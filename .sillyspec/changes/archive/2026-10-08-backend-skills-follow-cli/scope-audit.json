@@ -1,0 +1,45 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "e4cc5e0c6be37a1f97cffb686d01b36181f50a17",
+  "totals": {
+    "files": 4,
+    "additions": 28,
+    "deletions": 14
+  },
+  "rows": [
+    {
+      "path": ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+      "additions": 6,
+      "deletions": 6,
+      "kind": "modified"
+    },
+    {
+      "path": "backend/Dockerfile",
+      "additions": 11,
+      "deletions": 3,
+      "kind": "modified"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "additions": 6,
+      "deletions": 5,
+      "kind": "modified"
+    },
+    {
+      "path": "deploy/scripts/build-and-save.sh",
+      "additions": 5,
+      "deletions": 0,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "fcc3dd32a167e706f155bb71bb0bbb1f2ad71a916af64a58a800cc6ad13eb03c",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T02:50:18.253Z"
+}

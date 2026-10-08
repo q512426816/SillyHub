@@ -1659,3 +1659,31 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-06-litellm-log-rotation/requirements.md#FR-03
 最近确认：6a3bd3113b5d405935f3b2de2a54e8c30c9815ba
+
+## FR-build-113 backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
+变更：2026-10-08-backend-skills-follow-cli
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/requirements.md#FR-01
+最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f
+
+## FR-build-114 npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
+变更：2026-10-08-backend-skills-follow-cli
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/requirements.md#FR-02
+最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f
+
+## FR-build-115 deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
+变更：2026-10-08-backend-skills-follow-cli
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/requirements.md#FR-03
+最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f
+
+## FR-build-116 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
+变更：2026-10-08-backend-skills-follow-cli
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-backend-skills-follow-cli/requirements.md#FR-04
+最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f

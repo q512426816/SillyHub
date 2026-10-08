@@ -1726,3 +1726,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：f7eeb237e90fa48bd4da92409503176dd6ef99a4
 理由：最大风险：node:22-slim 与既有层交互（如 npm 路径结构变化致 ln -sf 失效）——node 官方镜像 npm-cli.js 路径多年稳定，构建本身即验证（失败即暴露，本次实跑通过）。放弃方案：①回退 SILLYSPEC_VERSION pin 到 3.29.x（Node 20 可跑）——放弃理由：技能包已 3.32.0，CLI 落后会再次制造本次要修的「指引与技能不配套」，且 node:sqlite 是 DB 引擎长期依赖，绕不过；②容器内热修 npm install（不进镜像）——放弃理由：容器重建即丢，违反镜像即真相。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-08-backend-skills-follow-cli
+锚点：未记录
+最近确认：c1970cd37f0338f3a3b122bf3638e649e515f18f
+理由：最大风险：sillyspec 未来版本改包内目录布局（`.claude/skills` 移位）→ COPY 构建期失败（fail-closed 可见，非运行期暗病）；其次 npm latest 引入破坏性变更直进生产（无 pin 缓冲）——缓解：build-and-save.sh 回显版本留痕、backup tag + .env pin 双回滚口，且 sillyspec 是用户自研工具、发布节奏自控。放弃方案：①保留仓库快照源 + 定期 init 刷新——放弃理由：自动化仍靠人记着做，正是本次要消灭的错位根源；②容器启动时 runtime npm install 拉最新——放弃理由：启动时延+网络依赖+镜像内容不确定（同 tag 不同行为），破坏回滚语义；③CI 定时重建——放弃理由：当前无 CI 部署链，超出本变更面。

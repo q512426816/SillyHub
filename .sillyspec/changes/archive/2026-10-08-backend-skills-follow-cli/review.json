@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-backend-skills-follow-cli",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fa9470347afbc3c554e6cba57996b8f5074922b8",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 混入并行变更 hunk，审计面被污染（交付提交本身干净）",
+      "evidence": "change.patch 开头含 .sillyspec/docs/frontend/modules/lib-menu-permissions.md 的 RBAC 死键清理 diff（属并行变更 2026-10-08-rbac-dead-permissions-cleanup）；git show fa9470347 --stat 证实本变更交付提交只含 backend/Dockerfile、deploy/docker-compose.yml、deploy/scripts/build-and-save.sh 三个文件——patch 生成时按仓库全量 diff 捕获了并行会话已提交内容，非本变更代码污染",
+      "location": ".sillyspec/changes/2026-10-08-backend-skills-follow-cli/change.patch:1-38"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "verification": {
+    "FR01": "git show fa9470347:backend/Dockerfile:132 确认 COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills；compose additional_contexts 仅剩 daemon，无 skills；全仓 grep 无 --from=skills 残留消费者；绑定不适用属实（静态改动，以 grep+重建清点验收）",
+    "FR02": "Dockerfile:21 ARG SILLYSPEC_REFRESH + :23 RUN echo 引用（缓存键含值）；compose:81 透传 ${SILLYSPEC_REFRESH:-}；build-and-save.sh:37 导出 date +%Y%m%d%H%M%S、:58 docker run 回显 sillyspec --version；机制核实：空值时命令串与旧缓存一致不误爆、非空时间戳必变命令串必爆破；绑定不适用属实",
+    "FR03": "deploy/.env:11 现状 grep 确认 '# SILLYSPEC_VERSION=3.32.0  # ...仅应急回滚时取消注释 pin' 已注释化且注明回滚用途；绑定不适用属实（gitignored 本地文件）",
+    "FR04": "评审独立复现（只读 docker 探测本地 multi-agent-platform-backend:latest）：sillyspec --version=3.32.1；/app/sillyspec-skills 中 ^sillyspec- 计 21 个、含 sillyspec-flow；diff -qr 与 /usr/local/lib/node_modules/sillyspec/.claude/skills 逐字节一致（BYTE-IDENTICAL）；backend 容器 healthy，curl localhost:8001/api/health 返回 status:ok；绑定不适用属实（运行时行为实跑验收）",
+    "盲维四问": "与构建编排变更性质相符：乱序=同 refresh 值可复现/异值重拉成立；并发=交付提交显式 pathspec 干净（见 P3，仅 patch 产物面）；切换=镜像内产物构建期固化运行时只读，回滚口双通道已核实；作用域=只影响本仓镜像构建，服务器 load 不构建、本地工具面不经镜像",
+    "披露边界裁决": "①npm latest 直进生产无 pin 缓冲——可接受：sillyspec 为用户自研、发布节奏自控，回显留痕（build-and-save.sh:58）+ 双回滚口（backup tag 于 .zcode/skills/deploy-to-server/SKILL.md:65-67 打 tag、:118-122 回滚步骤、load-and-up.sh:29-38 留最近 4 个；.env pin 应急口），且自动升级即用户诉求本身；②npmmirror 同步滞后——可接受：已披露、pin 可绕过；③包内目录移位 fail-closed——可接受且属实：COPY 源缺失时构建期即失败，非运行期暗病；④三个放弃方案理由均成立（手刷=错位根源、runtime install 破坏同 tag 确定性与回滚语义、无 CI 链超范围）",
+    "防护声明": "与事实一致：build-and-save.sh:58 回显版本行存在；backup tag 机制在部署 runbook 中实际存在（SKILL.md:65-67 创建 / :118-122 回滚）；deploy/.env:11 pin 注释化属实",
+    "生成物同步": "无类型/契约文件改动（仅 Dockerfile/compose/打包脚本），无需 gen:types 同步"
+  },
+  "reviewedAt": "2026-10-08T10:52:54+08:00"
+}

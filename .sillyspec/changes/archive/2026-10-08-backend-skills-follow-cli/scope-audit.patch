@@ -1,0 +1,295 @@
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 9890e9dd0..9df28f77a 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -18,18 +18,18 @@ created_at: 2026-08-18 01:45:00
+   - `navHidden?` — 二级页面不在侧边栏渲染（路由仍可达、active 匹配保留），如 ppm 项目成员/里程碑明细。
+ - `MENU_SECTION_ORDER` — 渲染顺序：workspace → agent → config → governance → ppm → system。
+ - `MENU_SECTION_LABEL` — section 中文标题（工作区/智能体/配置中心/协作治理/系统管理/项目管理）。
+-- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`，经 OpenAPI 生成联合类型，漂移编译期暴露）。
++- 类型 `PermissionItem`（key/name/description?）：key 必须命中后端 Permission 枚举（`backend/app/modules/auth/permissions.py`，经 OpenAPI 生成联合类型，漂移编译期暴露；2026-10-08-rbac-dead-permissions-cleanup 起目录 58 项——删 14 个零端点消费死键 code:*/tool:*/task:cancel/task:approve/platform:audit:read/platform:billing/component:read/change:update，存量行迁移 20261008100000 清理）。
+ 
+ 各 section 构成：
+ - **workspace**（8 项）：工作区首页（/workspaces，absolute）、组件、拓扑、变更中心、扫描文档、运行时、知识库、发布。
+-  - 子菜单均有独立 read 权限（component:read / topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit：components 卡含 workspace:read——列表端点鉴权所需；changes 卡含 task:read——变更任务子页所需；knowledge 卡含 knowledge:write——写按钮所需）。
++  - 子菜单均有独立 read 权限（topology:read / scan-docs:read / knowledge:read 等），不共用 workspace:read 作兜底；但卡片可含页面实际所需的其他 key（2026-10-08-page-audit + rbac-dead-permissions-cleanup：components 卡收敛为 [workspace:read]（component:read 死键删除，列表端点鉴权即 workspace:read）；changes 卡含 task:read/create/assign（任务子页 + 任务 API；change:update 死键删除）；knowledge 卡含 knowledge:write（写按钮））。
+ - **agent**（4 项）：技能管理（/settings/skills）、MCP 资产库（/settings/mcp）、智能体档案（/agent-profiles）、智能体会话（/sessions），全 absolute。
+   - 四菜单 2026-09-18-web-menu-management 起各挂独立 read 权限（skill:read / mcp:read / agent_profile:read / agent_session:read），进角色勾选器。
+   - 智能体会话 2026-10-08-sessions-menu-permissions 起补齐会话页实际权限共 4 项：agent_session:read（门控主 key）+ task:run_agent（全部 /api/daemon/sessions* 端点）+ daemon:borrow（借用会话）+ runtime:admin（机器下拉 /api/daemon/machines）——多权限菜单任一命中即可见，跨菜单重复挂载（runtime:admin 同挂 config 守护进程运行时）有 change:approve 双卡先例。
+   - MCP 资产库 2026-10-08-page-audit 起补 settings:admin（平台库写端点 mcp_registry settings_admin_check；读与我的库任意登录用户可用）。
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+-- **governance**（3 项）：审批中心（task:approve / change:approve / task:read / task:run_agent）、审计中心（platform:audit:read / change:read）、事件（incident:read / deploy:staging）。
+-  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ；platform:audit:read 零端点消费保留存量）；事件补 deploy:staging（上报端点鉴权）。
++- **governance**（3 项）：审批中心（change:approve / task:read / task:run_agent）、审计中心（change:read）、事件（incident:read / deploy:staging）。
++  - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ）；事件补 deploy:staging（上报端点鉴权）。rbac-dead-permissions-cleanup：task:approve / platform:audit:read 死键删除，两卡收敛为页面真实所需。
+ - **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+@@ -52,9 +52,9 @@ created_at: 2026-08-18 01:45:00
+ - `icon` 字段经排查（sidebar-menu-restructure task-04）在 app-shell/picker/permission 均无消费者，新增菜单可填占位 emoji。
+ - 写错权限 key = 该菜单永远不可见；改菜单结构需同步 `lib-permission` 判定、app-shell 渲染（MENU_ICON_MAP 按 href）、页面路由三处。
+ - 菜单 permissions 数组同时服务两个消费面：canSeeMenu 可见性（任一命中）与 AdminRolePermissionPicker 可配面——往菜单补权限会同步放宽可见性，页面实际依赖的权限应挂全（否则勾选器配不了，如 sessions 补齐前的 task:run_agent；2026-10-08-page-audit 批量修了 components/changes/knowledge/mcp/approvals/audit/incidents 七处同类缺口）。
+-- 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 72 项），后端扩删权限时两处一起改。
++- 测试镜像常量 `BACKEND_PERMISSION_KEYS`（menu-permissions.test.ts）须与后端枚举逐项同步（现 58 项），后端扩删权限时两处一起改。
+ - 管理类菜单多为单一 admin 权限（api_key:admin / git_identity:admin / runtime:admin / settings:admin），平台超管自动通过。
+-- 零端点消费的悬空 key（component:read / platform:audit:read / task:approve、code:* / tool:* / task:cancel 等）保留在卡上或目录中属已知债——清理需独立变更评审（涉及存量角色可见性与可配性）；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
++- 2026-10-08-rbac-dead-permissions-cleanup 已清理 14 个零端点消费死键（卡上 4 个 + 目录 10 个），存量授权行由迁移 20261008100000 删除；仍有意保留的纯门控 key（llm_provider:read / skill:read / mcp:read / agent_profile:read / agent_session:read）无端点但驱动菜单显隐，属设计而非悬空；PPM 的 ppm:plan:read / ppm:problem:read / ppm:task:read / ppm:problem-change:read 为 D-002 决策故意悬空。
+ 
+ ## 人工备注
+ 
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index c91ddc5cc..faf4350a3 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -15,8 +15,13 @@ FROM node:${NODE_VERSION}-slim AS node-tools
+ 
+ ARG CLAUDE_CODE_VERSION
+ ARG SILLYSPEC_VERSION
++# 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：缓存爆破阀——SILLYSPEC_VERSION 留空
++# （取 npm latest）时本层缓存会冻结在首次构建的版本上（容器 3.26.0 vs latest 3.32.0 实证）。
++# 打包脚本（build-and-save.sh）每次传新时间戳强制重拉 latest；本地迭代不传则缓存照旧（快）。
++ARG SILLYSPEC_REFRESH=""
+ 
+-RUN npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
++RUN echo "npm layer refresh token: ${SILLYSPEC_REFRESH:-cached}" \
++ && npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
+  && npm cache clean --force
+ 
+ FROM python:${PYTHON_VERSION}-slim AS builder
+@@ -116,12 +121,15 @@ COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1
+ 
+ # 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
+ # 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
+-# compose additional_contexts "skills: ../.claude/skills" 直接指向 skills 目录本身。
++# 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：技能源从仓库 .claude/skills 快照
++# （additional_contexts "skills"，构建时固定、与容器 CLI 可能错位）改为已安装 sillyspec 包
++# 自带 .claude/skills——同包同版 lockstep，CLI 随 SILLYSPEC_REFRESH 拉 latest 时技能自动同版，
++# 平台侧永不错位。仓库技能目录仍服务本地工具面（ZCode/Claude CLI），由 sillyspec init 刷新。
+ # COPY 到 /app/sillyspec-skills/（非 volume 路径）而非 /app/.claude/skills/——后者被
+ # claude-data named volume 遮盖（volume 9h 前创建无 skills/，不会重拷镜像内容）。
+ # docker-entrypoint.sh 启动时软链 /app/.claude/skills → /app/sillyspec-skills 让 claude 找到；
+ # backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
+-COPY --from=skills . /app/sillyspec-skills/
++COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills /app/sillyspec-skills/
+ 
+ # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
+ # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index 908925be6..1b46edb26 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -68,16 +68,17 @@ services:
+       dockerfile: Dockerfile
+       # 宿主机预构建的 daemon 分发物（install.sh + sillyhub-daemon.js）；
+       # 部署前需 cd sillyhub-daemon && pnpm bundle 产出 build/bundle/。
+-      # 2026-07-07-daemon-skill-execution task-07：skills 上下文直接指向 .claude/skills/
+-      # 子目录（Dockerfile COPY --from=skills . /app/.claude/skills/）。指向仓库根会触发
+-      # compose additional_contexts 传输异常（只传 2.42kB，.claude/ 内容丢失），故直接指向子目录。
++      # 2026-10-08-backend-skills-follow-cli：skills 上下文退役——镜像技能改为从已安装
++      # sillyspec 包自带 .claude/skills 取（与容器 CLI 同包同版 lockstep），不再依赖仓库快照。
+       additional_contexts:
+         daemon: ../sillyhub-daemon
+-        skills: ../.claude/skills
+       args:
+         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.241}
+-        # 空 → 取最新 sillyspec；填值 → pin。
++        # 空 → 取最新 sillyspec；填值 → pin（应急回滚口，日常留空走自动）。
+         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
++        # 缓存爆破阀（时间戳）：打包脚本每次导出新值强制 npm 层真拉 latest；
++        # 不传则本地迭代缓存照旧。想手动刷新本地镜像也可 export 后 build。
++        SILLYSPEC_REFRESH: ${SILLYSPEC_REFRESH:-}
+         # Git SHA baked into the image; export COMMIT_SHA before `up --build`.
+         # 2026-09-26-deploy-eng-hardening：保留构建参数（Dockerfile ENV 烘焙链），
+         # 只删下方运行时 environment 的空覆盖行。
+diff --git a/deploy/scripts/build-and-save.sh b/deploy/scripts/build-and-save.sh
+index 9c2732c6e..1efaf617e 100644
+--- a/deploy/scripts/build-and-save.sh
++++ b/deploy/scripts/build-and-save.sh
+@@ -32,6 +32,10 @@ echo "==> [3/5] 准备 build-arg"
+ # COMMIT_SHA 焙进镜像（health 端点回显版本）；export 到环境后 compose 读 ${COMMIT_SHA:-} 覆盖 .env 空值。
+ export COMMIT_SHA="${COMMIT_SHA:-$(git rev-parse --short HEAD)}"
+ export NEXT_PUBLIC_COMMIT_SHA="$COMMIT_SHA"
++# 2026-10-08-backend-skills-follow-cli：每次打包传新时间戳爆破 npm 层缓存，
++# 强制真拉 sillyspec latest（空 SILLYSPEC_VERSION 时）；镜像技能随同包走，自动同版。
++export SILLYSPEC_REFRESH="$(date +%Y%m%d%H%M%S)"
++echo "    SILLYSPEC_REFRESH=$SILLYSPEC_REFRESH（强制 npm 层重拉 latest）"
+ # 生产打包用 PROD_API_URL 覆盖前端浏览器 API 地址（本地 .env 是 127.0.0.1 开发值，生产须替换）。
+ # 环境变量优先级 > .env，故 export 的值进 build-arg 生效。
+ if [ -n "${PROD_API_URL:-}" ]; then
+@@ -51,6 +55,7 @@ OUT="$DEPLOY_DIR/images.tar.gz"
+ docker save multi-agent-platform-backend:latest multi-agent-platform-frontend:latest \
+   | gzip > "$OUT"
+ echo "    产出: $OUT ($(du -h "$OUT" | cut -f1))"
++echo "    镜像内 sillyspec 版本: $(docker run --rm --entrypoint sh multi-agent-platform-backend:latest -c 'sillyspec --version 2>/dev/null' || echo 查询失败)"
+ echo ""
+ echo "    镜像 COMMIT_SHA=$COMMIT_SHA（health 端点将回显此值；运行时不再空覆盖）"
+ echo ""
+diff --git a/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/design.md b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/design.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:38:28.292Z
++---
++# 设计记录（Design Record）— 2026-10-08-backend-skills-follow-cli
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：平台侧 CLI 与技能是两股道——CLI 来自镜像 npm 层（SILLYSPEC_VERSION 空时被 Docker 层缓存冻结在首次构建版本，容器 3.26.0 vs latest 3.32.0 实证），技能来自仓库 `.claude/skills` 构建快照；任一侧自动前进都会与另一侧错位（本次用户诉求=要自动升级）。
++
++方案：①技能源改为已安装 sillyspec 包自带的 `.claude/skills`（`COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills`）——同包同版天然 lockstep，CLI 升到哪技能跟到哪；②npm 层加 `SILLYSPEC_REFRESH` 时间戳 build-arg 爆破缓存，`build-and-save.sh` 每次打包导出新时间戳强制真拉 latest，并回显镜像内版本；③`deploy/.env` 的 pin 注释化，降级为应急回滚口。仓库 `.claude/skills` 等四镜像目录保留服务本地工具面（ZCode/Claude CLI），仍由 `sillyspec init` 手刷（低频）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无后端/前端代码接口变化。变化面：`backend/Dockerfile`（npm RUN 加 refresh echo；技能 COPY 换源）、`deploy/docker-compose.yml`（backend args 增 SILLYSPEC_REFRESH、移除 skills additional_context）、`deploy/scripts/build-and-save.sh`（导出时间戳 + 打包后回显镜像内 sillyspec 版本）、`deploy/.env`（本地 gitignored，pin 注释化）。行为变化：每次打包镜像内 sillyspec = npm latest 且技能同版；compose additional_contexts 的 `skills` 键退役（无消费者）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——无事件流；同一 SILLYSPEC_REFRESH 值构建可复现（缓存键含值），不同值=重拉。npmmirror 同步 npmjs 有分钟级滞后，latest 取到的是镜像源当前最新，可接受（应急时 pin 绕过）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   构建单线程产出镜像 tag；deploy/.env 仅本机会话改。变更时 git status 干净（无外来脏文件），提交用显式 pathspec。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   容器重建与历次部署一致（平台自身生命周期管理）；镜像内技能/CLI 是构建期固化产物，运行时只读。回滚走既有 backup tag 机制 + .env pin 应急口。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   只影响本仓镜像构建；服务器端不构建（load 镜像），本地工具面（.zcode/.claude 等）不经镜像，互不影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：sillyspec 未来版本改包内目录布局（`.claude/skills` 移位）→ COPY 构建期失败（fail-closed 可见，非运行期暗病）；其次 npm latest 引入破坏性变更直进生产（无 pin 缓冲）——缓解：build-and-save.sh 回显版本留痕、backup tag + .env pin 双回滚口，且 sillyspec 是用户自研工具、发布节奏自控。放弃方案：①保留仓库快照源 + 定期 init 刷新——放弃理由：自动化仍靠人记着做，正是本次要消灭的错位根源；②容器启动时 runtime npm install 拉最新——放弃理由：启动时延+网络依赖+镜像内容不确定（同 tag 不同行为），破坏回滚语义；③CI 定时重建——放弃理由：当前无 CI 部署链，超出本变更面。
++
++## 验收命令（FR-01..04 对账，实跑为准）
++
++```bash
++bash -n deploy/scripts/build-and-save.sh   # 脚本语法
++grep -n "SILLYSPEC_REFRESH" backend/Dockerfile deploy/docker-compose.yml deploy/scripts/build-and-save.sh
++grep -n "node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills" backend/Dockerfile
++SILLYSPEC_REFRESH=$(date +%s) docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build --force-recreate -d backend
++# 容器内：sillyspec --version（=npm latest）/ ls /app/sillyspec-skills | grep -c ^sillyspec-（=21 含 flow）/ curl /api/health
++```
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/proposal.md b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:38:28.292Z
++---
++# 提案书（Proposal）— 2026-10-08-backend-skills-follow-cli
++
++## 动机
++
++任务原话转写：平台 CLI/技能自动升级——SILLYSPEC_VERSION 空+Docker 层缓存=冻结在过去（容器 3.26.0 实证），且平台技能来自仓库快照与容器 CLI 两股道、CLI 自动最新时技能仍停旧版继续错位；改为镜像技能从已安装 sillyspec 包自带 .claude/skills 取（同包同版 lockstep），打包脚本传时间戳 build-arg 强制 npm 层每次真拉 latest
++成功标准：
++- backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
++- npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
++- deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
++- 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
++2. npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
++3. deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
++4. 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
++
++## 成功标准（可验证）
++
++1. backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
++2. npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
++3. deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
++4. 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/requirements.md b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:38:28.292Z
++---
++# 需求规格（Requirements）— 2026-10-08-backend-skills-follow-cli
++
++## 功能需求
++
++### FR-01: backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
++
++- 必须：镜像内 `/app/sillyspec-skills/` 的内容来自 `COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills`，与容器内安装的 sillyspec CLI 同包同版；`deploy/docker-compose.yml` 移除已无消费者的 `skills: ../.claude/skills` additional_context。
++
++#### 场景：主路径
++
++- Given 原技能来自仓库 `.claude/skills` 构建快照（与容器 CLI 版本可能错位）
++- When CLI 随 SILLYSPEC_REFRESH 拉到任意新版
++- Then `/app/sillyspec-skills` 自动是同版技能（lockstep），无需仓库先行刷新
++
++### FR-02: npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
++
++- 必须：`backend/Dockerfile` node-tools 阶段声明 `ARG SILLYSPEC_REFRESH` 且 RUN 命令引用它（缓存键含该值）；compose backend args 透传 `${SILLYSPEC_REFRESH:-}`；`build-and-save.sh` 每次导出 `date +%Y%m%d%H%M%S` 时间戳并在打包后打印镜像内 `sillyspec --version`。
++
++#### 场景：主路径
++
++- Given SILLYSPEC_VERSION 留空（latest）+ npm 层存在旧缓存
++- When build-and-save.sh 打包（新时间戳）
++- Then npm 层缓存被爆破真拉 latest，输出行显示拉到的版本
++
++### FR-03: deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
++
++- 必须：`deploy/.env` 中 `SILLYSPEC_VERSION=3.32.0` 行注释掉（等效空值=latest），注释说明 pin 仅应急回滚用。
++
++#### 场景：主路径
++
++- Given 昨日 pin 了 3.32.0
++- When 改为注释留空
++- Then compose 构建走 npm latest；需要回滚时取消注释填旧版
++
++### FR-04: 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
++
++- 必须：`SILLYSPEC_REFRESH=<新值> docker compose build backend` + `--force-recreate` 后，容器内 `sillyspec --version` 为 npm latest（当前 3.32.0），`ls /app/sillyspec-skills | grep -c '^sillyspec-'` = 21 且含 sillyspec-flow，`/api/health` ok。
++
++#### 场景：主路径
++
++- Given 新 Dockerfile（技能源=node-tools sillyspec 包）
++- When 带 refresh 重建并重建容器
++- Then CLI 与技能同版、服务健康
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: 不适用：Dockerfile/compose 静态改动，验收以 grep 源行 + 重建后容器内清点为准
++FR-02: 不适用：构建编排脚本，验收以 build-and-save.sh 语法（bash -n）+ 重建实跑回显为准
++FR-03: 不适用：本地 gitignored 配置注释化，验收以 grep 为准
++FR-04: 不适用：容器运行时行为，验收以重建后容器内实跑命令为准
+
+diff --git a/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/tasks.md b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-08-backend-skills-follow-cli/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T02:38:28.292Z
++---
++# 任务注册表（Tasks）— 2026-10-08-backend-skills-follow-cli
++
++- [x] task-01: backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
++- [x] task-02: npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
++- [x] task-03: deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
++- [x] task-04: 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok

@@ -1,0 +1,29 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-08T02:38:28.292Z
+---
+# 提案书（Proposal）— 2026-10-08-backend-skills-follow-cli
+
+## 动机
+
+任务原话转写：平台 CLI/技能自动升级——SILLYSPEC_VERSION 空+Docker 层缓存=冻结在过去（容器 3.26.0 实证），且平台技能来自仓库快照与容器 CLI 两股道、CLI 自动最新时技能仍停旧版继续错位；改为镜像技能从已安装 sillyspec 包自带 .claude/skills 取（同包同版 lockstep），打包脚本传时间戳 build-arg 强制 npm 层每次真拉 latest
+成功标准：
+- backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
+- npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
+- deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
+- 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
+
+## 变更范围
+
+按成功标准机械推导，共 4 条验收面：
+1. backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
+2. npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
+3. deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
+4. 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
+
+## 成功标准（可验证）
+
+1. backend/Dockerfile 技能 COPY 源从仓库快照(additional_contexts skills)改为 node-tools 阶段已装 sillyspec 包的 .claude/skills
+2. npm 安装层引用 SILLYSPEC_REFRESH arg（时间戳爆破缓存），deploy/docker-compose.yml 传参、build-and-save.sh 每次打包自动导出新时间戳并回显镜像内 sillyspec 版本
+3. deploy/.env 的 SILLYSPEC_VERSION 置空并注释为应急回滚口（默认走 npm latest）
+4. 本地带 refresh 重建后容器内 sillyspec 版本=npm latest 且 /app/sillyspec-skills 与该版本技能数一致（21 个含 flow）、health ok
