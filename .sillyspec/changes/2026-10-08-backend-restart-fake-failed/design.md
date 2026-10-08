@@ -66,7 +66,10 @@ UI 永远显示假失败。修两处，互为防线：
    `close_interactive_run` 全程持该 run 的 FOR UPDATE 行锁，回正分支在同一锁内判定+写入，
    与其它并发收口串行化；复扫后台任务用独立 session（`get_session_factory`），写前同样走
    `_cleanup_stale_runs_impl` 的逐 run 更新，与迟到结果竞态最坏情况同上——先误判后回正，
-   收敛。SQLite 测试库下写入天然串行，无死锁面。
+   收敛。评审 P2 加固：清理循环对每个 run 写前 FOR UPDATE 重读（populate_existing 刷新
+   identity map 缓存），快照后已被并发收口置终态（如迟到成功结果落 completed）的轮直接
+   放弃、不盲写覆盖，消除「复扫把 completed 打回 failed」的反序窗口。SQLite 测试库下
+   写入天然串行，无死锁面。
 
 3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
 

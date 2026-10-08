@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog
@@ -103,3 +105,50 @@ async def test_cleanup_fails_run_without_logs(db_session: AsyncSession) -> None:
     assert refreshed is not None
     assert refreshed.status == "failed"
     assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_run_closed_concurrently_after_snapshot(
+    db_session: AsyncSession,
+) -> None:
+    """评审 P2 守卫：快照后、写入前被并发收口置终态的轮不被覆盖回 failed。
+
+    模拟：处理 run_a 的收尾钩子（cancel_pending_dialogs_for_run）恰在 run_b
+    写入前把 run_b 置 completed——生产里对应 daemon 迟到成功结果经
+    close_interactive_run 行锁收口抢先落库。守卫（写前 FOR UPDATE 重读）
+    必须放弃 run_b，不盲写覆盖。
+    """
+    run_a = _make_running_run()
+    run_b = _make_running_run()
+    db_session.add_all([run_a, run_b])
+    await db_session.commit()
+    # 两轮日志均已停滞超宽限 → 快照判定都该清理
+    await _add_log(db_session, run_a.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
+    await _add_log(db_session, run_b.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
+
+    async def _close_run_b_mid_loop(session: AsyncSession, run_id: uuid.UUID) -> None:
+        if run_id == run_a.id:
+            await session.execute(
+                update(AgentRun)
+                .where(AgentRun.id == run_b.id)
+                .values(status="completed", exit_code=0)
+            )
+
+    with (
+        patch(
+            "app.modules.daemon.permission_service.cancel_pending_dialogs_for_run",
+            new=AsyncMock(side_effect=_close_run_b_mid_loop),
+        ),
+    ):
+        cleaned = await _cleanup_stale_runs_impl(db_session)
+
+    assert cleaned == 1
+    refreshed_a = await db_session.get(AgentRun, run_a.id)
+    refreshed_b = await db_session.get(AgentRun, run_b.id)
+    assert refreshed_a is not None
+    assert refreshed_a.status == "failed"
+    assert refreshed_a.error_code == "SERVICE_RESTART_INTERRUPTED"
+    # 并发收口的 completed 不被快照盲写覆盖回 failed
+    assert refreshed_b is not None
+    assert refreshed_b.status == "completed"
+    assert refreshed_b.error_code is None

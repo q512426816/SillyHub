@@ -2442,20 +2442,48 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
 
     cleaned = 0
     for run in stale_runs:
+        # 写前 FOR UPDATE 重读（评审 P2）：快照读与落库之间可能有并发收口——
+        # daemon 迟到成功结果经 close_interactive_run 行锁收口把 run 置
+        # completed，此处若按快照盲写会把它覆盖回 failed，复刻本变更要修的
+        # 永久假失败（复扫链每 10 分钟重跑本函数，窗口 recurring）。非
+        # running 即放弃（迟到结果已收口，等 FR-02/正常路径语义生效）。
+        # populate_existing：identity map 已缓存快照属性，强制从行重填才能
+        # 看见并发会话已提交的终态（对齐 _close_verify_and_load 行锁读语义）。
+        locked_run = (
+            await session.execute(
+                select(AgentRun)
+                .where(AgentRun.id == run.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if locked_run is None or locked_run.status != "running":
+            log.info(
+                "stale_run_cleanup_skipped_concurrent_terminal",
+                run_id=str(run.id),
+                current_status=None if locked_run is None else locked_run.status,
+            )
+            continue
         # If metadata was already written (agent actually finished but commit
         # was lost during restart), restore as completed instead of failed.
-        if (run.num_turns or 0) > 0 and run.exit_code is not None and run.exit_code >= 0:
-            run.status = "completed" if run.exit_code == 0 else "failed"
-            run.finished_at = run.finished_at or now
+        if (
+            (locked_run.num_turns or 0) > 0
+            and locked_run.exit_code is not None
+            and locked_run.exit_code >= 0
+        ):
+            locked_run.status = "completed" if locked_run.exit_code == 0 else "failed"
+            locked_run.finished_at = locked_run.finished_at or now
             log.info(
                 "stale_run_restored_from_metadata",
-                run_id=str(run.id),
-                exit_code=run.exit_code,
+                run_id=str(locked_run.id),
+                exit_code=locked_run.exit_code,
             )
         else:
             last_log_at = (
                 await session.execute(
-                    select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run.id)
+                    select(func.max(AgentRunLog.timestamp)).where(
+                        AgentRunLog.run_id == locked_run.id
+                    )
                 )
             ).scalar_one_or_none()
             if last_log_at is not None:
@@ -2466,30 +2494,34 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
                 if now - last_log_at <= STALE_RUN_ACTIVE_GRACE:
                     log.info(
                         "stale_run_cleanup_deferred_active",
-                        run_id=str(run.id),
+                        run_id=str(locked_run.id),
                         last_log_age_seconds=int((now - last_log_at).total_seconds()),
                     )
                     continue
-            run.status = "failed"
-            run.finished_at = now
-            run.exit_code = -1
-            run.output_redacted = "Run interrupted: service restarted while agent was running."
+            locked_run.status = "failed"
+            locked_run.finished_at = now
+            locked_run.exit_code = -1
+            locked_run.output_redacted = (
+                "Run interrupted: service restarted while agent was running."
+            )
             # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
             # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
             # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
-            # 已正常完成，重启只是丢 commit，非错误）。
-            run.error_code = "SERVICE_RESTART_INTERRUPTED"
-            run.error_detail = {
-                "reason": "backend service restarted while run was active",
-                "finished_by": "startup_cleanup",
+            # 已正常完成，重启只是丢 commit，非错误）。reason 兼顾复扫链场景
+            # （评审 P3）：清理不只发生在后端重启，延迟复扫发现 daemon 停止
+            # 上报同样走此分支，文案按实际成因（宽限窗内无上报）描述。
+            locked_run.error_code = "SERVICE_RESTART_INTERRUPTED"
+            locked_run.error_detail = {
+                "reason": "no daemon activity within grace window (startup cleanup / deferred recheck)",
+                "finished_by": "stale_run_cleanup",
             }
-            log.warning("stale_run_cleaned", run_id=str(run.id))
-        session.add(run)
+            log.warning("stale_run_cleaned", run_id=str(locked_run.id))
+        session.add(locked_run)
 
         # ql-20260815-003：run 终止后其 pending AskUserQuestion 卡成孤儿（agent
         # 已不在等待答案），置 cancelled 防用户点出 no active run 报错。completed
         # 恢复分支同样作废——dialog 未答说明 agent 实际没走完应答链路。
-        await cancel_pending_dialogs_for_run(session, run.id)
+        await cancel_pending_dialogs_for_run(session, locked_run.id)
         cleaned += 1
 
     await session.commit()
