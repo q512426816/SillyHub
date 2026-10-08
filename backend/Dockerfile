@@ -7,13 +7,14 @@ ARG PYTHON_VERSION=3.12
 # 用 node:sqlite 内置模块（engines 硬要求 Node >=22.13），Node 20 下容器内任何
 # sillyspec 命令直接 ERR_UNKNOWN_BUILTIN_MODULE 崩溃，与镜像内 3.32.0 技能包不配套。
 ARG NODE_VERSION=22
-ARG CLAUDE_CODE_VERSION=2.1.158
-# 空 → npm install -g sillyspec 取最新；填值 → pin 到该版本（compose build arg 可覆盖）。
+# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：claude-code 安装退役——
+# agent 执行全在宿主 daemon（D-007 删 server-local 模式后单一 daemon-client），容器内
+# backend exec 只有 git（config.py COMMIT_SHA 回退 + diff_collector），claude/sillyspec
+# 二进制与 .claude settings/插件同步均为遗物。本 stage 仅产出 sillyspec 包（技能源 + 版本件）。
 ARG SILLYSPEC_VERSION=""
 
 FROM node:${NODE_VERSION}-slim AS node-tools
 
-ARG CLAUDE_CODE_VERSION
 ARG SILLYSPEC_VERSION
 # 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：缓存爆破阀——SILLYSPEC_VERSION 留空
 # （取 npm latest）时本层缓存会冻结在首次构建的版本上（容器 3.26.0 vs latest 3.32.0 实证）。
@@ -21,7 +22,7 @@ ARG SILLYSPEC_VERSION
 ARG SILLYSPEC_REFRESH=""
 
 RUN echo "npm layer refresh token: ${SILLYSPEC_REFRESH:-cached}" \
- && npm install --registry=https://registry.npmmirror.com -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
+ && npm install --registry=https://registry.npmmirror.com -g sillyspec${SILLYSPEC_VERSION:+@$SILLYSPEC_VERSION} \
  && npm cache clean --force
 
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -51,20 +52,18 @@ COPY . .
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
-ARG CLAUDE_CODE_VERSION
-ARG SILLYSPEC_VERSION
 # Git commit SHA injected at build time (build arg → ENV) so the health
 # endpoint reports the exact image version without relying on a .git dir
 # (the build context is backend/, which does not contain the repo .git).
 # Empty default keeps the runtime `git rev-parse` fallback working locally.
 ARG COMMIT_SHA=""
 
+# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：CLAUDE_CODE_VERSION/
+# SILLYSPEC_VERSION 的 ENV 烘焙随二进制退役一并删除（backend 无读者）；NPM_CONFIG_CACHE
+# 同 retire（容器内已无 npm）。保留 HOME=/app（应用运行主目录）。
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HOME=/app \
-    NPM_CONFIG_CACHE=/tmp/.npm \
-    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
-    SILLYSPEC_VERSION=${SILLYSPEC_VERSION} \
     COMMIT_SHA=${COMMIT_SHA:-} \
     PATH="/opt/venv/bin:${PATH}"
 
@@ -92,14 +91,9 @@ RUN find /etc/apt -type f \( -name 'sources.list' -o -name '*.sources' \) \
 
 WORKDIR /app
 
-COPY --from=node-tools /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-tools /usr/local/lib/node_modules /usr/local/lib/node_modules
-
-RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
- && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
- && ln -sf ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude \
- && ln -sf ../lib/node_modules/sillyspec/bin/sillyspec.js /usr/local/bin/sillyspec
-
+# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：runtime 不再携带 node/
+# npm/npx/claude/sillyspec 二进制与 node_modules——agent 执行全在宿主 daemon，容器只做
+# API/分发（技能文件如下方 COPY；daemon bundle 走静态分发）。瘦身约数百 MB。
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build /app
 
@@ -119,23 +113,22 @@ COPY --from=daemon scripts/install.sh /app/daemon-dist/install.sh
 # task-04（DG-02）：Windows PowerShell 安装脚本，偏好 CRLF 换行（与 install.sh 的 LF 相反）。
 COPY --from=daemon scripts/install.ps1 /app/daemon-dist/install.ps1
 
-# 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像（server-local 模式
-# 容器内 claude 自带 skills 调 /sillyspec-* 跑 stage 流程，不经 daemon skill-manager 同步）。
+# 2026-07-07-daemon-skill-execution task-07：sillyspec skills 进镜像。
 # 2026-10-08（thin 2026-10-08-backend-skills-follow-cli）：技能源从仓库 .claude/skills 快照
 # （additional_contexts "skills"，构建时固定、与容器 CLI 可能错位）改为已安装 sillyspec 包
 # 自带 .claude/skills——同包同版 lockstep，CLI 随 SILLYSPEC_REFRESH 拉 latest 时技能自动同版，
 # 平台侧永不错位。仓库技能目录仍服务本地工具面（ZCode/Claude CLI），由 sillyspec init 刷新。
-# COPY 到 /app/sillyspec-skills/（非 volume 路径）而非 /app/.claude/skills/——后者被
-# claude-data named volume 遮盖（volume 9h 前创建无 skills/，不会重拷镜像内容）。
-# docker-entrypoint.sh 启动时软链 /app/.claude/skills → /app/sillyspec-skills 让 claude 找到；
-# backend skills_bundle_dir config 默认 /app/sillyspec-skills 供 manifest/bundle 端点读。
+# 2026-10-08（thin 2026-10-08-backend-image-slim-no-claude）：容器内无 sillyspec 可执行后，
+# 本目录是镜像唯一的技能载荷——skills_bundle_dir 默认 /app/sillyspec-skills 供 manifest/bundle
+# 端点读；package.json 焰为版本件（build-and-save.sh 回显用，无 node 也能查）。
 COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/.claude/skills /app/sillyspec-skills/
+COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/package.json /app/sillyspec-package.json
 
 # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
 # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
 # `sed 's/\r$//' install.sh`（那行明确只列 install.sh + entrypoint，bash 要 LF）。
-RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspaces \
- && chown -R app:app /app /tmp/.npm /data/spec-workspaces \
+RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces \
+ && chown -R app:app /app /data/spec-workspaces \
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \

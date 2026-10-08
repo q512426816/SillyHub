@@ -73,7 +73,8 @@ services:
       additional_contexts:
         daemon: ../sillyhub-daemon
       args:
-        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.241}
+        # 2026-10-08-backend-image-slim-no-claude：CLAUDE_CODE_VERSION 退役（镜像不装
+        # claude-code）；.env 残留同名行为惰性，无需清理。
         # 空 → 取最新 sillyspec；填值 → pin（应急回滚口，日常留空走自动）。
         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
         # 缓存爆破阀（时间戳）：打包脚本每次导出新值强制 npm 层真拉 latest；
@@ -103,7 +104,9 @@ services:
       # see spec documents written by the backend. Override host path via
       # SPEC_DATA_HOST_DIR in .env (see deploy/.env.example).
       - "${SPEC_DATA_HOST_DIR:-C:/data/spec-workspaces}:/data/spec-workspaces"
-      - claude-data:/app/.claude
+      # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
+      # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
+      # 宿主磁盘，仅不再挂入。
     environment:
       # Prefix that rewrites host-style paths into container mount paths.
       HOST_PATH_PREFIX: ${HOST_PATH_PREFIX:-C:/Users/qinyi/IdeaProjects}
@@ -140,9 +143,9 @@ services:
       WORKTREE_BASE_DIR: /data/sillyspec-workspaces
       SPEC_DATA_ROOT: /data/spec-workspaces
       HOME: /app
-      NPM_CONFIG_CACHE: /tmp/.npm
-      # Claude Code agent configuration is loaded from deploy/.env via env_file
-      # so host-level ANTHROPIC_* variables do not override the Docker settings.
+      # 2026-10-08-backend-image-slim-no-claude：NPM_CONFIG_CACHE 退役（容器内已无 npm）。
+      # 容器内已无 claude，deploy/.env 的 ANTHROPIC_*/CLAUDE_* 行对容器为惰性变量
+      # （daemon 侧凭据不受影响，走 daemon install 自身配置）。
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     # Run migrations before serving so a fresh stack always lands on head.
@@ -293,5 +296,4 @@ volumes:
   redisdata:
   litellm-db-data:
   worktree-data:
-  claude-data:
   minio-data:
