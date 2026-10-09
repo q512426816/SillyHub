@@ -464,6 +464,37 @@ describe("锚点自动补全（D-005@v1）", () => {
   });
 });
 
+// ── 查询交互优化（2026-10-09-graph-query-ux）────────────────────────────────
+
+describe("锚点自动选中与 sub 人话说明（2026-10-09-graph-query-ux）", () => {
+  it("带锚点的 neighbors 查询执行后，锚点节点自动选中（右栏直切详情）", async () => {
+    renderPage();
+    await screen.findByTestId("full-stats");
+    // 预置「文件反查」= neighbors + 真实锚点现成形态（跳过 antd Select 交互）。
+    const presets = screen.getAllByTestId("preset-btn");
+    const fileLookup = presets.find((b) => b.textContent?.includes("文件反查"));
+    expect(fileLookup).toBeTruthy();
+    fireEvent.click(fileLookup!);
+    // 右栏自动切「节点详情」且展示锚点节点（自动选中，无需手点画布）。
+    const detail = await screen.findByText("knowledge.ts");
+    expect(detail).toBeInTheDocument();
+    expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
+      WS,
+      "neighbors",
+      expect.objectContaining({ anchor: "frontend/src/lib/knowledge.ts" }),
+    );
+  });
+
+  it("sub 下拉下方动态说明行随选中类型切换（人话文案）", async () => {
+    renderPage();
+    await screen.findByTestId("full-stats");
+    const desc = screen.getByTestId("sub-description");
+    // 切到切片态默认 orphans → 孤儿节点说明。
+    fireEvent.click(screen.getByTestId("mode-capsule-slice"));
+    expect(desc).toHaveTextContent("没人理");
+  });
+});
+
 // ── 深链与查询面 ────────────────────────────────────────────────────────────
 
 describe("深链与查询面", () => {

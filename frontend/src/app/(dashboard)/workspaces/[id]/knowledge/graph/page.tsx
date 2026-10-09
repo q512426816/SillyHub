@@ -88,6 +88,17 @@ const SUB_OPTIONS: ReadonlyArray<{ value: GraphSub; label: string }> = [
   { value: "nodes", label: "nodes · 节点搜索" },
 ];
 
+/** 查询类型人话说明（title 悬浮 + 下拉下方动态行双通道，2026-10-09-graph-query-ux）。 */
+const SUB_DESCRIPTIONS: Record<string, string> = {
+  orphans: "找「没人理」的知识条目——没有任何关联指向的决策/条目，治理时补关联或清理",
+  dangling: "找「指空气」的引用——文档写了锚点但目标文件实际不存在，告诉你缺了哪个",
+  neighbors: "给一个节点，看它直接相连的都是谁（最常用：看某个决策/FR/文件周围有什么）",
+  impact: "给一个模块/文件/变更，评估动了它会波及哪些——只沿强关联最多追两层",
+  path: "给两个节点，找它们之间最短的关联链路并逐跳展示（只走强边，查不到=只有弱关联）",
+  summary: "不查具体节点，输出整张图的统计（节点/边总数、分布、治理计数）——「全图」胶囊的统计卡就是它",
+  nodes: "按名字模糊搜节点出候选列表——锚点输入框自动补全背后就是它，一般不用手动跑",
+};
+
 /** 需要锚点的 sub（执行按钮缺锚点禁用）。 */
 const SUB_NEEDS_ANCHOR: ReadonlySet<string> = new Set([
   "neighbors",
@@ -583,6 +594,32 @@ export default function KnowledgeGraphPage({ params }: Props) {
   );
   const nodeMap = useMemo(() => new Map(slice.nodes.map((n) => [n.id, n] as const)), [slice]);
 
+  // 锚点自动选中（2026-10-09-graph-query-ux）：带锚点的查询结果到达后，锚点节点
+  // 直接为选中态（选中环+一跳高亮+右栏详情）——免二次手点。guard 防同查询重复选中
+  // 与「重置后又被拉回」；锚点不在结果集（node_not_found 降级等）静默不选。
+  const autoSelectRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeParams?.anchor || !queryQ.data) return;
+    const sig = `${activeParams.sub}|${activeParams.anchor}|${activeParams.anchor2 ?? ""}`;
+    if (autoSelectRef.current === sig) return;
+    const data = queryQ.data.data as Record<string, unknown> | null;
+    if (!data) return;
+    // 锚点候选：用户输入 + 后端归一回填（neighbors.anchor/impact.key/path.from）
+    const candidates = [
+      activeParams.anchor,
+      typeof data.anchor === "string" ? data.anchor : undefined,
+      typeof data.key === "string" ? data.key : undefined,
+      typeof data.from === "string" ? data.from : undefined,
+    ].filter(Boolean) as string[];
+    const hit = candidates.map((c) => nodeMap.get(c)).find(Boolean);
+    if (!hit) return;
+    autoSelectRef.current = sig;
+    setSelectedId(hit.id);
+    // 仅 neighbors（锚点中心视图）自动切详情；impact/path 的价值在结果面
+    // （闭包/推理链），保持「查询结果」不抢焦点——画布选中高亮照常生效。
+    if (activeParams.sub === "neighbors") setRightTab("detail");
+  }, [activeParams, queryQ.data, nodeMap]);
+
   // ── 高亮集：选中一跳邻域 ∪ 图例节点类型 ∪ 图例边型（原型语义合并）────────
   const highlight = useMemo(() => {
     const nodeIds = new Set<string>();
@@ -842,8 +879,18 @@ export default function KnowledgeGraphPage({ params }: Props) {
                   aria-label="查询类型"
                   value={draft.sub}
                   onChange={(v) => setDraft((d) => ({ ...d, sub: v }))}
-                  options={SUB_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                  options={SUB_OPTIONS.map((o) => ({
+                    value: o.value,
+                    label: o.label,
+                    title: SUB_DESCRIPTIONS[o.value],
+                  }))}
                 />
+                <span
+                  data-testid="sub-description"
+                  className="text-[10.5px] leading-4 text-muted-foreground/80"
+                >
+                  {SUB_DESCRIPTIONS[draft.sub] ?? ""}
+                </span>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] leading-4 text-muted-foreground">
