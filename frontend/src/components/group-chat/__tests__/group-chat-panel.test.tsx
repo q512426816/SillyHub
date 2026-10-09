@@ -1615,10 +1615,62 @@ describe("群消息附件（FR-05 补遗）", () => {
       expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
     });
     // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
-    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
+    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"));
     // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
     // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
     expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
+  });
+
+  // 2026-10-09-attachment-inline-reference task-05：右击插入引用 + 发送置换
+  // + 删附件联动剥离（单聊 session-input-bar 同口径）。
+  it("右击待发 chip 插入正文引用 → 发送置换为 [附件引用:uuid|name] + 删附件联动剥离", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+    });
+    // 右击 chip → 草稿末尾追加【报错日志.txt】（镜像层角标随之渲染）。
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    expect(screen.getAllByLabelText("移除引用 报错日志.txt").length).toBe(1);
+    // 追加正文后发送：sendGroupMessage 收到置换版（uuid 与上传 id 一致）。
+    fireEvent.change(input, { target: { value: "看看这份【报错日志.txt】日志" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalled());
+    expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+      "g-1",
+      "看看这份[附件引用:att-upload-1|报错日志.txt]日志",
+      ["att-upload-1"],
+      null,
+    );
+  });
+
+  it("删附件联动：点 X 剥离正文该附件全部引用（群聊 task-05）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+    });
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
+    await waitFor(() => expect(input.value).not.toContain("【报错日志.txt】"));
+    expect(
+      screen.queryByLabelText("移除引用 报错日志.txt"),
+    ).toBeNull();
   });
 
   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
