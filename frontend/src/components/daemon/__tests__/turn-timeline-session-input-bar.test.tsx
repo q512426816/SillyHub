@@ -450,6 +450,24 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
     });
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
   });
+
+  // task-06（2026-10-09-attachment-inline-reference）：历史正文行内引用渲染为
+  // 可点击标签（InlineAttRefTextWithPreview；点击预览链路组件级用例已覆盖）。
+  it("正文含 [附件引用:uuid|name] → 渲染引用标签（点击在线预览 title）", () => {
+    setupTimeline({
+      turns: [
+        makeTurn({
+          prompt: `看这个[附件引用:${UUID1}|对比图.png]的效果`,
+          output: "",
+        }),
+      ],
+    });
+    expect(
+      screen.getByTitle("对比图.png（点击在线预览）"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("看这个", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("的效果", { exact: false })).toBeInTheDocument();
+  });
 });
 
 describe("SessionInputBar（task-13 抽取共享子组件）", () => {

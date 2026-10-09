@@ -1786,6 +1786,33 @@ describe("群消息附件（FR-05 补遗）", () => {
       await screen.findByTitle("同步日志.txt（点击在线预览）"),
     ).toBeTruthy();
   });
+
+  // task-06（2026-10-09-attachment-inline-reference）：历史正文行内引用标签渲染
+  // + 点击开预览窗（uuid 直接指向附件 content 端点）。
+  it("正文含 [附件引用:uuid|name] → 渲染标签并可点击打开预览窗", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-live-2",
+      log_id: "l-live-ref-1",
+      timestamp: "2026-09-01T06:09:00Z",
+      channel: "user_input",
+      content:
+        "看看这份[附件引用:aaaaaaaa-1111-2222-3333-444444444444|对比图.png]的效果",
+      sender_user_id: "u-lin",
+      sender_member_name: "林一",
+    });
+    // 正文前缀原样 + 引用渲染为标签（title 悬浮提示）。
+    const tag = await screen.findByTitle("对比图.png（点击在线预览）");
+    expect(screen.getByText("看看这份", { exact: false })).toBeTruthy();
+    // 点击开预览窗（真实 FilePreviewModal 下载按钮锚定；fetchAttachmentBlob 已 mock）。
+    fireEvent.click(tag);
+    expect(await screen.findByLabelText("下载 对比图.png")).toBeTruthy();
+  });
 });
 
 // ── 6. 成员头像渲染（quick 群成员头像自定义） ───────────────────────────────

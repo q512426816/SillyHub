@@ -73,6 +73,7 @@ import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
 // ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
 // 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 import type {
   StubTurnSegment,
   ToolTurnSegment,
@@ -1094,7 +1095,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         {segment.phase === "steering" ? (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
-              {text}
+              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+              <InlineAttRefTextWithPreview text={text} />
             </div>
             <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
               <span
@@ -1107,7 +1109,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         ) : segment.phase === "delivered" ? (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
-              {text}
+              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+              <InlineAttRefTextWithPreview text={text} />
             </div>
             <p className="mt-1 text-right text-[11px] text-emerald-600">
               ✓ 已投递，agent 已收到引导
@@ -1116,7 +1119,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         ) : (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground opacity-70">
-              {text}
+              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+              <InlineAttRefTextWithPreview text={text} />
             </div>
             <p className="mt-1 text-right text-[11px] text-muted-foreground">
               本轮已结束，消息未投递

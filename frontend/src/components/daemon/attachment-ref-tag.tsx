@@ -11,9 +11,14 @@
  * 消息渲染逐字不变）。React.memo 段级缓存防长文重析（R-06）。
  */
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 
 import { parseInlineAttRefs } from "@/lib/attachment-refs";
+import { fetchAttachmentBlob } from "@/lib/api/session-attachments";
+import {
+  FilePreviewModal,
+  type FilePreviewTarget,
+} from "@/components/files/file-preview-modal";
 
 interface InlineAttRefTextProps {
   /** 待渲染正文（可含 [附件引用:uuid|name] 行内引用）。 */
@@ -50,3 +55,30 @@ export const InlineAttRefText = memo(function InlineAttRefText({
     </>
   );
 });
+
+/**
+ * 带预览窗的完整接线（task-06）：InlineAttRefText + 点击开 FilePreviewModal
+ * （fetch=fetchAttachmentBlob(uuid)，与已发送附件 chips/attachment-chips.tsx
+ * 同链路含 officeSource 高保真标识）。单聊 turn-timeline 用户气泡正文、steered
+ * 引导段与群聊气泡正文共用——宿主一行接入，自持 modal state。
+ */
+export function InlineAttRefTextWithPreview({ text }: { text: string }) {
+  const [target, setTarget] = useState<FilePreviewTarget | null>(null);
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <InlineAttRefText
+        text={text}
+        onOpenRef={(ref) => {
+          setTarget({
+            fetch: () => fetchAttachmentBlob(ref.id),
+            meta: { name: ref.name },
+            officeSource: { source: "session_attachment", id: ref.id },
+          });
+          setOpen(true);
+        }}
+      />
+      <FilePreviewModal target={target} open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}

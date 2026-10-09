@@ -147,11 +147,13 @@ import {
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
   allocateAttRefToken,
+  parseInlineAttRefs,
   stripAttRefTokens,
   substituteAttRefsForSend,
   type AttRefTokenMap,
 } from "@/lib/attachment-refs";
 import { InputRefOverlay } from "@/components/daemon/input-ref-overlay";
+import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 import {
   PROVIDER_META,
   fetchPendingDialogs,
@@ -3346,9 +3348,16 @@ function GroupTimelineRowInner({
             {(entry.replyTo || entry.content) && (
               <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                 {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self />}
-                {entry.content
-                  ? renderMentionHighlights(entry.content, memberNames, true)
-                  : null}
+                {entry.content ? (
+                  /* task-06：正文含行内附件引用 → 标签化渲染（点击预览）；
+                     该分支下 @提及暂不走高亮管线（引用+@ 同存为少数组合，
+                     文本原样保留语义不变）；绝大多数消息走原高亮路径零变化。 */
+                  parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                    <InlineAttRefTextWithPreview text={entry.content} />
+                  ) : (
+                    renderMentionHighlights(entry.content, memberNames, true)
+                  )
+                ) : null}
               </div>
             )}
             <ReplyingTags replying={replying} />
@@ -3398,9 +3407,14 @@ function GroupTimelineRowInner({
           {(entry.replyTo || entry.content) && (
             <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
               {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self={false} />}
-              {entry.content
-                ? renderMentionHighlights(entry.content, memberNames, false)
-                : null}
+              {entry.content ? (
+                /* task-06：他人消息同款分支——正文含行内引用走标签渲染。 */
+                parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                  <InlineAttRefTextWithPreview text={entry.content} />
+                ) : (
+                  renderMentionHighlights(entry.content, memberNames, false)
+                )
+              ) : null}
             </div>
           )}
           <ReplyingTags replying={replying} />
