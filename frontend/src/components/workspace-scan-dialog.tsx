@@ -13,7 +13,7 @@ import {
   type DaemonInstanceRead,
 } from "@/lib/daemon";
 import { errMessage, useNotify } from "@/lib/errors";
-import { initDispatch } from "@/lib/spec-workspaces";
+import { initDispatch, type SpecStrategy } from "@/lib/spec-workspaces";
 import {
   createWorkspace,
   slugifyWorkspaceName,
@@ -36,6 +36,19 @@ type Phase = "idle" | "creating" | "initializing" | "done" | "init_failed";
 // 轮询节律与超时对齐 config-card handleInit（D-003@v1：2s 轮询 / 5min 超时）。
 const INIT_POLL_INTERVAL_MS = 2_000;
 const INIT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+// spec 同步策略选项（2026-10-09-ws-create-spec-default-collapse）：默认
+// repo-native（源项目即真理），前两个低频选项收进「更多选项」展开后才渲染
+// （条件渲染非 CSS 隐藏）；shortLabel 供收起态摘要行使用。
+const SPEC_STRATEGY_OPTIONS: Array<{
+  value: SpecStrategy;
+  shortLabel: string;
+  label: string;
+}> = [
+  { value: "platform-managed", shortLabel: "平台托管", label: "平台托管（不碰源项目，从零扫描）" },
+  { value: "repo-mirrored", shortLabel: "单次导入", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
+  { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
+];
 
 interface Props {
   onCreated: () => void;
@@ -67,10 +80,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [daemonId, setDaemonId] = useState<string>("");
   const [daemonRootPath, setDaemonRootPath] = useState("");
   // spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）：daemon-client workspace
-  // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 platform-managed 零回归。
-  const [specStrategy, setSpecStrategy] = useState<
-    "platform-managed" | "repo-mirrored" | "repo-native"
-  >("platform-managed");
+  // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 repo-native 源项目即真理
+  // （2026-10-09-ws-create-spec-default-collapse 翻转，前两选项默认收进「更多选项」）。
+  const [specStrategy, setSpecStrategy] = useState<SpecStrategy>("repo-native");
+  const [specExpanded, setSpecExpanded] = useState(false);
 
   // quick ql-20260803-003-cb34：创建后如后端标记「复用/激活/复活」则提示用户，避免
   // 静默返回 201（同 root_path 已有工作区被复用）导致「创建成功却看不到/绑定没生效」的困惑。
@@ -356,28 +369,53 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           )}
           {daemonRootPath && (
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                spec 同步策略（源项目已有 .sillyspec 如何进入平台）
-              </label>
-              <div className="flex flex-col gap-1">
-                {(
-                  [
-                    ["platform-managed", "平台托管（默认，不碰源项目，从零扫描）"],
-                    ["repo-mirrored", "单次导入（复制源项目 .sillyspec 快照，不污染源项目）"],
-                    ["repo-native", "源项目即真理（软链接，扫描直接写源项目）"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <label key={value} className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="radio"
-                      checked={specStrategy === value}
-                      onChange={() => setSpecStrategy(value)}
+              {specExpanded ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      spec 同步策略（源项目已有 .sillyspec 如何进入平台）
+                    </label>
+                    <button
+                      type="button"
+                      className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                      onClick={() => setSpecExpanded(false)}
                       disabled={phase === "creating" || phase === "initializing"}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
+                    >
+                      收起
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {SPEC_STRATEGY_OPTIONS.map(({ value, label }) => (
+                      <label key={value} className="flex items-center gap-1.5 text-xs">
+                        <input
+                          type="radio"
+                          checked={specStrategy === value}
+                          onChange={() => setSpecStrategy(value)}
+                          disabled={phase === "creating" || phase === "initializing"}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {`spec 同步策略：${
+                      SPEC_STRATEGY_OPTIONS.find((o) => o.value === specStrategy)
+                        ?.shortLabel ?? ""
+                    }`}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+                    onClick={() => setSpecExpanded(true)}
+                    disabled={phase === "creating" || phase === "initializing"}
+                  >
+                    更多选项
+                  </button>
+                </div>
+              )}
               {specStrategy === "repo-native" && (
                 <p className="text-[11px] text-amber-600">
                   ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。

@@ -81,13 +81,16 @@ const STATUS_FILTER_OPTIONS = [
 ];
 
 // spec 同步策略选项（对齐桌面 WorkspaceScanDialog，源项目已有 .sillyspec 如何进入平台）。
+// 2026-10-09-ws-create-spec-default-collapse：默认 repo-native 源项目即真理，
+// 前两个低频选项收进「更多选项」展开后才渲染（条件渲染非 CSS 隐藏）。
 const SPEC_STRATEGY_OPTIONS: Array<{
   value: "platform-managed" | "repo-mirrored" | "repo-native";
+  shortLabel: string;
   label: string;
 }> = [
-  { value: "platform-managed", label: "平台托管（默认，不碰源项目，从零扫描）" },
-  { value: "repo-mirrored", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
-  { value: "repo-native", label: "源项目即真理（软链接，扫描直接写源项目）" },
+  { value: "platform-managed", shortLabel: "平台托管", label: "平台托管（不碰源项目，从零扫描）" },
+  { value: "repo-mirrored", shortLabel: "单次导入", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
+  { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
 ];
 
 // 页内内联筛选控件统一样式（≥44px 触摸热区、≥14px 正文，R-04）。
@@ -523,7 +526,10 @@ function WorkspaceCreateSheet({
   const [name, setName] = useState("");
   const [specStrategy, setSpecStrategy] = useState<
     "platform-managed" | "repo-mirrored" | "repo-native"
-  >("platform-managed");
+  >("repo-native");
+  // 2026-10-09-ws-create-spec-default-collapse：spec 策略默认收起，
+  // 摘要行 + 「更多选项」入口，展开后才渲染三选项。
+  const [specExpanded, setSpecExpanded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -547,7 +553,8 @@ function WorkspaceCreateSheet({
     setDaemonId("");
     setRootPath("");
     setName("");
-    setSpecStrategy("platform-managed");
+    setSpecStrategy("repo-native");
+    setSpecExpanded(false);
     setError(null);
   };
 
@@ -653,23 +660,54 @@ function WorkspaceCreateSheet({
           />
         </CreateField>
 
-        <CreateField label="spec 同步策略（源项目已有 .sillyspec 如何进入平台）">
-          <div className="flex flex-col gap-1">
-            {SPEC_STRATEGY_OPTIONS.map((o) => (
-              <label
-                key={o.value}
-                className="flex min-h-[44px] items-center gap-1.5 text-[13px] text-foreground"
-              >
-                <input
-                  type="radio"
-                  checked={specStrategy === o.value}
-                  onChange={() => setSpecStrategy(o.value)}
+        <CreateField label="spec 同步策略">
+          {specExpanded ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-muted-foreground">
+                  源项目已有 .sillyspec 如何进入平台
+                </span>
+                <button
+                  type="button"
+                  className="text-[12px] text-primary underline-offset-2 disabled:opacity-50"
+                  onClick={() => setSpecExpanded(false)}
                   disabled={creating}
-                />
-                {o.label}
-              </label>
-            ))}
-          </div>
+                >
+                  收起
+                </button>
+              </div>
+              <div className="flex flex-col gap-1">
+                {SPEC_STRATEGY_OPTIONS.map((o) => (
+                  <label
+                    key={o.value}
+                    className="flex min-h-[44px] items-center gap-1.5 text-[13px] text-foreground"
+                  >
+                    <input
+                      type="radio"
+                      checked={specStrategy === o.value}
+                      onChange={() => setSpecStrategy(o.value)}
+                      disabled={creating}
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-foreground">
+                {SPEC_STRATEGY_OPTIONS.find((o) => o.value === specStrategy)?.shortLabel}
+              </span>
+              <button
+                type="button"
+                className="text-[12px] text-primary underline-offset-2 disabled:opacity-50"
+                onClick={() => setSpecExpanded(true)}
+                disabled={creating}
+              >
+                更多选项
+              </button>
+            </div>
+          )}
           {specStrategy === "repo-native" ? (
             <p className="mt-1 text-[12px] text-amber-600">
               ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。
