@@ -604,7 +604,7 @@ const TurnRow = memo(function TurnRow({
                             <div className="whitespace-pre-wrap break-words">
                               {/* task-06（2026-10-09-attachment-inline-reference）：
                                   正文行内引用渲染为可点击标签（点击开预览窗）。 */}
-                              <InlineAttRefTextWithPreview text={parsed.text} />
+                              <InlineAttRefTextWithPreview text={parsed.text} tone="onPrimary" />
                             </div>
                           )}
                           {/* task-11：复制剥离标记后的纯文本（与显示一致，点击时惰性重解析）；

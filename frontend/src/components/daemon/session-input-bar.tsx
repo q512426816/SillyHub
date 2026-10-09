@@ -288,7 +288,8 @@ export function SessionInputBar({
     onAttTokenMapChange?.(next);
   };
 
-  /** 右击 chip 插入引用（D-006：追加正文末尾，光标随 pendingCaretRef 落末尾；允许重复）。 */
+  /** 右击 chip 插入引用（D-006@v2：光标在输入框内→插光标处，否则插末尾；
+   *  插入后自动聚焦、光标落 token 尾；允许重复）。 */
   const handleInsertAttRef = (att: AttachmentRead) => {
     let token = attTokenMap[att.id];
     if (!token) {
@@ -300,9 +301,13 @@ export function SessionInputBar({
       );
       syncTokenMap({ ...attTokenMap, [att.id]: token });
     }
-    const next = value + token;
+    const ta = textareaRef.current;
+    const focused = !!ta && document.activeElement === ta;
+    const caret = focused ? (ta.selectionStart ?? value.length) : value.length;
+    const next = value.slice(0, caret) + token + value.slice(caret);
     onChange(next);
-    pendingCaretRef.current = next.length;
+    pendingCaretRef.current = caret + token.length;
+    ta?.focus();
   };
 
   /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。 */

@@ -105,3 +105,33 @@ created_at: 2026-10-09 13:47:10
 - priority: P0
 - 锚点: frontend/src/components/daemon/session-input-bar.tsx（onKeyDown Backspace 分支）
 - 模块域: frontend_components
+
+## D-005@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-005@v1
+- source: 用户实测反馈（部署实测 2026-10-09，附截图）
+- question: 蓝色主气泡（自己消息）内行内引用标签看不清怎么办？
+- answer: InlineAttRefText 增加 tone 双色调——brand（默认，浅色气泡：品牌色底+深字）/ onPrimary（蓝色主气泡内：白色半透明底 border-white/30 bg-white/25 + 白字，hover 加深）；单聊主气泡/steered delivered/群聊自己消息分支用 onPrimary，其余分支保持 brand。
+- normalized_requirement: FR-06 标签在深色主气泡内对比可读；浅色气泡渲染不变。
+- impacts: attachment-ref-tag.tsx、turn-timeline.tsx、turn-segment-views.tsx、group-chat-panel.tsx。
+- evidence: 用户截图（蓝色气泡内标签近不可辨）+ 原话「回显的记录标签看不清」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/attachment-ref-tag.tsx（tone 分支）
+- 模块域: frontend_components
+
+## D-006@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-006@v1
+- source: 用户实测反馈（部署实测 2026-10-09）
+- question: 右击插入的位置与聚焦行为？
+- answer: 光标在输入框内（document.activeElement===textarea 且有 selectionStart）→ 插入光标当前位置；否则插入正文末尾；插入后输入框自动聚焦、光标落 token 尾（单聊 pendingCaretRef / 群聊 rAF 复位机制）。允许重复不变。
+- normalized_requirement: FR-01 插入位置按本版执行；其余（右击触发/防默认菜单）不变。
+- impacts: session-input-bar.tsx handleInsertAttRef、group-chat-panel.tsx handleInsertAttRef。
+- evidence: 用户原话「①右击文件插入输入框，如果光标在输入框，那插入光标当前所在位置，否则插在最后。②插入之后没有自动聚焦啊」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（handleInsertAttRef）
+- 模块域: frontend_components

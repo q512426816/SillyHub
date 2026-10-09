@@ -1925,14 +1925,16 @@ export function GroupChatPanel({
       );
       setAttTokenMap({ ...attTokenMap, [att.id]: token });
     }
-    const next = draft + token;
-    setDraft(next);
-    // FR-01 光标落末尾（验收 review gap 修复）：同文件 @ 回填的 rAF 复位机制。
     const input = inputRef.current;
+    const focused = !!input && document.activeElement === input;
+    const caret = focused ? (input.selectionStart ?? draft.length) : draft.length;
+    const next = draft.slice(0, caret) + token + draft.slice(caret);
+    setDraft(next);
+    // D-006@v2：插入后自动聚焦、光标落 token 尾（rAF 复位机制，同 @ 回填）。
     const restore = () => {
       if (!input) return;
       input.focus();
-      input.setSelectionRange(next.length, next.length);
+      input.setSelectionRange(caret + token.length, caret + token.length);
     };
     if (typeof requestAnimationFrame === "function") {
       requestAnimationFrame(restore);
@@ -3397,7 +3399,7 @@ function GroupTimelineRowInner({
                      该分支下 @提及暂不走高亮管线（引用+@ 同存为少数组合，
                      文本原样保留语义不变）；绝大多数消息走原高亮路径零变化。 */
                   parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
-                    <InlineAttRefTextWithPreview text={entry.content} />
+                    <InlineAttRefTextWithPreview text={entry.content} tone="onPrimary" />
                   ) : (
                     renderMentionHighlights(entry.content, memberNames, true)
                   )

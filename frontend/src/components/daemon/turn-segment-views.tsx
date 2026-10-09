@@ -1109,8 +1109,8 @@ export const UserMsgSegmentView = memo(function UserMsgSegmentView({
         ) : segment.phase === "delivered" ? (
           <>
             <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
-              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
-              <InlineAttRefTextWithPreview text={text} />
+              {/* task-06：引导段正文行内引用标签化（蓝色主气泡内用 onPrimary 色调）。 */}
+              <InlineAttRefTextWithPreview text={text} tone="onPrimary" />
             </div>
             <p className="mt-1 text-right text-[11px] text-emerald-600">
               ✓ 已投递，agent 已收到引导

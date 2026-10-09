@@ -15,7 +15,16 @@ import { ApiError } from "@/lib/api";
 import { SessionInputBar } from "@/components/daemon/session-input-bar";
 
 vi.mock("@/lib/session-mention-sources", () => ({
-  useMentionSources: vi.fn(),
+  // D-006@v2 插入后自动聚焦 → textarea onFocus 挂载联想数据桥：mock 须返回
+  // 空快照（原 vi.fn() 返回 undefined 会在 isSameMentionSources 回流比较崩溃）。
+  useMentionSources: vi.fn(() => ({
+    skills: [],
+    changes: [],
+    quicklogs: [],
+    ppmTasks: [],
+    ppmProblems: [],
+    atEnabled: false,
+  })),
 }));
 
 // Mock FilePreviewModal（保留渲染状态供断言——attachment-chips.test 同款）。
@@ -217,6 +226,25 @@ describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-re
       expect(screen.getByText(/前文【截图.png】【截图.png】/)).toBeInTheDocument(),
     );
     expect(onTokenMap).toHaveBeenLastCalledWith({ "att-ref-1": "【截图.png】" });
+  });
+
+  // D-006@v2（用户反馈 2026-10-09）：光标在输入框内→插光标处+聚焦；未聚焦→插末尾。
+  it("光标在输入框内右击 → 插入光标处、光标落 token 尾；未聚焦 → 插末尾", async () => {
+    await mountAndUpload([{ id: "att-caret-1", name: "插入.png" }], "ABCD");
+    const chip = screen.getByTitle(/右击插入正文引用/);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+
+    // ① 未聚焦（activeElement 不是 textarea）→ 插末尾。
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("ABCD【插入.png】"));
+
+    // ② 聚焦且光标在 B|C（index 2）→ 插光标处（①的末尾 token 仍在），聚焦保持。
+    ta.focus();
+    ta.setSelectionRange(2, 2);
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("AB【插入.png】CD【插入.png】"));
+    expect(document.activeElement).toBe(ta);
+    await waitFor(() => expect(ta.selectionStart).toBe(2 + "【插入.png】".length));
   });
 
   it("同名两附件：第二个右击自动 ·2 唯一化", async () => {
