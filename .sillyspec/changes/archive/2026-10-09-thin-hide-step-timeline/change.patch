@@ -1,0 +1,360 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index e09dbe067..4a2c877c8 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -10,6 +10,8 @@
+ //   2. aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card
+ //      与主栏时间线卡同表双显，反向钉防回潮）
+ //   3. 范围对账卡收到 archived 传参（isTerminalChange 派生，非终态 false）
++//   4. thin 出身步骤时间线卡隐藏 / 厚变更双卡共存（2026-10-09-thin-hide-step-timeline：
++//      thin steps 只有归档补种 3 行同时间戳步骤属噪音，整卡隐藏；厚变更两卡共存不变）
+ //
+ // 卡片组件全部 stub（只验页面挂载与传参，组件内部由各自套件覆盖），范式对齐
+ // 同目录 page-team-toggle.test.tsx。
+@@ -210,8 +212,10 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets
+ 
+   // 2026-09-27-timeline-coexist：归档时 unregisterChange 终态一致化补种 3 行
+   // 同一时间戳 steps，原互斥挂载会把真实留痕时间线卡顶掉（归档后真实数据
+-  // 不可见）。钉住共存：steps 非空 + 观测数据在 → 两卡同时渲染。
+-  it("共存（2026-09-27-timeline-coexist）：归档补种 steps 后真实留痕时间线卡不被顶掉", async () => {
++  // 不可见）。2026-10-09-thin-hide-step-timeline 语义升级：thin 出身（本 fixture
++  // change_type=quick 命中②分支）步骤时间线卡整卡隐藏——补种行对 thin 零信息量，
++  // 钉住：卡隐藏 + 真实留痕卡保留（隐藏后更不可能被顶掉）。
++  it("共存→隐藏（2026-10-09-thin-hide-step-timeline）：归档补种 steps 的 thin 变更步骤时间线卡不渲染，真实留痕时间线卡保留", async () => {
+     vi.mocked(getChangeTimeline).mockResolvedValue({
+       change_key: "2026-09-26-restore-fixture",
+       born_at: "2026-09-26T10:00:00.000Z",
+@@ -276,11 +280,79 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets
+         ],
+       }),
+     );
+-    // 补种的 3 行步骤时间线照常渲染
++    // thin 出身（quick 分流 + 补种 steps 无标准阶段痕迹）→ 步骤时间线卡隐藏
++    expect(
++      screen.queryByTestId("change-step-timeline-card"),
++    ).toBeNull();
++    // 真实留痕时间线卡保留（thin 主线叙事承担者）
++    expect(
++      await screen.findByTestId("change-timeline-card"),
++    ).toBeInTheDocument();
++  });
++
++  // 2026-10-09-thin-hide-step-timeline FR-02/FR-03：厚变更（steps 含标准四阶段
++  // 痕迹 → 非 thin 出身）双卡共存语义原样保留——步骤时间线卡照常渲染，且
++  // 不被真实留痕卡互斥顶掉（timeline-coexist 原语义在厚侧的延续钉子）。
++  it("共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染", async () => {
++    vi.mocked(getChangeTimeline).mockResolvedValue({
++      change_key: "2026-09-26-restore-fixture",
++      born_at: "2026-09-26T10:00:00.000Z",
++      events: [
++        {
++          ts: "2026-09-26T10:01:00Z",
++          kind: "file-update",
++          label: "requirements.md 内容变更",
++          rule: "watcher",
++          severity: "info",
++          provisional: true,
++          commit_title: null,
++        },
++      ],
++      tasks: [
++        { id: "task-01", checked: true, desc: "厚共存钉子", commit_sha: null },
++      ],
++      stats: {
++        event_count: 1,
++        commit_count: 0,
++        checked: 1,
++        total: 1,
++        wall_clock_s: 300,
++      },
++    });
++    renderPage(
++      makeChange({
++        current_stage: "archive",
++        status: "archived",
++        location: "archive",
++        change_type: null,
++        created_at: "2026-09-26T10:00:00Z",
++        steps: [
++          {
++            name: "实现收尾",
++            stage: "execute",
++            status: "completed",
++            output: null,
++            completed_at: "2026-09-27T12:00:00Z",
++            ordering: 0,
++            wait_reason: null,
++            kind: "step",
++          },
++          {
++            name: "验证通过",
++            stage: "verify",
++            status: "completed",
++            output: null,
++            completed_at: "2026-09-27T12:30:00Z",
++            ordering: 1,
++            wait_reason: null,
++            kind: "step",
++          },
++        ],
++      }),
++    );
+     expect(
+       await screen.findByTestId("change-step-timeline-card"),
+     ).toBeInTheDocument();
+-    // 真实留痕时间线卡共存（不再被互斥顶掉）
+     expect(
+       await screen.findByTestId("change-timeline-card"),
+     ).toBeInTheDocument();
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index 241978292..bad898ef5 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -407,8 +407,12 @@ export default function ChangeDetailPage({ params }: Props) {
+ 
+           {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
+               SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
+-              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017） */}
+-          {change.steps && change.steps.length > 0 ? (
++              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
++              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）：thin 流程子步
++              不落库，steps 里只有归档时 unregisterChange 终态一致化补种的 3 行同
++              时间戳步骤，零过程信息量；主线叙事由顶部轻量流程条 + 真实留痕时间线
++              卡承担（谓词与流程条同源 isThinLineageChange）。 */}
++          {!isThinLineageChange(change) && change.steps && change.steps.length > 0 ? (
+             <section
+               data-testid="change-step-timeline-card"
+               className="rounded-md border bg-card"
+diff --git a/frontend/src/components/mobile/mobile-change-detail.test.tsx b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+index 6d778d0ae..ff6e70008 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.test.tsx
+@@ -856,6 +856,9 @@ describe("MobileChangeDetail thin/quick 卡口径（对齐桌面 isThinLineageCh
+     renderDetail();
+     expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
+     expect(screen.queryByTestId("m-change-review-idle")).not.toBeInTheDocument();
++    // 2026-10-09-thin-hide-step-timeline：thin 出身（含归档补种/收口 steps）
++    // 阶段时间线卡整卡隐藏——补种行零信息量，对齐桌面同款排除。
++    expect(screen.queryByTestId("m-change-timeline-card")).not.toBeInTheDocument();
+   });
+ 
+   it("quick 分流新变更（change_type=quick、时间窗内）→ 轻量说明卡（对齐桌面②分支）", async () => {
+diff --git a/frontend/src/components/mobile/mobile-change-detail.tsx b/frontend/src/components/mobile/mobile-change-detail.tsx
+index 5124818f0..c775f44ad 100644
+--- a/frontend/src/components/mobile/mobile-change-detail.tsx
++++ b/frontend/src/components/mobile/mobile-change-detail.tsx
+@@ -713,8 +713,11 @@ export function MobileChangeDetail({
+       </SecCard>
+ 
+       {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳；focusStage
+-          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化） */}
+-      {steps && steps.length > 0 ? (
++          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化）。
++          thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline，对齐桌面同款）：
++          thin steps 只有归档补种 3 行同时间戳步骤属噪音，主线叙事由轻量说明卡
++          与真实留痕承担（判定复用 :508 isThinLineageChange 同源谓词）。 */}
++      {!isThinLineageChange(change) && steps && steps.length > 0 ? (
+         <SecCard
+           testId="m-change-timeline-card"
+           title={<>🧭 阶段时间线（{steps.length}）</>}
+diff --git a/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/design.md b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/design.md
+new file mode 100644
+index 000000000..9867f2309
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:10:52.133Z
++---
++# 设计记录（Design Record）— 2026-10-09-thin-hide-step-timeline
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++桌面详情页（`changes/[cid]/page.tsx`）与移动端详情页（`mobile-change-detail.tsx`）的「步骤时间线」卡挂载条件各加一个 `!isThinLineageChange(change)` 前置排除——该谓词是页面既有单一真相（顶部轻量流程条 2026-09-27-thin-display-fix 已用同一判定，后端 `_is_thin_lineage` 三分支同口径），thin 出身时整卡不渲染。选整卡隐藏而非「过滤补种行」：thin 的 steps 里只有归档补种 3 行，过滤后必空卡无意义；且「补种行特征」（stage=archive + 同一时间戳）属脆弱启发式，与出身判定重复造轮子。移动端同步改（同一产品面同一数据，单改桌面会留同款噪音）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无后端/API/DTO 改动（纯前端条件渲染）。对外可见行为变化仅一处：thin 出身变更的详情页不再出现「步骤时间线」卡（桌面 testid `change-step-timeline-card` / 移动端 `m-change-timeline-card`）；厚变更渲染路径与「真实留痕时间线」卡挂载条件零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立——详情数据经 10s 轮询整体到达，谓词是 change 载荷的纯派生函数，每次渲染重算；迟到补种的 steps 到达后下一次轮询确定性翻卡可见性，无顺序假设。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   纯只读渲染路径，本变更零写入；不存在两执行体竞争面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全——路由切换即重挂载（真实留痕卡已 key=changeId）；focusStage 联动对 thin 天然缺席（thin 不渲染 ChangeStageHeader 阶段节点，focusStage 恒 null），隐藏时间线卡无残留状态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会——`isThinLineageChange` 按 change 对象逐条判定（含 created_at 时间窗双保险），无跨工作区/跨实例共享状态。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：出身误判导致厚变更卡片被误隐藏——缓解：复用已被 thin-badge-survives-archive / thin-display-fix 两个变更钉过的既有谓词，不引入新判定逻辑。试过放弃的方案：①按「3 行同一时间戳 + stage=archive」特征过滤补种行——放弃，脆弱启发式且过滤后必空卡；②后端停止补种 steps——放弃，补种行承载归档终态投影语义（status=archived 读时覆盖依赖 latest_progress），前端隐藏是展示层正确切面。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx | 步骤时间线卡挂载条件加 `!isThinLineageChange(change)` 前置 + 注释记录规则 |
++| 修改 | frontend/src/components/mobile/mobile-change-detail.tsx | 阶段时间线卡同款 thin 出身排除 |
++| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | 共存用例语义翻转（thin 隐藏）+ 厚变更双卡共存新增用例 |
++| 修改 | frontend/src/components/mobile/mobile-change-detail.test.tsx | 归档 thin 用例补时间线卡缺席断言 |
+diff --git a/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/proposal.md b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/proposal.md
+new file mode 100644
+index 000000000..e0372e369
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:10:52.133Z
++---
++# 提案书（Proposal）— 2026-10-09-thin-hide-step-timeline
++
++## 动机
++
++任务原话转写：动机: 轻量变更（thin 出身）详情页的「步骤时间线」卡只显示归档时 CLI unregisterChange 补种的 3 行同一时间戳步骤（decision-distill/extract-module-impact/确认归档），无过程信息量属噪音；thin 主线叙事已由顶部轻量流程条与真实留痕时间线卡承担，该卡应隐藏。
++成功标准：
++- thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
++- 非 thin 厚变更步骤时间线卡行为不变，仍正常渲染 steps 明细
++- 真实留痕时间线卡恒挂载行为不变（2026-09-27-timeline-coexist 共存语义保留）
++- 相关前端测试更新并通过（仅跑改动相关测试，不跑全量）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
++2. 非 thin 厚变更步骤时间线卡行为不变，仍正常渲染 steps 明细
++3. 真实留痕时间线卡恒挂载行为不变（2026-09-27-timeline-coexist 共存语义保留）
++4. 相关前端测试更新并通过（仅跑改动相关测试，不跑全量）
++
++## 成功标准（可验证）
++
++1. thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
++2. 非 thin 厚变更步骤时间线卡行为不变，仍正常渲染 steps 明细
++3. 真实留痕时间线卡恒挂载行为不变（2026-09-27-timeline-coexist 共存语义保留）
++4. 相关前端测试更新并通过（仅跑改动相关测试，不跑全量）
+diff --git a/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/requirements.md b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/requirements.md
+new file mode 100644
+index 000000000..9c8deeba9
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/requirements.md
+@@ -0,0 +1,61 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:10:52.133Z
++---
++# 需求规格（Requirements）— 2026-10-09-thin-hide-step-timeline
++
++## 功能需求
++
++### FR-01: thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
++
++- thin 出身变更的详情页（桌面 `changes/[cid]/page.tsx` 与移动端 `mobile-change-detail.tsx`）必须不渲染「步骤时间线」卡——thin 流程子步不落 sillyspec.db，steps 里唯一的 数据是归档时 CLI `unregisterChange` 终态一致化补种的 3 行同一时间戳步骤（decision-distill / extract-module-impact / 确认归档），对 thin 属零信息量噪音；判定必须复用页面既有单一谓词 `isThinLineageChange`（与顶部轻量流程条、后端 `_is_thin_lineage` 三分支口径一致），禁止另造「补种行特征」启发式。
++
++#### 场景：归档 thin 补种 steps
++
++- Given 归档后的 thin 出身变更（current_stage=archived / change_type=feature、steps 为 3 行 stage=archive 补种步骤、created_at ≥ 2026-09-25）
++- When 打开变更详情页
++- Then 「步骤时间线」卡整卡不渲染；「真实留痕时间线」卡照常渲染（事件轴 × 任务面 × 墙钟）
++
++#### 场景：在途 thin
++
++- Given 在途 thin 变更（current_stage=thin、steps 为空或缺失）
++- When 打开变更详情页
++- Then 「步骤时间线」卡不渲染（原有 steps 空降级语义自然覆盖，行为不变）
++
++### FR-02: 非 thin 厚变更步骤时间线卡行为不变，仍正常渲染 steps 明细
++
++- 非 thin 出身的厚变更（steps 含标准四阶段痕迹 / current_stage 为标准阶段 / 分流时间窗外）详情页「步骤时间线」卡必须保持既有行为：steps 非空即渲染明细，steps 缺失或空数组降级不渲染；本变更禁止影响厚变更任何既有渲染路径。
++
++#### 场景：厚变更带 steps
++
++- Given 厚变更（steps 含 stage=brainstorm/execute 等标准阶段明细）
++- When 打开变更详情页
++- Then 「步骤时间线」卡照常渲染 steps 明细（与 2026-08-15-change-step-visibility task-07 行为一致）
++
++### FR-03: 真实留痕时间线卡恒挂载行为不变（2026-09-27-timeline-coexist 共存语义保留）
++
++- 「真实留痕时间线」卡（ChangeTimelineCard）必须保持恒挂载语义（2026-09-27-timeline-coexist）：组件自身 events/tasks/born 全空时静默隐藏；本变更只隐藏「步骤时间线」卡，禁止改动真实留痕卡的挂载条件与取数行为。
++
++#### 场景：厚变更归档双卡共存
++
++- Given 归档厚变更（steps 非空含标准阶段痕迹 + 观测事件流有数据）
++- When 打开变更详情页
++- Then 「步骤时间线」卡与「真实留痕时间线」卡两卡同时渲染（共存语义不回潮互斥）
++
++### FR-04: 相关前端测试更新并通过（仅跑改动相关测试，不跑全量）
++
++- 本变更必须更新受语义影响的既有测试（page-restore-assets 共存用例按新语义翻转）并补充薄厚两侧钉子用例；测试运行必须仅覆盖改动相关文件（本页测试 + 移动端详情页测试 + 步骤时间线组件测试），禁止跑全量（全量留给 CI）。
++
++#### 场景：定向测试
++
++- When 实现完成后运行改动相关 vitest 文件
++- Then 全部用例通过，且既有厚变更用例（page-team-toggle / page-last-signal）零改动零回归
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「共存→隐藏（2026-10-09-thin-hide-step-timeline）：归档补种 steps 的 thin 变更步骤时间线卡不渲染，真实留痕时间线卡保留」
++FR-01: frontend/src/components/mobile/mobile-change-detail.test.tsx「归档 thin（stage=archived + steps 无标准四阶段痕迹）→ 轻量说明卡而非「无可审批」（+ 阶段时间线卡缺席断言）」
++FR-02: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx「change.steps 有明细 → 渲染 ChangeStepTimeline 区块（时间线卡片 + 组件挂载）」（零改动零回归钉子）
++FR-02: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染」
++FR-03: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡」（零改动零回归钉子）
++FR-04: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「本文件全部用例（vitest run 定向）」
+diff --git a/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/tasks.md b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/tasks.md
+new file mode 100644
+index 000000000..7547b389a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:10:52.133Z
++---
++# 任务注册表（Tasks）— 2026-10-09-thin-hide-step-timeline
++
++- [x] task-01: 桌面详情页步骤时间线卡挂载条件加 thin 出身排除（page.tsx 复用 isThinLineageChange）；page-restore-assets.test.tsx 共存用例语义翻转（thin 补种 → 卡隐藏 + 真实留痕卡保留）+ 新增厚变更双卡共存用例——定向跑该测试文件绿
++- [x] task-02: 移动端详情页同款排除（mobile-change-detail.tsx 阶段时间线卡）+ 归档 thin 用例补 m-change-timeline-card 缺席断言——定向跑该测试文件绿
++- [x] task-03: 厚变更回归面：page-team-toggle / page-last-signal / change-step-timeline 组件测试定向跑绿（零改动零回归确认）
++- [x] task-04: visual-evidence.md 落档（DOM 断言式渲染对照结论 + 无降级声明）
+diff --git a/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/visual-evidence.md b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/visual-evidence.md
+new file mode 100644
+index 000000000..1ca3a6cf3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-thin-hide-step-timeline/visual-evidence.md
+@@ -0,0 +1,21 @@
++# 视觉证据（visual-evidence）— 2026-10-09-thin-hide-step-timeline
++
++## 变更性质
++
++既有页面（变更详情页，桌面 + 移动端）的负向条件渲染：thin 出身变更不再挂载「步骤时间线」卡。非新页面 / 非新形态 / 非布局改版——不改任何卡片内部结构与样式，仅在挂载条件前加 `!isThinLineageChange(change)` 排除（谓词与页面既有顶部轻量流程条同源）。
++
++## 视觉方案与 token 依据
++
++不适用：本变更零新增视觉元素、零样式 token——隐藏一张对 thin 只有归档补种 3 行同时间戳步骤的噪音卡，页面剩余布局（审批卡 / 真实留痕时间线卡 / 沉淀资产卡等）由既有流式布局自然收拢，无占位空洞。
++
++## 验证方式
++
++- 渲染对照采用页面级 DOM 断言（改动是纯条件渲染增删，无像素级样式变化面，实页截图对本变更无增量信息）：
++  - `page-restore-assets.test.tsx`「共存→隐藏（2026-10-09-thin-hide-step-timeline）」：thin fixture（change_type=quick + 3 行 stage=archive 补种 steps）断言 `change-step-timeline-card` 缺席、`change-timeline-card` 在场——隐藏后页面仍有主线叙事卡，无空窗。
++  - `page-restore-assets.test.tsx`「共存（厚变更）」：厚 fixture（steps 含 execute/verify 标准阶段痕迹）断言两卡同屏——厚变更视觉行为零变化。
++  - `mobile-change-detail.test.tsx`「归档 thin」：补 `m-change-timeline-card` 缺席断言（移动端同款）。
++- 测试结果：page-restore-assets 11/11、mobile-change-detail 18/18、回归面（page-team-toggle + page-last-signal + change-step-timeline 组件）37/37 全绿。
++
++## 降级裁决
++
++无降级——实现与方案一致（整卡隐藏，非「过滤补种行」的结构收敛变体）。隐藏范围由用户在对话中明确拍板（「变更详情页隐藏 步骤时间线 吧」，2026-10-09 会话，对应本变更 FR-01）。

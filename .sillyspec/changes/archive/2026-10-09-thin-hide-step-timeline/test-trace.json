@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-thin-hide-step-timeline",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「共存→隐藏（2026-10-09-thin-hide-step-timeline）：归档补种 steps 的 thin 变更步骤时间线卡不渲染，真实留痕时间线卡保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-detail.test.tsx「归档 thin（stage=archived + steps 无标准四阶段痕迹）→ 轻量说明卡而非「无可审批」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx「change.steps 有明细 → 渲染 ChangeStepTimeline 区块（时间线卡片 + 组件挂载）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「本文件全部用例（vitest run 定向）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-thin-hide-step-timeline"
+    }
+  ]
+}
