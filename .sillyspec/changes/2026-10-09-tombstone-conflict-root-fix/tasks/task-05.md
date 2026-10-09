@@ -15,13 +15,11 @@ decision_ids: [D-001@v1, D-002@v1]
 allowed_paths:
   - src/spec-sync.js
   - src/progress/stage-machine.js
-  - test/spec-sync-platform-deleted-receipt.test.mjs
   - test/spec-sync-tombstone-attribution.test.mjs
   - docs/sillyspec/file-lifecycle.md
 target_files:
   - src/spec-sync.js
   - src/progress/stage-machine.js
-  - test/spec-sync-platform-deleted-receipt.test.mjs
   - NEW:test/spec-sync-tombstone-attribution.test.mjs
   - docs/sillyspec/file-lifecycle.md
 goal: >
