@@ -22,9 +22,6 @@ allowed_paths:
 target_files:
   - backend/app/modules/daemon/router/machines.py
   - backend/app/modules/daemon/ws_hub.py
-  - backend/app/modules/daemon/model.py
-  - backend/app/modules/daemon/schema.py
-  - backend/app/modules/daemon/router/heartbeat.py
   - backend/openapi.json
   - backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py
 goal: >
