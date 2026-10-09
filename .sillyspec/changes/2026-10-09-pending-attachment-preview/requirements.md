@@ -48,7 +48,7 @@ created_at: 2026-10-09T02:41:20.771Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「待发附件 chip 点击文件名打开在线预览（FilePreviewModal）」
-FR-02: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（FilePreviewModal 打开）」
+FR-01: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」
+FR-02: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开」
 FR-03: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
 FR-04: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」+ group-chat-panel.test.tsx 既有附件用例（移除/发送/纯附件可发）
