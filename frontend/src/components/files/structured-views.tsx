@@ -411,7 +411,8 @@ function ChangePatchView({ value }: { value: JsonRecord }) {
 }
 
 /** apply-manifest.json：应用清单摘要 + 文件哈希表格。 */
-function ApplyManifestView({ value }: { value: JsonRecord }) {  const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter(isRecord) : [];
+function ApplyManifestView({ value }: { value: JsonRecord }) {
+  const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter(isRecord) : [];
   return (
     <div data-testid="apply-manifest-view" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">

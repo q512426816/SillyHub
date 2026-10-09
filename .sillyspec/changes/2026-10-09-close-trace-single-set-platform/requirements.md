@@ -31,6 +31,6 @@ created_at: 2026-10-09T07:21:15.089Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: 不适用（前端展示组件仓无组件测试面）：验证走 tsc 类型检查 + 构建产物；预览行为属 UI 验收面
-FR-02: 不适用（零改动面）：既有分支保留性由代码 diff 审阅保证（knownJsonView 仅新增分支不改旧分支）
-FR-03: frontend `npx tsc --noEmit`（exit 0 实测）+ backend pytest change 模块（28 预存 ERROR 与基线同象，零新增）
+FR-01: frontend/src/components/files/__tests__/structured-views.test.tsx「change-patch.json（含 scopeAudit）→ 清单摘要 + 交付文件表 + 对账快照复用」「change-patch.json（旧形态无 scopeAudit）→ 清单面照常 + 降级说明；结构漂移 → null」（评审 P2 清偿：仓内实有组件测试面，初版作答有误）
+FR-02: frontend/src/components/files/__tests__/structured-views.test.tsx「scope-audit.json → 裁决表格（徽章/路径/统计齐全）」（既有用例不改动即过=旧分支零回归）+ 代码 diff 审阅（knownJsonView 仅新增分支）
+FR-03: frontend `npx tsc --noEmit`（exit 0 实测）+ vitest structured-views 21/21 + backend pytest change 模块（28 预存 ERROR 与基线同象，零新增）
