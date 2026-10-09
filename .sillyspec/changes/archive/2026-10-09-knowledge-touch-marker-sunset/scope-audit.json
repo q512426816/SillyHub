@@ -1,0 +1,85 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "61865d614d0bb020e65d9457f4ac08b91732b7d6",
+  "totals": {
+    "files": 8,
+    "additions": 190,
+    "deletions": 136
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/assets.py",
+      "additions": 18,
+      "deletions": 53,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/schema.py",
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_assets.py",
+      "additions": 31,
+      "deletions": 30,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/openapi.json",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md",
+      "additions": 1,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+      "additions": 54,
+      "deletions": 16,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-assets-card.tsx",
+      "additions": 77,
+      "deletions": 29,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "additions": 4,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "23c67a7a730a180a083041234e874b2e9b611348cce116e476100f737c1b88f4",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T04:30:12.801Z"
+}

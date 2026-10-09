@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-knowledge-touch-marker-sunset",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_assets.py「金样本聚合 + live 触达标记忽略」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-knowledge-touch-marker-sunset"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达统一文案」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-knowledge-touch-marker-sunset"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「同 slug 去重与整文件分组」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-knowledge-touch-marker-sunset"
+    }
+  ]
+}

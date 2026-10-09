@@ -2333,3 +2333,78 @@
   confirmed_at: null
   source_change: 2026-10-08-rbac-dead-permissions-cleanup
   status: active
+
+## FR-lib-api-111 backend change assets 聚合摘除「待复核」标记反查面，knowledge_touch 单一来源为 knowledge_hits inject 实时命中
+变更：2026-10-09-knowledge-touch-marker-sunset
+状态：active
+摘要：标记行不再进触达面；归档态与在途同源；归属解析不受影响
+场景正文：
+- 场景：标记行不再进触达面 — Given 域文件存在「待复核：<变更名>」行且库中无该变更的 inject 行 / When 聚合 / Then knowledge_touch == []（标记行被无视
+- 场景：归档态与在途同源 — Given 变更已归档且库中有 inject 行 / When 聚合 / Then 触达面内容与在途态同源同序（无归档特化合并路径）。
+- 场景：归属解析不受影响 — Given 域文件含「变更：<change_key>」归属行 / When 聚合 / Then fr_entries/decisions 归属条目解析行为与改前逐字一致（o
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-touch-marker-sunset/requirements.md#FR-01
+最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_assets.py「金样本聚合 + live 触达标记忽略」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-touch-marker-sunset
+  status: active
+
+## FR-lib-api-112 前端知识触达标题与悬停文案统一为注入命中留痕口径
+变更：2026-10-09-knowledge-touch-marker-sunset
+状态：active
+摘要：在途与归档同文案
+场景正文：
+- 场景：在途与归档同文案 — Given knowledge_touch 非空 / When 分别以 archived=true 与 archived=false 渲染 / Then 两次标题与悬停文案
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-touch-marker-sunset/requirements.md#FR-02
+最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达统一文案」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-touch-marker-sunset
+  status: active
+
+## FR-lib-api-113 触达条目渲染去重与分组收拢
+变更：2026-10-09-knowledge-touch-marker-sunset
+状态：active
+摘要：同 slug 去重；整文件与锚点分形
+场景正文：
+- 场景：同 slug 去重 — Given 条目 id==title==slug / When 渲染 / Then 该 slug 在组内文本中恰好出现一次。
+- 场景：整文件与锚点分形 — Given 同组数据含裸文件条目（fr/daemon.md）与锚点条目（known-issues.md#slug）/ When 渲染 / Then 裸文件以 chip 呈现
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-touch-marker-sunset/requirements.md#FR-03
+最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-knowledge-touch-marker-sunset:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「同 slug 去重与整文件分组」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-knowledge-touch-marker-sunset
+  status: active
+
+## FR-lib-api-114 相关测试更新并通过（仅跑相关，不全量）
+变更：2026-10-09-knowledge-touch-marker-sunset
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动落盘 / When 跑上述两组定向测试 / Then 全绿。
+全文：.sillyspec/changes/archive/2026-10-09-knowledge-touch-marker-sunset/requirements.md#FR-04
+最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
