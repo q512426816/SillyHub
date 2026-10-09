@@ -1662,9 +1662,9 @@ export class Daemon {
    */
   private _sillyspecStatusRoot: string | null = null;
   /**
-   * 单槽位落盘串行链（2026-10-09 竞态修复）：两次快速 claim 各自 fire 的
-   * writeFile 在同文件上竞态，旧值可能后落盘覆盖新值（CI 实证红：alpha 盖
-   * beta）。链式串行化保证「最后一次 note 的值最后落盘」。
+   * 落盘串行链（2026-10-09 竞态修复，单槽位/映射槽位共用）：两次快速 claim
+   * 各自 fire 的 writeFile 在同文件上竞态，旧值可能后落盘覆盖新值（CI 实证
+   * 红：alpha 盖 beta）。链式串行化保证「最后一次 note 的值最后落盘」。
    */
   private _statusRootPersistChain: Promise<void> = Promise.resolve();
   /**

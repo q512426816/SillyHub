@@ -55,3 +55,20 @@ source: 2026-10-08-sync-sillyspec-skills-3320 活体——平台预置技能缺 
 - 上游命令卡已支持 zcode 落点（2026-09-21-flow-command-cards D-003），
   本坑只是技能复制面；CLAUDE.md 规则 4 的 thin 协议引导依赖
   `sillyspec-flow` 技能存在，两缺口叠加时引导与技能脱节最明显。
+
+## 处置记录（2026-10-09）
+
+**双缺口已修**（sillyspec 仓工作树，未提交）：
+
+1. `detectTools` 增 `.zcode` 检测分支（在场即自动发现，AGENTS.md 注入/命令卡/技能复制
+   三面全覆盖）；函数导出供测试。
+2. `skillToolDirs` 增 `zcode: '.zcode/skills'` 映射（显式 `--tool zcode` 也拿得到技能；
+   与命令卡面 D-003 的 zcode 落点对齐）。
+
+测试：`test/init-zcode-skills.test.mjs` 3/3（zcode 发现 / skillToolDirs 源级钉 /
+既有六信号零变化）；init 注入三套件 + quick-retired 模板锚回归全绿。
+建议③（「技能同步 0 个」原因提示）不单独做——两缺口修复后 0 同步仅剩「npm 包内无
+skills 目录」既有警告路径覆盖。
+
+**复合坑（本仓 .gitignore `.zcode/`）**：属使用守则已在坑内记录（`git add -f`），
+不属工具侧。归档。

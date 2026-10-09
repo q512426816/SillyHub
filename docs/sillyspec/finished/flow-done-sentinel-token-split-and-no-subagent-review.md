@@ -21,3 +21,21 @@
 **绕过**：主会话按任务书检查单代行自审，review.json 的 reviewer 字段如实标注 `inline-self（环境无已注册子代理…）`——工具接受该产物（评审通过）。但「干净上下文」的独立性承诺打了折扣，属环境能力缺口下的降级。
 
 **建议**：①CLI 检测无子代理通道时给出显式选项（等待 / 代行留痕 / 降级门档）；②文档化 reviewer 字段的代行标注惯例。
+
+## 处置记录（2026-10-09）
+
+**两向均处**（sillyspec 仓工作树，未提交）：
+
+1. **连写 token 组拆分 ✅ 已修**：`sentinel-assertions.js` 新增 `expandTaskShorthand`
+   （`task-01/02/03`、`task-1、2，03` 等连写组展开为独立规范 token，补零两位、尾数
+   `(?!\d)` 防版本串误切）——哨兵判定（detectFakeCheckCompletion）与 autopilot 自动
+   勾选提取（flow.js，同病同修）两处先展开再匹配。独立 token 行为零变化、
+   task-01 不证 task-010 前瞻边界不破。
+   测试：`test/sentinel-token-shorthand.test.mjs` 4/4 + sentinel 全家回归 55/55 绿。
+2. **无子代理评审 ✅ 惯例文档化（建议②路线）**：评审任务书（flow-review.js
+   renderReviewerTaskbook）增「无子代理通道时」段——主会话按检查单代行自审可接受、
+   reviewer 字段如实标注 `inline-self（环境无已注册子代理，主会话代行）`，禁止伪装
+   subagent。建议①（CLI 显式检测无通道给选项）不采纳：CLI 无法可靠探测宿主代理
+   注册面，任务书惯例已闭环；flow-review 测试 7/7 绿。
+
+归档。

@@ -50,3 +50,19 @@ source: 2026-10-07-assets-patch-scope-audit-fallback 活体——autopilot 单�
   （2026-10-07-unify-close-trace）+ 平台读回退（2026-10-07-assets-patch-
   scope-audit-fallback）收口，记录在 finished/thin-flow-done-no-scope-audit-
   snapshot.md；本文件是收尾链上的两个新坑。
+
+## 处置记录（2026-10-09）
+
+**两坑均已被 `6093ac7c`（2026-10-08-thin-done-dirty-gate-and-paren-attribution）修复**，
+本日复核验证后归档：
+
+1. **坑一（dirty 缺口归档阻断）✅**：flow done dirty 警告出现时**收口阻断**——不进
+   archive 子步，三选一显式选择（先提交重跑 / `--freeze-dirty` 并入 /
+   `--accept-dirty-gap` 留痕，缺口数随 change-patch.json 落盘）。autopilot 单跑不再
+   一次性归档锁死重冻结入口。
+2. **坑二（全角括号归属）✅**：`parseChangeNamesFromSubject` 正则改 `[（(]…[)）]`
+   双括号兼容 + `(?:thin\s+)?` 前缀形态——本日功能实测：全角/半角/带 thin 前缀三种
+   subject 均正确解析出变更名。
+
+**测试证据**：`test/thin-done-dirty-gate.test.mjs` 5/5 + `test/commit-attribution-split.
+test.mjs` 3/3 本日复跑双绿。归档。
