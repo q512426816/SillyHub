@@ -416,6 +416,7 @@ class TestInitLeaseCompleteFailureGate:
 
         claim_token = "tok-" + uuid.uuid4().hex
         lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
+        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
         lease.metadata_["claim_token"] = claim_token
         db_session.add(lease)
         await db_session.commit()
@@ -452,6 +453,7 @@ class TestInitLeaseCompleteFailureGate:
         claim_token = "tok-" + uuid.uuid4().hex
         lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
         # latest_spec_version 非 0 验证回写值透传
+        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
         lease.metadata_["latest_spec_version"] = 7
         lease.metadata_["claim_token"] = claim_token
         db_session.add(lease)

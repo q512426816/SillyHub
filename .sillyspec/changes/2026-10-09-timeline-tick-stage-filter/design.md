@@ -47,3 +47,4 @@ created_at: 2026-10-09T04:06:40.935Z
 | 修改 | backend/app/modules/change/timeline.py | `_TASK_DONE_RE` 前缀捕获 + `_infer_task_times` 非 tasks 前缀跳过（含 docstring 补注） |
 | 修改 | backend/app/modules/change/tests/test_timeline.py | 新增实证形态回归用例 test_timeline_task_time_skips_non_tasks_stage |
 | 新增 | docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md | 同族工具缺陷记录（fourpiece-init 写 UTC 致 born 锚偏 8h，已修于 sillyspec 仓待发版） |
+| 修改 | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | 收口 lint 门附带修复：metadata_ Optional 列赋值前断言收窄（mypy 3 报错，兄弟变更 2026-10-09-workspace-init-skill-gate 已提交代码的既有债，非本变更语义面） |
