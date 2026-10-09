@@ -65,3 +65,48 @@ created_at: 2026-10-08T01:03:54.861Z
   confirmed_at: null
   source_change: 2026-10-08-provider-update-models-none-guard
   status: active
+
+## FR-auto-sillyspec-056 前端 change-patch.json 文件预览渲染结构化清单面，scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
+变更：2026-10-09-close-trace-single-set-platform
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-close-trace-single-set-platform/requirements.md#FR-01
+最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-close-trace-single-set-platform:flow:测试绑定FR-01
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-close-trace-single-set-platform
+  status: active
+
+## FR-auto-sillyspec-057 旧形态归档（四件套/heavy 双件）预览不回归
+变更：2026-10-09-close-trace-single-set-platform
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-close-trace-single-set-platform/requirements.md#FR-02
+最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-close-trace-single-set-platform:flow:测试绑定FR-02
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-close-trace-single-set-platform
+  status: active
+
+## FR-auto-sillyspec-058 tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
+变更：2026-10-09-close-trace-single-set-platform
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-close-trace-single-set-platform/requirements.md#FR-03
+最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967

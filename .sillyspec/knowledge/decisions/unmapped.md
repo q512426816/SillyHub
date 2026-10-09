@@ -1864,6 +1864,7 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
 理由：最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。
+
 ## D-001@v1 init 时写入 skill 走 sillyspec init 自带 skills 复制（去掉 --no-skills）
 状态：implemented
 变更：2026-10-09-workspace-init-skill-gate
@@ -1935,3 +1936,19 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
 理由：最大风险：归档态语义预期错位——用户若期待「归档后收窄为权威面」，本变更是明示不收窄（文案诚实化对冲：口径写清是注入命中留痕）。放弃的方案：① 恢复 CLI 待复核标记落盘（2026-09-29 已实证否决，反向开倒车）；② 平台按域收窄 live 数据面（改的是数据口径，会连带影响 knowledge-stats 运营指标消费，超出本变更范围且无消费者支撑）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-close-trace-single-set-platform
+锚点：未记录
+最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967
+理由：最大风险：CLI 新形态落盘字段与前端特征判定脱节（如 files 非数组）——已知防御：特征判定失败回落 JsonView 折叠树（既有机制），不白屏。放弃方案：改后端 assets.py 读 scopeAudit 子对象做投影——顶级字段（files/totals/patchStatus/savedAt）已含卡面全部所需，子对象仅前端预览增值面，动后端是无效改动面。
+
+## D-002@v1 实现架构=方案 A（注册表直读 + 指令通道复用）
+状态：implemented
+变更：2026-10-09-tombstone-conflict-root-fix
+锚点：未记录
+最近确认：2f6d52515
+理由：用户选方案 A（推荐）。②前端从 backend `spec_conflicts` 注册表直读 platform_deleted（`_upsert_sync_conflict` 已把 details_json.platform_deleted 落库，daemon 心跳链路零改动）；③平台删除变更入口复用 resolve/ghost_cleanup 指令通道新增 `tombstone_cleanup` action，回执走既有 `sillyspec_command_result`。拒 B（backend 注册表已有同样数据，心跳 model→openapi→api-types→前端四层透传属重复建设，且 daemon 不发版前端上不了）；拒 C（CLI 自动动用户目录违反 SpecPushConflict 人工拍板语义——spec-sync.ts:259 钉死注释；daemon 自动同步链路不经 CLI，覆盖不全）。
+故障面：②依赖 daemon 上报的冲突与注册表行的时间差（心跳 15s + 采集 ≤75s，前端以注册表为准展示墓碑详情）；③旧 daemon 静默忽略指令（150s 超时回显恢复，与 resolve/ghost_cleanup 同款既有兜底）。
+退役判据：若未来冲突展示统一收敛到单一数据源（注册表），②的直读即终态；若指令通道升级为推送制，③的轮询复用段随之迁移。

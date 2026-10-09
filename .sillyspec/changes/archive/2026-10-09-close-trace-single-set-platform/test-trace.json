@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-close-trace-single-set-platform",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-close-trace-single-set-platform:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-close-trace-single-set-platform"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-close-trace-single-set-platform:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-close-trace-single-set-platform"
+    }
+  ]
+}
