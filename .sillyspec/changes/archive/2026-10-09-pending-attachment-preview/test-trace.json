@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-pending-attachment-preview",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-pending-attachment-preview:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-pending-attachment-preview"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-pending-attachment-preview:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-pending-attachment-preview"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-pending-attachment-preview:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-pending-attachment-preview"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-pending-attachment-preview:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-pending-attachment-preview"
+    }
+  ]
+}

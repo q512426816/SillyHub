@@ -1,0 +1,1960 @@
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/change-patch.json b/.sillyspec/changes/2026-10-09-pending-attachment-preview/change-patch.json
+new file mode 100644
+index 000000000..56fed0df9
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/change-patch.json
+@@ -0,0 +1,52 @@
++{
++  "change": "2026-10-09-pending-attachment-preview",
++  "baseline": "21763d356758116cbc9a6bfafbd567f0adc9445a",
++  "head": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
++  "files": [
++    ".sillyspec/changes/2026-10-09-pending-attachment-preview/design.md",
++    ".sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml",
++    ".sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md",
++    ".sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md",
++    ".sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md",
++    "frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx",
++    "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
++    "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
++    "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
++    "frontend/src/components/daemon/session-input-bar.tsx",
++    "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
++    "frontend/src/components/group-chat/group-chat-panel.tsx"
++  ],
++  "totals": {
++    "files": 12,
++    "additions": 328,
++    "deletions": 13
++  },
++  "savedAt": "2026-10-09T03:05:59.198Z",
++  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
++  "modules": [
++    {
++      "id": "frontend",
++      "files": 7,
++      "doc": "docs/multi-agent-platform/modules/frontend.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "frontend_components",
++      "files": 7,
++      "doc": "docs/SillyHub/modules/frontend_components.md",
++      "docTouched": false,
++      "docMissing": false
++    }
++  ],
++  "uncoveredDirs": [],
++  "moduleMaps": [
++    "docs/backend/modules/_module-map.yaml",
++    "docs/frontend/modules/_module-map.yaml",
++    "docs/multi-agent-platform/modules/_module-map.yaml",
++    "docs/SillyHub/modules/_module-map.yaml",
++    "docs/sillyhub-daemon/modules/_module-map.yaml"
++  ],
++  "patchSha256": "5f7a6f4ee887e7593d7a26c3a287f2d77f33110920cbbfd7f8bb12a39fdc849d",
++  "patchStatus": "ok"
++}
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/change.patch b/.sillyspec/changes/2026-10-09-pending-attachment-preview/change.patch
+new file mode 100644
+index 000000000..275af01ed
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/change.patch
+@@ -0,0 +1,570 @@
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
++new file mode 100644
++index 000000000..98ddb4cd8
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
++@@ -0,0 +1,19 @@
+++tier: thin
+++legacy_fallback: false
+++substeps: {}
+++born_face: thin
+++with_tasks: false
+++review_force: null
+++input: |-
+++  会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
+++
+++  成功标准：
+++  - 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++  - 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++  - 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++  - 既有上传/移除/发送行为零回归，相关测试全绿
+++autopilot: false
+++baseline_commit: 21763d356758116cbc9a6bfafbd567f0adc9445a
+++updatedAt: '2026-10-09T02:41:20.970Z'
+++baseline_sha256: 754d0f65d98ced5daa7b5e6ca357b864ae6462afad7eb87dc292212bb145404e
+++
++diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++index c1aad79d6..9800c008c 100644
++--- a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++@@ -17,6 +17,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";
++diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++index 4ab9b02e8..b9f38b6b4 100644
++--- a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++@@ -1,6 +1,9 @@
++ // ql-20260903-012-7976：附件上传错误出口统一——超 10 个截断 toast 告知 +
++ // 上传失败行内红字走 errMessage（网络错误不再英文 "Failed to fetch" 直出）。
++ //
+++// 2026-10-09-pending-attachment-preview：待发 chip 点击预览——mock
+++// FilePreviewModal（attachment-chips.test 同款断言面）+ fetchAttachmentBlob。
+++//
++ // 渲染骨架对齐 session-input-bar-mention.test.tsx（mock @/lib/session-mention-sources
++ // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
++ // useNotify 换 spy（toast 断言面）。
++@@ -14,12 +17,20 @@ vi.mock("@/lib/session-mention-sources", () => ({
++   useMentionSources: vi.fn(),
++ }));
++ 
+++// Mock FilePreviewModal（保留渲染状态供断言——attachment-chips.test 同款）。
+++vi.mock("@/components/files/file-preview-modal", () => ({
+++  FilePreviewModal: ({ open }: { open: boolean }) => (
+++    <div data-testid="file-preview-modal" data-open={open} />
+++  ),
+++}));
+++
++ const notifyMock = vi.hoisted(() => ({
++   success: vi.fn(),
++   warning: vi.fn(),
++   error: vi.fn(),
++ }));
++ const uploadMock = vi.hoisted(() => vi.fn());
+++const fetchBlobMock = vi.hoisted(() => vi.fn());
++ 
++ vi.mock("@/lib/errors", async (importOriginal) => {
++   const actual = await importOriginal<typeof import("@/lib/errors")>();
++@@ -29,6 +40,7 @@ vi.mock("@/lib/errors", async (importOriginal) => {
++ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: uploadMock,
++   removeSessionAttachment: vi.fn(),
+++  fetchAttachmentBlob: fetchBlobMock,
++ }));
++ 
++ function renderBar() {
++@@ -97,3 +109,40 @@ describe("SessionInputBar 附件上传反馈（ql-20260903-012）", () => {
++     expect(screen.queryByText("Failed to fetch")).toBeNull();
++   });
++ });
+++
+++describe("待发附件 chip 点击预览（2026-10-09-pending-attachment-preview）", () => {
+++  /** 上传一枚附件并等 chip 出现（返回预览按钮锚点）。 */
+++  async function uploadOne(name: string, kind: "image" | "file") {
+++    uploadMock.mockImplementation(async () => ({
+++      id: `att-${name}`,
+++      kind,
+++      media_type: kind === "image" ? "image/png" : "text/plain",
+++      bytes: 64,
+++      name,
+++      created_at: "2026-10-09T00:00:00Z",
+++    }));
+++    fetchBlobMock.mockResolvedValue(new Blob(["x"], { type: "text/plain" }));
+++    const { fileInput } = renderBar();
+++    pickFiles(fileInput(), 1);
+++    const title = `${name} · 1KB（点击在线预览）`;
+++    await waitFor(() => expect(screen.getByTitle(title)).toBeTruthy());
+++    return screen.getByTitle(title);
+++  }
+++
+++  it("点击文件名区打开 FilePreviewModal 在线预览", async () => {
+++    const nameBtn = await uploadOne("预览图.png", "image");
+++    fireEvent.click(nameBtn);
+++    const modal = document.querySelector("[data-testid='file-preview-modal']");
+++    expect(modal?.getAttribute("data-open")).toBe("true");
+++  });
+++
+++  it("点 X 删除附件不触发预览（预览/移除互不干扰）", async () => {
+++    await uploadOne("待删文件.txt", "file");
+++    fireEvent.click(screen.getByLabelText("移除附件 待删文件.txt"));
+++    await waitFor(() =>
+++      expect(screen.queryByTitle("待删文件.txt · 1KB（点击在线预览）")).toBeNull(),
+++    );
+++    const modal = document.querySelector("[data-testid='file-preview-modal']");
+++    expect(modal?.getAttribute("data-open")).toBe("false");
+++  });
+++});
++diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
++index eb51014cc..99fe1103c 100644
++--- a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
++@@ -46,6 +46,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ /* ----- mock lib/daemon（同 dialog 测试） ----- */
++@@ -353,7 +356,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++       expect.any(File),
++       "image",
++     );
++-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
++ 
++     fireEvent.change(input, { target: { value: "看下这张图" } });
++     fireEvent.click(screen.getByTitle("发送"));
++@@ -391,7 +394,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++ 
++     const input = screen.getByPlaceholderText(/排队/) as HTMLTextAreaElement;
++     pasteFile(input, att);
++-    await screen.findByTitle("note.md · 2KB");
+++    await screen.findByTitle("note.md · 2KB（点击在线预览）");
++     fireEvent.change(input, { target: { value: "排队带附件" } });
++     fireEvent.click(screen.getByTitle("发送"));
++ 
++@@ -432,7 +435,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++ 
++     const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++     pasteFile(input, att);
++-    await screen.findByTitle("shot.png · 2KB");
+++    await screen.findByTitle("shot.png · 2KB（点击在线预览）");
++ 
++     // 空文本 + 有附件：发送按钮可点
++     const sendBtn = screen.getByTitle("发送") as HTMLButtonElement;
++diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++index 87abfc96b..4028c6049 100644
++--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++@@ -37,6 +37,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++@@ -547,7 +550,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
++     // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
++     expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
++     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
++-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
++     expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
++   });
++ 
++@@ -557,7 +560,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
++     const file = new File(["# hi"], "note.md", { type: "text/markdown" });
++     pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
++     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
++-    expect(await screen.findByTitle("note.md · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("note.md · 2KB（点击在线预览）")).toBeInTheDocument();
++   });
++ 
++   it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {
++diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
++index d9598760d..845b72c71 100644
++--- a/frontend/src/components/daemon/session-input-bar.tsx
+++++ b/frontend/src/components/daemon/session-input-bar.tsx
++@@ -12,6 +12,11 @@
++  * 文本（D-7）、attachmentsDisabled 门控（codex 引擎 D-6）、降级提示条（FR-10
++  * D-9：当前供应商 multimodal 判不支持 → 图片将落盘供 agent 工具读）。
++  *
+++ * 2026-10-09-pending-attachment-preview：待发附件 chip 文件名区可点击——弹
+++ * FilePreviewModal 在线预览（与已发送附件 attachment-chips 同链路：附件已传
+++ * 服务端持有 id，fetchAttachmentBlob 拉取 + officeSource 高保真标识）；X 删除
+++ * 按钮独立兄弟节点，点击互不干扰。
+++ *
++  * ql-20260825-006：输入框支持 Ctrl+V 粘贴剪贴板图片/文件——textarea onPaste 读
++  * clipboardData.files，非空则拦截默认插入并复用 handleFiles 上传管线（与 📎 完全
++  * 等价，含 attachmentsDisabled 门控与 10 个上限）；纯文本粘贴走默认行为不受影响。
++@@ -47,10 +52,12 @@ import {
++ import { Button } from "antd";
++ 
++ import {
+++  fetchAttachmentBlob,
++   removeSessionAttachment,
++   uploadSessionAttachment,
++   type AttachmentRead,
++ } from "@/lib/api/session-attachments";
+++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
++ import {
++   SessionMentionPopover,
++   buildAtMentionItems,
++@@ -245,6 +252,21 @@ export function SessionInputBar({
++   const [uploadError, setUploadError] = useState<string | null>(null);
++   const notify = useNotify();
++ 
+++  /* 2026-10-09-pending-attachment-preview：待发 chip 点击预览（与已发送附件的
+++   * attachment-chips 同链路——附件选文件即传已有服务端 id，预览走
+++   * fetchAttachmentBlob + officeSource 高保真标识）。 */
+++  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+++  const [previewOpen, setPreviewOpen] = useState(false);
+++
+++  const openAttachmentPreview = (att: AttachmentRead) => {
+++    setPreviewTarget({
+++      fetch: () => fetchAttachmentBlob(att.id),
+++      meta: { name: att.name, size: att.bytes },
+++      officeSource: { source: "session_attachment", id: att.id },
+++    });
+++    setPreviewOpen(true);
+++  };
+++
++   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
++ 
++   /** 检测命中（task-01 detectMention 结果快照，query 随输入更新；null = 关层）。 */
++@@ -614,16 +636,22 @@ export function SessionInputBar({
++               <span
++                 key={att.id}
++                 className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
++-                title={`${att.name} · ${formatBytes(att.bytes)}`}
++               >
++-                <span className="truncate inline-flex items-center gap-1">
+++                {/* 2026-10-09-pending-attachment-preview：文件名区可点击在线预览
+++                    （未发送也能查看已上传内容）；X 删除按钮独立兄弟节点，互不冒泡。 */}
+++                <button
+++                  type="button"
+++                  onClick={() => openAttachmentPreview(att)}
+++                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+++                  className="inline-flex min-w-0 cursor-pointer items-center gap-1 truncate text-left transition-colors hover:text-brand-600"
+++                >
++                   {att.kind === "image" ? (
++                     <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
++                   ) : (
++                     <FileText aria-hidden className="h-3 w-3 shrink-0" />
++                   )}
++                   {att.name} · {formatBytes(att.bytes)}
++-                </span>
+++                </button>
++                 <button
++                   type="button"
++                   aria-label={`移除附件 ${att.name}`}
++@@ -929,6 +957,12 @@ export function SessionInputBar({
++           )}
++         </Button>
++       </div>
+++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+++      <FilePreviewModal
+++        target={previewTarget}
+++        open={previewOpen}
+++        onClose={() => setPreviewOpen(false)}
+++      />
++     </footer>
++   );
++ }
++diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++index d470967da..84f3db0f7 100644
++--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++@@ -1605,6 +1605,22 @@ describe("群消息附件（FR-05 补遗）", () => {
++     });
++   });
++ 
+++  it("待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开", async () => {
+++    harness.logsJson = [];
+++    renderPanel();
+++    await waitForStreamWired();
+++
+++    await pickFile();
+++    await waitFor(() => {
+++      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+++    });
+++    // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
+++    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
+++    // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
+++    // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
+++    expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
+++  });
+++
++   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
++     harness.logsJson = [];
++     renderPanel();
++diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
++index 45e76e57d..3c61936f3 100644
++--- a/frontend/src/components/group-chat/group-chat-panel.tsx
+++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
++@@ -139,10 +139,12 @@ import type { AgentRunLogEntry } from "@/lib/agent";
++ import { errMessage, useNotify } from "@/lib/errors";
++ import { markGroupOpened } from "@/lib/group-unread";
++ import {
+++  fetchAttachmentBlob,
++   removeSessionAttachment,
++   uploadSessionAttachment,
++   type AttachmentRead,
++ } from "@/lib/api/session-attachments";
+++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
++ import {
++   PROVIDER_META,
++   fetchPendingDialogs,
++@@ -1741,6 +1743,19 @@ export function GroupChatPanel({
++   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
++   const [uploading, setUploading] = useState(0);
++   const [uploadError, setUploadError] = useState<string | null>(null);
+++  /* 待发 chip 点击预览（2026-10-09-pending-attachment-preview，与单聊输入栏同款：
+++   * 附件已传服务端持有 id，走 fetchAttachmentBlob + officeSource 链路弹
+++   * FilePreviewModal）。 */
+++  const [pendingPreview, setPendingPreview] = useState<FilePreviewTarget | null>(null);
+++  const [pendingPreviewOpen, setPendingPreviewOpen] = useState(false);
+++  const openPendingAttachmentPreview = (att: AttachmentRead) => {
+++    setPendingPreview({
+++      fetch: () => fetchAttachmentBlob(att.id),
+++      meta: { name: att.name, size: att.bytes },
+++      officeSource: { source: "session_attachment", id: att.id },
+++    });
+++    setPendingPreviewOpen(true);
+++  };
++   const mentionItems = useMemo(() => buildMemberMentionItems(members), [members]);
++   const mentionDetection = useMemo(
++     () => detectMention(draft, inputRef.current?.selectionStart ?? draft.length),
++@@ -2856,19 +2871,25 @@ export function GroupChatPanel({
++                       key={att.id}
++                       data-testid="group-pending-attachment-chip"
++                       className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
++-                      title={`${att.name} · ${formatBytes(att.bytes)}`}
++                     >
++-                      <span className="inline-flex shrink-0 items-center gap-1 truncate">
+++                      {/* 文件名区可点击在线预览（2026-10-09-pending-attachment-
+++                          preview，单聊输入栏同款）；X 删除按钮独立兄弟节点不冒泡。 */}
+++                      <button
+++                        type="button"
+++                        onClick={() => openPendingAttachmentPreview(att)}
+++                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+++                        className="inline-flex min-w-0 cursor-pointer items-center gap-1 text-left transition-colors hover:text-brand-600"
+++                      >
++                         {att.kind === "image" ? (
++-                          <ImageIcon aria-hidden className="h-3 w-3" />
+++                          <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
++                         ) : (
++-                          <FileText aria-hidden className="h-3 w-3" />
+++                          <FileText aria-hidden className="h-3 w-3 shrink-0" />
++                         )}
++                         <span className="truncate">{att.name}</span>
++                         <span className="shrink-0 text-muted-foreground">
++                           {formatBytes(att.bytes)}
++                         </span>
++-                      </span>
+++                      </button>
++                       <button
++                         type="button"
++                         aria-label={`移除附件 ${att.name}`}
++@@ -3027,6 +3048,13 @@ export function GroupChatPanel({
++           <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
++         )}
++       </Drawer>
+++
+++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+++      <FilePreviewModal
+++        target={pendingPreview}
+++        open={pendingPreviewOpen}
+++        onClose={() => setPendingPreviewOpen(false)}
+++      />
++     </div>
++   );
++ }
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
++new file mode 100644
++index 000000000..293bc2af3
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
++@@ -0,0 +1,57 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 设计记录（Design Record）— 2026-10-09-pending-attachment-preview
+++
+++## 做法概述
+++
+++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+++
+++问题：单聊输入栏（session-input-bar.tsx）与群聊面板（group-chat-panel.tsx）的待发送附件 chips 是纯展示 `<span>`（图标+文件名+大小+X），点击无任何反应——附件虽已上传到服务端（选文件即传），用户发送前却无法查看内容。
+++
+++方案：复用已发送消息附件的成熟预览链路（attachment-chips.tsx → FilePreviewModal）。附件上传完成后已持有服务端 id（AttachmentRead），点击 chip 文件名区即以 `fetch: () => fetchAttachmentBlob(att.id)`、`meta: { name, size: bytes }`、`officeSource: { source: "session_attachment", id }` 组装 FilePreviewTarget 打开 FilePreviewModal——图片走 ImagePreviewer、office 家族走 DS 高保真降级链，与已发送附件完全同一体验。两处输入区各持一对 previewTarget/previewOpen state，组件层零新依赖（FilePreviewModal 与 fetchAttachmentBlob 均既有导出）。结构上把 chip 的文件名区从 `<span>` 改为 `<button type="button">`（X 删除按钮保持独立兄弟节点），HTML 不嵌套按钮、事件天然不串。
+++
+++## 接口契约
+++
+++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+++
+++不动任何后端端点/API 封装签名。前端组件内部行为变化：
+++
+++- `session-input-bar.tsx`：新增 FilePreviewModal/`FilePreviewTarget`/`fetchAttachmentBlob` import 与预览 state；`SessionInputBarProps` 无新增 prop（对外契约不变）。
+++- `group-chat-panel.tsx`：同上，面板组件 props 无变化。
+++- 待发 chip 文件名区从 `<span>` 变 `<button>`，title 统一为 `${name} · ${大小}（点击在线预览）`；X 按钮 aria-label（`移除附件 ${name}`）不变。
+++
+++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+++
+++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+++
+++预览按点击时刻的附件快照（闭包捕获 att）组装 fetch；上传中（uploading>0）的 chip 不存在（附件列表只有上传完成项），无迟到态。上传失败不产生 chip，预览无从触发。
+++
+++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+++
+++预览是只读拉取（GET content），不写任何数据；与移除并发时最坏情况是 blob 拉取 404 → FilePreviewModal 内建 error 重试态（既有 R-07 行为），不崩溃。
+++
+++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+++
+++预览窗 open 时删除该附件 → chips 消失但弹窗内容已加载则可继续看；关闭弹窗即释放（useObjectUrl revoke 既有逻辑）。切换会话/组件卸载 → React state 随组件销毁，无泄漏。
+++
+++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+++
+++预览 target 携带附件 id 走鉴权拉取（fetchAttachmentBlob 带 Bearer + 401 刷新重试），附件 id 会话无关（草稿态全局），无跨工作区串台。
+++
+++## 风险与死路
+++
+++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+++
+++最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。
+++
+++## 文件变更清单
+++
+++| 操作 | 路径 | 说明 |
+++| --- | --- | --- |
+++| 修改 | frontend/src/components/daemon/session-input-bar.tsx | 待发 chips 文件名区改可点击按钮 + FilePreviewModal 预览 state |
+++| 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊待发 chips 同款可点击预览 |
+++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | 新增预览/删除不串扰用例 + mock 补 fetchAttachmentBlob |
+++| 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 新增群聊待发 chip 点击预览用例 |
+++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx、turn-timeline-session-input-bar.test.tsx、session-panel-dialog-attachments.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
++new file mode 100644
++index 000000000..7f6d9f718
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
++@@ -0,0 +1,30 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 提案书（Proposal）— 2026-10-09-pending-attachment-preview
+++
+++## 动机
+++
+++任务原话转写：会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
+++
+++成功标准：
+++- 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++- 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++- 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++- 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++## 变更范围
+++
+++按成功标准机械推导，共 4 条验收面：
+++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++4. 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++## 成功标准（可验证）
+++
+++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++4. 既有上传/移除/发送行为零回归，相关测试全绿
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
++new file mode 100644
++index 000000000..501e2424a
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
++@@ -0,0 +1,54 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 需求规格（Requirements）— 2026-10-09-pending-attachment-preview
+++
+++## 功能需求
+++
+++### FR-01: 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++
+++- 单聊会话输入栏的待发送附件 chip 必须支持点击预览：点击 chip 的文件名区域（图标+名称+大小）打开统一预览窗 FilePreviewModal，在线查看已上传但未发送的图片/文件内容；预览目标必须复用已发送附件同款链路（fetchAttachmentBlob 拉取 + officeSource: session_attachment 高保真标识）。
+++
+++#### 场景：上传后未发送点击预览
+++
+++- Given 用户在会话输入栏上传了一张图片（或一个文件），chip 已出现在输入框上方且消息未发送
+++- When 用户点击 chip 的文件名区域
+++- Then 打开 FilePreviewModal 在线预览该附件内容（非新窗跳转）
+++
+++### FR-02: 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++
+++- 群聊面板输入区的待发送附件 chip 必须支持与单聊一致的点击预览行为：点击文件名区域打开 FilePreviewModal 在线预览。
+++
+++#### 场景：群聊待发附件点击预览
+++
+++- Given 用户在群聊输入区上传了附件，chip 已出现且消息未发送
+++- When 用户点击 chip 的文件名区域
+++- Then 打开 FilePreviewModal 在线预览该附件内容
+++
+++### FR-03: 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++
+++- 预览入口与移除入口必须相互独立：chip 内 X 按钮只删除附件（不打开预览）；文件名区域只开预览（不删除）；两者必须为独立按钮元素，禁止嵌套按钮。
+++
+++#### 场景：点 X 删除不开预览
+++
+++- Given 待发附件 chip 存在
+++- When 用户点击 chip 上的 X 按钮
+++- Then 该附件被移除（本地 chip 消失 + 服务端草稿删除），预览窗不打开
+++
+++### FR-04: 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++- 本变更必须不改变既有附件上传（选文件即传/批量上限/粘贴）、移除、发送（附件 ids 组装/发送后清空）与输入栏其余交互（联想、定时发送、＋菜单）的任何行为；相关既有测试必须保持全绿。
+++
+++#### 场景：零回归验证
+++
+++- Given 本变更代码合入
+++- When 运行 session-input-bar 系与 group-chat-panel 系既有测试
+++- Then 全部通过，无既有用例被修改或删除
+++
+++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
+++
+++FR-01: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「待发附件 chip 点击文件名打开在线预览（FilePreviewModal）」
+++FR-02: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（FilePreviewModal 打开）」
+++FR-03: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
+++FR-04: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」+ group-chat-panel.test.tsx 既有附件用例（移除/发送/纯附件可发）
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
++new file mode 100644
++index 000000000..7263047b1
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
++@@ -0,0 +1,10 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 任务注册表（Tasks）— 2026-10-09-pending-attachment-preview
+++
+++- [x] task-01: session-input-bar.tsx 待发 chips 文件名区改按钮（title 带「点击在线预览」）+ FilePreviewModal 预览 state（fetchAttachmentBlob + officeSource），验证：tsc 无错
+++- [x] task-02: group-chat-panel.tsx 待发 chips 同款改造，验证：tsc 无错
+++- [x] task-03: 测试——session-input-bar-upload.test.tsx 新增「点击文件名开预览」「点 X 删除不开预览」两用例（mock 补 fetchAttachmentBlob + FilePreviewModal），验证：vitest 该文件全绿
+++- [x] task-04: 测试——group-chat-panel.test.tsx 新增待发 chip 点击预览用例，验证：vitest 该文件全绿（含既有附件用例零回归）
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
+new file mode 100644
+index 000000000..ffa30a1e4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
+@@ -0,0 +1,29 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++  patch: done
++born_face: thin
++with_tasks: false
++review_force: null
++input: |-
++  会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
++
++  成功标准：
++  - 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
++  - 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
++  - 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
++  - 既有上传/移除/发送行为零回归，相关测试全绿
++autopilot: false
++baseline_commit: 21763d356758116cbc9a6bfafbd567f0adc9445a
++updatedAt: '2026-10-09T03:05:59.201Z'
++baseline_sha256: 754d0f65d98ced5daa7b5e6ca357b864ae6462afad7eb87dc292212bb145404e
++spec_approved: true
++spec_approved_at: '2026-10-09T03:05:21.240Z'
++spec_approved_by: anon@DESKTOP-2BN7FDC
++gate_summary: >-
++  test: passed ← module[]+deps(jsx5)（20.8s）
++  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261009030557\test-result.json｜lint: skipped — 跳过原因：local.yaml
++  未配置 commands.lint（或标记 unavailable）。｜门文件 8 个
++
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json
+new file mode 100644
+index 000000000..82cbccc7f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json
+@@ -0,0 +1,15 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-09-pending-attachment-preview",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
++  "findings": [],
++  "dimensionNotes": {
++    "乱序": "ok（边界已裁决：可接受）——闭包快照 att 组装 fetch 属实（session-input-bar.tsx:259、group-chat-panel.tsx:1752）；上传中仅渲染独立 spinner chip、附件列表仅在 uploadSessionAttachment 成功后追加（session-input-bar.tsx:591-604），「上传中无 chip 故无迟到态」边界经代码核实",
++    "并发": "ok（边界已裁决：可接受）——预览为只读 GET content（session-attachments.ts:75-89），拉取失败走 FilePreviewModal 内建 error 重试态（file-preview-modal.tsx:308，R-07），「404 降级不崩溃」边界经代码核实",
++    "切换": "ok（边界已裁决：可接受）——useObjectUrl 关闭/重挂即 revokeObjectURL（file-preview-modal.tsx:196），预览 state 组件局部随卸载销毁，「open 时删除可继续看、关闭即释放」边界经代码核实",
++    "作用域": "ok（边界已裁决：可接受）——fetchAttachmentBlob 携带 Bearer 且 401 时 ensureFreshAccessToken 重试（session-attachments.ts:77-88），officeSource 与已发送附件同字面量 session_attachment（attachment-chips.tsx:90 / session-input-bar.tsx:265 / group-chat-panel.tsx:1755），无跨工作区串台面"
++  },
++  "reviewedAt": "2026-10-09T03:13:36Z"
++}
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.json b/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.json
+new file mode 100644
+index 000000000..c4196bebd
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.json
+@@ -0,0 +1,93 @@
++{
++  "mode": "full-flow",
++  "ok": true,
++  "degradedReason": null,
++  "baseAnchor": "21763d356758116cbc9a6bfafbd567f0adc9445a",
++  "totals": {
++    "files": 9,
++    "additions": 149,
++    "deletions": 13
++  },
++  "rows": [
++    {
++      "path": "frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx",
++      "additions": 3,
++      "deletions": 0,
++      "kind": "modified",
++      "planned": "修改",
++      "verdict": "planned"
++    },
++    {
++      "path": "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
++      "additions": 49,
++      "deletions": 0,
++      "kind": "modified",
++      "planned": "修改",
++      "verdict": "planned"
++    },
++    {
++      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
++      "additions": 6,
++      "deletions": 3,
++      "kind": "modified",
++      "planned": null,
++      "verdict": "unplanned"
++    },
++    {
++      "path": "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
++      "additions": 5,
++      "deletions": 2,
++      "kind": "modified",
++      "planned": null,
++      "verdict": "unplanned"
++    },
++    {
++      "path": "frontend/src/components/daemon/session-input-bar.tsx",
++      "additions": 37,
++      "deletions": 3,
++      "kind": "modified",
++      "planned": "修改",
++      "verdict": "planned"
++    },
++    {
++      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
++      "additions": 16,
++      "deletions": 0,
++      "kind": "modified",
++      "planned": "修改",
++      "verdict": "planned"
++    },
++    {
++      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
++      "additions": 33,
++      "deletions": 5,
++      "kind": "modified",
++      "planned": "修改",
++      "verdict": "planned"
++    },
++    {
++      "path": "turn-timeline-session-input-bar.test.tsx",
++      "planned": "修改",
++      "additions": 0,
++      "deletions": 0,
++      "kind": "modified",
++      "verdict": "untouched"
++    },
++    {
++      "path": "session-panel-dialog-attachments.test.tsx",
++      "planned": "修改",
++      "additions": 0,
++      "deletions": 0,
++      "kind": "modified",
++      "verdict": "untouched"
++    }
++  ],
++  "excluded": {
++    "foreignDeclared": []
++  },
++  "note": "flow done 时点冻结（本文件落盘时采集）",
++  "closedBy": "flow done",
++  "patchSha256": "5f7a6f4ee887e7593d7a26c3a287f2d77f33110920cbbfd7f8bb12a39fdc849d",
++  "patchStatus": "ok",
++  "savedAt": "2026-10-09T03:05:59.198Z"
++}
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.patch b/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.patch
+new file mode 100644
+index 000000000..275af01ed
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/scope-audit.patch
+@@ -0,0 +1,570 @@
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
++new file mode 100644
++index 000000000..98ddb4cd8
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml
++@@ -0,0 +1,19 @@
+++tier: thin
+++legacy_fallback: false
+++substeps: {}
+++born_face: thin
+++with_tasks: false
+++review_force: null
+++input: |-
+++  会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
+++
+++  成功标准：
+++  - 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++  - 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++  - 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++  - 既有上传/移除/发送行为零回归，相关测试全绿
+++autopilot: false
+++baseline_commit: 21763d356758116cbc9a6bfafbd567f0adc9445a
+++updatedAt: '2026-10-09T02:41:20.970Z'
+++baseline_sha256: 754d0f65d98ced5daa7b5e6ca357b864ae6462afad7eb87dc292212bb145404e
+++
++diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++index c1aad79d6..9800c008c 100644
++--- a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++@@ -17,6 +17,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";
++diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++index 4ab9b02e8..b9f38b6b4 100644
++--- a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++@@ -1,6 +1,9 @@
++ // ql-20260903-012-7976：附件上传错误出口统一——超 10 个截断 toast 告知 +
++ // 上传失败行内红字走 errMessage（网络错误不再英文 "Failed to fetch" 直出）。
++ //
+++// 2026-10-09-pending-attachment-preview：待发 chip 点击预览——mock
+++// FilePreviewModal（attachment-chips.test 同款断言面）+ fetchAttachmentBlob。
+++//
++ // 渲染骨架对齐 session-input-bar-mention.test.tsx（mock @/lib/session-mention-sources
++ // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
++ // useNotify 换 spy（toast 断言面）。
++@@ -14,12 +17,20 @@ vi.mock("@/lib/session-mention-sources", () => ({
++   useMentionSources: vi.fn(),
++ }));
++ 
+++// Mock FilePreviewModal（保留渲染状态供断言——attachment-chips.test 同款）。
+++vi.mock("@/components/files/file-preview-modal", () => ({
+++  FilePreviewModal: ({ open }: { open: boolean }) => (
+++    <div data-testid="file-preview-modal" data-open={open} />
+++  ),
+++}));
+++
++ const notifyMock = vi.hoisted(() => ({
++   success: vi.fn(),
++   warning: vi.fn(),
++   error: vi.fn(),
++ }));
++ const uploadMock = vi.hoisted(() => vi.fn());
+++const fetchBlobMock = vi.hoisted(() => vi.fn());
++ 
++ vi.mock("@/lib/errors", async (importOriginal) => {
++   const actual = await importOriginal<typeof import("@/lib/errors")>();
++@@ -29,6 +40,7 @@ vi.mock("@/lib/errors", async (importOriginal) => {
++ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: uploadMock,
++   removeSessionAttachment: vi.fn(),
+++  fetchAttachmentBlob: fetchBlobMock,
++ }));
++ 
++ function renderBar() {
++@@ -97,3 +109,40 @@ describe("SessionInputBar 附件上传反馈（ql-20260903-012）", () => {
++     expect(screen.queryByText("Failed to fetch")).toBeNull();
++   });
++ });
+++
+++describe("待发附件 chip 点击预览（2026-10-09-pending-attachment-preview）", () => {
+++  /** 上传一枚附件并等 chip 出现（返回预览按钮锚点）。 */
+++  async function uploadOne(name: string, kind: "image" | "file") {
+++    uploadMock.mockImplementation(async () => ({
+++      id: `att-${name}`,
+++      kind,
+++      media_type: kind === "image" ? "image/png" : "text/plain",
+++      bytes: 64,
+++      name,
+++      created_at: "2026-10-09T00:00:00Z",
+++    }));
+++    fetchBlobMock.mockResolvedValue(new Blob(["x"], { type: "text/plain" }));
+++    const { fileInput } = renderBar();
+++    pickFiles(fileInput(), 1);
+++    const title = `${name} · 1KB（点击在线预览）`;
+++    await waitFor(() => expect(screen.getByTitle(title)).toBeTruthy());
+++    return screen.getByTitle(title);
+++  }
+++
+++  it("点击文件名区打开 FilePreviewModal 在线预览", async () => {
+++    const nameBtn = await uploadOne("预览图.png", "image");
+++    fireEvent.click(nameBtn);
+++    const modal = document.querySelector("[data-testid='file-preview-modal']");
+++    expect(modal?.getAttribute("data-open")).toBe("true");
+++  });
+++
+++  it("点 X 删除附件不触发预览（预览/移除互不干扰）", async () => {
+++    await uploadOne("待删文件.txt", "file");
+++    fireEvent.click(screen.getByLabelText("移除附件 待删文件.txt"));
+++    await waitFor(() =>
+++      expect(screen.queryByTitle("待删文件.txt · 1KB（点击在线预览）")).toBeNull(),
+++    );
+++    const modal = document.querySelector("[data-testid='file-preview-modal']");
+++    expect(modal?.getAttribute("data-open")).toBe("false");
+++  });
+++});
++diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
++index eb51014cc..99fe1103c 100644
++--- a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
++@@ -46,6 +46,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ /* ----- mock lib/daemon（同 dialog 测试） ----- */
++@@ -353,7 +356,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++       expect.any(File),
++       "image",
++     );
++-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
++ 
++     fireEvent.change(input, { target: { value: "看下这张图" } });
++     fireEvent.click(screen.getByTitle("发送"));
++@@ -391,7 +394,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++ 
++     const input = screen.getByPlaceholderText(/排队/) as HTMLTextAreaElement;
++     pasteFile(input, att);
++-    await screen.findByTitle("note.md · 2KB");
+++    await screen.findByTitle("note.md · 2KB（点击在线预览）");
++     fireEvent.change(input, { target: { value: "排队带附件" } });
++     fireEvent.click(screen.getByTitle("发送"));
++ 
++@@ -432,7 +435,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
++ 
++     const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
++     pasteFile(input, att);
++-    await screen.findByTitle("shot.png · 2KB");
+++    await screen.findByTitle("shot.png · 2KB（点击在线预览）");
++ 
++     // 空文本 + 有附件：发送按钮可点
++     const sendBtn = screen.getByTitle("发送") as HTMLButtonElement;
++diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++index 87abfc96b..4028c6049 100644
++--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++@@ -37,6 +37,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
++   uploadSessionAttachment: vi.fn(),
++   removeSessionAttachment: vi.fn(),
++   fetchAttachmentObjectUrl: vi.fn(),
+++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+++  // 预览，补导出防 mock 缺口）。
+++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
++ }));
++ 
++ function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++@@ -547,7 +550,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
++     // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
++     expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
++     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
++-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
++     expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
++   });
++ 
++@@ -557,7 +560,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
++     const file = new File(["# hi"], "note.md", { type: "text/markdown" });
++     pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
++     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
++-    expect(await screen.findByTitle("note.md · 2KB")).toBeInTheDocument();
+++    expect(await screen.findByTitle("note.md · 2KB（点击在线预览）")).toBeInTheDocument();
++   });
++ 
++   it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {
++diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
++index d9598760d..845b72c71 100644
++--- a/frontend/src/components/daemon/session-input-bar.tsx
+++++ b/frontend/src/components/daemon/session-input-bar.tsx
++@@ -12,6 +12,11 @@
++  * 文本（D-7）、attachmentsDisabled 门控（codex 引擎 D-6）、降级提示条（FR-10
++  * D-9：当前供应商 multimodal 判不支持 → 图片将落盘供 agent 工具读）。
++  *
+++ * 2026-10-09-pending-attachment-preview：待发附件 chip 文件名区可点击——弹
+++ * FilePreviewModal 在线预览（与已发送附件 attachment-chips 同链路：附件已传
+++ * 服务端持有 id，fetchAttachmentBlob 拉取 + officeSource 高保真标识）；X 删除
+++ * 按钮独立兄弟节点，点击互不干扰。
+++ *
++  * ql-20260825-006：输入框支持 Ctrl+V 粘贴剪贴板图片/文件——textarea onPaste 读
++  * clipboardData.files，非空则拦截默认插入并复用 handleFiles 上传管线（与 📎 完全
++  * 等价，含 attachmentsDisabled 门控与 10 个上限）；纯文本粘贴走默认行为不受影响。
++@@ -47,10 +52,12 @@ import {
++ import { Button } from "antd";
++ 
++ import {
+++  fetchAttachmentBlob,
++   removeSessionAttachment,
++   uploadSessionAttachment,
++   type AttachmentRead,
++ } from "@/lib/api/session-attachments";
+++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
++ import {
++   SessionMentionPopover,
++   buildAtMentionItems,
++@@ -245,6 +252,21 @@ export function SessionInputBar({
++   const [uploadError, setUploadError] = useState<string | null>(null);
++   const notify = useNotify();
++ 
+++  /* 2026-10-09-pending-attachment-preview：待发 chip 点击预览（与已发送附件的
+++   * attachment-chips 同链路——附件选文件即传已有服务端 id，预览走
+++   * fetchAttachmentBlob + officeSource 高保真标识）。 */
+++  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+++  const [previewOpen, setPreviewOpen] = useState(false);
+++
+++  const openAttachmentPreview = (att: AttachmentRead) => {
+++    setPreviewTarget({
+++      fetch: () => fetchAttachmentBlob(att.id),
+++      meta: { name: att.name, size: att.bytes },
+++      officeSource: { source: "session_attachment", id: att.id },
+++    });
+++    setPreviewOpen(true);
+++  };
+++
++   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
++ 
++   /** 检测命中（task-01 detectMention 结果快照，query 随输入更新；null = 关层）。 */
++@@ -614,16 +636,22 @@ export function SessionInputBar({
++               <span
++                 key={att.id}
++                 className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
++-                title={`${att.name} · ${formatBytes(att.bytes)}`}
++               >
++-                <span className="truncate inline-flex items-center gap-1">
+++                {/* 2026-10-09-pending-attachment-preview：文件名区可点击在线预览
+++                    （未发送也能查看已上传内容）；X 删除按钮独立兄弟节点，互不冒泡。 */}
+++                <button
+++                  type="button"
+++                  onClick={() => openAttachmentPreview(att)}
+++                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+++                  className="inline-flex min-w-0 cursor-pointer items-center gap-1 truncate text-left transition-colors hover:text-brand-600"
+++                >
++                   {att.kind === "image" ? (
++                     <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
++                   ) : (
++                     <FileText aria-hidden className="h-3 w-3 shrink-0" />
++                   )}
++                   {att.name} · {formatBytes(att.bytes)}
++-                </span>
+++                </button>
++                 <button
++                   type="button"
++                   aria-label={`移除附件 ${att.name}`}
++@@ -929,6 +957,12 @@ export function SessionInputBar({
++           )}
++         </Button>
++       </div>
+++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+++      <FilePreviewModal
+++        target={previewTarget}
+++        open={previewOpen}
+++        onClose={() => setPreviewOpen(false)}
+++      />
++     </footer>
++   );
++ }
++diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++index d470967da..84f3db0f7 100644
++--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++@@ -1605,6 +1605,22 @@ describe("群消息附件（FR-05 补遗）", () => {
++     });
++   });
++ 
+++  it("待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开", async () => {
+++    harness.logsJson = [];
+++    renderPanel();
+++    await waitForStreamWired();
+++
+++    await pickFile();
+++    await waitFor(() => {
+++      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+++    });
+++    // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
+++    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
+++    // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
+++    // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
+++    expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
+++  });
+++
++   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
++     harness.logsJson = [];
++     renderPanel();
++diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
++index 45e76e57d..3c61936f3 100644
++--- a/frontend/src/components/group-chat/group-chat-panel.tsx
+++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
++@@ -139,10 +139,12 @@ import type { AgentRunLogEntry } from "@/lib/agent";
++ import { errMessage, useNotify } from "@/lib/errors";
++ import { markGroupOpened } from "@/lib/group-unread";
++ import {
+++  fetchAttachmentBlob,
++   removeSessionAttachment,
++   uploadSessionAttachment,
++   type AttachmentRead,
++ } from "@/lib/api/session-attachments";
+++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
++ import {
++   PROVIDER_META,
++   fetchPendingDialogs,
++@@ -1741,6 +1743,19 @@ export function GroupChatPanel({
++   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
++   const [uploading, setUploading] = useState(0);
++   const [uploadError, setUploadError] = useState<string | null>(null);
+++  /* 待发 chip 点击预览（2026-10-09-pending-attachment-preview，与单聊输入栏同款：
+++   * 附件已传服务端持有 id，走 fetchAttachmentBlob + officeSource 链路弹
+++   * FilePreviewModal）。 */
+++  const [pendingPreview, setPendingPreview] = useState<FilePreviewTarget | null>(null);
+++  const [pendingPreviewOpen, setPendingPreviewOpen] = useState(false);
+++  const openPendingAttachmentPreview = (att: AttachmentRead) => {
+++    setPendingPreview({
+++      fetch: () => fetchAttachmentBlob(att.id),
+++      meta: { name: att.name, size: att.bytes },
+++      officeSource: { source: "session_attachment", id: att.id },
+++    });
+++    setPendingPreviewOpen(true);
+++  };
++   const mentionItems = useMemo(() => buildMemberMentionItems(members), [members]);
++   const mentionDetection = useMemo(
++     () => detectMention(draft, inputRef.current?.selectionStart ?? draft.length),
++@@ -2856,19 +2871,25 @@ export function GroupChatPanel({
++                       key={att.id}
++                       data-testid="group-pending-attachment-chip"
++                       className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
++-                      title={`${att.name} · ${formatBytes(att.bytes)}`}
++                     >
++-                      <span className="inline-flex shrink-0 items-center gap-1 truncate">
+++                      {/* 文件名区可点击在线预览（2026-10-09-pending-attachment-
+++                          preview，单聊输入栏同款）；X 删除按钮独立兄弟节点不冒泡。 */}
+++                      <button
+++                        type="button"
+++                        onClick={() => openPendingAttachmentPreview(att)}
+++                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+++                        className="inline-flex min-w-0 cursor-pointer items-center gap-1 text-left transition-colors hover:text-brand-600"
+++                      >
++                         {att.kind === "image" ? (
++-                          <ImageIcon aria-hidden className="h-3 w-3" />
+++                          <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
++                         ) : (
++-                          <FileText aria-hidden className="h-3 w-3" />
+++                          <FileText aria-hidden className="h-3 w-3 shrink-0" />
++                         )}
++                         <span className="truncate">{att.name}</span>
++                         <span className="shrink-0 text-muted-foreground">
++                           {formatBytes(att.bytes)}
++                         </span>
++-                      </span>
+++                      </button>
++                       <button
++                         type="button"
++                         aria-label={`移除附件 ${att.name}`}
++@@ -3027,6 +3048,13 @@ export function GroupChatPanel({
++           <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
++         )}
++       </Drawer>
+++
+++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+++      <FilePreviewModal
+++        target={pendingPreview}
+++        open={pendingPreviewOpen}
+++        onClose={() => setPendingPreviewOpen(false)}
+++      />
++     </div>
++   );
++ }
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
++new file mode 100644
++index 000000000..293bc2af3
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
++@@ -0,0 +1,57 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 设计记录（Design Record）— 2026-10-09-pending-attachment-preview
+++
+++## 做法概述
+++
+++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+++
+++问题：单聊输入栏（session-input-bar.tsx）与群聊面板（group-chat-panel.tsx）的待发送附件 chips 是纯展示 `<span>`（图标+文件名+大小+X），点击无任何反应——附件虽已上传到服务端（选文件即传），用户发送前却无法查看内容。
+++
+++方案：复用已发送消息附件的成熟预览链路（attachment-chips.tsx → FilePreviewModal）。附件上传完成后已持有服务端 id（AttachmentRead），点击 chip 文件名区即以 `fetch: () => fetchAttachmentBlob(att.id)`、`meta: { name, size: bytes }`、`officeSource: { source: "session_attachment", id }` 组装 FilePreviewTarget 打开 FilePreviewModal——图片走 ImagePreviewer、office 家族走 DS 高保真降级链，与已发送附件完全同一体验。两处输入区各持一对 previewTarget/previewOpen state，组件层零新依赖（FilePreviewModal 与 fetchAttachmentBlob 均既有导出）。结构上把 chip 的文件名区从 `<span>` 改为 `<button type="button">`（X 删除按钮保持独立兄弟节点），HTML 不嵌套按钮、事件天然不串。
+++
+++## 接口契约
+++
+++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+++
+++不动任何后端端点/API 封装签名。前端组件内部行为变化：
+++
+++- `session-input-bar.tsx`：新增 FilePreviewModal/`FilePreviewTarget`/`fetchAttachmentBlob` import 与预览 state；`SessionInputBarProps` 无新增 prop（对外契约不变）。
+++- `group-chat-panel.tsx`：同上，面板组件 props 无变化。
+++- 待发 chip 文件名区从 `<span>` 变 `<button>`，title 统一为 `${name} · ${大小}（点击在线预览）`；X 按钮 aria-label（`移除附件 ${name}`）不变。
+++
+++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+++
+++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+++
+++预览按点击时刻的附件快照（闭包捕获 att）组装 fetch；上传中（uploading>0）的 chip 不存在（附件列表只有上传完成项），无迟到态。上传失败不产生 chip，预览无从触发。
+++
+++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+++
+++预览是只读拉取（GET content），不写任何数据；与移除并发时最坏情况是 blob 拉取 404 → FilePreviewModal 内建 error 重试态（既有 R-07 行为），不崩溃。
+++
+++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+++
+++预览窗 open 时删除该附件 → chips 消失但弹窗内容已加载则可继续看；关闭弹窗即释放（useObjectUrl revoke 既有逻辑）。切换会话/组件卸载 → React state 随组件销毁，无泄漏。
+++
+++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+++
+++预览 target 携带附件 id 走鉴权拉取（fetchAttachmentBlob 带 Bearer + 401 刷新重试），附件 id 会话无关（草稿态全局），无跨工作区串台。
+++
+++## 风险与死路
+++
+++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+++
+++最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。
+++
+++## 文件变更清单
+++
+++| 操作 | 路径 | 说明 |
+++| --- | --- | --- |
+++| 修改 | frontend/src/components/daemon/session-input-bar.tsx | 待发 chips 文件名区改可点击按钮 + FilePreviewModal 预览 state |
+++| 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊待发 chips 同款可点击预览 |
+++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | 新增预览/删除不串扰用例 + mock 补 fetchAttachmentBlob |
+++| 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 新增群聊待发 chip 点击预览用例 |
+++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx、turn-timeline-session-input-bar.test.tsx、session-panel-dialog-attachments.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
++new file mode 100644
++index 000000000..7f6d9f718
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
++@@ -0,0 +1,30 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 提案书（Proposal）— 2026-10-09-pending-attachment-preview
+++
+++## 动机
+++
+++任务原话转写：会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
+++
+++成功标准：
+++- 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++- 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++- 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++- 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++## 变更范围
+++
+++按成功标准机械推导，共 4 条验收面：
+++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++4. 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++## 成功标准（可验证）
+++
+++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++4. 既有上传/移除/发送行为零回归，相关测试全绿
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
++new file mode 100644
++index 000000000..501e2424a
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
++@@ -0,0 +1,54 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 需求规格（Requirements）— 2026-10-09-pending-attachment-preview
+++
+++## 功能需求
+++
+++### FR-01: 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+++
+++- 单聊会话输入栏的待发送附件 chip 必须支持点击预览：点击 chip 的文件名区域（图标+名称+大小）打开统一预览窗 FilePreviewModal，在线查看已上传但未发送的图片/文件内容；预览目标必须复用已发送附件同款链路（fetchAttachmentBlob 拉取 + officeSource: session_attachment 高保真标识）。
+++
+++#### 场景：上传后未发送点击预览
+++
+++- Given 用户在会话输入栏上传了一张图片（或一个文件），chip 已出现在输入框上方且消息未发送
+++- When 用户点击 chip 的文件名区域
+++- Then 打开 FilePreviewModal 在线预览该附件内容（非新窗跳转）
+++
+++### FR-02: 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+++
+++- 群聊面板输入区的待发送附件 chip 必须支持与单聊一致的点击预览行为：点击文件名区域打开 FilePreviewModal 在线预览。
+++
+++#### 场景：群聊待发附件点击预览
+++
+++- Given 用户在群聊输入区上传了附件，chip 已出现且消息未发送
+++- When 用户点击 chip 的文件名区域
+++- Then 打开 FilePreviewModal 在线预览该附件内容
+++
+++### FR-03: 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+++
+++- 预览入口与移除入口必须相互独立：chip 内 X 按钮只删除附件（不打开预览）；文件名区域只开预览（不删除）；两者必须为独立按钮元素，禁止嵌套按钮。
+++
+++#### 场景：点 X 删除不开预览
+++
+++- Given 待发附件 chip 存在
+++- When 用户点击 chip 上的 X 按钮
+++- Then 该附件被移除（本地 chip 消失 + 服务端草稿删除），预览窗不打开
+++
+++### FR-04: 既有上传/移除/发送行为零回归，相关测试全绿
+++
+++- 本变更必须不改变既有附件上传（选文件即传/批量上限/粘贴）、移除、发送（附件 ids 组装/发送后清空）与输入栏其余交互（联想、定时发送、＋菜单）的任何行为；相关既有测试必须保持全绿。
+++
+++#### 场景：零回归验证
+++
+++- Given 本变更代码合入
+++- When 运行 session-input-bar 系与 group-chat-panel 系既有测试
+++- Then 全部通过，无既有用例被修改或删除
+++
+++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
+++
+++FR-01: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「待发附件 chip 点击文件名打开在线预览（FilePreviewModal）」
+++FR-02: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（FilePreviewModal 打开）」
+++FR-03: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
+++FR-04: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」+ group-chat-panel.test.tsx 既有附件用例（移除/发送/纯附件可发）
++diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
++new file mode 100644
++index 000000000..7263047b1
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
++@@ -0,0 +1,10 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-09T02:41:20.771Z
+++---
+++# 任务注册表（Tasks）— 2026-10-09-pending-attachment-preview
+++
+++- [x] task-01: session-input-bar.tsx 待发 chips 文件名区改按钮（title 带「点击在线预览」）+ FilePreviewModal 预览 state（fetchAttachmentBlob + officeSource），验证：tsc 无错
+++- [x] task-02: group-chat-panel.tsx 待发 chips 同款改造，验证：tsc 无错
+++- [x] task-03: 测试——session-input-bar-upload.test.tsx 新增「点击文件名开预览」「点 X 删除不开预览」两用例（mock 补 fetchAttachmentBlob + FilePreviewModal），验证：vitest 该文件全绿
+++- [x] task-04: 测试——group-chat-panel.test.tsx 新增待发 chip 点击预览用例，验证：vitest 该文件全绿（含既有附件用例零回归）
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+index c1aad79d6..9800c008c 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx
+@@ -17,6 +17,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
+   uploadSessionAttachment: vi.fn(),
+   removeSessionAttachment: vi.fn(),
+   fetchAttachmentObjectUrl: vi.fn(),
++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
++  // 预览，补导出防 mock 缺口）。
++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
+ }));
+ 
+ const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+index 4ab9b02e8..b9f38b6b4 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+@@ -1,6 +1,9 @@
+ // ql-20260903-012-7976：附件上传错误出口统一——超 10 个截断 toast 告知 +
+ // 上传失败行内红字走 errMessage（网络错误不再英文 "Failed to fetch" 直出）。
+ //
++// 2026-10-09-pending-attachment-preview：待发 chip 点击预览——mock
++// FilePreviewModal（attachment-chips.test 同款断言面）+ fetchAttachmentBlob。
++//
+ // 渲染骨架对齐 session-input-bar-mention.test.tsx（mock @/lib/session-mention-sources
+ // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
+ // useNotify 换 spy（toast 断言面）。
+@@ -14,12 +17,20 @@ vi.mock("@/lib/session-mention-sources", () => ({
+   useMentionSources: vi.fn(),
+ }));
+ 
++// Mock FilePreviewModal（保留渲染状态供断言——attachment-chips.test 同款）。
++vi.mock("@/components/files/file-preview-modal", () => ({
++  FilePreviewModal: ({ open }: { open: boolean }) => (
++    <div data-testid="file-preview-modal" data-open={open} />
++  ),
++}));
++
+ const notifyMock = vi.hoisted(() => ({
+   success: vi.fn(),
+   warning: vi.fn(),
+   error: vi.fn(),
+ }));
+ const uploadMock = vi.hoisted(() => vi.fn());
++const fetchBlobMock = vi.hoisted(() => vi.fn());
+ 
+ vi.mock("@/lib/errors", async (importOriginal) => {
+   const actual = await importOriginal<typeof import("@/lib/errors")>();
+@@ -29,6 +40,7 @@ vi.mock("@/lib/errors", async (importOriginal) => {
+ vi.mock("@/lib/api/session-attachments", () => ({
+   uploadSessionAttachment: uploadMock,
+   removeSessionAttachment: vi.fn(),
++  fetchAttachmentBlob: fetchBlobMock,
+ }));
+ 
+ function renderBar() {
+@@ -97,3 +109,40 @@ describe("SessionInputBar 附件上传反馈（ql-20260903-012）", () => {
+     expect(screen.queryByText("Failed to fetch")).toBeNull();
+   });
+ });
++
++describe("待发附件 chip 点击预览（2026-10-09-pending-attachment-preview）", () => {
++  /** 上传一枚附件并等 chip 出现（返回预览按钮锚点）。 */
++  async function uploadOne(name: string, kind: "image" | "file") {
++    uploadMock.mockImplementation(async () => ({
++      id: `att-${name}`,
++      kind,
++      media_type: kind === "image" ? "image/png" : "text/plain",
++      bytes: 64,
++      name,
++      created_at: "2026-10-09T00:00:00Z",
++    }));
++    fetchBlobMock.mockResolvedValue(new Blob(["x"], { type: "text/plain" }));
++    const { fileInput } = renderBar();
++    pickFiles(fileInput(), 1);
++    const title = `${name} · 1KB（点击在线预览）`;
++    await waitFor(() => expect(screen.getByTitle(title)).toBeTruthy());
++    return screen.getByTitle(title);
++  }
++
++  it("点击文件名区打开 FilePreviewModal 在线预览", async () => {
++    const nameBtn = await uploadOne("预览图.png", "image");
++    fireEvent.click(nameBtn);
++    const modal = document.querySelector("[data-testid='file-preview-modal']");
++    expect(modal?.getAttribute("data-open")).toBe("true");
++  });
++
++  it("点 X 删除附件不触发预览（预览/移除互不干扰）", async () => {
++    await uploadOne("待删文件.txt", "file");
++    fireEvent.click(screen.getByLabelText("移除附件 待删文件.txt"));
++    await waitFor(() =>
++      expect(screen.queryByTitle("待删文件.txt · 1KB（点击在线预览）")).toBeNull(),
++    );
++    const modal = document.querySelector("[data-testid='file-preview-modal']");
++    expect(modal?.getAttribute("data-open")).toBe("false");
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
+index eb51014cc..99fe1103c 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
+@@ -46,6 +46,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
+   uploadSessionAttachment: vi.fn(),
+   removeSessionAttachment: vi.fn(),
+   fetchAttachmentObjectUrl: vi.fn(),
++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
++  // 预览，补导出防 mock 缺口）。
++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
+ }));
+ 
+ /* ----- mock lib/daemon（同 dialog 测试） ----- */
+@@ -353,7 +356,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
+       expect.any(File),
+       "image",
+     );
+-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
+ 
+     fireEvent.change(input, { target: { value: "看下这张图" } });
+     fireEvent.click(screen.getByTitle("发送"));
+@@ -391,7 +394,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
+ 
+     const input = screen.getByPlaceholderText(/排队/) as HTMLTextAreaElement;
+     pasteFile(input, att);
+-    await screen.findByTitle("note.md · 2KB");
++    await screen.findByTitle("note.md · 2KB（点击在线预览）");
+     fireEvent.change(input, { target: { value: "排队带附件" } });
+     fireEvent.click(screen.getByTitle("发送"));
+ 
+@@ -432,7 +435,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
+ 
+     const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
+     pasteFile(input, att);
+-    await screen.findByTitle("shot.png · 2KB");
++    await screen.findByTitle("shot.png · 2KB（点击在线预览）");
+ 
+     // 空文本 + 有附件：发送按钮可点
+     const sendBtn = screen.getByTitle("发送") as HTMLButtonElement;
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+index 87abfc96b..4028c6049 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+@@ -37,6 +37,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
+   uploadSessionAttachment: vi.fn(),
+   removeSessionAttachment: vi.fn(),
+   fetchAttachmentObjectUrl: vi.fn(),
++  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
++  // 预览，补导出防 mock 缺口）。
++  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
+ }));
+ 
+ function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
+@@ -547,7 +550,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
+     // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
+     expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
+     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
+-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
++    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
+     expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
+   });
+ 
+@@ -557,7 +560,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
+     const file = new File(["# hi"], "note.md", { type: "text/markdown" });
+     pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
+     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
+-    expect(await screen.findByTitle("note.md · 2KB")).toBeInTheDocument();
++    expect(await screen.findByTitle("note.md · 2KB（点击在线预览）")).toBeInTheDocument();
+   });
+ 
+   it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index d9598760d..845b72c71 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -12,6 +12,11 @@
+  * 文本（D-7）、attachmentsDisabled 门控（codex 引擎 D-6）、降级提示条（FR-10
+  * D-9：当前供应商 multimodal 判不支持 → 图片将落盘供 agent 工具读）。
+  *
++ * 2026-10-09-pending-attachment-preview：待发附件 chip 文件名区可点击——弹
++ * FilePreviewModal 在线预览（与已发送附件 attachment-chips 同链路：附件已传
++ * 服务端持有 id，fetchAttachmentBlob 拉取 + officeSource 高保真标识）；X 删除
++ * 按钮独立兄弟节点，点击互不干扰。
++ *
+  * ql-20260825-006：输入框支持 Ctrl+V 粘贴剪贴板图片/文件——textarea onPaste 读
+  * clipboardData.files，非空则拦截默认插入并复用 handleFiles 上传管线（与 📎 完全
+  * 等价，含 attachmentsDisabled 门控与 10 个上限）；纯文本粘贴走默认行为不受影响。
+@@ -47,10 +52,12 @@ import {
+ import { Button } from "antd";
+ 
+ import {
++  fetchAttachmentBlob,
+   removeSessionAttachment,
+   uploadSessionAttachment,
+   type AttachmentRead,
+ } from "@/lib/api/session-attachments";
++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import {
+   SessionMentionPopover,
+   buildAtMentionItems,
+@@ -245,6 +252,21 @@ export function SessionInputBar({
+   const [uploadError, setUploadError] = useState<string | null>(null);
+   const notify = useNotify();
+ 
++  /* 2026-10-09-pending-attachment-preview：待发 chip 点击预览（与已发送附件的
++   * attachment-chips 同链路——附件选文件即传已有服务端 id，预览走
++   * fetchAttachmentBlob + officeSource 高保真标识）。 */
++  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
++  const [previewOpen, setPreviewOpen] = useState(false);
++
++  const openAttachmentPreview = (att: AttachmentRead) => {
++    setPreviewTarget({
++      fetch: () => fetchAttachmentBlob(att.id),
++      meta: { name: att.name, size: att.bytes },
++      officeSource: { source: "session_attachment", id: att.id },
++    });
++    setPreviewOpen(true);
++  };
++
+   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
+ 
+   /** 检测命中（task-01 detectMention 结果快照，query 随输入更新；null = 关层）。 */
+@@ -614,16 +636,22 @@ export function SessionInputBar({
+               <span
+                 key={att.id}
+                 className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
+-                title={`${att.name} · ${formatBytes(att.bytes)}`}
+               >
+-                <span className="truncate inline-flex items-center gap-1">
++                {/* 2026-10-09-pending-attachment-preview：文件名区可点击在线预览
++                    （未发送也能查看已上传内容）；X 删除按钮独立兄弟节点，互不冒泡。 */}
++                <button
++                  type="button"
++                  onClick={() => openAttachmentPreview(att)}
++                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
++                  className="inline-flex min-w-0 cursor-pointer items-center gap-1 truncate text-left transition-colors hover:text-brand-600"
++                >
+                   {att.kind === "image" ? (
+                     <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
+                   ) : (
+                     <FileText aria-hidden className="h-3 w-3 shrink-0" />
+                   )}
+                   {att.name} · {formatBytes(att.bytes)}
+-                </span>
++                </button>
+                 <button
+                   type="button"
+                   aria-label={`移除附件 ${att.name}`}
+@@ -929,6 +957,12 @@ export function SessionInputBar({
+           )}
+         </Button>
+       </div>
++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
++      <FilePreviewModal
++        target={previewTarget}
++        open={previewOpen}
++        onClose={() => setPreviewOpen(false)}
++      />
+     </footer>
+   );
+ }
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index d470967da..84f3db0f7 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -1605,6 +1605,22 @@ describe("群消息附件（FR-05 补遗）", () => {
+     });
+   });
+ 
++  it("待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开", async () => {
++    harness.logsJson = [];
++    renderPanel();
++    await waitForStreamWired();
++
++    await pickFile();
++    await waitFor(() => {
++      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
++    });
++    // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
++    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
++    // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
++    // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
++    expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
++  });
++
+   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
+     harness.logsJson = [];
+     renderPanel();
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 45e76e57d..3c61936f3 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -139,10 +139,12 @@ import type { AgentRunLogEntry } from "@/lib/agent";
+ import { errMessage, useNotify } from "@/lib/errors";
+ import { markGroupOpened } from "@/lib/group-unread";
+ import {
++  fetchAttachmentBlob,
+   removeSessionAttachment,
+   uploadSessionAttachment,
+   type AttachmentRead,
+ } from "@/lib/api/session-attachments";
++import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import {
+   PROVIDER_META,
+   fetchPendingDialogs,
+@@ -1741,6 +1743,19 @@ export function GroupChatPanel({
+   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
+   const [uploading, setUploading] = useState(0);
+   const [uploadError, setUploadError] = useState<string | null>(null);
++  /* 待发 chip 点击预览（2026-10-09-pending-attachment-preview，与单聊输入栏同款：
++   * 附件已传服务端持有 id，走 fetchAttachmentBlob + officeSource 链路弹
++   * FilePreviewModal）。 */
++  const [pendingPreview, setPendingPreview] = useState<FilePreviewTarget | null>(null);
++  const [pendingPreviewOpen, setPendingPreviewOpen] = useState(false);
++  const openPendingAttachmentPreview = (att: AttachmentRead) => {
++    setPendingPreview({
++      fetch: () => fetchAttachmentBlob(att.id),
++      meta: { name: att.name, size: att.bytes },
++      officeSource: { source: "session_attachment", id: att.id },
++    });
++    setPendingPreviewOpen(true);
++  };
+   const mentionItems = useMemo(() => buildMemberMentionItems(members), [members]);
+   const mentionDetection = useMemo(
+     () => detectMention(draft, inputRef.current?.selectionStart ?? draft.length),
+@@ -2856,19 +2871,25 @@ export function GroupChatPanel({
+                       key={att.id}
+                       data-testid="group-pending-attachment-chip"
+                       className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
+-                      title={`${att.name} · ${formatBytes(att.bytes)}`}
+                     >
+-                      <span className="inline-flex shrink-0 items-center gap-1 truncate">
++                      {/* 文件名区可点击在线预览（2026-10-09-pending-attachment-
++                          preview，单聊输入栏同款）；X 删除按钮独立兄弟节点不冒泡。 */}
++                      <button
++                        type="button"
++                        onClick={() => openPendingAttachmentPreview(att)}
++                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
++                        className="inline-flex min-w-0 cursor-pointer items-center gap-1 text-left transition-colors hover:text-brand-600"
++                      >
+                         {att.kind === "image" ? (
+-                          <ImageIcon aria-hidden className="h-3 w-3" />
++                          <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
+                         ) : (
+-                          <FileText aria-hidden className="h-3 w-3" />
++                          <FileText aria-hidden className="h-3 w-3 shrink-0" />
+                         )}
+                         <span className="truncate">{att.name}</span>
+                         <span className="shrink-0 text-muted-foreground">
+                           {formatBytes(att.bytes)}
+                         </span>
+-                      </span>
++                      </button>
+                       <button
+                         type="button"
+                         aria-label={`移除附件 ${att.name}`}
+@@ -3027,6 +3048,13 @@ export function GroupChatPanel({
+           <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
+         )}
+       </Drawer>
++
++      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
++      <FilePreviewModal
++        target={pendingPreview}
++        open={pendingPreviewOpen}
++        onClose={() => setPendingPreviewOpen(false)}
++      />
+     </div>
+   );
+ }
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
+new file mode 100644
+index 000000000..85560a30f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/design.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T02:41:20.771Z
++---
++# 设计记录（Design Record）— 2026-10-09-pending-attachment-preview
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：单聊输入栏（session-input-bar.tsx）与群聊面板（group-chat-panel.tsx）的待发送附件 chips 是纯展示 `<span>`（图标+文件名+大小+X），点击无任何反应——附件虽已上传到服务端（选文件即传），用户发送前却无法查看内容。
++
++方案：复用已发送消息附件的成熟预览链路（attachment-chips.tsx → FilePreviewModal）。附件上传完成后已持有服务端 id（AttachmentRead），点击 chip 文件名区即以 `fetch: () => fetchAttachmentBlob(att.id)`、`meta: { name, size: bytes }`、`officeSource: { source: "session_attachment", id }` 组装 FilePreviewTarget 打开 FilePreviewModal——图片走 ImagePreviewer、office 家族走 DS 高保真降级链，与已发送附件完全同一体验。两处输入区各持一对 previewTarget/previewOpen state，组件层零新依赖（FilePreviewModal 与 fetchAttachmentBlob 均既有导出）。结构上把 chip 的文件名区从 `<span>` 改为 `<button type="button">`（X 删除按钮保持独立兄弟节点），HTML 不嵌套按钮、事件天然不串。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++不动任何后端端点/API 封装签名。前端组件内部行为变化：
++
++- `session-input-bar.tsx`：新增 FilePreviewModal/`FilePreviewTarget`/`fetchAttachmentBlob` import 与预览 state；`SessionInputBarProps` 无新增 prop（对外契约不变）。
++- `group-chat-panel.tsx`：同上，面板组件 props 无变化。
++- 待发 chip 文件名区从 `<span>` 变 `<button>`，title 统一为 `${name} · ${大小}（点击在线预览）`；X 按钮 aria-label（`移除附件 ${name}`）不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++预览按点击时刻的附件快照（闭包捕获 att）组装 fetch；上传中（uploading>0）的 chip 不存在（附件列表只有上传完成项），无迟到态。上传失败不产生 chip，预览无从触发。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++预览是只读拉取（GET content），不写任何数据；与移除并发时最坏情况是 blob 拉取 404 → FilePreviewModal 内建 error 重试态（既有 R-07 行为），不崩溃。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++预览窗 open 时删除该附件 → chips 消失但弹窗内容已加载则可继续看；关闭弹窗即释放（useObjectUrl revoke 既有逻辑）。切换会话/组件卸载 → React state 随组件销毁，无泄漏。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++预览 target 携带附件 id 走鉴权拉取（fetchAttachmentBlob 带 Bearer + 401 刷新重试），附件 id 会话无关（草稿态全局），无跨工作区串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/session-input-bar.tsx | 待发 chips 文件名区改可点击按钮 + FilePreviewModal 预览 state |
++| 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊待发 chips 同款可点击预览 |
++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | 新增预览/删除不串扰用例 + mock 补 fetchAttachmentBlob |
++| 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 新增群聊待发 chip 点击预览用例 |
++| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx | 旧 harness 补 fetchAttachmentBlob mock |
++| 修改 | frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
++| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
+new file mode 100644
+index 000000000..7f6d9f718
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T02:41:20.771Z
++---
++# 提案书（Proposal）— 2026-10-09-pending-attachment-preview
++
++## 动机
++
++任务原话转写：会话输入区待发送附件 chips 仅展示不可点击，用户上传图片/文件后未发送时无法再次查看内容，需要点击预览。
++
++成功标准：
++- 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
++- 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
++- 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
++- 既有上传/移除/发送行为零回归，相关测试全绿
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
++4. 既有上传/移除/发送行为零回归，相关测试全绿
++
++## 成功标准（可验证）
++
++1. 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
++2. 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
++3. 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
++4. 既有上传/移除/发送行为零回归，相关测试全绿
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
+new file mode 100644
+index 000000000..3eedc7d93
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T02:41:20.771Z
++---
++# 需求规格（Requirements）— 2026-10-09-pending-attachment-preview
++
++## 功能需求
++
++### FR-01: 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
++
++- 单聊会话输入栏的待发送附件 chip 必须支持点击预览：点击 chip 的文件名区域（图标+名称+大小）打开统一预览窗 FilePreviewModal，在线查看已上传但未发送的图片/文件内容；预览目标必须复用已发送附件同款链路（fetchAttachmentBlob 拉取 + officeSource: session_attachment 高保真标识）。
++
++#### 场景：上传后未发送点击预览
++
++- Given 用户在会话输入栏上传了一张图片（或一个文件），chip 已出现在输入框上方且消息未发送
++- When 用户点击 chip 的文件名区域
++- Then 打开 FilePreviewModal 在线预览该附件内容（非新窗跳转）
++
++### FR-02: 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
++
++- 群聊面板输入区的待发送附件 chip 必须支持与单聊一致的点击预览行为：点击文件名区域打开 FilePreviewModal 在线预览。
++
++#### 场景：群聊待发附件点击预览
++
++- Given 用户在群聊输入区上传了附件，chip 已出现且消息未发送
++- When 用户点击 chip 的文件名区域
++- Then 打开 FilePreviewModal 在线预览该附件内容
++
++### FR-03: 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
++
++- 预览入口与移除入口必须相互独立：chip 内 X 按钮只删除附件（不打开预览）；文件名区域只开预览（不删除）；两者必须为独立按钮元素，禁止嵌套按钮。
++
++#### 场景：点 X 删除不开预览
++
++- Given 待发附件 chip 存在
++- When 用户点击 chip 上的 X 按钮
++- Then 该附件被移除（本地 chip 消失 + 服务端草稿删除），预览窗不打开
++
++### FR-04: 既有上传/移除/发送行为零回归，相关测试全绿
++
++- 本变更必须不改变既有附件上传（选文件即传/批量上限/粘贴）、移除、发送（附件 ids 组装/发送后清空）与输入栏其余交互（联想、定时发送、＋菜单）的任何行为；相关既有测试必须保持全绿。
++
++#### 场景：零回归验证
++
++- Given 本变更代码合入
++- When 运行 session-input-bar 系与 group-chat-panel 系既有测试
++- Then 全部通过，无既有用例被修改或删除
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」
++FR-02: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开」
++FR-03: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
++FR-04: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」+ group-chat-panel.test.tsx 既有附件用例（移除/发送/纯附件可发）
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
+new file mode 100644
+index 000000000..7263047b1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T02:41:20.771Z
++---
++# 任务注册表（Tasks）— 2026-10-09-pending-attachment-preview
++
++- [x] task-01: session-input-bar.tsx 待发 chips 文件名区改按钮（title 带「点击在线预览」）+ FilePreviewModal 预览 state（fetchAttachmentBlob + officeSource），验证：tsc 无错
++- [x] task-02: group-chat-panel.tsx 待发 chips 同款改造，验证：tsc 无错
++- [x] task-03: 测试——session-input-bar-upload.test.tsx 新增「点击文件名开预览」「点 X 删除不开预览」两用例（mock 补 fetchAttachmentBlob + FilePreviewModal），验证：vitest 该文件全绿
++- [x] task-04: 测试——group-chat-panel.test.tsx 新增待发 chip 点击预览用例，验证：vitest 该文件全绿（含既有附件用例零回归）
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031311 b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031311
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031311
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-09-pending-attachment-preview",
++  "reviewer": "subagent",
++  "verdict": "FAIL",
++  "reviewedAgainst": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "requirements 测试绑定引用的用例名与 HEAD 实际用例标题不一致（FR-01 为改写、FR-02 中段插入变更号），按精确串定位会落空",
++      "evidence": "FR-01 绑定引「待发附件 chip 点击文件名打开在线预览（FilePreviewModal）」，实际用例标题为「点击文件名区打开 FilePreviewModal 在线预览」（非子串，session-input-bar-upload.test.tsx:132）；FR-02 绑定引「待发附件 chip 点击在线预览（FilePreviewModal 打开）」，实际标题在「在线预览（」后插入「2026-10-09-pending-attachment-preview）：」（非子串，group-chat-panel.test.tsx:1608）；两用例本体均真实存在且断言承诺行为（FR-01 mock 弹窗断言 open=true；FR-02 真弹窗断言下载按钮），属可追溯性缺陷而非行为缺陷；FR-03 绑定为实际标题的精确前缀、FR-04 为精确匹配，均可定位",
++      "location": ".sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md:51-52"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok（边界已裁决：可接受）——闭包快照 att 组装 fetch 属实（session-input-bar.tsx:259、group-chat-panel.tsx:1752）；上传中仅渲染独立 spinner chip、附件列表仅在 uploadSessionAttachment 成功后追加（session-input-bar.tsx:591-604），「上传中无 chip 故无迟到态」边界经代码核实",
++    "并发": "ok（边界已裁决：可接受）——预览为只读 GET content（session-attachments.ts:75-89），拉取失败走 FilePreviewModal 内建 error 重试态（file-preview-modal.tsx:308，R-07），「404 降级不崩溃」边界经代码核实",
++    "切换": "ok（边界已裁决：可接受）——useObjectUrl 关闭/重挂即 revokeObjectURL（file-preview-modal.tsx:196），预览 state 组件局部随卸载销毁，「open 时删除可继续看、关闭即释放」边界经代码核实",
++    "作用域": "ok（边界已裁决：可接受）——fetchAttachmentBlob 携带 Bearer 且 401 时 ensureFreshAccessToken 重试（session-attachments.ts:77-88），officeSource 与已发送附件同字面量 session_attachment（attachment-chips.tsx:90 / session-input-bar.tsx:265 / group-chat-panel.tsx:1755），无跨工作区串台面"
++  },
++  "reviewedAt": "2026-10-09T03:11:58Z"
++}
+
+diff --git a/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031427 b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031427
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031427
+@@ -0,0 +1,15 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-09-pending-attachment-preview",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
++  "findings": [],
++  "dimensionNotes": {
++    "乱序": "ok（边界已裁决：可接受）——闭包快照 att 组装 fetch 属实（session-input-bar.tsx:259、group-chat-panel.tsx:1752）；上传中仅渲染独立 spinner chip、附件列表仅在 uploadSessionAttachment 成功后追加（session-input-bar.tsx:591-604），「上传中无 chip 故无迟到态」边界经代码核实",
++    "并发": "ok（边界已裁决：可接受）——预览为只读 GET content（session-attachments.ts:75-89），拉取失败走 FilePreviewModal 内建 error 重试态（file-preview-modal.tsx:308，R-07），「404 降级不崩溃」边界经代码核实",
++    "切换": "ok（边界已裁决：可接受）——useObjectUrl 关闭/重挂即 revokeObjectURL（file-preview-modal.tsx:196），预览 state 组件局部随卸载销毁，「open 时删除可继续看、关闭即释放」边界经代码核实",
++    "作用域": "ok（边界已裁决：可接受）——fetchAttachmentBlob 携带 Bearer 且 401 时 ensureFreshAccessToken 重试（session-attachments.ts:77-88），officeSource 与已发送附件同字面量 session_attachment（attachment-chips.tsx:90 / session-input-bar.tsx:265 / group-chat-panel.tsx:1755），无跨工作区串台面"
++  },
++  "reviewedAt": "2026-10-09T03:13:36Z"
++}

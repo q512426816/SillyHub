@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-pending-attachment-preview",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "requirements 测试绑定引用的用例名与 HEAD 实际用例标题不一致（FR-01 为改写、FR-02 中段插入变更号），按精确串定位会落空",
+      "evidence": "FR-01 绑定引「待发附件 chip 点击文件名打开在线预览（FilePreviewModal）」，实际用例标题为「点击文件名区打开 FilePreviewModal 在线预览」（非子串，session-input-bar-upload.test.tsx:132）；FR-02 绑定引「待发附件 chip 点击在线预览（FilePreviewModal 打开）」，实际标题在「在线预览（」后插入「2026-10-09-pending-attachment-preview）：」（非子串，group-chat-panel.test.tsx:1608）；两用例本体均真实存在且断言承诺行为（FR-01 mock 弹窗断言 open=true；FR-02 真弹窗断言下载按钮），属可追溯性缺陷而非行为缺陷；FR-03 绑定为实际标题的精确前缀、FR-04 为精确匹配，均可定位",
+      "location": ".sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md:51-52"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——闭包快照 att 组装 fetch 属实（session-input-bar.tsx:259、group-chat-panel.tsx:1752）；上传中仅渲染独立 spinner chip、附件列表仅在 uploadSessionAttachment 成功后追加（session-input-bar.tsx:591-604），「上传中无 chip 故无迟到态」边界经代码核实",
+    "并发": "ok（边界已裁决：可接受）——预览为只读 GET content（session-attachments.ts:75-89），拉取失败走 FilePreviewModal 内建 error 重试态（file-preview-modal.tsx:308，R-07），「404 降级不崩溃」边界经代码核实",
+    "切换": "ok（边界已裁决：可接受）——useObjectUrl 关闭/重挂即 revokeObjectURL（file-preview-modal.tsx:196），预览 state 组件局部随卸载销毁，「open 时删除可继续看、关闭即释放」边界经代码核实",
+    "作用域": "ok（边界已裁决：可接受）——fetchAttachmentBlob 携带 Bearer 且 401 时 ensureFreshAccessToken 重试（session-attachments.ts:77-88），officeSource 与已发送附件同字面量 session_attachment（attachment-chips.tsx:90 / session-input-bar.tsx:265 / group-chat-panel.tsx:1755），无跨工作区串台面"
+  },
+  "reviewedAt": "2026-10-09T03:11:58Z"
+}

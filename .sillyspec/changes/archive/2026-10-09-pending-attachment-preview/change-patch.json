@@ -1,12 +1,13 @@
 {
   "change": "2026-10-09-pending-attachment-preview",
   "baseline": "21763d356758116cbc9a6bfafbd567f0adc9445a",
-  "head": "722d194b20f6ded76ceaef89f01f0c5f497dbf64",
+  "head": "2c168156b0f004d395095ee5e3739f8b3719d795",
   "files": [
     ".sillyspec/changes/2026-10-09-pending-attachment-preview/design.md",
     ".sillyspec/changes/2026-10-09-pending-attachment-preview/flow-state.yaml",
     ".sillyspec/changes/2026-10-09-pending-attachment-preview/proposal.md",
     ".sillyspec/changes/2026-10-09-pending-attachment-preview/requirements.md",
+    ".sillyspec/changes/2026-10-09-pending-attachment-preview/review.json",
     ".sillyspec/changes/2026-10-09-pending-attachment-preview/tasks.md",
     "frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx",
     "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
@@ -14,14 +15,16 @@
     "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
     "frontend/src/components/daemon/session-input-bar.tsx",
     "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
-    "frontend/src/components/group-chat/group-chat-panel.tsx"
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    ".sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031311",
+    ".sillyspec/changes/2026-10-09-pending-attachment-preview/review.json.superseded-20261009T031427"
   ],
   "totals": {
-    "files": 12,
-    "additions": 328,
+    "files": 15,
+    "additions": 368,
     "deletions": 13
   },
-  "savedAt": "2026-10-09T03:05:59.198Z",
+  "savedAt": "2026-10-09T03:14:28.036Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
   "modules": [
     {
@@ -47,6 +50,6 @@
     "docs/SillyHub/modules/_module-map.yaml",
     "docs/sillyhub-daemon/modules/_module-map.yaml"
   ],
-  "patchSha256": "5f7a6f4ee887e7593d7a26c3a287f2d77f33110920cbbfd7f8bb12a39fdc849d",
+  "patchSha256": "dbc33ba14d1f12351c7455fdf3c413fdc1ba6109187f4a04cc95dd9d0c999f87",
   "patchStatus": "ok"
 }

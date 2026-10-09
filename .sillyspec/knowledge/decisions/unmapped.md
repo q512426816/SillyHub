@@ -1857,3 +1857,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：15b0d73d3336119481d4daff23c92785176bd0cc
 理由：最大风险：正则误伤真实错误行。缓解——只匹配行首严格形态 `^\(node:\d+\) \w+Warning` 与 ``^\(Use `node --trace-warnings``（实测 CLI 噪声逐字）， 真实 CLI 报错文案不以这两种形态开头。放弃的方案：给子进程注入 `NODE_OPTIONS=--no-warnings`——会静默压制 CLI 所有告警（含未来可能有价值的）， 且改的 spawn 环境面大于必要面；前端展示头 160 字符代替尾 160——CLI 结果摘要（含 条目 ID 清单）在输出尾部，取头会丢信息。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-pending-attachment-preview
+锚点：未记录
+最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
+理由：最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。

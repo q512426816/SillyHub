@@ -359,3 +359,79 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-05
 最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
+
+## FR-auto-frontend-141 单聊输入栏（session-input-bar）待发附件 chip 点击文件名区打开 FilePreviewModal 在线预览（复用已发送附件的 fetchAttachmentBlob + officeSource 链路）
+变更：2026-10-09-pending-attachment-preview
+状态：active
+摘要：上传后未发送点击预览
+全文：.sillyspec/changes/archive/2026-10-09-pending-attachment-preview/requirements.md#FR-01
+最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-pending-attachment-preview
+  status: active
+
+## FR-auto-frontend-142 群聊面板（group-chat-panel）待发附件 chip 同样支持点击预览
+变更：2026-10-09-pending-attachment-preview
+状态：active
+摘要：群聊待发附件点击预览
+全文：.sillyspec/changes/archive/2026-10-09-pending-attachment-preview/requirements.md#FR-02
+最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-02
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-pending-attachment-preview
+  status: active
+
+## FR-auto-frontend-143 预览与移除互不干扰：点击 X 删除附件不触发预览，点击预览不影响删除
+变更：2026-10-09-pending-attachment-preview
+状态：active
+摘要：点 X 删除不开预览
+全文：.sillyspec/changes/archive/2026-10-09-pending-attachment-preview/requirements.md#FR-03
+最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-pending-attachment-preview
+  status: active
+
+## FR-auto-frontend-144 既有上传/移除/发送行为零回归，相关测试全绿
+变更：2026-10-09-pending-attachment-preview
+状态：active
+摘要：零回归验证
+全文：.sillyspec/changes/archive/2026-10-09-pending-attachment-preview/requirements.md#FR-04
+最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-pending-attachment-preview
+  status: active

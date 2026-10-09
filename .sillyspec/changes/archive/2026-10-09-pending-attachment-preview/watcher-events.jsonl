@@ -1,0 +1,12 @@
+{"ts":1791513684599,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791513684599,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791513684599,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791513730936,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791513751626,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791513762556,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791513800642,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/session-input-bar.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791513860218,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/group-chat/group-chat-panel.tsx.tmp.31676.e39a753daa30——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791513892249,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/group-chat/group-chat-panel.tsx.tmp.31676.fd7cca4d712d——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791513970343,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791514002354,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx、frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx、rontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791514363190,"kind":"archived","stage":"archive","detail":"change 目录已移入 archive","provisional":true}
