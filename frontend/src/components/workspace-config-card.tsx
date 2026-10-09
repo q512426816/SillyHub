@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
 import { Badge } from "@/components/ui/badge";
-import { Button, Modal, Progress, Radio, Tooltip } from "antd";
+import { Alert, Button, Modal, Progress, Radio, Tooltip } from "antd";
 import { SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
@@ -682,6 +682,19 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           <dt className="text-muted-foreground">上次接入同步</dt>
           <dd>{formatTs(myBinding.synced_at)}</dd>
         </dl>
+
+        {/* 2026-10-09-workspace-init-skill-gate task-05 / FR-03 / D-002@v1：
+            当前成员/机器未初始化时的行动引导（轻引导，后端不硬拦）——
+            成员维度状态，一台机器未初始化不影响另一台。已初始化态零渲染。 */}
+        {!myBinding.init_synced_at && (
+          <Alert
+            type="warning"
+            showIcon
+            className="mt-3"
+            message="当前机器尚未初始化这个工作区，初始化后才能正常使用。"
+            description="每台机器需要单独初始化（同一工作区在其它机器不受影响）。点击「初始化」将下发平台配置、拉取文档缓存，并按本机已有的 agent 写入对应 skill 文件。"
+          />
+        )}
 
         {/* task-04：编辑入口就地展开（非 Modal） */}
         {editing && (
