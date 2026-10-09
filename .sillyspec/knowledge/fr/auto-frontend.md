@@ -224,3 +224,79 @@ created_at: 2026-10-08T03:33:17.438Z
 - 场景：默认场景 — Given 卡片模式完成改造；When ① 从知识库 INDEX 路由行点击跳转目标条目锚点；② 顶栏切换 blue / ai-native 主题；Then ① 页面**必须**滚动定位到目标卡片（data-entry-anchor + scrollIntoView 保留有效）；② 品牌色条/表头色/头底色**必须*
 全文：.sillyspec/changes/archive/2026-09-23-md-card-render/requirements.md#FR-04
 最近确认：322c55edd
+
+## FR-auto-frontend-132 力场收敛后停止 stepForceLayout 步进（连续帧守卫防转折点误判）
+变更：2026-10-09-graph-raf-settle
+状态：active
+摘要：页面开着不再恒耗 CPU
+全文：.sillyspec/changes/archive/2026-10-09-graph-raf-settle/requirements.md#FR-01
+最近确认：e39d596092c4282b08b7d04a889b7a0ae1282d34
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-raf-settle:flow:测试绑定FR-01
+  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「收敛帧数守卫常量：连续帧数 ≥30（转折点零速误判防线）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-raf-settle
+  status: active
+
+## FR-auto-frontend-133 收敛定格终局 fitView + tick 语义承接
+变更：2026-10-09-graph-raf-settle
+状态：active
+摘要：未交互的收敛定格
+全文：.sillyspec/changes/archive/2026-10-09-graph-raf-settle/requirements.md#FR-02
+最近确认：e39d596092c4282b08b7d04a889b7a0ae1282d34
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-raf-settle:flow:测试绑定FR-02
+  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「全节点位移为零（x==px）判静止；单节点位移超阈值判未静止」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-raf-settle
+  status: active
+
+## FR-auto-frontend-134 数据重建与节点拖拽重启力场
+变更：2026-10-09-graph-raf-settle
+状态：active
+摘要：拖放节点后重收敛
+全文：.sillyspec/changes/archive/2026-10-09-graph-raf-settle/requirements.md#FR-03
+最近确认：e39d596092c4282b08b7d04a889b7a0ae1282d34
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-raf-settle:flow:测试绑定FR-03
+  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「阈值参数生效：位移恰在阈值内/外两态；NaN 坐标防御性判未静止」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-raf-settle
+  status: active
+
+## FR-auto-frontend-135 判定提取导出纯函数 forceSettled 供测试；恢复被冲掉的 shouldAutoRefit 用例
+变更：2026-10-09-graph-raf-settle
+状态：active
+摘要：相关面全绿
+全文：.sillyspec/changes/archive/2026-10-09-graph-raf-settle/requirements.md#FR-04
+最近确认：e39d596092c4282b08b7d04a889b7a0ae1282d34
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-raf-settle:flow:测试绑定FR-04
+  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「shouldAutoRefit 两用例（恢复）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-raf-settle
+  status: active

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-graph-raf-settle",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e39d596092c4282b08b7d04a889b7a0ae1282d34",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "（维持）FR-02/FR-03 测试绑定断言面与 FR 行为错位，组件级接线零直接覆盖——边界已裁决：可接受",
+      "evidence": "FR-03 绑定用例断言 forceSettled 阈值/NaN 语义（含本轮新增 bad-prev 断言），未断言门控/拖拽守卫/重启/终局 fit 接线（graph-canvas.tsx:918 拖拽守卫、:757-758 重建复位、:1001-1002 拖拽复位均无组件级测试）；边界裁决：jsdom 无 canvas 2D 上下文（getContext 返回 null），组件挂载测试不可行，接线正确性由两轮代码走查核验兜底——可接受。【首轮 P1 与 NaN P3 已修复并验证】P1：收敛判定加 dragRef.current===null 守卫（:918）——拖拽期不判静止、else 分支归零计数器（:931）、步进持续每步钉 mx/my 跟指针，松手 dragRef 置 null 后位移大→继续演化→30 帧后重收敛停步，闭环成立；NaN P3：isFinite 扩展至 px/py（:311-313）+ bad-prev 测试断言（graph-canvas.test.ts:452-454）；requirements FR-01 与 design 做法概述均已补记两处评审修复。33 测全绿、tsc 0 error、eslint 0 error 本轮独立复跑通过。【重基线注记】04477570f..e39d59609 间插入的提交（graph-text-backslash daemon 消毒面 + 归档件）与本变更两交付文件零交集，git diff 04477570f..HEAD 于两文件为空、工作区干净，PASS 判定原样有效。",
+      "location": ".sillyspec/changes/2026-10-09-graph-raf-settle/requirements.md:54"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok；边界已裁决×2 可接受：①数据重建 effect 即复位重启（:757-758，收敛计数唯一写者在步进路径 :919/:931）②阈值 0.25/30 帧参数可能不优——后果仅布局略欠收敛或收益打折，无正确性风险，真实积分器联测实证 6000 步内收敛",
+    "并发": "ok；边界已裁决：可接受（作答「不适用」属实——全部 ref 由单 rAF 循环与主线程 React 处理器串行读写，无并发执行体）",
+    "切换": "ok（首轮 P1 已修复：dragRef 活跃守卫 :918 阻断拖拽手势内停步，松手后重收敛闭环，指针捕获下 pointerup 必达 dragRef 清空）；边界已裁决×3 可接受：①停步进保留 rAF 而非取消（dirty 早退 :942 空帧成本趋零、卸载 cleanup cancelAnimationFrame/disconnect/removeEventListener 完整）②平移/缩放不重启力场（纯视口操作只改 viewRef）③组件级测试不可行（jsdom 无 canvas 2D 上下文）由代码走查兜底；残留微险：pointercancel 等极端路径若致 dragRef 悬置非空，守卫 failsafe 退化为永不判停（即变更前恒步进行为，耗 CPU 但无冻结），失败方向安全",
+    "作用域": "ok；边界已裁决：可接受（终局 fit 仅未交互执行——userTouchedRef 滚轮/指针双源置位先于终局 fit 判定 :922 生效，交互过的视口不受打扰；ref 为组件实例态、forceSettled 纯函数无状态且 NaN 防御已覆盖 x/y/px/py 四字段）"
+  },
+  "reviewedAt": "2026-10-09T00:03:17Z"
+}

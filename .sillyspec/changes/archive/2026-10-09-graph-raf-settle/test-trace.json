@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-graph-raf-settle",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-graph-raf-settle:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「与真实积分器联测：两节点弹簧系统步进至收敛（无截止恒耗场景可判停）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-raf-settle"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-graph-raf-settle:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「收敛帧数守卫常量：连续帧数 ≥30（转折点零速误判防线）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-raf-settle"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-graph-raf-settle:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「全节点位移为零（x==px）判静止；单节点位移超阈值判未静止」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-raf-settle"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-graph-raf-settle:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「阈值参数生效：位移恰在阈值内/外两态；NaN 坐标防御性判未静止」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-raf-settle"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-graph-raf-settle:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「shouldAutoRefit 两用例（恢复）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-raf-settle"
+    }
+  ]
+}

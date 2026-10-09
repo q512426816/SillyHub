@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -25,7 +30,7 @@ input: >-
   - 既有 graph-canvas 测试全绿，tsc/eslint 0
 autopilot: true
 baseline_commit: 9918b30bd71e4f30153ee7a4e6beac20183fac45
-updatedAt: '2026-10-08T23:49:18.235Z'
+updatedAt: '2026-10-09T00:03:41.633Z'
 baseline_sha256: 9b1468eb073ee4cc3384532392242849d5361d9cccd9366e233e3dd12edc612c
 autopilot_ticked: 4
 gate_summary: >-

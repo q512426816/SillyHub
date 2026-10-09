@@ -7,6 +7,8 @@ substeps:
   review: done
   probes: done
   distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,7 +26,7 @@ input: >-
   - 既有 daemon 相关测试保持绿，tsc 0
 autopilot: true
 baseline_commit: 04477570fac577d27dc6d655dfb671ab92720f30
-updatedAt: '2026-10-09T00:01:36.540Z'
+updatedAt: '2026-10-09T00:01:37.280Z'
 baseline_sha256: f25242ce7b5ae629457756706428e5cffee48d538da742898bd709ac463de983
 autopilot_ticked: 3
 gate_summary: >-

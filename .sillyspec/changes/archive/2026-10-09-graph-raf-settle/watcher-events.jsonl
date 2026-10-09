@@ -1,0 +1,25 @@
+{"ts":1791503308676,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791503308676,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791503309161,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/knowledge/__tests__/graph-canvas.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503323219,"kind":"commit","stage":null,"detail":"62bf606a9","provisional":true}
+{"ts":1791503326832,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791503326832,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791503327255,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-09-graph-raf-settle/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503332779,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791503333950,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791503333950,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true}
+{"ts":1791503347354,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791503347354,"kind":"commit","stage":null,"detail":"09f4c5344","provisional":true}
+{"ts":1791503350977,"kind":"gate-run","stage":"verify","detail":"门实测 passed（2.9s） · 20261008234909","provisional":true}
+{"ts":1791503771893,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791503771893,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791503788646,"kind":"commit","stage":null,"detail":"04477570f","provisional":true}
+{"ts":1791503854932,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/runtime-handler.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503864977,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/knowledge-governance-handler.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503897922,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/src/runtime-handler.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503901111,"kind":"commit","stage":null,"detail":"3a1d383bf","provisional":true}
+{"ts":1791503914597,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-09-graph-raf-settle/review.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791503917762,"kind":"commit","stage":null,"detail":"4fa6ce567","provisional":true}
+{"ts":1791504108492,"kind":"commit","stage":null,"detail":"e39d59609","provisional":true}
+{"ts":1791504112162,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-09-graph-raf-settle/change-patch.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791504220416,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
