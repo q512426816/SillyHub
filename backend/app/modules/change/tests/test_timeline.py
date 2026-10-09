@@ -356,3 +356,32 @@ async def test_timeline_task_time_stage_prefix_and_cursor_break(db_session, tmp_
         ws2.id, change2.id, uuid.uuid4()
     )
     assert all(t.time is None for t in result2.tasks)
+
+
+async def test_timeline_task_time_skips_non_tasks_stage(db_session, tmp_path: Path) -> None:
+    """非 tasks 域勾选计数不污染任务时刻推断（2026-10-09 实证钉：
+    2026-10-09-workspace-init-skill-gate 五任务全列表同秒 ≈10:00:48 且早于
+    tasks.md 诞生——「design · checked 0→6」实为 design.md 自审清单 6 勾，
+    CLI inferFlipTimes 有 stage 白名单，Python 移植补齐同款过滤）。"""
+    spec_root = tmp_path / "case-c" / "spec-root8"
+    _seed_change_dir(spec_root)
+    ws = await _make_ws(db_session, spec_root)
+    change = await _make_change(db_session, ws)
+    # 实证事件序列（ts 为 UTC；02:00:48Z=本地 10:00:48）：
+    # design 自审清单 → tasks.md 批勾 0→5 → 回退后逐拍补勾（首拍 1→2）。
+    await _add_event(db_session, ws.id, "2026-10-09T02:00:48Z", "task-done", "design · checked 0→6")
+    await _add_event(db_session, ws.id, "2026-10-09T02:28:52Z", "task-done", "tasks · checked 0→5")
+    await _add_event(db_session, ws.id, "2026-10-09T02:33:23Z", "task-done", "tasks · checked 1→2")
+    await db_session.commit()
+
+    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
+        ws.id, change.id, uuid.uuid4()
+    )
+    # design 事件被跳过（未修代码会把它赋给全部任务且游标跳 6 致后续断裂——
+    # 全部任务停在 02:00:48）；「tasks · checked 0→5」一拍覆盖 tasks.md 前 3 行，
+    # 后续 1→2 因 from=1≠游标 5 断裂，task-03 未勾本就不推断。
+    assert result.tasks[0].time == "2026-10-09T02:28:52Z"
+    assert result.tasks[1].time == "2026-10-09T02:28:52Z"
+    assert result.tasks[2].time is None
+    for t in result.tasks:
+        assert t.time != "2026-10-09T02:00:48Z"
