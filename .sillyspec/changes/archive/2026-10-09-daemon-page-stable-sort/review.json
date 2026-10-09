@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-daemon-page-stable-sort",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "d05aa105bed8ad32d2745d42ebd72f26e20a4ea0",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "[informational] 评审基准偏移：实际 HEAD 为 1c4acf7a8a146975c41d153750f28c5054d58ac0，标注的 d05aa105 之上有两个不相关前端提交",
+      "evidence": "git log 显示 d05aa105 之后仅有 8561bb664/1c4acf7a8 两个 ws-create-spec-default-collapse 前端提交；git diff --stat 75c673dbd..d05aa105b -- backend frontend 仅触达本变更 3 个后端文件；工作区 service.py/queries.py/test_machines_router.py 实态与 change.patch 逐行一致，故不影响任何结论，仅作基准留痕",
+      "location": "git log / git diff --stat 75c673dbd..d05aa105b"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok；边界已裁决：可接受——排序键换为不可变/单调键（展示名+id、created_at+id），心跳乱序/迟到不再影响行序；披露的『别名修改（PATCH /machines/{id}）会改变排序位置属合理语义』裁决可接受：alias 是用户可控展示名，重排与卡片头展示同口径，无数据正确性风险",
+    "并发": "ok；边界已裁决：可接受——diff 为纯 ORDER BY 调整零新写入，心跳 UPDATE 与 SELECT 并发行为同旧；list_machines 进入时的 cleanup_stale_runtimes 为既有逻辑未触碰",
+    "切换": "ok；边界已裁决：可接受——未引入缓存/内存序等任何状态（diff 仅改 SQL order_by 与测试），请求中断无残留；前端 react-query 整体替换缓存与稳定响应序自洽",
+    "作用域": "ok；边界已裁决：可接受——排序作用于既有人员/工作区过滤后的单次查询结果集；披露的『借用派发链路 last_heartbeat_at DESC 是功能性选优不动』裁决可接受：resolve_granted_daemon_for_borrow 保留 DESC NULLS LAST LIMIT 1（queries.py:419）是选最近心跳在线 runtime 的功能语义而非展示排序，不修反而正确；『前端各消费方不依赖机器行序』弱验证可接受：前端零改动且从乱跳到稳定只会更可预期，无正确性风险"
+  },
+  "reviewedAt": "2026-10-09T16:00:00+00:00"
+}

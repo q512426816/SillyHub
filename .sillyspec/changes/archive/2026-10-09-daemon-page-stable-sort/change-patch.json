@@ -1,0 +1,97 @@
+{
+  "change": "2026-10-09-daemon-page-stable-sort",
+  "baseline": "75c673dbd7318ab531427252bd3805712f97c2e9",
+  "head": "d05aa105bed8ad32d2745d42ebd72f26e20a4ea0",
+  "files": [
+    ".sillyspec/changes/2026-10-09-daemon-page-stable-sort/design.md",
+    ".sillyspec/changes/2026-10-09-daemon-page-stable-sort/flow-state.yaml",
+    ".sillyspec/changes/2026-10-09-daemon-page-stable-sort/proposal.md",
+    ".sillyspec/changes/2026-10-09-daemon-page-stable-sort/requirements.md",
+    ".sillyspec/changes/2026-10-09-daemon-page-stable-sort/tasks.md",
+    "backend/app/modules/daemon/grants/queries.py",
+    "backend/app/modules/daemon/runtime/service.py",
+    "backend/app/modules/daemon/tests/test_machines_router.py"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 350,
+    "deletions": 31
+  },
+  "savedAt": "2026-10-09T15:15:09.569Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "75c673dbd7318ab531427252bd3805712f97c2e9",
+    "totals": {
+      "files": 3,
+      "additions": 155,
+      "deletions": 31
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/grants/queries.py",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/runtime/service.py",
+        "additions": 26,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_machines_router.py",
+        "additions": 123,
+        "deletions": 23,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6be2bbe07de81294e87a3d6059c32c6d2c4f369917bd77bb35f2e1692d76a902",
+  "patchStatus": "ok"
+}

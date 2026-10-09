@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-daemon-page-stable-sort",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-daemon-page-stable-sort"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machines_router.py「test_machines_nested_runtimes_same_provider_stable_order」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-daemon-page-stable-sort"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machines_router.py「test_machines_shared_to_me_runtimes_same_provider_stable_order」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-daemon-page-stable-sort"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc + test_machines_nested_runtimes_same_provider_stable_order + test_machines_shared_to_me_runtimes_same_provider_stable_order」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-daemon-page-stable-sort"
+    }
+  ]
+}

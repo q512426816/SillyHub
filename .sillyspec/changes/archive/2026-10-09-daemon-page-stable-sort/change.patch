@@ -1,0 +1,513 @@
+diff --git a/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/flow-state.yaml b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/flow-state.yaml
+new file mode 100644
+index 000000000..e59649e20
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/flow-state.yaml
+@@ -0,0 +1,26 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  守护进程页面（/runtimes）机器卡与机器内 agent 卡每次刷新排序乱跳，要固定排序。
++
++  根因（已定位）：后端 list_machines 主查询 ORDER BY last_heartbeat_at DESC（每次心跳都更新，机器间先后随时翻转）；机器内 runtimes 二次查询仅 ORDER BY provider（同
++  provider 并列时顺序不定）；共享给我的 runtimes 查询同款并列问题。
++
++  成功标准：
++
++  - /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
++
++  - 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
++
++  - 共享给我的区块内 runtimes 明细同口径加 tiebreaker
++
++  - 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
++autopilot: true
++baseline_commit: 75c673dbd7318ab531427252bd3805712f97c2e9
++updatedAt: '2026-10-09T15:01:34.831Z'
++baseline_sha256: d3bbffe6d219646e85d3077ddf387dade19778c41adcdd74390f85f74ae1c4cf
++
+diff --git a/backend/app/modules/daemon/grants/queries.py b/backend/app/modules/daemon/grants/queries.py
+index cd2e21bbe..8ed115950 100644
+--- a/backend/app/modules/daemon/grants/queries.py
++++ b/backend/app/modules/daemon/grants/queries.py
+@@ -254,7 +254,8 @@ async def list_machines_shared_to_me(
+     task-13：每行附带该机器的 runtime 明细（``runtimes``）——会话创建按
+     runtime 粒度，前端锁 runtime_id / picker 选引擎需要机器→引擎清单。二次
+     查询一次 IN 本页 machine_ids（N+1 规避，对齐 list_machines 先例），按
+-    provider 升序保证输出稳定可测。
++    provider 升序 + created_at/id tiebreaker 保证输出稳定可测（同 provider
++    并列时顺序固定，2026-10-09-daemon-page-stable-sort）。
+ 
+     排序 hostname → machine_id → lender，保证分页/快照稳定可测。
+     """
+@@ -313,8 +314,12 @@ async def list_machines_shared_to_me(
+                     select(DaemonRuntime)
+                     .where(col(DaemonRuntime.daemon_instance_id).in_(machine_ids))
+                     .order_by(
++                        # provider 后接 created_at/id tiebreaker（2026-10-09-daemon-page-stable-sort）：
++                        # 同 provider 并列时 DB 返回顺序不定，前端「共享给我的」agent 明细随刷新乱跳。
+                         col(DaemonRuntime.daemon_instance_id),
+                         col(DaemonRuntime.provider),
++                        col(DaemonRuntime.created_at),
++                        col(DaemonRuntime.id),
+                     )
+                 )
+             )
+diff --git a/backend/app/modules/daemon/runtime/service.py b/backend/app/modules/daemon/runtime/service.py
+index 33b3c3f9f..06802fc43 100644
+--- a/backend/app/modules/daemon/runtime/service.py
++++ b/backend/app/modules/daemon/runtime/service.py
+@@ -1464,11 +1464,15 @@ class RuntimeService:
+         - WHERE：``q``（max 200）ILIKE ``%q%`` 命中 hostname/display_alias + EXISTS
+           子查询（该机器任一 runtime 的 provider ILIKE）；``status`` 精确匹配
+           ``instance.status``；``provider`` EXISTS 子查询（含该 provider 的机器）。
+-        - ORDER BY：online 优先（case status=='online' → 0）→ last_heartbeat_at DESC。
++        - ORDER BY：online 优先（case status=='online' → 0）→ 展示名
++          ``coalesce(display_alias, hostname)`` 升序 → ``id`` 升序
++          （2026-10-09-daemon-page-stable-sort：旧 ``last_heartbeat_at DESC`` 随每次
++          心跳翻转，前端 15s 轮询刷新时机器卡顺序乱跳；展示名与机器卡头同口径）。
+         - 二次查询（N+1 规避，constraints）：本页 instance_ids → 一次性
+-          ``select(DaemonRuntime).where(daemon_instance_id IN ids).order_by(provider)``，
+-          Python 按 instance_id 分组成 dict；0-runtime 机器该键缺失，router 用
+-          ``.get(id, [])`` 兜底（D-003）。
++          ``select(DaemonRuntime).where(daemon_instance_id IN ids).order_by(
++          provider, created_at, id)``（provider 后接稳定 tiebreaker，同 provider
++          多 runtime 顺序固定），Python 按 instance_id 分组成 dict；0-runtime
++          机器该键缺失，router 用 ``.get(id, [])`` 兜底（D-003）。
+         - 不内联用量（D-004：用量走 ``/runtimes/usage``，前端按 instance 分组聚合）。
+         - 2026-08-28-daemon-agent-share task-07：末位附加 ``shared_to_me`` 行
+           （design §5 Phase 2.2）——共享机器独立成块不混入 items，items 的
+@@ -1524,7 +1528,9 @@ class RuntimeService:
+         total = int((await self._session.scalar(total_stmt)) or 0)
+ 
+         # ── 主查询：JOIN users + WHERE/ORDER/LIMIT/OFFSET ─────────────────────
+-        # online 优先（case 0）→ last_heartbeat_at DESC（design §5.1 排序上提到 SQL）。
++        # online 优先（case 0）保留（design §5.1）；组内改按展示名升序 + id 兜底
++        # （2026-10-09-daemon-page-stable-sort）：last_heartbeat_at 每次心跳都更新，
++        # 作排序键会让前端 15s 轮询刷新时机器卡顺序乱跳；hostname 非空，coalesce 恒非 NULL。
+         order_expr = case(
+             (col(DaemonInstance.status) == "online", 0),
+             else_=1,
+@@ -1532,7 +1538,13 @@ class RuntimeService:
+         rows_stmt = (
+             select(DaemonInstance, User)
+             .outerjoin(User, DaemonInstance.user_id == User.id)
+-            .order_by(order_expr, col(DaemonInstance.last_heartbeat_at).desc())
++            .order_by(
++                order_expr,
++                func.coalesce(
++                    col(DaemonInstance.display_alias), col(DaemonInstance.hostname)
++                ).asc(),
++                col(DaemonInstance.id),
++            )
+             .limit(limit)
+             .offset(offset)
+         )
+@@ -1551,7 +1563,14 @@ class RuntimeService:
+                     await self._session.execute(
+                         select(DaemonRuntime)
+                         .where(col(DaemonRuntime.daemon_instance_id).in_(instance_ids))
+-                        .order_by(col(DaemonRuntime.provider))
++                        .order_by(
++                            # provider 升序 + created_at/id tiebreaker（2026-10-09-daemon-page-stable-sort）：
++                            # 仅按 provider 排序时同 provider 多 runtime 的 DB 返回顺序不定，
++                            # 前端 agent 卡随刷新乱跳；nulls_last 对齐 SQLite/PG 的 NULL 位置差异。
++                            col(DaemonRuntime.provider).asc().nulls_last(),
++                            col(DaemonRuntime.created_at),
++                            col(DaemonRuntime.id),
++                        )
+                     )
+                 )
+                 .scalars()
+diff --git a/backend/app/modules/daemon/tests/test_machines_router.py b/backend/app/modules/daemon/tests/test_machines_router.py
+index 18d658904..c5e4c3177 100644
+--- a/backend/app/modules/daemon/tests/test_machines_router.py
++++ b/backend/app/modules/daemon/tests/test_machines_router.py
+@@ -4,7 +4,8 @@
+ 覆盖 FR-1 / FR-2 / FR-3 / FR-8 + D-001 / D-002 / D-003 / D-007：
+ 
+ - GET /machines：机器级分页（D-007）、``q``/``status``/``provider``/``user_id`` 筛选、
+-  online 优先 → last_heartbeat_at DESC 排序、admin 全局 / 普通用户仅自己、派生字段
++  online 优先 → 展示名 coalesce(display_alias, hostname) 升序排序（2026-10-09-daemon-page-stable-sort，
++  旧 last_heartbeat_at DESC 随心跳翻转让刷新乱序）、admin 全局 / 普通用户仅自己、派生字段
+   ``runtime_count``/``online_runtime_count``、0-runtime 机器边界（D-003）。
+ - PATCH /machines/{id}：display_alias set/clear/省略、越权→404、不存在→404、0-runtime
+   机器可改（D-001）。
+@@ -165,7 +166,10 @@ async def _create_runtime(
+     allowed_roots: list[str] | None = None,
+     daemon_instance_id: uuid.UUID | None = None,
+     last_heartbeat_at: datetime | None = None,
++    created_at: datetime | None = None,
+ ) -> DaemonRuntime:
++    # created_at：2026-10-09-daemon-page-stable-sort 排序用例需要显式控制
++    # 同 provider 多 runtime 的创建先后（tiebreaker 断言依据）。
+     rt = DaemonRuntime(
+         id=uuid.uuid4(),
+         user_id=user_id,
+@@ -176,6 +180,7 @@ async def _create_runtime(
+         allowed_roots=allowed_roots,
+         daemon_instance_id=daemon_instance_id,
+         last_heartbeat_at=last_heartbeat_at or datetime.now(UTC),
++        created_at=created_at or datetime.now(UTC),
+     )
+     session.add(rt)
+     await session.commit()
+@@ -411,13 +416,35 @@ async def test_machines_user_id_admin_filters_by_owner(
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_machines_sort_online_first_then_heartbeat_desc(
++async def test_machines_sort_online_first_then_display_name_asc(
+     client: AsyncClient, db_session: AsyncSession
+ ) -> None:
+-    """FR-1 / D-002：排序 online 优先 → last_heartbeat_at DESC。"""
++    """FR-1 / D-002 / 2026-10-09-daemon-page-stable-sort：排序 online 优先 → 展示名
++    ``coalesce(display_alias, hostname)`` 升序 → id 兜底；``last_heartbeat_at`` 不再
++    参与排序（旧键每次心跳翻转，前端 15s 轮询刷新时机器卡乱序）。"""
+     admin, user_a, _ = await _bootstrap(db_session)
+     now = datetime.now(UTC)
+-    # offline 但心跳最新（应排在所有 online 之后）
++    # online：hostname 靠后但别名 "aaa-alias" 靠前；心跳最旧（旧排序键下垫底，
++    # <45s 不会被 cleanup_stale_runtimes 收敛 offline）。
++    inst_alias = await _create_instance(
++        db_session,
++        user_a.id,
++        hostname="zulu-host",
++        display_alias="aaa-alias",
++        status="online",
++        last_heartbeat_at=now - timedelta(seconds=30),
++    )
++    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_alias.id)
++    # online：无别名（展示名=hostname），心跳最新（旧排序键下排第一）。
++    inst_plain = await _create_instance(
++        db_session,
++        user_a.id,
++        hostname="mike-host",
++        status="online",
++        last_heartbeat_at=now - timedelta(seconds=1),
++    )
++    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_plain.id)
++    # offline 但心跳全场最新（online 优先保留：仍排最后）。
+     inst_off_fresh = await _create_instance(
+         db_session,
+         user_a.id,
+@@ -426,32 +453,63 @@ async def test_machines_sort_online_first_then_heartbeat_desc(
+         last_heartbeat_at=now,
+     )
+     await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_off_fresh.id)
+-    # online 心跳较旧
+-    inst_on_old = await _create_instance(
++
++    orders: list[list[str]] = []
++    for _ in range(2):  # 连续两次请求：顺序一致（稳定排序）。
++        resp = await client.get(
++            "/api/daemon/machines?limit=10", headers=_headers(_token_for(admin))
++        )
++        assert resp.status_code == 200, resp.text
++        orders.append([it["hostname"] for it in resp.json()["items"]])
++    # online 组内按展示名升序："aaa-alias"(zulu-host) < "mike-host"——与心跳新旧
++    # 相反（zulu 最旧却第一）、也与 hostname 序相反，证明排序键是展示名而非心跳/主机名。
++    assert orders[0] == ["zulu-host", "mike-host", "off-fresh"]
++    assert orders[0] == orders[1]
++
++
++@pytest.mark.asyncio
++async def test_machines_nested_runtimes_same_provider_stable_order(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """FR-2（2026-10-09-daemon-page-stable-sort）：机器内嵌套 runtimes 按 provider
++    升序 + created_at/id tiebreaker——同 provider 多 agent（runtime 卡）顺序固定，
++    且 provider 主序不被 created_at 穿插。"""
++    admin, user_a, _ = await _bootstrap(db_session)
++    inst = await _create_instance(db_session, user_a.id, hostname="multi-agent-host")
++    t0 = datetime.now(UTC) - timedelta(minutes=10)
++    await _create_runtime(
+         db_session,
+         user_a.id,
+-        hostname="on-old",
+-        status="online",
+-        # <45s：cleanup_stale_runtimes（list_machines 进入先收敛 stale）不会改 offline；
+-        # 仍比 on-new(now-1s) 旧，用于验证 online 组内 last_heartbeat_at DESC。
+-        last_heartbeat_at=now - timedelta(seconds=30),
++        name="claude-first",
++        provider="claude",
++        daemon_instance_id=inst.id,
++        created_at=t0,
+     )
+-    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_on_old.id)
+-    # online 心跳最新（应排第一）
+-    inst_on_new = await _create_instance(
++    await _create_runtime(
+         db_session,
+         user_a.id,
+-        hostname="on-new",
+-        status="online",
+-        last_heartbeat_at=now - timedelta(seconds=1),
++        name="codex-mid",
++        provider="codex",
++        daemon_instance_id=inst.id,
++        created_at=t0 + timedelta(seconds=10),
++    )
++    await _create_runtime(
++        db_session,
++        user_a.id,
++        name="claude-second",
++        provider="claude",
++        daemon_instance_id=inst.id,
++        created_at=t0 + timedelta(seconds=20),
+     )
+-    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_on_new.id)
+ 
+-    resp = await client.get("/api/daemon/machines?limit=10", headers=_headers(_token_for(admin)))
+-    assert resp.status_code == 200, resp.text
+-    hostnames = [it["hostname"] for it in resp.json()["items"]]
+-    # online 两台在前（new 在 old 前），offline 在最后
+-    assert hostnames == ["on-new", "on-old", "off-fresh"]
++    for _ in range(2):  # 连续两次请求：顺序一致。
++        resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(admin)))
++        assert resp.status_code == 200, resp.text
++        assert len(resp.json()["items"]) == 1
++        names = [r["name"] for r in resp.json()["items"][0]["runtimes"]]
++        # provider 升序主导（codex 创建时间夹在两个 claude 之间但仍排最后），
++        # claude 组内按 created_at 升序。
++        assert names == ["claude-first", "claude-second", "codex-mid"]
+ 
+ 
+ @pytest.mark.asyncio
+@@ -1217,6 +1275,48 @@ async def test_machines_shared_to_me_block_fields_passthrough(
+     assert row_off["runtimes"] == []
+ 
+ 
++@pytest.mark.asyncio
++async def test_machines_shared_to_me_runtimes_same_provider_stable_order(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """FR-3（2026-10-09-daemon-page-stable-sort）：「共享给我的」runtimes 明细
++    同 provider 并列时按 created_at/id tiebreaker 固定顺序，连续刷新不乱跳。"""
++    _admin, user_a, user_b = await _bootstrap(db_session)
++    ws = await _create_workspace(db_session)
++    await _add_workspace_member(db_session, workspace_id=ws.id, user_id=user_a.id)
++    inst = await _seed_shared_machine(
++        db_session, lender=user_b, workspace_id=ws.id, hostname="lender-multi-host"
++    )
++    t0 = datetime.now(UTC) - timedelta(minutes=10)
++    rt_first = await _create_runtime(
++        db_session,
++        user_b.id,
++        name="claude-first",
++        provider="claude",
++        daemon_instance_id=inst.id,
++        created_at=t0,
++    )
++    rt_second = await _create_runtime(
++        db_session,
++        user_b.id,
++        name="claude-second",
++        provider="claude",
++        daemon_instance_id=inst.id,
++        created_at=t0 + timedelta(seconds=5),
++    )
++
++    expected = [
++        {"runtime_id": str(rt_first.id), "provider": "claude", "online": True},
++        {"runtime_id": str(rt_second.id), "provider": "claude", "online": True},
++    ]
++    for _ in range(2):  # 连续两次请求：明细顺序一致。
++        resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(user_a)))
++        assert resp.status_code == 200, resp.text
++        shared = resp.json()["shared_to_me"]
++        assert len(shared) == 1 and shared[0]["machine_id"] == str(inst.id)
++        assert shared[0]["runtimes"] == expected
++
++
+ @pytest.mark.asyncio
+ async def test_machines_shared_to_me_empty_without_membership_or_enabled(
+     client: AsyncClient, db_session: AsyncSession
+diff --git a/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/design.md b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/design.md
+new file mode 100644
+index 000000000..496d4a1e4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T15:01:05.476Z
++---
++# 设计记录（Design Record）— 2026-10-09-daemon-page-stable-sort
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题根因在后端排序键选择：`/api/daemon/machines`（守护进程页面唯一数据源，前端 15s 轮询）主查询 `ORDER BY case(online→0), last_heartbeat_at DESC`——`last_heartbeat_at` 每次心跳（约 15s 一跳）都被 UPDATE，机器间相对先后随时翻转，页面刷新即乱序；嵌套 runtimes 二次查询仅 `ORDER BY provider`，同 provider 多 agent 并列时 DB 返回顺序不定，agent 卡随之乱跳。
++
++修法：把机器列表排序键换成不变的稳定键——保留 design §5.1 的 online 优先分组，组内改按展示名 `coalesce(display_alias, hostname)` 升序（与机器卡头展示名同口径，用户可预期），`id` 升序兜底保证全序确定；嵌套 runtimes 与「共享给我的」明细查询在 provider 之后追加 `created_at, id` tiebreaker。前端零改动（顺序随响应走），无 API 形状变化。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `backend/app/modules/daemon/runtime/service.py::RuntimeService.list_machines`：内部行为变化——主查询 ORDER BY 由 `online 优先, last_heartbeat_at DESC` 改为 `online 优先, coalesce(display_alias, hostname) ASC, id ASC`；嵌套 runtimes 查询 ORDER BY 由 `provider` 改为 `provider ASC NULLS LAST, created_at ASC, id ASC`。返回结构（rows/runtimes_by_instance/total/shared）与函数签名零变化。
++- `backend/app/modules/daemon/grants/queries.py::list_machines_shared_to_me`：内部行为变化——runtimes 明细二次查询在 `daemon_instance_id, provider` 后追加 `created_at, id`。返回类型零变化。
++- 对外 HTTP 契约：GET /api/daemon/machines 响应字段、状态码、分页语义零变化，仅 items/runtimes 的行序稳定化（排序本就是实现细节，OpenAPI 不含排序承诺，`api-types.ts` 无需再生成）。
++- 借用派发链路（`resolve_granted_daemon_for_borrow` 的 `last_heartbeat_at DESC LIMIT 1`、session 侧 `_query_online`）是功能性选优不是展示排序，本变更不动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立。排序键改为 coalesce(别名/主机名)+id、created_at+id 后均为不可变或单调字段，心跳乱序/迟到到达不再影响行序；别名被用户修改（PATCH /machines/{id}）会改变该机器的排序位置，属用户可见的合理语义变化。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   纯读路径排序调整，无新写入；心跳 UPDATE 与列表 SELECT 并发时行为同旧（读到提交后的快照），不再出现因心跳更新导致的行序抖动。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全。无状态引入（无缓存/内存序），请求中途中断无残留；前端 react-query 缓存仍按响应整体替换，无增量合并问题。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会。排序作用于单次查询结果集，受既有人员/工作区过滤约束；「共享给我的」块行序仍由 grants 查询独立决定，与 items 块互不影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险是排序语义变化对依赖旧行为的调用方的破坏——已排查：前端 runtimes 页及各消费方（工作区概览/悬浮抽屉/移动端）均不依赖机器行序（渲染直接 map），仅 `test_machines_sort_online_first_then_heartbeat_desc` 断言旧序，随本变更同步改写。SQLite（测试）与 PostgreSQL（生产）对 `coalesce` 与多列 ORDER BY 语义一致；provider NULL 的 ASC 排序两方言默认相反（SQLite NULL 在前、PG 在后），故显式 `nulls_last()` 对齐（先例 grants/queries.py:414）。试过放弃的方案：继续按 last_heartbeat_at 排序但前端做二次稳定排序——放弃，双端各排一半、缓存替换时仍会闪跳，且「最近心跳优先」对单用户多机场景无信息量；改按 created_at 排机器——放弃，老机器永远沉底，用户新装机排最前反而难找，展示名升序是唯一可预期口径。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/daemon/runtime/service.py | list_machines 主查询排序键换展示名+id；嵌套 runtimes 加 created_at/id tiebreaker；docstring 同步 |
++| 修改 | backend/app/modules/daemon/grants/queries.py | list_machines_shared_to_me 的 runtimes 明细查询加 created_at/id tiebreaker |
++| 修改 | backend/app/modules/daemon/tests/test_machines_router.py | 旧排序用例改写为展示名升序语义；新增机器内/共享区块同 provider 稳定序两个用例；_create_runtime 加 created_at 参数；文件头注释同步 |
+diff --git a/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/proposal.md b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/proposal.md
+new file mode 100644
+index 000000000..b82bb631e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T15:01:05.475Z
++---
++# 提案书（Proposal）— 2026-10-09-daemon-page-stable-sort
++
++## 动机
++
++任务原话转写：守护进程页面（/runtimes）机器卡与机器内 agent 卡每次刷新排序乱跳，要固定排序。
++根因（已定位）：后端 list_machines 主查询 ORDER BY last_heartbeat_at DESC（每次心跳都更新，机器间先后随时翻转）；机器内 runtimes 二次查询仅 ORDER BY provider（同 provider 并列时顺序不定）；共享给我的 runtimes 查询同款并列问题。
++成功标准：
++- /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
++- 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
++- 共享给我的区块内 runtimes 明细同口径加 tiebreaker
++- 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
++2. 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
++3. 共享给我的区块内 runtimes 明细同口径加 tiebreaker
++4. 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
++
++## 成功标准（可验证）
++
++1. /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
++2. 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
++3. 共享给我的区块内 runtimes 明细同口径加 tiebreaker
++4. 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
+diff --git a/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/requirements.md b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/requirements.md
+new file mode 100644
+index 000000000..37bd9f307
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/requirements.md
+@@ -0,0 +1,66 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T15:01:05.475Z
++---
++# 需求规格（Requirements）— 2026-10-09-daemon-page-stable-sort
++
++## 功能需求
++
++### FR-01: /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
++
++- 后端 `list_machines` 主查询必须按「online 优先 → 展示名 `coalesce(display_alias, hostname)` 升序 → `id` 升序」排序，禁止再以 `last_heartbeat_at` 作为机器列表排序键（每次心跳都更新该字段，导致前端 15s 轮询刷新时机器卡顺序乱跳）。
++
++#### 场景：机器卡顺序不随心跳翻转
++
++- Given 同一用户两台 online 机器 A、B，A 的心跳时间比 B 新
++- When 前端连续两次调用 GET /api/daemon/machines（期间 A、B 均有新心跳，先后次序互换）
++- Then 两次响应中 items 的机器顺序一致，均按展示名升序排列
++
++#### 场景：online 优先保留
++
++- Given 一台 offline 机器（即使心跳时间最新）与多台 online 机器
++- When 调用 GET /api/daemon/machines
++- Then online 机器全部排在 offline 机器之前，组内按展示名升序
++
++#### 场景：别名参与排序
++
++- Given 机器 hostname 为 "zeta-host"，display_alias 为 "alpha 别名"
++- When 调用 GET /api/daemon/machines
++- Then 该机器按 "alpha 别名"（而非 hostname）参与排序位置计算，与卡片头展示名一致
++
++### FR-02: 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
++
++- `list_machines` 的嵌套 runtimes 二次查询必须按「provider 升序（NULL 靠后）→ `created_at` 升序 → `id` 升序」排序，保证同 provider 多个 agent（runtime 卡）在多次刷新间顺序固定。
++
++#### 场景：同 provider 多 agent 顺序固定
++
++- Given 一台机器下两个 provider 均为 "claude" 的 runtime，created_at 先后不同
++- When 连续两次调用 GET /api/daemon/machines
++- Then 该机器嵌套 runtimes 数组中两个 claude runtime 的先后顺序两次一致（按 created_at 升序）
++
++### FR-03: 共享给我的区块内 runtimes 明细同口径加 tiebreaker
++
++- `grants/queries.list_machines_shared_to_me` 的 runtimes 明细二次查询必须在既有 `daemon_instance_id, provider` 排序后追加 `created_at, id` tiebreaker，保证「共享给我的」区块内 agent 明细顺序在多次刷新间固定。
++
++#### 场景：共享机器 agent 明细顺序固定
++
++- Given 一台共享机器下两个同 provider 的 runtime
++- When 连续两次调用 GET /api/daemon/machines
++- Then 响应 shared_to_me 块中该机器 runtimes 明细顺序两次一致
++
++### FR-04: 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
++
++- 本变更必须新增覆盖 FR-01/02/03 排序稳定性的后端测试，并同步更新既有排序断言（`test_machines_sort_online_first_then_heartbeat_desc` 断言的是被本变更废止的旧排序键），本变更触达的模块测试必须全部通过；禁止跑全量测试（CI 负责）。
++
++#### 场景：排序行为有回归保护
++
++- Given 排序实现被误改回按 last_heartbeat_at 排序
++- When 运行 test_machines_router.py 排序用例
++- Then 用例失败（断言展示名升序与心跳无关）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc」
++FR-02: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_nested_runtimes_same_provider_stable_order」
++FR-03: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_shared_to_me_runtimes_same_provider_stable_order」
++FR-04: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc + test_machines_nested_runtimes_same_provider_stable_order + test_machines_shared_to_me_runtimes_same_provider_stable_order」
+diff --git a/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/tasks.md b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/tasks.md
+new file mode 100644
+index 000000000..6e3ca4df0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-daemon-page-stable-sort/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T15:01:05.476Z
++---
++# 任务注册表（Tasks）— 2026-10-09-daemon-page-stable-sort
++
++- [x] task-01: 改 runtime/service.py list_machines 主查询排序：online 优先保留，`last_heartbeat_at DESC` 换成 `coalesce(display_alias, hostname) ASC, id ASC`，同步 docstring/行内注释。验证：pytest test_machines_router.py 排序用例（改写后）通过
++- [x] task-02: 改 list_machines 嵌套 runtimes 二次查询：`provider` 后追加 `created_at ASC, id ASC`（provider 显式 nulls_last 对齐方言）。验证：新增同 provider 稳定序用例通过
++- [x] task-03: 改 grants/queries.py list_machines_shared_to_me 的 runtimes 明细查询：追加 `created_at, id` tiebreaker。验证：新增 shared 明细稳定序用例通过
++- [x] task-04: 测试收口：改写 test_machines_sort_online_first_then_heartbeat_desc 为展示名升序语义 + 新增两个稳定序用例 + 文件头注释同步；跑本变更触达的相关测试文件全绿

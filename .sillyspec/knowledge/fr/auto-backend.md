@@ -296,3 +296,79 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-09-timeline-tick-stage-filter
   status: active
+
+## FR-auto-backend-138 /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
+变更：2026-10-09-daemon-page-stable-sort
+状态：active
+摘要：机器卡顺序不随心跳翻转；online 优先保留；别名参与排序
+全文：.sillyspec/changes/archive/2026-10-09-daemon-page-stable-sort/requirements.md#FR-01
+最近确认：4ce2c98e6e18c17b277ae923ca5c957fd5228455
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-daemon-page-stable-sort
+  status: active
+
+## FR-auto-backend-139 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
+变更：2026-10-09-daemon-page-stable-sort
+状态：active
+摘要：同 provider 多 agent 顺序固定
+全文：.sillyspec/changes/archive/2026-10-09-daemon-page-stable-sort/requirements.md#FR-02
+最近确认：4ce2c98e6e18c17b277ae923ca5c957fd5228455
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_nested_runtimes_same_provider_stable_order」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-daemon-page-stable-sort
+  status: active
+
+## FR-auto-backend-140 共享给我的区块内 runtimes 明细同口径加 tiebreaker
+变更：2026-10-09-daemon-page-stable-sort
+状态：active
+摘要：共享机器 agent 明细顺序固定
+全文：.sillyspec/changes/archive/2026-10-09-daemon-page-stable-sort/requirements.md#FR-03
+最近确认：4ce2c98e6e18c17b277ae923ca5c957fd5228455
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_shared_to_me_runtimes_same_provider_stable_order」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-daemon-page-stable-sort
+  status: active
+
+## FR-auto-backend-141 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
+变更：2026-10-09-daemon-page-stable-sort
+状态：active
+摘要：排序行为有回归保护
+全文：.sillyspec/changes/archive/2026-10-09-daemon-page-stable-sort/requirements.md#FR-04
+最近确认：4ce2c98e6e18c17b277ae923ca5c957fd5228455
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-daemon-page-stable-sort:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_machines_router.py「test_machines_sort_online_first_then_display_name_asc + test_machines_nested_runtimes_same_provider_stable_order + test_machines_shared_to_me_runtimes_same_provider_stable_order」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-daemon-page-stable-sort
+  status: active

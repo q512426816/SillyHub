@@ -1959,3 +1959,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
 理由：- 最大风险：默认策略从「平台托管（不碰源项目）」翻转为「源项目即真理（扫描直接写源项目）」，新工作区默认行为变为写源项目 `.sillyspec`——已有 ⚠ 警示文案在收起态也保持可见（FR-05）来对冲用户无感知的风险；这是用户明确要求的默认值，属预期行为变化。 - 放弃的方案：CSS `display:none` 隐藏前两选项（不满足 FR-03 的 DOM 移除要求，且屏幕阅读器仍可聚焦）；把 spec 策略挪进独立的「高级设置」二级弹窗（改动面大、移动端无对应容器形态，收益低）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-daemon-page-stable-sort
+锚点：未记录
+最近确认：4ce2c98e6e18c17b277ae923ca5c957fd5228455
+理由：最大风险是排序语义变化对依赖旧行为的调用方的破坏——已排查：前端 runtimes 页及各消费方（工作区概览/悬浮抽屉/移动端）均不依赖机器行序（渲染直接 map），仅 `test_machines_sort_online_first_then_heartbeat_desc` 断言旧序，随本变更同步改写。SQLite（测试）与 PostgreSQL（生产）对 `coalesce` 与多列 ORDER BY 语义一致；provider NULL 的 ASC 排序两方言默认相反（SQLite NULL 在前、PG 在后），故显式 `nulls_last()` 对齐（先例 grants/queries.py:414）。试过放弃的方案：继续按 last_heartbeat_at 排序但前端做二次稳定排序——放弃，双端各排一半、缓存替换时仍会闪跳，且「最近心跳优先」对单用户多机场景无信息量；改按 created_at 排机器——放弃，老机器永远沉底，用户新装机排最前反而难找，展示名升序是唯一可预期口径。

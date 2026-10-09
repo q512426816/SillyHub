@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -21,6 +29,13 @@ input: >-
   - 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
 autopilot: true
 baseline_commit: 75c673dbd7318ab531427252bd3805712f97c2e9
-updatedAt: '2026-10-09T15:01:34.831Z'
+updatedAt: '2026-10-09T15:21:02.808Z'
 baseline_sha256: d3bbffe6d219646e85d3077ddf387dade19778c41adcdd74390f85f74ae1c4cf
+gate_summary: >-
+  test: passed ← module[]+deps(py27)（155.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009151451\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009151451\test-result.json｜门文件
+  4 个
 
