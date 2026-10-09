@@ -512,7 +512,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
   });
 
-  it("知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href", async () => {
+  it("知识触达组：统一文案（在途/归档同口径）并带知识库 file+anchor 深链 href", async () => {
+    // 2026-10-09-knowledge-touch-marker-sunset：标题不再分裂归档/实时双口径，
+    // 悬停说明注入命中留痕口径；禁止「待复核」「以标记为准」字样。
     mockGet.mockResolvedValue({
       ...FULL,
       knowledge_touch: [
@@ -527,23 +529,26 @@ describe("ChangeAssetsCard 资产透明面", () => {
     await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
-    // 标题用用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。
-    expect(group).toHaveTextContent("知识触达（本变更参考过的知识）");
-    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
-      "标记反查",
-    );
+    expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
+    const tooltip = group.querySelector("span[title]")?.getAttribute("title") ?? "";
+    expect(tooltip).toContain("注入");
+    expect(tooltip).not.toContain("待复核");
+    expect(tooltip).not.toContain("以标记为准");
+    // id≠title 的锚点条目：双栏各显示一份，挂在文件组头下。
     expect(group).toHaveTextContent("FR-auto-backend-015");
     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
-    const link = group.querySelector("a");
+    const link = group.querySelector(
+      '[data-testid="change-assets-touch-group-knowledge/fr/auto-backend.md"] a[href*="anchor="]',
+    );
     expect(link).not.toBeNull();
     expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
       "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
     );
   });
 
-  it("在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）", async () => {
-    // 2026-09-28-knowledge-touch-live：在途（archived=false）也能有触达——数据来自
-    // knowledge_hits inject 行（后端合并），标题尾标「实时」提示记录仍在增长。
+  it("在途变更知识触达：同 slug 只显示一份（id==title 不连排两遍）", async () => {
+    // 2026-09-28-knowledge-touch-live 起在途即有触达（knowledge_hits inject 行）；
+    // 2026-10-09-knowledge-touch-marker-sunset：live 行 id==title——单份渲染。
     mockGet.mockResolvedValue({
       ...FULL,
       archived: false,
@@ -555,18 +560,51 @@ describe("ChangeAssetsCard 资产透明面", () => {
     await screen.findByRole("button", { name: /沉淀资产/ });
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
-    expect(group).toHaveTextContent("知识触达（本变更参考过的知识 · 实时）");
-    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
-      "实时记录",
+    // 在途与归档同文案（无「· 实时」尾标分裂）。
+    expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
+    // slug 恰好出现一次（改前 id+title 双栏连排两遍）。
+    expect((group.textContent?.match(/-audit_hooks-只在测试/g) ?? []).length).toBe(1);
+    // 锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
+    const link = group.querySelector(
+      '[data-testid="change-assets-touch-group-known-issues.md"] a[href*="anchor="]',
     );
-    expect(group).toHaveTextContent("-audit_hooks-只在测试");
-    // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
-    const link = group.querySelector("a");
     expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
       "file=known-issues.md&anchor=-audit_hooks-",
     );
     // 在途引导空态不出现（已有触达数据）
     expect(screen.queryByTestId("change-assets-inflight")).toBeNull();
+  });
+
+  it("知识触达分组：整文件路由收拢 chip（链接无 anchor），锚点条目按文件分组", async () => {
+    mockGet.mockResolvedValue({
+      ...FULL,
+      knowledge_touch: [
+        { id: "fr/daemon.md", title: "fr/daemon.md", file: "fr/daemon.md" },
+        { id: "slug-a", title: "slug-a", file: "conventions.md" },
+        { id: "slug-b", title: "slug-b", file: "conventions.md" },
+        { id: "slug-c", title: "slug-c", file: "patterns.md" },
+      ],
+    });
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    const group = await screen.findByTestId("change-assets-knowledge-touch");
+    expect(group).toHaveTextContent("整文件");
+    // 整文件 chip：href 只带 file 不带 anchor（jsdom 选择器引擎不吃 %2F 编码值，
+    // 按 title 锚定元素再验 href）。
+    const chip = group.querySelector("a[title*='整文件路由注入']");
+    expect(chip).not.toBeNull();
+    expect(chip!.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
+    expect(chip!.getAttribute("href")).not.toContain("anchor=");
+    // 锚点条目按文件分组：组头计数 + 组内 slug。
+    const g1 = screen.getByTestId("change-assets-touch-group-conventions.md");
+    expect(g1).toHaveTextContent("conventions.md（2）");
+    expect(g1).toHaveTextContent("slug-a");
+    expect(g1).toHaveTextContent("slug-b");
+    const g2 = screen.getByTestId("change-assets-touch-group-patterns.md");
+    expect(g2).toHaveTextContent("slug-c");
+    // 计数含整文件与锚点条目共 4 条。
+    expect(group).toHaveTextContent("4 条");
   });
 
   it("模块触达组：chip 渲染中文名，点击打开模块文档预览弹窗（.sillyspec 前缀）", async () => {
