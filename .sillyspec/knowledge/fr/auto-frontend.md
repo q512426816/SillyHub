@@ -300,3 +300,62 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-09-graph-raf-settle
   status: active
+
+## FR-auto-frontend-136 neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
+变更：2026-10-09-graph-query-ux
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-01
+最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-query-ux:flow:测试绑定FR-01
+  tests: frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx「锚点自动选中」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-query-ux
+  status: active
+
+## FR-auto-frontend-137 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
+变更：2026-10-09-graph-query-ux
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-02
+最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-query-ux:flow:测试绑定FR-02
+  tests: frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx「sub 人话说明」用例
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-query-ux
+  status: active
+
+## FR-auto-frontend-138 sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
+变更：2026-10-09-graph-query-ux
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-03
+最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
+
+## FR-auto-frontend-139 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
+变更：2026-10-09-graph-query-ux
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-04
+最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
+
+## FR-auto-frontend-140 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
+变更：2026-10-09-graph-query-ux
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-graph-query-ux/requirements.md#FR-05
+最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b

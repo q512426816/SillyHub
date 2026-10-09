@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-graph-query-ux",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-graph-query-ux:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx「锚点自动选中」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-query-ux"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-graph-query-ux:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx「sub 人话说明」用例"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-graph-query-ux"
+    }
+  ]
+}

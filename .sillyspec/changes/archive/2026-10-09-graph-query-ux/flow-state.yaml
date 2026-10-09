@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  图谱页查询交互两处优化：①查询执行后若有锚点 anchor，默认直接选中该锚点节点（选中环+一跳高亮+右栏详情一步到位，不用再手动点）；②查询类型 sub 下拉每个选项加人话悬浮说明（title 悬浮 +
+  选中项下方一行动态说明文案，双通道保障）。
+
+
+  成功标准：
+
+  - neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
+
+  - 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
+
+  - sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
+
+  - 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
+
+  - 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
+autopilot: true
+baseline_commit: 90590bcadde0cdbfbb534cef50f6f54b39d8d92a
+updatedAt: '2026-10-09T01:10:59.634Z'
+baseline_sha256: 01f95dbca2e45249f30d00fa6b89fbe6ac208049e045c70c3d4b4183b23729e9
+autopilot_ticked: 2
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（7.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009011047\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009011047\test-result.json｜门文件
+  2 个
+

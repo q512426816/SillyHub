@@ -1,0 +1,53 @@
+{
+  "change": "2026-10-09-graph-query-ux",
+  "baseline": "90590bcadde0cdbfbb534cef50f6f54b39d8d92a",
+  "head": "0c2a8bd2264230f90dbcfc4199d33c88a325750b",
+  "files": [
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx",
+    "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx",
+    ".sillyspec/changes/2026-10-09-graph-query-ux/design.md",
+    ".sillyspec/changes/2026-10-09-graph-query-ux/proposal.md",
+    ".sillyspec/changes/2026-10-09-graph-query-ux/requirements.md",
+    ".sillyspec/changes/2026-10-09-graph-query-ux/tasks.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 212,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-09T01:10:58.217Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "patchSha256": "5f02ce22bfb79c6586ab92c14b722b0a9ea4812178449dff5c319b3b29360287",
+  "patchStatus": "ok"
+}

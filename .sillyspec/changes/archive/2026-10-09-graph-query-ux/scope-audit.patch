@@ -1,0 +1,273 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+index 37d0fac30..4ce7c5736 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+@@ -88,6 +88,17 @@ const SUB_OPTIONS: ReadonlyArray<{ value: GraphSub; label: string }> = [
+   { value: "nodes", label: "nodes · 节点搜索" },
+ ];
+ 
++/** 查询类型人话说明（title 悬浮 + 下拉下方动态行双通道，2026-10-09-graph-query-ux）。 */
++const SUB_DESCRIPTIONS: Record<string, string> = {
++  orphans: "找「没人理」的知识条目——没有任何关联指向的决策/条目，治理时补关联或清理",
++  dangling: "找「指空气」的引用——文档写了锚点但目标文件实际不存在，告诉你缺了哪个",
++  neighbors: "给一个节点，看它直接相连的都是谁（最常用：看某个决策/FR/文件周围有什么）",
++  impact: "给一个模块/文件/变更，评估动了它会波及哪些——只沿强关联最多追两层",
++  path: "给两个节点，找它们之间最短的关联链路并逐跳展示（只走强边，查不到=只有弱关联）",
++  summary: "不查具体节点，输出整张图的统计（节点/边总数、分布、治理计数）——「全图」胶囊的统计卡就是它",
++  nodes: "按名字模糊搜节点出候选列表——锚点输入框自动补全背后就是它，一般不用手动跑",
++};
++
+ /** 需要锚点的 sub（执行按钮缺锚点禁用）。 */
+ const SUB_NEEDS_ANCHOR: ReadonlySet<string> = new Set([
+   "neighbors",
+@@ -583,6 +594,32 @@ export default function KnowledgeGraphPage({ params }: Props) {
+   );
+   const nodeMap = useMemo(() => new Map(slice.nodes.map((n) => [n.id, n] as const)), [slice]);
+ 
++  // 锚点自动选中（2026-10-09-graph-query-ux）：带锚点的查询结果到达后，锚点节点
++  // 直接为选中态（选中环+一跳高亮+右栏详情）——免二次手点。guard 防同查询重复选中
++  // 与「重置后又被拉回」；锚点不在结果集（node_not_found 降级等）静默不选。
++  const autoSelectRef = useRef<string | null>(null);
++  useEffect(() => {
++    if (!activeParams?.anchor || !queryQ.data) return;
++    const sig = `${activeParams.sub}|${activeParams.anchor}|${activeParams.anchor2 ?? ""}`;
++    if (autoSelectRef.current === sig) return;
++    const data = queryQ.data.data as Record<string, unknown> | null;
++    if (!data) return;
++    // 锚点候选：用户输入 + 后端归一回填（neighbors.anchor/impact.key/path.from）
++    const candidates = [
++      activeParams.anchor,
++      typeof data.anchor === "string" ? data.anchor : undefined,
++      typeof data.key === "string" ? data.key : undefined,
++      typeof data.from === "string" ? data.from : undefined,
++    ].filter(Boolean) as string[];
++    const hit = candidates.map((c) => nodeMap.get(c)).find(Boolean);
++    if (!hit) return;
++    autoSelectRef.current = sig;
++    setSelectedId(hit.id);
++    // 仅 neighbors（锚点中心视图）自动切详情；impact/path 的价值在结果面
++    // （闭包/推理链），保持「查询结果」不抢焦点——画布选中高亮照常生效。
++    if (activeParams.sub === "neighbors") setRightTab("detail");
++  }, [activeParams, queryQ.data, nodeMap]);
++
+   // ── 高亮集：选中一跳邻域 ∪ 图例节点类型 ∪ 图例边型（原型语义合并）────────
+   const highlight = useMemo(() => {
+     const nodeIds = new Set<string>();
+@@ -842,8 +879,18 @@ export default function KnowledgeGraphPage({ params }: Props) {
+                   aria-label="查询类型"
+                   value={draft.sub}
+                   onChange={(v) => setDraft((d) => ({ ...d, sub: v }))}
+-                  options={SUB_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
++                  options={SUB_OPTIONS.map((o) => ({
++                    value: o.value,
++                    label: o.label,
++                    title: SUB_DESCRIPTIONS[o.value],
++                  }))}
+                 />
++                <span
++                  data-testid="sub-description"
++                  className="text-[10.5px] leading-4 text-muted-foreground/80"
++                >
++                  {SUB_DESCRIPTIONS[draft.sub] ?? ""}
++                </span>
+               </label>
+               <label className="flex flex-col gap-1">
+                 <span className="text-[11px] leading-4 text-muted-foreground">
+diff --git a/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx b/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
+index f5cf8b0d3..508b86378 100644
+--- a/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
+@@ -464,6 +464,37 @@ describe("锚点自动补全（D-005@v1）", () => {
+   });
+ });
+ 
++// ── 查询交互优化（2026-10-09-graph-query-ux）────────────────────────────────
++
++describe("锚点自动选中与 sub 人话说明（2026-10-09-graph-query-ux）", () => {
++  it("带锚点的 neighbors 查询执行后，锚点节点自动选中（右栏直切详情）", async () => {
++    renderPage();
++    await screen.findByTestId("full-stats");
++    // 预置「文件反查」= neighbors + 真实锚点现成形态（跳过 antd Select 交互）。
++    const presets = screen.getAllByTestId("preset-btn");
++    const fileLookup = presets.find((b) => b.textContent?.includes("文件反查"));
++    expect(fileLookup).toBeTruthy();
++    fireEvent.click(fileLookup!);
++    // 右栏自动切「节点详情」且展示锚点节点（自动选中，无需手点画布）。
++    const detail = await screen.findByText("knowledge.ts");
++    expect(detail).toBeInTheDocument();
++    expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
++      WS,
++      "neighbors",
++      expect.objectContaining({ anchor: "frontend/src/lib/knowledge.ts" }),
++    );
++  });
++
++  it("sub 下拉下方动态说明行随选中类型切换（人话文案）", async () => {
++    renderPage();
++    await screen.findByTestId("full-stats");
++    const desc = screen.getByTestId("sub-description");
++    // 切到切片态默认 orphans → 孤儿节点说明。
++    fireEvent.click(screen.getByTestId("mode-capsule-slice"));
++    expect(desc).toHaveTextContent("没人理");
++  });
++});
++
+ // ── 深链与查询面 ────────────────────────────────────────────────────────────
+ 
+ describe("深链与查询面", () => {
+diff --git a/.sillyspec/changes/2026-10-09-graph-query-ux/design.md b/.sillyspec/changes/2026-10-09-graph-query-ux/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-query-ux/design.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:59:09.043Z
++---
++# 设计记录（Design Record）— 2026-10-09-graph-query-ux
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++图谱页两处交互优化：①runQuery 后新增自动选中 effect——带锚点的查询结果到达时，锚点节点（用户输入或后端归一回填 anchor/key/from 三候选）直接置选中态；仅 neighbors 自动切「节点详情」tab（锚点中心视图），impact/path 保持「查询结果」（闭包/推理链价值所在，不抢焦点）；guard ref 按查询签名防重复选中与重置后被拉回。②SUB_DESCRIPTIONS 人话映射七条，双通道呈现：antd Select 选项 title 悬浮 + 下拉下方动态说明行（antd Select 弹层内 title 悬浮在部分环境不稳，动态行保底）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++文件清单（自声明）：①`frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx`（SUB_DESCRIPTIONS 常量+选项 title+说明行+自动选中 effect）；②`frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx`（+2 用例）。零接口变更（纯前端交互层，无端点/schema/lib 改动）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++   不适用——React Query 结果缓存确定性到达；effect 依赖 data 引用，陈旧响应由 query key 隔离。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++   不适用——纯前端组件态；两次快速查询由 guard 签名判重。
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++   安全——选中态是组件本地 state，卸载即清；重置按钮清 selectedId 后 guard 拦截同签名重选。
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++   不会——workspaceId 在路由层隔离，guard 签名含 sub/anchor 不含跨区共享态。
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：自动切 tab 抢走结果面焦点（实测即翻车——path 预置用例被详情 tab 抢走 reason 文案）。已收口为仅 neighbors 切详情。放弃的方案：①所有带锚点 sub 都切详情——否，impact 闭包/path 推理链的价值在结果面；②antd Select 弹层内做富 tooltip——否，原生 title 在弹层滚动环境不稳，动态说明行同信息更可靠。
+
+diff --git a/.sillyspec/changes/2026-10-09-graph-query-ux/proposal.md b/.sillyspec/changes/2026-10-09-graph-query-ux/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-query-ux/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:59:09.042Z
++---
++# 提案书（Proposal）— 2026-10-09-graph-query-ux
++
++## 动机
++
++任务原话转写：图谱页查询交互两处优化：①查询执行后若有锚点 anchor，默认直接选中该锚点节点（选中环+一跳高亮+右栏详情一步到位，不用再手动点）；②查询类型 sub 下拉每个选项加人话悬浮说明（title 悬浮 + 选中项下方一行动态说明文案，双通道保障）。
++
++成功标准：
++- neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
++- 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
++- sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
++- 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
++- 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
++2. 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
++3. sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
++4. 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
++5. 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
++
++## 成功标准（可验证）
++
++1. neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
++2. 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
++3. sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
++4. 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
++5. 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
+
+diff --git a/.sillyspec/changes/2026-10-09-graph-query-ux/requirements.md b/.sillyspec/changes/2026-10-09-graph-query-ux/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-query-ux/requirements.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:59:09.043Z
++---
++# 需求规格（Requirements）— 2026-10-09-graph-query-ux
++
++## 功能需求
++
++### FR-01: neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
++
++- 带锚点的 neighbors 查询结果到达后锚点节点必须自动选中并切详情 tab；impact/path 必须保持结果面（仅画布选中）；sub 七类型必须有人话说明（title+动态行双通道）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-02: 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
++
++- 带锚点的 neighbors 查询结果到达后锚点节点必须自动选中并切详情 tab；impact/path 必须保持结果面（仅画布选中）；sub 七类型必须有人话说明（title+动态行双通道）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-03: sub 下拉每个选项悬浮（title）显示人话说明（孤儿节点=没人引用的知识条目…七条）
++
++- 带锚点的 neighbors 查询结果到达后锚点节点必须自动选中并切详情 tab；impact/path 必须保持结果面（仅画布选中）；sub 七类型必须有人话说明（title+动态行双通道）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-04: 选中 sub 后下拉下方显示一行动态说明文案（同 tooltip 内容）
++
++- 带锚点的 neighbors 查询结果到达后锚点节点必须自动选中并切详情 tab；impact/path 必须保持结果面（仅画布选中）；sub 七类型必须有人话说明（title+动态行双通道）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++### FR-05: 既有 16 页面用例零回归+新增用例（自动选中断言+说明文案断言）；tsc/eslint 零错
++
++- 带锚点的 neighbors 查询结果到达后锚点节点必须自动选中并切详情 tab；impact/path 必须保持结果面（仅画布选中）；sub 七类型必须有人话说明（title+动态行双通道）。
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: knowledge-graph-page.test.tsx「锚点自动选中」用例（文件反查预置→详情断言）+path 预置回归守不抢结果面
++FR-02: knowledge-graph-page.test.tsx「sub 人话说明」用例（sub-description testid）
++FR-03: 不适用：title 悬浮与动态行同源 SUB_DESCRIPTIONS，一行断言覆盖双通道
++FR-04: 不适用：FR-03 同源（同映射常量）
++FR-05: knowledge 域 182 用例回归全绿（tsc/eslint 零错）
+
+diff --git a/.sillyspec/changes/2026-10-09-graph-query-ux/tasks.md b/.sillyspec/changes/2026-10-09-graph-query-ux/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-query-ux/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:59:09.043Z
++---
++# 任务注册表（Tasks）— 2026-10-09-graph-query-ux
++
++- [x] task-01: neighbors/impact/path 查询执行后，若结果节点集中含锚点节点（id 精确或 CLI 模糊解析回填的 query.key/anchor），该节点自动为选中态（选中环+一跳邻域高亮+右栏切节点详情）
++- [x] task-02: 锚点不在结果集中时不报错不高亮（如 node_not_found 降级提示沿既有）
