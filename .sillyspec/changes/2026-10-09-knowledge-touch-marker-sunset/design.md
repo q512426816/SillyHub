@@ -44,3 +44,14 @@ CLI 自 2026-09-29-rot-retire-inject-cap 起不再落盘「待复核」标记（
 本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：归档态语义预期错位——用户若期待「归档后收窄为权威面」，本变更是明示不收窄（文案诚实化对冲：口径写清是注入命中留痕）。放弃的方案：① 恢复 CLI 待复核标记落盘（2026-09-29 已实证否决，反向开倒车）；② 平台按域收窄 live 数据面（改的是数据口径，会连带影响 knowledge-stats 运营指标消费，超出本变更范围且无消费者支撑）。
+
+## 文件变更清单
+
+- backend/app/modules/change/assets.py —— 摘除标记反查面与 owner_line_re 死参数，knowledge_touch 单一来源 _live_touch_rows
+- backend/app/modules/change/schema.py —— ChangeKnowledgeTouch docstring 口径措辞更新
+- backend/app/modules/change/tests/test_assets.py —— 标记反查用例改写为标记无视/同源断言
+- backend/openapi.json —— schema 描述变更再生成（pnpm gen:types）
+- frontend/src/lib/api-types.ts —— 同上再生成，类型结构零变化
+- frontend/src/components/changes/detail/change-assets-card.tsx —— 统一文案 + 分组渲染（chip/按文件分组/同 slug 单份）
+- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx —— 触达用例更新与分组用例新增
+
