@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-09-tombstone-conflict-root-fix",
+  "generatedAt": "2026-10-09T05:25:04.289Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 1,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "backendEndpoints": 2333,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-09-tombstone-conflict-root-fix",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "knowledge/uncategorized.md 新增 1 条待确认（降级：知识归类审阅非功能缺口，依据 verify-result 槽 2）",
+        "condition": "跨仓 worktree task 用直接 git commit（wt-commit 只认主仓 worktree）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "跨仓 sillyspec worktree 交付 d8811604（降级：archive apply 阶段的标准跨仓回收步骤非未竟事项，依据 execute step 指引「跨仓 worktree task」段）",
+        "condition": "归档 apply 阶段 CLI 统一回对应跨仓主工作区",
+        "severity": "advisory"
+      },
+      {
+        "type": "env-blocked",
+        "item": "daemon 发版（降级：发版窗口属环境依赖非代码缺口，旧 daemon 静默忽略有 150s 回显兜底，依据 design 兼容策略 R-03）",
+        "condition": "③ 收敛指令需新版 daemon bundle 分发",
+        "severity": "blocking"
+      },
+      {
+        "type": "env-blocked",
+        "item": "sillyspec CLI 发版（降级：同上发版窗口依赖，旧 CLI 存量记录由新清理判定收编不阻塞 ②③，依据 design 兼容策略）",
+        "condition": "① 归因记账需 CLI 新版本进 npm/daemon bundle",
+        "severity": "blocking"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 8,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup",
+        "rowIdx": 1
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py",
+      "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py32+jsx39)+fr(67)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset+cross-repo",
+    "failedRemaining": [],
+    "passedAt": "2026-10-09T06:14:36.946Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe3"
+    ],
+    "verdict": "mismatch",
+    "detail": [
+      {
+        "probe": "probe3",
+        "snapshot": 4,
+        "rerun": 5,
+        "severity": "warning",
+        "note": "facts 快照 hasTest 数与重跑不符（测试布局环境敏感，WARNING）"
+      }
+    ]
+  }
+}

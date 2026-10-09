@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-tombstone-conflict-root-fix",
+  "anchors": [
+    "FR-03",
+    "FR-02",
+    "FR-01"
+  ],
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-02:acc-2-5b3d4d40",
+      "tests": [
+        "backend/app/modules/change/tests/test_delete_change.py"
+      ]
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-0-ece38916",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-1-0143ccd6",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-2-88c8a511",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-3-561829ad",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-0-db7a90fd",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-1-16400291",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ]
+    }
+  ],
+  "traceFiles": [
+    "backend/app/modules/change/tests/test_delete_change.py",
+    "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
+    "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+  ],
+  "provableSource": "dynamic-subset",
+  "residualFiles": [],
+  "action": "dynamic-subset",
+  "ranAt": "2026-10-09T06:14:21.576Z"
+}

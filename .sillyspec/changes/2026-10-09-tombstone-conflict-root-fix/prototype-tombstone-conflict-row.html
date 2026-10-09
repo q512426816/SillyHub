@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 墓碑冲突行三态（2026-10-09-tombstone-conflict-root-fix）</title>
+<style>
+  :root {
+    --bg: #fafafa; --card: #ffffff; --border: #e5e7eb;
+    --fg: #18181b; --muted: #71717a; --muted-2: #a1a1aa;
+    --brand: #2563eb; --brand-soft: #eff6ff;
+    --error: #dc2626; --error-soft: #fef2f2;
+    --success: #16a34a; --success-soft: #f0fdf4;
+    --warning: #d97706; --warning-soft: #fffbeb;
+    --violet: #7c3aed; --violet-soft: #f5f3ff;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--fg); padding: 24px; font-size: 14px; }
+  h1 { font-size: 16px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; max-width: 760px; overflow: hidden; }
+  .card-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .card-head b { font-size: 14px; }
+  .meta { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .row { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .row:last-child { border-bottom: none; }
+  .badge { font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 4px; flex-shrink: 0; }
+  .b-spec { background: var(--violet-soft); color: var(--violet); }
+  .b-tomb { background: var(--error-soft); color: var(--error); }
+  .b-progress { background: var(--warning-soft); color: var(--warning); }
+  .name { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+  .tomb-target { font-family: var(--mono); font-size: 12px; color: var(--error); word-break: break-all; }
+  .age { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .warn-active { font-size: 11px; color: var(--error); border: 1px dashed color-mix(in srgb, var(--error) 50%, transparent); background: var(--error-soft); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+  .tomb-note { width: 100%; font-size: 12px; color: var(--muted); line-height: 1.7; margin-top: 2px; padding: 6px 8px; background: var(--error-soft); border-radius: 6px; }
+  .tomb-note b { color: var(--error); }
+  .btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); cursor: pointer; }
+  .btn:hover { border-color: var(--brand); color: var(--brand); }
+  .btn-converge { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .state { font-size: 12px; }
+  .s-wait { color: var(--brand); }
+  .s-done { color: var(--success); }
+  .actions { margin-left: auto; display: flex; gap: 8px; }
+  .ghost-zone { padding: 12px 16px; }
+  .ghost-zone .g-title { font-size: 13px; color: var(--muted); }
+  .g-actions { display: flex; align-items: center; gap: 10px; }
+  .btn-danger { background: var(--error); color: #fff; border-color: var(--error); }
+  .legend { margin: 20px 0 12px; display: flex; gap: 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: baseline; }
+  .lg1::before { background: var(--violet); } .lg2::before { background: var(--error); } .lg3::before { background: var(--success); }
+  .tooltip { position: relative; cursor: help; border-bottom: 1px dotted var(--muted-2); }
+  .tooltip:hover::after { content: attr(data-tip); position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); background: #27272a; color: #fff; font-size: 11px; padding: 6px 10px; border-radius: 6px; white-space: nowrap; z-index: 5; }
+</style>
+</head>
+<body>
+  <h1>平台同步 — 冲突行三态（变更中心）</h1>
+  <p class="sub">本变更唯一 UI 面：冲突行按形态分化渲染。数据源：backend spec-conflicts 注册表（details_json.platform_deleted）join 机器快照行。页面骨架、卡片布局、ghost 区均不变。</p>
+
+  <div class="legend">
+    <span class="lg1">状态一 · 普通版本冲突（现有渲染，不动）</span>
+    <span class="lg2">状态二 · 墓碑冲突（新形态：露根因 + 隐藏无效裁决）</span>
+    <span class="lg3">状态三 · 收敛指令已下发（③回显，随快照消失）</span>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <b>平台同步</b>
+      <span style="font-size:12px;color:var(--muted)">未决冲突 <b style="color:var(--error)">2</b> · ghost <b>0</b></span>
+      <span class="meta">数据源机器：DESKTOP-HJ0AM09 · 更新于 12 秒前</span>
+    </div>
+
+    <!-- 状态一：普通版本冲突（现状渲染，本变更不动） -->
+    <div class="row">
+      <span class="badge b-spec">spec</span>
+      <span class="name">2026-10-08-explore-knowledge-graph</span>
+      <span class="age">冲突发生于 2 小时前</span>
+      <span class="warn-active">⚠ 活跃变更 · 谨慎裁决</span>
+      <div class="actions"><button class="btn">查看对比</button></div>
+    </div>
+
+    <!-- 状态二：墓碑冲突（新形态） -->
+    <div class="row">
+      <span class="badge b-tomb">平台已删</span>
+      <span class="tomb-target">salv</span>
+      <span class="age">发现于 3 天前</span>
+      <div class="actions">
+        <!-- 裁决入口（查看对比/保本地/取平台）对该形态隐藏：resolve 重推必然无效 -->
+        <button class="btn btn-converge tooltip" data-tip="下发 tombstone_cleanup：目录移入 .runtime/tombstone-quarantine/ 隔离区（不硬删，可找回），进度库行归档">收敛本机目录</button>
+      </div>
+      <div class="tomb-note">
+        <b>非版本冲突</b> —— 平台侧已删除该变更（墓碑拒收，2 个路径：<code>tasks/task-01.md</code>、<code>verify-result.md</code>）。「保本地 / 取平台」裁决对它无效；如属误删请在平台恢复变更后走 manifest-heal，或点「收敛本机目录」隔离本地残留。
+      </div>
+    </div>
+
+    <!-- 状态三：收敛指令已下发（③ 回显，复用既有 sillyspec_command_result 链路） -->
+    <div class="row">
+      <span class="badge b-tomb">平台已删</span>
+      <span class="tomb-target">2026-09-25-observation-events-v3-r16sf</span>
+      <span class="age">发现于 6 天前</span>
+      <span class="state s-done">已收敛 · 等待快照刷新（≤75 秒）</span>
+      <div class="tomb-note">本机目录已移入隔离区（<code>.runtime/tombstone-quarantine/</code>），进度库行已归档；下一轮采集后该行消失。</div>
+    </div>
+
+    <div class="ghost-zone">
+      <div class="g-actions">
+        <span class="g-title">残留记录 (ghost) <b>0</b> 个 —— 目录已不存在 · 建议清理</span>
+        <button class="btn btn-danger" disabled style="margin-left:auto">一键清理 ghost</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
