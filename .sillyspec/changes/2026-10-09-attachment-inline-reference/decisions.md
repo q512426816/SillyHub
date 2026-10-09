@@ -135,3 +135,18 @@ created_at: 2026-10-09 13:47:10
 - priority: P0
 - 锚点: frontend/src/components/daemon/session-input-bar.tsx（handleInsertAttRef）
 - 模块域: frontend_components
+
+## D-006@v3
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-006@v2
+- source: 用户实测反馈（部署实测 2026-10-09）
+- question: v2 的「聚焦时插光标处」判定不可用——右击附件那一刻输入框必然已失焦，怎么办？
+- answer: onBlur 时记忆 selectionStart（lastCaretRef/groupLastCaretRef）；右击插入时：聚焦态用当前光标位、失焦态用记忆位、从未聚焦过（记忆位 null）插末尾；插入后记忆位同步推进到 token 尾并自动聚焦。
+- normalized_requirement: FR-01 插入位置按本版执行；自动聚焦与其余行为不变。
+- impacts: session-input-bar.tsx（lastCaretRef+onBlur+handleInsertAttRef）、group-chat-panel.tsx（groupLastCaretRef 同款）。
+- evidence: 用户原话「这个修改的不理想，因为我在点击附件的时候必定是失焦的，但是如果在点击之前光标还在输入框，那么就插入光标位置」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（lastCaretRef）
+- 模块域: frontend_components

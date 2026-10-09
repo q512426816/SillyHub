@@ -1693,6 +1693,28 @@ describe("群消息附件（FR-05 补遗）", () => {
     );
   });
 
+  // D-006@v3（用户反馈 2026-10-09）：失焦后右击插「失焦前记住的光标位」。
+  it("失焦后右击 → 插入失焦前光标位置（群聊 D-006@v3）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    const chip = screen.getByTitle(
+      "报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）",
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+
+    // 聚焦置光标到 index 1 再失焦（模拟点击 chip）→ 右击插位置 1。
+    fireEvent.change(input, { target: { value: "ABCD" } });
+    input.focus();
+    input.setSelectionRange(1, 1);
+    fireEvent.blur(input);
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(input.value).toBe("A【报错日志.txt】BCD"));
+    expect(document.activeElement).toBe(input);
+  });
+
   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
     harness.logsJson = [];
     renderPanel();

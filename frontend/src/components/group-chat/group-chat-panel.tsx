@@ -1761,6 +1761,8 @@ export function GroupChatPanel({
    * （attId → 编辑态 token，D-002/D-003/D-004——右击插入/删附件联动剥离/
    * handleSend 置换，单聊 session-input-bar 同款口径）。 */
   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+  /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart。 */
+  const groupLastCaretRef = useRef<number | null>(null);
   const openPendingAttachmentPreview = (att: AttachmentRead) => {
     setPendingPreview({
       fetch: () => fetchAttachmentBlob(att.id),
@@ -1927,10 +1929,15 @@ export function GroupChatPanel({
     }
     const input = inputRef.current;
     const focused = !!input && document.activeElement === input;
-    const caret = focused ? (input.selectionStart ?? draft.length) : draft.length;
+    // D-006@v3：失焦态插「失焦前记住的光标位」（右击 chip 必先失焦，
+    // onBlur 记 selectionStart）；从未聚焦过才插末尾。
+    const caret = focused
+      ? (input.selectionStart ?? draft.length)
+      : (groupLastCaretRef.current ?? draft.length);
     const next = draft.slice(0, caret) + token + draft.slice(caret);
     setDraft(next);
-    // D-006@v2：插入后自动聚焦、光标落 token 尾（rAF 复位机制，同 @ 回填）。
+    groupLastCaretRef.current = caret + token.length;
+    // 插入后自动聚焦、光标落 token 尾（rAF 复位机制，同 @ 回填）。
     const restore = () => {
       if (!input) return;
       input.focus();
@@ -3041,6 +3048,10 @@ export function GroupChatPanel({
                   if (!files || files.length === 0) return;
                   e.preventDefault();
                   void handleFiles(files);
+                }}
+                onBlur={(e) => {
+                  // D-006@v3：记住失焦前光标位（右击 chip 插引用据此定位）。
+                  groupLastCaretRef.current = e.target.selectionStart;
                 }}
                 // ql-20260911-030：原 max-h-[120px] 钳制会截断拖拽高度（拖拽高度
                 // 直接内联 style，min-h 下限与拖拽钳制同值 44px）；无拖拽值时

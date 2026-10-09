@@ -288,8 +288,9 @@ export function SessionInputBar({
     onAttTokenMapChange?.(next);
   };
 
-  /** 右击 chip 插入引用（D-006@v2：光标在输入框内→插光标处，否则插末尾；
-   *  插入后自动聚焦、光标落 token 尾；允许重复）。 */
+  /** 右击 chip 插入引用（D-006@v3：聚焦态插当前光标处；失焦态插**失焦前记住的
+   *  光标位**——右击 chip 必先使输入框失焦，故 onBlur 时记忆 selectionStart；
+   *  从未聚焦过才插末尾。插入后自动聚焦、光标落 token 尾；允许重复）。 */
   const handleInsertAttRef = (att: AttachmentRead) => {
     let token = attTokenMap[att.id];
     if (!token) {
@@ -303,10 +304,14 @@ export function SessionInputBar({
     }
     const ta = textareaRef.current;
     const focused = !!ta && document.activeElement === ta;
-    const caret = focused ? (ta.selectionStart ?? value.length) : value.length;
+    const caret = focused
+      ? (ta.selectionStart ?? value.length)
+      : (lastCaretRef.current ?? value.length);
     const next = value.slice(0, caret) + token + value.slice(caret);
     onChange(next);
     pendingCaretRef.current = caret + token.length;
+    // 记忆位同步推进（防连续右击第二枚时用到过期位置）。
+    lastCaretRef.current = caret + token.length;
     ta?.focus();
   };
 
@@ -328,6 +333,9 @@ export function SessionInputBar({
   /** 回填后待复位光标——受控 value 的 DOM 更新会覆盖同步 setSelectionRange，
    *  故记此 ref 在 useEffect 内延迟执行（design §3.3 仓库首例模式）。 */
   const pendingCaretRef = useRef<number | null>(null);
+  /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart，
+   *  插入引用时据此定位；null = 从未聚焦过（插末尾）。 */
+  const lastCaretRef = useRef<number | null>(null);
   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
@@ -950,10 +958,12 @@ export function SessionInputBar({
             // task-03：首次聚焦挂载联想数据桥（预取，见 MentionSourcesBridge 注释）。
             setMentionSourcesMounted(true);
           }}
-          onBlur={() => {
+          onBlur={(e) => {
             // task-03 失焦关层（design §3.1）：浮层内 mousedown 已 preventDefault
             // 不触发 blur，到达此处的均为浮层外失焦。
             closeMention();
+            // D-006@v3：记住失焦前光标位（右击 chip 插引用据此定位）。
+            lastCaretRef.current = e.target.selectionStart;
           }}
           onCompositionStart={() => {
             // task-03 IME 组合期标记（R-3）：组合期跳过检测与 Enter/Tab 拦截。

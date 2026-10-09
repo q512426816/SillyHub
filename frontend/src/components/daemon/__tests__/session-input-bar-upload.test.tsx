@@ -228,19 +228,22 @@ describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-re
     expect(onTokenMap).toHaveBeenLastCalledWith({ "att-ref-1": "【截图.png】" });
   });
 
-  // D-006@v2（用户反馈 2026-10-09）：光标在输入框内→插光标处+聚焦；未聚焦→插末尾。
-  it("光标在输入框内右击 → 插入光标处、光标落 token 尾；未聚焦 → 插末尾", async () => {
+  // D-006@v3（用户反馈 2026-10-09）：右击 chip 必先使输入框失焦——插「失焦前
+  // 记住的光标位」；从未聚焦过才插末尾。
+  it("失焦后右击 → 插入失焦前光标位置并重新聚焦；从未聚焦 → 插末尾", async () => {
     await mountAndUpload([{ id: "att-caret-1", name: "插入.png" }], "ABCD");
     const chip = screen.getByTitle(/右击插入正文引用/);
     const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
 
-    // ① 未聚焦（activeElement 不是 textarea）→ 插末尾。
+    // ① 从未聚焦 → 插末尾。
     fireEvent.contextMenu(chip);
     await waitFor(() => expect(ta.value).toBe("ABCD【插入.png】"));
 
-    // ② 聚焦且光标在 B|C（index 2）→ 插光标处（①的末尾 token 仍在），聚焦保持。
+    // ② 聚焦置光标到 B|C（index 2）再失焦（模拟点击 chip 的必然失焦）→
+    //    右击插记住的位置 2，聚焦回归、光标落 token 尾。
     ta.focus();
     ta.setSelectionRange(2, 2);
+    fireEvent.blur(ta);
     fireEvent.contextMenu(chip);
     await waitFor(() => expect(ta.value).toBe("AB【插入.png】CD【插入.png】"));
     expect(document.activeElement).toBe(ta);
