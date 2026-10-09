@@ -254,7 +254,8 @@ async def list_machines_shared_to_me(
     task-13：每行附带该机器的 runtime 明细（``runtimes``）——会话创建按
     runtime 粒度，前端锁 runtime_id / picker 选引擎需要机器→引擎清单。二次
     查询一次 IN 本页 machine_ids（N+1 规避，对齐 list_machines 先例），按
-    provider 升序保证输出稳定可测。
+    provider 升序 + created_at/id tiebreaker 保证输出稳定可测（同 provider
+    并列时顺序固定，2026-10-09-daemon-page-stable-sort）。
 
     排序 hostname → machine_id → lender，保证分页/快照稳定可测。
     """
@@ -313,8 +314,12 @@ async def list_machines_shared_to_me(
                     select(DaemonRuntime)
                     .where(col(DaemonRuntime.daemon_instance_id).in_(machine_ids))
                     .order_by(
+                        # provider 后接 created_at/id tiebreaker（2026-10-09-daemon-page-stable-sort）：
+                        # 同 provider 并列时 DB 返回顺序不定，前端「共享给我的」agent 明细随刷新乱跳。
                         col(DaemonRuntime.daemon_instance_id),
                         col(DaemonRuntime.provider),
+                        col(DaemonRuntime.created_at),
+                        col(DaemonRuntime.id),
                     )
                 )
             )
