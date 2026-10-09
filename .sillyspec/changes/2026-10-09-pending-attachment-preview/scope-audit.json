@@ -1,0 +1,93 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "21763d356758116cbc9a6bfafbd567f0adc9445a",
+  "totals": {
+    "files": 9,
+    "additions": 149,
+    "deletions": 13
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx",
+      "additions": 3,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+      "additions": 49,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+      "additions": 6,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+      "additions": 5,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-input-bar.tsx",
+      "additions": 37,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "additions": 16,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "additions": 33,
+      "deletions": 5,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "turn-timeline-session-input-bar.test.tsx",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    },
+    {
+      "path": "session-panel-dialog-attachments.test.tsx",
+      "planned": "修改",
+      "additions": 0,
+      "deletions": 0,
+      "kind": "modified",
+      "verdict": "untouched"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "5f7a6f4ee887e7593d7a26c3a287f2d77f33110920cbbfd7f8bb12a39fdc849d",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T03:05:59.198Z"
+}

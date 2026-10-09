@@ -54,4 +54,6 @@ created_at: 2026-10-09T02:41:20.771Z
 | 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊待发 chips 同款可点击预览 |
 | 修改 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | 新增预览/删除不串扰用例 + mock 补 fetchAttachmentBlob |
 | 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 新增群聊待发 chip 点击预览用例 |
-| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx、turn-timeline-session-input-bar.test.tsx、session-panel-dialog-attachments.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
+| 修改 | frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx | 旧 harness 补 fetchAttachmentBlob mock |
+| 修改 | frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
+| 修改 | frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx | 旧 harness 补 fetchAttachmentBlob mock + chip title 锚点跟随新契约 |
