@@ -1,6 +1,14 @@
-tier: thin
+tier: thick
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -20,6 +28,14 @@ input: >-
   - 既有 backend change timeline 测试面（test_timeline.py）全绿
 autopilot: true
 baseline_commit: 8c6802f09b281a94b16dabda6238feae6133cd79
-updatedAt: '2026-10-09T04:06:40.957Z'
+updatedAt: '2026-10-09T04:17:27.879Z'
 baseline_sha256: 0a5e32e986ce5fc4dd09d4f856a9af069f1d731cb69b0d42e67777977b7552cc
+upgrade_reason: verify 实测失败（实测失败：lint（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py2)（8.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009041202\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009041202\test-result.json｜门文件
+  6 个
 

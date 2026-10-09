@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-timeline-tick-stage-filter",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "61865d614d0bb020e65d9457f4ac08b91732b7d6",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（事件查询 order_by ts.asc 未动，过滤只剔除域外行、不改变游标衔接的顺序依赖，design 作答属实）",
+    "并发": "ok（防护声明实证：timeline.py 全文件零 mutation——仅两条 select，D-004 events 表只读红线成立）",
+    "切换": "ok（_infer_task_times 纯函数、无模块级可变状态，单请求内聚合无残留）",
+    "作用域": "ok（查询仍按 workspace_id+change_name 过滤；边界已裁决：可接受——tasks 域内无法区分 tasks.md 与 task 卡片勾选，系 CLI 同款已知诚实面限制，本次对齐不扩大不收窄，修复需事件携带任务 id 的 schema 迁移，放弃理由成立）"
+  },
+  "reviewedAt": "2026-10-09T04:17:00Z"
+}

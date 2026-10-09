@@ -239,3 +239,60 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-09-stale-recheck-scope
   status: active
+
+## FR-auto-backend-135 _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
+变更：2026-10-09-timeline-tick-stage-filter
+状态：active
+摘要：design 自审清单事件被跳过；裸形态仍参与推断
+全文：.sillyspec/changes/archive/2026-10-09-timeline-tick-stage-filter/requirements.md#FR-01
+最近确认：ece14180dc23240f0a83d34f61bc9aab0d9d2f16
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-timeline-tick-stage-filter
+  status: active
+
+## FR-auto-backend-136 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
+变更：2026-10-09-timeline-tick-stage-filter
+状态：active
+摘要：实证序列回归被拦
+全文：.sillyspec/changes/archive/2026-10-09-timeline-tick-stage-filter/requirements.md#FR-02
+最近确认：ece14180dc23240f0a83d34f61bc9aab0d9d2f16
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-timeline-tick-stage-filter
+  status: active
+
+## FR-auto-backend-137 既有 backend change timeline 测试面（test_timeline.py）全绿
+变更：2026-10-09-timeline-tick-stage-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-timeline-tick-stage-filter/requirements.md#FR-03
+最近确认：ece14180dc23240f0a83d34f61bc9aab0d9d2f16
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_timeline.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-timeline-tick-stage-filter
+  status: active

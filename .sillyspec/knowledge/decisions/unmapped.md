@@ -1914,3 +1914,10 @@ supersedes：D-002@v1
 理由：代码查证：sillyspec CLI v3.32.2 VALID_TOOLS = [claude, zcode, cursor, openclaw, codex, gemini, opencode]（含 zcode），daemon 端 SILLYSPEC_VALID_TOOLS 落后缺 zcode（注释自述「CLI 新增工具时同步此表」）。zcode 技能复制双层缺口于 2026-10-09 修复（sillyspec commit 016968bd，v3.32.2）。
 故障面：机器上 sillyspec 版本 <3.32.2 时 zcode 端技能复制静默缺失（CLI 静默忽略未知 tool）。
 退役判据：无（跟随 CLI VALID_TOOLS 演进同步）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-timeline-tick-stage-filter
+锚点：未记录
+最近确认：ece14180dc23240f0a83d34f61bc9aab0d9d2f16
+理由：最大风险：tasks 域内仍无法区分 tasks.md 与 tasks/task-NN.md 卡片的勾选计数（卡片段落勾选会以「tasks · checked N→M」进入推断）——这是 CLI 同款已知诚实面限制（事件只记计数不记任务 id），本次对齐 CLI 语义不扩大不收窄。试过放弃：①events 表加 stage 列 + watcher 推送带 stage——需 schema 迁移与历史回填，跨仓协同成本远超收益；②按 detail 前缀白名单枚举具体 stage 名（design/proposal…）——黑名单式枚举漏新 stage 域，白名单「仅 tasks 参与」与 CLI 语义一致更稳。
