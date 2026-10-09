@@ -88,3 +88,19 @@ scope-audit 件」回退用例）——本日复跑双绿。UI 三态降权建�
 降级路径基本不可达，剩余为极端形态：快照与冻结件双缺——note 自述已覆盖）。
 
 归档（CLI 两向已提交；平台侧改动在并行会话工作树，随其变更收口）。
+
+## 后续演进：四件双轨 → 单套统一（2026-10-09-close-trace-single-set）
+
+双轨形态运行两日后收敛为单套（用户裁决：一套留痕、平台单读）：
+
+1. **CLI 写侧**：`writeCloseTraceArtifacts` 只落 **change.patch + change-patch.json**
+   两件——原 scope-audit.json 对账面（mode/ok/rows/verdict/closedBy/repos 等）并入
+   change-patch.json 的 **`scopeAudit` 子对象**；顶级键（files/totals/baseline/head/
+   patchSha256/patchStatus/savedAt/modules 等）原位不动。scope-audit.json/.patch 停写。
+2. **CLI 读侧**：快照读序 `change-patch.json.scopeAudit` → 旧 `scope-audit.json` →
+   `.runtime` 快照 → thin 回放 → 实时区间；`--file` 冻结切片 change.patch 优先、
+   scope-audit.patch 兜存量 heavy 归档；防篡改 sha 伴生件读 change-patch.json。
+3. **平台侧**：backend 主读路径本就 change-patch.json/change.patch 优先、顶级字段
+   零变化——无需改逻辑；schema.py 契约注释补 scopeAudit 子对象说明；前端
+   structured-views 新增 change-patch.json 结构化分支（清单面 + scopeAudit 复用
+   ScopeAuditView）。**回退链保留**（其他仓/本仓存量 247 个旧形态归档不动）。
