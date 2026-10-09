@@ -57,9 +57,6 @@ log = get_logger(__name__)
 # 上游格式演进时本层同步，D-001@v1 故障面；未知行一律跳过）。
 _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
 _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
-# 「待复核：<变更名>」归属行（flow done 对触达域 active 条目打标；知识触达
-# 反查用——2026-09-26-change-asset-transparency，与「变更：」行同构）。
-_REVIEW_MARK_RE = re.compile(r"^待复核：(.+)$")
 _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
 # git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
 _PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
@@ -73,15 +70,13 @@ _PATCH_FILE_MAX_CHARS = 200_000
 def _parse_entries_owned_by(
     text: str,
     change_key: str,
-    *,
-    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
 ) -> list[tuple[str, str, str | None]]:
-    """解析域文件条目（节头分条 + 归属行过滤，默认 ``变更：``）。
+    """解析域文件条目（节头分条 + ``变更：`` 归属行过滤）。
 
     返回 ``(id, title, status)`` 三元组列表；status 行缺省 None（fr 条目
     恒有、decisions 个别条目无——对齐 CLI 两文件的现实容差）。
-    ``owner_line_re``（2026-09-26-change-asset-transparency）允许换归属行
-    正则（知识触达反查用 ``待复核：`` 标记行）。
+    （2026-10-09-knowledge-touch-marker-sunset：``owner_line_re`` 换归属行
+    正则的参数已随「待复核」标记反查面一并拆除——CLI 侧标记落盘已退役。）
     """
     entries: list[tuple[str, str, str | None]] = []
     cur_id: str | None = None
@@ -100,7 +95,7 @@ def _parse_entries_owned_by(
             continue
         if cur_id is None:
             continue
-        owner = owner_line_re.match(line)
+        owner = _OWNER_LINE_RE.match(line)
         if owner:
             owned = owner.group(1).strip() == change_key
             continue
@@ -117,13 +112,8 @@ def _scan_domain_files(
     spec_root: Path,
     domain: str,
     change_key: str,
-    *,
-    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
 ) -> list[tuple[str, str, str | None, str]]:
-    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。
-
-    ``owner_line_re`` 透传（知识触达反查用 ``待复核：`` 标记）。
-    """
+    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。"""
     out: list[tuple[str, str, str | None, str]] = []
     domain_dir = spec_root / "knowledge" / domain
     if not domain_dir.is_dir():
@@ -134,9 +124,7 @@ def _scan_domain_files(
         except OSError as exc:
             log.warning("change.assets_read_domain_file_failed", file=str(md), error=str(exc))
             continue
-        for entry_id, title, status in _parse_entries_owned_by(
-            text, change_key, owner_line_re=owner_line_re
-        ):
+        for entry_id, title, status in _parse_entries_owned_by(text, change_key):
             out.append((entry_id, title, status, md.relative_to(spec_root).as_posix()))
     return out
 
@@ -497,14 +485,15 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
 async def _live_touch_rows(
     session: AsyncSession, workspace_id: uuid.UUID, change_key: str
 ) -> list[tuple[str, str, str]]:
-    """知识触达实时命中（2026-09-28-knowledge-touch-live）。
+    """知识触达命中（2026-09-28-knowledge-touch-live；2026-10-09 起唯一来源）。
 
     ``knowledge_hits`` 表 inject 行的 ``matched_anchors``（``文件#锚`` / 裸文件
-    两形态）展开去重——CLI 执行期逐任务写入、daemon 周期上行，变更在途即可见
-    （此前只有 flow done 打的「待复核：」标记反查，归档前恒空）。返回
-    ``(id, title, file)``：id/title 取锚 slug（裸文件取文件名），file 为知识库
-    根相对路径（不带 knowledge/ 前缀——与标记反查行的 spec_root 相对路径在
-    合并处归一同 key）。上限 100 条防载荷（实际单变更数十量级）。
+    两形态）展开去重——CLI 执行期逐任务写入、daemon 周期上行，变更在途即可见。
+    （2026-10-09-knowledge-touch-marker-sunset：原「待复核：」标记反查面已拆除
+    ——CLI 自 2026-09-29-rot-retire-inject-cap 起不再落盘标记，标记面恒空，
+    归档态与在途态同源同序。）返回 ``(id, title, file)``：id/title 取锚 slug
+    （裸文件取文件名），file 为知识库根相对路径（不带 knowledge/ 前缀）。
+    上限 100 条防载荷（实际单变更数十量级）。
     """
     from app.modules.knowledge.hits import KnowledgeHit  # 局部 import 防模块环
 
@@ -552,38 +541,14 @@ class ChangeAssetsQueryService:
         spec_root = await self._spec_root(workspace_id)
         archived = change.location == "archive" or change.status == "archived"
 
-        fr_rows, dec_rows, touch_rows, live_rows = await asyncio.gather(
+        fr_rows, dec_rows, live_rows = await asyncio.gather(
             asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
             asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
-            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：
-            # 「待复核：」标记反查双域（fr + decisions 同构一轮）——归档后复核口径。
-            asyncio.to_thread(
-                lambda: [
-                    row
-                    for domain in ("fr", "decisions")
-                    for row in _scan_domain_files(
-                        spec_root, domain, change.change_key, owner_line_re=_REVIEW_MARK_RE
-                    )
-                ]
-            ),
-            # 实时命中（2026-09-28-knowledge-touch-live）：knowledge_hits inject 行
-            # 在途即有——与标记反查合并，标记行在前（复核权威），实时补差去重。
+            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：knowledge_hits
+            # inject 遥测行展开去重——在途/归档同源（2026-10-09-knowledge-touch-
+            # marker-sunset：待复核标记反查面拆除，CLI 已退役标记落盘）。
             _live_touch_rows(self._session, workspace_id, change.change_key),
         )
-        touch_merged: list[ChangeKnowledgeTouch] = []
-        seen_touch: set[tuple[str, str]] = set()
-
-        def _merge_touch(entry_id: str, title: str, file: str) -> None:
-            key = (file.removeprefix("knowledge/"), entry_id)
-            if key in seen_touch:
-                return
-            seen_touch.add(key)
-            touch_merged.append(ChangeKnowledgeTouch(id=entry_id, title=title, file=file))
-
-        for i, t, _s, f in touch_rows:
-            _merge_touch(i, t, f)
-        for i, t, f in live_rows:
-            _merge_touch(i, t, f)
         result = ChangeAssetsRead(
             change_key=change.change_key,
             archived=archived,
@@ -591,7 +556,7 @@ class ChangeAssetsQueryService:
             decisions=[
                 ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
             ],
-            knowledge_touch=touch_merged,
+            knowledge_touch=[ChangeKnowledgeTouch(id=i, title=t, file=f) for i, t, f in live_rows],
         )
         if not archived:
             # 在途变更：目录件尚不存在，跳过读取（design R-03）。

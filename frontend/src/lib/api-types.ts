@@ -13907,9 +13907,10 @@ export interface components {
          * ChangeKnowledgeTouch
          * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
          *
-         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
-         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
-         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+         *     本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
+         *     的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
+         *     定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
+         *     落盘，标记反查面拆除，此即唯一来源与口径）。
          */
         ChangeKnowledgeTouch: {
             /** Id */
