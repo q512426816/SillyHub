@@ -16,7 +16,7 @@
 ## 影响面与存量数据
 
 - 生效前所有新 fourpiece 骨架的 `created_at` 均为 UTC；存量变更（含 2026-10-09-workspace-init-skill-gate）时间线 born 锚持续显示偏移值——历史工件不改写（变更事实以 watcher 事件流为准），接受旧值。
-- 附带发现（未修，另一显示路径）：sillyspec 仓 `src/module-impact.js:158` 用 `toISOString().slice(0,19) + '+08:00'`——UTC 数字拼 +08:00 偏移后缀，解析瞬间错 16h，待单独变更处理。
+- 附带发现（已修于 sillyspec 仓 `2026-10-09-module-card-updated-at-iso`，同样待发版）：`src/module-impact.js:158` 用 `toISOString().slice(0,19) + '+08:00'`——UTC 数字拼 +08:00 偏移后缀，解析瞬间恒早 8h（机器无关），已改全量 `toISOString()`。
 
 ## 关联
 
