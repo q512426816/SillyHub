@@ -24,6 +24,10 @@ import { ForkConfirmModal } from "@/components/daemon/session-fork/fork-confirm-
 import { type AttachmentRead } from "@/lib/api/session-attachments";
 import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
+  substituteAttRefsForSend,
+  type AttRefTokenMap,
+} from "@/lib/attachment-refs";
+import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
@@ -184,6 +188,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // attachment_ids）、chips 清理句柄、队列条目附件元数据镜像（D-004：投递侧
   // 占位轮标记行用，入队时登记、出队/移除时清理）。
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
+  // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（D-003
+  // 发送置换消费；dialog 与 page 同款）。
+  const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化选中
@@ -300,8 +307,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
    */
   const confirmSchedCreate = useCallback(async () => {
     const sid = view.sessionId;
-    const prompt = input.trim();
-    if (!sid || !schedAt || !prompt || schedSubmitting) return;
+    const rawPrompt = input.trim();
+    // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
     setSchedSubmitting(true);
     try {
       await createScheduledMessage(sid, {
@@ -309,10 +318,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         dispatch_at: schedAt.toISOString(),
       });
       setSchedOpen(false);
-      setInput((prev) => (prev.trim() === prompt ? "" : prev));
+      setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
       setSchedHints((prev) => [
         ...prev,
-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(prompt)}」`,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
       ]);
       setSchedRefresh((n) => n + 1);
       notify.success("已创建定时消息");
@@ -321,7 +330,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     } finally {
       setSchedSubmitting(false);
     }
-  }, [view.sessionId, input, schedAt, schedSubmitting, notify]);
+  }, [view.sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
 
   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
   // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
@@ -379,7 +388,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
     setInput((prev) => {
       const t = prev.trim();
-      return t === prompt || parseTeamCommand(t) === prompt ? "" : prev;
+      // task-04：prompt 为 token 置换版——草稿同样置换后比对（同 page 口径）。
+      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
+      return t === prompt || substituted === prompt || parseTeamCommand(t) === prompt ? "" : prev;
     });
     setPendingAttachments((prev) =>
       attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
@@ -388,7 +399,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
     // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机）。
     setPendingMentions({});
-  }, []);
+  }, [attTokenMap, pendingAttachments]);
 
   // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
   // 不丢）；忙轮发送由 sendToServerQueue 直达后端入队。idle / creating 首条消息
@@ -1326,19 +1337,22 @@ export function SessionPanelDialog(props: SessionPanelProps) {
    *     挂起一条到过渡态的语义不明）、队满（D-002）。
    */
   const handleSend = useCallback(async () => {
-    const prompt = input.trim();
+    const rawPrompt = input.trim();
+    // task-04（D-003）：入口置换引用 token，后续 sendFromQueue/steered 全路径
+    // 消费置换版；守卫/长度口径用 rawPrompt。
+    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
     // ql-20260825-007：D-7 对齐 page——附件非空豁免空文本（看图说话）；纯文本
     // 仍要求非空。idle 首句走 createSession（无附件可带），但该态附件入口已被
     // 门控（attachmentsDisabled），pendingAttachments 恒空。
     if (
-      !prompt &&
+      !rawPrompt &&
       pendingAttachments.length === 0
     ) {
       return;
     }
-    if (prompt.length > MAX_PROMPT_LEN) {
+    if (rawPrompt.length > MAX_PROMPT_LEN) {
       notify.warning(
-        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${prompt.length} 字），请精简后再发送`,
+        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${rawPrompt.length} 字），请精简后再发送`,
       );
       return;
     }
@@ -1494,7 +1508,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败
@@ -2148,6 +2162,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         attachmentsDisabled={attachmentsDisabled}
         attachmentsDisabledTitle={attachmentsDisabledTitle}
         onAttachmentsChange={setPendingAttachments}
+        onAttTokenMapChange={setAttTokenMap}
         registerClearAttachments={(fn) => {
           clearAttachmentsRef.current = fn;
         }}

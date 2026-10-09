@@ -1490,6 +1490,73 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     // 链路的纯函数行为已在 markers 测试覆盖；此处断言页面接线类型契约即可。
     expect(typeof handlers.onLog).toBe("function");
   });
+
+  // 2026-10-09-attachment-inline-reference task-04（FR-04/D-003）：端到端接线
+  // ——上传 → 右击插入引用 → 发送时 handleSend 入口置换，inject 收到的 prompt
+  // 含 uuid 锚定 [附件引用:...]（token 不再以【】原样直发）。
+  it("右击插入引用后发送 → inject prompt 置换为 [附件引用:uuid|name]", async () => {
+    renderPage();
+    await selectDefaultSession();
+    await waitFor(() =>
+      expect(
+        screen.getByPlaceholderText(/继续追问|消息将排队/),
+      ).toBeTruthy(),
+    );
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/session-attachments")) {
+        return new Response(
+          JSON.stringify({
+            id: "aaaaaaaa-1111-2222-3333-444444444444",
+            kind: "image",
+            media_type: "image/png",
+            bytes: 70,
+            name: "截图.png",
+            width: 1,
+            height: 1,
+            created_at: "2026-10-09T00:00:00Z",
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      throw new Error("unexpected fetch " + url);
+    });
+    const fileInput = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["x"], "截图.png", { type: "image/png" })],
+    });
+    fireEvent.change(fileInput);
+    const chip = await waitFor(() =>
+      screen.getByTitle(/右击插入正文引用/),
+    );
+    fireEvent.contextMenu(chip);
+    const ta = screen.getByPlaceholderText(
+      /继续追问|消息将排队/,
+    ) as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("【截图.png】"));
+
+    mocks.injectSession.mockResolvedValueOnce({
+      session_id: "s-1",
+      run_id: "r-live",
+      status: "running",
+      steered: true,
+      queued: false,
+    });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalled());
+    expect(mocks.injectSession).toHaveBeenCalledWith(
+      "s-1",
+      expect.stringContaining(
+        "[附件引用:aaaaaaaa-1111-2222-3333-444444444444|截图.png]",
+      ),
+      expect.anything(),
+    );
+    // 草稿随 onSendSettled strip 比对清空（置换版 ≠ 原文的口径回归）。
+    await waitFor(() => expect(ta.value).toBe(""));
+  });
 });
 
 // ── task-08（2026-08-21-session-reopen-resume / FR-09 / DS-5）：reconnecting 恢复超时 + 409 中文化 ──
