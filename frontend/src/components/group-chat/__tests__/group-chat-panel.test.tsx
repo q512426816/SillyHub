@@ -1605,6 +1605,22 @@ describe("群消息附件（FR-05 补遗）", () => {
     });
   });
 
+  it("待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+    });
+    // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
+    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
+    // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
+    // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
+    expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
+  });
+
   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
     harness.logsJson = [];
     renderPanel();
