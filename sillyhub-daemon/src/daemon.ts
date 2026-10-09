@@ -1662,6 +1662,12 @@ export class Daemon {
    */
   private _sillyspecStatusRoot: string | null = null;
   /**
+   * 单槽位落盘串行链（2026-10-09 竞态修复）：两次快速 claim 各自 fire 的
+   * writeFile 在同文件上竞态，旧值可能后落盘覆盖新值（CI 实证红：alpha 盖
+   * beta）。链式串行化保证「最后一次 note 的值最后落盘」。
+   */
+  private _statusRootPersistChain: Promise<void> = Promise.resolve();
+  /**
    * 工作区级采集根映射（2026-09-08 总览工作区级化）：wsId → {rootPath, lastClaimAt}。
    * claim 学习（_noteSillySpecStatusRoot）+ 落盘恢复（_restoreSillySpecStatusRoot），
    * LRU 上限 SILLYSPEC_STATUS_ROOTS_MAX。非空时 manager 走 statusTargets 多目标采集。
@@ -5232,11 +5238,18 @@ export class Daemon {
           root_path: rootPath,
         });
       }
-      void this._persistSillySpecStatusRoots();
+      // 串行链落盘（2026-10-09 竞态修复）：映射槽位与单槽位同理，防旧值后写。
+      this._statusRootPersistChain = this._statusRootPersistChain
+        .then(() => this._persistSillySpecStatusRoots())
+        .catch(() => {});
     }
     if (this._sillyspecStatusRoot === rootPath) return;
     this._sillyspecStatusRoot = rootPath;
-    void this._persistSillySpecStatusRoot(rootPath);
+    // 串行链落盘（2026-10-09 竞态修复）：两次快速 note 各自 fire 的 writeFile
+    // 在同文件竞态会让旧值后落盘（CI 实证红）——链式保证最后值最后落。
+    this._statusRootPersistChain = this._statusRootPersistChain
+      .then(() => this._persistSillySpecStatusRoot(rootPath))
+      .catch(() => {});
   }
 
   /** root 落盘（best-effort：失败仅 warn 不影响内存态；文件= {root_path, saved_at}）。 */

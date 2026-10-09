@@ -136,6 +136,33 @@ describe('2026-09-08 采集根落盘/恢复', () => {
     restore();
   });
 
+  it('快速连续切换 ×20 → 落盘最终必为最后一次值（2026-10-09 竞态回归：串行链）', async () => {
+    // 旧实现两次快速 note 各 fire 一个未串行 writeFile，同文件竞态下旧值可能
+    // 后落盘（CI 实证红：alpha 盖 beta）；×20 交替放大窗口，串行链下确定性绿。
+    const restore = silenceConsole();
+    const daemon = await buildDaemon();
+    const d = daemon as unknown as {
+      _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
+    };
+    const ws = 'b97f8231-9404-43bd-89de-38c281c4d875';
+    let last = '';
+    for (let i = 0; i < 20; i++) {
+      last = i % 2 === 0 ? `C:\\repo\\r${i}` : `C:\\repo\\r${i}`;
+      d._noteSillySpecStatusRoot(ws, last);
+    }
+    const t0 = Date.now();
+    let raw: { root_path: string } | null = null;
+    for (;;) {
+      raw = await waitFileJson<{ root_path: string }>(
+        join(stateDir, 'sillyspec-status-root.json'),
+      );
+      if (raw.root_path === last || Date.now() - t0 > 3000) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(raw.root_path).toBe(last);
+    restore();
+  });
+
   it('文件缺失/损坏/字段非法 → 恢复静默跳过（回退等 claim 旧路径）', async () => {
     const restore = silenceConsole();
     // 缺失。
