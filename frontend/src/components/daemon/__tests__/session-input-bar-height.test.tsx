@@ -17,6 +17,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
   uploadSessionAttachment: vi.fn(),
   removeSessionAttachment: vi.fn(),
   fetchAttachmentObjectUrl: vi.fn(),
+  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+  // 预览，补导出防 mock 缺口）。
+  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
 }));
 
 const HEIGHT_KEY = "sillyhub.sessions.inputBarHeight";

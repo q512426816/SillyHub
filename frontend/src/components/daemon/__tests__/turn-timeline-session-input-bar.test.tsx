@@ -37,6 +37,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
   uploadSessionAttachment: vi.fn(),
   removeSessionAttachment: vi.fn(),
   fetchAttachmentObjectUrl: vi.fn(),
+  // 2026-10-09-pending-attachment-preview：待发 chip 预览拉取（本文件用例不点击
+  // 预览，补导出防 mock 缺口）。
+  fetchAttachmentBlob: vi.fn(async () => new Blob(["x"])),
 }));
 
 function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
@@ -547,7 +550,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
     // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
     expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
-    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
     expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
   });
 
@@ -557,7 +560,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
     const file = new File(["# hi"], "note.md", { type: "text/markdown" });
     pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
-    expect(await screen.findByTitle("note.md · 2KB")).toBeInTheDocument();
+    expect(await screen.findByTitle("note.md · 2KB（点击在线预览）")).toBeInTheDocument();
   });
 
   it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {
