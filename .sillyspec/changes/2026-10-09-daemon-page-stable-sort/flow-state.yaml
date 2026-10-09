@@ -1,0 +1,26 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  守护进程页面（/runtimes）机器卡与机器内 agent 卡每次刷新排序乱跳，要固定排序。
+
+  根因（已定位）：后端 list_machines 主查询 ORDER BY last_heartbeat_at DESC（每次心跳都更新，机器间先后随时翻转）；机器内 runtimes 二次查询仅 ORDER BY provider（同
+  provider 并列时顺序不定）；共享给我的 runtimes 查询同款并列问题。
+
+  成功标准：
+
+  - /machines 机器列表排序稳定：保留 online 优先，其余改为展示名（coalesce(display_alias, hostname)）升序 + id 兜底，连续多次刷新顺序不变
+
+  - 机器内 runtime（agent）列表排序稳定：provider 升序 + created_at/id tiebreaker，同 provider 多 agent 顺序不变
+
+  - 共享给我的区块内 runtimes 明细同口径加 tiebreaker
+
+  - 新增/扩展后端测试覆盖上述排序稳定性，相关既有测试全部通过
+autopilot: true
+baseline_commit: 75c673dbd7318ab531427252bd3805712f97c2e9
+updatedAt: '2026-10-09T15:01:34.831Z'
+baseline_sha256: d3bbffe6d219646e85d3077ddf387dade19778c41adcdd74390f85f74ae1c4cf
+
