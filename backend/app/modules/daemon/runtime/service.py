@@ -1464,11 +1464,15 @@ class RuntimeService:
         - WHERE：``q``（max 200）ILIKE ``%q%`` 命中 hostname/display_alias + EXISTS
           子查询（该机器任一 runtime 的 provider ILIKE）；``status`` 精确匹配
           ``instance.status``；``provider`` EXISTS 子查询（含该 provider 的机器）。
-        - ORDER BY：online 优先（case status=='online' → 0）→ last_heartbeat_at DESC。
+        - ORDER BY：online 优先（case status=='online' → 0）→ 展示名
+          ``coalesce(display_alias, hostname)`` 升序 → ``id`` 升序
+          （2026-10-09-daemon-page-stable-sort：旧 ``last_heartbeat_at DESC`` 随每次
+          心跳翻转，前端 15s 轮询刷新时机器卡顺序乱跳；展示名与机器卡头同口径）。
         - 二次查询（N+1 规避，constraints）：本页 instance_ids → 一次性
-          ``select(DaemonRuntime).where(daemon_instance_id IN ids).order_by(provider)``，
-          Python 按 instance_id 分组成 dict；0-runtime 机器该键缺失，router 用
-          ``.get(id, [])`` 兜底（D-003）。
+          ``select(DaemonRuntime).where(daemon_instance_id IN ids).order_by(
+          provider, created_at, id)``（provider 后接稳定 tiebreaker，同 provider
+          多 runtime 顺序固定），Python 按 instance_id 分组成 dict；0-runtime
+          机器该键缺失，router 用 ``.get(id, [])`` 兜底（D-003）。
         - 不内联用量（D-004：用量走 ``/runtimes/usage``，前端按 instance 分组聚合）。
         - 2026-08-28-daemon-agent-share task-07：末位附加 ``shared_to_me`` 行
           （design §5 Phase 2.2）——共享机器独立成块不混入 items，items 的
@@ -1524,7 +1528,9 @@ class RuntimeService:
         total = int((await self._session.scalar(total_stmt)) or 0)
 
         # ── 主查询：JOIN users + WHERE/ORDER/LIMIT/OFFSET ─────────────────────
-        # online 优先（case 0）→ last_heartbeat_at DESC（design §5.1 排序上提到 SQL）。
+        # online 优先（case 0）保留（design §5.1）；组内改按展示名升序 + id 兜底
+        # （2026-10-09-daemon-page-stable-sort）：last_heartbeat_at 每次心跳都更新，
+        # 作排序键会让前端 15s 轮询刷新时机器卡顺序乱跳；hostname 非空，coalesce 恒非 NULL。
         order_expr = case(
             (col(DaemonInstance.status) == "online", 0),
             else_=1,
@@ -1532,7 +1538,13 @@ class RuntimeService:
         rows_stmt = (
             select(DaemonInstance, User)
             .outerjoin(User, DaemonInstance.user_id == User.id)
-            .order_by(order_expr, col(DaemonInstance.last_heartbeat_at).desc())
+            .order_by(
+                order_expr,
+                func.coalesce(
+                    col(DaemonInstance.display_alias), col(DaemonInstance.hostname)
+                ).asc(),
+                col(DaemonInstance.id),
+            )
             .limit(limit)
             .offset(offset)
         )
@@ -1551,7 +1563,14 @@ class RuntimeService:
                     await self._session.execute(
                         select(DaemonRuntime)
                         .where(col(DaemonRuntime.daemon_instance_id).in_(instance_ids))
-                        .order_by(col(DaemonRuntime.provider))
+                        .order_by(
+                            # provider 升序 + created_at/id tiebreaker（2026-10-09-daemon-page-stable-sort）：
+                            # 仅按 provider 排序时同 provider 多 runtime 的 DB 返回顺序不定，
+                            # 前端 agent 卡随刷新乱跳；nulls_last 对齐 SQLite/PG 的 NULL 位置差异。
+                            col(DaemonRuntime.provider).asc().nulls_last(),
+                            col(DaemonRuntime.created_at),
+                            col(DaemonRuntime.id),
+                        )
                     )
                 )
                 .scalars()
