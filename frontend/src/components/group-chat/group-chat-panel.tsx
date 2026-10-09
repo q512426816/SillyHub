@@ -139,10 +139,12 @@ import type { AgentRunLogEntry } from "@/lib/agent";
 import { errMessage, useNotify } from "@/lib/errors";
 import { markGroupOpened } from "@/lib/group-unread";
 import {
+  fetchAttachmentBlob,
   removeSessionAttachment,
   uploadSessionAttachment,
   type AttachmentRead,
 } from "@/lib/api/session-attachments";
+import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
   PROVIDER_META,
   fetchPendingDialogs,
@@ -1741,6 +1743,19 @@ export function GroupChatPanel({
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  /* 待发 chip 点击预览（2026-10-09-pending-attachment-preview，与单聊输入栏同款：
+   * 附件已传服务端持有 id，走 fetchAttachmentBlob + officeSource 链路弹
+   * FilePreviewModal）。 */
+  const [pendingPreview, setPendingPreview] = useState<FilePreviewTarget | null>(null);
+  const [pendingPreviewOpen, setPendingPreviewOpen] = useState(false);
+  const openPendingAttachmentPreview = (att: AttachmentRead) => {
+    setPendingPreview({
+      fetch: () => fetchAttachmentBlob(att.id),
+      meta: { name: att.name, size: att.bytes },
+      officeSource: { source: "session_attachment", id: att.id },
+    });
+    setPendingPreviewOpen(true);
+  };
   const mentionItems = useMemo(() => buildMemberMentionItems(members), [members]);
   const mentionDetection = useMemo(
     () => detectMention(draft, inputRef.current?.selectionStart ?? draft.length),
@@ -2856,19 +2871,25 @@ export function GroupChatPanel({
                       key={att.id}
                       data-testid="group-pending-attachment-chip"
                       className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
-                      title={`${att.name} · ${formatBytes(att.bytes)}`}
                     >
-                      <span className="inline-flex shrink-0 items-center gap-1 truncate">
+                      {/* 文件名区可点击在线预览（2026-10-09-pending-attachment-
+                          preview，单聊输入栏同款）；X 删除按钮独立兄弟节点不冒泡。 */}
+                      <button
+                        type="button"
+                        onClick={() => openPendingAttachmentPreview(att)}
+                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+                        className="inline-flex min-w-0 cursor-pointer items-center gap-1 text-left transition-colors hover:text-brand-600"
+                      >
                         {att.kind === "image" ? (
-                          <ImageIcon aria-hidden className="h-3 w-3" />
+                          <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
                         ) : (
-                          <FileText aria-hidden className="h-3 w-3" />
+                          <FileText aria-hidden className="h-3 w-3 shrink-0" />
                         )}
                         <span className="truncate">{att.name}</span>
                         <span className="shrink-0 text-muted-foreground">
                           {formatBytes(att.bytes)}
                         </span>
-                      </span>
+                      </button>
                       <button
                         type="button"
                         aria-label={`移除附件 ${att.name}`}
@@ -3027,6 +3048,13 @@ export function GroupChatPanel({
           <p className="p-6 text-center text-xs text-muted-foreground">群成员加载中…</p>
         )}
       </Drawer>
+
+      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+      <FilePreviewModal
+        target={pendingPreview}
+        open={pendingPreviewOpen}
+        onClose={() => setPendingPreviewOpen(false)}
+      />
     </div>
   );
 }
