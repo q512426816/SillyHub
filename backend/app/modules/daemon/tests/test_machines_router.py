@@ -4,7 +4,8 @@
 覆盖 FR-1 / FR-2 / FR-3 / FR-8 + D-001 / D-002 / D-003 / D-007：
 
 - GET /machines：机器级分页（D-007）、``q``/``status``/``provider``/``user_id`` 筛选、
-  online 优先 → last_heartbeat_at DESC 排序、admin 全局 / 普通用户仅自己、派生字段
+  online 优先 → 展示名 coalesce(display_alias, hostname) 升序排序（2026-10-09-daemon-page-stable-sort，
+  旧 last_heartbeat_at DESC 随心跳翻转让刷新乱序）、admin 全局 / 普通用户仅自己、派生字段
   ``runtime_count``/``online_runtime_count``、0-runtime 机器边界（D-003）。
 - PATCH /machines/{id}：display_alias set/clear/省略、越权→404、不存在→404、0-runtime
   机器可改（D-001）。
@@ -165,7 +166,10 @@ async def _create_runtime(
     allowed_roots: list[str] | None = None,
     daemon_instance_id: uuid.UUID | None = None,
     last_heartbeat_at: datetime | None = None,
+    created_at: datetime | None = None,
 ) -> DaemonRuntime:
+    # created_at：2026-10-09-daemon-page-stable-sort 排序用例需要显式控制
+    # 同 provider 多 runtime 的创建先后（tiebreaker 断言依据）。
     rt = DaemonRuntime(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -176,6 +180,7 @@ async def _create_runtime(
         allowed_roots=allowed_roots,
         daemon_instance_id=daemon_instance_id,
         last_heartbeat_at=last_heartbeat_at or datetime.now(UTC),
+        created_at=created_at or datetime.now(UTC),
     )
     session.add(rt)
     await session.commit()
@@ -411,13 +416,35 @@ async def test_machines_user_id_admin_filters_by_owner(
 
 
 @pytest.mark.asyncio
-async def test_machines_sort_online_first_then_heartbeat_desc(
+async def test_machines_sort_online_first_then_display_name_asc(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    """FR-1 / D-002：排序 online 优先 → last_heartbeat_at DESC。"""
+    """FR-1 / D-002 / 2026-10-09-daemon-page-stable-sort：排序 online 优先 → 展示名
+    ``coalesce(display_alias, hostname)`` 升序 → id 兜底；``last_heartbeat_at`` 不再
+    参与排序（旧键每次心跳翻转，前端 15s 轮询刷新时机器卡乱序）。"""
     admin, user_a, _ = await _bootstrap(db_session)
     now = datetime.now(UTC)
-    # offline 但心跳最新（应排在所有 online 之后）
+    # online：hostname 靠后但别名 "aaa-alias" 靠前；心跳最旧（旧排序键下垫底，
+    # <45s 不会被 cleanup_stale_runtimes 收敛 offline）。
+    inst_alias = await _create_instance(
+        db_session,
+        user_a.id,
+        hostname="zulu-host",
+        display_alias="aaa-alias",
+        status="online",
+        last_heartbeat_at=now - timedelta(seconds=30),
+    )
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_alias.id)
+    # online：无别名（展示名=hostname），心跳最新（旧排序键下排第一）。
+    inst_plain = await _create_instance(
+        db_session,
+        user_a.id,
+        hostname="mike-host",
+        status="online",
+        last_heartbeat_at=now - timedelta(seconds=1),
+    )
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_plain.id)
+    # offline 但心跳全场最新（online 优先保留：仍排最后）。
     inst_off_fresh = await _create_instance(
         db_session,
         user_a.id,
@@ -426,32 +453,63 @@ async def test_machines_sort_online_first_then_heartbeat_desc(
         last_heartbeat_at=now,
     )
     await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_off_fresh.id)
-    # online 心跳较旧
-    inst_on_old = await _create_instance(
-        db_session,
-        user_a.id,
-        hostname="on-old",
-        status="online",
-        # <45s：cleanup_stale_runtimes（list_machines 进入先收敛 stale）不会改 offline；
-        # 仍比 on-new(now-1s) 旧，用于验证 online 组内 last_heartbeat_at DESC。
-        last_heartbeat_at=now - timedelta(seconds=30),
-    )
-    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_on_old.id)
-    # online 心跳最新（应排第一）
-    inst_on_new = await _create_instance(
-        db_session,
-        user_a.id,
-        hostname="on-new",
-        status="online",
-        last_heartbeat_at=now - timedelta(seconds=1),
-    )
-    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst_on_new.id)
 
-    resp = await client.get("/api/daemon/machines?limit=10", headers=_headers(_token_for(admin)))
-    assert resp.status_code == 200, resp.text
-    hostnames = [it["hostname"] for it in resp.json()["items"]]
-    # online 两台在前（new 在 old 前），offline 在最后
-    assert hostnames == ["on-new", "on-old", "off-fresh"]
+    orders: list[list[str]] = []
+    for _ in range(2):  # 连续两次请求：顺序一致（稳定排序）。
+        resp = await client.get(
+            "/api/daemon/machines?limit=10", headers=_headers(_token_for(admin))
+        )
+        assert resp.status_code == 200, resp.text
+        orders.append([it["hostname"] for it in resp.json()["items"]])
+    # online 组内按展示名升序："aaa-alias"(zulu-host) < "mike-host"——与心跳新旧
+    # 相反（zulu 最旧却第一）、也与 hostname 序相反，证明排序键是展示名而非心跳/主机名。
+    assert orders[0] == ["zulu-host", "mike-host", "off-fresh"]
+    assert orders[0] == orders[1]
+
+
+@pytest.mark.asyncio
+async def test_machines_nested_runtimes_same_provider_stable_order(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """FR-2（2026-10-09-daemon-page-stable-sort）：机器内嵌套 runtimes 按 provider
+    升序 + created_at/id tiebreaker——同 provider 多 agent（runtime 卡）顺序固定，
+    且 provider 主序不被 created_at 穿插。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_instance(db_session, user_a.id, hostname="multi-agent-host")
+    t0 = datetime.now(UTC) - timedelta(minutes=10)
+    await _create_runtime(
+        db_session,
+        user_a.id,
+        name="claude-first",
+        provider="claude",
+        daemon_instance_id=inst.id,
+        created_at=t0,
+    )
+    await _create_runtime(
+        db_session,
+        user_a.id,
+        name="codex-mid",
+        provider="codex",
+        daemon_instance_id=inst.id,
+        created_at=t0 + timedelta(seconds=10),
+    )
+    await _create_runtime(
+        db_session,
+        user_a.id,
+        name="claude-second",
+        provider="claude",
+        daemon_instance_id=inst.id,
+        created_at=t0 + timedelta(seconds=20),
+    )
+
+    for _ in range(2):  # 连续两次请求：顺序一致。
+        resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(admin)))
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["items"]) == 1
+        names = [r["name"] for r in resp.json()["items"][0]["runtimes"]]
+        # provider 升序主导（codex 创建时间夹在两个 claude 之间但仍排最后），
+        # claude 组内按 created_at 升序。
+        assert names == ["claude-first", "claude-second", "codex-mid"]
 
 
 @pytest.mark.asyncio
@@ -1215,6 +1273,48 @@ async def test_machines_shared_to_me_block_fields_passthrough(
         {"runtime_id": str(rt_codex.id), "provider": "codex", "online": False},
     ]
     assert row_off["runtimes"] == []
+
+
+@pytest.mark.asyncio
+async def test_machines_shared_to_me_runtimes_same_provider_stable_order(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """FR-3（2026-10-09-daemon-page-stable-sort）：「共享给我的」runtimes 明细
+    同 provider 并列时按 created_at/id tiebreaker 固定顺序，连续刷新不乱跳。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    ws = await _create_workspace(db_session)
+    await _add_workspace_member(db_session, workspace_id=ws.id, user_id=user_a.id)
+    inst = await _seed_shared_machine(
+        db_session, lender=user_b, workspace_id=ws.id, hostname="lender-multi-host"
+    )
+    t0 = datetime.now(UTC) - timedelta(minutes=10)
+    rt_first = await _create_runtime(
+        db_session,
+        user_b.id,
+        name="claude-first",
+        provider="claude",
+        daemon_instance_id=inst.id,
+        created_at=t0,
+    )
+    rt_second = await _create_runtime(
+        db_session,
+        user_b.id,
+        name="claude-second",
+        provider="claude",
+        daemon_instance_id=inst.id,
+        created_at=t0 + timedelta(seconds=5),
+    )
+
+    expected = [
+        {"runtime_id": str(rt_first.id), "provider": "claude", "online": True},
+        {"runtime_id": str(rt_second.id), "provider": "claude", "online": True},
+    ]
+    for _ in range(2):  # 连续两次请求：明细顺序一致。
+        resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(user_a)))
+        assert resp.status_code == 200, resp.text
+        shared = resp.json()["shared_to_me"]
+        assert len(shared) == 1 and shared[0]["machine_id"] == str(inst.id)
+        assert shared[0]["runtimes"] == expected
 
 
 @pytest.mark.asyncio
