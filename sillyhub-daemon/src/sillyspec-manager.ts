@@ -1274,8 +1274,11 @@ export class SillySpecManager {
   /**
    * 执行前置校验：cwd（statusCwd 回调根）与 sillyspec bin 双就绪才返回
    * {cwd, bin}；任一缺失记 failed（不 spawn——无根/无 CLI 时起进程必错，还
-   * 浪费超时窗）并返回 null。change 名不再重复校验：daemon.ts 入口已验非空、
-   * backend 白名单 + CLI assertSafeChangeName 双保险，数组形参不经 shell。
+   * 浪费超时窗）并返回 null。change 名不在此重复校验——守卫面按路径分工
+   * （2026-10-10-daemon-tombstone-change-guard 对齐）：tombstone_cleanup 的
+   * 目录拼接/renameSync 全在 daemon 侧完成、不经 CLI，由 daemon.ts 入口
+   * SAFE_CHANGE_NAME_RE 白名单拦截；resolve 等数组形参路径由 CLI
+   * assertSafeChangeName 拦截（数组形参不经 shell）。
    */
   private _requireCommandPrecondition(
     action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',

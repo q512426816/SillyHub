@@ -1575,6 +1575,15 @@ const SILLYSPEC_COMMAND_UPGRADE_POLL_MS = 1000;
  */
 const SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS = 300_000;
 
+/**
+ * sillyspec change 名白名单（2026-10-10-daemon-tombstone-change-guard）：与
+ * backend machines.py MachineSillySpecTombstoneCleanupRequest 同款正则——首字符
+ * 字母数字，其余字母数字/./-/_，长度 1-128。tombstone_cleanup 的目录拼接与
+ * renameSync 完全在 daemon 侧完成，CLI 的 assertSafeChangeName 不触及该值
+ * （后续 doctor 命令数组不含 change），入口必须自校验。
+ */
+const SAFE_CHANGE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 // ── Daemon class（核心）──────────────────────────────────────────────────────
 
 /**
@@ -7389,7 +7398,9 @@ export class Daemon {
         // payload: {change, workspace_id}（2026-10-09-tombstone-conflict-root-fix
         // FR-03：墓碑收敛——目录隔离区移动 + doctor 归档，执行归
         // sillyspec-manager task-03）。值域校验同 resolve（缺 change /
-        // workspace_id 非字符串 → warn 丢弃不崩）。
+        // workspace_id 非字符串 → warn 丢弃不崩）；change 另过白名单正则
+        // （2026-10-10-daemon-tombstone-change-guard：执行器在 daemon 侧直接
+        // join+renameSync，路径穿越形态必须入口拦截，CLI 校验不覆盖本路径）。
         const change = typeof rawPayload.change === 'string' ? rawPayload.change : '';
         const workspaceId =
           typeof rawPayload.workspace_id === 'string' ? rawPayload.workspace_id : '';
@@ -7397,6 +7408,12 @@ export class Daemon {
           this._logger.warn('sillyspec_tombstone_cleanup_missing_fields', {
             change,
             workspace_id: workspaceId || null,
+          });
+          break;
+        }
+        if (!SAFE_CHANGE_NAME_RE.test(change)) {
+          this._logger.warn('sillyspec_tombstone_cleanup_invalid_change', {
+            change: change.slice(0, 160),
           });
           break;
         }

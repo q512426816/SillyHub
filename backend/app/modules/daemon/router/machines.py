@@ -343,8 +343,10 @@ class MachineSillySpecTombstoneCleanupRequest(BaseModel):
     """Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
 
     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
-    其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
-    双保险，backend 只做格式校验）。
+    其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则
+    ``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：
+    墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口
+    必须自拦截路径穿越形态）。
     """
 
     change: str

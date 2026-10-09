@@ -306,4 +306,27 @@ describe('task-03 case 分发：SILLYSPEC_TOMBSTONE_CLEANUP 直连路由', () =>
     ).resolves.toBeUndefined();
     expect(h.manager.runTombstoneCleanup).not.toHaveBeenCalled();
   });
+
+  // 2026-10-10-daemon-tombstone-change-guard：change 白名单（与 backend
+  // machines.py MachineSillySpecTombstoneCleanupRequest 同款正则）。本执行器
+  // 的目录拼接/renameSync 在 daemon 侧完成、不经 CLI assertSafeChangeName，
+  // 入口必须自校验——路径穿越/分隔符/非法首字符/超长一律 warn 丢弃。
+  it.each([
+    ['路径穿越 ../evil', { change: '../evil', workspace_id: 'ws-1' }],
+    ['反斜杠穿越 ..\\evil', { change: '..\\evil', workspace_id: 'ws-1' }],
+    ['正斜杠分隔 a/b', { change: 'a/b', workspace_id: 'ws-1' }],
+    ['非法首字符 .hidden', { change: '.hidden', workspace_id: 'ws-1' }],
+    ['非法首字符 -lead', { change: '-lead', workspace_id: 'ws-1' }],
+    ['含空格 my change', { change: 'my change', workspace_id: 'ws-1' }],
+    ['超长 129 字符', { change: 'a'.repeat(129), workspace_id: 'ws-1' }],
+  ])('%s → warn 丢弃不调用执行器（change 白名单）', async (_name, payload) => {
+    const h = makeDispatchHarness();
+    await expect(
+      h.handleWsMessage({
+        type: MSG.SILLYSPEC_TOMBSTONE_CLEANUP,
+        payload: payload as Record<string, unknown>,
+      }),
+    ).resolves.toBeUndefined();
+    expect(h.manager.runTombstoneCleanup).not.toHaveBeenCalled();
+  });
 });
