@@ -228,6 +228,77 @@ describe("m/workspaces task-08 破坏面收口", () => {
   });
 });
 
+describe("m/workspaces 创建工作区 spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {
+  /** 打开创建 Sheet 并填好 daemon + 路径（对齐 task-08 创建用例的前置链）。 */
+  async function openCreateSheetAndFill() {
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      {
+        id: "daemon-1",
+        hostname: "host-1",
+        display_alias: "本机守护",
+        status: "online",
+        providers: [],
+      } as never,
+    ]);
+    renderPage();
+    fireEvent.click(await screen.findByTestId("mobile-workspace-create"));
+    const daemonSelect = await screen.findByLabelText("选择守护进程");
+    fireEvent.change(daemonSelect, { target: { value: "daemon-1" } });
+    const pathInput = await screen.findByPlaceholderText(String.raw`C:\\path\\to\\repo`);
+    fireEvent.change(pathInput, { target: { value: String.raw`C:\repo\demo` } });
+  }
+
+  it("创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见", async () => {
+    await openCreateSheetAndFill();
+
+    // 默认收起：摘要指向 repo-native（FR-01），前两选项不进 DOM（FR-03）
+    expect(screen.getByText("源项目即真理")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /平台托管/ })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /单次导入/ })).toBeNull();
+    // 默认 repo-native 的 ⚠ 警示收起态可见（FR-05）
+    expect(screen.getByText(/⚠ 扫描产出会写入源项目/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("mobile-detail-sheet-submit"));
+    await waitFor(() => {
+      const post = apiCalls.apiFetch.mock.calls
+        .filter((call) => {
+          const [url, init] = call as FetchCall;
+          return url === "/api/workspaces" && init?.method === "POST";
+        })
+        .map((call) => call as FetchCall)
+        .at(-1);
+      expect(post?.[1]?.json).toMatchObject({
+        // 默认值翻转：repo-native 源项目即真理（FR-01/06）
+        spec_strategy: "repo-native",
+        type: "other",
+      });
+    });
+  });
+
+  it("更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随", async () => {
+    await openCreateSheetAndFill();
+
+    // 展开（FR-02）→ 三 radio 可见；repo-native 选中
+    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
+    const platformRadio = screen.getByRole("radio", {
+      name: "平台托管（不碰源项目，从零扫描）",
+    });
+    expect(platformRadio).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /单次导入/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: "源项目即真理（软链接，扫描直接写源项目）" }),
+    ).toBeChecked();
+
+    // 切到平台托管 → ⚠ 警示隐藏（FR-05 反向）
+    fireEvent.click(platformRadio);
+    expect(screen.queryByText(/⚠ 扫描产出会写入源项目/)).toBeNull();
+
+    // 收起 → 摘要跟随新选中值（FR-02；平台托管文案本身即「无默认字样」断言 FR-04）
+    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+    expect(screen.getByText("平台托管")).toBeInTheDocument();
+  });
+});
+
 describe("m/workspaces 卡片点击导航（D-006 门禁解除，2026-08-26-mobile-workspace-page task-03）", () => {
   it("点卡片 → router.push('/m/workspaces/<id>')，不再提示「请在电脑端打开」", async () => {
     // 列表桩改吐一张卡片（复用既有 apiFetch 桩机制，经真实 listWorkspaces 解析）

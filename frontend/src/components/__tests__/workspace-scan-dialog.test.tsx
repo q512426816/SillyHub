@@ -335,3 +335,86 @@ describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-ski
     expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
   });
 });
+
+describe("WorkspaceScanDialog spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {
+  beforeEach(() => {
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      {
+        id: "d1",
+        hostname: "host-a",
+        display_alias: null,
+        status: "online",
+        providers: [{ provider: "claude_code" }],
+      },
+    ]);
+    workspacesApi.createWorkspace.mockResolvedValue(makeCreatedWorkspace());
+    specWorkspacesApi.initDispatch.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native", async () => {
+    await renderDialogAndFillBase();
+
+    // 默认收起：摘要行可见且指向 repo-native（FR-01）
+    expect(screen.getByText("spec 同步策略：源项目即真理")).toBeInTheDocument();
+    // 前两个选项不出现在 DOM（FR-03，条件渲染非 CSS 隐藏）
+    expect(screen.queryByRole("radio", { name: /平台托管/ })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /单次导入/ })).toBeNull();
+    // 默认 repo-native 的 ⚠ 警示在收起态也可见（FR-05）
+    expect(screen.getByText(/⚠ 扫描产出会写入源项目/)).toBeInTheDocument();
+
+    // 直接创建（未展开未改选）→ 提交体带 spec_strategy=repo-native（FR-01/06）
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+    await waitFor(() =>
+      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
+    );
+    expect(workspacesApi.createWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ spec_strategy: "repo-native" }),
+    );
+  });
+
+  it("更多选项展开三选项可切换再收起不动选中值", async () => {
+    await renderDialogAndFillBase();
+
+    // 展开（FR-02）
+    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
+    // 三选项全部可见；平台托管文案已无「默认」字样（FR-04）
+    const platformRadio = screen.getByRole("radio", {
+      name: "平台托管（不碰源项目，从零扫描）",
+    });
+    expect(platformRadio).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /单次导入/ })).toBeInTheDocument();
+    const nativeRadio = screen.getByRole("radio", {
+      name: "源项目即真理（软链接，扫描直接写源项目）",
+    });
+    expect(nativeRadio).toBeInTheDocument();
+    expect(nativeRadio).toBeChecked();
+
+    // 切换到平台托管 → ⚠ 警示隐藏（FR-05 反向）
+    fireEvent.click(platformRadio);
+    expect(screen.queryByText(/⚠ 扫描产出会写入源项目/)).toBeNull();
+
+    // 收起 → 摘要跟随新选中值，选中值不被重置（FR-02）
+    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+    expect(screen.getByText("spec 同步策略：平台托管")).toBeInTheDocument();
+
+    // 切换后提交体随选中值（FR-06）
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+    await waitFor(() =>
+      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
+    );
+    expect(workspacesApi.createWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ spec_strategy: "platform-managed" }),
+    );
+  });
+});
