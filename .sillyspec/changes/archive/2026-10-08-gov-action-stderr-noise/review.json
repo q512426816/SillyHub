@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-08-gov-action-stderr-noise",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "15b0d73d3336119481d4daff23c92785176bd0cc",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "digest() 失败路径未过滤同源告警噪声（FR 范围外的一致性观察）",
+      "evidence": "同一 sillyspec CLI 子进程每次运行同样往 stderr 打两行 (node:NNN) ExperimentalWarning 噪声，而 digest 失败分支拼接 r.stderr 时未过 stripNodeWarningNoise，stdout 短时噪声会进入 digest failed 错误消息前 500 字符；FR-01 仅承诺 action 面，非违约，属同源噪声过滤不彻底的改进点。",
+      "location": "sillyhub-daemon/src/runtime-handler.ts:450"
+    },
+    {
+      "severity": "P3",
+      "title": "数据面修复（FR-build-049 重绑）未体现在 change.patch 冻结件",
+      "evidence": "change.patch 仅含 runtime-handler.ts、测试文件与 change 目录自身的 diff，无 .sillyspec/knowledge/fr/build.md；实态验证：FR-build-049 按 row-id 2026-09-30-vitest-passwithnotests-rollback:flow:FR-04 绑定 frontend/src/components/__tests__/top-bar.test.tsx 且该文件确认存在于本仓（数据正确性达成），其 confirmed_at=f5ac298c 恰等于 baseline_commit，说明重绑落在 baseline 侧、故不出现在 patch 增量中——数据实态正确，仅记录追溯口径。",
+      "location": ".sillyspec/knowledge/fr/build.md:716"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——过滤是对 run() 收齐后的完整 stderr 文本做同步纯函数变换，runtime-handler.ts:402-407 split(/\\r?\\n/) 归一换行后逐行过滤，无流式/乱序风险面，声称属实）",
+    "并发": "ok（边界已裁决：可接受——stripNodeWarningNoise 无共享可变状态，两正则 NODE_WARNING_LINE_RE/NODE_WARNING_HINT_RE 均无 /g 标志即 test() 无 lastIndex 副作用，action 单请求单子进程与写面行为不变，声称属实）",
+    "切换": "ok（边界已裁决：可接受——过滤发生在 await run() 返回后（子进程已 close）的拼接阶段 runtime-handler.ts:487，timedOut 抛 timeout 分支（:489）未动，中断/超时行为与改前一致，声称属实）",
+    "作用域": "ok（边界已裁决：可接受——按行过滤只变换本次 RPC 响应文本，无跨工作区/跨仓状态，声称属实）"
+  },
+  "disclosedBoundariesRuling": [
+    "daemon 侧过滤而非前端侧：可接受——噪声源头在子进程 stderr，源头滤一次使成功 output 与失败 action failed 前缀两路同时受益，前端零改动面最小。",
+    "放弃 NODE_OPTIONS=--no-warnings：可接受——该方案会静默压制 CLI 全部告警（含未来可能有价值的）且改动 spawn 环境面大于必要面；行级精确过滤仅删两行已知噪声。",
+    "放弃前端展示头 160 字符：可接受——CLI 结果摘要（含条目 ID 清单）在输出尾部，取头会丢信息，治标不治本。",
+    "RPC knowledge.action output 字段语义微变、backend/前端零改动：可接受——同字段同类型 string，仅内容不再含 Node 告警行，无类型/契约重生成需求（已确认生成物同步无需动作）。"
+  ],
+  "protectionClaimsVerified": "防护声明属实：NODE_WARNING_LINE_RE=/^\\(node:\\d+\\) \\w+Warning/ 与 NODE_WARNING_HINT_RE=/^\\(Use `node --trace-warnings/ 均 ^ 锚定行首、split 后逐行测试（runtime-handler.ts:399-406），不以这两种形态开头的真实错误行不会被误伤；且过滤仅作用于 r.stderr，r.stdout 原样拼接（:487），stdout 真实文案禁改禁丢的承诺兑现。",
+  "frTestTriadCheck": "FR-01 三方一致：实现（runtime-handler.ts:399-407,487,490）兑现承诺；绑定声称的测试 sillyhub-daemon/tests/knowledge-governance-handler.test.ts:107『stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）』真实存在且断言与 FR 两个 Given/When/Then 场景一一对应（成功路 not ExperimentalWarning/not node --trace-warnings/contains 无法定位需人工核；失败路 contains 'action failed: boom'/not ExperimentalWarning）。",
+  "reviewedAt": "2026-10-08T09:08:30Z"
+}

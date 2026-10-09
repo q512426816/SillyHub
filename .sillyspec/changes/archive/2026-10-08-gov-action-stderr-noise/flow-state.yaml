@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：知识库信号卡「一键修复路径」点完只看到 Node SQLite ExperimentalWarning——daemon 把 CLI stderr 告警拼进 output 尾部返回，前端仅展示末尾 160 字符，真实结果文案（如『1
+  个无法定位需人工核』）被挤掉，用户无法得知修复到底成没成。
+
+  成功标准：
+
+  - daemon knowledge.action 返回的 output 过滤 Node 进程告警噪声行（(node:NNN) XxxWarning 行与其 (Use node --trace-warnings 续行），CLI
+  真实结果文案完整保留
+
+  - 失败路径（action failed 前缀）同样不再携带告警噪声
+
+  - tests/knowledge-governance-handler.test.ts 新增 stderr 含 ExperimentalWarning 场景用例，该文件既有用例全绿
+autopilot: true
+baseline_commit: f5ac298c9cd6c2ddbca791ff43feccc8c737a2bb
+updatedAt: '2026-10-08T09:09:38.229Z'
+baseline_sha256: b2d87efb7f81e2fcfa348a5a760bcf3b382dcdd6fbcb328b0ab2a8cccac316db
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（1.7s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261008090719\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 3 个
+

@@ -1,0 +1,33 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "f5ac298c9cd6c2ddbca791ff43feccc8c737a2bb",
+  "totals": {
+    "files": 2,
+    "additions": 44,
+    "deletions": 1
+  },
+  "rows": [
+    {
+      "path": "sillyhub-daemon/src/runtime-handler.ts",
+      "additions": 18,
+      "deletions": 1,
+      "kind": "modified"
+    },
+    {
+      "path": "sillyhub-daemon/tests/knowledge-governance-handler.test.ts",
+      "additions": 26,
+      "deletions": 0,
+      "kind": "modified"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "4e76289858169484899124b435c1bb0563c01afaabb4430ac74a7308a2166533",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-08T09:07:20.568Z"
+}

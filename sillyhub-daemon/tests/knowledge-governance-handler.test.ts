@@ -114,6 +114,32 @@ describe('knowledge.action', () => {
     expect(cwds[0]).toBe('C:/repo/x');
   });
 
+  it('stderr 带 Node 实验特性告警噪声 → output 滤掉噪声、真实文案可见（成功/失败两路）', async () => {
+    // 实测 sillyspec CLI（node:sqlite）每次运行必打这两行 stderr（2026-10-08-gov-action-stderr-noise）
+    const noisy =
+      '(node:632) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n' +
+      '(Use `node --trace-warnings ...` to show where the warning was created)';
+    const ok = mk({
+      ok: true,
+      stdout: '✅ 绑定路径无需修复（1 个无法定位需人工核：FR-build-049:test/x.test.mjs）',
+      stderr: noisy,
+      timedOut: false,
+    });
+    const r = await ok.handler.action('ws-1', 'repair-paths', {}, 'C:/repo/x');
+    expect(r.output).not.toContain('ExperimentalWarning');
+    expect(r.output).not.toContain('node --trace-warnings');
+    expect(r.output).toContain('无法定位需人工核');
+
+    const fail = mk({ ok: false, stdout: 'boom', stderr: noisy, timedOut: false });
+    let caught: unknown;
+    await fail.handler.action('ws-1', 'repair-paths', {}, 'C:/repo/x').catch((e: unknown) => {
+      caught = e;
+    });
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain('action failed: boom');
+    expect((caught as Error).message).not.toContain('ExperimentalWarning');
+  });
+
   it('redomain：域名合法透传；元字符/大小写拒', async () => {
     const ok = mk({ ok: true, stdout: '✅ 域迁移完成：2 条', stderr: '', timedOut: false });
     const r = await ok.handler.action('ws-1', 'redomain', { from: 'auto-backend', to: 'platform-sync' }, 'C:/repo/x');

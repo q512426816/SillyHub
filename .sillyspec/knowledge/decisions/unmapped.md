@@ -1852,3 +1852,8 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：0c2a8bd2264230f90dbcfc4199d33c88a325750b
 理由：最大风险：自动切 tab 抢走结果面焦点（实测即翻车——path 预置用例被详情 tab 抢走 reason 文案）。已收口为仅 neighbors 切详情。放弃的方案：①所有带锚点 sub 都切详情——否，impact 闭包/path 推理链的价值在结果面；②antd Select 弹层内做富 tooltip——否，原生 title 在弹层滚动环境不稳，动态说明行同信息更可靠。
+
+变更：2026-10-08-gov-action-stderr-noise
+锚点：未记录
+最近确认：15b0d73d3336119481d4daff23c92785176bd0cc
+理由：最大风险：正则误伤真实错误行。缓解——只匹配行首严格形态 `^\(node:\d+\) \w+Warning` 与 ``^\(Use `node --trace-warnings``（实测 CLI 噪声逐字）， 真实 CLI 报错文案不以这两种形态开头。放弃的方案：给子进程注入 `NODE_OPTIONS=--no-warnings`——会静默压制 CLI 所有告警（含未来可能有价值的）， 且改的 spawn 环境面大于必要面；前端展示头 160 字符代替尾 160——CLI 结果摘要（含 条目 ID 清单）在输出尾部，取头会丢信息。

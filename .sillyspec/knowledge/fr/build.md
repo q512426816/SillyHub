@@ -716,13 +716,13 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-09-30-vitest-passwithnotests-rollback:flow:FR-04
-  tests: frontend/src/components/__tests__/top-bar.test.tsx | test/dynamic-deps-comment-edge.test.mjs
+  tests: frontend/src/components/__tests__/top-bar.test.tsx
   reason: spec
-  state: candidate
-  discovery: machine
-  confirmed_by: null
-  confirmed_at: null
-  source_change: 2026-09-30-vitest-passwithnotests-rollback
+  state: active
+  discovery: agent
+  confirmed_by: agent
+  confirmed_at: f5ac298c9cd6c2ddbca791ff43feccc8c737a2bb
+  source_change: manual
   status: active
 
 ## FR-build-050 定位段（session 查询）串行执行，RPC 段保持 Semaphore(3) 并发，AsyncSession 不再被并发使用
