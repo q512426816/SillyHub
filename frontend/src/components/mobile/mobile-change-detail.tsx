@@ -713,8 +713,11 @@ export function MobileChangeDetail({
       </SecCard>
 
       {/* 阶段时间线（X-03 #4 纯内容复用 ChangeStepTimeline；折叠壳；focusStage
-          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化） */}
-      {steps && steps.length > 0 ? (
+          联动筛选 + 卡头「阶段名 ✕」清除 chip，样式范式对齐桌面 :376-386 移动化）。
+          thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline，对齐桌面同款）：
+          thin steps 只有归档补种 3 行同时间戳步骤属噪音，主线叙事由轻量说明卡
+          与真实留痕承担（判定复用 :508 isThinLineageChange 同源谓词）。 */}
+      {!isThinLineageChange(change) && steps && steps.length > 0 ? (
         <SecCard
           testId="m-change-timeline-card"
           title={<>🧭 阶段时间线（{steps.length}）</>}
