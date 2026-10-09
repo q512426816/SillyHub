@@ -12,6 +12,11 @@
  * 文本（D-7）、attachmentsDisabled 门控（codex 引擎 D-6）、降级提示条（FR-10
  * D-9：当前供应商 multimodal 判不支持 → 图片将落盘供 agent 工具读）。
  *
+ * 2026-10-09-pending-attachment-preview：待发附件 chip 文件名区可点击——弹
+ * FilePreviewModal 在线预览（与已发送附件 attachment-chips 同链路：附件已传
+ * 服务端持有 id，fetchAttachmentBlob 拉取 + officeSource 高保真标识）；X 删除
+ * 按钮独立兄弟节点，点击互不干扰。
+ *
  * ql-20260825-006：输入框支持 Ctrl+V 粘贴剪贴板图片/文件——textarea onPaste 读
  * clipboardData.files，非空则拦截默认插入并复用 handleFiles 上传管线（与 📎 完全
  * 等价，含 attachmentsDisabled 门控与 10 个上限）；纯文本粘贴走默认行为不受影响。
@@ -47,10 +52,12 @@ import {
 import { Button } from "antd";
 
 import {
+  fetchAttachmentBlob,
   removeSessionAttachment,
   uploadSessionAttachment,
   type AttachmentRead,
 } from "@/lib/api/session-attachments";
+import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
   SessionMentionPopover,
   buildAtMentionItems,
@@ -244,6 +251,21 @@ export function SessionInputBar({
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const notify = useNotify();
+
+  /* 2026-10-09-pending-attachment-preview：待发 chip 点击预览（与已发送附件的
+   * attachment-chips 同链路——附件选文件即传已有服务端 id，预览走
+   * fetchAttachmentBlob + officeSource 高保真标识）。 */
+  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const openAttachmentPreview = (att: AttachmentRead) => {
+    setPreviewTarget({
+      fetch: () => fetchAttachmentBlob(att.id),
+      meta: { name: att.name, size: att.bytes },
+      officeSource: { source: "session_attachment", id: att.id },
+    });
+    setPreviewOpen(true);
+  };
 
   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
 
@@ -614,16 +636,22 @@ export function SessionInputBar({
               <span
                 key={att.id}
                 className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
-                title={`${att.name} · ${formatBytes(att.bytes)}`}
               >
-                <span className="truncate inline-flex items-center gap-1">
+                {/* 2026-10-09-pending-attachment-preview：文件名区可点击在线预览
+                    （未发送也能查看已上传内容）；X 删除按钮独立兄弟节点，互不冒泡。 */}
+                <button
+                  type="button"
+                  onClick={() => openAttachmentPreview(att)}
+                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+                  className="inline-flex min-w-0 cursor-pointer items-center gap-1 truncate text-left transition-colors hover:text-brand-600"
+                >
                   {att.kind === "image" ? (
                     <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
                   ) : (
                     <FileText aria-hidden className="h-3 w-3 shrink-0" />
                   )}
                   {att.name} · {formatBytes(att.bytes)}
-                </span>
+                </button>
                 <button
                   type="button"
                   aria-label={`移除附件 ${att.name}`}
@@ -929,6 +957,12 @@ export function SessionInputBar({
           )}
         </Button>
       </div>
+      {/* 待发附件在线预览窗（2026-10-09-pending-attachment-preview）。 */}
+      <FilePreviewModal
+        target={previewTarget}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
     </footer>
   );
 }
