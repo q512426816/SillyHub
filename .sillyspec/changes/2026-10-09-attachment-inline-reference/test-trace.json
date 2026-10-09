@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-attachment-inline-reference",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-attachment-inline-reference:task-01:acc-0-befb68d6",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-attachment-inline-reference:task-01:acc-1-87bcb059",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-attachment-inline-reference:task-02:acc-0-1dfd89f5",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-attachment-inline-reference:task-02:acc-1-3b4a90ee",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-attachment-inline-reference:task-03:acc-0-5e531a62",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-attachment-inline-reference:task-03:acc-1-efb19665",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-attachment-inline-reference:task-04:acc-0-d7ea3659",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-attachment-inline-reference:task-04:acc-1-af4a2ac5",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-attachment-inline-reference:task-05:acc-0-7fd44e56",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-09-attachment-inline-reference:task-06:acc-0-297e9c56",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-09-attachment-inline-reference:task-06:acc-1-c1496481",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-attachment-inline-reference"
+    }
+  ]
+}
