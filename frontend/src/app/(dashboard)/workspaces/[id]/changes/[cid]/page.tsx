@@ -407,8 +407,12 @@ export default function ChangeDetailPage({ params }: Props) {
 
           {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
               SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
-              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017） */}
-          {change.steps && change.steps.length > 0 ? (
+              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
+              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）：thin 流程子步
+              不落库，steps 里只有归档时 unregisterChange 终态一致化补种的 3 行同
+              时间戳步骤，零过程信息量；主线叙事由顶部轻量流程条 + 真实留痕时间线
+              卡承担（谓词与流程条同源 isThinLineageChange）。 */}
+          {!isThinLineageChange(change) && change.steps && change.steps.length > 0 ? (
             <section
               data-testid="change-step-timeline-card"
               className="rounded-md border bg-card"
