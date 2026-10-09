@@ -1,0 +1,234 @@
+diff --git a/.sillyspec/changes/2026-10-09-graph-text-backslash/flow-state.yaml b/.sillyspec/changes/2026-10-09-graph-text-backslash/flow-state.yaml
+new file mode 100644
+index 000000000..19ac1f0ca
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-text-backslash/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：24 小时风险审查实证 runtime-handler.ts GRAPH_TEXT_BLACKLIST_RE 字符集缺反斜杠——anchor 以反斜杠结尾时拼串的闭合引号被转义，POSIX shell
++  下吞并后续旗标进锚点参数；因命令分隔符均已在黑名单内无注入面，后果限于 CLI 报错回 internal（参数粘连），属消毒面加固。
++
++
++  成功标准：
++
++  - GRAPH_TEXT_BLACKLIST_RE 字符集补 \（反斜杠），注释同步更新
++
++  - 含反斜杠的 anchor/anchor2/search 被 validation_rejected（先红后绿用例钉住）
++
++  - 既有 daemon 相关测试保持绿，tsc 0
++autopilot: true
++baseline_commit: 04477570fac577d27dc6d655dfb671ab92720f30
++updatedAt: '2026-10-08T23:56:44.694Z'
++baseline_sha256: f25242ce7b5ae629457756706428e5cffee48d538da742898bd709ac463de983
++
+diff --git a/sillyhub-daemon/src/runtime-handler.ts b/sillyhub-daemon/src/runtime-handler.ts
+index c69047aa0..356b16dd3 100644
+--- a/sillyhub-daemon/src/runtime-handler.ts
++++ b/sillyhub-daemon/src/runtime-handler.ts
+@@ -412,11 +412,14 @@ const KNOWLEDGE_GRAPH_EDGES = new Set([
+ 
+ /**
+  * graph 自由串黑名单：先例 ROOT_PATH_METACHAR_RE 全集（"'`$&|;<>() %^ + \n\r\0
+- * ——注意空格与反引号都在集合内）外加 \t。命中即 validation_rejected；正常节点
+- * id 字符集（/ # : @ - _ . 与中文，实测样本 decision:decisions/x.md#D-1@v1、
+- * src/foo.js、FR-core-engine-001、2026-10-08-x）零冲突放行。
++ * ——注意空格与反引号都在集合内）外加 \t 与 \（2026-10-09 审查加固：反斜杠
++ * 结尾的锚点会转义拼串的闭合引号，POSIX shell 下吞并后续旗标进锚点参数——
++ * 分隔符均已在集合内故无注入面，补 \ 杜绝参数粘连）。命中即
++ * validation_rejected；正常节点 id 字符集（/ # : @ - _ . 与中文，实测样本
++ * decision:decisions/x.md#D-1@v1、src/foo.js、FR-core-engine-001、
++ * 2026-10-08-x）零冲突放行。
+  */
+-const GRAPH_TEXT_BLACKLIST_RE = /["'`$&|;<>() %^\n\r\0\t]/;
++const GRAPH_TEXT_BLACKLIST_RE = /["'`$&|;<>() %^\n\r\0\t\\]/;
+ 
+ /** graph 自由串消毒（anchor/anchor2/search 三参数同函数）：命中黑名单拒（D-001@v2）。 */
+ function sanitizeGraphText(name: string, v: string): string {
+diff --git a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+index ecfe960f3..a7c02b635 100644
+--- a/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
++++ b/sillyhub-daemon/tests/knowledge-governance-handler.test.ts
+@@ -196,6 +196,24 @@ describe('knowledge.graph', () => {
+     expect(sillyspecCmd).not.toHaveBeenCalled();
+   });
+ 
++  it('②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 \\ 转义闭合引号吞旗标，先红后绿钉住）', async () => {
++    const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK(), stderr: '', timedOut: false });
++    // 尾反斜杠=引号转义形态；中缀/开头反斜杠一并拒（黑名单字符级判定）
++    const backslash = ['anchor\\', 'a\\b', '\\FR-1'];
++    for (const bad of backslash) {
++      await expect(handler.graph('ws-1', { sub: 'neighbors', anchor: bad }, 'C:/repo/x')).rejects.toMatchObject({
++        code: 'validation_rejected',
++      });
++      await expect(
++        handler.graph('ws-1', { sub: 'path', anchor: 'FR-core-engine-001', anchor2: bad }, 'C:/repo/x'),
++      ).rejects.toMatchObject({ code: 'validation_rejected' });
++      await expect(handler.graph('ws-1', { sub: 'nodes', search: bad }, 'C:/repo/x')).rejects.toMatchObject({
++        code: 'validation_rejected',
++      });
++    }
++    expect(sillyspecCmd).not.toHaveBeenCalled();
++  });
++
+   it('③ 正常节点 id 样本全放行（/#:@/路径/FR/change 名）+ cwd=仓库根', async () => {
+     const cwds: string[] = [];
+     const { handler, sillyspecCmd } = mk({ ok: true, stdout: GRAPH_OK({ nodes: [] }), stderr: '', timedOut: false }, cwds);
+diff --git a/.sillyspec/changes/2026-10-09-graph-text-backslash/design.md b/.sillyspec/changes/2026-10-09-graph-text-backslash/design.md
+new file mode 100644
+index 000000000..c49b54f1d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-text-backslash/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T20:10:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-09-graph-text-backslash
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++单字符集补丁：GRAPH_TEXT_BLACKLIST_RE 在既有元字符全集外补 `\`，并新增 ②b 测试用例（反斜杠三形态 × 三参数位，全部断言 validation_rejected + 零 spawn）。机理：graph 拼串把锚点包进双引号，尾反斜杠会转义闭合引号，POSIX shell 把后续旗标吞进锚点参数——命令分隔符（;|&`$() 等）均已在黑名单内故无命令注入面，后果限于 CLI 收到粘连参数报错 → 回 internal（stderr 截 500），属消毒面完整性加固。选字符级拒绝而非引号转义处理：正常节点 id 字符集（/ # : @ - _ . 中文）不含反斜杠（实测样本），字符级拒绝与既有 9 类元字符消毒语义同构，不引入「哪些位置的反斜杠才危险」的判定复杂度。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `sillyhub-daemon/src/runtime-handler.ts`：GRAPH_TEXT_BLACKLIST_RE 常量字符集 +1 字符（\）；sanitizeGraphText 行为变化=含反斜杠的 anchor/anchor2/search 从放行变 validation_rejected。函数签名零变化。
++- 测试文件新增 ②b 用例。
++- 后端 / 前端 / RPC schema：零变化（validation_rejected 是既有回码形态，backend 信封已按 reason 翻译）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：消毒是同步纯判定（regex test），发生在拼串/spawn 之前，无时序面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：模块级只读正则常量，无共享可变态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：拒绝路径抛 RpcError 走既有 _dispatchRpc 回码链，无半态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：字符级判定与工作区/路径无关；root containment 二道校验保持独立。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：合法锚点若含反斜杠会被误拒——已核正常节点 id 字符集（/ # : @ - _ . 与中文，实测样本 decision:decisions/x.md#D-1@v1、src/foo.js、FR-core-engine-001）零含反斜杠，Windows 路径形态锚点本就带 : 与 \ 会被拒，但该形态从不在合法锚点域（用例 ③ 钉住放行面）。试过放弃：(a) 拼串侧对反斜杠做 shell 转义——放弃，黑名单字符级拒绝是与既有 9 类元字符同构的消毒语义，混入转义逻辑引入「部分放行」面；(b) 只拒尾反斜杠——放弃，字符级黑名单无法表达位置语义且中缀形态同样可疑，全拒更保守一致。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/runtime-handler.ts | GRAPH_TEXT_BLACKLIST_RE 补 \ + 注释 |
++| 修改 | sillyhub-daemon/tests/knowledge-governance-handler.test.ts | ②b 反斜杠样本矩阵用例 |
+diff --git a/.sillyspec/changes/2026-10-09-graph-text-backslash/proposal.md b/.sillyspec/changes/2026-10-09-graph-text-backslash/proposal.md
+new file mode 100644
+index 000000000..a1b4edc8b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-text-backslash/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T23:56:44.670Z
++---
++# 提案书（Proposal）— 2026-10-09-graph-text-backslash
++
++## 动机
++
++任务原话转写：动机：24 小时风险审查实证 runtime-handler.ts GRAPH_TEXT_BLACKLIST_RE 字符集缺反斜杠——anchor 以反斜杠结尾时拼串的闭合引号被转义，POSIX shell 下吞并后续旗标进锚点参数；因命令分隔符均已在黑名单内无注入面，后果限于 CLI 报错回 internal（参数粘连），属消毒面加固。
++
++成功标准：
++- GRAPH_TEXT_BLACKLIST_RE 字符集补 \（反斜杠），注释同步更新
++- 含反斜杠的 anchor/anchor2/search 被 validation_rejected（先红后绿用例钉住）
++- 既有 daemon 相关测试保持绿，tsc 0
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. GRAPH_TEXT_BLACKLIST_RE 字符集补 \（反斜杠），注释同步更新
++2. 含反斜杠的 anchor/anchor2/search 被 validation_rejected（先红后绿用例钉住）
++3. 既有 daemon 相关测试保持绿，tsc 0
++
++## 成功标准（可验证）
++
++1. GRAPH_TEXT_BLACKLIST_RE 字符集补 \（反斜杠），注释同步更新
++2. 含反斜杠的 anchor/anchor2/search 被 validation_rejected（先红后绿用例钉住）
++3. 既有 daemon 相关测试保持绿，tsc 0
+diff --git a/.sillyspec/changes/2026-10-09-graph-text-backslash/requirements.md b/.sillyspec/changes/2026-10-09-graph-text-backslash/requirements.md
+new file mode 100644
+index 000000000..c9717a005
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-text-backslash/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T20:10:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-09-graph-text-backslash
++
++## 功能需求
++
++### FR-01: GRAPH_TEXT_BLACKLIST_RE 字符集补反斜杠（\）
++
++- `sillyhub-daemon/src/runtime-handler.ts` 的 GRAPH_TEXT_BLACKLIST_RE 必须在既有字符集外补 `\`，注释同步说明动机（结尾反斜杠转义拼串闭合引号、吞并后续旗标进锚点参数的参数粘连形态）。
++
++#### 场景：反斜杠锚点被拒
++
++- Given anchor/anchor2/search 含反斜杠（尾缀/中缀/开头任一形态）
++- When 消毒判定
++- Then validation_rejected 且不 spawn（sillyspecCmd 零调用）
++
++### FR-02: 先红后绿用例钉住
++
++- 测试新增反斜杠样本矩阵用例（三参数位 × 三形态），旧黑名单下该用例必须失败（样本到达命令串），新黑名单下全绿；既有 knowledge.graph 消毒矩阵用例保持绿。
++
++#### 场景：加固可回归检测
++
++- Given 未来有人误删黑名单中的 \
++- When 跑 ②b 用例
++- Then 红（反斜杠样本放行到达 spawn 断言失败）
++
++### FR-03: 既有面零回归
++
++- 既有 daemon 相关测试必须保持全绿（本文件 26 用例含新增），daemon tsc --noEmit 必须 0 error；正常节点 id 字符集（/ # : @ - _ . 中文）必须零冲突——实测样本用例 ③ 继续放行。
++
++#### 场景：正常 id 不受影响
++
++- Given 实测样本 decision:decisions/x.md#D-1@v1、src/foo.js 等
++- When 消毒判定
++- Then 放行拼串（用例 ③ 钉住）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 \ 转义闭合引号吞旗标，先红后绿钉住）」
++FR-02: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b（旧黑名单形态下反斜杠样本放行即红——先红实证由字符集 diff 可推）」
++FR-03: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「①/②/③ 既有用例 + ③ 正常节点 id 样本全放行；26 测绿 + tsc 0（已实测）」
+diff --git a/.sillyspec/changes/2026-10-09-graph-text-backslash/tasks.md b/.sillyspec/changes/2026-10-09-graph-text-backslash/tasks.md
+new file mode 100644
+index 000000000..ad221ce2f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-graph-text-backslash/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-08T23:56:44.671Z
++---
++# 任务注册表（Tasks）— 2026-10-09-graph-text-backslash
++
++- [x] task-01: GRAPH_TEXT_BLACKLIST_RE 字符集补 \（反斜杠），注释同步更新
++- [x] task-02: 含反斜杠的 anchor/anchor2/search 被 validation_rejected（先红后绿用例钉住）
++- [x] task-03: 既有 daemon 相关测试保持绿，tsc 0

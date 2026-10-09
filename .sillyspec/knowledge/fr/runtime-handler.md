@@ -423,3 +423,60 @@ created_at: 2026-10-08T11:44:49.977Z
 - 场景：默认场景 — Given 5812 节点静态全图；When 缩放平移交互；Then 帧渲染 MUST 无力场计算（恒静态）；边绘制按缩放阈值裁剪；交互帧脏标记重绘；肉眼流畅（无逐帧全量重算）
 全文：.sillyspec/changes/archive/2026-10-09-knowledge-graph-fullmap/requirements.md#FR-05
 最近确认：3a04f370e
+
+## FR-runtime-handler-014 GRAPH_TEXT_BLACKLIST_RE 字符集补反斜杠（\）
+变更：2026-10-09-graph-text-backslash
+状态：active
+摘要：反斜杠锚点被拒
+全文：.sillyspec/changes/archive/2026-10-09-graph-text-backslash/requirements.md#FR-01
+最近确认：4fa6ce567d22b4d41f5b07583630510edd340a77
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 / 转义闭合引号吞旗标，先红后绿钉住）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-text-backslash
+  status: active
+
+## FR-runtime-handler-015 先红后绿用例钉住
+变更：2026-10-09-graph-text-backslash
+状态：active
+摘要：加固可回归检测
+全文：.sillyspec/changes/archive/2026-10-09-graph-text-backslash/requirements.md#FR-02
+最近确认：4fa6ce567d22b4d41f5b07583630510edd340a77
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b（旧黑名单形态下反斜杠样本放行即红——先红实证由字符集 diff 可推）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-text-backslash
+  status: active
+
+## FR-runtime-handler-016 既有面零回归
+变更：2026-10-09-graph-text-backslash
+状态：active
+摘要：正常 id 不受影响
+全文：.sillyspec/changes/archive/2026-10-09-graph-text-backslash/requirements.md#FR-03
+最近确认：4fa6ce567d22b4d41f5b07583630510edd340a77
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「①/②/③ 既有用例 + ③ 正常节点 id 样本全放行；26 测绿 + tsc 0（已实测）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-graph-text-backslash
+  status: active

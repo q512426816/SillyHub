@@ -1824,3 +1824,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：58cf516f41f5a4a03bcdd85b8f52dca555bdbb4f
 理由：最大风险：drift check 在 CI 上重生成时 openapi-typescript 版本与本地不一致会导致输出形态差误红——已由 frozen-lockfile（Install --frozen-lockfile）钉住同版本消解；本地实测同命令绿态通过。次风险：路径增补后 backend 独改也会触发 daemon-ci 全量测试，CI 时长略增（分钟级，可接受）。试过放弃：(a) 单独开一个轻量 drift workflow——放弃，daemon-ci 已有 Node/pnpm 环境，复用零成本；(b) 在 frontend-ci 里顺带守 daemon 类型——放弃，职责域错位（daemon 生成物归 daemon-ci）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-graph-text-backslash
+锚点：未记录
+最近确认：4fa6ce567d22b4d41f5b07583630510edd340a77
+理由：最大风险：合法锚点若含反斜杠会被误拒——已核正常节点 id 字符集（/ # : @ - _ . 与中文，实测样本 decision:decisions/x.md#D-1@v1、src/foo.js、FR-core-engine-001）零含反斜杠，Windows 路径形态锚点本就带 : 与 \ 会被拒，但该形态从不在合法锚点域（用例 ③ 钉住放行面）。试过放弃：(a) 拼串侧对反斜杠做 shell 转义——放弃，黑名单字符级拒绝是与既有 9 类元字符同构的消毒语义，混入转义逻辑引入「部分放行」面；(b) 只拒尾反斜杠——放弃，字符级黑名单无法表达位置语义且中缀形态同样可疑，全拒更保守一致。
