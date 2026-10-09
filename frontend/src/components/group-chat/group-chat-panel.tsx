@@ -1925,7 +1925,20 @@ export function GroupChatPanel({
       );
       setAttTokenMap({ ...attTokenMap, [att.id]: token });
     }
-    setDraft((prev) => prev + token);
+    const next = draft + token;
+    setDraft(next);
+    // FR-01 光标落末尾（验收 review gap 修复）：同文件 @ 回填的 rAF 复位机制。
+    const input = inputRef.current;
+    const restore = () => {
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(next.length, next.length);
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(restore);
+    } else {
+      restore();
+    }
   };
 
   const removeAttRefOnce = (token: string) => {
