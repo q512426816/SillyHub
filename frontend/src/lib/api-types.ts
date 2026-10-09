@@ -14022,6 +14022,11 @@ export interface components {
          *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
          *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
          *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
+         *
+         *     单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +
+         *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
+         *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
+         *     存量旧形态归档。
          */
         ChangePatchMeta: {
             /** Files */
@@ -19023,8 +19028,10 @@ export interface components {
          * @description Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
          *
          *     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
-         *     其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
-         *     双保险，backend 只做格式校验）。
+         *     其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则
+         *     ``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：
+         *     墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口
+         *     必须自拦截路径穿越形态）。
          */
         MachineSillySpecTombstoneCleanupRequest: {
             /** Change */
