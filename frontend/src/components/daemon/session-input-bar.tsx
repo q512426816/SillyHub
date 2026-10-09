@@ -59,6 +59,12 @@ import {
 } from "@/lib/api/session-attachments";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
+  allocateAttRefToken,
+  stripAttRefTokens,
+  type AttRefTokenMap,
+} from "@/lib/attachment-refs";
+import { InputRefOverlay } from "./input-ref-overlay";
+import {
   SessionMentionPopover,
   buildAtMentionItems,
   buildSlashMentionItems,
@@ -141,6 +147,10 @@ export interface SessionInputBarProps {
   multimodalDowngraded?: boolean;
   /** task-12：待发送附件变化（回传完整对象——父级合成标记行/取 ids；发送成功后父级调 clearAttachments）。 */
   onAttachmentsChange?: (next: AttachmentRead[]) => void;
+  /** 2026-10-09-attachment-inline-reference task-03：附件引用 token 映射回传
+   *  （attId → 编辑态 token；父级发送组装时 substituteAttRefsForSend 消费，
+   *  task-04 接线）。缺省不回传，组件内行为自洽。 */
+  onAttTokenMapChange?: (next: AttRefTokenMap) => void;
   /** task-12：父级发送成功后清空 chips（经 ref 暴露口，这里改用受控清理回调）。 */
   registerClearAttachments?: (fn: () => void) => void;
   /** task-03：@ 结构化选中回传——change/quick 两槽位、同类型后选覆盖先选；
@@ -236,6 +246,7 @@ export function SessionInputBar({
   attachmentsDisabledTitle,
   multimodalDowngraded = false,
   onAttachmentsChange,
+  onAttTokenMapChange,
   registerClearAttachments,
   onMentionsChange,
   workspaceId,
@@ -265,6 +276,40 @@ export function SessionInputBar({
       officeSource: { source: "session_attachment", id: att.id },
     });
     setPreviewOpen(true);
+  };
+
+  /* 2026-10-09-attachment-inline-reference task-03：附件引用 token 映射
+   * （attId → 编辑态 token，D-002/D-004）。分配按"正文已出现 + 已分配"并集
+   * 唯一化（含用户手打【】文本的保守占位）；删附件联动剥离其全部 token；
+   * 映射随 onAttTokenMapChange 受控回传父级（发送置换 task-04 消费）。 */
+  const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+  const syncTokenMap = (next: AttRefTokenMap) => {
+    setAttTokenMap(next);
+    onAttTokenMapChange?.(next);
+  };
+
+  /** 右击 chip 插入引用（D-006：追加正文末尾，光标随 pendingCaretRef 落末尾；允许重复）。 */
+  const handleInsertAttRef = (att: AttachmentRead) => {
+    let token = attTokenMap[att.id];
+    if (!token) {
+      // 唯一化并集：已分配映射值 + 正文中出现的所有【…】文本（保守占位防手打碰撞）。
+      const inText = value.match(/【[^】]*】/g) ?? [];
+      token = allocateAttRefToken(
+        att.name,
+        [...Object.values(attTokenMap), ...inText].filter(Boolean),
+      );
+      syncTokenMap({ ...attTokenMap, [att.id]: token });
+    }
+    const next = value + token;
+    onChange(next);
+    pendingCaretRef.current = next.length;
+  };
+
+  /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。 */
+  const removeAttRefOnce = (token: string) => {
+    const idx = value.indexOf(token);
+    if (idx < 0) return;
+    onChange(value.slice(0, idx) + value.slice(idx + token.length));
   };
 
   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
@@ -500,6 +545,9 @@ export function SessionInputBar({
       mentionsRef.current = {};
       onMentionsChangeRef.current?.({});
     }
+    // 引用映射随外部清空归零（新建/切换会话等不经 clearAttachments 的路径；
+    // token 已不在正文，此处只清映射防陈旧槽位跨消息泄漏——同 mentions 口径）。
+    if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
     if (!mention) return;
     setMention(null);
     setMentionActiveIndex(0);
@@ -576,6 +624,8 @@ export function SessionInputBar({
   registerClearAttachments?.(() => {
     setAttachments([]);
     onAttachmentsChange?.([]);
+    // 引用映射随发送成功清空一并复位（task-03）。
+    if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
   });
 
   const handleFiles = async (files: FileList | null) => {
@@ -608,6 +658,14 @@ export function SessionInputBar({
   };
 
   const handleRemove = async (att: AttachmentRead) => {
+    // 2026-10-09-attachment-inline-reference：删附件联动剥离正文全部引用（D-004）。
+    const token = attTokenMap[att.id];
+    if (token) {
+      onChange(stripAttRefTokens(value, [token]));
+      const nextMap = { ...attTokenMap };
+      delete nextMap[att.id];
+      syncTokenMap(nextMap);
+    }
     setAttachments((prev) => {
       const next = prev.filter((a) => a.id !== att.id);
       syncToParent(next);
@@ -642,7 +700,12 @@ export function SessionInputBar({
                 <button
                   type="button"
                   onClick={() => openAttachmentPreview(att)}
-                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+                  onContextMenu={(e) => {
+                    // 右击插入正文末尾引用标签（D-006，FR-01）；阻止浏览器默认菜单。
+                    e.preventDefault();
+                    handleInsertAttRef(att);
+                  }}
+                  title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览 / 右击插入正文引用）`}
                   className="inline-flex min-w-0 cursor-pointer items-center gap-1 truncate text-left transition-colors hover:text-brand-600"
                 >
                   {att.kind === "image" ? (
@@ -853,15 +916,31 @@ export function SessionInputBar({
             </div>
           )}
         </div>
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            // task-03 检测驱动：读 e.target.selectionStart（光标左侧回看），
-            // IME 组合期由 runMentionDetect 内部跳过。
-            runMentionDetect(e.target.value, e.target.selectionStart);
-          }}
+        {/* 引用镜像高亮层（2026-10-09-attachment-inline-reference task-03）：
+            wrapper 锚定 textarea 版式区（flex-1 迁至 wrapper），overlay 铺底
+            渲染 token 背景块与 × 角标（角标 z-20 浮出 textarea），textarea
+            加 relative z-10 保持输入事件面。 */}
+        <div className="relative min-w-0 flex-1">
+          <InputRefOverlay
+            value={value}
+            tokens={Object.values(attTokenMap)}
+            onRemoveToken={removeAttRefOnce}
+            overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
+            overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+          />
+          <textarea
+            ref={textareaRef}
+            value={value}
+            className="relative z-10 min-h-11 w-full resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            rows={2}
+            disabled={disabled}
+            style={inputHeight != null ? { height: inputHeight } : undefined}
+            onChange={(e) => {
+              onChange(e.target.value);
+              // task-03 检测驱动：读 e.target.selectionStart（光标左侧回看），
+              // IME 组合期由 runMentionDetect 内部跳过。
+              runMentionDetect(e.target.value, e.target.selectionStart);
+            }}
           onFocus={() => {
             // task-03：首次聚焦挂载联想数据桥（预取，见 MentionSourcesBridge 注释）。
             setMentionSourcesMounted(true);
@@ -917,11 +996,8 @@ export function SessionInputBar({
             }
           }}
           placeholder={placeholder}
-          className="min-h-11 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
-          rows={2}
-          disabled={disabled}
-          style={inputHeight != null ? { height: inputHeight } : undefined}
         />
+        </div>
         {/* task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：⏰ 定时
             发送按钮——发送按钮左侧，点击开父层定时弹窗（onSchedule 注入，预会话
             idle 态不注入不渲染）。原生 button（antd .ant-btn height:32 会盖掉

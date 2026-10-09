@@ -73,6 +73,7 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
 // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
 import { useSession } from "@/stores/session";
@@ -600,7 +601,11 @@ const TurnRow = memo(function TurnRow({
                             <AttachmentChips attachments={parsed.attachments} />
                           )}
                           {parsed.text && (
-                            <div className="whitespace-pre-wrap break-words">{parsed.text}</div>
+                            <div className="whitespace-pre-wrap break-words">
+                              {/* task-06（2026-10-09-attachment-inline-reference）：
+                                  正文行内引用渲染为可点击标签（点击开预览窗）。 */}
+                              <InlineAttRefTextWithPreview text={parsed.text} />
+                            </div>
                           )}
                           {/* task-11：复制剥离标记后的纯文本（与显示一致，点击时惰性重解析）；
                               纯附件消息（text 空串）不渲染复制钮。原型 .bubble-user .copy-btn

@@ -356,7 +356,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
       expect.any(File),
       "image",
     );
-    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
+    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）")).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "看下这张图" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -394,7 +394,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
 
     const input = screen.getByPlaceholderText(/排队/) as HTMLTextAreaElement;
     pasteFile(input, att);
-    await screen.findByTitle("note.md · 2KB（点击在线预览）");
+    await screen.findByTitle("note.md · 2KB（点击在线预览 / 右击插入正文引用）");
     fireEvent.change(input, { target: { value: "排队带附件" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -435,7 +435,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
 
     const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     pasteFile(input, att);
-    await screen.findByTitle("shot.png · 2KB（点击在线预览）");
+    await screen.findByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）");
 
     // 空文本 + 有附件：发送按钮可点
     const sendBtn = screen.getByTitle("发送") as HTMLButtonElement;

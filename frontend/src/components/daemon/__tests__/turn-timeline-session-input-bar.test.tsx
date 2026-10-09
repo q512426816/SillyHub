@@ -450,6 +450,24 @@ describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-q
     });
     expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
   });
+
+  // task-06（2026-10-09-attachment-inline-reference）：历史正文行内引用渲染为
+  // 可点击标签（InlineAttRefTextWithPreview；点击预览链路组件级用例已覆盖）。
+  it("正文含 [附件引用:uuid|name] → 渲染引用标签（点击在线预览 title）", () => {
+    setupTimeline({
+      turns: [
+        makeTurn({
+          prompt: `看这个[附件引用:${UUID1}|对比图.png]的效果`,
+          output: "",
+        }),
+      ],
+    });
+    expect(
+      screen.getByTitle("对比图.png（点击在线预览）"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("看这个", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("的效果", { exact: false })).toBeInTheDocument();
+  });
 });
 
 describe("SessionInputBar（task-13 抽取共享子组件）", () => {
@@ -550,7 +568,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
     // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
     expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
-    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览）")).toBeInTheDocument();
+    expect(await screen.findByTitle("shot.png · 2KB（点击在线预览 / 右击插入正文引用）")).toBeInTheDocument();
     expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
   });
 
@@ -560,7 +578,7 @@ describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
     const file = new File(["# hi"], "note.md", { type: "text/markdown" });
     pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
     expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
-    expect(await screen.findByTitle("note.md · 2KB（点击在线预览）")).toBeInTheDocument();
+    expect(await screen.findByTitle("note.md · 2KB（点击在线预览 / 右击插入正文引用）")).toBeInTheDocument();
   });
 
   it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {

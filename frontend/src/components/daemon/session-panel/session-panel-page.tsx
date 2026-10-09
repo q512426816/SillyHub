@@ -24,6 +24,10 @@ import { type AttachmentRead } from "@/lib/api/session-attachments";
 import {
   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
+  substituteAttRefsForSend,
+  type AttRefTokenMap,
+} from "@/lib/attachment-refs";
+import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
@@ -746,6 +750,9 @@ export function SessionPanelPage({
   const [input, setInput] = useState("");
   // 2026-08-20 task-12：待发送附件 ids（SessionInputBar 上传产物）与清理句柄。
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
+  // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（输入区
+  // 受控回传；发送组装时置换为 uuid 锚定正式引用，D-003）。
+  const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化
@@ -823,8 +830,10 @@ export function SessionPanelPage({
    */
   const confirmSchedCreate = useCallback(async () => {
     const sid = sessionId;
-    const prompt = input.trim();
-    if (!sid || !schedAt || !prompt || schedSubmitting) return;
+    const rawPrompt = input.trim();
+    // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
     setSchedSubmitting(true);
     try {
       await createScheduledMessage(sid, {
@@ -832,10 +841,10 @@ export function SessionPanelPage({
         dispatch_at: schedAt.toISOString(),
       });
       setSchedOpen(false);
-      setInput((prev) => (prev.trim() === prompt ? "" : prev));
+      setInput((prev) => (prev.trim() === rawPrompt ? "" : prev));
       setSchedHints((prev) => [
         ...prev,
-        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(prompt)}」`,
+        `已创建定时消息：${formatScheduledTime(schedAt.toISOString())} 发送「${summarizeScheduledPrompt(rawPrompt)}」`,
       ]);
       setSchedRefresh((n) => n + 1);
       notify.success("已创建定时消息");
@@ -844,7 +853,7 @@ export function SessionPanelPage({
     } finally {
       setSchedSubmitting(false);
     }
-  }, [sessionId, input, schedAt, schedSubmitting, notify]);
+  }, [sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
 
   // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
   // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
@@ -2726,11 +2735,22 @@ export function SessionPanelPage({
    * ql-20260901-002：/team 轮发的是原始输入（与草稿同文），t === prompt 直接
    * 对上；parseTeamCommand 比对保留兼容（旧版本发送剥前缀文本的语义残渣，
    * 对上即清无副作用）。
+   * 2026-10-09-attachment-inline-reference task-04：prompt 为 token 置换版，
+   * 草稿原文含【…】token 与置换版不等——补 strip 比对（剥掉当前映射 token 后
+   * 相等即视为同文，对上即清；attTokenMap 此时仍持本次映射）。
    */
-  const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
+  const onSendSettled = useCallback(
+    (prompt: string, attachmentIds: string[]) => {
     setInput((prev) => {
       const t = prev.trim();
-      return t === prompt || parseTeamCommand(t) === prompt ? "" : prev;
+      // 草稿同样置换后与发送文本比对（token 剥离版 ≠ 置换版——uuid 文本
+      // 只在发送侧注入，草稿侧补齐同款置换才是同文判定）。
+      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
+      return (
+        t === prompt ||
+        substituted === prompt ||
+        parseTeamCommand(t) === prompt ? "" : prev
+      );
     });
     setPendingAttachments((prev) =>
       attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
@@ -2740,7 +2760,9 @@ export function SessionPanelPage({
     // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机；
     // 绑定已随本次请求上送，残留会错绑到下一条消息）。
     setPendingMentions({});
-  }, []);
+    },
+    [attTokenMap, pendingAttachments],
+  );
 
   /**
    * 空闲路径直发（占位轮 + injectSession）。
@@ -3228,15 +3250,20 @@ export function SessionPanelPage({
   // running 禁发守卫 + 409 回填输入）删除——失败语义改由 D-003 队头 failed +
   // 重试/删除承载。
   const handleSend = useCallback(() => {
-    const prompt = input.trim();
+    const rawPrompt = input.trim();
+    // 2026-10-09-attachment-inline-reference task-04（D-003）：正文引用 token 置换
+    // 为 [附件引用:uuid|name]——入口一处置换，后续 createSession 直发 / 队列
+    // sendFromQueue / steered / /team / takeover 全路径消费置换版；tokenMap 空
+    // 时原样返回（零开销旁路）。守卫/长度口径用 rawPrompt（用户所见原文）。
+    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
     // ql-20260825-007：D-7 对齐——附件非空豁免空文本（看图说话）；纯文本仍要求非空。
     // 空文本静默（发送按钮本已禁用）；超长/队满 toast 明示（ql-20260903-014：
     // 旧版一律静默 return，按钮亮着却毫无反应，用户以为软件坏了）。
-    if (!prompt && pendingAttachments.length === 0) return;
-    if (prompt.length > MAX_PROMPT_LEN) {
+    if (!rawPrompt && pendingAttachments.length === 0) return;
+    if (rawPrompt.length > MAX_PROMPT_LEN) {
       notify.warning(
-        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${prompt.length} 字），请精简后再发送`,
+        `单条消息最长 ${MAX_PROMPT_LEN} 字（当前 ${rawPrompt.length} 字），请精简后再发送`,
       );
       return;
     }
@@ -3316,7 +3343,7 @@ export function SessionPanelPage({
       return;
     }
     void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -3830,6 +3857,7 @@ export function SessionPanelPage({
             attachmentsDisabled={preAttachmentsDisabled}
             multimodalDowngraded={false}
             onAttachmentsChange={setPendingAttachments}
+            onAttTokenMapChange={setAttTokenMap}
             registerClearAttachments={(fn) => {
               clearAttachmentsRef.current = fn;
             }}
@@ -4919,6 +4947,7 @@ export function SessionPanelPage({
           attachmentsDisabled={attachmentsDisabled}
           multimodalDowngraded={multimodalDowngraded}
           onAttachmentsChange={setPendingAttachments}
+          onAttTokenMapChange={setAttTokenMap}
           registerClearAttachments={(fn) => {
             clearAttachmentsRef.current = fn;
           }}

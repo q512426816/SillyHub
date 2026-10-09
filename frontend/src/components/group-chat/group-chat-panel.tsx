@@ -146,6 +146,15 @@ import {
 } from "@/lib/api/session-attachments";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
+  allocateAttRefToken,
+  parseInlineAttRefs,
+  stripAttRefTokens,
+  substituteAttRefsForSend,
+  type AttRefTokenMap,
+} from "@/lib/attachment-refs";
+import { InputRefOverlay } from "@/components/daemon/input-ref-overlay";
+import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
+import {
   PROVIDER_META,
   fetchPendingDialogs,
   getAgentSessionLogs,
@@ -1748,6 +1757,10 @@ export function GroupChatPanel({
    * FilePreviewModal）。 */
   const [pendingPreview, setPendingPreview] = useState<FilePreviewTarget | null>(null);
   const [pendingPreviewOpen, setPendingPreviewOpen] = useState(false);
+  /* task-05（2026-10-09-attachment-inline-reference）：附件引用 token 映射
+   * （attId → 编辑态 token，D-002/D-003/D-004——右击插入/删附件联动剥离/
+   * handleSend 置换，单聊 session-input-bar 同款口径）。 */
+  const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
   const openPendingAttachmentPreview = (att: AttachmentRead) => {
     setPendingPreview({
       fetch: () => fetchAttachmentBlob(att.id),
@@ -1884,6 +1897,14 @@ export function GroupChatPanel({
 
   /** 移除待发附件（草稿行服务端同步删；发送后清理不走此处——行已绑定群会话）。 */
   const handleRemoveAttachment = async (att: AttachmentRead) => {
+    // task-05：删附件联动剥离正文全部引用（D-004，单聊同款）。
+    const token = attTokenMap[att.id];
+    if (token) {
+      setDraft((prev) => stripAttRefTokens(prev, [token]));
+      const nextMap = { ...attTokenMap };
+      delete nextMap[att.id];
+      setAttTokenMap(nextMap);
+    }
     setPendingAttachments((prev) => prev.filter((a) => a.id !== att.id));
     try {
       await removeSessionAttachment(att.id);
@@ -1892,10 +1913,48 @@ export function GroupChatPanel({
     }
   };
 
+  /* task-05：右击 chip 插入正文引用（D-006：末尾追加、允许重复、同名唯一化
+   * ——并集口径与单聊一致）；× 角标删一处（D-004）。 */
+  const handleInsertAttRef = (att: AttachmentRead) => {
+    let token = attTokenMap[att.id];
+    if (!token) {
+      const inText = draft.match(/【[^】]*】/g) ?? [];
+      token = allocateAttRefToken(
+        att.name,
+        [...Object.values(attTokenMap), ...inText].filter(Boolean),
+      );
+      setAttTokenMap({ ...attTokenMap, [att.id]: token });
+    }
+    const next = draft + token;
+    setDraft(next);
+    // FR-01 光标落末尾（验收 review gap 修复）：同文件 @ 回填的 rAF 复位机制。
+    const input = inputRef.current;
+    const restore = () => {
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(next.length, next.length);
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(restore);
+    } else {
+      restore();
+    }
+  };
+
+  const removeAttRefOnce = (token: string) => {
+    setDraft((prev) => {
+      const idx = prev.indexOf(token);
+      return idx < 0 ? prev : prev.slice(0, idx) + prev.slice(idx + token.length);
+    });
+  };
+
   const performSend = useCallback(async () => {
-    const content = draft.trim();
+    const rawContent = draft.trim();
     const attachmentIds = pendingAttachments.map((a) => a.id);
-    if ((!content && attachmentIds.length === 0) || sending) return;
+    if ((!rawContent && attachmentIds.length === 0) || sending) return;
+    // task-05（D-003）：正文引用 token 置换为 uuid 锚定正式引用（群聊出口仅
+    // 此处；tokenMap 空时原样返回）。守卫口径用原文。
+    const content = substituteAttRefsForSend(rawContent, attTokenMap, pendingAttachments);
     setSending(true);
     // 发送即收口 typing（停顿指示器 + 心跳）。
     stopTypingReport();
@@ -1911,6 +1970,7 @@ export function GroupChatPanel({
       );
       setDraft("");
       setPendingAttachments([]);
+      setAttTokenMap({});
       setReplyTarget(null);
       setUploadError(null);
       /* ── quick 群 P2 触发失败展示：消息恒 200 已落时间线，单成员触发失败
@@ -1930,7 +1990,7 @@ export function GroupChatPanel({
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, sending, groupId, pendingAttachments, replyTarget, notify, stopTypingReport]);
+  }, [draft, sending, groupId, pendingAttachments, attTokenMap, replyTarget, notify, stopTypingReport]);
 
   const handleSend = useCallback(async () => {
     const content = draft.trim();
@@ -2877,7 +2937,12 @@ export function GroupChatPanel({
                       <button
                         type="button"
                         onClick={() => openPendingAttachmentPreview(att)}
-                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览）`}
+                        onContextMenu={(e) => {
+                          // task-05：右击插入正文末尾引用标签（D-006/FR-01）。
+                          e.preventDefault();
+                          handleInsertAttRef(att);
+                        }}
+                        title={`${att.name} · ${formatBytes(att.bytes)}（点击在线预览 / 右击插入正文引用）`}
                         className="inline-flex min-w-0 cursor-pointer items-center gap-1 text-left transition-colors hover:text-brand-600"
                       >
                         {att.kind === "image" ? (
@@ -2919,27 +2984,38 @@ export function GroupChatPanel({
               aria-label="选择群消息附件"
               onChange={(e) => void handleFiles(e.target.files)}
             />
-            <textarea
-              ref={inputRef}
-              value={draft}
-              rows={1}
-              aria-label="群消息输入框"
-              placeholder="发送消息，@昵称 唤起指定 Agent，@全体 通知所有 Agent…"
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={handleInputKeyDown}
-              onPaste={(e) => {
-                // 剪贴板带文件（截图等）→ 与 📎 同上传管线（单聊同口径）。
-                const files = e.clipboardData?.files;
-                if (!files || files.length === 0) return;
-                e.preventDefault();
-                void handleFiles(files);
-              }}
-              // ql-20260911-030：原 max-h-[120px] 钳制会截断拖拽高度（拖拽高度
-              // 直接内联 style，min-h 下限与拖拽钳制同值 44px）；无拖拽值时
-              // rows=1 单行自适应与原行为一致。
-              className="min-h-[44px] w-full resize-none border-none bg-transparent px-3.5 py-2.5 text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70"
-              style={inputHeight != null ? { height: inputHeight } : undefined}
-            />
+            {/* task-05：引用镜像高亮层（单聊 session-input-bar 同款——wrapper
+                锚定版式区，overlay 铺底、角标 z-20 浮出、textarea z-10 输入面）。 */}
+            <div className="relative w-full">
+              <InputRefOverlay
+                value={draft}
+                tokens={Object.values(attTokenMap)}
+                onRemoveToken={removeAttRefOnce}
+                overlayClassName="min-h-[44px] w-full px-3.5 py-2.5 text-[13.5px]"
+                overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+              />
+              <textarea
+                ref={inputRef}
+                value={draft}
+                rows={1}
+                aria-label="群消息输入框"
+                placeholder="发送消息，@昵称 唤起指定 Agent，@全体 通知所有 Agent…"
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleInputKeyDown}
+                onPaste={(e) => {
+                  // 剪贴板带文件（截图等）→ 与 📎 同上传管线（单聊同口径）。
+                  const files = e.clipboardData?.files;
+                  if (!files || files.length === 0) return;
+                  e.preventDefault();
+                  void handleFiles(files);
+                }}
+                // ql-20260911-030：原 max-h-[120px] 钳制会截断拖拽高度（拖拽高度
+                // 直接内联 style，min-h 下限与拖拽钳制同值 44px）；无拖拽值时
+                // rows=1 单行自适应与原行为一致。
+                className="relative z-10 min-h-[44px] w-full resize-none border-none bg-transparent px-3.5 py-2.5 text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70"
+                style={inputHeight != null ? { height: inputHeight } : undefined}
+              />
+            </div>
             <div className="flex items-center gap-2 px-2.5 pb-2 pt-1">
               <button
                 type="button"
@@ -3285,9 +3361,16 @@ function GroupTimelineRowInner({
             {(entry.replyTo || entry.content) && (
               <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                 {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self />}
-                {entry.content
-                  ? renderMentionHighlights(entry.content, memberNames, true)
-                  : null}
+                {entry.content ? (
+                  /* task-06：正文含行内附件引用 → 标签化渲染（点击预览）；
+                     该分支下 @提及暂不走高亮管线（引用+@ 同存为少数组合，
+                     文本原样保留语义不变）；绝大多数消息走原高亮路径零变化。 */
+                  parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                    <InlineAttRefTextWithPreview text={entry.content} />
+                  ) : (
+                    renderMentionHighlights(entry.content, memberNames, true)
+                  )
+                ) : null}
               </div>
             )}
             <ReplyingTags replying={replying} />
@@ -3337,9 +3420,14 @@ function GroupTimelineRowInner({
           {(entry.replyTo || entry.content) && (
             <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tl-md border border-border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
               {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self={false} />}
-              {entry.content
-                ? renderMentionHighlights(entry.content, memberNames, false)
-                : null}
+              {entry.content ? (
+                /* task-06：他人消息同款分支——正文含行内引用走标签渲染。 */
+                parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                  <InlineAttRefTextWithPreview text={entry.content} />
+                ) : (
+                  renderMentionHighlights(entry.content, memberNames, false)
+                )
+              ) : null}
             </div>
           )}
           <ReplyingTags replying={replying} />
