@@ -71,20 +71,24 @@ scale: large
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
+| 修改 | backend/app/modules/daemon/protocol.py | 新消息常量 `DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP`（与 daemon protocol.ts 逐字对齐） |
 | 修改 | backend/app/modules/daemon/router/machines.py | 新增 `POST /machines/{instance_id}/sillyspec-tombstone-cleanup` 端点（同 ghost-cleanup 先例：归属校验+成员校验+WS fire-and-forget+离线 504） |
+| 修改 | backend/app/modules/daemon/router/__init__.py | `_ENDPOINT_ORDER` 登记新端点（端点集合不变量守卫） |
 | 修改 | backend/app/modules/daemon/ws_hub.py | 新增 `send_sillyspec_tombstone_cleanup(instance_id, change, workspace_id)`（同 send_sillyspec_resolve 428 行形态） |
 | 修改 | backend/app/modules/daemon/model.py | `MachineSillySpecCommandResultRead.action` 联合类型加 `tombstone_cleanup`（producer=daemon 回执 → 心跳 heartbeat 落槽 → consumer=前端 matchesCommandResult） |
 | 修改 | backend/app/modules/daemon/router/heartbeat.py | sillyspec_command_result 落槽对 action='tombstone_cleanup' 的透传（不新增关闭逻辑——收敛闭环走既有全绿关闭路径，见 Phase 2 第 5 步；producer=daemon 回执 → consumer=前端回显） |
 | 修改 | backend/app/modules/change/service.py | `delete_change` 收敛环落墓碑后查绑定数据源机器并 fire-and-forget 下发（失败仅日志） |
 | 修改 | backend/app/modules/daemon/schema.py | 新端点请求体 `MachineSillySpecTombstoneCleanupRequest{workspace_id, change}`（若无独立 schema 文件则以实际模块结构为准） |
+| 修改 | sillyhub-daemon/src/protocol.ts | 消息常量 `SILLYSPEC_TOMBSTONE_CLEANUP` + SillySpecCommandResult.action 联合扩展 |
 | 修改 | sillyhub-daemon/src/daemon.ts | WS 分发 `daemon:sillyspec_tombstone_cleanup`（change/workspace_id 必填校验 + executor 调用，同 7364-7483 行 resolve/ghost 形态） |
 | 修改 | sillyhub-daemon/src/sillyspec-manager.ts | 新执行器 `runTombstoneCleanup(change, workspaceId)`：根解析→目录定位→隔离区移动→doctor 归档→回执（action='tombstone_cleanup'） |
 | 修改 | sillyhub-daemon/src/api-types.ts | `pnpm gen:types` 重生成（新端点+action 枚举） |
 | 修改 | frontend/src/lib/api-types.ts | `pnpm gen:types` 重生成（同上） |
+| 修改 | frontend/src/lib/provider-caps.ts | gen:types 连带重生成（gen-provider-caps 脚本产物） |
 | 修改 | frontend/src/lib/daemon/machines.ts | 新增 `triggerMachineSillySpecTombstoneCleanup(instanceId, {workspace_id, change})` 封装（同 triggerMachineSillySpecGhostCleanup 先例） |
 | 修改 | frontend/src/components/changes/platform-sync-section.tsx | 冲突行双源 join+墓碑形态渲染+收敛按钮+回显登记（matchesCommandResult 加 tombstone_cleanup 分支） |
 | 修改 | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx | 墓碑行渲染/按钮权限/回显用例（既有测试文件扩展） |
-| 新增 | NEW:backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py | 端点权限/离线 504/透传用例 |
+| 修改 | backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py | 端点权限四态/离线 504/白名单/OpenAPI 用例（执行期裁决：就近扩展既有参数化文件） |
 | 新增 | NEW:sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts | runTombstoneCleanup 执行器用例（幂等/跨区定位/移动失败/回执） |
 
 ## sillyspec 仓变更
