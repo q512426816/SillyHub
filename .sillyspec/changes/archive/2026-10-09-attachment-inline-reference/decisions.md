@@ -90,3 +90,63 @@ created_at: 2026-10-09 13:47:10
 - priority: P1
 - 锚点: frontend/src/components/daemon/session-input-bar.tsx
 - 模块域: frontend_components
+
+## D-004@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-004@v1
+- source: 用户实测反馈（verify 后归档前，2026-10-09 部署实测）
+- question: 退格删除引用标签的行为？
+- answer: 无选区且光标贴在已注册 token 尾部时，一次退格删除整个标签（textarea onKeyDown 拦截 Backspace + endsWith 最长匹配，preventDefault 后整段移除并复位光标到标签原起点）；标签中部或普通文本退格仍逐字；IME 组合期与 @ 联想浮层开层时不拦截。单聊与群聊同款。
+- normalized_requirement: FR-03 的退格子句按本版执行；其余（× 角标删一处、删附件联动剥离）不变。
+- impacts: session-input-bar.tsx onKeyDown、group-chat-panel.tsx handleInputKeyDown。
+- evidence: 用户原话「删除回退不是一个文字一个文字的删，而是直接把这个标签直接删掉」（2026-10-09 会话）。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（onKeyDown Backspace 分支）
+- 模块域: frontend_components
+
+## D-005@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-005@v1
+- source: 用户实测反馈（部署实测 2026-10-09，附截图）
+- question: 蓝色主气泡（自己消息）内行内引用标签看不清怎么办？
+- answer: InlineAttRefText 增加 tone 双色调——brand（默认，浅色气泡：品牌色底+深字）/ onPrimary（蓝色主气泡内：白色半透明底 border-white/30 bg-white/25 + 白字，hover 加深）；单聊主气泡/steered delivered/群聊自己消息分支用 onPrimary，其余分支保持 brand。
+- normalized_requirement: FR-06 标签在深色主气泡内对比可读；浅色气泡渲染不变。
+- impacts: attachment-ref-tag.tsx、turn-timeline.tsx、turn-segment-views.tsx、group-chat-panel.tsx。
+- evidence: 用户截图（蓝色气泡内标签近不可辨）+ 原话「回显的记录标签看不清」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/attachment-ref-tag.tsx（tone 分支）
+- 模块域: frontend_components
+
+## D-006@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-006@v1
+- source: 用户实测反馈（部署实测 2026-10-09）
+- question: 右击插入的位置与聚焦行为？
+- answer: 光标在输入框内（document.activeElement===textarea 且有 selectionStart）→ 插入光标当前位置；否则插入正文末尾；插入后输入框自动聚焦、光标落 token 尾（单聊 pendingCaretRef / 群聊 rAF 复位机制）。允许重复不变。
+- normalized_requirement: FR-01 插入位置按本版执行；其余（右击触发/防默认菜单）不变。
+- impacts: session-input-bar.tsx handleInsertAttRef、group-chat-panel.tsx handleInsertAttRef。
+- evidence: 用户原话「①右击文件插入输入框，如果光标在输入框，那插入光标当前所在位置，否则插在最后。②插入之后没有自动聚焦啊」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（handleInsertAttRef）
+- 模块域: frontend_components
+
+## D-006@v3
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-006@v2
+- source: 用户实测反馈（部署实测 2026-10-09）
+- question: v2 的「聚焦时插光标处」判定不可用——右击附件那一刻输入框必然已失焦，怎么办？
+- answer: onBlur 时记忆 selectionStart（lastCaretRef/groupLastCaretRef）；右击插入时：聚焦态用当前光标位、失焦态用记忆位、从未聚焦过（记忆位 null）插末尾；插入后记忆位同步推进到 token 尾并自动聚焦。
+- normalized_requirement: FR-01 插入位置按本版执行；自动聚焦与其余行为不变。
+- impacts: session-input-bar.tsx（lastCaretRef+onBlur+handleInsertAttRef）、group-chat-panel.tsx（groupLastCaretRef 同款）。
+- evidence: 用户原话「这个修改的不理想，因为我在点击附件的时候必定是失焦的，但是如果在点击之前光标还在输入框，那么就插入光标位置」。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（lastCaretRef）
+- 模块域: frontend_components

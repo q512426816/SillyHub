@@ -435,3 +435,177 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-09-pending-attachment-preview
   status: active
+
+## FR-auto-frontend-145 右击待发附件在正文末尾插入引用标签
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-006@v3
+场景正文：
+- 场景：默认场景 — Given 会话输入区存在至少一个已上传未发送的附件 chip；When 用户右击（contextmenu）该 chip；Then 插入位置=**失焦前记住的光标位**（右击附件必先使输入框失焦，onBlur 记忆 selectionStart；输入框仍聚焦时用当前光标位；从未聚焦过才插正文
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-01
+最近确认：4050ee624
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-attachment-inline-reference:task-03:acc-0-5e531a62
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-03:acc-1-efb19665
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-05:acc-0-7fd44e56
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+
+## FR-auto-frontend-146 同名附件引用唯一化
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 已存在引用标签的附件名与本次右击的附件同名；When 插入新引用；Then 新引用自动加序号后缀（`【文件名·2】`、`【文件名·3】`…），保证正文内每个引用标签文本指代唯一附件；删除任一附件不改变其它（同名）附件已插入引用的文本
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-02
+最近确认：4050ee624
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-attachment-inline-reference:task-01:acc-0-befb68d6
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-01:acc-1-87bcb059
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+
+## FR-auto-frontend-147 编辑态引用标签的渲染与删除
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-004@v2
+场景正文：
+- 场景：默认场景 — Given 正文含引用标签；Then 输入框镜像高亮层将其渲染为标签样式（品牌色底、圆角、右上角 × 角标）；点 × 角标删除该处一次出现；退格键在光标贴标签尾部且无选区时**一次删除整个标签**（
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-03
+最近确认：4050ee624
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-attachment-inline-reference:task-02:acc-0-1dfd89f5
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-02:acc-1-3b4a90ee
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+
+## FR-auto-frontend-148 发送置换为 uuid 锚定正式引用
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 正文含引用标签且用户发送消息；When 发送组装 prompt；Then 每个可解析的编辑态 token 置换为 `[附件引用:<uuid>|<文件名>]`（uuid 与随消息附件、头部标记行对齐，同名附件可精确区分）；无法解析的孤儿
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-04
+最近确认：4050ee624
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-attachment-inline-reference:task-04:acc-0-d7ea3659
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-04:acc-1-af4a2ac5
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+
+## FR-auto-frontend-149 删除附件联动清空正文引用
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-004@v2
+场景正文：
+- 场景：默认场景 — Given 正文含某附件的引用标签；When 用户点该附件 chip 的 X 删除；Then 正文内该附件的全部引用标签同步移除，其它附件的引用不受影响
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-05
+最近确认：4050ee624
+
+## FR-auto-frontend-150 历史消息引用标签渲染与点击预览
+变更：2026-10-09-attachment-inline-reference
+状态：active
+摘要：默认场景
+依据决策：D-005@v2
+场景正文：
+- 场景：默认场景 — Given 历史消息正文含 `[附件引用:<uuid>|<文件名>]`；When 气泡正文渲染；Then 引用渲染为标签节点（蓝色主气泡内用白色半透明色调保证可读，D-005@v2），点击打开 FilePreviewModal 按 uuid 在线预览附件内容（与已发
+全文：.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/requirements.md#FR-06
+最近确认：4050ee624
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-attachment-inline-reference:task-06:acc-0-297e9c56
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
+- row: 2026-10-09-attachment-inline-reference:task-06:acc-1-c1496481
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-attachment-inline-reference
+  status: active
