@@ -651,3 +651,117 @@
 - 场景：主路径 — Given 修复推送 / When 各 workflow 完成 / Then 全部 success。
 全文：.sillyspec/changes/archive/2026-10-08-shared-assertion-surfaces/requirements.md#FR-04
 最近确认：e7787cadba68c5b51b50c7aaf6c461a4caac849c
+
+## FR-components-shared-045 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-01
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-01
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active
+
+## FR-components-shared-046 spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-02
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-02
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active
+
+## FR-components-shared-047 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-03
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-03
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active
+
+## FR-components-shared-048 选项文案中平台托管（默认…）的默认字样随新默认值移除
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-04
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-04
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active
+
+## FR-components-shared-049 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-05
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-05
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active
+
+## FR-components-shared-050 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归
+变更：2026-10-09-ws-create-spec-default-collapse
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-09-ws-create-spec-default-collapse/requirements.md#FR-06
+最近确认：1c4acf7a8a146975c41d153750f28c5054d58ac0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-06
+  tests: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-ws-create-spec-default-collapse
+  status: active

@@ -1,0 +1,622 @@
+diff --git a/frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx b/frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx
+index e537134ed..4c5efb00c 100644
+--- a/frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx
++++ b/frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx
+@@ -228,6 +228,77 @@ describe("m/workspaces task-08 破坏面收口", () => {
+   });
+ });
+ 
++describe("m/workspaces 创建工作区 spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {
++  /** 打开创建 Sheet 并填好 daemon + 路径（对齐 task-08 创建用例的前置链）。 */
++  async function openCreateSheetAndFill() {
++    daemonApi.listDaemonInstances.mockResolvedValue([
++      {
++        id: "daemon-1",
++        hostname: "host-1",
++        display_alias: "本机守护",
++        status: "online",
++        providers: [],
++      } as never,
++    ]);
++    renderPage();
++    fireEvent.click(await screen.findByTestId("mobile-workspace-create"));
++    const daemonSelect = await screen.findByLabelText("选择守护进程");
++    fireEvent.change(daemonSelect, { target: { value: "daemon-1" } });
++    const pathInput = await screen.findByPlaceholderText(String.raw`C:\\path\\to\\repo`);
++    fireEvent.change(pathInput, { target: { value: String.raw`C:\repo\demo` } });
++  }
++
++  it("创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见", async () => {
++    await openCreateSheetAndFill();
++
++    // 默认收起：摘要指向 repo-native（FR-01），前两选项不进 DOM（FR-03）
++    expect(screen.getByText("源项目即真理")).toBeInTheDocument();
++    expect(screen.queryByRole("radio", { name: /平台托管/ })).toBeNull();
++    expect(screen.queryByRole("radio", { name: /单次导入/ })).toBeNull();
++    // 默认 repo-native 的 ⚠ 警示收起态可见（FR-05）
++    expect(screen.getByText(/⚠ 扫描产出会写入源项目/)).toBeInTheDocument();
++
++    fireEvent.click(screen.getByTestId("mobile-detail-sheet-submit"));
++    await waitFor(() => {
++      const post = apiCalls.apiFetch.mock.calls
++        .filter((call) => {
++          const [url, init] = call as FetchCall;
++          return url === "/api/workspaces" && init?.method === "POST";
++        })
++        .map((call) => call as FetchCall)
++        .at(-1);
++      expect(post?.[1]?.json).toMatchObject({
++        // 默认值翻转：repo-native 源项目即真理（FR-01/06）
++        spec_strategy: "repo-native",
++        type: "other",
++      });
++    });
++  });
++
++  it("更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随", async () => {
++    await openCreateSheetAndFill();
++
++    // 展开（FR-02）→ 三 radio 可见；repo-native 选中
++    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
++    const platformRadio = screen.getByRole("radio", {
++      name: "平台托管（不碰源项目，从零扫描）",
++    });
++    expect(platformRadio).toBeInTheDocument();
++    expect(screen.getByRole("radio", { name: /单次导入/ })).toBeInTheDocument();
++    expect(
++      screen.getByRole("radio", { name: "源项目即真理（软链接，扫描直接写源项目）" }),
++    ).toBeChecked();
++
++    // 切到平台托管 → ⚠ 警示隐藏（FR-05 反向）
++    fireEvent.click(platformRadio);
++    expect(screen.queryByText(/⚠ 扫描产出会写入源项目/)).toBeNull();
++
++    // 收起 → 摘要跟随新选中值（FR-02；平台托管文案本身即「无默认字样」断言 FR-04）
++    fireEvent.click(screen.getByRole("button", { name: "收起" }));
++    expect(screen.getByText("平台托管")).toBeInTheDocument();
++  });
++});
++
+ describe("m/workspaces 卡片点击导航（D-006 门禁解除，2026-08-26-mobile-workspace-page task-03）", () => {
+   it("点卡片 → router.push('/m/workspaces/<id>')，不再提示「请在电脑端打开」", async () => {
+     // 列表桩改吐一张卡片（复用既有 apiFetch 桩机制，经真实 listWorkspaces 解析）
+diff --git a/frontend/src/app/m/workspaces/page.tsx b/frontend/src/app/m/workspaces/page.tsx
+index 07db3fe64..1c6451061 100644
+--- a/frontend/src/app/m/workspaces/page.tsx
++++ b/frontend/src/app/m/workspaces/page.tsx
+@@ -81,13 +81,16 @@ const STATUS_FILTER_OPTIONS = [
+ ];
+ 
+ // spec 同步策略选项（对齐桌面 WorkspaceScanDialog，源项目已有 .sillyspec 如何进入平台）。
++// 2026-10-09-ws-create-spec-default-collapse：默认 repo-native 源项目即真理，
++// 前两个低频选项收进「更多选项」展开后才渲染（条件渲染非 CSS 隐藏）。
+ const SPEC_STRATEGY_OPTIONS: Array<{
+   value: "platform-managed" | "repo-mirrored" | "repo-native";
++  shortLabel: string;
+   label: string;
+ }> = [
+-  { value: "platform-managed", label: "平台托管（默认，不碰源项目，从零扫描）" },
+-  { value: "repo-mirrored", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
+-  { value: "repo-native", label: "源项目即真理（软链接，扫描直接写源项目）" },
++  { value: "platform-managed", shortLabel: "平台托管", label: "平台托管（不碰源项目，从零扫描）" },
++  { value: "repo-mirrored", shortLabel: "单次导入", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
++  { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
+ ];
+ 
+ // 页内内联筛选控件统一样式（≥44px 触摸热区、≥14px 正文，R-04）。
+@@ -523,7 +526,10 @@ function WorkspaceCreateSheet({
+   const [name, setName] = useState("");
+   const [specStrategy, setSpecStrategy] = useState<
+     "platform-managed" | "repo-mirrored" | "repo-native"
+-  >("platform-managed");
++  >("repo-native");
++  // 2026-10-09-ws-create-spec-default-collapse：spec 策略默认收起，
++  // 摘要行 + 「更多选项」入口，展开后才渲染三选项。
++  const [specExpanded, setSpecExpanded] = useState(false);
+   const [creating, setCreating] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+@@ -547,7 +553,8 @@ function WorkspaceCreateSheet({
+     setDaemonId("");
+     setRootPath("");
+     setName("");
+-    setSpecStrategy("platform-managed");
++    setSpecStrategy("repo-native");
++    setSpecExpanded(false);
+     setError(null);
+   };
+ 
+@@ -653,23 +660,54 @@ function WorkspaceCreateSheet({
+           />
+         </CreateField>
+ 
+-        <CreateField label="spec 同步策略（源项目已有 .sillyspec 如何进入平台）">
+-          <div className="flex flex-col gap-1">
+-            {SPEC_STRATEGY_OPTIONS.map((o) => (
+-              <label
+-                key={o.value}
+-                className="flex min-h-[44px] items-center gap-1.5 text-[13px] text-foreground"
+-              >
+-                <input
+-                  type="radio"
+-                  checked={specStrategy === o.value}
+-                  onChange={() => setSpecStrategy(o.value)}
++        <CreateField label="spec 同步策略">
++          {specExpanded ? (
++            <>
++              <div className="flex items-center justify-between">
++                <span className="text-[12px] text-muted-foreground">
++                  源项目已有 .sillyspec 如何进入平台
++                </span>
++                <button
++                  type="button"
++                  className="text-[12px] text-primary underline-offset-2 disabled:opacity-50"
++                  onClick={() => setSpecExpanded(false)}
+                   disabled={creating}
+-                />
+-                {o.label}
+-              </label>
+-            ))}
+-          </div>
++                >
++                  收起
++                </button>
++              </div>
++              <div className="flex flex-col gap-1">
++                {SPEC_STRATEGY_OPTIONS.map((o) => (
++                  <label
++                    key={o.value}
++                    className="flex min-h-[44px] items-center gap-1.5 text-[13px] text-foreground"
++                  >
++                    <input
++                      type="radio"
++                      checked={specStrategy === o.value}
++                      onChange={() => setSpecStrategy(o.value)}
++                      disabled={creating}
++                    />
++                    {o.label}
++                  </label>
++                ))}
++              </div>
++            </>
++          ) : (
++            <div className="flex items-center justify-between">
++              <span className="text-[13px] text-foreground">
++                {SPEC_STRATEGY_OPTIONS.find((o) => o.value === specStrategy)?.shortLabel}
++              </span>
++              <button
++                type="button"
++                className="text-[12px] text-primary underline-offset-2 disabled:opacity-50"
++                onClick={() => setSpecExpanded(true)}
++                disabled={creating}
++              >
++                更多选项
++              </button>
++            </div>
++          )}
+           {specStrategy === "repo-native" ? (
+             <p className="mt-1 text-[12px] text-amber-600">
+               ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。
+diff --git a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+index c90b9d689..c5b606e10 100644
+--- a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
++++ b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+@@ -335,3 +335,86 @@ describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-ski
+     expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
+   });
+ });
++
++describe("WorkspaceScanDialog spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {
++  beforeEach(() => {
++    daemonApi.listDaemonInstances.mockResolvedValue([
++      {
++        id: "d1",
++        hostname: "host-a",
++        display_alias: null,
++        status: "online",
++        providers: [{ provider: "claude_code" }],
++      },
++    ]);
++    workspacesApi.createWorkspace.mockResolvedValue(makeCreatedWorkspace());
++    specWorkspacesApi.initDispatch.mockResolvedValue(undefined);
++  });
++
++  afterEach(() => {
++    cleanup();
++    vi.clearAllMocks();
++  });
++
++  it("spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native", async () => {
++    await renderDialogAndFillBase();
++
++    // 默认收起：摘要行可见且指向 repo-native（FR-01）
++    expect(screen.getByText("spec 同步策略：源项目即真理")).toBeInTheDocument();
++    // 前两个选项不出现在 DOM（FR-03，条件渲染非 CSS 隐藏）
++    expect(screen.queryByRole("radio", { name: /平台托管/ })).toBeNull();
++    expect(screen.queryByRole("radio", { name: /单次导入/ })).toBeNull();
++    // 默认 repo-native 的 ⚠ 警示在收起态也可见（FR-05）
++    expect(screen.getByText(/⚠ 扫描产出会写入源项目/)).toBeInTheDocument();
++
++    // 直接创建（未展开未改选）→ 提交体带 spec_strategy=repo-native（FR-01/06）
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++    await waitFor(() =>
++      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
++    );
++    expect(workspacesApi.createWorkspace).toHaveBeenCalledWith(
++      expect.objectContaining({ spec_strategy: "repo-native" }),
++    );
++  });
++
++  it("更多选项展开三选项可切换再收起不动选中值", async () => {
++    await renderDialogAndFillBase();
++
++    // 展开（FR-02）
++    fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
++    // 三选项全部可见；平台托管文案已无「默认」字样（FR-04）
++    const platformRadio = screen.getByRole("radio", {
++      name: "平台托管（不碰源项目，从零扫描）",
++    });
++    expect(platformRadio).toBeInTheDocument();
++    expect(screen.getByRole("radio", { name: /单次导入/ })).toBeInTheDocument();
++    const nativeRadio = screen.getByRole("radio", {
++      name: "源项目即真理（软链接，扫描直接写源项目）",
++    });
++    expect(nativeRadio).toBeInTheDocument();
++    expect(nativeRadio).toBeChecked();
++
++    // 切换到平台托管 → ⚠ 警示隐藏（FR-05 反向）
++    fireEvent.click(platformRadio);
++    expect(screen.queryByText(/⚠ 扫描产出会写入源项目/)).toBeNull();
++
++    // 收起 → 摘要跟随新选中值，选中值不被重置（FR-02）
++    fireEvent.click(screen.getByRole("button", { name: "收起" }));
++    expect(screen.getByText("spec 同步策略：平台托管")).toBeInTheDocument();
++
++    // 切换后提交体随选中值（FR-06）
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++    await waitFor(() =>
++      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
++    );
++    expect(workspacesApi.createWorkspace).toHaveBeenCalledWith(
++      expect.objectContaining({ spec_strategy: "platform-managed" }),
++    );
++  });
++});
+diff --git a/frontend/src/components/workspace-scan-dialog.tsx b/frontend/src/components/workspace-scan-dialog.tsx
+index 701430743..06283b79f 100644
+--- a/frontend/src/components/workspace-scan-dialog.tsx
++++ b/frontend/src/components/workspace-scan-dialog.tsx
+@@ -13,7 +13,7 @@ import {
+   type DaemonInstanceRead,
+ } from "@/lib/daemon";
+ import { errMessage, useNotify } from "@/lib/errors";
+-import { initDispatch } from "@/lib/spec-workspaces";
++import { initDispatch, type SpecStrategy } from "@/lib/spec-workspaces";
+ import {
+   createWorkspace,
+   slugifyWorkspaceName,
+@@ -37,6 +37,19 @@ type Phase = "idle" | "creating" | "initializing" | "done" | "init_failed";
+ const INIT_POLL_INTERVAL_MS = 2_000;
+ const INIT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+ 
++// spec 同步策略选项（2026-10-09-ws-create-spec-default-collapse）：默认
++// repo-native（源项目即真理），前两个低频选项收进「更多选项」展开后才渲染
++// （条件渲染非 CSS 隐藏）；shortLabel 供收起态摘要行使用。
++const SPEC_STRATEGY_OPTIONS: Array<{
++  value: SpecStrategy;
++  shortLabel: string;
++  label: string;
++}> = [
++  { value: "platform-managed", shortLabel: "平台托管", label: "平台托管（不碰源项目，从零扫描）" },
++  { value: "repo-mirrored", shortLabel: "单次导入", label: "单次导入（复制源项目 .sillyspec 快照，不污染源项目）" },
++  { value: "repo-native", shortLabel: "源项目即真理", label: "源项目即真理（软链接，扫描直接写源项目）" },
++];
++
+ interface Props {
+   onCreated: () => void;
+   onCancel: () => void;
+@@ -67,10 +80,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+   const [daemonId, setDaemonId] = useState<string>("");
+   const [daemonRootPath, setDaemonRootPath] = useState("");
+   // spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy）：daemon-client workspace
+-  // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 platform-managed 零回归。
+-  const [specStrategy, setSpecStrategy] = useState<
+-    "platform-managed" | "repo-mirrored" | "repo-native"
+-  >("platform-managed");
++  // 创建时用户可选源项目已有 .sillyspec 如何进入平台。默认 repo-native 源项目即真理
++  // （2026-10-09-ws-create-spec-default-collapse 翻转，前两选项默认收进「更多选项」）。
++  const [specStrategy, setSpecStrategy] = useState<SpecStrategy>("repo-native");
++  const [specExpanded, setSpecExpanded] = useState(false);
+ 
+   // quick ql-20260803-003-cb34：创建后如后端标记「复用/激活/复活」则提示用户，避免
+   // 静默返回 201（同 root_path 已有工作区被复用）导致「创建成功却看不到/绑定没生效」的困惑。
+@@ -356,28 +369,53 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+           )}
+           {daemonRootPath && (
+             <div className="space-y-1.5">
+-              <label className="text-xs font-medium text-muted-foreground">
+-                spec 同步策略（源项目已有 .sillyspec 如何进入平台）
+-              </label>
+-              <div className="flex flex-col gap-1">
+-                {(
+-                  [
+-                    ["platform-managed", "平台托管（默认，不碰源项目，从零扫描）"],
+-                    ["repo-mirrored", "单次导入（复制源项目 .sillyspec 快照，不污染源项目）"],
+-                    ["repo-native", "源项目即真理（软链接，扫描直接写源项目）"],
+-                  ] as const
+-                ).map(([value, label]) => (
+-                  <label key={value} className="flex items-center gap-1.5 text-xs">
+-                    <input
+-                      type="radio"
+-                      checked={specStrategy === value}
+-                      onChange={() => setSpecStrategy(value)}
++              {specExpanded ? (
++                <>
++                  <div className="flex items-center justify-between">
++                    <label className="text-xs font-medium text-muted-foreground">
++                      spec 同步策略（源项目已有 .sillyspec 如何进入平台）
++                    </label>
++                    <button
++                      type="button"
++                      className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
++                      onClick={() => setSpecExpanded(false)}
+                       disabled={phase === "creating" || phase === "initializing"}
+-                    />
+-                    {label}
+-                  </label>
+-                ))}
+-              </div>
++                    >
++                      收起
++                    </button>
++                  </div>
++                  <div className="flex flex-col gap-1">
++                    {SPEC_STRATEGY_OPTIONS.map(({ value, label }) => (
++                      <label key={value} className="flex items-center gap-1.5 text-xs">
++                        <input
++                          type="radio"
++                          checked={specStrategy === value}
++                          onChange={() => setSpecStrategy(value)}
++                          disabled={phase === "creating" || phase === "initializing"}
++                        />
++                        {label}
++                      </label>
++                    ))}
++                  </div>
++                </>
++              ) : (
++                <div className="flex items-center justify-between">
++                  <span className="text-xs text-muted-foreground">
++                    {`spec 同步策略：${
++                      SPEC_STRATEGY_OPTIONS.find((o) => o.value === specStrategy)
++                        ?.shortLabel ?? ""
++                    }`}
++                  </span>
++                  <button
++                    type="button"
++                    className="text-[11px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
++                    onClick={() => setSpecExpanded(true)}
++                    disabled={phase === "creating" || phase === "initializing"}
++                  >
++                    更多选项
++                  </button>
++                </div>
++              )}
+               {specStrategy === "repo-native" && (
+                 <p className="text-[11px] text-amber-600">
+                   ⚠ 扫描产出会写入源项目 .sillyspec（若被 git 跟踪需自行 commit）。
+diff --git a/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/design.md b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/design.md
+new file mode 100644
+index 000000000..71c7d8c3c
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/design.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T14:58:49.787Z
++---
++# 设计记录（Design Record）— 2026-10-09-ws-create-spec-default-collapse
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++纯前端交互调整，两个改动面：
++
++1. **默认值翻转**：桌面端 `frontend/src/components/workspace-scan-dialog.tsx` 与移动端 `frontend/src/app/m/workspaces/page.tsx`（WorkspaceCreateSheet）的 `specStrategy` state 初始值从 `"platform-managed"` 改为 `"repo-native"`（移动端 `reset()` 同步改）。随之把「平台托管」选项文案里的「默认」字样移除（避免文案与新默认值矛盾）。
++2. **收起/展开交互**：两端各加一个本地 `specExpanded` state（默认 false）。收起态渲染一行摘要（「spec 同步策略：<当前选中项短名>」）+「更多选项」文字按钮 + repo-native 的 ⚠ 警示；展开态渲染三选项单选列表（条件渲染，非 CSS 隐藏，保证 FR-03 的 DOM 移除）+「收起」按钮。选项数组提为模块级常量并加 shortLabel，摘要行与单选列表共用同一份，杜绝双份硬编码漂移。
++
++选择该方案的原因：用户明确表达「默认源码即真理 + 低频选项收进更多选项」，不涉及后端/协议变化，最小改动面即两端表单组件 + 配套测试。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 后端 API（`POST /api/workspaces` 的 `spec_strategy` 字段）：**无变化**，仍是三值枚举透传，仅默认传入值从 platform-managed 变为 repo-native。
++- `createWorkspace()` / `lib/workspaces.ts`：签名与行为无变化。
++- 前端组件内部 state：`specStrategy` 默认值变更；新增 `specExpanded`（组件私有，不外溢）。
++- 移动端 `SPEC_STRATEGY_OPTIONS` 常量：label 文案变更（去「默认」字样 + 新增 shortLabel 字段），value 不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——本变更纯本地 UI state，无事件流/异步输入参与 spec 策略选择；守护进程实例列表异步加载与 spec 区块渲染无交集。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用——`specStrategy`/`specExpanded` 均为单组件内 React state，单用户会话内无并发写者；创建请求发出后表单控件即禁用，不存在提交中途改值。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   弹窗关闭（桌面 `destroyOnHidden` / 移动端 `reset()`）时 state 重置——桌面端因 destroyOnHidden 重建组件回到 repo-native 默认；移动端 reset() 显式重置为 repo-native + 收起。创建成功/失败路径均回到默认收起态，不残留展开态影响下次打开。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不适用——specExpanded 是组件私有 state，不进全局 store/URL/持久化；spec_strategy 值仅随本次创建请求体提交，不写本地存储，多标签页/多实例无串台面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：默认策略从「平台托管（不碰源项目）」翻转为「源项目即真理（扫描直接写源项目）」，新工作区默认行为变为写源项目 `.sillyspec`——已有 ⚠ 警示文案在收起态也保持可见（FR-05）来对冲用户无感知的风险；这是用户明确要求的默认值，属预期行为变化。
++- 放弃的方案：CSS `display:none` 隐藏前两选项（不满足 FR-03 的 DOM 移除要求，且屏幕阅读器仍可聚焦）；把 spec 策略挪进独立的「高级设置」二级弹窗（改动面大、移动端无对应容器形态，收益低）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/workspace-scan-dialog.tsx | 默认值 repo-native + spec 区块收起/展开交互 + 文案去「默认」 |
++| 修改 | frontend/src/app/m/workspaces/page.tsx | 移动端同款：默认值/reset/收起展开 + SPEC_STRATEGY_OPTIONS 文案 |
++| 修改 | frontend/src/components/__tests__/workspace-scan-dialog.test.tsx | 新增 spec 策略默认收起/展开切换/提交体用例 |
++| 修改 | frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx | 新增移动端默认值 + 收起态 DOM 断言用例 |
+diff --git a/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/requirements.md b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/requirements.md
+new file mode 100644
+index 000000000..6f5e59853
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/requirements.md
+@@ -0,0 +1,78 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T14:58:49.787Z
++---
++# 需求规格（Requirements）— 2026-10-09-ws-create-spec-default-collapse
++
++## 功能需求
++
++### FR-01: 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
++
++- 用户打开创建工作区表单时，spec 同步策略的初始选中值**必须**为 repo-native（源项目即真理）；桌面端 WorkspaceScanDialog 与移动端 WorkspaceCreateSheet 两端一致，且移动端关闭表单重置后回到同一默认值。
++
++#### 场景：主路径
++
++- Given 用户未改动任何选项
++- When 打开创建工作区表单并直接提交
++- Then 提交体 spec_strategy 为 "repo-native"
++
++### FR-02: spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
++
++- spec 同步策略区块**必须**默认收起：仅显示当前策略摘要行与「更多选项」入口；点击入口**必须**展开完整三选项（platform-managed / repo-mirrored / repo-native）单选列表供切换，再次点击**必须**可收起。展开/收起**禁止**影响已选中的策略值。
++
++#### 场景：主路径
++
++- Given 创建工作区表单已打开（spec 区块收起）
++- When 点击「更多选项」
++- Then 三个单选选项全部可见，当前选中 repo-native，可点选其它选项
++
++### FR-03: 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
++
++- spec 区块未展开时，platform-managed 与 repo-mirrored 的单选选项**禁止**出现在 DOM 中（display:none 不可接受，必须条件渲染移除）；repo-native 的策略值仍随提交体传递。
++
++#### 场景：主路径
++
++- Given 创建工作区表单已打开（spec 区块收起）
++- Then DOM 中查询不到「平台托管」「单次导入」选项文本
++
++### FR-04: 选项文案中平台托管（默认…）的默认字样随新默认值移除
++
++- 由于默认值已改为 repo-native，「平台托管」选项文案**必须**去掉「默认」字样（改为「平台托管（不碰源项目，从零扫描）」），避免文案与新默认值矛盾；「源项目即真理」选项文案不变。
++
++#### 场景：主路径
++
++- Given 用户展开 spec 选项
++- Then 平台托管选项文案不含「默认」字样
++
++### FR-05: 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
++
++- 当前选中策略为 repo-native 时，⚠「扫描产出会写入源项目 .sillyspec」警示文案**必须**可见，无论 spec 区块处于收起还是展开态；选中其它策略时**必须**隐藏该警示。
++
++#### 场景：主路径
++
++- Given 创建工作区表单已打开（默认收起 + 默认 repo-native）
++- Then ⚠ 写入源项目警示文案可见
++
++### FR-06: 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归
++
++- 创建工作区请求体**必须**携带当前选中的 spec_strategy 值（默认 repo-native，切换后随选中值）；后端接口与既有创建链路行为**禁止**变化（本变更纯前端交互调整）。
++
++#### 场景：主路径
++
++- Given 用户切换策略为 repo-mirrored 后提交
++- Then 提交体 spec_strategy 为 "repo-mirrored"
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」
++FR-01: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
++FR-02: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」
++FR-02: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」
++FR-03: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」
++FR-03: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
++FR-04: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」（展开态断言平台托管文案不含默认字样）
++FR-04: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」
++FR-05: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」（收起态 ⚠ 警示可见断言）
++FR-05: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」
++FR-06: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」（切换后提交体随选中值）
++FR-06: frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」（提交体断言）
+diff --git a/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/tasks.md b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/tasks.md
+new file mode 100644
+index 000000000..09b80e5c4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/tasks.md
+@@ -0,0 +1,13 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T14:58:49.787Z
++---
++# 任务注册表（Tasks）— 2026-10-09-ws-create-spec-default-collapse
++
++- [x] task-01: 桌面端 workspace-scan-dialog.tsx：specStrategy 默认值改 repo-native，三选项提为模块级常量（去「默认」字样）——验证：组件编译通过，新常量被摘要行与单选列表共用
++- [x] task-02: 桌面端 spec 区块收起/展开交互：specExpanded state 默认 false，收起态渲染摘要行+「更多选项」+⚠警示（repo-native 时），展开态条件渲染三单选+「收起」——验证：tsc 无错，DOM 条件渲染（非 CSS 隐藏）
++- [x] task-03: 移动端 m/workspaces/page.tsx：specStrategy 默认值与 reset() 改 repo-native，SPEC_STRATEGY_OPTIONS 文案去「默认」字样——验证：tsc 无错
++- [x] task-04: 移动端 WorkspaceCreateSheet 同款收起/展开交互（specExpanded + 摘要行 + 更多选项按钮）——验证：tsc 无错
++- [x] task-05: 桌面端测试 workspace-scan-dialog.test.tsx 新增用例：默认收起仅摘要行+前两选项不在 DOM+⚠ 可见、直接创建提交体带 repo-native、展开三选项可切换再收起选中值不变+切换后提交体随选中值——验证：pnpm vitest run 该文件全绿
++- [x] task-06: 移动端测试 page.m-workspaces.test.tsx 新增用例：默认 repo-native 提交体携带+收起态前两选项不在 DOM+⚠ 可见+展开文案断言——验证：pnpm vitest run 该文件全绿
++- [x] task-07: 回归验证：跑两端上述两个测试文件全量用例确认无既有用例挂（不跑全仓测试）——验证：两文件 vitest exit 0
+diff --git a/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/proposal.md b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-ws-create-spec-default-collapse/proposal.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T14:58:49.787Z
++---
++# 提案书（Proposal）— 2026-10-09-ws-create-spec-default-collapse
++
++## 动机
++
++任务原话转写：新建工作区表单的 spec 同步策略选项过多且默认值不合用户习惯，希望默认走源项目即真理并收起低频选项，降低创建表单噪音。
++
++成功标准:
++- 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
++- spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
++- 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
++- 选项文案中平台托管（默认…）的默认字样随新默认值移除
++- 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
++- 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
++2. spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
++3. 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
++4. 选项文案中平台托管（默认…）的默认字样随新默认值移除
++5. 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
++6. 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归
++
++## 成功标准（可验证）
++
++1. 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
++2. spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
++3. 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
++4. 选项文案中平台托管（默认…）的默认字样随新默认值移除
++5. 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
++6. 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归

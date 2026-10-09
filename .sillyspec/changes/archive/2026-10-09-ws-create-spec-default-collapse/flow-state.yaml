@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  新建工作区表单的 spec 同步策略选项过多且默认值不合用户习惯，希望默认走源项目即真理并收起低频选项，降低创建表单噪音。
+
+  成功标准:
+  - 桌面端与移动端创建工作区表单的 spec 策略默认值均为 repo-native（源项目即真理）
+  - spec 策略单选列表默认收起，仅显示摘要行与更多选项入口；点击展开后才显示完整三选项可切换
+  - 未展开时 platform-managed 与 repo-mirrored 两个选项不出现在 DOM
+  - 选项文案中平台托管（默认…）的默认字样随新默认值移除
+  - 选中 repo-native 时 ⚠ 写入源项目提示可见（含默认收起态）
+  - 提交体 spec_strategy 传当前选中值（默认 repo-native），既有创建链路无回归
+autopilot: true
+baseline_commit: 75c673dbd7318ab531427252bd3805712f97c2e9
+updatedAt: '2026-10-09T15:17:34.544Z'
+baseline_sha256: cfff9fefe1dfeb0f38b95c087780971711966475e88dd3799e6fb79697f6023c
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)（7.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009151723\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261009151723\test-result.json｜门文件
+  5 个
+

@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-ws-create-spec-default-collapse",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「更多选项展开三选项可见、平台托管文案无默认字样、切换后收起摘要跟随」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「spec 策略默认 repo-native：默认收起仅摘要行 + 直接创建提交体带 repo-native」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「更多选项展开三选项可切换再收起不动选中值」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-09-ws-create-spec-default-collapse:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/app/m/workspaces/__tests__/page.m-workspaces.test.tsx「创建工作区默认 spec 策略 repo-native：提交体携带 + 收起态前两选项不在 DOM + ⚠ 可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-ws-create-spec-default-collapse"
+    }
+  ]
+}
