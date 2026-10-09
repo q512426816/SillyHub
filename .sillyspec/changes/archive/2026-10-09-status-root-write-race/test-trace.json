@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-status-root-write-race",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-status-root-write-race:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「快速连续切换 ×20 → 落盘最终必为最后一次值（2026-10-09 竞态回归：串行链）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-status-root-write-race"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-status-root-write-race:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「切换 root → 落盘覆盖为最新值（既有用例转稳定；红证=旧码 CI run 37862831833 实跑红 + 本地 3 跑 1 红）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-status-root-write-race"
+    }
+  ]
+}

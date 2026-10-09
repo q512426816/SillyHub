@@ -1,0 +1,342 @@
+diff --git a/.sillyspec/changes/2026-10-09-status-root-write-race/flow-state.yaml b/.sillyspec/changes/2026-10-09-status-root-write-race/flow-state.yaml
+new file mode 100644
+index 000000000..a4d0ac8e4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-status-root-write-race/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：daemon-ci 在 ae49ccee 实跑红——daemon-status-root-persistence.test「切换 root」用例断言 beta 收到 alpha；机理为
++  _noteSillySpecStatusRoot 两次快速调用各自 fire 未串行的 writeFile，同文件竞态下旧值可后落盘（9 月既有缺陷，此前 CI 绿属运气，非本次任何变更引入；原用例本地 3 跑亦 1 红实证可复现）。
++
++
++  成功标准：
++
++  - 单槽位与映射槽位落盘均经 _statusRootPersistChain 串行链（fire-and-forget 改链式 then），最后一次 note 的值必最后落盘
++
++  - 新增 ×20 快速交替回归用例（放大窗口），与既有「切换 root」用例在新码下连跑全绿
++
++  - daemon tsc 0，相关面测试全绿；CI 重推转绿
++autopilot: true
++baseline_commit: ae49ccee1e024d5a858ef93fd57a409d8e67e1dc
++updatedAt: '2026-10-09T00:15:12.402Z'
++baseline_sha256: 5a01754ae4be91e05baae8364cd57db2ff99318b756bb5e5c3503bbf8a39a219
++
+diff --git a/docs/sillyspec/flow-done-sentinel-token-split-and-no-subagent-review.md b/docs/sillyspec/finished/flow-done-sentinel-token-split-and-no-subagent-review.md
+similarity index 61%
+rename from docs/sillyspec/flow-done-sentinel-token-split-and-no-subagent-review.md
+rename to docs/sillyspec/finished/flow-done-sentinel-token-split-and-no-subagent-review.md
+index 5e72131f9..3e01aa13e 100644
+--- a/docs/sillyspec/flow-done-sentinel-token-split-and-no-subagent-review.md
++++ b/docs/sillyspec/finished/flow-done-sentinel-token-split-and-no-subagent-review.md
+@@ -21,3 +21,21 @@
+ **绕过**：主会话按任务书检查单代行自审，review.json 的 reviewer 字段如实标注 `inline-self（环境无已注册子代理…）`——工具接受该产物（评审通过）。但「干净上下文」的独立性承诺打了折扣，属环境能力缺口下的降级。
+ 
+ **建议**：①CLI 检测无子代理通道时给出显式选项（等待 / 代行留痕 / 降级门档）；②文档化 reviewer 字段的代行标注惯例。
++
++## 处置记录（2026-10-09）
++
++**两向均处**（sillyspec 仓工作树，未提交）：
++
++1. **连写 token 组拆分 ✅ 已修**：`sentinel-assertions.js` 新增 `expandTaskShorthand`
++   （`task-01/02/03`、`task-1、2，03` 等连写组展开为独立规范 token，补零两位、尾数
++   `(?!\d)` 防版本串误切）——哨兵判定（detectFakeCheckCompletion）与 autopilot 自动
++   勾选提取（flow.js，同病同修）两处先展开再匹配。独立 token 行为零变化、
++   task-01 不证 task-010 前瞻边界不破。
++   测试：`test/sentinel-token-shorthand.test.mjs` 4/4 + sentinel 全家回归 55/55 绿。
++2. **无子代理评审 ✅ 惯例文档化（建议②路线）**：评审任务书（flow-review.js
++   renderReviewerTaskbook）增「无子代理通道时」段——主会话按检查单代行自审可接受、
++   reviewer 字段如实标注 `inline-self（环境无已注册子代理，主会话代行）`，禁止伪装
++   subagent。建议①（CLI 显式检测无通道给选项）不采纳：CLI 无法可靠探测宿主代理
++   注册面，任务书惯例已闭环；flow-review 测试 7/7 绿。
++
++归档。
+diff --git a/docs/sillyspec/init-skills-sync-no-zcode.md b/docs/sillyspec/finished/init-skills-sync-no-zcode.md
+similarity index 78%
+rename from docs/sillyspec/init-skills-sync-no-zcode.md
+rename to docs/sillyspec/finished/init-skills-sync-no-zcode.md
+index 6277af466..9fe7f1e24 100644
+--- a/docs/sillyspec/init-skills-sync-no-zcode.md
++++ b/docs/sillyspec/finished/init-skills-sync-no-zcode.md
+@@ -55,3 +55,20 @@ source: 2026-10-08-sync-sillyspec-skills-3320 活体——平台预置技能缺
+ - 上游命令卡已支持 zcode 落点（2026-09-21-flow-command-cards D-003），
+   本坑只是技能复制面；CLAUDE.md 规则 4 的 thin 协议引导依赖
+   `sillyspec-flow` 技能存在，两缺口叠加时引导与技能脱节最明显。
++
++## 处置记录（2026-10-09）
++
++**双缺口已修**（sillyspec 仓工作树，未提交）：
++
++1. `detectTools` 增 `.zcode` 检测分支（在场即自动发现，AGENTS.md 注入/命令卡/技能复制
++   三面全覆盖）；函数导出供测试。
++2. `skillToolDirs` 增 `zcode: '.zcode/skills'` 映射（显式 `--tool zcode` 也拿得到技能；
++   与命令卡面 D-003 的 zcode 落点对齐）。
++
++测试：`test/init-zcode-skills.test.mjs` 3/3（zcode 发现 / skillToolDirs 源级钉 /
++既有六信号零变化）；init 注入三套件 + quick-retired 模板锚回归全绿。
++建议③（「技能同步 0 个」原因提示）不单独做——两缺口修复后 0 同步仅剩「npm 包内无
++skills 目录」既有警告路径覆盖。
++
++**复合坑（本仓 .gitignore `.zcode/`）**：属使用守则已在坑内记录（`git add -f`），
++不属工具侧。归档。
+diff --git a/docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md b/docs/sillyspec/finished/thin-done-src-commit-order-and-attribution-paren.md
+similarity index 78%
+rename from docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md
+rename to docs/sillyspec/finished/thin-done-src-commit-order-and-attribution-paren.md
+index 37cfffde1..0e2400578 100644
+--- a/docs/sillyspec/thin-done-src-commit-order-and-attribution-paren.md
++++ b/docs/sillyspec/finished/thin-done-src-commit-order-and-attribution-paren.md
+@@ -50,3 +50,19 @@ source: 2026-10-07-assets-patch-scope-audit-fallback 活体——autopilot 单
+   （2026-10-07-unify-close-trace）+ 平台读回退（2026-10-07-assets-patch-
+   scope-audit-fallback）收口，记录在 finished/thin-flow-done-no-scope-audit-
+   snapshot.md；本文件是收尾链上的两个新坑。
++
++## 处置记录（2026-10-09）
++
++**两坑均已被 `6093ac7c`（2026-10-08-thin-done-dirty-gate-and-paren-attribution）修复**，
++本日复核验证后归档：
++
++1. **坑一（dirty 缺口归档阻断）✅**：flow done dirty 警告出现时**收口阻断**——不进
++   archive 子步，三选一显式选择（先提交重跑 / `--freeze-dirty` 并入 /
++   `--accept-dirty-gap` 留痕，缺口数随 change-patch.json 落盘）。autopilot 单跑不再
++   一次性归档锁死重冻结入口。
++2. **坑二（全角括号归属）✅**：`parseChangeNamesFromSubject` 正则改 `[（(]…[)）]`
++   双括号兼容 + `(?:thin\s+)?` 前缀形态——本日功能实测：全角/半角/带 thin 前缀三种
++   subject 均正确解析出变更名。
++
++**测试证据**：`test/thin-done-dirty-gate.test.mjs` 5/5 + `test/commit-attribution-split.
++test.mjs` 3/3 本日复跑双绿。归档。
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index ac7012521..a36697d06 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1661,6 +1661,12 @@ export class Daemon {
+    * statusCwd 回调读取。null=尚未观察到（采集跳过，心跳不带 sillyspec_status 键）。
+    */
+   private _sillyspecStatusRoot: string | null = null;
++  /**
++   * 单槽位落盘串行链（2026-10-09 竞态修复）：两次快速 claim 各自 fire 的
++   * writeFile 在同文件上竞态，旧值可能后落盘覆盖新值（CI 实证红：alpha 盖
++   * beta）。链式串行化保证「最后一次 note 的值最后落盘」。
++   */
++  private _statusRootPersistChain: Promise<void> = Promise.resolve();
+   /**
+    * 工作区级采集根映射（2026-09-08 总览工作区级化）：wsId → {rootPath, lastClaimAt}。
+    * claim 学习（_noteSillySpecStatusRoot）+ 落盘恢复（_restoreSillySpecStatusRoot），
+@@ -5232,11 +5238,18 @@ export class Daemon {
+           root_path: rootPath,
+         });
+       }
+-      void this._persistSillySpecStatusRoots();
++      // 串行链落盘（2026-10-09 竞态修复）：映射槽位与单槽位同理，防旧值后写。
++      this._statusRootPersistChain = this._statusRootPersistChain
++        .then(() => this._persistSillySpecStatusRoots())
++        .catch(() => {});
+     }
+     if (this._sillyspecStatusRoot === rootPath) return;
+     this._sillyspecStatusRoot = rootPath;
+-    void this._persistSillySpecStatusRoot(rootPath);
++    // 串行链落盘（2026-10-09 竞态修复）：两次快速 note 各自 fire 的 writeFile
++    // 在同文件竞态会让旧值后落盘（CI 实证红）——链式保证最后值最后落。
++    this._statusRootPersistChain = this._statusRootPersistChain
++      .then(() => this._persistSillySpecStatusRoot(rootPath))
++      .catch(() => {});
+   }
+ 
+   /** root 落盘（best-effort：失败仅 warn 不影响内存态；文件= {root_path, saved_at}）。 */
+diff --git a/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts b/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
+index a626d96cb..16cb8bb1d 100644
+--- a/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
++++ b/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts
+@@ -136,6 +136,33 @@ describe('2026-09-08 采集根落盘/恢复', () => {
+     restore();
+   });
+ 
++  it('快速连续切换 ×20 → 落盘最终必为最后一次值（2026-10-09 竞态回归：串行链）', async () => {
++    // 旧实现两次快速 note 各 fire 一个未串行 writeFile，同文件竞态下旧值可能
++    // 后落盘（CI 实证红：alpha 盖 beta）；×20 交替放大窗口，串行链下确定性绿。
++    const restore = silenceConsole();
++    const daemon = await buildDaemon();
++    const d = daemon as unknown as {
++      _noteSillySpecStatusRoot(ws: string | null | undefined, p: string | undefined): void;
++    };
++    const ws = 'b97f8231-9404-43bd-89de-38c281c4d875';
++    let last = '';
++    for (let i = 0; i < 20; i++) {
++      last = i % 2 === 0 ? `C:\\repo\\r${i}` : `C:\\repo\\r${i}`;
++      d._noteSillySpecStatusRoot(ws, last);
++    }
++    const t0 = Date.now();
++    let raw: { root_path: string } | null = null;
++    for (;;) {
++      raw = await waitFileJson<{ root_path: string }>(
++        join(stateDir, 'sillyspec-status-root.json'),
++      );
++      if (raw.root_path === last || Date.now() - t0 > 3000) break;
++      await new Promise((r) => setTimeout(r, 20));
++    }
++    expect(raw.root_path).toBe(last);
++    restore();
++  });
++
+   it('文件缺失/损坏/字段非法 → 恢复静默跳过（回退等 claim 旧路径）', async () => {
+     const restore = silenceConsole();
+     // 缺失。
+diff --git a/.sillyspec/changes/2026-10-09-status-root-write-race/design.md b/.sillyspec/changes/2026-10-09-status-root-write-race/design.md
+new file mode 100644
+index 000000000..36aa1e28a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-status-root-write-race/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T20:40:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-09-status-root-write-race
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`sillyhub-daemon/src/daemon.ts` 的 `_noteSillySpecStatusRoot` 两处落盘调用（单槽位 `_persistSillySpecStatusRoot` + 映射槽位 `_persistSillySpecStatusRoots`）从 `void`（fire-and-forget）改为共享 `_statusRootPersistChain` 串行链（`.then(() => 写入).catch(() => {})`）——两次快速 note 的写请求按发起序排队，最后一次值必然最后落盘，消除同文件 writeFile 竞态。写方法本身零改动（best-effort try/catch 语义保留）。测试补 ×20 快速交替回归用例放大窗口。背景：daemon-ci 在 ae49ccee 实跑红（1/4530），机理为 9 月既有代码缺陷（ef5b3c76a/f9bb4eeac），此前 CI 绿属运气；非任何在途变更引入。选串行链而非写前去重/防抖：链式保序语义最小且同时治两个文件面；防抖会改观察语义（落盘延迟）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `daemon.ts`：新增私有字段 `_statusRootPersistChain: Promise<void>`；`_noteSillySpecStatusRoot` 内两处落盘触发方式变为链式。类外可见行为零变化（私有方法/字段）；落盘文件格式零变化。
++- 测试文件 +1 用例（共 10）。
++- RPC / backend / 前端：零变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立：note 调用本身在单线程事件循环上按到达序同步入链，链保证落盘序=入链序；迟到的 note 追加链尾仍是最后落盘者。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++正是本变更所治：同一 daemon 进程内两次快速 note 的写被串行化；不同 daemon 进程（多实例同 stateDir）不在本面（既有形态单机单 daemon，多实例共享 stateDir 本就无文件锁，超范围）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：链上每个写自带 try/catch（失败仅 warn），`.catch(() => {})` 防单次失败毒化整链；进程退出时在途写丢失与原 fire-and-forget 语义一致（best-effort，恢复路径有「文件缺失/损坏静默跳过」兜底，既有用例钉住）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：串行链是实例内私有字段；两文件内容仍按 workspaceId 隔离（映射槽位）/单槽位语义不变。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：回归用例对竞态的检出是概率性的（旧码本地 ×20 用例 3 跑未触发、原用例 1/3 触发、CI 触发）——窗口取决于 fs 调度；以机理代码读证 + CI 实跑红作红证，用例作放大器非唯一防线。次风险：链上积压（极端高频 claim）延迟落盘——量级为毫秒级写排队，claim 频率远达不到。试过放弃：(a) 只修测试轮询窗口——放弃，生产同款竞态（两次快速 claim 持久化旧根）仍在；(b) 写前 coalesce（同值跳过）——`_sillyspecStatusRoot === rootPath` 早退已有同值短路，跨值仍需保序，链式是完备解；(c) 防抖 500ms——放弃，改落盘时效语义且测试需假时钟。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/daemon.ts | _statusRootPersistChain 串行链 + 两处触发改链式 |
++| 修改 | sillyhub-daemon/tests/daemon-status-root-persistence.test.ts | ×20 快速交替回归用例 |
+diff --git a/.sillyspec/changes/2026-10-09-status-root-write-race/proposal.md b/.sillyspec/changes/2026-10-09-status-root-write-race/proposal.md
+new file mode 100644
+index 000000000..558f7067b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-status-root-write-race/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:15:12.376Z
++---
++# 提案书（Proposal）— 2026-10-09-status-root-write-race
++
++## 动机
++
++任务原话转写：动机：daemon-ci 在 ae49ccee 实跑红——daemon-status-root-persistence.test「切换 root」用例断言 beta 收到 alpha；机理为 _noteSillySpecStatusRoot 两次快速调用各自 fire 未串行的 writeFile，同文件竞态下旧值可后落盘（9 月既有缺陷，此前 CI 绿属运气，非本次任何变更引入；原用例本地 3 跑亦 1 红实证可复现）。
++
++成功标准：
++- 单槽位与映射槽位落盘均经 _statusRootPersistChain 串行链（fire-and-forget 改链式 then），最后一次 note 的值必最后落盘
++- 新增 ×20 快速交替回归用例（放大窗口），与既有「切换 root」用例在新码下连跑全绿
++- daemon tsc 0，相关面测试全绿；CI 重推转绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. 单槽位与映射槽位落盘均经 _statusRootPersistChain 串行链（fire-and-forget 改链式 then），最后一次 note 的值必最后落盘
++2. 新增 ×20 快速交替回归用例（放大窗口），与既有「切换 root」用例在新码下连跑全绿
++3. daemon tsc 0，相关面测试全绿；CI 重推转绿
++
++## 成功标准（可验证）
++
++1. 单槽位与映射槽位落盘均经 _statusRootPersistChain 串行链（fire-and-forget 改链式 then），最后一次 note 的值必最后落盘
++2. 新增 ×20 快速交替回归用例（放大窗口），与既有「切换 root」用例在新码下连跑全绿
++3. daemon tsc 0，相关面测试全绿；CI 重推转绿
+diff --git a/.sillyspec/changes/2026-10-09-status-root-write-race/requirements.md b/.sillyspec/changes/2026-10-09-status-root-write-race/requirements.md
+new file mode 100644
+index 000000000..000432e4b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-status-root-write-race/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T20:40:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-09-status-root-write-race
++
++## 功能需求
++
++### FR-01: 落盘串行链——最后一次 note 的值必最后落盘
++
++- `_noteSillySpecStatusRoot` 触发的单槽位（sillyspec-status-root.json）与映射槽位（sillyspec-status-roots.json）落盘必须经 `_statusRootPersistChain` 串行链（`.then()` 链式 + `.catch(() => {})` 防链毒化），禁止并行的 fire-and-forget writeFile——两次快速 note 在同文件上的竞态不得让旧值后落盘。
++
++#### 场景：两次快速切换 root
++
++- Given note(alpha) 后立即 note(beta)（或 ×20 交替）
++- When 落盘完成
++- Then 文件最终值为最后一次 note 的值（CI 实证红形态：alpha 盖 beta 不再发生）
++
++### FR-02: 回归用例钉住
++
++- 测试必须新增「快速连续切换 ×20」用例（轮询 3s 断言最终值=最后一次）；既有「切换 root → 落盘覆盖为最新值」用例保持不变并转稳定；红证=该既有用例在旧码上 CI 实跑红 + 本地 3 跑 1 红（竞态窗口窄属概率复现，机理由代码读证：两未串行 writeFile 无顺序保证）。
++
++#### 场景：回归可检
++
++- Given 未来回退为 fire-and-forget 写
++- When CI 跑本文件
++- Then 概率性红（窗口窄），×20 用例放大检出概率
++
++### FR-03: 相关面全绿
++
++- daemon `tsc --noEmit` 必须 0 error；tests/daemon-status-root-persistence.test.ts 全绿（含新增共 10 用例）；重推后 daemon-ci 必须转绿。
++
++#### 场景：CI 转绿
++
++- Given 修复推送
++- When daemon-ci 实跑
++- Then success
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「快速连续切换 ×20 → 落盘最终必为最后一次值（2026-10-09 竞态回归：串行链）」
++FR-02: test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「切换 root → 落盘覆盖为最新值（既有用例转稳定；红证=旧码 CI run 37862831833 实跑红 + 本地 3 跑 1 红）」
++FR-03: test/sillyhub-daemon「本文件 10 用例全绿 + tsc 0（本地实测）；daemon-ci 重推转绿（推送后验证）」
+diff --git a/.sillyspec/changes/2026-10-09-status-root-write-race/tasks.md b/.sillyspec/changes/2026-10-09-status-root-write-race/tasks.md
+new file mode 100644
+index 000000000..2a6dbb9c1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-status-root-write-race/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T00:15:12.376Z
++---
++# 任务注册表（Tasks）— 2026-10-09-status-root-write-race
++
++- [x] task-01: 单槽位与映射槽位落盘均经 _statusRootPersistChain 串行链（fire-and-forget 改链式 then），最后一次 note 的值必最后落盘
++- [x] task-02: 新增 ×20 快速交替回归用例（放大窗口），与既有「切换 root」用例在新码下连跑全绿
++- [x] task-03: daemon tsc 0，相关面测试全绿；CI 重推转绿

@@ -1,0 +1,61 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "ae49ccee1e024d5a858ef93fd57a409d8e67e1dc",
+  "totals": {
+    "files": 5,
+    "additions": 93,
+    "deletions": 2
+  },
+  "rows": [
+    {
+      "path": "docs/sillyspec/finished/flow-done-sentinel-token-split-and-no-subagent-review.md",
+      "additions": 18,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/init-skills-sync-no-zcode.md",
+      "additions": 17,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "docs/sillyspec/finished/thin-done-src-commit-order-and-attribution-paren.md",
+      "additions": 16,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "additions": 15,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts",
+      "additions": 27,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "f25d38871c58e41e3be0a323d00c63444bc47e388c62b7740debbfa3c392837b",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T00:17:24.529Z"
+}

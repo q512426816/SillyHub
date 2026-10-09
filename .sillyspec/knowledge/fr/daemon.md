@@ -2516,3 +2516,48 @@
 依据决策：D-003@v1
 全文：.sillyspec/changes/archive/2026-08-05-daemon-version/requirements.md#FR-03
 最近确认：9afbfe036
+
+## FR-daemon-064 落盘串行链——最后一次 note 的值必最后落盘
+变更：2026-10-09-status-root-write-race
+状态：active
+摘要：两次快速切换 root
+全文：.sillyspec/changes/archive/2026-10-09-status-root-write-race/requirements.md#FR-01
+最近确认：ad9c05fb8cb88d8510207c895a9157960bfa533d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-status-root-write-race:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「快速连续切换 ×20 → 落盘最终必为最后一次值（2026-10-09 竞态回归：串行链）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-status-root-write-race
+  status: active
+
+## FR-daemon-065 回归用例钉住
+变更：2026-10-09-status-root-write-race
+状态：active
+摘要：回归可检
+全文：.sillyspec/changes/archive/2026-10-09-status-root-write-race/requirements.md#FR-02
+最近确认：ad9c05fb8cb88d8510207c895a9157960bfa533d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-status-root-write-race:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/daemon-status-root-persistence.test.ts「切换 root → 落盘覆盖为最新值（既有用例转稳定；红证=旧码 CI run 37862831833 实跑红 + 本地 3 跑 1 红）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-status-root-write-race
+  status: active
+
+## FR-daemon-066 相关面全绿
+变更：2026-10-09-status-root-write-race
+状态：active
+摘要：CI 转绿
+全文：.sillyspec/changes/archive/2026-10-09-status-root-write-race/requirements.md#FR-03
+最近确认：ad9c05fb8cb88d8510207c895a9157960bfa533d

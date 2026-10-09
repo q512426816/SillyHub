@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-status-root-write-race",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b2f2b48326288f7f36f900333e91fbfc6c6c2466",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "×20 回归用例三元表达式两分支相同（死代码），「交替」实为 20 个不同值",
+      "evidence": "test L150 `last = i % 2 === 0 ? `C:\\repo\\r${i}` : `C:\\repo\\r${i}`` 两分支完全一致，设计意图（两值交替放大窗口）未按字面实现；实际执行 20 次快速不同值切换（r0..r19）并断言终值=r19，检测力不减（任意旧值后落盘均会被断言捕获），仅代码误导",
+      "location": "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts:150"
+    },
+    {
+      "severity": "P3",
+      "title": "_statusRootPersistChain 字段注释称「单槽位落盘串行链」，实际同时串行映射槽位落盘",
+      "evidence": "daemon.ts:1665 注释写「单槽位落盘串行链」，但 5242-5244 同一链也承接 _persistSillySpecStatusRoots（映射槽位）；design.md 正确写「共享」。注释与实际用途不一致，纯注释级瑕疵，不影响行为",
+      "location": "sillyhub-daemon/src/daemon.ts:1665"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03「daemon-ci 重推转绿」尚未兑现：修复提交未推送，tasks.md task-03 已勾选",
+      "evidence": "git rev-parse origin/main = ae49ccee1（基线红 commit），bb1cb74aa/b2f2b4832 为本地未推送提交；gh run list 无对应 daemon-ci run（最新 daemon-ci 37862831833 = 基线 failure，恰好实证红证）。本地已复现 tsc exit 0 + 测试文件 10/10 绿，CI 面待推送后验证；requirements 绑定自身已声明「推送后验证」故不算承诺违反，但 task-03 的 [x] 勾选略超前",
+      "location": ".sillyspec/changes/2026-10-09-status-root-write-race/tasks.md:7"
+    },
+    {
+      "severity": "P3",
+      "title": "映射槽位（sillyspec-status-roots.json）的快速切换终值无用例断言",
+      "evidence": "FR-01 覆盖两槽位，实现面两处确均入链（5242-5244/5250-5252，grep 证实无其他 fire-and-forget 调用点），但 ×20 用例仅轮询断言单槽位 sillyspec-status-root.json；映射槽位串行化无测试钉子，仅代码读证",
+      "location": "sillyhub-daemon/tests/daemon-status-root-persistence.test.ts:139-164"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——note 在单线程事件循环上同步入链（5242/5250 同步赋值），链 FIFO 保证落盘序=入链序；每节写捕获的 rootPath 参数（5256）而非懒读内存态，迟到 note 追加链尾必最后落盘，design 作答与代码一致",
+    "并发": "ok（边界已裁决：可接受——多进程同 stateDir 无文件锁：写方法为裸 writeFile（5258/5355）无 temp+rename 原子写，跨进程竞态风险面确实存在，但为 9 月既有形态（单机单 daemon），design 明示超范围，本变更未引入也未扩大该面，裁决可接受）。进程内两快速 note 竞态已由共享链根治，grep 证实 _persistSillySpecStatusRoot/Roots 无其他调用点，FR-01「禁止 fire-and-forget」完全兑现；「回归用例概率性检出、以 CI 实跑红+代码读证作红证」边界亦裁决可接受——gh 实证 run 37862831833 在基线 ae49ccee1 上 daemon-ci failure（红证为真），机理读证成立，修复是代码级串行化而非仅测试放大",
+    "切换": "ok（边界已裁决：可接受——「进程退出在途写丢失与原语义一致」：链式与原 void fire-and-forget 同为 best-effort，恢复路径静默跳过兜底被既有用例钉住（test L166「文件缺失/损坏/字段非法 → 恢复静默跳过」）。「链积压毫秒级」：每链节仅一个 writeFile，claim 频率远低，无定时器；链虽只增但已结算 promise 前驱可回收，无泄漏面。`.catch(() => {})` 防毒化代码实证：每节自带 catch（5244/5252）链永不 reject，且写方法内层另有 try/catch warn（5257/5347）双保险；同值短路早退保留（5246）；写方法 best-effort 语义零改动（diff 证实）",
+    "作用域": "ok——链为实例内私有字段（1669），映射按 wsId 隔离（5223-5234 LRU），单槽位全局语义不变；对外接口/RPC/前端/schema/类型面零变化（commit bb1cb74aa 仅 daemon.ts+测试+变更文档），生成物同步检查通过：本变更无 schema/类型面，符合声明"
+  },
+  "reviewedAt": "2026-10-09T00:20:56Z"
+}

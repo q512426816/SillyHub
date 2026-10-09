@@ -1,0 +1,9 @@
+{"ts":1791504939597,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791504939597,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791504953229,"kind":"commit","stage":null,"detail":"b2f2b4832","provisional":true}
+{"ts":1791504959901,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791504959901,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1791504960190,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-09-status-root-write-race/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791505039567,"kind":"gate-run","stage":"verify","detail":"门实测 passed（76.6s） · 20261009001716","provisional":true}
+{"ts":1791505316401,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791505316401,"kind":"commit","stage":null,"detail":"ad9c05fb8","provisional":true}
