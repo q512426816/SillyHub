@@ -20,6 +20,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_SELF_UPDATE,
     DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP,
     DAEMON_MSG_SILLYSPEC_RESOLVE,
+    DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP,
     DAEMON_MSG_SILLYSPEC_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
 )
@@ -465,6 +466,32 @@ class DaemonWsHub:
         （REST 端点，task-02）转 504 DaemonRuntimeOffline。
         """
         message = {"type": DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP, "payload": {}}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_sillyspec_tombstone_cleanup(
+        self,
+        daemon_id: uuid.UUID,
+        change: str,
+        workspace_id: uuid.UUID,
+    ) -> bool:
+        """推送 sillyspec 墓碑收敛指令（Server → Daemon，2026-10-09 FR-03）。
+
+        daemon 收到后把本机变更目录（活跃区 ``changes/<name>/``，不在则归档区
+        ``changes/archive/<name>/``）移入 ``.sillyspec/.runtime/tombstone-quarantine/``
+        隔离区（移动不删除）并跑 ``doctor --cleanup-ghosts --confirm`` 归档进度
+        库行；执行结果经心跳 sillyspec_command_result 字段（action=
+        'tombstone_cleanup'，宽松透传无需枚举扩展）回传，不走本消息。
+        fire-and-forget，无回执（同 SILLYSPEC_UPDATE 语义）。旧 daemon 走
+        default 分支静默忽略（前端 150s 回显超时兜底）。``change`` 格式校验归
+        调用方端点，本方法只透传不重复校验（同 send_sillyspec_resolve 惯例）。
+        触发方两路：平台删除变更收敛环（delete_change 终 commit 后，失败仅
+        日志）与前端墓碑行「收敛本机目录」按钮（离线 504）。
+        """
+        payload = {
+            "change": change,
+            "workspace_id": str(workspace_id),
+        }
+        message = {"type": DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP, "payload": payload}
         return await self.send_to_runtime(daemon_id, message)
 
     async def send_policy_update(

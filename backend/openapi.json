@@ -13432,6 +13432,64 @@
         }
       }
     },
+    "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Trigger Machine Sillyspec Tombstone Cleanup",
+        "description": "推送 sillyspec 墓碑收敛指令到指定机器（admin，2026-10-09 FR-03）。\n\n机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送\n``daemon:sillyspec_tombstone_cleanup``（fire-and-forget，无回执，同\nSILLYSPEC_UPDATE 语义，不排队不落库）；daemon 收到后把本机变更目录移入\n``.sillyspec/.runtime/tombstone-quarantine/`` 隔离区（移动不删除）并归档\n进度库行，结果经心跳 sillyspec_command_result（action='tombstone_cleanup'）\n回传。本端点是前端墓碑行「收敛本机目录」按钮的手动触发通道（平台删除\n变更时的自动下发走 delete_change 收敛环，不经此端点）。权限/归属校验与\n504 结构与 sillyspec-resolve 同款（RuntimeAdminUser +\n``_get_owned_instance`` owner 与平台管理员放行 + workspace 成员校验）。",
+        "operationId": "trigger_machine_sillyspec_tombstone_cleanup_api_daemon_machines__instance_id__sillyspec_tombstone_cleanup_post",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineSillySpecTombstoneCleanupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Trigger Machine Sillyspec Tombstone Cleanup Api Daemon Machines  Instance Id  Sillyspec Tombstone Cleanup Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
       "get": {
         "tags": [
@@ -51945,6 +52003,26 @@
         "type": "object",
         "title": "MachineSillySpecStatusRead",
         "description": "机器视图 sillyspec_status 嵌套（2026-09-02-changes-overview-card FR-05）。\n\n即 daemon_instances.sillyspec_status JSON 列宽松透出（design §4 摘要）：\ndaemon 侧采集的 ``progress show --json`` envelope 摘要（计数 + changes[] +\npending_conflicts[]）。与 sillyspec_update 不同，backend 不补任何字段（无\nsince 注入），落库形态=上报形态，故嵌套项直接复用心跳 DTO 的\nDaemonHeartbeatSillySpecChange / DaemonHeartbeatSillySpecConflict /\nDaemonHeartbeatSillySpecChangeSteps（同形零转换，免三胞胎模型漂移）。\nNULL（总览不可用——sillyspec 未安装或版本过低）→ 机器视图字段为 null。\n时间字段（generated_at/last_active/created_at）为 ISO8601 字符串原样透传。"
+      },
+      "MachineSillySpecTombstoneCleanupRequest": {
+        "properties": {
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "change",
+          "workspace_id"
+        ],
+        "title": "MachineSillySpecTombstoneCleanupRequest",
+        "description": "Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。\n\n``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，\n其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验\n双保险，backend 只做格式校验）。"
       },
       "MachineSillySpecUpdateRead": {
         "properties": {

@@ -283,6 +283,22 @@ export async function triggerMachineSillySpecGhostCleanup(
 }
 
 /**
+ * POST /api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup — 推送
+ * sillyspec 墓碑收敛指令（2026-10-09-tombstone-conflict-root-fix FR-03：本机变更
+ * 目录移入 .runtime/tombstone-quarantine/ 隔离区 + 进度库行归档；fire-and-forget，
+ * 结果经心跳 sillyspec_command_result 回显）。前端墓碑行「收敛本机目录」按钮触发。
+ */
+export async function triggerMachineSillySpecTombstoneCleanup(
+  instanceId: string,
+  body: components["schemas"]["MachineSillySpecTombstoneCleanupRequest"],
+): Promise<{ sent: boolean }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-tombstone-cleanup`,
+    { method: "POST", json: body },
+  );
+}
+
+/**
  * GET /api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare —
  * 拉取 sillyspec 同步冲突的本地/平台对比数据（2026-09-07-conflict-diff-compare
  * task-07 / FR-02 / D-001@v1 方案A：请求/响应式，区别于 fire-and-forget 裁决

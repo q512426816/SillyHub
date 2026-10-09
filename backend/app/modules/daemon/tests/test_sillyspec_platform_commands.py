@@ -39,6 +39,7 @@ from app.modules.daemon.model import DaemonInstance
 from app.modules.daemon.protocol import (
     DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP,
     DAEMON_MSG_SILLYSPEC_RESOLVE,
+    DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP,
 )
 from app.modules.daemon.runtime.service import RuntimeService
 from app.modules.daemon.ws_hub import DaemonWsHub
@@ -79,6 +80,7 @@ _VALID_CHANGE = "2026-09-04-conflict-resolve-entry"
 # 两端点路径（含 /api 前缀，照 test_machine_sillyspec.py HTTP 断言形态）。
 _RESOLVE_PATH = "/api/daemon/machines/{instance_id}/sillyspec-resolve"
 _GHOST_PATH = "/api/daemon/machines/{instance_id}/sillyspec-ghost-cleanup"
+_TOMB_PATH = "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup"
 
 
 # ── helpers（照 test_machine_sillyspec.py 惯例就近私有复刻，不新建 conftest）────
@@ -248,8 +250,23 @@ class _SendRecorder:
             recorder.calls.append(("ghost_cleanup", {"daemon_id": daemon_id}))
             return recorder.result
 
+        async def _fake_tombstone(
+            self_hub: DaemonWsHub,
+            daemon_id: uuid.UUID,
+            change: str,
+            workspace_id: uuid.UUID,
+        ) -> bool:
+            recorder.calls.append(
+                (
+                    "tombstone_cleanup",
+                    {"daemon_id": daemon_id, "change": change, "workspace_id": workspace_id},
+                )
+            )
+            return recorder.result
+
         monkeypatch.setattr(DaemonWsHub, "send_sillyspec_resolve", _fake_resolve)
         monkeypatch.setattr(DaemonWsHub, "send_sillyspec_ghost_cleanup", _fake_ghost)
+        monkeypatch.setattr(DaemonWsHub, "send_sillyspec_tombstone_cleanup", _fake_tombstone)
 
 
 def _resolve_url(instance_id: uuid.UUID) -> str:
@@ -260,11 +277,19 @@ def _ghost_url(instance_id: uuid.UUID) -> str:
     return _GHOST_PATH.format(instance_id=instance_id)
 
 
-_ENDPOINT_IDS = ["resolve", "ghost_cleanup"]
+def _tomb_url(instance_id: uuid.UUID) -> str:
+    return _TOMB_PATH.format(instance_id=instance_id)
+
+
+_ENDPOINT_IDS = ["resolve", "ghost_cleanup", "tombstone_cleanup"]
 
 
 def _endpoint_url(kind: str, instance_id: uuid.UUID) -> str:
-    return _resolve_url(instance_id) if kind == "resolve" else _ghost_url(instance_id)
+    if kind == "resolve":
+        return _resolve_url(instance_id)
+    if kind == "tombstone_cleanup":
+        return _tomb_url(instance_id)
+    return _ghost_url(instance_id)
 
 
 async def _post_endpoint(
@@ -283,6 +308,15 @@ async def _post_endpoint(
             json={
                 "change": _VALID_CHANGE,
                 "strategy": "keep_local",
+                **({"workspace_id": str(workspace_id)} if workspace_id else {}),
+            },
+            headers=headers,
+        )
+    if kind == "tombstone_cleanup":
+        return await client.post(
+            url,
+            json={
+                "change": _VALID_CHANGE,
                 **({"workspace_id": str(workspace_id)} if workspace_id else {}),
             },
             headers=headers,
@@ -359,6 +393,27 @@ async def test_ws_hub_send_sillyspec_ghost_cleanup_envelope(fresh_ws_hub: Daemon
 
 
 @pytest.mark.asyncio
+async def test_ws_hub_send_sillyspec_tombstone_cleanup_envelope(
+    fresh_ws_hub: DaemonWsHub,
+) -> None:
+    """send_sillyspec_tombstone_cleanup → ``daemon:sillyspec_tombstone_cleanup`` 封包：
+    payload 两键（change 原样 + workspace_id str 化），fire-and-forget 无回执键。"""
+    daemon_id = uuid.uuid4()
+    fake_ws = _FakeWs()
+    await fresh_ws_hub.connect(daemon_id, fake_ws)
+
+    ws_id = uuid.uuid4()
+    sent = await fresh_ws_hub.send_sillyspec_tombstone_cleanup(daemon_id, _VALID_CHANGE, ws_id)
+    assert sent is True
+    assert fake_ws.messages == [
+        {
+            "type": DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP,
+            "payload": {"change": _VALID_CHANGE, "workspace_id": str(ws_id)},
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ws_hub_send_without_connection_returns_false(fresh_ws_hub: DaemonWsHub) -> None:
     """无连接（daemon 离线）→ 两 send 均返回 False（调用方端点转 504，不在 hub 抛）。"""
     assert (
@@ -368,6 +423,12 @@ async def test_ws_hub_send_without_connection_returns_false(fresh_ws_hub: Daemon
         is False
     )
     assert await fresh_ws_hub.send_sillyspec_ghost_cleanup(uuid.uuid4()) is False
+    assert (
+        await fresh_ws_hub.send_sillyspec_tombstone_cleanup(
+            uuid.uuid4(), _VALID_CHANGE, uuid.uuid4()
+        )
+        is False
+    )
 
 
 # ── 端点权限四态（D-003@v1：owner + 平台 admin 放行，其余 404/403）────────────
@@ -538,6 +599,45 @@ async def test_resolve_rejects_bad_change_without_touching_hub(
         json={
             "change": bad_change,
             "strategy": "keep_local",
+            "workspace_id": str(uuid.uuid4()),
+        },
+        headers=_headers(admin_token),
+    )
+    assert resp.status_code == 422, resp.text
+    assert recorder.calls == [], "422 请求不得触达 ws_hub"
+
+
+@pytest.mark.parametrize(
+    "bad_change",
+    [
+        "a..b",
+        "../x",
+        "-bad",
+        ".dotted-start",
+        "a" * 129,
+        "has space",
+        "",
+    ],
+    ids=["dotdot", "traversal", "bad-first-char", "dot-first", "too-long-129", "space", "empty"],
+)
+@pytest.mark.asyncio
+async def test_tombstone_rejects_bad_change_without_touching_hub(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+    monkeypatch: pytest.MonkeyPatch,
+    bad_change: str,
+) -> None:
+    """tombstone-cleanup 非法 change → 422 且 ws_hub 零调用（白名单与 resolve 同款）。"""
+    admin, admin_token = await _seed_user(db_session, name="wl-tomb", is_platform_admin=True)
+    inst = await _create_machine(db_session, admin.id, hostname="sscmd-tomb-whitelist-host")
+    recorder = _SendRecorder(result=True)
+    recorder.install(monkeypatch)
+
+    resp = await client.post(
+        _tomb_url(inst.id),
+        json={
+            "change": bad_change,
             "workspace_id": str(uuid.uuid4()),
         },
         headers=_headers(admin_token),
@@ -902,6 +1002,7 @@ def test_openapi_contains_endpoints_and_command_result_refs() -> None:
     spec = app.openapi()
     assert "/api/daemon/machines/{instance_id}/sillyspec-resolve" in spec["paths"]
     assert "/api/daemon/machines/{instance_id}/sillyspec-ghost-cleanup" in spec["paths"]
+    assert "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup" in spec["paths"]
 
     machine_schema = spec["components"]["schemas"]["DaemonMachineReadWithPending"]
     assert "sillyspec_command_result" in machine_schema["properties"]

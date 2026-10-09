@@ -101,6 +101,17 @@ DAEMON_MSG_SILLYSPEC_UPDATE = "daemon:sillyspec_update"  # Server → Daemon, D-
 DAEMON_MSG_SILLYSPEC_RESOLVE = "daemon:sillyspec_resolve"  # Server → Daemon, D-001@v1
 DAEMON_MSG_SILLYSPEC_GHOST_CLEANUP = "daemon:sillyspec_ghost_cleanup"  # Server → Daemon, D-001@v1
 
+# change 2026-10-09-tombstone-conflict-root-fix / FR-03: 墓碑收敛指令 WS push
+# （Server → Daemon）。平台删除变更（delete_change 收敛环，终 commit 后）或前端
+# 墓碑行「收敛本机目录」按钮触发；daemon 收到后把本机变更目录移入
+# .sillyspec/.runtime/tombstone-quarantine/ 隔离区（移动不删除）并跑
+# doctor --cleanup-ghosts --confirm 归档进度库行；结果经心跳
+# sillyspec_command_result（action='tombstone_cleanup'）回传，不走本消息。
+# fire-and-forget，无回执（同 SILLYSPEC_UPDATE 语义）。旧 daemon 走 default
+# 仅 warn（静默忽略，前端 150s 回显超时兜底）。与 sillyhub-daemon/src/protocol.ts
+# MSG 逐字对齐。
+DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP = "daemon:sillyspec_tombstone_cleanup"
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 

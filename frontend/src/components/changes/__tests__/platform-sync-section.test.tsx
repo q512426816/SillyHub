@@ -56,6 +56,8 @@ const mocks = vi.hoisted(() => ({
   fetchMyBinding: vi.fn(),
   triggerResolve: vi.fn(),
   triggerGhostCleanup: vi.fn(),
+  listSpecConflicts: vi.fn(),
+  triggerTombstoneCleanup: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async (importOriginal) => ({
@@ -63,6 +65,12 @@ vi.mock("@/lib/daemon", async (importOriginal) => ({
   listDaemonMachines: mocks.listDaemonMachines,
   triggerMachineSillySpecResolve: mocks.triggerResolve,
   triggerMachineSillySpecGhostCleanup: mocks.triggerGhostCleanup,
+  triggerMachineSillySpecTombstoneCleanup: mocks.triggerTombstoneCleanup,
+}));
+
+vi.mock("@/lib/spec-workspaces", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/spec-workspaces")>()),
+  listSpecConflicts: mocks.listSpecConflicts,
 }));
 
 vi.mock("@/lib/workspace-binding", async (importOriginal) => ({
@@ -319,6 +327,9 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     setupMachine(makeMachine(makeStatus()));
     mocks.triggerResolve.mockResolvedValue({ sent: true });
     mocks.triggerGhostCleanup.mockResolvedValue({ sent: true });
+    // 注册表默认空（墓碑用例自行覆写——纯墓碑判定谓词见 FR-02）。
+    mocks.listSpecConflicts.mockResolvedValue([]);
+    mocks.triggerTombstoneCleanup.mockResolvedValue({ sent: true });
   });
 
   afterEach(() => {
@@ -729,5 +740,139 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── 墓碑形态三态（2026-10-09-tombstone-conflict-root-fix FR-02）─────────
+
+  /** 注册表行 fixture（details_json 字符串形态，对齐 SpecConflictItem）。 */
+  function makeRegistryRow(details: object, createdAgoMs = 3 * 24 * 60 * MIN) {
+    return {
+      id: `reg-${Math.random().toString(36).slice(2, 8)}`,
+      workspace_id: "ws-1",
+      stage: "spec-sync",
+      conflict_type: "spec_tree",
+      details_json: JSON.stringify(details),
+      status: "open",
+      created_at: isoAgo(createdAgoMs),
+    };
+  }
+
+  it("墓碑行——注册表纯墓碑行命中：徽章「平台已删」+ 被删变更名 + 无查看对比/裁决入口 + 收敛按钮在场", async () => {
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: ["changes/salv/tasks/task-01.md", "changes/salv/verify-result.md"],
+        conflicting_paths: [
+          "changes/salv/tasks/task-01.md",
+          "changes/salv/verify-result.md",
+        ],
+        server_versions: {},
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByTestId("platform-sync-tombstone-row")).toBeInTheDocument();
+    });
+    // 快照同名行被墓碑形态接管：不再有查看对比按钮与该行裁决入口
+    const row = screen.getByTestId("platform-sync-tombstone-row");
+    expect(within(row).getByTestId("platform-sync-tombstone-badge")).toHaveTextContent(
+      "平台已删",
+    );
+    expect(within(row).getByText("salv")).toBeInTheDocument();
+    expect(within(row).queryByText("查看对比")).not.toBeInTheDocument();
+    expect(
+      within(row).getByTestId("platform-sync-tombstone-converge"),
+    ).toBeInTheDocument();
+    expect(within(row).getByText(/非版本冲突/)).toBeInTheDocument();
+  });
+
+  it("混合行——注册表 conflicting_paths 差集非空：走现有版本冲突渲染（保留查看对比，不误隐藏裁决）", async () => {
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: ["changes/mixed-chg/tomb.md"],
+        conflicting_paths: ["changes/mixed-chg/tomb.md", "changes/mixed-chg/real.md"],
+        server_versions: { "changes/mixed-chg/real.md": 2 },
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByText("quick-x")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("platform-sync-tombstone-row")).not.toBeInTheDocument();
+    // 混合注册表行不产生墓碑渲染（快照两条冲突行照常渲染查看对比）
+    expect(screen.getAllByText("查看对比").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("注册表独有墓碑行——快照无对应行也渲染（CLI 旧版无归因记录兜底）", async () => {
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: ["changes/registry-only-chg/a.md"],
+        conflicting_paths: ["changes/registry-only-chg/a.md"],
+        server_versions: {},
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByTestId("platform-sync-tombstone-row")).toBeInTheDocument();
+    });
+    expect(screen.getByText("registry-only-chg")).toBeInTheDocument();
+  });
+
+  it("收敛按钮——点击下发（workspace_id+change 透传）→ 回显等待 → 心跳 tombstone_cleanup 成功回报转已收敛", async () => {
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: ["changes/salv/tasks/task-01.md"],
+        conflicting_paths: ["changes/salv/tasks/task-01.md"],
+        server_versions: {},
+      }),
+    ]);
+    renderSection();
+    const btn = await waitFor(() =>
+      screen.getByTestId("platform-sync-tombstone-converge"),
+    );
+    fireEvent.click(btn);
+    expect(mocks.triggerTombstoneCleanup).toHaveBeenCalledWith("machine-1", {
+      workspace_id: "ws-1",
+      change: "salv",
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("platform-sync-state-waiting"),
+      ).toBeInTheDocument();
+    });
+    // 心跳回报：action=tombstone_cleanup + change 匹配 → 成功态
+    await pushMachine(
+      makeMachine(makeStatus(), {
+        sillyspec_command_result: makeResult({
+          action: "tombstone_cleanup",
+          change: "salv",
+          strategy: null,
+          state: "success",
+          error: null,
+        }),
+      }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("platform-sync-state-succeeded"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByText(/已收敛 · 等待快照刷新/)).toBeInTheDocument();
+  });
+
+  it("快照 type=tombstone 透传（无注册表数据时）——CLI 归因记录直判墓碑形态", async () => {
+    setupMachine(
+      makeMachine({
+        ...makeStatus(),
+        pending_conflicts: [
+          { change: "cli-attributed-chg", created_at: isoAgo(60 * MIN), type: "tombstone" },
+        ],
+        conflict_count: 1,
+      } as Partial<StatusFixture> as StatusFixture),
+    );
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByTestId("platform-sync-tombstone-row")).toBeInTheDocument();
+    });
+    expect(screen.getByText("cli-attributed-chg")).toBeInTheDocument();
   });
 });

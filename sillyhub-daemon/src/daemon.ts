@@ -1542,6 +1542,12 @@ export interface SillySpecCommandExecutor {
    */
   runGhostCleanup(): Promise<void>;
   /**
+   * 执行墓碑收敛（2026-10-09-tombstone-conflict-root-fix FR-03）：本机变更目录
+   * 移入 .runtime/tombstone-quarantine/ 隔离区（移动不删除）+ doctor 归档进度
+   * 库行；目录不在 = 幂等成功（重放安全）。结果全收敛写结果槽不 reject。
+   */
+  runTombstoneCleanup(change: string, workspaceId?: string): Promise<void>;
+  /**
    * npm 升级链在跑判定（running/deferred 期间 true）——排队命令出队执行前轮询
    * 等待的依据（2026-09-26-sillyspec-command-queue：原忙拒第二臂改等待）。
    */
@@ -7379,6 +7385,28 @@ export class Daemon {
         void this._routeSillySpecGhostCleanup();
         break;
       }
+      case MSG.SILLYSPEC_TOMBSTONE_CLEANUP: {
+        // payload: {change, workspace_id}（2026-10-09-tombstone-conflict-root-fix
+        // FR-03：墓碑收敛——目录隔离区移动 + doctor 归档，执行归
+        // sillyspec-manager task-03）。值域校验同 resolve（缺 change /
+        // workspace_id 非字符串 → warn 丢弃不崩）。
+        const change = typeof rawPayload.change === 'string' ? rawPayload.change : '';
+        const workspaceId =
+          typeof rawPayload.workspace_id === 'string' ? rawPayload.workspace_id : '';
+        if (!change || !workspaceId) {
+          this._logger.warn('sillyspec_tombstone_cleanup_missing_fields', {
+            change,
+            workspace_id: workspaceId || null,
+          });
+          break;
+        }
+        this._logger.info('sillyspec_tombstone_cleanup_received', {
+          change,
+          workspace_id: workspaceId,
+        });
+        void this._routeSillySpecTombstoneCleanup(change, workspaceId);
+        break;
+      }
       // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。
       // 黑名单删除（cleanup.ts CLEANABLE_DIRS），outbox/（未投递消息）与 runs/
       // （活跃任务日志，terminal-observer 另有 7 天保留期清理）不在清理范围。
@@ -7485,6 +7513,18 @@ export class Daemon {
   }
 
   /**
+   * 同上（2026-10-09-tombstone-conflict-root-fix FR-03）：SILLYSPEC_TOMBSTONE_CLEANUP
+   * 直连路由——转发（change, workspaceId）执行方法（identify 只携 change）。
+   */
+  private _routeSillySpecTombstoneCleanup(change: string, workspaceId: string): Promise<void> {
+    return this._runSillySpecCommand(
+      'tombstone_cleanup',
+      { change },
+      (executor) => executor.runTombstoneCleanup(change, workspaceId),
+    );
+  }
+
+  /**
    * task-05（design §5 Phase2 第4条；2026-09-26-sillyspec-command-queue 重写）：
    * sillyspec 平台命令统一转发 + FIFO 串行队列。
    *
@@ -7506,7 +7546,7 @@ export class Daemon {
    *   （同 plan_response_no_manager 惯例，tsc 独立编译不依赖 task-06）。
    */
   private _runSillySpecCommand(
-    action: 'resolve' | 'ghost_cleanup',
+    action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
     identify: Pick<SillySpecCommandResult, 'change' | 'strategy'>,
     exec: (executor: SillySpecCommandExecutor) => Promise<void>,
   ): Promise<void> {
@@ -7578,7 +7618,9 @@ export class Daemon {
    * 重叠无害——心跳是无状态全量上报，backend 侧字段级 last-write-wins。
    *（2026-09-26-sillyspec-command-queue：忙拒相位随排队化消亡，收敛单参。）
    */
-  private _nudgeHeartbeatAfterCommandResult(action: 'resolve' | 'ghost_cleanup'): void {
+  private _nudgeHeartbeatAfterCommandResult(
+    action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
+  ): void {
     this._logger.debug('sillyspec_command_heartbeat_nudge', { action });
     void this._sendHeartbeatOnce();
   }

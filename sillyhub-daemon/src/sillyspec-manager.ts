@@ -81,7 +81,7 @@ import {
 // 采集器用 execFile 数组形参直跑 node <sillyspec-bin>（无 shell 依赖，路径空格
 // 安全）；bin 解析用 existsSync 探测 npm 全局布局候选。
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, statSync } from 'node:fs';
 // 2026-09-07-conflict-diff-compare task-02：冲突快照逐路径 stat/realpath/readFile
 //（只读，不写任何文件——RPC 只读快照铁律）。
 import { readFile, realpath, stat } from 'node:fs/promises';
@@ -1074,6 +1074,98 @@ export class SillySpecManager {
   }
 
   /**
+   * 执行墓碑收敛（2026-10-09-tombstone-conflict-root-fix FR-03）：把本机变更目录
+   * （活跃区 changes/<名>/，不在则归档区 changes/archive/<名>/）移动到
+   * <根>/.sillyspec/.runtime/tombstone-quarantine/<名>-<yyyymmdd-HHmmss>/ 隔离区
+   * （移动不删除——同盘 rename 原子性；同步树外不进 git，用户可手工取回；**不移入
+   * changes/archive/**——墓碑守卫对归档区前缀同样拒收，会二次撞墙）。随后
+   * `doctor --cleanup-ghosts --confirm` 归档进度库行（目录已移走该行即 ghost）。
+   *
+   * 幂等语义：目录不在（已收敛或从未存在）→ state=success、error 注明「目录已
+   * 不在本地」，无副作用——指令重放/前端 150s 超时重试安全。rename 失败（占用/
+   * 跨盘）→ failed 带错误摘要。根解析同 runResolve（带 workspaceId 不回退单槽位）。
+   */
+  async runTombstoneCleanup(change: string, workspaceId?: string): Promise<void> {
+    const identify: SillySpecCommandIdentify = { change };
+    this._log('info', 'sillyspec_tombstone_cleanup_started', {
+      change,
+      workspace_id: workspaceId ?? null,
+    });
+    try {
+      const pre = this._requireCommandPrecondition('tombstone_cleanup', identify, workspaceId);
+      if (pre === null) return;
+      const candidates = [
+        join(pre.cwd, '.sillyspec', 'changes', change),
+        join(pre.cwd, '.sillyspec', 'changes', 'archive', change),
+      ];
+      const source = candidates.find((c) => this._isDirPresent(c));
+      if (source === undefined) {
+        // 幂等：目录不在 = 已收敛/从未存在 → 成功回执（重放安全）。
+        this.recordCommandResult({
+          action: 'tombstone_cleanup',
+          ...identify,
+          state: 'success',
+          exit_code: 0,
+          error: '目录已不在本地（已收敛或从未存在），无操作',
+        });
+        return;
+      }
+      const stamp = new Date(this._now());
+      const quarantineDir = join(
+        pre.cwd,
+        '.sillyspec',
+        '.runtime',
+        'tombstone-quarantine',
+        `${change}-${this._quarantineStamp(stamp)}`,
+      );
+      try {
+        mkdirSync(dirname(quarantineDir), { recursive: true });
+        renameSync(source, quarantineDir);
+      } catch (e) {
+        this.recordCommandResult({
+          action: 'tombstone_cleanup',
+          ...identify,
+          state: 'failed',
+          error: `隔离区移动失败（源=${source}）：${fmtErrorSnippet(e)}`,
+        });
+        return;
+      }
+      this._log('info', 'sillyspec_tombstone_cleanup_quarantined', {
+        change,
+        from: source,
+        to: quarantineDir,
+      });
+      // 目录已移走 → 该变更行即 ghost，doctor 归档之（runGhostCleanup 同款链路）。
+      const doctor = await this._execSillySpecCli(
+        pre.bin,
+        ['doctor', '--cleanup-ghosts', '--confirm'],
+        pre.cwd,
+      );
+      this._recordCommandOutcome('tombstone_cleanup', identify, doctor);
+    } catch (e) {
+      this._recordCommandExecutorError('tombstone_cleanup', identify, e);
+    }
+  }
+
+  /** 隔离区子目录时间戳后缀（本地钟 yyyymmdd-HHmmss，仅命名用不跨机比较）。 */
+  private _quarantineStamp(d: Date): string {
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}` +
+      `-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`
+    );
+  }
+
+  /** 目录在位判定（rename 源探测；stat 失败按不在处理）。 */
+  private _isDirPresent(p: string): boolean {
+    try {
+      return statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * 执行 ghost 清理（FR-03 / design §5 Phase2 第2条）：先 `doctor
    * --cleanup-ghosts --confirm`（本地 DB 幽灵行翻 archived + 超 7 天空壳归档），
    * 成功后再 `platform sync`（上行终态 + 墓碑，平台侧收敛——闭环依据 sync.js
@@ -1186,7 +1278,7 @@ export class SillySpecManager {
    * backend 白名单 + CLI assertSafeChangeName 双保险，数组形参不经 shell。
    */
   private _requireCommandPrecondition(
-    action: 'resolve' | 'ghost_cleanup',
+    action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
     identify: SillySpecCommandIdentify,
     workspaceId?: string,
   ): { cwd: string; bin: string } | null {
@@ -1251,7 +1343,7 @@ export class SillySpecManager {
    * 摘要）；0 → success（exit_code=0）。
    */
   private _recordCommandOutcome(
-    action: 'resolve' | 'ghost_cleanup',
+    action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
     identify: SillySpecCommandIdentify,
     outcome: SillySpecProgressOutcome,
   ): void {
@@ -1288,7 +1380,7 @@ export class SillySpecManager {
 
   /** 执行器意外异常防御（约定不 reject，此处兜底记 failed 不上抛）。 */
   private _recordCommandExecutorError(
-    action: 'resolve' | 'ghost_cleanup',
+    action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
     identify: SillySpecCommandIdentify,
     e: unknown,
   ): void {
