@@ -990,6 +990,30 @@ export function SessionInputBar({
               });
               if (handled) return;
             }
+            // 退格整删引用标签（用户反馈 2026-10-09，D-004@v2）：无选区、光标
+            // 贴在已注册 token 尾部时，一次退格删除整个标签（非逐字）；标签
+            // 中部/普通文本退格不受影响；多 token 同尾时取最长匹配。
+            if (
+              e.key === "Backspace" &&
+              !mention &&
+              !composingRef.current
+            ) {
+              const ta = e.target as HTMLTextAreaElement;
+              const { selectionStart: s, selectionEnd: en } = ta;
+              if (s === en && s > 0) {
+                const before = value.slice(0, s);
+                const matched = Object.values(attTokenMap)
+                  .filter((t) => t && before.endsWith(t))
+                  .sort((a, b) => b.length - a.length);
+                const token = matched[0];
+                if (token) {
+                  e.preventDefault();
+                  onChange(value.slice(0, s - token.length) + value.slice(s));
+                  pendingCaretRef.current = s - token.length;
+                  return;
+                }
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               onSend();

@@ -257,6 +257,26 @@ describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-re
     expect(screen.queryByText(/【图A.png】/)).toBeNull();
   });
 
+  // D-004@v2（用户反馈 2026-10-09）：退格贴标签尾部一次整删；标签中部退格不拦截。
+  it("退格整删：光标贴标签尾部无选区 → 一次删除整个标签；中部退格放行逐字", async () => {
+    await mountAndUpload([{ id: "att-bs-1", name: "整删.png" }], "前文");
+    const chip = screen.getByTitle(/右击插入正文引用/);
+    fireEvent.contextMenu(chip);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toBe("前文【整删.png】"));
+    // ① 光标贴标签尾部 → 一次退格整删。
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    await waitFor(() => expect(ta.value).toBe("前文"));
+    // ② 光标在标签中部（如「【整删.p」后）→ 不拦截，走默认逐字删除语义
+    //    （jsdom 默认行为不真删字符，仅断言我们的处理函数未整删 value）。
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("前文【整删.png】"));
+    ta.setSelectionRange(6, 6);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    expect(ta.value).toBe("前文【整删.png】"); // 未被整删（原生逐字由浏览器处理）
+  });
+
   it("未右击任何附件 → 镜像层零渲染（无「移除引用」角标）", async () => {
     await mountAndUpload([{ id: "att-noref-1", name: "未引用.png" }]);
     expect(screen.queryByLabelText(/移除引用/)).toBeNull();

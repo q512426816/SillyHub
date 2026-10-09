@@ -1673,6 +1673,26 @@ describe("群消息附件（FR-05 补遗）", () => {
     ).toBeNull();
   });
 
+  // D-004@v2（用户反馈 2026-10-09）：群聊退格贴标签尾部一次整删。
+  it("退格整删：光标贴标签尾部 → 一次删除整个标签（群聊 D-004@v2）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    const before = input.value;
+    input.setSelectionRange(before.length, before.length);
+    fireEvent.keyDown(input, { key: "Backspace" });
+    await waitFor(() =>
+      expect(input.value).toBe(before.replace("【报错日志.txt】", "")),
+    );
+  });
+
   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
     harness.logsJson = [];
     renderPanel();

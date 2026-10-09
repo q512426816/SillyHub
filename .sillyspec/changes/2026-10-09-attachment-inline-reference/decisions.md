@@ -90,3 +90,18 @@ created_at: 2026-10-09 13:47:10
 - priority: P1
 - 锚点: frontend/src/components/daemon/session-input-bar.tsx
 - 模块域: frontend_components
+
+## D-004@v2
+
+- type: 交互契约
+- status: confirmed
+- supersedes: D-004@v1
+- source: 用户实测反馈（verify 后归档前，2026-10-09 部署实测）
+- question: 退格删除引用标签的行为？
+- answer: 无选区且光标贴在已注册 token 尾部时，一次退格删除整个标签（textarea onKeyDown 拦截 Backspace + endsWith 最长匹配，preventDefault 后整段移除并复位光标到标签原起点）；标签中部或普通文本退格仍逐字；IME 组合期与 @ 联想浮层开层时不拦截。单聊与群聊同款。
+- normalized_requirement: FR-03 的退格子句按本版执行；其余（× 角标删一处、删附件联动剥离）不变。
+- impacts: session-input-bar.tsx onKeyDown、group-chat-panel.tsx handleInputKeyDown。
+- evidence: 用户原话「删除回退不是一个文字一个文字的删，而是直接把这个标签直接删掉」（2026-10-09 会话）。
+- priority: P0
+- 锚点: frontend/src/components/daemon/session-input-bar.tsx（onKeyDown Backspace 分支）
+- 模块域: frontend_components

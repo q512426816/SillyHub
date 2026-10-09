@@ -2037,6 +2037,37 @@ export function GroupChatPanel({
       });
       if (handled) return;
     }
+    // 退格整删引用标签（用户反馈 2026-10-09，D-004@v2，单聊同款）：无选区、
+    // 光标贴在已注册 token 尾部时一次删除整个标签；多 token 同尾取最长匹配。
+    if (e.key === "Backspace" && !mentionOpen) {
+      const ta = e.target as HTMLTextAreaElement;
+      const { selectionStart: s, selectionEnd: en } = ta;
+      if (s === en && s > 0) {
+        const before = draft.slice(0, s);
+        const matched = Object.values(attTokenMap)
+          .filter((t) => t && before.endsWith(t))
+          .sort((a, b) => b.length - a.length);
+        const token = matched[0];
+        if (token) {
+          e.preventDefault();
+          const next = draft.slice(0, s - token.length) + draft.slice(s);
+          setDraft(next);
+          // 光标复位到标签原起点（受控 value DOM 更新后延迟执行）。
+          const input = inputRef.current;
+          const caret = s - token.length;
+          const restore = () => {
+            if (!input) return;
+            input.setSelectionRange(caret, caret);
+          };
+          if (typeof requestAnimationFrame === "function") {
+            requestAnimationFrame(restore);
+          } else {
+            restore();
+          }
+          return;
+        }
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       void handleSend();
