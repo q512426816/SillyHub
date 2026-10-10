@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-dump-gzip-thread-offload",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c2dea0074b6fc874e20bd6a894d932dd25842239",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 标题「既有 4 用例零回归」与测试绑定行「dump 组 5 旧用例」数字口径不一致",
+      "evidence": "requirements.md FR-02 标题写「既有 4 用例零回归」，同文件测试绑定行写「dump 组 5 旧用例零回归，实测 6 passed」；grep 实测 test_graph.py 中 test_graph_dump* 旧用例共 5 个（happy_path/large_payload/existing_endpoints_no_content_encoding/cli_feature_missing/route_order_and_permission）+ 新卸载钉 1 个 = 6。承诺面（零回归）被更严格满足，仅文档口径含混，非承诺违反。",
+      "location": ".sillyspec/changes/2026-10-10-dump-gzip-thread-offload/requirements.md:17 与 requirements.md:37；backend/app/modules/knowledge/tests/test_graph.py:744,807,876,900,939"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T00:33:20Z"
+}

@@ -1,0 +1,83 @@
+{
+  "change": "2026-10-10-dump-gzip-thread-offload",
+  "baseline": "205f4b9cd6836e54221f9daedbe9de857ae1b510",
+  "head": "c2dea0074b6fc874e20bd6a894d932dd25842239",
+  "files": [
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/tests/test_graph.py",
+    ".sillyspec/changes/2026-10-10-dump-gzip-thread-offload/design.md",
+    ".sillyspec/changes/2026-10-10-dump-gzip-thread-offload/proposal.md",
+    ".sillyspec/changes/2026-10-10-dump-gzip-thread-offload/requirements.md",
+    ".sillyspec/changes/2026-10-10-dump-gzip-thread-offload/tasks.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 166,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-10T00:30:42.057Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "knowledge",
+      "files": 2,
+      "doc": "docs/backend/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "205f4b9cd6836e54221f9daedbe9de857ae1b510",
+    "totals": {
+      "files": 2,
+      "additions": 45,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/knowledge/router.py",
+        "additions": 14,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_graph.py",
+        "additions": 31,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7205e517c99aa0279382539158151a09a0aedf07b6f865540f27c6e96aff7681",
+  "patchStatus": "ok"
+}

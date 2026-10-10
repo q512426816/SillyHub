@@ -1,0 +1,223 @@
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index e87b0e003..50cd98b9d 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import gzip
+ import json
+ import uuid
+@@ -336,11 +337,20 @@ async def get_knowledge_graph_dump(
+     """
+     service = KnowledgeGraphService(session)
+     envelope = await service.dump(workspace_id, user.id)
+-    payload = json.dumps(
+-        envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+-    )
++
++    # CPU 段卸载工作线程（2026-10-10-dump-gzip-thread-offload）：大图（实测
++    # 5855 节点/MB 级 payload）的 json.dumps + gzip.compress 同步执行达百 ms~秒级，
++    # 跑在事件循环会阻塞全部并发请求（含 SSE 心跳/日志流推送）。纯 CPU 无 IO
++    # 共享态，asyncio.to_thread 卸载安全；响应字节与响应头不变。
++    def _serialize_compress() -> bytes:
++        payload = json.dumps(
++            envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
++        )
++        return gzip.compress(payload.encode("utf-8"))
++
++    body = await asyncio.to_thread(_serialize_compress)
+     return Response(
+-        content=gzip.compress(payload.encode("utf-8")),
++        content=body,
+         media_type="application/json",
+         headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+     )
+diff --git a/backend/app/modules/knowledge/tests/test_graph.py b/backend/app/modules/knowledge/tests/test_graph.py
+index e4936e83e..f2f4c49ea 100644
+--- a/backend/app/modules/knowledge/tests/test_graph.py
++++ b/backend/app/modules/knowledge/tests/test_graph.py
+@@ -842,6 +842,37 @@ async def test_graph_dump_large_payload_compression_effective(
+     assert data["nodes"][0]["x"] == 0.0  # (0*37)%5000 确定性坐标透传
+ 
+ 
++async def test_graph_dump_compress_offloaded_to_worker_thread(
++    client, db_session, tmp_path, auth_headers, monkeypatch
++) -> None:
++    """卸载钉（2026-10-10-dump-gzip-thread-offload）：gzip.compress 必须在
++    工作线程执行（asyncio.to_thread 卸载）——大图 MB 级 payload 的同步 CPU
++    压缩跑在事件循环线程会阻塞全部并发请求（含 SSE 心跳/日志流推送）。
++    spy 记录 compress 时线程 id，断言 ≠ 测试事件循环线程。"""
++    import threading
++
++    compress_threads: list[int] = []
++    orig_compress = gzip.compress
++
++    def _thread_probe_compress(data, *args, **kwargs):
++        compress_threads.append(threading.get_ident())
++        return orig_compress(data, *args, **kwargs)
++
++    monkeypatch.setattr(gzip, "compress", _thread_probe_compress)
++    big = _big_dump_graph()
++    _mock_graph(monkeypatch, lambda m, p: {"graph": big})
++    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
++    resp = await client.get(
++        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.headers["content-encoding"] == "gzip"
++    assert len(compress_threads) == 1
++    assert compress_threads[0] != threading.get_ident(), (
++        "gzip.compress 在事件循环线程同步执行——大图压缩阻塞并发面"
++    )
++
++
+ async def test_graph_dump_existing_endpoints_no_content_encoding(
+     client, db_session, tmp_path, auth_headers
+ ) -> None:
+diff --git a/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/design.md b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/design.md
+@@ -0,0 +1,48 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:27:58.726Z
++---
++# 设计记录（Design Record）— 2026-10-10-dump-gzip-thread-offload
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查发现 `GET /knowledge/graph/dump` 在 async 端点内同步执行 `json.dumps` + `gzip.compress`（默认 level 9）——大图（2026-10-09-knowledge-graph-fullmap 真图实测 5855 节点/MB 级 payload）该 CPU 段达百 ms~秒级，期间事件循环上全部并发请求（含 SSE 心跳/日志流推送）被阻塞。方案：把序列化+压缩收进单个同步闭包 `_serialize_compress`，经 `asyncio.to_thread` 卸载到工作线程执行。选 to_thread 而非降 compresslevel：降档只缩短阻塞时长不消除阻塞，卸载根治且响应字节零变化（同函数同参数）；选单闭包而非两段分别卸载：json.dumps 的 str 中间产物（MB 级）不必跨线程往返，一次切换开销最小。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `backend/app/modules/knowledge/router.py`：`get_knowledge_graph_dump` 端点内部实现——新增局部闭包 `_serialize_compress` 与 `asyncio.to_thread` 调用；模块 import 增加 `asyncio`。对外路由/参数/鉴权/响应头/响应字节零变化（纯执行线程变化）；不新增生成物面（openapi 描述未动，无需 gen:types）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立：envelope 在卸载前已完整物化（await service.dump 先返回），闭包只读该快照，与后续请求的到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   无共享可变态：每次请求各自构造独立闭包与独立 envelope，gzip.compress 纯函数；多请求并发时各自在工作线程执行互不干扰（to_thread 线程池调度）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全：卸载段无 IO 无锁，客户端中途断开仅浪费一次压缩计算（与卸载前行为一致），无半态资源。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会：闭包捕获的是本请求 envelope，workspace 隔离在 service.dump 的鉴权与查询层（未动）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：to_thread 默认线程池在高并发 dump 风暴下排队——但 dump 为低频全图总览请求且单次百 ms 级，默认池容量充足；极端排队仅表现为该请求变慢，不阻塞事件循环（恰是本变更要保住的底线）。试过但放弃：①降 compresslevel 到 6（放弃理由：只缩短不消除阻塞，且改变输出字节引入对比噪声）；②ResponseStreaming 分块压缩（放弃理由：信封需整体 JSON 化后压缩才能保证 gzip 原子性与既有测试的字节级断言，流式改造收益不抵复杂度）。
++
++## 文件变更清单（自声明）
++
++交付文件（2 个）：
++
++1. `backend/app/modules/knowledge/router.py`——dump 端点 to_thread 卸载（FR-01/FR-02）
++2. `backend/app/modules/knowledge/tests/test_graph.py`——新增卸载钉用例（FR-03）
+
+diff --git a/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/proposal.md b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:27:58.726Z
++---
++# 提案书（Proposal）— 2026-10-10-dump-gzip-thread-offload
++
++## 动机
++
++任务原话转写：24h 审查发现知识图谱 dump 端点在 async 端点内同步执行 json.dumps + gzip.compress（默认 level 9），大图（实测 5855 节点/MB 级 payload）时阻塞事件循环上全部并发请求（含 SSE 心跳/日志流推送）。
++成功标准：
++- dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
++- 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
++- 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
++2. 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
++3. 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
++
++## 成功标准（可验证）
++
++1. dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
++2. 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
++3. 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
+
+diff --git a/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/requirements.md b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/requirements.md
+@@ -0,0 +1,38 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:27:58.726Z
++---
++# 需求规格（Requirements）— 2026-10-10-dump-gzip-thread-offload
++
++## 功能需求
++
++### FR-01: dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
++
++- `GET /knowledge/graph/dump` 端点必须将信封 JSON 序列化（json.dumps）与 gzip 压缩（gzip.compress）整体放入单个同步函数并经 `asyncio.to_thread` 执行，禁止在事件循环线程同步执行该 CPU 段。
++
++#### 场景：主路径
++
++Given 大图（>100KB payload）dump 请求 / When 端点处理 / Then gzip.compress 在工作线程执行（spy 线程 id ≠ 事件循环线程 id），事件循环期间可调度其它请求。
++
++### FR-02: 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
++
++- 卸载后响应必须保持 Content-Encoding: gzip 与 Vary: Accept-Encoding 响应头，压缩字节与卸载前一致（同函数同参数，仅执行线程变化）；既有 dump 组用例（happy path/大 payload 压缩生效/不可用小包同构/压缩面未外溢）必须零回归。
++
++#### 场景：主路径
++
++Given 卸载后实现 / When 复跑 dump 组既有用例 / Then 全绿（6/6，含新增卸载钉）。
++
++### FR-03: 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
++
++- 测试必须以 spy 记录 gzip.compress 执行线程 id，断言 ≠ 测试事件循环线程；实现前运行必须红（1 failed），实现后必须全绿。
++
++#### 场景：主路径
++
++Given 未卸载的旧实现 / When 跑新增用例 / Then 红（compress 在事件循环线程）。
++Given to_thread 卸载后 / When 同用例 / Then 绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」
++FR-02: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_happy_path_gzip_envelope」+「test_graph_dump_large_payload_compression_effective」（dump 组 5 旧用例零回归，实测 6 passed 2026-10-10 08:26）
++FR-03: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」（先红 1 failed 实证于 2026-10-10 08:25 运行，后绿 6/6 实证于 08:26 运行）
+
+diff --git a/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/tasks.md b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dump-gzip-thread-offload/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:27:58.726Z
++---
++# 任务注册表（Tasks）— 2026-10-10-dump-gzip-thread-offload
++
++- [x] task-01: dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
++- [x] task-02: 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
++- [x] task-03: 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）

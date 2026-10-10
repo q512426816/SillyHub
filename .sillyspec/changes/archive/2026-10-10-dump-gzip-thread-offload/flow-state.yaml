@@ -1,0 +1,37 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  24h 审查发现知识图谱 dump 端点在 async 端点内同步执行 json.dumps + gzip.compress（默认 level 9），大图（实测 5855 节点/MB 级 payload）时阻塞事件循环上全部并发请求（含
+  SSE 心跳/日志流推送）。
+
+  成功标准：
+
+  - dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
+
+  - 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
+
+  - 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
+autopilot: true
+baseline_commit: 205f4b9cd6836e54221f9daedbe9de857ae1b510
+updatedAt: '2026-10-10T00:33:47.729Z'
+baseline_sha256: d1e87c9d0409b4ffbbcdb9f9ca33989645368b007eac656e11af33eed3de7517
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（13.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010003033\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010003033\test-result.json｜门文件
+  2 个
+

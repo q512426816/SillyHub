@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-dump-gzip-thread-offload",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dump-gzip-thread-offload"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_happy_path_gzip_envelope」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dump-gzip-thread-offload"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dump-gzip-thread-offload"
+    }
+  ]
+}
