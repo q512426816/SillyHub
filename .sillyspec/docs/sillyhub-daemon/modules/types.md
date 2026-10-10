@@ -31,6 +31,10 @@ client / spawn-env / credential-injector / claude-settings 共用的中间表示
 - **WS 信封**：`DaemonMessage<T extends MsgType> {type, payload: unknown}`。
 - **Lease 族**：
   - `LeaseCtx`：claim/task_available 执行上下文（字段见关键逻辑与注意事项）；
+    可选字段 `borrowWorkspaceContext`（2026-10-10-borrow-sandbox-workspace-context）：
+    借用 interactive lease 的工作区上下文对象（claim payload `borrow_workspace_context`
+    双读归一），仅借用路径携带，缺键 undefined 穿透（daemon marker 分支渲染沙箱
+    AGENTS.md 消费）；
   - `LeasePayload = LeaseCtx`（task_available 阶段尚无 claim_token）；
   - `ExecutionContextPayload`：GET execution-context 响应（snake_case）；
   - `LeaseClaimResult`（claimToken 必填）；`LeaseMessage`（submit_messages 单条，

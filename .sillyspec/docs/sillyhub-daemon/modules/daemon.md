@@ -79,6 +79,12 @@ RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 - 借用（borrow）沙箱：backend placement 下发 `metadata.cwd = "borrow-sandbox:<slug>"`
   marker，daemon 检测前缀 → 提取 slug → 创建独立沙箱目录作 cwd（marker 不进真实
   路径），并登记按 lease 隔离的只读 policy。
+- 借用沙箱工作区上下文（2026-10-10-borrow-sandbox-workspace-context）：claim
+  payload 携带 `borrow_workspace_context`（Workspace 行非 None 字段，含真实
+  root_path），daemon 归一化双读（borrowWorkspaceContext，workspaceSlug 先例）后
+  由 marker 分支渲染 `AGENTS.md` 落沙箱根（borrow-sandbox-context.ts 纯函数：
+  元信息 + 真实路径**可读**告知 + 禁止写声明 + 500 字符截断防注入）；无键不写、
+  写失败仅 warn fail-open；写守卫 enforcement 零改动。
 - usage/cost 上报走 ResilienceService（notifyRunResult + mergeAdapterUsage）非
   submitMessages 直传；FileOutbox 防 WS 断线丢消息。
 - SILLYSPEC_TEMP_ROOTS 常量放行 /dev/null（含 Windows C:/dev/null 形态）+ tmpdir，
