@@ -24,17 +24,89 @@ insert-or-update 单行写入（R-03 控写放大，刻意不做事件流水表�
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.agent.model import AgentRun
 from app.modules.daemon.model import AgentSessionTask
 from app.modules.daemon.schema import AgentTaskStatusEvent
 
 # 终态集合（语义②/③的判定口径；schema Literal 四态中的非 running 三态，与
 # 前端归约的终态吸收态一致）。
 _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"})
+
+# 2026-10-10-run-close-task-sweep：轮终态清扫的可读原因（任务列表 message 列）。
+_RUN_CLOSED_REASON = "轮次已结束，任务未上报终态"
+
+
+async def finalize_running_tasks_for_run(
+    session: AsyncSession,
+    *,
+    run_id: uuid.UUID,
+    now: datetime | None = None,
+) -> int:
+    """2026-10-10-run-close-task-sweep：把一个 run 的非终态任务行批量收口 stopped。
+
+    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理被放弃/未上报终态
+    时 agent_session_task 永卡 running（17 条），任务列表在会话结束后仍显示
+    「进行中」。run 终态后其任务不可能仍合法运行——调用方（close_interactive_run
+    同事务 / 启动兜底清扫）以本函数收口。已终态行不触碰（终态定格语义①③不破坏）；
+    upsert 语义②天然幂等（清扫后迟到的 running 心跳不复活）。
+
+    Returns:
+        实际收口的行数。
+    """
+    result = await session.execute(
+        update(AgentSessionTask)
+        .where(
+            AgentSessionTask.run_id == run_id,
+            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+        )
+        .values(
+            status="stopped",
+            finished_at=now or datetime.now(UTC),
+            updated_at=now or datetime.now(UTC),
+            message=_RUN_CLOSED_REASON,
+        )
+    )
+    return int(result.rowcount or 0)
+
+
+async def sweep_orphan_running_tasks(session: AsyncSession) -> int:
+    """2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但任务仍 running 的行。
+
+    自愈两类存量：①历史收口无清扫（close_interactive_run 接清扫前的旧数据）；
+    ②后端重启判死路径（cleanup_stale_runs 把 running run 翻 failed）不经
+    daemon 收口、无 task 事件。仅扫 run 已终态（TERMINAL_TURN_STATUSES）的行——
+    running run 的任务是活跃心跳，不误伤。
+
+    Returns:
+        实际收口的行数。
+    """
+    # late import 防 agent ↔ daemon 循环依赖（对齐本模块 upsert 的调用方惯例）。
+    from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
+
+    result = await session.execute(
+        update(AgentSessionTask)
+        .where(
+            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+            AgentSessionTask.run_id.in_(
+                select(AgentRun.id).where(AgentRun.status.in_(TERMINAL_TURN_STATUSES))
+            ),
+        )
+        .values(
+            status="stopped",
+            finished_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            message=_RUN_CLOSED_REASON,
+        )
+    )
+    swept = int(result.rowcount or 0)
+    await session.commit()
+    return swept
 
 
 def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:

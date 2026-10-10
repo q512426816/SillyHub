@@ -1442,6 +1442,17 @@ class AgentService:
                 grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
                 tracked_runs=len(deferred),
             )
+        # 2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但其
+        # agent_session_task 行仍 running 的存量（历史收口无清扫 / 重启判死
+        # 路径不经 daemon 收口）批量收口 stopped；失败仅日志不阻塞启动。
+        try:
+            from app.modules.daemon.agent_task_store import sweep_orphan_running_tasks
+
+            swept = await sweep_orphan_running_tasks(self._session)
+            if swept:
+                log.info("startup_orphan_task_sweep", swept_tasks=swept)
+        except Exception as exc:
+            log.warning("startup_orphan_task_sweep_failed", error=str(exc))
         return cleaned
 
     # ------------------------------------------------------------------

@@ -867,3 +867,94 @@ class TestSessionDeleteCascade:
             )
         ).scalar_one()
         assert count_after == 0
+
+
+# ── 2026-10-10-run-close-task-sweep：run 终态任务清扫 ────────────────────────
+
+
+class TestRunCloseTaskSweep:
+    """finalize_running_tasks_for_run / sweep_orphan_running_tasks 行为钉死。
+
+    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理未上报终态时
+    agent_session_task 永卡 running，任务列表在会话结束后仍显示「进行中」。
+    """
+
+    @pytest.mark.asyncio
+    async def test_finalize_sweeps_running_to_stopped_terminal_untouched(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        from app.modules.daemon.agent_task_store import (
+            finalize_running_tasks_for_run,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-run"))
+        await upsert_agent_task(
+            db_session, _event(ag_session.id, run.id, "t-done", status="completed")
+        )
+
+        swept = await finalize_running_tasks_for_run(db_session, run_id=run.id)
+
+        assert swept == 1
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-run"].status == "stopped"
+        assert rows["t-run"].finished_at is not None
+        assert "轮次已结束" in (rows["t-run"].message or "")
+        # 已终态行不触碰（终态定格不破坏）。
+        assert rows["t-done"].status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_finalize_after_sweep_running_heartbeat_no_revive(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """清扫后迟到的 running 心跳不复活任务（upsert 语义② 终态吸收）。"""
+        from app.modules.daemon.agent_task_store import (
+            finalize_running_tasks_for_run,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
+        await finalize_running_tasks_for_run(db_session, run_id=run.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
+
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-x"].status == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_sweep_orphans_terminal_run_only(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """启动兜底：终态 run 的 running 任务收口；running run 的任务不误扫。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.daemon.agent_task_store import (
+            sweep_orphan_running_tasks,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, live_run = await _create_session_with_run(db_session, user_id, rt.id)
+        done_run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=uuid.uuid4(),
+            agent_type="claude_code",
+            agent_session_id=ag_session.id,
+            status="completed",
+        )
+        db_session.add(done_run)
+        await db_session.commit()
+        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan"))
+        await upsert_agent_task(db_session, _event(ag_session.id, live_run.id, "t-live"))
+
+        swept = await sweep_orphan_running_tasks(db_session)
+
+        assert swept == 1
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-orphan"].status == "stopped"
+        assert rows["t-live"].status == "running"

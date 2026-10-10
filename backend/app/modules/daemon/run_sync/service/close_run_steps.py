@@ -126,6 +126,19 @@ async def close_interactive_run(
         result_summary=result_summary,
     )
     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
+    # 2026-10-10-run-close-task-sweep：同事务收口该 run 的非终态任务行——子代理
+    # 被放弃/未上报终态时 agent_session_task 永卡 running（会话 47e2ff1a run
+    # 5e485ba2 实证 17 条），任务列表在会话结束后仍显示「进行中」。已终态行
+    # 不触碰；清扫后迟到 running 心跳被 upsert 终态吸收挡下（语义②）。
+    from app.modules.daemon.agent_task_store import finalize_running_tasks_for_run
+
+    swept_tasks = await finalize_running_tasks_for_run(svc._session, run_id=agent_run.id, now=now)
+    if swept_tasks:
+        _rsvc.log.info(
+            "run_close_task_sweep",
+            agent_run_id=str(agent_run.id),
+            swept_tasks=swept_tasks,
+        )
     await svc._session.commit()
     await svc._session.refresh(agent_run)
     await _close_post_commit(
