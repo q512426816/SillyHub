@@ -16,6 +16,10 @@
  * - knownJsonView：三个固定结构报告文件的表格摘要视图分发（ql-20260917-010）
  *   ——scope-audit（裁决徽章+文件表格）、apply-manifest（哈希清单）、
  *   verify-facts（探针/测试/一致性/移交）；文件名+结构特征不命中回落 JsonView。
+ *   change-patch.json（收口留痕单套清单）同走此分发——对账快照 ScopeAuditView
+ *   含跨仓冻结面（2026-10-10-change-patch-cross-repo-view）：scopeAudit.repos[]
+ *   按仓分段（锚点 chip/三态 chips/降级 ⚠️）+ rows 跨仓行仓标 + repos[].patch
+ *   折叠 diff 正文。
  *
  * 视图自身不限高：垂直滚动交给外层容器（内联 flex 链 / 全屏弹窗 body），
  * 仅横向在 DiffView 行容器出滚动条。
@@ -298,11 +302,127 @@ function DataTable({ head, children }: { head: string[]; children: React.ReactNo
   );
 }
 
+/** 仓 key 显示名（CLI 约定 main=主仓；与 scope-audit-command-card 同款）。 */
+function repoDisplayName(key: string): string {
+  return key === "main" ? "主仓" : key;
+}
+
+/** 三态 chips 展示序（计数取 repos[].totals 单一源）。 */
+const VERDICT_ORDER = ["planned", "unplanned", "untouched"] as const;
+
+/**
+ * 按仓冻结面单仓段（2026-10-10-change-patch-cross-repo-view）：段头=仓标识+锚点
+ * chip（anchor.label + base 前 7 位；daemon 链的 anchor_label 短哈希是投影产物，
+ * 冻结件没有——前端从 anchor.base 自行短化）+该仓 files/+−；段身=三态 chips 或
+ * degraded 整段 ⚠️。patch 面（折叠 diff 正文/未采集留痕）仅非降级段渲染——
+ * 「采集失败或空窗」对整仓不可达是误描述。repoPath 字段可能含本机布局，恒不渲染。
+ */
+function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
+  const [patchOpen, setPatchOpen] = useState(false);
+  const anchor = isRecord(repo.anchor) ? repo.anchor : {};
+  const anchorLabel = typeof anchor.label === "string" && anchor.label ? anchor.label : null;
+  const anchorBase = typeof anchor.base === "string" && anchor.base ? anchor.base.slice(0, 7) : null;
+  const totals = isRecord(repo.totals) ? repo.totals : {};
+  const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
+  const degraded = repo.degraded === true;
+  // producer 契约（additive）：collectPatch=true 才带 patch 两键，旧形态缺键零渲染
+  const hasPatchKey = "patch" in repo;
+  const patchText = typeof repo.patch === "string" && repo.patch.length > 0 ? repo.patch : null;
+  const patchSha = typeof repo.patchSha256 === "string" && repo.patchSha256 ? repo.patchSha256 : null;
+  return (
+    <div data-testid={`scope-audit-repo-seg-${repoKey}`} className="rounded-md border border-dashed border-border px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <span className={cn("text-xs font-semibold", repoKey === "main" ? "text-brand-700" : "text-foreground")}>
+          {repoDisplayName(repoKey)}
+        </span>
+        <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
+          {anchorLabel ? `${anchorLabel} ` : ""}
+          <span className="font-semibold text-foreground">{anchorBase ?? "—"}</span>
+        </span>
+        {!degraded && (
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {num(totals.files)} 文件{" "}
+            <span className="text-success">+{num(totals.additions)}</span> /{" "}
+            <span className="text-error">−{num(totals.deletions)}</span>
+          </span>
+        )}
+      </div>
+      {degraded ? (
+        <p data-testid={`scope-audit-repo-degraded-${repoKey}`} className="mt-1.5 text-[11px] leading-relaxed text-warning">
+          ⚠️{" "}
+          {typeof repo.degradedReason === "string" && repo.degradedReason
+            ? repo.degradedReason
+            : "该仓跨仓对账不可达（未注册/路径不可达），请人工到对应仓核对"}
+        </p>
+      ) : (
+        <>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {VERDICT_ORDER.map((verdict) => {
+              const meta = VERDICT_BADGE[verdict];
+              if (!meta) return null;
+              return (
+                <span
+                  key={verdict}
+                  data-testid={`scope-audit-chip-${repoKey}-${verdict}`}
+                  className={cn("rounded-full px-2 py-px text-[11px] font-medium", meta.className)}
+                >
+                  {meta.label} {num(totals[verdict])}
+                </span>
+              );
+            })}
+          </div>
+          {hasPatchKey &&
+            (patchText ? (
+              <div className="mt-2">
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <button
+                    type="button"
+                    data-testid={`scope-audit-repo-patch-${repoKey}`}
+                    onClick={() => setPatchOpen((o) => !o)}
+                    aria-expanded={patchOpen}
+                    className="flex items-baseline gap-1 rounded px-1 py-px text-[11px] text-muted-foreground transition-colors hover:bg-muted/60"
+                  >
+                    <ChevronRight
+                      className={cn("h-3 w-3 shrink-0 self-center transition-transform", patchOpen && "rotate-90")}
+                      aria-hidden
+                    />
+                    跨仓 patch 正文（冻结）
+                  </button>
+                  {patchSha && (
+                    <span className="font-mono text-[10px] text-muted-foreground" title={patchSha}>
+                      {patchSha.slice(0, 12)}…
+                    </span>
+                  )}
+                </div>
+                {patchOpen && (
+                  <div className="mt-1.5 flex min-w-0">
+                    <DiffView content={patchText} />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p data-testid={`scope-audit-repo-patch-missing-${repoKey}`} className="mt-1.5 text-[11px] text-muted-foreground">
+                patch 未采集（采集失败或空窗）
+              </p>
+            ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** scope-audit.json：审计摘要 + 文件裁决表格。 */
 function ScopeAuditView({ value }: { value: JsonRecord }) {
   const totals = isRecord(value.totals) ? value.totals : {};
   const rows = Array.isArray(value.rows)
     ? (value.rows as JsonValue[]).filter(isRecord)
+    : [];
+  // 跨仓冻结面（2026-10-10-change-patch-cross-repo-view）：repos[] 非空数组才分段；
+  // 条目须带非空 string key（防御式，非法条目跳过）
+  const repos = Array.isArray(value.repos)
+    ? (value.repos as JsonValue[])
+        .filter(isRecord)
+        .filter((r) => typeof r.key === "string" && r.key !== "")
     : [];
   const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
   return (
@@ -341,6 +461,14 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
               </td>
               <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">
                 {typeof r.path === "string" ? r.path : "—"}
+                {typeof r.crossRepo === "string" && r.crossRepo !== "" && (
+                  <span
+                    data-repo-badge={r.crossRepo}
+                    className="ml-1.5 inline-block rounded bg-brand-50 px-1 font-sans text-[10px] leading-4 text-brand-700"
+                  >
+                    {r.crossRepo}
+                  </span>
+                )}
               </td>
               <td className="px-2.5 py-1.5 text-right font-mono text-success">{num(r.additions) || ""}</td>
               <td className="px-2.5 py-1.5 text-right font-mono text-error">{num(r.deletions) || ""}</td>
@@ -348,6 +476,16 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
           );
         })}
       </DataTable>
+      {repos.length > 0 && (
+        <>
+          <SectionTitle>{`按仓冻结面（${repos.length} 仓）`}</SectionTitle>
+          <div className="flex flex-col gap-2">
+            {repos.map((repo) => (
+              <ScopeAuditRepoSeg key={String(repo.key)} repo={repo} repoKey={String(repo.key)} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
