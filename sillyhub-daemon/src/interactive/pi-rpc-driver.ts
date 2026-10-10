@@ -100,6 +100,7 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
 import type { CanUseToolDecision } from './types.js';
 
 import { CodepageDetectorDecoder } from '../spawn-env.js';
+import { writePiMcpConfig } from '../pi-settings.js';
 
 /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
 const KILL_GRACE_MS = 2_000;
@@ -177,6 +178,64 @@ const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
  * pi 的会话 jsonl 全部落本目录，resume（`--session <id>`）也在本目录内查找。
  * 导出纯函数供测试断言（daemon-state-dir 隔离收口同款锚点）。
  */
+/**
+ * 解析 pi --version 输出的主版本号（纯函数，2026-10-10-all-engines-mcp-injection
+ * task-05 / FR-06）。pi 1.0 起原生内置 MCP（SPIKE-00 实测）；主版本 <1 或无法
+ * 解析 → 返回 -1（视为不支持，调用方降级不注入）。
+ */
+export function parsePiMajorVersion(output: string): number {
+  const m = /(^|[\sv])([0-9]+)\.[0-9]+/.exec(output.trim());
+  return m ? Number(m[2]) : -1;
+}
+
+/**
+ * 探测宿主 pi 主版本（spawn --version；每会话至多一次，MCP 注入路径才触发）。
+ * spawn 失败/超时/输出不可解析 → -1（调用方降级 warn，不阻断会话）。
+ * 不做模块级缓存：宿主升级 pi 后无需重启 daemon 即生效；会话创建频率低，
+ * 多一次短命子进程可接受。
+ */
+export async function detectPiMajorVersion(
+  cmdPath: string,
+  useShell: boolean,
+  env: NodeJS.ProcessEnv,
+): Promise<number> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v: number) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    let child;
+    try {
+      child = spawn(cmdPath, ['--version'], {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: useShell,
+        windowsHide: true,
+      });
+    } catch {
+      done(-1);
+      return;
+    }
+    let out = '';
+    child.stdout?.on('data', (d: unknown) => {
+      out += String(d);
+    });
+    child.on('error', () => done(-1));
+    child.on('close', () => done(parsePiMajorVersion(out)));
+    setTimeout(() => {
+      done(-1);
+      try {
+        child.kill();
+      } catch {
+        /* noop */
+      }
+    }, 5000);
+  });
+}
+
 export function piRpcSessionDir(): string {
   return join(daemonStateDir(), 'runs', 'pi-sessions');
 }
@@ -842,6 +901,52 @@ export class PiRpcDriver implements InteractiveDriver {
     if (askUserExtension) args.push('--extension', askUserExtension);
 
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+
+    // MCP 注入（2026-10-10-all-engines-mcp-injection task-05 / D-005@v1 形态①）：
+    // 平台 MCP 配置表（resolveMainAgentMcp 产出，经 buildDriverOptions 透传）写
+    // per-session mcp.json——pi 1.1.0+ 原生 MCP 客户端启动时读取并连接（SPIKE-00：
+    // PI_CODING_AGENT_DIR 重定向后读取路径 = <dir>/mcp.json）。降级面（FR-06 两层
+    // 门控：caps 翻值描述机制支持，此处运行时二次门控）：宿主 pi < 1.0 → 不写 +
+    // warn；PI_CODING_AGENT_DIR 缺失（官方端点形态无 per-session 目录）→ 不写 +
+    // warn。写盘失败 warn 不阻断 spawn（MCP 是增强能力，失败不拖垮会话）。
+    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+      const piAgentDir = env['PI_CODING_AGENT_DIR'];
+      if (!piAgentDir || piAgentDir.trim() === '') {
+        // eslint-disable-next-line no-console
+        console.warn('[pi-rpc-driver] mcp skip: no PI_CODING_AGENT_DIR in spawn env');
+      } else {
+        // 版本探测在 spawn 前完成写盘，此处内联同款 shim 解析（与下方 spawnCmdPath
+        // 同一输入同款逻辑，结果一致；正式 spawn 的解析在其后独立执行不回读）。
+        let verCmdPath = opts.pathToAgentExecutable;
+        let verShell = false;
+        if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
+          const verResolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
+          if (verResolved) {
+            verCmdPath = verResolved.exe;
+          } else {
+            verShell = true;
+          }
+        }
+        const major = await detectPiMajorVersion(verCmdPath, verShell, env);
+        if (major < 1) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[pi-rpc-driver] mcp skip: pi native MCP requires >=1.0 (detected major:',
+            major,
+          );
+        } else {
+          try {
+            await writePiMcpConfig(piAgentDir, opts.mcpServers);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              '[pi-rpc-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
+              (e as Error).message,
+            );
+          }
+        }
+      }
+    }
 
     // R-exe（design §10 R-05）：Windows 下 detector 给的是 pi.cmd（npm cmd-shim），
     // 直接 spawn .cmd 无 shell → CreateProcess EINVAL。复用 codex driver 同款
