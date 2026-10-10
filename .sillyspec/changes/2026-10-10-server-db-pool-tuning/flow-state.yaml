@@ -1,0 +1,23 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  阿里云生产服务器(2核1.6G)内存不足持续swap换页导致整机卡顿，根因之一是backend数据库连接池写死pool_size=20/max_overflow=30，postgres常驻13个idle连接吃内存。连接池大小改为环境变量可配（DB_POOL_SIZE/DB_MAX_OVERFLOW），代码默认值保持不变，由服务器.env配小值适配小规格机器。
+
+  成功标准：
+
+  - db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
+
+  - 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
+
+  - 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
+
+  - 既有相关测试全部通过
+autopilot: true
+baseline_commit: a8623c6d614dff46a33cbb243c88643712245598
+updatedAt: '2026-10-10T15:00:12.283Z'
+baseline_sha256: c0b9f0d4c732e8be027e66fe35ad6e9b76fe6af610095442543a88f32b7570ec
+
