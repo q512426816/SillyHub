@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # LLM 供应商凭证管理（llm_provider）
 
 ## 定位
-后端「用户级 LLM 供应商凭证管理」：cc-switch 式启停模型——每用户维护自己的供应商记录（base_url + 加密 api_key + api_format + 模型角色映射），`(user_id, agent_kind)` 内单条 `is_default` 互斥。本模块只管数据与生命周期（CRUD + 加密 + 互斥 + 凭证探测 + 模型列表/用量/配额代查 + LiteLLM 网关注册），不下发凭证——真正注入 daemon 子进程在 `daemon/lease/context.py::_inject_provider_config`。openai_chat 格式经服务器 LiteLLM 网关转 Anthropic↔OpenAI（平台不自己实现协议转换）。
+后端「用户级 LLM 供应商凭证管理」：cc-switch 式启停模型——每用户维护自己的供应商记录（base_url + 加密 api_key + api_format + 模型角色映射），`(user_id, 引擎)` 维度单条 `is_default` 互斥；2026-10-06-provider-multi-agent-kind 起一行供应商持有 `agent_kinds` 引擎集合（至少一个），多引擎行对集合内**每个**引擎各占一个默认位（同一 key 一条行服务多引擎，免重复建卡）。本模块只管数据与生命周期（CRUD + 加密 + 逐引擎互斥 + 凭证探测 + 模型列表/用量/配额代查 + LiteLLM 网关注册），不下发凭证——真正注入 daemon 子进程在 `daemon/lease/context.py::_inject_provider_config`。openai_chat 格式经服务器 LiteLLM 网关转 Anthropic↔OpenAI（平台不自己实现协议转换）。
 
 ## 契约摘要
 - 端点（prefix=/llm-providers，全部 `get_current_user` + 按 `current_user.id` 过滤，**不走** require_permission_any——owner 级，跨用户 404/403 不泄漏存在性）：
@@ -23,13 +23,13 @@ created_at: 2026-08-18 01:45:00
   - `GET /{id}/quota` — 配额查询（智谱 query_zhipu_quota）
   - `POST /{id}/set-default` — 「启动」；`POST /{id}/unset-default` — 「停止」；均返回 `SetDefaultResult{switched, affected_sessions, error, litellm_registered?}`（router 包装 service 的 DefaultSwitchResult）
 - `LlmProvider` 列：
-  - agent_kind / base_url / auth_field / api_format
+  - agent_kinds（JSON 数组，D-004 单值改集合）/ base_url / auth_field / api_format
   - encrypted_api_key(bytes) + key_id（CredentialCipher，xchacha20-poly1305，照 git_identity）
   - model / default_fallback_model（X-10：provider.model 优先，否则 fallback，覆盖 lease_meta 来源）
   - model_role_mappings（dict，角色→映射：display 仅展示 / model 实际模型名留空=该角色不注入走兜底 / one_m 在模型名后追加 [1m] 标记）
-  - is_default；索引 (user_id, agent_kind, is_default)
-  - 列定义须与 migration `20260725_create_llm_providers` 一一对应（防漂移）
-- schema Literal：agent_kind 仅 `claude`（codex/gemini/pi 预留）；auth_field 仅 `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`；api_format 仅 `anthropic`/`openai_chat`。
+  - is_default；原复合索引 (user_id, agent_kind, is_default) 随 agent_kind 列删除退役，现为 `ix_llm_providers_user(user_id)`
+  - 列定义须与 migration `20260725_create_llm_providers` + `20261006120000_provider_agent_kinds`（单值→JSON 数组双方言回填 + 索引 drop/rebuild + 对称 downgrade）一一对应（防漂移）
+- schema：agent_kinds 为 `list[Literal["claude","pi","codex"]]`（min_length=1，保序去重 validator；该字段声明形态被 daemon 源读取对账正则共享）；**组合禁配**——agent_kinds 含 `pi` 且 api_format=`openai_chat` 直接 422（create 级 model_validator，update 级 service 取行合并后同判）；auth_field 仅 `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`；api_format 仅 `anthropic`/`openai_chat`；Read DTO 无单值 agent_kind 字段（无过渡期，前后端同批切换）。
 - 出参只含 `api_key_masked`（空→None、<8→`****`、≥8→首4…尾4）；`encrypted_api_key`/明文 key 不出现在任何 Read DTO。
 - 错误类（fetch-models 四分类 + SSRF + usage 两态）：
   - `LlmProviderAuthFailed`(401) — 上游 401/403 凭证被拒
@@ -46,15 +46,16 @@ set_default（启动）:
   → probe_provider（GET /v1/models，按 api_format 走候选 URL + 鉴权头
     ——复用 service._build_auth_headers/_candidate_urls 单一来源；
     SSRF assert_public_hostname；失败→不改默认不推送，返结构化 error）
-  → _clear_sibling_defaults + 置本行 True（事务内互斥）
+  → _clear_sibling_defaults（按 user_id+is_default 过滤后行级集合交集清：set_default 逐引擎清、
+    update 扩张 agent_kinds 时对新增引擎清兄弟——扩张语义 D-006）+ 置本行 True（事务内互斥）
   → openai_chat: litellm_client.register（POST /model/new，
     model_name=usr-<uid>-<pid>，model 带 openai/ 前缀，
     model_info.mode=chat 强制 Chat Completions；best-effort）
-  → notify_provider_switch 推活动交互会话热切换（best-effort，
+  → notify_provider_switch 按会话引擎分组扇出热切换（best-effort，
     失败仅告警不阻塞，新会话仍走 claim 注入）
 unset_default（停止）: 不探测，置本行 False 不清兄弟（幂等）；
-  openai_chat 联动 litellm unregister；notify provider_config=null
-  → daemon 回退宿主机本机凭证
+  openai_chat 联动 litellm unregister；notify provider_config=null 对全部活跃会话广播
+  （多引擎行亦无差别广播 None 回退本机——收缩引擎默认空缺的会话跳过热切换仅告警）
 fetch_models: 候选 URL 逐个试 → 四类错误分类 + SSRF 拒绝
 query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
   → 6 家 handler（deepseek/kimi/minimax/openrouter/siliconflow/zhipu）
@@ -82,3 +83,4 @@ query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
 
 <!-- MANUAL_NOTES_END -->
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
+- 2026-10-06-provider-multi-agent-kind：agent_kind 单值 → agent_kinds 集合全链路化（迁移/互斥逐引擎/组合禁配/前端多选），本卡定位/契约/关键逻辑已同步（详见 changes 归档）

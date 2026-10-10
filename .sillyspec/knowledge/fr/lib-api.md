@@ -2408,3 +2408,123 @@
 - 场景：主路径 — Given 改动落盘 / When 跑上述两组定向测试 / Then 全绿。
 全文：.sillyspec/changes/archive/2026-10-09-knowledge-touch-marker-sunset/requirements.md#FR-04
 最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
+
+## FR-lib-api-115 供应商引擎集合多选
+变更：2026-10-06-provider-multi-agent-kind
+状态：active
+摘要：默认场景；多引擎命中
+依据决策：D-001@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given 供应商创建/编辑表单；When 用户勾选多个引擎（≥1）保存；Then 行 agent_kinds 存为引擎数组，同一条凭证可服务集合内全部引擎的会话
+- 场景：多引擎命中 — Given 一条供应商勾选 claude+pi；When 分别创建 Claude 会话与 Pi 会话（会话级或默认链解析）；Then 两个会话都命中该供应商，下发的 provider_config.agent_kind 分别为 claude 与 pi（daemon 注入器分发不变）
+全文：.sillyspec/changes/archive/2026-10-06-provider-multi-agent-kind/requirements.md#FR-01
+最近确认：85736410d
+
+## FR-lib-api-116 存量迁移等价
+变更：2026-10-06-provider-multi-agent-kind
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given 存量单值 agent_kind 行；When 迁移执行；Then 每行转为 [旧值] 单元素数组，未编辑供应商的全部解析/默认/校验行为与单值时代逐项等价；MUST NOT 合并或清理存量重复行
+全文：.sillyspec/changes/archive/2026-10-06-provider-multi-agent-kind/requirements.md#FR-02
+最近确认：85736410d
+
+## FR-lib-api-117 默认全引擎生效与互斥
+变更：2026-10-06-provider-multi-agent-kind
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 多引擎供应商设为默认；When 保存；Then 其勾选的每个引擎都视它为默认；设默认/扩张引擎集合时 MUST 清对应引擎的兄弟默认行（互斥粒度 (user_id, 引擎) 恒成立，MUST NOT 出现同引
+全文：.sillyspec/changes/archive/2026-10-06-provider-multi-agent-kind/requirements.md#FR-03
+最近确认：85736410d
+
+## FR-lib-api-118 组合禁配
+变更：2026-10-06-provider-multi-agent-kind
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 供应商 api_format=openai_chat；When 勾选集合含 pi；Then 后端 MUST 422 拒绝（LlmProviderKindFormatForbidden 语义沿用）；前端表单 MUST 前置禁用 pi 项并提示
+全文：.sillyspec/changes/archive/2026-10-06-provider-multi-agent-kind/requirements.md#FR-04
+最近确认：85736410d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-06-provider-multi-agent-kind:task-10:acc-0-fd5730b3
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+- row: 2026-10-06-provider-multi-agent-kind:task-10:acc-1-8dff8054
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+- row: 2026-10-06-provider-multi-agent-kind:task-10:acc-2-2ff978e1
+  tests: frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+
+## FR-lib-api-119 解析链集合化与契约保持
+变更：2026-10-06-provider-multi-agent-kind
+状态：active
+摘要：默认场景
+依据决策：D-005@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 任一解析路径（claim 注入 / 会话级绑定校验 / 附件能力门控 / MCP 配额池 / 热切换扇出）；When 按引擎解析供应商 热切换推送（notify_provider_switch）；Then 匹配语义为「引擎 ∈ agent_kinds」；下发/推送的 provider_config.agent_kind MUST 恒为该会话引擎值；session.
+全文：.sillyspec/changes/archive/2026-10-06-provider-multi-agent-kind/requirements.md#FR-05
+最近确认：85736410d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-06-provider-multi-agent-kind:task-09:acc-0-86eed621
+  tests: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+- row: 2026-10-06-provider-multi-agent-kind:task-09:acc-1-6e302926
+  tests: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+- row: 2026-10-06-provider-multi-agent-kind:task-09:acc-2-90389088
+  tests: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
+- row: 2026-10-06-provider-multi-agent-kind:task-09:acc-3-fd64a17e
+  tests: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-06-provider-multi-agent-kind
+  status: active
