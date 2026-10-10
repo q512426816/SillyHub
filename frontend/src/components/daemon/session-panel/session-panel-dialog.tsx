@@ -656,6 +656,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                   // task-08（FR-01）：ctx_tokens 同步写入；null 不覆盖已收值
                   // （close 终态不携带 ctx，保留实时最后写入值）。
                   ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
+                  // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长
+                  // （tok/s 分母）终态写入；null 不覆盖（与 ctx 同守卫口径）。
+                  apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
                 };
               }, { clearCurrentRun: env.run_id! }));
 
@@ -1092,6 +1095,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
             inputTokens: null,
             outputTokens: null,
             ctxTokens: null,
+            apiDurationMs: null,
             errorDetail: null,
             processItems: [],
             // 装配化初始形状 + live 计时锚点（本地发送占位时刻），带 segments
@@ -1429,6 +1433,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
             inputTokens: null,
             outputTokens: null,
             ctxTokens: null,
+            apiDurationMs: null,
             errorDetail: null,
             processItems: [],
             // 装配化初始形状 + live 计时锚点（同 submitFollowup）。

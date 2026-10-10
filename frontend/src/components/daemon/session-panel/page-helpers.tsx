@@ -215,6 +215,9 @@ export function enrichDisplayTurns(
         // task-08（FR-01 / D-003）：ctx 历史回填（SessionRunRead.ctx_tokens，
         // 历史 run 无 ctx 列值 → null → 环未知态）。
         ctxTokens: t.ctxTokens ?? meta.ctx_tokens ?? null,
+        // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长历史回填
+        // （tok/s 分母；引擎未上报 / 旧数据 null → 轮尾不显示速度）。
+        apiDurationMs: t.apiDurationMs ?? meta.duration_api_ms ?? null,
         // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
         // task-09（FR-02）计时锚点：终态轮维持 ?? 链（turn 已有值优先——live 发送
@@ -245,6 +248,7 @@ export function enrichDisplayTurns(
         candidate.inputTokens !== t.inputTokens ||
         candidate.outputTokens !== t.outputTokens ||
         candidate.ctxTokens !== t.ctxTokens ||
+        candidate.apiDurationMs !== t.apiDurationMs ||
         candidate.replyAt !== t.replyAt ||
         candidate.turnStartedAt !== t.turnStartedAt ||
         candidate.errorDetail !== t.errorDetail;

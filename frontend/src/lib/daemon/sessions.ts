@@ -816,6 +816,15 @@ export interface SessionRunRead {
    */
   ctx_tokens?: number | null;
   /**
+   * 2026-10-10-session-turn-token-speed FR-02：轮内模型 API 调用总时长 ms
+   * （AgentRun.duration_api_ms，daemon 结果元数据收尾写列；REST 历史回填路径：
+   * GET /sessions/{id}/runs → 前端 enrichDisplayTurns 回填 turn.apiDurationMs，
+   * 与 outputTokens 组成 tok/s 生成速度分母，不含工具执行时间）。引擎未上报 /
+   * 历史 run 行为 null（前端「无数据不显示速度」）。手工维护镜像
+   * （后端 SessionRunRead from_attributes 直映，本 interface 惯例）。
+   */
+  duration_api_ms?: number | null;
+  /**
    * task-08 / D-014③（2026-09-22-session-fork-continuation）：轮引擎锚点
    * （AgentRun.engine_anchor，claude 轮末 chain-entry UUID——task-04 终态回填）。
    * 轮级「从此分叉」入口（TurnForkEntry）native 档门控数据源；存量轮 /

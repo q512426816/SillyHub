@@ -214,6 +214,13 @@ export interface SessionStreamEnvelope {
    */
   ctx_tokens?: number | null;
   /**
+   * 2026-10-10-session-turn-token-speed FR-01：轮内模型 API 调用总时长 ms
+   * （AgentRun.duration_api_ms，daemon 结果元数据收尾写入；前端 tok/s 生成
+   * 速度分母，不含工具执行时间）。仅 turn_completed 终态事件携带；引擎未
+   * 上报 / 旧 backend → null / undefined，消费方按「无数据不显示速度」处理。
+   */
+  duration_api_ms?: number | null;
+  /**
    * 2026-08-03-session-stream-partial-revoke / FR-03 / design §5 Phase2 / §7.2：
    * 流式分片 segment_id。backend（task-01 透传 log_entry.segment_id）对 partial 半截
    * 行下发非空（形如 "main:<msg_id>" 或 "<tool_use_id>:<seq>"），对 complete/其他行

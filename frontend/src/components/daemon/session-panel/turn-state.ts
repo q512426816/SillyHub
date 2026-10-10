@@ -199,6 +199,9 @@ export function upsertTurn(
       // task-08（FR-01）：unknown run 首建 turn 同步携带 ctx（tokens 事件到达
       // 早于 turn_started 时 upsert 走此分支）；null = 未知。
       ctxTokens: env.ctx_tokens ?? null,
+      // 2026-10-10-session-turn-token-speed：轮内 API 时长（tok/s 分母）。
+      // 仅 turn_completed 事件携带；新建时 null（运行中无此数据）。
+      apiDurationMs: env.duration_api_ms ?? null,
       errorDetail: null,
       processItems: empty.processItems,
       segments: empty.segments,

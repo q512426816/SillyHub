@@ -309,6 +309,43 @@ class TestListSessionRuns:
         assert items[str(legacy.id)]["ctx_tokens"] is None
 
     @pytest.mark.asyncio
+    async def test_returns_duration_api_ms_column(self, client, auth_headers, db_session) -> None:
+        """2026-10-10-session-turn-token-speed FR-02：run 项透传
+        ``duration_api_ms``（SessionRunRead from_attributes 直映
+        AgentRun.duration_api_ms 列，runs 查询零改动）。
+
+        seed 值 12500 如实输出（前端 tok/s 生成速度分母）；历史 run 行
+        （引擎未上报，列 NULL）→ null（前端「无数据不显示速度」，FR-04）。"""
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(AgentSession(id=sid, user_id=admin, provider="claude", status="active"))
+        with_duration = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC),
+            duration_api_ms=12500,
+        )
+        legacy = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC) + timedelta(seconds=1),
+            # duration_api_ms 缺省 None（历史行 / 无时长引擎）
+        )
+        db_session.add_all([with_duration, legacy])
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = {it["id"]: it for it in resp.json()}
+        assert len(items) == 2
+        assert items[str(with_duration.id)]["duration_api_ms"] == 12500
+        assert items[str(legacy.id)]["duration_api_ms"] is None
+
+    @pytest.mark.asyncio
     async def test_empty_session_returns_empty_list(self, client, auth_headers, db_session) -> None:
         """有 session 但无 run → 200 空列表（不报错）。"""
         admin = await _admin_id(db_session)

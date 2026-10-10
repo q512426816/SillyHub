@@ -602,6 +602,57 @@ class TestGap3CloseInteractiveRun:
         assert payload["exit_code"] == 0
 
     @pytest.mark.asyncio
+    async def test_publishes_turn_completed_duration_api_ms(self, db_session, mocked_redis) -> None:
+        """2026-10-10-session-turn-token-speed FR-01：turn_completed 携带
+        duration_api_ms（前端 tok/s 生成速度分母，语义=轮内模型 API 调用总时长、
+        不含工具执行）。引擎上报时带值；未上报（None）照实下发 null 不省键。"""
+
+        def _turn_completed_payload(session_id):
+            import json as _json
+
+            for call in mocked_redis.publish.await_args_list:
+                if call.args[0] != f"agent_session:{session_id}":
+                    continue
+                payload = _json.loads(call.args[1])
+                if payload.get("event") == "turn_completed":
+                    return payload
+            return None
+
+        # 有值态：close 入参 duration_api_ms 写列后随事件透传。
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            duration_api_ms=3900,
+        )
+        run = await db_session.get(AgentRun, run_id)
+        payload = _turn_completed_payload(run.agent_session_id)
+        assert payload is not None
+        assert payload["duration_api_ms"] == 3900
+
+        mocked_redis.publish.await_args_list.clear()
+
+        # null 态：引擎未上报 → 键存在、值为 None（前端「无数据不显示速度」）。
+        lease_id2, run_id2, token2 = await _seed_active_interactive_session(db_session)
+        svc2 = DaemonService(db_session)
+        await svc2.close_interactive_run(
+            lease_id2,
+            run_id2,
+            token2,
+            status="success",
+            is_error=False,
+        )
+        run2 = await db_session.get(AgentRun, run_id2)
+        payload2 = _turn_completed_payload(run2.agent_session_id)
+        assert payload2 is not None
+        assert "duration_api_ms" in payload2
+        assert payload2["duration_api_ms"] is None
+
+    @pytest.mark.asyncio
     async def test_publishes_turn_completed_failed_status(self, db_session, mocked_redis) -> None:
         """turn_completed 在 failed turn 也要发，且 status/exit_code 反映失败
         （前端据此把 turn 渲染成失败并解锁输入）。"""

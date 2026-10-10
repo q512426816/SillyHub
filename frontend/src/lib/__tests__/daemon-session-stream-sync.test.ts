@@ -133,6 +133,9 @@ describe("streamSession — 首连缺口同步（ql-20260827-018）", () => {
         status: "completed",
         started_at: "2026-08-27T09:00:00.000Z",
         finished_at: "2026-08-27T10:00:30.000Z",
+        // 2026-10-10-session-turn-token-speed FR-05：合成终态事件透传轮内
+        // API 时长（tok/s 分母，与实时 turn_completed 事件同口径）。
+        duration_api_ms: 12500,
       },
     ];
     harness.logsJson = [logEntry()];
@@ -168,6 +171,12 @@ describe("streamSession — 首连缺口同步（ql-20260827-018）", () => {
     );
     expect(startedRunIds).toEqual(["run-live"]);
     expect(completedRunIds).toEqual(["run-done"]);
+    // 2026-10-10-session-turn-token-speed FR-05：合成 turn_completed 透传
+    // duration_api_ms（轮内 API 时长，前端 tok/s 分母）。
+    expect(
+      onTurnCompleted.mock.calls
+        .map((c) => (c[0] as { duration_api_ms?: number | null }).duration_api_ms),
+    ).toEqual([12500]);
 
     conn.close();
   });

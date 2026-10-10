@@ -1314,6 +1314,9 @@ export function SessionPanelPage({
                     // task-08（FR-01）：ctx_tokens null 不覆盖已收值（终态保留实时
                     // 最后写入——close_interactive_run 请求 DTO 不含 ctx_tokens）。
                     ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
+                    // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长
+                    // （tok/s 分母）终态写入；null 不覆盖（与 ctx 同守卫口径）。
+                    apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
                   };
                 },
                 { clearCurrentRun: env.run_id! },
@@ -2807,6 +2810,7 @@ export function SessionPanelPage({
             inputTokens: null,
             outputTokens: null,
             ctxTokens: null,
+            apiDurationMs: null,
             errorDetail: null,
             processItems: [],
             // task-09（FR-02）：live 计时锚点 = 本地发送占位时刻（空段数组 =
@@ -3452,6 +3456,7 @@ export function SessionPanelPage({
             inputTokens: null,
             outputTokens: null,
             ctxTokens: null,
+            apiDurationMs: null,
             errorDetail: null,
             processItems: [],
             // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。

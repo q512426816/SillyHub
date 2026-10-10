@@ -24785,6 +24785,8 @@ export interface components {
             cache_creation_tokens?: number | null;
             /** Ctx Tokens */
             ctx_tokens?: number | null;
+            /** Duration Api Ms */
+            duration_api_ms?: number | null;
             /** Failure Summary */
             failure_summary?: string | null;
             /** Engine Anchor */

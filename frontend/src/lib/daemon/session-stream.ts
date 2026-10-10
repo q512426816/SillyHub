@@ -417,6 +417,10 @@ export function streamSession(
         reason: null,
         input_tokens: run.input_tokens,
         output_tokens: run.output_tokens,
+        // 2026-10-10-session-turn-token-speed FR-05：合成终态事件透传轮内
+        // API 时长（tok/s 分母，与实时 turn_completed 事件同口径）；旧快照
+        // 类型无此字段 / 值缺失 → null（消费方不显示速度）。
+        duration_api_ms: run.duration_api_ms ?? null,
       }),
     });
   };

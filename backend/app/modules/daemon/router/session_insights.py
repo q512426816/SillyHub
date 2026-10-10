@@ -101,6 +101,11 @@ class SessionRunRead(BaseModel):
     # task-05 / FR-01：最近一次调用提示词大小，from_attributes 直映
     # AgentRun.ctx_tokens 列（runs 查询零改动）；历史行 None 如实输出。
     ctx_tokens: int | None = None
+    # 2026-10-10-session-turn-token-speed FR-02：轮内模型 API 调用总时长 ms
+    # （daemon 结果元数据收尾写列），前端 tok/s 生成速度分母（不含工具执行
+    # 时间）。from_attributes 直映 AgentRun.duration_api_ms 列（runs 查询零
+    # 改动）；引擎未上报 / 旧数据 None 如实输出（前端不显示速度）。
+    duration_api_ms: int | None = None
     # ── ql-20260831-004：失败原因透出──────────────────────────────────────────
     # 调度层/系统层失败原因（撞闸 SESSION_LIMIT_REACHED、inject 过期联动、lease
     # 超时重试耗尽等），from_attributes 经 validation_alias 直映 AgentRun.

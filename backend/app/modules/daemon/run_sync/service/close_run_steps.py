@@ -597,6 +597,11 @@ async def _close_post_commit(
             # 覆盖 daemon 老版本不实时推 token 的情形）。
             "input_tokens": agent_run.input_tokens,
             "output_tokens": agent_run.output_tokens,
+            # 2026-10-10-session-turn-token-speed FR-01：轮内模型 API 调用总时长
+            # （daemon 结果元数据 duration_api_ms，收尾已写列）——前端算生成速度
+            # tok/s 的分母（不含工具执行时间）。引擎未上报为 None 照实下发，
+            # 前端「无数据不显示速度」。
+            "duration_api_ms": agent_run.duration_api_ms,
             "timestamp": now.isoformat().replace("+00:00", "Z"),
         },
     )

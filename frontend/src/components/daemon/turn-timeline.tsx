@@ -73,6 +73,7 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import { turnTokenSpeedText } from "@/components/daemon/turn-speed";
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
 // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
@@ -255,6 +256,14 @@ export interface SessionTurnView {
    * 渲染、不读此字段（D-004）。
    */
   ctxTokens?: number | null;
+  /**
+   * 2026-10-10-session-turn-token-speed：轮内模型 API 调用总时长 ms
+   * （AgentRun.duration_api_ms，经 turn_completed 事件 / runs 快照回填写入）。
+   * 与 outputTokens 组成 tok/s 生成速度（turnTokenSpeedText），不含工具执行
+   * 时间。null / 缺省 = 未知（运行中 / 旧数据 / 无时长引擎）——轮尾不显示
+   * 速度段，不伪造。可选：外部构造的历史 turn（logsToTurns 等旧形状）不带。
+   */
+  apiDurationMs?: number | null;
   /**
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
@@ -877,7 +886,15 @@ const TurnRow = memo(function TurnRow({
                                   : live
                                     ? "↓执行中…"
                                     : "↓0";
-                              return `${inTxt} ${outTxt}`;
+                              // 2026-10-10-session-turn-token-speed FR-03/04：
+                              // 终态轮追加生成速度（output ÷ API 时长）；运行中 /
+                              // 无数据 null 不渲染（不伪造）。
+                              const speed = turnTokenSpeedText(
+                                turn.outputTokens,
+                                turn.apiDurationMs,
+                                turn.status,
+                              );
+                              return speed ? `${inTxt} ${outTxt} · ${speed}` : `${inTxt} ${outTxt}`;
                             })()
                           : undefined
                       }
@@ -901,6 +918,7 @@ const TurnRow = memo(function TurnRow({
                     turn={turn.turn}
                     inputTokens={turn.inputTokens}
                     outputTokens={turn.outputTokens}
+                    apiDurationMs={turn.apiDurationMs}
                   />
                   {turn.autoResumeOf != null && (
                     <span
@@ -1972,11 +1990,14 @@ function TurnStatusBadge({
   turn,
   inputTokens,
   outputTokens,
+  apiDurationMs,
 }: {
   status: TurnUiStatus;
   turn: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
+  /** 2026-10-10-session-turn-token-speed：tok/s 生成速度分母（可选，旧形状不带）。 */
+  apiDurationMs?: number | null;
 }) {
   const label =
     turn != null ? `第 ${turn} 轮` : "轮次";
@@ -2013,6 +2034,9 @@ function TurnStatusBadge({
   const outTokens = outputTokens ?? null;
   const showTokens = inTokens !== null || outTokens !== null;
   const isLive = status === "running" || status === "pending" || status === "interrupting";
+  // 2026-10-10-session-turn-token-speed FR-03/04：终态轮速度段（output ÷ API
+  // 时长）；运行中 / 无数据 null 不渲染（与 RoundDivider meta 同口径）。
+  const speed = turnTokenSpeedText(outTokens, apiDurationMs, status);
   return (
     <span className="font-mono">
       {label} · <Badge status={badgeStatus[status]} text={statusLabel[status]} />
@@ -2030,6 +2054,7 @@ function TurnStatusBadge({
             : isLive
               ? "↓执行中…"
               : "↓0"}
+          {speed && ` · ${speed}`}
         </span>
       )}
     </span>

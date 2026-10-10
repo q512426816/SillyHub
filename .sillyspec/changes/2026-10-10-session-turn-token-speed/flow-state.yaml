@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：平台会话轮次目前只显示 ↑输入 ↓输出 token 数，用户想参考 deepseek-harness 展示模型生成速度 tok/s（口径=提供方报告的输出词元 ÷ 模型 API
+  调用时长，不用含工具执行时间的墙钟，避免数字被稀释误导）。AgentRun.duration_api_ms 列已存在且轮收尾已写入，只是 turn_completed SSE 事件与 SessionRunRead 两个出口均未透传。
+
+  成功标准：
+
+  - turn_completed SSE 事件携带 duration_api_ms（close_run_steps.py 从 AgentRun 既有列透传，None 亦如实下发）
+
+  - GET /api/daemon/sessions/{id}/runs 的 SessionRunRead 增加 duration_api_ms 字段（from_attributes 直映，零查询改动），跑 pnpm gen:types
+  同步 api-types.ts 与 backend/openapi.json
+
+  - 前端会话面板轮尾两处（对话视图 RoundDivider meta、全部视图 TurnStatusBadge）在终态轮显示『N tok/s』：output_tokens ÷ duration_api_ms，格式化口径 ≥10
+  取整、<10 保留 1 位小数、负值钳 0
+
+  - 运行中轮 / 旧数据 / 无时长引擎（duration_api_ms 为空或非正）如实不显示速度，不伪造不降级
+
+  - page 与 dialog 两种面板模式、断线 resync 合成轮、历史回填（enrichDisplayTurns）路径均接线一致
+
+  - 后端与前端相关测试通过（不跑全量）
+autopilot: true
+baseline_commit: 032d3085c6dc79902e1843cd2adeeb4dceb536af
+updatedAt: '2026-10-10T10:35:45.052Z'
+baseline_sha256: 1be4c0bf0e7d7021db579a04e7784db695e788119f762ddc8a32387190422160
+
