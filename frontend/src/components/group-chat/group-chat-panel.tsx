@@ -152,7 +152,7 @@ import {
   substituteAttRefsForSend,
   type AttRefTokenMap,
 } from "@/lib/attachment-refs";
-import { InputRefOverlay } from "@/components/daemon/input-ref-overlay";
+import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 import {
   PROVIDER_META,
@@ -1763,6 +1763,9 @@ export function GroupChatPanel({
   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart。 */
   const groupLastCaretRef = useRef<number | null>(null);
+  /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示（单聊同款）。 */
+  const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+  const attOverlayRef = useRef<HTMLDivElement | null>(null);
   const openPendingAttachmentPreview = (att: AttachmentRead) => {
     setPendingPreview({
       fetch: () => fetchAttachmentBlob(att.id),
@@ -3025,14 +3028,26 @@ export function GroupChatPanel({
               onChange={(e) => void handleFiles(e.target.files)}
             />
             {/* task-05：引用镜像高亮层（单聊 session-input-bar 同款——wrapper
-                锚定版式区，overlay 铺底、角标 z-20 浮出、textarea z-10 输入面）。 */}
-            <div className="relative w-full">
+                锚定版式区，overlay 铺底、角标 z-20 浮出、textarea z-10 输入面）。
+                2026-10-10-att-ref-badge-hover：角标悬停显示——wrapper pointermove
+                hitTest 驱动（单聊同款）。 */}
+            <div
+              className="relative w-full"
+              onPointerMove={(e) => {
+                setHoveredRefOcc(
+                  hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
+                );
+              }}
+              onPointerLeave={() => setHoveredRefOcc(null)}
+            >
               <InputRefOverlay
                 value={draft}
                 tokens={Object.values(attTokenMap)}
                 onRemoveToken={removeAttRefOnce}
                 overlayClassName="min-h-[44px] w-full px-3.5 py-2.5 text-[13.5px]"
                 overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+                visibleBadgeIndex={hoveredRefOcc}
+                containerRef={attOverlayRef}
               />
               <textarea
                 ref={inputRef}

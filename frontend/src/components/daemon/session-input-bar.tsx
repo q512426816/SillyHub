@@ -63,7 +63,7 @@ import {
   stripAttRefTokens,
   type AttRefTokenMap,
 } from "@/lib/attachment-refs";
-import { InputRefOverlay } from "./input-ref-overlay";
+import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
 import {
   SessionMentionPopover,
   buildAtMentionItems,
@@ -336,6 +336,10 @@ export function SessionInputBar({
   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart，
    *  插入引用时据此定位；null = 从未聚焦过（插末尾）。 */
   const lastCaretRef = useRef<number | null>(null);
+  /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示——命中序号 state + overlay
+   * 容器 ref（wrapper pointermove hitTest 回写）。 */
+  const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+  const attOverlayRef = useRef<HTMLDivElement | null>(null);
   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
@@ -932,14 +936,26 @@ export function SessionInputBar({
         {/* 引用镜像高亮层（2026-10-09-attachment-inline-reference task-03）：
             wrapper 锚定 textarea 版式区（flex-1 迁至 wrapper），overlay 铺底
             渲染 token 背景块与 × 角标（角标 z-20 浮出 textarea），textarea
-            加 relative z-10 保持输入事件面。 */}
-        <div className="relative min-w-0 flex-1">
+            加 relative z-10 保持输入事件面。2026-10-10-att-ref-badge-hover：
+            标签区被 textarea 覆盖（CSS :hover 不可行），wrapper 级 pointermove
+            hitTest 命中检测驱动角标仅悬停处显示。 */}
+        <div
+          className="relative min-w-0 flex-1"
+          onPointerMove={(e) => {
+            setHoveredRefOcc(
+              hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
+            );
+          }}
+          onPointerLeave={() => setHoveredRefOcc(null)}
+        >
           <InputRefOverlay
             value={value}
             tokens={Object.values(attTokenMap)}
             onRemoveToken={removeAttRefOnce}
             overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+            visibleBadgeIndex={hoveredRefOcc}
+            containerRef={attOverlayRef}
           />
           <textarea
             ref={textareaRef}
