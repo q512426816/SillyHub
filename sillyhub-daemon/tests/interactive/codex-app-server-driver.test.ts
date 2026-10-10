@@ -3164,3 +3164,161 @@ describe('task-03（2026-09-18-single-chat-steering）：turn/steer 忙轮注入
     await consumeP;
   });
 });
+
+
+// ── FR-02 生成窗口计时（2026-10-10-live-token-speed-daemon-timing）────────────
+
+/** item/started reasoning notification 行（thinking 事件源——生成窗口锚点）。 */
+function itemStartedReasoning(threadId: string, itemId = 'it_r1'): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'item/started',
+    params: { threadId, item: { type: 'reasoning', id: itemId, summary: [] } },
+  });
+}
+
+/** item/started commandExecution notification 行（tool_use 事件源——折叠点）。 */
+function itemStartedCommand(
+  threadId: string,
+  command: string,
+  itemId = 'it_c1',
+): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'item/started',
+    params: {
+      threadId,
+      item: { type: 'commandExecution', id: itemId, command, aggregatedOutput: '' },
+    },
+  });
+}
+
+/** item/agentMessage/delta notification 行（text 事件源——生成窗口锚点）。 */
+function agentMessageDelta(threadId: string, delta: string, itemId = 'it_m1'): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'item/agentMessage/delta',
+    params: { threadId, itemId, delta },
+  });
+}
+
+describe('FR-02 生成窗口计时（api_duration_ms）', () => {
+  it('生成→工具→生成：工具时间不计入；usage_update 搭车累计；轮收尾残段折叠进 result', async () => {
+    // 仅伪造 Date（vi.setSystemTime 控制），setTimeout 保持真实——既有 50ms 等待骨架零改动。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results, messages } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_speed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    push('hi');
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // t=1000ms：reasoning started（锚定生成窗口）
+    vi.setSystemTime(1000);
+    emitLines(child, [itemStartedReasoning('thr_speed')]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    // t=6000ms：commandExecution started（tool_use 折叠 5000ms，工具时间从这里起不计）
+    vi.setSystemTime(6000);
+    emitLines(child, [itemStartedCommand('thr_speed', 'ls -la')]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    // 工具执行 20s（6000→26000 无模型输出事件——不进窗口）
+    // t=26000ms：agentMessage delta 重新锚定——adapter 对 delta 有缓冲阈值
+    // （80 字符/120ms），单条超阈值 delta 在同一行处理内立即 flush 产 text 事件
+    //（多行同批推送会被 readline 拆散跨时钟处理，禁用）。
+    vi.setSystemTime(26000);
+    emitLines(child, [
+      agentMessageDelta('thr_speed', 'x'.repeat(100), 'it_m1'),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+    // t=32000ms：tokenUsage 通知 → usage_update 搭车 api_duration_ms = 5000 + 6000 = 11000
+    vi.setSystemTime(32000);
+    emitLines(child, [
+      tokenUsageNotif('thr_speed', {
+        inputTokens: 10000,
+        cachedInputTokens: 9000,
+        cacheWriteInputTokens: 0,
+        outputTokens: 50,
+      }),
+    ]);
+    await new Promise<void>((r) => setTimeout(r, 30));
+
+    const usageMsgs = messages.filter(
+      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
+    );
+    expect(usageMsgs).toHaveLength(1);
+    expect(usageMsgs[0]!.usage).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 50,
+      api_duration_ms: 11000,
+    });
+    expect(safeParseAgentEvent(usageMsgs[0]!).success).toBe(true);
+
+    // t=34000ms：turn/completed → finishTurn 残段折叠 2000 → result 13000
+    vi.setSystemTime(34000);
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(results).toHaveLength(1);
+    expect(results[0]!.usage).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 50,
+      api_duration_ms: 13000,
+    });
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+    vi.useRealTimers();
+  });
+
+  it('跨轮归零：第二轮派发后计时状态从零（无上轮残留）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_speed2')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 第 1 轮：生成窗口锚定 + 累计（轮内数值非零，给归零断言一个非平凡前置）
+    push('t1');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    vi.setSystemTime(1000);
+    emitLines(child, [agentMessageDelta('thr_speed2', 'y'.repeat(100), 'it_m1')]);
+    await new Promise<void>((r) => setTimeout(r, 80));
+    vi.setSystemTime(5000);
+    emitLines(child, [turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 80));
+    expect(results).toHaveLength(1);
+    // finishTurn 残段折叠后轮内累计为非零终值（未归零前置）
+    expect(handle.turnApiDurationMs).toBeGreaterThan(0);
+
+    // 第 2 轮派发后：轮 start 重置生效——累计归零、窗口锚为 null（FR-02 跨轮归零）
+    push('t2');
+    await new Promise<void>((r) => setTimeout(r, 80));
+    expect(handle.turnApiDurationMs).toBe(0);
+    expect(handle.generatingSince).toBeNull();
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+    vi.useRealTimers();
+  });
+
+});

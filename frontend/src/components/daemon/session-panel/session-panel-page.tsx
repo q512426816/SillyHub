@@ -1396,6 +1396,9 @@ export function SessionPanelPage({
                   // task-08（FR-01）：ctx 是 last-write-wins 瞬时量，null/缺省
                   // （旧 daemon）不覆盖已收值，保持环未知态语义。
                   ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
+                  // 2026-10-10-live-token-speed-daemon-timing FR-07：轮内累计
+                  // 生成时长（tok/s 分母）实时写入（?? 链不覆盖已收值）。
+                  apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
                 }),
                 {},
               ),

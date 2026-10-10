@@ -500,3 +500,183 @@ class TestCloseInteractiveRunCtxTokens:
         assert reloaded.input_tokens == 888888
         assert reloaded.output_tokens == 999999
         assert reloaded.ctx_tokens == 62000
+
+
+# ── api_duration_ms：轮内累计生成时长摄取与下发（FR-05/FR-06）──────────────────
+
+
+class TestApiDurationMsIngest:
+    """2026-10-10-live-token-speed-daemon-timing FR-05：submit_messages 提取
+    usage.api_duration_ms（daemon 各引擎逐调用计时生产）→ max 累积 → 仅增不减
+    写回 AgentRun.duration_api_ms。"""
+
+    @pytest.mark.asyncio
+    async def test_api_duration_ms_written_on_submit(self, db_session, mocked_redis) -> None:
+        """usage 带 api_duration_ms → AgentRun.duration_api_ms 写入；既有字段不回归。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] hi",
+                    "usage": {
+                        "input_tokens": 100,
+                        "output_tokens": 50,
+                        "api_duration_ms": 12000,
+                    },
+                }
+            ],
+        )
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.duration_api_ms == 12000
+        assert run.input_tokens == 100
+        assert run.output_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_same_batch_out_of_order_keeps_max(self, db_session, mocked_redis) -> None:
+        """同批先 12000 后 8000（乱序/子桶交替模拟）→ 列保持 12000（max 累积）。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] a",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 12000},
+                },
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] b",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 8000},
+                },
+            ],
+        )
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.duration_api_ms == 12000
+
+    @pytest.mark.asyncio
+    async def test_cross_batch_monotonic_write_back(self, db_session, mocked_redis) -> None:
+        """跨批仅增不减：批 1 写 15000，批 2 累计 8000 → 列保持 15000（防跨轮回退）。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] turn1",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 15000},
+                }
+            ],
+        )
+        await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] turn2",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 8000},
+                }
+            ],
+        )
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.duration_api_ms == 15000
+
+    @pytest.mark.asyncio
+    async def test_missing_key_keeps_none(self, db_session, mocked_redis) -> None:
+        """usage 缺 api_duration_ms（老 daemon / cursor 未计时）→ 列保持 NULL 不报错。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        count = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] old daemon",
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                }
+            ],
+        )
+        assert count == 1
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.duration_api_ms is None
+
+
+class TestApiDurationMsPublish:
+    """FR-06：tokens 事件与 run channel summary 携带 duration_api_ms；None 不带键。"""
+
+    @pytest.mark.asyncio
+    async def test_both_channels_carry_duration_api_ms(self, db_session, recording_redis) -> None:
+        """submit 带 api_duration_ms → 两路 payload 均含 duration_api_ms。"""
+        lease_id, run_id, token, session_id = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        submission = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] hi",
+                    "usage": {"input_tokens": 100, "output_tokens": 50, "api_duration_ms": 12500},
+                }
+            ],
+        )
+        assert submission.publish_intent is not None
+        await publish_submitted_messages(submission.publish_intent)
+
+        summaries = _published_events(recording_redis, f"agent_run:{run_id}", "messages")
+        assert len(summaries) == 1
+        assert summaries[0]["duration_api_ms"] == 12500
+
+        token_events = _published_events(recording_redis, f"agent_session:{session_id}", "tokens")
+        assert len(token_events) == 1
+        assert token_events[0]["duration_api_ms"] == 12500
+        # 既有字段照常透传
+        assert token_events[0]["input_tokens"] == 100
+
+    @pytest.mark.asyncio
+    async def test_none_duration_omits_key_both_channels(self, db_session, recording_redis) -> None:
+        """api_duration_ms 缺键（老 daemon）→ 两路 payload 均无该键，事件照常发布。"""
+        lease_id, run_id, token, session_id = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        submission = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] old daemon",
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                }
+            ],
+        )
+        assert submission.publish_intent is not None
+        await publish_submitted_messages(submission.publish_intent)
+
+        summaries = _published_events(recording_redis, f"agent_run:{run_id}", "messages")
+        assert len(summaries) == 1
+        assert "duration_api_ms" not in summaries[0]
+
+        token_events = _published_events(recording_redis, f"agent_session:{session_id}", "tokens")
+        assert len(token_events) == 1
+        assert "duration_api_ms" not in token_events[0]
+        assert token_events[0]["input_tokens"] == 100

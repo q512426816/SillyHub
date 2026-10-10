@@ -214,10 +214,12 @@ export interface SessionStreamEnvelope {
    */
   ctx_tokens?: number | null;
   /**
-   * 2026-10-10-session-turn-token-speed FR-01：轮内模型 API 调用总时长 ms
-   * （AgentRun.duration_api_ms，daemon 结果元数据收尾写入；前端 tok/s 生成
-   * 速度分母，不含工具执行时间）。仅 turn_completed 终态事件携带；引擎未
-   * 上报 / 旧 backend → null / undefined，消费方按「无数据不显示速度」处理。
+   * 2026-10-10-session-turn-token-speed FR-01 / 2026-10-10-live-token-speed-
+   * daemon-timing FR-07：轮内模型 API 调用累计时长 ms（tok/s 生成速度分母，
+   * 不含工具执行时间）。`tokens` 事件（daemon 逐调用计时实时累积，运行中
+   * tok/s）与 `turn_completed` 事件（终态权威值，Claude SDK 结果元数据覆盖）
+   * 均可携带；引擎未计时（cursor） / 旧 backend → null / undefined，消费方按
+   * 「无数据不显示速度」处理。
    */
   duration_api_ms?: number | null;
   /**

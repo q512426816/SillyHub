@@ -55,6 +55,10 @@ class _SubmitState:
     latest_cache_read_tokens: int | None = None
     latest_cache_creation_tokens: int | None = None
     latest_ctx_tokens: int | None = None
+    # 2026-10-10-live-token-speed-daemon-timing FR-05：轮内累计模型生成时长 ms
+    # （daemon usage.api_duration_ms 搭车）。max 累积（乱序/子桶交替不回退，
+    # 0 不拉低非零——与 in_tok :366 同款）。
+    latest_api_duration_ms: int | None = None
     latest_session_id: str | None = None
     existing_dedup_keys: set[str] = field(default_factory=set)
     completed_segments: set[str] = field(default_factory=set)
@@ -113,6 +117,7 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages: 
     # 瞬时量可上可下——批内最后出现值胜出直接赋值（last-write-wins），刻意
     # 不用 input/output 的 max 累积（design §7 守卫差异）。
     st.latest_ctx_tokens = None
+    st.latest_api_duration_ms = None
     # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
     # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
     # content/event_type。旧代码只拼 text blocks、丢弃 thinking/tool_use/tool_result，
@@ -377,6 +382,11 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
                 )
             if isinstance(ctx_tok, (int, float)):
                 st.latest_ctx_tokens = int(ctx_tok)
+            # FR-05：轮内累计生成时长（usage.api_duration_ms，daemon 各引擎计时
+            # 生产）。max 累积防乱序回退；负值/非法（非数值）不收。
+            api_dur = usage.get("api_duration_ms")
+            if isinstance(api_dur, (int, float)) and api_dur > 0:
+                st.latest_api_duration_ms = max(st.latest_api_duration_ms or 0, int(api_dur))
         msg_session_id = msg.get("session_id")
         if isinstance(msg_session_id, str) and msg_session_id:
             st.latest_session_id = msg_session_id

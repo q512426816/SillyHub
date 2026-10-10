@@ -101,6 +101,14 @@ export interface AgentEventUsage {
    * 实时透传，封闭 4 字段会让新轨轮内环实时显示缺失。
    */
   ctx_tokens?: number;
+  /**
+   * 轮内累计模型生成时长 ms（各引擎计时生产：claude 桶 message_start 锚定 /
+   * codex 生成窗口 / pi message_end 折叠），随 usage 事件搭车实时上报 →
+   * backend AgentRun.duration_api_ms → 前端 tok/s 生成速度分母（分母口径=
+   * 模型生成窗口，不含工具执行时间）。缺省=该引擎未计时（2026-10-10-live-
+   * token-speed-daemon-timing FR-04）。
+   */
+  api_duration_ms?: number;
 }
 
 /**

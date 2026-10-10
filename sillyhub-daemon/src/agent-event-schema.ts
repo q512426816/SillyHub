@@ -45,13 +45,15 @@ const AGENT_STATUS_SUBTYPES = [
 ] as const;
 
 /** usage 子对象 schema（与 types.ts AgentEventUsage 对齐，字段全可选）。
- * ctx_tokens（上下文环分子）为 D-005@v1 契约补遗新增。 */
+ * ctx_tokens（上下文环分子）为 D-005@v1 契约补遗新增；
+ * api_duration_ms（轮内累计生成时长 ms）为 2026-10-10-live-token-speed-daemon-timing 契约扩展。 */
 const agentEventUsageSchema = z.object({
   input_tokens: z.number().optional(),
   output_tokens: z.number().optional(),
   cache_read_tokens: z.number().optional(),
   cache_creation_tokens: z.number().optional(),
   ctx_tokens: z.number().optional(),
+  api_duration_ms: z.number().optional(),
 });
 
 /**

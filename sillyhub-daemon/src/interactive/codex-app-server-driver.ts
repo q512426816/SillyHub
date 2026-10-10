@@ -535,6 +535,14 @@ export interface CodexHandle extends InteractiveDriverHandle {
    * （不伪造 0，codex ctx 保持未知态，设计兼容策略）。
    */
   lastCallCtxTokens?: number;
+  /**
+   * FR-02（2026-10-10-live-token-speed-daemon-timing）生成窗口锚点 ms：
+   * 模型输出首事件（reasoning thinking / agentMessage 文本）锚定，tool_use 折叠；
+   * null = 无进行中窗口。
+   */
+  generatingSince: number | null;
+  /** FR-02 轮内已折叠累计生成时长 ms（轮 start 归零）。 */
+  turnApiDurationMs: number;
   /** 释放底层资源（关 stdin + kill child）。幂等。 */
   close(): Promise<void>;
 }
@@ -610,6 +618,9 @@ function extractEventUsage(raw: unknown): AgentEventUsage | undefined {
   // usage_update 事件一等 usage 携带 last 毛值直取的 ctx_tokens（delta 附加后
   // 经 toAgentEvent 提升；非 number 不设置，不伪造 0）。
   if (typeof u.ctx_tokens === 'number') out.ctx_tokens = u.ctx_tokens;
+  // FR-02（2026-10-10-live-token-speed-daemon-timing）：轮内累计生成时长同守卫
+  // 透传（_usageDelta 附加后经 toAgentEvent 提升；非 number 不设置，不伪造 0）。
+  if (typeof u.api_duration_ms === 'number') out.api_duration_ms = u.api_duration_ms;
   // 四字段全缺/全非法 → 不带 usage（比「全 undefined 的空壳对象」更干净，
   // 下游 isPresent 判定与既有 undefined 语义一致）
   return Object.keys(out).length > 0 ? out : undefined;
@@ -888,6 +899,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
       turnApiCallCount: 0,
       // 2026-09-13-ctx-usage-all-providers task-04：最近一次调用 ctx（见字段注释）。
       lastCallCtxTokens: undefined,
+      // FR-02 生成窗口计时（见 CodexHandle 字段注释）。
+      generatingSince: null,
+      turnApiDurationMs: 0,
       close: (): Promise<void> => this._close(handle),
       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
       ...({ _ctx: ctx } as object),
@@ -964,6 +978,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
 
     /** resolve 当前轮（若存在），传 outcome；同时暂存待统一消费（见 completedOutcome）。 */
     const finishTurn = (o: TurnOutcome): void => {
+      // FR-02 残段折叠：轮收口时生成窗口仍开（最后一段生成后无 tool_use 折叠点）
+      // 先折叠，consume 的 _applyTurnUsageDelta → _usageDelta 即携带完整轮时长。
+      if (h.generatingSince !== null) {
+        h.turnApiDurationMs += Math.max(0, Date.now() - h.generatingSince);
+        h.generatingSince = null;
+      }
       if (currentTurnResolve) {
         completedOutcome = o;
         const r = currentTurnResolve;
@@ -1233,6 +1253,24 @@ export class CodexAppServerDriver implements InteractiveDriver {
           pendingTurnError = ev.content || null;
         }
 
+        // FR-02 生成窗口：模型输出事件锚定（reasoning thinking / agentMessage
+        // 文本——usage_update / status / subtype 信号排除），tool_use 折叠。
+        // 已锚不重锚（同调用多 item 合并窗口）；负值钳 0。
+        const evMeta = (ev.metadata ?? {}) as Record<string, unknown>;
+        if (ev.type === 'tool_use') {
+          if (h.generatingSince !== null) {
+            h.turnApiDurationMs += Math.max(0, Date.now() - h.generatingSince);
+            h.generatingSince = null;
+          }
+        } else if (
+          ev.type === 'text' &&
+          evMeta.status === undefined &&
+          evMeta.subtype === undefined &&
+          h.generatingSince === null
+        ) {
+          h.generatingSince = Date.now();
+        }
+
         // 其余（text/thinking 提升后/tool_use/tool_result/error）→ AgentEvent 上报
         if (onMessage && h.threadId) {
           // task-08：envelope 包装（单事件成批）。
@@ -1348,6 +1386,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
           h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
           // ql-20260910-003：本轮调用计数清零（同基线时点）。
           h.turnApiCallCount = 0;
+          // FR-02：轮内生成时长归零 + 窗口锚清空（新轮从零，防跨轮残留）。
+          h.generatingSince = null;
+          h.turnApiDurationMs = 0;
           if (!threadIdReady && !h.closing && !finalized) {
             pendingTurnError =
               `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
@@ -1813,6 +1854,13 @@ export class CodexAppServerDriver implements InteractiveDriver {
       (b?.cacheWriteInputTokens ?? 0);
     const dOut = h.threadUsageTotal.outputTokens - (b?.outputTokens ?? 0);
     if (dInput <= 0 && dCached <= 0 && dWrite <= 0 && dOut <= 0) return null;
+    // FR-02：搭车轮内累计生成时长（折叠 + 活窗口实时增长）；单点附加即
+    // usage_update 事件与 turn result usage 两路同源（同 ctx_tokens 口径）。
+    // >0 才带键（无计时数据不伪造 0）。
+    const apiDur =
+      h.generatingSince !== null
+        ? h.turnApiDurationMs + Math.max(0, Date.now() - h.generatingSince)
+        : h.turnApiDurationMs;
     return {
       input_tokens: Math.max(0, dInput - dCached - dWrite),
       output_tokens: Math.max(0, dOut),
@@ -1821,6 +1869,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
       ...(h.lastCallCtxTokens !== undefined
         ? { ctx_tokens: h.lastCallCtxTokens }
         : {}),
+      ...(apiDur > 0 ? { api_duration_ms: apiDur } : {}),
     };
   }
 

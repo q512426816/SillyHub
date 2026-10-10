@@ -787,6 +787,9 @@ describe('get_state 握手 → session_started 合成', () => {
 
 describe('turn 生命周期', () => {
   it('prompt id 关联 + 事件流上报 + agent_settled 收敛 onTurnResult(success)', async () => {
+    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -861,6 +864,9 @@ describe('turn 生命周期', () => {
   // ql-20260909-028：pi 每条 message.usage 是单次调用量，turn_end 只定格最后
   // 一次调用——原 replace 语义丢轮内工具循环中间调用（实测全会话只记真实 2-9%）。
   it('轮内多调用：result.usage = message_end 逐调用累加和（非 turn_end 定格值），usage 事件同步注入轮累计', async () => {
+    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -947,6 +953,9 @@ describe('turn 生命周期', () => {
   });
 
   it('message_end 无 usage（旧版 pi）→ 退回 turn_end 定格值，行为与修复前一致', async () => {
+    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
     const driver = await makeDriver();
@@ -3247,5 +3256,97 @@ describe('PiRpcDriver 思考档位（2026-09-14-session-thinking-level task-04�
 
     closeQueue();
     await consumeP;
+  });
+});
+
+
+// ── FR-03 生成窗口计时（2026-10-10-live-token-speed-daemon-timing）────────────
+
+describe('FR-03 pi 生成窗口计时（api_duration_ms）', () => {
+  it('text_delta 锚定 → tool_use 折叠 → 再锚定 → message_end 收口：turn_end 与 result 搭车累计', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(0);
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = await makeDriver();
+    const { queue, push, close: closeQueue } = makeInputQueue();
+    const { cb, events, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
+    const consumeP = driver.consume(handle, cb);
+    await tick();
+    handshakeOk(child);
+    await tick();
+
+    push('跑工具');
+    await tick();
+    respond(child, 'prompt');
+    emitEvent(child, { type: 'agent_start' });
+    // t=1000ms：text_delta 锚定生成窗口
+    vi.setSystemTime(1000);
+    emitEvent(child, {
+      type: 'message_update',
+      message: {},
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: '先查' },
+    });
+    await tick(1);
+    // t=6000ms：tool_execution_start（tool_use 折叠 5000ms，工具时间不计）
+    vi.setSystemTime(6000);
+    emitEvent(child, {
+      type: 'tool_execution_start',
+      toolName: 'read',
+      callId: 'c1',
+      args: { path: '/tmp/x' },
+    });
+    await tick(1);
+    // t=26000ms：第二段生成 text_delta 重新锚定
+    vi.setSystemTime(26000);
+    emitEvent(child, {
+      type: 'message_update',
+      message: {},
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: '查完了' },
+    });
+    await tick(1);
+    // t=32000ms：assistant message_end（调用收口折叠 6000ms）+ usage 供累加
+    vi.setSystemTime(32000);
+    emitEvent(child, {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '查完了' }],
+        usage: { input: 100, output: 50, cacheRead: 900, cacheWrite: 0 },
+      },
+    });
+    await tick(1);
+    // t=33000ms：turn_end（定格 usage）→ turnUsage 搭车 api_duration_ms = 11000
+    vi.setSystemTime(33000);
+    emitEvent(child, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        usage: { input: 100, output: 50, cacheRead: 900, cacheWrite: 0 },
+      },
+    });
+    emitFinalTextEnd(child, '查完了');
+    emitEvent(child, { type: 'agent_settled' });
+    await tick();
+
+    // turn_end usage 事件搭车：轮内累计 = 5000 + 6000 = 11000（工具 20s 不计）
+    const usageEv = events.find((e) => e.type === 'text' && e.usage !== undefined);
+    expect(usageEv).toBeDefined();
+    expect(usageEv!.usage).toMatchObject({
+      input_tokens: 100,
+      output_tokens: 50,
+      api_duration_ms: 11000,
+    });
+    expect(safeParseAgentEvent(usageEv!).success).toBe(true);
+
+    // result.usage 与事件两路同源
+    expect(results).toHaveLength(1);
+    expect(results[0]!.usage).toMatchObject({ api_duration_ms: 11000 });
+
+    closeQueue();
+    await consumeP;
+    vi.useRealTimers();
   });
 });

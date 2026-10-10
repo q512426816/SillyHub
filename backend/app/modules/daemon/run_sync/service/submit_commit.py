@@ -252,6 +252,14 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
         # 不触碰该列（SDK result 无 per-call 拆分，保留实时最后写入值）。
         if st.latest_ctx_tokens is not None:
             st.agent_run.ctx_tokens = st.latest_ctx_tokens
+        # 2026-10-10-live-token-speed-daemon-timing FR-05：轮内累计生成时长写回——
+        # 仅增不减（与 DB 现值取 max）：submit 状态按请求重置、daemon 累计按轮从零，
+        # 直写款会让下一轮 submit 把列拉回小值（Grill P2 采纳）。close 的结果元数据
+        # 覆盖守卫（if not None）语义不变（Claude SDK 权威终值）。
+        if st.latest_api_duration_ms is not None and st.latest_api_duration_ms > (
+            st.agent_run.duration_api_ms or 0
+        ):
+            st.agent_run.duration_api_ms = st.latest_api_duration_ms
             svc._session.add(st.agent_run)
         # ql-20260617-001：session_id 实时写回（首次拿到就填，complete_lease 仍可覆盖）。
         if st.latest_session_id and not st.agent_run.session_id:
@@ -358,6 +366,8 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
     # task-05 / FR-01：ctx_tokens 同步提取（对齐 input/output），供 publish
     # 实时透传（run channel summary + session channel tokens 事件）。
     publish_ctx_tokens = st.agent_run.ctx_tokens if st.agent_run is not None else None
+    # FR-06：intent 携带本轮 max 累积的生成时长（None 不带键，design §9）。
+    publish_duration_api_ms = st.latest_api_duration_ms
     publish_session_id = st.agent_run.agent_session_id if st.agent_run is not None else None
 
     if st.count > 0 or (st.agent_run is not None and agent_run_status == "running"):
@@ -401,6 +411,7 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
             cache_read_tokens=publish_cache_read_tokens,
             cache_creation_tokens=publish_cache_creation_tokens,
             ctx_tokens=publish_ctx_tokens,
+            duration_api_ms=publish_duration_api_ms,
             agent_session_id=publish_session_id,
             timestamp_iso=st.now.isoformat().replace("+00:00", "Z"),
             # task-05：群桥接标量快照（事务内已解析的群上下文 + 最后投影行 id）。

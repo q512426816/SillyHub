@@ -53,6 +53,9 @@ class PublishIntent:
     # task-05 / FR-01：最近一次调用提示词大小（last-write-wins 写回后的实时值），
     # None（老 daemon / 未上报）时 publish 两路 payload 均不带该键（design §9）。
     ctx_tokens: int | None
+    # 2026-10-10-live-token-speed-daemon-timing FR-06：轮内累计模型生成时长 ms
+    # （max 累积实时值）。None 不带键（design §9 同款）；前端 tok/s 速度分母。
+    duration_api_ms: int | None
     agent_session_id: uuid.UUID | None
     timestamp_iso: str
     # ── task-05（2026-09-01-session-group-chat / design §5.2）：群桥接投影标量 ──
@@ -141,6 +144,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
         # 调用提示词大小）。None 不带键——老 daemon / 子桶未上报兼容（design §9）。
         if intent.ctx_tokens is not None:
             summary_payload["ctx_tokens"] = intent.ctx_tokens
+        # FR-06：实时 token 透传同批携带轮内累计生成时长（None 不带键）。
+        if intent.duration_api_ms is not None:
+            summary_payload["duration_api_ms"] = intent.duration_api_ms
         pipe.publish(channel_name, json.dumps(summary_payload))
         await pipe.execute()
     except Exception:
@@ -218,6 +224,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             # 老 daemon 双向兼容）。
             if intent.ctx_tokens is not None:
                 token_payload["ctx_tokens"] = intent.ctx_tokens
+            # FR-06：tokens 事件携带轮内累计生成时长（tok/s 分母，None 不带键）。
+            if intent.duration_api_ms is not None:
+                token_payload["duration_api_ms"] = intent.duration_api_ms
             pipe.publish(session_channel, json.dumps(token_payload, default=str))
         await pipe.execute()
     except Exception:

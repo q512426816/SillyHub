@@ -64,7 +64,14 @@ describe("turn-timeline 轮尾 token 速度（FR-03/FR-04）", () => {
     expect(container.textContent).toContain("↓1,250 · 100 tok/s");
   });
 
-  it("运行中轮不显示速度（无 API 时长数据；token 计数照常显示累积值）", () => {
+  it("运行中轮有实时计时数据 → 显示速度（FR-07 运行中实时 tok/s）", () => {
+    const { container } = renderTimeline([
+      makeTurn({ status: "running", outputTokens: 625, apiDurationMs: 12500 }),
+    ]);
+    expect(container.textContent).toContain("· 50 tok/s");
+  });
+
+  it("运行中轮无 API 时长数据（cursor / 旧 daemon）→ 只显示 token 计数", () => {
     const { container } = renderTimeline([
       makeTurn({ status: "running", apiDurationMs: null }),
     ]);

@@ -39,12 +39,19 @@ describe("turnTokenSpeedText", () => {
     expect(turnTokenSpeedText(31, 10_000, "completed")).toBe("3.1 tok/s");
   });
 
-  it.each(["running", "pending", "interrupting"] as const)(
-    "非终态 %s 不显示（无 API 时长数据，禁止墙钟估速）",
+  // 2026-10-10-live-token-speed-daemon-timing FR-07：门控放宽——任意状态双值
+  // 即显示（运行中实时速度为核心交付；取代上变更「仅终态」语义）。
+  it.each(["running", "pending", "interrupting", "completed", "failed", "killed"] as const)(
+    "%s 双值可得 → 显示（门控不看状态，数据说话）",
     (status) => {
-      expect(turnTokenSpeedText(1250, 12500, status)).toBeNull();
+      expect(turnTokenSpeedText(1250, 12500, status)).toBe("100 tok/s");
     },
   );
+
+  it("running 无时长数据（cursor / 旧 daemon）→ null 不伪造", () => {
+    expect(turnTokenSpeedText(1250, null, "running")).toBeNull();
+    expect(turnTokenSpeedText(1250, 0, "running")).toBeNull();
+  });
 
   it.each([
     ["outputTokens 缺失", null, 12500],

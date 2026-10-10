@@ -1047,6 +1047,11 @@ export class PiRpcDriver implements InteractiveDriver {
     // 调用，不得再计入）；累加值为空（pi 版本不带 message_end usage）退回定格
     // 值，零回归兜底。
     let turnUsageSum: AgentEventUsage | null = null;
+    // FR-03（2026-10-10-live-token-speed-daemon-timing）生成窗口计时：
+    // text_delta（模型输出流）锚定，tool_execution_start / assistant message_end
+    // 折叠；轮内累计（随 turnUsage 搭车 api_duration_ms，轮重置归零）。
+    let turnApiDurationMs = 0;
+    let generatingSince: number | null = null;
     // quick-ffb92f60（2026-09-13-ctx-usage-all-providers 生产实证缺陷修复）：
     // 末次 assistant message_end 的原始 usage（input/cacheRead/cacheWrite 净值
     // 三口径）——ctx_tokens（上下文环分子，末次调用提示词大小）数据源。既有
@@ -1381,6 +1386,11 @@ export class PiRpcDriver implements InteractiveDriver {
       if (msg.type === 'message_end') {
         const endMsg = isRecord(msg.message) ? msg.message : {};
         if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
+          // FR-03：assistant message_end = 一次 API 调用收口，折叠生成窗口。
+          if (generatingSince !== null) {
+            turnApiDurationMs += Math.max(0, Date.now() - generatingSince);
+            generatingSince = null;
+          }
           turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
           turnApiCallCount += 1;
           // quick-ffb92f60：定格末次调用 usage 快照（ctx_tokens 数据源，见声明注释）。
@@ -1445,6 +1455,16 @@ export class PiRpcDriver implements InteractiveDriver {
         if (ev.type === 'error' && ev.content) {
           pendingTurnError = ev.content;
         }
+        // FR-03 生成窗口：text_delta（模型输出流，override 全文属终态重放不锚）
+        // 锚定，tool_use 折叠；已锚不重锚，负值钳 0。
+        if (ev.type === 'tool_use') {
+          if (generatingSince !== null) {
+            turnApiDurationMs += Math.max(0, Date.now() - generatingSince);
+            generatingSince = null;
+          }
+        } else if (ev.type === 'text' && ev.override !== true && generatingSince === null) {
+          generatingSince = Date.now();
+        }
         // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ②——
         // 仅 tool_result 事件翻 false（工具结果之后尚无新 assistant 消息 =
         // 轮尾非全文）。thinking / override text / partial text 一律不动标记
@@ -1490,6 +1510,15 @@ export class PiRpcDriver implements InteractiveDriver {
                   : {}),
               }
             : ev.usage;
+          // FR-03：搭车轮内累计生成时长（>0 才带键，不伪造 0）——turn_end 事件
+          // 与 result usage 共用本对象，单点附加双路生效。
+          const apiDurTotal =
+            generatingSince !== null
+              ? turnApiDurationMs + Math.max(0, Date.now() - generatingSince)
+              : turnApiDurationMs;
+          if (turnUsage && apiDurTotal > 0) {
+            turnUsage.api_duration_ms = apiDurTotal;
+          }
           ev.usage = turnUsage;
           if (isRecord(ev.metadata)) {
             ev.metadata.usage = turnUsage;
@@ -1591,6 +1620,9 @@ export class PiRpcDriver implements InteractiveDriver {
         turnUserEntryId = null;
         turnUsage = undefined;
         turnUsageSum = null;
+        // FR-03：轮内生成时长归零 + 窗口锚清空（新轮从零，防跨轮残留）。
+        turnApiDurationMs = 0;
+        generatingSince = null;
         lastEndUsage = null;
         turnApiCallCount = 0;
         turnReported = false;

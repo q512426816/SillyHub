@@ -127,6 +127,16 @@ interface PartialBucket {
   lastCallCacheReadTokens: number;
   /** 当前 API call cache_creation 快照（ctx 差分重算用）。session-manager.ts:546。 */
   lastCallCacheCreationTokens: number;
+  /**
+   * 当前 API 调用锚点 ms（message_start 锚定；null=无进行中调用）。
+   * 2026-10-10-live-token-speed-daemon-timing FR-01 逐调用计时。
+   */
+  callStartMs: number | null;
+  /**
+   * 轮内已折叠完成的 API 调用累计生成时长 ms（锚间折叠天然排除工具执行窗口）。
+   * 同上 FR-01；onTurnEnd 归零（新轮从零，防跨轮残留）。
+   */
+  turnApiDurationMs: number;
 }
 
 /** 运行中 Bash 命令索引条目（bash_chunk/bash_status 终态配对用）。session-manager.ts:816-819。 */
@@ -258,6 +268,11 @@ export class ClaudeEventNormalizer {
         buf.turnInputTokens = 0;
         buf.turnOutputTokens = 0;
         buf.pendingUsage = null;
+        // 计时归零（FR-01）：新轮从零。残段不折叠——onTurnEnd 后无 flush 载体
+        //（残段 < 节流窗口，丢弃可接受；终态权威值走 close 覆盖，Claude SDK
+        // duration_api_ms）。
+        buf.callStartMs = null;
+        buf.turnApiDurationMs = 0;
       } else {
         if (buf.timer) {
           clearTimeout(buf.timer);
@@ -926,6 +941,8 @@ export class ClaudeEventNormalizer {
         lastCallCtxTokens: 0,
         lastCallCacheReadTokens: 0,
         lastCallCacheCreationTokens: 0,
+        callStartMs: null,
+        turnApiDurationMs: 0,
       };
       this.buckets.set(parentKey, buf);
     }
@@ -950,6 +967,13 @@ export class ClaudeEventNormalizer {
     const evType = event['type'];
 
     if (evType === 'message_start') {
+      // 逐调用计时（FR-01）：上一调用折叠（message_stop 可能缺失，锚间折叠兜底，
+      // 同刻锚新调用保证首尾时间同源），负值钳 0。
+      const nowMs = this.now();
+      if (buf.callStartMs !== null) {
+        buf.turnApiDurationMs += Math.max(0, nowMs - buf.callStartMs);
+      }
+      buf.callStartMs = nowMs;
       const message = event['message'] as Record<string, unknown> | undefined;
       if (message && typeof message === 'object') {
         const mid = message['id'];
@@ -1059,15 +1083,29 @@ export class ClaudeEventNormalizer {
         // pendingUsage = 轮级 input/output + cache 快照 + main 桶 ctx_tokens
         // （:5817-5825；D-005@v1：ctx_tokens 随 partial flush 实时上报，SSE
         // summary 环分子对齐——子桶不含该键，消费侧缺键即跳过）。
+        // api_duration_ms（FR-01）：累计 + 活窗口（进行中调用实时增长，前端
+        // 运行中 tok/s 分母）；有计时数据即带（0 起步安全——backend max 累积、
+        // 前端 >0 门控）。
+        const apiDurMs =
+          buf.callStartMs !== null
+            ? buf.turnApiDurationMs + Math.max(0, this.now() - buf.callStartMs)
+            : buf.turnApiDurationMs;
         buf.pendingUsage = {
           input_tokens: buf.turnInputTokens,
           output_tokens: buf.turnOutputTokens,
           cache_read_tokens: buf.sessionCacheReadTokens,
           cache_creation_tokens: buf.sessionCacheCreationTokens,
+          api_duration_ms: apiDurMs,
           ...(buf.parentKey === 'main'
             ? { ctx_tokens: buf.lastCallCtxTokens }
             : {}),
         };
+      }
+    } else if (evType === 'message_stop') {
+      // 调用收口（FR-01）：折叠本调用窗口并清锚（幂等——无锚不折叠）。
+      if (buf.callStartMs !== null) {
+        buf.turnApiDurationMs += Math.max(0, this.now() - buf.callStartMs);
+        buf.callStartMs = null;
       }
     }
 
@@ -1296,11 +1334,15 @@ function usageToEventUsage(
   // ctx_tokens（D-005@v1）：API 原生 usage 无此字段（归一化器差分派生，仅
   // partial flush 携带）；守卫透传以兼容上游已派生形态。
   const ctx = numOf(usage['ctx_tokens']);
+  // api_duration_ms（2026-10-10-live-token-speed-daemon-timing FR-04）：桶计时
+  // 生产的轮内累计生成时长，守卫透传兼容上游已派生形态；缺省不带键。
+  const apiDur = numOf(usage['api_duration_ms']);
   if (input !== undefined) out.input_tokens = input;
   if (output !== undefined) out.output_tokens = output;
   if (cr !== undefined) out.cache_read_tokens = cr;
   if (cc !== undefined) out.cache_creation_tokens = cc;
   if (ctx !== undefined) out.ctx_tokens = ctx;
+  if (apiDur !== undefined) out.api_duration_ms = apiDur;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

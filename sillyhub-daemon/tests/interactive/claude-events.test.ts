@@ -18,7 +18,7 @@
 // fixture 来源（真实采样 + SDK 信封构造 + 脱敏）见
 // tests/fixtures/claude-sdk-messages/README.md。
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { ClaudeEventNormalizer } from '../../src/interactive/claude-events.js';
 import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
@@ -367,7 +367,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
     vi.useFakeTimers();
     const msgs = loadMessages('partial-stream-override');
     const partials: AgentEvent[] = [];
-    const norm = makeNormalizer(partials);
+    const norm = makeNormalizer(partials, () => 0); // 冻结时钟（FR-01）：golden 不含真实时间噪声
 
     // message_start → block_start → 3× thinking_delta → message_delta（usage）。
     for (let i = 0; i <= 5; i++) {
@@ -392,6 +392,8 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
           // ctx_tokens = message_start 的 input+cache_read+cache_creation
           // = 100+500+0（D-005@v1，仅 main 桶携带）。
           ctx_tokens: 600,
+          // FR-01 桶计时：冻结时钟下累计+活窗口恒 0。
+          api_duration_ms: 0,
         },
       },
     ]);
@@ -402,7 +404,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
     vi.useFakeTimers();
     const msgs = loadMessages('partial-stream-override');
     const partials: AgentEvent[] = [];
-    const norm = makeNormalizer(partials);
+    const norm = makeNormalizer(partials, () => 0); // 冻结时钟（FR-01）：golden 不含真实时间噪声
 
     for (let i = 0; i <= 6; i++) norm.normalizeMessage(msgs[i]!); // 至 message_stop
     vi.advanceTimersByTime(500); // thinking partial 已 flush
@@ -447,6 +449,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
           cache_read_tokens: 700,
           cache_creation_tokens: 64,
           ctx_tokens: 1084,
+          api_duration_ms: 0,
         },
       },
     ]);
@@ -828,5 +831,196 @@ describe('safeParseAgentEvent 契约校验', () => {
       }
       expect(parsed.success).toBe(true);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. usage.api_duration_ms 契约扩展（2026-10-10-live-token-speed-daemon-timing FR-04）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('usage api_duration_ms 守卫透传与 schema 放行', () => {
+  /** 合成 assistant 消息（usage 盖章路径 _stampCarriedFields 的最小输入）。 */
+  function assistantWithUsage(
+    usage: Record<string, unknown> | undefined,
+  ): SDKMessage {
+    return {
+      type: 'assistant',
+      session_id: 'sess-test',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '回答' }],
+        ...(usage ? { usage } : {}),
+      },
+    } as unknown as SDKMessage;
+  }
+
+  it('usage 带 api_duration_ms → 首条内容事件 usage 透传同值键', () => {
+    const norm = makeNormalizer([]);
+    const events = norm.normalizeMessage(
+      assistantWithUsage({
+        input_tokens: 10,
+        output_tokens: 5,
+        api_duration_ms: 12500,
+      }),
+    );
+    norm.dispose();
+    const withUsage = events.find((ev) => ev.usage != null);
+    expect(withUsage).toBeDefined();
+    expect(withUsage!.usage!.api_duration_ms).toBe(12500);
+  });
+
+  it('usage 无 api_duration_ms → 输出 usage 不带该键（旧事件零影响）', () => {
+    const norm = makeNormalizer([]);
+    const events = norm.normalizeMessage(
+      assistantWithUsage({ input_tokens: 10, output_tokens: 5 }),
+    );
+    norm.dispose();
+    const withUsage = events.find((ev) => ev.usage != null);
+    expect(withUsage).toBeDefined();
+    expect(withUsage!.usage).not.toHaveProperty('api_duration_ms');
+  });
+
+  it('usage api_duration_ms 非法值（字符串）→ 守卫忽略不带键', () => {
+    const norm = makeNormalizer([]);
+    const events = norm.normalizeMessage(
+      assistantWithUsage({
+        input_tokens: 10,
+        output_tokens: 5,
+        api_duration_ms: 'not-a-number',
+      }),
+    );
+    norm.dispose();
+    const withUsage = events.find((ev) => ev.usage != null);
+    expect(withUsage).toBeDefined();
+    expect(withUsage!.usage).not.toHaveProperty('api_duration_ms');
+  });
+
+  it('safeParseAgentEvent 对带/不带 api_duration_ms 的 usage 均通过 zod 校验', () => {
+    const base = {
+      type: 'text' as const,
+      content: 'x',
+    };
+    const withKey = safeParseAgentEvent({
+      ...base,
+      usage: { input_tokens: 1, api_duration_ms: 100 },
+    });
+    const withoutKey = safeParseAgentEvent({
+      ...base,
+      usage: { input_tokens: 1 },
+    });
+    expect(withKey.success).toBe(true);
+    expect(withoutKey.success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. 桶计时（2026-10-10-live-token-speed-daemon-timing FR-01）：message_start 锚/
+//    折叠 + message_delta 活刷新 + message_stop 收口 + onTurnEnd 归零
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** stream_event 包装 helper（normalizeMessage → _bufferPartial 入口）。 */
+function streamEvent(event: Record<string, unknown>): SDKMessage {
+  return { type: 'stream_event', event } as unknown as SDKMessage;
+}
+
+describe('claude 桶逐调用计时（FR-01）', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+  function flushOf(
+    partials: AgentEvent[],
+  ): AgentEvent | undefined {
+    return [...partials].reverse().find((ev) => ev.usage != null);
+  }
+
+  it('单调用：pendingUsage.api_duration_ms 为锚点活窗口（message_start@1000 → delta@6000 → 5000）', () => {
+    let clock = 1000;
+    const partials: AgentEvent[] = [];
+    const norm = makeNormalizer(partials, () => clock);
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_1', usage: { input_tokens: 100 } } }),
+    );
+    clock = 6000;
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_delta', usage: { output_tokens: 50 } }),
+    );
+    expect(partials).toHaveLength(0);
+    vi.advanceTimersByTime(600);
+    norm.dispose();
+    const ev = flushOf(partials);
+    expect(ev).toBeDefined();
+    expect(ev!.usage!.api_duration_ms).toBe(5000);
+  });
+
+  it('两调用夹工具窗口：锚间折叠排除工具时间（5000 折叠 + 6000 活窗口 = 11000）', () => {
+    let clock = 1000;
+    const partials: AgentEvent[] = [];
+    const norm = makeNormalizer(partials, () => clock);
+    // 调用 1：1000 → 6000（stop 收口折叠 5000）
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_1', usage: { input_tokens: 100 } } }),
+    );
+    clock = 6000;
+    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 50 } }));
+    norm.normalizeMessage(streamEvent({ type: 'message_stop' }));
+    // 工具执行 13s（6000 → 19000，无任何事件——不进任何桶）
+    clock = 19000;
+    // 调用 2：19000 → 25000（活窗口 6000）
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_2', usage: { input_tokens: 200 } } }),
+    );
+    clock = 25000;
+    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 120 } }));
+    vi.advanceTimersByTime(600);
+    norm.dispose();
+    const ev = flushOf(partials);
+    expect(ev).toBeDefined();
+    expect(ev!.usage!.api_duration_ms).toBe(11000);
+  });
+
+  it('时钟回拨：折叠钳 0 不出负值', () => {
+    let clock = 1000;
+    const partials: AgentEvent[] = [];
+    const norm = makeNormalizer(partials, () => clock);
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_1' } }),
+    );
+    clock = 500; // 回拨
+    norm.normalizeMessage(streamEvent({ type: 'message_stop' })); // 折叠 max(0, -500) = 0
+    clock = 2000;
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_2' } }),
+    );
+    clock = 2200;
+    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 3 } }));
+    vi.advanceTimersByTime(600);
+    norm.dispose();
+    const ev = flushOf(partials);
+    expect(ev).toBeDefined();
+    expect(ev!.usage!.api_duration_ms).toBe(200);
+  });
+
+  it('onTurnEnd 归零：新轮计时从零起步', () => {
+    let clock = 1000;
+    const partials: AgentEvent[] = [];
+    const norm = makeNormalizer(partials, () => clock);
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_1' } }),
+    );
+    clock = 5000;
+    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 10 } }));
+    norm.onTurnEnd();
+    // 新轮：旧锚已清，新 delta 只计新窗口
+    clock = 9000;
+    norm.normalizeMessage(
+      streamEvent({ type: 'message_start', message: { id: 'msg_2' } }),
+    );
+    clock = 9500;
+    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 20 } }));
+    vi.advanceTimersByTime(600);
+    norm.dispose();
+    const ev = flushOf(partials);
+    expect(ev).toBeDefined();
+    expect(ev!.usage!.api_duration_ms).toBe(500);
   });
 });
