@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  手机端会话页回显子代理内容时，子代理内部会话整段内联刷进对话流（应与 PC 端同构：只显示子代理基本信息紧凑卡，点击后在弹窗展示内部会话）。根因：SubagentPanelContext 的挂载条件显式排除
+  mobile（session-panel-page hasSubagentPanelHost = !mobile && onOpenSubagent != null，旧设计「移动端窄屏不做右栏」），无 context 时
+  SubagentBlockView 回退内联展开分支；且手机页宿主不传 portal 专属三 props（openSubagentId/onOpenSubagent/onSubagentPanelClose）。
+
+  成功标准：
+
+  - mobile 会话页子代理段渲染为紧凑基本信息卡（同 PC：状态点/名称/类型/徽标/时长，不内联 children），对话流不再被子代理内部会话刷屏
+
+  - 点击紧凑卡打开移动端 Drawer 弹窗，内嵌既有 SubagentDetailPanel 展示子代理内部会话（初始化提示词 + 段时间线），✕ 或遮罩关闭
+
+  - 再点已激活卡片为 toggle 关闭（与 PC 语义一致）；会话切换/段失效自动关闭
+
+  - PC 端（portal 宿主三 props 装配 + 右栏）与 dialog 模式行为零变化
+
+  - 新增移动端用例（紧凑卡不内联 + 点击开 Drawer + 关闭）+ 既有相关测试全绿 + tsc 零错
+autopilot: true
+baseline_commit: ae22d036039026687de6383b22dc0e0c92f957eb
+updatedAt: '2026-10-10T16:14:14.137Z'
+baseline_sha256: cf92f3089e4fe8297bf448774b5779d49f7b66db3956123e91e61854f04fca60
+
