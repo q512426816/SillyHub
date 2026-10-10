@@ -141,7 +141,10 @@ export function InputRefOverlay({
           <span
             key={i}
             data-att-ref-occ={occIndex}
-            className="relative mx-px rounded bg-brand-500/15 dark:bg-brand-400/20"
+            /* 严禁加 margin/padding/border——overlay 与 textarea 逐字符对齐
+             * （错位教训 2026-10-10：mx-px 每标签多 2px，多标签累积漂移），
+             * 背景块只用 background+radius 零布局影响。 */
+            className="relative rounded bg-brand-500/15 dark:bg-brand-400/20"
           >
             {/* 占位文本撑出背景块宽度（透明，不与 textarea 文字叠加重影）。 */}
             <span aria-hidden className="text-transparent">

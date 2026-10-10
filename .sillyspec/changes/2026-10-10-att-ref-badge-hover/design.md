@@ -12,7 +12,9 @@ created_at: 2026-10-10T00:49:23.984Z
 
 关键约束：镜像高亮层位于 textarea **下方**（z 序），标签文字区域被 textarea 覆盖，纯 CSS `:hover` 在 span 上永不触发（指针事件被 textarea 截获），也不能给 span 开 pointer-events（会挡住下方 textarea 的光标定位/选字）。
 
-方案：**宿主 wrapper 级 pointermove 命中测试**。InputRefOverlay 的每个 token 占位 span 带 `data-att-ref-occ`（出现序号）；新增导出 `hitTestAttRefOverlay(container, x, y)`——遍历这些 span 的 getBoundingClientRect（外扩 8px，覆盖右上角外挂的角标区），返回命中序号或 null。宿主（session-input-bar / group-chat-panel）在 overlay+textarea 的共同 wrapper 上挂 `onPointerMove`（React 合成事件从 textarea 冒泡到 wrapper）调 hitTest 写 `hoveredRefOcc` state，`onPointerLeave` 清空；`hoveredRefOcc` 经新 prop `visibleBadgeIndex` 传回 overlay——只有命中的角标 `opacity-100 + pointer-events-auto`，其余 `opacity-0 + pointer-events-none`（隐藏态不吃点击）。指针移到角标本体上时：外扩 8px 的命中区仍覆盖角标位置，状态不闪灭，可正常点击。
+方案：**宿主 wrapper 级 pointermove 命中测试**。
+
+附带修复（用户实测 2026-10-10）：token 占位 span 的 mx-px 外边距是多标签场景背景错位的根因（每标签多 2px 累积漂移，overlay 与 textarea 逐字符失配）——已移除并立守卫用例：占位 span 禁带 margin/padding 布局类，背景块只用 background+radius 零布局影响。InputRefOverlay 的每个 token 占位 span 带 `data-att-ref-occ`（出现序号）；新增导出 `hitTestAttRefOverlay(container, x, y)`——遍历这些 span 的 getBoundingClientRect（外扩 8px，覆盖右上角外挂的角标区），返回命中序号或 null。宿主（session-input-bar / group-chat-panel）在 overlay+textarea 的共同 wrapper 上挂 `onPointerMove`（React 合成事件从 textarea 冒泡到 wrapper）调 hitTest 写 `hoveredRefOcc` state，`onPointerLeave` 清空；`hoveredRefOcc` 经新 prop `visibleBadgeIndex` 传回 overlay——只有命中的角标 `opacity-100 + pointer-events-auto`，其余 `opacity-0 + pointer-events-none`（隐藏态不吃点击）。指针移到角标本体上时：外扩 8px 的命中区仍覆盖角标位置，状态不闪灭，可正常点击。
 
 ## 接口契约
 

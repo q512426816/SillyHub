@@ -1,4 +1,4 @@
----
+---- [x] task-03: 错位修复——token span 去 mx-px（多标签累积漂移根因）+ 对齐守卫用例，验证：vitest overlay/单聊/群聊 89 绿 + tsc 零错
 author: flow-machine-draft
 created_at: 2026-10-10T00:49:23.984Z
 ---

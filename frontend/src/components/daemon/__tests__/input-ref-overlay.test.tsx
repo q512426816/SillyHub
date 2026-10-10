@@ -104,6 +104,21 @@ describe("InputRefOverlay 角标悬停显示（att-ref-badge-hover）", () => {
     expect(hitTestAttRefOverlay(container.firstElementChild as HTMLElement, 10, 10)).toBeNull();
   });
 
+  // 错位守卫（2026-10-10 用户反馈：多标签累积漂移）——token 占位 span 严禁带
+  // margin/padding 类（overlay 与 textarea 逐字符对齐的布局铁律）。
+  it("token 占位 span 无 margin/padding 布局类（镜像对齐守卫）", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="一【A.png】二【A.png】"
+        tokens={["【A.png】"]}
+        onRemoveToken={() => {}}
+      />,
+    );
+    for (const span of container.querySelectorAll<HTMLElement>("[data-att-ref-occ]")) {
+      expect(span.className).not.toMatch(/(^|\s)(m|p)[trblxy]?-/);
+    }
+  });
+
   it("既有 × 删除回调行为不变（可见性受控不影响点击）", () => {
     const onRemove = vi.fn();
     render(
