@@ -674,31 +674,18 @@ const TurnRow = memo(function TurnRow({
                   );
                   return <TurnDetailsList items={merged} />;
                 })()}
-              {/* ql-20260802-001/003：「对话」视图用轻量 ❓ 提问记录（只显问题+作答，
-                  穿插在对应 turn、答复之前）。AskUser 走 onUserDialog 不走 tool_use 日志，
-                  故用 dialog 历史渲染。全部视图的 AskUser 已并入上方时间线。 */}
+              {/* ql-20260802-001/003：「对话」视图用轻量 ❓ 提问记录（只显问题+作答）。
+                  2026-10-10-dialog-qa-inplace：v2 段路径的 ❓ 块改由
+                  SegmentedTurnBody 按 created_at 与段 ts 合并排序穿插进对话流
+                  （原「整组前置轮头部」造成一轮多问时序全丢）；本块仅剩旧渲染
+                  回退路径（segments undefined 的孤儿轮/旧数据），行为不变。
+                  AskUser 走 onUserDialog 不走 tool_use 日志，故用 dialog 历史渲染。
+                  全部视图的 AskUser 已并入上方时间线。 */}
               {viewMode !== "all" &&
+                turn.segments === undefined &&
                 dialogHistory
                   .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
-                  .map((d) => {
-                    const qa = extractDialogQA(d);
-                    if (qa.length === 0) return null;
-                    return (
-                      <div
-                        key={`dialog-${d.request_id}`}
-                        className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
-                      >
-                        {qa.map((item, i) => (
-                          <div key={i} className="break-words">
-                            <span className="font-medium text-foreground">❓ {item.question}</span>
-                            <span className="ml-1 text-muted-foreground">
-                              → {item.answerText ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })}
+                  .map((d) => <DialogQaBlock key={`dialog-${d.request_id}`} dialog={d} />)}
               {/* task-14（FR-07 / D-008@v1）：消息 who 行——读该轮 run 配置快照
                   （档案 · 智能体 · 供应商），未选如实显示「未指定/本机默认」；
                   历史不跟随会话当前配置。whoLine 缺省（弹窗旧组装）不渲染（零回归）。
@@ -1502,6 +1489,31 @@ function isConversationSegment(seg: TurnSegment): boolean {
  * 渲染经济性：段合并时间线 / 文本段过滤均 useMemo（segments 引用未变时跳过重算，
  * 装配器 path-copy 保证未触及段引用稳定）；段组件由 SegmentView 内部 memo。
  */
+/** 2026-10-10-dialog-qa-inplace：对话视图轻量 ❓ 提问记录卡——原「整组前置轮
+ *  头部」的同一标记原位组件化（视觉逐字不变），供 SegmentedTurnBody 按时间戳
+ *  穿插与旧回退路径两处复用。空 QA（不可解析 payload）渲染 null。 */
+function DialogQaBlock({ dialog }: { dialog: SessionDialogRead }) {
+  const qa = extractDialogQA(dialog);
+  if (qa.length === 0) return null;
+  return (
+    <div
+      data-testid="dialog-qa-block"
+      className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+    >
+      {qa.map((item, i) => (
+        <div key={i} className="break-words">
+          <span className="font-medium text-foreground">❓ {item.question}</span>
+          <span className="ml-1 text-muted-foreground">
+            →{" "}
+            {item.answerText ??
+              (dialog.status === "pending" ? "（待答）" : "（未回答）")}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SegmentedTurnBody({
   segments,
   turnStatus,
@@ -1560,6 +1572,35 @@ function SegmentedTurnBody({
     return items;
   }, [viewMode, segments, turnDialogs]);
 
+  // 2026-10-10-dialog-qa-inplace：对话流合并穿插——❓ 提问记录卡（turnDialogs，
+  //  ts=created_at）与对话段（textSegments，ts=段时刻）合并稳定排序，提问落在
+  //  真实发生的时间位置（两段之间的提问渲染在两段之间），不再整组前置轮头部。
+  //  排序约定与「全部」视图时间线（上方 timeline）一致：缺 ts（NaN/null）视为 0、
+  //  稳定排序保文档序。段渲染逻辑逐字保留，仅新增 askUser 分支。
+  const convoTimeline = useMemo(() => {
+    if (viewMode === "all" || textSegments == null) return null;
+    const items: Array<
+      | { kind: "segment"; segment: TurnSegment; ts: number | null }
+      | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null }
+    > = [
+      ...textSegments.map((s) => ({
+        kind: "segment" as const,
+        segment: s,
+        ts: segmentTsOf(s),
+      })),
+      ...turnDialogs.map((d) => ({
+        kind: "askUser" as const,
+        dialog: d,
+        ts: d.created_at ? Date.parse(d.created_at) : null,
+      })),
+    ];
+    items.sort(
+      (a, b) =>
+        (Number.isFinite(a.ts) ? a.ts! : 0) - (Number.isFinite(b.ts) ? b.ts! : 0),
+    );
+    return items;
+  }, [viewMode, textSegments, turnDialogs]);
+
   return (
     <>
       {/* 轮级状态条（FR-02）：运行中三态 + 计时锚点有值才挂载（终态消失；锚点缺失
@@ -1567,7 +1608,7 @@ function SegmentedTurnBody({
           段时间线之前，全宽。 */}
       {(turnStatus === "pending" || turnStatus === "running" || turnStatus === "interrupting") &&
         turnStartedAt != null && (
-          <TurnStatusBar turnStartedAt={turnStartedAt} segments={segments} turnStatus={turnStatus} />
+          <TurnStatusBar turnStartedAt={turnStartedAt} turnStatus={turnStatus} segments={segments} />
         )}
       {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
       {timeline != null && timeline.length > 0 && (
@@ -1585,8 +1626,10 @@ function SegmentedTurnBody({
           agent 侧挂共享渐变光环头像（ChatMessageAvatar），text/file 段气泡行与
           头像横排（task-02 后子代理容器段卡片也在此列，随 SegmentView 分发）；
           「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
-          容器原样式）。 */}
-      {textSegments != null && textSegments.length > 0 && (
+          容器原样式）。2026-10-10-dialog-qa-inplace：渲染列表改 convoTimeline
+          （段 + ❓ 提问记录合并排序穿插）；仅有提问无对话段的轮也渲染（旧行为
+          的 ❓ 块同样不依赖段存在）。 */}
+      {convoTimeline != null && convoTimeline.length > 0 && (
         <div className="flex items-start gap-2.5">
           <ChatMessageAvatar kind="agent" title="智能体" />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -1594,7 +1637,16 @@ function SegmentedTurnBody({
                 text 段先过 parseAskUserMarker——命中则该段原位渲染提问卡（AskUserMarkerCard）
                 并以 textBefore 作正文（复用 TextSegmentView 气泡，标记原文不显示；
                 纯标记段无正文气泡）；未命中走 SegmentView 零变化。 */}
-            {textSegments.map((s) => {
+            {convoTimeline.map((item) => {
+              if (item.kind === "askUser") {
+                return (
+                  <DialogQaBlock
+                    key={`dialog-${item.dialog.request_id}`}
+                    dialog={item.dialog}
+                  />
+                );
+              }
+              const s = item.segment;
               // ql-20260917-006：compact 摘要段原位特判——一行短提示替代大段
               // 摘要气泡（全文在「全部（进度）」视图折叠卡）；compact_status
               // 运行中实时提示行（CompactStatusRowView，success 渲染 null）。
