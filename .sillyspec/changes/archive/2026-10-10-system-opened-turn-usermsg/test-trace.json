@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-system-opened-turn-usermsg",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-system-opened-turn-usermsg"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 已有输出段（系统通知开轮）：追加 delivered 段，不再前移轮首」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-system-opened-turn-usermsg"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 无输出段（新鲜轮）：原样返回——开轮正文走 prompt 写入路径」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-system-opened-turn-usermsg"
+    }
+  ]
+}

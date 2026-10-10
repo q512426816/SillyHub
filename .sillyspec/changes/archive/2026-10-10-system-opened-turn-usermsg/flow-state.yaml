@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,7 +28,7 @@ input: >-
   - logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错
 autopilot: true
 baseline_commit: f9ef55b526e415243a4aa25b4ba180114abea8f9
-updatedAt: '2026-10-10T15:41:01.462Z'
+updatedAt: '2026-10-10T15:46:43.856Z'
 baseline_sha256: 10c324113e9bdaa09cb1f79bbd5cec2d00bb52ddd96b25402cdb47cf5886b5ba
 gate_summary: >-
   test: passed ← module[]+deps(jsx10)+fr(8)（22.5s）

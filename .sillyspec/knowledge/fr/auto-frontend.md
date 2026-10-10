@@ -1051,3 +1051,60 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-dialog-qa-inplace
   status: active
+
+## FR-auto-frontend-172 回放路径——系统注入开轮的占位槽（首条 user_input 剥空也占住 prompt 槽）
+变更：2026-10-10-system-opened-turn-usermsg
+状态：active
+摘要：系统通知开轮 + 中途⚡消息（run 4296aa6a 实证）
+全文：.sillyspec/changes/archive/2026-10-10-system-opened-turn-usermsg/requirements.md#FR-01
+最近确认：f164a7fbca2264116fe5a3adaff5ad585a217b81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-system-opened-turn-usermsg
+  status: active
+
+## FR-auto-frontend-173 实时路径——空 prompt 已有输出段的轮，user_input 转 user_msg 段
+变更：2026-10-10-system-opened-turn-usermsg
+状态：active
+摘要：实时中途消息不前移轮首
+全文：.sillyspec/changes/archive/2026-10-10-system-opened-turn-usermsg/requirements.md#FR-02
+最近确认：f164a7fbca2264116fe5a3adaff5ad585a217b81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 已有输出段（系统通知开轮）：追加 delivered 段，不再前移轮首」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-system-opened-turn-usermsg
+  status: active
+
+## FR-auto-frontend-174 既有行为零回归
+变更：2026-10-10-system-opened-turn-usermsg
+状态：active
+摘要：正常轮与新鲜轮
+全文：.sillyspec/changes/archive/2026-10-10-system-opened-turn-usermsg/requirements.md#FR-03
+最近确认：f164a7fbca2264116fe5a3adaff5ad585a217b81
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-system-opened-turn-usermsg:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 无输出段（新鲜轮）：原样返回——开轮正文走 prompt 写入路径」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-system-opened-turn-usermsg
+  status: active

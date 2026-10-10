@@ -1,0 +1,512 @@
+diff --git a/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/flow-state.yaml b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/flow-state.yaml
+new file mode 100644
+index 000000000..33e9b9724
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  运行中「立即发送（⚡引导注入）」的用户消息落到轮次顶部而非按发生时间穿插在回复流中。根因（服务器 run 4296aa6a 实证）：轮次由 [后台任务通知] 系统消息开启——该行被剥前导后为空、不占 prompt 槽；用户 07:47
++  中途注入的真实消息成了该轮首条有效 user_input，回放路径被提升为轮 prompt（顶部气泡）、实时路径同理（prompt 空即写入），时序全丢（该轮已有 240 行更早输出）。
++
++  成功标准：
++
++  - 回放 logsToTurns：首条 user_input 即使是系统注入（剥空）也占住开轮槽（prompt 保持空、顶部无用户气泡），后到真实消息转 user_msg 段按 ts 插入输出之间
++
++  - 实时路径：prompt 为空但轮已有输出段的 user_input 不再写 prompt，转 delivered user_msg 段（appendDeliveredUserMsgIfAbsent
++  守卫放宽）；新鲜轮（无输出段）行为不变
++
++  - 正常轮（首条 user_input 是真实文本）行为零变化；[后台任务通知] 唯一开轮（无中途消息）行为零变化
++
++  - logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错
++autopilot: true
++baseline_commit: f9ef55b526e415243a4aa25b4ba180114abea8f9
++updatedAt: '2026-10-10T15:33:49.576Z'
++baseline_sha256: 10c324113e9bdaa09cb1f79bbd5cec2d00bb52ddd96b25402cdb47cf5886b5ba
++
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 11aba9030..24db651a4 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -568,6 +568,9 @@ function makeTurn(overrides: Partial<SessionTurnView> & { runId?: string }): Ses
+     seenLogIds: new Set<string>(),
+     inputTokens: null,
+     outputTokens: null,
++    // 2026-10-10 顺手债（token-speed 变更后 enrich 会补本字段）：预置 null 保
++    // 「身份稳定守卫」用例零字段差（缺省会被 enrich 填充 → 新对象 → 误报）。
++    apiDurationMs: null,
+     ...overrides,
+   };
+ }
+@@ -627,3 +630,62 @@ describe("enrichDisplayTurns 计时锚点（R4：活跃轮快照优先，终态
+     expect(enriched).toBe(turn);
+   });
+ });
++
++
++// ── 2026-10-10-system-opened-turn-usermsg：系统注入开轮的占位槽 ──────────────
++
++describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-turn-usermsg）", () => {
++  // run 4296aa6a 实证场景：[后台任务通知] 开轮（剥前导为空）跑 14 分钟后用户
++  // ⚡中途注入真实消息——旧逻辑消息被提升为轮 prompt（顶部气泡），时序全丢。
++  const TS = (sec: number) =>
++    `2026-10-10T07:${String(30 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
++
++  it("系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间", () => {
++    const turns = logsToTurns([
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
++      makeLog("o1", "run-1", "stdout", "输出甲", { timestamp: TS(60) }),
++      makeLog("t1", "run-1", "tool_call", "Read src/a.ts", { timestamp: TS(90) }),
++      makeLog("u1", "run-1", "user_input", "国际销售合同 不要动！", { timestamp: TS(120) }),
++      makeLog("o2", "run-1", "stdout", "输出乙", { timestamp: TS(180) }),
++    ]);
++    expect(turns).toHaveLength(1);
++    const turn = turns[0]!;
++    // 开轮槽被系统通知占住：prompt 空（顶部无用户气泡），消息不再前移轮首。
++    expect(turn.prompt).toBe("");
++    const segs = turn.segments ?? [];
++    const userMsg = segs.find((s) => s.kind === "user_msg");
++    expect(userMsg).toBeTruthy();
++    expect((userMsg as { text: string }).text).toBe("国际销售合同 不要动！");
++    // ts 定位（tool_call 隔开两段 reply 防流式合并成单段）：user_msg 位于
++    // 「输出甲」之后、「输出乙」之前。
++    const texts = segs.map((s) => (s.kind === "text" || s.kind === "user_msg" ? s.text : ""));
++    expect(texts.indexOf("输出甲")).toBeGreaterThanOrEqual(0);
++    expect(texts.indexOf("输出甲")).toBeLessThan(texts.indexOf("国际销售合同 不要动！"));
++    expect(texts.indexOf("国际销售合同 不要动！")).toBeLessThan(texts.indexOf("输出乙"));
++    expect(texts.indexOf("输出乙")).toBeGreaterThanOrEqual(0);
++  });
++
++  it("系统通知唯一开轮（无中途消息）：prompt 空、不产出占位 user_msg 段", () => {
++    const turns = logsToTurns([
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 任务已结束", { timestamp: TS(0) }),
++      makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("");
++    expect((turn.segments ?? []).some((s) => s.kind === "user_msg")).toBe(false);
++  });
++
++  it("正常轮不受影响：真实开轮 prompt 保持，第二条消息仍转 user_msg；中途系统行不占槽", () => {
++    const turns = logsToTurns([
++      makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),
++      makeLog("o1", "run-1", "stdout", "输出", { timestamp: TS(30) }),
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 中途通知", { timestamp: TS(60) }),
++      makeLog("u2", "run-1", "user_input", "第二句", { timestamp: TS(90) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("第一句");
++    const userMsgs = (turn.segments ?? []).filter((s) => s.kind === "user_msg");
++    // 「第二句」成段；中途系统通知不成段（非首条，不占槽、剥空静默跳过）。
++    expect(userMsgs.map((s) => (s as { text: string }).text)).toEqual(["第二句"]);
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx b/frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx
+new file mode 100644
+index 000000000..92549f316
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx
+@@ -0,0 +1,99 @@
++// 2026-10-10-system-opened-turn-usermsg：appendDeliveredUserMsgIfAbsent 守卫放宽
++// 单测——系统注入开轮（[后台任务通知]，prompt 空 + 已有输出段）的轮，中途
++// user_input 照常追加 delivered user_msg 段（不再被「prompt 为空」挡回、由
++// prompt 补写路径前移到轮首顶部，run 4296aa6a 实证）。
++//
++// 覆盖：
++//   1. prompt 空 + 有输出段（系统开轮）→ 追加 delivered 段（新行为）；
++//   2. prompt 空 + 无输出段（新鲜轮）→ 原样返回（开轮正文走 prompt 写入）；
++//   3. prompt 非空 + 互异主体 → 追加（既有行为不回归）；
++//   4. 同主体幂等：已有同主体 user_msg 段 → 原样返回（既有行为）。
++import { describe, it, expect } from "vitest";
++
++import { appendDeliveredUserMsgIfAbsent } from "../session-panel/session-panel-page";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { TurnSegment } from "../session-log-assembler";
++
++function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "",
++    output: "",
++    status: "running",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    segments: [],
++    ...overrides,
++  };
++}
++
++const TEXT_SEG: TurnSegment = {
++  kind: "text",
++  id: "seg-text-1",
++  text: "已产出的输出",
++  streaming: false,
++  startedAt: 1000,
++} as TurnSegment;
++
++const MSG = "国际销售合同 不要动！";
++
++function userMsgCount(turn: SessionTurnView): number {
++  return (turn.segments ?? []).filter((s) => s.kind === "user_msg").length;
++}
++
++describe("appendDeliveredUserMsgIfAbsent 守卫放宽（2026-10-10-system-opened-turn-usermsg）", () => {
++  it("prompt 空 + 已有输出段（系统通知开轮）：追加 delivered 段，不再前移轮首", () => {
++    const [out] = appendDeliveredUserMsgIfAbsent(
++      [makeTurn({ prompt: "", segments: [TEXT_SEG] })],
++      "run-1",
++      MSG,
++      2000,
++    );
++    expect(out).toBeTruthy();
++    expect(out!.prompt).toBe(""); // 不写 prompt（顶部无用户气泡）
++    expect(userMsgCount(out!)).toBe(1);
++    const seg = out!.segments!.find((s) => s.kind === "user_msg") as {
++      text: string;
++      ts: number | null;
++      phase: string;
++    };
++    expect(seg.text).toBe(MSG);
++    expect(seg.ts).toBe(2000);
++    expect(seg.phase).toBe("delivered");
++  });
++
++  it("prompt 空 + 无输出段（新鲜轮）：原样返回——开轮正文走 prompt 写入路径", () => {
++    const turns = [makeTurn({ prompt: "", segments: [] })];
++    const out = appendDeliveredUserMsgIfAbsent(turns, "run-1", MSG, 2000);
++    expect(out).toBe(turns); // 原引用（零重渲）
++    expect(userMsgCount(out[0]!)).toBe(0);
++  });
++
++  it("prompt 非空 + 互异主体：照常追加（既有行为不回归）", () => {
++    const [out] = appendDeliveredUserMsgIfAbsent(
++      [makeTurn({ prompt: "第一句", segments: [TEXT_SEG] })],
++      "run-1",
++      MSG,
++      2000,
++    );
++    expect(out!.prompt).toBe("第一句");
++    expect(userMsgCount(out!)).toBe(1);
++  });
++
++  it("已有同主体 user_msg 段：幂等原样返回（既有行为）", () => {
++    const turns = [
++      makeTurn({
++        prompt: "第一句",
++        segments: [
++          TEXT_SEG,
++          { kind: "user_msg", id: "steer:1", text: MSG, ts: 1900, phase: "delivered" },
++        ] as unknown as TurnSegment[],
++      }),
++    ];
++    const out = appendDeliveredUserMsgIfAbsent(turns, "run-1", MSG, 2000);
++    expect(out).toBe(turns);
++    expect(userMsgCount(out[0]!)).toBe(1);
++  });
++});
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index d19e4f9c6..786ddc0fe 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -420,6 +420,14 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+     const preambleSegments: TurnSegment[] = [];
+     const seenText = new Set<string>();
+     const assemblerInputs: AssemblerLogInput[] = [];
++    // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
++    // user_input 即使被剥空（[后台任务通知] / 纯前导系统注入）也占住 prompt 槽
++    // （占位空组 → prompt 保持空、顶部无用户气泡）；后到真实消息进组 2+ 转
++    // user_msg 段按 ts 插入，不再被提升为轮 prompt 前移到轮首（run 4296aa6a
++    // 实证：系统通知开轮跑 14 分钟后用户⚡中途注入，消息气泡落到顶部）。
++    // 占位键含控制字符，真实消息体（trim 后非空文本）不可碰撞。
++    let openerSlotSeen = false;
++    const OPENER_RESERVED_KEY = "\u0000__opener__";
+     for (const entry of entries) {
+       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
+       if (!seg) continue;
+@@ -457,7 +465,22 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+         const promptSource = preambleText
+           ? stripPreambleText(seg.text).trim()
+           : seg.text;
+-        if (!promptSource.trim()) continue;
++        if (!promptSource.trim()) {
++          // 2026-10-10-system-opened-turn-usermsg：首条 user_input 剥空（系统
++          // 注入开轮）→ 占位空组占住开轮槽（仅首条；后到系统行静默跳过）。
++          if (!openerSlotSeen) {
++            openerSlotSeen = true;
++            promptGroups.push({
++              key: OPENER_RESERVED_KEY,
++              withMarker: null,
++              plain: null,
++              firstId: entry.id ?? null,
++              ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
++            });
++          }
++          continue;
++        }
++        openerSlotSeen = true;
+         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
+         const lines = promptSource.split("\n");
+         const markerLines: string[] = [];
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 76ebb99e8..c4732678a 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -589,15 +589,22 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                   return upsertDialogTurn(
+                     { ...prev, turns: withLiveUserMsg },
+                     env,
+-                    (turn) =>
+-                      !turn.prompt.trim()
+-                        ? {
+-                            ...turn,
+-                            prompt: preambleText
+-                              ? stripPreambleText(rawText).trim()
+-                              : rawText.trim(),
+-                          }
+-                        : turn,
++                    (turn) => {
++                      // 2026-10-10-system-opened-turn-usermsg（同 page 模式）：仅
++                      // 新鲜轮（无输出段）写 prompt——系统注入开轮的中途消息由
++                      // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不前移轮首。
++                      if (turn.prompt.trim()) return turn;
++                      const hasOutputSegs = (turn.segments ?? []).some(
++                        (s) => s.kind !== "preamble",
++                      );
++                      if (hasOutputSegs) return turn;
++                      return {
++                        ...turn,
++                        prompt: preambleText
++                          ? stripPreambleText(rawText).trim()
++                          : rawText.trim(),
++                      };
++                    },
+                     staleReplay ? {} : { setCurrentRun: env.run_id! },
+                   );
+                 });
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 00235897c..f3c0ab52d 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -440,10 +440,12 @@ export function markSteeredSegmentsEnded(
+  * markSteeredSegmentDelivered 无段可收敛，消息正文在实时视图被静默丢弃（刷新后
+  * logsToTurns 才可见）。
+  *
+- * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且 prompt 已非空、主体
+- * （steerMatchKey）与 prompt 互异、轮内尚无同主体 user_msg 段 → 追加 delivered
+- * 段（注入已发生，不走引导中三态）；其余情形原样返回原引用：
+- *   - 轮未建 / prompt 为空 → 本条即轮 prompt（upsertTurn 既有补写承载）；
++ * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且（prompt 已非空 **或** 轮已有
++ * 输出段——2026-10-10-system-opened-turn-usermsg：系统注入开轮的空 prompt 轮，
++ * 中途消息照常成段不再前移轮首）、主体（steerMatchKey）与 prompt 互异、轮内尚无
++ * 同主体 user_msg 段 → 追加 delivered 段（注入已发生，不走引导中三态）；其余情形
++ * 原样返回原引用：
++ *   - 轮未建 / （prompt 为空且无输出段）→ 本条即轮 prompt（upsertTurn 既有补写承载）；
+  *   - 主体与 prompt 相同 → prompt 回显 / daemon 双提交（marker 版+裸文本版）；
+  *   - 已有同主体段 → steering 段刚被上方收敛为 delivered / 已兜底过，幂等。
+  */
+@@ -458,7 +460,13 @@ export function appendDeliveredUserMsgIfAbsent(
+   const idx = steeredTurnIndexOf(turns, runId);
+   if (idx < 0) return turns;
+   const turn = turns[idx]!;
+-  if (!turn.prompt.trim()) return turns;
++  // 2026-10-10-system-opened-turn-usermsg：守卫放宽——prompt 为空但轮已有输出段
++  // （[后台任务通知]/系统注入开轮，run 4296aa6a 实证）时，本条 user_input 是
++  // 中途消息而非开轮正文 → 照常追加 delivered 段；prompt 空且无输出段 = 新鲜
++  // 轮开轮正文，维持原返回交 prompt 写入路径。preamble 段不算输出（开轮通知
++  // 先落 preamble 段的场景不误判为已有输出）。
++  const hasOutputSegs = (turn.segments ?? []).some((s) => s.kind !== "preamble");
++  if (!turn.prompt.trim() && !hasOutputSegs) return turns;
+   if (steerMatchKey(turn.prompt) === key) return turns;
+   if (turn.segments?.some((s) => s.kind === "user_msg" && steerMatchKey(s.text) === key)) {
+     return turns;
+@@ -1248,10 +1256,19 @@ export function SessionPanelPage({
+                       };
+                     }
+                     if (!next.prompt.trim()) {
+-                      const promptSource = preambleText
+-                        ? stripPreambleText(env.content ?? "").trim()
+-                        : (env.content ?? "").trim();
+-                      if (promptSource) next = { ...next, prompt: promptSource };
++                      // 2026-10-10-system-opened-turn-usermsg：仅新鲜轮（无输出段）
++                      // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，
++                      // prompt 空 + 已有输出段）的中途消息已由上方
++                      // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不再前移轮首。
++                      const hasOutputSegs = (next.segments ?? []).some(
++                        (s) => s.kind !== "preamble",
++                      );
++                      if (!hasOutputSegs) {
++                        const promptSource = preambleText
++                          ? stripPreambleText(env.content ?? "").trim()
++                          : (env.content ?? "").trim();
++                        if (promptSource) next = { ...next, prompt: promptSource };
++                      }
+                     }
+                     return next;
+                   },
+diff --git a/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/design.md b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/design.md
+new file mode 100644
+index 000000000..885b53564
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:33:49.552Z
++---
++# 设计记录（Design Record）— 2026-10-10-system-opened-turn-usermsg
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户实证（服务器 run 4296aa6a）：轮次由 [后台任务通知] 系统消息开启，跑 14 分钟 240 行输出后用户⚡中途注入「国际销售合同 不要动！」——该消息成了此轮首条「有效」user_input，回放被提升为轮 prompt（顶部气泡）、实时被 prompt 补写路径写进 prompt，时序全丢。根因：系统通知行被 `extractPreambleText/stripPreambleText` 剥空后 `continue`，不占 prompt 槽，首条真实消息错误补位。修法最小侵入三处：①回放 `logsToTurns`——首条 user_input 剥空时压入一个占位空组（键含控制字符不可碰撞），prompt 保持空、真实消息自然落组 2+ 走既有 user_msg 段按 ts 插入链路；②共享函数 `appendDeliveredUserMsgIfAbsent` 守卫放宽（prompt 空 + 已有输出段 → 照常追加 delivered 段）；③page/dialog 两模式 prompt 补写加「新鲜轮（无输出段）」条件。不动后端/数据（时间戳本就正确），全部复用既有 user_msg 段渲染与插入机制。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `appendDeliveredUserMsgIfAbsent`（session-panel-page.tsx 导出，page/dialog 共用）：守卫行为变化（空 prompt + 有输出段 → 追加段），签名不变。
++- `logsToTurns`（runtime-session-helpers.tsx 导出）：内部新增占位空组，返回形状不变（prompt 可能为空串——通知唯一开轮既有形态）。
++- 后端/端点/数据格式零改动。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | logsToTurns 开轮槽占位（openerSlotSeen + 占位空组） |
++| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | appendDeliveredUserMsgIfAbsent 守卫放宽 + page 模式 prompt 补写新鲜轮条件 |
++| 修改 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | dialog 模式 prompt 补写新鲜轮条件（同款） |
++| 修改 | frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx | 占位槽 3 用例 + 顺手修 enrich 身份用例 fixture 缺 apiDurationMs（token-speed 旧债） |
++| 新增 | frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx | appendDelivered 守卫 4 用例 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。回放侧开轮槽按 entries 处理序（后端返回 run 块序内 ts 升序）首条 user_input 判定，与到达顺序无关；user_msg 段 ts 取 log timestamp（服务器时间）非客户端时钟，插队消息乱序到达仍按 ts 落位。实时侧 resync 重放走同一 onLog 链路，与回放口径一致（通知先到剥空不写 prompt、输出段累积、中途消息成段）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：纯前端派生状态（setTurnState 单线程 reducer 链），无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：全部变更在既有 setState updater 纯函数内，无定时器/外部资源；换会话 turnState 整体重置不受影响。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：占位组与 user_msg 段均按 run 分组作用域内构造，run_id 匹配口径不变（runId/realRunId 双匹配既有逻辑）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：占位空组使「通知开轮」轮次的 prompt 恒空——若该轮实为用户真实发起但消息形态恰被剥空（如纯前导群聊注入开轮），顶部将无用户气泡——与既有「通知唯一开轮」形态一致，属既有语义而非新增缺失。
++- 放弃方案「后端给 user_input 行加 opener 标记列」：需动表结构+迁移+双端联动，而时间戳数据本就正确、纯前端可判（首条+剥空），收益不抵面。
++- 已知残留：首条判定按处理序而非严格 min(ts)——后端返回序即块内 ts 升序，理论乱序输入不在契约内。
+diff --git a/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/proposal.md b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/proposal.md
+new file mode 100644
+index 000000000..0de5f7a36
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:33:49.552Z
++---
++# 提案书（Proposal）— 2026-10-10-system-opened-turn-usermsg
++
++## 动机
++
++任务原话转写：运行中「立即发送（⚡引导注入）」的用户消息落到轮次顶部而非按发生时间穿插在回复流中。根因（服务器 run 4296aa6a 实证）：轮次由 [后台任务通知] 系统消息开启——该行被剥前导后为空、不占 prompt 槽；用户 07:47 中途注入的真实消息成了该轮首条有效 user_input，回放路径被提升为轮 prompt（顶部气泡）、实时路径同理（prompt 空即写入），时序全丢（该轮已有 240 行更早输出）。
++成功标准：
++- 回放 logsToTurns：首条 user_input 即使是系统注入（剥空）也占住开轮槽（prompt 保持空、顶部无用户气泡），后到真实消息转 user_msg 段按 ts 插入输出之间
++- 实时路径：prompt 为空但轮已有输出段的 user_input 不再写 prompt，转 delivered user_msg 段（appendDeliveredUserMsgIfAbsent 守卫放宽）；新鲜轮（无输出段）行为不变
++- 正常轮（首条 user_input 是真实文本）行为零变化；[后台任务通知] 唯一开轮（无中途消息）行为零变化
++- logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 回放 logsToTurns：首条 user_input 即使是系统注入（剥空）也占住开轮槽（prompt 保持空、顶部无用户气泡），后到真实消息转 user_msg 段按 ts 插入输出之间
++2. 实时路径：prompt 为空但轮已有输出段的 user_input 不再写 prompt，转 delivered user_msg 段（appendDeliveredUserMsgIfAbsent 守卫放宽）；新鲜轮（无输出段）行为不变
++3. 正常轮（首条 user_input 是真实文本）行为零变化；[后台任务通知] 唯一开轮（无中途消息）行为零变化
++4. logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错
++
++## 成功标准（可验证）
++
++1. 回放 logsToTurns：首条 user_input 即使是系统注入（剥空）也占住开轮槽（prompt 保持空、顶部无用户气泡），后到真实消息转 user_msg 段按 ts 插入输出之间
++2. 实时路径：prompt 为空但轮已有输出段的 user_input 不再写 prompt，转 delivered user_msg 段（appendDeliveredUserMsgIfAbsent 守卫放宽）；新鲜轮（无输出段）行为不变
++3. 正常轮（首条 user_input 是真实文本）行为零变化；[后台任务通知] 唯一开轮（无中途消息）行为零变化
++4. logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错
+diff --git a/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/requirements.md b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/requirements.md
+new file mode 100644
+index 000000000..7985c984b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/requirements.md
+@@ -0,0 +1,42 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:33:49.552Z
++---
++# 需求规格（Requirements）— 2026-10-10-system-opened-turn-usermsg
++
++## 功能需求
++
++### FR-01: 回放路径——系统注入开轮的占位槽（首条 user_input 剥空也占住 prompt 槽）
++
++- `logsToTurns` 必须把每个 run 的**首条** user_input 行（即使被剥前导后为空——[后台任务通知]/纯前导系统注入）视为开轮正文占位：prompt 保持空（顶部无用户气泡），后到真实文本消息不得提升为轮 prompt，必须转 user_msg 段按 ts 插入轮内输出之间。占位键必须不可与真实消息体碰撞。
++
++#### 场景：系统通知开轮 + 中途⚡消息（run 4296aa6a 实证）
++
++- Given 一个 run：首条 user_input 是 [后台任务通知]（07:32），其后 240 行输出，用户 07:47 中途注入真实消息
++- When 回放渲染该轮
++- Then prompt 为空（顶部无用户气泡），该消息为 user_msg 段且位于 07:47 时间位置的输出之间
++
++### FR-02: 实时路径——空 prompt 已有输出段的轮，user_input 转 user_msg 段
++
++- `appendDeliveredUserMsgIfAbsent` 的「prompt 为空即返回」守卫必须放宽为「prompt 为空**且**无输出段（preamble 不算输出）才返回」；page 与 dialog 两模式的 prompt 补写必须增加同款新鲜轮条件（prompt 空 + 已有输出段 → 不写 prompt，由 user_msg 段承载）。
++
++#### 场景：实时中途消息不前移轮首
++
++- Given 运行中的系统通知开轮（prompt 空、已有输出段），SSE 到达一条真实消息 user_input
++- Then 该轮 prompt 保持空，消息以 delivered user_msg 段追加（段尾=当前时刻位置）
++
++### FR-03: 既有行为零回归
++
++- 正常轮（首条 user_input 为真实文本）prompt/组归并行为必须零变化；[后台任务通知] 唯一开轮（无中途消息）必须仍无用户气泡且不产出占位 user_msg 段；新鲜轮（排队派发，无输出段）的 prompt 补写路径必须原样。
++
++#### 场景：正常轮与新鲜轮
++
++- Given 首条 user_input 为真实文本的轮 / 无任何输出段的新鲜轮
++- When 各自场景渲染与实时处理
++- Then 行为与改动前一致（既有测试全绿）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」
++FR-02: frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 已有输出段（系统通知开轮）：追加 delivered 段，不再前移轮首」
++FR-03: frontend/src/components/daemon/__tests__/steered-usermsg-guard.test.tsx「prompt 空 + 无输出段（新鲜轮）：原样返回——开轮正文走 prompt 写入路径」
+diff --git a/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/tasks.md b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/tasks.md
+new file mode 100644
+index 000000000..6f82785b8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-system-opened-turn-usermsg/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:33:49.552Z
++---
++# 任务注册表（Tasks）— 2026-10-10-system-opened-turn-usermsg
++
++- [x] task-01: 回放 logsToTurns：首条 user_input 即使是系统注入（剥空）也占住开轮槽（prompt 保持空、顶部无用户气泡），后到真实消息转 user_msg 段按 ts 插入输出之间（openerSlotSeen + 占位空组；用例「系统通知开轮 + 中途消息」）
++- [x] task-02: 实时路径：prompt 为空但轮已有输出段的 user_input 不再写 prompt，转 delivered user_msg 段（appendDeliveredUserMsgIfAbsent 守卫放宽 + page/dialog prompt 补写新鲜轮条件；用例「追加 delivered 段，不再前移轮首」）
++- [x] task-03: 正常轮（首条 user_input 是真实文本）行为零变化；[后台任务通知] 唯一开轮（无中途消息）行为零变化（用例「正常轮不受影响」「系统通知唯一开轮」「新鲜轮原样返回」+ 既有回归 5 文件 136/136 绿）
++- [x] task-04: logsToTurns / appendDeliveredUserMsgIfAbsent 新单测覆盖上述场景，既有相关测试全绿 + tsc 零错（新 7 用例 + 2 文件 41/41；回归簇 5 文件 136/136；tsc exit 0）
