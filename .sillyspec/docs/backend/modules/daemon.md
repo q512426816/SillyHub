@@ -55,6 +55,12 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   SessionUsageRead totals+by_model——agent_run_model_usage 按 model SUM 为主 + 无明细行
   run 的 AgentRun 四维列 NOT EXISTS 兜底（ctx_tokens 快照列排除，「未记录」桶末位
   api_requests=0），全 SQL 侧聚合）、
+  - usage 管线补维（2026-10-10-live-token-speed-daemon-timing）：submit_messages 提取
+  message 顶层 `usage.api_duration_ms`（daemon 三引擎逐调用计时生产的轮内累计生成
+  时长 ms，不含工具窗口）→ max 累积（乱序不回退）→ submit_commit **仅增不减**写回
+  `AgentRun.duration_api_ms`（防跨轮回退；close 结果元数据非 None 仍权威覆盖）→
+  tokens SSE 事件与 run channel summary 增键 `duration_api_ms`（None 不带键，
+  design §9 同款）——前端运行中 tok/s 分母数据源；
   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
   任务执行面板（2026-09-04-session-task-execution-panel）：`GET /{id}/tasks`
   （AgentSessionTaskRead 18 字段 snake_case，鉴权同 runs 端点

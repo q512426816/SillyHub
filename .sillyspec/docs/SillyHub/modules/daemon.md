@@ -236,3 +236,8 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容�
 ## 增量（ql-20260924-001：空 firstPrompt 不挂 10s 兜底——native fork 首轮契约对齐，24h 审查 H-2 daemon 侧）
 
 - session-manager `_createInternal` 的 firstPrompt 挂起（ql-20260825-002 的 10s fallback）补空串守卫：`input.firstPrompt` 为空（native fork 会话——backend create 对 fork 归零 lease metadata prompt 且空载荷 SESSION_INJECT 已不再下发，见 backend daemon.md 同 ql）时**不挂兜底**。修复前兜底到点 push `{type:'user', text:''}` 空用户消息（claude 档空串仍发送），污染 B 首轮。inject 消费路径对 Map 缺键天然 no-op（turn-control/lifecycle 均 get→undefined 守卫），B 等用户首问经 SESSION_INJECT 正常驱动，零回归。测试 session-fork.test.ts 新用例（空串不挂 + 非空仍挂对照）。
+
+## 增量（2026-10-10-live-token-speed-daemon-timing：逐调用计时——usage 事件契约补 api_duration_ms）
+
+- **契约**：`AgentEventUsage` 增可选 `api_duration_ms`（轮内累计模型生成时长 ms，**不含工具执行窗口**；缺省=该引擎未计时，缺键不伪造）。三引擎生产：claude 桶 `callStartMs`/`turnApiDurationMs`（message_start 锚定+锚间折叠、message_delta 活刷新、message_stop 收口、onTurnEnd 归零防跨轮残留）；codex 生成窗口（模型输出事件锚定、tool_use 折叠、finishTurn 残段折叠、轮 start 归零，`_usageDelta` 单点搭车——usage_update 与 result usage 两路同源）；pi（text_delta 锚定、tool_execution_start/assistant message_end 折叠、turnUsage 搭车——turn_end 事件与 result 两路同源）。cursor 无逐调用 usage，不接（如实不显示）。schema（agent-event-schema.ts）同步放行。
+- **测试**：claude-events 22（含时钟回拨钳 0 反例 + golden 冻结注入时钟）、codex-app-server-driver 70（含工具 20s 不计入 + 跨轮归零状态断言）、pi-rpc-driver 91（含两窗口折叠求和），共 183 绿；typecheck 0。

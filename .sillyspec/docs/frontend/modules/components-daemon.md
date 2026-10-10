@@ -59,7 +59,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     自动投递；inject 失败（含 409 TURN_CONFLICT）队头 failed + 重试/删除（D-001~D-004）。
   - 消息生命周期：首条 `createSession` → 追问 `injectSession`（排队调度）→
     `interruptSession` → `endSession`；单条 `streamSession` SSE 贯穿，envelope
-    run_id 区分 turn。
+    run_id 区分 turn。tokens 事件增键 `duration_api_ms`（2026-10-10-live-token-
+    speed-daemon-timing）：daemon 逐调用计时实时累积的轮内生成时长（tok/s 分母，
+    不含工具窗口），onTokens → `turn.apiDurationMs`（?? 链不覆盖已收值）；
+    `turnTokenSpeedText` 门控为「双值可得即显示（任意状态）」——运行中实时速度，
+    缺数据不显示不伪造（cursor/旧 daemon 如实无速度段）。
   - 历史回看一致性（ql-20260822-010）：displayTurns 富集时按 runsMeta run 快照
     回补终态（`runTerminalTurnStatus`：failed→failed+errorDetail（无详情兜底
     「运行失败（无详情）」）、interrupted/cancelled→killed）——logsToTurns 一律
