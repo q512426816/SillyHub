@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-daemon-tombstone-change-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c6a7c34f424a3f3f6cbccb25dafbc6c2cce00c85",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 的 warn 语义（事件名 + 160 截断）无测试锁定，绑定用例仅断言执行器零调用",
+      "evidence": "FR-01 明文要求「warn 记录 sillyspec_tombstone_cleanup_invalid_change 后丢弃（截断至 160 字符）」，实现真实存在（daemon.ts:7414-7417 slice(0,160)+break），但 it.each 7 形态用例只断言 resolves.toBeUndefined 与 runTombstoneCleanup 零调用，warn 事件名与截断行为无任何断言（tests/sillyspec-tombstone-cleanup.test.ts 全文件无 invalid_change/160 相关 expect）——绑定作答名称里的「warn」仅是标题未落为断言；纯覆盖缺口，非行为缺陷（superseded 评审 P3-2 同点，本次仍未补）",
+      "location": "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts:322-331"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——校验在 _handleWsMessage 分发分支同步执行（daemon.ts:7414）、无状态常量正则，每条消息独立过同一白名单，结果与到达顺序无关，design「成立」作答与代码相符",
+    "并发": "ok——SAFE_CHANGE_NAME_RE 为模块级常量纯函数（daemon.ts:1585），无共享可变状态，通过后走既有串行队列，不新增并发面，design「无影响」作答与代码相符",
+    "切换": "ok——校验失败 warn+break 即整体丢弃、无半态（daemon.ts:7414-7419），通过后生命周期与变更前一致，design「安全」作答与代码相符",
+    "作用域": "ok——正则仅约束 change 字符集，workspaceId 原样透传、与工作区/实例解耦，design「不会串台」作答与代码相符；边界已裁决：可接受——(1) 选入口层而非执行器内校验：runTombstoneCleanup 全仓唯一实际调用点为 daemon.ts:7540 消息分支内，入口即全下发路径必经点，实证成立；(2) 放弃 _requireCommandPrecondition 内加校验：三 action 共用方法，resolve 路径已有 CLI assertSafeChangeName，重复校验混淆守卫分工，可接受；(3) 正则与 backend 同款/误伤零增量：daemon.ts:1585 与 machines.py:249/358/560 的 re.fullmatch 本体逐字节同款，backend 另有 '..' 子串拒绝而 daemon 无，但该字符集不含路径分隔符且首字符强制字母数字，无穿越面，稍宽松不构成正确性风险；(4) FR-02 测试绑定「不适用」：patch 中 sillyspec-manager.ts 与 machines.py 两 hunk 均仅 docstring 行，纯注释无行为面，属实；(5) 对外协议/合法 change 零变化：payload 结构未动仅新增拒绝分支，透传用例未改动，属实；(6) 三镜像「规则 21 债务清偿」定性：旧「daemon 侧目录定位有边界校验」文案三镜像 grep 0 次、新 SAFE_CHANGE_NAME_RE 文案各 1 次且与 machines.py docstring 逐字一致，镜像 diff 附带的 ChangePatchMeta/ChangeKnowledgeTouch 等其他 DTO 滞后描述一并收敛属再生成自然结果、schema 形状零变化，可接受"
+  },
+  "reviewedAt": "2026-10-10T08:01:00+08:00"
+}

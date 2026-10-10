@@ -1,0 +1,140 @@
+{
+  "change": "2026-10-10-daemon-tombstone-change-guard",
+  "baseline": "cd9c05193511d0c012f191bf73d03613c4a51576",
+  "head": "c6a7c34f424a3f3f6cbccb25dafbc6c2cce00c85",
+  "files": [
+    "backend/app/modules/daemon/router/machines.py",
+    "backend/openapi.json",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts",
+    ".sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/design.md",
+    ".sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/proposal.md",
+    ".sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/requirements.md",
+    ".sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/review.json.superseded-20261009T235835",
+    ".sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/tasks.md"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 230,
+    "deletions": 14
+  },
+  "savedAt": "2026-10-09T23:58:56.616Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "cd9c05193511d0c012f191bf73d03613c4a51576",
+    "totals": {
+      "files": 7,
+      "additions": 74,
+      "deletions": 14
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/router/machines.py",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 13,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 18,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "0ec475b320eb2cc3372bdb29fad3056d8230c53707076e42cfe8003d97478758",
+  "patchStatus": "ok"
+}

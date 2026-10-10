@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-daemon-tombstone-change-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-daemon-tombstone-change-guard:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts「%s → warn 丢弃不调用执行器（change 白名单）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-daemon-tombstone-change-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-daemon-tombstone-change-guard:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts「%s → warn 丢弃不调用执行器（change 白名单）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-daemon-tombstone-change-guard"
+    }
+  ]
+}

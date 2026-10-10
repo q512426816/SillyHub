@@ -1,0 +1,390 @@
+diff --git a/backend/app/modules/daemon/router/machines.py b/backend/app/modules/daemon/router/machines.py
+index d92b6d180..40c9f808f 100644
+--- a/backend/app/modules/daemon/router/machines.py
++++ b/backend/app/modules/daemon/router/machines.py
+@@ -343,8 +343,10 @@ class MachineSillySpecTombstoneCleanupRequest(BaseModel):
+     """Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
+ 
+     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
+-    其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
+-    双保险，backend 只做格式校验）。
++    其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则
++    ``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：
++    墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口
++    必须自拦截路径穿越形态）。
+     """
+ 
+     change: str
+diff --git a/backend/openapi.json b/backend/openapi.json
+index e1ed51cdc..b877ee625 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -40330,7 +40330,7 @@
+         },
+         "type": "object",
+         "title": "ChangePatchMeta",
+-        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。"
++        "description": "patch 留档统计（change-patch.json 优先，缺件回退 scope-audit.json；两缺 → None）。\n\n``files`` 是 CLI totals 的文件计数（既有语义不动）；``file_list`` 的清单投影\n按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面\n列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退\n形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。\n\n单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +\nchange-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，\n本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓\n存量旧形态归档。"
+       },
+       "ChangeProcessReq": {
+         "properties": {
+@@ -52022,7 +52022,7 @@
+           "workspace_id"
+         ],
+         "title": "MachineSillySpecTombstoneCleanupRequest",
+-        "description": "Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。\n\n``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，\n其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验\n双保险，backend 只做格式校验）。"
++        "description": "Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。\n\n``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，\n其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则\n``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：\n墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口\n必须自拦截路径穿越形态）。"
+       },
+       "MachineSillySpecUpdateRead": {
+         "properties": {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index fdcc2864f..cc4709154 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -14022,6 +14022,11 @@ export interface components {
+          *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+          *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+          *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
++         *
++         *     单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +
++         *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
++         *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
++         *     存量旧形态归档。
+          */
+         ChangePatchMeta: {
+             /** Files */
+@@ -19023,8 +19028,10 @@ export interface components {
+          * @description Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
+          *
+          *     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
+-         *     其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
+-         *     双保险，backend 只做格式校验）。
++         *     其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则
++         *     ``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：
++         *     墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口
++         *     必须自拦截路径穿越形态）。
+          */
+         MachineSillySpecTombstoneCleanupRequest: {
+             /** Change */
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index fa8530cce..cc4709154 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -13937,9 +13937,10 @@ export interface components {
+          * ChangeKnowledgeTouch
+          * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+          *
+-         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+-         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+-         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
++         *     本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
++         *     的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
++         *     定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
++         *     落盘，标记反查面拆除，此即唯一来源与口径）。
+          */
+         ChangeKnowledgeTouch: {
+             /** Id */
+@@ -14021,6 +14022,11 @@ export interface components {
+          *     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+          *     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+          *     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
++         *
++         *     单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +
++         *     change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
++         *     本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
++         *     存量旧形态归档。
+          */
+         ChangePatchMeta: {
+             /** Files */
+@@ -19022,8 +19028,10 @@ export interface components {
+          * @description Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
+          *
+          *     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
+-         *     其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
+-         *     双保险，backend 只做格式校验）。
++         *     其余字母数字/./-/_，长度 1-128，拒 ``..``）。daemon 入口另有同款正则
++         *     ``SAFE_CHANGE_NAME_RE`` 双端对齐（2026-10-10-daemon-tombstone-change-guard：
++         *     墓碑执行器的目录拼接/renameSync 在 daemon 侧完成、不经 CLI 校验，入口
++         *     必须自拦截路径穿越形态）。
+          */
+         MachineSillySpecTombstoneCleanupRequest: {
+             /** Change */
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 5c7395ac7..9fbeae0b4 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1575,6 +1575,15 @@ const SILLYSPEC_COMMAND_UPGRADE_POLL_MS = 1000;
+  */
+ const SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS = 300_000;
+ 
++/**
++ * sillyspec change 名白名单（2026-10-10-daemon-tombstone-change-guard）：与
++ * backend machines.py MachineSillySpecTombstoneCleanupRequest 同款正则——首字符
++ * 字母数字，其余字母数字/./-/_，长度 1-128。tombstone_cleanup 的目录拼接与
++ * renameSync 完全在 daemon 侧完成，CLI 的 assertSafeChangeName 不触及该值
++ * （后续 doctor 命令数组不含 change），入口必须自校验。
++ */
++const SAFE_CHANGE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
++
+ // ── Daemon class（核心）──────────────────────────────────────────────────────
+ 
+ /**
+@@ -7389,7 +7398,9 @@ export class Daemon {
+         // payload: {change, workspace_id}（2026-10-09-tombstone-conflict-root-fix
+         // FR-03：墓碑收敛——目录隔离区移动 + doctor 归档，执行归
+         // sillyspec-manager task-03）。值域校验同 resolve（缺 change /
+-        // workspace_id 非字符串 → warn 丢弃不崩）。
++        // workspace_id 非字符串 → warn 丢弃不崩）；change 另过白名单正则
++        // （2026-10-10-daemon-tombstone-change-guard：执行器在 daemon 侧直接
++        // join+renameSync，路径穿越形态必须入口拦截，CLI 校验不覆盖本路径）。
+         const change = typeof rawPayload.change === 'string' ? rawPayload.change : '';
+         const workspaceId =
+           typeof rawPayload.workspace_id === 'string' ? rawPayload.workspace_id : '';
+@@ -7400,6 +7411,12 @@ export class Daemon {
+           });
+           break;
+         }
++        if (!SAFE_CHANGE_NAME_RE.test(change)) {
++          this._logger.warn('sillyspec_tombstone_cleanup_invalid_change', {
++            change: change.slice(0, 160),
++          });
++          break;
++        }
+         this._logger.info('sillyspec_tombstone_cleanup_received', {
+           change,
+           workspace_id: workspaceId,
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index 6fec3e5d5..12f64fa3b 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -1274,8 +1274,11 @@ export class SillySpecManager {
+   /**
+    * 执行前置校验：cwd（statusCwd 回调根）与 sillyspec bin 双就绪才返回
+    * {cwd, bin}；任一缺失记 failed（不 spawn——无根/无 CLI 时起进程必错，还
+-   * 浪费超时窗）并返回 null。change 名不再重复校验：daemon.ts 入口已验非空、
+-   * backend 白名单 + CLI assertSafeChangeName 双保险，数组形参不经 shell。
++   * 浪费超时窗）并返回 null。change 名不在此重复校验——守卫面按路径分工
++   * （2026-10-10-daemon-tombstone-change-guard 对齐）：tombstone_cleanup 的
++   * 目录拼接/renameSync 全在 daemon 侧完成、不经 CLI，由 daemon.ts 入口
++   * SAFE_CHANGE_NAME_RE 白名单拦截；resolve 等数组形参路径由 CLI
++   * assertSafeChangeName 拦截（数组形参不经 shell）。
+    */
+   private _requireCommandPrecondition(
+     action: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup',
+diff --git a/sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts b/sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+index e70eaf000..d3c746ab4 100644
+--- a/sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+@@ -306,4 +306,27 @@ describe('task-03 case 分发：SILLYSPEC_TOMBSTONE_CLEANUP 直连路由', () =>
+     ).resolves.toBeUndefined();
+     expect(h.manager.runTombstoneCleanup).not.toHaveBeenCalled();
+   });
++
++  // 2026-10-10-daemon-tombstone-change-guard：change 白名单（与 backend
++  // machines.py MachineSillySpecTombstoneCleanupRequest 同款正则）。本执行器
++  // 的目录拼接/renameSync 在 daemon 侧完成、不经 CLI assertSafeChangeName，
++  // 入口必须自校验——路径穿越/分隔符/非法首字符/超长一律 warn 丢弃。
++  it.each([
++    ['路径穿越 ../evil', { change: '../evil', workspace_id: 'ws-1' }],
++    ['反斜杠穿越 ..\\evil', { change: '..\\evil', workspace_id: 'ws-1' }],
++    ['正斜杠分隔 a/b', { change: 'a/b', workspace_id: 'ws-1' }],
++    ['非法首字符 .hidden', { change: '.hidden', workspace_id: 'ws-1' }],
++    ['非法首字符 -lead', { change: '-lead', workspace_id: 'ws-1' }],
++    ['含空格 my change', { change: 'my change', workspace_id: 'ws-1' }],
++    ['超长 129 字符', { change: 'a'.repeat(129), workspace_id: 'ws-1' }],
++  ])('%s → warn 丢弃不调用执行器（change 白名单）', async (_name, payload) => {
++    const h = makeDispatchHarness();
++    await expect(
++      h.handleWsMessage({
++        type: MSG.SILLYSPEC_TOMBSTONE_CLEANUP,
++        payload: payload as Record<string, unknown>,
++      }),
++    ).resolves.toBeUndefined();
++    expect(h.manager.runTombstoneCleanup).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/design.md b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T23:47:00.931Z
++---
++# 设计记录（Design Record）— 2026-10-10-daemon-tombstone-change-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查发现：墓碑隔离执行器（runTombstoneCleanup）在 daemon 侧用 `join(pre.cwd, '.sillyspec', 'changes', change)` 直接拼接路径并 `renameSync` 整目录移动，而 daemon.ts 入口只校验 change 非空字符串；后续 doctor 命令数组不含 change，CLI 的 assertSafeChangeName 对该值不生效——路径穿越形态的 change 若经任一下发入口到达 daemon，可把工作区目录树外的同盘目录移进隔离区。当前两条入口（backend 手动端点白名单 + 自动环 DB change_key 均为目录名派生）都拦住了它，但纵深防御为零且两端注释互相声称对方有校验。方案：在 daemon.ts 消息入口加与 backend machines.py 同款的白名单正则 `SAFE_CHANGE_NAME_RE`，非法即 warn 丢弃（与既有「缺字段 warn 丢弃」同模式、同层）；同时把 sillyspec-manager.ts 与 machines.py 两处虚假注释改写为如实分工描述。选入口层而非执行器内部校验：入口是所有下发路径的必经点，一层拦截全路径；执行器保持纯执行职责。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `sillyhub-daemon/src/daemon.ts`：新增模块级常量 `SAFE_CHANGE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/`；`_handleWsMessage` 的 `MSG.SILLYSPEC_TOMBSTONE_CLEANUP` 分支在非空校验后追加白名单校验，不匹配 → warn `sillyspec_tombstone_cleanup_invalid_change`（change 截断 160 字符）后 break。对外协议（消息类型/payload）零变化；合法 change 行为零变化（透传语义用例不动）。
++- `sillyhub-daemon/src/sillyspec-manager.ts` 与 `backend/app/modules/daemon/router/machines.py`：仅 docstring 注释改写，无代码行为变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立：校验在消息分发入口同步执行、无状态，乱序/迟到消息每条独立过同一正则，结果与到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   无影响：正则为纯函数、常量无共享可变状态；校验通过后路由进既有 FIFO 命令队列（_runSillySpecCommand 串行），不新增并发面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全：校验失败即丢弃（fire-and-forget warn），无半态；校验通过走既有队列生命周期，中断语义与本变更前完全一致。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会：正则只约束 change 字符集，与 workspaceId 解耦；跨工作区/多实例下发各自独立过同一白名单，无跨域共享状态。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：白名单过严误伤合法 change 名（如未来出现含中文/空格的目录名）——现网 change_key 全部为 `YYYY-MM-DD-<slug>` 形态（目录名派生），正则与 backend 手动端点已长期同款，收紧面两端一致，误伤面为零增量。试过但放弃：在执行器 `_requireCommandPrecondition` 内加校验——该方法被 resolve/ghost_cleanup/tombstone_cleanup 三路共用，resolve 路径 change 经 CLI 数组形参已有 assertSafeChangeName，重复校验混淆守卫分工；且消息入口层一层拦截覆盖所有下发路径，更完整。
++
++## 文件变更清单（自声明）
++
++交付文件（7 个）：
++
++1. `sillyhub-daemon/src/daemon.ts`——SAFE_CHANGE_NAME_RE 常量 + TOMBSTONE_CLEANUP 分支白名单校验（task-01）
++2. `sillyhub-daemon/src/sillyspec-manager.ts`——_requireCommandPrecondition docstring 如实化（task-02）
++3. `backend/app/modules/daemon/router/machines.py`——请求体 docstring 如实化（task-02）
++4. `sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts`——非法形态 it.each 7 用例（task-03）
++5. `backend/openapi.json`——machines.py docstring 变化的生成物镜像（规则 21 债务清偿，评审 P3-1 处置）
++6. `frontend/src/lib/api-types.ts`——同上生成物镜像
++7. `sillyhub-daemon/src/api-types.ts`——同上生成物镜像
+
+diff --git a/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/proposal.md b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T23:47:00.931Z
++---
++# 提案书（Proposal）— 2026-10-10-daemon-tombstone-change-guard
++
++## 动机
++
++任务原话转写：24h 审查发现墓碑隔离执行器在 daemon 侧对 change 名零格式校验直接拼路径 renameSync，两端注释互相声称对方/CLI 有校验实际不存在，补白名单正则收口纵深缺口。
++成功标准：
++- SILLYSPEC_TOMBSTONE_CLEANUP 入口对 change 白名单校验（首字符字母数字、其余 [A-Za-z0-9._-]、长度 1-128、拒 ..），非法值 warn 丢弃不路由执行器，正则与 backend machines.py 同款
++- sillyspec-manager.ts _requireCommandPrecondition 注释与 machines.py 请求体注释改写为与实现一致（daemon 入口白名单真实存在后声明成立），不再引用不生效的 CLI assertSafeChangeName
++- 新增非法 change 形态用例先红后绿（路径穿越/分隔符/非法首字符/超长）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. SILLYSPEC_TOMBSTONE_CLEANUP 入口对 change 白名单校验（首字符字母数字、其余 [A-Za-z0-9._-]、长度 1-128、拒 ..），非法值 warn 丢弃不路由执行器，正则与 backend machines.py 同款
++2. sillyspec-manager.ts _requireCommandPrecondition 注释与 machines.py 请求体注释改写为与实现一致（daemon 入口白名单真实存在后声明成立），不再引用不生效的 CLI assertSafeChangeName
++3. 新增非法 change 形态用例先红后绿（路径穿越/分隔符/非法首字符/超长）
++
++## 成功标准（可验证）
++
++1. SILLYSPEC_TOMBSTONE_CLEANUP 入口对 change 白名单校验（首字符字母数字、其余 [A-Za-z0-9._-]、长度 1-128、拒 ..），非法值 warn 丢弃不路由执行器，正则与 backend machines.py 同款
++2. sillyspec-manager.ts _requireCommandPrecondition 注释与 machines.py 请求体注释改写为与实现一致（daemon 入口白名单真实存在后声明成立），不再引用不生效的 CLI assertSafeChangeName
++3. 新增非法 change 形态用例先红后绿（路径穿越/分隔符/非法首字符/超长）
+
+diff --git a/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/requirements.md b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/requirements.md
+@@ -0,0 +1,39 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T23:47:00.931Z
++---
++# 需求规格（Requirements）— 2026-10-10-daemon-tombstone-change-guard
++
++## 功能需求
++
++### FR-01: SILLYSPEC_TOMBSTONE_CLEANUP 入口对 change 白名单校验（首字符字母数字、其余 [A-Za-z0-9._-]、长度 1-128、拒 ..），非法值 warn 丢弃不路由执行器，正则与 backend machines.py 同款
++
++- daemon 收到 SILLYSPEC_TOMBSTONE_CLEANUP 消息时，change 必须匹配白名单正则 `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`（与 backend machines.py MachineSillySpecTombstoneCleanupRequest 同款）；不匹配的 change 禁止路由到执行器，必须 warn 记录 `sillyspec_tombstone_cleanup_invalid_change` 后丢弃（warn 截断至 160 字符）。
++
++#### 场景：主路径
++
++Given daemon 在线且收到合法 change（如 `2026-10-09-demo-change`）的墓碑清理消息 / When 消息分发 / When 执行器 `runTombstoneCleanup(change, workspaceId)` 原样透传（既有用例不动）。
++Given change 为 `../evil`、`..\evil`、`a/b`、`.hidden`、`-lead`、`my change` 或 129 字符超长 / When 消息分发 / Then 执行器零调用、warn 丢弃不崩。
++
++### FR-02: sillyspec-manager.ts _requireCommandPrecondition 注释与 machines.py 请求体注释改写为与实现一致（daemon 入口白名单真实存在后声明成立），不再引用不生效的 CLI assertSafeChangeName
++
++- 两处注释必须如实描述守卫面分工：tombstone_cleanup 路径由 daemon.ts 入口 `SAFE_CHANGE_NAME_RE` 白名单拦截（目录拼接/renameSync 在 daemon 侧完成、不经 CLI）；resolve 等数组形参路径仍由 CLI assertSafeChangeName 拦截。禁止再声称「CLI assertSafeChangeName 双保险」覆盖墓碑路径。
++
++#### 场景：主路径
++
++Given 读者查阅 `_requireCommandPrecondition` docstring 与 `MachineSillySpecTombstoneCleanupRequest` docstring / When 对照 daemon.ts 入口实现 / Then 注释声明的每一道防线都能在代码中指认到落点（规则 18：注释与实现一致）。
++
++### FR-03: 新增非法 change 形态用例先红后绿（路径穿越/分隔符/非法首字符/超长）
++
++- 测试必须以 it.each 覆盖 7 种非法形态（`../evil` / `..\evil` / `a/b` / `.hidden` / `-lead` / `my change` / 129 字符），断言执行器零调用；实现前运行该组用例必须红（7 failed），实现后必须全绿（16/16）。
++
++#### 场景：主路径
++
++Given 未加白名单的旧实现 / When 跑新增用例 / Then 7 用例全红（执行器被透传调用）。
++Given 加白名单后的新实现 / When 同组用例 / Then 全绿且旧 9 用例零回归。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts「%s → warn 丢弃不调用执行器（change 白名单）」（it.each 7 形态）
++FR-02: 不适用：纯注释修正无行为面，一致性由人工对照 daemon.ts:SAFE_CHANGE_NAME_RE 落点核验
++FR-03: sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts「%s → warn 丢弃不调用执行器（change 白名单）」（先红 7 failed 实证于 2026-10-10 07:47 运行，后绿 16/16 实证于 07:48 运行）
+
+diff --git a/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/review.json.superseded-20261009T235835 b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/review.json.superseded-20261009T235835
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/review.json.superseded-20261009T235835
+@@ -0,0 +1,28 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-10-daemon-tombstone-change-guard",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "1ce0abd2570e0d0a699302ea364e78df8cccf228",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "生成物未同步：machines.py 墓碑 docstring 改写后，三个 OpenAPI 生成镜像仍携带被 FR-02 判定为虚假的旧「双保险」文案",
++      "evidence": "backend/app/modules/daemon/router/machines.py 的 MachineSillySpecTombstoneCleanupRequest docstring 已改为如实分工描述，但 backend/openapi.json（旧文案「daemon 侧目录定位有边界校验」出现 1 次、SAFE_CHANGE_NAME_RE 0 次）、frontend/src/lib/api-types.ts:19022-19028、sillyhub-daemon/src/api-types.ts:19021-19027（文件头声明 auto-generated by openapi-typescript）均未再生成，仍携带「daemon 侧目录定位有边界校验双保险，backend 只做格式校验」旧文案——FR-02 要清除的虚假声明在生成镜像里继续存活；schema 形状未变仅描述文本滞后，无行为风险",
++      "location": "sillyhub-daemon/src/api-types.ts:19021-19027; frontend/src/lib/api-types.ts:19022-19028; backend/openapi.json"
++    },
++    {
++      "severity": "P3",
++      "title": "FR-01 绑定测试未断言 warn 事件与 160 截断，仅断言执行器零调用",
++      "evidence": "FR-01 要求「warn 记录 sillyspec_tombstone_cleanup_invalid_change 后丢弃（warn 截断至 160 字符）」，daemon.ts:7414-7418 已实现（slice(0,160)+break）；但测试 it.each 7 形态（tests/sillyspec-tombstone-cleanup.test.ts:314-331）只断言 resolves.toBeUndefined 与 runTombstoneCleanup 零调用，warn 语义无测试锁定，绑定作答名称中的「warn」仅是标题",
++      "location": "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts:322-331"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok——校验在消息分发入口同步执行、无状态纯函数正则（daemon.ts:7414），每条消息独立过同一白名单，结果与到达顺序无关，design「成立」作答属实",
++    "并发": "ok——常量正则无共享可变状态，校验通过后路由进既有 FIFO 串行队列 _runSillySpecCommand（daemon.ts:7536-7541），不新增并发面，design「无影响」作答属实",
++    "切换": "ok——校验失败 warn+break 即丢弃（daemon.ts:7414-7419），无半态残留，design「安全」作答属实",
++    "作用域": "ok——正则仅约束 change 字符集，workspaceId 原样透传（daemon.ts:7404-7406），与工作区/实例解耦，design「不会串台」作答属实；边界裁决：选入口层而非执行器内校验——可接受（runTombstoneCleanup 全仓唯一调用点为 daemon.ts:7540 消息分支内，入口即全路径必经点，实证成立）；白名单过严误伤面零增量——可接受（正则与 machines.py:358 逐字节同款；daemon 虽缺 backend 的 \"..\" 子串额外拒（如 a..b），但无路径分隔符即无穿越面，无正确性风险）；放弃 _requireCommandPrecondition 内加校验——可接受（三 action 共用方法，重复校验混淆守卫分工）；FR-02 测试绑定「不适用」——可接受（patch 中两文件均为 docstring-only）；对外协议零变化/合法 change 零变化——可接受（透传用例零改动且绿）"
++  },
++  "reviewedAt": "2026-10-10T07:56:28+08:00"
++}
+
+diff --git a/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/tasks.md b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-daemon-tombstone-change-guard/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T23:47:00.931Z
++---
++# 任务注册表（Tasks）— 2026-10-10-daemon-tombstone-change-guard
++
++- [x] task-01: SILLYSPEC_TOMBSTONE_CLEANUP 入口对 change 白名单校验（首字符字母数字、其余 [A-Za-z0-9._-]、长度 1-128、拒 ..），非法值 warn 丢弃不路由执行器，正则与 backend machines.py 同款
++- [x] task-02: sillyspec-manager.ts _requireCommandPrecondition 注释与 machines.py 请求体注释改写为与实现一致（daemon 入口白名单真实存在后声明成立），不再引用不生效的 CLI assertSafeChangeName
++- [x] task-03: 新增非法 change 形态用例先红后绿（路径穿越/分隔符/非法首字符/超长）
