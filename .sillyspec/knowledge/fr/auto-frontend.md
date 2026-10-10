@@ -956,3 +956,22 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-change-patch-cross-repo-view
   status: active
+
+## FR-auto-frontend-167 session-panel-variant 回归锚用例断言随导航阈值放宽翻转（1 轮 fixture 导航列渲染）
+变更：2026-10-10-variant-test-nav-flip
+状态：active
+摘要：断言翻转后全绿
+全文：.sillyspec/changes/archive/2026-10-10-variant-test-nav-flip/requirements.md#FR-01
+最近确认：589d2691b4a6dc32ae723617030bce6a58f4c339
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-variant-test-nav-flip:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「不传 variant：根/头部 className 与改前字面量逐字一致，桌面 chrome 原位、无 ⋯ 菜单」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-variant-test-nav-flip
+  status: active

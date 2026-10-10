@@ -1,0 +1,181 @@
+diff --git a/.sillyspec/changes/2026-10-10-variant-test-nav-flip/flow-state.yaml b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/flow-state.yaml
+new file mode 100644
+index 000000000..686bfa62e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  上一变更 2026-10-10-single-turn-nav-and-jump-head（已归档）把轮次导航隐藏阈值 <3 放宽为 <1，但漏跑了 session-panel-variant.test.tsx——其回归锚用例用 1 轮
++  fixture 断言「轮次导航不存在」（锁旧 ql-20260909-005 行为，注释本就预留「常驻断言随行为翻转」），当前 HEAD 该用例红。
++
++  成功标准：
++
++  - session-panel-variant.test.tsx 回归锚用例断言翻转为「1 轮 fixture 导航列渲染」，全文件绿
++
++  - 轮次导航相关全部测试文件（turn-nav-list / turn-catalog / session-history-scroll / page.test / session-panel-history-race /
++  session-panel-variant）全绿
++
++  - 除该断言外零代码改动
++autopilot: true
++baseline_commit: 3d6a5a58b1e9123ccac9fdbe6a30de8c800e2030
++updatedAt: '2026-10-10T11:53:02.346Z'
++baseline_sha256: 4e186b9a7ed63801171131b329100bcae627e596eff9b18e25908dcf85e92bc1
++
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+index f21aa0289..3ecbcca7c 100644
+--- a/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx
+@@ -302,14 +302,13 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
+     const flexRow = chatCol.parentElement as HTMLElement;
+     expect(flexRow.className).toBe("flex min-h-0 flex-1");
+     expect(flexRow.parentElement).toBe(panel);
+-    // ql-20260909-005：轮次 <3 导航列整条隐藏（短会话回收占位）——本
+-    // fixture 仅 1 轮，断言列不渲染（常驻断言随行为翻转；≥3 轮形态由
+-    // turn-nav-list 组件测试覆盖）。2026-09-27-session-fast-replay task-04：
+-    // 挂载组件 TurnCatalog → TurnNavList（行式导航列，aria-label 随改「轮次导航」，
+-    // 断言意图不变：短会话不渲染导航）。
++    // 2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005「轮次 <3 导航
++    // 列整条隐藏」随 FR-01 阈值放宽（<3→<1）翻转——本 fixture 仅 1 轮，断言
++    // 导航列**渲染**（TurnNavList，aria-label「轮次导航」；原注释预留「常驻断言
++    // 随行为翻转」）；≥3 轮形态由 turn-nav-list 组件测试覆盖。
+     expect(
+-      within(flexRow).queryByRole("navigation", { name: "轮次导航" }),
+-    ).not.toBeInTheDocument();
++      within(flexRow).getByRole("navigation", { name: "轮次导航" }),
++    ).toBeInTheDocument();
+   });
+ 
+   it("显式 variant='desktop'：与不传渲染一致（分发函数默认值归一）", async () => {
+diff --git a/.sillyspec/changes/2026-10-10-variant-test-nav-flip/design.md b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/design.md
+new file mode 100644
+index 000000000..fe7f77d3a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/design.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:53:02.321Z
++---
++# 设计记录（Design Record）— 2026-10-10-variant-test-nav-flip
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++已归档变更 2026-10-10-single-turn-nav-and-jump-head 把轮次导航隐藏阈值 <3 放宽为 <1，但其测试验收子集漏跑了 `session-panel-variant.test.tsx`——该文件回归锚用例用 1 轮 fixture 断言「轮次导航不存在」（锁旧 ql-20260909-005 行为，原注释本就预留「常驻断言随行为翻转」），当前 HEAD 红。本变更只翻转这一处断言为「导航列渲染」并同步注释，与 FR-01 语义对齐；不改任何产品代码（组件行为已正确，红的只是过时断言）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无——仅测试断言与注释，零产品代码改动，无接口/签名变化。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | 回归锚用例导航断言 not.toBeInTheDocument → toBeInTheDocument + 注释更新 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：纯测试断言翻转，无运行时输入/事件面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：单测试文件单断言编辑，无共享数据面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用：测试文件静态内容，无生命周期面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：断言作用域为该测试文件内 flexRow 容器，无跨面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：无（断言翻转有组件测试 turn-nav-list「单轮渲染」用例与本次 6 文件 107/107 全绿双重佐证）。未试过其它方案——「改组件迁就旧断言」会直接违反已归档 FR-01，不在考虑内。
+diff --git a/.sillyspec/changes/2026-10-10-variant-test-nav-flip/proposal.md b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/proposal.md
+new file mode 100644
+index 000000000..9b2a2d02d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:53:02.320Z
++---
++# 提案书（Proposal）— 2026-10-10-variant-test-nav-flip
++
++## 动机
++
++任务原话转写：上一变更 2026-10-10-single-turn-nav-and-jump-head（已归档）把轮次导航隐藏阈值 <3 放宽为 <1，但漏跑了 session-panel-variant.test.tsx——其回归锚用例用 1 轮 fixture 断言「轮次导航不存在」（锁旧 ql-20260909-005 行为，注释本就预留「常驻断言随行为翻转」），当前 HEAD 该用例红。
++成功标准：
++- session-panel-variant.test.tsx 回归锚用例断言翻转为「1 轮 fixture 导航列渲染」，全文件绿
++- 轮次导航相关全部测试文件（turn-nav-list / turn-catalog / session-history-scroll / page.test / session-panel-history-race / session-panel-variant）全绿
++- 除该断言外零代码改动
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. session-panel-variant.test.tsx 回归锚用例断言翻转为「1 轮 fixture 导航列渲染」，全文件绿
++2. 轮次导航相关全部测试文件（turn-nav-list / turn-catalog / session-history-scroll / page.test / session-panel-history-race / session-panel-variant）全绿
++3. 除该断言外零代码改动
++
++## 成功标准（可验证）
++
++1. session-panel-variant.test.tsx 回归锚用例断言翻转为「1 轮 fixture 导航列渲染」，全文件绿
++2. 轮次导航相关全部测试文件（turn-nav-list / turn-catalog / session-history-scroll / page.test / session-panel-history-race / session-panel-variant）全绿
++3. 除该断言外零代码改动
+diff --git a/.sillyspec/changes/2026-10-10-variant-test-nav-flip/requirements.md b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/requirements.md
+new file mode 100644
+index 000000000..accbd1e2b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/requirements.md
+@@ -0,0 +1,21 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:53:02.321Z
++---
++# 需求规格（Requirements）— 2026-10-10-variant-test-nav-flip
++
++## 功能需求
++
++### FR-01: session-panel-variant 回归锚用例断言随导航阈值放宽翻转（1 轮 fixture 导航列渲染）
++
++- `session-panel-variant.test.tsx` 的「不传 variant：根/头部 className 与改前字面量逐字一致」用例必须把「轮次导航不存在」断言（锁旧 ql-20260909-005 <3 隐藏行为，注释预留「常驻断言随行为翻转」）翻转为「导航列渲染」，与已归档变更 2026-10-10-single-turn-nav-and-jump-head 的 FR-01（阈值 <3→<1）一致；除该断言与注释外必须零改动。
++
++#### 场景：断言翻转后全绿
++
++- Given 当前 HEAD（阈值已放宽）
++- When 运行 session-panel-variant.test.tsx
++- Then 回归锚用例通过（1 轮 fixture 下 `getByRole("navigation", { name: "轮次导航" })` 命中），全文件 10/10 绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx「不传 variant：根/头部 className 与改前字面量逐字一致，桌面 chrome 原位、无 ⋯ 菜单」
+diff --git a/.sillyspec/changes/2026-10-10-variant-test-nav-flip/tasks.md b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/tasks.md
+new file mode 100644
+index 000000000..d0355c6bc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-variant-test-nav-flip/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:53:02.321Z
++---
++# 任务注册表（Tasks）— 2026-10-10-variant-test-nav-flip
++
++- [x] task-01: session-panel-variant.test.tsx 回归锚用例断言翻转为「1 轮 fixture 导航列渲染」，全文件绿（10/10）
++- [x] task-02: 轮次导航相关全部测试文件（turn-nav-list / turn-catalog / session-history-scroll / page.test / session-panel-history-race / session-panel-variant）全绿（6 文件 107/107）
++- [x] task-03: 除该断言外零代码改动（交付提交 4760d71 上一笔仅 session-panel-variant.test.tsx 单文件、断言+注释，git show 可核）

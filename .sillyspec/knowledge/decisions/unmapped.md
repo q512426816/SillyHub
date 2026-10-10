@@ -2043,3 +2043,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
 理由：最大风险：patch 正文内联使 change-patch.json 体积增大（跨仓多文件大 diff），预览链若对 JSON 全量 parse 可能耗内存——但 DiffView 已有 2000 行增量渲染兜底 DOM 面，且折叠默认收起，渲染成本可控；JSON.parse 本身是预览链既有成本，非本变更引入。 试过但放弃的方案：① 在变更中心 scope-audit 实时查询链（command-card）加 patch 面——该链是实时对账（快照说当下），无冻结正文书，且要动 daemon 投影白名单（repoPath 剥离逻辑），面大不做；冻结正文归属 change-patch.json 读侧。② patch 正文落独立文件族（change-patch-cross-repo/<key>.patch）——违背 2026-10-09-close-trace-single-set 单套两件纪律，producer 侧设计已显式否决（D-001@v1），平台侧不翻案。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-variant-test-nav-flip
+锚点：未记录
+最近确认：589d2691b4a6dc32ae723617030bce6a58f4c339
+理由：最大风险：无（断言翻转有组件测试 turn-nav-list「单轮渲染」用例与本次 6 文件 107/107 全绿双重佐证）。未试过其它方案——「改组件迁就旧断言」会直接违反已归档 FR-01，不在考虑内。
