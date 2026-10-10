@@ -107,6 +107,7 @@ describe('mcp-config: loadPlatformMcpConfig', () => {
 
 // task-07: backend 拉 + 回落
 import { fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend } from '../src/mcp-config.js';
+import { PROVIDER_CAPS, isMainAgentMcpCandidate } from '../src/interactive/providers.js';
 
 describe('mcp-config: fetchPlatformMcpConfig（task-07 backend 拉）', () => {
   it('200 + platform_default → 返回 mcpServers', async () => {
@@ -660,5 +661,48 @@ describe('mcp-config: fetchMcpBundle user_id 查询参数（task-06 / D-008@v2�
     const calledUrl = String(spy.mock.calls[0]?.[0]);
     expect(calledUrl).toBe('http://hub:8000/api/daemon/mcp/config');
     spy.mockRestore();
+  });
+});
+
+// ── 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控 MCP 注入谓词能力化 ──
+// 谓词行为跟随 PROVIDER_CAPS 的 mcp 键（数据驱动）：caps.mcp=true 引擎 × stage 缺省/orchestrator 注入，
+// mission_worker 不进主控；caps.mcp=false 引擎与未知 provider 一律 false（默认拒绝不抛错，Grill B-3）。
+// 翻值（task-08）后本矩阵自动跟随 caps 表，无需改测试。
+describe('mcp-config: isMainAgentMcpCandidate 谓词能力化（task-04 D-001@v1）', () => {
+  const engines = Object.keys(PROVIDER_CAPS);
+
+  it('未知 provider 默认拒绝且不抛错（禁直下标语义）', () => {
+    expect(() => isMainAgentMcpCandidate({ provider: 'no-such-engine' })).not.toThrow();
+    expect(isMainAgentMcpCandidate({ provider: 'no-such-engine' })).toBe(false);
+  });
+
+  it('caps.mcp=true 引擎：stage 缺省与 orchestrator 注入', () => {
+    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
+      expect(isMainAgentMcpCandidate({ provider: e })).toBe(true);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: undefined })).toBe(true);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: null })).toBe(true);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: '' })).toBe(true);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(true);
+    }
+  });
+
+  it('caps.mcp=true 引擎：mission_worker 与其它非空 stage 不进主控', () => {
+    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
+      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: 'unknown_stage' })).toBe(false);
+    }
+  });
+
+  it('caps.mcp=false 引擎：任意 stage 均不注入（现状行为保持）', () => {
+    for (const e of engines.filter((k) => !PROVIDER_CAPS[k].mcp)) {
+      expect(isMainAgentMcpCandidate({ provider: e })).toBe(false);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(false);
+      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
+    }
+  });
+
+  it('claude 引擎恒在注入集（回归锚：claude 链路零变化）', () => {
+    expect(PROVIDER_CAPS.claude.mcp).toBe(true);
+    expect(isMainAgentMcpCandidate({ provider: 'claude' })).toBe(true);
   });
 });

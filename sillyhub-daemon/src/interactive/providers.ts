@@ -474,6 +474,29 @@ export function getProviderCaps(provider: string): ProviderCaps {
   };
 }
 
+/**
+ * 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控/普通会话 MCP
+ * 注入候选判定（引擎无关纯函数，无副作用可单测）。
+ *
+ * 取代 cli.ts 装配处 `provider !== 'claude'` 硬拒（2026-08-26-workspace-mcp-edit
+ * D-008 时代仅 claude 消费 mcpServers 的口径）：改为按能力矩阵 mcp 键判定——
+ * caps.mcp=true 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值后）均
+ * 进入主控注入；未知 provider 经 getProviderCaps 默认拒绝（mcp=false），禁止
+ * 对 PROVIDER_CAPS 直接下标（undefined 链 TypeError，Grill B-3）。
+ *
+ * stage 判定维持原口径：缺省（''）= 普通会话常驻注入；'orchestrator' = 存量
+ * 外部主控照常注入；'mission_worker'（分身）不进本判定——分身走 isWorkerSession
+ * 受限注入（cli.ts:1118-1120 维持 claude-only，D-002 循既有 D-008@v1 治理决策）。
+ */
+export function isMainAgentMcpCandidate(ctx: {
+  provider: string;
+  stage?: string | null;
+}): boolean {
+  if (!getProviderCaps(ctx.provider).mcp) return false;
+  const stage = ctx.stage ?? '';
+  return stage === '' || stage === 'orchestrator';
+}
+
 // ── task-05（FR-05 / design §5.2）：provider 注册表 ───────────────────────────
 //
 // 分层：上方 PROVIDER_CAPS 是能力矩阵单源（task-02，内容不动）；本节在其上建

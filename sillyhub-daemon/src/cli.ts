@@ -77,6 +77,7 @@ import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
 // createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
 import { CursorDriver } from './interactive/cursor-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
+import { isMainAgentMcpCandidate } from './interactive/providers.js';
 import type { SessionEventForBackend } from './interactive/types.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
@@ -960,18 +961,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // isMainAgentSession：读 ctx.provider + ctx.stage 判定本 session 是否注入
       // 主 agent MCP tool。链路：backend 写 lease.metadata.stage → daemon claim
       // payload stage（lease/context.py:479）→ execPayload.stage（daemon.ts:3760）
-      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。判据
-      // （design §5 Phase 2）：
-      //   - provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true：
-      //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
-      //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
-      //   - provider=claude 且 stage='mission_worker'（backend execution.py
-      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不进主控分支（防 worker
-      //     递归派发与 converge 干扰，审查 CC-12）——但改走下方 isWorkerSession
-      //     分支注入受限 server（task-06 2026-08-25-team-subsession-governance
-      //     / D-003@v1，谓词三态化：普通 / 主控 / 分身）；其它非空 stage 值不注入。
-      //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
-      //     不消费 mcpServers，另立后续变更）。
+      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。
+      //
+      // 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）能力化：判定逻辑
+      // 单源收编 providers.ts isMainAgentMcpCandidate——provider !== 'claude' 硬拒
+      // （2026-08-26-workspace-mcp-edit 时代口径，codex 旧注释 D-003@v1"另立后续
+      // 变更"即本变更）改为按 getProviderCaps(provider).mcp 判定：caps.mcp=true
+      // 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值）注入，未知
+      // provider 默认拒绝；stage 判定维持原口径（缺省/orchestrator 注入）。
+      //   - stage='mission_worker'（分身）不进主控分支——isWorkerSession（下方）
+      //     维持 claude-only 受限注入（D-002 循既有 D-008@v1 治理决策，未放开）。
       //
       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
       // task-07（2026-08-26-workspace-mcp-edit）起为三件套合并注入：读会话级缓存
@@ -990,11 +989,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
       // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
       // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
-      isMainAgentSession: (ctx) => {
-        if (ctx.provider !== 'claude') return false;
-        const stage = ctx.stage ?? '';
-        return stage === '' || stage === 'orchestrator';
-      },
+      isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx),
       mainAgentMcpConfigProvider: (ctx) => {
         // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
         // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。
