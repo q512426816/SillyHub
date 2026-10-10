@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-task-wakeup-quiet-threshold",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务不唤醒（elapsed_ms 2s）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「长任务照常唤醒（elapsed_ms 61s）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「elapsed_ms 缺失用 startedAt 兜底判时长」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「时长无从判定（无 elapsed 无注册条目）保持唤醒」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_queue.py「通知不占用户 5 条额度」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_queue.py「队满时系统通知不丢（入队成功）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_queue.py「用户满员语义零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-task-wakeup-quiet-threshold"
+    }
+  ]
+}

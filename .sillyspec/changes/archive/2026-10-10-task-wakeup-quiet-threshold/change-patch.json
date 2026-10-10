@@ -1,0 +1,227 @@
+{
+  "change": "2026-10-10-task-wakeup-quiet-threshold",
+  "baseline": "ea376aa085d466f3c3ea01429b237f514543a921",
+  "head": "9852d96f58056927f03e7497ec1a609c7b75eed3",
+  "files": [
+    ".sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/design.md",
+    ".sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/proposal.md",
+    ".sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/requirements.md",
+    ".sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/tasks.md",
+    ".sillyspec/docs/SillyHub/modules/daemon.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+    ".sillyspec/docs/SillyHub/modules/llm_provider.md",
+    ".sillyspec/docs/backend/modules/daemon.md",
+    ".sillyspec/docs/frontend/modules/components-daemon.md",
+    ".sillyspec/docs/multi-agent-platform/modules/_module-map.yaml",
+    ".sillyspec/docs/multi-agent-platform/modules/backend.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/daemon.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/types.md",
+    "backend/app/modules/daemon/session/service/queue.py",
+    "backend/app/modules/daemon/tests/test_session_queue.py",
+    "docs/sillyspec/archived-change-resurrect-by-merge.md",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 20,
+    "additions": 515,
+    "deletions": 23
+  },
+  "savedAt": "2026-10-10T14:17:11.419Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ea376aa085d466f3c3ea01429b237f514543a921",
+    "totals": {
+      "files": 16,
+      "additions": 275,
+      "deletions": 23
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+        "additions": 8,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/llm_provider.md",
+        "additions": 11,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/components-daemon.md",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/_module-map.yaml",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/daemon.md",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/types.md",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/queue.py",
+        "additions": 16,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+        "additions": 66,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/sillyspec/archived-change-resurrect-by-merge.md",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 21,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 86,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c4b0ff271b0d6986ec1482e6019b0aeb3174854b9a971cc5a061cde07792fb6f",
+  "patchStatus": "ok"
+}

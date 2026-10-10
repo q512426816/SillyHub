@@ -498,3 +498,55 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-10-recheck-lease-freshness
   status: active
+
+## FR-auto-backend-148 daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
+变更：2026-10-10-task-wakeup-quiet-threshold
+状态：active
+摘要：短任务静默；长任务照常唤醒；时长无从判定保持原行为
+全文：.sillyspec/changes/archive/2026-10-10-task-wakeup-quiet-threshold/requirements.md#FR-01
+最近确认：9852d96f58056927f03e7497ec1a609c7b75eed3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「时长无从判定（无 elapsed 无注册条目）保持唤醒」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-task-wakeup-quiet-threshold
+  status: active
+
+## FR-auto-backend-149 backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
+变更：2026-10-10-task-wakeup-quiet-threshold
+状态：active
+摘要：通知不占用户额度；队满时通知不被丢弃；用户满员语义零回归
+全文：.sillyspec/changes/archive/2026-10-10-task-wakeup-quiet-threshold/requirements.md#FR-02
+最近确认：9852d96f58056927f03e7497ec1a609c7b75eed3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-task-wakeup-quiet-threshold:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_session_queue.py「用户满员语义零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-task-wakeup-quiet-threshold
+  status: active
+
+## FR-auto-backend-150 daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
+变更：2026-10-10-task-wakeup-quiet-threshold
+状态：active
+摘要：测试绑定可追溯
+全文：.sillyspec/changes/archive/2026-10-10-task-wakeup-quiet-threshold/requirements.md#FR-03
+最近确认：9852d96f58056927f03e7497ec1a609c7b75eed3
+
+## FR-auto-backend-151 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
+变更：2026-10-10-task-wakeup-quiet-threshold
+状态：active
+摘要：非目标边界
+全文：.sillyspec/changes/archive/2026-10-10-task-wakeup-quiet-threshold/requirements.md#FR-04
+最近确认：9852d96f58056927f03e7497ec1a609c7b75eed3

@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  后台任务终态唤醒对秒级短任务也全套触发：空闲时插对话流、忙时进排队栏混排且占 5 条额度，实测会话 13 分钟被灌 18 条通知，全是子代理内部秒级搜索步骤（仅 Claude Code 引擎触发，pi 无后台模式零影响）。
+  成功标准：
+  - daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
+  - backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
+  - daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
+  - 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
+autopilot: false
+baseline_commit: ea376aa085d466f3c3ea01429b237f514543a921
+updatedAt: '2026-10-10T14:20:42.378Z'
+baseline_sha256: c78e65c5d9dc9b39c9b9ce968c78fe5261f03deff827d6ff22f3c9dbaed61efa
+spec_approved: true
+spec_approved_at: '2026-10-10T08:04:51.952Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx1)（13.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010141703\test-result.json｜lint:
+  skipped ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（5.8s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
+  不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 6 个
+

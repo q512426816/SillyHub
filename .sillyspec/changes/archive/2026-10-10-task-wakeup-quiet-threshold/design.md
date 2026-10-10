@@ -6,6 +6,9 @@ created_at: 2026-10-10T07:45:13.004Z
 
 ## 做法概述
 
+<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+<!-- MACHINE-DRAFT:design-approach:end -->
 问题根因（生产实证，阿里云会话 0d6b2ba9）：Claude Code 引擎的后台子代理终态每个都触发
 daemon 唤醒注入（`scheduleTaskWakeup`），13 分钟灌 18 条「后台任务通知」——其中 17 条是
 后台调研子代理内部派的秒级搜索步骤（孙任务），唯一的真长任务（12:50）才是唤醒机制原本
@@ -29,6 +32,9 @@ spike；门槛已把实证噪音全灭）、排队栏前端分开展示（门槛
 
 ## 接口契约
 
+<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+<!-- MACHINE-DRAFT:design-contract:end -->
 - daemon `interactive/session-manager/background-tasks.ts`：新增模块常量
   `TASK_WAKEUP_MIN_DURATION_MS = 60_000`（不导出，仅本模块消费）；
   `handleTaskNotificationEvent` 的 completed/failed 分支行为变化——不足 60s 不再调用
@@ -41,6 +47,12 @@ spike；门槛已把实证噪音全灭）、排队栏前端分开展示（门槛
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
+<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+<!-- MACHINE-DRAFT:design-boundaries:end -->
 1. 乱序/迟到到达：时长判定只用当条 notification 自带的 elapsed_ms 或该任务注册条目的
    startedAt（task_started 恒先于 task_notification 到达，注册表在通知消费时才注销），
    不依赖跨事件排序；迟到很久的短任务通知（如 debounce 前的旧回执）按其真实时长判，
@@ -61,6 +73,9 @@ spike；门槛已把实证噪音全灭）、排队栏前端分开展示（门槛
 
 ## 风险与死路
 
+<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+<!-- MACHINE-DRAFT:design-risks:end -->
 最大风险：60 秒门槛把「中等时长但有汇报价值」的后台任务（如 30-50s 的检查类任务）也
 静默了。接受理由：主代理仍可 TaskOutput 主动取结果，终态行/emit 都在，信息不丢，只是
 不再强迫打断；常量单点可调，后续按体验收紧/放宽是一行改动。次要风险：既有唤醒用例

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-task-wakeup-quiet-threshold",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9852d96f58056927f03e7497ec1a609c7b75eed3",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结 change.patch 范围超出 design 文件变更清单，混入其他并行变更的 10 个文档文件",
+      "evidence": "design.md 清单只列 5 文件，但 change.patch 含 .sillyspec/docs/SillyHub/frontend_components.md、llm_provider.md、multi-agent-platform/_module-map.yaml、docs/sillyspec/archived-change-resurrect-by-merge.md 等属于 2026-10-10-workspec-maintenance / 2026-10-06-provider-multi-agent-kind / borrow-sandbox-workspace-context 等其他变更的 hunks（基线 9852d96f5 为 live-token-speed 归档提交，工作树残留一并入了 diff）；本变更自身 4 个代码/测试文件完整且正确，FR-04 的 frontend 零代码变更仍成立（仅 .sillyspec 文档提及 frontend），但该冻结件作为「代码事实唯一来源」含噪音，按 patch 审计/回滚会波及无关变更",
+      "location": ".sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/change.patch:1-236 (design.md:90-98 为声明的 5 文件清单)"
+    },
+    {
+      "severity": "P3",
+      "title": "design 盲维「乱序」答语略过头：无 elapsed_ms 的迟到通知走 startedAt 兜底会高估时长而非「按真实时长判」",
+      "evidence": "durationMs 兜底为 Date.now() - info.startedAt（background-tasks.ts:277-278），迟到到达时差值含到达滞后 → 短任务仍唤醒；该方向为 fail-open（保持旧行为，无正确性回归），但 design「迟到很久的短任务通知按其真实时长判，短则静默」仅在 elapsed_ms 在场时成立",
+      "location": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts:274-279; design.md:56-61"
+    },
+    {
+      "severity": "P3",
+      "title": "用户构造 [后台任务通知] 前缀 prompt 可绕过 5 条额度（未在披露边界声明）",
+      "evidence": "豁免按 prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX) 判定，不区分来源；用户自发的该前缀消息既不计数也不被拒，且会走既有 merge 并入不可编辑（409）的通知条目——因 merge 恒收敛 ≤1 行无撑爆风险，仅会话内自伤，影响极低",
+      "location": "backend/app/modules/daemon/session/service/queue.py:132-148"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T14:20:06Z"
+}

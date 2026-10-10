@@ -91,12 +91,12 @@ ql-20260827-015 同条合并，恒 ≤1 条 pending，不会撑爆队列）。�
 
 ## 测试绑定
 
-- FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务不唤醒（elapsed_ms 2s）」
-- FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「长任务照常唤醒（elapsed_ms 61s）」
-- FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「elapsed_ms 缺失用 startedAt 兜底判时长」
-- FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「时长无从判定（无 elapsed 无注册条目）保持唤醒」
-- FR-02: backend/app/modules/daemon/tests/test_session_queue.py「通知不占用户 5 条额度」
-- FR-02: backend/app/modules/daemon/tests/test_session_queue.py「队满时系统通知不丢（入队成功）」
-- FR-02: backend/app/modules/daemon/tests/test_session_queue.py「用户满员语义零回归」
-- FR-03: 上述七条用例的集合即为本变更测试面（跑修改相关文件，不跑全量）
-- FR-04: 无测试绑定（非目标条目，由 diff 范围审查守护——frontend 零变更）
+FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务不唤醒（elapsed_ms 2s）」
+FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「长任务照常唤醒（elapsed_ms 61s）」
+FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「elapsed_ms 缺失用 startedAt 兜底判时长」
+FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「时长无从判定（无 elapsed 无注册条目）保持唤醒」
+FR-02: backend/app/modules/daemon/tests/test_session_queue.py「通知不占用户 5 条额度」
+FR-02: backend/app/modules/daemon/tests/test_session_queue.py「队满时系统通知不丢（入队成功）」
+FR-02: backend/app/modules/daemon/tests/test_session_queue.py「用户满员语义零回归」
+FR-03: 上述七条用例的集合即为本变更测试面（跑修改相关文件，不跑全量）
+FR-04: 不适用：非目标条目（孙任务冒泡缺 SDK 信号需 spike、排队栏前端分开展示为纯展示优化），由 diff 范围审查守护（frontend 零变更）

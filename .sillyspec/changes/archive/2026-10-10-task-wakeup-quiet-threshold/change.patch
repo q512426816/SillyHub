@@ -1,0 +1,823 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index 5e61cabcd..c75d03740 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -17,15 +17,16 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态
+   - RuntimeService：注册/心跳/实例列表/机器级聚合读（machines 含别名、版本、构建号、启动时间、用量视图，规避 N+1）/别名更新/离线标记/禁用启用删除/失联清理/自更新指令下发（复用 WS self_update 消息，仅改路由键）/本地缓存清理指令下发（WS cleanup 消息，fire-and-forget，daemon 侧黑名单删除且跳过有活跃交互会话的机器）/机器级删除（ql-20260829-006：`DELETE /machines/{id}` 物理删 daemon_instance，守卫链=归属 404 → 心跳 45s 新鲜 409（daemon 心跳 404 不重注册、删在跑机器=僵尸心跳，须先停 daemon）→ workspace_member_runtimes 绑定 409（daemon_id/runtime_id 双列 RESTRICT 前置）→ daemon_runtime_grants 409（含停用行）→ daemon_borrow_audit 409（审计红线不可删）→ in-flight lease/change_write 409（删前先收敛孤儿 lease，ql-20260830-006：interactive 绑定会话已 ended/failed 或 claimed 已过期的可证死行置 cancelled——生产实证 26 行 23 天孤儿把删除永久 409；真在途仍拦）→ IntegrityError 兜底 409；通过后 CASCADE 清该机全部 runtimes 及其会话/任务记录，scan_docs SET NULL；错误类 DaemonMachineInUse=HTTP_409_DAEMON_MACHINE_IN_USE；前端 MachineCard 仅离线机器可点删除）。
+   - DaemonLeaseService：claim（claim_token 鉴权 compare_digest）/heartbeat/过期回收（expire_overdue_leases + stuck_terminating 告警）/cancel（区分 interactive 会话取消与 batch lease 取消两路下发）。
+ - **claim payload 组装**（lease/context）：
+-  - provider 配置四级解析：run 绑定 profile 的 `llm_provider_id`（归属校验 user_id==runtime.user_id + agent_kind 一致）→ 平台默认供应商 → 本机不注入。
++  - provider 配置四级解析：run 绑定 profile 的 `llm_provider_id`（归属校验 user_id==runtime.user_id + 会话引擎 ∈ 行 agent_kinds 集合命中，2026-10-06-provider-multi-agent-kind 集合化）→ 平台默认供应商 → 本机不注入；下发 `provider_config.agent_kind` 恒盖为会话引擎值（多引擎行对每引擎会话各自命中）。
+   - openai_chat 类供应商不下发 master key，改发 `litellm_proxy` 标记 + hub 代理地址（daemon injector 转 ANTHROPIC_BASE_URL 指向 hub，子进程 Bearer 打 hub 代理）。
+   - profile 透传（mcp/skills/凭证/allowed_roots）；mission 预算注入。
+-  - 供应商热切换：默认供应商变更 → 按 daemon 分组推 `DAEMON_MSG_PROVIDER_CONFIG_CHANGED`，daemon 在 turn 边界 reload（close 旧 query + resume agentSessionId 保留历史），停止推 null 回退本机凭证。
++  - 供应商热切换：默认供应商变更 → 按会话引擎分组扇出推 `DAEMON_MSG_PROVIDER_CONFIG_CHANGED`（每会话收「agent_kind=本会话引擎」的 config；引擎同复用/异则重新 resolve/无默认告警跳过；NULL provider 会话跳过——2026-10-06-provider-multi-agent-kind），daemon 在 turn 边界 reload（close 旧 query + resume agentSessionId 保留历史），停止推 null 回退本机凭证。
+ - **session**：
+   - create/inject/interrupt/end/reopen/recover/confirm-reconnected/mark-recovery-failed/ready 上报 + SSE stream + logs（`GET /sessions/{id}/logs?after=` 增量游标，P4 2026-08-24：前端断线 resync/轮后对账增量拉取，游标-2s 重叠 + log_id 去重兜同批同 timestamp 边界；gzip 回显的 dumps+compress 纯 CPU 段 asyncio.to_thread 化，ql-20260909-012——长会话几十 MB payload 压缩 100-300ms 原直接卡事件循环）；sillyspec 冲突对比 `SillySpecCompareService.compare` 的比对（同步 FS IO 逐文件 stat+read + difflib）与 2MB 体积护栏同样 to_thread 化（同上 ql，spec 树几百文件时原阻塞数百 ms-秒级）；spec-tree 的 identical 判定走 `_lines_equal` 行尾归一化（与 `_aligned_diff_rows` 同口径，ql-20260909-025——本地 Windows 检出 CRLF vs 平台副本 LF 的仅行尾/末尾换行差异不再判 modified，修「只看差异清单挂肉眼相同文件且逐行无高亮」假差异；ql-20260910-005 口径收紧：两处共用 `_normalized_lines` 单一源——`splitlines(keepends=True)` 逐行 `rstrip("\r\n")` 只归一 \r\n/\n/\r 三种真行尾，裸 splitlines 会把 \v/\f/\u2028 等罕见分隔符当行边界吞掉致字节不同判 identical，收紧后两处一致判 different 且高亮真实）。
+   - reopen 会话级供应商凭证链（ql-20260827-014，生产实证修复）：reopen_session 建 lease 时补写 `session_llm_provider_id`（与 create 同款键——漏写会让 claim/恢复链路解析不到会话供应商），SESSION_RESUME WS payload 携带 `resolve_bound_provider_config` 解密的 `provider_config`（与 claim payload 同一真相源）；解析失败/None 降级缺键 + warning 不阻断 reopen（对齐 claim 链 `_inject_provider_config` 降级语义），daemon 走本机凭证链。
+   - 排队消息 retry 成功派发返回删除前快照（ql-20260827-019）：retry 翻 pending 后立即派发，成功即删行——re-get 必为 None，旧代码裸 assert 在此路径必 500（消息其实已发出）；现返回 detached 快照（status=dispatched），前端以 SSE/重拉队列为准。
+   - 排队消息通知合并（ql-20260827-015，生产实证修复）：inject 端点恒 `queue_when_busy=True`，daemon 后台任务终态唤醒（ql-20260827-007 `_scheduleTaskWakeup`，2s debounce 只覆盖 2 秒窗口）在长轮期间每任务终态注入一条「[后台任务通知]」排队——计数只增不减、派发后逐条烧一轮模型汇报（会话 17f10040 实证）。修法：入队分支对通知前缀做同会话 pending 合并（任务行追加 + 头/尾计数改写、`_merge_task_wakeup_prompt` 行级解析），通知类排队恒 ≤1 条；普通消息互不合并。
++  - 后台任务唤醒静音门槛 + 通知豁免排队额度（2026-10-10-task-wakeup-quiet-threshold，生产实证修复）：唤醒机制对秒级短任务也全套触发——空闲插对话流、忙时进排队栏与用户消息混排挤占额度，13 分钟会话被灌 18 条通知且 19 轮里 18 轮是通知驱动，全是后台子代理内部派的秒级搜索步骤（孙任务，会话 0d6b2ba9；仅 Claude Code 引擎触发，pi 无后台子代理模式零影响）。修法两处：①daemon `background-tasks.ts` 唤醒前判实际运行时长——`TASK_WAKEUP_MIN_DURATION_MS=60_000`（实证噪音全 ≤15s、真长任务 770s），elapsed_ms（服务端权威）优先→注册表 startedAt 差值兜底→双缺失 fail-open 照常唤醒；不足 60s 不注入唤醒，终态 emit/[TASK_NOTIFICATION] 落行/注销不变（主代理可 TaskOutput 自取短任务结果）。②backend `queue.py` 满员计数剔除 [后台任务通知] 前缀 pending 条目（用户 5 条额度只数用户消息）且通知类注入豁免 QueueFull（旧口径队满时注入抛错、daemon catch 后仅记日志静默丢通知）。孙任务不冒泡（SDK task 事件无层级信号需先 spike）与排队栏前端分开展示为显式非目标未做。
+   - 派发轮 user_input 实时推送 + 打断终态可区分（ql-20260918-003，生产实证修复）：①排队派发轮（立即发送/轮末自动派发）的用户消息气泡实时缺失（刷新才可见）——根因是 `_inject_into_session` 的 user_input 日志由 backend 直接落库、不经 daemon 上报管线故无 Redis 发布，而前端实时路径 onLog 对 user_input 只提 preamble 不写 prompt；修法：commit 前快照标量、commit 后按 daemon 上报同形态（publish.py session_payload）补发 `event=log`+`channel=user_input` 事件，前端 page/dialog onLog 在 turn.prompt 为空时写入剥前导正文（含附件标记原文，直发占位轮/daemon 双提交裸文本版到达时非空天然幂等，终态轮重放带守卫不误置 currentRunId）。②打断轮被渲染成「轮次失败」误导（立即发送忙时打断/手动打断同源）——daemon SDK abort 上报 error_during_execution 落 run.status=failed；修法：turn_completed 事件补 `error_code` 直传（`_close_post_commit`），前端 deriveTurnTerminalStatus / runTerminalTurnStatus / mapRunStatus / dispatchRunSynth 四处识别 `error_code=interactive_interrupted` 映射 killed（UI「已中止」），真实失败（interactive_failed/interactive_unknown_status）与无码老事件保持 failed。
+   - 单聊忙轮引导直注入（2026-09-18-single-chat-steering）：inject 端点（backend/app/modules/daemon/router/session_crud.py）provider 能力门控——请求可进忙轮分支时（不带切换维度且有 prompt/附件）读会话行 provider 经生成镜像 `get_provider_caps` 判 steering 键（单源 daemon PROVIDER_CAPS 第 14 键）：支持 → `busy_strategy="inject"` 复用群聊 `_inject_mid_turn_into_run` mid-turn 注入活跃轮（不建新 run 不 interrupt）；不支持（cursor/未知默认 false）或携带切换维度 → 维持 queue_when_busy 排队现状。SessionInjectResponse（:83）增 `steered` 出参（映射 service 层既有 `mid_turn`，不新建平行字段）。⚡ dispatch_now（backend/app/modules/daemon/session/service/queue.py?）不再无条件 interrupt：caps steering 且条目不带轮边界维度（profile/provider/model 快照全 None 且非 auto_resume）→ mid-turn 注入返 `dispatch_mode="steered"`（注入成功删排队行）；不可引导 → 既有 interrupt 接力（"interrupted"）；无活跃 run → 当场派发（"dispatched"）；QueueDispatchNowResponse（backend/app/modules/daemon/schema.py?）增 dispatch_mode 三态、interrupted 字段保留兼容派生。详见文末「增量（2026-09-18-single-chat-steering）」。
+   - `/team` 前缀派发层剥离（ql-20260901-002）：前端发原始输入（消息气泡/历史回放显示 "/team 目标"，对齐技能指令显示形态；旧版前端剥离导致气泡丢前缀），agent 永不接收字面前缀——剥离收口到本层派发组装点 `_strip_team_command_prefix`（create 的 dispatch_prompt / inject 的 SESSION_INJECT payload 与 SESSION_SWITCH_CONFIG prompt；正则整条指令匹配，`/teams` 不误伤）。展示层（AgentRunLog user_input / 排队条目）保留用户原文；mission objective 回填（create 回落与 inject 占位回填）用剥后文本，裸 `/team` 剥后空文本不回填占位（前端裸指令无内容不发送，此处为 API 直发防御）。
+@@ -235,3 +236,8 @@ backend daemon 模块四个大文件目录化（机械拆分 + 原路径兼容
+ ## 增量（ql-20260924-001：空 firstPrompt 不挂 10s 兜底——native fork 首轮契约对齐，24h 审查 H-2 daemon 侧）
+ 
+ - session-manager `_createInternal` 的 firstPrompt 挂起（ql-20260825-002 的 10s fallback）补空串守卫：`input.firstPrompt` 为空（native fork 会话——backend create 对 fork 归零 lease metadata prompt 且空载荷 SESSION_INJECT 已不再下发，见 backend daemon.md 同 ql）时**不挂兜底**。修复前兜底到点 push `{type:'user', text:''}` 空用户消息（claude 档空串仍发送），污染 B 首轮。inject 消费路径对 Map 缺键天然 no-op（turn-control/lifecycle 均 get→undefined 守卫），B 等用户首问经 SESSION_INJECT 正常驱动，零回归。测试 session-fork.test.ts 新用例（空串不挂 + 非空仍挂对照）。
++
++## 增量（2026-10-10-live-token-speed-daemon-timing：逐调用计时——usage 事件契约补 api_duration_ms）
++
++- **契约**：`AgentEventUsage` 增可选 `api_duration_ms`（轮内累计模型生成时长 ms，**不含工具执行窗口**；缺省=该引擎未计时，缺键不伪造）。三引擎生产：claude 桶 `callStartMs`/`turnApiDurationMs`（message_start 锚定+锚间折叠、message_delta 活刷新、message_stop 收口、onTurnEnd 归零防跨轮残留）；codex 生成窗口（模型输出事件锚定、tool_use 折叠、finishTurn 残段折叠、轮 start 归零，`_usageDelta` 单点搭车——usage_update 与 result usage 两路同源）；pi（text_delta 锚定、tool_execution_start/assistant message_end 折叠、turnUsage 搭车——turn_end 事件与 result 两路同源）。cursor 无逐调用 usage，不接（如实不显示）。schema（agent-event-schema.ts）同步放行。
++- **测试**：claude-events 22（含时钟回拨钳 0 反例 + golden 冻结注入时钟）、codex-app-server-driver 70（含工具 20s 不计入 + 跨轮归零状态断言）、pi-rpc-driver 91（含两窗口折叠求和），共 183 绿；typecheck 0。
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.md b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+index 7be70ad3e..fa0ac5f3a 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.md
+@@ -82,8 +82,8 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
+   - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染
+     工作区类型（title 带 role/description 摘要）
+ - 供应商域（llm-providers/）：
+-  - `llm-provider-form` — CRUD 表单（agent_kind / auth_field / api_format / 模型角色映射编辑）；结构化字段（base_url/兜底模型/角色模型/认证字段）↔ 配置 JSON `settings_config.env` 同名键联动（仅键已存在时跟随，字段清空删键；ql-20260823-007，防 JSON 过期值覆盖字段——曾致空占位盖掉真实 key → 会话 Not logged in）
+-  - `llm-provider-list` — 启停（set/unset-default）与列表
++  - `llm-provider-form` — CRUD 表单（agent_kinds 引擎多选 Checkbox.Group（2026-10-06-provider-multi-agent-kind，openai 格式禁 pi 前置 + 收缩引擎默认空缺 toast）/ auth_field / api_format / 模型角色映射编辑）；结构化字段（base_url/兜底模型/角色模型/认证字段）↔ 配置 JSON `settings_config.env` 同名键联动（仅键已存在时跟随，字段清空删键；ql-20260823-007，防 JSON 过期值覆盖字段——曾致空占位盖掉真实 key → 会话 Not logged in）
++  - `llm-provider-list` — 启停（set/unset-default）与列表（引擎多徽标）
+   - `model-input-with-fetch` — 拉上游 /v1/models 填充模型下拉
+   - `usage-footer` — 余额/配额/用量两态展示（瞬时错误保上次值）
+ - agent 域：
+diff --git a/.sillyspec/docs/SillyHub/modules/llm_provider.md b/.sillyspec/docs/SillyHub/modules/llm_provider.md
+index 5f2af4130..dbe5bb91e 100644
+--- a/.sillyspec/docs/SillyHub/modules/llm_provider.md
++++ b/.sillyspec/docs/SillyHub/modules/llm_provider.md
+@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
+ # LLM 供应商凭证管理（llm_provider）
+ 
+ ## 定位
+-后端「用户级 LLM 供应商凭证管理」：cc-switch 式启停模型——每用户维护自己的供应商记录（base_url + 加密 api_key + api_format + 模型角色映射），`(user_id, agent_kind)` 内单条 `is_default` 互斥。本模块只管数据与生命周期（CRUD + 加密 + 互斥 + 凭证探测 + 模型列表/用量/配额代查 + LiteLLM 网关注册），不下发凭证——真正注入 daemon 子进程在 `daemon/lease/context.py::_inject_provider_config`。openai_chat 格式经服务器 LiteLLM 网关转 Anthropic↔OpenAI（平台不自己实现协议转换）。
++后端「用户级 LLM 供应商凭证管理」：cc-switch 式启停模型——每用户维护自己的供应商记录（base_url + 加密 api_key + api_format + 模型角色映射），`(user_id, 引擎)` 维度单条 `is_default` 互斥；2026-10-06-provider-multi-agent-kind 起一行供应商持有 `agent_kinds` 引擎集合（至少一个），多引擎行对集合内**每个**引擎各占一个默认位（同一 key 一条行服务多引擎，免重复建卡）。本模块只管数据与生命周期（CRUD + 加密 + 逐引擎互斥 + 凭证探测 + 模型列表/用量/配额代查 + LiteLLM 网关注册），不下发凭证——真正注入 daemon 子进程在 `daemon/lease/context.py::_inject_provider_config`。openai_chat 格式经服务器 LiteLLM 网关转 Anthropic↔OpenAI（平台不自己实现协议转换）。
+ 
+ ## 契约摘要
+ - 端点（prefix=/llm-providers，全部 `get_current_user` + 按 `current_user.id` 过滤，**不走** require_permission_any——owner 级，跨用户 404/403 不泄漏存在性）：
+@@ -23,13 +23,13 @@ created_at: 2026-08-18 01:45:00
+   - `GET /{id}/quota` — 配额查询（智谱 query_zhipu_quota）
+   - `POST /{id}/set-default` — 「启动」；`POST /{id}/unset-default` — 「停止」；均返回 `SetDefaultResult{switched, affected_sessions, error, litellm_registered?}`（router 包装 service 的 DefaultSwitchResult）
+ - `LlmProvider` 列：
+-  - agent_kind / base_url / auth_field / api_format
++  - agent_kinds（JSON 数组，D-004 单值改集合）/ base_url / auth_field / api_format
+   - encrypted_api_key(bytes) + key_id（CredentialCipher，xchacha20-poly1305，照 git_identity）
+   - model / default_fallback_model（X-10：provider.model 优先，否则 fallback，覆盖 lease_meta 来源）
+   - model_role_mappings（dict，角色→映射：display 仅展示 / model 实际模型名留空=该角色不注入走兜底 / one_m 在模型名后追加 [1m] 标记）
+-  - is_default；索引 (user_id, agent_kind, is_default)
+-  - 列定义须与 migration `20260725_create_llm_providers` 一一对应（防漂移）
+-- schema Literal：agent_kind 仅 `claude`（codex/gemini/pi 预留）；auth_field 仅 `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`；api_format 仅 `anthropic`/`openai_chat`。
++  - is_default；原复合索引 (user_id, agent_kind, is_default) 随 agent_kind 列删除退役，现为 `ix_llm_providers_user(user_id)`
++  - 列定义须与 migration `20260725_create_llm_providers` + `20261006120000_provider_agent_kinds`（单值→JSON 数组双方言回填 + 索引 drop/rebuild + 对称 downgrade）一一对应（防漂移）
++- schema：agent_kinds 为 `list[Literal["claude","pi","codex"]]`（min_length=1，保序去重 validator；该字段声明形态被 daemon 源读取对账正则共享）；**组合禁配**——agent_kinds 含 `pi` 且 api_format=`openai_chat` 直接 422（create 级 model_validator，update 级 service 取行合并后同判）；auth_field 仅 `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`；api_format 仅 `anthropic`/`openai_chat`；Read DTO 无单值 agent_kind 字段（无过渡期，前后端同批切换）。
+ - 出参只含 `api_key_masked`（空→None、<8→`****`、≥8→首4…尾4）；`encrypted_api_key`/明文 key 不出现在任何 Read DTO。
+ - 错误类（fetch-models 四分类 + SSRF + usage 两态）：
+   - `LlmProviderAuthFailed`(401) — 上游 401/403 凭证被拒
+@@ -46,15 +46,16 @@ set_default（启动）:
+   → probe_provider（GET /v1/models，按 api_format 走候选 URL + 鉴权头
+     ——复用 service._build_auth_headers/_candidate_urls 单一来源；
+     SSRF assert_public_hostname；失败→不改默认不推送，返结构化 error）
+-  → _clear_sibling_defaults + 置本行 True（事务内互斥）
++  → _clear_sibling_defaults（按 user_id+is_default 过滤后行级集合交集清：set_default 逐引擎清、
++    update 扩张 agent_kinds 时对新增引擎清兄弟——扩张语义 D-006）+ 置本行 True（事务内互斥）
+   → openai_chat: litellm_client.register（POST /model/new，
+     model_name=usr-<uid>-<pid>，model 带 openai/ 前缀，
+     model_info.mode=chat 强制 Chat Completions；best-effort）
+-  → notify_provider_switch 推活动交互会话热切换（best-effort，
++  → notify_provider_switch 按会话引擎分组扇出热切换（best-effort，
+     失败仅告警不阻塞，新会话仍走 claim 注入）
+ unset_default（停止）: 不探测，置本行 False 不清兄弟（幂等）；
+-  openai_chat 联动 litellm unregister；notify provider_config=null
+-  → daemon 回退宿主机本机凭证
++  openai_chat 联动 litellm unregister；notify provider_config=null 对全部活跃会话广播
++  （多引擎行亦无差别广播 None 回退本机——收缩引擎默认空缺的会话跳过热切换仅告警）
+ fetch_models: 候选 URL 逐个试 → 四类错误分类 + SSRF 拒绝
+ query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
+   → 6 家 handler（deepseek/kimi/minimax/openrouter/siliconflow/zhipu）
+@@ -82,3 +83,4 @@ query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
+ 
+ <!-- MANUAL_NOTES_END -->
+ - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
++- 2026-10-06-provider-multi-agent-kind：agent_kind 单值 → agent_kinds 集合全链路化（迁移/互斥逐引擎/组合禁配/前端多选），本卡定位/契约/关键逻辑已同步（详见 changes 归档）
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index 12789fce5..8f2982336 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -55,6 +55,12 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
+   SessionUsageRead totals+by_model——agent_run_model_usage 按 model SUM 为主 + 无明细行
+   run 的 AgentRun 四维列 NOT EXISTS 兜底（ctx_tokens 快照列排除，「未记录」桶末位
+   api_requests=0），全 SQL 侧聚合）、
++  - usage 管线补维（2026-10-10-live-token-speed-daemon-timing）：submit_messages 提取
++  message 顶层 `usage.api_duration_ms`（daemon 三引擎逐调用计时生产的轮内累计生成
++  时长 ms，不含工具窗口）→ max 累积（乱序不回退）→ submit_commit **仅增不减**写回
++  `AgentRun.duration_api_ms`（防跨轮回退；close 结果元数据非 None 仍权威覆盖）→
++  tokens SSE 事件与 run channel summary 增键 `duration_api_ms`（None 不带键，
++  design §9 同款）——前端运行中 tok/s 分母数据源；
+   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+   任务执行面板（2026-09-04-session-task-execution-panel）：`GET /{id}/tasks`
+   （AgentSessionTaskRead 18 字段 snake_case，鉴权同 runs 端点
+diff --git a/.sillyspec/docs/frontend/modules/components-daemon.md b/.sillyspec/docs/frontend/modules/components-daemon.md
+index 999bd3b57..d66f89c5d 100644
+--- a/.sillyspec/docs/frontend/modules/components-daemon.md
++++ b/.sillyspec/docs/frontend/modules/components-daemon.md
+@@ -59,7 +59,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 
+     自动投递；inject 失败（含 409 TURN_CONFLICT）队头 failed + 重试/删除（D-001~D-004）。
+   - 消息生命周期：首条 `createSession` → 追问 `injectSession`（排队调度）→
+     `interruptSession` → `endSession`；单条 `streamSession` SSE 贯穿，envelope
+-    run_id 区分 turn。
++    run_id 区分 turn。tokens 事件增键 `duration_api_ms`（2026-10-10-live-token-
++    speed-daemon-timing）：daemon 逐调用计时实时累积的轮内生成时长（tok/s 分母，
++    不含工具窗口），onTokens → `turn.apiDurationMs`（?? 链不覆盖已收值）；
++    `turnTokenSpeedText` 门控为「双值可得即显示（任意状态）」——运行中实时速度，
++    缺数据不显示不伪造（cursor/旧 daemon 如实无速度段）。
+   - 历史回看一致性（ql-20260822-010）：displayTurns 富集时按 runsMeta run 快照
+     回补终态（`runTerminalTurnStatus`：failed→failed+errorDetail（无详情兜底
+     「运行失败（无详情）」）、interrupted/cancelled→killed）——logsToTurns 一律
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/_module-map.yaml b/.sillyspec/docs/multi-agent-platform/modules/_module-map.yaml
+index eb5e2bc10..3593123f2 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/_module-map.yaml
++++ b/.sillyspec/docs/multi-agent-platform/modules/_module-map.yaml
+@@ -35,6 +35,8 @@ modules:
+       - append_events/list_events (backend/app/modules/platform_sync/service.py+router.py, POST/GET /changes/{name}/events 变更事件通道·watcher 批量上行幂等跳过+5000 修剪·since 增量正序·provisional 只展示不消费红线, 2026-09-23-change-events-channel)
+       - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
+       - workspace_router
++      - linked_repos 子模块三表+六端点 (backend/app/modules/workspace/linked_repos/, 跨仓关联登记[共享字段+成员级路径]+CRUD+my-path+sync 触发, 跨工作区归属过滤 404+exclude_unset 清除语义, 2026-10-10-workspec-maintenance)
++      - linked_repos_sync 编排 (backend/app/modules/daemon/linked_repos_sync.py, linked_repos_sync RPC[30s+15s/仓上限180s]+machines.py 回报端点[落库唯一通道]+best-effort 推送[逐成员 abs_path/引用池], 2026-10-10-workspec-maintenance)
+       - members_router
+       - auth_router
+       - health_router
+@@ -65,6 +67,7 @@ modules:
+       - AgentReplayBody / buildReplayTurns (frontend/src/components/daemon/agent-replay-body.tsx + frontend/src/lib/agent-log-turns.ts, tool_report 纯日志会话回放主体·TurnTimeline 真组件复用·适配器切轮/系统事件中性行/轮级 token·工作会话折叠条, 2026-09-19-tool-report-session-replay)
+       - AgentLogReplayBody / buildReplayTurns / isSubagentLog (frontend/src/components/daemon/agent-log-replay-body.tsx + frontend/src/lib/agent-log-replay.ts, tool_report 空轮回放主体·TurnTimeline 直适配·系统事件复用 stderr 原语零改组件·三保险切轮·首屏最早窗口 10 页上限·dialog attach 轮询捕获门控, 2026-09-20-agent-log-session-replay)
+       - ChangeEventsCard (frontend/src/components/changes/detail/change-events-card.tsx, 变更详情页 aside「观测事件」折叠卡·30s 轮询自取数·warning 琥珀高亮+角标计数·provisional 徽标·失败静默隐藏·零业务逻辑红线, 2026-09-23-change-events-channel)
++      - LinkedReposCard + LinkedRepoFormModal (frontend/src/components/workspace/linked-repos-card.tsx + linked-repos-form.tsx + lib/linked-repos.ts, 工作区详情「关联仓」维护卡·四列列表+状态徽标+成员级「我的本地路径」小 Modal+立即同步·canManage=owner||admin, 2026-10-10-workspec-maintenance)
+     depends_on: [backend]
+     used_by: [deploy, ci, build]
+     needs_review: false
+@@ -96,6 +99,8 @@ modules:
+       - isProcessAlive
+       - writePid
+       - SillySpecManager.collectStatusOnce (sillyhub-daemon/src/sillyspec-manager.ts, progress show --json 三态采集器+心跳 sillyspec_status 透传, 2026-09-02-changes-overview-card)
++      - runLinkedReposSync (sillyhub-daemon/src/linked-repos-sync.ts, 关联仓双落盘例程·spawn workspace add/register-repo 两层独立成败·execFile 数组形参·失败重试一次·REST 回报唯一落库通道, 2026-10-10-workspec-maintenance)
++      - postLinkedReposSyncResult (sillyhub-daemon/src/hub-client.ts, 关联仓落盘结果回报方法, 2026-10-10-workspec-maintenance)
+       - removePid
+       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
+       - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.md b/.sillyspec/docs/multi-agent-platform/modules/backend.md
+index de79db5fc..64c362769 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.md
+@@ -72,6 +72,7 @@ multi-agent-platform 的核心 API 服务，monorepo 的"大脑"。以 FastAPI 
+ - **进度首推占位建行 + reparse 镜像滞后保护（ql-20260815-002）**：`PlatformSyncService._ensure_change_row`——接受分支（首推/常规接受）后确保 `ux_changes` 有占位行（变更中心以 ux_changes 为主表 join 进度表，只写 `platform_change_progress` 会让镜像 tar 滞后期间新建变更在界面不可见）；`workspace_id=None`（shk_live_/JWT 全局 fallback）跳过、幂等、savepoint 撞 `ux_changes_workspace_key` 静默放弃、best-effort 不阻断上行。配套 `ChangeService.reparse` 全量删除环保护：CLI 最近上行仍报 `status=active` 且**无任何文档**的占位行不删（`_progress_reported_active_keys`，查询失败降级空集=无保护）；有文档的行仍以镜像磁盘为权威删除（防 stale progress 行让本地已删变更永生）。
+ 
+ ## 人工备注
++- **工作区「关联仓」维护（跨仓信息配置）**（2026-10-10-workspec-maintenance）：`workspace/linked_repos/` 新子模块三表（`workspace_linked_repos` 共享登记[名称/仓库地址/描述/约定相对路径，(workspace_id,name) 唯一] + `workspace_linked_repo_paths` 成员级本机路径[(linked_repo_id,user_id) 唯一，D-007] + `workspace_linked_repo_sync_states` 落盘状态[(repo,machine,layer) 唯一 upsert]）；六端点挂 `/workspaces/{id}/linked-repos`（读=WORKSPACE_READ，写四端点=WORKSPACE_MEMBER_MANAGE，my-path 仅本人行；跨工作区 repo_id 统一 404[归属过滤]，PATCH exclude_unset 语义[JSON null=显式清除/缺省=不动]；main.py sibling include 防嵌套 Duplicated param name 坑）；`daemon/linked_repos_sync.py` 同步编排——POST /sync 请求-响应 RPC `linked_repos_sync`（超时 30s+15s/仓上限 180s，root_path 经 resolve_root_path_for_daemon 改写，method_not_found→全仓两层 skipped[需升级]不报错）；daemon 回报端点 `POST /api/daemon/machines/{instance_id}/linked-repos-sync-result` 为**落库唯一通道**（RPC 响应仅即时反馈）；CRUD 全部写端点成功后 best-effort 推送（逐成员 abs_path 组装，模块级任务引用池 fire-and-forget 不阻塞响应）；GET summary 双视角（成员=自己绑定机器；owner[workspace 建者]/platform admin=全部机器）。
+ <!-- MANUAL_NOTES_START -->
+ - **change 2026-08-22-team-session-unify**（会话内团队操作，团队并入统一会话页）：agent+daemon 模块核心改造。数据：AgentMission 加 `session_id` 列（FK agent_sessions.id，活跃态部分唯一索引 `uq_agent_missions_session_active` 防并发双懒建；迁移 `20260822090000_mission_session_id` 清库重建无回填）；分身派发 lease stage 常量化 `'mission_worker'`（run.role 移 lease metadata 保留语义）。**主控轮双标记（D-009）**：会话存在活跃 mission 时 inject 当轮 AgentRun 回填 `mission_id`+`role='orchestrator'`——统一锚定 `_get_main_run`/finalizer（取**最新** orchestrator run，存量 external 链路同规则兼容）与治理门/workers 列表/成本统计（查询收窄 `role!='orchestrator'`，主控轮不占 MAX_WORKERS=5 并发额度与分身成本）。**derive_status 扩展 awaiting_input 档（CC-01）**：主控轮+分身全终态、未 converge、无会话活跃 turn 且 session_id 非空 → awaiting_input；存量 external mission（session_id NULL）不进此档，complete_lease 自动收敛（依赖 derive∈{done,degraded}）零回归。**converge 语义重定义（D-010）**：按 X-Session-Id 解析 mission；分身未全终态返回 busy 引导（agent 等待重试）；全终态独立置位 `converged_at`（不依赖主控 run 状态），finalize/合并锚点=该 mission 最新 orchestrator run。**懒建兜底（B1）**：dispatch_worker 无活跃 mission 时按会话绑定工作区懒建（未绑定 422 提示走弹层显式选 scope；并发守卫=会话行 FOR UPDATE + 部分唯一索引；懒建时将当前活跃 run 补回填双标记，保懒建 mission 也有主控轮锚点）。**端点增删（D-011）**：新增 `POST /api/daemon/sessions/{id}/team-mission`（预建+scope 冻结快照+objective 占位 `SESSION_OBJECTIVE_PLACEHOLDER` 首条 inject 回填、活跃冲突 409 R-07）与 `GET /api/daemon/sessions/{id}/team-missions`（TeamTaskBlock 数据源，TeamMissionSummary DTO）；删 workspace/project 维度 create+list 四端点与独占 helper；**保留** `GET /api/missions/{id}`/`POST /api/missions/{id}/cancel`（change 详情 team-progress 在用）；MCP 五工具新增 `/api/sessions/{session_id}/missions/*` 治理口径路由族（旧 mission_id/workspace_id 显式路由保留，router include 前移遮蔽修复）。**patrol 适配（CC-08）**：僵尸判定改会话维度（分身非终态+主控会话无活跃 turn+超时）、awaiting_input 超时 `mission_patrol_awaiting_input_timeout_minutes`（默认 30 分钟）自动 converge、schedule_loop 三重收敛信号按 session 维度判定、redispatch_pending_main_runs 对新链路 no-op（存量行为保留）。`render_orchestrator_prompt` 下线；`team_mission_entry` 重构为预建入口（不再另起主控 AgentRun/lease）。gen:types 已同步 openapi.json（394 paths/462 schemas）。
+ - change 2026-08-21-mission-converge-patrol | mission 收敛巡检：新增 `agent/patrol.py`（MissionPatrolService 三职责 + mission_patrol_loop 常驻协程，main.py lifespan 接线：enabled 开关 create_task + finally cancel/gather）。①收敛兜底：活跃 team mission（converged/cancelled NULL，limit 100）逐个 schedule_loop——修项目维度 mission（change_id=None 回调短路）主 agent 不收敛时永久 running；②离线重派：每轮 redispatch_pending_main_runs（补启动时重派的运行中场景）；③两阶段僵尸：主 run running+有 lease+daemon 持续离线（last_heartbeat_at 判起点）超 60min → failed+orchestrator_zombie+constraints.zombie_marked_at 不收敛（schedule_loop 信号1豁免窗口 30min，信号3不豁免），窗口内 daemon 回线自动复活（翻 running+重渲染 prompt 重派，NoOnlineDaemonError 回滚），窗口耗尽标 zombie_converged 正常收敛。配置四项 mission_patrol_*（config.py）。测试：test_patrol.py 32 + test_orchestrator.py 豁免 7；agent+daemon 全量 1443 passed，mypy 0。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+index a1265c646..aea2ac1bc 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.md
+@@ -49,6 +49,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
+ - **daemon-client changes 入口（2026-06-26-daemon-client-spec-sync-fix）**：daemon-client workspace 新建 change 调 `POST /api/workspaces/{id}/changes/proxy-create`（带 `runtime_id=workspace.daemon_runtime_id`），由 backend 经 `daemon_change_writes` lease-polling 让 daemon 代写文件；daemon 离线时按钮禁用 + tooltip 引导，端点返 `DAEMON_CLIENT_NO_SESSION`(400)。区别于 server-local/repo-native 走原 `changes/create`。
+ 
+ ## 人工备注
++- **工作区「关联仓」卡片**（2026-10-10-workspec-maintenance）：`components/workspace/linked-repos-card.tsx`（工作区详情段③-2b 挂载，canManage=owner||platform admin）——四列列表（名称+描述/仓库地址+约定相对路径/我的本地路径[未配置琥珀提示]/逐层状态徽标[projects·ok ✓/failed ✗/skipped −，title 含 detail 与时间]）+ 新增编辑 Modal（`linked-repos-form.tsx`，名称正则+编辑态锁定，exclude_unset 语义空值发 null）+ 我的路径小 Modal（「仅保存给我自己」成员级语义，留空清除）+ 立即同步（受理后 3s 延迟刷新；dispatched=false 显示需升级警告）+ 空态禁用同步；brand-* 语义阶双主题零硬编码 hex；`lib/linked-repos.ts` API 封装引用 api-types 生成类型（CLAUDE.md 规则 21）。
+ <!-- MANUAL_NOTES_START -->
+ - **change 2026-08-22-team-session-unify**（会话内团队操作前端，8e47dc70/3a3f190f）：①**触发入口（task-11）**：session-panel 输入区「派团队」按钮（Claude 可用、Codex 置灰 tooltip「团队需要 Claude 引擎」）+ 新组件 team-trigger-popover 配置弹层（范围：当前工作区/项目+scope 多选/预算/分身预设折叠）+ 就绪/进行中状态 chip；`/team` 指令前缀拦截等价按钮路径；「用团队分析」改造走触发弹层（session-panel page/dialog 双模式 + interactive-session-panel 透传两处）；活跃 mission（planning/running/awaiting_input）5s 轮询、终态停止。②**TeamTaskBlock（task-12）**：新组件嵌入消息流（概要行：状态徽标（含 awaiting_input 档）/N 分身成败/花费；展开：主控行+分身行+日志/产物入口+取消按钮→`POST /api/missions/{id}/cancel`），数据源 `GET /api/daemon/sessions/{id}/team-missions`；turn-segment-views 进度视图分身段块（violet：角色/目标工作区徽标/状态/耗时）+ dispatch_worker 等 MCP 工具卡；`lib/daemon.ts` 新增 triggerSessionTeamMission/listSessionTeamMissions/cancelTeamMission client（TeamMissionSummary 手写保留——生成版 status 裸 string/workers 可选，注释差异）。③**删旧入口（task-13）**：删 mission-console.tsx、workspaces|projects 两 missions 页面路由、「Agent 团队」菜单项、`lib/agent.ts` create/list×4 client（保留 getMission/cancelMission 供 change 详情 team-progress）；ppm 项目页「发起团队」按钮改跳统一会话页。api-types.ts 随 backend OpenAPI 重新生成。
+ - ql-20260821-002（项目团队 mission 前端审查修复，docs/project-team-mission-review-2026-08-21.md）| mission-console.tsx 六项：①ACTIVE 集合去 degraded（终态不再 10s 轮询/不显示"取消任务"，原语义错误）；②`displayedMissionIdRef`+`selectMission` 轮询竞态守卫（切换 mission 丢弃在飞响应，不再闪回旧任务）；③worker 日志游标 earliestTimestamp→latestTimestamp（after=最新一条，消除每 5s 近乎全量重拉 5000 行 TEXT）；④budget 输入 0/负数/Infinity 阻断提交；⑤错误文案复用 errMessage（杜绝 [object Object]）；⑥anchor 默认过期注释更新（后端已按 backend-code 词表比对）。projects/[id]/missions/page.tsx：projectId 缺失渲染错误态（原永久 loading）；listProjectMissions 403 显式"仅项目经理"提示（原静默吞掉显示"无历史"）。游标 2 用例更新新语义 + missions-page 新增 degraded/budget/403 三用例；全量 1795 passed，tsc 0。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+index 67b001e68..818d62f83 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+@@ -55,6 +55,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
+ - **WS 事件按 socket 身份守卫 + 假活看门狗（2026-08-27 网络切换永久假连事故）**：`connect()` 注册的 open/message/close/error/pong 事件与 pong 超时/握手超时定时器必须比对 `this._ws === ws`——旧 socket 迟到的 close 无守卫时会把新 socket 从 `this._ws` 抹成 null，新连接 open 后 `_startKeepalive` 因 `_ws=null` **静默跳过**，keepalive 丢失后网络切换的黑洞连接无 ping/pong 检测，状态卡 Connected、`connect()` 幂等保护令重连永不发生（HTTP 心跳与会话 HTTP 兜底照常=「在线」假象，唯独 backend→daemon RPC 全 502，git-log 报「守护进程离线」）。兜底：`daemon._wsLoop` 每秒 `_reapStaleWsClient`——isConnected 且 `lastMessageAt`（**pong 也计入**，传输级新鲜度）陈旧 ≥ `WS_STALE_REAP_MS`(120s) 或 `connectedAt` 锚点陈旧 → `_closeWsClient` 强制重建；双 null fail-open 交给 keepalive 主判据。
+ 
+ ## 人工备注
++- **关联仓双落盘例程**（2026-10-10-workspec-maintenance）：`src/linked-repos-sync.ts` 消费 backend `linked_repos_sync` RPC（daemon.ts 平名注册，protocol.ts 零改动——RPC method 为自由字符串）——在成员机器工作区根逐仓两层 spawn sillyspec CLI：projects 层 `sillyspec workspace add <name> <rel_path> [--repo <url>]`（写 .sillyspec/projects/<name>.yaml，不传 --role）、repos 层 `sillyspec local register-repo <name> <abs_path>`（写 local.yaml repos: 段）；execFile 数组形参（Windows 路径安全）+正斜杠化；两层独立成败（skipped 三态：rel_path/abs_path 缺省、unknown command 需升级）；失败自动重试一次（R-07，unsupported 不重试）；同机串行（单循环 await）；结果经 `hub-client.postLinkedReposSyncResult` REST 回报（404 静默，唯一落库通道）+ RPC 响应即时反馈；`resolveSillySpecBinDefault` 导出供 bin 解析单一源复用。
+ <!-- MANUAL_NOTES_START -->
+ - **change 2026-08-22-team-session-unify**（会话内团队操作 daemon 侧）：①**注入谓词（D-002@v2）**：`cli.ts` isMainAgentSession 谓词矩阵——`provider==='claude'` 且 lease stage ∈ {空,'orchestrator'} 才注入团队 5 个 MCP 工具；分身派发 stage 常量化 `'mission_worker'`（backend execution.py 固定）不注入（防 worker 递归派发/converge 干扰 CC-12）；存量 external 主控 stage='orchestrator' 照常注入。②**MCP 会话上下文（B1）**：`buildDaemonMcpServerConfig` 增 env 参数注入 `MCP_SESSION_ID`（session-manager create 传 state.id；spike-01 PASS 确认 env 必须放 `mcpServers[*].env`，顶层 options.env 无效）；`mcp-server.ts` 5 工具参数可选化（mission_id/workspace_id/run_id 全可选，backend 按 X-Session-Id 解析活跃 mission，显式参数仅越权校验锚）+ 工具描述重写为「能力说明书」（如何拆解/仅用户明确要求时派团队/何时 converge/预算提示）；`hub-client.ts` MCP 端点请求统一携带 `X-Session-Id` header。`src/api-types.ts` 随 backend OpenAPI 重新生成（含 `/api/sessions/{session_id}/missions/*` 治理路由族与 TeamMission* DTO）。
+ - 2026-08-20-runtime-readpoint-repo-first | runtime.* 读点「仓库优先、缓存回退」：`runtime-handler.ts` 新增 `pickRuntimeSpecDir(workspaceId, rootPath?)` 三道校验（元字符黑名单 `ROOT_PATH_METACHAR_RE`（design §6 字符集，shell:true 命令串注入防线）→ `assertWithinAllowedRoots`（复用 file-rpc 导入，roots 由 daemon.ts 类字段构造点注入 `() => this._effectiveAllowedRoots()`，对齐 HostFsHandler 范式）→ `<root>/.sillyspec/.runtime` 存在性（pathExists 可注入）），全过读成员本机仓库 `<root>/.sillyspec`，任一不过 console.warn 回退 `~/.sillyhub/daemon/specs/<wsId>/`；workspace_id UUID 白名单 forbidden 仍 fail-loud（在回退 catch 外）。`daemon.ts` 四 handler 经导出 `normalizeRootPathParam` 归一透传（非字符串/空串→undefined）。动机：platform-managed 下 spec bundle 排除 .runtime，agent 驱动执行流数据真源在成员仓库，旧读点恒空。测试 35 passed（六类读点+normalize+注册器接线）。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/daemon.md b/.sillyspec/docs/sillyhub-daemon/modules/daemon.md
+index 1954ee064..e8915b888 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/daemon.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/daemon.md
+@@ -79,6 +79,12 @@ RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
+ - 借用（borrow）沙箱：backend placement 下发 `metadata.cwd = "borrow-sandbox:<slug>"`
+   marker，daemon 检测前缀 → 提取 slug → 创建独立沙箱目录作 cwd（marker 不进真实
+   路径），并登记按 lease 隔离的只读 policy。
++- 借用沙箱工作区上下文（2026-10-10-borrow-sandbox-workspace-context）：claim
++  payload 携带 `borrow_workspace_context`（Workspace 行非 None 字段，含真实
++  root_path），daemon 归一化双读（borrowWorkspaceContext，workspaceSlug 先例）后
++  由 marker 分支渲染 `AGENTS.md` 落沙箱根（borrow-sandbox-context.ts 纯函数：
++  元信息 + 真实路径**可读**告知 + 禁止写声明 + 500 字符截断防注入）；无键不写、
++  写失败仅 warn fail-open；写守卫 enforcement 零改动。
+ - usage/cost 上报走 ResilienceService（notifyRunResult + mergeAdapterUsage）非
+   submitMessages 直传；FileOutbox 防 WS 断线丢消息。
+ - SILLYSPEC_TEMP_ROOTS 常量放行 /dev/null（含 Windows C:/dev/null 形态）+ tmpdir，
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/types.md b/.sillyspec/docs/sillyhub-daemon/modules/types.md
+index bc5d929e5..dd5c8733f 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/types.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/types.md
+@@ -31,6 +31,10 @@ client / spawn-env / credential-injector / claude-settings 共用的中间表示
+ - **WS 信封**：`DaemonMessage<T extends MsgType> {type, payload: unknown}`。
+ - **Lease 族**：
+   - `LeaseCtx`：claim/task_available 执行上下文（字段见关键逻辑与注意事项）；
++    可选字段 `borrowWorkspaceContext`（2026-10-10-borrow-sandbox-workspace-context）：
++    借用 interactive lease 的工作区上下文对象（claim payload `borrow_workspace_context`
++    双读归一），仅借用路径携带，缺键 undefined 穿透（daemon marker 分支渲染沙箱
++    AGENTS.md 消费）；
+   - `LeasePayload = LeaseCtx`（task_available 阶段尚无 claim_token）；
+   - `ExecutionContextPayload`：GET execution-context 响应（snake_case）；
+   - `LeaseClaimResult`（claimToken 必填）；`LeaseMessage`（submit_messages 单条，
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index 7dd969d1b..0a32e1d8b 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -124,22 +124,33 @@ async def _handle_busy_turn(
+                 "current_run_id": str(current.id),
+             },
+         )
+-    pending_count = len(
++    # 2026-10-10-task-wakeup-quiet-threshold（FR-02）：[后台任务通知] 系统通知
++    # 豁免满员计数——用户额度只数非通知类 pending 条目（生产实证会话 0d6b2ba9：
++    # 通知在排队栏与用户消息混排挤占额度）；通知类注入自身也豁免拒绝（走下方
++    # ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）——旧口径队满时
++    # 注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。
++    is_task_wakeup_prompt = prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX)
++    pending_prompts = (
+         (
+             await svc._session.execute(
+-                select(AgentSessionQueuedMessage.id).where(
++                select(AgentSessionQueuedMessage.prompt).where(
+                     AgentSessionQueuedMessage.agent_session_id == session.id,
+                     AgentSessionQueuedMessage.status == "pending",
+                 )
+             )
+-        ).all()
++        )
++        .scalars()
++        .all()
++    )
++    user_pending_count = sum(
++        1 for p in pending_prompts if not (p or "").startswith(TASK_WAKEUP_PROMPT_PREFIX)
+     )
+-    if pending_count >= SESSION_QUEUE_MAX_PENDING:
++    if not is_task_wakeup_prompt and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
+         raise DaemonSessionQueueFull(
+             f"会话排队消息已达上限（{SESSION_QUEUE_MAX_PENDING} 条），请等当前本轮结束后再发送。",
+             details={
+                 "session_id": str(session_id),
+-                "pending": pending_count,
++                "pending": user_pending_count,
+             },
+         )
+     # ql-20260827-015：通知合并——同会话已有 pending 的「[后台任务通知]」
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 60fcf3e97..034089f6b 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -609,6 +609,72 @@ class TestTaskWakeupMerge:
+         assert "普通消息" in prompts
+ 
+ 
++class TestTaskWakeupQueueQuota:
++    """2026-10-10-task-wakeup-quiet-threshold FR-02：[后台任务通知] 豁免满员计数。
++
++    生产实证（会话 0d6b2ba9）：系统通知在排队栏与用户消息混排挤占 5 条额度；
++    队满时通知注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。豁免后：
++    用户额度只数非通知类 pending 条目；通知类注入永不因满员被拒（走既有
++    ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）。
++    """
++
++    @pytest.mark.asyncio
++    async def test_wakeup_entry_does_not_consume_user_quota(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """1 条通知 + 4 条用户消息（合计 5 行）时，第 5 条用户消息不被拒。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        await svc.inject_session(
++            session_id, uid, prompt=_wakeup_prompt("通知", "t-q1"), queue_when_busy=True
++        )
++        for i in range(SESSION_QUEUE_MAX_PENDING - 1):
++            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
++
++        result = await svc.inject_session(
++            session_id, uid, prompt="第5条用户消息", queue_when_busy=True
++        )
++
++        assert result.queued is True
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
++
++    @pytest.mark.asyncio
++    async def test_wakeup_inject_succeeds_when_queue_full(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """5 条用户消息队满后，通知注入不再抛 QueueFull（不再静默丢通知）。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        for i in range(SESSION_QUEUE_MAX_PENDING):
++            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
++
++        result = await svc.inject_session(
++            session_id, uid, prompt=_wakeup_prompt("队满补通知", "t-q2"), queue_when_busy=True
++        )
++
++        assert result.queued is True
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
++
++    @pytest.mark.asyncio
++    async def test_user_quota_semantics_unchanged(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """豁免只作用于通知：用户消息额度仍是 5，第 6 条照旧拒（零回归）。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        for i in range(SESSION_QUEUE_MAX_PENDING):
++            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
++        # 通知豁免入队成功（不占额度）……
++        await svc.inject_session(
++            session_id, uid, prompt=_wakeup_prompt("通知", "t-q3"), queue_when_busy=True
++        )
++        # ……但用户的第 6 条消息仍被拒（用户侧计数只数到 5）。
++        with pytest.raises(DaemonSessionQueueFull):
++            await svc.inject_session(session_id, uid, prompt="第6条用户消息", queue_when_busy=True)
++
++
+ class TestRetrySuccessPath:
+     @pytest.mark.asyncio
+     async def test_retry_success_returns_snapshot_not_crash(
+diff --git a/docs/sillyspec/archived-change-resurrect-by-merge.md b/docs/sillyspec/archived-change-resurrect-by-merge.md
+new file mode 100644
+index 000000000..b0bcda5da
+--- /dev/null
++++ b/docs/sillyspec/archived-change-resurrect-by-merge.md
+@@ -0,0 +1,36 @@
++# 已归档变更被远端 merge 复活 + CLI 误注册幽灵行（2026-10-10 实证）
++
++## 现象
++- `2026-10-09-attachment-inline-reference` 已于 10-09 22:55 完整归档（提交 eeb818a13：verify PASS、
++  skip-apply 留痕、时间线齐全，且已推送 origin/main）。
++- 10-10 08:34/08:42 两次 `Merge branch 'main'`（a43ce8b89 / 527482182）后，
++  `.sillyspec/changes/2026-10-09-attachment-inline-reference/` 活跃路径重新出现**旧版四件套**
++  （决策止 v1、module-impact 仍是 TODO 骨架、无 verify 工件）——merge 对侧分支基于归档前状态。
++- `sillyspec next` 按目录产物推断把它列为「task 全勾，待验证」；
++  随后 `sillyspec run verify --change <名>` 在进度库**新建行**（id 19937，verify in-progress）
++  并把幽灵态推到平台（platform 侧也变 verify/active）。
++
++## 定性
++两环节叠加：
++1. **git 层**：远端分支落后含归档删除提交的历史，merge 把已删除文件带回
++   （对侧对同名文件有改动时 merge 不按「删除优先」收敛）。
++2. **CLI 层**：
++   - `run verify` 见活跃目录存在即自动注册新进度行，不校验「同名 archive 目录已存在」；
++   - `doctor` 无「active 目录与 archive 目录同名」的幽灵复活探测器，
++     反而给出 `--align-execute-progress`（会错误地给幽灵补 execute 戳）。
++
++## 处置（2026-10-10，提交 2e598f5b7）
++1. 递归 diff 活跃 vs 归档目录，证实归档侧为超集（v2/v3 决策、终版 module-impact）零信息损失；
++2. `git rm -r` 幽灵活跃目录并提交；
++3. 进度库按既有归档终态模板手工收口（对照正常归档行形态）：
++   `changes.status='archived' / current_stage='archive'`，stages 全 pending 唯 archive completed，
++   删除误注册产生的 verify steps。
++
++## 工具侧改进建议（待 sillyspec 修复后移入 finished/）
++- `run <stage> --change` 注册前查同名 `changes/archive/<名>/` 存在即拒绝并提示幽灵复活；
++- `doctor` 增加「active×archive 同名」检测项并给出清理建议（勿建议 align）；
++- merge 后建议人工核对 `.sillyspec/changes/` 与 `changes/archive/` 无同名目录。
++
++## 复发判据
++本仓多机/多会话并行 + 频繁 merge 远端时，任何已归档变更的活跃路径旧文件都可能被带回。
++merge 后跑 `sillyspec next` 若出现「已归档过的变更名」即命中本坑。
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index cee9fc0fa..4a277b4bd 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -24,6 +24,16 @@ import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
+  */
+ const TASK_PROGRESS_LINE_THROTTLE_MS = 2000;
+ 
++/**
++ * 2026-10-10-task-wakeup-quiet-threshold（FR-01）：后台任务终态唤醒的最短实际
++ * 运行时长（ms）——不足该值的 completed/failed 不注入唤醒（生产实证：13 分钟
++ * 会话被 17 条秒级孙任务通知灌满，而真长任务 770s；60s 在两者间留一个数量级
++ * 安全带）。仅拦唤醒注入；终态 emit/[TASK_NOTIFICATION] 落行/注销不受影响，
++ * 主代理可 TaskOutput 自取短任务结果。时长判定：elapsed_ms（服务端权威）优先，
++ * 缺失用注册条目 startedAt 差值兜底，两者都缺 fail-open 照常唤醒。
++ */
++const TASK_WAKEUP_MIN_DURATION_MS = 60_000;
++
+ /**
+  * task-08（对账表 #8）：status/agent_task_status 统一处理器。
+  *
+@@ -259,6 +269,17 @@ export async function handleTaskNotificationEvent(
+   // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
+   // 停止，结果无需汇报，不唤醒防噪）。
+   if (rawStatus === 'completed' || rawStatus === 'failed') {
++    // 门槛判定（FR-01）：info 已从注册表注销但局部引用仍在，startedAt 可读；
++    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
++    const durationMs =
++      elapsedMs !== undefined
++        ? elapsedMs
++        : info?.startedAt !== undefined
++          ? Date.now() - info.startedAt
++          : undefined;
++    if (durationMs !== undefined && durationMs < TASK_WAKEUP_MIN_DURATION_MS) {
++      return;
++    }
+     scheduleTaskWakeup(mgr, state.sessionId, {
+       taskId,
+       taskName,
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index 3b5002dc9..c5f1c2d93 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -19,7 +19,10 @@
+ //     R-03 节流：短间隔多次 task_progress 只落 1 条 [TASK_PROGRESS]，超 2000ms 恢复
+ //     落行，终态行不受节流（fake timers）；
+ //   - 跨 turn：result 收尾（currentRunId 清空）后到达的 task_notification 用注册时
+-//     捕获的派发 runId 落行/emit。
++//     捕获的派发 runId 落行/emit；
++//   - 2026-10-10-task-wakeup-quiet-threshold FR-01：唤醒最短时长门槛 60s
++//     （elapsed_ms 优先/注册表 startedAt 兜底/双缺失 fail-open），仅拦唤醒注入，
++//     终态 emit/落行/注销不受影响。
+ //
+ // 不起真 CLI：fake driver 捕获 SessionManager._runConsume 注入的 onTurnMessage/
+ // onTurnResult 回调，直接调用即驱动 _onMessage / _onResult 全链路。
+@@ -708,8 +711,10 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
+       const h = await createHarnessWakeup('sess-w', 'run-w', wakeup);
+       await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A: 数数' }));
+       await h.emitMessage(msgTaskStarted({ taskId: 'task-b', toolUseId: 'call-b', description: '子代理B: 数数' }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 20000 }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 21000 }));
++      // durationMs 夹具须在唤醒门槛（60s）之上——2026-10-10-task-wakeup-quiet-threshold
++      // 后短任务不唤醒，本用例守护的是合并形态，不是门槛。
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 61000 }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 62000 }));
+       // 窗口内不注入
+       expect(wakeup).not.toHaveBeenCalled();
+       await vi.advanceTimersByTimeAsync(2100);
+@@ -725,7 +730,7 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
+       expect(prompt).toContain('禁止声称仍在等待任何任务');
+       expect(prompt).toContain('子代理A: 数数');
+       expect(prompt).toContain('子代理B: 数数');
+-      expect(prompt).toContain('00:20');
++      expect(prompt).toContain('01:01');
+       expect(prompt).toContain('A 数完了');
+       expect(prompt).toContain('TaskOutput');
+       expect(prompt).toContain('不要重复执行这些任务');
+@@ -734,6 +739,83 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
+     }
+   });
+ 
++  // ── 2026-10-10-task-wakeup-quiet-threshold：唤醒最短时长门槛（60s） ────────
++
++  it('FR：短任务不唤醒——elapsed_ms 2s < 60s 门槛，终态 emit/落行/注销照常', async () => {
++    vi.useFakeTimers();
++    try {
++      const wakeup = vi.fn().mockResolvedValue(undefined);
++      const h = await createHarnessWakeup('sess-q1', 'run-q1', wakeup);
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-q1', toolUseId: 'call-q1', description: '秒级搜索' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-q1', status: 'completed', summary: '查完了', durationMs: 2000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(wakeup).not.toHaveBeenCalled();
++      // 门槛只拦唤醒注入：终态 emit 与 [TASK_NOTIFICATION] 行照常。
++      expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
++      const notifLine = h.deps.onTurnMessage.mock.calls
++        .map((c) => String((c[2] as { content?: string })?.content ?? ''))
++        .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
++      expect(notifLine).toBeDefined();
++      expect(notifLine).toContain('"task_id":"task-q1"');
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR：长任务照常唤醒——elapsed_ms 61s ≥ 60s 门槛', async () => {
++    vi.useFakeTimers();
++    try {
++      const wakeup = vi.fn().mockResolvedValue(undefined);
++      const h = await createHarnessWakeup('sess-q2', 'run-q2', wakeup);
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-q2', toolUseId: 'call-q2', description: '长调研' }));
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-q2', status: 'failed', summary: '跑完但失败', durationMs: 61000 }));
++      await vi.advanceTimersByTimeAsync(2100);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++      const prompt = wakeup.mock.calls[0][1] as string;
++      expect(prompt).toContain('长调研');
++      expect(prompt).toContain('已失败');
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR：elapsed_ms 缺失用注册表 startedAt 兜底——注册 3s 后终态不唤醒，61s 后终态唤醒', async () => {
++    vi.useFakeTimers();
++    try {
++      const short = vi.fn().mockResolvedValue(undefined);
++      const h1 = await createHarnessWakeup('sess-q3', 'run-q3', short);
++      await h1.emitMessage(msgTaskStarted({ taskId: 'task-q3', toolUseId: 'call-q3', description: '短任务' }));
++      await vi.advanceTimersByTimeAsync(3000);
++      await h1.emitMessage(msgTaskNotification({ taskId: 'task-q3', status: 'completed', summary: 'x' }));
++      await vi.advanceTimersByTimeAsync(3000);
++      expect(short).not.toHaveBeenCalled();
++
++      const long = vi.fn().mockResolvedValue(undefined);
++      const h2 = await createHarnessWakeup('sess-q4', 'run-q4', long);
++      await h2.emitMessage(msgTaskStarted({ taskId: 'task-q4', toolUseId: 'call-q4', description: '长任务' }));
++      await vi.advanceTimersByTimeAsync(61000);
++      await h2.emitMessage(msgTaskNotification({ taskId: 'task-q4', status: 'completed', summary: 'y' }));
++      await vi.advanceTimersByTimeAsync(2100);
++      expect(long).toHaveBeenCalledTimes(1);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
++  it('FR：时长无从判定（无 elapsed_ms 且注册表无条目）保持原唤醒行为（fail-open）', async () => {
++    vi.useFakeTimers();
++    try {
++      const wakeup = vi.fn().mockResolvedValue(undefined);
++      const h = await createHarnessWakeup('sess-q5', 'run-q5', wakeup);
++      // 不发 task_started——daemon 重启窗口形态：任务表无条目，靠 currentRunId 兜住。
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'completed', summary: '孤儿终态' }));
++      await vi.advanceTimersByTimeAsync(2100);
++      expect(wakeup).toHaveBeenCalledTimes(1);
++    } finally {
++      vi.useRealTimers();
++    }
++  });
++
+   it('FR：stopped 不唤醒（主动停止无需汇报）', async () => {
+     vi.useFakeTimers();
+     try {
+diff --git a/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/design.md b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/design.md
+new file mode 100644
+index 000000000..03763de11
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/design.md
+@@ -0,0 +1,98 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T07:45:13.004Z
++---
++# 设计记录（Design Record）— 2026-10-10-task-wakeup-quiet-threshold
++
++## 做法概述
++
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++问题根因（生产实证，阿里云会话 0d6b2ba9）：Claude Code 引擎的后台子代理终态每个都触发
++daemon 唤醒注入（`scheduleTaskWakeup`），13 分钟灌 18 条「后台任务通知」——其中 17 条是
++后台调研子代理内部派的秒级搜索步骤（孙任务），唯一的真长任务（12:50）才是唤醒机制原本
++服务的对象；忙轮时这些通知还进排队栏与用户消息混排、挤占 5 条额度，队满时被静默丢弃。
++
++方案（两点，都最小侵入）：
++
++1. **daemon 唤醒门槛**：`handleTaskNotificationEvent` 在 completed/failed 唤醒分支前加
++   时长判定——`elapsed_ms`（服务端权威）优先，缺失用注册表条目 `startedAt` 差值兜底，
++   实际运行 < `TASK_WAKEUP_MIN_DURATION_MS`（60_000ms）直接 return 跳过
++   `scheduleTaskWakeup`。60 秒的取值依据：实证噪音全部 ≤15s，真任务 770s，中间留一个
++   数量级的安全带。门槛只拦「唤醒注入」，emit/落行/注销/清锚点全不动（终态簿记完整，
++   主代理随时可 TaskOutput 自取短任务结果）。
++2. **backend 队满豁免**：`queue.py` 满员检查把 `[后台任务通知]` 前缀条目从计数中剔除
++   （用户额度只数用户自己的），且通知类注入自身豁免满员拒绝——它走既有
++   ql-20260827-015 同条合并恒 ≤1 条 pending，无撑爆风险。
++
++不做（FR-04 非目标）：孙任务判别（SDK task 事件无 depth/父 tool_use 稳定信号，需先
++spike；门槛已把实证噪音全灭）、排队栏前端分开展示（门槛落地后频率骤降，纯展示优化
++留待后续）。
++
++## 接口契约
++
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++- daemon `interactive/session-manager/background-tasks.ts`：新增模块常量
++  `TASK_WAKEUP_MIN_DURATION_MS = 60_000`（不导出，仅本模块消费）；
++  `handleTaskNotificationEvent` 的 completed/failed 分支行为变化——不足 60s 不再调用
++  `onTaskWakeupInject` 注入唤醒。对 SDK 事件形状、`[TASK_*]` 行格式、emit 事件、
++  `scheduleTaskWakeup`/`registerAsyncReceiptTask`/`writeTaskLine` 签名均无变化。
++- backend `daemon/session/service/queue.py`：`DaemonSessionQueueFull` 抛出条件变化——
++  用户消息按「非通知类 pending 计数 ≥ 5」判定（原来数全部 pending）；`[后台任务通知]`
++  前缀注入永不因满员被拒。对 router/API 形状、排队行 schema、合并逻辑无变化。
++- 前端、CLI、MCP：零变更。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++1. 乱序/迟到到达：时长判定只用当条 notification 自带的 elapsed_ms 或该任务注册条目的
++   startedAt（task_started 恒先于 task_notification 到达，注册表在通知消费时才注销），
++   不依赖跨事件排序；迟到很久的短任务通知（如 debounce 前的旧回执）按其真实时长判，
++   短则静默——正是本变更要消灭的形态。重复 task_notification（SDK 重放）第一次已注销
++   注册表，第二次 info 缺失、若无 elapsed_ms 则走双缺失分支照常唤醒——与旧行为一致
++   （重复唤醒本就存在，不新增风险）。
++2. 并发写：daemon 侧判定在 `handleTaskNotificationEvent` 单协程内，注册表
++   `tasks.delete(taskId)` 已先于判定执行但局部变量 `info` 仍持有引用（startedAt 可读），
++   无竞态；backend 满员检查与写行同锁内事务（既有结构不动，仅改计数谓词），豁免分支
++   不写新行时走既有 merge 的行锁内更新，并发双通知仍收敛为一条。
++3. 切换/生命周期：会话终态 `clearBackgroundTasks` 清注册表的既有语义不变——门槛不持有
++   任何新状态；daemon 重启后孤儿终态（无注册条目）沿用「runId 缺失早退 / 双缺失
++   fail-open」既有路径。interrupt 不清后台任务（既有语义），被 interrupt 的会话里短任务
++   通知照旧静默、长任务照旧唤醒。
++4. 作用域：门槛是 daemon 进程内模块常量，按会话独立判定，无跨会话/跨工作区共享状态；
++   backend 豁免按 agent_session_id 维度的 pending 行过滤，不涉全局。多 daemon 实例对
++   同一 backend 各自独立注入，merge 逻辑既有行锁保证不重复。
++
++## 风险与死路
++
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-10-task-wakeup-quiet-threshold 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++最大风险：60 秒门槛把「中等时长但有汇报价值」的后台任务（如 30-50s 的检查类任务）也
++静默了。接受理由：主代理仍可 TaskOutput 主动取结果，终态行/emit 都在，信息不丢，只是
++不再强迫打断；常量单点可调，后续按体验收紧/放宽是一行改动。次要风险：既有唤醒用例
++夹具 20-21s 低于新门槛，需同步上调（行为规格变更的正常适配，已在 FR-03 声明，非躲败）。
++
++试过但放弃的方案：①按 subagent_type/depth 判孙任务不冒泡——SDK task 事件
++metadata 无层级信号（孙任务与主代理亲派任务同形），只能靠 `_agentToolUseMeta` 猜测，
++误判面大，放弃（转 FR-04 留待 spike）；②把 debounce 2s 拉长到 15s+——只合并同时窗
++口内的风暴，实证通知间隔 15-100s，合并不到一起，治标不治本；③前端把排队栏系统通知
++折叠展示——不动噪音源头，纯遮羞，且门槛落地后队列里几乎不会再出现通知，收益消失。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/interactive/session-manager/background-tasks.ts | 新增 TASK_WAKEUP_MIN_DURATION_MS 常量 + handleTaskNotificationEvent 唤醒分支时长门槛 |
++| 修改 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts | 新增 4 条门槛用例；既有合并用例 durationMs 夹具 20/21s→61/62s（00:20→01:01 断言同步） |
++| 修改 | backend/app/modules/daemon/session/service/queue.py | 满员计数剔除 [后台任务通知] 前缀条目 + 通知类注入豁免满员拒绝 |
++| 修改 | backend/app/modules/daemon/tests/test_session_queue.py | 新增 3 条豁免用例（不占额度/队满不丢/用户满员零回归） |
++| 修改 | .sillyspec/docs/SillyHub/modules/daemon.md | 模块文档补唤醒门槛行为（同步文档义务） |
+diff --git a/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/proposal.md b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/proposal.md
+new file mode 100644
+index 000000000..732e4fd45
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T07:45:13.004Z
++---
++# 提案书（Proposal）— 2026-10-10-task-wakeup-quiet-threshold
++
++## 动机
++
++任务原话转写：后台任务终态唤醒对秒级短任务也全套触发：空闲时插对话流、忙时进排队栏混排且占 5 条额度，实测会话 13 分钟被灌 18 条通知，全是子代理内部秒级搜索步骤（仅 Claude Code 引擎触发，pi 无后台模式零影响）。
++成功标准：
++- daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
++- backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
++- daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
++- 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
++2. backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
++3. daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
++4. 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
++
++## 成功标准（可验证）
++
++1. daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
++2. backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
++3. daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
++4. 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
+diff --git a/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/requirements.md b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/requirements.md
+new file mode 100644
+index 000000000..a322ed8a6
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/requirements.md
+@@ -0,0 +1,102 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T07:45:13.004Z
++---
++# 需求规格（Requirements）— 2026-10-10-task-wakeup-quiet-threshold
++
++## 功能需求
++
++### FR-01: daemon 唤醒加最短时长门槛：任务实际运行不足 60 秒不注入唤醒（emit/落行/注销语义不变），elapsed_ms 缺失时用注册表 startedAt 兜底计算，两者都缺时保持原唤醒行为
++
++daemon 必须在任务终态唤醒（`scheduleTaskWakeup`）前判定任务实际运行时长：时长来源优先取
++task_notification 事件 metadata 的 `elapsed_ms`（服务端权威值），缺失时用后台任务注册表
++条目的 `startedAt` 差值兜底；实际运行不足 `TASK_WAKEUP_MIN_DURATION_MS`（60 秒）的
++completed/failed 任务必须跳过唤醒注入。时长判定只作用于唤醒注入——终态 emit、
++`[TASK_NOTIFICATION]` 落行、任务表注销、末任务清后台锚点等既有语义必须保持不变。
++elapsed_ms 与注册表条目两者都缺失（时长无从判定）时必须保持原行为（照常唤醒）。
++
++#### 场景：短任务静默
++
++- Given：会话注册了后台任务 A（task_started），主代理空闲等待
++- When：A 的 task_notification 到达，metadata 带 `elapsed_ms: 2000`（或缺失但注册表
++  startedAt 距今 2 秒）
++- Then：终态 emit 与 `[TASK_NOTIFICATION]` 行照常发生、任务表注销照常，但 2s debounce
++  窗口后 `onTaskWakeupInject` 不被调用（无「后台任务通知」注入）
++
++#### 场景：长任务照常唤醒
++
++- Given：会话注册了后台任务 B（task_started）
++- When：B 的 task_notification 到达，metadata 带 `elapsed_ms: 61000`
++- Then：既有唤醒链路完整发生（debounce 合并 → prompt 注入，prompt 含任务名/用时/摘要）
++
++#### 场景：时长无从判定保持原行为
++
++- Given：会话有活跃轮（currentRunId 在），但任务表无该 task_id 条目（如 daemon 重启窗口）
++- When：该任务的 task_notification 到达（无 elapsed_ms、无 startedAt 可用）
++- Then：不因时长门槛吞掉唤醒——照旧走 scheduleTaskWakeup（fail-open 保留原语义）
++
++### FR-02: backend 排队满员检查不再把 [后台任务通知] 系统通知计入用户 5 条额度：队满时用户消息照常入队判断不受通知挤占，系统通知队满也不被丢弃（仍走既有同条合并）
++
++backend 排队满员检查（`SESSION_QUEUE_MAX_PENDING`）必须把 prompt 以
++`[后台任务通知]` 开头的系统通知条目排除在用户额度计数之外：用户消息的满员判断只统计
++非通知类 pending 条目；系统通知自身的入队/合并必须豁免满员拒绝（它走既有
++ql-20260827-015 同条合并，恒 ≤1 条 pending，不会撑爆队列）。普通用户消息满员时仍必须
++照旧抛 `DaemonSessionQueueFull`（用户侧语义零变化）。
++
++#### 场景：通知不占用户额度
++
++- Given：忙轮会话，队列里已有 1 条 pending 的 [后台任务通知] + 4 条用户消息（合计 5 行）
++- When：用户再发第 5 条用户消息（queue_when_busy=True）
++- Then：不抛 DaemonSessionQueueFull——用户额度只数自己的 4 条，第 5 条正常入队
++
++#### 场景：队满时通知不被丢弃
++
++- Given：忙轮会话，队列已有 5 条 pending 用户消息（旧口径下满员）
++- When：daemon 注入一条 [后台任务通知]（queue_when_busy=True）
++- Then：不抛 DaemonSessionQueueFull——系统通知正常入队（无既有通知条目时新建行，
++  有则并入既有条目改写计数），不再出现「task wakeup inject failed」静默丢通知
++
++#### 场景：用户满员语义零回归
++
++- Given：忙轮会话，队列已有 5 条 pending 用户消息（不含通知）
++- When：用户再发第 6 条用户消息
++- Then：照旧抛 DaemonSessionQueueFull（本变更不放宽用户侧上限）
++
++### FR-03: daemon 与 backend 各有针对性测试覆盖新行为，仅跑修改相关测试，全量留给 CI
++
++本变更必须为 FR-01/FR-02 各补针对性测试（daemon vitest + backend pytest），覆盖：短任务
++不唤醒、长任务唤醒、startedAt 兜底、双缺失保持唤醒、通知不占额度、队满通知不丢、用户
++满员零回归。已有一个既有唤醒用例的 durationMs 夹具（20-21 秒）必须同步上调至门槛之上
++（行为规格变更的正常适配，非改测试躲败）。执行时仅跑修改相关的测试文件，禁止跑全量
++（全量留给 CI）。
++
++#### 场景：测试绑定可追溯
++
++- Given：FR-01/FR-02 行为已实现
++- When：跑下方「测试绑定」列出的用例
++- Then：全部通过，且其中含针对新门槛/豁免的正反两向断言
++
++### FR-04: 孙任务不冒泡（缺可靠 SDK 信号需 spike）与排队栏前端分开展示（纯展示优化）本变更不做，留待后续
++
++本变更禁止扩大范围到以下两项（显式非目标）：①孙任务（后台子代理内部再派的后台任务）不
++向主会话冒泡——task 事件流缺可靠的层级信号（无 depth/父 tool_use 可稳定判别孙任务），
++需先 spike SDK 事件形状，本变更不做；②排队栏前端把系统通知与用户消息分开展示——FR-01
++门槛落地后通知频率大幅下降，纯展示优化收益有限，留待后续按实际体验决定。
++
++#### 场景：非目标边界
++
++- Given：本变更合入
++- When：检查 daemon/backend/frontend diff
++- Then：不含孙任务判别逻辑、不含排队栏 UI 改动（frontend 零文件变更）
++
++## 测试绑定
++
++FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「短任务不唤醒（elapsed_ms 2s）」
++FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「长任务照常唤醒（elapsed_ms 61s）」
++FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「elapsed_ms 缺失用 startedAt 兜底判时长」
++FR-01: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「时长无从判定（无 elapsed 无注册条目）保持唤醒」
++FR-02: backend/app/modules/daemon/tests/test_session_queue.py「通知不占用户 5 条额度」
++FR-02: backend/app/modules/daemon/tests/test_session_queue.py「队满时系统通知不丢（入队成功）」
++FR-02: backend/app/modules/daemon/tests/test_session_queue.py「用户满员语义零回归」
++FR-03: 上述七条用例的集合即为本变更测试面（跑修改相关文件，不跑全量）
++FR-04: 不适用：非目标条目（孙任务冒泡缺 SDK 信号需 spike、排队栏前端分开展示为纯展示优化），由 diff 范围审查守护（frontend 零变更）
+diff --git a/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/tasks.md b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/tasks.md
+new file mode 100644
+index 000000000..272524d9d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-task-wakeup-quiet-threshold/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T07:45:13.004Z
++---
++# 任务注册表（Tasks）— 2026-10-10-task-wakeup-quiet-threshold
++
++- [x] task-01: daemon 测试先行——task-lifecycle.test.ts 唤醒 describe 内新增 4 条用例（短任务 elapsed_ms 2s 不唤醒/长任务 61s 唤醒/elapsed 缺失走 startedAt 兜底/双缺失保持唤醒），同步把既有合并用例 durationMs 夹具 20/21s 上调 61/62s（00:20→01:01）；跑该文件确认新用例红、旧用例仅夹具变化
++- [x] task-02: daemon 实现——background-tasks.ts 加 TASK_WAKEUP_MIN_DURATION_MS=60_000，handleTaskNotificationEvent completed/failed 分支在 scheduleTaskWakeup 前判时长（elapsed_ms 优先→info.startedAt 兜底→双缺失放行），跑 task-lifecycle.test.ts 全绿
++- [x] task-03: backend 测试先行——test_session_queue.py 新增 3 条用例（1 通知+4 用户后第 5 条用户消息不拒/5 条用户队满后通知入队不抛 QueueFull/纯 5 条用户后第 6 条照旧拒），先跑确认红
++- [x] task-04: backend 实现——queue.py 满员计数剔除 [后台任务通知] 前缀 pending 条目 + 通知类注入豁免 DaemonSessionQueueFull，跑 test_session_queue.py 全绿
++- [x] task-05: 同步模块文档 daemon.md 唤醒门槛行为段 + 全部交付文件显式 pathspec 提交（每任务一格、消息带 task-NN）
