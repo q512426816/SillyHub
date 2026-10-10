@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-session-turn-token-speed",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "8b2e14092ba7eb9c505748f29cc1d7d4511c85f7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-05 的 page/dialog onTurnCompleted 写入与 enrichDisplayTurns 回填无行为测试，仅 pnpm typecheck 编译门覆盖",
+      "evidence": "绑定作答已显式声明该覆盖方式且裁决可接受：enrich ?? 链（t.apiDurationMs ?? meta.duration_api_ms ?? null）与 page/dialog 写入（env.duration_api_ms ?? turn.apiDurationMs ?? null）与既有 ctxTokens 先例完全同构（同链同守卫），resync 路径有真实断言兜底；遗留风险仅为抄写错误面，后续可补 enrich 回填行为测试。",
+      "location": "frontend/src/components/daemon/session-panel/page-helpers.tsx:220"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design 声明的终态幂等门真实存在且生效：turn-state.ts:218 非 log 事件对已终态轮直接 return t（迟到的重复 turn_completed 不重写轮），加上 ?? 链首值稳定，enrich 只补缺不覆盖实时值（page-helpers.tsx:220）。",
+    "并发": "ok——runsMeta 快照刷新与实时 onTurnCompleted 竞争由 enrich ?? 链「turn 实时值优先」消解（page-helpers.tsx:220），与既有 inputTokens 同口径；upsertTurn 按 run_id 定位单轮字段，page/dialog 独立 state 无跨模式共享。",
+    "切换": "ok——apiDurationMs 随 turn 对象整体重建（会话切换既有 effect 重建 turns），字段是轮级不可变终值，无跨轮累加状态、无需清理；page/dialog 共 4 处占位轮构造均已显式初始化为 null。",
+    "作用域": "ok——字段按 run_id 挂轮无共享面；group-shadow-stream.ts 有独立 turn_completed 分支（line 37/122 member 收口，自有 envelope 形状）不消费 duration_api_ms，design「群聊影子会话不经本链路」声明核实为真。"
+  },
+  "boundaryRulings": [
+    {
+      "boundary": "实时运行中不显示速度（需 daemon 逐调用计时），留后续独立变更（design 做法概述/放弃方案一）",
+      "ruling": "可接受",
+      "reason": "FR-04 明文要求不伪造不降级；墙钟估速含工具等待会稀释数字 5-10 倍误导多供应商对比，宁缺毋滥是本变更核心口径。"
+    },
+    {
+      "boundary": "codex/cursor 等无 duration_api_ms 上报的引擎永远无速度显示（design 风险节）",
+      "ruling": "可接受",
+      "reason": "数据不可得即不显示是 FR-04 明文预期行为，不产生错误数据，仅覆盖面受限且已声明后续 daemon 各 driver 逐调用计时的独立变更路径。"
+    },
+    {
+      "boundary": "会话级聚合速度不在本次范围（历史窗口化求和必算少 + 需聚合端点改动，design 做法概述/放弃方案二）",
+      "ruling": "可接受",
+      "reason": "纯功能增量取舍，不涉数据正确性；算少的技术依据（agent-log-turns.ts 既有结论）成立且不在任何 FR 承诺内。"
+    },
+    {
+      "boundary": "分母采用 duration_api_ms（含 TTFT 的近似 decode 口径），非 deepseek-harness 的逐调用 decode 分段（design 放弃方案三）",
+      "ruling": "可接受",
+      "reason": "近似口径已在 design 显式披露，跨三引擎消息边界形状不一致的改动面理由成立；展示为 tok/s 不声称 decode-exact，无误导性数据风险。"
+    },
+    {
+      "boundary": "未起全栈实页截图，以 jsdom 组件级渲染断言代替视觉验证（visual-evidence.md）",
+      "ruling": "可接受",
+      "reason": "改动为轮尾文本级追加（零布局/零颜色改动，同一文本节点/同一 span），jsdom 断言已覆盖两视图渲染产物，验证成本与改动面相称。"
+    },
+    {
+      "boundary": "FR-05 的 page/dialog/enrich 接线面由 pnpm typecheck 编译门覆盖、无专门行为测试（requirements 测试绑定 FR-05 行声明）",
+      "ruling": "可接受",
+      "reason": "绑定作答显式声明且与 ctxTokens 既有先例完全同构（同 ?? 链同守卫），resync 路径有真实断言；已按 P3 记入 findings 作为后续补强建议，非承诺违反。"
+    },
+    {
+      "boundary": "失败/中止轮（failed/killed）数据齐同样显示速度——速度与业务成败正交（turn-speed.ts 注释与测试固化）",
+      "ruling": "可接受",
+      "reason": "FR-03 定义「终态轮」，TERMINAL_TURN_STATUSES/TERMINAL_SPEED_STATUSES 恰为 completed/failed/killed 三态，实现与需求口径自洽且有测试固化。"
+    }
+  ],
+  "frVerification": {
+    "FR-01": "ok——close_run_steps.py:604 turn_completed payload 无条件携带 duration_api_ms=agent_run.duration_api_ms（写列在 line 313-314，publish 前已落实体属性），None 照实下发 null；绑定测试 test_publishes_turn_completed_duration_api_ms（test_interactive_lifecycle_patch.py:605）真实存在，断言有值态 3900 与 null 态键存在且为 None 两态。",
+    "FR-02": "ok——session_insights.py:108 SessionRunRead 增 duration_api_ms: int | None，model_config from_attributes（line 121），list_session_runs 为整行 select(AgentRun, ...)（line 327）+ model_validate(run)（line 349），直映成立、runs 查询零改动属实；绑定测试 test_returns_duration_api_ms_column（test_session_runs_endpoint.py:312）断言 12500/None 两态；openapi.json:68375 与 api-types.ts:24789 字段对齐（anyOf integer/null ↔ duration_api_ms?: number | null）。",
+    "FR-03": "ok——turn-speed.ts formatTokensPerSecond（≥10 取整/<10 一位小数/负值钳 0/非有限兜 0）+ turnTokenSpeedText（终态+双值+时长>0 才出文本）；两处轮尾接线：RoundDivider meta（turn-timeline.tsx:892-897，同一 meta 文本拼接=同色同级）、TurnStatusBadge（turn-timeline.tsx:2039/2057，速度段在 token 计数同一 span 内=同色同级）；绑定测试 12+4 用例实跑全绿，断言含「↓1,250 · 100 tok/s」「3.1 tok/s」与对话视图同样追加。",
+    "FR-04": "ok——门控单点收口在 turnTokenSpeedText（TERMINAL_SPEED_STATUSES 集合 + outputTokens==null + apiDurationMs==null/≤0 → null），RoundDivider 调用点外层另有 token 双 null 不渲染 meta 的既有闸门；渲染测试断言运行中/缺 apiDurationMs 均无「tok/s」，不伪造不降级。",
+    "FR-05": "ok——四路径接线齐：page onTurnCompleted（session-panel-page.tsx:1319）、dialog（session-panel-dialog.tsx:661）均 env.duration_api_ms ?? turn.apiDurationMs ?? null；resync dispatchRunSynth（session-stream.ts:423 run.duration_api_ms ?? null，类型为已加字段的手工镜像 SessionRunRead）+ stream-sync 测试实跑断言合成事件透传 12500；enrichDisplayTurns（page-helpers.tsx:220）?? 链只补缺；upsertTurn 新建分支初始化（turn-state.ts:204）；4 处占位轮 null 初始化。绑定测试名「cursor：runs+logs 前置同步在 SSE 建连之前，logs 走 cursor-2s 增量」真实存在（daemon-session-stream-sync.test.ts:125）。",
+    "FR-06": "ok（部分复验）——前端三个绑定测试文件实跑 23 用例全绿（turn-speed 12 / stream-sync 7 / 渲染 4），与作答数字一致；后端两绑定用例静态核实存在且断言正确，本机 backend venv 缺 aiobotocore 无法复跑（评审环境限制，非交付缺陷）；typecheck 未复跑（保持只读最小化，前端测试 transform 已隐含编译通过）。"
+  },
+  "reviewedAt": "2026-10-10T19:02:48+08:00"
+}

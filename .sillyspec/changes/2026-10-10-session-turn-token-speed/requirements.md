@@ -81,7 +81,7 @@ formatTokensPerSecond 口径）；速度段**必须**与 token 计数同色同�
 
 `duration_api_ms` 的前端接线**必须**覆盖全部四条数据路径且口径一致：
 page 模式与 dialog 模式的 onTurnCompleted 终态写入、断线 resync 的 run 快照合成
-turn_completed 事件（dispatchRunSyns 透传）、page 模式历史回填
+turn_completed 事件（dispatchRunSynth 透传）、page 模式历史回填
 （enrichDisplayTurns ?? 链只补缺）；新建 turn（upsertTurn）**必须**初始化
 `apiDurationMs` 字段，外部构造者（logsToTurns 等既有形状）不受影响（字段可选）。
 
