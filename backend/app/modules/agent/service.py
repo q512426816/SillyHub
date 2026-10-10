@@ -2588,28 +2588,34 @@ async def _deferred_run_ids(session: AsyncSession) -> list[uuid.UUID]:
 
 
 async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool | None:
-    """复扫判死的 daemon 活性门（对齐 patrol 判死段双条件语义）。
+    """复扫判死的 daemon 活性门（对齐 patrol 判死段双条件语义 + lease 续约核验）。
 
     链路：run 最新 lease（``updated_at`` 倒序首见即定，同 patrol
     ``_resolve_run_daemons_bulk`` 单条语义——最新 lease 无 runtime_id 即断链，
     不回退老 lease）→ runtime → daemon 实例。返回：
 
-    - True：daemon status=online，或 last_heartbeat_at 在宽限窗内（含
-      last_heartbeat_at 为 None——patrol 同款保守跳过）；
-    - False：daemon 明确非 online 且心跳停滞超宽限窗；
+    - True：daemon status=online **且该 run 的 lease 续约新鲜**（宽限窗内），
+      或 last_heartbeat_at 在宽限窗内（含 last_heartbeat_at 为 None——patrol
+      同款保守跳过）；
+    - False：daemon 明确非 online 且心跳停滞超宽限窗；或实例 online 但 lease
+      续约停滞超宽限窗（2026-10-10-recheck-lease-freshness：daemon 进程重启
+      丢失 run 执行状态后实例重新上线的永卡形态——健康 run 的 lease 由 daemon
+      每 lease_heartbeat_interval（默认 5s）续约刷新 updated_at，实例活着
+      但不再为该 run 续约 = 已放弃此 run）；
     - None：链路不可解析（无 lease / 无 runtime / 无实例）——调用方退回纯
       日志 recency 语义，不因解析失败缩小 FR-01 防永卡兜底。
     """
-    runtime_id = (
+    latest_lease = (
         await session.execute(
-            select(DaemonTaskLease.runtime_id)
+            select(DaemonTaskLease.runtime_id, DaemonTaskLease.updated_at)
             .where(DaemonTaskLease.agent_run_id == run_id)
             .order_by(DaemonTaskLease.updated_at.desc())
             .limit(1)
         )
-    ).scalar_one_or_none()
-    if runtime_id is None:
+    ).first()
+    if latest_lease is None:
         return None
+    runtime_id, lease_updated_at = latest_lease
     instance_id = (
         await session.execute(
             select(DaemonRuntime.daemon_instance_id).where(DaemonRuntime.id == runtime_id)
@@ -2622,9 +2628,14 @@ async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool | 
     ).scalar_one_or_none()
     if daemon is None:
         return None
-    if daemon.status == "online" or daemon.last_heartbeat_at is None:
+    now = datetime.now(UTC)
+    if daemon.status == "online":
+        # 实例在线再核 lease 续约新鲜度：停滞超宽限窗 = daemon 重启丢态后
+        # 放弃此 run（docstring 2026-10-10-recheck-lease-freshness 场景）。
+        return now - _as_utc(lease_updated_at) <= STALE_RUN_ACTIVE_GRACE
+    if daemon.last_heartbeat_at is None:
         return True
-    return datetime.now(UTC) - _as_utc(daemon.last_heartbeat_at) <= STALE_RUN_ACTIVE_GRACE
+    return now - _as_utc(daemon.last_heartbeat_at) <= STALE_RUN_ACTIVE_GRACE
 
 
 async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID]) -> set[uuid.UUID]:
@@ -2633,7 +2644,8 @@ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID])
     - 已非 running（正常收口/其它路径终态化）→ 出列停止追踪；
     - 日志宽限窗内（daemon 仍在报）→ 保持追踪；
     - 日志停滞 + daemon 活性门 True（健康 daemon 上的长静默轮：等待用户
-      应答/长工具调用）→ 不判死，保持追踪等真终态；
+      应答/长工具调用；在线实例须 lease 续约新鲜——停滞即 daemon 重启丢态
+      放弃此 run，活性门回 False）→ 不判死，保持追踪等真终态；
     - 日志停滞 + 活性门 False/None（daemon 确死或链路不可解析）→ 行锁重读
       后判死（None 退回纯 recency 语义，防永卡兜底不缩小）。
     """

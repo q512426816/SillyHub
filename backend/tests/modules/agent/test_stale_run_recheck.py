@@ -61,8 +61,14 @@ async def _make_daemon_chain(
     run_id: uuid.UUID,
     daemon_status: str,
     heartbeat_age: timedelta,
+    lease_updated_age: timedelta = timedelta(seconds=5),
 ) -> None:
-    """构造 run → lease → runtime → daemon 实例链（对齐 patrol 解析路径）。"""
+    """构造 run → lease → runtime → daemon 实例链（对齐 patrol 解析路径）。
+
+    lease_updated_age：最新 lease 的续约新鲜度——健康 run 由 daemon 每
+    lease_heartbeat_interval（默认 5s）续约刷新 updated_at（2026-10-10
+    -recheck-lease-freshness 对齐真实续约时序）；默认 5s = 续约中。
+    """
     uid = uuid.uuid4()
     db_session.add(
         User(
@@ -98,7 +104,7 @@ async def _make_daemon_chain(
             status="claimed",
             kind="interactive",
             created_at=datetime.now(UTC) - timedelta(hours=1),
-            updated_at=datetime.now(UTC) - timedelta(hours=1),
+            updated_at=datetime.now(UTC) - lease_updated_age,
         )
     )
     await db_session.commit()
@@ -154,7 +160,10 @@ async def test_recheck_ignores_new_silent_run_outside_tracked_set(
 
 @pytest.mark.asyncio
 async def test_recheck_pardons_run_with_online_daemon(db_session: AsyncSession) -> None:
-    """daemon 在线 + 日志停滞（等待用户应答/长工具调用的静默轮）→ 不判死。"""
+    """daemon 在线 + 日志停滞（等待用户应答/长工具调用的静默轮）→ 不判死。
+
+    前提（2026-10-10-recheck-lease-freshness）：lease 续约新鲜（daemon 每
+    5s 续约），证明 run 仍被 daemon 持有执行。"""
     run = _make_running_run()
     db_session.add(run)
     await db_session.commit()
@@ -171,6 +180,37 @@ async def test_recheck_pardons_run_with_online_daemon(db_session: AsyncSession) 
     assert refreshed.status == "running"
     assert refreshed.error_code is None
     assert refreshed.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_recheck_kills_run_with_online_daemon_but_stale_lease(
+    db_session: AsyncSession,
+) -> None:
+    """实例在线但 lease 续约停滞 → 判死出列（2026-10-10-recheck-lease-freshness）。
+
+    场景：daemon 进程重启丢失 run 执行状态后实例重新上线——日志停滞 +
+    实例 online，但该 run 的 lease 不再续约（daemon 重启后不会为旧 run
+    心跳）。原实现只看实例 online 即豁免 → run 永卡 running（patrol 对
+    online 实例同样豁免，无第二兜底）。"""
+    run = _make_running_run()
+    db_session.add(run)
+    await db_session.commit()
+    await _add_log(db_session, run.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
+    await _make_daemon_chain(
+        db_session,
+        run_id=run.id,
+        daemon_status="online",
+        heartbeat_age=timedelta(minutes=1),
+        lease_updated_age=timedelta(hours=1),
+    )
+
+    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
+
+    assert still == set()
+    refreshed = await db_session.get(AgentRun, run.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
 
 
 @pytest.mark.asyncio
