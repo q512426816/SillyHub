@@ -334,6 +334,102 @@ describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-ski
     await vi.advanceTimersByTimeAsync(10_000);
     expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
   });
+
+  // 2026-10-10-ws-init-dialog-close-guard：initializing 态三条默认关闭通道
+  // （ESC / 遮罩 / 右上角 X）必须全禁——注释声明的「初始化期间禁用取消」
+  // 不能只堵 footer 按钮。
+  it("initializing 态按 ESC / 点遮罩 → onCancel 不被调（Modal keyboard/maskClosable 禁用）", async () => {
+    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
+    const onCancel = vi.fn();
+    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={onCancel} />);
+    const daemonSelect = screen.getByRole("combobox");
+    await waitFor(() =>
+      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(1),
+    );
+    fireEvent.change(daemonSelect, { target: { value: "d1" } });
+    fireEvent.change(screen.getByLabelText("工作区路径"), {
+      target: { value: "C:\repo\demo" },
+    });
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+    expect(await screen.findByText("初始化工作区")).toBeInTheDocument();
+
+    // ESC：antd Modal keyboard 通道
+    fireEvent.keyDown(document, { key: "Escape", keyCode: 27 });
+    // 遮罩点击：antd Modal maskClosable 通道（点击 wrap 区域）
+    const wrap = document.querySelector(".ant-modal-wrap");
+    expect(wrap).not.toBeNull();
+    fireEvent.click(wrap!);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onCancel).not.toHaveBeenCalled();
+    // 弹窗仍在（进度反馈未丢）
+    expect(screen.getByText("初始化工作区")).toBeInTheDocument();
+  });
+
+  it("initializing 态右上角 X 不渲染（closable 禁用）；idle 态三条通道保持默认可用", async () => {
+    // idle 态：closable 默认 → X 按钮在
+    const { unmount } = render(
+      <WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />,
+    );
+    expect(
+      document.querySelector(".ant-modal-close"),
+    ).not.toBeNull();
+    unmount();
+
+    // initializing 态：closable=false → X 按钮不在 DOM
+    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
+    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />);
+    const daemonSelect = screen.getByRole("combobox");
+    await waitFor(() =>
+      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(1),
+    );
+    fireEvent.change(daemonSelect, { target: { value: "d1" } });
+    fireEvent.change(screen.getByLabelText("工作区路径"), {
+      target: { value: "C:\repo\demo" },
+    });
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+    expect(await screen.findByText("初始化工作区")).toBeInTheDocument();
+    expect(document.querySelector(".ant-modal-close")).toBeNull();
+  });
+
+  // 超时钟与轮询可见性暂停对齐：后台标签页（document.hidden）期间 5min 到期
+  // 不判 init_failed；回前台后重挂满窗再计。
+  it("后台标签页 5min 超时不假失败；回前台再计满 5min 才 init_failed", async () => {
+    const hiddenMock = { value: false };
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => hiddenMock.value,
+    });
+    try {
+      bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
+      await submitCreate();
+      await waitFor(() =>
+        expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
+      );
+
+      // 切后台：轮询暂停 + 超时钟顺延 → 推 5min+ 不出失败态
+      hiddenMock.value = true;
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 10_000);
+      expect(
+        screen.queryByText("工作区已创建成功，但初始化失败"),
+      ).toBeNull();
+      expect(screen.getByText("初始化工作区")).toBeInTheDocument();
+
+      // 回前台：重挂满窗 → 再推 5min+ 才失败
+      hiddenMock.value = false;
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 10_000);
+      expect(
+        await screen.findByText("工作区已创建成功，但初始化失败"),
+      ).toBeInTheDocument();
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+    }
+  });
 });
 
 describe("WorkspaceScanDialog spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {

@@ -103,6 +103,20 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     }
   };
   useEffect(() => stopInitPolling, []);
+  // 2026-10-10-ws-init-dialog-close-guard：超时钟与轮询的可见性暂停对齐
+  // （D-005 钟同步）——后台标签页轮询 tick 被 document.hidden 短路，deadline
+  // 到期同样顺延一拍再探，否则后台初始化实际成功、回前台却见 5min 假失败；
+  // 回前台后重挂满窗再计。
+  const armInitDeadline = (delayMs: number) => {
+    initDeadlineRef.current = setTimeout(() => {
+      if (document.hidden) {
+        armInitDeadline(INIT_POLL_INTERVAL_MS);
+        return;
+      }
+      stopInitPolling();
+      setPhase("init_failed");
+    }, delayMs);
+  };
 
   useEffect(() => {
     void listDaemonInstances()
@@ -156,10 +170,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           // 单次轮询错误忽略，下一 tick 重试（超时兜底）
         }
       }, INIT_POLL_INTERVAL_MS);
-      initDeadlineRef.current = setTimeout(() => {
-        stopInitPolling();
-        setPhase("init_failed");
-      }, INIT_POLL_TIMEOUT_MS);
+      armInitDeadline(INIT_POLL_TIMEOUT_MS);
     } catch (err) {
       setError(errMessage(err, "创建失败"));
       setPhase("idle");
@@ -168,6 +179,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
 
   // ql-20260821-007：内嵌展开块改为 antd Modal 弹窗（用户指定），
   // 表单内容/交互零改动，仅容器形态变化。
+  // 2026-10-10-ws-init-dialog-close-guard：busy（creating/initializing）态
+  // 三条默认关闭通道全禁（ESC=keyboard / 遮罩=maskClosable / 右上角 X=closable）
+  // ——「初始化期间禁用取消」不能只堵 footer 按钮；idle/done/init_failed 保持默认。
+  const busy = phase === "creating" || phase === "initializing";
   return (
     <Modal
       open
@@ -176,6 +191,9 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       footer={null}
       width={520}
       destroyOnHidden
+      maskClosable={!busy}
+      keyboard={!busy}
+      closable={!busy}
     >
       <div className="space-y-4">
         <p className="text-[11px] text-muted-foreground">
