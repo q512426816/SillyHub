@@ -1,0 +1,101 @@
+{
+  "change": "2026-10-10-usage-note-to-daemon-log",
+  "baseline": "527482182d0afd0979de6db774af3fd79c102efa",
+  "head": "fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe",
+  "files": [
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/design.md",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/flow-state.yaml",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/proposal.md",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/tasks.md",
+    ".sillyspec/docs/SillyHub/modules/daemon.md",
+    ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts",
+    ".sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json.superseded-20261010T023137"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 292,
+    "deletions": 60
+  },
+  "savedAt": "2026-10-10T02:33:19.306Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "527482182d0afd0979de6db774af3fd79c102efa",
+    "totals": {
+      "files": 4,
+      "additions": 74,
+      "deletions": 60
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/daemon.md",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 12,
+        "deletions": 25,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts",
+        "additions": 60,
+        "deletions": 34,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "f7bf1f97eb549530d7fa6d3def630bddd06e7b198bd5cc2b3caa13330f312e3c",
+  "patchStatus": "ok"
+}

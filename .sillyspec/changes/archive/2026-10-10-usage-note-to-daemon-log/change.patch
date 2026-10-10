@@ -1,0 +1,470 @@
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/flow-state.yaml b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/flow-state.yaml
+new file mode 100644
+index 000000000..cb633a189
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/flow-state.yaml
+@@ -0,0 +1,29 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  交互会话里 run 收口时若有存活后台任务，daemon 会向会话消息流追加 [USAGE_NOTE] 标注行（daemon.ts FR-04），每轮必触发、对用户是纯噪音且无法量化归属，需要移除会话内提示、排障信息降级到 daemon
++  日志。
++
++  成功标准：
++
++  - hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
++
++  - 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
++
++  - total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
++
++  - daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
++
++  - 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
++autopilot: false
++baseline_commit: 527482182d0afd0979de6db774af3fd79c102efa
++updatedAt: '2026-10-10T02:12:10.715Z'
++baseline_sha256: dff7e849782aee1bd214eab62012323fdf52893e128dd6bea7ba70eebb7f8ae8
++spec_approved: true
++spec_approved_at: '2026-10-10T02:12:10.713Z'
++spec_approved_by: anon@DESKTOP-HJ0AM09
++
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json
+new file mode 100644
+index 000000000..3642bd53b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-10-usage-note-to-daemon-log",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "65840b2985781a4954409c14ced8217afff73c66",
++  "findings": [
++    {
++      "severity": "P2",
++      "title": "FR-05 相关面回归引用不存在的测试路径，daemon-interactive-bridge.test.ts 实际从未运行",
++      "evidence": "FR-05/tasks.md task-03 命令写 tests/interactive/daemon-interactive-bridge.test.ts，但该文件实际位于 sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（tests 根目录，tests/interactive/ 下无此文件）；vitest CLI 参数为路径子串 filter，字面命令只会匹配到 usage-note 一个文件（bridge filter 匹配 0 文件且不报错），承诺的 bridge 相关面回归静默空转；verify 留档 test-result.json 中 grep 亦无 bridge 运行痕迹。产品代码本身无缺陷（本变更未触碰 bridge 面），属验证门承诺与实态偏差。",
++      "location": "C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md:51"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-10T02:30:18Z"
++}
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.md b/.sillyspec/docs/SillyHub/modules/daemon.md
+index d5c708847..5e61cabcd 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.md
+@@ -36,7 +36,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态
+   - 僵尸收敛 sweep 三档（`sweep.py`）：① reconnecting 超窗（180s）→ failed（DS-6 原档）；② `session_offline_sweep_once`——active/pending 会话其 runtime 非「online 且心跳≥600s 宽限」→ 主会话 suspended（非终态可 recover，run failed + 挂起 lease cancelled；worker 子会话/pending → failed，A5/S1 分流），suspended 非终态只广播列表 status_changed 不发 session_ended，超 24h GC 翻 failed 才发；③ `session_auto_recover_sweep_once`（ql-20260831-006-6d67）——suspended 主会话其 runtime 重新「online+心跳宽限内」且挂起满 60s → 翻 reconnecting + 发 SESSION_RESUME 控制指令（payload/供应商凭证对齐 reopen 路径），daemon restoreAndReconnect→confirm 翻 active；修 backend 重启场景 daemon WS 断开被误挂起后无人恢复（既有恢复链只在 daemon 自身重启时触发）。**排除项（quick 2026-09-01 风险审查修）**：候选与条件 UPDATE 均过滤 `deleted_at IS NULL`（suspended 软删残留行不复活——否则 confirm 翻 active + 补派发遗留排队消息成列表不可见僵尸）+ NOT EXISTS 归档工作区（对齐 reopen `_ensure_session_workspace_writable` 口径）；`confirm_session_reconnected` SELECT 同步加软删过滤（daemon 重启恢复链本地 sessions.json 仍含已删会话，迟到 confirm 按不存在→rejected）。终态写入点 `cancel_lease`（kill 把会话置 ended）也广播 session_ended；SSE 生成器对 `session_recovery_failed` 同样收尾（agent/service.py stream_session_logs）。
+ - **run_sync**：
+   - `submit_messages`：daemon 上行消息落库；partial/complete 用 segmentId 跨调用去重（`_revoke_committed_partials` 撤已提交半截）；pending→running 用原子条件 UPDATE 防迟到的 submit 覆盖终态（lost update）。quick-9f86d2c3（2026-08-27，会话 e87622aa）：完整行展开 segmentId 格式对齐 daemon partial 的 task-13 格式 `${parent}:${mid}:${type}`（text/thinking；原 `${mid}:${idx}` 与 partial 永不匹配致同调用判定与跨调用清理全部空转、partial 行永久滞留 DB）；完整行落库时不再只依赖 override 信号——直接 `_revoke_committed_partials` DELETE 已 commit 的同 segmentId partial（interactive 每消息独立 HTTP 提交，partial 先 commit、完整行后到是常态）。quick-0e56260f（2026-08-27，会话 0ef651b6）：完整行落库点 backend **合成 override 令箭**——①落一行标记（content=`[*_OVERRIDE] <segmentId>`、segment_id=NULL 防误删、mid=unknown 退化跳过）：partial 落库前查标记（判定 3）堵「完整行 DELETE 跑完后 partial 事务才提交」的并发竞态 + 完整行实时发布丢失时轮后对账重放补投；②published_logs 追加同形信封（stale=True）实时治愈前端乱序胶水段（直播窗口 Redis 发布部分丢失 → 前端按到达序拼出非前缀胶水段，前缀收编失效；前端据令箭按段 id 任意位置撤回，复用既有 override 链路零改动）。标记行在历史回放分类为 override 不渲染；不计入返回 count。
+-  - `_cleanup_stale_runs_impl` failed 分支补 error_code=SERVICE_RESTART_INTERRUPTED + error_detail（2026-09-15-background-task-permission-lockout FR-04，completed 恢复分支不写）；daemon 侧配套：run 收口时会话仍有存活后台任务→追加 [USAGE_NOTE] 标注行（SDK 会话级累计快照差分的归属误导如实标注，不改数值）。
++  - `_cleanup_stale_runs_impl` failed 分支补 error_code=SERVICE_RESTART_INTERRUPTED + error_detail（2026-09-15-background-task-permission-lockout FR-04，completed 恢复分支不写）；daemon 侧配套（2026-10-10-usage-note-to-daemon-log 改版）：run 收口时会话仍有存活后台任务→不进会话消息流（原 [USAGE_NOTE] 标注行每轮必触发、用户侧噪音，已删），改为 daemon 结构化 info 日志 `run_cost_may_include_bg_tasks`（session_id/run_id/cost_delta_usd=本轮快照差分，缺失 null；SDK 会话级累计快照差分的归属误导仅日志留痕，不改数值）。
+   - `sync_agent_run_status`、`close_interactive_run`（gate 任务仅 verify 阶段适用 `_gate_applicable`，勿扩大）。
+   - `_trigger_stage_completion_callback`：lease 完结回调驱动 change stage 收口；`_advance_team_stage`：execute 团队 mission 全 worker 收敛后推阶段；`_handle_team_run_completion`。
+   - gate/stage 状态变化事件发布（`_publish_gate_status_changed` / `_publish_stage_status_changed`）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+index 63e31f5a4..67b001e68 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+@@ -65,6 +65,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
+ - **2026-08-15-init-trigger-sillyspec-init**（init lease 触发 sillyspec init）：`handleInitLease`（spec-sync.ts）编序 5→6 步——pullSpecBundle 之后、postSpecSync 之前插入 `runSillyspecInit`（硬失败 abort，D-003）：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId> --no-skills --tool <逗号列表>`（shell:true + 60s 超时杀树 + spawnFn 依赖注入），落 .sillyspec-platform.json 平台指针 + CLAUDE.md 等指令注入 + spec 骨架。**spawn 前 3s 版本门控**（MIN_SILLYSPEC_VERSION_FOR_INIT=3.26.8，查询/解析失败 fail-safe 拦截，错误前缀 sillyspec_init_cli_too_old 带中文升级指引，不依赖 daemon 重启）。tools 来源：cli.ts 构造 TaskRunner 前 AgentDetector 独立探测映射 SILLYSPEC_VALID_TOOLS（6 值同名交集），空/失败兜底 ['claude']。**上传排除三处统一**：UPLOAD_EXCLUDE_TOP_BASE（含 projects）由 computeIncrementalOps/buildFullManifest/packSpecDir 共用 + isUploadExcludedPath 过滤缓存残留行防 delete op 误删（pull extractTar 不排除）。init 失败 error 前缀 sillyspec_init_failed 透传 stats.init_error。CLI 侧配套（sillyspec 仓 3.26.8）：--no-skills 开关、--tool 逗号/重复多值、平台模式整体跳过项目内 .sillyspec 清理（保 local.yaml 手调段）。
+ - **ql-20260820-007**（spec 策略两路径静默失效修复）：①`handleInitLease` 时序重排 pull → writeDaemonState（原状态文件先写会在缓存根占位 `.runtime/` 普通目录，阻塞 pullSpecBundle 的 repo-native `ensureSpecJunction` 普通目录守卫 + repo-mirrored cacheEmpty 首拷判定 → 两策略静默降级 platform-managed；且 pull 的 rm -rf 会删掉先写的状态文件）；repo-native 时状态文件经 junction 落源项目 `.sillyspec/.runtime`（gitignored，三策略读写路径 resolveSpecDir(ws)/.runtime 统一）。②task-runner batch agent 路径 `pullSpecBundle` 补传 `strategy: ctx.specStrategy, rootPath: ctx.rootPath`（原只传 existingSpecRoot → 永远 platform-managed pull，rm -rf 拆除 interactive scan 已建 junction，repo-native 永久退化）。③`bumpLocalSpecVersion` 状态文件缺失/损坏时完整重建 2 字段（原「缺失跳过不创建」在 pull rm -rf 后保鲜永久失效，每次任务全量 pull）。副作用契约变更：pull 失败返回 `daemonState: null`（状态文件后置未写）。回归：test_init_lease 新 7 用例（init 策略分支/状态文件幸存/bump 重建/batch 透传）+ test_spec_version_refresh 2 用例改新契约；daemon 全量 2453 绿 + tsc 干净。
+ ## 变更索引
++- 2026-10-10-usage-note-to-daemon-log | 交互 run 收口用量归属标注降噪：daemon.ts onTurnResult 删 [USAGE_NOTE] 会话消息流发射块（2026-09-15-background-task-permission-lockout FR-04 引入——有存活后台任务的每轮收口都追加 task_output/stdout 标注行，用户侧纯噪音），改为 cost 快照差分组装后结构化 info 日志 `run_cost_may_include_bg_tasks`（session_id/run_id/cost_delta_usd=本轮差分、快照缺失 null；SDK 会话级累计快照差分的归属误导仅日志留痕，不改用量数值）。测试：daemon-usage-note.test.ts 改两态断言（无消息流行 + console.info 日志断言含 24.1 差分 / null 降级 / 负例）先红后绿 3 绿；相关面 daemon-interactive-bridge 41 绿；tsc 0。
+ - 2026-10-09-tombstone-conflict-root-fix | 墓碑收敛执行器 task-03（c2a42fcb）：protocol.ts 新消息 SILLYSPEC_TOMBSTONE_CLEANUP（与 backend DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP 逐字对齐）+daemon.ts WS 分发（change/workspace_id 必填校验，缺字段 warn 丢弃）与 _routeSillySpecTombstoneCleanup 路由+sillyspec-manager.ts runTombstoneCleanup（_resolveWorkspaceRoot 不回退单槽位→活跃区 changes/<名>/ 不在则归档区→移入 .sillyspec/.runtime/tombstone-quarantine/<名>-<时间戳>/ 隔离区（移动不删除，不进 git）→doctor --cleanup-ghosts --confirm 归档进度库行→回执 action='tombstone_cleanup'；幂等（目录不在=success）；收敛闭环走平台全绿关闭路径（心跳落槽不新增关闭逻辑）。测试 sillyspec-tombstone-cleanup.test.ts 9 绿+platform-command 回归 108 绿；tsc 0。
+ - 2026-10-09-workspace-init-skill-gate | init 写多端 skill + 白名单/门控同步（task-01/02）：`runSillyspecInit`（spec-sync.ts）spawn argv **去掉 --no-skills**（修订 2026-08-15 D-004@v1 → 本变更 D-001@v1）——sillyspec CLI 按 --tool 交集把 sillyspec-* 技能复制到五端工具目录（.claude/.codex/.openclaw/.opencode/.zcode 的 skills/），多 agent 全写/不支持跳过/空交集兜底 ['claude']（兜底逻辑不变）；`MIN_SILLYSPEC_VERSION_FOR_INIT` 3.26.8→**3.32.2**（zcode 技能复制双层缺口 sillyspec commit 016968bd 修复版；老 CLI 静默忽略 --tool zcode）；`SILLYSPEC_VALID_TOOLS`（task-runner/runner-types.ts）6→7 值补 **zcode** 对齐 CLI v3.32.2 VALID_TOOLS。skill-manager 链路不动（平台自定义技能仍单端 .claude/skills，双渠道在 sillyspec-* 后写覆盖已接受）。测试：run-sillyspec-init.test.ts 断言反转（not.toContain --no-skills + 3.30.0 新旧门之间版本被拒）11 绿 + 新 sillyspec-tool-mapping.test.ts（7 值/zcode 放行/无关过滤/保序）5 绿；typecheck 0。
+ - 2026-09-26-sillyspec-command-queue | 平台命令忙拒改 FIFO 排队串行（用户裁决「忙拒绝没必要」——生产实证 2026-09-25 sillyspec 工作区两条裁决并发被双双拒记 failed busy 红字，D-001@2026-09-04-conflict-resolve-entry「拒排队语义（单管理员低频场景）」据此推翻）：daemon.ts `_runSillySpecCommand` 两臂忙拒改单一 FIFO promise 链尾 `_sillyspecCommandQueueTail`（置换 `_sillyspecCommandInFlight` 布尔 guard）——并发到达的 resolve/ghost_cleanup `.then(run, run)` 排尾，前一条完成（含防御 reject 出口）后依序执行；npm 升级臂（executor.isUpgradeInFlight，running/deferred）从立即记 failed 改出队前轮询等待（新常量 SILLYSPEC_COMMAND_UPGRADE_POLL_MS=1s，定时器 unref 对齐 manager deferred 复查惯例——npm 正在替换 CLI bin，并发 spawn 有半安装件风险）；删未导出常量 SILLYSPEC_COMMAND_BUSY_ERROR 与忙拒路径，`_nudgeHeartbeatAfterCommandResult(action, phase)` 收敛单参（ql-20260911-024 每条完成落槽即补发心跳语义不变，排队命令逐条完成逐条捎出）。已知取舍：排在长升级链后的命令可能撞前端 150s 回显恢复窗（ECHO_TIMEOUT_MS 恢复按钮可重试，重复排队条目执行幂等裁决无害），不设队列深度上限。测试：sillyspec-platform-command.test.ts 忙拒 describe 改写排队语义（并发排队依序/升级等待 fake timers 推进/nudge 双 gate 锁执行序逐条断言）41 绿；近邻 daemon-heartbeat-sillyspec + sillyspec-conflict-snapshot 51 绿；tsc 0。
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 9fbeae0b4..e705ec0d8 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -3881,31 +3881,6 @@ export class Daemon {
+     // ql-20260909-011：run 终态上报前冲掉该 lease 微批积压（不等微批窗），
+     // 保证 turn 内事件先于终态到达 backend（逐事件直发时代由 await 串行保证）。
+     await this.flushInteractiveBatches(state.leaseId);
+-    // 2026-09-15-background-task-permission-lockout（FR-04）：本 run 收口时若会话
+-    // 仍有存活后台任务，追加 [USAGE_NOTE] 标注行——SDK modelUsage/total_cost_usd 是
+-    // 会话级累计快照差分，两次收口之间的后台任务消耗会计给本 run（总量正确、归属
+-    // 误导，线上实证 19 秒小轮被记 $24.10）。仅日志标注，不改用量数值本身；
+-    // 复用 [TASK_*] legacy flat 行协议（channel=stdout、type=task_output 同族），
+-    // 经下方既有 onTurnMessage 通道随终态前到达 backend。压行失败仅 warn 不阻断
+-    // 终态上报（标注是尽力而为的排障提示）。`?.` 防御：旧测试替身 / 部分注入的
+-    // sessionManager 可能缺新方法——undefined → falsy → 不追加标注，安全降级。
+-    if (this._sessionManager.hasLiveBackgroundTasks?.(sessionId)) {
+-      try {
+-        await this.onTurnMessage(sessionId, runId, {
+-          type: 'task_output',
+-          channel: 'stdout',
+-          content:
+-            '[USAGE_NOTE] 本轮上报用量含仍在运行的后台任务消耗（SDK 为会话级累计快照，无法按任务拆分）',
+-          timestamp: new Date().toISOString(),
+-        });
+-      } catch (err) {
+-        this._logger.warn('usage_note_line_failed', {
+-          session_id: sessionId,
+-          run_id: runId,
+-          error: err instanceof Error ? err.message : String(err),
+-        });
+-      }
+-    }
+     // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
+     // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
+     // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
+@@ -3985,6 +3960,18 @@ export class Daemon {
+           ? Math.round((costSnapshot - costBase) * 1e6) / 1e6
+           : costSnapshot;
+     }
++    // 2026-10-10-usage-note-to-daemon-log：[USAGE_NOTE] 不再进会话消息流（有存活
++    // 后台任务的每轮收口都触发，用户侧纯噪音且无法量化归属），原 2026-09-15
++    // FR-04 排障意图降级为 daemon 结构化日志——本轮 cost 差分可能含后台任务消耗
++    // （SDK 会话级累计快照差分的归属误导，线上实证 19 秒小轮被记 $24.10），仅
++    // 日志留痕，不改用量数值本身。`?.` 防御旧测试替身缺新方法（undefined → 不记）。
++    if (this._sessionManager.hasLiveBackgroundTasks?.(sessionId)) {
++      this._logger.info('run_cost_may_include_bg_tasks', {
++        session_id: sessionId,
++        run_id: runId,
++        cost_delta_usd: payload.total_cost_usd ?? null,
++      });
++    }
+     if (typeof resultMeta.num_turns === 'number') {
+       payload.num_turns = resultMeta.num_turns;
+     }
+diff --git a/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts b/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts
+index 274323884..f01d7b335 100644
+--- a/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts
++++ b/sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts
+@@ -1,12 +1,16 @@
+ // tests/interactive/daemon-usage-note.test.ts
+-// 2026-09-15-background-task-permission-lockout（task-10 / FR-04）：daemon.onTurnResult
+-// 的 [USAGE_NOTE] 标注行两态——本 run 收口时会话仍有存活后台任务 → 追加一行
+-// stdout 标注（后台任务消耗会按快照差分记给本 run）；注册表空 → 不追加。
++// 2026-10-10-usage-note-to-daemon-log：daemon.onTurnResult 的用量归属标注两态——
++// 本 run 收口时会话仍有存活后台任务 → 不再向会话消息流发 [USAGE_NOTE] 行（每轮
++// 必触发、用户侧纯噪音），改为 daemon 结构化日志 run_cost_may_include_bg_tasks
++// （含本轮 cost 差分；SDK 会话级累计快照差分的归属误导仅日志留痕，不改数值）；
++// 注册表空 → 无行无日志。
+ //
+ // harness 模板沿用 tests/daemon-interactive-bridge.test.ts（mock client/SessionManager
+-// + Daemon 构造，仅断言桥接行为）。
++// + Daemon 构造，仅断言桥接行为）；日志断言经 vi.spyOn(console, 'info')——daemon
++// createLogger 的 info 落 console.info，args[0] 为 `[daemon.<事件名>]`、其余为
++// `key=value` 片段，按事件名过滤（构造期还有其它 info 日志）。
+ 
+-import { describe, it, expect, vi } from 'vitest';
++import { describe, it, expect, vi, afterEach } from 'vitest';
+ import { Daemon } from '../../src/daemon.js';
+ import type { DaemonConfig } from '../../src/config.js';
+ import type { SessionManager } from '../src/interactive/session-manager.js';
+@@ -110,41 +114,63 @@ function resultSuccess(): Record<string, unknown> {
+   };
+ }
+ 
+-describe('onTurnResult [USAGE_NOTE] 标注行（FR-04）', () => {
+-  it('hasLiveBackgroundTasks=true → submitMessages 追加一条 [USAGE_NOTE] stdout 行（挂收口 runId）', async () => {
++function hasUsageNoteLine(client: ReturnType<typeof createMockClient>): boolean {
++  return client.submitMessages.mock.calls.some(([, , , msgs]) =>
++    (msgs as Record<string, unknown>[]).some(
++      (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
++    ),
++  );
++}
++
++function noteLogCalls(infoSpy: ReturnType<typeof spyConsoleInfo>): unknown[][] {
++  return infoSpy.mock.calls.filter((c) => c[0] === '[daemon.run_cost_may_include_bg_tasks]');
++}
++
++function spyConsoleInfo() {
++  return vi.spyOn(console, 'info').mockImplementation(() => {});
++}
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++describe('onTurnResult 用量归属标注（run_cost_may_include_bg_tasks 日志）', () => {
++  it('hasLive=true → 无 [USAGE_NOTE] 消息流行，改发结构化日志（挂收口 session/run + cost 差分）', async () => {
++    const infoSpy = spyConsoleInfo();
+     const sm = createMockSessionManager({}, true);
+     const { daemon, client } = buildDaemon(sm);
+-    await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
+-    // submitMessages(leaseId, claimToken, runId, [msg])——USAGE_NOTE 行挂收口 runId。
+-    const noteCalls = client.submitMessages.mock.calls.filter(([, , , msgs]) =>
+-      (msgs as Record<string, unknown>[]).some(
+-        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
+-      ),
+-    );
+-    expect(noteCalls.length).toBeGreaterThanOrEqual(1);
+-    const [, , rid, msgs] = noteCalls[0]! as unknown as [
+-      string,
+-      string,
+-      string,
+-      Record<string, unknown>[],
+-    ];
+-    expect(rid).toBe('run-1'); // 挂正在收口的 run
+-    const line = msgs.find(
+-      (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
+-    )!;
+-    expect(line['channel']).toBe('stdout');
+-    expect(line['content']).toContain('后台任务消耗');
++    const result = resultSuccess();
++    result['total_cost_usd'] = 24.1;
++    await daemon.onTurnResult('sess-1', 'run-1', result as never);
++    expect(hasUsageNoteLine(client)).toBe(false);
++    const logs = noteLogCalls(infoSpy);
++    expect(logs.length).toBe(1);
++    const parts = (logs[0]!.slice(1) as string[]).join(' ');
++    expect(parts).toContain('session_id=sess-1');
++    expect(parts).toContain('run_id=run-1');
++    expect(parts).toContain('cost_delta_usd=24.1');
++  });
++
++  it('hasLive=true 且 total_cost_usd 缺失 → 日志 cost_delta_usd=null，终态照常上报', async () => {
++    const infoSpy = spyConsoleInfo();
++    const sm = createMockSessionManager({}, true);
++    const { daemon, client } = buildDaemon(sm);
++    const result = resultSuccess();
++    delete result['total_cost_usd'];
++    await daemon.onTurnResult('sess-1', 'run-1', result as never);
++    const logs = noteLogCalls(infoSpy);
++    expect(logs.length).toBe(1);
++    const parts = (logs[0]!.slice(1) as string[]).join(' ');
++    expect(parts).toContain('cost_delta_usd=null');
++    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+   });
+ 
+-  it('hasLiveBackgroundTasks=false → 无 [USAGE_NOTE] 行（行为与现状一致）', async () => {
++  it('hasLive=false → 无 [USAGE_NOTE] 行且无该日志（行为与现状一致）', async () => {
++    const infoSpy = spyConsoleInfo();
+     const sm = createMockSessionManager({}, false);
+     const { daemon, client } = buildDaemon(sm);
+     await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
+-    const hasNote = client.submitMessages.mock.calls.some(([, , , msgs]) =>
+-      (msgs as Record<string, unknown>[]).some(
+-        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
+-      ),
+-    );
+-    expect(hasNote).toBe(false);
++    expect(hasUsageNoteLine(client)).toBe(false);
++    expect(noteLogCalls(infoSpy).length).toBe(0);
+   });
+ });
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/design.md b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/design.md
+new file mode 100644
+index 000000000..44b33f669
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T02:08:40.013Z
++---
++# 设计记录（Design Record）— 2026-10-10-usage-note-to-daemon-log
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`sillyhub-daemon/src/daemon.ts` 的 `onTurnResult` 中删除 [USAGE_NOTE] 消息流发射块，改为在 cost 快照差分组装完成后（`payload.total_cost_usd` 就绪处）输出一条 daemon 结构化 info 日志（事件 `run_cost_may_include_bg_tasks`，字段 session_id / run_id / cost_delta_usd）。
++
++选"不报 + 日志降级"而非用户备选的"阈值版只在明显异常时报"：SDK 只给会话级累计快照，不存在"本轮真实成本"的真值基准，任何"明显异常"阈值都无法校准——误报会把同样的噪音重新带回会话流，漏报让功能形同虚设。日志带具体差分数字（比原消息流行信息量更大），且不进用户可见的会话流；原 2026-09-15 FR-04 的排障意图（标识"本轮用量可能含后台任务消耗"）完整保留。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++对外可见行为变化仅一项：交互会话消息流不再出现 `[USAGE_NOTE]` 行（该行走 task_output/stdout 通道，删除后 backend / 前端零改动，只是不再收到）。新增 daemon 日志事件 `run_cost_may_include_bg_tasks`（info 级）。无 REST / WS 协议、文件格式、导出函数签名变化；`SessionManager.hasLiveBackgroundTasks` 门面保留（permission.ts 侧语义未动）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。日志位于 `onTurnResult` 同步路径内、`flushInteractiveBatches` 之后与终态上报同段，与原发射点时序等价；迟到 result（state 不存在）在方法更早分支已 return，不触达本逻辑。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++无共享写。只读 `payload.total_cost_usd`（方法局部变量）与 `hasLiveBackgroundTasks`（只读门面）；console 输出天然串行，无交错风险。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。终态重试（retryTerminal 闭包）只捕获 payload，日志不在闭包内、重发不会重复输出；run 中断 / session 结束路径不经过本段，残留基线行为与本变更无关。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。日志字段显式携带 session_id / run_id，无跨会话串台面；纯 daemon 本地行为，无跨仓 / 多实例影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：排障入口从"用户可见的会话行"变为"daemon 日志事件"，运维需知道去日志找 `run_cost_may_include_bg_tasks`——通过模块文档 `daemon.md` 同步与本记录留痕缓解。试过放弃的方案：a) 阈值版"只在用量差分明显异常时报"——无真值基准，阈值任意、误报/漏报两头错（见做法概述）；b) 彻底删除不留任何痕迹——丢失原始 FR-04 排障意图（$24.10 归属误导类问题将无现场线索）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| 修改 | sillyhub-daemon/src/daemon.ts | onTurnResult 删 [USAGE_NOTE] 发射块；cost 差分组装后加 info 日志 run_cost_may_include_bg_tasks（cost_delta_usd 缺省 null） |
++| 修改 | sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts | 改写两态断言（无消息流行 + console info 日志断言），补 total_cost_usd 缺失用例 |
++| 修改 | .sillyspec/docs/SillyHub/modules/daemon.md | FR-04 表述同步（会话消息流标注行 → daemon 日志事件） |
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/proposal.md b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/proposal.md
+new file mode 100644
+index 000000000..cd408012a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T02:08:40.012Z
++---
++# 提案书（Proposal）— 2026-10-10-usage-note-to-daemon-log
++
++## 动机
++
++任务原话转写：交互会话里 run 收口时若有存活后台任务，daemon 会向会话消息流追加 [USAGE_NOTE] 标注行（daemon.ts FR-04），每轮必触发、对用户是纯噪音且无法量化归属，需要移除会话内提示、排障信息降级到 daemon 日志。
++成功标准：
++- hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
++- 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
++- total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
++- daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
++- 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
++2. 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
++3. total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
++4. daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
++5. 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
++
++## 成功标准（可验证）
++
++1. hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
++2. 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
++3. total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
++4. daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
++5. 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md
+new file mode 100644
+index 000000000..cdc4fae38
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md
+@@ -0,0 +1,65 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T02:08:40.013Z
++---
++# 需求规格（Requirements）— 2026-10-10-usage-note-to-daemon-log
++
++## 功能需求
++
++### FR-01: hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
++
++- daemon.onTurnResult 在会话仍有存活后台任务时，**禁止**向会话消息流（onTurnMessage → submitMessages 通道）追加 [USAGE_NOTE] 标注行；该提示对用户是每轮必触发的噪音。
++
++#### 场景：收口时有存活后台任务
++
++- Given：会话存在未结束的后台任务（hasLiveBackgroundTasks=true）
++- When：onTurnResult 收口并上报终态
++- Then：submitMessages 的所有批次中不含 content 以 `[USAGE_NOTE]` 开头的消息
++
++### FR-02: 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
++
++- 同一触发条件（存活后台任务）下，daemon **必须**输出一条结构化 info 日志，事件名 `run_cost_may_include_bg_tasks`，字段含 `session_id`、`run_id`、`cost_delta_usd`（取本轮快照差分，与 payload.total_cost_usd 同值同口径）。
++
++#### 场景：有存活后台任务且带成本快照
++
++- Given：hasLiveBackgroundTasks=true，result.total_cost_usd=24.10，会话基线 totalCostUsd=0
++- When：onTurnResult 收口
++- Then：logger info 输出事件 `run_cost_may_include_bg_tasks`，其中 cost_delta_usd=24.1、session_id/run_id 与收口 run 一致
++
++### FR-03: total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
++
++- result.total_cost_usd 缺失或非有限数时，该日志**必须**仍输出且 `cost_delta_usd=null`，**禁止**因日志抛错或阻断终态上报（notifyRunResult 照常调用）。
++
++#### 场景：成本快照缺失
++
++- Given：hasLiveBackgroundTasks=true，result 无 total_cost_usd 字段
++- When：onTurnResult 收口
++- Then：日志 cost_delta_usd=null，notifyRunResult 正常调用，无异常抛出
++
++### FR-04: daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
++
++- 覆盖本变更的测试**必须**改写为：hasLive=true → 无 [USAGE_NOTE] 消息流行 + 有替代日志；hasLive=false → 无消息流行且无该日志；并**必须**在改实现前先跑出红（旧实现下新断言失败），改后转绿。
++
++#### 场景：先红后绿
++
++- Given：daemon.ts 仍是旧实现（发 [USAGE_NOTE] 行、无日志）
++- When：运行改写后的测试
++- Then：断言失败（红）；实现落地后同命令转绿
++
++### FR-05: 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
++
++- 本变更**必须**通过相关面回归：`sillyhub-daemon` 下 `vitest run tests/interactive/daemon-usage-note.test.ts tests/interactive/daemon-interactive-bridge.test.ts` 全绿，且 `pnpm typecheck`（tsc --noEmit）0 错。
++
++#### 场景：改动后合跑
++
++- Given：daemon.ts 与测试已改
++- When：合跑上述测试与 typecheck
++- Then：全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true → 无 [USAGE_NOTE] 行，改发 run_cost_may_include_bg_tasks 日志」
++FR-02: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true 且 total_cost_usd=24.10 → 日志 cost_delta_usd=24.1 挂收口 run」
++FR-03: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「total_cost_usd 缺失 → 日志 cost_delta_usd=null 且终态照常上报」
++FR-04: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=false → 无 [USAGE_NOTE] 行且无该日志」+ 先红后绿流程记录（verify 留档）
++FR-05: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「相关面合跑回归」（勘误：原写 tests/interactive/ 前缀，实际在 tests/ 根，实测 41/41 通过）
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/tasks.md b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/tasks.md
+new file mode 100644
+index 000000000..4e2665a24
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T02:08:40.013Z
++---
++# 任务注册表（Tasks）— 2026-10-10-usage-note-to-daemon-log
++
++- [x] task-01: 改写 daemon-usage-note.test.ts 为两态断言（hasLive=true → 无 [USAGE_NOTE] 消息流行 + console.info 收到 run_cost_may_include_bg_tasks 含 session_id/run_id/cost_delta_usd；hasLive=false → 无行无日志；total_cost_usd 缺失 → cost_delta_usd=null 且 notifyRunResult 照常）——跑 `cd sillyhub-daemon && pnpm vitest run tests/interactive/daemon-usage-note.test.ts` 确认新断言红（旧实现下失败）
++- [x] task-02: 改 daemon.ts onTurnResult——删 [USAGE_NOTE] 发射块（含 usage_note_line_failed catch），在 payload.total_cost_usd 差分组装后加 info 日志 run_cost_may_include_bg_tasks（cost_delta_usd 取 payload 值、缺省 null）——跑 task-01 同命令转绿
++- [x] task-03: 相关面回归 + 类型门——`cd sillyhub-daemon && pnpm vitest run tests/interactive/daemon-usage-note.test.ts tests/interactive/daemon-interactive-bridge.test.ts` 全绿 + `pnpm typecheck` 0 错
++- [x] task-04: 同步模块文档 `.sillyspec/docs/SillyHub/modules/daemon.md` 的 FR-04 表述（消息流标注行 → daemon 日志事件）——grep USAGE_NOTE 确认文档无残留旧表述
+diff --git a/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json.superseded-20261010T023137 b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json.superseded-20261010T023137
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/review.json.superseded-20261010T023137
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-10-usage-note-to-daemon-log",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "65840b2985781a4954409c14ced8217afff73c66",
++  "findings": [
++    {
++      "severity": "P2",
++      "title": "FR-05 相关面回归引用不存在的测试路径，daemon-interactive-bridge.test.ts 实际从未运行",
++      "evidence": "FR-05/tasks.md task-03 命令写 tests/interactive/daemon-interactive-bridge.test.ts，但该文件实际位于 sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（tests 根目录，tests/interactive/ 下无此文件）；vitest CLI 参数为路径子串 filter，字面命令只会匹配到 usage-note 一个文件（bridge filter 匹配 0 文件且不报错），承诺的 bridge 相关面回归静默空转；verify 留档 test-result.json 中 grep 亦无 bridge 运行痕迹。产品代码本身无缺陷（本变更未触碰 bridge 面），属验证门承诺与实态偏差。",
++      "location": "C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md:51"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-10T02:30:18Z"
++}

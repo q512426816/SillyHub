@@ -2561,3 +2561,98 @@
 摘要：CI 转绿
 全文：.sillyspec/changes/archive/2026-10-09-status-root-write-race/requirements.md#FR-03
 最近确认：ad9c05fb8cb88d8510207c895a9157960bfa533d
+
+## FR-daemon-067 hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
+变更：2026-10-10-usage-note-to-daemon-log
+状态：active
+摘要：收口时有存活后台任务
+全文：.sillyspec/changes/archive/2026-10-10-usage-note-to-daemon-log/requirements.md#FR-01
+最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true → 无 [USAGE_NOTE] 行，改发 run_cost_may_include_bg_tasks 日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-usage-note-to-daemon-log
+  status: active
+
+## FR-daemon-068 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
+变更：2026-10-10-usage-note-to-daemon-log
+状态：active
+摘要：有存活后台任务且带成本快照
+全文：.sillyspec/changes/archive/2026-10-10-usage-note-to-daemon-log/requirements.md#FR-02
+最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true 且 total_cost_usd=24.10 → 日志 cost_delta_usd=24.1 挂收口 run」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-usage-note-to-daemon-log
+  status: active
+
+## FR-daemon-069 total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
+变更：2026-10-10-usage-note-to-daemon-log
+状态：active
+摘要：成本快照缺失
+全文：.sillyspec/changes/archive/2026-10-10-usage-note-to-daemon-log/requirements.md#FR-03
+最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「total_cost_usd 缺失 → 日志 cost_delta_usd=null 且终态照常上报」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-usage-note-to-daemon-log
+  status: active
+
+## FR-daemon-070 daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
+变更：2026-10-10-usage-note-to-daemon-log
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-10-usage-note-to-daemon-log/requirements.md#FR-04
+最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=false → 无 [USAGE_NOTE] 行且无该日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-usage-note-to-daemon-log
+  status: active
+
+## FR-daemon-071 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
+变更：2026-10-10-usage-note-to-daemon-log
+状态：active
+摘要：改动后合跑
+全文：.sillyspec/changes/archive/2026-10-10-usage-note-to-daemon-log/requirements.md#FR-05
+最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「相关面合跑回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-usage-note-to-daemon-log
+  status: active

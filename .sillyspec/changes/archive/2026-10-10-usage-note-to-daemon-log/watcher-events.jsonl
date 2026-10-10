@@ -1,0 +1,24 @@
+{"ts":1791598213144,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791598229894,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791598233349,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791598415742,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/tests/interactive/daemon-usage-note.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791598432249,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791598432249,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791598442643,"kind":"commit","stage":null,"detail":"f7ed27115","provisional":true}
+{"ts":1791598456250,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/daemon.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791598476097,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791598476097,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1791598486538,"kind":"commit","stage":null,"detail":"fcc2e3dae","provisional":true}
+{"ts":1791598523319,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791598523319,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791598550313,"kind":"commit","stage":null,"detail":"c4a978465","provisional":true}
+{"ts":1791598553839,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791598553839,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1791598564045,"kind":"commit","stage":null,"detail":"7e4f244ac","provisional":true}
+{"ts":1791599034556,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791599140250,"kind":"gate-run","stage":"verify","detail":"门实测 passed（97.7s） · 20261010022537","provisional":true}
+{"ts":1791599193670,"kind":"commit","stage":null,"detail":"65840b298","provisional":true}
+{"ts":1791599193884,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-10-usage-note-to-daemon-log/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791599482324,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791599489783,"kind":"commit","stage":null,"detail":"da9e68131","provisional":true}
+{"ts":1791599597864,"kind":"commit","stage":null,"detail":"fe99e67d4","provisional":true}

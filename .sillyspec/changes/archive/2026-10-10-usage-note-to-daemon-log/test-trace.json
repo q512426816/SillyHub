@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-usage-note-to-daemon-log",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true → 无 [USAGE_NOTE] 行，改发 run_cost_may_include_bg_tasks 日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-usage-note-to-daemon-log"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true 且 total_cost_usd=24.10 → 日志 cost_delta_usd=24.1 挂收口 run」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-usage-note-to-daemon-log"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「total_cost_usd 缺失 → 日志 cost_delta_usd=null 且终态照常上报」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-usage-note-to-daemon-log"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=false → 无 [USAGE_NOTE] 行且无该日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-usage-note-to-daemon-log"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-usage-note-to-daemon-log:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「相关面合跑回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-usage-note-to-daemon-log"
+    }
+  ]
+}
