@@ -266,6 +266,140 @@ describe("knownJsonView", () => {
   });
 });
 
+// ── 2026-10-10-change-patch-cross-repo-view：跨仓冻结面（scopeAudit.repos[]）──
+describe("knownJsonView 跨仓冻结面", () => {
+  // producer 契约（sillyspec 2026-10-10-cross-repo-patch-freeze）：repos[] 条目
+  // { key, repoPath?, anchor, totals, degraded, degradedReason, patch?, patchSha256? }
+  const crossScopeAudit = {
+    mode: "full-flow",
+    ok: true,
+    degradedReason: null,
+    baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
+    totals: { files: 3, additions: 13, deletions: 2 },
+    rows: [
+      { path: "frontend/src/a.tsx", additions: 3, deletions: 2, kind: "modified", verdict: "planned" },
+      { path: "sub-x/src/a.go", additions: 5, deletions: 0, kind: "modified", planned: "修改", verdict: "planned", crossRepo: "sub-x" },
+    ],
+    repos: [
+      {
+        key: "main",
+        repoPath: "C:/Users/x/local-main",
+        anchor: { source: "reviews-window", base: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce", head: "524546f45bc4149b101c35a0feda8fcd185bdf04", label: "锡点区间 reviews" },
+        totals: { files: 2, additions: 10, deletions: 2, planned: 2, unplanned: 0, untouched: 0 },
+        degraded: false,
+        degradedReason: null,
+        patch: "--- a/f.tsx\n+++ b/f.tsx\n@@ -1,1 +1,2 @@\n x\n+y",
+        patchSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
+      {
+        key: "sub-y",
+        anchor: { source: "head~1-window", base: null, head: null, label: "HEAD~1 窗口" },
+        totals: { files: 1, additions: 3, deletions: 0, planned: 1, unplanned: 0, untouched: 0 },
+        degraded: false,
+        degradedReason: null,
+        patch: null,
+        patchSha256: null,
+      },
+      {
+        key: "sub-gone",
+        anchor: { source: "degraded", base: null, head: null, label: "degraded" },
+        totals: { files: 1, additions: 0, deletions: 0, planned: 0, unplanned: 0, untouched: 1 },
+        degraded: true,
+        degradedReason: "跨仓采集不可达",
+        patch: null,
+        patchSha256: null,
+      },
+    ],
+  };
+
+  function renderChangePatch(scopeAudit: JsonValue) {
+    const node = knownJsonView("change-patch.json", {
+      change: "2026-10-10-demo",
+      files: ["frontend/src/a.tsx"],
+      totals: { files: 1, additions: 3, deletions: 0 },
+      savedAt: "2026-10-10T06:00:00.000Z",
+      patchStatus: "ok",
+      scopeAudit,
+    });
+    expect(node).not.toBeNull();
+    const { container } = render(<div>{node}</div>);
+    const el = container.querySelector('[data-testid="scope-audit-view"]');
+    expect(el).not.toBeNull();
+    return el!;
+  }
+
+  it("change-patch.json（跨仓冻结）→ repos[] 每仓段+锚点 chip+三态 chips+降级段", () => {
+    const el = renderChangePatch(crossScopeAudit as JsonValue);
+    // 三段齐（主仓/跨仓/降级）
+    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-main"]')).not.toBeNull();
+    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-sub-y"]')).not.toBeNull();
+    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-sub-gone"]')).not.toBeNull();
+    // 仓标识：main → 主仓；分段标题带仓数
+    expect(el!.textContent).toContain("主仓");
+    expect(el!.textContent).toContain("sub-y");
+    expect(el!.textContent).toContain("按仓冻结面（3 仓）");
+    // 锚点 chip：label 文案 + base 前 7 位；base 缺失 → —
+    expect(el!.textContent).toContain("锡点区间 reviews");
+    expect(el!.textContent).toContain("ec5ee3d");
+    expect(el!.textContent).toContain("HEAD~1 窗口");
+    // 三态 chips 计数取 repos[].totals 单一源
+    expect(el!.querySelector('[data-testid="scope-audit-chip-main-planned"]')!.textContent).toContain("2");
+    expect(el!.querySelector('[data-testid="scope-audit-chip-sub-y-planned"]')!.textContent).toContain("1");
+    // 降级段：无 chips，⚠️ + 原因
+    expect(el!.querySelector('[data-testid="scope-audit-repo-degraded-sub-gone"]')!.textContent).toContain("跨仓采集不可达");
+    expect(el!.querySelector('[data-testid="scope-audit-chip-sub-gone-planned"]')).toBeNull();
+    // repoPath 字段（本机布局）不渲染
+    expect(el!.textContent).not.toContain("C:/Users/x/local-main");
+  });
+
+  it("rows 跨仓行路径后仓标徽章，主仓行无", () => {
+    const el = renderChangePatch(crossScopeAudit as JsonValue);
+    expect(el!.querySelector('[data-repo-badge="sub-x"]')).not.toBeNull();
+    // 恰 1 个仓标（主仓行无 crossRepo 无徽章）
+    expect(el!.querySelectorAll("[data-repo-badge]").length).toBe(1);
+  });
+
+  it("repos[].patch：非空正文折叠展开+sha 短哈希；null 诚实未采集；降级段无 patch 面", () => {
+    const el = renderChangePatch(crossScopeAudit as JsonValue);
+    // 默认折叠：无 diff-view，点开展开（parseUnifiedDiff 剥 + 前缀，按 add 行断言）
+    expect(el!.querySelector('[data-testid="diff-view"]')).toBeNull();
+    fireEvent.click(el!.querySelector('[data-testid="scope-audit-repo-patch-main"]')!);
+    expect(el!.querySelector('[data-testid="diff-view"]')).not.toBeNull();
+    // 行内容 span 在行号列之后（行 div 末位），textContent 含行号 "2"+"y"
+    const addRow = el!.querySelector('[data-testid="diff-view"] [data-diff-kind="add"]')!;
+    expect(addRow.querySelector("span:last-child")!.textContent).toBe("y");
+    // sha 短哈希 + title 全量
+    const shaEl = el!.querySelector('[data-testid="scope-audit-repo-patch-main"]')!.parentElement!.querySelector("span[title]");
+    expect(shaEl!.textContent).toBe("bbbbbbbbbbbb…");
+    expect(shaEl!.getAttribute("title")).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    // patch=null（非降级段）→ 诚实未采集，无 DiffView 干扰
+    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-missing-sub-y"]')!.textContent).toContain("patch 未采集");
+    // 降级段整段 ⚠️：patch 键在场（null）也不渲染 patch 面
+    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-missing-sub-gone"]')).toBeNull();
+    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-sub-gone"]')).toBeNull();
+  });
+
+  it("旧形态（无 repos 键/无 patch 键）→ 现状渲染：无仓段/仓标/patch 面", () => {
+    const el = renderChangePatch({
+      mode: "full-flow",
+      ok: true,
+      degradedReason: null,
+      baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
+      totals: { files: 1, additions: 3, deletions: 0 },
+      rows: [{ path: "frontend/src/a.tsx", additions: 3, deletions: 0, kind: "new", verdict: "planned" }],
+    });
+    expect(el!.querySelector("[data-testid^='scope-audit-repo-seg-']")).toBeNull();
+    expect(el!.querySelector("[data-repo-badge]")).toBeNull();
+    expect(el!.textContent).not.toContain("按仓冻结面");
+    expect(el!.textContent).not.toContain("跨仓 patch 正文");
+    // 既有面不受影响
+    expect(el!.textContent).toContain("✓ 计划内");
+    // repos 非法条目（缺 key/非 record）防御跳过
+    const el2 = renderChangePatch({ ...crossScopeAudit, repos: [{ nokey: true }, "junk", { key: "", totals: {} }] } as JsonValue);
+    expect(el2.querySelector("[data-testid^='scope-audit-repo-seg-']")).toBeNull();
+  });
+});
+
 // ── 2026-09-29-change-detail-timeline-files-polish：JSONL 视图族 ─────────
 describe("tryParseJsonl", () => {
   it("逐行合法（含空行容忍）→ 行值数组", () => {
