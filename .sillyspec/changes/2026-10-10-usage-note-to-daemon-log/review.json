@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-usage-note-to-daemon-log",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "65840b2985781a4954409c14ced8217afff73c66",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-05 相关面回归引用不存在的测试路径，daemon-interactive-bridge.test.ts 实际从未运行",
+      "evidence": "FR-05/tasks.md task-03 命令写 tests/interactive/daemon-interactive-bridge.test.ts，但该文件实际位于 sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（tests 根目录，tests/interactive/ 下无此文件）；vitest CLI 参数为路径子串 filter，字面命令只会匹配到 usage-note 一个文件（bridge filter 匹配 0 文件且不报错），承诺的 bridge 相关面回归静默空转；verify 留档 test-result.json 中 grep 亦无 bridge 运行痕迹。产品代码本身无缺陷（本变更未触碰 bridge 面），属验证门承诺与实态偏差。",
+      "location": "C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/changes/2026-10-10-usage-note-to-daemon-log/requirements.md:51"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T02:30:18Z"
+}

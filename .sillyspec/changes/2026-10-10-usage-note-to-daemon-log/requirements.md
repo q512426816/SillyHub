@@ -62,4 +62,4 @@ FR-01: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=tru
 FR-02: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=true 且 total_cost_usd=24.10 → 日志 cost_delta_usd=24.1 挂收口 run」
 FR-03: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「total_cost_usd 缺失 → 日志 cost_delta_usd=null 且终态照常上报」
 FR-04: sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts「hasLive=false → 无 [USAGE_NOTE] 行且无该日志」+ 先红后绿流程记录（verify 留档）
-FR-05: sillyhub-daemon/tests/interactive/daemon-interactive-bridge.test.ts「相关面合跑回归」
+FR-05: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「相关面合跑回归」（勘误：原写 tests/interactive/ 前缀，实际在 tests/ 根，实测 41/41 通过）
