@@ -1,10 +1,10 @@
 {
   "change": "2026-10-10-dialog-qa-inplace",
-  "reviewedAt": "2026-10-10T23:20:00+08:00",
-  "reviewedAgainst": "58a210e726b83254fb002de287eca6edc5fd93d8",
+  "reviewedAt": "2026-10-10T23:22:10+08:00",
+  "reviewedAgainst": "7943dc42e2459febcd5f9bec3f3862cb603c3308",
   "reviewerStance": "独立评审员（干净上下文），拿承诺对代码实态 + HEAD，不信自述，实测验证",
   "verdict": "PASS",
-  "verdictDetail": "零 P1/P2，4 条 P3（注释过期 1 + 未披露几何差 1 + 测试断言强度 1 + 畸形数据孤头像 1）。FR-01~04 全部兑现且绑定测试存在、实测全绿；防护声明（全部视图零改动 / 回退路径不动）经 diff 逐块核实成立；盲维四问作答与实态相符。",
+  "verdictDetail": "零 P1/P2，4 条 P3（注释过期 1 + 未披露几何差 1 + 测试断言强度 1 + 畸形数据孤头像 1）。FR-01~04 全部兑现且绑定测试存在、实测全绿；防护声明（全部视图零改动 / 回退路径不动）经 diff 逐块核实成立；盲维四问作答与实态相符。首评针对 58a210e726b83254fb002de287eca6edc5fd93d8；复审增量 58a210e7..7943dc42e 见 reReview。",
   "materialConsistency": {
     "patchVsHead": "change.patch 前端部分与 HEAD blob 完全一致：turn-timeline.tsx=70e04d408、turn-timeline-dialog-inplace.test.tsx=adb722a72（与 patch index 行逐字吻合）",
     "baseline": "flow-state.yaml baseline_commit a8623c6d61 为 HEAD 祖先；diff baseline..HEAD -- frontend/ 仅 2 文件（turn-timeline.tsx +78/-26、新测试 +174），与 change.patch 覆盖面一致",
@@ -87,7 +87,8 @@
       "title": "SegmentedTurnBody JSDoc 注释过期，与实现矛盾",
       "location": "frontend/src/components/daemon/turn-timeline.tsx:1476-1477",
       "detail": "函数级文档注释仍写『轻量 ❓ AskUser 记录由外层共享逻辑渲染（答复之前）』，实现已改为本函数内 convoTimeline 就地穿插（新注释 1575-1579 正确）。旧句未被更新，违反仓库规则（CLAUDE.md 规则 18：注释和实现不一致是万恶之源）",
-      "recommendation": "删除或改写 1476-1477 处『由外层共享逻辑渲染（答复之前）』为『按 created_at 与段时刻合并穿插（convoTimeline）』"
+      "recommendation": "删除或改写 1476-1477 处『由外层共享逻辑渲染（答复之前）』为『按 created_at 与段时刻合并穿插（convoTimeline）』",
+      "status": "已在 7943dc42e 修复（见 P3-5 复核）"
     },
     {
       "id": "P3-2",
@@ -95,7 +96,8 @@
       "title": "❓ 块在 v2 对话视图的实际左缘/上下文变化未在 design 披露",
       "location": "frontend/src/components/daemon/turn-timeline.tsx:1632-1648（容器）与 1501（块 ml-9）",
       "detail": "FR-02『视觉逐字不变』在标记层面成立（类名/文案逐字一致，已逐字比对），但块现在渲染于 ChatMessageAvatar 行内列（flex-1 列）且自带 ml-9，实际左缘较旧轮头位置右移约一个头像宽（头像+gap 后再缩进 36px）；且『仅有提问无对话段』的轮从旧行为的裸块变为头像+块（新增 agent 头像）。均为位置/上下文变化的伴生几何差，design「仅位置变化」未披露到这个粒度",
-      "recommendation": "design 风险节补一句披露即可（或确认 ml-9 在新上下文中的视觉意图）；不阻塞"
+      "recommendation": "design 风险节补一句披露即可（或确认 ml-9 在新上下文中的视觉意图）；不阻塞",
+      "status": "历史保留（披露性建议，非阻塞，未列入本次修复范围）"
     },
     {
       "id": "P3-3",
@@ -103,7 +105,8 @@
       "title": "FR-02 回退用例断言强度弱于场景措辞（未锁定『旧位置』）",
       "location": "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx:187-198",
       "detail": "FR-02 场景写『Then ❓ 块按旧位置渲染』，但用例仅断言 getByTestId('dialog-qa-block') 与旧 output 文本存在，未断言块在 output 之前的 DOM 顺序；若未来回退路径渲染位置回归（块挪到正文之后）该用例不会失败。实现本身当前正确（TurnRow 684-688 块位于 whoLine/正文之前，与旧代码位次一致）",
-      "recommendation": "用例补一行 innerHTML 顺序断言（dialog-qa-block 的 ❓ 文本先于旧 output 文本），对齐同文件 expectOrderBefore 惯例"
+      "recommendation": "用例补一行 innerHTML 顺序断言（dialog-qa-block 的 ❓ 文本先于旧 output 文本），对齐同文件 expectOrderBefore 惯例",
+      "status": "已在 7943dc42e 修复（见 P3-5 复核）"
     },
     {
       "id": "P3-4",
@@ -111,18 +114,35 @@
       "title": "畸形数据边界：零对话段 + 空 QA dialog 的轮出现无内容孤头像",
       "location": "frontend/src/components/daemon/turn-timeline.tsx:1632（容器门控）与 1495-1497（DialogQaBlock 空 QA 渲染 null）",
       "detail": "convoTimeline 的长度把 turnDialogs 全量计入，不剔除 extractDialogQA 为空的 dialog（session-log-sanitize.ts:84，payload.questions 缺失/为空时返回 []）。当某轮无对话段且仅有此类不可解析 dialog 时：convoTimeline.length>0 → 挂载 ChatMessageAvatar 行，但唯一子项渲染 null，出现左侧孤头像；旧路径该情形整块渲染 null、完全无输出。触发面窄（需 payload.questions 为空的畸形 dialog），正常 AskUserQuestion 恒有 questions",
-      "recommendation": "convoTimeline 构造时对 askUser 项预过滤 extractDialogQA(d).length>0，或容器门控改为存在至少一个可渲染项；不阻塞"
+      "recommendation": "convoTimeline 构造时对 askUser 项预过滤 extractDialogQA(d).length>0，或容器门控改为存在至少一个可渲染项；不阻塞",
+      "status": "已在 7943dc42e 修复（见 P3-5 复核）"
+    },
+    {
+      "id": "P3-5",
+      "severity": "P3",
+      "title": "复审：P3-1/P3-3/P3-4 修复已在 7943dc42e 核实",
+      "location": "复审增量 58a210e726b83254fb002de287eca6edc5fd93d8..7943dc42e2459febcd5f9bec3f3862cb603c3308（frontend 部分仅该一提交，git show 7943dc42e -- frontend/ 全量核对）",
+      "detail": "① P3-1 已修：SegmentedTurnBody JSDoc（turn-timeline.tsx 1476-1478）改为『AskUser 记录由 convoTimeline 按 created_at 与段时刻合并排序穿插进对话流…segments undefined 的旧回退轮仍由外层原位渲染』，与实现一致，规则 18 矛盾消除；② P3-4 已修：convoTimeline 新增 renderableDialogs = turnDialogs.filter((d) => extractDialogQA(d).length > 0)（可解析性判定与 DialogQaBlock 渲染门同源），items 改用 renderableDialogs——畸形 dialog + 零对话段轮 convoTimeline.length===0，容器不挂载，孤头像消除；新用例『畸形 dialog（QA 不可解析）+ 零对话段：不渲染孤头像行』双重断言 queryByTestId('dialog-qa-block') 与 queryByTitle('智能体') 均 null；③ P3-3 已修：回退用例新增 expectOrderBefore(container.innerHTML, '❓ 第1200毫秒的问题？', '旧数据答复') 位置断言，『旧位置（块在答复正文之前）』承诺已被测试锁定。副作用核查：过滤仅作用于 v2 对话流，TurnRow 回退路径未过滤（DialogQaBlock 空 QA 自渲染 null，与旧代码等价），全部视图 timeline 未触碰——零回归面。复审实测（2026-10-10，7943dc42e 工作区实态，frontend 其后零提交零 diff）：vitest 6 文件 98/98 全绿（原 97 + 新增畸形 dialog 用例 1）+ tsc --noEmit exit 0。P3-2 未列入本次修复（披露性建议，维持非阻塞历史）。另核实：review.json verdict 仅机械归一 pass→PASS（7943dc42e 提交版与评审员原稿逐字段比对，除 verdict 外零改动）"
     }
   ],
+  "reReview": {
+    "round": 2,
+    "delta": "58a210e726b83254fb002de287eca6edc5fd93d8..7943dc42e2459febcd5f9bec3f3862cb603c3308",
+    "relevantCommits": "仅 7943dc42e（frontend 3 文件：turn-timeline.tsx +12 行、测试 +23 行、review.json 归档）；同区间其余 4 提交（7b0df2e6e/ebb5cfcd1/6c780fb99/9ef8e2528）均为 server-db-pool-tuning 后端文件，与本变更无关——与主会话声明一致",
+    "fixesVerified": ["P3-1 注释更新", "P3-3 回退位置断言 + 畸形 dialog 防例", "P3-4 convoTimeline 剔除空 QA dialog"],
+    "verdictNormalizationVerified": "7943dc42e 提交的 review.json 与评审员原稿仅 verdict 'pass'→'PASS' 一处差异，语义不变",
+    "testRun": "vitest 6 文件 98/98 全绿 + tsc --noEmit exit 0（2026-10-10T23:21 复跑）",
+    "openItems": "P3-2（design 披露粒度，非阻塞）保留为历史，不要求修复"
+  },
   "dimensionNotes": {
     "乱序": "ok",
     "并发": "n/a",
     "切换": "ok",
     "作用域": "ok",
-    "乱序详情": "稳定排序 + 缺 ts 视 0 与「全部」视图 comparator 逐字一致；memo 依赖完整，迟到 dialog 按 created_at 落位；畸形数据空 QA 项混入时间线仅产生 P3#4 孤头像，不产生乱序",
-    "作用域详情": "run_id === realRunId ?? runId 三处（新 turnDialogs/旧对话块/旧全视图回退）逐字一致，跨会话数据不进入",
-    "并发详情": "纯渲染层零写入面，diff 无新增 setState/effect",
+    "乱序详情": "稳定排序 + 缺 ts 视 0 与「全部」视图 comparator 逐字一致；memo 依赖完整，迟到 dialog 按 created_at 落位；畸形数据空 QA 项混入时间线仅产生 P3#4 孤头像，不产生乱序（P3#4 已于 7943dc42e 修复）",
+    "作用域详情": "run_id === realRunId ?? runId 三处（新 turnDialogs/旧对话块/旧全视图回退）逐字一致，跨会话数据不进入；P3-4 修复的 renderableDialogs 过滤仍在该 run_id 过滤之后的同源数据上，作用域口径未变",
+    "并发详情": "纯渲染层零写入面，diff 无新增 setState/effect（复审增量同样零新增）",
     "切换详情": "纯派生 useMemo，无本地状态/定时器，会话切换走父级既有重建",
-    "测试实测": "vitest 6 文件 97/97（92 既有 + 5 新增）+ tsc --noEmit exit 0，均为本评审独立复跑结果（2026-10-10）"
+    "测试实测": "首评（58a210e7）：vitest 6 文件 97/97 + tsc exit 0；复审（7943dc42e）：vitest 6 文件 98/98 + tsc exit 0，均为评审独立复跑结果（2026-10-10）"
   }
 }
