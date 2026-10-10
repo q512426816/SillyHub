@@ -7,23 +7,23 @@
   "findings": [
     {
       "id": "F-01",
-      "severity": "LOW",
+      "severity": "P3",
       "category": "工件留痕准确性",
-      "title": "tasks.md task-03 引用的交付提交 sha 不存在于仓库",
-      "detail": "tasks.md task-03 写「交付提交 4760d71 上一笔仅 session-panel-variant.test.tsx 单文件、git show 可核」，但 git cat-file -t 4760d71 报 Not a valid object name——该 sha 在仓库中不存在（含不可达对象亦无）。实际交付提交为 2474315c6。留痕指针失效，审计断链。实质声明「除断言外零代码改动」经独立核验为真（见 dimensionNotes），不影响交付语义。",
+      "title": "tasks.md task-03 引用的交付提交 sha 不存在于仓库（已由主会话修正为 2474315c6）",
+      "detail": "tasks.md task-03 原写「交付提交 4760d71 上一笔仅 session-panel-variant.test.tsx 单文件、git show 可核」，但 git cat-file -t 4760d71 报 Not a valid object name——该 sha 在仓库中不存在。实际交付提交为 2474315c6。留痕指针失效，审计断链；主会话已按本 finding 修正 tasks.md 指针并披露混入面。实质声明「除断言外零代码改动」经独立核验为真（见 dimensionNotes），不影响交付语义。",
       "evidence": "git cat-file -t 4760d71 → fatal: Not a valid object name；git log --oneline -8 中测试提交为 2474315c6"
     },
     {
       "id": "F-02",
-      "severity": "LOW",
+      "severity": "P3",
       "category": "提交卫生/留痕准确性",
       "title": "交付提交并非「单文件」：混入另一活跃变更的 5 个 spec 文档",
-      "detail": "2474315c6 实含 6 个文件：session-panel-variant.test.tsx 之外，还携带另一活跃变更 2026-10-10-live-token-speed-daemon-timing 的 design.md/plan.md/proposal.md/requirements.md/tasks.md。tasks.md task-03 的「仅 session-panel-variant.test.tsx 单文件」声明不实。代码面零改动承诺仍成立：git diff 3d6a5a58b..HEAD -- frontend/ backend/ 仅该测试文件 1 处 13 行（6+/7-），与 change.patch 冻结 hunk 完全一致，且 change.patch 冻结件本身不含这 5 个文档（冻结面干净）。",
+      "detail": "2474315c6 实含 6 个文件：session-panel-variant.test.tsx 之外，还携带另一活跃变更 2026-10-10-live-token-speed-daemon-timing 的 design.md/plan.md/proposal.md/requirements.md/tasks.md（并行会话暂存区竞态——该笔 commit 未带 pathspec）。tasks.md task-03 的「仅 session-panel-variant.test.tsx 单文件」声明不实，已由主会话补披露。代码面零改动承诺仍成立：git diff 3d6a5a58b..HEAD -- frontend/ backend/ 仅该测试文件 1 处 13 行（6+/7-），与 change.patch 冻结 hunk 完全一致，且 change.patch 冻结件本身不含这 5 个文档（冻结面干净）。",
       "evidence": "git show --format= --name-only 2474315c6 列出 6 文件；git diff --stat 3d6a5a58b..HEAD -- frontend/ backend/ 仅 session-panel-variant.test.tsx 13 行"
     },
     {
       "id": "F-03",
-      "severity": "INFO",
+      "severity": "P3",
       "category": "防护佐证可核实性",
       "title": "「6 文件 107/107 全绿」无 trace 工件，仅提交信息自述；核心文件已由评审实测复跑确认",
       "detail": "本变更目录无 test-trace.json / verify-facts.json（对比同期 borrow-sandbox 变更有）。design.md 与提交 2474315c6 message 均声称该文件 10/10 + 导航相关 6 文件 107/107。评审人按 CLAUDE.md 规则 0 实跑 session-panel-variant.test.tsx 单文件：10/10 全绿（含翻转后的回归锚用例），核心声称拿到一手证据；其余 5 文件本变更零触碰（代码 diff 仅 1 文件），107/107 未独立复跑，采信提交记录，风险低。",
@@ -31,7 +31,7 @@
     },
     {
       "id": "F-04",
-      "severity": "INFO",
+      "severity": "P3",
       "category": "工作区漂移",
       "title": "flow-state.yaml 相对冻结 patch 有工作区漂移（非交付面）",
       "detail": "git status 显示本变更目录 flow-state.yaml 处于已修改状态（flow 记账类字段更新），change-patch.json 与 change.patch 为未跟踪新增。漂移不触及代码与测试文件（工作区测试文件与 HEAD 一致，blob 3ecbcca7c 与 patch index 字节级吻合），无评审影响。",
@@ -39,13 +39,17 @@
     }
   ],
   "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "n/a",
     "frImplementationTest": {
       "conclusion": "一致（零误报核验通过）",
       "detail": "① 语义一致：已归档变更 requirements.md:11 明确「entries < 3 整条不渲染」放宽为「entries < 1（空）不渲染——单轮会话也能看到第 1 轮导航」；turn-nav-list.tsx:63 MIN_ENTRIES=1（注释归属该变更）、:267 仅 entries.length<1 时 return null、:305-311 窄轨 nav role=navigation aria-label=轮次导航 常驻渲染（浮层 aria-label 为「轮次导航列表」且默认不展开，getByRole 恰一命中）；session-panel-page.tsx:4848 的 flex min-h-0 flex-1 容器即测试断言的 flexRow 字面量，:4849 直接挂载 TurnNavList——within(flexRow) 作用域正确。测试 fixture 确为 1 轮（turn_count:1 + 单 run 日志）。② 零其它改动（代码面）：git diff 3d6a5a58b..HEAD -- frontend/ backend/ 仅该测试文件 13 行（6 插入/7 删除），与 change.patch 冻结 hunk 逐行一致；HEAD blob 3ecbcca7c330b62bf4dfe1c7fc55554043543130 与 patch index 行字节级吻合；工作区该文件无未提交改动。change.patch 内其余文件为 flow-state/design/proposal/requirements/tasks 等 spec 工件新增，非代码。③ 实测：单文件 10/10 绿，测试绑定行（FR-01: …「不传 variant：根/头部 className 与改前字面量逐字一致，桌面 chrome 原位、无 ⋯ 菜单」）与文件内用例名逐字对应。CLAUDE.md 规则 9（非测试逻辑有误禁改测试）不被违反：此处是产品行为先变（已归档变更）、过时断言后随行翻转，方向正确。"
     },
     "blindDimensions": {
-      "conclusion": "四问「不适用」属实",
-      "detail": "纯测试断言翻转、零产品代码改动（git diff 代码目录仅 1 个测试文件佐证）：无运行时输入/事件面（问1）、无共享数据并发写面（问2，单文件单断言编辑）、无会话/请求生命周期面（问3，测试文件静态内容）、断言作用域限该测试文件内 flexRow 容器无跨面（问4）。四问作答与实态相符，无设计缺口。"
+      "conclusion": "四问「不适用」属实（映射：乱序/并发/切换/作用域均 n/a）",
+      "detail": "纯测试断言翻转、零产品代码改动（git diff 代码目录仅 1 个测试文件佐证）：无运行时输入/事件面（乱序）、无共享数据并发写面（并发，单文件单断言编辑）、无会话/请求生命周期面（切换，测试文件静态内容）、断言作用域限该测试文件内 flexRow 容器无跨面（作用域）。四问作答与实态相符，无设计缺口。"
     },
     "boundaryDisclosure": {
       "conclusion": "无声明边界",
