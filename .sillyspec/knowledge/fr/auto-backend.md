@@ -372,3 +372,66 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-09-daemon-page-stable-sort
   status: active
+
+## FR-auto-backend-142 dump 端点的信封 JSON 序列化与 gzip 压缩必须卸载到工作线程（asyncio.to_thread），事件循环零同步 CPU 段
+变更：2026-10-10-dump-gzip-thread-offload
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 大图（>100KB payload）dump 请求 / When 端点处理 / Then gzip.compress 在工作线程执行（spy 线程 id ≠ 事
+全文：.sillyspec/changes/archive/2026-10-10-dump-gzip-thread-offload/requirements.md#FR-01
+最近确认：c2dea0074b6fc874e20bd6a894d932dd25842239
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dump-gzip-thread-offload
+  status: active
+
+## FR-auto-backend-143 响应字节与响应头（Content-Encoding: gzip / Vary）与卸载前完全一致（行为零变化，既有 4 用例零回归）
+变更：2026-10-10-dump-gzip-thread-offload
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 卸载后实现 / When 复跑 dump 组既有用例 / Then 全绿（6/6，含新增卸载钉）。
+全文：.sillyspec/changes/archive/2026-10-10-dump-gzip-thread-offload/requirements.md#FR-02
+最近确认：c2dea0074b6fc874e20bd6a894d932dd25842239
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_happy_path_gzip_envelope」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dump-gzip-thread-offload
+  status: active
+
+## FR-auto-backend-144 新增用例先红后绿：gzip.compress 执行线程 ≠ 事件循环线程（旧实现同线程必红）
+变更：2026-10-10-dump-gzip-thread-offload
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 未卸载的旧实现 / When 跑新增用例 / Then 红（compress 在事件循环线程）。 to_thread 卸载后 / When 同用例 / Then
+全文：.sillyspec/changes/archive/2026-10-10-dump-gzip-thread-offload/requirements.md#FR-03
+最近确认：c2dea0074b6fc874e20bd6a894d932dd25842239
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dump-gzip-thread-offload:flow:测试绑定FR-03
+  tests: backend/app/modules/knowledge/tests/test_graph.py「test_graph_dump_compress_offloaded_to_worker_thread」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dump-gzip-thread-offload
+  status: active
