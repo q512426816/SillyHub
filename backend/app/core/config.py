@@ -82,6 +82,20 @@ class Settings(BaseSettings):
         ...,
         description=("Async SQLAlchemy URL, e.g. ``postgresql+asyncpg://user:pass@host:5432/db``."),
     )
+    # 2026-10-10-server-db-pool-tuning：池参数可配化。默认 20/30 保持多 agent 负载
+    # 的原调优值；小内存服务器（2C1.6G）经 DB_POOL_SIZE=5/DB_MAX_OVERFLOW=10 调小，
+    # 控制 postgres 侧连接进程数。非法值（非整数/越界）启动即 ValidationError，
+    # 显式报错不静默回退——.env 手工维护，错值静默等于埋雷。
+    db_pool_size: int = Field(
+        20,
+        ge=1,
+        description="SQLAlchemy async engine pool_size（环境变量 DB_POOL_SIZE）。",
+    )
+    db_max_overflow: int = Field(
+        30,
+        ge=0,
+        description="SQLAlchemy async engine max_overflow（环境变量 DB_MAX_OVERFLOW）。",
+    )
     redis_url: str = Field("redis://localhost:6379/0")
     secret_key: str = Field(..., min_length=16)
     log_level: str = Field("INFO")
