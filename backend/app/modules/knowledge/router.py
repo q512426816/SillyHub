@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import uuid
@@ -336,11 +337,20 @@ async def get_knowledge_graph_dump(
     """
     service = KnowledgeGraphService(session)
     envelope = await service.dump(workspace_id, user.id)
-    payload = json.dumps(
-        envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
-    )
+
+    # CPU 段卸载工作线程（2026-10-10-dump-gzip-thread-offload）：大图（实测
+    # 5855 节点/MB 级 payload）的 json.dumps + gzip.compress 同步执行达百 ms~秒级，
+    # 跑在事件循环会阻塞全部并发请求（含 SSE 心跳/日志流推送）。纯 CPU 无 IO
+    # 共享态，asyncio.to_thread 卸载安全；响应字节与响应头不变。
+    def _serialize_compress() -> bytes:
+        payload = json.dumps(
+            envelope.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":")
+        )
+        return gzip.compress(payload.encode("utf-8"))
+
+    body = await asyncio.to_thread(_serialize_compress)
     return Response(
-        content=gzip.compress(payload.encode("utf-8")),
+        content=body,
         media_type="application/json",
         headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
     )

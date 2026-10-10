@@ -842,6 +842,37 @@ async def test_graph_dump_large_payload_compression_effective(
     assert data["nodes"][0]["x"] == 0.0  # (0*37)%5000 确定性坐标透传
 
 
+async def test_graph_dump_compress_offloaded_to_worker_thread(
+    client, db_session, tmp_path, auth_headers, monkeypatch
+) -> None:
+    """卸载钉（2026-10-10-dump-gzip-thread-offload）：gzip.compress 必须在
+    工作线程执行（asyncio.to_thread 卸载）——大图 MB 级 payload 的同步 CPU
+    压缩跑在事件循环线程会阻塞全部并发请求（含 SSE 心跳/日志流推送）。
+    spy 记录 compress 时线程 id，断言 ≠ 测试事件循环线程。"""
+    import threading
+
+    compress_threads: list[int] = []
+    orig_compress = gzip.compress
+
+    def _thread_probe_compress(data, *args, **kwargs):
+        compress_threads.append(threading.get_ident())
+        return orig_compress(data, *args, **kwargs)
+
+    monkeypatch.setattr(gzip, "compress", _thread_probe_compress)
+    big = _big_dump_graph()
+    _mock_graph(monkeypatch, lambda m, p: {"graph": big})
+    ws = await _mk_ws(client, db_session, tmp_path, auth_headers)
+    resp = await client.get(
+        f"/api/workspaces/{ws['ws_id']}/knowledge/graph/dump", headers=auth_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-encoding"] == "gzip"
+    assert len(compress_threads) == 1
+    assert compress_threads[0] != threading.get_ident(), (
+        "gzip.compress 在事件循环线程同步执行——大图压缩阻塞并发面"
+    )
+
+
 async def test_graph_dump_existing_endpoints_no_content_encoding(
     client, db_session, tmp_path, auth_headers
 ) -> None:
