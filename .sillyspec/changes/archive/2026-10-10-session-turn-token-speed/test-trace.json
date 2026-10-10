@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-session-turn-token-speed",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-session-turn-token-speed:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_publishes_turn_completed_duration_api_ms」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-session-turn-token-speed"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-session-turn-token-speed:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_runs_endpoint.py「test_returns_duration_api_ms_column」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-session-turn-token-speed"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-session-turn-token-speed:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts「turnTokenSpeedText > 终态轮双值可得 → 返回 tok/s 文本」",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「对话视图（RoundDivider meta）同样追加速度段」",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「终态轮双值可得 → token 计数后显示『· 100 tok/s』」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-session-turn-token-speed"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-session-turn-token-speed:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts「turnTokenSpeedText > 非终态/缺失不显示三连」",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「终态但缺 apiDurationMs → 不显示」",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「运行中轮不显示速度」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-session-turn-token-speed"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-session-turn-token-speed:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts「cursor：runs+logs 前置同步…（合成 turn_completed 透传 duration_api_ms 断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-session-turn-token-speed"
+    }
+  ]
+}

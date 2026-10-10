@@ -2015,3 +2015,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：1c9c0e40dae6ee77ad07859f3b80e0dc2d7e269c
 理由：- 最大风险：给用户源项目建空 `.sillyspec` 是对源项目的写操作——但 repo-native 语义即「扫描直接写源项目」，创建工作区时 ⚠ 警示已明示，属授权范围内最小写面（仅空目录）。次风险：备份目录在 specs/ 根堆积（每次策略切换最多一个），低频可接受，注释明示。 - 放弃的方案：① 改 sillyspec CLI 加 `--strategy` flag 显式跳过三写——跨仓接口变更，且自指守卫已存在，修前置条件即可闭合，不扩战线；② isSelfReferentialSpecRoot 在 cwd/.sillyspec 不存在时弱化判定（resolve 字符串比对）——junction 路径字符串本就不等，弱判定不可靠，治标不治本；③ 普通目录残留直接 rm 后建 junction——违背 R-01 防误删原则（残留可能含历史托管数据），rename 备份保数据。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-session-turn-token-speed
+锚点：未记录
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+理由：答：最大风险是 `duration_api_ms` 只有 Claude 系引擎上报（codex/cursor 等引擎 结果元数据可能缺省）→ 这些引擎的轮永远无速度显示。处置：FR-04 明确不显示即 预期行为，不伪造；后续若要全引擎覆盖需 daemon 各 driver 逐调用计时（独立变更）。 第二风险：api-types 重生成暴露无关旧测试债——按仓库规则 21 顺手补字段修好， 不回退手写（本次未暴露）。 试过但放弃的方案： - 实时运行中显示 Δoutput/Δt（tokens 事件差分 ÷ 墙钟）：分母含工具执行时间， 数字被稀释 5-10 倍，多供应商对比场景下误导性强，且 deepseek-harness 明确 拒绝该口径——放弃，宁可运行中不显示。 - 后端聚合端点加会话级总时长出「会话平均速度」：历史窗口化下前端求和必算少 （agent-log-turns.ts 注释既有结论），需新聚合查询，收益/成本比低——留后续。 - daemon 侧逐调用计时透传（对齐 deepseek-harness 的 decode 段口径）：跨 claude/codex/cursor 三引擎消息边界形状不一致，改动面大——本变更先用 duration_api_ms（含 TTFT 的近似 decode 口径），逐调用计时留独立变更。

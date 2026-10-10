@@ -2528,3 +2528,105 @@
   confirmed_at: null
   source_change: 2026-10-06-provider-multi-agent-kind
   status: active
+
+## FR-lib-api-120 turn_completed SSE 事件携带 duration_api_ms（close_run_steps.py 从 AgentRun 既有列透传，None 亦如实下发）
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：Claude 引擎轮收尾带 API 时长；无时长引擎轮收尾
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-01
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-session-turn-token-speed:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_publishes_turn_completed_duration_api_ms」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-session-turn-token-speed
+  status: active
+
+## FR-lib-api-121 GET /api/daemon/sessions/{id}/runs 的 SessionRunRead 增加 duration_api_ms 字段（from_attributes 直映，零查询改动），跑 pnpm gen:types 同步 api-types.ts 与 backend/openapi.json
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：历史轮读取
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-02
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-session-turn-token-speed:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_session_runs_endpoint.py「test_returns_duration_api_ms_column」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-session-turn-token-speed
+  status: active
+
+## FR-lib-api-122 前端会话面板轮尾两处（对话视图 RoundDivider meta、全部视图 TurnStatusBadge）在终态轮显示『N tok/s』：output_tokens ÷ duration_api_ms，格式化口径 ≥10 取整、<10 保留 1 位小数、负值钳 0
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：终态轮显示速度；低速保留一位小数
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-03
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-session-turn-token-speed:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-speed.test.ts「turnTokenSpeedText > 终态轮双值可得 → 返回 tok/s 文本」 | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「对话视图（RoundDivider meta）同样追加速度段」 | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「终态轮双值可得 → token 计数后显示『· 100 tok/s』」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-session-turn-token-speed
+  status: active
+
+## FR-lib-api-123 运行中轮 / 旧数据 / 无时长引擎（duration_api_ms 为空或非正）如实不显示速度，不伪造不降级
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：运行中轮；老数据无时长
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-04
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-session-turn-token-speed:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/turn-speed.test.ts「turnTokenSpeedText > 非终态/缺失不显示三连」 | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「终态但缺 apiDurationMs → 不显示」 | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx「运行中轮不显示速度」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-session-turn-token-speed
+  status: active
+
+## FR-lib-api-124 page 与 dialog 两种面板模式、断线 resync 合成轮、历史回填（enrichDisplayTurns）路径均接线一致
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：断线重连合成终态；刷新后历史回看
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-05
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-session-turn-token-speed:flow:测试绑定FR-05
+  tests: frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts「cursor：runs+logs 前置同步…（合成 turn_completed 透传 duration_api_ms 断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-session-turn-token-speed
+  status: active
+
+## FR-lib-api-125 后端与前端相关测试通过（不跑全量）
+变更：2026-10-10-session-turn-token-speed
+状态：active
+摘要：相关测试绿
+全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-06
+最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
