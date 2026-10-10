@@ -139,12 +139,19 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) 
     调用方旁路 except，下一次事件即恢复单行，无需在此重试。
     """
     now = datetime.now(UTC)
+    # 评审 P3-1 修复（2026-10-10-run-close-task-sweep）：FOR UPDATE 行锁读——
+    # 与 close 清扫（持 run 行锁后 UPDATE 本表）的跨 commit 并发交错中，无锁
+    # SELECT 快照可能读过期 running（close 已 commit stopped），随后 UPDATE 把
+    # stopped 覆写回 running（丢失更新 + 残留 finished_at）。行锁串行化后读到
+    # 的必是已提交终值，语义②「迟到 running 不复活」对在途事件同样成立。
     row = (
         await session.execute(
-            select(AgentSessionTask).where(
+            select(AgentSessionTask)
+            .where(
                 AgentSessionTask.session_id == event.session_id,
                 AgentSessionTask.task_id == event.task_id,
             )
+            .with_for_update()
         )
     ).scalar_one_or_none()
     overrides = _non_none_overrides(event)

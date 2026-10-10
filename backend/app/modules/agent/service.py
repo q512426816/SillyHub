@@ -1452,6 +1452,10 @@ class AgentService:
             if swept:
                 log.info("startup_orphan_task_sweep", swept_tasks=swept)
         except Exception as exc:
+            # 评审 P3-2 修复：sweep 失败时回滚本事务——session 不留 aborted 态，
+            # 免得同 session 的后续启动逻辑（gate reconcile 等）撞
+            # PendingRollbackError 被连带跳过；回滚后仅日志，不阻塞启动。
+            await self._session.rollback()
             log.warning("startup_orphan_task_sweep_failed", error=str(exc))
         return cleaned
 
