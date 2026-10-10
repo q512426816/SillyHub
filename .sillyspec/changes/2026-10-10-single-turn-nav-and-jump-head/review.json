@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-single-turn-nav-and-jump-head",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "196c2280aeaf47428b5197da25e21c9224a890fc",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "测试绑定用例名与实际用例名不一致（FR-01/FR-02/FR-05 为近似名）",
+      "evidence": "requirements 测试绑定写作「单轮（1 条）entries 渲染导航并可点击跳转」「0 条 entries 不渲染导航（空态语义保持）」「隐藏阈值改写：0 条隐藏 / 1 条起出现」，实际用例名分别为「单轮（1 条）刻度渲染且点击触发 onJump 跳转」「entries < 1 → 整列不渲染（0 条隐藏）；1 条起出现窄轨」「entries < 1 → 整条轨道不渲染（0 条隐藏）；1 条起出现」；行为断言实质已覆盖，但按绑定名逐字检索会 miss。FR-03/FR-04 绑定名与实际一致（仅多「（FR-0N）」后缀）。",
+      "location": ".sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/requirements.md:72-76"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 定位顶部断言在 jsdom 下恒真，50 页上限兜底路径零测试",
+      "evidence": "新用例断言 el.scrollTop===0（session-history-scroll.test.tsx:403），jsdom 无布局实现 scrollTop 恒 0，该断言无法区分实现是否执行定位（实现本体存在：session-panel-page.tsx:1765-1772 清 pendingAnchorRef + 双 rAF scrollTop=0）；「页上限兜底」场景（50 页停 + toast「可再次点击继续加载」，session-panel-page.tsx:1789-1793）无任何用例锁定。",
+      "location": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx:403"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 移动端 Drawer 一致性无直接测试绑定，靠零改动隐式保证",
+      "evidence": "绑定用例仅覆盖桌面 TurnNavList 0 条隐藏面；已核实 Drawer 与桌面同源 navEntries（session-panel-page.tsx:5129 注释、5148 渲染）且空态「暂无轮次」出现条件 navEntries.length===0（5188 行）本次零改动，无移动端用例锁定「单轮会话 Drawer 显示 1 条轮目」。",
+      "location": ".sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/requirements.md:73"
+    },
+    {
+      "severity": "P3",
+      "title": "回到开头循环未消费 loadEarlierOnce 返回值做无进展早退",
+      "evidence": "tick 内 `void loadEarlierOnce()`（session-panel-page.tsx:1796 附近）忽略「游标任一分量前进」返回值；翻页失败静默（handleLoadEarlier catch 吞掉）时同游标重发并逐次计入 50 页上限（有界，随后 toast 停止，不无限请求）；对照同文件 2104 行既有跳转回退循环有无进展判定。design 乱序问中「单调递减由返回值保证」的因果链在此处未闭环，实际单调性由成功路径写最旧行游标（older.reduce 取 oldest）保证。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1796"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结面混入兄弟变更提交面（经 git log 归因非本变更越界）",
+      "evidence": "change.patch 为 baseline 032d3085→HEAD 196c2280 区间 diff，含 8b2e14092（2026-10-10-session-turn-token-speed 的 apiDurationMs 四路径接线）与 979635107（2026-10-10-turn-speed-enrich-backfill-test 整个新增测试文件）的面；本变更自身提交 35d4adac8 与 design 文件清单一致（对 enrich 测试文件的贡献确为补 user_id/sender_name 字段）。审阅时 apiDurationMs hunks 不应计为本变更交付面。",
+      "location": ".sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/change.patch"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "放弃方案 A「修触顶手感/锚定参数调优」，滚动体感问题不根治、仅提供绕开路径",
+      "verdict": "可接受",
+      "reason": "无浏览器复现条件下动高测试密度滚动机制（触顶/锚定/贴底三方交互）回归面大；本变更对既有链路零改动并提供显式绕开入口，残留已明确披露。"
+    },
+    {
+      "boundary": "放弃方案 B「列表虚拟化」",
+      "verdict": "可接受",
+      "reason": "属大改超出轻量变更范围，已有 content-visibility 与 50 页上限兜底。"
+    },
+    {
+      "boundary": "连续翻页 50 页上限即停 + toast 可再点续（非一次拉全史）",
+      "verdict": "可接受",
+      "reason": "用户显式点击触发、请求有界、可继续，DOM 压力风险已在 design 披露并有兜底。"
+    },
+    {
+      "boundary": "隐藏阈值放宽为 <1 而非移除（空轮次仍不渲染，桌面窄轨隐藏 + 移动端保留「暂无轮次」空态）",
+      "verdict": "可接受",
+      "reason": "空导航无价值，FR-01 场景 2 明确锁定该语义，测试断言 container.textContent 为空。"
+    },
+    {
+      "boundary": "翻页失败静默沿既有 handleLoadEarlier catch 链路（无 per-page 错误提示，仅 50 页上限 toast）",
+      "verdict": "可接受",
+      "reason": "沿既有机制零改动，失败重发计入 50 页上限有界；体感缺陷已在 P3-4 记录。"
+    },
+    {
+      "boundary": "定位完成后 suppress 延迟 1s 解除（防触顶抢跑）",
+      "verdict": "可接受",
+      "reason": "stop() 所有出口均复位（epoch 分支同步复位、正常分支 1s 定时复位），最坏 <1s 残留自愈，无实害。"
+    }
+  ],
+  "reviewedAt": "2026-10-10T11:40:32Z"
+}
