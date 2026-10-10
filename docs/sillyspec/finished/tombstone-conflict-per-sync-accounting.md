@@ -74,3 +74,25 @@ sillyspec 指令集只有 `resolve` / `ghost_cleanup` 两个 action，没有「�
 **护栏建议**：①执行期任何落点/范围裁决当场回写 design 清单+task 卡 target_files（本变更 8 处欠账的教训）；②verify 门禁首轮即全列所有未过项（已有机制前移到首撞）；③实测结果按代码 diff 指纹缓存——git HEAD+scope 文件未变的重跑直接复用上轮结论；④跨仓 task 的 trace/对账/wt-commit 按行 repo 归属解析。
 
 **证据**：.sillyspec/.runtime/verify-runs/2026100905*~06* 共 19 个 run 目录、13 个 test-result.json 累计 2701s；friction-tally-2026-10-09-tombstone-conflict-root-fix.json gate 回滚 13 次。
+
+## 处置记录（2026-10-10）
+
+**三缺陷已全部断根**（`2026-10-09-tombstone-conflict-root-fix`，5 任务 6 提交两仓，
+verify PASS WITH NOTES，归档 75c673dbd）——本日逐项复核验证：
+
+1. **缺陷一（CLI 归因记账）✅**：`41edfc3e`——纯墓碑拒收按**被删变更**落
+   `spec-sync-conflict-<被删变更>.json`（幂等合并 + kind=tombstone），不再按当轮同步
+   标签累积；全绿轮自动清理陈旧纯墓碑记录（kind 无关判定）；横幅按被删变更单根因
+   叙事。本日复跑归因矩阵 + 回执 + 横幅去重套件 14/14 绿。
+2. **缺陷二（前端不露根因）✅**：`e0999476`——冲突行消费 `platform_deleted`/`note`，
+   墓碑形态改「非版本冲突 · 平台已删除」三态展示（混合行 `conflicting_paths ∖
+   platform_deleted` 判定，不误 hide 有效裁决入口）。本日复跑
+   platform-sync-section.test.tsx 20/20 绿。
+3. **缺陷三（无本机收敛通道）✅**：backend 指令通道（`dc2397a3`）+ 平台删除环下发
+   （`93c61da3`+`86fa83cce`）+ daemon 执行器（`c2a42fcb`）——`tombstone_cleanup`
+   action 收敛本机目录至 `.runtime/tombstone-quarantine/` 隔离区留证。
+
+**遗留（设计 backlog，坑内执行期发现，随变更归档留档）**：① CLI 跨仓 trace 绑定悬空
+（行携 repo 归属解析——绕过已记录：行标 superseded + verify-result 矩阵承接）；②
+verify 13 轮 gate 回滚 postmortem 的四条护栏建议（落点裁决当场回写/首轮全列/实测
+diff 指纹缓存/跨仓按行 repo 解析）——均提案级，需要时另立变更。归档。

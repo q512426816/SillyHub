@@ -21,3 +21,11 @@
 ## 关联
 
 - 平台侧同源缺陷（勾选时刻推断丢 stage 白名单）已于本仓 `2026-10-09-timeline-tick-stage-filter` 修复——那是平台移植遗漏，非 CLI 缺陷。
+
+## 处置记录（2026-10-10）
+
+双修复均已在 sillyspec 仓核实落地：`8c87cf28`（fourpiece-init `fpStamp` 改
+`nowWallClock()`，源码复核在位）+ `1aee4b11` 归档的 `2026-10-09-module-card-updated-at-iso`
+（`module-impact.js:158` 改全量 `toISOString()`，源码复核在位）。存量数据按坑内口径
+接受旧值（变更事实以 watcher 事件流为准，历史工件不改写）。余下发版面：sillyspec
+发版 + daemon 升级门控放行后新骨架生效——属发版节奏非代码缺口。归档。
