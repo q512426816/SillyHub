@@ -1,0 +1,26 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  线上会话（单轮 6969 行、活跃流）详情页：左侧轮次导航 MIN_ENTRIES=3 把单轮会话整条隐藏，用户不知道会话只有 1 轮也无跳转入口；触顶「加载更早」每页 400 行 +
+  锚定钉回原视口，慢服务器上体感「滚动不了、一直刷新、还是最后这点」，且重开面板进度归零，用户 24h 内重开 19 次。
+
+  成功标准：
+
+  - 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
+
+  - 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
+
+  - 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
+
+  - 连续加载期间有可见 loading 状态；到头后入口消失
+
+  - 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
+autopilot: true
+baseline_commit: 032d3085c6dc79902e1843cd2adeeb4dceb536af
+updatedAt: '2026-10-10T11:30:14.861Z'
+baseline_sha256: 3e1a87b6fafd6246fc53e75722ba29f1f56fe920779f2aa5443bcde9e84ca0f3
+
