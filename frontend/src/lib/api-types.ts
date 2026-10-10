@@ -1261,6 +1261,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/linked-repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Linked Repos
+         * @description 列出工作区关联仓（成员视角含 my_path；状态摘要由 task-03 接管填充）。
+         */
+        get: operations["list_linked_repos_api_workspaces__workspace_id__linked_repos_get"];
+        put?: never;
+        /**
+         * Create Linked Repo
+         * @description 登记关联仓（owner/admin）。重名 409。
+         */
+        post: operations["create_linked_repo_api_workspaces__workspace_id__linked_repos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Linked Repo
+         * @description 删除关联仓（owner/admin；成员路径与落盘状态级联清理）。
+         */
+        delete: operations["delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Linked Repo
+         * @description 编辑共享字段（owner/admin；name 不可改，见 schema 注）。
+         */
+        patch: operations["update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}/my-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save My Path
+         * @description 成员级本机路径 upsert（成员本人；path=null 清除）。
+         */
+        put: operations["save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Linked Repos Sync
+         * @description 「立即同步」：向当前成员绑定 daemon 发请求-响应 RPC（受理即返，FR-05）。
+         *
+         *     无入参（幂等触发，POST 空 body）；结果经 daemon REST 回报端点落库
+         *     （唯一通道），GET 轮询可见；老 daemon method_not_found → 状态层
+         *     skipped(需升级) 且本端点不报错（FR-07）。
+         */
+        post: operations["trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/explorer/tree": {
         parameters: {
             query?: never;
@@ -5060,6 +5152,28 @@ export interface paths {
         get: operations["compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/linked-repos-sync-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Linked Repos Sync Result
+         * @description daemon 回报关联仓双落盘结果（归属校验同裁决端点；宽容收数）。
+         *
+         *     未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
+         */
+        post: operations["report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -18686,6 +18800,80 @@ export interface components {
             skills?: components["schemas"]["LibrarySkillItem"][];
         };
         /**
+         * LinkedRepoCreate
+         * @description 登记关联仓（owner/admin）。name 对齐 sillyspec 子项目名规则。
+         */
+        LinkedRepoCreate: {
+            /** Name */
+            name: string;
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+        };
+        /** LinkedRepoOut */
+        LinkedRepoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+            /** My Path */
+            my_path?: string | null;
+            /** Sync Status Summary */
+            sync_status_summary?: components["schemas"]["SyncStateBrief"][];
+        };
+        /** LinkedRepoSyncResultItem */
+        LinkedRepoSyncResultItem: {
+            /** Repo Name */
+            repo_name: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "projects_yaml" | "repos_registry";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
+        };
+        /** LinkedRepoSyncResultRequest */
+        LinkedRepoSyncResultRequest: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Results */
+            results?: components["schemas"]["LinkedRepoSyncResultItem"][];
+        };
+        /**
+         * LinkedRepoUpdate
+         * @description 编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生
+         *     落盘产物错位——design 数据模型节）。
+         */
+        LinkedRepoUpdate: {
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+        };
+        /**
          * ListDirRequest
          * @description Request body for POST /runtimes/{runtime_id}/list-dir.
          */
@@ -19972,6 +20160,14 @@ export interface components {
              * @default 0
              */
             api_requests: number;
+        };
+        /**
+         * MyPathUpdate
+         * @description 成员级本机路径 upsert（成员本人；path=None 清除）。
+         */
+        MyPathUpdate: {
+            /** Path */
+            path?: string | null;
         };
         /**
          * NotificationListResponse
@@ -26031,6 +26227,34 @@ export interface components {
             runs_failed: number;
         };
         /**
+         * SyncStateBrief
+         * @description 单层落盘状态摘要（GET 聚合视图用；task-03 填充）。
+         */
+        SyncStateBrief: {
+            /**
+             * Machine Id
+             * Format: uuid
+             */
+            machine_id: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "projects_yaml" | "repos_registry";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+        };
+        /**
          * SystemStatusResponse
          * @description 服务器性能(psutil) + 业务统计(首页运行状态看板)。
          */
@@ -30939,6 +31163,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemberBindingView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_linked_repos_api_workspaces__workspace_id__linked_repos_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_linked_repo_api_workspaces__workspace_id__linked_repos_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MyPathUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -37246,6 +37671,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SillySpecConflictCompareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoSyncResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

@@ -1,0 +1,276 @@
+{
+  "change": "2026-10-10-workspec-maintenance",
+  "baseline": "8dd6e9f32b10a51df047ca470a607f72cc32d09f",
+  "head": "2d47023554fd6140005f62cfe17e71d72cc9bec5",
+  "files": [
+    "backend/app/main.py",
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/machines.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "backend/app/modules/daemon/linked_repos_sync.py",
+    "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+    "backend/app/modules/workspace/linked_repos/__init__.py",
+    "backend/app/modules/workspace/linked_repos/model.py",
+    "backend/app/modules/workspace/linked_repos/router.py",
+    "backend/app/modules/workspace/linked_repos/schema.py",
+    "backend/app/modules/workspace/linked_repos/service.py",
+    "backend/app/modules/workspace/linked_repos/tests/__init__.py",
+    "backend/app/modules/workspace/linked_repos/tests/conftest.py",
+    "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+    "backend/migrations/versions/20261010190000_create_workspace_linked_repos.py",
+    "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+    "frontend/src/components/workspace/linked-repos-card.tsx",
+    "frontend/src/components/workspace/linked-repos-form.tsx",
+    "frontend/src/lib/linked-repos.ts",
+    "sillyhub-daemon/src/linked-repos-sync.ts",
+    "sillyhub-daemon/tests/linked-repos-sync.test.ts"
+  ],
+  "totals": {
+    "files": 26,
+    "additions": 4283,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-10T12:34:19.505Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "8dd6e9f32b10a51df047ca470a607f72cc32d09f",
+    "totals": {
+      "files": 27,
+      "additions": 4283,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "backend/app/main.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/__init__.py",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/machines.py",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 681,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 462,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 64,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/linked_repos_sync.py",
+        "additions": 409,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "additions": 276,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/__init__.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/model.py",
+        "additions": 145,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/router.py",
+        "additions": 214,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/schema.py",
+        "additions": 64,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/service.py",
+        "additions": 183,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/tests/__init__.py",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/tests/conftest.py",
+        "additions": 89,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "additions": 417,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261010190000_create_workspace_linked_repos.py",
+        "additions": 106,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+        "additions": 132,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/linked-repos-card.tsx",
+        "additions": 297,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/linked-repos-form.tsx",
+        "additions": 127,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/linked-repos.ts",
+        "additions": 77,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/linked-repos-sync.ts",
+        "additions": 226,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/linked-repos-sync.test.ts",
+        "additions": 214,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/protocol.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "35c8966b4001d0dfbc7e81c2afe113da118621e32809b17bda8ee61179ff6c22",
+  "patchStatus": "ok"
+}

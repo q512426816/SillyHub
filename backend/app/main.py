@@ -92,6 +92,9 @@ from app.modules.tool_gateway.router import router as tool_gateway_router
 from app.modules.workflow.router import router as workflow_router
 from app.modules.workspace import workspace_router
 from app.modules.workspace.link_router import router as ppm_project_link_router
+from app.modules.workspace.linked_repos.router import (
+    router as linked_repos_router,
+)
 from app.modules.workspace.member_runtimes.router import (
     router as member_runtimes_router,
 )
@@ -880,6 +883,13 @@ def create_app() -> FastAPI:
     app.include_router(file_router, prefix="/api/file")
     app.include_router(preview_office_router, prefix="/api")
     app.include_router(member_runtimes_router, prefix="/api", tags=["workspace-member-runtimes"])
+    # 工作区「关联仓」维护（change ``2026-10-10-workspec-maintenance`` task-02）：
+    # 共享登记 CRUD + 成员级 my-path（sync 触发端点随 task-03 并入同 router）。
+    # sibling include 仿 members_router——router 自带
+    # ``/workspaces/{workspace_id}/linked-repos`` prefix，外层只加 ``/api``；
+    # 嵌套 include 会双计 prefix 并抛
+    # ``ValueError: Duplicated param name 'workspace_id'``。
+    app.include_router(linked_repos_router, prefix="/api", tags=["workspace-linked-repos"])
     # 工作区文件浏览器（change ``2026-08-18-workspace-file-browser``）：只读浏览
     # 当前用户自己绑定的工作区副本（explorer_* 三 RPC 转发，四 GET 端点）。
     # sibling include 仿 members_router——router 自带

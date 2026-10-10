@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-workspec-maintenance",
+  "generatedAt": "2026-10-10T12:35:34.842Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 12,
+        "globEntries": 1
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "backendEndpoints": 3001,
+        "frontendCalls": 6
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspec-maintenance",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 真进程端到端 9/9（登录→登记→重名 409→my-path→GET→sync 真离线 504→回报落库→状态摘要可见→跨工作区 404），隔离库 verify_workspec + 临时 redis",
+      "command": "uv run python scripts_verify/verify_e2e_linked_repos.py（对 127.0.0.1:8002 真服务）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-e2e-linked-repos.log"
+    },
+    {
+      "claim": "daemon 真模块真 CLI spawn 双落盘（真实 sillyspec v3.32.4 安装，SILLYSPEC_BIN 直连）：projects/e2e-specs.yaml 与 local.yaml repos: 段产物真实生成、report 回调收双层 ok",
+      "command": "SILLYSPEC_BIN=C:/Users/qinyi/IdeaProjects/sillyspec/bin/sillyspec.js node tests-verify/verify_daemon_spawn.mjs",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-daemon-spawn.log"
+    },
+    {
+      "claim": "真实 PostgreSQL 迁移升级（alembic upgrade head 至 20261010190000 三表建齐，隔离库）",
+      "command": "DATABASE_URL=postgresql+asyncpg://...@127.0.0.1:5432/verify_workspec uv run alembic upgrade head",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-backend-e2e.log（uvicorn 启动前置输出）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "完整 daemon↔backend WS 网络链路（真 daemon 进程连 hub 收 linked_repos_sync RPC → spawn 落盘 → REST 回报落库一气呵成）",
+        "condition": "本机起 daemon（daemon-start.bat，--server 指向 verify 用的 backend）+ 工作区绑定该机器后，UI 点「立即同步」并核对两层状态徽标变 ok；组件级真实证据已齐（backend e2e 真进程 + daemon 真模块真 spawn），仅 WS 传输层未起完整 daemon 进程",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "前端卡片真实浏览器走查（对照 visual-evidence.md 的代码级对照）",
+        "condition": "dev 环境起前后端，工作区详情页「关联仓」卡片：管理员增删改+成员路径配置+立即同步+状态徽标逐项过一遍（原型 prototype-workspace-linked-repos.html 并排对照）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "前端删除操作二次确认 Popconfirm（visual-evidence 已登记偏差，P3）",
+        "condition": "v1.1 顺手补（5 行成本），不阻塞归档",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{id}/linked-repos",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos",
+        "rowIdx": 2
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}",
+        "rowIdx": 3
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}",
+        "rowIdx": 4
+      },
+      {
+        "method": "PUT",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}/my-path",
+        "rowIdx": 5
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos/sync",
+        "rowIdx": 6
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/machines/{instance_id}/linked-repos-sync-result",
+        "rowIdx": 7
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos",
+        "rowIdx": 2
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}",
+        "rowIdx": 3
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}",
+        "rowIdx": 4
+      },
+      {
+        "method": "PUT",
+        "path": "/api/workspaces/{id}/linked-repos/{rid}/my-path",
+        "rowIdx": 5
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos/sync",
+        "rowIdx": 6
+      },
+      {
+        "method": "POST",
+        "path": "/api/daemon/machines/{instance_id}/linked-repos-sync-result",
+        "rowIdx": 7
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+      "sillyhub-daemon/tests/linked-repos-sync.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

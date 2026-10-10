@@ -1,0 +1,138 @@
+"""端到端集成验证脚本（verify 阶段 Runtime Evidence，非测试文件）。
+
+对 worktree 起的真 backend 进程（127.0.0.1:8002，隔离库 verify_workspec +
+临时 redis 6380）走完整 HTTP 链路：
+登录 → psql 预置工作区/owner 角色/daemon 机器 → 登记关联仓 → my-path →
+GET 回读 → POST sync（真实离线错误路径，无 daemon 在线）→ daemon 回报端点
+（真端点真落库）→ GET 状态摘要可见。
+输出逐段 PASS/FAIL 摘要到 stdout（日志由调用方重定向）。
+"""
+
+# fmt: off —— verify 阶段证据留档脚本（两套 ruff 配置 line-length 88/100 间
+# 无交集断行，作为非源码证据豁免格式化；复跑口径见 verify-result.md 集成验证回执）。
+
+import json
+import os
+import sys
+import urllib.request
+
+BASE = "http://127.0.0.1:8002"
+
+
+def call(method: str, path: str, token: str | None = None, body: dict | None = None):
+    req = urllib.request.Request(BASE + path, method=method)
+    req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    data = json.dumps(body).encode() if body is not None else None
+    try:
+        with urllib.request.urlopen(req, data=data, timeout=30) as resp:
+            text = resp.read().decode()
+            return resp.status, json.loads(text) if text else {}
+    except urllib.error.HTTPError as e:
+        text = e.read().decode()
+        try:
+            return e.code, json.loads(text)
+        except Exception:
+            return e.code, {"raw": text[:200]}
+
+
+def main() -> int:
+    admin_email = os.environ["VERIFY_ADMIN_EMAIL"]
+    admin_pwd = os.environ["VERIFY_ADMIN_PASSWORD"]
+    workspace_id = os.environ["VERIFY_WS_ID"]
+    instance_id = os.environ["VERIFY_INSTANCE_ID"]
+
+    results = []
+
+    # 1) 登录
+    st, body = call("POST", "/api/auth/login", body={"account": admin_email, "password": admin_pwd})
+    token = body.get("access_token") or (body.get("data") or {}).get("access_token")
+    results.append(("login", st == 200 and bool(token)))
+    if not token:
+        print("login failed:", st, body)
+        return 1
+
+    base = f"/api/workspaces/{workspace_id}/linked-repos"
+
+    # 2) 登记关联仓
+    st, body = call(
+        "POST",
+        base,
+        token,
+        {
+            "name": "platform-specs",
+            "repo_url": "git@example:specs.git",
+            "description": "spec 规范仓（e2e）",
+            "rel_path": "../platform-specs",
+        },
+    )
+    results.append(("create repo", st == 201 and body.get("name") == "platform-specs"))
+    repo_id = body.get("id")
+
+    # 3) 重名 409
+    st, _ = call("POST", base, token, {"name": "platform-specs"})
+    results.append(("duplicate 409", st == 409))
+
+    # 4) my-path upsert
+    st, body = call("PUT", f"{base}/{repo_id}/my-path", token, {"path": "C:/e2e/specs"})
+    results.append(("my-path upsert", st == 200 and body.get("my_path") == "C:/e2e/specs"))
+
+    # 5) GET 回读（elevated=admin 视角 summary 空）
+    st, body = call("GET", base, token)
+    ok = st == 200 and len(body) == 1 and body[0].get("my_path") == "C:/e2e/specs"
+    results.append(("GET list", ok))
+
+    # 6) POST sync —— 真实离线路径（无 daemon 连接 8002 的 hub）：预期非 2xx 错误
+    st, body = call("POST", f"{base}/sync", token)
+    results.append(("sync offline real-path", st in (502, 503, 504) or st >= 500))
+    print("sync offline status:", st, str(body)[:120])
+
+    # 7) daemon 回报端点（真端点真落库——模拟 daemon 侧完成的回报）
+    st, body = call(
+        "POST",
+        f"/api/daemon/machines/{instance_id}/linked-repos-sync-result",
+        token,
+        {
+            "workspace_id": workspace_id,
+            "results": [
+                {"repo_name": "platform-specs", "layer": "projects_yaml", "status": "ok"},
+                {
+                    "repo_name": "platform-specs",
+                    "layer": "repos_registry",
+                    "status": "skipped",
+                    "detail": "本机路径未配置（模拟）",
+                },
+            ],
+        },
+    )
+    results.append(("report endpoint", st == 200 and body.get("written") == 2))
+
+    # 8) GET 状态摘要可见（admin=全部机器）
+    st, body = call("GET", base, token)
+    summary = body[0].get("sync_status_summary", []) if st == 200 and body else []
+    layers = {s.get("layer"): s.get("status") for s in summary}
+    results.append(
+        ("summary visible", layers == {"projects_yaml": "ok", "repos_registry": "skipped"})
+    )
+
+    # 9) 越权回归（真实路径）：不存在 workspace → 404
+    st, _ = call(
+        "PATCH",
+        f"/api/workspaces/00000000-0000-0000-0000-000000000000/linked-repos/{repo_id}",
+        token,
+        {"description": "x"},
+    )
+    results.append(("cross-ws 404", st == 404))
+
+    failed = [name for name, ok in results if not ok]
+    for name, ok in results:
+        print(f"{'PASS' if ok else 'FAIL'}  {name}")
+    print("RESULT:", "ALL PASS" if not failed else f"FAILED: {failed}")
+    return 0 if not failed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+# fmt: on

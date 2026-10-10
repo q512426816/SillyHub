@@ -1894,6 +1894,33 @@ signal: AbortSignal.timeout(SPEC_BUNDLE_TIMEOUT_MS),
     );
   }
 
+  // -- 2026-10-10-workspec-maintenance task-04：关联仓双落盘结果回报（FR-04）--------
+
+  /**
+   * 回报关联仓双落盘结果（REST 落库唯一通道，design 分层要点 4）。
+   *
+   * 端点：POST {REST_PREFIX}/machines/{instanceId}/linked-repos-sync-result
+   * （backend machines.py；归属校验=daemon credential 对应 user 的机器归属）。
+   * body：workspace_id + results[]{repo_name/layer/status/detail}（snake_case）。
+   * 失败语义：404 → HubHttpError（机器不存在/越权）；调用方按 best-effort 静默。
+   */
+  async postLinkedReposSyncResult(
+    instanceId: string,
+    workspaceId: string,
+    results: Array<{
+      repo_name: string;
+      layer: string;
+      status: string;
+      detail?: string | null;
+    }>,
+  ): Promise<{ written: number }> {
+    return this._request<{ written: number }>(
+      'POST',
+      `${REST_PREFIX}/machines/${encodeURIComponent(instanceId)}/linked-repos-sync-result`,
+      { workspace_id: workspaceId, results },
+    );
+  }
+
   // -- task-11 / FR-08 / D-004@v1：daemon-client change-write 轻量回执通道 ---------
 
   /**

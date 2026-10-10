@@ -833,6 +833,21 @@ interface DetectorLike {
 
 /** daemon 需要的 HubClient 接口子集。 */
 interface ClientLike {
+  /**
+   * 2026-10-10-workspec-maintenance task-04：关联仓双落盘结果回报（FR-04；
+   * REST 落库唯一通道）。可选——真实 HubClient 已实现；测试 mock 未实现时
+   * handler 跳过回报（RPC 响应仍带结果）。
+   */
+  postLinkedReposSyncResult?(
+    instanceId: string,
+    workspaceId: string,
+    results: Array<{
+      repo_name: string;
+      layer: string;
+      status: string;
+      detail?: string | null;
+    }>,
+  ): Promise<{ written: number }>;
   register(params: {
     daemonLocalId: string;
     serverUrl: string;
@@ -6548,6 +6563,12 @@ export class Daemon {
     //（design §5 Phase 1 / §7.1）。业务全在 SillySpecManager.conflictSnapshot，
     // RpcError code 经 _dispatchRpc 原样回填（explorer 系同约定）。
     this._registerSillySpecRpcHandler(ws);
+    // task-04（2026-10-10-workspec-maintenance / FR-03）：注册 linked_repos_sync
+    // 双落盘 RPC——backend 同步编排经请求-响应下发配置快照，本机 spawn
+    // `sillyspec workspace add` / `local register-repo` 落盘工具消费点；结果经
+    // REST 回报（落库唯一通道）+ RPC 响应即时反馈。业务全在
+    // linked-repos-sync.runLinkedReposSync（平名注册，protocol.ts 帧格式无需改）。
+    this._registerLinkedReposRpcHandler(ws);
     // task-01（2026-08-25-workspace-git-log）：注册 git_log 系四只读 RPC（平名，
     // design §5.2 CC-02 / §7.2 契约），供 backend git_log 模块经 MemberBindingResolver
     // 解析绑定后直连（不走 host_fs. 前缀降级通道）。task-01（2026-08-26-
@@ -6581,6 +6602,49 @@ export class Daemon {
 
     this._wsClient = ws;
     this._logger.info('ws_client_created', { daemon_local_id: this._config.runtime_id });
+  }
+
+  /**
+   * task-04（2026-10-10-workspec-maintenance / FR-03 / FR-04 / FR-07）：注册
+   * linked_repos_sync RPC——daemon 双落盘例程接线。params 归一失败（非法形态）
+   * 如实 throw（backend 侧 502 家族）；业务失败不出 RPC 错误（逐层结果在
+   * 响应体内：ok/skipped/failed + detail——能力降级与命令失败都是数据不是异常）。
+   */
+  private _registerLinkedReposRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('linked_repos_sync', async (params) => {
+      const { runLinkedReposSync } = await import('./linked-repos-sync.js');
+      const repos = (
+        Array.isArray(params.repos) ? params.repos : []
+      ) as Array<Record<string, unknown>>;
+      const payload = {
+        workspace_id: typeof params.workspace_id === 'string' ? params.workspace_id : '',
+        root_path: typeof params.root_path === 'string' ? params.root_path : '',
+        repos: repos
+          .filter((r) => !!r && typeof r === 'object' && typeof r.name === 'string')
+          .map((r) => ({
+            name: r.name as string,
+            rel_path: typeof r.rel_path === 'string' ? r.rel_path : null,
+            repo_url: typeof r.repo_url === 'string' ? r.repo_url : null,
+            abs_path: typeof r.abs_path === 'string' ? r.abs_path : null,
+          })),
+      };
+      if (!payload.workspace_id || !payload.root_path || payload.repos.length === 0) {
+        throw new Error('linked_repos_sync: payload 缺 workspace_id/root_path/repos');
+      }
+      const instanceId = this._config.runtime_id;
+      const report = this._client.postLinkedReposSyncResult?.bind(this._client);
+      return runLinkedReposSync(payload, {
+        report: report
+          ? async (results) => {
+              await report(instanceId, payload.workspace_id, results);
+            }
+          : undefined,
+      });
+    });
   }
 
   private _registerListDirRpcHandler(ws: WsClientLike): void {

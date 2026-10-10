@@ -7,6 +7,7 @@ import { Archive } from "lucide-react";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { SharedDaemonToggle } from "@/components/workspace/shared-daemon-toggle";
 import { LinkedProjectsSection } from "@/components/workspace/LinkedProjectsSection";
+import { LinkedReposCard } from "@/components/workspace/linked-repos-card";
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
 import { Button } from "@/components/ui/button";
 import { PageContainer, SectionCard } from "@/components/layout";
@@ -725,6 +726,15 @@ export default function WorkspaceDetailPage({ params }: Props) {
           isOwner={isOwner}
           onRefresh={load}
           componentCount={componentCount}
+        />
+
+        {/* 段③-2b：关联仓维护（2026-10-10-workspec-maintenance task-05 / FR-06）。
+            canManage = owner || 平台管理员（对齐后端 WORKSPACE_MEMBER_MANAGE 口径）。 */}
+        <LinkedReposCard
+          workspaceId={workspaceId}
+          canManage={
+            isOwner || (useSession.getState().user?.is_platform_admin ?? false)
+          }
         />
 
         {/* 段③-4：默认智能体提供方 | 守护进程共享 最下一行两块 */}

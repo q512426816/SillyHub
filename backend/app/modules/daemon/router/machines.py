@@ -605,3 +605,48 @@ async def compare_machine_sillyspec_conflict(
         workspace_id=workspace_id,
     )
     return SillySpecConflictCompareResponse.model_validate(payload)
+
+
+# ── 关联仓落盘结果回报（2026-10-10-workspec-maintenance task-03，FR-04）────────
+# 落库唯一通道（design 分层要点 4）：daemon 完成双落盘后回调本端点 upsert
+# workspace_linked_repo_sync_states；RPC 响应仅即时反馈不落库。
+
+
+class LinkedRepoSyncResultItem(BaseModel):
+    repo_name: str
+    layer: Literal["projects_yaml", "repos_registry"]
+    status: Literal["ok", "skipped", "failed"]
+    detail: str | None = None
+
+
+class LinkedRepoSyncResultRequest(BaseModel):
+    workspace_id: uuid.UUID
+    results: list[LinkedRepoSyncResultItem] = Field(default_factory=list)
+
+
+@router.post(
+    "/machines/{instance_id}/linked-repos-sync-result",
+    status_code=status.HTTP_200_OK,
+)
+async def report_linked_repos_sync_result(
+    instance_id: uuid.UUID,
+    data: LinkedRepoSyncResultRequest,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict:
+    """daemon 回报关联仓双落盘结果（归属校验同裁决端点；宽容收数）。
+
+    未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.linked_repos_sync import apply_sync_result
+
+    written = await apply_sync_result(
+        session,
+        instance_id,
+        data.workspace_id,
+        [item.model_dump() for item in data.results],
+    )
+    return {"written": written}

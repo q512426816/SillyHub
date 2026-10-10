@@ -2450,7 +2450,7 @@ export function runProgressJsonDefault(
  * posix: ../lib/node_modules——npm prefix 布局，覆盖 /usr/local、homebrew、nvm）。
  * 逐个 existsSync，全缺返回 null。
  */
-function resolveSillySpecBinDefault(): string | null {
+export function resolveSillySpecBinDefault(): string | null {
   const candidates: string[] = [];
   const envBin = process.env.SILLYSPEC_BIN;
   if (envBin && envBin.trim()) {

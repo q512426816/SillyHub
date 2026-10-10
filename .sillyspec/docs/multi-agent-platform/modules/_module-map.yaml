@@ -35,6 +35,8 @@ modules:
       - append_events/list_events (backend/app/modules/platform_sync/service.py+router.py, POST/GET /changes/{name}/events 变更事件通道·watcher 批量上行幂等跳过+5000 修剪·since 增量正序·provisional 只展示不消费红线, 2026-09-23-change-events-channel)
       - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
       - workspace_router
+      - linked_repos 子模块三表+六端点 (backend/app/modules/workspace/linked_repos/, 跨仓关联登记[共享字段+成员级路径]+CRUD+my-path+sync 触发, 跨工作区归属过滤 404+exclude_unset 清除语义, 2026-10-10-workspec-maintenance)
+      - linked_repos_sync 编排 (backend/app/modules/daemon/linked_repos_sync.py, linked_repos_sync RPC[30s+15s/仓上限180s]+machines.py 回报端点[落库唯一通道]+best-effort 推送[逐成员 abs_path/引用池], 2026-10-10-workspec-maintenance)
       - members_router
       - auth_router
       - health_router
@@ -65,6 +67,7 @@ modules:
       - AgentReplayBody / buildReplayTurns (frontend/src/components/daemon/agent-replay-body.tsx + frontend/src/lib/agent-log-turns.ts, tool_report 纯日志会话回放主体·TurnTimeline 真组件复用·适配器切轮/系统事件中性行/轮级 token·工作会话折叠条, 2026-09-19-tool-report-session-replay)
       - AgentLogReplayBody / buildReplayTurns / isSubagentLog (frontend/src/components/daemon/agent-log-replay-body.tsx + frontend/src/lib/agent-log-replay.ts, tool_report 空轮回放主体·TurnTimeline 直适配·系统事件复用 stderr 原语零改组件·三保险切轮·首屏最早窗口 10 页上限·dialog attach 轮询捕获门控, 2026-09-20-agent-log-session-replay)
       - ChangeEventsCard (frontend/src/components/changes/detail/change-events-card.tsx, 变更详情页 aside「观测事件」折叠卡·30s 轮询自取数·warning 琥珀高亮+角标计数·provisional 徽标·失败静默隐藏·零业务逻辑红线, 2026-09-23-change-events-channel)
+      - LinkedReposCard + LinkedRepoFormModal (frontend/src/components/workspace/linked-repos-card.tsx + linked-repos-form.tsx + lib/linked-repos.ts, 工作区详情「关联仓」维护卡·四列列表+状态徽标+成员级「我的本地路径」小 Modal+立即同步·canManage=owner||admin, 2026-10-10-workspec-maintenance)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false
@@ -96,6 +99,8 @@ modules:
       - isProcessAlive
       - writePid
       - SillySpecManager.collectStatusOnce (sillyhub-daemon/src/sillyspec-manager.ts, progress show --json 三态采集器+心跳 sillyspec_status 透传, 2026-09-02-changes-overview-card)
+      - runLinkedReposSync (sillyhub-daemon/src/linked-repos-sync.ts, 关联仓双落盘例程·spawn workspace add/register-repo 两层独立成败·execFile 数组形参·失败重试一次·REST 回报唯一落库通道, 2026-10-10-workspec-maintenance)
+      - postLinkedReposSyncResult (sillyhub-daemon/src/hub-client.ts, 关联仓落盘结果回报方法, 2026-10-10-workspec-maintenance)
       - removePid
       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
       - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)

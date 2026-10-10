@@ -166,6 +166,8 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "trigger_machine_sillyspec_ghost_cleanup",
     "trigger_machine_sillyspec_tombstone_cleanup",
     "compare_machine_sillyspec_conflict",
+    # machines（2026-10-10-workspec-maintenance task-03：关联仓落盘结果回报）
+    "report_linked_repos_sync_result",
     "delete_machine",
     # runtimes（拆前 #17-21）
     "get_runtime",

@@ -3074,6 +3074,331 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/linked-repos": {
+      "get": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "List Linked Repos",
+        "description": "列出工作区关联仓（成员视角含 my_path；状态摘要由 task-03 接管填充）。",
+        "operationId": "list_linked_repos_api_workspaces__workspace_id__linked_repos_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LinkedRepoOut"
+                  },
+                  "title": "Response List Linked Repos Api Workspaces  Workspace Id  Linked Repos Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Create Linked Repo",
+        "description": "登记关联仓（owner/admin）。重名 409。",
+        "operationId": "create_linked_repo_api_workspaces__workspace_id__linked_repos_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkedRepoCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedRepoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}": {
+      "patch": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Update Linked Repo",
+        "description": "编辑共享字段（owner/admin；name 不可改，见 schema 注）。",
+        "operationId": "update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkedRepoUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedRepoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Delete Linked Repo",
+        "description": "删除关联仓（owner/admin；成员路径与落盘状态级联清理）。",
+        "operationId": "delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}/my-path": {
+      "put": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Save My Path",
+        "description": "成员级本机路径 upsert（成员本人；path=null 清除）。",
+        "operationId": "save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MyPathUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkedRepoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/linked-repos/sync": {
+      "post": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Trigger Linked Repos Sync",
+        "description": "「立即同步」：向当前成员绑定 daemon 发请求-响应 RPC（受理即返，FR-05）。\n\n无入参（幂等触发，POST 空 body）；结果经 daemon REST 回报端点落库\n（唯一通道），GET 轮询可见；老 daemon method_not_found → 状态层\nskipped(需升级) 且本端点不报错（FR-07）。",
+        "operationId": "trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Trigger Linked Repos Sync Api Workspaces  Workspace Id  Linked Repos Sync Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/explorer/tree": {
       "get": {
         "tags": [
@@ -13553,6 +13878,62 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SillySpecConflictCompareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/machines/{instance_id}/linked-repos-sync-result": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Report Linked Repos Sync Result",
+        "description": "daemon 回报关联仓双落盘结果（归属校验同裁决端点；宽容收数）。\n\n未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。",
+        "operationId": "report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkedRepoSyncResultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Report Linked Repos Sync Result Api Daemon Machines  Instance Id  Linked Repos Sync Result Post"
                 }
               }
             }
@@ -51079,6 +51460,236 @@
         "title": "LibraryView",
         "description": "技能库三源聚合视图（``GET /api/skills/library``，task-03）。"
       },
+      "LinkedRepoCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.\\-]+$",
+            "title": "Name"
+          },
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "LinkedRepoCreate",
+        "description": "登记关联仓（owner/admin）。name 对齐 sillyspec 子项目名规则。"
+      },
+      "LinkedRepoOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
+          },
+          "my_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Path"
+          },
+          "sync_status_summary": {
+            "items": {
+              "$ref": "#/components/schemas/SyncStateBrief"
+            },
+            "type": "array",
+            "title": "Sync Status Summary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "LinkedRepoOut"
+      },
+      "LinkedRepoSyncResultItem": {
+        "properties": {
+          "repo_name": {
+            "type": "string",
+            "title": "Repo Name"
+          },
+          "layer": {
+            "type": "string",
+            "enum": [
+              "projects_yaml",
+              "repos_registry"
+            ],
+            "title": "Layer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "skipped",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "repo_name",
+          "layer",
+          "status"
+        ],
+        "title": "LinkedRepoSyncResultItem"
+      },
+      "LinkedRepoSyncResultRequest": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedRepoSyncResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id"
+        ],
+        "title": "LinkedRepoSyncResultRequest"
+      },
+      "LinkedRepoUpdate": {
+        "properties": {
+          "repo_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
+          }
+        },
+        "type": "object",
+        "title": "LinkedRepoUpdate",
+        "description": "编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生\n落盘产物错位——design 数据模型节）。"
+      },
       "ListDirRequest": {
         "properties": {
           "path": {
@@ -54083,6 +54694,25 @@
         ],
         "title": "ModelUsageItemRead",
         "description": "终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。\n\ndaemon interactive 从 SDK ``result.modelUsage`` 逐模型拆行（camelCase→snake）；\n``api_requests`` 为按消耗占比的分摊估算（run 级精确值在顶层 api_requests，\ndesign §2 D-01）。batch 侧为 run 级单行。"
+      },
+      "MyPathUpdate": {
+        "properties": {
+          "path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          }
+        },
+        "type": "object",
+        "title": "MyPathUpdate",
+        "description": "成员级本机路径 upsert（成员本人；path=None 清除）。"
       },
       "NotificationListResponse": {
         "properties": {
@@ -70743,6 +71373,57 @@
         ],
         "title": "SuspendBatchResponse",
         "description": "POST /sessions/suspend-batch 响应（task-05 provides 契约）.\n\n``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的\n活跃轮 run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话\nno-op 计 0。"
+      },
+      "SyncStateBrief": {
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Machine Id"
+          },
+          "layer": {
+            "type": "string",
+            "enum": [
+              "projects_yaml",
+              "repos_registry"
+            ],
+            "title": "Layer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "skipped",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "synced_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Synced At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "machine_id",
+          "layer",
+          "status",
+          "synced_at"
+        ],
+        "title": "SyncStateBrief",
+        "description": "单层落盘状态摘要（GET 聚合视图用；task-03 填充）。"
       },
       "SystemStatusResponse": {
         "properties": {
