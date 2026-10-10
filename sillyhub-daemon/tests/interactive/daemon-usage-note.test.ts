@@ -1,12 +1,16 @@
 // tests/interactive/daemon-usage-note.test.ts
-// 2026-09-15-background-task-permission-lockout（task-10 / FR-04）：daemon.onTurnResult
-// 的 [USAGE_NOTE] 标注行两态——本 run 收口时会话仍有存活后台任务 → 追加一行
-// stdout 标注（后台任务消耗会按快照差分记给本 run）；注册表空 → 不追加。
+// 2026-10-10-usage-note-to-daemon-log：daemon.onTurnResult 的用量归属标注两态——
+// 本 run 收口时会话仍有存活后台任务 → 不再向会话消息流发 [USAGE_NOTE] 行（每轮
+// 必触发、用户侧纯噪音），改为 daemon 结构化日志 run_cost_may_include_bg_tasks
+// （含本轮 cost 差分；SDK 会话级累计快照差分的归属误导仅日志留痕，不改数值）；
+// 注册表空 → 无行无日志。
 //
 // harness 模板沿用 tests/daemon-interactive-bridge.test.ts（mock client/SessionManager
-// + Daemon 构造，仅断言桥接行为）。
+// + Daemon 构造，仅断言桥接行为）；日志断言经 vi.spyOn(console, 'info')——daemon
+// createLogger 的 info 落 console.info，args[0] 为 `[daemon.<事件名>]`、其余为
+// `key=value` 片段，按事件名过滤（构造期还有其它 info 日志）。
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Daemon } from '../../src/daemon.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { SessionManager } from '../src/interactive/session-manager.js';
@@ -110,41 +114,63 @@ function resultSuccess(): Record<string, unknown> {
   };
 }
 
-describe('onTurnResult [USAGE_NOTE] 标注行（FR-04）', () => {
-  it('hasLiveBackgroundTasks=true → submitMessages 追加一条 [USAGE_NOTE] stdout 行（挂收口 runId）', async () => {
+function hasUsageNoteLine(client: ReturnType<typeof createMockClient>): boolean {
+  return client.submitMessages.mock.calls.some(([, , , msgs]) =>
+    (msgs as Record<string, unknown>[]).some(
+      (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
+    ),
+  );
+}
+
+function noteLogCalls(infoSpy: ReturnType<typeof spyConsoleInfo>): unknown[][] {
+  return infoSpy.mock.calls.filter((c) => c[0] === '[daemon.run_cost_may_include_bg_tasks]');
+}
+
+function spyConsoleInfo() {
+  return vi.spyOn(console, 'info').mockImplementation(() => {});
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('onTurnResult 用量归属标注（run_cost_may_include_bg_tasks 日志）', () => {
+  it('hasLive=true → 无 [USAGE_NOTE] 消息流行，改发结构化日志（挂收口 session/run + cost 差分）', async () => {
+    const infoSpy = spyConsoleInfo();
     const sm = createMockSessionManager({}, true);
     const { daemon, client } = buildDaemon(sm);
-    await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
-    // submitMessages(leaseId, claimToken, runId, [msg])——USAGE_NOTE 行挂收口 runId。
-    const noteCalls = client.submitMessages.mock.calls.filter(([, , , msgs]) =>
-      (msgs as Record<string, unknown>[]).some(
-        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
-      ),
-    );
-    expect(noteCalls.length).toBeGreaterThanOrEqual(1);
-    const [, , rid, msgs] = noteCalls[0]! as unknown as [
-      string,
-      string,
-      string,
-      Record<string, unknown>[],
-    ];
-    expect(rid).toBe('run-1'); // 挂正在收口的 run
-    const line = msgs.find(
-      (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
-    )!;
-    expect(line['channel']).toBe('stdout');
-    expect(line['content']).toContain('后台任务消耗');
+    const result = resultSuccess();
+    result['total_cost_usd'] = 24.1;
+    await daemon.onTurnResult('sess-1', 'run-1', result as never);
+    expect(hasUsageNoteLine(client)).toBe(false);
+    const logs = noteLogCalls(infoSpy);
+    expect(logs.length).toBe(1);
+    const parts = (logs[0]!.slice(1) as string[]).join(' ');
+    expect(parts).toContain('session_id=sess-1');
+    expect(parts).toContain('run_id=run-1');
+    expect(parts).toContain('cost_delta_usd=24.1');
   });
 
-  it('hasLiveBackgroundTasks=false → 无 [USAGE_NOTE] 行（行为与现状一致）', async () => {
+  it('hasLive=true 且 total_cost_usd 缺失 → 日志 cost_delta_usd=null，终态照常上报', async () => {
+    const infoSpy = spyConsoleInfo();
+    const sm = createMockSessionManager({}, true);
+    const { daemon, client } = buildDaemon(sm);
+    const result = resultSuccess();
+    delete result['total_cost_usd'];
+    await daemon.onTurnResult('sess-1', 'run-1', result as never);
+    const logs = noteLogCalls(infoSpy);
+    expect(logs.length).toBe(1);
+    const parts = (logs[0]!.slice(1) as string[]).join(' ');
+    expect(parts).toContain('cost_delta_usd=null');
+    expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('hasLive=false → 无 [USAGE_NOTE] 行且无该日志（行为与现状一致）', async () => {
+    const infoSpy = spyConsoleInfo();
     const sm = createMockSessionManager({}, false);
     const { daemon, client } = buildDaemon(sm);
     await daemon.onTurnResult('sess-1', 'run-1', resultSuccess() as never);
-    const hasNote = client.submitMessages.mock.calls.some(([, , , msgs]) =>
-      (msgs as Record<string, unknown>[]).some(
-        (m) => typeof m['content'] === 'string' && (m['content'] as string).startsWith('[USAGE_NOTE]'),
-      ),
-    );
-    expect(hasNote).toBe(false);
+    expect(hasUsageNoteLine(client)).toBe(false);
+    expect(noteLogCalls(infoSpy).length).toBe(0);
   });
 });

@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  交互会话里 run 收口时若有存活后台任务，daemon 会向会话消息流追加 [USAGE_NOTE] 标注行（daemon.ts FR-04），每轮必触发、对用户是纯噪音且无法量化归属，需要移除会话内提示、排障信息降级到 daemon
+  日志。
+
+  成功标准：
+
+  - hasLiveBackgroundTasks=true 的 run 收口不再向 submitMessages 发 [USAGE_NOTE] 行
+
+  - 排障意图保留：daemon 结构化日志记录存活后台任务标记 + 本轮 cost 差分（cost_delta_usd）
+
+  - total_cost_usd 缺失时日志安全降级（字段 null，不抛错）
+
+  - daemon-usage-note.test.ts 改写为两态断言（无消息流行 + 有日志），先红后绿
+
+  - 相关面（daemon-interactive-bridge 等）合跑通过 + tsc --noEmit 0 错
+autopilot: false
+baseline_commit: 527482182d0afd0979de6db774af3fd79c102efa
+updatedAt: '2026-10-10T02:12:10.715Z'
+baseline_sha256: dff7e849782aee1bd214eab62012323fdf52893e128dd6bea7ba70eebb7f8ae8
+spec_approved: true
+spec_approved_at: '2026-10-10T02:12:10.713Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+
