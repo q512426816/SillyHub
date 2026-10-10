@@ -367,6 +367,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     sessionFork: 'native',
   },
   codex: {
+    // 2026-10-10-all-engines-mcp-injection task-06（D-011@v1）：机制就绪待复评——
+    // SPIKE-01 未能实测（宿主 codex 0.162.0 缺 win32 平台二进制且网络限断无法修复，
+    // 见 changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md 复评 SOP）；
+    // 消费通道已交付（codex-settings mergeCodexMcpToml / writeCodexMcpServers +
+    // driver start 写 CODEX_HOME config.toml [mcp_servers.*]，单测绿）。旧注释
+    // 「driver.ts codex 对 mcpServers 仅暂存不消费」已被 task-06 推翻。翻值 =
+    // 复测通过后本键 false→true + 重跑 gen-provider-caps。
     resume: true,
     mcp: false,
     multimodal: false,
@@ -393,6 +400,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
   // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
   pi: {
+    // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
+    // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
+    // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
+    // driver 版本门控写盘），翻值归 task-08（false→true + gen-provider-caps
+    // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
+    // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
+    // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
     resume: true,
     mcp: false,
     multimodal: true,
@@ -417,6 +431,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
   // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
   cursor: {
+    // 2026-10-10-all-engines-mcp-injection task-07（D-003@v1 / D-011@v1）：留档
+    // 分支——SPIKE-02 未能实测（宿主无 cursor-agent CLI 且网络限断无法安装，
+    // spike-cursor-mcp.md）。坑点：上游反馈 headless 模式 MCP 工具审批未实现
+    //（工具调用可能挂起，未经本地实测验证）；CLI 无 per-session MCP 配置通道，
+    // 全局 ~/.cursor/mcp.json 与项目级 .cursor/mcp.json 均为禁写落点（宿主
+    // 资产 / workspace 污染）。复评条件：cursor-agent 可安装后按
+    // spike-cursor-mcp.md SOP 实测审批行为与落点隔离，两项通过才翻值。
     resume: true,
     mcp: false,
     multimodal: false,

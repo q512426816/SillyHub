@@ -19,7 +19,11 @@
  *
  * 忽略的 StartOptions（无对应 CLI 通道，docblock 声明）：
  *   - manualApproval / askUserOnly（permission_dialog=false，D-003@v2）
- *   - mcpServers（CLI 无 per-session --mcp-config，D-008@v1）
+ *   - mcpServers（2026-10-10-all-engines-mcp-injection task-07 留档：CLI 无
+ *     per-session MCP 配置通道且 headless 审批上游坑未解——caps cursor.mcp=false，
+ *     实测证据/坑点/复评条件见 providers.ts cursor 注释块与
+ *     changes/2026-10-10-all-engines-mcp-injection/spike-cursor-mcp.md
+ *     （原 D-008@v1 口径由本次留档取代））
  *   - blocks 附件（multimodal=false）
  *
  * E7：handle 含子进程资源，不可序列化、禁止落盘。
@@ -93,6 +97,8 @@ export class CursorExecutableNotFoundError extends Error {
  * cursor 专属启动选项（经 CreateSessionInput 传入，值来自 daemon `_agentPaths.get('cursor')`）。
  *
  * 忽略（无对应 CLI 通道，见文件头）：manualApproval / askUserOnly / mcpServers / blocks。
+ * mcpServers 留档细节（task-07）：caps.mcp=false 期不透传，翻值前需先过
+ * spike-cursor-mcp.md 复评 SOP。
  */
 export interface CursorDriverStartOptions extends InteractiveDriverStartOptions {
   /** cursor-agent 可执行入口（.cmd/.ps1/或直 exe；Windows 下经 resolveWindowsCmdShim 解析）。 */
