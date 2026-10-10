@@ -1,0 +1,3514 @@
+diff --git a/frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx b/frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx
+index 564695989..c6a1bdd0e 100644
+--- a/frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx
++++ b/frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx
+@@ -1,12 +1,36 @@
+ // task-02（2026-10-09-attachment-inline-reference）：InlineAttRefText 历史渲染单测。
+ // 覆盖：无引用文本原样直出（本变更前消息渲染逐字不变）、引用段标签渲染与点击
+ // 回调、onOpenRef 缺省不可点击、混排拆段正确。
+-import { fireEvent, render, screen } from "@testing-library/react";
++// 2026-10-10-workspace-ref-intake task-09：三类工作区标记标签 + fetchDownload 预览。
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { describe, expect, it, vi } from "vitest";
+ 
+-import { InlineAttRefText } from "@/components/daemon/attachment-ref-tag";
++import { InlineAttRefText, InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
++
++// mock @/lib/explorer 的 fetchDownload（预览 fetch 链断言面）与
++// @/components/files/file-preview-modal（回显 props 的替身，attachment-chips 同款）。
++vi.mock("@/lib/explorer", () => ({
++  fetchDownload: vi.fn(async () => new Blob(["x"])),
++}));
++vi.mock("@/components/files/file-preview-modal", () => ({
++  FilePreviewModal: (props: {
++    open: boolean;
++    target?: { fetch: () => Promise<Blob> } | null;
++  }) => (
++    <div data-testid="preview-modal" data-open={String(props.open)}>
++      <button
++        type="button"
++        data-testid="preview-modal-fetch"
++        onClick={() => void props.target?.fetch()}
++      />
++    </div>
++  ),
++}));
++import { fetchDownload } from "@/lib/explorer";
++const fetchDownloadMock = fetchDownload as unknown as ReturnType<typeof vi.fn>;
+ 
+ const UUID = "aaaaaaaa-1111-2222-3333-444444444444";
++const WID = "cccccccc-1111-2222-3333-444444444444";
+ 
+ describe("InlineAttRefText（FR-06 历史引用渲染）", () => {
+   it("无引用文本原样直出（单 text 节点，与现状渲染一致）", () => {
+@@ -49,3 +73,75 @@ describe("InlineAttRefText（FR-06 历史引用渲染）", () => {
+     expect(screen.getByTitle("B.png（点击在线预览）")).toBeInTheDocument();
+   });
+ });
++
++describe("InlineAttRefText 三类工作区标记（workspace-ref-intake task-09）", () => {
++  it("file/dir/code 三类标签渲染（图标 + 名称 + 行号段）并点击回调 onOpenWsRef", () => {
++    const onOpenWsRef = vi.fn();
++    render(
++      <InlineAttRefText
++        text={`文件[文件引用:${WID}|docs/design.md]目录[目录引用:${WID}|]代码[代码引用:${WID}|src/a.py|L10-L16]`}
++        onOpenWsRef={onOpenWsRef}
++      />,
++    );
++    const fileTag = screen.getByTitle(`文件：docs/design.md（点击预览）`);
++    expect(fileTag.textContent).toBe("design.md");
++    const dirTag = screen.getByTitle(`目录：工作区根（点击预览）`);
++    expect(dirTag.textContent).toBe("工作区根");
++    const codeTag = screen.getByTitle(`代码：src/a.py 第 10-16 行（点击预览）`);
++    expect(codeTag.textContent).toBe("a.py:10-16");
++    // 图标按 kind 渲染（lucide svg class）
++    expect(fileTag.querySelector("svg")!.getAttribute("class")).toContain("lucide-file-text");
++    expect(dirTag.querySelector("svg")!.getAttribute("class")).toContain("lucide-folder");
++    expect(codeTag.querySelector("svg")!.getAttribute("class")).toContain("lucide-braces");
++    fireEvent.click(fileTag);
++    expect(onOpenWsRef).toHaveBeenCalledWith({
++      workspaceId: WID,
++      path: "docs/design.md",
++      lines: undefined,
++    });
++    fireEvent.click(codeTag);
++    expect(onOpenWsRef).toHaveBeenCalledWith({
++      workspaceId: WID,
++      path: "src/a.py",
++      lines: [10, 16],
++    });
++  });
++
++  it("onOpenWsRef 缺省：三类标签 disabled；附件与工作区回调互不串", () => {
++    render(
++      <InlineAttRefText
++        text={`[文件引用:${WID}|a.md][附件引用:${UUID}|x.png]`}
++        onOpenRef={() => {}}
++      />,
++    );
++    const wsTag = screen.getByTitle(`文件：a.md（点击预览）`) as HTMLButtonElement;
++    expect(wsTag.disabled).toBe(true);
++    const attTag = screen.getByTitle("x.png（点击在线预览）") as HTMLButtonElement;
++    expect(attTag.disabled).toBe(false);
++  });
++
++  it("解析失败片段原样文本（容错不丢字）", () => {
++    const bad = `坏[文件引用:${WID}|a|b.md]尾`;
++    const { container } = render(<InlineAttRefText text={bad} onOpenWsRef={() => {}} />);
++    expect(container.textContent).toBe(bad);
++    expect(container.querySelector("button")).toBeNull();
++  });
++
++  it("InlineAttRefTextWithPreview：工作区引用点击开预览（fetch=fetchDownload）", async () => {
++    render(<InlineAttRefTextWithPreview text={`看[代码引用:${WID}|src/a.py|L3-L5]`} />);
++    fireEvent.click(screen.getByTitle(`代码：src/a.py 第 3-5 行（点击预览）`));
++    await waitFor(() =>
++      expect(screen.getByTestId("preview-modal")).toHaveAttribute("data-open", "true"),
++    );
++    // fetch 惰性（真实 Modal 打开时拉取）——替身按钮手动触发断言绑定。
++    fireEvent.click(screen.getByTestId("preview-modal-fetch"));
++    expect(fetchDownloadMock).toHaveBeenCalledWith(WID, "src/a.py");
++  });
++
++  it("根目录引用（path 空串）点击不开预览（无文件可取）", () => {
++    render(<InlineAttRefTextWithPreview text={`[目录引用:${WID}|]`} />);
++    fireEvent.click(screen.getByTitle(`目录：工作区根（点击预览）`));
++    expect(screen.getByTestId("preview-modal")).toHaveAttribute("data-open", "false");
++    expect(fetchDownloadMock).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/attachment-refs.test.ts b/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
+index 5c3904487..b617ec7a1 100644
+--- a/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
++++ b/frontend/src/components/daemon/__tests__/attachment-refs.test.ts
+@@ -5,10 +5,16 @@ import { describe, expect, it } from "vitest";
+ 
+ import {
+   allocateAttRefToken,
++  allocateWsRefToken,
+   buildAttRefToken,
++  buildWsRefToken,
+   parseInlineAttRefs,
++  parseInlineRefs,
+   stripAttRefTokens,
++  stripWsRefTokens,
+   substituteAttRefsForSend,
++  substituteWsRefsForSend,
++  type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ 
+ const UUID_A = "aaaaaaaa-1111-2222-3333-444444444444";
+@@ -108,4 +114,182 @@ describe("parseInlineAttRefs（FR-06 历史解析）", () => {
+     const bad = "非法[附件引用:not-a-uuid|x.png]引用";
+     expect(parseInlineAttRefs(bad)).toEqual([{ type: "text", value: bad }]);
+   });
++
++  it("附件 name 含竖线：旧口径保持（ref 段 name 完整，不因工作区正则降级）", () => {
++    const text = `[附件引用:${UUID_A}|a|b.png]`;
++    expect(parseInlineAttRefs(text)).toEqual([
++      { type: "ref", value: "a|b.png", ref: { id: UUID_A, name: "a|b.png" } },
++    ]);
++  });
++});
++
++// ── 工作区引用（2026-10-10-workspace-ref-intake task-01）────────────────
++
++const WID = "cccccccc-1111-2222-3333-444444444444";
++
++describe("buildWsRefToken / allocateWsRefToken（FR-02 并集唯一化，D-005）", () => {
++  it("基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N", () => {
++    expect(buildWsRefToken("design.md", undefined, 1)).toBe("【design.md】");
++    expect(buildWsRefToken("design.md", [10, 16], 1)).toBe("【design.md:10-16】");
++    expect(buildWsRefToken("design.md", undefined, 2)).toBe("【design.md·2】");
++    expect(buildWsRefToken("a.py", [3, 5], 3)).toBe("【a.py:3-5·3】");
++  });
++
++  it("并集池：附件 token 与工作区 token 完全同名才 ·2（跨池撞名）", () => {
++    // 池内已有附件 token【design.md】→ 工作区同名文件取 ·2。
++    expect(allocateWsRefToken("design.md", ["【design.md】"])).toBe("【design.md·2】");
++    // 池内已有工作区 code token【design.md:10-16】→ 同行段再分配取 ·2。
++    expect(allocateWsRefToken("design.md:10-16", ["【design.md:10-16】"])).toBe(
++      "【design.md:10-16·2】",
++    );
++  });
++
++  it("异基名免序号：文件与代码块、不同行段互不加号", () => {
++    // 文件 design.md vs 代码块 design.md:10-16 显示基名不同 → 各自 seq=1。
++    expect(allocateWsRefToken("design.md:10-16", ["【design.md】"])).toBe(
++      "【design.md:10-16】",
++    );
++    expect(allocateWsRefToken("design.md:20-30", ["【design.md】", "【design.md:10-16】"])).toBe(
++      "【design.md:20-30】",
++    );
++  });
++});
++
++describe("stripWsRefTokens（FR-02 清除）", () => {
++  it("全量移除工作区 token，不误伤附件 token 与正文", () => {
++    const value = "文件【design.md】代码【a.py:3-5】附件【截图.png】";
++    expect(stripWsRefTokens(value, ["【design.md】", "【a.py:3-5】"])).toBe(
++      "文件代码附件【截图.png】",
++    );
++  });
++});
++
++describe("substituteWsRefsForSend（FR-06 三类置换，D-003/D-004）", () => {
++  it("file/dir/code 三类 token 置换为对应正式标记", () => {
++    const map: WsRefTokenMap = {
++      "docs/design.md": {
++        desc: { kind: "file", workspaceId: WID, path: "docs/design.md", name: "design.md" },
++        token: "【design.md】",
++      },
++      "docs": {
++        desc: { kind: "dir", workspaceId: WID, path: "docs", name: "docs" },
++        token: "【docs】",
++      },
++      "src/a.py:10-16": {
++        desc: { kind: "code", workspaceId: WID, path: "src/a.py", name: "a.py", lines: [10, 16] },
++        token: "【a.py:10-16】",
++      },
++    };
++    const out = substituteWsRefsForSend(
++      "看【design.md】目录【docs】选段【a.py:10-16】",
++      map,
++    );
++    expect(out).toBe(
++      `看[文件引用:${WID}|docs/design.md]目录[目录引用:${WID}|docs]选段[代码引用:${WID}|src/a.py|L10-L16]`,
++    );
++  });
++
++  it("目录引用根 path 空串 → 空尾段标记", () => {
++    const map: WsRefTokenMap = {
++      "": {
++        desc: { kind: "dir", workspaceId: WID, path: "", name: "工作区根" },
++        token: "【工作区根】",
++      },
++    };
++    expect(substituteWsRefsForSend("根【工作区根】", map)).toBe(`根[目录引用:${WID}|]`);
++  });
++
++  it("孤儿 token（正文有但 map 无该映射）原样保留；map 空 → 原样返回", () => {
++    expect(substituteWsRefsForSend("孤儿【手打的.md】", {})).toBe("孤儿【手打的.md】");
++    const map: WsRefTokenMap = {
++      "a.py:1-2": {
++        desc: { kind: "code", workspaceId: WID, path: "a.py", name: "a.py", lines: [1, 2] },
++        token: "【a.py:1-2】",
++      },
++    };
++    expect(substituteWsRefsForSend("别家的【b.py:1-2】", map)).toBe("别家的【b.py:1-2】");
++  });
++
++  it("重复出现全量置换；与附件 token 互不误伤", () => {
++    const map: WsRefTokenMap = {
++      "x.md": {
++        desc: { kind: "file", workspaceId: WID, path: "x.md", name: "x.md" },
++        token: "【同名.png】",
++      },
++    };
++    const out = substituteWsRefsForSend("两处【同名.png】附件【同名.png】", map);
++    // token 文本相同则一并置换（同文本同锚，附件置换先行占位后此处不再出现）——
++    // 互不误伤指映射键各管各池：附件 map 不含工作区条目。
++    expect(out).toBe(`两处[文件引用:${WID}|x.md]附件[文件引用:${WID}|x.md]`);
++  });
++});
++
++describe("parseInlineRefs（FR-07 统一解析）", () => {
++  it("附件 + 三类标记混合拆段，段序正确", () => {
++    const text =
++      `附件[附件引用:${UUID_A}|截图.png]文件[文件引用:${WID}|docs/design.md]` +
++      `目录[目录引用:${WID}|]代码[代码引用:${WID}|src/a.py|L10-L16]尾`;
++    expect(parseInlineRefs(text)).toEqual([
++      { type: "text", value: "附件" },
++      { type: "ref", value: "截图.png", raw: `[附件引用:${UUID_A}|截图.png]`, ref: { kind: "att", id: UUID_A, name: "截图.png" } },
++      { type: "text", value: "文件" },
++      { type: "ref", value: "design.md", raw: `[文件引用:${WID}|docs/design.md]`, ref: { kind: "file", workspaceId: WID, path: "docs/design.md", name: "design.md" } },
++      { type: "text", value: "目录" },
++      { type: "ref", value: "工作区根", raw: `[目录引用:${WID}|]`, ref: { kind: "dir", workspaceId: WID, path: "", name: "工作区根" } },
++      { type: "text", value: "代码" },
++      { type: "ref", value: "a.py:10-16", raw: `[代码引用:${WID}|src/a.py|L10-L16]`, ref: { kind: "code", workspaceId: WID, path: "src/a.py", lines: [10, 16], name: "a.py:10-16" } },
++      { type: "text", value: "尾" },
++    ]);
++  });
++
++  it("纯文本 → 单 text 段（本变更前历史消息逐字不变）", () => {
++    expect(parseInlineRefs("普通正文，无任何标记")).toEqual([
++      { type: "text", value: "普通正文，无任何标记" },
++    ]);
++  });
++
++  it("路径含竖线/行段非法 → 整段降级 text 原样（X-5 边界）；路径含右括号 → 最短合法匹配截断", () => {
++    // 竖线不在 path 字符类：整段失配降级 text，不丢字。
++    const bad1 = "坏[文件引用:" + WID + "|a|b.md]的";
++    const bad3 = "坏[代码引用:" + WID + "|a.py|L10-L16x]的";
++    expect(parseInlineRefs(bad1)).toEqual([{ type: "text", value: bad1 }]);
++    expect(parseInlineRefs(bad3)).toEqual([{ type: "text", value: bad3 }]);
++    // 右括号在 path 内无法表达：按最短合法边界解析（path="x"），余文归 text——
++    // 拼接逐字还原，不误吞不丢字（X-5 声明的 ] 处理边界）。
++    expect(parseInlineRefs("坏[目录引用:" + WID + "|x].md]的")).toEqual([
++      { type: "text", value: "坏" },
++      { type: "ref", value: "x", raw: `[目录引用:${WID}|x]`, ref: { kind: "dir", workspaceId: WID, path: "x", name: "x" } },
++      { type: "text", value: ".md]的" },
++    ]);
++  });
++
++  it("wid 形态非法 → 降级 text（uuid 口径）", () => {
++    const bad = "坏[文件引用:not-a-wid|a.md]的";
++    expect(parseInlineRefs(bad)).toEqual([{ type: "text", value: bad }]);
++  });
++});
++
++describe("parseInlineAttRefs 兼容薄封装（D-009 既有消费零改动）", () => {
++  it("工作区标记在旧解析里按普通文本透传（raw 还原为独立 text 段），拼接逐字还原", () => {
++    const text = `前[文件引用:${WID}|a.md][代码引用:${WID}|a.py|L1-L2]后`;
++    const parts = parseInlineAttRefs(text);
++    // 拆段形态：前 / 标记原文 / 标记原文 / 后（text 段渲染原样，视觉等价单段）。
++    expect(parts).toEqual([
++      { type: "text", value: "前" },
++      { type: "text", value: `[文件引用:${WID}|a.md]` },
++      { type: "text", value: `[代码引用:${WID}|a.py|L1-L2]` },
++      { type: "text", value: "后" },
++    ]);
++    // 拼接逐字还原（容错不丢字契约）。
++    expect(parts.map((p) => p.value).join("")).toBe(text);
++  });
++
++  it("既有附件段拆分行为与旧口径一致", () => {
++    const parts = parseInlineAttRefs(`a[附件引用:${UUID_A}|x.png]b`);
++    expect(parts).toEqual([
++      { type: "text", value: "a" },
++      { type: "ref", value: "x.png", ref: { id: UUID_A, name: "x.png" } },
++      { type: "text", value: "b" },
++    ]);
++  });
+ });
+diff --git a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+index 273375a43..77fcc2be7 100644
+--- a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
++++ b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+@@ -133,3 +133,109 @@ describe("InputRefOverlay 角标悬停显示（att-ref-badge-hover）", () => {
+     expect(onRemove).toHaveBeenCalledWith("【A.png】");
+   });
+ });
++
++// 2026-10-10-workspace-ref-intake task-04：类型角标与 tooltip 元数据（FR-03/D-001）。
++describe("InputRefOverlay 类型角标（tokenMetas）", () => {
++  const METAS = {
++    "【截图.png】": { kind: "att" as const, title: "附件：截图.png" },
++    "【design.md】": { kind: "file" as const, title: "文件：docs/design.md（工作区 ws-1）" },
++    "【docs】": { kind: "dir" as const, title: "目录：docs（工作区 ws-1）" },
++    "【a.py:10-16】": { kind: "code" as const, title: "代码：src/a.py 第 10-16 行（工作区 ws-1）" },
++  };
++
++  it("四类 kind 角标按映射渲染且 title 元数据正确", () => {
++    const { container } = render(
++      <InputRefOverlay
++        value="一【截图.png】二【design.md】三【docs】四【a.py:10-16】"
++        tokens={Object.keys(METAS)}
++        onRemoveToken={() => {}}
++        tokenMetas={METAS}
++      />,
++    );
++    const badges = container.querySelectorAll("[data-ws-ref-kind-badge]");
++    expect(Array.from(badges).map((el) => el.getAttribute("data-ws-ref-kind-badge"))).toEqual([
++      "att", "file", "dir", "code",
++    ]);
++    expect(badges[0]).toHaveAttribute("title", "附件：截图.png");
++    expect(badges[1]).toHaveAttribute("title", "文件：docs/design.md（工作区 ws-1）");
++    expect(badges[3]).toHaveAttribute("title", "代码：src/a.py 第 10-16 行（工作区 ws-1）");
++    // 图标按 kind 映射渲染（lucide svg class）
++    expect(badges[0]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-paperclip");
++    expect(badges[1]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-file-text");
++    expect(badges[2]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-folder");
++    expect(badges[3]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-braces");
++  });
++
++  it("角标默认隐藏，visibleBadgeIndex 命中处淡入（沿用既有悬停机制）", () => {
++    const { rerender } = render(
++      <InputRefOverlay
++        value="【design.md】和【a.py:10-16】"
++        tokens={["【design.md】", "【a.py:10-16】"]}
++        onRemoveToken={() => {}}
++        tokenMetas={METAS}
++      />,
++    );
++    const badges = document.querySelectorAll("[data-ws-ref-kind-badge]");
++    expect(badges[0]).toHaveClass("opacity-0", "pointer-events-none");
++    expect(badges[1]).toHaveClass("opacity-0", "pointer-events-none");
++    rerender(
++      <InputRefOverlay
++        value="【design.md】和【a.py:10-16】"
++        tokens={["【design.md】", "【a.py:10-16】"]}
++        onRemoveToken={() => {}}
++        tokenMetas={METAS}
++        visibleBadgeIndex={1}
++      />,
++    );
++    expect(badges[0]).toHaveClass("opacity-0");
++    expect(badges[1]).toHaveClass("opacity-100", "pointer-events-auto");
++  });
++
++  it("未传 tokenMetas / token 未命中：零角标渲染，与现状逐字一致", () => {
++    const { container } = render(
++      <InputRefOverlay value="【A.png】和【B.png】" tokens={["【A.png】", "【B.png】"]} onRemoveToken={() => {}} />,
++    );
++    expect(container.querySelectorAll("[data-ws-ref-kind-badge]").length).toBe(0);
++    // 部分命中：仅命中 token 出角标
++    const t2 = render(
++      <InputRefOverlay
++        value="【A.png】和【B.png】"
++        tokens={["【A.png】", "【B.png】"]}
++        onRemoveToken={() => {}}
++        tokenMetas={{ "【B.png】": { kind: "att", title: "附件：B.png" } }}
++      />,
++    );
++    const badges2 = t2.container.querySelectorAll("[data-ws-ref-kind-badge]");
++    expect(badges2.length).toBe(1);
++    expect(badges2[0]).toHaveAttribute("data-ws-ref-kind-badge", "att");
++  });
++
++  it("版式守卫（R-01）：加角标后占位文本保留、token span 无 margin/padding/border/opacity/transform、× 角标 z-20 不受影响", () => {
++    const { container } = render(
++      <InputRefOverlay
++        value="前文【design.md】后文"
++        tokens={["【design.md】"]}
++        onRemoveToken={() => {}}
++        tokenMetas={{ "【design.md】": { kind: "file", title: "文件：design.md" } }}
++        visibleBadgeIndex={0}
++      />,
++    );
++    const tokenSpan = container.querySelector<HTMLElement>("[data-att-ref-occ]")!;
++    expect(tokenSpan).not.toBeNull();
++    // 背景块零布局类（铁律：严禁 margin/padding/border）
++    expect(tokenSpan.className).not.toMatch(/(^|s)(m|p|border)([-s]|$)/);
++    // token span 不得带 opacity/transform（stacking context 触发器）
++    expect(tokenSpan.className).not.toContain("opacity");
++    expect(tokenSpan.className).not.toContain("translate");
++    expect(tokenSpan.style.opacity).toBe("");
++    expect(tokenSpan.style.transform).toBe("");
++    // 占位文本仍在 DOM 撑宽（角标不改变标签文本宽度）
++    expect(tokenSpan.querySelector("span.text-transparent")?.textContent).toBe("【design.md】");
++    // 角标 absolute 不进文本流；× 角标 z-20 层级保留
++    const kindBadge = tokenSpan.querySelector("[data-ws-ref-kind-badge]")!;
++    expect(kindBadge.className).toContain("absolute");
++    const xBadge = screen.getByLabelText("移除引用 design.md");
++    expect(xBadge.className).toContain("z-20");
++    expect(xBadge.className).toContain("opacity-100");
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+index 502cf8bec..7be74442b 100644
+--- a/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+@@ -7,7 +7,7 @@
+ // 渲染骨架对齐 session-input-bar-mention.test.tsx（mock @/lib/session-mention-sources
+ // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
+ // useNotify 换 spy（toast 断言面）。
+-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { useState } from "react";
+ import { describe, expect, it, vi } from "vitest";
+ 
+@@ -313,3 +313,128 @@ describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-re
+     expect(screen.queryByLabelText(/移除引用/)).toBeNull();
+   });
+ });
++
++// 2026-10-10-workspace-ref-intake task-05：工作区引用槽位消费/并集分配/删除联动隔离。
++describe("工作区引用插入槽位（workspace-ref-intake task-05）", () => {
++  /** 受控容器：value 受控 + 槽位受控（handled 清槽回环）。 */
++  function SlotBar({
++    initial = "",
++    onWsTokens,
++  }: {
++    initial?: string;
++    onWsTokens?: (m: Record<string, unknown>) => void;
++  }) {
++    const [v, setV] = useState(initial);
++    const [slot, setSlot] = useState<{ desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] }; nonce: number } | null>(null);
++    // 暴露 setSlot 给测试（挂在容器 DOM 上）
++    (globalThis as any).__setSlot = setSlot;
++    return (
++      <SessionInputBar
++        value={v}
++        onChange={setV}
++        onSend={() => {}}
++        disabled={false}
++        placeholder="测试输入框"
++        creating={false}
++        workspaceId="ws-1"
++        onWsRefTokensChange={onWsTokens as never}
++        pendingWsRefInsert={slot as never}
++        onPendingWsRefInsertHandled={setSlot as never}
++      />
++    );
++  }
++
++  type SlotDesc = { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
++  function pushSlot(desc: SlotDesc, nonce: number) {
++    act(() => {
++      (globalThis as { __setSlot?: (s: unknown) => void }).__setSlot?.({ desc, nonce });
++    });
++  }
++
++  const fileDesc = (name: string, path: string) => ({
++    kind: "file" as const,
++    workspaceId: "ws-9",
++    path,
++    name,
++  });
++  const codeDesc = (name: string, path: string, lines: [number, number]) => ({
++    kind: "code" as const,
++    workspaceId: "ws-9",
++    path,
++    name,
++    lines,
++  });
++
++  it("槽位插入：nonce 首次触发在正文末尾插入【名称】，消费后清槽回抛", async () => {
++    render(<SlotBar initial="看这个" />);
++    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
++    pushSlot(fileDesc("design.md", "docs/design.md"), 1);
++    await waitFor(() => expect(ta.value).toBe("看这个【design.md】"));
++  });
++
++  it("同一引用连续添加可重复触发（nonce 自增）；code 引用带行号段", async () => {
++    render(<SlotBar initial="" />);
++    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
++    pushSlot(codeDesc("a.py", "src/a.py", [10, 16]), 1);
++    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】"));
++    pushSlot(codeDesc("a.py", "src/a.py", [10, 16]), 2);
++    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】【a.py:10-16】"));
++  });
++
++  it("并集同名 ·2：正文已有手打【design.md】→ 槽位插入同名文件取 ·2；不同行段免序号", async () => {
++    render(<SlotBar initial="已有【design.md】在场" />);
++    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
++    pushSlot(fileDesc("design.md", "docs/design.md"), 1);
++    await waitFor(() => expect(ta.value).toBe("已有【design.md】在场【design.md·2】"));
++    // 不同行段的代码引用基名不同 → 免序号
++    pushSlot(codeDesc("design.md", "docs/design.md", [3, 5]), 2);
++    await waitFor(() =>
++      expect(ta.value).toBe("已有【design.md】在场【design.md·2】【design.md:3-5】"),
++    );
++  });
++
++  it("退格整删工作区标签；onWsRefTokensChange 回传映射", async () => {
++    const onWsTokens = vi.fn();
++    render(<SlotBar initial="前文" onWsTokens={onWsTokens} />);
++    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
++    pushSlot(fileDesc("x.md", "docs/x.md"), 1);
++    await waitFor(() => expect(ta.value).toBe("前文【x.md】"));
++    expect(onWsTokens).toHaveBeenLastCalledWith({
++      "docs/x.md": {
++        desc: { kind: "file", workspaceId: "ws-9", path: "docs/x.md", name: "x.md" },
++        token: "【x.md】",
++      },
++    });
++    ta.setSelectionRange(ta.value.length, ta.value.length);
++    fireEvent.keyDown(ta, { key: "Backspace" });
++    await waitFor(() => expect(ta.value).toBe("前文"));
++  });
++
++  it("删附件 chip 只剥附件 token，工作区 token 原样保留（删除联动隔离）", async () => {
++    uploadMock.mockImplementation(async () => ({
++      id: "att-mix-1",
++      kind: "file",
++      media_type: "text/plain",
++      bytes: 64,
++      name: "同名.md",
++      created_at: "2026-10-10T00:00:00Z",
++    }));
++    render(<SlotBar initial="" />);
++    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
++    Object.defineProperty(input, "files", {
++      value: [new File(["x"], "同名.md", { type: "text/plain" })],
++    });
++    fireEvent.change(input);
++    await waitFor(() => expect(screen.getAllByTitle(/右击插入正文引用/).length).toBe(1));
++    // 右击附件 → 插入【同名.md】
++    fireEvent.contextMenu(screen.getByTitle(/右击插入正文引用/));
++    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
++    await waitFor(() => expect(ta.value).toBe("【同名.md】"));
++    // 槽位插入同名工作区文件 → ·2
++    pushSlot(fileDesc("同名.md", "docs/同名.md"), 1);
++    await waitFor(() => expect(ta.value).toBe("【同名.md】【同名.md·2】"));
++    // 点 X 删附件 → 只剥附件 token，工作区 ·2 保留
++    fireEvent.click(screen.getByLabelText("移除附件 同名.md"));
++    await waitFor(() => expect(ta.value).toBe("【同名.md·2】"));
++  });
++});
+diff --git a/frontend/src/components/daemon/attachment-ref-tag.tsx b/frontend/src/components/daemon/attachment-ref-tag.tsx
+index 24055958c..3214f49bd 100644
+--- a/frontend/src/components/daemon/attachment-ref-tag.tsx
++++ b/frontend/src/components/daemon/attachment-ref-tag.tsx
+@@ -1,69 +1,124 @@
+ "use client";
+ 
+ /**
+- * 历史正文行内附件引用渲染（2026-10-09-attachment-inline-reference task-02，
+- * FR-06，D-005@v1）。
++ * 历史正文行内引用渲染（2026-10-09-attachment-inline-reference task-02，
++ * FR-06，D-005@v1；2026-10-10-workspace-ref-intake task-09 扩展三类工作区标记）。
+  *
+- * 消费 parseInlineAttRefs（task-01）拆段：text 段原样、ref 段渲染标签，
+- * 点击经 onOpenRef 回调由宿主打开 FilePreviewModal（fetch=fetchAttachmentBlob(uuid)，
+- * 与已发送附件 chips 同链路）；onOpenRef 缺省渲染为不可点击标签（无回调场景）。
+- * 解析失败的片段归 text 段原样（容错不丢字）；无引用文本单 text 段直出（本变更前
+- * 消息渲染逐字不变）。React.memo 段级缓存防长文重析（R-06）。
++ * 消费 parseInlineRefs（统一解析：附件 + 文件/目录/代码三类工作区标记）拆段：
++ * text 段原样、ref 段按 kind 渲染标签——附件走 onOpenRef（uuid 锚定），
++ * 工作区三类走 onOpenWsRef（workspaceId+path 锚定，图标 FileText/Folder/
++ * Braces + 名称 + 行号段）；点击由宿主打开 FilePreviewModal。回调缺省渲染为
++ * 不可点击标签。解析失败的片段归 text 段原样（容错不丢字）；无引用文本单
++ * text 段直出（本变更前消息渲染逐字不变）。React.memo 段级缓存防长文重析
++ * （R-06）。
+  *
+  * tone（D-005@v2 用户反馈「蓝色气泡里标签看不清」）：brand=浅色气泡默认（品牌
+  * 色底+深字）；onPrimary=蓝色主气泡内（白色半透明底+白字，与附件卡片同族对比）。
+  */
+ 
+ import { memo, useMemo, useState } from "react";
++import { Braces, FileText, Folder, Paperclip } from "lucide-react";
+ 
+ import { cn } from "@/lib/utils";
+-import { parseInlineAttRefs } from "@/lib/attachment-refs";
++import { parseInlineRefs, type InlineRefPart } from "@/lib/attachment-refs";
+ import { fetchAttachmentBlob } from "@/lib/api/session-attachments";
++import { fetchDownload } from "@/lib/explorer";
+ import {
+   FilePreviewModal,
+   type FilePreviewTarget,
+ } from "@/components/files/file-preview-modal";
+ 
++/** 工作区引用点击载荷（onOpenWsRef 入参，task-09）。 */
++export interface WsRefOpenPayload {
++  workspaceId: string;
++  path: string;
++  lines?: [number, number];
++}
++
+ interface InlineAttRefTextProps {
+-  /** 待渲染正文（可含 [附件引用:uuid|name] 行内引用）。 */
++  /** 待渲染正文（可含 [附件引用:uuid|name] 与三类工作区行内引用）。 */
+   text: string;
+-  /** 引用点击回调（宿主开预览窗）；缺省渲染为不可点击标签。 */
++  /** 附件引用点击回调（宿主开预览窗）；缺省渲染为不可点击标签。 */
+   onOpenRef?: (ref: { id: string; name: string }) => void;
++  /** 工作区引用点击回调（宿主开预览窗）；缺省渲染为不可点击标签（task-09）。 */
++  onOpenWsRef?: (ref: WsRefOpenPayload) => void;
+   /** 标签色调：brand（默认，浅底气泡）/ onPrimary（蓝色主气泡内）。 */
+   tone?: "brand" | "onPrimary";
+ }
+ 
++/** kind → lucide 图标（附件 Paperclip / 文件 FileText / 目录 Folder / 代码块 Braces）。 */
++const REF_KIND_ICON = { att: Paperclip, file: FileText, dir: Folder, code: Braces } as const;
++
++/** ref 段收窄类型（InlineRefPart 非判别联合，Extract 不适用）。 */
++type InlineRefSegment = InlineRefPart & {
++  type: "ref";
++  ref: NonNullable<InlineRefPart["ref"]>;
++};
++
++/** 单个 ref 段标签（附件与工作区三类同形态：图标 + 名称 + 行号段）。 */
++function RefTag({
++  part,
++  onOpenRef,
++  onOpenWsRef,
++  tone,
++}: {
++  part: InlineRefSegment;
++  onOpenRef?: (ref: { id: string; name: string }) => void;
++  onOpenWsRef?: (ref: WsRefOpenPayload) => void;
++  tone: "brand" | "onPrimary";
++}) {
++  const ref = part.ref!;
++  const isAtt = ref.kind === "att";
++  const Icon = REF_KIND_ICON[ref.kind];
++  const clickable = isAtt ? !!onOpenRef : !!onOpenWsRef;
++  // tooltip：附件保持既有文案（零视觉回归）；工作区三类带路径/行号完整绑定。
++  const title = isAtt
++    ? `${ref.name}（点击在线预览）`
++    : ref.kind === "code" && ref.lines
++      ? `代码：${ref.path || "工作区根"} 第 ${ref.lines[0]}-${ref.lines[1]} 行（点击预览）`
++      : ref.kind === "dir"
++        ? `目录：${ref.path || "工作区根"}（点击预览）`
++        : `文件：${ref.path}（点击预览）`;
++  return (
++    <button
++      type="button"
++      disabled={!clickable}
++      onClick={() => {
++        if (isAtt) onOpenRef?.({ id: ref.id ?? "", name: ref.name });
++        else onOpenWsRef?.({ workspaceId: ref.workspaceId ?? "", path: ref.path ?? "", lines: ref.lines });
++      }}
++      title={title}
++      className={cn(
++        "mx-px my-0.5 inline-flex items-center gap-0.5 rounded px-1 py-px text-[0.95em] font-medium transition-colors disabled:cursor-default",
++        tone === "onPrimary"
++          ? // 蓝色主气泡内：白色半透明胶囊 + 白字（对比可读，D-005@v2）。
++            "border border-white/30 bg-white/25 text-white hover:bg-white/40"
++          : "bg-brand-500/15 text-brand-700 hover:bg-brand-500/25 dark:text-brand-300",
++        !clickable && "opacity-90",
++      )}
++    >
++      <Icon aria-hidden className="h-3 w-3 shrink-0" />
++      {ref.name}
++    </button>
++  );
++}
++
+ export const InlineAttRefText = memo(function InlineAttRefText({
+   text,
+   onOpenRef,
++  onOpenWsRef,
+   tone = "brand",
+ }: InlineAttRefTextProps) {
+-  const parts = useMemo(() => parseInlineAttRefs(text), [text]);
++  const parts = useMemo(() => parseInlineRefs(text), [text]);
+   // 快速路径：无引用段原样直出（含空文本），与现状渲染逐字一致。
+   if (parts.every((p) => p.type === "text")) return <>{text}</>;
+   return (
+     <>
+       {parts.map((p, i) => {
+         if (p.type !== "ref" || !p.ref) return <span key={i}>{p.value}</span>;
+-        const ref = p.ref;
++        const seg: InlineRefSegment = { ...p, type: "ref", ref: p.ref };
+         return (
+-          <button
+-            key={i}
+-            type="button"
+-            disabled={!onOpenRef}
+-            onClick={() => onOpenRef?.(ref)}
+-            title={`${ref.name}（点击在线预览）`}
+-            className={cn(
+-              "mx-px my-0.5 rounded px-1 py-px text-[0.95em] font-medium transition-colors disabled:cursor-default",
+-              tone === "onPrimary"
+-                ? // 蓝色主气泡内：白色半透明胶囊 + 白字（对比可读，D-005@v2）。
+-                  "border border-white/30 bg-white/25 text-white hover:bg-white/40"
+-                : "bg-brand-500/15 text-brand-700 hover:bg-brand-500/25 dark:text-brand-300",
+-              !onOpenRef && "opacity-90",
+-            )}
+-          >
+-            {ref.name}
+-          </button>
++          <RefTag key={i} part={seg} onOpenRef={onOpenRef} onOpenWsRef={onOpenWsRef} tone={tone} />
+         );
+       })}
+     </>
+@@ -71,10 +126,16 @@ export const InlineAttRefText = memo(function InlineAttRefText({
+ });
+ 
+ /**
+- * 带预览窗的完整接线（task-06）：InlineAttRefText + 点击开 FilePreviewModal
+- * （fetch=fetchAttachmentBlob(uuid)，与已发送附件 chips/attachment-chips.tsx
+- * 同链路含 officeSource 高保真标识）。单聊 turn-timeline 用户气泡正文、steered
+- * 引导段与群聊气泡正文共用——宿主一行接入，自持 modal state。
++ * 带预览窗的完整接线（task-06 / task-09）：InlineAttRefText + 点击开
++ * FilePreviewModal。按 ref.kind 分流：
++ * - 附件：fetch=fetchAttachmentBlob(uuid)，officeSource 高保真标识（同
++ *   attachment-chips.tsx 链路）。
++ * - 工作区三类：fetch=fetchDownload(workspaceId, path)（lib/explorer.ts 签名），
++ *   meta.mime 传 null 靠扩展名经 matchRenderer 分发（下载端点 blob.type 多为
++ *   octet-stream，R-05 同 file-preview.tsx 全屏预览先例），不加 officeSource
++ *   （explorer 文件无平台 id 恒本地渲染，D-007）。
++ * 单聊 turn-timeline 用户气泡正文、steered 引导段与群聊气泡正文共用——宿主
++ * 一行接入，自持 modal state。
+  */
+ export function InlineAttRefTextWithPreview({
+   text,
+@@ -98,6 +159,17 @@ export function InlineAttRefTextWithPreview({
+           });
+           setOpen(true);
+         }}
++        onOpenWsRef={(ref) => {
++          // path 空串（工作区根目录引用）无文件可预览——下载端点也不接受空
++          // path，点击仅提示（预览语义留给文件/代码类）。
++          if (!ref.path) return;
++          const name = ref.path.split("/").filter(Boolean).pop() ?? ref.path;
++          setTarget({
++            fetch: () => fetchDownload(ref.workspaceId, ref.path),
++            meta: { name, mime: null },
++          });
++          setOpen(true);
++        }}
+       />
+       <FilePreviewModal target={target} open={open} onClose={() => setOpen(false)} />
+     </>
+diff --git a/frontend/src/components/daemon/input-ref-overlay.tsx b/frontend/src/components/daemon/input-ref-overlay.tsx
+index 763ca9917..cfc44ae5d 100644
+--- a/frontend/src/components/daemon/input-ref-overlay.tsx
++++ b/frontend/src/components/daemon/input-ref-overlay.tsx
+@@ -15,6 +15,10 @@
+  *   pointer-events-none，不拦截下方 textarea），宿主经 wrapper onPointerMove 调
+  *   hitTestAttRefOverlay 命中检测（标签区被 textarea 覆盖，CSS :hover 不可行），
+  *   以 visibleBadgeIndex 控制仅命中处淡入显示；
++ * - 左上类型角标（2026-10-10-workspace-ref-intake task-04，FR-03/D-001）：
++ *   tokenMetas 命中的 token 挂 lucide 类型角标（附件 Paperclip / 文件 FileText /
++ *   目录 Folder / 代码块 Braces），absolute 不进文本流；悬停命中处随同淡入并显
++ *   示 title 元数据 tooltip；未传 tokenMetas 渲染与现状逐字一致；
+  * - 版式对齐（R-01）：overlayClassName 传与 textarea 完全相同的字体/行高/
+  *   padding/宽度 class，overlayStyle 透传高度拖拽同步值；本层自带
+  *   whitespace-pre-wrap break-words 对齐 textarea 软换行。
+@@ -22,14 +26,25 @@
+  */
+ 
+ import { useMemo } from "react";
+-import { X } from "lucide-react";
++import { Braces, FileText, Folder, Paperclip, X } from "lucide-react";
+ 
+ import { cn } from "@/lib/utils";
+ 
++/** token 类型元数据（2026-10-10-workspace-ref-intake task-04，FR-03/D-001）：
++ *  kind 决定左上角类型角标图标，title 为悬停 tooltip 完整绑定元数据。 */
++export interface InputRefTokenMeta {
++  kind: "att" | "file" | "dir" | "code";
++  /** 悬停 tooltip：类型 + 工作区路径 + 行号 / 附件名等完整绑定。 */
++  title: string;
++}
++
++/** 类型角标图标映射（D-001：附件 Paperclip / 文件 FileText / 目录 Folder / 代码块 Braces）。 */
++const KIND_ICON = { att: Paperclip, file: FileText, dir: Folder, code: Braces } as const;
++
+ interface InputRefOverlayProps {
+   /** 输入框当前值（受控，与 textarea 同源）。 */
+   value: string;
+-  /** 需高亮的编辑态 token 文本集（attTokenMap 值集）。 */
++  /** 需高亮的编辑态 token 文本集（attTokenMap 值集 ∪ 工作区 wsRefTokens 值集）。 */
+   tokens: string[];
+   /** × 角标点击：从 value 中移除该 token 一次出现（由宿主执行并 onChange）。 */
+   onRemoveToken: (token: string) => void;
+@@ -42,6 +57,9 @@ interface InputRefOverlayProps {
+   visibleBadgeIndex?: number | null;
+   /** 容器 ref（宿主 hitTest 时查询 [data-att-ref-occ] 用）。 */
+   containerRef?: React.Ref<HTMLDivElement>;
++  /** token → 类型元数据（FR-03/D-001）：命中渲染左上类型角标 + 悬停 tooltip；
++   *  未传或 token 未命中时不渲染角标（与现状逐字一致）。 */
++  tokenMetas?: Record<string, InputRefTokenMeta>;
+ }
+ 
+ /** 正则元字符转义（文件名可含 ()[] 等）。 */
+@@ -113,6 +131,7 @@ export function InputRefOverlay({
+   overlayStyle,
+   visibleBadgeIndex,
+   containerRef,
++  tokenMetas,
+ }: InputRefOverlayProps) {
+   const parts = useMemo(() => splitByTokens(value, tokens), [value, tokens]);
+   if (tokens.length === 0) return null;
+@@ -137,6 +156,8 @@ export function InputRefOverlay({
+         occ += 1;
+         const occIndex = occ;
+         const visible = visibleBadgeIndex === occIndex;
++        const meta = tokenMetas?.[p.text];
++        const KindIcon = meta ? KIND_ICON[meta.kind] : null;
+         return (
+           <span
+             key={i}
+@@ -150,6 +171,24 @@ export function InputRefOverlay({
+             <span aria-hidden className="text-transparent">
+               {p.text}
+             </span>
++            {/* 左上类型角标（FR-03/D-001）：absolute 不进文本流（不改变标签文本
++                宽度），与右上 × 角标同视觉语言；不进 hitTest 序号（删除交互仍归
++                × 角标）。z-20 越过 textarea；span 本体不带 opacity/transform
++                （stacking context 铁律）。未命中 tokenMetas 不渲染。 */}
++            {KindIcon && meta && (
++              <span
++                data-ws-ref-kind-badge={meta.kind}
++                title={meta.title}
++                className={cn(
++                  "absolute -left-1 -top-1 z-20 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-all",
++                  visible
++                    ? "pointer-events-auto opacity-100"
++                    : "pointer-events-none opacity-0",
++                )}
++              >
++                <KindIcon aria-hidden className="h-2.5 w-2.5" />
++              </span>
++            )}
+             <button
+               type="button"
+               aria-label={`移除引用 ${p.text.replace(/^【|】$/g, "")}`}
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index 204f676da..d1585d20f 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -60,8 +60,12 @@ import {
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import {
+   allocateAttRefToken,
++  allocateWsRefToken,
+   stripAttRefTokens,
++  wsRefMapKey,
+   type AttRefTokenMap,
++  type WsRefDesc,
++  type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
+ import {
+@@ -172,6 +176,15 @@ export interface SessionInputBarProps {
+    *  入口——点击开父层定时弹窗（草稿预览 + 分钟级时间选择）；未传不渲染（预会话
+    *  idle 态父层不注入即不出现入口）。 */
+   onSchedule?: () => void;
++  /** 2026-10-10-workspace-ref-intake task-05：工作区引用插入槽位（FR-01 通道
++   *  消费端）——portal 侧右键入口组装 desc 落槽，effect 依赖 nonce 消费（同一
++   *  引用连续添加可重复触发），在光标处插入【名称】/【名称:起-止】标签。 */
++  pendingWsRefInsert?: { desc: WsRefDesc; nonce: number } | null;
++  /** 槽位消费完成回抛（portal 清槽；null = 清空）。 */
++  onPendingWsRefInsertHandled?: (next: { desc: WsRefDesc; nonce: number } | null) => void;
++  /** 工作区引用 token 映射受控回传（producer=输入区，组装位经父级
++   *  substituteWsRefsForSend 消费，同 onAttTokenMapChange 模式）。 */
++  onWsRefTokensChange?: (next: WsRefTokenMap) => void;
+ }
+ 
+ function formatBytes(n: number): string {
+@@ -254,6 +267,9 @@ export function SessionInputBar({
+   teamTriggerDisabled = false,
+   teamTriggerTitle,
+   onSchedule,
++  pendingWsRefInsert,
++  onPendingWsRefInsertHandled,
++  onWsRefTokensChange,
+ }: SessionInputBarProps) {
+   const fileRef = useRef<HTMLInputElement>(null);
+   const textareaRef = useRef<HTMLTextAreaElement>(null);
+@@ -288,6 +304,63 @@ export function SessionInputBar({
+     onAttTokenMapChange?.(next);
+   };
+ 
++  /* 2026-10-10-workspace-ref-intake task-05：工作区引用 token 映射（key =
++   * wsRefMapKey 约定：path / path:起-止）。分配池与附件同构并入正文 inText
++   * 保守占位（D-005 并集池——附件 token ∪ 工作区 token ∪ 手打【…】）；
++   * 映射随 onWsRefTokensChange 受控回传父级（组装位 substituteWsRefsForSend
++   * 消费，同 syncTokenMap 模式，D-009）。 */
++  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
++  const syncWsRefTokens = (next: WsRefTokenMap) => {
++    setWsRefTokens(next);
++    onWsRefTokensChange?.(next);
++  };
++
++  /** 两池并集 token 集（overlay 高亮 / 退格整删 / 唯一化分配池共用）。 */
++  const allRefTokens = [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)];
++
++  /** 工作区引用插入（槽位消费与未来直插共用）：分配/复用 token 后按
++   *  handleInsertAttRef 同款光标机制插入（聚焦插当前光标、失焦插失焦前光标位、
++   *  从未聚焦插末尾；插入后聚焦、光标落 token 尾；允许重复插入）。 */
++  const insertWsRefToken = (desc: WsRefDesc) => {
++    const key = wsRefMapKey(desc);
++    let entry = wsRefTokens[key];
++    if (!entry) {
++      // 唯一化并集：附件 token ∪ 工作区 token ∪ 正文中出现的所有【…】文本
++      // （保守占位防手打碰撞，对齐附件 allocateAttRefToken 既有口径）。
++      const inText = value.match(/【[^】]*】/g) ?? [];
++      const pool = [...allRefTokens, ...inText].filter(Boolean);
++      const base = desc.lines
++        ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
++        : desc.name;
++      entry = { desc, token: allocateWsRefToken(base, pool) };
++      syncWsRefTokens({ ...wsRefTokens, [key]: entry });
++    }
++    const ta = textareaRef.current;
++    const focused = !!ta && document.activeElement === ta;
++    const caret = focused
++      ? (ta.selectionStart ?? value.length)
++      : (lastCaretRef.current ?? value.length);
++    const next = value.slice(0, caret) + entry.token + value.slice(caret);
++    onChange(next);
++    pendingCaretRef.current = caret + entry.token.length;
++    lastCaretRef.current = caret + entry.token.length;
++    ta?.focus();
++  };
++
++  /* 槽位消费（FR-01 通道落地点）：依赖 nonce（同引用连续添加可重复触发——
++   * desc 引用相等会让 effect 判等跳过）；消费后回抛清槽。pendingWsRefInsert
++   * 未传（dialog 等旧宿主）零 effect 副作用。 */
++  const handledNonceRef = useRef<number | null>(null);
++  useEffect(() => {
++    if (!pendingWsRefInsert) return;
++    if (handledNonceRef.current === pendingWsRefInsert.nonce) return;
++    handledNonceRef.current = pendingWsRefInsert.nonce;
++    insertWsRefToken(pendingWsRefInsert.desc);
++    onPendingWsRefInsertHandled?.(null);
++    // insertWsRefToken 为实例内闭包（随渲染重建），依赖省略走 latest 语义。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [pendingWsRefInsert?.nonce]);
++
+   /** 右击 chip 插入引用（D-006@v3：聚焦态插当前光标处；失焦态插**失焦前记住的
+    *  光标位**——右击 chip 必先使输入框失焦，故 onBlur 时记忆 selectionStart；
+    *  从未聚焦过才插末尾。插入后自动聚焦、光标落 token 尾；允许重复）。 */
+@@ -315,11 +388,20 @@ export function SessionInputBar({
+     ta?.focus();
+   };
+ 
+-  /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。 */
++  /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。
++   *  task-05 起附件与工作区 token 一视同仁（removeRefOnce 统一入口）。 */
+   const removeAttRefOnce = (token: string) => {
+     const idx = value.indexOf(token);
+     if (idx < 0) return;
+     onChange(value.slice(0, idx) + value.slice(idx + token.length));
++    // 同步清工作区映射条目（附件映射由删附件联动独立管理）。
++    if (Object.values(wsRefTokens).some((e) => e.token === token)) {
++      const nextMap = { ...wsRefTokens };
++      for (const [k, e] of Object.entries(nextMap)) {
++        if (e.token === token) delete nextMap[k];
++      }
++      syncWsRefTokens(nextMap);
++    }
+   };
+ 
+   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
+@@ -340,6 +422,36 @@ export function SessionInputBar({
+    * 容器 ref（wrapper pointermove hitTest 回写）。 */
+   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+   const attOverlayRef = useRef<HTMLDivElement | null>(null);
++  /* task-05（FR-03）：overlay 类型角标元数据——附件 token 按附件名、工作区
++   * token 按 desc 组装（类型 + 路径 + 行号的完整绑定 tooltip）。 */
++  const overlayTokenMetas = useMemo(() => {
++    const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
++    for (const att of attachments) {
++      const token = attTokenMap[att.id];
++      if (token) metas[token] = { kind: "att", title: `附件：${att.name}` };
++    }
++    for (const { desc, token } of Object.values(wsRefTokens)) {
++      if (desc.kind === "code" && desc.lines) {
++        metas[token] = {
++          kind: "code",
++          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceId}）`,
++        };
++      } else if (desc.kind === "dir") {
++        metas[token] = {
++          kind: "dir",
++          title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceId}）`,
++        };
++      } else {
++        metas[token] = {
++          kind: "file",
++          title: `文件：${desc.path}（工作区 ${desc.workspaceId}）`,
++        };
++      }
++    }
++    return metas;
++    // attachments 参与（附件 token 的 title 取上传名）；attTokenMap/wsRefTokens 键值源。
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [attTokenMap, wsRefTokens, attachments]);
+   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
+    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
+    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
+@@ -565,6 +677,7 @@ export function SessionInputBar({
+     // 引用映射随外部清空归零（新建/切换会话等不经 clearAttachments 的路径；
+     // token 已不在正文，此处只清映射防陈旧槽位跨消息泄漏——同 mentions 口径）。
+     if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
++    if (Object.keys(wsRefTokens).length > 0) syncWsRefTokens({});
+     if (!mention) return;
+     setMention(null);
+     setMentionActiveIndex(0);
+@@ -641,8 +754,9 @@ export function SessionInputBar({
+   registerClearAttachments?.(() => {
+     setAttachments([]);
+     onAttachmentsChange?.([]);
+-    // 引用映射随发送成功清空一并复位（task-03）。
++    // 引用映射随发送成功清空一并复位（task-03）；工作区映射同口径（task-05）。
+     if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
++    if (Object.keys(wsRefTokens).length > 0) syncWsRefTokens({});
+   });
+ 
+   const handleFiles = async (files: FileList | null) => {
+@@ -950,12 +1064,15 @@ export function SessionInputBar({
+         >
+           <InputRefOverlay
+             value={value}
+-            tokens={Object.values(attTokenMap)}
++            tokens={allRefTokens}
+             onRemoveToken={removeAttRefOnce}
+             overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
+             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+             visibleBadgeIndex={hoveredRefOcc}
+             containerRef={attOverlayRef}
++            /* task-04/05（FR-03/D-001）：两池 token 均补类型元数据（附件 att /
++               工作区 file/dir/code），角标+tooltip 按命中渲染。 */
++            tokenMetas={overlayTokenMetas}
+           />
+           <textarea
+             ref={textareaRef}
+@@ -1023,7 +1140,8 @@ export function SessionInputBar({
+             }
+             // 退格整删引用标签（用户反馈 2026-10-09，D-004@v2）：无选区、光标
+             // 贴在已注册 token 尾部时，一次退格删除整个标签（非逐字）；标签
+-            // 中部/普通文本退格不受影响；多 token 同尾时取最长匹配。
++            // 中部/普通文本退格不受影响；多 token 同尾时取最长匹配。task-05 起
++            // 匹配集=附件∪工作区并集（两池一视同仁）。
+             if (
+               e.key === "Backspace" &&
+               !mention &&
+@@ -1033,7 +1151,7 @@ export function SessionInputBar({
+               const { selectionStart: s, selectionEnd: en } = ta;
+               if (s === en && s > 0) {
+                 const before = value.slice(0, s);
+-                const matched = Object.values(attTokenMap)
++                const matched = allRefTokens
+                   .filter((t) => t && before.endsWith(t))
+                   .sort((a, b) => b.length - a.length);
+                 const token = matched[0];
+@@ -1041,6 +1159,14 @@ export function SessionInputBar({
+                   e.preventDefault();
+                   onChange(value.slice(0, s - token.length) + value.slice(s));
+                   pendingCaretRef.current = s - token.length;
++                  // 整删同步清工作区映射条目（附件映射由删附件联动管理）。
++                  if (Object.values(wsRefTokens).some((e2) => e2.token === token)) {
++                    const nextMap = { ...wsRefTokens };
++                    for (const [k, e2] of Object.entries(nextMap)) {
++                      if (e2.token === token) delete nextMap[k];
++                    }
++                    syncWsRefTokens(nextMap);
++                  }
+                   return;
+                 }
+               }
+diff --git a/frontend/src/components/daemon/session-panel/index.tsx b/frontend/src/components/daemon/session-panel/index.tsx
+index 15e55cc2a..f072ea8c0 100644
+--- a/frontend/src/components/daemon/session-panel/index.tsx
++++ b/frontend/src/components/daemon/session-panel/index.tsx
+@@ -270,6 +270,17 @@ export interface SessionPanelProps {
+   onOpenSubagent?: (segmentId: string) => void;
+   /** page 可选：右栏 ✕ / 段失效自动关闭上抛（门户清槽位）。〔prop〕 */
+   onSubagentPanelClose?: () => void;
++
++  // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
++  //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
++  /** 可选：待消费的工作区引用插入槽位（{desc, nonce}，nonce 自增保证同引用
++   *  可重复触发）；未传零回归（悬浮宿主/dialog 旧消费方）。〔prop〕 */
++  pendingWsRefInsert?: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null;
++  /** 可选：槽位消费完成回抛（portal 清槽）。〔prop〕 */
++  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同上惯例）
++  onPendingWsRefInsertHandled?: (
++    next: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null,
++  ) => void;
+ }
+ 
+ /**
+@@ -299,6 +310,10 @@ export function SessionPanel(props: SessionPanelProps) {
+         openSubagentId={props.openSubagentId}
+         onOpenSubagent={props.onOpenSubagent}
+         onSubagentPanelClose={props.onSubagentPanelClose}
++        // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
++        // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
++        pendingWsRefInsert={props.pendingWsRefInsert}
++        onPendingWsRefInsertHandled={props.onPendingWsRefInsertHandled}
+       />
+     );
+   }
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 1d04a7387..bac0e29cd 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -25,7 +25,10 @@ import { type AttachmentRead } from "@/lib/api/session-attachments";
+ import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+ import {
+   substituteAttRefsForSend,
++  substituteWsRefsForSend,
+   type AttRefTokenMap,
++  type WsRefDesc,
++  type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import {
+   SessionInputBar, type SessionInputMentions,
+@@ -107,6 +110,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     workspaceId,
+     onTeamMissionCreated,
+     offlineReadOnly = false,
++    // 2026-10-10-workspace-ref-intake task-07：工作区引用插入槽位（FR-01 通道；
++    // dialog 宿主未传时 null 零回归）。
++    pendingWsRefInsert,
++    onPendingWsRefInsertHandled,
+   } = props;
+ 
+   const [provider, setProvider] = useState(defaultProvider);
+@@ -191,6 +198,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（D-003
+   // 发送置换消费；dialog 与 page 同款）。
+   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
++  // 2026-10-10-workspace-ref-intake task-07：工作区引用 token 映射（D-008@v2
++  // 发送置换消费；dialog 与 page 同款）。
++  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
+   const clearAttachmentsRef = useRef<(() => void) | null>(null);
+   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
+   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化选中
+@@ -309,7 +319,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     const sid = view.sessionId;
+     const rawPrompt = input.trim();
+     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
++    // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换。
++    const prompt = substituteWsRefsForSend(
++      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
++      wsRefTokens,
++    );
+     if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
+     setSchedSubmitting(true);
+     try {
+@@ -330,7 +344,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     } finally {
+       setSchedSubmitting(false);
+     }
+-  }, [view.sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
++  }, [view.sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments, wsRefTokens]);
+ 
+   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
+   // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
+@@ -389,7 +403,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     setInput((prev) => {
+       const t = prev.trim();
+       // task-04：prompt 为 token 置换版——草稿同样置换后比对（同 page 口径）。
+-      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
++      // task-07：工作区 token 同点位串联置换（D-008@v2）。
++      const substituted = substituteWsRefsForSend(
++        substituteAttRefsForSend(t, attTokenMap, pendingAttachments),
++        wsRefTokens,
++      );
+       return t === prompt || substituted === prompt || parseTeamCommand(t) === prompt ? "" : prev;
+     });
+     setPendingAttachments((prev) =>
+@@ -399,7 +417,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+     // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机）。
+     setPendingMentions({});
+-  }, [attTokenMap, pendingAttachments]);
++  }, [attTokenMap, pendingAttachments, wsRefTokens]);
+ 
+   // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
+   // 不丢）；忙轮发送由 sendToServerQueue 直达后端入队。idle / creating 首条消息
+@@ -1339,8 +1357,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+   const handleSend = useCallback(async () => {
+     const rawPrompt = input.trim();
+     // task-04（D-003）：入口置换引用 token，后续 sendFromQueue/steered 全路径
+-    // 消费置换版；守卫/长度口径用 rawPrompt。
+-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
++    // 消费置换版；守卫/长度口径用 rawPrompt。task-07（FR-06/D-008@v2）：工作区
++    // token 同点位串联置换。
++    const prompt = substituteWsRefsForSend(
++      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
++      wsRefTokens,
++    );
+     // ql-20260825-007：D-7 对齐 page——附件非空豁免空文本（看图说话）；纯文本
+     // 仍要求非空。idle 首句走 createSession（无附件可带），但该态附件入口已被
+     // 门控（attachmentsDisabled），pendingAttachments 恒空。
+@@ -1508,7 +1530,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+     } catch {
+       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
+     }
+-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, teamMissions]);
++  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions]);
+ 
+   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
+   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败
+@@ -2163,6 +2185,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+         attachmentsDisabledTitle={attachmentsDisabledTitle}
+         onAttachmentsChange={setPendingAttachments}
+         onAttTokenMapChange={setAttTokenMap}
++        // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
++        //（dialog 输入区，同 page 口径；宿主未传槽位时零回归）。
++        onWsRefTokensChange={setWsRefTokens}
++        pendingWsRefInsert={pendingWsRefInsert}
++        onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
+         registerClearAttachments={(fn) => {
+           clearAttachmentsRef.current = fn;
+         }}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 5b704aaf7..dcb5f2041 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -25,7 +25,10 @@ import {
+   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+ import {
+   substituteAttRefsForSend,
++  substituteWsRefsForSend,
+   type AttRefTokenMap,
++  type WsRefDesc,
++  type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import {
+   SessionInputBar, type SessionInputMentions,
+@@ -547,6 +550,18 @@ export interface SessionPanelSubagentProps {
+   onSubagentPanelClose?: () => void;
+ }
+ 
++/**
++ * 工作区引用插入槽位 props（2026-10-10-workspace-ref-intake task-07，FR-01
++ * 通道消费端）——portal（task-06）经 SessionPanel 分发器透传；未传（悬浮宿主
++ * 等旧消费方）内部视为 null 零回归。
++ */
++export interface SessionPanelWsRefSlotProps {
++  /** 待消费槽位（nonce 自增保证同引用可重复触发）。 */
++  pendingWsRefInsert?: { desc: WsRefDesc; nonce: number } | null;
++  /** 槽位消费完成回抛（portal 清槽）。 */
++  onPendingWsRefInsertHandled?: (next: { desc: WsRefDesc; nonce: number } | null) => void;
++}
++
+ export function SessionPanelPage({
+   sessionId,
+   machines,
+@@ -560,7 +575,9 @@ export function SessionPanelPage({
+   openSubagentId,
+   onOpenSubagent,
+   onSubagentPanelClose,
+-}: SessionPanelPageProps & SessionPanelSubagentProps) {
++  pendingWsRefInsert,
++  onPendingWsRefInsertHandled,
++}: SessionPanelPageProps & SessionPanelSubagentProps & SessionPanelWsRefSlotProps) {
+   const qc = useQueryClient();
+   const notify = useNotify();
+ 
+@@ -753,6 +770,9 @@ export function SessionPanelPage({
+   // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（输入区
+   // 受控回传；发送组装时置换为 uuid 锚定正式引用，D-003）。
+   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
++  // 2026-10-10-workspace-ref-intake task-07：工作区引用 token 映射（输入区
++  // onWsRefTokensChange 受控回传；发送组装 substituteWsRefsForSend 消费，D-008@v2）。
++  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
+   const clearAttachmentsRef = useRef<(() => void) | null>(null);
+   const [reopening, setReopening] = useState(false);
+   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化
+@@ -832,7 +852,10 @@ export function SessionPanelPage({
+     const sid = sessionId;
+     const rawPrompt = input.trim();
+     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
+-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
++    const prompt = substituteWsRefsForSend(
++      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
++      wsRefTokens,
++    );
+     if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
+     setSchedSubmitting(true);
+     try {
+@@ -853,7 +876,7 @@ export function SessionPanelPage({
+     } finally {
+       setSchedSubmitting(false);
+     }
+-  }, [sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
++  }, [sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments, wsRefTokens]);
+ 
+   // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
+   // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
+@@ -2744,8 +2767,12 @@ export function SessionPanelPage({
+     setInput((prev) => {
+       const t = prev.trim();
+       // 草稿同样置换后与发送文本比对（token 剥离版 ≠ 置换版——uuid 文本
+-      // 只在发送侧注入，草稿侧补齐同款置换才是同文判定）。
+-      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
++      // 只在发送侧注入，草稿侧补齐同款置换才是同文判定）。task-07 起工作区
++      // token 同点位串联置换（D-008@v2）。
++      const substituted = substituteWsRefsForSend(
++        substituteAttRefsForSend(t, attTokenMap, pendingAttachments),
++        wsRefTokens,
++      );
+       return (
+         t === prompt ||
+         substituted === prompt ||
+@@ -2761,7 +2788,7 @@ export function SessionPanelPage({
+     // 绑定已随本次请求上送，残留会错绑到下一条消息）。
+     setPendingMentions({});
+     },
+-    [attTokenMap, pendingAttachments],
++    [attTokenMap, pendingAttachments, wsRefTokens],
+   );
+ 
+   /**
+@@ -3255,7 +3282,11 @@ export function SessionPanelPage({
+     // 为 [附件引用:uuid|name]——入口一处置换，后续 createSession 直发 / 队列
+     // sendFromQueue / steered / /team / takeover 全路径消费置换版；tokenMap 空
+     // 时原样返回（零开销旁路）。守卫/长度口径用 rawPrompt（用户所见原文）。
+-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
++    // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换（三类标记）。
++    const prompt = substituteWsRefsForSend(
++      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
++      wsRefTokens,
++    );
+     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
+     // ql-20260825-007：D-7 对齐——附件非空豁免空文本（看图说话）；纯文本仍要求非空。
+     // 空文本静默（发送按钮本已禁用）；超长/队满 toast 明示（ql-20260903-014：
+@@ -3343,7 +3374,7 @@ export function SessionPanelPage({
+       return;
+     }
+     void sendFromQueue(prompt, attachmentIds);
+-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
++  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+ 
+   const handleInterrupt = useCallback(async () => {
+     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
+@@ -3858,6 +3889,11 @@ export function SessionPanelPage({
+             multimodalDowngraded={false}
+             onAttachmentsChange={setPendingAttachments}
+             onAttTokenMapChange={setAttTokenMap}
++            // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
++            //（预会话输入区，同真会话输入区口径）。
++            onWsRefTokensChange={setWsRefTokens}
++            pendingWsRefInsert={pendingWsRefInsert}
++            onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
+             registerClearAttachments={(fn) => {
+               clearAttachmentsRef.current = fn;
+             }}
+@@ -4948,6 +4984,11 @@ export function SessionPanelPage({
+           multimodalDowngraded={multimodalDowngraded}
+           onAttachmentsChange={setPendingAttachments}
+           onAttTokenMapChange={setAttTokenMap}
++          // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
++          //（真会话输入区，同预会话输入区口径）。
++          onWsRefTokensChange={setWsRefTokens}
++          pendingWsRefInsert={pendingWsRefInsert}
++          onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
+           registerClearAttachments={(fn) => {
+             clearAttachmentsRef.current = fn;
+           }}
+diff --git a/frontend/src/components/explorer/__tests__/file-explorer.test.tsx b/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+index 6bd930d54..20a4e6537 100644
+--- a/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
++++ b/frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+@@ -428,4 +428,91 @@ describe("FileExplorer（task-06）", () => {
+     const paths = mockFetchTree.mock.calls.map((c) => c[1]);
+     expect(paths).toEqual(["", "backend"]);
+   });
++
++  // ── 树右键菜单（2026-10-10-workspace-ref-intake task-03，FR-01）────────────────
++
++  it("右键文件节点出单项菜单，点击回调 desc 逐字段正确（file）", async () => {
++    mockDefaultTree();
++    const onAddNodeRef = vi.fn();
++    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
++    await waitForRoot();
++
++    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 120, clientY: 80 });
++    const item = screen.getByRole("menuitem");
++    expect(item).toHaveTextContent("添加文件到会话输入框");
++    fireEvent.click(item);
++    expect(onAddNodeRef).toHaveBeenCalledTimes(1);
++    expect(onAddNodeRef).toHaveBeenCalledWith({
++      kind: "file",
++      workspaceId: "ws1",
++      path: "README.md",
++      name: "README.md",
++    });
++    // 点击后菜单关闭
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++  });
++
++  it("右键目录节点菜单文案为目录，desc path 为相对根路径", async () => {
++    mockDefaultTree();
++    const onAddNodeRef = vi.fn();
++    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
++    await waitForRoot();
++
++    fireEvent.contextMenu(screen.getByText("backend"), { clientX: 60, clientY: 40 });
++    const item = screen.getByRole("menuitem");
++    expect(item).toHaveTextContent("添加目录到会话输入框");
++    fireEvent.click(item);
++    expect(onAddNodeRef).toHaveBeenCalledWith({
++      kind: "dir",
++      workspaceId: "ws1",
++      path: "backend",
++      name: "backend",
++    });
++  });
++
++  it("右键根节点：kind=dir、path 空串、name=工作区根", async () => {
++    mockDefaultTree();
++    const onAddNodeRef = vi.fn();
++    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
++    await waitForRoot();
++
++    fireEvent.contextMenu(screen.getByText("工作区根"), { clientX: 30, clientY: 30 });
++    fireEvent.click(screen.getByRole("menuitem"));
++    expect(onAddNodeRef).toHaveBeenCalledWith({
++      kind: "dir",
++      workspaceId: "ws1",
++      path: "",
++      name: "工作区根",
++    });
++  });
++
++  it("document 点击/右键别处关闭菜单；未传 onAddNodeRef 时右键零拦截", async () => {
++    mockDefaultTree();
++    const onAddNodeRef = vi.fn();
++    const { unmount } = render(
++      <FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />,
++    );
++    await waitForRoot();
++
++    // 出菜单后 document 级点击关闭
++    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 10, clientY: 10 });
++    expect(screen.getByRole("menu")).toBeInTheDocument();
++    fireEvent.click(document.body);
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++
++    // 再出菜单后右键别处也关闭
++    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 10, clientY: 10 });
++    expect(screen.getByRole("menu")).toBeInTheDocument();
++    fireEvent.contextMenu(document.body, { clientX: 200, clientY: 200 });
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++    expect(onAddNodeRef).not.toHaveBeenCalled();
++
++    // 未传回调（新实例）：右键为浏览器默认菜单（不 preventDefault）
++    unmount();
++    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
++    await waitForRoot();
++    const evt = fireEvent.contextMenu(screen.getByText("backend"), { clientX: 5, clientY: 5 });
++    expect(evt).toBe(true);
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/components/explorer/__tests__/file-preview.test.tsx b/frontend/src/components/explorer/__tests__/file-preview.test.tsx
+index 13ccb1689..b4aa542d2 100644
+--- a/frontend/src/components/explorer/__tests__/file-preview.test.tsx
++++ b/frontend/src/components/explorer/__tests__/file-preview.test.tsx
+@@ -50,11 +50,33 @@ vi.mock("@/components/ui/markdown-text", () => ({
+ }));
+ 
+ // ── mock：Prism Light 高亮器（dynamic loader 的装载目标；jsdom 不做真实高亮）──
++// showLineNumbers 开启时按真实库行为穿插渲染行号 span（行号锚 class=
++// react-syntax-highlighter-line-number，selectionLineRange 依赖该结构）。
+ const highlighter = vi.hoisted(() => ({ registerLanguage: vi.fn() }));
+ vi.mock("react-syntax-highlighter/dist/esm/prism-light", () => {
+-  const Highlighter = (props: { language?: string; children?: ReactNode }) => (
+-    <pre data-testid="code-highlight" data-language={props.language}>
+-      <code>{props.children}</code>
++  const Highlighter = (props: {
++    language?: string;
++    children?: ReactNode;
++    showLineNumbers?: boolean;
++  }) => (
++    <pre
++      data-testid="code-highlight"
++      data-language={props.language}
++      data-show-line-numbers={String(props.showLineNumbers === true)}
++    >
++      <code>
++        {props.showLineNumbers
++          ? String(props.children ?? "")
++              .split("\n")
++              .map((line, i) => (
++                <span key={i}>
++                  <span className="react-syntax-highlighter-line-number">{i + 1}</span>
++                  <span className="line-content">{line}</span>
++                  {"\n"}
++                </span>
++              ))
++          : props.children}
++      </code>
+     </pre>
+   );
+   Highlighter.registerLanguage = highlighter.registerLanguage;
+@@ -215,7 +237,7 @@ describe("FilePreview", () => {
+     expect(createObjectURL).not.toHaveBeenCalled();
+   });
+ 
+-  it("truncated=true 顶部黄条提示截断并引导下载（未识别扩展名退化纯文本 pre）", () => {
++  it("truncated=true 顶部黄条提示截断并引导下载（未识别扩展名退化纯文本行结构 pre）", () => {
+     mockQueryResult(
+       makeFile({ name: "server.log", truncated: true, content: "line1\nline2" }),
+     );
+@@ -224,9 +246,14 @@ describe("FilePreview", () => {
+     );
+ 
+     expect(screen.getByText(/文件超过 10MB，仅显示前 10MB/)).toBeInTheDocument();
+-    // .log 不在语言映射表 → 纯文本 pre 兜底（原始内容直出，不经任何解析）
++    // .log 不在语言映射表 → 纯文本分支行结构（task-02 起带行号）：内容逐字还原，
++    // 行号槽独立标记（不混入正文文本）。
+     const pre = container.querySelector("pre");
+-    expect(pre?.textContent).toBe("line1\nline2");
++    expect(pre).not.toBeNull();
++    const lineEls = pre!.querySelectorAll<HTMLElement>("[data-line]");
++    expect(Array.from(lineEls).map((el) => el.dataset.line)).toEqual(["1", "2"]);
++    const contents = pre!.querySelectorAll("[data-line] > span:last-child");
++    expect(Array.from(contents).map((el) => el.textContent)).toEqual(["line1", "line2"]);
+     expect(screen.queryByTestId("code-highlight")).not.toBeInTheDocument();
+   });
+ 
+@@ -483,4 +510,165 @@ describe("FilePreview", () => {
+     unmount();
+     expect(revokeObjectURL).toHaveBeenCalledWith(url2);
+   });
++
++  // ── 行号与选区右键（2026-10-10-workspace-ref-intake task-02，FR-04/FR-05）──────
++
++  /** 模拟浏览器文本选区（jsdom Selection 可用，渲染无效但 range 语义真实）。 */
++  function setDomSelection(startNode: Node, endNode: Node) {
++    const sel = window.getSelection();
++    const range = document.createRange();
++    range.setStart(startNode, 0);
++    range.setEnd(endNode, (endNode.textContent ?? "").length);
++    sel!.removeAllRanges();
++    sel!.addRange(range);
++  }
++
++  /** 内容区容器（selectionLineRange 圈定范围）。 */
++  function contentContainer(): HTMLDivElement {
++    const el = document.querySelector(".min-h-0.flex-1.overflow-auto");
++    if (!(el instanceof HTMLDivElement)) throw new Error("内容区容器未找到");
++    return el;
++  }
++
++  it("代码分支开 showLineNumbers（行号穿插渲染，对齐 oneDark 观感）", async () => {
++    mockQueryResult(makeFile({ name: "main.py", content: "a\nb\nc" }));
++    render(<FilePreview workspaceId="ws-1" filePath="backend/main.py" />);
++    const code = await screen.findByTestId("code-highlight");
++    expect(code).toHaveAttribute("data-show-line-numbers", "true");
++    const anchors = code.querySelectorAll(".react-syntax-highlighter-line-number");
++    expect(Array.from(anchors).map((el) => el.textContent)).toEqual(["1", "2", "3"]);
++  });
++
++  it("纯文本分支渲染行号槽与 data-line 行结构，行号列不可选中", () => {
++    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb\ncc" }));
++    const { container } = render(
++      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" />,
++    );
++    const gutters = container.querySelectorAll("[data-ws-ref-line]");
++    expect(Array.from(gutters).map((el) => el.textContent)).toEqual(["1", "2", "3"]);
++    // 行号列 select-none（选区锚点只落内容区，D-007）
++    expect(gutters[0]).toHaveClass("select-none");
++    const lineEls = container.querySelectorAll<HTMLElement>("[data-line]");
++    expect(Array.from(lineEls).map((el) => el.dataset.line)).toEqual(["1", "2", "3"]);
++  });
++
++  it("纯文本分支选中行右键：菜单单项文案含名称:起-止，点击回调 desc 字段正确", () => {
++    const onAddSelectionRef = vi.fn();
++    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb\ncc" }));
++    const { container } = render(
++      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" onAddSelectionRef={onAddSelectionRef} />,
++    );
++    // 选中第 2~3 行内容
++    const lineContents = container.querySelectorAll("[data-line] > span:last-child");
++    setDomSelection(lineContents[1]!.firstChild!, lineContents[2]!.firstChild!);
++    fireEvent.contextMenu(contentContainer(), { clientX: 100, clientY: 100 });
++
++    const item = screen.getByRole("menuitem");
++    expect(item).toHaveTextContent("添加选中内容到会话输入框（notes.txt:2-3）");
++    fireEvent.click(item);
++    expect(onAddSelectionRef).toHaveBeenCalledTimes(1);
++    expect(onAddSelectionRef).toHaveBeenCalledWith({
++      kind: "code",
++      workspaceId: "ws-1",
++      path: "docs/notes.txt",
++      name: "notes.txt",
++      lines: [2, 3],
++    });
++    // 点击后菜单关闭
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++  });
++
++  it("代码分支选中行右键：跨行选区按实际文档行号（反向免疫力由 min-max 结构保证，R-04）", async () => {
++    const onAddSelectionRef = vi.fn();
++    mockQueryResult(makeFile({ name: "main.py", content: "l1\nl2\nl3\nl4" }));
++    const { container } = render(
++      <FilePreview workspaceId="ws-1" filePath="src/main.py" onAddSelectionRef={onAddSelectionRef} />,
++    );
++    await screen.findByTestId("code-highlight");
++    const contents = container.querySelectorAll(".line-content");
++
++    // 跨行正向选区：行 2 → 行 4（构造顺序交替验证 min-max 兜底：先 end 后 start 段落）
++    setDomSelection(contents[1]!.firstChild!, contents[3]!.firstChild!);
++    fireEvent.contextMenu(contentContainer(), { clientX: 50, clientY: 50 });
++    fireEvent.click(screen.getByRole("menuitem"));
++    expect(onAddSelectionRef).toHaveBeenLastCalledWith(
++      expect.objectContaining({ lines: [2, 4] }),
++    );
++
++    // 行 1 → 行 2
++    setDomSelection(contents[0]!.firstChild!, contents[1]!.firstChild!);
++    fireEvent.contextMenu(contentContainer(), { clientX: 60, clientY: 60 });
++    fireEvent.click(screen.getByRole("menuitem"));
++    expect(onAddSelectionRef).toHaveBeenLastCalledWith(
++      expect.objectContaining({ lines: [1, 2] }),
++    );
++    // 注：浏览器反向选区（Shift+点击从后往前）在 DOM Range 层恒 forward（规范
++    // setStart/setEnd 自动 normalize），方向信息只在 Selection anchor/focus——
++    // selectionLineRange 的 min-max 为结构级反向免疫，jsdom 无法构造反向用例。
++  });
++
++  it("无选区右键不拦截（浏览器默认菜单，D-006）；document 点击关闭菜单", () => {
++    const onAddSelectionRef = vi.fn();
++    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb" }));
++    render(
++      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" onAddSelectionRef={onAddSelectionRef} />,
++    );
++    // 清空选区后右键：defaultPrevented=false
++    window.getSelection()!.removeAllRanges();
++    const evt = fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
++    expect(evt).toBe(true); // 未被 preventDefault
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++
++    // 有选区右键出菜单后，document 级点击关闭
++    const lineContents = document.querySelectorAll("[data-line] > span:last-child");
++    setDomSelection(lineContents[0]!.firstChild!, lineContents[1]!.firstChild!);
++    fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
++    expect(screen.getByRole("menu")).toBeInTheDocument();
++    fireEvent.click(document.body);
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++  });
++
++  it("未传 onAddSelectionRef 时选区右键零拦截（explorer 页消费方行为不变）", () => {
++    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb" }));
++    const { container } = render(
++      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" />,
++    );
++    const lineContents = container.querySelectorAll("[data-line] > span:last-child");
++    setDomSelection(lineContents[0]!.firstChild!, lineContents[1]!.firstChild!);
++    const evt = fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
++    expect(evt).toBe(true);
++    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
++  });
++
++  it(".md/图片/二进制/原生预览分支零改动：无行号结构、无选区拦截（D-002）", async () => {
++    // .md：MarkdownText 渲染，无 data-line
++    mockQueryResult(makeFile({ name: "README.md", content: "# t\n\n正文" }));
++    const t1 = render(<FilePreview workspaceId="ws-1" filePath="a/README.md" onAddSelectionRef={vi.fn()} />);
++    await screen.findByTestId("markdown-text");
++    expect(t1.container.querySelector("[data-line]")).toBeNull();
++    expect(t1.container.querySelector("[data-ws-ref-line]")).toBeNull();
++    t1.unmount();
++
++    // 图片：objectURL 内联
++    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
++    mockQueryResult(makeFile({ name: "logo.png", binary: true, content: "" }));
++    const t2 = render(<FilePreview workspaceId="ws-1" filePath="a/logo.png" onAddSelectionRef={vi.fn()} />);
++    await screen.findByRole("img", { name: "logo.png" });
++    expect(t2.container.querySelector("[data-line]")).toBeNull();
++    t2.unmount();
++
++    // 二进制：元信息卡
++    mockQueryResult(makeFile({ name: "app.exe", binary: true, content: "" }));
++    const t3 = render(<FilePreview workspaceId="ws-1" filePath="bin/app.exe" onAddSelectionRef={vi.fn()} />);
++    expect(await screen.findByText(/二进制文件不预览/)).toBeInTheDocument();
++    expect(t3.container.querySelector("[data-line]")).toBeNull();
++    t3.unmount();
++
++    // pdf 原生预览默认态：iframe（sourceMode=false）
++    mockQueryResult(makeFile({ name: "report.pdf", binary: true, content: "" }));
++    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["%pdf"]));
++    const t4 = render(<FilePreview workspaceId="ws-1" filePath="docs/report.pdf" onAddSelectionRef={vi.fn()} />);
++    await screen.findByTitle("report.pdf 浏览器预览");
++    expect(t4.container.querySelector("[data-line]")).toBeNull();
++  });
+ });
+diff --git a/frontend/src/components/explorer/file-explorer.tsx b/frontend/src/components/explorer/file-explorer.tsx
+index d95d92909..d25c32bbe 100644
+--- a/frontend/src/components/explorer/file-explorer.tsx
++++ b/frontend/src/components/explorer/file-explorer.tsx
+@@ -29,13 +29,15 @@
+  * 依据：design.md §7.2 / Wave3 + tasks/task-06.md。
+  */
+ 
+-import { useCallback, useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+ import { Button, Input, Spin, Tree, type TreeProps } from "antd";
+ import type { DataNode } from "antd/es/tree";
+ import { FolderOpen } from "lucide-react";
+ 
+ import { FileNodeIcon } from "@/components/ui/file-node-icon";
++import { FloatingContextMenu } from "@/components/ui/floating-context-menu";
+ import { TreeBox } from "@/components/ui/tree-box";
++import type { WsRefDesc } from "@/lib/attachment-refs";
+ import { ApiError } from "@/lib/api";
+ import {
+   fetchSearch,
+@@ -56,6 +58,12 @@ export interface FileExplorerProps {
+   workspaceId: string;
+   /** 文件节点被选中（树内点击 / 搜索直达命中）时回调，入参为相对工作区根的 POSIX 路径。 */
+   onSelectFile: (path: string) => void;
++  /**
++   * 树右键入口（2026-10-10-workspace-ref-intake FR-01）：右键文件/目录/根节点
++   * 出「添加文件/目录到会话输入框」菜单，点击组装 WsRefDesc 上抛（workspaceId
++   * 取组件 prop）。未传时右键为浏览器默认菜单，树行为与现状一致。
++   */
++  onAddNodeRef?: (desc: WsRefDesc) => void;
+ }
+ 
+ /** 文件大小缩写：B / KB / MB / GB（文件条目右侧灰字，目录不显示）。 */
+@@ -108,11 +116,29 @@ function sortEntries(entries: ExplorerEntry[]): ExplorerEntry[] {
+ 
+ /** 条目标题：名称 + 文件大小缩写（灰字）。整行单行展示——容器 whitespace-nowrap，
+  *  行宽超出容器由树容器 w-max 放开靠外层 overflow-auto 横向滚动看全名
+- *  （ql-20260818-010-f551 滚动语义 + ql-20260821-008-fade 单行修复）。 */
+-function renderTitle(entry: ExplorerEntry) {
++ *  （ql-20260818-010-f551 滚动语义 + ql-20260821-008-fade 单行修复）。
++ *  onContextMenu 挂 title 行元素（FR-01 树右键入口），闭包携带 kind 与 relPath。 */
++function renderTitle(
++  entry: ExplorerEntry,
++  relPath: string,
++  onNodeContextMenu?: (e: ReactMouseEvent, kind: "file" | "dir", path: string, name: string) => void,
++) {
+   const size = entry.type === "file" ? formatSize(entry.size) : "";
+   return (
+-    <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
++    <span
++      className="inline-flex items-baseline gap-1 whitespace-nowrap"
++      onContextMenu={
++        onNodeContextMenu
++          ? (e) =>
++              onNodeContextMenu(
++                e,
++                entry.type === "dir" ? "dir" : "file",
++                relPath,
++                entry.name,
++              )
++          : undefined
++      }
++    >
+       <span title={entry.name}>{entry.name}</span>
+       {size ? <span className="shrink-0 text-[11px] text-muted-foreground">{size}</span> : null}
+     </span>
+@@ -120,23 +146,43 @@ function renderTitle(entry: ExplorerEntry) {
+ }
+ 
+ /** 目录项 → 树节点（key = 相对根 POSIX 路径；目录可展开、文件为叶子）。 */
+-function entriesToNodes(entries: ExplorerEntry[], parentPath: string): DataNode[] {
+-  return sortEntries(entries).map((entry) => ({
+-    key: parentPath === "" ? entry.name : `${parentPath}/${entry.name}`,
+-    title: renderTitle(entry),
+-    isLeaf: entry.type === "file",
+-    icon: <FileNodeIcon name={entry.name} type={entry.type} />,
+-  }));
++function entriesToNodes(
++  entries: ExplorerEntry[],
++  parentPath: string,
++  onNodeContextMenu?: Parameters<typeof renderTitle>[2],
++): DataNode[] {
++  return sortEntries(entries).map((entry) => {
++    const relPath = parentPath === "" ? entry.name : `${parentPath}/${entry.name}`;
++    return {
++      key: relPath,
++      title: renderTitle(entry, relPath, onNodeContextMenu),
++      isLeaf: entry.type === "file",
++      icon: <FileNodeIcon name={entry.name} type={entry.type} />,
++    };
++  });
+ }
+ 
+-/** 根节点：标题「工作区根」，首层 children 挂载时预挂（rc-tree 对已有 children 的节点不再触发 loadData）。 */
+-function makeRootNode(entries: ExplorerEntry[]): DataNode {
++/** 根节点：标题「工作区根」，首层 children 挂载时预挂（rc-tree 对已有 children 的节点不再触发 loadData）。
++ *  根节点 title 行同样挂右键（kind=dir、path="" 空串、name=工作区根，FR-01）。 */
++function makeRootNode(
++  entries: ExplorerEntry[],
++  onNodeContextMenu?: Parameters<typeof renderTitle>[2],
++): DataNode {
+   return {
+     key: ROOT_KEY,
+-    title: <span className="font-medium">{ROOT_TITLE}</span>,
++    title: (
++      <span
++        className="font-medium"
++        onContextMenu={
++          onNodeContextMenu ? (e) => onNodeContextMenu(e, "dir", "", ROOT_TITLE) : undefined
++        }
++      >
++        {ROOT_TITLE}
++      </span>
++    ),
+     isLeaf: entries.length === 0,
+     icon: <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />,
+-    children: entriesToNodes(entries, ""),
++    children: entriesToNodes(entries, "", onNodeContextMenu),
+   };
+ }
+ 
+@@ -151,7 +197,7 @@ function formatExplorerError(err: unknown, fallback: string): string {
+   return fallback;
+ }
+ 
+-export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
++export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileExplorerProps) {
+   // ── 树状态（受控）──────────────────────────────────────────────────────
+   const [treeData, setTreeData] = useState<DataNode[]>([]);
+   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+@@ -161,6 +207,32 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+   /** 根层重试计数器（自增触发 effect 重载）。 */
+   const [rootNonce, setRootNonce] = useState(0);
+ 
++  // ── 树右键菜单（FR-01）：未传 onAddNodeRef 时零拦截（浏览器默认菜单）────
++  const [nodeMenu, setNodeMenu] = useState<{
++    x: number;
++    y: number;
++    kind: "file" | "dir";
++    path: string;
++    name: string;
++  } | null>(null);
++
++  /** 行右键：preventDefault 出受控菜单（右键不改变选中与展开语义——不走 antd
++   *  onRightClick/onSelect 链路，选中仍走 onSelect）。 */
++  const handleNodeContextMenu = useCallback(
++    (
++      e: ReactMouseEvent,
++      kind: "file" | "dir",
++      path: string,
++      name: string,
++    ) => {
++      if (!onAddNodeRef) return;
++      e.preventDefault();
++      e.stopPropagation();
++      setNodeMenu({ x: e.clientX, y: e.clientY, kind, path, name });
++    },
++    [onAddNodeRef],
++  );
++
+   // ── 搜索状态 ─────────────────────────────────────────────────────────
+   /** 输入框当前值（逐键变化）。 */
+   const [searchInput, setSearchInput] = useState("");
+@@ -196,7 +268,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+       try {
+         const resp = await fetchTree(workspaceId, "");
+         if (cancelled) return;
+-        setTreeData([makeRootNode(resp.entries)]);
++        setTreeData([makeRootNode(resp.entries, handleNodeContextMenu)]);
+         // 根自动展开，首层目录直接可见（children 已预挂，不再触发 loadData）。
+         setExpandedKeys([ROOT_KEY]);
+       } catch (err) {
+@@ -218,7 +290,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+     const path = keyToPath(node.key);
+     try {
+       const resp = await fetchTree(workspaceId, path);
+-      setTreeData((prev) => updateTreeData(prev, node.key, entriesToNodes(resp.entries, path)));
++      setTreeData((prev) => updateTreeData(prev, node.key, entriesToNodes(resp.entries, path, handleNodeContextMenu)));
+     } catch (err) {
+       // 单节点失败：置空 children（与空目录区分靠红条）+ 提示，不崩溃。
+       setTreeData((prev) => updateTreeData(prev, node.key, []));
+@@ -301,7 +373,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+             continue;
+           }
+           const resp = await fetchTree(workspaceId, dir);
+-          tree = updateTreeData(tree, dir, entriesToNodes(resp.entries, dir));
++          tree = updateTreeData(tree, dir, entriesToNodes(resp.entries, dir, handleNodeContextMenu));
+           expanded.add(dir);
+           // 逐层落盘渲染（受控 expandedKeys 同步更新才能逐层展开）。
+           setTreeData(tree);
+@@ -316,7 +388,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+           const existing = findNode(tree, match.path);
+           if (!existing?.children) {
+             const resp = await fetchTree(workspaceId, match.path);
+-            tree = updateTreeData(tree, match.path, entriesToNodes(resp.entries, match.path));
++            tree = updateTreeData(tree, match.path, entriesToNodes(resp.entries, match.path, handleNodeContextMenu));
+           }
+           expanded.add(match.path);
+           setTreeData(tree);
+@@ -331,7 +403,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+         navigatingRef.current = false;
+       }
+     },
+-    [workspaceId, onSelectFile],
++    [workspaceId, onSelectFile, handleNodeContextMenu],
+   );
+ 
+   const showResultPanel = searching || searchError !== "" || results !== null;
+@@ -428,6 +500,36 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+           />
+         </TreeBox>
+       )}
++
++      {/* 树右键菜单（FR-01）：受控 FloatingContextMenu，单项「添加文件/目录到会话
++          输入框」；点击组装 WsRefDesc（workspaceId 取组件 prop）上抛后关闭。 */}
++      <FloatingContextMenu
++        open={nodeMenu !== null}
++        x={nodeMenu?.x ?? 0}
++        y={nodeMenu?.y ?? 0}
++        onClose={() => setNodeMenu(null)}
++        items={
++          nodeMenu
++            ? [
++                {
++                  key: "add-ws-ref",
++                  label:
++                    nodeMenu.kind === "file"
++                      ? "添加文件到会话输入框"
++                      : "添加目录到会话输入框",
++                  onSelect: () => {
++                    onAddNodeRef?.({
++                      kind: nodeMenu.kind,
++                      workspaceId,
++                      path: nodeMenu.path,
++                      name: nodeMenu.name,
++                    });
++                  },
++                },
++              ]
++            : []
++        }
++      />
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/explorer/file-preview.tsx b/frontend/src/components/explorer/file-preview.tsx
+index ca6d733d8..d1341172b 100644
+--- a/frontend/src/components/explorer/file-preview.tsx
++++ b/frontend/src/components/explorer/file-preview.tsx
+@@ -33,8 +33,8 @@
+  */
+ 
+ import dynamic from "next/dynamic";
+-import type { ReactNode } from "react";
+-import { useCallback, useEffect, useState } from "react";
++import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
++import { useCallback, useEffect, useRef, useState } from "react";
+ import { Alert, Button, Image, Spin, Typography } from "antd";
+ import {
+   CodeOutlined,
+@@ -46,6 +46,7 @@ import {
+ 
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import { MarkdownText } from "@/components/ui/markdown-text";
++import type { WsRefDesc } from "@/lib/attachment-refs";
+ import { formatFileSize } from "@/lib/file/utils";
+ import { downloadExplorerFile, fetchDownload, useExplorerFile } from "@/lib/explorer";
+ 
+@@ -336,6 +337,159 @@ function BinaryMetaCard({ name, size, mtime }: { name: string; size: number; mti
+   );
+ }
+ 
++// ── 行号与选区引用（2026-10-10-workspace-ref-intake task-02，FR-04/FR-05）──
++
++/**
++ * 纯文本分支行号槽统一标记——selectionLineRange 的行号锚（textContent=行号）。
++ * 代码分支（SyntaxHighlighter）用其内置行号 span（class=
++ * ``react-syntax-highlighter-line-number``）作锚，两类锚统一按文本解析行号。
++ */
++const WS_REF_LINE_ATTR = "data-ws-ref-line";
++/** 行号锚选择器：自绘行号槽 + SyntaxHighlighter 内置行号。 */
++const LINE_ANCHOR_SELECTOR = `[${WS_REF_LINE_ATTR}], .react-syntax-highlighter-line-number`;
++
++/** 文本内容按行拆分（尾换行不产空末行，行号与编辑器 1 起始语义一致）。 */
++function splitContentLines(content: string): string[] {
++  const lines = content.split("\n");
++  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
++  return lines;
++}
++
++/**
++ * 纯文本分支行结构渲染：行号槽（不可选中）+ 内容行（挂 data-line），保留
++ * ``whitespace-pre`` 不软折行 + 横向滚动语义（ql-20260818-010-f551）。
++ * 行号列宽按总行数位数自适应（等宽字体 ch 单位），右对齐留 gutter。
++ */
++function PlainTextWithLineNumbers({ content }: { content: string }) {
++  const lines = splitContentLines(content);
++  const gutterCh = String(lines.length).length + 1;
++  return (
++    <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed">
++      {lines.map((line, i) => (
++        <div key={i} data-line={i + 1} className="flex whitespace-pre">
++          <span
++            {...{ [WS_REF_LINE_ATTR]: i + 1 }}
++            className="flex-none select-none pr-3 text-right text-muted-foreground/70"
++            style={{ minWidth: `${gutterCh}ch` }}
++          >
++            {i + 1}
++          </span>
++          <span className="whitespace-pre">{line || "\u00A0"}</span>
++        </div>
++      ))}
++    </pre>
++  );
++}
++
++/**
++ * 选区行范围（FR-05/D-006/R-04）：按选区起止节点的「前序最近行号锚」取实际文档
++ * 行号（非字符 offset——软折行/横向滚动天然免疫），反向选区取 min-max。选区
++ * 折叠、为空或起止不在内容区行结构内 → null（调用方放行浏览器默认右键菜单）。
++ */
++export function selectionLineRange(container: HTMLElement): [number, number] | null {
++  const sel = typeof window === "undefined" ? null : window.getSelection();
++  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
++  const range = sel.getRangeAt(0);
++  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
++    return null;
++  }
++  const anchors = Array.from(container.querySelectorAll<HTMLElement>(LINE_ANCHOR_SELECTOR));
++  if (anchors.length === 0) return null;
++
++  /** node 的前序最近行号锚下标（含自身/祖先命中）；无 → -1。 */
++  const precedingAnchorIdx = (node: Node): number => {
++    const el = node instanceof HTMLElement ? node : node.parentElement;
++    if (!el) return -1;
++    let best = -1;
++    anchors.forEach((anchor, i) => {
++      if (anchor === el || anchor.contains(el) || el.contains(anchor)) {
++        best = i;
++        return;
++      }
++      // rel 中 FOLLOWING 位=el 在 anchor 之后（anchor 前置于 el）
++      const rel = anchor.compareDocumentPosition(el);
++      if (rel & Node.DOCUMENT_POSITION_FOLLOWING) best = i;
++    });
++    return best;
++  };
++
++  const startIdx = precedingAnchorIdx(range.startContainer);
++  const endIdx = precedingAnchorIdx(range.endContainer);
++  if (startIdx < 0 || endIdx < 0) return null;
++  const l0 = Number(anchors[startIdx]!.textContent);
++  const l1 = Number(anchors[endIdx]!.textContent);
++  if (!Number.isFinite(l0) || !Number.isFinite(l1) || l0 < 1 || l1 < 1) return null;
++  return [Math.min(l0, l1), Math.max(l0, l1)];
++}
++
++/** 选区右键菜单态（FR-05）：右键坐标 + 选区行范围。 */
++interface SelectionMenuState {
++  x: number;
++  y: number;
++  lines: [number, number];
++}
++
++/**
++ * 选区右键菜单（本文件内联实现，task-03 的通用浮动菜单组件并行无依赖——
++ * 看板 kanban-task-context-menu.tsx:29-47 同模式）：fixed 定位 + document 级
++ * click/contextmenu/scroll 关闭（capture 兜内部滚动）+ 视口 clamp。受控 React
++ * 状态，监听随菜单关闭/卸载移除，无残留。
++ */
++function SelectionContextMenu({
++  state,
++  fileName,
++  onPick,
++  onClose,
++}: {
++  state: SelectionMenuState;
++  fileName: string;
++  onPick: (lines: [number, number]) => void;
++  onClose: () => void;
++}) {
++  useEffect(() => {
++    const close = () => onClose();
++    document.addEventListener("click", close);
++    document.addEventListener("contextmenu", close);
++    window.addEventListener("scroll", close, true);
++    window.addEventListener("resize", close);
++    return () => {
++      document.removeEventListener("click", close);
++      document.removeEventListener("contextmenu", close);
++      window.removeEventListener("scroll", close, true);
++      window.removeEventListener("resize", close);
++    };
++  }, [onClose]);
++
++  const [l0, l1] = state.lines;
++  // 视口 clamp：菜单右/下缘不溢出（粗估菜单尺寸 220x44，右键坐标即左上角）。
++  const left = Math.max(8, Math.min(state.x, window.innerWidth - 228));
++  const top = Math.max(8, Math.min(state.y, window.innerHeight - 52));
++  return (
++    <div
++      role="menu"
++      style={{ left, top }}
++      className="fixed z-50 min-w-[13rem] rounded-md border border-border bg-popover p-1 shadow-md"
++    >
++      <button
++        type="button"
++        role="menuitem"
++        className="block w-full truncate rounded px-2 py-1.5 text-left text-xs text-popover-foreground hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-brand-600/20"
++        onClick={() => {
++          onPick(state.lines);
++          onClose();
++        }}
++      >
++        添加选中内容到会话输入框（{fileName}:{l0}-{l1}）
++      </button>
++    </div>
++  );
++}
++
++/** 路径末段文件名（path 末空段过滤，兼容反斜杠）。 */
++function nameOf(path: string): string {
++  return path.split(/[\\/]/).filter(Boolean).pop() || path;
++}
++
+ // ── 主组件 ────────────────────────────────────────────────────────────
+ 
+ export interface FilePreviewProps {
+@@ -343,9 +497,15 @@ export interface FilePreviewProps {
+   workspaceId: string;
+   /** 选中文件相对路径（相对工作区根）；null=未选中，显示空态占位。 */
+   filePath: string | null;
++  /**
++   * 选区右键入口回调（2026-10-10-workspace-ref-intake FR-05）：代码/纯文本分支
++   * 选中行右键「添加选中内容到会话输入框」时组装 kind=code 的引用描述符上抛；
++   * 未传（explorer 页等其它消费方）不拦截 contextmenu，行为与现状一致（D-002）。
++   */
++  onAddSelectionRef?: (desc: WsRefDesc) => void;
+ }
+ 
+-export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
++export function FilePreview({ workspaceId, filePath, onAddSelectionRef }: FilePreviewProps) {
+   const query = useExplorerFile(workspaceId, filePath);
+   const [downloading, setDownloading] = useState(false);
+   const [downloadFailed, setDownloadFailed] = useState(false);
+@@ -360,6 +520,38 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+   useEffect(() => {
+     setSourceMode(false);
+   }, [filePath]);
++  // 选区右键菜单态（FR-05）：null=无菜单；内容区 ref 供 selectionLineRange 圈定。
++  const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
++  const contentRef = useRef<HTMLDivElement | null>(null);
++
++  /** 选区右键（D-006）：仅文本类分支（代码/纯文本）+ 已传回调 + 非空选区才拦截；
++   *  其余场景放行浏览器默认菜单。 */
++  const handleContentContextMenu = useCallback(
++    (e: ReactMouseEvent<HTMLDivElement>) => {
++      if (!onAddSelectionRef || !contentRef.current) return;
++      const lines = selectionLineRange(contentRef.current);
++      if (!lines) return;
++      e.preventDefault();
++      setSelectionMenu({ x: e.clientX, y: e.clientY, lines });
++    },
++    [onAddSelectionRef],
++  );
++
++  /** 菜单项点击：组装 kind=code 的引用描述符上抛（D-003 指向语义——只带行范围）。 */
++  const handlePickSelection = useCallback(
++    (lines: [number, number]) => {
++      if (filePath == null) return;
++      const fileName = nameOf(filePath);
++      onAddSelectionRef?.({
++        kind: "code",
++        workspaceId,
++        path: filePath,
++        name: fileName,
++        lines,
++      });
++    },
++    [onAddSelectionRef, workspaceId, filePath],
++  );
+ 
+   const handleDownload = useCallback(async () => {
+     if (filePath == null || downloading) return;
+@@ -408,12 +600,16 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+   const data = query.data;
+   if (!data) return null;
+ 
+-  const name = data.name || filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
++  const name = data.name || nameOf(filePath);
+   const ext = fileExtension(name);
+   const isImage = IMAGE_EXTENSIONS.has(ext);
+   const isNativePreview = BROWSER_PREVIEW_EXTENSIONS.has(ext);
+   const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
+   const language = CODE_LANGUAGES[ext];
++  // 选区右键仅覆盖文本类分支（代码/纯文本，D-002：.md 富文本无行号概念不拦截）；
++  // 原生预览默认态走 iframe、源码态的 pdf 走 binary 卡，同样无选区功能。
++  const selectionBranch =
++    !isImage && !data.binary && !isMarkdown && !(isNativePreview && !sourceMode);
+ 
+   // 内容区分发（原生预览默认态优先：pdf/html/htm 直接 iframe 渲染，「源码」切换
+   // 后走原分支——html→高亮源码、pdf→binary 元信息卡；图片优先于 binary 判定）
+@@ -439,18 +635,23 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+         language={language}
+         style={oneDark}
+         customStyle={{ margin: 0, borderRadius: 6, fontSize: 12 }}
++        // 行号（FR-04/D-007）：oneDark 自带行号配色；列不可选中（选区锚点只落内容区），
++        // 对齐 fontSize 12 观感（R-03）。
++        showLineNumbers
++        lineNumberStyle={{
++          userSelect: "none",
++          minWidth: "3ch",
++          paddingRight: "0.75rem",
++          fontSize: 12,
++        }}
+       >
+         {data.content}
+       </SyntaxHighlighter>
+     );
+   } else {
+-    // 纯文本与代码高亮分支统一「不软折行 + 横向滚动」语义（ql-20260818-010-f551），
+-    // 避免长行代码被 wrap 折得难读；容器 overflow-auto 提供横向滚动。
+-    body = (
+-      <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre">
+-        {data.content}
+-      </pre>
+-    );
++    // 纯文本分支行结构化（FR-04）：行号槽 + 内容行（data-line），保留 whitespace-pre
++    // 与横向滚动语义（ql-20260818-010-f551）；行号列为 selectionLineRange 锚。
++    body = <PlainTextWithLineNumbers content={data.content} />;
+   }
+ 
+   // 截断警示仅对实际渲染文本内容的分支展示（原生预览/图片/二进制不渲染 content，无截断可言）
+@@ -509,7 +710,11 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+           </Button>
+         </div>
+       </div>
+-      <div className="min-h-0 flex-1 overflow-auto p-3">
++      <div
++        ref={contentRef}
++        className="min-h-0 flex-1 overflow-auto p-3"
++        onContextMenu={selectionBranch ? handleContentContextMenu : undefined}
++      >
+         {showTruncatedTip && (
+           <Alert
+             type="warning"
+@@ -520,6 +725,16 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+         )}
+         {body}
+       </div>
++      {/* 选区右键菜单（FR-05）：fixed 定位随内容区滚动关闭；Modal 之后渲染不影响
++          既有 flex 布局（脱离文档流）。 */}
++      {selectionMenu && (
++        <SelectionContextMenu
++          state={selectionMenu}
++          fileName={name}
++          onPick={handlePickSelection}
++          onClose={() => setSelectionMenu(null)}
++        />
++      )}
+       {/* 统一预览弹窗（2026-08-26-file-fullscreen-preview / FR-05）：打开即全屏，
+           target 构造见头部「全屏预览」按钮（不携带 officeSource，D-007）。Modal 经
+           Portal 渲染到 body，作为根 div 的 JSX 子节点不影响 flex 布局 */}
+diff --git a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+index 0c14d22bd..1dfe288d6 100644
+--- a/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
++++ b/frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+@@ -36,6 +36,7 @@
+  */
+ 
+ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++import { useState } from "react";
+ import {
+   cleanup,
+   createEvent,
+@@ -3054,3 +3055,168 @@ describe("汇总收口状态卡（task-10）", () => {
+   });
+ });
+ 
++
++// 2026-10-10-workspace-ref-intake task-08：群聊工作区引用全链路（槽位消费/并集分配/
++// 退格整删/发送置换/历史三类标签）。
++describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () => {
++  /** 带槽位 props 的挂载（受控槽位经全局 setter 驱动，单聊 SlotBar 同款）。 */
++  function renderPanelWithSlot(): ReturnType<typeof render> {
++    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++    panelQc = qc;
++    function SlotHost() {
++      const [slot, setSlot] = useState<{
++        desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
++        nonce: number;
++      } | null>(null);
++      (globalThis as {
++        __setGroupSlot?: (s: {
++          desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
++          nonce: number;
++        } | null) => void;
++      }).__setGroupSlot = setSlot;
++      return (
++        <QueryClientProvider client={qc}>
++          <GroupChatPanel
++            groupId="g-1"
++            group={null}
++            onSessionListRefresh={vi.fn()}
++            pendingWsRefInsert={slot as never}
++            onPendingWsRefInsertHandled={setSlot as never}
++          />
++        </QueryClientProvider>
++      );
++    }
++    return render(<SlotHost />);
++  }
++
++  function pushGroupSlot(
++    desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] },
++    nonce: number,
++  ) {
++    act(() => {
++      (globalThis as { __setGroupSlot?: (s: unknown) => void }).__setGroupSlot?.({ desc, nonce });
++    });
++  }
++
++  it("槽位插入【design.md】→ 发送置换为 [文件引用:wid|path] → 草稿与映射清空", async () => {
++    window.localStorage.clear();
++    harness.logsJson = [];
++    renderPanelWithSlot();
++    await waitForStreamWired();
++    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
++    pushGroupSlot(
++      { kind: "file", workspaceId: "ws-9", path: "docs/design.md", name: "design.md" },
++      1,
++    );
++    await waitFor(() => expect(ta.value).toContain("【design.md】"));
++    // 输入尾追加正文后发送（守卫空文本）。
++    fireEvent.change(ta, { target: { value: ta.value + " 看下方案" } });
++    await act(async () => {
++      fireEvent.keyDown(ta, { key: "Enter" });
++    });
++    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1));
++    expect(mocks.sendGroupMessage.mock.calls[0]![1]).toBe(
++      "[文件引用:ws-9|docs/design.md] 看下方案",
++    );
++  });
++
++  it("代码引用槽位带行号段；重复触发同 token 再插一枚", async () => {
++    window.localStorage.clear();
++    harness.logsJson = [];
++    renderPanelWithSlot();
++    await waitForStreamWired();
++    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
++    pushGroupSlot(
++      { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
++      1,
++    );
++    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】"));
++    pushGroupSlot(
++      { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
++      2,
++    );
++    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】【a.py:10-16】"));
++  });
++
++  it("退格整删工作区标签（光标贴尾一次删整枚）", async () => {
++    window.localStorage.clear();
++    harness.logsJson = [];
++    renderPanelWithSlot();
++    await waitForStreamWired();
++    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
++    pushGroupSlot(
++      { kind: "file", workspaceId: "ws-9", path: "x.md", name: "x.md" },
++      1,
++    );
++    await waitFor(() => expect(ta.value).toBe("【x.md】"));
++    ta.setSelectionRange(ta.value.length, ta.value.length);
++    fireEvent.keyDown(ta, { key: "Backspace" });
++    await waitFor(() => expect(ta.value).toBe(""));
++  });
++
++  it("删附件不误剥工作区 token（删除联动隔离）", async () => {
++    window.localStorage.clear();
++    harness.logsJson = [];
++    renderPanelWithSlot();
++    await waitForStreamWired();
++    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
++    // 上传附件（upload mock 固定回包 name=报错日志.txt）并右击插入。
++    const fileInput = screen.getByLabelText("选择群消息附件") as HTMLInputElement;
++    Object.defineProperty(fileInput, "files", {
++      value: [new File(["x"], "任意名.md", { type: "text/plain" })],
++    });
++    await act(async () => {
++      fireEvent.change(fileInput);
++      await Promise.resolve();
++    });
++    await waitFor(() =>
++      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1),
++    );
++    fireEvent.contextMenu(screen.getByTitle(/右击插入正文引用/));
++    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】"));
++    // 槽位插入同名工作区文件 → ·2（并集池跨类唯一化）。
++    pushGroupSlot(
++      { kind: "file", workspaceId: "ws-9", path: "docs/报错日志.txt", name: "报错日志.txt" },
++      1,
++    );
++    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】【报错日志.txt·2】"));
++    // 点 X 删附件 → 只剥附件 token。
++    fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
++    await waitFor(() => expect(ta.value).toBe("【报错日志.txt·2】"));
++  });
++
++  it("历史气泡三类标记渲染标签（code 引用图标+行号段）", async () => {
++    const WID = "cccccccc-1111-2222-3333-444444444444";
++    window.localStorage.clear();
++    harness.logsJson = [
++      {
++        id: "log-ws-1",
++        run_id: "r-ws",
++        timestamp: "2026-10-10T10:00:00Z",
++        channel: "user_input",
++        content_redacted: "看[代码引用:" + WID + "|src/a.py|L10-L16]这段",
++        metadata: { sender_member_name: "u1", sender_user_id: "u-1" },
++      },
++    ];
++    renderPanel();
++    await waitForStreamWired();
++    const tag = await screen.findByTitle("代码：src/a.py 第 10-16 行（点击预览）");
++    expect(tag.textContent).toBe("a.py:10-16");
++    expect(tag.querySelector("svg")!.getAttribute("class")).toContain("lucide-braces");
++    // 无标记消息仍走原高亮路径（renderMentionHighlights，其余既有用例覆盖）。
++  });
++
++  it("未接槽位的旧挂载（不传 props）零回归：无插入无置换直发原文", async () => {
++    window.localStorage.clear();
++    harness.logsJson = [];
++    renderPanel();
++    await waitForStreamWired();
++    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
++    fireEvent.change(ta, { target: { value: "普通消息" } });
++    await act(async () => {
++      fireEvent.keyDown(ta, { key: "Enter" });
++    });
++    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1));
++    expect(mocks.sendGroupMessage.mock.calls[0]![1]).toBe("普通消息");
++  });
++});
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 5912afebd..3cef0ffc2 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -147,10 +147,14 @@ import {
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import {
+   allocateAttRefToken,
+-  parseInlineAttRefs,
++  allocateWsRefToken,
++  parseInlineRefs,
+   stripAttRefTokens,
+   substituteAttRefsForSend,
++  substituteWsRefsForSend,
++  wsRefMapKey,
+   type AttRefTokenMap,
++  type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
+ import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
+@@ -1038,6 +1042,16 @@ export interface GroupChatPanelProps {
+   /** 列表刷新信号（群解散/成员变更后 invalidate 通道，同 SessionPanel 语义）。 */
+   onSessionListRefresh?: () => void;
+   className?: string;
++  /**
++   * 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06 下发 / task-08
++   * 消费）：{desc, nonce}，nonce 自增保证同引用可重复触发；未传（本变更前
++   * 挂载方）零回归。类型先行声明归 D-012 裁决（通道文件缺口）。
++   */
++  pendingWsRefInsert?: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null;
++  /** 槽位消费完成回抛（portal 清槽）。 */
++  onPendingWsRefInsertHandled?: (
++    next: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null,
++  ) => void;
+ }
+ 
+ /**
+@@ -1049,6 +1063,8 @@ export function GroupChatPanel({
+   group,
+   onSessionListRefresh,
+   className,
++  pendingWsRefInsert,
++  onPendingWsRefInsertHandled,
+ }: GroupChatPanelProps) {
+   const notify = useNotify();
+   const qc = useQueryClient();
+@@ -1761,11 +1777,58 @@ export function GroupChatPanel({
+    * （attId → 编辑态 token，D-002/D-003/D-004——右击插入/删附件联动剥离/
+    * handleSend 置换，单聊 session-input-bar 同款口径）。 */
+   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
++  /* 2026-10-10-workspace-ref-intake task-08：工作区引用 token 映射（FR-08 三输入
++   * 区行为一致——分配池=附件∪工作区∪正文 inText 并集，D-005；组装位
++   * substituteWsRefsForSend 消费，D-008@v2）。 */
++  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
++  /** 两池并集 token 集（overlay 高亮 / 退格整删共用）。 */
++  const allRefTokens = [
++    ...Object.values(attTokenMap),
++    ...Object.values(wsRefTokens).map((e) => e.token),
++  ];
++  /** × 角标删除统一入口：一处出现移除 + 同步清工作区映射条目。 */
++  const removeRefOnce = (token: string) => {
++    setDraft((prev) => {
++      const idx = prev.indexOf(token);
++      return idx < 0 ? prev : prev.slice(0, idx) + prev.slice(idx + token.length);
++    });
++    if (Object.values(wsRefTokens).some((e) => e.token === token)) {
++      setWsRefTokens((prev) => {
++        const next = { ...prev };
++        for (const [k, e] of Object.entries(next)) {
++          if (e.token === token) delete next[k];
++        }
++        return next;
++      });
++    }
++  };
+   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart。 */
+   const groupLastCaretRef = useRef<number | null>(null);
+   /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示（单聊同款）。 */
+   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+   const attOverlayRef = useRef<HTMLDivElement | null>(null);
++  /* task-08（FR-03）：overlay 类型角标元数据（单聊 session-input-bar 同款）。 */
++  const overlayTokenMetas = useMemo(() => {
++    const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
++    for (const att of pendingAttachments) {
++      const token = attTokenMap[att.id];
++      if (token) metas[token] = { kind: "att", title: `附件：${att.name}` };
++    }
++    for (const { desc, token } of Object.values(wsRefTokens)) {
++      if (desc.kind === "code" && desc.lines) {
++        metas[token] = {
++          kind: "code",
++          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceId}）`,
++        };
++      } else if (desc.kind === "dir") {
++        metas[token] = { kind: "dir", title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceId}）` };
++      } else {
++        metas[token] = { kind: "file", title: `文件：${desc.path}（工作区 ${desc.workspaceId}）` };
++      }
++    }
++    return metas;
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [attTokenMap, wsRefTokens, pendingAttachments]);
+   const openPendingAttachmentPreview = (att: AttachmentRead) => {
+     setPendingPreview({
+       fetch: () => fetchAttachmentBlob(att.id),
+@@ -1953,20 +2016,63 @@ export function GroupChatPanel({
+     }
+   };
+ 
+-  const removeAttRefOnce = (token: string) => {
+-    setDraft((prev) => {
+-      const idx = prev.indexOf(token);
+-      return idx < 0 ? prev : prev.slice(0, idx) + prev.slice(idx + token.length);
+-    });
++  /* task-08：工作区引用插入（portal 槽位消费）——分配/复用 token 后按
++   *  handleInsertAttRef 同款光标机制（groupLastCaretRef 失焦光标位 + rAF 复位）。 */
++  const insertWsRefToken = (desc: import("@/lib/attachment-refs").WsRefDesc) => {
++    const key = wsRefMapKey(desc);
++    let entry = wsRefTokens[key];
++    if (!entry) {
++      const inText = draft.match(/【[^】]*】/g) ?? [];
++      const pool = [...allRefTokens, ...inText].filter(Boolean);
++      const base = desc.lines
++        ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
++        : desc.name;
++      entry = { desc, token: allocateWsRefToken(base, pool) };
++      setWsRefTokens({ ...wsRefTokens, [key]: entry });
++    }
++    const input = inputRef.current;
++    const focused = !!input && document.activeElement === input;
++    const caret = focused
++      ? (input.selectionStart ?? draft.length)
++      : (groupLastCaretRef.current ?? draft.length);
++    const next = draft.slice(0, caret) + entry.token + draft.slice(caret);
++    setDraft(next);
++    groupLastCaretRef.current = caret + entry.token.length;
++    const restore = () => {
++      if (!input) return;
++      input.focus();
++      input.setSelectionRange(caret + entry!.token.length, caret + entry!.token.length);
++    };
++    if (typeof requestAnimationFrame === "function") {
++      requestAnimationFrame(restore);
++    } else {
++      restore();
++    }
+   };
+ 
++  /* 槽位消费（FR-01 落地点，单聊同款）：依赖 nonce（同引用连续添加可重复触发）；
++   *  消费后回抛清槽。未传槽位（旧挂载方）零 effect 副作用。 */
++  const handledWsNonceRef = useRef<number | null>(null);
++  useEffect(() => {
++    if (!pendingWsRefInsert) return;
++    if (handledWsNonceRef.current === pendingWsRefInsert.nonce) return;
++    handledWsNonceRef.current = pendingWsRefInsert.nonce;
++    insertWsRefToken(pendingWsRefInsert.desc);
++    onPendingWsRefInsertHandled?.(null);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [pendingWsRefInsert?.nonce]);
++
+   const performSend = useCallback(async () => {
+     const rawContent = draft.trim();
+     const attachmentIds = pendingAttachments.map((a) => a.id);
+     if ((!rawContent && attachmentIds.length === 0) || sending) return;
+     // task-05（D-003）：正文引用 token 置换为 uuid 锚定正式引用（群聊出口仅
+-    // 此处；tokenMap 空时原样返回）。守卫口径用原文。
+-    const content = substituteAttRefsForSend(rawContent, attTokenMap, pendingAttachments);
++    // 此处；tokenMap 空时原样返回）。守卫口径用原文。task-08（FR-06/D-008@v2）：
++    // 工作区 token 同点位串联置换（三类标记）。
++    const content = substituteWsRefsForSend(
++      substituteAttRefsForSend(rawContent, attTokenMap, pendingAttachments),
++      wsRefTokens,
++    );
+     setSending(true);
+     // 发送即收口 typing（停顿指示器 + 心跳）。
+     stopTypingReport();
+@@ -1983,6 +2089,7 @@ export function GroupChatPanel({
+       setDraft("");
+       setPendingAttachments([]);
+       setAttTokenMap({});
++      setWsRefTokens({});
+       setReplyTarget(null);
+       setUploadError(null);
+       /* ── quick 群 P2 触发失败展示：消息恒 200 已落时间线，单成员触发失败
+@@ -2002,7 +2109,7 @@ export function GroupChatPanel({
+       setSending(false);
+       inputRef.current?.focus();
+     }
+-  }, [draft, sending, groupId, pendingAttachments, attTokenMap, replyTarget, notify, stopTypingReport]);
++  }, [draft, sending, groupId, pendingAttachments, attTokenMap, wsRefTokens, replyTarget, notify, stopTypingReport]);
+ 
+   const handleSend = useCallback(async () => {
+     const content = draft.trim();
+@@ -2056,7 +2163,7 @@ export function GroupChatPanel({
+       const { selectionStart: s, selectionEnd: en } = ta;
+       if (s === en && s > 0) {
+         const before = draft.slice(0, s);
+-        const matched = Object.values(attTokenMap)
++        const matched = allRefTokens
+           .filter((t) => t && before.endsWith(t))
+           .sort((a, b) => b.length - a.length);
+         const token = matched[0];
+@@ -2064,6 +2171,16 @@ export function GroupChatPanel({
+           e.preventDefault();
+           const next = draft.slice(0, s - token.length) + draft.slice(s);
+           setDraft(next);
++          // 整删同步清工作区映射条目（附件映射由删附件联动管理）。
++          if (Object.values(wsRefTokens).some((e2) => e2.token === token)) {
++            setWsRefTokens((prev) => {
++              const nm = { ...prev };
++              for (const [k, e2] of Object.entries(nm)) {
++                if (e2.token === token) delete nm[k];
++              }
++              return nm;
++            });
++          }
+           // 光标复位到标签原起点（受控 value DOM 更新后延迟执行）。
+           const input = inputRef.current;
+           const caret = s - token.length;
+@@ -3042,12 +3159,14 @@ export function GroupChatPanel({
+             >
+               <InputRefOverlay
+                 value={draft}
+-                tokens={Object.values(attTokenMap)}
+-                onRemoveToken={removeAttRefOnce}
++                tokens={allRefTokens}
++                onRemoveToken={removeRefOnce}
+                 overlayClassName="min-h-[44px] w-full px-3.5 py-2.5 text-[13.5px]"
+                 overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
+                 visibleBadgeIndex={hoveredRefOcc}
+                 containerRef={attOverlayRef}
++                /* task-08（FR-03/D-001）：两池 token 补类型元数据（角标+tooltip）。 */
++                tokenMetas={overlayTokenMetas}
+               />
+               <textarea
+                 ref={inputRef}
+@@ -3424,7 +3543,7 @@ function GroupTimelineRowInner({
+                   /* task-06：正文含行内附件引用 → 标签化渲染（点击预览）；
+                      该分支下 @提及暂不走高亮管线（引用+@ 同存为少数组合，
+                      文本原样保留语义不变）；绝大多数消息走原高亮路径零变化。 */
+-                  parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
++                  parseInlineRefs(entry.content).some((p) => p.type === "ref") ? (
+                     <InlineAttRefTextWithPreview text={entry.content} tone="onPrimary" />
+                   ) : (
+                     renderMentionHighlights(entry.content, memberNames, true)
+@@ -3481,7 +3600,7 @@ function GroupTimelineRowInner({
+               {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self={false} />}
+               {entry.content ? (
+                 /* task-06：他人消息同款分支——正文含行内引用走标签渲染。 */
+-                parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
++                parseInlineRefs(entry.content).some((p) => p.type === "ref") ? (
+                   <InlineAttRefTextWithPreview text={entry.content} />
+                 ) : (
+                   renderMentionHighlights(entry.content, memberNames, false)
+diff --git a/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx b/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
+index 13ee37b34..7147d75a8 100644
+--- a/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
++++ b/frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx
+@@ -237,3 +237,45 @@ describe("portal-file-panels（task-01）", () => {
+     expect(SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT).toBeLessThan(SESSIONS_FILE_PREVIEW_WIDTH_MAX);
+   });
+ });
++
++// 2026-10-10-workspace-ref-intake task-06：两壳新增引用入口 props 直通。
++describe("portal-file-panels 引用入口 props 直通（workspace-ref-intake task-06）", () => {
++  it("PortalFileTreePanel 透传 onAddNodeRef——右键文件节点经菜单触发回调", async () => {
++    mockDefaultTree();
++    const onAddNodeRef = vi.fn();
++    render(
++      <PortalFileTreePanel
++        workspaceId="ws-1"
++        onBack={() => {}}
++        onSelectFile={() => {}}
++        onAddNodeRef={onAddNodeRef}
++      />,
++    );
++    await waitFor(() => expect(screen.getByText("README.md")).toBeInTheDocument());
++    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 40, clientY: 40 });
++    fireEvent.click(screen.getByRole("menuitem"));
++    expect(onAddNodeRef).toHaveBeenCalledWith({
++      kind: "file",
++      workspaceId: "ws-1",
++      path: "README.md",
++      name: "README.md",
++    });
++  });
++
++  it("PortalFilePreviewPanel 透传 onAddSelectionRef——mock FilePreview 直调回调（壳层零包装）", async () => {
++    mockPendingFileQuery();
++    const onAddSelectionRef = vi.fn();
++    render(
++      <PortalFilePreviewPanel
++        workspaceId="ws-2"
++        filePath="docs/a.py"
++        onClose={() => {}}
++        onAddSelectionRef={onAddSelectionRef}
++      />,
++    );
++    // 壳层是纯组合薄壳：prop 原样传给 FilePreview（pending 桩下不渲染内容，
++    // 用 FileExplorer 的行为已在壳测试①覆盖——此处断言 props 透传语义经组件
++    // 签名（tsc）保证，运行时断言壳不吞 prop：卸载无副作用 + 头部正常渲染。
++    expect(screen.getByTestId("sessions-file-preview-close")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index 0a58a87ae..4915ef35d 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -187,10 +187,23 @@ const mocks = vi.hoisted(() => ({
+   lastFileExplorerProps: null as {
+     workspaceId: string;
+     onSelectFile: (_path: string) => void;
++    onAddNodeRef?: (desc: {
++      kind: string;
++      workspaceId: string;
++      path: string;
++      name: string;
++    }) => void;
+   } | null,
+   lastFilePreviewProps: null as {
+     workspaceId: string;
+     filePath: string | null;
++    onAddSelectionRef?: (desc: {
++      kind: string;
++      workspaceId: string;
++      path: string;
++      name: string;
++      lines?: [number, number];
++    }) => void;
+   } | null,
+ }));
+ 
+@@ -408,11 +421,18 @@ vi.mock("@/components/explorer/file-explorer", () => {
+   const FileExplorerStub = ({
+     workspaceId,
+     onSelectFile,
++    onAddNodeRef,
+   }: {
+     workspaceId: string;
+     onSelectFile: (_path: string) => void;
++    onAddNodeRef?: (desc: {
++      kind: string;
++      workspaceId: string;
++      path: string;
++      name: string;
++    }) => void;
+   }) => {
+-    mocks.lastFileExplorerProps = { workspaceId, onSelectFile };
++    mocks.lastFileExplorerProps = { workspaceId, onSelectFile, onAddNodeRef };
+     return (
+       <div data-testid="file-explorer-stub">
+         {workspaceId}
+@@ -420,6 +440,20 @@ vi.mock("@/components/explorer/file-explorer", () => {
+         <button type="button" onClick={() => onSelectFile("README.md")}>
+           stub-选文件
+         </button>
++        {/* workspace-ref-intake task-06：模拟树右键入口回调 */}
++        <button
++          type="button"
++          onClick={() =>
++            onAddNodeRef?.({
++              kind: "file",
++              workspaceId,
++              path: "docs/design.md",
++              name: "design.md",
++            })
++          }
++        >
++          stub-右键引用
++        </button>
+       </div>
+     );
+   };
+@@ -430,14 +464,37 @@ vi.mock("@/components/explorer/file-preview", () => {
+   const FilePreviewStub = ({
+     workspaceId,
+     filePath,
++    onAddSelectionRef,
+   }: {
+     workspaceId: string;
+     filePath: string | null;
++    onAddSelectionRef?: (desc: {
++      kind: string;
++      workspaceId: string;
++      path: string;
++      name: string;
++      lines?: [number, number];
++    }) => void;
+   }) => {
+-    mocks.lastFilePreviewProps = { workspaceId, filePath };
++    mocks.lastFilePreviewProps = { workspaceId, filePath, onAddSelectionRef };
+     return (
+       <div data-testid="file-preview-stub">
+         {workspaceId}:{filePath ?? ""}
++        {/* workspace-ref-intake task-06：模拟选区右键入口回调 */}
++        <button
++          type="button"
++          onClick={() =>
++            onAddSelectionRef?.({
++              kind: "code",
++              workspaceId,
++              path: filePath ?? "",
++              name: "a.py",
++              lines: [10, 16],
++            })
++          }
++        >
++          stub-选区引用
++        </button>
+       </div>
+     );
+   };
+@@ -2407,7 +2464,7 @@ describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
+     clickFilesToggle();
+     await stubPickFile();
+     await waitFor(() =>
+-      expect(mocks.lastFilePreviewProps).toEqual({
++      expect(mocks.lastFilePreviewProps).toMatchObject({
+         workspaceId: "ws-1",
+         filePath: "README.md",
+       }),
+@@ -2419,7 +2476,7 @@ describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
+ 
+     // 同文件重复点：幂等（列仍在，props 同值）。
+     await stubPickFile();
+-    expect(mocks.lastFilePreviewProps).toEqual({
++    expect(mocks.lastFilePreviewProps).toMatchObject({
+       workspaceId: "ws-1",
+       filePath: "README.md",
+     });
+@@ -2496,7 +2553,7 @@ describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
+     clickFilesToggle();
+     await stubPickFile();
+     await waitFor(() =>
+-      expect(mocks.lastFilePreviewProps).toEqual({
++      expect(mocks.lastFilePreviewProps).toMatchObject({
+         workspaceId: "ws-a",
+         filePath: "README.md",
+       }),
+@@ -2516,7 +2573,7 @@ describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
+     await waitFor(() =>
+       expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-b"),
+     );
+-    expect(mocks.lastFilePreviewProps).toEqual({
++    expect(mocks.lastFilePreviewProps).toMatchObject({
+       workspaceId: "ws-a",
+       filePath: "README.md",
+     });
+@@ -2652,7 +2709,7 @@ describe("SessionsPortal 子代理右栏槽位互斥（task-04 subagent-three-pa
+       expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
+     );
+     await waitFor(() =>
+-      expect(mocks.lastFilePreviewProps).toEqual({
++      expect(mocks.lastFilePreviewProps).toMatchObject({
+         workspaceId: "ws-a",
+         filePath: "README.md",
+       }),
+@@ -2727,3 +2784,79 @@ describe("SessionsPortal 子代理右栏槽位互斥（task-04 subagent-three-pa
+   });
+ });
+ 
++
++
++// ── 15. 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06 / FR-01） ──
++
++describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task-06）", () => {
++  /** 真会话态 + 进文件模式（树入口可达）。 */
++  async function enterFilesModeWithSession() {
++    mocks.listAgentSessions.mockResolvedValue({
++      items: [makeSession({ id: "s-ws", title: "工作区会话", workspace_id: "ws-1" })],
++      total: 1,
++      limit: 50,
++      offset: 0,
++    });
++    renderPortal();
++    await openWorkspaceGroup("未知工作区");
++    fireEvent.click(screen.getByRole("button", { name: "会话 工作区会话" }));
++    await waitFor(() => expect(screen.getByLabelText("会话面板")).toBeTruthy());
++    clickFilesToggle();
++    await screen.findByTestId("file-explorer-stub");
++  }
++
++  it("树右键入口：真会话输入框光标处插入【design.md】，重复触发再插一枚（端到端：槽位下发→面板透传→输入区消费→清槽）", async () => {
++    await enterFilesModeWithSession();
++    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
++    // 端到端效果断言：token 落进真渲染的 SessionInputBar textarea（比断言
++    // 槽位中间态稳——消费后即清槽，中间态与清槽态有 racing）。
++    const ta = await waitFor(() => {
++      const el = screen.getAllByPlaceholderText(/.+/).find(
++        (n) => (n as HTMLTextAreaElement).value.includes("【design.md】"),
++      );
++      expect(el).toBeTruthy();
++      return el as HTMLTextAreaElement;
++    });
++    // 同一引用连续添加：nonce 自增 → 再插一枚（重复触发契约）。
++    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
++    await waitFor(() => {
++      expect(
++        (ta as HTMLTextAreaElement).value.match(/【design\.md】/g)?.length,
++      ).toBe(2);
++    });
++  });
++
++  it("预览选区入口：desc 带行号 → 输入框插入【a.py:10-16】", async () => {
++    await enterFilesModeWithSession();
++    await stubPickFile();
++    await screen.findByTestId("file-preview-stub");
++    fireEvent.click(screen.getByRole("button", { name: "stub-选区引用" }));
++    await waitFor(() => {
++      const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
++        (n as HTMLTextAreaElement).value.includes("【a.py:10-16】"),
++      );
++      expect(el).toBeTruthy();
++    });
++  });
++
++  it("预会话分支：workspace scope 组头＋建立预会话后切文件模式，树右键落到预会话输入框", async () => {
++    // 预会话走非工作区分组时 fileWorkspaceId=null（📁 置灰进不了文件模式）——
++    // 用 workspace scope（scopedWorkspaceId=ws-1）建预会话。
++    renderPortal(WORKSPACE_SCOPE);
++    await enterPreSession("在 当前工作区 新建会话");
++    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
++    clickFilesToggle();
++    await screen.findByTestId("file-explorer-stub");
++    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
++    await waitFor(() => {
++      const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
++        (n as HTMLTextAreaElement).value.includes("【design.md】"),
++      );
++      expect(el).toBeTruthy();
++    });
++  });
++
++  // 空门户 toast：入口（文件树/预览列）在 UI 层均要求先选中会话（📁 门控），
++  // 空门户态组合不可达——toast 为防御性兜底（design R-08 声明触达面小），
++  // 不构造 UI 驱动用例（宁缺毋滥）。
++});
+diff --git a/frontend/src/components/sessions/portal-file-panels.tsx b/frontend/src/components/sessions/portal-file-panels.tsx
+index ab2573806..8d0e68800 100644
+--- a/frontend/src/components/sessions/portal-file-panels.tsx
++++ b/frontend/src/components/sessions/portal-file-panels.tsx
+@@ -26,6 +26,7 @@ import { ArrowLeft, X } from "lucide-react";
+ 
+ import { FileExplorer } from "@/components/explorer/file-explorer";
+ import { FilePreview } from "@/components/explorer/file-preview";
++import type { WsRefDesc } from "@/lib/attachment-refs";
+ 
+ export interface PortalFileTreePanelProps {
+   /** 文件树目标工作区（portal 进文件模式时快照，D-004）。 */
+@@ -34,6 +35,9 @@ export interface PortalFileTreePanelProps {
+   onBack: () => void;
+   /** 文件节点选中回调（FileExplorer 直通，入参为相对工作区根的 POSIX 路径）。 */
+   onSelectFile: (path: string) => void;
++  /** 2026-10-10-workspace-ref-intake task-06（FR-01）：树右键「添加文件/目录到
++   *  会话输入框」回调直通（desc.workspaceId=树快照；未传不拦截右键）。 */
++  onAddNodeRef?: (desc: WsRefDesc) => void;
+ }
+ 
+ export interface PortalFilePreviewPanelProps {
+@@ -43,6 +47,9 @@ export interface PortalFilePreviewPanelProps {
+   filePath: string;
+   /** 「✕」关闭整列回调。 */
+   onClose: () => void;
++  /** 2026-10-10-workspace-ref-intake task-06（FR-05）：预览选区右键「添加选中
++   *  内容到会话输入框」回调直通（desc.workspaceId=预览列自身；未传不拦截）。 */
++  onAddSelectionRef?: (desc: WsRefDesc) => void;
+ }
+ 
+ // ── 宽度常量（task-03 sessions-portal 消费；本文件只导出不消费） ──────────
+@@ -72,6 +79,7 @@ export function PortalFileTreePanel({
+   workspaceId,
+   onBack,
+   onSelectFile,
++  onAddNodeRef,
+ }: PortalFileTreePanelProps) {
+   return (
+     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+@@ -92,7 +100,11 @@ export function PortalFileTreePanel({
+ 
+       {/* 主体：FileExplorer 直通（自带搜索/懒加载/错误态/刷新，壳内零包装逻辑） */}
+       <div className="min-h-0 flex-1">
+-        <FileExplorer workspaceId={workspaceId} onSelectFile={onSelectFile} />
++        <FileExplorer
++          workspaceId={workspaceId}
++          onSelectFile={onSelectFile}
++          onAddNodeRef={onAddNodeRef}
++        />
+       </div>
+     </div>
+   );
+@@ -103,6 +115,7 @@ export function PortalFilePreviewPanel({
+   workspaceId,
+   filePath,
+   onClose,
++  onAddSelectionRef,
+ }: PortalFilePreviewPanelProps) {
+   return (
+     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+@@ -124,7 +137,11 @@ export function PortalFilePreviewPanel({
+ 
+       {/* 主体：FilePreview 直通（loading/错误/二进制降级/下载/全屏均在其内部） */}
+       <div className="min-h-0 flex-1">
+-        <FilePreview workspaceId={workspaceId} filePath={filePath} />
++        <FilePreview
++          workspaceId={workspaceId}
++          filePath={filePath}
++          onAddSelectionRef={onAddSelectionRef}
++        />
+       </div>
+     </div>
+   );
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index 6677f0854..a3090d2fb 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -157,6 +157,8 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
+ // ql-20260829-010：scoped 工作区归档态判定（页头「新建会话」置灰）。
+ import { getWorkspace } from "@/lib/workspaces";
+ import { debounceLeadingTrailing } from "@/lib/utils";
++import type { WsRefDesc } from "@/lib/attachment-refs";
++import { useNotify } from "@/lib/errors";
+ 
+ /* ────────────────────── 组件 ────────────────────── */
+ 
+@@ -213,6 +215,28 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+   const [subagentView, setSubagentView] = useState<{
+     segmentId: string;
+   } | null>(null);
++  // ── 2026-10-10-workspace-ref-intake task-06（FR-01 通道）：工作区引用插入
++  //    槽位——树右键/预览选区右键两入口组装 desc 落槽，nonce 自增保证同一
++  //    引用连续添加可重复触发；下发中栏四分支（群聊/真会话/预会话输入区
++  //    消费后回抛清槽；空门户态无消费者时 toast 兜底不落槽）。──
++  const [pendingWsRefInsert, setPendingWsRefInsert] = useState<{
++    desc: WsRefDesc;
++    nonce: number;
++  } | null>(null);
++  const wsRefInsertNonceRef = useRef(0);
++  const notify = useNotify();
++  /** 入口回调统一落槽（nonce 自增；空门户态无输入区消费者 → toast 不落槽）。 */
++  const handleAddWsRef = useCallback(
++    (desc: WsRefDesc) => {
++      if (!selectedGroupId && !selectedSessionId && !preContext) {
++        notify.warning("当前无可用输入区，请先选择或创建会话");
++        return;
++      }
++      wsRefInsertNonceRef.current += 1;
++      setPendingWsRefInsert({ desc, nonce: wsRefInsertNonceRef.current });
++    },
++    [selectedGroupId, selectedSessionId, preContext, notify],
++  );
+   // 全局入口当前选中归属工作区（六写入点显式快照，D-006——原派生链有群深链不
+   // 回填 selectedGroup、旁路列表外 find 不命中两处缺口；scope 入口不经此值）。
+   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+@@ -703,6 +727,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+                 setSubagentView(null);
+                 setFilePreview({ workspaceId: filesModeWorkspaceId, path });
+               }}
++              // 2026-10-10-workspace-ref-intake task-06：树右键「添加文件/目录到
++              // 会话输入框」入口（desc.workspaceId 由 FileExplorer 取树快照组好）。
++              onAddNodeRef={handleAddWsRef}
+             />
+           ) : (
+             <SessionListPanel
+@@ -925,6 +952,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+             groupId={selectedGroupId}
+             group={selectedGroup}
+             onSessionListRefresh={refreshSessionLists}
++            // 2026-10-10-workspace-ref-intake task-06：槽位下发（群聊输入区
++            // task-08 消费；未接时 prop 冗余零影响）。
++            pendingWsRefInsert={pendingWsRefInsert}
++            onPendingWsRefInsertHandled={setPendingWsRefInsert}
+           />
+         ) : selectedSessionId ? (
+           <SessionPanel
+@@ -941,6 +972,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+             openSubagentId={subagentView?.segmentId ?? null}
+             onOpenSubagent={handleOpenSubagent}
+             onSubagentPanelClose={() => setSubagentView(null)}
++            // 2026-10-10-workspace-ref-intake task-06：槽位下发（task-07 已接
++            // SessionPanelPage 消费链）。
++            pendingWsRefInsert={pendingWsRefInsert}
++            onPendingWsRefInsertHandled={setPendingWsRefInsert}
+           />
+         ) : preContext ? (
+           <SessionPanel
+@@ -951,6 +986,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+             llmProviders={providers}
+             preContext={preContext}
+             onPreSessionCreated={handlePreSessionCreated}
++            // 2026-10-10-workspace-ref-intake task-06：槽位下发（预会话输入区）。
++            pendingWsRefInsert={pendingWsRefInsert}
++            onPendingWsRefInsertHandled={setPendingWsRefInsert}
+           />
+         ) : (
+           // 空门户态（task-06 / X-12；2026-08-23-sessions-page-style 原型
+@@ -1049,6 +1087,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+                 workspaceId={filePreview.workspaceId}
+                 filePath={filePreview.path}
+                 onClose={() => setFilePreview(null)}
++                // 2026-10-10-workspace-ref-intake task-06：预览选区右键入口
++                //（desc.workspaceId 由 FilePreview 取预览列自身工作区，防跨
++                // 工作区串档——desc 直接透传不重写）。
++                onAddSelectionRef={handleAddWsRef}
+               />
+             </div>
+           </>
+diff --git a/frontend/src/components/ui/floating-context-menu.tsx b/frontend/src/components/ui/floating-context-menu.tsx
+new file mode 100644
+index 000000000..4f827f80e
+--- /dev/null
++++ b/frontend/src/components/ui/floating-context-menu.tsx
+@@ -0,0 +1,109 @@
++"use client";
++
++/**
++ * FloatingContextMenu · 通用浮动右键菜单（2026-10-10-workspace-ref-intake task-03）。
++ *
++ * 从看板右键菜单先例抽离泛化（app/(dashboard)/ppm/kanban/_components/
++ * kanban-task-context-menu.tsx:29-47 同模式）：
++ * - 受控 open/x/y + items 透传渲染（调用方持有状态，菜单自身零业务语义）
++ * - fixed 定位 + document 级 click/contextmenu/scroll（capture，兜内部滚动容器）
++ *   /resize 关闭；监听随菜单关闭或卸载移除，无残留
++ * - 视口 clamp：菜单右/下缘不溢出视口（估算菜单尺寸 + 最小边距）
++ *
++ * 品牌色走 brand-* 语义阶（hover 态随 html data-theme 换肤）；文案由调用方
++ * 透传（items.label），组件不内置业务词。
++ */
++
++import { useEffect, type ReactNode } from "react";
++
++/** 菜单项：key 供列表渲染，label 为展示文案，onSelect 点击回调（组件内自动关闭）。 */
++export interface FloatingContextMenuItem {
++  key: string;
++  label: ReactNode;
++  onSelect: () => void;
++}
++
++/** 视口 clamp 用的菜单尺寸粗估（px）——宽度按最窄可用菜单估，避免贴边溢出。 */
++const ESTIMATED_MENU_WIDTH = 220;
++const ESTIMATED_MENU_HEIGHT = 48;
++/** clamp 最小边距（px），防菜单贴视口边缘。 */
++const VIEWPORT_MARGIN = 8;
++
++export interface FloatingContextMenuProps {
++  /** 菜单开合（受控；false 时零渲染零监听）。 */
++  open: boolean;
++  /** 左上角 x（视口坐标，通常取 contextmenu event.clientX）。 */
++  x: number;
++  /** 左上角 y（视口坐标，通常取 contextmenu event.clientY）。 */
++  y: number;
++  /** 菜单项列表（单项为本期形态：调用方传一项即单项菜单）。 */
++  items: FloatingContextMenuItem[];
++  /** 关闭回调（document 级事件触发 / 菜单项点击后）。 */
++  onClose: () => void;
++}
++
++export function FloatingContextMenu({
++  open,
++  x,
++  y,
++  items,
++  onClose,
++}: FloatingContextMenuProps) {
++  // document 级关闭：点击 / 右键别处 / 滚动（capture 兜内部滚动）/ 视口缩放。
++  useEffect(() => {
++    if (!open) return;
++    const hide = () => onClose();
++    document.addEventListener("click", hide);
++    document.addEventListener("contextmenu", hide);
++    document.addEventListener("scroll", hide, true);
++    window.addEventListener("resize", hide);
++    return () => {
++      document.removeEventListener("click", hide);
++      document.removeEventListener("contextmenu", hide);
++      document.removeEventListener("scroll", hide, true);
++      window.removeEventListener("resize", hide);
++    };
++  }, [open, onClose]);
++
++  if (!open) return null;
++
++  // 视口 clamp（右/下缘不溢出）。
++  const left = Math.max(
++    VIEWPORT_MARGIN,
++    Math.min(x, window.innerWidth - ESTIMATED_MENU_WIDTH - VIEWPORT_MARGIN),
++  );
++  const top = Math.max(
++    VIEWPORT_MARGIN,
++    Math.min(y, window.innerHeight - ESTIMATED_MENU_HEIGHT - VIEWPORT_MARGIN),
++  );
++
++  return (
++    <div
++      role="menu"
++      style={{ left, top }}
++      className="fixed z-[9999] min-w-40 rounded-md border border-border bg-popover p-1 shadow-lg"
++      onClick={(e) => e.stopPropagation()}
++      onContextMenu={(e) => {
++        e.preventDefault();
++        e.stopPropagation();
++      }}
++    >
++      {items.map((item) => (
++        <button
++          key={item.key}
++          type="button"
++          role="menuitem"
++          className="block w-full truncate rounded px-2 py-1.5 text-left text-xs text-popover-foreground hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-brand-600/20"
++          onClick={() => {
++            item.onSelect();
++            onClose();
++          }}
++        >
++          {item.label}
++        </button>
++      ))}
++    </div>
++  );
++}
++
++export default FloatingContextMenu;
+diff --git a/frontend/src/lib/attachment-refs.ts b/frontend/src/lib/attachment-refs.ts
+index 6611b6597..db1d174d6 100644
+--- a/frontend/src/lib/attachment-refs.ts
++++ b/frontend/src/lib/attachment-refs.ts
+@@ -91,16 +91,207 @@ const INLINE_ATT_REF_RE =
+ /**
+  * 历史正文解析（FR-06/D-005）：按行内引用拆 text/ref 段；非法片段（uuid 形态
+  * 不符等）归入 text 段原样保留（容错，不丢字）。
++ * 2026-10-10-workspace-ref-intake task-01 起为 parseInlineRefs 的兼容薄封装
++ * （仅投影附件段），既有消费零改动。
+  */
+ export function parseInlineAttRefs(text: string): InlineAttRefPart[] {
+   const parts: InlineAttRefPart[] = [];
+-  let last = 0;
++  for (const p of parseInlineRefs(text)) {
++    if (p.type === "text") {
++      parts.push({ type: "text", value: p.value });
++    } else if (p.ref?.kind === "att") {
++      parts.push({ type: "ref", value: p.value, ref: { id: p.ref.id!, name: p.ref.name } });
++    } else {
++      // 工作区三类标记对旧消费方不存在（本变更前历史消息无此类标记）——
++      // 按普通文本透传（raw 保留原始标记字面），保证段拼接逐字还原。
++      parts.push({ type: "text", value: p.raw ?? p.value });
++    }
++  }
++  return parts;
++}
++
++// ── 工作区引用（2026-10-10-workspace-ref-intake task-01，FR-02/06/07 数据面）──
++
++/** 工作区引用三类：文件 / 目录 / 代码块（选中行范围）。 */
++export type WsRefKind = "file" | "dir" | "code";
++
++/**
++ * 工作区引用描述符：工作区 id + 相对根 POSIX 路径锚定（explorer 寻址坐标，
++ * frontend/src/lib/explorer.ts）。目录引用根 path 为空串、name 为「工作区根」；
++ * kind=code 必填 lines（1 起始，含端点）。
++ */
++export interface WsRefDesc {
++  kind: WsRefKind;
++  workspaceId: string;
++  /** 相对工作区根 POSIX 路径；目录引用根为 ""。 */
++  path: string;
++  /** 显示名（路径末段；根目录 = "工作区根"）。 */
++  name: string;
++  /** kind=code 必填：[起始行, 结束行]，1 起始含端点。 */
++  lines?: [number, number];
++}
++
++/** 工作区引用条目（key 约定见 wsRefMapKey）。 */
++export type WsRefTokenEntry = { desc: WsRefDesc; token: string };
++export type WsRefTokenMap = Record<string, WsRefTokenEntry>;
++
++/**
++ * map 键约定：file/dir = path；code = `${path}:${起}-${止}`（同 path 不同行段
++ * 是不同引用；key 由输入区分配与组装位置换两处共用，禁散拼字符串）。
++ */
++export function wsRefMapKey(desc: WsRefDesc): string {
++  return desc.lines ? `${desc.path}:${desc.lines[0]}-${desc.lines[1]}` : desc.path;
++}
++
++/**
++ * 工作区引用 token：基名 = name(+`:起-止`，无 L 前缀，D-005「完整显示基名」)，
++ * seq>1 加 `·seq`——与附件 token 同形态（【design.md】/【design.md:10-16】/【a·2】），
++ * 两池可共处一个并集序号池。
++ */
++export function buildWsRefToken(
++  name: string,
++  lines: [number, number] | undefined,
++  seq: number,
++): string {
++  return buildAttRefToken(lines ? `${name}:${lines[0]}-${lines[1]}` : name, seq);
++}
++
++/**
++ * 唯一化分配（D-005）：poolTokens = 附件 token ∪ 工作区 token（∪ 正文 inText
++ * 保守占位，由调用方组并集）内按完整显示基名取最小可用序号；不随删除重排。
++ * 与 allocateAttRefToken 同构（基名整体参与占位判定），直接委托（D-009 复用）。
++ */
++export function allocateWsRefToken(base: string, poolTokens: string[]): string {
++  return allocateAttRefToken(base, poolTokens);
++}
++
++/**
++ * 从 value 中移除 tokens 全部出现（清工作区引用 / 发送后清空用）；逐 token
++ * 全量替换，与 stripAttRefTokens 同构（附件/工作区各用各的 token 集，删除
++ * 精确匹配自身不互扰——D-005 组合推演）。
++ */
++export function stripWsRefTokens(value: string, tokens: string[]): string {
++  return stripAttRefTokens(value, tokens);
++}
++
++/** 工作区引用发送态标记（D-003/D-004：指向语义，只含 wid+path+行号）。 */
++function wsRefSendMarker(desc: WsRefDesc): string {
++  if (desc.kind === "code" && desc.lines) {
++    return `[代码引用:${desc.workspaceId}|${desc.path}|L${desc.lines[0]}-L${desc.lines[1]}]`;
++  }
++  return `[${desc.kind === "dir" ? "目录引用" : "文件引用"}:${desc.workspaceId}|${desc.path}]`;
++}
++
++/**
++ * 发送置换（FR-06）：map 命中且正文出现的 token → 三类正式标记；孤儿 token
++ * （map 不命中/用户手改坏）原样保留（降级纯文本，与附件 R-03 同口径）；map 空
++ * → 原样返回（零开销旁路，未插入引用零行为差异）。
++ */
++export function substituteWsRefsForSend(value: string, map: WsRefTokenMap): string {
++  let next = value;
++  for (const { desc, token } of Object.values(map)) {
++    if (!token || !next.includes(token)) continue;
++    next = next.split(token).join(wsRefSendMarker(desc));
++  }
++  return next;
++}
++
++/** 统一历史解析产物段：附件 ref 带 id；工作区三类带 workspaceId/path(/lines)。 */
++export interface InlineRefPart {
++  type: "text" | "ref";
++  /** text 段原文 / ref 段显示名。 */
++  value: string;
++  /** 仅 ref 段携带：原始标记字面（兼容投影/调试还原用）。 */
++  raw?: string;
++  /** 仅 ref 段携带。 */
++  ref?: {
++    kind: "att" | WsRefKind;
++    /** kind=att：附件 uuid。 */
++    id?: string;
++    /** 工作区三类：工作区 id。 */
++    workspaceId?: string;
++    /** 工作区三类：相对根 POSIX 路径（目录引用根为 ""）。 */
++    path?: string;
++    /** kind=code：[起始行, 结束行]（1 起始含端点）。 */
++    lines?: [number, number];
++    /** 显示名：附件=上传名；工作区=路径末段（根 = "工作区根"）。 */
++    name: string;
++  };
++}
++
++/** uuid 36 位（附件既有口径，工作区 id 同为 uuid 锚）。 */
++const REF_UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
++
++/**
++ * 工作区三类标记：path 段**不含** `]` `|` 与换行——路径含竖线或右方括号时整段
++ * 匹配失败降级为纯文本（审查 X-5 声明边界，与孤儿降级同口径）；目录空 path
++ * （`[目录引用:wid|]` 空尾段）显式容忍；代码行段 `L起-L止`（1 起始）。
++ * path 用非贪婪 + 行段可选拆三段：`[代码引用:wid|a.py|L1-L2]` 的 path 不会
++ * 吞行段；行段非法（如 `L1-L2x`）整段回溯失配归 text。
++ */
++const INLINE_WS_REF_RE = new RegExp(
++  "\\[(文件引用|目录引用|代码引用):(" + REF_UUID + ")\\|([^\\]|\\r\\n]*?)(?:\\|L(\\d+)-L(\\d+))?\\]",
++  "g",
++);
++
++/** 工作区 path → 显示名（末段；根 = "工作区根"）。 */
++function wsRefDisplayName(path: string): string {
++  const segs = path.split("/").filter(Boolean);
++  return segs.length ? segs[segs.length - 1]! : "工作区根";
++}
++
++/**
++ * 统一历史解析（FR-07）：附件 + 工作区三类标记拆 text/ref 段。附件段沿用
++ * INLINE_ATT_REF_RE 独立口径（name 允许 `|`，兼容既有消息不回归）；工作区三类
++ * 走 INLINE_WS_REF_RE（path 禁 `|`/`]`）。非法片段归 text 段原样保留（容错，
++ * 不丢字）。
++ */
++export function parseInlineRefs(text: string): InlineRefPart[] {
++  type Hit = { start: number; end: number; part: InlineRefPart };
++  const hits: Hit[] = [];
+   for (const m of text.matchAll(INLINE_ATT_REF_RE)) {
+-    const idx = m.index ?? 0;
+-    if (idx > last) parts.push({ type: "text", value: text.slice(last, idx) });
+-    parts.push({ type: "ref", value: m[2] ?? "", ref: { id: m[1] ?? "", name: m[2] ?? "" } });
+-    last = idx + m[0].length;
++    hits.push({
++      start: m.index ?? 0,
++      end: (m.index ?? 0) + m[0].length,
++      part: {
++        type: "ref",
++        value: m[2] ?? "",
++        raw: m[0],
++        ref: { kind: "att", id: m[1] ?? "", name: m[2] ?? "" },
++      },
++    });
++  }
++  for (const m of text.matchAll(INLINE_WS_REF_RE)) {
++    // 捕获组 1 是中文标记字面，映射到 WsRefKind 枚举。
++    const kind: WsRefKind =
++      m[1] === "文件引用" ? "file" : m[1] === "目录引用" ? "dir" : "code";
++    const workspaceId = m[2] ?? "";
++    const path = m[3] ?? "";
++    const name = wsRefDisplayName(path);
++    const ref: NonNullable<InlineRefPart["ref"]> = { kind, workspaceId, path, name };
++    if (kind === "code") {
++      if (m[4] === undefined || m[5] === undefined) continue; // 防御：code 必有行段
++      const l0 = Number(m[4]);
++      const l1 = Number(m[5]);
++      if (l0 < 1 || l1 < l0) continue; // 非法行段（0 起 / 倒序）整段降级 text
++      ref.lines = [l0, l1];
++      ref.name = linesSuffix(name, [l0, l1]);
++    }
++    hits.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, part: { type: "ref", value: ref.name, raw: m[0], ref } });
++  }
++  hits.sort((a, b) => a.start - b.start);
++  const parts: InlineRefPart[] = [];
++  let last = 0;
++  for (const hit of hits) {
++    if (hit.start > last) parts.push({ type: "text", value: text.slice(last, hit.start) });
++    parts.push(hit.part);
++    last = hit.end;
+   }
+   if (last < text.length) parts.push({ type: "text", value: text.slice(last) });
+   return parts;
+ }
++
++/** 代码引用显示名（末段 + 行号段，无 L 前缀，与编辑态 token 基名一致）。 */
++function linesSuffix(name: string, lines: [number, number]): string {
++  return `${name}:${lines[0]}-${lines[1]}`;
++}

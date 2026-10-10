@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-workspace-ref-intake",
+  "generatedAt": "2026-10-10T09:00:20.485Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "tasks": 9,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "backendEndpoints": 632,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-workspace-ref-intake",
+      "metrics": {
+        "checkedFiles": 10,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "本变更相关面 8 测试文件合跑全绿（组装行为：纯函数×输入区×portal 端到端×历史渲染拼装）",
+      "command": "cd frontend && pnpm exec vitest run src/components/daemon/__tests__/attachment-refs.test.ts src/components/daemon/__tests__/input-ref-overlay.test.tsx src/components/daemon/__tests__/session-input-bar-upload.test.tsx src/components/daemon/__tests__/attachment-ref-tag.test.tsx src/components/explorer/__tests__/file-preview.test.tsx src/components/explorer/__tests__/file-explorer.test.tsx src/components/sessions/__tests__/sessions-portal.test.tsx src/components/sessions/__tests__/portal-file-panels.test.tsx",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/wsri-related-suite.log"
+    },
+    {
+      "claim": "群聊套件 76/76（task-08 全链路）",
+      "command": "cd frontend && pnpm exec vitest run src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/task08-group-test3.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "UI 浏览器实测（B 角标/右键菜单/行号选区/标签 tooltip/历史标签点击）",
+        "condition": "起 dev server（cd frontend && pnpm dev）→ 会话页进文件模式 → ① 右键文件树文件/目录节点见菜单，点击后输入框光标处出标签（左上类型角标+悬停路径 tooltip）② 打开代码文件见行号，选中几行右键「添加选中内容到会话输入框」③ 发送后历史气泡标签可点开预览 ④ .md 预览右键无自定义菜单（预期边界）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "visual-evidence.md 补录（探针 12 ⚠️，默认档非阻断）",
+        "condition": "上述实测截图 2-3 张落变更目录 visual-evidence.md（渲染对照：标签角标+菜单+行号）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(jsx9)+fr(5)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-10T09:11:15.593Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-workspace-ref-intake",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-workspace-ref-intake:task-01:acc-0-c3d0e5a9",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-workspace-ref-intake:task-02:acc-0-e07fdcdd",
+      "tests": [
+        "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-workspace-ref-intake:task-02:acc-1-2e44829d",
+      "tests": [
+        "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-workspace-ref-intake:task-03:acc-0-5c7e2814",
+      "tests": [
+        "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-workspace-ref-intake:task-03:acc-1-d7085b37",
+      "tests": [
+        "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-workspace-ref-intake:task-04:acc-0-2e832fd9",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-workspace-ref-intake:task-04:acc-1-4d931d00",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-workspace-ref-intake:task-05:acc-0-e31eee83",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-workspace-ref-intake:task-05:acc-1-da26c83e",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-workspace-ref-intake:task-05:acc-2-45bba167",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-workspace-ref-intake:task-05:acc-3-3024a717",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-workspace-ref-intake:task-06:acc-0-f5647a9e",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-workspace-ref-intake:task-06:acc-1-25ac9d78",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-workspace-ref-intake:task-06:acc-2-f20c7f7d",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-10-workspace-ref-intake:task-07:acc-0-af16cfc2",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-10-workspace-ref-intake:task-07:acc-1-74dc11c4",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-10-workspace-ref-intake:task-07:acc-2-b8e01635",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-10-workspace-ref-intake:task-08:acc-0-449ccf0e",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-10-workspace-ref-intake:task-08:acc-1-f91784ba",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-workspace-ref-intake:task-09:acc-0-f2b7b04e",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-workspace-ref-intake:task-09:acc-1-e7a99eae",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-workspace-ref-intake"
+    }
+  ]
+}

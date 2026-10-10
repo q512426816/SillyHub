@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · 工作区文件 / 选区引用到会话输入框（2026-10-10 explore）</title>
+<!--
+  SillySpec explore 原型：深化 2026-10-09-attachment-inline-reference
+  功能：① 工作区文件树右键「添加到会话输入框」（文件/目录）
+        ② 预览区内容选中后右键「添加选中内容到会话输入框」（文件名+行号）
+        ③ 输入框引用标签（镜像高亮层）+ 类型图标（A 内嵌 emoji / B 角标图标，可切换对比）
+        ④ 悬停标签看完整路径（路径绑定）· ×/退格删除 · 发送置换为正式引用文本
+  主题：ai-native（violet brand 阶，取值同 frontend/src/styles/themes.ts）
+  布局：会话页三分屏 1:1（左树 320px / 中会话 / 右预览 480px，把手可拖）
+-->
+<style>
+:root{
+  --bg:#FAF5FF; --card:#FFFFFF; --border:#DDD6FE; --border-60:rgba(221,214,254,.6);
+  --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#ddd6fe; --brand-300:#c4b5fd;
+  --brand-400:#a78bfa; --brand-500:#8b5cf6; --brand-600:#7c3aed; --brand-700:#6d28d9;
+  --info:#0891B2;
+  --fg:#1e293b; --muted:#64748b; --subtle:#94a3b8;
+  --fill:#f1f5f9; --input-border:#cbd5e1;
+  --amber:#d97706; --emerald:#059669; --sky:#0284c7; --rose:#e11d48;
+  --shadow-sm:0 1px 2px rgba(15,23,42,.06);
+  --shadow-md:0 4px 6px -1px rgba(15,23,42,.08),0 2px 4px -2px rgba(15,23,42,.06);
+  --shadow-lg:0 10px 15px -3px rgba(15,23,42,.10),0 4px 6px -4px rgba(15,23,42,.06);
+  --shadow-primary:0 8px 20px -4px rgba(124,58,237,.35);
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Courier New",monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  background:var(--bg); color:var(--fg); font-size:14px; overflow:hidden;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.ico{width:1em;height:1em;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:var(--mono)}
+
+/* ── 顶栏（h-16 锚定） ─────────────────────────────── */
+.topbar{height:64px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border);background:rgba(255,255,255,.8);backdrop-filter:blur(12px)}
+.logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--brand-600),var(--info));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;box-shadow:var(--shadow-primary)}
+.topbar .name{font-weight:600;font-size:14.5px}
+.topbar .spacer{flex:1}
+.avatar{width:28px;height:28px;border-radius:9999px;background:var(--brand-100);border:1px solid var(--brand-300);color:var(--brand-700);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+
+/* ── 页面骨架 ─────────────────────────────────────── */
+.page{height:calc(100vh - 64px);display:flex;flex-direction:column;gap:12px;padding:16px 16px}
+.page-head h1{font-size:19px;font-weight:600;letter-spacing:.2px}
+.page-head p{font-size:12.5px;color:var(--muted);margin-top:2px}
+.main{flex:1;min-height:0;display:flex;gap:12px;overflow:hidden}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+
+/* ── 拖拽把手 ─────────────────────────────────────── */
+.resizer{width:6px;flex:none;cursor:col-resize;display:flex;align-items:center;justify-content:center;border-radius:9999px;margin:0 -3px;position:relative;z-index:5}
+.resizer::after{content:"";width:3px;height:36px;border-radius:9999px;background:rgba(100,116,139,.25);transition:background .15s}
+.resizer:hover::after,.resizer.active::after{background:var(--brand-500)}
+
+/* ── 左栏：文件树 ─────────────────────────────────── */
+#leftCol{width:320px;flex:none;min-width:0}
+.panel-head{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);padding:8px 12px;flex:none}
+.panel-head .back{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);padding:2px 6px;border-radius:6px}
+.panel-head .back:hover{background:var(--fill);color:var(--fg)}
+.panel-head .title{font-size:13.5px;font-weight:600}
+.search{margin:10px 10px 4px;display:flex;align-items:center;gap:6px;height:30px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--subtle);font-size:12.5px}
+.search input{border:none;outline:none;flex:1;font-size:12.5px;color:var(--fg);background:none}
+.tree{flex:1;min-height:0;overflow:auto;padding:4px 6px 12px}
+.trow{display:flex;align-items:center;gap:5px;height:28px;padding-left:calc(6px + var(--depth)*16px);padding-right:6px;border-radius:6px;font-size:13.5px;white-space:nowrap;cursor:pointer;user-select:none}
+.trow:hover{background:var(--fill)}
+.trow.sel{background:var(--brand-100)}
+.trow .sw{width:14px;height:14px;display:flex;align-items:center;justify-content:center;color:var(--subtle);transition:transform .15s}
+.trow.open .sw{transform:rotate(90deg)}
+.trow .nm{overflow:hidden;text-overflow:ellipsis}
+.trow .sz{font-size:11px;color:var(--muted);flex:none}
+.trow .ic{width:15px;height:15px;display:flex;align-items:center;justify-content:center}
+.trow .ic .ico{width:15px;height:15px}
+.c-dir{color:#94a3b8}.c-md{color:#64748b}.c-ts{color:#0284c7}.c-json{color:#d97706}.c-yaml{color:#059669}.c-db{color:#94a3b8}
+
+/* ── 中栏：会话面板 ───────────────────────────────── */
+#midCol{flex:1;min-width:0}
+.sess-head{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:9px 14px;flex:none}
+.dot{width:8px;height:8px;border-radius:9999px;background:var(--emerald)}
+.sess-head .t{font-size:13.5px;font-weight:600}
+.chip-ws{font-size:11px;color:var(--muted);background:var(--fill);border-radius:9999px;padding:2px 8px}
+.chip-eng{font-size:11px;color:var(--brand-700);background:var(--brand-100);border:1px solid var(--brand-200);border-radius:9999px;padding:2px 8px;font-weight:600}
+.sess-head .spacer{flex:1}
+.icon-btn{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+.icon-btn:hover{background:var(--brand-100);color:var(--brand-700)}
+.msgs{flex:1;min-height:0;overflow:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+.mrow{display:flex;gap:9px;max-width:78%}
+.mrow.user{align-self:flex-end;flex-direction:row-reverse}
+.m-av{width:26px;height:26px;border-radius:9999px;flex:none;display:flex;align-items:center;justify-content:center;margin-top:2px}
+.m-av.ai{background:linear-gradient(135deg,var(--brand-600),var(--info));color:#fff}
+.m-av.me{background:var(--brand-100);border:1px solid var(--brand-300);color:var(--brand-700);font-size:11px;font-weight:600}
+.bubble{padding:9px 13px;font-size:13px;line-height:1.65;border-radius:14px;white-space:pre-wrap;word-break:break-word}
+.bubble.ai{background:var(--card);border:1px solid var(--border);border-top-left-radius:4px;box-shadow:var(--shadow-sm)}
+.bubble.user{background:var(--brand-600);color:#fff;border-top-right-radius:4px;box-shadow:var(--shadow-primary)}
+.wire{align-self:flex-end;max-width:78%;font-size:11px;color:var(--muted);background:var(--fill);border:1px solid var(--border-60);border-radius:8px;padding:5px 9px;margin-top:-6px;word-break:break-all}
+/* 历史正文里的引用标签（发送后渲染） */
+.rt{display:inline-flex;align-items:center;gap:3px;border-radius:5px;padding:1px 6px;font-size:12px;cursor:pointer;vertical-align:-1px}
+.bubble.ai .rt{background:rgba(139,92,246,.15);color:var(--brand-700);border:1px solid rgba(139,92,246,.25)}
+.bubble.ai .rt:hover{background:rgba(139,92,246,.28)}
+.bubble.user .rt{background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.35);color:#fff}
+.bubble.user .rt:hover{background:rgba(255,255,255,.4)}
+
+/* ── 输入区 ─────────────────────────────────────── */
+.input-zone{flex:none;padding:10px 12px 12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chip{display:flex;align-items:center;gap:4px;max-width:220px;border:1px solid var(--input-border);background:rgba(241,245,249,.5);border-radius:6px;padding:4px 8px;font-size:11px}
+.chip .nm{display:inline-flex;min-width:0;align-items:center;gap:4px;cursor:pointer;overflow:hidden}
+.chip .nm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .nm:hover{color:var(--brand-600)}
+.chip .rm{flex:none;border-radius:4px;padding:2px;color:var(--muted);display:flex}
+.chip .rm:hover{background:rgba(225,29,72,.1);color:var(--rose)}
+.dragbar{display:flex;align-items:center;justify-content:center;height:12px;cursor:ns-resize;margin-bottom:-2px}
+.dragbar span{width:40px;height:3px;border-radius:9999px;background:rgba(100,116,139,.3)}
+.capsule{position:relative;display:flex;align-items:flex-end;gap:8px;border:1px solid var(--border);background:rgba(241,245,249,.4);border-radius:16px;padding:8px 10px;box-shadow:var(--shadow-sm);transition:all .15s}
+.capsule:focus-within{border-color:rgba(167,139,250,.45);background:var(--card);box-shadow:var(--shadow-md),0 0 0 3px rgba(139,92,246,.1)}
+.plusbtn{width:40px;height:40px;flex:none;align-self:center;border-radius:9999px;border:1px solid var(--border);background:var(--card);color:var(--muted);display:flex;align-items:center;justify-content:center;transition:all .15s}
+.plusbtn:hover,.plusbtn.on{border-color:var(--brand-300);background:var(--brand-50);color:var(--brand-600)}
+.plusbtn.on{background:var(--brand-100);border-color:var(--brand-300);color:var(--brand-600)}
+.plusbtn .ico{width:20px;height:20px;transition:transform .15s}
+.plusbtn.on .ico{transform:rotate(45deg)}
+.plusmenu{position:absolute;bottom:100%;left:0;margin-bottom:6px;width:256px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-lg);padding:4px 0;z-index:30;display:none}
+.plusmenu.open{display:block}
+.plusmenu button{display:flex;width:100%;gap:10px;padding:8px 12px;text-align:left;align-items:flex-start}
+.plusmenu button:hover{background:var(--fill)}
+.plusmenu .ico{width:16px;height:16px;color:var(--muted);margin-top:2px}
+.plusmenu b{font-size:13px;font-weight:500;line-height:20px;display:block}
+.plusmenu i{font-style:normal;font-size:11px;color:var(--muted);display:block}
+.sendbtn{width:36px;height:36px;flex:none;align-self:flex-end;border-radius:9999px;background:linear-gradient(135deg,var(--brand-600),var(--info));color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-primary);margin-bottom:2px}
+.sendbtn .ico{width:18px;height:18px}
+/* textarea + 镜像层 */
+.iwrap{position:relative;flex:1;min-width:0}
+#ta{position:relative;z-index:10;display:block;width:100%;height:84px;resize:none;border:none;outline:none;background:transparent;padding:8px 4px;font-size:14px;line-height:20px;font-family:inherit;color:var(--fg)}
+#overlay{position:absolute;inset:0;overflow:hidden;pointer-events:none;font-size:14px;line-height:20px;font-family:inherit}
+#ovIn{padding:8px 4px;white-space:pre-wrap;word-break:break-word}
+.ghost{color:transparent}
+.refocc{position:relative;border-radius:4px;background:rgba(139,92,246,.15)}
+.refocc.flash{animation:flash 1.1s ease-out}
+@keyframes flash{0%{background:rgba(139,92,246,.5)}100%{background:rgba(139,92,246,.15)}}
+.typebadge{display:none;position:absolute;left:-7px;top:-5px;width:14px;height:14px;border-radius:9999px;background:var(--card);border:1px solid var(--border);align-items:center;justify-content:center;box-shadow:var(--shadow-sm);z-index:20}
+.mode-b .typebadge{display:flex}
+.typebadge .ico{width:9px;height:9px;stroke-width:2.4}
+.t-file{color:#0284c7}.t-dir{color:#d97706}.t-code{color:#7c3aed}.t-att{color:#059669}
+.xbtn{position:absolute;right:-6px;top:-4px;width:14px;height:14px;border-radius:9999px;background:var(--card);border:1px solid var(--border);color:var(--muted);display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-sm);z-index:20;opacity:0;pointer-events:none;transition:opacity .15s}
+.xbtn .ico{width:10px;height:10px;stroke-width:2.6}
+.xbtn.show{opacity:1;pointer-events:auto}
+.xbtn:hover{background:rgba(225,29,72,.1);color:var(--rose)}
+
+/* ── 右栏：文件预览 ───────────────────────────────── */
+#rightCol{width:480px;flex:none;min-width:0}
+.fph{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:8px 12px;flex:none}
+.fph .fname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:500}
+.fph .fmeta{flex:none;font-size:11px;color:var(--muted)}
+.fph .grow{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden}
+.fph .acts{margin-left:auto;display:flex;gap:6px;flex:none}
+.minibtn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;font-size:12px;border:1px solid var(--input-border);border-radius:6px;background:var(--card);color:var(--fg)}
+.minibtn:hover{border-color:var(--brand-300);color:var(--brand-600)}
+.minibtn .ico{width:12px;height:12px}
+.fpbody{flex:1;min-height:0;overflow:auto;padding:12px}
+.pathbar{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);padding:8px 12px;flex:none}
+.pathbar .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--muted)}
+/* 代码预览（oneDark）+ 行号槽 */
+.codeblk{background:#282c34;border-radius:6px;padding:10px 0;font-family:var(--mono);font-size:12px;line-height:1.75}
+.cl{display:flex}
+.cl .ln{flex:none;width:44px;text-align:right;padding-right:12px;color:#636d83;user-select:none}
+.cl .lc{white-space:pre;color:#abb2bf;padding-right:12px}
+.codeblk .cl:hover .ln{color:#c4b5fd}
+.cmt{color:#5c6370;font-style:italic}.kw{color:#c678dd}.fn{color:#61afef}.str{color:#98c379}.num{color:#d19a66}.typ{color:#e5c07b}
+.fpbody ::selection{background:rgba(139,92,246,.32)}
+/* 文本预览（浅色）+ 行号槽 */
+.textblk{background:rgba(241,245,249,.4);border-radius:6px;padding:10px 0;font-family:var(--mono);font-size:12px;line-height:1.8}
+.textblk .cl .lc{color:var(--fg)}
+.textblk .cl .ln{color:var(--subtle)}
+.textblk .cl.hd .lc{font-weight:600}
+.binmeta{border:1px solid var(--border);border-radius:8px;padding:16px;display:flex;gap:12px;align-items:flex-start}
+.binmeta .ico{width:22px;height:22px;color:var(--subtle);margin-top:2px}
+.binmeta b{font-size:13px}
+.binmeta p{font-size:12px;color:var(--muted);margin-top:4px}
+.selhint{position:sticky;top:-12px;margin:-12px -12px 8px;padding:6px 12px;font-size:11.5px;color:var(--brand-700);background:var(--brand-50);border-bottom:1px solid var(--brand-200);display:none}
+.selhint.on{display:block}
+
+/* ── 右键菜单（kanban 模式：fixed div） ───────────── */
+#ctx{position:fixed;z-index:9999;min-width:196px;background:var(--card);border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-lg);padding:4px 0;display:none}
+#ctx.open{display:block}
+#ctx .mi{display:flex;width:100%;align-items:center;gap:8px;padding:8px 14px;font-size:13.5px;text-align:left}
+#ctx .mi:hover{background:rgba(241,245,249,.6)}
+#ctx .mi .ico{width:15px;height:15px;color:var(--muted)}
+#ctx .mi:hover .ico{color:var(--brand-600)}
+#ctx .hint{margin-left:auto;font-size:11px;color:var(--subtle);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono)}
+
+/* ── 标签悬停 tooltip（路径绑定） ─────────────────── */
+#tip{position:fixed;z-index:1000;max-width:420px;background:var(--fg);color:#f1f5f9;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.6;box-shadow:var(--shadow-lg);display:none;pointer-events:none}
+#tip.open{display:block}
+#tip .tp1{display:flex;align-items:center;gap:5px;font-weight:600}
+#tip .tp2{font-family:var(--mono);font-size:11px;color:#cbd5e1;word-break:break-all}
+
+/* ── 演示控件条 / 提示 ───────────────────────────── */
+#demoBar{position:fixed;right:14px;top:72px;z-index:500;background:var(--card);border:1px solid var(--brand-200);border-radius:10px;box-shadow:var(--shadow-md);padding:8px 10px;font-size:12px;display:flex;align-items:center;gap:8px}
+#demoBar .lbl{color:var(--muted)}
+.seg{display:flex;border:1px solid var(--brand-200);border-radius:9999px;overflow:hidden}
+.seg button{padding:3px 10px;font-size:11.5px;color:var(--muted)}
+.seg button.on{background:var(--brand-600);color:#fff}
+#hint{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:500;background:rgba(15,23,42,.92);color:#f1f5f9;border-radius:9999px;padding:8px 18px;font-size:12.5px;box-shadow:var(--shadow-lg);transition:opacity .6s;display:flex;gap:8px;align-items:center}
+#hint.off{opacity:0;pointer-events:none}
+#toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:600;background:rgba(15,23,42,.92);color:#f1f5f9;border-radius:8px;padding:7px 14px;font-size:12.5px;display:none}
+</style>
+</head>
+<body class="mode-a">
+
+<header class="topbar">
+  <div class="logo">S</div>
+  <span class="name">SillyHub</span>
+  <span class="spacer"></span>
+  <div class="avatar">W</div>
+</header>
+
+<div class="page">
+  <div class="page-head">
+    <h1>会话</h1>
+    <p>跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建</p>
+  </div>
+
+  <div class="main">
+    <!-- 左栏：工作区文件树（文件模式） -->
+    <aside class="panel" id="leftCol">
+      <div class="panel-head">
+        <button class="back">← 返回会话</button>
+        <span class="title">工作区文件</span>
+      </div>
+      <div class="search"><span>🔍</span><input placeholder="搜索文件…"></div>
+      <div class="tree" id="tree"></div>
+    </aside>
+    <div class="resizer" id="leftResizer" title="拖动调节宽度（双击复位）"></div>
+
+    <!-- 中栏：会话面板 -->
+    <section class="panel" id="midCol">
+      <div class="sess-head">
+        <span class="dot"></span>
+        <span class="t">附件引用 · 单聊会话</span>
+        <span class="chip-ws">工作区：SillyHub</span>
+        <span class="chip-eng">GLM</span>
+        <span class="spacer"></span>
+        <button class="icon-btn" title="刷新">⟳</button>
+      </div>
+      <div class="msgs" id="msgs">
+        <div class="mrow user">
+          <div class="m-av me">W</div>
+          <div class="bubble user">这个 <span class="rt">📎 原型截图.png</span> 是输入框右击 chip 插入的引用标签效果，昨天的附件引用链路。</div>
+        </div>
+        <div class="mrow">
+          <div class="m-av ai">✦</div>
+          <div class="bubble ai">收到。附件引用链路已就位：编辑态 token（【name】）→ 发送置换为 [附件引用:uuid|name] → 历史气泡内渲染为可点击标签。
+
+接下来要扩展的是工作区文件 / 目录 / 代码块选区三类引用，锚从附件 uuid 换成「工作区 id + 相对路径」。可以从左侧文件树或右侧预览区右键添加。</div>
+        </div>
+      </div>
+      <div class="input-zone">
+        <div class="chips" id="chips"></div>
+        <div class="dragbar" title="拖动调节输入框高度（原型仅示意）"><span></span></div>
+        <div class="capsule" id="capsule">
+          <div style="position:relative;flex:none;align-self:center">
+            <button class="plusbtn" id="plusBtn" title="附件 / 派团队 / 选择技能 / 关联变更">＋</button>
+            <div class="plusmenu" id="plusMenu">
+              <button>📎<span><b>上传附件</b><i>选文件即传，随消息发送（10 个/批）</i></span></button>
+              <button>👥<span><b>派发团队</b><i>多智能体协作，分工推进任务</i></span></button>
+              <button>⌘<span><b>选择技能</b><i>输入 / 唤起可用技能列表</i></span></button>
+              <button>🔗<span><b>关联变更</b><i>输入 @ 关联 SillySpec 变更</i></span></button>
+            </div>
+          </div>
+          <div class="iwrap" id="iwrap">
+            <div id="overlay"><div id="ovIn"></div></div>
+            <textarea id="ta" placeholder="输入消息… 右键左侧文件树 / 选中右侧预览内容右键，可插入引用标签"></textarea>
+          </div>
+          <button class="sendbtn" id="sendBtn" title="发送（Ctrl+Enter）"><svg class="ico" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></button>
+        </div>
+      </div>
+    </section>
+
+    <div class="resizer" id="rightResizer" title="拖动调节宽度（双击复位）"></div>
+
+    <!-- 右栏：文件预览 -->
+    <aside class="panel" id="rightCol">
+      <div class="pathbar">
+        <button class="back" id="fpClose" title="关闭文件预览">✕</button>
+        <span class="p" id="fpPath"></span>
+      </div>
+      <div class="fph" id="fph"></div>
+      <div class="fpbody" id="fpBody"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="ctx"></div>
+<div id="tip"></div>
+<div id="toast"></div>
+<div id="demoBar">
+  <span class="lbl">标签图标样式</span>
+  <div class="seg">
+    <button id="modeA" class="on">A 图标内嵌</button>
+    <button id="modeB">B 角标悬浮</button>
+  </div>
+</div>
+<div id="hint">💡 试试：右键<b>左侧文件树</b>节点 · 在<b>右侧预览</b>选中几行后右键 · 悬停输入框里的<b>标签</b>看完整路径 · 点<b>发送</b>看置换结果</div>
+
+<script>
+/* ═══════════════ 数据 ═══════════════ */
+const WS = { id: 'ws-f231ca18', name: 'SillyHub' };
+const ATT = { id: 'att-9f2c31e4', name: '原型截图.png', bytes: 482301, kind: 'image' };
+
+const TREE = [
+  { name:'.sillyspec', type:'dir', children:[
+    { name:'changes', type:'dir', children:[
+      { name:'archive', type:'dir', children:[
+        { name:'2026-10-09-attachment-inline-reference', type:'dir', children:[
+          { name:'design.md', type:'file', size:13824 },
+          { name:'requirements.md', type:'file', size:5632 },
+          { name:'proposal.md', type:'file', size:4210 },
+          { name:'delta.md', type:'file', size:8933 },
+        ]},
+        { name:'2026-10-10-att-ref-badge-hover', type:'dir', children:[
+          { name:'design.md', type:'file', size:3876 },
+          { name:'requirements.md', type:'file', size:2210 },
+        ]},
+      ]},
+      { name:'2026-10-06-provider-multi-agent-kind', type:'dir', children:[
+        { name:'design.md', type:'file', size:6650 },
+        { name:'tasks.md', type:'file', size:3120 },
+      ]},
+    ]},
+    { name:'docs', type:'dir', children:[
+      { name:'ARCHITECTURE.md', type:'file', size:120400 },
+    ]},
+    { name:'sillyspec.db', type:'file', size:2861056 },
+  ]},
+  { name:'frontend', type:'dir', children:[
+    { name:'src', type:'dir', children:[
+      { name:'components', type:'dir', children:[
+        { name:'sessions', type:'dir', children:[] },
+        { name:'daemon', type:'dir', children:[] },
+      ]},
+      { name:'lib', type:'dir', children:[
+        { name:'attachment-refs.ts', type:'file', size:4170 },
+        { name:'api-types.ts', type:'file', size:512000 },
+      ]},
+    ]},
+    { name:'package.json', type:'file', size:980 },
+  ]},
+  { name:'backend', type:'dir', children:[
+    { name:'main.py', type:'file', size:20480 },
+  ]},
+  { name:'AGENTS.md', type:'file', size:1024 },
+  { name:'package.json', type:'file', size:512 },
+  { name:'pnpm-workspace.yaml', type:'file', size:389 },
+];
+
+/* 预览内容（原型示意：代码走 oneDark 高亮，文本走浅色等宽，db 走二进制元信息卡） */
+const TS_LINES = [
+'<span class="cmt">/**</span>',
+'<span class="cmt"> * 附件引用 token 纯函数库（编辑态 token · 唯一化 · 发送置换 · 历史解析）。</span>',
+'<span class="cmt"> */</span>',
+'',
+'<span class="cmt">/** 附件 id → 编辑态 token 文本（【name】/【name·2】）映射。 */</span>',
+'<span class="kw">export</span> <span class="kw">type</span> <span class="typ">AttRefTokenMap</span> = <span class="typ">Record</span>&lt;<span class="kw">string</span>, <span class="kw">string</span>&gt;;',
+'',
+'<span class="cmt">/** 构建编辑态 token：seq=1 无后缀，seq&gt;1 加 ·seq。 */</span>',
+'<span class="kw">export</span> <span class="kw">function</span> <span class="fn">buildAttRefToken</span>(name: <span class="kw">string</span>, seq: <span class="kw">number</span>): <span class="kw">string</span> {',
+'  <span class="kw">return</span> seq &gt; <span class="num">1</span> ? <span class="str">`【${name}·${seq}】`</span> : <span class="str">`【${name}】`</span>;',
+'}',
+'',
+'<span class="cmt">/** 唯一化分配：在 existingTokens（正文已出现 + 已分配）中找最小可用序号。</span>',
+'<span class="cmt"> *  序号不随删除重排——删掉 【name】 后再新增同名，会拿到新的最小空位。 */</span>',
+'<span class="kw">export</span> <span class="kw">function</span> <span class="fn">allocateAttRefToken</span>(name: <span class="kw">string</span>, existingTokens: <span class="kw">string</span>[]): <span class="kw">string</span> {',
+'  <span class="kw">const</span> used = <span class="kw">new</span> <span class="typ">Set</span>&lt;<span class="kw">number</span>&gt;();',
+'  <span class="kw">for</span> (<span class="kw">const</span> t <span class="kw">of</span> existingTokens) {',
+'    <span class="kw">const</span> m = t.match(<span class="str">/^【(.+?)(?:·(\\d+))?】$/</span>);',
+'    <span class="kw">if</span> (m &amp;&amp; m[<span class="num">1</span>] === name) {',
+'      used.add(m[<span class="num">2</span>] ? <span class="typ">Number</span>(m[<span class="num">2</span>]) : <span class="num">1</span>);',
+'    }',
+'  }',
+'  <span class="kw">let</span> seq = <span class="num">1</span>;',
+'  <span class="kw">while</span> (used.has(seq)) seq += <span class="num">1</span>;',
+'  <span class="kw">return</span> <span class="fn">buildAttRefToken</span>(name, seq);',
+'}',
+'',
+'<span class="cmt">/** 从 value 中移除 tokens 的全部出现（删附件联动；逐 token 全量替换）。 */</span>',
+'<span class="kw">export</span> <span class="kw">function</span> <span class="fn">stripAttRefTokens</span>(value: <span class="kw">string</span>, tokens: <span class="kw">string</span>[]): <span class="kw">string</span> {',
+'  <span class="kw">let</span> out = value;',
+'  <span class="kw">for</span> (<span class="kw">const</span> token <span class="kw">of</span> tokens) {',
+'    out = out.split(token).join(<span class="str">""</span>);',
+'  }',
+'  <span class="kw">return</span> out;',
+'}',
+'',
+'<span class="cmt">/** 发送置换：tokenMap 命中的 token → [附件引用:uuid|name]；孤儿 token 原样保留。</span>',
+'<span class="cmt"> *  工作区引用（本原型）按同协议扩展：</span>',
+'<span class="cmt"> *  [文件引用:wid|path] · [目录引用:wid|path] · [代码引用:wid|path|L起-L止] */</span>',
+'<span class="kw">export</span> <span class="kw">function</span> <span class="fn">substituteAttRefsForSend</span>(',
+'  value: <span class="kw">string</span>,',
+'  tokenMap: <span class="typ">AttRefTokenMap</span>,',
+'  attachments: { id: <span class="kw">string</span>; name: <span class="kw">string</span> }[],',
+'): <span class="kw">string</span> {',
+'  <span class="kw">const</span> idToName = <span class="kw">new</span> <span class="typ">Map</span>(attachments.map((a) =&gt; [a.id, a.name]));',
+'  <span class="kw">return</span> value.replace(<span class="str">/【([^】]+)】/g</span>, (token) =&gt; {',
+'    <span class="kw">const</span> id = <span class="typ">Object</span>.keys(tokenMap).find((k) =&gt; tokenMap[k] === token);',
+'    <span class="kw">return</span> id ? <span class="str">`[附件引用:${id}|${idToName.get(id) ?? ""}]`</span> : token;',
+'  });',
+'}',
+];
+const MD_LINES = [
+'# 设计文档（Design）— 2026-10-09-attachment-inline-reference',
+'',
+'## 背景',
+'',
+'会话输入区支持上传附件（选文件即传，chips 展示、随消息发送），但用户无法在正文',
+'文字中标记「这句话说的是哪个附件」——附件与正文是两条平行通道，传递「第一张图',
+'怎样、第二张图怎样」这类指代信息只能靠口头描述，当两个附件同名时智能体完全无法',
+'区分。用户需要在编辑未发送消息时，把附件以引用标签的形式插入正文，并在发送后',
+'让智能体拿到 uuid 级精确关联。',
+'',
+'## 设计目标',
+'',
+'1. 右击待发附件 chip → 正文末尾插入该附件的引用标签（编辑态 token），插入后',
+'   光标落末尾，可继续输入。',
+'2. 编辑态 token 显示真实文件名；同名附件自动加序号（【文件名·2】），指代唯一。',
+'3. 输入框内标签有视觉样式（品牌色底、圆角、右上角 × 角标）：× 点击删该处引用；',
+'   退格贴标签尾部时一次整删整个标签，标签中部/普通文本退格仍逐字。',
+'4. 点 chip X 删除附件 → 正文该附件的全部引用同步移除。',
+'5. 发送时编辑态 token 自动置换为 [附件引用:uuid|name] 正式引用，随正文透传。',
+'6. 历史消息正文里的 [附件引用:...] 渲染为标签节点，点击打开在线预览。',
+'',
+'## 决策记录（节选）',
+'',
+'- D-001：不换富文本编辑器，采用 textarea + 镜像高亮层方案。',
+'- D-002：同名序号按「当前正文已有 + 已分配」唯一化，不随删除重排。',
+'- D-003：正式引用走文本协议，后端零改动，正文原样透传。',
+];
+const JSON_LINES = [
+'{',
+'  "name": "sillyhub-frontend",',
+'  "private": true,',
+'  "scripts": {',
+'    "dev": "next dev",',
+'    "gen:types": "openapi-typescript ../backend/openapi.json -o src/lib/api-types.ts"',
+'  },',
+'  "dependencies": {',
+'    "antd": "^5.x",',
+'    "lucide-react": "^0.x",',
+'    "react-query": "^5.x"',
+'  }',
+'}',
+];
+const GENERIC_LINES = ['（原型示意内容——真实实现走 /api/workspaces/{wid}/explorer/file 端点）',''];
+
+function findNode(path){ // path: 'a/b/c' 相对根
+  if(!path) return null;
+  let parts = path.split('/'), list = TREE, node = null;
+  for(const p of parts){
+    node = list.find(n=>n.name===p); if(!node) return null;
+    list = node.children||[];
+  }
+  return node;
+}
+function previewOf(path){
+  if(path.endsWith('attachment-refs.ts'))
+    return {kind:'code', size:4170, mtime:'2026/10/10 09:12', lines:TS_LINES};
+  if(path.endsWith('design.md'))
+    return {kind:'text', size:13824, mtime:'2026/10/09 14:20', lines:MD_LINES};
+  if(path.endsWith('package.json'))
+    return {kind:'text', size:980, mtime:'2026/09/30 11:02', lines:JSON_LINES};
+  if(path.endsWith('.db'))
+    return {kind:'binary', size:2861056, mtime:'2026/10/10 10:41'};
+  return {kind:'text', size:1024, mtime:'2026/10/08 16:00', lines:GENERIC_LINES};
+}
+
+/* ═══════════════ 工具 ═══════════════ */
+const $ = (s)=>document.querySelector(s);
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtSize(n){ if(n>=1048576) return (n/1048576).toFixed(1)+' MB'; if(n>=1024) return (n/1024).toFixed(1)+' KB'; return n+' B'; }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',2200); }
+
+const ICONS = {
+  fileplus:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M12 12v6"/>',
+  scissors:'<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+  folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  folderopen:'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+  file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+  filetext:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  code:'<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+  braces:'<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>',
+  paperclip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  db:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  chevron:'<path d="m9 18 6-6-6-6"/>',
+  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  filecode:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m10 12-2 2 2 2"/><path d="m14 12 2 2-2 2"/>',
+};
+function svg(name, cls){ return `<svg class="ico ${cls||''}" viewBox="0 0 24 24">${ICONS[name]}</svg>`; }
+function extIcon(name, type){
+  if(type==='dir') return svg('folder','c-dir');
+  if(name.endsWith('.ts')) return svg('filecode','c-ts');
+  if(name.endsWith('.json')) return svg('braces','c-json');
+  if(name.endsWith('.yaml')) return svg('filetext','c-yaml');
+  if(name.endsWith('.db')) return svg('db','c-db');
+  return svg('filetext','c-md');
+}
+
+/* ═══════════════ 文件树 ═══════════════ */
+const expanded = new Set(['','.sillyspec','.sillyspec/changes','.sillyspec/changes/archive','frontend']);
+let selectedPath = null;
+function renderTree(){
+  const root = $('#tree'); let html = '';
+  html += `<div class="trow open ${selectedPath===null?'sel':''}" data-path="" data-type="dir" style="--depth:0">
+    <span class="sw">${svg('chevron')}</span><span class="ic">${svg('folderopen','c-dir')}</span>
+    <span class="nm" style="font-weight:500">工作区根</span></div>`;
+  (function walk(list, parent, depth){
+    for(const n of [...list].sort((a,b)=> (a.type===b.type? a.name.localeCompare(b.name) : a.type==='dir'?-1:1))){
+      const path = parent? parent+'/'+n.name : n.name;
+      const isOpen = expanded.has(path);
+      html += `<div class="trow ${isOpen?'open':''} ${selectedPath===path?'sel':''}" data-path="${path}" data-type="${n.type}" data-name="${n.name}" style="--depth:${depth}">
+        <span class="sw">${n.type==='dir'?svg('chevron'):''}</span><span class="ic">${extIcon(n.name,n.type)}</span>
+        <span class="nm" title="${path}">${n.name}</span>
+        ${n.type==='file'?`<span class="sz">${fmtSize(n.size)}</span>`:''}</div>`;
+      if(n.type==='dir' && isOpen) walk(n.children||[], path, depth+1);
+    }
+  })(TREE,'',1);
+  root.innerHTML = html;
+}
+$('#tree').addEventListener('click',(e)=>{
+  const row = e.target.closest('.trow'); if(!row) return;
+  const path = row.dataset.path, type = row.dataset.type;
+  selectedPath = path;
+  if(type==='dir'){ expanded.has(path)?expanded.delete(path):expanded.add(path); renderTree(); }
+  else { renderTree(); openPreview(path); }
+});
+$('#tree').addEventListener('contextmenu',(e)=>{
+  const row = e.target.closest('.trow'); if(!row) return;
+  e.preventDefault();
+  selectedPath = row.dataset.path; renderTree();
+  const isDir = row.dataset.type==='dir', name = row.dataset.name||'工作区根';
+  openMenu(e.clientX, e.clientY, [{
+    icon:'fileplus', label: isDir?'添加目录到会话输入框':'添加文件到会话输入框', hint:name,
+    onClick:()=>insertRef(isDir?'dir':'file', name, row.dataset.path)
+  }]);
+});
+
+/* ═══════════════ 预览区 ═══════════════ */
+let curPreview = null;
+function openPreview(path){
+  const col = $('#rightCol'); col.style.display='flex';
+  curPreview = {path, ...previewOf(path)};
+  const name = path.split('/').pop();
+  $('#fpPath').textContent = path;
+  $('#fpPath').title = `${WS.name} · ${WS.id}\n${path}`;
+  const p = curPreview;
+  $('#fph').innerHTML = `
+    <span class="ic" style="color:var(--subtle)">${svg(p.kind==='code'?'filecode':'filetext')}</span>
+    <span class="grow"><span class="fname" title="${name}">${name}</span></span>
+    <span class="fmeta">${fmtSize(p.size)} · 修改于 ${p.mtime}</span>
+    <span class="acts"><button class="minibtn" data-a="full">${svg('file')}全屏预览</button>
+    <button class="minibtn" data-a="dl">${svg('file')}下载</button></span>`;
+  const body = $('#fpBody');
+  if(p.kind==='binary'){
+    body.innerHTML = `<div class="binmeta"><svg class="ico" viewBox="0 0 24 24">${ICONS.db}</svg>
+      <div><b>${name}</b><p>${fmtSize(p.size)} · 修改于 ${p.mtime}<br>二进制文件不支持文本预览与选区引用，可下载查看。</p></div></div>`;
+    return;
+  }
+  let rows = '';
+  p.lines.forEach((ln,i)=>{
+    const n = i+1;
+    const isHd = p.kind==='text' && /^#{1,3} /.test(ln.replace(/<[^>]+>/g,''));
+    rows += `<div class="cl ${isHd?'hd':''}" data-l="${n}"><span class="ln">${n}</span><span class="lc">${ln||' '}</span></div>`;
+  });
+  body.innerHTML = `<div class="selhint" id="selHint"></div><div class="${p.kind==='code'?'codeblk':'textblk'}">${rows}</div>`;
+}
+$('#fpClose').onclick = ()=>{ $('#rightCol').style.display='none'; };
+
+/* 选区 → 行号范围 */
+function selectionLineRange(){
+  const sel = getSelection();
+  if(!sel.rangeCount || sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  const a = (r.startContainer.nodeType===3? r.startContainer.parentElement : r.startContainer)?.closest?.('.cl');
+  const b = (r.endContainer.nodeType===3? r.endContainer.parentElement : r.endContainer)?.closest?.('.cl');
+  if(!a || !b) return null;
+  let l1=+a.dataset.l, l2=+b.dataset.l; if(l1>l2)[l1,l2]=[l2,l1];
+  return [l1,l2];
+}
+$('#fpBody').addEventListener('contextmenu',(e)=>{
+  if(!curPreview || curPreview.kind==='binary') return;   // 二进制无选区语义
+  const lr = selectionLineRange();
+  if(!lr) return;                                          // 无选区：不拦截浏览器默认菜单
+  e.preventDefault();
+  const name = curPreview.path.split('/').pop();
+  const label = `${name}:${lr[0]}-${lr[1]}`;
+  openMenu(e.clientX, e.clientY, [{
+    icon:'scissors', label:'添加选中内容到会话输入框', hint:label,
+    onClick:()=>{ insertRef('code', name, curPreview.path, lr); getSelection().removeAllRanges(); }
+  }]);
+});
+/* 选区变化时提示当前行范围 */
+document.addEventListener('selectionchange',()=>{
+  const hint = $('#selHint'); if(!hint || !curPreview) return;
+  const lr = selectionLineRange();
+  if(lr && curPreview.path){ hint.classList.add('on'); hint.textContent = `已选中 ${curPreview.path.split('/').pop()} 第 ${lr[0]}-${lr[1]} 行 · 右键可添加到会话输入框`; }
+  else hint.classList.remove('on');
+});
+
+/* ═══════════════ 右键菜单（kanban 模式） ═══════════════ */
+function openMenu(x, y, items){
+  const m = $('#ctx');
+  m.innerHTML = items.map((it,i)=>`<button class="mi" data-i="${i}">${svg(it.icon)}<span>${it.label}</span>${it.hint?`<span class="hint">${esc(it.hint)}</span>`:''}</button>`).join('');
+  m.classList.add('open');
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8))+'px';
+  m.style.top  = Math.max(8, Math.min(y, innerHeight - h - 8))+'px';
+  m.querySelectorAll('.mi').forEach(b=>b.onclick=(ev)=>{ ev.stopPropagation(); closeMenu(); items[+b.dataset.i].onClick(); });
+  setTimeout(()=>{
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('contextmenu', closeMenu, true);
+    document.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('resize', closeMenu);
+  },0);
+}
+function closeMenu(){
+  const m = $('#ctx'); if(!m.classList.contains('open')) return;
+  m.classList.remove('open');
+  document.removeEventListener('click', closeMenu);
+  document.removeEventListener('contextmenu', closeMenu, true);
+  document.removeEventListener('scroll', closeMenu, true);
+  window.removeEventListener('resize', closeMenu);
+}
+
+/* ═══════════════ 引用 token（编辑态） ═══════════════ */
+let mode = 'A';                       // A=图标内嵌(emoji 进 token 文本)  B=角标悬浮(lucide 角标)
+const EMO = { file:'📄', dir:'📁', code:'🧾', att:'📎' };
+const TYPE_META = {
+  file:{label:'文件引用', icon:'filetext', cls:'t-file'},
+  dir:{label:'目录引用', icon:'folder', cls:'t-dir'},
+  code:{label:'代码块引用', icon:'braces', cls:'t-code'},
+  att:{label:'附件引用', icon:'paperclip', cls:'t-att'},
+};
+let refTokens = [];                   // {key,type,name,path,lines,seq,token}
+const ta = $('#ta');
+let lastCaret = 0, flashToken = null;
+
+function baseOf(name, lines){ return name + (lines? `:${lines[0]}-${lines[1]}` : ''); }
+function mkToken(name, seq, type, lines){
+  let base = baseOf(name, lines);
+  if(seq>1) base += `·${seq}`;
+  const inner = mode==='A' ? `${EMO[type]} ${base}` : base;
+  return `【${inner}】`;
+}
+/* 序号池按「完整显示基名（含行号段）」分配：显示文本不同（如文件 vs 同名代码块）
+ * 本就无歧义，不加序号；只有显示文本完全相同的引用才 ·2 起唯一化。 */
+function allocSeq(base){
+  const used = new Set(refTokens.filter(r=>ta.value.includes(r.token) && baseOf(r.name,r.lines)===base).map(r=>r.seq));
+  let s=1; while(used.has(s)) s++; return s;
+}
+function insertRef(type, name, path, lines){
+  const key = type==='code'? `${path}:${lines[0]}-${lines[1]}` : path;
+  let ref = refTokens.find(r=>r.key===key && ta.value.includes(r.token));
+  if(!ref){
+    const seq = allocSeq(baseOf(name, lines));
+    ref = {key, type, name, path, lines, seq, token:mkToken(name,seq,type,lines)};
+    refTokens.push(ref);
+  }
+  const s = lastCaret ?? ta.value.length;
+  ta.value = ta.value.slice(0,s) + ref.token + ta.value.slice(s);
+  lastCaret = s + ref.token.length;
+  flashToken = ref.token;
+  renderOverlay();
+  ta.focus(); ta.setSelectionRange(lastCaret, lastCaret);
+  toast(`已插入引用：${ref.token}`);
+}
+/* 镜像高亮层（与真实 InputRefOverlay 同构：透明占位文本逐字符撑位） */
+function renderOverlay(){
+  const value = ta.value;
+  const toks = refTokens.filter(r=>value.includes(r.token)).map(r=>r.token).sort((a,b)=>b.length-a.length);
+  const ov = $('#ovIn');
+  if(!toks.length){ ov.innerHTML = esc(value)? `<span class="ghost">${esc(value)}</span>`:''; syncScroll(); return; }
+  const re = new RegExp(toks.map(t=>t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|'),'g');
+  let html='', last=0, occ=0;
+  for(const m of value.matchAll(re)){
+    const idx = m.index;
+    if(idx>last) html += `<span class="ghost">${esc(value.slice(last,idx))}</span>`;
+    const ref = refTokens.find(r=>r.token===m[0]);
+    const meta = TYPE_META[ref.type];
+    html += `<span class="refocc${m[0]===flashToken?' flash':''}" data-occ="${occ}" data-token="${esc(m[0])}">
+      <span class="typebadge ${meta.cls}" title="${meta.label}">${svg(meta.icon)}</span>
+      <span class="xbtn">${svg('x')}</span>
+      <span class="ghost">${esc(m[0])}</span></span>`;
+    occ++; last = idx + m[0].length;
+  }
+  if(last<value.length) html += `<span class="ghost">${esc(value.slice(last))}</span>`;
+  ov.innerHTML = html;
+  flashToken = null;
+  syncScroll();
+}
+function syncScroll(){ $('#ovIn').style.transform = `translateY(${-ta.scrollTop}px)`; }
+ta.addEventListener('scroll', syncScroll);
+ta.addEventListener('input', ()=>{ lastCaret = ta.selectionStart; renderOverlay(); });
+['keyup','click','select'].forEach(ev=>ta.addEventListener(ev,()=>lastCaret=ta.selectionStart));
+ta.addEventListener('blur',()=>lastCaret=ta.selectionStart);
+/* 退格整删：光标贴 token 尾一次退格删整个标签 */
+ta.addEventListener('keydown',(e)=>{
+  if(e.key!=='Backspace' || ta.selectionStart!==ta.selectionEnd) return;
+  const caret = ta.selectionStart;
+  const toks = refTokens.map(r=>r.token).filter(t=>ta.value.slice(0,caret).endsWith(t)).sort((a,b)=>b.length-a.length);
+  if(!toks.length) return;
+  e.preventDefault();
+  const t = toks[0];
+  ta.value = ta.value.slice(0,caret-t.length) + ta.value.slice(caret);
+  lastCaret = caret - t.length;
+  ta.setSelectionRange(lastCaret,lastCaret);
+  renderOverlay();
+});
+/* × 角标删除（事件委托，角标 pointer-events 仅 hover 命中时开启） */
+$('#ovIn').addEventListener('click',(e)=>{
+  const btn = e.target.closest('.xbtn'); if(!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  const occ = btn.closest('.refocc');
+  const t = occ.dataset.token;
+  const idx = ta.value.indexOf(t);
+  if(idx>=0){ ta.value = ta.value.slice(0,idx)+ta.value.slice(idx+t.length); lastCaret=Math.min(lastCaret,ta.value.length); renderOverlay(); }
+});
+/* 悬停命中：× 淡入 + 路径 tooltip（与 2026-10-10 hitTest 同思路） */
+const iwrap = $('#iwrap'), tip = $('#tip');
+iwrap.addEventListener('mousemove',(e)=>{
+  const spans = [...document.querySelectorAll('#ovIn .refocc')];
+  let hit = null;
+  for(const s of spans){
+    const r = s.getBoundingClientRect();
+    if(e.clientX>=r.left-8 && e.clientX<=r.right+8 && e.clientY>=r.top-8 && e.clientY<=r.bottom+8){ hit=s; break; }
+  }
+  spans.forEach(s=>s.querySelector('.xbtn').classList.toggle('show', s===hit));
+  if(hit){
+    const ref = refTokens.find(r=>r.token===hit.dataset.token);
+    const meta = TYPE_META[ref.type];
+    const sub = ref.type==='att'
+      ? `附件已上传 · uuid ${ATT.id}`
+      : `${WS.name}（${WS.id}）:${ref.path}${ref.lines?` · L${ref.lines[0]}-L${ref.lines[1]}`:''}`;
+    tip.innerHTML = `<div class="tp1">${svg(meta.icon,meta.cls)}${meta.label}${ref.lines?` · ${ref.name}:${ref.lines[0]}-${ref.lines[1]}`:` · ${ref.name}`}</div><div class="tp2">${esc(sub)}</div>`;
+    tip.classList.add('open');
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    tip.style.left = Math.min(e.clientX+14, innerWidth-tw-10)+'px';
+    tip.style.top  = Math.min(e.clientY+16, innerHeight-th-10)+'px';
+  } else tip.classList.remove('open');
+});
+iwrap.addEventListener('mouseleave',()=>{ tip.classList.remove('open'); document.querySelectorAll('#ovIn .xbtn').forEach(b=>b.classList.remove('show')); });
+
+/* ═══════════════ 附件 chip（昨日功能，共存演示） ═══════════════ */
+function renderChips(){
+  $('#chips').innerHTML = `<span class="chip">
+    <button class="nm" title="${ATT.name} · ${fmtSize(ATT.bytes)}（点击在线预览 / 右击插入正文引用）">${svg(ATT.kind==='image'?'filetext':'filetext')}<span>${ATT.name} · ${fmtSize(ATT.bytes)}</span></button>
+    <button class="rm" aria-label="移除附件">${svg('x')}</button></span>`;
+  const nm = $('#chips .nm');
+  nm.onclick = ()=>toast('在线预览弹窗（原型略）');
+  nm.oncontextmenu = (e)=>{ e.preventDefault(); insertRef('att', ATT.name, ATT.id); };
+  $('#chips .rm').onclick = ()=>{
+    const att = refTokens.filter(r=>r.type==='att');
+    for(const r of att) ta.value = ta.value.split(r.token).join('');
+    refTokens = refTokens.filter(r=>r.type!=='att');
+    $('#chips').innerHTML=''; renderOverlay();
+    toast('附件已移除，正文中的附件引用同步清除');
+  };
+}
+
+/* ═══════════════ 发送置换 ═══════════════ */
+function formal(r){
+  if(r.type==='att') return `[附件引用:${ATT.id}|${r.name}]`;
+  if(r.type==='file') return `[文件引用:${WS.id}|${r.path}]`;
+  if(r.type==='dir')  return `[目录引用:${WS.id}|${r.path}]`;
+  return `[代码引用:${WS.id}|${r.path}|L${r.lines[0]}-L${r.lines[1]}]`;
+}
+function send(){
+  const value = ta.value;
+  if(!value.trim()) { toast('输入为空（原型：也可只发附件）'); return; }
+  let out = value;
+  for(const r of refTokens){ if(out.includes(r.token)) out = out.split(r.token).join(formal(r)); }
+  /* 历史渲染：拆 text/ref 段（与 parseInlineAttRefs 同口径） */
+  const parts = []; let last=0;
+  const re = /\[(附件引用|文件引用|目录引用|代码引用):([^\]]*)\]/g;
+  for(const m of out.matchAll(re)){
+    if(m.index>last) parts.push({text:out.slice(last,m.index)});
+    const seg = m[2].split('|');
+    parts.push({ref:{kind:m[1], id:seg[0], path:seg[1]||'', lines:seg[2]||''}});
+    last = m.index + m[0].length;
+  }
+  if(last<out.length) parts.push({text:out.slice(last)});
+  const render = parts.map(p=>{
+    if(p.text) return esc(p.text);
+    const r = p.ref, name = r.path? r.path.split('/').pop() : '';
+    const icon = r.kind==='附件引用'?'paperclip': r.kind==='目录引用'?'folder': r.kind==='代码引用'?'braces':'filetext';
+    const label = r.kind==='代码引用' ? `${name}:${r.lines.replace('L','').replace('-L','-')}` : (name || r.id);
+    return `<span class="rt" title="${r.kind} · ${r.path||''}${r.lines?' '+r.lines:''}（点击打开预览）">${svg(icon)}${esc(label)}</span>`;
+  }).join('');
+  $('#msgs').insertAdjacentHTML('beforeend', `
+    <div class="mrow user"><div class="m-av me">W</div><div class="bubble user">${render}</div></div>
+    <div class="wire mono">→ 智能体收到正文：${esc(out)}</div>`);
+  ta.value=''; refTokens=[]; lastCaret=0; renderOverlay(); renderChipsClear();
+  $('#msgs').scrollTop = $('#msgs').scrollHeight;
+  toast('已发送：token 已置换为正式引用（见气泡下方原文）');
+}
+function renderChipsClear(){ /* 发送后清空待发区（与 registerClearAttachments 行为一致） */ $('#chips').innerHTML=''; }
+$('#sendBtn').onclick = send;
+ta.addEventListener('keydown',(e)=>{ if((e.ctrlKey||e.metaKey) && e.key==='Enter'){ e.preventDefault(); send(); } });
+
+/* ═══════════════ A / B 图标样式切换 ═══════════════ */
+function setMode(m){
+  if(m===mode) return;
+  const prev = mode; mode = m;
+  document.body.classList.toggle('mode-a', m==='A');
+  document.body.classList.toggle('mode-b', m==='B');
+  $('#modeA').classList.toggle('on', m==='A');
+  $('#modeB').classList.toggle('on', m==='B');
+  if(m==='A' || prev==='A'){  /* 重写既有 token 文本（emoji 前缀 ↔ 纯文本） */
+    for(const r of refTokens){
+      const nt = mkToken(r.name, r.seq, r.type, r.lines);
+      ta.value = ta.value.split(r.token).join(nt);
+      r.token = nt;
+    }
+    renderOverlay();
+  }
+  toast(m==='A'?'样式 A：图标内嵌（emoji 进 token 文本，两层天然同宽）':'样式 B：角标悬浮（lucide 角标不占文本流，零错位）');
+}
+$('#modeA').onclick=()=>setMode('A');
+$('#modeB').onclick=()=>setMode('B');
+
+/* ═══════════════ ＋ 功能菜单（视觉还原，项不实现） ═══════════════ */
+$('#plusBtn').onclick=(e)=>{ e.stopPropagation(); $('#plusMenu').classList.toggle('open'); $('#plusBtn').classList.toggle('on'); };
+$('#plusMenu').addEventListener('click',(e)=>{ e.stopPropagation(); toast('该入口为既有功能（原型不实现）'); });
+document.addEventListener('click',()=>{ $('#plusMenu').classList.remove('open'); $('#plusBtn').classList.remove('on'); });
+
+/* ═══════════════ 拖拽把手（左/右栏宽，原型可拖） ═══════════════ */
+function makeResizer(handle, col, min, max, dirRight){
+  let sx=0, sw=0, on=false;
+  handle.addEventListener('pointerdown',(e)=>{ on=true; sx=e.clientX; sw=col.offsetWidth; handle.classList.add('active'); handle.setPointerCapture(e.pointerId); e.preventDefault(); });
+  handle.addEventListener('pointermove',(e)=>{
+    if(!on) return;
+    const d = dirRight? (sx-e.clientX) : (e.clientX-sx);
+    col.style.width = Math.max(min, Math.min(max, sw+d))+'px';
+  });
+  handle.addEventListener('pointerup',()=>{ on=false; handle.classList.remove('active'); });
+  handle.addEventListener('dblclick',()=>{ col.style.width=(dirRight?480:320)+'px'; });
+}
+makeResizer($('#leftResizer'), $('#leftCol'), 240, 560, false);
+makeResizer($('#rightResizer'), $('#rightCol'), 320, 860, true);
+
+/* ═══════════════ 初始化 ═══════════════ */
+renderTree();
+openPreview('frontend/src/lib/attachment-refs.ts');
+renderChips();
+/* 预置两个示例引用，进入即见效果 */
+refTokens = [
+  {key:'frontend/src/lib/attachment-refs.ts', type:'file', name:'attachment-refs.ts', path:'frontend/src/lib/attachment-refs.ts', seq:1, token:''},
+  {key:'.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/design.md:10-16', type:'code', name:'design.md', path:'.sillyspec/changes/archive/2026-10-09-attachment-inline-reference/design.md', lines:[10,16], seq:1, token:''},
+];
+refTokens.forEach(r=>r.token = mkToken(r.name, r.seq, r.type, r.lines));
+ta.value = `看下这两个引用：${refTokens[0].token} 的序号分配逻辑，以及 ${refTokens[1].token} 这段设计目标。`;
+lastCaret = ta.value.length;
+renderOverlay();
+setTimeout(()=>$('#hint').classList.add('off'), 9000);
+$('#hint').onclick=()=>$('#hint').classList.add('off');
+</script>
+</body>
+</html>
