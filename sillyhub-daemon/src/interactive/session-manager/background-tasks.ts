@@ -25,6 +25,16 @@ import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
 const TASK_PROGRESS_LINE_THROTTLE_MS = 2000;
 
 /**
+ * 2026-10-10-task-wakeup-quiet-threshold（FR-01）：后台任务终态唤醒的最短实际
+ * 运行时长（ms）——不足该值的 completed/failed 不注入唤醒（生产实证：13 分钟
+ * 会话被 17 条秒级孙任务通知灌满，而真长任务 770s；60s 在两者间留一个数量级
+ * 安全带）。仅拦唤醒注入；终态 emit/[TASK_NOTIFICATION] 落行/注销不受影响，
+ * 主代理可 TaskOutput 自取短任务结果。时长判定：elapsed_ms（服务端权威）优先，
+ * 缺失用注册条目 startedAt 差值兜底，两者都缺 fail-open 照常唤醒。
+ */
+const TASK_WAKEUP_MIN_DURATION_MS = 60_000;
+
+/**
  * task-08（对账表 #8）：status/agent_task_status 统一处理器。
  *
  * 归一化器把 task_started/task_progress/task_updated 三类 system 帧都映射为
@@ -259,6 +269,17 @@ export async function handleTaskNotificationEvent(
   // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
   // 停止，结果无需汇报，不唤醒防噪）。
   if (rawStatus === 'completed' || rawStatus === 'failed') {
+    // 门槛判定（FR-01）：info 已从注册表注销但局部引用仍在，startedAt 可读；
+    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
+    const durationMs =
+      elapsedMs !== undefined
+        ? elapsedMs
+        : info?.startedAt !== undefined
+          ? Date.now() - info.startedAt
+          : undefined;
+    if (durationMs !== undefined && durationMs < TASK_WAKEUP_MIN_DURATION_MS) {
+      return;
+    }
     scheduleTaskWakeup(mgr, state.sessionId, {
       taskId,
       taskName,

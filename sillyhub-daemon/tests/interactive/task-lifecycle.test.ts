@@ -19,7 +19,10 @@
 //     R-03 节流：短间隔多次 task_progress 只落 1 条 [TASK_PROGRESS]，超 2000ms 恢复
 //     落行，终态行不受节流（fake timers）；
 //   - 跨 turn：result 收尾（currentRunId 清空）后到达的 task_notification 用注册时
-//     捕获的派发 runId 落行/emit。
+//     捕获的派发 runId 落行/emit；
+//   - 2026-10-10-task-wakeup-quiet-threshold FR-01：唤醒最短时长门槛 60s
+//     （elapsed_ms 优先/注册表 startedAt 兜底/双缺失 fail-open），仅拦唤醒注入，
+//     终态 emit/落行/注销不受影响。
 //
 // 不起真 CLI：fake driver 捕获 SessionManager._runConsume 注入的 onTurnMessage/
 // onTurnResult 回调，直接调用即驱动 _onMessage / _onResult 全链路。
@@ -708,8 +711,10 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
       const h = await createHarnessWakeup('sess-w', 'run-w', wakeup);
       await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A: 数数' }));
       await h.emitMessage(msgTaskStarted({ taskId: 'task-b', toolUseId: 'call-b', description: '子代理B: 数数' }));
-      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 20000 }));
-      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 21000 }));
+      // durationMs 夹具须在唤醒门槛（60s）之上——2026-10-10-task-wakeup-quiet-threshold
+      // 后短任务不唤醒，本用例守护的是合并形态，不是门槛。
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 61000 }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 62000 }));
       // 窗口内不注入
       expect(wakeup).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(2100);
@@ -725,10 +730,87 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
       expect(prompt).toContain('禁止声称仍在等待任何任务');
       expect(prompt).toContain('子代理A: 数数');
       expect(prompt).toContain('子代理B: 数数');
-      expect(prompt).toContain('00:20');
+      expect(prompt).toContain('01:01');
       expect(prompt).toContain('A 数完了');
       expect(prompt).toContain('TaskOutput');
       expect(prompt).toContain('不要重复执行这些任务');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // ── 2026-10-10-task-wakeup-quiet-threshold：唤醒最短时长门槛（60s） ────────
+
+  it('FR：短任务不唤醒——elapsed_ms 2s < 60s 门槛，终态 emit/落行/注销照常', async () => {
+    vi.useFakeTimers();
+    try {
+      const wakeup = vi.fn().mockResolvedValue(undefined);
+      const h = await createHarnessWakeup('sess-q1', 'run-q1', wakeup);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-q1', toolUseId: 'call-q1', description: '秒级搜索' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-q1', status: 'completed', summary: '查完了', durationMs: 2000 }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).not.toHaveBeenCalled();
+      // 门槛只拦唤醒注入：终态 emit 与 [TASK_NOTIFICATION] 行照常。
+      expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
+      const notifLine = h.deps.onTurnMessage.mock.calls
+        .map((c) => String((c[2] as { content?: string })?.content ?? ''))
+        .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
+      expect(notifLine).toBeDefined();
+      expect(notifLine).toContain('"task_id":"task-q1"');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR：长任务照常唤醒——elapsed_ms 61s ≥ 60s 门槛', async () => {
+    vi.useFakeTimers();
+    try {
+      const wakeup = vi.fn().mockResolvedValue(undefined);
+      const h = await createHarnessWakeup('sess-q2', 'run-q2', wakeup);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-q2', toolUseId: 'call-q2', description: '长调研' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-q2', status: 'failed', summary: '跑完但失败', durationMs: 61000 }));
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const prompt = wakeup.mock.calls[0][1] as string;
+      expect(prompt).toContain('长调研');
+      expect(prompt).toContain('已失败');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR：elapsed_ms 缺失用注册表 startedAt 兜底——注册 3s 后终态不唤醒，61s 后终态唤醒', async () => {
+    vi.useFakeTimers();
+    try {
+      const short = vi.fn().mockResolvedValue(undefined);
+      const h1 = await createHarnessWakeup('sess-q3', 'run-q3', short);
+      await h1.emitMessage(msgTaskStarted({ taskId: 'task-q3', toolUseId: 'call-q3', description: '短任务' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      await h1.emitMessage(msgTaskNotification({ taskId: 'task-q3', status: 'completed', summary: 'x' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(short).not.toHaveBeenCalled();
+
+      const long = vi.fn().mockResolvedValue(undefined);
+      const h2 = await createHarnessWakeup('sess-q4', 'run-q4', long);
+      await h2.emitMessage(msgTaskStarted({ taskId: 'task-q4', toolUseId: 'call-q4', description: '长任务' }));
+      await vi.advanceTimersByTimeAsync(61000);
+      await h2.emitMessage(msgTaskNotification({ taskId: 'task-q4', status: 'completed', summary: 'y' }));
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(long).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR：时长无从判定（无 elapsed_ms 且注册表无条目）保持原唤醒行为（fail-open）', async () => {
+    vi.useFakeTimers();
+    try {
+      const wakeup = vi.fn().mockResolvedValue(undefined);
+      const h = await createHarnessWakeup('sess-q5', 'run-q5', wakeup);
+      // 不发 task_started——daemon 重启窗口形态：任务表无条目，靠 currentRunId 兜住。
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'completed', summary: '孤儿终态' }));
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(wakeup).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
