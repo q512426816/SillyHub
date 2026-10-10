@@ -1,0 +1,1315 @@
+diff --git a/backend/app/modules/daemon/run_sync/service/publish.py b/backend/app/modules/daemon/run_sync/service/publish.py
+index e2b8b8f2a..2fbb4edd3 100644
+--- a/backend/app/modules/daemon/run_sync/service/publish.py
++++ b/backend/app/modules/daemon/run_sync/service/publish.py
+@@ -53,6 +53,9 @@ class PublishIntent:
+     # task-05 / FR-01：最近一次调用提示词大小（last-write-wins 写回后的实时值），
+     # None（老 daemon / 未上报）时 publish 两路 payload 均不带该键（design §9）。
+     ctx_tokens: int | None
++    # 2026-10-10-live-token-speed-daemon-timing FR-06：轮内累计模型生成时长 ms
++    # （max 累积实时值）。None 不带键（design §9 同款）；前端 tok/s 速度分母。
++    duration_api_ms: int | None
+     agent_session_id: uuid.UUID | None
+     timestamp_iso: str
+     # ── task-05（2026-09-01-session-group-chat / design §5.2）：群桥接投影标量 ──
+@@ -141,6 +144,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
+         # 调用提示词大小）。None 不带键——老 daemon / 子桶未上报兼容（design §9）。
+         if intent.ctx_tokens is not None:
+             summary_payload["ctx_tokens"] = intent.ctx_tokens
++        # FR-06：实时 token 透传同批携带轮内累计生成时长（None 不带键）。
++        if intent.duration_api_ms is not None:
++            summary_payload["duration_api_ms"] = intent.duration_api_ms
+         pipe.publish(channel_name, json.dumps(summary_payload))
+         await pipe.execute()
+     except Exception:
+@@ -218,6 +224,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
+             # 老 daemon 双向兼容）。
+             if intent.ctx_tokens is not None:
+                 token_payload["ctx_tokens"] = intent.ctx_tokens
++            # FR-06：tokens 事件携带轮内累计生成时长（tok/s 分母，None 不带键）。
++            if intent.duration_api_ms is not None:
++                token_payload["duration_api_ms"] = intent.duration_api_ms
+             pipe.publish(session_channel, json.dumps(token_payload, default=str))
+         await pipe.execute()
+     except Exception:
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_commit.py b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+index ac31db9d8..d69e0a2ed 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_commit.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+@@ -252,6 +252,14 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+         # 不触碰该列（SDK result 无 per-call 拆分，保留实时最后写入值）。
+         if st.latest_ctx_tokens is not None:
+             st.agent_run.ctx_tokens = st.latest_ctx_tokens
++        # 2026-10-10-live-token-speed-daemon-timing FR-05：轮内累计生成时长写回——
++        # 仅增不减（与 DB 现值取 max）：submit 状态按请求重置、daemon 累计按轮从零，
++        # 直写款会让下一轮 submit 把列拉回小值（Grill P2 采纳）。close 的结果元数据
++        # 覆盖守卫（if not None）语义不变（Claude SDK 权威终值）。
++        if st.latest_api_duration_ms is not None and st.latest_api_duration_ms > (
++            st.agent_run.duration_api_ms or 0
++        ):
++            st.agent_run.duration_api_ms = st.latest_api_duration_ms
+             svc._session.add(st.agent_run)
+         # ql-20260617-001：session_id 实时写回（首次拿到就填，complete_lease 仍可覆盖）。
+         if st.latest_session_id and not st.agent_run.session_id:
+@@ -358,6 +366,8 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+     # task-05 / FR-01：ctx_tokens 同步提取（对齐 input/output），供 publish
+     # 实时透传（run channel summary + session channel tokens 事件）。
+     publish_ctx_tokens = st.agent_run.ctx_tokens if st.agent_run is not None else None
++    # FR-06：intent 携带本轮 max 累积的生成时长（None 不带键，design §9）。
++    publish_duration_api_ms = st.latest_api_duration_ms
+     publish_session_id = st.agent_run.agent_session_id if st.agent_run is not None else None
+ 
+     if st.count > 0 or (st.agent_run is not None and agent_run_status == "running"):
+@@ -401,6 +411,7 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+             cache_read_tokens=publish_cache_read_tokens,
+             cache_creation_tokens=publish_cache_creation_tokens,
+             ctx_tokens=publish_ctx_tokens,
++            duration_api_ms=publish_duration_api_ms,
+             agent_session_id=publish_session_id,
+             timestamp_iso=st.now.isoformat().replace("+00:00", "Z"),
+             # task-05：群桥接标量快照（事务内已解析的群上下文 + 最后投影行 id）。
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_steps.py b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+index 92dde9cf7..4827f3a90 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+@@ -55,6 +55,10 @@ class _SubmitState:
+     latest_cache_read_tokens: int | None = None
+     latest_cache_creation_tokens: int | None = None
+     latest_ctx_tokens: int | None = None
++    # 2026-10-10-live-token-speed-daemon-timing FR-05：轮内累计模型生成时长 ms
++    # （daemon usage.api_duration_ms 搭车）。max 累积（乱序/子桶交替不回退，
++    # 0 不拉低非零——与 in_tok :366 同款）。
++    latest_api_duration_ms: int | None = None
+     latest_session_id: str | None = None
+     existing_dedup_keys: set[str] = field(default_factory=set)
+     completed_segments: set[str] = field(default_factory=set)
+@@ -113,6 +117,7 @@ async def _submit_prepare(svc, st: _SubmitState, *, claim_token: str, messages:
+     # 瞬时量可上可下——批内最后出现值胜出直接赋值（last-write-wins），刻意
+     # 不用 input/output 的 max 累积（design §7 守卫差异）。
+     st.latest_ctx_tokens = None
++    st.latest_api_duration_ms = None
+     # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
+     # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
+     # content/event_type。旧代码只拼 text blocks、丢弃 thinking/tool_use/tool_result，
+@@ -377,6 +382,11 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
+                 )
+             if isinstance(ctx_tok, (int, float)):
+                 st.latest_ctx_tokens = int(ctx_tok)
++            # FR-05：轮内累计生成时长（usage.api_duration_ms，daemon 各引擎计时
++            # 生产）。max 累积防乱序回退；负值/非法（非数值）不收。
++            api_dur = usage.get("api_duration_ms")
++            if isinstance(api_dur, (int, float)) and api_dur > 0:
++                st.latest_api_duration_ms = max(st.latest_api_duration_ms or 0, int(api_dur))
+         msg_session_id = msg.get("session_id")
+         if isinstance(msg_session_id, str) and msg_session_id:
+             st.latest_session_id = msg_session_id
+diff --git a/backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py b/backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+index d9183fdcb..b63a84960 100644
+--- a/backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
++++ b/backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+@@ -500,3 +500,183 @@ class TestCloseInteractiveRunCtxTokens:
+         assert reloaded.input_tokens == 888888
+         assert reloaded.output_tokens == 999999
+         assert reloaded.ctx_tokens == 62000
++
++
++# ── api_duration_ms：轮内累计生成时长摄取与下发（FR-05/FR-06）──────────────────
++
++
++class TestApiDurationMsIngest:
++    """2026-10-10-live-token-speed-daemon-timing FR-05：submit_messages 提取
++    usage.api_duration_ms（daemon 各引擎逐调用计时生产）→ max 累积 → 仅增不减
++    写回 AgentRun.duration_api_ms。"""
++
++    @pytest.mark.asyncio
++    async def test_api_duration_ms_written_on_submit(self, db_session, mocked_redis) -> None:
++        """usage 带 api_duration_ms → AgentRun.duration_api_ms 写入；既有字段不回归。"""
++        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
++        svc = DaemonService(db_session)
++        await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] hi",
++                    "usage": {
++                        "input_tokens": 100,
++                        "output_tokens": 50,
++                        "api_duration_ms": 12000,
++                    },
++                }
++            ],
++        )
++        run = await db_session.get(AgentRun, run_id)
++        assert run is not None
++        assert run.duration_api_ms == 12000
++        assert run.input_tokens == 100
++        assert run.output_tokens == 50
++
++    @pytest.mark.asyncio
++    async def test_same_batch_out_of_order_keeps_max(self, db_session, mocked_redis) -> None:
++        """同批先 12000 后 8000（乱序/子桶交替模拟）→ 列保持 12000（max 累积）。"""
++        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
++        svc = DaemonService(db_session)
++        await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] a",
++                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 12000},
++                },
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] b",
++                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 8000},
++                },
++            ],
++        )
++        run = await db_session.get(AgentRun, run_id)
++        assert run is not None
++        assert run.duration_api_ms == 12000
++
++    @pytest.mark.asyncio
++    async def test_cross_batch_monotonic_write_back(self, db_session, mocked_redis) -> None:
++        """跨批仅增不减：批 1 写 15000，批 2 累计 8000 → 列保持 15000（防跨轮回退）。"""
++        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
++        svc = DaemonService(db_session)
++        await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] turn1",
++                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 15000},
++                }
++            ],
++        )
++        await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] turn2",
++                    "usage": {"input_tokens": 10, "output_tokens": 5, "api_duration_ms": 8000},
++                }
++            ],
++        )
++        run = await db_session.get(AgentRun, run_id)
++        assert run is not None
++        assert run.duration_api_ms == 15000
++
++    @pytest.mark.asyncio
++    async def test_missing_key_keeps_none(self, db_session, mocked_redis) -> None:
++        """usage 缺 api_duration_ms（老 daemon / cursor 未计时）→ 列保持 NULL 不报错。"""
++        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
++        svc = DaemonService(db_session)
++        count = await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] old daemon",
++                    "usage": {"input_tokens": 100, "output_tokens": 50},
++                }
++            ],
++        )
++        assert count == 1
++        run = await db_session.get(AgentRun, run_id)
++        assert run is not None
++        assert run.duration_api_ms is None
++
++
++class TestApiDurationMsPublish:
++    """FR-06：tokens 事件与 run channel summary 携带 duration_api_ms；None 不带键。"""
++
++    @pytest.mark.asyncio
++    async def test_both_channels_carry_duration_api_ms(self, db_session, recording_redis) -> None:
++        """submit 带 api_duration_ms → 两路 payload 均含 duration_api_ms。"""
++        lease_id, run_id, token, session_id = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        submission = await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] hi",
++                    "usage": {"input_tokens": 100, "output_tokens": 50, "api_duration_ms": 12500},
++                }
++            ],
++        )
++        assert submission.publish_intent is not None
++        await publish_submitted_messages(submission.publish_intent)
++
++        summaries = _published_events(recording_redis, f"agent_run:{run_id}", "messages")
++        assert len(summaries) == 1
++        assert summaries[0]["duration_api_ms"] == 12500
++
++        token_events = _published_events(recording_redis, f"agent_session:{session_id}", "tokens")
++        assert len(token_events) == 1
++        assert token_events[0]["duration_api_ms"] == 12500
++        # 既有字段照常透传
++        assert token_events[0]["input_tokens"] == 100
++
++    @pytest.mark.asyncio
++    async def test_none_duration_omits_key_both_channels(self, db_session, recording_redis) -> None:
++        """api_duration_ms 缺键（老 daemon）→ 两路 payload 均无该键，事件照常发布。"""
++        lease_id, run_id, token, session_id = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        submission = await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [
++                {
++                    "event_type": "text",
++                    "content": "[ASSISTANT] old daemon",
++                    "usage": {"input_tokens": 100, "output_tokens": 50},
++                }
++            ],
++        )
++        assert submission.publish_intent is not None
++        await publish_submitted_messages(submission.publish_intent)
++
++        summaries = _published_events(recording_redis, f"agent_run:{run_id}", "messages")
++        assert len(summaries) == 1
++        assert "duration_api_ms" not in summaries[0]
++
++        token_events = _published_events(recording_redis, f"agent_session:{session_id}", "tokens")
++        assert len(token_events) == 1
++        assert "duration_api_ms" not in token_events[0]
++        assert token_events[0]["input_tokens"] == 100
+diff --git a/frontend/src/components/daemon/__tests__/turn-speed.test.ts b/frontend/src/components/daemon/__tests__/turn-speed.test.ts
+index 4b975188f..4cf7ffd62 100644
+--- a/frontend/src/components/daemon/__tests__/turn-speed.test.ts
++++ b/frontend/src/components/daemon/__tests__/turn-speed.test.ts
+@@ -39,13 +39,20 @@ describe("turnTokenSpeedText", () => {
+     expect(turnTokenSpeedText(31, 10_000, "completed")).toBe("3.1 tok/s");
+   });
+ 
+-  it.each(["running", "pending", "interrupting"] as const)(
+-    "非终态 %s 不显示（无 API 时长数据，禁止墙钟估速）",
++  // 2026-10-10-live-token-speed-daemon-timing FR-07：门控放宽——任意状态双值
++  // 即显示（运行中实时速度为核心交付；取代上变更「仅终态」语义）。
++  it.each(["running", "pending", "interrupting", "completed", "failed", "killed"] as const)(
++    "%s 双值可得 → 显示（门控不看状态，数据说话）",
+     (status) => {
+-      expect(turnTokenSpeedText(1250, 12500, status)).toBeNull();
++      expect(turnTokenSpeedText(1250, 12500, status)).toBe("100 tok/s");
+     },
+   );
+ 
++  it("running 无时长数据（cursor / 旧 daemon）→ null 不伪造", () => {
++    expect(turnTokenSpeedText(1250, null, "running")).toBeNull();
++    expect(turnTokenSpeedText(1250, 0, "running")).toBeNull();
++  });
++
+   it.each([
+     ["outputTokens 缺失", null, 12500],
+     ["apiDurationMs 缺失（旧数据 / 无时长引擎）", 1250, null],
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+index 08e71469f..ac4368d2a 100644
+--- a/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx
+@@ -64,7 +64,14 @@ describe("turn-timeline 轮尾 token 速度（FR-03/FR-04）", () => {
+     expect(container.textContent).toContain("↓1,250 · 100 tok/s");
+   });
+ 
+-  it("运行中轮不显示速度（无 API 时长数据；token 计数照常显示累积值）", () => {
++  it("运行中轮有实时计时数据 → 显示速度（FR-07 运行中实时 tok/s）", () => {
++    const { container } = renderTimeline([
++      makeTurn({ status: "running", outputTokens: 625, apiDurationMs: 12500 }),
++    ]);
++    expect(container.textContent).toContain("· 50 tok/s");
++  });
++
++  it("运行中轮无 API 时长数据（cursor / 旧 daemon）→ 只显示 token 计数", () => {
+     const { container } = renderTimeline([
+       makeTurn({ status: "running", apiDurationMs: null }),
+     ]);
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 94e673788..76ebb99e8 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -710,6 +710,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+                 // task-08（FR-01）：ctx 实时写入（last-write-wins 瞬时量；
+                 // null/缺省不覆盖已收值）。
+                 ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
++                // 2026-10-10-live-token-speed-daemon-timing FR-07：轮内累计
++                // 生成时长（tok/s 分母）实时写入（?? 链不覆盖已收值）。
++                apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
+               }), {}));
+             },
+             onSessionEnded: () => {
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 27275f095..00235897c 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -1396,6 +1396,9 @@ export function SessionPanelPage({
+                   // task-08（FR-01）：ctx 是 last-write-wins 瞬时量，null/缺省
+                   // （旧 daemon）不覆盖已收值，保持环未知态语义。
+                   ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
++                  // 2026-10-10-live-token-speed-daemon-timing FR-07：轮内累计
++                  // 生成时长（tok/s 分母）实时写入（?? 链不覆盖已收值）。
++                  apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
+                 }),
+                 {},
+               ),
+diff --git a/frontend/src/components/daemon/turn-speed.ts b/frontend/src/components/daemon/turn-speed.ts
+index ccaabb264..66b30ede5 100644
+--- a/frontend/src/components/daemon/turn-speed.ts
++++ b/frontend/src/components/daemon/turn-speed.ts
+@@ -1,12 +1,18 @@
+ /**
+- * 轮级 token 生成速度（tok/s）纯函数——2026-10-10-session-turn-token-speed。
++ * 轮级 token 生成速度（tok/s）纯函数——2026-10-10-session-turn-token-speed
++ * （初版：终态显示）+ 2026-10-10-live-token-speed-daemon-timing（门控放宽：
++ * 运行中实时显示）。
+  *
+  * 口径对齐 deepseek-harness（packages/client/ui-chat message-chrome.ts 的
+  * formatTokensPerSecond）：提供方报告的输出词元 ÷ 模型生成时长，**不含**工具
+- * 执行时间——本平台分母用 AgentRun.duration_api_ms（daemon 结果元数据的轮内
+- * API 调用总时长）。数据不可得（运行中 / 旧数据 / 无时长引擎）一律返回 null
+- * 不显示，禁止用墙钟估速充数（含工具等待的墙钟会把真实速度稀释数倍，多供应
+- * 商对比场景下误导性强）。
++ * 执行时间——分母是轮内累计 API 调用时长（daemon 逐调用计时经 usage 管线实时
++ * 上报，Claude 终态由 SDK 结果元数据权威覆盖）。数据不可得（旧数据 / 未计时
++ * 引擎）一律返回 null 不显示，禁止用墙钟估速充数（含工具等待的墙钟会把真实
++ * 速度稀释数倍，多供应商对比场景下误导性强）。
++ *
++ * 门控语义（本变更取代上变更「仅终态」）：**双值可得即显示（任意轮状态）**——
++ * tokens 事件实时携带 api_duration_ms，运行中即可算速度；pending 队列态无数据
++ * 自然不显示。不伪造原则不变。
+  *
+  * 纯函数：零 React / 渲染依赖，turn-timeline 与测试共用。
+  *
+@@ -15,13 +21,6 @@
+ 
+ import type { TurnUiStatus } from "@/components/daemon/turn-timeline";
+ 
+-/** 终态轮集合（速度只在轮收尾、duration_api_ms 落定后显示）。 */
+-const TERMINAL_SPEED_STATUSES: ReadonlySet<TurnUiStatus> = new Set([
+-  "completed",
+-  "failed",
+-  "killed",
+-]);
+-
+ /**
+  * 速度数值格式化：≥10 四舍五入取整、<10 保留 1 位小数、负值钳 0
+  * （deepseek-harness formatTokensPerSecond 同口径——药丸级辅助信息，
+@@ -34,8 +33,9 @@ export function formatTokensPerSecond(tps: number): string {
+ }
+ 
+ /**
+- * 轮尾速度段文本：终态轮且输出词元与 API 时长均可得（时长 > 0）时返回
+- * `"N tok/s"`，否则 null（调用方不渲染速度段）。失败/中止轮只要数据齐同样
++ * 轮尾速度段文本：输出词元与 API 时长双值可得（时长 > 0）即返回 `"N tok/s"`
++ * （任意轮状态——运行中实时 + 终态统一），否则 null（调用方不渲染速度段）。
++ * `status` 参数保留（签名兼容）但不再参与门控。失败/中止轮只要数据齐同样
+  * 显示——速度是模型侧事实，与轮业务成败正交。
+  */
+ export function turnTokenSpeedText(
+@@ -43,7 +43,7 @@ export function turnTokenSpeedText(
+   apiDurationMs: number | null | undefined,
+   status: TurnUiStatus,
+ ): string | null {
+-  if (!TERMINAL_SPEED_STATUSES.has(status)) return null;
++  void status;
+   if (outputTokens == null || apiDurationMs == null || apiDurationMs <= 0) {
+     return null;
+   }
+diff --git a/frontend/src/lib/daemon/session-sse.ts b/frontend/src/lib/daemon/session-sse.ts
+index b3260f80b..a79011143 100644
+--- a/frontend/src/lib/daemon/session-sse.ts
++++ b/frontend/src/lib/daemon/session-sse.ts
+@@ -214,10 +214,12 @@ export interface SessionStreamEnvelope {
+    */
+   ctx_tokens?: number | null;
+   /**
+-   * 2026-10-10-session-turn-token-speed FR-01：轮内模型 API 调用总时长 ms
+-   * （AgentRun.duration_api_ms，daemon 结果元数据收尾写入；前端 tok/s 生成
+-   * 速度分母，不含工具执行时间）。仅 turn_completed 终态事件携带；引擎未
+-   * 上报 / 旧 backend → null / undefined，消费方按「无数据不显示速度」处理。
++   * 2026-10-10-session-turn-token-speed FR-01 / 2026-10-10-live-token-speed-
++   * daemon-timing FR-07：轮内模型 API 调用累计时长 ms（tok/s 生成速度分母，
++   * 不含工具执行时间）。`tokens` 事件（daemon 逐调用计时实时累积，运行中
++   * tok/s）与 `turn_completed` 事件（终态权威值，Claude SDK 结果元数据覆盖）
++   * 均可携带；引擎未计时（cursor） / 旧 backend → null / undefined，消费方按
++   * 「无数据不显示速度」处理。
+    */
+   duration_api_ms?: number | null;
+   /**
+diff --git a/sillyhub-daemon/src/agent-event-schema.ts b/sillyhub-daemon/src/agent-event-schema.ts
+index 3d9422740..06c019728 100644
+--- a/sillyhub-daemon/src/agent-event-schema.ts
++++ b/sillyhub-daemon/src/agent-event-schema.ts
+@@ -45,13 +45,15 @@ const AGENT_STATUS_SUBTYPES = [
+ ] as const;
+ 
+ /** usage 子对象 schema（与 types.ts AgentEventUsage 对齐，字段全可选）。
+- * ctx_tokens（上下文环分子）为 D-005@v1 契约补遗新增。 */
++ * ctx_tokens（上下文环分子）为 D-005@v1 契约补遗新增；
++ * api_duration_ms（轮内累计生成时长 ms）为 2026-10-10-live-token-speed-daemon-timing 契约扩展。 */
+ const agentEventUsageSchema = z.object({
+   input_tokens: z.number().optional(),
+   output_tokens: z.number().optional(),
+   cache_read_tokens: z.number().optional(),
+   cache_creation_tokens: z.number().optional(),
+   ctx_tokens: z.number().optional(),
++  api_duration_ms: z.number().optional(),
+ });
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/claude-events.ts b/sillyhub-daemon/src/interactive/claude-events.ts
+index 885a6edde..b5f77d003 100644
+--- a/sillyhub-daemon/src/interactive/claude-events.ts
++++ b/sillyhub-daemon/src/interactive/claude-events.ts
+@@ -127,6 +127,16 @@ interface PartialBucket {
+   lastCallCacheReadTokens: number;
+   /** 当前 API call cache_creation 快照（ctx 差分重算用）。session-manager.ts:546。 */
+   lastCallCacheCreationTokens: number;
++  /**
++   * 当前 API 调用锚点 ms（message_start 锚定；null=无进行中调用）。
++   * 2026-10-10-live-token-speed-daemon-timing FR-01 逐调用计时。
++   */
++  callStartMs: number | null;
++  /**
++   * 轮内已折叠完成的 API 调用累计生成时长 ms（锚间折叠天然排除工具执行窗口）。
++   * 同上 FR-01；onTurnEnd 归零（新轮从零，防跨轮残留）。
++   */
++  turnApiDurationMs: number;
+ }
+ 
+ /** 运行中 Bash 命令索引条目（bash_chunk/bash_status 终态配对用）。session-manager.ts:816-819。 */
+@@ -258,6 +268,11 @@ export class ClaudeEventNormalizer {
+         buf.turnInputTokens = 0;
+         buf.turnOutputTokens = 0;
+         buf.pendingUsage = null;
++        // 计时归零（FR-01）：新轮从零。残段不折叠——onTurnEnd 后无 flush 载体
++        //（残段 < 节流窗口，丢弃可接受；终态权威值走 close 覆盖，Claude SDK
++        // duration_api_ms）。
++        buf.callStartMs = null;
++        buf.turnApiDurationMs = 0;
+       } else {
+         if (buf.timer) {
+           clearTimeout(buf.timer);
+@@ -926,6 +941,8 @@ export class ClaudeEventNormalizer {
+         lastCallCtxTokens: 0,
+         lastCallCacheReadTokens: 0,
+         lastCallCacheCreationTokens: 0,
++        callStartMs: null,
++        turnApiDurationMs: 0,
+       };
+       this.buckets.set(parentKey, buf);
+     }
+@@ -950,6 +967,13 @@ export class ClaudeEventNormalizer {
+     const evType = event['type'];
+ 
+     if (evType === 'message_start') {
++      // 逐调用计时（FR-01）：上一调用折叠（message_stop 可能缺失，锚间折叠兜底，
++      // 同刻锚新调用保证首尾时间同源），负值钳 0。
++      const nowMs = this.now();
++      if (buf.callStartMs !== null) {
++        buf.turnApiDurationMs += Math.max(0, nowMs - buf.callStartMs);
++      }
++      buf.callStartMs = nowMs;
+       const message = event['message'] as Record<string, unknown> | undefined;
+       if (message && typeof message === 'object') {
+         const mid = message['id'];
+@@ -1059,16 +1083,30 @@ export class ClaudeEventNormalizer {
+         // pendingUsage = 轮级 input/output + cache 快照 + main 桶 ctx_tokens
+         // （:5817-5825；D-005@v1：ctx_tokens 随 partial flush 实时上报，SSE
+         // summary 环分子对齐——子桶不含该键，消费侧缺键即跳过）。
++        // api_duration_ms（FR-01）：累计 + 活窗口（进行中调用实时增长，前端
++        // 运行中 tok/s 分母）；有计时数据即带（0 起步安全——backend max 累积、
++        // 前端 >0 门控）。
++        const apiDurMs =
++          buf.callStartMs !== null
++            ? buf.turnApiDurationMs + Math.max(0, this.now() - buf.callStartMs)
++            : buf.turnApiDurationMs;
+         buf.pendingUsage = {
+           input_tokens: buf.turnInputTokens,
+           output_tokens: buf.turnOutputTokens,
+           cache_read_tokens: buf.sessionCacheReadTokens,
+           cache_creation_tokens: buf.sessionCacheCreationTokens,
++          api_duration_ms: apiDurMs,
+           ...(buf.parentKey === 'main'
+             ? { ctx_tokens: buf.lastCallCtxTokens }
+             : {}),
+         };
+       }
++    } else if (evType === 'message_stop') {
++      // 调用收口（FR-01）：折叠本调用窗口并清锚（幂等——无锚不折叠）。
++      if (buf.callStartMs !== null) {
++        buf.turnApiDurationMs += Math.max(0, this.now() - buf.callStartMs);
++        buf.callStartMs = null;
++      }
+     }
+ 
+     // 节流定时器（:5836-5852）：首个 partial 启动，flush 清引用后由下次 delta 重建。
+@@ -1296,11 +1334,15 @@ function usageToEventUsage(
+   // ctx_tokens（D-005@v1）：API 原生 usage 无此字段（归一化器差分派生，仅
+   // partial flush 携带）；守卫透传以兼容上游已派生形态。
+   const ctx = numOf(usage['ctx_tokens']);
++  // api_duration_ms（2026-10-10-live-token-speed-daemon-timing FR-04）：桶计时
++  // 生产的轮内累计生成时长，守卫透传兼容上游已派生形态；缺省不带键。
++  const apiDur = numOf(usage['api_duration_ms']);
+   if (input !== undefined) out.input_tokens = input;
+   if (output !== undefined) out.output_tokens = output;
+   if (cr !== undefined) out.cache_read_tokens = cr;
+   if (cc !== undefined) out.cache_creation_tokens = cc;
+   if (ctx !== undefined) out.ctx_tokens = ctx;
++  if (apiDur !== undefined) out.api_duration_ms = apiDur;
+   return Object.keys(out).length > 0 ? out : undefined;
+ }
+ 
+diff --git a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+index d1d058448..881d069f2 100644
+--- a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+@@ -535,6 +535,14 @@ export interface CodexHandle extends InteractiveDriverHandle {
+    * （不伪造 0，codex ctx 保持未知态，设计兼容策略）。
+    */
+   lastCallCtxTokens?: number;
++  /**
++   * FR-02（2026-10-10-live-token-speed-daemon-timing）生成窗口锚点 ms：
++   * 模型输出首事件（reasoning thinking / agentMessage 文本）锚定，tool_use 折叠；
++   * null = 无进行中窗口。
++   */
++  generatingSince: number | null;
++  /** FR-02 轮内已折叠累计生成时长 ms（轮 start 归零）。 */
++  turnApiDurationMs: number;
+   /** 释放底层资源（关 stdin + kill child）。幂等。 */
+   close(): Promise<void>;
+ }
+@@ -610,6 +618,9 @@ function extractEventUsage(raw: unknown): AgentEventUsage | undefined {
+   // usage_update 事件一等 usage 携带 last 毛值直取的 ctx_tokens（delta 附加后
+   // 经 toAgentEvent 提升；非 number 不设置，不伪造 0）。
+   if (typeof u.ctx_tokens === 'number') out.ctx_tokens = u.ctx_tokens;
++  // FR-02（2026-10-10-live-token-speed-daemon-timing）：轮内累计生成时长同守卫
++  // 透传（_usageDelta 附加后经 toAgentEvent 提升；非 number 不设置，不伪造 0）。
++  if (typeof u.api_duration_ms === 'number') out.api_duration_ms = u.api_duration_ms;
+   // 四字段全缺/全非法 → 不带 usage（比「全 undefined 的空壳对象」更干净，
+   // 下游 isPresent 判定与既有 undefined 语义一致）
+   return Object.keys(out).length > 0 ? out : undefined;
+@@ -888,6 +899,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
+       turnApiCallCount: 0,
+       // 2026-09-13-ctx-usage-all-providers task-04：最近一次调用 ctx（见字段注释）。
+       lastCallCtxTokens: undefined,
++      // FR-02 生成窗口计时（见 CodexHandle 字段注释）。
++      generatingSince: null,
++      turnApiDurationMs: 0,
+       close: (): Promise<void> => this._close(handle),
+       // 扩展槽（非 CodexHandle 公共字段，consume 内部用）
+       ...({ _ctx: ctx } as object),
+@@ -964,6 +978,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
+ 
+     /** resolve 当前轮（若存在），传 outcome；同时暂存待统一消费（见 completedOutcome）。 */
+     const finishTurn = (o: TurnOutcome): void => {
++      // FR-02 残段折叠：轮收口时生成窗口仍开（最后一段生成后无 tool_use 折叠点）
++      // 先折叠，consume 的 _applyTurnUsageDelta → _usageDelta 即携带完整轮时长。
++      if (h.generatingSince !== null) {
++        h.turnApiDurationMs += Math.max(0, Date.now() - h.generatingSince);
++        h.generatingSince = null;
++      }
+       if (currentTurnResolve) {
+         completedOutcome = o;
+         const r = currentTurnResolve;
+@@ -1233,6 +1253,24 @@ export class CodexAppServerDriver implements InteractiveDriver {
+           pendingTurnError = ev.content || null;
+         }
+ 
++        // FR-02 生成窗口：模型输出事件锚定（reasoning thinking / agentMessage
++        // 文本——usage_update / status / subtype 信号排除），tool_use 折叠。
++        // 已锚不重锚（同调用多 item 合并窗口）；负值钳 0。
++        const evMeta = (ev.metadata ?? {}) as Record<string, unknown>;
++        if (ev.type === 'tool_use') {
++          if (h.generatingSince !== null) {
++            h.turnApiDurationMs += Math.max(0, Date.now() - h.generatingSince);
++            h.generatingSince = null;
++          }
++        } else if (
++          ev.type === 'text' &&
++          evMeta.status === undefined &&
++          evMeta.subtype === undefined &&
++          h.generatingSince === null
++        ) {
++          h.generatingSince = Date.now();
++        }
++
+         // 其余（text/thinking 提升后/tool_use/tool_result/error）→ AgentEvent 上报
+         if (onMessage && h.threadId) {
+           // task-08：envelope 包装（单事件成批）。
+@@ -1348,6 +1386,9 @@ export class CodexAppServerDriver implements InteractiveDriver {
+           h.usageBaseline = h.threadUsageTotal ? { ...h.threadUsageTotal } : null;
+           // ql-20260910-003：本轮调用计数清零（同基线时点）。
+           h.turnApiCallCount = 0;
++          // FR-02：轮内生成时长归零 + 窗口锚清空（新轮从零，防跨轮残留）。
++          h.generatingSince = null;
++          h.turnApiDurationMs = 0;
+           if (!threadIdReady && !h.closing && !finalized) {
+             pendingTurnError =
+               `codex thread/start 响应超时（${this.threadIdWaitTimeoutMs}ms 未拿到 threadId），` +
+@@ -1813,6 +1854,13 @@ export class CodexAppServerDriver implements InteractiveDriver {
+       (b?.cacheWriteInputTokens ?? 0);
+     const dOut = h.threadUsageTotal.outputTokens - (b?.outputTokens ?? 0);
+     if (dInput <= 0 && dCached <= 0 && dWrite <= 0 && dOut <= 0) return null;
++    // FR-02：搭车轮内累计生成时长（折叠 + 活窗口实时增长）；单点附加即
++    // usage_update 事件与 turn result usage 两路同源（同 ctx_tokens 口径）。
++    // >0 才带键（无计时数据不伪造 0）。
++    const apiDur =
++      h.generatingSince !== null
++        ? h.turnApiDurationMs + Math.max(0, Date.now() - h.generatingSince)
++        : h.turnApiDurationMs;
+     return {
+       input_tokens: Math.max(0, dInput - dCached - dWrite),
+       output_tokens: Math.max(0, dOut),
+@@ -1821,6 +1869,7 @@ export class CodexAppServerDriver implements InteractiveDriver {
+       ...(h.lastCallCtxTokens !== undefined
+         ? { ctx_tokens: h.lastCallCtxTokens }
+         : {}),
++      ...(apiDur > 0 ? { api_duration_ms: apiDur } : {}),
+     };
+   }
+ 
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index c1b5070a3..d9e117016 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -1047,6 +1047,11 @@ export class PiRpcDriver implements InteractiveDriver {
+     // 调用，不得再计入）；累加值为空（pi 版本不带 message_end usage）退回定格
+     // 值，零回归兜底。
+     let turnUsageSum: AgentEventUsage | null = null;
++    // FR-03（2026-10-10-live-token-speed-daemon-timing）生成窗口计时：
++    // text_delta（模型输出流）锚定，tool_execution_start / assistant message_end
++    // 折叠；轮内累计（随 turnUsage 搭车 api_duration_ms，轮重置归零）。
++    let turnApiDurationMs = 0;
++    let generatingSince: number | null = null;
+     // quick-ffb92f60（2026-09-13-ctx-usage-all-providers 生产实证缺陷修复）：
+     // 末次 assistant message_end 的原始 usage（input/cacheRead/cacheWrite 净值
+     // 三口径）——ctx_tokens（上下文环分子，末次调用提示词大小）数据源。既有
+@@ -1381,6 +1386,11 @@ export class PiRpcDriver implements InteractiveDriver {
+       if (msg.type === 'message_end') {
+         const endMsg = isRecord(msg.message) ? msg.message : {};
+         if (endMsg.role === 'assistant' && isRecord(endMsg.usage)) {
++          // FR-03：assistant message_end = 一次 API 调用收口，折叠生成窗口。
++          if (generatingSince !== null) {
++            turnApiDurationMs += Math.max(0, Date.now() - generatingSince);
++            generatingSince = null;
++          }
+           turnUsageSum = accumulatePiUsage(turnUsageSum, endMsg.usage);
+           turnApiCallCount += 1;
+           // quick-ffb92f60：定格末次调用 usage 快照（ctx_tokens 数据源，见声明注释）。
+@@ -1445,6 +1455,16 @@ export class PiRpcDriver implements InteractiveDriver {
+         if (ev.type === 'error' && ev.content) {
+           pendingTurnError = ev.content;
+         }
++        // FR-03 生成窗口：text_delta（模型输出流，override 全文属终态重放不锚）
++        // 锚定，tool_use 折叠；已锚不重锚，负值钳 0。
++        if (ev.type === 'tool_use') {
++          if (generatingSince !== null) {
++            turnApiDurationMs += Math.max(0, Date.now() - generatingSince);
++            generatingSince = null;
++          }
++        } else if (ev.type === 'text' && ev.override !== true && generatingSince === null) {
++          generatingSince = Date.now();
++        }
+         // 2026-09-12-chat-turn-auto-recovery FR-2.1：静默中断检测标记 ②——
+         // 仅 tool_result 事件翻 false（工具结果之后尚无新 assistant 消息 =
+         // 轮尾非全文）。thinking / override text / partial text 一律不动标记
+@@ -1490,6 +1510,15 @@ export class PiRpcDriver implements InteractiveDriver {
+                   : {}),
+               }
+             : ev.usage;
++          // FR-03：搭车轮内累计生成时长（>0 才带键，不伪造 0）——turn_end 事件
++          // 与 result usage 共用本对象，单点附加双路生效。
++          const apiDurTotal =
++            generatingSince !== null
++              ? turnApiDurationMs + Math.max(0, Date.now() - generatingSince)
++              : turnApiDurationMs;
++          if (turnUsage && apiDurTotal > 0) {
++            turnUsage.api_duration_ms = apiDurTotal;
++          }
+           ev.usage = turnUsage;
+           if (isRecord(ev.metadata)) {
+             ev.metadata.usage = turnUsage;
+@@ -1591,6 +1620,9 @@ export class PiRpcDriver implements InteractiveDriver {
+         turnUserEntryId = null;
+         turnUsage = undefined;
+         turnUsageSum = null;
++        // FR-03：轮内生成时长归零 + 窗口锚清空（新轮从零，防跨轮残留）。
++        turnApiDurationMs = 0;
++        generatingSince = null;
+         lastEndUsage = null;
+         turnApiCallCount = 0;
+         turnReported = false;
+diff --git a/sillyhub-daemon/src/types.ts b/sillyhub-daemon/src/types.ts
+index 01016c743..5a32dfd63 100644
+--- a/sillyhub-daemon/src/types.ts
++++ b/sillyhub-daemon/src/types.ts
+@@ -101,6 +101,14 @@ export interface AgentEventUsage {
+    * 实时透传，封闭 4 字段会让新轨轮内环实时显示缺失。
+    */
+   ctx_tokens?: number;
++  /**
++   * 轮内累计模型生成时长 ms（各引擎计时生产：claude 桶 message_start 锚定 /
++   * codex 生成窗口 / pi message_end 折叠），随 usage 事件搭车实时上报 →
++   * backend AgentRun.duration_api_ms → 前端 tok/s 生成速度分母（分母口径=
++   * 模型生成窗口，不含工具执行时间）。缺省=该引擎未计时（2026-10-10-live-
++   * token-speed-daemon-timing FR-04）。
++   */
++  api_duration_ms?: number;
+ }
+ 
+ /**
+diff --git a/sillyhub-daemon/tests/interactive/claude-events.test.ts b/sillyhub-daemon/tests/interactive/claude-events.test.ts
+index 9113294c1..923bbcc71 100644
+--- a/sillyhub-daemon/tests/interactive/claude-events.test.ts
++++ b/sillyhub-daemon/tests/interactive/claude-events.test.ts
+@@ -18,7 +18,7 @@
+ // fixture 来源（真实采样 + SDK 信封构造 + 脱敏）见
+ // tests/fixtures/claude-sdk-messages/README.md。
+ 
+-import { describe, it, expect, afterEach, vi } from 'vitest';
++import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+ 
+ import { ClaudeEventNormalizer } from '../../src/interactive/claude-events.js';
+ import { safeParseAgentEvent } from '../../src/agent-event-schema.js';
+@@ -367,7 +367,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
+     vi.useFakeTimers();
+     const msgs = loadMessages('partial-stream-override');
+     const partials: AgentEvent[] = [];
+-    const norm = makeNormalizer(partials);
++    const norm = makeNormalizer(partials, () => 0); // 冻结时钟（FR-01）：golden 不含真实时间噪声
+ 
+     // message_start → block_start → 3× thinking_delta → message_delta（usage）。
+     for (let i = 0; i <= 5; i++) {
+@@ -392,6 +392,8 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
+           // ctx_tokens = message_start 的 input+cache_read+cache_creation
+           // = 100+500+0（D-005@v1，仅 main 桶携带）。
+           ctx_tokens: 600,
++          // FR-01 桶计时：冻结时钟下累计+活窗口恒 0。
++          api_duration_ms: 0,
+         },
+       },
+     ]);
+@@ -402,7 +404,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
+     vi.useFakeTimers();
+     const msgs = loadMessages('partial-stream-override');
+     const partials: AgentEvent[] = [];
+-    const norm = makeNormalizer(partials);
++    const norm = makeNormalizer(partials, () => 0); // 冻结时钟（FR-01）：golden 不含真实时间噪声
+ 
+     for (let i = 0; i <= 6; i++) norm.normalizeMessage(msgs[i]!); // 至 message_stop
+     vi.advanceTimersByTime(500); // thinking partial 已 flush
+@@ -447,6 +449,7 @@ describe('partial 流式与 override 撤回（partial-stream-override）', () =>
+           cache_read_tokens: 700,
+           cache_creation_tokens: 64,
+           ctx_tokens: 1084,
++          api_duration_ms: 0,
+         },
+       },
+     ]);
+@@ -830,3 +833,194 @@ describe('safeParseAgentEvent 契约校验', () => {
+     }
+   });
+ });
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 6. usage.api_duration_ms 契约扩展（2026-10-10-live-token-speed-daemon-timing FR-04）
++// ─────────────────────────────────────────────────────────────────────────────
++
++describe('usage api_duration_ms 守卫透传与 schema 放行', () => {
++  /** 合成 assistant 消息（usage 盖章路径 _stampCarriedFields 的最小输入）。 */
++  function assistantWithUsage(
++    usage: Record<string, unknown> | undefined,
++  ): SDKMessage {
++    return {
++      type: 'assistant',
++      session_id: 'sess-test',
++      message: {
++        role: 'assistant',
++        content: [{ type: 'text', text: '回答' }],
++        ...(usage ? { usage } : {}),
++      },
++    } as unknown as SDKMessage;
++  }
++
++  it('usage 带 api_duration_ms → 首条内容事件 usage 透传同值键', () => {
++    const norm = makeNormalizer([]);
++    const events = norm.normalizeMessage(
++      assistantWithUsage({
++        input_tokens: 10,
++        output_tokens: 5,
++        api_duration_ms: 12500,
++      }),
++    );
++    norm.dispose();
++    const withUsage = events.find((ev) => ev.usage != null);
++    expect(withUsage).toBeDefined();
++    expect(withUsage!.usage!.api_duration_ms).toBe(12500);
++  });
++
++  it('usage 无 api_duration_ms → 输出 usage 不带该键（旧事件零影响）', () => {
++    const norm = makeNormalizer([]);
++    const events = norm.normalizeMessage(
++      assistantWithUsage({ input_tokens: 10, output_tokens: 5 }),
++    );
++    norm.dispose();
++    const withUsage = events.find((ev) => ev.usage != null);
++    expect(withUsage).toBeDefined();
++    expect(withUsage!.usage).not.toHaveProperty('api_duration_ms');
++  });
++
++  it('usage api_duration_ms 非法值（字符串）→ 守卫忽略不带键', () => {
++    const norm = makeNormalizer([]);
++    const events = norm.normalizeMessage(
++      assistantWithUsage({
++        input_tokens: 10,
++        output_tokens: 5,
++        api_duration_ms: 'not-a-number',
++      }),
++    );
++    norm.dispose();
++    const withUsage = events.find((ev) => ev.usage != null);
++    expect(withUsage).toBeDefined();
++    expect(withUsage!.usage).not.toHaveProperty('api_duration_ms');
++  });
++
++  it('safeParseAgentEvent 对带/不带 api_duration_ms 的 usage 均通过 zod 校验', () => {
++    const base = {
++      type: 'text' as const,
++      content: 'x',
++    };
++    const withKey = safeParseAgentEvent({
++      ...base,
++      usage: { input_tokens: 1, api_duration_ms: 100 },
++    });
++    const withoutKey = safeParseAgentEvent({
++      ...base,
++      usage: { input_tokens: 1 },
++    });
++    expect(withKey.success).toBe(true);
++    expect(withoutKey.success).toBe(true);
++  });
++});
++
++// ─────────────────────────────────────────────────────────────────────────────
++// 7. 桶计时（2026-10-10-live-token-speed-daemon-timing FR-01）：message_start 锚/
++//    折叠 + message_delta 活刷新 + message_stop 收口 + onTurnEnd 归零
++// ─────────────────────────────────────────────────────────────────────────────
++
++/** stream_event 包装 helper（normalizeMessage → _bufferPartial 入口）。 */
++function streamEvent(event: Record<string, unknown>): SDKMessage {
++  return { type: 'stream_event', event } as unknown as SDKMessage;
++}
++
++describe('claude 桶逐调用计时（FR-01）', () => {
++    beforeEach(() => {
++      vi.useFakeTimers();
++    });
++  function flushOf(
++    partials: AgentEvent[],
++  ): AgentEvent | undefined {
++    return [...partials].reverse().find((ev) => ev.usage != null);
++  }
++
++  it('单调用：pendingUsage.api_duration_ms 为锚点活窗口（message_start@1000 → delta@6000 → 5000）', () => {
++    let clock = 1000;
++    const partials: AgentEvent[] = [];
++    const norm = makeNormalizer(partials, () => clock);
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_1', usage: { input_tokens: 100 } } }),
++    );
++    clock = 6000;
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_delta', usage: { output_tokens: 50 } }),
++    );
++    expect(partials).toHaveLength(0);
++    vi.advanceTimersByTime(600);
++    norm.dispose();
++    const ev = flushOf(partials);
++    expect(ev).toBeDefined();
++    expect(ev!.usage!.api_duration_ms).toBe(5000);
++  });
++
++  it('两调用夹工具窗口：锚间折叠排除工具时间（5000 折叠 + 6000 活窗口 = 11000）', () => {
++    let clock = 1000;
++    const partials: AgentEvent[] = [];
++    const norm = makeNormalizer(partials, () => clock);
++    // 调用 1：1000 → 6000（stop 收口折叠 5000）
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_1', usage: { input_tokens: 100 } } }),
++    );
++    clock = 6000;
++    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 50 } }));
++    norm.normalizeMessage(streamEvent({ type: 'message_stop' }));
++    // 工具执行 13s（6000 → 19000，无任何事件——不进任何桶）
++    clock = 19000;
++    // 调用 2：19000 → 25000（活窗口 6000）
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_2', usage: { input_tokens: 200 } } }),
++    );
++    clock = 25000;
++    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 120 } }));
++    vi.advanceTimersByTime(600);
++    norm.dispose();
++    const ev = flushOf(partials);
++    expect(ev).toBeDefined();
++    expect(ev!.usage!.api_duration_ms).toBe(11000);
++  });
++
++  it('时钟回拨：折叠钳 0 不出负值', () => {
++    let clock = 1000;
++    const partials: AgentEvent[] = [];
++    const norm = makeNormalizer(partials, () => clock);
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_1' } }),
++    );
++    clock = 500; // 回拨
++    norm.normalizeMessage(streamEvent({ type: 'message_stop' })); // 折叠 max(0, -500) = 0
++    clock = 2000;
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_2' } }),
++    );
++    clock = 2200;
++    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 3 } }));
++    vi.advanceTimersByTime(600);
++    norm.dispose();
++    const ev = flushOf(partials);
++    expect(ev).toBeDefined();
++    expect(ev!.usage!.api_duration_ms).toBe(200);
++  });
++
++  it('onTurnEnd 归零：新轮计时从零起步', () => {
++    let clock = 1000;
++    const partials: AgentEvent[] = [];
++    const norm = makeNormalizer(partials, () => clock);
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_1' } }),
++    );
++    clock = 5000;
++    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 10 } }));
++    norm.onTurnEnd();
++    // 新轮：旧锚已清，新 delta 只计新窗口
++    clock = 9000;
++    norm.normalizeMessage(
++      streamEvent({ type: 'message_start', message: { id: 'msg_2' } }),
++    );
++    clock = 9500;
++    norm.normalizeMessage(streamEvent({ type: 'message_delta', usage: { output_tokens: 20 } }));
++    vi.advanceTimersByTime(600);
++    norm.dispose();
++    const ev = flushOf(partials);
++    expect(ev).toBeDefined();
++    expect(ev!.usage!.api_duration_ms).toBe(500);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts b/sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+index 4dd0f0982..8f4417651 100644
+--- a/sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+@@ -3164,3 +3164,161 @@ describe('task-03（2026-09-18-single-chat-steering）：turn/steer 忙轮注入
+     await consumeP;
+   });
+ });
++
++
++// ── FR-02 生成窗口计时（2026-10-10-live-token-speed-daemon-timing）────────────
++
++/** item/started reasoning notification 行（thinking 事件源——生成窗口锚点）。 */
++function itemStartedReasoning(threadId: string, itemId = 'it_r1'): string {
++  return JSON.stringify({
++    jsonrpc: '2.0',
++    method: 'item/started',
++    params: { threadId, item: { type: 'reasoning', id: itemId, summary: [] } },
++  });
++}
++
++/** item/started commandExecution notification 行（tool_use 事件源——折叠点）。 */
++function itemStartedCommand(
++  threadId: string,
++  command: string,
++  itemId = 'it_c1',
++): string {
++  return JSON.stringify({
++    jsonrpc: '2.0',
++    method: 'item/started',
++    params: {
++      threadId,
++      item: { type: 'commandExecution', id: itemId, command, aggregatedOutput: '' },
++    },
++  });
++}
++
++/** item/agentMessage/delta notification 行（text 事件源——生成窗口锚点）。 */
++function agentMessageDelta(threadId: string, delta: string, itemId = 'it_m1'): string {
++  return JSON.stringify({
++    jsonrpc: '2.0',
++    method: 'item/agentMessage/delta',
++    params: { threadId, itemId, delta },
++  });
++}
++
++describe('FR-02 生成窗口计时（api_duration_ms）', () => {
++  it('生成→工具→生成：工具时间不计入；usage_update 搭车累计；轮收尾残段折叠进 result', async () => {
++    // 仅伪造 Date（vi.setSystemTime 控制），setTimeout 保持真实——既有 50ms 等待骨架零改动。
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++
++    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
++    const { queue, push, close } = makeInputQueue();
++    const { cb, results, messages } = makeCallbacks();
++    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
++    const consumeP = driver.consume(handle, cb);
++
++    await new Promise<void>((r) => setTimeout(r, 50));
++    emitLines(child, [threadStartResponse('thr_speed')]);
++    await new Promise<void>((r) => setTimeout(r, 50));
++
++    push('hi');
++    await new Promise<void>((r) => setTimeout(r, 50));
++
++    // t=1000ms：reasoning started（锚定生成窗口）
++    vi.setSystemTime(1000);
++    emitLines(child, [itemStartedReasoning('thr_speed')]);
++    await new Promise<void>((r) => setTimeout(r, 30));
++    // t=6000ms：commandExecution started（tool_use 折叠 5000ms，工具时间从这里起不计）
++    vi.setSystemTime(6000);
++    emitLines(child, [itemStartedCommand('thr_speed', 'ls -la')]);
++    await new Promise<void>((r) => setTimeout(r, 30));
++    // 工具执行 20s（6000→26000 无模型输出事件——不进窗口）
++    // t=26000ms：agentMessage delta 重新锚定——adapter 对 delta 有缓冲阈值
++    // （80 字符/120ms），单条超阈值 delta 在同一行处理内立即 flush 产 text 事件
++    //（多行同批推送会被 readline 拆散跨时钟处理，禁用）。
++    vi.setSystemTime(26000);
++    emitLines(child, [
++      agentMessageDelta('thr_speed', 'x'.repeat(100), 'it_m1'),
++    ]);
++    await new Promise<void>((r) => setTimeout(r, 30));
++    // t=32000ms：tokenUsage 通知 → usage_update 搭车 api_duration_ms = 5000 + 6000 = 11000
++    vi.setSystemTime(32000);
++    emitLines(child, [
++      tokenUsageNotif('thr_speed', {
++        inputTokens: 10000,
++        cachedInputTokens: 9000,
++        cacheWriteInputTokens: 0,
++        outputTokens: 50,
++      }),
++    ]);
++    await new Promise<void>((r) => setTimeout(r, 30));
++
++    const usageMsgs = messages.filter(
++      (m) => (m.metadata as { status?: string })?.status === 'usage_update',
++    );
++    expect(usageMsgs).toHaveLength(1);
++    expect(usageMsgs[0]!.usage).toMatchObject({
++      input_tokens: 1000,
++      output_tokens: 50,
++      api_duration_ms: 11000,
++    });
++    expect(safeParseAgentEvent(usageMsgs[0]!).success).toBe(true);
++
++    // t=34000ms：turn/completed → finishTurn 残段折叠 2000 → result 13000
++    vi.setSystemTime(34000);
++    emitLines(child, [turnCompletedNotif('completed')]);
++    await new Promise<void>((r) => setTimeout(r, 50));
++    expect(results).toHaveLength(1);
++    expect(results[0]!.usage).toMatchObject({
++      input_tokens: 1000,
++      output_tokens: 50,
++      api_duration_ms: 13000,
++    });
++
++    close();
++    child._emitExit(0);
++    await consumeP;
++    vi.useRealTimers();
++  });
++
++  it('跨轮归零：第二轮派发后计时状态从零（无上轮残留）', async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++
++    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
++    const { queue, push, close } = makeInputQueue();
++    const { cb, results } = makeCallbacks();
++    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
++    const consumeP = driver.consume(handle, cb);
++
++    await new Promise<void>((r) => setTimeout(r, 50));
++    emitLines(child, [threadStartResponse('thr_speed2')]);
++    await new Promise<void>((r) => setTimeout(r, 50));
++
++    // 第 1 轮：生成窗口锚定 + 累计（轮内数值非零，给归零断言一个非平凡前置）
++    push('t1');
++    await new Promise<void>((r) => setTimeout(r, 50));
++    vi.setSystemTime(1000);
++    emitLines(child, [agentMessageDelta('thr_speed2', 'y'.repeat(100), 'it_m1')]);
++    await new Promise<void>((r) => setTimeout(r, 80));
++    vi.setSystemTime(5000);
++    emitLines(child, [turnCompletedNotif('completed')]);
++    await new Promise<void>((r) => setTimeout(r, 80));
++    expect(results).toHaveLength(1);
++    // finishTurn 残段折叠后轮内累计为非零终值（未归零前置）
++    expect(handle.turnApiDurationMs).toBeGreaterThan(0);
++
++    // 第 2 轮派发后：轮 start 重置生效——累计归零、窗口锚为 null（FR-02 跨轮归零）
++    push('t2');
++    await new Promise<void>((r) => setTimeout(r, 80));
++    expect(handle.turnApiDurationMs).toBe(0);
++    expect(handle.generatingSince).toBeNull();
++
++    close();
++    child._emitExit(0);
++    await consumeP;
++    vi.useRealTimers();
++  });
++
++});
+diff --git a/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts b/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+index 1766011ae..6deb7c74e 100644
+--- a/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+@@ -787,6 +787,9 @@ describe('get_state 握手 → session_started 合成', () => {
+ 
+ describe('turn 生命周期', () => {
+   it('prompt id 关联 + 事件流上报 + agent_settled 收敛 onTurnResult(success)', async () => {
++    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
+     const child = createFakeChild();
+     vi.mocked(spawn).mockReturnValue(child as never);
+     const driver = await makeDriver();
+@@ -861,6 +864,9 @@ describe('turn 生命周期', () => {
+   // ql-20260909-028：pi 每条 message.usage 是单次调用量，turn_end 只定格最后
+   // 一次调用——原 replace 语义丢轮内工具循环中间调用（实测全会话只记真实 2-9%）。
+   it('轮内多调用：result.usage = message_end 逐调用累加和（非 turn_end 定格值），usage 事件同步注入轮累计', async () => {
++    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
+     const child = createFakeChild();
+     vi.mocked(spawn).mockReturnValue(child as never);
+     const driver = await makeDriver();
+@@ -947,6 +953,9 @@ describe('turn 生命周期', () => {
+   });
+ 
+   it('message_end 无 usage（旧版 pi）→ 退回 turn_end 定格值，行为与修复前一致', async () => {
++    // 冻结时钟（FR-03）：tick 微任务不推进时钟，api_duration_ms 恒 0 不带键，精确断言无时间噪声。
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
+     const child = createFakeChild();
+     vi.mocked(spawn).mockReturnValue(child as never);
+     const driver = await makeDriver();
+@@ -3249,3 +3258,95 @@ describe('PiRpcDriver 思考档位（2026-09-14-session-thinking-level task-04
+     await consumeP;
+   });
+ });
++
++
++// ── FR-03 生成窗口计时（2026-10-10-live-token-speed-daemon-timing）────────────
++
++describe('FR-03 pi 生成窗口计时（api_duration_ms）', () => {
++  it('text_delta 锚定 → tool_use 折叠 → 再锚定 → message_end 收口：turn_end 与 result 搭车累计', async () => {
++    vi.useFakeTimers({ toFake: ['Date'] });
++    vi.setSystemTime(0);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const driver = await makeDriver();
++    const { queue, push, close: closeQueue } = makeInputQueue();
++    const { cb, events, results } = makeCallbacks();
++    const handle = (await driver.start(queue, makeOpts())) as PiRpcHandle;
++    const consumeP = driver.consume(handle, cb);
++    await tick();
++    handshakeOk(child);
++    await tick();
++
++    push('跑工具');
++    await tick();
++    respond(child, 'prompt');
++    emitEvent(child, { type: 'agent_start' });
++    // t=1000ms：text_delta 锚定生成窗口
++    vi.setSystemTime(1000);
++    emitEvent(child, {
++      type: 'message_update',
++      message: {},
++      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: '先查' },
++    });
++    await tick(1);
++    // t=6000ms：tool_execution_start（tool_use 折叠 5000ms，工具时间不计）
++    vi.setSystemTime(6000);
++    emitEvent(child, {
++      type: 'tool_execution_start',
++      toolName: 'read',
++      callId: 'c1',
++      args: { path: '/tmp/x' },
++    });
++    await tick(1);
++    // t=26000ms：第二段生成 text_delta 重新锚定
++    vi.setSystemTime(26000);
++    emitEvent(child, {
++      type: 'message_update',
++      message: {},
++      assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: '查完了' },
++    });
++    await tick(1);
++    // t=32000ms：assistant message_end（调用收口折叠 6000ms）+ usage 供累加
++    vi.setSystemTime(32000);
++    emitEvent(child, {
++      type: 'message_end',
++      message: {
++        role: 'assistant',
++        content: [{ type: 'text', text: '查完了' }],
++        usage: { input: 100, output: 50, cacheRead: 900, cacheWrite: 0 },
++      },
++    });
++    await tick(1);
++    // t=33000ms：turn_end（定格 usage）→ turnUsage 搭车 api_duration_ms = 11000
++    vi.setSystemTime(33000);
++    emitEvent(child, {
++      type: 'turn_end',
++      message: {
++        role: 'assistant',
++        content: [],
++        usage: { input: 100, output: 50, cacheRead: 900, cacheWrite: 0 },
++      },
++    });
++    emitFinalTextEnd(child, '查完了');
++    emitEvent(child, { type: 'agent_settled' });
++    await tick();
++
++    // turn_end usage 事件搭车：轮内累计 = 5000 + 6000 = 11000（工具 20s 不计）
++    const usageEv = events.find((e) => e.type === 'text' && e.usage !== undefined);
++    expect(usageEv).toBeDefined();
++    expect(usageEv!.usage).toMatchObject({
++      input_tokens: 100,
++      output_tokens: 50,
++      api_duration_ms: 11000,
++    });
++    expect(safeParseAgentEvent(usageEv!).success).toBe(true);
++
++    // result.usage 与事件两路同源
++    expect(results).toHaveLength(1);
++    expect(results[0]!.usage).toMatchObject({ api_duration_ms: 11000 });
++
++    closeQueue();
++    await consumeP;
++    vi.useRealTimers();
++  });
++});

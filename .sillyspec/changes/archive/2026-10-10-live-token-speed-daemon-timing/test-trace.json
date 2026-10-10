@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-live-token-speed-daemon-timing",
+  "rows": [
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-01:acc-0-f32728c9",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-01:acc-1-3494725c",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-01:acc-2-7ae30047",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-02:acc-0-6145b3a7",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-02:acc-1-aaf685f4",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-02:acc-2-29de5afe",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-03:acc-0-4ac8d91b",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-03:acc-1-dba29b16",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-03:acc-2-bcdd0983",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-04:acc-0-77afbadf",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-04:acc-1-6d39ea23",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-05:acc-0-cd45ab1f",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-05:acc-1-9d7b3d5c",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-05:acc-2-c4c134e7",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-05:acc-3-5c300bde",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-06:acc-0-8e69e39b",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-06:acc-1-08cb0074",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-live-token-speed-daemon-timing:task-06:acc-2-55c2c0f6",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-live-token-speed-daemon-timing"
+    }
+  ]
+}

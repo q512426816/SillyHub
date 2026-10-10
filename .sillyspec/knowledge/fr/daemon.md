@@ -2656,3 +2656,172 @@
   confirmed_at: null
   source_change: 2026-10-10-usage-note-to-daemon-log
   status: active
+
+## FR-daemon-072 借用 lease 携带工作区上下文单键
+变更：2026-10-10-borrow-sandbox-workspace-context
+状态：active
+摘要：默认场景；Workspace 行缺失/查询异常
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given 借用会话派发（三标记点之一：dispatch_to_daemon / prepare_interactive_dispatch /；When backend 写借用沙箱标记（_stamp_borrow_sandbox_metadata）；Then lease metadata MUST 含单键 `borrow_workspace_context`（JSON 对象），字段集 =
+- 场景：Workspace 行缺失/查询异常 — Given 借用派发时 workspace 行不存在或查询异常；When loader 执行；Then MUST 返回 None、MUST NOT 写键、MUST NOT 阻塞派发（best-effort，对齐借用
+全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-01
+最近确认：2d4702355
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-01:acc-0-7dae3102
+  tests: backend/app/modules/agent/tests/test_placement_borrow_integration.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-01:acc-1-534a304a
+  tests: backend/app/modules/agent/tests/test_placement_borrow_integration.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-01:acc-2-e11a234b
+  tests: backend/app/modules/agent/tests/test_placement_borrow_integration.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+
+## FR-daemon-073 上下文含真实路径与只读边界声明，写隔离零改动
+变更：2026-10-10-borrow-sandbox-workspace-context
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 借用会话的沙箱已准备 本变更上线；When daemon 渲染 AGENTS.md 任意借用会话尝试写沙箱外路径；Then 内容 MUST 含 lender 真实代码目录 root_path 与「可以读 / 禁止写（写守卫 写守卫判定逻辑 MUST NOT 与变更前有任何差异（红线）
+全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-02
+最近确认：2d4702355
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-03:acc-0-ed1bb551
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-03:acc-1-21a26d1f
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-03:acc-2-297ca987
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-04:acc-0-796faeca
+  tests: sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-04:acc-1-f58bf0c6
+  tests: sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-04:acc-2-523f0305
+  tests: sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+
+## FR-daemon-074 claim payload 白名单透传与 daemon 归一化
+变更：2026-10-10-borrow-sandbox-workspace-context
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given lease metadata 含 borrow_workspace_context；When daemon 认领（build_claim_payload）与归一化；Then claim payload MUST 含同名单键（真值守护）；daemon 归一化 MUST 双读
+全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-03
+最近确认：2d4702355
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-02:acc-0-cee00335
+  tests: backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-02:acc-1-393e1372
+  tests: backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+- row: 2026-10-10-borrow-sandbox-workspace-context:task-02:acc-2-e1bf0ac4
+  tests: backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-borrow-sandbox-workspace-context
+  status: active
+
+## FR-daemon-075 沙箱 AGENTS.md 落盘 fail-open
+变更：2026-10-10-borrow-sandbox-workspace-context
+状态：active
+摘要：默认场景；旧 backend 无键
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given marker 分支 prepareWorkspace 成功且 execPayload.borrowWorkspaceContext 存在；When daemon 渲染写 AGENTS.md；Then 文件 MUST 落沙箱根（BORROW_CONTEXT_FILENAME='AGENTS.md'）；渲染/写入异常
+- 场景：旧 backend 无键 — Given claim payload 无 borrow_workspace_context；When daemon 处理；Then MUST NOT 渲染/写任何文件（= 现状行为）。
+全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-04
+最近确认：2d4702355
+
+## FR-daemon-076 零回归与双向兼容
+变更：2026-10-10-borrow-sandbox-workspace-context
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 非借用 lease（borrowed=False） 新 backend 对旧 daemon 下发含新键的 claim payload；When 走完整派发链 旧 daemon 认领；Then metadata / claim payload MUST NOT 出现新键（逐字节不变）。 旧 daemon MUST 忽略未知键不报错。
+全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-05
+最近确认：2d4702355

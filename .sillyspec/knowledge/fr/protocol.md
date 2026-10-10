@@ -334,3 +334,241 @@
   confirmed_at: null
   source_change: 2026-10-09-tombstone-conflict-root-fix
   status: active
+
+## FR-protocol-017 关联仓共享登记（数据模型 + CRUD）
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 一个已存在的工作区；When 管理员通过 `POST /api/workspaces/{id}/linked-repos` 提交 `{ name, repo_url?, descriptio；Then 平台落库 `workspace_linked_repos` 新行（`(workspace_id, name)` 唯一，重名 409），无 relation_ki
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-01
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspec-maintenance:task-01:acc-0-120f853c
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-01:acc-1-88b1ea29
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-01:acc-2-035e5dc0
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-02:acc-0-9786a5d0
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-02:acc-1-c103a63b
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-02:acc-2-5eecbbe3
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+
+## FR-protocol-018 成员级本地路径
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 工作区已登记关联仓；When 成员调用 `PUT /api/workspaces/{id}/linked-repos/{rid}/my-path` 提交 `{ path }` 或 `{ pa；Then 仅写入/清除该成员自己的 `workspace_linked_repo_paths` 行（`(linked_repo_id, user_id)` 唯一，upse
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-02
+最近确认：b15fafc3b
+
+## FR-protocol-019 daemon 双落盘
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+依据决策：D-004@v2、D-005@v2
+场景正文：
+- 场景：默认场景 — Given 成员机器 daemon 在线且收到 `linked_repos_sync` RPC（payload 含 workspace、repos[] 配置快照与该成员 r；When daemon 执行同步；Then 在成员本机工作区根依次 spawn：
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-03
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspec-maintenance:task-04:acc-0-6d85faa6
+  tests: sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-04:acc-1-693c93a8
+  tests: sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-04:acc-2-1539fb52
+  tests: sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+
+## FR-protocol-020 落盘状态回环
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 完成或跳过/失败任一层；When daemon 调用 `POST /api/daemon/machines/{instance_id}/linked-repos-sync-result` 回报；Then backend 更新该 (workspace, machine, repo, layer) 状态（ok/skipped/failed + detail + 时间
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-04
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspec-maintenance:task-03:acc-0-34910d67
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx | sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-03:acc-1-2a0defea
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx | sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-03:acc-2-41ebc5dc
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx | sillyhub-daemon/tests/linked-repos-sync.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+
+## FR-protocol-021 同步触发
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 工作区有关联仓且用户为成员；When 用户在卡片点「立即同步」（`POST …/linked-repos/sync`）；Then backend 向该成员绑定 daemon 发请求-响应 RPC 并受理；配置 CRUD 成功后另向在线 daemon
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-05
+最近确认：b15fafc3b
+
+## FR-protocol-022 前端关联仓卡片
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户打开工作区详情页；When 渲染「关联仓」卡片；Then 列表展示名称/仓库地址/描述/我的本地路径/逐层落盘状态；管理员可新增/编辑/删除（Modal 表单，
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-06
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspec-maintenance:task-05:acc-0-e00d4b11
+  tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-05:acc-1-98100838
+  tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-05:acc-2-83dede27
+  tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-06:acc-0-b5661b5e
+  tests: backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_delete_change.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | backend/app/modules/daemon/tests/test_build_claim_payload.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_pending_update_upsert.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_compact_endpoint.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_readiness.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/daemon/tests/test_session_suspend.py | backend/app/modules/daemon/tests/test_worker_redispatch.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_governance.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_blocked_notify.py | backend/app/modules/platform_sync/tests/test_agent_log_states_push.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/daemon/__tests__/machine-card-pending.test.tsx | frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/liveness/discovery.test.ts | sillyhub-daemon/tests/agent-log/liveness/registry.test.ts | sillyhub-daemon/tests/agent-log/liveness/tailer.test.ts | sillyhub-daemon/tests/borrow-sandbox-context.test.ts | sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts | sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts | sillyhub-daemon/tests/daemon-interactive-bridge.test.ts | sillyhub-daemon/tests/daemon-selfupdate-orchestrator.test.ts | sillyhub-daemon/tests/daemon-status-root-persistence.test.ts | sillyhub-daemon/tests/disk-probe-pending.test.ts | sillyhub-daemon/tests/integration/worker-resume.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/daemon-notify-session-ready.test.ts | sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts | sillyhub-daemon/tests/knowledge-governance-handler.test.ts | sillyhub-daemon/tests/knowledge-hits-periodic.test.ts | sillyhub-daemon/tests/knowledge-hits-upload.test.ts | sillyhub-daemon/tests/sillyspec-platform-command.test.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-06:acc-1-f08d6b7d
+  tests: backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_delete_change.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | backend/app/modules/daemon/tests/test_build_claim_payload.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_pending_update_upsert.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_compact_endpoint.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_readiness.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/daemon/tests/test_session_suspend.py | backend/app/modules/daemon/tests/test_worker_redispatch.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_governance.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_blocked_notify.py | backend/app/modules/platform_sync/tests/test_agent_log_states_push.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/daemon/__tests__/machine-card-pending.test.tsx | frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/liveness/discovery.test.ts | sillyhub-daemon/tests/agent-log/liveness/registry.test.ts | sillyhub-daemon/tests/agent-log/liveness/tailer.test.ts | sillyhub-daemon/tests/borrow-sandbox-context.test.ts | sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts | sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts | sillyhub-daemon/tests/daemon-interactive-bridge.test.ts | sillyhub-daemon/tests/daemon-selfupdate-orchestrator.test.ts | sillyhub-daemon/tests/daemon-status-root-persistence.test.ts | sillyhub-daemon/tests/disk-probe-pending.test.ts | sillyhub-daemon/tests/integration/worker-resume.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/daemon-notify-session-ready.test.ts | sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts | sillyhub-daemon/tests/knowledge-governance-handler.test.ts | sillyhub-daemon/tests/knowledge-hits-periodic.test.ts | sillyhub-daemon/tests/knowledge-hits-upload.test.ts | sillyhub-daemon/tests/sillyspec-platform-command.test.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+- row: 2026-10-10-workspec-maintenance:task-06:acc-2-6d306988
+  tests: backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_placement_borrow_integration.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_delete_change.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | backend/app/modules/daemon/tests/test_build_claim_payload.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_pending_update_upsert.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_compact_endpoint.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_readiness.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/daemon/tests/test_session_suspend.py | backend/app/modules/daemon/tests/test_worker_redispatch.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_governance.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_blocked_notify.py | backend/app/modules/platform_sync/tests/test_agent_log_states_push.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/changes/__tests__/platform-sync-section.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/daemon/__tests__/machine-card-pending.test.tsx | frontend/src/components/daemon/__tests__/session-panel-mobile-detail-guard.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/liveness/discovery.test.ts | sillyhub-daemon/tests/agent-log/liveness/registry.test.ts | sillyhub-daemon/tests/agent-log/liveness/tailer.test.ts | sillyhub-daemon/tests/borrow-sandbox-context.test.ts | sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts | sillyhub-daemon/tests/daemon-hits-periodic-lifecycle.test.ts | sillyhub-daemon/tests/daemon-interactive-bridge.test.ts | sillyhub-daemon/tests/daemon-selfupdate-orchestrator.test.ts | sillyhub-daemon/tests/daemon-status-root-persistence.test.ts | sillyhub-daemon/tests/disk-probe-pending.test.ts | sillyhub-daemon/tests/integration/worker-resume.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/daemon-notify-session-ready.test.ts | sillyhub-daemon/tests/interactive/daemon-usage-note.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts | sillyhub-daemon/tests/knowledge-governance-handler.test.ts | sillyhub-daemon/tests/knowledge-hits-periodic.test.ts | sillyhub-daemon/tests/knowledge-hits-upload.test.ts | sillyhub-daemon/tests/sillyspec-platform-command.test.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspec-maintenance
+  status: active
+
+## FR-protocol-023 降级与兼容
+变更：2026-10-10-workspec-maintenance
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 老 daemon（无 RPC handler）或旧版 sillyspec CLI（无 register-repo 子命令）；When 触发同步；Then 分别得到「daemon 需升级」状态或该层 skipped；未配置关联仓的工作区行为与现状一致；
+全文：.sillyspec/changes/archive/2026-10-10-workspec-maintenance/requirements.md#FR-07
+最近确认：b15fafc3b

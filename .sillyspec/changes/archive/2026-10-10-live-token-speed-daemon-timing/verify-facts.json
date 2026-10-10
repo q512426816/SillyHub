@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-live-token-speed-daemon-timing",
+  "generatedAt": "2026-10-10T12:44:45.910Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 1,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "backendEndpoints": 1697,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-live-token-speed-daemon-timing",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "真实会话端到端观察：向 codex / pi 引擎各发一轮，确认轮**运行中**轮尾出现实时 tok/s、轮终态速度仍在（cursor 轮如实无速度）",
+        "condition": "平台会话页发起带工具调用的轮；daemon+backend+frontend 为本地开发栈",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "codex 时钟回拨专属用例补齐（QA P3：三处 Math.max(0) 守卫在场但无反例用例钉住）",
+        "condition": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts 增 setSystemTime 回拨用例",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+      "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+      "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+      "backend/app/modules/daemon/tests"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

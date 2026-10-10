@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-live-token-speed-daemon-timing",
+  "appliedAt": "2026-10-10T13:41:03.227Z",
+  "baseHash": "b073fcb584cddb9ed2ed446355ee469533bd2393",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+      "sha256": "52fa0ed0d4b94793ef06f302a6f05187da9e18400ee397432cfe50e55026497b"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+      "sha256": "ea5d67d5b4343c1e0aa8b6f3b969ebd19a315bb828fb40b6524358dbfd03eb96"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+      "sha256": "1f041aa0d5e9726dea33c2be07df68a74992d50da730cdd491d0aba3872de821"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+      "sha256": "b9381a00c1a04917b43795465c834c419ebc2599a1b351b6efbe51f4cc9da438"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+      "sha256": "cd9ca168f80da38b186c8c2bcf64a69182845c4bb8ea39d3ce662ca1b5481963"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+      "sha256": "d340c7981ed08e2698ecfe0e30d4458a2f7e609a23b782fff19fc140054cecc2"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "sha256": "882a0734ef8fe9c2569cae9cac0ecf008d57419cbc0d4f2fbe3b78dc0c2aaf14"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "6cdd6ad04692132e5944301a938607a02771b6b2e41d3bb3220b47fafa7639ea"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-speed.ts",
+      "sha256": "953f0fb678e947aaec73fde22e4e5182facb4c535648cd5272db2a247e742592"
+    },
+    {
+      "path": "frontend/src/lib/daemon/session-sse.ts",
+      "sha256": "9bf7e97c1631703f8441179a73de4cf5946814b1c01bf2344967744c40e31f56"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-event-schema.ts",
+      "sha256": "fb09a853c9e1020831b9d534eaef93558725a8499485204767fb8717adc3e8ac"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/claude-events.ts",
+      "sha256": "02419d5b6752c3bd467d543ca8a740d76a32b5190a4bbb6bdfb0fc33ad7e782d"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+      "sha256": "229e305ab2b9960154766a039d4b3ff8aba8060ecb969cfa66375913832e74a7"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+      "sha256": "0b123156f318b2f24a63d2942bd8a099a270f07a4757935f7243fb6c562655d8"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+      "sha256": "914670ceac8647293e9358bb555c75f97d371c648df0d43f7430782b18e1aeda"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+      "sha256": "3839d34751eae0e9ec18d7deb35e46383f8ad3a973102efb2d543cf4ae092c7a"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+      "sha256": "dee4421156dae3db65637be153cab894c68c3381f33c9a8844469bfe1d8c160e"
+    },
+    {
+      "path": "sillyhub-daemon/src/types.ts",
+      "sha256": "fd01c554c63aa3cce45e802b3328162018cbe28707356ec9a3537d628678ef51"
+    }
+  ]
+}

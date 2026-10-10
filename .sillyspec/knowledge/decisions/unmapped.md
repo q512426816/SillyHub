@@ -2050,3 +2050,65 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：589d2691b4a6dc32ae723617030bce6a58f4c339
 理由：最大风险：无（断言翻转有组件测试 turn-nav-list「单轮渲染」用例与本次 6 文件 107/107 全绿双重佐证）。未试过其它方案——「改组件迁就旧断言」会直接违反已归档 FR-01，不在考虑内。
+
+## D-001@v1 借用沙箱感知深度 = 元信息 + 真实路径只读
+状态：implemented
+变更：2026-10-10-borrow-sandbox-workspace-context
+锚点：未记录
+最近确认：2d4702355
+理由：注入工作区名称/描述/repo 地址/分支/技术栈 + lender 机器上真实代码目录
+
+## D-003@v1 写隔离 enforcement 不动，AGENTS.md 仅纵深防御提示
+状态：implemented
+变更：2026-10-10-borrow-sandbox-workspace-context
+锚点：未记录
+最近确认：2d4702355
+理由：不变。写隔离的唯一 enforcement 是 daemon 写守卫（registerBorrowSandbox
+
+## D-002@v2 v1 范围修订——登记+双落盘为核心，会话注入移出本期
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：修订。用户确认双落盘架构时明确「会话上下文注入降为可选加分项不再作为核心」。v1 范围=关联仓登记（共享字段+成员级路径）+daemon 双落盘+落盘状态回环；会话上下文注入移入非目标（留 v2 候选——落盘后 CLI 自身的模块上下文/跨仓对账机制已覆盖大部分场景）。
+supersedes：D-002@v1
+
+## D-003@v2 实现路线修订——「平台登记 + daemon 双落盘」取代纯「登记+会话注入」
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：不维持纯 A。修订为：A 的平台登记层（CRUD/成员级路径/审计）保留为 UI 与权威源，但价值核心转向 daemon 落盘层（D-008）：projects/*.yaml（workspace add）+ local.yaml repos:（register-repo）。会话注入从必做降为可选。
+supersedes：D-003@v1
+
+## D-006@v1 砍掉关联类型枚举（spec_source/peer）——用户否决
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：用户原话：「我认为没必要类型啊」——v1 两类行为完全一样（都只是注入上下文），枚举只有展示意义，配置时多一步选择。砍掉，保留 name/repo_url/本地路径/描述。v2 若需按类型分化行为（规范聚合/跨仓影响标记），届时再补列迁移（本项目未上线无历史兼容负担，CLAUDE.md 规则 11）。
+
+## D-007@v1 关联仓本地路径改为成员级（每用户每机器各自配置）
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：用户原话：「你要关注的应该是 不同用户电脑上 这些关联的仓库位置都不一样」——原设计工作区级单值无法适配多成员多机器（A 的 clone 在 C:/Users/A/...，B 的在 /home/b/...）。改为两层：仓的共享登记（name/repo_url/description）为工作区级；本地路径为成员级（每用户各自保存自己的路径），对齐 WorkspaceMemberRuntime 成员绑定 root_path 的既有模式。会话注入时按 lease 认领成员解析其配置的本地路径，未配置则该条只注入 repo_url 并标注路径未配置。
+
+## D-008@v1 平台配置必须落盘到工具消费点（local.yaml repos: + projects/）——用户定调
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：用户原话：「local.yaml 中 和 project 目录 要考虑清楚怎么配置，这个是必须的！ 不涉及 sillyspec 工具能力，做这个功能没意义，并且 sillyspec 现有的能力应该满足的！」——即：平台配置必须驱动工具行为（跨仓对账/子项目登记），纯平台侧登记+会话注入不构成这个功能的意义；且用工具现有机制落盘（不改 sillyspec 本身）。查证证实工具能力满足：① `sillyspec workspace add` 路径校验仅 existsSync(resolve(cwd,path)) 无「根目录内」限制，`../xxx` 跨目录树相对路径可登记（sillyspec/src/workspace.js:38-70）；② `sillyspec local register-repo <key> <path>` 外科写 local.yaml repos: 段，跨仓 task 卡 repo: key 校验/plan-postcheck/MultiRepoContext/scope-audit 消费（sillyspec/src/index.js:4972-5008、src/stages/plan-postcheck.js:247-283）。
+故障面：daemon 落盘经 spawn CLI 有版本依赖（老 sillyspec 无 register-repo 命令则该层降级，需能力探测+状态可见）；成员机器目录布局不满足约定相对路径时 workspace add 落盘失败（需失败回报与 UI 提示）；平台 DB 与落盘产物间存在最终一致窗口
+退役判据：sillyspec 工具若原生提供「平台侧配置拉取」命令（pull 式），daemon push 式落盘可退役
+
+## D-009@v1 execute 验收审查返工——越权修复/PATCH 清除语义/best-effort 补全/owner 视角/四处偏差登记
+状态：implemented
+变更：2026-10-10-workspec-maintenance
+锚点：未记录
+最近确认：b15fafc3b
+理由：全部修复+登记。①跨工作区 repo_id 越权（IDOR）：service 层 get/update/delete/upsert_my_path 加 workspace 归属过滤（跨工作区统一 404）+回归用例；②PATCH 清除失效：改 exclude_unset 语义（JSON null=显式清除，缺省=不动）+用例；③best-effort 推送半通道：payload 补逐成员 abs_path（按 binding.user_id 查 paths）、推送挂 PATCH/my-path 端点（原仅 create）、任务引用模块级集合持有（fire-and-forget 不阻塞 CRUD）+用例；④owner 视角走样：summary 提权视角扩为 owner（workspace 建者，_ensure_creator_as_owner 先例）||platform admin；⑤daemon 失败重试一次（R-07 承诺补齐，unsupported 不重试）+3 用例；⑥死代码 clear_all_sync_states 删除。
+故障面：无（收敛性修复）
+退役判据：无

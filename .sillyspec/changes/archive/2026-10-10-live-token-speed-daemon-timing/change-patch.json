@@ -1,0 +1,204 @@
+{
+  "change": "2026-10-10-live-token-speed-daemon-timing",
+  "baseline": "b073fcb584cddb9ed2ed446355ee469533bd2393",
+  "head": "2d47023554fd6140005f62cfe17e71d72cc9bec5",
+  "files": [
+    "backend/app/modules/daemon/run_sync/service/publish.py",
+    "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+    "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+    "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+    "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+    "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-speed.ts",
+    "frontend/src/lib/daemon/session-sse.ts",
+    "sillyhub-daemon/src/agent-event-schema.ts",
+    "sillyhub-daemon/src/interactive/claude-events.ts",
+    "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+    "sillyhub-daemon/src/types.ts",
+    "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+    "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts"
+  ],
+  "totals": {
+    "files": 18,
+    "additions": 845,
+    "deletions": 27
+  },
+  "savedAt": "2026-10-10T12:39:59.703Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b073fcb584cddb9ed2ed446355ee469533bd2393",
+    "totals": {
+      "files": 19,
+      "additions": 845,
+      "deletions": 27
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/publish.py",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py",
+        "additions": 180,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-speed.test.ts",
+        "additions": 10,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-speed.ts",
+        "additions": 15,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/session-sse.ts",
+        "additions": 6,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-event-schema.ts",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/claude-events.ts",
+        "additions": 42,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+        "additions": 49,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "additions": 32,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/types.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "additions": 197,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts",
+        "additions": 158,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts",
+        "additions": 101,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/__init__.py",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "554d644b4c5d5a0c126ffb755191c6cc4c25d6b38303415aa0eff4fc38ddd7df",
+  "patchStatus": "ok"
+}
