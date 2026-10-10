@@ -302,14 +302,13 @@ describe("SessionPanel variant 回归锚（不传 variant 与 desktop 一致）"
     const flexRow = chatCol.parentElement as HTMLElement;
     expect(flexRow.className).toBe("flex min-h-0 flex-1");
     expect(flexRow.parentElement).toBe(panel);
-    // ql-20260909-005：轮次 <3 导航列整条隐藏（短会话回收占位）——本
-    // fixture 仅 1 轮，断言列不渲染（常驻断言随行为翻转；≥3 轮形态由
-    // turn-nav-list 组件测试覆盖）。2026-09-27-session-fast-replay task-04：
-    // 挂载组件 TurnCatalog → TurnNavList（行式导航列，aria-label 随改「轮次导航」，
-    // 断言意图不变：短会话不渲染导航）。
+    // 2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005「轮次 <3 导航
+    // 列整条隐藏」随 FR-01 阈值放宽（<3→<1）翻转——本 fixture 仅 1 轮，断言
+    // 导航列**渲染**（TurnNavList，aria-label「轮次导航」；原注释预留「常驻断言
+    // 随行为翻转」）；≥3 轮形态由 turn-nav-list 组件测试覆盖。
     expect(
-      within(flexRow).queryByRole("navigation", { name: "轮次导航" }),
-    ).not.toBeInTheDocument();
+      within(flexRow).getByRole("navigation", { name: "轮次导航" }),
+    ).toBeInTheDocument();
   });
 
   it("显式 variant='desktop'：与不传渲染一致（分发函数默认值归一）", async () => {
