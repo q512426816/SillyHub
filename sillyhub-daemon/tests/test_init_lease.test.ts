@@ -40,10 +40,10 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
   return { ...actual, writeLocalYaml: localYamlWriterMock };
 });
 
-import { mkdtemp, mkdir, writeFile, rm, readFile, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 import {
   handleInitLease,
@@ -106,6 +106,8 @@ const TEST_WS_IDS = [
   'ws-init-initfail', 'ws-init-gate', 'ws-init-order', 'ws-init-tools-pass', 'ws-init-tools-fallback',
   // ql-20260820-007：策略分支 init 时序 + 状态文件保鲜重建用例
   'ws-init-native', 'ws-init-mirror', 'ws-init-pm-state', 'ws-init-bump-recreate', 'ws-init-batch-native',
+  // 2026-10-10-repo-native-no-platform-markers：源缺失不降级 / 残留备份交换两用例
+  'ws-init-native-nosource', 'ws-init-native-stale',
 ];
 afterAll(async () => {
   await Promise.all(
@@ -629,6 +631,78 @@ describe('策略分支 init 时序 + 状态文件保鲜 (ql-20260820-007)', () =
       await readFile(join(resolveSpecDir('ws-init-mirror'), DAEMON_STATE_FILENAME), 'utf-8'),
     ) as Record<string, unknown>;
     expect(st.spec_version).toBe(1);
+  });
+
+  // 2026-10-10-repo-native-no-platform-markers：repo-native 两降级洞收口——降级会让缓存成
+  // 普通目录，sillyspec CLI 自指守卫（realpath 穿透 junction 判回环 → 拒写平台标记三件套）
+  // 失效，init 三写把 .sillyspec-platform.json/-managed/-cleaned 投毒进源项目根。两用例断言
+  // 守卫的前置条件（缓存 symlink + 源项目 .sillyspec 存在 + 两 realpath 相等）全部路径成立。
+
+  it('repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）', async () => {
+    // 前置：tmpProject 存在但无 .sillyspec（全新项目首接形态）
+    const client = makeClient(); // 有 bundle 也不应被调（junction 分支早退）
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-native-nosource',
+      rootPath: tmpProject,
+      serverOrigin: 'http://127.0.0.1:8000',
+      strategy: 'repo-native',
+      latestSpecVersion: 0,
+      spawnFn: makeInitSpawn(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(client.getSpecBundle).not.toHaveBeenCalled();
+    // 空真理源被就地创建（「源项目即真理」：真理源不存在则创建空目录）
+    const srcDir = join(tmpProject, '.sillyspec');
+    expect((await stat(srcDir)).isDirectory()).toBe(true);
+    // 自指守卫前置条件：缓存是 symlink，且 realpath 与源项目 .sillyspec 同一物理目录
+    const cacheRoot = resolveSpecDir('ws-init-native-nosource');
+    expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(true);
+    expect(await realpath(cacheRoot)).toBe(await realpath(srcDir));
+    // 状态文件经 junction 落源项目（repo-native 统一语义）
+    const st = JSON.parse(
+      await readFile(join(srcDir, DAEMON_STATE_FILENAME), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(st.spec_version).toBe(0);
+  });
+
+  it('repo-native：缓存为普通目录残留 → rename 备份后 junction 成立，原内容保留在备份目录，getSpecBundle 不被调', async () => {
+    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
+    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
+    // 预置普通目录残留缓存（历史 platform-managed 形态，带真实内容）
+    const cacheRoot = resolveSpecDir('ws-init-native-stale');
+    await mkdir(join(cacheRoot, 'legacy'), { recursive: true });
+    await writeFile(join(cacheRoot, 'legacy', 'old-bundle.md'), '# old');
+    const client = makeClient();
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-native-stale',
+      rootPath: tmpProject,
+      serverOrigin: 'http://127.0.0.1:8000',
+      strategy: 'repo-native',
+      latestSpecVersion: 1,
+      spawnFn: makeInitSpawn(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(client.getSpecBundle).not.toHaveBeenCalled();
+    // 缓存已成为 junction（自指守卫前置条件）
+    expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(true);
+    expect(await realpath(cacheRoot)).toBe(await realpath(join(tmpProject, '.sillyspec')));
+    // 源项目内容经 junction 可达（scan 将直接写源项目）
+    expect(await readFile(join(cacheRoot, 'docs', 'native.md'), 'utf-8')).toBe('# native');
+    // 残留数据完整保留在备份目录（rename 备份非删除）
+    const parent = dirname(cacheRoot);
+    const backups = (await readdir(parent)).filter((n) =>
+      n.startsWith('ws-init-native-stale.pre-junction-backup-'),
+    );
+    expect(backups.length).toBe(1);
+    expect(
+      await readFile(join(parent, backups[0], 'legacy', 'old-bundle.md'), 'utf-8'),
+    ).toBe('# old');
+    // 备份目录不在 TEST_WS_IDS 精确清理面 → 用例自清，防真实 specs/ 根堆积
+    await rm(join(parent, backups[0]), { recursive: true, force: true }).catch(() => {});
   });
 
   it('platform-managed：pull 200 的 rm -rf 不再删掉状态文件（重排后 writeDaemonState 后置于 pull）', async () => {

@@ -143,20 +143,23 @@ export async function pullSpecBundle(
 
   // ── repo-native（D-005）：建 junction 让缓存指向源项目 .sillyspec，跳过 pull 覆盖 ──
   // scan 直接写源项目（实时双向）。R-01：repo-native 不走 rm/不覆盖，避免顺链删源项目。
+  // 2026-10-10-repo-native-no-platform-markers：源项目无 .sillyspec 不再降级 pull——降级
+  // 会让缓存成普通目录，sillyspec CLI 自指守卫（realpath 穿透 junction）失效，init 三写
+  // 把平台标记（.sillyspec-platform.json/-managed/-cleaned）投毒进源项目根。就地创建空
+  // 真理源（「源项目即真理」语义：用户创建工作区时的 ⚠ 写入警示已覆盖该授权）。
   if (strategy === 'repo-native' && opts.rootPath) {
     const sourceSillyspec = join(opts.rootPath, '.sillyspec');
-    if (await pathExists(sourceSillyspec)) {
-      const ok = await ensureSpecJunction(specDir, sourceSillyspec);
-      if (ok) {
-        console.info('spec_sync: repo_native_junction_ready', wsId, specDir, '->', sourceSillyspec);
-        return specDir; // junction 就绪，scan 在源项目跑，postSpecSync 打包源项目回灌
-      }
-      // 普通目录残留阻塞 junction → 降级 pull（不删数据）
-      console.warn('spec_sync: repo_native_junction_blocked_fallback', wsId, specDir);
-    } else {
-      // 源项目无 .sillyspec → 降级 repo-mirrored（首次复制空操作，最终走 pull）
-      console.warn('spec_sync: repo_native_source_missing_fallback', wsId, sourceSillyspec);
+    if (!(await pathExists(sourceSillyspec))) {
+      await mkdir(sourceSillyspec, { recursive: true });
+      console.info('spec_sync: repo_native_source_created', wsId, sourceSillyspec);
     }
+    const ok = await ensureSpecJunction(specDir, sourceSillyspec);
+    if (ok) {
+      console.info('spec_sync: repo_native_junction_ready', wsId, specDir, '->', sourceSillyspec);
+      return specDir; // junction 就绪，scan 在源项目跑，postSpecSync 打包源项目回灌
+    }
+    // 备份交换失败（Windows 句柄占用等）→ 降级 pull（不删数据）
+    console.warn('spec_sync: repo_native_junction_blocked_fallback', wsId, specDir);
   }
 
   // ── repo-mirrored（D-002）：首次（缓存空）从源项目 .sillyspec 单次 fs.cp ──────────
@@ -483,9 +486,12 @@ async function dirHasContent(dir: string): Promise<boolean> {
  * - 不存在 → 建（Win fs.symlink('junction') 无需提权 / Linux·macOS 普通 symlink）。
  * - 已是符号链接/junction 且目标一致 → 复用，返回 true。
  * - 已是符号链接但目标不一致 → 移除重建。
- * - 是普通目录（历史残留）→ 不自动删（防误删数据），返回 false 让上层降级 pull。
+ * - 是普通目录（历史残留）→ rename 备份到 <wsId>.pre-junction-backup-<ts> 后建 junction
+ *   （2026-10-10-repo-native-no-platform-markers：直接降级会让缓存成普通目录，sillyspec
+ *   CLI 自指守卫失效，init 三写平台标记投毒源项目根；rename 保数据优于降级投毒）；
+ *   rename 失败（Windows 句柄占用等）→ 保守返回 false 让上层降级 pull（不删数据）。
  *
- * @returns true=junction 就绪；false=被普通目录阻塞，上层应降级
+ * @returns true=junction 就绪；false=备份交换失败，上层应降级
  */
 async function ensureSpecJunction(specDir: string, target: string): Promise<boolean> {
   let existing: string | null = null;
@@ -502,7 +508,22 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
   } catch {
     // 不存在，继续建
   }
-  if (isPlainDir) return false; // 普通目录残留，不自动删（防误删），上层降级
+  if (isPlainDir) {
+    // 普通目录残留：备份交换（数据不丢）后建 junction，不再直接降级。
+    // renameWithRetry：Windows 索引器/杀软短暂持有句柄的 EBUSY/EPERM 暂态失败重试
+    // （与下方 pull 目录交换同款）；重试穷尽仍败 → 保守降级（不删数据）。
+    const backup = join(
+      dirname(specDir),
+      `${basename(specDir)}.pre-junction-backup-${Date.now()}`,
+    );
+    try {
+      await renameWithRetry(specDir, backup);
+      console.info('spec_sync: junction_stale_dir_backed_up', specDir, '->', backup);
+    } catch (e) {
+      console.warn('spec_sync: junction_backup_rename_failed_fallback', specDir, e);
+      return false; // 备份失败保守降级（不删数据）
+    }
+  }
   if (isLink) {
     const existingNorm = existing ? resolve(existing) : null;
     if (existingNorm === resolve(target)) return true; // 目标一致，复用
