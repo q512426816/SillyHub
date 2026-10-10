@@ -147,7 +147,7 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
   });
 
   it("旧回退路径（segments undefined）：❓ 块仍渲染，不回归", () => {
-    render(
+    const { container } = render(
       <TurnTimeline
         {...renderProps(
           [makeTurn({ segments: undefined, output: "旧数据答复" })],
@@ -157,6 +157,27 @@ describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog
     );
     expect(screen.getByTestId("dialog-qa-block")).toBeInTheDocument();
     expect(screen.getByText(/旧数据答复/)).toBeInTheDocument();
+    // 评审 P3-3 补强：回退路径保持旧位置（❓ 块在答复正文之前）。
+    expectOrderBefore(container.innerHTML, "❓ 第1200毫秒的问题？", "旧数据答复");
+  });
+
+  it("畸形 dialog（QA 不可解析）+ 零对话段：不渲染孤头像行（评审 P3-4）", () => {
+    render(
+      <TurnTimeline
+        {...renderProps(
+          [makeTurn({ segments: [] })],
+          [
+            makeDialog(1500, {
+              dialog_payload: { questions: [] },
+              answer: { answers: [] },
+            }),
+          ],
+        )}
+      />,
+    );
+    expect(screen.queryByTestId("dialog-qa-block")).not.toBeInTheDocument();
+    // 智能体头像列不挂载（无任何可渲染对话项）。
+    expect(screen.queryByTitle("智能体")).not.toBeInTheDocument();
   });
 
   it("「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）", () => {

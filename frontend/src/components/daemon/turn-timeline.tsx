@@ -1474,7 +1474,9 @@ function isConversationSegment(seg: TurnSegment): boolean {
  *     呈现）+ 子代理容器段（tool 带 children / subagent_stub，task-02 放宽过滤后经
  *     SegmentView 渲染为子代理卡片，见 isConversationSegment）；思考/普通工具/stderr/
  *     团队分身段不挂载——渲染经济，FR-06），轻量 ❓
- *     AskUser 记录由外层共享逻辑渲染（答复之前）；
+ *     AskUser 记录由 convoTimeline 按 created_at 与段时刻合并排序穿插进对话流
+ *     （2026-10-10-dialog-qa-inplace，原「外层整组前置答复之前」已废弃；
+ *     segments undefined 的旧回退轮仍由外层原位渲染）；
  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
  *     SegmentView 段组件族（key=segment.id，段级 memo 由 task-05 保证）；AskUser
@@ -1579,6 +1581,12 @@ function SegmentedTurnBody({
   //  稳定排序保文档序。段渲染逻辑逐字保留，仅新增 askUser 分支。
   const convoTimeline = useMemo(() => {
     if (viewMode === "all" || textSegments == null) return null;
+    // 评审 P3-4 修复：payload 不可解析（QA 空）的 dialog 先行剔除——避免
+    // 「零对话段 + 仅畸形 dialog」的轮挂出孤头像而唯一子项渲染 null（旧路径
+    // 该情形完全无输出）；可解析性判定与 DialogQaBlock 渲染门同源。
+    const renderableDialogs = turnDialogs.filter(
+      (d) => extractDialogQA(d).length > 0,
+    );
     const items: Array<
       | { kind: "segment"; segment: TurnSegment; ts: number | null }
       | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null }
@@ -1588,7 +1596,7 @@ function SegmentedTurnBody({
         segment: s,
         ts: segmentTsOf(s),
       })),
-      ...turnDialogs.map((d) => ({
+      ...renderableDialogs.map((d) => ({
         kind: "askUser" as const,
         dialog: d,
         ts: d.created_at ? Date.parse(d.created_at) : null,
