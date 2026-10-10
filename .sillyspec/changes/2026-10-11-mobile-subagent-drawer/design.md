@@ -6,7 +6,7 @@ created_at: 2026-10-10T16:14:36.914Z
 
 ## 做法概述
 
-本变更怎么解决问题？改哪里、为什么选这个方案（一两段）？
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
 
 用户实测：手机端会话页回显子代理内容时，内部会话整段内联刷进对话流。根因：SubagentPanelContext 的挂载条件显式排除 mobile（session-panel-page `hasSubagentPanelHost = !mobile && onOpenSubagent != null`，2026-09-15 设计「移动端窄屏不做右栏」），无 context 时 SubagentBlockView 回退内联展开分支；且手机页宿主不传 portal 专属三 props（openSubagentId/onOpenSubagent/onSubagentPanelClose），槽位状态无处承载。修法最小侵入：①mobile 恒挂 Provider——宿主未传时用组件内状态（mobileSubagentId）承载开合（会话切换清槽），openSubagent/closeSubagent 收敛为统一槽位出口（context / 失效自动关 / 右栏 ✕ / Drawer 关闭共用）；②mobile 命中段时右侧滑出 antd Drawer（size min(92vw, 420px)，与移动端轮次导航 Drawer 同款用法）内嵌既有 SubagentDetailPanel——与 PC 右栏同一组件零复制，嵌套子代理单槽位换内容天然生效。desktop 分支（portal 三 props / 悬浮宿主回退）逐字不动。
 
