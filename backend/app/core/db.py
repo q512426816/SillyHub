@@ -28,8 +28,9 @@ _SessionFactory: async_sessionmaker[AsyncSession] | None = None
 # lease callbacks all share this pool. Larger size/overflow tolerates concurrent
 # callbacks; shorter recycle reclaims leaked/stale slots faster. Complements the
 # c1de949 SSE/background slot-release fix.
-_POOL_SIZE: Final[int] = 20
-_MAX_OVERFLOW: Final[int] = 30
+# pool_size / max_overflow 经 Settings 可配（DB_POOL_SIZE / DB_MAX_OVERFLOW，
+# 默认 20/30 即下方历史调优值）——2026-10-10-server-db-pool-tuning：小内存
+# 服务器配小池控制 postgres 连接进程数，默认行为不变。
 _POOL_TIMEOUT: Final[float] = 30.0
 _POOL_RECYCLE: Final[int] = 300  # 5 min — reclaim leaked/stale slots faster
 
@@ -71,8 +72,8 @@ def get_engine() -> AsyncEngine:
         settings = get_settings()
         _engine = create_async_engine(
             settings.database_url,
-            pool_size=_POOL_SIZE,
-            max_overflow=_MAX_OVERFLOW,
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
             pool_timeout=_POOL_TIMEOUT,
             pool_recycle=_POOL_RECYCLE,
             pool_pre_ping=True,
