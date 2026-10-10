@@ -117,7 +117,8 @@ daemon 渲染时逗号拼接）、`repo_url`、`default_branch`、`root_path`。
 | 修改 | sillyhub-daemon/src/daemon.ts | 归一化 cross-type 对象（:9498 起）加 `borrowWorkspaceContext`（camel/snake/初始 payload 三级兜底，对齐 :9511 workspaceSlug 先例）；`_startInteractiveSession` marker 分支 prepareWorkspace 成功后调渲染写 AGENTS.md（try/catch warn `borrow_sandbox_context_write_failed` fail-open）。consumer=沙箱目录 AGENTS.md |
 | 新增 | NEW:sillyhub-daemon/src/borrow-sandbox-context.ts | 纯函数模块：`renderBorrowSandboxContext(ctx: Record<string, unknown>, sandboxRoot: string): string` 模板渲染（description 截断 500、tech_stack 数组/串归一、缺字段段略过）；`BORROW_CONTEXT_FILENAME = 'AGENTS.md'` 常量。无 IO（写文件在 daemon.ts，便于纯函数测试） |
 | 修改 | sillyhub-daemon/src/types.ts | LeaseCtx 增可选字段 `borrowWorkspaceContext?: Record<string, unknown>`（claim payload 归一化产物，kind=interactive 借用 lease 才有） |
-| 修改 | backend/app/modules/agent/tests/test_placement_borrow_integration.py | 三标记点断言 borrow_workspace_context 存在+字段正确；Workspace 行缺失→无键不抛；claim payload 透传断言落 backend 既有 lease context 测试（plan 阶段定位具体文件写回任务） |
+| 修改 | backend/app/modules/agent/tests/test_placement_borrow_integration.py | 三标记点断言 borrow_workspace_context 存在+字段正确；Workspace 行缺失→无键不抛 |
+| 修改 | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | claim payload 透传单测：interactive lease metadata 含键→payload 同名同值；无键→payload 无键；batch 不透传 |
 | 新增 | NEW:sillyhub-daemon/tests/borrow-sandbox-context.test.ts | 渲染纯函数单测：全字段/缺字段/截断/tech_stack 归一 |
 | 修改 | sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts | marker+context → AGENTS.md 落沙箱根断言；无 context → 不写文件不抛；写失败 → warn 不阻塞 |
 

@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-borrow-sandbox-workspace-context",
+  "generatedAt": "2026-10-10T11:09:43.129Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 2,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "backendEndpoints": 632,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-borrow-sandbox-workspace-context",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 借用产键面测试全绿（placement 三标记点 + Workspace 缺行边界 + 非借用零回归）",
+      "command": "cd backend && uv run pytest -q --no-cov app/modules/agent/tests/test_placement_borrow_integration.py",
+      "exitCode": 0,
+      "logPath": "27 passed（execute 期实录，/tmp/t01-test2.log）"
+    },
+    {
+      "claim": "claim payload 透传面测试全绿（含 batch 不透传反例）",
+      "command": "cd backend && uv run pytest -q --no-cov app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "exitCode": 0,
+      "logPath": "13 passed（/tmp/t02-test2.log）"
+    },
+    {
+      "claim": "daemon 渲染纯函数 + marker 落盘三态集成全绿（有键渲染/无键不写/写失败 fail-open）+ 类型检查",
+      "command": "cd sillyhub-daemon && pnpm exec vitest run tests/borrow-sandbox-context.test.ts tests/daemon-borrow-sandbox.test.ts && pnpm typecheck",
+      "exitCode": 0,
+      "logPath": "7+6 passed + tsc 0 错（/tmp/t03-test.log、/tmp/t04-test4.log、/tmp/t04-tsc.log）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "daemon-kind-dispatch.test.ts 等 20 用例超时（系统代理黑洞 npm 流量，daemon.start() 每例拖 30-60s；主仓 HEAD 对照同超时=环境归因非回归）",
+        "condition": "关闭系统代理或放行 npm 流量后 `cd sillyhub-daemon && pnpm exec vitest run tests/daemon-kind-dispatch.test.ts`；或按 uncategorized 知识条目推广 vi.mock runPreflight 修法（候选独立小变更）",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "借用会话端到端感知效果（agent 基于 AGENTS.md 答出工作区名/代码路径）",
+        "condition": "部署 backend+daemon 新版到测试环境后，用 180024 类账号在 workflow 工作区开借用会话问「这是什么工作区/代码在哪」，并抽查沙箱根 AGENTS.md 内容与写守卫仍拦截沙箱外写",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "task-03 探针 7 partial 行：camel 形态 claim payload 键（borrowWorkspaceContext）无直测（三级兜底与 workspaceSlug 先例同构机械等价，snake 形态集成已测）",
+        "condition": "后续变更顺手在 sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts 加一例 camel 键集成用例（claim payload 喂 borrowWorkspaceContext 断言 AGENTS.md 落盘）即清账",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 1,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+      "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+      "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py20+jsx33)+fr(36)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-10T12:38:31.269Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

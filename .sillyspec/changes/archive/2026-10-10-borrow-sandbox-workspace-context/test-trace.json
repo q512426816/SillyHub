@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-borrow-sandbox-workspace-context",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-01:acc-0-7dae3102",
+      "tests": [
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-01:acc-1-534a304a",
+      "tests": [
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-01:acc-2-e11a234b",
+      "tests": [
+        "backend/app/modules/agent/tests/test_placement_borrow_integration.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-02:acc-0-cee00335",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-02:acc-1-393e1372",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-02:acc-2-e1bf0ac4",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-03:acc-0-ed1bb551",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-03:acc-1-21a26d1f",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-03:acc-2-297ca987",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-04:acc-0-796faeca",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-04:acc-1-f58bf0c6",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-borrow-sandbox-workspace-context:task-04:acc-2-523f0305",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-borrow-sandbox-workspace-context"
+    }
+  ]
+}

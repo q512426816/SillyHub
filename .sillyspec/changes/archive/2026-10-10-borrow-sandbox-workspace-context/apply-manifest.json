@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-borrow-sandbox-workspace-context",
+  "appliedAt": "2026-10-10T12:47:29.720Z",
+  "baseHash": "ea376aa085d466f3c3ea01429b237f514543a921",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/placement.py",
+      "sha256": "4c9e7db76804b128d6638ccd59255d53df022a07162570b6ad1ec7bc0cde4cc4"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+      "sha256": "f9f4d26b3d8c493c1c3bcef18057dcfdc8223b8c7eb8765414415f086199eb4e"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/context.py",
+      "sha256": "0e33f7459700d46ca26131bac6bcbdf04cf5dd63bc5988821cd1ce3c476a0693"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "sha256": "0db4e2030100c318a58988a1b114a35e161d7cdc8b047c522d4587cb7ac105c4"
+    },
+    {
+      "path": "sillyhub-daemon/src/borrow-sandbox-context.ts",
+      "sha256": "5f39ae59dfaebd1c45737575ce1055062b1eab6c46b9341b7632c3a79b9382ed"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "5ebf8a7cebb225c57a60392267854699e0052325a40388341e5880af46ffa880"
+    },
+    {
+      "path": "sillyhub-daemon/src/types.ts",
+      "sha256": "6d49f67c9933e4f826536cb2562945472bdb11b7ea4cb5c72bdfa8c79bda7cb0"
+    },
+    {
+      "path": "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+      "sha256": "2ab9c6892805ec36bb70a845cdacfd6e440bd07cbc308318f972b1ea10e620a5"
+    },
+    {
+      "path": "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts",
+      "sha256": "79f75976ac4852e979111e7dc0a1bc2f5ebe13be91d087d85021b2f39ac95391"
+    }
+  ]
+}

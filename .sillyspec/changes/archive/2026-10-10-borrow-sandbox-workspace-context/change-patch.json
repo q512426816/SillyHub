@@ -1,0 +1,115 @@
+{
+  "change": "2026-10-10-borrow-sandbox-workspace-context",
+  "baseline": "ea376aa085d466f3c3ea01429b237f514543a921",
+  "head": "032d3085c6dc79902e1843cd2adeeb4dceb536af",
+  "files": [
+    "backend/app/modules/agent/placement.py",
+    "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+    "backend/app/modules/daemon/lease/context.py",
+    "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+    "sillyhub-daemon/src/borrow-sandbox-context.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/types.ts",
+    "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+    "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 768,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-10T10:35:09.759Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ea376aa085d466f3c3ea01429b237f514543a921",
+    "totals": {
+      "files": 9,
+      "additions": 768,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/placement.py",
+        "additions": 76,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_placement_borrow_integration.py",
+        "additions": 115,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/lease/context.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+        "additions": 97,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/borrow-sandbox-context.ts",
+        "additions": 120,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/types.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+        "additions": 99,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts",
+        "additions": 205,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "5af76db8f7f11bef1a008e911cfa773441f9dc3caa5f2723da0d90c188f667fd",
+  "patchStatus": "ok"
+}

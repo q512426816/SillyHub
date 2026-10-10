@@ -1,0 +1,931 @@
+diff --git a/backend/app/modules/agent/placement.py b/backend/app/modules/agent/placement.py
+index 7bbb77829..078178ffe 100644
+--- a/backend/app/modules/agent/placement.py
++++ b/backend/app/modules/agent/placement.py
+@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
+ from app.core.logging import get_logger
+ from app.modules.agent.borrow_resolver import _resolve_borrowed_or_own_runtime
+ from app.modules.daemon.session_events import publish_sessions_changed
++from app.modules.workspace.model import Workspace
+ 
+ log = get_logger(__name__)
+ 
+@@ -140,6 +141,7 @@ def _stamp_borrow_sandbox_metadata(
+     metadata: dict,
+     actor_user_id: uuid.UUID,
+     run_id: uuid.UUID,
++    workspace_context: dict | None = None,
+ ) -> str:
+     """借用 lease 写沙箱 slug + cwd marker（task-09 / D-007@v2）。
+ 
+@@ -153,15 +155,68 @@ def _stamp_borrow_sandbox_metadata(
+     不能是 lender 代码路径——否则 daemon 用 lender 代码作 cwd，PolicyEngine 按 lease
+     隔离失效）。
+ 
++    2026-10-10-borrow-sandbox-workspace-context / FR-01：``workspace_context`` 非
++    None 时额外写 ``metadata["borrow_workspace_context"]`` 单键（工作区元信息 +
++    真实 root_path，daemon 侧渲染进沙箱 AGENTS.md）；缺省 None 不写键，存量路径
++    零回归。
++
+     Returns:
+         构造的 slug（调用方可记日志）。
+     """
+     slug = _make_borrow_sandbox_slug(actor_user_id, run_id)
+     metadata["borrow_sandbox_slug"] = slug
+     metadata["cwd"] = _BORROW_SANDBOX_MARKER + slug
++    if workspace_context is not None:
++        metadata["borrow_workspace_context"] = workspace_context
+     return slug
+ 
+ 
++# 2026-10-10-borrow-sandbox-workspace-context / D-001@v1：借用沙箱是空目录，agent
++# 感知不到自己服务于哪个工作区。三处借用标记点在写沙箱 marker 的同时查
++# Workspace 行，把下列字段（值为 None 的不落键）经 lease metadata 单键
++# ``borrow_workspace_context`` 下发，daemon 渲染 AGENTS.md 进沙箱根——真实
++# root_path 只读告知，写隔离仍由 daemon 写守卫强制（D-003@v1 红线）。
++_BORROW_WORKSPACE_CONTEXT_FIELDS = (
++    "name",
++    "display_alias",
++    "slug",
++    "description",
++    "type",
++    "tech_stack",
++    "repo_url",
++    "default_branch",
++    "root_path",
++)
++
++
++async def _load_borrow_workspace_context(
++    session: AsyncSession, workspace_id: uuid.UUID
++) -> dict | None:
++    """查 Workspace 行组装借用上下文（行缺失/异常/全空 → None，best-effort）。
++
++    失败语义对齐 ``_insert_borrow_audit_row``：上下文是增强项，任何异常只记
++    日志不阻塞借用派发。全字段 None 时归一返回 None（而非空 dict），保证下游
++    真值守护（键不落 metadata）语义一致。
++    """
++    try:
++        ws = await session.get(Workspace, workspace_id)
++    except Exception as exc:  # BLE001 全局忽略：异步常需 catch 裸 Exception
++        log.warning(
++            "borrow_workspace_context_lookup_failed",
++            workspace_id=str(workspace_id),
++            error=str(exc),
++        )
++        return None
++    if ws is None:
++        return None
++    ctx = {
++        field: getattr(ws, field)
++        for field in _BORROW_WORKSPACE_CONTEXT_FIELDS
++        if getattr(ws, field, None) is not None
++    }
++    return ctx or None
++
++
+ def _runtime_daemon_instance_id(runtime: dict) -> uuid.UUID:
+     """从 resolved runtime dict 抽 daemon_instance_id（task-11 审计写入用）。
+ 
+@@ -509,7 +564,13 @@ class RunPlacementService:
+             # 不能是 lender 代码 rootPath（否则 daemon 用 lender 代码作 cwd + PolicyEngine
+             # 按 lease 隔离失效 → 借用 agent 可写开发代码区）。marker 借 build_claim_payload
+             # 既有 cwd→root_path 透传带给 daemon，无需改 context.py。
+-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
++            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
++            _borrow_ws_ctx = (
++                await _load_borrow_workspace_context(self._session, workspace_id)
++                if workspace_id is not None
++                else None
++            )
++            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
+             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+             # 借用必然 workspace-scoped（AC7：无 workspace_id 不借用），故 workspace_id 非空。
+             if workspace_id is not None:
+@@ -931,7 +992,13 @@ class RunPlacementService:
+             # 覆盖上方 caller cwd（quick-chat 场景 cwd 可能指 lender 代码 → daemon 会用作
+             # cwd → PolicyEngine 按 lease 隔离失效）。marker 借 build_claim_payload 既有
+             # cwd→root_path 透传带给 daemon，无需改 context.py。
+-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
++            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
++            _borrow_ws_ctx = (
++                await _load_borrow_workspace_context(self._session, workspace_id)
++                if workspace_id is not None
++                else None
++            )
++            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
+             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+             # workspace_id / lender_user_id 借用必然非空（AC7 + borrow_resolver 契约）。
+             # task-03（2026-08-28-daemon-agent-share）：共享钉定路径（上方钉定分支
+@@ -1093,7 +1160,13 @@ class RunPlacementService:
+             # 既有 cwd→root_path 透传（cwd 优先于 root_path）带给 daemon，无需改 context.py。
+             # scan 语义字段（root_path/spec_root/runtime_root）仍保留在 metadata，仅 cwd 透传
+             # 给 daemon 时被 marker 优先覆盖。
+-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
++            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
++            _borrow_ws_ctx = (
++                await _load_borrow_workspace_context(self._session, workspace_id)
++                if workspace_id is not None
++                else None
++            )
++            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
+             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
+             # scan 借用同样 workspace-scoped（AC7），workspace_id 非空。
+             if workspace_id is not None:
+diff --git a/backend/app/modules/agent/tests/test_placement_borrow_integration.py b/backend/app/modules/agent/tests/test_placement_borrow_integration.py
+index c5d8f268e..dc78d9403 100644
+--- a/backend/app/modules/agent/tests/test_placement_borrow_integration.py
++++ b/backend/app/modules/agent/tests/test_placement_borrow_integration.py
+@@ -804,3 +804,118 @@ async def test_ac8_own_daemon_no_sandbox_marker_zero_regression(db_session, tmp_
+     # 自有路径不写 marker（cwd 若有则原样，不前缀 borrow-sandbox:）。
+     if "cwd" in meta:
+         assert not meta["cwd"].startswith("borrow-sandbox:")
++
++
++# ────────────────────────────────────────────────────────────────────────────
++# AC9: 2026-10-10-borrow-sandbox-workspace-context / FR-01 借用 lease 携带
++# 工作区上下文单键 borrow_workspace_context（daemon 渲染沙箱 AGENTS.md 数据源）
++# ────────────────────────────────────────────────────────────────────────────
++
++
++async def test_ac9_dispatch_borrow_writes_workspace_context(db_session, tmp_path) -> None:
++    """dispatch_to_daemon 借用 → metadata 含 borrow_workspace_context。
++
++    _seed_workspace 只落 name/slug/root_path（其余 None），断言非 None 字段入键、
++    None 字段不落键；tech_stack 列默认 []（永非 None）原样携带。
++    """
++    from app.modules.agent.placement import RunPlacementService
++
++    refs = await _setup_borrow(db_session, tmp_path)
++    run = await _seed_agent_run(db_session)
++    placement = RunPlacementService(db_session)
++    lease_id = await placement.dispatch_to_daemon(
++        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
++    )
++    meta = await _lease_metadata(db_session, lease_id)
++    ctx = meta["borrow_workspace_context"]
++    assert ctx["name"] == "W"
++    assert ctx["root_path"] == str(tmp_path)
++    assert isinstance(ctx["slug"], str) and ctx["slug"]
++    assert ctx["tech_stack"] == []
++    assert ctx["default_branch"] == "main"  # 模型列默认值，非 None 原样携带
++    # None 值字段不落键（design 字段集定义）。
++    for absent in ("display_alias", "description", "type", "repo_url"):
++        assert absent not in ctx
++
++
++async def test_ac9_interactive_borrow_writes_workspace_context(db_session, tmp_path) -> None:
++    """prepare_interactive_dispatch 借用 → 同样携带上下文单键。"""
++    from app.modules.agent.placement import RunPlacementService
++
++    refs = await _setup_borrow(db_session, tmp_path)
++    placement = RunPlacementService(db_session)
++    dispatch = await placement.prepare_interactive_dispatch(
++        agent_session_id=uuid.uuid4(),
++        agent_run_id=uuid.uuid4(),
++        user_id=refs["actor"],
++        provider="claude",
++        prompt="这是什么工作区",
++        model=None,
++        workspace_id=refs["ws"],
++    )
++    meta = await _lease_metadata(db_session, dispatch.lease_id)
++    assert meta["borrow_workspace_context"]["root_path"] == str(tmp_path)
++    assert meta["borrow_workspace_context"]["name"] == "W"
++
++
++async def test_ac9_scan_interactive_borrow_writes_workspace_context(db_session, tmp_path) -> None:
++    """prepare_scan_interactive_dispatch 借用 → 同样携带上下文单键（三标记点一致）。"""
++    from app.modules.agent.placement import RunPlacementService
++
++    refs = await _setup_borrow(db_session, tmp_path)
++    placement = RunPlacementService(db_session)
++    dispatch = await placement.prepare_scan_interactive_dispatch(
++        agent_session_id=uuid.uuid4(),
++        agent_run_id=uuid.uuid4(),
++        user_id=refs["actor"],
++        provider="claude",
++        prompt="scan",
++        model=None,
++        root_path="/home/lender/repo",
++        spec_root="/home/lender/repo/.sillyspec",
++        workspace_id=refs["ws"],
++    )
++    meta = await _lease_metadata(db_session, dispatch.lease_id)
++    ctx = meta["borrow_workspace_context"]
++    # 沙箱 marker 语义字段仍在（cwd 被 marker 覆盖）+ 上下文单键共存。
++    assert meta["cwd"].startswith("borrow-sandbox:")
++    assert ctx["root_path"] == str(tmp_path)
++    assert ctx["slug"]
++
++
++async def test_ac9_workspace_row_missing_no_context_key(db_session, tmp_path) -> None:
++    """Workspace 行缺失 → 不写键、不阻塞派发（best-effort，FR-01 场景）。"""
++    from sqlalchemy import text as _text
++
++    from app.modules.agent.placement import RunPlacementService
++
++    refs = await _setup_borrow(db_session, tmp_path)
++    # 物理删除 Workspace 行（grants/membership 查询不 join workspaces 表，
++    # 借用解析不受影响；仅上下文 loader 查不到行）。
++    await db_session.execute(_text("DELETE FROM workspaces WHERE id = :id"), {"id": refs["ws"].hex})
++    await db_session.commit()
++    run = await _seed_agent_run(db_session)
++    placement = RunPlacementService(db_session)
++    lease_id = await placement.dispatch_to_daemon(
++        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
++    )
++    assert lease_id is not None  # 派发不被阻塞
++    meta = await _lease_metadata(db_session, lease_id)
++    assert "borrow_workspace_context" not in meta
++    # 沙箱 marker / borrowed 语义不受影响。
++    assert meta["borrowed"] is True
++    assert meta["cwd"].startswith("borrow-sandbox:")
++
++
++async def test_ac9_own_daemon_no_context_key_zero_regression(db_session, tmp_path) -> None:
++    """自有 daemon 路径 → 不写 borrow_workspace_context（FR-05 零回归）。"""
++    from app.modules.agent.placement import RunPlacementService
++
++    refs = await _setup_own_daemon(db_session, tmp_path, actor_role="business")
++    run = await _seed_agent_run(db_session)
++    placement = RunPlacementService(db_session)
++    lease_id = await placement.dispatch_to_daemon(
++        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
++    )
++    meta = await _lease_metadata(db_session, lease_id)
++    assert "borrow_workspace_context" not in meta
+diff --git a/backend/app/modules/daemon/lease/context.py b/backend/app/modules/daemon/lease/context.py
+index 3ba68907b..f36d87027 100644
+--- a/backend/app/modules/daemon/lease/context.py
++++ b/backend/app/modules/daemon/lease/context.py
+@@ -617,6 +617,13 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) ->
+             payload["fork_anchor_entry_id"] = lease_meta["fork_anchor_entry_id"]
+         if lease_meta.get("fork_mode"):
+             payload["fork_mode"] = lease_meta["fork_mode"]
++        # 2026-10-10-borrow-sandbox-workspace-context / FR-03：借用沙箱工作区上下文
++        # 单键白名单透传（真值守护，写法对齐上方 resume_session_id 先例）。置于
++        # transport 分支之前让 tar / shared 两路 return 均携带；缺键（旧 backend
++        # 语义 / 非借用 lease）→ payload 不含，daemon 侧 undefined 穿透不渲染
++        # AGENTS.md（零回归，D-005@v1）。
++        if lease_meta.get("borrow_workspace_context"):
++            payload["borrow_workspace_context"] = lease_meta["borrow_workspace_context"]
+         # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
+         # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
+         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。
+diff --git a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+index 2006220a6..3bfb93af2 100644
+--- a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
++++ b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+@@ -465,3 +465,100 @@ class TestInitLeaseCompleteFailureGate:
+         await db_session.refresh(binding)
+         assert binding.init_synced_at is not None
+         assert binding.init_synced_spec_version == 7
++
++
++# ---------------------------------------------------------------------------
++# 用例组 D：2026-10-10-borrow-sandbox-workspace-context / FR-03
++# 借用沙箱工作区上下文单键 claim payload 白名单透传（kind=interactive）
++# ---------------------------------------------------------------------------
++
++
++async def _make_lease(
++    session: AsyncSession,
++    runtime_id: uuid.UUID,
++    kind: str,
++    metadata: dict[str, Any] | None = None,
++    agent_run_id: uuid.UUID | None = None,
++) -> DaemonTaskLease:
++    """造指定 kind 的 lease（interactive 形态带 session_id/run_id 模拟借用派发）。"""
++    now = datetime.now(UTC)
++    lease = DaemonTaskLease(
++        id=uuid.uuid4(),
++        runtime_id=runtime_id,
++        agent_run_id=agent_run_id,
++        status="pending",
++        kind=kind,
++        claimed_at=None,
++        lease_expires_at=None,
++        metadata_=metadata or {},
++        created_at=now,
++        updated_at=now,
++    )
++    session.add(lease)
++    await session.commit()
++    await session.refresh(lease)
++    return lease
++
++
++class TestBorrowWorkspaceContextPassthrough:
++    """FR-03：interactive lease 的 borrow_workspace_context 真值守护透传。
++
++    写法对齐 context.py fork_mode/resume_session_id 白名单先例：缺键（旧
++    backend 语义 / 非借用 lease）→ payload 不含（daemon undefined 穿透）。
++    """
++
++    @pytest.mark.asyncio
++    async def test_interactive_lease_context_passthrough(self, db_session: AsyncSession) -> None:
++        ctx = {
++            "name": "workflow",
++            "slug": "zcjtworkflow",
++            "root_path": "C:/repo/workflow",
++            "default_branch": "main",
++        }
++        user_id = await _create_user(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        lease = await _make_lease(
++            db_session,
++            rt.id,
++            "interactive",
++            {
++                "session_id": str(uuid.uuid4()),
++                "run_id": str(uuid.uuid4()),
++                "borrow_workspace_context": ctx,
++            },
++        )
++        payload = await build_claim_payload(db_session, lease)
++        assert payload["borrow_workspace_context"] == ctx
++
++    @pytest.mark.asyncio
++    async def test_interactive_lease_no_context_no_key(self, db_session: AsyncSession) -> None:
++        user_id = await _create_user(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        lease = await _make_lease(
++            db_session,
++            rt.id,
++            "interactive",
++            {"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
++        )
++        payload = await build_claim_payload(db_session, lease)
++        assert "borrow_workspace_context" not in payload
++
++    @pytest.mark.asyncio
++    async def test_batch_lease_context_not_passthrough(self, db_session: AsyncSession) -> None:
++        """batch 分支无该透传（interactive 专属；batch lease 实务不携带该键）。"""
++        from app.modules.agent.model import AgentRun
++
++        run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
++        db_session.add(run)
++        await db_session.commit()
++        user_id = await _create_user(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        lease = await _make_lease(
++            db_session,
++            rt.id,
++            "batch",
++            {"borrow_workspace_context": {"name": "W"}},
++            agent_run_id=run.id,
++        )
++        payload = await build_claim_payload(db_session, lease)
++        assert "borrow_workspace_context" not in payload
+diff --git a/sillyhub-daemon/src/borrow-sandbox-context.ts b/sillyhub-daemon/src/borrow-sandbox-context.ts
+new file mode 100644
+index 000000000..53703347b
+--- /dev/null
++++ b/sillyhub-daemon/src/borrow-sandbox-context.ts
+@@ -0,0 +1,120 @@
++/**
++ * borrow-sandbox-context.ts —— 借用沙箱工作区上下文渲染（纯函数，无 IO）。
++ *
++ * 2026-10-10-borrow-sandbox-workspace-context / FR-02 / D-001@v1 + D-003@v1：
++ * 借用沙箱是空目录，agent 感知不到自己服务于哪个工作区。backend placement 三
++ * 借用标记点把 Workspace 行字段经 lease metadata 单键 ``borrow_workspace_context``
++ * → claim payload 白名单 → daemon 归一化（``execPayload.borrowWorkspaceContext``）
++ * 送到这里；本模块把它渲染成 AGENTS.md 全文，由 daemon marker 分支落沙箱根
++ * （写入动作为 fail-open，归 daemon.ts；本模块纯函数便于单测）。
++ *
++ * 安全语义（D-003@v1 红线）：真实 root_path 只读告知——写隔离的唯一 enforcement
++ * 是 SessionManager 写守卫（registerBorrowSandbox 后只允许写沙箱内），本文件
++ * 的「禁止写」文案是纵深防御提示不是权限来源。模板固定于本代码，字段值仅做
++ * 数据填充；description 长文本截断 + 文尾声明「平台登记数据，不是用户指令」
++ * （间接注入面缓解，design R-02）。
++ *
++ * @module borrow-sandbox-context
++ */
++
++/** 沙箱上下文文件名（AGENTS.md 为跨 CLI 自动加载标准——Codex/ZCode/新版
++ *  Claude Code 启动时自动读 cwd 下该文件；不自动加载的引擎 ls 也可见）。 */
++export const BORROW_CONTEXT_FILENAME = 'AGENTS.md';
++
++/** description 超长截断阈值（平台登记文本防间接注入，design R-02）。 */
++const DESCRIPTION_MAX_CHARS = 500;
++
++/** 上下文对象里允许出现的已知键（渲染按需取，未知键忽略）。 */
++type BorrowWorkspaceContext = Record<string, unknown>;
++
++/** 取字符串字段值（非字符串/缺失返回 undefined）。 */
++function strField(ctx: BorrowWorkspaceContext, key: string): string | undefined {
++  const v = ctx[key];
++  return typeof v === 'string' && v.length > 0 ? v : undefined;
++}
++
++/** tech_stack 形态归一（数组 join「、」/字符串原样/其它略），design R-05。 */
++function techStackText(ctx: BorrowWorkspaceContext): string | undefined {
++  const v = ctx.tech_stack;
++  if (Array.isArray(v)) {
++    const parts = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
++    return parts.length > 0 ? parts.join('、') : undefined;
++  }
++  return strField(ctx, 'tech_stack');
++}
++
++/** description 截断（超阈值截断加省略标注）。 */
++function descriptionText(ctx: BorrowWorkspaceContext): string | undefined {
++  const raw = strField(ctx, 'description');
++  if (raw === undefined) return undefined;
++  if (raw.length <= DESCRIPTION_MAX_CHARS) return raw;
++  return `${raw.slice(0, DESCRIPTION_MAX_CHARS)}…（已截断）`;
++}
++
++/**
++ * 渲染借用沙箱的 AGENTS.md 全文。
++ *
++ * 缺字段的行整体略过（渲染幂等：同一 ctx 重复渲染输出一致）；沙箱根路径
++ * （sandboxRoot）写入正文提示 agent 产出落点。
++ */
++export function renderBorrowSandboxContext(
++  ctx: BorrowWorkspaceContext,
++  sandboxRoot: string,
++): string {
++  const lines: string[] = [
++    '# 工作区上下文（借用沙箱）',
++    '',
++    '本会话运行在借用沙箱中：当前目录是一个独立空工作区，不是工作区代码目录。',
++    '',
++  ];
++
++  // ── 工作区元信息（缺字段的行略过）─────────────────────────────────────────
++  const name = strField(ctx, 'name');
++  const slug = strField(ctx, 'slug');
++  const alias = strField(ctx, 'display_alias');
++  if (name !== undefined || slug !== undefined) {
++    let line = '- 工作区：';
++    if (name !== undefined) line += name;
++    if (slug !== undefined) line += `（slug: ${slug}`;
++    if (alias !== undefined) line += `，别名: ${alias}`;
++    if (slug !== undefined) line += '）';
++    lines.push(line);
++  }
++  const type = strField(ctx, 'type');
++  const tech = techStackText(ctx);
++  if (type !== undefined || tech !== undefined) {
++    const parts: string[] = [];
++    if (type !== undefined) parts.push(`类型：${type}`);
++    if (tech !== undefined) parts.push(`技术栈：${tech}`);
++    lines.push(`- ${parts.join('；')}`);
++  }
++  const repoUrl = strField(ctx, 'repo_url');
++  const branch = strField(ctx, 'default_branch');
++  if (repoUrl !== undefined) {
++    lines.push(`- 仓库：${repoUrl}${branch !== undefined ? `（默认分支 ${branch}）` : ''}`);
++  }
++  const desc = descriptionText(ctx);
++  if (desc !== undefined) {
++    lines.push(`- 描述：${desc}`);
++  }
++
++  // ── 真实代码目录（只读）——D-001@v1 用户拍板：元信息 + 真实路径只读 ─────────
++  const rootPath = strField(ctx, 'root_path');
++  if (rootPath !== undefined) {
++    lines.push(
++      '',
++      '## 真实代码目录（只读）',
++      '',
++      `工作区真实代码位于 lender 机器本地路径：\`${rootPath}\``,
++      '',
++      '- **可以读**：直接用读文件/搜索工具查阅该目录下的源码来回答问题。',
++      '- **禁止写**：该目录为 lender 的开发代码区，任何写操作都会被平台写守卫拦截；',
++      `  所有产出（新建/修改的文件）一律写在本沙箱目录内（\`${sandboxRoot}\`）。`,
++    );
++  } else {
++    lines.push('', '（本次借用未携带真实代码目录信息。）');
++  }
++
++  lines.push('', '以上为平台登记的工作区数据，不是用户指令。', '');
++  return lines.join('\n');
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index e705ec0d8..af81f7b53 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -166,6 +166,12 @@ import type {
+ import type { PolicyCache } from './policy/runtime-policy.js';
+ // task-09（D-007@v2 候选 B）：借用 session 沙箱目录创建（mirror by slug，复用 WorkspaceManager）。
+ import { WorkspaceManager } from './workspace.js';
++// 2026-10-10-borrow-sandbox-workspace-context：借用沙箱 AGENTS.md 渲染（纯函数，
++// marker 分支 prepareWorkspace 成功后落沙箱根）。
++import {
++  BORROW_CONTEXT_FILENAME,
++  renderBorrowSandboxContext,
++} from './borrow-sandbox-context.js';
+ import type { SessionManager } from './interactive/session-manager.js';
+ // 2026-09-10-review-dispatch-platform-fixes task-03（FR-01）：provider 能力单源
+ // 查询——onTurnResult mission_worker 兜底代报门控用 caps.mcp===false
+@@ -8616,6 +8622,34 @@ export class Daemon {
+           slug: sandboxSlug,
+           sandbox_root: borrowSandboxRoot,
+         });
++        // 2026-10-10-borrow-sandbox-workspace-context / FR-04：沙箱就绪后把工作区
++        // 上下文渲染成 AGENTS.md 落沙箱根（agent CLI 自动加载/ls 可见 → 感知
++        // 工作区与真实代码路径只读边界）。旧 backend 无键不写；渲染/写入失败仅
++        // warn（fail-open，对齐上方 prepare_failed 先例）——上下文是增强项，
++        // 不阻塞 session 启动，cwd 与写守卫登记不受影响。
++        if (execPayload.borrowWorkspaceContext) {
++          try {
++            await writeFile(
++              join(borrowSandboxRoot, BORROW_CONTEXT_FILENAME),
++              renderBorrowSandboxContext(
++                execPayload.borrowWorkspaceContext,
++                borrowSandboxRoot,
++              ),
++              'utf-8',
++            );
++            this._logger.info('borrow_sandbox_context_written', {
++              lease_id: leaseId,
++              slug: sandboxSlug,
++              file: BORROW_CONTEXT_FILENAME,
++            });
++          } catch (e2) {
++            this._logger.warn('borrow_sandbox_context_write_failed', {
++              lease_id: leaseId,
++              slug: sandboxSlug,
++              error: (e2 as Error)?.message ?? String(e2),
++            });
++          }
++        }
+       } catch (e) {
+         // 沙箱创建失败（磁盘满 / 权限）→ 回退 workspace_dir 不阻塞 session 启动。
+         // 不登记 borrowSandboxRoot → SessionManager 写守卫走 runtime policy（fail-open）。
+@@ -9512,6 +9546,13 @@ export class Daemon {
+         (rawExec.workspaceSlug as string | undefined) ??
+         (rawExec.workspace_slug as string | undefined) ??
+         payload.workspaceSlug,
++      // 2026-10-10-borrow-sandbox-workspace-context / FR-03：借用沙箱工作区上下文
++      // 双读归一（写法对齐上方 workspaceSlug 先例）；缺键 undefined 穿透，消费方
++      // marker 分支（borrow-sandbox-context.ts 渲染 AGENTS.md）。
++      borrowWorkspaceContext:
++        (rawExec.borrowWorkspaceContext as Record<string, unknown> | undefined) ??
++        (rawExec.borrow_workspace_context as Record<string, unknown> | undefined) ??
++        payload.borrowWorkspaceContext,
+       rootPath:
+         (rawExec.rootPath as string | undefined) ??
+         (rawExec.root_path as string | undefined) ??
+diff --git a/sillyhub-daemon/src/types.ts b/sillyhub-daemon/src/types.ts
+index 01016c743..44f972306 100644
+--- a/sillyhub-daemon/src/types.ts
++++ b/sillyhub-daemon/src/types.ts
+@@ -445,6 +445,14 @@ export interface LeaseCtx {
+    * 未定义/未知值一律按 `batch` 兼容（design §9）。
+    */
+   kind?: 'batch' | 'interactive';
++  /**
++   * 借用沙箱工作区上下文（2026-10-10-borrow-sandbox-workspace-context / FR-03）：
++   * lease metadata 单键 borrow_workspace_context 经 claim payload 白名单透传、
++   * daemon 归一化（camel/snake 双读）后的原样对象（Workspace 行非 None 字段）。
++   * 仅 kind=interactive 借用 lease 携带；缺键 undefined 穿透（旧 backend 零回归）。
++   * 消费方：daemon.ts marker 分支渲染 AGENTS.md 进沙箱根（borrow-sandbox-context.ts）。
++   */
++  borrowWorkspaceContext?: Record<string, unknown>;
+   /**
+    * task-04：interactive lease 绑定的 agent_sessions.id（backend 创建并下发）。
+    * 仅 kind=interactive 时有意义；batch 路径忽略。daemon 用它做 SessionManager.create 的 sessionId。
+diff --git a/sillyhub-daemon/tests/borrow-sandbox-context.test.ts b/sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+new file mode 100644
+index 000000000..bbf522776
+--- /dev/null
++++ b/sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+@@ -0,0 +1,99 @@
++// tests/borrow-sandbox-context.test.ts
++// 2026-10-10-borrow-sandbox-workspace-context / FR-02：借用沙箱 AGENTS.md 渲染纯函数单测。
++//
++// 覆盖：
++//   1. 全字段渲染：元信息 + 真实 root_path + 「可以读/禁止写」边界声明 + 文尾数据声明；
++//   2. 缺字段略行（None 字段 backend 侧已不落键，渲染侧再防御空串/空数组）；
++//   3. description 截断（500 字符阈值 + 省略标注，防间接注入 R-02）；
++//   4. tech_stack 三形态归一（数组 join / 字符串原样 / 缺失略段，R-05）。
++
++import { describe, expect, it } from 'vitest';
++import {
++  BORROW_CONTEXT_FILENAME,
++  renderBorrowSandboxContext,
++} from '../src/borrow-sandbox-context.js';
++
++const FULL_CTX: Record<string, unknown> = {
++  name: 'workflow',
++  display_alias: '工作流平台',
++  slug: 'zcjtworkflow',
++  description: '制造工作流编排服务',
++  type: 'backend-code',
++  tech_stack: ['FastAPI', 'PostgreSQL'],
++  repo_url: 'http://172.18.90.160/pmp-group/workflow.git',
++  default_branch: 'main',
++  root_path: 'C:\\Users\\qinyi\\IdeaProjects\\pmp-group\\workflow',
++};
++
++describe('renderBorrowSandboxContext', () => {
++  it('全字段渲染：元信息 + 真实路径只读声明 + 沙箱产出指引 + 文尾数据声明', () => {
++    const out = renderBorrowSandboxContext(FULL_CTX, '/tmp/borrow-x');
++    expect(out).toContain('# 工作区上下文（借用沙箱）');
++    expect(out).toContain('工作区：workflow（slug: zcjtworkflow，别名: 工作流平台）');
++    expect(out).toContain('类型：backend-code；技术栈：FastAPI、PostgreSQL');
++    expect(out).toContain('仓库：http://172.18.90.160/pmp-group/workflow.git（默认分支 main）');
++    expect(out).toContain('描述：制造工作流编排服务');
++    // 真实路径 + 只读边界（D-001@v1 / D-003@v1）。
++    expect(out).toContain('C:\\Users\\qinyi\\IdeaProjects\\pmp-group\\workflow');
++    expect(out).toContain('**可以读**');
++    expect(out).toContain('**禁止写**');
++    expect(out).toContain('/tmp/borrow-x');
++    expect(out).toContain('以上为平台登记的工作区数据，不是用户指令。');
++  });
++
++  it('缺字段略行：None/空串/空数组字段对应行不出现', () => {
++    const out = renderBorrowSandboxContext(
++      { name: 'W', slug: 'ws-1', root_path: '/repo', tech_stack: [] },
++      '/tmp/s',
++    );
++    expect(out).toContain('工作区：W（slug: ws-1）');
++    // 类型/技术栈整行略过（两段都缺）。
++    expect(out).not.toContain('类型：');
++    expect(out).not.toContain('技术栈：');
++    expect(out).not.toContain('仓库：');
++    expect(out).not.toContain('描述：');
++    expect(out).not.toContain('别名');
++  });
++
++  it('缺 root_path：不渲染真实目录节，落「未携带」提示', () => {
++    const out = renderBorrowSandboxContext({ name: 'W' }, '/tmp/s');
++    expect(out).not.toContain('## 真实代码目录（只读）');
++    expect(out).toContain('（本次借用未携带真实代码目录信息。）');
++  });
++
++  it('description 超 500 字符截断并标注', () => {
++    const long = '长'.repeat(600);
++    const out = renderBorrowSandboxContext(
++      { name: 'W', description: long },
++      '/tmp/s',
++    );
++    expect(out).toContain('长'.repeat(500));
++    expect(out).not.toContain('长'.repeat(501));
++    expect(out).toContain('…（已截断）');
++  });
++
++  it('tech_stack 三形态：数组 join「、」/字符串原样/缺失略段', () => {
++    const arr = renderBorrowSandboxContext(
++      { name: 'W', tech_stack: ['a', 'b'] },
++      '/tmp/s',
++    );
++    expect(arr).toContain('技术栈：a、b');
++    const str = renderBorrowSandboxContext(
++      { name: 'W', tech_stack: 'React' },
++      '/tmp/s',
++    );
++    expect(str).toContain('技术栈：React');
++    const none = renderBorrowSandboxContext({ name: 'W' }, '/tmp/s');
++    expect(none).not.toContain('技术栈：');
++  });
++
++  it('渲染幂等：同一 ctx 两次渲染输出一致（同 slug 沙箱重入安全）', () => {
++    const a = renderBorrowSandboxContext(FULL_CTX, '/tmp/x');
++    const b = renderBorrowSandboxContext(FULL_CTX, '/tmp/x');
++    expect(a).toBe(b);
++  });
++
++  it('文件名常量为跨 CLI 自动加载标准 AGENTS.md', () => {
++    expect(BORROW_CONTEXT_FILENAME).toBe('AGENTS.md');
++  });
++});
+diff --git a/sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts b/sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
+index 71dd89da6..d5ba7e95f 100644
+--- a/sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
++++ b/sillyhub-daemon/tests/daemon-borrow-sandbox.test.ts
+@@ -14,10 +14,20 @@
+ // wsClient._injectMessage 驱动 lease 状态机）。
+ 
+ import { describe, it, expect, afterEach, vi } from 'vitest';
+-import { existsSync, mkdirSync, rmSync } from 'node:fs';
++import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+ import { join } from 'node:path';
+ import { tmpdir } from 'node:os';
+ import { Daemon } from '../src/daemon.js';
++// 2026-10-10-borrow-sandbox-workspace-context（测试环境修复，非功能改动）：
++// mock 掉 runPreflight——其 `npm view sillyspec version --prefer-online` 子进程
++// 遵循 Windows 系统代理（本机 Clash），代理对 npm 流量黑洞时每次外呼挂满
++// runCmd 的 30s 超时帽，拖死每个用例的 daemon.start()（本机实测全文件 6 用例
++// 全超时；npm 可达时亦有真执行 npm install -g 的隐患）。本用例组不断言
++// preflight 行为，no-op mock 语义无损；其余导出保留原件。
++vi.mock('../src/preflight.js', async (importOriginal) => {
++  const orig = await importOriginal<typeof import('../src/preflight.js')>();
++  return { ...orig, runPreflight: async () => undefined };
++});
+ import type { DaemonConfig } from '../src/config.js';
+ import { MSG } from '../src/protocol.js';
+ import type { DetectedAgent } from '../src/agent-detector.js';
+@@ -170,10 +180,20 @@ function buildDaemon(opts: {
+     allowed_roots: [opts.workspaceDir],
+   };
+ 
++  // 2026-10-10-borrow-sandbox-workspace-context（测试环境修复，非功能改动）：
++  // 注入 no-op sillyspecManager（构造器官方注入口）——避免真实 probeLatest 起
++  // `npm view sillyspec` 子进程在网络差环境挂 30s 拖死 start()（本机实测把全部
++  // 用例拖超时；探测失败=version/latest 均未知，与本用例组断言面无关）。
++  const fakeSillyspecManager = {
++    probeLocal: async () => null,
++    probeLatest: async () => null,
++    getSnapshot: () => ({ version: null, latest_version: null }),
++  };
+   const ctorOpts: Record<string, unknown> = {
+     detector,
+     wsClientFactory,
+     sessionManager: opts.sessionManager,
++    sillyspecManager: fakeSillyspecManager,
+   };
+   if (opts.borrowWorkspaceManager !== undefined) {
+     ctorOpts.borrowWorkspaceManager = opts.borrowWorkspaceManager;
+@@ -373,3 +393,187 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
+     await daemon.stop();
+   });
+ });
++
++// ────────────────────────────────────────────────────────────────────────────
++// 2026-10-10-borrow-sandbox-workspace-context / FR-04：借用沙箱 AGENTS.md 落盘。
++// claim payload 携带 borrow_workspace_context（snake 形态，backend 白名单透传）
++// → marker 分支 prepareWorkspace 成功后渲染 AGENTS.md 进沙箱根；无键不写
++// （旧 backend 零回归）；写失败仅 warn 不阻塞 session（fail-open）。
++// ────────────────────────────────────────────────────────────────────────────
++
++describe('借用沙箱工作区上下文 AGENTS.md（task-04 / 2026-10-10）', () => {
++  let daemons: Daemon[] = [];
++  let tmpDirs: string[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      if (d.isRunning) {
++        await d.stop().catch(() => undefined);
++      }
++    }
++    daemons = [];
++    for (const dir of tmpDirs) {
++      rmSync(dir, { recursive: true, force: true });
++    }
++    tmpDirs = [];
++  });
++
++  function mkTmpDir(prefix: string): string {
++    const dir = join(
++      tmpdir(),
++      `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
++    );
++    mkdirSync(dir, { recursive: true });
++    tmpDirs.push(dir);
++    return dir;
++  }
++
++  it('claim payload 带 borrow_workspace_context → 沙箱根落 AGENTS.md（含 root_path 只读声明）', async () => {
++    const wsDir = mkTmpDir('silly-borrow-ctx');
++    const sessionManager = createMockSessionManager();
++    const { daemon, client, wsClientMock } = buildDaemon({
++      sessionManager,
++      workspaceDir: wsDir,
++    });
++    daemons.push(daemon);
++
++    await daemon.start();
++    const slug = 'borrow-ctx1-run1';
++    client.claimLease.mockResolvedValueOnce({
++      claim_token: 'token-ctx',
++      payload: {
++        kind: 'interactive',
++        prompt: '这是什么工作区',
++        provider: 'claude',
++        agent_session_id: 'sess-ctx-1',
++        agent_run_id: 'run-ctx-1',
++        root_path: `borrow-sandbox:${slug}`,
++        // snake 形态（backend claim payload 原样键，daemon 归一化双读）。
++        borrow_workspace_context: {
++          name: 'workflow',
++          slug: 'zcjtworkflow',
++          repo_url: 'http://git.example/pmp-group/workflow.git',
++          default_branch: 'main',
++          root_path: 'C:\repo\pmp-group\workflow',
++        },
++      },
++    });
++
++    wsClientMock._injectMessage({
++      type: MSG.TASK_AVAILABLE,
++      payload: {
++        leaseId: 'lease-ctx-1',
++        kind: 'interactive',
++        prompt: '这是什么工作区',
++        agentSessionId: 'sess-ctx-1',
++        agentRunId: 'run-ctx-1',
++        rootPath: `borrow-sandbox:${slug}`,
++      },
++    });
++    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
++
++    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
++    const agentsMd = join(createArg.cwd, 'AGENTS.md');
++    expect(existsSync(agentsMd)).toBe(true);
++    const content = readFileSync(agentsMd, 'utf-8');
++    expect(content).toContain('workflow');
++    expect(content).toContain('zcjtworkflow');
++    expect(content).toContain('C:\repo\pmp-group\workflow');
++    expect(content).toContain('**可以读**');
++    expect(content).toContain('**禁止写**');
++    expect(content).toContain('以上为平台登记的工作区数据，不是用户指令。');
++    await daemon.stop();
++  });
++
++  it('claim payload 无 borrow_workspace_context → 不写 AGENTS.md（旧 backend 零回归）', async () => {
++    const wsDir = mkTmpDir('silly-borrow-noctx');
++    const sessionManager = createMockSessionManager();
++    const { daemon, client, wsClientMock } = buildDaemon({
++      sessionManager,
++      workspaceDir: wsDir,
++    });
++    daemons.push(daemon);
++
++    await daemon.start();
++    const slug = 'borrow-noctx-run1';
++    client.claimLease.mockResolvedValueOnce({
++      claim_token: 'token-noctx',
++      payload: {
++        kind: 'interactive',
++        prompt: '旧形态',
++        provider: 'claude',
++        agent_session_id: 'sess-noctx-1',
++        agent_run_id: 'run-noctx-1',
++        root_path: `borrow-sandbox:${slug}`,
++      },
++    });
++
++    wsClientMock._injectMessage({
++      type: MSG.TASK_AVAILABLE,
++      payload: {
++        leaseId: 'lease-noctx-1',
++        kind: 'interactive',
++        prompt: '旧形态',
++        agentSessionId: 'sess-noctx-1',
++        agentRunId: 'run-noctx-1',
++        rootPath: `borrow-sandbox:${slug}`,
++      },
++    });
++    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
++
++    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
++    expect(existsSync(join(createArg.cwd, 'AGENTS.md'))).toBe(false);
++    await daemon.stop();
++  });
++
++  it('AGENTS.md 写失败（同名目录占位）→ 仅 warn 不阻塞 session（fail-open）', async () => {
++    const wsDir = mkTmpDir('silly-borrow-wfail');
++    const sandbox = mkTmpDir('silly-borrow-wfail-sandbox');
++    // 沙箱根预置同名目录 → writeFile 命中 EISDIR 失败，走 warn 分支。
++    mkdirSync(join(sandbox, 'AGENTS.md'), { recursive: true });
++    const sessionManager = createMockSessionManager();
++    const borrowWsManager = {
++      prepareWorkspace: vi.fn(async () => sandbox),
++    } as unknown as WorkspaceManager;
++    const { daemon, client, wsClientMock } = buildDaemon({
++      sessionManager,
++      workspaceDir: wsDir,
++      borrowWorkspaceManager: borrowWsManager,
++    });
++    daemons.push(daemon);
++
++    await daemon.start();
++    const slug = 'borrow-wfail-run1';
++    client.claimLease.mockResolvedValueOnce({
++      claim_token: 'token-wfail',
++      payload: {
++        kind: 'interactive',
++        prompt: '写失败场景',
++        provider: 'claude',
++        agent_session_id: 'sess-wfail-1',
++        agent_run_id: 'run-wfail-1',
++        root_path: `borrow-sandbox:${slug}`,
++        borrow_workspace_context: { name: 'W', slug: 'w', root_path: 'C:/repo/w' },
++      },
++    });
++
++    wsClientMock._injectMessage({
++      type: MSG.TASK_AVAILABLE,
++      payload: {
++        leaseId: 'lease-wfail-1',
++        kind: 'interactive',
++        prompt: '写失败场景',
++        agentSessionId: 'sess-wfail-1',
++        agentRunId: 'run-wfail-1',
++        rootPath: `borrow-sandbox:${slug}`,
++      },
++    });
++    // fail-open 核心：session 照常创建（不因上下文写失败中断）。
++    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
++    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
++    expect(createArg.cwd).toBe(sandbox);
++    // 写守卫登记照常（写隔离不受上下文失败影响，D-003@v1）。
++    expect(sessionManager.registerBorrowSandbox).toHaveBeenCalledWith('sess-wfail-1', sandbox);
++    await daemon.stop();
++  });
++});
