@@ -440,10 +440,12 @@ export function markSteeredSegmentsEnded(
  * markSteeredSegmentDelivered 无段可收敛，消息正文在实时视图被静默丢弃（刷新后
  * logsToTurns 才可见）。
  *
- * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且 prompt 已非空、主体
- * （steerMatchKey）与 prompt 互异、轮内尚无同主体 user_msg 段 → 追加 delivered
- * 段（注入已发生，不走引导中三态）；其余情形原样返回原引用：
- *   - 轮未建 / prompt 为空 → 本条即轮 prompt（upsertTurn 既有补写承载）；
+ * 兜底口径与回放（logsToTurns 组2+）一致：轮存在且（prompt 已非空 **或** 轮已有
+ * 输出段——2026-10-10-system-opened-turn-usermsg：系统注入开轮的空 prompt 轮，
+ * 中途消息照常成段不再前移轮首）、主体（steerMatchKey）与 prompt 互异、轮内尚无
+ * 同主体 user_msg 段 → 追加 delivered 段（注入已发生，不走引导中三态）；其余情形
+ * 原样返回原引用：
+ *   - 轮未建 / （prompt 为空且无输出段）→ 本条即轮 prompt（upsertTurn 既有补写承载）；
  *   - 主体与 prompt 相同 → prompt 回显 / daemon 双提交（marker 版+裸文本版）；
  *   - 已有同主体段 → steering 段刚被上方收敛为 delivered / 已兜底过，幂等。
  */
@@ -458,7 +460,13 @@ export function appendDeliveredUserMsgIfAbsent(
   const idx = steeredTurnIndexOf(turns, runId);
   if (idx < 0) return turns;
   const turn = turns[idx]!;
-  if (!turn.prompt.trim()) return turns;
+  // 2026-10-10-system-opened-turn-usermsg：守卫放宽——prompt 为空但轮已有输出段
+  // （[后台任务通知]/系统注入开轮，run 4296aa6a 实证）时，本条 user_input 是
+  // 中途消息而非开轮正文 → 照常追加 delivered 段；prompt 空且无输出段 = 新鲜
+  // 轮开轮正文，维持原返回交 prompt 写入路径。preamble 段不算输出（开轮通知
+  // 先落 preamble 段的场景不误判为已有输出）。
+  const hasOutputSegs = (turn.segments ?? []).some((s) => s.kind !== "preamble");
+  if (!turn.prompt.trim() && !hasOutputSegs) return turns;
   if (steerMatchKey(turn.prompt) === key) return turns;
   if (turn.segments?.some((s) => s.kind === "user_msg" && steerMatchKey(s.text) === key)) {
     return turns;
@@ -1248,10 +1256,19 @@ export function SessionPanelPage({
                       };
                     }
                     if (!next.prompt.trim()) {
-                      const promptSource = preambleText
-                        ? stripPreambleText(env.content ?? "").trim()
-                        : (env.content ?? "").trim();
-                      if (promptSource) next = { ...next, prompt: promptSource };
+                      // 2026-10-10-system-opened-turn-usermsg：仅新鲜轮（无输出段）
+                      // 把首条正文写为 prompt——系统注入开轮（[后台任务通知]，
+                      // prompt 空 + 已有输出段）的中途消息已由上方
+                      // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不再前移轮首。
+                      const hasOutputSegs = (next.segments ?? []).some(
+                        (s) => s.kind !== "preamble",
+                      );
+                      if (!hasOutputSegs) {
+                        const promptSource = preambleText
+                          ? stripPreambleText(env.content ?? "").trim()
+                          : (env.content ?? "").trim();
+                        if (promptSource) next = { ...next, prompt: promptSource };
+                      }
                     }
                     return next;
                   },

@@ -568,6 +568,9 @@ function makeTurn(overrides: Partial<SessionTurnView> & { runId?: string }): Ses
     seenLogIds: new Set<string>(),
     inputTokens: null,
     outputTokens: null,
+    // 2026-10-10 顺手债（token-speed 变更后 enrich 会补本字段）：预置 null 保
+    // 「身份稳定守卫」用例零字段差（缺省会被 enrich 填充 → 新对象 → 误报）。
+    apiDurationMs: null,
     ...overrides,
   };
 }
@@ -625,5 +628,64 @@ describe("enrichDisplayTurns 计时锚点（R4：活跃轮快照优先，终态�
     const [enriched] = enrichDisplayTurns([turn], new Map([["run-1", meta]]), [], "agent", null);
     // 锚点与各补齐字段值均一致 → 返回原对象（FR-06 memo 命中前提）
     expect(enriched).toBe(turn);
+  });
+});
+
+
+// ── 2026-10-10-system-opened-turn-usermsg：系统注入开轮的占位槽 ──────────────
+
+describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-turn-usermsg）", () => {
+  // run 4296aa6a 实证场景：[后台任务通知] 开轮（剥前导为空）跑 14 分钟后用户
+  // ⚡中途注入真实消息——旧逻辑消息被提升为轮 prompt（顶部气泡），时序全丢。
+  const TS = (sec: number) =>
+    `2026-10-10T07:${String(30 + Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
+
+  it("系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间", () => {
+    const turns = logsToTurns([
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "输出甲", { timestamp: TS(60) }),
+      makeLog("t1", "run-1", "tool_call", "Read src/a.ts", { timestamp: TS(90) }),
+      makeLog("u1", "run-1", "user_input", "国际销售合同 不要动！", { timestamp: TS(120) }),
+      makeLog("o2", "run-1", "stdout", "输出乙", { timestamp: TS(180) }),
+    ]);
+    expect(turns).toHaveLength(1);
+    const turn = turns[0]!;
+    // 开轮槽被系统通知占住：prompt 空（顶部无用户气泡），消息不再前移轮首。
+    expect(turn.prompt).toBe("");
+    const segs = turn.segments ?? [];
+    const userMsg = segs.find((s) => s.kind === "user_msg");
+    expect(userMsg).toBeTruthy();
+    expect((userMsg as { text: string }).text).toBe("国际销售合同 不要动！");
+    // ts 定位（tool_call 隔开两段 reply 防流式合并成单段）：user_msg 位于
+    // 「输出甲」之后、「输出乙」之前。
+    const texts = segs.map((s) => (s.kind === "text" || s.kind === "user_msg" ? s.text : ""));
+    expect(texts.indexOf("输出甲")).toBeGreaterThanOrEqual(0);
+    expect(texts.indexOf("输出甲")).toBeLessThan(texts.indexOf("国际销售合同 不要动！"));
+    expect(texts.indexOf("国际销售合同 不要动！")).toBeLessThan(texts.indexOf("输出乙"));
+    expect(texts.indexOf("输出乙")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("系统通知唯一开轮（无中途消息）：prompt 空、不产出占位 user_msg 段", () => {
+    const turns = logsToTurns([
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 任务已结束", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("");
+    expect((turn.segments ?? []).some((s) => s.kind === "user_msg")).toBe(false);
+  });
+
+  it("正常轮不受影响：真实开轮 prompt 保持，第二条消息仍转 user_msg；中途系统行不占槽", () => {
+    const turns = logsToTurns([
+      makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "输出", { timestamp: TS(30) }),
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 中途通知", { timestamp: TS(60) }),
+      makeLog("u2", "run-1", "user_input", "第二句", { timestamp: TS(90) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("第一句");
+    const userMsgs = (turn.segments ?? []).filter((s) => s.kind === "user_msg");
+    // 「第二句」成段；中途系统通知不成段（非首条，不占槽、剥空静默跳过）。
+    expect(userMsgs.map((s) => (s as { text: string }).text)).toEqual(["第二句"]);
   });
 });

@@ -420,6 +420,14 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     const preambleSegments: TurnSegment[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
+    // 2026-10-10-system-opened-turn-usermsg：开轮槽占用标记——本 run 首条
+    // user_input 即使被剥空（[后台任务通知] / 纯前导系统注入）也占住 prompt 槽
+    // （占位空组 → prompt 保持空、顶部无用户气泡）；后到真实消息进组 2+ 转
+    // user_msg 段按 ts 插入，不再被提升为轮 prompt 前移到轮首（run 4296aa6a
+    // 实证：系统通知开轮跑 14 分钟后用户⚡中途注入，消息气泡落到顶部）。
+    // 占位键含控制字符，真实消息体（trim 后非空文本）不可碰撞。
+    let openerSlotSeen = false;
+    const OPENER_RESERVED_KEY = "\u0000__opener__";
     for (const entry of entries) {
       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
       if (!seg) continue;
@@ -457,7 +465,22 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         const promptSource = preambleText
           ? stripPreambleText(seg.text).trim()
           : seg.text;
-        if (!promptSource.trim()) continue;
+        if (!promptSource.trim()) {
+          // 2026-10-10-system-opened-turn-usermsg：首条 user_input 剥空（系统
+          // 注入开轮）→ 占位空组占住开轮槽（仅首条；后到系统行静默跳过）。
+          if (!openerSlotSeen) {
+            openerSlotSeen = true;
+            promptGroups.push({
+              key: OPENER_RESERVED_KEY,
+              withMarker: null,
+              plain: null,
+              firstId: entry.id ?? null,
+              ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+            });
+          }
+          continue;
+        }
+        openerSlotSeen = true;
         // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
         const lines = promptSource.split("\n");
         const markerLines: string[] = [];

@@ -589,15 +589,22 @@ export function SessionPanelDialog(props: SessionPanelProps) {
                   return upsertDialogTurn(
                     { ...prev, turns: withLiveUserMsg },
                     env,
-                    (turn) =>
-                      !turn.prompt.trim()
-                        ? {
-                            ...turn,
-                            prompt: preambleText
-                              ? stripPreambleText(rawText).trim()
-                              : rawText.trim(),
-                          }
-                        : turn,
+                    (turn) => {
+                      // 2026-10-10-system-opened-turn-usermsg（同 page 模式）：仅
+                      // 新鲜轮（无输出段）写 prompt——系统注入开轮的中途消息由
+                      // appendDeliveredUserMsgIfAbsent 转 user_msg 段，不前移轮首。
+                      if (turn.prompt.trim()) return turn;
+                      const hasOutputSegs = (turn.segments ?? []).some(
+                        (s) => s.kind !== "preamble",
+                      );
+                      if (hasOutputSegs) return turn;
+                      return {
+                        ...turn,
+                        prompt: preambleText
+                          ? stripPreambleText(rawText).trim()
+                          : rawText.trim(),
+                      };
+                    },
                     staleReplay ? {} : { setCurrentRun: env.run_id! },
                   );
                 });
