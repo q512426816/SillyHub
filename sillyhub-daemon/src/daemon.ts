@@ -166,6 +166,12 @@ import type {
 import type { PolicyCache } from './policy/runtime-policy.js';
 // task-09（D-007@v2 候选 B）：借用 session 沙箱目录创建（mirror by slug，复用 WorkspaceManager）。
 import { WorkspaceManager } from './workspace.js';
+// 2026-10-10-borrow-sandbox-workspace-context：借用沙箱 AGENTS.md 渲染（纯函数，
+// marker 分支 prepareWorkspace 成功后落沙箱根）。
+import {
+  BORROW_CONTEXT_FILENAME,
+  renderBorrowSandboxContext,
+} from './borrow-sandbox-context.js';
 import type { SessionManager } from './interactive/session-manager.js';
 // 2026-09-10-review-dispatch-platform-fixes task-03（FR-01）：provider 能力单源
 // 查询——onTurnResult mission_worker 兜底代报门控用 caps.mcp===false
@@ -8616,6 +8622,34 @@ export class Daemon {
           slug: sandboxSlug,
           sandbox_root: borrowSandboxRoot,
         });
+        // 2026-10-10-borrow-sandbox-workspace-context / FR-04：沙箱就绪后把工作区
+        // 上下文渲染成 AGENTS.md 落沙箱根（agent CLI 自动加载/ls 可见 → 感知
+        // 工作区与真实代码路径只读边界）。旧 backend 无键不写；渲染/写入失败仅
+        // warn（fail-open，对齐上方 prepare_failed 先例）——上下文是增强项，
+        // 不阻塞 session 启动，cwd 与写守卫登记不受影响。
+        if (execPayload.borrowWorkspaceContext) {
+          try {
+            await writeFile(
+              join(borrowSandboxRoot, BORROW_CONTEXT_FILENAME),
+              renderBorrowSandboxContext(
+                execPayload.borrowWorkspaceContext,
+                borrowSandboxRoot,
+              ),
+              'utf-8',
+            );
+            this._logger.info('borrow_sandbox_context_written', {
+              lease_id: leaseId,
+              slug: sandboxSlug,
+              file: BORROW_CONTEXT_FILENAME,
+            });
+          } catch (e2) {
+            this._logger.warn('borrow_sandbox_context_write_failed', {
+              lease_id: leaseId,
+              slug: sandboxSlug,
+              error: (e2 as Error)?.message ?? String(e2),
+            });
+          }
+        }
       } catch (e) {
         // 沙箱创建失败（磁盘满 / 权限）→ 回退 workspace_dir 不阻塞 session 启动。
         // 不登记 borrowSandboxRoot → SessionManager 写守卫走 runtime policy（fail-open）。
@@ -9512,6 +9546,13 @@ export class Daemon {
         (rawExec.workspaceSlug as string | undefined) ??
         (rawExec.workspace_slug as string | undefined) ??
         payload.workspaceSlug,
+      // 2026-10-10-borrow-sandbox-workspace-context / FR-03：借用沙箱工作区上下文
+      // 双读归一（写法对齐上方 workspaceSlug 先例）；缺键 undefined 穿透，消费方
+      // marker 分支（borrow-sandbox-context.ts 渲染 AGENTS.md）。
+      borrowWorkspaceContext:
+        (rawExec.borrowWorkspaceContext as Record<string, unknown> | undefined) ??
+        (rawExec.borrow_workspace_context as Record<string, unknown> | undefined) ??
+        payload.borrowWorkspaceContext,
       rootPath:
         (rawExec.rootPath as string | undefined) ??
         (rawExec.root_path as string | undefined) ??

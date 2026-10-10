@@ -14,10 +14,20 @@
 // wsClient._injectMessage 驱动 lease 状态机）。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Daemon } from '../src/daemon.js';
+// 2026-10-10-borrow-sandbox-workspace-context（测试环境修复，非功能改动）：
+// mock 掉 runPreflight——其 `npm view sillyspec version --prefer-online` 子进程
+// 遵循 Windows 系统代理（本机 Clash），代理对 npm 流量黑洞时每次外呼挂满
+// runCmd 的 30s 超时帽，拖死每个用例的 daemon.start()（本机实测全文件 6 用例
+// 全超时；npm 可达时亦有真执行 npm install -g 的隐患）。本用例组不断言
+// preflight 行为，no-op mock 语义无损；其余导出保留原件。
+vi.mock('../src/preflight.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../src/preflight.js')>();
+  return { ...orig, runPreflight: async () => undefined };
+});
 import type { DaemonConfig } from '../src/config.js';
 import { MSG } from '../src/protocol.js';
 import type { DetectedAgent } from '../src/agent-detector.js';
@@ -170,10 +180,20 @@ function buildDaemon(opts: {
     allowed_roots: [opts.workspaceDir],
   };
 
+  // 2026-10-10-borrow-sandbox-workspace-context（测试环境修复，非功能改动）：
+  // 注入 no-op sillyspecManager（构造器官方注入口）——避免真实 probeLatest 起
+  // `npm view sillyspec` 子进程在网络差环境挂 30s 拖死 start()（本机实测把全部
+  // 用例拖超时；探测失败=version/latest 均未知，与本用例组断言面无关）。
+  const fakeSillyspecManager = {
+    probeLocal: async () => null,
+    probeLatest: async () => null,
+    getSnapshot: () => ({ version: null, latest_version: null }),
+  };
   const ctorOpts: Record<string, unknown> = {
     detector,
     wsClientFactory,
     sessionManager: opts.sessionManager,
+    sillyspecManager: fakeSillyspecManager,
   };
   if (opts.borrowWorkspaceManager !== undefined) {
     ctorOpts.borrowWorkspaceManager = opts.borrowWorkspaceManager;
@@ -370,6 +390,190 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
       'sess-inj-1',
       injectedSandbox,
     );
+    await daemon.stop();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2026-10-10-borrow-sandbox-workspace-context / FR-04：借用沙箱 AGENTS.md 落盘。
+// claim payload 携带 borrow_workspace_context（snake 形态，backend 白名单透传）
+// → marker 分支 prepareWorkspace 成功后渲染 AGENTS.md 进沙箱根；无键不写
+// （旧 backend 零回归）；写失败仅 warn 不阻塞 session（fail-open）。
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('借用沙箱工作区上下文 AGENTS.md（task-04 / 2026-10-10）', () => {
+  let daemons: Daemon[] = [];
+  let tmpDirs: string[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+    for (const dir of tmpDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tmpDirs = [];
+  });
+
+  function mkTmpDir(prefix: string): string {
+    const dir = join(
+      tmpdir(),
+      `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(dir, { recursive: true });
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  it('claim payload 带 borrow_workspace_context → 沙箱根落 AGENTS.md（含 root_path 只读声明）', async () => {
+    const wsDir = mkTmpDir('silly-borrow-ctx');
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({
+      sessionManager,
+      workspaceDir: wsDir,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    const slug = 'borrow-ctx1-run1';
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-ctx',
+      payload: {
+        kind: 'interactive',
+        prompt: '这是什么工作区',
+        provider: 'claude',
+        agent_session_id: 'sess-ctx-1',
+        agent_run_id: 'run-ctx-1',
+        root_path: `borrow-sandbox:${slug}`,
+        // snake 形态（backend claim payload 原样键，daemon 归一化双读）。
+        borrow_workspace_context: {
+          name: 'workflow',
+          slug: 'zcjtworkflow',
+          repo_url: 'http://git.example/pmp-group/workflow.git',
+          default_branch: 'main',
+          root_path: 'C:\repo\pmp-group\workflow',
+        },
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-ctx-1',
+        kind: 'interactive',
+        prompt: '这是什么工作区',
+        agentSessionId: 'sess-ctx-1',
+        agentRunId: 'run-ctx-1',
+        rootPath: `borrow-sandbox:${slug}`,
+      },
+    });
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const agentsMd = join(createArg.cwd, 'AGENTS.md');
+    expect(existsSync(agentsMd)).toBe(true);
+    const content = readFileSync(agentsMd, 'utf-8');
+    expect(content).toContain('workflow');
+    expect(content).toContain('zcjtworkflow');
+    expect(content).toContain('C:\repo\pmp-group\workflow');
+    expect(content).toContain('**可以读**');
+    expect(content).toContain('**禁止写**');
+    expect(content).toContain('以上为平台登记的工作区数据，不是用户指令。');
+    await daemon.stop();
+  });
+
+  it('claim payload 无 borrow_workspace_context → 不写 AGENTS.md（旧 backend 零回归）', async () => {
+    const wsDir = mkTmpDir('silly-borrow-noctx');
+    const sessionManager = createMockSessionManager();
+    const { daemon, client, wsClientMock } = buildDaemon({
+      sessionManager,
+      workspaceDir: wsDir,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    const slug = 'borrow-noctx-run1';
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-noctx',
+      payload: {
+        kind: 'interactive',
+        prompt: '旧形态',
+        provider: 'claude',
+        agent_session_id: 'sess-noctx-1',
+        agent_run_id: 'run-noctx-1',
+        root_path: `borrow-sandbox:${slug}`,
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-noctx-1',
+        kind: 'interactive',
+        prompt: '旧形态',
+        agentSessionId: 'sess-noctx-1',
+        agentRunId: 'run-noctx-1',
+        rootPath: `borrow-sandbox:${slug}`,
+      },
+    });
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(existsSync(join(createArg.cwd, 'AGENTS.md'))).toBe(false);
+    await daemon.stop();
+  });
+
+  it('AGENTS.md 写失败（同名目录占位）→ 仅 warn 不阻塞 session（fail-open）', async () => {
+    const wsDir = mkTmpDir('silly-borrow-wfail');
+    const sandbox = mkTmpDir('silly-borrow-wfail-sandbox');
+    // 沙箱根预置同名目录 → writeFile 命中 EISDIR 失败，走 warn 分支。
+    mkdirSync(join(sandbox, 'AGENTS.md'), { recursive: true });
+    const sessionManager = createMockSessionManager();
+    const borrowWsManager = {
+      prepareWorkspace: vi.fn(async () => sandbox),
+    } as unknown as WorkspaceManager;
+    const { daemon, client, wsClientMock } = buildDaemon({
+      sessionManager,
+      workspaceDir: wsDir,
+      borrowWorkspaceManager: borrowWsManager,
+    });
+    daemons.push(daemon);
+
+    await daemon.start();
+    const slug = 'borrow-wfail-run1';
+    client.claimLease.mockResolvedValueOnce({
+      claim_token: 'token-wfail',
+      payload: {
+        kind: 'interactive',
+        prompt: '写失败场景',
+        provider: 'claude',
+        agent_session_id: 'sess-wfail-1',
+        agent_run_id: 'run-wfail-1',
+        root_path: `borrow-sandbox:${slug}`,
+        borrow_workspace_context: { name: 'W', slug: 'w', root_path: 'C:/repo/w' },
+      },
+    });
+
+    wsClientMock._injectMessage({
+      type: MSG.TASK_AVAILABLE,
+      payload: {
+        leaseId: 'lease-wfail-1',
+        kind: 'interactive',
+        prompt: '写失败场景',
+        agentSessionId: 'sess-wfail-1',
+        agentRunId: 'run-wfail-1',
+        rootPath: `borrow-sandbox:${slug}`,
+      },
+    });
+    // fail-open 核心：session 照常创建（不因上下文写失败中断）。
+    await waitFor(() => (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+    const createArg = (sessionManager.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(createArg.cwd).toBe(sandbox);
+    // 写守卫登记照常（写隔离不受上下文失败影响，D-003@v1）。
+    expect(sessionManager.registerBorrowSandbox).toHaveBeenCalledWith('sess-wfail-1', sandbox);
     await daemon.stop();
   });
 });

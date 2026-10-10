@@ -804,3 +804,118 @@ async def test_ac8_own_daemon_no_sandbox_marker_zero_regression(db_session, tmp_
     # 自有路径不写 marker（cwd 若有则原样，不前缀 borrow-sandbox:）。
     if "cwd" in meta:
         assert not meta["cwd"].startswith("borrow-sandbox:")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# AC9: 2026-10-10-borrow-sandbox-workspace-context / FR-01 借用 lease 携带
+# 工作区上下文单键 borrow_workspace_context（daemon 渲染沙箱 AGENTS.md 数据源）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def test_ac9_dispatch_borrow_writes_workspace_context(db_session, tmp_path) -> None:
+    """dispatch_to_daemon 借用 → metadata 含 borrow_workspace_context。
+
+    _seed_workspace 只落 name/slug/root_path（其余 None），断言非 None 字段入键、
+    None 字段不落键；tech_stack 列默认 []（永非 None）原样携带。
+    """
+    from app.modules.agent.placement import RunPlacementService
+
+    refs = await _setup_borrow(db_session, tmp_path)
+    run = await _seed_agent_run(db_session)
+    placement = RunPlacementService(db_session)
+    lease_id = await placement.dispatch_to_daemon(
+        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
+    )
+    meta = await _lease_metadata(db_session, lease_id)
+    ctx = meta["borrow_workspace_context"]
+    assert ctx["name"] == "W"
+    assert ctx["root_path"] == str(tmp_path)
+    assert isinstance(ctx["slug"], str) and ctx["slug"]
+    assert ctx["tech_stack"] == []
+    assert ctx["default_branch"] == "main"  # 模型列默认值，非 None 原样携带
+    # None 值字段不落键（design 字段集定义）。
+    for absent in ("display_alias", "description", "type", "repo_url"):
+        assert absent not in ctx
+
+
+async def test_ac9_interactive_borrow_writes_workspace_context(db_session, tmp_path) -> None:
+    """prepare_interactive_dispatch 借用 → 同样携带上下文单键。"""
+    from app.modules.agent.placement import RunPlacementService
+
+    refs = await _setup_borrow(db_session, tmp_path)
+    placement = RunPlacementService(db_session)
+    dispatch = await placement.prepare_interactive_dispatch(
+        agent_session_id=uuid.uuid4(),
+        agent_run_id=uuid.uuid4(),
+        user_id=refs["actor"],
+        provider="claude",
+        prompt="这是什么工作区",
+        model=None,
+        workspace_id=refs["ws"],
+    )
+    meta = await _lease_metadata(db_session, dispatch.lease_id)
+    assert meta["borrow_workspace_context"]["root_path"] == str(tmp_path)
+    assert meta["borrow_workspace_context"]["name"] == "W"
+
+
+async def test_ac9_scan_interactive_borrow_writes_workspace_context(db_session, tmp_path) -> None:
+    """prepare_scan_interactive_dispatch 借用 → 同样携带上下文单键（三标记点一致）。"""
+    from app.modules.agent.placement import RunPlacementService
+
+    refs = await _setup_borrow(db_session, tmp_path)
+    placement = RunPlacementService(db_session)
+    dispatch = await placement.prepare_scan_interactive_dispatch(
+        agent_session_id=uuid.uuid4(),
+        agent_run_id=uuid.uuid4(),
+        user_id=refs["actor"],
+        provider="claude",
+        prompt="scan",
+        model=None,
+        root_path="/home/lender/repo",
+        spec_root="/home/lender/repo/.sillyspec",
+        workspace_id=refs["ws"],
+    )
+    meta = await _lease_metadata(db_session, dispatch.lease_id)
+    ctx = meta["borrow_workspace_context"]
+    # 沙箱 marker 语义字段仍在（cwd 被 marker 覆盖）+ 上下文单键共存。
+    assert meta["cwd"].startswith("borrow-sandbox:")
+    assert ctx["root_path"] == str(tmp_path)
+    assert ctx["slug"]
+
+
+async def test_ac9_workspace_row_missing_no_context_key(db_session, tmp_path) -> None:
+    """Workspace 行缺失 → 不写键、不阻塞派发（best-effort，FR-01 场景）。"""
+    from sqlalchemy import text as _text
+
+    from app.modules.agent.placement import RunPlacementService
+
+    refs = await _setup_borrow(db_session, tmp_path)
+    # 物理删除 Workspace 行（grants/membership 查询不 join workspaces 表，
+    # 借用解析不受影响；仅上下文 loader 查不到行）。
+    await db_session.execute(_text("DELETE FROM workspaces WHERE id = :id"), {"id": refs["ws"].hex})
+    await db_session.commit()
+    run = await _seed_agent_run(db_session)
+    placement = RunPlacementService(db_session)
+    lease_id = await placement.dispatch_to_daemon(
+        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
+    )
+    assert lease_id is not None  # 派发不被阻塞
+    meta = await _lease_metadata(db_session, lease_id)
+    assert "borrow_workspace_context" not in meta
+    # 沙箱 marker / borrowed 语义不受影响。
+    assert meta["borrowed"] is True
+    assert meta["cwd"].startswith("borrow-sandbox:")
+
+
+async def test_ac9_own_daemon_no_context_key_zero_regression(db_session, tmp_path) -> None:
+    """自有 daemon 路径 → 不写 borrow_workspace_context（FR-05 零回归）。"""
+    from app.modules.agent.placement import RunPlacementService
+
+    refs = await _setup_own_daemon(db_session, tmp_path, actor_role="business")
+    run = await _seed_agent_run(db_session)
+    placement = RunPlacementService(db_session)
+    lease_id = await placement.dispatch_to_daemon(
+        run, refs["actor"], workspace_id=refs["ws"], provider="claude"
+    )
+    meta = await _lease_metadata(db_session, lease_id)
+    assert "borrow_workspace_context" not in meta

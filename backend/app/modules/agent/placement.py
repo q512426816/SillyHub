@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.modules.agent.borrow_resolver import _resolve_borrowed_or_own_runtime
 from app.modules.daemon.session_events import publish_sessions_changed
+from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
@@ -140,6 +141,7 @@ def _stamp_borrow_sandbox_metadata(
     metadata: dict,
     actor_user_id: uuid.UUID,
     run_id: uuid.UUID,
+    workspace_context: dict | None = None,
 ) -> str:
     """借用 lease 写沙箱 slug + cwd marker（task-09 / D-007@v2）。
 
@@ -153,13 +155,66 @@ def _stamp_borrow_sandbox_metadata(
     不能是 lender 代码路径——否则 daemon 用 lender 代码作 cwd，PolicyEngine 按 lease
     隔离失效）。
 
+    2026-10-10-borrow-sandbox-workspace-context / FR-01：``workspace_context`` 非
+    None 时额外写 ``metadata["borrow_workspace_context"]`` 单键（工作区元信息 +
+    真实 root_path，daemon 侧渲染进沙箱 AGENTS.md）；缺省 None 不写键，存量路径
+    零回归。
+
     Returns:
         构造的 slug（调用方可记日志）。
     """
     slug = _make_borrow_sandbox_slug(actor_user_id, run_id)
     metadata["borrow_sandbox_slug"] = slug
     metadata["cwd"] = _BORROW_SANDBOX_MARKER + slug
+    if workspace_context is not None:
+        metadata["borrow_workspace_context"] = workspace_context
     return slug
+
+
+# 2026-10-10-borrow-sandbox-workspace-context / D-001@v1：借用沙箱是空目录，agent
+# 感知不到自己服务于哪个工作区。三处借用标记点在写沙箱 marker 的同时查
+# Workspace 行，把下列字段（值为 None 的不落键）经 lease metadata 单键
+# ``borrow_workspace_context`` 下发，daemon 渲染 AGENTS.md 进沙箱根——真实
+# root_path 只读告知，写隔离仍由 daemon 写守卫强制（D-003@v1 红线）。
+_BORROW_WORKSPACE_CONTEXT_FIELDS = (
+    "name",
+    "display_alias",
+    "slug",
+    "description",
+    "type",
+    "tech_stack",
+    "repo_url",
+    "default_branch",
+    "root_path",
+)
+
+
+async def _load_borrow_workspace_context(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> dict | None:
+    """查 Workspace 行组装借用上下文（行缺失/异常/全空 → None，best-effort）。
+
+    失败语义对齐 ``_insert_borrow_audit_row``：上下文是增强项，任何异常只记
+    日志不阻塞借用派发。全字段 None 时归一返回 None（而非空 dict），保证下游
+    真值守护（键不落 metadata）语义一致。
+    """
+    try:
+        ws = await session.get(Workspace, workspace_id)
+    except Exception as exc:  # BLE001 全局忽略：异步常需 catch 裸 Exception
+        log.warning(
+            "borrow_workspace_context_lookup_failed",
+            workspace_id=str(workspace_id),
+            error=str(exc),
+        )
+        return None
+    if ws is None:
+        return None
+    ctx = {
+        field: getattr(ws, field)
+        for field in _BORROW_WORKSPACE_CONTEXT_FIELDS
+        if getattr(ws, field, None) is not None
+    }
+    return ctx or None
 
 
 def _runtime_daemon_instance_id(runtime: dict) -> uuid.UUID:
@@ -509,7 +564,13 @@ class RunPlacementService:
             # 不能是 lender 代码 rootPath（否则 daemon 用 lender 代码作 cwd + PolicyEngine
             # 按 lease 隔离失效 → 借用 agent 可写开发代码区）。marker 借 build_claim_payload
             # 既有 cwd→root_path 透传带给 daemon，无需改 context.py。
-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
+            _borrow_ws_ctx = (
+                await _load_borrow_workspace_context(self._session, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
             # 借用必然 workspace-scoped（AC7：无 workspace_id 不借用），故 workspace_id 非空。
             if workspace_id is not None:
@@ -931,7 +992,13 @@ class RunPlacementService:
             # 覆盖上方 caller cwd（quick-chat 场景 cwd 可能指 lender 代码 → daemon 会用作
             # cwd → PolicyEngine 按 lease 隔离失效）。marker 借 build_claim_payload 既有
             # cwd→root_path 透传带给 daemon，无需改 context.py。
-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
+            _borrow_ws_ctx = (
+                await _load_borrow_workspace_context(self._session, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
             # workspace_id / lender_user_id 借用必然非空（AC7 + borrow_resolver 契约）。
             # task-03（2026-08-28-daemon-agent-share）：共享钉定路径（上方钉定分支
@@ -1093,7 +1160,13 @@ class RunPlacementService:
             # 既有 cwd→root_path 透传（cwd 优先于 root_path）带给 daemon，无需改 context.py。
             # scan 语义字段（root_path/spec_root/runtime_root）仍保留在 metadata，仅 cwd 透传
             # 给 daemon 时被 marker 优先覆盖。
-            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
+            # 2026-10-10-borrow-sandbox-workspace-context：同时携带工作区上下文单键。
+            _borrow_ws_ctx = (
+                await _load_borrow_workspace_context(self._session, workspace_id)
+                if workspace_id is not None
+                else None
+            )
+            _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id, _borrow_ws_ctx)
             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
             # scan 借用同样 workspace-scoped（AC7），workspace_id 非空。
             if workspace_id is not None:

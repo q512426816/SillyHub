@@ -446,6 +446,14 @@ export interface LeaseCtx {
    */
   kind?: 'batch' | 'interactive';
   /**
+   * 借用沙箱工作区上下文（2026-10-10-borrow-sandbox-workspace-context / FR-03）：
+   * lease metadata 单键 borrow_workspace_context 经 claim payload 白名单透传、
+   * daemon 归一化（camel/snake 双读）后的原样对象（Workspace 行非 None 字段）。
+   * 仅 kind=interactive 借用 lease 携带；缺键 undefined 穿透（旧 backend 零回归）。
+   * 消费方：daemon.ts marker 分支渲染 AGENTS.md 进沙箱根（borrow-sandbox-context.ts）。
+   */
+  borrowWorkspaceContext?: Record<string, unknown>;
+  /**
    * task-04：interactive lease 绑定的 agent_sessions.id（backend 创建并下发）。
    * 仅 kind=interactive 时有意义；batch 路径忽略。daemon 用它做 SessionManager.create 的 sessionId。
    * 兼容 snake_case `agent_session_id`（daemon 在 _runLeaseStateMachine 归一化）。

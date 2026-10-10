@@ -465,3 +465,100 @@ class TestInitLeaseCompleteFailureGate:
         await db_session.refresh(binding)
         assert binding.init_synced_at is not None
         assert binding.init_synced_spec_version == 7
+
+
+# ---------------------------------------------------------------------------
+# 用例组 D：2026-10-10-borrow-sandbox-workspace-context / FR-03
+# 借用沙箱工作区上下文单键 claim payload 白名单透传（kind=interactive）
+# ---------------------------------------------------------------------------
+
+
+async def _make_lease(
+    session: AsyncSession,
+    runtime_id: uuid.UUID,
+    kind: str,
+    metadata: dict[str, Any] | None = None,
+    agent_run_id: uuid.UUID | None = None,
+) -> DaemonTaskLease:
+    """造指定 kind 的 lease（interactive 形态带 session_id/run_id 模拟借用派发）。"""
+    now = datetime.now(UTC)
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=runtime_id,
+        agent_run_id=agent_run_id,
+        status="pending",
+        kind=kind,
+        claimed_at=None,
+        lease_expires_at=None,
+        metadata_=metadata or {},
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(lease)
+    await session.commit()
+    await session.refresh(lease)
+    return lease
+
+
+class TestBorrowWorkspaceContextPassthrough:
+    """FR-03：interactive lease 的 borrow_workspace_context 真值守护透传。
+
+    写法对齐 context.py fork_mode/resume_session_id 白名单先例：缺键（旧
+    backend 语义 / 非借用 lease）→ payload 不含（daemon undefined 穿透）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_interactive_lease_context_passthrough(self, db_session: AsyncSession) -> None:
+        ctx = {
+            "name": "workflow",
+            "slug": "zcjtworkflow",
+            "root_path": "C:/repo/workflow",
+            "default_branch": "main",
+        }
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _make_lease(
+            db_session,
+            rt.id,
+            "interactive",
+            {
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "borrow_workspace_context": ctx,
+            },
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert payload["borrow_workspace_context"] == ctx
+
+    @pytest.mark.asyncio
+    async def test_interactive_lease_no_context_no_key(self, db_session: AsyncSession) -> None:
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _make_lease(
+            db_session,
+            rt.id,
+            "interactive",
+            {"session_id": str(uuid.uuid4()), "run_id": str(uuid.uuid4())},
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert "borrow_workspace_context" not in payload
+
+    @pytest.mark.asyncio
+    async def test_batch_lease_context_not_passthrough(self, db_session: AsyncSession) -> None:
+        """batch 分支无该透传（interactive 专属；batch lease 实务不携带该键）。"""
+        from app.modules.agent.model import AgentRun
+
+        run = AgentRun(id=uuid.uuid4(), agent_type="claude_code", status="pending")
+        db_session.add(run)
+        await db_session.commit()
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _make_lease(
+            db_session,
+            rt.id,
+            "batch",
+            {"borrow_workspace_context": {"name": "W"}},
+            agent_run_id=run.id,
+        )
+        payload = await build_claim_payload(db_session, lease)
+        assert "borrow_workspace_context" not in payload

@@ -617,6 +617,13 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
             payload["fork_anchor_entry_id"] = lease_meta["fork_anchor_entry_id"]
         if lease_meta.get("fork_mode"):
             payload["fork_mode"] = lease_meta["fork_mode"]
+        # 2026-10-10-borrow-sandbox-workspace-context / FR-03：借用沙箱工作区上下文
+        # 单键白名单透传（真值守护，写法对齐上方 resume_session_id 先例）。置于
+        # transport 分支之前让 tar / shared 两路 return 均携带；缺键（旧 backend
+        # 语义 / 非借用 lease）→ payload 不含，daemon 侧 undefined 穿透不渲染
+        # AGENTS.md（零回归，D-005@v1）。
+        if lease_meta.get("borrow_workspace_context"):
+            payload["borrow_workspace_context"] = lease_meta["borrow_workspace_context"]
         # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
         # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。
