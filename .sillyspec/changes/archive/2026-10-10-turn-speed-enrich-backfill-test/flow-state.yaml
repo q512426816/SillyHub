@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -16,6 +24,13 @@ input: >-
   - 测试文件 vitest 全绿，不跑全量
 autopilot: true
 baseline_commit: 8dd6e9f32b10a51df047ca470a607f72cc32d09f
-updatedAt: '2026-10-10T11:30:43.078Z'
+updatedAt: '2026-10-10T11:38:42.310Z'
 baseline_sha256: bdc90f90f5ad151f68bc4dbdc71a9dd3f22c6f06dc3f7939ee60dd7f3b60a8b1
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（7.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010113251\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010113251\test-result.json｜门文件
+  2 个
 

@@ -728,3 +728,41 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：验证通过
 全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-04
 最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
+
+## FR-auto-frontend-155 enrichDisplayTurns 的 apiDurationMs 回填语义必须有行为测试锁定（上变更评审 P3）
+变更：2026-10-10-turn-speed-enrich-backfill-test
+状态：active
+摘要：历史轮回填；实时值优先
+全文：.sillyspec/changes/archive/2026-10-10-turn-speed-enrich-backfill-test/requirements.md#FR-01
+最近确认：196c2280aeaf47428b5197da25e21c9224a890fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-turn-speed-enrich-backfill-test:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts「全部用例（回填/优先/缺失/null/未命中/引用稳定/新对象）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-turn-speed-enrich-backfill-test
+  status: active
+
+## FR-auto-frontend-156 测试全绿（不跑全量）
+变更：2026-10-10-turn-speed-enrich-backfill-test
+状态：active
+摘要：相关测试绿
+全文：.sillyspec/changes/archive/2026-10-10-turn-speed-enrich-backfill-test/requirements.md#FR-02
+最近确认：196c2280aeaf47428b5197da25e21c9224a890fc
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-turn-speed-enrich-backfill-test:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-turn-speed-enrich-backfill-test
+  status: active

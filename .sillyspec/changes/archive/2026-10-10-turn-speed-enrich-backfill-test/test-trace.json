@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-turn-speed-enrich-backfill-test",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-turn-speed-enrich-backfill-test:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts「全部用例（回填/优先/缺失/null/未命中/引用稳定/新对象）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-turn-speed-enrich-backfill-test"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-turn-speed-enrich-backfill-test:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-turn-speed-enrich-backfill-test"
+    }
+  ]
+}

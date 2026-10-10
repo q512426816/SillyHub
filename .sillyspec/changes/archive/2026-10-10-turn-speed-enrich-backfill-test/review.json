@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-turn-speed-enrich-backfill-test",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "196c2280aeaf47428b5197da25e21c9224a890fc",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "n/a",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-10T11:38:17Z",
+  "round2Notes": {
+    "p1Resolution": "第 1 轮 P1（makeRun 缺 SessionRunRead 必填字段 user_id/sender_name 致 tsc TS2322）已由并行变更提交 35d4adac8 修复——提交信息明载「顺手补 enrich 测试 user_id/sender_name 必填字段」；git diff 9796351..HEAD 对该测试文件仅 +2 行 fixture 修复（user_id: null :42 / sender_name: null :43），六用例 describe/it/expect 断言零变化。",
+    "p1VerificationAnchors": [
+      "git show HEAD:frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts → makeRun 含 user_id: null (line 42) / sender_name: null (line 43)",
+      "npx tsc --noEmit 全量跑后 grep page-helpers-enrich → 零匹配（本文件零类型错误）",
+      "npx vitest run 该文件 → 6/6 passed（工作区该文件与 HEAD 一致，即 HEAD 内容实测无回归）"
+    ],
+    "incrementalScope": "git diff 9796351..HEAD --stat 中，本变更面仅 page-helpers-enrich-api-duration.test.ts +2 行；session-history-scroll.test.tsx / page-helpers.tsx / session-panel-page.tsx / turn-catalog / turn-nav-list 等其余 12 个文件全部属并行变更 2026-10-10-single-turn-nav-and-jump-head（35d4adac8 + ca2daf83a），不计入本变更 findings。",
+    "round1FindingsDisposition": "P1 已修复移除（35d4adac8 承载）；第 1 轮 P3（冻结件与工作区漂移）随修复落提交一并消除——修复已在 HEAD 冻结面内，工作区该测试文件 clean。"
+  }
+}
