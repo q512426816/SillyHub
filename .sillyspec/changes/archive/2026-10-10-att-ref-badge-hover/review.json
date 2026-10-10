@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-att-ref-badge-hover",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0",
+  "findings": [],
+  "reviewerNotes": "首轮 P2（FR-02 测试绑定用例名失准）已在提交 b9b67aa80c9a 修复：requirements.md FR-02 绑定行现指向真实存在的两个用例「角标默认隐藏（opacity-0 + pointer-events-none），visibleBadgeIndex 命中才显示」+「既有 × 删除回调行为不变（可见性受控不影响点击）」，grep 确认两用例名均在 frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx（:61、:122），修复提交面仅 requirements.md + review.json 无越界。首轮 P3（hitTest 外扩 8px 命中区大于可见背景块，相邻标签间隙可瞬时点亮前一标签角标，input-ref-overlay.tsx:80-106）经裁决为已接受边界：纯视觉瞬时瑕疵、下次 pointermove 纠正、无点击误删风险（删除目标由渲染时绑定的 token 文本决定，不依赖 hoveredRefOcc），不作为 finding 记录。",
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T09:34:26+08:00"
+}

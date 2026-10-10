@@ -1,0 +1,53 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "a43ce8b8900f21312925436daa7941115033cc31",
+  "totals": {
+    "files": 4,
+    "additions": 190,
+    "deletions": 20
+  },
+  "rows": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+      "additions": 79,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/input-ref-overlay.tsx",
+      "additions": 74,
+      "deletions": 13,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-input-bar.tsx",
+      "additions": 19,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "additions": 18,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "f2efdf2f8d5c2f4ac8de7db811548245d40f024f8cbca62dd33a5f8dc3445ae3",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-10T01:29:45.588Z"
+}

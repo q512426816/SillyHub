@@ -1,0 +1,99 @@
+{
+  "change": "2026-10-10-att-ref-badge-hover",
+  "baseline": "a43ce8b8900f21312925436daa7941115033cc31",
+  "head": "b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0",
+  "files": [
+    ".sillyspec/changes/2026-10-10-att-ref-badge-hover/design.md",
+    ".sillyspec/changes/2026-10-10-att-ref-badge-hover/requirements.md",
+    ".sillyspec/changes/2026-10-10-att-ref-badge-hover/review.json",
+    ".sillyspec/changes/2026-10-10-att-ref-badge-hover/tasks.md",
+    "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+    "frontend/src/components/daemon/input-ref-overlay.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    ".sillyspec/changes/2026-10-10-att-ref-badge-hover/proposal.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 358,
+    "deletions": 20
+  },
+  "savedAt": "2026-10-10T01:34:52.246Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a43ce8b8900f21312925436daa7941115033cc31",
+    "totals": {
+      "files": 4,
+      "additions": 190,
+      "deletions": 20
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "additions": 79,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/input-ref-overlay.tsx",
+        "additions": 74,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 19,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+        "additions": 18,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "3e9aecd6f63f53b6b33360bf888091d9a35e8ee5e365615e12bd18250f74493e",
+  "patchStatus": "ok"
+}

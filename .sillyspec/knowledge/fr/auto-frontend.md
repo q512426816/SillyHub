@@ -371,6 +371,7 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-01
   tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」
+
 ## FR-auto-frontend-141 thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
 变更：2026-10-09-thin-hide-step-timeline
 状态：active
@@ -663,3 +664,67 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-09-attachment-inline-reference
   status: active
+
+## FR-auto-frontend-151 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
+变更：2026-10-10-att-ref-badge-hover
+状态：active
+摘要：悬停显示
+全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-01
+最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-att-ref-badge-hover:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏、visibleBadgeIndex 命中才显示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-att-ref-badge-hover
+  status: active
+
+## FR-auto-frontend-152 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
+变更：2026-10-10-att-ref-badge-hover
+状态：active
+摘要：隐藏态点击穿透
+全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-02
+最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-att-ref-badge-hover:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏（opacity-0 + pointer-events-none），visibleBadgeIndex 命中才显示」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-att-ref-badge-hover
+  status: active
+
+## FR-auto-frontend-153 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
+变更：2026-10-10-att-ref-badge-hover
+状态：active
+摘要：移出隐藏
+全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-03
+最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-att-ref-badge-hover:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「既有×删除回调行为不变」 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「× 角标删除该处一次出现；点 X 删附件联动剥离全部引用」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-att-ref-badge-hover
+  status: active
+
+## FR-auto-frontend-154 相关测试全绿+tsc 零错
+变更：2026-10-10-att-ref-badge-hover
+状态：active
+摘要：验证通过
+全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-04
+最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
