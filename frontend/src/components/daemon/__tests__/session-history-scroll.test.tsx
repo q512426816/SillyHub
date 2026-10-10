@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { SessionPanel } from "../session-panel";
@@ -360,5 +360,82 @@ describe("scroll-up history integration", () => {
     });
     const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
     expect(el.style.overflowAnchor).toBe("none");
+  });
+});
+
+// ── 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」一键连续翻页 ──
+// 依据 design.md（FR-03/FR-04）：顶部入口（hasEarlier 时渲染）→ 点击 interval
+// 轮询连续 loadEarlierOnce 直至到头 → 清 prepend 锚 + scrollTop=0 定位最早内容；
+// loading 态可见、到头后入口消失。触顶翻页/锚定/贴底跟随机制零改动（复用链路）。
+
+describe("回到会话开头（2026-10-10-single-turn-nav-and-jump-head）", () => {
+  it("点击回到会话开头：连续 before 翻页到头并定位顶部（FR-03）", async () => {
+    const initPage = makePage("init", PAGE_SIZE, 13 * 3600);
+    const older1 = makePage("o1", PAGE_SIZE, 11 * 3600);
+    // 末页不满页（100 < 400）→ 翻完 hasEarlier=false（到头）
+    const older2 = makePage("o2", 100, 9 * 3600);
+    const beforeCursors: string[] = [];
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string }) => {
+        if (!opts?.before) return initPage;
+        beforeCursors.push(opts.before);
+        return beforeCursors.length === 1 ? older1 : older2;
+      },
+    );
+    render(<Host sessionId="jh1" />);
+    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
+    // 入口渲染（hasEarlier=true）
+    await waitFor(() => expect(screen.getByTestId("session-jump-head")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("session-jump-head"));
+    // 连续翻页：2 次 before 请求，游标单调递减（init 最旧 → o1 最旧）
+    await waitFor(() => expect(beforeCursors.length).toBe(2), { timeout: 5000 });
+    expect(beforeCursors[0]).toBe(initPage[0]!.timestamp);
+    expect(beforeCursors[1]).toBe(older1[0]!.timestamp);
+    expect(new Date(beforeCursors[1]!).getTime()).toBeLessThan(
+      new Date(beforeCursors[0]!).getTime(),
+    );
+    // 两页更早内容均 prepend 可见
+    await waitFor(() => expect(screen.getAllByText(/o2-msg/).length).toBeGreaterThan(0));
+    expect(screen.getAllByText(/o1-msg/).length).toBeGreaterThan(0);
+    // 到头定位：滚动容器回到顶部
+    await waitFor(() => {
+      const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
+      expect(el.scrollTop).toBe(0);
+    });
+    // 到头后入口消失（hasEarlier=false）
+    await waitFor(() => expect(screen.queryByTestId("session-jump-head")).toBeNull());
+  });
+
+  it("回到会话开头 loading 态可见，完成后恢复；连续加载到头后入口消失（FR-04）", async () => {
+    const initPage = makePage("ini2", PAGE_SIZE, 13 * 3600);
+    let resolveOlder: (() => void) | null = null;
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string }) => {
+        if (!opts?.before) return initPage;
+        // 末页可控挂起：窗口期内断言 loading 态
+        return new Promise((resolve) => {
+          resolveOlder = () => resolve(makePage("old2", 50, 9 * 3600));
+        });
+      },
+    );
+    render(<Host sessionId="jh2" />);
+    await waitFor(() => expect(screen.getAllByText(/ini2-msg/).length).toBeGreaterThan(0));
+    const btn = await screen.findByTestId("session-jump-head");
+    fireEvent.click(btn);
+    // 在途：入口转 loading + disabled
+    await waitFor(() => {
+      const loading = screen.getByTestId("session-jump-head");
+      expect(loading.textContent).toContain("正在回到会话开头");
+      expect(loading.hasAttribute("disabled")).toBe(true);
+    });
+    // 重复点击不重发（inflight 锁）
+    fireEvent.click(screen.getByTestId("session-jump-head"));
+    resolveOlder!();
+    await waitFor(() => expect(screen.queryByTestId("session-jump-head")).toBeNull());
+    // 仅一次 before 请求（重复点击被锁挡下）
+    const beforeCalls = sessionApi.getAgentSessionLogs.mock.calls.filter(
+      (c) => (c[1] as { before?: string } | undefined)?.before,
+    );
+    expect(beforeCalls).toHaveLength(1);
   });
 });

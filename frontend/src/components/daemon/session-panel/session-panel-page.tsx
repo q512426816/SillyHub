@@ -679,6 +679,10 @@ export function SessionPanelPage({
   // 初始历史改 limit=100 起步（HISTORY_PAGE_SIZE），时间线顶部「加载更早消息」
   // 按钮 before 游标 prepend（resync after 增量不受影响——cursor 语义不变）。
   const [historyLoading, setHistoryLoading] = useState(false);
+  // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
+  // （入口转圈 + disabled；随会话切换复位）。
+  const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
+  const jumpHeadInflightRef = useRef(false);
   const [hasEarlier, setHasEarlier] = useState(false);
   const historyCursorRef = useRef<string | null>(null);
   // task-06（2026-09-16-logs-cursor-tiebreaker）：复合游标 id 分量，与 ts 分量
@@ -1032,6 +1036,10 @@ export function SessionPanelPage({
     setHasEarlier(false);
     setHistoryLoading(false);
     historyLoadingRef.current = false;
+    // 2026-10-10-single-turn-nav-and-jump-head：回到开头循环跨会话即停——
+    // inflight 锁复位（循环 tick 内 epoch 校验兜底退出），loading 态复位。
+    jumpHeadInflightRef.current = false;
+    setJumpHeadLoading(false);
     autoFillCountRef.current = 0;
     setSearchOpen(false);
     setSearchTerm("");
@@ -1727,6 +1735,72 @@ export function SessionPanelPage({
       historyCursorIdRef.current !== idBefore
     );
   }, []);
+
+  /** 2026-10-10-single-turn-nav-and-jump-head（FR-03/FR-04）：回到会话开头——
+   *  interval 轮询连续翻页（对齐 fallbackLoop 惯例：纯 async/await 循环生产环境
+   *  有冻结前科 ql-20260916-014），直至 hasEarlier=false（到头）或
+   *  JUMP_LOAD_EARLIER_MAX_PAGES 上限（toast 可再点续）。到头后清 prepend 滚动锚
+   *  （钉回 apply 判 pendingAnchorRef 已换即恒 false → watch interval 自清）并
+   *  双 rAF 后 scrollTop=0 定位最早内容；循环期 suppress 触顶自动加载（既有
+   *  R-02 竞争守卫），定位滚动事件派发完毕（1s 余量）再解除。每页经既有
+   *  loadEarlierOnce 链路（复合游标/纪元校验/prepend 装配零改动）。 */
+  const handleJumpToHead = useCallback(() => {
+    if (jumpHeadInflightRef.current || !hasEarlierRef.current) return;
+    jumpHeadInflightRef.current = true;
+    setJumpHeadLoading(true);
+    jumpSuppressLoadEarlierRef.current = true;
+    const epochAtStart = sessionEpochRef.current;
+    let pages = 0;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = (reachedHead: boolean) => {
+      jumpHeadInflightRef.current = false;
+      if (timer !== undefined) clearInterval(timer);
+      if (!mountedRef.current || epochAtStart !== sessionEpochRef.current) {
+        setJumpHeadLoading(false);
+        jumpSuppressLoadEarlierRef.current = false;
+        return;
+      }
+      setJumpHeadLoading(false);
+      if (reachedHead) {
+        pendingAnchorRef.current = null;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            // 经 scrollElQueryRef（渲染末段镜像 timelineScrollEl）取容器——
+            // 本回调声明位置早于 timelineScrollEl 定义，直引会 TDZ。
+            const el = scrollElQueryRef.current();
+            if (el) el.scrollTop = 0;
+          }),
+        );
+      }
+      // scrollTo 的 scroll 事件下一帧派发；suppress 延迟解除防触顶抢跑。
+      setTimeout(() => {
+        jumpSuppressLoadEarlierRef.current = false;
+      }, 1000);
+    };
+    const tick = () => {
+      if (!mountedRef.current || epochAtStart !== sessionEpochRef.current) {
+        stop(false);
+        return;
+      }
+      if (!hasEarlierRef.current) {
+        stop(true);
+        return;
+      }
+      if (pages >= JUMP_LOAD_EARLIER_MAX_PAGES) {
+        stop(false);
+        notify.warning(
+          `已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`,
+        );
+        return;
+      }
+      // 在途时不重复触发（loadEarlier 内部有锁，这里跳过本轮即可）
+      if (historyLoadingRef.current) return;
+      pages += 1;
+      void loadEarlierOnce();
+    };
+    tick(); // 首页立即发起（对齐 fallbackLoop 即时性），其后 40ms 间隔续翻。
+    timer = setInterval(tick, 40);
+  }, [loadEarlierOnce, notify]);
 
   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
    *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
@@ -4027,6 +4101,10 @@ export function SessionPanelPage({
         localReportTurns,
         localReportOpen,
         onToggleLocalReport: () => setLocalReportOpen((v) => !v),
+        // 2026-10-10-single-turn-nav-and-jump-head（FR-03/FR-04）：回到开头入口。
+        hasEarlier,
+        jumpHeadLoading,
+        onJumpToHead: handleJumpToHead,
       })}
       <TurnTimeline
         suppressFollowBottom={jumpFollowSuppress}

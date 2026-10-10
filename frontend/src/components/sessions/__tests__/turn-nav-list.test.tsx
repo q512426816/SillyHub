@@ -134,20 +134,30 @@ function getDot(row: HTMLElement): HTMLElement {
   return dot as HTMLElement;
 }
 
-// ── 0. 短会话隐藏（TurnCatalog ql-20260909-005 同口径保留） ─────────────
+// ── 0. 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005
+//    <3 阈值放宽为 <1——单轮会话也显示导航） ─────────────────────────────────
 
-describe("TurnNavList 短会话隐藏", () => {
-  it("entries < 3 → 整列不渲染（0/1/2 条均隐藏）；3 条起出现窄轨", () => {
+describe("TurnNavList 空轮次隐藏", () => {
+  it("entries < 1 → 整列不渲染（0 条隐藏）；1 条起出现窄轨", () => {
     const { container } = renderNav([]);
     expect(container.textContent).toBe("");
 
-    const two = renderNav(FIXTURES.slice(0, 2));
-    expect(two.container.textContent).toBe("");
-    two.unmount();
+    const one = renderNav(FIXTURES.slice(0, 1));
+    expect(within(one.container).getByTestId("turn-nav-rail")).toBeTruthy();
+    expect(getTicks(one.container)).toHaveLength(1);
+  });
 
-    const three = renderNav(FIXTURES);
-    expect(within(three.container).getByTestId("turn-nav-rail")).toBeTruthy();
-    expect(getTicks(three.container)).toHaveLength(3);
+  it("单轮（1 条）刻度渲染且点击触发 onJump 跳转", () => {
+    const { container, onJump } = renderNav(FIXTURES.slice(0, 1));
+    const ticks = getTicks(container);
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0]).toHaveAttribute(
+      "aria-label",
+      "第1轮 · 完成 · 调研 sessions 页面组件结构与渲染链路",
+    );
+    fireEvent.click(ticks[0]!);
+    expect(onJump).toHaveBeenCalledTimes(1);
+    expect((onJump as Mock).mock.calls[0]?.[0]).toMatchObject({ key: "run-1" });
   });
 });
 

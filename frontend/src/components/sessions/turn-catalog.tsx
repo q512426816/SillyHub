@@ -209,10 +209,10 @@ export default function TurnCatalog({
     if (entry) setFlyout({ entry, index });
   };
 
-  // ql-20260909-005（会话页整洁度二轮）：轮次 < 3 轨道无导航价值，整条隐藏
-  // （短会话左侧 30px 占位回收给聊天区）；轮次增长后自动出现。early return 在
-  // 全部 hooks 之后（React 规则）。
-  if (entries.length < 3) return null;
+  // 隐藏阈值（2026-10-10-single-turn-nav-and-jump-head）：原 ql-20260909-005
+  // 的 <3 放宽为 <1，与 TurnNavList MIN_ENTRIES 同口径——单轮会话也显示轨道，
+  // 仅空轮次不渲染。early return 在全部 hooks 之后（React 规则）。
+  if (entries.length < 1) return null;
 
   return (
     <div className="relative flex-shrink-0 flex">

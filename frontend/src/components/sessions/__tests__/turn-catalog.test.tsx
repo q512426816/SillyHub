@@ -111,29 +111,27 @@ function getTickLines(container: HTMLElement): HTMLElement[] {
   );
 }
 
-// ── 0. 短会话隐藏（ql-20260909-005） ──────────────────────────────────────
+// ── 0. 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005
+//    <3 阈值放宽为 <1——单轮会话也显示轨道，仅空不渲染） ─────────────────────
 
-describe("TurnCatalog 短会话隐藏（ql-20260909-005）", () => {
-  it("entries < 3 → 整条轨道不渲染（0/1/2 条均隐藏）；3 条起出现", () => {
+describe("TurnCatalog 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head）", () => {
+  it("entries < 1 → 整条轨道不渲染（0 条隐藏）；1 条起出现", () => {
     const { container } = renderCatalog([]);
     expect(container.textContent).toBe("");
 
-    const two = renderCatalog(FIXTURES.slice(0, 2));
-    expect(two.container.textContent).toBe("");
-    two.unmount();
-
-    const three = renderCatalog(FIXTURES);
-    expect(within(three.container).getByRole("navigation")).toBeTruthy();
+    const one = renderCatalog(FIXTURES.slice(0, 1));
+    expect(within(one.container).getByRole("navigation")).toBeTruthy();
+    expect(within(one.container).getAllByRole("button")).toHaveLength(1);
   });
 
-  it("隐藏→增长跨阈值自动出现（entries 1 → 3）", () => {
-    const { container, rerender } = renderCatalog(FIXTURES.slice(0, 1));
+  it("空→增长自动出现（entries 0 → 1）", () => {
+    const { container, rerender } = renderCatalog([]);
     expect(within(container).queryByRole("navigation")).toBeNull();
     rerender(
-      <TurnCatalog entries={FIXTURES} activeTurnKey={null} onJump={vi.fn()} />,
+      <TurnCatalog entries={FIXTURES.slice(0, 1)} activeTurnKey={null} onJump={vi.fn()} />,
     );
     expect(within(container).getByRole("navigation")).toBeTruthy();
-    expect(within(container).getAllByRole("button")).toHaveLength(3);
+    expect(within(container).getAllByRole("button")).toHaveLength(1);
   });
 });
 

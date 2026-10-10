@@ -57,8 +57,10 @@ const OPEN_HOVER_DELAY_MS = 300;
 /** 整体移开关合防抖（ms）：窄轨↔浮层间移动的间隙不闪烁。 */
 const CLOSE_DELAY_MS = 250;
 
-/** 短会话隐藏阈值（TurnCatalog ql-20260909-005 同口径：<3 轮整条不渲染）。 */
-const MIN_ENTRIES = 3;
+/** 隐藏阈值（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005 的
+ *  <3 放宽为 <1——单轮会话也显示导航（线上单轮长会话无任何跳转入口实证），
+ *  仅空轮次不渲染。TurnCatalog 同口径。） */
+const MIN_ENTRIES = 1;
 /** 长列表阈值（FR-06）：超过则浮层行高固定 + content-visibility:auto 防卡。 */
 const LONG_LIST_THRESHOLD = 200;
 /** 长列表固定行高（px，≥40 命中区下限；containIntrinsicSize 同值）。 */
@@ -261,7 +263,7 @@ export default function TurnNavList({
     }
   }, [activeTurnKey, hoverTurnKey, expanded]);
 
-  // 短会话隐藏（early return 在全部 hooks 之后，React 规则）。
+  // 空轮次隐藏（early return 在全部 hooks 之后，React 规则）。
   if (entries.length < MIN_ENTRIES) return null;
 
   const longList = entries.length > LONG_LIST_THRESHOLD;

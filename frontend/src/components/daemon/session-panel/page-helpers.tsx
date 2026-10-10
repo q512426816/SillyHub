@@ -30,7 +30,7 @@ import type {
 } from "@/lib/api/llm-providers";
 import { getProviderCaps } from "@/lib/provider-caps";
 import type { ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { ArrowUpToLine, Loader2 } from "lucide-react";
 import { isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { MENTION_PLACEHOLDER_HINT } from "./turn-state";
 import type { listWorkspaces } from "@/lib/workspaces";
@@ -746,6 +746,12 @@ export function renderHistoryAndLocalReport(o: {
   localReportTurns: SessionTurnView[];
   localReportOpen: boolean;
   onToggleLocalReport: () => void;
+  /** 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」入口三件套——
+   *  hasEarlier=true 渲染；点击走 onJumpToHead（连续翻页拉全史）；loading 态
+   *  转圈。缺省（undefined）不渲染，既有调用面零影响。 */
+  hasEarlier?: boolean;
+  jumpHeadLoading?: boolean;
+  onJumpToHead?: () => void;
 }): ReactNode {
   const {
     historyLoading,
@@ -753,6 +759,9 @@ export function renderHistoryAndLocalReport(o: {
     localReportTurns,
     localReportOpen,
     onToggleLocalReport,
+    hasEarlier,
+    jumpHeadLoading,
+    onJumpToHead,
   } = o;
   return (
     <>
@@ -763,6 +772,32 @@ export function renderHistoryAndLocalReport(o: {
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           正在加载更早消息…
+        </div>
+      )}
+      {/* 2026-10-10-single-turn-nav-and-jump-head：触顶翻页对超长会话（单轮数千
+          行 + 慢接口）体感「滚不动」，顶部提供「回到会话开头」一键连续翻页拉全
+          史并定位最早内容；hasEarlier=false（到头）后入口消失。 */}
+      {(hasEarlier || jumpHeadLoading) && onJumpToHead && (
+        <div className="flex shrink-0 justify-center py-1">
+          <button
+            type="button"
+            data-testid="session-jump-head"
+            onClick={onJumpToHead}
+            disabled={jumpHeadLoading}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-0.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {jumpHeadLoading ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                正在回到会话开头…
+              </>
+            ) : (
+              <>
+                <ArrowUpToLine className="h-3 w-3" />
+                回到会话开头
+              </>
+            )}
+          </button>
         </div>
       )}
       {/* quick 本地 Agent 会话信息折叠：tool_report 激活后，CLI 上报历史轮收进

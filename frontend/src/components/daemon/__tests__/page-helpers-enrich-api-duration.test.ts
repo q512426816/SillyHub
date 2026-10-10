@@ -39,6 +39,8 @@ function makeRun(over: Partial<SessionRunRead> = {}): SessionRunRead {
     id: "run-1",
     created_at: "2026-10-10T00:00:00Z",
     status: "completed",
+    user_id: null,
+    sender_name: null,
     error_code: null,
     failure_summary: null,
     error_detail: null,
