@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-run-close-task-sweep",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-run-close-task-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_finalize_sweeps_running_to_stopped_terminal_untouched」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-run-close-task-sweep"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-run-close-task-sweep:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_orphans_terminal_run_only」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-run-close-task-sweep"
+    }
+  ]
+}

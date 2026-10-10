@@ -1,0 +1,122 @@
+{
+  "change": "2026-10-10-run-close-task-sweep",
+  "baseline": "033c78a5d5d17ee44a9ac6600055926c6925a602",
+  "head": "9efccfff7751ef838fe436eafa9da030ef68554d",
+  "files": [
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/design.md",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/flow-state.yaml",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/proposal.md",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/requirements.md",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/review.json",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/tasks.md",
+    "backend/app/modules/agent/service.py",
+    "backend/app/modules/daemon/agent_task_store.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+    ".sillyspec/changes/2026-10-10-run-close-task-sweep/review.json.superseded-20261010T160543"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 459,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-10T16:05:44.151Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "033c78a5d5d17ee44a9ac6600055926c6925a602",
+    "totals": {
+      "files": 4,
+      "additions": 200,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/service.py",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/agent_task_store.py",
+        "additions": 81,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "additions": 91,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "39a54d937836600a51fc4b574bcd7a2879a0e20fd03694a665899f7587152ad8",
+  "patchStatus": "ok"
+}

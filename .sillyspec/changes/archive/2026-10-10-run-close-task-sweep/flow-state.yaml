@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -20,6 +28,13 @@ input: >-
   - 新单测覆盖：finalize 单 run 收口 / 启动兜底清扫（终态 run 扫、running run 不扫）/ close 链路接入；既有 agent_session_tasks 测试全绿 + ruff/mypy 过
 autopilot: true
 baseline_commit: 033c78a5d5d17ee44a9ac6600055926c6925a602
-updatedAt: '2026-10-10T15:51:05.964Z'
+updatedAt: '2026-10-10T16:10:14.290Z'
 baseline_sha256: 1bc76aac7848fb76eaec8c86bc90f73afdb5598814a5716324715aa594b70631
+gate_summary: >-
+  test: passed ← module[]+deps(py28)+fr(4)（85.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010155734\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010155734\test-result.json｜门文件
+  5 个
 

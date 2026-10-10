@@ -1,0 +1,654 @@
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/flow-state.yaml b/.sillyspec/changes/2026-10-10-run-close-task-sweep/flow-state.yaml
+new file mode 100644
+index 000000000..e90cffaef
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  会话已结束但子代理任务仍显示「进行中」（线上会话 47e2ff1a 实证：两个 run 均 completed，agent_session_task 表 17 条卡 running，最后更新停在 run 结束前 20+
++  分钟）。根因：agent_session_task 只按 agent_task_status 事件 upsert（agent_task_store），run
++  终态收口（close_interactive_run）与后端重启判死（cleanup_stale_runs）均不清理该 run 的非终态任务行——子代理未上报终态（被放弃/中断）时永远卡 running。
++
++  成功标准：
++
++  - close_interactive_run 收口时同事务把该 run 的非终态 agent_session_task 行批量收口为 stopped（附可读 message，finished_at/updated_at 同步置位）
++
++  - 后端启动清理（cleanup_stale_runs）追加兜底清扫：run 已终态但其任务仍 running 的行全量收口（自愈存量脏数据，47e2ff1a 的 17 条在下次部署重启后自动修复）
++
++  - 已终态任务行不被清扫触碰；running run 的任务不被误扫
++
++  - 新单测覆盖：finalize 单 run 收口 / 启动兜底清扫（终态 run 扫、running run 不扫）/ close 链路接入；既有 agent_session_tasks 测试全绿 + ruff/mypy 过
++autopilot: true
++baseline_commit: 033c78a5d5d17ee44a9ac6600055926c6925a602
++updatedAt: '2026-10-10T15:51:05.964Z'
++baseline_sha256: 1bc76aac7848fb76eaec8c86bc90f73afdb5598814a5716324715aa594b70631
++
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json b/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json
+new file mode 100644
+index 000000000..f3ed5fba7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json
+@@ -0,0 +1,98 @@
++{
++  "schemaVersion": 1,
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "db50e88325f0a4c1b041dff9666ece51d4f15a14",
++  "reviewedAt": "2026-10-10T16:04:38Z",
++  "summary": "后端修复承诺与代码实态三方一致（FR↔实现↔测试）。finalize_running_tasks_for_run / sweep_orphan_running_tasks 两个新函数的 where 条件严格限定『非终态 + 本 run』/『非终态 + run 已终态』，已终态不触碰、running run 不误扫均有代码与真实落库断言支撑；close 接入确在 FOR UPDATE 行锁事务内、commit 前（close_run_steps.py:135 调用、:142 commit、:180 with_for_update）；启动兜底 try/except 包裹且 main.py 外层再兜一层，失败不阻塞启动；sweep 自带 commit 的调用时点无其它挂起写（_cleanup_stale_runs_impl 逐轮自行 commit、_deferred_run_ids 只读），边界安全。初评审两个 P3（并发缝隙 / 故障路径残留）均已在复审对象 db50e8832 中修复并核实（见 findings 各 resolution 及 P3-R1），并发维改观为 ok，verdict 维持 PASS。只读纪律下未执行测试（无 __pycache__/.pytest_cache 副作用；提交信息自述 27/27 绿未复跑验证），全部结论为静态代码核对。",
++  "findings": [
++    {
++      "id": "P3-1",
++      "severity": "P3",
++      "title": "upsert 更新路径无终态守卫：与 close 清扫并发交错的在途 running 心跳可把 stopped 覆写回 running（丢失更新）",
++      "evidence": "backend/app/modules/daemon/agent_task_store.py upsert_agent_task（:142-187）：先 SELECT 读行（READ COMMITTED 快照），语义②守卫基于该快照判断（:170），随后 ORM 逐字段赋值 + commit 刷出 UPDATE ... WHERE id=X，WHERE 无 status 终态守卫。交错序列：upsert SELECT（见 running）→ close 清扫 UPDATE 置 stopped 并 commit（close_run_steps.py:135/:142）→ upsert 的 UPDATE 落锁写 status='running' 并 commit → 任务复活（且残留 finished_at 旧值，行内不一致）。设计并发问『由 UPDATE 行级锁串行化』只保证写-写不交错，不保证最终值序——若 upsert 写在后则复活；乱序问的『清扫后迟到 running 不复活』对顺序迟到成立（语义②生效前提是读发生在清扫 commit 之后），对跨 commit 的在途事件不成立。测试 test_finalize_after_sweep_running_heartbeat_no_revive 为顺序执行，不覆盖此交错。",
++      "impact": "极窄窗口（该任务的事件处理读-写跨 close commit，毫秒级）；复活后无收口路径，需等下次重启 sweep 自愈。与设计『任务不复活』的全称承诺存在缝隙。",
++      "resolution": "已修复：db50e8832 将 upsert 的行 SELECT 改为 .with_for_update() 行锁读（复审核实，见 P3-R1）。",
++      "suggestion": "upsert 更新路径对 running 事件改带守卫的条件 UPDATE（WHERE status NOT IN 终态）或 SELECT ... WITH FOR UPDATE（读会阻塞至 close commit 后见到 stopped，语义②自然吸收）。"
++    },
++    {
++      "id": "P3-2",
++      "severity": "P3",
++      "title": "启动兜底清扫失败路径不回滚调用方 session：同 session 的后续启动任务（gate reconcile）会撞 PendingRollbackError 被跳过",
++      "evidence": "backend/app/modules/agent/service.py:1448-1455 except 仅 log.warning 不 rollback；sweep_orphan_running_tasks 自身 UPDATE 抛错时事务处于 aborted 态。main.py:158-170 同一 session 继续执行 reconcile_pending_gate_decisions（自带 try/except，失败仅日志）。FR-02『失败仅记日志不阻塞启动』字面满足（启动继续），但代价是同一故障场景下 gate 启动对账被连带跳过。",
++      "impact": "仅在清扫 UPDATE 本身抛 DB 错（DB 异常/迁移不符等）的条件下降级；启动不阻塞、有日志。",
++      "suggestion": "except 分支补 await self._session.rollback()（或在 sweep 内部失败时自行 rollback），恢复 session 可用性。",
++      "resolution": "已修复：db50e8832 在 except 首行补 await self._session.rollback()（复审核实）。"
++    },
++    {
++      "id": "P3-R1",
++      "severity": "P3",
++      "title": "复审：P3-1/P3-2 修复已在 db50e8832 核实（增量 006e98e14..db50e8832，2 文件 +12/-1，无其它 delta）",
++      "evidence": "P3-1：upsert_agent_task 的 SELECT 加 .with_for_update()（agent_task_store.py，db50e8832 hunk）——两种交错序均正确收敛：①upsert 先阻塞在 close 清扫持有的任务行锁上，读到的必是已 commit 的 stopped，语义②整行吸收不复活（原丢失更新路径消除）；②upsert 先持锁写 running 提交，close 的 finalize UPDATE 后落锁置 stopped（终值正确）。无新增死锁面：close 锁序 AgentRun 行→AgentSessionTask 行，upsert 只锁任务行不触 AgentRun，无环。首插缺行场景仍走唯一约束兜底（不变）。SQLite 忽略 FOR UPDATE 但其写者本就全库串行，PG/MySQL 行锁生效——三平台行为安全。P3-2：agent/service.py 兜底 except 首行补 await self._session.rollback()（db50e8832 hunk）——session 不留 aborted 态，gate reconcile 不再被连带跳过；若 rollback 本身抛错（连接已坏），main.py 外层 try/except 仍兜住，启动不阻塞。",
++      "impact": "两项 P3 均收口；未发现修复引入的新问题（锁序/平台差异/异常路径已核）。",
++      "suggestion": "无（并发交错属难以确定性测试的场景，代码级核实已足够；后续若加集成级并发用例更好）。"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "detail": {
++    "dimensionRationale": {
++      "乱序": "顺序迟到场景承诺为真且被钉死：upsert_agent_task :170-171 行已终态再收 running 整行跳过（不写、不 commit、updated_at 不刷）——代码事实；迟到的真实终态（completed/failed）仍可经语义③覆盖 stopped（:182-184 置 finished_at），信息不失真。测试 test_finalize_after_sweep_running_heartbeat_no_revive 真实落库断言。跨 commit 在途交错归并发维（P3-1）。",
++      "并发": "close 路径承诺属实：run 行 FOR UPDATE（close_run_steps.py:180）后同事务清扫（:135）、commit（:142）前，原子性成立；两个清扫体（启动 sweep 与 close）都写 stopped 幂等收敛；rowcount 仅日志（两调用点均只 log）。原缝隙（P3-1：close 清扫 vs 在途 upsert 丢失更新）已由 db50e8832 修复：upsert 的 SELECT 改 .with_for_update() 行锁读，两种交错序终值均正确（upsert 后读见 stopped 被语义②吸收 / finalize 后落锁置 stopped），且锁序无环不引入死锁——复审后并发维改观为 ok，详见 findings P3-R1。",
++      "切换": "清扫与 run 终态同事务（close 失败回滚则清扫一并回滚，不产生『run running 但任务 stopped』中间态）——commit 前接入位置核实；启动兜底独立 commit（agent_task_store.py:108），失败 try/except 双层（service.py:1448 + main.py:153）不阻塞启动。残留边界见 P3-2。",
++      "作用域": "finalize 限定 run_id==参数（:65）；sweep 限定 run_id IN (AgentRun.status ∈ TERMINAL_TURN_STATUSES 子查询)（:96-98），TERMINAL_TURN_STATUSES={completed,failed,killed,cancelled}（session/service/__init__.py:102）完整覆盖 close 收口（completed/failed）与重启判死（failed）两路径；running run 任务行不命中子查询不误扫（测试 t-live 断言）。行集按全局唯一 run_id 限定，无跨会话/跨工作区串台；多实例并发兜底幂等收敛 stopped。"
++    },
++    "frMapping": [
++      {
++        "fr": "FR-01",
++        "implementation": "agent_task_store.py finalize_running_tasks_for_run（:45-75）：UPDATE where run_id+status ∉ {completed,failed,stopped} → stopped + message『轮次已结束，任务未上报终态』+ finished_at/updated_at；close_run_steps.py:135 在 _close_flip_session 之后、svc._session.commit()（:142）之前同事务调用，now 复用 run 终态时点。",
++        "test": "test_agent_session_tasks.py:883 test_finalize_sweeps_running_to_stopped_terminal_untouched——真实 upsert 两行（running/completed）后 finalize，重查落库行断言 swept==1、t-run 变 stopped、finished_at 非空、message 含『轮次已结束』、t-done 保持 completed。与 requirements.md 绑定行逐字一致。"
++      },
++      {
++        "fr": "FR-02",
++        "implementation": "agent_task_store.py sweep_orphan_running_tasks（:78-109）：非终态 AND run_id IN 终态 run 子查询 → stopped，自带 commit；agent/service.py:1445-1455 cleanup_stale_runs 尾部 try/except 接入，失败仅日志，返回值语义不变（仍 return cleaned）。",
++        "test": "test_agent_session_tasks.py:930 test_sweep_orphans_terminal_run_only——同会话建 running run 与 completed run 各挂一条 running 任务，断言 swept==1、t-orphan 变 stopped、t-live 保持 running（running run 不误扫）。与 requirements.md 绑定行逐字一致。"
++      }
++    ],
++    "blindSpotChecks": {
++      "乱序四问": "见 dimensionRationale.乱序；设计引用的语义②代码事实核对无误（agent_task_store.py:170-171）。",
++      "并发四问": "见 dimensionRationale.并发；FOR UPDATE 同事务承诺真实，P3-1 为未覆盖缝隙。",
++      "切换四问": "同事务原子 + 独立 commit + 双层 try/except，承诺属实；P3-2 为故障路径残留。",
++      "作用域四问": "子查询用 run 终态集（含 killed/cancelled），非任务终态集——口径正确；无跨实例协调面，声明与代码一致。"
++    },
++    "disclosedTradeoffs": [
++      {
++        "item": "极窄窗口提前收口（run 收口瞬间任务收尾事件在途被收 stopped）",
++        "verdict": "可接受",
++        "reason": "run 终态即该轮进程已结束，任务不可能再产出合法结果；迟到真实终态事件仍可经语义③覆盖（upsert :182-184 对任意终态事件重置 status/finished_at），不丢最终真值。"
++      },
++      {
++        "item": "message 覆盖旧值（sweep 无条件写 _RUN_CLOSED_REASON）",
++        "verdict": "可接受",
++        "reason": "仅作用于非终态（running）行，被覆盖的是进行中间歇性 message；收口原因文案信息量更高，且属设计声明的 Optional latest-wins 既有语义内。"
++      },
++      {
++        "item": "放弃读端治标方案（终态 run 的 running 任务渲染为停止）",
++        "verdict": "可接受",
++        "reason": "治标理由成立——脏数据永存、导出/其它消费方仍见 running；写侧收口 + 启动 sweep 自愈存量（47e2ff1a 的 17 条重启即修）是正解。"
++      },
++      {
++        "item": "放弃会话级对账",
++        "verdict": "可接受",
++        "reason": "改动面大且治不了存量；现有两函数方案已覆盖增量（close）与存量（启动）两个面。"
++      }
++    ],
++    "protectionClaims": {
++      "close同事务commit前": "核实为真：close_run_steps.py:135 finalize 调用位于 :142 await svc._session.commit() 之前，同事务；且 run 行经 :180 with_for_update 行锁读入。幂等 no-op 分支（已终态回滚返回，:106）不涉及清扫——首次成功 close 已清扫，语义自洽。",
++      "启动兜底失败不阻塞": "核实为真：service.py:1448-1455 try/except log.warning；main.py:153-157 lifespan 外层再 try/except log.exception，启动继续。复审增量（db50e8832）：except 首行补 await self._session.rollback()——P3-2 收口，session 不留 aborted 态，同 session 后续启动逻辑（gate reconcile）不再被连带跳过。",
++      "sweep自带commit的边界安全": "核实安全：cleanup_stale_runs 调用时序上 _cleanup_stale_runs_impl 逐轮自行 commit（:2571）、_deferred_run_ids 只读，sweep 的 commit 不会捎带提交无关挂起写；原残留边界（P3-2 失败不回滚）已由 db50e8832 修复。"
++    },
++    "generators": "无涉及——HTTP API/DTO/表结构/前端零改动（design 接口契约声明与 diff 文件清单一致：仅 agent_task_store.py、close_run_steps.py、agent/service.py、测试文件），无 OpenAPI/api-types 生成物需同步。",
++    "workspaceState": "初评审 HEAD=006e98e14ec22aac9d2cec3cfb71347571ea1b38；复审 HEAD=db50e88325f0a4c1b041dff9666ece51d4f15a14，增量 006e98e14..db50e8832 恰为评审修复提交（2 文件 +12/-1：agent_task_store.py upsert 加 with_for_update、agent/service.py 兜底 except 补 rollback），无夹带。git status 代码文件零改动（仅无关 .sillyspec 流程件差异），工作区实态即 db50e8832 实态。change.patch（9 个 diff）为首轮交付冻结件，复审增量在其后单独成提交。",
++    "testExecutionNote": "只读纪律（禁修改文件）下未运行 pytest（避免 __pycache__/.pytest_cache 副作用）；三用例断言均为真实落库重查（select AgentSessionTask）非 mock，测试辅助函数（_event/_task_rows/_admin_id/_create_runtime/_create_session_with_run）存在且被同文件既有用例共用。"
++  }
++}
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index f2c986539..6fcaa18b9 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -1442,6 +1442,21 @@ class AgentService:
+                 grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
+                 tracked_runs=len(deferred),
+             )
++        # 2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但其
++        # agent_session_task 行仍 running 的存量（历史收口无清扫 / 重启判死
++        # 路径不经 daemon 收口）批量收口 stopped；失败仅日志不阻塞启动。
++        try:
++            from app.modules.daemon.agent_task_store import sweep_orphan_running_tasks
++
++            swept = await sweep_orphan_running_tasks(self._session)
++            if swept:
++                log.info("startup_orphan_task_sweep", swept_tasks=swept)
++        except Exception as exc:
++            # 评审 P3-2 修复：sweep 失败时回滚本事务——session 不留 aborted 态，
++            # 免得同 session 的后续启动逻辑（gate reconcile 等）撞
++            # PendingRollbackError 被连带跳过；回滚后仅日志，不阻塞启动。
++            await self._session.rollback()
++            log.warning("startup_orphan_task_sweep_failed", error=str(exc))
+         return cleaned
+ 
+     # ------------------------------------------------------------------
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index d003cd9dd..1e8bc399a 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -24,11 +24,13 @@ insert-or-update 单行写入（R-03 控写放大，刻意不做事件流水表
+ 
+ from __future__ import annotations
+ 
++import uuid
+ from datetime import UTC, datetime
+ 
+-from sqlalchemy import select
++from sqlalchemy import select, update
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
++from app.modules.agent.model import AgentRun
+ from app.modules.daemon.model import AgentSessionTask
+ from app.modules.daemon.schema import AgentTaskStatusEvent
+ 
+@@ -36,6 +38,76 @@ from app.modules.daemon.schema import AgentTaskStatusEvent
+ # 前端归约的终态吸收态一致）。
+ _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"})
+ 
++# 2026-10-10-run-close-task-sweep：轮终态清扫的可读原因（任务列表 message 列）。
++_RUN_CLOSED_REASON = "轮次已结束，任务未上报终态"
++
++
++async def finalize_running_tasks_for_run(
++    session: AsyncSession,
++    *,
++    run_id: uuid.UUID,
++    now: datetime | None = None,
++) -> int:
++    """2026-10-10-run-close-task-sweep：把一个 run 的非终态任务行批量收口 stopped。
++
++    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理被放弃/未上报终态
++    时 agent_session_task 永卡 running（17 条），任务列表在会话结束后仍显示
++    「进行中」。run 终态后其任务不可能仍合法运行——调用方（close_interactive_run
++    同事务 / 启动兜底清扫）以本函数收口。已终态行不触碰（终态定格语义①③不破坏）；
++    upsert 语义②天然幂等（清扫后迟到的 running 心跳不复活）。
++
++    Returns:
++        实际收口的行数。
++    """
++    result = await session.execute(
++        update(AgentSessionTask)
++        .where(
++            AgentSessionTask.run_id == run_id,
++            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
++        )
++        .values(
++            status="stopped",
++            finished_at=now or datetime.now(UTC),
++            updated_at=now or datetime.now(UTC),
++            message=_RUN_CLOSED_REASON,
++        )
++    )
++    return int(result.rowcount or 0)
++
++
++async def sweep_orphan_running_tasks(session: AsyncSession) -> int:
++    """2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但任务仍 running 的行。
++
++    自愈两类存量：①历史收口无清扫（close_interactive_run 接清扫前的旧数据）；
++    ②后端重启判死路径（cleanup_stale_runs 把 running run 翻 failed）不经
++    daemon 收口、无 task 事件。仅扫 run 已终态（TERMINAL_TURN_STATUSES）的行——
++    running run 的任务是活跃心跳，不误伤。
++
++    Returns:
++        实际收口的行数。
++    """
++    # late import 防 agent ↔ daemon 循环依赖（对齐本模块 upsert 的调用方惯例）。
++    from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
++
++    result = await session.execute(
++        update(AgentSessionTask)
++        .where(
++            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
++            AgentSessionTask.run_id.in_(
++                select(AgentRun.id).where(AgentRun.status.in_(TERMINAL_TURN_STATUSES))
++            ),
++        )
++        .values(
++            status="stopped",
++            finished_at=datetime.now(UTC),
++            updated_at=datetime.now(UTC),
++            message=_RUN_CLOSED_REASON,
++        )
++    )
++    swept = int(result.rowcount or 0)
++    await session.commit()
++    return swept
++
+ 
+ def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:
+     """收集事件中非 None 的 Optional 契约字段（语义④的覆盖集，键=行列名）。
+@@ -67,12 +139,19 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent)
+     调用方旁路 except，下一次事件即恢复单行，无需在此重试。
+     """
+     now = datetime.now(UTC)
++    # 评审 P3-1 修复（2026-10-10-run-close-task-sweep）：FOR UPDATE 行锁读——
++    # 与 close 清扫（持 run 行锁后 UPDATE 本表）的跨 commit 并发交错中，无锁
++    # SELECT 快照可能读过期 running（close 已 commit stopped），随后 UPDATE 把
++    # stopped 覆写回 running（丢失更新 + 残留 finished_at）。行锁串行化后读到
++    # 的必是已提交终值，语义②「迟到 running 不复活」对在途事件同样成立。
+     row = (
+         await session.execute(
+-            select(AgentSessionTask).where(
++            select(AgentSessionTask)
++            .where(
+                 AgentSessionTask.session_id == event.session_id,
+                 AgentSessionTask.task_id == event.task_id,
+             )
++            .with_for_update()
+         )
+     ).scalar_one_or_none()
+     overrides = _non_none_overrides(event)
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 25bb541b0..809f73ee4 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -126,6 +126,19 @@ async def close_interactive_run(
+         result_summary=result_summary,
+     )
+     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
++    # 2026-10-10-run-close-task-sweep：同事务收口该 run 的非终态任务行——子代理
++    # 被放弃/未上报终态时 agent_session_task 永卡 running（会话 47e2ff1a run
++    # 5e485ba2 实证 17 条），任务列表在会话结束后仍显示「进行中」。已终态行
++    # 不触碰；清扫后迟到 running 心跳被 upsert 终态吸收挡下（语义②）。
++    from app.modules.daemon.agent_task_store import finalize_running_tasks_for_run
++
++    swept_tasks = await finalize_running_tasks_for_run(svc._session, run_id=agent_run.id, now=now)
++    if swept_tasks:
++        _rsvc.log.info(
++            "run_close_task_sweep",
++            agent_run_id=str(agent_run.id),
++            swept_tasks=swept_tasks,
++        )
+     await svc._session.commit()
+     await svc._session.refresh(agent_run)
+     await _close_post_commit(
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index 2e1587dfb..16e810479 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -867,3 +867,94 @@ class TestSessionDeleteCascade:
+             )
+         ).scalar_one()
+         assert count_after == 0
++
++
++# ── 2026-10-10-run-close-task-sweep：run 终态任务清扫 ────────────────────────
++
++
++class TestRunCloseTaskSweep:
++    """finalize_running_tasks_for_run / sweep_orphan_running_tasks 行为钉死。
++
++    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理未上报终态时
++    agent_session_task 永卡 running，任务列表在会话结束后仍显示「进行中」。
++    """
++
++    @pytest.mark.asyncio
++    async def test_finalize_sweeps_running_to_stopped_terminal_untouched(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        from app.modules.daemon.agent_task_store import (
++            finalize_running_tasks_for_run,
++            upsert_agent_task,
++        )
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-run"))
++        await upsert_agent_task(
++            db_session, _event(ag_session.id, run.id, "t-done", status="completed")
++        )
++
++        swept = await finalize_running_tasks_for_run(db_session, run_id=run.id)
++
++        assert swept == 1
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-run"].status == "stopped"
++        assert rows["t-run"].finished_at is not None
++        assert "轮次已结束" in (rows["t-run"].message or "")
++        # 已终态行不触碰（终态定格不破坏）。
++        assert rows["t-done"].status == "completed"
++
++    @pytest.mark.asyncio
++    async def test_finalize_after_sweep_running_heartbeat_no_revive(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """清扫后迟到的 running 心跳不复活任务（upsert 语义② 终态吸收）。"""
++        from app.modules.daemon.agent_task_store import (
++            finalize_running_tasks_for_run,
++            upsert_agent_task,
++        )
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
++        await finalize_running_tasks_for_run(db_session, run_id=run.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
++
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-x"].status == "stopped"
++
++    @pytest.mark.asyncio
++    async def test_sweep_orphans_terminal_run_only(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """启动兜底：终态 run 的 running 任务收口；running run 的任务不误扫。"""
++        from app.modules.agent.model import AgentRun
++        from app.modules.daemon.agent_task_store import (
++            sweep_orphan_running_tasks,
++            upsert_agent_task,
++        )
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, live_run = await _create_session_with_run(db_session, user_id, rt.id)
++        done_run = AgentRun(
++            id=uuid.uuid4(),
++            task_id=uuid.uuid4(),
++            agent_type="claude_code",
++            agent_session_id=ag_session.id,
++            status="completed",
++        )
++        db_session.add(done_run)
++        await db_session.commit()
++        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan"))
++        await upsert_agent_task(db_session, _event(ag_session.id, live_run.id, "t-live"))
++
++        swept = await sweep_orphan_running_tasks(db_session)
++
++        assert swept == 1
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-orphan"].status == "stopped"
++        assert rows["t-live"].status == "running"
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/design.md b/.sillyspec/changes/2026-10-10-run-close-task-sweep/design.md
+new file mode 100644
+index 000000000..9cc24b264
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:47:26.914Z
++---
++# 设计记录（Design Record）— 2026-10-10-run-close-task-sweep
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++线上实证（会话 47e2ff1a，run 5e485ba2 completed 09:00:41）：`agent_session_task` 17 条卡 running（最后更新停在 08:37，全部属该 run），任务列表在会话结束后仍显示子代理「进行中」。根因：该表只按 `agent_task_status` 事件 upsert（agent_task_store），run 终态的两条路径——close_interactive_run（daemon 收口）与 cleanup_stale_runs（重启判死）——都不清理其任务行，子代理被放弃/未上报终态时永卡 running。修法：agent_task_store 新增 `finalize_running_tasks_for_run`（单 run 批量 UPDATE running→stopped + 可读 message），close_interactive_run 在终态 commit 前同事务调用（原子：run 终态与任务收口同生共死）；新增 `sweep_orphan_running_tasks` 启动兜底（run 已终态但任务仍 running 的存量全量收口，自愈历史脏数据——47e2ff1a 的 17 条在下次部署重启后自动修复，无需手工 SQL），挂在 cleanup_stale_runs 尾部 try/except。不选「读端把终态 run 的 running 任务渲染为停止」——治标且脏数据永存。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `agent_task_store` 新增两个导出 async 函数：`finalize_running_tasks_for_run(session, *, run_id, now=None) -> int`、`sweep_orphan_running_tasks(session) -> int`（后者自带 commit）。
++- `close_interactive_run` 行为增强：终态同事务多一步任务清扫（新日志事件 run_close_task_sweep）；对外签名不变。
++- `AgentService.cleanup_stale_runs` 行为增强：尾部追加兜底清扫（新日志 startup_orphan_task_sweep）；返回值语义不变（仍返回 stale run 数）。
++- HTTP API / 表结构 / 前端零改动（任务端点读到的 status 自然变 stopped）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/daemon/agent_task_store.py | 新增 finalize_running_tasks_for_run + sweep_orphan_running_tasks |
++| 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | close_interactive_run 终态 commit 前接入清扫（同事务） |
++| 修改 | backend/app/modules/agent/service.py | cleanup_stale_runs 尾部接入启动兜底清扫 |
++| 修改 | backend/app/modules/daemon/tests/test_agent_session_tasks.py | TestRunCloseTaskSweep 三用例 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。清扫后迟到的 running 事件被 upsert 语义②（终态吸收）整行跳过——任务不复活（test_finalize_after_sweep_running_heartbeat_no_revive 钉死）；迟到的真实终态事件（completed/failed）仍可覆盖 stopped（语义③ 异种终态 latest-wins），信息不失真。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++close 路径持 run 行 FOR UPDATE 后清扫（同事务），与并发 upsert 的竞争由 UPDATE 行级锁串行化；启动兜底与 daemon 收口并发时二者都写 stopped，幂等收敛；rowcount 仅作日志观测。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。清扫与 run 终态同事务（close 失败回滚则清扫一并回滚，不产生「run running 但任务 stopped」的中间态）；启动兜底独立 commit、失败仅日志不阻塞启动。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。两函数均按 run_id / 「run 已终态」限定行集，不触碰其它会话；无跨实例协调面（多 backend 实例并发兜底幂等收敛为 stopped）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：daemon 对「子代理实际还在跑」的极窄窗口（run 收口瞬间任务仍在收尾事件在途）会被提前收口为 stopped——但 run 已终态意味着该轮进程已结束，任务不可能再产出合法结果，收口语义正确；迟到终态事件仍可覆盖（乱序问）。
++- 放弃方案「读端把终态 run 的 running 任务渲染为停止」：治标——脏数据永存、导出/其它消费方仍见 running；放弃「给 upsert 加会话级对账」：面大且治不了存量。
++- 已知残留：message 覆盖旧值（Optional 字段 latest-wins 既有语义内，可接受）。
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/proposal.md b/.sillyspec/changes/2026-10-10-run-close-task-sweep/proposal.md
+new file mode 100644
+index 000000000..d8cc35891
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:51:05.941Z
++---
++# 提案书（Proposal）— 2026-10-10-run-close-task-sweep
++
++## 动机
++
++任务原话转写：会话已结束但子代理任务仍显示「进行中」（线上会话 47e2ff1a 实证：两个 run 均 completed，agent_session_task 表 17 条卡 running，最后更新停在 run 结束前 20+ 分钟）。根因：agent_session_task 只按 agent_task_status 事件 upsert（agent_task_store），run 终态收口（close_interactive_run）与后端重启判死（cleanup_stale_runs）均不清理该 run 的非终态任务行——子代理未上报终态（被放弃/中断）时永远卡 running。
++成功标准：
++- close_interactive_run 收口时同事务把该 run 的非终态 agent_session_task 行批量收口为 stopped（附可读 message，finished_at/updated_at 同步置位）
++- 后端启动清理（cleanup_stale_runs）追加兜底清扫：run 已终态但其任务仍 running 的行全量收口（自愈存量脏数据，47e2ff1a 的 17 条在下次部署重启后自动修复）
++- 已终态任务行不被清扫触碰；running run 的任务不被误扫
++- 新单测覆盖：finalize 单 run 收口 / 启动兜底清扫（终态 run 扫、running run 不扫）/ close 链路接入；既有 agent_session_tasks 测试全绿 + ruff/mypy 过
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. close_interactive_run 收口时同事务把该 run 的非终态 agent_session_task 行批量收口为 stopped（附可读 message，finished_at/updated_at 同步置位）
++2. 后端启动清理（cleanup_stale_runs）追加兜底清扫：run 已终态但其任务仍 running 的行全量收口（自愈存量脏数据，47e2ff1a 的 17 条在下次部署重启后自动修复）
++3. 已终态任务行不被清扫触碰；running run 的任务不被误扫
++4. 新单测覆盖：finalize 单 run 收口 / 启动兜底清扫（终态 run 扫、running run 不扫）/ close 链路接入；既有 agent_session_tasks 测试全绿 + ruff/mypy 过
++
++## 成功标准（可验证）
++
++1. close_interactive_run 收口时同事务把该 run 的非终态 agent_session_task 行批量收口为 stopped（附可读 message，finished_at/updated_at 同步置位）
++2. 后端启动清理（cleanup_stale_runs）追加兜底清扫：run 已终态但其任务仍 running 的行全量收口（自愈存量脏数据，47e2ff1a 的 17 条在下次部署重启后自动修复）
++3. 已终态任务行不被清扫触碰；running run 的任务不被误扫
++4. 新单测覆盖：finalize 单 run 收口 / 启动兜底清扫（终态 run 扫、running run 不扫）/ close 链路接入；既有 agent_session_tasks 测试全绿 + ruff/mypy 过
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/requirements.md b/.sillyspec/changes/2026-10-10-run-close-task-sweep/requirements.md
+new file mode 100644
+index 000000000..83a41fd6a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/requirements.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:47:26.914Z
++---
++# 需求规格（Requirements）— 2026-10-10-run-close-task-sweep
++
++## 功能需求
++
++### FR-01: close_interactive_run 同事务收口该 run 的非终态任务行
++
++- run 终态收口时必须在**同一事务**内把该 run 的 `agent_session_task` 非终态行（status ∉ {completed, failed, stopped}）批量收口为 `stopped`，附可读 message（「轮次已结束，任务未上报终态」），`finished_at`/`updated_at` 同步置位；已终态行必须不被触碰；清扫后迟到的 running 心跳必须被 upsert 终态吸收挡下（不复活）。
++
++#### 场景：子代理未上报终态（线上 47e2ff1a 实证）
++
++- Given 一个 run 执行中派出子代理任务（running 行），run 收口 completed 而子代理未上报终态
++- When close_interactive_run 落终态
++- Then 该任务行同事务变 stopped（含 message 与 finished_at），任务列表不再显示「进行中」
++
++### FR-02: 启动兜底清扫（自愈存量脏数据）
++
++- 后端启动清理（cleanup_stale_runs）必须追加兜底：`agent_session_task` 中 status 非终态且其 run 已终态（TERMINAL_TURN_STATUSES）的行全量收口 stopped；running run 的任务行必须不被误扫；清扫失败必须仅记日志不阻塞启动。
++
++#### 场景：部署重启自愈存量
++
++- Given 存量脏数据（如 47e2ff1a 的 17 条卡 running，run 已 completed）
++- When 后端部署重启执行启动清理
++- Then 这 17 条自动变 stopped（message 注明原因），无需手工 SQL
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_finalize_sweeps_running_to_stopped_terminal_untouched」
++FR-02: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_orphans_terminal_run_only」
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/tasks.md b/.sillyspec/changes/2026-10-10-run-close-task-sweep/tasks.md
+new file mode 100644
+index 000000000..20c2c0964
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:47:26.914Z
++---
++# 任务注册表（Tasks）— 2026-10-10-run-close-task-sweep
++
++- [x] task-01: agent_task_store 新增 finalize_running_tasks_for_run（单 run 批量 running→stopped + message）——用例「test_finalize_sweeps_running_to_stopped_terminal_untouched」（已终态不触碰 + message/finished_at 断言）
++- [x] task-02: close_interactive_run 终态 commit 前同事务接入清扫——close 回归 test_close_interactive_run_session_status / auto_recover_integration / e2e_model_usage 13/13 绿（接线行为由 task-01 函数级用例 + 回归覆盖）
++- [x] task-03: sweep_orphan_running_tasks 启动兜底（run 终态扫 / running 不误扫）+ cleanup_stale_runs 接入——用例「test_sweep_orphans_terminal_run_only」
++- [x] task-04: 迟到心跳不复活（upsert 终态吸收）——用例「test_finalize_after_sweep_running_heartbeat_no_revive」；全文件 21/21 绿 + ruff/format/mypy 零错
+diff --git a/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json.superseded-20261010T160543 b/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json.superseded-20261010T160543
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-run-close-task-sweep/review.json.superseded-20261010T160543
+@@ -0,0 +1,98 @@
++{
++  "schemaVersion": 1,
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "db50e88325f0a4c1b041dff9666ece51d4f15a14",
++  "reviewedAt": "2026-10-10T16:04:38Z",
++  "summary": "后端修复承诺与代码实态三方一致（FR↔实现↔测试）。finalize_running_tasks_for_run / sweep_orphan_running_tasks 两个新函数的 where 条件严格限定『非终态 + 本 run』/『非终态 + run 已终态』，已终态不触碰、running run 不误扫均有代码与真实落库断言支撑；close 接入确在 FOR UPDATE 行锁事务内、commit 前（close_run_steps.py:135 调用、:142 commit、:180 with_for_update）；启动兜底 try/except 包裹且 main.py 外层再兜一层，失败不阻塞启动；sweep 自带 commit 的调用时点无其它挂起写（_cleanup_stale_runs_impl 逐轮自行 commit、_deferred_run_ids 只读），边界安全。初评审两个 P3（并发缝隙 / 故障路径残留）均已在复审对象 db50e8832 中修复并核实（见 findings 各 resolution 及 P3-R1），并发维改观为 ok，verdict 维持 PASS。只读纪律下未执行测试（无 __pycache__/.pytest_cache 副作用；提交信息自述 27/27 绿未复跑验证），全部结论为静态代码核对。",
++  "findings": [
++    {
++      "id": "P3-1",
++      "severity": "P3",
++      "title": "upsert 更新路径无终态守卫：与 close 清扫并发交错的在途 running 心跳可把 stopped 覆写回 running（丢失更新）",
++      "evidence": "backend/app/modules/daemon/agent_task_store.py upsert_agent_task（:142-187）：先 SELECT 读行（READ COMMITTED 快照），语义②守卫基于该快照判断（:170），随后 ORM 逐字段赋值 + commit 刷出 UPDATE ... WHERE id=X，WHERE 无 status 终态守卫。交错序列：upsert SELECT（见 running）→ close 清扫 UPDATE 置 stopped 并 commit（close_run_steps.py:135/:142）→ upsert 的 UPDATE 落锁写 status='running' 并 commit → 任务复活（且残留 finished_at 旧值，行内不一致）。设计并发问『由 UPDATE 行级锁串行化』只保证写-写不交错，不保证最终值序——若 upsert 写在后则复活；乱序问的『清扫后迟到 running 不复活』对顺序迟到成立（语义②生效前提是读发生在清扫 commit 之后），对跨 commit 的在途事件不成立。测试 test_finalize_after_sweep_running_heartbeat_no_revive 为顺序执行，不覆盖此交错。",
++      "impact": "极窄窗口（该任务的事件处理读-写跨 close commit，毫秒级）；复活后无收口路径，需等下次重启 sweep 自愈。与设计『任务不复活』的全称承诺存在缝隙。",
++      "resolution": "已修复：db50e8832 将 upsert 的行 SELECT 改为 .with_for_update() 行锁读（复审核实，见 P3-R1）。",
++      "suggestion": "upsert 更新路径对 running 事件改带守卫的条件 UPDATE（WHERE status NOT IN 终态）或 SELECT ... WITH FOR UPDATE（读会阻塞至 close commit 后见到 stopped，语义②自然吸收）。"
++    },
++    {
++      "id": "P3-2",
++      "severity": "P3",
++      "title": "启动兜底清扫失败路径不回滚调用方 session：同 session 的后续启动任务（gate reconcile）会撞 PendingRollbackError 被跳过",
++      "evidence": "backend/app/modules/agent/service.py:1448-1455 except 仅 log.warning 不 rollback；sweep_orphan_running_tasks 自身 UPDATE 抛错时事务处于 aborted 态。main.py:158-170 同一 session 继续执行 reconcile_pending_gate_decisions（自带 try/except，失败仅日志）。FR-02『失败仅记日志不阻塞启动』字面满足（启动继续），但代价是同一故障场景下 gate 启动对账被连带跳过。",
++      "impact": "仅在清扫 UPDATE 本身抛 DB 错（DB 异常/迁移不符等）的条件下降级；启动不阻塞、有日志。",
++      "suggestion": "except 分支补 await self._session.rollback()（或在 sweep 内部失败时自行 rollback），恢复 session 可用性。",
++      "resolution": "已修复：db50e8832 在 except 首行补 await self._session.rollback()（复审核实）。"
++    },
++    {
++      "id": "P3-R1",
++      "severity": "P3",
++      "title": "复审：P3-1/P3-2 修复已在 db50e8832 核实（增量 006e98e14..db50e8832，2 文件 +12/-1，无其它 delta）",
++      "evidence": "P3-1：upsert_agent_task 的 SELECT 加 .with_for_update()（agent_task_store.py，db50e8832 hunk）——两种交错序均正确收敛：①upsert 先阻塞在 close 清扫持有的任务行锁上，读到的必是已 commit 的 stopped，语义②整行吸收不复活（原丢失更新路径消除）；②upsert 先持锁写 running 提交，close 的 finalize UPDATE 后落锁置 stopped（终值正确）。无新增死锁面：close 锁序 AgentRun 行→AgentSessionTask 行，upsert 只锁任务行不触 AgentRun，无环。首插缺行场景仍走唯一约束兜底（不变）。SQLite 忽略 FOR UPDATE 但其写者本就全库串行，PG/MySQL 行锁生效——三平台行为安全。P3-2：agent/service.py 兜底 except 首行补 await self._session.rollback()（db50e8832 hunk）——session 不留 aborted 态，gate reconcile 不再被连带跳过；若 rollback 本身抛错（连接已坏），main.py 外层 try/except 仍兜住，启动不阻塞。",
++      "impact": "两项 P3 均收口；未发现修复引入的新问题（锁序/平台差异/异常路径已核）。",
++      "suggestion": "无（并发交错属难以确定性测试的场景，代码级核实已足够；后续若加集成级并发用例更好）。"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "detail": {
++    "dimensionRationale": {
++      "乱序": "顺序迟到场景承诺为真且被钉死：upsert_agent_task :170-171 行已终态再收 running 整行跳过（不写、不 commit、updated_at 不刷）——代码事实；迟到的真实终态（completed/failed）仍可经语义③覆盖 stopped（:182-184 置 finished_at），信息不失真。测试 test_finalize_after_sweep_running_heartbeat_no_revive 真实落库断言。跨 commit 在途交错归并发维（P3-1）。",
++      "并发": "close 路径承诺属实：run 行 FOR UPDATE（close_run_steps.py:180）后同事务清扫（:135）、commit（:142）前，原子性成立；两个清扫体（启动 sweep 与 close）都写 stopped 幂等收敛；rowcount 仅日志（两调用点均只 log）。原缝隙（P3-1：close 清扫 vs 在途 upsert 丢失更新）已由 db50e8832 修复：upsert 的 SELECT 改 .with_for_update() 行锁读，两种交错序终值均正确（upsert 后读见 stopped 被语义②吸收 / finalize 后落锁置 stopped），且锁序无环不引入死锁——复审后并发维改观为 ok，详见 findings P3-R1。",
++      "切换": "清扫与 run 终态同事务（close 失败回滚则清扫一并回滚，不产生『run running 但任务 stopped』中间态）——commit 前接入位置核实；启动兜底独立 commit（agent_task_store.py:108），失败 try/except 双层（service.py:1448 + main.py:153）不阻塞启动。残留边界见 P3-2。",
++      "作用域": "finalize 限定 run_id==参数（:65）；sweep 限定 run_id IN (AgentRun.status ∈ TERMINAL_TURN_STATUSES 子查询)（:96-98），TERMINAL_TURN_STATUSES={completed,failed,killed,cancelled}（session/service/__init__.py:102）完整覆盖 close 收口（completed/failed）与重启判死（failed）两路径；running run 任务行不命中子查询不误扫（测试 t-live 断言）。行集按全局唯一 run_id 限定，无跨会话/跨工作区串台；多实例并发兜底幂等收敛 stopped。"
++    },
++    "frMapping": [
++      {
++        "fr": "FR-01",
++        "implementation": "agent_task_store.py finalize_running_tasks_for_run（:45-75）：UPDATE where run_id+status ∉ {completed,failed,stopped} → stopped + message『轮次已结束，任务未上报终态』+ finished_at/updated_at；close_run_steps.py:135 在 _close_flip_session 之后、svc._session.commit()（:142）之前同事务调用，now 复用 run 终态时点。",
++        "test": "test_agent_session_tasks.py:883 test_finalize_sweeps_running_to_stopped_terminal_untouched——真实 upsert 两行（running/completed）后 finalize，重查落库行断言 swept==1、t-run 变 stopped、finished_at 非空、message 含『轮次已结束』、t-done 保持 completed。与 requirements.md 绑定行逐字一致。"
++      },
++      {
++        "fr": "FR-02",
++        "implementation": "agent_task_store.py sweep_orphan_running_tasks（:78-109）：非终态 AND run_id IN 终态 run 子查询 → stopped，自带 commit；agent/service.py:1445-1455 cleanup_stale_runs 尾部 try/except 接入，失败仅日志，返回值语义不变（仍 return cleaned）。",
++        "test": "test_agent_session_tasks.py:930 test_sweep_orphans_terminal_run_only——同会话建 running run 与 completed run 各挂一条 running 任务，断言 swept==1、t-orphan 变 stopped、t-live 保持 running（running run 不误扫）。与 requirements.md 绑定行逐字一致。"
++      }
++    ],
++    "blindSpotChecks": {
++      "乱序四问": "见 dimensionRationale.乱序；设计引用的语义②代码事实核对无误（agent_task_store.py:170-171）。",
++      "并发四问": "见 dimensionRationale.并发；FOR UPDATE 同事务承诺真实，P3-1 为未覆盖缝隙。",
++      "切换四问": "同事务原子 + 独立 commit + 双层 try/except，承诺属实；P3-2 为故障路径残留。",
++      "作用域四问": "子查询用 run 终态集（含 killed/cancelled），非任务终态集——口径正确；无跨实例协调面，声明与代码一致。"
++    },
++    "disclosedTradeoffs": [
++      {
++        "item": "极窄窗口提前收口（run 收口瞬间任务收尾事件在途被收 stopped）",
++        "verdict": "可接受",
++        "reason": "run 终态即该轮进程已结束，任务不可能再产出合法结果；迟到真实终态事件仍可经语义③覆盖（upsert :182-184 对任意终态事件重置 status/finished_at），不丢最终真值。"
++      },
++      {
++        "item": "message 覆盖旧值（sweep 无条件写 _RUN_CLOSED_REASON）",
++        "verdict": "可接受",
++        "reason": "仅作用于非终态（running）行，被覆盖的是进行中间歇性 message；收口原因文案信息量更高，且属设计声明的 Optional latest-wins 既有语义内。"
++      },
++      {
++        "item": "放弃读端治标方案（终态 run 的 running 任务渲染为停止）",
++        "verdict": "可接受",
++        "reason": "治标理由成立——脏数据永存、导出/其它消费方仍见 running；写侧收口 + 启动 sweep 自愈存量（47e2ff1a 的 17 条重启即修）是正解。"
++      },
++      {
++        "item": "放弃会话级对账",
++        "verdict": "可接受",
++        "reason": "改动面大且治不了存量；现有两函数方案已覆盖增量（close）与存量（启动）两个面。"
++      }
++    ],
++    "protectionClaims": {
++      "close同事务commit前": "核实为真：close_run_steps.py:135 finalize 调用位于 :142 await svc._session.commit() 之前，同事务；且 run 行经 :180 with_for_update 行锁读入。幂等 no-op 分支（已终态回滚返回，:106）不涉及清扫——首次成功 close 已清扫，语义自洽。",
++      "启动兜底失败不阻塞": "核实为真：service.py:1448-1455 try/except log.warning；main.py:153-157 lifespan 外层再 try/except log.exception，启动继续。复审增量（db50e8832）：except 首行补 await self._session.rollback()——P3-2 收口，session 不留 aborted 态，同 session 后续启动逻辑（gate reconcile）不再被连带跳过。",
++      "sweep自带commit的边界安全": "核实安全：cleanup_stale_runs 调用时序上 _cleanup_stale_runs_impl 逐轮自行 commit（:2571）、_deferred_run_ids 只读，sweep 的 commit 不会捎带提交无关挂起写；原残留边界（P3-2 失败不回滚）已由 db50e8832 修复。"
++    },
++    "generators": "无涉及——HTTP API/DTO/表结构/前端零改动（design 接口契约声明与 diff 文件清单一致：仅 agent_task_store.py、close_run_steps.py、agent/service.py、测试文件），无 OpenAPI/api-types 生成物需同步。",
++    "workspaceState": "初评审 HEAD=006e98e14ec22aac9d2cec3cfb71347571ea1b38；复审 HEAD=db50e88325f0a4c1b041dff9666ece51d4f15a14，增量 006e98e14..db50e8832 恰为评审修复提交（2 文件 +12/-1：agent_task_store.py upsert 加 with_for_update、agent/service.py 兜底 except 补 rollback），无夹带。git status 代码文件零改动（仅无关 .sillyspec 流程件差异），工作区实态即 db50e8832 实态。change.patch（9 个 diff）为首轮交付冻结件，复审增量在其后单独成提交。",
++    "testExecutionNote": "只读纪律（禁修改文件）下未运行 pytest（避免 __pycache__/.pytest_cache 副作用）；三用例断言均为真实落库重查（select AgentSessionTask）非 mock，测试辅助函数（_event/_task_rows/_admin_id/_create_runtime/_create_session_with_run）存在且被同文件既有用例共用。"
++  }
++}
