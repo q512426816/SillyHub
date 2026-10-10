@@ -340,6 +340,107 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
  * 日志安全：warn/error 载荷只含路径 / 字段名 / api_format / 错误 message，
  * 永不含 api_key / daemonApiKey 明文。
  */
+/**
+ * codex per-session MCP server 配置条目（结构兼容 interactive/driver.js 的
+ * McpServerConfigForDriver；本写盘器按结构类型直传）。
+ */
+export interface CodexMcpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/**
+ * 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1）：把平台 MCP
+ * 配置表序列化为 config.toml [mcp_servers.*] 托管段并差量合并（纯函数，无 IO）。
+ *
+ * 序列化形态（codex CLI config.toml 官方 schema）：
+ *   [mcp_servers.<name>]
+ *   command = "<cmd>"
+ *   args = ["<a>", "<b>"]          （可选，字符串数组）
+ *   [mcp_servers.<name>.env]        （可选，KEY = "value" 子表）
+ *
+ * 托管语义：[mcp_servers.*] 命名空间为 daemon 独占（per-session 目录内的
+ * config.toml 由 daemon 管理，宿主全局 ~/.codex 不受影响）——现有 mcp_servers
+ * 段整段丢弃重写（防幽灵 server 残留），其余行（含 model 托管段与用户行）
+ * 原样保留。空表 → 返回 existing 原文（不动文件）。env 空对象不产生子表。
+ * 值转义复用 tomlString；数组/子表键名按 TOML 裸键规则（name 由 daemon 白名单
+ * 控制为安全标识符：sillyhub-daemon / sillyhub-file 等连字符形态合法）。
+ */
+export function mergeCodexMcpToml(
+  existing: string,
+  mcpServers: Record<string, CodexMcpServerConfig>,
+): string {
+  const names = Object.keys(mcpServers);
+  if (names.length === 0) return existing;
+  const lines = existing.split(/\r?\n/);
+  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') lines.pop();
+
+  const kept: string[] = [];
+  let inMcpNamespace = false;
+  for (const line of lines) {
+    const path = parseHeaderPath(line);
+    if (path !== null) {
+      inMcpNamespace = path[0] === 'mcp_servers';
+      if (!inMcpNamespace) kept.push(line);
+      continue;
+    }
+    if (inMcpNamespace) continue; // 旧 mcp_servers 段（含尾随空行/注释）整段丢弃
+    kept.push(line);
+  }
+  while (kept.length > 0 && kept[kept.length - 1]?.trim() === '') kept.pop();
+
+  const mcpBlock: string[] = [];
+  for (const name of names) {
+    const cfg = mcpServers[name];
+    if (cfg === undefined) continue;
+    mcpBlock.push(`[mcp_servers.${name}]`);
+    mcpBlock.push(`command = ${tomlString(cfg.command)}`);
+    if (cfg.args !== undefined && cfg.args.length > 0) {
+      const items = cfg.args.map((a) => tomlString(a)).join(', ');
+      mcpBlock.push(`args = [${items}]`);
+    }
+    const envKeys = cfg.env === undefined ? [] : Object.keys(cfg.env);
+    if (envKeys.length > 0) {
+      mcpBlock.push(`[mcp_servers.${name}.env]`);
+      for (const k of envKeys) {
+        mcpBlock.push(`${k} = ${tomlString(cfg.env?.[k] ?? '')}`);
+      }
+    }
+  }
+
+  const head = kept.length > 0 ? `${kept.join('\n')}\n\n` : '';
+  return `${head}${mcpBlock.join('\n')}\n`;
+}
+
+/**
+ * 2026-10-10-all-engines-mcp-injection task-06：写 per-session CODEX_HOME 内
+ * config.toml 的 [mcp_servers.*] 托管段（读 config.toml → mergeCodexMcpToml →
+ * writeFileAtomic）。空表跳过不写；写 IO 失败 throw（调用方 codex driver start
+ * 捕获降级 warn 不阻断 spawn——MCP 是增强能力）。本文件由 daemon 与本函数共同
+ * 管理（provider 托管段归 writeCodexHome，mcp_servers 段归本函数），两写路径
+ * 均为「读原文→差量合并→原子写」幂等形态。
+ */
+export async function writeCodexMcpServers(
+  codexHome: string,
+  mcpServers: Record<string, CodexMcpServerConfig>,
+): Promise<void> {
+  if (Object.keys(mcpServers).length === 0) return;
+  const path = join(codexHome, CONFIG_FILENAME);
+  const existing = await readTextIfExists(path);
+  const merged = mergeCodexMcpToml(existing, mcpServers);
+  try {
+    await writeFileAtomic(path, merged);
+  } catch (e) {
+    console.error('codex_mcp_config_write_failed', {
+      codexHome,
+      servers: Object.keys(mcpServers),
+      error: (e as Error)?.message ?? String(e),
+    });
+    throw e;
+  }
+}
+
 export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> {
   const { codexHome, provider, daemonApiKey } = input;
 
