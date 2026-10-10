@@ -766,3 +766,98 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-turn-speed-enrich-backfill-test
   status: active
+
+## FR-auto-frontend-157 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
+变更：2026-10-10-single-turn-nav-and-jump-head
+状态：active
+摘要：单轮会话导航可见；空轮次仍不渲染
+全文：.sillyspec/changes/archive/2026-10-10-single-turn-nav-and-jump-head/requirements.md#FR-01
+最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「单轮（1 条）entries 渲染导航并可点击跳转」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-single-turn-nav-and-jump-head
+  status: active
+
+## FR-auto-frontend-158 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
+变更：2026-10-10-single-turn-nav-and-jump-head
+状态：active
+摘要：移动端一致性
+全文：.sillyspec/changes/archive/2026-10-10-single-turn-nav-and-jump-head/requirements.md#FR-02
+最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「0 条 entries 不渲染导航（空态语义保持）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-single-turn-nav-and-jump-head
+  status: active
+
+## FR-auto-frontend-159 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
+变更：2026-10-10-single-turn-nav-and-jump-head
+状态：active
+摘要：点击直达开头；页上限兜底
+全文：.sillyspec/changes/archive/2026-10-10-single-turn-nav-and-jump-head/requirements.md#FR-03
+最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「点击回到会话开头：连续 before 翻页到头并定位顶部」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-single-turn-nav-and-jump-head
+  status: active
+
+## FR-auto-frontend-160 连续加载期间有可见 loading 状态；到头后入口消失
+变更：2026-10-10-single-turn-nav-and-jump-head
+状态：active
+摘要：loading 可见与消失
+全文：.sillyspec/changes/archive/2026-10-10-single-turn-nav-and-jump-head/requirements.md#FR-04
+最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「回到会话开头 loading 态与到头后入口消失」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-single-turn-nav-and-jump-head
+  status: active
+
+## FR-auto-frontend-161 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
+变更：2026-10-10-single-turn-nav-and-jump-head
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-10-single-turn-nav-and-jump-head/requirements.md#FR-05
+最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/turn-catalog.test.tsx「隐藏阈值改写：0 条隐藏 / 1 条起出现」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-single-turn-nav-and-jump-head
+  status: active

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-single-turn-nav-and-jump-head",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「单轮（1 条）entries 渲染导航并可点击跳转」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-single-turn-nav-and-jump-head"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「0 条 entries 不渲染导航（空态语义保持）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-single-turn-nav-and-jump-head"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「点击回到会话开头：连续 before 翻页到头并定位顶部」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-single-turn-nav-and-jump-head"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「回到会话开头 loading 态与到头后入口消失」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-single-turn-nav-and-jump-head"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-single-turn-nav-and-jump-head:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-catalog.test.tsx「隐藏阈值改写：0 条隐藏 / 1 条起出现」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-single-turn-nav-and-jump-head"
+    }
+  ]
+}

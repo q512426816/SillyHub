@@ -1,0 +1,802 @@
+diff --git a/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/flow-state.yaml b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/flow-state.yaml
+new file mode 100644
+index 000000000..ddb2247f4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/flow-state.yaml
+@@ -0,0 +1,26 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  线上会话（单轮 6969 行、活跃流）详情页：左侧轮次导航 MIN_ENTRIES=3 把单轮会话整条隐藏，用户不知道会话只有 1 轮也无跳转入口；触顶「加载更早」每页 400 行 +
++  锚定钉回原视口，慢服务器上体感「滚动不了、一直刷新、还是最后这点」，且重开面板进度归零，用户 24h 内重开 19 次。
++
++  成功标准：
++
++  - 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
++
++  - 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
++
++  - 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
++
++  - 连续加载期间有可见 loading 状态；到头后入口消失
++
++  - 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
++autopilot: true
++baseline_commit: 032d3085c6dc79902e1843cd2adeeb4dceb536af
++updatedAt: '2026-10-10T11:30:14.861Z'
++baseline_sha256: 3e1a87b6fafd6246fc53e75722ba29f1f56fe920779f2aa5443bcde9e84ca0f3
++
+diff --git a/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts b/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
+new file mode 100644
+index 000000000..77c3165e6
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts
+@@ -0,0 +1,110 @@
++/**
++ * 2026-10-10-turn-speed-enrich-backfill-test（FR-01）：enrichDisplayTurns 对
++ * apiDurationMs 的历史回填行为锁定——上变更 2026-10-10-session-turn-token-speed
++ * 独立评审 P3 补课。锁三个语义：?? 链只补缺（实时值优先）、缺失兜底 null、
++ * 身份稳定守卫（引用稳定防流式 memo 击穿）。纯函数直测，实现零改动。
++ */
++import { describe, it, expect } from "vitest";
++
++import {
++  enrichDisplayTurns,
++} from "@/components/daemon/session-panel/page-helpers";
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import type { SessionRunRead } from "@/lib/daemon/sessions";
++
++function makeTurn(over: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "继续任务",
++    output: "好的，继续。",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: 1250,
++    ctxTokens: null,
++    autoResumeOf: null,
++    errorDetail: null,
++    segments: [],
++    turnStartedAt: 12345,
++    // 预置与快照派生值一致的字段（身份稳定用例要求除目标字段外全等）。
++    whoLine: { profileName: null, agentName: "claude", providerName: null },
++    replyAt: null,
++    ...over,
++  };
++}
++
++function makeRun(over: Partial<SessionRunRead> = {}): SessionRunRead {
++  return {
++    id: "run-1",
++    created_at: "2026-10-10T00:00:00Z",
++    status: "completed",
++    user_id: null,
++    sender_name: null,
++    error_code: null,
++    failure_summary: null,
++    error_detail: null,
++    started_at: null,
++    finished_at: null,
++    exit_code: 0,
++    agent_profile_snapshot: null,
++    llm_provider_id: null,
++    input_tokens: null,
++    output_tokens: null,
++    ...over,
++  };
++}
++
++function enrich(turns: SessionTurnView[], runs: SessionRunRead[]) {
++  return enrichDisplayTurns(turns, new Map(runs.map((r) => [r.id, r])), [], "claude", null);
++}
++
++describe("enrichDisplayTurns — apiDurationMs 回填（FR-01）", () => {
++  it("快照回填历史轮：turn 无值 + 快照 duration_api_ms=12500 → 12500", () => {
++    const [enriched] = enrich(
++      [makeTurn()],
++      [makeRun({ duration_api_ms: 12500 })],
++    );
++    expect(enriched!.apiDurationMs).toBe(12500);
++  });
++
++  it("实时值优先：turn 已有 999，快照 12500 → 保持 999 不覆盖", () => {
++    const [enriched] = enrich(
++      [makeTurn({ apiDurationMs: 999 })],
++      [makeRun({ duration_api_ms: 12500 })],
++    );
++    expect(enriched!.apiDurationMs).toBe(999);
++  });
++
++  it("快照缺字段（undefined）→ 回填 null（不残留 undefined）", () => {
++    const [enriched] = enrich([makeTurn()], [makeRun({})]);
++    expect(enriched!.apiDurationMs).toBeNull();
++  });
++
++  it("runsMeta 未命中该 run → 原对象原引用返回", () => {
++    const turn = makeTurn();
++    const result = enrich([turn], [makeRun({ id: "run-other" })]);
++    expect(result[0]).toBe(turn);
++  });
++
++  it("全字段一致（含 apiDurationMs=12500）→ 返回原对象引用（身份稳定守卫）", () => {
++    const turn = makeTurn({ apiDurationMs: 12500 });
++    const result = enrich(
++      [turn],
++      [makeRun({ duration_api_ms: 12500 })],
++    );
++    expect(result[0]).toBe(turn);
++  });
++
++  it("仅 apiDurationMs 变化（null→12500）→ 返回新对象且值回填（不击穿其余引用）", () => {
++    const turn = makeTurn();
++    const result = enrich(
++      [turn],
++      [makeRun({ duration_api_ms: 12500 })],
++    );
++    expect(result[0]).not.toBe(turn);
++    expect(result[0]!.apiDurationMs).toBe(12500);
++    // ?? 链语义逐字段镜像：未变化字段引用保持（whoLine 原引用）。
++    expect(result[0]!.whoLine).toBe(turn.whoLine);
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index 2428f038d..390c3fe6b 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -1,5 +1,5 @@
+ import { describe, it, expect, beforeEach, vi } from "vitest";
+-import { act, render, screen, waitFor } from "@testing-library/react";
++import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import type { ReactNode } from "react";
+ import { SessionPanel } from "../session-panel";
+@@ -362,3 +362,80 @@ describe("scroll-up history integration", () => {
+     expect(el.style.overflowAnchor).toBe("none");
+   });
+ });
++
++// ── 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」一键连续翻页 ──
++// 依据 design.md（FR-03/FR-04）：顶部入口（hasEarlier 时渲染）→ 点击 interval
++// 轮询连续 loadEarlierOnce 直至到头 → 清 prepend 锚 + scrollTop=0 定位最早内容；
++// loading 态可见、到头后入口消失。触顶翻页/锚定/贴底跟随机制零改动（复用链路）。
++
++describe("回到会话开头（2026-10-10-single-turn-nav-and-jump-head）", () => {
++  it("点击回到会话开头：连续 before 翻页到头并定位顶部（FR-03）", async () => {
++    const initPage = makePage("init", PAGE_SIZE, 13 * 3600);
++    const older1 = makePage("o1", PAGE_SIZE, 11 * 3600);
++    // 末页不满页（100 < 400）→ 翻完 hasEarlier=false（到头）
++    const older2 = makePage("o2", 100, 9 * 3600);
++    const beforeCursors: string[] = [];
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string }) => {
++        if (!opts?.before) return initPage;
++        beforeCursors.push(opts.before);
++        return beforeCursors.length === 1 ? older1 : older2;
++      },
++    );
++    render(<Host sessionId="jh1" />);
++    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
++    // 入口渲染（hasEarlier=true）
++    await waitFor(() => expect(screen.getByTestId("session-jump-head")).toBeTruthy());
++    fireEvent.click(screen.getByTestId("session-jump-head"));
++    // 连续翻页：2 次 before 请求，游标单调递减（init 最旧 → o1 最旧）
++    await waitFor(() => expect(beforeCursors.length).toBe(2), { timeout: 5000 });
++    expect(beforeCursors[0]).toBe(initPage[0]!.timestamp);
++    expect(beforeCursors[1]).toBe(older1[0]!.timestamp);
++    expect(new Date(beforeCursors[1]!).getTime()).toBeLessThan(
++      new Date(beforeCursors[0]!).getTime(),
++    );
++    // 两页更早内容均 prepend 可见
++    await waitFor(() => expect(screen.getAllByText(/o2-msg/).length).toBeGreaterThan(0));
++    expect(screen.getAllByText(/o1-msg/).length).toBeGreaterThan(0);
++    // 到头定位：滚动容器回到顶部
++    await waitFor(() => {
++      const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
++      expect(el.scrollTop).toBe(0);
++    });
++    // 到头后入口消失（hasEarlier=false）
++    await waitFor(() => expect(screen.queryByTestId("session-jump-head")).toBeNull());
++  });
++
++  it("回到会话开头 loading 态可见，完成后恢复；连续加载到头后入口消失（FR-04）", async () => {
++    const initPage = makePage("ini2", PAGE_SIZE, 13 * 3600);
++    let resolveOlder: (() => void) | null = null;
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string }) => {
++        if (!opts?.before) return initPage;
++        // 末页可控挂起：窗口期内断言 loading 态
++        return new Promise((resolve) => {
++          resolveOlder = () => resolve(makePage("old2", 50, 9 * 3600));
++        });
++      },
++    );
++    render(<Host sessionId="jh2" />);
++    await waitFor(() => expect(screen.getAllByText(/ini2-msg/).length).toBeGreaterThan(0));
++    const btn = await screen.findByTestId("session-jump-head");
++    fireEvent.click(btn);
++    // 在途：入口转 loading + disabled
++    await waitFor(() => {
++      const loading = screen.getByTestId("session-jump-head");
++      expect(loading.textContent).toContain("正在回到会话开头");
++      expect(loading.hasAttribute("disabled")).toBe(true);
++    });
++    // 重复点击不重发（inflight 锁）
++    fireEvent.click(screen.getByTestId("session-jump-head"));
++    resolveOlder!();
++    await waitFor(() => expect(screen.queryByTestId("session-jump-head")).toBeNull());
++    // 仅一次 before 请求（重复点击被锁挡下）
++    const beforeCalls = sessionApi.getAgentSessionLogs.mock.calls.filter(
++      (c) => (c[1] as { before?: string } | undefined)?.before,
++    );
++    expect(beforeCalls).toHaveLength(1);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/page-helpers.tsx b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+index 1dfbaf31c..63b9c844c 100644
+--- a/frontend/src/components/daemon/session-panel/page-helpers.tsx
++++ b/frontend/src/components/daemon/session-panel/page-helpers.tsx
+@@ -30,7 +30,7 @@ import type {
+ } from "@/lib/api/llm-providers";
+ import { getProviderCaps } from "@/lib/provider-caps";
+ import type { ReactNode } from "react";
+-import { Loader2 } from "lucide-react";
++import { ArrowUpToLine, Loader2 } from "lucide-react";
+ import { isActiveTeamMission } from "@/components/daemon/team-task-block";
+ import { MENTION_PLACEHOLDER_HINT } from "./turn-state";
+ import type { listWorkspaces } from "@/lib/workspaces";
+@@ -215,6 +215,9 @@ export function enrichDisplayTurns(
+         // task-08（FR-01 / D-003）：ctx 历史回填（SessionRunRead.ctx_tokens，
+         // 历史 run 无 ctx 列值 → null → 环未知态）。
+         ctxTokens: t.ctxTokens ?? meta.ctx_tokens ?? null,
++        // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长历史回填
++        // （tok/s 分母；引擎未上报 / 旧数据 null → 轮尾不显示速度）。
++        apiDurationMs: t.apiDurationMs ?? meta.duration_api_ms ?? null,
+         // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
+         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
+         // task-09（FR-02）计时锚点：终态轮维持 ?? 链（turn 已有值优先——live 发送
+@@ -245,6 +248,7 @@ export function enrichDisplayTurns(
+         candidate.inputTokens !== t.inputTokens ||
+         candidate.outputTokens !== t.outputTokens ||
+         candidate.ctxTokens !== t.ctxTokens ||
++        candidate.apiDurationMs !== t.apiDurationMs ||
+         candidate.replyAt !== t.replyAt ||
+         candidate.turnStartedAt !== t.turnStartedAt ||
+         candidate.errorDetail !== t.errorDetail;
+@@ -742,6 +746,12 @@ export function renderHistoryAndLocalReport(o: {
+   localReportTurns: SessionTurnView[];
+   localReportOpen: boolean;
+   onToggleLocalReport: () => void;
++  /** 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」入口三件套——
++   *  hasEarlier=true 渲染；点击走 onJumpToHead（连续翻页拉全史）；loading 态
++   *  转圈。缺省（undefined）不渲染，既有调用面零影响。 */
++  hasEarlier?: boolean;
++  jumpHeadLoading?: boolean;
++  onJumpToHead?: () => void;
+ }): ReactNode {
+   const {
+     historyLoading,
+@@ -749,6 +759,9 @@ export function renderHistoryAndLocalReport(o: {
+     localReportTurns,
+     localReportOpen,
+     onToggleLocalReport,
++    hasEarlier,
++    jumpHeadLoading,
++    onJumpToHead,
+   } = o;
+   return (
+     <>
+@@ -761,6 +774,32 @@ export function renderHistoryAndLocalReport(o: {
+           正在加载更早消息…
+         </div>
+       )}
++      {/* 2026-10-10-single-turn-nav-and-jump-head：触顶翻页对超长会话（单轮数千
++          行 + 慢接口）体感「滚不动」，顶部提供「回到会话开头」一键连续翻页拉全
++          史并定位最早内容；hasEarlier=false（到头）后入口消失。 */}
++      {(hasEarlier || jumpHeadLoading) && onJumpToHead && (
++        <div className="flex shrink-0 justify-center py-1">
++          <button
++            type="button"
++            data-testid="session-jump-head"
++            onClick={onJumpToHead}
++            disabled={jumpHeadLoading}
++            className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-0.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-70"
++          >
++            {jumpHeadLoading ? (
++              <>
++                <Loader2 className="h-3 w-3 animate-spin" />
++                正在回到会话开头…
++              </>
++            ) : (
++              <>
++                <ArrowUpToLine className="h-3 w-3" />
++                回到会话开头
++              </>
++            )}
++          </button>
++        </div>
++      )}
+       {/* quick 本地 Agent 会话信息折叠：tool_report 激活后，CLI 上报历史轮收进
+           顶部小按钮（点击展开/收起），对话流只显示用户交互轮。 */}
+       {isToolReportActivated && localReportTurns.length > 0 && (
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 5b704aaf7..27275f095 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -679,6 +679,10 @@ export function SessionPanelPage({
+   // 初始历史改 limit=100 起步（HISTORY_PAGE_SIZE），时间线顶部「加载更早消息」
+   // 按钮 before 游标 prepend（resync after 增量不受影响——cursor 语义不变）。
+   const [historyLoading, setHistoryLoading] = useState(false);
++  // 2026-10-10-single-turn-nav-and-jump-head：「回到会话开头」连续翻页进行中
++  // （入口转圈 + disabled；随会话切换复位）。
++  const [jumpHeadLoading, setJumpHeadLoading] = useState(false);
++  const jumpHeadInflightRef = useRef(false);
+   const [hasEarlier, setHasEarlier] = useState(false);
+   const historyCursorRef = useRef<string | null>(null);
+   // task-06（2026-09-16-logs-cursor-tiebreaker）：复合游标 id 分量，与 ts 分量
+@@ -1032,6 +1036,10 @@ export function SessionPanelPage({
+     setHasEarlier(false);
+     setHistoryLoading(false);
+     historyLoadingRef.current = false;
++    // 2026-10-10-single-turn-nav-and-jump-head：回到开头循环跨会话即停——
++    // inflight 锁复位（循环 tick 内 epoch 校验兜底退出），loading 态复位。
++    jumpHeadInflightRef.current = false;
++    setJumpHeadLoading(false);
+     autoFillCountRef.current = 0;
+     setSearchOpen(false);
+     setSearchTerm("");
+@@ -1314,6 +1322,9 @@ export function SessionPanelPage({
+                     // task-08（FR-01）：ctx_tokens null 不覆盖已收值（终态保留实时
+                     // 最后写入——close_interactive_run 请求 DTO 不含 ctx_tokens）。
+                     ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
++                    // 2026-10-10-session-turn-token-speed FR-05：轮内 API 时长
++                    // （tok/s 分母）终态写入；null 不覆盖（与 ctx 同守卫口径）。
++                    apiDurationMs: env.duration_api_ms ?? turn.apiDurationMs ?? null,
+                   };
+                 },
+                 { clearCurrentRun: env.run_id! },
+@@ -1725,6 +1736,72 @@ export function SessionPanelPage({
+     );
+   }, []);
+ 
++  /** 2026-10-10-single-turn-nav-and-jump-head（FR-03/FR-04）：回到会话开头——
++   *  interval 轮询连续翻页（对齐 fallbackLoop 惯例：纯 async/await 循环生产环境
++   *  有冻结前科 ql-20260916-014），直至 hasEarlier=false（到头）或
++   *  JUMP_LOAD_EARLIER_MAX_PAGES 上限（toast 可再点续）。到头后清 prepend 滚动锚
++   *  （钉回 apply 判 pendingAnchorRef 已换即恒 false → watch interval 自清）并
++   *  双 rAF 后 scrollTop=0 定位最早内容；循环期 suppress 触顶自动加载（既有
++   *  R-02 竞争守卫），定位滚动事件派发完毕（1s 余量）再解除。每页经既有
++   *  loadEarlierOnce 链路（复合游标/纪元校验/prepend 装配零改动）。 */
++  const handleJumpToHead = useCallback(() => {
++    if (jumpHeadInflightRef.current || !hasEarlierRef.current) return;
++    jumpHeadInflightRef.current = true;
++    setJumpHeadLoading(true);
++    jumpSuppressLoadEarlierRef.current = true;
++    const epochAtStart = sessionEpochRef.current;
++    let pages = 0;
++    let timer: ReturnType<typeof setInterval> | undefined;
++    const stop = (reachedHead: boolean) => {
++      jumpHeadInflightRef.current = false;
++      if (timer !== undefined) clearInterval(timer);
++      if (!mountedRef.current || epochAtStart !== sessionEpochRef.current) {
++        setJumpHeadLoading(false);
++        jumpSuppressLoadEarlierRef.current = false;
++        return;
++      }
++      setJumpHeadLoading(false);
++      if (reachedHead) {
++        pendingAnchorRef.current = null;
++        requestAnimationFrame(() =>
++          requestAnimationFrame(() => {
++            // 经 scrollElQueryRef（渲染末段镜像 timelineScrollEl）取容器——
++            // 本回调声明位置早于 timelineScrollEl 定义，直引会 TDZ。
++            const el = scrollElQueryRef.current();
++            if (el) el.scrollTop = 0;
++          }),
++        );
++      }
++      // scrollTo 的 scroll 事件下一帧派发；suppress 延迟解除防触顶抢跑。
++      setTimeout(() => {
++        jumpSuppressLoadEarlierRef.current = false;
++      }, 1000);
++    };
++    const tick = () => {
++      if (!mountedRef.current || epochAtStart !== sessionEpochRef.current) {
++        stop(false);
++        return;
++      }
++      if (!hasEarlierRef.current) {
++        stop(true);
++        return;
++      }
++      if (pages >= JUMP_LOAD_EARLIER_MAX_PAGES) {
++        stop(false);
++        notify.warning(
++          `已连续加载 ${JUMP_LOAD_EARLIER_MAX_PAGES} 页仍未到达，可再次点击继续加载`,
++        );
++        return;
++      }
++      // 在途时不重复触发（loadEarlier 内部有锁，这里跳过本轮即可）
++      if (historyLoadingRef.current) return;
++      pages += 1;
++      void loadEarlierOnce();
++    };
++    tick(); // 首页立即发起（对齐 fallbackLoop 即时性），其后 40ms 间隔续翻。
++    timer = setInterval(tick, 40);
++  }, [loadEarlierOnce, notify]);
++
+   /** 视口补拉（触顶补口）：内容不满视口且可能还有更早 → 自动续拉一页。
+    *  守卫：容器存在且有布局高度（jsdom 无布局 scrollHeight=0 不触发）、
+    *  连拉上限 AUTO_FILL_MAX（防整段历史全被空渲染吞掉的极端批量请求；
+@@ -2807,6 +2884,7 @@ export function SessionPanelPage({
+             inputTokens: null,
+             outputTokens: null,
+             ctxTokens: null,
++            apiDurationMs: null,
+             errorDetail: null,
+             processItems: [],
+             // task-09（FR-02）：live 计时锚点 = 本地发送占位时刻（空段数组 =
+@@ -3452,6 +3530,7 @@ export function SessionPanelPage({
+             inputTokens: null,
+             outputTokens: null,
+             ctxTokens: null,
++            apiDurationMs: null,
+             errorDetail: null,
+             processItems: [],
+             // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。
+@@ -4022,6 +4101,10 @@ export function SessionPanelPage({
+         localReportTurns,
+         localReportOpen,
+         onToggleLocalReport: () => setLocalReportOpen((v) => !v),
++        // 2026-10-10-single-turn-nav-and-jump-head（FR-03/FR-04）：回到开头入口。
++        hasEarlier,
++        jumpHeadLoading,
++        onJumpToHead: handleJumpToHead,
+       })}
+       <TurnTimeline
+         suppressFollowBottom={jumpFollowSuppress}
+diff --git a/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx b/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
+index 3cd8c535b..472145705 100644
+--- a/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
++++ b/frontend/src/components/sessions/__tests__/turn-catalog.test.tsx
+@@ -111,29 +111,27 @@ function getTickLines(container: HTMLElement): HTMLElement[] {
+   );
+ }
+ 
+-// ── 0. 短会话隐藏（ql-20260909-005） ──────────────────────────────────────
++// ── 0. 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005
++//    <3 阈值放宽为 <1——单轮会话也显示轨道，仅空不渲染） ─────────────────────
+ 
+-describe("TurnCatalog 短会话隐藏（ql-20260909-005）", () => {
+-  it("entries < 3 → 整条轨道不渲染（0/1/2 条均隐藏）；3 条起出现", () => {
++describe("TurnCatalog 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head）", () => {
++  it("entries < 1 → 整条轨道不渲染（0 条隐藏）；1 条起出现", () => {
+     const { container } = renderCatalog([]);
+     expect(container.textContent).toBe("");
+ 
+-    const two = renderCatalog(FIXTURES.slice(0, 2));
+-    expect(two.container.textContent).toBe("");
+-    two.unmount();
+-
+-    const three = renderCatalog(FIXTURES);
+-    expect(within(three.container).getByRole("navigation")).toBeTruthy();
++    const one = renderCatalog(FIXTURES.slice(0, 1));
++    expect(within(one.container).getByRole("navigation")).toBeTruthy();
++    expect(within(one.container).getAllByRole("button")).toHaveLength(1);
+   });
+ 
+-  it("隐藏→增长跨阈值自动出现（entries 1 → 3）", () => {
+-    const { container, rerender } = renderCatalog(FIXTURES.slice(0, 1));
++  it("空→增长自动出现（entries 0 → 1）", () => {
++    const { container, rerender } = renderCatalog([]);
+     expect(within(container).queryByRole("navigation")).toBeNull();
+     rerender(
+-      <TurnCatalog entries={FIXTURES} activeTurnKey={null} onJump={vi.fn()} />,
++      <TurnCatalog entries={FIXTURES.slice(0, 1)} activeTurnKey={null} onJump={vi.fn()} />,
+     );
+     expect(within(container).getByRole("navigation")).toBeTruthy();
+-    expect(within(container).getAllByRole("button")).toHaveLength(3);
++    expect(within(container).getAllByRole("button")).toHaveLength(1);
+   });
+ });
+ 
+diff --git a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+index c525179b3..d251f0954 100644
+--- a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
++++ b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+@@ -134,20 +134,30 @@ function getDot(row: HTMLElement): HTMLElement {
+   return dot as HTMLElement;
+ }
+ 
+-// ── 0. 短会话隐藏（TurnCatalog ql-20260909-005 同口径保留） ─────────────
++// ── 0. 空轮次隐藏（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005
++//    <3 阈值放宽为 <1——单轮会话也显示导航） ─────────────────────────────────
+ 
+-describe("TurnNavList 短会话隐藏", () => {
+-  it("entries < 3 → 整列不渲染（0/1/2 条均隐藏）；3 条起出现窄轨", () => {
++describe("TurnNavList 空轮次隐藏", () => {
++  it("entries < 1 → 整列不渲染（0 条隐藏）；1 条起出现窄轨", () => {
+     const { container } = renderNav([]);
+     expect(container.textContent).toBe("");
+ 
+-    const two = renderNav(FIXTURES.slice(0, 2));
+-    expect(two.container.textContent).toBe("");
+-    two.unmount();
++    const one = renderNav(FIXTURES.slice(0, 1));
++    expect(within(one.container).getByTestId("turn-nav-rail")).toBeTruthy();
++    expect(getTicks(one.container)).toHaveLength(1);
++  });
+ 
+-    const three = renderNav(FIXTURES);
+-    expect(within(three.container).getByTestId("turn-nav-rail")).toBeTruthy();
+-    expect(getTicks(three.container)).toHaveLength(3);
++  it("单轮（1 条）刻度渲染且点击触发 onJump 跳转", () => {
++    const { container, onJump } = renderNav(FIXTURES.slice(0, 1));
++    const ticks = getTicks(container);
++    expect(ticks).toHaveLength(1);
++    expect(ticks[0]).toHaveAttribute(
++      "aria-label",
++      "第1轮 · 完成 · 调研 sessions 页面组件结构与渲染链路",
++    );
++    fireEvent.click(ticks[0]!);
++    expect(onJump).toHaveBeenCalledTimes(1);
++    expect((onJump as Mock).mock.calls[0]?.[0]).toMatchObject({ key: "run-1" });
+   });
+ });
+ 
+diff --git a/frontend/src/components/sessions/turn-catalog.tsx b/frontend/src/components/sessions/turn-catalog.tsx
+index 1e33fd43b..5119b0961 100644
+--- a/frontend/src/components/sessions/turn-catalog.tsx
++++ b/frontend/src/components/sessions/turn-catalog.tsx
+@@ -209,10 +209,10 @@ export default function TurnCatalog({
+     if (entry) setFlyout({ entry, index });
+   };
+ 
+-  // ql-20260909-005（会话页整洁度二轮）：轮次 < 3 轨道无导航价值，整条隐藏
+-  // （短会话左侧 30px 占位回收给聊天区）；轮次增长后自动出现。early return 在
+-  // 全部 hooks 之后（React 规则）。
+-  if (entries.length < 3) return null;
++  // 隐藏阈值（2026-10-10-single-turn-nav-and-jump-head）：原 ql-20260909-005
++  // 的 <3 放宽为 <1，与 TurnNavList MIN_ENTRIES 同口径——单轮会话也显示轨道，
++  // 仅空轮次不渲染。early return 在全部 hooks 之后（React 规则）。
++  if (entries.length < 1) return null;
+ 
+   return (
+     <div className="relative flex-shrink-0 flex">
+diff --git a/frontend/src/components/sessions/turn-nav-list.tsx b/frontend/src/components/sessions/turn-nav-list.tsx
+index 6bb6f5889..f5d49eb27 100644
+--- a/frontend/src/components/sessions/turn-nav-list.tsx
++++ b/frontend/src/components/sessions/turn-nav-list.tsx
+@@ -57,8 +57,10 @@ const OPEN_HOVER_DELAY_MS = 300;
+ /** 整体移开关合防抖（ms）：窄轨↔浮层间移动的间隙不闪烁。 */
+ const CLOSE_DELAY_MS = 250;
+ 
+-/** 短会话隐藏阈值（TurnCatalog ql-20260909-005 同口径：<3 轮整条不渲染）。 */
+-const MIN_ENTRIES = 3;
++/** 隐藏阈值（2026-10-10-single-turn-nav-and-jump-head：原 ql-20260909-005 的
++ *  <3 放宽为 <1——单轮会话也显示导航（线上单轮长会话无任何跳转入口实证），
++ *  仅空轮次不渲染。TurnCatalog 同口径。） */
++const MIN_ENTRIES = 1;
+ /** 长列表阈值（FR-06）：超过则浮层行高固定 + content-visibility:auto 防卡。 */
+ const LONG_LIST_THRESHOLD = 200;
+ /** 长列表固定行高（px，≥40 命中区下限；containIntrinsicSize 同值）。 */
+@@ -261,7 +263,7 @@ export default function TurnNavList({
+     }
+   }, [activeTurnKey, hoverTurnKey, expanded]);
+ 
+-  // 短会话隐藏（early return 在全部 hooks 之后，React 规则）。
++  // 空轮次隐藏（early return 在全部 hooks 之后，React 规则）。
+   if (entries.length < MIN_ENTRIES) return null;
+ 
+   const longList = entries.length > LONG_LIST_THRESHOLD;
+diff --git a/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/design.md b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/design.md
+new file mode 100644
+index 000000000..86ecb4490
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/design.md
+@@ -0,0 +1,62 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T09:06:23.767Z
++---
++# 设计记录（Design Record）— 2026-10-10-single-turn-nav-and-jump-head
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++线上实证（会话 47e2ff1a，单 run 6969 行活跃流）：左侧轮次导航 `MIN_ENTRIES=3` 把单轮会话整条隐藏；触顶「加载更早」每页 400 行 + prepend 锚定钉回原视口，慢服务器（2C，接口 1s+）上体感为「滚动不了、一直刷新、还是最后这点」，且面板重开进度归零（24h 内重开 19 次）。本变更两点：
++
++1. **阈值放宽**：`turn-nav-list.tsx` 与 `turn-catalog.tsx` 的隐藏阈值 3 → 1（空数组仍不渲染），单轮会话显示「第1轮」导航，点击走既有 `onJump`/`handleJumpToTurn`。
++2. **回到会话开头**：时间线顶部（`renderHistoryAndLocalReport` 位置）新增「回到会话开头」入口（仅 `hasEarlier=true` 渲染），点击后以 interval 轮询循环（40ms，对齐 `fallbackLoop` 惯例——纯 async/await 循环在生产环境有冻结前科 ql-20260916-014）连续驱动既有 `loadEarlierOnce()` 翻页，直至 `hasEarlierRef=false`（到头）或 50 页上限（toast 提示可再点）；到头后清 prepend 滚动锚（`pendingAnchorRef`/`anchorPinRef`，防 300ms 重申钉回）并双 rAF 后 `scrollTo(0)` 定位到最早内容。不选「修触顶手感/虚拟化」——无浏览器复现条件下动高测试密度滚动机制回归风险大，留给确证后的后续变更。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `TurnNavList`/`TurnCatalog`：`entries` props 契约不变，仅渲染门槛行为变化（<1 隐藏，原 <3）。
++- `renderHistoryAndLocalReport(o)`（page-helpers.tsx）：新增 3 个可选 props `hasEarlier?: boolean`、`jumpHeadLoading?: boolean`、`onJumpToHead?: () => void`——缺省不渲染新入口，既有调用面零影响。
++- `session-panel-page.tsx` 新增内部回调 `handleJumpToHead`（不导出）；`jumpHeadLoading` state 随 `sessionId` 切换复位（attach effect 重置段）。
++- 后端零改动（翻页 API `/logs?before=&before_id=` 原样复用）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/sessions/turn-nav-list.tsx | MIN_ENTRIES 3→1 + 注释更新 |
++| 修改 | frontend/src/components/sessions/turn-catalog.tsx | 隐藏阈值 3→1 同口径 + 注释更新 |
++| 修改 | frontend/src/components/daemon/session-panel/page-helpers.tsx | renderHistoryAndLocalReport 增「回到会话开头」入口（props + 渲染） |
++| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | handleJumpToHead 循环 + jumpHeadLoading state + 复位 + 接线 |
++| 修改 | frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx | 新增 1 条渲染/0 条隐藏用例 |
++| 修改 | frontend/src/components/sessions/__tests__/turn-catalog.test.tsx | 隐藏阈值用例改写（0 隐藏/1 起出现） |
++| 修改 | frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | 新增回到开头两条用例 |
++| 修改 | frontend/src/components/daemon/__tests__/page-helpers-enrich-api-duration.test.ts | 顺手补无关旧债：makeRun 缺 user_id/sender_name 必填字段（tsc 债） |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立。连续翻页串行推进（interval tick 见 `historyLoadingRef` 在途即跳过本轮），游标单调递减由 `loadEarlierOnce` 的「游标任一分量前进」返回值保证；乱序到达的旧响应经纪元校验（`sessionEpochRef`）丢弃，不 prepend。循环仅认 `hasEarlierRef` 镜像（await 间隙不读过期 state）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   入口点击有 `jumpHeadInflightRef` 同步锁防重入（重复点击不重发，测试 FR-04 用例锁定）；循环期间 `jumpSuppressLoadEarlierRef=true` 抑制触顶自动加载竞争（既有 R-02 机制）；用户同时手动触顶被 suppress 挡下；`handleLoadEarlier` 自身 `historyLoadingRef` 锁防双发。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全。换会话时 attach effect 重置段新增 `setJumpHeadLoading(false)` + inflight ref 复位 + 循环 tick 内 epoch 校验（`epochAtStart !== sessionEpochRef` → stop）让在途循环退出；卸载由 `mountedRef` 守卫（tick 首查）；suppress 在 stop() 的所有出口复位（定位滚动事件派发后 1s 延迟解除防触顶抢跑），不残留。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会。全部状态（`jumpHeadLoading`/refs/游标）为组件实例私有、随 `sessionId` 重建；无跨工作区/跨会话共享面；后端无改动，无多实例串台面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：50 页上限内连续 prepend 大量 DOM（巨型会话全量加载），低配端渲染压力——已有 `content-visibility` 与 50 页上限兜底，且为用户显式点击触发（非自动）；toast 明示可续。
++- 放弃方案 A「修触顶手感（阈值/锚定参数调优）」：无浏览器复现定位精确体感根因，动高测试密度滚动机制（触顶/锚定/贴底三方交互）回归面大；放弃方案 B「列表虚拟化」：属大改，超出轻量变更范围。
++- 已知残留：滚动体感问题本身未根治（本变更提供绕开路径）；用户侧验证待部署后确认。
+diff --git a/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/proposal.md b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/proposal.md
+new file mode 100644
+index 000000000..b2ab0f0a2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T09:06:23.767Z
++---
++# 提案书（Proposal）— 2026-10-10-single-turn-nav-and-jump-head
++
++## 动机
++
++任务原话转写：线上会话（单轮 6969 行、活跃流）详情页：左侧轮次导航 MIN_ENTRIES=3 把单轮会话整条隐藏，用户不知道会话只有 1 轮也无跳转入口；触顶「加载更早」每页 400 行 + 锚定钉回原视口，慢服务器上体感「滚动不了、一直刷新、还是最后这点」，且重开面板进度归零，用户 24h 内重开 19 次。
++成功标准：
++- 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
++- 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
++- 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
++- 连续加载期间有可见 loading 状态；到头后入口消失
++- 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
++2. 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
++3. 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
++4. 连续加载期间有可见 loading 状态；到头后入口消失
++5. 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
++
++## 成功标准（可验证）
++
++1. 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
++2. 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
++3. 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
++4. 连续加载期间有可见 loading 状态；到头后入口消失
++5. 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
+diff --git a/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/requirements.md b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/requirements.md
+new file mode 100644
+index 000000000..62854ffdc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/requirements.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T09:06:23.767Z
++---
++# 需求规格（Requirements）— 2026-10-10-single-turn-nav-and-jump-head
++
++## 功能需求
++
++### FR-01: 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
++
++- 桌面端 `TurnNavList` 与回退组件 `TurnCatalog` 的隐藏阈值必须从「entries < 3 整条不渲染」放宽为「entries < 1（空）不渲染」——单轮会话也能看到「第 1 轮」导航并可点击触发既有 `onJump` 跳转定位。
++
++#### 场景：单轮会话导航可见
++
++- Given 一个只有 1 个 run 的会话，轮次大纲返回 1 条
++- When 打开会话详情页
++- Then 左侧轮次导航渲染，显示「第1轮」（含运行中状态点），点击触发跳转定位，不再整条隐藏
++
++#### 场景：空轮次仍不渲染
++
++- Given 轮次大纲与本地 runs 均为空（tool_report 未接手会话等）
++- When 打开会话详情页
++- Then 桌面端窄轨导航保持不渲染（空壳无导航价值），移动端 Drawer 显示既有「暂无轮次」空态
++
++### FR-02: 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
++
++- 移动端 Drawer 轮次列表数据源与桌面同源（navEntries），本次不得引入新的分叉；移动端「暂无轮次」空态文案与出现条件必须保持不变。
++
++#### 场景：移动端一致性
++
++- Given 同一单轮会话
++- When 移动端打开轮次导航 Drawer
++- Then Drawer 内显示与桌面相同的那 1 条轮目（第1轮 + 摘要），点击走同一 `handleJumpToTurn`
++
++### FR-03: 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
++
++- `hasEarlier=true` 时时间线顶部必须显示「回到会话开头」入口；点击后必须以既有 `loadEarlierOnce` 翻页链路连续加载更早历史（40ms 轮询推进，单次在途不重发），直至游标到头（`hasEarlier=false`）或达到既有 `JUMP_LOAD_EARLIER_MAX_PAGES=50` 页上限（toast 提示可再点继续）；完成后必须清除 prepend 滚动锚并定位滚动到时间线最顶部。
++
++#### 场景：点击直达开头
++
++- Given 会话总日志 3 页（首屏 1 页已加载，`hasEarlier=true`）
++- When 点击「回到会话开头」
++- Then 以 before 游标连续发起 2 次翻页请求且游标单调递减，`hasEarlier` 翻 false 后滚动容器 `scrollTo(0)`，更早内容在时间线顶部可见
++
++#### 场景：页上限兜底
++
++- Given 会话历史超过 50 页
++- When 点击「回到会话开头」
++- Then 连续加载 50 页后停止并 toast「可再次点击继续加载」，不无限请求
++
++### FR-04: 连续加载期间有可见 loading 状态；到头后入口消失
++
++- 连续加载期间入口必须显示加载中状态（转圈 + 文案），完成后恢复；`hasEarlier=false`（已到头）时入口必须整体消失；换会话/组件卸载时加载状态必须复位，不得残留。
++
++#### 场景：loading 可见与消失
++
++- Given 点击「回到会话开头」后翻页请求在途
++- Then 入口显示「正在加载」态；全部到头后入口不再渲染（`hasEarlier=false`）
++
++### FR-05: 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
++
++- 必须保持 `session-history-scroll.test.tsx`、`turn-nav-list.test.tsx`、`turn-catalog.test.tsx` 等既有用例通过；`turn-catalog` 的「短会话隐藏」用例随阈值放宽同步改写（0 条隐藏 / 1 条起出现），其余断言不得改动。
++
++#### 场景：回归
++
++- Given 本次改动合入
++- When 运行上述测试文件
++- Then 除按 FR-01 明确改写的隐藏阈值用例外全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「单轮（1 条）entries 渲染导航并可点击跳转」
++FR-02: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「0 条 entries 不渲染导航（空态语义保持）」
++FR-03: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「点击回到会话开头：连续 before 翻页到头并定位顶部」
++FR-04: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「回到会话开头 loading 态与到头后入口消失」
++FR-05: frontend/src/components/sessions/__tests__/turn-catalog.test.tsx「隐藏阈值改写：0 条隐藏 / 1 条起出现」
+diff --git a/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/tasks.md b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/tasks.md
+new file mode 100644
+index 000000000..2252bf739
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-single-turn-nav-and-jump-head/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T09:06:23.767Z
++---
++# 任务注册表（Tasks）— 2026-10-10-single-turn-nav-and-jump-head
++
++- [x] task-01: turn-nav-list.tsx MIN_ENTRIES 3→1（注释同步），验证：turn-nav-list.test.tsx 新增「1 条渲染/可点击」「0 条不渲染」两用例绿
++- [x] task-02: turn-catalog.tsx 隐藏阈值 3→1 同口径（注释同步），验证：turn-catalog.test.tsx 隐藏用例改写为「0 条隐藏/1 条起出现」后全绿
++- [x] task-03: session-panel-page.tsx 新增 handleJumpToHead（interval 轮询连续翻页到头/50 页上限 + 清锚定位顶部 + suppress/锁/复位），验证：session-history-scroll.test.tsx 新增「点击回到会话开头：连续 before 翻页到头并定位顶部」用例绿
++- [x] task-04: page-helpers.tsx renderHistoryAndLocalReport 增「回到会话开头」入口（hasEarlier/jumpHeadLoading/onJumpToHead props）并接线，验证：「loading 态与到头后入口消失」用例绿
++- [x] task-05: 跑三份测试文件全量（session-history-scroll / turn-nav-list / turn-catalog）+ 相关既有回归（session-panel-history-race 等）确认零回归
