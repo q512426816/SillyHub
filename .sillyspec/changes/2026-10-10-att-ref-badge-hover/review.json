@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-att-ref-badge-hover",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e0312ee6a841ebee5da1a6d6024a6309031fbcfd",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-02 测试绑定指向的用例名不存在，hitTest 外扩命中区无直接断言",
+      "evidence": "requirements.md FR-02 绑定写「隐藏态角标不拦截命中测试（pointer-events 语义）+hitTest 命中展开区」，测试文件中无同名/同义用例；该行为实际仅被间接覆盖——FR-01 用例断言隐藏态 className 含 pointer-events-none（input-ref-overlay.test.tsx:70-71），「既有 × 删除回调行为不变」断言显示态可点击，而 HIT_EXPAND_PX=8 的展开命中逻辑（input-ref-overlay.tsx:80,96-104）无任何测试断言。FR-02 行为本身实现真实且无数据正确性风险，属绑定追溯失准+次要覆盖缺口。",
+      "location": ".sillyspec/changes/2026-10-10-att-ref-badge-hover/requirements.md:52 与 frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx:60-135"
+    },
+    {
+      "severity": "P3",
+      "title": "命中区外扩 8px 大于可见背景块，相邻标签间隙可点亮前一标签角标",
+      "evidence": "hitTestAttRefOverlay 按 DOM 顺序线性遍历返回首个命中 span（外扩 8px 四向扩展），两标签水平间距小于 16px 时指针落在可见背景块之间的空隙仍命中先出现者，角标瞬时亮在非指针所指标签上；仅视觉瑕疵，下次 pointermove 即纠正，design 已披露同族取舍（序号偏移瞬时指错），无点击误删风险（删除目标由渲染时绑定的 p.text 决定，不依赖 hoveredRefOcc）。",
+      "location": "frontend/src/components/daemon/input-ref-overlay.tsx:80-106"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T09:32:44+08:00"
+}

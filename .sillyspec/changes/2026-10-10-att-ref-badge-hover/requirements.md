@@ -49,6 +49,6 @@ created_at: 2026-10-10T00:49:23.984Z
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏、visibleBadgeIndex 命中才显示」
-FR-02: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「隐藏态角标不拦截命中测试（pointer-events 语义）+hitTest 命中展开区」
+FR-02: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏（opacity-0 + pointer-events-none），visibleBadgeIndex 命中才显示」+「既有 × 删除回调行为不变（可见性受控不影响点击）」
 FR-03: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「既有×删除回调行为不变」+ session-input-bar-upload.test.tsx「× 角标删除该处一次出现；点 X 删附件联动剥离全部引用」
 FR-04: frontend/components 相关 vitest 全绿 + pnpm exec tsc --noEmit 零错（verify 实测）
