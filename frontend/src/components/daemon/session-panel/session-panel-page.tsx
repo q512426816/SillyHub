@@ -2456,8 +2456,32 @@ export function SessionPanelPage({
 
   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
   //    §5.B §5.E）：子代理右栏——段实时解析 + 失效自动关闭 + context 提供 ────
-  // 未传 props（悬浮宿主等 page 旧消费方）内部归一 null；dialog 模式不经本组件。
-  const activeSubagentId = openSubagentId ?? null;
+  // 2026-10-11-mobile-subagent-drawer：mobile 兜底槽位——宿主三 props 是 portal
+  // 专属装配（手机页不传），mobile 无右栏但需要「紧凑卡 + 点击弹窗」与 PC 同构
+  // （旧口径 mobile 不挂 Provider → SubagentBlockView 回退内联展开，子代理内部
+  // 会话整段刷进对话流）。宿主未传时以组件内状态承载开合。
+  const [mobileSubagentId, setMobileSubagentId] = useState<string | null>(null);
+  // 会话切换清槽（子代理段 id 会话作用域，对齐 portal 宿主 selectedSessionId
+  // 变化清 subagentView 的口径）。
+  useEffect(() => {
+    setMobileSubagentId(null);
+  }, [sessionId]);
+  const hasHostSubagent = onOpenSubagent != null;
+  // 槽位开合统一出口：宿主装配走宿主回调，mobile 兜底走内部状态（下方
+  // context / 失效自动关 / Drawer 关闭共用，防三处漂移）。
+  const openSubagentSlot = useCallback(
+    (segmentId: string) => {
+      if (hasHostSubagent) onOpenSubagent?.(segmentId);
+      else setMobileSubagentId(segmentId);
+    },
+    [hasHostSubagent, onOpenSubagent],
+  );
+  const closeSubagentSlot = useCallback(() => {
+    if (hasHostSubagent) onSubagentPanelClose?.();
+    else setMobileSubagentId(null);
+  }, [hasHostSubagent, onSubagentPanelClose]);
+  // 未传 props（dialog 等旧宿主）内部归一 null；mobile 无宿主时取内部槽位。
+  const activeSubagentId = (hasHostSubagent ? openSubagentId : mobileSubagentId) ?? null;
   // 段解析：displayTurns DFS findSegmentById 定位（活引用——SSE 更新即重渲面板，
   // 非快照）；命中但非容器段（tool / subagent_stub，理论不可达——目录与卡片只
   // 会给容器段 id）视为未命中，走自动关闭兜底。
@@ -2474,9 +2498,9 @@ export function SessionPanelPage({
   // effect 只兜段失效。依赖不变不重跑，宿主忽略回调也不会死循环。
   useEffect(() => {
     if (activeSubagentId != null && openSubagentSegment == null) {
-      onSubagentPanelClose?.();
+      closeSubagentSlot();
     }
-  }, [activeSubagentId, openSubagentSegment, onSubagentPanelClose]);
+  }, [activeSubagentId, openSubagentSegment, closeSubagentSlot]);
   // 右栏宽度：本组件自有 usePanelWidth，与文件预览共用同一 localStorage 键
   // （单槽位语义，两实例互不重叠生命周期内各自记忆，design §5.B / X-002 修正）；
   // 默认 / 最小 / 最大用 portal-file-panels 同处常量（480 / 320 / 860）。
@@ -2486,12 +2510,13 @@ export function SessionPanelPage({
     minWidth: SESSIONS_FILE_PREVIEW_WIDTH_MIN,
     maxWidth: SESSIONS_FILE_PREVIEW_WIDTH_MAX,
   });
-  // Provider 挂载条件（最终方案）：宿主声明右栏能力（传入 onOpenSubagent）且非
-  // mobile（design §3 非目标：移动端窄屏不做右栏）才挂 SubagentPanelContext——
-  // 消费到 context 的 SubagentBlockView 走紧凑卡片分支；不满足则不挂 Provider，
-  // useSubagentPanel() 返回 null 回退原内联展开（FR-05 零回归）。不能无条件挂
-  // 空值 Provider：紧凑卡片点击 openSubagent=noop 会「点了没反应」，比内联回退更差。
-  const hasSubagentPanelHost = !mobile && onOpenSubagent != null;
+  // Provider 挂载条件：desktop 沿用宿主声明右栏能力（onOpenSubagent）口径；
+  // 2026-10-11-mobile-subagent-drawer：mobile 恒挂（内部槽位承载，「紧凑卡 +
+  // 点击 Drawer 弹窗」与 PC 同构——旧口径 mobile 不挂回退内联展开，子代理内部
+  // 会话刷屏对话流）。dialog 模式不经本组件；无宿主无 mobile（悬浮宿主 page
+  // 旧形态）仍不挂，回退内联展开零回归。仍不能无条件挂空值 Provider（紧凑卡
+  // 点击 noop「点了没反应」比内联回退更差）。
+  const hasSubagentPanelHost = (!mobile && hasHostSubagent) || mobile;
   // ── 2026-09-27-session-portal-ia-restructure（FR-02）：右列「详情」模式 ──
   // 详情侧栏开合（布尔态，localStorage 记忆用户偏好——与宽度/展开记忆同模式）；
   // 列内容模式不设独立状态，由既有 openSubagentId 派生（subagentPanelOpen 时列
@@ -2517,17 +2542,19 @@ export function SessionPanelPage({
   }, [detailOpen]);
   const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
     () => ({
-      openSubagent: onOpenSubagent ?? (() => {}),
-      closeSubagent: onSubagentPanelClose ?? (() => {}),
+      // 2026-10-11-mobile-subagent-drawer：换统一槽位出口（宿主回调 / mobile
+      // 内部状态），mobile 与 desktop 同一 context 值来源。
+      openSubagent: openSubagentSlot,
+      closeSubagent: closeSubagentSlot,
       activeId: activeSubagentId,
     }),
-    [onOpenSubagent, onSubagentPanelClose, activeSubagentId],
+    [openSubagentSlot, closeSubagentSlot, activeSubagentId],
   );
   // 右栏渲染条件：openSubagentId 命中段（段失效时不渲染右列，等上方 effect 关闭）。
   const subagentPanelOpen = activeSubagentId != null && openSubagentSegment != null;
   const handleSubagentPanelClose = useCallback(() => {
-    onSubagentPanelClose?.();
-  }, [onSubagentPanelClose]);
+    closeSubagentSlot();
+  }, [closeSubagentSlot]);
 
   // 2026-09-27-session-portal-ia-restructure（FR-02）：右列可见性与内容模式
   // ——子代理命中段（subagentPanelOpen，既有单槽位语义）优先展示子代理面板，
@@ -5339,9 +5366,32 @@ export function SessionPanelPage({
   if (!hasSubagentPanelHost) {
     return withSlimLogFull(detailColumnTree);
   }
+  // 2026-10-11-mobile-subagent-drawer：mobile 弹窗承载（desktop 右栏的移动端
+  // 同构出口）——命中段时右侧滑出 Drawer，内嵌既有 SubagentDetailPanel（自带
+  // 头部 ✕ + 初始化提示词 + 段时间线，与 PC 右栏同一组件零复制）；关闭走
+  // 统一槽位出口（✕ / 遮罩 / 再点已激活卡 toggle 同语义）。
+  const mobileSubagentDrawer =
+    mobile && subagentPanelOpen && openSubagentSegment != null ? (
+      <Drawer
+        open
+        onClose={closeSubagentSlot}
+        placement="right"
+        size="min(92vw, 420px)"
+        getContainer={false}
+        destroyOnHidden
+        rootClassName="session-subagent-drawer-root"
+        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
+      >
+        <SubagentDetailPanel
+          segment={openSubagentSegment}
+          onClose={closeSubagentSlot}
+        />
+      </Drawer>
+    ) : null;
   return withSlimLogFull(
     <SubagentPanelContext.Provider value={subagentPanelContextValue}>
       {detailColumnTree}
+      {mobileSubagentDrawer}
     </SubagentPanelContext.Provider>,
   );
 }
