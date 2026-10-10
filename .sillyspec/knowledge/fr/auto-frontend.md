@@ -861,3 +861,98 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
+
+## FR-auto-frontend-162 ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
+变更：2026-10-10-change-patch-cross-repo-view
+状态：active
+摘要：跨仓冻结件按仓分段；降级仓整段警示
+全文：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/requirements.md#FR-01
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-01
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-change-patch-cross-repo-view
+  status: active
+
+## FR-auto-frontend-163 rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
+变更：2026-10-10-change-patch-cross-repo-view
+状态：active
+摘要：跨仓行与主仓行混排
+全文：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/requirements.md#FR-02
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-02
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「rows 跨仓行路径后仓标徽章」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-change-patch-cross-repo-view
+  status: active
+
+## FR-auto-frontend-164 repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
+变更：2026-10-10-change-patch-cross-repo-view
+状态：active
+摘要：patch 正文在场可展开；patch 采集失败诚实留痕；旧形态无 patch 键零渲染
+全文：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/requirements.md#FR-03
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-03
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「repos[].patch 折叠正文+sha/null 未采集/缺键零渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-change-patch-cross-repo-view
+  status: active
+
+## FR-auto-frontend-165 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
+变更：2026-10-10-change-patch-cross-repo-view
+状态：active
+摘要：旧冻结件回退
+全文：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/requirements.md#FR-04
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-04
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「旧形态无 repos 回退现状（既有用例零回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-change-patch-cross-repo-view
+  status: active
+
+## FR-auto-frontend-166 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
+变更：2026-10-10-change-patch-cross-repo-view
+状态：active
+摘要：回归面全绿
+全文：.sillyspec/changes/archive/2026-10-10-change-patch-cross-repo-view/requirements.md#FR-05
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-05
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「跨仓展示用例组全绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-change-patch-cross-repo-view
+  status: active

@@ -1,0 +1,76 @@
+{
+  "change": "2026-10-10-change-patch-cross-repo-view",
+  "baseline": "9796351071bf7ff0a50ee71a85c2d21ca75e2079",
+  "head": "1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff",
+  "files": [
+    ".sillyspec/changes/2026-10-10-change-patch-cross-repo-view/tasks.md",
+    "frontend/src/components/files/__tests__/structured-views.test.tsx",
+    "frontend/src/components/files/structured-views.tsx",
+    ".sillyspec/changes/2026-10-10-change-patch-cross-repo-view/design.md",
+    ".sillyspec/changes/2026-10-10-change-patch-cross-repo-view/proposal.md",
+    ".sillyspec/changes/2026-10-10-change-patch-cross-repo-view/requirements.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 450,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-10T11:45:58.863Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9796351071bf7ff0a50ee71a85c2d21ca75e2079",
+    "totals": {
+      "files": 2,
+      "additions": 272,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/files/__tests__/structured-views.test.tsx",
+        "additions": 134,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/files/structured-views.tsx",
+        "additions": 138,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "4c9f05eff595cec63eceacc4fca3ba86e4fd9ab81e92470fd4d0bb0e2852888c",
+  "patchStatus": "ok"
+}

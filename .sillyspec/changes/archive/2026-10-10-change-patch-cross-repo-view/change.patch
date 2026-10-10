@@ -1,0 +1,522 @@
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+index 0aa33a434..5407d1e2a 100644
+--- a/frontend/src/components/files/__tests__/structured-views.test.tsx
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -266,6 +266,140 @@ describe("knownJsonView", () => {
+   });
+ });
+ 
++// ── 2026-10-10-change-patch-cross-repo-view：跨仓冻结面（scopeAudit.repos[]）──
++describe("knownJsonView 跨仓冻结面", () => {
++  // producer 契约（sillyspec 2026-10-10-cross-repo-patch-freeze）：repos[] 条目
++  // { key, repoPath?, anchor, totals, degraded, degradedReason, patch?, patchSha256? }
++  const crossScopeAudit = {
++    mode: "full-flow",
++    ok: true,
++    degradedReason: null,
++    baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
++    totals: { files: 3, additions: 13, deletions: 2 },
++    rows: [
++      { path: "frontend/src/a.tsx", additions: 3, deletions: 2, kind: "modified", verdict: "planned" },
++      { path: "sub-x/src/a.go", additions: 5, deletions: 0, kind: "modified", planned: "修改", verdict: "planned", crossRepo: "sub-x" },
++    ],
++    repos: [
++      {
++        key: "main",
++        repoPath: "C:/Users/x/local-main",
++        anchor: { source: "reviews-window", base: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce", head: "524546f45bc4149b101c35a0feda8fcd185bdf04", label: "锡点区间 reviews" },
++        totals: { files: 2, additions: 10, deletions: 2, planned: 2, unplanned: 0, untouched: 0 },
++        degraded: false,
++        degradedReason: null,
++        patch: "--- a/f.tsx\n+++ b/f.tsx\n@@ -1,1 +1,2 @@\n x\n+y",
++        patchSha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++      },
++      {
++        key: "sub-y",
++        anchor: { source: "head~1-window", base: null, head: null, label: "HEAD~1 窗口" },
++        totals: { files: 1, additions: 3, deletions: 0, planned: 1, unplanned: 0, untouched: 0 },
++        degraded: false,
++        degradedReason: null,
++        patch: null,
++        patchSha256: null,
++      },
++      {
++        key: "sub-gone",
++        anchor: { source: "degraded", base: null, head: null, label: "degraded" },
++        totals: { files: 1, additions: 0, deletions: 0, planned: 0, unplanned: 0, untouched: 1 },
++        degraded: true,
++        degradedReason: "跨仓采集不可达",
++        patch: null,
++        patchSha256: null,
++      },
++    ],
++  };
++
++  function renderChangePatch(scopeAudit: JsonValue) {
++    const node = knownJsonView("change-patch.json", {
++      change: "2026-10-10-demo",
++      files: ["frontend/src/a.tsx"],
++      totals: { files: 1, additions: 3, deletions: 0 },
++      savedAt: "2026-10-10T06:00:00.000Z",
++      patchStatus: "ok",
++      scopeAudit,
++    });
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    const el = container.querySelector('[data-testid="scope-audit-view"]');
++    expect(el).not.toBeNull();
++    return el!;
++  }
++
++  it("change-patch.json（跨仓冻结）→ repos[] 每仓段+锚点 chip+三态 chips+降级段", () => {
++    const el = renderChangePatch(crossScopeAudit as JsonValue);
++    // 三段齐（主仓/跨仓/降级）
++    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-main"]')).not.toBeNull();
++    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-sub-y"]')).not.toBeNull();
++    expect(el!.querySelector('[data-testid="scope-audit-repo-seg-sub-gone"]')).not.toBeNull();
++    // 仓标识：main → 主仓；分段标题带仓数
++    expect(el!.textContent).toContain("主仓");
++    expect(el!.textContent).toContain("sub-y");
++    expect(el!.textContent).toContain("按仓冻结面（3 仓）");
++    // 锚点 chip：label 文案 + base 前 7 位；base 缺失 → —
++    expect(el!.textContent).toContain("锡点区间 reviews");
++    expect(el!.textContent).toContain("ec5ee3d");
++    expect(el!.textContent).toContain("HEAD~1 窗口");
++    // 三态 chips 计数取 repos[].totals 单一源
++    expect(el!.querySelector('[data-testid="scope-audit-chip-main-planned"]')!.textContent).toContain("2");
++    expect(el!.querySelector('[data-testid="scope-audit-chip-sub-y-planned"]')!.textContent).toContain("1");
++    // 降级段：无 chips，⚠️ + 原因
++    expect(el!.querySelector('[data-testid="scope-audit-repo-degraded-sub-gone"]')!.textContent).toContain("跨仓采集不可达");
++    expect(el!.querySelector('[data-testid="scope-audit-chip-sub-gone-planned"]')).toBeNull();
++    // repoPath 字段（本机布局）不渲染
++    expect(el!.textContent).not.toContain("C:/Users/x/local-main");
++  });
++
++  it("rows 跨仓行路径后仓标徽章，主仓行无", () => {
++    const el = renderChangePatch(crossScopeAudit as JsonValue);
++    expect(el!.querySelector('[data-repo-badge="sub-x"]')).not.toBeNull();
++    // 恰 1 个仓标（主仓行无 crossRepo 无徽章）
++    expect(el!.querySelectorAll("[data-repo-badge]").length).toBe(1);
++  });
++
++  it("repos[].patch：非空正文折叠展开+sha 短哈希；null 诚实未采集；降级段无 patch 面", () => {
++    const el = renderChangePatch(crossScopeAudit as JsonValue);
++    // 默认折叠：无 diff-view，点开展开（parseUnifiedDiff 剥 + 前缀，按 add 行断言）
++    expect(el!.querySelector('[data-testid="diff-view"]')).toBeNull();
++    fireEvent.click(el!.querySelector('[data-testid="scope-audit-repo-patch-main"]')!);
++    expect(el!.querySelector('[data-testid="diff-view"]')).not.toBeNull();
++    // 行内容 span 在行号列之后（行 div 末位），textContent 含行号 "2"+"y"
++    const addRow = el!.querySelector('[data-testid="diff-view"] [data-diff-kind="add"]')!;
++    expect(addRow.querySelector("span:last-child")!.textContent).toBe("y");
++    // sha 短哈希 + title 全量
++    const shaEl = el!.querySelector('[data-testid="scope-audit-repo-patch-main"]')!.parentElement!.querySelector("span[title]");
++    expect(shaEl!.textContent).toBe("bbbbbbbbbbbb…");
++    expect(shaEl!.getAttribute("title")).toBe("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
++    // patch=null（非降级段）→ 诚实未采集，无 DiffView 干扰
++    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-missing-sub-y"]')!.textContent).toContain("patch 未采集");
++    // 降级段整段 ⚠️：patch 键在场（null）也不渲染 patch 面
++    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-missing-sub-gone"]')).toBeNull();
++    expect(el!.querySelector('[data-testid="scope-audit-repo-patch-sub-gone"]')).toBeNull();
++  });
++
++  it("旧形态（无 repos 键/无 patch 键）→ 现状渲染：无仓段/仓标/patch 面", () => {
++    const el = renderChangePatch({
++      mode: "full-flow",
++      ok: true,
++      degradedReason: null,
++      baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
++      totals: { files: 1, additions: 3, deletions: 0 },
++      rows: [{ path: "frontend/src/a.tsx", additions: 3, deletions: 0, kind: "new", verdict: "planned" }],
++    });
++    expect(el!.querySelector("[data-testid^='scope-audit-repo-seg-']")).toBeNull();
++    expect(el!.querySelector("[data-repo-badge]")).toBeNull();
++    expect(el!.textContent).not.toContain("按仓冻结面");
++    expect(el!.textContent).not.toContain("跨仓 patch 正文");
++    // 既有面不受影响
++    expect(el!.textContent).toContain("✓ 计划内");
++    // repos 非法条目（缺 key/非 record）防御跳过
++    const el2 = renderChangePatch({ ...crossScopeAudit, repos: [{ nokey: true }, "junk", { key: "", totals: {} }] } as JsonValue);
++    expect(el2.querySelector("[data-testid^='scope-audit-repo-seg-']")).toBeNull();
++  });
++});
++
+ // ── 2026-09-29-change-detail-timeline-files-polish：JSONL 视图族 ─────────
+ describe("tryParseJsonl", () => {
+   it("逐行合法（含空行容忍）→ 行值数组", () => {
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index 2ba491e5a..f27a31d7e 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -16,6 +16,10 @@
+  * - knownJsonView：三个固定结构报告文件的表格摘要视图分发（ql-20260917-010）
+  *   ——scope-audit（裁决徽章+文件表格）、apply-manifest（哈希清单）、
+  *   verify-facts（探针/测试/一致性/移交）；文件名+结构特征不命中回落 JsonView。
++ *   change-patch.json（收口留痕单套清单）同走此分发——对账快照 ScopeAuditView
++ *   含跨仓冻结面（2026-10-10-change-patch-cross-repo-view）：scopeAudit.repos[]
++ *   按仓分段（锚点 chip/三态 chips/降级 ⚠️）+ rows 跨仓行仓标 + repos[].patch
++ *   折叠 diff 正文。
+  *
+  * 视图自身不限高：垂直滚动交给外层容器（内联 flex 链 / 全屏弹窗 body），
+  * 仅横向在 DiffView 行容器出滚动条。
+@@ -298,12 +302,128 @@ function DataTable({ head, children }: { head: string[]; children: React.ReactNo
+   );
+ }
+ 
++/** 仓 key 显示名（CLI 约定 main=主仓；与 scope-audit-command-card 同款）。 */
++function repoDisplayName(key: string): string {
++  return key === "main" ? "主仓" : key;
++}
++
++/** 三态 chips 展示序（计数取 repos[].totals 单一源）。 */
++const VERDICT_ORDER = ["planned", "unplanned", "untouched"] as const;
++
++/**
++ * 按仓冻结面单仓段（2026-10-10-change-patch-cross-repo-view）：段头=仓标识+锚点
++ * chip（anchor.label + base 前 7 位；daemon 链的 anchor_label 短哈希是投影产物，
++ * 冻结件没有——前端从 anchor.base 自行短化）+该仓 files/+−；段身=三态 chips 或
++ * degraded 整段 ⚠️。patch 面（折叠 diff 正文/未采集留痕）仅非降级段渲染——
++ * 「采集失败或空窗」对整仓不可达是误描述。repoPath 字段可能含本机布局，恒不渲染。
++ */
++function ScopeAuditRepoSeg({ repo, repoKey }: { repo: JsonRecord; repoKey: string }) {
++  const [patchOpen, setPatchOpen] = useState(false);
++  const anchor = isRecord(repo.anchor) ? repo.anchor : {};
++  const anchorLabel = typeof anchor.label === "string" && anchor.label ? anchor.label : null;
++  const anchorBase = typeof anchor.base === "string" && anchor.base ? anchor.base.slice(0, 7) : null;
++  const totals = isRecord(repo.totals) ? repo.totals : {};
++  const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
++  const degraded = repo.degraded === true;
++  // producer 契约（additive）：collectPatch=true 才带 patch 两键，旧形态缺键零渲染
++  const hasPatchKey = "patch" in repo;
++  const patchText = typeof repo.patch === "string" && repo.patch.length > 0 ? repo.patch : null;
++  const patchSha = typeof repo.patchSha256 === "string" && repo.patchSha256 ? repo.patchSha256 : null;
++  return (
++    <div data-testid={`scope-audit-repo-seg-${repoKey}`} className="rounded-md border border-dashed border-border px-3 py-2">
++      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
++        <span className={cn("text-xs font-semibold", repoKey === "main" ? "text-brand-700" : "text-foreground")}>
++          {repoDisplayName(repoKey)}
++        </span>
++        <span className="rounded bg-muted px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
++          {anchorLabel ? `${anchorLabel} ` : ""}
++          <span className="font-semibold text-foreground">{anchorBase ?? "—"}</span>
++        </span>
++        {!degraded && (
++          <span className="ml-auto text-[11px] text-muted-foreground">
++            {num(totals.files)} 文件{" "}
++            <span className="text-success">+{num(totals.additions)}</span> /{" "}
++            <span className="text-error">−{num(totals.deletions)}</span>
++          </span>
++        )}
++      </div>
++      {degraded ? (
++        <p data-testid={`scope-audit-repo-degraded-${repoKey}`} className="mt-1.5 text-[11px] leading-relaxed text-warning">
++          ⚠️{" "}
++          {typeof repo.degradedReason === "string" && repo.degradedReason
++            ? repo.degradedReason
++            : "该仓跨仓对账不可达（未注册/路径不可达），请人工到对应仓核对"}
++        </p>
++      ) : (
++        <>
++          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
++            {VERDICT_ORDER.map((verdict) => {
++              const meta = VERDICT_BADGE[verdict];
++              if (!meta) return null;
++              return (
++                <span
++                  key={verdict}
++                  data-testid={`scope-audit-chip-${repoKey}-${verdict}`}
++                  className={cn("rounded-full px-2 py-px text-[11px] font-medium", meta.className)}
++                >
++                  {meta.label} {num(totals[verdict])}
++                </span>
++              );
++            })}
++          </div>
++          {hasPatchKey &&
++            (patchText ? (
++              <div className="mt-2">
++                <div className="flex flex-wrap items-baseline gap-x-2">
++                  <button
++                    type="button"
++                    data-testid={`scope-audit-repo-patch-${repoKey}`}
++                    onClick={() => setPatchOpen((o) => !o)}
++                    aria-expanded={patchOpen}
++                    className="flex items-baseline gap-1 rounded px-1 py-px text-[11px] text-muted-foreground transition-colors hover:bg-muted/60"
++                  >
++                    <ChevronRight
++                      className={cn("h-3 w-3 shrink-0 self-center transition-transform", patchOpen && "rotate-90")}
++                      aria-hidden
++                    />
++                    跨仓 patch 正文（冻结）
++                  </button>
++                  {patchSha && (
++                    <span className="font-mono text-[10px] text-muted-foreground" title={patchSha}>
++                      {patchSha.slice(0, 12)}…
++                    </span>
++                  )}
++                </div>
++                {patchOpen && (
++                  <div className="mt-1.5 flex min-w-0">
++                    <DiffView content={patchText} />
++                  </div>
++                )}
++              </div>
++            ) : (
++              <p data-testid={`scope-audit-repo-patch-missing-${repoKey}`} className="mt-1.5 text-[11px] text-muted-foreground">
++                patch 未采集（采集失败或空窗）
++              </p>
++            ))}
++        </>
++      )}
++    </div>
++  );
++}
++
+ /** scope-audit.json：审计摘要 + 文件裁决表格。 */
+ function ScopeAuditView({ value }: { value: JsonRecord }) {
+   const totals = isRecord(value.totals) ? value.totals : {};
+   const rows = Array.isArray(value.rows)
+     ? (value.rows as JsonValue[]).filter(isRecord)
+     : [];
++  // 跨仓冻结面（2026-10-10-change-patch-cross-repo-view）：repos[] 非空数组才分段；
++  // 条目须带非空 string key（防御式，非法条目跳过）
++  const repos = Array.isArray(value.repos)
++    ? (value.repos as JsonValue[])
++        .filter(isRecord)
++        .filter((r) => typeof r.key === "string" && r.key !== "")
++    : [];
+   const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
+   return (
+     <div data-testid="scope-audit-view" className="flex flex-col gap-3">
+@@ -341,6 +461,14 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
+               </td>
+               <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">
+                 {typeof r.path === "string" ? r.path : "—"}
++                {typeof r.crossRepo === "string" && r.crossRepo !== "" && (
++                  <span
++                    data-repo-badge={r.crossRepo}
++                    className="ml-1.5 inline-block rounded bg-brand-50 px-1 font-sans text-[10px] leading-4 text-brand-700"
++                  >
++                    {r.crossRepo}
++                  </span>
++                )}
+               </td>
+               <td className="px-2.5 py-1.5 text-right font-mono text-success">{num(r.additions) || ""}</td>
+               <td className="px-2.5 py-1.5 text-right font-mono text-error">{num(r.deletions) || ""}</td>
+@@ -348,6 +476,16 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
+           );
+         })}
+       </DataTable>
++      {repos.length > 0 && (
++        <>
++          <SectionTitle>{`按仓冻结面（${repos.length} 仓）`}</SectionTitle>
++          <div className="flex flex-col gap-2">
++            {repos.map((repo) => (
++              <ScopeAuditRepoSeg key={String(repo.key)} repo={repo} repoKey={String(repo.key)} />
++            ))}
++          </div>
++        </>
++      )}
+     </div>
+   );
+ }
+diff --git a/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/tasks.md b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/tasks.md
+new file mode 100644
+index 000000000..a43a90084
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:34:47.360Z
++---
++# 任务注册表（Tasks）— 2026-10-10-change-patch-cross-repo-view
++
++- [x] task-01: ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
++- [x] task-02: rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
++- [x] task-03: repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
++- [x] task-04: 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
++- [x] task-05: 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
+diff --git a/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/design.md b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/design.md
+@@ -0,0 +1,48 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:34:47.360Z
++---
++# 设计记录（Design Record）— 2026-10-10-change-patch-cross-repo-view
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++纯前端读侧适配，单文件改动：`frontend/src/components/files/structured-views.tsx` 的 `ScopeAuditView`（scope-audit.json 独立报告与 change-patch.json 的 scopeAudit 子对象共用同一渲染）增量渲染跨仓冻结面。数据链：sillyspec 仓变更 2026-10-10-cross-repo-patch-freeze（已归档，commit e7a50f35）已把 `scopeAudit.repos[]`（key/anchor/totals/degraded/degradedReason/patch/patchSha256）冻结进 change-patch.json；平台文件预览链（change-file-tree 内联预览 + json-previewer 全屏弹窗）把 JSON 全文交给 `knownJsonView` → `ChangePatchView` → `ScopeAuditView`——在这一个渲染函数补齐，两个入口同时生效，后端/daemon 零改动。
++
++视觉形态对齐变更中心 scope-audit-command-card 的跨仓分组渲染（2026-09-20-scope-audit-cross-repo-platform 已上线范式）：主仓 brand 色标识、锚点 chip、三态 chips。一处差异：daemon 链的 `anchor_label` 短哈希是 daemon 投影产出，冻结件里没有——前端从 `anchor.base` 自行短化（`slice(0, 7)`）。patch 正文折叠块默认收起，展开后复用 `DiffView`（自带 2000 行增量渲染，大 diff 不铺满）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 修改 `frontend/src/components/files/structured-views.tsx`：`ScopeAuditView` 增三块渲染——① rows 表跨仓行仓标徽章；② `repos[]` 非空数组时表格下方按仓分段；③ 每仓段的 patch 折叠面。新增局部组件（`ScopeAuditRepoSeg` 仓段/锚点 chip/patch 折叠块），模块导出面不变（knownJsonView/JsonView/DiffView/JsonlView 等签名与行为不动）。
++- 消费的数据契约（producer=sillyspec CLI，2026-10-10-cross-repo-patch-freeze 已定形）：`scopeAudit.repos[]` 条目 `{ key: string, repoPath?: string|null, anchor: {source, base, head, label}, totals: {files, additions, deletions, planned, unplanned, untouched}, degraded: boolean, degradedReason: string|null, patch?: string|null, patchSha256?: string|null }`；`rows[]` 条目可选 `crossRepo: string`。防御式解析：repos 非数组 → 不分段；条目非 record 或 key 非非空 string → 跳过；totals 字段非数值 → 计 0。
++- 后端/daemon/OpenAPI 零改动——change-patch.json 走文件预览链（自由形态 JSON 文本），不经过接口 DTO，`api-types.ts` 无需 gen:types。
++- testid 约定（与 command-card 同形，组件独立无冲突）：`scope-audit-repo-seg-<key>` / `scope-audit-repo-degraded-<key>` / `scope-audit-chip-<key>-<verdict>` / `scope-audit-repo-patch-<key>` / `scope-audit-repo-patch-missing-<key>`，行徽章 `data-repo-badge`。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——纯同步渲染组件，无事件流无异步输入；JSON 文本一次性 parse 后进入，不存在乱序面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用——组件零 mutation 零落盘；冻结件由 CLI 单套写纪律（writeCloseTraceArtifacts 单写点）保证无并发双版本，读侧只读快照。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全——折叠展开态为组件局部 state；预览切换文件/变更时组件重挂载，折叠态回默认收起，无状态残留风险。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会——每仓段只渲染本变更自己的 scopeAudit.repos[]，无跨工作区/跨变更串台面；主仓判定用 `key === 'main'`（CLI 既有约定，与 command-card 一致）；`repos[].repoPath` 可能含本机布局路径（CLI 侧 P2 已确认 patch 正文不含、但字段本身含），展示面不渲染该字段——本机布局不外泄。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：patch 正文内联使 change-patch.json 体积增大（跨仓多文件大 diff），预览链若对 JSON 全量 parse 可能耗内存——但 DiffView 已有 2000 行增量渲染兜底 DOM 面，且折叠默认收起，渲染成本可控；JSON.parse 本身是预览链既有成本，非本变更引入。
++
++试过但放弃的方案：① 在变更中心 scope-audit 实时查询链（command-card）加 patch 面——该链是实时对账（快照说当下），无冻结正文书，且要动 daemon 投影白名单（repoPath 剥离逻辑），面大不做；冻结正文归属 change-patch.json 读侧。② patch 正文落独立文件族（change-patch-cross-repo/<key>.patch）——违背 2026-10-09-close-trace-single-set 单套两件纪律，producer 侧设计已显式否决（D-001@v1），平台侧不翻案。
+
+diff --git a/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/proposal.md b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:34:47.359Z
++---
++# 提案书（Proposal）— 2026-10-10-change-patch-cross-repo-view
++
++## 动机
++
++任务原话转写：变更详情的 change-patch.json 结构化视图（内联预览+全屏弹窗共用 ChangePatchView→ScopeAuditView）不渲染 scopeAudit.repos[]——sillyspec 2026-10-10-cross-repo-patch-freeze 已把每仓锚点档/三态计数/patch 正文+patchSha256 冻结进该子对象，平台展示侧不可见；rows 表跨仓行也无仓标，与主仓行混排无法区分。
++成功标准：
++- ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
++- rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
++- repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
++- 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
++- 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
++2. rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
++3. repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
++4. 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
++5. 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
++
++## 成功标准（可验证）
++
++1. ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
++2. rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
++3. repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
++4. 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
++5. 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
+
+diff --git a/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/requirements.md b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-change-patch-cross-repo-view/requirements.md
+@@ -0,0 +1,87 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T11:34:47.360Z
++---
++# 需求规格（Requirements）— 2026-10-10-change-patch-cross-repo-view
++
++## 功能需求
++
++### FR-01: ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
++
++- 对账快照视图必须在 scopeAudit.repos 为非空数组时按仓分段渲染：每段段头=仓标识（key==='main' 显示「主仓」并用 brand 色，其余仓显示仓 key）+ 锚点 chip（anchor.label 文案 + anchor.base 前 7 位短哈希，base 缺失时哈希位显示 —）；段身=三态计数 chips（计划内/计划外/计划未动，计数必须取 repos[].totals 单一源，禁止前端从 rows 重算）+ 该仓 files 数与 +/− 行数。
++- degraded=true 的仓段禁止渲染三态 chips，整段降级为 ⚠️ 与 degradedReason 文案（无原因时给默认文案「该仓跨仓对账不可达（未注册/路径不可达），请人工到对应仓核对」）。
++- 每仓段禁止渲染 repos[].repoPath 字段（该字段可能含本机布局路径，不外泄）。
++
++#### 场景：跨仓冻结件按仓分段
++
++- Given：change-patch.json 的 scopeAudit.repos 为非空数组（含 main 之外的仓，如 sub-x）
++- When：渲染对账快照视图
++- Then：每仓出现独立段（`scope-audit-repo-seg-<key>`），段头=仓标识+锚点 chip，段身=三态 chips（计数与 repos[].totals 一致）+ files/+−
++
++#### 场景：降级仓整段警示
++
++- Given：repos[] 某条 degraded=true 且 degradedReason 非空
++- When：渲染
++- Then：该段无三态 chips，显示 ⚠️ 与原因文案（`scope-audit-repo-degraded-<key>`）
++
++### FR-02: rows 表 crossRepo 字段非空的行在路径后加仓标徽章（brand 色小标签，对齐 scope-audit-command-card 形态）
++
++- rows 表中 crossRepo 字段为非空 string 的行必须在文件路径后渲染仓标徽章（brand 色小标签显示仓 key，形态对齐 scope-audit-command-card 的 repoBadge）；无 crossRepo 或值非 string 的行禁止渲染仓标。
++
++#### 场景：跨仓行与主仓行混排
++
++- Given：rows 同时含 crossRepo='sub-x' 的行与无 crossRepo 的行
++- When：渲染表格
++- Then：跨仓行路径后出现「sub-x」brand 徽章，主仓行无徽章
++
++### FR-03: repos[].patch 键在场（'patch' in 条目）时：非空 string 可折叠展开 DiffView 正文+patchSha256 短哈希（title 全量）；null 诚实显示「patch 未采集（采集失败或空窗）」；键缺省（旧形态/未开采集）零渲染——additive 契约旧读方零感知
++
++- repos[] 条目存在 patch 键时（'patch' in 条目）：patch 为非空 string 必须提供可折叠的 diff 正文区（默认折叠，展开后用 DiffView 渲染）并显示 patchSha256 短哈希（title 为全量哈希）；patch 为 null（键在场但采集失败/空窗）必须诚实显示「patch 未采集（采集失败或空窗）」，禁止伪造正文或占位 diff；条目无 patch 键（旧形态冻结件/未开采集）禁止渲染任何 patch 相关 UI。
++- degraded=true 的仓段不适用上述 patch 面（FR-01 整段降级语义优先）——「采集失败或空窗」文案对整仓不可达场景是误描述，降级原因已覆盖。
++- 折叠区默认收起（跨仓 diff 正文可能很大，不铺满预览面）。
++
++#### 场景：patch 正文在场可展开
++
++- Given：repos[] 条目 patch 为非空 diff string、patchSha256 为 64 位哈希
++- When：渲染
++- Then：段内出现折叠钮（`scope-audit-repo-patch-<key>`），展开后 DiffView 渲染 hunk，sha 短哈希可见（title 全量）
++
++#### 场景：patch 采集失败诚实留痕
++
++- Given：repos[] 条目 patch=null 且键在场
++- When：渲染
++- Then：显示「patch 未采集（采集失败或空窗）」文案，无 DiffView
++
++#### 场景：旧形态无 patch 键零渲染
++
++- Given：repos[] 条目无 patch 键
++- When：渲染
++- Then：该段无任何 patch 相关 UI
++
++### FR-04: 旧形态（无 repos 键/无跨仓行）渲染与现状一致，既有测试零回归
++
++- scopeAudit 无 repos 键或 repos 为空数组时，视图渲染必须与现状保持一致（摘要行+rows 表，无仓分段、无仓标、无 patch 面）；structured-views 测试文件的既有用例必须全部保持通过。
++
++#### 场景：旧冻结件回退
++
++- Given：scopeAudit 无 repos 键、rows 无 crossRepo 字段
++- When：渲染
++- Then：输出与现状一致（既有用例断言不变绿）
++
++### FR-05: 测试覆盖：跨仓 repos 段渲染/降级段/patch 展开+sha/null 未采集/缺键不渲染/行仓标徽章
++
++- 本变更必须在 structured-views 测试文件补齐以下用例并全部通过：跨仓 repos 段渲染（含主仓+跨仓段）、降级段、patch 正文折叠展开+sha 短哈希、patch null 未采集、patch 键缺省零渲染、rows 仓标徽章、无 repos 回退。
++
++#### 场景：回归面全绿
++
++- Given：上述用例就位
++- When：运行 structured-views 测试文件
++- Then：全部通过（含既有用例）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/files/__tests__/structured-views.test.tsx「change-patch.json（跨仓冻结）→ repos[] 每仓段+锚点 chip+三态 chips+降级段」
++FR-02: frontend/src/components/files/__tests__/structured-views.test.tsx「rows 跨仓行路径后仓标徽章」
++FR-03: frontend/src/components/files/__tests__/structured-views.test.tsx「repos[].patch 折叠正文+sha/null 未采集/缺键零渲染」
++FR-04: frontend/src/components/files/__tests__/structured-views.test.tsx「旧形态无 repos 回退现状（既有用例零回归）」
++FR-05: frontend/src/components/files/__tests__/structured-views.test.tsx「跨仓展示用例组全绿」

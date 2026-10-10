@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-change-patch-cross-repo-view",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-change-patch-cross-repo-view"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「rows 跨仓行路径后仓标徽章」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-change-patch-cross-repo-view"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「repos[].patch 折叠正文+sha/null 未采集/缺键零渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-change-patch-cross-repo-view"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「旧形态无 repos 回退现状（既有用例零回归）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-change-patch-cross-repo-view"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-change-patch-cross-repo-view:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「跨仓展示用例组全绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-change-patch-cross-repo-view"
+    }
+  ]
+}

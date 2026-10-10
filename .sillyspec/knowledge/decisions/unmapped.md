@@ -2036,3 +2036,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：d36f637fb53b872facafe40761c637f9b5acd6b8
 理由：- 最大风险：50 页上限内连续 prepend 大量 DOM（巨型会话全量加载），低配端渲染压力——已有 `content-visibility` 与 50 页上限兜底，且为用户显式点击触发（非自动）；toast 明示可续。 - 放弃方案 A「修触顶手感（阈值/锚定参数调优）」：无浏览器复现定位精确体感根因，动高测试密度滚动机制（触顶/锚定/贴底三方交互）回归面大；放弃方案 B「列表虚拟化」：属大改，超出轻量变更范围。 - 已知残留：滚动体感问题本身未根治（本变更提供绕开路径）；用户侧验证待部署后确认。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-change-patch-cross-repo-view
+锚点：未记录
+最近确认：1f4ea92e5df86e3be6149b1f19d5fa046a8ee1ff
+理由：最大风险：patch 正文内联使 change-patch.json 体积增大（跨仓多文件大 diff），预览链若对 JSON 全量 parse 可能耗内存——但 DiffView 已有 2000 行增量渲染兜底 DOM 面，且折叠默认收起，渲染成本可控；JSON.parse 本身是预览链既有成本，非本变更引入。 试过但放弃的方案：① 在变更中心 scope-audit 实时查询链（command-card）加 patch 面——该链是实时对账（快照说当下），无冻结正文书，且要动 daemon 投影白名单（repoPath 剥离逻辑），面大不做；冻结正文归属 change-patch.json 读侧。② patch 正文落独立文件族（change-patch-cross-repo/<key>.patch）——违背 2026-10-09-close-trace-single-set 单套两件纪律，producer 侧设计已显式否决（D-001@v1），平台侧不翻案。
