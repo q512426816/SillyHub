@@ -403,12 +403,12 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
     // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
     // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
-    // driver 版本门控写盘），翻值归 task-08（false→true + gen-provider-caps
+    // driver 版本门控写盘），task-08 已翻值（SPIKE-00 实测通过为唯一依据，gen-provider-caps
     // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
     // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
     // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
     resume: true,
-    mcp: false,
+    mcp: true,
     multimodal: true,
     attachments: true,
     thinking: true,

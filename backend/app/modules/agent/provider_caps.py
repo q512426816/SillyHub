@@ -64,7 +64,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
     },
     "pi": {
         "resume": True,
-        "mcp": False,
+        "mcp": True,
         "multimodal": True,
         "attachments": True,
         "thinking": True,
