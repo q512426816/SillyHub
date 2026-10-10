@@ -105,12 +105,18 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   useEffect(() => stopInitPolling, []);
   // 2026-10-10-ws-init-dialog-close-guard：超时钟与轮询的可见性暂停对齐
   // （D-005 钟同步）——后台标签页轮询 tick 被 document.hidden 短路，deadline
-  // 到期同样顺延一拍再探，否则后台初始化实际成功、回前台却见 5min 假失败；
-  // 回前台后重挂满窗再计。
-  const armInitDeadline = (delayMs: number) => {
+  // 到期同样不判死：hidden 时顺延一拍再探；回前台后重挂满窗再计（后台时段
+  // 不累计超时，杜绝「后台初始化实际成功、回前台 ≤2s 即假失败」的竞态）。
+  // fullWindow 标记区分两态：满窗到期且可见才判 init_failed；顺延拍到期且
+  // 可见 = 刚从后台回来 → 重挂满窗。
+  const armInitDeadline = (delayMs: number, fullWindow: boolean) => {
     initDeadlineRef.current = setTimeout(() => {
       if (document.hidden) {
-        armInitDeadline(INIT_POLL_INTERVAL_MS);
+        armInitDeadline(INIT_POLL_INTERVAL_MS, false);
+        return;
+      }
+      if (!fullWindow) {
+        armInitDeadline(INIT_POLL_TIMEOUT_MS, true);
         return;
       }
       stopInitPolling();
@@ -170,7 +176,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           // 单次轮询错误忽略，下一 tick 重试（超时兜底）
         }
       }, INIT_POLL_INTERVAL_MS);
-      armInitDeadline(INIT_POLL_TIMEOUT_MS);
+      armInitDeadline(INIT_POLL_TIMEOUT_MS, true);
     } catch (err) {
       setError(errMessage(err, "创建失败"));
       setPhase("idle");

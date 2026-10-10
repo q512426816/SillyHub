@@ -420,9 +420,14 @@ describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-ski
       ).toBeNull();
       expect(screen.getByText("初始化工作区")).toBeInTheDocument();
 
-      // 回前台：重挂满窗 → 再推 5min+ 才失败
+      // 回前台：重挂满窗再计 → 4min 检查点不出失败态（区分「≤2s 即死」旧形态）
       hiddenMock.value = false;
-      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 10_000);
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+      expect(
+        screen.queryByText("工作区已创建成功，但初始化失败"),
+      ).toBeNull();
+      // 满窗计满 → init_failed
+      await vi.advanceTimersByTimeAsync(60 * 1000 + 10_000);
       expect(
         await screen.findByText("工作区已创建成功，但初始化失败"),
       ).toBeInTheDocument();
