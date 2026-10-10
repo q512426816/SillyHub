@@ -1,0 +1,24 @@
+{"ts":1791615165765,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791615192230,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791615225444,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791615235681,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/spec-sync.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791615443968,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791615444238,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791615444878,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791615444878,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791615448865,"kind":"commit","stage":null,"detail":"261dc22e9","provisional":true}
+{"ts":1791615455381,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791615455675,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791615455437,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791615455437,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791615455944,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791615459354,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791615459354,"kind":"task-done","stage":"tasks","detail":"checked 3→5","provisional":true}
+{"ts":1791615459354,"kind":"commit","stage":null,"detail":"f86761270","provisional":true}
+{"ts":1791615482388,"kind":"gate-run","stage":"verify","detail":"门实测 failed（13.6s） · 20261010065759","provisional":true}
+{"ts":1791615840410,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1791615873313,"kind":"gate-run","stage":"verify","detail":"门实测 failed（11.6s） · 20261010070432","provisional":true}
+{"ts":1791616060476,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1791616080165,"kind":"gate-run","stage":"verify","detail":"门实测 failed（11.5s） · 20261010070759","provisional":true}
+{"ts":1791616119745,"kind":"config-change","stage":null,"detail":"本地配置 local.yaml 有变更（内容不上行）","provisional":true}
+{"ts":1791616139522,"kind":"gate-run","stage":"verify","detail":"门实测 passed（11.8s） · 20261010070859","provisional":true}

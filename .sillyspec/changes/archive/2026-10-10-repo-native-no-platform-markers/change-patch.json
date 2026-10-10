@@ -1,0 +1,96 @@
+{
+  "change": "2026-10-10-repo-native-no-platform-markers",
+  "baseline": "9517edfd544c15145f3cbbe1ea2a1d07c0ebc2a7",
+  "head": "1c9c0e40dae6ee77ad07859f3b80e0dc2d7e269c",
+  "files": [
+    ".sillyspec/changes/2026-10-10-repo-native-no-platform-markers/design.md",
+    ".sillyspec/changes/2026-10-10-repo-native-no-platform-markers/requirements.md",
+    ".sillyspec/changes/2026-10-10-repo-native-no-platform-markers/tasks.md",
+    "docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/test_init_lease.test.ts",
+    ".sillyspec/changes/2026-10-10-repo-native-no-platform-markers/proposal.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 321,
+    "deletions": 16
+  },
+  "savedAt": "2026-10-10T07:09:27.967Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9517edfd544c15145f3cbbe1ea2a1d07c0ebc2a7",
+    "totals": {
+      "files": 3,
+      "additions": 159,
+      "deletions": 16
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md",
+        "additions": 48,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 35,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/test_init_lease.test.ts",
+        "additions": 76,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "faeab393defbfb6a8150ced610d4318d5d4c604e658b2c4cd1cf39e7fa1d4776",
+  "patchStatus": "ok"
+}

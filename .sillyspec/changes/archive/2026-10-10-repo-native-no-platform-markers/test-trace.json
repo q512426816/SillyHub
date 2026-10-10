@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-repo-native-no-platform-markers",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-repo-native-no-platform-markers:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-repo-native-no-platform-markers"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-repo-native-no-platform-markers:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：缓存为普通目录残留 → rename 备份后 junction 成立，原内容保留在备份目录，getSpecBundle 不被调」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-repo-native-no-platform-markers"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-repo-native-no-platform-markers:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-repo-native-no-platform-markers"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-repo-native-no-platform-markers:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「策略分支 init 时序 + 状态文件保鲜 (ql-20260820-007)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-repo-native-no-platform-markers"
+    }
+  ]
+}

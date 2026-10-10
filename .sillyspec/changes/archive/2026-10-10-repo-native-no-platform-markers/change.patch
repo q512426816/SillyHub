@@ -1,0 +1,422 @@
+diff --git a/docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md b/docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md
+new file mode 100644
+index 000000000..4c27cc0ff
+--- /dev/null
++++ b/docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md
+@@ -0,0 +1,48 @@
++# verify 动态测试子集把 TS 源码归入 node --test 批跑出伪败
++
++- **发现日**:2026-10-10
++- **变更**:2026-10-10-repo-native-no-platform-markers（flow done 实测门）
++- **状态**:活跃坑（工具缺陷，待 sillyspec 修复）
++
++## 现象
++
++flow done 实测门（动态测试子集）把 `sillyhub-daemon/src/spec-sync.ts`（**TS 源码**，
++非测试文件）归入 `deps(auto-js)` 批并用 `node --test` 执行——node 24 直接跑 .ts 源码
++import 链（`./config.js` ESM 后缀解析）必然 `ERR_MODULE_NOT_FOUND`，TAP 输出失败行：
++
++```
++not ok 1 - sillyhub-daemon\src\spec-sync.ts
++```
++
++整单实测 FAIL，中断于 ledger 子步。而该文件在 sillyhub-daemon 的 vitest 套件中
++（tests/test_init_lease.test.ts 31/31 全绿）真实覆盖，伪败与代码质量无关。
++
++## 根因
++
++动态子集的 import 依赖推断（2026-09-26-dynamic-test-inference）把测试文件 import 的
++**源码文件**也计进"要跑的测试面"；runner 按"最近 package.json"推断运行器时，
++`sillyhub-daemon/src/*.ts`（无 `.test.` 后缀）被判给 `node --test` 批（auto-js）而非
++vitest（auto-jsx）。node --test 对 TS 源码是必然失败的错误运行器。
++
++对照：同批 `deps(auto-jsx)` 5 个 .test.ts 文件正确走 vitest 全绿；唯一 auto-js 条目
++恰是那个被误判的源码文件。
++
++## 绕过（当前 local.yaml known_failures 已加锚定条目）
++
++```yaml
++- '^not ok 1 - sillyhub-daemon\\src\\spec-sync\.ts$'
++```
++
++锚定式（`^…$`）整行匹配，不掩盖 spec-sync 相关 vitest 套件的真实失败（那些失败行
++带测试名/断言详情，不匹配本锚定）。
++
++## 修复建议（工具侧）
++
++1. 动态子集的 import 依赖面只应产生**测试文件**候选；源码依赖应作为「测试文件的选择
++   依据」（import 了它的测试要跑），而不是自身进 runner 面。
++2. 或 runner 推断兜底：无 `.test.`/`_test`/`test_` 后缀的文件不进 node --test 批
++   （node --test 语义是「文件即测试」）。
++
++## 复核条件
++
++sillyspec 发版修复动态子集推断后，删除 local.yaml 该锚定条目与本文件（移 finished/）。
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 940983684..56812f0d6 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -143,20 +143,23 @@ export async function pullSpecBundle(
+ 
+   // ── repo-native（D-005）：建 junction 让缓存指向源项目 .sillyspec，跳过 pull 覆盖 ──
+   // scan 直接写源项目（实时双向）。R-01：repo-native 不走 rm/不覆盖，避免顺链删源项目。
++  // 2026-10-10-repo-native-no-platform-markers：源项目无 .sillyspec 不再降级 pull——降级
++  // 会让缓存成普通目录，sillyspec CLI 自指守卫（realpath 穿透 junction）失效，init 三写
++  // 把平台标记（.sillyspec-platform.json/-managed/-cleaned）投毒进源项目根。就地创建空
++  // 真理源（「源项目即真理」语义：用户创建工作区时的 ⚠ 写入警示已覆盖该授权）。
+   if (strategy === 'repo-native' && opts.rootPath) {
+     const sourceSillyspec = join(opts.rootPath, '.sillyspec');
+-    if (await pathExists(sourceSillyspec)) {
+-      const ok = await ensureSpecJunction(specDir, sourceSillyspec);
+-      if (ok) {
+-        console.info('spec_sync: repo_native_junction_ready', wsId, specDir, '->', sourceSillyspec);
+-        return specDir; // junction 就绪，scan 在源项目跑，postSpecSync 打包源项目回灌
+-      }
+-      // 普通目录残留阻塞 junction → 降级 pull（不删数据）
+-      console.warn('spec_sync: repo_native_junction_blocked_fallback', wsId, specDir);
+-    } else {
+-      // 源项目无 .sillyspec → 降级 repo-mirrored（首次复制空操作，最终走 pull）
+-      console.warn('spec_sync: repo_native_source_missing_fallback', wsId, sourceSillyspec);
++    if (!(await pathExists(sourceSillyspec))) {
++      await mkdir(sourceSillyspec, { recursive: true });
++      console.info('spec_sync: repo_native_source_created', wsId, sourceSillyspec);
+     }
++    const ok = await ensureSpecJunction(specDir, sourceSillyspec);
++    if (ok) {
++      console.info('spec_sync: repo_native_junction_ready', wsId, specDir, '->', sourceSillyspec);
++      return specDir; // junction 就绪，scan 在源项目跑，postSpecSync 打包源项目回灌
++    }
++    // 备份交换失败（Windows 句柄占用等）→ 降级 pull（不删数据）
++    console.warn('spec_sync: repo_native_junction_blocked_fallback', wsId, specDir);
+   }
+ 
+   // ── repo-mirrored（D-002）：首次（缓存空）从源项目 .sillyspec 单次 fs.cp ──────────
+@@ -483,9 +486,12 @@ async function dirHasContent(dir: string): Promise<boolean> {
+  * - 不存在 → 建（Win fs.symlink('junction') 无需提权 / Linux·macOS 普通 symlink）。
+  * - 已是符号链接/junction 且目标一致 → 复用，返回 true。
+  * - 已是符号链接但目标不一致 → 移除重建。
+- * - 是普通目录（历史残留）→ 不自动删（防误删数据），返回 false 让上层降级 pull。
++ * - 是普通目录（历史残留）→ rename 备份到 <wsId>.pre-junction-backup-<ts> 后建 junction
++ *   （2026-10-10-repo-native-no-platform-markers：直接降级会让缓存成普通目录，sillyspec
++ *   CLI 自指守卫失效，init 三写平台标记投毒源项目根；rename 保数据优于降级投毒）；
++ *   rename 失败（Windows 句柄占用等）→ 保守返回 false 让上层降级 pull（不删数据）。
+  *
+- * @returns true=junction 就绪；false=被普通目录阻塞，上层应降级
++ * @returns true=junction 就绪；false=备份交换失败，上层应降级
+  */
+ async function ensureSpecJunction(specDir: string, target: string): Promise<boolean> {
+   let existing: string | null = null;
+@@ -502,7 +508,22 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
+   } catch {
+     // 不存在，继续建
+   }
+-  if (isPlainDir) return false; // 普通目录残留，不自动删（防误删），上层降级
++  if (isPlainDir) {
++    // 普通目录残留：备份交换（数据不丢）后建 junction，不再直接降级。
++    // renameWithRetry：Windows 索引器/杀软短暂持有句柄的 EBUSY/EPERM 暂态失败重试
++    // （与下方 pull 目录交换同款）；重试穷尽仍败 → 保守降级（不删数据）。
++    const backup = join(
++      dirname(specDir),
++      `${basename(specDir)}.pre-junction-backup-${Date.now()}`,
++    );
++    try {
++      await renameWithRetry(specDir, backup);
++      console.info('spec_sync: junction_stale_dir_backed_up', specDir, '->', backup);
++    } catch (e) {
++      console.warn('spec_sync: junction_backup_rename_failed_fallback', specDir, e);
++      return false; // 备份失败保守降级（不删数据）
++    }
++  }
+   if (isLink) {
+     const existingNorm = existing ? resolve(existing) : null;
+     if (existingNorm === resolve(target)) return true; // 目标一致，复用
+diff --git a/sillyhub-daemon/tests/test_init_lease.test.ts b/sillyhub-daemon/tests/test_init_lease.test.ts
+index 72096a5ca..3a40b871d 100644
+--- a/sillyhub-daemon/tests/test_init_lease.test.ts
++++ b/sillyhub-daemon/tests/test_init_lease.test.ts
+@@ -40,10 +40,10 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
+   return { ...actual, writeLocalYaml: localYamlWriterMock };
+ });
+ 
+-import { mkdtemp, mkdir, writeFile, rm, readFile, lstat } from 'node:fs/promises';
++import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir } from 'node:fs/promises';
+ import { writeFileSync } from 'node:fs';
+ import { tmpdir, homedir } from 'node:os';
+-import { join } from 'node:path';
++import { join, dirname } from 'node:path';
+ 
+ import {
+   handleInitLease,
+@@ -106,6 +106,8 @@ const TEST_WS_IDS = [
+   'ws-init-initfail', 'ws-init-gate', 'ws-init-order', 'ws-init-tools-pass', 'ws-init-tools-fallback',
+   // ql-20260820-007：策略分支 init 时序 + 状态文件保鲜重建用例
+   'ws-init-native', 'ws-init-mirror', 'ws-init-pm-state', 'ws-init-bump-recreate', 'ws-init-batch-native',
++  // 2026-10-10-repo-native-no-platform-markers：源缺失不降级 / 残留备份交换两用例
++  'ws-init-native-nosource', 'ws-init-native-stale',
+ ];
+ afterAll(async () => {
+   await Promise.all(
+@@ -631,6 +633,78 @@ describe('策略分支 init 时序 + 状态文件保鲜 (ql-20260820-007)', () =
+     expect(st.spec_version).toBe(1);
+   });
+ 
++  // 2026-10-10-repo-native-no-platform-markers：repo-native 两降级洞收口——降级会让缓存成
++  // 普通目录，sillyspec CLI 自指守卫（realpath 穿透 junction 判回环 → 拒写平台标记三件套）
++  // 失效，init 三写把 .sillyspec-platform.json/-managed/-cleaned 投毒进源项目根。两用例断言
++  // 守卫的前置条件（缓存 symlink + 源项目 .sillyspec 存在 + 两 realpath 相等）全部路径成立。
++
++  it('repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）', async () => {
++    // 前置：tmpProject 存在但无 .sillyspec（全新项目首接形态）
++    const client = makeClient(); // 有 bundle 也不应被调（junction 分支早退）
++
++    const result = await handleInitLease(client as never, {
++      workspaceId: 'ws-init-native-nosource',
++      rootPath: tmpProject,
++      serverOrigin: 'http://127.0.0.1:8000',
++      strategy: 'repo-native',
++      latestSpecVersion: 0,
++      spawnFn: makeInitSpawn(),
++    });
++
++    expect(result.ok).toBe(true);
++    expect(client.getSpecBundle).not.toHaveBeenCalled();
++    // 空真理源被就地创建（「源项目即真理」：真理源不存在则创建空目录）
++    const srcDir = join(tmpProject, '.sillyspec');
++    expect((await stat(srcDir)).isDirectory()).toBe(true);
++    // 自指守卫前置条件：缓存是 symlink，且 realpath 与源项目 .sillyspec 同一物理目录
++    const cacheRoot = resolveSpecDir('ws-init-native-nosource');
++    expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(true);
++    expect(await realpath(cacheRoot)).toBe(await realpath(srcDir));
++    // 状态文件经 junction 落源项目（repo-native 统一语义）
++    const st = JSON.parse(
++      await readFile(join(srcDir, DAEMON_STATE_FILENAME), 'utf-8'),
++    ) as Record<string, unknown>;
++    expect(st.spec_version).toBe(0);
++  });
++
++  it('repo-native：缓存为普通目录残留 → rename 备份后 junction 成立，原内容保留在备份目录，getSpecBundle 不被调', async () => {
++    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
++    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
++    // 预置普通目录残留缓存（历史 platform-managed 形态，带真实内容）
++    const cacheRoot = resolveSpecDir('ws-init-native-stale');
++    await mkdir(join(cacheRoot, 'legacy'), { recursive: true });
++    await writeFile(join(cacheRoot, 'legacy', 'old-bundle.md'), '# old');
++    const client = makeClient();
++
++    const result = await handleInitLease(client as never, {
++      workspaceId: 'ws-init-native-stale',
++      rootPath: tmpProject,
++      serverOrigin: 'http://127.0.0.1:8000',
++      strategy: 'repo-native',
++      latestSpecVersion: 1,
++      spawnFn: makeInitSpawn(),
++    });
++
++    expect(result.ok).toBe(true);
++    expect(client.getSpecBundle).not.toHaveBeenCalled();
++    // 缓存已成为 junction（自指守卫前置条件）
++    expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(true);
++    expect(await realpath(cacheRoot)).toBe(await realpath(join(tmpProject, '.sillyspec')));
++    // 源项目内容经 junction 可达（scan 将直接写源项目）
++    expect(await readFile(join(cacheRoot, 'docs', 'native.md'), 'utf-8')).toBe('# native');
++    // 残留数据完整保留在备份目录（rename 备份非删除）
++    const parent = dirname(cacheRoot);
++    const backups = (await readdir(parent)).filter((n) =>
++      n.startsWith('ws-init-native-stale.pre-junction-backup-'),
++    );
++    expect(backups.length).toBe(1);
++    expect(
++      await readFile(join(parent, backups[0], 'legacy', 'old-bundle.md'), 'utf-8'),
++    ).toBe('# old');
++    // 备份目录不在 TEST_WS_IDS 精确清理面 → 用例自清，防真实 specs/ 根堆积
++    await rm(join(parent, backups[0]), { recursive: true, force: true }).catch(() => {});
++  });
++
+   it('platform-managed：pull 200 的 rm -rf 不再删掉状态文件（重排后 writeDaemonState 后置于 pull）', async () => {
+     // 预置旧状态文件 + 旧内容：pull 覆盖语义会 rm -rf 整个缓存——重排前状态文件先写后被删
+     const cacheRoot = resolveSpecDir('ws-init-pm-state');
+diff --git a/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/design.md b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/design.md
+new file mode 100644
+index 000000000..2bff87982
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/design.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T06:51:49.152Z
++---
++# 设计记录（Design Record）— 2026-10-10-repo-native-no-platform-markers
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++根因：repo-native 的「零投毒」依赖一条守卫链——sillyspec CLI 的 isSelfReferentialSpecRoot 用 realpath 穿透 junction 判回环，回环则拒写平台标记三件套；而 daemon `pullSpecBundle`（sillyhub-daemon/src/spec-sync.ts）的 repo-native 分支在**源项目无 .sillyspec** 时降级走 platform-managed pull（缓存成普通目录），以及 `ensureSpecJunction` 遇**缓存普通目录残留**时返回 false 降级——两种降级都让缓存不再是 junction，守卫链断裂，init 三写把 `.sillyspec-platform.json` / `.sillyspec-platform-managed` / `.sillyspec-platform-cleaned` 投毒进源项目根（deepseek-harness 项目实证：无 .sillyspec 但三件套齐全）。
++
++修法（daemon 单侧，sillyspec CLI 零改动）：① repo-native 分支源项目无 .sillyspec 时不再降级——就地 mkdir 空目录后照常建 junction（「源项目即真理」语义下空真理源就地创建，用户创建工作区时的 ⚠ 写入警示已覆盖该授权）；② `ensureSpecJunction` 普通目录残留从「直接 return false 降级」改为「rename 到 `<wsId>.pre-junction-backup-<时间戳>` 备份后建 junction」，rename 失败才保守降级。两处都把 junction 成功率拉满，守卫链在全部 repo-native 路径闭合。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `pullSpecBundle`（sillyhub-daemon/src/spec-sync.ts）：签名无变化；行为变化 = strategy=repo-native 且源项目无 .sillyspec 时新增「mkdir 空目录 + junction」路径（原为降级 pull），新增日志 `repo_native_source_created`。
++- `ensureSpecJunction`（同文件，模块私有）：签名无变化；行为变化 = 普通目录残留由「return false 降级」改为「rename 备份后建 junction」，新增日志 `junction_stale_dir_backed_up` / `junction_backup_rename_failed_fallback`。
++- backend API / sillyspec CLI / 前端：**无变化**（守卫逻辑本就存在于 sillyspec CLI，本变更只保证其前置条件成立）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——pullSpecBundle 在 init lease 编排内单次同步执行，无乱序事件面；mkdir/junction 建立是幂等前置（ensureSpecJunction 对「已是 symlink 且目标一致」复用）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   同一 workspace 的 init lease 由 backend lease 机制单执行体持有；跨 workspace 各自操作独立 specDir。理论竞态：init 与心跳预取同时进 pullSpecBundle——既有行为已存在（junction 复用分支幂等），本变更未加宽竞态面：mkdir recursive 幂等、rename 竞态失败即走降级兜底分支。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   mkdir 后、junction 建立前中断 → 源项目留空 .sillyspec（合法状态，下次重试继续）；rename 备份后、junction 建立前中断 → 缓存路径短暂缺失，下次 pullSpecBundle 重走 ensureSpecJunction（specDir 不存在 → 直接建），备份目录数据不丢。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   specDir 按 wsId 隔离、备份目录带 wsId+时间戳前缀，无串台；mkdir 只触碰本 workspace rootPath 下的 .sillyspec，不涉其它项目。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：给用户源项目建空 `.sillyspec` 是对源项目的写操作——但 repo-native 语义即「扫描直接写源项目」，创建工作区时 ⚠ 警示已明示，属授权范围内最小写面（仅空目录）。次风险：备份目录在 specs/ 根堆积（每次策略切换最多一个），低频可接受，注释明示。
++- 放弃的方案：① 改 sillyspec CLI 加 `--strategy` flag 显式跳过三写——跨仓接口变更，且自指守卫已存在，修前置条件即可闭合，不扩战线；② isSelfReferentialSpecRoot 在 cwd/.sillyspec 不存在时弱化判定（resolve 字符串比对）——junction 路径字符串本就不等，弱判定不可靠，治标不治本；③ 普通目录残留直接 rm 后建 junction——违背 R-01 防误删原则（残留可能含历史托管数据），rename 备份保数据。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/spec-sync.ts | repo-native 源缺失就地建空真理源；ensureSpecJunction 残留备份交换 |
++| 修改 | sillyhub-daemon/tests/test_init_lease.test.ts | 新增两用例：源缺失不降级 / 残留备份交换 junction |
+diff --git a/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/requirements.md b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/requirements.md
+new file mode 100644
+index 000000000..2f47a6fdd
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/requirements.md
+@@ -0,0 +1,65 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T06:51:49.152Z
++---
++# 需求规格（Requirements）— 2026-10-10-repo-native-no-platform-markers
++
++## 功能需求
++
++### FR-01: repo-native 且源项目无 .sillyspec 时不再降级：daemon 就地创建空 .sillyspec 后建 junction，getSpecBundle 不被调用（junction 分支早退）
++
++- daemon `pullSpecBundle` 在 strategy=repo-native 且源项目 `<rootPath>/.sillyspec` 不存在时，**必须**就地创建该空目录并继续建 junction（源项目即真理：真理源不存在则创建空真理源），**禁止**再降级走 platform-managed pull（缓存成普通目录会让 sillyspec CLI 自指守卫失效，平台标记三件套投毒源项目根）。
++
++#### 场景：全新项目首接
++
++- Given 源项目根无 .sillyspec，workspace spec_strategy=repo-native
++- When init lease 触发 pullSpecBundle
++- Then `<rootPath>/.sillyspec` 空目录被创建，缓存路径成为指向它的 junction，getSpecBundle 不被调用
++
++### FR-02: repo-native 且缓存为普通目录残留时不再静默降级：残留 rename 备份后建 junction，原缓存数据保留在备份目录
++
++- `ensureSpecJunction` 遇到缓存路径已是普通目录（历史 platform-managed 缓存残留）时，**必须**先 rename 到同级 `<wsId>.pre-junction-backup-<时间戳>` 备份目录再建 junction（数据不丢）；rename 失败时**必须**保守返回 false 走原降级 pull 路径（不抛错、不删数据）。
++
++#### 场景：策略切换残留
++
++- Given 缓存目录是含旧 bundle 内容的普通目录，本次 strategy=repo-native
++- When pullSpecBundle 走到 ensureSpecJunction
++- Then 残留被 rename 为备份目录，junction 建立，getSpecBundle 不被调用，旧内容在备份目录可寻址
++
++### FR-03: junction 成立后 init 时 sillyspec 自指守卫生效：源项目根不落 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned 任一文件
++
++- repo-native junction 成立（缓存路径 realpath 解析回源项目 .sillyspec）后，后续 `sillyspec init --spec-dir <缓存路径>` 的三写（writePlatformPointer 三写与 cleaned marker）**必须**被 sillyspec CLI 既有自指守卫（isSelfReferentialSpecRoot，realpath 穿透 junction）拦截——本变更的职责是保证守卫的前置条件（junction 成立且源项目 .sillyspec 存在）在 FR-01/FR-02 全路径成立；守卫行为本身由 sillyspec CLI 既有实现与测试保证，daemon 侧以「junction 形态断言」作为等价前置验证。
++
++#### 场景：init 不投毒
++
++- Given repo-native junction 已建立（缓存 symlink → 源项目 .sillyspec，两路径 realpath 相等）
++- When daemon spawn sillyspec init --spec-dir 缓存路径
++- Then sillyspec 自指守卫返回 true，源项目根不写平台标记三件套
++
++### FR-04: 既有 repo-native / repo-mirrored / platform-managed 策略分支测试全部保持绿（无回归）
++
++- 本变更**禁止**破坏既有策略分支行为：repo-mirrored 首拷、platform-managed pull 覆盖、repo-native junction 复用/目标不一致重建等既有用例**必须**全部保持绿。
++
++#### 场景：回归
++
++- Given 既有 test_init_lease.test.ts 策略分支 describe 全量用例
++- When 本次改动后运行
++- Then 全部通过
++
++### FR-05: backup rename 失败（如 Windows 句柄占用）时仍走原降级 pull 路径，不抛错不删数据
++
++- FR-02 的备份 rename 抛错（Windows EBUSY/EPERM 句柄占用等）时，ensureSpecJunction **必须**捕获并返回 false（上层降级 pull），**禁止**向上抛错或删除残留目录数据。
++
++#### 场景：rename 失败降级
++
++- Given 缓存为普通目录且 rename 抛错
++- When ensureSpecJunction 执行
++- Then 返回 false，pullSpecBundle 走降级 pull，残留目录原样保留
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）」
++FR-02: sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：缓存为普通目录残留 → rename 备份后 junction 成立，原内容保留在备份目录，getSpecBundle 不被调」
++FR-03: sillyhub-daemon/tests/test_init_lease.test.ts「repo-native：源项目无 .sillyspec → 就地创建空真理源 + junction 建立，getSpecBundle 不被调（不再降级投毒）」（junction 形态 = 自指守卫前置条件；守卫行为由 sillyspec CLI 既有 isSelfReferentialSpecRoot 实现保证，见 FR-03 正文口径）
++FR-04: sillyhub-daemon/tests/test_init_lease.test.ts「策略分支 init 时序 + 状态文件保鲜 (ql-20260820-007)」describe 全量既有用例（repo-native junction / repo-mirrored 首拷 / platform-managed pull 覆盖）
++FR-05: 不适用：rename 失败需注入操作系统级句柄占用故障，vitest 无可靠注入面（Windows EBUSY 形态无法在沙箱稳定复现）；代码路径为 try/catch 包裹 return false 的兜底分支，由 FR-02 用例的反向语义与代码评审覆盖
+diff --git a/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/tasks.md b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/tasks.md
+new file mode 100644
+index 000000000..1fb8bf10d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T06:51:49.152Z
++---
++# 任务注册表（Tasks）— 2026-10-10-repo-native-no-platform-markers
++
++- [x] task-01: spec-sync.ts pullSpecBundle repo-native 分支：源项目无 .sillyspec 时 mkdir 空目录（repo_native_source_created 日志）后照常建 junction，删除 source_missing_fallback 降级——验证：新用例 getSpecBundle 不被调 + junction 成立
++- [x] task-02: ensureSpecJunction 普通目录残留分支：rename 到 <wsId>.pre-junction-backup-<ts> 备份后建 junction，rename 失败 catch 返回 false 保守降级——验证：新用例备份目录存在原内容 + junction 成立
++- [x] task-03: test_init_lease.test.ts 策略分支 describe 新增两用例：源项目无 .sillyspec 不降级投毒 / 普通目录残留备份交换——验证：pnpm vitest run 该文件全绿（含既有用例）
++- [x] task-04: 回归确认：test_init_lease.test.ts 全量（repo-native/repo-mirrored/platform-managed 既有用例）+ tsc typecheck 全绿——验证：两命令 exit 0
++- [x] task-05: 收口前自查：junction 成立后 init 自指守卫前置条件（源 .sillyspec 存在 + 缓存 symlink）在两新路径成立（用例内断言 lstat isSymbolicLink + realpath 相等）——验证：用例断言通过
+diff --git a/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/proposal.md b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-repo-native-no-platform-markers/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T06:51:49.152Z
++---
++# 提案书（Proposal）— 2026-10-10-repo-native-no-platform-markers
++
++## 动机
++
++任务原话转写：默认源项目即真理（repo-native）时源项目根不该出现 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned 平台标记三件套，但 daemon 的 repo-native 分支在源项目无 .sillyspec 时降级走 platform-managed pull（缓存成普通目录），sillyspec CLI 的自指守卫（realpath 穿透 junction 判回环）随之失效，三件套投毒源项目根（deepseek-harness 项目实证：无 .sillyspec 但三件套齐全）；缓存被普通目录残留阻塞时同样降级投毒。
++
++成功标准:
++- repo-native 且源项目无 .sillyspec 时不再降级：daemon 就地创建空 .sillyspec 后建 junction，getSpecBundle 不被调用（junction 分支早退）
++- repo-native 且缓存为普通目录残留时不再静默降级：残留 rename 备份后建 junction，原缓存数据保留在备份目录
++- junction 成立后 init 时 sillyspec 自指守卫生效：源项目根不落 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned 任一文件
++- 既有 repo-native / repo-mirrored / platform-managed 策略分支测试全部保持绿（无回归）
++- backup rename 失败（如 Windows 句柄占用）时仍走原降级 pull 路径，不抛错不删数据
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. repo-native 且源项目无 .sillyspec 时不再降级：daemon 就地创建空 .sillyspec 后建 junction，getSpecBundle 不被调用（junction 分支早退）
++2. repo-native 且缓存为普通目录残留时不再静默降级：残留 rename 备份后建 junction，原缓存数据保留在备份目录
++3. junction 成立后 init 时 sillyspec 自指守卫生效：源项目根不落 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned 任一文件
++4. 既有 repo-native / repo-mirrored / platform-managed 策略分支测试全部保持绿（无回归）
++5. backup rename 失败（如 Windows 句柄占用）时仍走原降级 pull 路径，不抛错不删数据
++
++## 成功标准（可验证）
++
++1. repo-native 且源项目无 .sillyspec 时不再降级：daemon 就地创建空 .sillyspec 后建 junction，getSpecBundle 不被调用（junction 分支早退）
++2. repo-native 且缓存为普通目录残留时不再静默降级：残留 rename 备份后建 junction，原缓存数据保留在备份目录
++3. junction 成立后 init 时 sillyspec 自指守卫生效：源项目根不落 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned 任一文件
++4. 既有 repo-native / repo-mirrored / platform-managed 策略分支测试全部保持绿（无回归）
++5. backup rename 失败（如 Windows 句柄占用）时仍走原降级 pull 路径，不抛错不删数据

@@ -1,0 +1,45 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  默认源项目即真理（repo-native）时源项目根不该出现 .sillyspec-platform.json / .sillyspec-platform-managed / .sillyspec-platform-cleaned
+  平台标记三件套，但 daemon 的 repo-native 分支在源项目无 .sillyspec 时降级走 platform-managed pull（缓存成普通目录），sillyspec CLI 的自指守卫（realpath 穿透
+  junction 判回环）随之失效，三件套投毒源项目根（deepseek-harness 项目实证：无 .sillyspec 但三件套齐全）；缓存被普通目录残留阻塞时同样降级投毒。
+
+
+  成功标准:
+
+  - repo-native 且源项目无 .sillyspec 时不再降级：daemon 就地创建空 .sillyspec 后建 junction，getSpecBundle 不被调用（junction 分支早退）
+
+  - repo-native 且缓存为普通目录残留时不再静默降级：残留 rename 备份后建 junction，原缓存数据保留在备份目录
+
+  - junction 成立后 init 时 sillyspec 自指守卫生效：源项目根不落 .sillyspec-platform.json / .sillyspec-platform-managed /
+  .sillyspec-platform-cleaned 任一文件
+
+  - 既有 repo-native / repo-mirrored / platform-managed 策略分支测试全部保持绿（无回归）
+
+  - backup rename 失败（如 Windows 句柄占用）时仍走原降级 pull 路径，不抛错不删数据
+autopilot: true
+baseline_commit: 9517edfd544c15145f3cbbe1ea2a1d07c0ebc2a7
+updatedAt: '2026-10-10T07:09:29.422Z'
+baseline_sha256: 6ab112b160b6fd5eea0f2302b96224c9d49da7a5a515f989163c410e184e2afe
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py1+js1+jsx4)+fr(6)（11.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010070859\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（5.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010070859\test-result.json｜门文件
+  3 个
+

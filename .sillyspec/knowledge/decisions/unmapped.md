@@ -2008,3 +2008,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
 理由：最大风险：角标显示后指针移向角标本体——离开 span 原始矩形瞬间若命中测试失败会闪灭循环。缓解：命中矩形外扩 8px 覆盖角标外挂区（-right-1.5 -top-1 = 6px）。放弃的方案：①纯 CSS group-hover——span 被 textarea 覆盖，:hover 永不触发（可行性死路）；②给 span 开 pointer-events-auto——挡住下方 textarea 的点击/选字，违反 FR-02；③mousemove 监听 textarea——指针移到角标（sibling）后事件不再冒泡到 textarea，同样闪灭。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-repo-native-no-platform-markers
+锚点：未记录
+最近确认：1c9c0e40dae6ee77ad07859f3b80e0dc2d7e269c
+理由：- 最大风险：给用户源项目建空 `.sillyspec` 是对源项目的写操作——但 repo-native 语义即「扫描直接写源项目」，创建工作区时 ⚠ 警示已明示，属授权范围内最小写面（仅空目录）。次风险：备份目录在 specs/ 根堆积（每次策略切换最多一个），低频可接受，注释明示。 - 放弃的方案：① 改 sillyspec CLI 加 `--strategy` flag 显式跳过三写——跨仓接口变更，且自指守卫已存在，修前置条件即可闭合，不扩战线；② isSelfReferentialSpecRoot 在 cwd/.sillyspec 不存在时弱化判定（resolve 字符串比对）——junction 路径字符串本就不等，弱判定不可靠，治标不治本；③ 普通目录残留直接 rm 后建 junction——违背 R-01 防误删原则（残留可能含历史托管数据），rename 备份保数据。
