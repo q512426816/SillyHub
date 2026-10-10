@@ -8,13 +8,23 @@
 // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
 // useNotify 换 spy（toast 断言面）。
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 import { SessionInputBar } from "@/components/daemon/session-input-bar";
 
 vi.mock("@/lib/session-mention-sources", () => ({
-  useMentionSources: vi.fn(),
+  // D-006@v2 插入后自动聚焦 → textarea onFocus 挂载联想数据桥：mock 须返回
+  // 空快照（原 vi.fn() 返回 undefined 会在 isSameMentionSources 回流比较崩溃）。
+  useMentionSources: vi.fn(() => ({
+    skills: [],
+    changes: [],
+    quicklogs: [],
+    ppmTasks: [],
+    ppmProblems: [],
+    atEnabled: false,
+  })),
 }));
 
 // Mock FilePreviewModal（保留渲染状态供断言——attachment-chips.test 同款）。
@@ -43,7 +53,9 @@ vi.mock("@/lib/api/session-attachments", () => ({
   fetchAttachmentBlob: fetchBlobMock,
 }));
 
-function renderBar() {
+function renderBar(
+  overrides: Partial<Parameters<typeof SessionInputBar>[0]> = {},
+) {
   function Bar() {
     return (
       <SessionInputBar
@@ -54,6 +66,7 @@ function renderBar() {
         placeholder="测试输入框"
         creating={false}
         workspaceId="ws-1"
+        {...overrides}
       />
     );
   }
@@ -124,7 +137,7 @@ describe("待发附件 chip 点击预览（2026-10-09-pending-attachment-preview
     fetchBlobMock.mockResolvedValue(new Blob(["x"], { type: "text/plain" }));
     const { fileInput } = renderBar();
     pickFiles(fileInput(), 1);
-    const title = `${name} · 1KB（点击在线预览）`;
+    const title = `${name} · 1KB（点击在线预览 / 右击插入正文引用）`;
     await waitFor(() => expect(screen.getByTitle(title)).toBeTruthy());
     return screen.getByTitle(title);
   }
@@ -140,9 +153,163 @@ describe("待发附件 chip 点击预览（2026-10-09-pending-attachment-preview
     await uploadOne("待删文件.txt", "file");
     fireEvent.click(screen.getByLabelText("移除附件 待删文件.txt"));
     await waitFor(() =>
-      expect(screen.queryByTitle("待删文件.txt · 1KB（点击在线预览）")).toBeNull(),
+      expect(screen.queryByTitle("待删文件.txt · 1KB（点击在线预览 / 右击插入正文引用）")).toBeNull(),
     );
     const modal = document.querySelector("[data-testid='file-preview-modal']");
     expect(modal?.getAttribute("data-open")).toBe("false");
+  });
+});
+
+describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-reference task-03）", () => {
+  /** 受控状态容器（右击追加依赖受控 value 回流）。 */
+  function StatefulBar({
+    initial = "前文",
+    onTokenMap,
+  }: {
+    initial?: string;
+    onTokenMap?: (m: Record<string, string>) => void;
+  }) {
+    const [v, setV] = useState(initial);
+    return (
+      <SessionInputBar
+        value={v}
+        onChange={setV}
+        onSend={() => {}}
+        disabled={false}
+        placeholder="测试输入框"
+        creating={false}
+        workspaceId="ws-1"
+        onAttTokenMapChange={onTokenMap}
+      />
+    );
+  }
+
+  /** 挂 StatefulBar 并上传附件（names/ids 逐枚对应），等 chips 出现。 */
+  async function mountAndUpload(
+    fixtures: { id: string; name: string }[],
+    initial = "前文",
+    onTokenMap?: (m: Record<string, string>) => void,
+  ) {
+    uploadMock.mockImplementation(async () => {
+      const i = Math.min(uploadMock.mock.calls.length - 1, fixtures.length - 1);
+      const f = fixtures[i]!;
+      return {
+        id: f.id,
+        kind: "file",
+        media_type: "text/plain",
+        bytes: 64,
+        name: f.name,
+        created_at: "2026-10-09T00:00:00Z",
+      };
+    });
+    render(<StatefulBar initial={initial} onTokenMap={onTokenMap} />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const files = fixtures.map(
+      (f, i) => new File(["x"], `${f.name}(${i})`, { type: "text/plain" }),
+    );
+    Object.defineProperty(input, "files", { value: files });
+    fireEvent.change(input);
+    return waitFor(() =>
+      expect(screen.getAllByTitle(/右击插入正文引用/).length).toBe(fixtures.length),
+    );
+  }
+
+  it("右击 chip → 正文末尾追加【文件名】，重复右击追加同 token，映射回传父级", async () => {
+    const onTokenMap = vi.fn();
+    await mountAndUpload([{ id: "att-ref-1", name: "截图.png" }], "前文", onTokenMap);
+    const chip = screen.getByTitle(/截图\.png · 1KB（点击在线预览 \/ 右击插入正文引用）/);
+
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(screen.getByText(/前文【截图.png】/)).toBeInTheDocument());
+    fireEvent.contextMenu(chip);
+    await waitFor(() =>
+      expect(screen.getByText(/前文【截图.png】【截图.png】/)).toBeInTheDocument(),
+    );
+    expect(onTokenMap).toHaveBeenLastCalledWith({ "att-ref-1": "【截图.png】" });
+  });
+
+  // D-006@v3（用户反馈 2026-10-09）：右击 chip 必先使输入框失焦——插「失焦前
+  // 记住的光标位」；从未聚焦过才插末尾。
+  it("失焦后右击 → 插入失焦前光标位置并重新聚焦；从未聚焦 → 插末尾", async () => {
+    await mountAndUpload([{ id: "att-caret-1", name: "插入.png" }], "ABCD");
+    const chip = screen.getByTitle(/右击插入正文引用/);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+
+    // ① 从未聚焦 → 插末尾。
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("ABCD【插入.png】"));
+
+    // ② 聚焦置光标到 B|C（index 2）再失焦（模拟点击 chip 的必然失焦）→
+    //    右击插记住的位置 2，聚焦回归、光标落 token 尾。
+    ta.focus();
+    ta.setSelectionRange(2, 2);
+    fireEvent.blur(ta);
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("AB【插入.png】CD【插入.png】"));
+    expect(document.activeElement).toBe(ta);
+    await waitFor(() => expect(ta.selectionStart).toBe(2 + "【插入.png】".length));
+  });
+
+  it("同名两附件：第二个右击自动 ·2 唯一化", async () => {
+    await mountAndUpload(
+      [
+        { id: "att-same-1", name: "配置.json" },
+        { id: "att-same-2", name: "配置.json" },
+      ],
+      "对比",
+    );
+    const chips = screen.getAllByTitle(/右击插入正文引用/);
+    fireEvent.contextMenu(chips[0]!);
+    await waitFor(() => expect(screen.getByText(/对比【配置.json】/)).toBeInTheDocument());
+    fireEvent.contextMenu(chips[1]!);
+    await waitFor(() =>
+      expect(screen.getByText(/对比【配置.json】【配置.json·2】/)).toBeInTheDocument(),
+    );
+  });
+
+  it("× 角标删除该处一次出现；点 X 删附件联动剥离全部引用", async () => {
+    await mountAndUpload([{ id: "att-ref-x", name: "图A.png" }], "");
+    const chip = screen.getByTitle(/右击插入正文引用/);
+    fireEvent.contextMenu(chip);
+    fireEvent.contextMenu(chip);
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("移除引用 图A.png").length).toBe(2),
+    );
+    // × 角标删一处。
+    fireEvent.click(screen.getAllByLabelText("移除引用 图A.png")[0]!);
+    await waitFor(() =>
+      expect(screen.getAllByLabelText("移除引用 图A.png").length).toBe(1),
+    );
+    // 点 X 删附件 → 剩余引用全部剥离。
+    fireEvent.click(screen.getByLabelText("移除附件 图A.png"));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("移除引用 图A.png")).toBeNull(),
+    );
+    expect(screen.queryByText(/【图A.png】/)).toBeNull();
+  });
+
+  // D-004@v2（用户反馈 2026-10-09）：退格贴标签尾部一次整删；标签中部退格不拦截。
+  it("退格整删：光标贴标签尾部无选区 → 一次删除整个标签；中部退格放行逐字", async () => {
+    await mountAndUpload([{ id: "att-bs-1", name: "整删.png" }], "前文");
+    const chip = screen.getByTitle(/右击插入正文引用/);
+    fireEvent.contextMenu(chip);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toBe("前文【整删.png】"));
+    // ① 光标贴标签尾部 → 一次退格整删。
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    await waitFor(() => expect(ta.value).toBe("前文"));
+    // ② 光标在标签中部（如「【整删.p」后）→ 不拦截，走默认逐字删除语义
+    //    （jsdom 默认行为不真删字符，仅断言我们的处理函数未整删 value）。
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(ta.value).toBe("前文【整删.png】"));
+    ta.setSelectionRange(6, 6);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    expect(ta.value).toBe("前文【整删.png】"); // 未被整删（原生逐字由浏览器处理）
+  });
+
+  it("未右击任何附件 → 镜像层零渲染（无「移除引用」角标）", async () => {
+    await mountAndUpload([{ id: "att-noref-1", name: "未引用.png" }]);
+    expect(screen.queryByLabelText(/移除引用/)).toBeNull();
   });
 });

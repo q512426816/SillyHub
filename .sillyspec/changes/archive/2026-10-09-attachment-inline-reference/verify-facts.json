@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-09-attachment-inline-reference",
+  "generatedAt": "2026-10-09T07:22:57.631Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 4,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "backendEndpoints": 631,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-09-attachment-inline-reference",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "浏览器实测：右击插入/×角标删除/删附件联动/发送后历史标签点击预览（jsdom 覆盖行为断言，视觉层建议用户在 Docker 部署后过一遍）",
+        "condition": "打开 http://127.0.0.1:3000 会话页：上传附件→右击→发送→点历史标签",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 4,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(jsx5)+fr(2)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-09T07:24:50.352Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

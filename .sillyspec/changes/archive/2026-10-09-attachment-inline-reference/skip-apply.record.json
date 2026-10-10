@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-attachment-inline-reference",
+  "flag": "--skip-apply",
+  "skippedAt": "2026-10-09T14:51:31.046Z",
+  "deliverableCount": 7,
+  "deliverableFiles": [
+    "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+    "frontend/src/components/daemon/attachment-ref-tag.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx"
+  ],
+  "note": "归档时显式跳过未 apply 交付面检查（--skip-apply）：交付物未确认进主仓，本记录随归档包留存供审计"
+}

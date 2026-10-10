@@ -1615,10 +1615,104 @@ describe("群消息附件（FR-05 补遗）", () => {
       expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
     });
     // 文件名区按钮（title 与单聊输入栏同口径；固件 bytes=64 → formatBytes 计 1KB）。
-    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览）"));
+    fireEvent.click(screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"));
     // 真实 FilePreviewModal 打开：下载按钮出现（附件内容经 fetchAttachmentBlob
     // mock 拉取，txt 走 TextPreviewer 渲染链路——与时间线附件条同链路）。
     expect(await screen.findByLabelText("下载 报错日志.txt")).toBeTruthy();
+  });
+
+  // 2026-10-09-attachment-inline-reference task-05：右击插入引用 + 发送置换
+  // + 删附件联动剥离（单聊 session-input-bar 同口径）。
+  it("右击待发 chip 插入正文引用 → 发送置换为 [附件引用:uuid|name] + 删附件联动剥离", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+    });
+    // 右击 chip → 草稿末尾追加【报错日志.txt】（镜像层角标随之渲染）。
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    expect(screen.getAllByLabelText("移除引用 报错日志.txt").length).toBe(1);
+    // 追加正文后发送：sendGroupMessage 收到置换版（uuid 与上传 id 一致）。
+    fireEvent.change(input, { target: { value: "看看这份【报错日志.txt】日志" } });
+    await flushAsync(2);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalled());
+    expect(mocks.sendGroupMessage).toHaveBeenCalledWith(
+      "g-1",
+      "看看这份[附件引用:att-upload-1|报错日志.txt]日志",
+      ["att-upload-1"],
+      null,
+    );
+  });
+
+  it("删附件联动：点 X 剥离正文该附件全部引用（群聊 task-05）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
+    });
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
+    await waitFor(() => expect(input.value).not.toContain("【报错日志.txt】"));
+    expect(
+      screen.queryByLabelText("移除引用 报错日志.txt"),
+    ).toBeNull();
+  });
+
+  // D-004@v2（用户反馈 2026-10-09）：群聊退格贴标签尾部一次整删。
+  it("退格整删：光标贴标签尾部 → 一次删除整个标签（群聊 D-004@v2）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    fireEvent.contextMenu(
+      screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    const before = input.value;
+    input.setSelectionRange(before.length, before.length);
+    fireEvent.keyDown(input, { key: "Backspace" });
+    await waitFor(() =>
+      expect(input.value).toBe(before.replace("【报错日志.txt】", "")),
+    );
+  });
+
+  // D-006@v3（用户反馈 2026-10-09）：失焦后右击插「失焦前记住的光标位」。
+  it("失焦后右击 → 插入失焦前光标位置（群聊 D-006@v3）", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pickFile();
+    const chip = screen.getByTitle(
+      "报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）",
+    );
+    const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+
+    // 聚焦置光标到 index 1 再失焦（模拟点击 chip）→ 右击插位置 1。
+    fireEvent.change(input, { target: { value: "ABCD" } });
+    input.focus();
+    input.setSelectionRange(1, 1);
+    fireEvent.blur(input);
+    fireEvent.contextMenu(chip);
+    await waitFor(() => expect(input.value).toBe("A【报错日志.txt】BCD"));
+    expect(document.activeElement).toBe(input);
   });
 
   it("带附件发送：sendGroupMessage 携带 attachment_ids + 成功后清空 chips（服务端不删）", async () => {
@@ -1733,6 +1827,33 @@ describe("群消息附件（FR-05 补遗）", () => {
     expect(
       await screen.findByTitle("同步日志.txt（点击在线预览）"),
     ).toBeTruthy();
+  });
+
+  // task-06（2026-10-09-attachment-inline-reference）：历史正文行内引用标签渲染
+  // + 点击开预览窗（uuid 直接指向附件 content 端点）。
+  it("正文含 [附件引用:uuid|name] → 渲染标签并可点击打开预览窗", async () => {
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+
+    await pushSseEvent({
+      event: "log",
+      session_id: "s-g-1",
+      run_id: "r-live-2",
+      log_id: "l-live-ref-1",
+      timestamp: "2026-09-01T06:09:00Z",
+      channel: "user_input",
+      content:
+        "看看这份[附件引用:aaaaaaaa-1111-2222-3333-444444444444|对比图.png]的效果",
+      sender_user_id: "u-lin",
+      sender_member_name: "林一",
+    });
+    // 正文前缀原样 + 引用渲染为标签（title 悬浮提示）。
+    const tag = await screen.findByTitle("对比图.png（点击在线预览）");
+    expect(screen.getByText("看看这份", { exact: false })).toBeTruthy();
+    // 点击开预览窗（真实 FilePreviewModal 下载按钮锚定；fetchAttachmentBlob 已 mock）。
+    fireEvent.click(tag);
+    expect(await screen.findByLabelText("下载 对比图.png")).toBeTruthy();
   });
 });
 

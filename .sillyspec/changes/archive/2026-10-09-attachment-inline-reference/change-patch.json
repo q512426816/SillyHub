@@ -1,0 +1,33 @@
+{
+  "change": "2026-10-09-attachment-inline-reference",
+  "baseline": "7e5246c89d78261e32a32f689684eb0f7216af4d",
+  "head": "f70e79b30ca8dadb42b18318cd1c107189963a2e",
+  "files": [
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+    "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+    "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+    "frontend/src/components/daemon/attachment-ref-tag.tsx",
+    "frontend/src/components/daemon/input-ref-overlay.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    "frontend/src/lib/attachment-refs.ts"
+  ],
+  "totals": {
+    "files": 17,
+    "additions": 1108,
+    "deletions": 83
+  },
+  "savedAt": "2026-10-09T07:15:46.334Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "patchSha256": "a83dd32190cc5c28b575e6491aecf7165e9b03e17d8bb27ce2d36d6ac5185cae",
+  "patchStatus": "ok"
+}

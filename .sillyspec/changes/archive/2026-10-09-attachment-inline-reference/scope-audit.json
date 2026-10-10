@@ -1,0 +1,157 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "7e5246c89d78261e32a32f689684eb0f7216af4d",
+  "totals": {
+    "files": 17,
+    "additions": 1108,
+    "deletions": 83
+  },
+  "rows": [
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "additions": 67,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+      "additions": 51,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+      "additions": 111,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+      "additions": 57,
+      "deletions": 0,
+      "kind": "new",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+      "additions": 119,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx",
+      "additions": 3,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx",
+      "additions": 20,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/daemon/attachment-ref-tag.tsx",
+      "additions": 84,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/input-ref-overlay.tsx",
+      "additions": 119,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-input-bar.tsx",
+      "additions": 90,
+      "deletions": 14,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "additions": 27,
+      "deletions": 12,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "additions": 42,
+      "deletions": 13,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+      "additions": 7,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "additions": 6,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": null,
+      "verdict": "unplanned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "additions": 80,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "additions": 119,
+      "deletions": 31,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/lib/attachment-refs.ts",
+      "additions": 106,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "closedBy": "execute --done",
+  "patchSha256": "a83dd32190cc5c28b575e6491aecf7165e9b03e17d8bb27ce2d36d6ac5185cae",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T07:15:46.334Z"
+}
