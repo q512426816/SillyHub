@@ -1,0 +1,36 @@
+{"ts":1791644515879,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791644545611,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791644545611,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791644566466,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/core/config.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791644652491,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/turn-timeline.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791644711529,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791644939585,"kind":"commit","stage":null,"detail":"473a20995","provisional":true}
+{"ts":1791644943136,"kind":"commit","stage":null,"detail":"58a210e72","provisional":true}
+{"ts":1791644943410,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/core/config.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791644953647,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-10-dialog-qa-inplace/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791645227029,"kind":"commit","stage":null,"detail":"ebb5cfcd1","provisional":true}
+{"ts":1791645230508,"kind":"commit","stage":null,"detail":"6c780fb99","provisional":true}
+{"ts":1791645238258,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791645238618,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791645238967,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791645239340,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791645240510,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791645240510,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791645250867,"kind":"commit","stage":null,"detail":"9ef8e2528","provisional":true}
+{"ts":1791645422613,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/turn-timeline.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791645477028,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791645546847,"kind":"commit","stage":null,"detail":"7943dc42e","provisional":true}
+{"ts":1791645547113,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-10-dialog-qa-inplace/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791645686273,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791645689258,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791645689258,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true}
+{"ts":1791645689258,"kind":"commit","stage":null,"detail":"6b92c54c0","provisional":true}
+{"ts":1791645706796,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791645717046,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791645808663,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791645808663,"kind":"commit","stage":null,"detail":"70caa5d20","provisional":true}
+{"ts":1791645830164,"kind":"commit","stage":null,"detail":"21ea5d036","provisional":true}
+{"ts":1791645850771,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791645854353,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791645854353,"kind":"commit","stage":null,"detail":"e3bca7777","provisional":true}
+{"ts":1791645922756,"kind":"gate-run","stage":"verify","detail":"门实测 passed（195.0s） · 20261010152520","provisional":true}

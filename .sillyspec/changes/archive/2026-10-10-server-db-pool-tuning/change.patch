@@ -1,0 +1,359 @@
+diff --git a/.sillyspec/changes/2026-10-10-server-db-pool-tuning/flow-state.yaml b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/flow-state.yaml
+new file mode 100644
+index 000000000..6a9bf3b28
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  阿里云生产服务器(2核1.6G)内存不足持续swap换页导致整机卡顿，根因之一是backend数据库连接池写死pool_size=20/max_overflow=30，postgres常驻13个idle连接吃内存。连接池大小改为环境变量可配（DB_POOL_SIZE/DB_MAX_OVERFLOW），代码默认值保持不变，由服务器.env配小值适配小规格机器。
++
++  成功标准：
++
++  - db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
++
++  - 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
++
++  - 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
++
++  - 既有相关测试全部通过
++autopilot: true
++baseline_commit: a8623c6d614dff46a33cbb243c88643712245598
++updatedAt: '2026-10-10T15:00:12.283Z'
++baseline_sha256: c0b9f0d4c732e8be027e66fe35ad6e9b76fe6af610095442543a88f32b7570ec
++
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 00b587165..54a037191 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -82,6 +82,20 @@ class Settings(BaseSettings):
+         ...,
+         description=("Async SQLAlchemy URL, e.g. ``postgresql+asyncpg://user:pass@host:5432/db``."),
+     )
++    # 2026-10-10-server-db-pool-tuning：池参数可配化。默认 20/30 保持多 agent 负载
++    # 的原调优值；小内存服务器（2C1.6G）经 DB_POOL_SIZE=5/DB_MAX_OVERFLOW=10 调小，
++    # 控制 postgres 侧连接进程数。非法值（非整数/越界）启动即 ValidationError，
++    # 显式报错不静默回退——.env 手工维护，错值静默等于埋雷。
++    db_pool_size: int = Field(
++        20,
++        ge=1,
++        description="SQLAlchemy async engine pool_size（环境变量 DB_POOL_SIZE）。",
++    )
++    db_max_overflow: int = Field(
++        30,
++        ge=0,
++        description="SQLAlchemy async engine max_overflow（环境变量 DB_MAX_OVERFLOW）。",
++    )
+     redis_url: str = Field("redis://localhost:6379/0")
+     secret_key: str = Field(..., min_length=16)
+     log_level: str = Field("INFO")
+diff --git a/backend/app/core/db.py b/backend/app/core/db.py
+index 2ba599979..4106d4b4a 100644
+--- a/backend/app/core/db.py
++++ b/backend/app/core/db.py
+@@ -28,8 +28,9 @@ _SessionFactory: async_sessionmaker[AsyncSession] | None = None
+ # lease callbacks all share this pool. Larger size/overflow tolerates concurrent
+ # callbacks; shorter recycle reclaims leaked/stale slots faster. Complements the
+ # c1de949 SSE/background slot-release fix.
+-_POOL_SIZE: Final[int] = 20
+-_MAX_OVERFLOW: Final[int] = 30
++# pool_size / max_overflow 经 Settings 可配（DB_POOL_SIZE / DB_MAX_OVERFLOW，
++# 默认 20/30 即下方历史调优值）——2026-10-10-server-db-pool-tuning：小内存
++# 服务器配小池控制 postgres 连接进程数，默认行为不变。
+ _POOL_TIMEOUT: Final[float] = 30.0
+ _POOL_RECYCLE: Final[int] = 300  # 5 min — reclaim leaked/stale slots faster
+ 
+@@ -71,8 +72,8 @@ def get_engine() -> AsyncEngine:
+         settings = get_settings()
+         _engine = create_async_engine(
+             settings.database_url,
+-            pool_size=_POOL_SIZE,
+-            max_overflow=_MAX_OVERFLOW,
++            pool_size=settings.db_pool_size,
++            max_overflow=settings.db_max_overflow,
+             pool_timeout=_POOL_TIMEOUT,
+             pool_recycle=_POOL_RECYCLE,
+             pool_pre_ping=True,
+diff --git a/backend/tests/core/test_db_pool_settings.py b/backend/tests/core/test_db_pool_settings.py
+new file mode 100644
+index 000000000..d36e69f4e
+--- /dev/null
++++ b/backend/tests/core/test_db_pool_settings.py
+@@ -0,0 +1,93 @@
++"""Tests for ``Settings.db_pool_size`` / ``db_max_overflow`` (2026-10-10-server-db-pool-tuning).
++
++背景：阿里云生产服务器（2C/1.6G）内存不足持续 swap，postgres 常驻 13 个 idle 连接。
++池参数经环境变量 DB_POOL_SIZE / DB_MAX_OVERFLOW 可配，默认 20/30 保持原调优值。
++
++覆盖：默认值（FR-01 未配置场景）、环境变量覆盖（Settings 层 + get_engine 实际
++engine pool 参数）、非法值显式 ValidationError（FR-02，选报错路线非静默回退）。
++"""
++
++from __future__ import annotations
++
++import pytest
++from pydantic import ValidationError
++
++import app.core.db as db_mod
++from app.core.config import Settings
++
++
++def _make(**overrides) -> Settings:
++    """Construct Settings with required fields filled to avoid ValidationError noise."""
++    base = {
++        "database_url": "sqlite+aiosqlite:///:memory:",
++        "secret_key": "x" * 16,
++    }
++    base.update(overrides)
++    return Settings(**base)
++
++
++class TestPoolDefaults:
++    def test_default_pool_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        # FR-01：未配置环境变量时默认 20/30，与 db.py 原常量一致（现行为不变）
++        monkeypatch.delenv("DB_POOL_SIZE", raising=False)
++        monkeypatch.delenv("DB_MAX_OVERFLOW", raising=False)
++        s = _make()
++        assert s.db_pool_size == 20
++        assert s.db_max_overflow == 30
++
++
++class TestPoolEnvOverride:
++    def test_env_override_settings_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        monkeypatch.setenv("DB_POOL_SIZE", "5")
++        monkeypatch.setenv("DB_MAX_OVERFLOW", "10")
++        s = _make()
++        assert s.db_pool_size == 5
++        assert s.db_max_overflow == 10
++
++    def test_env_override_engine_pool_params(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        # FR-01：get_engine() 把 settings 值传进 create_async_engine（引擎层生效）。
++        # URL 用 postgres 形式（engine 惰性创建不真连库）；sqlite/StaticPool
++        # 不接受 pool_size 系参数——db.py 池参数本来就仅 asyncpg(PG) 路径生效。
++        monkeypatch.setenv("DB_POOL_SIZE", "5")
++        monkeypatch.setenv("DB_MAX_OVERFLOW", "10")
++        monkeypatch.setattr(
++            db_mod,
++            "get_settings",
++            lambda: _make(database_url="postgresql+asyncpg://u:p@h:5432/d"),
++        )
++        captured: dict = {}
++        real_create = db_mod.create_async_engine
++
++        def spy(url, **kwargs):
++            captured.update(kwargs)
++            return real_create(url, **kwargs)
++
++        monkeypatch.setattr(db_mod, "create_async_engine", spy)
++        monkeypatch.setattr(db_mod, "_engine", None)
++        try:
++            engine = db_mod.get_engine()
++            assert captured["pool_size"] == 5
++            assert captured["max_overflow"] == 10
++            assert engine.pool.size() == 5
++        finally:
++            db_mod._engine = None
++            db_mod._SessionFactory = None
++
++
++class TestPoolInvalidValue:
++    @pytest.mark.parametrize(
++        "env_name,raw,field_name",
++        [
++            ("DB_POOL_SIZE", "abc", "db_pool_size"),  # 非整数
++            ("DB_POOL_SIZE", "0", "db_pool_size"),  # 越界：pool_size >= 1
++            ("DB_MAX_OVERFLOW", "-1", "db_max_overflow"),  # 越界：max_overflow >= 0
++            ("DB_MAX_OVERFLOW", "1.5", "db_max_overflow"),  # 非整数
++        ],
++    )
++    def test_invalid_pool_value_raises(
++        self, monkeypatch: pytest.MonkeyPatch, env_name: str, raw: str, field_name: str
++    ) -> None:
++        # FR-02：非法值显式报错（fail fast），禁止静默回退默认值
++        monkeypatch.setenv(env_name, raw)
++        with pytest.raises(ValidationError, match=field_name):
++            _make()
+diff --git a/.sillyspec/changes/2026-10-10-server-db-pool-tuning/design.md b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/design.md
+new file mode 100644
+index 000000000..647fab999
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T14:59:53.677Z
++---
++# 设计记录（Design Record）— 2026-10-10-server-db-pool-tuning
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++阿里云生产服务器（2 核 / 1.6G 内存）持续 swap 换页导致整机卡顿（vmstat 实测 so 峰值 ~9790 页/s、CPU wa 一度 71%）。根因之一：`backend/app/core/db.py` 连接池写死 `_POOL_SIZE=20 / _MAX_OVERFLOW=30`，SQLAlchemy 池只增不减，postgres 侧常驻 13 个 idle 连接，每个是一个独立 postgres 服务进程，在 1.6G 机器上挤爆内存。
++
++方案：池参数从 `Settings` 新增字段 `db_pool_size` / `db_max_overflow` 读取（pydantic-settings 自动映射环境变量 `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`），代码默认值保持 20/30 不变（开发机/大内存机器行为零变化），由服务器 `.env` 配小值（5/10）适配小规格机器。选择改 Settings 而非 db.py 直接 `os.getenv`，依据 config.py 模块规约「All runtime configuration MUST live here — never read os.environ directly」。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `Settings` 新增两个字段（对外新增，无破坏）：
++  - `db_pool_size: int = Field(20, ge=1, description="SQLAlchemy async engine pool_size；小内存服务器可经 DB_POOL_SIZE 调小")`
++  - `db_max_overflow: int = Field(30, ge=0, description="SQLAlchemy async engine max_overflow；经 DB_MAX_OVERFLOW 配置")`
++- `db.py`：删除模块级常量 `_POOL_SIZE` / `_MAX_OVERFLOW`（`_POOL_TIMEOUT` / `_POOL_RECYCLE` 保留不动），`get_engine()` 内改用 `settings.db_pool_size` / `settings.db_max_overflow`。`get_engine()` 函数签名不变。
++- 环境变量名（运维可见契约）：`DB_POOL_SIZE` / `DB_MAX_OVERFLOW`，非法值（非整数 / 越界）在进程启动加载 Settings 时抛 `ValidationError` 显式失败——选显式报错而非静默回退，避免配置错误被掩盖。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——池参数只在 engine 首次创建时读取一次（`get_engine()` 懒创建 + 全局单例），运行中改环境变量不影响已存在的 engine，行为与现状一致；要生效需重启进程，与现有运维方式（换镜像 `compose up -d`）吻合。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用——无共享可变状态新增；`get_engine()` 的懒创建竞态是既有行为（GIL + 单事件循环场景下现状已如此），本变更不改变其并发语义。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   engine 生命周期不变（进程级单例，`dispose_engine()` 语义不变）。若配置非法，进程在 Settings 加载时即失败（fail fast），不会出现半初始化 engine。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   配置按进程作用域（环境变量/compose `.env`），多实例各自读各自环境，不会串台；postgres 侧总连接上限 = 各实例 (pool_size + max_overflow) 之和，服务器单实例部署下为 DB_POOL_SIZE+DB_MAX_OVERFLOW，当前 `max_connections=100` 远够。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：把服务器池调太小导致高峰期请求排队等连接（`pool_timeout=30s` 后抛超时）。缓解：服务器配 5+10=15 上限，对当前低负载（load 0.29、13 idle 已是历史峰值水位）足够；真不够时改 `.env` 重启即可，无需改代码。放弃的方案：a) 直接把默认值改成 5——会改变开发机/大机器行为，且注释说明 20 是按 multi-agent 负载（daemon websocket + mission 轮询 + worker 回调并发）调的，砍默认值风险大于收益；b) db.py 里 `os.getenv` 直读——违反 config.py 模块规约；c) 非法值静默回退默认——掩盖配置错误，运维难察觉（本仓库 .env 手工维护，错值静默等于埋雷）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/core/config.py | Settings 新增 db_pool_size / db_max_overflow 字段 |
++| 修改 | backend/app/core/db.py | 删 _POOL_SIZE/_MAX_OVERFLOW 常量，get_engine 改读 settings |
++| 新增 | backend/tests/core/test_db_pool_settings.py | 默认值 / 环境变量覆盖 / 非法值三组用例 |
+diff --git a/.sillyspec/changes/2026-10-10-server-db-pool-tuning/proposal.md b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/proposal.md
+new file mode 100644
+index 000000000..bdb3127b9
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T14:59:53.677Z
++---
++# 提案书（Proposal）— 2026-10-10-server-db-pool-tuning
++
++## 动机
++
++任务原话转写：阿里云生产服务器(2核1.6G)内存不足持续swap换页导致整机卡顿，根因之一是backend数据库连接池写死pool_size=20/max_overflow=30，postgres常驻13个idle连接吃内存。连接池大小改为环境变量可配（DB_POOL_SIZE/DB_MAX_OVERFLOW），代码默认值保持不变，由服务器.env配小值适配小规格机器。
++成功标准：
++- db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
++- 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
++- 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
++- 既有相关测试全部通过
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
++2. 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
++3. 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
++4. 既有相关测试全部通过
++
++## 成功标准（可验证）
++
++1. db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
++2. 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
++3. 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
++4. 既有相关测试全部通过
+diff --git a/.sillyspec/changes/2026-10-10-server-db-pool-tuning/requirements.md b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/requirements.md
+new file mode 100644
+index 000000000..93b43a3d3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/requirements.md
+@@ -0,0 +1,60 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T14:59:53.677Z
++---
++# 需求规格（Requirements）— 2026-10-10-server-db-pool-tuning
++
++## 功能需求
++
++### FR-01: db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
++
++- 连接池大小与溢出上限必须可经环境变量 `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` 配置（走 `Settings` 字段，遵守 config.py「运行时配置必须集中在 Settings、禁止直接读 os.environ」的仓库约定），未配置时默认值必须保持 20 / 30，与现行为完全一致。
++
++#### 场景：主路径（未配置环境变量）
++
++- Given 运行环境未设置 `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`
++- When backend 进程启动并首次创建 async engine
++- Then engine 的 `pool.size() == 20`、`pool.max_overflow == 30`（与现状一致）
++
++#### 场景：小规格服务器配置小池
++
++- Given 服务器 `.env` 配置 `DB_POOL_SIZE=5`、`DB_MAX_OVERFLOW=10`
++- When backend 进程启动并首次创建 async engine
++- Then engine 的 `pool.size() == 5`、`pool.max_overflow == 10`，postgres 侧 platform 用户连接数上限为 15
++
++### FR-02: 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
++
++- 环境变量配置非法值（非整数、超出取值约束 `pool_size>=1` / `max_overflow>=0`）时必须显式报错（pydantic `ValidationError`，进程启动即失败），禁止静默回退默认值掩盖配置错误。实现选择「显式报错」路线并在字段 description 中注明。
++
++#### 场景：非法值启动失败
++
++- Given 环境变量 `DB_POOL_SIZE=abc`
++- When 进程加载 `Settings`
++- Then 抛出 `ValidationError`（类型/约束校验失败），错误信息包含字段名
++
++### FR-03: 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
++
++- 必须新增单元测试文件覆盖三组行为：默认值（20/30）、环境变量覆盖生效（engine 实际 pool 参数）、非法值显式报错。本变更选择显式报错路线，故第三组断言 `ValidationError` 而非回退。
++
++#### 场景：主路径
++
++- Given 测试文件 `backend/tests/core/test_db_pool_settings.py`
++- When 运行 `pytest backend/tests/core/test_db_pool_settings.py`
++- Then 全部用例通过，覆盖上述三组行为
++
++### FR-04: 既有相关测试全部通过
++
++- 本变更涉及 `config.py`（仅新增字段，不改既有字段）与 `db.py`（常量改读 settings），既有测试必须全部通过，禁止为通过测试修改既有断言。
++
++#### 场景：主路径
++
++- Given 本变更的代码改动
++- When 运行 `backend/tests/core/` 全目录测试（配置与核心层相关面）
++- Then 全部通过，无回归
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/backend/tests/core/test_db_pool_settings.py「test_default_pool_values」「test_env_override_engine_pool_params」
++FR-02: test/backend/tests/core/test_db_pool_settings.py「test_invalid_pool_value_raises」
++FR-03: test/backend/tests/core/test_db_pool_settings.py（整文件三组用例即本 FR 交付物）
++FR-04: test/backend/tests/core/「目录级回归——config/db 相关既有用例全绿」
+diff --git a/.sillyspec/changes/2026-10-10-server-db-pool-tuning/tasks.md b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/tasks.md
+new file mode 100644
+index 000000000..0b2a5cd87
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-server-db-pool-tuning/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T14:59:53.677Z
++---
++# 任务注册表（Tasks）— 2026-10-10-server-db-pool-tuning
++
++- [x] task-01: config.py Settings 新增 db_pool_size(默认20,ge=1) / db_max_overflow(默认30,ge=0) 字段（走 Field+description，环境变量 DB_POOL_SIZE/DB_MAX_OVERFLOW 自动映射）——验证：`pytest backend/tests/core/test_db_pool_settings.py` 默认值用例绿
++- [x] task-02: db.py 删 _POOL_SIZE/_MAX_OVERFLOW 常量，get_engine() 改读 settings.db_pool_size/db_max_overflow——验证：engine pool 参数用例绿 + ruff 无告警
++- [x] task-03: 新增 backend/tests/core/test_db_pool_settings.py 覆盖默认值 / 环境变量覆盖生效(engine.pool.size()==5) / 非法值 ValidationError 三组——验证：该文件 pytest 全绿
++- [x] task-04: 跑 backend/tests/core/ 目录回归确认无既有测试破坏——验证：目录 pytest 全绿
++- [x] task-05: 部署到阿里云：本地打包 backend 镜像 → scp → 服务器 .env 加 DB_POOL_SIZE=5/DB_MAX_OVERFLOW=10 → load-and-up → 验证 postgres 连接数 ≤6 且 5 容器 healthy

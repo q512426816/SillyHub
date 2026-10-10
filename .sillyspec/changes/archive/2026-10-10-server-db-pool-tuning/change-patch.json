@@ -1,0 +1,97 @@
+{
+  "change": "2026-10-10-server-db-pool-tuning",
+  "baseline": "a8623c6d614dff46a33cbb243c88643712245598",
+  "head": "e3bca7777d2c72a74e7292e1c5b98326478a7a61",
+  "files": [
+    ".sillyspec/changes/2026-10-10-server-db-pool-tuning/design.md",
+    ".sillyspec/changes/2026-10-10-server-db-pool-tuning/flow-state.yaml",
+    ".sillyspec/changes/2026-10-10-server-db-pool-tuning/proposal.md",
+    ".sillyspec/changes/2026-10-10-server-db-pool-tuning/requirements.md",
+    ".sillyspec/changes/2026-10-10-server-db-pool-tuning/tasks.md",
+    "backend/app/core/config.py",
+    "backend/app/core/db.py",
+    "backend/tests/core/test_db_pool_settings.py"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 299,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-10T15:25:29.760Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 2,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a8623c6d614dff46a33cbb243c88643712245598",
+    "totals": {
+      "files": 3,
+      "additions": 112,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/core/db.py",
+        "additions": 5,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/core/test_db_pool_settings.py",
+        "additions": 93,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "6956bf5a64cec0c969390621f924d034af88a0cd9269a92619b6c1718f1b8789",
+  "patchStatus": "ok"
+}

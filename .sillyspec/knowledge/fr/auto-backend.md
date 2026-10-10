@@ -550,3 +550,67 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：非目标边界
 全文：.sillyspec/changes/archive/2026-10-10-task-wakeup-quiet-threshold/requirements.md#FR-04
 最近确认：9852d96f58056927f03e7497ec1a609c7b75eed3
+
+## FR-auto-backend-152 db.py 的 pool_size/max_overflow 从 DB_POOL_SIZE/DB_MAX_OVERFLOW 环境变量读取，未配置时默认值 20/30 保持现行为不变
+变更：2026-10-10-server-db-pool-tuning
+状态：active
+摘要：主路径（未配置环境变量）；小规格服务器配置小池
+全文：.sillyspec/changes/archive/2026-10-10-server-db-pool-tuning/requirements.md#FR-01
+最近确认：e3bca7777d2c72a74e7292e1c5b98326478a7a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-server-db-pool-tuning:flow:测试绑定FR-01
+  tests: test/backend/tests/core/test_db_pool_settings.py「test_default_pool_values」 | test/backend/tests/core/test_db_pool_settings.py「test_env_override_engine_pool_params」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-server-db-pool-tuning
+  status: active
+
+## FR-auto-backend-153 环境变量配置非法值（非整数）时行为可预期（用默认值并记录警告，或显式报错，实现内注明）
+变更：2026-10-10-server-db-pool-tuning
+状态：active
+摘要：非法值启动失败
+全文：.sillyspec/changes/archive/2026-10-10-server-db-pool-tuning/requirements.md#FR-02
+最近确认：e3bca7777d2c72a74e7292e1c5b98326478a7a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-server-db-pool-tuning:flow:测试绑定FR-02
+  tests: test/backend/tests/core/test_db_pool_settings.py「test_invalid_pool_value_raises」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-server-db-pool-tuning
+  status: active
+
+## FR-auto-backend-154 新增单元测试覆盖：默认值、环境变量覆盖生效、（如选静默回退）非法值回退
+变更：2026-10-10-server-db-pool-tuning
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-10-server-db-pool-tuning/requirements.md#FR-03
+最近确认：e3bca7777d2c72a74e7292e1c5b98326478a7a61
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-server-db-pool-tuning:flow:测试绑定FR-03
+  tests: test/backend/tests/core/test_db_pool_settings.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-server-db-pool-tuning
+  status: active
+
+## FR-auto-backend-155 既有相关测试全部通过
+变更：2026-10-10-server-db-pool-tuning
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-10-server-db-pool-tuning/requirements.md#FR-04
+最近确认：e3bca7777d2c72a74e7292e1c5b98326478a7a61

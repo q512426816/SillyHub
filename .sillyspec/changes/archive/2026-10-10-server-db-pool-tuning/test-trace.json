@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-server-db-pool-tuning",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-server-db-pool-tuning:flow:测试绑定FR-01",
+      "tests": [
+        "test/backend/tests/core/test_db_pool_settings.py「test_default_pool_values」",
+        "test/backend/tests/core/test_db_pool_settings.py「test_env_override_engine_pool_params」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-server-db-pool-tuning"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-server-db-pool-tuning:flow:测试绑定FR-02",
+      "tests": [
+        "test/backend/tests/core/test_db_pool_settings.py「test_invalid_pool_value_raises」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-server-db-pool-tuning"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-server-db-pool-tuning:flow:测试绑定FR-03",
+      "tests": [
+        "test/backend/tests/core/test_db_pool_settings.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-server-db-pool-tuning"
+    }
+  ]
+}
