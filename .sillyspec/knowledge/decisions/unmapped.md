@@ -2154,3 +2154,35 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：85f49e7333567bea28ef71b993f8b132fb4614b9
 理由：- 最大风险：Drawer 内 SubagentDetailPanel 的 h-full 布局在 antd Drawer body 内的高度链——body 已设 flex column + 面板根 h-full（jsdom 无布局无法实测，真机验收项）；若异常退化方案为 body 加显式 height。 - 放弃方案「mobile 页宿主自持三 props（照 portal 装配）」：手机页无右栏可开，props 还得指回组件内状态，多一层无意义转发；放弃「mobile 复用内联展开 + 默认折叠」：信息密度仍高于紧凑卡且与 PC 形态不一致（用户点名要 PC 同构）。 - 已知残留：Drawer 无嵌套路由/返回键联动（移动端返回手势直接退页面而非关 Drawer）——后续可按需接 antd onClose 与历史栈。
+
+## D-002@v1 形态=展示对照+一键导入（用户选定）
+状态：implemented
+变更：2026-10-10-linked-repos-local-echo
+锚点：未记录
+最近确认：f4f974870
+理由：展示+一键导入：卡片新增「本机已有配置」对照区（三态：两边一致/仅本地/仅平台），「仅本地有」条目可勾选导入为平台登记。
+
+## D-003@v1 拉取时机=手动刷新现拉（不随 GET 自动拉）
+状态：implemented
+变更：2026-10-10-linked-repos-local-echo
+锚点：未记录
+最近确认：f4f974870
+理由：手动「刷新本机现状」按钮现拉（请求-响应 RPC）。理由：daemon 离线/超时不阻塞列表加载；本地配置低频变化，conflict_snapshot 按需拉取先例同款。
+故障面：用户忘刷新看到旧快照——展示 fetched_at 时间戳缓解
+退役判据：若未来做快照增量缓存（多成员聚合视图），手动刷新可升级为缓存+手动强制刷新
+
+## D-004@v1 导入语义——复用平台登记建行，重名跳过
+状态：implemented
+变更：2026-10-10-linked-repos-local-echo
+锚点：未记录
+最近确认：f4f974870
+理由：导入=调既有 create_repo 建平台登记行：projects 条目的 path 带入 rel_path（保持团队约定相对路径原样）；repos: 条目的绝对路径写入**当前用户**的 my_path（成员级语义天然对位）；与平台已有同名登记跳过（幂等，响应标 skipped）。
+
+## D-005@v1 快照不落库（实时取，只读）
+状态：implemented
+变更：2026-10-10-linked-repos-local-echo
+锚点：未记录
+最近确认：f4f974870
+理由：不落库。实时拉取即弃（对照视图是即时快照不是状态源）；与 sync_states（下行落盘状态）分离。
+故障面：无持久化即无历史——对照视图只有「当下」，回看历史需另行落库（v2 候选）
+退役判据：出现快照历史/审计需求时升表持久化（复用 sync_states 模式）

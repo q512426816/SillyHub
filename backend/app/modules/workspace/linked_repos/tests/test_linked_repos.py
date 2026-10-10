@@ -415,3 +415,178 @@ async def test_best_effort_push_after_create(
     payload = hub.send_rpc.await_args.args[2]
     assert payload["repos"][0]["name"] == "fe"
     assert "abs_path" in payload["repos"][0]
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# task-02/03（2026-10-10-linked-repos-local-echo）：快照端点 + 导入端点 HTTP 面。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def test_local_snapshot_http_binding_missing(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
+) -> None:
+    ws, _, _ = await _seed(db_session, tag="snap")
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "binding_missing"
+
+
+async def test_local_snapshot_http_offline_degrade(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """daemon 离线 → 结构化 daemon_offline（200 非 5xx，FR-02）。"""
+    import app.modules.daemon.linked_repos_sync as sync_mod
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(sync_mod, "fetch_local_snapshot", boom)
+    ws, _, _ = await _seed(db_session, tag="snap2")
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "daemon_offline"
+
+
+async def test_import_http_double_landing_and_idempotent(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Gap A 合并条目一次导入双落地（rel_path+my_path）；二次导入全 skipped（幂等）。"""
+    ws, _user, _ = await _seed(db_session, tag="imp")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+    resp = await client.post(
+        f"{base}/import",
+        json={"entries": [{"name": "demo", "rel_path": "../demo", "abs_path": "C:/works/demo"}]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["results"] == [{"name": "demo", "result": "imported", "detail": None}]
+
+    items = (await client.get(base, headers=auth_headers)).json()
+    demo = next(i for i in items if i["name"] == "demo")
+    assert demo["rel_path"] == "../demo"
+    assert demo["my_path"] == "C:/works/demo"  # admin=导入者=本人 my_path
+
+    resp = await client.post(
+        f"{base}/import",
+        json={"entries": [{"name": "demo", "rel_path": "../demo", "abs_path": "C:/works/demo"}]},
+        headers=auth_headers,
+    )
+    assert resp.json()["results"][0]["result"] == "skipped"
+
+
+async def test_import_http_per_entry_independent(
+    client: AsyncClient, db_session: AsyncSession, auth_headers: dict[str, str]
+) -> None:
+    """逐条独立成败：合法+非法名混合，非法条 failed 不影响合法条。"""
+    ws, _, _ = await _seed(db_session, tag="imp2")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+    resp = await client.post(
+        f"{base}/import",
+        json={"entries": [{"name": "ok-repo"}, {"name": "bad name!"}]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    results = {r["name"]: r["result"] for r in resp.json()["results"]}
+    assert results["ok-repo"] == "imported"
+    assert results["bad name!"] == "failed"
+
+
+async def test_import_http_member_forbidden(client: AsyncClient, db_session: AsyncSession) -> None:
+    token = await _regular_user_token(db_session, email="snap-member@example.com")
+    ws, _, _ = await _seed(db_session, tag="imp3")
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/linked-repos/import",
+        json={"entries": [{"name": "x"}]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_import_triggers_best_effort_push(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G1：导入成功触发 best-effort 推送（复用 create 先例断言）。"""
+    import asyncio
+
+    import app.modules.daemon.ws_hub as ws_hub_mod
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    ws, _user, machine = await _seed(db_session, tag="impp")
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=_user.id,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    await db_session.commit()
+    hub = AsyncMock()
+    hub.send_rpc = AsyncMock(return_value={})
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/linked-repos/import",
+        json={"entries": [{"name": "pushed", "rel_path": "../pushed"}]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    await asyncio.sleep(0.05)
+    assert hub.send_rpc.await_count >= 1
+
+
+async def test_local_snapshot_http_unsupported(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """G2：daemon_unsupported 的 HTTP 层穿透（method_not_found → 200 结构化）。"""
+    from sqlalchemy import select as _select
+
+    from app.modules.auth.model import User
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    ws, _, machine = await _seed(db_session, tag="unsup")
+    # binding 挂到请求者（admin token 用户）——fetch_local_snapshot 按 actor 路由机器
+    admin = (
+        (await db_session.execute(_select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .one()
+    )
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=admin.id,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    await db_session.commit()
+
+    hub = AsyncMock()
+    hub.send_rpc = AsyncMock(side_effect=DaemonRpcRemoteError({"code": "method_not_found"}))
+    import app.modules.daemon.ws_hub as ws_hub_mod
+
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub)
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "daemon_unsupported"

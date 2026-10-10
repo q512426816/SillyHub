@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-linked-repos-local-echo",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-01:acc-0-91d1e8dd",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "sillyhub-daemon/tests/linked-repos-snapshot.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-01:acc-1-5ff9bd9b",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "sillyhub-daemon/tests/linked-repos-snapshot.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-01:acc-2-1fa61984",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "sillyhub-daemon/tests/linked-repos-snapshot.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-02:acc-0-0e591632",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-02:acc-1-919be75d",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-03:acc-0-0a63f53a",
+      "tests": [
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-linked-repos-local-echo:task-04:acc-0-91896792",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-linked-repos-local-echo"
+    }
+  ]
+}

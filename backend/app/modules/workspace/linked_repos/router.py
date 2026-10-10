@@ -27,9 +27,12 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.workspace.linked_repos import service
 from app.modules.workspace.linked_repos.schema import (
+    ImportRequest,
+    ImportResponse,
     LinkedRepoCreate,
     LinkedRepoOut,
     LinkedRepoUpdate,
+    LocalSnapshotResponse,
     MyPathUpdate,
 )
 
@@ -212,3 +215,40 @@ async def trigger_linked_repos_sync(
     from app.modules.daemon.linked_repos_sync import trigger_sync
 
     return await trigger_sync(session, workspace_id, user.id)
+
+
+# ── 2026-10-10-linked-repos-local-echo task-02/03：本机现状快照与导入（FR-01~04）──
+
+
+@router.get("/local-snapshot", response_model=LocalSnapshotResponse)
+async def get_local_snapshot(
+    workspace_id: Annotated[uuid.UUID, Path(...)],
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> LocalSnapshotResponse:
+    """本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
+    与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。"""
+    from app.modules.daemon import linked_repos_sync as sync_mod
+
+    try:
+        payload = await sync_mod.fetch_local_snapshot(session, workspace_id, user.id)
+    except sync_mod.SnapshotBindingMissing:
+        payload = {"status": "binding_missing", "entries": [], "platform_only_names": []}
+    except Exception:
+        # offline/timeout（既有 504 家族）→ 结构化 daemon_offline 降级（不 5xx，FR-02）
+        payload = {"status": "daemon_offline", "entries": [], "platform_only_names": []}
+    return LocalSnapshotResponse.model_validate(payload)
+
+
+@router.post("/import", response_model=ImportResponse)
+async def import_from_local(
+    workspace_id: Annotated[uuid.UUID, Path(...)],
+    payload: ImportRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_MEMBER_MANAGE))],
+) -> ImportResponse:
+    """从本机快照条目导入为平台登记（owner/admin；合并条目一次落 rel_path+my_path，
+    Grill Gap A；重名 skipped 幂等；逐条独立成败）。"""
+    results = await service.import_repos(session, workspace_id, user.id, payload.entries)
+    await _push_best_effort(session, workspace_id)
+    return ImportResponse(results=results)

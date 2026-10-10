@@ -2825,3 +2825,113 @@
 - 场景：默认场景 — Given 非借用 lease（borrowed=False） 新 backend 对旧 daemon 下发含新键的 claim payload；When 走完整派发链 旧 daemon 认领；Then metadata / claim payload MUST NOT 出现新键（逐字节不变）。 旧 daemon MUST 忽略未知键不报错。
 全文：.sillyspec/changes/archive/2026-10-10-borrow-sandbox-workspace-context/requirements.md#FR-05
 最近确认：2d4702355
+
+## FR-daemon-077 本机现状快照拉取与对照
+变更：2026-10-10-linked-repos-local-echo
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 成员机器 daemon 在线且绑定该工作区；When 成员在关联仓卡片点「刷新本机现状」（GET local-snapshot）；Then backend 经 RPC `linked_repos_snapshot` 现拉 daemon 侧快照（projects 登记面 +
+全文：.sillyspec/changes/archive/2026-10-10-linked-repos-local-echo/requirements.md#FR-01
+最近确认：f4f974870
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-linked-repos-local-echo:task-01:acc-0-91d1e8dd
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | sillyhub-daemon/tests/linked-repos-snapshot.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+- row: 2026-10-10-linked-repos-local-echo:task-01:acc-1-5ff9bd9b
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | sillyhub-daemon/tests/linked-repos-snapshot.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+- row: 2026-10-10-linked-repos-local-echo:task-01:acc-2-1fa61984
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | sillyhub-daemon/tests/linked-repos-snapshot.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+- row: 2026-10-10-linked-repos-local-echo:task-02:acc-0-0e591632
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+- row: 2026-10-10-linked-repos-local-echo:task-02:acc-1-919be75d
+  tests: backend/app/modules/daemon/tests/test_linked_repos_sync.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+
+## FR-daemon-078 降级路径
+变更：2026-10-10-linked-repos-local-echo
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given daemon 离线、老 daemon（无 handler）、本机 sillyspec 缺读命令或**成员未绑定机器**；When 成员点刷新；Then 分别得到 daemon_offline / daemon_unsupported / 源级 skipped / binding_missing 的
+全文：.sillyspec/changes/archive/2026-10-10-linked-repos-local-echo/requirements.md#FR-02
+最近确认：f4f974870
+
+## FR-daemon-079 一键导入
+变更：2026-10-10-linked-repos-local-echo
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 快照含 local_only 条目（对照期已把 projects/repos 同名条目合并为单条：；When owner/admin 勾选后点「导入所选」（POST import）；Then 逐条独立成败：create_repo(name, rel_path?) 建行 +（含 abs_path 时）绝对路径写
+全文：.sillyspec/changes/archive/2026-10-10-linked-repos-local-echo/requirements.md#FR-03
+最近确认：f4f974870
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-linked-repos-local-echo:task-03:acc-0-0a63f53a
+  tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active
+
+## FR-daemon-080 前端本机现状区
+变更：2026-10-10-linked-repos-local-echo
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户打开关联仓卡片；When 查看本机现状区；Then 初始为引导文案（零请求，D-003）；刷新后按三态徽标展示（both ✓ / local_only 可勾选
+全文：.sillyspec/changes/archive/2026-10-10-linked-repos-local-echo/requirements.md#FR-04
+最近确认：f4f974870
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-linked-repos-local-echo:task-04:acc-0-91896792
+  tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-linked-repos-local-echo
+  status: active

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-linked-repos-local-echo",
+  "generatedAt": "2026-10-10T16:06:41.567Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 2,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "backendEndpoints": 639,
+        "frontendCalls": 6
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-linked-repos-local-echo",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 真进程端到端——登录→local-snapshot（无绑定 binding_missing）→导入 sillyspec 条目 imported（abs_path→my_path 双落地回读一致）→二次导入 skipped 幂等→补绑定后无 daemon 连接 → daemon_offline 结构化（全程 200 非 5xx）",
+      "command": "uvicorn 真进程 127.0.0.1:8003（隔离库 verify_echo + 临时 redis 6380）+ curl 五步",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-echo-e2e.log"
+    },
+    {
+      "claim": "daemon 真模块真 CLI 真读本机——runLinkedReposSnapshot(dist) 以真实 sillyspec 安装读主仓：projects 5 条（state scanned/detail 中文正常）+ repos 注册表读到 sillyspec 条目（C:/Users/qinyi/IdeaProjects/sillyspec）+ fetched_at 在场 + 双源零 skipped",
+      "command": "SILLYSPEC_BIN=... node --input-type=module -e \"runLinkedReposSnapshot('主仓根')\"",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/verify-daemon-real-snapshot.log"
+    }
+  ],
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "前端「本机已有配置」区真实浏览器走查（visual-evidence 为代码级对照+组件测试）",
+        "condition": "dev 环境工作区详情页：刷新本机现状→三态徽标→勾选导入→「已登记，可点立即同步落盘」提示链路过一遍",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{id}/linked-repos/local-snapshot",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos/import",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/linked-repos/import",
+        "rowIdx": 2
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/linked-repos-snapshot.test.ts",
+      "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+      "backend/app/modules/daemon/tests/test_linked_repos_sync.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py37+jsx54)+fr(84)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-10T16:28:14.153Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

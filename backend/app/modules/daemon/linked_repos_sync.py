@@ -407,3 +407,142 @@ async def push_sync_best_effort(session: AsyncSession, workspace_id: uuid.UUID) 
     for t in list(_BACKGROUND_PUSH_TASKS):
         if t.done():
             _BACKGROUND_PUSH_TASKS.discard(t)
+
+
+# ── 2026-10-10-linked-repos-local-echo task-02：本机现状快照编排（FR-01/FR-02）──
+
+
+SNAPSHOT_RPC_METHOD = "linked_repos_snapshot"
+SNAPSHOT_RPC_TIMEOUT_SECONDS = 15
+
+SNAPSHOT_STATUS_OK = "ok"
+SNAPSHOT_STATUS_OFFLINE = "daemon_offline"
+SNAPSHOT_STATUS_UNSUPPORTED = "daemon_unsupported"
+SNAPSHOT_STATUS_BINDING_MISSING = "binding_missing"
+
+
+class SnapshotBindingMissing(Exception):
+    """成员未绑定机器——快照语义降级为 binding_missing（不 409，Gap B）。"""
+
+
+async def fetch_local_snapshot(
+    session: AsyncSession, workspace_id: uuid.UUID, actor_user_id: uuid.UUID
+) -> dict[str, Any]:
+    """现拉当前用户绑定机器的本机配置快照 + 双源合并 + 与平台登记三态对照。
+
+    只读：快照即弃不落库（D-005）；四态降级（ok/offline/unsupported/binding_missing）。
+    """
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+    from app.modules.workspace.linked_repos.model import WorkspaceLinkedRepo
+
+    binding = (
+        (
+            await session.execute(
+                select(WorkspaceMemberRuntime).where(
+                    col(WorkspaceMemberRuntime.workspace_id) == workspace_id,
+                    col(WorkspaceMemberRuntime.user_id) == actor_user_id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if binding is None or binding.daemon_id is None:
+        return {"status": SNAPSHOT_STATUS_BINDING_MISSING, "entries": [], "platform_only_names": []}
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    root_path = resolve_root_path_for_daemon(binding.root_path)
+    try:
+        raw = await hub.send_rpc(
+            binding.daemon_id,
+            SNAPSHOT_RPC_METHOD,
+            {"workspace_id": str(workspace_id), "root_path": root_path},
+            timeout=SNAPSHOT_RPC_TIMEOUT_SECONDS,
+        )
+    except DaemonRpcRemoteError as exc:
+        if exc.code == "method_not_found":
+            return {"status": SNAPSHOT_STATUS_UNSUPPORTED, "entries": [], "platform_only_names": []}
+        raise  # offline/timeout 等走既有 504 家族上抛（router 层捕获转 daemon_offline）
+
+    # 平台登记面
+    platform_rows = (
+        (
+            await session.execute(
+                select(WorkspaceLinkedRepo).where(
+                    col(WorkspaceLinkedRepo.workspace_id) == workspace_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    platform_by_name = {r.name: r for r in platform_rows}
+
+    # 双源合并（Grill Gap A）：projects 与 repos 按 name/key 合并单条
+    snap = raw if isinstance(raw, dict) else {}
+    projects = [p for p in (snap.get("projects") or []) if isinstance(p, dict)]
+    repos = {
+        r.get("key"): r for r in (snap.get("repos") or []) if isinstance(r, dict) and r.get("key")
+    }
+    # 兜底源：daemon projects 快照条目的 path（R-01 两级兜底已 daemon 侧完成）
+    merged: dict[str, dict[str, Any]] = {}
+    for proj in projects:
+        name = str(proj.get("name") or "")
+        if not name:
+            continue
+        entry = merged.setdefault(
+            name,
+            {
+                "key": name,
+                "sources": ["projects"],
+                "rel_path": None,
+                "abs_path": None,
+                "role": None,
+                "state": None,
+                "detail": None,
+            },
+        )
+        entry["rel_path"] = proj.get("path")
+        entry["role"] = proj.get("role")
+        entry["state"] = proj.get("state")
+        entry["detail"] = proj.get("detail")
+    for key, repo in repos.items():
+        name = str(key)
+        entry = merged.setdefault(
+            name,
+            {
+                "key": name,
+                "sources": [],
+                "rel_path": None,
+                "abs_path": None,
+                "role": None,
+                "state": None,
+                "detail": None,
+            },
+        )
+        entry["abs_path"] = repo.get("path")
+        entry["sources"].append("repos")
+
+    # 三态对照
+    entries = []
+    for name, entry in sorted(merged.items()):
+        row = platform_by_name.get(name)
+        if row is not None:
+            entry["match"] = "both"
+            entry["platform_repo_id"] = str(row.id)
+            entry["platform_rel_path"] = row.rel_path
+        else:
+            entry["match"] = "local_only"
+        entries.append(entry)
+    platform_only = sorted(set(platform_by_name) - set(merged))
+
+    return {
+        "status": SNAPSHOT_STATUS_OK,
+        "fetched_at": snap.get("fetched_at"),
+        "projects_skipped": snap.get("projects_skipped"),
+        "repos_skipped": snap.get("repos_skipped"),
+        "entries": entries,
+        "platform_only_names": platform_only,
+    }

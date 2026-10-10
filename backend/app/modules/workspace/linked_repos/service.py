@@ -181,3 +181,58 @@ async def upsert_my_path(
             WorkspaceLinkedRepoPath(linked_repo_id=repo_id, user_id=user_id, root_path=path)
         )
     await session.commit()
+
+
+async def import_repos(
+    session: AsyncSession,
+    workspace_id: UUID,
+    actor_user_id: UUID,
+    entries: list,
+) -> list:
+    """从本机快照条目导入（FR-03，Grill Gap A：合并条目一次落 rel_path 与 my_path）。
+
+    逐条独立成败：重名 skipped（不重不丢）；failed 带 detail 不回滚已成功条目。
+    """
+    out = []
+    import re as _re
+
+    for item in entries:
+        name = item.name
+        if not _re.match(r"^[A-Za-z0-9_.\-]+$", name):
+            out.append({"name": name, "result": "failed", "detail": "仓库名非法"})
+            continue
+        try:
+            await create_repo(
+                session,
+                workspace_id,
+                name=name,
+                repo_url=None,
+                description=None,
+                rel_path=item.rel_path,
+                created_by=actor_user_id,
+            )
+            result = "imported"
+            detail = None
+        except LinkedRepoNameConflict:
+            result = "skipped"
+            detail = None
+        except Exception as exc:  # 单条失败不回滚已成功条目
+            result = "failed"
+            detail = str(exc)[:200]
+        # 重名/新建后写 my_path（abs_path 在场时）——按 name 反查行
+        if item.abs_path and result in ("imported", "skipped"):
+            try:
+                stmt = select(WorkspaceLinkedRepo).where(
+                    WorkspaceLinkedRepo.workspace_id == workspace_id,
+                    WorkspaceLinkedRepo.name == name,
+                )
+                row = (await session.execute(stmt)).scalars().first()
+                if row is not None:
+                    await upsert_my_path(
+                        session, row.id, workspace_id, actor_user_id, item.abs_path
+                    )
+            except Exception as exc:
+                result = "failed"
+                detail = f"my_path 写入失败: {exc}"[:200]
+        out.append({"name": name, "result": result, "detail": detail})
+    return out

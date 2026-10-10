@@ -75,3 +75,48 @@ export interface SyncNowOutcome {
 export async function syncLinkedReposNow(workspaceId: string): Promise<SyncNowOutcome> {
   return apiFetch<SyncNowOutcome>(`${base(workspaceId)}/sync`, { method: "POST" });
 }
+
+export interface LocalSnapshotEntryView {
+  key: string;
+  sources: string[];
+  rel_path?: string | null;
+  abs_path?: string | null;
+  role?: string | null;
+  state?: string | null;
+  detail?: string | null;
+  match: "both" | "local_only" | "platform_only";
+  platform_repo_id?: string | null;
+  platform_rel_path?: string | null;
+}
+
+export interface LocalSnapshotView {
+  status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
+  fetched_at?: string | null;
+  projects_skipped?: string | null;
+  repos_skipped?: string | null;
+  entries: LocalSnapshotEntryView[];
+  platform_only_names: string[];
+}
+
+export async function fetchLocalSnapshot(
+  workspaceId: string,
+): Promise<LocalSnapshotView> {
+  return apiFetch<LocalSnapshotView>(`${base(workspaceId)}/local-snapshot`);
+}
+
+export interface ImportOutcomeView {
+  name: string;
+  result: "imported" | "skipped" | "failed";
+  detail?: string | null;
+}
+
+export async function importSelected(
+  workspaceId: string,
+  entries: Array<{ name: string; rel_path?: string | null; abs_path?: string | null }>,
+): Promise<ImportOutcomeView[]> {
+  const out = await apiFetch<{ results: ImportOutcomeView[] }>(`${base(workspaceId)}/import`, {
+    method: "POST",
+    json: { entries },
+  });
+  return out.results ?? [];
+}

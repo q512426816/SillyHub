@@ -1297,7 +1297,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Linked Repo
-         * @description 删除关联仓（owner/admin；成员路径与落盘状态级联清理）。
+         * @description 删除关联仓（owner/admin；成员路径与落盘状态级联清理；归属校验 404）。
          */
         delete: operations["delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete"];
         options?: never;
@@ -1305,6 +1305,9 @@ export interface paths {
         /**
          * Update Linked Repo
          * @description 编辑共享字段（owner/admin；name 不可改，见 schema 注）。
+         *
+         *     显式提交键即更新（JSON null=显式清除，缺省=不动——exclude_unset 语义）；
+         *     repo 必须归属路径工作区（跨工作区 404）。
          */
         patch: operations["update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch"];
         trace?: never;
@@ -1319,7 +1322,7 @@ export interface paths {
         get?: never;
         /**
          * Save My Path
-         * @description 成员级本机路径 upsert（成员本人；path=null 清除）。
+         * @description 成员级本机路径 upsert（成员本人；path=null 清除；归属校验 404）。
          */
         put: operations["save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put"];
         post?: never;
@@ -1347,6 +1350,48 @@ export interface paths {
          *     skipped(需升级) 且本端点不报错（FR-07）。
          */
         post: operations["trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/local-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Snapshot
+         * @description 本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
+         *     与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。
+         */
+        get: operations["get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import From Local
+         * @description 从本机快照条目导入为平台登记（owner/admin；合并条目一次落 rel_path+my_path，
+         *     Grill Gap A；重名 skipped 幂等；逐条独立成败）。
+         */
+        post: operations["import_from_local_api_workspaces__workspace_id__linked_repos_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -18257,6 +18302,21 @@ export interface components {
             rows: components["schemas"]["ImportPreviewRow"][];
         };
         /**
+         * ImportEntryInput
+         * @description 导入条目（合并形态：一次导入同时落 rel_path 与 my_path）。
+         *
+         *     名合法性不在请求级校验（422 会拒整批）——service 层逐条判定 failed
+         *     （快照来源理论合法，运行时脏值按条目级容错，FR-03 逐条独立成败）。
+         */
+        ImportEntryInput: {
+            /** Name */
+            name: string;
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Abs Path */
+            abs_path?: string | null;
+        };
+        /**
          * ImportPreviewResp
          * @description 预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。
          */
@@ -18318,6 +18378,28 @@ export interface components {
             row_count: number;
             /** Rows */
             rows: components["schemas"]["ImportPreviewRow"][];
+        };
+        /** ImportRequest */
+        ImportRequest: {
+            /** Entries */
+            entries?: components["schemas"]["ImportEntryInput"][];
+        };
+        /** ImportResponse */
+        ImportResponse: {
+            /** Results */
+            results?: components["schemas"]["ImportResultItem"][];
+        };
+        /** ImportResultItem */
+        ImportResultItem: {
+            /** Name */
+            name: string;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "imported" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
         };
         /**
          * ImportResultResp
@@ -19071,6 +19153,56 @@ export interface components {
             } | null;
             /** Is Default */
             is_default?: boolean | null;
+        };
+        /**
+         * LocalSnapshotEntry
+         * @description 对照条目（双源合并后：rel_path 取 projects 源、abs_path 取 repos 源，Grill Gap A）。
+         */
+        LocalSnapshotEntry: {
+            /** Key */
+            key: string;
+            /** Sources */
+            sources?: string[];
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Abs Path */
+            abs_path?: string | null;
+            /** Role */
+            role?: string | null;
+            /** State */
+            state?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Match
+             * @enum {string}
+             */
+            match: "both" | "local_only" | "platform_only";
+            /** Platform Repo Id */
+            platform_repo_id?: string | null;
+            /** Platform Rel Path */
+            platform_rel_path?: string | null;
+        };
+        /**
+         * LocalSnapshotResponse
+         * @description 本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。
+         */
+        LocalSnapshotResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Projects Skipped */
+            projects_skipped?: string | null;
+            /** Repos Skipped */
+            repos_skipped?: string | null;
+            /** Entries */
+            entries?: components["schemas"]["LocalSnapshotEntry"][];
+            /** Platform Only Names */
+            platform_only_names?: string[];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -31364,6 +31496,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_from_local_api_workspaces__workspace_id__linked_repos_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResponse"];
                 };
             };
             /** @description Validation Error */

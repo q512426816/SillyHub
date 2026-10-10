@@ -24,11 +24,15 @@ vi.mock("@/lib/linked-repos", async () => {
     deleteLinkedRepo: vi.fn(),
     saveMyLinkedRepoPath: vi.fn(),
     syncLinkedReposNow: vi.fn(),
+    fetchLocalSnapshot: vi.fn(),
+    importSelected: vi.fn(),
   };
 });
 
 const listMock = vi.mocked(api.listLinkedRepos);
 const syncMock = vi.mocked(api.syncLinkedReposNow);
+const fetchSnapMock = vi.mocked(api.fetchLocalSnapshot);
+const importMock = vi.mocked(api.importSelected);
 const createMock = vi.mocked(api.createLinkedRepo);
 
 const sample: LinkedRepoView = {
@@ -128,5 +132,64 @@ describe("LinkedReposCard", () => {
     await screen.findByText("platform-specs");
     fireEvent.click(screen.getByRole("button", { name: "立即同步" }));
     await waitFor(() => expect(syncMock).toHaveBeenCalled());
+  });
+});
+
+// ── 2026-10-10-linked-repos-local-echo task-04：本机现状区 ──
+
+describe("LinkedReposCard 本机现状区", () => {
+  it("初始态：引导文案，零请求", async () => {
+    listMock.mockResolvedValue([sample]);
+    mount({ canManage: true });
+    await screen.findByText("platform-specs");
+    expect(screen.getByText(/点「刷新本机现状」读取/)).toBeTruthy();
+    expect(fetchSnapMock).not.toHaveBeenCalled();
+  });
+
+  it("刷新后三态渲染 + 可导入条目勾选", async () => {
+    listMock.mockResolvedValue([sample]);
+    fetchSnapMock.mockResolvedValue({
+      status: "ok",
+      fetched_at: "2026-10-10T10:00:00Z",
+      entries: [
+        { key: "demo", sources: ["projects", "repos"], rel_path: "../demo", abs_path: "C:/demo", match: "local_only" },
+        { key: "platform-specs", sources: ["projects"], rel_path: null, abs_path: null, match: "both", platform_repo_id: "r1" },
+      ],
+      platform_only_names: ["ghost"],
+    });
+    mount({ canManage: true });
+    await screen.findByText("platform-specs");
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    expect(await screen.findByText("demo")).toBeTruthy();
+    expect(screen.getByText("两边一致")).toBeTruthy();
+    expect(screen.getByText("仅本机", { exact: false })).toBeTruthy();
+    expect(screen.getByText(/仅平台登记（1）：ghost/)).toBeTruthy();
+    // 勾选 demo 后导入按钮计数 1/1
+    fireEvent.click(screen.getByLabelText("选择导入 demo"));
+    expect(screen.getByRole("button", { name: /导入所选（1\/1）/ })).toBeTruthy();
+  });
+
+  it("四态降级：binding_missing 显示引导", async () => {
+    listMock.mockResolvedValue([]);
+    fetchSnapMock.mockResolvedValue({ status: "binding_missing", entries: [], platform_only_names: [] });
+    mount({ canManage: true });
+    await screen.findByText(/尚未登记关联仓/);
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    expect(await screen.findByText(/请先绑定守护进程/)).toBeTruthy();
+  });
+
+  it("成员视角：无导入按钮（仅刷新）", async () => {
+    listMock.mockResolvedValue([sample]);
+    fetchSnapMock.mockResolvedValue({
+      status: "ok",
+      entries: [{ key: "demo", sources: ["repos"], abs_path: "C:/d", match: "local_only" }],
+      platform_only_names: [],
+    });
+    mount({ canManage: false });
+    await screen.findByText("platform-specs");
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    expect(await screen.findByText("demo")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /导入所选/ })).toBeNull();
+    expect(screen.queryByLabelText("选择导入 demo")).toBeNull();
   });
 });

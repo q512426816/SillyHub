@@ -3183,7 +3183,7 @@
           "workspace-linked-repos"
         ],
         "summary": "Update Linked Repo",
-        "description": "编辑共享字段（owner/admin；name 不可改，见 schema 注）。",
+        "description": "编辑共享字段（owner/admin；name 不可改，见 schema 注）。\n\n显式提交键即更新（JSON null=显式清除，缺省=不动——exclude_unset 语义）；\nrepo 必须归属路径工作区（跨工作区 404）。",
         "operationId": "update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch",
         "parameters": [
           {
@@ -3246,7 +3246,7 @@
           "workspace-linked-repos"
         ],
         "summary": "Delete Linked Repo",
-        "description": "删除关联仓（owner/admin；成员路径与落盘状态级联清理）。",
+        "description": "删除关联仓（owner/admin；成员路径与落盘状态级联清理；归属校验 404）。",
         "operationId": "delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete",
         "parameters": [
           {
@@ -3294,7 +3294,7 @@
           "workspace-linked-repos"
         ],
         "summary": "Save My Path",
-        "description": "成员级本机路径 upsert（成员本人；path=null 清除）。",
+        "description": "成员级本机路径 upsert（成员本人；path=null 清除；归属校验 404）。",
         "operationId": "save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put",
         "parameters": [
           {
@@ -3382,6 +3382,106 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Trigger Linked Repos Sync Api Workspaces  Workspace Id  Linked Repos Sync Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/linked-repos/local-snapshot": {
+      "get": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Get Local Snapshot",
+        "description": "本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +\n与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。",
+        "operationId": "get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalSnapshotResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/linked-repos/import": {
+      "post": {
+        "tags": [
+          "workspace-linked-repos",
+          "workspace-linked-repos"
+        ],
+        "summary": "Import From Local",
+        "description": "从本机快照条目导入为平台登记（owner/admin；合并条目一次落 rel_path+my_path，\nGrill Gap A；重名 skipped 幂等；逐条独立成败）。",
+        "operationId": "import_from_local_api_workspaces__workspace_id__linked_repos_import_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResponse"
                 }
               }
             }
@@ -50144,6 +50244,46 @@
         "title": "ImportCommitSheet",
         "description": "提交请求中的单 Sheet — 前端回传用户确认导入的行 (valid 行)。"
       },
+      "ImportEntryInput": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
+          },
+          "abs_path": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abs Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ImportEntryInput",
+        "description": "导入条目（合并形态：一次导入同时落 rel_path 与 my_path）。\n\n名合法性不在请求级校验（422 会拒整批）——service 层逐条判定 failed\n（快照来源理论合法，运行时脏值按条目级容错，FR-03 逐条独立成败）。"
+      },
       "ImportPreviewResp": {
         "properties": {
           "sheets": {
@@ -50352,6 +50492,67 @@
         ],
         "title": "ImportPreviewSheet",
         "description": "单 Sheet 预览结果。"
+      },
+      "ImportRequest": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEntryInput"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "title": "ImportRequest"
+      },
+      "ImportResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ImportResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "title": "ImportResponse"
+      },
+      "ImportResultItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "imported",
+              "skipped",
+              "failed"
+            ],
+            "title": "Result"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "result"
+        ],
+        "title": "ImportResultItem"
       },
       "ImportResultResp": {
         "properties": {
@@ -52263,6 +52464,182 @@
         },
         "type": "object",
         "title": "LlmProviderUpdate"
+      },
+      "LocalSnapshotEntry": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
+          },
+          "abs_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Abs Path"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "both",
+              "local_only",
+              "platform_only"
+            ],
+            "title": "Match"
+          },
+          "platform_repo_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Repo Id"
+          },
+          "platform_rel_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform Rel Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "match"
+        ],
+        "title": "LocalSnapshotEntry",
+        "description": "对照条目（双源合并后：rel_path 取 projects 源、abs_path 取 repos 源，Grill Gap A）。"
+      },
+      "LocalSnapshotResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "daemon_offline",
+              "daemon_unsupported",
+              "binding_missing"
+            ],
+            "title": "Status"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "projects_skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projects Skipped"
+          },
+          "repos_skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos Skipped"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LocalSnapshotEntry"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "platform_only_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Platform Only Names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "LocalSnapshotResponse",
+        "description": "本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。"
       },
       "LoginRequest": {
         "properties": {

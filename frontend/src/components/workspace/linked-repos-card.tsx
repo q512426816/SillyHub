@@ -26,6 +26,9 @@ import {
   syncLinkedReposNow,
   updateLinkedRepo,
   type LinkedRepoView,
+  type LocalSnapshotView,
+  fetchLocalSnapshot,
+  importSelected,
 } from "@/lib/linked-repos";
 import { LinkedRepoFormModal } from "./linked-repos-form";
 
@@ -54,6 +57,10 @@ export function LinkedReposCard({ workspaceId, canManage }: LinkedReposCardProps
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<LinkedRepoView | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [snapshot, setSnapshot] = useState<LocalSnapshotView | null>(null);
+  const [snapLoading, setSnapLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -102,6 +109,49 @@ export function LinkedReposCard({ workspaceId, canManage }: LinkedReposCardProps
       setSyncing(false);
     }
   }, [message, refresh, workspaceId]);
+
+  const refreshSnapshot = useCallback(async () => {
+    setSnapLoading(true);
+    try {
+      setSnapshot(await fetchLocalSnapshot(workspaceId));
+      setSelected(new Set());
+    } catch {
+      setSnapshot({
+        status: "daemon_offline",
+        entries: [],
+        platform_only_names: [],
+      });
+    } finally {
+      setSnapLoading(false);
+    }
+  }, [workspaceId]);
+
+  const handleImportSelected = useCallback(async () => {
+    if (!snapshot) return;
+    const targets = snapshot.entries.filter(
+      (e) => e.match === "local_only" && selected.has(e.key) && (e.rel_path || e.abs_path),
+    );
+    if (targets.length === 0) return;
+    setImporting(true);
+    try {
+      const results = await importSelected(
+        workspaceId,
+        targets.map((e) => ({ name: e.key, rel_path: e.rel_path, abs_path: e.abs_path })),
+      );
+      const okCount = results.filter((r) => r.result === "imported").length;
+      const skipCount = results.filter((r) => r.result === "skipped").length;
+      const failCount = results.filter((r) => r.result === "failed").length;
+      message.success(
+        `导入完成：${okCount} 成功${skipCount ? `、${skipCount} 已存在` : ""}${failCount ? `、${failCount} 失败` : ""}——已登记，可点「立即同步」落盘`,
+      );
+      await refresh();
+      await refreshSnapshot();
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : "导入失败");
+    } finally {
+      setImporting(false);
+    }
+  }, [message, refresh, refreshSnapshot, selected, snapshot, workspaceId]);
 
   const handleSaveMyPath = useCallback(
     async (repo: LinkedRepoView, path: string | null) => {
@@ -229,6 +279,23 @@ export function LinkedReposCard({ workspaceId, canManage }: LinkedReposCardProps
           })}
         </ul>
       )}
+      <LocalEchoSection
+        snapshot={snapshot}
+        loading={snapLoading}
+        selected={selected}
+        onToggle={(key) =>
+          setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          })
+        }
+        onRefresh={() => void refreshSnapshot()}
+        canManage={canManage}
+        importing={importing}
+        onImport={() => void handleImportSelected()}
+      />
       {formOpen ? (
         <LinkedRepoFormModal
           open={formOpen}
@@ -293,5 +360,117 @@ function MyPathButton({
         />
       </Modal>
     </>
+  );
+}
+
+
+function LocalEchoSection({
+  snapshot,
+  loading,
+  selected,
+  onToggle,
+  onRefresh,
+  canManage,
+  importing,
+  onImport,
+}: {
+  snapshot: LocalSnapshotView | null;
+  loading: boolean;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+  onRefresh: () => void;
+  canManage: boolean;
+  importing: boolean;
+  onImport: () => void;
+}): JSX.Element {
+  const importableCount = snapshot
+    ? snapshot.entries.filter((e) => e.match === "local_only" && (e.rel_path || e.abs_path)).length
+    : 0;
+  return (
+    <div className="border-t border-border px-4 py-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold text-muted-foreground">
+          本机已有配置（sillyspec projects 登记 + repos 注册表；仅当前绑定机器）
+          {snapshot?.fetched_at ? (
+            <span className="ml-2 font-normal">
+              拉取于 {new Date(snapshot.fetched_at).toLocaleString("zh-CN")}
+            </span>
+          ) : null}
+        </p>
+        <div className="flex items-center gap-2">
+          {canManage && importableCount > 0 ? (
+            <Button
+              size="sm"
+              disabled={importing || selected.size === 0}
+              onClick={onImport}
+            >
+              {importing ? "导入中…" : `导入所选（${selected.size}/${importableCount}）`}
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
+            {loading ? "读取中…" : "刷新本机现状"}
+          </Button>
+        </div>
+      </div>
+      {!snapshot ? (
+        <p className="py-2 text-xs text-muted-foreground">
+          点「刷新本机现状」读取你机器上已手工配置的 sillyspec 关联信息（不自动拉取）。
+        </p>
+      ) : snapshot.status === "binding_missing" ? (
+        <p className="py-2 text-xs text-amber-600">请先绑定守护进程后再读取本机配置。</p>
+      ) : snapshot.status === "daemon_offline" ? (
+        <p className="py-2 text-xs text-amber-600">守护进程离线，无法读取本机配置。</p>
+      ) : snapshot.status === "daemon_unsupported" ? (
+        <p className="py-2 text-xs text-amber-600">守护进程需升级（不支持本机现状读取）。</p>
+      ) : snapshot.entries.length === 0 ? (
+        <p className="py-2 text-xs text-muted-foreground">
+          本机暂无相关配置
+          {snapshot.projects_skipped ? `（projects 源：${snapshot.projects_skipped}）` : ""}
+          {snapshot.repos_skipped ? `（repos 源：${snapshot.repos_skipped}）` : ""}
+          。
+        </p>
+      ) : (
+        <>
+          <ul className="grid grid-cols-1 gap-1 md:grid-cols-2">
+            {snapshot.entries.map((e) => {
+              const importable = e.match === "local_only" && (e.rel_path || e.abs_path);
+              return (
+                <li key={e.key} className="flex items-center gap-2 text-xs">
+                  {canManage && importable ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(e.key)}
+                      onChange={() => onToggle(e.key)}
+                      className="h-3.5 w-3.5"
+                      aria-label={`选择导入 ${e.key}`}
+                    />
+                  ) : null}
+                  <span className="font-mono font-semibold">{e.key}</span>
+                  {e.match === "both" ? (
+                    <Badge variant="outline" className="border-brand-200 bg-brand-50 text-[10px] text-brand-700">
+                      两边一致
+                    </Badge>
+                  ) : e.match === "local_only" ? (
+                    <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">
+                      仅本机{importable ? "" : "（路径未知）"}
+                    </Badge>
+                  ) : null}
+                  <span className="truncate text-muted-foreground" title={[e.rel_path, e.abs_path].filter(Boolean).join(" | ") || undefined}>
+                    {[e.rel_path, e.abs_path].filter(Boolean).join(" | ") || "—"}
+                    {e.state ? ` · ${e.state}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {snapshot.platform_only_names.length > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              仅平台登记（{snapshot.platform_only_names.length}）：{snapshot.platform_only_names.join("、")}
+              ——本机尚未落盘或已被移除。
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }

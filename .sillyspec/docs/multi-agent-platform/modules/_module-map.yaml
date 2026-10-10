@@ -37,6 +37,7 @@ modules:
       - workspace_router
       - linked_repos 子模块三表+六端点 (backend/app/modules/workspace/linked_repos/, 跨仓关联登记[共享字段+成员级路径]+CRUD+my-path+sync 触发, 跨工作区归属过滤 404+exclude_unset 清除语义, 2026-10-10-workspec-maintenance)
       - linked_repos_sync 编排 (backend/app/modules/daemon/linked_repos_sync.py, linked_repos_sync RPC[30s+15s/仓上限180s]+machines.py 回报端点[落库唯一通道]+best-effort 推送[逐成员 abs_path/引用池], 2026-10-10-workspec-maintenance)
+      - fetch_local_snapshot + import 端点 (backend/app/modules/daemon/linked_repos_sync.py + workspace/linked_repos/router.py, 本机现状回显·RPC 快照+双源合并三态对照[Gap A]+四态降级[Gap B]+导入双落地幂等, 2026-10-10-linked-repos-local-echo)
       - members_router
       - auth_router
       - health_router
@@ -68,6 +69,7 @@ modules:
       - AgentLogReplayBody / buildReplayTurns / isSubagentLog (frontend/src/components/daemon/agent-log-replay-body.tsx + frontend/src/lib/agent-log-replay.ts, tool_report 空轮回放主体·TurnTimeline 直适配·系统事件复用 stderr 原语零改组件·三保险切轮·首屏最早窗口 10 页上限·dialog attach 轮询捕获门控, 2026-09-20-agent-log-session-replay)
       - ChangeEventsCard (frontend/src/components/changes/detail/change-events-card.tsx, 变更详情页 aside「观测事件」折叠卡·30s 轮询自取数·warning 琥珀高亮+角标计数·provisional 徽标·失败静默隐藏·零业务逻辑红线, 2026-09-23-change-events-channel)
       - LinkedReposCard + LinkedRepoFormModal (frontend/src/components/workspace/linked-repos-card.tsx + linked-repos-form.tsx + lib/linked-repos.ts, 工作区详情「关联仓」维护卡·四列列表+状态徽标+成员级「我的本地路径」小 Modal+立即同步·canManage=owner||admin, 2026-10-10-workspec-maintenance)
+      - LocalEchoSection (frontend/src/components/workspace/linked-repos-card.tsx, 关联仓「本机已有配置」区·手动刷新快照+三态徽标+勾选导入[Gap A 合并条目]+四态降级占位, 2026-10-10-linked-repos-local-echo)
     depends_on: [backend]
     used_by: [deploy, ci, build]
     needs_review: false
@@ -100,6 +102,7 @@ modules:
       - writePid
       - SillySpecManager.collectStatusOnce (sillyhub-daemon/src/sillyspec-manager.ts, progress show --json 三态采集器+心跳 sillyspec_status 透传, 2026-09-02-changes-overview-card)
       - runLinkedReposSync (sillyhub-daemon/src/linked-repos-sync.ts, 关联仓双落盘例程·spawn workspace add/register-repo 两层独立成败·execFile 数组形参·失败重试一次·REST 回报唯一落库通道, 2026-10-10-workspec-maintenance)
+      - runLinkedReposSnapshot (sillyhub-daemon/src/linked-repos-snapshot.ts, 本机现状只读快照·spawn workspace status --json + config cat --spec-dir 两条读命令·R-01 两级兜底·源级降级·零写盘, 2026-10-10-linked-repos-local-echo)
       - postLinkedReposSyncResult (sillyhub-daemon/src/hub-client.ts, 关联仓落盘结果回报方法, 2026-10-10-workspec-maintenance)
       - removePid
       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)

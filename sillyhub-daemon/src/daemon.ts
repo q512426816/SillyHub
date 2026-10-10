@@ -6645,6 +6645,18 @@ export class Daemon {
           : undefined,
       });
     });
+    // task-01（2026-10-10-linked-repos-local-echo / FR-01 / D-005 只读铁律）：
+    // linked_repos_snapshot——本机现状只读快照（workspace status --json + config cat
+    // --spec-dir 两条读命令，零写盘）；业务全在 linked-repos-snapshot.runLinkedReposSnapshot
+    //（平名注册，protocol 零改动）。root_path 缺失 throw（backend 恒下发，与写链路同口径）。
+    ws.registerRpcHandler('linked_repos_snapshot', async (params) => {
+      const { runLinkedReposSnapshot } = await import('./linked-repos-snapshot.js');
+      const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
+      if (!rootPath) {
+        throw new Error('linked_repos_snapshot: payload 缺 root_path');
+      }
+      return runLinkedReposSnapshot(rootPath);
+    });
   }
 
   private _registerListDirRpcHandler(ws: WsClientLike): void {

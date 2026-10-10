@@ -274,3 +274,115 @@ async def test_sync_and_report_http(
         headers=auth_headers,
     )
     assert resp.status_code == 404
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# task-02（2026-10-10-linked-repos-local-echo）：本机现状快照编排与对照。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+from app.modules.daemon.linked_repos_sync import fetch_local_snapshot
+
+
+async def test_snapshot_binding_missing(db_session: AsyncSession) -> None:
+    ws, _, _ = await _seed_ws(db_session)
+    out = await fetch_local_snapshot(db_session, ws.id, uuid.uuid4())
+    assert out["status"] == "binding_missing"
+    assert out["entries"] == []
+
+
+async def test_snapshot_merge_and_match(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """双源合并（Gap A）+ 三态对照：demo 双源合并单条双字段；demo2 仅本地；已有行 both。"""
+    ws, machine, _ = await _seed_ws(db_session)
+    actor = machine.user_id
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=actor,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    # 平台已有 platform-specs（both）与 only-plat（platform_only）
+    db_session.add_all(
+        [
+            WorkspaceLinkedRepo(workspace_id=ws.id, name="platform-specs", rel_path="../specs"),
+            WorkspaceLinkedRepo(workspace_id=ws.id, name="only-plat"),
+        ]
+    )
+    await db_session.commit()
+
+    hub = AsyncMock()
+    hub.send_rpc = AsyncMock(
+        return_value={
+            "projects": [
+                {
+                    "name": "demo",
+                    "path": "../demo",
+                    "role": None,
+                    "state": "scanned",
+                    "detail": "x",
+                },
+                {
+                    "name": "platform-specs",
+                    "path": "../specs",
+                    "role": None,
+                    "state": "scanned",
+                    "detail": None,
+                },
+            ],
+            "repos": [{"key": "demo", "path": "C:/works/demo"}],
+            "fetched_at": "2026-10-10T00:00:00Z",
+        }
+    )
+    import app.modules.daemon.ws_hub as ws_hub_mod
+
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub)
+
+    out = await fetch_local_snapshot(db_session, ws.id, actor)
+    assert out["status"] == "ok"
+    assert out["fetched_at"] == "2026-10-10T00:00:00Z"
+    by_key = {e["key"]: e for e in out["entries"]}
+    demo = by_key["demo"]
+    assert demo["rel_path"] == "../demo" and demo["abs_path"] == "C:/works/demo"
+    assert sorted(demo["sources"]) == ["projects", "repos"]
+    assert demo["match"] == "local_only"
+    assert by_key["platform-specs"]["match"] == "both"
+    assert "platform_repo_id" in by_key["platform-specs"]
+    assert out["platform_only_names"] == ["only-plat"]
+
+
+async def test_snapshot_unsupported_and_offline(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws, machine, _ = await _seed_ws(db_session)
+    actor = machine.user_id
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=actor,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    await db_session.commit()
+    from app.modules.daemon.runtime.service import DaemonRpcRemoteError
+
+    hub = AsyncMock()
+    hub.send_rpc = AsyncMock(side_effect=DaemonRpcRemoteError({"code": "method_not_found"}))
+    import app.modules.daemon.ws_hub as ws_hub_mod
+
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub)
+    out = await fetch_local_snapshot(db_session, ws.id, actor)
+    assert out["status"] == "daemon_unsupported"
+
+    hub2 = AsyncMock()
+    hub2.send_rpc = AsyncMock(side_effect=RuntimeError("offline"))
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub2)
+    with pytest.raises(RuntimeError):
+        # offline/timeout 上抛（router 层捕获转 daemon_offline）
+        await fetch_local_snapshot(db_session, ws.id, actor)

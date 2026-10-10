@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-linked-repos-local-echo",
+  "appliedAt": "2026-10-10T16:39:55.717Z",
+  "baseHash": "f9ef55b526e415243a4aa25b4ba180114abea8f9",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/linked_repos_sync.py",
+      "sha256": "39596cba540ad04821ff27fa612cf12f48586c87391bccdea18fccff0a857d16"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_linked_repos_sync.py",
+      "sha256": "2e00128a3b7a7bd27f3d450f0e5b4a5f610983d91e6c3cc3dcf87c5939c926e5"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/router.py",
+      "sha256": "939729f9c8d49d0ed63d989a1b6ec2a4ee714931496e133296c264d86f0f2be1"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/schema.py",
+      "sha256": "a3af7c2e9e6f3f75817be1635328da6a616bd1f562d2906088f9b59f3531763f"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/service.py",
+      "sha256": "bd1f11e2dc8d93627afcf61b1a9905419e16ccc3e2e784aec7fb09fcfe206fbb"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+      "sha256": "986f7c03d9985dc1f15321eb6480046149e69f43bd2c594a9b4326efe517472f"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "f11f4bce59891492c780b7d06af3addc36f7a392ea09cebe2d74c1460fcb78d1"
+    },
+    {
+      "path": "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+      "sha256": "84429c6a9cf60935246c988e0c9de0b07e30234e64ee82f2f7442e11915e280c"
+    },
+    {
+      "path": "frontend/src/components/workspace/linked-repos-card.tsx",
+      "sha256": "053009eb289050347dfe27d965d18b41bb23fa61f5657cc59de04cb8a2a4af79"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "b9923230b0fd20b1c3b1de59d22899ee802d40e8d73c647f13d16f74b77f9135"
+    },
+    {
+      "path": "frontend/src/lib/linked-repos.ts",
+      "sha256": "2278732688cce0dd2942c2a930df3875cd6d82993bf4bd80efcb820015d8be20"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "789d4ab50c4d2f14bc57ce4a2e33523930c4ad45165a6e8fed8314bc4d207fdc"
+    },
+    {
+      "path": "sillyhub-daemon/src/linked-repos-snapshot.ts",
+      "sha256": "fff23e859864456987de2ff307aad8d7c36f19df24bc27bc95fd5d6fb660636e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/linked-repos-snapshot.test.ts",
+      "sha256": "683026a81a0e5c17dc8b6478ce53dabc037586ee87b5ef61600acb368297c79e"
+    }
+  ]
+}

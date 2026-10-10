@@ -614,3 +614,41 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-10-server-db-pool-tuning/requirements.md#FR-04
 最近确认：e3bca7777d2c72a74e7292e1c5b98326478a7a61
+
+## FR-auto-backend-156 close_interactive_run 同事务收口该 run 的非终态任务行
+变更：2026-10-10-run-close-task-sweep
+状态：active
+摘要：子代理未上报终态（线上 47e2ff1a 实证）
+全文：.sillyspec/changes/archive/2026-10-10-run-close-task-sweep/requirements.md#FR-01
+最近确认：9efccfff7751ef838fe436eafa9da030ef68554d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-run-close-task-sweep:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_finalize_sweeps_running_to_stopped_terminal_untouched」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-run-close-task-sweep
+  status: active
+
+## FR-auto-backend-157 启动兜底清扫（自愈存量脏数据）
+变更：2026-10-10-run-close-task-sweep
+状态：active
+摘要：部署重启自愈存量
+全文：.sillyspec/changes/archive/2026-10-10-run-close-task-sweep/requirements.md#FR-02
+最近确认：9efccfff7751ef838fe436eafa9da030ef68554d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-run-close-task-sweep:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_orphans_terminal_run_only」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-run-close-task-sweep
+  status: active
