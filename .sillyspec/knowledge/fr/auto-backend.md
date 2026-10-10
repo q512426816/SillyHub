@@ -435,3 +435,66 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-10-dump-gzip-thread-offload
   status: active
+
+## FR-auto-backend-145 _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
+变更：2026-10-10-recheck-lease-freshness
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given run running + 日志停滞超宽限窗 + 实例 online（心跳 1min 前）+ lease updated_at 停滞 1h / When 复扫单
+全文：.sillyspec/changes/archive/2026-10-10-recheck-lease-freshness/requirements.md#FR-01
+最近确认：f1d975bf97dcd3bbb12c85e510dae5617809c797
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-recheck-lease-freshness:flow:测试绑定FR-01
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-recheck-lease-freshness
+  status: active
+
+## FR-auto-backend-146 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
+变更：2026-10-10-recheck-lease-freshness
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 既有 8 用例形态（含 fixture 对齐真实续约时序后的 pardons 用例）/ When 复跑 / Then 全绿。
+全文：.sillyspec/changes/archive/2026-10-10-recheck-lease-freshness/requirements.md#FR-02
+最近确认：f1d975bf97dcd3bbb12c85e510dae5617809c797
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-recheck-lease-freshness:flow:测试绑定FR-02
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_pardons_run_with_online_daemon」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-recheck-lease-freshness
+  status: active
+
+## FR-auto-backend-147 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归
+变更：2026-10-10-recheck-lease-freshness
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-10-recheck-lease-freshness/requirements.md#FR-03
+最近确认：f1d975bf97dcd3bbb12c85e510dae5617809c797
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-recheck-lease-freshness:flow:测试绑定FR-03
+  tests: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-recheck-lease-freshness
+  status: active

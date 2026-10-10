@@ -1987,3 +1987,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：c2dea0074b6fc874e20bd6a894d932dd25842239
 理由：最大风险：to_thread 默认线程池在高并发 dump 风暴下排队——但 dump 为低频全图总览请求且单次百 ms 级，默认池容量充足；极端排队仅表现为该请求变慢，不阻塞事件循环（恰是本变更要保住的底线）。试过但放弃：①降 compresslevel 到 6（放弃理由：只缩短不消除阻塞，且改变输出字节引入对比噪声）；②ResponseStreaming 分块压缩（放弃理由：信封需整体 JSON 化后压缩才能保证 gzip 原子性与既有测试的字节级断言，流式改造收益不抵复杂度）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-recheck-lease-freshness
+锚点：未记录
+最近确认：f1d975bf97dcd3bbb12c85e510dae5617809c797
+理由：最大风险：daemon 续约线程被长任务饿死超 10 分钟（宽限窗）导致健康 run 被误判死——缓解：lease 心跳在 daemon 独立定时器（task-runner 5s 间隔，与任务执行线程解耦）+ FR-02 回正兜底；极端饥饿 10 分钟本身已属病态，判死后回正比永卡合理。边界取舍：`last_heartbeat_at is None` 分支保持保守 True 不引入 lease 核验（从未心跳的实例语义模糊，patrol 同款跳过，不扩大本变更判死面）。试过但放弃：豁免轮数上限（dict 簿记 tracked→轮数）——放弃理由：按时间盲猜，对合法等用户应答的长静默轮有误杀面且需改 _recheck_deferred_runs 签名与全部既有用例；lease 续约是直接证据且零簿记。

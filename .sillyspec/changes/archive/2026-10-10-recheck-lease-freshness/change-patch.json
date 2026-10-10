@@ -1,0 +1,83 @@
+{
+  "change": "2026-10-10-recheck-lease-freshness",
+  "baseline": "09eef33cd528e4297bfdd34c5c1ac4d0ab3db535",
+  "head": "f1d975bf97dcd3bbb12c85e510dae5617809c797",
+  "files": [
+    "backend/app/modules/agent/service.py",
+    "backend/tests/modules/agent/test_stale_run_recheck.py",
+    ".sillyspec/changes/2026-10-10-recheck-lease-freshness/design.md",
+    ".sillyspec/changes/2026-10-10-recheck-lease-freshness/proposal.md",
+    ".sillyspec/changes/2026-10-10-recheck-lease-freshness/requirements.md",
+    ".sillyspec/changes/2026-10-10-recheck-lease-freshness/tasks.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 189,
+    "deletions": 14
+  },
+  "savedAt": "2026-10-10T00:38:17.817Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "09eef33cd528e4297bfdd34c5c1ac4d0ab3db535",
+    "totals": {
+      "files": 2,
+      "additions": 66,
+      "deletions": 14
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/service.py",
+        "additions": 23,
+        "deletions": 11,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/tests/modules/agent/test_stale_run_recheck.py",
+        "additions": 43,
+        "deletions": 3,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e95c4ec01081e4ca996871e846e9a37e4fbd8763cad9ca0897c16a3b58c28a93",
+  "patchStatus": "ok"
+}

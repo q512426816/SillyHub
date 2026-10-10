@@ -1,0 +1,299 @@
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 2dd6d916d..f2c986539 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -2588,28 +2588,34 @@ async def _deferred_run_ids(session: AsyncSession) -> list[uuid.UUID]:
+ 
+ 
+ async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool | None:
+-    """复扫判死的 daemon 活性门（对齐 patrol 判死段双条件语义）。
++    """复扫判死的 daemon 活性门（对齐 patrol 判死段双条件语义 + lease 续约核验）。
+ 
+     链路：run 最新 lease（``updated_at`` 倒序首见即定，同 patrol
+     ``_resolve_run_daemons_bulk`` 单条语义——最新 lease 无 runtime_id 即断链，
+     不回退老 lease）→ runtime → daemon 实例。返回：
+ 
+-    - True：daemon status=online，或 last_heartbeat_at 在宽限窗内（含
+-      last_heartbeat_at 为 None——patrol 同款保守跳过）；
+-    - False：daemon 明确非 online 且心跳停滞超宽限窗；
++    - True：daemon status=online **且该 run 的 lease 续约新鲜**（宽限窗内），
++      或 last_heartbeat_at 在宽限窗内（含 last_heartbeat_at 为 None——patrol
++      同款保守跳过）；
++    - False：daemon 明确非 online 且心跳停滞超宽限窗；或实例 online 但 lease
++      续约停滞超宽限窗（2026-10-10-recheck-lease-freshness：daemon 进程重启
++      丢失 run 执行状态后实例重新上线的永卡形态——健康 run 的 lease 由 daemon
++      每 lease_heartbeat_interval（默认 5s）续约刷新 updated_at，实例活着
++      但不再为该 run 续约 = 已放弃此 run）；
+     - None：链路不可解析（无 lease / 无 runtime / 无实例）——调用方退回纯
+       日志 recency 语义，不因解析失败缩小 FR-01 防永卡兜底。
+     """
+-    runtime_id = (
++    latest_lease = (
+         await session.execute(
+-            select(DaemonTaskLease.runtime_id)
++            select(DaemonTaskLease.runtime_id, DaemonTaskLease.updated_at)
+             .where(DaemonTaskLease.agent_run_id == run_id)
+             .order_by(DaemonTaskLease.updated_at.desc())
+             .limit(1)
+         )
+-    ).scalar_one_or_none()
+-    if runtime_id is None:
++    ).first()
++    if latest_lease is None:
+         return None
++    runtime_id, lease_updated_at = latest_lease
+     instance_id = (
+         await session.execute(
+             select(DaemonRuntime.daemon_instance_id).where(DaemonRuntime.id == runtime_id)
+@@ -2622,9 +2628,14 @@ async def _run_daemon_alive(session: AsyncSession, run_id: uuid.UUID) -> bool |
+     ).scalar_one_or_none()
+     if daemon is None:
+         return None
+-    if daemon.status == "online" or daemon.last_heartbeat_at is None:
++    now = datetime.now(UTC)
++    if daemon.status == "online":
++        # 实例在线再核 lease 续约新鲜度：停滞超宽限窗 = daemon 重启丢态后
++        # 放弃此 run（docstring 2026-10-10-recheck-lease-freshness 场景）。
++        return now - _as_utc(lease_updated_at) <= STALE_RUN_ACTIVE_GRACE
++    if daemon.last_heartbeat_at is None:
+         return True
+-    return datetime.now(UTC) - _as_utc(daemon.last_heartbeat_at) <= STALE_RUN_ACTIVE_GRACE
++    return now - _as_utc(daemon.last_heartbeat_at) <= STALE_RUN_ACTIVE_GRACE
+ 
+ 
+ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID]) -> set[uuid.UUID]:
+@@ -2633,7 +2644,8 @@ async def _recheck_deferred_runs(session: AsyncSession, tracked: set[uuid.UUID])
+     - 已非 running（正常收口/其它路径终态化）→ 出列停止追踪；
+     - 日志宽限窗内（daemon 仍在报）→ 保持追踪；
+     - 日志停滞 + daemon 活性门 True（健康 daemon 上的长静默轮：等待用户
+-      应答/长工具调用）→ 不判死，保持追踪等真终态；
++      应答/长工具调用；在线实例须 lease 续约新鲜——停滞即 daemon 重启丢态
++      放弃此 run，活性门回 False）→ 不判死，保持追踪等真终态；
+     - 日志停滞 + 活性门 False/None（daemon 确死或链路不可解析）→ 行锁重读
+       后判死（None 退回纯 recency 语义，防永卡兜底不缩小）。
+     """
+diff --git a/backend/tests/modules/agent/test_stale_run_recheck.py b/backend/tests/modules/agent/test_stale_run_recheck.py
+index a5c73a085..84e8c3ba7 100644
+--- a/backend/tests/modules/agent/test_stale_run_recheck.py
++++ b/backend/tests/modules/agent/test_stale_run_recheck.py
+@@ -61,8 +61,14 @@ async def _make_daemon_chain(
+     run_id: uuid.UUID,
+     daemon_status: str,
+     heartbeat_age: timedelta,
++    lease_updated_age: timedelta = timedelta(seconds=5),
+ ) -> None:
+-    """构造 run → lease → runtime → daemon 实例链（对齐 patrol 解析路径）。"""
++    """构造 run → lease → runtime → daemon 实例链（对齐 patrol 解析路径）。
++
++    lease_updated_age：最新 lease 的续约新鲜度——健康 run 由 daemon 每
++    lease_heartbeat_interval（默认 5s）续约刷新 updated_at（2026-10-10
++    -recheck-lease-freshness 对齐真实续约时序）；默认 5s = 续约中。
++    """
+     uid = uuid.uuid4()
+     db_session.add(
+         User(
+@@ -98,7 +104,7 @@ async def _make_daemon_chain(
+             status="claimed",
+             kind="interactive",
+             created_at=datetime.now(UTC) - timedelta(hours=1),
+-            updated_at=datetime.now(UTC) - timedelta(hours=1),
++            updated_at=datetime.now(UTC) - lease_updated_age,
+         )
+     )
+     await db_session.commit()
+@@ -154,7 +160,10 @@ async def test_recheck_ignores_new_silent_run_outside_tracked_set(
+ 
+ @pytest.mark.asyncio
+ async def test_recheck_pardons_run_with_online_daemon(db_session: AsyncSession) -> None:
+-    """daemon 在线 + 日志停滞（等待用户应答/长工具调用的静默轮）→ 不判死。"""
++    """daemon 在线 + 日志停滞（等待用户应答/长工具调用的静默轮）→ 不判死。
++
++    前提（2026-10-10-recheck-lease-freshness）：lease 续约新鲜（daemon 每
++    5s 续约），证明 run 仍被 daemon 持有执行。"""
+     run = _make_running_run()
+     db_session.add(run)
+     await db_session.commit()
+@@ -173,6 +182,37 @@ async def test_recheck_pardons_run_with_online_daemon(db_session: AsyncSession)
+     assert refreshed.finished_at is None
+ 
+ 
++@pytest.mark.asyncio
++async def test_recheck_kills_run_with_online_daemon_but_stale_lease(
++    db_session: AsyncSession,
++) -> None:
++    """实例在线但 lease 续约停滞 → 判死出列（2026-10-10-recheck-lease-freshness）。
++
++    场景：daemon 进程重启丢失 run 执行状态后实例重新上线——日志停滞 +
++    实例 online，但该 run 的 lease 不再续约（daemon 重启后不会为旧 run
++    心跳）。原实现只看实例 online 即豁免 → run 永卡 running（patrol 对
++    online 实例同样豁免，无第二兜底）。"""
++    run = _make_running_run()
++    db_session.add(run)
++    await db_session.commit()
++    await _add_log(db_session, run.id, STALE_RUN_ACTIVE_GRACE + timedelta(minutes=20))
++    await _make_daemon_chain(
++        db_session,
++        run_id=run.id,
++        daemon_status="online",
++        heartbeat_age=timedelta(minutes=1),
++        lease_updated_age=timedelta(hours=1),
++    )
++
++    still = await agent_service._recheck_deferred_runs(db_session, {run.id})
++
++    assert still == set()
++    refreshed = await db_session.get(AgentRun, run.id)
++    assert refreshed is not None
++    assert refreshed.status == "failed"
++    assert refreshed.error_code == "SERVICE_RESTART_INTERRUPTED"
++
++
+ @pytest.mark.asyncio
+ async def test_recheck_kills_silent_run_with_dead_daemon(db_session: AsyncSession) -> None:
+     """daemon 明确离线且心跳停滞超宽限窗 + 日志停滞 → 判死并出列。"""
+diff --git a/.sillyspec/changes/2026-10-10-recheck-lease-freshness/design.md b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/design.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:34:34.662Z
++---
++# 设计记录（Design Record）— 2026-10-10-recheck-lease-freshness
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查发现复扫链 daemon 活性门只看实例 online 即豁免判死——daemon 进程重启丢失 run 执行状态但实例重新上线时，日志停滞+实例在线 → run 永卡 running、复扫链永驻空转（patrol 对 online 实例同样豁免，无第二兜底）。关键事实：健康 run 的 lease 由 daemon 每 lease_heartbeat_interval（默认 5s）续约刷新 `updated_at`（lease/service.py lease_heartbeat → task-runner.ts 每 5s 调用），daemon 重启丢态后不再为旧 run 续约。方案：`_run_daemon_alive` 的 online 分支叠加最新 lease 续约新鲜度核验——`now - lease.updated_at > STALE_RUN_ACTIVE_GRACE` 返回 False，fall through 到既有判死路径（FOR UPDATE 锁定重读 + SERVICE_RESTART_INTERRUPTED，daemon 后续真成功上报时由 FR-02 回正兜底 close_run_steps 改回 completed）。选 lease 续约信号而非豁免轮数上限：lease 续约是「daemon 仍持有此 run」的直接证据（无状态、无需在复扫循环里簿记轮数、不改 _recheck_deferred_runs 签名），轮数上限只能按时间盲猜且对合法长静默（等用户应答）有误杀面。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `backend/app/modules/agent/service.py`：`_run_daemon_alive`（模块内私有，仅 `_recheck_deferred_runs` 一个调用点，grep 实证）——最新 lease 查询从单列 runtime_id 改两列 (runtime_id, updated_at)（同一查询零额外开销）；online 分支返回值从恒 True 改为 lease 续约新鲜度判定；offline/None 分支语义零变化。对外 API/模型/协议零变化，无生成物面。
++- `backend/tests/modules/agent/test_stale_run_recheck.py`：fixture `_make_daemon_chain` 新增 `lease_updated_age` 参数（默认 5s 新鲜）；新增 1 用例。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立：lease.updated_at 由 backend lease_heartbeat 单写者事务更新（每次续约 commit），复扫读的是已提交的最新值；「最新 lease 倒序首见即定」与既有 patrol 单条语义一致，迟到续约只会让下一次复扫轮放行（判死路径有 FOR UPDATE 重读，锁内仍 running 才写 failed）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   与判死路径既有并发语义一致：无锁预判（本变更所在层）可能读到过期视图，但写 failed 前有 FOR UPDATE 行锁重读（populate_existing），daemon 并发终态化的 run 在锁内被识别为非 running 跳过，不覆盖。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全：误判死（lease 停滞但 run 真活着的极端窗口——如 daemon 线程池饿死 10 分钟未续约）由 FR-02 回正兜底（close_run_steps 按 SERVICE_RESTART_INTERRUPTED+success 回正 completed），误杀代价为短暂假失败非数据损毁。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会：lease 按 agent_run_id 精确关联，最新 lease 单条即定；多实例（用户重启 daemon 生成新实例行）场景下旧实例 offline 分支语义不变，新实例 online 但无该 run 的 lease（链路按 lease 解析，不跨实例串）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：daemon 续约线程被长任务饿死超 10 分钟（宽限窗）导致健康 run 被误判死——缓解：lease 心跳在 daemon 独立定时器（task-runner 5s 间隔，与任务执行线程解耦）+ FR-02 回正兜底；极端饥饿 10 分钟本身已属病态，判死后回正比永卡合理。边界取舍：`last_heartbeat_at is None` 分支保持保守 True 不引入 lease 核验（从未心跳的实例语义模糊，patrol 同款跳过，不扩大本变更判死面）。试过但放弃：豁免轮数上限（dict 簿记 tracked→轮数）——放弃理由：按时间盲猜，对合法等用户应答的长静默轮有误杀面且需改 _recheck_deferred_runs 签名与全部既有用例；lease 续约是直接证据且零簿记。
++
++## 文件变更清单（自声明）
++
++交付文件（2 个）：
++
++1. `backend/app/modules/agent/service.py`——_run_daemon_alive online 分支 lease 续约核验（FR-01/FR-02）
++2. `backend/tests/modules/agent/test_stale_run_recheck.py`——fixture lease_updated_age 参数 + 新增判死用例（FR-03）
+
+diff --git a/.sillyspec/changes/2026-10-10-recheck-lease-freshness/proposal.md b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:34:34.662Z
++---
++# 提案书（Proposal）— 2026-10-10-recheck-lease-freshness
++
++## 动机
++
++任务原话转写：24h 审查发现复扫链 daemon 活性门只看实例 online 即豁免判死：daemon 进程重启丢失 run 执行状态但实例重新上线时，日志停滞+实例在线 → run 永卡 running、复扫链永驻空转（patrol 对 online 实例同样豁免，无第二兜底）。关键事实：健康 run 的 lease 由 daemon 每 lease_heartbeat_interval（默认 5s）续约刷新 updated_at，daemon 重启丢态后不再续约。
++成功标准：
++- _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
++- 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
++- 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
++2. 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
++3. 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归
++
++## 成功标准（可验证）
++
++1. _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
++2. 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
++3. 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归
+
+diff --git a/.sillyspec/changes/2026-10-10-recheck-lease-freshness/requirements.md b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/requirements.md
+@@ -0,0 +1,39 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:34:34.662Z
++---
++# 需求规格（Requirements）— 2026-10-10-recheck-lease-freshness
++
++## 功能需求
++
++### FR-01: _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
++
++- daemon 实例 status=online 时，活性门必须继续核验该 run 最新 lease 的续约新鲜度：`now - lease.updated_at > STALE_RUN_ACTIVE_GRACE` 时必须返回 False（daemon 重启丢态后不再为旧 run 续约的永卡形态）；续约新鲜（宽限窗内）必须返回 True（健康静默轮放行）。禁止只看实例 online 即豁免。
++
++#### 场景：主路径
++
++Given run running + 日志停滞超宽限窗 + 实例 online（心跳 1min 前）+ lease updated_at 停滞 1h / When 复扫单轮 / Then run 判死出列（failed / SERVICE_RESTART_INTERRUPTED / exit_code=-1）。
++Given 同上但 lease updated_at 5s 前（续约中）/ When 复扫单轮 / Then 保持追踪不判死。
++
++### FR-02: 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
++
++- 三类既有语义必须零回归：①实例 offline + 心跳停滞 → False 判死；②链路不可解析（无 lease/runtime/实例）→ None 退回 recency 判死；③实例 last_heartbeat_at 为 None → 保守 True（patrol 同款跳过，不引入 lease 核验）。
++
++#### 场景：主路径
++
++Given 既有 8 用例形态（含 fixture 对齐真实续约时序后的 pardons 用例）/ When 复跑 / Then 全绿。
++
++### FR-03: 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归
++
++- 测试必须新增「实例在线但 lease 续约停滞」判死用例（实现前红：原实现豁免保持追踪）；fixture `_make_daemon_chain` 必须暴露 `lease_updated_age` 参数（默认 5s 新鲜，对齐 daemon lease_heartbeat_interval 真实时序）；全部用例实现后必须绿。
++
++#### 场景：主路径
++
++Given 未加核验的旧实现 / When 跑新用例 / Then 红（still == {run.id} 保持追踪）。
++Given 加核验后 / When 全文件复跑 / Then 9/9 绿（相关面 liveness 合跑 13/13 绿）。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」
++FR-02: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_pardons_run_with_online_daemon」+「test_recheck_kills_silent_run_with_dead_daemon」+「test_recheck_unresolvable_daemon_falls_back_to_recency」（零回归，实测 9 passed 2026-10-10 08:38）
++FR-03: backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」（先红 1 failed 实证于 2026-10-10 08:36 运行，后绿 9/9 实证于 08:38 运行；相关面 test_stale_run_cleanup_liveness 合跑 13/13）
+
+diff --git a/.sillyspec/changes/2026-10-10-recheck-lease-freshness/tasks.md b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-recheck-lease-freshness/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:34:34.662Z
++---
++# 任务注册表（Tasks）— 2026-10-10-recheck-lease-freshness
++
++- [x] task-01: _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回 False（实例活着但已放弃此 run），fall through 判死出列
++- [x] task-02: 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
++- [x] task-03: 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture 对齐真实续约时序（lease 新鲜）零回归

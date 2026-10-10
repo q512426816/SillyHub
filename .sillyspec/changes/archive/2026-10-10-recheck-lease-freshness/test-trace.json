@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-recheck-lease-freshness",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-recheck-lease-freshness:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-recheck-lease-freshness"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-recheck-lease-freshness:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_pardons_run_with_online_daemon」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-recheck-lease-freshness"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-recheck-lease-freshness:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/agent/test_stale_run_recheck.py「test_recheck_kills_run_with_online_daemon_but_stale_lease」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-recheck-lease-freshness"
+    }
+  ]
+}

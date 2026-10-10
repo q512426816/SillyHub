@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-recheck-lease-freshness",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f1d975bf97dcd3bbb12c85e510dae5617809c797",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "close_run_steps 回正兜底函数体未直接目击，仅有注释锚点佐证（核验深度受限披露，非缺失指控）",
+      "evidence": "design 盲维第 3 问的回正兜底（按 SERVICE_RESTART_INTERRUPTED+success 回正 completed）在 HEAD 仅有 service.py:2431-2432 既有注释锚点（_mark_stale_run_failed docstring：『error_code 是 FR-02 迟到成功回正例外条件的匹配键（close_run_steps 终态守卫）』）与 _mark_stale_run_failed 实际写 error_code=SERVICE_RESTART_INTERRUPTED/exit_code=-1（service.py:2435-2443）佐证；grep \"async def close_run_steps\" 在 backend/app 无命中（可能为同步 def 或其他签名形式），评审请求预算耗尽未能二次定位函数体。判死侧主链（FOR UPDATE+populate_existing 锁内重读、锁内非 running 跳过）已实证于 service.py:2673-2682。",
+      "location": "backend/app/modules/agent/service.py:2431"
+    },
+    {
+      "severity": "P3",
+      "title": "design.md 裸写「FR-02 回正兜底」存在跨文档引用歧义",
+      "evidence": "本变更 requirements.md 的 FR-02 是零回归条款（健康 run 不判死+三类语义不变），不含任何回正兜底内容；design.md 做法概述与盲维第 3 问的『FR-02 回正兜底（close_run_steps 改回 completed）』实际指先前变更 2026-10-08-backend-restart-fake-failed 的 FR-02（service.py:2431 注释同源表述），未加变更名限定，后续读者按本变更 FR-02 追溯会落空。",
+      "location": ".sillyspec/changes/2026-10-10-recheck-lease-freshness/design.md:11"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-10T09:30:00+08:00"
+}

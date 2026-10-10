@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  24h 审查发现复扫链 daemon 活性门只看实例 online 即豁免判死：daemon 进程重启丢失 run 执行状态但实例重新上线时，日志停滞+实例在线 → run 永卡 running、复扫链永驻空转（patrol 对
+  online 实例同样豁免，无第二兜底）。关键事实：健康 run 的 lease 由 daemon 每 lease_heartbeat_interval（默认 5s）续约刷新 updated_at，daemon 重启丢态后不再续约。
+
+  成功标准：
+
+  - _run_daemon_alive 实例 online 分支必须叠加最新 lease 续约新鲜度核验：lease updated_at 停滞超宽限窗（STALE_RUN_ACTIVE_GRACE）→ 返回
+  False（实例活着但已放弃此 run），fall through 判死出列
+
+  - 健康 run（日志停滞但 lease 续约新鲜，如等用户应答/长工具调用）必须保持不判死；daemon 确死/链路不可解析语义不变
+
+  - 新增用例先红后绿：实例 online+心跳新鲜+lease updated_at 停滞 1h → 判死 failed/SERVICE_RESTART_INTERRUPTED；既有 pardons 用例 fixture
+  对齐真实续约时序（lease 新鲜）零回归
+autopilot: true
+baseline_commit: 09eef33cd528e4297bfdd34c5c1ac4d0ab3db535
+updatedAt: '2026-10-10T00:41:07.575Z'
+baseline_sha256: 53dd0f46e5fd084d73d525703ca18d185b1dfa44b262ecb4cd5b3d8c37ca9936
+gate_summary: >-
+  test: passed ← module[]+deps(py27)+fr(4)（70.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010003807\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010003807\test-result.json｜门文件
+  2 个
+
