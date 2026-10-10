@@ -609,6 +609,72 @@ class TestTaskWakeupMerge:
         assert "普通消息" in prompts
 
 
+class TestTaskWakeupQueueQuota:
+    """2026-10-10-task-wakeup-quiet-threshold FR-02：[后台任务通知] 豁免满员计数。
+
+    生产实证（会话 0d6b2ba9）：系统通知在排队栏与用户消息混排挤占 5 条额度；
+    队满时通知注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。豁免后：
+    用户额度只数非通知类 pending 条目；通知类注入永不因满员被拒（走既有
+    ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_wakeup_entry_does_not_consume_user_quota(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """1 条通知 + 4 条用户消息（合计 5 行）时，第 5 条用户消息不被拒。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("通知", "t-q1"), queue_when_busy=True
+        )
+        for i in range(SESSION_QUEUE_MAX_PENDING - 1):
+            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+
+        result = await svc.inject_session(
+            session_id, uid, prompt="第5条用户消息", queue_when_busy=True
+        )
+
+        assert result.queued is True
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
+
+    @pytest.mark.asyncio
+    async def test_wakeup_inject_succeeds_when_queue_full(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """5 条用户消息队满后，通知注入不再抛 QueueFull（不再静默丢通知）。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        for i in range(SESSION_QUEUE_MAX_PENDING):
+            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+
+        result = await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("队满补通知", "t-q2"), queue_when_busy=True
+        )
+
+        assert result.queued is True
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
+
+    @pytest.mark.asyncio
+    async def test_user_quota_semantics_unchanged(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """豁免只作用于通知：用户消息额度仍是 5，第 6 条照旧拒（零回归）。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        for i in range(SESSION_QUEUE_MAX_PENDING):
+            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+        # 通知豁免入队成功（不占额度）……
+        await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("通知", "t-q3"), queue_when_busy=True
+        )
+        # ……但用户的第 6 条消息仍被拒（用户侧计数只数到 5）。
+        with pytest.raises(DaemonSessionQueueFull):
+            await svc.inject_session(session_id, uid, prompt="第6条用户消息", queue_when_busy=True)
+
+
 class TestRetrySuccessPath:
     @pytest.mark.asyncio
     async def test_retry_success_returns_snapshot_not_crash(

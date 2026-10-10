@@ -124,22 +124,33 @@ async def _handle_busy_turn(
                 "current_run_id": str(current.id),
             },
         )
-    pending_count = len(
+    # 2026-10-10-task-wakeup-quiet-threshold（FR-02）：[后台任务通知] 系统通知
+    # 豁免满员计数——用户额度只数非通知类 pending 条目（生产实证会话 0d6b2ba9：
+    # 通知在排队栏与用户消息混排挤占额度）；通知类注入自身也豁免拒绝（走下方
+    # ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）——旧口径队满时
+    # 注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。
+    is_task_wakeup_prompt = prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX)
+    pending_prompts = (
         (
             await svc._session.execute(
-                select(AgentSessionQueuedMessage.id).where(
+                select(AgentSessionQueuedMessage.prompt).where(
                     AgentSessionQueuedMessage.agent_session_id == session.id,
                     AgentSessionQueuedMessage.status == "pending",
                 )
             )
-        ).all()
+        )
+        .scalars()
+        .all()
     )
-    if pending_count >= SESSION_QUEUE_MAX_PENDING:
+    user_pending_count = sum(
+        1 for p in pending_prompts if not (p or "").startswith(TASK_WAKEUP_PROMPT_PREFIX)
+    )
+    if not is_task_wakeup_prompt and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
         raise DaemonSessionQueueFull(
             f"会话排队消息已达上限（{SESSION_QUEUE_MAX_PENDING} 条），请等当前本轮结束后再发送。",
             details={
                 "session_id": str(session_id),
-                "pending": pending_count,
+                "pending": user_pending_count,
             },
         )
     # ql-20260827-015：通知合并——同会话已有 pending 的「[后台任务通知]」
