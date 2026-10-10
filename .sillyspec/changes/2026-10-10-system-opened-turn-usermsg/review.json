@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "0653cad1037b694dc348c904c68b23dd3dbb8cd6",
+  "reviewedAt": "2026-10-10T15:45:35Z",
+  "findings": [
+    {
+      "id": "P3-1",
+      "severity": "P3",
+      "title": "page/dialog 两处 prompt 补写新鲜轮条件（内联 lambda）无直接单测覆盖",
+      "detail": "FR-02 要求 page 与 dialog 两模式 prompt 补写加新鲜轮条件：实现已逐字核到（session-panel-page.tsx:1258-1272、session-panel-dialog.tsx:592-607，均为 prompt 空 && 存在非 preamble 段则跳过写入），但绑定测试 steered-usermsg-guard.test.tsx 4 用例只覆盖共享函数 appendDeliveredUserMsgIfAbsent，未覆盖两处内联 lambda。该路径的正确性依赖管线调用顺序（appendDeliveredUserMsgIfAbsent 先追加 user_msg 段 → 补写 lambda 的 hasOutputSegs 因此为真 → 不写 prompt）——此耦合仅由代码阅读保证；若未来重排 onLog 管线中两步的先后，会出现 user_msg 段与 prompt 双显而无测试拦截。建议后续补组件级用例或将该谓词抽为可测导出。不影响本次验收：实现与 FR 文本逐条吻合且全量回归绿。",
+      "files": [
+        "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx"
+      ]
+    },
+    {
+      "id": "P3-2",
+      "severity": "P3",
+      "title": "罕见竞态窗口下实时/回放渲染形态不一致（设计已声明处理序口径的隐含面，建议补披露）",
+      "detail": "系统通知开轮后、首个输出段到达前（窗口通常毫秒级）：中途消息实时走新鲜轮路径写入 prompt（prompt 空 + 无输出段 → 写入，行为与改动前一致、时序正确）；但刷新后 logsToTurns 用占位组占槽，同一消息渲染为 user_msg 段——同一 run 实时/回放形态不一致（气泡从顶部移到段间）。非回归（改动前回放同样提升为 prompt，且两种渲染时序均正确），属 design「首条按处理序非严格 min(ts)」已声明口径的隐含面，但设计未点名此实时窗口。纯形态差异、极低频，建议在 design 已知残留处补一句披露。",
+      "files": [
+        "frontend/src/components/daemon/runtime-session-helpers.tsx",
+        "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+      ]
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "dimensionRationale": {
+    "乱序": "设计声明核实为真：回放开轮槽按 entries 处理序首条 user_input 判定（runtime-session-helpers.tsx:429-483 openerSlotSeen 循环，与到达顺序无关）；user_msg 段 ts 取 log timestamp 服务器时间（placeholder/user_msg 组 ts 均 Date.parse(entry.timestamp)，实时路径 appendDeliveredUserMsgIfAbsent 传 env.timestamp 解析值、缺失才回退 Date.now()），与代码一致。实时 resync 重放走同一 onLog 链路，重放序下通知剥空不写 prompt、输出累积、中途消息成段，与回放口径一致。残留（处理序非严格 min(ts)）已显式声明，且该序假设是 logsToTurns 全管线既有口径（分组迭代序、firstLogTimestampMs 同源），非本变更新引入。附 P3-2 竞态窗口注记。",
+    "并发": "设计答「不适用」核验成立：全部变更位于 setTurnState/setView 纯函数 updater 或无副作用导出函数内，无定时器/外部资源/共享可变面，React 单线程 reducer 链无并发写面。",
+    "切换": "设计答「安全」核验成立：改动均为 turns 数组纯变换，无跨会话持久化；换会话 turnState 整体重置的既有生命周期未受影响（全量 daemon 82 文件 1136 用例含会话切换类用例全绿）。",
+    "作用域": "设计答「不会串台」核验成立：占位组为 logsToTurns 每 run 循环内局部构造；run_id 匹配口径未动（steeredTurnIndexOf 与 page/dialog 的 runId/realRunId 双匹配 find 均在 diff 之外，逐字核对无改动）；后端/数据格式零改动（diff 仅前端 5 文件）。"
+  },
+  "frVerification": [
+    {
+      "fr": "FR-01",
+      "status": "兑现",
+      "evidence": "runtime-session-helpers.tsx:429-483：首条剥空 user_input 压入占位空组（withMarker/plain 均 null → prompts[0]=\"\" → turn.prompt 空、顶部无气泡）；后到真实消息进组 1+，promptGroups.slice(1) 转 user_msg 段（ts=服务器 log timestamp），insertUserMsgSegments 按 ts 插入装配段之间。第二条剥空行因 openerSlotSeen 已置位静默跳过，不重复占位。绑定测试「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」存在且断言该行为（prompt===\"\"、user_msg 文本、位置严格介于输出甲与输出乙之间），实测通过（vitest 41/41）。占位键碰撞不可达论证成立且比注释声明更强：占位组从不注册进 promptGroupIndex（注册仅发生在非空分支），即使假设真实正文恰为 \"\\u0000__opener__\" 也只会另立新组而非与占位组归并，无任何共享查找面；更实际层面 trim 后非空正文含 NUL 控制字符不可达。"
+    },
+    {
+      "fr": "FR-02",
+      "status": "兑现",
+      "evidence": "appendDeliveredUserMsgIfAbsent（session-panel-page.tsx:463-469）：守卫精确改为「!prompt.trim() && !hasOutputSegs 才返回」，hasOutputSegs 排除 preamble 段——与 FR 文本「prompt 为空且无输出段（preamble 不算输出）才返回」逐字对应。page 补写（1258-1272）与 dialog 补写（592-607）均加同款新鲜轮条件，且 mutate 回调在 appendDeliveredUserMsgIfAbsent 之后执行，追加的 user_msg 段自然使 hasOutputSegs 为真。绑定测试「prompt 空 + 已有输出段（系统通知开轮）：追加 delivered 段，不再前移轮首」存在且断言 prompt 保持空、段 phase=delivered、ts=传入值，实测通过。附 P3-1（两处内联 lambda 无直接单测）。"
+    },
+    {
+      "fr": "FR-03",
+      "status": "兑现",
+      "evidence": "正常轮：新用例「正常轮不受影响」断言真实开轮 prompt 保持、中途系统行不占槽、第二句成 user_msg 段——通过。通知唯一开轮：新用例「系统通知唯一开轮」断言 prompt 空、segments 无 user_msg 段（占位组被 slice(1) 排除，不产段）——通过。新鲜轮：绑定用例「prompt 空 + 无输出段（新鲜轮）：原样返回」断言原引用返回（零重渲）、无段——通过；新鲜轮 prompt 实际写入路径为既有行为且条件等价改写（改动前无条件写空 prompt，改动后空 prompt 且无输出段才写——新鲜收开轮正文时恒无输出段，等价）。回归实测：daemon 全目录 82 文件 1136 用例全绿 + tsc --noEmit exit 0（强于 tasks.md 自述的 5 文件 136/136）。"
+    }
+  ],
+  "disclosedBoundariesRuling": [
+    {
+      "boundary": "通知开轮 prompt 恒空属既有语义（纯前导剥空的真实用户开轮将无顶部气泡）",
+      "ruling": "可接受",
+      "reason": "核验为真：改动前通知唯一开轮的 prompt 同样为空（旧代码 if(!promptSource.trim()) continue 后无真实消息即空 prompt），本变更未新增任何「原本有气泡现在没有」的轮次形态；纯前导群聊注入开轮在旧代码下同样无气泡（次条真实消息会补位——但那恰是本变更修复的时序错位）。取舍已声明且与替代方案（后端 opener 列）一并评估。"
+    },
+    {
+      "boundary": "放弃方案「后端给 user_input 行加 opener 标记列」",
+      "ruling": "可接受",
+      "reason": "放弃理由核验成立：时间戳数据本就正确，首条+剥空两条件纯前端可判（实现即此），后端方案需表结构+迁移+双端联动，侵入面与收益不成比例。且纯前端方案已由 7 个新用例锁定，不依赖后端协作。"
+    },
+    {
+      "boundary": "首条判定按处理序而非严格 min(ts)",
+      "ruling": "可接受",
+      "reason": "「后端返回 run 块序内 ts 升序」是 logsToTurns 整条既有管线（run 分组迭代序、段装配序、firstLogTimestampMs）的共同前提，非本变更新引入的假设；理论乱序输入不在前后端契约内，已声明。附 P3-2：此口径的一个隐含面（实时消息先于首输出段到达的窗口）建议补点名，但不构成缺陷。"
+    }
+  ],
+  "generatedArtifactsSync": "无涉及：diff 仅前端 5 文件（3 源码 + 2 测试），无生成物/代码gen/后端契约产物，无需同步。",
+  "testEvidence": {
+    "boundFiles": "vitest run 两份绑定测试文件：2 passed / 41 tests passed（steered-usermsg-guard 4 + runtime-session-helpers 37）",
+    "regression": "vitest run src/components/daemon：82 文件 / 1136 用例全绿（2026-10-10T15:43Z 实测，强于自述回归簇 5 文件 136/136）",
+    "typecheck": "npx tsc --noEmit exit 0"
+  },
+  "workspaceState": "工作区前端与 HEAD 0653cad 一致（git status 仅 .sillyspec 工件 modified/untracked）；baseline f9ef55b..HEAD 前端 5 文件 +227/-19，与 change.patch 文件清单一一对应，三处源码改动逐字吻合。"
+}
