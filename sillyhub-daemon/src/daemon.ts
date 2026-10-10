@@ -3881,31 +3881,6 @@ export class Daemon {
     // ql-20260909-011：run 终态上报前冲掉该 lease 微批积压（不等微批窗），
     // 保证 turn 内事件先于终态到达 backend（逐事件直发时代由 await 串行保证）。
     await this.flushInteractiveBatches(state.leaseId);
-    // 2026-09-15-background-task-permission-lockout（FR-04）：本 run 收口时若会话
-    // 仍有存活后台任务，追加 [USAGE_NOTE] 标注行——SDK modelUsage/total_cost_usd 是
-    // 会话级累计快照差分，两次收口之间的后台任务消耗会计给本 run（总量正确、归属
-    // 误导，线上实证 19 秒小轮被记 $24.10）。仅日志标注，不改用量数值本身；
-    // 复用 [TASK_*] legacy flat 行协议（channel=stdout、type=task_output 同族），
-    // 经下方既有 onTurnMessage 通道随终态前到达 backend。压行失败仅 warn 不阻断
-    // 终态上报（标注是尽力而为的排障提示）。`?.` 防御：旧测试替身 / 部分注入的
-    // sessionManager 可能缺新方法——undefined → falsy → 不追加标注，安全降级。
-    if (this._sessionManager.hasLiveBackgroundTasks?.(sessionId)) {
-      try {
-        await this.onTurnMessage(sessionId, runId, {
-          type: 'task_output',
-          channel: 'stdout',
-          content:
-            '[USAGE_NOTE] 本轮上报用量含仍在运行的后台任务消耗（SDK 为会话级累计快照，无法按任务拆分）',
-          timestamp: new Date().toISOString(),
-        });
-      } catch (err) {
-        this._logger.warn('usage_note_line_failed', {
-          session_id: sessionId,
-          run_id: runId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
     // payload 字段映射（snake_case 对齐 backend InteractiveRunResultRequest）。
     // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
     // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
@@ -3984,6 +3959,18 @@ export class Daemon {
         costSnapshot >= costBase
           ? Math.round((costSnapshot - costBase) * 1e6) / 1e6
           : costSnapshot;
+    }
+    // 2026-10-10-usage-note-to-daemon-log：[USAGE_NOTE] 不再进会话消息流（有存活
+    // 后台任务的每轮收口都触发，用户侧纯噪音且无法量化归属），原 2026-09-15
+    // FR-04 排障意图降级为 daemon 结构化日志——本轮 cost 差分可能含后台任务消耗
+    // （SDK 会话级累计快照差分的归属误导，线上实证 19 秒小轮被记 $24.10），仅
+    // 日志留痕，不改用量数值本身。`?.` 防御旧测试替身缺新方法（undefined → 不记）。
+    if (this._sessionManager.hasLiveBackgroundTasks?.(sessionId)) {
+      this._logger.info('run_cost_may_include_bg_tasks', {
+        session_id: sessionId,
+        run_id: runId,
+        cost_delta_usd: payload.total_cost_usd ?? null,
+      });
     }
     if (typeof resultMeta.num_turns === 'number') {
       payload.num_turns = resultMeta.num_turns;
