@@ -1,0 +1,747 @@
+diff --git a/backend/app/modules/change/assets.py b/backend/app/modules/change/assets.py
+index ffe7d1745..e4131cdfc 100644
+--- a/backend/app/modules/change/assets.py
++++ b/backend/app/modules/change/assets.py
+@@ -57,9 +57,6 @@ log = get_logger(__name__)
+ # 上游格式演进时本层同步，D-001@v1 故障面；未知行一律跳过）。
+ _ENTRY_HEAD_RE = re.compile(r"^##\s+(FR-\S+|D-\d+@v\d+)\s+(.+)$")
+ _OWNER_LINE_RE = re.compile(r"^变更：(.+)$")
+-# 「待复核：<变更名>」归属行（flow done 对触达域 active 条目打标；知识触达
+-# 反查用——2026-09-26-change-asset-transparency，与「变更：」行同构）。
+-_REVIEW_MARK_RE = re.compile(r"^待复核：(.+)$")
+ _STATUS_LINE_RE = re.compile(r"^状态：(\S+)")
+ # git 块头（``diff --git a/<old> b/<new>``；两侧可被引号包裹——特殊字符路径形态）。
+ _PATCH_HEADER_RE = re.compile(r"^diff --git (?P<old>\"[^\"]*\"|\S+) (?P<new>\"[^\"]*\"|\S+)$")
+@@ -73,15 +70,13 @@ _PATCH_FILE_MAX_CHARS = 200_000
+ def _parse_entries_owned_by(
+     text: str,
+     change_key: str,
+-    *,
+-    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
+ ) -> list[tuple[str, str, str | None]]:
+-    """解析域文件条目（节头分条 + 归属行过滤，默认 ``变更：``）。
++    """解析域文件条目（节头分条 + ``变更：`` 归属行过滤）。
+ 
+     返回 ``(id, title, status)`` 三元组列表；status 行缺省 None（fr 条目
+     恒有、decisions 个别条目无——对齐 CLI 两文件的现实容差）。
+-    ``owner_line_re``（2026-09-26-change-asset-transparency）允许换归属行
+-    正则（知识触达反查用 ``待复核：`` 标记行）。
++    （2026-10-09-knowledge-touch-marker-sunset：``owner_line_re`` 换归属行
++    正则的参数已随「待复核」标记反查面一并拆除——CLI 侧标记落盘已退役。）
+     """
+     entries: list[tuple[str, str, str | None]] = []
+     cur_id: str | None = None
+@@ -100,7 +95,7 @@ def _parse_entries_owned_by(
+             continue
+         if cur_id is None:
+             continue
+-        owner = owner_line_re.match(line)
++        owner = _OWNER_LINE_RE.match(line)
+         if owner:
+             owned = owner.group(1).strip() == change_key
+             continue
+@@ -117,13 +112,8 @@ def _scan_domain_files(
+     spec_root: Path,
+     domain: str,
+     change_key: str,
+-    *,
+-    owner_line_re: re.Pattern[str] = _OWNER_LINE_RE,
+ ) -> list[tuple[str, str, str | None, str]]:
+-    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。
+-
+-    ``owner_line_re`` 透传（知识触达反查用 ``待复核：`` 标记）。
+-    """
++    """扫 ``spec_root/knowledge/<domain>/*.md``，返回归属条目 ``(id,title,status,rel_file)``。"""
+     out: list[tuple[str, str, str | None, str]] = []
+     domain_dir = spec_root / "knowledge" / domain
+     if not domain_dir.is_dir():
+@@ -134,9 +124,7 @@ def _scan_domain_files(
+         except OSError as exc:
+             log.warning("change.assets_read_domain_file_failed", file=str(md), error=str(exc))
+             continue
+-        for entry_id, title, status in _parse_entries_owned_by(
+-            text, change_key, owner_line_re=owner_line_re
+-        ):
++        for entry_id, title, status in _parse_entries_owned_by(text, change_key):
+             out.append((entry_id, title, status, md.relative_to(spec_root).as_posix()))
+     return out
+ 
+@@ -497,14 +485,15 @@ def _read_touched_modules(spec_root: Path, file_list: list[str]) -> list["Change
+ async def _live_touch_rows(
+     session: AsyncSession, workspace_id: uuid.UUID, change_key: str
+ ) -> list[tuple[str, str, str]]:
+-    """知识触达实时命中（2026-09-28-knowledge-touch-live）。
++    """知识触达命中（2026-09-28-knowledge-touch-live；2026-10-09 起唯一来源）。
+ 
+     ``knowledge_hits`` 表 inject 行的 ``matched_anchors``（``文件#锚`` / 裸文件
+-    两形态）展开去重——CLI 执行期逐任务写入、daemon 周期上行，变更在途即可见
+-    （此前只有 flow done 打的「待复核：」标记反查，归档前恒空）。返回
+-    ``(id, title, file)``：id/title 取锚 slug（裸文件取文件名），file 为知识库
+-    根相对路径（不带 knowledge/ 前缀——与标记反查行的 spec_root 相对路径在
+-    合并处归一同 key）。上限 100 条防载荷（实际单变更数十量级）。
++    两形态）展开去重——CLI 执行期逐任务写入、daemon 周期上行，变更在途即可见。
++    （2026-10-09-knowledge-touch-marker-sunset：原「待复核：」标记反查面已拆除
++    ——CLI 自 2026-09-29-rot-retire-inject-cap 起不再落盘标记，标记面恒空，
++    归档态与在途态同源同序。）返回 ``(id, title, file)``：id/title 取锚 slug
++    （裸文件取文件名），file 为知识库根相对路径（不带 knowledge/ 前缀）。
++    上限 100 条防载荷（实际单变更数十量级）。
+     """
+     from app.modules.knowledge.hits import KnowledgeHit  # 局部 import 防模块环
+ 
+@@ -552,38 +541,14 @@ class ChangeAssetsQueryService:
+         spec_root = await self._spec_root(workspace_id)
+         archived = change.location == "archive" or change.status == "archived"
+ 
+-        fr_rows, dec_rows, touch_rows, live_rows = await asyncio.gather(
++        fr_rows, dec_rows, live_rows = await asyncio.gather(
+             asyncio.to_thread(_scan_domain_files, spec_root, "fr", change.change_key),
+             asyncio.to_thread(_scan_domain_files, spec_root, "decisions", change.change_key),
+-            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：
+-            # 「待复核：」标记反查双域（fr + decisions 同构一轮）——归档后复核口径。
+-            asyncio.to_thread(
+-                lambda: [
+-                    row
+-                    for domain in ("fr", "decisions")
+-                    for row in _scan_domain_files(
+-                        spec_root, domain, change.change_key, owner_line_re=_REVIEW_MARK_RE
+-                    )
+-                ]
+-            ),
+-            # 实时命中（2026-09-28-knowledge-touch-live）：knowledge_hits inject 行
+-            # 在途即有——与标记反查合并，标记行在前（复核权威），实时补差去重。
++            # 知识触达（2026-09-26-change-asset-transparency / FR-01）：knowledge_hits
++            # inject 遥测行展开去重——在途/归档同源（2026-10-09-knowledge-touch-
++            # marker-sunset：待复核标记反查面拆除，CLI 已退役标记落盘）。
+             _live_touch_rows(self._session, workspace_id, change.change_key),
+         )
+-        touch_merged: list[ChangeKnowledgeTouch] = []
+-        seen_touch: set[tuple[str, str]] = set()
+-
+-        def _merge_touch(entry_id: str, title: str, file: str) -> None:
+-            key = (file.removeprefix("knowledge/"), entry_id)
+-            if key in seen_touch:
+-                return
+-            seen_touch.add(key)
+-            touch_merged.append(ChangeKnowledgeTouch(id=entry_id, title=title, file=file))
+-
+-        for i, t, _s, f in touch_rows:
+-            _merge_touch(i, t, f)
+-        for i, t, f in live_rows:
+-            _merge_touch(i, t, f)
+         result = ChangeAssetsRead(
+             change_key=change.change_key,
+             archived=archived,
+@@ -591,7 +556,7 @@ class ChangeAssetsQueryService:
+             decisions=[
+                 ChangeDecisionEntry(id=i, title=t, status=s, file=f) for i, t, s, f in dec_rows
+             ],
+-            knowledge_touch=touch_merged,
++            knowledge_touch=[ChangeKnowledgeTouch(id=i, title=t, file=f) for i, t, f in live_rows],
+         )
+         if not archived:
+             # 在途变更：目录件尚不存在，跳过读取（design R-03）。
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 7668f7bff..63df2fb86 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -830,9 +830,10 @@ class ChangeDecisionEntry(BaseModel):
+ class ChangeKnowledgeTouch(BaseModel):
+     """知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+ 
+-    本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+-    （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+-    不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
++    本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
++    的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
++    定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
++    落盘，标记反查面拆除，此即唯一来源与口径）。
+     """
+ 
+     id: str
+diff --git a/backend/app/modules/change/tests/test_assets.py b/backend/app/modules/change/tests/test_assets.py
+index 2c7d25ca3..ccb30b796 100644
+--- a/backend/app/modules/change/tests/test_assets.py
++++ b/backend/app/modules/change/tests/test_assets.py
+@@ -133,15 +133,11 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
+     dec_dir.mkdir(parents=True)
+     (fr_dir / "auto-test.md").write_text(
+         f"# FR\n\n## FR-auto-test-001 金样本条目\n变更：{KEY}\n状态：active\n全文：x#FR-01\n\n"
+-        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n\n"
+-        # 知识触达（2026-09-26-change-asset-transparency）：他属条目带本变更
+-        # 待复核标记 → knowledge_touch 收录（与「变更：」归属正交）。
+-        f"## FR-auto-test-003 注入命中\n待复核：{KEY}\n状态：active\n",
++        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n",
+         encoding="utf-8",
+     )
+     (dec_dir / "backend.md").write_text(
+-        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n\n"
+-        f"## D-002@v1 注入命中决策\n待复核：{KEY}\n理由：r\n",
++        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n",
+         encoding="utf-8",
+     )
+     # 模块图 + 模块 doc（模块触达面）：change 模块命中交付文件、core 不命中；
+@@ -226,11 +222,9 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
+         == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
+         " （共享前置：seed 镜像三件）"
+     )
+-    # 知识触达（2026-09-26-change-asset-transparency）：待复核标记反查双域。
+-    assert [(t.id, t.file) for t in result.knowledge_touch] == [
+-        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
+-        ("D-002@v1", "knowledge/decisions/backend.md"),
+-    ]
++    # 知识触达（2026-10-09-knowledge-touch-marker-sunset）：唯一来源是 inject
++    # 遥测——本用例未播种 knowledge_hits 行 → 恒空（标记反查面已拆除）。
++    assert result.knowledge_touch == []
+     assert result.touched_modules == []  # 无 change-patch.json → file_list 空
+     assert result.patch is None  # 无 change-patch.json → 容错 None
+     assert result.delta is not None
+@@ -784,16 +778,20 @@ def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
+     ]
+ 
+ 
+-def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
+-    """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
+-    from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files
++def test_knowledge_touch_scan_ignores_review_marks(tmp_path: Path) -> None:
++    """纯函数：域文件含「待复核：」行也只按「变更：」归属过滤（标记面已拆除）。"""
++    from app.modules.change.assets import _scan_domain_files
+ 
+     fr_dir = tmp_path / "knowledge" / "fr"
+     fr_dir.mkdir(parents=True)
+-    (fr_dir / "x.md").write_text("## FR-x-001 条目\n变更：someone\n", encoding="utf-8")
+-    assert (
+-        _scan_domain_files(tmp_path, "fr", "2026-09-26-none", owner_line_re=_REVIEW_MARK_RE) == []
++    (fr_dir / "x.md").write_text(
++        "## FR-x-001 条目\n待复核：2026-09-26-none\n变更：someone\n",
++        encoding="utf-8",
+     )
++    assert _scan_domain_files(tmp_path, "fr", "2026-09-26-none") == []
++    assert _scan_domain_files(tmp_path, "fr", "someone") == [
++        ("FR-x-001", "条目", None, "knowledge/fr/x.md")
++    ]
+ 
+ 
+ # ===========================================================================
+@@ -810,14 +808,6 @@ async def test_live_touch_hits_inflight(db_session, tmp_path: Path) -> None:
+ 
+     spec_root = tmp_path / "spec-root"
+     _seed_mirror(spec_root)
+-    # 在途真实形态：标记是 flow done 落的——归档前知识文件里没有「待复核：」行
+-    # （扫描本身不看归档态；剥离后模拟在途库状态）。
+-    for md in (
+-        spec_root / "knowledge" / "fr" / "auto-test.md",
+-        spec_root / "knowledge" / "decisions" / "backend.md",
+-    ):
+-        stripped = md.read_text(encoding="utf-8").replace("待复核：" + KEY + chr(10), "")
+-        md.write_text(stripped, encoding="utf-8")
+     ws = await _make_ws_spec(db_session, spec_root)
+     change = await _make_change(db_session, ws, archived=False)
+     db_session.add_all(
+@@ -871,15 +861,25 @@ async def test_live_touch_hits_inflight(db_session, tmp_path: Path) -> None:
+     ]
+ 
+ 
+-async def test_live_touch_merges_with_markers_dedupe(db_session, tmp_path: Path) -> None:
+-    """归档态：标记反查行在前（复核权威），实时命中补差；同 (file,id) 归一去重。"""
++async def test_live_touch_archived_ignores_review_marks(db_session, tmp_path: Path) -> None:
++    """归档态：触达面与在途同源（仅 inject 遥测行）；域文件残留「待复核：」行被无视。
++
++    2026-10-09-knowledge-touch-marker-sunset：标记反查面拆除——归档态不再有
++    标记∪实时合并路径，标记行即使在场（存量知识文件残留）也不进触达面。
++    """
+     from app.modules.knowledge.hits import KnowledgeHit
+ 
+     spec_root = tmp_path / "spec-root"
+     _seed_mirror(spec_root)
++    # 存量残留形态：知识文件里留着 flow done 时代的「待复核：」行。
++    fr_md = spec_root / "knowledge" / "fr" / "auto-test.md"
++    fr_md.write_text(
++        fr_md.read_text(encoding="utf-8")
++        + f"\n## FR-auto-test-003 存量标记条目\n待复核：{KEY}\n状态：active\n",
++        encoding="utf-8",
++    )
+     ws = await _make_ws_spec(db_session, spec_root)
+     change = await _make_change(db_session, ws, archived=True)
+-    # live 锚与标记行同条目（fr/auto-test.md#FR-auto-test-003，前缀形态不同）+ 一条新命中
+     db_session.add(
+         KnowledgeHit(
+             workspace_id=ws.id,
+@@ -893,8 +893,9 @@ async def test_live_touch_merges_with_markers_dedupe(db_session, tmp_path: Path)
+     await db_session.commit()
+ 
+     result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
++    # live 行的 FR-auto-test-003 锚照收（来源是遥测而非标记行）；存量标记行
++    # 本身不再额外产生任何条目；跨行 (file, ident) 去重语义保留。
+     assert [(t.id, t.file) for t in result.knowledge_touch] == [
+-        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
+-        ("D-002@v1", "knowledge/decisions/backend.md"),
++        ("FR-auto-test-003", "fr/auto-test.md"),
+         ("陷阱条目", "testing-gotchas.md"),
+     ]
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 0f21fa866..8fc14b32d 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -40049,7 +40049,7 @@
+           "file"
+         ],
+         "title": "ChangeKnowledgeTouch",
+-        "description": "知识触达条目（2026-09-26-change-asset-transparency / FR-01）。\n\n本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查\n（flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准\n不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。"
++        "description": "知识触达条目（2026-09-26-change-asset-transparency / FR-01）。\n\n本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行\n的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后\n定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记\n落盘，标记反查面拆除，此即唯一来源与口径）。"
+       },
+       "ChangeList": {
+         "properties": {
+diff --git a/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md b/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
+index 1ed520d85..08175d900 100644
+--- a/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
++++ b/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
+@@ -16,7 +16,7 @@
+ ## 影响面与存量数据
+ 
+ - 生效前所有新 fourpiece 骨架的 `created_at` 均为 UTC；存量变更（含 2026-10-09-workspace-init-skill-gate）时间线 born 锚持续显示偏移值——历史工件不改写（变更事实以 watcher 事件流为准），接受旧值。
+-- 附带发现（未修，另一显示路径）：sillyspec 仓 `src/module-impact.js:158` 用 `toISOString().slice(0,19) + '+08:00'`——UTC 数字拼 +08:00 偏移后缀，解析瞬间错 16h，待单独变更处理。
++- 附带发现（已修于 sillyspec 仓 `2026-10-09-module-card-updated-at-iso`，同样待发版）：`src/module-impact.js:158` 用 `toISOString().slice(0,19) + '+08:00'`——UTC 数字拼 +08:00 偏移后缀，解析瞬间恒早 8h（机器无关），已改全量 `toISOString()`。
+ 
+ ## 关联
+ 
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index f90e3ebf7..a51c73e76 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -512,7 +512,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
+   });
+ 
+-  it("知识触达组：待复核条目渲染并带知识库 file+anchor 深链 href", async () => {
++  it("知识触达组：统一文案（在途/归档同口径）并带知识库 file+anchor 深链 href", async () => {
++    // 2026-10-09-knowledge-touch-marker-sunset：标题不再分裂归档/实时双口径，
++    // 悬停说明注入命中留痕口径；禁止「待复核」「以标记为准」字样。
+     mockGet.mockResolvedValue({
+       ...FULL,
+       knowledge_touch: [
+@@ -527,23 +529,26 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+-    // 标题用用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。
+-    expect(group).toHaveTextContent("知识触达（本变更参考过的知识）");
+-    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
+-      "标记反查",
+-    );
++    expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
++    const tooltip = group.querySelector("span[title]")?.getAttribute("title") ?? "";
++    expect(tooltip).toContain("注入");
++    expect(tooltip).not.toContain("待复核");
++    expect(tooltip).not.toContain("以标记为准");
++    // id≠title 的锚点条目：双栏各显示一份，挂在文件组头下。
+     expect(group).toHaveTextContent("FR-auto-backend-015");
+     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
+-    const link = group.querySelector("a");
++    const link = group.querySelector(
++      '[data-testid="change-assets-touch-group-knowledge/fr/auto-backend.md"] a[href*="anchor="]',
++    );
+     expect(link).not.toBeNull();
+     expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+       "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
+     );
+   });
+ 
+-  it("在途变更知识触达：实时命中渲染（标题带「实时」尾标区分归档定稿口径）", async () => {
+-    // 2026-09-28-knowledge-touch-live：在途（archived=false）也能有触达——数据来自
+-    // knowledge_hits inject 行（后端合并），标题尾标「实时」提示记录仍在增长。
++  it("在途变更知识触达：同 slug 只显示一份（id==title 不连排两遍）", async () => {
++    // 2026-09-28-knowledge-touch-live 起在途即有触达（knowledge_hits inject 行）；
++    // 2026-10-09-knowledge-touch-marker-sunset：live 行 id==title——单份渲染。
+     mockGet.mockResolvedValue({
+       ...FULL,
+       archived: false,
+@@ -555,13 +560,14 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+-    expect(group).toHaveTextContent("知识触达（本变更参考过的知识 · 实时）");
+-    expect(group.querySelector("span[title]")?.getAttribute("title")).toContain(
+-      "实时记录",
++    // 在途与归档同文案（无「· 实时」尾标分裂）。
++    expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
++    // slug 恰好出现一次（改前 id+title 双栏连排两遍）。
++    expect((group.textContent?.match(/-audit_hooks-只在测试/g) ?? []).length).toBe(1);
++    // 锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
++    const link = group.querySelector(
++      '[data-testid="change-assets-touch-group-known-issues.md"] a[href*="anchor="]',
+     );
+-    expect(group).toHaveTextContent("-audit_hooks-只在测试");
+-    // 实时锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
+-    const link = group.querySelector("a");
+     expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+       "file=known-issues.md&anchor=-audit_hooks-",
+     );
+@@ -569,6 +575,38 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     expect(screen.queryByTestId("change-assets-inflight")).toBeNull();
+   });
+ 
++  it("知识触达分组：整文件路由收拢 chip（链接无 anchor），锚点条目按文件分组", async () => {
++    mockGet.mockResolvedValue({
++      ...FULL,
++      knowledge_touch: [
++        { id: "fr/daemon.md", title: "fr/daemon.md", file: "fr/daemon.md" },
++        { id: "slug-a", title: "slug-a", file: "conventions.md" },
++        { id: "slug-b", title: "slug-b", file: "conventions.md" },
++        { id: "slug-c", title: "slug-c", file: "patterns.md" },
++      ],
++    });
++    renderCard();
++    await screen.findByRole("button", { name: /沉淀资产/ });
++
++    const group = await screen.findByTestId("change-assets-knowledge-touch");
++    expect(group).toHaveTextContent("整文件");
++    // 整文件 chip：href 只带 file 不带 anchor（jsdom 选择器引擎不吃 %2F 编码值，
++    // 按 title 锚定元素再验 href）。
++    const chip = group.querySelector("a[title*='整文件路由注入']");
++    expect(chip).not.toBeNull();
++    expect(chip!.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
++    expect(chip!.getAttribute("href")).not.toContain("anchor=");
++    // 锚点条目按文件分组：组头计数 + 组内 slug。
++    const g1 = screen.getByTestId("change-assets-touch-group-conventions.md");
++    expect(g1).toHaveTextContent("conventions.md（2）");
++    expect(g1).toHaveTextContent("slug-a");
++    expect(g1).toHaveTextContent("slug-b");
++    const g2 = screen.getByTestId("change-assets-touch-group-patterns.md");
++    expect(g2).toHaveTextContent("slug-c");
++    // 计数含整文件与锚点条目共 4 条。
++    expect(group).toHaveTextContent("4 条");
++  });
++
+   it("模块触达组：chip 渲染中文名，点击打开模块文档预览弹窗（.sillyspec 前缀）", async () => {
+     mockGet.mockResolvedValue({
+       ...FULL,
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 3e40f3f0c..83156d011 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -157,9 +157,22 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+   const decCount = data?.decisions?.length ?? 0;
+   const rowCount = data?.test_rows?.length ?? 0;
+   const hasAudit = Boolean(data?.patch || data?.delta);
+-  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（待复核标记
+-  // 反查）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
++  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（执行期
++  // inject 遥测命中，在途/归档同源——2026-10-09-knowledge-touch-marker-sunset
++  // 统一口径）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
+   const touchList = data?.knowledge_touch ?? [];
++  // 触达分形（2026-10-09-knowledge-touch-marker-sunset）：整文件路由（id==file
++  // 裸条目）收拢为 chip 行；锚点条目按文件分组——48 行平铺噪声的主要来源。
++  const touchFileChips = touchList.filter((e) => !e.id || e.id === e.file);
++  const touchByFile = new Map<string, typeof touchList>();
++  for (const e of touchList) {
++    if (!e.id || e.id === e.file) continue;
++    const key = e.file ?? "";
++    const bucket = touchByFile.get(key);
++    if (bucket) bucket.push(e);
++    else touchByFile.set(key, [e]);
++  }
++  const touchGroups = [...touchByFile.entries()];
+   const moduleList = data?.touched_modules ?? [];
+   const total =
+     frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
+@@ -270,42 +283,77 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+             </div>
+           ) : null}
+ 
+-          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
+-              注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
+-              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。标题用
+-              用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。 */}
++          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01；2026-10-09-
++              knowledge-touch-marker-sunset 口径统一）：本变更执行期 CLI 知识注入
++              命中的知识库条目（knowledge_hits inject 遥测），在途/归档同源同文案
++              （在途随执行增长、归档后定格）。整文件路由收拢 chip 行、锚点条目按
++              文件分组；行点击跳知识库深链。 */}
+           {touchList.length > 0 ? (
+             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+-                <span
+-                  title={
+-                    data?.archived
+-                      ? "按知识条目内「待复核：<变更名>」标记反查，并与执行期注入命中合并去重；覆盖以标记为准"
+-                      : "执行期知识注入命中的实时记录；变更收尾后以条目内「待复核」标记为权威口径"
+-                  }
+-                >
+-                  {data?.archived
+-                    ? "知识触达（本变更参考过的知识）"
+-                    : "知识触达（本变更参考过的知识 · 实时）"}
++                <span title="本变更执行期 CLI 知识注入的命中留痕：在途变更随执行增长，归档后定格（唯一口径——注入命中即留痕，不另设标记复核面）">
++                  知识触达（本变更注入命中的知识）
+                 </span>
+                 <span className="text-[10px] text-muted-foreground/70">
+                   {touchList.length} 条
+                 </span>
+               </div>
+               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+-              {touchList.map((e) => (
+-                <Link
+-                  key={`${e.file}#${e.id}`}
+-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+-                    e.file ?? "",
+-                  )}&anchor=${encodeURIComponent(e.id ?? "")}`}
+-                  title={`打开知识库并定位到 ${e.id}`}
+-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+-                >
+-                  <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
+-                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
+-                </Link>
+-              ))}
++                {touchFileChips.length > 0 ? (
++                  <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
++                    <span className="text-[10px] text-muted-foreground/70">整文件</span>
++                    {touchFileChips.map((e) => (
++                      <Link
++                        key={`chip-${e.file}`}
++                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                          e.file ?? "",
++                        )}`}
++                        title={`打开知识库文件 ${e.file}（整文件路由注入）`}
++                        className="rounded-full border border-border/60 bg-muted/40 px-1.5 py-px font-mono text-[10px] hover:border-brand-300 hover:bg-brand-50/60"
++                      >
++                        {e.file}
++                      </Link>
++                    ))}
++                  </div>
++                ) : null}
++                {touchGroups.map(([file, entries]) => (
++                  <div
++                    key={file}
++                    data-testid={`change-assets-touch-group-${file}`}
++                    className="border-b border-dashed py-1 last:border-b-0"
++                  >
++                    <Link
++                      href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(file)}`}
++                      title={`打开知识库文件 ${file}`}
++                      className="font-mono text-[10px] text-muted-foreground hover:underline"
++                    >
++                      {file}
++                      <span className="ml-1 font-sans text-[9px] text-muted-foreground/70">
++                        （{entries.length}）
++                      </span>
++                    </Link>
++                    {entries.map((e) => (
++                      <Link
++                        key={`${e.file}#${e.id}`}
++                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                          e.file ?? "",
++                        )}&anchor=${encodeURIComponent(e.id ?? "")}`}
++                        title={`打开知识库并定位到 ${e.id}`}
++                        className="flex items-baseline gap-2 py-0.5 pl-2 text-xs hover:underline"
++                      >
++                        {/* 同 slug 只显示一份（2026-10-09：live 行 id==title，双栏连排两遍是噪声） */}
++                        {e.id === e.title ? (
++                          <span className="min-w-0 flex-1 truncate">{e.title}</span>
++                        ) : (
++                          <>
++                            <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
++                            <span className="min-w-0 flex-1 truncate">{e.title}</span>
++                          </>
++                        )}
++                      </Link>
++                    ))}
++                  </div>
++                ))}
+               </div>
+             </div>
+           ) : null}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 1affd61f7..e0d5049f9 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13907,9 +13907,10 @@ export interface components {
+          * ChangeKnowledgeTouch
+          * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
+          *
+-         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
+-         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
+-         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
++         *     本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
++         *     的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
++         *     定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
++         *     落盘，标记反查面拆除，此即唯一来源与口径）。
+          */
+         ChangeKnowledgeTouch: {
+             /** Id */
+diff --git a/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/design.md b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/design.md
+new file mode 100644
+index 000000000..41b5d2cb3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/design.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:12:25.717Z
++---
++# 设计记录（Design Record）— 2026-10-09-knowledge-touch-marker-sunset
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++CLI 自 2026-09-29-rot-retire-inject-cap 起不再落盘「待复核」标记（371 条零消费实证，持久化已拆），平台侧 change assets 聚合的标记反查面恒空成为死面——归档前后触达列表恒等（实测 48→48），归档态文案「以标记为准」失真。本变更：backend 摘除 `_REVIEW_MARK_RE` 标记反查与 `owner_line_re` 死参数，knowledge_touch 单一来源 = `_live_touch_rows`（knowledge_hits inject 遥测）；frontend 统一文案为「注入命中留痕」口径并修渲染（同 slug 的 id/title 只显示一个、整文件路由收拢 chip 行、锚点条目按文件分组）。
++
++不选「恢复 CLI 标记落盘」（被零消费实证否决的旧路）也不选「新建权威收窄面」（无真实消费者，重蹈覆辙风险高）；展示层修复低风险且直接解决噪声投诉。若未来要「受影响 FR」窄视图，应消费既有 fr-rot-suspect 遥测（自带条目级 frIds），不属本变更。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- API 响应形状不变：`ChangeKnowledgeTouch`（id/title/file 三字段）结构不动；仅 schema docstring 措辞更新 → openapi.json description 变化 → 按仓规 `pnpm gen:types` 重生成并提交 openapi.json + api-types.ts（类型结构无变化，gen:types:check 零漂移）。
++- `assets.py` 私有纯函数 `_parse_entries_owned_by`/`_scan_domain_files` 删除 `owner_line_re` 可选参（grep 核实无外部消费方，仅本模块与自身测试引用）；默认 `变更：` 归属语义逐字保留。
++- `get_change_assets`：gather 从四路减为三路（fr 扫描 / decisions 扫描 / live 触达），`_merge_touch` 合并与 `seen_touch` 去重集合删除（live 行内部已按 (file, ident) 去重并帽 100）。
++- 前端组件无 props/取数变化，纯渲染段重写；data-testid `change-assets-knowledge-touch` 保留，新增组级 testid `change-assets-touch-group-<file>`。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立。live 行按 occurred_at 排序、matched_anchors 首见序展开去重；daemon 周期上行迟到的新行只追加新锚点，不依赖标记面，无乱序假设需要成立。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   聚合纯只读（SELECT knowledge_hits + 读镜像文件），无写面；knowledge_hits 的幂等上行（行 sha256 唯一约束）是既有机制，不动。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全。在途→归档只是 Change.location/status 翻转，触达面持续可查；归档后 CLI 不再产生新 inject 行，列表自然定格——文案如实陈述该生命周期。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会。查询按 workspace_id + change_name 过滤（既有约束保留）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：归档态语义预期错位——用户若期待「归档后收窄为权威面」，本变更是明示不收窄（文案诚实化对冲：口径写清是注入命中留痕）。放弃的方案：① 恢复 CLI 待复核标记落盘（2026-09-29 已实证否决，反向开倒车）；② 平台按域收窄 live 数据面（改的是数据口径，会连带影响 knowledge-stats 运营指标消费，超出本变更范围且无消费者支撑）。
++
++## 文件变更清单
++
++- backend/app/modules/change/assets.py —— 摘除标记反查面与 owner_line_re 死参数，knowledge_touch 单一来源 _live_touch_rows
++- backend/app/modules/change/schema.py —— ChangeKnowledgeTouch docstring 口径措辞更新
++- backend/app/modules/change/tests/test_assets.py —— 标记反查用例改写为标记无视/同源断言
++- backend/openapi.json —— schema 描述变更再生成（pnpm gen:types）
++- frontend/src/lib/api-types.ts —— 同上再生成，类型结构零变化
++- frontend/src/components/changes/detail/change-assets-card.tsx —— 统一文案 + 分组渲染（chip/按文件分组/同 slug 单份）
++- frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx —— 触达用例更新与分组用例新增
++
+diff --git a/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/requirements.md b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/requirements.md
+new file mode 100644
+index 000000000..2c51796b1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/requirements.md
+@@ -0,0 +1,58 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:12:25.717Z
++---
++# 需求规格（Requirements）— 2026-10-09-knowledge-touch-marker-sunset
++
++## 功能需求
++
++### FR-01: backend change assets 聚合摘除「待复核」标记反查面，knowledge_touch 单一来源为 knowledge_hits inject 实时命中
++
++- 必须删除 `_REVIEW_MARK_RE` 常量与 `_scan_domain_files`/`_parse_entries_owned_by` 的 `owner_line_re` 可选参数（该参数只为标记反查而设，死面不留）；`get_change_assets` 的 knowledge_touch 必须**仅**来自 `_live_touch_rows`（knowledge_hits 表 type=inject 行的 matched_anchors 展开去重）；API 响应形状（`ChangeKnowledgeTouch` 的 id/title/file 三字段）不变。`ChangeKnowledgeTouch` 的 schema docstring 必须改为注入命中留痕口径（原「标记反查、以标记为准」措辞已失真），并按仓规重生成 openapi.json + api-types.ts。
++
++#### 场景：标记行不再进触达面
++
++Given 域文件存在「待复核：<变更名>」行且库中无该变更的 inject 行 / When 聚合 / Then knowledge_touch == []（标记行被无视）。
++
++#### 场景：归档态与在途同源
++
++Given 变更已归档且库中有 inject 行 / When 聚合 / Then 触达面内容与在途态同源同序（无归档特化合并路径）。
++
++#### 场景：归属解析不受影响
++
++Given 域文件含「变更：<change_key>」归属行 / When 聚合 / Then fr_entries/decisions 归属条目解析行为与改前逐字一致（owner_line_re 删参不触碰默认 `变更：` 语义）。
++
++### FR-02: 前端知识触达标题与悬停文案统一为注入命中留痕口径
++
++- 知识触达组标题必须恒为「知识触达（本变更注入命中的知识）」（在途/归档同一文案，不再有「· 实时」尾标分裂）；悬停提示必须说明口径为执行期 CLI 知识注入命中留痕（在途期间随执行增长、归档后定格），禁止出现「待复核」「以标记为准」字样。
++
++#### 场景：在途与归档同文案
++
++Given knowledge_touch 非空 / When 分别以 archived=true 与 archived=false 渲染 / Then 两次标题与悬停文案一致。
++
++### FR-03: 触达条目渲染去重与分组收拢
++
++- id 与 title 同值时必须只渲染一份文本（不得出现同一 slug 连排两遍）；整文件路由条目（id==file 的裸文件形态）必须收拢为「整文件」chip 行（链接只带 file 参数不带 anchor）；锚点条目必须按 file 分组渲染（组头为文件链接，组内条目只显示锚点 slug），不得 48 行平铺混排。
++
++#### 场景：同 slug 去重
++
++Given 条目 id==title==slug / When 渲染 / Then 该 slug 在组内文本中恰好出现一次。
++
++#### 场景：整文件与锚点分形
++
++Given 同组数据含裸文件条目（fr/daemon.md）与锚点条目（known-issues.md#slug）/ When 渲染 / Then 裸文件以 chip 呈现且 href 无 anchor 参数，锚点条目挂在各自文件组头下。
++
++### FR-04: 相关测试更新并通过（仅跑相关，不全量）
++
++- 必须通过 backend `uv run pytest app/modules/change/tests/test_assets.py` 与 frontend 卡片测试 `change-assets-card.test.tsx`；schema 描述变更必须随 `pnpm gen:types` 重生成 openapi.json + api-types.ts 且无漂移；禁止跑全量测试（全量留给 CI）。
++
++#### 场景：主路径
++
++Given 改动落盘 / When 跑上述两组定向测试 / Then 全绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/change/tests/test_assets.py「金样本聚合 + live 触达标记忽略」用例
++FR-02: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达统一文案」用例
++FR-03: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「同 slug 去重与整文件分组」用例
++FR-04: 不适用：FR-04 即测试任务本身，由 FR-01~03 绑定行覆盖（另含 gen:types 漂移检查）
+diff --git a/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/tasks.md b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/tasks.md
+new file mode 100644
+index 000000000..2906e5e99
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:12:25.717Z
++---
++# 任务注册表（Tasks）— 2026-10-09-knowledge-touch-marker-sunset
++
++- [x] task-01: backend：change assets 聚合不再扫「待复核」标记（_REVIEW_MARK_RE 与 owner_line_re 分支删除），knowledge_touch 单一来源为 knowledge_hits inject 实时命中，API 响应形状不变
++- [x] task-02: frontend：知识触达标题与悬停文案不再宣称归档态以标记为准的双口径，统一为注入命中留痕口径
++- [x] task-03: frontend：同 slug 的 id 与 title 只显示一个；裸文件整文件路由条目按文件分组收拢，不再与锚点条目混排平铺
++- [x] task-04: 测试：backend change assets 相关测试与 frontend 卡片测试更新并通过（仅跑相关测试，不全量）
+diff --git a/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/proposal.md b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-knowledge-touch-marker-sunset/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:12:25.717Z
++---
++# 提案书（Proposal）— 2026-10-09-knowledge-touch-marker-sunset
++
++## 动机
++
++任务原话转写：知识触达面板归档态仍按「待复核」标记反查并宣称以标记为准，但 CLI 自 2026-09-29-rot-retire-inject-cap 起已退役标记落盘（371 条零消费实证），标记面恒空——归档前后列表恒等（实测 48→48）文案失真；且渲染层 id/title 同 slug 连排两遍、锚点条目与整文件域路由 48 行平铺噪声大。
++
++成功标准：
++- backend：change assets 聚合不再扫「待复核」标记（_REVIEW_MARK_RE 与 owner_line_re 分支删除），knowledge_touch 单一来源为 knowledge_hits inject 实时命中，API 响应形状不变
++- frontend：知识触达标题与悬停文案不再宣称归档态以标记为准的双口径，统一为注入命中留痕口径
++- frontend：同 slug 的 id 与 title 只显示一个；裸文件整文件路由条目按文件分组收拢，不再与锚点条目混排平铺
++- 测试：backend change assets 相关测试与 frontend 卡片测试更新并通过（仅跑相关测试，不全量）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. backend：change assets 聚合不再扫「待复核」标记（_REVIEW_MARK_RE 与 owner_line_re 分支删除），knowledge_touch 单一来源为 knowledge_hits inject 实时命中，API 响应形状不变
++2. frontend：知识触达标题与悬停文案不再宣称归档态以标记为准的双口径，统一为注入命中留痕口径
++3. frontend：同 slug 的 id 与 title 只显示一个；裸文件整文件路由条目按文件分组收拢，不再与锚点条目混排平铺
++4. 测试：backend change assets 相关测试与 frontend 卡片测试更新并通过（仅跑相关测试，不全量）
++
++## 成功标准（可验证）
++
++1. backend：change assets 聚合不再扫「待复核」标记（_REVIEW_MARK_RE 与 owner_line_re 分支删除），knowledge_touch 单一来源为 knowledge_hits inject 实时命中，API 响应形状不变
++2. frontend：知识触达标题与悬停文案不再宣称归档态以标记为准的双口径，统一为注入命中留痕口径
++3. frontend：同 slug 的 id 与 title 只显示一个；裸文件整文件路由条目按文件分组收拢，不再与锚点条目混排平铺
++4. 测试：backend change assets 相关测试与 frontend 卡片测试更新并通过（仅跑相关测试，不全量）

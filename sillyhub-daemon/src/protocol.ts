@@ -268,6 +268,25 @@ export const MSG = {
    * 逐字对齐。
    */
   SILLYSPEC_GHOST_CLEANUP: 'daemon:sillyspec_ghost_cleanup',
+
+  /**
+   * Server → Daemon：墓碑收敛指令（2026-10-09-tombstone-conflict-root-fix FR-03）。
+   *
+   * 平台删除变更（delete_change 收敛环，终 commit 后）或前端墓碑行「收敛本机
+   * 目录」按钮 → backend ws_hub.send_sillyspec_tombstone_cleanup 推送本消息。
+   * daemon 收到后把本机变更目录（活跃区 changes/<名>/，不在则归档区
+   * changes/archive/<名>/）移入 .sillyspec/.runtime/tombstone-quarantine/
+   * 隔离区（移动不删除，同步树外不进 git）并跑 doctor --cleanup-ghosts
+   * --confirm 归档进度库行。payload: SillySpecTombstoneCleanupPayload
+   * （change + workspace_id——按工作区映射取根，不回退单槽位）。
+   *
+   * 机器级直连 + fire-and-forget，结果经心跳 sillyspec_command_result
+   * （action='tombstone_cleanup'）回传——收敛闭环走既有全绿关闭路径（目录
+   * 隔离后下一轮同步不再撞墓碑 → 全绿 → 注册表开放行自动 resolved）。
+   * 与 backend DAEMON_MSG_SILLYSPEC_TOMBSTONE_CLEANUP 逐字对齐；旧 daemon
+   * 走 default 仅 warn（静默忽略，前端 150s 回显超时兜底）。
+   */
+  SILLYSPEC_TOMBSTONE_CLEANUP: 'daemon:sillyspec_tombstone_cleanup',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */
@@ -546,7 +565,7 @@ export interface SillySpecResolvePayload {
  */
 export interface SillySpecCommandResult {
   /** 命令种类：resolve（冲突裁决）/ ghost_cleanup（ghost 清理）。 */
-  action?: 'resolve' | 'ghost_cleanup';
+  action?: 'resolve' | 'ghost_cleanup' | 'tombstone_cleanup';
   /** 仅 resolve：目标变更名。 */
   change?: string;
   /** 仅 resolve：裁决策略。 */

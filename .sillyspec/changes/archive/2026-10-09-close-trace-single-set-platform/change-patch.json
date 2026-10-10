@@ -1,0 +1,120 @@
+{
+  "change": "2026-10-09-close-trace-single-set-platform",
+  "baseline": "1b8c047d3beb903f4213e8509035792e2a52ec9c",
+  "head": "2f6d525155a2b7cd8ec208e77f0f83e5f9a43967",
+  "files": [
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/design.md",
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/flow-state.yaml",
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/proposal.md",
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/requirements.md",
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/tasks.md",
+    "backend/app/modules/change/schema.py",
+    "docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md",
+    "frontend/src/components/files/__tests__/structured-views.test.tsx",
+    "frontend/src/components/files/structured-views.tsx",
+    ".sillyspec/changes/2026-10-09-close-trace-single-set-platform/review.json.superseded-20261009T073430"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 330,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-09T07:34:31.389Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "1b8c047d3beb903f4213e8509035792e2a52ec9c",
+    "totals": {
+      "files": 4,
+      "additions": 148,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/schema.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/files/__tests__/structured-views.test.tsx",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/files/structured-views.tsx",
+        "additions": 64,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "5d94ca2fdca3e6f59ef8d1f72e9d75c8ecb8485f68dda26606ddd5f9b91d43e8",
+  "patchStatus": "ok"
+}

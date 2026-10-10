@@ -10,6 +10,8 @@
 //   2. aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card
 //      与主栏时间线卡同表双显，反向钉防回潮）
 //   3. 范围对账卡收到 archived 传参（isTerminalChange 派生，非终态 false）
+//   4. thin 出身步骤时间线卡隐藏 / 厚变更双卡共存（2026-10-09-thin-hide-step-timeline：
+//      thin steps 只有归档补种 3 行同时间戳步骤属噪音，整卡隐藏；厚变更两卡共存不变）
 //
 // 卡片组件全部 stub（只验页面挂载与传参，组件内部由各自套件覆盖），范式对齐
 // 同目录 page-team-toggle.test.tsx。
@@ -210,8 +212,10 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
 
   // 2026-09-27-timeline-coexist：归档时 unregisterChange 终态一致化补种 3 行
   // 同一时间戳 steps，原互斥挂载会把真实留痕时间线卡顶掉（归档后真实数据
-  // 不可见）。钉住共存：steps 非空 + 观测数据在 → 两卡同时渲染。
-  it("共存（2026-09-27-timeline-coexist）：归档补种 steps 后真实留痕时间线卡不被顶掉", async () => {
+  // 不可见）。2026-10-09-thin-hide-step-timeline 语义升级：thin 出身（本 fixture
+  // change_type=quick 命中②分支）步骤时间线卡整卡隐藏——补种行对 thin 零信息量，
+  // 钉住：卡隐藏 + 真实留痕卡保留（隐藏后更不可能被顶掉）。
+  it("共存→隐藏（2026-10-09-thin-hide-step-timeline）：归档补种 steps 的 thin 变更步骤时间线卡不渲染，真实留痕时间线卡保留", async () => {
     vi.mocked(getChangeTimeline).mockResolvedValue({
       change_key: "2026-09-26-restore-fixture",
       born_at: "2026-09-26T10:00:00.000Z",
@@ -276,11 +280,79 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
         ],
       }),
     );
-    // 补种的 3 行步骤时间线照常渲染
+    // thin 出身（quick 分流 + 补种 steps 无标准阶段痕迹）→ 步骤时间线卡隐藏
+    expect(
+      screen.queryByTestId("change-step-timeline-card"),
+    ).toBeNull();
+    // 真实留痕时间线卡保留（thin 主线叙事承担者）
+    expect(
+      await screen.findByTestId("change-timeline-card"),
+    ).toBeInTheDocument();
+  });
+
+  // 2026-10-09-thin-hide-step-timeline FR-02/FR-03：厚变更（steps 含标准四阶段
+  // 痕迹 → 非 thin 出身）双卡共存语义原样保留——步骤时间线卡照常渲染，且
+  // 不被真实留痕卡互斥顶掉（timeline-coexist 原语义在厚侧的延续钉子）。
+  it("共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染", async () => {
+    vi.mocked(getChangeTimeline).mockResolvedValue({
+      change_key: "2026-09-26-restore-fixture",
+      born_at: "2026-09-26T10:00:00.000Z",
+      events: [
+        {
+          ts: "2026-09-26T10:01:00Z",
+          kind: "file-update",
+          label: "requirements.md 内容变更",
+          rule: "watcher",
+          severity: "info",
+          provisional: true,
+          commit_title: null,
+        },
+      ],
+      tasks: [
+        { id: "task-01", checked: true, desc: "厚共存钉子", commit_sha: null },
+      ],
+      stats: {
+        event_count: 1,
+        commit_count: 0,
+        checked: 1,
+        total: 1,
+        wall_clock_s: 300,
+      },
+    });
+    renderPage(
+      makeChange({
+        current_stage: "archive",
+        status: "archived",
+        location: "archive",
+        change_type: null,
+        created_at: "2026-09-26T10:00:00Z",
+        steps: [
+          {
+            name: "实现收尾",
+            stage: "execute",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-27T12:00:00Z",
+            ordering: 0,
+            wait_reason: null,
+            kind: "step",
+          },
+          {
+            name: "验证通过",
+            stage: "verify",
+            status: "completed",
+            output: null,
+            completed_at: "2026-09-27T12:30:00Z",
+            ordering: 1,
+            wait_reason: null,
+            kind: "step",
+          },
+        ],
+      }),
+    );
     expect(
       await screen.findByTestId("change-step-timeline-card"),
     ).toBeInTheDocument();
-    // 真实留痕时间线卡共存（不再被互斥顶掉）
     expect(
       await screen.findByTestId("change-timeline-card"),
     ).toBeInTheDocument();

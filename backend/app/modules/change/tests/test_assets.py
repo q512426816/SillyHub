@@ -133,15 +133,11 @@ def _seed_mirror(spec_root: Path, *, with_trace: bool = True) -> None:
     dec_dir.mkdir(parents=True)
     (fr_dir / "auto-test.md").write_text(
         f"# FR\n\n## FR-auto-test-001 金样本条目\n变更：{KEY}\n状态：active\n全文：x#FR-01\n\n"
-        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n\n"
-        # 知识触达（2026-09-26-change-asset-transparency）：他属条目带本变更
-        # 待复核标记 → knowledge_touch 收录（与「变更：」归属正交）。
-        f"## FR-auto-test-003 注入命中\n待复核：{KEY}\n状态：active\n",
+        "## FR-auto-test-002 他属\n变更：someone-else\n状态：active\n",
         encoding="utf-8",
     )
     (dec_dir / "backend.md").write_text(
-        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n\n"
-        f"## D-002@v1 注入命中决策\n待复核：{KEY}\n理由：r\n",
+        f"# 决策\n\n## D-001@v1 金样本决策\n变更：{KEY}\n理由：z\n\n## D-009@v1 无主\n理由：w\n",
         encoding="utf-8",
     )
     # 模块图 + 模块 doc（模块触达面）：change 模块命中交付文件、core 不命中；
@@ -226,11 +222,9 @@ async def test_golden_aggregation(db_session, tmp_path: Path) -> None:
         == "backend/app/modules/change/tests/test_assets.py::金样本聚合 用例"
         " （共享前置：seed 镜像三件）"
     )
-    # 知识触达（2026-09-26-change-asset-transparency）：待复核标记反查双域。
-    assert [(t.id, t.file) for t in result.knowledge_touch] == [
-        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
-        ("D-002@v1", "knowledge/decisions/backend.md"),
-    ]
+    # 知识触达（2026-10-09-knowledge-touch-marker-sunset）：唯一来源是 inject
+    # 遥测——本用例未播种 knowledge_hits 行 → 恒空（标记反查面已拆除）。
+    assert result.knowledge_touch == []
     assert result.touched_modules == []  # 无 change-patch.json → file_list 空
     assert result.patch is None  # 无 change-patch.json → 容错 None
     assert result.delta is not None
@@ -784,16 +778,20 @@ def test_touched_modules_doc_traversal_guard(tmp_path: Path) -> None:
     ]
 
 
-def test_knowledge_touch_empty_without_marker(tmp_path: Path) -> None:
-    """纯函数：无待复核标记的域文件 → 空组（fail-open）。"""
-    from app.modules.change.assets import _REVIEW_MARK_RE, _scan_domain_files
+def test_knowledge_touch_scan_ignores_review_marks(tmp_path: Path) -> None:
+    """纯函数：域文件含「待复核：」行也只按「变更：」归属过滤（标记面已拆除）。"""
+    from app.modules.change.assets import _scan_domain_files
 
     fr_dir = tmp_path / "knowledge" / "fr"
     fr_dir.mkdir(parents=True)
-    (fr_dir / "x.md").write_text("## FR-x-001 条目\n变更：someone\n", encoding="utf-8")
-    assert (
-        _scan_domain_files(tmp_path, "fr", "2026-09-26-none", owner_line_re=_REVIEW_MARK_RE) == []
+    (fr_dir / "x.md").write_text(
+        "## FR-x-001 条目\n待复核：2026-09-26-none\n变更：someone\n",
+        encoding="utf-8",
     )
+    assert _scan_domain_files(tmp_path, "fr", "2026-09-26-none") == []
+    assert _scan_domain_files(tmp_path, "fr", "someone") == [
+        ("FR-x-001", "条目", None, "knowledge/fr/x.md")
+    ]
 
 
 # ===========================================================================
@@ -810,14 +808,6 @@ async def test_live_touch_hits_inflight(db_session, tmp_path: Path) -> None:
 
     spec_root = tmp_path / "spec-root"
     _seed_mirror(spec_root)
-    # 在途真实形态：标记是 flow done 落的——归档前知识文件里没有「待复核：」行
-    # （扫描本身不看归档态；剥离后模拟在途库状态）。
-    for md in (
-        spec_root / "knowledge" / "fr" / "auto-test.md",
-        spec_root / "knowledge" / "decisions" / "backend.md",
-    ):
-        stripped = md.read_text(encoding="utf-8").replace("待复核：" + KEY + chr(10), "")
-        md.write_text(stripped, encoding="utf-8")
     ws = await _make_ws_spec(db_session, spec_root)
     change = await _make_change(db_session, ws, archived=False)
     db_session.add_all(
@@ -871,15 +861,25 @@ async def test_live_touch_hits_inflight(db_session, tmp_path: Path) -> None:
     ]
 
 
-async def test_live_touch_merges_with_markers_dedupe(db_session, tmp_path: Path) -> None:
-    """归档态：标记反查行在前（复核权威），实时命中补差；同 (file,id) 归一去重。"""
+async def test_live_touch_archived_ignores_review_marks(db_session, tmp_path: Path) -> None:
+    """归档态：触达面与在途同源（仅 inject 遥测行）；域文件残留「待复核：」行被无视。
+
+    2026-10-09-knowledge-touch-marker-sunset：标记反查面拆除——归档态不再有
+    标记∪实时合并路径，标记行即使在场（存量知识文件残留）也不进触达面。
+    """
     from app.modules.knowledge.hits import KnowledgeHit
 
     spec_root = tmp_path / "spec-root"
     _seed_mirror(spec_root)
+    # 存量残留形态：知识文件里留着 flow done 时代的「待复核：」行。
+    fr_md = spec_root / "knowledge" / "fr" / "auto-test.md"
+    fr_md.write_text(
+        fr_md.read_text(encoding="utf-8")
+        + f"\n## FR-auto-test-003 存量标记条目\n待复核：{KEY}\n状态：active\n",
+        encoding="utf-8",
+    )
     ws = await _make_ws_spec(db_session, spec_root)
     change = await _make_change(db_session, ws, archived=True)
-    # live 锚与标记行同条目（fr/auto-test.md#FR-auto-test-003，前缀形态不同）+ 一条新命中
     db_session.add(
         KnowledgeHit(
             workspace_id=ws.id,
@@ -893,8 +893,9 @@ async def test_live_touch_merges_with_markers_dedupe(db_session, tmp_path: Path)
     await db_session.commit()
 
     result = await ChangeAssetsQueryService(db_session).get_change_assets(ws.id, change.id)
+    # live 行的 FR-auto-test-003 锚照收（来源是遥测而非标记行）；存量标记行
+    # 本身不再额外产生任何条目；跨行 (file, ident) 去重语义保留。
     assert [(t.id, t.file) for t in result.knowledge_touch] == [
-        ("FR-auto-test-003", "knowledge/fr/auto-test.md"),
-        ("D-002@v1", "knowledge/decisions/backend.md"),
+        ("FR-auto-test-003", "fr/auto-test.md"),
         ("陷阱条目", "testing-gotchas.md"),
     ]

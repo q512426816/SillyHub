@@ -157,9 +157,22 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
   const decCount = data?.decisions?.length ?? 0;
   const rowCount = data?.test_rows?.length ?? 0;
   const hasAudit = Boolean(data?.patch || data?.delta);
-  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（待复核标记
-  // 反查）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
+  // 资产透明面（2026-09-26-change-asset-transparency）：知识触达（执行期
+  // inject 遥测命中，在途/归档同源——2026-10-09-knowledge-touch-marker-sunset
+  // 统一口径）与模块触达（file_list × 模块图）两组，计数并入卡头统计。
   const touchList = data?.knowledge_touch ?? [];
+  // 触达分形（2026-10-09-knowledge-touch-marker-sunset）：整文件路由（id==file
+  // 裸条目）收拢为 chip 行；锚点条目按文件分组——48 行平铺噪声的主要来源。
+  const touchFileChips = touchList.filter((e) => !e.id || e.id === e.file);
+  const touchByFile = new Map<string, typeof touchList>();
+  for (const e of touchList) {
+    if (!e.id || e.id === e.file) continue;
+    const key = e.file ?? "";
+    const bucket = touchByFile.get(key);
+    if (bucket) bucket.push(e);
+    else touchByFile.set(key, [e]);
+  }
+  const touchGroups = [...touchByFile.entries()];
   const moduleList = data?.touched_modules ?? [];
   const total =
     frCount + decCount + rowCount + (hasAudit ? 1 : 0) + (touchList.length > 0 ? 1 : 0) +
@@ -270,42 +283,77 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
             </div>
           ) : null}
 
-          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01）：本变更知识
-              注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查（flow
-              done 对触达域打标），覆盖面以标记为准，行点击跳知识库深链。标题用
-              用户语言、机制口径收进 title 悬停（2026-10-04-knowledge-touch-plain-title）。 */}
+          {/* 知识触达（2026-09-26-change-asset-transparency / FR-01；2026-10-09-
+              knowledge-touch-marker-sunset 口径统一）：本变更执行期 CLI 知识注入
+              命中的知识库条目（knowledge_hits inject 遥测），在途/归档同源同文案
+              （在途随执行增长、归档后定格）。整文件路由收拢 chip 行、锚点条目按
+              文件分组；行点击跳知识库深链。 */}
           {touchList.length > 0 ? (
             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
-                <span
-                  title={
-                    data?.archived
-                      ? "按知识条目内「待复核：<变更名>」标记反查，并与执行期注入命中合并去重；覆盖以标记为准"
-                      : "执行期知识注入命中的实时记录；变更收尾后以条目内「待复核」标记为权威口径"
-                  }
-                >
-                  {data?.archived
-                    ? "知识触达（本变更参考过的知识）"
-                    : "知识触达（本变更参考过的知识 · 实时）"}
+                <span title="本变更执行期 CLI 知识注入的命中留痕：在途变更随执行增长，归档后定格（唯一口径——注入命中即留痕，不另设标记复核面）">
+                  知识触达（本变更注入命中的知识）
                 </span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {touchList.length} 条
                 </span>
               </div>
               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
-              {touchList.map((e) => (
-                <Link
-                  key={`${e.file}#${e.id}`}
-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
-                    e.file ?? "",
-                  )}&anchor=${encodeURIComponent(e.id ?? "")}`}
-                  title={`打开知识库并定位到 ${e.id}`}
-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
-                >
-                  <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
-                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
-                </Link>
-              ))}
+                {touchFileChips.length > 0 ? (
+                  <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
+                    <span className="text-[10px] text-muted-foreground/70">整文件</span>
+                    {touchFileChips.map((e) => (
+                      <Link
+                        key={`chip-${e.file}`}
+                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+                          e.file ?? "",
+                        )}`}
+                        title={`打开知识库文件 ${e.file}（整文件路由注入）`}
+                        className="rounded-full border border-border/60 bg-muted/40 px-1.5 py-px font-mono text-[10px] hover:border-brand-300 hover:bg-brand-50/60"
+                      >
+                        {e.file}
+                      </Link>
+                    ))}
+                  </div>
+                ) : null}
+                {touchGroups.map(([file, entries]) => (
+                  <div
+                    key={file}
+                    data-testid={`change-assets-touch-group-${file}`}
+                    className="border-b border-dashed py-1 last:border-b-0"
+                  >
+                    <Link
+                      href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(file)}`}
+                      title={`打开知识库文件 ${file}`}
+                      className="font-mono text-[10px] text-muted-foreground hover:underline"
+                    >
+                      {file}
+                      <span className="ml-1 font-sans text-[9px] text-muted-foreground/70">
+                        （{entries.length}）
+                      </span>
+                    </Link>
+                    {entries.map((e) => (
+                      <Link
+                        key={`${e.file}#${e.id}`}
+                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+                          e.file ?? "",
+                        )}&anchor=${encodeURIComponent(e.id ?? "")}`}
+                        title={`打开知识库并定位到 ${e.id}`}
+                        className="flex items-baseline gap-2 py-0.5 pl-2 text-xs hover:underline"
+                      >
+                        {/* 同 slug 只显示一份（2026-10-09：live 行 id==title，双栏连排两遍是噪声） */}
+                        {e.id === e.title ? (
+                          <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                        ) : (
+                          <>
+                            <span className="font-mono text-[10px] text-violet-700">{e.id}</span>
+                            <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                          </>
+                        )}
+                      </Link>
+                    ))}
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

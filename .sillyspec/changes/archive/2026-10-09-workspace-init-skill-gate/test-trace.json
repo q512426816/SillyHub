@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-workspace-init-skill-gate",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-01:acc-0-9465688b",
+      "tests": [
+        "sillyhub-daemon/src/spec-sync.ts",
+        "sillyhub-daemon/tests/run-sillyspec-init.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-01:acc-1-e32cf1a8",
+      "tests": [
+        "sillyhub-daemon/src/spec-sync.ts",
+        "sillyhub-daemon/tests/run-sillyspec-init.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-02:acc-0-90f57461",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-02:acc-1-84fd69f4",
+      "tests": [
+        "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-03:acc-0-2920023a",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-03:acc-1-93b6fbce",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-03:acc-2-0384b6d6",
+      "tests": [
+        "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-04:acc-0-92cd0895",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-04:acc-1-38c20000",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-04:acc-2-9ace1f39",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-05:acc-0-381396e8",
+      "tests": [
+        "frontend/src/components/workspace-config-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-05:acc-1-02353ccf",
+      "tests": [
+        "frontend/src/components/workspace-config-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-workspace-init-skill-gate:task-05:acc-2-cf4a5097",
+      "tests": [
+        "frontend/src/components/workspace-config-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-workspace-init-skill-gate"
+    }
+  ]
+}

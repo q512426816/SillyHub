@@ -1,0 +1,53 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "8c6802f09b281a94b16dabda6238feae6133cd79",
+  "totals": {
+    "files": 4,
+    "additions": 66,
+    "deletions": 4
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/change/tests/test_timeline.py",
+      "additions": 29,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/change/timeline.py",
+      "additions": 12,
+      "deletions": 4,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "additions": 2,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md",
+      "additions": 23,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "flow done 时点冻结（本文件落盘时采集）",
+  "closedBy": "flow done",
+  "patchSha256": "413e5391716fb49a09f9c0b0341b88f545d48846b716035001c828e380db13de",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T04:12:34.575Z"
+}

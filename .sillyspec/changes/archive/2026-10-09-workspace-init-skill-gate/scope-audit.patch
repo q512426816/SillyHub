@@ -1,0 +1,861 @@
+diff --git a/backend/app/modules/daemon/lease/service.py b/backend/app/modules/daemon/lease/service.py
+index f9b2b6369..32c82df41 100644
+--- a/backend/app/modules/daemon/lease/service.py
++++ b/backend/app/modules/daemon/lease/service.py
+@@ -528,8 +528,19 @@ class LeaseService:
+         # binding 的 init_synced_*。upsert_my_binding 注释明说这两个字段只由此路径写，
+         # 但本路径之前漏实现 → 前端"接入初始化状态"永远显示未初始化。
+         # try/except 兜底：meta 损坏 / 无 binding 只 warn，不阻塞 lease 完成。
++        # 2026-10-09-workspace-init-skill-gate task-03 / D-006@v1（Grill UB-1 修复）：
++        # 回写加成败门——daemon init 失败仍以 status='failed' 走 complete 上报
++        # （task-runner.ts _finish 路径），失败时禁止回写，否则"失败被标已初始化"，
++        # 前端（手动初始化与创建即初始化）轮询 init_synced_at 会误报完成。
+         _init_meta = lease.metadata_ if isinstance(lease.metadata_, dict) else {}
+-        if _init_meta.get("mode") == "init":
++        _init_failed = result.get("status") == "failed"
++        if _init_meta.get("mode") == "init" and _init_failed:
++            log.warning(
++                "init_lease_failed_no_synced",
++                lease_id=str(lease.id),
++                status=result.get("status"),
++            )
++        elif _init_meta.get("mode") == "init":
+             try:
+                 _init_ws_id = uuid.UUID(str(_init_meta.get("workspace_id")))
+                 _init_user_id = uuid.UUID(str(_init_meta.get("actor_user_id")))
+diff --git a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+index c0f0aeb5b..c4c535fa2 100644
+--- a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
++++ b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+@@ -382,3 +382,84 @@ class TestInitClaimInMemoryNoPlaintext:
+         assert _PLATFORM_PLAIN not in meta_json
+         assert _MCP_PLAIN not in meta_json
+         assert "local_yaml" not in meta_json
++
++
++# ---------------------------------------------------------------------------
++# 用例组 E：init lease 成败门（2026-10-09-workspace-init-skill-gate task-03 / D-006@v1）
++# ---------------------------------------------------------------------------
++
++
++class TestInitLeaseCompleteFailureGate:
++    """Grill UB-1 修复守卫：complete_lease 的 init 回写段加 ``result.status != 'failed'``
++    成败门——daemon init 失败仍以 status='failed' 走 complete 上报（task-runner.ts
++    ``_finish`` 路径），失败时禁止回写 ``init_synced_at``，否则"失败被标已初始化"，
++    前端（手动初始化与创建即初始化）轮询会误报完成。"""
++
++    @pytest.mark.asyncio
++    async def test_failed_complete_does_not_sync_init(self, db_session: AsyncSession) -> None:
++        """FR-05：status='failed' complete → init_synced_* 保持 NULL + warn 日志。"""
++        from app.modules.daemon.lease.service import LeaseService
++        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++
++        _user_id, rt_id, ws, actor = await _setup(db_session)
++        # 绑定行主键 (workspace_id, actor_user_id)——与 init 回写段读取的复合键一致
++        binding = WorkspaceMemberRuntime(
++            workspace_id=ws.id,
++            user_id=actor,
++            daemon_id=None,
++            runtime_id=rt_id,
++            root_path="/tmp/init-gate-project",
++            path_source="daemon-client",
++        )
++        db_session.add(binding)
++        await db_session.flush()
++
++        claim_token = "tok-" + uuid.uuid4().hex
++        lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
++        lease.metadata_["claim_token"] = claim_token
++        db_session.add(lease)
++        await db_session.commit()
++
++        svc = LeaseService(db_session)
++        completed = await svc.complete_lease(
++            lease.id, claim_token, {"status": "failed", "error": "init lease failed"}
++        )
++
++        # lease 本身正常完成（成败门只影响回写，不阻塞 complete 流程）
++        assert completed.status == "completed"
++        await db_session.refresh(binding)
++        assert binding.init_synced_at is None
++        assert binding.init_synced_spec_version is None
++
++    @pytest.mark.asyncio
++    async def test_completed_complete_syncs_init_as_before(self, db_session: AsyncSession) -> None:
++        """对照组零回归：status='completed' → 回写行为与现状一致。"""
++        from app.modules.daemon.lease.service import LeaseService
++        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++
++        _user_id, rt_id, ws, actor = await _setup(db_session)
++        binding = WorkspaceMemberRuntime(
++            workspace_id=ws.id,
++            user_id=actor,
++            daemon_id=None,
++            runtime_id=rt_id,
++            root_path="/tmp/init-gate-project",
++            path_source="daemon-client",
++        )
++        db_session.add(binding)
++        await db_session.flush()
++
++        claim_token = "tok-" + uuid.uuid4().hex
++        lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
++        # latest_spec_version 非 0 验证回写值透传
++        lease.metadata_["latest_spec_version"] = 7
++        lease.metadata_["claim_token"] = claim_token
++        db_session.add(lease)
++        await db_session.commit()
++
++        svc = LeaseService(db_session)
++        await svc.complete_lease(lease.id, claim_token, {"status": "completed"})
++
++        await db_session.refresh(binding)
++        assert binding.init_synced_at is not None
++        assert binding.init_synced_spec_version == 7
+diff --git a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+index 2fb803065..c90b9d689 100644
+--- a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
++++ b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+@@ -14,6 +14,9 @@ import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
+ 
+ const daemonApi = vi.hoisted(() => ({ listDaemonInstances: vi.fn() }));
+ const workspacesApi = vi.hoisted(() => ({ createWorkspace: vi.fn() }));
++// 2026-10-09-workspace-init-skill-gate task-04 / FR-04：创建后自动初始化链路的两个依赖。
++const specWorkspacesApi = vi.hoisted(() => ({ initDispatch: vi.fn() }));
++const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
+ const notify = vi.hoisted(() => ({
+   success: vi.fn(),
+   warning: vi.fn(),
+@@ -34,6 +37,22 @@ vi.mock("@/lib/workspaces", async () => {
+   return { ...actual, createWorkspace: workspacesApi.createWorkspace };
+ });
+ 
++vi.mock("@/lib/spec-workspaces", async () => {
++  const actual =
++    await vi.importActual<typeof import("@/lib/spec-workspaces")>(
++      "@/lib/spec-workspaces",
++    );
++  return { ...actual, initDispatch: specWorkspacesApi.initDispatch };
++});
++
++vi.mock("@/lib/workspace-binding", async () => {
++  const actual =
++    await vi.importActual<typeof import("@/lib/workspace-binding")>(
++      "@/lib/workspace-binding",
++    );
++  return { ...actual, fetchMyBinding: bindingApi.fetchMyBinding };
++});
++
+ // useNotify 依赖 antd App 上下文，这里直接换纯函数实现。
+ vi.mock("@/lib/errors", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/errors")>(
+@@ -194,3 +213,125 @@ describe("WorkspaceScanDialog slug 字段", () => {
+     );
+   });
+ });
++
++describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-skill-gate task-04 / FR-04 / D-003@v1）", () => {
++  beforeEach(() => {
++    // shouldAdvanceTime：保留 waitFor 的时间推进（fake timers 会冻结其内部轮询），
++    // 同时 advanceTimersByTimeAsync 仍可控 setInterval/setTimeout。
++    vi.useFakeTimers({ shouldAdvanceTime: true });
++    daemonApi.listDaemonInstances.mockResolvedValue([
++      {
++        id: "d1",
++        hostname: "host-a",
++        display_alias: null,
++        status: "online",
++        providers: [{ provider: "claude_code" }],
++      },
++    ]);
++    workspacesApi.createWorkspace.mockResolvedValue(makeCreatedWorkspace());
++    specWorkspacesApi.initDispatch.mockResolvedValue(undefined);
++  });
++
++  afterEach(() => {
++    cleanup();
++    vi.useRealTimers();
++    vi.clearAllMocks();
++  });
++
++  async function submitCreate() {
++    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />);
++    const daemonSelect = screen.getByRole("combobox");
++    await waitFor(() =>
++      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(
++        1,
++      ),
++    );
++    fireEvent.change(daemonSelect, { target: { value: "d1" } });
++    fireEvent.change(screen.getByLabelText("工作区路径"), {
++      target: { value: "C:\repo\demo" },
++    });
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++  }
++
++  it("全链路成功：创建 → initDispatch → 轮询到 init_synced_at 非空 → done 态 + 打开按钮调 onCreated", async () => {
++    bindingApi.fetchMyBinding.mockResolvedValue({
++      init_synced_at: "2026-10-09T02:00:00Z",
++      init_synced_spec_version: 3,
++    });
++    await submitCreate();
++
++    await waitFor(() =>
++      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
++    );
++    await waitFor(() =>
++      expect(specWorkspacesApi.initDispatch).toHaveBeenCalledWith("ws-1"),
++    );
++    // 初始化中态：两步进度可见 + 取消禁用
++    expect(screen.getByText("初始化工作区")).toBeInTheDocument();
++    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
++
++    // 第一个 2s tick 轮询到非空 → done
++    await vi.advanceTimersByTimeAsync(2_000);
++    expect(await screen.findByText("初始化完成，工作区可以使用了。")).toBeInTheDocument();
++  });
++
++  it("initDispatch 拒绝 → init_failed 态：文案明示已创建成功 + 双出口可达 onCreated（不回滚）", async () => {
++    specWorkspacesApi.initDispatch.mockRejectedValue(new Error("daemon 离线"));
++    const onCreated = vi.fn();
++    render(<WorkspaceScanDialog onCreated={onCreated} onCancel={vi.fn()} />);
++    const daemonSelect = screen.getByRole("combobox");
++    await waitFor(() =>
++      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(
++        1,
++      ),
++    );
++    fireEvent.change(daemonSelect, { target: { value: "d1" } });
++    fireEvent.change(screen.getByLabelText("工作区路径"), {
++      target: { value: "C:\repo\demo" },
++    });
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++
++    expect(await screen.findByText("工作区已创建成功，但初始化失败")).toBeInTheDocument();
++    expect(
++      screen.getByText(/可稍后在.*详情页.*重新初始化/),
++    ).toBeInTheDocument();
++    // 失败不回滚：两个出口均可达 onCreated
++    fireEvent.click(screen.getByRole("button", { name: "稍后手动初始化" }));
++    expect(onCreated).toHaveBeenCalledTimes(1);
++  });
++
++  it("轮询超时（5min 无 init_synced_at）→ init_failed 态", async () => {
++    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
++    await submitCreate();
++
++    await waitFor(() =>
++      expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
++    );
++    // 推进 5 分钟（含多个 2s tick，fetchMyBinding 恒 null）
++    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
++    expect(await screen.findByText("工作区已创建成功，但初始化失败")).toBeInTheDocument();
++  });
++
++  it("卸载清理：initializing 态 unmount 后轮询不再发起（行为级，无孤儿请求）", async () => {
++    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
++    await submitCreate();
++
++    await waitFor(() =>
++      expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
++    );
++    // 轮询在飞：推进几个 tick 确认 fetchMyBinding 持续被调
++    await vi.advanceTimersByTimeAsync(2_000);
++    const callsAtUnmount = bindingApi.fetchMyBinding.mock.calls.length;
++    expect(callsAtUnmount).toBeGreaterThan(0);
++
++    cleanup(); // unmount → useEffect 清理 stopInitPolling（interval + deadline）
++    await vi.advanceTimersByTimeAsync(10_000);
++    expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
++  });
++});
+diff --git a/frontend/src/components/workspace-config-card.test.tsx b/frontend/src/components/workspace-config-card.test.tsx
+index bef26996b..db83b1983 100644
+--- a/frontend/src/components/workspace-config-card.test.tsx
++++ b/frontend/src/components/workspace-config-card.test.tsx
+@@ -333,15 +333,21 @@ describe("WorkspaceConfigCard 六状态分支（design §5.3 / AC-05）", () =>
+     expect(screen.getByText("/data/spec-workspaces/ws-1")).toBeInTheDocument();
+   });
+ 
+-  it("④ 已绑定·未初始化（init_synced_at=null）：amber「未初始化」徽标 + 初始化按钮", () => {
++  it("④ 已绑定·未初始化（init_synced_at=null）：amber「未初始化」徽标 + 引导 Alert + 初始化按钮", () => {
+     renderCard({ myBinding: makeBinding({ init_synced_at: null }) });
+     expect(screen.getByText("未初始化")).toBeInTheDocument();
+     expect(screen.queryByText("已初始化")).not.toBeInTheDocument();
+     // 头部初始化按钮（platform-managed 策略下）
+     expect(screen.getByRole("button", { name: "初始化" })).toBeInTheDocument();
++    // 2026-10-09-workspace-init-skill-gate task-05 / FR-03：未初始化行动引导 Alert
++    // （成员/机器维度轻引导，D-002@v1 后端不硬拦）
++    expect(
++      screen.getByText("当前机器尚未初始化这个工作区，初始化后才能正常使用。"),
++    ).toBeInTheDocument();
++    expect(screen.getByText(/每台机器需要单独初始化/)).toBeInTheDocument();
+   });
+ 
+-  it("⑤ 已绑定·已初始化（init_synced_at 非空）：emerald「已初始化」徽标 + 时间 + v{spec_version}", () => {
++  it("⑤ 已绑定·已初始化（init_synced_at 非空）：emerald「已初始化」徽标 + 时间 + v{spec_version}，无引导 Alert（零回归）", () => {
+     renderCard({
+       myBinding: makeBinding({
+         init_synced_at: "2026-06-30T02:00:00Z",
+@@ -352,6 +358,10 @@ describe("WorkspaceConfigCard 六状态分支（design §5.3 / AC-05）", () =>
+     expect(screen.queryByText("未初始化")).not.toBeInTheDocument();
+     // spec_version 展示
+     expect(screen.getByText(/（v3）/)).toBeInTheDocument();
++    // 已初始化态不渲染引导 Alert（现状零回归）
++    expect(
++      screen.queryByText(/初始化后才能正常使用/),
++    ).not.toBeInTheDocument();
+   });
+ });
+ 
+diff --git a/frontend/src/components/workspace-config-card.tsx b/frontend/src/components/workspace-config-card.tsx
+index 2600dfd76..0c17e08d4 100644
+--- a/frontend/src/components/workspace-config-card.tsx
++++ b/frontend/src/components/workspace-config-card.tsx
+@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
+ 
+ import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
+ import { Badge } from "@/components/ui/badge";
+-import { Button, Modal, Progress, Radio, Tooltip } from "antd";
++import { Alert, Button, Modal, Progress, Radio, Tooltip } from "antd";
+ import { SectionCard } from "@/components/layout";
+ import { ApiError } from "@/lib/api";
+ import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
+@@ -683,6 +683,19 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+           <dd>{formatTs(myBinding.synced_at)}</dd>
+         </dl>
+ 
++        {/* 2026-10-09-workspace-init-skill-gate task-05 / FR-03 / D-002@v1：
++            当前成员/机器未初始化时的行动引导（轻引导，后端不硬拦）——
++            成员维度状态，一台机器未初始化不影响另一台。已初始化态零渲染。 */}
++        {!myBinding.init_synced_at && (
++          <Alert
++            type="warning"
++            showIcon
++            className="mt-3"
++            message="当前机器尚未初始化这个工作区，初始化后才能正常使用。"
++            description="每台机器需要单独初始化（同一工作区在其它机器不受影响）。点击「初始化」将下发平台配置、拉取文档缓存，并按本机已有的 agent 写入对应 skill 文件。"
++          />
++        )}
++
+         {/* task-04：编辑入口就地展开（非 Modal） */}
+         {editing && (
+           <WorkspaceAccessGuide
+diff --git a/frontend/src/components/workspace-scan-dialog.tsx b/frontend/src/components/workspace-scan-dialog.tsx
+index 83599d6f5..701430743 100644
+--- a/frontend/src/components/workspace-scan-dialog.tsx
++++ b/frontend/src/components/workspace-scan-dialog.tsx
+@@ -1,7 +1,7 @@
+ "use client";
+ 
+-import { Modal } from "antd";
+-import { useEffect, useState } from "react";
++import { Alert, Modal } from "antd";
++import { useEffect, useRef, useState } from "react";
+ 
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+@@ -13,6 +13,7 @@ import {
+   type DaemonInstanceRead,
+ } from "@/lib/daemon";
+ import { errMessage, useNotify } from "@/lib/errors";
++import { initDispatch } from "@/lib/spec-workspaces";
+ import {
+   createWorkspace,
+   slugifyWorkspaceName,
+@@ -23,8 +24,18 @@ import {
+   WORKSPACE_TYPE_OPTIONS,
+   type WorkspaceType,
+ } from "@/lib/workspace-types";
++// 2026-10-09-workspace-init-skill-gate task-04 / FR-04 / D-003@v1：创建成功后
++// 轮询本机绑定 init_synced_at 判定初始化完成（与 config-card handleInit 同源字段）。
++import { fetchMyBinding } from "@/lib/workspace-binding";
+ 
+-type Phase = "idle" | "creating";
++// 两步状态机：idle → creating → initializing → done | init_failed。
++// 「初始化失败不回滚创建」——工作区行已落库，失败态明示可稍后在详情页重试
++// （失败不回写 init_synced_at 由后端成败门保证，task-03 / D-006@v1）。
++type Phase = "idle" | "creating" | "initializing" | "done" | "init_failed";
++
++// 轮询节律与超时对齐 config-card handleInit（D-003@v1：2s 轮询 / 5min 超时）。
++const INIT_POLL_INTERVAL_MS = 2_000;
++const INIT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+ 
+ interface Props {
+   onCreated: () => void;
+@@ -65,6 +76,21 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+   // 静默返回 201（同 root_path 已有工作区被复用）导致「创建成功却看不到/绑定没生效」的困惑。
+   const notify = useNotify();
+ 
++  // task-04 / FR-04：初始化轮询的定时器与超时句柄（卸载/终态清理，防孤儿轮询）。
++  const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
++  const initDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const stopInitPolling = () => {
++    if (initPollRef.current) {
++      clearInterval(initPollRef.current);
++      initPollRef.current = null;
++    }
++    if (initDeadlineRef.current) {
++      clearTimeout(initDeadlineRef.current);
++      initDeadlineRef.current = null;
++    }
++  };
++  useEffect(() => stopInitPolling, []);
++
+   useEffect(() => {
+     void listDaemonInstances()
+       .then(setInstances)
+@@ -92,10 +118,35 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+       // quick ql-20260803-003-cb34：复用/激活/复活时后端返回 creation_notice，必须显式提示。
+       if (ws.creation_notice) {
+         notify.warning(ws.creation_notice);
+-      } else {
+-        notify.success("工作区已创建");
+       }
+-      onCreated();
++
++      // task-04 / FR-04 / D-003@v1：创建成功（daemonId 由入口必选校验保证非空）→
++      // 串行派发初始化并轮询到 init_synced_at 非空。
++      // initDispatch 失败不回滚创建（工作区已落库），直接进失败态明示可稍后重试。
++      try {
++        await initDispatch(ws.id);
++      } catch {
++        setPhase("init_failed");
++        return;
++      }
++      setPhase("initializing");
++      initPollRef.current = setInterval(async () => {
++        if (document.hidden) return; // visibilitychange 暂停（对齐 config-card D-005）
++        try {
++          const binding = await fetchMyBinding(ws.id);
++          if (binding?.init_synced_at) {
++            stopInitPolling();
++            setPhase("done");
++            notify.success("工作区已创建并完成初始化");
++          }
++        } catch {
++          // 单次轮询错误忽略，下一 tick 重试（超时兜底）
++        }
++      }, INIT_POLL_INTERVAL_MS);
++      initDeadlineRef.current = setTimeout(() => {
++        stopInitPolling();
++        setPhase("init_failed");
++      }, INIT_POLL_TIMEOUT_MS);
+     } catch (err) {
+       setError(errMessage(err, "创建失败"));
+       setPhase("idle");
+@@ -118,6 +169,69 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+           使用本机守护进程上的项目路径。
+         </p>
+ 
++        {/* task-04 / FR-04：创建后自动初始化的状态区（两步进度 + 终态 Alert）。
++            creating 态沿用原按钮文案（无状态区），initializing/done/init_failed 渲染本区。 */}
++        {(phase === "initializing" || phase === "done" || phase === "init_failed") && (
++          <div className="space-y-3">
++            <div className="flex items-center gap-2 text-xs">
++              <span
++                className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] text-emerald-600"
++                aria-label="创建工作区已完成"
++              >
++                ✓
++              </span>
++              <span className="text-muted-foreground">创建工作区</span>
++              <span className="h-px flex-1 bg-border" />
++              <span
++                className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${
++                  phase === "done"
++                    ? "bg-emerald-500/15 text-emerald-600"
++                    : phase === "init_failed"
++                      ? "bg-destructive/15 text-destructive"
++                      : "bg-primary/15 text-primary"
++                }`}
++                aria-label={
++                  phase === "done"
++                    ? "初始化已完成"
++                    : phase === "init_failed"
++                      ? "初始化失败"
++                      : "初始化进行中"
++                }
++              >
++                {phase === "done" ? "✓" : phase === "init_failed" ? "✕" : "…"}
++              </span>
++              <span
++                className={
++                  phase === "initializing" ? "text-foreground" : "text-muted-foreground"
++                }
++              >
++                初始化工作区
++              </span>
++            </div>
++            {phase === "initializing" && (
++              <p className="rounded-md bg-muted px-3 py-2 text-[11px] leading-5 text-muted-foreground">
++                正在通过本机守护进程初始化：下发平台配置 → 拉取文档缓存 →
++                按本机已有的 agent 写入对应 skill 文件。通常需要十几秒，请勿关闭弹窗。
++              </p>
++            )}
++            {phase === "done" && (
++              <Alert
++                type="success"
++                showIcon
++                message="初始化完成，工作区可以使用了。"
++              />
++            )}
++            {phase === "init_failed" && (
++              <Alert
++                type="error"
++                showIcon
++                message="工作区已创建成功，但初始化失败"
++                description="守护进程可能离线或版本过旧（sillyspec 需 ≥3.32.2）。可稍后在工作区详情页重新初始化。"
++              />
++            )}
++          </div>
++        )}
++
+         <div className="space-y-3">
+           <div className="space-y-1.5">
+             <label className="text-xs font-medium text-muted-foreground">
+@@ -127,7 +241,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+               className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+               value={daemonId}
+               onChange={(e) => setDaemonId(e.target.value)}
+-              disabled={phase === "creating"}
++              disabled={phase === "creating" || phase === "initializing"}
+             >
+               <option value="">— 请选择在线守护进程 —</option>
+               {instances.map((inst) => {
+@@ -173,7 +287,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+                 value={name}
+                 onChange={(e) => setName(e.target.value)}
+                 placeholder="my-workspace"
+-                disabled={phase === "creating"}
++                disabled={phase === "creating" || phase === "initializing"}
+               />
+             </div>
+           )}
+@@ -194,7 +308,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+                 }}
+                 placeholder="默认从工作区名称生成"
+                 maxLength={100}
+-                disabled={phase === "creating"}
++                disabled={phase === "creating" || phase === "initializing"}
+                 className="font-mono"
+               />
+               <p className="text-[11px] text-muted-foreground">
+@@ -212,7 +326,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+                 className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                 value={wsType}
+                 onChange={(e) => setWsType(e.target.value as WorkspaceType | "")}
+-                disabled={phase === "creating"}
++                disabled={phase === "creating" || phase === "initializing"}
+               >
+                 <option value="">— 请选择工作区类型 —</option>
+                 {WORKSPACE_TYPE_OPTIONS.map((option) => (
+@@ -235,7 +349,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+                 placeholder="工作区用途说明，如「订单模块前端代码」"
+                 maxLength={2000}
+                 rows={3}
+-                disabled={phase === "creating"}
++                disabled={phase === "creating" || phase === "initializing"}
+                 className="w-full resize-y rounded border bg-background px-2 py-1.5 text-sm"
+               />
+             </div>
+@@ -258,7 +372,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+                       type="radio"
+                       checked={specStrategy === value}
+                       onChange={() => setSpecStrategy(value)}
+-                      disabled={phase === "creating"}
++                      disabled={phase === "creating" || phase === "initializing"}
+                     />
+                     {label}
+                   </label>
+@@ -271,14 +385,18 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+               )}
+             </div>
+           )}
+-          {daemonRootPath && (
++          {daemonRootPath && phase !== "done" && phase !== "init_failed" && (
+             <div className="flex justify-center">
+               <Button
+                 size="sm"
+                 onClick={handleCreateDaemonClient}
+-                disabled={phase === "creating" || !wsType}
++                disabled={phase === "creating" || phase === "initializing" || !wsType}
+               >
+-                {phase === "creating" ? "创建中..." : "创建工作区"}
++                {phase === "creating"
++                  ? "创建中..."
++                  : phase === "initializing"
++                    ? "初始化中…"
++                    : "创建工作区"}
+               </Button>
+             </div>
+           )}
+@@ -287,13 +405,38 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+         {error && <p className="text-xs text-destructive">{error}</p>}
+ 
+         <footer className="flex items-center justify-end gap-2 pt-1">
+-          <Button
+-            variant="outline"
+-            size="sm"
+-            onClick={onCancel}
+-          >
+-            取消
+-          </Button>
++          {/* task-04 / FR-04：初始化期间禁用取消（防半途关窗状态不可见；关窗不中断
++              后台 lease，但用户会失去进度反馈）；done/init_failed 提供出口按钮。 */}
++          {phase === "done" && (
++            <Button size="sm" onClick={onCreated}>
++              打开工作区
++            </Button>
++          )}
++          {phase === "init_failed" && (
++            <>
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={onCreated}
++                title="工作区已创建，可稍后在详情页重新初始化"
++              >
++                稍后手动初始化
++              </Button>
++              <Button size="sm" onClick={onCreated}>
++                打开工作区
++              </Button>
++            </>
++          )}
++          {(phase === "idle" || phase === "creating" || phase === "initializing") && (
++            <Button
++              variant="outline"
++              size="sm"
++              onClick={onCancel}
++              disabled={phase === "creating" || phase === "initializing"}
++            >
++              取消
++            </Button>
++          )}
+         </footer>
+       </div>
+     </Modal>
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 386f2dbf1..940983684 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -1654,25 +1654,30 @@ export async function bumpLocalSpecVersion(
+ // 两步：
+ //   步骤 0：版本门控（D-009）——spawn 'sillyspec --version'（shell:true，3s 超时），semver
+ //     低于 MIN_SILLYSPEC_VERSION_FOR_INIT → ok:false + sillyspec_init_cli_too_old（老 CLI
+-//     静默忽略 --no-skills/--tool 多值且 exit 0，preflight 仅启动跑一次不自愈，故每次
++//     静默忽略 --tool 多值且 exit 0，preflight 仅启动跑一次不自愈，故每次
+ //     init 前独立门控；用户升级 CLI 后无需重启 daemon）。
+ //   步骤 1：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot>
+-//     --workspace-id <wsId> --no-skills --tool <tools>`（60s 超时，D-006）。
++//     --workspace-id <wsId> --tool <tools>`（60s 超时，D-006）。不带 --no-skills——
++//     2026-10-09-workspace-init-skill-gate D-001@v1 修订 D-004@v1：恢复 CLI 自带 skills
++//     复制段，按 --tool 交集把 sillyspec-* 技能写入各工具目录（.claude/.codex/.openclaw/
++//     .opencode/.zcode 的 skills/），skill-manager 链路不动（平台自定义技能仍单端）。
+ //
+ // 超时杀树范式对齐 preflight.ts runWithTreeKill（私有未导出，此处自实现，不跨模块 import）：
+ // Windows taskkill /PID /T /F（npm.cmd wrapper 孙进程）/ POSIX detached:true 进程组 kill(-pid)。
+ //
+ // 覆盖：design.md §2（daemon 侧编排）/ §6（与 preflight 衔接）；decisions.md D-001@v1 /
+-// D-004@v1（--no-skills）/ D-006@v1（60s 超时）/ D-009@v1（版本门控）。
++// D-004@v1 → D-001@v1（2026-10-09 修订：去 --no-skills）/ D-006@v1（60s 超时）/ D-009@v1（版本门控）。
+ 
+ /**
+  * init 所需 sillyspec CLI 最低版本（D-009 门控比对值）。
+  *
+- * 3.26.8：含 --no-skills 开关 + --tool 多值 + 平台模式跳过项目内清理段
+- * （task-01/02/03 三项，本机 npm link 验证版）。正式 npm 发版后若版本号更高，
+- * 本常量保持 3.26.8 即可（门控语义是"不低于最低要求"，无需跟随最新版）。
++ * 3.32.2（2026-10-09-workspace-init-skill-gate D-004@v1 提升，原 3.26.8）：zcode 技能
++ * 复制的双层缺口（detectTools 不发现 + 显式 --tool zcode 也拿不到技能）在该版本修复
++ * （sillyspec commit 016968bd）；且本变更起 init 不带 --no-skills，需 CLI skills 复制段
++ * 对五端目录（claude/codex/openclaw/opencode/zcode）完整可用。老版本对 --tool zcode
++ * 静默忽略且 exit 0，会造成"init 成功但 zcode 端无技能"的暗坑，故门控提到修复版。
+  */
+-export const MIN_SILLYSPEC_VERSION_FOR_INIT = '3.26.8';
++export const MIN_SILLYSPEC_VERSION_FOR_INIT = '3.32.2';
+ 
+ /** 版本门控 spawn 超时（ms）。--version 是纯本地命令，3s 充裕。 */
+ const VERSION_CHECK_TIMEOUT_MS = 3_000;
+@@ -1805,15 +1810,17 @@ function runInitCmd(
+  * → ok:false + sillyspec_init_cli_too_old + 中文升级指引（重启 daemon 或 npm install -g
+  * sillyspec@latest——升级 CLI 后无需重启 daemon，下次 init 门控即通过）。门控查询失败
+  * （spawn 失败 / 超时 / 版本解析失败）同样 fail-safe 按门控不过（ok:false，cli_too_old 前缀），
+- * 不冒险对一个版本未知的 CLI 发 --no-skills/--tool 多值（老 CLI 静默忽略且 exit 0，
++ * 不冒险对一个版本未知的 CLI 发 --tool 多值（老 CLI 静默忽略且 exit 0，
+  * 会产出错误骨架假成功）。
+  *
+  * 步骤 1 init spawn（60s 超时杀树，D-006）：
+  *   sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId>
+- *                   --no-skills --tool <tools.join(',')>
++ *                   --tool <tools.join(',')>
+  *   - 退出码 0 → ok:true
+  *   - 非 0 / 超时 / spawn 失败 → ok:false + sillyspec_init_failed（stdout/stderr 截断收集进 error）
+  *   - tools 空数组/缺省 → 兜底 ['claude']（D-005@v1）
++ *   - 不带 --no-skills：CLI 按 --tool 复制 sillyspec-* 技能到各工具目录
++ *     （2026-10-09-workspace-init-skill-gate D-001@v1 修订 D-004@v1）
+  *
+  * 纯编排函数：spawn 经 spawnFn 注入（默认 node:child_process.spawn），供单测 mock。
+  *
+@@ -1845,7 +1852,8 @@ export async function runSillyspecInit(
+     `--dir "${params.rootPath}"`,
+     `--spec-dir "${params.specCacheRoot}"`,
+     `--workspace-id ${params.wsId}`,
+-    '--no-skills', // D-004：skills 只走 skill-manager 单渠道
++    // 不带 --no-skills：让 CLI 按 --tool 复制 sillyspec-* 技能到各工具目录
++    // （2026-10-09-workspace-init-skill-gate D-001@v1，修订 2026-08-15 D-004@v1）
+     `--tool ${tools.join(',')}`,
+   ].join(' ');
+   const init = await runInitCmd(cmd, INIT_SPAWN_TIMEOUT_MS, spawnFn);
+diff --git a/sillyhub-daemon/src/task-runner/runner-types.ts b/sillyhub-daemon/src/task-runner/runner-types.ts
+index 14d1da947..794ca0dcc 100644
+--- a/sillyhub-daemon/src/task-runner/runner-types.ts
++++ b/sillyhub-daemon/src/task-runner/runner-types.ts
+@@ -167,11 +167,13 @@ export interface RunnerCredentialManager {
+ 
+ /**
+  * sillyspec `--tool` 的合法值集（sillyspec CLI VALID_TOOLS，design §2 D-005@v1）。
+- * 与 daemon agent-detector 12 provider 中的 6 个同名：claude/cursor/openclaw/codex/
+- * gemini/opencode。集中一处便于扩展（CLI 新增工具时同步此表）。
++ * 与 daemon agent-detector 12 provider 中的 7 个同名：claude/zcode/cursor/openclaw/
++ * codex/gemini/opencode（zcode 为 CLI v3.32.2 新增，2026-10-09-workspace-init-skill-gate
++ * D-004@v1 同步）。集中一处便于扩展（CLI 新增工具时同步此表）。
+  */
+ export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
+   'claude',
++  'zcode',
+   'cursor',
+   'openclaw',
+   'codex',
+@@ -182,7 +184,7 @@ export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
+ /**
+  * agent-detector 探测结果 → sillyspec --tool 工具列表（task-06 / D-005@v1）。
+  *
+- * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 6 个同名，其余如 copilot/
++ * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 7 个同名，其余如 copilot/
+  * hermes/pi/kimi/kiro/antigravity 非 sillyspec 工具名，剔除）。探测失败调用方传
+  * undefined 即可（runSillyspecInit 兜底 ['claude']），本函数只做纯映射不兜底。
+  */
+diff --git a/sillyhub-daemon/tests/run-sillyspec-init.test.ts b/sillyhub-daemon/tests/run-sillyspec-init.test.ts
+index 6a7bab4e9..3bfa0f426 100644
+--- a/sillyhub-daemon/tests/run-sillyspec-init.test.ts
++++ b/sillyhub-daemon/tests/run-sillyspec-init.test.ts
+@@ -3,7 +3,7 @@
+ //
+ // 覆盖（task 卡 acceptance）：
+ //   - 版本门控（D-009）：版本过低 fail-fast（init spawn 未发起）；查询失败/解析失败 fail-safe。
+-//   - 参数组装：5 类 flag（--dir/--spec-dir/--workspace-id/--no-skills/--tool 逗号连接）。
++//   - 参数组装：4 类 flag（--dir/--spec-dir/--workspace-id/--tool 逗号连接；不带 --no-skills）。
+ //   - 退出码映射：0 → ok:true；非 0 → sillyspec_init_failed。
+ //   - 超时映射：超时（注入极小超时不真等 60s）→ 杀树 + ok:false + 超时原因。
+ //   - tools 兜底：空数组/缺省 → ['claude']（D-005@v1）。
+@@ -118,13 +118,14 @@ describe('parseSemver（D-009 门控解析）', () => {
+ describe('runSillyspecInit 版本门控（D-009 / FR-03）', () => {
+   it('版本过低 → ok:false，error 含 sillyspec_init_cli_too_old 与中文升级指引，init spawn 未发起', async () => {
+     const { spawnMock, calls } = makeSpawnMock([
+-      { stdout: '3.26.7\n', exitCode: 0 }, // --version 返回过旧版本
++      // 3.30.0：旧门控（3.26.8）放行、新门控（3.32.2）拒绝——验证门控提升生效
++      { stdout: '3.30.0\n', exitCode: 0 },
+     ]);
+     const result = await runSillyspecInit(BASE_PARAMS, spawnMock);
+ 
+     expect(result.ok).toBe(false);
+     expect(result.error).toContain('sillyspec_init_cli_too_old');
+-    expect(result.error).toContain('3.26.7');
++    expect(result.error).toContain('3.30.0');
+     expect(result.error).toContain(MIN_SILLYSPEC_VERSION_FOR_INIT);
+     // 中文升级指引：重启 daemon / npm install -g sillyspec@latest
+     expect(result.error).toContain('重启 daemon');
+@@ -164,7 +165,7 @@ describe('runSillyspecInit 版本门控（D-009 / FR-03）', () => {
+ });
+ 
+ describe('runSillyspecInit init 执行（FR-01/FR-02）', () => {
+-  it('门控通过 → spawn init，参数含全部 5 类 flag；退出码 0 → ok:true', async () => {
++  it('门控通过 → spawn init，参数含全部 4 类 flag 且不带 --no-skills；退出码 0 → ok:true', async () => {
+     const { spawnMock, calls } = makeSpawnMock([
+       { stdout: `${MIN_SILLYSPEC_VERSION_FOR_INIT}\n`, exitCode: 0 }, // --version 放行
+       { stdout: 'init done\n', exitCode: 0 }, // init 成功
+@@ -177,11 +178,12 @@ describe('runSillyspecInit init 执行（FR-01/FR-02）', () => {
+ 
+     const initCall = calls[1]!;
+     expect(String(initCall.cmd)).toContain('sillyspec init');
+-    // 5 类 flag（task acceptance）——带空格路径验证引号包裹
++    // 4 类 flag（task acceptance）——带空格路径验证引号包裹
+     expect(String(initCall.cmd)).toContain(`--dir "${BASE_PARAMS.rootPath}"`);
+     expect(String(initCall.cmd)).toContain(`--spec-dir "${BASE_PARAMS.specCacheRoot}"`);
+     expect(String(initCall.cmd)).toContain(`--workspace-id ws-1`);
+-    expect(String(initCall.cmd)).toContain('--no-skills');
++    // 不带 --no-skills（2026-10-09-workspace-init-skill-gate D-001@v1：恢复 CLI skills 复制段）
++    expect(String(initCall.cmd)).not.toContain('--no-skills');
+     expect(String(initCall.cmd)).toContain('--tool claude,codex');
+     // shell:true（X-06：Windows bare name 必 ENOENT）
+     expect((initCall.opts as Record<string, unknown>).shell).toBe(true);
+diff --git a/sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts b/sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts
+new file mode 100644
+index 000000000..2b5818222
+--- /dev/null
++++ b/sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts
+@@ -0,0 +1,56 @@
++// tests/sillyspec-tool-mapping.test.ts
++// 2026-10-09-workspace-init-skill-gate task-02 / FR-01 / D-004@v1：
++// SILLYSPEC_VALID_TOOLS 补 zcode（7 值对齐 sillyspec CLI v3.32.2 VALID_TOOLS）后，
++// mapDetectedToSillyspecTools 同名交集映射的白名单守卫——
++//   - zcode 放行（v3.32.2 前被剔除，zcode 端 .zcode/skills 拿不到技能）
++//   - 非 sillyspec 工具名的 provider 过滤
++//   - 全不支持 → 空数组（兜底 ['claude'] 在 runSillyspecInit 层，本函数纯映射不兜底）
++//
++// @module sillyspec-tool-mapping.test
++
++import { describe, expect, it } from 'vitest';
++
++import {
++  SILLYSPEC_VALID_TOOLS,
++  mapDetectedToSillyspecTools,
++} from '../src/task-runner/index.js';
++
++describe('SILLYSPEC_VALID_TOOLS 白名单（D-004@v1 对齐 CLI v3.32.2）', () => {
++  it('7 值且含 zcode', () => {
++    expect(SILLYSPEC_VALID_TOOLS.size).toBe(7);
++    expect([...SILLYSPEC_VALID_TOOLS].sort()).toEqual(
++      ['claude', 'codex', 'cursor', 'gemini', 'openclaw', 'opencode', 'zcode'].sort(),
++    );
++  });
++});
++
++describe('mapDetectedToSillyspecTools 同名交集（task-02 / FR-01）', () => {
++  it('zcode 放行 + 非 sillyspec 工具名过滤', () => {
++    expect(
++      mapDetectedToSillyspecTools(['claude', 'zcode', 'copilot']),
++    ).toEqual(['claude', 'zcode']);
++  });
++
++  it('全不支持（12 provider 中非同名的 5 个）→ 空数组', () => {
++    expect(
++      mapDetectedToSillyspecTools([
++        'copilot',
++        'hermes',
++        'pi',
++        'kimi',
++        'kiro',
++        'antigravity',
++      ]),
++    ).toEqual([]);
++  });
++
++  it('空数组 → 空数组（兜底 claude 在 runSillyspecInit 层，本函数不兜底）', () => {
++    expect(mapDetectedToSillyspecTools([])).toEqual([]);
++  });
++
++  it('顺序：交集保持探测顺序（filter 语义，不去重——探测源 per-provider 唯一）', () => {
++    expect(
++      mapDetectedToSillyspecTools(['gemini', 'claude', 'codex']),
++    ).toEqual(['gemini', 'claude', 'codex']);
++  });
++});

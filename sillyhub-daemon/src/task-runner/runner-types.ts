@@ -167,11 +167,13 @@ export interface RunnerCredentialManager {
 
 /**
  * sillyspec `--tool` 的合法值集（sillyspec CLI VALID_TOOLS，design §2 D-005@v1）。
- * 与 daemon agent-detector 12 provider 中的 6 个同名：claude/cursor/openclaw/codex/
- * gemini/opencode。集中一处便于扩展（CLI 新增工具时同步此表）。
+ * 与 daemon agent-detector 12 provider 中的 7 个同名：claude/zcode/cursor/openclaw/
+ * codex/gemini/opencode（zcode 为 CLI v3.32.2 新增，2026-10-09-workspace-init-skill-gate
+ * D-004@v1 同步）。集中一处便于扩展（CLI 新增工具时同步此表）。
  */
 export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
   'claude',
+  'zcode',
   'cursor',
   'openclaw',
   'codex',
@@ -182,7 +184,7 @@ export const SILLYSPEC_VALID_TOOLS: ReadonlySet<string> = new Set([
 /**
  * agent-detector 探测结果 → sillyspec --tool 工具列表（task-06 / D-005@v1）。
  *
- * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 6 个同名，其余如 copilot/
+ * agent 名 → VALID_TOOLS **同名交集**过滤（12 provider 里 7 个同名，其余如 copilot/
  * hermes/pi/kimi/kiro/antigravity 非 sillyspec 工具名，剔除）。探测失败调用方传
  * undefined 即可（runSillyspecInit 兜底 ['claude']），本函数只做纯映射不兜底。
  */

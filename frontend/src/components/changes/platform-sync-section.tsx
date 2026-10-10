@@ -59,7 +59,9 @@ import type { components } from "@/lib/api-types";
 import {
   listDaemonMachines,
   triggerMachineSillySpecGhostCleanup,
+  triggerMachineSillySpecTombstoneCleanup,
 } from "@/lib/daemon";
+import { listSpecConflicts } from "@/lib/spec-workspaces";
 import { useNotify } from "@/lib/errors";
 import { useMachineSyncActionAccess } from "@/lib/use-machine-sync-action-access";
 import { fetchMyBinding } from "@/lib/workspace-binding";
@@ -154,7 +156,7 @@ type PendingPhase = "waiting" | "succeeded" | "failed" | "timeout";
 
 interface PendingEntry {
   phase: PendingPhase;
-  kind: "resolve" | "ghost_cleanup";
+  kind: "resolve" | "ghost_cleanup" | "tombstone_cleanup";
   /** resolve 专用：冲突行变更名。 */
   change: string | null;
   /** resolve 专用：裁决方向。 */
@@ -179,6 +181,9 @@ function matchesCommandResult(
   entry: Pick<PendingEntry, "kind" | "change" | "strategy">,
 ): boolean {
   if (entry.kind === "ghost_cleanup") return r.action === "ghost_cleanup";
+  if (entry.kind === "tombstone_cleanup") {
+    return r.action === "tombstone_cleanup" && r.change === entry.change;
+  }
   if (r.action !== "resolve" || entry.change === null) return false;
   if (r.change !== entry.change) return false;
   if (entry.strategy && r.strategy && r.strategy !== entry.strategy) {
@@ -265,6 +270,62 @@ export function PlatformSyncSection({
       Date.now() < pollBoostUntil ? ECHO_FAST_POLL_MS : MACHINES_POLL_MS,
   });
 
+  // 注册表侧墓碑数据（D-002@v1 方案A：backend spec-conflicts 直读，零心跳 schema
+  // 改动；60s 轮询对齐 spec-sync-conflict-banner 先例）。daemonId 就绪才查（同一
+  // 数据源机器定位成功=本卡可见前提）。
+  const specConflictsQ = useQuery({
+    queryKey: [...QUERY_KEY_ROOT, "spec-conflicts", workspaceId],
+    queryFn: () => listSpecConflicts(workspaceId, "open"),
+    enabled: daemonId !== null,
+    refetchInterval: 60_000,
+  });
+
+  /**
+   * 墓碑索引（FR-02 纯墓碑判定，D-002@v1 钉死谓词）：注册表行 details_json 的
+   * platform_deleted 非空 **且** conflicting_paths ∖ platform_deleted 为空（注册表
+   * conflicting_paths 是 server_versions ∪ platform_deleted 并集——混合行的
+   * platform_deleted 也非空，单看非空会错 hide 有效裁决入口）。按被删变更名
+   * （platform_deleted 路径剥名，同 CLI 归因规则）建索引；损坏行跳过。
+   */
+  const tombstoneIndex = useMemo(() => {
+    const idx = new Map<string, { paths: string[]; createdAt: string | null }>();
+    for (const row of specConflictsQ.data ?? []) {
+      let details: {
+        platform_deleted?: unknown;
+        conflicting_paths?: unknown;
+        server_versions?: unknown;
+      } | null = null;
+      try {
+        details = row.details_json ? (JSON.parse(row.details_json) as object) : null;
+      } catch {
+        continue; // 损坏行跳过（注册表宽松 JSON）
+      }
+      if (!details) continue;
+      const pd = Array.isArray(details.platform_deleted)
+        ? details.platform_deleted.filter((p): p is string => typeof p === "string")
+        : [];
+      if (pd.length === 0) continue;
+      const cp = Array.isArray(details.conflicting_paths)
+        ? details.conflicting_paths.filter((p): p is string => typeof p === "string")
+        : Object.keys(details.server_versions ?? {});
+      const pdSet = new Set(pd);
+      // 混合形态（去掉墓碑路径后仍有版本冲突面）→ 走现有版本冲突渲染，不进索引。
+      if (cp.some((p) => !pdSet.has(p))) continue;
+      for (const path of pd) {
+        const m = path.match(/^changes\/(?:archive\/)?([^/]+)\//);
+        const name = m?.[1];
+        if (!name) continue;
+        const prev = idx.get(name);
+        if (prev) {
+          prev.paths = [...new Set([...prev.paths, ...pd])];
+        } else {
+          idx.set(name, { paths: pd, createdAt: row.created_at ?? null });
+        }
+      }
+    }
+    return idx;
+  }, [specConflictsQ.data]);
+
   const machine =
     daemonId !== null
       ? (machinesQ.data?.items.find((m) => m.id === daemonId) ?? null)
@@ -303,6 +364,38 @@ export function PlatformSyncSection({
   }, [status]);
 
   const conflicts = status?.pending_conflicts ?? [];
+  /**
+   * 渲染行（FR-02 双源 join）：快照 pending_conflicts 行 + 注册表独有墓碑行
+   * （快照没有的——CLI 旧版无归因记录 / CLI 已清注册表未关期间）。墓碑判定
+   * 双源：注册表索引命中，或快照行 type==='tombstone'（task-05 CLI 透传）。
+   */
+  const renderRows = useMemo(() => {
+    const rows = conflicts.map((c) => {
+      const tomb = tombstoneIndex.get(c.change ?? "") ?? null;
+      return {
+        change: c.change || "",
+        type: c.type,
+        createdAt: c.created_at,
+        qlId: c.ql_id ?? null,
+        isTomb: tomb !== null || c.type === "tombstone",
+        tombPaths: tomb?.paths ?? null,
+      };
+    });
+    const seen = new Set(rows.map((r) => r.change));
+    for (const [name, info] of tombstoneIndex) {
+      if (!seen.has(name)) {
+        rows.push({
+          change: name,
+          type: "tombstone",
+          createdAt: info.createdAt,
+          qlId: null,
+          isTomb: true,
+          tombPaths: info.paths,
+        });
+      }
+    }
+    return rows;
+  }, [conflicts, tombstoneIndex]);
   const ghostCount = status?.ghost_count ?? ghosts.length;
 
   const generatedMs =
@@ -422,6 +515,37 @@ export function PlatformSyncSection({
     );
   };
 
+  /**
+   * 墓碑行「收敛本机目录」（FR-02/FR-03 手动触发通道）：下发 tombstone_cleanup
+   * 指令并登记回显（复用既有 waiting/succeeded/failed/timeout 链路与加速轮询窗）。
+   */
+  const dispatchTombstoneCleanup = (change: string) => {
+    if (!change || machine === null) return;
+    triggerMachineSillySpecTombstoneCleanup(machine.id, {
+      workspace_id: workspaceId,
+      change,
+    })
+      .then(() => {
+        setPendingMap((prev) => ({
+          ...prev,
+          [`tombstone_cleanup:${change}`]: {
+            phase: "waiting",
+            kind: "tombstone_cleanup",
+            change,
+            strategy: null,
+            dispatchedAt: Date.now(),
+            baselineResultKey: commandResultKeyOf(machine.sillyspec_command_result),
+            errorText: null,
+          },
+        }));
+        setPollBoostUntil(Date.now() + ECHO_FAST_WINDOW_MS);
+        notify.success(`指令已下发：收敛 ${change} 本机目录（等待机器回报）`);
+      })
+      .catch((err: unknown) => {
+        notify.error(err, "下发收敛指令失败");
+      });
+  };
+
   const dispatchGhostCleanup = () => {
     if (ghostCount === 0) return;
     modal.confirm({
@@ -481,8 +605,11 @@ export function PlatformSyncSection({
       case "waiting":
         return "已下发 · 等待机器回报";
       case "succeeded":
-        return entry.kind === "ghost_cleanup"
-          ? "清理完成 · 等待快照刷新（≤75 秒）"
+        if (entry.kind === "ghost_cleanup") {
+          return "清理完成 · 等待快照刷新（≤75 秒）";
+        }
+        return entry.kind === "tombstone_cleanup"
+          ? "已收敛 · 等待快照刷新（≤75 秒）"
           : "已消解 · 等待快照刷新（≤75 秒）";
       case "timeout":
         return "150 秒无机器回报（旧版 daemon 可能已忽略）· 可重试";
@@ -503,8 +630,8 @@ export function PlatformSyncSection({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>
             未决冲突{" "}
-            <b className={cn(conflicts.length > 0 && "text-error")}>
-              {conflicts.length}
+            <b className={cn(renderRows.length > 0 && "text-error")}>
+              {renderRows.length}
             </b>{" "}
             · ghost{" "}
             <b className={cn(ghostCount > 0 && "text-error")}>{ghostCount}</b>
@@ -525,23 +652,118 @@ export function PlatformSyncSection({
       }
     >
       {/* 冲突行清单（原型 .row：type 徽章 + 变更名 mono + 活跃警示 + 行内裁决） */}
-      {conflicts.length === 0 ? (
+      {renderRows.length === 0 ? (
         <p className="border-b px-4 py-3 text-xs text-muted-foreground">
           暂无未决同步冲突
         </p>
       ) : (
         <ul className="border-b" data-testid="platform-sync-conflicts">
-          {conflicts.map((c, i) => {
+          {renderRows.map((c, i) => {
             const name = c.change || "—";
             const meta = conflictTypeMeta(c.type);
             const activeWarn = name !== "—" && activeNames.has(name);
-            // 行回显条目 = 两方向中已存在的那条（同刻仅一行一发；失败/超时后恢复）。
+            // 行回显条目 = 两方向中已存在的那条（同刻仅一行一发；失败/超时后恢复）；
+            // 墓碑行另有 tombstone_cleanup 回显键。
             const entry =
               pendingMap[`resolve:${name}:keep_local`] ??
-              pendingMap[`resolve:${name}:take_platform`];
+              pendingMap[`resolve:${name}:take_platform`] ??
+              pendingMap[`tombstone_cleanup:${name}`];
             const waiting = entry?.phase === "waiting";
             const succeeded = entry?.phase === "succeeded";
             const stateText = rowStateText(entry);
+
+            // ── 墓碑形态行（FR-02 三态之二）：露真凶（被删变更名）+ 隐藏必然无效的
+            // 裁决入口（compare/resolve 对纯墓碑拒收无意义），替换为「收敛本机目录」
+            // （③ 手动触发通道；平台删除环自动下发是另一路，这里兜离线场景）。
+            if (c.isTomb) {
+              const tombEntry = pendingMap[`tombstone_cleanup:${name}`];
+              const tombWaiting = tombEntry?.phase === "waiting";
+              const tombStateText = rowStateText(tombEntry);
+              return (
+                <li
+                  key={`tomb-${name}-${i}`}
+                  className="border-b px-4 py-3 last:border-b-0"
+                  data-testid="platform-sync-tombstone-row"
+                >
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-2",
+                      compact && "flex-col items-stretch gap-2",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "flex min-w-0 flex-wrap items-center gap-2",
+                        compact && "items-start",
+                      )}
+                    >
+                      <span
+                        className="shrink-0 rounded bg-error/10 px-1 text-[10px] leading-4 text-error"
+                        data-testid="platform-sync-tombstone-badge"
+                      >
+                        平台已删
+                      </span>
+                      <span className="break-all text-[13px] font-semibold">
+                        {name}
+                      </span>
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">
+                        发现于 {relativeAge(c.createdAt)}
+                      </span>
+                    </div>
+                    {tombStateText && (
+                      <span
+                        data-testid={`platform-sync-state-${tombEntry?.phase}`}
+                        className={cn(
+                          "text-xs",
+                          tombEntry?.phase === "succeeded" && "text-success",
+                          tombEntry?.phase === "timeout" && "text-warning",
+                          tombEntry?.phase === "waiting" && "text-brand-600",
+                        )}
+                      >
+                        {tombStateText}
+                      </span>
+                    )}
+                    {access.canOperate && tombEntry?.phase !== "succeeded" && (
+                      <div className={cn("flex", compact ? "w-full" : "ml-auto")}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={tombWaiting || !machineOnline}
+                          title={
+                            machineOnline
+                              ? "下发 tombstone_cleanup：目录移入 .runtime/tombstone-quarantine/ 隔离区（不硬删，可找回），进度库行归档"
+                              : "机器离线，无法执行本机收敛"
+                          }
+                          onClick={() => dispatchTombstoneCleanup(c.change)}
+                          className={cn(compact && "min-h-[44px] flex-1")}
+                          data-testid="platform-sync-tombstone-converge"
+                        >
+                          收敛本机目录
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-1.5 rounded bg-error/10 px-2 py-1.5 text-xs leading-6 text-muted-foreground">
+                    <b className="text-error">非版本冲突</b> —— 平台侧已删除该变更
+                    （墓碑拒收
+                    {c.tombPaths && c.tombPaths.length > 0
+                      ? `，${c.tombPaths.length} 个路径`
+                      : ""}
+                    ）。「保本地 / 取平台」裁决对它无效；如属误删请在平台恢复变更后走
+                    manifest-heal，或点「收敛本机目录」隔离本地残留。
+                  </div>
+                  {tombEntry?.phase === "failed" && tombEntry.errorText && (
+                    <p
+                      className="mt-1.5 break-all text-xs text-error"
+                      data-testid="platform-sync-fail-text"
+                    >
+                      {tombEntry.errorText}
+                    </p>
+                  )}
+                </li>
+              );
+            }
+
             return (
               <li
                 key={`${c.type ?? "?"}-${name}-${i}`}
@@ -568,12 +790,12 @@ export function PlatformSyncSection({
                     >
                       {meta.label}
                     </span>
-                    {c.ql_id ? (
+                    {c.qlId ? (
                       <>
                         {/* ql 标题（D-004@v1）：quick 冲突显示 QUICKLOG 编号，
                             原始会话 ID 降为灰色小字 */}
                         <span className="break-all text-[13px] font-semibold">
-                          【{c.ql_id}】快速修复
+                          【{c.qlId}】快速修复
                         </span>
                         <code className="break-all font-mono text-[11px] text-muted-foreground">
                           {name}
@@ -585,7 +807,7 @@ export function PlatformSyncSection({
                       </code>
                     )}
                     <span className="whitespace-nowrap text-xs text-muted-foreground">
-                      冲突发生于 {relativeAge(c.created_at)}
+                      冲突发生于 {relativeAge(c.createdAt)}
                     </span>
                     {activeWarn && (
                       <span
@@ -632,8 +854,8 @@ export function PlatformSyncSection({
                           setCompareTarget({
                             change: c.change,
                             kind: c.type === "progress" ? "progress" : "spec-tree",
-                            ql_id: c.ql_id ?? null,
-                            created_at: c.created_at ?? null,
+                            ql_id: c.qlId,
+                            created_at: c.createdAt,
                           });
                         }}
                         className={cn(compact && "min-h-[44px] flex-1")}

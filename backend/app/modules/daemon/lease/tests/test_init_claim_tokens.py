@@ -382,3 +382,86 @@ class TestInitClaimInMemoryNoPlaintext:
         assert _PLATFORM_PLAIN not in meta_json
         assert _MCP_PLAIN not in meta_json
         assert "local_yaml" not in meta_json
+
+
+# ---------------------------------------------------------------------------
+# 用例组 E：init lease 成败门（2026-10-09-workspace-init-skill-gate task-03 / D-006@v1）
+# ---------------------------------------------------------------------------
+
+
+class TestInitLeaseCompleteFailureGate:
+    """Grill UB-1 修复守卫：complete_lease 的 init 回写段加 ``result.status != 'failed'``
+    成败门——daemon init 失败仍以 status='failed' 走 complete 上报（task-runner.ts
+    ``_finish`` 路径），失败时禁止回写 ``init_synced_at``，否则"失败被标已初始化"，
+    前端（手动初始化与创建即初始化）轮询会误报完成。"""
+
+    @pytest.mark.asyncio
+    async def test_failed_complete_does_not_sync_init(self, db_session: AsyncSession) -> None:
+        """FR-05：status='failed' complete → init_synced_* 保持 NULL + warn 日志。"""
+        from app.modules.daemon.lease.service import LeaseService
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        _user_id, rt_id, ws, actor = await _setup(db_session)
+        # 绑定行主键 (workspace_id, actor_user_id)——与 init 回写段读取的复合键一致
+        binding = WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=actor,
+            daemon_id=None,
+            runtime_id=rt_id,
+            root_path="/tmp/init-gate-project",
+            path_source="daemon-client",
+        )
+        db_session.add(binding)
+        await db_session.flush()
+
+        claim_token = "tok-" + uuid.uuid4().hex
+        lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
+        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
+        lease.metadata_["claim_token"] = claim_token
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = LeaseService(db_session)
+        completed = await svc.complete_lease(
+            lease.id, claim_token, {"status": "failed", "error": "init lease failed"}
+        )
+
+        # lease 本身正常完成（成败门只影响回写，不阻塞 complete 流程）
+        assert completed.status == "completed"
+        await db_session.refresh(binding)
+        assert binding.init_synced_at is None
+        assert binding.init_synced_spec_version is None
+
+    @pytest.mark.asyncio
+    async def test_completed_complete_syncs_init_as_before(self, db_session: AsyncSession) -> None:
+        """对照组零回归：status='completed' → 回写行为与现状一致。"""
+        from app.modules.daemon.lease.service import LeaseService
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        _user_id, rt_id, ws, actor = await _setup(db_session)
+        binding = WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=actor,
+            daemon_id=None,
+            runtime_id=rt_id,
+            root_path="/tmp/init-gate-project",
+            path_source="daemon-client",
+        )
+        db_session.add(binding)
+        await db_session.flush()
+
+        claim_token = "tok-" + uuid.uuid4().hex
+        lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
+        # latest_spec_version 非 0 验证回写值透传
+        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
+        lease.metadata_["latest_spec_version"] = 7
+        lease.metadata_["claim_token"] = claim_token
+        db_session.add(lease)
+        await db_session.commit()
+
+        svc = LeaseService(db_session)
+        await svc.complete_lease(lease.id, claim_token, {"status": "completed"})
+
+        await db_session.refresh(binding)
+        assert binding.init_synced_at is not None
+        assert binding.init_synced_spec_version == 7

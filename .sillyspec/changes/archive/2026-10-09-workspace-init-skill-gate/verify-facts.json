@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-09-workspace-init-skill-gate",
+  "generatedAt": "2026-10-09T03:13:38.952Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "backendEndpoints": 631,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-09-workspace-init-skill-gate",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "探针 7 机械判定 partial 的 5 条 acceptance（task-03×2 / task-04×2 / task-05×1）经人工逐条复核均为实际覆盖，判定列已改写 covered×4 + non-testable×1",
+        "condition": "复跑口径：`sillyhub-daemon` 跑 `pnpm vitest run tests/run-sillyspec-init.test.ts tests/sillyspec-tool-mapping.test.ts`；`backend` 跑 `uv run pytest app/modules/daemon/lease/tests/test_init_claim_tokens.py -q --no-cov`；`frontend` 跑 `pnpm vitest run src/components/__tests__/workspace-scan-dialog.test.tsx src/components/workspace-config-card.test.tsx`（三端全绿即复核成立）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/api/workspaces",
+        "rowIdx": 1
+      }
+    ],
+    "declared": 0,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/api/workspaces",
+        "rowIdx": 1
+      }
+    ]
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "sillyhub-daemon/tests/run-sillyspec-init.test.ts",
+      "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py6+jsx5)+fr(6)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-09T03:24:57.608Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

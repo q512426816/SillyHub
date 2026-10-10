@@ -1,0 +1,411 @@
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/flow-state.yaml b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/flow-state.yaml
+new file mode 100644
+index 000000000..fe83def41
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/flow-state.yaml
+@@ -0,0 +1,29 @@
++tier: thin
++legacy_fallback: false
++substeps:
++  artifacts: done
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  CLI 侧 2026-10-09-close-trace-single-set（sillyspec 仓）把收口留痕四件套收敛为单套（只落 change.patch + change-patch.json，对账面并入
++  change-patch.json 的 scopeAudit 子对象）——平台侧配套三件小改：前端 structured-views 新增 change-patch.json 结构化渲染分支（清单摘要 + scopeAudit
++  子对象复用 ScopeAuditView；旧 scope-audit.json 分支保留兜存量归档）；后端 schema.py ChangePatchMeta 契约注释补 scopeAudit 子对象说明（纯 docstring，DTO
++  字段零变化，无需 gen:types）；跨仓契约文档 thin-flow-done-no-scope-audit-snapshot.md 追加单套演进注记。
++
++
++  成功标准：
++
++  - 前端 change-patch.json 文件预览渲染结构化清单面（变更名/patch 状态/文件数/±行数/锚点/sha/冻结时间 + 交付文件表），scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
++
++  - 旧形态归档（四件套/heavy 双件）预览不回归：scope-audit.json 结构化分支与后端回退链原样保留
++
++  - tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
++autopilot: false
++baseline_commit: 1b8c047d3beb903f4213e8509035792e2a52ec9c
++updatedAt: '2026-10-09T07:23:26.231Z'
++baseline_sha256: f961c7cb61e1c190d179496b2a6e16c84ecbc2bb497dc8e2cc30d8cf24b47299
++spec_approved: true
++spec_approved_at: '2026-10-09T07:22:16.956Z'
++spec_approved_by: zcode-close-trace-single-set
++
+diff --git a/backend/app/modules/change/schema.py b/backend/app/modules/change/schema.py
+index 63df2fb86..d862e9c7a 100644
+--- a/backend/app/modules/change/schema.py
++++ b/backend/app/modules/change/schema.py
+@@ -878,6 +878,11 @@ class ChangePatchMeta(BaseModel):
+     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
+     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
+     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
++
++    单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +
++    change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
++    本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
++    存量旧形态归档。
+     """
+ 
+     files: int | None = None
+diff --git a/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md b/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
+index 650aab8ca..1b60c2bda 100644
+--- a/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
++++ b/docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md
+@@ -88,3 +88,19 @@ scope-audit 件」回退用例）——本日复跑双绿。UI 三态降权建
+ 降级路径基本不可达，剩余为极端形态：快照与冻结件双缺——note 自述已覆盖）。
+ 
+ 归档（CLI 两向已提交；平台侧改动在并行会话工作树，随其变更收口）。
++
++## 后续演进：四件双轨 → 单套统一（2026-10-09-close-trace-single-set）
++
++双轨形态运行两日后收敛为单套（用户裁决：一套留痕、平台单读）：
++
++1. **CLI 写侧**：`writeCloseTraceArtifacts` 只落 **change.patch + change-patch.json**
++   两件——原 scope-audit.json 对账面（mode/ok/rows/verdict/closedBy/repos 等）并入
++   change-patch.json 的 **`scopeAudit` 子对象**；顶级键（files/totals/baseline/head/
++   patchSha256/patchStatus/savedAt/modules 等）原位不动。scope-audit.json/.patch 停写。
++2. **CLI 读侧**：快照读序 `change-patch.json.scopeAudit` → 旧 `scope-audit.json` →
++   `.runtime` 快照 → thin 回放 → 实时区间；`--file` 冻结切片 change.patch 优先、
++   scope-audit.patch 兜存量 heavy 归档；防篡改 sha 伴生件读 change-patch.json。
++3. **平台侧**：backend 主读路径本就 change-patch.json/change.patch 优先、顶级字段
++   零变化——无需改逻辑；schema.py 契约注释补 scopeAudit 子对象说明；前端
++   structured-views 新增 change-patch.json 结构化分支（清单面 + scopeAudit 复用
++   ScopeAuditView）。**回退链保留**（其他仓/本仓存量 247 个旧形态归档不动）。
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+index 9e721e4c1..0aa33a434 100644
+--- a/frontend/src/components/files/__tests__/structured-views.test.tsx
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -172,6 +172,69 @@ describe("knownJsonView", () => {
+     expect(container.textContent).toContain("−3");
+   });
+ 
++  // ── 2026-10-09-close-trace-single-set-platform：收口留痕单套清单（含 scopeAudit 子对象）──
++  it("change-patch.json（含 scopeAudit）→ 清单摘要 + 交付文件表 + 对账快照复用", () => {
++    const changePatch = {
++      change: "2026-10-09-demo",
++      baseline: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
++      head: "524546f45bc4149b101c35a0feda8fcd185bdf04",
++      files: ["frontend/src/a.tsx", "docs/x.md"],
++      totals: { files: 2, additions: 30, deletions: 3 },
++      savedAt: "2026-10-09T06:00:00.000Z",
++      patchSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++      patchStatus: "ok",
++      scopeAudit: {
++        mode: "full-flow",
++        ok: true,
++        degradedReason: null,
++        baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
++        totals: { files: 2, additions: 30, deletions: 3 },
++        rows: [
++          { path: "frontend/src/a.tsx", additions: 3, deletions: 3, kind: "modified", verdict: "planned" },
++        ],
++        excluded: { foreignDeclared: [] },
++        closedBy: "flow done",
++      },
++    };
++    const node = knownJsonView("change-patch.json", changePatch);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    const el = container.querySelector('[data-testid="change-patch-view"]');
++    expect(el).not.toBeNull();
++    // 清单摘要面：变更名 / 冻结徽章 / ±统计 / 锚点截断
++    expect(el!.textContent).toContain("2026-10-09-demo");
++    expect(el!.textContent).toContain("✓ patch 已冻结");
++    expect(el!.textContent).toContain("+30");
++    expect(el!.textContent).toContain("−3");
++    expect(el!.textContent).toContain("ec5ee3dcd9db…");
++    // 交付文件表
++    expect(el!.textContent).toContain("frontend/src/a.tsx");
++    expect(el!.textContent).toContain("docs/x.md");
++    // scopeAudit 子对象复用 ScopeAuditView（对账快照小节 + 裁决徽章）
++    expect(el!.textContent).toContain("范围对账快照");
++    expect(el!.querySelector('[data-testid="scope-audit-view"]')).not.toBeNull();
++    expect(el!.textContent).toContain("✓ 计划内");
++  });
++
++  it("change-patch.json（旧形态无 scopeAudit）→ 清单面照常 + 降级说明；结构漂移 → null", () => {
++    const legacy = {
++      change: "2026-09-25-demo",
++      files: ["frontend/src/a.tsx"],
++      totals: { files: 1, additions: 3, deletions: 0 },
++      savedAt: "2026-09-25T06:00:00.000Z",
++      patchStatus: "ok",
++    };
++    const node = knownJsonView("change-patch.json", legacy);
++    expect(node).not.toBeNull();
++    const { container } = render(<div>{node}</div>);
++    const el = container.querySelector('[data-testid="change-patch-view"]');
++    expect(el).not.toBeNull();
++    expect(el!.textContent).toContain("frontend/src/a.tsx");
++    expect(el!.textContent).toContain("无 scopeAudit 对账面");
++    // 名字命中但结构漂移（files 非数组）→ null（回落 JsonView）
++    expect(knownJsonView("change-patch.json", { change: "x", totals: {} })).toBeNull();
++  });
++
+   it("apply-manifest.json → 哈希清单表格", () => {
+     const node = knownJsonView("apply-manifest.json", applyManifest);
+     expect(node).not.toBeNull();
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index a91e8a8e6..2ba491e5a 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -237,7 +237,7 @@ export function DiffView({ content }: { content: string }) {
+ 
+ // ── 固定结构 JSON 表格视图（ql-20260917-010）──────────────────────────
+ //
+-// scope-audit / apply-manifest / verify-facts 是 sillyspec 产出的固定结构
++// scope-audit / change-patch / apply-manifest / verify-facts 是 sillyspec 产出的固定结构
+ // 报告文件，折叠树对人类不友好——按文件名 + 结构特征分发到专用摘要视图；
+ // 不命中（结构漂移/其他 json）回落 JsonView 折叠树。
+ 
+@@ -352,6 +352,64 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
+   );
+ }
+ 
++/**
++ * change-patch.json：收口留痕单套清单（2026-10-09-close-trace-single-set 起 sillyspec
++ * 只落 change.patch + change-patch.json 两件——对账面并入 scopeAudit 子对象；旧归档仍可能
++ * 是四件套/双件形态，scope-audit.json 分支保留兜底）。上半=交付清单摘要（顶级键），下半=
++ * 对账快照（scopeAudit 子对象复用 ScopeAuditView）。
++ */
++function ChangePatchView({ value }: { value: JsonRecord }) {
++  const totals = isRecord(value.totals) ? value.totals : {};
++  const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
++  const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter((f) => typeof f === "string") : [];
++  const patchStatus = value.patchStatus === "ok";
++  const scopeAudit = isRecord(value.scopeAudit) ? value.scopeAudit : null;
++  const hasAuditFace = scopeAudit !== null && Array.isArray(scopeAudit.rows) && isRecord(scopeAudit.totals);
++  return (
++    <div data-testid="change-patch-view" className="flex flex-col gap-3">
++      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
++        {typeof value.change === "string" && <MetaItem label="变更" value={value.change} mono />}
++        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", patchStatus ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>
++          {patchStatus ? "✓ patch 已冻结" : "⚠️ patch 采集失败"}
++        </span>
++        <MetaItem label="文件" value={String(num(totals.files) || files.length)} />
++        <span className="text-success">+{num(totals.additions)}</span>
++        <span className="text-error">−{num(totals.deletions)}</span>
++        {typeof value.baseline === "string" && (
++          <MetaItem label="baseline" value={value.baseline.slice(0, 12) + "…"} mono title={value.baseline} />
++        )}
++        {typeof value.head === "string" && (
++          <MetaItem label="head" value={value.head.slice(0, 12) + "…"} mono title={value.head} />
++        )}
++        {typeof value.patchSha256 === "string" && (
++          <MetaItem label="sha256" value={value.patchSha256.slice(0, 12) + "…"} mono title={value.patchSha256} />
++        )}
++        {typeof value.savedAt === "string" && (
++          <MetaItem label="冻结时间" value={new Date(value.savedAt).toLocaleString("zh-CN")} />
++        )}
++      </div>
++      <DataTable head={["#", "交付文件"]}>
++        {files.slice(0, 500).map((f, i) => (
++          <tr key={i} className="border-t border-border">
++            <td className="px-2.5 py-1.5 text-right text-muted-foreground">{i + 1}</td>
++            <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">{String(f)}</td>
++          </tr>
++        ))}
++      </DataTable>
++      {hasAuditFace && scopeAudit ? (
++        <>
++          <SectionTitle>范围对账快照</SectionTitle>
++          <ScopeAuditView value={scopeAudit} />
++        </>
++      ) : (
++        <p className="text-[11px] text-muted-foreground">
++          无 scopeAudit 对账面（旧形态冻结件或纯清单收口）——完整对账表走变更中心 scope-audit 查询。
++        </p>
++      )}
++    </div>
++  );
++}
++
+ /** apply-manifest.json：应用清单摘要 + 文件哈希表格。 */
+ function ApplyManifestView({ value }: { value: JsonRecord }) {
+   const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter(isRecord) : [];
+@@ -495,6 +553,11 @@ export function knownJsonView(name: string, value: JsonValue): ReactNode | null
+   if (basename === "scope-audit.json" && Array.isArray(value.rows) && isRecord(value.totals)) {
+     return <ScopeAuditView value={value} />;
+   }
++  // change-patch.json（收口留痕单套清单，2026-10-09 起）：files 数组=清单面特征；
++  // scopeAudit 子对象在场则叠加对账快照视图
++  if (basename === "change-patch.json" && Array.isArray(value.files)) {
++    return <ChangePatchView value={value} />;
++  }
+   if (basename === "apply-manifest.json" && Array.isArray(value.files)) {
+     return <ApplyManifestView value={value} />;
+   }
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/design.md b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/design.md
+new file mode 100644
+index 000000000..1fcdc5219
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T07:21:15.089Z
++---
++# 设计记录（Design Record）— 2026-10-09-close-trace-single-set-platform
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++CLI 仓 2026-10-09-close-trace-single-set 把收口留痕四件套收敛为单套（只落 change.patch + change-patch.json，原 scope-audit.json 对账面并入 change-patch.json 的 scopeAudit 子对象）。平台侧配套三件小改：前端 structured-views.tsx 新增 ChangePatchView（清单摘要条 + 交付文件表 + scopeAudit 子对象复用既有 ScopeAuditView），knownJsonView 分发点新增 change-patch.json 分支（files 数组为特征，旧三分支零改动）；后端 schema.py 仅更新 ChangePatchMeta docstring 说明新契约（DTO 字段零变化）；跨仓契约文档追加演进注记。复用既有 MetaItem/DataTable/SectionTitle/ScopeAuditView 组件，与既有结构化视图同构，不动后端读取路径——顶级字段已含卡面所需全部数据，后端零改动是本方案的核心取舍。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- frontend knownJsonView(name, value)：新增 change-patch.json 命中（basename 判定 + files 数组特征）→ ChangePatchView；既有 scope-audit.json/apply-manifest.json/verify-facts.json 三分支零改动。
++- backend ChangePatchMeta DTO：字段零变化（docstring-only）——无需 pnpm gen:types。
++- assets.py 读取路径 / 端点：零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++纯展示组件按值渲染，无时序假设；scopeAudit 子对象缺席/畸形走降级说明文案（文件预览不白屏）。CLI 与平台镜像同步的时序差（旧 CLI + 新前端或反之）无影响——两形态各自独立分支互不依赖。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++无共享可变状态（React 纯函数组件，props 驱动渲染）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++纯渲染无副作用/无订阅，组件卸载即回收，无残留状态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++按 basename 分发，同目录其他 json 不受影响；旧名分支保留兜存量归档（其他仓镜像仍为旧形态）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：CLI 新形态落盘字段与前端特征判定脱节（如 files 非数组）——已知防御：特征判定失败回落 JsonView 折叠树（既有机制），不白屏。放弃方案：改后端 assets.py 读 scopeAudit 子对象做投影——顶级字段（files/totals/patchStatus/savedAt）已含卡面全部所需，子对象仅前端预览增值面，动后端是无效改动面。
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/proposal.md b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/proposal.md
+new file mode 100644
+index 000000000..d7ef91abc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T07:21:15.088Z
++---
++# 提案书（Proposal）— 2026-10-09-close-trace-single-set-platform
++
++## 动机
++
++任务原话转写：CLI 侧 2026-10-09-close-trace-single-set（sillyspec 仓）把收口留痕四件套收敛为单套（只落 change.patch + change-patch.json，对账面并入 change-patch.json 的 scopeAudit 子对象）——平台侧配套三件小改：前端 structured-views 新增 change-patch.json 结构化渲染分支（清单摘要 + scopeAudit 子对象复用 ScopeAuditView；旧 scope-audit.json 分支保留兜存量归档）；后端 schema.py ChangePatchMeta 契约注释补 scopeAudit 子对象说明（纯 docstring，DTO 字段零变化，无需 gen:types）；跨仓契约文档 thin-flow-done-no-scope-audit-snapshot.md 追加单套演进注记。
++
++成功标准：
++- 前端 change-patch.json 文件预览渲染结构化清单面（变更名/patch 状态/文件数/±行数/锚点/sha/冻结时间 + 交付文件表），scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
++- 旧形态归档（四件套/heavy 双件）预览不回归：scope-audit.json 结构化分支与后端回退链原样保留
++- tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. 前端 change-patch.json 文件预览渲染结构化清单面（变更名/patch 状态/文件数/±行数/锚点/sha/冻结时间 + 交付文件表），scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
++2. 旧形态归档（四件套/heavy 双件）预览不回归：scope-audit.json 结构化分支与后端回退链原样保留
++3. tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
++
++## 成功标准（可验证）
++
++1. 前端 change-patch.json 文件预览渲染结构化清单面（变更名/patch 状态/文件数/±行数/锚点/sha/冻结时间 + 交付文件表），scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
++2. 旧形态归档（四件套/heavy 双件）预览不回归：scope-audit.json 结构化分支与后端回退链原样保留
++3. tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/requirements.md b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/requirements.md
+new file mode 100644
+index 000000000..dfce9e246
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/requirements.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T07:21:15.089Z
++---
++# 需求规格（Requirements）— 2026-10-09-close-trace-single-set-platform
++
++## 功能需求
++
++### FR-01: 前端 change-patch.json 文件预览渲染结构化清单面，scopeAudit 子对象在场时叠加对账快照视图，缺席时降级说明
++
++- 必须：structured-views.tsx 的 knownJsonView 对 basename=change-patch.json 且 files 为数组的 JSON 分发到专用视图 ChangePatchView：摘要条（变更名/patch 状态徽章/文件数/±行数/baseline/head/sha256/冻结时间）+ 交付文件表（≤500 行）；scopeAudit 子对象含 rows 数组与 totals 时复用 ScopeAuditView 渲染对账快照，缺席时显示降级说明文案。
++- 禁止：移除或改动 scope-audit.json 既有结构化分支与后端 assets.py 的 scope-audit.json 回退链（存量归档仍为旧形态）。
++
++#### 场景：主路径
++- Given 新形态归档（change-patch.json 含 scopeAudit 子对象），When 前端预览该文件，Then 渲染结构化清单摘要 + 交付文件表 + 对账快照视图，非纯 JSON 折叠树。
++- Given 旧形态 thin 冻结件（change-patch.json 无 scopeAudit 子对象），When 预览，Then 清单面照常 + 降级说明文案。
++
++### FR-02: 旧形态归档（四件套/heavy 双件）预览不回归
++
++- 必须：scope-audit.json 结构化分支（rows 数组 + totals 特征判定）原样保留；后端 assets.py/_read_patch_meta 的 scope-audit.json 回退路径与 _read_patch_file_diff 的 scope-audit.patch 回退路径零改动（本次仅 schema.py docstring 注释更新）。
++
++#### 场景：主路径
++- Given 存量 heavy 双件归档（仅 scope-audit.json/.patch），When 前端预览 scope-audit.json，Then 既有 ScopeAuditView 照常渲染。
++
++### FR-03: tsc --noEmit 通过；change 模块相关测试无新增失败（预存环境错误除外）
++
++- 必须：frontend tsc --noEmit 退出码 0；backend change 模块测试错误数不高于基线（预存 28 个环境 ERROR 与本次改动无关，stash 对照已验证基线同象）。
++
++#### 场景：主路径
++- Given 前端改动完成，When 跑 npx tsc --noEmit，Then exit 0。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/files/__tests__/structured-views.test.tsx「change-patch.json（含 scopeAudit）→ 清单摘要 + 交付文件表 + 对账快照复用」「change-patch.json（旧形态无 scopeAudit）→ 清单面照常 + 降级说明；结构漂移 → null」（评审 P2 清偿：仓内实有组件测试面，初版作答有误）
++FR-02: frontend/src/components/files/__tests__/structured-views.test.tsx「scope-audit.json → 裁决表格（徽章/路径/统计齐全）」（既有用例不改动即过=旧分支零回归）+ 代码 diff 审阅（knownJsonView 仅新增分支）
++FR-03: frontend `npx tsc --noEmit`（exit 0 实测）+ vitest structured-views 21/21 + backend pytest change 模块（28 预存 ERROR 与基线同象，零新增）
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/tasks.md b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/tasks.md
+new file mode 100644
+index 000000000..85eb6ca9e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T07:21:15.089Z
++---
++# 任务注册表（Tasks）— 2026-10-09-close-trace-single-set-platform
++
++- [x] task-01: 前端 structured-views 新增 ChangePatchView + knownJsonView 分支（tsc 绿）
++- [x] task-02: schema.py ChangePatchMeta docstring 契约注记（字段零变化）
++- [x] task-03: 契约文档 thin-flow-done-no-scope-audit-snapshot.md 追加单套演进注记
+diff --git a/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/review.json.superseded-20261009T073430 b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/review.json.superseded-20261009T073430
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-close-trace-single-set-platform/review.json.superseded-20261009T073430
+@@ -0,0 +1,28 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-09-close-trace-single-set-platform",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "52606a985daca9adde76255ef1cfc93006194336",
++  "findings": [
++    {
++      "severity": "P2",
++      "title": "FR-01 新分支零测试且测试绑定声明失实：knownJsonView 既有测试面存在但未加 change-patch.json 用例",
++      "evidence": "requirements.md FR-01 测试绑定声称「前端展示组件仓无组件测试面」，但 structured-views.test.tsx 存在 knownJsonView describe 块（覆盖三个既有分支分发 + null 回落），本次在 structured-views.tsx:557 新增的 change-patch.json 分支与 ChangePatchView 的 scopeAudit 降级路径均无对应用例——按既有模式补一条 vitest 用例成本极低却被跳过，FR-01 验收仅剩 tsc 类型检查。",
++      "location": "frontend/src/components/files/__tests__/structured-views.test.tsx:128"
++    },
++    {
++      "severity": "P3",
++      "title": "ApplyManifestView 函数签名行与首语句被意外合并为一行（越界格式回归）",
++      "evidence": "change.patch 中 ApplyManifestView 首行被改为 `function ApplyManifestView(...) {  const files = ...`（原为两行），语义等价但属声明范围外的顺手改动，与 design「旧三分支零改动」的零侵入承诺不符，且会触发 prettier/格式检查告警。",
++      "location": "frontend/src/components/files/structured-views.tsx:414"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-09T07:31:08Z"
++}

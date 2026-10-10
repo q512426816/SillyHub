@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-close-trace-single-set-platform",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "52606a985daca9adde76255ef1cfc93006194336",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-01 新分支零测试且测试绑定声明失实：knownJsonView 既有测试面存在但未加 change-patch.json 用例",
+      "evidence": "requirements.md FR-01 测试绑定声称「前端展示组件仓无组件测试面」，但 structured-views.test.tsx 存在 knownJsonView describe 块（覆盖三个既有分支分发 + null 回落），本次在 structured-views.tsx:557 新增的 change-patch.json 分支与 ChangePatchView 的 scopeAudit 降级路径均无对应用例——按既有模式补一条 vitest 用例成本极低却被跳过，FR-01 验收仅剩 tsc 类型检查。",
+      "location": "frontend/src/components/files/__tests__/structured-views.test.tsx:128"
+    },
+    {
+      "severity": "P3",
+      "title": "ApplyManifestView 函数签名行与首语句被意外合并为一行（越界格式回归）",
+      "evidence": "change.patch 中 ApplyManifestView 首行被改为 `function ApplyManifestView(...) {  const files = ...`（原为两行），语义等价但属声明范围外的顺手改动，与 design「旧三分支零改动」的零侵入承诺不符，且会触发 prettier/格式检查告警。",
+      "location": "frontend/src/components/files/structured-views.tsx:414"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-09T07:31:08Z"
+}

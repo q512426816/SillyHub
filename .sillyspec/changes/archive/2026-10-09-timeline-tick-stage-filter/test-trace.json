@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-timeline-tick-stage-filter",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-timeline-tick-stage-filter"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-timeline-tick-stage-filter"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-timeline-tick-stage-filter:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_timeline.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-timeline-tick-stage-filter"
+    }
+  ]
+}

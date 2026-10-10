@@ -1864,3 +1864,91 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：2c168156b0f004d395095ee5e3739f8b3719d795
 理由：最大风险：测试面——多处既有 harness 以工厂 mock `@/lib/api/session-attachments`，缺新用到的 `fetchAttachmentBlob` 导出时组件 import 可能拿到 undefined；本变更只在实际点击预览时调用该函数，且对涉及的 mock 顺手补齐该导出。放弃的方案：给 chip 整体包 `<button>` 再给 X `stopPropagation`——嵌套按钮非法 HTML 且事件冒泡补丁脆弱，改为文件名区与 X 两个独立兄弟按钮，无冒泡依赖。
+
+## D-001@v1 init 时写入 skill 走 sillyspec init 自带 skills 复制（去掉 --no-skills）
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：用户明确「sillyspec init 里面会写 skill」——即启用 sillyspec CLI init 自带的 skills 复制段（daemon 侧 runSillyspecInit 当前以 --no-skills 关闭）。本决策修订 2026-08-15-init-trigger-sillyspec-init 变更 D-004@v1（supersedes）。
+故障面：双渠道在 .claude/skills/sillyspec-* 上后写覆盖（skill-manager spawn 前 link 覆盖 init 时写入），版本可能漂移（daemon 本地 npm 包 vs 服务器 bundle 静态目录），无害。
+退役判据：skill-manager 升级为多端分发时，可再次关闭 init 复制段恢复单渠道。
+
+## D-002@v1 未初始化门禁仅前端引导，后端不硬拦
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：用户选「仅前端引导」——后端不加硬门禁（不返回 409），前端在成员绑定未初始化（init_synced_at 为空）时对工作区使用入口做引导提示，引导用户去初始化。门禁维度为成员/机器（一台机器未初始化不影响另一台）。
+故障面：直接调 API 绕过前端引导仍可对未初始化工作区派任务（用户已知情选择）。
+
+## D-003@v1 创建完成后前端串行调用初始化
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：用户选「前端串行调用」——创建接口成功返回后，前端紧接着调现有初始化接口（POST /api/workspaces/{id}/init），创建弹窗内展示初始化进度直到完成（复用 handleInit 轮询模式）。创建时未绑定 daemon_id（无法定位机器）则跳过自动初始化，保持现状等用户绑定机器后手动初始化。
+
+## D-006@v1 init lease 失败禁止回写 init_synced_at（成败门）
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：Grill 独立审查 UB-1 实证：daemon init 失败仍以 status='failed' 走 completeLease 上报（sillyhub-daemon/src/task-runner.ts:1070-1080），后端回写段只判 mode=='init' 不分成败（backend/app/modules/daemon/lease/service.py:531-542）——失败数秒内 init_synced_at 即被写入。修复：回写段加 `result.get("status") != "failed"` 门，失败跳过回写 + warn 日志 init_lease_failed_no_synced。这也是 FR-04 前端"轮询非空=成功"语义成立的前置。
+故障面：init 失败后 init_synced_at 恒 NULL，若用户不重试则详情页长期显示"未初始化"——正确语义，重试路径通畅（新 lease 行）。
+退役判据：无（字段语义修正，不回退）。
+
+## D-005@v1 方案A 最小链路
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：用户选方案A：daemon 去掉 --no-skills 让 sillyspec init 按 --tool 交集写多端 skill；版本门控提升 ≥3.32.2；前端创建弹窗串行初始化展示进度；详情页轻引导。否决理由——B：三端抽公共组件改动面大收益小（新增 UI 仅创建弹窗一处，详情页已有完整实现）；C：初始化时刻本地仍无 skill 不满足直接诉求，且动任务执行热路径（skill-manager 每次 spawn 前跑）。
+故障面：前端串行链路任一环失败（initDispatch 5xx / 轮询超时）都会让"创建即初始化"降级为"已创建待手动初始化"——出口文案必须明示两态，防止用户误以为创建失败。
+退役判据：若后端 create 接口未来内嵌派发（原子化），前端串行状态机整体退役。
+
+## D-004@v1 SILLYSPEC_VALID_TOOLS 同步 CLI v3.32.2 补 zcode
+状态：implemented
+变更：2026-10-09-workspace-init-skill-gate
+锚点：未记录
+最近确认：ad53f7271
+理由：代码查证：sillyspec CLI v3.32.2 VALID_TOOLS = [claude, zcode, cursor, openclaw, codex, gemini, opencode]（含 zcode），daemon 端 SILLYSPEC_VALID_TOOLS 落后缺 zcode（注释自述「CLI 新增工具时同步此表」）。zcode 技能复制双层缺口于 2026-10-09 修复（sillyspec commit 016968bd，v3.32.2）。
+故障面：机器上 sillyspec 版本 <3.32.2 时 zcode 端技能复制静默缺失（CLI 静默忽略未知 tool）。
+退役判据：无（跟随 CLI VALID_TOOLS 演进同步）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-timeline-tick-stage-filter
+锚点：未记录
+最近确认：ece14180dc23240f0a83d34f61bc9aab0d9d2f16
+理由：最大风险：tasks 域内仍无法区分 tasks.md 与 tasks/task-NN.md 卡片的勾选计数（卡片段落勾选会以「tasks · checked N→M」进入推断）——这是 CLI 同款已知诚实面限制（事件只记计数不记任务 id），本次对齐 CLI 语义不扩大不收窄。试过放弃：①events 表加 stage 列 + watcher 推送带 stage——需 schema 迁移与历史回填，跨仓协同成本远超收益；②按 detail 前缀白名单枚举具体 stage 名（design/proposal…）——黑名单式枚举漏新 stage 域，白名单「仅 tasks 参与」与 CLI 语义一致更稳。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-thin-hide-step-timeline
+锚点：未记录
+最近确认：bb504f72b29ed001ef798b89b79e99bc8ce9b830
+理由：最大风险：出身误判导致厚变更卡片被误隐藏——缓解：复用已被 thin-badge-survives-archive / thin-display-fix 两个变更钉过的既有谓词，不引入新判定逻辑。试过放弃的方案：①按「3 行同一时间戳 + stage=archive」特征过滤补种行——放弃，脆弱启发式且过滤后必空卡；②后端停止补种 steps——放弃，补种行承载归档终态投影语义（status=archived 读时覆盖依赖 latest_progress），前端隐藏是展示层正确切面。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-knowledge-touch-marker-sunset
+锚点：未记录
+最近确认：54e72b580d5108fd12c60fad18c2c31ca0d51535
+理由：最大风险：归档态语义预期错位——用户若期待「归档后收窄为权威面」，本变更是明示不收窄（文案诚实化对冲：口径写清是注入命中留痕）。放弃的方案：① 恢复 CLI 待复核标记落盘（2026-09-29 已实证否决，反向开倒车）；② 平台按域收窄 live 数据面（改的是数据口径，会连带影响 knowledge-stats 运营指标消费，超出本变更范围且无消费者支撑）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-09-close-trace-single-set-platform
+锚点：未记录
+最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967
+理由：最大风险：CLI 新形态落盘字段与前端特征判定脱节（如 files 非数组）——已知防御：特征判定失败回落 JsonView 折叠树（既有机制），不白屏。放弃方案：改后端 assets.py 读 scopeAudit 子对象做投影——顶级字段（files/totals/patchStatus/savedAt）已含卡面全部所需，子对象仅前端预览增值面，动后端是无效改动面。
+
+## D-002@v1 实现架构=方案 A（注册表直读 + 指令通道复用）
+状态：implemented
+变更：2026-10-09-tombstone-conflict-root-fix
+锚点：未记录
+最近确认：2f6d52515
+理由：用户选方案 A（推荐）。②前端从 backend `spec_conflicts` 注册表直读 platform_deleted（`_upsert_sync_conflict` 已把 details_json.platform_deleted 落库，daemon 心跳链路零改动）；③平台删除变更入口复用 resolve/ghost_cleanup 指令通道新增 `tombstone_cleanup` action，回执走既有 `sillyspec_command_result`。拒 B（backend 注册表已有同样数据，心跳 model→openapi→api-types→前端四层透传属重复建设，且 daemon 不发版前端上不了）；拒 C（CLI 自动动用户目录违反 SpecPushConflict 人工拍板语义——spec-sync.ts:259 钉死注释；daemon 自动同步链路不经 CLI，覆盖不全）。
+故障面：②依赖 daemon 上报的冲突与注册表行的时间差（心跳 15s + 采集 ≤75s，前端以注册表为准展示墓碑详情）；③旧 daemon 静默忽略指令（150s 超时回显恢复，与 resolve/ghost_cleanup 同款既有兜底）。
+退役判据：若未来冲突展示统一收敛到单一数据源（注册表），②的直读即终态；若指令通道升级为推送制，③的轮询复用段随之迁移。

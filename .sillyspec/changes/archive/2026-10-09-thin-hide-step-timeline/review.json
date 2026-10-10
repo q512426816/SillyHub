@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-thin-hide-step-timeline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "77897c3b58ff8f9dda3129a08a00502881de423a",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——晚到补种 steps 等下一次 10s 轮询翻卡，谓词纯派生每渲染重算，无顺序假设）",
+    "并发": "ok（边界已裁决：可接受——纯只读渲染路径零写入，diff 四文件均无写面）",
+    "切换": "ok（边界已裁决：可接受——thin 分支不渲染阶段节点、focusStage 无 setter 入口恒 null，已核 page.tsx:140/327 与 mobile-change-detail.tsx:389/508/720）",
+    "作用域": "ok（边界已裁决：可接受——isThinLineageChange 为 change 对象纯函数逐条判定，含 created_at≥2026-09-25 时间窗双保险，无共享状态）"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "design 风险与死路：放弃「后端停止补种 steps」——补种行承载归档终态投影语义（status=archived 读时覆盖依赖 latest_progress），前端隐藏是展示层正确切面",
+      "verdict": "可接受",
+      "reason": "数据层终态投影语义保持完整；隐藏纯展示层、可逆、不触厚变更渲染路径，无数据正确性风险"
+    },
+    {
+      "boundary": "design 做法概述：整卡隐藏而非「过滤补种行」（thin steps 只有补种行，过滤后必空卡）",
+      "verdict": "可接受",
+      "reason": "谓词③分支（thin-lineage.ts:31-35）对含标准四阶段痕迹的 steps 判非 thin，任何后续落标准 steps 的变更自然翻回厚侧渲染，无信息丢失路径"
+    },
+    {
+      "boundary": "design 盲维1：晚到补种 steps 到达后需下一次 10s 轮询才翻卡可见性",
+      "verdict": "可接受",
+      "reason": "轮询整体到达为既有架构，谓词对 change 载荷每次渲染重算、翻卡确定性成立，陈旧窗口上限一个轮询周期"
+    },
+    {
+      "boundary": "requirements FR-01 在途 thin 场景：依赖原有 steps 空降级语义自然覆盖（行为不变）",
+      "verdict": "可接受",
+      "reason": "steps 空/缺失时挂载条件本就不渲染；FR-03 钉子（page-restore-assets.test.tsx:177，fixture 默认 thin+quick+空 steps）恰好钉住该路径且零改动"
+    },
+    {
+      "boundary": "FR-04：仅跑定向测试不跑全量（全量留给 CI）",
+      "verdict": "可接受",
+      "reason": "纯前端条件渲染、四文件交付面；本评审独立复跑同范围（page-restore-assets 11 + mobile-change-detail 18 + page-team-toggle 13 + page-last-signal 5 + change-step-timeline 19 = 66/66 绿），与 visual-evidence 声称的 11/11、18/18、37/37 逐项吻合"
+    }
+  ],
+  "reviewedAt": "2026-10-09T12:27:30+08:00"
+}

@@ -5008,6 +5008,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/sillyspec-tombstone-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Tombstone Cleanup
+         * @description 推送 sillyspec 墓碑收敛指令到指定机器（admin，2026-10-09 FR-03）。
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_tombstone_cleanup``（fire-and-forget，无回执，同
+         *     SILLYSPEC_UPDATE 语义，不排队不落库）；daemon 收到后把本机变更目录移入
+         *     ``.sillyspec/.runtime/tombstone-quarantine/`` 隔离区（移动不删除）并归档
+         *     进度库行，结果经心跳 sillyspec_command_result（action='tombstone_cleanup'）
+         *     回传。本端点是前端墓碑行「收敛本机目录」按钮的手动触发通道（平台删除
+         *     变更时的自动下发走 delete_change 收敛环，不经此端点）。权限/归属校验与
+         *     504 结构与 sillyspec-resolve 同款（RuntimeAdminUser +
+         *     ``_get_owned_instance`` owner 与平台管理员放行 + workspace 成员校验）。
+         */
+        post: operations["trigger_machine_sillyspec_tombstone_cleanup_api_daemon_machines__instance_id__sillyspec_tombstone_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/machines/{instance_id}/sillyspec-conflicts/{change}/compare": {
         parameters: {
             query?: never;
@@ -13907,9 +13937,10 @@ export interface components {
          * ChangeKnowledgeTouch
          * @description 知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
          *
-         *     本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
-         *     （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
-         *     不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+         *     本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
+         *     的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
+         *     定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
+         *     落盘，标记反查面拆除，此即唯一来源与口径）。
          */
         ChangeKnowledgeTouch: {
             /** Id */
@@ -18986,6 +19017,23 @@ export interface components {
             changes?: components["schemas"]["DaemonHeartbeatSillySpecChange"][] | null;
             /** Pending Conflicts */
             pending_conflicts?: components["schemas"]["DaemonHeartbeatSillySpecConflict"][] | null;
+        };
+        /**
+         * MachineSillySpecTombstoneCleanupRequest
+         * @description Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
+         *
+         *     ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
+         *     其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
+         *     双保险，backend 只做格式校验）。
+         */
+        MachineSillySpecTombstoneCleanupRequest: {
+            /** Change */
+            change: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * MachineSillySpecUpdateRead
@@ -37105,6 +37153,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_tombstone_cleanup_api_daemon_machines__instance_id__sillyspec_tombstone_cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineSillySpecTombstoneCleanupRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

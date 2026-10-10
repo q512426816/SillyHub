@@ -14,6 +14,9 @@ import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 
 const daemonApi = vi.hoisted(() => ({ listDaemonInstances: vi.fn() }));
 const workspacesApi = vi.hoisted(() => ({ createWorkspace: vi.fn() }));
+// 2026-10-09-workspace-init-skill-gate task-04 / FR-04：创建后自动初始化链路的两个依赖。
+const specWorkspacesApi = vi.hoisted(() => ({ initDispatch: vi.fn() }));
+const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
 const notify = vi.hoisted(() => ({
   success: vi.fn(),
   warning: vi.fn(),
@@ -32,6 +35,22 @@ vi.mock("@/lib/workspaces", async () => {
     "@/lib/workspaces",
   );
   return { ...actual, createWorkspace: workspacesApi.createWorkspace };
+});
+
+vi.mock("@/lib/spec-workspaces", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/spec-workspaces")>(
+      "@/lib/spec-workspaces",
+    );
+  return { ...actual, initDispatch: specWorkspacesApi.initDispatch };
+});
+
+vi.mock("@/lib/workspace-binding", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/workspace-binding")>(
+      "@/lib/workspace-binding",
+    );
+  return { ...actual, fetchMyBinding: bindingApi.fetchMyBinding };
 });
 
 // useNotify 依赖 antd App 上下文，这里直接换纯函数实现。
@@ -192,5 +211,127 @@ describe("WorkspaceScanDialog slug 字段", () => {
     expect(workspacesApi.createWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "custom-slug" }),
     );
+  });
+});
+
+describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-skill-gate task-04 / FR-04 / D-003@v1）", () => {
+  beforeEach(() => {
+    // shouldAdvanceTime：保留 waitFor 的时间推进（fake timers 会冻结其内部轮询），
+    // 同时 advanceTimersByTimeAsync 仍可控 setInterval/setTimeout。
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      {
+        id: "d1",
+        hostname: "host-a",
+        display_alias: null,
+        status: "online",
+        providers: [{ provider: "claude_code" }],
+      },
+    ]);
+    workspacesApi.createWorkspace.mockResolvedValue(makeCreatedWorkspace());
+    specWorkspacesApi.initDispatch.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  async function submitCreate() {
+    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />);
+    const daemonSelect = screen.getByRole("combobox");
+    await waitFor(() =>
+      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(
+        1,
+      ),
+    );
+    fireEvent.change(daemonSelect, { target: { value: "d1" } });
+    fireEvent.change(screen.getByLabelText("工作区路径"), {
+      target: { value: "C:\repo\demo" },
+    });
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+  }
+
+  it("全链路成功：创建 → initDispatch → 轮询到 init_synced_at 非空 → done 态 + 打开按钮调 onCreated", async () => {
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      init_synced_at: "2026-10-09T02:00:00Z",
+      init_synced_spec_version: 3,
+    });
+    await submitCreate();
+
+    await waitFor(() =>
+      expect(workspacesApi.createWorkspace).toHaveBeenCalled(),
+    );
+    await waitFor(() =>
+      expect(specWorkspacesApi.initDispatch).toHaveBeenCalledWith("ws-1"),
+    );
+    // 初始化中态：两步进度可见 + 取消禁用
+    expect(screen.getByText("初始化工作区")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
+
+    // 第一个 2s tick 轮询到非空 → done
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await screen.findByText("初始化完成，工作区可以使用了。")).toBeInTheDocument();
+  });
+
+  it("initDispatch 拒绝 → init_failed 态：文案明示已创建成功 + 双出口可达 onCreated（不回滚）", async () => {
+    specWorkspacesApi.initDispatch.mockRejectedValue(new Error("daemon 离线"));
+    const onCreated = vi.fn();
+    render(<WorkspaceScanDialog onCreated={onCreated} onCancel={vi.fn()} />);
+    const daemonSelect = screen.getByRole("combobox");
+    await waitFor(() =>
+      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(
+        1,
+      ),
+    );
+    fireEvent.change(daemonSelect, { target: { value: "d1" } });
+    fireEvent.change(screen.getByLabelText("工作区路径"), {
+      target: { value: "C:\repo\demo" },
+    });
+    fireEvent.change(screen.getByLabelText("工作区类型"), {
+      target: { value: "other" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
+
+    expect(await screen.findByText("工作区已创建成功，但初始化失败")).toBeInTheDocument();
+    expect(
+      screen.getByText(/可稍后在.*详情页.*重新初始化/),
+    ).toBeInTheDocument();
+    // 失败不回滚：两个出口均可达 onCreated
+    fireEvent.click(screen.getByRole("button", { name: "稍后手动初始化" }));
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("轮询超时（5min 无 init_synced_at）→ init_failed 态", async () => {
+    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
+    await submitCreate();
+
+    await waitFor(() =>
+      expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
+    );
+    // 推进 5 分钟（含多个 2s tick，fetchMyBinding 恒 null）
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(await screen.findByText("工作区已创建成功，但初始化失败")).toBeInTheDocument();
+  });
+
+  it("卸载清理：initializing 态 unmount 后轮询不再发起（行为级，无孤儿请求）", async () => {
+    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
+    await submitCreate();
+
+    await waitFor(() =>
+      expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
+    );
+    // 轮询在飞：推进几个 tick 确认 fetchMyBinding 持续被调
+    await vi.advanceTimersByTimeAsync(2_000);
+    const callsAtUnmount = bindingApi.fetchMyBinding.mock.calls.length;
+    expect(callsAtUnmount).toBeGreaterThan(0);
+
+    cleanup(); // unmount → useEffect 清理 stopInitPolling（interval + deadline）
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
   });
 });

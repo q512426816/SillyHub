@@ -528,8 +528,19 @@ class LeaseService:
         # binding 的 init_synced_*。upsert_my_binding 注释明说这两个字段只由此路径写，
         # 但本路径之前漏实现 → 前端"接入初始化状态"永远显示未初始化。
         # try/except 兜底：meta 损坏 / 无 binding 只 warn，不阻塞 lease 完成。
+        # 2026-10-09-workspace-init-skill-gate task-03 / D-006@v1（Grill UB-1 修复）：
+        # 回写加成败门——daemon init 失败仍以 status='failed' 走 complete 上报
+        # （task-runner.ts _finish 路径），失败时禁止回写，否则"失败被标已初始化"，
+        # 前端（手动初始化与创建即初始化）轮询 init_synced_at 会误报完成。
         _init_meta = lease.metadata_ if isinstance(lease.metadata_, dict) else {}
-        if _init_meta.get("mode") == "init":
+        _init_failed = result.get("status") == "failed"
+        if _init_meta.get("mode") == "init" and _init_failed:
+            log.warning(
+                "init_lease_failed_no_synced",
+                lease_id=str(lease.id),
+                status=result.get("status"),
+            )
+        elif _init_meta.get("mode") == "init":
             try:
                 _init_ws_id = uuid.UUID(str(_init_meta.get("workspace_id")))
                 _init_user_id = uuid.UUID(str(_init_meta.get("actor_user_id")))

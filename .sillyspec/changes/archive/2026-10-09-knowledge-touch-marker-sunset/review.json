@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-knowledge-touch-marker-sunset",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "54e72b580d5108fd12c60fad18c2c31ca0d51535",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "交付面超出 design 文件变更清单自声明：缺陷台账 doc 更新被冻入 change.patch 但未列入清单",
+      "evidence": "design「文件变更清单」自声明 7 个交付文件（HEAD 提交 54e72b580 亦题为「7 个交付文件」），但 change.patch 另含 docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md 的缺陷台账修订（提交 bb504f72b，时间戳 2026-10-09 12:28:10 落在本变更 task 提交 23e90c9f4/3ecffc8b2 之间，被窗口冻结机制扫入 patch）；内容为 sillyspec 仓另一修复的交叉引用更新，与本变更四条 FR 无关。docs-only、无行为影响，属未声明范围附加而非承诺违反。",
+      "location": "docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md:19"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "frVerification": {
+    "FR-01": "兑现。_REVIEW_MARK_RE 常量与 _scan_domain_files/_parse_entries_owned_by 的 owner_line_re 参数已删（backend/app/modules/change/assets.py 全文 grep 零残留，仅拆除注记）；get_change_assets 三路 gather，knowledge_touch 仅由 _live_touch_rows 构造（assets.py:544-559）；_live_touch_rows 按 (file, ident) 去重（seen 集合，assets.py:515-525）且帽 100（len(out)>=100 提前返回，assets.py:526-527）、order_by occurred_at（assets.py:509）；「变更：」归属语义逐字保留（_OWNER_LINE_RE 正则与 owner.group(1).strip()==change_key 比较逻辑未动，FR 场景由 test_knowledge_touch_scan_ignores_review_marks 与金样本归属断言覆盖）。API 形状不变（openapi props id/title/file + required 三字段实证）。绑定测试真实存在且断言该行为：test_golden_aggregation（无 inject 行 → knowledge_touch==[]）、test_live_touch_archived_ignores_review_marks（存量待复核行被无视 + 归档/在途同源）、test_knowledge_touch_scan_ignores_review_marks（纯函数标记无视）。",
+    "FR-02": "兑现。change-assets-card.tsx:294-296 标题恒为「知识触达（本变更注入命中的知识）」、tooltip 为静态字符串（无 archived 分支），组件全文无「待复核」「以标记为准」「· 实时」字样（grep 实证，前端 knowledge_touch 唯一消费方即本卡）。测试「知识触达组：统一文案…」断言 archived=true 的标题+tooltip 约束，「在途变更知识触达：同 slug…」断言 archived=false 同标题；tooltip 跨态一致由静态字面量结构保证（在途态未逐字断言 tooltip，风险为零，不立 finding）。",
+    "FR-03": "兑现。id===e.title 三元只渲染一份（change-assets-card.tsx:345-352），无漏网分支——id 空串形态被 !e.id 前置滤入 chip 面、后端也恒不产空 id（ident = slug or file）；整文件 chip 判定 !e.id || e.id === e.file 与后端裸文件形态（partition('#') 无锚时 ident==file）严格对应，锚点条目 slug 字面等于文件路径才会误判、非真实形态；chip href 只带 file 无 anchor（:308-310）；锚点条目按 file 分组、组头文件链接+计数（:319-334）。测试断言 slug 恰现一次（regex 计数==1）、chip href 无 anchor=、分组 testid 与组头计数、总计数 4 条。",
+    "FR-04": "兑现（评审员亲测）。backend uv run pytest app/modules/change/tests/test_assets.py → 28 passed；frontend vitest run change-assets-card.test.tsx → 29 passed。生成物同步以只读方式实证：后端 app.openapi() 实时导出的 ChangeKnowledgeTouch schema 与已提交 openapi.json 逐字段相等（desc-equal: True，props/required 一致），api-types.ts 描述块与 openapi.json 文本一致、类型结构零变化。"
+  },
+  "blindDimensionEvidence": {
+    "乱序": "assets.py:509 order_by(KnowledgeHit.occurred_at) + matched_anchors 首见序展开去重（seen 集合保序）；标记面依赖已不存在，迟到 daemon 行只经 (file,ident) 去重追加新锚点。等时间戳行无次级排序属既有展示序面（本次 diff 未触碰查询），design 作答成立。",
+    "并发": "聚合路径纯只读（SELECT knowledge_hits + 读镜像文件），diff 无任何写面；knowledge_hits 幂等上行（sha256 唯一约束）在 hits 模块，本变更未触碰（patch 零 hits 模块改动）。",
+    "切换": "knowledge_touch 在 ChangeAssetsRead 构造时即定型（assets.py:559），位于 `if not archived` 提前返回（:561）之前——归档态只是在途态的超集（追加目录件四组），触达面同源同序；前端触达块在 archived 门控之外（仅 total==0 空态文案随态），同一渲染路径实证。",
+    "作用域": "assets.py:504-508 查询过滤 workspace_id + change_name + type=='inject' 三条件保留；test_live_touch_hits_inflight 断言他变更名行与非 inject 行不进本变更触达面。"
+  },
+  "boundaryNotes": [
+    "边界1「归档态不收窄、明示不设权威窄面」：可接受——标记面自 2026-09-29 CLI 退役落盘后恒空（371 条零消费实证），唯一真实来源是 inject 遥测；重建无消费者的权威窄面会重蹈死代码覆辙；口径已在 schema/openapi/前端 tooltip 三处诚实陈述。dimensionNotes 四维记「边界已裁决：可接受」。",
+    "边界2「live 行帽 100（静默截断）」：可接受——展示面载荷守卫，实际单变更数十量级；为 2026-09-28-knowledge-touch-live 既有取舍、本 diff 未触碰该行代码，无 UI 截断标注属既有债不属本变更。",
+    "边界3「owner_line_re 删参（grep 核实无外部消费方）」：可接受——评审员重跑 grep 实证 backend 全域零外部消费残留。",
+    "边界4「存量知识文件残留待复核行（含 2026-09-26~09-28 历史归档的标记数据）不再进触达面」：可接受——requirements FR-01 场景明示要求标记行被无视（规格本身下令），旧标记物种已被上游退役，标记∪遥测混用正是原文案失真根源；API 唯一消费方是本卡，无下游依赖标记行数据。",
+    "边界5「不消费 fr-rot-suspect 建窄视图（不属本变更）」：可接受——范围边界，有真实需求时另立变更。"
+  ],
+  "protectionClaims": {
+    "live 行 (file,ident) 去重并帽 100": "真实存在且生效（assets.py:515-527）；去重有测试实证（test_live_touch_hits_inflight 跨行同锚收一条），帽 100 无直接用例（既有守卫、非本 diff 引入，不立 finding）。",
+    "workspace_id + change_name 过滤": "真实存在（assets.py:504-508）且有他变更名/他类型排除断言。",
+    "data-testid change-assets-knowledge-touch 保留": "真实（change-assets-card.tsx:292），新增组级 testid change-assets-touch-group-<file> 亦在（:322）。"
+  },
+  "generatedArtifactsSync": "openapi.json 与 schema 实现对齐（app.openapi() 实时导出 == 已提交文件，逐字段相等）；api-types.ts 描述与 openapi.json 一致、类型结构（id/title/file required）零变化；FR-04 漂移要求满足。",
+  "testExecution": {
+    "backend": "uv run pytest app/modules/change/tests/test_assets.py → 28 passed（评审员 2026-10-09T04:35Z 亲测）",
+    "frontend": "vitest run src/components/changes/detail/__tests__/change-assets-card.test.tsx → 29 passed（评审员 2026-10-09T04:35Z 亲测）"
+  },
+  "reviewedAt": "2026-10-09T04:39:03Z"
+}

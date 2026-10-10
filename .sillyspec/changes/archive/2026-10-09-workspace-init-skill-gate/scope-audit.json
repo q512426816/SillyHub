@@ -1,0 +1,101 @@
+{
+  "mode": "full-flow",
+  "ok": true,
+  "degradedReason": null,
+  "baseAnchor": "21763d356758116cbc9a6bfafbd567f0adc9445a",
+  "totals": {
+    "files": 10,
+    "additions": 512,
+    "deletions": 45
+  },
+  "rows": [
+    {
+      "path": "backend/app/modules/daemon/lease/service.py",
+      "additions": 12,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "additions": 81,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx",
+      "additions": 141,
+      "deletions": 0,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-config-card.test.tsx",
+      "additions": 12,
+      "deletions": 2,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-config-card.tsx",
+      "additions": 14,
+      "deletions": 1,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "frontend/src/components/workspace-scan-dialog.tsx",
+      "additions": 165,
+      "deletions": 22,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/spec-sync.ts",
+      "additions": 18,
+      "deletions": 10,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner/runner-types.ts",
+      "additions": 5,
+      "deletions": 3,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/run-sillyspec-init.test.ts",
+      "additions": 8,
+      "deletions": 6,
+      "kind": "modified",
+      "planned": "修改",
+      "verdict": "planned"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts",
+      "additions": 56,
+      "deletions": 0,
+      "kind": "new",
+      "planned": "新增",
+      "verdict": "planned"
+    }
+  ],
+  "excluded": {
+    "foreignDeclared": []
+  },
+  "note": "execute --done 时点冻结（本文件落盘时采集）",
+  "closedBy": "execute --done",
+  "patchSha256": "8140c2a009cd3ab38c7f7b2f53d2266850bd3c196c591cbd3183b8581a365ccc",
+  "patchStatus": "ok",
+  "savedAt": "2026-10-09T03:10:58.193Z"
+}

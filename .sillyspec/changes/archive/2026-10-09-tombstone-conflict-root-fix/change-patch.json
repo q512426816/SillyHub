@@ -1,0 +1,34 @@
+{
+  "change": "2026-10-09-tombstone-conflict-root-fix",
+  "baseline": "bb4a0950b8f15451918e058a8075c4de8960fa59",
+  "head": "f0830ee63ac4b182abc383b8becedf5a69adf7fc",
+  "files": [
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_delete_change.py",
+    "backend/app/modules/daemon/protocol.py",
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/machines.py",
+    "backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py",
+    "backend/app/modules/daemon/ws_hub.py",
+    "backend/openapi.json",
+    "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
+    "frontend/src/components/changes/platform-sync-section.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/machines.ts",
+    "frontend/src/lib/provider-caps.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/protocol.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+  ],
+  "totals": {
+    "files": 18,
+    "additions": 1480,
+    "deletions": 26
+  },
+  "savedAt": "2026-10-09T05:03:22.760Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "patchSha256": "4a71892ce35e279a3c802f4fd260f61382318b3bab990df56593dee9a4ddc0b4",
+  "patchStatus": "ok"
+}

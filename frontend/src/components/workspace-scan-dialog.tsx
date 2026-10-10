@@ -1,7 +1,7 @@
 "use client";
 
-import { Modal } from "antd";
-import { useEffect, useState } from "react";
+import { Alert, Modal } from "antd";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import {
   type DaemonInstanceRead,
 } from "@/lib/daemon";
 import { errMessage, useNotify } from "@/lib/errors";
+import { initDispatch } from "@/lib/spec-workspaces";
 import {
   createWorkspace,
   slugifyWorkspaceName,
@@ -23,8 +24,18 @@ import {
   WORKSPACE_TYPE_OPTIONS,
   type WorkspaceType,
 } from "@/lib/workspace-types";
+// 2026-10-09-workspace-init-skill-gate task-04 / FR-04 / D-003@v1：创建成功后
+// 轮询本机绑定 init_synced_at 判定初始化完成（与 config-card handleInit 同源字段）。
+import { fetchMyBinding } from "@/lib/workspace-binding";
 
-type Phase = "idle" | "creating";
+// 两步状态机：idle → creating → initializing → done | init_failed。
+// 「初始化失败不回滚创建」——工作区行已落库，失败态明示可稍后在详情页重试
+// （失败不回写 init_synced_at 由后端成败门保证，task-03 / D-006@v1）。
+type Phase = "idle" | "creating" | "initializing" | "done" | "init_failed";
+
+// 轮询节律与超时对齐 config-card handleInit（D-003@v1：2s 轮询 / 5min 超时）。
+const INIT_POLL_INTERVAL_MS = 2_000;
+const INIT_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface Props {
   onCreated: () => void;
@@ -65,6 +76,21 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   // 静默返回 201（同 root_path 已有工作区被复用）导致「创建成功却看不到/绑定没生效」的困惑。
   const notify = useNotify();
 
+  // task-04 / FR-04：初始化轮询的定时器与超时句柄（卸载/终态清理，防孤儿轮询）。
+  const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopInitPolling = () => {
+    if (initPollRef.current) {
+      clearInterval(initPollRef.current);
+      initPollRef.current = null;
+    }
+    if (initDeadlineRef.current) {
+      clearTimeout(initDeadlineRef.current);
+      initDeadlineRef.current = null;
+    }
+  };
+  useEffect(() => stopInitPolling, []);
+
   useEffect(() => {
     void listDaemonInstances()
       .then(setInstances)
@@ -92,10 +118,35 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       // quick ql-20260803-003-cb34：复用/激活/复活时后端返回 creation_notice，必须显式提示。
       if (ws.creation_notice) {
         notify.warning(ws.creation_notice);
-      } else {
-        notify.success("工作区已创建");
       }
-      onCreated();
+
+      // task-04 / FR-04 / D-003@v1：创建成功（daemonId 由入口必选校验保证非空）→
+      // 串行派发初始化并轮询到 init_synced_at 非空。
+      // initDispatch 失败不回滚创建（工作区已落库），直接进失败态明示可稍后重试。
+      try {
+        await initDispatch(ws.id);
+      } catch {
+        setPhase("init_failed");
+        return;
+      }
+      setPhase("initializing");
+      initPollRef.current = setInterval(async () => {
+        if (document.hidden) return; // visibilitychange 暂停（对齐 config-card D-005）
+        try {
+          const binding = await fetchMyBinding(ws.id);
+          if (binding?.init_synced_at) {
+            stopInitPolling();
+            setPhase("done");
+            notify.success("工作区已创建并完成初始化");
+          }
+        } catch {
+          // 单次轮询错误忽略，下一 tick 重试（超时兜底）
+        }
+      }, INIT_POLL_INTERVAL_MS);
+      initDeadlineRef.current = setTimeout(() => {
+        stopInitPolling();
+        setPhase("init_failed");
+      }, INIT_POLL_TIMEOUT_MS);
     } catch (err) {
       setError(errMessage(err, "创建失败"));
       setPhase("idle");
@@ -118,6 +169,69 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           使用本机守护进程上的项目路径。
         </p>
 
+        {/* task-04 / FR-04：创建后自动初始化的状态区（两步进度 + 终态 Alert）。
+            creating 态沿用原按钮文案（无状态区），initializing/done/init_failed 渲染本区。 */}
+        {(phase === "initializing" || phase === "done" || phase === "init_failed") && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/15 text-[11px] text-emerald-600"
+                aria-label="创建工作区已完成"
+              >
+                ✓
+              </span>
+              <span className="text-muted-foreground">创建工作区</span>
+              <span className="h-px flex-1 bg-border" />
+              <span
+                className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${
+                  phase === "done"
+                    ? "bg-emerald-500/15 text-emerald-600"
+                    : phase === "init_failed"
+                      ? "bg-destructive/15 text-destructive"
+                      : "bg-primary/15 text-primary"
+                }`}
+                aria-label={
+                  phase === "done"
+                    ? "初始化已完成"
+                    : phase === "init_failed"
+                      ? "初始化失败"
+                      : "初始化进行中"
+                }
+              >
+                {phase === "done" ? "✓" : phase === "init_failed" ? "✕" : "…"}
+              </span>
+              <span
+                className={
+                  phase === "initializing" ? "text-foreground" : "text-muted-foreground"
+                }
+              >
+                初始化工作区
+              </span>
+            </div>
+            {phase === "initializing" && (
+              <p className="rounded-md bg-muted px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+                正在通过本机守护进程初始化：下发平台配置 → 拉取文档缓存 →
+                按本机已有的 agent 写入对应 skill 文件。通常需要十几秒，请勿关闭弹窗。
+              </p>
+            )}
+            {phase === "done" && (
+              <Alert
+                type="success"
+                showIcon
+                message="初始化完成，工作区可以使用了。"
+              />
+            )}
+            {phase === "init_failed" && (
+              <Alert
+                type="error"
+                showIcon
+                message="工作区已创建成功，但初始化失败"
+                description="守护进程可能离线或版本过旧（sillyspec 需 ≥3.32.2）。可稍后在工作区详情页重新初始化。"
+              />
+            )}
+          </div>
+        )}
+
         <div className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
@@ -127,7 +241,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               className="w-full rounded border bg-background px-2 py-1.5 text-sm"
               value={daemonId}
               onChange={(e) => setDaemonId(e.target.value)}
-              disabled={phase === "creating"}
+              disabled={phase === "creating" || phase === "initializing"}
             >
               <option value="">— 请选择在线守护进程 —</option>
               {instances.map((inst) => {
@@ -173,7 +287,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="my-workspace"
-                disabled={phase === "creating"}
+                disabled={phase === "creating" || phase === "initializing"}
               />
             </div>
           )}
@@ -194,7 +308,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 }}
                 placeholder="默认从工作区名称生成"
                 maxLength={100}
-                disabled={phase === "creating"}
+                disabled={phase === "creating" || phase === "initializing"}
                 className="font-mono"
               />
               <p className="text-[11px] text-muted-foreground">
@@ -212,7 +326,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 className="w-full rounded border bg-background px-2 py-1.5 text-sm"
                 value={wsType}
                 onChange={(e) => setWsType(e.target.value as WorkspaceType | "")}
-                disabled={phase === "creating"}
+                disabled={phase === "creating" || phase === "initializing"}
               >
                 <option value="">— 请选择工作区类型 —</option>
                 {WORKSPACE_TYPE_OPTIONS.map((option) => (
@@ -235,7 +349,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 placeholder="工作区用途说明，如「订单模块前端代码」"
                 maxLength={2000}
                 rows={3}
-                disabled={phase === "creating"}
+                disabled={phase === "creating" || phase === "initializing"}
                 className="w-full resize-y rounded border bg-background px-2 py-1.5 text-sm"
               />
             </div>
@@ -258,7 +372,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                       type="radio"
                       checked={specStrategy === value}
                       onChange={() => setSpecStrategy(value)}
-                      disabled={phase === "creating"}
+                      disabled={phase === "creating" || phase === "initializing"}
                     />
                     {label}
                   </label>
@@ -271,14 +385,18 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               )}
             </div>
           )}
-          {daemonRootPath && (
+          {daemonRootPath && phase !== "done" && phase !== "init_failed" && (
             <div className="flex justify-center">
               <Button
                 size="sm"
                 onClick={handleCreateDaemonClient}
-                disabled={phase === "creating" || !wsType}
+                disabled={phase === "creating" || phase === "initializing" || !wsType}
               >
-                {phase === "creating" ? "创建中..." : "创建工作区"}
+                {phase === "creating"
+                  ? "创建中..."
+                  : phase === "initializing"
+                    ? "初始化中…"
+                    : "创建工作区"}
               </Button>
             </div>
           )}
@@ -287,13 +405,38 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         {error && <p className="text-xs text-destructive">{error}</p>}
 
         <footer className="flex items-center justify-end gap-2 pt-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onCancel}
-          >
-            取消
-          </Button>
+          {/* task-04 / FR-04：初始化期间禁用取消（防半途关窗状态不可见；关窗不中断
+              后台 lease，但用户会失去进度反馈）；done/init_failed 提供出口按钮。 */}
+          {phase === "done" && (
+            <Button size="sm" onClick={onCreated}>
+              打开工作区
+            </Button>
+          )}
+          {phase === "init_failed" && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCreated}
+                title="工作区已创建，可稍后在详情页重新初始化"
+              >
+                稍后手动初始化
+              </Button>
+              <Button size="sm" onClick={onCreated}>
+                打开工作区
+              </Button>
+            </>
+          )}
+          {(phase === "idle" || phase === "creating" || phase === "initializing") && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onCancel}
+              disabled={phase === "creating" || phase === "initializing"}
+            >
+              取消
+            </Button>
+          )}
         </footer>
       </div>
     </Modal>

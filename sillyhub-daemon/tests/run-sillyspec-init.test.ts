@@ -3,7 +3,7 @@
 //
 // 覆盖（task 卡 acceptance）：
 //   - 版本门控（D-009）：版本过低 fail-fast（init spawn 未发起）；查询失败/解析失败 fail-safe。
-//   - 参数组装：5 类 flag（--dir/--spec-dir/--workspace-id/--no-skills/--tool 逗号连接）。
+//   - 参数组装：4 类 flag（--dir/--spec-dir/--workspace-id/--tool 逗号连接；不带 --no-skills）。
 //   - 退出码映射：0 → ok:true；非 0 → sillyspec_init_failed。
 //   - 超时映射：超时（注入极小超时不真等 60s）→ 杀树 + ok:false + 超时原因。
 //   - tools 兜底：空数组/缺省 → ['claude']（D-005@v1）。
@@ -118,13 +118,14 @@ describe('parseSemver（D-009 门控解析）', () => {
 describe('runSillyspecInit 版本门控（D-009 / FR-03）', () => {
   it('版本过低 → ok:false，error 含 sillyspec_init_cli_too_old 与中文升级指引，init spawn 未发起', async () => {
     const { spawnMock, calls } = makeSpawnMock([
-      { stdout: '3.26.7\n', exitCode: 0 }, // --version 返回过旧版本
+      // 3.30.0：旧门控（3.26.8）放行、新门控（3.32.2）拒绝——验证门控提升生效
+      { stdout: '3.30.0\n', exitCode: 0 },
     ]);
     const result = await runSillyspecInit(BASE_PARAMS, spawnMock);
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain('sillyspec_init_cli_too_old');
-    expect(result.error).toContain('3.26.7');
+    expect(result.error).toContain('3.30.0');
     expect(result.error).toContain(MIN_SILLYSPEC_VERSION_FOR_INIT);
     // 中文升级指引：重启 daemon / npm install -g sillyspec@latest
     expect(result.error).toContain('重启 daemon');
@@ -164,7 +165,7 @@ describe('runSillyspecInit 版本门控（D-009 / FR-03）', () => {
 });
 
 describe('runSillyspecInit init 执行（FR-01/FR-02）', () => {
-  it('门控通过 → spawn init，参数含全部 5 类 flag；退出码 0 → ok:true', async () => {
+  it('门控通过 → spawn init，参数含全部 4 类 flag 且不带 --no-skills；退出码 0 → ok:true', async () => {
     const { spawnMock, calls } = makeSpawnMock([
       { stdout: `${MIN_SILLYSPEC_VERSION_FOR_INIT}\n`, exitCode: 0 }, // --version 放行
       { stdout: 'init done\n', exitCode: 0 }, // init 成功
@@ -177,11 +178,12 @@ describe('runSillyspecInit init 执行（FR-01/FR-02）', () => {
 
     const initCall = calls[1]!;
     expect(String(initCall.cmd)).toContain('sillyspec init');
-    // 5 类 flag（task acceptance）——带空格路径验证引号包裹
+    // 4 类 flag（task acceptance）——带空格路径验证引号包裹
     expect(String(initCall.cmd)).toContain(`--dir "${BASE_PARAMS.rootPath}"`);
     expect(String(initCall.cmd)).toContain(`--spec-dir "${BASE_PARAMS.specCacheRoot}"`);
     expect(String(initCall.cmd)).toContain(`--workspace-id ws-1`);
-    expect(String(initCall.cmd)).toContain('--no-skills');
+    // 不带 --no-skills（2026-10-09-workspace-init-skill-gate D-001@v1：恢复 CLI skills 复制段）
+    expect(String(initCall.cmd)).not.toContain('--no-skills');
     expect(String(initCall.cmd)).toContain('--tool claude,codex');
     // shell:true（X-06：Windows bare name 必 ENOENT）
     expect((initCall.opts as Record<string, unknown>).shell).toBe(true);

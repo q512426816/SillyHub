@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-tombstone-conflict-root-fix",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-01:acc-0-d1244a4b",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-01:acc-1-fc1cea71",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-01:acc-2-79bc5459",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-02:acc-0-45e3a3da",
+      "tests": [
+        "backend/app/modules/change/tests/test_delete_change.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-02:acc-1-5bdfa2ab",
+      "tests": [
+        "backend/app/modules/change/tests/test_delete_change.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-02:acc-2-5b3d4d40",
+      "tests": [
+        "backend/app/modules/change/tests/test_delete_change.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-0-ece38916",
+      "tests": [
+        "sillyhub-daemon/src/sillyspec-manager.ts",
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-1-0143ccd6",
+      "tests": [
+        "sillyhub-daemon/src/sillyspec-manager.ts",
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-2-88c8a511",
+      "tests": [
+        "sillyhub-daemon/src/sillyspec-manager.ts",
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-03:acc-3-561829ad",
+      "tests": [
+        "sillyhub-daemon/src/sillyspec-manager.ts",
+        "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-0-db7a90fd",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-1-16400291",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-2-3af70223",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-04:acc-3-ce315e5f",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-05:acc-0-a99023d4",
+      "tests": [
+        "src/spec-sync.js",
+        "test/spec-sync-tombstone-attribution.test.mjs"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-05:acc-1-c2f76477",
+      "tests": [
+        "src/spec-sync.js",
+        "test/spec-sync-tombstone-attribution.test.mjs"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-05:acc-2-98534e2e",
+      "tests": [
+        "src/spec-sync.js",
+        "test/spec-sync-tombstone-attribution.test.mjs"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-09-tombstone-conflict-root-fix:task-05:acc-3-99da3d1a",
+      "tests": [
+        "src/spec-sync.js",
+        "test/spec-sync-tombstone-attribution.test.mjs"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-09-tombstone-conflict-root-fix"
+    }
+  ]
+}

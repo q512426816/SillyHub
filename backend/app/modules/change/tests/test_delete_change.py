@@ -570,5 +570,118 @@ class TestEnrichDeletedFilter:
         assert read_active.current_stage == "archived"
 
 
+# ===========================================================================
+# ⑥ 删除环墓碑收敛指令下发（2026-10-09-tombstone-conflict-root-fix FR-03）
+# ===========================================================================
+
+
+class TestDeleteDispatchesTombstoneCleanup:
+    """delete_change 终 commit 后向绑定数据源机器 fire-and-forget 下发
+    tombstone_cleanup（失败仅日志不阻塞删除；无绑定零调用）。"""
+
+    async def test_dispatches_to_bound_daemons_after_commit(
+        self, db_session, tmp_path, monkeypatch
+    ) -> None:
+        """有绑定数据源机器 → send_sillyspec_tombstone_cleanup 被调（change_key +
+        workspace_id 透传），删除照常成功。"""
+        from app.modules.daemon import ws_hub as ws_hub_module
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        user, _token = await _make_user(db_session)
+        env = await _make_env(
+            db_session, tmp_path, change_key="tomb_dispatch_chg", owner_id=user.id
+        )
+
+        daemon_id = uuid.uuid4()
+        db_session.add(
+            WorkspaceMemberRuntime(
+                workspace_id=env["ws"].id,
+                user_id=user.id,
+                runtime_id=None,
+                daemon_id=daemon_id,
+                root_path="/tmp/wmr-tomb-test",
+                path_source="manual",
+            )
+        )
+        await db_session.commit()
+
+        calls: list[tuple] = []
+
+        async def _fake_send(self_hub, d_id, change, ws_id) -> bool:
+            calls.append((d_id, change, ws_id))
+            return True
+
+        monkeypatch.setattr(
+            ws_hub_module.DaemonWsHub, "send_sillyspec_tombstone_cleanup", _fake_send
+        )
+
+        resp = await ChangeService(db_session).delete_change(
+            env["ws"].id, env["change"].id, actor_id=user.id
+        )
+        assert resp.ok is True, "删除成功不被下发段阻塞"
+        assert calls == [(daemon_id, "tomb_dispatch_chg", env["ws"].id)], (
+            "终 commit 后按绑定机器下发（change_key+workspace_id 原样透传）"
+        )
+        # 时序锚：下发前 Change 行已翻 deleted（终 commit 先于下发段）。
+        row = (
+            await db_session.execute(select(Change).where(Change.id == env["change"].id))
+        ).scalar_one()
+        assert row.location == "deleted"
+
+    async def test_dispatch_failure_does_not_block_delete(
+        self, db_session, tmp_path, monkeypatch
+    ) -> None:
+        """send 抛错（如 hub 异常）→ 仅记日志，删除照常成功（fire-and-forget 语义）。"""
+        from app.modules.daemon import ws_hub as ws_hub_module
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        user, _token = await _make_user(db_session)
+        env = await _make_env(db_session, tmp_path, change_key="tomb_fail_chg", owner_id=user.id)
+        db_session.add(
+            WorkspaceMemberRuntime(
+                workspace_id=env["ws"].id,
+                user_id=user.id,
+                runtime_id=None,
+                daemon_id=uuid.uuid4(),
+                root_path="/tmp/wmr-tomb-test",
+                path_source="manual",
+            )
+        )
+        await db_session.commit()
+
+        async def _boom(self_hub, d_id, change, ws_id) -> bool:
+            raise RuntimeError("ws hub down")
+
+        monkeypatch.setattr(ws_hub_module.DaemonWsHub, "send_sillyspec_tombstone_cleanup", _boom)
+
+        resp = await ChangeService(db_session).delete_change(
+            env["ws"].id, env["change"].id, actor_id=user.id
+        )
+        assert resp.ok is True, "下发失败仅日志，删除不受影响"
+
+    async def test_no_bound_daemon_skips_dispatch(self, db_session, tmp_path, monkeypatch) -> None:
+        """无绑定数据源机器（daemon_id 全空/无行）→ 零调用，删除成功。"""
+        from app.modules.daemon import ws_hub as ws_hub_module
+
+        user, _token = await _make_user(db_session)
+        env = await _make_env(db_session, tmp_path, change_key="tomb_nobind_chg", owner_id=user.id)
+
+        calls: list[tuple] = []
+
+        async def _fake_send(self_hub, d_id, change, ws_id) -> bool:
+            calls.append((d_id, change, ws_id))
+            return True
+
+        monkeypatch.setattr(
+            ws_hub_module.DaemonWsHub, "send_sillyspec_tombstone_cleanup", _fake_send
+        )
+
+        resp = await ChangeService(db_session).delete_change(
+            env["ws"].id, env["change"].id, actor_id=user.id
+        )
+        assert resp.ok is True
+        assert calls == [], "无绑定机器零下发"
+
+
 # Suppress unused-import warning for pytest (fixture discovery).
 pytestmark = pytest.mark.asyncio

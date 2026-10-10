@@ -856,6 +856,9 @@ describe("MobileChangeDetail thin/quick 卡口径（对齐桌面 isThinLineageCh
     renderDetail();
     expect(await screen.findByTestId("m-change-thin-card")).toBeInTheDocument();
     expect(screen.queryByTestId("m-change-review-idle")).not.toBeInTheDocument();
+    // 2026-10-09-thin-hide-step-timeline：thin 出身（含归档补种/收口 steps）
+    // 阶段时间线卡整卡隐藏——补种行零信息量，对齐桌面同款排除。
+    expect(screen.queryByTestId("m-change-timeline-card")).not.toBeInTheDocument();
   });
 
   it("quick 分流新变更（change_type=quick、时间窗内）→ 轻量说明卡（对齐桌面②分支）", async () => {

@@ -85,8 +85,12 @@ def _parse_ts(ts: str) -> datetime | None:
 
 
 # task-done 事件勾选计数（watcher 推送 detail 为「stage · checked N→M」——
-# stage 前缀并存，search 子串匹配兼容两种形态）。
-_TASK_DONE_RE = re.compile(r"checked (\d+)→(\d+)")
+# stage 前缀并存，search 子串匹配兼容两种形态）。前缀捕获组用于域白名单：
+# 非 tasks 域的勾选计数（如 design.md 自审清单「design · checked 0→6」）不参与
+# 任务勾选推断——CLI inferFlipTimes（e.stage && e.stage !== 'tasks'）同款过滤；
+# 2026-10-09-workspace-init-skill-gate 实证：误吃 design 事件致全部任务同秒
+# 且早于 tasks.md 诞生。无前缀裸形态（stage 缺省）仍参与推断。
+_TASK_DONE_RE = re.compile(r"^(?:(\S+) · )?checked (\d+)→(\d+)")
 
 
 def _infer_task_times(rows: list, total: int) -> list[str | None]:
@@ -95,7 +99,8 @@ def _infer_task_times(rows: list, total: int) -> list[str | None]:
     task-done 事件序列（``checked N→M``）游标衔接才赋值：中段断裂（from ≠ 游标）
     停止推断（观测盲窗丢拍，后续任务时刻不可信）；尾部未覆盖（链完整但拍数
     少于任务数——在途未勾完）不标断裂，未勾任务自然 None。观测起点前的首勾
-    （首个事件 from>0）同断裂语义。返回按任务序号索引的时刻列表。
+    （首个事件 from>0）同断裂语义。detail 带非 tasks stage 前缀的事件跳过
+    （域白名单，见 _TASK_DONE_RE 注）。返回按任务序号索引的时刻列表。
     """
     times: list[str | None] = [None] * max(0, total)
     cursor = 0
@@ -105,7 +110,10 @@ def _infer_task_times(rows: list, total: int) -> list[str | None]:
         m = _TASK_DONE_RE.search(r.detail)
         if not m:
             continue
-        start, end = int(m.group(1)), int(m.group(2))
+        stage = m.group(1)
+        if stage is not None and stage != "tasks":
+            continue
+        start, end = int(m.group(2)), int(m.group(3))
         if start != cursor:
             break
         for i in range(start, min(end, total)):

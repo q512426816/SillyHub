@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-tombstone-conflict-root-fix",
+  "appliedAt": "2026-10-09T05:36:47.475Z",
+  "baseHash": "bb4a0950b8f15451918e058a8075c4de8960fa59",
+  "files": [
+    {
+      "path": "backend/app/modules/change/service.py",
+      "sha256": "c263fbab8bfae9ac67a4aa259398e2f7494024d079023d4e186a5a4ce9586700"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_delete_change.py",
+      "sha256": "05de7d1d3a34be14757864000ce66d7715947f2780927fcd099d9a15655828a9"
+    },
+    {
+      "path": "backend/app/modules/daemon/protocol.py",
+      "sha256": "f1082c546f4ef19fcb1a5f462133b0a0a58cc42ce272ef50c40e7ed5029b9ff5"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "390be02eff72a166b678863a6ce684ed2300e26c1f19ff9106e9b78269550742"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/machines.py",
+      "sha256": "b788063167d43d5d0b17eb2fef57002d9dbd51baf26ce5c216cfa8b5f252f2e6"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_sillyspec_platform_commands.py",
+      "sha256": "f0912f34c3f4bb59a43acfb7f1af3e0ecc14cfabe602fd145b54f2e0d2f4b005"
+    },
+    {
+      "path": "backend/app/modules/daemon/ws_hub.py",
+      "sha256": "0377c887f79981f391aa03bd925f615378c72b11a9d2865b072f66270fd12a23"
+    },
+    {
+      "path": "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
+      "sha256": "5202b360e65b19d4ace0ce447105e8da488d44535dcf81bbd09d7a7a63c9058c"
+    },
+    {
+      "path": "frontend/src/components/changes/platform-sync-section.tsx",
+      "sha256": "950bf61f2b82b32a3eb2046621c00fdd55ec8a38614f84cec5c7bba43ca5db0e"
+    },
+    {
+      "path": "frontend/src/lib/daemon/machines.ts",
+      "sha256": "1afcbaf9fab233e55ec602d700e2f4c3a31019011ca58f3d80600a64ed886078"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "sha256": "5e74d0259e86c1e1b8dd35de73ccefe0825c8e33b2fe68b6549775436aad23af"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "7b3390f71373b6e4489e99df3ddc8dd63af792f37becd18604f11c25351ff4a9"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "de6ed4900fc9a6151c0ee11ae3d41132085376e8408960ebc67285cfe269ea56"
+    },
+    {
+      "path": "sillyhub-daemon/src/protocol.ts",
+      "sha256": "14efd390ad482cdf2fca89fdaf6d7c48de6c5f1cb6bfe9905d90f42d811b7355"
+    },
+    {
+      "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+      "sha256": "925fcaa02b8e3e972b5125647e17bb93c4a8254c09e95747fb16998c54eedca9"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts",
+      "sha256": "804f0f740ee5368a709b5dab7d768d44edcdd7bfd578029e792009b262e797c4"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "a1c99e90fbfde6a04ab2a52ecc698a3e632bbfd6b0269a06f5415d9e621f8986"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "294e6bc6a9cb606511d97a7f2bf2a05ea3eddf814eb9e31642662427dbc656d7"
+    }
+  ]
+}

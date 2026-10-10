@@ -333,15 +333,21 @@ describe("WorkspaceConfigCard 六状态分支（design §5.3 / AC-05）", () => 
     expect(screen.getByText("/data/spec-workspaces/ws-1")).toBeInTheDocument();
   });
 
-  it("④ 已绑定·未初始化（init_synced_at=null）：amber「未初始化」徽标 + 初始化按钮", () => {
+  it("④ 已绑定·未初始化（init_synced_at=null）：amber「未初始化」徽标 + 引导 Alert + 初始化按钮", () => {
     renderCard({ myBinding: makeBinding({ init_synced_at: null }) });
     expect(screen.getByText("未初始化")).toBeInTheDocument();
     expect(screen.queryByText("已初始化")).not.toBeInTheDocument();
     // 头部初始化按钮（platform-managed 策略下）
     expect(screen.getByRole("button", { name: "初始化" })).toBeInTheDocument();
+    // 2026-10-09-workspace-init-skill-gate task-05 / FR-03：未初始化行动引导 Alert
+    // （成员/机器维度轻引导，D-002@v1 后端不硬拦）
+    expect(
+      screen.getByText("当前机器尚未初始化这个工作区，初始化后才能正常使用。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/每台机器需要单独初始化/)).toBeInTheDocument();
   });
 
-  it("⑤ 已绑定·已初始化（init_synced_at 非空）：emerald「已初始化」徽标 + 时间 + v{spec_version}", () => {
+  it("⑤ 已绑定·已初始化（init_synced_at 非空）：emerald「已初始化」徽标 + 时间 + v{spec_version}，无引导 Alert（零回归）", () => {
     renderCard({
       myBinding: makeBinding({
         init_synced_at: "2026-06-30T02:00:00Z",
@@ -352,6 +358,10 @@ describe("WorkspaceConfigCard 六状态分支（design §5.3 / AC-05）", () => 
     expect(screen.queryByText("未初始化")).not.toBeInTheDocument();
     // spec_version 展示
     expect(screen.getByText(/（v3）/)).toBeInTheDocument();
+    // 已初始化态不渲染引导 Alert（现状零回归）
+    expect(
+      screen.queryByText(/初始化后才能正常使用/),
+    ).not.toBeInTheDocument();
   });
 });
 

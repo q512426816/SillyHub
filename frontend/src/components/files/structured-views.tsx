@@ -237,7 +237,7 @@ export function DiffView({ content }: { content: string }) {
 
 // ── 固定结构 JSON 表格视图（ql-20260917-010）──────────────────────────
 //
-// scope-audit / apply-manifest / verify-facts 是 sillyspec 产出的固定结构
+// scope-audit / change-patch / apply-manifest / verify-facts 是 sillyspec 产出的固定结构
 // 报告文件，折叠树对人类不友好——按文件名 + 结构特征分发到专用摘要视图；
 // 不命中（结构漂移/其他 json）回落 JsonView 折叠树。
 
@@ -348,6 +348,64 @@ function ScopeAuditView({ value }: { value: JsonRecord }) {
           );
         })}
       </DataTable>
+    </div>
+  );
+}
+
+/**
+ * change-patch.json：收口留痕单套清单（2026-10-09-close-trace-single-set 起 sillyspec
+ * 只落 change.patch + change-patch.json 两件——对账面并入 scopeAudit 子对象；旧归档仍可能
+ * 是四件套/双件形态，scope-audit.json 分支保留兜底）。上半=交付清单摘要（顶级键），下半=
+ * 对账快照（scopeAudit 子对象复用 ScopeAuditView）。
+ */
+function ChangePatchView({ value }: { value: JsonRecord }) {
+  const totals = isRecord(value.totals) ? value.totals : {};
+  const num = (v: JsonValue | undefined) => (typeof v === "number" ? v : 0);
+  const files = Array.isArray(value.files) ? (value.files as JsonValue[]).filter((f) => typeof f === "string") : [];
+  const patchStatus = value.patchStatus === "ok";
+  const scopeAudit = isRecord(value.scopeAudit) ? value.scopeAudit : null;
+  const hasAuditFace = scopeAudit !== null && Array.isArray(scopeAudit.rows) && isRecord(scopeAudit.totals);
+  return (
+    <div data-testid="change-patch-view" className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
+        {typeof value.change === "string" && <MetaItem label="变更" value={value.change} mono />}
+        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", patchStatus ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>
+          {patchStatus ? "✓ patch 已冻结" : "⚠️ patch 采集失败"}
+        </span>
+        <MetaItem label="文件" value={String(num(totals.files) || files.length)} />
+        <span className="text-success">+{num(totals.additions)}</span>
+        <span className="text-error">−{num(totals.deletions)}</span>
+        {typeof value.baseline === "string" && (
+          <MetaItem label="baseline" value={value.baseline.slice(0, 12) + "…"} mono title={value.baseline} />
+        )}
+        {typeof value.head === "string" && (
+          <MetaItem label="head" value={value.head.slice(0, 12) + "…"} mono title={value.head} />
+        )}
+        {typeof value.patchSha256 === "string" && (
+          <MetaItem label="sha256" value={value.patchSha256.slice(0, 12) + "…"} mono title={value.patchSha256} />
+        )}
+        {typeof value.savedAt === "string" && (
+          <MetaItem label="冻结时间" value={new Date(value.savedAt).toLocaleString("zh-CN")} />
+        )}
+      </div>
+      <DataTable head={["#", "交付文件"]}>
+        {files.slice(0, 500).map((f, i) => (
+          <tr key={i} className="border-t border-border">
+            <td className="px-2.5 py-1.5 text-right text-muted-foreground">{i + 1}</td>
+            <td className="px-2.5 py-1.5 font-mono text-[11px] break-all">{String(f)}</td>
+          </tr>
+        ))}
+      </DataTable>
+      {hasAuditFace && scopeAudit ? (
+        <>
+          <SectionTitle>范围对账快照</SectionTitle>
+          <ScopeAuditView value={scopeAudit} />
+        </>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          无 scopeAudit 对账面（旧形态冻结件或纯清单收口）——完整对账表走变更中心 scope-audit 查询。
+        </p>
+      )}
     </div>
   );
 }
@@ -494,6 +552,11 @@ export function knownJsonView(name: string, value: JsonValue): ReactNode | null 
   if (!isRecord(value)) return null;
   if (basename === "scope-audit.json" && Array.isArray(value.rows) && isRecord(value.totals)) {
     return <ScopeAuditView value={value} />;
+  }
+  // change-patch.json（收口留痕单套清单，2026-10-09 起）：files 数组=清单面特征；
+  // scopeAudit 子对象在场则叠加对账快照视图
+  if (basename === "change-patch.json" && Array.isArray(value.files)) {
+    return <ChangePatchView value={value} />;
   }
   if (basename === "apply-manifest.json" && Array.isArray(value.files)) {
     return <ApplyManifestView value={value} />;

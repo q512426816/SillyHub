@@ -371,6 +371,17 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-01
   tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点击文件名区打开 FilePreviewModal 在线预览」
+## FR-auto-frontend-141 thin 出身变更（isThinLineageChange 判定）详情页不再渲染「步骤时间线」卡，含归档补种 steps 场景
+变更：2026-10-09-thin-hide-step-timeline
+状态：active
+摘要：归档 thin 补种 steps；在途 thin
+全文：.sillyspec/changes/archive/2026-10-09-thin-hide-step-timeline/requirements.md#FR-01
+最近确认：bb504f72b29ed001ef798b89b79e99bc8ce9b830
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-01
+  tests: frontend/src/components/mobile/mobile-change-detail.test.tsx「归档 thin（stage=archived + steps 无标准四阶段痕迹）→ 轻量说明卡而非「无可审批」
   reason: spec
   state: candidate
   discovery: machine
@@ -390,6 +401,20 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-02
   tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx「待发附件 chip 点击在线预览（2026-10-09-pending-attachment-preview）：FilePreviewModal 打开」
+  source_change: 2026-10-09-thin-hide-step-timeline
+  status: active
+
+## FR-auto-frontend-142 非 thin 厚变更步骤时间线卡行为不变，仍正常渲染 steps 明细
+变更：2026-10-09-thin-hide-step-timeline
+状态：active
+摘要：厚变更带 steps
+全文：.sillyspec/changes/archive/2026-10-09-thin-hide-step-timeline/requirements.md#FR-02
+最近确认：bb504f72b29ed001ef798b89b79e99bc8ce9b830
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染」
   reason: spec
   state: candidate
   discovery: machine
@@ -409,6 +434,20 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-03
   tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「点 X 删除附件不触发预览」
+  source_change: 2026-10-09-thin-hide-step-timeline
+  status: active
+
+## FR-auto-frontend-143 真实留痕时间线卡恒挂载行为不变（2026-09-27-timeline-coexist 共存语义保留）
+变更：2026-10-09-thin-hide-step-timeline
+状态：active
+摘要：厚变更归档双卡共存
+全文：.sillyspec/changes/archive/2026-10-09-thin-hide-step-timeline/requirements.md#FR-03
+最近确认：bb504f72b29ed001ef798b89b79e99bc8ce9b830
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡」
   reason: spec
   state: candidate
   discovery: machine
@@ -428,12 +467,27 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-pending-attachment-preview:flow:测试绑定FR-04
   tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「一次选 12 个文件：toast 告知忽略多余的 2 个，只上传前 10 个」 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  source_change: 2026-10-09-thin-hide-step-timeline
+  status: active
+
+## FR-auto-frontend-144 相关前端测试更新并通过（仅跑改动相关测试，不跑全量）
+变更：2026-10-09-thin-hide-step-timeline
+状态：active
+摘要：定向测试
+全文：.sillyspec/changes/archive/2026-10-09-thin-hide-step-timeline/requirements.md#FR-04
+最近确认：bb504f72b29ed001ef798b89b79e99bc8ce9b830
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-thin-hide-step-timeline:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「本文件全部用例（vitest run 定向）」
   reason: spec
   state: candidate
   discovery: machine
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-09-pending-attachment-preview
+  source_change: 2026-10-09-thin-hide-step-timeline
   status: active
 
 ## FR-auto-frontend-145 右击待发附件在正文末尾插入引用标签

@@ -1,0 +1,78 @@
+{
+  "change": "2026-10-09-timeline-tick-stage-filter",
+  "baseline": "8c6802f09b281a94b16dabda6238feae6133cd79",
+  "head": "61865d614d0bb020e65d9457f4ac08b91732b7d6",
+  "files": [
+    ".sillyspec/changes/2026-10-09-timeline-tick-stage-filter/design.md",
+    ".sillyspec/changes/2026-10-09-timeline-tick-stage-filter/flow-state.yaml",
+    ".sillyspec/changes/2026-10-09-timeline-tick-stage-filter/proposal.md",
+    ".sillyspec/changes/2026-10-09-timeline-tick-stage-filter/requirements.md",
+    ".sillyspec/changes/2026-10-09-timeline-tick-stage-filter/tasks.md",
+    "backend/app/modules/change/tests/test_timeline.py",
+    "backend/app/modules/change/timeline.py",
+    "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+    "docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 236,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-09T04:12:34.575Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "patchSha256": "413e5391716fb49a09f9c0b0341b88f545d48846b716035001c828e380db13de",
+  "patchStatus": "ok"
+}

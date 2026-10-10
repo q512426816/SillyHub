@@ -1,0 +1,26 @@
+{
+  "change": "2026-10-09-workspace-init-skill-gate",
+  "baseline": "21763d356758116cbc9a6bfafbd567f0adc9445a",
+  "head": "21763d356758116cbc9a6bfafbd567f0adc9445a",
+  "files": [
+    "backend/app/modules/daemon/lease/service.py",
+    "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+    "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx",
+    "frontend/src/components/workspace-config-card.test.tsx",
+    "frontend/src/components/workspace-config-card.tsx",
+    "frontend/src/components/workspace-scan-dialog.tsx",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/src/task-runner/runner-types.ts",
+    "sillyhub-daemon/tests/run-sillyspec-init.test.ts",
+    "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 512,
+    "deletions": 45
+  },
+  "savedAt": "2026-10-09T03:10:58.193Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "patchSha256": "8140c2a009cd3ab38c7f7b2f53d2266850bd3c196c591cbd3183b8581a365ccc",
+  "patchStatus": "ok"
+}

@@ -830,9 +830,10 @@ class ChangeDecisionEntry(BaseModel):
 class ChangeKnowledgeTouch(BaseModel):
     """知识触达条目（2026-09-26-change-asset-transparency / FR-01）。
 
-    本变更知识注入命中的知识库条目——按条目内「待复核：<变更名>」标记反查
-    （flow done 对触达域有覆盖交集的 active 条目打标），覆盖面以标记为准
-    不冒充全量消费记录（知识命中锚点不落盘，见变更 design 槽4 披露）。
+    本变更执行期 CLI 知识注入命中的知识库条目（knowledge_hits inject 遥测行
+    的 matched_anchors 展开去重），在途/归档同源——在途随执行增长、归档后
+    定格（2026-10-09-knowledge-touch-marker-sunset：CLI 已退役「待复核」标记
+    落盘，标记反查面拆除，此即唯一来源与口径）。
     """
 
     id: str
@@ -877,6 +878,11 @@ class ChangePatchMeta(BaseModel):
     按留档来源二形（2026-09-25-change-detail-assets-usability / FR-04 起供卡面
     列出具体改动面）：change-patch.json 取 ``files`` 数组，scope-audit.json 回退
     形态取 ``rows[].path``；超上限时 ``files_truncated=True`` 显式标注。
+
+    单套演进（2026-10-09-close-trace-single-set，CLI 侧）：新收口只落 change.patch +
+    change-patch.json 两件——对账面并入后者的 ``scopeAudit`` 子对象（顶级键原位不动，
+    本 DTO 读的顶级字段零变化），scope-audit.json/.patch 停写；回退链保留兜其他仓/本仓
+    存量旧形态归档。
     """
 
     files: int | None = None

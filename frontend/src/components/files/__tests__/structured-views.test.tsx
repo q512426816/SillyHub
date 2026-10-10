@@ -172,6 +172,69 @@ describe("knownJsonView", () => {
     expect(container.textContent).toContain("−3");
   });
 
+  // ── 2026-10-09-close-trace-single-set-platform：收口留痕单套清单（含 scopeAudit 子对象）──
+  it("change-patch.json（含 scopeAudit）→ 清单摘要 + 交付文件表 + 对账快照复用", () => {
+    const changePatch = {
+      change: "2026-10-09-demo",
+      baseline: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
+      head: "524546f45bc4149b101c35a0feda8fcd185bdf04",
+      files: ["frontend/src/a.tsx", "docs/x.md"],
+      totals: { files: 2, additions: 30, deletions: 3 },
+      savedAt: "2026-10-09T06:00:00.000Z",
+      patchSha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      patchStatus: "ok",
+      scopeAudit: {
+        mode: "full-flow",
+        ok: true,
+        degradedReason: null,
+        baseAnchor: "ec5ee3dcd9db863a0f11c382b79bafee9c8b3cce",
+        totals: { files: 2, additions: 30, deletions: 3 },
+        rows: [
+          { path: "frontend/src/a.tsx", additions: 3, deletions: 3, kind: "modified", verdict: "planned" },
+        ],
+        excluded: { foreignDeclared: [] },
+        closedBy: "flow done",
+      },
+    };
+    const node = knownJsonView("change-patch.json", changePatch);
+    expect(node).not.toBeNull();
+    const { container } = render(<div>{node}</div>);
+    const el = container.querySelector('[data-testid="change-patch-view"]');
+    expect(el).not.toBeNull();
+    // 清单摘要面：变更名 / 冻结徽章 / ±统计 / 锚点截断
+    expect(el!.textContent).toContain("2026-10-09-demo");
+    expect(el!.textContent).toContain("✓ patch 已冻结");
+    expect(el!.textContent).toContain("+30");
+    expect(el!.textContent).toContain("−3");
+    expect(el!.textContent).toContain("ec5ee3dcd9db…");
+    // 交付文件表
+    expect(el!.textContent).toContain("frontend/src/a.tsx");
+    expect(el!.textContent).toContain("docs/x.md");
+    // scopeAudit 子对象复用 ScopeAuditView（对账快照小节 + 裁决徽章）
+    expect(el!.textContent).toContain("范围对账快照");
+    expect(el!.querySelector('[data-testid="scope-audit-view"]')).not.toBeNull();
+    expect(el!.textContent).toContain("✓ 计划内");
+  });
+
+  it("change-patch.json（旧形态无 scopeAudit）→ 清单面照常 + 降级说明；结构漂移 → null", () => {
+    const legacy = {
+      change: "2026-09-25-demo",
+      files: ["frontend/src/a.tsx"],
+      totals: { files: 1, additions: 3, deletions: 0 },
+      savedAt: "2026-09-25T06:00:00.000Z",
+      patchStatus: "ok",
+    };
+    const node = knownJsonView("change-patch.json", legacy);
+    expect(node).not.toBeNull();
+    const { container } = render(<div>{node}</div>);
+    const el = container.querySelector('[data-testid="change-patch-view"]');
+    expect(el).not.toBeNull();
+    expect(el!.textContent).toContain("frontend/src/a.tsx");
+    expect(el!.textContent).toContain("无 scopeAudit 对账面");
+    // 名字命中但结构漂移（files 非数组）→ null（回落 JsonView）
+    expect(knownJsonView("change-patch.json", { change: "x", totals: {} })).toBeNull();
+  });
+
   it("apply-manifest.json → 哈希清单表格", () => {
     const node = knownJsonView("apply-manifest.json", applyManifest);
     expect(node).not.toBeNull();

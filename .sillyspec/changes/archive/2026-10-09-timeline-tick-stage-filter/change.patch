@@ -1,0 +1,317 @@
+diff --git a/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/flow-state.yaml b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/flow-state.yaml
+new file mode 100644
+index 000000000..4ec0917af
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/flow-state.yaml
+@@ -0,0 +1,25 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  变更详情「真实留痕时间线」任务勾选时刻全列表同秒且早于 tasks.md 诞生（2026-10-09-workspace-init-skill-gate 实证：五任务全部 ≈10:00:48，而 tasks.md 10:05:46
++  才出现）。根因：watcher 对任何文件的 - [x] 计数增加都发 task-done 事件（detail 带文件所属 stage 前缀），design.md 自审清单 6 勾产生「design · checked 0→6」；CLI
++  侧 inferFlipTimes（sillyspec 仓 timeline.js）有 stage 白名单跳过非 tasks 事件，平台 Python 移植 backend timeline.py _infer_task_times
++  丢了该过滤——误吃 design 事件把 10:00:48 赋给全部任务，且游标跳到 6 致后续真实「tasks · checked 0→5」断裂。
++
++
++  成功标准：
++
++  - _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++
++  - 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++
++  - 既有 backend change timeline 测试面（test_timeline.py）全绿
++autopilot: true
++baseline_commit: 8c6802f09b281a94b16dabda6238feae6133cd79
++updatedAt: '2026-10-09T04:06:40.957Z'
++baseline_sha256: 0a5e32e986ce5fc4dd09d4f856a9af069f1d731cb69b0d42e67777977b7552cc
++
+diff --git a/backend/app/modules/change/tests/test_timeline.py b/backend/app/modules/change/tests/test_timeline.py
+index 7fcb1df4b..16b318d91 100644
+--- a/backend/app/modules/change/tests/test_timeline.py
++++ b/backend/app/modules/change/tests/test_timeline.py
+@@ -356,3 +356,32 @@ async def test_timeline_task_time_stage_prefix_and_cursor_break(db_session, tmp_
+         ws2.id, change2.id, uuid.uuid4()
+     )
+     assert all(t.time is None for t in result2.tasks)
++
++
++async def test_timeline_task_time_skips_non_tasks_stage(db_session, tmp_path: Path) -> None:
++    """非 tasks 域勾选计数不污染任务时刻推断（2026-10-09 实证钉：
++    2026-10-09-workspace-init-skill-gate 五任务全列表同秒 ≈10:00:48 且早于
++    tasks.md 诞生——「design · checked 0→6」实为 design.md 自审清单 6 勾，
++    CLI inferFlipTimes 有 stage 白名单，Python 移植补齐同款过滤）。"""
++    spec_root = tmp_path / "case-c" / "spec-root8"
++    _seed_change_dir(spec_root)
++    ws = await _make_ws(db_session, spec_root)
++    change = await _make_change(db_session, ws)
++    # 实证事件序列（ts 为 UTC；02:00:48Z=本地 10:00:48）：
++    # design 自审清单 → tasks.md 批勾 0→5 → 回退后逐拍补勾（首拍 1→2）。
++    await _add_event(db_session, ws.id, "2026-10-09T02:00:48Z", "task-done", "design · checked 0→6")
++    await _add_event(db_session, ws.id, "2026-10-09T02:28:52Z", "task-done", "tasks · checked 0→5")
++    await _add_event(db_session, ws.id, "2026-10-09T02:33:23Z", "task-done", "tasks · checked 1→2")
++    await db_session.commit()
++
++    result = await ChangeTimelineQueryService(db_session).get_change_timeline(
++        ws.id, change.id, uuid.uuid4()
++    )
++    # design 事件被跳过（未修代码会把它赋给全部任务且游标跳 6 致后续断裂——
++    # 全部任务停在 02:00:48）；「tasks · checked 0→5」一拍覆盖 tasks.md 前 3 行，
++    # 后续 1→2 因 from=1≠游标 5 断裂，task-03 未勾本就不推断。
++    assert result.tasks[0].time == "2026-10-09T02:28:52Z"
++    assert result.tasks[1].time == "2026-10-09T02:28:52Z"
++    assert result.tasks[2].time is None
++    for t in result.tasks:
++        assert t.time != "2026-10-09T02:00:48Z"
+diff --git a/backend/app/modules/change/timeline.py b/backend/app/modules/change/timeline.py
+index b0fdb3ecf..5b28fb8b1 100644
+--- a/backend/app/modules/change/timeline.py
++++ b/backend/app/modules/change/timeline.py
+@@ -85,8 +85,12 @@ def _parse_ts(ts: str) -> datetime | None:
+ 
+ 
+ # task-done 事件勾选计数（watcher 推送 detail 为「stage · checked N→M」——
+-# stage 前缀并存，search 子串匹配兼容两种形态）。
+-_TASK_DONE_RE = re.compile(r"checked (\d+)→(\d+)")
++# stage 前缀并存，search 子串匹配兼容两种形态）。前缀捕获组用于域白名单：
++# 非 tasks 域的勾选计数（如 design.md 自审清单「design · checked 0→6」）不参与
++# 任务勾选推断——CLI inferFlipTimes（e.stage && e.stage !== 'tasks'）同款过滤；
++# 2026-10-09-workspace-init-skill-gate 实证：误吃 design 事件致全部任务同秒
++# 且早于 tasks.md 诞生。无前缀裸形态（stage 缺省）仍参与推断。
++_TASK_DONE_RE = re.compile(r"^(?:(\S+) · )?checked (\d+)→(\d+)")
+ 
+ 
+ def _infer_task_times(rows: list, total: int) -> list[str | None]:
+@@ -95,7 +99,8 @@ def _infer_task_times(rows: list, total: int) -> list[str | None]:
+     task-done 事件序列（``checked N→M``）游标衔接才赋值：中段断裂（from ≠ 游标）
+     停止推断（观测盲窗丢拍，后续任务时刻不可信）；尾部未覆盖（链完整但拍数
+     少于任务数——在途未勾完）不标断裂，未勾任务自然 None。观测起点前的首勾
+-    （首个事件 from>0）同断裂语义。返回按任务序号索引的时刻列表。
++    （首个事件 from>0）同断裂语义。detail 带非 tasks stage 前缀的事件跳过
++    （域白名单，见 _TASK_DONE_RE 注）。返回按任务序号索引的时刻列表。
+     """
+     times: list[str | None] = [None] * max(0, total)
+     cursor = 0
+@@ -105,7 +110,10 @@ def _infer_task_times(rows: list, total: int) -> list[str | None]:
+         m = _TASK_DONE_RE.search(r.detail)
+         if not m:
+             continue
+-        start, end = int(m.group(1)), int(m.group(2))
++        stage = m.group(1)
++        if stage is not None and stage != "tasks":
++            continue
++        start, end = int(m.group(2)), int(m.group(3))
+         if start != cursor:
+             break
+         for i in range(start, min(end, total)):
+diff --git a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+index c4c535fa2..2006220a6 100644
+--- a/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
++++ b/backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py
+@@ -416,6 +416,7 @@ class TestInitLeaseCompleteFailureGate:
+ 
+         claim_token = "tok-" + uuid.uuid4().hex
+         lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
++        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
+         lease.metadata_["claim_token"] = claim_token
+         db_session.add(lease)
+         await db_session.commit()
+@@ -452,6 +453,7 @@ class TestInitLeaseCompleteFailureGate:
+         claim_token = "tok-" + uuid.uuid4().hex
+         lease = await _create_init_lease(db_session, rt_id, workspace_id=ws.id, actor_user_id=actor)
+         # latest_spec_version 非 0 验证回写值透传
++        assert lease.metadata_ is not None  # mypy：Optional 列收窄（运行时列缺省恒 dict）
+         lease.metadata_["latest_spec_version"] = 7
+         lease.metadata_["claim_token"] = claim_token
+         db_session.add(lease)
+diff --git a/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md b/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
+new file mode 100644
+index 000000000..1ed520d85
+--- /dev/null
++++ b/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
+@@ -0,0 +1,23 @@
++# fourpiece-init 写 UTC 致时间线「变更诞生」锚偏 8 小时（sillyspec CLI）
++
++> 记录时间：2026-10-09 · 来源：平台侧变更详情「真实留痕时间线」显示异常排查（2026-10-09-workspace-init-skill-gate 实证）
++> 状态：活跃坑（已修于 sillyspec 仓 `2026-10-09-fourpiece-created-at-local`（commit 8c87cf28，src/index.js fourpiece-init `fpStamp` 改 `datetime.js nowWallClock()`）；待 sillyspec 发版且 daemon 升级门控放行后生效，生效前新初始化产出的骨架仍带 UTC 戳）
++
++## 事实（2026-10-09 实证）
++
++- 平台时间线「🌱 变更诞生」显示 `10-09 02:04:06`，真实诞生为本地 `10:04:06`（watcher 事件流 `requirements.md 出现` @10:04:08 佐证）。
++- 同一变更内两种时间基并存：requirements.md / proposal.md（fourpiece-init 产出）`created_at: 2026-10-09 02:04:06`（UTC）；design.md（design-init 产出）`created_at: 2026-10-09 09:58:48`（本地，正确）。
++
++## 根因（sillyspec CLI）
++
++- `sillyspec fourpiece-init` 骨架 frontmatter `created_at` 用 `new Date().toISOString().slice(0,19)` 写 **UTC 数字的裸形状**（无时区标记）。项目约定（sillyspec 仓 `src/datetime.js` 头注，坑 `taskcard-created-at-utc` 2026-08-23）：frontmatter 人读时间字段统一本地墙钟——taskcard 与 design-init 均已改 `nowWallClock()`，fourpiece-init 是漏网点。
++- 读取链不自愈：平台 `_read_born_at`（backend timeline.py）原样透传无时区串，前端 `new Date("…")` 按浏览器本地解析 → UTC 值被当本地直接显示，偏时区数（实证机 -8h）。
++
++## 影响面与存量数据
++
++- 生效前所有新 fourpiece 骨架的 `created_at` 均为 UTC；存量变更（含 2026-10-09-workspace-init-skill-gate）时间线 born 锚持续显示偏移值——历史工件不改写（变更事实以 watcher 事件流为准），接受旧值。
++- 附带发现（未修，另一显示路径）：sillyspec 仓 `src/module-impact.js:158` 用 `toISOString().slice(0,19) + '+08:00'`——UTC 数字拼 +08:00 偏移后缀，解析瞬间错 16h，待单独变更处理。
++
++## 关联
++
++- 平台侧同源缺陷（勾选时刻推断丢 stage 白名单）已于本仓 `2026-10-09-timeline-tick-stage-filter` 修复——那是平台移植遗漏，非 CLI 缺陷。
+diff --git a/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/design.md b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/design.md
+new file mode 100644
+index 000000000..a0a165430
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:06:40.935Z
++---
++# 设计记录（Design Record）— 2026-10-09-timeline-tick-stage-filter
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`timeline.py` 的 `_TASK_DONE_RE` 从「checked N→M」子串匹配改为带可选 stage 前缀捕获的锚定匹配（`^(?:(\S+) · )?checked (\d+)→(\d+)`），`_infer_task_times` 循环内对捕获到的非 None 且非 `tasks` 的 stage 前缀 continue 跳过——语义与 CLI `inferFlipTimes`（sillyspec 仓 timeline.js:39 `e.stage && e.stage !== 'tasks'`）逐字对齐。根因背景：watcher 对任何文件的 `- [x]` 计数增加都发 task-done（detail 带「stage ·」前缀，DB 无独立 stage 列），design.md 自审清单 6 勾产生「design · checked 0→6」；Python 移植只做了计数子串匹配、丢了 CLI 的域白名单，误吃该事件把 10:00:48 赋给全部任务且游标跳到 6 致后续真实事件断裂。选前缀解析而非给 events 表加 stage 列：零 schema 变更、零回填，与推送端既有「stage 并入 detail」契约一致。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++模块内私有函数 `_infer_task_times`（timeline.py）行为变化：非 tasks 前缀的 task-done 事件不再参与游标衔接。API 响应结构（ChangeTimelineRead）零变化；无端点/schema/DTO 变更（api-types 无需 regen）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   事件按 ts 正序读（既有查询不变）；过滤只剔除域外事件，不改变游标衔接对顺序的既有依赖——乱序迟到（同步镜像延迟重放）下游标断裂语义照旧（from≠游标即停），无新假设。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   只读聚合（红线 D-004：events 表只读零 mutation），无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   无状态纯函数 + 单次请求内聚合；请求中断无残留状态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   查询既有按 (workspace_id, change_name) 过滤不变；stage 前缀是事件自身属性，与工作区无关，不串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：tasks 域内仍无法区分 tasks.md 与 tasks/task-NN.md 卡片的勾选计数（卡片段落勾选会以「tasks · checked N→M」进入推断）——这是 CLI 同款已知诚实面限制（事件只记计数不记任务 id），本次对齐 CLI 语义不扩大不收窄。试过放弃：①events 表加 stage 列 + watcher 推送带 stage——需 schema 迁移与历史回填，跨仓协同成本远超收益；②按 detail 前缀白名单枚举具体 stage 名（design/proposal…）——黑名单式枚举漏新 stage 域，白名单「仅 tasks 参与」与 CLI 语义一致更稳。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/change/timeline.py | `_TASK_DONE_RE` 前缀捕获 + `_infer_task_times` 非 tasks 前缀跳过（含 docstring 补注） |
++| 修改 | backend/app/modules/change/tests/test_timeline.py | 新增实证形态回归用例 test_timeline_task_time_skips_non_tasks_stage |
++| 新增 | docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md | 同族工具缺陷记录（fourpiece-init 写 UTC 致 born 锚偏 8h，已修于 sillyspec 仓待发版） |
++| 修改 | backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py | 收口 lint 门附带修复：metadata_ Optional 列赋值前断言收窄（mypy 3 报错，兄弟变更 2026-10-09-workspace-init-skill-gate 已提交代码的既有债，非本变更语义面） |
+diff --git a/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/proposal.md b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/proposal.md
+new file mode 100644
+index 000000000..05632e770
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:06:40.935Z
++---
++# 提案书（Proposal）— 2026-10-09-timeline-tick-stage-filter
++
++## 动机
++
++任务原话转写：变更详情「真实留痕时间线」任务勾选时刻全列表同秒且早于 tasks.md 诞生（2026-10-09-workspace-init-skill-gate 实证：五任务全部 ≈10:00:48，而 tasks.md 10:05:46 才出现）。根因：watcher 对任何文件的 - [x] 计数增加都发 task-done 事件（detail 带文件所属 stage 前缀），design.md 自审清单 6 勾产生「design · checked 0→6」；CLI 侧 inferFlipTimes（sillyspec 仓 timeline.js）有 stage 白名单跳过非 tasks 事件，平台 Python 移植 backend timeline.py _infer_task_times 丢了该过滤——误吃 design 事件把 10:00:48 赋给全部任务，且游标跳到 6 致后续真实「tasks · checked 0→5」断裂。
++
++成功标准：
++- _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++- 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++- 既有 backend change timeline 测试面（test_timeline.py）全绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++2. 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++3. 既有 backend change timeline 测试面（test_timeline.py）全绿
++
++## 成功标准（可验证）
++
++1. _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++2. 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++3. 既有 backend change timeline 测试面（test_timeline.py）全绿
+diff --git a/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/requirements.md b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/requirements.md
+new file mode 100644
+index 000000000..b077937c8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/requirements.md
+@@ -0,0 +1,49 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:06:40.935Z
++---
++# 需求规格（Requirements）— 2026-10-09-timeline-tick-stage-filter
++
++## 功能需求
++
++### FR-01: _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++
++- `_infer_task_times` 对 detail 为「非 tasks stage 前缀 · checked N→M」的 task-done 事件**必须**跳过（对齐 CLI `inferFlipTimes` 的 `e.stage && e.stage !== 'tasks'` 白名单语义）；detail 无 stage 前缀的裸「checked N→M」形态（stage 缺省）**必须**仍参与推断。
++
++#### 场景：design 自审清单事件被跳过
++
++- Given 事件流含「design · checked 0→6」（design.md 自审清单勾选，非任务勾选）与后续「tasks · checked 0→5」
++- When 聚合变更时间线
++- Then 任务勾选时刻只由 tasks 域事件推断，design 事件既不赋值也不推进游标
++
++#### 场景：裸形态仍参与推断
++
++- Given 事件流含无前缀「checked 0→2」（旧推送形态）
++- When 聚合变更时间线
++- Then 该事件照常参与游标衔接推断（既有金样本用例锁定的行为不变）
++
++### FR-02: 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++
++- `test_timeline.py` **必须**新增回归用例，按 2026-10-09-workspace-init-skill-gate 实证事件序列（design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2）构造事件流，断言任务时刻不出现 design 事件时刻；未修复代码上该用例**必须**失败（design 时刻被赋给全部任务）。
++
++#### 场景：实证序列回归被拦
++
++- Given 未修复代码（无非 tasks 过滤）
++- When 运行该回归用例
++- Then 断言失败（全部任务时刻 = design 事件时刻 02:00:48，且早于真实勾选时刻）
++
++### FR-03: 既有 backend change timeline 测试面（test_timeline.py）全绿
++
++- 改动落盘后，`backend/app/modules/change/tests/test_timeline.py` 全部既有用例**必须**保持全绿（金样本聚合/空事件容错/锚窗口收窄/git 降级/ChangeNotFound/token 边界/stage 前缀与游标断裂）。
++
++#### 场景：主路径
++
++- Given 改动已落盘
++- When 只跑 `test_timeline.py`（规则 0：禁全量）
++- Then 全部用例 pass
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」
++FR-02: backend/app/modules/change/tests/test_timeline.py「test_timeline_task_time_skips_non_tasks_stage」+「test_timeline_task_time_stage_prefix_and_cursor_break」（裸形态/前缀形态既有锁定）
++FR-03: backend/app/modules/change/tests/test_timeline.py 全文件既有用例
+diff --git a/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/tasks.md b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/tasks.md
+new file mode 100644
+index 000000000..66f5b7905
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-09-timeline-tick-stage-filter/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-09T04:06:40.936Z
++---
++# 任务注册表（Tasks）— 2026-10-09-timeline-tick-stage-filter
++
++- [x] task-01: _infer_task_times 跳过 detail 带非 tasks stage 前缀的 task-done 事件（对齐 CLI e.stage && e.stage !== 'tasks' 语义；无前缀裸形态仍参与推断）
++- [x] task-02: 回归用例钉住实证形态：design · checked 0→6 → tasks · checked 0→5 → tasks · checked 1→2…，断言任务时刻不被 design 事件污染
++- [x] task-03: 既有 backend change timeline 测试面（test_timeline.py）全绿

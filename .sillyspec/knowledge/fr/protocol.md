@@ -126,3 +126,211 @@
 - 场景：默认场景 — Given 指令已下发且 daemon 执行完毕 下发后 150s（执行上限 120s + 一个心跳周期）无匹配回报（如旧 daemon 静默忽略） daemon 同一时刻；When 下一次心跳（默认 15s）到达 到达超时 新指令到达；Then daemon 携带 `sillyspec_command_result`（action/change/strategy/state/exit_code/erro
 全文：.sillyspec/changes/archive/2026-09-04-conflict-resolve-entry/requirements.md#FR-05
 最近确认：0d7e66502
+
+## FR-protocol-014 纯墓碑冲突按被删变更归因记账并自动清理（sillyspec CLI 仓）
+变更：2026-10-09-tombstone-conflict-root-fix
+状态：active
+摘要：纯墓碑拒收归因落盘；归档区路径剥名；全绿同步清陈旧墓碑记录；进度总览透传墓碑形态
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：纯墓碑拒收归因落盘 — Given 本地存在平台已删除变更 `<X>` 的目录路径，CLI 同步收到纯墓碑拒收（版本冲突面为空、`platform_deleted` 非空）；When CLI 落冲突记录；Then 记录文件为 `spec-sync-conflict-<X>.json`（按被删变更名，非当轮同步标签），内容含 `kind:'tombstone'`、`plat
+- 场景：归档区路径剥名 — When `platform_deleted` 路径含归档区前缀 `changes/archive/<X>/…`；Then 同样归因到变更 `<X>`；剥不出变更名的路径归入 `__unattributed__` 聚合记录
+- 场景：全绿同步清陈旧墓碑记录 — Given `.runtime/` 下存在纯墓碑形态记录（`conflicting_paths` 为空且 `platform_deleted` 非空——kind 无关，涵盖；When 本轮同步全绿（无冲突无拒收）；Then 全部纯墓碑形态记录被删除；混合形态记录（`conflicting_paths` 非空）不受影响
+- 场景：进度总览透传墓碑形态 — When `sillyspec progress show --json` 列出未决冲突；Then 墓碑记录的 `type` 为 `'tombstone'`（优先读记录 `kind` 字段，文件名前缀判定保留兜底）
+全文：.sillyspec/changes/archive/2026-10-09-tombstone-conflict-root-fix/requirements.md#FR-01
+最近确认：2f6d52515
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-tombstone-conflict-root-fix:task-05:acc-0-a99023d4
+  tests: src/spec-sync.js | test/spec-sync-tombstone-attribution.test.mjs
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-05:acc-1-c2f76477
+  tests: src/spec-sync.js | test/spec-sync-tombstone-attribution.test.mjs
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-05:acc-2-98534e2e
+  tests: src/spec-sync.js | test/spec-sync-tombstone-attribution.test.mjs
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-05:acc-3-99da3d1a
+  tests: src/spec-sync.js | test/spec-sync-tombstone-attribution.test.mjs
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+
+## FR-protocol-015 前端冲突行识别墓碑形态并露出根因
+变更：2026-10-09-tombstone-conflict-root-fix
+状态：active
+摘要：墓碑行渲染；普通版本冲突行不变；收敛按钮与回显
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：墓碑行渲染 — Given backend spec-conflicts 注册表开放行（status=open）满足纯墓碑判定——`details_json.platform_delete；When 变更中心「平台同步」卡渲染冲突行；Then 该行显示「平台已删」徽章（error 语义色）+ 被删变更名（真凶）+ 非版本冲突说明（裁决无效+恢复指引），**不显示**「查看对比」与裁决入口；数据源为注册
+- 场景：普通版本冲突行不变 — Given 冲突行未命中墓碑判定；When 渲染；Then 与现状渲染一致（type 徽章/名称/时间/查看对比/活跃警示）
+- 场景：收敛按钮与回显 — Given 用户对墓碑行点「收敛本机目录」（权限=机器所有者/平台管理员，同裁决权限集）；When 后端下发 tombstone_cleanup 指令成功；Then 行内回显「已下发·等待机器回报」→ 心跳 `sillyspec_command_result`（action='tombstone_cleanup' 且 cha
+全文：.sillyspec/changes/archive/2026-10-09-tombstone-conflict-root-fix/requirements.md#FR-02
+最近确认：2f6d52515
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-tombstone-conflict-root-fix:task-04:acc-0-db7a90fd
+  tests: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-04:acc-1-16400291
+  tests: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-04:acc-2-3af70223
+  tests: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-04:acc-3-ce315e5f
+  tests: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+
+## FR-protocol-016 平台删除变更时下发本机收敛指令
+变更：2026-10-09-tombstone-conflict-root-fix
+状态：active
+摘要：删除环自动下发；daemon 执行器隔离区收敛；执行器幂等
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：删除环自动下发 — Given 平台删除变更 `<X>`（墓碑落库完成）且该工作区有绑定数据源机器；When 删除流程收敛环执行；Then 经 WS 通道下发 `daemon:sillyspec_tombstone_cleanup`（payload 含 change 与 workspace_id）；
+- 场景：daemon 执行器隔离区收敛 — When daemon 收到 tombstone_cleanup 指令；Then 按 workspace_id 映射定位 spec 根（未命中报 `workspace_root_unknown` 不回退单槽位）；把 `changes/<X>/
+- 场景：执行器幂等 — When 指令重放/重试时本机目录已不在（已收敛或从未存在）；Then 回执 state=success，error 注明「目录已不在本地」，无副作用
+全文：.sillyspec/changes/archive/2026-10-09-tombstone-conflict-root-fix/requirements.md#FR-03
+最近确认：2f6d52515
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-09-tombstone-conflict-root-fix:task-01:acc-0-d1244a4b
+  tests: backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-01:acc-1-fc1cea71
+  tests: backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-01:acc-2-79bc5459
+  tests: backend/app/modules/daemon/tests/test_machine_tombstone_cleanup.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-02:acc-0-45e3a3da
+  tests: backend/app/modules/change/tests/test_delete_change.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-02:acc-1-5bdfa2ab
+  tests: backend/app/modules/change/tests/test_delete_change.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-02:acc-2-5b3d4d40
+  tests: backend/app/modules/change/tests/test_delete_change.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-03:acc-0-ece38916
+  tests: sillyhub-daemon/src/sillyspec-manager.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-03:acc-1-0143ccd6
+  tests: sillyhub-daemon/src/sillyspec-manager.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-03:acc-2-88c8a511
+  tests: sillyhub-daemon/src/sillyspec-manager.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active
+- row: 2026-10-09-tombstone-conflict-root-fix:task-03:acc-3-561829ad
+  tests: sillyhub-daemon/src/sillyspec-manager.ts | sillyhub-daemon/tests/sillyspec-tombstone-cleanup.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-09-tombstone-conflict-root-fix
+  status: active

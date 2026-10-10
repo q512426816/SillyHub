@@ -339,6 +339,72 @@ async def trigger_machine_sillyspec_ghost_cleanup(
     return {"sent": True}
 
 
+class MachineSillySpecTombstoneCleanupRequest(BaseModel):
+    """Body for POST /machines/{instance_id}/sillyspec-tombstone-cleanup（FR-03）。
+
+    ``change`` 白名单与 ``MachineSillySpecResolveRequest`` 同款（首字符字母数字，
+    其余字母数字/./-/_，长度 1-128，拒 ``..``——daemon 侧目录定位有边界校验
+    双保险，backend 只做格式校验）。
+    """
+
+    change: str
+    workspace_id: uuid.UUID
+
+    @field_validator("change")
+    @classmethod
+    def _validate_change(cls, v: str) -> str:
+        if ".." in v or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", v) is None:
+            raise ValueError(
+                "change 仅允许字母数字与 . _ - 组成（长度 1-128，首字符须为字母数字，"
+                "且不得包含 ..）。"
+            )
+        return v
+
+
+@router.post(
+    "/machines/{instance_id}/sillyspec-tombstone-cleanup",
+)
+async def trigger_machine_sillyspec_tombstone_cleanup(
+    instance_id: uuid.UUID,
+    data: MachineSillySpecTombstoneCleanupRequest,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, bool]:
+    """推送 sillyspec 墓碑收敛指令到指定机器（admin，2026-10-09 FR-03）。
+
+    机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+    ``daemon:sillyspec_tombstone_cleanup``（fire-and-forget，无回执，同
+    SILLYSPEC_UPDATE 语义，不排队不落库）；daemon 收到后把本机变更目录移入
+    ``.sillyspec/.runtime/tombstone-quarantine/`` 隔离区（移动不删除）并归档
+    进度库行，结果经心跳 sillyspec_command_result（action='tombstone_cleanup'）
+    回传。本端点是前端墓碑行「收敛本机目录」按钮的手动触发通道（平台删除
+    变更时的自动下发走 delete_change 收敛环，不经此端点）。权限/归属校验与
+    504 结构与 sillyspec-resolve 同款（RuntimeAdminUser +
+    ``_get_owned_instance`` owner 与平台管理员放行 + workspace 成员校验）。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.sillyspec_compare import SillySpecCompareService
+
+    await SillySpecCompareService(session).ensure_workspace_member(
+        user.id, data.workspace_id, action="收敛"
+    )
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_sillyspec_tombstone_cleanup(instance_id, data.change, data.workspace_id)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
+            details={"daemon_instance_id": str(instance_id)},
+        )
+    return {"sent": True}
+
+
 @router.delete(
     "/machines/{instance_id}",
     status_code=status.HTTP_204_NO_CONTENT,

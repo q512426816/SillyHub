@@ -164,6 +164,7 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     "trigger_machine_sillyspec_update",
     "trigger_machine_sillyspec_resolve",
     "trigger_machine_sillyspec_ghost_cleanup",
+    "trigger_machine_sillyspec_tombstone_cleanup",
     "compare_machine_sillyspec_conflict",
     "delete_machine",
     # runtimes（拆前 #17-21）

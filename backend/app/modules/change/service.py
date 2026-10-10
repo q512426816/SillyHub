@@ -431,6 +431,53 @@ class ChangeService:
             change_key=change.change_key,
             file_count=file_count,
         )
+        # 2026-10-09-tombstone-conflict-root-fix FR-03：终 commit 后向绑定数据源机器
+        # fire-and-forget 下发墓碑收敛指令（daemon 把本机 changes/<key>/ 目录移入
+        # .sillyspec/.runtime/tombstone-quarantine/ 隔离区并归档进度库行——堵「平台
+        # 删了、本地留着」的每轮撞墓碑复发源头）。下发时点钉死在主事务终 commit 之后
+        # （Grill P2：防指令先于事务提交到达时 daemon 收敛后推送仍撞墓碑的窗口）；
+        # 失败仅记日志不阻塞删除（机器离线兜底=前端墓碑行「收敛本机目录」按钮手动
+        # 补发，指令幂等重放安全）。
+        try:
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+            from app.modules.workspace.member_runtimes.model import (
+                WorkspaceMemberRuntime,
+            )
+
+            daemon_ids = (
+                (
+                    await self._session.execute(
+                        select(WorkspaceMemberRuntime.daemon_id)
+                        .where(
+                            WorkspaceMemberRuntime.workspace_id == workspace_id,
+                            WorkspaceMemberRuntime.daemon_id.is_not(None),
+                        )
+                        .distinct()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if daemon_ids:
+                hub = get_daemon_ws_hub()
+                for daemon_id in daemon_ids:
+                    sent = await hub.send_sillyspec_tombstone_cleanup(
+                        daemon_id, change.change_key, workspace_id
+                    )
+                    log.info(
+                        "change.tombstone_cleanup_dispatched",
+                        workspace_id=str(workspace_id),
+                        daemon_instance_id=str(daemon_id),
+                        change_key=change.change_key,
+                        sent=sent,
+                    )
+        except Exception as exc:
+            log.warning(
+                "change.tombstone_cleanup_dispatch_failed",
+                workspace_id=str(workspace_id),
+                change_key=change.change_key,
+                error=str(exc),
+            )
         return ChangeDeleteResponse(ok=True, backup_dir=backup_dir, file_count=file_count)
 
     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──

@@ -1654,25 +1654,30 @@ export async function bumpLocalSpecVersion(
 // 两步：
 //   步骤 0：版本门控（D-009）——spawn 'sillyspec --version'（shell:true，3s 超时），semver
 //     低于 MIN_SILLYSPEC_VERSION_FOR_INIT → ok:false + sillyspec_init_cli_too_old（老 CLI
-//     静默忽略 --no-skills/--tool 多值且 exit 0，preflight 仅启动跑一次不自愈，故每次
+//     静默忽略 --tool 多值且 exit 0，preflight 仅启动跑一次不自愈，故每次
 //     init 前独立门控；用户升级 CLI 后无需重启 daemon）。
 //   步骤 1：spawn `sillyspec init --dir <rootPath> --spec-dir <specCacheRoot>
-//     --workspace-id <wsId> --no-skills --tool <tools>`（60s 超时，D-006）。
+//     --workspace-id <wsId> --tool <tools>`（60s 超时，D-006）。不带 --no-skills——
+//     2026-10-09-workspace-init-skill-gate D-001@v1 修订 D-004@v1：恢复 CLI 自带 skills
+//     复制段，按 --tool 交集把 sillyspec-* 技能写入各工具目录（.claude/.codex/.openclaw/
+//     .opencode/.zcode 的 skills/），skill-manager 链路不动（平台自定义技能仍单端）。
 //
 // 超时杀树范式对齐 preflight.ts runWithTreeKill（私有未导出，此处自实现，不跨模块 import）：
 // Windows taskkill /PID /T /F（npm.cmd wrapper 孙进程）/ POSIX detached:true 进程组 kill(-pid)。
 //
 // 覆盖：design.md §2（daemon 侧编排）/ §6（与 preflight 衔接）；decisions.md D-001@v1 /
-// D-004@v1（--no-skills）/ D-006@v1（60s 超时）/ D-009@v1（版本门控）。
+// D-004@v1 → D-001@v1（2026-10-09 修订：去 --no-skills）/ D-006@v1（60s 超时）/ D-009@v1（版本门控）。
 
 /**
  * init 所需 sillyspec CLI 最低版本（D-009 门控比对值）。
  *
- * 3.26.8：含 --no-skills 开关 + --tool 多值 + 平台模式跳过项目内清理段
- * （task-01/02/03 三项，本机 npm link 验证版）。正式 npm 发版后若版本号更高，
- * 本常量保持 3.26.8 即可（门控语义是"不低于最低要求"，无需跟随最新版）。
+ * 3.32.2（2026-10-09-workspace-init-skill-gate D-004@v1 提升，原 3.26.8）：zcode 技能
+ * 复制的双层缺口（detectTools 不发现 + 显式 --tool zcode 也拿不到技能）在该版本修复
+ * （sillyspec commit 016968bd）；且本变更起 init 不带 --no-skills，需 CLI skills 复制段
+ * 对五端目录（claude/codex/openclaw/opencode/zcode）完整可用。老版本对 --tool zcode
+ * 静默忽略且 exit 0，会造成"init 成功但 zcode 端无技能"的暗坑，故门控提到修复版。
  */
-export const MIN_SILLYSPEC_VERSION_FOR_INIT = '3.26.8';
+export const MIN_SILLYSPEC_VERSION_FOR_INIT = '3.32.2';
 
 /** 版本门控 spawn 超时（ms）。--version 是纯本地命令，3s 充裕。 */
 const VERSION_CHECK_TIMEOUT_MS = 3_000;
@@ -1805,15 +1810,17 @@ function runInitCmd(
  * → ok:false + sillyspec_init_cli_too_old + 中文升级指引（重启 daemon 或 npm install -g
  * sillyspec@latest——升级 CLI 后无需重启 daemon，下次 init 门控即通过）。门控查询失败
  * （spawn 失败 / 超时 / 版本解析失败）同样 fail-safe 按门控不过（ok:false，cli_too_old 前缀），
- * 不冒险对一个版本未知的 CLI 发 --no-skills/--tool 多值（老 CLI 静默忽略且 exit 0，
+ * 不冒险对一个版本未知的 CLI 发 --tool 多值（老 CLI 静默忽略且 exit 0，
  * 会产出错误骨架假成功）。
  *
  * 步骤 1 init spawn（60s 超时杀树，D-006）：
  *   sillyspec init --dir <rootPath> --spec-dir <specCacheRoot> --workspace-id <wsId>
- *                   --no-skills --tool <tools.join(',')>
+ *                   --tool <tools.join(',')>
  *   - 退出码 0 → ok:true
  *   - 非 0 / 超时 / spawn 失败 → ok:false + sillyspec_init_failed（stdout/stderr 截断收集进 error）
  *   - tools 空数组/缺省 → 兜底 ['claude']（D-005@v1）
+ *   - 不带 --no-skills：CLI 按 --tool 复制 sillyspec-* 技能到各工具目录
+ *     （2026-10-09-workspace-init-skill-gate D-001@v1 修订 D-004@v1）
  *
  * 纯编排函数：spawn 经 spawnFn 注入（默认 node:child_process.spawn），供单测 mock。
  *
@@ -1845,7 +1852,8 @@ export async function runSillyspecInit(
     `--dir "${params.rootPath}"`,
     `--spec-dir "${params.specCacheRoot}"`,
     `--workspace-id ${params.wsId}`,
-    '--no-skills', // D-004：skills 只走 skill-manager 单渠道
+    // 不带 --no-skills：让 CLI 按 --tool 复制 sillyspec-* 技能到各工具目录
+    // （2026-10-09-workspace-init-skill-gate D-001@v1，修订 2026-08-15 D-004@v1）
     `--tool ${tools.join(',')}`,
   ].join(' ');
   const init = await runInitCmd(cmd, INIT_SPAWN_TIMEOUT_MS, spawnFn);

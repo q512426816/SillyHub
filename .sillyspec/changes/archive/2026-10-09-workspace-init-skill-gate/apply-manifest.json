@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-09-workspace-init-skill-gate",
+  "appliedAt": "2026-10-09T03:28:09.788Z",
+  "baseHash": "21763d356758116cbc9a6bfafbd567f0adc9445a",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/lease/service.py",
+      "sha256": "ab45c7b30b9053587733acf63e183b9c622ba7d6603bb17352567453c1683dd9"
+    },
+    {
+      "path": "backend/app/modules/daemon/lease/tests/test_init_claim_tokens.py",
+      "sha256": "33310445f493bebd7176600e9b220742210a0d8c59a6a80759b2b9547c27ace4"
+    },
+    {
+      "path": "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx",
+      "sha256": "5b99b105c5468421d89929ed6272d2bd54106827001654b2e757480a32fd0509"
+    },
+    {
+      "path": "frontend/src/components/workspace-config-card.test.tsx",
+      "sha256": "1b07f044ad50f939789e82de5c4afdd1d13fd19e5a9801388664e565cc1a8678"
+    },
+    {
+      "path": "frontend/src/components/workspace-config-card.tsx",
+      "sha256": "458dfbdd64f7969cbf68333af69e7cbcc68926c2c04a34ecf3ab4c76fdd5e838"
+    },
+    {
+      "path": "frontend/src/components/workspace-scan-dialog.tsx",
+      "sha256": "5f14611ce0aadbd41d94c4d5d8aeaae93a120d19df8a86e9e6006da7132aeeeb"
+    },
+    {
+      "path": "sillyhub-daemon/src/spec-sync.ts",
+      "sha256": "3d9bcc76c7e1f1d7b2484555317f2b514dd47a57ca94fced3513c3a882994583"
+    },
+    {
+      "path": "sillyhub-daemon/src/task-runner/runner-types.ts",
+      "sha256": "ffed3d40f747c2c77b1a927a4aafadfdbcc674ee78c744d4a98fdb9eeadee053"
+    },
+    {
+      "path": "sillyhub-daemon/tests/run-sillyspec-init.test.ts",
+      "sha256": "d8b2e8060220eb8bf1d517a3295e5e16dc08130508d88ce2c68594c96e9f21de"
+    },
+    {
+      "path": "sillyhub-daemon/tests/sillyspec-tool-mapping.test.ts",
+      "sha256": "d30453ea0e5f445b4a37395c70fe2bac8704981af707e454506133025f27a42d"
+    }
+  ]
+}
