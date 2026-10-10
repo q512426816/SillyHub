@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 1,
   "change": "2026-10-10-dialog-qa-inplace",
   "reviewedAt": "2026-10-10T23:22:10+08:00",
   "reviewedAgainst": "7943dc42e2459febcd5f9bec3f3862cb603c3308",
@@ -129,7 +130,11 @@
     "round": 2,
     "delta": "58a210e726b83254fb002de287eca6edc5fd93d8..7943dc42e2459febcd5f9bec3f3862cb603c3308",
     "relevantCommits": "仅 7943dc42e（frontend 3 文件：turn-timeline.tsx +12 行、测试 +23 行、review.json 归档）；同区间其余 4 提交（7b0df2e6e/ebb5cfcd1/6c780fb99/9ef8e2528）均为 server-db-pool-tuning 后端文件，与本变更无关——与主会话声明一致",
-    "fixesVerified": ["P3-1 注释更新", "P3-3 回退位置断言 + 畸形 dialog 防例", "P3-4 convoTimeline 剔除空 QA dialog"],
+    "fixesVerified": [
+      "P3-1 注释更新",
+      "P3-3 回退位置断言 + 畸形 dialog 防例",
+      "P3-4 convoTimeline 剔除空 QA dialog"
+    ],
     "verdictNormalizationVerified": "7943dc42e 提交的 review.json 与评审员原稿仅 verdict 'pass'→'PASS' 一处差异，语义不变",
     "testRun": "vitest 6 文件 98/98 全绿 + tsc --noEmit exit 0（2026-10-10T23:21 复跑）",
     "openItems": "P3-2（design 披露粒度，非阻塞）保留为历史，不要求修复"
@@ -144,5 +149,6 @@
     "并发详情": "纯渲染层零写入面，diff 无新增 setState/effect（复审增量同样零新增）",
     "切换详情": "纯派生 useMemo，无本地状态/定时器，会话切换走父级既有重建",
     "测试实测": "首评（58a210e7）：vitest 6 文件 97/97 + tsc exit 0；复审（7943dc42e）：vitest 6 文件 98/98 + tsc exit 0，均为评审独立复跑结果（2026-10-10）"
-  }
+  },
+  "reviewer": "subagent"
 }
