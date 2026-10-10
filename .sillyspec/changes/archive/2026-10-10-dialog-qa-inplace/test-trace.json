@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-dialog-qa-inplace",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-dialog-qa-inplace:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「两段之间的提问渲染在两段之间（created_at 落在段时刻中间）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dialog-qa-inplace"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-dialog-qa-inplace:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「旧回退路径（segments undefined）：❓ 块仍渲染，不回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dialog-qa-inplace"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-dialog-qa-inplace:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「「全部」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dialog-qa-inplace"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-dialog-qa-inplace:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-dialog-qa-inplace"
+    }
+  ]
+}

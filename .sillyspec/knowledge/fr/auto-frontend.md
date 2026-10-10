@@ -975,3 +975,79 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-variant-test-nav-flip
   status: active
+
+## FR-auto-frontend-168 对话视图 ❓ 提问记录按时间戳穿插进对话流（不再整组前置轮头部）
+变更：2026-10-10-dialog-qa-inplace
+状态：active
+摘要：一轮多问时序还原；仅有提问无对话段
+全文：.sillyspec/changes/archive/2026-10-10-dialog-qa-inplace/requirements.md#FR-01
+最近确认：21ea5d036cc57538deceda94ae85e4ff3ec9c6fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dialog-qa-inplace:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「两段之间的提问渲染在两段之间（created_at 落在段时刻中间）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dialog-qa-inplace
+  status: active
+
+## FR-auto-frontend-169 问答块视觉样式逐字不变（复用同一标记），仅位置变化
+变更：2026-10-10-dialog-qa-inplace
+状态：active
+摘要：回退路径不回归
+全文：.sillyspec/changes/archive/2026-10-10-dialog-qa-inplace/requirements.md#FR-02
+最近确认：21ea5d036cc57538deceda94ae85e4ff3ec9c6fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dialog-qa-inplace:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「旧回退路径（segments undefined）：❓ 块仍渲染，不回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dialog-qa-inplace
+  status: active
+
+## FR-auto-frontend-170 全部视图穿插行为零改动
+变更：2026-10-10-dialog-qa-inplace
+状态：active
+摘要：全部视图无双画
+全文：.sillyspec/changes/archive/2026-10-10-dialog-qa-inplace/requirements.md#FR-03
+最近确认：21ea5d036cc57538deceda94ae85e4ff3ec9c6fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dialog-qa-inplace:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「「全部」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dialog-qa-inplace
+  status: active
+
+## FR-auto-frontend-171 既有对话/弹窗相关测试全部保持通过
+变更：2026-10-10-dialog-qa-inplace
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-10-dialog-qa-inplace/requirements.md#FR-04
+最近确认：21ea5d036cc57538deceda94ae85e4ff3ec9c6fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-dialog-qa-inplace:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-dialog-qa-inplace
+  status: active

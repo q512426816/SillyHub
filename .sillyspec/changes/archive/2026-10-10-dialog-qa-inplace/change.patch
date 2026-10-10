@@ -1,0 +1,847 @@
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/flow-state.yaml b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/flow-state.yaml
+new file mode 100644
+index 000000000..f270dd3da
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/flow-state.yaml
+@@ -0,0 +1,26 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  会话「对话」视图中，同一轮内多个断点问答（AskUser 提问记录 ❓ 块）全部固定渲染在轮头部、agent 回复正文之前（turn-timeline.tsx 677-701 按 run_id 过滤后整组前置渲染），用户实测一轮 7
++  问全部堆在轮次顶部，提问与答复的时序完全丢失；「全部」视图早已按时间戳穿插（650-676/1546-1561），对话视图是遗留旧路径。
++
++  成功标准：
++
++  - 对话视图（v2 段路径）中，已答问答 ❓ 块按 dialog.created_at 与段 startedAt/ts 合并排序，穿插在对话流的时间正确位置（两段之间的提问渲染在两段之间）
++
++  - 问答块视觉样式逐字不变（复用同一标记），仅位置变化
++
++  - 旧回退路径（segments undefined 的孤儿轮）保持旧行为不回归
++
++  - 全部视图穿插行为零改动
++
++  - 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card 等）全部保持通过
++autopilot: true
++baseline_commit: a8623c6d614dff46a33cbb243c88643712245598
++updatedAt: '2026-10-10T15:03:59.702Z'
++baseline_sha256: 02953aafecd965a520b2828350086ff9e5f107c190e44f06968e552e893b13e6
++
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json
+new file mode 100644
+index 000000000..adebd14ad
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json
+@@ -0,0 +1,128 @@
++{
++  "change": "2026-10-10-dialog-qa-inplace",
++  "reviewedAt": "2026-10-10T23:20:00+08:00",
++  "reviewedAgainst": "58a210e726b83254fb002de287eca6edc5fd93d8",
++  "reviewerStance": "独立评审员（干净上下文），拿承诺对代码实态 + HEAD，不信自述，实测验证",
++  "verdict": "PASS",
++  "verdictDetail": "零 P1/P2，4 条 P3（注释过期 1 + 未披露几何差 1 + 测试断言强度 1 + 畸形数据孤头像 1）。FR-01~04 全部兑现且绑定测试存在、实测全绿；防护声明（全部视图零改动 / 回退路径不动）经 diff 逐块核实成立；盲维四问作答与实态相符。",
++  "materialConsistency": {
++    "patchVsHead": "change.patch 前端部分与 HEAD blob 完全一致：turn-timeline.tsx=70e04d408、turn-timeline-dialog-inplace.test.tsx=adb722a72（与 patch index 行逐字吻合）",
++    "baseline": "flow-state.yaml baseline_commit a8623c6d61 为 HEAD 祖先；diff baseline..HEAD -- frontend/ 仅 2 文件（turn-timeline.tsx +78/-26、新测试 +174），与 change.patch 覆盖面一致",
++    "workingTree": "frontend/ 相对 HEAD 零 diff；工作区其它 M 文件（backend/app/core/config.py、db.py）属 2026-10-10-server-db-pool-tuning 变更，与本变更无关"
++  },
++  "frVerification": [
++    {
++      "fr": "FR-01 对话视图 ❓ 提问记录按时间戳穿插",
++      "status": "兑现",
++      "evidence": "turn-timeline.tsx:1580-1602 convoTimeline memo——textSegments 以 segmentTsOf、turnDialogs 以 Date.parse(created_at) 为键，合并后 sort((a,b)=>(Number.isFinite(a.ts)?a.ts!:0)-(Number.isFinite(b.ts)?b.ts!:0))，缺 ts 视 0；渲染 1640-1648 askUser 分支走 DialogQaBlock，容器门控 1632 convoTimeline!=null&&length>0（仅提问轮也渲染）",
++      "testBinding": "绑定测试存在且断言该行为：『两段之间的提问渲染在两段之间（created_at 落在段时刻中间）』用 container.innerHTML indexOf 断言 段一正文<❓<段二正文 硬顺序；另有『晚于全部段的提问渲染在末段之后』『仅有提问、无对话段的轮也渲染 ❓ 块』覆盖 FR-01 另两场景",
++      "testRun": "实测通过（vitest，本文件 5/5）"
++    },
++    {
++      "fr": "FR-02 问答块视觉标记逐字不变 + 回退路径不回归",
++      "status": "兑现（测试断言强度弱于场景措辞，见 P3#3）",
++      "evidence": "DialogQaBlock（1495-1515）与 patch 删除的旧内联块逐字比对：className 串 'ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5'、内层 div break-words、span font-medium text-foreground『❓ 』+ span ml-1 text-muted-foreground『→ 』+ answerText ?? (pending?（待答）:（未回答)) 全同；回退门控 684-688 viewMode!=='all' && turn.segments===undefined 复用同组件",
++      "testBinding": "绑定测试『旧回退路径（segments undefined）：❓ 块仍渲染，不回归』存在：断言 getByTestId('dialog-qa-block') + 旧 output 文本；未断言块相对 output 的顺序位置",
++      "testRun": "实测通过"
++    },
++    {
++      "fr": "FR-03 全部视图穿插行为零改动 + 不双画",
++      "status": "兑现",
++      "evidence": "timeline memo（1558-1573）与旧路径 TurnDetailsList 合并（650-676）在 baseline..HEAD diff 中零触碰；convoTimeline 在 viewMode==='all' 时返回 null（1581），TurnRow 旧块门控 viewMode!=='all'（684）——全部视图不可能出现 dialog-qa-block",
++      "testBinding": "绑定测试『「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）』存在：viewMode='all' 下 queryByTestId('dialog-qa-block') 断言 null",
++      "testRun": "实测通过"
++    },
++    {
++      "fr": "FR-04 既有测试全绿 + tsc 零错",
++      "status": "兑现",
++      "evidence": "session-panel-dialog.test.tsx:1233 存在『AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)』",
++      "testRun": "实测（本评审复跑，2026-10-10）：6 文件 97/97 全绿 = 既有 5 文件 92/92 + 新文件 5/5，与 tasks.md 声明数字一致；pnpm exec tsc --noEmit exit 0 零错"
++    }
++  ],
++  "blindSpotVerification": {
++    "乱序": "作答与实态相符：comparator（1597-1600）与「全部」视图 timeline memo（1569-1571）逐字一致（Number.isFinite 守卫 null/NaN→0，ES2019+ Array.sort 稳定保文档序）；convoTimeline memo deps [viewMode, textSegments, turnDialogs] 完整，dialog 迟到到达时按 created_at 重算落位，与到达顺序无关",
++    "并发": "作答相符：diff 未新增任何 setState/effect/写入，纯派生渲染，不适用成立",
++    "切换": "作答相符：convoTimeline/DialogQaBlock 均纯派生无本地状态/定时器，会话切换走父级既有重建",
++    "作用域": "作答相符：turnDialogs 过滤 d.run_id === runKey（1541-1543），runKey = turn.realRunId ?? turn.runId（724 传入），与旧块（687）及旧全视图回退（658-659）三处口径逐字一致，run_id 过滤口径未变"
++  },
++  "protectionClaims": [
++    {
++      "claim": "全部视图零改动",
++      "verdict": "成立",
++      "detail": "timeline memo / AskUserToolCard / 旧路径 TurnDetailsList 合并块均零触碰；唯一共同触碰行为 TurnStatusBar 的 JSX prop 书写顺序重排（turnStartedAt/turnStatus/segments），属性集合不变、语义零变化"
++    },
++    {
++      "claim": "回退路径不动",
++      "verdict": "成立",
++      "detail": "对 segments===undefined 的轮：块仍在 TurnRow 原位（whoLine/正文之前）渲染，且复用同一 DialogQaBlock 保证样式一致；门控新增的 segments===undefined 条件仅把 v2 轮分流到新路径，对回退人群行为不变（回退用例实测绿）"
++    }
++  ],
++  "boundaryAdjudications": [
++    {
++      "boundary": "放弃「dialog 落 chat 日志行参与日志流」方案",
++      "ruling": "可接受",
++      "reason": "放弃理由与实态相符：既有裁决注释在案（turn-timeline.tsx:682『AskUser 走 onUserDialog 不走 tool_use 日志，故用 dialog 历史渲染』）；diff 零后端/数据文件，dialog 历史确实独立于 chat 日志（GET /dialogs/history），落日志行必然要求历史回填才能救存量会话；纯渲染层方案以最小面达成同等时序还原"
++    },
++    {
++      "boundary": "缺 ts 段与 ❓ 块（视 0）混排穿插位置退化，与「全部」视图同款",
++      "ruling": "可接受",
++      "reason": "同款语义经代码核实为逐字同 comparator（1569-1571 vs 1597-1600），属既有约定平移而非新增风险类；且 subagent_stub 段 ts 恒 null（segmentTsOf 1420-1421）在全部视图早已按视 0 运行"
++    },
++    {
++      "boundary": "created_at 与段时刻同刻理论残留（稳定排序保互不跳序）",
++      "ruling": "可接受",
++      "reason": "毫秒同刻时稳定排序保 items 构造序（段先、dialog 后），与「全部」视图一致，无跳序风险"
++    },
++    {
++      "boundary": "无声明边界（评审发现的未披露点已转 findings）",
++      "ruling": "转 P3#2 / P3#4",
++      "reason": "v2 对话视图 ❓ 块嵌套上下文（头像行内列 + 自带 ml-9）造成的左缘右移与仅提问轮新增 agent 头像未在 design 披露；空 QA 畸形 payload 孤头像边界未披露"
++    }
++  ],
++  "artifactSync": "无涉及（确认）：纯前端渲染层变更，后端 schema 零改动，无需 pnpm gen:types；requirements/design/tasks/patch 四件套齐且相互一致（tasks 5 任务与 FR/测试绑定对应，全勾与实测相符）",
++  "findings": [
++    {
++      "id": "P3-1",
++      "severity": "P3",
++      "title": "SegmentedTurnBody JSDoc 注释过期，与实现矛盾",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1476-1477",
++      "detail": "函数级文档注释仍写『轻量 ❓ AskUser 记录由外层共享逻辑渲染（答复之前）』，实现已改为本函数内 convoTimeline 就地穿插（新注释 1575-1579 正确）。旧句未被更新，违反仓库规则（CLAUDE.md 规则 18：注释和实现不一致是万恶之源）",
++      "recommendation": "删除或改写 1476-1477 处『由外层共享逻辑渲染（答复之前）』为『按 created_at 与段时刻合并穿插（convoTimeline）』"
++    },
++    {
++      "id": "P3-2",
++      "severity": "P3",
++      "title": "❓ 块在 v2 对话视图的实际左缘/上下文变化未在 design 披露",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1632-1648（容器）与 1501（块 ml-9）",
++      "detail": "FR-02『视觉逐字不变』在标记层面成立（类名/文案逐字一致，已逐字比对），但块现在渲染于 ChatMessageAvatar 行内列（flex-1 列）且自带 ml-9，实际左缘较旧轮头位置右移约一个头像宽（头像+gap 后再缩进 36px）；且『仅有提问无对话段』的轮从旧行为的裸块变为头像+块（新增 agent 头像）。均为位置/上下文变化的伴生几何差，design「仅位置变化」未披露到这个粒度",
++      "recommendation": "design 风险节补一句披露即可（或确认 ml-9 在新上下文中的视觉意图）；不阻塞"
++    },
++    {
++      "id": "P3-3",
++      "severity": "P3",
++      "title": "FR-02 回退用例断言强度弱于场景措辞（未锁定『旧位置』）",
++      "location": "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx:187-198",
++      "detail": "FR-02 场景写『Then ❓ 块按旧位置渲染』，但用例仅断言 getByTestId('dialog-qa-block') 与旧 output 文本存在，未断言块在 output 之前的 DOM 顺序；若未来回退路径渲染位置回归（块挪到正文之后）该用例不会失败。实现本身当前正确（TurnRow 684-688 块位于 whoLine/正文之前，与旧代码位次一致）",
++      "recommendation": "用例补一行 innerHTML 顺序断言（dialog-qa-block 的 ❓ 文本先于旧 output 文本），对齐同文件 expectOrderBefore 惯例"
++    },
++    {
++      "id": "P3-4",
++      "severity": "P3",
++      "title": "畸形数据边界：零对话段 + 空 QA dialog 的轮出现无内容孤头像",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1632（容器门控）与 1495-1497（DialogQaBlock 空 QA 渲染 null）",
++      "detail": "convoTimeline 的长度把 turnDialogs 全量计入，不剔除 extractDialogQA 为空的 dialog（session-log-sanitize.ts:84，payload.questions 缺失/为空时返回 []）。当某轮无对话段且仅有此类不可解析 dialog 时：convoTimeline.length>0 → 挂载 ChatMessageAvatar 行，但唯一子项渲染 null，出现左侧孤头像；旧路径该情形整块渲染 null、完全无输出。触发面窄（需 payload.questions 为空的畸形 dialog），正常 AskUserQuestion 恒有 questions",
++      "recommendation": "convoTimeline 构造时对 askUser 项预过滤 extractDialogQA(d).length>0，或容器门控改为存在至少一个可渲染项；不阻塞"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "n/a",
++    "切换": "ok",
++    "作用域": "ok",
++    "乱序详情": "稳定排序 + 缺 ts 视 0 与「全部」视图 comparator 逐字一致；memo 依赖完整，迟到 dialog 按 created_at 落位；畸形数据空 QA 项混入时间线仅产生 P3#4 孤头像，不产生乱序",
++    "作用域详情": "run_id === realRunId ?? runId 三处（新 turnDialogs/旧对话块/旧全视图回退）逐字一致，跨会话数据不进入",
++    "并发详情": "纯渲染层零写入面，diff 无新增 setState/effect",
++    "切换详情": "纯派生 useMemo，无本地状态/定时器，会话切换走父级既有重建",
++    "测试实测": "vitest 6 文件 97/97（92 既有 + 5 新增）+ tsc --noEmit exit 0，均为本评审独立复跑结果（2026-10-10）"
++  }
++}
+\ No newline at end of file
+diff --git a/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+new file mode 100644
+index 000000000..33c0286e2
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx
+@@ -0,0 +1,195 @@
++// 2026-10-10-dialog-qa-inplace：「对话」视图 ❓ 提问记录按时间戳穿插进对话流。
++//
++// 背景：原实现（turn-timeline.tsx 旧块）把该轮全部 AskUser 提问记录整组渲染在
++// 轮头部、agent 回复正文之前——一轮多问（如 SillySpec 断点七连问）时序全丢，
++// 用户实测「一股脑扔轮次顶部」。本文件锁定的契约：
++//   1. v2 段路径（segments）：❓ 块按 dialog.created_at 与段时刻合并排序穿插
++//      （两段之间的提问渲染在两段之间，晚于全部段的提问渲染在末段之后）；
++//   2. 仅有提问、无对话段的轮也渲染 ❓ 块（旧行为的块同样不依赖段存在）；
++//   3. 旧回退路径（segments undefined）：❓ 块仍渲染（旧行为不回归）；
++//   4. 「全部」视图穿插行为零改动（AskUserToolCard 路径，已有用例覆盖，此处
++//      仅断言对话视图块在全部视图不双画轻量块）。
++//
++// mock 口径：MarkdownText（next/dynamic jsdom 同步渲染 null）——照抄
++// turn-timeline-conversation-file-card.test 惯例。
++import { afterEach, describe, it, expect, vi } from "vitest";
++import { cleanup, render, screen } from "@testing-library/react";
++
++import { TurnTimeline } from "../turn-timeline";
++import type { SessionTurnView, SessionViewMode } from "../turn-timeline";
++import type { TextTurnSegment } from "../turn-segment-views";
++import type { SessionDialogRead } from "@/lib/daemon";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++function textSeg(id: string, text: string, startedAt: number | null): TextTurnSegment {
++  return { kind: "text", id, text, streaming: false, startedAt };
++}
++
++function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-1",
++    turn: 1,
++    prompt: "开始设计",
++    output: "已完成",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    ...overrides,
++  };
++}
++
++function makeDialog(createdAtMs: number, overrides: Partial<SessionDialogRead> = {}): SessionDialogRead {
++  return {
++    id: `d-${createdAtMs}`,
++    session_id: "sess-1",
++    run_id: "run-1",
++    request_id: `req-${createdAtMs}`,
++    tool_name: "AskUserQuestion",
++    dialog_kind: "AskUserQuestion",
++    dialog_payload: { questions: [{ question: `第${createdAtMs}毫秒的问题？` }] },
++    status: "answered",
++    answer: { answers: [{ answer: "确认，继续" }] },
++    created_at: new Date(createdAtMs).toISOString(),
++    answered_at: new Date(createdAtMs).toISOString(),
++    ...overrides,
++  };
++}
++
++function renderProps(
++  turns: SessionTurnView[],
++  dialogHistory: SessionDialogRead[],
++  viewMode: SessionViewMode = "conversation",
++) {
++  return {
++    turns,
++    viewMode,
++    errorMsg: null,
++    sessionStatus: "active" as const,
++    pendingRequests: [],
++    dialogHistory,
++    onDialogResolved: () => {},
++    onResend: () => {},
++    onSwitchProvider: () => {},
++    hasOnlineProvider: true,
++    emptyProviderLabel: "Claude Code",
++  };
++}
++
++/** innerHTML 顺序断言：a 文本先于 b 文本出现（indexOf，均须存在）。 */
++function expectOrderBefore(html: string, a: string, b: string) {
++  const ia = html.indexOf(a);
++  const ib = html.indexOf(b);
++  expect(ia).toBeGreaterThanOrEqual(0);
++  expect(ib).toBeGreaterThanOrEqual(0);
++  expect(ia).toBeLessThan(ib);
++}
++
++afterEach(() => {
++  cleanup();
++});
++
++describe("「对话」视图 ❓ 提问记录按时间穿插（2026-10-10-dialog-qa-inplace）", () => {
++  it("两段之间的提问渲染在两段之间（created_at 落在段时刻中间）", () => {
++    const { container } = render(
++      <TurnTimeline
++        {...renderProps(
++          [
++            makeTurn({
++              segments: [textSeg("seg-a", "段一正文", 1000), textSeg("seg-b", "段二正文", 3000)],
++            }),
++          ],
++          [makeDialog(2000)],
++        )}
++      />,
++    );
++    const html = container.innerHTML;
++    expectOrderBefore(html, "段一正文", "❓ 第2000毫秒的问题？");
++    expectOrderBefore(html, "❓ 第2000毫秒的问题？", "段二正文");
++    // 作答文本同块可见。
++    expect(screen.getByText(/确认，继续/)).toBeInTheDocument();
++  });
++
++  it("晚于全部段的提问渲染在末段之后（不再前置轮头部）", () => {
++    const { container } = render(
++      <TurnTimeline
++        {...renderProps(
++          [
++            makeTurn({
++              segments: [textSeg("seg-a", "段一正文", 1000), textSeg("seg-b", "段二正文", 3000)],
++            }),
++          ],
++          [makeDialog(4000)],
++        )}
++      />,
++    );
++    const html = container.innerHTML;
++    expectOrderBefore(html, "段一正文", "段二正文");
++    expectOrderBefore(html, "段二正文", "❓ 第4000毫秒的问题？");
++  });
++
++  it("仅有提问、无对话段的轮也渲染 ❓ 块（不依赖段存在）", () => {
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [makeTurn({ segments: [] })],
++          [makeDialog(1500)],
++        )}
++      />,
++    );
++    expect(screen.getByTestId("dialog-qa-block")).toBeInTheDocument();
++    expect(screen.getByText(/❓ 第1500毫秒的问题？/)).toBeInTheDocument();
++  });
++
++  it("旧回退路径（segments undefined）：❓ 块仍渲染，不回归", () => {
++    const { container } = render(
++      <TurnTimeline
++        {...renderProps(
++          [makeTurn({ segments: undefined, output: "旧数据答复" })],
++          [makeDialog(1200)],
++        )}
++      />,
++    );
++    expect(screen.getByTestId("dialog-qa-block")).toBeInTheDocument();
++    expect(screen.getByText(/旧数据答复/)).toBeInTheDocument();
++    // 评审 P3-3 补强：回退路径保持旧位置（❓ 块在答复正文之前）。
++    expectOrderBefore(container.innerHTML, "❓ 第1200毫秒的问题？", "旧数据答复");
++  });
++
++  it("畸形 dialog（QA 不可解析）+ 零对话段：不渲染孤头像行（评审 P3-4）", () => {
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [makeTurn({ segments: [] })],
++          [
++            makeDialog(1500, {
++              dialog_payload: { questions: [] },
++              answer: { answers: [] },
++            }),
++          ],
++        )}
++      />,
++    );
++    expect(screen.queryByTestId("dialog-qa-block")).not.toBeInTheDocument();
++    // 智能体头像列不挂载（无任何可渲染对话项）。
++    expect(screen.queryByTitle("智能体")).not.toBeInTheDocument();
++  });
++
++  it("「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）", () => {
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [makeTurn({ segments: [textSeg("seg-a", "段一正文", 1000)] })],
++          [makeDialog(2000)],
++          "all",
++        )}
++      />,
++    );
++    expect(screen.queryByTestId("dialog-qa-block")).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index f5ddd5e6e..2fd287bb6 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -674,31 +674,18 @@ const TurnRow = memo(function TurnRow({
+                   );
+                   return <TurnDetailsList items={merged} />;
+                 })()}
+-              {/* ql-20260802-001/003：「对话」视图用轻量 ❓ 提问记录（只显问题+作答，
+-                  穿插在对应 turn、答复之前）。AskUser 走 onUserDialog 不走 tool_use 日志，
+-                  故用 dialog 历史渲染。全部视图的 AskUser 已并入上方时间线。 */}
++              {/* ql-20260802-001/003：「对话」视图用轻量 ❓ 提问记录（只显问题+作答）。
++                  2026-10-10-dialog-qa-inplace：v2 段路径的 ❓ 块改由
++                  SegmentedTurnBody 按 created_at 与段 ts 合并排序穿插进对话流
++                  （原「整组前置轮头部」造成一轮多问时序全丢）；本块仅剩旧渲染
++                  回退路径（segments undefined 的孤儿轮/旧数据），行为不变。
++                  AskUser 走 onUserDialog 不走 tool_use 日志，故用 dialog 历史渲染。
++                  全部视图的 AskUser 已并入上方时间线。 */}
+               {viewMode !== "all" &&
++                turn.segments === undefined &&
+                 dialogHistory
+                   .filter((d) => d.run_id === (turn.realRunId ?? turn.runId))
+-                  .map((d) => {
+-                    const qa = extractDialogQA(d);
+-                    if (qa.length === 0) return null;
+-                    return (
+-                      <div
+-                        key={`dialog-${d.request_id}`}
+-                        className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
+-                      >
+-                        {qa.map((item, i) => (
+-                          <div key={i} className="break-words">
+-                            <span className="font-medium text-foreground">❓ {item.question}</span>
+-                            <span className="ml-1 text-muted-foreground">
+-                              → {item.answerText ?? (d.status === "pending" ? "（待答）" : "（未回答）")}
+-                            </span>
+-                          </div>
+-                        ))}
+-                      </div>
+-                    );
+-                  })}
++                  .map((d) => <DialogQaBlock key={`dialog-${d.request_id}`} dialog={d} />)}
+               {/* task-14（FR-07 / D-008@v1）：消息 who 行——读该轮 run 配置快照
+                   （档案 · 智能体 · 供应商），未选如实显示「未指定/本机默认」；
+                   历史不跟随会话当前配置。whoLine 缺省（弹窗旧组装）不渲染（零回归）。
+@@ -1487,7 +1474,9 @@ function isConversationSegment(seg: TurnSegment): boolean {
+  *     呈现）+ 子代理容器段（tool 带 children / subagent_stub，task-02 放宽过滤后经
+  *     SegmentView 渲染为子代理卡片，见 isConversationSegment）；思考/普通工具/stderr/
+  *     团队分身段不挂载——渲染经济，FR-06），轻量 ❓
+- *     AskUser 记录由外层共享逻辑渲染（答复之前）；
++ *     AskUser 记录由 convoTimeline 按 created_at 与段时刻合并排序穿插进对话流
++ *     （2026-10-10-dialog-qa-inplace，原「外层整组前置答复之前」已废弃；
++ *     segments undefined 的旧回退轮仍由外层原位渲染）；
+  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
+  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
+  *     SegmentView 段组件族（key=segment.id，段级 memo 由 task-05 保证）；AskUser
+@@ -1502,6 +1491,31 @@ function isConversationSegment(seg: TurnSegment): boolean {
+  * 渲染经济性：段合并时间线 / 文本段过滤均 useMemo（segments 引用未变时跳过重算，
+  * 装配器 path-copy 保证未触及段引用稳定）；段组件由 SegmentView 内部 memo。
+  */
++/** 2026-10-10-dialog-qa-inplace：对话视图轻量 ❓ 提问记录卡——原「整组前置轮
++ *  头部」的同一标记原位组件化（视觉逐字不变），供 SegmentedTurnBody 按时间戳
++ *  穿插与旧回退路径两处复用。空 QA（不可解析 payload）渲染 null。 */
++function DialogQaBlock({ dialog }: { dialog: SessionDialogRead }) {
++  const qa = extractDialogQA(dialog);
++  if (qa.length === 0) return null;
++  return (
++    <div
++      data-testid="dialog-qa-block"
++      className="ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5"
++    >
++      {qa.map((item, i) => (
++        <div key={i} className="break-words">
++          <span className="font-medium text-foreground">❓ {item.question}</span>
++          <span className="ml-1 text-muted-foreground">
++            →{" "}
++            {item.answerText ??
++              (dialog.status === "pending" ? "（待答）" : "（未回答）")}
++          </span>
++        </div>
++      ))}
++    </div>
++  );
++}
++
+ function SegmentedTurnBody({
+   segments,
+   turnStatus,
+@@ -1560,6 +1574,41 @@ function SegmentedTurnBody({
+     return items;
+   }, [viewMode, segments, turnDialogs]);
+ 
++  // 2026-10-10-dialog-qa-inplace：对话流合并穿插——❓ 提问记录卡（turnDialogs，
++  //  ts=created_at）与对话段（textSegments，ts=段时刻）合并稳定排序，提问落在
++  //  真实发生的时间位置（两段之间的提问渲染在两段之间），不再整组前置轮头部。
++  //  排序约定与「全部」视图时间线（上方 timeline）一致：缺 ts（NaN/null）视为 0、
++  //  稳定排序保文档序。段渲染逻辑逐字保留，仅新增 askUser 分支。
++  const convoTimeline = useMemo(() => {
++    if (viewMode === "all" || textSegments == null) return null;
++    // 评审 P3-4 修复：payload 不可解析（QA 空）的 dialog 先行剔除——避免
++    // 「零对话段 + 仅畸形 dialog」的轮挂出孤头像而唯一子项渲染 null（旧路径
++    // 该情形完全无输出）；可解析性判定与 DialogQaBlock 渲染门同源。
++    const renderableDialogs = turnDialogs.filter(
++      (d) => extractDialogQA(d).length > 0,
++    );
++    const items: Array<
++      | { kind: "segment"; segment: TurnSegment; ts: number | null }
++      | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null }
++    > = [
++      ...textSegments.map((s) => ({
++        kind: "segment" as const,
++        segment: s,
++        ts: segmentTsOf(s),
++      })),
++      ...renderableDialogs.map((d) => ({
++        kind: "askUser" as const,
++        dialog: d,
++        ts: d.created_at ? Date.parse(d.created_at) : null,
++      })),
++    ];
++    items.sort(
++      (a, b) =>
++        (Number.isFinite(a.ts) ? a.ts! : 0) - (Number.isFinite(b.ts) ? b.ts! : 0),
++    );
++    return items;
++  }, [viewMode, textSegments, turnDialogs]);
++
+   return (
+     <>
+       {/* 轮级状态条（FR-02）：运行中三态 + 计时锚点有值才挂载（终态消失；锚点缺失
+@@ -1567,7 +1616,7 @@ function SegmentedTurnBody({
+           段时间线之前，全宽。 */}
+       {(turnStatus === "pending" || turnStatus === "running" || turnStatus === "interrupting") &&
+         turnStartedAt != null && (
+-          <TurnStatusBar turnStartedAt={turnStartedAt} segments={segments} turnStatus={turnStatus} />
++          <TurnStatusBar turnStartedAt={turnStartedAt} turnStatus={turnStatus} segments={segments} />
+         )}
+       {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
+       {timeline != null && timeline.length > 0 && (
+@@ -1585,8 +1634,10 @@ function SegmentedTurnBody({
+           agent 侧挂共享渐变光环头像（ChatMessageAvatar），text/file 段气泡行与
+           头像横排（task-02 后子代理容器段卡片也在此列，随 SegmentView 分发）；
+           「全部」视图不挂头像（Grill G-03——进度时间线保持 ml-9 竖线
+-          容器原样式）。 */}
+-      {textSegments != null && textSegments.length > 0 && (
++          容器原样式）。2026-10-10-dialog-qa-inplace：渲染列表改 convoTimeline
++          （段 + ❓ 提问记录合并排序穿插）；仅有提问无对话段的轮也渲染（旧行为
++          的 ❓ 块同样不依赖段存在）。 */}
++      {convoTimeline != null && convoTimeline.length > 0 && (
+         <div className="flex items-start gap-2.5">
+           <ChatMessageAvatar kind="agent" title="智能体" />
+           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+@@ -1594,7 +1645,16 @@ function SegmentedTurnBody({
+                 text 段先过 parseAskUserMarker——命中则该段原位渲染提问卡（AskUserMarkerCard）
+                 并以 textBefore 作正文（复用 TextSegmentView 气泡，标记原文不显示；
+                 纯标记段无正文气泡）；未命中走 SegmentView 零变化。 */}
+-            {textSegments.map((s) => {
++            {convoTimeline.map((item) => {
++              if (item.kind === "askUser") {
++                return (
++                  <DialogQaBlock
++                    key={`dialog-${item.dialog.request_id}`}
++                    dialog={item.dialog}
++                  />
++                );
++              }
++              const s = item.segment;
+               // ql-20260917-006：compact 摘要段原位特判——一行短提示替代大段
+               // 摘要气泡（全文在「全部（进度）」视图折叠卡）；compact_status
+               // 运行中实时提示行（CompactStatusRowView，success 渲染 null）。
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/design.md b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/design.md
+new file mode 100644
+index 000000000..321d86dba
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:03:59.680Z
++---
++# 设计记录（Design Record）— 2026-10-10-dialog-qa-inplace
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户实证：SillySpec 断点七连问在同一轮内发生，对话视图把全部 ❓ 提问记录整组渲染在轮头部、agent 回复之前（`turn-timeline.tsx` 旧块按 `run_id` 过滤后前置），时序全丢；「全部」视图早已按时间戳穿插（既有 `timeline` memo + 旧路径 `TurnDetailsList` 合并排序，注释明示该差异），对话视图是遗留旧路径。修法对齐「全部」视图既有约定：`SegmentedTurnBody` 新增 `convoTimeline` memo（对话段 `textSegments` 以 `segmentTsOf`、❓ 块以 `created_at` 为键，稳定排序缺 ts 视 0），对话流按合并序渲染；❓ 块标记抽出 `DialogQaBlock` 组件（视觉逐字不变）供 v2 穿插与旧回退两处复用；旧块门控收紧为 `segments === undefined`（孤儿轮/旧数据回退，行为不变）。不选「给 dialog 落一条 chat 日志行」——动数据写入链路面大且历史数据不回填，纯渲染层合并零数据改动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `TurnTimeline` 对外 props 零变化（`dialogHistory` 语义不变，仅消费位置变）。
++- 新增组件内部 `DialogQaBlock`（不导出，标记新增 `data-testid="dialog-qa-block"` 供测试定位，不改视觉）。
++- 后端/数据零改动（dialog 历史仍走 `GET /dialogs/history`）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/turn-timeline.tsx | DialogQaBlock 抽取 + SegmentedTurnBody convoTimeline 合并穿插 + 旧块回退门控 |
++| 新增 | frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx | 穿插顺序/末尾块/仅提问轮/回退路径/全部视图不双画 5 用例 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。合并排序是稳定排序：缺 ts（null/NaN）视为 0 保持文档序（与「全部」视图既有约定逐字一致）；dialog 迟到到达（history 刷新）时 `convoTimeline` memo 依赖 `turnDialogs` 重算，位置按其 `created_at` 落位，与到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：纯渲染层变更，无写入面；`dialogHistory` 数组由父级既有序列化 setState 供给。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：`convoTimeline`/`DialogQaBlock` 均为纯派生渲染，无本地状态/定时器；会话切换走父级既有 turnState 重建，无残留面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：❓ 块仍按 `run_id === 该轮 runKey` 过滤（既有口径），跨会话/跨用户数据不进入。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：段时刻缺失（`startedAt`/`ts` 为 null 的旧段）与 ❓ 块（ts 视 0）混排时穿插位置退化——与「全部」视图同款既有语义（视 0 靠前 + 稳定保文档序），非新增风险；回退路径完全不动。
++- 放弃方案「dialog 落 chat 日志行参与日志流」：需动后端写入链路 + 历史数据不回填 + 与 dialog 机制（不走 tool_use 日志）的既有裁决冲突，收益不抵面。
++- 已知残留：`created_at` 精度为 dialog 请求时刻，与段时刻毫秒级并列排序理论上可同刻（稳定排序保互不跳序）。
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/proposal.md b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/proposal.md
+new file mode 100644
+index 000000000..f8a0e7edb
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:03:59.680Z
++---
++# 提案书（Proposal）— 2026-10-10-dialog-qa-inplace
++
++## 动机
++
++任务原话转写：会话「对话」视图中，同一轮内多个断点问答（AskUser 提问记录 ❓ 块）全部固定渲染在轮头部、agent 回复正文之前（turn-timeline.tsx 677-701 按 run_id 过滤后整组前置渲染），用户实测一轮 7 问全部堆在轮次顶部，提问与答复的时序完全丢失；「全部」视图早已按时间戳穿插（650-676/1546-1561），对话视图是遗留旧路径。
++成功标准：
++- 对话视图（v2 段路径）中，已答问答 ❓ 块按 dialog.created_at 与段 startedAt/ts 合并排序，穿插在对话流的时间正确位置（两段之间的提问渲染在两段之间）
++- 问答块视觉样式逐字不变（复用同一标记），仅位置变化
++- 旧回退路径（segments undefined 的孤儿轮）保持旧行为不回归
++- 全部视图穿插行为零改动
++- 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card 等）全部保持通过
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 对话视图（v2 段路径）中，已答问答 ❓ 块按 dialog.created_at 与段 startedAt/ts 合并排序，穿插在对话流的时间正确位置（两段之间的提问渲染在两段之间）
++2. 问答块视觉样式逐字不变（复用同一标记），仅位置变化
++3. 旧回退路径（segments undefined 的孤儿轮）保持旧行为不回归
++4. 全部视图穿插行为零改动
++5. 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card 等）全部保持通过
++
++## 成功标准（可验证）
++
++1. 对话视图（v2 段路径）中，已答问答 ❓ 块按 dialog.created_at 与段 startedAt/ts 合并排序，穿插在对话流的时间正确位置（两段之间的提问渲染在两段之间）
++2. 问答块视觉样式逐字不变（复用同一标记），仅位置变化
++3. 旧回退路径（segments undefined 的孤儿轮）保持旧行为不回归
++4. 全部视图穿插行为零改动
++5. 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card 等）全部保持通过
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/requirements.md b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/requirements.md
+new file mode 100644
+index 000000000..33a65973c
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/requirements.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:03:59.680Z
++---
++# 需求规格（Requirements）— 2026-10-10-dialog-qa-inplace
++
++## 功能需求
++
++### FR-01: 对话视图 ❓ 提问记录按时间戳穿插进对话流（不再整组前置轮头部）
++
++- `SegmentedTurnBody`（v2 段路径）的「对话」视图必须把该轮 ❓ 提问记录卡（dialogHistory 按 run_id 过滤）与对话段合并：dialog 以 `created_at`、段以既有 `segmentTsOf` 时刻为键，稳定排序（缺 ts 视为 0，与「全部」视图时间线同约定）后穿插渲染——两段之间的提问必须渲染在两段之间，晚于全部段的提问必须渲染在末段之后。
++
++#### 场景：一轮多问时序还原
++
++- Given 一轮含 text 段 A（t=1000）、text 段 B（t=3000），期间 agent 在 t=2000 提问一次（已答）
++- When 对话视图渲染该轮
++- Then DOM 顺序为 段A → ❓ 块 → 段B（不再 ❓ 块整组出现在 agent 回复之前）
++
++#### 场景：仅有提问无对话段
++
++- Given 一轮无对话段但有已答提问
++- Then ❓ 块仍渲染（旧行为的块不依赖段存在）
++
++### FR-02: 问答块视觉样式逐字不变（复用同一标记），仅位置变化
++
++- ❓ 块的标记（类名/文案/❓ → 作答格式/待答未答文案）必须与原实现逐字一致（抽出 `DialogQaBlock` 组件复用，新增 `data-testid="dialog-qa-block"` 供测试定位不改视觉）；旧回退路径（`segments === undefined` 的孤儿轮/旧数据）必须保持旧行为渲染同款块。
++
++#### 场景：回退路径不回归
++
++- Given segments undefined 的旧数据轮 + 已答提问
++- Then ❓ 块按旧位置渲染，块样式与 v2 路径一致
++
++### FR-03: 全部视图穿插行为零改动
++
++- 「全部」视图既有 AskUser 工具卡时间线穿插（`timeline` memo）必须零改动；对话视图的轻量 ❓ 块不得在「全部」视图双画。
++
++#### 场景：全部视图无双画
++
++- Given 同一轮在「全部」视图渲染
++- Then 无 `dialog-qa-block`（AskUser 走工具卡路径）
++
++### FR-04: 既有对话/弹窗相关测试全部保持通过
++
++- `session-panel-dialog.test.tsx`（含 AC-10-01b「按 run_id 穿插到对应 turn」、AC-10-01c 视图切换）、`turn-timeline-dialog-minimize.test.tsx`、`turn-timeline-conversation-file-card.test.tsx`、`turn-time-display.test.tsx`、`session-history-scroll.test.tsx` 必须全部通过；前端 `tsc --noEmit` 必须零错。
++
++#### 场景：回归
++
++- Given 本次改动合入
++- When 运行上述测试文件与类型检查
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「两段之间的提问渲染在两段之间（created_at 落在段时刻中间）」
++FR-02: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「旧回退路径（segments undefined）：❓ 块仍渲染，不回归」
++FR-03: frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx「「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）」
++FR-04: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx「AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)」
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/tasks.md b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/tasks.md
+new file mode 100644
+index 000000000..04eb07e41
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T15:03:59.680Z
++---
++# 任务注册表（Tasks）— 2026-10-10-dialog-qa-inplace
++
++- [x] task-01: 对话视图（v2 段路径）中，已答问答 ❓ 块按 dialog.created_at 与段 startedAt/ts 合并排序，穿插在对话流的时间正确位置（两段之间的提问渲染在两段之间）（convoTimeline memo + 用例「两段之间的提问渲染在两段之间」）
++- [x] task-02: 问答块视觉样式逐字不变（复用同一标记），仅位置变化（DialogQaBlock 抽取，类名/文案逐字平移 + data-testid）
++- [x] task-03: 旧回退路径（segments undefined 的孤儿轮）保持旧行为不回归（旧块门控收紧 + 用例「旧回退路径：❓ 块仍渲染」）
++- [x] task-04: 全部视图穿插行为零改动（timeline memo 原样 + 用例「全部视图：轻量 ❓ 块不双画」）
++- [x] task-05: 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card / turn-time-display / session-history-scroll）全部保持通过（5 文件 92/92 绿 + tsc 零错；本变更新用例 5/5 绿）
+diff --git a/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json.superseded-20261010T151907 b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json.superseded-20261010T151907
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-dialog-qa-inplace/review.json.superseded-20261010T151907
+@@ -0,0 +1,128 @@
++{
++  "change": "2026-10-10-dialog-qa-inplace",
++  "reviewedAt": "2026-10-10T23:20:00+08:00",
++  "reviewedAgainst": "58a210e726b83254fb002de287eca6edc5fd93d8",
++  "reviewerStance": "独立评审员（干净上下文），拿承诺对代码实态 + HEAD，不信自述，实测验证",
++  "verdict": "PASS",
++  "verdictDetail": "零 P1/P2，4 条 P3（注释过期 1 + 未披露几何差 1 + 测试断言强度 1 + 畸形数据孤头像 1）。FR-01~04 全部兑现且绑定测试存在、实测全绿；防护声明（全部视图零改动 / 回退路径不动）经 diff 逐块核实成立；盲维四问作答与实态相符。",
++  "materialConsistency": {
++    "patchVsHead": "change.patch 前端部分与 HEAD blob 完全一致：turn-timeline.tsx=70e04d408、turn-timeline-dialog-inplace.test.tsx=adb722a72（与 patch index 行逐字吻合）",
++    "baseline": "flow-state.yaml baseline_commit a8623c6d61 为 HEAD 祖先；diff baseline..HEAD -- frontend/ 仅 2 文件（turn-timeline.tsx +78/-26、新测试 +174），与 change.patch 覆盖面一致",
++    "workingTree": "frontend/ 相对 HEAD 零 diff；工作区其它 M 文件（backend/app/core/config.py、db.py）属 2026-10-10-server-db-pool-tuning 变更，与本变更无关"
++  },
++  "frVerification": [
++    {
++      "fr": "FR-01 对话视图 ❓ 提问记录按时间戳穿插",
++      "status": "兑现",
++      "evidence": "turn-timeline.tsx:1580-1602 convoTimeline memo——textSegments 以 segmentTsOf、turnDialogs 以 Date.parse(created_at) 为键，合并后 sort((a,b)=>(Number.isFinite(a.ts)?a.ts!:0)-(Number.isFinite(b.ts)?b.ts!:0))，缺 ts 视 0；渲染 1640-1648 askUser 分支走 DialogQaBlock，容器门控 1632 convoTimeline!=null&&length>0（仅提问轮也渲染）",
++      "testBinding": "绑定测试存在且断言该行为：『两段之间的提问渲染在两段之间（created_at 落在段时刻中间）』用 container.innerHTML indexOf 断言 段一正文<❓<段二正文 硬顺序；另有『晚于全部段的提问渲染在末段之后』『仅有提问、无对话段的轮也渲染 ❓ 块』覆盖 FR-01 另两场景",
++      "testRun": "实测通过（vitest，本文件 5/5）"
++    },
++    {
++      "fr": "FR-02 问答块视觉标记逐字不变 + 回退路径不回归",
++      "status": "兑现（测试断言强度弱于场景措辞，见 P3#3）",
++      "evidence": "DialogQaBlock（1495-1515）与 patch 删除的旧内联块逐字比对：className 串 'ml-9 space-y-0.5 rounded-md border border-indigo-200 bg-indigo-50/40 px-3 py-1.5 text-xs leading-5'、内层 div break-words、span font-medium text-foreground『❓ 』+ span ml-1 text-muted-foreground『→ 』+ answerText ?? (pending?（待答）:（未回答)) 全同；回退门控 684-688 viewMode!=='all' && turn.segments===undefined 复用同组件",
++      "testBinding": "绑定测试『旧回退路径（segments undefined）：❓ 块仍渲染，不回归』存在：断言 getByTestId('dialog-qa-block') + 旧 output 文本；未断言块相对 output 的顺序位置",
++      "testRun": "实测通过"
++    },
++    {
++      "fr": "FR-03 全部视图穿插行为零改动 + 不双画",
++      "status": "兑现",
++      "evidence": "timeline memo（1558-1573）与旧路径 TurnDetailsList 合并（650-676）在 baseline..HEAD diff 中零触碰；convoTimeline 在 viewMode==='all' 时返回 null（1581），TurnRow 旧块门控 viewMode!=='all'（684）——全部视图不可能出现 dialog-qa-block",
++      "testBinding": "绑定测试『「全部」视图：轻量 ❓ 块不双画（AskUser 走工具卡路径）』存在：viewMode='all' 下 queryByTestId('dialog-qa-block') 断言 null",
++      "testRun": "实测通过"
++    },
++    {
++      "fr": "FR-04 既有测试全绿 + tsc 零错",
++      "status": "兑现",
++      "evidence": "session-panel-dialog.test.tsx:1233 存在『AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)』",
++      "testRun": "实测（本评审复跑，2026-10-10）：6 文件 97/97 全绿 = 既有 5 文件 92/92 + 新文件 5/5，与 tasks.md 声明数字一致；pnpm exec tsc --noEmit exit 0 零错"
++    }
++  ],
++  "blindSpotVerification": {
++    "乱序": "作答与实态相符：comparator（1597-1600）与「全部」视图 timeline memo（1569-1571）逐字一致（Number.isFinite 守卫 null/NaN→0，ES2019+ Array.sort 稳定保文档序）；convoTimeline memo deps [viewMode, textSegments, turnDialogs] 完整，dialog 迟到到达时按 created_at 重算落位，与到达顺序无关",
++    "并发": "作答相符：diff 未新增任何 setState/effect/写入，纯派生渲染，不适用成立",
++    "切换": "作答相符：convoTimeline/DialogQaBlock 均纯派生无本地状态/定时器，会话切换走父级既有重建",
++    "作用域": "作答相符：turnDialogs 过滤 d.run_id === runKey（1541-1543），runKey = turn.realRunId ?? turn.runId（724 传入），与旧块（687）及旧全视图回退（658-659）三处口径逐字一致，run_id 过滤口径未变"
++  },
++  "protectionClaims": [
++    {
++      "claim": "全部视图零改动",
++      "verdict": "成立",
++      "detail": "timeline memo / AskUserToolCard / 旧路径 TurnDetailsList 合并块均零触碰；唯一共同触碰行为 TurnStatusBar 的 JSX prop 书写顺序重排（turnStartedAt/turnStatus/segments），属性集合不变、语义零变化"
++    },
++    {
++      "claim": "回退路径不动",
++      "verdict": "成立",
++      "detail": "对 segments===undefined 的轮：块仍在 TurnRow 原位（whoLine/正文之前）渲染，且复用同一 DialogQaBlock 保证样式一致；门控新增的 segments===undefined 条件仅把 v2 轮分流到新路径，对回退人群行为不变（回退用例实测绿）"
++    }
++  ],
++  "boundaryAdjudications": [
++    {
++      "boundary": "放弃「dialog 落 chat 日志行参与日志流」方案",
++      "ruling": "可接受",
++      "reason": "放弃理由与实态相符：既有裁决注释在案（turn-timeline.tsx:682『AskUser 走 onUserDialog 不走 tool_use 日志，故用 dialog 历史渲染』）；diff 零后端/数据文件，dialog 历史确实独立于 chat 日志（GET /dialogs/history），落日志行必然要求历史回填才能救存量会话；纯渲染层方案以最小面达成同等时序还原"
++    },
++    {
++      "boundary": "缺 ts 段与 ❓ 块（视 0）混排穿插位置退化，与「全部」视图同款",
++      "ruling": "可接受",
++      "reason": "同款语义经代码核实为逐字同 comparator（1569-1571 vs 1597-1600），属既有约定平移而非新增风险类；且 subagent_stub 段 ts 恒 null（segmentTsOf 1420-1421）在全部视图早已按视 0 运行"
++    },
++    {
++      "boundary": "created_at 与段时刻同刻理论残留（稳定排序保互不跳序）",
++      "ruling": "可接受",
++      "reason": "毫秒同刻时稳定排序保 items 构造序（段先、dialog 后），与「全部」视图一致，无跳序风险"
++    },
++    {
++      "boundary": "无声明边界（评审发现的未披露点已转 findings）",
++      "ruling": "转 P3#2 / P3#4",
++      "reason": "v2 对话视图 ❓ 块嵌套上下文（头像行内列 + 自带 ml-9）造成的左缘右移与仅提问轮新增 agent 头像未在 design 披露；空 QA 畸形 payload 孤头像边界未披露"
++    }
++  ],
++  "artifactSync": "无涉及（确认）：纯前端渲染层变更，后端 schema 零改动，无需 pnpm gen:types；requirements/design/tasks/patch 四件套齐且相互一致（tasks 5 任务与 FR/测试绑定对应，全勾与实测相符）",
++  "findings": [
++    {
++      "id": "P3-1",
++      "severity": "P3",
++      "title": "SegmentedTurnBody JSDoc 注释过期，与实现矛盾",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1476-1477",
++      "detail": "函数级文档注释仍写『轻量 ❓ AskUser 记录由外层共享逻辑渲染（答复之前）』，实现已改为本函数内 convoTimeline 就地穿插（新注释 1575-1579 正确）。旧句未被更新，违反仓库规则（CLAUDE.md 规则 18：注释和实现不一致是万恶之源）",
++      "recommendation": "删除或改写 1476-1477 处『由外层共享逻辑渲染（答复之前）』为『按 created_at 与段时刻合并穿插（convoTimeline）』"
++    },
++    {
++      "id": "P3-2",
++      "severity": "P3",
++      "title": "❓ 块在 v2 对话视图的实际左缘/上下文变化未在 design 披露",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1632-1648（容器）与 1501（块 ml-9）",
++      "detail": "FR-02『视觉逐字不变』在标记层面成立（类名/文案逐字一致，已逐字比对），但块现在渲染于 ChatMessageAvatar 行内列（flex-1 列）且自带 ml-9，实际左缘较旧轮头位置右移约一个头像宽（头像+gap 后再缩进 36px）；且『仅有提问无对话段』的轮从旧行为的裸块变为头像+块（新增 agent 头像）。均为位置/上下文变化的伴生几何差，design「仅位置变化」未披露到这个粒度",
++      "recommendation": "design 风险节补一句披露即可（或确认 ml-9 在新上下文中的视觉意图）；不阻塞"
++    },
++    {
++      "id": "P3-3",
++      "severity": "P3",
++      "title": "FR-02 回退用例断言强度弱于场景措辞（未锁定『旧位置』）",
++      "location": "frontend/src/components/daemon/__tests__/turn-timeline-dialog-inplace.test.tsx:187-198",
++      "detail": "FR-02 场景写『Then ❓ 块按旧位置渲染』，但用例仅断言 getByTestId('dialog-qa-block') 与旧 output 文本存在，未断言块在 output 之前的 DOM 顺序；若未来回退路径渲染位置回归（块挪到正文之后）该用例不会失败。实现本身当前正确（TurnRow 684-688 块位于 whoLine/正文之前，与旧代码位次一致）",
++      "recommendation": "用例补一行 innerHTML 顺序断言（dialog-qa-block 的 ❓ 文本先于旧 output 文本），对齐同文件 expectOrderBefore 惯例"
++    },
++    {
++      "id": "P3-4",
++      "severity": "P3",
++      "title": "畸形数据边界：零对话段 + 空 QA dialog 的轮出现无内容孤头像",
++      "location": "frontend/src/components/daemon/turn-timeline.tsx:1632（容器门控）与 1495-1497（DialogQaBlock 空 QA 渲染 null）",
++      "detail": "convoTimeline 的长度把 turnDialogs 全量计入，不剔除 extractDialogQA 为空的 dialog（session-log-sanitize.ts:84，payload.questions 缺失/为空时返回 []）。当某轮无对话段且仅有此类不可解析 dialog 时：convoTimeline.length>0 → 挂载 ChatMessageAvatar 行，但唯一子项渲染 null，出现左侧孤头像；旧路径该情形整块渲染 null、完全无输出。触发面窄（需 payload.questions 为空的畸形 dialog），正常 AskUserQuestion 恒有 questions",
++      "recommendation": "convoTimeline 构造时对 askUser 项预过滤 extractDialogQA(d).length>0，或容器门控改为存在至少一个可渲染项；不阻塞"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "n/a",
++    "切换": "ok",
++    "作用域": "ok",
++    "乱序详情": "稳定排序 + 缺 ts 视 0 与「全部」视图 comparator 逐字一致；memo 依赖完整，迟到 dialog 按 created_at 落位；畸形数据空 QA 项混入时间线仅产生 P3#4 孤头像，不产生乱序",
++    "作用域详情": "run_id === realRunId ?? runId 三处（新 turnDialogs/旧对话块/旧全视图回退）逐字一致，跨会话数据不进入",
++    "并发详情": "纯渲染层零写入面，diff 无新增 setState/effect",
++    "切换详情": "纯派生 useMemo，无本地状态/定时器，会话切换走父级既有重建",
++    "测试实测": "vitest 6 文件 97/97（92 既有 + 5 新增）+ tsc --noEmit exit 0，均为本评审独立复跑结果（2026-10-10）"
++  }
++}

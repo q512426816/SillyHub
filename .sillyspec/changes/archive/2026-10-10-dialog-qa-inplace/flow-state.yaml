@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -21,6 +29,13 @@ input: >-
   - 既有对话/弹窗相关测试（session-panel-dialog / dialog-minimize / conversation-file-card 等）全部保持通过
 autopilot: true
 baseline_commit: a8623c6d614dff46a33cbb243c88643712245598
-updatedAt: '2026-10-10T15:03:59.702Z'
+updatedAt: '2026-10-10T15:23:50.849Z'
 baseline_sha256: 02953aafecd965a520b2828350086ff9e5f107c190e44f06968e552e893b13e6
+gate_summary: >-
+  test: passed ← module[]+deps(jsx6)+fr(5)（21.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010150935\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（24.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010150935\test-result.json｜门文件
+  3 个
 
