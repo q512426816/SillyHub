@@ -1,0 +1,23 @@
+{"ts":1791593368398,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791593368398,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791593400640,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791593447993,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791593454616,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791593486097,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/input-ref-overlay.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791593627282,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791593705397,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791593705397,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791593705397,"kind":"commit","stage":null,"detail":"6e8cc6354","provisional":true}
+{"ts":1791593728770,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791593742052,"kind":"commit","stage":null,"detail":"8cdc9eadb","provisional":true}
+{"ts":1791594362076,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/input-ref-overlay.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791594404842,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791594451737,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791594451737,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791594462083,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791594465464,"kind":"commit","stage":null,"detail":"e0312ee6a","provisional":true}
+{"ts":1791595366954,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1791595784152,"kind":"gate-run","stage":"verify","detail":"门实测 passed（21.3s） · 20261010012944","provisional":true}
+{"ts":1791596026891,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791596033466,"kind":"commit","stage":null,"detail":"b9b67aa80","provisional":true}
+{"ts":1791596075272,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-10-att-ref-badge-hover/review.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

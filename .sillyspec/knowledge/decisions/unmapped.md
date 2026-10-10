@@ -2001,3 +2001,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：fe99e67d4c7df4c6d1dc64fdb4b3612940c832fe
 理由：最大风险：排障入口从"用户可见的会话行"变为"daemon 日志事件"，运维需知道去日志找 `run_cost_may_include_bg_tasks`——通过模块文档 `daemon.md` 同步与本记录留痕缓解。试过放弃的方案：a) 阈值版"只在用量差分明显异常时报"——无真值基准，阈值任意、误报/漏报两头错（见做法概述）；b) 彻底删除不留任何痕迹——丢失原始 FR-04 排障意图（$24.10 归属误导类问题将无现场线索）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-att-ref-badge-hover
+锚点：未记录
+最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
+理由：最大风险：角标显示后指针移向角标本体——离开 span 原始矩形瞬间若命中测试失败会闪灭循环。缓解：命中矩形外扩 8px 覆盖角标外挂区（-right-1.5 -top-1 = 6px）。放弃的方案：①纯 CSS group-hover——span 被 textarea 覆盖，:hover 永不触发（可行性死路）；②给 span 开 pointer-events-auto——挡住下方 textarea 的点击/选字，违反 FR-02；③mousemove 监听 textarea——指针移到角标（sibling）后事件不再冒泡到 textarea，同样闪灭。

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-att-ref-badge-hover",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-att-ref-badge-hover:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏、visibleBadgeIndex 命中才显示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-att-ref-badge-hover"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-att-ref-badge-hover:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏（opacity-0 + pointer-events-none），visibleBadgeIndex 命中才显示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-att-ref-badge-hover"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-att-ref-badge-hover:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「既有×删除回调行为不变」",
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx「× 角标删除该处一次出现；点 X 删附件联动剥离全部引用」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-att-ref-badge-hover"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  编辑态附件引用标签的×删除角标常显略吵，改为鼠标悬停标签时才显示。
+
+  成功标准：
+  - 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
+  - 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
+  - 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
+  - 相关测试全绿+tsc 零错
+autopilot: false
+baseline_commit: a43ce8b8900f21312925436daa7941115033cc31
+updatedAt: '2026-10-10T01:34:55.266Z'
+baseline_sha256: 69f58b6613b8654ee3ba52e931dfc62added279afee6a37a3a37e9aebe249032
+spec_approved: true
+spec_approved_at: '2026-10-10T01:29:00.837Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx5)+fr(5)（21.3s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261010012944\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 4 个
+

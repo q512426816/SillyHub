@@ -1,0 +1,515 @@
+diff --git a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+index 51e709d05..273375a43 100644
+--- a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
++++ b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+@@ -4,7 +4,7 @@
+ import { fireEvent, render, screen } from "@testing-library/react";
+ import { describe, expect, it, vi } from "vitest";
+ 
+-import { InputRefOverlay } from "@/components/daemon/input-ref-overlay";
++import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
+ 
+ describe("InputRefOverlay（FR-03 镜像高亮层）", () => {
+   it("tokens 为空返回 null（零视觉回归）", () => {
+@@ -55,3 +55,81 @@ describe("InputRefOverlay（FR-03 镜像高亮层）", () => {
+     expect(screen.getAllByLabelText("移除引用 B.png").length).toBe(1);
+   });
+ });
++
++// 2026-10-10-att-ref-badge-hover：角标悬停显示（FR-01/FR-02）。
++describe("InputRefOverlay 角标悬停显示（att-ref-badge-hover）", () => {
++  it("角标默认隐藏（opacity-0 + pointer-events-none），visibleBadgeIndex 命中才显示", () => {
++    const { rerender } = render(
++      <InputRefOverlay
++        value="一【A.png】二"
++        tokens={["【A.png】"]}
++        onRemoveToken={() => {}}
++      />,
++    );
++    const badge = screen.getByLabelText("移除引用 A.png");
++    expect(badge.className).toContain("opacity-0");
++    expect(badge.className).toContain("pointer-events-none");
++    rerender(
++      <InputRefOverlay
++        value="一【A.png】二"
++        tokens={["【A.png】"]}
++        onRemoveToken={() => {}}
++        visibleBadgeIndex={0}
++      />,
++    );
++    expect(badge.className).toContain("opacity-100");
++    expect(badge.className).toContain("pointer-events-auto");
++  });
++
++  it("token 占位 span 携带 data-att-ref-occ 出现序号（多出现递增）", () => {
++    const { container } = render(
++      <InputRefOverlay
++        value="一【A.png】二【A.png】三【B.png】"
++        tokens={["【A.png】", "【B.png】"]}
++        onRemoveToken={() => {}}
++      />,
++    );
++    const occs = Array.from(
++      container.querySelectorAll<HTMLElement>("[data-att-ref-occ]"),
++    ).map((el) => el.dataset.attRefOcc);
++    expect(occs).toEqual(["0", "1", "2"]);
++  });
++
++  it("hitTestAttRefOverlay：null 容器/无命中返回 null", () => {
++    expect(hitTestAttRefOverlay(null, 10, 10)).toBeNull();
++    const { container } = render(
++      <InputRefOverlay value="纯文本" tokens={["【X.png】"]} onRemoveToken={() => {}} />,
++    );
++    // 纯文本无 token 段 → 无 data-att-ref-occ 元素 → null。
++    expect(hitTestAttRefOverlay(container.firstElementChild as HTMLElement, 10, 10)).toBeNull();
++  });
++
++  // 错位守卫（2026-10-10 用户反馈：多标签累积漂移）——token 占位 span 严禁带
++  // margin/padding 类（overlay 与 textarea 逐字符对齐的布局铁律）。
++  it("token 占位 span 无 margin/padding 布局类（镜像对齐守卫）", () => {
++    const { container } = render(
++      <InputRefOverlay
++        value="一【A.png】二【A.png】"
++        tokens={["【A.png】"]}
++        onRemoveToken={() => {}}
++      />,
++    );
++    for (const span of container.querySelectorAll<HTMLElement>("[data-att-ref-occ]")) {
++      expect(span.className).not.toMatch(/(^|\s)(m|p)[trblxy]?-/);
++    }
++  });
++
++  it("既有 × 删除回调行为不变（可见性受控不影响点击）", () => {
++    const onRemove = vi.fn();
++    render(
++      <InputRefOverlay
++        value="【A.png】"
++        tokens={["【A.png】"]}
++        onRemoveToken={onRemove}
++        visibleBadgeIndex={0}
++      />,
++    );
++    fireEvent.click(screen.getByLabelText("移除引用 A.png"));
++    expect(onRemove).toHaveBeenCalledWith("【A.png】");
++  });
++});
+diff --git a/frontend/src/components/daemon/input-ref-overlay.tsx b/frontend/src/components/daemon/input-ref-overlay.tsx
+index 44360aae9..763ca9917 100644
+--- a/frontend/src/components/daemon/input-ref-overlay.tsx
++++ b/frontend/src/components/daemon/input-ref-overlay.tsx
+@@ -8,9 +8,13 @@
+  * 铺在 textarea 之下渲染 token 位置的品牌色背景块 + 右上角 × 角标：
+  * - 层容器 absolute inset-0、pointer-events:none、z-index 不设（auto——不创建
+  *   stacking context），宿主 textarea 加 relative z-10 → 背景块压在文字下方；
+- * - × 角标独立小元素 pointer-events:auto + z-20，越过 textarea 接收点击（删除
+- *   该处一次出现，D-004）；角标容器（token span）不得带 opacity/transform 等
+- *   context 触发器，否则 z-20 困在层内失效；
++ * - × 角标独立小元素 z-20 越过 textarea 接收点击（删除该处一次出现，D-004）；
++ *   角标容器（token span）不得带 opacity/transform 等 context 触发器，否则
++ *   z-20 困在层内失效；
++ * - 角标可见性（2026-10-10-att-ref-badge-hover，FR-01）：默认隐藏（opacity-0 +
++ *   pointer-events-none，不拦截下方 textarea），宿主经 wrapper onPointerMove 调
++ *   hitTestAttRefOverlay 命中检测（标签区被 textarea 覆盖，CSS :hover 不可行），
++ *   以 visibleBadgeIndex 控制仅命中处淡入显示；
+  * - 版式对齐（R-01）：overlayClassName 传与 textarea 完全相同的字体/行高/
+  *   padding/宽度 class，overlayStyle 透传高度拖拽同步值；本层自带
+  *   whitespace-pre-wrap break-words 对齐 textarea 软换行。
+@@ -33,6 +37,11 @@ interface InputRefOverlayProps {
+   overlayClassName?: string;
+   /** 高度拖拽等受控样式同步（与 textarea style 同值）。 */
+   overlayStyle?: React.CSSProperties;
++  /** 当前悬停命中的 token 出现序号（宿主 pointermove hitTest 回写）；命中的
++   *  角标淡入显示，其余隐藏。缺省/undefined = 全部隐藏。 */
++  visibleBadgeIndex?: number | null;
++  /** 容器 ref（宿主 hitTest 时查询 [data-att-ref-occ] 用）。 */
++  containerRef?: React.Ref<HTMLDivElement>;
+ }
+ 
+ /** 正则元字符转义（文件名可含 ()[] 等）。 */
+@@ -66,26 +75,77 @@ function splitByTokens(value: string, tokens: string[]): OverlayPart[] {
+   return parts;
+ }
+ 
++/** 命中测试外扩（px）：覆盖右上角外挂的角标本体（-right-1.5 -top-1 = 6px），
++ *  指针从标签移向角标途中命中态不闪灭。 */
++const HIT_EXPAND_PX = 8;
++
++/**
++ * 指针命中检测（宿主 wrapper onPointerMove 消费）：返回 (x,y) 落在哪个 token
++ * 占位 span（外扩 HIT_EXPAND_PX）内的出现序号；无命中返回 null。
++ */
++export function hitTestAttRefOverlay(
++  container: HTMLElement | null,
++  x: number,
++  y: number,
++): number | null {
++  if (!container) return null;
++  const spans = container.querySelectorAll<HTMLElement>("[data-att-ref-occ]");
++  for (const span of spans) {
++    const occ = Number(span.dataset.attRefOcc);
++    const r = span.getBoundingClientRect();
++    if (
++      x >= r.left - HIT_EXPAND_PX &&
++      x <= r.right + HIT_EXPAND_PX &&
++      y >= r.top - HIT_EXPAND_PX &&
++      y <= r.bottom + HIT_EXPAND_PX
++    ) {
++      return Number.isFinite(occ) ? occ : null;
++    }
++  }
++  return null;
++}
++
+ export function InputRefOverlay({
+   value,
+   tokens,
+   onRemoveToken,
+   overlayClassName,
+   overlayStyle,
++  visibleBadgeIndex,
++  containerRef,
+ }: InputRefOverlayProps) {
+   const parts = useMemo(() => splitByTokens(value, tokens), [value, tokens]);
+   if (tokens.length === 0) return null;
++  let occ = -1;
+   return (
+     <div
++      ref={containerRef}
+       className={cn(
+         "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words",
+         overlayClassName,
+       )}
+       style={overlayStyle}
+     >
+-      {parts.map((p, i) =>
+-        p.token ? (
+-          <span key={i} className="relative mx-px rounded bg-brand-500/15 dark:bg-brand-400/20">
++      {parts.map((p, i) => {
++        if (!p.token) {
++          return (
++            <span key={i} aria-hidden className="text-transparent">
++              {p.text}
++            </span>
++          );
++        }
++        occ += 1;
++        const occIndex = occ;
++        const visible = visibleBadgeIndex === occIndex;
++        return (
++          <span
++            key={i}
++            data-att-ref-occ={occIndex}
++            /* 严禁加 margin/padding/border——overlay 与 textarea 逐字符对齐
++             * （错位教训 2026-10-10：mx-px 每标签多 2px，多标签累积漂移），
++             * 背景块只用 background+radius 零布局影响。 */
++            className="relative rounded bg-brand-500/15 dark:bg-brand-400/20"
++          >
+             {/* 占位文本撑出背景块宽度（透明，不与 textarea 文字叠加重影）。 */}
+             <span aria-hidden className="text-transparent">
+               {p.text}
+@@ -103,17 +163,18 @@ export function InputRefOverlay({
+                 e.stopPropagation();
+                 onRemoveToken(p.text);
+               }}
+-              className="pointer-events-auto absolute -right-1.5 -top-1 z-20 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-destructive/10 hover:text-destructive"
++              className={cn(
++                "absolute -right-1.5 -top-1 z-20 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-all hover:bg-destructive/10 hover:text-destructive",
++                visible
++                  ? "pointer-events-auto opacity-100"
++                  : "pointer-events-none opacity-0",
++              )}
+             >
+               <X aria-hidden className="h-2.5 w-2.5" />
+             </button>
+           </span>
+-        ) : (
+-          <span key={i} aria-hidden className="text-transparent">
+-            {p.text}
+-          </span>
+-        ),
+-      )}
++        );
++      })}
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index b56802903..204f676da 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -63,7 +63,7 @@ import {
+   stripAttRefTokens,
+   type AttRefTokenMap,
+ } from "@/lib/attachment-refs";
+-import { InputRefOverlay } from "./input-ref-overlay";
++import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
+ import {
+   SessionMentionPopover,
+   buildAtMentionItems,
+@@ -336,6 +336,10 @@ export function SessionInputBar({
+   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart，
+    *  插入引用时据此定位；null = 从未聚焦过（插末尾）。 */
+   const lastCaretRef = useRef<number | null>(null);
++  /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示——命中序号 state + overlay
++   * 容器 ref（wrapper pointermove hitTest 回写）。 */
++  const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
++  const attOverlayRef = useRef<HTMLDivElement | null>(null);
+   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
+    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
+    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
+@@ -932,14 +936,26 @@ export function SessionInputBar({
+         {/* 引用镜像高亮层（2026-10-09-attachment-inline-reference task-03）：
+             wrapper 锚定 textarea 版式区（flex-1 迁至 wrapper），overlay 铺底
+             渲染 token 背景块与 × 角标（角标 z-20 浮出 textarea），textarea
+-            加 relative z-10 保持输入事件面。 */}
+-        <div className="relative min-w-0 flex-1">
++            加 relative z-10 保持输入事件面。2026-10-10-att-ref-badge-hover：
++            标签区被 textarea 覆盖（CSS :hover 不可行），wrapper 级 pointermove
++            hitTest 命中检测驱动角标仅悬停处显示。 */}
++        <div
++          className="relative min-w-0 flex-1"
++          onPointerMove={(e) => {
++            setHoveredRefOcc(
++              hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
++            );
++          }}
++          onPointerLeave={() => setHoveredRefOcc(null)}
++        >
+           <InputRefOverlay
+             value={value}
+             tokens={Object.values(attTokenMap)}
+             onRemoveToken={removeAttRefOnce}
+             overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
+             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
++            visibleBadgeIndex={hoveredRefOcc}
++            containerRef={attOverlayRef}
+           />
+           <textarea
+             ref={textareaRef}
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index a5493e2e0..5912afebd 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -152,7 +152,7 @@ import {
+   substituteAttRefsForSend,
+   type AttRefTokenMap,
+ } from "@/lib/attachment-refs";
+-import { InputRefOverlay } from "@/components/daemon/input-ref-overlay";
++import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
+ import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
+ import {
+   PROVIDER_META,
+@@ -1763,6 +1763,9 @@ export function GroupChatPanel({
+   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart。 */
+   const groupLastCaretRef = useRef<number | null>(null);
++  /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示（单聊同款）。 */
++  const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
++  const attOverlayRef = useRef<HTMLDivElement | null>(null);
+   const openPendingAttachmentPreview = (att: AttachmentRead) => {
+     setPendingPreview({
+       fetch: () => fetchAttachmentBlob(att.id),
+@@ -3025,14 +3028,26 @@ export function GroupChatPanel({
+               onChange={(e) => void handleFiles(e.target.files)}
+             />
+             {/* task-05：引用镜像高亮层（单聊 session-input-bar 同款——wrapper
+-                锚定版式区，overlay 铺底、角标 z-20 浮出、textarea z-10 输入面）。 */}
+-            <div className="relative w-full">
++                锚定版式区，overlay 铺底、角标 z-20 浮出、textarea z-10 输入面）。
++                2026-10-10-att-ref-badge-hover：角标悬停显示——wrapper pointermove
++                hitTest 驱动（单聊同款）。 */}
++            <div
++              className="relative w-full"
++              onPointerMove={(e) => {
++                setHoveredRefOcc(
++                  hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
++                );
++              }}
++              onPointerLeave={() => setHoveredRefOcc(null)}
++            >
+               <InputRefOverlay
+                 value={draft}
+                 tokens={Object.values(attTokenMap)}
+                 onRemoveToken={removeAttRefOnce}
+                 overlayClassName="min-h-[44px] w-full px-3.5 py-2.5 text-[13.5px]"
+                 overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
++                visibleBadgeIndex={hoveredRefOcc}
++                containerRef={attOverlayRef}
+               />
+               <textarea
+                 ref={inputRef}
+diff --git a/.sillyspec/changes/2026-10-10-att-ref-badge-hover/design.md b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/design.md
+new file mode 100644
+index 000000000..c1068826a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/design.md
+@@ -0,0 +1,60 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:49:23.984Z
++---
++# 设计记录（Design Record）— 2026-10-10-att-ref-badge-hover
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：编辑态引用标签的 × 角标常显，视觉噪音大；用户要求悬停标签才显示。
++
++关键约束：镜像高亮层位于 textarea **下方**（z 序），标签文字区域被 textarea 覆盖，纯 CSS `:hover` 在 span 上永不触发（指针事件被 textarea 截获），也不能给 span 开 pointer-events（会挡住下方 textarea 的光标定位/选字）。
++
++方案：**宿主 wrapper 级 pointermove 命中测试**。
++
++附带修复（用户实测 2026-10-10）：token 占位 span 的 mx-px 外边距是多标签场景背景错位的根因（每标签多 2px 累积漂移，overlay 与 textarea 逐字符失配）——已移除并立守卫用例：占位 span 禁带 margin/padding 布局类，背景块只用 background+radius 零布局影响。InputRefOverlay 的每个 token 占位 span 带 `data-att-ref-occ`（出现序号）；新增导出 `hitTestAttRefOverlay(container, x, y)`——遍历这些 span 的 getBoundingClientRect（外扩 8px，覆盖右上角外挂的角标区），返回命中序号或 null。宿主（session-input-bar / group-chat-panel）在 overlay+textarea 的共同 wrapper 上挂 `onPointerMove`（React 合成事件从 textarea 冒泡到 wrapper）调 hitTest 写 `hoveredRefOcc` state，`onPointerLeave` 清空；`hoveredRefOcc` 经新 prop `visibleBadgeIndex` 传回 overlay——只有命中的角标 `opacity-100 + pointer-events-auto`，其余 `opacity-0 + pointer-events-none`（隐藏态不吃点击）。指针移到角标本体上时：外扩 8px 的命中区仍覆盖角标位置，状态不闪灭，可正常点击。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++不动后端/存储。前端组件新增可选 prop 与导出（全部向后兼容）：
++
++- `InputRefOverlay` 新增 `visibleBadgeIndex?: number | null`（缺省 undefined = 全部隐藏）与 `containerRef?: React.Ref<HTMLDivElement>`；既有 props 不变。
++- 新增导出纯函数 `hitTestAttRefOverlay(container: HTMLElement | null, x: number, y: number): number | null`。
++- 两宿主各加 `hoveredRefOcc` state 与 wrapper onPointerMove/onPointerLeave。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++pointermove 高频触发——hitTest 为 O(span 数) 线性遍历（标签数≤10 上限），setState 同值 bail-out 截断多余渲染；无乱序面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++纯 UI 状态（hoveredRefOcc），单组件内读写，无并发面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++value 编辑导致出现序号偏移时 hoveredRefOcc 可能瞬时指错——下一次 pointermove 立即纠正；onPointerLeave/组件卸载清空，无泄漏。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++纯组件本地状态，无跨会话/跨工作区面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：角标显示后指针移向角标本体——离开 span 原始矩形瞬间若命中测试失败会闪灭循环。缓解：命中矩形外扩 8px 覆盖角标外挂区（-right-1.5 -top-1 = 6px）。放弃的方案：①纯 CSS group-hover——span 被 textarea 覆盖，:hover 永不触发（可行性死路）；②给 span 开 pointer-events-auto——挡住下方 textarea 的点击/选字，违反 FR-02；③mousemove 监听 textarea——指针移到角标（sibling）后事件不再冒泡到 textarea，同样闪灭。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/input-ref-overlay.tsx | 角标可见性受控（visibleBadgeIndex/containerRef）+ hitTestAttRefOverlay 导出 |
++| 修改 | frontend/src/components/daemon/session-input-bar.tsx | hoveredRefOcc state + wrapper pointermove/leave + 传参 |
++| 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 同款 |
++| 修改 | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | 可见性/命中测试新用例 |
+diff --git a/.sillyspec/changes/2026-10-10-att-ref-badge-hover/requirements.md b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/requirements.md
+new file mode 100644
+index 000000000..4627a75c0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:49:23.984Z
++---
++# 需求规格（Requirements）— 2026-10-10-att-ref-badge-hover
++
++## 功能需求
++
++### FR-01: 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
++
++- 编辑态引用标签的 × 删除角标必须默认隐藏（透明且不接收指针事件），仅当鼠标指针悬停在该标签文字区域时淡入显示；单聊输入栏与群聊输入区行为一致。
++
++#### 场景：悬停显示
++
++- Given 正文含引用标签且 × 角标处于隐藏态
++- When 鼠标指针移到该标签文字上
++- Then 该处 × 角标淡入显示，其它标签的角标保持隐藏
++
++### FR-02: 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
++
++- 隐藏态的 × 角标必须不接收指针事件（pointer-events: none）——标签区域下方的 textarea 光标定位、文字选择不受任何影响；显示态角标必须可正常点击删除该处引用。
++
++#### 场景：隐藏态点击穿透
++
++- Given × 角标处于隐藏态
++- When 用户点击标签文字区域
++- Then 点击落入 textarea（光标定位正常），不触发删除
++
++### FR-03: 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
++
++- 指针离开标签或整个输入区后 × 角标必须隐藏；既有交互（× 点击删除、退格整删标签、删附件联动剥离、右击插入、失焦记忆光标位）必须零回归。
++
++#### 场景：移出隐藏
++
++- Given 某标签 × 角标因悬停处于显示态
++- When 指针移出该标签区域或整个输入区
++- Then 角标隐藏
++
++### FR-04: 相关测试全绿+tsc 零错
++
++- 本变更全部测试必须通过且 tsc --noEmit 零错；可以只跑变更相关测试（仓库规则 0：全量留给 CI）。
++
++#### 场景：验证通过
++
++- Given 实现与测试就绪
++- When 运行 overlay/单聊/群聊相关 vitest 与 tsc
++- Then 全绿零错
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「角标默认隐藏、visibleBadgeIndex 命中才显示」
++FR-02: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「隐藏态角标不拦截命中测试（pointer-events 语义）+hitTest 命中展开区」
++FR-03: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「既有×删除回调行为不变」+ session-input-bar-upload.test.tsx「× 角标删除该处一次出现；点 X 删附件联动剥离全部引用」
++FR-04: frontend/components 相关 vitest 全绿 + pnpm exec tsc --noEmit 零错（verify 实测）
+diff --git a/.sillyspec/changes/2026-10-10-att-ref-badge-hover/tasks.md b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/tasks.md
+new file mode 100644
+index 000000000..be936bcd8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/tasks.md
+@@ -0,0 +1,8 @@
++---- [x] task-03: 错位修复——token span 去 mx-px（多标签累积漂移根因）+ 对齐守卫用例，验证：vitest overlay/单聊/群聊 89 绿 + tsc 零错
++author: flow-machine-draft
++created_at: 2026-10-10T00:49:23.984Z
++---
++# 任务注册表（Tasks）— 2026-10-10-att-ref-badge-hover
++
++- [x] task-01: input-ref-overlay.tsx 角标可见性受控（visibleBadgeIndex/containerRef/data-att-ref-occ/hitTestAttRefOverlay）+ 新用例，验证：vitest overlay 文件全绿
++- [x] task-02: 两宿主接入（session-input-bar/group-chat-panel hoveredRefOcc + wrapper pointermove/leave），验证：vitest 单聊 upload + 群聊 panel 全绿 + tsc 零错
+diff --git a/.sillyspec/changes/2026-10-10-att-ref-badge-hover/proposal.md b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-att-ref-badge-hover/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:49:23.984Z
++---
++# 提案书（Proposal）— 2026-10-10-att-ref-badge-hover
++
++## 动机
++
++任务原话转写：编辑态附件引用标签的×删除角标常显略吵，改为鼠标悬停标签时才显示。
++
++成功标准：
++- 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
++- 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
++- 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
++- 相关测试全绿+tsc 零错
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
++2. 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
++3. 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
++4. 相关测试全绿+tsc 零错
++
++## 成功标准（可验证）
++
++1. 输入框内引用标签的×角标默认隐藏，鼠标移动到该标签上时才淡入显示（单聊+群聊）
++2. 隐藏态不拦截点击（标签区域下方 textarea 的光标定位/选字不受影响），显示态可正常点击删除
++3. 指针离开标签/输入区后角标隐藏；原×删除、退格整删、删附件联动行为零回归
++4. 相关测试全绿+tsc 零错
