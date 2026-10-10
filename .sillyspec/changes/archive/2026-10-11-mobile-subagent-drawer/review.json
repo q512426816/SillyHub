@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "85f49e7333567bea28ef71b993f8b132fb4614b9",
+  "reviewedAt": "2026-10-10T16:28:00Z",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "「desktop 分支逐字不动」字面表述与 diff 事实有出入（行为等价成立，非回归）",
+      "detail": "design.md 做法概述称 desktop 分支（portal 三 props / 悬浮宿主回退）『逐字不动』。实际 5 个 hunk 中 4 个位于 desktop/mobile 共享管线：activeSubagentId 派生（2484）、context 值构造（2543-2551）、段失效自动关 effect（2498-2503）、右栏 ✕ handleSubagentPanelClose（2555-2557）均被改写为统一槽位出口。回调等价性经代码核实成立：desktop portal 宿主（onOpenSubagent != null）时 openSubagentSlot→onOpenSubagent?.(segmentId)、closeSubagentSlot→onSubagentPanelClose?.()，与改前 onOpenSubagent ?? noop 语义一致，useCallback 依赖 [hasHostSubagent, onOpenSubagent] 保持引用稳定性等价；desktop 专属路径确零改动——detailColumnVisible（!mobile && (subagentPanelOpen || detailOpen)，2569）、右栏 detailColumnTree 渲染（5330-5364）、sessions-portal.tsx:941-943 三 props 装配均在 hunk 之外。行为锁定：sessions-portal.test.tsx 60/60 绿（含『统一 effect 清零』『切群再切回不复活』『未传三 props 零回归契约』用例）+ 零回归锚用例（desktop 无 props 仍内联展开）。属表述精度问题，非功能缺陷。"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 子句「会话切换自动关闭」的 mobile 专属清槽 effect 无直接测试锁定",
+      "detail": "FR-02 要求『会话切换与段失效自动关闭』。代码已实现双保险：useEffect([sessionId]) 清 mobileSubagentId（session-panel-page.tsx:2465-2468）+ 段失效共享 effect 走 closeSubagentSlot（2498-2503）。但测试绑定仅『每 FR 至少一行』达标：新测试文件 3 用例覆盖紧凑卡/Drawer 开/✕ 关/toggle，未覆盖 mobile 会话切换清槽路径；段失效自动关仅由 sessions-portal desktop 用例间接覆盖共享 effect。行为风险极低（即使清槽 effect 缺失，段 id 跨会话必然 miss→subagentPanelOpen=false→Drawer 卸载兜底），列为测试覆盖缺口而非行为缺口。"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "evidence": {
+    "patchIntegrity": {
+      "verified": true,
+      "detail": "git diff baseline ae22d036..HEAD 85f49e7 对 session-panel-page.tsx 的 hunk 头（@@-2456/-2474/-2486/-2517/-5339 共 5 处）与 change.patch 冻结件逐一一致；HEAD blob sha（session-panel-page.tsx=cf2bf9023、test=5741732d9）与 patch 头部 index 行一致；frontend/ 工作树相对 HEAD 零 diff——工作区实态=HEAD=patch。"
+    },
+    "frFulfillment": {
+      "FR-01": "兑现并锁定。hasSubagentPanelHost = (!mobile && hasHostSubagent) || mobile（2519）→ variant=mobile 恒挂 Provider；SubagentBlockView 消费 context 走紧凑卡分支（turn-segment-views.tsx:713-829，data-segment-id + role=button，无 aria-expanded 折叠语义）。测试 1 断言紧凑卡存在且 children 正文（『子代理调研完成，结论如下。』）不在对话流——真实装配链（getAgentSessionLogs→logsToTurns→displayTurns）喂入。"
+      ,
+      "FR-02": "兑现并锁定。mobileSubagentDrawer（5373-5390）：antd v6 Drawer size=\"min(92vw, 420px)\"（antd 6.4.4 DrawerProps.size 类型为 sizeType|number|string，合法）+ destroyOnHidden + body flex column，内嵌既有 SubagentDetailPanel（segment+onClose，data-testid=subagent-panel-close，根 flex h-full min-h-0）。三关闭路径均走 closeSubagentSlot：✕（SubagentDetailPanel onClose→closeSubagentSlot，5387）、遮罩（Drawer onClose，5377）、toggle（SubagentBlockView 已激活→closeSubagent()，turn-segment-views.tsx:809-814 共享实现，PC/mobile 同源）。嵌套单槽位由 activeId 单值天然成立。测试 1/2 分别锁定 ✕ 关闭与 toggle 关闭。会话切换/段失效关闭见 finding P3-2。"
+      ,
+      "FR-03": "兑现并锁定。desktop 专属路径（detailColumnVisible/右栏渲染/portal 三 props 装配）diff 零触碰；desktop 无 props 悬浮宿主（hasSubagentPanelHost=false→不挂 Provider→内联展开 aria-expanded）由零回归锚用例锁定；desktop portal 宿主行为由 sessions-portal.test.tsx 60 用例（含三 props 装配断言 :2606）锁定，回调等价性见 finding P3-1 详述。"
+    },
+    "blindSpotVerification": {
+      "乱序": "ok——段 id 为装配器稳定 key，SSE 重装配后 id 稳定；段失效由共享 effect（2498-2503）走统一出口自动收口，无悬挂状态。答案属实。",
+      "并发": "n/a——设计自答『不适用』经核实为真：纯前端单组件 useState，无共享写面，Drawer 开合与槽位状态同源（subagentPanelOpen 由 mobileSubagentId 派生）。",
+      "切换": "ok——useEffect 清 mobileSubagentId（2465-2468）+ Drawer destroyOnHidden + subagentPanelOpen 派生失效兜底，三重保障属实（测试锁定缺口见 P3-2）。",
+      "作用域": "ok——槽位状态组件实例私有、随 sessionId 重建；段解析限定本组件 displayTurns（findSegmentById），无跨实例串台通道。"
+    },
+    "disclosedBoundaries": [
+      {
+        "item": "Drawer 内 SubagentDetailPanel h-full 高度链 jsdom 无法实测，列为真机验收项（退化方案：body 加显式 height）",
+        "ruling": "可接受",
+        "reason": "CSS 布局链超出 jsdom 能力是客观限制，已给出退化方案；body 已设 flex column 与面板根 h-full min-h-0 组合是标准做法。"
+      },
+      {
+        "item": "放弃『mobile 页宿主自持三 props（照 portal 装配）』",
+        "ruling": "可接受",
+        "reason": "理由成立：手机页无右栏可开，props 只能指回组件内状态，多一层无意义转发；组件内槽位方案侵入面更小。"
+      },
+      {
+        "item": "放弃『mobile 复用内联展开 + 默认折叠』",
+        "ruling": "可接受",
+        "reason": "产品决策与用户诉求（PC 同构）一致，且内联展开信息密度确高于紧凑卡。"
+      },
+      {
+        "item": "已知残留：Drawer 无嵌套路由/返回键联动（移动端返回手势退页面而非关 Drawer）",
+        "ruling": "可接受",
+        "reason": "已显式披露为已知残留并给出后续路径（antd onClose + 历史栈）；属 UX 债务非功能回归，不阻塞验收。"
+      }
+    ],
+    "generatedArtifacts": "无涉及——变更仅触及前端源码 + 测试（无 codegen/API 类型/协议产物），requirements/design/patch/tasks 四件套齐备且相互一致。",
+    "testRuns": {
+      "new": "session-panel-mobile-subagent.test.tsx 3/3 绿",
+      "relatedRegression": "session-panel-variant 10 + subagent-async-derive 10 + subagent-detail-panel 11 + turn-state-subagent-routing 4 = 35/35 绿",
+      "desktopPortalLock": "sessions-portal.test.tsx 60/60 绿",
+      "tsc": "npx tsc --noEmit 退出码 0，零错误"
+    }
+  }
+}

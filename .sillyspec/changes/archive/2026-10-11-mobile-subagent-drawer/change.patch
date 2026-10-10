@@ -1,0 +1,563 @@
+diff --git a/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/flow-state.yaml b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/flow-state.yaml
+new file mode 100644
+index 000000000..008d88a6b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/flow-state.yaml
+@@ -0,0 +1,27 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  手机端会话页回显子代理内容时，子代理内部会话整段内联刷进对话流（应与 PC 端同构：只显示子代理基本信息紧凑卡，点击后在弹窗展示内部会话）。根因：SubagentPanelContext 的挂载条件显式排除
++  mobile（session-panel-page hasSubagentPanelHost = !mobile && onOpenSubagent != null，旧设计「移动端窄屏不做右栏」），无 context 时
++  SubagentBlockView 回退内联展开分支；且手机页宿主不传 portal 专属三 props（openSubagentId/onOpenSubagent/onSubagentPanelClose）。
++
++  成功标准：
++
++  - mobile 会话页子代理段渲染为紧凑基本信息卡（同 PC：状态点/名称/类型/徽标/时长，不内联 children），对话流不再被子代理内部会话刷屏
++
++  - 点击紧凑卡打开移动端 Drawer 弹窗，内嵌既有 SubagentDetailPanel 展示子代理内部会话（初始化提示词 + 段时间线），✕ 或遮罩关闭
++
++  - 再点已激活卡片为 toggle 关闭（与 PC 语义一致）；会话切换/段失效自动关闭
++
++  - PC 端（portal 宿主三 props 装配 + 右栏）与 dialog 模式行为零变化
++
++  - 新增移动端用例（紧凑卡不内联 + 点击开 Drawer + 关闭）+ 既有相关测试全绿 + tsc 零错
++autopilot: true
++baseline_commit: ae22d036039026687de6383b22dc0e0c92f957eb
++updatedAt: '2026-10-10T16:14:14.137Z'
++baseline_sha256: cf92f3089e4fe8297bf448774b5779d49f7b66db3956123e91e61854f04fca60
++
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx
+new file mode 100644
+index 000000000..5741732d9
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx
+@@ -0,0 +1,234 @@
++// 2026-10-11-mobile-subagent-drawer：mobile 子代理「紧凑卡 + 点击弹窗」单测。
++//
++// 背景：旧口径 mobile 不挂 SubagentPanelContext（design §3「移动端窄屏不做
++// 右栏」），SubagentBlockView 回退内联展开分支——子代理内部会话整段刷进对话
++// 流（用户实测手机端刷屏）。本变更：mobile 恒挂 Provider（内部槽位状态承载），
++// 子代理段渲染紧凑基本信息卡（同 PC），点击右侧滑出 Drawer 内嵌既有
++// SubagentDetailPanel 展示内部会话。
++//
++// 覆盖：
++//   1. mobile 紧凑卡：子代理 children 不内联（对话流无内部会话内容），卡片
++//      容器（data-segment-id）存在；
++//   2. 点击卡片 → Drawer 打开，内部会话内容（子段正文 + 初始化提示词）在
++//      Drawer 内可见；
++//   3. ✕ 关闭 → Drawer 卸载、内容消失；
++//   4. 零回归锚：desktop 且宿主未装配右栏 props（悬浮宿主 page 旧形态）仍
++//      回退内联展开（children 可见，无卡片点击语义）。
++//
++// 固件：真会话历史日志喂真实装配链（getAgentSessionLogs → logsToTurns →
++// displayTurns）——tool_call JSON 的 tool_use_id 即容器段 id，stdout 行按
++// parent_tool_use_id 路由进 children（写法照 sessions-portal.test.tsx task-04）。
++// mock 口径同 session-panel-variant.test.tsx（仅 mock 网络层）。
++
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, fireEvent, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++
++import { SessionPanel } from "../session-panel";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  createSession: vi.fn(),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    createSession: sessionApi.createSession,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++  };
++});
++
++const workspaceApi = vi.hoisted(() => ({
++  listWorkspaces: vi.fn(),
++  listProjects: vi.fn(),
++  listProjectWorkspaces: vi.fn(),
++}));
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/** 子代理会话日志（容器段 tu-sub-1 + children，写法照 sessions-portal task-04）。 */
++function makeSubagentLogs() {
++  return [
++    {
++      id: "log-1",
++      run_id: "run-1",
++      timestamp: "2026-09-15T10:00:00Z",
++      channel: "user_input",
++      content_redacted: "帮我调研缓存方案",
++    },
++    {
++      id: "log-2",
++      run_id: "run-1",
++      timestamp: "2026-09-15T10:00:01Z",
++      channel: "tool_call",
++      content_redacted:
++        '{"tool":"Task","args":{"description":"调研缓存方案","prompt":"请调研并给出结论"},"tool_use_id":"tu-sub-1","success":true}',
++    },
++    {
++      id: "log-3",
++      run_id: "run-1",
++      timestamp: "2026-09-15T10:00:02Z",
++      channel: "stdout",
++      content_redacted: "子代理调研完成，结论如下。",
++      parent_tool_use_id: "tu-sub-1",
++      subagent_type: "general-purpose",
++      depth: 1,
++    },
++  ];
++}
++
++function setupPanel(variant?: "mobile") {
++  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
++  return render(
++    <QueryClientProvider client={qc}>
++      <SessionPanel
++        mode="page"
++        sessionId="sess-m"
++        machines={[]}
++        llmProviders={[]}
++        {...(variant ? { variant } : {})}
++      />
++    </QueryClientProvider>,
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  sessionApi.getAgentSession.mockResolvedValue({
++    id: "sess-m", runtime_id: null, lease_id: null, provider: "claude",
++    status: "active", agent_session_id: "ag-1", config: null, turn_count: 1,
++    created_at: "t", last_active_at: null, ended_at: null,
++  });
++  sessionApi.getAgentSessionLogs.mockResolvedValue(makeSubagentLogs());
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.streamSession.mockImplementation(() => ({
++    close: vi.fn(),
++    getLastEventId: () => null,
++  }));
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
++});
++
++/** 等历史轮回灌完成（用户消息气泡出现 = displayTurns 已装配）。 */
++async function awaitTurns() {
++  await waitFor(() => {
++    expect(screen.getByText("帮我调研缓存方案")).toBeInTheDocument();
++  });
++}
++
++describe("mobile 子代理紧凑卡 + Drawer 弹窗（2026-10-11-mobile-subagent-drawer）", () => {
++  it("mobile：子代理段为紧凑卡（children 不内联刷屏），点击打开 Drawer 展示内部会话，✕ 关闭", async () => {
++    const { container } = setupPanel("mobile");
++    await awaitTurns();
++
++    // 紧凑卡：容器段存在，但子代理内部正文不在对话流。
++    const card = container.querySelector('[data-segment-id="tu-sub-1"]');
++    expect(card).toBeTruthy();
++    expect(screen.queryByText("子代理调研完成，结论如下。")).not.toBeInTheDocument();
++
++    // 点击卡片头 → Drawer 打开，内部会话正文 + 初始化提示词可见。
++    const head = card!.querySelector('[role="button"]');
++    expect(head).toBeTruthy();
++    fireEvent.click(head!);
++    await waitFor(() => {
++      expect(screen.getByText("子代理调研完成，结论如下。")).toBeInTheDocument();
++    });
++    expect(screen.getByText(/请调研并给出结论/)).toBeInTheDocument();
++
++    // ✕ 关闭 → 内容随 Drawer 卸载消失。
++    fireEvent.click(screen.getByTestId("subagent-panel-close"));
++    await waitFor(() => {
++      expect(screen.queryByText("子代理调研完成，结论如下。")).not.toBeInTheDocument();
++    });
++  });
++
++  it("mobile：再点已激活卡片为 toggle 关闭（与 PC 语义一致）", async () => {
++    const { container } = setupPanel("mobile");
++    await awaitTurns();
++    const card = container.querySelector('[data-segment-id="tu-sub-1"]')!;
++    const head = card.querySelector('[role="button"]')!;
++
++    fireEvent.click(head);
++    await waitFor(() => {
++      expect(screen.getByText("子代理调研完成，结论如下。")).toBeInTheDocument();
++    });
++    // 卡片已激活（ring 高亮），再点 → 关闭 Drawer。
++    fireEvent.click(head);
++    await waitFor(() => {
++      expect(screen.queryByText("子代理调研完成，结论如下。")).not.toBeInTheDocument();
++    });
++  });
++
++  it("零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）", async () => {
++    setupPanel();
++    await awaitTurns();
++    // 无 Provider → SubagentBlockView 内联分支：终端态默认折叠，头部可展开
++    // （aria-expanded 语义为内联分支专属）——展开后 children 正文直接在对话流。
++    // 同名按钮多处命中（块头 + 段内工具行等），取带 aria-expanded 的容器块头。
++    const head = (await screen.findAllByRole("button", { name: /调研缓存方案/ })).find(
++      (b) => b.hasAttribute("aria-expanded"),
++    );
++    expect(head).toBeTruthy();
++    fireEvent.click(head!);
++    await waitFor(() => {
++      expect(screen.getByText("子代理调研完成，结论如下。")).toBeInTheDocument();
++    });
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index f3c0ab52d..cf2bf9023 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2456,8 +2456,32 @@ export function SessionPanelPage({
+ 
+   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
+   //    §5.B §5.E）：子代理右栏——段实时解析 + 失效自动关闭 + context 提供 ────
+-  // 未传 props（悬浮宿主等 page 旧消费方）内部归一 null；dialog 模式不经本组件。
+-  const activeSubagentId = openSubagentId ?? null;
++  // 2026-10-11-mobile-subagent-drawer：mobile 兜底槽位——宿主三 props 是 portal
++  // 专属装配（手机页不传），mobile 无右栏但需要「紧凑卡 + 点击弹窗」与 PC 同构
++  // （旧口径 mobile 不挂 Provider → SubagentBlockView 回退内联展开，子代理内部
++  // 会话整段刷进对话流）。宿主未传时以组件内状态承载开合。
++  const [mobileSubagentId, setMobileSubagentId] = useState<string | null>(null);
++  // 会话切换清槽（子代理段 id 会话作用域，对齐 portal 宿主 selectedSessionId
++  // 变化清 subagentView 的口径）。
++  useEffect(() => {
++    setMobileSubagentId(null);
++  }, [sessionId]);
++  const hasHostSubagent = onOpenSubagent != null;
++  // 槽位开合统一出口：宿主装配走宿主回调，mobile 兜底走内部状态（下方
++  // context / 失效自动关 / Drawer 关闭共用，防三处漂移）。
++  const openSubagentSlot = useCallback(
++    (segmentId: string) => {
++      if (hasHostSubagent) onOpenSubagent?.(segmentId);
++      else setMobileSubagentId(segmentId);
++    },
++    [hasHostSubagent, onOpenSubagent],
++  );
++  const closeSubagentSlot = useCallback(() => {
++    if (hasHostSubagent) onSubagentPanelClose?.();
++    else setMobileSubagentId(null);
++  }, [hasHostSubagent, onSubagentPanelClose]);
++  // 未传 props（dialog 等旧宿主）内部归一 null；mobile 无宿主时取内部槽位。
++  const activeSubagentId = (hasHostSubagent ? openSubagentId : mobileSubagentId) ?? null;
+   // 段解析：displayTurns DFS findSegmentById 定位（活引用——SSE 更新即重渲面板，
+   // 非快照）；命中但非容器段（tool / subagent_stub，理论不可达——目录与卡片只
+   // 会给容器段 id）视为未命中，走自动关闭兜底。
+@@ -2474,9 +2498,9 @@ export function SessionPanelPage({
+   // effect 只兜段失效。依赖不变不重跑，宿主忽略回调也不会死循环。
+   useEffect(() => {
+     if (activeSubagentId != null && openSubagentSegment == null) {
+-      onSubagentPanelClose?.();
++      closeSubagentSlot();
+     }
+-  }, [activeSubagentId, openSubagentSegment, onSubagentPanelClose]);
++  }, [activeSubagentId, openSubagentSegment, closeSubagentSlot]);
+   // 右栏宽度：本组件自有 usePanelWidth，与文件预览共用同一 localStorage 键
+   // （单槽位语义，两实例互不重叠生命周期内各自记忆，design §5.B / X-002 修正）；
+   // 默认 / 最小 / 最大用 portal-file-panels 同处常量（480 / 320 / 860）。
+@@ -2486,12 +2510,13 @@ export function SessionPanelPage({
+     minWidth: SESSIONS_FILE_PREVIEW_WIDTH_MIN,
+     maxWidth: SESSIONS_FILE_PREVIEW_WIDTH_MAX,
+   });
+-  // Provider 挂载条件（最终方案）：宿主声明右栏能力（传入 onOpenSubagent）且非
+-  // mobile（design §3 非目标：移动端窄屏不做右栏）才挂 SubagentPanelContext——
+-  // 消费到 context 的 SubagentBlockView 走紧凑卡片分支；不满足则不挂 Provider，
+-  // useSubagentPanel() 返回 null 回退原内联展开（FR-05 零回归）。不能无条件挂
+-  // 空值 Provider：紧凑卡片点击 openSubagent=noop 会「点了没反应」，比内联回退更差。
+-  const hasSubagentPanelHost = !mobile && onOpenSubagent != null;
++  // Provider 挂载条件：desktop 沿用宿主声明右栏能力（onOpenSubagent）口径；
++  // 2026-10-11-mobile-subagent-drawer：mobile 恒挂（内部槽位承载，「紧凑卡 +
++  // 点击 Drawer 弹窗」与 PC 同构——旧口径 mobile 不挂回退内联展开，子代理内部
++  // 会话刷屏对话流）。dialog 模式不经本组件；无宿主无 mobile（悬浮宿主 page
++  // 旧形态）仍不挂，回退内联展开零回归。仍不能无条件挂空值 Provider（紧凑卡
++  // 点击 noop「点了没反应」比内联回退更差）。
++  const hasSubagentPanelHost = (!mobile && hasHostSubagent) || mobile;
+   // ── 2026-09-27-session-portal-ia-restructure（FR-02）：右列「详情」模式 ──
+   // 详情侧栏开合（布尔态，localStorage 记忆用户偏好——与宽度/展开记忆同模式）；
+   // 列内容模式不设独立状态，由既有 openSubagentId 派生（subagentPanelOpen 时列
+@@ -2517,17 +2542,19 @@ export function SessionPanelPage({
+   }, [detailOpen]);
+   const subagentPanelContextValue = useMemo<SubagentPanelContextValue>(
+     () => ({
+-      openSubagent: onOpenSubagent ?? (() => {}),
+-      closeSubagent: onSubagentPanelClose ?? (() => {}),
++      // 2026-10-11-mobile-subagent-drawer：换统一槽位出口（宿主回调 / mobile
++      // 内部状态），mobile 与 desktop 同一 context 值来源。
++      openSubagent: openSubagentSlot,
++      closeSubagent: closeSubagentSlot,
+       activeId: activeSubagentId,
+     }),
+-    [onOpenSubagent, onSubagentPanelClose, activeSubagentId],
++    [openSubagentSlot, closeSubagentSlot, activeSubagentId],
+   );
+   // 右栏渲染条件：openSubagentId 命中段（段失效时不渲染右列，等上方 effect 关闭）。
+   const subagentPanelOpen = activeSubagentId != null && openSubagentSegment != null;
+   const handleSubagentPanelClose = useCallback(() => {
+-    onSubagentPanelClose?.();
+-  }, [onSubagentPanelClose]);
++    closeSubagentSlot();
++  }, [closeSubagentSlot]);
+ 
+   // 2026-09-27-session-portal-ia-restructure（FR-02）：右列可见性与内容模式
+   // ——子代理命中段（subagentPanelOpen，既有单槽位语义）优先展示子代理面板，
+@@ -5339,9 +5366,32 @@ export function SessionPanelPage({
+   if (!hasSubagentPanelHost) {
+     return withSlimLogFull(detailColumnTree);
+   }
++  // 2026-10-11-mobile-subagent-drawer：mobile 弹窗承载（desktop 右栏的移动端
++  // 同构出口）——命中段时右侧滑出 Drawer，内嵌既有 SubagentDetailPanel（自带
++  // 头部 ✕ + 初始化提示词 + 段时间线，与 PC 右栏同一组件零复制）；关闭走
++  // 统一槽位出口（✕ / 遮罩 / 再点已激活卡 toggle 同语义）。
++  const mobileSubagentDrawer =
++    mobile && subagentPanelOpen && openSubagentSegment != null ? (
++      <Drawer
++        open
++        onClose={closeSubagentSlot}
++        placement="right"
++        size="min(92vw, 420px)"
++        getContainer={false}
++        destroyOnHidden
++        rootClassName="session-subagent-drawer-root"
++        styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
++      >
++        <SubagentDetailPanel
++          segment={openSubagentSegment}
++          onClose={closeSubagentSlot}
++        />
++      </Drawer>
++    ) : null;
+   return withSlimLogFull(
+     <SubagentPanelContext.Provider value={subagentPanelContextValue}>
+       {detailColumnTree}
++      {mobileSubagentDrawer}
+     </SubagentPanelContext.Provider>,
+   );
+ }
+diff --git a/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/design.md b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/design.md
+new file mode 100644
+index 000000000..6f775c62a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/design.md
+@@ -0,0 +1,52 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T16:14:36.914Z
++---
++# 设计记录（Design Record）— 2026-10-11-mobile-subagent-drawer
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户实测：手机端会话页回显子代理内容时，内部会话整段内联刷进对话流。根因：SubagentPanelContext 的挂载条件显式排除 mobile（session-panel-page `hasSubagentPanelHost = !mobile && onOpenSubagent != null`，2026-09-15 设计「移动端窄屏不做右栏」），无 context 时 SubagentBlockView 回退内联展开分支；且手机页宿主不传 portal 专属三 props（openSubagentId/onOpenSubagent/onSubagentPanelClose），槽位状态无处承载。修法最小侵入：①mobile 恒挂 Provider——宿主未传时用组件内状态（mobileSubagentId）承载开合（会话切换清槽），openSubagent/closeSubagent 收敛为统一槽位出口（context / 失效自动关 / 右栏 ✕ / Drawer 关闭共用）；②mobile 命中段时右侧滑出 antd Drawer（size min(92vw, 420px)，与移动端轮次导航 Drawer 同款用法）内嵌既有 SubagentDetailPanel——与 PC 右栏同一组件零复制，嵌套子代理单槽位换内容天然生效。desktop 分支（portal 三 props / 悬浮宿主回退）逐字不动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- SessionPanel/SessionPanelPage 对外 props 零变化（三 props 语义不变，仅内部消费点收敛）。
++- SubagentPanelContext 挂载条件变化：mobile 恒挂（此前恒不挂）；context 值 shape 不变。
++- 后端/数据零改动。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | mobile 内部槽位状态 + 统一槽位回调 + Provider 条件放宽 + mobile Drawer 渲染 |
++| 新增 | frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx | 紧凑卡/Drawer 开关/toggle/零回归锚 3 用例 |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。槽位 id 指向段 id（装配器稳定 key），SSE 更新重装配后段引用变化但 id 稳定；段失效（id 消失）由既有 effect 走统一关闭出口自动收口，迟到事件不产生悬挂状态。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：纯前端 UI 状态（单一组件内 useState），无共享写面；Drawer 开合与槽位状态同源。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：会话切换 effect 清 mobileSubagentId（Drawer 随 subagentPanelOpen=false 卸载）；destroyOnHidden 卸载面板内容；组件卸载随 React 状态机自然回收。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：槽位状态为组件实例私有、随 sessionId 重建；段解析限定本会话 displayTurns（既有口径）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：Drawer 内 SubagentDetailPanel 的 h-full 布局在 antd Drawer body 内的高度链——body 已设 flex column + 面板根 h-full（jsdom 无布局无法实测，真机验收项）；若异常退化方案为 body 加显式 height。
++- 放弃方案「mobile 页宿主自持三 props（照 portal 装配）」：手机页无右栏可开，props 还得指回组件内状态，多一层无意义转发；放弃「mobile 复用内联展开 + 默认折叠」：信息密度仍高于紧凑卡且与 PC 形态不一致（用户点名要 PC 同构）。
++- 已知残留：Drawer 无嵌套路由/返回键联动（移动端返回手势直接退页面而非关 Drawer）——后续可按需接 antd onClose 与历史栈。
+diff --git a/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/proposal.md b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/proposal.md
+new file mode 100644
+index 000000000..4690df101
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T16:14:14.110Z
++---
++# 提案书（Proposal）— 2026-10-11-mobile-subagent-drawer
++
++## 动机
++
++任务原话转写：手机端会话页回显子代理内容时，子代理内部会话整段内联刷进对话流（应与 PC 端同构：只显示子代理基本信息紧凑卡，点击后在弹窗展示内部会话）。根因：SubagentPanelContext 的挂载条件显式排除 mobile（session-panel-page hasSubagentPanelHost = !mobile && onOpenSubagent != null，旧设计「移动端窄屏不做右栏」），无 context 时 SubagentBlockView 回退内联展开分支；且手机页宿主不传 portal 专属三 props（openSubagentId/onOpenSubagent/onSubagentPanelClose）。
++成功标准：
++- mobile 会话页子代理段渲染为紧凑基本信息卡（同 PC：状态点/名称/类型/徽标/时长，不内联 children），对话流不再被子代理内部会话刷屏
++- 点击紧凑卡打开移动端 Drawer 弹窗，内嵌既有 SubagentDetailPanel 展示子代理内部会话（初始化提示词 + 段时间线），✕ 或遮罩关闭
++- 再点已激活卡片为 toggle 关闭（与 PC 语义一致）；会话切换/段失效自动关闭
++- PC 端（portal 宿主三 props 装配 + 右栏）与 dialog 模式行为零变化
++- 新增移动端用例（紧凑卡不内联 + 点击开 Drawer + 关闭）+ 既有相关测试全绿 + tsc 零错
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. mobile 会话页子代理段渲染为紧凑基本信息卡（同 PC：状态点/名称/类型/徽标/时长，不内联 children），对话流不再被子代理内部会话刷屏
++2. 点击紧凑卡打开移动端 Drawer 弹窗，内嵌既有 SubagentDetailPanel 展示子代理内部会话（初始化提示词 + 段时间线），✕ 或遮罩关闭
++3. 再点已激活卡片为 toggle 关闭（与 PC 语义一致）；会话切换/段失效自动关闭
++4. PC 端（portal 宿主三 props 装配 + 右栏）与 dialog 模式行为零变化
++5. 新增移动端用例（紧凑卡不内联 + 点击开 Drawer + 关闭）+ 既有相关测试全绿 + tsc 零错
++
++## 成功标准（可验证）
++
++1. mobile 会话页子代理段渲染为紧凑基本信息卡（同 PC：状态点/名称/类型/徽标/时长，不内联 children），对话流不再被子代理内部会话刷屏
++2. 点击紧凑卡打开移动端 Drawer 弹窗，内嵌既有 SubagentDetailPanel 展示子代理内部会话（初始化提示词 + 段时间线），✕ 或遮罩关闭
++3. 再点已激活卡片为 toggle 关闭（与 PC 语义一致）；会话切换/段失效自动关闭
++4. PC 端（portal 宿主三 props 装配 + 右栏）与 dialog 模式行为零变化
++5. 新增移动端用例（紧凑卡不内联 + 点击开 Drawer + 关闭）+ 既有相关测试全绿 + tsc 零错
+diff --git a/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/requirements.md b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/requirements.md
+new file mode 100644
+index 000000000..10aa61221
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/requirements.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T16:14:36.914Z
++---
++# 需求规格（Requirements）— 2026-10-11-mobile-subagent-drawer
++
++## 功能需求
++
++### FR-01: mobile 子代理段渲染紧凑基本信息卡（children 不内联刷屏）
++
++- `variant="mobile"` 的会话页必须挂载 SubagentPanelContext（组件内槽位状态承载），使 SubagentBlockView 走紧凑卡片分支——子代理段只显示状态点/名称/类型/徽标/时长基本信息，内部会话（children）不得内联刷进对话流。
++
++#### 场景：手机端回显
++
++- Given 手机端会话页含一个已完成子代理容器段（children 有内部正文）
++- When 历史回显完成
++- Then 对话流只见紧凑卡（data-segment-id 容器），children 正文不可见
++
++### FR-02: 点击紧凑卡打开移动端 Drawer 展示子代理内部会话
++
++- 点击紧凑卡必须在右侧滑出的 Drawer（min(92vw, 420px)）内渲染既有 SubagentDetailPanel（初始化提示词 + 段时间线，与 PC 右栏同一组件）；✕ / 遮罩 / 再点已激活卡均为关闭（toggle 语义与 PC 一致）；嵌套子代理点击换面板内容（单槽位）；会话切换与段失效自动关闭。
++
++#### 场景：点击-浏览-关闭
++
++- Given FR-01 的紧凑卡
++- When 点击卡片头
++- Then Drawer 打开且内部会话正文与初始化提示词可见；点 ✕ 后 Drawer 卸载、正文消失；再次点击已激活卡片同样关闭
++
++### FR-03: PC 与旧宿主零回归
++
++- desktop portal 宿主（三 props 装配 + 右栏）行为必须零变化；desktop/dialog 未装配右栏 props 的旧宿主必须维持内联展开回退（默认折叠、点击展开）；右栏宽度/详情列等既有 desktop 逻辑不得被 mobile 分支影响。
++
++#### 场景：desktop 悬浮宿主形态
++
++- Given desktop SessionPanel（未传 onOpenSubagent）
++- When 渲染子代理段
++- Then 内联展开分支：默认折叠、点击头部 aria-expanded 展开后 children 可见（既有行为）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：子代理段为紧凑卡（children 不内联刷屏），点击打开 Drawer 展示内部会话，✕ 关闭」
++FR-02: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：再点已激活卡片为 toggle 关闭（与 PC 语义一致）」
++FR-03: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）」
+diff --git a/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/tasks.md b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/tasks.md
+new file mode 100644
+index 000000000..7b3f76dd6
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-mobile-subagent-drawer/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T16:14:36.914Z
++---
++# 任务注册表（Tasks）— 2026-10-11-mobile-subagent-drawer
++
++- [x] task-01: mobile 内部槽位状态 + 统一槽位回调（openSubagentSlot/closeSubagentSlot）+ 会话切换清槽（session-panel-page.tsx）
++- [x] task-02: Provider 挂载条件放宽（mobile 恒挂）+ context 值/失效自动关/右栏 ✕ 换统一出口（用例「mobile 紧凑卡 + Drawer + ✕ 关闭」）
++- [x] task-03: mobile Drawer 渲染（antd Drawer + SubagentDetailPanel 复用）（用例同上 + 「toggle 关闭」）
++- [x] task-04: PC/旧宿主零回归锚（desktop 未装配 props 仍内联展开默认折叠）+ 相关回归 4 文件 87/87 绿 + tsc 零错（用例「零回归锚」）

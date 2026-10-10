@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-mobile-subagent-drawer",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：子代理段为紧凑卡（children 不内联刷屏），点击打开 Drawer 展示内部会话，✕ 关闭」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-mobile-subagent-drawer"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：再点已激活卡片为 toggle 关闭（与 PC 语义一致）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-mobile-subagent-drawer"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-mobile-subagent-drawer"
+    }
+  ]
+}

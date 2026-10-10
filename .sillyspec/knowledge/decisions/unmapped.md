@@ -2147,3 +2147,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：9efccfff7751ef838fe436eafa9da030ef68554d
 理由：- 最大风险：daemon 对「子代理实际还在跑」的极窄窗口（run 收口瞬间任务仍在收尾事件在途）会被提前收口为 stopped——但 run 已终态意味着该轮进程已结束，任务不可能再产出合法结果，收口语义正确；迟到终态事件仍可覆盖（乱序问）。 - 放弃方案「读端把终态 run 的 running 任务渲染为停止」：治标——脏数据永存、导出/其它消费方仍见 running；放弃「给 upsert 加会话级对账」：面大且治不了存量。 - 已知残留：message 覆盖旧值（Optional 字段 latest-wins 既有语义内，可接受）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-mobile-subagent-drawer
+锚点：未记录
+最近确认：85f49e7333567bea28ef71b993f8b132fb4614b9
+理由：- 最大风险：Drawer 内 SubagentDetailPanel 的 h-full 布局在 antd Drawer body 内的高度链——body 已设 flex column + 面板根 h-full（jsdom 无布局无法实测，真机验收项）；若异常退化方案为 body 加显式 height。 - 放弃方案「mobile 页宿主自持三 props（照 portal 装配）」：手机页无右栏可开，props 还得指回组件内状态，多一层无意义转发；放弃「mobile 复用内联展开 + 默认折叠」：信息密度仍高于紧凑卡且与 PC 形态不一致（用户点名要 PC 同构）。 - 已知残留：Drawer 无嵌套路由/返回键联动（移动端返回手势直接退页面而非关 Drawer）——后续可按需接 antd onClose 与历史栈。

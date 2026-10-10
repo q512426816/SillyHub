@@ -1108,3 +1108,60 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-system-opened-turn-usermsg
   status: active
+
+## FR-auto-frontend-175 mobile 子代理段渲染紧凑基本信息卡（children 不内联刷屏）
+变更：2026-10-11-mobile-subagent-drawer
+状态：active
+摘要：手机端回显
+全文：.sillyspec/changes/archive/2026-10-11-mobile-subagent-drawer/requirements.md#FR-01
+最近确认：85f49e7333567bea28ef71b993f8b132fb4614b9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：子代理段为紧凑卡（children 不内联刷屏），点击打开 Drawer 展示内部会话，✕ 关闭」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-mobile-subagent-drawer
+  status: active
+
+## FR-auto-frontend-176 点击紧凑卡打开移动端 Drawer 展示子代理内部会话
+变更：2026-10-11-mobile-subagent-drawer
+状态：active
+摘要：点击-浏览-关闭
+全文：.sillyspec/changes/archive/2026-10-11-mobile-subagent-drawer/requirements.md#FR-02
+最近确认：85f49e7333567bea28ef71b993f8b132fb4614b9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「mobile：再点已激活卡片为 toggle 关闭（与 PC 语义一致）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-mobile-subagent-drawer
+  status: active
+
+## FR-auto-frontend-177 PC 与旧宿主零回归
+变更：2026-10-11-mobile-subagent-drawer
+状态：active
+摘要：desktop 悬浮宿主形态
+全文：.sillyspec/changes/archive/2026-10-11-mobile-subagent-drawer/requirements.md#FR-03
+最近确认：85f49e7333567bea28ef71b993f8b132fb4614b9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-mobile-subagent-drawer:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx「零回归锚：desktop 悬浮宿主形态（未装配右栏 props）仍内联展开（children 可见）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-mobile-subagent-drawer
+  status: active

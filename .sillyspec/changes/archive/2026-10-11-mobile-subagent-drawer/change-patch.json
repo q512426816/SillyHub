@@ -1,0 +1,81 @@
+{
+  "change": "2026-10-11-mobile-subagent-drawer",
+  "baseline": "ae22d036039026687de6383b22dc0e0c92f957eb",
+  "head": "85f49e7333567bea28ef71b993f8b132fb4614b9",
+  "files": [
+    ".sillyspec/changes/2026-10-11-mobile-subagent-drawer/design.md",
+    ".sillyspec/changes/2026-10-11-mobile-subagent-drawer/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-mobile-subagent-drawer/proposal.md",
+    ".sillyspec/changes/2026-10-11-mobile-subagent-drawer/requirements.md",
+    ".sillyspec/changes/2026-10-11-mobile-subagent-drawer/tasks.md",
+    "frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 472,
+    "deletions": 15
+  },
+  "savedAt": "2026-10-10T16:23:28.436Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ae22d036039026687de6383b22dc0e0c92f957eb",
+    "totals": {
+      "files": 2,
+      "additions": 299,
+      "deletions": 15
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-panel-mobile-subagent.test.tsx",
+        "additions": 234,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 65,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "78fcd1e8b0bd629027fcb06684ca56d836b9f1cfa45e07a9d95067e8a16f24d7",
+  "patchStatus": "ok"
+}
