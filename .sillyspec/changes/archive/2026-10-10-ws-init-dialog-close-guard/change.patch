@@ -1,0 +1,418 @@
+diff --git a/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md b/docs/sillyspec/finished/fourpiece-created-at-utc-born-anchor-offset.md
+similarity index 81%
+rename from docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
+rename to docs/sillyspec/finished/fourpiece-created-at-utc-born-anchor-offset.md
+index 08175d900..5814c79de 100644
+--- a/docs/sillyspec/fourpiece-created-at-utc-born-anchor-offset.md
++++ b/docs/sillyspec/finished/fourpiece-created-at-utc-born-anchor-offset.md
+@@ -21,3 +21,11 @@
+ ## 关联
+ 
+ - 平台侧同源缺陷（勾选时刻推断丢 stage 白名单）已于本仓 `2026-10-09-timeline-tick-stage-filter` 修复——那是平台移植遗漏，非 CLI 缺陷。
++
++## 处置记录（2026-10-10）
++
++双修复均已在 sillyspec 仓核实落地：`8c87cf28`（fourpiece-init `fpStamp` 改
++`nowWallClock()`，源码复核在位）+ `1aee4b11` 归档的 `2026-10-09-module-card-updated-at-iso`
++（`module-impact.js:158` 改全量 `toISOString()`，源码复核在位）。存量数据按坑内口径
++接受旧值（变更事实以 watcher 事件流为准，历史工件不改写）。余下发版面：sillyspec
++发版 + daemon 升级门控放行后新骨架生效——属发版节奏非代码缺口。归档。
+diff --git a/docs/sillyspec/tombstone-conflict-per-sync-accounting.md b/docs/sillyspec/finished/tombstone-conflict-per-sync-accounting.md
+similarity index 80%
+rename from docs/sillyspec/tombstone-conflict-per-sync-accounting.md
+rename to docs/sillyspec/finished/tombstone-conflict-per-sync-accounting.md
+index 6d7de3d67..cda51637e 100644
+--- a/docs/sillyspec/tombstone-conflict-per-sync-accounting.md
++++ b/docs/sillyspec/finished/tombstone-conflict-per-sync-accounting.md
+@@ -74,3 +74,25 @@ sillyspec 指令集只有 `resolve` / `ghost_cleanup` 两个 action，没有「
+ **护栏建议**：①执行期任何落点/范围裁决当场回写 design 清单+task 卡 target_files（本变更 8 处欠账的教训）；②verify 门禁首轮即全列所有未过项（已有机制前移到首撞）；③实测结果按代码 diff 指纹缓存——git HEAD+scope 文件未变的重跑直接复用上轮结论；④跨仓 task 的 trace/对账/wt-commit 按行 repo 归属解析。
+ 
+ **证据**：.sillyspec/.runtime/verify-runs/2026100905*~06* 共 19 个 run 目录、13 个 test-result.json 累计 2701s；friction-tally-2026-10-09-tombstone-conflict-root-fix.json gate 回滚 13 次。
++
++## 处置记录（2026-10-10）
++
++**三缺陷已全部断根**（`2026-10-09-tombstone-conflict-root-fix`，5 任务 6 提交两仓，
++verify PASS WITH NOTES，归档 75c673dbd）——本日逐项复核验证：
++
++1. **缺陷一（CLI 归因记账）✅**：`41edfc3e`——纯墓碑拒收按**被删变更**落
++   `spec-sync-conflict-<被删变更>.json`（幂等合并 + kind=tombstone），不再按当轮同步
++   标签累积；全绿轮自动清理陈旧纯墓碑记录（kind 无关判定）；横幅按被删变更单根因
++   叙事。本日复跑归因矩阵 + 回执 + 横幅去重套件 14/14 绿。
++2. **缺陷二（前端不露根因）✅**：`e0999476`——冲突行消费 `platform_deleted`/`note`，
++   墓碑形态改「非版本冲突 · 平台已删除」三态展示（混合行 `conflicting_paths ∖
++   platform_deleted` 判定，不误 hide 有效裁决入口）。本日复跑
++   platform-sync-section.test.tsx 20/20 绿。
++3. **缺陷三（无本机收敛通道）✅**：backend 指令通道（`dc2397a3`）+ 平台删除环下发
++   （`93c61da3`+`86fa83cce`）+ daemon 执行器（`c2a42fcb`）——`tombstone_cleanup`
++   action 收敛本机目录至 `.runtime/tombstone-quarantine/` 隔离区留证。
++
++**遗留（设计 backlog，坑内执行期发现，随变更归档留档）**：① CLI 跨仓 trace 绑定悬空
++（行携 repo 归属解析——绕过已记录：行标 superseded + verify-result 矩阵承接）；②
++verify 13 轮 gate 回滚 postmortem 的四条护栏建议（落点裁决当场回写/首轮全列/实测
++diff 指纹缓存/跨仓按行 repo 解析）——均提案级，需要时另立变更。归档。
+diff --git a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+index c5b606e10..98bde6188 100644
+--- a/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
++++ b/frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+@@ -334,6 +334,107 @@ describe("WorkspaceScanDialog 创建即初始化（2026-10-09-workspace-init-ski
+     await vi.advanceTimersByTimeAsync(10_000);
+     expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsAtUnmount);
+   });
++
++  // 2026-10-10-ws-init-dialog-close-guard：initializing 态三条默认关闭通道
++  // （ESC / 遮罩 / 右上角 X）必须全禁——注释声明的「初始化期间禁用取消」
++  // 不能只堵 footer 按钮。
++  it("initializing 态按 ESC / 点遮罩 → onCancel 不被调（Modal keyboard/maskClosable 禁用）", async () => {
++    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
++    const onCancel = vi.fn();
++    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={onCancel} />);
++    const daemonSelect = screen.getByRole("combobox");
++    await waitFor(() =>
++      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(1),
++    );
++    fireEvent.change(daemonSelect, { target: { value: "d1" } });
++    fireEvent.change(screen.getByLabelText("工作区路径"), {
++      target: { value: "C:\repo\demo" },
++    });
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++    expect(await screen.findByText("初始化工作区")).toBeInTheDocument();
++
++    // ESC：antd Modal keyboard 通道
++    fireEvent.keyDown(document, { key: "Escape", keyCode: 27 });
++    // 遮罩点击：antd Modal maskClosable 通道（点击 wrap 区域）
++    const wrap = document.querySelector(".ant-modal-wrap");
++    expect(wrap).not.toBeNull();
++    fireEvent.click(wrap!);
++    await vi.advanceTimersByTimeAsync(100);
++    expect(onCancel).not.toHaveBeenCalled();
++    // 弹窗仍在（进度反馈未丢）
++    expect(screen.getByText("初始化工作区")).toBeInTheDocument();
++  });
++
++  it("initializing 态右上角 X 不渲染（closable 禁用）；idle 态三条通道保持默认可用", async () => {
++    // idle 态：closable 默认 → X 按钮在
++    const { unmount } = render(
++      <WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />,
++    );
++    expect(
++      document.querySelector(".ant-modal-close"),
++    ).not.toBeNull();
++    unmount();
++
++    // initializing 态：closable=false → X 按钮不在 DOM
++    bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
++    render(<WorkspaceScanDialog onCreated={vi.fn()} onCancel={vi.fn()} />);
++    const daemonSelect = screen.getByRole("combobox");
++    await waitFor(() =>
++      expect((daemonSelect as HTMLSelectElement).options.length).toBeGreaterThan(1),
++    );
++    fireEvent.change(daemonSelect, { target: { value: "d1" } });
++    fireEvent.change(screen.getByLabelText("工作区路径"), {
++      target: { value: "C:\repo\demo" },
++    });
++    fireEvent.change(screen.getByLabelText("工作区类型"), {
++      target: { value: "other" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "创建工作区" }));
++    expect(await screen.findByText("初始化工作区")).toBeInTheDocument();
++    expect(document.querySelector(".ant-modal-close")).toBeNull();
++  });
++
++  // 超时钟与轮询可见性暂停对齐：后台标签页（document.hidden）期间 5min 到期
++  // 不判 init_failed；回前台后重挂满窗再计。
++  it("后台标签页 5min 超时不假失败；回前台再计满 5min 才 init_failed", async () => {
++    const hiddenMock = { value: false };
++    Object.defineProperty(document, "hidden", {
++      configurable: true,
++      get: () => hiddenMock.value,
++    });
++    try {
++      bindingApi.fetchMyBinding.mockResolvedValue({ init_synced_at: null });
++      await submitCreate();
++      await waitFor(() =>
++        expect(specWorkspacesApi.initDispatch).toHaveBeenCalled(),
++      );
++
++      // 切后台：轮询暂停 + 超时钟顺延 → 推 5min+ 不出失败态
++      hiddenMock.value = true;
++      await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 10_000);
++      expect(
++        screen.queryByText("工作区已创建成功，但初始化失败"),
++      ).toBeNull();
++      expect(screen.getByText("初始化工作区")).toBeInTheDocument();
++
++      // 回前台：重挂满窗再计 → 4min 检查点不出失败态（区分「≤2s 即死」旧形态）
++      hiddenMock.value = false;
++      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
++      expect(
++        screen.queryByText("工作区已创建成功，但初始化失败"),
++      ).toBeNull();
++      // 满窗计满 → init_failed
++      await vi.advanceTimersByTimeAsync(60 * 1000 + 10_000);
++      expect(
++        await screen.findByText("工作区已创建成功，但初始化失败"),
++      ).toBeInTheDocument();
++    } finally {
++      delete (document as { hidden?: boolean }).hidden;
++    }
++  });
+ });
+ 
+ describe("WorkspaceScanDialog spec 策略默认 repo-native + 收起/展开（2026-10-09-ws-create-spec-default-collapse）", () => {
+diff --git a/frontend/src/components/workspace-scan-dialog.tsx b/frontend/src/components/workspace-scan-dialog.tsx
+index 06283b79f..cd167dac3 100644
+--- a/frontend/src/components/workspace-scan-dialog.tsx
++++ b/frontend/src/components/workspace-scan-dialog.tsx
+@@ -103,6 +103,26 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+     }
+   };
+   useEffect(() => stopInitPolling, []);
++  // 2026-10-10-ws-init-dialog-close-guard：超时钟与轮询的可见性暂停对齐
++  // （D-005 钟同步）——后台标签页轮询 tick 被 document.hidden 短路，deadline
++  // 到期同样不判死：hidden 时顺延一拍再探；回前台后重挂满窗再计（后台时段
++  // 不累计超时，杜绝「后台初始化实际成功、回前台 ≤2s 即假失败」的竞态）。
++  // fullWindow 标记区分两态：满窗到期且可见才判 init_failed；顺延拍到期且
++  // 可见 = 刚从后台回来 → 重挂满窗。
++  const armInitDeadline = (delayMs: number, fullWindow: boolean) => {
++    initDeadlineRef.current = setTimeout(() => {
++      if (document.hidden) {
++        armInitDeadline(INIT_POLL_INTERVAL_MS, false);
++        return;
++      }
++      if (!fullWindow) {
++        armInitDeadline(INIT_POLL_TIMEOUT_MS, true);
++        return;
++      }
++      stopInitPolling();
++      setPhase("init_failed");
++    }, delayMs);
++  };
+ 
+   useEffect(() => {
+     void listDaemonInstances()
+@@ -156,10 +176,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+           // 单次轮询错误忽略，下一 tick 重试（超时兜底）
+         }
+       }, INIT_POLL_INTERVAL_MS);
+-      initDeadlineRef.current = setTimeout(() => {
+-        stopInitPolling();
+-        setPhase("init_failed");
+-      }, INIT_POLL_TIMEOUT_MS);
++      armInitDeadline(INIT_POLL_TIMEOUT_MS, true);
+     } catch (err) {
+       setError(errMessage(err, "创建失败"));
+       setPhase("idle");
+@@ -168,6 +185,10 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+ 
+   // ql-20260821-007：内嵌展开块改为 antd Modal 弹窗（用户指定），
+   // 表单内容/交互零改动，仅容器形态变化。
++  // 2026-10-10-ws-init-dialog-close-guard：busy（creating/initializing）态
++  // 三条默认关闭通道全禁（ESC=keyboard / 遮罩=maskClosable / 右上角 X=closable）
++  // ——「初始化期间禁用取消」不能只堵 footer 按钮；idle/done/init_failed 保持默认。
++  const busy = phase === "creating" || phase === "initializing";
+   return (
+     <Modal
+       open
+@@ -176,6 +197,9 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
+       footer={null}
+       width={520}
+       destroyOnHidden
++      maskClosable={!busy}
++      keyboard={!busy}
++      closable={!busy}
+     >
+       <div className="space-y-4">
+         <p className="text-[11px] text-muted-foreground">
+diff --git a/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/tasks.md b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/tasks.md
+new file mode 100644
+index 000000000..e7e7ced9a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:02:05.793Z
++---
++# 任务注册表（Tasks）— 2026-10-10-ws-init-dialog-close-guard
++
++- [x] task-01: creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
++- [x] task-02: 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
++- [x] task-03: 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
+diff --git a/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/design.md b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:02:05.793Z
++---
++# 设计记录（Design Record）— 2026-10-10-ws-init-dialog-close-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查发现 1940c83b1「创建即初始化」弹窗收口不完整：initializing 态只把 footer 取消按钮 disabled，antd v6 Modal 默认开启的 ESC（keyboard）/点遮罩（maskClosable）/右上角 X（closable）三条通道仍会触发 onCancel → 父组件卸载弹窗、轮询清理、进度反馈丢失且列表不刷新；另后台标签页期间轮询 tick 被 document.hidden 短路而 5min 超时 setTimeout 不暂停，后台初始化实际成功、回前台却见假失败。方案：①Modal 三属性随 busy（creating/initializing）态翻转（`!busy`），idle/done/init_failed 保持默认；②超时回调改 armInitDeadline 递归——到期时若 document.hidden 则顺延一拍（2s）再探，回前台后重挂满窗（5min）再计，与轮询的 D-005 可见性暂停钟对齐。选属性翻转而非 onCancel 内拦截：属性禁用让三条通道在交互层就不触发（含 X 按钮直接不渲染），比事后拦截语义更明确且不影响 idle 态既有行为。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `frontend/src/components/workspace-scan-dialog.tsx`：组件 Props 零变化；新增内部函数 armInitDeadline(delayMs)（替换原一次性 setTimeout 赋值）；Modal 新增 maskClosable/keyboard/closable 三个动态属性。对外可见行为变化：busy 态 ESC/遮罩/X 不再关闭弹窗（footer disabled 语义对齐）；后台标签页不再 5min 假失败。
++- 无后端/协议/类型面变化（纯前端交互收口，api-types 无涉）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   成立：deadline 顺延只在到期瞬间读一次 document.hidden，与轮询 tick 无交错依赖；ESC/遮罩事件与 phase 状态同步渲染（React 单线程提交），无乱序面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   无并发写面：initDeadlineRef 句柄由 stopInitPolling 统一清理，armInitDeadline 递归每次覆盖同一句柄槽；单组件内单定时器链，不存在双 deadline 并存。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   安全：卸载仍走既有 useEffect(() => stopInitPolling) 清理（顺延中的 deadline 同样被 clearTimeout）；done/init_failed 达成时 stopInitPolling 先清 deadline 再置态，无孤儿定时器。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不会：visibility 与 phase 均为组件内状态，一次只服务一个创建流程；弹窗销毁（destroyOnHidden）后状态全部重置。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：deadline 顺延一拍（2s）在高频切页场景产生最长 2s 的判死延迟——相对 5min 超时窗可忽略，且换来的是后台零假失败。另一个取舍：回前台后重挂满窗而非续接剩余时长，最坏情况前台多等 5min——初始化轮询通常先于超时命中 init_synced_at，实际影响罕见。试过但放弃：onCancel 内按 phase 拦截（放弃理由：ESC/遮罩事件仍会触发 antd 内部状态翻转，且 X 按钮仍渲染给用户可点击的假出口，交互层禁用更干净）；deadline 用 visibilitychange 事件重算剩余时长（放弃理由：需要额外事件监听器与剩余时长簿记，复杂度超过 2s 顺延的收益）。
++
++## 文件变更清单（自声明）
++
++交付文件（2 个）：
++
++1. `frontend/src/components/workspace-scan-dialog.tsx`——Modal 三属性 + armInitDeadline 递归顺延（FR-01/FR-02）
++2. `frontend/src/components/__tests__/workspace-scan-dialog.test.tsx`——三个新用例（FR-03）
++
++留档口径注记：冻结面内的 docs/sillyspec 两条坑记录移动（finished/ 收编）为同会话独立 chore 提交（f95789b7a），非本变更交付；评审 P1（回前台重挂满窗未实现）已在后续提交修复——armInitDeadline 增加 fullWindow 标记区分满窗/顺延拍，测试补 4min 检查点断言。
+
+diff --git a/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/proposal.md b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:02:05.793Z
++---
++# 提案书（Proposal）— 2026-10-10-ws-init-dialog-close-guard
++
++## 动机
++
++任务原话转写：24h 审查发现创建即初始化弹窗收口不完整：initializing 态仅 footer 取消按钮被禁用，antd Modal 的 ESC/遮罩/右上角 X 三条默认关闭通道全开，半途关窗丢进度反馈且列表不刷新；且后台标签页期间轮询被 document.hidden 暂停而 5min 超时钟不暂停，后台初始化成功回前台却见假失败。
++成功标准：
++- creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
++- 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
++- 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
++2. 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
++3. 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
++
++## 成功标准（可验证）
++
++1. creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
++2. 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
++3. 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
+
+diff --git a/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/requirements.md b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/requirements.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-10T00:02:05.793Z
++---
++# 需求规格（Requirements）— 2026-10-10-ws-init-dialog-close-guard
++
++## 功能需求
++
++### FR-01: creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
++
++- phase 为 creating/initializing 时，Modal 必须以 `maskClosable={false} keyboard={false} closable={false}` 禁用三条默认关闭通道（对齐 footer 取消按钮既有 disabled 语义）；idle/done/init_failed 态三条通道必须保持 antd 默认可用。
++
++#### 场景：主路径
++
++Given initializing 态弹窗 / When 按 ESC 或点击遮罩 / Then onCancel 不被调、弹窗保持、进度反馈不丢。
++Given initializing 态弹窗 / When 查 DOM / Then 右上角 X（.ant-modal-close）不渲染。
++Given idle 态弹窗 / When 查 DOM / Then X 按默认渲染（三条通道可用）。
++
++### FR-02: 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
++
++- 初始化超时 deadline 到期时若 document.hidden 为真，禁止判 init_failed，必须顺延一拍（INIT_POLL_INTERVAL_MS）再探；回前台后必须重挂满窗（INIT_POLL_TIMEOUT_MS）再计。
++
++#### 场景：主路径
++
++Given initializing 态且标签页后台 / When 推进 5min+ / Then 失败文案不出现、initializing 保持。
++Given 回前台 / When 再推进 5min+ / Then 才进 init_failed。
++
++### FR-03: 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
++
++- 测试必须覆盖三个新用例（ESC/遮罩 onCancel 零调用 + X 不渲染、hidden 超时假失败防护、idle 默认通道保持），实现前运行必须红（3 failed），实现后必须全绿（14/14）且旧 11 用例零回归。
++
++#### 场景：主路径
++
++Given 未加防护的旧实现 / When 跑新增 3 用例 / Then 全红（ESC 触发 onCancel / X 渲染 / hidden 5min 假失败）。
++Given 加防护后的新实现 / When 同组用例 / Then 全绿。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「initializing 态按 ESC / 点遮罩 → onCancel 不被调（Modal keyboard/maskClosable 禁用）」+「initializing 态右上角 X 不渲染（closable 禁用）；idle 态三条通道保持默认可用」
++FR-02: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「后台标签页 5min 超时不假失败；回前台再计满 5min 才 init_failed」
++FR-03: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx 同上三用例（先红 3 failed 实证于 2026-10-10 08:02 运行，后绿 14/14 实证于 08:03 运行）
+
+diff --git a/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/review.json.superseded-20261010T001329 b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/review.json.superseded-20261010T001329
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/review.json.superseded-20261010T001329
+@@ -0,0 +1,34 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-10-ws-init-dialog-close-guard",
++  "reviewer": "subagent",
++  "verdict": "FAIL",
++  "reviewedAgainst": "f95789b7abe1a10e234db94cb75a65204f6f6149",
++  "findings": [
++    {
++      "severity": "P1",
++      "title": "FR-02「回前台后必须重挂满窗（INIT_POLL_TIMEOUT_MS）再计」未实现：回前台后 ≤2s 即判 init_failed",
++      "evidence": "armInitDeadline 全仓仅两处调用——初次挂满窗 INIT_POLL_TIMEOUT_MS（tsx:173）与递归顺延 INIT_POLL_INTERVAL_MS（tsx:113），无 visibilitychange 监听、无任何回前台重挂满窗路径；递归链在 hidden 期间每 2s 再探，回前台后下一次再探发现可见即 stopInitPolling()+setPhase(\"init_failed\")，判死延迟 ≤2s 而非承诺的满窗 5min。design「回前台后重挂满窗（5min）再计」「最坏情况前台多等 5min」与提交 9365246fe 信息同款自述均与代码不符；绑定测试（test:402）只断言回前台推 5min+10s 后失败文案出现，未断言 5min 窗内不出失败态，对「立即失败」与「满窗再计」两种行为都通过（vacuous），验证强度低于 FR-02 场景「再推进 5min+ 才进 init_failed」。",
++      "location": "frontend/src/components/workspace-scan-dialog.tsx:110-119"
++    },
++    {
++      "severity": "P2",
++      "title": "回前台竞态残留假失败：deadline 再探先于首个可见轮询 tick 触发即清轮询并定格 init_failed（FR-02 目标 bug 缩小未除）",
++      "evidence": "轮询 interval 与 deadline 顺延链同为 2s 节律、相位随机；回前台后若 deadline 先触发（约 50% 竞态窗），stopInitPolling 先清 interval 再置 init_failed，此后无轮询兜底，后台实际成功（init_synced_at 已非空）的初始化在弹窗内定格假失败且弹窗内不可自愈——恰是 FR-02 动机所述「后台初始化实际成功、回前台却见假失败」的缩小版。正确修复 P1（回前台真重挂满窗，判死期间轮询存活可命中 done）即可同时消除本竞态。",
++      "location": "frontend/src/components/workspace-scan-dialog.tsx:111-118"
++    },
++    {
++      "severity": "P3",
++      "title": "冻结件 change.patch 范围超出设计自声明 2 文件清单（混入同会话独立 chore 提交内容）",
++      "evidence": "design 文件变更清单交付 2 文件，实际代码提交 9365246fe --stat 恰为该 2 文件（声明属实）；但 change.patch 冻结件额外包含 docs/sillyspec 两条坑文档移入 finished（属另一提交 f95789b7a 的 chore）及变更目录自身文档，冻结口径与清单口径不一致，仅影响留档考古，无功能影响。",
++      "location": ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/change.patch:1-52"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok——design 作答与代码相符：document.hidden 仅在 deadline 到期回调内读取一次（tsx:112），ESC/遮罩/X 随 phase 同步渲染，无交错乱序面。边界已裁决：可接受（顺延一拍 2s 判死粒度相对 5min 超时窗可忽略；放弃 onCancel 内拦截改属性翻转可接受——X 直接不渲染、交互层收口更干净，代码确为属性翻转）",
++    "并发": "finding——见 P2：deadline 顺延链与轮询 tick 同节律竞速，回前台先中即清轮询定格假失败；design「句柄单槽覆盖、无双 deadline 并存」对句柄管理属实（initDeadlineRef 单槽 + stopInitPolling 统一清理），但漏算了两个执行体的时序竞态。边界裁决：回前台重挂满窗——不可接受（承诺行为未实现，见 P1，已进 findings）",
++    "切换": "ok——卸载走既有 useEffect(()=>stopInitPolling) 清 interval+deadline（tsx:95-105），顺延中的 deadline 同被 clearTimeout；done/init_failed 均先 stopInitPolling 再置态（tsx:165-166/116-117），initDispatch 拒绝路径（tsx:155-157）定时器尚未挂无孤儿，作答属实",
++    "作用域": "ok——visibility/phase 均组件内状态、单流程单链；destroyOnHidden 在位（tsx:193）且弹窗随组件卸载状态全重置，作答属实。边界已裁决：可接受（放弃 visibilitychange 重算剩余时长——簿记复杂度不值 2s 顺延收益，前提是顺延机制本身实现正确，而满窗重挂缺口见 P1）"
++  },
++  "reviewedAt": "2026-10-10T00:12:03Z"
++}

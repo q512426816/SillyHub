@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  24h 审查发现创建即初始化弹窗收口不完整：initializing 态仅 footer 取消按钮被禁用，antd Modal 的 ESC/遮罩/右上角 X 三条默认关闭通道全开，半途关窗丢进度反馈且列表不刷新；且后台标签页期间轮询被
+  document.hidden 暂停而 5min 超时钟不暂停，后台初始化成功回前台却见假失败。
+
+  成功标准：
+
+  - creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed
+  态保持默认可关
+
+  - 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
+
+  - 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
+autopilot: true
+baseline_commit: 0eab3fad156ba67d7146dfe0cd4e2250a62de26d
+updatedAt: '2026-10-10T00:16:39.365Z'
+baseline_sha256: b19e813dc0f3d8e8aa32b8e3c07fee6c247b57903faded96468a7f6c001486e8
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)+fr(1)（5.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010000559\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261010000559\test-result.json｜门文件
+  6 个
+

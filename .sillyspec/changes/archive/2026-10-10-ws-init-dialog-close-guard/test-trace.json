@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-ws-init-dialog-close-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「initializing 态按 ESC / 点遮罩 → onCancel 不被调（Modal keyboard/maskClosable 禁用）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-ws-init-dialog-close-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「后台标签页 5min 超时不假失败；回前台再计满 5min 才 init_failed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-ws-init-dialog-close-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-ws-init-dialog-close-guard"
+    }
+  ]
+}

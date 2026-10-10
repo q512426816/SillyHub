@@ -1,0 +1,98 @@
+{
+  "change": "2026-10-10-ws-init-dialog-close-guard",
+  "baseline": "0eab3fad156ba67d7146dfe0cd4e2250a62de26d",
+  "head": "52b3f8031ded82c900b45dbc9ae87d89626453f9",
+  "files": [
+    ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/tasks.md",
+    "docs/sillyspec/finished/fourpiece-created-at-utc-born-anchor-offset.md",
+    "docs/sillyspec/finished/tombstone-conflict-per-sync-accounting.md",
+    "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx",
+    "frontend/src/components/workspace-scan-dialog.tsx",
+    ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/design.md",
+    ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/proposal.md",
+    ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/requirements.md",
+    ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/review.json.superseded-20261010T001329"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 320,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-10T00:13:30.026Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0eab3fad156ba67d7146dfe0cd4e2250a62de26d",
+    "totals": {
+      "files": 4,
+      "additions": 159,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/finished/fourpiece-created-at-utc-born-anchor-offset.md",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/tombstone-conflict-per-sync-accounting.md",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/__tests__/workspace-scan-dialog.test.tsx",
+        "additions": 101,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/workspace-scan-dialog.tsx",
+        "additions": 28,
+        "deletions": 4,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fda4449bbf249ee90f9e7967de389a8b2ed718bda542344807593e83741e4672",
+  "patchStatus": "ok"
+}

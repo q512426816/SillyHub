@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-ws-init-dialog-close-guard",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "f95789b7abe1a10e234db94cb75a65204f6f6149",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "FR-02「回前台后必须重挂满窗（INIT_POLL_TIMEOUT_MS）再计」未实现：回前台后 ≤2s 即判 init_failed",
+      "evidence": "armInitDeadline 全仓仅两处调用——初次挂满窗 INIT_POLL_TIMEOUT_MS（tsx:173）与递归顺延 INIT_POLL_INTERVAL_MS（tsx:113），无 visibilitychange 监听、无任何回前台重挂满窗路径；递归链在 hidden 期间每 2s 再探，回前台后下一次再探发现可见即 stopInitPolling()+setPhase(\"init_failed\")，判死延迟 ≤2s 而非承诺的满窗 5min。design「回前台后重挂满窗（5min）再计」「最坏情况前台多等 5min」与提交 9365246fe 信息同款自述均与代码不符；绑定测试（test:402）只断言回前台推 5min+10s 后失败文案出现，未断言 5min 窗内不出失败态，对「立即失败」与「满窗再计」两种行为都通过（vacuous），验证强度低于 FR-02 场景「再推进 5min+ 才进 init_failed」。",
+      "location": "frontend/src/components/workspace-scan-dialog.tsx:110-119"
+    },
+    {
+      "severity": "P2",
+      "title": "回前台竞态残留假失败：deadline 再探先于首个可见轮询 tick 触发即清轮询并定格 init_failed（FR-02 目标 bug 缩小未除）",
+      "evidence": "轮询 interval 与 deadline 顺延链同为 2s 节律、相位随机；回前台后若 deadline 先触发（约 50% 竞态窗），stopInitPolling 先清 interval 再置 init_failed，此后无轮询兜底，后台实际成功（init_synced_at 已非空）的初始化在弹窗内定格假失败且弹窗内不可自愈——恰是 FR-02 动机所述「后台初始化实际成功、回前台却见假失败」的缩小版。正确修复 P1（回前台真重挂满窗，判死期间轮询存活可命中 done）即可同时消除本竞态。",
+      "location": "frontend/src/components/workspace-scan-dialog.tsx:111-118"
+    },
+    {
+      "severity": "P3",
+      "title": "冻结件 change.patch 范围超出设计自声明 2 文件清单（混入同会话独立 chore 提交内容）",
+      "evidence": "design 文件变更清单交付 2 文件，实际代码提交 9365246fe --stat 恰为该 2 文件（声明属实）；但 change.patch 冻结件额外包含 docs/sillyspec 两条坑文档移入 finished（属另一提交 f95789b7a 的 chore）及变更目录自身文档，冻结口径与清单口径不一致，仅影响留档考古，无功能影响。",
+      "location": ".sillyspec/changes/2026-10-10-ws-init-dialog-close-guard/change.patch:1-52"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design 作答与代码相符：document.hidden 仅在 deadline 到期回调内读取一次（tsx:112），ESC/遮罩/X 随 phase 同步渲染，无交错乱序面。边界已裁决：可接受（顺延一拍 2s 判死粒度相对 5min 超时窗可忽略；放弃 onCancel 内拦截改属性翻转可接受——X 直接不渲染、交互层收口更干净，代码确为属性翻转）",
+    "并发": "finding——见 P2：deadline 顺延链与轮询 tick 同节律竞速，回前台先中即清轮询定格假失败；design「句柄单槽覆盖、无双 deadline 并存」对句柄管理属实（initDeadlineRef 单槽 + stopInitPolling 统一清理），但漏算了两个执行体的时序竞态。边界裁决：回前台重挂满窗——不可接受（承诺行为未实现，见 P1，已进 findings）",
+    "切换": "ok——卸载走既有 useEffect(()=>stopInitPolling) 清 interval+deadline（tsx:95-105），顺延中的 deadline 同被 clearTimeout；done/init_failed 均先 stopInitPolling 再置态（tsx:165-166/116-117），initDispatch 拒绝路径（tsx:155-157）定时器尚未挂无孤儿，作答属实",
+    "作用域": "ok——visibility/phase 均组件内状态、单流程单链；destroyOnHidden 在位（tsx:193）且弹窗随组件卸载状态全重置，作答属实。边界已裁决：可接受（放弃 visibilitychange 重算剩余时长——簿记复杂度不值 2s 顺延收益，前提是顺延机制本身实现正确，而满窗重挂缺口见 P1）"
+  },
+  "reviewedAt": "2026-10-10T00:12:03Z"
+}

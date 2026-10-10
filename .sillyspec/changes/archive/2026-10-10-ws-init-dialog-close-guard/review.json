@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-ws-init-dialog-close-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "52b3f8031ded82c900b45dbc9ae87d89626453f9",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——design 作答与代码属实：document.hidden 仅在 deadline 到期回调内读一次（tsx:114），轮询 tick 独立读取（tsx:167），两钟无交错依赖；ESC/遮罩/X 随 phase 同步渲染。边界裁决：2s 顺延粒度可接受（判死最多滞后一拍且方向为「更晚判死」不误伤成功态——顺延期间轮询存活可先命中 done）；放弃 onCancel 拦截改属性翻转可接受（代码确为属性翻转 tsx:200-202，X 直接不渲染经 test:397 实证，idle 默认通道经 test:376-378 实证保留）",
+    "并发": "ok——上轮 P1/P2 已消除，本轮实测复验：armInitDeadline(delayMs, fullWindow) 满窗到期且可见才 stopInitPolling+setPhase(\"init_failed\")（tsx:118-123）；顺延拍到期且可见=刚回前台→armInitDeadline(INIT_POLL_TIMEOUT_MS, true) 重挂满窗（tsx:118-120），不判死不清轮询——后台实际成功的初始化在回前台 ≤2s 轮询 tick 命中 done 即 stopInitPolling 清 deadline，假失败竞态无残留路径。句柄管理属实：递归在回调内挂下一轮写回 initDeadlineRef 单槽，无双 deadline 并存；创建按钮 busy 态 disabled（tsx:455）杜绝二次挂载。回前台重挂满窗（非续接剩余）裁决：可接受——误差方向为前台多等不误判，轮询 2s 节律通常先命中 init_synced_at。测试 4min 检查点（test:423-428）对旧「≤2s 即死」形态必红、对重挂满窗形态必绿（回前台后 ≤2s 重挂、满窗到期 ≥302s > 240s 检查点），非 vacuous；全套 14/14 本评审实测通过（vitest run 2026-10-10T08:15Z）",
+    "切换": "ok——卸载走既有 useEffect(()=>stopInitPolling)（tsx:105），interval+deadline 双句柄同清并置 null（tsx:95-104），顺延/重挂中的 deadline 链每轮写回同一 ref 均被覆盖清理；done（tsx:171-172）与 init_failed（tsx:122-123）均 stopInitPolling 先于置态；initDispatch 拒绝路径（tsx:161-164）定时器尚未挂载无孤儿。作答属实",
+    "作用域": "ok——visibility 与 phase 均组件内状态、单流程单链；destroyOnHidden 在位（tsx:199）。边界裁决：放弃 visibilitychange 重算剩余时长可接受（前提「顺延机制正确实现」本轮已成立，事件监听+剩余时长簿记复杂度超过收益）；留档口径注记可接受——design.md:51 明示冻结面内 docs/sillyspec 两文档移动为同会话独立 chore 提交（f95789b7a）非本变更交付，并追溯披露 fullWindow 修复，上轮 P3 以注记收口符合「冻结件不改、变化以注记披露」机制。生成物同步声明属实：修复提交 52b3f8031 仅动组件 tsx+测试+tasks.md（--stat 实核），Props 接口未动（tsx:53-56），无类型面/生成物变化"
+  },
+  "reviewedAt": "2026-10-10T00:16:09Z"
+}

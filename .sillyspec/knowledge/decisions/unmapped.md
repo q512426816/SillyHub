@@ -1973,3 +1973,10 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：c6a7c34f424a3f3f6cbccb25dafbc6c2cce00c85
 理由：最大风险：白名单过严误伤合法 change 名（如未来出现含中文/空格的目录名）——现网 change_key 全部为 `YYYY-MM-DD-<slug>` 形态（目录名派生），正则与 backend 手动端点已长期同款，收紧面两端一致，误伤面为零增量。试过但放弃：在执行器 `_requireCommandPrecondition` 内加校验——该方法被 resolve/ghost_cleanup/tombstone_cleanup 三路共用，resolve 路径 change 经 CLI 数组形参已有 assertSafeChangeName，重复校验混淆守卫分工；且消息入口层一层拦截覆盖所有下发路径，更完整。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-ws-init-dialog-close-guard
+锚点：未记录
+最近确认：52b3f8031ded82c900b45dbc9ae87d89626453f9
+理由：最大风险：deadline 顺延一拍（2s）在高频切页场景产生最长 2s 的判死延迟——相对 5min 超时窗可忽略，且换来的是后台零假失败。另一个取舍：回前台后重挂满窗而非续接剩余时长，最坏情况前台多等 5min——初始化轮询通常先于超时命中 init_synced_at，实际影响罕见。试过但放弃：onCancel 内按 phase 拦截（放弃理由：ESC/遮罩事件仍会触发 antd 内部状态翻转，且 X 按钮仍渲染给用户可点击的假出口，交互层禁用更干净）；deadline 用 visibilitychange 事件重算剩余时长（放弃理由：需要额外事件监听器与剩余时长簿记，复杂度超过 2s 顺延的收益）。

@@ -765,3 +765,66 @@
   confirmed_at: null
   source_change: 2026-10-09-ws-create-spec-default-collapse
   status: active
+
+## FR-components-shared-051 creating/initializing 态 Modal 的 ESC（keyboard）、点遮罩（maskClosable）、右上角 X（closable）三条关闭通道必须全部禁用，idle/done/init_failed 态保持默认可关
+变更：2026-10-10-ws-init-dialog-close-guard
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given initializing 态弹窗 / When 按 ESC 或点击遮罩 / Then onCancel 不被调、弹窗保持、进度反馈不丢。 initializin
+全文：.sillyspec/changes/archive/2026-10-10-ws-init-dialog-close-guard/requirements.md#FR-01
+最近确认：52b3f8031ded82c900b45dbc9ae87d89626453f9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「initializing 态按 ESC / 点遮罩 → onCancel 不被调（Modal keyboard/maskClosable 禁用）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-ws-init-dialog-close-guard
+  status: active
+
+## FR-components-shared-052 后台标签页（document.hidden）期间初始化超时不得判 init_failed（超时钟与轮询可见性暂停对齐），回前台后恢复计时再判
+变更：2026-10-10-ws-init-dialog-close-guard
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-10-ws-init-dialog-close-guard/requirements.md#FR-02
+最近确认：52b3f8031ded82c900b45dbc9ae87d89626453f9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-02
+  tests: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx「后台标签页 5min 超时不假失败；回前台再计满 5min 才 init_failed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-ws-init-dialog-close-guard
+  status: active
+
+## FR-components-shared-053 新增用例先红后绿：initializing 态 ESC 不调 onCancel；hidden+5min 推进不出失败态，回前台再计满才失败
+变更：2026-10-10-ws-init-dialog-close-guard
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 未加防护的旧实现 / When 跑新增 3 用例 / Then 全红（ESC 触发 onCancel / X 渲染 / hidden 5min 假失败）。 加防
+全文：.sillyspec/changes/archive/2026-10-10-ws-init-dialog-close-guard/requirements.md#FR-03
+最近确认：52b3f8031ded82c900b45dbc9ae87d89626453f9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-ws-init-dialog-close-guard:flow:测试绑定FR-03
+  tests: frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-ws-init-dialog-close-guard
+  status: active
