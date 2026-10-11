@@ -282,7 +282,7 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     expect(postSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('conflict=true → 抛 SpecPushConflict（不静默覆盖，NFR-02）', async () => {
+  it('conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）', async () => {
     const wsId = 'ws-conflict';
     await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
     write('docs/a.md', 'v2');
@@ -299,8 +299,72 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     await expect(postSpecSync(client as never, wsId, scratch)).rejects.toBeInstanceOf(
       SpecPushConflict,
     );
+    // 恰好两次：首推 conflict + re-base 后重试仍 conflict（有界一次，不上抛前不停重试）
+    expect(incrSpy).toHaveBeenCalledTimes(2);
+    // 重试 op 的 base_version 已 re-base 到服务端版本 9
+    const retryOps = incrSpy.mock.calls[1][1] as Array<Record<string, unknown>>;
+    expect(retryOps[0]).toMatchObject({ op: 'update', path: 'docs/a.md', base_version: 9 });
     // conflict 不回退旧 tar（人工拍板）
     expect(postSpy).not.toHaveBeenCalled();
+    // 失败路径不落盘 re-base（磁盘缓存仍是旧 version，防半写状态）
+    const cached = JSON.parse(readFileSync(resolveManifestCachePath(wsId), 'utf-8')) as {
+      files: Record<string, { version: number }>;
+    };
+    expect(cached.files['docs/a.md'].version).toBe(1);
+  });
+
+  it('conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）', async () => {
+    const wsId = 'ws-rebase-heal';
+    await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
+    write('docs/a.md', 'v2');
+
+    const incrSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        new_versions: {},
+        conflict: true,
+        server_versions: { 'docs/a.md': 9 },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        new_versions: { 'docs/a.md': 10 },
+        conflict: false,
+        server_versions: null,
+      });
+    const client = makeClient({ postSpecSyncIncremental: incrSpy });
+
+    const r = await postSpecSync(client as never, wsId, scratch);
+
+    expect(r).toMatchObject({ ok: true, reparsed: 0 });
+    expect(incrSpy).toHaveBeenCalledTimes(2);
+    // 重试 op base_version 已对齐服务端 9；成功后缓存回写新 version 10（含 re-base 收敛）
+    const retryOps = incrSpy.mock.calls[1][1] as Array<Record<string, unknown>>;
+    expect(retryOps[0]).toMatchObject({ base_version: 9 });
+    const cached = JSON.parse(readFileSync(resolveManifestCachePath(wsId), 'utf-8')) as {
+      files: Record<string, { hash: string; version: number }>;
+    };
+    expect(cached.files['docs/a.md'].version).toBe(10);
+    expect(cached.files['docs/a.md'].hash).toBe(sha256('v2'));
+  });
+
+  it('conflict 且 server_versions 为空 → 不重试直接抛（无从 re-base）', async () => {
+    const wsId = 'ws-conflict-nosv';
+    await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
+    write('docs/a.md', 'v2');
+
+    const incrSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      new_versions: {},
+      conflict: true,
+      server_versions: {},
+    });
+    const client = makeClient({ postSpecSyncIncremental: incrSpy });
+
+    await expect(postSpecSync(client as never, wsId, scratch)).rejects.toBeInstanceOf(
+      SpecPushConflict,
+    );
+    expect(incrSpy).toHaveBeenCalledTimes(1);
   });
 
   it('new_versions 回写缓存 version（下次 diff 用新 version 作 base_version）', async () => {

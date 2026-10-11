@@ -720,10 +720,43 @@ async function readBundleManifestVersions(specDir: string): Promise<Map<string, 
 }
 
 /**
+ * 就地 re-base 清单缓存版本（2026-10-11-sync-conflict-tri-fix FR-02）：乐观锁冲突
+ * 响应的 server_versions 是服务端时点权威值——「他端先推 / 重复推送」型冲突（生产
+ * 实证 2026-10-11：镜像哈希已与本地一致，daemon 缓存 base_version 落后）据此对齐
+ * 后重推一次即全绿。只改内存对象不落盘；磁盘缓存仅由成功路径 buildManifestFromLocal
+ * 全量回写（失败路径落盘会与 mtime 快路径的 hash/mtime 记账耦合出半写状态）。
+ *
+ * 返回实际改写条数（0=冲突路径均不在缓存，如 add 目标占用型——无从 re-base，
+ * 调用方据此跳过无意义重算）。
+ */
+function rebaseManifestVersions(
+  cached: LocalManifest,
+  serverVersions: Record<string, number>,
+): number {
+  let rebased = 0;
+  for (const [path, version] of Object.entries(serverVersions)) {
+    const entry = cached.files[path];
+    if (
+      entry !== undefined &&
+      typeof version === 'number' &&
+      Number.isFinite(version) &&
+      version >= 0 &&
+      entry.version !== version
+    ) {
+      entry.version = version;
+      rebased++;
+    }
+  }
+  return rebased;
+}
+
+/**
  * 增量冲突错误（NFR-02）：base_version 过期服务器返 conflict=true，不静默覆盖。
  *
  * 由调用方（syncSpecTreeIfNeeded / task-runner）catch 后仅 warn 不阻塞，提示用户
  * 人工拍板（design §7：409 由 daemon 侧据 conflict 字段提示，不自动重试）。
+ * 2026-10-11-sync-conflict-tri-fix FR-02 起：抛出前先做**恰好一次** re-base 重试
+ * （见 rebaseManifestVersions）；重试仍 conflict（真分叉）才走到本异常。
  */
 export class SpecPushConflict extends Error {
   readonly workspaceId: string;
@@ -760,7 +793,10 @@ export class SpecPushConflict extends Error {
  *        （`changes/<name>/` 与 `changes/archive/<name>/` 前缀分组 key，去重成 string[]；
  *        best-effort 计算失败降级 []，backend 无标注路径检测兜底，不阻断同步主流程）。
  *      - 成功 → 按 new_versions 回写缓存 version（+ 刷新 hash/mtime），返回 { ok: true, reparsed: 0 }。
- *      - conflict=true → 抛 SpecPushConflict（调用方 catch 后 warn 不阻塞，人工拍板 NFR-02）。
+ *      - conflict=true → **先 re-base 重试恰好一次**（2026-10-11-sync-conflict-tri-fix
+ *        FR-02：按响应 server_versions 对齐缓存 version 重算 ops 再推；re-base 后无
+ *        ops 视为收敛成功）；重试仍 conflict → 抛 SpecPushConflict（调用方 catch 后
+ *        warn 不阻塞，人工拍板 NFR-02）。
  *      - 404（旧后端无端点）/ 网络失败 / 端点错误 → **回退旧 tar** 全量，写全量快照缓存。
  *   5. 缓存写失败 try/catch warn 不阻塞推送主流程。
  *
@@ -836,14 +872,47 @@ async function postSpecSyncImpl(
   }
 
   try {
-    const result = await client.postSpecSyncIncremental(wsId, ops, changeWriteId, changeDirs);
+    // 2026-10-11-sync-conflict-tri-fix FR-02：conflict 先做恰好一次 re-base 重试——
+    // server_versions 对齐缓存 version 后重算 ops 再推；「他端先推/重复推送」型冲突
+    // （镜像哈希已与本地一致，base_version 落后）重试即全绿（backend 注册表行随
+    // 全绿自动关闭，自愈闭环）；重试仍 conflict（真分叉）才上抛人工裁决。
+    let pushOps = ops;
+    let pushLocalFiles = localFiles;
+    let pushChangeDirs = changeDirs;
+    let result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
     if (result.conflict) {
-      throw new SpecPushConflict(wsId, result.server_versions ?? {});
+      const rebased = rebaseManifestVersions(cached, result.server_versions ?? {});
+      if (rebased > 0) {
+        const recomputed = await computeIncrementalOps(specRoot, cached);
+        if (recomputed.ops.length === 0) {
+          // re-base 后与缓存无差异（服务端已持有等价内容）→ 视为收敛，回写缓存即成功。
+          await writeLocalManifest(wsId, buildManifestFromLocal(cached, recomputed.localFiles, {}));
+          return { ok: true, reparsed: 0, filesTotal: 0 };
+        }
+        pushOps = recomputed.ops;
+        pushLocalFiles = recomputed.localFiles;
+        try {
+          pushChangeDirs = extractChangeDirs(pushOps);
+        } catch {
+          pushChangeDirs = [];
+        }
+        onProgress?.({ files_total: pushOps.length, files_processed: 0 });
+        console.warn(
+          `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
+        );
+        result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+      }
+      if (result.conflict) {
+        throw new SpecPushConflict(wsId, result.server_versions ?? {});
+      }
     }
     // 成功 → 按 new_versions 回写缓存 version
-    await writeLocalManifest(wsId, buildManifestFromLocal(cached, localFiles, result.new_versions));
+    await writeLocalManifest(
+      wsId,
+      buildManifestFromLocal(cached, pushLocalFiles, result.new_versions),
+    );
     // filesTotal = 本次增量 ops 数（变化的文件数）
-    return { ok: true, reparsed: 0, filesTotal: ops.length };
+    return { ok: true, reparsed: 0, filesTotal: pushOps.length };
   } catch (e) {
     // conflict 不回退（人工拍板）；404/网络/端点错误 → 回退旧 tar 全量
     if (e instanceof SpecPushConflict) throw e;
