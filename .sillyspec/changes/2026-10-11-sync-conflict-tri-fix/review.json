@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-sync-conflict-tri-fix",
+  "reviewer": "subagent（ZCode Agent 通用代理）",
+  "verdict": "PASS",
+  "reviewedAgainst": "b35fa7f538e33886242ec20ee06ce99ba3fd57d0",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "daemon 首推已见 conflict 后，重试遇传输类错误会落入旧 tar 全量回退，违背「conflict 不回退 tar」既有不变量（design 弃案②），未披露",
+      "evidence": "spec-sync.ts:883-907 首推 conflict=true 后重试 postSpecSyncIncremental 若抛网络错/5xx（非 conflict 响应），外层 catch（:916-924）判非 SpecPushConflict 即走 packSpecDir+client.postSpecSync 全量 tar 覆盖——此时刚被告知服务器有他端推进的分叉内容，等于冲突已知仍静默覆盖（NFR-02 语义洞）；旧代码 conflict 恒抛 SpecPushConflict 永不回退，本变更新开的重试窗口使该路径可达。design 盲维一仅覆盖「重试再 conflict→有界上抛」，未覆盖传输错形态。窄窗（冲突+恰在重试时传输失败）故 P2 不阻断。",
+      "location": "sillyhub-daemon/src/spec-sync.ts:903-924"
+    },
+    {
+      "severity": "P2",
+      "title": "注册表版本冲突面全为非 changes/ 路径（docs/、quicklog/ 等整树同步对象）时归因失败：区块渲染 0 行而横幅 1 条、无裁决入口——本变更动机所述断裂形态残留，未在 design 披露",
+      "evidence": "registryVersionRows 归因正则 ^changes/(?:archive/)?([^/]+)/ 只认 changes/ 前缀（platform-sync-section.tsx:357-364）；注册表 conflicting_paths = server_versions ∪ platform_deleted（backend service.py:1311），而 daemon/CLI 增量同步 diff 整棵 spec 树（daemon 测试自身即用 docs/a.md；daemon walk 仅排除 .runtime/runtime/projects/worktrees）。冲突仅落在 docs/、quicklog/ 路径时（机器 pending_conflicts 亦无行）区块 0 行、横幅 1 条。FR-01 文面以「可归因出变更名」为前提，实现与 FR 字面一致故不判 P1；design 仅披露「一行多变更名拆行」口径差，此不可归因残留未披露。",
+      "location": "frontend/src/components/changes/platform-sync-section.tsx:357-364"
+    },
+    {
+      "severity": "P3",
+      "title": "re-base 后重算 ops 为空的「收敛成功」分支不触发 apply_ops，注册表开放行无全绿关闭时机，且该分支语义未写入 requirements/design（仅存代码 docstring）",
+      "evidence": "spec-sync.ts:887-890 空 ops 即回写缓存返回 ok——不发推送，首次失败已落的注册表开放行（backend 仅在全绿 apply_ops 时置 resolved，service.py:2724）只能等未来某次真实推送关闭；若本地此后持续无差异（:849-853 同样不推）该行长期滞留（横幅恒报冲突而 daemon 自认收敛）。可达性窄（需两次 walk 间本地盘回退到缓存态），且真分叉时注册表行反成安全网（FR-01 给出裁决入口），故 P3。该「空 ops 视为收敛」语义只在 spec-sync.ts docstring（:796-799）声明，requirements FR-02 与 design 均未记。",
+      "location": "sillyhub-daemon/src/spec-sync.ts:887-890"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件混入无关变更 2026-10-11-linked-repo-workspace-ref 的模块文档 diff",
+      "evidence": "patch 基线 0f7af00 → HEAD 间含他人提交 d059f6335，冻结件因此带 _module-map.yaml/backend.md/frontend.md 三处 linked-repo-workspace-ref 条目（change.patch:32-68），与本变更无涉；归档/回放时会把他人交付计入本变更产物。代码文件部分无混入（仅前端组件/测试 + daemon spec-sync/测试）。",
+      "location": ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/change.patch:32-68"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T10:46:58Z",
+  "reviewDetail": {
+    "frCoverage": {
+      "FR-01": "兑现。registryVersionRows 按 conflicting_paths ∖ platform_deleted 归因并入 renderRows（机器行>墓碑行>注册表版本行去重，tombstoneIndex 纯墓碑谓词 :313 混合行不进索引、版本面路径 :358 剔除墓碑路径——混合行只渲染版本行一种形态）；卡头计数=renderRows.length（:689）。绑定用例实测在场且断言对应：主用例 platform-sync-section.test.tsx:883（rows.length=1 :906、查看对比 :912、卡头计数=1 :919）、去重用例 :922-945、混合行用例 :948-967。23 用例实跑全绿。",
+      "FR-02": "兑现。rebaseManifestVersions 只改内存条目（:732-751）；重试恰好一次（无循环，server_versions 空或无可 rebase 条目即直抛 :905-907）；重试成功回写用重试轮 pushLocalFiles/pushOps（:892-915，filesTotal=pushOps.length）；SpecPushConflict 在外层 catch 首行 rethrow 不落 tar 回退（:918）。绑定用例实跑在场：仍冲突上抛 :285（calledTimes(2) :303、重试 base_version=9 :306、磁盘缓存仍 version 1 :313）、自愈 :316（缓存回写 version 10 + hash v2 :347-348）、server_versions 空直抛 :351（calledTimes(1) :367）。17 用例实跑全绿。对照 backend apply_ops 同内容豁免（service.py:2180-2184 docstring）：豁免在服务端对齐 daemon manifest；daemon 侧空 ops 收敛是其补集（本地态==缓存态时无需推送即收敛），合理性可接受但见 finding P3-3。",
+      "FR-03": "兑现（跨仓 sillyspec@e0b1ce16）。index.js platform sync 无 --change 分支：未连接 console.error+exit(1)（:4267-4269）不误报成功；冲突 exit(1)+resolve 提示（:4272-4275）；--change 路径仍走 syncModule.sync（进度六表按变更粒度语义不变）。assertSafeChangeName 字符集 [\\w.\\-一-鿿]（shared.js:77），与 assertDatedChangeName slug 同集（shared.js:93）；/、\\\\、..（含 includes('..') 兜底）仍拒（shared.js:74）。CLI 测试实跑全绿：platform-sync-fulltree 3 用例（CJK 冲突归因 :62-91 断言冲突文件按变更名落盘 :81-85、跨变更归并 full-tree :93-121）+ 守卫 CJK/穿越对抗（assert-safe-change-name.test.mjs:53-75，:73 即绑定用例）。",
+      "FR-04": "兑现。三处用例实测全绿：daemon spec-sync-incremental 17 passed、前端 platform-sync-section 23 passed、CLI platform-sync-fulltree 3 passed + 守卫 10 合法+17 对抗通过。生产冒烟两条为过程声明，评审无法复跑，不构成 finding。"
+    },
+    "blindSpotCheck": {
+      "乱序": "design 答案与代码一致：rebase 取冲突响应时点值、恰一次有界重试、前端 60s 轮询（specConflictsQ refetchInterval=60_000）——ok",
+      "并发": "两 daemon 各自 rebase 各重试一次、注册表同 stage 幂等 upsert（service.py:1296-1334）与代码一致；但 finding P2-1（冲突已知+重试传输错→tar 覆盖他端推进）是并发写维上未披露的正确性缺口——finding",
+      "切换": "design 答案与代码一致：rebase 仅改内存对象（readLocalManifest 每次新对象，无跨调用污染）；磁盘缓存仅在成功路径回写，SpecPushConflict 在任何 writeLocalManifest 前 rethrow，测试断言磁盘 version 未变——ok",
+      "作用域": "design 答案与代码一致：manifest 按 wsId 分键（resolveManifestCachePath）、注册表 workspace_id+stage 单行、前端按工作区查询（listSpecConflicts 绑 workspaceId）——ok"
+    },
+    "boundaryAdjudications": [
+      "「重试恰好一次」：可接受——代码单次重试无循环，测试 calledTimes(2)/(1) 钉死",
+      "「失败路径不落盘 re-base」：可接受——SpecPushConflict 先于缓存写 rethrow，测试断言磁盘 version 仍 1（spec-sync-incremental.test.ts:310-313）",
+      "「前端裁决指令对无 CLI 冲突文件场景可能回执失败」：可接受——design 遗留节显式披露，FR-02 自愈先行消化多数 + 对比弹窗两侧内容供人工处置兜底",
+      "「full-tree 合并裁决」：可接受——attributeChangeLabel 跨变更归并 'full-tree'（spec-sync.js:603-610），冲突文件/清标记按归因兼容 per-change 流程（:742/:819-825），CLI 测试覆盖",
+      "「一行多变更名拆行与横幅计数口径差」：可接受——design 接口契约明示「单变更行场景与横幅计数一致」",
+      "「重试窗口他端再推进→重试再 conflict→有界上抛」：可接受——与代码一致；其传输错变体缺口记 finding P2-1（不可接受，应修）",
+      "「非 changes/ 路径版本冲突不可归因→区块 0 行横幅 1 条」：无声明边界，记 finding P2-2（应修或补披露）",
+      "「re-base 后空 ops 视为收敛成功（不推送）」：无声明边界（仅代码 docstring），记 finding P3-3"
+    ],
+    "artifactSyncCheck": "本次无 schema/契约改动声明属实：change.patch 文件清单无 frontend/src/lib/api-types.ts 与 backend/openapi.json（仅文档文本提及）；前端改动纯渲染层数据派生，无 HTTP API 变化。"
+  }
+}

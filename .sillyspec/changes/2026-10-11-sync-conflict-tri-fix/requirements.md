@@ -84,3 +84,13 @@ Then 输出明确「未连接平台」提示，不静默成功。
 ### FR-04: 三处修复各有单测覆盖且相关测试全绿
 
 - 必须：前端 platform-sync-section.test.tsx 增注册表版本冲突行渲染/去重/计数用例；daemon spec-sync 增量测试增 re-base 重试（自愈/仍冲突上抛/失败不落盘）用例；CLI test/ 新增 .test.mjs 覆盖全树同步入口与守卫字符集（放行 CJK、仍拒穿越）。仅跑改动相关测试，全量留给 CI。
+
+## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
+
+FR-01: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行——机器 pending_conflicts 为空也渲染：spec 徽章 + 变更名 + 查看对比 + 计数对齐」
+FR-01: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行与机器行同名去重——机器行优先不重复渲染」
+FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」
+FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」
+FR-03: sillyspec 仓 test/platform-sync-fulltree.test.mjs「全树冲突归因单一 CJK 变更——冲突文件按变更名落盘（per-change 兼容）」（跨仓：commit e0b1ce16）
+FR-03: sillyspec 仓 test/assert-safe-change-name.test.mjs「日期前缀+中文描述」（跨仓：commit e0b1ce16）
+FR-04: 三处用例见 FR-01/02/03 绑定行——daemon 17 用例 + 前端 23 用例 + CLI 3 用例全绿，另生产冒烟两条（platform sync 全树 0 差异 exit 0；中文名 --change 同步终态墓碑上行 exit 0）
