@@ -1,0 +1,20 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  守护进程运行时复制命令需直接携带用户 API 密钥明文（无密钥时自动创建永不过期密钥）；密钥列表与 MCP 令牌列表支持复制已生成凭据明文；已吊销记录支持物理删除。
+
+  成功标准：
+  - runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
+  - api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
+  - mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
+  - 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
+  - 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
+autopilot: true
+baseline_commit: a62c8e24d52fa2d33f6231cd90caabd09c6af1ad
+updatedAt: '2026-10-11T07:19:50.781Z'
+baseline_sha256: 36f21875606781258e6ada50ea5531f60f2e210adc2e3ae7ced32f455d881133
+
