@@ -6549,6 +6549,9 @@ export class Daemon {
       },
     });
     this._registerListDirRpcHandler(ws);
+    // 2026-10-11-task-sweep-daemon-truth：注册 session_live_tasks 只读 RPC——
+    // backend 任务清扫死活判定问询通道（注册表 = 唯一真相源，废除超时启发式）。
+    this._registerSessionLiveTasksRpcHandler(ws);
     this._registerGetSpecBundleRpcHandler(ws);
     // task-03（2026-07-06-daemon-host-fs-delegate）：注册 host_fs.* 八方法 RPC handler。
     // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
@@ -6674,6 +6677,42 @@ export class Daemon {
     // 2026-07-09-remote-folder-picker task-02：list_roots RPC 供前端文件夹选择器拿磁盘根（FR-1），
     // 浏览自由同 list_dir（ql-20260706-006），不受 allowed_roots 限制。
     ws.registerRpcHandler('list_roots', async () => listRoots());
+  }
+
+  /**
+   * 2026-10-11-task-sweep-daemon-truth：注册 `session_live_tasks` 只读 RPC——
+   * backend 任务清扫（agent_task_store.sweep_confirmed_dead_tasks）死活判定的
+   * 问询通道：返回本 daemon 该会话后台任务注册表（mgr._backgroundTasks，
+   * task_started 注册 / task_notification 注销 / 会话终态清空）的活跃
+   * task_id 快照。backend 侧候选行不在快照内才收口——「活着但长时间静默」
+   * 的任务（注册表在）永不误判（用户指正废除超时启发式后的唯一判据）。
+   *
+   * 形态照 list_dir 平名注册先例；`_sessionManager` null → throw（backend 收
+   * DaemonRpcRemoteError 跳过该批不误收）；params.session_id 非字符串 → throw。
+   */
+  private _registerSessionLiveTasksRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('session_live_tasks', async (params) => {
+      const sessionId = typeof params.session_id === 'string' ? params.session_id : '';
+      if (!sessionId) {
+        throw new Error('session_live_tasks: payload 缺 session_id');
+      }
+      const mgr = this._sessionManager;
+      if (!mgr) {
+        throw new Error('session_live_tasks: session manager not ready');
+      }
+      const { sessionLiveTaskIds } = await import(
+        './interactive/session-manager/background-tasks.js'
+      );
+      // SessionManager → SessionManagerCore 结构窄化（deps 可见性差异的既有
+      // 家族问题——本调用只读 _backgroundTasks，as unknown 收窄对齐 daemon.ts
+      // 既有 cast 惯例）。
+      const core = mgr as unknown as Parameters<typeof sessionLiveTaskIds>[0];
+      return { session_id: sessionId, live_task_ids: sessionLiveTaskIds(core, sessionId) };
+    });
   }
 
   /**

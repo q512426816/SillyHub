@@ -452,6 +452,20 @@ export function getOrCreateTaskMap(
 }
 
 /**
+ * 2026-10-11-task-sweep-daemon-truth：会话活跃后台任务只读快照——backend
+ * `session_live_tasks` RPC 的数据源（死活判定唯一真相源；用户两轮指正废除了
+ * 「run 终态即死」「超时无心跳即死」两类启发式）。只读 `.get`（不像
+ * getOrCreateTaskMap 建空条目——查询不该有写副作用）；未注册会话 = 空数组
+ * （该 daemon 上无此会话的活跃任务）。
+ */
+export function sessionLiveTaskIds(
+  mgr: SessionManagerCore,
+  sessionId: string,
+): string[] {
+  return [...(mgr._backgroundTasks.get(sessionId)?.keys() ?? [])];
+}
+
+/**
  * task-03：清理指定 session 的后台任务表 + Task/Agent tool_use 元数据。
  * 会话终态（end/fail）调用——SDK 进程已 kill，后台任务随进程消亡，后续
  * task_* 不会再到达；防 Map 泄漏（对齐 _clearRunningBashCommands 语义）。

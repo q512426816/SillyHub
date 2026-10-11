@@ -1442,19 +1442,20 @@ class AgentService:
                 grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
                 tracked_runs=len(deferred),
             )
-        # 2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但其
-        # agent_session_task 行仍 running 的存量（历史收口无清扫 / 重启判死
-        # 路径不经 daemon 收口）批量收口 stopped；失败仅日志不阻塞启动。
+        # 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-daemon-truth：
+        # 启动确认清扫——run 已终态但 agent_session_task 行仍 running 的存量
+        # （历史无清扫 / 终态事件丢失），经 daemon 注册表确认（session_live_tasks
+        # RPC；会话终态直接收）才收口；失败仅日志不阻塞启动。
         try:
-            from app.modules.daemon.agent_task_store import sweep_orphan_running_tasks
+            from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
-            swept = await sweep_orphan_running_tasks(self._session)
+            swept = await sweep_confirmed_dead_tasks(self._session, hub=get_daemon_ws_hub())
             if swept:
                 log.info("startup_orphan_task_sweep", swept_tasks=swept)
         except Exception as exc:
-            # 评审 P3-2 修复：sweep 失败时回滚本事务——session 不留 aborted 态，
-            # 免得同 session 的后续启动逻辑（gate reconcile 等）撞
-            # PendingRollbackError 被连带跳过；回滚后仅日志，不阻塞启动。
+            # sweep 失败时回滚本事务——session 不留 aborted 态，免得同 session 的
+            # 后续启动逻辑（gate reconcile 等）撞 PendingRollbackError 被连带跳过。
             await self._session.rollback()
             log.warning("startup_orphan_task_sweep_failed", error=str(exc))
         return cleaned

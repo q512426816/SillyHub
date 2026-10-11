@@ -25,14 +25,16 @@ insert-or-update 单行写入（R-03 控写放大，刻意不做事件流水表�
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun
+from app.core.logging import get_logger
 from app.modules.daemon.model import AgentSessionTask
 from app.modules.daemon.schema import AgentTaskStatusEvent
+
+_log = get_logger(__name__)
 
 # 终态集合（语义②/③的判定口径；schema Literal 四态中的非 running 三态，与
 # 前端归约的终态吸收态一致）。
@@ -42,99 +44,114 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"
 # 2026-10-11-task-sweep-liveness-guard：该 message 兼作「清扫收口行」识别标记
 # ——upsert 对携带本标记的 stopped 行放行 running 心跳复活（自愈误收的活跃
 # 任务），事件驱动的真实终态行（message 非本标记）维持终态吸收。
+# 2026-10-11-task-sweep-daemon-truth：文案沿用（历史语义「随轮收口」不再准确，
+# 实际含义为「daemon 确认不在活跃注册表」——保留原文仅为复活标记稳定性，
+# 不改已落库行的标记可比性）。
 RUN_CLOSE_SWEEP_REASON = "轮次已结束，任务未上报终态"
 
-# 2026-10-11-task-sweep-liveness-guard：清扫心跳宽限窗——后台子代理任务跨轮次
-# 存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮
-# 继续回复，用户指正），且线上 is_async 恒 false（daemon 上报未打标），按标记
-# 排除保护不了它们。以「最近无心跳」为死判：updated_at 距清扫时刻超过本窗才
-# 收口；宽限内活跃（含跨轮次后台任务）不误收，真死的任务由延迟复扫/启动兜底
-# 在窗后收敛。
-TASK_SWEEP_GRACE = timedelta(minutes=5)
 
-
-async def finalize_running_tasks_for_run(
+async def sweep_confirmed_dead_tasks(
     session: AsyncSession,
     *,
-    run_id: uuid.UUID,
-    now: datetime | None = None,
+    hub,
+    run_id: uuid.UUID | None = None,
+    rpc_timeout: float = 5.0,
 ) -> int:
-    """2026-10-10-run-close-task-sweep：把一个 run 的非终态任务行批量收口 stopped。
+    """2026-10-11-task-sweep-daemon-truth：确认制任务清扫——问 daemon 注册表才收口。
 
-    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理被放弃/未上报终态
-    时 agent_session_task 永卡 running（17 条），任务列表在会话结束后仍显示
-    「进行中」。调用方（close_interactive_run 同事务 / 启动兜底清扫 / 延迟复扫）
-    以本函数收口。
+    演进史：run-close-task-sweep（run 终态即收）→ task-sweep-liveness-guard
+    （5 分钟心跳宽限启发式）均被用户指正误判（后台任务跨轮存活 / 长耗时任务
+    静默）。本版死活判定回归唯一真相源——daemon 后台任务注册表
+    （mgr._backgroundTasks：task_started 注册 / task_notification 注销 / 会话
+    终态清空=SDK 进程 kill 任务随进程消亡，daemon 自己的权威语义）：
 
-    2026-10-11-task-sweep-liveness-guard 收窄（用户指正 run 终态≠任务必死）：
-    只收「最近无心跳」（updated_at 距 now 超过 TASK_SWEEP_GRACE）且非异步标记
-    （is_async，双保险——线上恒 false 但语义上后台任务应打标）的行；宽限窗内
-    活跃的任务（跨轮次后台任务）不误收——真死任务由调用方的延迟复扫在窗后
-    收敛。已终态行不触碰（终态定格语义①③不破坏）；清扫行带
-    RUN_CLOSE_SWEEP_REASON 标记，误收的活跃任务下一个 running 心跳经 upsert
-    复活分支自愈（真实终态行维持终态吸收不复活）。
+    - 会话终态（ended/failed）或无绑定 runtime → 任务必死（daemon 语义背书），
+      直接收口；
+    - 其余候选逐 runtime 调 ``session_live_tasks`` RPC 问活跃集，候选 task_id
+      不在活跃集内才收口（活着但长时间静默的任务注册表仍在，永不被误收——
+      无任何时间启发式参与死判）；
+    - daemon 离线 / RPC 超时 / 旧版 daemon method_not_found → 跳过该批
+      （fail-open 保活，下轮触发点再问）。
 
-    Returns:
-        实际收口的行数。
-    """
-    sweep_at = now or datetime.now(UTC)
-    result = await session.execute(
-        update(AgentSessionTask)
-        .where(
-            AgentSessionTask.run_id == run_id,
-            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
-            AgentSessionTask.is_async.is_(False),
-            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
-        )
-        .values(
-            status="stopped",
-            finished_at=sweep_at,
-            updated_at=sweep_at,
-            message=RUN_CLOSE_SWEEP_REASON,
-        )
-    )
-    return int(result.rowcount or 0)
+    清扫行写 RUN_CLOSE_SWEEP_REASON 标记（复活分支识别）；已终态行不触碰。
+    run_id 限定时只扫该 run 的候选（run 收口延迟确认清扫用）；不限定则全量
+    （启动兜底用）。
 
-
-async def sweep_orphan_running_tasks(session: AsyncSession, *, now: datetime | None = None) -> int:
-    """2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但任务仍 running 的行。
-
-    自愈两类存量：①历史收口无清扫（close_interactive_run 接清扫前的旧数据）；
-    ②后端重启判死路径（cleanup_stale_runs 把 running run 翻 failed）不经
-    daemon 收口、无 task 事件。仅扫 run 已终态（TERMINAL_TURN_STATUSES）的行——
-    running run 的任务是活跃心跳，不误伤。
-
-    2026-10-11-task-sweep-liveness-guard：同 finalize 的心跳宽限与 is_async
-    豁免（跨轮次后台任务可跨后端重启存活，updated_at 新鲜的不误收；真死任务
-    下次重启收敛）。
+    Args:
+        hub: DaemonWsHub 或等价物（async send_rpc(daemon_id, method, params,
+            timeout=...)）。
+        run_id: 可选——限定候选行归属的 run。
 
     Returns:
         实际收口的行数。
     """
-    # late import 防 agent ↔ daemon 循环依赖（对齐本模块 upsert 的调用方惯例）。
-    from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
+    from app.modules.agent.model import AgentSession
 
-    sweep_at = now or datetime.now(UTC)
+    cand = (
+        await session.execute(
+            select(
+                AgentSessionTask.id,
+                AgentSessionTask.task_id,
+                AgentSessionTask.session_id,
+                AgentSession.runtime_id,
+                AgentSession.status.label("session_status"),
+            )
+            .join(AgentSession, AgentSessionTask.session_id == AgentSession.id)
+            .where(
+                AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+                *([] if run_id is None else [AgentSessionTask.run_id == run_id]),
+            )
+        )
+    ).all()
+    if not cand:
+        return 0
+
+    dead_row_ids: list[uuid.UUID] = []
+    # runtime_id -> {session_id: {task_id: row_id}}（待 daemon 确认的候选）
+    pending: dict[uuid.UUID, dict[uuid.UUID, dict[str, uuid.UUID]]] = {}
+    for row in cand:
+        session_status = str(row.session_status or "")
+        if session_status in ("ended", "failed") or row.runtime_id is None:
+            dead_row_ids.append(row.id)
+            continue
+        pending.setdefault(row.runtime_id, {}).setdefault(row.session_id, {})[row.task_id] = row.id
+
+    for runtime_id, sessions in pending.items():
+        for sess_id, tasks in sessions.items():
+            try:
+                res = await hub.send_rpc(
+                    runtime_id,
+                    "session_live_tasks",
+                    {"session_id": str(sess_id)},
+                    timeout=rpc_timeout,
+                )
+                live = {str(t) for t in (res.get("live_task_ids") or [])}
+            except Exception as exc:
+                # 离线/超时/旧版 method_not_found → fail-open 跳过该会话候选。
+                _log.warning(
+                    "task_sweep_daemon_confirm_failed",
+                    runtime_id=str(runtime_id),
+                    session_id=str(sess_id),
+                    error=str(exc),
+                )
+                continue
+            dead_row_ids.extend(rid for tid, rid in tasks.items() if tid not in live)
+
+    if not dead_row_ids:
+        return 0
+    now = datetime.now(UTC)
     result = await session.execute(
         update(AgentSessionTask)
-        .where(
-            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
-            AgentSessionTask.is_async.is_(False),
-            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
-            AgentSessionTask.run_id.in_(
-                select(AgentRun.id).where(AgentRun.status.in_(TERMINAL_TURN_STATUSES))
-            ),
-        )
+        .where(AgentSessionTask.id.in_(dead_row_ids))
         .values(
             status="stopped",
-            finished_at=sweep_at,
-            updated_at=sweep_at,
+            finished_at=now,
+            updated_at=now,
             message=RUN_CLOSE_SWEEP_REASON,
         )
     )
-    swept = int(result.rowcount or 0)
     await session.commit()
-    return swept
+    return int(result.rowcount or 0)
 
 
 def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:

@@ -869,72 +869,186 @@ class TestSessionDeleteCascade:
         assert count_after == 0
 
 
-# ── 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-liveness-guard ───
+# ── 2026-10-11-task-sweep-daemon-truth：确认制任务清扫 ────────────────────────
+
+
+class _StubHub:
+    """send_rpc 桩——按 (runtime_id, session_id) 脚本化返回活跃集或抛离线。"""
+
+    def __init__(self, responses: dict):
+        # key: (runtime_id, session_id_str) -> list[str] 活跃 task_id 或 Exception
+        self.responses = responses
+        self.calls: list = []
+
+    async def send_rpc(self, daemon_id, method, params, timeout=None):
+        self.calls.append((daemon_id, method, dict(params)))
+        value = self.responses.get((daemon_id, params["session_id"]))
+        if isinstance(value, Exception):
+            raise value
+        return {"session_id": params["session_id"], "live_task_ids": value or []}
 
 
 class TestRunCloseTaskSweep:
-    """run 终态任务清扫（心跳宽限 + is_async 豁免 + 清扫行复活）行为钉死。
+    """确认制清扫（daemon 注册表 = 唯一真相源）行为钉死。
 
-    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理未上报终态时
-    agent_session_task 永卡 running。2026-10-11 修正（用户指正 run 终态≠任务
-    必死——后台任务跨轮次存活）：清扫只收「宽限窗外无心跳」的同步行；清扫行
-    带标记，迟到 running 心跳复活自愈；真实终态行维持终态吸收。
+    演进：run 终态即收（v1）→ 5 分钟心跳宽限（v2）均被用户指正误判（后台任务
+    跨轮存活 / 长耗时任务静默）。v3：会话终态直接收（daemon 语义背书：会话
+    end/fail 时 SDK 进程 kill、任务随进程消亡）；活跃会话逐 runtime 问
+    session_live_tasks RPC，不在活跃集才收；daemon 离线跳过（fail-open 保活）。
     """
 
-    @staticmethod
-    def _future(minutes: float) -> datetime:
-        return datetime.now(UTC) + timedelta(minutes=minutes)
-
     @pytest.mark.asyncio
-    async def test_finalize_sweeps_only_stale_sync(
+    async def test_sweep_daemon_confirmed_dead_only(
         self, auth_headers: dict[str, str], db_session: AsyncSession
     ) -> None:
-        """宽限窗外同步行收口；窗内新鲜行（活跃心跳）与异步标记行豁免。"""
+        """daemon 确认不在活跃集 → 收口；确认在活跃集（静默但仍活）→ 保留。"""
         from app.modules.daemon.agent_task_store import (
-            finalize_running_tasks_for_run,
+            sweep_confirmed_dead_tasks,
             upsert_agent_task,
         )
 
         user_id = await _admin_id(db_session)
         rt = await _create_runtime(db_session, user_id)
         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-stale"))
-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-fresh"))
-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-async", async_=True))
-        await upsert_agent_task(
-            db_session, _event(ag_session.id, run.id, "t-done", status="completed")
-        )
-        # 老化 t-stale / t-async（updated_at 拨回 1 小时前=长期无心跳）；t-fresh
-        # 保持刚心跳（真实 now 下宽限窗内）。
-        from sqlalchemy import update as sa_update
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-dead"))
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-alive"))
 
-        await db_session.execute(
-            sa_update(AgentSessionTask)
-            .where(AgentSessionTask.task_id.in_(["t-stale", "t-async"]))
-            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
-        )
-        await db_session.commit()
-
-        # 清扫时刻 = 真实 now：仅 t-stale（窗外无心跳且非异步）收口；t-fresh
-        # （窗内心跳）/ t-async（异步标记，虽已无心跳）豁免；t-done 已终态不触碰。
-        swept = await finalize_running_tasks_for_run(db_session, run_id=run.id)
+        hub = _StubHub({(rt.id, str(ag_session.id)): ["t-alive"]})
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
 
         assert swept == 1
         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
-        assert rows["t-stale"].status == "stopped"
-        assert rows["t-stale"].finished_at is not None
-        assert "轮次已结束" in (rows["t-stale"].message or "")
-        assert rows["t-fresh"].status == "running"
-        assert rows["t-async"].status == "running"
-        assert rows["t-done"].status == "completed"
+        assert rows["t-dead"].status == "stopped"
+        assert "轮次已结束" in (rows["t-dead"].message or "")
+        # daemon 说活着的（哪怕长时间静默）永不误收——无时间启发式。
+        assert rows["t-alive"].status == "running"
+        # RPC 按会话问询一次。
+        assert hub.calls == [(rt.id, "session_live_tasks", {"session_id": str(ag_session.id)})]
+
+    @pytest.mark.asyncio
+    async def test_sweep_daemon_offline_skips(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """daemon 离线/超时 → 该批跳过不误收（fail-open 保活）。"""
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+        from app.modules.daemon.ws_hub import DaemonRuntimeOffline
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-maybe"))
+
+        hub = _StubHub({(rt.id, str(ag_session.id)): DaemonRuntimeOffline("offline")})
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+
+        assert swept == 0
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-maybe"].status == "running"
+
+    @pytest.mark.asyncio
+    async def test_sweep_terminal_session_direct_no_rpc(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """会话终态（ended）与无 runtime 行直接收口——不经 RPC。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.agent.model import AgentSession as AgSessionModel
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        ended_session = AgSessionModel(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            runtime_id=rt.id,
+            provider="claude",
+            status="ended",
+        )
+        noruntime_session = AgSessionModel(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            runtime_id=None,
+            provider="claude",
+            status="active",
+        )
+        db_session.add_all([ended_session, noruntime_session])
+        await db_session.commit()
+        for sess in (ended_session, noruntime_session):
+            r = AgentRun(
+                id=uuid.uuid4(),
+                task_id=uuid.uuid4(),
+                agent_type="claude_code",
+                agent_session_id=sess.id,
+                status="completed",
+            )
+            db_session.add(r)
+            await db_session.commit()
+            await upsert_agent_task(db_session, _event(sess.id, r.id, f"t-{str(sess.id)[:4]}"))
+        # 对照组：活跃会话 + 在线 daemon 说活 → 保留。
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-live"))
+        hub = _StubHub({(rt.id, str(ag_session.id)): ["t-live"]})
+
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+
+        assert swept == 2
+        rows = {r.task_id: r for r in await _task_rows(db_session, ended_session.id)}
+        assert all(r.status == "stopped" for r in rows.values())
+        rows2 = {r.task_id: r for r in await _task_rows(db_session, noruntime_session.id)}
+        assert all(r.status == "stopped" for r in rows2.values())
+        live_rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert live_rows["t-live"].status == "running"
+        # 终态/无 runtime 会话零 RPC（只有活跃会话问了一次）。
+        assert len(hub.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_sweep_run_scoped_filter(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """run_id 限定：只扫该 run 的候选（run 收口延迟确认清扫口径）。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        other_run = AgentRun(
+            id=uuid.uuid4(),
+            task_id=uuid.uuid4(),
+            agent_type="claude_code",
+            agent_session_id=ag_session.id,
+            status="completed",
+        )
+        db_session.add(other_run)
+        await db_session.commit()
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-in-run"))
+        await upsert_agent_task(db_session, _event(ag_session.id, other_run.id, "t-other"))
+
+        hub = _StubHub({(rt.id, str(ag_session.id)): []})  # daemon：全部不在活跃集
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub, run_id=run.id)
+
+        assert swept == 1
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-in-run"].status == "stopped"
+        assert rows["t-other"].status == "running"
 
     @pytest.mark.asyncio
     async def test_sweep_stopped_row_revives_on_running_heartbeat(
         self, auth_headers: dict[str, str], db_session: AsyncSession
     ) -> None:
         """清扫收口行（message=清扫原因）收 running 心跳 → 复活自愈。"""
+        from sqlalchemy import update as sa_update
+
         from app.modules.daemon.agent_task_store import (
-            finalize_running_tasks_for_run,
+            RUN_CLOSE_SWEEP_REASON,
             upsert_agent_task,
         )
 
@@ -942,9 +1056,14 @@ class TestRunCloseTaskSweep:
         rt = await _create_runtime(db_session, user_id)
         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
         await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
-        await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
+        # 直接种入清扫态（stopped + 标记）——复活分支只认标记。
+        await db_session.execute(
+            sa_update(AgentSessionTask)
+            .where(AgentSessionTask.task_id == "t-x")
+            .values(status="stopped", message=RUN_CLOSE_SWEEP_REASON, finished_at=datetime.now(UTC))
+        )
+        await db_session.commit()
 
-        # 误收的活跃任务下一个心跳复活（跨轮次后台任务场景）。
         await upsert_agent_task(
             db_session,
             _event(ag_session.id, run.id, "t-x", status="running", progress=42),
@@ -976,80 +1095,3 @@ class TestRunCloseTaskSweep:
         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
         assert rows["t-s"].status == "stopped"
         assert (rows["t-s"].message or "") == "用户停止"
-
-    @pytest.mark.asyncio
-    async def test_sweep_orphans_stale_terminal_run_only(
-        self, auth_headers: dict[str, str], db_session: AsyncSession
-    ) -> None:
-        """启动兜底：终态 run + 宽限窗外无心跳收口；新鲜行 / running run / 异步行不误扫。"""
-        from sqlalchemy import update as sa_update
-
-        from app.modules.agent.model import AgentRun
-        from app.modules.daemon.agent_task_store import (
-            sweep_orphan_running_tasks,
-            upsert_agent_task,
-        )
-
-        user_id = await _admin_id(db_session)
-        rt = await _create_runtime(db_session, user_id)
-        ag_session, live_run = await _create_session_with_run(db_session, user_id, rt.id)
-        done_run = AgentRun(
-            id=uuid.uuid4(),
-            task_id=uuid.uuid4(),
-            agent_type="claude_code",
-            agent_session_id=ag_session.id,
-            status="completed",
-        )
-        db_session.add(done_run)
-        await db_session.commit()
-        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan"))
-        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan-fresh"))
-        await upsert_agent_task(
-            db_session, _event(ag_session.id, done_run.id, "t-orphan-async", async_=True)
-        )
-        await upsert_agent_task(db_session, _event(ag_session.id, live_run.id, "t-live"))
-        # 老化 t-orphan / t-orphan-async（真孤儿/停跳异步——均拨回 1 小时前）。
-        await db_session.execute(
-            sa_update(AgentSessionTask)
-            .where(AgentSessionTask.task_id.in_(["t-orphan", "t-orphan-async"]))
-            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
-        )
-        await db_session.commit()
-
-        # 真实 now：仅终态 run + 窗外无心跳 + 非异步的 t-orphan 收口。
-        swept = await sweep_orphan_running_tasks(db_session)
-
-        assert swept == 1
-        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
-        assert rows["t-orphan"].status == "stopped"
-        assert rows["t-orphan-fresh"].status == "running"
-        assert rows["t-orphan-async"].status == "running"
-        assert rows["t-live"].status == "running"
-
-    @pytest.mark.asyncio
-    async def test_delayed_resweep_catches_now_silent(
-        self, auth_headers: dict[str, str], db_session: AsyncSession
-    ) -> None:
-        """延迟复扫语义：收口时新鲜的行，若此后无心跳，宽限+缓冲后同款 finalize 收口。"""
-        from app.modules.daemon.agent_task_store import (
-            finalize_running_tasks_for_run,
-            upsert_agent_task,
-        )
-
-        user_id = await _admin_id(db_session)
-        rt = await _create_runtime(db_session, user_id)
-        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-wait"))
-
-        # 收口时点（now）：宽限内 → 不收。
-        assert (
-            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(1))
-            == 0
-        )
-        # 复扫时点（宽限+60s 后）：仍无心跳 → 收口。
-        assert (
-            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
-            == 1
-        )
-        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
-        assert rows["t-wait"].status == "stopped"
