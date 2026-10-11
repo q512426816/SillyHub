@@ -1,0 +1,112 @@
+{
+  "change": "2026-10-10-duration-api-cumulative-fix",
+  "baseline": "f23edfcc98357feaa5de078618d5d45dc45d2fc5",
+  "head": "303963b6019cd66b1865cd655f3f1e5e8ab4b86b",
+  "files": [
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts",
+    ".sillyspec/changes/2026-10-10-duration-api-cumulative-fix/design.md",
+    ".sillyspec/changes/2026-10-10-duration-api-cumulative-fix/proposal.md",
+    ".sillyspec/changes/2026-10-10-duration-api-cumulative-fix/requirements.md",
+    ".sillyspec/changes/2026-10-10-duration-api-cumulative-fix/tasks.md"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 313,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-11T14:26:16.240Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f23edfcc98357feaa5de078618d5d45dc45d2fc5",
+    "totals": {
+      "files": 4,
+      "additions": 161,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+        "additions": 38,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 26,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts",
+        "additions": 90,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7b661a5e8b4edf62abb1d68553eaf2dbb650dd5d311730f53186519449627b59",
+  "patchStatus": "ok"
+}

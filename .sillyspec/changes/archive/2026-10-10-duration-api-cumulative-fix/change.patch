@@ -1,0 +1,400 @@
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 42a7a114c..42c2d2993 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -355,7 +355,13 @@ async def _close_apply_terminal(
+     if duration_ms is not None:
+         agent_run.duration_ms = duration_ms
+     if duration_api_ms is not None:
+-        agent_run.duration_api_ms = duration_api_ms
++        # 2026-10-10-duration-api-cumulative-fix 物理守卫：API 调用时长不可能超过
++        # 轮墙钟（duration_ms）。会话级累计快照形态的引擎（线上实证：13s 轮被写
++        # 3171s 累计值 → 终态 tok/s 分母放大 239 倍显示 0.4）在此拒收——保留既有
++        # 值（daemon 实时计时累计或 NULL），不静默放大分母。
++        wall = duration_ms if duration_ms is not None else agent_run.duration_ms
++        if wall is None or duration_api_ms <= wall:
++            agent_run.duration_api_ms = duration_api_ms
+     if input_tokens is not None:
+         agent_run.input_tokens = input_tokens
+     if output_tokens is not None:
+diff --git a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+index d1a868bbd..921b0f26f 100644
+--- a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
++++ b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+@@ -652,6 +652,44 @@ class TestGap3CloseInteractiveRun:
+         assert "duration_api_ms" in payload2
+         assert payload2["duration_api_ms"] is None
+ 
++    @pytest.mark.asyncio
++    async def test_close_duration_api_ms_over_wall_rejected(self, db_session, mocked_redis) -> None:
++        """2026-10-10-duration-api-cumulative-fix：duration_api_ms > duration_ms（墙钟）
++        物理不可能——会话级累计快照形态的引擎（线上实证 13s 轮被写 3171s）拒收，
++        列保留既有值（NULL / daemon 实时计时累计），不放大终态 tok/s 分母。"""
++        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        run1 = await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="success",
++            is_error=False,
++            duration_ms=13246,
++            duration_api_ms=3171192,
++        )
++        assert run1.duration_ms == 13246
++        assert run1.duration_api_ms is None
++
++    @pytest.mark.asyncio
++    async def test_close_duration_api_ms_within_wall_written(
++        self, db_session, mocked_redis
++    ) -> None:
++        """合法值（api ≤ 墙钟）照常写入。"""
++        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        run1 = await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="success",
++            is_error=False,
++            duration_ms=13246,
++            duration_api_ms=12500,
++        )
++        assert run1.duration_api_ms == 12500
++        assert run1.duration_ms == 13246
++
+     @pytest.mark.asyncio
+     async def test_publishes_turn_completed_failed_status(self, db_session, mocked_redis) -> None:
+         """turn_completed 在 failed turn 也要发，且 status/exit_code 反映失败
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 27496d461..17f56fd8d 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -1800,6 +1800,14 @@ export class Daemon {
+    * 全量，不持久化不跨进程）。
+    */
+   private readonly _modelUsageBaselineBySession = new Map<string, ModelUsageBaseline>();
++  /**
++   * duration_api_ms 跨轮累计快照基线（sessionId → 上一轮快照）。SDK streaming
++   * 会话每轮终态的 duration_api_ms 是「会话至今累计」（2026-10-10-duration-api-
++   * cumulative-fix 线上实证：13s 轮被写 3171s 累计值，per-run 列放大 239 倍 →
++   * 终态 tok/s 分母失真）。差分为本轮增量后上报；生命周期同
++   * _modelUsageBaselineBySession（onSessionEnd / onSessionReloaded 回收）。
++   */
++  private readonly _durationApiBaselineBySession = new Map<string, number>();
+   // ── ql-20260909-011（交互会话逐事件上报微批化）────────────────────────────
+   // 实机根因：interactive 路径每条事件一次串行 submitMessages HTTP 往返（onTurnMessage
+   // → events.ts 循环逐事件 await → consume 协程读完下一条 SDK 帧前必须等当前帧
+@@ -4005,7 +4013,19 @@ export class Daemon {
+       payload.duration_ms = resultMeta.duration_ms;
+     }
+     if (typeof resultMeta.duration_api_ms === 'number') {
+-      payload.duration_api_ms = resultMeta.duration_api_ms;
++      // 2026-10-10-duration-api-cumulative-fix：duration_api_ms 与 total_cost_usd /
++      // modelUsage 同生命周期——SDK streaming 会话每轮终态报「会话至今累计」（线上
++      // 实证会话 0d6b2ba9：13s 轮被写 52.8min 累计值 → 终态 tok/s 分母放大 239 倍
++      // 显示 0.4）。差分为本轮增量；当前 < 基线 = SDK 计数复位（resume / /clear /
++      // crash），报全量（同 cost 口径）；0 值合法不丢。duration_ms 是 per-query
++      // 墙钟，无需差分（DB 实证各轮 duration_ms = 本轮墙钟）。
++      const durSnapshot = resultMeta.duration_api_ms;
++      const durBase = this._durationApiBaselineBySession.get(sessionId);
++      payload.duration_api_ms =
++        durBase === undefined || durSnapshot < durBase
++          ? durSnapshot
++          : durSnapshot - durBase;
++      this._durationApiBaselineBySession.set(sessionId, durSnapshot);
+     }
+     // ql-20260829-002：token 四维优先取 modelUsage 跨模型聚合（含 Task 子代理 /
+     // sidechain / compaction 的全部 query-pipeline 消耗，SDK 官方指明这才是
+@@ -4763,6 +4783,8 @@ export class Daemon {
+    */
+   onSessionReloaded(sessionId: string): void {
+     this._modelUsageBaselineBySession.delete(sessionId);
++    // duration_api_ms 累计基线同生命周期回收（句柄重建后快照从零起）。
++    this._durationApiBaselineBySession.delete(sessionId);
+   }
+ 
+   async onSessionEnd(
+@@ -4843,6 +4865,9 @@ export class Daemon {
+     // ql-20260831-009：回收 modelUsage 差分基线（生命周期=会话；会话结束后同 id
+     // 重建的会话是新流式 query，快照从零起，残留基线会误触发复位检测多报全量）。
+     this._modelUsageBaselineBySession.delete(sessionId);
++    // duration_api_ms 累计基线同生命周期回收（同上：会话结束后同 id 重建是新
++    // 流式 query，累计从零起，残留基线会误触发复位检测报全量）。
++    this._durationApiBaselineBySession.delete(sessionId);
+ 
+     // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
+     // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
+diff --git a/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts b/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
+index 53e2a12df..8865b7b57 100644
+--- a/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
++++ b/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
+@@ -1354,3 +1354,93 @@ describe('ql-20260831-009：modelUsage/total_cost_usd 跨轮累计快照差分',
+     expect(p2.output_tokens).toBe(20);
+   });
+ });
++
++// 2026-10-10-duration-api-cumulative-fix：duration_api_ms 会话级累计快照差分
++//（线上实证会话 0d6b2ba9：13s 轮被写 3171s 累计值 → 终态 tok/s 显示 0.4）。
++describe('duration_api_ms 跨轮累计快照差分', () => {
++  let daemons: Daemon[] = [];
++
++  afterEach(async () => {
++    for (const d of daemons) {
++      if (d.isRunning) {
++        await d.stop().catch(() => undefined);
++      }
++    }
++    daemons = [];
++  });
++
++  function payloadOf(client: ReturnType<typeof createMockClient>, n: number) {
++    const callArgs = client.notifyRunResult.mock.calls[n]!;
++    return callArgs[3] as Record<string, unknown>;
++  }
++
++  it('第 2 轮 payload 为快照差值（12000→25000 → 差 13000），duration_ms 照原样透传', async () => {
++    const { daemon, client } = buildDaemon();
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-1', 'run-1', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_ms: 12000,
++      duration_api_ms: 12000,
++    } as unknown as SDKResultMessage);
++    await daemon.onTurnResult('sess-1', 'run-2', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_ms: 13000,
++      duration_api_ms: 25000,
++    } as unknown as SDKResultMessage);
++
++    const p1 = payloadOf(client, 0);
++    expect(p1.duration_api_ms).toBe(12000);
++    const p2 = payloadOf(client, 1);
++    expect(p2.duration_api_ms).toBe(13000);
++    expect(p2.duration_ms).toBe(13000);
++  });
++
++  it('快照复位（当前 < 基线）：报全量（同 cost 口径）', async () => {
++    const { daemon, client } = buildDaemon();
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-1', 'run-1', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_api_ms: 25000,
++    } as unknown as SDKResultMessage);
++    await daemon.onTurnResult('sess-1', 'run-2', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_api_ms: 9000,
++    } as unknown as SDKResultMessage);
++
++    const p2 = payloadOf(client, 1);
++    expect(p2.duration_api_ms).toBe(9000);
++  });
++
++  it('会话结束回收基线：同 id 重建后新轮报全量不误差分', async () => {
++    const { daemon, client } = buildDaemon();
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-1', 'run-1', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_api_ms: 25000,
++    } as unknown as SDKResultMessage);
++    daemon.onSessionEnd('sess-1', 'ended', 'manual');
++    // 同 id 重建（快照从零起的会话累计）→ 无基线 → 报全量。
++    await daemon.onTurnResult('sess-1', 'run-2', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      duration_api_ms: 11000,
++    } as unknown as SDKResultMessage);
++
++    const p2 = payloadOf(client, 1);
++    expect(p2.duration_api_ms).toBe(11000);
++  });
++});
+diff --git a/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/design.md b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/design.md
+@@ -0,0 +1,72 @@
++---
++author: qinyi
++created_at: 2026-10-10T20:55:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-10-duration-api-cumulative-fix
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++答：线上会话 0d6b2ba9 实证（postgres 直查）——claude 引擎 SDK 结果的
++duration_api_ms 是**会话级累计快照**（逐轮单调递增：2207767→…→3171192，13 秒
++轮被写 52.8 分钟），而 duration_ms 是 per-query 墙钟（各轮=本轮墙钟）。close
++原样把累计值写进 per-run 列 → 终态 tok/s = 本轮输出 ÷ 会话累计时长 → 逐轮衰减
++（0.4 tok/s 实证）。修复两层：① daemon onTurnResult 按会话差分为本轮增量（照搬
++同族量 total_cost_usd/_modelUsageBaselineBySession 的既有累计快照差分范式，
++含复位报全量与 onSessionEnd/onSessionReloaded 基线回收）；② backend close 物理守卫
++（api 时长 > 墙钟为不可能值拒收，保留既有值）防任何引擎再写垃圾。cumulative
++increment 与各轮墙钟吻合（DB 逐轮核对 +28.7s/+9.9s/+13.2s），差分后语义正确。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++答：函数签名零变化。行为变化两处：daemon onTurnResult 对 duration_api_ms 由
++透传改为会话级差分上报（增量语义，同 cost 口径）；backend close_interactive_run
++对 duration_api_ms 增超界拒收守卫（api > wall 不覆盖）。payload/DTO 字段不变。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   答：成立。基线按会话 FIFO 收敛（onTurnResult 串行）；快照回退（当前 < 基线）
++   判 SDK 复位报全量（与 cost 同口径）；backend 守卫再兜一层物理不可能值。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   答：不适用——daemon 会话事件单驱动串行（onTurnMessage/onTurnResult 同 FIFO）；
++   backend close 幂等（TERMINAL 守卫既有）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   答：安全。基线 Map 随 onSessionEnd / onSessionReloaded 回收（同
++   _modelUsageBaselineBySession 既有两处），会话重建后从零起不误差分。
++   已知边界：daemon 重启后首轮快照无基线报全量（同 cost 既有局限，留档）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   答：不串台。基线按 sessionId 隔离；backend 守卫按 run 行隔离。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++答：最大风险是各 CLI 构建的 duration_api_ms 语义不一（真 Anthropic 可能为
++per-query 纯 API 时长）——差分逻辑对「真 per-query」值也正确（第二轮起
++snapshot≥base 时差值=snapshot−base 会把 per-query 值误差分！）。缓解：差分仅在
++snapshot ≥ base 时做，per-query 形态下 snapshot 无单调性（12s→9s 走复位分支报
++全量）→ 不会误差分；单调递增的 per-query 序列理论上会被误差分，但 DB 实证本
++部署形态是累计量，真 per-query 序列含工具等待通常非单调——留档该假设。
++放弃方案：仅做 backend 守卫不做 daemon 差分（守卫后合法累计增量被整段拒收，
++正确数据也进不来）；仅做 daemon 差分不做 backend 守卫（防线单薄，其他引擎再犯
++无兜底）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | sillyhub-daemon/src/daemon.ts | duration_api_ms 会话级差分基线（+2 处回收） |
++| 改 | sillyhub-daemon/tests/daemon-interactive-bridge.test.ts | 差分/复位/回收 3 用例 |
++| 改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | 超界拒收守卫 |
++| 改 | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | 超界拒收/合法写入 2 用例 |
+
+diff --git a/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/proposal.md b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:20:05.202Z
++---
++# 提案书（Proposal）— 2026-10-10-duration-api-cumulative-fix
++
++## 动机
++
++任务原话转写：动机：线上会话 0d6b2ba9 实证终态 tok/s 显示 0.4——claude SDK 结果的 duration_api_ms 是会话级累计快照（逐轮单调递增，DB 实证 13 秒轮被写 52.8 分钟），close 原样写进 per-run 列，终态速度分母放大数十倍且随轮次衰减。同族量 total_cost_usd 已有会话级差分基线机制，duration_api_ms 漏了同款处理。
++成功标准：
++- daemon onTurnResult 对 duration_api_ms 按会话差分为本轮增量（当前<基线=SDK 复位报全量；基线随 onSessionEnd/onSessionReloaded 回收），duration_ms 语义不变
++- backend close 增物理守卫：duration_api_ms > duration_ms（墙钟）为不可能值拒收不覆盖，保留既有值
++- 两侧测试覆盖（daemon 差分/复位/回收；backend 超界拒收+合法写入），不跑全量
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. daemon onTurnResult 对 duration_api_ms 按会话差分为本轮增量（当前<基线=SDK 复位报全量；基线随 onSessionEnd/onSessionReloaded 回收），duration_ms 语义不变
++2. backend close 增物理守卫：duration_api_ms > duration_ms（墙钟）为不可能值拒收不覆盖，保留既有值
++3. 两侧测试覆盖（daemon 差分/复位/回收；backend 超界拒收+合法写入），不跑全量
++
++## 成功标准（可验证）
++
++1. daemon onTurnResult 对 duration_api_ms 按会话差分为本轮增量（当前<基线=SDK 复位报全量；基线随 onSessionEnd/onSessionReloaded 回收），duration_ms 语义不变
++2. backend close 增物理守卫：duration_api_ms > duration_ms（墙钟）为不可能值拒收不覆盖，保留既有值
++3. 两侧测试覆盖（daemon 差分/复位/回收；backend 超界拒收+合法写入），不跑全量
+
+diff --git a/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/requirements.md b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/requirements.md
+@@ -0,0 +1,46 @@
++---
++author: qinyi
++created_at: 2026-10-10T20:55:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-10-duration-api-cumulative-fix
++
++## 功能需求
++
++### FR-01: daemon duration_api_ms 按会话差分上报
++
++daemon onTurnResult **必须**把 SDK 会话级累计快照 duration_api_ms 差分为本轮
++增量再入 payload（快照 < 基线判复位报全量；基线随 onSessionEnd /
++onSessionReloaded 回收）；duration_ms 语义不变照原样透传。
++
++#### 场景：跨轮差分
++
++- Given：同会话轮 1 快照 12000、轮 2 快照 25000
++- When：各轮 onTurnResult
++- Then：轮 1 payload 12000、轮 2 payload 13000
++
++### FR-02: backend close 超界拒收
++
++close_interactive_run **必须**拒收 duration_api_ms > duration_ms（墙钟）的写入
++（保留既有值）；api ≤ 墙钟照常写入。
++
++#### 场景：累计值拒收
++
++- Given：close 入参 duration_ms=13246、duration_api_ms=3171192
++- When：close_interactive_run
++- Then：AgentRun.duration_api_ms 保持 NULL（不放大分母）
++
++### FR-03: 相关测试通过（不跑全量）
++
++daemon 差分三用例（差分/复位/回收）与 backend 守卫两用例（拒收/合法）**必须**
++全绿；**禁止**运行全量测试套件。
++
++#### 场景：双侧绿
++
++- When：跑触及测试文件
++- Then：全部通过
++
++## 测试绑定（每条 FR 至少一行）
++
++FR-01: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 跨轮累计快照差分」三用例
++FR-02: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_duration_api_ms_over_wall_rejected」
++FR-03: 上述文件全绿（daemon 44 / backend 3 passed）
+
+diff --git a/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/tasks.md b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-10-duration-api-cumulative-fix/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: qinyi
++created_at: 2026-10-10T20:55:00.000Z
++---
++# 任务注册表（Tasks）— 2026-10-10-duration-api-cumulative-fix
++
++- [x] task-01: daemon.ts 会话级差分基线（字段+差分+两处回收）+ 桥接测试三用例，vitest 绿
++- [x] task-02: close_run_steps 超界拒收守卫 + lifecycle 两用例，pytest 绿；交付提交

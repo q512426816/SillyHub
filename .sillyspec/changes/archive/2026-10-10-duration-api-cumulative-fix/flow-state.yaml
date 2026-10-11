@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：线上会话 0d6b2ba9 实证终态 tok/s 显示 0.4——claude SDK 结果的 duration_api_ms 是会话级累计快照（逐轮单调递增，DB 实证 13 秒轮被写 52.8 分钟），close 原样写进
+  per-run 列，终态速度分母放大数十倍且随轮次衰减。同族量 total_cost_usd 已有会话级差分基线机制，duration_api_ms 漏了同款处理。
+
+  成功标准：
+
+  - daemon onTurnResult 对 duration_api_ms 按会话差分为本轮增量（当前<基线=SDK 复位报全量；基线随 onSessionEnd/onSessionReloaded 回收），duration_ms
+  语义不变
+
+  - backend close 增物理守卫：duration_api_ms > duration_ms（墙钟）为不可能值拒收不覆盖，保留既有值
+
+  - 两侧测试覆盖（daemon 差分/复位/回收；backend 超界拒收+合法写入），不跑全量
+autopilot: true
+baseline_commit: f23edfcc98357feaa5de078618d5d45dc45d2fc5
+updatedAt: '2026-10-11T14:28:41.513Z'
+baseline_sha256: 79717a9471f02b4d2e8fe2ee0b430f2019e33b09d86c1452aa6d1f612b336bd4
+gate_summary: >-
+  test: passed ← module[]+deps(py18+jsx29)+fr(46)（171.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011142546\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（27.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011142546\test-result.json｜门文件
+  4 个
+

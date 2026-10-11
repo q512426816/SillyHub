@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-duration-api-cumulative-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-duration-api-cumulative-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 跨轮累计快照差分」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-duration-api-cumulative-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-10-duration-api-cumulative-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_duration_api_ms_over_wall_rejected」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-10-duration-api-cumulative-fix"
+    }
+  ]
+}

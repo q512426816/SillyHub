@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-duration-api-cumulative-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "303963b6019cd66b1865cd655f3f1e5e8ab4b86b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "onSessionReloaded 回收行无专属测试（回收用例仅覆盖 onSessionEnd）",
+      "evidence": "回收用例只调用 daemon.onSessionEnd('sess-1','ended','manual') 后断言新轮报全量；onSessionReloaded 的 _durationApiBaselineBySession.delete 已实现（与既有 _modelUsageBaselineBySession.delete 并排）但无用例直接驱动。实现与既有范式逐行同构，回归风险低。",
+      "location": "sillyhub-daemon/src/daemon.ts:4787 / sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（回收用例）"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 守卫的 wall 回退分支无用例覆盖",
+      "evidence": "close_run_steps.py 守卫含三行为：api>wall 拒收、api<=wall 写入、wall 缺失回退（入参 duration_ms 为 None 时取 agent_run.duration_ms，仍为 None 则放行写入）。两用例均传 duration_ms=13246，回退两子分支（入参缺失取存量列、双缺失放行）未被驱动。需求 FR-02 文本未明确要求回退分支用例，属覆盖缺口而非承诺违反；双缺失放行时 tok/s 分母本身缺失，无显示面危害。",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:362-364"
+    },
+    {
+      "severity": "P3",
+      "title": "已披露假设裁决留痕：单调递增 per-query 序列会被误差分（裁决：可接受）",
+      "evidence": "design.md『风险与死路』披露：若某引擎 duration_api_ms 为真 per-query 且序列单调递增，差分会把 per-query 值误算为增量。裁决可接受：DB 实证本部署形态为会话级累计（2207767→…→3171192 单调递增，增量与各轮墙钟吻合 +28.7s/+9.9s/+13.2s）；真 per-query 序列含工具等待通常非单调，非单调走复位分支报全量语义仍正确；即便偶发两连增被误差分，仅诊断指标 tok/s 分母低估，backend 守卫仍拦超墙钟值。已按 design 留档。",
+      "location": ".sillyspec/changes/2026-10-10-duration-api-cumulative-fix/design.md（风险与死路节）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  }
+}
