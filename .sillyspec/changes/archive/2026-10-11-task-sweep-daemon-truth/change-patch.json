@@ -1,0 +1,278 @@
+{
+  "change": "2026-10-11-task-sweep-daemon-truth",
+  "baseline": "3c25091810c5773e4cdb734bc4edfa24446199fa",
+  "head": "bc0cac931980b9a1145369a9bfd7ddd377776ee5",
+  "files": [
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/design.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/proposal.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/requirements.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/tasks.md",
+    "backend/app/modules/agent/provider_caps.py",
+    "backend/app/modules/agent/service.py",
+    "backend/app/modules/daemon/agent_task_store.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+    "frontend/src/lib/provider-caps.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/codex-settings.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/cursor-driver.ts",
+    "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+    "sillyhub-daemon/src/interactive/providers.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/src/pi-settings.ts",
+    "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+    "sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts",
+    "sillyhub-daemon/tests/mcp-config.test.ts",
+    "sillyhub-daemon/tests/pi-settings-mcp.test.ts",
+    ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/review.json.superseded-20261011T044439"
+  ],
+  "totals": {
+    "files": 25,
+    "additions": 1284,
+    "deletions": 235
+  },
+  "savedAt": "2026-10-11T04:44:40.929Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 13,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 16,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3c25091810c5773e4cdb734bc4edfa24446199fa",
+    "totals": {
+      "files": 19,
+      "additions": 993,
+      "deletions": 235
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/provider_caps.py",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/service.py",
+        "additions": 9,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/agent_task_store.py",
+        "additions": 93,
+        "deletions": 68,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 26,
+        "deletions": 33,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "additions": 183,
+        "deletions": 104,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/provider-caps.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 15,
+        "deletions": 18,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/codex-settings.ts",
+        "additions": 101,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/cursor-driver.ts",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "additions": 105,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/providers.ts",
+        "additions": 45,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/pi-settings.ts",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+        "additions": 85,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/mcp-config.test.ts",
+        "additions": 44,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/pi-settings-mcp.test.ts",
+        "additions": 105,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c19ea3ada4d63a097a24764ae466186b3aa8e5a45c697a676d42d18a224d7ae5",
+  "patchStatus": "ok"
+}

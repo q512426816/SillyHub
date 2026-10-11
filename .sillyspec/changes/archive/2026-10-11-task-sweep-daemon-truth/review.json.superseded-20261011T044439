@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c3948368cd7e3a9a8248ec8e72e1a27bbce406d1",
+  "reviewedAt": "2026-10-11T04:43:35Z",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "P2",
+      "title": "sweep_confirmed_dead_tasks 最终 UPDATE 丢失非终态守卫——候选 SELECT 与 UPDATE 之间的真实终态事件被覆写为 stopped（v2 有守卫，本变更回归）",
+      "location": "backend/app/modules/daemon/agent_task_store.py:143-152（最终 UPDATE 仅 .where(AgentSessionTask.id.in_(dead_row_ids))；候选筛选的非终态谓词在 :101，UPDATE 处无）",
+      "evidence": "时序：① 候选 SELECT（:100-102，非终态行）→ ② 逐 (runtime, session) 串行 RPC（离线/慢 daemon 每个吃满 rpc_timeout=5s，dead_row_ids 累积到全部 RPC 完成后才统一 UPDATE）→ ③ UPDATE 按 id 覆写。窗口①→③为数百 ms 至数十秒（多会话启动全量清扫时更长）。期间 task_notification 真实终态事件经 notify 路由 upsert（FOR UPDATE）提交 completed/failed/stopped 后，③ 的 UPDATE 在 READ COMMITTED（postgresql+asyncpg，backend/app/core/config.py:83 / core/db.py:73，未设 isolation_level）下取最新已提交行版本、WHERE 无 status 谓词必然命中——把 completed 覆写为 stopped+RUN_CLOSE_SWEEP_REASON。任务已终态不再有后续事件，design Q1 声称的「收真实终态事件 latest-wins 覆盖」只对清扫提交之后到达的事件成立，此窗口内失效且无自愈路径。违反模块自身语义①「终态定格：status 不回退、任何字段不改动」与本函数 docstring「已终态行不触碰」。对照：v2 finalize/sweep_orphan 的 UPDATE WHERE 均带 status.notin_(_TERMINAL_STATUSES)（commit c77f42488），本变更删除函数时一并丢了守卫。修复一行：UPDATE WHERE 补同款非终态谓词。",
+      "reachable": "延迟复扫 T+60s 恰逢后台任务完成（daemon 注销→事件落库 vs 清扫 RPC→UPDATE 两条路径竞速）；启动全量清扫多会话串行 RPC 拉长窗口。影响有界（已死任务的终态标签错标 + 完成信息丢失，非误杀活任务），但属对声明的核心不变量的确定性违反，且为上一代已有防护的回归。",
+      "dimension": "乱序",
+      "declaredBoundary": "无声明边界（design Q1 的保守方向论证未覆盖 select→update 窗口）",
+      "resolution": "已修复@ c3948368（增量复审确认：agent_task_store.py:148-153 UPDATE WHERE 恢复 id.in_(dead_row_ids) + status.notin_(_TERMINAL_STATUSES) 双条件，终态定格语义①恢复；新增 test_sweep_terminal_race_not_overwritten 以 RPC 回调为确定性窗口钩子注入 completed，断言 swept==0 + status 保持 completed + message 无标记污染，无守卫时该用例必失败（裸 UPDATE 会 stopped+标记），回归锁真实非摆设。返回值改按 rowcount 如实反映收口数，两处调用方仅日志用途不受影响）"
+    },
+    {
+      "id": "F2",
+      "severity": "P3",
+      "title": "change.patch 冻结件混入并行变更 2026-10-10-all-engines-mcp-injection 的约 12 个文件，与 design.md 的 7 文件清单不符",
+      "location": ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/change.patch（对比 design.md「文件变更清单」7 项）",
+      "evidence": "patch 内混入与本变更无关的：backend/app/modules/agent/provider_caps.py、frontend/src/lib/provider-caps.ts、sillyhub-daemon/src/cli.ts、codex-settings.ts、pi-settings.ts、interactive/codex-app-server-driver.ts、cursor-driver.ts、pi-rpc-driver.ts、interactive/providers.ts、tests/codex-settings-mcp.test.ts、tests/pi-settings-mcp.test.ts、tests/mcp-config.test.ts（成因：以 baseline 3c250918 对含并行未提交改动的工作区取 diff 冻结）。本变更自身 7 文件的交付内容经核对全部在 commit 900416bdf 落库且工作区干净；但「交付 diff 冻结件」未隔离本变更交付面，按此 patch 留档/复放会连带并行变更。",
+      "dimension": "n/a（工件卫生）"
+    },
+    {
+      "id": "F3",
+      "severity": "P3",
+      "title": "两处接线胶水无直接测试：run 收口 fire 门控与 daemon RPC handler",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:161-172；sillyhub-daemon/src/daemon.ts:6698-6715",
+      "evidence": "FR-03 绑定的 test_sweep_run_scoped_filter 只锁 sweep 函数的 run_id 过滤；close_run_steps 的 has_open_tasks 门控（有候选才 fire）与 _delayed_task_resweep 的 60s 延迟/独立 session 接线无任何用例（fire 恒排→有候选才排是行为变更点，恰好无锁）。FR-01 绑定的 daemon 侧测试只锁 sessionLiveTaskIds helper；handler 的缺 session_id throw / mgr 未就绪 throw / 返回形状未测。requirements 测试绑定按字面满足（每 FR 一行且用例存在），但上述行为仅靠 typecheck/评审兜底。",
+      "dimension": "n/a（测试覆盖）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "dimensionRationale": {
+    "乱序": "（前轮：F1 P2——SELECT→UPDATE 窗口内真实终态事件被覆写，已裁决 finding。）增量复审@c3948368：UPDATE 恢复非终态守卫后该项消除。原判定链仍成立：design Q1 的保守方向论证对守卫恢复后重新闭合——窗口内终态事件提交后 UPDATE 的 status.notin_ 谓词在 DB 侧取最新已提交行版本判定，completed/failed/stopped 均被放行定格，不再有覆写路径；守卫恢复同时使并发清扫实例对已收口行天然幂等（二次 UPDATE no-op，不再重复刷新 finished_at/标记）。",
+    "并发": "design Q2 声明与代码一致：UPDATE 按行 id 原子；多实例并发清扫对同批 dead 行幂等收敛（二次 UPDATE 已 stopped 行仍写 stopped 同值）；daemon 注册表单线程事件循环维护，sessionLiveTaskIds 同步 Map 展开无撕裂（background-tasks.ts:460-467）。upsert 的 FOR UPDATE（P3-1 前科已修）与本清扫的交错见 F1，但那是乱序窗口问题而非双写冲突。",
+    "切换": "design Q3 与代码一致：_delayed_task_resweep 独立 DB session + _fire_background_task 异常记日志不伤终态（close_run_steps.py:55-65）；进程重启丢延迟任务由启动确认清扫补位（service.py:1450-1453）；daemon 重启清空注册表=lifecycle.ts:229 clearBackgroundTasks 会话终态调用（SDK 进程 kill 语义背书真实存在），重启后问询空集→正确收口。",
+    "作用域": "design Q4 与代码一致：候选按 AgentSession.runtime_id 分组定向 send_rpc(runtime_id,...)（agent_task_store.py:110-136），run 限定清扫 WHERE 带 run_id 过滤不越界；问错 daemon 返回空集的残余风险已在 design 披露且有复活分支兜底。task 行唯一写入方为 notify.py 的 upsert（行存在⇒daemon 注册表曾有条目），「空集=死」的方向性论证成立。"
+  },
+  "frVerification": {
+    "FR-01": "兑现且测试锁定。daemon.ts:6698 注册 'session_live_tasks'（list_dir 平名先例，:6552 接线）；缺 session_id throw、mgr null throw、返回 {session_id, live_task_ids}；数据源 sessionLiveTaskIds 只读 .get 快照不建条目（background-tasks.ts:460-467）。测试 sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts 3 用例：全量返回/未注册空数组且 mgr._backgroundTasks.has 为 false（无副作用）/注销后不含。throw→backend 跳过链路核实：ws-client.ts:609-613 handler 抛错回 error dict → ws_hub.py:616 raise DaemonRpcRemoteError → sweep except Exception continue。缺口：handler 本体未直接测（F3）。",
+    "FR-02": "兑现且测试锁定。候选=非终态行 join AgentSession；session_status in (ended,failed) 或 runtime_id is None 直接收（daemon 语义背书：会话终态=lifecycle kill+清注册表）；其余按 runtime→session 分组问询，task_id 不在 live 集才收；离线/超时/method_not_found 统一 except Exception 跳过（ws-client.ts:593-598 证实旧版 daemon 回 method_not_found error dict）。时间启发式全灭：TASK_SWEEP_GRACE/finalize_running_tasks_for_run/sweep_orphan_running_tasks 全 backend *.py 零命中；is_async/updated_at 在 agent_task_store.py 仅剩 upsert 字段映射（:173）与快照排序键维护（:149/:215/:248），死判路径零引用。测试 4 用例含 hub.calls 断言（RPC 按会话定向、终态会话零 RPC）。除 F1 窗口外语义正确。",
+    "FR-03": "兑现，测试部分锁定。close_run_steps.py:161-172 收口不再同步清扫，has_open_tasks（该 run 非终态行 limit 1）存在才 fire _delayed_task_resweep；:43-65 sleep(60)→独立 session→run 限定确认清扫（sweep 内部自 commit）；service.py:1450-1453 启动清理改调确认清扫（传 get_daemon_ws_hub）。触发时机无时间死判（60s 是收敛缓冲不是判据）。缺口：fire 门控与 60s 接线无直接测试（F3）。",
+    "FR-04": "兑现且测试锁定。RUN_CLOSE_SWEEP_REASON 字符串原样保留（:50，design 解释了文案不准确的取舍——标记可比性优先，合理）；复活分支 :230/:233 仅 message==RUN_CLOSE_SWEEP_REASON 的 stopped 行放行 running 心跳复活，真实终态行维持吸收；test_sweep_stopped_row_revives_on_running_heartbeat / test_genuine_stopped_absorbs_running_heartbeat 均在（test_agent_session_tasks.py:1044/:1079）。测试结果自述（后端 24/24+close 12/12+daemon 16 用例+tsc/bundle）未独立复跑，静态核实测试逻辑与被测行为对得上。"
+  },
+  "disclosureAdjudication": [
+    {
+      "item": "旧版 daemon method_not_found 窗口内卡死行暂不收敛",
+      "verdict": "可接受",
+      "reason": "链路已核实为真（method_not_found error dict → DaemonRpcRemoteError → 跳过），方向安全（宁可不收不错收），daemon 经 /daemon 分发自动升级，窗口有限；滞留态=running 显示，回到 v1 之前的展示问题而非数据损伤。"
+    },
+    {
+      "item": "放弃「问询结果缓存+TTL」",
+      "verdict": "可接受",
+      "reason": "缓存 TTL 会重新引入时间参数，与本变更「无时间死判」的第一原则冲突；清扫触发点低频，收益微小。"
+    },
+    {
+      "item": "放弃「daemon 周期性全量推送任务表」",
+      "verdict": "可接受",
+      "reason": "广播放大 + 双端状态机复杂度远超按需问询，与问题规模不成比例。"
+    },
+    {
+      "item": "daemon 注册表丢失窗口（终态事件无处归）靠确认清扫收敛",
+      "verdict": "可接受（附注）",
+      "reason": "方向安全（丢事件→行滞留 running，由下一触发点收口）。附注：触发点只有 run 收口（run 限定，只扫本 run）与后端启动（全量）——活跃会话中无后续 run 收口的历史滞留行要等后端重启才收敛，design「下一触发点把它收敛」的表述略乐观，但属披露范围内的收敛时机问题，非正确性问题。"
+    },
+    {
+      "item": "is_async 列恒 false 遗留",
+      "verdict": "可接受",
+      "reason": "已核实不再参与死判（grep 证据见 FR-02），纯元数据债，留待后续按需修的裁决合理。"
+    },
+    {
+      "item": "前两代裁决作废声明（run 终态即收 / 5 分钟宽限）",
+      "verdict": "可接受",
+      "reason": "两代函数与常量物理删除（全仓 .py 零命中，git 历史 c77f42488/db50e8832 可证演进链），标记/复活机制按声明沿用。"
+    }
+  ],
+  "artifactsCheck": {
+    "daemonBundle": "dist/daemon.js（2026-10-11 12:10 重建）含 session_live_tasks 5 处，handler 关键串（payload 缺 session_id / session manager not ready / sessionLiveTaskIds）与 src 1:1 匹配；dist/interactive/session-manager/background-tasks.js 含 sessionLiveTaskIds。注：daemon.ts 工作区 mtime（12:11:25）晚于 bundle（12:10:34），但本变更全部功能串均在 bundle 内，差异不涉本变更面。",
+    "apiTypes": "本变更 7 文件不涉 frontend/src/lib/api-types.ts（该文件在 baseline..HEAD 的差异来自并行变更）。"
+  },
+  "reviewScope": "增量复审（独立干净上下文）：HEAD c3948368，delta = git show c3948368（agent_task_store.py +10/-1、test_agent_session_tasks.py +37，2 文件 +46/-1）。核验：① 守卫双条件（id.in_ + status.notin_(_TERMINAL_STATUSES)，:148-153）与 rowcount 返回值语义；② 竞态用例窗口真实性——_create_session_with_run 造 status=active+runtime 绑定会话（test_session_plan_bash_events.py:77-83），候选行必走 pending RPC 路径（agent_task_store.py:117→122），_RacingHub.send_rpc 注入点严格处于候选 SELECT（:90-105）之后、最终 UPDATE（:148）之前，同 session commit 后 UPDATE 新事务可见 completed；断言三锁（swept==0/status completed/message None）且无守卫时用例必失败；③ 无新问题——候选 SELECT 本身限非终态，确定性用例守卫为 no-op，25 个测试计数与自述一致，两处调用方（service.py:1453/close_run_steps.py:61）仅日志用返回值。工作区两文件==HEAD（git status 核对）。未独立复跑测试（只读纪律），静态核验测试逻辑与被测行为一致。前轮 F2/F3（P3）按主会话裁决保留历史记录不修。"
+}

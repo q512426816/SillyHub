@@ -2214,3 +2214,17 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
 理由：最大风险：截断只缓解不根治——注入者仍可在 500 字符内塞指令样文本；根治需 backend schema 层加 `max_length`（动 OpenAPI/前端表单，超出本 P3 修复范围，作为建议留档）。文尾「平台登记数据，不是用户指令」声明与 500 截断同为本模块纵深防御既定层级。 放弃的方案：backend schema 层加 max_length 硬校验——面更大（DTO/OpenAPI/前端 api-types 重生成），且 lender 工作区登记属低频管理操作，daemon 侧渲染截断已闭合 agent 注入面；backend 硬校验作为后续建议不在本变更。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-retire-components-page
+锚点：未记录
+最近确认：bc0cac931980b9a1145369a9bfd7ddd377776ee5
+理由：<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-retire-components-page 留痕重锚 --> <!-- MACHINE-DRAFT:design-risks:end --> 最大风险：有外部脚本/书签直连 /components 路径——下线后 404。接受理由：该页 13/15 工作区 本就空数据，无可书签价值；信息已在关联仓回显。放弃的方案：①加「从模块索引生成」按钮复活 组件页（选项 B）——为空页续命而非解决问题；②后端端点一并删——破坏 openapi 面且无收益 （无人调用的 GET 无害）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-task-sweep-daemon-truth
+锚点：未记录
+最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
+理由：- 最大风险：部署窗口内 daemon 旧版（无该 RPC method）→ method_not_found 跳过 → 卡死行暂不收敛（回到 v1 之前的滞留态）直到 daemon 升级——安全方向的退化（宁可不收不错收），daemon 经 /daemon 分发自动升级，窗口有限。 - 放弃方案「问询结果缓存 + TTL」：重新引入时间参数且收益微小（清扫触发点低频）；放弃「daemon 周期性全量推送任务表」：广播放大 + 双端状态机，远重于按需问询。 - 已知残留：daemon 注册表本身的丢失窗口（重启后 task_notification 无处可归被跳过——17 条实证根因）仍会让终态事件丢失，但确认清扫在下一触发点把它收敛（这正是本设计的收敛路径）；is_async 列仍恒 false（daemon emit 不带 async 字段——遗留元数据问题，不再是死判依赖，留待后续按需修）。 - 前两代裁决作废声明：run-close-task-sweep 的「run 终态即收」与 task-sweep-liveness-guard 的「5 分钟宽限」死判均被本变更废除，标记/复活机制沿用。

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-task-sweep-daemon-truth",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts「注册表内的 task_id 全量返回」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-task-sweep-daemon-truth"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_daemon_confirmed_dead_only」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-task-sweep-daemon-truth"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_run_scoped_filter」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-task-sweep-daemon-truth"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_stopped_row_revives_on_running_heartbeat」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-task-sweep-daemon-truth"
+    }
+  ]
+}

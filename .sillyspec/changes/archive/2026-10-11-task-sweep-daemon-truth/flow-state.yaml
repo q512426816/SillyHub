@@ -1,6 +1,14 @@
-tier: thin
+tier: thick
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,6 +31,14 @@ input: >-
   - daemon bundle 重建通过、后端测试全绿（新用例：确认收/确认留/离线跳过/会话终态直收）+ 既有 agent_session_tasks 回归
 autopilot: true
 baseline_commit: 3c25091810c5773e4cdb734bc4edfa24446199fa
-updatedAt: '2026-10-11T03:58:30.559Z'
+updatedAt: '2026-10-11T04:47:41.005Z'
 baseline_sha256: 873978a1198e0694b005afdb43d8c9b3134b342b90f2caddc80a3f4dfbbddbd1
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py20+jsx39)+fr(51)（129.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011043219\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011043219\test-result.json｜门文件
+  32 个
 

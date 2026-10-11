@@ -1,0 +1,1959 @@
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/flow-state.yaml b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/flow-state.yaml
+new file mode 100644
+index 000000000..94b083de8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/flow-state.yaml
+@@ -0,0 +1,28 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  用户二次指正：超时无心跳≠死（长耗时任务可能静默很久）——上一变更的 5 分钟宽限启发式仍会误判。彻底修正：死活判定回归唯一真相源 daemon 注册表（mgr._backgroundTasks：task_started
++  注册、task_notification 注销、会话终态清空=SDK 进程 kill 任务随进程消亡——daemon 自己的权威语义）。实现：daemon 新增 session_live_tasks RPC（backend→daemon
++  既有 rpc_id 通道，list_dir/linked_repos 同款）；后端清扫改为「确认死才收」——会话终态（ended/failed）直接收（daemon 语义背书），其余逐 runtime 问 daemon
++  活跃集，不在集合内才收；daemon 离线/超时跳过该批（fail-open 保活）。废除全部时间启发式（TASK_SWEEP_GRACE/延迟复扫宽限）；run 收口改为 +60s 后跑一次确认清扫；复活分支保留为误收兜底。
++
++  成功标准：
++
++  - daemon session_live_tasks RPC 返回该会话注册表活跃 task_id 列表（未注册会话=空表）
++
++  - 后端清扫：会话终态行直接收口；活跃会话行经 daemon 确认不在活跃集才收口；daemon 离线跳过不误收
++
++  - 活着但长时间静默的任务（daemon 注册表在）永不被收口——无任何时间启发式参与死判
++
++  - 清扫行标记与复活分支保留（误收自愈）；真实终态吸收不回归
++
++  - daemon bundle 重建通过、后端测试全绿（新用例：确认收/确认留/离线跳过/会话终态直收）+ 既有 agent_session_tasks 回归
++autopilot: true
++baseline_commit: 3c25091810c5773e4cdb734bc4edfa24446199fa
++updatedAt: '2026-10-11T03:58:30.559Z'
++baseline_sha256: 873978a1198e0694b005afdb43d8c9b3134b342b90f2caddc80a3f4dfbbddbd1
++
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index f19b370dd..6fcb566d6 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -64,7 +64,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+     },
+     "pi": {
+         "resume": True,
+-        "mcp": False,
++        "mcp": True,
+         "multimodal": True,
+         "attachments": True,
+         "thinking": True,
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 6fcaa18b9..1b2c3eb96 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -1442,19 +1442,20 @@ class AgentService:
+                 grace_seconds=int(STALE_RUN_ACTIVE_GRACE.total_seconds()),
+                 tracked_runs=len(deferred),
+             )
+-        # 2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但其
+-        # agent_session_task 行仍 running 的存量（历史收口无清扫 / 重启判死
+-        # 路径不经 daemon 收口）批量收口 stopped；失败仅日志不阻塞启动。
++        # 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-daemon-truth：
++        # 启动确认清扫——run 已终态但 agent_session_task 行仍 running 的存量
++        # （历史无清扫 / 终态事件丢失），经 daemon 注册表确认（session_live_tasks
++        # RPC；会话终态直接收）才收口；失败仅日志不阻塞启动。
+         try:
+-            from app.modules.daemon.agent_task_store import sweep_orphan_running_tasks
++            from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
++            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+ 
+-            swept = await sweep_orphan_running_tasks(self._session)
++            swept = await sweep_confirmed_dead_tasks(self._session, hub=get_daemon_ws_hub())
+             if swept:
+                 log.info("startup_orphan_task_sweep", swept_tasks=swept)
+         except Exception as exc:
+-            # 评审 P3-2 修复：sweep 失败时回滚本事务——session 不留 aborted 态，
+-            # 免得同 session 的后续启动逻辑（gate reconcile 等）撞
+-            # PendingRollbackError 被连带跳过；回滚后仅日志，不阻塞启动。
++            # sweep 失败时回滚本事务——session 不留 aborted 态，免得同 session 的
++            # 后续启动逻辑（gate reconcile 等）撞 PendingRollbackError 被连带跳过。
+             await self._session.rollback()
+             log.warning("startup_orphan_task_sweep_failed", error=str(exc))
+         return cleaned
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index 62ae8be27..b5b6cb44b 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -25,15 +25,17 @@ insert-or-update 单行写入（R-03 控写放大，刻意不做事件流水表
+ from __future__ import annotations
+ 
+ import uuid
+-from datetime import UTC, datetime, timedelta
++from datetime import UTC, datetime
+ 
+ from sqlalchemy import select, update
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+-from app.modules.agent.model import AgentRun
++from app.core.logging import get_logger
+ from app.modules.daemon.model import AgentSessionTask
+ from app.modules.daemon.schema import AgentTaskStatusEvent
+ 
++_log = get_logger(__name__)
++
+ # 终态集合（语义②/③的判定口径；schema Literal 四态中的非 running 三态，与
+ # 前端归约的终态吸收态一致）。
+ _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"})
+@@ -42,99 +44,122 @@ _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"
+ # 2026-10-11-task-sweep-liveness-guard：该 message 兼作「清扫收口行」识别标记
+ # ——upsert 对携带本标记的 stopped 行放行 running 心跳复活（自愈误收的活跃
+ # 任务），事件驱动的真实终态行（message 非本标记）维持终态吸收。
++# 2026-10-11-task-sweep-daemon-truth：文案沿用（历史语义「随轮收口」不再准确，
++# 实际含义为「daemon 确认不在活跃注册表」——保留原文仅为复活标记稳定性，
++# 不改已落库行的标记可比性）。
+ RUN_CLOSE_SWEEP_REASON = "轮次已结束，任务未上报终态"
+ 
+-# 2026-10-11-task-sweep-liveness-guard：清扫心跳宽限窗——后台子代理任务跨轮次
+-# 存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮
+-# 继续回复，用户指正），且线上 is_async 恒 false（daemon 上报未打标），按标记
+-# 排除保护不了它们。以「最近无心跳」为死判：updated_at 距清扫时刻超过本窗才
+-# 收口；宽限内活跃（含跨轮次后台任务）不误收，真死的任务由延迟复扫/启动兜底
+-# 在窗后收敛。
+-TASK_SWEEP_GRACE = timedelta(minutes=5)
+-
+ 
+-async def finalize_running_tasks_for_run(
++async def sweep_confirmed_dead_tasks(
+     session: AsyncSession,
+     *,
+-    run_id: uuid.UUID,
+-    now: datetime | None = None,
++    hub,
++    run_id: uuid.UUID | None = None,
++    rpc_timeout: float = 5.0,
+ ) -> int:
+-    """2026-10-10-run-close-task-sweep：把一个 run 的非终态任务行批量收口 stopped。
++    """2026-10-11-task-sweep-daemon-truth：确认制任务清扫——问 daemon 注册表才收口。
++
++    演进史：run-close-task-sweep（run 终态即收）→ task-sweep-liveness-guard
++    （5 分钟心跳宽限启发式）均被用户指正误判（后台任务跨轮存活 / 长耗时任务
++    静默）。本版死活判定回归唯一真相源——daemon 后台任务注册表
++    （mgr._backgroundTasks：task_started 注册 / task_notification 注销 / 会话
++    终态清空=SDK 进程 kill 任务随进程消亡，daemon 自己的权威语义）：
++
++    - 会话终态（ended/failed）或无绑定 runtime → 任务必死（daemon 语义背书），
++      直接收口；
++    - 其余候选逐 runtime 调 ``session_live_tasks`` RPC 问活跃集，候选 task_id
++      不在活跃集内才收口（活着但长时间静默的任务注册表仍在，永不被误收——
++      无任何时间启发式参与死判）；
++    - daemon 离线 / RPC 超时 / 旧版 daemon method_not_found → 跳过该批
++      （fail-open 保活，下轮触发点再问）。
+ 
+-    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理被放弃/未上报终态
+-    时 agent_session_task 永卡 running（17 条），任务列表在会话结束后仍显示
+-    「进行中」。调用方（close_interactive_run 同事务 / 启动兜底清扫 / 延迟复扫）
+-    以本函数收口。
++    清扫行写 RUN_CLOSE_SWEEP_REASON 标记（复活分支识别）；已终态行不触碰。
++    run_id 限定时只扫该 run 的候选（run 收口延迟确认清扫用）；不限定则全量
++    （启动兜底用）。
+ 
+-    2026-10-11-task-sweep-liveness-guard 收窄（用户指正 run 终态≠任务必死）：
+-    只收「最近无心跳」（updated_at 距 now 超过 TASK_SWEEP_GRACE）且非异步标记
+-    （is_async，双保险——线上恒 false 但语义上后台任务应打标）的行；宽限窗内
+-    活跃的任务（跨轮次后台任务）不误收——真死任务由调用方的延迟复扫在窗后
+-    收敛。已终态行不触碰（终态定格语义①③不破坏）；清扫行带
+-    RUN_CLOSE_SWEEP_REASON 标记，误收的活跃任务下一个 running 心跳经 upsert
+-    复活分支自愈（真实终态行维持终态吸收不复活）。
++    Args:
++        hub: DaemonWsHub 或等价物（async send_rpc(daemon_id, method, params,
++            timeout=...)）。
++        run_id: 可选——限定候选行归属的 run。
+ 
+     Returns:
+         实际收口的行数。
+     """
+-    sweep_at = now or datetime.now(UTC)
+-    result = await session.execute(
+-        update(AgentSessionTask)
+-        .where(
+-            AgentSessionTask.run_id == run_id,
+-            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+-            AgentSessionTask.is_async.is_(False),
+-            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
+-        )
+-        .values(
+-            status="stopped",
+-            finished_at=sweep_at,
+-            updated_at=sweep_at,
+-            message=RUN_CLOSE_SWEEP_REASON,
+-        )
+-    )
+-    return int(result.rowcount or 0)
+-
++    from app.modules.agent.model import AgentSession
+ 
+-async def sweep_orphan_running_tasks(session: AsyncSession, *, now: datetime | None = None) -> int:
+-    """2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但任务仍 running 的行。
+-
+-    自愈两类存量：①历史收口无清扫（close_interactive_run 接清扫前的旧数据）；
+-    ②后端重启判死路径（cleanup_stale_runs 把 running run 翻 failed）不经
+-    daemon 收口、无 task 事件。仅扫 run 已终态（TERMINAL_TURN_STATUSES）的行——
+-    running run 的任务是活跃心跳，不误伤。
++    cand = (
++        await session.execute(
++            select(
++                AgentSessionTask.id,
++                AgentSessionTask.task_id,
++                AgentSessionTask.session_id,
++                AgentSession.runtime_id,
++                AgentSession.status.label("session_status"),
++            )
++            .join(AgentSession, AgentSessionTask.session_id == AgentSession.id)
++            .where(
++                AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
++                *([] if run_id is None else [AgentSessionTask.run_id == run_id]),
++            )
++        )
++    ).all()
++    if not cand:
++        return 0
+ 
+-    2026-10-11-task-sweep-liveness-guard：同 finalize 的心跳宽限与 is_async
+-    豁免（跨轮次后台任务可跨后端重启存活，updated_at 新鲜的不误收；真死任务
+-    下次重启收敛）。
++    dead_row_ids: list[uuid.UUID] = []
++    # runtime_id -> {session_id: {task_id: row_id}}（待 daemon 确认的候选）
++    pending: dict[uuid.UUID, dict[uuid.UUID, dict[str, uuid.UUID]]] = {}
++    for row in cand:
++        session_status = str(row.session_status or "")
++        if session_status in ("ended", "failed") or row.runtime_id is None:
++            dead_row_ids.append(row.id)
++            continue
++        pending.setdefault(row.runtime_id, {}).setdefault(row.session_id, {})[row.task_id] = row.id
+ 
+-    Returns:
+-        实际收口的行数。
+-    """
+-    # late import 防 agent ↔ daemon 循环依赖（对齐本模块 upsert 的调用方惯例）。
+-    from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
++    for runtime_id, sessions in pending.items():
++        for sess_id, tasks in sessions.items():
++            try:
++                res = await hub.send_rpc(
++                    runtime_id,
++                    "session_live_tasks",
++                    {"session_id": str(sess_id)},
++                    timeout=rpc_timeout,
++                )
++                live = {str(t) for t in (res.get("live_task_ids") or [])}
++            except Exception as exc:
++                # 离线/超时/旧版 method_not_found → fail-open 跳过该会话候选。
++                _log.warning(
++                    "task_sweep_daemon_confirm_failed",
++                    runtime_id=str(runtime_id),
++                    session_id=str(sess_id),
++                    error=str(exc),
++                )
++                continue
++            dead_row_ids.extend(rid for tid, rid in tasks.items() if tid not in live)
+ 
+-    sweep_at = now or datetime.now(UTC)
++    if not dead_row_ids:
++        return 0
++    now = datetime.now(UTC)
++    # 评审 F1（P2）修复：UPDATE 带非终态守卫——候选 SELECT 与最终 UPDATE 之间
++    # 有真实窗口（RPC 逐会话串行，离线每会话吃满超时），期间 task_notification
++    # 终态事件提交后按 id 裸 UPDATE 会把 completed/failed 覆写成 stopped+清扫
++    # 标记，且已终态任务无后续事件、复活分支/latest-wins 均无法自愈（违反语义
++    # ①终态定格与「已终态行不触碰」承诺；v2 的同款守卫在重写时丢失，此处恢复）。
+     result = await session.execute(
+         update(AgentSessionTask)
+         .where(
++            AgentSessionTask.id.in_(dead_row_ids),
+             AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+-            AgentSessionTask.is_async.is_(False),
+-            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
+-            AgentSessionTask.run_id.in_(
+-                select(AgentRun.id).where(AgentRun.status.in_(TERMINAL_TURN_STATUSES))
+-            ),
+         )
+         .values(
+             status="stopped",
+-            finished_at=sweep_at,
+-            updated_at=sweep_at,
++            finished_at=now,
++            updated_at=now,
+             message=RUN_CLOSE_SWEEP_REASON,
+         )
+     )
+-    swept = int(result.rowcount or 0)
+     await session.commit()
+-    return swept
++    return int(result.rowcount or 0)
+ 
+ 
+ def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index e7df078aa..42a7a114c 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -42,25 +42,23 @@ from .group_bridge import _close_group_hooks
+ 
+ 
+ async def _delayed_task_resweep(run_id: uuid.UUID) -> None:
+-    """2026-10-11-task-sweep-liveness-guard：run 收口后的延迟任务复扫。
++    """2026-10-11-task-sweep-daemon-truth：run 收口后的延迟确认清扫。
+ 
+-    收口时点处于心跳宽限窗内（或带异步标记）而未被立即收口的任务行，若此后
+-    再无心跳，宽限窗 + 60s 缓冲后由本复扫收口——孤儿收敛不依赖后端重启。
+-    独立 DB session（H1）；复扫幂等（finalize 条件同款，已终态/仍新鲜行 no-op）。
++    后台任务跨轮存活（run 收口时可能仍在跑），收口瞬间不判死活；60s 缓冲后
++    问 daemon 注册表（session_live_tasks RPC）确认——不在活跃集的候选才收口
++    （终态事件丢失的孤儿收敛；daemon 离线则跳过等下一触发点）。独立 DB
++    session（H1）；幂等（确认条件同款，已终态行 no-op）。
+     """
+     import asyncio
+ 
+     from app.core.db import get_session_factory
+-    from app.modules.daemon.agent_task_store import (
+-        TASK_SWEEP_GRACE,
+-        finalize_running_tasks_for_run,
+-    )
++    from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
++    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+ 
+-    await asyncio.sleep(TASK_SWEEP_GRACE.total_seconds() + 60)
++    await asyncio.sleep(60)
+     session_factory = get_session_factory()
+     async with session_factory() as db:
+-        swept = await finalize_running_tasks_for_run(db, run_id=run_id)
+-        await db.commit()
++        swept = await sweep_confirmed_dead_tasks(db, hub=get_daemon_ws_hub(), run_id=run_id)
+     if swept:
+         _rsvc.log.info(
+             "run_close_task_resweep",
+@@ -154,29 +152,24 @@ async def close_interactive_run(
+         result_summary=result_summary,
+     )
+     session_end_intent, sessions_changed_intent = await _close_flip_session(svc, agent_run, now)
+-    # 2026-10-10-run-close-task-sweep：同事务收口该 run 的非终态任务行——子代理
+-    # 被放弃/未上报终态时 agent_session_task 永卡 running（会话 47e2ff1a run
+-    # 5e485ba2 实证 17 条），任务列表在会话结束后仍显示「进行中」。已终态行
+-    # 不触碰；清扫后迟到 running 心跳被 upsert 终态吸收挡下（语义②）。
+-    # 2026-10-11-task-sweep-liveness-guard：finalize 只收「宽限窗外无心跳」行
+-    # （跨轮次后台任务不误收）；窗内活跃任务由下方延迟复扫在窗后收敛，不靠
+-    # 后端重启兜底。
+-    from app.modules.daemon.agent_task_store import (
+-        finalize_running_tasks_for_run,
+-    )
+-
+-    swept_tasks = await finalize_running_tasks_for_run(svc._session, run_id=agent_run.id, now=now)
+-    if swept_tasks:
+-        _rsvc.log.info(
+-            "run_close_task_sweep",
+-            agent_run_id=str(agent_run.id),
+-            swept_tasks=swept_tasks,
++    # 2026-10-11-task-sweep-daemon-truth：run 收口瞬间不判任务死活（后台任务
++    # 跨轮存活——立即收会误伤）；该 run 有非终态候选时 fire 60s 后的延迟确认
++    # 清扫（问 daemon 注册表，见 _delayed_task_resweep），无候选零开销。
++
++    from app.modules.daemon.model import AgentSessionTask as _TaskRow
++
++    has_open_tasks = (
++        await svc._session.execute(
++            select(_TaskRow.id)
++            .where(
++                _TaskRow.run_id == agent_run.id,
++                _TaskRow.status.notin_(("completed", "failed", "stopped")),
++            )
++            .limit(1)
+         )
+-    # 延迟复扫（恒排——本次「宽限窗内活跃/异步标记」未扫的行，若此后再无心跳，
+-    # 宽限+缓冲后由本复扫收口，不靠后端重启兜底；无非终态行时 UPDATE no-op
+-    # 代价可忽略）：独立 DB session，对齐 dispatch_next_queued_message 的 H1
+-    # 模式；异常交 _fire_background_task done_callback 记日志，不影响已提交终态。
+-    svc._fire_background_task(_delayed_task_resweep(agent_run.id), run_id=agent_run.id)
++    ).scalar_one_or_none()
++    if has_open_tasks is not None:
++        svc._fire_background_task(_delayed_task_resweep(agent_run.id), run_id=agent_run.id)
+     await svc._session.commit()
+     await svc._session.refresh(agent_run)
+     await _close_post_commit(
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index 7c2d40275..b73b164cb 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -869,187 +869,266 @@ class TestSessionDeleteCascade:
+         assert count_after == 0
+ 
+ 
+-# ── 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-liveness-guard ───
++# ── 2026-10-11-task-sweep-daemon-truth：确认制任务清扫 ────────────────────────
++
++
++class _StubHub:
++    """send_rpc 桩——按 (runtime_id, session_id) 脚本化返回活跃集或抛离线。"""
++
++    def __init__(self, responses: dict):
++        # key: (runtime_id, session_id_str) -> list[str] 活跃 task_id 或 Exception
++        self.responses = responses
++        self.calls: list = []
++
++    async def send_rpc(self, daemon_id, method, params, timeout=None):
++        self.calls.append((daemon_id, method, dict(params)))
++        value = self.responses.get((daemon_id, params["session_id"]))
++        if isinstance(value, Exception):
++            raise value
++        return {"session_id": params["session_id"], "live_task_ids": value or []}
+ 
+ 
+ class TestRunCloseTaskSweep:
+-    """run 终态任务清扫（心跳宽限 + is_async 豁免 + 清扫行复活）行为钉死。
++    """确认制清扫（daemon 注册表 = 唯一真相源）行为钉死。
+ 
+-    线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理未上报终态时
+-    agent_session_task 永卡 running。2026-10-11 修正（用户指正 run 终态≠任务
+-    必死——后台任务跨轮次存活）：清扫只收「宽限窗外无心跳」的同步行；清扫行
+-    带标记，迟到 running 心跳复活自愈；真实终态行维持终态吸收。
++    演进：run 终态即收（v1）→ 5 分钟心跳宽限（v2）均被用户指正误判（后台任务
++    跨轮存活 / 长耗时任务静默）。v3：会话终态直接收（daemon 语义背书：会话
++    end/fail 时 SDK 进程 kill、任务随进程消亡）；活跃会话逐 runtime 问
++    session_live_tasks RPC，不在活跃集才收；daemon 离线跳过（fail-open 保活）。
+     """
+ 
+-    @staticmethod
+-    def _future(minutes: float) -> datetime:
+-        return datetime.now(UTC) + timedelta(minutes=minutes)
+-
+     @pytest.mark.asyncio
+-    async def test_finalize_sweeps_only_stale_sync(
++    async def test_sweep_daemon_confirmed_dead_only(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """宽限窗外同步行收口；窗内新鲜行（活跃心跳）与异步标记行豁免。"""
++        """daemon 确认不在活跃集 → 收口；确认在活跃集（静默但仍活）→ 保留。"""
+         from app.modules.daemon.agent_task_store import (
+-            finalize_running_tasks_for_run,
++            sweep_confirmed_dead_tasks,
+             upsert_agent_task,
+         )
+ 
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-stale"))
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-fresh"))
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-async", async_=True))
+-        await upsert_agent_task(
+-            db_session, _event(ag_session.id, run.id, "t-done", status="completed")
+-        )
+-        # 老化 t-stale / t-async（updated_at 拨回 1 小时前=长期无心跳）；t-fresh
+-        # 保持刚心跳（真实 now 下宽限窗内）。
+-        from sqlalchemy import update as sa_update
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-dead"))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-alive"))
+ 
+-        await db_session.execute(
+-            sa_update(AgentSessionTask)
+-            .where(AgentSessionTask.task_id.in_(["t-stale", "t-async"]))
+-            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
+-        )
+-        await db_session.commit()
+-
+-        # 清扫时刻 = 真实 now：仅 t-stale（窗外无心跳且非异步）收口；t-fresh
+-        # （窗内心跳）/ t-async（异步标记，虽已无心跳）豁免；t-done 已终态不触碰。
+-        swept = await finalize_running_tasks_for_run(db_session, run_id=run.id)
++        hub = _StubHub({(rt.id, str(ag_session.id)): ["t-alive"]})
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+ 
+         assert swept == 1
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-stale"].status == "stopped"
+-        assert rows["t-stale"].finished_at is not None
+-        assert "轮次已结束" in (rows["t-stale"].message or "")
+-        assert rows["t-fresh"].status == "running"
+-        assert rows["t-async"].status == "running"
+-        assert rows["t-done"].status == "completed"
++        assert rows["t-dead"].status == "stopped"
++        assert "轮次已结束" in (rows["t-dead"].message or "")
++        # daemon 说活着的（哪怕长时间静默）永不误收——无时间启发式。
++        assert rows["t-alive"].status == "running"
++        # RPC 按会话问询一次。
++        assert hub.calls == [(rt.id, "session_live_tasks", {"session_id": str(ag_session.id)})]
+ 
+     @pytest.mark.asyncio
+-    async def test_sweep_stopped_row_revives_on_running_heartbeat(
++    async def test_sweep_daemon_offline_skips(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """清扫收口行（message=清扫原因）收 running 心跳 → 复活自愈。"""
++        """daemon 离线/超时 → 该批跳过不误收（fail-open 保活）。"""
+         from app.modules.daemon.agent_task_store import (
+-            finalize_running_tasks_for_run,
++            sweep_confirmed_dead_tasks,
+             upsert_agent_task,
+         )
++        from app.modules.daemon.ws_hub import DaemonRuntimeOffline
+ 
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
+-        await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-maybe"))
+ 
+-        # 误收的活跃任务下一个心跳复活（跨轮次后台任务场景）。
+-        await upsert_agent_task(
+-            db_session,
+-            _event(ag_session.id, run.id, "t-x", status="running", progress=42),
+-        )
++        hub = _StubHub({(rt.id, str(ag_session.id)): DaemonRuntimeOffline("offline")})
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+ 
++        assert swept == 0
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-x"].status == "running"
+-        assert rows["t-x"].finished_at is None
+-        assert rows["t-x"].message is None
+-        assert rows["t-x"].progress == 42
++        assert rows["t-maybe"].status == "running"
+ 
+     @pytest.mark.asyncio
+-    async def test_genuine_stopped_absorbs_running_heartbeat(
++    async def test_sweep_terminal_session_direct_no_rpc(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """事件驱动的真实 stopped 行（message 非清扫标记）维持终态吸收。"""
+-        from app.modules.daemon.agent_task_store import upsert_agent_task
++        """会话终态（ended）与无 runtime 行直接收口——不经 RPC。"""
++        from app.modules.agent.model import AgentRun
++        from app.modules.agent.model import AgentSession as AgSessionModel
++        from app.modules.daemon.agent_task_store import (
++            sweep_confirmed_dead_tasks,
++            upsert_agent_task,
++        )
+ 
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+-        await upsert_agent_task(
+-            db_session,
+-            _event(ag_session.id, run.id, "t-s", status="stopped", message="用户停止"),
++        ended_session = AgSessionModel(
++            id=uuid.uuid4(),
++            user_id=user_id,
++            runtime_id=rt.id,
++            provider="claude",
++            status="ended",
+         )
+-
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-s", status="running"))
+-
+-        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-s"].status == "stopped"
+-        assert (rows["t-s"].message or "") == "用户停止"
++        noruntime_session = AgSessionModel(
++            id=uuid.uuid4(),
++            user_id=user_id,
++            runtime_id=None,
++            provider="claude",
++            status="active",
++        )
++        db_session.add_all([ended_session, noruntime_session])
++        await db_session.commit()
++        for sess in (ended_session, noruntime_session):
++            r = AgentRun(
++                id=uuid.uuid4(),
++                task_id=uuid.uuid4(),
++                agent_type="claude_code",
++                agent_session_id=sess.id,
++                status="completed",
++            )
++            db_session.add(r)
++            await db_session.commit()
++            await upsert_agent_task(db_session, _event(sess.id, r.id, f"t-{str(sess.id)[:4]}"))
++        # 对照组：活跃会话 + 在线 daemon 说活 → 保留。
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-live"))
++        hub = _StubHub({(rt.id, str(ag_session.id)): ["t-live"]})
++
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
++
++        assert swept == 2
++        rows = {r.task_id: r for r in await _task_rows(db_session, ended_session.id)}
++        assert all(r.status == "stopped" for r in rows.values())
++        rows2 = {r.task_id: r for r in await _task_rows(db_session, noruntime_session.id)}
++        assert all(r.status == "stopped" for r in rows2.values())
++        live_rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert live_rows["t-live"].status == "running"
++        # 终态/无 runtime 会话零 RPC（只有活跃会话问了一次）。
++        assert len(hub.calls) == 1
+ 
+     @pytest.mark.asyncio
+-    async def test_sweep_orphans_stale_terminal_run_only(
++    async def test_sweep_run_scoped_filter(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """启动兜底：终态 run + 宽限窗外无心跳收口；新鲜行 / running run / 异步行不误扫。"""
+-        from sqlalchemy import update as sa_update
+-
++        """run_id 限定：只扫该 run 的候选（run 收口延迟确认清扫口径）。"""
+         from app.modules.agent.model import AgentRun
+         from app.modules.daemon.agent_task_store import (
+-            sweep_orphan_running_tasks,
++            sweep_confirmed_dead_tasks,
+             upsert_agent_task,
+         )
+ 
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+-        ag_session, live_run = await _create_session_with_run(db_session, user_id, rt.id)
+-        done_run = AgentRun(
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        other_run = AgentRun(
+             id=uuid.uuid4(),
+             task_id=uuid.uuid4(),
+             agent_type="claude_code",
+             agent_session_id=ag_session.id,
+             status="completed",
+         )
+-        db_session.add(done_run)
+-        await db_session.commit()
+-        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan"))
+-        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan-fresh"))
+-        await upsert_agent_task(
+-            db_session, _event(ag_session.id, done_run.id, "t-orphan-async", async_=True)
+-        )
+-        await upsert_agent_task(db_session, _event(ag_session.id, live_run.id, "t-live"))
+-        # 老化 t-orphan / t-orphan-async（真孤儿/停跳异步——均拨回 1 小时前）。
+-        await db_session.execute(
+-            sa_update(AgentSessionTask)
+-            .where(AgentSessionTask.task_id.in_(["t-orphan", "t-orphan-async"]))
+-            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
+-        )
++        db_session.add(other_run)
+         await db_session.commit()
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-in-run"))
++        await upsert_agent_task(db_session, _event(ag_session.id, other_run.id, "t-other"))
+ 
+-        # 真实 now：仅终态 run + 窗外无心跳 + 非异步的 t-orphan 收口。
+-        swept = await sweep_orphan_running_tasks(db_session)
++        hub = _StubHub({(rt.id, str(ag_session.id)): []})  # daemon：全部不在活跃集
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub, run_id=run.id)
+ 
+         assert swept == 1
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-orphan"].status == "stopped"
+-        assert rows["t-orphan-fresh"].status == "running"
+-        assert rows["t-orphan-async"].status == "running"
+-        assert rows["t-live"].status == "running"
++        assert rows["t-in-run"].status == "stopped"
++        assert rows["t-other"].status == "running"
+ 
+     @pytest.mark.asyncio
+-    async def test_delayed_resweep_catches_now_silent(
++    async def test_sweep_terminal_race_not_overwritten(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """延迟复扫语义：收口时新鲜的行，若此后无心跳，宽限+缓冲后同款 finalize 收口。"""
++        """评审 F1（P2）：SELECT→UPDATE 窗口内到达的真实终态不被覆写。
++
++        构造：候选 SELECT 后、最终 UPDATE 前（RPC 回调即该窗口的确定性钩子点），
++        任务行被 task_notification 终态事件写成 completed——UPDATE 的非终态守卫
++        必须放它过去（终态定格，语义①），不得覆写为 stopped+清扫标记。
++        """
+         from app.modules.daemon.agent_task_store import (
+-            finalize_running_tasks_for_run,
++            sweep_confirmed_dead_tasks,
+             upsert_agent_task,
+         )
+ 
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-wait"))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-race"))
++
++        class _RacingHub(_StubHub):
++            async def send_rpc(self, daemon_id, method, params, timeout=None):
++                # 窗口钩子：RPC 在途时终态事件先到达并提交。
++                await upsert_agent_task(
++                    db_session,
++                    _event(ag_session.id, run.id, "t-race", status="completed"),
++                )
++                return await super().send_rpc(daemon_id, method, params, timeout)
++
++        hub = _RacingHub({(rt.id, str(ag_session.id)): []})  # daemon：不在活跃集
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
++
++        assert swept == 0  # 唯一候选已终态 → 守卫放行，零收口
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-race"].status == "completed"
++        assert rows["t-race"].message is None  # 未被清扫标记污染
++
++    @pytest.mark.asyncio
++    async def test_sweep_stopped_row_revives_on_running_heartbeat(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """清扫收口行（message=清扫原因）收 running 心跳 → 复活自愈。"""
++        from sqlalchemy import update as sa_update
+ 
+-        # 收口时点（now）：宽限内 → 不收。
+-        assert (
+-            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(1))
+-            == 0
++        from app.modules.daemon.agent_task_store import (
++            RUN_CLOSE_SWEEP_REASON,
++            upsert_agent_task,
+         )
+-        # 复扫时点（宽限+60s 后）：仍无心跳 → 收口。
+-        assert (
+-            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
+-            == 1
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
++        # 直接种入清扫态（stopped + 标记）——复活分支只认标记。
++        await db_session.execute(
++            sa_update(AgentSessionTask)
++            .where(AgentSessionTask.task_id == "t-x")
++            .values(status="stopped", message=RUN_CLOSE_SWEEP_REASON, finished_at=datetime.now(UTC))
+         )
++        await db_session.commit()
++
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-x", status="running", progress=42),
++        )
++
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-wait"].status == "stopped"
++        assert rows["t-x"].status == "running"
++        assert rows["t-x"].finished_at is None
++        assert rows["t-x"].message is None
++        assert rows["t-x"].progress == 42
++
++    @pytest.mark.asyncio
++    async def test_genuine_stopped_absorbs_running_heartbeat(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """事件驱动的真实 stopped 行（message 非清扫标记）维持终态吸收。"""
++        from app.modules.daemon.agent_task_store import upsert_agent_task
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-s", status="stopped", message="用户停止"),
++        )
++
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-s", status="running"))
++
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-s"].status == "stopped"
++        assert (rows["t-s"].message or "") == "用户停止"
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index ae2cb8cf9..aa850b531 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -142,7 +142,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   },
+   pi: {
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index a864edc46..7bb1aee81 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -77,6 +77,7 @@ import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
+ // createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
+ import { CursorDriver } from './interactive/cursor-driver.js';
+ import { SessionManager } from './interactive/session-manager.js';
++import { isMainAgentMcpCandidate } from './interactive/providers.js';
+ import type { SessionEventForBackend } from './interactive/types.js';
+ import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+ import { DAEMON_VERSION } from './daemon-version.js';
+@@ -859,8 +860,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
+       // ql-20260827-007：后台任务终态自动唤醒——session-manager debounce 合并后
+       // 经 hubClient 注入唤醒消息（失败仅日志，session-manager 侧已 catch）。
++      // 2026-10-11-queue-wakeup-origin-guard：携带 origin='task_wakeup' 结构化
++      // 标记（X-API-Key 服务凭证路径）——backend 排队豁免/合并只认该标记。
+       onTaskWakeupInject: async (sessionId, prompt) => {
+-        await client.injectSessionPrompt(sessionId, prompt);
++        await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
+       },
+       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
+         void (async () => {
+@@ -960,18 +963,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // isMainAgentSession：读 ctx.provider + ctx.stage 判定本 session 是否注入
+       // 主 agent MCP tool。链路：backend 写 lease.metadata.stage → daemon claim
+       // payload stage（lease/context.py:479）→ execPayload.stage（daemon.ts:3760）
+-      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。判据
+-      // （design §5 Phase 2）：
+-      //   - provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true：
+-      //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
+-      //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
+-      //   - provider=claude 且 stage='mission_worker'（backend execution.py
+-      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不进主控分支（防 worker
+-      //     递归派发与 converge 干扰，审查 CC-12）——但改走下方 isWorkerSession
+-      //     分支注入受限 server（task-06 2026-08-25-team-subsession-governance
+-      //     / D-003@v1，谓词三态化：普通 / 主控 / 分身）；其它非空 stage 值不注入。
+-      //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
+-      //     不消费 mcpServers，另立后续变更）。
++      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。
++      //
++      // 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）能力化：判定逻辑
++      // 单源收编 providers.ts isMainAgentMcpCandidate——provider !== 'claude' 硬拒
++      // （2026-08-26-workspace-mcp-edit 时代口径，codex 旧注释 D-003@v1"另立后续
++      // 变更"即本变更）改为按 getProviderCaps(provider).mcp 判定：caps.mcp=true
++      // 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值）注入，未知
++      // provider 默认拒绝；stage 判定维持原口径（缺省/orchestrator 注入）。
++      //   - stage='mission_worker'（分身）不进主控分支——isWorkerSession（下方）
++      //     维持 claude-only 受限注入（D-002 循既有 D-008@v1 治理决策，未放开）。
+       //
+       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
+       // task-07（2026-08-26-workspace-mcp-edit）起为三件套合并注入：读会话级缓存
+@@ -990,11 +991,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
+       // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
+       // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
+-      isMainAgentSession: (ctx) => {
+-        if (ctx.provider !== 'claude') return false;
+-        const stage = ctx.stage ?? '';
+-        return stage === '' || stage === 'orchestrator';
+-      },
++      isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx),
+       mainAgentMcpConfigProvider: (ctx) => {
+         // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
+         // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index 2ca597a57..ccc2c7df1 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -340,6 +340,107 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
+  * 日志安全：warn/error 载荷只含路径 / 字段名 / api_format / 错误 message，
+  * 永不含 api_key / daemonApiKey 明文。
+  */
++/**
++ * codex per-session MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver；本写盘器按结构类型直传）。
++ */
++export interface CodexMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1）：把平台 MCP
++ * 配置表序列化为 config.toml [mcp_servers.*] 托管段并差量合并（纯函数，无 IO）。
++ *
++ * 序列化形态（codex CLI config.toml 官方 schema）：
++ *   [mcp_servers.<name>]
++ *   command = "<cmd>"
++ *   args = ["<a>", "<b>"]          （可选，字符串数组）
++ *   [mcp_servers.<name>.env]        （可选，KEY = "value" 子表）
++ *
++ * 托管语义：[mcp_servers.*] 命名空间为 daemon 独占（per-session 目录内的
++ * config.toml 由 daemon 管理，宿主全局 ~/.codex 不受影响）——现有 mcp_servers
++ * 段整段丢弃重写（防幽灵 server 残留），其余行（含 model 托管段与用户行）
++ * 原样保留。空表 → 返回 existing 原文（不动文件）。env 空对象不产生子表。
++ * 值转义复用 tomlString；数组/子表键名按 TOML 裸键规则（name 由 daemon 白名单
++ * 控制为安全标识符：sillyhub-daemon / sillyhub-file 等连字符形态合法）。
++ */
++export function mergeCodexMcpToml(
++  existing: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): string {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return existing;
++  const lines = existing.split(/\r?\n/);
++  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') lines.pop();
++
++  const kept: string[] = [];
++  let inMcpNamespace = false;
++  for (const line of lines) {
++    const path = parseHeaderPath(line);
++    if (path !== null) {
++      inMcpNamespace = path[0] === 'mcp_servers';
++      if (!inMcpNamespace) kept.push(line);
++      continue;
++    }
++    if (inMcpNamespace) continue; // 旧 mcp_servers 段（含尾随空行/注释）整段丢弃
++    kept.push(line);
++  }
++  while (kept.length > 0 && kept[kept.length - 1]?.trim() === '') kept.pop();
++
++  const mcpBlock: string[] = [];
++  for (const name of names) {
++    const cfg = mcpServers[name];
++    if (cfg === undefined) continue;
++    mcpBlock.push(`[mcp_servers.${name}]`);
++    mcpBlock.push(`command = ${tomlString(cfg.command)}`);
++    if (cfg.args !== undefined && cfg.args.length > 0) {
++      const items = cfg.args.map((a) => tomlString(a)).join(', ');
++      mcpBlock.push(`args = [${items}]`);
++    }
++    const envKeys = cfg.env === undefined ? [] : Object.keys(cfg.env);
++    if (envKeys.length > 0) {
++      mcpBlock.push(`[mcp_servers.${name}.env]`);
++      for (const k of envKeys) {
++        mcpBlock.push(`${k} = ${tomlString(cfg.env?.[k] ?? '')}`);
++      }
++    }
++  }
++
++  const head = kept.length > 0 ? `${kept.join('\n')}\n\n` : '';
++  return `${head}${mcpBlock.join('\n')}\n`;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06：写 per-session CODEX_HOME 内
++ * config.toml 的 [mcp_servers.*] 托管段（读 config.toml → mergeCodexMcpToml →
++ * writeFileAtomic）。空表跳过不写；写 IO 失败 throw（调用方 codex driver start
++ * 捕获降级 warn 不阻断 spawn——MCP 是增强能力）。本文件由 daemon 与本函数共同
++ * 管理（provider 托管段归 writeCodexHome，mcp_servers 段归本函数），两写路径
++ * 均为「读原文→差量合并→原子写」幂等形态。
++ */
++export async function writeCodexMcpServers(
++  codexHome: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): Promise<void> {
++  if (Object.keys(mcpServers).length === 0) return;
++  const path = join(codexHome, CONFIG_FILENAME);
++  const existing = await readTextIfExists(path);
++  const merged = mergeCodexMcpToml(existing, mcpServers);
++  try {
++    await writeFileAtomic(path, merged);
++  } catch (e) {
++    console.error('codex_mcp_config_write_failed', {
++      codexHome,
++      servers: Object.keys(mcpServers),
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> {
+   const { codexHome, provider, daemonApiKey } = input;
+ 
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index b02dc0292..a8460ce97 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -6549,6 +6549,9 @@ export class Daemon {
+       },
+     });
+     this._registerListDirRpcHandler(ws);
++    // 2026-10-11-task-sweep-daemon-truth：注册 session_live_tasks 只读 RPC——
++    // backend 任务清扫死活判定问询通道（注册表 = 唯一真相源，废除超时启发式）。
++    this._registerSessionLiveTasksRpcHandler(ws);
+     this._registerGetSpecBundleRpcHandler(ws);
+     // task-03（2026-07-06-daemon-host-fs-delegate）：注册 host_fs.* 八方法 RPC handler。
+     // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
+@@ -6676,6 +6679,42 @@ export class Daemon {
+     ws.registerRpcHandler('list_roots', async () => listRoots());
+   }
+ 
++  /**
++   * 2026-10-11-task-sweep-daemon-truth：注册 `session_live_tasks` 只读 RPC——
++   * backend 任务清扫（agent_task_store.sweep_confirmed_dead_tasks）死活判定的
++   * 问询通道：返回本 daemon 该会话后台任务注册表（mgr._backgroundTasks，
++   * task_started 注册 / task_notification 注销 / 会话终态清空）的活跃
++   * task_id 快照。backend 侧候选行不在快照内才收口——「活着但长时间静默」
++   * 的任务（注册表在）永不误判（用户指正废除超时启发式后的唯一判据）。
++   *
++   * 形态照 list_dir 平名注册先例；`_sessionManager` null → throw（backend 收
++   * DaemonRpcRemoteError 跳过该批不误收）；params.session_id 非字符串 → throw。
++   */
++  private _registerSessionLiveTasksRpcHandler(ws: WsClientLike): void {
++    if (typeof ws.registerRpcHandler !== 'function') {
++      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
++      return;
++    }
++    ws.registerRpcHandler('session_live_tasks', async (params) => {
++      const sessionId = typeof params.session_id === 'string' ? params.session_id : '';
++      if (!sessionId) {
++        throw new Error('session_live_tasks: payload 缺 session_id');
++      }
++      const mgr = this._sessionManager;
++      if (!mgr) {
++        throw new Error('session_live_tasks: session manager not ready');
++      }
++      const { sessionLiveTaskIds } = await import(
++        './interactive/session-manager/background-tasks.js'
++      );
++      // SessionManager → SessionManagerCore 结构窄化（deps 可见性差异的既有
++      // 家族问题——本调用只读 _backgroundTasks，as unknown 收窄对齐 daemon.ts
++      // 既有 cast 惯例）。
++      const core = mgr as unknown as Parameters<typeof sessionLiveTaskIds>[0];
++      return { session_id: sessionId, live_task_ids: sessionLiveTaskIds(core, sessionId) };
++    });
++  }
++
+   /**
+    * task-03（2026-09-14-session-ctx-compact / FR-02 / D-003@v3 单点接线）：
+    * 注册 `session_compact` RPC handler——backend 经 ws_rpc 请求 daemon 把指定
+diff --git a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+index 881d069f2..ce1b4f7fe 100644
+--- a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+@@ -59,6 +59,7 @@ import { mkdir } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import readline from 'node:readline';
+ import { resolveWindowsCmdShim } from '../cmd-shim.js';
++import { writeCodexMcpServers } from '../codex-settings.js';
+ import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
+ import { daemonStateDir } from '../config.js';
+ import type { AgentEvent, AgentEventUsage } from '../types.js';
+@@ -829,6 +830,31 @@ export class CodexAppServerDriver implements InteractiveDriver {
+     args.unshift('-c', 'features.default_mode_request_user_input=true');
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-06 / D-006@v1 + D-011@v1）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出）写 per-session CODEX_HOME 内
++    // config.toml [mcp_servers.*] 托管段（codex CLI 原生读取）。caps 侧 codex.mcp
++    // 当前维持 false（SPIKE-01 未能实测——引擎二进制缺失，D-011@v1），本消费路径
++    // 在 caps 翻值前不会被触发（机制就绪待复评：复测通过翻值即活）。降级面：
++    // CODEX_HOME 缺失（provider 文件层未写）→ 不写 + warn；写盘失败 → warn 不阻断
++    // spawn（MCP 是增强能力）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const codexHome = env['CODEX_HOME'];
++      if (!codexHome || codexHome.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[codex-driver] mcp skip: no CODEX_HOME in spawn env');
++      } else {
++        try {
++          await writeCodexMcpServers(codexHome, opts.mcpServers);
++        } catch (e) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[codex-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++            (e as Error).message,
++          );
++        }
++      }
++    }
++
+     // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的
+     // 是 codex.cmd（npm cmd-shim），直接 spawn .cmd 无 shell → CreateProcess EINVAL
+     //（claude driver task-01 R-exe 同类问题，design §10 / interactive.md:38）。复用
+diff --git a/sillyhub-daemon/src/interactive/cursor-driver.ts b/sillyhub-daemon/src/interactive/cursor-driver.ts
+index cebae2ab9..ecc5fa3db 100644
+--- a/sillyhub-daemon/src/interactive/cursor-driver.ts
++++ b/sillyhub-daemon/src/interactive/cursor-driver.ts
+@@ -19,7 +19,11 @@
+  *
+  * 忽略的 StartOptions（无对应 CLI 通道，docblock 声明）：
+  *   - manualApproval / askUserOnly（permission_dialog=false，D-003@v2）
+- *   - mcpServers（CLI 无 per-session --mcp-config，D-008@v1）
++ *   - mcpServers（2026-10-10-all-engines-mcp-injection task-07 留档：CLI 无
++ *     per-session MCP 配置通道且 headless 审批上游坑未解——caps cursor.mcp=false，
++ *     实测证据/坑点/复评条件见 providers.ts cursor 注释块与
++ *     changes/2026-10-10-all-engines-mcp-injection/spike-cursor-mcp.md
++ *     （原 D-008@v1 口径由本次留档取代））
+  *   - blocks 附件（multimodal=false）
+  *
+  * E7：handle 含子进程资源，不可序列化、禁止落盘。
+@@ -93,6 +97,8 @@ export class CursorExecutableNotFoundError extends Error {
+  * cursor 专属启动选项（经 CreateSessionInput 传入，值来自 daemon `_agentPaths.get('cursor')`）。
+  *
+  * 忽略（无对应 CLI 通道，见文件头）：manualApproval / askUserOnly / mcpServers / blocks。
++ * mcpServers 留档细节（task-07）：caps.mcp=false 期不透传，翻值前需先过
++ * spike-cursor-mcp.md 复评 SOP。
+  */
+ export interface CursorDriverStartOptions extends InteractiveDriverStartOptions {
+   /** cursor-agent 可执行入口（.cmd/.ps1/或直 exe；Windows 下经 resolveWindowsCmdShim 解析）。 */
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index d9e117016..eed2ce28c 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -100,6 +100,7 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
+ import type { CanUseToolDecision } from './types.js';
+ 
+ import { CodepageDetectorDecoder } from '../spawn-env.js';
++import { writePiMcpConfig } from '../pi-settings.js';
+ 
+ /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
+ const KILL_GRACE_MS = 2_000;
+@@ -177,6 +178,64 @@ const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
+  * pi 的会话 jsonl 全部落本目录，resume（`--session <id>`）也在本目录内查找。
+  * 导出纯函数供测试断言（daemon-state-dir 隔离收口同款锚点）。
+  */
++/**
++ * 解析 pi --version 输出的主版本号（纯函数，2026-10-10-all-engines-mcp-injection
++ * task-05 / FR-06）。pi 1.0 起原生内置 MCP（SPIKE-00 实测）；主版本 <1 或无法
++ * 解析 → 返回 -1（视为不支持，调用方降级不注入）。
++ */
++export function parsePiMajorVersion(output: string): number {
++  const m = /(^|[\sv])([0-9]+)\.[0-9]+/.exec(output.trim());
++  return m ? Number(m[2]) : -1;
++}
++
++/**
++ * 探测宿主 pi 主版本（spawn --version；每会话至多一次，MCP 注入路径才触发）。
++ * spawn 失败/超时/输出不可解析 → -1（调用方降级 warn，不阻断会话）。
++ * 不做模块级缓存：宿主升级 pi 后无需重启 daemon 即生效；会话创建频率低，
++ * 多一次短命子进程可接受。
++ */
++export async function detectPiMajorVersion(
++  cmdPath: string,
++  useShell: boolean,
++  env: NodeJS.ProcessEnv,
++): Promise<number> {
++  return new Promise((resolve) => {
++    let settled = false;
++    const done = (v: number) => {
++      if (!settled) {
++        settled = true;
++        resolve(v);
++      }
++    };
++    let child;
++    try {
++      child = spawn(cmdPath, ['--version'], {
++        env,
++        stdio: ['ignore', 'pipe', 'pipe'],
++        shell: useShell,
++        windowsHide: true,
++      });
++    } catch {
++      done(-1);
++      return;
++    }
++    let out = '';
++    child.stdout?.on('data', (d: unknown) => {
++      out += String(d);
++    });
++    child.on('error', () => done(-1));
++    child.on('close', () => done(parsePiMajorVersion(out)));
++    setTimeout(() => {
++      done(-1);
++      try {
++        child.kill();
++      } catch {
++        /* noop */
++      }
++    }, 5000);
++  });
++}
++
+ export function piRpcSessionDir(): string {
+   return join(daemonStateDir(), 'runs', 'pi-sessions');
+ }
+@@ -843,6 +902,52 @@ export class PiRpcDriver implements InteractiveDriver {
+ 
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-05 / D-005@v1 形态①）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出，经 buildDriverOptions 透传）写
++    // per-session mcp.json——pi 1.1.0+ 原生 MCP 客户端启动时读取并连接（SPIKE-00：
++    // PI_CODING_AGENT_DIR 重定向后读取路径 = <dir>/mcp.json）。降级面（FR-06 两层
++    // 门控：caps 翻值描述机制支持，此处运行时二次门控）：宿主 pi < 1.0 → 不写 +
++    // warn；PI_CODING_AGENT_DIR 缺失（官方端点形态无 per-session 目录）→ 不写 +
++    // warn。写盘失败 warn 不阻断 spawn（MCP 是增强能力，失败不拖垮会话）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const piAgentDir = env['PI_CODING_AGENT_DIR'];
++      if (!piAgentDir || piAgentDir.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[pi-rpc-driver] mcp skip: no PI_CODING_AGENT_DIR in spawn env');
++      } else {
++        // 版本探测在 spawn 前完成写盘，此处内联同款 shim 解析（与下方 spawnCmdPath
++        // 同一输入同款逻辑，结果一致；正式 spawn 的解析在其后独立执行不回读）。
++        let verCmdPath = opts.pathToAgentExecutable;
++        let verShell = false;
++        if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
++          const verResolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
++          if (verResolved) {
++            verCmdPath = verResolved.exe;
++          } else {
++            verShell = true;
++          }
++        }
++        const major = await detectPiMajorVersion(verCmdPath, verShell, env);
++        if (major < 1) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[pi-rpc-driver] mcp skip: pi native MCP requires >=1.0 (detected major:',
++            major,
++          );
++        } else {
++          try {
++            await writePiMcpConfig(piAgentDir, opts.mcpServers);
++          } catch (e) {
++            // eslint-disable-next-line no-console
++            console.warn(
++              '[pi-rpc-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++              (e as Error).message,
++            );
++          }
++        }
++      }
++    }
++
+     // R-exe（design §10 R-05）：Windows 下 detector 给的是 pi.cmd（npm cmd-shim），
+     // 直接 spawn .cmd 无 shell → CreateProcess EINVAL。复用 codex driver 同款
+     // resolveWindowsCmdShim（batch task-runner 先例）解析为 node + pi.js；解析
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 75ae767ff..50fae3926 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -367,6 +367,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     sessionFork: 'native',
+   },
+   codex: {
++    // 2026-10-10-all-engines-mcp-injection task-06（D-011@v1）：机制就绪待复评——
++    // SPIKE-01 未能实测（宿主 codex 0.162.0 缺 win32 平台二进制且网络限断无法修复，
++    // 见 changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md 复评 SOP）；
++    // 消费通道已交付（codex-settings mergeCodexMcpToml / writeCodexMcpServers +
++    // driver start 写 CODEX_HOME config.toml [mcp_servers.*]，单测绿）。旧注释
++    // 「driver.ts codex 对 mcpServers 仅暂存不消费」已被 task-06 推翻。翻值 =
++    // 复测通过后本键 false→true + 重跑 gen-provider-caps。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -393,8 +400,15 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
+   // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
+   pi: {
++    // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
++    // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
++    // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
++    // driver 版本门控写盘），task-08 已翻值（SPIKE-00 实测通过为唯一依据，gen-provider-caps
++    // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
++    // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
++    // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+@@ -417,6 +431,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
+   // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
+   cursor: {
++    // 2026-10-10-all-engines-mcp-injection task-07（D-003@v1 / D-011@v1）：留档
++    // 分支——SPIKE-02 未能实测（宿主无 cursor-agent CLI 且网络限断无法安装，
++    // spike-cursor-mcp.md）。坑点：上游反馈 headless 模式 MCP 工具审批未实现
++    //（工具调用可能挂起，未经本地实测验证）；CLI 无 per-session MCP 配置通道，
++    // 全局 ~/.cursor/mcp.json 与项目级 .cursor/mcp.json 均为禁写落点（宿主
++    // 资产 / workspace 污染）。复评条件：cursor-agent 可安装后按
++    // spike-cursor-mcp.md SOP 实测审批行为与落点隔离，两项通过才翻值。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -474,6 +495,29 @@ export function getProviderCaps(provider: string): ProviderCaps {
+   };
+ }
+ 
++/**
++ * 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控/普通会话 MCP
++ * 注入候选判定（引擎无关纯函数，无副作用可单测）。
++ *
++ * 取代 cli.ts 装配处 `provider !== 'claude'` 硬拒（2026-08-26-workspace-mcp-edit
++ * D-008 时代仅 claude 消费 mcpServers 的口径）：改为按能力矩阵 mcp 键判定——
++ * caps.mcp=true 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值后）均
++ * 进入主控注入；未知 provider 经 getProviderCaps 默认拒绝（mcp=false），禁止
++ * 对 PROVIDER_CAPS 直接下标（undefined 链 TypeError，Grill B-3）。
++ *
++ * stage 判定维持原口径：缺省（''）= 普通会话常驻注入；'orchestrator' = 存量
++ * 外部主控照常注入；'mission_worker'（分身）不进本判定——分身走 isWorkerSession
++ * 受限注入（cli.ts:1118-1120 维持 claude-only，D-002 循既有 D-008@v1 治理决策）。
++ */
++export function isMainAgentMcpCandidate(ctx: {
++  provider: string;
++  stage?: string | null;
++}): boolean {
++  if (!getProviderCaps(ctx.provider).mcp) return false;
++  const stage = ctx.stage ?? '';
++  return stage === '' || stage === 'orchestrator';
++}
++
+ // ── task-05（FR-05 / design §5.2）：provider 注册表 ───────────────────────────
+ //
+ // 分层：上方 PROVIDER_CAPS 是能力矩阵单源（task-02，内容不动）；本节在其上建
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index 4a277b4bd..5cfae162e 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -451,6 +451,20 @@ export function getOrCreateTaskMap(
+   return tasks;
+ }
+ 
++/**
++ * 2026-10-11-task-sweep-daemon-truth：会话活跃后台任务只读快照——backend
++ * `session_live_tasks` RPC 的数据源（死活判定唯一真相源；用户两轮指正废除了
++ * 「run 终态即死」「超时无心跳即死」两类启发式）。只读 `.get`（不像
++ * getOrCreateTaskMap 建空条目——查询不该有写副作用）；未注册会话 = 空数组
++ * （该 daemon 上无此会话的活跃任务）。
++ */
++export function sessionLiveTaskIds(
++  mgr: SessionManagerCore,
++  sessionId: string,
++): string[] {
++  return [...(mgr._backgroundTasks.get(sessionId)?.keys() ?? [])];
++}
++
+ /**
+  * task-03：清理指定 session 的后台任务表 + Task/Agent tool_use 元数据。
+  * 会话终态（end/fail）调用——SDK 进程已 kill，后台任务随进程消亡，后续
+diff --git a/sillyhub-daemon/src/pi-settings.ts b/sillyhub-daemon/src/pi-settings.ts
+index 446ef9b05..b8d90b6b8 100644
+--- a/sillyhub-daemon/src/pi-settings.ts
++++ b/sillyhub-daemon/src/pi-settings.ts
+@@ -290,6 +290,53 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
+  *（default_fallback_model ?? model）非空。聚合表 pi writer 的 isSufficient 与
+  * spawn/reload 分派共用。
+  */
++/**
++ * pi 1.1.0+ 原生 MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver——本文件是低依赖纯写盘层，不回引 interactive/，
++ * driver 侧按结构类型直传）。
++ */
++export interface PiMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：写 per-session
++ * `<PI_CODING_AGENT_DIR>/mcp.json`（pi 1.1.0+ 原生 MCP 配置）。
++ *
++ * SPIKE-00 实测（spike-pi-10-compat.md，pi 1.1.0）：PI_CODING_AGENT_DIR 重定向后
++ * pi root 直接对应 agent 层——原生 MCP 配置读取路径 = `<dir>/mcp.json`（非宿主
++ * ~/.pi/agent/mcp.json 的 agent 子层），格式与 codex 同风格：
++ * `{ "mcpServers": { "<name>": { command, args?, env? } } }`；per-server env
++ * （MCP_SESSION_ID 等）经条目 env 字段透传（conventions「env 必须进 mcpServers
++ * 条目 env 字段」）。
++ *
++ * 语义：daemon 独占管理本文件（区别于 auth/models/settings 三文件的先读后写
++ * 保留语义）——每次会话创建按 resolveMainAgentMcp 产出的配置表全量覆写，不合并
++ * 旧条目（旧 server 残留 = 幽灵工具面）；空表跳过不写（保持目录干净，pi 侧
++ * 视为无 MCP 配置）。写 IO 失败 throw（reject）——调用方（pi-rpc-driver start）
++ * 捕获降级 warn 不阻断 spawn（MCP 是增强能力）。
++ */
++export async function writePiMcpConfig(
++  piDir: string,
++  mcpServers: Record<string, PiMcpServerConfig>,
++): Promise<void> {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return;
++  const payload = { mcpServers: mcpServers };
++  try {
++    await writeFileAtomic(join(piDir, 'mcp.json'), JSON.stringify(payload, null, 2) + '\n');
++  } catch (e) {
++    console.error('pi_mcp_config_write_failed', {
++      piDir,
++      servers: names,
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export function isPiFormSufficient(provider: ProviderConfig): boolean {
+   return (
+     provider.api_format !== 'openai_chat' &&
+diff --git a/sillyhub-daemon/tests/codex-settings-mcp.test.ts b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+new file mode 100644
+index 000000000..fbc283689
+--- /dev/null
++++ b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+@@ -0,0 +1,85 @@
++import { mkdtempSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { mergeCodexMcpToml, writeCodexMcpServers } from '../src/codex-settings.js';
++
++/** 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1 机制就绪分支）。 */
++
++const Q = '"';
++
++describe('codex-settings: mergeCodexMcpToml（task-06 [mcp_servers.*] 托管段）', () => {
++  it('托管段写入：command/args 数组/env 子表完整序列化', () => {
++    const out = mergeCodexMcpToml('', {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1' },
++      },
++    });
++    expect(out).toContain('[mcp_servers.sillyhub-file]');
++    expect(out).toContain(`command = ${Q}node${Q}`);
++    expect(out).toContain(`args = [${Q}mcp-server.js${Q}, ${Q}--toolset${Q}, ${Q}file${Q}]`);
++    expect(out).toContain('[mcp_servers.sillyhub-file.env]');
++    expect(out).toContain(`MCP_SESSION_ID = ${Q}sess-1${Q}`);
++  });
++
++  it('非托管行保留：既有 model 托管段与用户行原样不动', () => {
++    const existing = [
++      `model = ${Q}gpt-5${Q}`,
++      `model_provider = ${Q}sillyhub${Q}`,
++      '',
++      '[model_providers.sillyhub]',
++      `name = ${Q}SillyHub${Q}`,
++      '',
++      '# user comment',
++      '[projects."X/repo"]',
++      `trust_level = ${Q}trusted${Q}`,
++    ].join('\n');
++    const out = mergeCodexMcpToml(existing, { s: { command: 'x' } });
++    expect(out).toContain(`model = ${Q}gpt-5${Q}`);
++    expect(out).toContain('[model_providers.sillyhub]');
++    expect(out).toContain('# user comment');
++    expect(out).toContain('[projects."X/repo"]');
++    expect(out).toContain('[mcp_servers.s]');
++  });
++
++  it('幂等：merge 两次同配置结果一致（不重复不残留）', () => {
++    const cfg = { s: { command: 'x', env: { K: 'v' } } };
++    const once = mergeCodexMcpToml('', cfg);
++    const twice = mergeCodexMcpToml(once, cfg);
++    expect(twice).toBe(once);
++    expect(twice.split('[mcp_servers.s]').length - 1).toBe(1);
++  });
++
++  it('旧段重写：换配置后旧 server 不残留（幽灵 server 防护）', () => {
++    const withOld = mergeCodexMcpToml('', { old: { command: 'a' } });
++    const replaced = mergeCodexMcpToml(withOld, { fresh: { command: 'b' } });
++    expect(replaced).not.toContain('[mcp_servers.old]');
++    expect(replaced).toContain('[mcp_servers.fresh]');
++  });
++
++  it('空表：返回原文不动（跳过语义）', () => {
++    const existing = `model = ${Q}x${Q}\n`;
++    expect(mergeCodexMcpToml(existing, {})).toBe(existing);
++  });
++});
++
++describe('codex-settings: writeCodexMcpServers（task-06 写盘）', () => {
++  it('写盘落 CODEX_HOME/config.toml 且与既有内容合并', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {
++      s: { command: 'node', args: ['a.js'], env: { K: 'v' } },
++    });
++    const text = readFileSync(join(dir, 'config.toml'), 'utf-8');
++    expect(text).toContain('[mcp_servers.s]');
++    expect(text).toContain(`command = ${Q}node${Q}`);
++    expect(text).toContain(`K = ${Q}v${Q}`);
++  });
++
++  it('空表跳过：不写 config.toml', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {});
++    expect(() => readFileSync(join(dir, 'config.toml'), 'utf-8')).toThrow();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts b/sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts
+new file mode 100644
+index 000000000..db4b2c66a
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts
+@@ -0,0 +1,47 @@
++// tests/interactive/session-live-task-ids.test.ts
++// 2026-10-11-task-sweep-daemon-truth：sessionLiveTaskIds 只读快照——backend
++// `session_live_tasks` RPC 的数据源（任务清扫死活判定的唯一真相源）。钉死：
++//   1. 注册表内的 task_id 全量返回；
++//   2. 未注册会话 = 空数组（不建条目、无写副作用）；
++//   3. 注销（task_notification 删除条目）后不再返回。
++//
++// helper 只读 mgr._backgroundTasks，用最小 stub core 直测（无需 fake driver
++// 全家桶——对齐本目录「按被测面选夹具」惯例）。
++
++import { describe, it, expect } from 'vitest';
++import {
++  getOrCreateTaskMap,
++  sessionLiveTaskIds,
++} from '../../src/interactive/session-manager/background-tasks.js';
++import type { SessionManagerCore } from '../../src/interactive/session-manager/types.js';
++
++function stubCore(): SessionManagerCore {
++  return { _backgroundTasks: new Map() } as unknown as SessionManagerCore;
++}
++
++describe('sessionLiveTaskIds（2026-10-11-task-sweep-daemon-truth）', () => {
++  it('注册表内的 task_id 全量返回', () => {
++    const mgr = stubCore();
++    const tasks = getOrCreateTaskMap(mgr, 'sess-1');
++    tasks.set('t-1', { taskName: 'A', async: true, startedAt: 1 });
++    tasks.set('t-2', { taskName: 'B', async: true, startedAt: 2 });
++
++    expect(sessionLiveTaskIds(mgr, 'sess-1').sort()).toEqual(['t-1', 't-2']);
++  });
++
++  it('未注册会话 = 空数组，且不建条目（只读无副作用）', () => {
++    const mgr = stubCore();
++
++    expect(sessionLiveTaskIds(mgr, 'sess-none')).toEqual([]);
++    expect(mgr._backgroundTasks.has('sess-none')).toBe(false);
++  });
++
++  it('注销后不再返回（task_notification 删除条目 = daemon 判死）', () => {
++    const mgr = stubCore();
++    const tasks = getOrCreateTaskMap(mgr, 'sess-1');
++    tasks.set('t-1', { taskName: 'A', async: true, startedAt: 1 });
++    tasks.delete('t-1');
++
++    expect(sessionLiveTaskIds(mgr, 'sess-1')).toEqual([]);
++  });
++});
+diff --git a/sillyhub-daemon/tests/mcp-config.test.ts b/sillyhub-daemon/tests/mcp-config.test.ts
+index ac4b26237..2952ed101 100644
+--- a/sillyhub-daemon/tests/mcp-config.test.ts
++++ b/sillyhub-daemon/tests/mcp-config.test.ts
+@@ -107,6 +107,7 @@ describe('mcp-config: loadPlatformMcpConfig', () => {
+ 
+ // task-07: backend 拉 + 回落
+ import { fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend } from '../src/mcp-config.js';
++import { PROVIDER_CAPS, isMainAgentMcpCandidate } from '../src/interactive/providers.js';
+ 
+ describe('mcp-config: fetchPlatformMcpConfig（task-07 backend 拉）', () => {
+   it('200 + platform_default → 返回 mcpServers', async () => {
+@@ -662,3 +663,46 @@ describe('mcp-config: fetchMcpBundle user_id 查询参数（task-06 / D-008@v2
+     spy.mockRestore();
+   });
+ });
++
++// ── 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控 MCP 注入谓词能力化 ──
++// 谓词行为跟随 PROVIDER_CAPS 的 mcp 键（数据驱动）：caps.mcp=true 引擎 × stage 缺省/orchestrator 注入，
++// mission_worker 不进主控；caps.mcp=false 引擎与未知 provider 一律 false（默认拒绝不抛错，Grill B-3）。
++// 翻值（task-08）后本矩阵自动跟随 caps 表，无需改测试。
++describe('mcp-config: isMainAgentMcpCandidate 谓词能力化（task-04 D-001@v1）', () => {
++  const engines = Object.keys(PROVIDER_CAPS);
++
++  it('未知 provider 默认拒绝且不抛错（禁直下标语义）', () => {
++    expect(() => isMainAgentMcpCandidate({ provider: 'no-such-engine' })).not.toThrow();
++    expect(isMainAgentMcpCandidate({ provider: 'no-such-engine' })).toBe(false);
++  });
++
++  it('caps.mcp=true 引擎：stage 缺省与 orchestrator 注入', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: undefined })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: null })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: '' })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(true);
++    }
++  });
++
++  it('caps.mcp=true 引擎：mission_worker 与其它非空 stage 不进主控', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'unknown_stage' })).toBe(false);
++    }
++  });
++
++  it('caps.mcp=false 引擎：任意 stage 均不注入（现状行为保持）', () => {
++    for (const e of engines.filter((k) => !PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++    }
++  });
++
++  it('claude 引擎恒在注入集（回归锚：claude 链路零变化）', () => {
++    expect(PROVIDER_CAPS.claude.mcp).toBe(true);
++    expect(isMainAgentMcpCandidate({ provider: 'claude' })).toBe(true);
++  });
++});
+diff --git a/sillyhub-daemon/tests/pi-settings-mcp.test.ts b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+new file mode 100644
+index 000000000..5504f3182
+--- /dev/null
++++ b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+@@ -0,0 +1,105 @@
++import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { writePiMcpConfig } from '../src/pi-settings.js';
++import { detectPiMajorVersion, parsePiMajorVersion } from '../src/interactive/pi-rpc-driver.js';
++
++// detectPiMajorVersion 经 ESM import 绑定 node:child_process 的 spawn——
++// vi.stubGlobal 不生效，必须模块级 vi.mock（版本探测行为单测的 mock 面）。
++vi.mock('node:child_process', () => ({
++  spawn: vi.fn(),
++}));
++
++/** 2026-10-10-all-engines-mcp-injection task-05：pi 通道 MCP 写盘与版本门控单测。 */
++describe('pi-settings: writePiMcpConfig（task-05 D-005@v1 形态①）', () => {
++  let dir: string;
++
++  it('配置落盘隔离：只写指定 per-session 目录的 mcp.json', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-daemon': { command: 'node', args: ['mcp-server.js'] },
++    });
++    const file = join(dir, 'mcp.json');
++    expect(existsSync(file)).toBe(true);
++    const parsed = JSON.parse(readFileSync(file, 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-daemon']).toEqual({
++      command: 'node',
++      args: ['mcp-server.js'],
++    });
++  });
++
++  it('env 透传：条目 env 字段（MCP_SESSION_ID）原样落盘', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1', MCP_SERVER_DAEMON_API_KEY: 'k1' },
++      },
++    });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-file'].env).toEqual({
++      MCP_SESSION_ID: 'sess-1',
++      MCP_SERVER_DAEMON_API_KEY: 'k1',
++    });
++  });
++
++  it('空表跳过：不写文件（保持目录干净，pi 视为无 MCP 配置）', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {});
++    expect(existsSync(join(dir, 'mcp.json'))).toBe(false);
++  });
++
++  it('覆写语义：二次写替换旧条目，不残留幽灵 server', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, { old: { command: 'a' } });
++    await writePiMcpConfig(dir, { fresh: { command: 'b' } });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers.old).toBeUndefined();
++    expect(parsed.mcpServers.fresh).toEqual({ command: 'b' });
++  });
++});
++
++describe('pi-rpc-driver: pi 版本门控（task-05 FR-06 两层门控的运行时层）', () => {
++  afterEach(async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReset();
++  });
++
++  it('parsePiMajorVersion：1.x 支持 / 0.x 不支持 / 乱串与空串返回 -1', () => {
++    expect(parsePiMajorVersion('1.1.0')).toBe(1);
++    expect(parsePiMajorVersion('1.0.0')).toBe(1);
++    expect(parsePiMajorVersion('0.81.1')).toBe(0);
++    expect(parsePiMajorVersion('pi version weird')).toBe(-1);
++    expect(parsePiMajorVersion('')).toBe(-1);
++  });
++
++  it('detectPiMajorVersion：正常输出解析为主版本号', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: (_e: string, cb: (d: unknown) => void) => cb('1.1.0') },
++        on: (ev: string, cb: () => void) => {
++          if (ev === 'close') setTimeout(cb, 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(1);
++  });
++
++  it('detectPiMajorVersion：spawn 报错返回 -1（降级不抛）', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: () => undefined },
++        on: (ev: string, cb: (e?: unknown) => void) => {
++          if (ev === 'error') setTimeout(() => cb(new Error('boom')), 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(-1);
++  });
++});
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/design.md b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/design.md
+new file mode 100644
+index 000000000..39c3d31c5
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/design.md
+@@ -0,0 +1,59 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:58:30.390Z
++---
++# 设计记录（Design Record）— 2026-10-11-task-sweep-daemon-truth
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户两轮指正击毙了两代启发式：v1「run 终态即收」（后台任务跨轮存活）、v2「5 分钟无心跳即收」（长耗时任务可能静默更久）。任何基于时间/轮次的推断都猜不准「静默但活着」与「死了没上报」——唯一可靠判据是 daemon 后台任务注册表（mgr._backgroundTasks：task_started 注册 / task_notification 注销 / 会话终态清空=SDK 进程 kill 任务随进程消亡，daemon 自己的权威语义）。本变更把死活判定搬到真相源：daemon 新增 `session_live_tasks` 只读 RPC（既有 rpc_id 请求-响应通道，list_dir 平名注册先例；数据经新 helper sessionLiveTaskIds 只读快照，不建空条目）；后端清扫重写为 `sweep_confirmed_dead_tasks`——会话终态/无 runtime 候选直接收（daemon 语义背书），其余逐 runtime 问活跃集、不在集内才收，daemon 离线/超时/旧版 method_not_found 跳过该批（fail-open 保活）；run 收口不再立即收（只在该 run 有非终态候选时 fire 60s 后的 run 限定确认清扫），启动清理同改确认制；TASK_SWEEP_GRACE/is_async/updated_at 全部移出死判；清扫标记与复活分支保留为误收兜底。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- daemon：新增 RPC method `session_live_tasks`（params `{session_id}` → result `{session_id, live_task_ids: string[]}`）；`background-tasks.ts` 新增导出 `sessionLiveTaskIds(mgr, sessionId)`。既有事件/消息契约零改动。
++- backend：`agent_task_store` 导出面变化——删除 `finalize_running_tasks_for_run` / `sweep_orphan_running_tasks` / `TASK_SWEEP_GRACE`，新增 `sweep_confirmed_dead_tasks(session, *, hub, run_id=None, rpc_timeout=5.0)`；`RUN_CLOSE_SWEEP_REASON` 保留。
++- `close_interactive_run`：收口路径不再同步清扫，改为有候选时 fire `_delayed_task_resweep`（60s 后 run 限定确认清扫）；`AgentService.cleanup_stale_runs` 尾部改调确认清扫。
++- HTTP API / 表结构零改动。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/interactive/session-manager/background-tasks.ts | sessionLiveTaskIds 只读快照 helper |
++| 修改 | sillyhub-daemon/src/daemon.ts | _registerSessionLiveTasksRpcHandler + 注册接线 |
++| 新增 | sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts | helper 3 用例 |
++| 修改 | backend/app/modules/daemon/agent_task_store.py | sweep_confirmed_dead_tasks 重写（删两代启发式函数） |
++| 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | 收口改延迟确认清扫（有候选才 fire） |
++| 修改 | backend/app/modules/agent/service.py | 启动清理改调确认清扫（传 ws hub） |
++| 修改 | backend/app/modules/daemon/tests/test_agent_session_tasks.py | TestRunCloseTaskSweep 迁移为确认制 6 用例 + _StubHub |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。清扫与事件写入（upsert 持任务行 FOR UPDATE）交错时 UPDATE 行级锁串行化；确认后收口的行收迟到 running 心跳走复活分支自愈、收真实终态事件 latest-wins 覆盖（语义③）；RPC 问询与注册表变更的竞态只会让本次判定偏保守（问早了活跃集还含该任务 → 保留）或下次触发点再收敛，无永久错误态。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++安全。确认清扫 UPDATE 按行 id 原子；多 backend 实例并发触发清扫幂等收敛；daemon 注册表单线程维护（daemon 事件循环），RPC 快照读取与注销无撕裂（同一 tick 内完成序列化）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。延迟确认清扫为独立 DB session 后台任务（H1，异常记日志不伤终态）；进程重启丢任务由启动确认清扫补位；daemon 重启清空注册表 = 其上任务随进程消亡（daemon 语义），重启后问询返回空集 → 候选正确收口。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。RPC 按 (runtime_id, session_id) 定向问询；候选行按会话归属分组，run 限定清扫不越界；daemon 注册表本机作用域（问错 daemon 返回空集——但路由按会话绑定的 runtime，正常不发生；即便发生，空集收敛方向与死判一致且有复活兜底）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：部署窗口内 daemon 旧版（无该 RPC method）→ method_not_found 跳过 → 卡死行暂不收敛（回到 v1 之前的滞留态）直到 daemon 升级——安全方向的退化（宁可不收不错收），daemon 经 /daemon 分发自动升级，窗口有限。
++- 放弃方案「问询结果缓存 + TTL」：重新引入时间参数且收益微小（清扫触发点低频）；放弃「daemon 周期性全量推送任务表」：广播放大 + 双端状态机，远重于按需问询。
++- 已知残留：daemon 注册表本身的丢失窗口（重启后 task_notification 无处可归被跳过——17 条实证根因）仍会让终态事件丢失，但确认清扫在下一触发点把它收敛（这正是本设计的收敛路径）；is_async 列仍恒 false（daemon emit 不带 async 字段——遗留元数据问题，不再是死判依赖，留待后续按需修）。
++- 前两代裁决作废声明：run-close-task-sweep 的「run 终态即收」与 task-sweep-liveness-guard 的「5 分钟宽限」死判均被本变更废除，标记/复活机制沿用。
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/proposal.md b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/proposal.md
+new file mode 100644
+index 000000000..f002e0100
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:58:30.390Z
++---
++# 提案书（Proposal）— 2026-10-11-task-sweep-daemon-truth
++
++## 动机
++
++任务原话转写：用户二次指正：超时无心跳≠死（长耗时任务可能静默很久）——上一变更的 5 分钟宽限启发式仍会误判。彻底修正：死活判定回归唯一真相源 daemon 注册表（mgr._backgroundTasks：task_started 注册、task_notification 注销、会话终态清空=SDK 进程 kill 任务随进程消亡——daemon 自己的权威语义）。实现：daemon 新增 session_live_tasks RPC（backend→daemon 既有 rpc_id 通道，list_dir/linked_repos 同款）；后端清扫改为「确认死才收」——会话终态（ended/failed）直接收（daemon 语义背书），其余逐 runtime 问 daemon 活跃集，不在集合内才收；daemon 离线/超时跳过该批（fail-open 保活）。废除全部时间启发式（TASK_SWEEP_GRACE/延迟复扫宽限）；run 收口改为 +60s 后跑一次确认清扫；复活分支保留为误收兜底。
++成功标准：
++- daemon session_live_tasks RPC 返回该会话注册表活跃 task_id 列表（未注册会话=空表）
++- 后端清扫：会话终态行直接收口；活跃会话行经 daemon 确认不在活跃集才收口；daemon 离线跳过不误收
++- 活着但长时间静默的任务（daemon 注册表在）永不被收口——无任何时间启发式参与死判
++- 清扫行标记与复活分支保留（误收自愈）；真实终态吸收不回归
++- daemon bundle 重建通过、后端测试全绿（新用例：确认收/确认留/离线跳过/会话终态直收）+ 既有 agent_session_tasks 回归
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. daemon session_live_tasks RPC 返回该会话注册表活跃 task_id 列表（未注册会话=空表）
++2. 后端清扫：会话终态行直接收口；活跃会话行经 daemon 确认不在活跃集才收口；daemon 离线跳过不误收
++3. 活着但长时间静默的任务（daemon 注册表在）永不被收口——无任何时间启发式参与死判
++4. 清扫行标记与复活分支保留（误收自愈）；真实终态吸收不回归
++5. daemon bundle 重建通过、后端测试全绿（新用例：确认收/确认留/离线跳过/会话终态直收）+ 既有 agent_session_tasks 回归
++
++## 成功标准（可验证）
++
++1. daemon session_live_tasks RPC 返回该会话注册表活跃 task_id 列表（未注册会话=空表）
++2. 后端清扫：会话终态行直接收口；活跃会话行经 daemon 确认不在活跃集才收口；daemon 离线跳过不误收
++3. 活着但长时间静默的任务（daemon 注册表在）永不被收口——无任何时间启发式参与死判
++4. 清扫行标记与复活分支保留（误收自愈）；真实终态吸收不回归
++5. daemon bundle 重建通过、后端测试全绿（新用例：确认收/确认留/离线跳过/会话终态直收）+ 既有 agent_session_tasks 回归
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/requirements.md b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/requirements.md
+new file mode 100644
+index 000000000..ffffa887a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/requirements.md
+@@ -0,0 +1,60 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:58:30.390Z
++---
++# 需求规格（Requirements）— 2026-10-11-task-sweep-daemon-truth
++
++## 功能需求
++
++### FR-01: daemon session_live_tasks RPC 返回会话活跃任务快照
++
++- daemon 必须注册 `session_live_tasks` RPC（backend→daemon 既有 rpc_id 通道，list_dir 平名先例）：入参 `{session_id}`，返回 `{session_id, live_task_ids}`——数据源为后台任务注册表 `mgr._backgroundTasks`（task_started 注册 / task_notification 注销 / 会话终态清空）的只读快照；未注册会话返回空数组且不得产生写副作用；session_id 缺失或 session manager 未就绪必须 throw（backend 侧跳过该批）。
++
++#### 场景：问询
++
++- Given daemon 上会话 S 有任务 t-1（注册中）、t-2（已注销）
++- When backend 调 session_live_tasks(S)
++- Then 返回 live_task_ids=["t-1"]；对未注册会话返回 [] 且不建条目
++
++### FR-02: 后端清扫改为确认制（daemon 真相源，废除全部时间启发式）
++
++- `sweep_confirmed_dead_tasks`（替代 v1 run 终态即收 / v2 5 分钟宽限）必须：会话终态（ended/failed）或无绑定 runtime 的候选行直接收口（daemon「会话终态=SDK 进程 kill、任务随进程消亡」的权威语义背书）；其余候选按 runtime 分组调 session_live_tasks RPC，候选 task_id 不在活跃集内才收口；daemon 离线/超时/旧版 method_not_found 必须跳过该批（fail-open 保活，下轮触发点再问）；TASK_SWEEP_GRACE 与 is_async/updated_at 时间启发式必须全部移除出死判。
++
++#### 场景：确认死才收
++
++- Given 活跃会话两个 running 任务行，daemon 活跃集只含 t-alive
++- When 清扫执行
++- Then t-dead 收口 stopped（带标记），t-alive 保持 running（哪怕它静默数小时）
++
++#### 场景：daemon 离线
++
++- Given daemon 掉线（send_rpc 抛离线/超时）
++- When 清扫执行
++- Then 该批候选全部保留 running（不误收）
++
++### FR-03: run 收口延迟确认清扫 + 启动确认清扫
++
++- run 收口瞬间不得判任务死活（后台任务跨轮存活）；该 run 存在非终态候选时必须 fire 60s 后的延迟确认清扫（run_id 限定，独立 DB session，问 daemon）；后端启动清理必须改调确认清扫（全量）；触发时机不得引入时间死判。
++
++#### 场景：run 收口后孤儿收敛
++
++- Given run 收口时有后台任务在跑（终态事件后因 daemon 注册表丢失/无 runId 被跳过而丢失）
++- When 60s 后延迟确认清扫执行
++- Then daemon 注册表已注销（或会话已终态）→ 收口；仍在注册表 → 保留
++
++### FR-04: 标记与复活保留 + 回归
++
++- 清扫行必须继续写 RUN_CLOSE_SWEEP_REASON 标记；upsert 复活分支（标记行收 running 心跳复活）与真实终态吸收行为保持；既有 agent_session_tasks 测试语义迁移后全绿，close 链路回归通过，daemon typecheck/测试/bundle 通过。
++
++#### 场景：回归
++
++- Given 本变更合入
++- When 运行后端任务测试 + close 回归 + daemon typecheck/测试
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts「注册表内的 task_id 全量返回」
++FR-02: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_daemon_confirmed_dead_only」
++FR-03: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_run_scoped_filter」
++FR-04: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_stopped_row_revives_on_running_heartbeat」
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/tasks.md b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/tasks.md
+new file mode 100644
+index 000000000..e179ee2d3
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:58:30.390Z
++---
++# 任务注册表（Tasks）— 2026-10-11-task-sweep-daemon-truth
++
++- [x] task-01: daemon session_live_tasks RPC 返回该会话注册表活跃 task_id 列表（未注册会话=空表、只读无副作用、缺参/未就绪 throw）——sessionLiveTaskIds helper + daemon.ts 平名注册；用例「注册表内的 task_id 全量返回」等 3 条（daemon 侧 16/16 绿含既有回归）
++- [x] task-02: 后端清扫确认制：会话终态/无 runtime 直接收口；活跃会话经 daemon 确认不在活跃集才收口；daemon 离线跳过不误收——sweep_confirmed_dead_tasks 重写；用例 test_sweep_daemon_confirmed_dead_only / test_sweep_daemon_offline_skips / test_sweep_terminal_session_direct_no_rpc
++- [x] task-03: 活着但长时间静默的任务（daemon 注册表在）永不被收口——TASK_SWEEP_GRACE/is_async/updated_at 全部移出死判（「确认在活跃集→保留」断言即静默存活语义）；run 收口改 60s 后 run 限定确认清扫（test_sweep_run_scoped_filter）+ 启动清理改确认制
++- [x] task-04: 清扫行标记与复活分支保留（test_sweep_stopped_row_revives_on_running_heartbeat）+ 真实终态吸收不回归（test_genuine_stopped_absorbs_running_heartbeat）；后端 24/24 + close 回归 12/12 + ruff/mypy 零错 + daemon typecheck/测试过 + bundle 重建
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/review.json.superseded-20261011T044439 b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/review.json.superseded-20261011T044439
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-daemon-truth/review.json.superseded-20261011T044439
+@@ -0,0 +1,91 @@
++{
++  "schemaVersion": 1,
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "c3948368cd7e3a9a8248ec8e72e1a27bbce406d1",
++  "reviewedAt": "2026-10-11T04:43:35Z",
++  "findings": [
++    {
++      "id": "F1",
++      "severity": "P2",
++      "title": "sweep_confirmed_dead_tasks 最终 UPDATE 丢失非终态守卫——候选 SELECT 与 UPDATE 之间的真实终态事件被覆写为 stopped（v2 有守卫，本变更回归）",
++      "location": "backend/app/modules/daemon/agent_task_store.py:143-152（最终 UPDATE 仅 .where(AgentSessionTask.id.in_(dead_row_ids))；候选筛选的非终态谓词在 :101，UPDATE 处无）",
++      "evidence": "时序：① 候选 SELECT（:100-102，非终态行）→ ② 逐 (runtime, session) 串行 RPC（离线/慢 daemon 每个吃满 rpc_timeout=5s，dead_row_ids 累积到全部 RPC 完成后才统一 UPDATE）→ ③ UPDATE 按 id 覆写。窗口①→③为数百 ms 至数十秒（多会话启动全量清扫时更长）。期间 task_notification 真实终态事件经 notify 路由 upsert（FOR UPDATE）提交 completed/failed/stopped 后，③ 的 UPDATE 在 READ COMMITTED（postgresql+asyncpg，backend/app/core/config.py:83 / core/db.py:73，未设 isolation_level）下取最新已提交行版本、WHERE 无 status 谓词必然命中——把 completed 覆写为 stopped+RUN_CLOSE_SWEEP_REASON。任务已终态不再有后续事件，design Q1 声称的「收真实终态事件 latest-wins 覆盖」只对清扫提交之后到达的事件成立，此窗口内失效且无自愈路径。违反模块自身语义①「终态定格：status 不回退、任何字段不改动」与本函数 docstring「已终态行不触碰」。对照：v2 finalize/sweep_orphan 的 UPDATE WHERE 均带 status.notin_(_TERMINAL_STATUSES)（commit c77f42488），本变更删除函数时一并丢了守卫。修复一行：UPDATE WHERE 补同款非终态谓词。",
++      "reachable": "延迟复扫 T+60s 恰逢后台任务完成（daemon 注销→事件落库 vs 清扫 RPC→UPDATE 两条路径竞速）；启动全量清扫多会话串行 RPC 拉长窗口。影响有界（已死任务的终态标签错标 + 完成信息丢失，非误杀活任务），但属对声明的核心不变量的确定性违反，且为上一代已有防护的回归。",
++      "dimension": "乱序",
++      "declaredBoundary": "无声明边界（design Q1 的保守方向论证未覆盖 select→update 窗口）",
++      "resolution": "已修复@ c3948368（增量复审确认：agent_task_store.py:148-153 UPDATE WHERE 恢复 id.in_(dead_row_ids) + status.notin_(_TERMINAL_STATUSES) 双条件，终态定格语义①恢复；新增 test_sweep_terminal_race_not_overwritten 以 RPC 回调为确定性窗口钩子注入 completed，断言 swept==0 + status 保持 completed + message 无标记污染，无守卫时该用例必失败（裸 UPDATE 会 stopped+标记），回归锁真实非摆设。返回值改按 rowcount 如实反映收口数，两处调用方仅日志用途不受影响）"
++    },
++    {
++      "id": "F2",
++      "severity": "P3",
++      "title": "change.patch 冻结件混入并行变更 2026-10-10-all-engines-mcp-injection 的约 12 个文件，与 design.md 的 7 文件清单不符",
++      "location": ".sillyspec/changes/2026-10-11-task-sweep-daemon-truth/change.patch（对比 design.md「文件变更清单」7 项）",
++      "evidence": "patch 内混入与本变更无关的：backend/app/modules/agent/provider_caps.py、frontend/src/lib/provider-caps.ts、sillyhub-daemon/src/cli.ts、codex-settings.ts、pi-settings.ts、interactive/codex-app-server-driver.ts、cursor-driver.ts、pi-rpc-driver.ts、interactive/providers.ts、tests/codex-settings-mcp.test.ts、tests/pi-settings-mcp.test.ts、tests/mcp-config.test.ts（成因：以 baseline 3c250918 对含并行未提交改动的工作区取 diff 冻结）。本变更自身 7 文件的交付内容经核对全部在 commit 900416bdf 落库且工作区干净；但「交付 diff 冻结件」未隔离本变更交付面，按此 patch 留档/复放会连带并行变更。",
++      "dimension": "n/a（工件卫生）"
++    },
++    {
++      "id": "F3",
++      "severity": "P3",
++      "title": "两处接线胶水无直接测试：run 收口 fire 门控与 daemon RPC handler",
++      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:161-172；sillyhub-daemon/src/daemon.ts:6698-6715",
++      "evidence": "FR-03 绑定的 test_sweep_run_scoped_filter 只锁 sweep 函数的 run_id 过滤；close_run_steps 的 has_open_tasks 门控（有候选才 fire）与 _delayed_task_resweep 的 60s 延迟/独立 session 接线无任何用例（fire 恒排→有候选才排是行为变更点，恰好无锁）。FR-01 绑定的 daemon 侧测试只锁 sessionLiveTaskIds helper；handler 的缺 session_id throw / mgr 未就绪 throw / 返回形状未测。requirements 测试绑定按字面满足（每 FR 一行且用例存在），但上述行为仅靠 typecheck/评审兜底。",
++      "dimension": "n/a（测试覆盖）"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "dimensionRationale": {
++    "乱序": "（前轮：F1 P2——SELECT→UPDATE 窗口内真实终态事件被覆写，已裁决 finding。）增量复审@c3948368：UPDATE 恢复非终态守卫后该项消除。原判定链仍成立：design Q1 的保守方向论证对守卫恢复后重新闭合——窗口内终态事件提交后 UPDATE 的 status.notin_ 谓词在 DB 侧取最新已提交行版本判定，completed/failed/stopped 均被放行定格，不再有覆写路径；守卫恢复同时使并发清扫实例对已收口行天然幂等（二次 UPDATE no-op，不再重复刷新 finished_at/标记）。",
++    "并发": "design Q2 声明与代码一致：UPDATE 按行 id 原子；多实例并发清扫对同批 dead 行幂等收敛（二次 UPDATE 已 stopped 行仍写 stopped 同值）；daemon 注册表单线程事件循环维护，sessionLiveTaskIds 同步 Map 展开无撕裂（background-tasks.ts:460-467）。upsert 的 FOR UPDATE（P3-1 前科已修）与本清扫的交错见 F1，但那是乱序窗口问题而非双写冲突。",
++    "切换": "design Q3 与代码一致：_delayed_task_resweep 独立 DB session + _fire_background_task 异常记日志不伤终态（close_run_steps.py:55-65）；进程重启丢延迟任务由启动确认清扫补位（service.py:1450-1453）；daemon 重启清空注册表=lifecycle.ts:229 clearBackgroundTasks 会话终态调用（SDK 进程 kill 语义背书真实存在），重启后问询空集→正确收口。",
++    "作用域": "design Q4 与代码一致：候选按 AgentSession.runtime_id 分组定向 send_rpc(runtime_id,...)（agent_task_store.py:110-136），run 限定清扫 WHERE 带 run_id 过滤不越界；问错 daemon 返回空集的残余风险已在 design 披露且有复活分支兜底。task 行唯一写入方为 notify.py 的 upsert（行存在⇒daemon 注册表曾有条目），「空集=死」的方向性论证成立。"
++  },
++  "frVerification": {
++    "FR-01": "兑现且测试锁定。daemon.ts:6698 注册 'session_live_tasks'（list_dir 平名先例，:6552 接线）；缺 session_id throw、mgr null throw、返回 {session_id, live_task_ids}；数据源 sessionLiveTaskIds 只读 .get 快照不建条目（background-tasks.ts:460-467）。测试 sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts 3 用例：全量返回/未注册空数组且 mgr._backgroundTasks.has 为 false（无副作用）/注销后不含。throw→backend 跳过链路核实：ws-client.ts:609-613 handler 抛错回 error dict → ws_hub.py:616 raise DaemonRpcRemoteError → sweep except Exception continue。缺口：handler 本体未直接测（F3）。",
++    "FR-02": "兑现且测试锁定。候选=非终态行 join AgentSession；session_status in (ended,failed) 或 runtime_id is None 直接收（daemon 语义背书：会话终态=lifecycle kill+清注册表）；其余按 runtime→session 分组问询，task_id 不在 live 集才收；离线/超时/method_not_found 统一 except Exception 跳过（ws-client.ts:593-598 证实旧版 daemon 回 method_not_found error dict）。时间启发式全灭：TASK_SWEEP_GRACE/finalize_running_tasks_for_run/sweep_orphan_running_tasks 全 backend *.py 零命中；is_async/updated_at 在 agent_task_store.py 仅剩 upsert 字段映射（:173）与快照排序键维护（:149/:215/:248），死判路径零引用。测试 4 用例含 hub.calls 断言（RPC 按会话定向、终态会话零 RPC）。除 F1 窗口外语义正确。",
++    "FR-03": "兑现，测试部分锁定。close_run_steps.py:161-172 收口不再同步清扫，has_open_tasks（该 run 非终态行 limit 1）存在才 fire _delayed_task_resweep；:43-65 sleep(60)→独立 session→run 限定确认清扫（sweep 内部自 commit）；service.py:1450-1453 启动清理改调确认清扫（传 get_daemon_ws_hub）。触发时机无时间死判（60s 是收敛缓冲不是判据）。缺口：fire 门控与 60s 接线无直接测试（F3）。",
++    "FR-04": "兑现且测试锁定。RUN_CLOSE_SWEEP_REASON 字符串原样保留（:50，design 解释了文案不准确的取舍——标记可比性优先，合理）；复活分支 :230/:233 仅 message==RUN_CLOSE_SWEEP_REASON 的 stopped 行放行 running 心跳复活，真实终态行维持吸收；test_sweep_stopped_row_revives_on_running_heartbeat / test_genuine_stopped_absorbs_running_heartbeat 均在（test_agent_session_tasks.py:1044/:1079）。测试结果自述（后端 24/24+close 12/12+daemon 16 用例+tsc/bundle）未独立复跑，静态核实测试逻辑与被测行为对得上。"
++  },
++  "disclosureAdjudication": [
++    {
++      "item": "旧版 daemon method_not_found 窗口内卡死行暂不收敛",
++      "verdict": "可接受",
++      "reason": "链路已核实为真（method_not_found error dict → DaemonRpcRemoteError → 跳过），方向安全（宁可不收不错收），daemon 经 /daemon 分发自动升级，窗口有限；滞留态=running 显示，回到 v1 之前的展示问题而非数据损伤。"
++    },
++    {
++      "item": "放弃「问询结果缓存+TTL」",
++      "verdict": "可接受",
++      "reason": "缓存 TTL 会重新引入时间参数，与本变更「无时间死判」的第一原则冲突；清扫触发点低频，收益微小。"
++    },
++    {
++      "item": "放弃「daemon 周期性全量推送任务表」",
++      "verdict": "可接受",
++      "reason": "广播放大 + 双端状态机复杂度远超按需问询，与问题规模不成比例。"
++    },
++    {
++      "item": "daemon 注册表丢失窗口（终态事件无处归）靠确认清扫收敛",
++      "verdict": "可接受（附注）",
++      "reason": "方向安全（丢事件→行滞留 running，由下一触发点收口）。附注：触发点只有 run 收口（run 限定，只扫本 run）与后端启动（全量）——活跃会话中无后续 run 收口的历史滞留行要等后端重启才收敛，design「下一触发点把它收敛」的表述略乐观，但属披露范围内的收敛时机问题，非正确性问题。"
++    },
++    {
++      "item": "is_async 列恒 false 遗留",
++      "verdict": "可接受",
++      "reason": "已核实不再参与死判（grep 证据见 FR-02），纯元数据债，留待后续按需修的裁决合理。"
++    },
++    {
++      "item": "前两代裁决作废声明（run 终态即收 / 5 分钟宽限）",
++      "verdict": "可接受",
++      "reason": "两代函数与常量物理删除（全仓 .py 零命中，git 历史 c77f42488/db50e8832 可证演进链），标记/复活机制按声明沿用。"
++    }
++  ],
++  "artifactsCheck": {
++    "daemonBundle": "dist/daemon.js（2026-10-11 12:10 重建）含 session_live_tasks 5 处，handler 关键串（payload 缺 session_id / session manager not ready / sessionLiveTaskIds）与 src 1:1 匹配；dist/interactive/session-manager/background-tasks.js 含 sessionLiveTaskIds。注：daemon.ts 工作区 mtime（12:11:25）晚于 bundle（12:10:34），但本变更全部功能串均在 bundle 内，差异不涉本变更面。",
++    "apiTypes": "本变更 7 文件不涉 frontend/src/lib/api-types.ts（该文件在 baseline..HEAD 的差异来自并行变更）。"
++  },
++  "reviewScope": "增量复审（独立干净上下文）：HEAD c3948368，delta = git show c3948368（agent_task_store.py +10/-1、test_agent_session_tasks.py +37，2 文件 +46/-1）。核验：① 守卫双条件（id.in_ + status.notin_(_TERMINAL_STATUSES)，:148-153）与 rowcount 返回值语义；② 竞态用例窗口真实性——_create_session_with_run 造 status=active+runtime 绑定会话（test_session_plan_bash_events.py:77-83），候选行必走 pending RPC 路径（agent_task_store.py:117→122），_RacingHub.send_rpc 注入点严格处于候选 SELECT（:90-105）之后、最终 UPDATE（:148）之前，同 session commit 后 UPDATE 新事务可见 completed；断言三锁（swept==0/status completed/message None）且无守卫时用例必失败；③ 无新问题——候选 SELECT 本身限非终态，确定性用例守卫为 no-op，25 个测试计数与自述一致，两处调用方（service.py:1453/close_run_steps.py:61）仅日志用返回值。工作区两文件==HEAD（git status 核对）。未独立复跑测试（只读纪律），静态核验测试逻辑与被测行为一致。前轮 F2/F3（P3）按主会话裁决保留历史记录不修。"
++}
