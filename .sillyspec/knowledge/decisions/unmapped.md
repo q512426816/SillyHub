@@ -2297,3 +2297,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb
 理由：最大风险：部署者绕过 build-and-save.sh 手工 `docker build`（两闸全绕）——接受：技能文档固定走脚本，纯手工路径属明知故犯；CI 闸仍覆盖 PR 流。 已弃方案： ① 只加 CI 闸——直推 main/本地部署不经 PR 时拦不住（本变更正是本地打包部署场景翻的车），弃单闸改双闸。 ② 预检 shell out 跑 pytest 复用测试——部署机未必有 pytest 环境，且脚本内嵌 python -m alembic 依赖更轻，弃。 ③ 后端启动时（容器 entrypoint）容错多头——掩盖问题不如 fail-fast，且容器已 crash-loop 即等价红灯，无增益。 无声明边界以外的取舍。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-10-duration-api-cumulative-fix
+锚点：未记录
+最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
+理由：答：最大风险是各 CLI 构建的 duration_api_ms 语义不一（真 Anthropic 可能为 per-query 纯 API 时长）——差分逻辑对「真 per-query」值也正确（第二轮起 snapshot≥base 时差值=snapshot−base 会把 per-query 值误差分！）。缓解：差分仅在 snapshot ≥ base 时做，per-query 形态下 snapshot 无单调性（12s→9s 走复位分支报 全量）→ 不会误差分；单调递增的 per-query 序列理论上会被误差分，但 DB 实证本 部署形态是累计量，真 per-query 序列含工具等待通常非单调——留档该假设。 放弃方案：仅做 backend 守卫不做 daemon 差分（守卫后合法累计增量被整段拒收， 正确数据也进不来）；仅做 daemon 差分不做 backend 守卫（防线单薄，其他引擎再犯 无兜底）。

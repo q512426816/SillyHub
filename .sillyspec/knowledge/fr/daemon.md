@@ -3011,3 +3011,48 @@
   confirmed_at: null
   source_change: 2026-10-11-task-sweep-daemon-truth
   status: active
+
+## FR-daemon-085 daemon duration_api_ms 按会话差分上报
+变更：2026-10-10-duration-api-cumulative-fix
+状态：active
+摘要：跨轮差分
+全文：.sillyspec/changes/archive/2026-10-10-duration-api-cumulative-fix/requirements.md#FR-01
+最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-duration-api-cumulative-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 跨轮累计快照差分」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-duration-api-cumulative-fix
+  status: active
+
+## FR-daemon-086 backend close 超界拒收
+变更：2026-10-10-duration-api-cumulative-fix
+状态：active
+摘要：累计值拒收
+全文：.sillyspec/changes/archive/2026-10-10-duration-api-cumulative-fix/requirements.md#FR-02
+最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-duration-api-cumulative-fix:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_duration_api_ms_over_wall_rejected」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-duration-api-cumulative-fix
+  status: active
+
+## FR-daemon-087 相关测试通过（不跑全量）
+变更：2026-10-10-duration-api-cumulative-fix
+状态：active
+摘要：双侧绿
+全文：.sillyspec/changes/archive/2026-10-10-duration-api-cumulative-fix/requirements.md#FR-03
+最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
