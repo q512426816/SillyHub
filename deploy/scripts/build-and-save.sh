@@ -28,6 +28,23 @@ for f in sillyhub-daemon/build/bundle/sillyhub-daemon.js sillyhub-daemon/build/b
 done
 echo "    bundle OK"
 
+echo "==> [2.5/5] alembic 迁移单头预检（2026-10-11 生产实证：多头部署 crash-loop 宕机）"
+# 双闸之二（闸一为 backend/tests/test_migration_single_head.py 随 CI 跑）：打镜像前
+# 本地 fail-fast——多头直接退出，省掉「传 300M 镜像上服务器才发现起不来」的往返。
+ALEMBIC_HEADS="$(cd backend && python -m alembic heads 2>&1)" || {
+  echo "    ❌ alembic 命令失败（本地 Python 环境缺依赖？cd backend && uv sync 修复后重试）:"
+  echo "       $ALEMBIC_HEADS"
+  exit 1
+}
+ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)')"
+if [ "$ALEMBIC_HEAD_COUNT" -ne 1 ]; then
+  echo "    ❌ alembic 迁移多头（并行变更各自加迁移未合流）——部署后 backend upgrade head 会 crash-loop："
+  printf '%s\n' "$ALEMBIC_HEADS" | sed 's/^/       /'
+  echo "    解法：cd backend && python -m alembic merge heads -m \"merge parallel heads ...\" 后提交再打包"
+  exit 1
+fi
+echo "    单头 OK: $(printf '%s\n' "$ALEMBIC_HEADS" | grep '(head)' | head -1)"
+
 echo "==> [3/5] 准备 build-arg"
 # COMMIT_SHA 焙进镜像（health 端点回显版本）；export 到环境后 compose 读 ${COMMIT_SHA:-} 覆盖 .env 空值。
 export COMMIT_SHA="${COMMIT_SHA:-$(git rev-parse --short HEAD)}"

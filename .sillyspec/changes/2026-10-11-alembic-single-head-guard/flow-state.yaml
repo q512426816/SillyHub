@@ -1,0 +1,23 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：并行变更各自新增 alembic 迁移未合流即部署，生产 backend crash-loop 宕机约 2 分钟（2026-10-11 实证：Multiple head revisions，两迁移同父分叉），需在 CI
+  与部署预检双闸提前拦截。
+
+
+  成功标准：
+
+  - backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
+
+  - deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
+
+  - 改动相关测试全绿（全量留给 CI）
+autopilot: true
+baseline_commit: 6cdf7c61714c1fff30bcc02a4c7dfe7ebeb3f117
+updatedAt: '2026-10-11T11:38:24.266Z'
+baseline_sha256: 55ce1f7a2d03c66d40af18666060305f51c5df8d2410e9099a7c7c9e6a29d982
+
