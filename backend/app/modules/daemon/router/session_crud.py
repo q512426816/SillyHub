@@ -31,6 +31,8 @@ from sqlalchemy import select
 from sqlalchemy import select as sa_select
 
 import app.modules.daemon.router as _router
+from app.core.auth_deps import is_service_credential_request
+from app.core.errors import PermissionDenied
 from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonTaskLease
@@ -700,10 +702,22 @@ async def fork_session(
 async def inject_session(
     session_id: uuid.UUID,
     data: SessionInjectRequest,
+    request: Request,
     session: SessionDep,
     user: TaskRunAgentUser,
 ) -> SessionInjectResponse:
     """Append a new turn run to an active interactive session (FR-02)."""
+    # 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：结构化通知
+    # 标记仅服务凭证可携带——API key 由 api_key:admin 门控签发给 daemon，
+    # 浏览器用户恒走 Bearer JWT；Bearer 携带即 403（杜绝用户冒充系统通知
+    # 豁免排队额度/落不可编辑通知行）。Bearer+X-API-Key 同场按
+    # get_current_principal 优先级视作 Bearer 用户（同样 403）。
+    task_wakeup = data.origin == "task_wakeup"
+    if task_wakeup and not is_service_credential_request(request):
+        raise PermissionDenied(
+            "系统通知来源标记仅限服务凭证调用。",
+            details={"origin": data.origin, "reason": "service_credential_required"},
+        )
     svc = DaemonService(session)
     # ── ql-20260920-006（2026-09-18-single-chat-steering 修订 / D-001 语义
     # 收敛）：忙轮默认回排队——主输入框忙轮发送不再自动 steering 直注入，
@@ -741,6 +755,9 @@ async def inject_session(
         # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
         # 调用方不经本端点，保持 409 拒绝语义。
         queue_when_busy=True,
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记（上方门控后
+        # 才可能为 True）——排队行 origin='task_wakeup'（豁免/合并锚）。
+        task_wakeup=task_wakeup,
     )
     return SessionInjectResponse(
         session_id=result.agent_session.id,

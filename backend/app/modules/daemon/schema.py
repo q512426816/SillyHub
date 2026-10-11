@@ -393,6 +393,12 @@ class SessionInjectRequest(BaseModel):
     """
 
     prompt: str = Field(default="", max_length=8000)
+    # 2026-10-11-queue-wakeup-origin-guard：结构化来源标记——仅服务凭证
+    # （X-API-Key）请求可携带 'task_wakeup'（daemon 后台任务唤醒通知；router
+    # 层门控：Bearer 携带即 403）。豁免/合并/编辑守卫按排队行 origin 判定，
+    # 不再看 prompt 内容前缀（用户前缀伪造不再享有任何豁免）。Literal 校验：
+    # 其它字面量（含空串）422。
+    origin: Literal["task_wakeup"] | None = None
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
     # task-11（2026-08-29-usage-by-provider-model / FR-03-3 / D-002@v1）：会话级

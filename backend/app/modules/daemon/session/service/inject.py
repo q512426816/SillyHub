@@ -88,6 +88,11 @@ async def inject_session(
     # provider caps steering 门控（router/session_crud.py inject 端点）传入；
     # 携带切换维度时 service 层守卫（queue.py 忙轮分支）不生效，回落排队。
     busy_strategy: Literal["queue", "inject"] | None = None,
+    # 2026-10-11-queue-wakeup-origin-guard：daemon 服务凭证经 HTTP inject 端点
+    # 携带 origin='task_wakeup'（router 层门控）时置 True——忙轮排队行落结构化
+    # origin 标记（豁免/合并/编辑守卫判定锚，queue._handle_busy_turn）。缺省
+    # False：群聊/审批代写等服务路径与普通用户路径零回归。
+    task_wakeup: bool = False,
 ) -> SessionDispatchResult:
     """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -241,6 +246,8 @@ async def inject_session(
         # task-05（2026-09-18-single-chat-steering）：单聊忙轮策略透传
         # （缺省 None 零回归）。
         busy_strategy=busy_strategy,
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
+        task_wakeup=task_wakeup,
     )
 
 
@@ -416,6 +423,10 @@ async def _inject_into_session(
     # source_member_id/source_carrier_run_id/chain_depth/sender_user_id——
     # task-04 turn_completed 互@检测读取）。缺省 None 不写（存量行 NULL）。
     turn_metadata: dict | None = None,
+    # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记（语义见
+    # inject_session 同名参数；inject_session_as_service 不接——群聊等服务
+    # 路径的用户内容永不被标记）。
+    task_wakeup: bool = False,
 ) -> SessionDispatchResult:
     """Shared inject-turn core (used by :meth:`inject_session` +
     :meth:`inject_session_as_service`).
@@ -484,6 +495,7 @@ async def _inject_into_session(
                 queue_sender_user_id=queue_sender_user_id,
                 turn_metadata=turn_metadata,
                 auto_resume_of=auto_resume_of,
+                task_wakeup=task_wakeup,
             )
 
         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──

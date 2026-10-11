@@ -1528,12 +1528,20 @@ export class HubClient {
    * 汇报）。端点：POST /api/daemon/sessions/{sessionId}/inject，body `{prompt}`；
    * X-API-Key 服务身份鉴权（与 notifyAgentTaskStatus 同款 _headers()）。backend
    * 侧 queue_when_busy=true——主 turn 在跑时排队，空闲即建新 turn 唤醒主代理。
+   *
+   * 2026-10-11-queue-wakeup-origin-guard：可选 origin='task_wakeup' 结构化标记
+   * （仅服务凭证可携带——本客户端即 X-API-Key 身份）。backend 排队豁免/合并/
+   * 编辑守卫只认该标记，prompt 内容前缀不再享有豁免（防用户伪造）。
    */
-  async injectSessionPrompt(sessionId: string, prompt: string): Promise<Record<string, unknown>> {
+  async injectSessionPrompt(
+    sessionId: string,
+    prompt: string,
+    origin?: 'task_wakeup',
+  ): Promise<Record<string, unknown>> {
     return this._request<Record<string, unknown>>(
       'POST',
       `/api/daemon/sessions/${sessionId}/inject`,
-      { prompt },
+      origin ? { prompt, origin } : { prompt },
     );
   }
 

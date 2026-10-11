@@ -300,7 +300,11 @@ class TestEnqueuePosition:
 
     @pytest.mark.asyncio
     async def test_wakeup_merge_keeps_position(self, db_session, mocked_hub, mocked_redis) -> None:
-        """TASK_WAKEUP 通知 merge 原地改 prompt——不新建行、原条目 position 不变。"""
+        """TASK_WAKEUP 通知 merge 原地改 prompt——不新建行、原条目 position 不变。
+
+        2026-10-11-queue-wakeup-origin-guard：merge 锚点改结构化 origin，
+        两条注入均带 task_wakeup=True（服务凭证路径）。
+        """
         svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
 
         await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
@@ -309,12 +313,14 @@ class TestEnqueuePosition:
             uid,
             prompt=_wakeup_prompt("查依赖", "t-1"),
             queue_when_busy=True,
+            task_wakeup=True,
         )
         merged = await svc.inject_session(
             session_id,
             uid,
             prompt=_wakeup_prompt("生成类文件", "t-2"),
             queue_when_busy=True,
+            task_wakeup=True,
         )
 
         assert merged.queued is True
@@ -452,10 +458,18 @@ class TestEditEntry:
     async def test_edit_wakeup_entry_rejected_409(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """TASK_WAKEUP 前缀条目 409 不可编辑（D-009——改文破坏 like 去重匹配）。"""
+        """origin=task_wakeup 条目 409 不可编辑（D-009——改文破坏合并锚）。
+
+        2026-10-11-queue-wakeup-origin-guard：守卫改结构化 origin 判定，
+        存量前缀行（origin NULL）保持 409 兼容（第二段）。
+        """
         svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
         result = await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("查依赖", "t-1"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
         entry_id = result.queue_entry_id
         assert entry_id is not None
@@ -465,7 +479,58 @@ class TestEditEntry:
 
         rows = await _queue_rows(db_session, session_id)
         assert len(rows) == 1
+        assert rows[0].origin == "task_wakeup"
         assert rows[0].prompt is not None and rows[0].prompt.startswith("[后台任务通知]")
+
+    @pytest.mark.asyncio
+    async def test_edit_legacy_prefix_entry_now_editable(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """存量前缀行（升级在途、origin NULL）不再 409——纯结构化判定的取舍。
+
+        存量行与新伪造行形态不可区分（前缀 + origin NULL），按规则 11 不做
+        前缀兜底：pending 行生命周期天级、编辑影响仅限当条 prompt 文本。
+        """
+        from app.modules.agent.model import AgentSessionQueuedMessage
+
+        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
+        # 直接落一行「升级前旧口径写入」的前缀通知行（绕过 service 标记）。
+        legacy = AgentSessionQueuedMessage(
+            agent_session_id=session_id,
+            sender_user_id=uid,
+            prompt=_wakeup_prompt("存量", "t-legacy"),
+            origin=None,
+            status="pending",
+            position=0,
+        )
+        db_session.add(legacy)
+        await db_session.commit()
+
+        updated = await svc.update_queued_message(session_id, legacy.id, "改存量", uid)
+
+        assert updated.prompt == "改存量"
+
+    @pytest.mark.asyncio
+    async def test_edit_spoofed_prefix_user_entry_allowed(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-05：用户新发的前缀伪造行（origin NULL）是普通消息，可编辑。"""
+        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
+        result = await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("伪造", "t-spoof"),
+            queue_when_busy=True,
+        )
+        entry_id = result.queue_entry_id
+        assert entry_id is not None
+
+        updated = await svc.update_queued_message(session_id, entry_id, "改成普通消息", uid)
+
+        assert updated.prompt == "改成普通消息"
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        assert rows[0].origin is None
 
     @pytest.mark.asyncio
     async def test_edit_failed_entry_resets_pending_state(

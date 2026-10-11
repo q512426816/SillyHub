@@ -42,7 +42,7 @@ from .errors import (
     DaemonSessionTurnConflict,
 )
 from .helpers import (
-    TASK_WAKEUP_PROMPT_PREFIX,
+    TASK_WAKEUP_QUEUE_ORIGIN,
     _merge_task_wakeup_prompt,
     _prepend_group_chain_marker,
     _split_group_chain_marker,
@@ -73,6 +73,13 @@ async def _handle_busy_turn(
     # 忙轮转排队时落排队行 origin='auto_resume:<源 run uuid>'（幂等查重/G10/
     # 徽标数据源与直接入队条目同构）；None = 普通排队（既有调用零改动）。
     auto_resume_of: uuid.UUID | None = None,
+    # 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：结构化通知
+    # 标记——daemon 服务凭证经 HTTP inject 端点携带 origin='task_wakeup'
+    # （router 层门控，Bearer 用户不可伪造）时置 True；豁免/合并/计数排除/
+    # 编辑守卫全部按本标记与排队行 origin 判定，**不再看 prompt 内容前缀**
+    # （旧口径用户发「[后台任务通知]」前缀即可冒充豁免）。与 auto_resume_of
+    # 调用方不相交（daemon 唤醒不带 auto_resume_of），同时携带时本标记优先。
+    task_wakeup: bool = False,
 ) -> SessionDispatchResult:
     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
 
@@ -129,23 +136,21 @@ async def _handle_busy_turn(
     # 通知在排队栏与用户消息混排挤占额度）；通知类注入自身也豁免拒绝（走下方
     # ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）——旧口径队满时
     # 注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。
-    is_task_wakeup_prompt = prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX)
-    pending_prompts = (
-        (
-            await svc._session.execute(
-                select(AgentSessionQueuedMessage.prompt).where(
-                    AgentSessionQueuedMessage.agent_session_id == session.id,
-                    AgentSessionQueuedMessage.status == "pending",
-                )
+    # 2026-10-11-queue-wakeup-origin-guard：判定从内容前缀改结构化标记——
+    # is_task_wakeup 只认 task_wakeup 入参（服务凭证路径），pending 计数排除
+    # origin='task_wakeup' 行；用户带前缀伪造的消息按普通用户消息计数（占额度）。
+    pending_rows = (
+        await svc._session.execute(
+            select(AgentSessionQueuedMessage.prompt, AgentSessionQueuedMessage.origin).where(
+                AgentSessionQueuedMessage.agent_session_id == session.id,
+                AgentSessionQueuedMessage.status == "pending",
             )
         )
-        .scalars()
-        .all()
-    )
+    ).all()
     user_pending_count = sum(
-        1 for p in pending_prompts if not (p or "").startswith(TASK_WAKEUP_PROMPT_PREFIX)
+        1 for _prompt, row_origin in pending_rows if row_origin != TASK_WAKEUP_QUEUE_ORIGIN
     )
-    if not is_task_wakeup_prompt and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
+    if not task_wakeup and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
         raise DaemonSessionQueueFull(
             f"会话排队消息已达上限（{SESSION_QUEUE_MAX_PENDING} 条），请等当前本轮结束后再发送。",
             details={
@@ -153,20 +158,22 @@ async def _handle_busy_turn(
                 "pending": user_pending_count,
             },
         )
-    # ql-20260827-015：通知合并——同会话已有 pending 的「[后台任务通知]」
-    # 条目时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
+    # ql-20260827-015：通知合并——同会话已有 pending 的通知条目（origin=
+    # task_wakeup）时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
     # 返回形态与普通入队一致（queued=True + 同 entry id），daemon 调用
     # 方无感。
     # 2026-08-31-session-queue-ux（design §4 Phase1.2/D-002）：merge 只
     # 原地改 prompt——不新建行、原条目 position 保持不变。
+    # 2026-10-11-queue-wakeup-origin-guard：合并锚点从 prompt.like 前缀改
+    # origin 列（伪造前缀的用户行不再被并进通知行）。
     existing_notification: AgentSessionQueuedMessage | None = None
-    if prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX):
+    if task_wakeup:
         existing_notification = (
             await svc._session.execute(
                 select(AgentSessionQueuedMessage).where(
                     AgentSessionQueuedMessage.agent_session_id == session.id,
                     AgentSessionQueuedMessage.status == "pending",
-                    AgentSessionQueuedMessage.prompt.like(f"{TASK_WAKEUP_PROMPT_PREFIX}%"),
+                    AgentSessionQueuedMessage.origin == TASK_WAKEUP_QUEUE_ORIGIN,
                 )
             )
         ).scalar_one_or_none()
@@ -301,7 +308,13 @@ async def _handle_busy_turn(
         model=model,
         # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
         # origin，G10/幂等/徽标全断链）。
-        origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记优先落
+        # origin='task_wakeup'（与 auto_resume_of 调用方不相交）。
+        origin=(
+            TASK_WAKEUP_QUEUE_ORIGIN
+            if task_wakeup
+            else (make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None)
+        ),
         status="pending",
         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
         # 连续入队全 0——显式 None 判（对齐 MAX+1 语义，D-002）。
@@ -560,7 +573,12 @@ async def update_queued_message(
             f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
             details={"session_id": str(session_id), "entry_id": str(entry_id)},
         )
-    if (entry.prompt or "").startswith(TASK_WAKEUP_PROMPT_PREFIX):
+    # 2026-10-11-queue-wakeup-origin-guard：编辑守卫改纯结构化 origin 判定。
+    # 旧口径按内容前缀 409——用户伪造行会被误锁。存量前缀行（升级在途）与新
+    # 伪造行形态不可区分（前缀 + origin NULL），按规则 11（未正式上线，不要求
+    # 历史兼容）不做前缀兜底：pending 行生命周期天级、编辑影响仅限当条 prompt
+    # 文本，放行无害；系统通知恒带 origin 标记（服务凭证路径落库）。
+    if entry.origin == TASK_WAKEUP_QUEUE_ORIGIN:
         await svc._session.rollback()
         raise DaemonSessionQueueEntryNotEditable(
             f"系统通知条目 '{entry_id}' 不支持编辑。",

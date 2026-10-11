@@ -797,6 +797,10 @@ class DaemonService:
         # 见 session 子域 inject.py；缺省 None 零回归——facade 显式签名同步，
         # 漏透传会 500，见 bind_* 同款教训）。
         busy_strategy: Literal["queue", "inject"] | None = None,
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（daemon
+        # 经 X-API-Key inject 携带 origin='task_wakeup'，router 层门控后传入；
+        # facade 显式签名同步，漏透传会 500）。
+        task_wakeup: bool = False,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -813,6 +817,7 @@ class DaemonService:
             bind_ppm_item_id=bind_ppm_item_id,
             queue_when_busy=queue_when_busy,
             busy_strategy=busy_strategy,
+            task_wakeup=task_wakeup,
         )
 
     async def interrupt_session(

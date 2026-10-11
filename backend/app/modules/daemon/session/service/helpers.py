@@ -46,6 +46,12 @@ from .errors import DaemonSessionInvariantViolation, DaemonSessionNotFound
 # 跨长轮的合并在本层做：同会话已有 pending 通知条目时并入（任务行追加 + 头/尾
 # 计数改写），不新增行——通知类排队恒 ≤1 条。
 TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]"
+# 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：排队行的结构化
+# 通知标记——豁免/合并/编辑守卫的判定锚。旧口径按 prompt 内容前缀判定，用户
+# 经 /inject 发同前缀消息即可伪造豁免；新口径只认本标记，且仅由服务凭证
+# （X-API-Key + 请求 origin 字段，router/session_crud.py 门控）写入。
+# 与 origin 列既有值 'auto_resume:<uuid>' 前缀空间不相交（本字面量无冒号）。
+TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
 _TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
 _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
 

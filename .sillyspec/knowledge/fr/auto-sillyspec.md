@@ -110,3 +110,79 @@ created_at: 2026-10-08T01:03:54.861Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-09-close-trace-single-set-platform/requirements.md#FR-03
 最近确认：2f6d525155a2b7cd8ec208e77f0f83e5f9a43967
+
+## FR-auto-sillyspec-059 清扫只收「最近无心跳」的任务（心跳宽限 + is_async 豁免）
+变更：2026-10-11-task-sweep-liveness-guard
+状态：active
+摘要：后台任务跨轮存活不被误收
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-liveness-guard/requirements.md#FR-01
+最近确认：460c2474d9377ddeef2971b481f8a56cd0700b5a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-liveness-guard:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_finalize_sweeps_only_stale_sync」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-liveness-guard
+  status: active
+
+## FR-auto-sillyspec-060 清扫收口行可被 running 心跳复活（误收自愈）；真实终态行维持吸收
+变更：2026-10-11-task-sweep-liveness-guard
+状态：active
+摘要：误收自愈；真实终态不复活
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-liveness-guard/requirements.md#FR-02
+最近确认：460c2474d9377ddeef2971b481f8a56cd0700b5a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-liveness-guard:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_stopped_row_revives_on_running_heartbeat」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-liveness-guard
+  status: active
+
+## FR-auto-sillyspec-061 run 收口安排延迟复扫（孤儿不靠重启兜底）
+变更：2026-10-11-task-sweep-liveness-guard
+状态：active
+摘要：新鲜后沉默的孤儿
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-liveness-guard/requirements.md#FR-03
+最近确认：460c2474d9377ddeef2971b481f8a56cd0700b5a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-liveness-guard:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_delayed_resweep_catches_now_silent」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-liveness-guard
+  status: active
+
+## FR-auto-sillyspec-062 既有行为回归
+变更：2026-10-11-task-sweep-liveness-guard
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-liveness-guard/requirements.md#FR-04
+最近确认：460c2474d9377ddeef2971b481f8a56cd0700b5a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-liveness-guard:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_genuine_stopped_absorbs_running_heartbeat」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-liveness-guard
+  status: active

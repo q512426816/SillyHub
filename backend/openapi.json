@@ -68760,6 +68760,18 @@
             "title": "Prompt",
             "default": ""
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "task_wakeup"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
           "agent_profile_id": {
             "anyOf": [
               {

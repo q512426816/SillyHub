@@ -548,6 +548,8 @@ class TestTaskWakeupMerge:
 
     生产实证（会话 17f10040）：长轮未结期间每个后台任务终态注入一条通知排队，
     计数只增不减、派发后逐条烧一轮模型汇报。合并后通知类排队恒 ≤1 条。
+    2026-10-11-queue-wakeup-origin-guard：合并锚点从内容前缀改排队行结构化
+    origin='task_wakeup'（service 层经 task_wakeup=True 模拟服务凭证路径）。
     """
 
     @pytest.mark.asyncio
@@ -557,10 +559,18 @@ class TestTaskWakeupMerge:
         svc, uid, session_id, _run = await _setup_busy_session(db_session)
 
         first = await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("查依赖", "t-1"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
         second = await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("生成类文件", "t-2"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("生成类文件", "t-2"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
 
         # 仍只有 1 行；两次返回同一 entry id（daemon 调用方无感）。
@@ -568,6 +578,50 @@ class TestTaskWakeupMerge:
         assert len(rows) == 1
         assert second.queued is True
         assert second.queue_entry_id == first.queue_entry_id
+        # 结构化标记随行落库（豁免/合并/编辑守卫的判定锚）。
+        assert rows[0].origin == "task_wakeup"
+
+    @pytest.mark.asyncio
+    async def test_wakeup_entries_merge_by_origin(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """origin 结构化合并：真通知相互合并；用户前缀伪造行不并进通知行。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("查依赖", "t-1"),
+            queue_when_busy=True,
+            task_wakeup=True,
+        )
+        # 用户伪造行：前缀相同但无结构化标记 → 独立成行，origin NULL。
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("伪造", "t-spoof"),
+            queue_when_busy=True,
+        )
+        # 第二条真通知 → 并入首条通知行。
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("生成类文件", "t-2"),
+            queue_when_busy=True,
+            task_wakeup=True,
+        )
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 2
+        by_origin = {row.origin: row for row in rows}
+        assert set(by_origin) == {"task_wakeup", None}
+        # 伪造行未被并入：内容只有它自己的任务行。
+        assert "任务「伪造」" in (by_origin[None].prompt or "")
+        assert "任务「查依赖」" not in (by_origin[None].prompt or "")
+        # 通知行合并了两条真通知。
+        merged = by_origin["task_wakeup"].prompt or ""
+        assert "任务「查依赖」" in merged and "任务「生成类文件」" in merged
+        assert "任务「伪造」" not in merged
 
         merged = rows[0].prompt or ""
         # 两个任务行都在，头/尾计数改写为 2。
@@ -594,11 +648,15 @@ class TestTaskWakeupMerge:
     async def test_notification_and_normal_coexist(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """通知与普通消息互不合并（合并只作用于通知前缀内部）。"""
+        """通知与普通消息互不合并（合并只作用于同 origin 通知内部）。"""
         svc, uid, session_id, _run = await _setup_busy_session(db_session)
 
         await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("查依赖", "t-1"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
         await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
 
@@ -616,6 +674,9 @@ class TestTaskWakeupQueueQuota:
     队满时通知注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。豁免后：
     用户额度只数非通知类 pending 条目；通知类注入永不因满员被拒（走既有
     ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）。
+    2026-10-11-queue-wakeup-origin-guard：豁免判定从内容前缀改结构化
+    origin='task_wakeup'（task_wakeup=True 模拟服务凭证路径）——用户带前缀
+    伪造不再享有任何豁免（见 spoofed 用例）。
     """
 
     @pytest.mark.asyncio
@@ -626,7 +687,11 @@ class TestTaskWakeupQueueQuota:
         svc, uid, session_id, _run = await _setup_busy_session(db_session)
 
         await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("通知", "t-q1"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("通知", "t-q1"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
         for i in range(SESSION_QUEUE_MAX_PENDING - 1):
             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
@@ -650,12 +715,47 @@ class TestTaskWakeupQueueQuota:
             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
 
         result = await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("队满补通知", "t-q2"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("队满补通知", "t-q2"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
 
         assert result.queued is True
         rows = await _queue_rows(db_session, session_id)
         assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
+        assert any(row.origin == "task_wakeup" for row in rows)
+
+    @pytest.mark.asyncio
+    async def test_spoofed_prefix_message_consumes_user_quota_and_rejected(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """FR-01 前缀伪造不豁免：无结构化标记的前缀消息按普通用户消息计数。
+
+        24h 审查 P2 修复锚——旧实现 prompt.startswith 前缀即豁免，用户冒充
+        系统通知绕过 5 条额度；新实现豁免只认服务凭证携带的 origin 标记。
+        """
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        # 4 条真用户消息 + 1 条前缀伪造（旧口径会被豁免计数，新口径占额度）。
+        for i in range(SESSION_QUEUE_MAX_PENDING - 1):
+            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+        await svc.inject_session(
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("伪造通知", "t-spoof"),
+            queue_when_busy=True,
+        )
+
+        # 第 6 条用户消息（按用户口径）被拒——伪造行占了第 5 个额度位。
+        with pytest.raises(DaemonSessionQueueFull):
+            await svc.inject_session(session_id, uid, prompt="第6条用户消息", queue_when_busy=True)
+        # 伪造行 origin 为 NULL（普通用户行，编辑保护不误伤）。
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == SESSION_QUEUE_MAX_PENDING
+        spoofed = next(r for r in rows if (r.prompt or "").startswith("[后台任务通知]"))
+        assert spoofed.origin is None
 
     @pytest.mark.asyncio
     async def test_user_quota_semantics_unchanged(
@@ -668,7 +768,11 @@ class TestTaskWakeupQueueQuota:
             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
         # 通知豁免入队成功（不占额度）……
         await svc.inject_session(
-            session_id, uid, prompt=_wakeup_prompt("通知", "t-q3"), queue_when_busy=True
+            session_id,
+            uid,
+            prompt=_wakeup_prompt("通知", "t-q3"),
+            queue_when_busy=True,
+            task_wakeup=True,
         )
         # ……但用户的第 6 条消息仍被拒（用户侧计数只数到 5）。
         with pytest.raises(DaemonSessionQueueFull):

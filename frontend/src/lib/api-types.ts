@@ -24850,6 +24850,8 @@ export interface components {
              * @default
              */
             prompt: string;
+            /** Origin */
+            origin?: "task_wakeup" | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */

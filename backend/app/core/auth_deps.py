@@ -164,6 +164,21 @@ async def require_platform_admin(
     return user
 
 
+def is_service_credential_request(request: Request) -> bool:
+    """Whether this request authenticates via the X-API-Key service credential.
+
+    Mirrors :func:`get_current_principal` precedence exactly: Bearer wins when
+    present, so "service credential" means no Authorization header **and** an
+    X-API-Key header. API keys are issued by platform admins only
+    (``api_key:admin`` gate, auth/router.py — "Issue a new long-lived API key
+    for the daemon"), so browser JWT users cannot fake this with their own
+    key. ⚠️ 前提钉死：若未来放开普通用户自助签发 API key，本判别不再构成
+    服务边界，调用方（如 inject 的 origin='task_wakeup' 门控）须同步收紧
+    （2026-10-11-queue-wakeup-origin-guard）。
+    """
+    return _extract_bearer(request) is None and _extract_api_key(request) is not None
+
+
 async def get_current_principal(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],

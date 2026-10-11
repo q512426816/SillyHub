@@ -534,6 +534,9 @@ class SessionService(BackgroundTaskMixin):
         # task-05（2026-09-18-single-chat-steering / FR-01）：单聊忙轮策略透传
         # （语义见 inject.py inject_session 同名参数；缺省 None 零回归）。
         busy_strategy: Literal["queue", "inject"] | None = None,
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（语义见
+        # inject.py inject_session 同名参数）。
+        task_wakeup: bool = False,
     ) -> SessionDispatchResult:
         return await _inject.inject_session(
             self,
@@ -551,6 +554,7 @@ class SessionService(BackgroundTaskMixin):
             bind_ppm_item_id=bind_ppm_item_id,
             queue_when_busy=queue_when_busy,
             busy_strategy=busy_strategy,
+            task_wakeup=task_wakeup,
         )
 
     async def inject_session_as_service(
@@ -610,6 +614,8 @@ class SessionService(BackgroundTaskMixin):
         queue_sender_user_id: uuid.UUID | None = None,
         turn_metadata: dict | None = None,
         auto_resume_of: uuid.UUID | None = None,
+        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
+        task_wakeup: bool = False,
     ) -> SessionDispatchResult:
         return await _inject._inject_into_session(
             self,
@@ -628,6 +634,7 @@ class SessionService(BackgroundTaskMixin):
             busy_strategy=busy_strategy,
             queue_sender_user_id=queue_sender_user_id,
             turn_metadata=turn_metadata,
+            task_wakeup=task_wakeup,
         )
 
     async def _cancel_pending_control_command(
