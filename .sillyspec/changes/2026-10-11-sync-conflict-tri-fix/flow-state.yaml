@@ -1,0 +1,25 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：spec 同步乐观锁冲突闭环断裂——横幅报 1 条而平台同步区块渲染 0 且无裁决入口；daemon 撞冲突只 warn 不 re-base 致冲突行永久滞留；CLI 缺全树同步且变更名守卫拒绝磁盘已存在的中文名变更（实测
+  2026-10-10-取消LTC宽表校验规则 被 assertSafeChangeName 拒）。
+
+
+  成功标准：
+
+  - platform-sync-section 渲染注册表「版本冲突」型开放行（非纯墓碑）并给对比/裁决入口，未决冲突计数与横幅口径一致
+
+  - daemon 增量推送撞乐观锁冲突后自动重拉 manifest re-base 一次并重试，re-base 后仍冲突才落注册表
+
+  - sillyspec CLI platform sync 支持不带 --change 的全树同步；assertSafeChangeName 放行磁盘已存在的变更名
+
+  - 三处修复各有单测覆盖且相关测试全绿
+autopilot: false
+baseline_commit: 0f7af00fe3d1835655461c9f2a8c59223819dfb6
+updatedAt: '2026-10-11T09:38:34.784Z'
+baseline_sha256: cddf059213b9fe296ad2fe0068d39c5b412f88d5f25c1dab5d136186f65f7252
+
