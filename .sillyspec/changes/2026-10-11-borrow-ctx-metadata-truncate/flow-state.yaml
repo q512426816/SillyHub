@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  沙箱 AGENTS.md 渲染中 tech_stack/repo_url 不截断，绕过 description 的 500 字符注入防线（24h 审查 P3-3）：32bc06602 的
+  borrow-sandbox-context.ts 仅 description 有 DESCRIPTION_MAX_CHARS=500 截断（design R-02 点名的注入缓解），tech_stack 数组 join 与
+  repo_url 原样进自动加载的 AGENTS.md 正文，而 backend workspace schema 两字段均无长度上限——有工作区编辑权限的成员可借超长/指令样式字段注入借用沙箱 agent。修复：tech_stack
+  join 后与 repo_url 复用同款 500 字符截断（含「…（已截断）」标注），防线对齐 description。
+
+  成功标准：
+
+  - tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
+
+  - repo_url 超 500 字符同款截断
+
+  - 短字段（≤500）逐字原样（零回归）
+
+  - 截断对 name/slug/display_alias/default_branch 等既有字段零影响
+
+  - 渲染幂等不变（同 ctx 重复渲染输出一致）
+
+  - 新增截断用例先红后绿，既有渲染/透传/三态用例全绿 + tsc 零错
+autopilot: true
+baseline_commit: cda4bbd6f6e1bda0c0f5a64564da8b0eb9487eaf
+updatedAt: '2026-10-11T04:31:07.301Z'
+baseline_sha256: 51eaf3a7232fb6c71e3486cbf138d769e56c737f38ef0d7dd3baad48e5eaebb3
+
