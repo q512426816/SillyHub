@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-alembic-single-head-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-alembic-single-head-guard:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/test_migration_single_head.py「test_alembic_single_head」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-alembic-single-head-guard"
+    }
+  ]
+}

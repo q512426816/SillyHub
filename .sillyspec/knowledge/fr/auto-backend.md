@@ -721,3 +721,43 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-11-linked-repo-workspace-ref
   status: active
+
+## FR-auto-backend-162 backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
+变更：2026-10-11-alembic-single-head-guard
+状态：active
+摘要：主路径（当前单头通过）；多头红灯（2026-10-11 事故形态复现）
+场景正文：
+- 场景：主路径（当前单头通过） — Given 迁移图单头（当前 c515ffd62859）；When 运行该测试；Then 通过。
+- 场景：多头红灯（2026-10-11 事故形态复现） — Given 并行变更各自新增迁移形成两 head（同日实证 20261011020000/20261011160000 形态）；When CI 运行该测试；Then fail，报错含 merge heads 解法提示——PR 阶段拦截，不再等部署宕机才发现。
+全文：.sillyspec/changes/archive/2026-10-11-alembic-single-head-guard/requirements.md#FR-01
+最近确认：e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-alembic-single-head-guard:flow:测试绑定FR-01
+  tests: backend/tests/test_migration_single_head.py「test_alembic_single_head」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-alembic-single-head-guard
+  status: active
+
+## FR-auto-backend-163 deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
+变更：2026-10-11-alembic-single-head-guard
+状态：active
+摘要：主路径（单头放行）；多头拦截；本地环境缺失
+场景正文：
+- 场景：主路径（单头放行） — Given 迁移图单头；When 运行 build-and-save.sh；Then 预检打印「单头 OK: <revision>」并继续构建。
+- 场景：多头拦截 — Given 迁移图两 head；When 运行 build-and-save.sh；Then 打印两 head 清单与 merge 提示后 exit 1，不进入 docker build。
+- 场景：本地环境缺失 — Given backend Python 环境缺 alembic（命令报错）；When 运行 build-and-save.sh；Then exit 1 并提示 `uv sync` 修复，不静默跳过预检。
+全文：.sillyspec/changes/archive/2026-10-11-alembic-single-head-guard/requirements.md#FR-02
+最近确认：e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb
+
+## FR-auto-backend-164 改动相关测试全绿（全量留给 CI）
+变更：2026-10-11-alembic-single-head-guard
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-11-alembic-single-head-guard/requirements.md#FR-03
+最近确认：e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb

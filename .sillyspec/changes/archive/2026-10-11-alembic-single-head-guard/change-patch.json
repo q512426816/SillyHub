@@ -1,0 +1,92 @@
+{
+  "change": "2026-10-11-alembic-single-head-guard",
+  "baseline": "6cdf7c61714c1fff30bcc02a4c7dfe7ebeb3f117",
+  "head": "e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb",
+  "files": [
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/design.md",
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/proposal.md",
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/requirements.md",
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/review.json",
+    ".sillyspec/changes/2026-10-11-alembic-single-head-guard/tasks.md",
+    "backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py",
+    "backend/tests/test_migration_single_head.py",
+    "deploy/scripts/build-and-save.sh"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 277,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-11T11:50:19.188Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "6cdf7c61714c1fff30bcc02a4c7dfe7ebeb3f117",
+    "totals": {
+      "files": 3,
+      "additions": 69,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "backend/tests/test_migration_single_head.py",
+        "additions": 29,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "deploy/scripts/build-and-save.sh",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a385bc4be7b2dbefd6e267b781b9f33fbe9fabc2c8381ac1276622bcc72ce717",
+  "patchStatus": "ok"
+}

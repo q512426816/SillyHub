@@ -1,0 +1,326 @@
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/flow-state.yaml b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/flow-state.yaml
+new file mode 100644
+index 000000000..fcc202998
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/flow-state.yaml
+@@ -0,0 +1,23 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：并行变更各自新增 alembic 迁移未合流即部署，生产 backend crash-loop 宕机约 2 分钟（2026-10-11 实证：Multiple head revisions，两迁移同父分叉），需在 CI
++  与部署预检双闸提前拦截。
++
++
++  成功标准：
++
++  - backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++
++  - deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++
++  - 改动相关测试全绿（全量留给 CI）
++autopilot: true
++baseline_commit: 6cdf7c61714c1fff30bcc02a4c7dfe7ebeb3f117
++updatedAt: '2026-10-11T11:38:24.266Z'
++baseline_sha256: 55ce1f7a2d03c66d40af18666060305f51c5df8d2410e9099a7c7c9e6a29d982
++
+diff --git a/backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py b/backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py
+new file mode 100644
+index 000000000..68d6df99e
+--- /dev/null
++++ b/backend/migrations/versions/c515ffd62859_merge_parallel_heads_20261011020000_.py
+@@ -0,0 +1,23 @@
++"""merge parallel heads 20261011020000 20261011160000
++
++Revision ID: c515ffd62859
++Revises: 20261011020000, 20261011160000
++Create Date: 2026-10-11 19:13:27.412706
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++revision: str = "c515ffd62859"
++down_revision: str | None = ("20261011020000", "20261011160000")
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    pass
++
++
++def downgrade() -> None:
++    pass
+diff --git a/backend/tests/test_migration_single_head.py b/backend/tests/test_migration_single_head.py
+new file mode 100644
+index 000000000..20d4e516e
+--- /dev/null
++++ b/backend/tests/test_migration_single_head.py
+@@ -0,0 +1,29 @@
++"""alembic 迁移单头守卫（2026-10-11-alembic-single-head-guard FR-01）。
++
++生产实证（2026-10-11）：并行变更各自新增迁移未合流即部署——两条 revision 同父分叉，
++backend 容器 ``alembic upgrade head`` 报 ``Multiple head revisions`` crash-loop，平台
++宕机约 2 分钟（回滚 backup-20261011-1907 保服务后手工 ``alembic merge heads`` 修复）。
++本测试在 CI 测试套件内把该形态提前拦成红灯：heads 必须恰一个，多头即 fail 并给出
++merge 解法提示。
++
++实现走 alembic API（ScriptDirectory.get_heads），不 shell out——CI/本地环境无差异。
++部署侧同款守卫见 deploy/scripts/build-and-save.sh 预检步骤（双闸：CI 拦 PR、脚本拦
++打镜像）。
++"""
++
++from pathlib import Path
++
++from alembic.config import Config
++from alembic.script import ScriptDirectory
++
++
++def test_alembic_single_head() -> None:
++    backend_root = Path(__file__).resolve().parents[1]
++    script = ScriptDirectory.from_config(Config(str(backend_root / "alembic.ini")))
++    heads = script.get_heads()
++    assert len(heads) == 1, (
++        "alembic 迁移多头（并行变更各自加迁移未合流）——部署会 crash-loop："
++        f"当前 heads={heads}。解法：cd backend && python -m alembic merge heads "
++        '-m "merge parallel heads ..." 后提交 merge revision（纯 DAG 接线无 DDL）。'
++        "（生产实证 2026-10-11：Multiple head revisions 宕机）"
++    )
+diff --git a/deploy/scripts/build-and-save.sh b/deploy/scripts/build-and-save.sh
+index fe374ff0c..76b3f6759 100644
+--- a/deploy/scripts/build-and-save.sh
++++ b/deploy/scripts/build-and-save.sh
+@@ -28,6 +28,23 @@ for f in sillyhub-daemon/build/bundle/sillyhub-daemon.js sillyhub-daemon/build/b
+ done
+ echo "    bundle OK"
+ 
++echo "==> [2.5/5] alembic 迁移单头预检（2026-10-11 生产实证：多头部署 crash-loop 宕机）"
++# 双闸之二（闸一为 backend/tests/test_migration_single_head.py 随 CI 跑）：打镜像前
++# 本地 fail-fast——多头直接退出，省掉「传 300M 镜像上服务器才发现起不来」的往返。
++ALEMBIC_HEADS="$(cd backend && python -m alembic heads 2>&1)" || {
++  echo "    ❌ alembic 命令失败（本地 Python 环境缺依赖？cd backend && uv sync 修复后重试）:"
++  echo "       $ALEMBIC_HEADS"
++  exit 1
++}
++ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)')"
++if [ "$ALEMBIC_HEAD_COUNT" -ne 1 ]; then
++  echo "    ❌ alembic 迁移多头（并行变更各自加迁移未合流）——部署后 backend upgrade head 会 crash-loop："
++  printf '%s\n' "$ALEMBIC_HEADS" | sed 's/^/       /'
++  echo "    解法：cd backend && python -m alembic merge heads -m \"merge parallel heads ...\" 后提交再打包"
++  exit 1
++fi
++echo "    单头 OK: $(printf '%s\n' "$ALEMBIC_HEADS" | grep '(head)' | head -1)"
++
+ echo "==> [3/5] 准备 build-arg"
+ # COMMIT_SHA 焙进镜像（health 端点回显版本）；export 到环境后 compose 读 ${COMMIT_SHA:-} 覆盖 .env 空值。
+ export COMMIT_SHA="${COMMIT_SHA:-$(git rev-parse --short HEAD)}"
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/design.md b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/design.md
+new file mode 100644
+index 000000000..9d6776d24
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T11:38:24.239Z
++---
++# 设计记录（Design Record）— 2026-10-11-alembic-single-head-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++双闸拦截 alembic 迁移多头形态（2026-10-11 生产实证：并行变更 `20261011020000`/`20261011160000` 同父分叉未合流即部署，backend `alembic upgrade head` 报 Multiple head revisions crash-loop，平台宕机约 2 分钟后回滚 + 手工 merge 修复）：
++
++1. **CI 闸（PR 阶段）**：`backend/tests/test_migration_single_head.py` 用 alembic API（`ScriptDirectory.from_config(...).get_heads()`）断言 heads 恰一个——走 API 不 shell out，CI 与本地零环境差异；`.github/workflows/backend-ci.yml` 的 pytest 套件天然收录（testpaths 含 tests/），不新增 workflow。
++2. **部署闸（打镜像阶段）**：`deploy/scripts/build-and-save.sh` 在 docker build 前新增 `[2.5/5]` 预检——`python -m alembic heads` 输出 `(head)` 行数 ≠1 即 exit 1（打印各 head + `alembic merge heads` 解法）；命令本身失败也 exit 1（提示 `uv sync`），fail-closed 不静默跳过——省掉「300M 镜像传上服务器才发现起不来」的往返。
++
++选双闸而非单闸：CI 依赖 PR 流程存在（直推 main / 本地部署绕过 PR 时 CI 不拦截），部署脚本是打镜像的必经路径，两者互补。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 新增测试文件一个（无生产代码改动、无 API/DTO 变化、无迁移内容变化——merge 迁移 c515ffd62859 属上一轮事故修复已独立提交）。
++- `build-and-save.sh` 行为变化：单头时多一行「单头 OK」输出；多头/alembic 不可用时非零退出（此前会继续构建）。新增前置依赖：本地 backend Python 环境可跑 `python -m alembic`（部署者本就具备；缺失时明确报错而非静默）。
++- 无数据库/契约/前端影响，`gen:types` 不涉及。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   答：n/a——守卫是纯读静态迁移图（文件系统快照），无事件/时序输入。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   答：并行变更同时新增迁移 → 迁移图多头 → 正是被拦截的形态：CI 闸在 PR 红灯、部署闸在打包 exit 1，解法统一为 merge heads（报错文案直接给命令）。两闸自身只读，无共享状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   答：安全——测试与脚本预检均无副作用（不触 DB、不写文件）；预检失败在任何阶段退出都不留半态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   答：不会——两闸均锚定本仓 backend/alembic.ini 的迁移目录（ScriptDirectory 解析 script_location=migrations 相对 backend/），与运行数据库无关（单头性是图属性非库状态，离线判定）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：部署者绕过 build-and-save.sh 手工 `docker build`（两闸全绕）——接受：技能文档固定走脚本，纯手工路径属明知故犯；CI 闸仍覆盖 PR 流。
++
++已弃方案：
++① 只加 CI 闸——直推 main/本地部署不经 PR 时拦不住（本变更正是本地打包部署场景翻的车），弃单闸改双闸。
++② 预检 shell out 跑 pytest 复用测试——部署机未必有 pytest 环境，且脚本内嵌 python -m alembic 依赖更轻，弃。
++③ 后端启动时（容器 entrypoint）容错多头——掩盖问题不如 fail-fast，且容器已 crash-loop 即等价红灯，无增益。
++
++无声明边界以外的取舍。
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/proposal.md b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/proposal.md
+new file mode 100644
+index 000000000..f29476258
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T11:38:24.238Z
++---
++# 提案书（Proposal）— 2026-10-11-alembic-single-head-guard
++
++## 动机
++
++任务原话转写：动机：并行变更各自新增 alembic 迁移未合流即部署，生产 backend crash-loop 宕机约 2 分钟（2026-10-11 实证：Multiple head revisions，两迁移同父分叉），需在 CI 与部署预检双闸提前拦截。
++
++成功标准：
++- backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++- deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++- 改动相关测试全绿（全量留给 CI）
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++2. deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++3. 改动相关测试全绿（全量留给 CI）
++
++## 成功标准（可验证）
++
++1. backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++2. deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++3. 改动相关测试全绿（全量留给 CI）
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/requirements.md b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/requirements.md
+new file mode 100644
+index 000000000..be017dff2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/requirements.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T11:38:24.239Z
++---
++# 需求规格（Requirements）— 2026-10-11-alembic-single-head-guard
++
++## 功能需求
++
++### FR-01: backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++
++- 必须：`backend/tests/test_migration_single_head.py` 用 alembic API（ScriptDirectory.get_heads，不 shell out）断言迁移图 heads 恰一个；多头时断言失败且报错信息包含 `alembic merge heads` 解法提示与生产实证出处。
++
++#### 场景：主路径（当前单头通过）
++
++Given 迁移图单头（当前 c515ffd62859）
++When 运行该测试
++Then 通过。
++
++#### 场景：多头红灯（2026-10-11 事故形态复现）
++
++Given 并行变更各自新增迁移形成两 head（同日实证 20261011020000/20261011160000 形态）
++When CI 运行该测试
++Then fail，报错含 merge heads 解法提示——PR 阶段拦截，不再等部署宕机才发现。
++
++### FR-02: deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++
++- 必须：脚本在 docker build 前执行 `python -m alembic heads` 预检——多头（(head) 行数 ≠1）立即 exit 1 并打印各 head 与 merge 解法；alembic 命令本身失败也 exit 1 并提示修本地环境。
++- 禁止：预检失败后继续打镜像（省 300M 镜像上传后服务器起不来的往返）。
++
++#### 场景：主路径（单头放行）
++
++Given 迁移图单头
++When 运行 build-and-save.sh
++Then 预检打印「单头 OK: <revision>」并继续构建。
++
++#### 场景：多头拦截
++
++Given 迁移图两 head
++When 运行 build-and-save.sh
++Then 打印两 head 清单与 merge 提示后 exit 1，不进入 docker build。
++
++#### 场景：本地环境缺失
++
++Given backend Python 环境缺 alembic（命令报错）
++When 运行 build-and-save.sh
++Then exit 1 并提示 `uv sync` 修复，不静默跳过预检。
++
++### FR-03: 改动相关测试全绿（全量留给 CI）
++
++- 必须：新测试文件单独运行通过；build-and-save.sh 通过 bash -n 语法检查且 LF 行尾（.gitattributes 强制）；守卫 grep 计数逻辑经多头/单头样例模拟验证。仅跑改动相关，全量留给 CI。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/test_migration_single_head.py「test_alembic_single_head」
++FR-02: deploy/scripts/build-and-save.sh「[2.5/5] alembic 迁移单头预检」——bash -n 语法过 + grep 计数模拟（两 head 样例计数 2、单头样例计数 1、当前仓库实跑 heads-count=1）+ LF 校验 0
++FR-03: FR-01/FR-02 绑定行合计——pytest 1 passed，bash 语法与模拟全过
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/review.json b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/review.json
+new file mode 100644
+index 000000000..68561e40c
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/review.json
+@@ -0,0 +1,28 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-alembic-single-head-guard",
++  "reviewer": "subagent（ZCode Agent 通用代理）",
++  "verdict": "PASS",
++  "reviewedAgainst": "cc3c022b69db53de715ae457b83419ccfed16754",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "CI 闸测试对运行时 CWD 敏感：script_location 相对路径按 CWD 解析而非 alembic.ini 所在目录",
++      "evidence": "backend/alembic.ini 为 script_location = migrations（相对路径），alembic 1.18 的 ScriptDirectory.from_config 以进程 CWD 为基准解析——实证：从仓库根目录执行同款 from_config 报 CommandError: Path doesn't exist: migrations；cd backend 后正常（pytest 实测 1 passed）。当前所有执行路径均满足 CWD=backend：CI workflow 有 defaults.run.working-directory: backend，部署闸脚本显式 cd backend，本地惯例 cd backend && uv run pytest，故无一现行路径失效；但 design 作用域节『ScriptDirectory 解析 script_location=migrations 相对 backend/』表述不严谨（实际相对 CWD，靠调用约定成立）。若有人在仓库根跑 pytest backend/tests 会得到环境性报错而非清晰的图断言。加固一行即可：config.set_main_option(\"script_location\", str(backend_root / \"migrations\"))。",
++      "location": "backend/tests/test_migration_single_head.py:22"
++    },
++    {
++      "severity": "P3",
++      "title": "零头（versions 目录为空/无有效 revision）路径静默退出：grep -c 零匹配 exit 1 在 set -euo pipefail 下先于 -ne 1 分支杀死脚本",
++      "evidence": "实证模拟：ALEMBIC_HEADS 为空时 `ALEMBIC_HEAD_COUNT=\"$(printf '%s\\n' \"$ALEMBIC_HEADS\" | grep -c '(head)')\" 赋值语句因命令替换退出码 1 直接触发 set -e，脚本 exit 1 且不打印多头诊断文案（模拟输出：before count 后即死，zero-head-path exit=1）。行为仍 fail-closed（0 头亦非正常态，不会打镜像），仅报错质量降级；正常多头场景（每头一行 (head) 后缀，双头沙盒实证计数=2、真实仓库单头计数=1）走 -ne 1 分支有完整提示，不受影响。可选加固：grep -c '(head)' || true。",
++      "location": "deploy/scripts/build-and-save.sh:39"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "n/a",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "finding"
++  },
++  "reviewedAt": "2026-10-11T19:48:25+08:00"
++}
+diff --git a/.sillyspec/changes/2026-10-11-alembic-single-head-guard/tasks.md b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/tasks.md
+new file mode 100644
+index 000000000..45ea8eb7a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-alembic-single-head-guard/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T11:38:24.239Z
++---
++# 任务注册表（Tasks）— 2026-10-11-alembic-single-head-guard
++
++- [x] task-01: backend 新增迁移单头断言测试（alembic heads 输出恰一行，多头即 fail），随测试套件进 CI
++- [x] task-02: deploy/scripts/build-and-save.sh 打镜像前预检 alembic 单头，多头直接非零退出并提示 merge heads 解法
++- [x] task-03: 改动相关测试全绿（全量留给 CI）
