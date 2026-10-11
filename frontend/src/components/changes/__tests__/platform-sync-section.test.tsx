@@ -875,4 +875,98 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     });
     expect(screen.getByText("cli-attributed-chg")).toBeInTheDocument();
   });
+
+  // ── 注册表「版本冲突」面渲染（2026-10-11-sync-conflict-tri-fix FR-01）──────
+  // 背景：daemon 通道撞出的 apply_ops 乐观锁冲突只进注册表，机器 pending_conflicts
+  // 恒看不到——此前横幅报 1 条而本区块渲染 0 且无任何裁决入口（生产实证 2026-10-11）。
+
+  it("注册表版本冲突行——机器 pending_conflicts 为空也渲染：spec 徽章 + 变更名 + 查看对比 + 计数对齐", async () => {
+    setupMachine(
+      makeMachine(
+        makeStatus({
+          pending_conflicts: [],
+          conflict_count: 0,
+          conflict_types: {},
+        }),
+      ),
+    );
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: [],
+        conflicting_paths: [
+          "changes/2026-10-10-fire-equipment/tasks.md",
+          "changes/archive/2026-10-10-fire-equipment/decisions.md",
+        ],
+        server_versions: { "changes/archive/2026-10-10-fire-equipment/decisions.md": 3 },
+      }),
+    ]);
+    renderSection();
+    const row = await waitFor(() => {
+      const rows = screen.getAllByTestId("platform-sync-conflict-row");
+      expect(rows).toHaveLength(1);
+      return rows[0]!;
+    });
+    // 同一注册表行的多个路径归因到同一变更名 → 只拆 1 行
+    expect(within(row).getByText("2026-10-10-fire-equipment")).toBeInTheDocument();
+    expect(within(row).getByText("spec")).toBeInTheDocument();
+    expect(within(row).getByText("查看对比")).toBeInTheDocument();
+    // 卡头「未决冲突」计数 = 渲染行数（与横幅的注册表开放行口径一致）。
+    // span 直接文本与 ghost 计数连排，用函数匹配器定位；首个 <b> 是冲突计数。
+    const head = screen.getByText(
+      (_, el) =>
+        el?.tagName === "SPAN" && el.textContent?.includes("未决冲突") === true,
+    );
+    expect(head.querySelector("b")?.textContent).toBe("1");
+  });
+
+  it("注册表版本冲突行与机器行同名去重——机器行优先不重复渲染", async () => {
+    setupMachine(
+      makeMachine(
+        makeStatus({
+          pending_conflicts: [
+            { change: "dup-chg", created_at: isoAgo(25 * MIN), type: "spec-tree" },
+          ],
+          conflict_count: 1,
+          conflict_types: { "spec-tree": 1 },
+        }),
+      ),
+    );
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: [],
+        conflicting_paths: ["changes/dup-chg/a.md"],
+        server_versions: { "changes/dup-chg/a.md": 2 },
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("platform-sync-conflict-row")).toHaveLength(1);
+    });
+    expect(screen.getAllByText("dup-chg")).toHaveLength(1);
+  });
+
+  it("混合行按版本冲突面归因渲染（非墓碑形态），墓碑面不另渲染墓碑行", async () => {
+    setupMachine(
+      makeMachine(
+        makeStatus({
+          pending_conflicts: [],
+          conflict_count: 0,
+          conflict_types: {},
+        }),
+      ),
+    );
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        platform_deleted: ["changes/mixed-chg/tomb.md"],
+        conflicting_paths: ["changes/mixed-chg/tomb.md", "changes/mixed-chg/real.md"],
+        server_versions: { "changes/mixed-chg/real.md": 2 },
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("platform-sync-conflict-row")).toHaveLength(1);
+    });
+    expect(screen.queryByTestId("platform-sync-tombstone-row")).not.toBeInTheDocument();
+    expect(screen.getByText("mixed-chg")).toBeInTheDocument();
+  });
 });

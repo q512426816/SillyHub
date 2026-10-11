@@ -326,6 +326,47 @@ export function PlatformSyncSection({
     return idx;
   }, [specConflictsQ.data]);
 
+  /**
+   * 注册表「版本冲突」面归因行（2026-10-11-sync-conflict-tri-fix FR-01）：backend
+   * apply_ops 乐观锁冲突写入注册表的开放行（daemon 通道撞出——机器 pending_conflicts
+   * 看不到，此前横幅报 1 条而本区块渲染 0 且无裁决入口）。按 conflicting_paths ∖
+   * platform_deleted 的版本冲突面归因变更名（同墓碑行归因正则），一行多变更名时逐名
+   * 拆行；纯墓碑面归 tombstoneIndex 走既有墓碑行形态，不在此处理。损坏行跳过。
+   */
+  const registryVersionRows = useMemo(() => {
+    const rows: Array<{ change: string; createdAt: string | null }> = [];
+    for (const row of specConflictsQ.data ?? []) {
+      let details: {
+        platform_deleted?: unknown;
+        conflicting_paths?: unknown;
+        server_versions?: unknown;
+      } | null = null;
+      try {
+        details = row.details_json ? (JSON.parse(row.details_json) as object) : null;
+      } catch {
+        continue; // 损坏行跳过（注册表宽松 JSON）
+      }
+      if (!details) continue;
+      const pd = Array.isArray(details.platform_deleted)
+        ? details.platform_deleted.filter((p): p is string => typeof p === "string")
+        : [];
+      const cp = Array.isArray(details.conflicting_paths)
+        ? details.conflicting_paths.filter((p): p is string => typeof p === "string")
+        : Object.keys(details.server_versions ?? {});
+      const pdSet = new Set(pd);
+      for (const path of cp) {
+        if (pdSet.has(path)) continue; // 墓碑面路径走墓碑行形态，不重复归因
+        const m = path.match(/^changes\/(?:archive\/)?([^/]+)\//);
+        const name = m?.[1];
+        if (!name) continue;
+        if (!rows.some((r) => r.change === name)) {
+          rows.push({ change: name, createdAt: row.created_at ?? null });
+        }
+      }
+    }
+    return rows;
+  }, [specConflictsQ.data]);
+
   const machine =
     daemonId !== null
       ? (machinesQ.data?.items.find((m) => m.id === daemonId) ?? null)
@@ -365,9 +406,11 @@ export function PlatformSyncSection({
 
   const conflicts = status?.pending_conflicts ?? [];
   /**
-   * 渲染行（FR-02 双源 join）：快照 pending_conflicts 行 + 注册表独有墓碑行
-   * （快照没有的——CLI 旧版无归因记录 / CLI 已清注册表未关期间）。墓碑判定
-   * 双源：注册表索引命中，或快照行 type==='tombstone'（task-05 CLI 透传）。
+   * 渲染行（FR-02 双源 join + FR-01 注册表版本冲突面）：快照 pending_conflicts 行 +
+   * 注册表独有墓碑行（快照没有的——CLI 旧版无归因记录 / CLI 已清注册表未关期间）+
+   * 注册表版本冲突面归因行（daemon 通道冲突，机器快照恒看不到——2026-10-11-sync-
+   * conflict-tri-fix FR-01，与横幅口径对齐）。墓碑判定双源：注册表索引命中，或快照行
+   * type==='tombstone'（task-05 CLI 透传）。同名去重：机器行 > 墓碑行 > 注册表版本行。
    */
   const renderRows = useMemo(() => {
     const rows = conflicts.map((c) => {
@@ -384,6 +427,7 @@ export function PlatformSyncSection({
     const seen = new Set(rows.map((r) => r.change));
     for (const [name, info] of tombstoneIndex) {
       if (!seen.has(name)) {
+        seen.add(name);
         rows.push({
           change: name,
           type: "tombstone",
@@ -394,8 +438,20 @@ export function PlatformSyncSection({
         });
       }
     }
+    for (const reg of registryVersionRows) {
+      if (seen.has(reg.change)) continue;
+      seen.add(reg.change);
+      rows.push({
+        change: reg.change,
+        type: "spec-tree",
+        createdAt: reg.createdAt,
+        qlId: null,
+        isTomb: false,
+        tombPaths: null,
+      });
+    }
     return rows;
-  }, [conflicts, tombstoneIndex]);
+  }, [conflicts, tombstoneIndex, registryVersionRows]);
   const ghostCount = status?.ghost_count ?? ghosts.length;
 
   const generatedMs =
