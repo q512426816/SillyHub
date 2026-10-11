@@ -367,6 +367,33 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     expect(incrSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）', async () => {
+    const wsId = 'ws-retry-transport';
+    await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
+    write('docs/a.md', 'v2');
+
+    const incrSpy = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        new_versions: {},
+        conflict: true,
+        server_versions: { 'docs/a.md': 9 },
+      })
+      .mockRejectedValueOnce(new Error('ECONNRESET'));
+    const postSpy = vi.fn();
+    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
+
+    await expect(postSpecSync(client as never, wsId, scratch)).rejects.toBeInstanceOf(
+      SpecPushConflict,
+    );
+    // 首推 conflict + 重试传输失败，恰好两次；不回退旧 tar（首推已知 conflict，静默覆盖违背 NFR-02）
+    expect(incrSpy).toHaveBeenCalledTimes(2);
+    expect(postSpy).not.toHaveBeenCalled();
+    // SpecPushConflict 语义：不写 pending_push 标记（人工拍板非传输失败）
+    expect(existsSync(join(scratch, '.runtime', 'pending_push'))).toBe(false);
+  });
+
   it('new_versions 回写缓存 version（下次 diff 用新 version 作 base_version）', async () => {
     const wsId = 'ws-rev';
     await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
