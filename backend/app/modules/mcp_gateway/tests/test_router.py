@@ -377,3 +377,61 @@ async def test_hard_delete_unknown_token_returns_404(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_cleans_up_bound_webhooks(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """hard delete 后该 token 名下 webhook 行一并移除（FR-04 级联承诺）。
+
+    service 层显式删 webhook 子行（不依赖 FK CASCADE——单测 SQLite 不开外键
+    PRAGMA，纯 FK 级联在测试面会残留），生产 PG 上与 FK CASCADE 双保险。
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.modules.mcp_gateway.model import McpTokenORM, McpWebhookORM
+
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_token(client, h, str(ws.id), name="hooked")
+
+    webhook = McpWebhookORM(
+        id=uuid.uuid4(),
+        token_id=uuid.uuid4(),  # 占位，下面替换为真实 token id
+        workspace_id=ws.id,
+        url="https://hooks.example.com/done",
+        secret="v1:" + "ab" * 8,
+        events=["worker.completed"],
+        active=True,
+        created_at=datetime.now(UTC),
+    )
+    webhook.token_id = uuid.UUID(created["id"])
+    db_session.add(webhook)
+    await db_session.commit()
+
+    await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
+    )
+    assert resp.status_code == 204
+
+    tokens_left = (
+        await db_session.execute(
+            select(McpTokenORM).where(McpTokenORM.id == uuid.UUID(created["id"]))
+        )
+    ).scalar_one_or_none()
+    webhooks_left = (
+        (
+            await db_session.execute(
+                select(McpWebhookORM).where(McpWebhookORM.token_id == uuid.UUID(created["id"]))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert tokens_left is None
+    assert webhooks_left == []

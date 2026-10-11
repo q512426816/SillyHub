@@ -36,7 +36,8 @@ settings/api-keys / workspaces/[id]/mcp-tokens）接新端点。runtimes 页复�
 3. `DELETE /api/auth/api-keys/{id}?hard=true`（变）：hard 且已吊销 → 物理删行 204；
    hard 且未吊销 → 409（中文 detail「请先吊销再删除」）；无 hard 参数 → 原吊销语义逐字不变。
 4. `DELETE /api/workspaces/{wid}/mcp-tokens/{tid}?hard=true`（变）：同上；删行时其
-   mcp_webhooks 子行随外键 `ondelete=CASCADE` 一并移除。
+   mcp_webhooks 子行由 service 显式删除（与外键 `ondelete=CASCADE` 双保险——单测
+   SQLite 不开外键 PRAGMA，纯 FK 级联在测试面会残留）。
 5. DTO：`ApiKeyRead` / `McpTokenRead` 增 `plaintext_recoverable: bool`（加密列非空）。
    `ApiKeyCreated` / `McpTokenCreated` 响应形态不变（明文字段仍在，语义从「此后不可恢复」
    改为「列表可再取」，对应 docstring 同步修正）。

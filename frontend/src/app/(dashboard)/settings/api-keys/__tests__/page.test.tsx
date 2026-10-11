@@ -189,3 +189,25 @@ describe("API 密钥设置页 · 按钮矩阵", () => {
     expect(screen.getAllByRole("button", { name: /删除/ })).toHaveLength(1);
   });
 });
+
+describe("API 密钥设置页 · 过期行（评审 P1 修复回归）", () => {
+  it("过期未吊销行不渲染复制按钮（明文端点对过期行 404，可点只会报错）", async () => {
+    const expiredKey = makeKey({
+      id: "eeeeeeee-0000-0000-0000-000000000000",
+      name: "expired-key",
+      expires_at: "2026-10-01T00:00:00Z",
+    });
+    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey, expiredKey]);
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("expired-key")).toBeInTheDocument();
+    });
+
+    // 状态列显示「已过期」；仅活跃行有复制按钮；过期行吊销按钮保留（仍可吊销清理）
+    expect(screen.getAllByText("已过期").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("button", { name: /复制密钥/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "吊销" })).toHaveLength(2);
+    expect(apiKeysApi.fetchApiKeyPlaintext).not.toHaveBeenCalled();
+  });
+});

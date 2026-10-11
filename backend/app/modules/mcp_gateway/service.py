@@ -335,8 +335,9 @@ class McpTokenService:
         """物理删除行（仅已吊销记录放行，2026-10-11 变更）。
 
         不存在 / 跨 workspace → :class:`McpTokenNotFound`（404）；存在但未吊销 →
-        :class:`McpTokenDeleteBlocked`（409）。行删除时其 mcp_webhooks 子行随外键
-        ``ondelete=CASCADE`` 一并移除；删除后按 ``token_hash`` 精确清一次正缓存
+        :class:`McpTokenDeleteBlocked`（409）。行删除时其 mcp_webhooks 子行由 service
+        **显式删除**（与外键 ``ondelete=CASCADE`` 双保险——SQLite 单测库不开外键
+        PRAGMA，纯 FK 级联在测试面会残留）；删除后按 ``token_hash`` 精确清一次正缓存
         （正常路径 revoke 已清，这里兜底残余窗口）。
         """
         row = (
@@ -354,10 +355,15 @@ class McpTokenService:
         if row.revoked_at is None:
             raise McpTokenDeleteBlocked("该令牌尚未吊销，请先吊销再删除。")
         token_hash = row.token_hash
+        # 先删 webhook 子行（显式，不依赖 FK CASCADE），同事务保证原子。
+        await self._db.execute(delete(McpWebhookORM).where(col(McpWebhookORM.token_id) == token_id))
+        # DELETE 复带 revoked_at IS NOT NULL 条件（不止靠上方 check）：即便出现
+        # un-revoke 类未来路径翻转状态，并发窗口内也不会误删活跃凭证。
         await self._db.execute(
             delete(McpTokenORM)
             .where(col(McpTokenORM.id) == token_id)
             .where(col(McpTokenORM.workspace_id) == workspace_id)
+            .where(col(McpTokenORM.revoked_at).is_not(None))
         )
         await self._db.commit()
         await self._invalidate_cache(token_hash)

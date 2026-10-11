@@ -101,7 +101,7 @@ created_at: 2026-10-11T07:00:52.199Z
 
 FR-01: backend/tests/modules/auth/test_api_key_service.py「create 同时落 bcrypt hash 与加密明文」
 FR-01: frontend/src/lib/__tests__/api-keys.test.ts「resolveDaemonApiKey：有活跃 key 返回明文 / 无活跃 key 自动创建永不过期 key」
-FR-01: frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx「复制命令写入剪贴板的命令内嵌真实密钥、渲染面保持打码」
+FR-01: frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx「复制命令写入剪贴板的命令内嵌真实密钥、渲染面保持打码」
 FR-02: backend/tests/modules/auth/test_api_key_router.py「GET /api/auth/api-keys/{id}/plaintext 活跃 key 返回明文、已吊销 404」
 FR-02: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「活跃可恢复行显示复制密钥并写入剪贴板」
 FR-03: backend/app/modules/mcp_gateway/tests/test_router.py「GET plaintext 端点活跃 token 返回明文、已吊销/越权 404」

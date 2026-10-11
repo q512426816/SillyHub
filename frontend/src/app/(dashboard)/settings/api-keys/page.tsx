@@ -211,6 +211,9 @@ export default function ApiKeysSettingsPage() {
               <tbody>
                 {keys.map((k) => {
                   const status = getKeyStatus(k);
+                  // 与 getKeyStatus 同判据：过期未吊销行不提供复制入口（明文端点 404）。
+                  const expired =
+                    !!k.expires_at && new Date(k.expires_at) <= new Date();
                   return (
                     <tr key={k.id} className="border-b last:border-0 hover:bg-muted/25">
                       <td className="px-4 py-3">
@@ -234,38 +237,40 @@ export default function ApiKeysSettingsPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {/* 复制按钮仅活跃行渲染：过期/已吊销行的明文端点一律 404（FR-02），
+                              渲染了可点的按钮只会得到报错横幅。吊销对未吊销行（含过期）仍开放。 */}
+                          {!k.revoked_at && !expired && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1"
+                              disabled={!k.plaintext_recoverable || copyingId === k.id}
+                              title={
+                                k.plaintext_recoverable
+                                  ? "复制该密钥的完整明文"
+                                  : "旧版本签发的密钥未保存明文，无法复制；请新签发一把"
+                              }
+                              onClick={() => void handleCopyKey(k)}
+                            >
+                              {copiedId === k.id ? (
+                                "已复制"
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" />
+                                  复制密钥
+                                </>
+                              )}
+                            </Button>
+                          )}
                           {!k.revoked_at && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="gap-1"
-                                disabled={!k.plaintext_recoverable || copyingId === k.id}
-                                title={
-                                  k.plaintext_recoverable
-                                    ? "复制该密钥的完整明文"
-                                    : "旧版本签发的密钥未保存明文，无法复制；请新签发一把"
-                                }
-                                onClick={() => void handleCopyKey(k)}
-                              >
-                                {copiedId === k.id ? (
-                                  "已复制"
-                                ) : (
-                                  <>
-                                    <Copy className="h-3.5 w-3.5" />
-                                    复制密钥
-                                  </>
-                                )}
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                onClick={() => void handleRevoke(k)}
-                              >
-                                吊销
-                              </Button>
-                            </>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={() => void handleRevoke(k)}
+                            >
+                              吊销
+                            </Button>
                           )}
                           {k.revoked_at && (
                             <Button

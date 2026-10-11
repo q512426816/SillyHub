@@ -281,8 +281,13 @@ class ApiKeyService:
         if row.revoked_at is None:
             raise ApiKeyDeleteBlocked("该密钥尚未吊销，请先吊销再删除。")
         key_prefix = row.key_prefix
+        # DELETE 复带 revoked_at IS NOT NULL 条件（不止靠上方 check）：即便出现
+        # un-revoke 类未来路径翻转状态，并发窗口内也不会误删活跃凭证。
         await self._db.execute(
-            delete(ApiKey).where(col(ApiKey.id) == api_key_id).where(col(ApiKey.user_id) == user_id)
+            delete(ApiKey)
+            .where(col(ApiKey.id) == api_key_id)
+            .where(col(ApiKey.user_id) == user_id)
+            .where(col(ApiKey.revoked_at).is_not(None))
         )
         await self._db.commit()
         await self._invalidate_prefix_cache(key_prefix)
