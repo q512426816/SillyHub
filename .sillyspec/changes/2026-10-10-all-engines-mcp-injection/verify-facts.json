@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-10-all-engines-mcp-injection",
+  "generatedAt": "2026-10-11T03:38:02.509Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 1,
+        "worktreeHits": 2,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "tasks": 9,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "backendEndpoints": 1074,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "deletions": 3,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
+      "metrics": {
+        "checkedFiles": 10,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "requiredEvidence": [
+    {
+      "task": "task-01",
+      "status": "satisfied",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/spike-pi-10-compat.md"
+      ]
+    },
+    {
+      "task": "task-02",
+      "status": "satisfied",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md"
+      ]
+    },
+    {
+      "task": "task-03",
+      "status": "satisfied",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/spike-cursor-mcp.md"
+      ]
+    },
+    {
+      "task": "task-04",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/cli.ts",
+        "sillyhub-daemon/src/interactive/providers.ts",
+        "sillyhub-daemon/tests/mcp-config.test.ts"
+      ]
+    },
+    {
+      "task": "task-05",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/pi-settings.ts",
+        "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "sillyhub-daemon/tests/pi-settings-mcp.test.ts"
+      ]
+    },
+    {
+      "task": "task-06",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/codex-settings.ts",
+        "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+        "sillyhub-daemon/tests/codex-settings-mcp.test.ts"
+      ]
+    },
+    {
+      "task": "task-07",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/providers.ts",
+        "sillyhub-daemon/src/interactive/cursor-driver.ts"
+      ]
+    },
+    {
+      "task": "task-08",
+      "status": "satisfied",
+      "verifiedFiles": [
+        "sillyhub-daemon/src/interactive/providers.ts",
+        "frontend/src/lib/provider-caps.ts",
+        "backend/app/modules/agent/provider_caps.py"
+      ]
+    },
+    {
+      "task": "task-09",
+      "status": "satisfied",
+      "verifiedFiles": [
+        ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/acceptance-e2e.md"
+      ]
+    }
+  ],
+  "runtimeEvidence": [
+    {
+      "claim": "pi 引擎端到端五环节全链（注入→连接→工具可见→调用→backend 出站）",
+      "command": "PI_CODING_AGENT_DIR=<per-session dir> pi mcp list --json && node direct-call.mjs（JSON-RPC tools/call upload_file）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/acceptance-e2e.md（五环节证据全文）"
+    }
+  ],
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "FR-09 线上复验：daemon 部署本变更构建后，平台 pi 会话内 agent 调 upload_file 真实上传落文件中心（引擎侧全链已验，凭证由 daemon 注入链携带——D-013@v1）",
+        "condition": "部署后任一 pi 平台会话实测一次",
+        "severity": "advisory"
+      },
+      {
+        "type": "other（后续变更）",
+        "item": "G-1：pi 版本门控 driver start 组合行为（major<1→跳过写盘）无直接集成断言（QA 评轻微，三层缓解不阻塞）",
+        "condition": "后续变更补 pi-rpc-driver 门控块集成测试",
+        "severity": "blocking"
+      },
+      {
+        "type": "other（复评）",
+        "item": "codex/cursor SPIKE 复评：宿主 codex 平台二进制修复 / cursor-agent 可安装后重跑 SPIKE-01/02，通过即翻 caps（机制代码已就绪）",
+        "condition": "引擎可用 + spike-codex-mcp.md / spike-cursor-mcp.md SOP",
+        "severity": "blocking"
+      },
+      {
+        "type": "other（环境）",
+        "item": "frontend vitest 环境半坏（node_modules 缺 .bin shim，CLAUDE.md 规则 21 已知坑）：全量 frontend test 未跑；frontend 本变更仅生成产物 1 行 diff，三端一致性由 backend 对齐守护锁定",
+        "condition": "pnpm install --force 修复后 CI 全量",
+        "severity": "blocking"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/pi-settings-mcp.test.ts",
+      "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+      "sillyhub-daemon/tests/mcp-config.test.ts",
+      "sillyhub-daemon/scripts/gen-provider-caps.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py41+nontest-skip1+jsx61)+fr(96) + vitest/jest(1)",
+    "exitCode": 1,
+    "strategy": "dynamic-subset+trace(1)",
+    "failedRemaining": [],
+    "passedAt": "2026-10-11T04:27:54.464Z"
+  }
+}

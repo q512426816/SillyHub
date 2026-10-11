@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-all-engines-mcp-injection",
+  "anchors": [
+    "FR-03",
+    "FR-04",
+    "FR-05",
+    "FR-01",
+    "FR-02",
+    "FR-06",
+    "FR-07",
+    "FR-08",
+    "FR-09"
+  ],
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-04:acc-0-a49a5fe0",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-04:acc-1-5d090b57",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-04:acc-2-b420a527",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-05:acc-0-09e0eb41",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts",
+        "sillyhub-daemon/tests/pi-settings-mcp.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-06:acc-0-5a94183b",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-06:acc-1-5cf50ff5",
+      "tests": [
+        "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-07:acc-1-996fd0d5",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-08:acc-0-7383e2ec",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-08:acc-1-897c6d88",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-10-all-engines-mcp-injection:task-08:acc-2-0cd15a23",
+      "tests": [
+        "sillyhub-daemon/tests/mcp-config.test.ts",
+        "sillyhub-daemon/tests/mcp-server.test.ts"
+      ]
+    }
+  ],
+  "traceFiles": [
+    "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+    "sillyhub-daemon/tests/mcp-config.test.ts",
+    "sillyhub-daemon/tests/mcp-server.test.ts",
+    "sillyhub-daemon/tests/pi-settings-mcp.test.ts"
+  ],
+  "provableSource": "dynamic-subset",
+  "residualFiles": [
+    "sillyhub-daemon/tests/mcp-server.test.ts"
+  ],
+  "action": "dynamic-subset",
+  "ranAt": "2026-10-11T04:27:52.756Z"
+}

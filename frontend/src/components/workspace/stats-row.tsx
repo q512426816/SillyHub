@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Archive, GitBranch, Puzzle, Zap } from "lucide-react";
+import { Archive, GitBranch, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 interface WorkspaceStatsRowProps {
   workspaceId: string;
-  componentCount: number;
   activeChanges: number;
   archivedChanges: number;
   /** 快速修复总条数（QUICKLOG；用户反馈 ql-20260820-013：原"运行时阶段"卡替换）。 */
@@ -55,24 +54,18 @@ function StatCard({
 
 export function WorkspaceStatsRow({
   workspaceId,
-  componentCount,
   activeChanges,
   archivedChanges,
   quickTotal,
 }: WorkspaceStatsRowProps): JSX.Element {
+  // 2026-10-11-retire-components-page：「项目组组件」卡随组件页下线移除（空数据源 +
+  // 死链），余三格（lg:grid-cols-3）。
   return (
     <section
       className={cn(
-        "grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4",
+        "grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-3",
       )}
     >
-      <StatCard
-        href={`/workspaces/${workspaceId}/components`}
-        icon={Puzzle}
-        label="项目组组件"
-        value={componentCount}
-        clickable
-      />
       <StatCard
         href={`/workspaces/${workspaceId}/changes`}
         icon={GitBranch}

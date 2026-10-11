@@ -110,29 +110,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
       { key: "workspace:member:manage", name: "工作区成员管理" },
     ],
   },
-  {
-    section: "workspace",
-    menuKey: "components",
-    menuLabel: "项目组组件",
-    icon: "\u{1F4E6}",
-    href: "components",
-    matchPattern: "/components",
-    // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
-    // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
-    // 鉴权 workspace:read。
-    // 2026-10-08-rbac-dead-permissions-cleanup：component:read 死键删除（零端点
-    // 消费，ql-003 接线意图从未落地），卡片收敛为页面真实所需。
-    permissions: [{ key: "workspace:read", name: "组件查看" }],
-  },
-  {
-    section: "workspace",
-    menuKey: "topology",
-    menuLabel: "拓扑图",
-    icon: "\u{1F5FA}",
-    href: "components/topology",
-    matchPattern: "/components/topology",
-    permissions: [{ key: "topology:read", name: "拓扑查看" }],
-  },
+  // 2026-10-11-retire-components-page：「项目组组件」「拓扑图」菜单随组件页
+  // （含 components/topology 子页）一并下线——生成入口缺失长期空页，信息已被
+  // 关联仓卡片「本机现状回显」覆盖（用户裁决选项 A）。
   {
     section: "workspace",
     menuKey: "changes",

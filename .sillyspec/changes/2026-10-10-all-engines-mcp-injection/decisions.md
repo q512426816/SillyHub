@@ -142,3 +142,51 @@ created_at: 2026-10-10 23:59:32
 - priority: P1
 - 否决理由: pi 1.0（2026-10-01）已原生支持 MCP，上游在演进原生 MCP；保持 0.81.1 + 自写桥接偏离上游演进，桥接层长期自维护成本高。
 - 复潮条件: SPIKE-00 显示 pi 1.0 rpc/extension 面大改、升级适配成本显著超过自写桥接时重评。
+
+## D-011@v1 执行期裁决：SPIKE-01/02 因宿主引擎不可用受阻，codex/cursor 维持 false 留复评
+- type: boundary
+- status: accepted
+- supersedes:
+- source: code
+- question: SPIKE-01（codex）/SPIKE-02（cursor）实测因宿主引擎不可用无法完成时如何裁定？
+- answer: codex 0.162.0 主包在但缺 @openai/codex-win32-x64 平台二进制（npmjs ETIMEDOUT 限断、npmmirror 未同步、yarnpkg 断连，多路重试均失败）；cursor-agent CLI 未安装且同网络无法安装。按 D-003/D-006 红线（禁止无实测证据翻值）：codex.mcp/cursor.mcp 维持 false；codex 通道机制代码（config.toml [mcp_servers.*] 序列化+单测）照计划交付（机制就绪待复评，翻值即活），cursor 通道走留档分支（注释三要素）。
+- normalized_requirement: caps 翻值必须以 spike-*.md 实测证据为唯一依据；宿主引擎不可用属"未能实测"而非"实测不生效"，两态都不得翻值；复评条件=引擎可用后重跑对应 SPIKE。
+- impacts: [task-02, task-03, task-05, task-06, task-07, task-08, task-09]
+- evidence: task-01 SPIKE-00 实测通过（pi 1.1.0 原生 MCP 全链路）对照；codex --version 报 Missing optional dependency；npm view ETIMEDOUT（141.193.154.210:443 超时）；npmmirror NOT_FOUND
+- priority: P1
+- 锚点: sillyhub-daemon/src/interactive/providers.ts:226（codex caps 注释块，task-08 留档落点）
+- 模块域: sillyhub-daemon
+- 故障面: 机制代码与 caps 状态暂时分离（codex 代码就绪但 false）——翻值动作被 D-003/D-006 红线锁在 SPIKE 复评之后，防止未验证通道进生产会话
+- 退役判据: codex/cursor 引擎在宿主可用且 SPIKE-01/02 复测通过翻值后，本裁决自动失去约束对象
+
+## D-012@v1 执行期裁决：pi/codex MCP 写盘调用点定在 driver start（非 providers.ts 薄适配）
+- type: architecture
+- status: accepted
+- supersedes:
+- source: code
+- question: Grill B-5 落定"对齐薄适配模式"后发现 writer 调用点（daemon applyProviderFileSettings）与 mcpServers 产出点（resolveMainAgentMcp→driverOpts）是两条独立链，强行汇流需改 daemon.ts 大文件，如何落定？
+- answer: writePiMcpConfig/writeCodexMcpServers 作为 pi-settings/codex-settings 导出的独立纯写盘器，调用点在各自 driver start()（运行时函数体内调用）——从 opts.mcpServers + opts.env（PI_CODING_AGENT_DIR/CODEX_HOME）取双参数。懒调用纪律的实质是"模块初始化零跨表求值"（防 ESM TDZ 环），driver start 运行时调用与 providers.ts writer 函数体内调 writePiDir 同性质，不破坏该纪律（pi-settings/codex-settings 均无回引 interactive/ 的反向依赖，无环）。
+- normalized_requirement: MCP 写盘只发生在 driver start 的函数体内（运行时），模块顶层零调用；两写盘器保持低依赖纯函数形态（不 import interactive/ 运行时符号）。
+- impacts: [task-05, task-06]
+- evidence: providers.ts:66-76 懒调用纪律注释原文；driver-factory.ts:238-240（mcpServers 经 driverOpts 透传，产出点在 SessionManager 层）；daemon.ts:8923-8948（providerFileEnv 与 mcpServers 组装为两条独立链）
+- priority: P2
+- 锚点: sillyhub-daemon/src/interactive/pi-rpc-driver.ts:844（start 内写盘调用块）
+- 模块域: sillyhub-daemon
+- 故障面: driver 内写盘使"配置落盘"与"spawn"耦合在同一函数——写盘失败已按降级 warn 不阻断 spawn 处理（MCP 为增强能力），无新增失败传播面
+- 退役判据: 若未来 daemon 侧统一 provider 文件层与 MCP 注入为单次写盘事务，可迁回薄适配模式
+
+## D-013@v1 执行期裁决：task-09 验收方式为引擎侧全链 + 线上复验项
+- type: boundary
+- status: accepted
+- supersedes:
+- source: code
+- question: 完整平台链端到端（backend 建会话→daemon 接单→UI 内 upload 成功）在本验证窗口受阻（本地平台登录验证码链、生产 daemon 共存约束、用户模型凭证敏感边界），如何收口 FR-09？
+- answer: 引擎侧全链验收（配置注入→pi 连接→工具面可见→JSON-RPC 直调→HTTP 到达本地 backend 401 结构化错误）作为 FR-09 的交付证据；真实上传落文件中心列为 daemon 部署本变更构建后的线上复验项（凭证由 daemon 注入链自动携带，复验动作=平台 pi 会话内让 agent 调 upload_file）。
+- normalized_requirement: 引擎侧全链五环节（注入/连接/可见/调用/出站）全部有留档证据方可视为 FR-09 通过；线上复验项必须写进验收记录并在汇报中向用户披露。
+- impacts: [task-09, FR-09]
+- evidence: acceptance-e2e.md 五环节证据链；本地 /api/auth/captcha 路由存在；宿主生产 daemon PID 30728 连 crrcdt.ppdmq.top 且有活 pi 会话（不可干扰）
+- priority: P1
+- 锚点: .sillyspec/changes/2026-10-10-all-engines-mcp-injection/acceptance-e2e.md
+- 模块域: sillyhub-daemon
+- 故障面: 引擎侧全链不含 backend 会话定位真实链（e2e 假凭证 401 即止）——生产真实上传的唯一未验证面，由线上复验项闭合
+- 退役判据: daemon 部署后线上复验通过（真实上传成功落文件中心），本裁决的复验项闭环

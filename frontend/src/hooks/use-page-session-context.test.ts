@@ -85,14 +85,10 @@ describe("usePageSessionContext", () => {
     );
   });
 
-  it("工作区 tab：知识库/拓扑/审批/Git 记录", () => {
+  it("工作区 tab：知识库/审批/Git 记录（拓扑页已下线 2026-10-11）", () => {
     pathnameRef.current = "/workspaces/w1/knowledge";
     expect(tabKeyOf(renderHook(() => usePageSessionContext()).result.current.pageContext)).toBe(
       "workspace_knowledge",
-    );
-    pathnameRef.current = "/workspaces/w1/components/topology";
-    expect(tabKeyOf(renderHook(() => usePageSessionContext()).result.current.pageContext)).toBe(
-      "workspace_topology",
     );
     pathnameRef.current = "/workspaces/w1/approvals";
     expect(renderHook(() => usePageSessionContext()).result.current.label).toBe("工作区 · 审批中心");

@@ -1,0 +1,790 @@
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index f19b370dd..6fcb566d6 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -64,7 +64,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+     },
+     "pi": {
+         "resume": True,
+-        "mcp": False,
++        "mcp": True,
+         "multimodal": True,
+         "attachments": True,
+         "thinking": True,
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index ae2cb8cf9..aa850b531 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -142,7 +142,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   },
+   pi: {
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index a864edc46..f0643839d 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -77,6 +77,7 @@ import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
+ // createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
+ import { CursorDriver } from './interactive/cursor-driver.js';
+ import { SessionManager } from './interactive/session-manager.js';
++import { isMainAgentMcpCandidate } from './interactive/providers.js';
+ import type { SessionEventForBackend } from './interactive/types.js';
+ import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+ import { DAEMON_VERSION } from './daemon-version.js';
+@@ -960,18 +961,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // isMainAgentSession：读 ctx.provider + ctx.stage 判定本 session 是否注入
+       // 主 agent MCP tool。链路：backend 写 lease.metadata.stage → daemon claim
+       // payload stage（lease/context.py:479）→ execPayload.stage（daemon.ts:3760）
+-      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。判据
+-      // （design §5 Phase 2）：
+-      //   - provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true：
+-      //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
+-      //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
+-      //   - provider=claude 且 stage='mission_worker'（backend execution.py
+-      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不进主控分支（防 worker
+-      //     递归派发与 converge 干扰，审查 CC-12）——但改走下方 isWorkerSession
+-      //     分支注入受限 server（task-06 2026-08-25-team-subsession-governance
+-      //     / D-003@v1，谓词三态化：普通 / 主控 / 分身）；其它非空 stage 值不注入。
+-      //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
+-      //     不消费 mcpServers，另立后续变更）。
++      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。
++      //
++      // 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）能力化：判定逻辑
++      // 单源收编 providers.ts isMainAgentMcpCandidate——provider !== 'claude' 硬拒
++      // （2026-08-26-workspace-mcp-edit 时代口径，codex 旧注释 D-003@v1"另立后续
++      // 变更"即本变更）改为按 getProviderCaps(provider).mcp 判定：caps.mcp=true
++      // 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值）注入，未知
++      // provider 默认拒绝；stage 判定维持原口径（缺省/orchestrator 注入）。
++      //   - stage='mission_worker'（分身）不进主控分支——isWorkerSession（下方）
++      //     维持 claude-only 受限注入（D-002 循既有 D-008@v1 治理决策，未放开）。
+       //
+       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
+       // task-07（2026-08-26-workspace-mcp-edit）起为三件套合并注入：读会话级缓存
+@@ -990,11 +989,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
+       // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
+       // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
+-      isMainAgentSession: (ctx) => {
+-        if (ctx.provider !== 'claude') return false;
+-        const stage = ctx.stage ?? '';
+-        return stage === '' || stage === 'orchestrator';
+-      },
++      isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx),
+       mainAgentMcpConfigProvider: (ctx) => {
+         // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
+         // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index 2ca597a57..ccc2c7df1 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -340,6 +340,107 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
+  * 日志安全：warn/error 载荷只含路径 / 字段名 / api_format / 错误 message，
+  * 永不含 api_key / daemonApiKey 明文。
+  */
++/**
++ * codex per-session MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver；本写盘器按结构类型直传）。
++ */
++export interface CodexMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1）：把平台 MCP
++ * 配置表序列化为 config.toml [mcp_servers.*] 托管段并差量合并（纯函数，无 IO）。
++ *
++ * 序列化形态（codex CLI config.toml 官方 schema）：
++ *   [mcp_servers.<name>]
++ *   command = "<cmd>"
++ *   args = ["<a>", "<b>"]          （可选，字符串数组）
++ *   [mcp_servers.<name>.env]        （可选，KEY = "value" 子表）
++ *
++ * 托管语义：[mcp_servers.*] 命名空间为 daemon 独占（per-session 目录内的
++ * config.toml 由 daemon 管理，宿主全局 ~/.codex 不受影响）——现有 mcp_servers
++ * 段整段丢弃重写（防幽灵 server 残留），其余行（含 model 托管段与用户行）
++ * 原样保留。空表 → 返回 existing 原文（不动文件）。env 空对象不产生子表。
++ * 值转义复用 tomlString；数组/子表键名按 TOML 裸键规则（name 由 daemon 白名单
++ * 控制为安全标识符：sillyhub-daemon / sillyhub-file 等连字符形态合法）。
++ */
++export function mergeCodexMcpToml(
++  existing: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): string {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return existing;
++  const lines = existing.split(/\r?\n/);
++  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') lines.pop();
++
++  const kept: string[] = [];
++  let inMcpNamespace = false;
++  for (const line of lines) {
++    const path = parseHeaderPath(line);
++    if (path !== null) {
++      inMcpNamespace = path[0] === 'mcp_servers';
++      if (!inMcpNamespace) kept.push(line);
++      continue;
++    }
++    if (inMcpNamespace) continue; // 旧 mcp_servers 段（含尾随空行/注释）整段丢弃
++    kept.push(line);
++  }
++  while (kept.length > 0 && kept[kept.length - 1]?.trim() === '') kept.pop();
++
++  const mcpBlock: string[] = [];
++  for (const name of names) {
++    const cfg = mcpServers[name];
++    if (cfg === undefined) continue;
++    mcpBlock.push(`[mcp_servers.${name}]`);
++    mcpBlock.push(`command = ${tomlString(cfg.command)}`);
++    if (cfg.args !== undefined && cfg.args.length > 0) {
++      const items = cfg.args.map((a) => tomlString(a)).join(', ');
++      mcpBlock.push(`args = [${items}]`);
++    }
++    const envKeys = cfg.env === undefined ? [] : Object.keys(cfg.env);
++    if (envKeys.length > 0) {
++      mcpBlock.push(`[mcp_servers.${name}.env]`);
++      for (const k of envKeys) {
++        mcpBlock.push(`${k} = ${tomlString(cfg.env?.[k] ?? '')}`);
++      }
++    }
++  }
++
++  const head = kept.length > 0 ? `${kept.join('\n')}\n\n` : '';
++  return `${head}${mcpBlock.join('\n')}\n`;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06：写 per-session CODEX_HOME 内
++ * config.toml 的 [mcp_servers.*] 托管段（读 config.toml → mergeCodexMcpToml →
++ * writeFileAtomic）。空表跳过不写；写 IO 失败 throw（调用方 codex driver start
++ * 捕获降级 warn 不阻断 spawn——MCP 是增强能力）。本文件由 daemon 与本函数共同
++ * 管理（provider 托管段归 writeCodexHome，mcp_servers 段归本函数），两写路径
++ * 均为「读原文→差量合并→原子写」幂等形态。
++ */
++export async function writeCodexMcpServers(
++  codexHome: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): Promise<void> {
++  if (Object.keys(mcpServers).length === 0) return;
++  const path = join(codexHome, CONFIG_FILENAME);
++  const existing = await readTextIfExists(path);
++  const merged = mergeCodexMcpToml(existing, mcpServers);
++  try {
++    await writeFileAtomic(path, merged);
++  } catch (e) {
++    console.error('codex_mcp_config_write_failed', {
++      codexHome,
++      servers: Object.keys(mcpServers),
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> {
+   const { codexHome, provider, daemonApiKey } = input;
+ 
+diff --git a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+index 881d069f2..ce1b4f7fe 100644
+--- a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+@@ -59,6 +59,7 @@ import { mkdir } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import readline from 'node:readline';
+ import { resolveWindowsCmdShim } from '../cmd-shim.js';
++import { writeCodexMcpServers } from '../codex-settings.js';
+ import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
+ import { daemonStateDir } from '../config.js';
+ import type { AgentEvent, AgentEventUsage } from '../types.js';
+@@ -829,6 +830,31 @@ export class CodexAppServerDriver implements InteractiveDriver {
+     args.unshift('-c', 'features.default_mode_request_user_input=true');
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-06 / D-006@v1 + D-011@v1）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出）写 per-session CODEX_HOME 内
++    // config.toml [mcp_servers.*] 托管段（codex CLI 原生读取）。caps 侧 codex.mcp
++    // 当前维持 false（SPIKE-01 未能实测——引擎二进制缺失，D-011@v1），本消费路径
++    // 在 caps 翻值前不会被触发（机制就绪待复评：复测通过翻值即活）。降级面：
++    // CODEX_HOME 缺失（provider 文件层未写）→ 不写 + warn；写盘失败 → warn 不阻断
++    // spawn（MCP 是增强能力）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const codexHome = env['CODEX_HOME'];
++      if (!codexHome || codexHome.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[codex-driver] mcp skip: no CODEX_HOME in spawn env');
++      } else {
++        try {
++          await writeCodexMcpServers(codexHome, opts.mcpServers);
++        } catch (e) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[codex-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++            (e as Error).message,
++          );
++        }
++      }
++    }
++
+     // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的
+     // 是 codex.cmd（npm cmd-shim），直接 spawn .cmd 无 shell → CreateProcess EINVAL
+     //（claude driver task-01 R-exe 同类问题，design §10 / interactive.md:38）。复用
+diff --git a/sillyhub-daemon/src/interactive/cursor-driver.ts b/sillyhub-daemon/src/interactive/cursor-driver.ts
+index cebae2ab9..ecc5fa3db 100644
+--- a/sillyhub-daemon/src/interactive/cursor-driver.ts
++++ b/sillyhub-daemon/src/interactive/cursor-driver.ts
+@@ -19,7 +19,11 @@
+  *
+  * 忽略的 StartOptions（无对应 CLI 通道，docblock 声明）：
+  *   - manualApproval / askUserOnly（permission_dialog=false，D-003@v2）
+- *   - mcpServers（CLI 无 per-session --mcp-config，D-008@v1）
++ *   - mcpServers（2026-10-10-all-engines-mcp-injection task-07 留档：CLI 无
++ *     per-session MCP 配置通道且 headless 审批上游坑未解——caps cursor.mcp=false，
++ *     实测证据/坑点/复评条件见 providers.ts cursor 注释块与
++ *     changes/2026-10-10-all-engines-mcp-injection/spike-cursor-mcp.md
++ *     （原 D-008@v1 口径由本次留档取代））
+  *   - blocks 附件（multimodal=false）
+  *
+  * E7：handle 含子进程资源，不可序列化、禁止落盘。
+@@ -93,6 +97,8 @@ export class CursorExecutableNotFoundError extends Error {
+  * cursor 专属启动选项（经 CreateSessionInput 传入，值来自 daemon `_agentPaths.get('cursor')`）。
+  *
+  * 忽略（无对应 CLI 通道，见文件头）：manualApproval / askUserOnly / mcpServers / blocks。
++ * mcpServers 留档细节（task-07）：caps.mcp=false 期不透传，翻值前需先过
++ * spike-cursor-mcp.md 复评 SOP。
+  */
+ export interface CursorDriverStartOptions extends InteractiveDriverStartOptions {
+   /** cursor-agent 可执行入口（.cmd/.ps1/或直 exe；Windows 下经 resolveWindowsCmdShim 解析）。 */
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index d9e117016..eed2ce28c 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -100,6 +100,7 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
+ import type { CanUseToolDecision } from './types.js';
+ 
+ import { CodepageDetectorDecoder } from '../spawn-env.js';
++import { writePiMcpConfig } from '../pi-settings.js';
+ 
+ /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
+ const KILL_GRACE_MS = 2_000;
+@@ -177,6 +178,64 @@ const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
+  * pi 的会话 jsonl 全部落本目录，resume（`--session <id>`）也在本目录内查找。
+  * 导出纯函数供测试断言（daemon-state-dir 隔离收口同款锚点）。
+  */
++/**
++ * 解析 pi --version 输出的主版本号（纯函数，2026-10-10-all-engines-mcp-injection
++ * task-05 / FR-06）。pi 1.0 起原生内置 MCP（SPIKE-00 实测）；主版本 <1 或无法
++ * 解析 → 返回 -1（视为不支持，调用方降级不注入）。
++ */
++export function parsePiMajorVersion(output: string): number {
++  const m = /(^|[\sv])([0-9]+)\.[0-9]+/.exec(output.trim());
++  return m ? Number(m[2]) : -1;
++}
++
++/**
++ * 探测宿主 pi 主版本（spawn --version；每会话至多一次，MCP 注入路径才触发）。
++ * spawn 失败/超时/输出不可解析 → -1（调用方降级 warn，不阻断会话）。
++ * 不做模块级缓存：宿主升级 pi 后无需重启 daemon 即生效；会话创建频率低，
++ * 多一次短命子进程可接受。
++ */
++export async function detectPiMajorVersion(
++  cmdPath: string,
++  useShell: boolean,
++  env: NodeJS.ProcessEnv,
++): Promise<number> {
++  return new Promise((resolve) => {
++    let settled = false;
++    const done = (v: number) => {
++      if (!settled) {
++        settled = true;
++        resolve(v);
++      }
++    };
++    let child;
++    try {
++      child = spawn(cmdPath, ['--version'], {
++        env,
++        stdio: ['ignore', 'pipe', 'pipe'],
++        shell: useShell,
++        windowsHide: true,
++      });
++    } catch {
++      done(-1);
++      return;
++    }
++    let out = '';
++    child.stdout?.on('data', (d: unknown) => {
++      out += String(d);
++    });
++    child.on('error', () => done(-1));
++    child.on('close', () => done(parsePiMajorVersion(out)));
++    setTimeout(() => {
++      done(-1);
++      try {
++        child.kill();
++      } catch {
++        /* noop */
++      }
++    }, 5000);
++  });
++}
++
+ export function piRpcSessionDir(): string {
+   return join(daemonStateDir(), 'runs', 'pi-sessions');
+ }
+@@ -843,6 +902,52 @@ export class PiRpcDriver implements InteractiveDriver {
+ 
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-05 / D-005@v1 形态①）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出，经 buildDriverOptions 透传）写
++    // per-session mcp.json——pi 1.1.0+ 原生 MCP 客户端启动时读取并连接（SPIKE-00：
++    // PI_CODING_AGENT_DIR 重定向后读取路径 = <dir>/mcp.json）。降级面（FR-06 两层
++    // 门控：caps 翻值描述机制支持，此处运行时二次门控）：宿主 pi < 1.0 → 不写 +
++    // warn；PI_CODING_AGENT_DIR 缺失（官方端点形态无 per-session 目录）→ 不写 +
++    // warn。写盘失败 warn 不阻断 spawn（MCP 是增强能力，失败不拖垮会话）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const piAgentDir = env['PI_CODING_AGENT_DIR'];
++      if (!piAgentDir || piAgentDir.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[pi-rpc-driver] mcp skip: no PI_CODING_AGENT_DIR in spawn env');
++      } else {
++        // 版本探测在 spawn 前完成写盘，此处内联同款 shim 解析（与下方 spawnCmdPath
++        // 同一输入同款逻辑，结果一致；正式 spawn 的解析在其后独立执行不回读）。
++        let verCmdPath = opts.pathToAgentExecutable;
++        let verShell = false;
++        if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
++          const verResolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
++          if (verResolved) {
++            verCmdPath = verResolved.exe;
++          } else {
++            verShell = true;
++          }
++        }
++        const major = await detectPiMajorVersion(verCmdPath, verShell, env);
++        if (major < 1) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[pi-rpc-driver] mcp skip: pi native MCP requires >=1.0 (detected major:',
++            major,
++          );
++        } else {
++          try {
++            await writePiMcpConfig(piAgentDir, opts.mcpServers);
++          } catch (e) {
++            // eslint-disable-next-line no-console
++            console.warn(
++              '[pi-rpc-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++              (e as Error).message,
++            );
++          }
++        }
++      }
++    }
++
+     // R-exe（design §10 R-05）：Windows 下 detector 给的是 pi.cmd（npm cmd-shim），
+     // 直接 spawn .cmd 无 shell → CreateProcess EINVAL。复用 codex driver 同款
+     // resolveWindowsCmdShim（batch task-runner 先例）解析为 node + pi.js；解析
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 75ae767ff..50fae3926 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -367,6 +367,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     sessionFork: 'native',
+   },
+   codex: {
++    // 2026-10-10-all-engines-mcp-injection task-06（D-011@v1）：机制就绪待复评——
++    // SPIKE-01 未能实测（宿主 codex 0.162.0 缺 win32 平台二进制且网络限断无法修复，
++    // 见 changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md 复评 SOP）；
++    // 消费通道已交付（codex-settings mergeCodexMcpToml / writeCodexMcpServers +
++    // driver start 写 CODEX_HOME config.toml [mcp_servers.*]，单测绿）。旧注释
++    // 「driver.ts codex 对 mcpServers 仅暂存不消费」已被 task-06 推翻。翻值 =
++    // 复测通过后本键 false→true + 重跑 gen-provider-caps。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -393,8 +400,15 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
+   // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
+   pi: {
++    // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
++    // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
++    // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
++    // driver 版本门控写盘），task-08 已翻值（SPIKE-00 实测通过为唯一依据，gen-provider-caps
++    // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
++    // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
++    // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+@@ -417,6 +431,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
+   // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
+   cursor: {
++    // 2026-10-10-all-engines-mcp-injection task-07（D-003@v1 / D-011@v1）：留档
++    // 分支——SPIKE-02 未能实测（宿主无 cursor-agent CLI 且网络限断无法安装，
++    // spike-cursor-mcp.md）。坑点：上游反馈 headless 模式 MCP 工具审批未实现
++    //（工具调用可能挂起，未经本地实测验证）；CLI 无 per-session MCP 配置通道，
++    // 全局 ~/.cursor/mcp.json 与项目级 .cursor/mcp.json 均为禁写落点（宿主
++    // 资产 / workspace 污染）。复评条件：cursor-agent 可安装后按
++    // spike-cursor-mcp.md SOP 实测审批行为与落点隔离，两项通过才翻值。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -474,6 +495,29 @@ export function getProviderCaps(provider: string): ProviderCaps {
+   };
+ }
+ 
++/**
++ * 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控/普通会话 MCP
++ * 注入候选判定（引擎无关纯函数，无副作用可单测）。
++ *
++ * 取代 cli.ts 装配处 `provider !== 'claude'` 硬拒（2026-08-26-workspace-mcp-edit
++ * D-008 时代仅 claude 消费 mcpServers 的口径）：改为按能力矩阵 mcp 键判定——
++ * caps.mcp=true 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值后）均
++ * 进入主控注入；未知 provider 经 getProviderCaps 默认拒绝（mcp=false），禁止
++ * 对 PROVIDER_CAPS 直接下标（undefined 链 TypeError，Grill B-3）。
++ *
++ * stage 判定维持原口径：缺省（''）= 普通会话常驻注入；'orchestrator' = 存量
++ * 外部主控照常注入；'mission_worker'（分身）不进本判定——分身走 isWorkerSession
++ * 受限注入（cli.ts:1118-1120 维持 claude-only，D-002 循既有 D-008@v1 治理决策）。
++ */
++export function isMainAgentMcpCandidate(ctx: {
++  provider: string;
++  stage?: string | null;
++}): boolean {
++  if (!getProviderCaps(ctx.provider).mcp) return false;
++  const stage = ctx.stage ?? '';
++  return stage === '' || stage === 'orchestrator';
++}
++
+ // ── task-05（FR-05 / design §5.2）：provider 注册表 ───────────────────────────
+ //
+ // 分层：上方 PROVIDER_CAPS 是能力矩阵单源（task-02，内容不动）；本节在其上建
+diff --git a/sillyhub-daemon/src/pi-settings.ts b/sillyhub-daemon/src/pi-settings.ts
+index 446ef9b05..b8d90b6b8 100644
+--- a/sillyhub-daemon/src/pi-settings.ts
++++ b/sillyhub-daemon/src/pi-settings.ts
+@@ -290,6 +290,53 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
+  *（default_fallback_model ?? model）非空。聚合表 pi writer 的 isSufficient 与
+  * spawn/reload 分派共用。
+  */
++/**
++ * pi 1.1.0+ 原生 MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver——本文件是低依赖纯写盘层，不回引 interactive/，
++ * driver 侧按结构类型直传）。
++ */
++export interface PiMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：写 per-session
++ * `<PI_CODING_AGENT_DIR>/mcp.json`（pi 1.1.0+ 原生 MCP 配置）。
++ *
++ * SPIKE-00 实测（spike-pi-10-compat.md，pi 1.1.0）：PI_CODING_AGENT_DIR 重定向后
++ * pi root 直接对应 agent 层——原生 MCP 配置读取路径 = `<dir>/mcp.json`（非宿主
++ * ~/.pi/agent/mcp.json 的 agent 子层），格式与 codex 同风格：
++ * `{ "mcpServers": { "<name>": { command, args?, env? } } }`；per-server env
++ * （MCP_SESSION_ID 等）经条目 env 字段透传（conventions「env 必须进 mcpServers
++ * 条目 env 字段」）。
++ *
++ * 语义：daemon 独占管理本文件（区别于 auth/models/settings 三文件的先读后写
++ * 保留语义）——每次会话创建按 resolveMainAgentMcp 产出的配置表全量覆写，不合并
++ * 旧条目（旧 server 残留 = 幽灵工具面）；空表跳过不写（保持目录干净，pi 侧
++ * 视为无 MCP 配置）。写 IO 失败 throw（reject）——调用方（pi-rpc-driver start）
++ * 捕获降级 warn 不阻断 spawn（MCP 是增强能力）。
++ */
++export async function writePiMcpConfig(
++  piDir: string,
++  mcpServers: Record<string, PiMcpServerConfig>,
++): Promise<void> {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return;
++  const payload = { mcpServers: mcpServers };
++  try {
++    await writeFileAtomic(join(piDir, 'mcp.json'), JSON.stringify(payload, null, 2) + '\n');
++  } catch (e) {
++    console.error('pi_mcp_config_write_failed', {
++      piDir,
++      servers: names,
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export function isPiFormSufficient(provider: ProviderConfig): boolean {
+   return (
+     provider.api_format !== 'openai_chat' &&
+diff --git a/sillyhub-daemon/tests/codex-settings-mcp.test.ts b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+new file mode 100644
+index 000000000..fbc283689
+--- /dev/null
++++ b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+@@ -0,0 +1,85 @@
++import { mkdtempSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { mergeCodexMcpToml, writeCodexMcpServers } from '../src/codex-settings.js';
++
++/** 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1 机制就绪分支）。 */
++
++const Q = '"';
++
++describe('codex-settings: mergeCodexMcpToml（task-06 [mcp_servers.*] 托管段）', () => {
++  it('托管段写入：command/args 数组/env 子表完整序列化', () => {
++    const out = mergeCodexMcpToml('', {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1' },
++      },
++    });
++    expect(out).toContain('[mcp_servers.sillyhub-file]');
++    expect(out).toContain(`command = ${Q}node${Q}`);
++    expect(out).toContain(`args = [${Q}mcp-server.js${Q}, ${Q}--toolset${Q}, ${Q}file${Q}]`);
++    expect(out).toContain('[mcp_servers.sillyhub-file.env]');
++    expect(out).toContain(`MCP_SESSION_ID = ${Q}sess-1${Q}`);
++  });
++
++  it('非托管行保留：既有 model 托管段与用户行原样不动', () => {
++    const existing = [
++      `model = ${Q}gpt-5${Q}`,
++      `model_provider = ${Q}sillyhub${Q}`,
++      '',
++      '[model_providers.sillyhub]',
++      `name = ${Q}SillyHub${Q}`,
++      '',
++      '# user comment',
++      '[projects."X/repo"]',
++      `trust_level = ${Q}trusted${Q}`,
++    ].join('\n');
++    const out = mergeCodexMcpToml(existing, { s: { command: 'x' } });
++    expect(out).toContain(`model = ${Q}gpt-5${Q}`);
++    expect(out).toContain('[model_providers.sillyhub]');
++    expect(out).toContain('# user comment');
++    expect(out).toContain('[projects."X/repo"]');
++    expect(out).toContain('[mcp_servers.s]');
++  });
++
++  it('幂等：merge 两次同配置结果一致（不重复不残留）', () => {
++    const cfg = { s: { command: 'x', env: { K: 'v' } } };
++    const once = mergeCodexMcpToml('', cfg);
++    const twice = mergeCodexMcpToml(once, cfg);
++    expect(twice).toBe(once);
++    expect(twice.split('[mcp_servers.s]').length - 1).toBe(1);
++  });
++
++  it('旧段重写：换配置后旧 server 不残留（幽灵 server 防护）', () => {
++    const withOld = mergeCodexMcpToml('', { old: { command: 'a' } });
++    const replaced = mergeCodexMcpToml(withOld, { fresh: { command: 'b' } });
++    expect(replaced).not.toContain('[mcp_servers.old]');
++    expect(replaced).toContain('[mcp_servers.fresh]');
++  });
++
++  it('空表：返回原文不动（跳过语义）', () => {
++    const existing = `model = ${Q}x${Q}\n`;
++    expect(mergeCodexMcpToml(existing, {})).toBe(existing);
++  });
++});
++
++describe('codex-settings: writeCodexMcpServers（task-06 写盘）', () => {
++  it('写盘落 CODEX_HOME/config.toml 且与既有内容合并', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {
++      s: { command: 'node', args: ['a.js'], env: { K: 'v' } },
++    });
++    const text = readFileSync(join(dir, 'config.toml'), 'utf-8');
++    expect(text).toContain('[mcp_servers.s]');
++    expect(text).toContain(`command = ${Q}node${Q}`);
++    expect(text).toContain(`K = ${Q}v${Q}`);
++  });
++
++  it('空表跳过：不写 config.toml', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {});
++    expect(() => readFileSync(join(dir, 'config.toml'), 'utf-8')).toThrow();
++  });
++});
+diff --git a/sillyhub-daemon/tests/mcp-config.test.ts b/sillyhub-daemon/tests/mcp-config.test.ts
+index ac4b26237..2952ed101 100644
+--- a/sillyhub-daemon/tests/mcp-config.test.ts
++++ b/sillyhub-daemon/tests/mcp-config.test.ts
+@@ -107,6 +107,7 @@ describe('mcp-config: loadPlatformMcpConfig', () => {
+ 
+ // task-07: backend 拉 + 回落
+ import { fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend } from '../src/mcp-config.js';
++import { PROVIDER_CAPS, isMainAgentMcpCandidate } from '../src/interactive/providers.js';
+ 
+ describe('mcp-config: fetchPlatformMcpConfig（task-07 backend 拉）', () => {
+   it('200 + platform_default → 返回 mcpServers', async () => {
+@@ -662,3 +663,46 @@ describe('mcp-config: fetchMcpBundle user_id 查询参数（task-06 / D-008@v2
+     spy.mockRestore();
+   });
+ });
++
++// ── 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控 MCP 注入谓词能力化 ──
++// 谓词行为跟随 PROVIDER_CAPS 的 mcp 键（数据驱动）：caps.mcp=true 引擎 × stage 缺省/orchestrator 注入，
++// mission_worker 不进主控；caps.mcp=false 引擎与未知 provider 一律 false（默认拒绝不抛错，Grill B-3）。
++// 翻值（task-08）后本矩阵自动跟随 caps 表，无需改测试。
++describe('mcp-config: isMainAgentMcpCandidate 谓词能力化（task-04 D-001@v1）', () => {
++  const engines = Object.keys(PROVIDER_CAPS);
++
++  it('未知 provider 默认拒绝且不抛错（禁直下标语义）', () => {
++    expect(() => isMainAgentMcpCandidate({ provider: 'no-such-engine' })).not.toThrow();
++    expect(isMainAgentMcpCandidate({ provider: 'no-such-engine' })).toBe(false);
++  });
++
++  it('caps.mcp=true 引擎：stage 缺省与 orchestrator 注入', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: undefined })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: null })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: '' })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(true);
++    }
++  });
++
++  it('caps.mcp=true 引擎：mission_worker 与其它非空 stage 不进主控', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'unknown_stage' })).toBe(false);
++    }
++  });
++
++  it('caps.mcp=false 引擎：任意 stage 均不注入（现状行为保持）', () => {
++    for (const e of engines.filter((k) => !PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++    }
++  });
++
++  it('claude 引擎恒在注入集（回归锚：claude 链路零变化）', () => {
++    expect(PROVIDER_CAPS.claude.mcp).toBe(true);
++    expect(isMainAgentMcpCandidate({ provider: 'claude' })).toBe(true);
++  });
++});
+diff --git a/sillyhub-daemon/tests/pi-settings-mcp.test.ts b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+new file mode 100644
+index 000000000..5504f3182
+--- /dev/null
++++ b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+@@ -0,0 +1,105 @@
++import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { writePiMcpConfig } from '../src/pi-settings.js';
++import { detectPiMajorVersion, parsePiMajorVersion } from '../src/interactive/pi-rpc-driver.js';
++
++// detectPiMajorVersion 经 ESM import 绑定 node:child_process 的 spawn——
++// vi.stubGlobal 不生效，必须模块级 vi.mock（版本探测行为单测的 mock 面）。
++vi.mock('node:child_process', () => ({
++  spawn: vi.fn(),
++}));
++
++/** 2026-10-10-all-engines-mcp-injection task-05：pi 通道 MCP 写盘与版本门控单测。 */
++describe('pi-settings: writePiMcpConfig（task-05 D-005@v1 形态①）', () => {
++  let dir: string;
++
++  it('配置落盘隔离：只写指定 per-session 目录的 mcp.json', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-daemon': { command: 'node', args: ['mcp-server.js'] },
++    });
++    const file = join(dir, 'mcp.json');
++    expect(existsSync(file)).toBe(true);
++    const parsed = JSON.parse(readFileSync(file, 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-daemon']).toEqual({
++      command: 'node',
++      args: ['mcp-server.js'],
++    });
++  });
++
++  it('env 透传：条目 env 字段（MCP_SESSION_ID）原样落盘', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1', MCP_SERVER_DAEMON_API_KEY: 'k1' },
++      },
++    });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-file'].env).toEqual({
++      MCP_SESSION_ID: 'sess-1',
++      MCP_SERVER_DAEMON_API_KEY: 'k1',
++    });
++  });
++
++  it('空表跳过：不写文件（保持目录干净，pi 视为无 MCP 配置）', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {});
++    expect(existsSync(join(dir, 'mcp.json'))).toBe(false);
++  });
++
++  it('覆写语义：二次写替换旧条目，不残留幽灵 server', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, { old: { command: 'a' } });
++    await writePiMcpConfig(dir, { fresh: { command: 'b' } });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers.old).toBeUndefined();
++    expect(parsed.mcpServers.fresh).toEqual({ command: 'b' });
++  });
++});
++
++describe('pi-rpc-driver: pi 版本门控（task-05 FR-06 两层门控的运行时层）', () => {
++  afterEach(async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReset();
++  });
++
++  it('parsePiMajorVersion：1.x 支持 / 0.x 不支持 / 乱串与空串返回 -1', () => {
++    expect(parsePiMajorVersion('1.1.0')).toBe(1);
++    expect(parsePiMajorVersion('1.0.0')).toBe(1);
++    expect(parsePiMajorVersion('0.81.1')).toBe(0);
++    expect(parsePiMajorVersion('pi version weird')).toBe(-1);
++    expect(parsePiMajorVersion('')).toBe(-1);
++  });
++
++  it('detectPiMajorVersion：正常输出解析为主版本号', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: (_e: string, cb: (d: unknown) => void) => cb('1.1.0') },
++        on: (ev: string, cb: () => void) => {
++          if (ev === 'close') setTimeout(cb, 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(1);
++  });
++
++  it('detectPiMajorVersion：spawn 报错返回 -1（降级不抛）', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: () => undefined },
++        on: (ev: string, cb: (e?: unknown) => void) => {
++          if (ev === 'error') setTimeout(() => cb(new Error('boom')), 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(-1);
++  });
++});

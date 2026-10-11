@@ -4,8 +4,7 @@
  * 背景（bug）：isActive 对菜单逐个做前缀判断，兄弟路径互相连累——
  *   - absolute 分支 startsWith：「设置」(/settings) 命中 /settings/providers 等全部
  *     /settings/* 兄弟菜单页，「我的供应商」选中时「设置」同时亮；
- *   - 相对分支 includes：「项目组组件」(/components) 命中 /workspaces/:id/components/topology，
- *     「拓扑图」选中时「项目组组件」同时亮。
+
  *
  * 契约：侧边栏渲染出的菜单中，只有「匹配当前 pathname 匹配段最长」的那个高亮；
  * 无任何命中时全不高亮。等长命中（数据退化）保持原有可多重高亮语义。
@@ -152,21 +151,8 @@ describe("侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）
     expect(activeLabels()).toEqual(["API 密钥"]);
   });
 
-  it("/workspaces/:id/components/topology：仅「拓扑图」高亮，「项目组组件」不再连亮（相对菜单 includes 分支）", () => {
-    ws.workspaceId = "1";
-    nav.pathname = "/workspaces/1/components/topology";
-    renderShell();
-
-    expect(activeLabels()).toEqual(["拓扑图"]);
-  });
-
-  it("/workspaces/:id/components：仅「项目组组件」高亮（相对菜单自身页回归）", () => {
-    ws.workspaceId = "1";
-    nav.pathname = "/workspaces/1/components";
-    renderShell();
-
-    expect(activeLabels()).toEqual(["项目组组件"]);
-  });
+  // 2026-10-11-retire-components-page：/components 与 /components/topology 两页
+  // 已下线，对应高亮用例随之移除（菜单条目同删，无可高亮项）。
 
   it("/workspaces：仅「工作区首页」高亮（精确匹配分支回归）", () => {
     nav.pathname = "/workspaces";

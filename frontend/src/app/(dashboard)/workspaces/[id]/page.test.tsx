@@ -125,9 +125,6 @@ vi.mock("@/lib/use-daemon-machines", () => ({
   }),
 }));
 
-const componentsApi = vi.hoisted(() => ({ listComponents: vi.fn() }));
-vi.mock("@/lib/components", () => ({ listComponents: componentsApi.listComponents }));
-
 vi.mock("@/lib/changes", () => ({ listChanges: vi.fn(async () => ({ items: [], total: 0 })) }));
 vi.mock("@/lib/agent", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
@@ -212,17 +209,12 @@ async function renderWithStrategy(
   strategy: "platform-managed" | "repo-mirrored" | "repo-native",
   overrides?: {
     initSyncedAt?: string | null;
-    componentCount?: number;
   },
 ) {
   const { ws, specWs } = makeWorkspace(strategy);
   workspacesApi.getWorkspace.mockResolvedValue(ws);
   specApi.getSpecWorkspace.mockResolvedValue(specWs);
   workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-  componentsApi.listComponents.mockResolvedValue({
-    items: [],
-    total: overrides?.componentCount ?? 0,
-  });
 
   // 默认未初始化
   mockDefaultBinding();
@@ -279,7 +271,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
   it("page 不再渲染已迁入卡片的操作按钮（初始化/扫描/同步到服务器）", async () => {
     await renderWithStrategy("platform-managed", {
       initSyncedAt: "2026-07-02T10:00:00Z",
-      componentCount: 3,
     });
     // 这些按钮随 task-07 迁入卡片，page 层不再渲染（行为由 task-08 组件测试覆盖）
     expect(screen.queryByRole("button", { name: "初始化" })).not.toBeInTheDocument();
@@ -314,10 +305,10 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
   // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字 ──
   //（快速入口宫格已随 2026-08-20-workspace-nav-consolidate 删除，入口统一走顶部 WorkspaceTabs）
 
-  it("统计四数字按 mock 数据渲染（组件/进行中/已归档/快速修复）", async () => {
-    await renderWithStrategy("platform-managed", { componentCount: 7 });
-    // 四张统计卡标签应存在（ql-20260820-013 第四卡=快速修复）
-    expect(screen.getByText("项目组组件")).toBeInTheDocument();
+  it("统计三数字按 mock 数据渲染（进行中/已归档/快速修复）", async () => {
+    await renderWithStrategy("platform-managed");
+    // 2026-10-11-retire-components-page：组件卡随组件页下线，余三卡
+    expect(screen.queryByText("项目组组件")).not.toBeInTheDocument();
     expect(screen.getByText("进行中变更")).toBeInTheDocument();
     expect(screen.getByText("已归档变更")).toBeInTheDocument();
     const quickCard = screen.getByText(/快速修复/).closest("a");
@@ -326,12 +317,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
       "/workspaces/ws-1/changes?tab=quicklog",
     );
     expect(quickCard).toHaveTextContent("0");
-    // 组件数显式断言
-    const componentCard = screen.getByText("项目组组件").closest("a");
-    expect(componentCard).toHaveTextContent("7");
-    // 进行中 / 已归档变更因 mock 返回 total=0，断言卡片存在即可
-    expect(screen.getByText("进行中变更")).toBeInTheDocument();
-    expect(screen.getByText("已归档变更")).toBeInTheDocument();
   });
 
   // ── task-11 / daemon-entity-binding：default_agent 独立选择器（保留，其他区块行为不变）──
@@ -379,7 +364,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
     // 设置 binding 有 daemon_id
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",
@@ -443,7 +427,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",
       user_id: "user-1",
@@ -521,7 +504,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",
       user_id: "user-1",
@@ -559,7 +541,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
     bindingApi.fetchMyBinding.mockResolvedValue({
       workspace_id: "ws-1",
       user_id: "user-1",
@@ -591,7 +572,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     workspacesApi.getWorkspace.mockResolvedValue(ws);
     specApi.getSpecWorkspace.mockResolvedValue(specWs);
     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
     mockDefaultBinding();
     workspacesApi.updateWorkspace.mockResolvedValue({ ...ws, status: "archived" });
 
@@ -631,7 +611,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     const active = makeWorkspace("platform-managed");
     workspacesApi.getWorkspace.mockResolvedValue(active.ws);
     specApi.getSpecWorkspace.mockResolvedValue(active.specWs);
-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
     mockDefaultBinding();
     const { unmount } = render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
     await waitFor(() =>

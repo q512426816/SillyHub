@@ -12,7 +12,6 @@ import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
 import { useNotify } from "@/lib/errors";
 import {
   downloadSpecBundle,
-  generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
   initDispatch,
@@ -45,7 +44,6 @@ interface WorkspaceConfigCardProps {
    * 按钮门禁与三态引导消费；Workspace 类型无此字段，故作可选 prop 由 page.tsx 注入。
    * 不传时按 0 处理。
    */
-  componentCount?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -120,7 +118,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     boundDaemon,
     isOwner,
     onRefresh,
-    componentCount = 0,
   } = props;
   const workspaceId = workspace.id;
 
@@ -152,7 +149,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   const [scanning, setScanning] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
-  const [generatingProjects, setGeneratingProjects] = useState(false);
   // task-09（FR-06/FR-08）：下载文档包独立 loading 态——即时 HTTP 拉流，
   // 不建 DaemonChangeWrite 任务、不轮询，与 syncManual/syncStatus 状态机完全独立。
   const [downloading, setDownloading] = useState(false);
@@ -385,9 +381,11 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       return;
     }
 
-    // D-003@V2：已扫过时弹确认（componentCount > 0）。FR-04 规范对齐：antd Modal.confirm
-    // 替代浏览器原生 window.confirm（FRONTEND_PAGE_STYLE §11）。
-    if (componentCount > 0) {
+    // D-003@V2：已扫过时弹确认。FR-04 规范对齐：antd Modal.confirm 替代原生 confirm
+    //（FRONTEND_PAGE_STYLE §11）。2026-10-11-retire-components-page：判据从
+    // componentCount（已随组件页下线失去数据源）改为 specWs.last_synced_at——
+    // spec 同步过即扫过，与下方三态引导同口径。
+    if (initSyncedAt && !!specWs?.last_synced_at) {
       const ok = await confirmRescan();
       if (!ok) return;
     }
@@ -457,26 +455,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     }
   }
 
-  /* ---- Generate Projects handler ---- */
-  async function handleGenerateProjects(): Promise<void> {
-    setGeneratingProjects(true);
-    setLocalError(null);
-    try {
-      const result = await generateProjects(workspaceId);
-      if (result.reparse.created > 0) {
-        onRefresh();
-      } else {
-        setLocalError("未生成新的项目组件（projects/*.yaml 可能已存在）");
-      }
-    } catch (err) {
-      setLocalError(
-        err instanceof ApiError ? err.message : "生成项目组件失败",
-      );
-    } finally {
-      setGeneratingProjects(false);
-    }
-  }
-
   /* ================================================================ */
   /*  Render                                                          */
   /* ================================================================ */
@@ -524,7 +502,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           </Button>
         </span>
       </Tooltip>
-      {initSyncedAt && componentCount > 0 && (
+      {initSyncedAt && !!specWs?.last_synced_at && (
         <Tooltip
           title={
             syncStatus === "syncing"
@@ -574,23 +552,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           </span>
         </Tooltip>
       )}
-      <Tooltip
-        title={
-          generatingProjects
-            ? "生成中，请稍候"
-            : "根据 projects/*.yaml 生成项目组件"
-        }
-      >
-        <span>
-          <Button
-            onClick={() => void handleGenerateProjects()}
-            loading={generatingProjects}
-            disabled={!!busyReason()}
-          >
-            生成项目
-          </Button>
-        </span>
-      </Tooltip>
     </div>
   ) : undefined;
 
@@ -835,15 +796,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
             </p>
           </div>
         )}
-        {generatingProjects && (
-          <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
-            <p className="font-medium">生成项目组件中...</p>
-            <p className="mt-0.5 text-brand-600">
-              正在根据 projects/*.yaml 生成项目组件，请稍候...
-            </p>
-          </div>
-        )}
-        {initSyncedAt && !!specWs?.last_synced_at && !importing && !generatingProjects && (
+        {initSyncedAt && !!specWs?.last_synced_at && !importing && (
           <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
             <p className="font-medium">工作区已就绪。</p>
             <p className="mt-0.5 text-green-600">规范文档已同步，可直接使用。</p>

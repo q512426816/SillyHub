@@ -40,9 +40,9 @@ const BACKEND_PERMISSION_KEYS = [
   "workspace:member:manage",
   // Workspace 子菜单独立 read (7, 2026-06-18 ql-003 新增 6 + 2026-09-17
   // knowledge-precipitation task-02 新增 knowledge:write——镜像曾漏补)
-  "topology:read",
   "scan-docs:read",
   "runtime:read",
+  "topology:read",
   "knowledge:read",
   "knowledge:write",
   "incident:read",
@@ -105,8 +105,6 @@ const BACKEND_PERMISSION_KEYS = [
 /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
-  "components",
-  "topology",
   "changes",
   "scan-docs",
   "runtime",
@@ -159,8 +157,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 38（task-08 新增 menus 菜单项）", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
+  it("MENU_PERMISSION_GROUPS 长度 === 36（2026-10-11-retire-components-page 下线 components/topology 两项）", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(36);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -175,7 +173,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（task-08 system 组新增 menus）", () => {
+  it("section 分布：workspace 6 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（components/topology 下线）", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -187,7 +185,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     MENU_PERMISSION_GROUPS.forEach((g) => {
       counter[g.section] += 1;
     });
-    expect(counter.workspace).toBe(8);
+    expect(counter.workspace).toBe(6); // 2026-10-11 下线 components/topology
     expect(counter.agent).toBe(4);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(3);
@@ -255,7 +253,6 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     // 死键删除后卡片收敛为 [workspace:read]（组件列表端点鉴权即
     // workspace:read），退出本清单——独立 read key 剩 5 个。
     const EXPECTED: Record<string, string> = {
-      topology: "topology:read",
       "scan-docs": "scan-docs:read",
       runtime: "runtime:read",
       knowledge: "knowledge:read",

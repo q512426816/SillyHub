@@ -291,7 +291,6 @@ function renderCard(overrides: {
         }
         isOwner={overrides.isOwner ?? true}
         onRefresh={onRefresh}
-        componentCount={overrides.componentCount ?? 0}
       />
     </ConfigProvider>,
   );
@@ -532,7 +531,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 20, files_processed: 8 },
     ]);
 
-    renderCard({ myBinding: binding, componentCount: 5 });
+    renderCard({ myBinding: binding });
 
     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
     await flushMicrotasks();
@@ -559,7 +558,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
         { task_id: "t-1", status: "done", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 35, files_processed: 35 },
       ]);
 
-    renderCard({ myBinding: binding, componentCount: 5, onRefresh });
+    renderCard({ myBinding: binding, onRefresh });
 
     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
     await flushMicrotasks();
@@ -598,7 +597,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z" },
     ]);
 
-    renderCard({ myBinding: binding, componentCount: 5 });
+    renderCard({ myBinding: binding });
 
     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
     await flushMicrotasks();
@@ -625,7 +624,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: "invalid byte sequence 0x00", created_at: "2026-07-01T00:00:00Z" },
     ]);
 
-    renderCard({ myBinding: binding, componentCount: 5 });
+    renderCard({ myBinding: binding });
 
     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
     await flushMicrotasks();
@@ -648,7 +647,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: null, created_at: "2026-07-01T00:00:00Z" },
     ]);
 
-    renderCard({ myBinding: binding, componentCount: 5 });
+    renderCard({ myBinding: binding });
 
     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
     await flushMicrotasks();
@@ -669,7 +668,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     expect(scanBtn).toBeDisabled();
   });
 
-  it("扫描：componentCount>0 弹 Modal.confirm（确认 false 不调用 scanGenerate）", () => {
+  it("扫描：已扫过（specWs.last_synced_at 在场）弹 Modal.confirm（确认 false 不调用 scanGenerate）", () => {
     const ws = makeWorkspace();
     // FR-04：W2 改 antd Modal.confirm（不再用 window.confirm）。spy Modal.confirm
     // 模拟用户点「取消」（调 onCancel → resolve(false)），不触发 onOk。
@@ -687,7 +686,12 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
       message: "",
     });
 
-    renderCard({ workspace: ws, componentCount: 3 });
+    // 2026-10-11-retire-components-page：判据从 componentCount 改为
+    // specWs.last_synced_at（组件数据源已下线）——默认 specWs 带同步时间即命中。
+    renderCard({
+      workspace: ws,
+      myBinding: makeBinding({ init_synced_at: "2026-06-30T00:50:00Z" }),
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "扫描" }));
     expect(confirmSpy).toHaveBeenCalledWith(

@@ -19,8 +19,8 @@ const TABS = [
   // knowledge:read——菜单 matchPattern "/knowledge" startsWith 前缀天然覆盖 /knowledge/graph）
   { key: "knowledge-graph", label: "知识图谱", path: "/knowledge/graph" },
   // 2026-08-20-workspace-nav-consolidate：概览宫格退役，4 入口并入菜单（顺序按使用频率）
-  // ql-20260821-009：组件移到扫描文档之前（用户指定）
-  { key: "components", label: "组件", path: "/components" },
+  // 2026-10-11-retire-components-page：组件页下线（生成入口缺失长期空页，
+  // 信息已被关联仓「本机现状回显」覆盖）——tab 移除。
   { key: "scan-docs", label: "扫描文档", path: "/scan-docs" },
   { key: "runtime", label: "运行时", path: "/runtime" },
   { key: "agent-profiles", label: "智能体档案", path: "/agent-profiles" },

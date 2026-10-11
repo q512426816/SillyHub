@@ -82,9 +82,8 @@ function workspaceTabKeyOf(rest: string): string {
     if (rest === "changes" || rest === "changes/") return "workspace_changes";
     return rest.includes("/sessions") ? "workspace_change_sessions" : "workspace_change_detail";
   }
-  if (seg === "components") {
-    return rest.startsWith("components/topology") ? "workspace_topology" : "workspace_components";
-  }
+  // 2026-10-11-retire-components-page：components 段（含 topology）页面已下线，
+  // 走 WORKSPACE_TAB_MAP 兜底（回落 workspace_overview）。
   if (seg === "incidents") return "workspace_incidents";
   return WORKSPACE_TAB_MAP[rest.replace(/\/$/, "")] ?? "workspace_overview";
 }
@@ -130,8 +129,6 @@ export const ROUTE_LABELS: Record<string, string> = {
   workspace_sessions_tab: "工作区 · 会话",
   workspace_explorer: "工作区 · 文件",
   workspace_knowledge: "工作区 · 知识库",
-  workspace_components: "工作区 · 组件",
-  workspace_topology: "工作区 · 组件拓扑",
   workspace_scan_docs: "工作区 · 扫描文档",
   workspace_runtime_tab: "工作区 · 运行时",
   workspace_agent_profiles_tab: "工作区 · 智能体档案",

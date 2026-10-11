@@ -27,7 +27,6 @@ import {
 } from "@/lib/workspace-types";
 import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
-import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import { listQuicklogEntries } from "@/lib/quicklog";
 import {
@@ -76,7 +75,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [boundRuntime, setBoundRuntime] = useState<DaemonRuntimeRead | null>(null);
   const [specWs, setSpecWs] = useState<SpecWorkspace | null>(null);
-  const [componentCount, setComponentCount] = useState<number>(0);
   const [activeChanges, setActiveChanges] = useState<number>(0);
   const [archivedChanges, setArchivedChanges] = useState<number>(0);
   // ql-20260820-013：统计第四卡由"运行时阶段"改为快速修复条数（用户反馈）
@@ -188,10 +186,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
     try {
       // 第六批：fetchMyBinding 仅依赖 workspaceId，与上 6 路相互独立，并入
       // Promise.all 并行（原串行排在 6 路之后，白多一个 RTT）。各路已有 .catch 降级。
-      const [ws, sw, comps, active, archived, ql, binding] = await Promise.all([
+      const [ws, sw, active, archived, ql, binding] = await Promise.all([
         getWorkspace(workspaceId),
         getSpecWorkspace(workspaceId).catch(() => null),
-        listComponents(workspaceId).catch(() => ({ items: [], total: 0 })),
         // ql-20260821-004 口径对齐变更中心 tab 徽标（pageSize=1 取 total +
         // quicklog 含空壳占位 include_placeholder，与 tabTotalsQuery 同参）
         listChanges(workspaceId, { location: "active", pageSize: 1 }).catch(() => ({ items: [], total: 0 })),
@@ -213,7 +210,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
       // （WorkspacePathFields 的 daemon prop）。
       setBoundRuntime(null);
       setSpecWs(sw);
-      setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
       setArchivedChanges(archived.total ?? archived.items?.length ?? 0);
       setQuickTotal(ql.total ?? ql.items?.length ?? 0);
@@ -653,7 +649,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
             换 GitHub Insights 竖排四格） */}
         <WorkspaceStatsRow
           workspaceId={workspaceId}
-          componentCount={componentCount}
           activeChanges={activeChanges}
           archivedChanges={archivedChanges}
           quickTotal={quickTotal}
@@ -725,7 +720,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
           boundDaemon={boundDaemon}
           isOwner={isOwner}
           onRefresh={load}
-          componentCount={componentCount}
         />
 
         {/* 段③-2b：关联仓维护（2026-10-10-workspec-maintenance task-05 / FR-06）。
