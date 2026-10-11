@@ -590,3 +590,91 @@ async def test_local_snapshot_http_unsupported(
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "daemon_unsupported"
+
+
+async def test_local_snapshot_http_timeout_distinct(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """2026-10-11-snapshot-timeout-distinct：DaemonRpcTimeout → daemon_timeout 独立态
+    （生产实证：daemon 更新后进程未重启跑旧代码，旧 dispatch 静默不回 → 15s 超时，
+    旧版误并入 daemon_offline 误导排障方向）。"""
+    from sqlalchemy import select as _select
+
+    from app.modules.auth.model import User
+    from app.modules.daemon.runtime.service import DaemonRpcTimeout
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    ws, _, machine = await _seed(db_session, tag="tmout")
+    admin = (
+        (await db_session.execute(_select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .one()
+    )
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=admin.id,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    await db_session.commit()
+
+    import app.modules.daemon.linked_repos_sync as sync_mod
+
+    async def raise_timeout(*args, **kwargs):
+        raise DaemonRpcTimeout("rpc timeout")
+
+    monkeypatch.setattr(sync_mod, "fetch_local_snapshot", raise_timeout)
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "daemon_timeout"
+
+
+async def test_local_snapshot_http_offline_still_offline(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DaemonRuntimeOffline（无 WS 连接）仍归 daemon_offline——回归不变。"""
+    from sqlalchemy import select as _select
+
+    from app.modules.auth.model import User
+    from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+    ws, _, machine = await _seed(db_session, tag="offln")
+    admin = (
+        (await db_session.execute(_select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .one()
+    )
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=admin.id,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    await db_session.commit()
+
+    import app.modules.daemon.linked_repos_sync as sync_mod
+
+    async def raise_offline(*args, **kwargs):
+        raise DaemonRuntimeOffline("no ws")
+
+    monkeypatch.setattr(sync_mod, "fetch_local_snapshot", raise_offline)
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "daemon_offline"

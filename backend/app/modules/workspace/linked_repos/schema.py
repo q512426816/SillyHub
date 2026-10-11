@@ -85,7 +85,9 @@ class LocalSnapshotEntry(BaseModel):
 class LocalSnapshotResponse(BaseModel):
     """本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。"""
 
-    status: Literal["ok", "daemon_offline", "daemon_unsupported", "binding_missing"]
+    status: Literal[
+        "ok", "daemon_offline", "daemon_timeout", "daemon_unsupported", "binding_missing"
+    ]
     fetched_at: str | None = None
     projects_skipped: str | None = None
     repos_skipped: str | None = None

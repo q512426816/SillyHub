@@ -90,7 +90,7 @@ export interface LocalSnapshotEntryView {
 }
 
 export interface LocalSnapshotView {
-  status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
+  status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
   fetched_at?: string | null;
   projects_skipped?: string | null;
   repos_skipped?: string | null;

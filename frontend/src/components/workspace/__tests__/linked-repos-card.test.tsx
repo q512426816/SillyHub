@@ -193,3 +193,16 @@ describe("LinkedReposCard 本机现状区", () => {
     expect(screen.queryByLabelText("选择导入 demo")).toBeNull();
   });
 });
+
+describe("本机现状区 timeout 态（2026-10-11-snapshot-timeout-distinct）", () => {
+  it("daemon_timeout 显示重启引导文案（非离线文案）", async () => {
+    listMock.mockResolvedValue([]);
+    fetchSnapMock.mockResolvedValue({ status: "daemon_timeout", entries: [], platform_only_names: [] });
+    mount({ canManage: true });
+    await screen.findByText(/尚未登记关联仓/);
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    expect(await screen.findByText(/守护进程无响应/)).toBeTruthy();
+    expect(await screen.findByText(/请重启进程/)).toBeTruthy();
+    expect(screen.queryByText(/守护进程离线/)).toBeNull();
+  });
+});

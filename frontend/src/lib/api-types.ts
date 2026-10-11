@@ -1366,7 +1366,9 @@ export interface paths {
         /**
          * Get Local Snapshot
          * @description 本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
-         *     与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。
+         *     与平台登记三态对照；五态降级（ok/offline/**timeout**\/unsupported/binding_missing——
+         *     timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
+         *     2026-10-11 生产实证）。
          */
         get: operations["get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get"];
         put?: never;
@@ -19192,7 +19194,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
+            status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
             /** Fetched At */
             fetched_at?: string | null;
             /** Projects Skipped */

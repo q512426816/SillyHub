@@ -227,15 +227,29 @@ async def get_local_snapshot(
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> LocalSnapshotResponse:
     """本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
-    与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。"""
+    与平台登记三态对照；五态降级（ok/offline/**timeout**/unsupported/binding_missing——
+    timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
+    2026-10-11 生产实证）。"""
     from app.modules.daemon import linked_repos_sync as sync_mod
+    from app.modules.daemon.runtime.service import DaemonRpcTimeout, DaemonRuntimeOffline
 
     try:
         payload = await sync_mod.fetch_local_snapshot(session, workspace_id, user.id)
     except sync_mod.SnapshotBindingMissing:
         payload = {"status": "binding_missing", "entries": [], "platform_only_names": []}
+    except DaemonRuntimeOffline:
+        # 无活跃 WS 连接——机器掉线/未启动
+        payload = {"status": "daemon_offline", "entries": [], "platform_only_names": []}
+    except DaemonRpcTimeout:
+        # 连接在但 15s 无响应——典型根因：daemon 自更新换了文件但进程未重启跑旧代码，
+        # 旧 dispatch 对未知 method 静默不回（2026-10-11 生产实证）。独立于离线态，
+        # 前端文案引导「重启 daemon」而非「检查连接」。
+        payload = {"status": "daemon_timeout", "entries": [], "platform_only_names": []}
     except Exception:
-        # offline/timeout（既有 504 家族）→ 结构化 daemon_offline 降级（不 5xx，FR-02）
+        # 其余意外（编排层缺陷等）→ 结构化 offline 兜底不 5xx（FR-02）；留痕可查。
+        import logging
+
+        logging.getLogger(__name__).exception("local_snapshot unexpected error")
         payload = {"status": "daemon_offline", "entries": [], "platform_only_names": []}
     return LocalSnapshotResponse.model_validate(payload)
 

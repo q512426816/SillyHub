@@ -420,6 +420,10 @@ function LocalEchoSection({
         <p className="py-2 text-xs text-amber-600">请先绑定守护进程后再读取本机配置。</p>
       ) : snapshot.status === "daemon_offline" ? (
         <p className="py-2 text-xs text-amber-600">守护进程离线，无法读取本机配置。</p>
+      ) : snapshot.status === "daemon_timeout" ? (
+        <p className="py-2 text-xs text-amber-600">
+          守护进程无响应——若刚更新过 daemon 请重启进程（更新只替换文件，进程需重启才加载新能力）。
+        </p>
       ) : snapshot.status === "daemon_unsupported" ? (
         <p className="py-2 text-xs text-amber-600">守护进程需升级（不支持本机现状读取）。</p>
       ) : snapshot.entries.length === 0 ? (
