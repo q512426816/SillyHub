@@ -99,8 +99,11 @@ class TestMigrationStructure:
         # 2026-10-03-local-usage-segment-attribution）→ 20261006120000
         # （provider_agent_kinds，2026-10-06-provider-multi-agent-kind）→
         # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）→
-        # 20261008100000（drop_dead_rbac_permissions，2026-10-08）。
-        assert heads[0] == "20261008100000"  # drop_dead_rbac_permissions 成为新 head
+        # 20261008100000（drop_dead_rbac_permissions，2026-10-08）→
+        # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
+        # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
+        # 拦截后顺手清偿）。
+        assert heads[0] == "20261010190000"  # workspace_linked_repos 成为新 head
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()
