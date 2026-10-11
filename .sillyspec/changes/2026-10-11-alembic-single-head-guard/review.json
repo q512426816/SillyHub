@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-alembic-single-head-guard",
+  "reviewer": "subagent（ZCode Agent 通用代理）",
+  "verdict": "PASS",
+  "reviewedAgainst": "cc3c022b69db53de715ae457b83419ccfed16754",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "CI 闸测试对运行时 CWD 敏感：script_location 相对路径按 CWD 解析而非 alembic.ini 所在目录",
+      "evidence": "backend/alembic.ini 为 script_location = migrations（相对路径），alembic 1.18 的 ScriptDirectory.from_config 以进程 CWD 为基准解析——实证：从仓库根目录执行同款 from_config 报 CommandError: Path doesn't exist: migrations；cd backend 后正常（pytest 实测 1 passed）。当前所有执行路径均满足 CWD=backend：CI workflow 有 defaults.run.working-directory: backend，部署闸脚本显式 cd backend，本地惯例 cd backend && uv run pytest，故无一现行路径失效；但 design 作用域节『ScriptDirectory 解析 script_location=migrations 相对 backend/』表述不严谨（实际相对 CWD，靠调用约定成立）。若有人在仓库根跑 pytest backend/tests 会得到环境性报错而非清晰的图断言。加固一行即可：config.set_main_option(\"script_location\", str(backend_root / \"migrations\"))。",
+      "location": "backend/tests/test_migration_single_head.py:22"
+    },
+    {
+      "severity": "P3",
+      "title": "零头（versions 目录为空/无有效 revision）路径静默退出：grep -c 零匹配 exit 1 在 set -euo pipefail 下先于 -ne 1 分支杀死脚本",
+      "evidence": "实证模拟：ALEMBIC_HEADS 为空时 `ALEMBIC_HEAD_COUNT=\"$(printf '%s\\n' \"$ALEMBIC_HEADS\" | grep -c '(head)')\" 赋值语句因命令替换退出码 1 直接触发 set -e，脚本 exit 1 且不打印多头诊断文案（模拟输出：before count 后即死，zero-head-path exit=1）。行为仍 fail-closed（0 头亦非正常态，不会打镜像），仅报错质量降级；正常多头场景（每头一行 (head) 后缀，双头沙盒实证计数=2、真实仓库单头计数=1）走 -ne 1 分支有完整提示，不受影响。可选加固：grep -c '(head)' || true。",
+      "location": "deploy/scripts/build-and-save.sh:39"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-10-11T19:48:25+08:00"
+}
