@@ -4,10 +4,15 @@ on:
   push:
     paths:
       - "backend/**"
+      # daemon golden 三件套被 backend parity 测试跨端消费
+      # （app/modules/daemon/tests/test_run_sync_golden_parity.py）——fixture 变更
+      # 须触发 backend-ci 验 parity（2026-10-11-daemon-masked-test-fix 评审 P3 盲区）。
+      - "sillyhub-daemon/tests/fixtures/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "sillyhub-daemon/tests/fixtures/**"
       - ".github/workflows/backend-ci.yml"
   workflow_dispatch:
 
