@@ -2,7 +2,11 @@
 
 Long-lived credentials for daemon processes. Mirrors the refresh-token
 pattern in :mod:`app.modules.auth.service`: plaintext is generated with
-``secrets.token_urlsafe``, persisted as ``bcrypt(plaintext)``.
+``secrets.token_urlsafe``, persisted as ``bcrypt(plaintext)`` (authenticate
+path). Since 2026-10-11-apikey-mcp-copy-delete the plaintext is *also*
+kept reversibly-encrypted in ``encrypted_key`` (libsodium secretbox + KEK
+in ``SILLYSPEC_MASTER_KEY``) so the admin UI can copy an already-issued key
+on demand; rows without it (pre-change or no master key) are not recoverable.
 
 The ``shk_live_`` prefix is prepended to the plaintext so GitHub secret
 scanning custom rules can match leaked keys, and so the UI can render a
@@ -19,11 +23,13 @@ import secrets
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.config import Settings
+from app.core.crypto import CipherKeyMismatch, get_cipher
+from app.core.errors import ApiKeyNotFound, AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.core.security import hash_refresh_token, password_hasher, verify_refresh_token
@@ -33,6 +39,23 @@ log = get_logger(__name__)
 
 API_KEY_PREFIX = "shk_live_"
 _KEY_PREFIX_DISPLAY_LEN = 12
+
+
+class ApiKeyPlaintextUnavailable(AppError):
+    """明文不可再取回（存量行未存加密明文 / 主密钥已轮换）→ 409。
+
+    定义在 service 模块（对齐 McpTokenNotFound 模式），detail 中文引导重新签发。
+    """
+
+    code = "HTTP_409_API_KEY_PLAINTEXT_UNAVAILABLE"
+    http_status = 409
+
+
+class ApiKeyDeleteBlocked(AppError):
+    """物理删除未吊销的 key → 409（防误删活跃凭证，先吊销再删除）。"""
+
+    code = "HTTP_409_API_KEY_NOT_REVOKED"
+    http_status = 409
 
 
 def _utc_now() -> datetime:
@@ -78,6 +101,40 @@ def _neg_cache_key(plaintext: str) -> str:
     return f"auth:apikey:neg:{_key_digest(plaintext)}"
 
 
+def _encrypt_plaintext(plaintext: str) -> str | None:
+    """加密明文 → 单列存储串 ``{key_id}:{hex(ciphertext)}``（与 mcp_webhooks.secret 同构）。
+
+    任何加密侧异常（含主密钥未配置 ``MasterKeyMissing``）都降级为 ``None``：签发
+    链路绝不因「可恢复明文」这层增值能力而回归——明文仍一次性返回，只是事后不可
+    再复制（UI 降级禁用，FR-05）。失败原因记 WARNING 供运维定位。
+    """
+    try:
+        ciphertext, key_id = get_cipher().encrypt(plaintext)
+    except Exception as exc:  # 降级：主密钥缺失/加密故障不阻断签发
+        log.warning("api_key.plaintext_encrypt_skipped", error=str(exc))
+        return None
+    return f"{key_id}:{ciphertext.hex()}"
+
+
+def _decrypt_plaintext(stored: str) -> str:
+    """从单列存储串还原明文（仅管理端复制入口用，绝不入日志）。
+
+    密钥轮换（``CipherKeyMismatch``）或主密钥缺失统一转
+    :class:`ApiKeyPlaintextUnavailable`（409 引导重新签发），不 500。
+    """
+    key_id, _, hex_ct = stored.partition(":")
+    try:
+        return get_cipher().decrypt(bytes.fromhex(hex_ct), key_id)
+    except CipherKeyMismatch as exc:
+        raise ApiKeyPlaintextUnavailable(
+            "该密钥的加密明文无法用当前主密钥解密（主密钥已轮换），请吊销后重新签发。",
+        ) from exc
+    except Exception as exc:
+        raise ApiKeyPlaintextUnavailable(
+            "该密钥未保存可恢复的明文，请新建密钥后使用复制功能。",
+        ) from exc
+
+
 class ApiKeyService:
     """CRUD + authenticate for long-lived API keys."""
 
@@ -95,8 +152,9 @@ class ApiKeyService:
         name: str,
         expires_at: datetime | None,
     ) -> tuple[ApiKey, str]:
-        """Issue a new key. Returns ``(row, plaintext)`` — plaintext must be
-        returned to the caller *now* and is never recoverable later."""
+        """Issue a new key. Returns ``(row, plaintext)`` — plaintext is
+        returned to the caller *now*; if ``encrypted_key`` landed, it can
+        also be re-fetched later via :meth:`get_plaintext`."""
         plaintext = _generate_plaintext()
         row = ApiKey(
             id=uuid.uuid4(),
@@ -104,6 +162,7 @@ class ApiKeyService:
             name=name.strip(),
             key_prefix=_display_prefix(plaintext),
             key_hash=hash_refresh_token(plaintext),
+            encrypted_key=_encrypt_plaintext(plaintext),
             last_used_at=None,
             expires_at=expires_at,
             created_at=_utc_now(),
@@ -173,6 +232,65 @@ class ApiKeyService:
                 user_id=str(user_id),
             )
         return bool(rowcount)
+
+    async def get_plaintext(self, *, api_key_id: uuid.UUID, user_id: uuid.UUID) -> str:
+        """按 id 取回明文（管理端「复制密钥」入口）。
+
+        放行条件：行存在 + 属于 ``user_id`` + 未吊销 + 未过期；否则
+        :class:`ApiKeyNotFound`（404，与吊销端点同文案，不泄露具体原因）。
+        存量行（``encrypted_key`` 为空）/ 主密钥轮换 →
+        :class:`ApiKeyPlaintextUnavailable`（409，引导重新签发）。
+        """
+        row = (
+            await self._db.execute(
+                select(ApiKey)
+                .where(col(ApiKey.id) == api_key_id)
+                .where(col(ApiKey.user_id) == user_id)
+            )
+        ).scalar_one_or_none()
+        now = _utc_now()
+        if (
+            row is None
+            or row.revoked_at is not None
+            or (row.expires_at is not None and _as_utc(row.expires_at) <= now)
+        ):
+            raise ApiKeyNotFound("API 密钥不存在或已被吊销。")
+        if not row.encrypted_key:
+            raise ApiKeyPlaintextUnavailable(
+                "该密钥签发时未保存可恢复的明文（旧版本签发或未配置主密钥），请新建密钥后使用复制功能。",
+            )
+        return _decrypt_plaintext(row.encrypted_key)
+
+    async def hard_delete(self, *, api_key_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        """物理删除行（仅已吊销记录放行）。
+
+        不存在 / 跨用户 → :class:`ApiKeyNotFound`（404）；存在但未吊销 →
+        :class:`ApiKeyDeleteBlocked`（409，防误删活跃凭证）。删除后按
+        ``key_prefix`` 防御性清一次正缓存——正常路径 revoke 时已清，这里兜底
+        「吊销后缓存清理失败、随后 hard delete」的残余窗口。
+        """
+        row = (
+            await self._db.execute(
+                select(ApiKey)
+                .where(col(ApiKey.id) == api_key_id)
+                .where(col(ApiKey.user_id) == user_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise ApiKeyNotFound("API 密钥不存在或已被吊销。")
+        if row.revoked_at is None:
+            raise ApiKeyDeleteBlocked("该密钥尚未吊销，请先吊销再删除。")
+        key_prefix = row.key_prefix
+        await self._db.execute(
+            delete(ApiKey).where(col(ApiKey.id) == api_key_id).where(col(ApiKey.user_id) == user_id)
+        )
+        await self._db.commit()
+        await self._invalidate_prefix_cache(key_prefix)
+        log.info(
+            "api_key.hard_deleted",
+            api_key_id=str(api_key_id),
+            user_id=str(user_id),
+        )
 
     # ── Authenticate ──────────────────────────────────────────────────────
 

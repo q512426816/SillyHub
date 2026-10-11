@@ -132,3 +132,127 @@ async def test_revoke_unknown_id_returns_404(client: AsyncClient, db_session: As
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
+
+
+# ── 2026-10-11-apikey-mcp-copy-delete：plaintext 端点 + hard 删除 ─────────
+
+
+async def _create_key(client: AsyncClient, h: dict, name: str = "k") -> dict:
+    resp = await client.post(
+        "/api/auth/api-keys", headers=h, json={"name": name, "expires_at": None}
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+async def _insert_legacy_key(db_session: AsyncSession, user: User) -> str:
+    """模拟存量 hash-only 行：不经 service.create（无加密列）。"""
+    from datetime import UTC, datetime
+
+    from app.modules.auth.model import ApiKey
+
+    legacy = ApiKey(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        name="legacy",
+        key_prefix="shk_live_leg",
+        key_hash="not-bcrypt-legacy",
+        encrypted_key=None,
+        expires_at=None,
+        created_at=datetime.now(UTC),
+        revoked_at=None,
+    )
+    db_session.add(legacy)
+    await db_session.commit()
+    return str(legacy.id)
+
+
+@pytest.mark.asyncio
+async def test_plaintext_endpoint_roundtrip_and_404_after_revoke(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_key(client, h, name="copyable")
+
+    got = await client.get(f"/api/auth/api-keys/{created['id']}/plaintext", headers=h)
+    assert got.status_code == 200, got.text
+    assert got.json()["plaintext"] == created["plaintext"]
+
+    revoked = await client.delete(f"/api/auth/api-keys/{created['id']}", headers=h)
+    assert revoked.status_code == 204
+    gone = await client.get(f"/api/auth/api-keys/{created['id']}/plaintext", headers=h)
+    assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_plaintext_endpoint_legacy_row_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    kid = await _insert_legacy_key(db_session, user)
+
+    resp = await client.get(f"/api/auth/api-keys/{kid}/plaintext", headers=h)
+    assert resp.status_code == 409
+    assert "新建" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_list_carries_plaintext_recoverable_flag(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    user, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    await _create_key(client, h, name="new")
+    await _insert_legacy_key(db_session, user)
+
+    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
+    by_name = {it["name"]: it for it in items}
+    assert by_name["new"]["plaintext_recoverable"] is True
+    assert by_name["legacy"]["plaintext_recoverable"] is False
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_revoked_row_204_and_removed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_key(client, h, name="doomed")
+
+    await client.delete(f"/api/auth/api-keys/{created['id']}", headers=h)
+    resp = await client.delete(f"/api/auth/api-keys/{created['id']}?hard=true", headers=h)
+    assert resp.status_code == 204
+
+    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
+    assert all(it["id"] != created["id"] for it in items)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_active_row_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_key(client, h, name="alive")
+
+    resp = await client.delete(f"/api/auth/api-keys/{created['id']}?hard=true", headers=h)
+    assert resp.status_code == 409
+    assert "吊销" in resp.json()["message"]
+
+    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
+    mine = next(it for it in items if it["id"] == created["id"])
+    assert mine["revoked_at"] is None  # 原吊销语义不受影响
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_unknown_id_returns_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    _, token = await _make_user(db_session, admin=True)
+    resp = await client.delete(
+        f"/api/auth/api-keys/{uuid.uuid4()}?hard=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404

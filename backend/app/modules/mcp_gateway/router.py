@@ -1,12 +1,13 @@
 """McpToken workspace 级管理 HTTP API（非 MCP，workspace owner/admin 用）。
 
-design §7.2 / D-002@v1 / task-02。三个端点：
+design §7.2 / D-002@v1 / task-02。端点：
 
-- ``POST   /workspaces/{workspace_id}/mcp-tokens``      签发（明文 token **仅此一次**返回）
-- ``GET    /workspaces/{workspace_id}/mcp-tokens``      列出（不返明文，含 last_used_at / revoked_at）
-- ``DELETE /workspaces/{workspace_id}/mcp-tokens/{id}`` 吊销（204）
+- ``POST   /workspaces/{workspace_id}/mcp-tokens``                      签发（明文 token 返回）
+- ``GET    /workspaces/{workspace_id}/mcp-tokens``                      列出（不返明文，含 last_used_at / revoked_at）
+- ``DELETE /workspaces/{workspace_id}/mcp-tokens/{id}``                 吊销（204；``?hard=true`` 物理删除）
+- ``GET    /workspaces/{workspace_id}/mcp-tokens/{id}/plaintext``       取回明文（2026-10-11-apikey-mcp-copy-delete）
 
-鉴权：三端点均 ``require_permission(Permission.WORKSPACE_WRITE)``（RBAC 层级满足：
+鉴权：均 ``require_permission(Permission.WORKSPACE_WRITE)``（RBAC 层级满足：
 WORKSPACE_ADMIN 自动继承 WRITE；viewer 只读 → 403）。``require_permission`` 自动从路径
 取 ``{workspace_id}`` 注入 RBAC 闭包（与 agent/profile router 同模式）。
 
@@ -15,7 +16,8 @@ main.py 外层挂 ``prefix="/api"`` → 落地 ``/api/workspaces/{workspace_id}/
 
 DTO 内联在 router（task-02 allowed_paths 未含 schema.py，对齐 daemon/profile router
 的内联 DTO 习惯）。响应 DTO 用 ``from_attributes=True`` 直接从 ORM 行构造；``token_hash``
-与明文均**不出现在任何响应**（R-06：仅 POST 201 的 ``token`` 字段返回一次明文）。
+不出现在任何响应。明文出现在 POST 201（``token``，一次性返回）与按 id plaintext 端点
+（2026-10-11 变更：签发时已加密存档的活跃 token 可再取回，R-06 对存量未存档行继续成立）。
 
 异常风格：service 抛 ``AppError`` 子类（``McpTokenNotFound`` 404），由全局 ``AppError``
 handler 统一序列化，router 不额外捕获。
@@ -27,7 +29,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +72,11 @@ class McpTokenCreateRequest(BaseModel):
 
 
 class McpTokenRead(BaseModel):
-    """列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。"""
+    """列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
+
+    ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
+    端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -80,6 +86,13 @@ class McpTokenRead(BaseModel):
     last_used_at: datetime | None
     revoked_at: datetime | None
     created_at: datetime
+    plaintext_recoverable: bool
+
+
+class McpTokenPlaintextResponse(BaseModel):
+    """GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。"""
+
+    token: str = Field(description="完整令牌明文，仅复制入口使用，勿入日志")
 
 
 class McpTokenCreated(BaseModel):
@@ -185,6 +198,26 @@ async def list_mcp_tokens(
     return McpTokenListResponse(items=[McpTokenRead.model_validate(r) for r in rows])
 
 
+@router.get(
+    "/{workspace_id}/mcp-tokens/{token_id}/plaintext",
+    response_model=McpTokenPlaintextResponse,
+)
+async def get_mcp_token_plaintext(
+    workspace_id: Annotated[uuid.UUID, Path(...)],
+    token_id: Annotated[uuid.UUID, Path(...)],
+    session: SessionDep,
+    _user: WorkspaceWriter,
+) -> McpTokenPlaintextResponse:
+    """取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
+
+    仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
+    探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+    """
+    svc = _service(session)
+    plaintext = await svc.get_plaintext(token_id=token_id, workspace_id=workspace_id)
+    return McpTokenPlaintextResponse(token=plaintext)
+
+
 @router.delete(
     "/{workspace_id}/mcp-tokens/{token_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -194,14 +227,24 @@ async def revoke_mcp_token(
     token_id: Annotated[uuid.UUID, Path(...)],
     session: SessionDep,
     _user: WorkspaceWriter,
+    hard: Annotated[
+        bool,
+        Query(description="物理删除（仅已吊销记录放行；未吊销返回 409）"),
+    ] = False,
 ) -> None:
     """吊销（``revoked_at = now``，幂等）。
 
     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
     精确 DEL，无 TTL 放行窗口）。
+
+    ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
+    CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
     """
     svc = _service(session)
+    if hard:
+        await svc.hard_delete(token_id=token_id, workspace_id=workspace_id)
+        return None
     revoked = await svc.revoke(token_id=token_id, workspace_id=workspace_id)
     if not revoked:
         raise McpTokenNotFound(

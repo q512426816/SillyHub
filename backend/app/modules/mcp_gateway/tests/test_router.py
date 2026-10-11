@@ -227,3 +227,153 @@ async def test_create_gateway_url_settings_override_wins(
     assert resp.status_code == 201, resp.text
     # 尾斜杠归一后拼 /mcp/，不产生双斜杠。
     assert resp.json()["gateway_url"] == "https://mcp.example.com/mcp/"
+
+
+# ── 2026-10-11-apikey-mcp-copy-delete：plaintext 端点 + hard 删除 ─────────
+
+
+async def _create_token(client: AsyncClient, h: dict, ws_id: str, name: str = "t") -> dict:
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/mcp-tokens",
+        headers=h,
+        json={"name": name, "scope": ["read"]},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_plaintext_endpoint_roundtrip_and_404_after_revoke(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_token(client, h, str(ws.id), name="copyable")
+
+    got = await client.get(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
+    )
+    assert got.status_code == 200, got.text
+    assert got.json()["token"] == created["token"]
+
+    revoked = await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
+    assert revoked.status_code == 204
+    gone = await client.get(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
+    )
+    assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_plaintext_endpoint_rejects_foreign_workspace(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """跨 workspace 取明文 → 404（防存在性探测，与吊销同语义）。"""
+    ws = await _make_workspace(db_session)
+    other_ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_token(client, h, str(ws.id))
+
+    resp = await client.get(
+        f"/api/workspaces/{other_ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_plaintext_endpoint_legacy_row_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """存量 hash-only 行（encrypted_token=NULL，直接插 ORM）→ 409 引导新建。"""
+    from datetime import UTC, datetime
+
+    from app.modules.mcp_gateway.model import McpTokenORM
+
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+
+    legacy = McpTokenORM(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        name="legacy",
+        token_hash=uuid.uuid4().hex,
+        encrypted_token=None,
+        scope=["read"],
+        created_at=datetime.now(UTC),
+        last_used_at=None,
+        revoked_at=None,
+    )
+    db_session.add(legacy)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/workspaces/{ws.id}/mcp-tokens/{legacy.id}/plaintext", headers=h)
+    assert resp.status_code == 409
+    assert "新建" in resp.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_list_carries_plaintext_recoverable_flag(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    await _create_token(client, h, str(ws.id), name="fresh")
+
+    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
+    assert items[0]["plaintext_recoverable"] is True
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_revoked_token_204_and_removed(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_token(client, h, str(ws.id), name="doomed")
+
+    await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
+    )
+    assert resp.status_code == 204
+
+    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
+    assert all(it["id"] != created["id"] for it in items)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_active_token_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    h = {"Authorization": f"Bearer {token}"}
+    created = await _create_token(client, h, str(ws.id), name="alive")
+
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
+    )
+    assert resp.status_code == 409
+    assert "吊销" in resp.json()["message"]
+
+    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
+    mine = next(it for it in items if it["id"] == created["id"])
+    assert mine["revoked_at"] is None  # 原吊销语义不受影响
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_unknown_token_returns_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    ws = await _make_workspace(db_session)
+    _, token = await _make_user(db_session, admin=True)
+    resp = await client.delete(
+        f"/api/workspaces/{ws.id}/mcp-tokens/{uuid.uuid4()}?hard=true",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404

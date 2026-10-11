@@ -9,8 +9,10 @@
 - 正/负 Redis 缓存模式与 ``ApiKeyService`` 一致（命中缓存避免每请求查库），
   best-effort 降级（redis 故障回退直查 DB），``last_used_at`` 节流写（复用
   ``auth_api_key_last_used_throttle_seconds``，避免每请求 UPDATE 同一行锁串行化）。
-- 签发返回明文 token **仅一次**（DB 只存 sha256，不存明文，R-06）；token_hash 与
-  明文均不入日志。
+- 明文存取（2026-10-11-apikey-mcp-copy-delete）：鉴权只查 token_hash；明文另以
+  libsodium secretbox 可逆加密存 ``encrypted_token``（KEK=SILLYSPEC_MASTER_KEY），
+  管理端「复制令牌」按需解密返回。存量行未存档（NULL）→ 不可恢复，409 引导重签。
+  token_hash 与明文均不入日志。
 
 TTL 复用说明：``auth_api_key_cache_ttl`` / ``auth_api_key_negative_cache_ttl`` /
 ``auth_api_key_last_used_throttle_seconds`` 直接复用（config.py 非本任务 allowed_path，
@@ -63,6 +65,23 @@ class McpTokenNotFound(AppError):
 
     code = "HTTP_404_MCP_TOKEN_NOT_FOUND"
     http_status = 404
+
+
+class McpTokenPlaintextUnavailable(AppError):
+    """明文不可再取回（存量行未存加密明文 / 主密钥已轮换）→ 409。
+
+    2026-10-11-apikey-mcp-copy-delete：detail 中文引导重新签发。
+    """
+
+    code = "HTTP_409_MCP_TOKEN_PLAINTEXT_UNAVAILABLE"
+    http_status = 409
+
+
+class McpTokenDeleteBlocked(AppError):
+    """物理删除未吊销的 token → 409（防误删活跃凭证，先吊销再删除）。"""
+
+    code = "HTTP_409_MCP_TOKEN_NOT_REVOKED"
+    http_status = 409
 
 
 # ``shmcp_`` 前缀（SillyHub MCP）：供 GitHub secret scanning 自定义规则匹配泄漏的
@@ -126,8 +145,39 @@ def _pos_cache_key(token_hash: str) -> str:
 
 
 def _neg_cache_key(token_hash: str) -> str:
-    """负缓存 key：``auth:mcptoken:neg:{token_hash}``。"""
+    """负缓存 key：``auth:mcptoken:neg:{sha256}``。"""
     return f"{_NEG_CACHE_PREFIX}{token_hash}"
+
+
+def _encrypt_plaintext(plaintext: str) -> str | None:
+    """加密明文 → 单列存储串 ``{key_id}:{hex(ciphertext)}``。
+
+    2026-10-11-apikey-mcp-copy-delete：与 ApiKeyService._encrypt_plaintext 及
+    McpWebhookService._encode_secret 同构（libsodium secretbox + KEK=
+    SILLYSPEC_MASTER_KEY）。任何加密侧异常（含主密钥未配置）降级 ``None``：
+    签发链路绝不因「可恢复明文」回归——明文仍一次性返回，事后不可再复制。
+    """
+    try:
+        ciphertext, key_id = get_cipher().encrypt(plaintext)
+    except Exception as exc:  # 降级：主密钥缺失/加密故障不阻断签发
+        log.warning("mcp_token.plaintext_encrypt_skipped", error=str(exc))
+        return None
+    return f"{key_id}:{ciphertext.hex()}"
+
+
+def _decrypt_plaintext(stored: str) -> str:
+    """从单列存储串还原明文（仅管理端复制入口用，绝不入日志）。
+
+    主密钥轮换 / 缺失 / 密文损坏统一转 :class:`McpTokenPlaintextUnavailable`
+    （409 引导重新签发），不 500。
+    """
+    key_id, _, hex_ct = stored.partition(":")
+    try:
+        return get_cipher().decrypt(bytes.fromhex(hex_ct), key_id)
+    except Exception as exc:
+        raise McpTokenPlaintextUnavailable(
+            "该令牌的加密明文无法解密（主密钥已轮换或未配置），请吊销后重新签发。",
+        ) from exc
 
 
 def _encode_principal(principal: McpTokenPrincipal) -> str:
@@ -176,14 +226,15 @@ class McpTokenService:
         scope: list[str],
         created_by: uuid.UUID | None,
     ) -> tuple[McpTokenORM, str]:
-        """签发新 token。返回 ``(row, 明文)``——明文必须**立刻**返回给调用方，
-        此后不可恢复（DB 只存 sha256）。"""
+        """签发新 token。返回 ``(row, 明文)``——明文立刻返回给调用方；若
+        ``encrypted_token`` 落库成功，此后还可经 :meth:`get_plaintext` 再取回。"""
         plaintext = _generate_plaintext()
         row = McpTokenORM(
             id=uuid.uuid4(),
             workspace_id=workspace_id,
             name=name.strip(),
             token_hash=_token_hash(plaintext),
+            encrypted_token=_encrypt_plaintext(plaintext),
             scope=list(scope),
             created_by=created_by,
             created_at=_utc_now(),
@@ -203,7 +254,8 @@ class McpTokenService:
         return row, plaintext
 
     async def list_for_workspace(self, *, workspace_id: uuid.UUID) -> list[McpTokenORM]:
-        """该 workspace 全部 token（含已吊销），新→旧。不返明文（明文从未持久化）。"""
+        """该 workspace 全部 token（含已吊销），新→旧。行明文不直接外露（管理端
+        复制走 :meth:`get_plaintext` 按需解密）。"""
         stmt = (
             select(McpTokenORM)
             .where(col(McpTokenORM.workspace_id) == workspace_id)
@@ -252,6 +304,68 @@ class McpTokenService:
                 workspace_id=str(workspace_id),
             )
         return bool(rowcount)
+
+    async def get_plaintext(self, *, token_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
+        """按 id 取回明文（管理端「复制令牌」入口，2026-10-11 变更）。
+
+        放行条件：行存在 + 属于 ``workspace_id`` + 未吊销；否则
+        :class:`McpTokenNotFound`（404，与吊销端点同文案，防存在性探测）。
+        存量行（``encrypted_token`` 为空）/ 主密钥轮换 →
+        :class:`McpTokenPlaintextUnavailable`（409，引导重新签发）。
+        """
+        row = (
+            await self._db.execute(
+                select(McpTokenORM)
+                .where(col(McpTokenORM.id) == token_id)
+                .where(col(McpTokenORM.workspace_id) == workspace_id)
+            )
+        ).scalar_one_or_none()
+        if row is None or row.revoked_at is not None:
+            raise McpTokenNotFound(
+                "MCP 令牌不存在或已被吊销。",
+                details={"mcp_token_id": str(token_id), "workspace_id": str(workspace_id)},
+            )
+        if not row.encrypted_token:
+            raise McpTokenPlaintextUnavailable(
+                "该令牌签发时未保存可恢复的明文（旧版本签发或未配置主密钥），请新建令牌后使用复制功能。",
+            )
+        return _decrypt_plaintext(row.encrypted_token)
+
+    async def hard_delete(self, *, token_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
+        """物理删除行（仅已吊销记录放行，2026-10-11 变更）。
+
+        不存在 / 跨 workspace → :class:`McpTokenNotFound`（404）；存在但未吊销 →
+        :class:`McpTokenDeleteBlocked`（409）。行删除时其 mcp_webhooks 子行随外键
+        ``ondelete=CASCADE`` 一并移除；删除后按 ``token_hash`` 精确清一次正缓存
+        （正常路径 revoke 已清，这里兜底残余窗口）。
+        """
+        row = (
+            await self._db.execute(
+                select(McpTokenORM)
+                .where(col(McpTokenORM.id) == token_id)
+                .where(col(McpTokenORM.workspace_id) == workspace_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise McpTokenNotFound(
+                "MCP 令牌不存在或已被吊销。",
+                details={"mcp_token_id": str(token_id), "workspace_id": str(workspace_id)},
+            )
+        if row.revoked_at is None:
+            raise McpTokenDeleteBlocked("该令牌尚未吊销，请先吊销再删除。")
+        token_hash = row.token_hash
+        await self._db.execute(
+            delete(McpTokenORM)
+            .where(col(McpTokenORM.id) == token_id)
+            .where(col(McpTokenORM.workspace_id) == workspace_id)
+        )
+        await self._db.commit()
+        await self._invalidate_cache(token_hash)
+        log.info(
+            "mcp_token.hard_deleted",
+            mcp_token_id=str(token_id),
+            workspace_id=str(workspace_id),
+        )
 
     async def get_or_issue(
         self, *, workspace_id: uuid.UUID, created_by: uuid.UUID | None

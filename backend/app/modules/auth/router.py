@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission_any
@@ -16,6 +16,7 @@ from app.modules.auth.api_key_schema import (
     ApiKeyCreated,
     ApiKeyCreateRequest,
     ApiKeyListResponse,
+    ApiKeyPlaintextResponse,
     ApiKeyRead,
 )
 from app.modules.auth.api_key_service import ApiKeyService
@@ -221,8 +222,9 @@ async def create_api_key(
 ) -> ApiKeyCreated:
     """Issue a new long-lived API key for the daemon.
 
-    Plaintext is returned **only** here; subsequent GETs will only expose
-    ``key_prefix``. ``api_key:admin``-gated.
+    Plaintext is returned here (canonical one-time return); when the master
+    key is configured the row also stores it encrypted, and the per-id
+    plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
     """
     row, plaintext = await ApiKeyService(session, settings=settings).create(
         user_id=user.id,
@@ -237,6 +239,7 @@ async def create_api_key(
         expires_at=row.expires_at,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+        plaintext_recoverable=row.plaintext_recoverable,
         plaintext=plaintext,
     )
 
@@ -247,9 +250,32 @@ async def list_api_keys(
     settings: SettingsDep,
     user: ApiKeyAdminUser,
 ) -> ApiKeyListResponse:
-    """List the caller's API keys (plaintext never included)."""
+    """List the caller's API keys (plaintext never included; rows carry
+    ``plaintext_recoverable`` so the UI knows whether copy is possible)."""
     rows = await ApiKeyService(session, settings=settings).list_for_user(user_id=user.id)
     return ApiKeyListResponse(items=[ApiKeyRead.model_validate(r) for r in rows])
+
+
+@router.get(
+    "/api-keys/{api_key_id}/plaintext",
+    response_model=ApiKeyPlaintextResponse,
+)
+async def get_api_key_plaintext(
+    api_key_id: Annotated[uuid.UUID, Path(...)],
+    session: SessionDep,
+    settings: SettingsDep,
+    user: ApiKeyAdminUser,
+) -> ApiKeyPlaintextResponse:
+    """取回某把活跃 key 的明文（管理端「复制密钥」入口）。
+
+    仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
+    不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+    """
+    plaintext = await ApiKeyService(session, settings=settings).get_plaintext(
+        api_key_id=api_key_id,
+        user_id=user.id,
+    )
+    return ApiKeyPlaintextResponse(plaintext=plaintext)
 
 
 @router.delete(
@@ -261,9 +287,21 @@ async def revoke_api_key(
     session: SessionDep,
     settings: SettingsDep,
     user: ApiKeyAdminUser,
+    hard: Annotated[
+        bool,
+        Query(description="物理删除（仅已吊销记录放行；未吊销返回 409）"),
+    ] = False,
 ) -> None:
-    """Revoke an API key. Idempotent for unknown / already-revoked ids → 404."""
-    updated = await ApiKeyService(session, settings=settings).revoke(
+    """Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
+
+    ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
+    未吊销 → 409（先吊销再删除）。
+    """
+    svc = ApiKeyService(session, settings=settings)
+    if hard:
+        await svc.hard_delete(api_key_id=api_key_id, user_id=user.id)
+        return None
+    updated = await svc.revoke(
         api_key_id=api_key_id,
         user_id=user.id,
     )

@@ -451,3 +451,133 @@ async def test_authenticate_unknown_plaintext_still_negative_caches(
     bogus = API_KEY_PREFIX + "definitely-not-a-real-key-0xC0FFEE"
     assert await svc.authenticate(plaintext=bogus) is None
     assert fake.store.get(_neg_cache_key(bogus)) == "1"
+
+
+# ── 2026-10-11-apikey-mcp-copy-delete：可恢复明文 + 物理删除 ──────────────
+
+
+@pytest.mark.asyncio
+async def test_create_persists_reversible_encrypted_plaintext(
+    db_session: AsyncSession,
+) -> None:
+    """create 同时落 bcrypt hash（鉴权）与加密明文（管理面再取回）。
+
+    encrypted_key 非空、``{key_id}:{hex}`` 格式且不含明文；get_plaintext
+    解密回同一明文；key_hash 仍是 bcrypt。
+    """
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+
+    row, plaintext = await svc.create(user_id=user.id, name="copyable", expires_at=None)
+
+    assert row.encrypted_key is not None
+    key_id, _, hex_ct = row.encrypted_key.partition(":")
+    assert key_id and hex_ct
+    assert plaintext not in row.encrypted_key  # 密文不含明文
+    assert row.plaintext_recoverable is True
+    assert row.key_hash.startswith("$2")
+    assert await svc.get_plaintext(api_key_id=row.id, user_id=user.id) == plaintext
+
+
+@pytest.mark.asyncio
+async def test_get_plaintext_rejects_revoked_expired_foreign_or_missing(
+    db_session: AsyncSession,
+) -> None:
+    """吊销 / 过期 / 跨用户 / 不存在一律 404（防存在性探测）。"""
+    from app.core.errors import ApiKeyNotFound
+
+    user = await _make_user(db_session)
+    other = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+
+    row_revoked, _ = await svc.create(user_id=user.id, name="r", expires_at=None)
+    await svc.revoke(api_key_id=row_revoked.id, user_id=user.id)
+
+    row_expired, _ = await svc.create(
+        user_id=user.id,
+        name="e",
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    row_foreign, _ = await svc.create(user_id=other.id, name="f", expires_at=None)
+
+    for kid, uid in [
+        (row_revoked.id, user.id),
+        (row_expired.id, user.id),
+        (row_foreign.id, user.id),  # 他人 key 对 user 不可见
+        (uuid.uuid4(), user.id),
+    ]:
+        with pytest.raises(ApiKeyNotFound):
+            await svc.get_plaintext(api_key_id=kid, user_id=uid)
+
+
+@pytest.mark.asyncio
+async def test_get_plaintext_legacy_row_without_encrypted_returns_409(
+    db_session: AsyncSession,
+) -> None:
+    """存量 hash-only 行（encrypted_key=NULL）→ 409 引导新建，而非 500。"""
+    from app.modules.auth.api_key_service import ApiKeyPlaintextUnavailable
+
+    user = await _make_user(db_session)
+    legacy = ApiKey(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        name="legacy",
+        key_prefix="shk_live_leg",
+        key_hash="not-bcrypt-legacy",
+        encrypted_key=None,
+        expires_at=None,
+        created_at=datetime.now(UTC),
+        revoked_at=None,
+    )
+    db_session.add(legacy)
+    await db_session.commit()
+
+    svc = ApiKeyService(db_session, settings=get_settings())
+    assert legacy.plaintext_recoverable is False
+    with pytest.raises(ApiKeyPlaintextUnavailable):
+        await svc.get_plaintext(api_key_id=legacy.id, user_id=user.id)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_only_accepts_revoked_rows(
+    db_session: AsyncSession,
+) -> None:
+    """活跃行 hard_delete → 409；吊销后 → 行物理移除。"""
+    from app.modules.auth.api_key_service import ApiKeyDeleteBlocked
+
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    row, _ = await svc.create(user_id=user.id, name="d", expires_at=None)
+
+    with pytest.raises(ApiKeyDeleteBlocked):
+        await svc.hard_delete(api_key_id=row.id, user_id=user.id)
+
+    await svc.revoke(api_key_id=row.id, user_id=user.id)
+    await svc.hard_delete(api_key_id=row.id, user_id=user.id)
+
+    gone = (
+        await db_session.execute(select(ApiKey).where(ApiKey.id == row.id))
+    ).scalar_one_or_none()
+    assert gone is None
+
+
+@pytest.mark.asyncio
+async def test_create_degrades_gracefully_without_master_key(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主密钥缺失时创建仍成功（加密列置空、明文一次性返回），不 503。"""
+    from app.core.crypto import MasterKeyMissing
+
+    def _no_cipher():
+        raise MasterKeyMissing("no key")
+
+    monkeypatch.setattr("app.modules.auth.api_key_service.get_cipher", _no_cipher)
+
+    user = await _make_user(db_session)
+    svc = ApiKeyService(db_session, settings=get_settings())
+    row, plaintext = await svc.create(user_id=user.id, name="nokek", expires_at=None)
+
+    assert plaintext.startswith(API_KEY_PREFIX)
+    assert row.encrypted_key is None
+    assert row.plaintext_recoverable is False
