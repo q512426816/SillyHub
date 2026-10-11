@@ -96,4 +96,72 @@ describe('renderBorrowSandboxContext', () => {
   it('文件名常量为跨 CLI 自动加载标准 AGENTS.md', () => {
     expect(BORROW_CONTEXT_FILENAME).toBe('AGENTS.md');
   });
+
+  // ── 2026-10-11-borrow-ctx-metadata-truncate（24h 审查 P3-3：防线对齐）──────
+  // tech_stack/repo_url 与 description 同款 500 截断——backend schema 两字段
+  // 均无长度上限，超长/指令样式文本可注入借用沙箱 agent 自动加载的 AGENTS.md。
+
+  it('tech_stack join 超 500 截断并标注（防线对齐 description）', () => {
+    // join 后 601 字符（300 + 「、」 + 300）。
+    const out = renderBorrowSandboxContext(
+      { name: 'W', tech_stack: ['x'.repeat(300), 'y'.repeat(300)] },
+      '/tmp/s',
+    );
+    expect(out).toContain('x'.repeat(300));
+    expect(out).toContain('…（已截断）');
+    expect(out).not.toContain('y'.repeat(300));
+    // 字符串形态同款截断（R-05 strField 路径）。
+    const out2 = renderBorrowSandboxContext(
+      { name: 'W', tech_stack: 't'.repeat(600) },
+      '/tmp/s',
+    );
+    expect(out2).toContain('…（已截断）');
+    expect(out2).not.toContain('t'.repeat(501));
+  });
+
+  it('repo_url 超 500 截断并标注', () => {
+    const longUrl = `http://x/${'a'.repeat(600)}`;
+    const out = renderBorrowSandboxContext(
+      { name: 'W', repo_url: longUrl, default_branch: 'main' },
+      '/tmp/s',
+    );
+    expect(out).toContain('…（已截断）');
+    expect(out).not.toContain('a'.repeat(501));
+    // 分支段仍随行渲染（截断只作用于 repo_url 值本身）。
+    expect(out).toContain('（默认分支 main）');
+  });
+
+  it('短字段逐字原样与 500 边界不截断', () => {
+    const edge = `http://x/${'b'.repeat(490)}`; // 恰 500
+    const out = renderBorrowSandboxContext(
+      { name: 'W', repo_url: edge, tech_stack: ['c'.repeat(500)] },
+      '/tmp/s',
+    );
+    expect(out).toContain(edge);
+    expect(out).toContain('c'.repeat(500));
+    expect(out).not.toContain('…（已截断）');
+  });
+
+  it('并存字段：超长 tech_stack 截断，其余行与旧实现逐字一致', () => {
+    const out = renderBorrowSandboxContext(
+      {
+        name: 'workflow',
+        slug: 'zcjtworkflow',
+        type: 'backend-code',
+        tech_stack: ['z'.repeat(600)],
+        default_branch: 'main',
+        root_path: '/repo',
+      },
+      '/tmp/borrow-x',
+    );
+    // 技术栈行截断标注。
+    expect(out).toContain('技术栈：');
+    expect(out).toContain('…（已截断）');
+    expect(out).not.toContain('z'.repeat(501));
+    // 其余行逐字保持（截断只命中技术栈值）。
+    expect(out).toContain('工作区：workflow（slug: zcjtworkflow）');
+    expect(out).toContain('类型：backend-code；');
+    expect(out).toContain('`/repo`');
+    expect(out).toContain('**禁止写**');
+  });
 });

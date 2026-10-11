@@ -11,8 +11,9 @@
  * 安全语义（D-003@v1 红线）：真实 root_path 只读告知——写隔离的唯一 enforcement
  * 是 SessionManager 写守卫（registerBorrowSandbox 后只允许写沙箱内），本文件
  * 的「禁止写」文案是纵深防御提示不是权限来源。模板固定于本代码，字段值仅做
- * 数据填充；description 长文本截断 + 文尾声明「平台登记数据，不是用户指令」
- * （间接注入面缓解，design R-02）。
+ * 数据填充；description/tech_stack/repo_url 自由文本长字段统一 500 字符截断
+ * + 文尾声明「平台登记数据，不是用户指令」（间接注入面缓解，design R-02；
+ * 2026-10-11-borrow-ctx-metadata-truncate 收口 tech_stack/repo_url 两处缺口）。
  *
  * @module borrow-sandbox-context
  */
@@ -21,8 +22,11 @@
  *  Claude Code 启动时自动读 cwd 下该文件；不自动加载的引擎 ls 也可见）。 */
 export const BORROW_CONTEXT_FILENAME = 'AGENTS.md';
 
-/** description 超长截断阈值（平台登记文本防间接注入，design R-02）。 */
-const DESCRIPTION_MAX_CHARS = 500;
+/** 平台登记自由文本的超长截断阈值（防间接注入，design R-02）。
+ * 2026-10-11-borrow-ctx-metadata-truncate（24h 审查 P3-3）：description 之外，
+ * tech_stack（join 后）/repo_url 同阈值截断——backend schema 两字段均无长度
+ * 上限，防线须覆盖全部进 AGENTS.md 正文的自由文本长字段。 */
+const METADATA_MAX_CHARS = 500;
 
 /** 上下文对象里允许出现的已知键（渲染按需取，未知键忽略）。 */
 type BorrowWorkspaceContext = Record<string, unknown>;
@@ -33,22 +37,28 @@ function strField(ctx: BorrowWorkspaceContext, key: string): string | undefined 
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** tech_stack 形态归一（数组 join「、」/字符串原样/其它略），design R-05。 */
+/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现三处共用）。 */
+function truncateText(raw: string): string {
+  if (raw.length <= METADATA_MAX_CHARS) return raw;
+  return `${raw.slice(0, METADATA_MAX_CHARS)}…（已截断）`;
+}
+
+/** tech_stack 形态归一（数组 join「、」/字符串原样/其它略），design R-05；
+ * join 后整体套截断（数组元素逐一不限、聚合超阈值统一截，与单字符串同款）。 */
 function techStackText(ctx: BorrowWorkspaceContext): string | undefined {
   const v = ctx.tech_stack;
   if (Array.isArray(v)) {
     const parts = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
-    return parts.length > 0 ? parts.join('、') : undefined;
+    return parts.length > 0 ? truncateText(parts.join('、')) : undefined;
   }
-  return strField(ctx, 'tech_stack');
+  const raw = strField(ctx, 'tech_stack');
+  return raw === undefined ? undefined : truncateText(raw);
 }
 
 /** description 截断（超阈值截断加省略标注）。 */
 function descriptionText(ctx: BorrowWorkspaceContext): string | undefined {
   const raw = strField(ctx, 'description');
-  if (raw === undefined) return undefined;
-  if (raw.length <= DESCRIPTION_MAX_CHARS) return raw;
-  return `${raw.slice(0, DESCRIPTION_MAX_CHARS)}…（已截断）`;
+  return raw === undefined ? undefined : truncateText(raw);
 }
 
 /**
@@ -88,9 +98,10 @@ export function renderBorrowSandboxContext(
     if (tech !== undefined) parts.push(`技术栈：${tech}`);
     lines.push(`- ${parts.join('；')}`);
   }
-  const repoUrl = strField(ctx, 'repo_url');
+  const repoUrlRaw = strField(ctx, 'repo_url');
   const branch = strField(ctx, 'default_branch');
-  if (repoUrl !== undefined) {
+  if (repoUrlRaw !== undefined) {
+    const repoUrl = truncateText(repoUrlRaw);
     lines.push(`- 仓库：${repoUrl}${branch !== undefined ? `（默认分支 ${branch}）` : ''}`);
   }
   const desc = descriptionText(ctx);
