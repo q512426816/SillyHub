@@ -213,3 +213,98 @@
 - 场景：默认场景 — Given 实现完成；When 跑相关测试与静态检查；Then 涉及文件既有测试（改断言不改意图）全绿；tsc 零新增错误；eslint 零新增
 全文：.sillyspec/changes/archive/2026-09-27-session-portal-ia-restructure/requirements.md#FR-08
 最近确认：e4e593b4cc5ba221ebd773df5105beb4adbd4d83
+
+## FR-app-pages-018 runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
+变更：2026-10-11-apikey-mcp-copy-delete
+状态：active
+摘要：有活跃 key；无任何活跃 key；非 admin 用户
+全文：.sillyspec/changes/archive/2026-10-11-apikey-mcp-copy-delete/requirements.md#FR-01
+最近确认：fffc17f482902ef9655bf2f848d94807658e7f90
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx「复制命令写入剪贴板的命令内嵌真实密钥、渲染面保持打码」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-apikey-mcp-copy-delete
+  status: active
+
+## FR-app-pages-019 api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
+变更：2026-10-11-apikey-mcp-copy-delete
+状态：active
+摘要：活跃可恢复 key 复制；已吊销 key
+全文：.sillyspec/changes/archive/2026-10-11-apikey-mcp-copy-delete/requirements.md#FR-02
+最近确认：fffc17f482902ef9655bf2f848d94807658e7f90
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「活跃可恢复行显示复制密钥并写入剪贴板」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-apikey-mcp-copy-delete
+  status: active
+
+## FR-app-pages-020 mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
+变更：2026-10-11-apikey-mcp-copy-delete
+状态：active
+摘要：活跃可恢复 token 复制
+全文：.sillyspec/changes/archive/2026-10-11-apikey-mcp-copy-delete/requirements.md#FR-03
+最近确认：fffc17f482902ef9655bf2f848d94807658e7f90
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx「活跃可恢复行显示复制令牌并写入剪贴板」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-apikey-mcp-copy-delete
+  status: active
+
+## FR-app-pages-021 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
+变更：2026-10-11-apikey-mcp-copy-delete
+状态：active
+摘要：删除已吊销 key；对活跃 key 请求硬删除
+全文：.sillyspec/changes/archive/2026-10-11-apikey-mcp-copy-delete/requirements.md#FR-04
+最近确认：fffc17f482902ef9655bf2f848d94807658e7f90
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「已吊销行显示删除按钮，confirm 后调用硬删除」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-apikey-mcp-copy-delete
+  status: active
+
+## FR-app-pages-022 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
+变更：2026-10-11-apikey-mcp-copy-delete
+状态：active
+摘要：存量旧 key 复制；master key 缺失时创建
+全文：.sillyspec/changes/archive/2026-10-11-apikey-mcp-copy-delete/requirements.md#FR-05
+最近确认：fffc17f482902ef9655bf2f848d94807658e7f90
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-05
+  tests: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「不可恢复行复制按钮禁用带 tooltip」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-apikey-mcp-copy-delete
+  status: active
