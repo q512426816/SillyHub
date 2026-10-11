@@ -59,6 +59,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import readline from 'node:readline';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
+import { writeCodexMcpServers } from '../codex-settings.js';
 import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
 import { daemonStateDir } from '../config.js';
 import type { AgentEvent, AgentEventUsage } from '../types.js';
@@ -828,6 +829,31 @@ export class CodexAppServerDriver implements InteractiveDriver {
     // -c 键非 strict 下仅告警不失败（实测），向前兼容安全。
     args.unshift('-c', 'features.default_mode_request_user_input=true');
     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+
+    // MCP 注入（2026-10-10-all-engines-mcp-injection task-06 / D-006@v1 + D-011@v1）：
+    // 平台 MCP 配置表（resolveMainAgentMcp 产出）写 per-session CODEX_HOME 内
+    // config.toml [mcp_servers.*] 托管段（codex CLI 原生读取）。caps 侧 codex.mcp
+    // 当前维持 false（SPIKE-01 未能实测——引擎二进制缺失，D-011@v1），本消费路径
+    // 在 caps 翻值前不会被触发（机制就绪待复评：复测通过翻值即活）。降级面：
+    // CODEX_HOME 缺失（provider 文件层未写）→ 不写 + warn；写盘失败 → warn 不阻断
+    // spawn（MCP 是增强能力）。
+    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+      const codexHome = env['CODEX_HOME'];
+      if (!codexHome || codexHome.trim() === '') {
+        // eslint-disable-next-line no-console
+        console.warn('[codex-driver] mcp skip: no CODEX_HOME in spawn env');
+      } else {
+        try {
+          await writeCodexMcpServers(codexHome, opts.mcpServers);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[codex-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
+            (e as Error).message,
+          );
+        }
+      }
+    }
 
     // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的
     // 是 codex.cmd（npm cmd-shim），直接 spawn .cmd 无 shell → CreateProcess EINVAL

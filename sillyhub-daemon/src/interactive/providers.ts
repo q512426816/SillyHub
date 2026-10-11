@@ -367,6 +367,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     sessionFork: 'native',
   },
   codex: {
+    // 2026-10-10-all-engines-mcp-injection task-06（D-011@v1）：机制就绪待复评——
+    // SPIKE-01 未能实测（宿主 codex 0.162.0 缺 win32 平台二进制且网络限断无法修复，
+    // 见 changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md 复评 SOP）；
+    // 消费通道已交付（codex-settings mergeCodexMcpToml / writeCodexMcpServers +
+    // driver start 写 CODEX_HOME config.toml [mcp_servers.*]，单测绿）。旧注释
+    // 「driver.ts codex 对 mcpServers 仅暂存不消费」已被 task-06 推翻。翻值 =
+    // 复测通过后本键 false→true + 重跑 gen-provider-caps。
     resume: true,
     mcp: false,
     multimodal: false,
@@ -393,8 +400,15 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
   // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
   pi: {
+    // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
+    // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
+    // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
+    // driver 版本门控写盘），task-08 已翻值（SPIKE-00 实测通过为唯一依据，gen-provider-caps
+    // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
+    // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
+    // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
     resume: true,
-    mcp: false,
+    mcp: true,
     multimodal: true,
     attachments: true,
     thinking: true,
@@ -417,6 +431,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
   // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
   cursor: {
+    // 2026-10-10-all-engines-mcp-injection task-07（D-003@v1 / D-011@v1）：留档
+    // 分支——SPIKE-02 未能实测（宿主无 cursor-agent CLI 且网络限断无法安装，
+    // spike-cursor-mcp.md）。坑点：上游反馈 headless 模式 MCP 工具审批未实现
+    //（工具调用可能挂起，未经本地实测验证）；CLI 无 per-session MCP 配置通道，
+    // 全局 ~/.cursor/mcp.json 与项目级 .cursor/mcp.json 均为禁写落点（宿主
+    // 资产 / workspace 污染）。复评条件：cursor-agent 可安装后按
+    // spike-cursor-mcp.md SOP 实测审批行为与落点隔离，两项通过才翻值。
     resume: true,
     mcp: false,
     multimodal: false,
@@ -472,6 +493,29 @@ export function getProviderCaps(provider: string): ProviderCaps {
     steering: false,
     sessionFork: 'none',
   };
+}
+
+/**
+ * 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控/普通会话 MCP
+ * 注入候选判定（引擎无关纯函数，无副作用可单测）。
+ *
+ * 取代 cli.ts 装配处 `provider !== 'claude'` 硬拒（2026-08-26-workspace-mcp-edit
+ * D-008 时代仅 claude 消费 mcpServers 的口径）：改为按能力矩阵 mcp 键判定——
+ * caps.mcp=true 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值后）均
+ * 进入主控注入；未知 provider 经 getProviderCaps 默认拒绝（mcp=false），禁止
+ * 对 PROVIDER_CAPS 直接下标（undefined 链 TypeError，Grill B-3）。
+ *
+ * stage 判定维持原口径：缺省（''）= 普通会话常驻注入；'orchestrator' = 存量
+ * 外部主控照常注入；'mission_worker'（分身）不进本判定——分身走 isWorkerSession
+ * 受限注入（cli.ts:1118-1120 维持 claude-only，D-002 循既有 D-008@v1 治理决策）。
+ */
+export function isMainAgentMcpCandidate(ctx: {
+  provider: string;
+  stage?: string | null;
+}): boolean {
+  if (!getProviderCaps(ctx.provider).mcp) return false;
+  const stage = ctx.stage ?? '';
+  return stage === '' || stage === 'orchestrator';
 }
 
 // ── task-05（FR-05 / design §5.2）：provider 注册表 ───────────────────────────

@@ -142,7 +142,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
   },
   pi: {
     resume: true,
-    mcp: false,
+    mcp: true,
     multimodal: true,
     attachments: true,
     thinking: true,

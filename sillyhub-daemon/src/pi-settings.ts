@@ -290,6 +290,53 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
  *（default_fallback_model ?? model）非空。聚合表 pi writer 的 isSufficient 与
  * spawn/reload 分派共用。
  */
+/**
+ * pi 1.1.0+ 原生 MCP server 配置条目（结构兼容 interactive/driver.js 的
+ * McpServerConfigForDriver——本文件是低依赖纯写盘层，不回引 interactive/，
+ * driver 侧按结构类型直传）。
+ */
+export interface PiMcpServerConfig {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
+/**
+ * 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：写 per-session
+ * `<PI_CODING_AGENT_DIR>/mcp.json`（pi 1.1.0+ 原生 MCP 配置）。
+ *
+ * SPIKE-00 实测（spike-pi-10-compat.md，pi 1.1.0）：PI_CODING_AGENT_DIR 重定向后
+ * pi root 直接对应 agent 层——原生 MCP 配置读取路径 = `<dir>/mcp.json`（非宿主
+ * ~/.pi/agent/mcp.json 的 agent 子层），格式与 codex 同风格：
+ * `{ "mcpServers": { "<name>": { command, args?, env? } } }`；per-server env
+ * （MCP_SESSION_ID 等）经条目 env 字段透传（conventions「env 必须进 mcpServers
+ * 条目 env 字段」）。
+ *
+ * 语义：daemon 独占管理本文件（区别于 auth/models/settings 三文件的先读后写
+ * 保留语义）——每次会话创建按 resolveMainAgentMcp 产出的配置表全量覆写，不合并
+ * 旧条目（旧 server 残留 = 幽灵工具面）；空表跳过不写（保持目录干净，pi 侧
+ * 视为无 MCP 配置）。写 IO 失败 throw（reject）——调用方（pi-rpc-driver start）
+ * 捕获降级 warn 不阻断 spawn（MCP 是增强能力）。
+ */
+export async function writePiMcpConfig(
+  piDir: string,
+  mcpServers: Record<string, PiMcpServerConfig>,
+): Promise<void> {
+  const names = Object.keys(mcpServers);
+  if (names.length === 0) return;
+  const payload = { mcpServers: mcpServers };
+  try {
+    await writeFileAtomic(join(piDir, 'mcp.json'), JSON.stringify(payload, null, 2) + '\n');
+  } catch (e) {
+    console.error('pi_mcp_config_write_failed', {
+      piDir,
+      servers: names,
+      error: (e as Error)?.message ?? String(e),
+    });
+    throw e;
+  }
+}
+
 export function isPiFormSufficient(provider: ProviderConfig): boolean {
   return (
     provider.api_format !== 'openai_chat' &&
