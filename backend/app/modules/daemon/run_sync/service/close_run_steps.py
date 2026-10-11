@@ -355,7 +355,13 @@ async def _close_apply_terminal(
     if duration_ms is not None:
         agent_run.duration_ms = duration_ms
     if duration_api_ms is not None:
-        agent_run.duration_api_ms = duration_api_ms
+        # 2026-10-10-duration-api-cumulative-fix 物理守卫：API 调用时长不可能超过
+        # 轮墙钟（duration_ms）。会话级累计快照形态的引擎（线上实证：13s 轮被写
+        # 3171s 累计值 → 终态 tok/s 分母放大 239 倍显示 0.4）在此拒收——保留既有
+        # 值（daemon 实时计时累计或 NULL），不静默放大分母。
+        wall = duration_ms if duration_ms is not None else agent_run.duration_ms
+        if wall is None or duration_api_ms <= wall:
+            agent_run.duration_api_ms = duration_api_ms
     if input_tokens is not None:
         agent_run.input_tokens = input_tokens
     if output_tokens is not None:

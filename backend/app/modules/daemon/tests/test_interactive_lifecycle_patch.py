@@ -653,6 +653,44 @@ class TestGap3CloseInteractiveRun:
         assert payload2["duration_api_ms"] is None
 
     @pytest.mark.asyncio
+    async def test_close_duration_api_ms_over_wall_rejected(self, db_session, mocked_redis) -> None:
+        """2026-10-10-duration-api-cumulative-fix：duration_api_ms > duration_ms（墙钟）
+        物理不可能——会话级累计快照形态的引擎（线上实证 13s 轮被写 3171s）拒收，
+        列保留既有值（NULL / daemon 实时计时累计），不放大终态 tok/s 分母。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        run1 = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            duration_ms=13246,
+            duration_api_ms=3171192,
+        )
+        assert run1.duration_ms == 13246
+        assert run1.duration_api_ms is None
+
+    @pytest.mark.asyncio
+    async def test_close_duration_api_ms_within_wall_written(
+        self, db_session, mocked_redis
+    ) -> None:
+        """合法值（api ≤ 墙钟）照常写入。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        run1 = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            duration_ms=13246,
+            duration_api_ms=12500,
+        )
+        assert run1.duration_api_ms == 12500
+        assert run1.duration_ms == 13246
+
+    @pytest.mark.asyncio
     async def test_publishes_turn_completed_failed_status(self, db_session, mocked_redis) -> None:
         """turn_completed 在 failed turn 也要发，且 status/exit_code 反映失败
         （前端据此把 turn 渲染成失败并解锁输入）。"""
