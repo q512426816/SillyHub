@@ -1354,3 +1354,93 @@ describe('ql-20260831-009：modelUsage/total_cost_usd 跨轮累计快照差分',
     expect(p2.output_tokens).toBe(20);
   });
 });
+
+// 2026-10-10-duration-api-cumulative-fix：duration_api_ms 会话级累计快照差分
+//（线上实证会话 0d6b2ba9：13s 轮被写 3171s 累计值 → 终态 tok/s 显示 0.4）。
+describe('duration_api_ms 跨轮累计快照差分', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  function payloadOf(client: ReturnType<typeof createMockClient>, n: number) {
+    const callArgs = client.notifyRunResult.mock.calls[n]!;
+    return callArgs[3] as Record<string, unknown>;
+  }
+
+  it('第 2 轮 payload 为快照差值（12000→25000 → 差 13000），duration_ms 照原样透传', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-1', 'run-1', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_ms: 12000,
+      duration_api_ms: 12000,
+    } as unknown as SDKResultMessage);
+    await daemon.onTurnResult('sess-1', 'run-2', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_ms: 13000,
+      duration_api_ms: 25000,
+    } as unknown as SDKResultMessage);
+
+    const p1 = payloadOf(client, 0);
+    expect(p1.duration_api_ms).toBe(12000);
+    const p2 = payloadOf(client, 1);
+    expect(p2.duration_api_ms).toBe(13000);
+    expect(p2.duration_ms).toBe(13000);
+  });
+
+  it('快照复位（当前 < 基线）：报全量（同 cost 口径）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-1', 'run-1', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: 25000,
+    } as unknown as SDKResultMessage);
+    await daemon.onTurnResult('sess-1', 'run-2', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: 9000,
+    } as unknown as SDKResultMessage);
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.duration_api_ms).toBe(9000);
+  });
+
+  it('会话结束回收基线：同 id 重建后新轮报全量不误差分', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-1', 'run-1', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: 25000,
+    } as unknown as SDKResultMessage);
+    daemon.onSessionEnd('sess-1', 'ended', 'manual');
+    // 同 id 重建（快照从零起的会话累计）→ 无基线 → 报全量。
+    await daemon.onTurnResult('sess-1', 'run-2', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: 11000,
+    } as unknown as SDKResultMessage);
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.duration_api_ms).toBe(11000);
+  });
+});

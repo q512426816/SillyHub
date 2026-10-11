@@ -1800,6 +1800,14 @@ export class Daemon {
    * 全量，不持久化不跨进程）。
    */
   private readonly _modelUsageBaselineBySession = new Map<string, ModelUsageBaseline>();
+  /**
+   * duration_api_ms 跨轮累计快照基线（sessionId → 上一轮快照）。SDK streaming
+   * 会话每轮终态的 duration_api_ms 是「会话至今累计」（2026-10-10-duration-api-
+   * cumulative-fix 线上实证：13s 轮被写 3171s 累计值，per-run 列放大 239 倍 →
+   * 终态 tok/s 分母失真）。差分为本轮增量后上报；生命周期同
+   * _modelUsageBaselineBySession（onSessionEnd / onSessionReloaded 回收）。
+   */
+  private readonly _durationApiBaselineBySession = new Map<string, number>();
   // ── ql-20260909-011（交互会话逐事件上报微批化）────────────────────────────
   // 实机根因：interactive 路径每条事件一次串行 submitMessages HTTP 往返（onTurnMessage
   // → events.ts 循环逐事件 await → consume 协程读完下一条 SDK 帧前必须等当前帧
@@ -4005,7 +4013,19 @@ export class Daemon {
       payload.duration_ms = resultMeta.duration_ms;
     }
     if (typeof resultMeta.duration_api_ms === 'number') {
-      payload.duration_api_ms = resultMeta.duration_api_ms;
+      // 2026-10-10-duration-api-cumulative-fix：duration_api_ms 与 total_cost_usd /
+      // modelUsage 同生命周期——SDK streaming 会话每轮终态报「会话至今累计」（线上
+      // 实证会话 0d6b2ba9：13s 轮被写 52.8min 累计值 → 终态 tok/s 分母放大 239 倍
+      // 显示 0.4）。差分为本轮增量；当前 < 基线 = SDK 计数复位（resume / /clear /
+      // crash），报全量（同 cost 口径）；0 值合法不丢。duration_ms 是 per-query
+      // 墙钟，无需差分（DB 实证各轮 duration_ms = 本轮墙钟）。
+      const durSnapshot = resultMeta.duration_api_ms;
+      const durBase = this._durationApiBaselineBySession.get(sessionId);
+      payload.duration_api_ms =
+        durBase === undefined || durSnapshot < durBase
+          ? durSnapshot
+          : durSnapshot - durBase;
+      this._durationApiBaselineBySession.set(sessionId, durSnapshot);
     }
     // ql-20260829-002：token 四维优先取 modelUsage 跨模型聚合（含 Task 子代理 /
     // sidechain / compaction 的全部 query-pipeline 消耗，SDK 官方指明这才是
@@ -4763,6 +4783,8 @@ export class Daemon {
    */
   onSessionReloaded(sessionId: string): void {
     this._modelUsageBaselineBySession.delete(sessionId);
+    // duration_api_ms 累计基线同生命周期回收（句柄重建后快照从零起）。
+    this._durationApiBaselineBySession.delete(sessionId);
   }
 
   async onSessionEnd(
@@ -4843,6 +4865,9 @@ export class Daemon {
     // ql-20260831-009：回收 modelUsage 差分基线（生命周期=会话；会话结束后同 id
     // 重建的会话是新流式 query，快照从零起，残留基线会误触发复位检测多报全量）。
     this._modelUsageBaselineBySession.delete(sessionId);
+    // duration_api_ms 累计基线同生命周期回收（同上：会话结束后同 id 重建是新
+    // 流式 query，累计从零起，残留基线会误触发复位检测报全量）。
+    this._durationApiBaselineBySession.delete(sessionId);
 
     // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
     // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
