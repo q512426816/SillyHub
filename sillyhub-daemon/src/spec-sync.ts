@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
-import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename, utimes } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
 import type { FileOp } from './hub-client.js';
 import { daemonStateDir } from './config.js';
@@ -536,6 +536,11 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
     );
     try {
       await renameWithRetry(specDir, backup);
+      // 评审 P3 清偿：保留期锚定**创建时刻**——rename 继承旧目录 mtime（残留
+      // 可携月级旧值），不清零则 7 天人工窗口对老残留形同虚设（下次清扫即删）。
+      // best-effort：盖戳失败不阻塞（sweep 判龄退化回 mtime 原值）。
+      const now = new Date();
+      await utimes(backup, now, now).catch(() => {});
       console.info('spec_sync: junction_stale_dir_backed_up', specDir, '->', backup);
     } catch (e) {
       console.warn('spec_sync: junction_backup_rename_failed_fallback', specDir, e);

@@ -1307,6 +1307,10 @@ describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-
   it('repo-native 成功路径清扫过期备份（8 天清/10 分钟留）；tmp/trash 10 分钟语义零回归', async () => {
     const wsId = 'ws-init-sweep-bak';
     await seedResidueAndSource(wsId); // 普通残留 → 本次运行会产生新备份（新鲜）
+    // 评审 P3 钉：残留缓存盖 30 天旧 mtime——rename 继承旧值，备份创建时刻
+    // 盖戳后仍须视为新鲜（不清扫），7 天人工窗口对老残留真实生效。
+    const residueRoot = resolveSpecDir(wsId);
+    await utimes(residueRoot, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
     const parent = dirname(resolveSpecDir(wsId));
     const now = Date.now();
     const DAY = 24 * 60 * 60 * 1000;
@@ -1339,8 +1343,16 @@ describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-
       const names = await readdir(parent);
       // 过期备份被清（旧实现 repo-native 路径不清扫 → 残留，本用例红点）。
       expect(names.some((n) => n.startsWith(`${wsId}.pre-junction-backup-`) && n.endsWith(`${now - 8 * DAY}`))).toBe(false);
-      // 保留期内备份不误删 + 本次运行新产生的备份（新鲜）在。
+      // 保留期内备份不误删 + 本次运行新产生的备份在（残留 mtime 30 天旧——
+      // 创建时刻盖戳锚定，不因继承旧 mtime 被立即清扫）。
       expect(names).toContain(freshBackupName);
+      const runBackups = names.filter(
+        (n) => n.startsWith(`${wsId}.pre-junction-backup-`) && n !== freshBackupName,
+      );
+      expect(runBackups.length).toBe(1);
+      // 盖戳直接证据：新备份 mtime 距今 < 60s（未盖戳则继承残留的 30 天旧值）。
+      const runBackupStat = await lstat(join(parent, runBackups[0]));
+      expect(Date.now() - runBackupStat.mtimeMs).toBeLessThan(60_000);
       // tmp/trash 既有 10 分钟语义零回归（repo-native 路径此前不扫，顶部清扫后照扫）。
       expect(names.some((n) => n.startsWith(`${wsId}.tmp-111-`))).toBe(false);
       expect(names.some((n) => n.startsWith(`${wsId}.tmp-222-`))).toBe(true);
