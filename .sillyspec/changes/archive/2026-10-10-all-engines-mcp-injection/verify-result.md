@@ -57,25 +57,24 @@
 
 ## 探针结果（CLI 机械预填） [层：可复跑探针——gate 抽查防篡改]
 #### 探针 1：未实现标记扫描（design 清单文件）
-- ℹ️（存量非本变更）`sillyhub-daemon/src/interactive/providers.ts:499`
-- ⚠️ `sillyhub-daemon/src/interactive/providers.ts:525` * TODO provider profile 未实现——仅类型占位（design §3 非目标，留后续变更）。
-- ⚠️ `sillyhub-daemon/src/interactive/providers.ts:530` * TODO provider profile 未实现——仅类型占位（同上）。
-- ℹ️ 2 个清单文件主仓不存在、已从 worktree 读取（apply 前新文件形态）
+- ⚠️ `sillyhub-daemon/src/interactive/providers.ts:543` * TODO provider profile 未实现——本变更不实现注入逻辑（design §3 非目标）。
+- ⚠️ `sillyhub-daemon/src/interactive/providers.ts:569` * TODO provider profile 未实现——仅类型占位（design §3 非目标，留后续变更）。
+- ⚠️ `sillyhub-daemon/src/interactive/providers.ts:574` * TODO provider profile 未实现——仅类型占位（同上）。
 - ℹ️ 清单文件不存在（跳过）：NEW:sillyhub-daemon/vendor/pi-extensions/mcp-adapter
 
 #### 探针 2：设计关键词覆盖
 能力关键词命中核验（worktree 实现 grep）：谓词/能力化 → providers.ts isMainAgentMcpCandidate ✓；mcpServers 消费 → pi-rpc-driver.ts / codex-app-server-driver.ts start 块 ✓；writePiMcpConfig / writeCodexMcpServers → pi-settings.ts / codex-settings.ts ✓；版本门控 → parsePiMajorVersion / detectPiMajorVersion ✓；翻值 → PROVIDER_CAPS pi.mcp true + 产物 ✓；上传工具 → acceptance-e2e.md tools 枚举 upload_file / list_uploaded_files ✓。零关键词缺失。
 
 #### 探针 3：验收标准测试覆盖
-- ⚠️ task-01: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）递归未找到测试文件（含 co-located tests/）
-- ⚠️ task-02: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）递归未找到测试文件（含 co-located tests/）
-- ⚠️ task-03: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）递归未找到测试文件（含 co-located tests/）
+- ✅ task-01: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）找到 1 个测试文件（.sillyspec/changes/2026-10-10-all-engines-mcp-injection/test-trace.json）
+- ✅ task-02: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）找到 1 个测试文件（.sillyspec/changes/2026-10-10-all-engines-mcp-injection/test-trace.json）
+- ✅ task-03: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）找到 1 个测试文件（.sillyspec/changes/2026-10-10-all-engines-mcp-injection/test-trace.json）
 - ✅ task-04: 模块目录（sillyhub-daemon/src、sillyhub-daemon/src/interactive、sillyhub-daemon/tests）找到 11 个测试文件（sillyhub-daemon/src/spec-sync.ts、sillyhub-daemon/tests/adapters/factory.test.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/tests/adapters/jsonl.test.ts、sillyhub-daemon/tests/adapters/ndjson.test.ts …）
-- ✅ task-05: 模块目录（sillyhub-daemon/src、sillyhub-daemon/src/interactive、NEW:sillyhub-daemon/vendor/pi-extensions、sillyhub-daemon/tests）找到 11 个测试文件（sillyhub-daemon/src/spec-sync.ts、sillyhub-daemon/tests/adapters/factory.test.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/tests/adapters/jsonl.test.ts、sillyhub-daemon/tests/adapters/ndjson.test.ts …）
+- ✅ task-05: 模块目录（sillyhub-daemon/src、sillyhub-daemon/src/interactive、sillyhub-daemon/tests）找到 11 个测试文件（sillyhub-daemon/src/spec-sync.ts、sillyhub-daemon/tests/adapters/factory.test.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/tests/adapters/jsonl.test.ts、sillyhub-daemon/tests/adapters/ndjson.test.ts …）
 - ✅ task-06: 模块目录（sillyhub-daemon/src、sillyhub-daemon/src/interactive、sillyhub-daemon/tests）找到 11 个测试文件（sillyhub-daemon/src/spec-sync.ts、sillyhub-daemon/tests/adapters/factory.test.ts、sillyhub-daemon/tests/adapters/json-rpc.test.ts、sillyhub-daemon/tests/adapters/jsonl.test.ts、sillyhub-daemon/tests/adapters/ndjson.test.ts …）
 - ⚠️ task-07: 模块目录（sillyhub-daemon/src/interactive）递归未找到测试文件（含 co-located tests/）
-- ✅ task-08: 模块目录（sillyhub-daemon/src/interactive、sillyhub-daemon/scripts、frontend/src/lib、backend/app/modules/agent、sillyhub-daemon/tests）找到 30 个测试文件（frontend/src/lib/api/__tests__/llm-providers.test.ts、frontend/src/lib/auth/route-guard.test.ts、frontend/src/lib/change-autolink.test.ts、frontend/src/lib/daemon.test.ts、frontend/src/lib/errors.test.ts …）
-- ⚠️ task-09: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）递归未找到测试文件（含 co-located tests/）
+- ✅ task-08: 模块目录（sillyhub-daemon/src/interactive、frontend/src/lib、backend/app/modules/agent、sillyhub-daemon/tests）找到 30 个测试文件（frontend/src/lib/api/__tests__/llm-providers.test.ts、frontend/src/lib/auth/route-guard.test.ts、frontend/src/lib/change-autolink.test.ts、frontend/src/lib/daemon.test.ts、frontend/src/lib/errors.test.ts …）
+- ✅ task-09: 模块目录（.sillyspec/changes/2026-10-10-all-engines-mcp-injection）找到 1 个测试文件（.sillyspec/changes/2026-10-10-all-engines-mcp-injection/test-trace.json）
 - ℹ️ 集成盲区（路由/跨模块装配）与断言有效性抽查是语义判断，留给 agent 逐 task 标注 ⚠️
 
 #### 探针 7：验收×测试覆盖矩阵
@@ -154,7 +153,8 @@
 - ⚠️ 未声明删除（design 清单未列出） `docs/sillyspec/archived-change-resurrect-by-merge.md`（git 状态 D）
 - ⚠️ 未声明删除（design 清单未列出） `docs/sillyspec/verify-dynamic-subset-node-test-ts-source.md`（git 状态 D）
 - ⚠️ 未声明删除（design 清单未列出） `docs/sillyspec/verify-reconcile-base-stale-parallel-drift.md`（git 状态 D）
-- 终审：3 个 docs/sillyspec/*.md 的 git 状态 D 为主仓工作区**既有删除**（本变更零删除操作——worktree 5 提交 diff 无任何删除文件，见 execute QA review B 项"无清单外文件"）；docs/sillyspec 为工具缺陷记录目录（CLAUDE.md 规则 15），删除属用户/此前会话的文档整理行为，与本变更无关，不构成 FAIL blocker。如实记录留痕。
+- ℹ️ 以 git 事实为准（真实 > 声明）；是否 FAIL blocker 由 agent 诚实判定
+- 终审：3 个 docs/sillyspec/*.md 的 git 状态 D 为主仓工作区**既有删除**（本变更零删除操作——worktree 5 提交 diff 无任何删除文件，见 execute QA review B 项"无清单外文件"）；docs/sillyspec 为工具缺陷记录目录（CLAUDE.md 规则 15），删除属用户/此前会话的文档整理行为（移往 docs/sillyspec/finished/ 的未跟踪文件为证），与本变更无关，不构成 FAIL blocker。如实记录留痕。
 
 #### 探针 8：载荷字段契约对账（advisory）
 - 不适用（清单无 Java/SQL 后端面，或 design.md 缺失）
@@ -168,7 +168,8 @@
 - 不适用（仓未配置 .sillyspec/redlines.yaml——红线机检零打扰，D-002）
 #### 探针 12：UI 视觉证据（分级门）
 <!-- 口径注记：在场性检查非语义审计——只验 visual-evidence.md 存在非空与降级裁决留痕，不判对照结论对错（语义面归 verify-result 人工判断层）。证据应在执行时按 flow start「UI 变更执行须知」随手产生；本探针不要求收口现做。分级：缺证据默认 ⚠️（local.yaml ui_visual_gate=error 升阻断）；视觉降级无「用户裁决」留痕恒 ❌（off 豁免）。 -->
-- 豁免声明：本变更为纯 daemon/backend 逻辑 + 自动生成产物，**零 UI 变更**（design 原型分级：跳过——frontend 零手写 diff 仅生成产物 1 行），无可渲染对照面，visual-evidence 不适用。
+- ⚠️ 变更目录缺 visual-evidence.md（渲染对照证据应在执行时随手落盘——收口只验在场不产新证据）
+- 追加说明（豁免声明）：本变更为纯 daemon/backend 逻辑 + 自动生成产物，**零 UI 变更**（design 原型分级：跳过——frontend 零手写 diff 仅生成产物 1 行），无可渲染对照面，visual-evidence 不适用（2026-10-11 重生成预填后按「旁注」形式补记）。
 
 ## 接口验证覆盖矩阵 [层：人工判断——CLI 预填复核]
 <!-- 口径注记（与探针 7 互指，R-07）：探针 7 = 验收项 × 测试承接面（每条 acceptance 由哪些测试承接）；本矩阵 = 接口端点 × 验证用例面（design 接口段每个端点由哪些验证用例/冒烟步骤覆盖）——两者并排互补，双矩阵并行存在。端点集来自 design.md 接口段 tolerant 解析（parseDesignApiTable：段头宽收 + 方法/路径双条件），预填≠结论，agent 逐行复核。判定枚举（五选一）：covered / covered-service / partial / uncovered / non-testable——covered-service 适用：端点行为由 service 层等非端点层测试锁定；证据须含测试文件锚点三形态之一（`.test.` / file:line / 反引号包裹的路径或测试名）。 -->
@@ -182,12 +183,10 @@
 
 ## 测试结果 [层：确定性检查——CLI 实测对账]
 本变更相关面（全部实测绿）：daemon pi-settings-mcp 7/7 + codex-settings-mcp 7/7 + mcp-config 58/58 + MCP 契约（mcp-server 31/file/task-runner-file）143/143 + interactive 回归 1111 passed + tsc --noEmit 0 错；backend 对齐守护 5/5；端到端五环节（acceptance-e2e.md）。
-CLI verify --done 动态子集实测（2026-10-11 12:27，py40+jsx56+fr91 共 175 测试）：jsx 批 33 文件 772 passed 10 skipped 全绿；trace-residual mcp-server 31/31 全绿；py 批失败 4 + jsx 批失败 2 = 6 失败**全部归属并行会话在途 WIP**（TestRunCloseTaskSweep ImportError×4 = task-sweep-daemon-truth 在途 TDD 红灯；MENU_PERMISSION_GROUPS 镜像断言×2 = retire-components-page 在途改菜单权限——CLI 归因提示在途文件 spec-sync.ts/test_init_lease.test.ts 实时增长为证）。known_failures 已窄锚定豁免 TestRunCloseTaskSweep（移除条件注明）；MENU 失败为移动靶不加豁免（等 retire-components-page 收尾自然消失）。
-裁决：本变更实测证据充分（相关面全绿 + 6 失败全为并行 WIP 且 CLI 归因提示确认），verify --done 实测门等并行会话收尾后复跑即收口（剩余失败届时应自然清零）。
+CLI verify --done 动态子集实测（2026-10-11 12:27 中间轮，py40+jsx56+fr91 共 175 测试）：jsx 批全绿、trace-residual mcp-server 31/31 全绿；py 批 4 + jsx 批 2 = 6 失败全部归属并行会话在途 WIP（TestRunCloseTaskSweep ImportError×4 = task-sweep-daemon-truth TDD 红灯；MENU_PERMISSION_GROUPS×2 = retire-components-page 改菜单权限）。
+收口轮实测（2026-10-11 15:03 verify --done，两并行变更均已归档提交）：**实测门通过**——增量重跑面 76 文件（前轮失败批 68 ∪ 基线以来变更 15，未触碰绿面复用）全绿；豁免 7 行全部为 admin/menus 排序双 PUT 预存债（组内上移/下移两用例的文件摘要/×/FAIL 行 + AssertionError 详情行 2——详情行经 known_failures 补锚定模式 'expected "spy" to be called with arguments' 登记，与该债既有两条用例名豁免同组同移除条件）；lint 对账（ruff/mypy/pnpm lint/typecheck）退出码 0；API parity 通过（0 未调用）。此前 12:27 轮的 6 失败中 py 批 4 失败随 task-sweep-daemon-truth 归档自然清零、jsx 批 2 失败确认为 menus 预存债归入豁免，与归因预判一致。
 
 ## 决策追踪矩阵（如存在 decisions.md；无则删本节） [层：人工判断]
-<!-- 机械半边预填（CLI，P0-1）：D→FR→task 链自 decisions.md × tasks/*.md frontmatter 结构化字段构建；
-     Evidence / 状态两列是人工判断——逐格复核，未闭环行必须在报告标注风险 -->
 | 决策 ID | FR | Task | Evidence | 状态 |
 |---|---|---|---|---|
 | D-001@v1 | FR-01、FR-02、FR-09 | task-04、task-09 | cli.ts:992 isMainAgentMcpCandidate 委托 + mcp-config 矩阵用例 + acceptance-e2e 五环节 | 已闭环 |
@@ -203,27 +202,54 @@ CLI verify --done 动态子集实测（2026-10-11 12:27，py40+jsx56+fr91 共 17
 | D-011@v1 | FR-05、FR-09（边界） | task-02、03、05、06、07、08 | 受阻裁定：codex/cursor caps 维持 false + 机制就绪/留档分支落地 + 复评 SOP（providers.ts:370-376/434-441） | 已闭环 |
 | D-012@v1 | FR-03、FR-04（实现形态） | task-05、task-06 | 写盘调用点=driver start 函数体内（pi-rpc-driver.ts:905-945 / codex-app-server-driver.ts:833-857），懒调用纪律不破坏 | 已闭环 |
 | D-013@v1 | FR-09 | task-09 | 引擎侧五环节全链证据（acceptance-e2e.md）+ 线上复验项移交 | 已闭环（含移交） |
+
+
+<!-- refresh 携载的已填行（新渲染中无同键行，agent 裁决去留） -->
+| 决策 ID | FR | Task | Evidence | 状态 |
+| D-001@v1 | FR-01、FR-02、FR-09 | task-04、task-09 | cli.ts:992 isMainAgentMcpCandidate 委托 + mcp-config 矩阵用例 + acceptance-e2e 五环节 | 已闭环 |
+| D-002@v1 | FR-01、FR-02 | task-04 | isWorkerSession 零 diff（QA E）+ 矩阵 mission_worker 断言 | 已闭环 |
+| D-003@v1 | FR-05、FR-09 | task-03、task-07、task-09 | spike-cursor-mcp.md + providers.ts:434-441 三要素 + acceptance-e2e 截断引擎节 | 已闭环 |
+| D-004@v1 | FR-03、FR-06、FR-09 | task-01、task-05、task-09 | spike-pi-10-compat.md 量化裁定 + parsePiMajorVersion/detectPiMajorVersion 反例断言 + 版本降级用例 | 已闭环 |
+| D-005@v1 | FR-03、FR-06 | task-01、task-05 | 形态①裁定 + writePiMcpConfig 落盘隔离/env 透传/覆写语义 7 用例 | 已闭环 |
+| D-006@v1 | FR-04、FR-09 | task-02、task-06、task-09 | spike-codex-mcp.md 受阻裁定 + mergeCodexMcpToml 7 用例（含 TOML 往返）+ providers.ts 复评 SOP | 已闭环 |
+| D-007@v1 | FR-07 | task-08 | gen-provider-caps 产物各 1 行 diff + 对齐守护 5/5 绿 | 已闭环 |
+| D-008@v1 | FR-01 | task-04 | rejected 留痕：driver 选项层实现（driver-factory 零 diff 管道复用） | 已闭环（rejected） |
+| D-009@v1 | FR-09 | task-09 | rejected 留痕：全引擎一并收口（pi 翻值+两通道留档） | 已闭环（rejected） |
+| D-010@v1 | FR-03 | task-05 | rejected 留痕：pi 1.0 原生 MCP 形态①落地 | 已闭环（rejected） |
 | D-011@v1 | FR-05、FR-09（边界） | task-02、03、05、06、07、08 | 受阻裁定：codex/cursor caps 维持 false + 机制就绪/留档分支落地 + 复评 SOP（providers.ts:370-376/434-441） | 已闭环 |
 | D-012@v1 | FR-03、FR-04（实现形态） | task-05、task-06 | 写盘调用点=driver start 函数体内（pi-rpc-driver.ts:905-945 / codex-app-server-driver.ts:833-857），懒调用纪律不破坏 | 已闭环 |
 | D-013@v1 | FR-09 | task-09 | 引擎侧五环节全链证据（acceptance-e2e.md）+ 线上复验项移交 | 已闭环（含移交） |
-
 ## 技术债务 [层：人工判断]
-<!--TODO: TODO/FIXME/HACK 统计（探针 1 的命中已预填在上方探针结果）-->
+- 探针 1 命中 3 处全部位于 sillyhub-daemon/src/interactive/providers.ts（`providers.ts:543`/`569`/`574`，2026-10-11 重生成预填后的 worktree 终态行号——旧预填 499/525/530 为 worktree 中间态行号已过期）：均为 provider profile 相关 TODO（543 注入逻辑非目标 / 569、574 类型占位），全部属 **design §3 非目标**（留后续变更），非本变更未实现的缺口。
+- G-1（已列移交项）：pi 版本门控 driver start 组合行为（major<1→跳过写盘）无直接集成断言，现有三层缓解（parsePiMajorVersion/detectPiMajorVersion 反例单测 + 版本降级用例 + caps 门）不阻塞，后续变更补 pi-rpc-driver 门控块集成测试。
+- 本变更新增/改写文件零 TODO/FIXME/HACK 新增（3 处命中均为存量/非目标注释，非本变更实现缺口）。
+- codex/cursor 机制代码就绪但 caps=false（D-011@v1 有意暂缺，非债）；复评 SOP 已留 spike-codex-mcp.md / spike-cursor-mcp.md。
 
 ## 变更风险等级 [层：人工判断]
-<!--TODO: doc-only / unit-sufficient / contract-required / integration-critical / deployment-critical；若 design.md frontmatter 有 risk_level 显式声明，写明「显式声明 = <等级>」+ 理由；若有命中被同句否定语境抑制（如「不新增 daemon 协议」），写明被抑制关键词与理由（抑制可审计，不许用来静默降级）-->
+integration-critical（如实记录变更性质）。理由：MCP 注入链触碰引擎运行时——pi/codex 会话启动时由 driver 写 per-session 配置并 spawn MCP server 子进程（stdio/JSON-RPC 跨进程交互），验收依赖真实引擎链路（acceptance-e2e.md 五环节）。证据已按最高口径提供：「集成验证回执」两条（端到端五环节 + 三端 caps 对齐）+ Runtime Evidence 节。
+- design.md frontmatter 无 `risk_level` 显式声明（仅 author/created_at/generated_by/scale: large）。
+- 仓未配置 `.sillyspec/_module-map.yaml`（无 blast/evidence 声明面）——CLI 判级无强制 evidence 门；本报告按 integration-critical 口径主动提供真实集成证据，不靠声明面缺口降级。
+- 无命中被否定语境抑制（design 非目标节的「不新增 daemon 协议/端点」为范围排除声明，与判级无关）。
 
 ## Runtime Evidence [层：人工判断]
-<!--TODO: 关键命令输出/时间戳/commit hash 证据链；integration/deployment-critical 必填，按实际触碰的运行时组件写（启动命令/端点/请求响应/日志片段/生命周期终态断言/失败模式排除），未涉及的行写「不涉及」-->
-<!-- 降级路径（design §3.2，D-004 收口）：服务起不来时：Controller 直调冒烟（mock 下游，验绑定+校验+路由）/ 基础设施恢复后复跑固化用例——不要空填不涉及 -->
+依据 acceptance-e2e.md（2026-10-11 实测，worktree 构建 @ 分支 sillyspec/2026-10-10-all-engines-mcp-injection，5 提交 77fc5170/08861ad0/6f5f1b0d/37864650e/7bd74323）：
+- 长驻进程启动命令：`PI_CODING_AGENT_DIR=<sessiondir> pi mcp list --json`（pi 1.1.0 引擎，per-session 目录隔离）；MCP server 以 stdio 子进程形态被引擎 spawn（`dist/mcp-server.js --toolset file`），随调用进程生命周期退出——无长驻服务遗留（宿主生产 daemon 连 crrcdt.ppdmq.top 未受干扰，e2e 全程 Temp/e2e-pi 隔离）。
+- 触碰的服务端点：`http://localhost:8001`（backend 鉴权层，upload 出站 POST）。
+- 触发核心路径的请求：JSON-RPC `tools/call upload_file`（direct-call.mjs 直调）→ 未设 MCP_ALLOWED_ROOT 得 `{"error":"path_out_of_root",...}`（fail-closed 校验生效）；设 root 后进入上传执行路径并 HTTP 出站。
+- 进程日志关键片段（新路径证据）：环节 2 `sillyhub-file | state: connected`；环节 3 `tools: ['upload_file','list_uploaded_files']`（工具命名空间 mcp__sillyhub-file__upload_file）；环节 5 `{"error":"http","tool":"upload_file","status":401,"message":"backend 401: {\"code\":\"HTTP_401_AUTH_TOKEN_INVALID\"...\"request_id\":\"0db8696c-...\"}"}`。
+- 生命周期终态断言：e2e 起止闭环（配置注入 → connected → 工具可见 → 调用 → backend 401 结构化回传），即起即止无进程存活；宿主全局 `~/.pi` 零写入（PI_CODING_AGENT_DIR 隔离断言）。
+- 失败模式排除：① backend 401 为假 apiKey 预期拒绝——证明调用穿透全链到达鉴权层，非缺陷；② path_out_of_root 为安全 fail-closed 设计行为；③ 真实上传成功为线上复验项（D-013@v1 移交，daemon 部署后注入真实凭证即转成功）。
 
 ## 代码审查 [层：人工判断]
-<!--TODO: 问题列表 + 总体评价。走查清单（零覆盖路径必查——探针 7 ⚠️ 条目即定向面）：
-     ① 编辑/更新链路（回显、字段映射、残留态）——非新增主链路，实证盲区；
-     ② 非主分支流（相关方/旁路支线等未走查路径）；
-     ③ 守卫一致性：同资源端点的操作人/权限校验模式对比（实证 doSubmit 无操作人校验而 delete/withdraw 有——越权）；
-     ④ 载荷字段契约（探针 8 ⚠️ 配对逐条核实）；
-     ⑤ 分页/并发/事务原子性（无测试基建端的纯逻辑面）-->
+- execute 阶段 QA 独立审查（后台子代理 11/15 请求）：specVerdict=pass、qualityVerdict=pass，无 P1/P2 遗留；G-1 评轻微（已列移交项）。
+- 走查清单逐条：
+  - ① 编辑/更新链路：pi 侧 mcp.json 为 daemon 独占文件，writePiMcpConfig 全量覆写语义（防幽灵键，pi-settings-mcp.test.ts 用例锁定）；codex 侧 mergeCodexMcpToml 托管段合并保留用户键、TOML 序列化往返用例锁定——无回显/字段映射/残留态盲区。
+  - ② 非主分支流：codex/cursor 截断分支（caps=false 不注入）由 mcp-config.test.ts 58 用例矩阵覆盖（未翻引擎不注入 + 未知 provider）；pi 版本门控 major<1 跳过写盘有 G-1 三层缓解（见技术债务节）。
+  - ③ 守卫一致性：不涉及（本变更零端点零协议零 schema——探针 5 + 接口验证矩阵声明）。
+  - ④ 载荷字段契约：不涉及（探针 8 不适用——无 Java/SQL 后端面）。
+  - ⑤ 分页/并发/事务原子性：无 DB/分页面；并发互写由 per-session 目录隔离防（PI_CODING_AGENT_DIR / CODEX_HOME 落盘隔离用例锁定）。
+- 探针 7 ⚠️ 8 条零/半自动化承接条目已显式走查：task-01/02/03/09 留档类（人工核验记录见矩阵证据列）、task-05/06 条件分支未触发条款（acceptance 原文允许截断分支留档）、task-07 cursor 零逻辑 diff（回归绿）——无 P1 藏身面。
+- 总体评价：实现面质量良好，测试承接充分（本变更相关面全绿 + 端到端实测），无阻断缺陷；遗留仅 G-1 轻微项与 D-011 有意暂缺（均已结构化移交）。
 
 ## 独立复核（可选回流槽） [层：人工判断——复核后追加]
-<!-- verify 完成后的深度复核（独立子代理/二次审查）结论回流至此：缺陷分级（P1 功能不可用 / P2 需求子项 / P3 建议修）+ 修复证据链 + 对「结论枚举」的影响改写。无复核时本节写「无」或删除。复核结论不再只活在聊天记录（2026-09-16 EHS 二次复核实证：5 个 P1 只有聊天可查，变更档案仍写 PASS WITH NOTES）。 -->
+无（verify 阶段未追加二次独立复核；execute 阶段 QA 独立审查结论已回流至「设计一致性」「测试结果」「代码审查」节，13 项 checklist 全 pass 留档于变更档案）。

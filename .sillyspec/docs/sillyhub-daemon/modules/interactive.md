@@ -58,7 +58,9 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
   MultiEdit + Bash 经 extractShellWritePaths 提取写目标；读工具不拦；
   policyEngine 未注入时退化 allowedRootsProvider fallback（空数组放行防全 deny）
 主 agent MCP: isMainAgentSession(ctx.stage==='orchestrator') → mainAgentMcpConfigProvider
-  经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入
+  经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入；
+  引擎门 2026-10-10 起由 cli.ts 装配 providers.isMainAgentMcpCandidate（caps 驱动，
+  见 2026-10-10-all-engines-mcp-injection 增量节）——谓词判定与注入管道分居两层
 reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
   provider 维度门 PROVIDER_RELOAD_ENGINES（D-005@v2；2026-09-13 由手写
   ['claude','codex','pi'] 改 INTERACTIVE_PROVIDERS.switchable 派生，照前端
@@ -153,3 +155,12 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快�
 - 撞号缺陷：CodexHandle 曾有双 id 计数器——`nextRpcId`（turn/start·turn/interrupt，≥3 无上界）与 `nextJsonRpcId`（compact 等「等 response」请求，seed 100）。seed 100 只在会话前 ~97 次轮级 RPC 内避开 nextRpcId 空间；长会话越过交叉点后两计数器分到同号，同 id 并发在途时 `_maybeResolveJsonRpcResponse` 按先到回执错配唤醒 compact pending（误报成功/失败，压缩命令本体仍会发出执行）。
 - 修法：删 `nextJsonRpcId` 字段，`_sendJsonRpcRequest` 改复用 `nextRpcId++` 单源分配——任意时刻在途请求 id 全局唯一，撞号结构性消除；turn 路径零改动（fire-and-forget 不经 jsonRpcPending 表的语义不变）。
 - 回归锚：tests/interactive/codex-app-server-driver.test.ts 新增防碰撞用例（把 nextRpcId 推到旧交叉点 100 → compact 取 100、并发 turn/start 取 101 分号不同、turn 回执先到不误唤醒 compact、正主 id 回执才 resolve）；既有 pending 机制/compact 组 8 处 seed-100 断言同步改为统一计数器语义（未发 turn 时首取 3）。
+
+## 2026-10-10-all-engines-mcp-injection 增量（四引擎 MCP 注入）
+
+- **providers.ts**：新增导出 `isMainAgentMcpCandidate(provider, stage?)`——主控会话 MCP 引擎门从 `provider !== 'claude'` 硬拒改为 `getProviderCaps(provider).mcp` 能力驱动（未知 provider 默认拒绝；stage 口径不变：orchestrator/缺省注入、mission_worker 走分身分支不受影响）；`PROVIDER_CAPS.pi.mcp` 翻 true（唯一依据 SPIKE-00 实测，pi 1.1.0）；codex/cursor 维持 false（D-011@v1 受阻裁定——宿主引擎不可用未能实测，机制代码就绪，复评 SOP 见 providers.ts 两注释块 + spike-codex-mcp.md / spike-cursor-mcp.md）。三端同步：frontend/src/lib/provider-caps.ts 与 backend provider_caps.py 产物由 gen-provider-caps.mjs 重刷（各 1 行 diff），backend 对齐守护测试锁定。
+- **pi-rpc-driver.ts**：start 函数体内消费 `opts.mcpServers`——有配置时调 pi-settings.writePiMcpConfig 写 per-session mcp.json（形态①原生配置）；版本门控 `detectPiMajorVersion`（spawn pi --version，5s 超时/失败/乱串 → -1）：major<1 跳过写盘 warn 不阻断（pi 0.x 无 MCP）；PI_CODING_AGENT_DIR 缺失或写盘失败同样降级 warn 不阻断 spawn（MCP 是增强能力，三重降级）。`parsePiMajorVersion` 纯函数可单测。
+- **codex-app-server-driver.ts**：start 函数体内调 codex-settings.writeCodexMcpServers 写 per-session CODEX_HOME/config.toml [mcp_servers.*] 托管段——caps=false 当前不触达（谓词层先拦），机制就绪待 SPIKE-01 复评翻值。
+- **cursor-driver.ts**：零逻辑 diff，仅忽略注释同步（cursor 通道留档分支）。
+- 写盘调用点纪律（D-012@v1）：两处消费均在 driver start 函数体内运行时执行，模块顶层零调用，写盘器（pi-settings/codex-settings）低依赖不回引 interactive/（无 TDZ 环）；driver-factory/driver.ts 注入管道零 diff（引擎无关管道复用）。
+- 端到端证据：acceptance-e2e.md 五环节（注入→connected→工具可见 upload_file/list_uploaded_files→JSON-RPC 调用→backend 出站 401 结构化回传）；真实上传落文件中心为 daemon 部署后线上复验项（D-013@v1）。

@@ -177,3 +177,243 @@
 - 场景：默认场景 — Given 全部代码任务完成；When 执行验收（typecheck×2 + 相关测试 + 真机冒烟）
 全文：.sillyspec/changes/archive/2026-09-08-cursor-interactive-session/requirements.md#FR-06
 最近确认：35f3d6528
+
+## FR-cli-020 谓词能力化——caps.mcp=true 的引擎主控/普通会话注入平台 MCP，配置面与 claude 完全一致
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：pi 会话（caps 翻值后）注入；caps=false 引擎维持现状；未知 provider 默认拒绝
+依据决策：D-001@v1、D-008@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-01
+最近确认：a62c8e24d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-all-engines-mcp-injection:task-04:acc-0-a49a5fe0
+  tests: sillyhub-daemon/tests/mcp-config.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-04:acc-1-5d090b57
+  tests: sillyhub-daemon/tests/mcp-config.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-04:acc-2-b420a527
+  tests: sillyhub-daemon/tests/mcp-config.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+
+## FR-cli-021 分身会话维持 claude-only
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：pi 分身不注入
+依据决策：D-002@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-02
+最近确认：a62c8e24d
+
+## FR-cli-022 pi 通道——per-session MCP 配置落盘 + 1.0 兼容门控
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：配置落盘隔离；SPIKE-00 截断
+依据决策：D-004@v1、D-005@v1、D-010@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-03
+最近确认：a62c8e24d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-all-engines-mcp-injection:task-01:acc-0-e07c0805
+  tests: sillyhub-daemon/tests/pi-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-01:acc-1-8485d049
+  tests: sillyhub-daemon/tests/pi-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-05:acc-0-09e0eb41
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts | sillyhub-daemon/tests/pi-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-05:acc-1-5eca9cf2
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts | sillyhub-daemon/tests/pi-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-05:acc-2-78f97545
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts | sillyhub-daemon/tests/pi-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+
+## FR-cli-023 codex 通道——config.toml 托管段 [mcp_servers.*] + app-server 生效门控
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：托管段写入与保留
+依据决策：D-006@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-04
+最近确认：a62c8e24d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-all-engines-mcp-injection:task-02:acc-0-217d2218
+  tests: sillyhub-daemon/tests/codex-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-02:acc-1-f43daa06
+  tests: sillyhub-daemon/tests/codex-settings-mcp.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-06:acc-0-5a94183b
+  tests: sillyhub-daemon/tests/codex-settings-mcp.test.ts | sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-06:acc-1-5cf50ff5
+  tests: sillyhub-daemon/tests/codex-settings-mcp.test.ts | sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+
+## FR-cli-024 cursor 通道——SPIKE-02 结论落地
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：不可行留档
+依据决策：D-003@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-05
+最近确认：a62c8e24d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-all-engines-mcp-injection:task-07:acc-0-db5fecef
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-07:acc-1-996fd0d5
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+
+## FR-cli-025 宿主 pi 版本检测降级
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：老版本宿主
+依据决策：D-004@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-06
+最近确认：a62c8e24d
+
+## FR-cli-026 能力矩阵三端同步
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：翻值同步
+依据决策：D-007@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-07
+最近确认：a62c8e24d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-all-engines-mcp-injection:task-08:acc-0-7383e2ec
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-08:acc-1-897c6d88
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+- row: 2026-10-10-all-engines-mcp-injection:task-08:acc-2-0cd15a23
+  tests: sillyhub-daemon/tests/mcp-config.test.ts | sillyhub-daemon/tests/mcp-server.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-all-engines-mcp-injection
+  status: active
+
+## FR-cli-027 既有测试零回归
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：回归
+依据决策：D-001@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-08
+最近确认：a62c8e24d
+
+## FR-cli-028 端到端验收——每翻值引擎实测上传
+变更：2026-10-10-all-engines-mcp-injection
+状态：active
+摘要：pi 端到端
+依据决策：D-001@v1、D-003@v1、D-004@v1、D-006@v1、D-009@v1
+全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-09
+最近确认：a62c8e24d

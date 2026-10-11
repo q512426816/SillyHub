@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
   "change": "2026-10-10-all-engines-mcp-injection",
-  "generatedAt": "2026-10-11T03:38:02.509Z",
+  "generatedAt": "2026-10-11T07:05:29.749Z",
   "probes": {
     "probe1": {
       "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
       "metrics": {
         "matches": 3,
         "skippedFiles": 1,
-        "worktreeHits": 2,
+        "worktreeHits": 0,
         "globEntries": 0
       }
     },
@@ -16,7 +16,7 @@
       "command": "sillyspec verify-probes --change 2026-10-10-all-engines-mcp-injection",
       "metrics": {
         "tasks": 9,
-        "hasTest": 4
+        "hasTest": 8
       }
     },
     "probe5": {
@@ -63,6 +63,13 @@
     }
   },
   "conclusion": "PASS WITH NOTES",
+  "tests": {
+    "command": "module[]+deps(jsx69)+fr(3) + vitest/jest(1)",
+    "exitCode": 0,
+    "strategy": "incremental-rerun+trace(1)",
+    "failedRemaining": [],
+    "passedAt": "2026-10-11T07:03:25.778Z"
+  },
   "requiredEvidence": [
     {
       "task": "task-01",
@@ -145,6 +152,18 @@
       "logPath": ".sillyspec/changes/2026-10-10-all-engines-mcp-injection/acceptance-e2e.md（五环节证据全文）"
     }
   ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
   "handover": {
     "count": 4,
     "items": [
@@ -191,12 +210,5 @@
       "sillyhub-daemon/scripts/gen-provider-caps.mjs"
     ]
   },
-  "smokeRan": "not-configured",
-  "tests": {
-    "command": "module[]+deps(py41+nontest-skip1+jsx61)+fr(96) + vitest/jest(1)",
-    "exitCode": 1,
-    "strategy": "dynamic-subset+trace(1)",
-    "failedRemaining": [],
-    "passedAt": "2026-10-11T04:27:54.464Z"
-  }
+  "smokeRan": "not-configured"
 }

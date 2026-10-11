@@ -204,3 +204,57 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 锚点：未记录
 最近确认：28915f71b
 理由：方案 A：照 2026-09-14-session-ctx-compact 刚验证的 RPC 模式——driver.ts 加可选 `getThinkingLevels?(handle)`/`setThinkingLevel?(handle, level)` 两契约方法；daemon.ts 注册 `session_get_thinking_levels`/`session_set_thinking_level` 两 RPC handler；backend 两端点（GET 档位列表+POST 切换）；caps 第 13 键 `thinking_level`（claude/pi/codex=true、cursor=false）。B（进程重启式）否决：切档重启子进程丢流式状态体验差；C（inject 文本）否决：pi/codex 不认文本且档位查询无通道。
+
+## D-001@v1 方案选型：谓词能力化 + 各 driver 原生消费 mcpServers
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：sillyhub-daemon/src/cli.ts:993（isMainAgentSession 谓词）
+最近确认：a62c8e24d
+理由：方案 A——daemon 谓词按能力矩阵放开（caps.mcp 驱动），各 driver start() 原生消费 mcpServers 写各自引擎的 per-session 配置（pi=PI_CODING_AGENT_DIR、codex=CODEX_HOME config.toml、cursor=spike 定落点、claude=现状不动）。
+故障面：谓词能力化后，某引擎 caps 翻 true 但其 driver 消费通道有缺陷时，平台 MCP 配置会注入到无法正确消费的引擎会话（工具不可见或调用挂起）——由 SPIKE 前置 + 翻值与实测绑定（D-003/D-004/D-006）与单点回退兜底
+退役判据：各引擎原生统一 MCP 配置协议成熟且 daemon 三套 per-session 落盘通道可合并为一套通用机制时，收编单通道
+
+## D-005@v1 pi MCP 形态优先级：原生配置 > 官方 adapter > vendor 自写扩展兜底
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：sillyhub-daemon/src/pi-settings.ts:210
+最近确认：a62c8e24d
+理由：按 SPIKE-00 结论择优：优先 pi 1.0 原生 MCP 配置（若 settings.json/等价机制原生支持）；其次官方 pi-mcp-adapter 扩展（读 .mcp.json，vendor 经现有 --extension 通道装载）；兜底 vendor 自写桥接扩展（仿 ask-user 扩展形态 registerTool）。
+故障面：pi 形态分叉（①原生/②adapter/③自写）若在 SPIKE 后仍选错，MCP 配置落盘位置与 pi 实际读取位置错位——工具静默不可见；依赖 SPIKE-00 实测留档为唯一裁定依据
+退役判据：pi 后续版本原生 MCP 配置稳定（settings.json mcpServers 或等价键成为官方唯一推荐）后，砍掉 adapter/自写扩展两档兜底
+
+## D-006@v1 codex 走 config.toml [mcp_servers.*] 托管段差量替换
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：sillyhub-daemon/src/codex-settings.ts:38
+最近确认：a62c8e24d
+理由：扩展 codex-settings.ts 现有托管段差量替换机制写 [mcp_servers.<name>]（command/args/env）；SPIKE-01 实测 app-server 协议模式下是否生效，不生效则评估 initialize capabilities 实验位，仍不通则降级暂缺。
+故障面：config.toml 托管段序列化缺陷（数组/子表转义错）可能产出 codex 无法解析的 config.toml，导致 codex 会话启动失败——序列化必须带往返（round-trip）单测覆盖
+退役判据：codex 官方提供 per-session MCP 配置 CLI 参数或 app-server 协议级 MCP 注入方法后，迁移至官方通道、托管段序列化器退役
+
+## D-011@v1 执行期裁决：SPIKE-01/02 因宿主引擎不可用受阻，codex/cursor 维持 false 留复评
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：sillyhub-daemon/src/interactive/providers.ts:226（codex caps 注释块，task-08 留档落点）
+最近确认：a62c8e24d
+理由：codex 0.162.0 主包在但缺 @openai/codex-win32-x64 平台二进制（npmjs ETIMEDOUT 限断、npmmirror 未同步、yarnpkg 断连，多路重试均失败）；cursor-agent CLI 未安装且同网络无法安装。按 D-003/D-006 红线（禁止无实测证据翻值）：codex.mcp/cursor.mcp 维持 false；codex 通道机制代码（config.toml [mcp_servers.*] 序列化+单测）照计划交付（机制就绪待复评，翻值即活），cursor 通道走留档分支（注释三要素）。
+故障面：机制代码与 caps 状态暂时分离（codex 代码就绪但 false）——翻值动作被 D-003/D-006 红线锁在 SPIKE 复评之后，防止未验证通道进生产会话
+退役判据：codex/cursor 引擎在宿主可用且 SPIKE-01/02 复测通过翻值后，本裁决自动失去约束对象
+
+## D-012@v1 执行期裁决：pi/codex MCP 写盘调用点定在 driver start（非 providers.ts 薄适配）
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：sillyhub-daemon/src/interactive/pi-rpc-driver.ts:844（start 内写盘调用块）
+最近确认：a62c8e24d
+理由：writePiMcpConfig/writeCodexMcpServers 作为 pi-settings/codex-settings 导出的独立纯写盘器，调用点在各自 driver start()（运行时函数体内调用）——从 opts.mcpServers + opts.env（PI_CODING_AGENT_DIR/CODEX_HOME）取双参数。懒调用纪律的实质是"模块初始化零跨表求值"（防 ESM TDZ 环），driver start 运行时调用与 providers.ts writer 函数体内调 writePiDir 同性质，不破坏该纪律（pi-settings/codex-settings 均无回引 interactive/ 的反向依赖，无环）。
+故障面：driver 内写盘使"配置落盘"与"spawn"耦合在同一函数——写盘失败已按降级 warn 不阻断 spawn 处理（MCP 为增强能力），无新增失败传播面
+退役判据：若未来 daemon 侧统一 provider 文件层与 MCP 注入为单次写盘事务，可迁回薄适配模式
+
+## D-013@v1 执行期裁决：task-09 验收方式为引擎侧全链 + 线上复验项
+状态：implemented
+变更：2026-10-10-all-engines-mcp-injection
+锚点：.sillyspec/changes/2026-10-10-all-engines-mcp-injection/acceptance-e2e.md
+最近确认：a62c8e24d
+理由：引擎侧全链验收（配置注入→pi 连接→工具面可见→JSON-RPC 直调→HTTP 到达本地 backend 401 结构化错误）作为 FR-09 的交付证据；真实上传落文件中心列为 daemon 部署本变更构建后的线上复验项（凭证由 daemon 注入链自动携带，复验动作=平台 pi 会话内让 agent 调 upload_file）。
+故障面：引擎侧全链不含 backend 会话定位真实链（e2e 假凭证 401 即止）——生产真实上传的唯一未验证面，由线上复验项闭合
+退役判据：daemon 部署后线上复验通过（真实上传成功落文件中心），本裁决的复验项闭环

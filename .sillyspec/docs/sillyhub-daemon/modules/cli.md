@@ -50,6 +50,7 @@ statusAction: running 时 resolveRunningDaemonConfig(pid) 反查实际 server �
 - RuntimeLockManager（`--force`）：同机同 provider 已有活跃 daemon 时 start 抛 LockHeldError 退 1；--force 仅回收 stale/corrupt lock，不强杀活跃进程。
 - TaskRunner 构造是位置参数（含 config、resilience、policyCache 等），非 options 对象；TaskRunner 创建必须在 PolicyCache 之后（共享实例）。
 - interactive 组装顺序：先 new SessionManager（deps 闭包引用 daemon）再 new Daemon，靠 `let daemon` 闭包延迟绑定解决循环引用。
+- 主控 MCP 引擎门装配（2026-10-10-all-engines-mcp-injection）：SessionManager 构造处 `isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx)`——谓词单源在 providers.ts（getProviderCaps(provider).mcp 能力驱动，未知 provider 默认拒绝；pi 已翻 true、codex/cursor 维持 false D-011）；分身谓词 isWorkerSession 不动（claude-only，D-008）。cli 层只做委托装配，判定语义改动归 interactive 模块。
 - 三循环 fire-and-forget 的未捕获 rejection 由顶层 handler 吞掉保活——排查「daemon 静默不退」时先 grep `[FATAL ...]`。
 
 ## 人工备注

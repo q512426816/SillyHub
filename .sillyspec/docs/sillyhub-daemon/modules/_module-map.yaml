@@ -361,21 +361,24 @@ modules:
       - "sillyhub-daemon/src/interactive/session-manager.ts"
       - "sillyhub-daemon/src/interactive/claude-sdk-driver.ts"
       - "sillyhub-daemon/src/interactive/codex-app-server-driver.ts"
+      - "sillyhub-daemon/src/interactive/pi-rpc-driver.ts"
+      - "sillyhub-daemon/src/interactive/cursor-driver.ts"
+      - "sillyhub-daemon/src/interactive/providers.ts"
       - "sillyhub-daemon/src/interactive/driver.ts"
       - "sillyhub-daemon/src/interactive/input-queue.ts"
       - "sillyhub-daemon/src/interactive/permission-resolver.ts"
       - "sillyhub-daemon/src/interactive/session-store-persistence.ts"
       - "sillyhub-daemon/src/interactive/types.ts"
-    tags: [interactive, session, claude-sdk, codex, agent-driver, permission, persistence, 会话]
-    aliases: [interactive-session, session-manager, claude-sdk-driver, codex-app-server-driver]
+    tags: [interactive, session, claude-sdk, codex, pi, cursor, agent-driver, permission, persistence, provider-caps, 会话]
+    aliases: [interactive-session, session-manager, claude-sdk-driver, codex-app-server-driver, pi-rpc-driver, cursor-driver, providers]
     entrypoints: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver]
-    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, InteractiveDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState]
-    depends_on: [config, protocol, types, adapters, adapter-json-rpc, cmd-shim, mcp-config, model-error, policy, spawn-env]
+    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, InteractiveDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState, isMainAgentMcpCandidate, PROVIDER_CAPS]
+    depends_on: [config, protocol, types, adapters, adapter-json-rpc, cmd-shim, mcp-config, model-error, policy, spawn-env, pi-settings, codex-settings]
     used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "session-manager 实测还 import mcp-config/policy(path-utils+filesystem-policy+shell-paths)/model-error/spawn-env（旧版未计）；interactive/types.ts 独立于 src/types.ts"
+    notes: "session-manager 实测还 import mcp-config/policy(path-utils+filesystem-policy+shell-paths)/model-error/spawn-env（旧版未计）；interactive/types.ts 独立于 src/types.ts；2026-10-10-all-engines-mcp-injection 起 pi/codex driver start 消费 opts.mcpServers 调两写盘器（pi-settings/codex-settings），providers.ts 出 isMainAgentMcpCandidate 谓词与 PROVIDER_CAPS 单源（pi.mcp=true，codex/cursor=false D-011）；pi-rpc-driver.ts/cursor-driver.ts/providers.ts 三文件 2026-10-11 归档时补登 paths（此前 unmapped 存量缺口）"
 
   daemon-version:
     status: active
@@ -772,28 +775,28 @@ modules:
     status: active
     doc: modules/codex-settings.md
     paths: ["sillyhub-daemon/src/codex-settings.ts"]
-    tags: [codex, settings, config, 写盘, 供应商注入]
+    tags: [codex, settings, config, 写盘, 供应商注入, mcp]
     aliases: []
-    entrypoints: [writeCodexHome]
-    main_symbols: [writeCodexHome, CodexHomeWriteInput]
+    entrypoints: [writeCodexHome, writeCodexMcpServers]
+    main_symbols: [writeCodexHome, CodexHomeWriteInput, writeCodexMcpServers, mergeCodexMcpToml, CodexMcpServerConfig]
     depends_on: [types]
-    used_by: [task-runner]
+    used_by: [task-runner, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "写 per-session CODEX_HOME/{auth.json, config.toml}（task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派）；wire_api 恒 responses（codex 0.147.0 基线 R-03，'chat' 已移除）；openai_chat 形态 auth key=daemonApiKey 走 litellm_proxy 通道（D-006）；保守合并保留非托管段；golden=change spike/a2b-config.toml+a2-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
+    notes: "凭证面：写 per-session CODEX_HOME/{auth.json, config.toml}（task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派）；wire_api 恒 responses（codex 0.147.0 基线 R-03，'chat' 已移除）；openai_chat 形态 auth key=daemonApiKey 走 litellm_proxy 通道（D-006）；保守合并保留非托管段；golden=change spike/a2b-config.toml+a2-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts。MCP 面（2026-10-10-all-engines-mcp-injection，caps=false 未触达 D-011）：writeCodexMcpServers/mergeCodexMcpToml 写 [mcp_servers.*] 托管段（整段重写防幽灵，非托管行保留）；调用方 codex-app-server-driver start；复评 SOP=spike-codex-mcp.md"
 
   pi-settings:
     status: active
     doc: modules/pi-settings.md
     paths: ["sillyhub-daemon/src/pi-settings.ts"]
-    tags: [pi, settings, config, 写盘, 供应商注入]
+    tags: [pi, settings, config, 写盘, 供应商注入, mcp]
     aliases: []
-    entrypoints: [writePiDir]
-    main_symbols: [writePiDir, PiDirWriteInput]
+    entrypoints: [writePiDir, writePiMcpConfig]
+    main_symbols: [writePiDir, PiDirWriteInput, writePiMcpConfig, PiMcpServerConfig]
     depends_on: [types]
-    used_by: [task-runner]
+    used_by: [task-runner, interactive]
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "写 per-session PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}（applyProviderFileSettings 按 agent_kind='pi' 分派）；providers.sillyhub.api 恒 openai-completions 打 /chat/completions（pi 0.81.1 基线 R-03）；auth 官方形状 {type:'api_key', key}；官方端点（base_url 空）零写入归 env 层（D-008/R-04）；golden=change spike/b1-models.json+b1b-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
+    notes: "凭证面：写 per-session PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}（applyProviderFileSettings 按 agent_kind='pi' 分派）；providers.sillyhub.api 恒 openai-completions 打 /chat/completions（pi 0.81.1 基线 R-03）；auth 官方形状 {type:'api_key', key}；官方端点（base_url 空）零写入归 env 层（D-008/R-04）；golden=change spike/b1-models.json+b1b-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts。MCP 面（2026-10-10-all-engines-mcp-injection）：writePiMcpConfig 覆写语义写 <dir>/mcp.json（pi 1.1.0 原生形态①，daemon 独占整表重写防幽灵 server；空表跳过）；调用方 pi-rpc-driver start（detectPiMajorVersion<1 跳过）"

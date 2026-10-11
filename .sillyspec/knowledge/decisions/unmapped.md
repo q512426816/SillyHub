@@ -2242,3 +2242,30 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：d2c1b83a609869a3b817dc087520d1df691095bf
 理由：<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-snapshot-timeout-distinct 留痕重锚 --> <!-- MACHINE-DRAFT:design-risks:end --> 最大风险：timeout 语义不止「进程未重启」一种（daemon 忙碌/网络劣化也超时）——文案用「若刚更新过请重启」条件句而非断言根因。放弃的方案：①daemon 自更新后自动重启进程——会中断活跃会话，留独立变更评估；②超时归入 unsupported——语义错误（unsupported=版本不支持，timeout=无响应），会把「忙」误报成「需升级」。
+
+## D-008@v1 rejected：方案 B 文件设置层透传（driver 层零改动）
+状态：rejected
+变更：2026-10-10-all-engines-mcp-injection
+锚点：未记录
+最近确认：a62c8e24d
+理由：否决。
+否决理由：MCP_SESSION_ID env 注入、mcpRefs 白名单过滤、内置双 server 运行时组装都在 driver-factory 层现成，文件层透传要把这套逻辑重做一遍且 cursor 无 per-session 文件层，driver.ts 契约（driver.ts:300-320）预留方向本就是 driver 透传。
+复潮条件：driver 选项管道被废弃重构，或各引擎文件层原生支持 per-session env 注入时重评。
+
+## D-009@v1 rejected：方案 C 分引擎灰度（先 pi+codex，cursor 观望）
+状态：rejected
+变更：2026-10-10-all-engines-mcp-injection
+锚点：未记录
+最近确认：a62c8e24d
+理由：否决。
+否决理由：与用户「一起打通」的明确表态冲突；spike 驱动本身已提供逐引擎降级保护（D-003/D-004），无需预设灰度。
+复潮条件：SPIKE-00/01/02 集体失败导致全引擎不可行时，按引擎逐个降级收口。
+
+## D-010@v1 rejected：路线 B（vendor 自写桥接扩展为主路径，不升级 pi 基线）
+状态：rejected
+变更：2026-10-10-all-engines-mcp-injection
+锚点：未记录
+最近确认：a62c8e24d
+理由：否决（用户明确选路线 A）。
+否决理由：pi 1.0（2026-10-01）已原生支持 MCP，上游在演进原生 MCP；保持 0.81.1 + 自写桥接偏离上游演进，桥接层长期自维护成本高。
+复潮条件：SPIKE-00 显示 pi 1.0 rpc/extension 面大改、升级适配成本显著超过自写桥接时重评。

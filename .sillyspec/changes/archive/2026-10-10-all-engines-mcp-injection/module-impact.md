@@ -34,10 +34,10 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/cli.md` | 更新cli模块卡 | skipped——模块卡同步归 archive 阶段统一执行（sillyspec-archive 义务：模块影响分析+同步模块文档）；行为变化已沉淀于本表与知识库 3 条 |
-| `modules/codex-settings.md` | 更新codex-settings模块卡 | skipped——模块卡同步归 archive 阶段统一执行（sillyspec-archive 义务：模块影响分析+同步模块文档）；行为变化已沉淀于本表与知识库 3 条 |
-| `modules/interactive.md` | 更新interactive模块卡 | skipped——模块卡同步归 archive 阶段统一执行（sillyspec-archive 义务：模块影响分析+同步模块文档）；行为变化已沉淀于本表与知识库 3 条 |
-| `modules/pi-settings.md` | 更新pi-settings模块卡 | skipped——模块卡同步归 archive 阶段统一执行（sillyspec-archive 义务：模块影响分析+同步模块文档）；行为变化已沉淀于本表与知识库 3 条 |
-| `_module-map.yaml` | 判定：无需 rebuild——未匹配文件全部归属既有 sillyhub-daemon 模块（首版未命中系 paths 前缀匹配口径，非索引过期） | done |
+| `modules/cli.md` | archive 阶段同步（2026-10-11）：注意事项补「主控 MCP 引擎门装配」条——isMainAgentSession 委托 isMainAgentMcpCandidate（caps 驱动）、分身谓词不动（D-008）、cli 层只做委托装配 | done |
+| `modules/codex-settings.md` | archive 阶段同步（2026-10-11）：定位/契约摘要/关键逻辑/注意事项补 MCP 面——mergeCodexMcpToml + writeCodexMcpServers（[mcp_servers.*] 托管段差量替换）+ CodexMcpServerConfig；config.toml 托管段分工（provider 段归 writeCodexHome / mcp_servers 段归 writeCodexMcpServers）；caps=false 未触达留复评 SOP（D-011） | done |
+| `modules/interactive.md` | archive 阶段同步（2026-10-11）：关键逻辑「主 agent MCP」行补引擎门新口径 + 追加「2026-10-10-all-engines-mcp-injection 增量」节——providers.ts 谓词能力化与 PROVIDER_CAPS pi.mcp 翻值、pi-rpc-driver start 消费+版本门控三重降级、codex driver 写盘块（未触达）、cursor 零 diff、写盘调用点纪律（D-012）、五环节端到端证据 | done |
+| `modules/pi-settings.md` | archive 阶段同步（2026-10-11）：定位/契约摘要/关键逻辑/注意事项补 MCP 面——writePiMcpConfig + PiMcpServerConfig（mcp.json 覆写语义、空表跳过、pi 1.1.0 形态① golden、调用方 pi-rpc-driver start、版本门控责任在 driver） | done |
+| `_module-map.yaml` | archive 阶段同步（2026-10-11）：interactive.paths 补登 pi-rpc-driver.ts/cursor-driver.ts/providers.ts（存量 unmapped 缺口收口，此后 module-impact 前缀匹配可自动命中）+ depends_on 增 pi-settings/codex-settings + main_symbols/aliases 增补；pi-settings/codex-settings 两模块 entrypoints/main_symbols/used_by（+interactive）/tags（+mcp）/notes 增补 MCP 面事实 | done |
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。
