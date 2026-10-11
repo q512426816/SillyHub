@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Ban, Clock3, KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Ban, Clock3, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { ApiKeyCreateDialog } from "@/components/api-key-create-dialog";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -10,7 +10,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { errMessage } from "@/lib/errors";
-import { listApiKeys, revokeApiKey, type ApiKeyRead } from "@/lib/api-keys";
+import {
+  deleteApiKey,
+  fetchApiKeyPlaintext,
+  listApiKeys,
+  revokeApiKey,
+  type ApiKeyRead,
+} from "@/lib/api-keys";
 import { cn } from "@/lib/utils";
 
 type ApiKeyStatus = {
@@ -40,6 +46,9 @@ export default function ApiKeysSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  // 正在复制明文的 key id（按钮转圈防重复点击）与刚复制完成的 key id（✓ 回显）。
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,6 +92,39 @@ export default function ApiKeysSettingsPage() {
     }
   };
 
+  /** 复制密钥明文（2026-10-11-apikey-mcp-copy-delete）：仅活跃且可恢复的 key。 */
+  const handleCopyKey = async (k: ApiKeyRead) => {
+    if (copyingId) return;
+    setCopyingId(k.id);
+    try {
+      const plaintext = await fetchApiKeyPlaintext(k.id);
+      await navigator.clipboard.writeText(plaintext);
+      setCopiedId(k.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      setPageError(errMessage(err, "复制密钥失败"));
+    } finally {
+      setCopyingId(null);
+    }
+  };
+
+  /** 物理删除已吊销的密钥（后端仅对已吊销记录放行）。 */
+  const handleDelete = async (k: ApiKeyRead) => {
+    if (
+      !confirm(
+        `确定彻底删除已吊销的密钥 "${k.name}"？该记录将从列表中永久移除，此操作不可恢复。`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteApiKey(k.id);
+      await load();
+    } catch (err) {
+      setPageError(errMessage(err, "删除失败"));
+    }
+  };
+
   return (
     <PageContainer size="full" className="gap-5">
       <PageHeader
@@ -93,7 +135,7 @@ export default function ApiKeysSettingsPage() {
               设置
             </Link>
             <span className="px-1 text-muted-foreground/60">/</span>
-            为守护进程签发长期凭证，明文仅在创建时显示一次
+            为守护进程签发长期凭证，支持随时复制密钥明文（旧版本签发的密钥除外）
           </span>
         }
         actions={
@@ -191,16 +233,53 @@ export default function ApiKeysSettingsPage() {
                         {formatExpiry(k.expires_at)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {!k.revoked_at && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => void handleRevoke(k)}
-                          >
-                            吊销
-                          </Button>
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          {!k.revoked_at && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1"
+                                disabled={!k.plaintext_recoverable || copyingId === k.id}
+                                title={
+                                  k.plaintext_recoverable
+                                    ? "复制该密钥的完整明文"
+                                    : "旧版本签发的密钥未保存明文，无法复制；请新签发一把"
+                                }
+                                onClick={() => void handleCopyKey(k)}
+                              >
+                                {copiedId === k.id ? (
+                                  "已复制"
+                                ) : (
+                                  <>
+                                    <Copy className="h-3.5 w-3.5" />
+                                    复制密钥
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                onClick={() => void handleRevoke(k)}
+                              >
+                                吊销
+                              </Button>
+                            </>
+                          )}
+                          {k.revoked_at && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              title="从列表永久移除该已吊销记录（不可恢复）"
+                              onClick={() => void handleDelete(k)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              删除
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

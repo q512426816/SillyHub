@@ -78,7 +78,7 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
               </div>
               <DialogTitle>签发 API 密钥</DialogTitle>
               <DialogDescription>
-                为守护进程签发长期凭证。明文仅在签发后显示一次，请妥善保存。
+                为守护进程签发长期凭证。明文在签发后展示，支持复制的部署可在列表中随时再次复制。
               </DialogDescription>
             </DialogHeader>
 
@@ -134,7 +134,9 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
               </div>
               <DialogTitle>API 密钥已签发</DialogTitle>
               <DialogDescription>
-                这是该 Key 的唯一一次明文展示。关闭后将无法再次查看。
+                {issued.plaintext_recoverable
+                  ? "请立即复制保存。关闭后仍可在密钥列表中随时复制该明文。"
+                  : "该部署未启用密钥找回，关闭后将无法再次查看明文，请立即复制保存。"}
               </DialogDescription>
             </DialogHeader>
 

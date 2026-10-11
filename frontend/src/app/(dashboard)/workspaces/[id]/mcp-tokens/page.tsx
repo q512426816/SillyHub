@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { Ban, KeyRound, Plus, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Ban, Copy, KeyRound, Plus, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 
 import { McpTokenCreateDialog } from "@/components/mcp-token-create-dialog";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
@@ -12,7 +12,13 @@ import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { errMessage } from "@/lib/errors";
-import { listMcpTokens, revokeMcpToken, type McpTokenRead } from "@/lib/mcp-tokens";
+import {
+  deleteMcpToken,
+  fetchMcpTokenPlaintext,
+  listMcpTokens,
+  revokeMcpToken,
+  type McpTokenRead,
+} from "@/lib/mcp-tokens";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -36,6 +42,9 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // 复制令牌明文的行级状态（2026-10-11-apikey-mcp-copy-delete）。
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,11 +91,44 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
     }
   };
 
+  /** 复制令牌明文（2026-10-11-apikey-mcp-copy-delete）：仅活跃且可恢复的 token。 */
+  const handleCopyToken = async (t: McpTokenRead) => {
+    if (copyingId) return;
+    setCopyingId(t.id);
+    try {
+      const plaintext = await fetchMcpTokenPlaintext(workspaceId, t.id);
+      await navigator.clipboard.writeText(plaintext);
+      setCopiedId(t.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      setPageError(errMessage(err, "复制令牌失败"));
+    } finally {
+      setCopyingId(null);
+    }
+  };
+
+  /** 物理删除已吊销的令牌（后端仅对已吊销记录放行；webhook 配置级联清理）。 */
+  const handleDelete = async (t: McpTokenRead) => {
+    if (
+      !confirm(
+        `确定彻底删除已吊销的令牌 "${t.name}"？该记录及其 webhook 配置将从列表中永久移除，不可恢复。`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteMcpToken(workspaceId, t.id);
+      await load();
+    } catch (err) {
+      setPageError(errMessage(err, "删除失败"));
+    }
+  };
+
   return (
     <PageContainer size="full" className="gap-5">
       <PageHeader
         title="MCP 令牌"
-        subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，明文仅在签发后显示一次"
+        subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，支持随时复制令牌明文（旧版本签发的令牌除外）"
         actions={
           <>
             <Link
@@ -210,16 +252,53 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
                             {formatDateTime(t.created_at)}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            {!revoked && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                onClick={() => void handleRevoke(t)}
-                              >
-                                吊销
-                              </Button>
-                            )}
+                            <div className="flex items-center justify-end gap-1">
+                              {!revoked && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="gap-1"
+                                    disabled={!t.plaintext_recoverable || copyingId === t.id}
+                                    title={
+                                      t.plaintext_recoverable
+                                        ? "复制该令牌的完整明文"
+                                        : "旧版本签发的令牌未保存明文，无法复制；请新签发一个"
+                                    }
+                                    onClick={() => void handleCopyToken(t)}
+                                  >
+                                    {copiedId === t.id ? (
+                                      "已复制"
+                                    ) : (
+                                      <>
+                                        <Copy className="h-3.5 w-3.5" />
+                                        复制令牌
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                    onClick={() => void handleRevoke(t)}
+                                  >
+                                    吊销
+                                  </Button>
+                                </>
+                              )}
+                              {revoked && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                  title="从列表永久移除该已吊销记录（其 webhook 配置一并清理，不可恢复）"
+                                  onClick={() => void handleDelete(t)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  删除
+                                </Button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

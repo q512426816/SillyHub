@@ -101,10 +101,16 @@ const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
 const SILLYSPEC_ECHO_FAST_POLL_MS = 5_000;
 const SILLYSPEC_ECHO_BOOST_WINDOW_MS = 60_000;
 
-function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+export function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const accessToken = useSession((s) => s.accessToken);
   const [copied, setCopied] = useState(false);
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  // admin 探测结果：true=可签发/列出 API key（渲染 --api-key 形态）。
+  const [apiKeyCapable, setApiKeyCapable] = useState(false);
+  // 已有活跃 key 的前缀（打码展示）；null=尚无活跃 key（复制时自动创建）。
+  const [apiKeyPrefix, setApiKeyPrefix] = useState<string | null>(null);
+  // 复制后的回显：自动创建提示 / 失败原因（成功提示由 copied 态承担）。
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,10 +118,13 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
       try {
         const { getLatestActiveApiKey } = await import("@/lib/api-keys");
         const latest = await getLatestActiveApiKey();
-        if (!cancelled) setApiKey(latest ? latest.key_prefix + "…" : null);
+        if (!cancelled) {
+          setApiKeyCapable(true);
+          setApiKeyPrefix(latest ? latest.key_prefix + "…" : null);
+        }
       } catch {
-        // 非 admin 或尚未签发：fallback 到 access_token
-        if (!cancelled) setApiKey(null);
+        // 非 admin 或接口失败：fallback 到 access_token 形态
+        if (!cancelled) setApiKeyCapable(false);
       }
     })();
     return () => {
@@ -123,8 +132,8 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
     };
   }, []);
 
-  // 渲染所需：apiKey（优先）或 accessToken（fallback）
-  if (!apiKey && !accessToken) return null;
+  // 渲染所需：apiKeyCapable（优先）或 accessToken（fallback）
+  if (!apiKeyCapable && !accessToken) return null;
 
   // server-url 用客户端实际访问地址：前端经 rewrite 代理 /api/* 与 /daemon/* 到 backend，
   // daemon 全程连前端地址即可。不做端口替换——避免硬编码 :3001→:8001 随部署端口变化失效
@@ -132,16 +141,46 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
   const serverUrl =
     typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
   // 优先用长期 API Key；fallback 到浏览器短期 access_token（TTL 15min，不适合长期运行）。
-  const useApiKey = !!apiKey;
-  const placeholderCred = useApiKey ? (apiKey as string) : "<access_token>";
-  const cmd = useApiKey
-    ? `sillyhub-daemon start --server ${serverUrl} --api-key <粘贴你的 API Key>`
-    : `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+  const useApiKey = apiKeyCapable;
+  // 渲染面永远打码：完整明文只在点击复制时解析并进剪贴板，不常驻屏幕/DOM。
+  const placeholderCred = useApiKey
+    ? (apiKeyPrefix ?? "shk_live_…（复制时自动创建）")
+    : "<access_token>";
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (resolving) return;
+    setResolving(true);
+    setNotice(null);
+    try {
+      let cmd: string;
+      if (useApiKey) {
+        // FR-01（2026-10-11-apikey-mcp-copy-delete）：有活跃 key 取其明文；
+        // 无（或存量不可恢复）自动签发永不过期的新 key，命令内嵌完整明文。
+        const { resolveDaemonApiKey } = await import("@/lib/api-keys");
+        const res = await resolveDaemonApiKey();
+        if (res.status === "ok") {
+          cmd = `sillyhub-daemon start --server ${serverUrl} --api-key ${res.plaintext}`;
+          setApiKeyPrefix(res.keyPrefix + "…");
+          if (res.createdName) {
+            setNotice(
+              `✅ 已自动创建 API 密钥「${res.createdName}」（永不过期），复制的命令中已包含其完整密钥。`,
+            );
+          }
+        } else {
+          // 探测期是 admin、复制时被降权：回退 access_token（不静默拼错命令）
+          cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+        }
+      } else {
+        cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+      }
+      await navigator.clipboard.writeText(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setNotice(`复制失败：${err instanceof Error ? err.message : "未知错误"}`);
+    } finally {
+      setResolving(false);
+    }
   };
 
   return (
@@ -159,19 +198,33 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
           variant="outline"
           className="h-8 shrink-0 gap-1.5 px-2.5"
           onClick={handleCopy}
-          title={copied ? "已复制" : "复制完整命令"}
+          disabled={resolving}
+          title={copied ? "已复制" : "复制完整命令（含完整密钥）"}
         >
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          <span className="hidden sm:inline">{copied ? "已复制" : "复制命令"}</span>
+          <span className="hidden sm:inline">
+            {copied ? "已复制" : resolving ? "解析密钥…" : "复制命令"}
+          </span>
         </Button>
       </div>
-      {!useApiKey && (
+      {useApiKey ? (
+        <p className="text-[10px] text-muted-foreground">
+          {apiKeyPrefix
+            ? "复制的命令中将包含该密钥的完整明文，可直接粘贴运行。"
+            : "尚无 API 密钥：点击复制时会自动创建一个永不过期的新密钥并写入命令。"}
+        </p>
+      ) : (
         <p className="text-[10px] text-amber-600">
           ⚠️ 当前显示的 --token 是浏览器 access_token（15 分钟过期），守护进程长期运行建议{" "}
           <a href="/settings/api-keys" className="underline">
             签发 API Key
           </a>{" "}
           后用 --api-key。
+        </p>
+      )}
+      {notice && (
+        <p className="text-[10px] text-muted-foreground" role="status">
+          {notice}
         </p>
       )}
     </div>

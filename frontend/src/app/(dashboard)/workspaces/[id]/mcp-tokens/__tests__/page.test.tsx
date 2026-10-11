@@ -12,6 +12,8 @@
  *   3. 非 403 错误 → 红条错误文案
  *   4. 空列表 → 「还没有 MCP 令牌」空态
  *   5. 吊销二次确认：confirm 取消不调 revokeMcpToken；确认后调用并重新加载列表
+ *   6. (2026-10-11-apikey-mcp-copy-delete) 复制令牌：活跃可恢复行 → 明文入剪贴板；
+ *      存量不可恢复行 → 按钮禁用；已吊销行 → 删除按钮（confirm 后物理删除）
  *
  * mock @/lib/mcp-tokens（hoisted vi.fn），风格对齐 workspaces/[id]/mcp/__tests__/page.test.tsx。
  */
@@ -38,11 +40,15 @@ vi.mock("next/link", () => ({
 const mcpTokensApi = vi.hoisted(() => ({
   listMcpTokens: vi.fn(),
   revokeMcpToken: vi.fn(),
+  deleteMcpToken: vi.fn(),
+  fetchMcpTokenPlaintext: vi.fn(),
 }));
 
 vi.mock("@/lib/mcp-tokens", () => ({
   listMcpTokens: mcpTokensApi.listMcpTokens,
   revokeMcpToken: mcpTokensApi.revokeMcpToken,
+  deleteMcpToken: mcpTokensApi.deleteMcpToken,
+  fetchMcpTokenPlaintext: mcpTokensApi.fetchMcpTokenPlaintext,
 }));
 
 function makeToken(overrides: Partial<McpTokenRead> = {}): McpTokenRead {
@@ -53,6 +59,7 @@ function makeToken(overrides: Partial<McpTokenRead> = {}): McpTokenRead {
     last_used_at: null,
     revoked_at: null,
     created_at: "2026-08-01T10:00:00Z",
+    plaintext_recoverable: true,
     ...overrides,
   };
 }
@@ -72,6 +79,8 @@ function renderPage() {
 beforeEach(() => {
   mcpTokensApi.listMcpTokens.mockReset();
   mcpTokensApi.revokeMcpToken.mockReset();
+  mcpTokensApi.deleteMcpToken.mockReset();
+  mcpTokensApi.fetchMcpTokenPlaintext.mockReset();
 });
 
 afterEach(() => {
@@ -213,5 +222,113 @@ describe("workspace MCP 令牌管理页 · 吊销二次确认", () => {
     await waitFor(() => {
       expect(screen.getAllByText("已吊销").length).toBeGreaterThanOrEqual(2);
     });
+  });
+});
+
+// ── 2026-10-11-apikey-mcp-copy-delete：复制令牌 + 物理删除 ────────────────
+
+describe("workspace MCP 令牌管理页 · 复制令牌", () => {
+  it("活跃可恢复行点「复制令牌」→ 明文写入剪贴板并回显已复制", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([activeToken]);
+    mcpTokensApi.fetchMcpTokenPlaintext.mockResolvedValueOnce("shmcp_secret_plaintext");
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("ci-runner")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /复制令牌/ }));
+
+    await waitFor(() => {
+      expect(mcpTokensApi.fetchMcpTokenPlaintext).toHaveBeenCalledWith(
+        "ws-1",
+        activeToken.id,
+      );
+    });
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("shmcp_secret_plaintext");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("已复制")).toBeInTheDocument();
+    });
+  });
+
+  it("存量不可恢复行（plaintext_recoverable=false）→ 复制按钮禁用、不调明文端点", async () => {
+    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([
+      makeToken({ plaintext_recoverable: false }),
+    ]);
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("ci-runner")).toBeInTheDocument();
+    });
+
+    const btn = screen.getByRole("button", { name: /复制令牌/ }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(
+      screen.getByTitle("旧版本签发的令牌未保存明文，无法复制；请新签发一个"),
+    ).toBeInTheDocument();
+    expect(mcpTokensApi.fetchMcpTokenPlaintext).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspace MCP 令牌管理页 · 已吊销令牌物理删除", () => {
+  it("confirm 确认 → 调 deleteMcpToken 并重新加载列表", async () => {
+    mcpTokensApi.listMcpTokens
+      .mockResolvedValueOnce([revokedToken])
+      .mockResolvedValueOnce([]);
+    mcpTokensApi.deleteMcpToken.mockResolvedValueOnce(undefined);
+    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("old-token")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
+
+    await waitFor(() => {
+      expect(mcpTokensApi.deleteMcpToken).toHaveBeenCalledWith("ws-1", revokedToken.id);
+    });
+    await waitFor(() => {
+      expect(mcpTokensApi.listMcpTokens).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("还没有 MCP 令牌")).toBeInTheDocument();
+    });
+  });
+
+  it("confirm 取消 → 不调 deleteMcpToken", async () => {
+    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([revokedToken]);
+    const confirmMock = vi.fn().mockReturnValue(false);
+    vi.stubGlobal("confirm", confirmMock);
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("old-token")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
+
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(mcpTokensApi.deleteMcpToken).not.toHaveBeenCalled();
+  });
+
+  it("已吊销行不渲染吊销与复制按钮，活跃行不渲染删除按钮", async () => {
+    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([activeToken, revokedToken]);
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("old-token")).toBeInTheDocument();
+    });
+
+    expect(screen.getAllByRole("button", { name: "吊销" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /复制令牌/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /删除/ })).toHaveLength(1);
   });
 });
