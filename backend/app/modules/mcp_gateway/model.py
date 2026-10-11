@@ -29,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     Uuid,
     text,
 )
@@ -40,9 +41,12 @@ from app.models.base import BaseModel
 class McpTokenORM(BaseModel, table=True):
     """第三方接入平台的 MCP token（design §8.1）。
 
-    明文 token 仅签发时返回一次；库存 ``token_hash = sha256(明文)``，不存明文（R-06）。
-    middleware 校验：hash 传入 token → 等值查本表 → 未吊销（``revoked_at`` IS NULL）
-    才放行，命中后回写 ``last_used_at``。``scope`` 决定可调用的 tool 集合。
+    鉴权库存 ``token_hash = sha256(明文)``；middleware 校验：hash 传入 token →
+    等值查本表 → 未吊销（``revoked_at`` IS NULL）才放行，命中后回写
+    ``last_used_at``。``scope`` 决定可调用的 tool 集合。自
+    2026-10-11-apikey-mcp-copy-delete 起明文另存可逆加密列 ``encrypted_token``
+    （libsodium secretbox + KEK）供管理端「复制令牌」按需取回；存量行为 NULL
+    （不可恢复，R-06 原语义仅对此类行继续成立）。
     """
 
     __tablename__ = "mcp_tokens"
@@ -65,8 +69,16 @@ class McpTokenORM(BaseModel, table=True):
         ),
     )
     name: str = Field(sa_column=Column(String(100), nullable=False))  # 人类可读标签
-    # sha256(明文 token) hex；不存明文（R-06）。唯一性由 ix_mcp_tokens_token_hash 承担。
+    # sha256(明文 token) hex；鉴权按 hash 等值 O(1) 查表。唯一性由 ix_mcp_tokens_token_hash 承担。
     token_hash: str = Field(sa_column=Column(String(128), nullable=False))
+    # 可逆加密的明文（``{key_id}:{hex(ciphertext)}``，libsodium secretbox + KEK=
+    # SILLYSPEC_MASTER_KEY，与 mcp_webhooks.secret 同构）：管理端「复制令牌」按需
+    # 解密返回（2026-10-11-apikey-mcp-copy-delete）。NULL = 存量行或签发时未配置
+    # 主密钥——明文不可恢复，UI 复制入口降级禁用。token_hash 鉴权路径不依赖本列。
+    encrypted_token: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
     # scope 集合：["read","dispatch","converge"]。middleware 按 scope 拒绝越界 tool。
     scope: list[str] = Field(
         default_factory=list,
@@ -98,6 +110,11 @@ class McpTokenORM(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+    @property
+    def plaintext_recoverable(self) -> bool:
+        """明文是否可再取回（签发时加密存档）。吊销状态由 revoked_at 自表达。"""
+        return self.encrypted_token is not None
 
 
 class McpWebhookORM(BaseModel, table=True):

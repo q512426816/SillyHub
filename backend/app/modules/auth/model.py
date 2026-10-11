@@ -16,7 +16,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Uuid, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -204,10 +204,14 @@ class RolePermission(BaseModel, table=True):
 class ApiKey(BaseModel, table=True):
     """A long-lived API key issued by a platform admin.
 
-    The plaintext key is shown to the admin **once** at creation time and
-    never persisted. The DB row stores ``bcrypt(plaintext)`` in
-    ``key_hash`` plus a non-sensitive ``key_prefix`` (the first 12 chars
-    of the plaintext) for display in the admin UI.
+    The DB row stores ``bcrypt(plaintext)`` in ``key_hash`` (authenticate
+    path) plus a non-sensitive ``key_prefix`` (the first 12 chars of the
+    plaintext) for display. Since 2026-10-11-apikey-mcp-copy-delete the
+    plaintext is *also* kept reversibly-encrypted in ``encrypted_key``
+    (libsodium secretbox, KEK in ``SILLYSPEC_MASTER_KEY``) so the admin UI
+    can copy an already-issued key on demand; rows created before that
+    change (or without the master key configured) have ``encrypted_key =
+    NULL`` and are not recoverable.
 
     Revocation sets ``revoked_at``; expiry sets ``expires_at``. Both are
     checked at authenticate time. ``last_used_at`` is updated on a successful
@@ -237,6 +241,14 @@ class ApiKey(BaseModel, table=True):
     name: str = Field(sa_column=Column(String(100), nullable=False))
     key_prefix: str = Field(sa_column=Column(String(16), nullable=False))
     key_hash: str = Field(sa_column=Column(String(255), nullable=False))
+    # 可逆加密的明文（``{key_id}:{hex(ciphertext)}``，libsodium secretbox + KEK=
+    # SILLYSPEC_MASTER_KEY，与 mcp_webhooks.secret 同构）：管理端「复制密钥」按需
+    # 解密返回（2026-10-11-apikey-mcp-copy-delete）。NULL = 存量行或签发时未配置
+    # 主密钥——明文不可恢复，UI 复制入口降级禁用。bcrypt key_hash 鉴权路径不依赖本列。
+    encrypted_key: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
     last_used_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
@@ -253,6 +265,11 @@ class ApiKey(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+    @property
+    def plaintext_recoverable(self) -> bool:
+        """明文是否可再取回（签发时加密存档）。吊销/过期状态由字段自表达。"""
+        return self.encrypted_key is not None
 
 
 class UserWorkspaceRole(BaseModel, table=True):
