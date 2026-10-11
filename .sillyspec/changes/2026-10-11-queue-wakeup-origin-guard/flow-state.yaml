@@ -1,0 +1,29 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  排队满员豁免按消息内容前缀判定可被用户伪造（24h 审查 P2）：queue.py 以 prompt.startswith("[后台任务通知]") 判定豁免与计数排除，而 /inject 端点对用户 prompt
+  零过滤——用户发该前缀消息即可冒充系统通知绕过 5 条额度并落入不可编辑的通知条目。修复：豁免/合并/计数全部改读排队行结构化 origin='task_wakeup'；标记仅由服务凭证（X-API-Key，api_key:admin
+  签发给 daemon）经请求显式字段携带，Bearer 用户携带该字段直接 403；daemon 唤醒链路随请求携带 origin 标记。
+
+  成功标准：
+
+  - 用户（Bearer、无 origin 标记）以 [后台任务通知] 前缀发消息：计为普通用户消息占额度，队满第 6 条照旧 QueueFull，不进通知合并
+
+  - daemon 服务凭证（X-API-Key + origin=task_wakeup）注入通知：豁免满员、不占用户额度、同 origin pending 行合并不新增行，排队行 origin 落 task_wakeup
+
+  - Bearer 请求携带 origin=task_wakeup 字段：403 拒绝（仅服务凭证可标记）
+
+  - origin 非 task_wakeup 字面量：422（DTO Literal 校验）
+
+  - 通知条目编辑保护改为 origin 结构化判定（兼容存量前缀行 409 不回归）
+
+  - 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
+autopilot: true
+baseline_commit: f0d24f51dd296c86dc2093343e1084d935db5515
+updatedAt: '2026-10-11T03:40:55.517Z'
+baseline_sha256: 27be1a19b60f57cd97dcba82e7a39647a5b6e0b3c880f8a42d52b014576101cb
+
