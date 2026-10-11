@@ -139,6 +139,24 @@ describe('runLinkedReposSnapshot', () => {
     expect(snap.projects_skipped).toContain('未安装');
     expect(snap.repos_skipped).toContain('未安装');
   });
+
+  // ── 2026-10-11-linked-repos-path-guard（24h 审查 P3-2：形态校验）──────────
+
+  it('相对形态 root_path 抛错不 spawn CLI', async () => {
+    const { deps, calls } = makeExec();
+    for (const bad of ['ws-root', '../x', '']) {
+      await expect(runLinkedReposSnapshot(bad, deps)).rejects.toThrow('非绝对路径');
+    }
+    expect(calls.length).toBe(0);
+  });
+
+  it('UNC 与 POSIX 绝对形态放行', async () => {
+    for (const good of ['/ws', '\\\\srv\\share\\ws']) {
+      // bin 缺失走 skipped 分支——能到达该分支即证明入口守卫放行。
+      const snap = await runLinkedReposSnapshot(good, { resolveBin: () => null });
+      expect(snap.projects_skipped).toBe('sillyspec 未安装');
+    }
+  });
 });
 
 // 供 bin 缺失用例复用的 calls 断言（上面 makeExec 的 exec 不会被调用）

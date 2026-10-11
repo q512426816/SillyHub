@@ -22,6 +22,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { isAbsoluteLikePath } from './linked-repos-path.js';
 import { resolveSillySpecBinDefault } from './sillyspec-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -138,6 +139,12 @@ export async function runLinkedReposSync(
   payload: LinkedRepoSyncPayload,
   deps: LinkedReposSyncDeps = {},
 ): Promise<{ workspace_id: string; results: LinkedRepoLayerResult[] }> {
+  // 2026-10-11-linked-repos-path-guard（24h 审查 P3-2）：root_path 是全部写命令
+  // 的公共 cwd，相对/垃圾形态漂移到 daemon 进程目录——payload 级校验抛错
+  //（RPC 错误，对齐 handler 缺参 throw 语义），先于任何外部调用。
+  if (!isAbsoluteLikePath(payload.root_path)) {
+    throw new Error(`linked_repos_sync: root_path 非绝对路径: ${payload.root_path}`);
+  }
   const resolveBin = deps.resolveBin ?? resolveSillySpecBinDefault;
   const bin = resolveBin();
   const results: LinkedRepoLayerResult[] = [];
@@ -172,6 +179,16 @@ export async function runLinkedReposSync(
         status: 'skipped',
         detail: '未配置约定相对路径',
       });
+    } else if (isAbsoluteLikePath(repo.rel_path.trim())) {
+      // 2026-10-11-linked-repos-path-guard：约定相对路径是相对工作区根的形态
+      //（'../' 兄弟仓合法，不禁 ..）；绝对形态是脏值，该层 failed 不 spawn
+      //（数据级失败走结果体，对齐「能力降级与命令失败都是数据」契约）。
+      results.push({
+        repo_name: name,
+        layer: 'projects_yaml',
+        status: 'failed',
+        detail: '约定相对路径非法（须相对路径）',
+      });
     } else {
       const args = ['workspace', 'add', name, toPosix(repo.rel_path.trim())];
       if (repo.repo_url && repo.repo_url.trim()) {
@@ -194,6 +211,16 @@ export async function runLinkedReposSync(
         layer: 'repos_registry',
         status: 'skipped',
         detail: '本机路径未配置',
+      });
+    } else if (!isAbsoluteLikePath(repo.abs_path.trim())) {
+      // 2026-10-11-linked-repos-path-guard：本机路径注册语义须绝对形态；相对
+      // 形态该层 failed 不 spawn（绝对路径内容不受限——登记本机任意仓库是
+      // 功能本体）。
+      results.push({
+        repo_name: name,
+        layer: 'repos_registry',
+        status: 'failed',
+        detail: '本机路径非法（须绝对路径）',
       });
     } else {
       const outcome = await runCommand(

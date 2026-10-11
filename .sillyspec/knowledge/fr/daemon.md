@@ -2935,3 +2935,79 @@
   confirmed_at: null
   source_change: 2026-10-10-linked-repos-local-echo
   status: active
+
+## FR-daemon-081 daemon session_live_tasks RPC 返回会话活跃任务快照
+变更：2026-10-11-task-sweep-daemon-truth
+状态：active
+摘要：问询
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-daemon-truth/requirements.md#FR-01
+最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/session-live-task-ids.test.ts「注册表内的 task_id 全量返回」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-daemon-truth
+  status: active
+
+## FR-daemon-082 后端清扫改为确认制（daemon 真相源，废除全部时间启发式）
+变更：2026-10-11-task-sweep-daemon-truth
+状态：active
+摘要：确认死才收；daemon 离线
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-daemon-truth/requirements.md#FR-02
+最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_daemon_confirmed_dead_only」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-daemon-truth
+  status: active
+
+## FR-daemon-083 run 收口延迟确认清扫 + 启动确认清扫
+变更：2026-10-11-task-sweep-daemon-truth
+状态：active
+摘要：run 收口后孤儿收敛
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-daemon-truth/requirements.md#FR-03
+最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_run_scoped_filter」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-daemon-truth
+  status: active
+
+## FR-daemon-084 标记与复活保留 + 回归
+变更：2026-10-11-task-sweep-daemon-truth
+状态：active
+摘要：回归
+全文：.sillyspec/changes/archive/2026-10-11-task-sweep-daemon-truth/requirements.md#FR-04
+最近确认：ed9542f24dd515f923417163e8a2b71ba2b53477
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-task-sweep-daemon-truth:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_stopped_row_revives_on_running_heartbeat」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-task-sweep-daemon-truth
+  status: active

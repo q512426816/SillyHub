@@ -122,3 +122,22 @@ created_at: 2026-09-25T23:00:56.833Z
   confirmed_at: null
   source_change: 2026-09-26-spec-sync-receipt-visibility
   status: active
+
+## FR-app-layouts-007 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
+变更：2026-10-11-retire-components-page
+状态：active
+摘要：主路径；主路径；主路径；主路径；主路径
+全文：.sillyspec/changes/archive/2026-10-11-retire-components-page/requirements.md#FR-01
+最近确认：bc0cac931980b9a1145369a9bfd7ddd377776ee5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-retire-components-page:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 长度 === 36」 | page.test.tsx「统计三数字按 mock 数据渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-retire-components-page
+  status: active

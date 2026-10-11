@@ -15,6 +15,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { isAbsoluteLikePath } from './linked-repos-path.js';
 import { resolveSillySpecBinDefault } from './sillyspec-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -95,6 +96,12 @@ export async function runLinkedReposSnapshot(
   rootPath: string,
   deps: LinkedReposSnapshotDeps = {},
 ): Promise<LinkedReposSnapshot> {
+  // 2026-10-11-linked-repos-path-guard（24h 审查 P3-2）：root_path 是两条读命令
+  // 的 cwd 与 --spec-dir 参数，相对/垃圾形态会漂移到 daemon 进程目录（行为
+  // 未定义）——入口形态校验，先于任何外部调用（含 resolveBin）。
+  if (!isAbsoluteLikePath(rootPath)) {
+    throw new Error(`linked_repos_snapshot: root_path 非绝对路径: ${rootPath}`);
+  }
   const resolveBin = deps.resolveBin ?? resolveSillySpecBinDefault;
   const bin = resolveBin();
   const fetched_at = new Date().toISOString();

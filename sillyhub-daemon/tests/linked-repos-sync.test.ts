@@ -211,4 +211,59 @@ describe('R-07 失败重试一次', () => {
     expect(out.results.find((r) => r.layer === 'projects_yaml')!.status).toBe('skipped');
     expect(calls.filter((c) => c.args[0] === 'workspace').length).toBe(1);
   });
+
+  // ── 2026-10-11-linked-repos-path-guard（24h 审查 P3-2：形态校验）──────────
+
+  it('root_path 形态守卫：相对形态抛错零 spawn；POSIX/盘符/UNC 三绝对形态放行', async () => {
+    const { exec, calls } = makeExec();
+    for (const bad of ['ws-root', '../x', '']) {
+      await expect(
+        runLinkedReposSync({ ...basePayload, root_path: bad }, { resolveBin: () => '/bin/s.js', exec }),
+      ).rejects.toThrow('非绝对路径');
+    }
+    expect(calls.length).toBe(0);
+    // 三种绝对形态照常执行（每仓两层 → 仓×2 命令）。
+    for (const good of ['/ws', 'C:/ws', '\\\\srv\\share\\ws']) {
+      await runLinkedReposSync(
+        { ...basePayload, root_path: good, repos: [{ name: 'a', rel_path: '../a', abs_path: 'C:/a' }] },
+        { resolveBin: () => '/bin/s.js', exec },
+      );
+    }
+    expect(calls.length).toBe(6);
+  });
+
+  it('rel_path 绝对形态：projects_yaml 层 failed 不 spawn（abs 合法层照常）', async () => {
+    const { exec, calls } = makeExec();
+    const out = await runLinkedReposSync(
+      { ...basePayload, repos: [{ name: 'a', rel_path: 'C:/a', abs_path: 'C:/abs' }] },
+      { resolveBin: () => '/bin/s.js', exec },
+    );
+    const proj = out.results.find((r) => r.layer === 'projects_yaml')!;
+    expect(proj.status).toBe('failed');
+    expect(proj.detail).toContain('须相对路径');
+    expect(calls.length).toBe(1);
+    expect(calls[0].args[0]).toBe('local');
+  });
+
+  it('abs_path 相对形态：repos_registry 层 failed 不 spawn（rel 合法层照常）', async () => {
+    const { exec, calls } = makeExec();
+    const out = await runLinkedReposSync(
+      { ...basePayload, repos: [{ name: 'a', rel_path: '../a', abs_path: 'a/b' }] },
+      { resolveBin: () => '/bin/s.js', exec },
+    );
+    const reg = out.results.find((r) => r.layer === 'repos_registry')!;
+    expect(reg.status).toBe('failed');
+    expect(reg.detail).toContain('须绝对路径');
+    expect(calls.length).toBe(1);
+    expect(calls[0].args[0]).toBe('workspace');
+  });
+
+  it('合法约定零回归：兄弟相对路径与绝对本机路径照常 spawn', async () => {
+    const { exec, calls } = makeExec();
+    await runLinkedReposSync(basePayload, { resolveBin: () => '/bin/s.js', exec });
+    // '../platform-specs' 相对约定 + 绝对 abs_path 双层照常（既有 basePayload）。
+    expect(calls.length).toBe(2);
+    expect(calls[0].args[3]).toBe('../platform-specs');
+    expect(calls[1].args[3]).toBe('C:/Users/me/works/platform-specs');
+  });
 });
