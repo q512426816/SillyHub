@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-linked-repo-workspace-ref",
+  "appliedAt": "2026-10-11T10:08:38.262Z",
+  "baseHash": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/linked_repos_sync.py",
+      "sha256": "f3fbf913c38a85984ab91e055c7a1c9ffc1ed763fd3bc60c062a3ac04d399167"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/model.py",
+      "sha256": "22a409c2f1e01e97f7bafec8ecdadf7d8254eeb5fd94c0c0b28bab1676fa834d"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/router.py",
+      "sha256": "1ee41ea4b750e81f9521fbf49c9685f9924fcf3e137c723c6a5487c647e2f547"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/schema.py",
+      "sha256": "4f8fef99f419a2a8e3404a5551b9bc21e5caf56635ac53ec70cada3256f85011"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/service.py",
+      "sha256": "28b38040c01f33c7b069aaa2238e5377eb229a2edd627423e998939c6348cabc"
+    },
+    {
+      "path": "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+      "sha256": "ffb79a1bc1c19d333187d4227cb6e87d3b1d585efb1e87152fedc39f5004351e"
+    },
+    {
+      "path": "backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py",
+      "sha256": "7e8e1f63451545d63631e22aa1af4460874144292c1ea870382a9801a12933ab"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "4bc4ec969df808f9ad06204666d206c939b7b6e46bb3f800ad964c825437d595"
+    },
+    {
+      "path": "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+      "sha256": "224e0988d302c433a16c0726acfb8bd62f3d48c065582b3d40f465665698c51a"
+    },
+    {
+      "path": "frontend/src/components/workspace/linked-repos-card.tsx",
+      "sha256": "7cc5d98894a10785eb241ea77c2f3fa6f69f04961dcda9cd1bf3bce3cc344453"
+    },
+    {
+      "path": "frontend/src/components/workspace/linked-repos-form.tsx",
+      "sha256": "c5c9832956dfd925341d00c236633572f864b9ff02a016de7cb298fa9dc75182"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "4e9c8ac992729c338e0b8a32e6d78dca8b41b2ad72b4e000f1d6559d68e7f297"
+    },
+    {
+      "path": "frontend/src/lib/linked-repos.ts",
+      "sha256": "3032ff5c8ca25291e948abf33c9ffcb948fe2f51afd425582d1478437514715a"
+    }
+  ]
+}

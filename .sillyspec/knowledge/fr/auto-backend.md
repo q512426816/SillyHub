@@ -652,3 +652,72 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-10-run-close-task-sweep
   status: active
+
+## FR-auto-backend-158 挂载引用与跳转
+变更：2026-10-11-linked-repo-workspace-ref
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 平台上存在多个工作区；When owner/admin 在关联仓表单中从工作区下拉选择一个（排除当前工作区自身）并保存；Then 登记行 ref_workspace_id 写入；列表条目返回对方工作区 {id, name, slug}；前端条目可点击跳转 `/workspaces/{id}
+全文：.sillyspec/changes/archive/2026-10-11-linked-repo-workspace-ref/requirements.md#FR-01
+最近确认：0f7af00fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repo-workspace-ref:task-01:acc-0-3c9095f1
+  tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repo-workspace-ref
+  status: active
+- row: 2026-10-11-linked-repo-workspace-ref:task-01:acc-1-349bd3a6
+  tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repo-workspace-ref
+  status: active
+
+## FR-auto-backend-159 摘除与软删降级
+变更：2026-10-11-linked-repo-workspace-ref
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 已挂载条目；When 编辑时清空选择（null=显式摘除）或对方工作区被软删除；Then 编辑场景摘除引用（行保留）；软删场景读时降级——摘要/跳转/匹配输出一律为 null（登记行与 FK 落库值保留；匹配与挂载校验均过滤 deleted_at，G
+全文：.sillyspec/changes/archive/2026-10-11-linked-repo-workspace-ref/requirements.md#FR-02
+最近确认：0f7af00fe
+
+## FR-auto-backend-160 回显匹配提示
+变更：2026-10-11-linked-repo-workspace-ref
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 本机回显快照含 local_only 条目；When backend 对照时仅对 local_only 条目、按 key 在当前用户可见工作区集（过滤软删；限定可见集防泄露，Grill X-002）name/slu；Then 命中时该条目附 matched_workspace {id, name, slug}（提示性字段，不写库不自动挂载）；未命中为 null。
+全文：.sillyspec/changes/archive/2026-10-11-linked-repo-workspace-ref/requirements.md#FR-03
+最近确认：0f7af00fe
+
+## FR-auto-backend-161 前端展示
+变更：2026-10-11-linked-repo-workspace-ref
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 用户查看关联仓卡片；When 条目已挂载 → 显示对方名+跳转图标；回显条目 matched_workspace 命中 → 显示「匹配到 XX」提示；Then 挂载跳转用 router push；未挂载条目行为不变；双主题 brand 语义阶。
+全文：.sillyspec/changes/archive/2026-10-11-linked-repo-workspace-ref/requirements.md#FR-04
+最近确认：0f7af00fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repo-workspace-ref:task-02:acc-0-5034f1dd
+  tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repo-workspace-ref
+  status: active

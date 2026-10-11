@@ -12,12 +12,14 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.modules.workspace.linked_repos.model import (
     WorkspaceLinkedRepo,
     WorkspaceLinkedRepoPath,
 )
 from app.modules.workspace.linked_repos.schema import LinkedRepoOut
+from app.modules.workspace.model import Workspace
 
 
 class LinkedRepoNotFound(Exception):
@@ -73,6 +75,23 @@ async def list_repos(
     summary = await summary_for_repos(
         session, workspace_id, repo_ids, viewer_user_id, viewer_is_elevated
     )
+    # ref 摘要（读时降级：批量取目标工作区，过滤软删——Grill X-001）
+    ref_ids = {r.ref_workspace_id for r in repos if r.ref_workspace_id is not None}
+    ref_ws_map: dict = {}
+    if ref_ids:
+        ref_rows = (
+            (
+                await session.execute(
+                    select(Workspace).where(
+                        col(Workspace.id).in_(ref_ids),
+                        col(Workspace.deleted_at).is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        ref_ws_map = {w.id: w for w in ref_rows}
     return [
         LinkedRepoOut(
             id=r.id,
@@ -80,11 +99,35 @@ async def list_repos(
             repo_url=r.repo_url,
             description=r.description,
             rel_path=r.rel_path,
+            ref_workspace=(
+                {"id": w.id, "name": w.name, "slug": w.slug}
+                if (w := ref_ws_map.get(r.ref_workspace_id)) is not None
+                else None
+            ),
             my_path=my_path_by_repo.get(r.id),
             sync_status_summary=summary.get(r.id, []),
         )
         for r in repos
     ]
+
+
+async def validate_ref_workspace(
+    session: AsyncSession, workspace_id: UUID, ref_workspace_id: UUID | None
+) -> None:
+    """挂载校验（Grill X-001/X-002）：目标存在+非软删+不等于当前工作区 → 422。"""
+    if ref_workspace_id is None:
+        return
+    if ref_workspace_id == workspace_id:
+        raise RefWorkspaceInvalid("不能挂载当前工作区自身")
+    ws = await session.get(Workspace, ref_workspace_id)
+    if ws is None or ws.deleted_at is not None:
+        raise RefWorkspaceInvalid("目标工作区不存在或已删除")
+    # 注：可见集权限由 rbac 层在挂载后读取时守卫（GET 列表摘要经 ref_ws_map 过滤软删；
+    # matched_workspace 在 sync 侧限定 allowed_workspace_ids）——此处校验存在性+非软删+非自身。
+
+
+class RefWorkspaceInvalid(Exception):
+    """挂载目标非法（router 层转 422 REF_WORKSPACE_INVALID）。"""
 
 
 async def create_repo(
@@ -95,6 +138,7 @@ async def create_repo(
     repo_url: str | None,
     description: str | None,
     rel_path: str | None,
+    ref_workspace_id: UUID | None = None,
     created_by: UUID | None,
 ) -> WorkspaceLinkedRepo:
     exists = await session.execute(
@@ -105,12 +149,14 @@ async def create_repo(
     )
     if exists.first() is not None:
         raise LinkedRepoNameConflict(name)
+    await validate_ref_workspace(session, workspace_id, ref_workspace_id)
     row = WorkspaceLinkedRepo(
         workspace_id=workspace_id,
         name=name,
         repo_url=repo_url,
         description=description,
         rel_path=rel_path,
+        ref_workspace_id=ref_workspace_id,
         created_by=created_by,
     )
     session.add(row)
@@ -141,10 +187,12 @@ async def update_repo(
 
     fields 为显式提交键集合（router 层 model_dump(exclude_unset=True) 组装）：
     键在场即更新（值可为 None=显式清除——JSON null 与缺省可区分，验收审查
-    问题 B 修复）；不在场即不动。
+    问题 B 修复）；不在场即不动。ref_workspace_id 同语义（null=摘除）。
     """
     row = await get_repo(session, repo_id, workspace_id)
-    for key in ("repo_url", "description", "rel_path"):
+    if "ref_workspace_id" in fields:
+        await validate_ref_workspace(session, workspace_id, fields["ref_workspace_id"])
+    for key in ("repo_url", "description", "rel_path", "ref_workspace_id"):
         if key in fields:
             setattr(row, key, fields[key])
     await session.commit()

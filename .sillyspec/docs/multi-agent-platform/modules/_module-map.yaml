@@ -38,6 +38,7 @@ modules:
       - linked_repos 子模块三表+六端点 (backend/app/modules/workspace/linked_repos/, 跨仓关联登记[共享字段+成员级路径]+CRUD+my-path+sync 触发, 跨工作区归属过滤 404+exclude_unset 清除语义, 2026-10-10-workspec-maintenance)
       - linked_repos_sync 编排 (backend/app/modules/daemon/linked_repos_sync.py, linked_repos_sync RPC[30s+15s/仓上限180s]+machines.py 回报端点[落库唯一通道]+best-effort 推送[逐成员 abs_path/引用池], 2026-10-10-workspec-maintenance)
       - fetch_local_snapshot + import 端点 (backend/app/modules/daemon/linked_repos_sync.py + workspace/linked_repos/router.py, 本机现状回显·RPC 快照+双源合并三态对照[Gap A]+四态降级[Gap B]+导入双落地幂等, 2026-10-10-linked-repos-local-echo)
+      - ref_workspace 挂载 (backend/app/modules/workspace/linked_repos/model.py+service.py+daemon/linked_repos_sync.py, 关联仓→平台工作区 FK 引用·读时降级[X-001]+可见集匹配[X-002·allowed_workspace_ids+admin bypass]+PATCH 422, 2026-10-11-linked-repo-workspace-ref)
       - members_router
       - auth_router
       - health_router

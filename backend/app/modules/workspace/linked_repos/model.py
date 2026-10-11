@@ -34,6 +34,7 @@ class WorkspaceLinkedRepo(BaseModel, table=True):
     __table_args__ = (
         UniqueConstraint("workspace_id", "name", name="ux_linked_repos_ws_name"),
         Index("ix_linked_repos_workspace", "workspace_id"),
+        Index("ix_linked_repos_ref_ws", "ref_workspace_id"),
     )
 
     id: UUID = Field(
@@ -53,6 +54,15 @@ class WorkspaceLinkedRepo(BaseModel, table=True):
     description: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     # 团队约定的相对工作区根路径（如 ../platform-specs）；可空=该仓只落 repos: 层。
     rel_path: str | None = Field(default=None, sa_column=Column(String(500), nullable=True))
+    # 挂载引用：指向平台另一工作区（可空；读时降级过滤软删，DB SET NULL 防御性保留——Grill X-001）。
+    ref_workspace_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     created_by: UUID | None = Field(
         default=None,
         sa_column=Column(

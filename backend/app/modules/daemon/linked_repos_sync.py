@@ -525,6 +525,54 @@ async def fetch_local_snapshot(
         entry["abs_path"] = repo.get("path")
         entry["sources"].append("repos")
 
+    # 可见工作区集（Grill X-002：非平台管理员仅匹配 allowed_workspace_ids 限定的
+    # 可见工作区，防 name/slug 泄露；过滤软删；平台管理员全量）
+    from app.modules.auth.model import User as _UserModel
+    from app.modules.auth.permissions import Permission
+    from app.modules.auth.rbac import allowed_workspace_ids
+    from app.modules.workspace.model import Workspace as _WsModel
+
+    _actor = await session.get(_UserModel, actor_user_id)
+    _is_admin = bool(_actor and _actor.is_platform_admin)
+    if _is_admin:
+        # 平台管理员 bypass：全平台（仅过滤软删）
+        visible_ws = (
+            (await session.execute(select(_WsModel).where(col(_WsModel.deleted_at).is_(None))))
+            .scalars()
+            .all()
+        )
+    else:
+        allowed_ids = await allowed_workspace_ids(
+            session, user_id=actor_user_id, permission=Permission.WORKSPACE_READ
+        )
+        if not allowed_ids:
+            visible_ws = []
+        else:
+            visible_ws = (
+                (
+                    await session.execute(
+                        select(_WsModel).where(
+                            col(_WsModel.deleted_at).is_(None),
+                            col(_WsModel.id).in_(allowed_ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+    def match_ws(key: str) -> dict | None:
+        """tie-break: name 优先 slug，仍多命中取 id 最小（确定性）。"""
+        by_name = sorted([w for w in visible_ws if w.name == key], key=lambda w: w.id)
+        if by_name:
+            w = by_name[0]
+            return {"id": str(w.id), "name": w.name, "slug": w.slug}
+        by_slug = sorted([w for w in visible_ws if w.slug == key], key=lambda w: w.id)
+        if by_slug:
+            w = by_slug[0]
+            return {"id": str(w.id), "name": w.name, "slug": w.slug}
+        return None
+
     # 三态对照
     entries = []
     for name, entry in sorted(merged.items()):
@@ -533,8 +581,10 @@ async def fetch_local_snapshot(
             entry["match"] = "both"
             entry["platform_repo_id"] = str(row.id)
             entry["platform_rel_path"] = row.rel_path
+            entry["matched_workspace"] = None  # both 条目恒 null（design 兼容策略）
         else:
             entry["match"] = "local_only"
+            entry["matched_workspace"] = match_ws(name)
         entries.append(entry)
     platform_only = sorted(set(platform_by_name) - set(merged))
 

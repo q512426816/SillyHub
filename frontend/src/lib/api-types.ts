@@ -18965,6 +18965,8 @@ export interface components {
             description?: string | null;
             /** Rel Path */
             rel_path?: string | null;
+            /** Ref Workspace Id */
+            ref_workspace_id?: string | null;
         };
         /** LinkedRepoOut */
         LinkedRepoOut: {
@@ -18981,6 +18983,7 @@ export interface components {
             description?: string | null;
             /** Rel Path */
             rel_path?: string | null;
+            ref_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
             /** My Path */
             my_path?: string | null;
             /** Sync Status Summary */
@@ -19016,7 +19019,7 @@ export interface components {
         /**
          * LinkedRepoUpdate
          * @description 编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生
-         *     落盘产物错位——design 数据模型节）。
+         *     落盘产物错位——design 数据模型节）。ref_workspace_id 键在场 null=摘除。
          */
         LinkedRepoUpdate: {
             /** Repo Url */
@@ -19025,6 +19028,8 @@ export interface components {
             description?: string | null;
             /** Rel Path */
             rel_path?: string | null;
+            /** Ref Workspace Id */
+            ref_workspace_id?: string | null;
         };
         /**
          * ListDirRequest
@@ -19253,6 +19258,7 @@ export interface components {
             platform_repo_id?: string | null;
             /** Platform Rel Path */
             platform_rel_path?: string | null;
+            matched_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
         };
         /**
          * LocalSnapshotResponse
@@ -28616,30 +28622,6 @@ export interface components {
             };
         };
         /**
-         * WorkspaceBrief
-         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
-         *
-         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
-         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
-         */
-        WorkspaceBrief: {
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-            /** Name */
-            name: string;
-            /** Status */
-            status: string;
-            /** Type */
-            type?: string | null;
-            /** Role */
-            role?: string | null;
-            /** Description */
-            description?: string | null;
-        };
-        /**
          * WorkspaceCreate
          * @description Request body for ``POST /api/workspaces``.
          *
@@ -29395,6 +29377,21 @@ export interface components {
             created_at: string;
         };
         /**
+         * WorkspaceBrief
+         * @description 挂载引用/匹配提示的工作区摘要 {id,name,slug}（读时过滤软删）。
+         */
+        app__modules__workspace__linked_repos__schema__WorkspaceBrief: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+        };
+        /**
          * OwnerRead
          * @description Nested owner DTO for platform-admin global views (task-05 / D-006@v1).
          */
@@ -29405,6 +29402,30 @@ export interface components {
             email?: string | null;
             /** Display Name */
             display_name?: string | null;
+        };
+        /**
+         * WorkspaceBrief
+         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+         *
+         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
+         */
+        app__modules__workspace__schema__WorkspaceBrief: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Type */
+            type?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Description */
+            description?: string | null;
         };
     };
     responses: never;
@@ -43973,7 +43994,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceBrief"][];
+                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"][];
                 };
             };
             /** @description Validation Error */
@@ -44008,7 +44029,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceBrief"];
+                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"];
                 };
             };
             /** @description Validation Error */

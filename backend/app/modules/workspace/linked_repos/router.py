@@ -99,11 +99,18 @@ async def create_linked_repo(
             repo_url=payload.repo_url,
             description=payload.description,
             rel_path=payload.rel_path,
+            ref_workspace_id=payload.ref_workspace_id,
             created_by=user.id,
         )
     except service.LinkedRepoNameConflict as exc:
         raise AppError(
             f"关联仓重名: {exc}", code="HTTP_409_LINKED_REPO_NAME_CONFLICT", http_status=409
+        ) from exc
+    except service.RefWorkspaceInvalid as exc:
+        raise AppError(
+            f"挂载工作区非法: {exc}",
+            code="HTTP_422_REF_WORKSPACE_INVALID",
+            http_status=422,
         ) from exc
     await _push_best_effort(session, workspace_id)
     return LinkedRepoOut(
@@ -112,6 +119,7 @@ async def create_linked_repo(
         repo_url=row.repo_url,
         description=row.description,
         rel_path=row.rel_path,
+        ref_workspace=None,
         my_path=None,
         sync_status_summary=[],
     )
@@ -142,6 +150,12 @@ async def update_linked_repo(
         raise AppError(
             "关联仓不存在", code="HTTP_404_LINKED_REPO_NOT_FOUND", http_status=404
         ) from exc
+    except service.RefWorkspaceInvalid as exc:
+        raise AppError(
+            f"挂载工作区非法: {exc}",
+            code="HTTP_422_REF_WORKSPACE_INVALID",
+            http_status=422,
+        ) from exc
     await _push_best_effort(session, workspace_id)
     return LinkedRepoOut(
         id=row.id,
@@ -149,6 +163,7 @@ async def update_linked_repo(
         repo_url=row.repo_url,
         description=row.description,
         rel_path=row.rel_path,
+        ref_workspace=None,
         my_path=None,
         sync_status_summary=[],
     )

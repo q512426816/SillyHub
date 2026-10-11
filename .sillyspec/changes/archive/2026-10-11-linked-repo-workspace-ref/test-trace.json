@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-linked-repo-workspace-ref",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-linked-repo-workspace-ref:task-01:acc-0-3c9095f1",
+      "tests": [
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repo-workspace-ref"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-linked-repo-workspace-ref:task-01:acc-1-349bd3a6",
+      "tests": [
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repo-workspace-ref"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-linked-repo-workspace-ref:task-02:acc-0-5034f1dd",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repo-workspace-ref"
+    }
+  ]
+}

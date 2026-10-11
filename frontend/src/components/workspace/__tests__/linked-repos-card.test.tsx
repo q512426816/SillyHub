@@ -206,3 +206,57 @@ describe("本机现状区 timeout 态（2026-10-11-snapshot-timeout-distinct）"
     expect(screen.queryByText(/守护进程离线/)).toBeNull();
   });
 });
+
+describe("ref_workspace 挂载与匹配（2026-10-11-linked-repo-workspace-ref）", () => {
+  it("已挂载条目显示跳转图标（链接到对方工作区）", async () => {
+    listMock.mockResolvedValue([
+      { ...sample, name: "linked-to-b", ref_workspace: { id: "ws-b", name: "WS-B", slug: "ws-b" } },
+    ]);
+    mount({ canManage: true });
+    await screen.findByText("linked-to-b");
+    const link = screen.getByTitle("跳转到工作区 WS-B");
+    expect(link).toHaveAttribute("href", "/workspaces/ws-b");
+  });
+
+  it("未挂载条目无跳转图标（回归）", async () => {
+    listMock.mockResolvedValue([sample]);
+    mount({ canManage: true });
+    await screen.findByText("platform-specs");
+    expect(screen.queryByTitle(/跳转到工作区/)).toBeNull();
+  });
+
+  it("回显 matched_workspace 命中显示匹配提示链接", async () => {
+    listMock.mockResolvedValue([sample]);
+    fetchSnapMock.mockResolvedValue({
+      status: "ok",
+      entries: [
+        {
+          key: "demo", sources: ["projects"], rel_path: "../demo", abs_path: null,
+          match: "local_only", matched_workspace: { id: "ws-demo", name: "Demo", slug: "demo" },
+        },
+      ],
+      platform_only_names: [],
+    });
+    mount({ canManage: true });
+    await screen.findByText("platform-specs");
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    const matchLink = await screen.findByText(/匹配到 Demo/);
+    expect(matchLink.closest("a")).toHaveAttribute("href", "/workspaces/ws-demo");
+  });
+
+  it("both 条目无 matched 提示（恒 null 回归）", async () => {
+    listMock.mockResolvedValue([]);
+    fetchSnapMock.mockResolvedValue({
+      status: "ok",
+      entries: [
+        { key: "platform-specs", sources: ["projects"], rel_path: "../s", abs_path: null, match: "both" },
+      ],
+      platform_only_names: [],
+    });
+    mount({ canManage: true });
+    await screen.findByText(/尚未登记关联仓/);
+    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
+    await screen.findByText("platform-specs");
+    expect(screen.queryByText(/匹配到/)).toBeNull();
+  });
+});

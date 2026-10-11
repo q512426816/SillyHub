@@ -9,15 +9,18 @@
  */
 
 import { useEffect, useState } from "react";
-import { App, Form, Input, Modal } from "antd";
+import { App, Form, Input, Modal, Select } from "antd";
 
 import { ApiError } from "@/lib/api";
 import type { LinkedRepoUpsertInput, LinkedRepoView } from "@/lib/linked-repos";
+import { listWorkspaces } from "@/lib/workspaces";
 
 export interface LinkedRepoFormModalProps {
   open: boolean;
   /** null=新增；否则编辑该行（name 锁定）。 */
   editing: LinkedRepoView | null;
+  /** 当前工作区 id（下拉排除自身）。 */
+  currentWorkspaceId: string;
   onClose: () => void;
   onSubmit: (input: LinkedRepoUpsertInput) => Promise<void>;
 }
@@ -27,17 +30,33 @@ interface FormValues {
   repo_url?: string;
   description?: string;
   rel_path?: string;
+  ref_workspace_id?: string;
 }
 
 export function LinkedRepoFormModal({
   open,
   editing,
+  currentWorkspaceId,
   onClose,
   onSubmit,
 }: LinkedRepoFormModalProps): JSX.Element {
   const { message } = App.useApp();
   const [form] = Form.useForm<FormValues>();
   const [saving, setSaving] = useState(false);
+  const [wsOptions, setWsOptions] = useState<Array<{ value: string; label: string }>>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    listWorkspaces({ limit: 100 })
+      .then((res) => {
+        setWsOptions(
+          (res.items ?? [])
+            .filter((w) => w.id !== currentWorkspaceId)
+            .map((w) => ({ value: w.id, label: w.name })),
+        );
+      })
+      .catch(() => setWsOptions([]));
+  }, [open, currentWorkspaceId]);
 
   useEffect(() => {
     if (open) {
@@ -46,6 +65,7 @@ export function LinkedRepoFormModal({
         repo_url: editing?.repo_url ?? "",
         description: editing?.description ?? "",
         rel_path: editing?.rel_path ?? "",
+        ref_workspace_id: editing?.ref_workspace?.id ?? undefined,
       });
     }
   }, [open, editing, form]);
@@ -64,6 +84,7 @@ export function LinkedRepoFormModal({
         repo_url: values.repo_url?.trim() || null,
         description: values.description?.trim() || null,
         rel_path: values.rel_path?.trim() || null,
+        ref_workspace_id: values.ref_workspace_id ?? null,
       });
       message.success(editing ? "已保存修改" : "已新增关联仓");
       onClose();
@@ -113,6 +134,20 @@ export function LinkedRepoFormModal({
           extra="相对本工作区根目录的团队约定路径（如 ../platform-specs，进 git 须全员一致）；留空则该仓只落本机 repos 注册表层"
         >
           <Input placeholder="../platform-specs（可空）" maxLength={500} />
+        </Form.Item>
+        <Form.Item
+          name="ref_workspace_id"
+          label="关联到平台工作区"
+          extra="可选——挂载后列表条目可直接跳转到对方工作区详情页"
+        >
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="选择平台工作区（可选）"
+            options={wsOptions}
+            notFoundContent="暂无其它可见工作区"
+          />
         </Form.Item>
         <Form.Item name="description" label="关系描述">
           <Input.TextArea

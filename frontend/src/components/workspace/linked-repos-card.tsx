@@ -215,7 +215,18 @@ export function LinkedReposCard({ workspaceId, canManage }: LinkedReposCardProps
             return (
               <li key={repo.id} className="grid grid-cols-[minmax(120px,1fr)_1.4fr_1.6fr_auto] items-center gap-3 px-4 py-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{repo.name}</p>
+                  <p className="flex items-center gap-1 truncate text-sm font-semibold">
+                    {repo.name}
+                    {repo.ref_workspace ? (
+                      <a
+                        href={`/workspaces/${repo.ref_workspace.id}`}
+                        className="text-brand-600 hover:text-brand-700"
+                        title={`跳转到工作区 ${repo.ref_workspace.name}`}
+                      >
+                        ↗
+                      </a>
+                    ) : null}
+                  </p>
                   <p className="truncate text-xs text-muted-foreground" title={repo.description ?? undefined}>
                     {repo.description || "—"}
                   </p>
@@ -299,6 +310,7 @@ export function LinkedReposCard({ workspaceId, canManage }: LinkedReposCardProps
       {formOpen ? (
         <LinkedRepoFormModal
           open={formOpen}
+          currentWorkspaceId={workspaceId}
           editing={editing}
           onClose={() => setFormOpen(false)}
           onSubmit={async (input) => {
@@ -458,6 +470,15 @@ function LocalEchoSection({
                     <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">
                       仅本机{importable ? "" : "（路径未知）"}
                     </Badge>
+                  ) : null}
+                  {e.match === "local_only" && e.matched_workspace ? (
+                    <a
+                      href={`/workspaces/${e.matched_workspace.id}`}
+                      className="text-[10px] text-brand-600 hover:text-brand-700"
+                      title={`跳转到工作区 ${e.matched_workspace.name}`}
+                    >
+                      匹配到 {e.matched_workspace.name} ↗
+                    </a>
                   ) : null}
                   <span className="truncate text-muted-foreground" title={[e.rel_path, e.abs_path].filter(Boolean).join(" | ") || undefined}>
                     {[e.rel_path, e.abs_path].filter(Boolean).join(" | ") || "—"}

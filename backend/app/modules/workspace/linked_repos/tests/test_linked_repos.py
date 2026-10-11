@@ -678,3 +678,242 @@ async def test_local_snapshot_http_offline_still_offline(
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "daemon_offline"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# task-01（2026-10-11-linked-repo-workspace-ref）：挂载引用/软删降级/匹配。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def test_ref_workspace_mount_unmount(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """挂载→摘要返回→null 摘除。"""
+    ws, _, _ = await _seed(db_session, tag="refa")
+    other, _, _ = await _seed(db_session, tag="refb")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+
+    resp = await client.post(
+        base,
+        json={"name": "linked-to-b", "ref_workspace_id": str(other.id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201, resp.text
+
+    # list_repos 摘要返回——直调 service（ref 摘要 join 需 list_repos 扩展；HTTP 层 list 返回也应含）
+    from app.modules.workspace.linked_repos import service as lr_service
+
+    aid = await _admin_id(db_session)
+    items = await lr_service.list_repos(db_session, ws.id, aid, viewer_is_elevated=True)
+    item = next(i for i in items if i.name == "linked-to-b")
+    assert item.ref_workspace is not None
+    assert item.ref_workspace.id == other.id
+    assert item.ref_workspace.name == "WS-refb"
+
+    # null 摘除
+    repo_id = item.id
+    resp = await client.patch(
+        f"{base}/{repo_id}", json={"ref_workspace_id": None}, headers=auth_headers
+    )
+    assert resp.status_code == 200
+    aid = await _admin_id(db_session)
+    items = await lr_service.list_repos(db_session, ws.id, aid, viewer_is_elevated=True)
+    item = next(i for i in items if i.name == "linked-to-b")
+    assert item.ref_workspace is None
+
+
+async def test_ref_workspace_validation_422(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """三路径：挂自身/不存在/软删。"""
+    ws, _, _ = await _seed(db_session, tag="refc")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+
+    # 挂自身
+    resp = await client.post(
+        base, json={"name": "self-ref", "ref_workspace_id": str(ws.id)}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+    assert "REF_WORKSPACE_INVALID" in resp.text
+
+    # 不存在
+    resp = await client.post(
+        base,
+        json={"name": "ghost-ref", "ref_workspace_id": str(uuid.uuid4())},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+    # 软删目标
+    dead, _, _ = await _seed(db_session, tag="refd")
+    from datetime import UTC as _U
+    from datetime import datetime as _dt
+
+    dead.status = "deleted"
+    dead.deleted_at = _dt.now(_U)
+    db_session.add(dead)
+    await db_session.commit()
+    resp = await client.post(
+        base, json={"name": "dead-ref", "ref_workspace_id": str(dead.id)}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+
+
+async def test_matched_workspace_in_snapshot(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """local_only 条目按名匹配到可见工作区 → matched_workspace 附上；both 条目恒 null。"""
+    from app.modules.daemon.linked_repos_sync import fetch_local_snapshot
+
+    ws, user, machine = await _seed(db_session, tag="snapm")
+    user.is_platform_admin = True  # 平台管理员 bypass 可见集（Grill X-002 admin 路径）
+    db_session.add(user)
+    await db_session.commit()
+    _ = None  # demo 工作区手动建
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+    from app.modules.workspace.model import Workspace as _WsModel
+
+    demo_ws = _WsModel(
+        id=uuid.uuid4(), name="demo", slug="demo-ws", root_path="/demo", status="active"
+    )
+    db_session.add(demo_ws)
+    actor = machine.user_id
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=actor,
+            daemon_id=machine.id,
+            root_path="/ws",
+            path_source="manual",
+        )
+    )
+    # 平台已有 platform-specs（both）与 demo 不登记（local_only → 应匹配到 demo_ws）
+    db_session.add(
+        WorkspaceLinkedRepo(workspace_id=ws.id, name="platform-specs", rel_path="../specs")
+    )
+    await db_session.commit()
+
+    hub = AsyncMock()
+    hub.send_rpc = AsyncMock(
+        return_value={
+            "projects": [
+                {
+                    "name": "demo",
+                    "path": "../demo",
+                    "role": None,
+                    "state": "scanned",
+                    "detail": None,
+                },
+                {
+                    "name": "platform-specs",
+                    "path": "../specs",
+                    "role": None,
+                    "state": "scanned",
+                    "detail": None,
+                },
+            ],
+            "repos": [],
+            "fetched_at": "2026-10-11T00:00:00Z",
+        }
+    )
+    import app.modules.daemon.ws_hub as ws_hub_mod
+
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: hub)
+
+    out = await fetch_local_snapshot(db_session, ws.id, actor)
+    by_key = {e["key"]: e for e in out["entries"]}
+    demo = by_key["demo"]
+    assert demo["match"] == "local_only"
+    assert demo["matched_workspace"] is not None
+    assert demo["matched_workspace"]["name"] == "demo"
+    both = by_key["platform-specs"]
+    assert both["matched_workspace"] is None  # both 恒 null
+
+
+# 内部辅助：admin user id（既有用例同款）
+
+
+async def _admin_id(session):
+    from sqlalchemy import select as _sel
+
+    from app.modules.auth.model import User
+
+    return (
+        (await session.execute(_sel(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .one()
+        .id
+    )
+
+
+# ── 验收审查返工用例（X-001/X-002/422 契约补）──────────────────────────────
+
+
+async def test_patch_ref_workspace_422(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """PATCH 挂非法目标（自身/不存在/软删）→ 422（初审实测 500 的回归钉）。"""
+    ws, _, _ = await _seed(db_session, tag="p422")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+    repo_id = ((await client.post(base, json={"name": "r422"}, headers=auth_headers)).json())["id"]
+
+    for bad in [ws.id, uuid.uuid4()]:
+        resp = await client.patch(
+            f"{base}/{repo_id}", json={"ref_workspace_id": str(bad)}, headers=auth_headers
+        )
+        assert resp.status_code == 422, f"{bad}: {resp.status_code} {resp.text}"
+        assert "REF_WORKSPACE_INVALID" in resp.text
+
+    dead, _, _ = await _seed(db_session, tag="p422d")
+    from datetime import UTC as _U
+    from datetime import datetime as _dt
+
+    dead.status = "deleted"
+    dead.deleted_at = _dt.now(_U)
+    db_session.add(dead)
+    await db_session.commit()
+    resp = await client.patch(
+        f"{base}/{repo_id}", json={"ref_workspace_id": str(dead.id)}, headers=auth_headers
+    )
+    assert resp.status_code == 422
+
+
+async def test_mounted_then_softdelete_summary_null(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """挂载后对方软删 → 行保留+摘要 null（X-001 读时降级回归钉）。"""
+    from datetime import UTC as _U
+    from datetime import datetime as _dt
+
+    ws, _, _ = await _seed(db_session, tag="mx1")
+    other, _, _ = await _seed(db_session, tag="mx2")
+    base = f"/api/workspaces/{ws.id}/linked-repos"
+    resp = await client.post(
+        base,
+        json={"name": "mounted", "ref_workspace_id": str(other.id)},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 201
+
+    other.status = "deleted"
+    other.deleted_at = _dt.now(_U)
+    db_session.add(other)
+    await db_session.commit()
+
+    from app.modules.workspace.linked_repos import service as lr_service
+
+    aid = await _admin_id(db_session)
+    items = await lr_service.list_repos(db_session, ws.id, aid, viewer_is_elevated=True)
+    item = next(i for i in items if i.name == "mounted")
+    assert item.ref_workspace is None  # 读时降级
+    # 行还在（FK 值保留在 DB，摘要层降级）
+    db_row = await db_session.get(WorkspaceLinkedRepo, item.id)
+    assert db_row is not None and db_row.ref_workspace_id == other.id

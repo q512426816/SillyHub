@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-11-linked-repo-workspace-ref",
+  "generatedAt": "2026-10-11T09:53:59.434Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "tasks": 2,
+        "hasTest": 2
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "backendEndpoints": 641,
+        "frontendCalls": 6
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-11-linked-repo-workspace-ref",
+      "metrics": {
+        "checkedFiles": 3,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 35 用例全绿——含 PATCH 422 三路径/软删降级回归钉/X-002 可见集（admin bypass 路径）",
+      "command": "cd backend && uv run pytest app/modules/workspace/linked_repos/tests app/modules/daemon/tests/test_linked_repos_sync.py -q --no-cov",
+      "exitCode": 0,
+      "logPath": "会话实跑 2026-10-11"
+    },
+    {
+      "claim": "frontend 15 用例全绿 + tsc/lint 零错 + gen:types 三件齐（WorkspaceBrief/ref_workspace/matched_workspace 在 api-types）",
+      "command": "cd frontend && pnpm vitest run src/components/workspace/__tests__/linked-repos-card.test.tsx && pnpm typecheck && pnpm lint",
+      "exitCode": 0,
+      "logPath": "会话实跑 2026-10-11"
+    }
+  ],
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "浏览器走查：表单下拉/跳转图标/匹配提示条",
+        "condition": "dev 环境工作区详情→关联仓卡片过一遍（组件测试已覆盖代码层）",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py25+jsx27)+fr(51)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-11T10:07:02.413Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

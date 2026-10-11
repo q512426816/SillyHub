@@ -23955,7 +23955,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/WorkspaceBrief"
+                    "$ref": "#/components/schemas/app__modules__workspace__schema__WorkspaceBrief"
                   },
                   "title": "Response List Project Workspaces Api Ppm Projects  Project Id  Workspaces Get"
                 }
@@ -24009,7 +24009,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceBrief"
+                  "$ref": "#/components/schemas/app__modules__workspace__schema__WorkspaceBrief"
                 }
               }
             }
@@ -51853,6 +51853,18 @@
               }
             ],
             "title": "Rel Path"
+          },
+          "ref_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Workspace Id"
           }
         },
         "type": "object",
@@ -51905,6 +51917,16 @@
               }
             ],
             "title": "Rel Path"
+          },
+          "ref_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__modules__workspace__linked_repos__schema__WorkspaceBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "my_path": {
             "anyOf": [
@@ -52033,11 +52055,23 @@
               }
             ],
             "title": "Rel Path"
+          },
+          "ref_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Workspace Id"
           }
         },
         "type": "object",
         "title": "LinkedRepoUpdate",
-        "description": "编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生\n落盘产物错位——design 数据模型节）。"
+        "description": "编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生\n落盘产物错位——design 数据模型节）。ref_workspace_id 键在场 null=摘除。"
       },
       "ListDirRequest": {
         "properties": {
@@ -52712,6 +52746,16 @@
               }
             ],
             "title": "Platform Rel Path"
+          },
+          "matched_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__modules__workspace__linked_repos__schema__WorkspaceBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -77169,64 +77213,6 @@
         "title": "WorkloadGridUserRow",
         "description": "工时热力网格·单人员行。\n\n``plan_hours``/``actual_hours`` 为 ``{YYYY-MM-DD: 人天}`` 字典,缺省日期视为 0。\nplan = 剩余负载摊天 (仅 ≥ today,面向未来);actual = time_spent 覆盖日求和 (含今天)。"
       },
-      "WorkspaceBrief": {
-        "properties": {
-          "workspace_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Workspace Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Type"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          }
-        },
-        "type": "object",
-        "required": [
-          "workspace_id",
-          "name",
-          "status"
-        ],
-        "title": "WorkspaceBrief",
-        "description": "项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。\n\nFR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，\n项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。"
-      },
       "WorkspaceCreate": {
         "properties": {
           "name": {
@@ -79166,6 +79152,31 @@
         ],
         "title": "ReviewResponse"
       },
+      "app__modules__workspace__linked_repos__schema__WorkspaceBrief": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slug"
+        ],
+        "title": "WorkspaceBrief",
+        "description": "挂载引用/匹配提示的工作区摘要 {id,name,slug}（读时过滤软删）。"
+      },
       "app__modules__workspace__schema__OwnerRead": {
         "properties": {
           "user_id": {
@@ -79206,6 +79217,64 @@
         "type": "object",
         "title": "OwnerRead",
         "description": "Nested owner DTO for platform-admin global views (task-05 / D-006@v1)."
+      },
+      "app__modules__workspace__schema__WorkspaceBrief": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "name",
+          "status"
+        ],
+        "title": "WorkspaceBrief",
+        "description": "项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。\n\nFR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，\n项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。"
       }
     }
   }

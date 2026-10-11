@@ -26,6 +26,14 @@ class SyncStateBrief(BaseModel):
     synced_at: datetime
 
 
+class WorkspaceBrief(BaseModel):
+    """挂载引用/匹配提示的工作区摘要 {id,name,slug}（读时过滤软删）。"""
+
+    id: UUID
+    name: str
+    slug: str
+
+
 class LinkedRepoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -34,6 +42,7 @@ class LinkedRepoOut(BaseModel):
     repo_url: str | None = None
     description: str | None = None
     rel_path: str | None = None
+    ref_workspace: WorkspaceBrief | None = None
     # 当前用户的成员级本机路径（无则 None）。
     my_path: str | None = None
     # 落盘状态摘要：普通成员=自己绑定机器；owner/admin=全部机器（task-03 接管）。
@@ -47,15 +56,17 @@ class LinkedRepoCreate(BaseModel):
     repo_url: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=2000)
     rel_path: str | None = Field(default=None, max_length=500)
+    ref_workspace_id: UUID | None = Field(default=None)
 
 
 class LinkedRepoUpdate(BaseModel):
     """编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生
-    落盘产物错位——design 数据模型节）。"""
+    落盘产物错位——design 数据模型节）。ref_workspace_id 键在场 null=摘除。"""
 
     repo_url: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=2000)
     rel_path: str | None = Field(default=None, max_length=500)
+    ref_workspace_id: UUID | None = Field(default=None)
 
 
 class MyPathUpdate(BaseModel):
@@ -80,6 +91,8 @@ class LocalSnapshotEntry(BaseModel):
     match: Literal["both", "local_only", "platform_only"]
     platform_repo_id: UUID | None = None
     platform_rel_path: str | None = None
+    # 按名匹配到的平台工作区（仅 local_only 条目；限定当前用户可见集+过滤软删；只提示不写库）
+    matched_workspace: WorkspaceBrief | None = None
 
 
 class LocalSnapshotResponse(BaseModel):

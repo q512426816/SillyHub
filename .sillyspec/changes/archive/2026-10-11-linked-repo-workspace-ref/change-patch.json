@@ -1,0 +1,151 @@
+{
+  "change": "2026-10-11-linked-repo-workspace-ref",
+  "baseline": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
+  "head": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
+  "files": [
+    "backend/app/modules/daemon/linked_repos_sync.py",
+    "backend/app/modules/workspace/linked_repos/model.py",
+    "backend/app/modules/workspace/linked_repos/router.py",
+    "backend/app/modules/workspace/linked_repos/schema.py",
+    "backend/app/modules/workspace/linked_repos/service.py",
+    "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+    "backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py",
+    "backend/openapi.json",
+    "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+    "frontend/src/components/workspace/linked-repos-card.tsx",
+    "frontend/src/components/workspace/linked-repos-form.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/linked-repos.ts"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 712,
+    "deletions": 93
+  },
+  "savedAt": "2026-10-11T09:53:17.131Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
+    "totals": {
+      "files": 13,
+      "additions": 712,
+      "deletions": 93
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/linked_repos_sync.py",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/model.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/router.py",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/schema.py",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/service.py",
+        "additions": 50,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py",
+        "additions": 239,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261011020000_add_linked_repo_ref_workspace.py",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 130,
+        "deletions": 61,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx",
+        "additions": 54,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/linked-repos-card.tsx",
+        "additions": 22,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/linked-repos-form.tsx",
+        "additions": 36,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 48,
+        "deletions": 27,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/linked-repos.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "ff0b12ecf241811a6727e6d1770c6dba8b77e5a62e4b2be2c6959adefe9d7080",
+  "patchStatus": "ok"
+}

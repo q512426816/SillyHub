@@ -17,6 +17,7 @@ export interface LinkedRepoUpsertInput {
   repo_url?: string | null;
   description?: string | null;
   rel_path?: string | null;
+  ref_workspace_id?: string | null;
 }
 
 function base(workspaceId: string): string {
@@ -76,6 +77,12 @@ export async function syncLinkedReposNow(workspaceId: string): Promise<SyncNowOu
   return apiFetch<SyncNowOutcome>(`${base(workspaceId)}/sync`, { method: "POST" });
 }
 
+export interface WorkspaceBriefView {
+  id: string;
+  name: string;
+  slug: string;
+}
+
 export interface LocalSnapshotEntryView {
   key: string;
   sources: string[];
@@ -87,6 +94,7 @@ export interface LocalSnapshotEntryView {
   match: "both" | "local_only" | "platform_only";
   platform_repo_id?: string | null;
   platform_rel_path?: string | null;
+  matched_workspace?: WorkspaceBriefView | null;
 }
 
 export interface LocalSnapshotView {
