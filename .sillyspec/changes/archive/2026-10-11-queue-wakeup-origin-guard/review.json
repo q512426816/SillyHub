@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-queue-wakeup-origin-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4327a97dff4afdea34bc7ddde367f8b86cea5583",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok；合并与计数均在会话行锁内同事务查询+写入（queue.py:142-201，_handle_busy_turn 调用方持 _get_owned_session_for_update 行锁），origin 判定不依赖到达顺序，daemon 重试同 origin 仍幂等合并",
+    "并发": "ok；满员计数/合并锚/入队三查一写都在行锁内串行，伪造行（origin NULL）与通知行互不合并；并发双发不会超上限",
+    "切换": "ok；边界已裁决：可接受——旧 daemon（无 origin 字段）+ 新 backend 通知按普通消息计（test_api_key_without_origin_is_plain_user_message 实证落 origin NULL 普通行），同仓同部署窗口、最坏丢一条通知且 daemon catch 不崩",
+    "作用域": "ok；origin 为排队行级标记随会话隔离；'task_wakeup' 字面量与 'auto_resume:<uuid>' 前缀空间不相交（无冒号，parse_auto_resume_origin 不误伤），dispatch/reorder 的 auto_resume 守卫均用 startswith('auto_resume:') 不命中 task_wakeup 行"
+  },
+  "reviewedAt": "2026-10-11T05:00:00Z",
+  "incrementalNote": "增量复审（第二轮）：git diff 437996ec4..4327a97df 核实仅两处变化——review.json 入库与本文件 test_edit_wakeup_entry_rejected_409 docstring 4 行注释修正，无其他代码变化。原 P3（docstring 与实际断言相反）已修复：新注释「守卫改纯结构化 origin 判定（存量/伪造前缀行的编辑语义见相邻两个用例）」与实现（queue.py:581）及相邻用例（test_session_queue_actions.py:486 legacy 可编辑、:514 伪造可编辑）一致，finding 清偿移除。首轮全量结论（FR-01~06 三方一致、80 用例实测全绿、防护机制在位、生成物同步）不受影响。"
+}

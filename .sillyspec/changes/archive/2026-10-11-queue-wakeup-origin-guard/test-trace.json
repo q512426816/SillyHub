@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-queue-wakeup-origin-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-01",
+      "tests": [
+        "test/app/modules/daemon/tests/test_session_queue.py「test_spoofed_prefix_message_consumes_user_quota_and_rejected」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-02",
+      "tests": [
+        "test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_inject_succeeds_when_queue_full」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-02",
+      "tests": [
+        "test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_entries_merge_by_origin」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-03",
+      "tests": [
+        "test/app/modules/daemon/tests/test_inject_origin_guard.py「test_bearer_with_origin_field_403」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-04",
+      "tests": [
+        "test/app/modules/daemon/tests/test_inject_origin_guard.py「test_origin_literal_validation_422」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-05",
+      "tests": [
+        "test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_wakeup_entry_rejected_409」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-05",
+      "tests": [
+        "test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_spoofed_prefix_user_entry_allowed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-06",
+      "tests": [
+        "test/app/modules/daemon/tests/test_inject_origin_guard.py「test_api_key_origin_inject_marks_queue_row」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-queue-wakeup-origin-guard"
+    }
+  ]
+}

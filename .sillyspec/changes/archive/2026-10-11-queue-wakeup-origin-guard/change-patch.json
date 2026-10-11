@@ -1,0 +1,243 @@
+{
+  "change": "2026-10-11-queue-wakeup-origin-guard",
+  "baseline": "f0d24f51dd296c86dc2093343e1084d935db5515",
+  "head": "4327a97dff4afdea34bc7ddde367f8b86cea5583",
+  "files": [
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/design.md",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/proposal.md",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/requirements.md",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/tasks.md",
+    "backend/app/core/auth_deps.py",
+    "backend/app/modules/daemon/router/session_crud.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/service.py",
+    "backend/app/modules/daemon/session/service/__init__.py",
+    "backend/app/modules/daemon/session/service/helpers.py",
+    "backend/app/modules/daemon/session/service/inject.py",
+    "backend/app/modules/daemon/session/service/queue.py",
+    "backend/app/modules/daemon/tests/test_inject_origin_guard.py",
+    "backend/app/modules/daemon/tests/test_session_queue.py",
+    "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+    "backend/openapi.json",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/hub-client.ts",
+    ".sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json.superseded-20261011T040932"
+  ],
+  "totals": {
+    "files": 22,
+    "additions": 780,
+    "deletions": 33
+  },
+  "savedAt": "2026-10-11T04:09:34.080Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 10,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 12,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 12,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 21,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f0d24f51dd296c86dc2093343e1084d935db5515",
+    "totals": {
+      "files": 15,
+      "additions": 526,
+      "deletions": 33
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/auth_deps.py",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_crud.py",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/service.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/__init__.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/helpers.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject.py",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/queue.py",
+        "additions": 38,
+        "deletions": 20,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_inject_origin_guard.py",
+        "additions": 214,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_queue.py",
+        "additions": 111,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_queue_actions.py",
+        "additions": 68,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/hub-client.ts",
+        "additions": 10,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a99c4d2fdfb6d05b7a13c7f107d441406385c2f4056c32428e8115f4555fd9b4",
+  "patchStatus": "ok"
+}

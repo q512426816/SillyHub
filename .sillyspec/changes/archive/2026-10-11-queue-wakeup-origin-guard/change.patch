@@ -1,0 +1,1236 @@
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/flow-state.yaml b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/flow-state.yaml
+new file mode 100644
+index 000000000..1471605cc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/flow-state.yaml
+@@ -0,0 +1,29 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  排队满员豁免按消息内容前缀判定可被用户伪造（24h 审查 P2）：queue.py 以 prompt.startswith("[后台任务通知]") 判定豁免与计数排除，而 /inject 端点对用户 prompt
++  零过滤——用户发该前缀消息即可冒充系统通知绕过 5 条额度并落入不可编辑的通知条目。修复：豁免/合并/计数全部改读排队行结构化 origin='task_wakeup'；标记仅由服务凭证（X-API-Key，api_key:admin
++  签发给 daemon）经请求显式字段携带，Bearer 用户携带该字段直接 403；daemon 唤醒链路随请求携带 origin 标记。
++
++  成功标准：
++
++  - 用户（Bearer、无 origin 标记）以 [后台任务通知] 前缀发消息：计为普通用户消息占额度，队满第 6 条照旧 QueueFull，不进通知合并
++
++  - daemon 服务凭证（X-API-Key + origin=task_wakeup）注入通知：豁免满员、不占用户额度、同 origin pending 行合并不新增行，排队行 origin 落 task_wakeup
++
++  - Bearer 请求携带 origin=task_wakeup 字段：403 拒绝（仅服务凭证可标记）
++
++  - origin 非 task_wakeup 字面量：422（DTO Literal 校验）
++
++  - 通知条目编辑保护改为 origin 结构化判定（兼容存量前缀行 409 不回归）
++
++  - 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
++autopilot: true
++baseline_commit: f0d24f51dd296c86dc2093343e1084d935db5515
++updatedAt: '2026-10-11T03:40:55.517Z'
++baseline_sha256: 27be1a19b60f57cd97dcba82e7a39647a5b6e0b3c880f8a42d52b014576101cb
++
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json
+new file mode 100644
+index 000000000..23b6739ab
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-queue-wakeup-origin-guard",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "437996ec474e37d8b58b620272087abedd27a708",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "test_edit_wakeup_entry_rejected_409 docstring 与实际断言相反（陈旧注释）",
++      "evidence": "docstring 写「存量前缀行（origin NULL）保持 409 兼容（第二段）」，但该测试体并无此第二段，且同文件 test_edit_legacy_prefix_entry_now_editable（486-511 行）断言的恰是相反行为——存量 origin NULL 前缀行可编辑（与 FR-05 及 queue.py:581 纯结构化守卫一致）。纯注释陈旧，运行时零影响，80 用例实测全绿。",
++      "location": "backend/app/modules/daemon/tests/test_session_queue_actions.py:463-464"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok；合并与计数均在会话行锁内同事务查询+写入（queue.py:142-201，_handle_busy_turn 调用方持 _get_owned_session_for_update 行锁），origin 判定不依赖到达顺序，daemon 重试同 origin 仍幂等合并",
++    "并发": "ok；满员计数/合并锚/入队三查一写都在行锁内串行，伪造行（origin NULL）与通知行互不合并；并发双发不会超上限",
++    "切换": "ok；边界已裁决：可接受——旧 daemon（无 origin 字段）+ 新 backend 通知按普通消息计（test_api_key_without_origin_is_plain_user_message 实证落 origin NULL 普通行），同仓同部署窗口、最坏丢一条通知且 daemon catch 不崩",
++    "作用域": "ok；origin 为排队行级标记随会话隔离；'task_wakeup' 字面量与 'auto_resume:<uuid>' 前缀空间不相交（无冒号，parse_auto_resume_origin 不误伤），dispatch/reorder 的 auto_resume 守卫均用 startswith('auto_resume:') 不命中 task_wakeup 行"
++  },
++  "reviewedAt": "2026-10-11T04:00:00Z"
++}
+diff --git a/backend/app/core/auth_deps.py b/backend/app/core/auth_deps.py
+index 81219d208..c3ef6f51a 100644
+--- a/backend/app/core/auth_deps.py
++++ b/backend/app/core/auth_deps.py
+@@ -164,6 +164,21 @@ async def require_platform_admin(
+     return user
+ 
+ 
++def is_service_credential_request(request: Request) -> bool:
++    """Whether this request authenticates via the X-API-Key service credential.
++
++    Mirrors :func:`get_current_principal` precedence exactly: Bearer wins when
++    present, so "service credential" means no Authorization header **and** an
++    X-API-Key header. API keys are issued by platform admins only
++    (``api_key:admin`` gate, auth/router.py — "Issue a new long-lived API key
++    for the daemon"), so browser JWT users cannot fake this with their own
++    key. ⚠️ 前提钉死：若未来放开普通用户自助签发 API key，本判别不再构成
++    服务边界，调用方（如 inject 的 origin='task_wakeup' 门控）须同步收紧
++    （2026-10-11-queue-wakeup-origin-guard）。
++    """
++    return _extract_bearer(request) is None and _extract_api_key(request) is not None
++
++
+ async def get_current_principal(
+     request: Request,
+     session: Annotated[AsyncSession, Depends(get_session)],
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index d860e8d54..faf4dae0e 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -31,6 +31,8 @@ from sqlalchemy import select
+ from sqlalchemy import select as sa_select
+ 
+ import app.modules.daemon.router as _router
++from app.core.auth_deps import is_service_credential_request
++from app.core.errors import PermissionDenied
+ from app.core.logging import get_logger
+ from app.modules.auth.model import User
+ from app.modules.daemon.model import DaemonTaskLease
+@@ -700,10 +702,22 @@ async def fork_session(
+ async def inject_session(
+     session_id: uuid.UUID,
+     data: SessionInjectRequest,
++    request: Request,
+     session: SessionDep,
+     user: TaskRunAgentUser,
+ ) -> SessionInjectResponse:
+     """Append a new turn run to an active interactive session (FR-02)."""
++    # 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：结构化通知
++    # 标记仅服务凭证可携带——API key 由 api_key:admin 门控签发给 daemon，
++    # 浏览器用户恒走 Bearer JWT；Bearer 携带即 403（杜绝用户冒充系统通知
++    # 豁免排队额度/落不可编辑通知行）。Bearer+X-API-Key 同场按
++    # get_current_principal 优先级视作 Bearer 用户（同样 403）。
++    task_wakeup = data.origin == "task_wakeup"
++    if task_wakeup and not is_service_credential_request(request):
++        raise PermissionDenied(
++            "系统通知来源标记仅限服务凭证调用。",
++            details={"origin": data.origin, "reason": "service_credential_required"},
++        )
+     svc = DaemonService(session)
+     # ── ql-20260920-006（2026-09-18-single-chat-steering 修订 / D-001 语义
+     # 收敛）：忙轮默认回排队——主输入框忙轮发送不再自动 steering 直注入，
+@@ -741,6 +755,9 @@ async def inject_session(
+         # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
+         # 调用方不经本端点，保持 409 拒绝语义。
+         queue_when_busy=True,
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记（上方门控后
++        # 才可能为 True）——排队行 origin='task_wakeup'（豁免/合并锚）。
++        task_wakeup=task_wakeup,
+     )
+     return SessionInjectResponse(
+         session_id=result.agent_session.id,
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 42dcfbd15..3ec14158e 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -393,6 +393,12 @@ class SessionInjectRequest(BaseModel):
+     """
+ 
+     prompt: str = Field(default="", max_length=8000)
++    # 2026-10-11-queue-wakeup-origin-guard：结构化来源标记——仅服务凭证
++    # （X-API-Key）请求可携带 'task_wakeup'（daemon 后台任务唤醒通知；router
++    # 层门控：Bearer 携带即 403）。豁免/合并/编辑守卫按排队行 origin 判定，
++    # 不再看 prompt 内容前缀（用户前缀伪造不再享有任何豁免）。Literal 校验：
++    # 其它字面量（含空串）422。
++    origin: Literal["task_wakeup"] | None = None
+     agent_profile_id: str | None = None
+     llm_provider_id: str | None = None
+     # task-11（2026-08-29-usage-by-provider-model / FR-03-3 / D-002@v1）：会话级
+diff --git a/backend/app/modules/daemon/service.py b/backend/app/modules/daemon/service.py
+index e77c9452e..066b23673 100644
+--- a/backend/app/modules/daemon/service.py
++++ b/backend/app/modules/daemon/service.py
+@@ -797,6 +797,10 @@ class DaemonService:
+         # 见 session 子域 inject.py；缺省 None 零回归——facade 显式签名同步，
+         # 漏透传会 500，见 bind_* 同款教训）。
+         busy_strategy: Literal["queue", "inject"] | None = None,
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（daemon
++        # 经 X-API-Key inject 携带 origin='task_wakeup'，router 层门控后传入；
++        # facade 显式签名同步，漏透传会 500）。
++        task_wakeup: bool = False,
+     ) -> SessionDispatchResult:
+         return await self._sess.inject_session(
+             session_id,
+@@ -813,6 +817,7 @@ class DaemonService:
+             bind_ppm_item_id=bind_ppm_item_id,
+             queue_when_busy=queue_when_busy,
+             busy_strategy=busy_strategy,
++            task_wakeup=task_wakeup,
+         )
+ 
+     async def interrupt_session(
+diff --git a/backend/app/modules/daemon/session/service/__init__.py b/backend/app/modules/daemon/session/service/__init__.py
+index dc2e992f8..ad89ffadb 100644
+--- a/backend/app/modules/daemon/session/service/__init__.py
++++ b/backend/app/modules/daemon/session/service/__init__.py
+@@ -534,6 +534,9 @@ class SessionService(BackgroundTaskMixin):
+         # task-05（2026-09-18-single-chat-steering / FR-01）：单聊忙轮策略透传
+         # （语义见 inject.py inject_session 同名参数；缺省 None 零回归）。
+         busy_strategy: Literal["queue", "inject"] | None = None,
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传（语义见
++        # inject.py inject_session 同名参数）。
++        task_wakeup: bool = False,
+     ) -> SessionDispatchResult:
+         return await _inject.inject_session(
+             self,
+@@ -551,6 +554,7 @@ class SessionService(BackgroundTaskMixin):
+             bind_ppm_item_id=bind_ppm_item_id,
+             queue_when_busy=queue_when_busy,
+             busy_strategy=busy_strategy,
++            task_wakeup=task_wakeup,
+         )
+ 
+     async def inject_session_as_service(
+@@ -610,6 +614,8 @@ class SessionService(BackgroundTaskMixin):
+         queue_sender_user_id: uuid.UUID | None = None,
+         turn_metadata: dict | None = None,
+         auto_resume_of: uuid.UUID | None = None,
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
++        task_wakeup: bool = False,
+     ) -> SessionDispatchResult:
+         return await _inject._inject_into_session(
+             self,
+@@ -628,6 +634,7 @@ class SessionService(BackgroundTaskMixin):
+             busy_strategy=busy_strategy,
+             queue_sender_user_id=queue_sender_user_id,
+             turn_metadata=turn_metadata,
++            task_wakeup=task_wakeup,
+         )
+ 
+     async def _cancel_pending_control_command(
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index 2feb0ff0c..c7c477a45 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -46,6 +46,12 @@ from .errors import DaemonSessionInvariantViolation, DaemonSessionNotFound
+ # 跨长轮的合并在本层做：同会话已有 pending 通知条目时并入（任务行追加 + 头/尾
+ # 计数改写），不新增行——通知类排队恒 ≤1 条。
+ TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]"
++# 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：排队行的结构化
++# 通知标记——豁免/合并/编辑守卫的判定锚。旧口径按 prompt 内容前缀判定，用户
++# 经 /inject 发同前缀消息即可伪造豁免；新口径只认本标记，且仅由服务凭证
++# （X-API-Key + 请求 origin 字段，router/session_crud.py 门控）写入。
++# 与 origin 列既有值 'auto_resume:<uuid>' 前缀空间不相交（本字面量无冒号）。
++TASK_WAKEUP_QUEUE_ORIGIN = "task_wakeup"
+ _TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
+ _TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+ 
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index 06bcd46d5..278d4bb83 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -88,6 +88,11 @@ async def inject_session(
+     # provider caps steering 门控（router/session_crud.py inject 端点）传入；
+     # 携带切换维度时 service 层守卫（queue.py 忙轮分支）不生效，回落排队。
+     busy_strategy: Literal["queue", "inject"] | None = None,
++    # 2026-10-11-queue-wakeup-origin-guard：daemon 服务凭证经 HTTP inject 端点
++    # 携带 origin='task_wakeup'（router 层门控）时置 True——忙轮排队行落结构化
++    # origin 标记（豁免/合并/编辑守卫判定锚，queue._handle_busy_turn）。缺省
++    # False：群聊/审批代写等服务路径与普通用户路径零回归。
++    task_wakeup: bool = False,
+ ) -> SessionDispatchResult:
+     """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
+ 
+@@ -241,6 +246,8 @@ async def inject_session(
+         # task-05（2026-09-18-single-chat-steering）：单聊忙轮策略透传
+         # （缺省 None 零回归）。
+         busy_strategy=busy_strategy,
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记透传。
++        task_wakeup=task_wakeup,
+     )
+ 
+ 
+@@ -416,6 +423,10 @@ async def _inject_into_session(
+     # source_member_id/source_carrier_run_id/chain_depth/sender_user_id——
+     # task-04 turn_completed 互@检测读取）。缺省 None 不写（存量行 NULL）。
+     turn_metadata: dict | None = None,
++    # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记（语义见
++    # inject_session 同名参数；inject_session_as_service 不接——群聊等服务
++    # 路径的用户内容永不被标记）。
++    task_wakeup: bool = False,
+ ) -> SessionDispatchResult:
+     """Shared inject-turn core (used by :meth:`inject_session` +
+     :meth:`inject_session_as_service`).
+@@ -484,6 +495,7 @@ async def _inject_into_session(
+                 queue_sender_user_id=queue_sender_user_id,
+                 turn_metadata=turn_metadata,
+                 auto_resume_of=auto_resume_of,
++                task_wakeup=task_wakeup,
+             )
+ 
+         # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
+diff --git a/backend/app/modules/daemon/session/service/queue.py b/backend/app/modules/daemon/session/service/queue.py
+index 0a32e1d8b..aaf19eace 100644
+--- a/backend/app/modules/daemon/session/service/queue.py
++++ b/backend/app/modules/daemon/session/service/queue.py
+@@ -42,7 +42,7 @@ from .errors import (
+     DaemonSessionTurnConflict,
+ )
+ from .helpers import (
+-    TASK_WAKEUP_PROMPT_PREFIX,
++    TASK_WAKEUP_QUEUE_ORIGIN,
+     _merge_task_wakeup_prompt,
+     _prepend_group_chain_marker,
+     _split_group_chain_marker,
+@@ -73,6 +73,13 @@ async def _handle_busy_turn(
+     # 忙轮转排队时落排队行 origin='auto_resume:<源 run uuid>'（幂等查重/G10/
+     # 徽标数据源与直接入队条目同构）；None = 普通排队（既有调用零改动）。
+     auto_resume_of: uuid.UUID | None = None,
++    # 2026-10-11-queue-wakeup-origin-guard（24h 审查 P2 修复）：结构化通知
++    # 标记——daemon 服务凭证经 HTTP inject 端点携带 origin='task_wakeup'
++    # （router 层门控，Bearer 用户不可伪造）时置 True；豁免/合并/计数排除/
++    # 编辑守卫全部按本标记与排队行 origin 判定，**不再看 prompt 内容前缀**
++    # （旧口径用户发「[后台任务通知]」前缀即可冒充豁免）。与 auto_resume_of
++    # 调用方不相交（daemon 唤醒不带 auto_resume_of），同时携带时本标记优先。
++    task_wakeup: bool = False,
+ ) -> SessionDispatchResult:
+     """忙轮三分支收口（task-08 自 _inject_into_session:3499-3650 拆出，零改写）。
+ 
+@@ -129,23 +136,21 @@ async def _handle_busy_turn(
+     # 通知在排队栏与用户消息混排挤占额度）；通知类注入自身也豁免拒绝（走下方
+     # ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）——旧口径队满时
+     # 注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。
+-    is_task_wakeup_prompt = prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX)
+-    pending_prompts = (
+-        (
+-            await svc._session.execute(
+-                select(AgentSessionQueuedMessage.prompt).where(
+-                    AgentSessionQueuedMessage.agent_session_id == session.id,
+-                    AgentSessionQueuedMessage.status == "pending",
+-                )
++    # 2026-10-11-queue-wakeup-origin-guard：判定从内容前缀改结构化标记——
++    # is_task_wakeup 只认 task_wakeup 入参（服务凭证路径），pending 计数排除
++    # origin='task_wakeup' 行；用户带前缀伪造的消息按普通用户消息计数（占额度）。
++    pending_rows = (
++        await svc._session.execute(
++            select(AgentSessionQueuedMessage.prompt, AgentSessionQueuedMessage.origin).where(
++                AgentSessionQueuedMessage.agent_session_id == session.id,
++                AgentSessionQueuedMessage.status == "pending",
+             )
+         )
+-        .scalars()
+-        .all()
+-    )
++    ).all()
+     user_pending_count = sum(
+-        1 for p in pending_prompts if not (p or "").startswith(TASK_WAKEUP_PROMPT_PREFIX)
++        1 for _prompt, row_origin in pending_rows if row_origin != TASK_WAKEUP_QUEUE_ORIGIN
+     )
+-    if not is_task_wakeup_prompt and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
++    if not task_wakeup and user_pending_count >= SESSION_QUEUE_MAX_PENDING:
+         raise DaemonSessionQueueFull(
+             f"会话排队消息已达上限（{SESSION_QUEUE_MAX_PENDING} 条），请等当前本轮结束后再发送。",
+             details={
+@@ -153,20 +158,22 @@ async def _handle_busy_turn(
+                 "pending": user_pending_count,
+             },
+         )
+-    # ql-20260827-015：通知合并——同会话已有 pending 的「[后台任务通知]」
+-    # 条目时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
++    # ql-20260827-015：通知合并——同会话已有 pending 的通知条目（origin=
++    # task_wakeup）时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
+     # 返回形态与普通入队一致（queued=True + 同 entry id），daemon 调用
+     # 方无感。
+     # 2026-08-31-session-queue-ux（design §4 Phase1.2/D-002）：merge 只
+     # 原地改 prompt——不新建行、原条目 position 保持不变。
++    # 2026-10-11-queue-wakeup-origin-guard：合并锚点从 prompt.like 前缀改
++    # origin 列（伪造前缀的用户行不再被并进通知行）。
+     existing_notification: AgentSessionQueuedMessage | None = None
+-    if prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX):
++    if task_wakeup:
+         existing_notification = (
+             await svc._session.execute(
+                 select(AgentSessionQueuedMessage).where(
+                     AgentSessionQueuedMessage.agent_session_id == session.id,
+                     AgentSessionQueuedMessage.status == "pending",
+-                    AgentSessionQueuedMessage.prompt.like(f"{TASK_WAKEUP_PROMPT_PREFIX}%"),
++                    AgentSessionQueuedMessage.origin == TASK_WAKEUP_QUEUE_ORIGIN,
+                 )
+             )
+         ).scalar_one_or_none()
+@@ -301,7 +308,13 @@ async def _handle_busy_turn(
+         model=model,
+         # 2026-09-12：自动续跑转排队保留 origin（R-08——忙轮 INSERT 此前丢
+         # origin，G10/幂等/徽标全断链）。
+-        origin=(make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None),
++        # 2026-10-11-queue-wakeup-origin-guard：服务凭证通知标记优先落
++        # origin='task_wakeup'（与 auto_resume_of 调用方不相交）。
++        origin=(
++            TASK_WAKEUP_QUEUE_ORIGIN
++            if task_wakeup
++            else (make_auto_resume_origin(auto_resume_of) if auto_resume_of is not None else None)
++        ),
+         status="pending",
+         # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
+         # 连续入队全 0——显式 None 判（对齐 MAX+1 语义，D-002）。
+@@ -560,7 +573,12 @@ async def update_queued_message(
+             f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
+             details={"session_id": str(session_id), "entry_id": str(entry_id)},
+         )
+-    if (entry.prompt or "").startswith(TASK_WAKEUP_PROMPT_PREFIX):
++    # 2026-10-11-queue-wakeup-origin-guard：编辑守卫改纯结构化 origin 判定。
++    # 旧口径按内容前缀 409——用户伪造行会被误锁。存量前缀行（升级在途）与新
++    # 伪造行形态不可区分（前缀 + origin NULL），按规则 11（未正式上线，不要求
++    # 历史兼容）不做前缀兜底：pending 行生命周期天级、编辑影响仅限当条 prompt
++    # 文本，放行无害；系统通知恒带 origin 标记（服务凭证路径落库）。
++    if entry.origin == TASK_WAKEUP_QUEUE_ORIGIN:
+         await svc._session.rollback()
+         raise DaemonSessionQueueEntryNotEditable(
+             f"系统通知条目 '{entry_id}' 不支持编辑。",
+diff --git a/backend/app/modules/daemon/tests/test_inject_origin_guard.py b/backend/app/modules/daemon/tests/test_inject_origin_guard.py
+new file mode 100644
+index 000000000..ca31c8f96
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_inject_origin_guard.py
+@@ -0,0 +1,214 @@
++"""inject 端点结构化 origin 门控（2026-10-11-queue-wakeup-origin-guard / FR-03/04/06）。
++
++24h 审查 P2 修复的 HTTP 层覆盖：排队满员豁免从「prompt 内容前缀」改「排队行
++结构化 origin='task_wakeup'」，标记仅服务凭证（X-API-Key，api_key:admin 门控
++签发给 daemon）可经请求体 ``origin`` 字段携带——
++
++- Bearer（浏览器 JWT）携带 ``origin="task_wakeup"`` → 403（仅服务凭证可标记）；
++- ``origin`` 非法字面量 → 422（DTO Literal 校验，不进 service）；
++- X-API-Key + ``origin="task_wakeup"`` → 忙轮排队行落 origin='task_wakeup'
++  （豁免/合并/编辑守卫的判定锚）。
++
++service 层豁免/合并/编辑三态见 test_session_queue.py / test_session_queue_actions.py。
++
++HTTP harness 对齐 test_inject_empty_prompt.py（client + auth_headers（Bearer
++admin）+ fresh_ws_hub + mock WS 在线 runtime）。
++"""
++
++from __future__ import annotations
++
++import uuid
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentSessionQueuedMessage
++from app.modules.auth.api_key_service import ApiKeyService
++from app.modules.auth.model import User
++from app.modules.daemon.ws_hub import DaemonWsHub
++
++from .test_inject_empty_prompt import _seed_active_session_http
++
++
++@pytest.fixture()
++def fresh_ws_hub(monkeypatch: pytest.MonkeyPatch) -> DaemonWsHub:
++    """Replace the process-wide ws_hub singleton with a fresh, wired hub."""
++    from app.modules.daemon import ws_hub as ws_hub_module
++
++    hub = DaemonWsHub()
++    monkeypatch.setattr(ws_hub_module, "_ws_hub", hub)
++    return hub
++
++
++async def _issue_admin_api_key(
++    db_session: AsyncSession, client: AsyncClient, auth_headers: dict[str, str]
++) -> str:
++    """给 conftest admin（auth_headers 代表的用户）真签发一把 API key。
++
++    服务凭证与浏览器用户同一 User——恰好验证门控只看认证方式（X-API-Key vs
++    Bearer），不看用户身份。
++    """
++    from app.core.config import get_settings
++
++    admin = (
++        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    _, plaintext = await ApiKeyService(db_session, settings=get_settings()).create(
++        user_id=admin.id, name=f"origin-guard-{uuid.uuid4().hex[:8]}", expires_at=None
++    )
++    return plaintext
++
++
++async def _queue_rows(
++    db_session: AsyncSession, session_id: uuid.UUID
++) -> list[AgentSessionQueuedMessage]:
++    return list(
++        (
++            await db_session.execute(
++                select(AgentSessionQueuedMessage).where(
++                    AgentSessionQueuedMessage.agent_session_id == session_id
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++
++
++class TestInjectOriginGuard:
++    """FR-03/04：origin 标记的凭证门控与 DTO Literal 校验。"""
++
++    @pytest.mark.asyncio
++    async def test_bearer_with_origin_field_403(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        fresh_ws_hub: DaemonWsHub,
++    ) -> None:
++        """Bearer 携带 origin='task_wakeup' → 403，无排队副作用。"""
++        created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
++        sid = uuid.UUID(created["session_id"])
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{sid}/inject",
++            json={"prompt": "[后台任务通知] 冒充", "origin": "task_wakeup"},
++            headers=auth_headers,
++        )
++
++        assert resp.status_code == 403, resp.text
++        assert "仅限服务凭证" in resp.json()["message"]
++        # 门控先于 service：无排队行副作用。
++        assert await _queue_rows(db_session, sid) == []
++
++    @pytest.mark.asyncio
++    async def test_bearer_and_api_key_both_headers_still_403(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        fresh_ws_hub: DaemonWsHub,
++    ) -> None:
++        """Bearer + X-API-Key 同场：按 get_current_principal 优先级视作 Bearer
++        用户（Authorization 赢），origin 门控照旧 403——不能靠叠加 header 冒充。"""
++        created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
++        sid = uuid.UUID(created["session_id"])
++        key = await _issue_admin_api_key(db_session, client, auth_headers)
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{sid}/inject",
++            json={"prompt": "[后台任务通知] 冒充", "origin": "task_wakeup"},
++            headers={**auth_headers, "X-API-Key": key},
++        )
++
++        assert resp.status_code == 403, resp.text
++        assert await _queue_rows(db_session, sid) == []
++
++    @pytest.mark.asyncio
++    @pytest.mark.parametrize(
++        "bad_origin", ["admin", "", "auto_resume:x"], ids=["word", "empty", "other_literal"]
++    )
++    async def test_origin_literal_validation_422(
++        self,
++        bad_origin: str,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        fresh_ws_hub: DaemonWsHub,
++    ) -> None:
++        """origin 非法字面量 → 422（DTO Literal 校验，不进 service）。"""
++        created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
++        sid = uuid.UUID(created["session_id"])
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{sid}/inject",
++            json={"prompt": "hi", "origin": bad_origin},
++            headers=auth_headers,
++        )
++
++        assert resp.status_code == 422, resp.text
++        assert await _queue_rows(db_session, sid) == []
++
++    @pytest.mark.asyncio
++    async def test_api_key_origin_inject_marks_queue_row(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        fresh_ws_hub: DaemonWsHub,
++    ) -> None:
++        """X-API-Key + origin='task_wakeup' → 忙轮排队行落 origin='task_wakeup'。
++
++        FR-06 主链路：daemon 唤醒通知经服务凭证携带标记，豁免/合并锚到位。
++        """
++        created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
++        sid = uuid.UUID(created["session_id"])
++        key = await _issue_admin_api_key(db_session, client, auth_headers)
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{sid}/inject",
++            json={
++                "prompt": "[后台任务通知] 以下 1 个后台子代理任务已全部结束：\n- 任务「查依赖」已完成",
++                "origin": "task_wakeup",
++            },
++            headers={"X-API-Key": key},
++        )
++
++        assert resp.status_code == 201, resp.text
++        body = resp.json()
++        assert body.get("queued") is True
++        rows = await _queue_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].origin == "task_wakeup"
++
++    @pytest.mark.asyncio
++    async def test_api_key_without_origin_is_plain_user_message(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        fresh_ws_hub: DaemonWsHub,
++    ) -> None:
++        """服务凭证但不带 origin 字段（旧 daemon 形态）→ 普通行（origin NULL）。
++
++        标记只来自显式请求字段，绝不从 prompt 内容回推。
++        """
++        created = await _seed_active_session_http(db_session, client, auth_headers, fresh_ws_hub)
++        sid = uuid.UUID(created["session_id"])
++        key = await _issue_admin_api_key(db_session, client, auth_headers)
++
++        resp = await client.post(
++            f"/api/daemon/sessions/{sid}/inject",
++            json={"prompt": "[后台任务通知] 前缀但无标记"},
++            headers={"X-API-Key": key},
++        )
++
++        assert resp.status_code == 201, resp.text
++        rows = await _queue_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].origin is None
+diff --git a/backend/app/modules/daemon/tests/test_session_queue.py b/backend/app/modules/daemon/tests/test_session_queue.py
+index 034089f6b..a270f2576 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue.py
++++ b/backend/app/modules/daemon/tests/test_session_queue.py
+@@ -548,6 +548,8 @@ class TestTaskWakeupMerge:
+ 
+     生产实证（会话 17f10040）：长轮未结期间每个后台任务终态注入一条通知排队，
+     计数只增不减、派发后逐条烧一轮模型汇报。合并后通知类排队恒 ≤1 条。
++    2026-10-11-queue-wakeup-origin-guard：合并锚点从内容前缀改排队行结构化
++    origin='task_wakeup'（service 层经 task_wakeup=True 模拟服务凭证路径）。
+     """
+ 
+     @pytest.mark.asyncio
+@@ -557,10 +559,18 @@ class TestTaskWakeupMerge:
+         svc, uid, session_id, _run = await _setup_busy_session(db_session)
+ 
+         first = await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("查依赖", "t-1"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+         second = await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("生成类文件", "t-2"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("生成类文件", "t-2"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+ 
+         # 仍只有 1 行；两次返回同一 entry id（daemon 调用方无感）。
+@@ -568,6 +578,50 @@ class TestTaskWakeupMerge:
+         assert len(rows) == 1
+         assert second.queued is True
+         assert second.queue_entry_id == first.queue_entry_id
++        # 结构化标记随行落库（豁免/合并/编辑守卫的判定锚）。
++        assert rows[0].origin == "task_wakeup"
++
++    @pytest.mark.asyncio
++    async def test_wakeup_entries_merge_by_origin(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """origin 结构化合并：真通知相互合并；用户前缀伪造行不并进通知行。"""
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("查依赖", "t-1"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++        # 用户伪造行：前缀相同但无结构化标记 → 独立成行，origin NULL。
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("伪造", "t-spoof"),
++            queue_when_busy=True,
++        )
++        # 第二条真通知 → 并入首条通知行。
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("生成类文件", "t-2"),
++            queue_when_busy=True,
++            task_wakeup=True,
++        )
++
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 2
++        by_origin = {row.origin: row for row in rows}
++        assert set(by_origin) == {"task_wakeup", None}
++        # 伪造行未被并入：内容只有它自己的任务行。
++        assert "任务「伪造」" in (by_origin[None].prompt or "")
++        assert "任务「查依赖」" not in (by_origin[None].prompt or "")
++        # 通知行合并了两条真通知。
++        merged = by_origin["task_wakeup"].prompt or ""
++        assert "任务「查依赖」" in merged and "任务「生成类文件」" in merged
++        assert "任务「伪造」" not in merged
+ 
+         merged = rows[0].prompt or ""
+         # 两个任务行都在，头/尾计数改写为 2。
+@@ -594,11 +648,15 @@ class TestTaskWakeupMerge:
+     async def test_notification_and_normal_coexist(
+         self, db_session, mocked_hub, mocked_redis
+     ) -> None:
+-        """通知与普通消息互不合并（合并只作用于通知前缀内部）。"""
++        """通知与普通消息互不合并（合并只作用于同 origin 通知内部）。"""
+         svc, uid, session_id, _run = await _setup_busy_session(db_session)
+ 
+         await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("查依赖", "t-1"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+         await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
+ 
+@@ -616,6 +674,9 @@ class TestTaskWakeupQueueQuota:
+     队满时通知注入抛 QueueFull，daemon 侧 catch 后仅记日志即静默丢通知。豁免后：
+     用户额度只数非通知类 pending 条目；通知类注入永不因满员被拒（走既有
+     ql-20260827-015 同条合并，pending 恒 ≤1 条，不会撑爆队列）。
++    2026-10-11-queue-wakeup-origin-guard：豁免判定从内容前缀改结构化
++    origin='task_wakeup'（task_wakeup=True 模拟服务凭证路径）——用户带前缀
++    伪造不再享有任何豁免（见 spoofed 用例）。
+     """
+ 
+     @pytest.mark.asyncio
+@@ -626,7 +687,11 @@ class TestTaskWakeupQueueQuota:
+         svc, uid, session_id, _run = await _setup_busy_session(db_session)
+ 
+         await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("通知", "t-q1"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("通知", "t-q1"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+         for i in range(SESSION_QUEUE_MAX_PENDING - 1):
+             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+@@ -650,12 +715,47 @@ class TestTaskWakeupQueueQuota:
+             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+ 
+         result = await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("队满补通知", "t-q2"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("队满补通知", "t-q2"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+ 
+         assert result.queued is True
+         rows = await _queue_rows(db_session, session_id)
+         assert len(rows) == SESSION_QUEUE_MAX_PENDING + 1
++        assert any(row.origin == "task_wakeup" for row in rows)
++
++    @pytest.mark.asyncio
++    async def test_spoofed_prefix_message_consumes_user_quota_and_rejected(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """FR-01 前缀伪造不豁免：无结构化标记的前缀消息按普通用户消息计数。
++
++        24h 审查 P2 修复锚——旧实现 prompt.startswith 前缀即豁免，用户冒充
++        系统通知绕过 5 条额度；新实现豁免只认服务凭证携带的 origin 标记。
++        """
++        svc, uid, session_id, _run = await _setup_busy_session(db_session)
++
++        # 4 条真用户消息 + 1 条前缀伪造（旧口径会被豁免计数，新口径占额度）。
++        for i in range(SESSION_QUEUE_MAX_PENDING - 1):
++            await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
++        await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("伪造通知", "t-spoof"),
++            queue_when_busy=True,
++        )
++
++        # 第 6 条用户消息（按用户口径）被拒——伪造行占了第 5 个额度位。
++        with pytest.raises(DaemonSessionQueueFull):
++            await svc.inject_session(session_id, uid, prompt="第6条用户消息", queue_when_busy=True)
++        # 伪造行 origin 为 NULL（普通用户行，编辑保护不误伤）。
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == SESSION_QUEUE_MAX_PENDING
++        spoofed = next(r for r in rows if (r.prompt or "").startswith("[后台任务通知]"))
++        assert spoofed.origin is None
+ 
+     @pytest.mark.asyncio
+     async def test_user_quota_semantics_unchanged(
+@@ -668,7 +768,11 @@ class TestTaskWakeupQueueQuota:
+             await svc.inject_session(session_id, uid, prompt=f"msg-{i}", queue_when_busy=True)
+         # 通知豁免入队成功（不占额度）……
+         await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("通知", "t-q3"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("通知", "t-q3"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+         # ……但用户的第 6 条消息仍被拒（用户侧计数只数到 5）。
+         with pytest.raises(DaemonSessionQueueFull):
+diff --git a/backend/app/modules/daemon/tests/test_session_queue_actions.py b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+index 2f6a16795..37b4dc3b5 100644
+--- a/backend/app/modules/daemon/tests/test_session_queue_actions.py
++++ b/backend/app/modules/daemon/tests/test_session_queue_actions.py
+@@ -300,7 +300,11 @@ class TestEnqueuePosition:
+ 
+     @pytest.mark.asyncio
+     async def test_wakeup_merge_keeps_position(self, db_session, mocked_hub, mocked_redis) -> None:
+-        """TASK_WAKEUP 通知 merge 原地改 prompt——不新建行、原条目 position 不变。"""
++        """TASK_WAKEUP 通知 merge 原地改 prompt——不新建行、原条目 position 不变。
++
++        2026-10-11-queue-wakeup-origin-guard：merge 锚点改结构化 origin，
++        两条注入均带 task_wakeup=True（服务凭证路径）。
++        """
+         svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
+ 
+         await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
+@@ -309,12 +313,14 @@ class TestEnqueuePosition:
+             uid,
+             prompt=_wakeup_prompt("查依赖", "t-1"),
+             queue_when_busy=True,
++            task_wakeup=True,
+         )
+         merged = await svc.inject_session(
+             session_id,
+             uid,
+             prompt=_wakeup_prompt("生成类文件", "t-2"),
+             queue_when_busy=True,
++            task_wakeup=True,
+         )
+ 
+         assert merged.queued is True
+@@ -452,10 +458,18 @@ class TestEditEntry:
+     async def test_edit_wakeup_entry_rejected_409(
+         self, db_session, mocked_hub, mocked_redis
+     ) -> None:
+-        """TASK_WAKEUP 前缀条目 409 不可编辑（D-009——改文破坏 like 去重匹配）。"""
++        """origin=task_wakeup 条目 409 不可编辑（D-009——改文破坏合并锚）。
++
++        2026-10-11-queue-wakeup-origin-guard：守卫改纯结构化 origin 判定
++        （存量/伪造前缀行的编辑语义见相邻两个用例）。
++        """
+         svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
+         result = await svc.inject_session(
+-            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("查依赖", "t-1"),
++            queue_when_busy=True,
++            task_wakeup=True,
+         )
+         entry_id = result.queue_entry_id
+         assert entry_id is not None
+@@ -465,8 +479,59 @@ class TestEditEntry:
+ 
+         rows = await _queue_rows(db_session, session_id)
+         assert len(rows) == 1
++        assert rows[0].origin == "task_wakeup"
+         assert rows[0].prompt is not None and rows[0].prompt.startswith("[后台任务通知]")
+ 
++    @pytest.mark.asyncio
++    async def test_edit_legacy_prefix_entry_now_editable(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """存量前缀行（升级在途、origin NULL）不再 409——纯结构化判定的取舍。
++
++        存量行与新伪造行形态不可区分（前缀 + origin NULL），按规则 11 不做
++        前缀兜底：pending 行生命周期天级、编辑影响仅限当条 prompt 文本。
++        """
++        from app.modules.agent.model import AgentSessionQueuedMessage
++
++        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
++        # 直接落一行「升级前旧口径写入」的前缀通知行（绕过 service 标记）。
++        legacy = AgentSessionQueuedMessage(
++            agent_session_id=session_id,
++            sender_user_id=uid,
++            prompt=_wakeup_prompt("存量", "t-legacy"),
++            origin=None,
++            status="pending",
++            position=0,
++        )
++        db_session.add(legacy)
++        await db_session.commit()
++
++        updated = await svc.update_queued_message(session_id, legacy.id, "改存量", uid)
++
++        assert updated.prompt == "改存量"
++
++    @pytest.mark.asyncio
++    async def test_edit_spoofed_prefix_user_entry_allowed(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """FR-05：用户新发的前缀伪造行（origin NULL）是普通消息，可编辑。"""
++        svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
++        result = await svc.inject_session(
++            session_id,
++            uid,
++            prompt=_wakeup_prompt("伪造", "t-spoof"),
++            queue_when_busy=True,
++        )
++        entry_id = result.queue_entry_id
++        assert entry_id is not None
++
++        updated = await svc.update_queued_message(session_id, entry_id, "改成普通消息", uid)
++
++        assert updated.prompt == "改成普通消息"
++        rows = await _queue_rows(db_session, session_id)
++        assert len(rows) == 1
++        assert rows[0].origin is None
++
+     @pytest.mark.asyncio
+     async def test_edit_failed_entry_resets_pending_state(
+         self, db_session, mocked_hub, mocked_redis
+diff --git a/backend/openapi.json b/backend/openapi.json
+index ed4f60d50..8ce4a40a5 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -68760,6 +68760,18 @@
+             "title": "Prompt",
+             "default": ""
+           },
++          "origin": {
++            "anyOf": [
++              {
++                "type": "string",
++                "const": "task_wakeup"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Origin"
++          },
+           "agent_profile_id": {
+             "anyOf": [
+               {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 99dcc88df..722b16c05 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -24850,6 +24850,8 @@ export interface components {
+              * @default
+              */
+             prompt: string;
++            /** Origin */
++            origin?: "task_wakeup" | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index a864edc46..5bf630e0c 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -859,8 +859,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
+       // ql-20260827-007：后台任务终态自动唤醒——session-manager debounce 合并后
+       // 经 hubClient 注入唤醒消息（失败仅日志，session-manager 侧已 catch）。
++      // 2026-10-11-queue-wakeup-origin-guard：携带 origin='task_wakeup' 结构化
++      // 标记（X-API-Key 服务凭证路径）——backend 排队豁免/合并只认该标记。
+       onTaskWakeupInject: async (sessionId, prompt) => {
+-        await client.injectSessionPrompt(sessionId, prompt);
++        await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
+       },
+       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
+         void (async () => {
+diff --git a/sillyhub-daemon/src/hub-client.ts b/sillyhub-daemon/src/hub-client.ts
+index 76c8704fc..3c8af57d9 100644
+--- a/sillyhub-daemon/src/hub-client.ts
++++ b/sillyhub-daemon/src/hub-client.ts
+@@ -1528,12 +1528,20 @@ export class HubClient {
+    * 汇报）。端点：POST /api/daemon/sessions/{sessionId}/inject，body `{prompt}`；
+    * X-API-Key 服务身份鉴权（与 notifyAgentTaskStatus 同款 _headers()）。backend
+    * 侧 queue_when_busy=true——主 turn 在跑时排队，空闲即建新 turn 唤醒主代理。
++   *
++   * 2026-10-11-queue-wakeup-origin-guard：可选 origin='task_wakeup' 结构化标记
++   * （仅服务凭证可携带——本客户端即 X-API-Key 身份）。backend 排队豁免/合并/
++   * 编辑守卫只认该标记，prompt 内容前缀不再享有豁免（防用户伪造）。
+    */
+-  async injectSessionPrompt(sessionId: string, prompt: string): Promise<Record<string, unknown>> {
++  async injectSessionPrompt(
++    sessionId: string,
++    prompt: string,
++    origin?: 'task_wakeup',
++  ): Promise<Record<string, unknown>> {
+     return this._request<Record<string, unknown>>(
+       'POST',
+       `/api/daemon/sessions/${sessionId}/inject`,
+-      { prompt },
++      origin ? { prompt, origin } : { prompt },
+     );
+   }
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/design.md b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/design.md
+new file mode 100644
+index 000000000..a2298c15a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/design.md
+@@ -0,0 +1,71 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:40:33.352Z
++---
++# 设计记录（Design Record）— 2026-10-11-queue-wakeup-origin-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查 P2：排队满员豁免（d1d366651）以 `prompt.startswith("[后台任务通知]")` 内容前缀判定，而 `/inject` 端点对用户 prompt 零过滤——用户发该前缀即可冒充系统通知绕过 5 条额度并落入不可编辑/合并的通知条目。根修：豁免三判定（自身豁免、计数排除、合并锚点）全部从内容前缀改为排队行**结构化 `origin='task_wakeup'`**（复用 2026-09-10 已有的 origin 列，与 `auto_resume:*` 同列共存，零迁移）。
++
++标记的可信来源：`SessionInjectRequest` 新增可选 `origin: Literal["task_wakeup"]`，路由层仅当请求以 **X-API-Key 服务凭证**认证时放行该字段（API key 由 `api_key:admin` 门控、管理员签发给 daemon，浏览器用户恒走 Bearer JWT——两者是既有 `get_current_principal` 双路，判别点真实存在且不可由普通用户自造）。Bearer 携带该字段 → 403。daemon 唤醒链路（cli.ts onTaskWakeupInject → hub-client.injectSessionPrompt）随请求显式携带 `origin='task_wakeup'`，prompt 内容不再承担任何安全语义（前缀保留仅为展示/协议文本）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `SessionInjectRequest`（backend/app/modules/daemon/schema.py）：新增 `origin: Literal["task_wakeup"] | None = None`（DTO 层 Literal 严格校验，其它值 422）。OpenAPI 变化 → `pnpm gen:types` 重生成前端 api-types。
++- `POST /sessions/{id}/inject`（router/session_crud.py）：新增 `request: Request` 参数；`origin=="task_wakeup"` 且非服务凭证认证 → PermissionDenied 403；合法时透传 `task_wakeup=True` 至 service。
++- `app.core.auth_deps`：新增公开 helper `is_service_credential_request(request) -> bool`（无 Bearer 且有 X-API-Key，与 get_current_principal 优先级一致）。
++- `DaemonService.inject_session` / `SessionService.inject_session` / `_inject_into_session` / `_handle_busy_turn`：新增关键字参数 `task_wakeup: bool = False`（缺省零回归；`inject_session_as_service` 不接该参数，群聊等服务路径恒普通消息）。
++- `_handle_busy_turn`：豁免判定 `task_wakeup` 入参；计数查询改 select (prompt, origin)、排除 `origin=='task_wakeup'` 行；合并锚点改 `origin=='task_wakeup'`（弃 prompt.like）；入队行 origin 落 `'task_wakeup'`（与 auto_resume 组合时 task_wakeup 优先——两者调用方不相交，daemon 唤醒不带 auto_resume_of）。
++- `update_queued_message` 编辑守卫：改**纯结构化** `origin=='task_wakeup'` 409；不做前缀兜底——存量前缀行（origin NULL）与新伪造行形态不可区分，按规则 11 取舍：pending 行生命周期天级、误放行影响仅限当条 prompt 文本，误锁（前缀兜底）则伤用户伪造行可编辑语义，两害取轻。
++- daemon（sillyhub-daemon）：`hub-client.injectSessionPrompt(sessionId, prompt, origin?)` body 增量键；`cli.ts` 唤醒回调传 `'task_wakeup'`；`interactive/types.ts` 的 onTaskWakeupInject 签名不变（origin 由 cli 落点决定）。
++- 前端：无行为改动（排队渲染/前缀 preamble 语义照旧——daemon 发的 prompt 文本仍带前缀）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++合并与计数都在会话行锁内同事务查询+写入（既有 R-01 串行化不变），origin 判定不依赖到达顺序；daemon 重试重复注入同 origin 仍被合并幂等吸收。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++并发双发在行锁内串行——用户伪造行与通知行互不合并（origin 不同）；满员计数两次查询都在锁内，不会超上限。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++旧 daemon（不带 origin 字段）+ 新 backend → 通知按普通用户消息计（可能占额度/被满员拒，daemon catch 记日志不崩）；本项目 daemon 与 backend 同仓同部署窗口（规则 11 不要求历史兼容），可接受。升级时已在途的存量前缀通知行按普通行对待（可编辑，影响仅限当条 prompt 文本）；被派发即删行，天级自然清空。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++origin 是排队行级标记，会话隔离不跨工作区；`task_wakeup` 字面量与 `auto_resume:<uuid>` 前缀空间不相交（字面量无冒号），解析互不误伤。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：服务凭证判别依赖「API key 仅管理员签发给 daemon」的既有治理事实——若未来开放普通用户自助 API key，需同步收紧（已在 auth_deps helper 的 docstring 钉死该前提）。
++
++试过但放弃的方案：① 入口拒收/剥离用户前缀——daemon 与用户走同一端点、后端无法按端点区分，剥错方向必伤一边；② 专用内部端点——权限模型里 daemon 的 API key 就是普通 User 权限（runtime owner），无独立服务主体可 gate，新端点同样被用户可达，等于换皮不换实质；③ 内容前缀 + API-key 双条件——省 wire 改动但仍把安全语义绑在内容上，与「结构化判定」的审查结论相悖。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/core/auth_deps.py | 新增 is_service_credential_request helper |
++| 修改 | backend/app/modules/daemon/schema.py | SessionInjectRequest 增 origin Literal 字段 |
++| 修改 | backend/app/modules/daemon/router/session_crud.py | inject 端点门控 + task_wakeup 透传 |
++| 修改 | backend/app/modules/daemon/service.py | facade 签名同步透传 task_wakeup |
++| 修改 | backend/app/modules/daemon/session/service/inject.py | inject_session/_inject_into_session 增参透传 |
++| 修改 | backend/app/modules/daemon/session/service/__init__.py | 包装层透传 task_wakeup |
++| 修改 | backend/app/modules/daemon/session/service/queue.py | 豁免/计数/合并/编辑守卫改结构化 origin |
++| 修改 | backend/app/modules/daemon/session/service/helpers.py | TASK_WAKEUP_QUEUE_ORIGIN 常量 |
++| 修改 | backend/app/modules/daemon/tests/test_session_queue.py | 既有用例改结构化口径 + 新增伪造/合并用例 |
++| 修改 | backend/app/modules/daemon/tests/test_session_queue_actions.py | 编辑守卫用例更新 + 伪造行可编辑用例 |
++| 新增 | backend/app/modules/daemon/tests/test_inject_origin_guard.py | HTTP 层门控/标记落行用例 |
++| 修改 | sillyhub-daemon/src/hub-client.ts | injectSessionPrompt 增 origin 可选参 |
++| 修改 | sillyhub-daemon/src/cli.ts | 唤醒回调传 task_wakeup |
++| 重生成 | frontend/src/lib/api-types.ts + backend/openapi.json | DTO 增键（pnpm gen:types） |
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/proposal.md b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/proposal.md
+new file mode 100644
+index 000000000..409ee4ca7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:40:33.351Z
++---
++# 提案书（Proposal）— 2026-10-11-queue-wakeup-origin-guard
++
++## 动机
++
++任务原话转写：排队满员豁免按消息内容前缀判定可被用户伪造（24h 审查 P2）：queue.py 以 prompt.startswith("[后台任务通知]") 判定豁免与计数排除，而 /inject 端点对用户 prompt 零过滤——用户发该前缀消息即可冒充系统通知绕过 5 条额度并落入不可编辑的通知条目。修复：豁免/合并/计数全部改读排队行结构化 origin='task_wakeup'；标记仅由服务凭证（X-API-Key，api_key:admin 签发给 daemon）经请求显式字段携带，Bearer 用户携带该字段直接 403；daemon 唤醒链路随请求携带 origin 标记。
++成功标准：
++- 用户（Bearer、无 origin 标记）以 [后台任务通知] 前缀发消息：计为普通用户消息占额度，队满第 6 条照旧 QueueFull，不进通知合并
++- daemon 服务凭证（X-API-Key + origin=task_wakeup）注入通知：豁免满员、不占用户额度、同 origin pending 行合并不新增行，排队行 origin 落 task_wakeup
++- Bearer 请求携带 origin=task_wakeup 字段：403 拒绝（仅服务凭证可标记）
++- origin 非 task_wakeup 字面量：422（DTO Literal 校验）
++- 通知条目编辑保护改为 origin 结构化判定（兼容存量前缀行 409 不回归）
++- 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. 用户（Bearer、无 origin 标记）以 [后台任务通知] 前缀发消息：计为普通用户消息占额度，队满第 6 条照旧 QueueFull，不进通知合并
++2. daemon 服务凭证（X-API-Key + origin=task_wakeup）注入通知：豁免满员、不占用户额度、同 origin pending 行合并不新增行，排队行 origin 落 task_wakeup
++3. Bearer 请求携带 origin=task_wakeup 字段：403 拒绝（仅服务凭证可标记）
++4. origin 非 task_wakeup 字面量：422（DTO Literal 校验）
++5. 通知条目编辑保护改为 origin 结构化判定（兼容存量前缀行 409 不回归）
++6. 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
++
++## 成功标准（可验证）
++
++1. 用户（Bearer、无 origin 标记）以 [后台任务通知] 前缀发消息：计为普通用户消息占额度，队满第 6 条照旧 QueueFull，不进通知合并
++2. daemon 服务凭证（X-API-Key + origin=task_wakeup）注入通知：豁免满员、不占用户额度、同 origin pending 行合并不新增行，排队行 origin 落 task_wakeup
++3. Bearer 请求携带 origin=task_wakeup 字段：403 拒绝（仅服务凭证可标记）
++4. origin 非 task_wakeup 字面量：422（DTO Literal 校验）
++5. 通知条目编辑保护改为 origin 结构化判定（兼容存量前缀行 409 不回归）
++6. 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/requirements.md b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/requirements.md
+new file mode 100644
+index 000000000..505eb40e4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/requirements.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:40:33.352Z
++---
++# 需求规格（Requirements）— 2026-10-11-queue-wakeup-origin-guard
++
++## 功能需求
++
++### FR-01: 用户消息的 [后台任务通知] 前缀不再享有任何豁免
++
++- 用户经 `/inject` 端点发送的消息（无结构化 origin 标记）**必须**按普通用户消息计数：占满员额度（队满第 6 条 QueueFull）、不进通知合并分支、排队行 origin 为 NULL；**禁止**以消息内容前缀作为任何豁免/合并/计数排除的判定依据。
++
++#### 场景：前缀伪造不豁免
++
++- Given 会话忙轮且已有 5 条 pending 用户消息
++- When 用户再发一条以 `[后台任务通知]` 开头的消息（Bearer、无 origin 字段）
++- Then 抛 DaemonSessionQueueFull（第 6 条用户消息口径），不落通知合并行
++
++### FR-02: 服务凭证通知注入豁免满员并按 origin 合并
++
++- daemon 服务凭证注入（X-API-Key + `origin="task_wakeup"`）**必须**豁免满员检查、不计入用户额度、与既有 pending 的同 origin 行合并不新增行，且排队行 `origin` 落 `task_wakeup` 字面量。
++
++#### 场景：队满后通知照常入队并合并
++
++- Given 会话忙轮且已有 5 条 pending 用户消息 + 1 条 origin=task_wakeup 通知
++- When 服务凭证再注入一条 origin=task_wakeup 通知
++- Then 合并入既有通知行（不新增行、position 不变），用户后续消息额度口径仍是 5
++
++### FR-03: 结构化 origin 标记仅限服务凭证携带
++
++- `SessionInjectRequest` 新增可选 `origin: Literal["task_wakeup"]`；Bearer（浏览器 JWT）请求携带该字段**必须**被 403 拒绝（仅 X-API-Key 服务凭证可标记——API key 由 `api_key:admin` 门控签发给 daemon）；X-API-Key 与 Bearer 同时在场时按 `get_current_principal` 既有优先级视作 Bearer 用户（同样 403）。
++
++#### 场景：Bearer 冒充标记被拒
++
++- Given 任一活跃会话
++- When 携带 `Authorization: Bearer …` 的请求体带 `origin="task_wakeup"`
++- Then 403 PermissionDenied，无排队行/run 副作用
++
++### FR-04: origin 字面量由 DTO 严格校验
++
++- `origin` 字段**必须**为 `Literal["task_wakeup"]`：任意其它字符串（含空串）在 DTO 层 422，不进 service。
++
++#### 场景：非法 origin 值
++
++- When 请求体 `origin="admin"` 或 `origin=""`
++- Then 422（pydantic Literal 校验）
++
++### FR-05: 通知条目编辑保护改纯结构化 origin 判定
++
++- 排队条目编辑守卫**必须**且仅按 `origin == "task_wakeup"` 拒绝（409）；内容前缀不再参与判定（存量前缀行与新伪造行形态不可区分，按规则 11 不做前缀兜底——pending 行生命周期天级、误放行影响仅限当条 prompt 文本）；**禁止**把普通用户消息（前缀伪造、origin NULL）误判为不可编辑。
++
++#### 场景：两类行的编辑语义
++
++- Given 两条 pending：A=origin task_wakeup、B=用户前缀伪造行 origin NULL（与升级在途存量行同形态）
++- When 逐一编辑
++- Then A 409、B 200 可编辑
++
++### FR-06: 回归与新增用例全绿
++
++- 既有 test_session_queue / test_session_queue_actions 中通知相关用例**必须**改结构化口径后全绿；**必须**新增前缀伪造（FR-01）、服务豁免与合并（FR-02）、HTTP 层门控（FR-03/04）、编辑三态（FR-05）用例，先红后绿。
++
++#### 场景：先红后绿
++
++- When 在旧实现上运行新增用例
++- Then 前缀伪造豁免用例与 Bearer-origin 门控用例失败（红）；实现后全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/app/modules/daemon/tests/test_session_queue.py「test_spoofed_prefix_message_consumes_user_quota_and_rejected」
++FR-02: test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_inject_succeeds_when_queue_full」
++FR-02: test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_entries_merge_by_origin」
++FR-03: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_bearer_with_origin_field_403」
++FR-04: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_origin_literal_validation_422」
++FR-05: test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_wakeup_entry_rejected_409」
++FR-05: test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_spoofed_prefix_user_entry_allowed」
++FR-06: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_api_key_origin_inject_marks_queue_row」
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/tasks.md b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/tasks.md
+new file mode 100644
+index 000000000..043cbbb44
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:40:33.352Z
++---
++# 任务注册表（Tasks）— 2026-10-11-queue-wakeup-origin-guard
++
++- [x] task-01: 测试先行：test_session_queue 既有通知用例改结构化口径（task_wakeup=True），新增前缀伪造占额度/QueueFull 用例与 origin 合并用例——旧实现下伪造用例先红
++- [x] task-02: 后端结构化判定：helpers 常量 + queue.py 豁免/计数/合并/编辑守卫改 origin 判定 + inject 链路（inject.py/__init__.py）增 task_wakeup 透传——task-01 用例转绿
++- [x] task-03: HTTP 层门控：schema.py origin Literal 字段 + auth_deps.is_service_credential_request + session_crud inject 端点 403/透传；新增 test_inject_origin_guard.py（Bearer 403 / 非法值 422 / API-key 标记落行）先红后绿
++- [x] task-04: daemon 链路：hub-client.injectSessionPrompt 增 origin 可选参 + cli.ts 唤醒回调传 'task_wakeup'，daemon tsc 零错
++- [x] task-05: 契约重生成与回归收口：pnpm gen:types + dump_openapi 提交；相关面测试全绿 + ruff/mypy 零错；tasks 勾选与提交留痕
+diff --git a/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json.superseded-20261011T040932 b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json.superseded-20261011T040932
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-queue-wakeup-origin-guard/review.json.superseded-20261011T040932
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-queue-wakeup-origin-guard",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "437996ec474e37d8b58b620272087abedd27a708",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "test_edit_wakeup_entry_rejected_409 docstring 与实际断言相反（陈旧注释）",
++      "evidence": "docstring 写「存量前缀行（origin NULL）保持 409 兼容（第二段）」，但该测试体并无此第二段，且同文件 test_edit_legacy_prefix_entry_now_editable（486-511 行）断言的恰是相反行为——存量 origin NULL 前缀行可编辑（与 FR-05 及 queue.py:581 纯结构化守卫一致）。纯注释陈旧，运行时零影响，80 用例实测全绿。",
++      "location": "backend/app/modules/daemon/tests/test_session_queue_actions.py:463-464"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok；合并与计数均在会话行锁内同事务查询+写入（queue.py:142-201，_handle_busy_turn 调用方持 _get_owned_session_for_update 行锁），origin 判定不依赖到达顺序，daemon 重试同 origin 仍幂等合并",
++    "并发": "ok；满员计数/合并锚/入队三查一写都在行锁内串行，伪造行（origin NULL）与通知行互不合并；并发双发不会超上限",
++    "切换": "ok；边界已裁决：可接受——旧 daemon（无 origin 字段）+ 新 backend 通知按普通消息计（test_api_key_without_origin_is_plain_user_message 实证落 origin NULL 普通行），同仓同部署窗口、最坏丢一条通知且 daemon catch 不崩",
++    "作用域": "ok；origin 为排队行级标记随会话隔离；'task_wakeup' 字面量与 'auto_resume:<uuid>' 前缀空间不相交（无冒号，parse_auto_resume_origin 不误伤），dispatch/reorder 的 auto_resume 守卫均用 startswith('auto_resume:') 不命中 task_wakeup 行"
++  },
++  "reviewedAt": "2026-10-11T04:00:00Z"
++}

@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,6 +32,13 @@ input: >-
   - 既有 test_session_queue 相关用例改结构化口径全绿，新增伪造/合并/门控用例先红后绿
 autopilot: true
 baseline_commit: f0d24f51dd296c86dc2093343e1084d935db5515
-updatedAt: '2026-10-11T03:40:55.517Z'
+updatedAt: '2026-10-11T04:11:03.384Z'
 baseline_sha256: 27be1a19b60f57cd97dcba82e7a39647a5b6e0b3c880f8a42d52b014576101cb
+gate_summary: >-
+  test: passed ← module[]+deps(py39+jsx52)+fr(88)（264.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011040446\test-result.json｜lint:
+  failed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（1.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011040446\test-result.json｜门文件
+  26 个
 

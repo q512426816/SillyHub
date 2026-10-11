@@ -2630,3 +2630,117 @@
 摘要：相关测试绿
 全文：.sillyspec/changes/archive/2026-10-10-session-turn-token-speed/requirements.md#FR-06
 最近确认：de31e3fa5b1cd6e9dc0d73ba8705374b124ac61c
+
+## FR-lib-api-126 用户消息的 [后台任务通知] 前缀不再享有任何豁免
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：前缀伪造不豁免
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-01
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-01
+  tests: test/app/modules/daemon/tests/test_session_queue.py「test_spoofed_prefix_message_consumes_user_quota_and_rejected」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
+
+## FR-lib-api-127 服务凭证通知注入豁免满员并按 origin 合并
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：队满后通知照常入队并合并
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-02
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-02
+  tests: test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_entries_merge_by_origin」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
+
+## FR-lib-api-128 结构化 origin 标记仅限服务凭证携带
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：Bearer 冒充标记被拒
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-03
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-03
+  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_bearer_with_origin_field_403」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
+
+## FR-lib-api-129 origin 字面量由 DTO 严格校验
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：非法 origin 值
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-04
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-04
+  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_origin_literal_validation_422」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
+
+## FR-lib-api-130 通知条目编辑保护改纯结构化 origin 判定
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：两类行的编辑语义
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-05
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-05
+  tests: test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_spoofed_prefix_user_entry_allowed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
+
+## FR-lib-api-131 回归与新增用例全绿
+变更：2026-10-11-queue-wakeup-origin-guard
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-11-queue-wakeup-origin-guard/requirements.md#FR-06
+最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-06
+  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_api_key_origin_inject_marks_queue_row」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-queue-wakeup-origin-guard
+  status: active
