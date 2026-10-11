@@ -115,8 +115,10 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
   });
 
-  it('MSG 总数 = 24（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令），互不干扰', () => {
-    expect(Object.keys(MSG)).toHaveLength(24);
+  it('MSG 总数 = 25（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令 + 1 TOMBSTONE_CLEANUP），互不干扰', () => {
+    // 0b09d1555（2026-10-09-tombstone-conflict-root-fix）加 SILLYSPEC_TOMBSTONE_CLEANUP
+    // 漏更本钉——24→25。
+    expect(Object.keys(MSG)).toHaveLength(25);
   });
 
   it('SILLYSPEC_UPDATE（sillyspec 升级指令）字符串值 = daemon:sillyspec_update（与 backend DAEMON_MSG_SILLYSPEC_UPDATE 逐字对齐）', () => {

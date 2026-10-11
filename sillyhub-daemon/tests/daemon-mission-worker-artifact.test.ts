@@ -3,19 +3,25 @@
 // daemon.onTurnResult 对 mission_worker 分身（provider 无原生 MCP）成功轮终态
 // 兜底代报 worker_done。
 //
-// 背景：pi/codex/cursor 的 caps.mcp===false（providers.ts PROVIDER_CAPS），物理上
+// 背景：caps.mcp===false 的 provider（providers.ts PROVIDER_CAPS）物理上
 // 无法经 worker_prompt 约定的 worker_done MCP 工具自报，get_worker_result 的
 // artifacts 恒空；daemon 在既有 notifyRunResult 终态上报之后，用轮终 assistant
 // 全文 fire-and-forget 代报 hubClient.workerDone(undefined, undefined,
 // {summary: 全文}, {sessionId: 分身会话})，backend _worker_done_core 沉淀
 // kind=summary artifact。
 //
+// 2026-10-11-ci-red-batch-fix 契约同步：7bd743230（all-engines-mcp-injection
+// task-08）把 pi.caps.mcp false→true（SPIKE-00 实测），pi 分身改走 worker_done
+// MCP 工具自报路径——兜底代报门 caps.mcp===false 对 pi 不再放行（防双写）。
+// 正例与门控矩阵测试载体从 pi 换成仍 mcp=false 的 codex（机制断言不变）；
+// pi 新契约（零代报）补独立钉子。
+//
 // 覆盖（门控矩阵 + 顺序 + 容错）：
-//   - mission_worker + pi(mcp=false) + success + 全文非空 → 恰一次代报：
+//   - mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报：
 //     前两参 undefined、summary=全文（不截断）、opts.sessionId=分身会话 id、
 //     且调用发生在 notifyRunResult 之后（顺序数组断言）
 //   - 非 mission_worker（stage 缺省）→ 零调用
-//   - claude(mcp=true) → 零调用（自报路径，防 _worker_done_core artifact 双写）
+//   - claude(mcp=true) / pi(mcp=true 自 task-08) → 零调用（自报路径，防双写）
 //   - is_error=true → 零调用
 //   - result 空串 / 纯空白 / undefined / 非 string → 零调用
 //   - workerDone reject（含 HubHttpError 409 形状）→ 仅 warn worker_auto_done_failed，
@@ -227,11 +233,11 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
     return spies;
   }
 
-  it('mission_worker + pi(mcp=false) + success + 全文非空 → 恰一次代报（参数=全文+sessionId，顺序在 notifyRunResult 之后）', async () => {
+  it('mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报（参数=全文+sessionId，顺序在 notifyRunResult 之后）', async () => {
     track(spyConsole());
     const { daemon, client, order } = buildHarness({
       stage: 'mission_worker',
-      provider: 'pi',
+      provider: 'codex',
     });
     daemons.push(daemon);
 
@@ -285,11 +291,26 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
     expect(client['workerDone']).not.toHaveBeenCalled();
   });
 
-  it('is_error=true → 零代报', async () => {
+  it('pi（caps.mcp false→true 自 7bd743230 / task-08，worker MCP 自报路径）→ 零代报（防双写）', async () => {
     track(spyConsole());
     const { daemon, client } = buildHarness({
       stage: 'mission_worker',
       provider: 'pi',
+    });
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await flushMicrotasks();
+
+    expect(client['workerDone']).not.toHaveBeenCalled();
+    expect(client['notifyRunResult']).toHaveBeenCalledTimes(1);
+  });
+
+  it('is_error=true → 零代报', async () => {
+    track(spyConsole());
+    const { daemon, client } = buildHarness({
+      stage: 'mission_worker',
+      provider: 'codex',
     });
     daemons.push(daemon);
 
@@ -315,7 +336,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
     track(spyConsole());
     const { daemon, client } = buildHarness({
       stage: 'mission_worker',
-      provider: 'pi',
+      provider: 'codex',
     });
     daemons.push(daemon);
 
@@ -328,7 +349,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
   it('workerDone reject HubHttpError(409 迟到收敛) → 仅 warn worker_auto_done_failed，onTurnResult 不 reject', async () => {
     const spies = track(spyConsole());
     const { daemon, client } = buildHarness(
-      { stage: 'mission_worker', provider: 'pi' },
+      { stage: 'mission_worker', provider: 'codex' },
       async () => {
         throw new HubHttpError(
           409,
@@ -363,7 +384,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
   it('workerDone reject 普通网络错误 → 同样仅 warn 收敛不 reject', async () => {
     const spies = track(spyConsole());
     const { daemon } = buildHarness(
-      { stage: 'mission_worker', provider: 'pi' },
+      { stage: 'mission_worker', provider: 'codex' },
       async () => {
         throw new Error('fetch failed: ECONNREFUSED');
       },
@@ -383,7 +404,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
   it('client 未实现 workerDone（可选成员）→ debug 日志 + onTurnResult 正常返回', async () => {
     const spies = track(spyConsole());
     const { daemon, client } = buildHarness(
-      { stage: 'mission_worker', provider: 'pi' },
+      { stage: 'mission_worker', provider: 'codex' },
       'omit',
     );
     daemons.push(daemon);
@@ -412,7 +433,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
     track(spyConsole());
     const { daemon, client } = buildHarness({
       stage: 'mission_worker',
-      provider: 'pi',
+      provider: 'codex',
     });
     daemons.push(daemon);
 
@@ -529,10 +550,10 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白 
     expect(client['workerDone']).not.toHaveBeenCalled();
   });
 
-  it('pi 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
+  it('codex 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
     vi.useFakeTimers();
     const { daemon, client } = buildFallbackHarness(
-      { stage: 'mission_worker', provider: 'pi' },
+      { stage: 'mission_worker', provider: 'codex' },
       async () => ({
         active: true,
         workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
@@ -550,7 +571,7 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白 
   it('result 空白 + 晚到完整 text 事件（onTurnMessage）→ 兜底用会话级最后全文', async () => {
     vi.useFakeTimers();
     const { daemon, client } = buildFallbackHarness(
-      { stage: 'mission_worker', provider: 'pi' },
+      { stage: 'mission_worker', provider: 'codex' },
       async () => ({
         active: true,
         workers: [{ id: 'run-mw-1', artifacts: [] }],

@@ -1,5 +1,5 @@
 {
-  "_comment": "task-12 golden：ClaudeEventNormalizer 对 golden-session.json 的完整事件流（含 partial flush）。驱动协议：假时钟每帧 +100ms；帧 4/26 后推进 500ms（节流中途 flush）；帧 22/37 后 onTurnEnd；末尾 dispose。由 tests/interactive/golden/claude-events-golden.test.ts 锚定（快照防实现回归漂移）。",
+  "_comment": "task-12 golden：ClaudeEventNormalizer 对 golden-session.json 的完整事件流（含 partial flush）。驱动协议：假时钟每帧 +100ms；帧 4/26 后推进 500ms（节流中途 flush）；帧 22/37 后 onTurnEnd；末尾 dispose。由 tests/interactive/golden/claude-events-golden.test.ts 锚定（快照防实现回归漂移）。2026-10-11 再生成：帧 7/15/29 partial usage 补 api_duration_ms（2026-10-10-live-token-speed-daemon-timing 新产出键当时漏更快照，被 daemon-ci drift gate 遮蔽，2026-10-11-ci-red-batch-fix 清偿）。",
   "advance_after_frames": [
     4,
     26
@@ -74,6 +74,7 @@
           "usage": {
             "input_tokens": 100,
             "output_tokens": 50,
+            "api_duration_ms": 500,
             "cache_read_tokens": 500,
             "cache_creation_tokens": 0,
             "ctx_tokens": 600
@@ -142,6 +143,7 @@
           "usage": {
             "input_tokens": 420,
             "output_tokens": 170,
+            "api_duration_ms": 1100,
             "cache_read_tokens": 700,
             "cache_creation_tokens": 64,
             "ctx_tokens": 1084
@@ -381,6 +383,7 @@
           "usage": {
             "input_tokens": 900,
             "output_tokens": 40,
+            "api_duration_ms": 400,
             "cache_read_tokens": 1500,
             "cache_creation_tokens": 64,
             "ctx_tokens": 2400

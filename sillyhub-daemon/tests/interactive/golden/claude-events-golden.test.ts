@@ -338,10 +338,12 @@ describe('golden 事件序列快照', () => {
       segment_id: 'main:msg_t1_m1:thinking',
     });
     expect(byFrame.get(4)!.partials[0]!.usage).toBeUndefined();
-    // 帧 7：message_stop 边界 flush 携带中途 usage（含 ctx_tokens，D-003/D-005）。
+    // 帧 7：message_stop 边界 flush 携带中途 usage（含 ctx_tokens，D-003/D-005；
+    // api_duration_ms 为 live-token-speed FR-04 产出键）。
     expect(byFrame.get(7)!.partials[0]!.usage).toEqual({
       input_tokens: 100,
       output_tokens: 50,
+      api_duration_ms: 500,
       cache_read_tokens: 500,
       cache_creation_tokens: 0,
       ctx_tokens: 600,
@@ -353,10 +355,12 @@ describe('golden 事件序列快照', () => {
       usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 500 },
       session_id: 'sess-sample-0003',
     });
-    // 帧 15：轮级累计 usage（input 100+320 / output 50+120）+ ctx 重建 320+700+64。
+    // 帧 15：轮级累计 usage（input 100+320 / output 50+120）+ ctx 重建 320+700+64
+    // + api_duration_ms 桶计时（live-token-speed FR-04）。
     expect(byFrame.get(15)!.partials[0]!.usage).toEqual({
       input_tokens: 420,
       output_tokens: 170,
+      api_duration_ms: 1100,
       cache_read_tokens: 700,
       cache_creation_tokens: 64,
       ctx_tokens: 1084,
