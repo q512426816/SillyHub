@@ -140,9 +140,17 @@ async def sweep_confirmed_dead_tasks(
     if not dead_row_ids:
         return 0
     now = datetime.now(UTC)
+    # 评审 F1（P2）修复：UPDATE 带非终态守卫——候选 SELECT 与最终 UPDATE 之间
+    # 有真实窗口（RPC 逐会话串行，离线每会话吃满超时），期间 task_notification
+    # 终态事件提交后按 id 裸 UPDATE 会把 completed/failed 覆写成 stopped+清扫
+    # 标记，且已终态任务无后续事件、复活分支/latest-wins 均无法自愈（违反语义
+    # ①终态定格与「已终态行不触碰」承诺；v2 的同款守卫在重写时丢失，此处恢复）。
     result = await session.execute(
         update(AgentSessionTask)
-        .where(AgentSessionTask.id.in_(dead_row_ids))
+        .where(
+            AgentSessionTask.id.in_(dead_row_ids),
+            AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
+        )
         .values(
             status="stopped",
             finished_at=now,

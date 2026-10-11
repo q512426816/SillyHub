@@ -1041,6 +1041,43 @@ class TestRunCloseTaskSweep:
         assert rows["t-other"].status == "running"
 
     @pytest.mark.asyncio
+    async def test_sweep_terminal_race_not_overwritten(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """评审 F1（P2）：SELECT→UPDATE 窗口内到达的真实终态不被覆写。
+
+        构造：候选 SELECT 后、最终 UPDATE 前（RPC 回调即该窗口的确定性钩子点），
+        任务行被 task_notification 终态事件写成 completed——UPDATE 的非终态守卫
+        必须放它过去（终态定格，语义①），不得覆写为 stopped+清扫标记。
+        """
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-race"))
+
+        class _RacingHub(_StubHub):
+            async def send_rpc(self, daemon_id, method, params, timeout=None):
+                # 窗口钩子：RPC 在途时终态事件先到达并提交。
+                await upsert_agent_task(
+                    db_session,
+                    _event(ag_session.id, run.id, "t-race", status="completed"),
+                )
+                return await super().send_rpc(daemon_id, method, params, timeout)
+
+        hub = _RacingHub({(rt.id, str(ag_session.id)): []})  # daemon：不在活跃集
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+
+        assert swept == 0  # 唯一候选已终态 → 守卫放行，零收口
+        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+        assert rows["t-race"].status == "completed"
+        assert rows["t-race"].message is None  # 未被清扫标记污染
+
+    @pytest.mark.asyncio
     async def test_sweep_stopped_row_revives_on_running_heartbeat(
         self, auth_headers: dict[str, str], db_session: AsyncSession
     ) -> None:
