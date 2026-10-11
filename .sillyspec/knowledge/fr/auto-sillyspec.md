@@ -186,3 +186,98 @@ created_at: 2026-10-08T01:03:54.861Z
   confirmed_at: null
   source_change: 2026-10-11-task-sweep-liveness-guard
   status: active
+
+## FR-auto-sillyspec-063 tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
+变更：2026-10-11-borrow-ctx-metadata-truncate
+状态：active
+摘要：超长技术栈数组
+全文：.sillyspec/changes/archive/2026-10-11-borrow-ctx-metadata-truncate/requirements.md#FR-01
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「tech_stack join 超 500 截断并标注（防线对齐 description）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-borrow-ctx-metadata-truncate
+  status: active
+
+## FR-auto-sillyspec-064 repo_url 超 500 字符同款截断
+变更：2026-10-11-borrow-ctx-metadata-truncate
+状态：active
+摘要：超长仓库地址
+全文：.sillyspec/changes/archive/2026-10-11-borrow-ctx-metadata-truncate/requirements.md#FR-02
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「repo_url 超 500 截断并标注」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-borrow-ctx-metadata-truncate
+  status: active
+
+## FR-auto-sillyspec-065 短字段（≤500）逐字原样（零回归）
+变更：2026-10-11-borrow-ctx-metadata-truncate
+状态：active
+摘要：边界 500
+全文：.sillyspec/changes/archive/2026-10-11-borrow-ctx-metadata-truncate/requirements.md#FR-03
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「短字段逐字原样与 500 边界不截断」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-borrow-ctx-metadata-truncate
+  status: active
+
+## FR-auto-sillyspec-066 截断只作用于 tech_stack/repo_url，其余字段零影响 + 渲染幂等不变
+变更：2026-10-11-borrow-ctx-metadata-truncate
+状态：active
+摘要：并存字段
+全文：.sillyspec/changes/archive/2026-10-11-borrow-ctx-metadata-truncate/requirements.md#FR-04
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「渲染幂等：同一 ctx 两次渲染输出一致（同 slug 沙箱重入安全）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-borrow-ctx-metadata-truncate
+  status: active
+
+## FR-auto-sillyspec-067 新增截断用例先红后绿，既有用例全绿 + tsc 零错
+变更：2026-10-11-borrow-ctx-metadata-truncate
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-11-borrow-ctx-metadata-truncate/requirements.md#FR-05
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「全字段渲染：元信息 + 真实路径只读声明 + 沙箱产出指引 + 文尾数据声明」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-borrow-ctx-metadata-truncate
+  status: active

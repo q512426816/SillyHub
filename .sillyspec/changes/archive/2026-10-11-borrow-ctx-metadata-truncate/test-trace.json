@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-borrow-ctx-metadata-truncate",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「tech_stack join 超 500 截断并标注（防线对齐 description）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-borrow-ctx-metadata-truncate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「repo_url 超 500 截断并标注」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-borrow-ctx-metadata-truncate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-03",
+      "tests": [
+        "test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「短字段逐字原样与 500 边界不截断」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-borrow-ctx-metadata-truncate"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「渲染幂等：同一 ctx 两次渲染输出一致（同 slug 沙箱重入安全）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-borrow-ctx-metadata-truncate"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-borrow-ctx-metadata-truncate:flow:测试绑定FR-05",
+      "tests": [
+        "test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「全字段渲染：元信息 + 真实路径只读声明 + 沙箱产出指引 + 文尾数据声明」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-borrow-ctx-metadata-truncate"
+    }
+  ]
+}

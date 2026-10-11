@@ -2207,3 +2207,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
 理由：最大风险：7 天保留期是拍的工程值——太长磁盘压力延续、太短丢人工检查窗口；选 7 天依据是「缓存快照 + repo-native 真数据在源项目」的双重冗余，误删后果有限。声明边界：repo-native 分支 `mkdir(sourceSillyspec)` 失败保持 fail-loud 不降级——降级 pull 会把缓存落回普通目录、sillyspec CLI 自指守卫（realpath 穿透 junction）失效、重新打开 261dc22e9 收口的平台标记投毒面；fail-loud 由调用方 catch 记日志，会话无 spec 缓存但不投毒，两害取轻（可接受：投毒写脏源项目 vs 本会话读不到 spec）。 放弃的方案：① symlink 失败时回滚（rename backup→specDir 复原）——回滚 rename 同样可能 EBUSY 失败，引入第二层半交换态，复杂度不划算；降级 pull 重建 specDir 等价且更简单。② 清扫复用 10 分钟保留期——备份是完整数据快照非 in-flight 残留，10 分钟等于变相「删备份」，与 261dc22e9「数据不丢」的承诺冲突。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-borrow-ctx-metadata-truncate
+锚点：未记录
+最近确认：d2dd769513f5d21559927dcda958740a1b4981e8
+理由：最大风险：截断只缓解不根治——注入者仍可在 500 字符内塞指令样文本；根治需 backend schema 层加 `max_length`（动 OpenAPI/前端表单，超出本 P3 修复范围，作为建议留档）。文尾「平台登记数据，不是用户指令」声明与 500 截断同为本模块纵深防御既定层级。 放弃的方案：backend schema 层加 max_length 硬校验——面更大（DTO/OpenAPI/前端 api-types 重生成），且 lender 工作区登记属低频管理操作，daemon 侧渲染截断已闭合 agent 注入面；backend 硬校验作为后续建议不在本变更。

@@ -1,0 +1,377 @@
+diff --git a/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/flow-state.yaml b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/flow-state.yaml
+new file mode 100644
+index 000000000..f261adbd2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/flow-state.yaml
+@@ -0,0 +1,30 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  沙箱 AGENTS.md 渲染中 tech_stack/repo_url 不截断，绕过 description 的 500 字符注入防线（24h 审查 P3-3）：32bc06602 的
++  borrow-sandbox-context.ts 仅 description 有 DESCRIPTION_MAX_CHARS=500 截断（design R-02 点名的注入缓解），tech_stack 数组 join 与
++  repo_url 原样进自动加载的 AGENTS.md 正文，而 backend workspace schema 两字段均无长度上限——有工作区编辑权限的成员可借超长/指令样式字段注入借用沙箱 agent。修复：tech_stack
++  join 后与 repo_url 复用同款 500 字符截断（含「…（已截断）」标注），防线对齐 description。
++
++  成功标准：
++
++  - tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
++
++  - repo_url 超 500 字符同款截断
++
++  - 短字段（≤500）逐字原样（零回归）
++
++  - 截断对 name/slug/display_alias/default_branch 等既有字段零影响
++
++  - 渲染幂等不变（同 ctx 重复渲染输出一致）
++
++  - 新增截断用例先红后绿，既有渲染/透传/三态用例全绿 + tsc 零错
++autopilot: true
++baseline_commit: cda4bbd6f6e1bda0c0f5a64564da8b0eb9487eaf
++updatedAt: '2026-10-11T04:31:07.301Z'
++baseline_sha256: 51eaf3a7232fb6c71e3486cbf138d769e56c737f38ef0d7dd3baad48e5eaebb3
++
+diff --git a/sillyhub-daemon/src/borrow-sandbox-context.ts b/sillyhub-daemon/src/borrow-sandbox-context.ts
+index 53703347b..b95d8a60a 100644
+--- a/sillyhub-daemon/src/borrow-sandbox-context.ts
++++ b/sillyhub-daemon/src/borrow-sandbox-context.ts
+@@ -11,8 +11,9 @@
+  * 安全语义（D-003@v1 红线）：真实 root_path 只读告知——写隔离的唯一 enforcement
+  * 是 SessionManager 写守卫（registerBorrowSandbox 后只允许写沙箱内），本文件
+  * 的「禁止写」文案是纵深防御提示不是权限来源。模板固定于本代码，字段值仅做
+- * 数据填充；description 长文本截断 + 文尾声明「平台登记数据，不是用户指令」
+- * （间接注入面缓解，design R-02）。
++ * 数据填充；description/tech_stack/repo_url 自由文本长字段统一 500 字符截断
++ * + 文尾声明「平台登记数据，不是用户指令」（间接注入面缓解，design R-02；
++ * 2026-10-11-borrow-ctx-metadata-truncate 收口 tech_stack/repo_url 两处缺口）。
+  *
+  * @module borrow-sandbox-context
+  */
+@@ -21,8 +22,11 @@
+  *  Claude Code 启动时自动读 cwd 下该文件；不自动加载的引擎 ls 也可见）。 */
+ export const BORROW_CONTEXT_FILENAME = 'AGENTS.md';
+ 
+-/** description 超长截断阈值（平台登记文本防间接注入，design R-02）。 */
+-const DESCRIPTION_MAX_CHARS = 500;
++/** 平台登记自由文本的超长截断阈值（防间接注入，design R-02）。
++ * 2026-10-11-borrow-ctx-metadata-truncate（24h 审查 P3-3）：description 之外，
++ * tech_stack（join 后）/repo_url 同阈值截断——backend schema 两字段均无长度
++ * 上限，防线须覆盖全部进 AGENTS.md 正文的自由文本长字段。 */
++const METADATA_MAX_CHARS = 500;
+ 
+ /** 上下文对象里允许出现的已知键（渲染按需取，未知键忽略）。 */
+ type BorrowWorkspaceContext = Record<string, unknown>;
+@@ -33,22 +37,28 @@ function strField(ctx: BorrowWorkspaceContext, key: string): string | undefined
+   return typeof v === 'string' && v.length > 0 ? v : undefined;
+ }
+ 
+-/** tech_stack 形态归一（数组 join「、」/字符串原样/其它略），design R-05。 */
++/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现三处共用）。 */
++function truncateText(raw: string): string {
++  if (raw.length <= METADATA_MAX_CHARS) return raw;
++  return `${raw.slice(0, METADATA_MAX_CHARS)}…（已截断）`;
++}
++
++/** tech_stack 形态归一（数组 join「、」/字符串原样/其它略），design R-05；
++ * join 后整体套截断（数组元素逐一不限、聚合超阈值统一截，与单字符串同款）。 */
+ function techStackText(ctx: BorrowWorkspaceContext): string | undefined {
+   const v = ctx.tech_stack;
+   if (Array.isArray(v)) {
+     const parts = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
+-    return parts.length > 0 ? parts.join('、') : undefined;
++    return parts.length > 0 ? truncateText(parts.join('、')) : undefined;
+   }
+-  return strField(ctx, 'tech_stack');
++  const raw = strField(ctx, 'tech_stack');
++  return raw === undefined ? undefined : truncateText(raw);
+ }
+ 
+ /** description 截断（超阈值截断加省略标注）。 */
+ function descriptionText(ctx: BorrowWorkspaceContext): string | undefined {
+   const raw = strField(ctx, 'description');
+-  if (raw === undefined) return undefined;
+-  if (raw.length <= DESCRIPTION_MAX_CHARS) return raw;
+-  return `${raw.slice(0, DESCRIPTION_MAX_CHARS)}…（已截断）`;
++  return raw === undefined ? undefined : truncateText(raw);
+ }
+ 
+ /**
+@@ -88,9 +98,10 @@ export function renderBorrowSandboxContext(
+     if (tech !== undefined) parts.push(`技术栈：${tech}`);
+     lines.push(`- ${parts.join('；')}`);
+   }
+-  const repoUrl = strField(ctx, 'repo_url');
++  const repoUrlRaw = strField(ctx, 'repo_url');
+   const branch = strField(ctx, 'default_branch');
+-  if (repoUrl !== undefined) {
++  if (repoUrlRaw !== undefined) {
++    const repoUrl = truncateText(repoUrlRaw);
+     lines.push(`- 仓库：${repoUrl}${branch !== undefined ? `（默认分支 ${branch}）` : ''}`);
+   }
+   const desc = descriptionText(ctx);
+diff --git a/sillyhub-daemon/tests/borrow-sandbox-context.test.ts b/sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+index bbf522776..11ccfcfd1 100644
+--- a/sillyhub-daemon/tests/borrow-sandbox-context.test.ts
++++ b/sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+@@ -96,4 +96,72 @@ describe('renderBorrowSandboxContext', () => {
+   it('文件名常量为跨 CLI 自动加载标准 AGENTS.md', () => {
+     expect(BORROW_CONTEXT_FILENAME).toBe('AGENTS.md');
+   });
++
++  // ── 2026-10-11-borrow-ctx-metadata-truncate（24h 审查 P3-3：防线对齐）──────
++  // tech_stack/repo_url 与 description 同款 500 截断——backend schema 两字段
++  // 均无长度上限，超长/指令样式文本可注入借用沙箱 agent 自动加载的 AGENTS.md。
++
++  it('tech_stack join 超 500 截断并标注（防线对齐 description）', () => {
++    // join 后 601 字符（300 + 「、」 + 300）。
++    const out = renderBorrowSandboxContext(
++      { name: 'W', tech_stack: ['x'.repeat(300), 'y'.repeat(300)] },
++      '/tmp/s',
++    );
++    expect(out).toContain('x'.repeat(300));
++    expect(out).toContain('…（已截断）');
++    expect(out).not.toContain('y'.repeat(300));
++    // 字符串形态同款截断（R-05 strField 路径）。
++    const out2 = renderBorrowSandboxContext(
++      { name: 'W', tech_stack: 't'.repeat(600) },
++      '/tmp/s',
++    );
++    expect(out2).toContain('…（已截断）');
++    expect(out2).not.toContain('t'.repeat(501));
++  });
++
++  it('repo_url 超 500 截断并标注', () => {
++    const longUrl = `http://x/${'a'.repeat(600)}`;
++    const out = renderBorrowSandboxContext(
++      { name: 'W', repo_url: longUrl, default_branch: 'main' },
++      '/tmp/s',
++    );
++    expect(out).toContain('…（已截断）');
++    expect(out).not.toContain('a'.repeat(501));
++    // 分支段仍随行渲染（截断只作用于 repo_url 值本身）。
++    expect(out).toContain('（默认分支 main）');
++  });
++
++  it('短字段逐字原样与 500 边界不截断', () => {
++    const edge = `http://x/${'b'.repeat(490)}`; // 恰 500
++    const out = renderBorrowSandboxContext(
++      { name: 'W', repo_url: edge, tech_stack: ['c'.repeat(500)] },
++      '/tmp/s',
++    );
++    expect(out).toContain(edge);
++    expect(out).toContain('c'.repeat(500));
++    expect(out).not.toContain('…（已截断）');
++  });
++
++  it('并存字段：超长 tech_stack 截断，其余行与旧实现逐字一致', () => {
++    const out = renderBorrowSandboxContext(
++      {
++        name: 'workflow',
++        slug: 'zcjtworkflow',
++        type: 'backend-code',
++        tech_stack: ['z'.repeat(600)],
++        default_branch: 'main',
++        root_path: '/repo',
++      },
++      '/tmp/borrow-x',
++    );
++    // 技术栈行截断标注。
++    expect(out).toContain('技术栈：');
++    expect(out).toContain('…（已截断）');
++    expect(out).not.toContain('z'.repeat(501));
++    // 其余行逐字保持（截断只命中技术栈值）。
++    expect(out).toContain('工作区：workflow（slug: zcjtworkflow）');
++    expect(out).toContain('类型：backend-code；');
++    expect(out).toContain('`/repo`');
++    expect(out).toContain('**禁止写**');
++  });
+ });
+diff --git a/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/design.md b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/design.md
+new file mode 100644
+index 000000000..2fedfd760
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:31:07.280Z
++---
++# 设计记录（Design Record）— 2026-10-11-borrow-ctx-metadata-truncate
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查 P3-3：32bc06602 的 `borrow-sandbox-context.ts` 只有 description 走 `DESCRIPTION_MAX_CHARS=500` 截断（design R-02 点名的间接注入缓解），`tech_stack`（数组 join）与 `repo_url` 原样进借用沙箱 agent 自动加载的 AGENTS.md——而 backend `workspace/schema.py:120,127` 两字段均无 `max_length`，构成防线不一致的注入面。修复：把 description 的截断逻辑抽成共享 helper `truncateText`，`techStackText` 产出与 `repo_url` 取值后套用同款 500 字符截断（含「…（已截断）」标注），阈值/文案与 description 完全一致——单一防线覆盖全部平台登记自由文本长字段。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `sillyhub-daemon/src/borrow-sandbox-context.ts`（内部函数，导出面零改动）：
++  - 新增私有 helper `truncateText(raw)`（≤500 原样 / 超长截断加「…（已截断）」），`descriptionText` 改调它（行为逐字不变）；
++  - `techStackText` 的 join 结果与字符串形态套 `truncateText`；
++  - 渲染处 `repo_url` 套 `truncateText`。
++- 模块导出符号（`BORROW_CONTEXT_FILENAME`、`renderBorrowSandboxContext`）签名零改动；backend、前端、协议「无」变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：纯函数渲染（无 IO、无状态），输入是已归一化的 ctx 快照，截断按值决定、与到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：纯函数无共享状态；落盘由 daemon.ts marker 分支既有 fail-open 写（本变更不动）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++不适用：渲染幂等（同 ctx 输出一致），无中途态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不适用：ctx 是借用会话自身的白名单字段（backend placement 固定九字段），渲染不跨工作区。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：截断只缓解不根治——注入者仍可在 500 字符内塞指令样文本；根治需 backend schema 层加 `max_length`（动 OpenAPI/前端表单，超出本 P3 修复范围，作为建议留档）。文尾「平台登记数据，不是用户指令」声明与 500 截断同为本模块纵深防御既定层级。
++
++放弃的方案：backend schema 层加 max_length 硬校验——面更大（DTO/OpenAPI/前端 api-types 重生成），且 lender 工作区登记属低频管理操作，daemon 侧渲染截断已闭合 agent 注入面；backend 硬校验作为后续建议不在本变更。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/borrow-sandbox-context.ts | truncateText 共享 helper + tech_stack/repo_url 截断 |
++| 修改 | sillyhub-daemon/tests/borrow-sandbox-context.test.ts | 新增截断/边界/并存字段用例（先红后绿） |
+diff --git a/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/proposal.md b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/proposal.md
+new file mode 100644
+index 000000000..c52846605
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:31:07.280Z
++---
++# 提案书（Proposal）— 2026-10-11-borrow-ctx-metadata-truncate
++
++## 动机
++
++任务原话转写：沙箱 AGENTS.md 渲染中 tech_stack/repo_url 不截断，绕过 description 的 500 字符注入防线（24h 审查 P3-3）：32bc06602 的 borrow-sandbox-context.ts 仅 description 有 DESCRIPTION_MAX_CHARS=500 截断（design R-02 点名的注入缓解），tech_stack 数组 join 与 repo_url 原样进自动加载的 AGENTS.md 正文，而 backend workspace schema 两字段均无长度上限——有工作区编辑权限的成员可借超长/指令样式字段注入借用沙箱 agent。修复：tech_stack join 后与 repo_url 复用同款 500 字符截断（含「…（已截断）」标注），防线对齐 description。
++成功标准：
++- tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
++- repo_url 超 500 字符同款截断
++- 短字段（≤500）逐字原样（零回归）
++- 截断对 name/slug/display_alias/default_branch 等既有字段零影响
++- 渲染幂等不变（同 ctx 重复渲染输出一致）
++- 新增截断用例先红后绿，既有渲染/透传/三态用例全绿 + tsc 零错
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
++2. repo_url 超 500 字符同款截断
++3. 短字段（≤500）逐字原样（零回归）
++4. 截断对 name/slug/display_alias/default_branch 等既有字段零影响
++5. 渲染幂等不变（同 ctx 重复渲染输出一致）
++6. 新增截断用例先红后绿，既有渲染/透传/三态用例全绿 + tsc 零错
++
++## 成功标准（可验证）
++
++1. tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
++2. repo_url 超 500 字符同款截断
++3. 短字段（≤500）逐字原样（零回归）
++4. 截断对 name/slug/display_alias/default_branch 等既有字段零影响
++5. 渲染幂等不变（同 ctx 重复渲染输出一致）
++6. 新增截断用例先红后绿，既有渲染/透传/三态用例全绿 + tsc 零错
+diff --git a/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/requirements.md b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/requirements.md
+new file mode 100644
+index 000000000..68d869e7d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/requirements.md
+@@ -0,0 +1,64 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:31:07.280Z
++---
++# 需求规格（Requirements）— 2026-10-11-borrow-ctx-metadata-truncate
++
++## 功能需求
++
++### FR-01: tech_stack join 结果超 500 字符时截断加「…（已截断）」标注，与 description 同款
++
++- `techStackText` 产出的文本（数组 join「、」或字符串原样）超 500 字符时**必须**截断至 500 并加「…（已截断）」标注——与 description 的 `DESCRIPTION_MAX_CHARS=500` 注入缓解（design R-02）同款同阈值；backend schema 对 tech_stack 无长度上限（24h 审查 P3-3：有工作区编辑权限者可借超长/指令样式字段注入借用沙箱 agent 自动加载的 AGENTS.md）。
++
++#### 场景：超长技术栈数组
++
++- Given tech_stack = ['x'.repeat(300), 'y'.repeat(300)]（join 后 601 字符）
++- When renderBorrowSandboxContext
++- Then 技术栈行含「…（已截断）」且不含完整尾部 'y'*300
++
++### FR-02: repo_url 超 500 字符同款截断
++
++- `repo_url` 字符串超 500 字符时**必须**同款截断标注（backend schema 同样无长度上限）。
++
++#### 场景：超长仓库地址
++
++- Given repo_url 长度 607
++- When 渲染
++- Then 仓库行含「…（已截断）」且长度受界
++
++### FR-03: 短字段（≤500）逐字原样（零回归）
++
++- 长度 ≤500 的 tech_stack/repo_url **必须**逐字原样渲染（含恰 500 边界值不截断）；既有渲染/透传/三态用例零回归。
++
++#### 场景：边界 500
++
++- Given repo_url 恰 500 字符
++- When 渲染
++- Then 原样出现且无「已截断」标注
++
++### FR-04: 截断只作用于 tech_stack/repo_url，其余字段零影响 + 渲染幂等不变
++
++- name/slug/display_alias/type/default_branch/root_path 等字段**必须**保持现状渲染（零改动）；同一 ctx 重复渲染输出一致（幂等）不变。
++
++#### 场景：并存字段
++
++- Given 同 ctx 携带超长 tech_stack + 正常 name/branch
++- When 渲染
++- Then 仅技术栈行截断，其余行与旧实现逐字一致
++
++### FR-05: 新增截断用例先红后绿，既有用例全绿 + tsc 零错
++
++- 新用例在旧实现上**必须**先红；实现后 borrow-sandbox-context.test.ts 全绿；`tsc --noEmit` 零错。
++
++#### 场景：先红后绿
++
++- When 旧实现运行 FR-01/02 用例
++- Then 无「已截断」标注断言失败（红）；实现后全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「tech_stack join 超 500 截断并标注（防线对齐 description）」
++FR-02: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「repo_url 超 500 截断并标注」
++FR-03: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「短字段逐字原样与 500 边界不截断」
++FR-04: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「渲染幂等：同一 ctx 两次渲染输出一致（同 slug 沙箱重入安全）」
++FR-05: test/sillyhub-daemon/tests/borrow-sandbox-context.test.ts「全字段渲染：元信息 + 真实路径只读声明 + 沙箱产出指引 + 文尾数据声明」
+diff --git a/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/tasks.md b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/tasks.md
+new file mode 100644
+index 000000000..63a898a77
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-borrow-ctx-metadata-truncate/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:31:07.280Z
++---
++# 任务注册表（Tasks）— 2026-10-11-borrow-ctx-metadata-truncate
++
++- [x] task-01: 测试先行：borrow-sandbox-context.test.ts 新增 tech_stack join 超 500 / repo_url 超 500 / 短字段与 500 边界原样 / 并存字段零影响四组用例——旧实现先红
++- [x] task-02: 实现 truncateText 共享 helper，techStackText/repo_url/descriptionText 三处统一走 500 截断——用例转绿，description 行为逐字不变
++- [x] task-03: 全文件回归 + daemon tsc 零错 + 显式 pathspec 提交（消息带 task-NN）
