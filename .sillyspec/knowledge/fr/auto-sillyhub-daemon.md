@@ -114,10 +114,10 @@ created_at: 2026-10-08T15:19:22.662Z
 - row: 2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-01
   tests: sillyhub-daemon/tests/protocol-session-contract.test.ts「MSG 总数 = 25」
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 004af2936041cba741bbce9afef8a46a6e412c9c
   source_change: 2026-10-11-daemon-masked-test-fix
   status: active
 
@@ -133,10 +133,10 @@ created_at: 2026-10-08T15:19:22.662Z
 - row: 2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-02
   tests: sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: 004af2936041cba741bbce9afef8a46a6e412c9c
   source_change: 2026-10-11-daemon-masked-test-fix
   status: active
 
