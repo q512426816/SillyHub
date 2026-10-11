@@ -1,0 +1,109 @@
+{
+  "change": "2026-10-11-linked-repos-path-guard",
+  "baseline": "abf3dd42f71f9036c1d8727156f5b6d363d7ce8c",
+  "head": "3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0",
+  "files": [
+    ".sillyspec/changes/2026-10-11-linked-repos-path-guard/design.md",
+    ".sillyspec/changes/2026-10-11-linked-repos-path-guard/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-linked-repos-path-guard/proposal.md",
+    ".sillyspec/changes/2026-10-11-linked-repos-path-guard/requirements.md",
+    ".sillyspec/changes/2026-10-11-linked-repos-path-guard/tasks.md",
+    "sillyhub-daemon/src/linked-repos-path.ts",
+    "sillyhub-daemon/src/linked-repos-snapshot.ts",
+    "sillyhub-daemon/src/linked-repos-sync.ts",
+    "sillyhub-daemon/tests/linked-repos-snapshot.test.ts",
+    "sillyhub-daemon/tests/linked-repos-sync.test.ts"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 350,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-11T04:54:04.973Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "abf3dd42f71f9036c1d8727156f5b6d363d7ce8c",
+    "totals": {
+      "files": 5,
+      "additions": 134,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/linked-repos-path.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/linked-repos-snapshot.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/linked-repos-sync.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/linked-repos-snapshot.test.ts",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/linked-repos-sync.test.ts",
+        "additions": 55,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2f09ccaf3a6b38300590b1ca3964ac9cee51800ab638cb410f923f718ede8934",
+  "patchStatus": "ok"
+}

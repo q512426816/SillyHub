@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-linked-repos-path-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「相对形态 root_path 抛错不 spawn CLI」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-sync.test.ts「root_path 三种绝对形态放行 + 相对形态抛错」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-03",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-sync.test.ts「rel_path 绝对形态该层 failed 不 spawn」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-sync.test.ts「abs_path 相对形态该层 failed 不 spawn」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-05",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-sync.test.ts「合法约定零回归：兄弟相对路径与绝对本机路径照常 spawn」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-11-linked-repos-path-guard:flow:测试绑定FR-06",
+      "tests": [
+        "test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「UNC 与 POSIX 绝对形态放行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-linked-repos-path-guard"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-linked-repos-path-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T04:56:30Z"
+}

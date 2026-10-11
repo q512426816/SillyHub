@@ -1,0 +1,447 @@
+diff --git a/.sillyspec/changes/2026-10-11-linked-repos-path-guard/flow-state.yaml b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/flow-state.yaml
+new file mode 100644
+index 000000000..91d4f3e44
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/flow-state.yaml
+@@ -0,0 +1,31 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  linked_repos 两条 RPC 对路径参数零校验（24h 审查 P3-2 遗留）：daemon.ts 的 linked_repos_snapshot/linked_repos_sync 对 root_path
++  只做非空校验即用作外部 CLI 的 cwd 与参数，rel_path/abs_path 仅 trim 后直传 sillyspec 写命令（对比 name 有正则白名单）；backend 侧 MyPathUpdate.path
++  只限长度不限形态，daemon 无第二道边界——backend 数据被污染或未来新增调用方时，daemon 成为以其进程权限执行任意路径命令的跳板。修复（形态校验，不动既有约定）：新增 isAbsoluteLikePath
++  助手（POSIX 根 / Windows 盘符 / UNC 任一绝对形态；裸 path.isAbsolute 会在 Linux CI 打翻 Windows 盘符 fixture）；快照 root_path 与 sync
++  root_path 非绝对形态 throw；sync 逐仓 rel_path 须相对路径（../ 兄弟仓是既有合法约定，不禁 ..）、abs_path 须绝对路径，违者该层 failed 不 spawn，合法形态逐字透传零回归。
++
++  成功标准：
++
++  - runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
++
++  - runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
++
++  - sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
++
++  - sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
++
++  - 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
++
++  - 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
++autopilot: true
++baseline_commit: abf3dd42f71f9036c1d8727156f5b6d363d7ce8c
++updatedAt: '2026-10-11T04:49:03.246Z'
++baseline_sha256: c157c6e1151962c09f926f291da0364f198483315d68d14e6c72712856997f94
++
+diff --git a/sillyhub-daemon/src/linked-repos-path.ts b/sillyhub-daemon/src/linked-repos-path.ts
+new file mode 100644
+index 000000000..99dfbe44f
+--- /dev/null
++++ b/sillyhub-daemon/src/linked-repos-path.ts
+@@ -0,0 +1,27 @@
++/**
++ * linked-repos-path.ts —— 关联仓 RPC 路径形态校验助手（纯函数）。
++ *
++ * 2026-10-11-linked-repos-path-guard（24h 审查 P3-2）：daemon 的
++ * linked_repos_snapshot/sync 此前对 root_path 只做非空校验即用作外部 CLI 的
++ * cwd 与参数、rel_path/abs_path 仅 trim 直传写命令；backend 侧 MyPathUpdate.path
++ * 只限长度不限形态——本助手提供第二道边界（纵深防御），只拦**相对/垃圾形态**
++ * （相对路径会让 execFile cwd 漂移到 daemon 进程目录、行为未定义）。
++ *
++ * 不用裸 `path.isAbsolute`：它平台相关（Linux 上拒 `C:/x` 盘符形态），而 CI
++ * （ubuntu-latest）与生产 fixture 都会出现 Windows 盘符字符串——三形态正则
++ * 保证任意运行平台上判定一致：
++ * - POSIX 根：`/ws`
++ * - Windows 盘符：`C:/x`、`C:\x`
++ * - UNC：`\\srv\share\x`（反斜双）或 `//srv/share/x`（正斜双）
++ *
++ * 绝对路径的**内容**不加白名单——用户登记本机任意仓库路径是功能本体，机器
++ * 归属校验归 backend 绑定行语义。
++ */
++
++/** 绝对路径形态：盘符 / UNC 反斜双 / UNC 正斜双 / POSIX 根，任一起头即真。 */
++const ABSOLUTE_LIKE_RE = /^(?:[A-Za-z]:[\\/]|\\\\|\/\/|\/)/;
++
++/** 是否为绝对路径形态（平台无关；空串与相对形态 false）。 */
++export function isAbsoluteLikePath(p: string): boolean {
++  return ABSOLUTE_LIKE_RE.test(p);
++}
+diff --git a/sillyhub-daemon/src/linked-repos-snapshot.ts b/sillyhub-daemon/src/linked-repos-snapshot.ts
+index 25f0f3fee..0b242cc70 100644
+--- a/sillyhub-daemon/src/linked-repos-snapshot.ts
++++ b/sillyhub-daemon/src/linked-repos-snapshot.ts
+@@ -15,6 +15,7 @@
+ import { execFile } from 'node:child_process';
+ import { promisify } from 'node:util';
+ 
++import { isAbsoluteLikePath } from './linked-repos-path.js';
+ import { resolveSillySpecBinDefault } from './sillyspec-manager.js';
+ 
+ const execFileAsync = promisify(execFile);
+@@ -95,6 +96,12 @@ export async function runLinkedReposSnapshot(
+   rootPath: string,
+   deps: LinkedReposSnapshotDeps = {},
+ ): Promise<LinkedReposSnapshot> {
++  // 2026-10-11-linked-repos-path-guard（24h 审查 P3-2）：root_path 是两条读命令
++  // 的 cwd 与 --spec-dir 参数，相对/垃圾形态会漂移到 daemon 进程目录（行为
++  // 未定义）——入口形态校验，先于任何外部调用（含 resolveBin）。
++  if (!isAbsoluteLikePath(rootPath)) {
++    throw new Error(`linked_repos_snapshot: root_path 非绝对路径: ${rootPath}`);
++  }
+   const resolveBin = deps.resolveBin ?? resolveSillySpecBinDefault;
+   const bin = resolveBin();
+   const fetched_at = new Date().toISOString();
+diff --git a/sillyhub-daemon/src/linked-repos-sync.ts b/sillyhub-daemon/src/linked-repos-sync.ts
+index 2c1943f2b..11d958723 100644
+--- a/sillyhub-daemon/src/linked-repos-sync.ts
++++ b/sillyhub-daemon/src/linked-repos-sync.ts
+@@ -22,6 +22,7 @@
+ import { execFile } from 'node:child_process';
+ import { promisify } from 'node:util';
+ 
++import { isAbsoluteLikePath } from './linked-repos-path.js';
+ import { resolveSillySpecBinDefault } from './sillyspec-manager.js';
+ 
+ const execFileAsync = promisify(execFile);
+@@ -138,6 +139,12 @@ export async function runLinkedReposSync(
+   payload: LinkedRepoSyncPayload,
+   deps: LinkedReposSyncDeps = {},
+ ): Promise<{ workspace_id: string; results: LinkedRepoLayerResult[] }> {
++  // 2026-10-11-linked-repos-path-guard（24h 审查 P3-2）：root_path 是全部写命令
++  // 的公共 cwd，相对/垃圾形态漂移到 daemon 进程目录——payload 级校验抛错
++  //（RPC 错误，对齐 handler 缺参 throw 语义），先于任何外部调用。
++  if (!isAbsoluteLikePath(payload.root_path)) {
++    throw new Error(`linked_repos_sync: root_path 非绝对路径: ${payload.root_path}`);
++  }
+   const resolveBin = deps.resolveBin ?? resolveSillySpecBinDefault;
+   const bin = resolveBin();
+   const results: LinkedRepoLayerResult[] = [];
+@@ -172,6 +179,16 @@ export async function runLinkedReposSync(
+         status: 'skipped',
+         detail: '未配置约定相对路径',
+       });
++    } else if (isAbsoluteLikePath(repo.rel_path.trim())) {
++      // 2026-10-11-linked-repos-path-guard：约定相对路径是相对工作区根的形态
++      //（'../' 兄弟仓合法，不禁 ..）；绝对形态是脏值，该层 failed 不 spawn
++      //（数据级失败走结果体，对齐「能力降级与命令失败都是数据」契约）。
++      results.push({
++        repo_name: name,
++        layer: 'projects_yaml',
++        status: 'failed',
++        detail: '约定相对路径非法（须相对路径）',
++      });
+     } else {
+       const args = ['workspace', 'add', name, toPosix(repo.rel_path.trim())];
+       if (repo.repo_url && repo.repo_url.trim()) {
+@@ -195,6 +212,16 @@ export async function runLinkedReposSync(
+         status: 'skipped',
+         detail: '本机路径未配置',
+       });
++    } else if (!isAbsoluteLikePath(repo.abs_path.trim())) {
++      // 2026-10-11-linked-repos-path-guard：本机路径注册语义须绝对形态；相对
++      // 形态该层 failed 不 spawn（绝对路径内容不受限——登记本机任意仓库是
++      // 功能本体）。
++      results.push({
++        repo_name: name,
++        layer: 'repos_registry',
++        status: 'failed',
++        detail: '本机路径非法（须绝对路径）',
++      });
+     } else {
+       const outcome = await runCommand(
+         deps,
+diff --git a/sillyhub-daemon/tests/linked-repos-snapshot.test.ts b/sillyhub-daemon/tests/linked-repos-snapshot.test.ts
+index f6f170429..cb57472bc 100644
+--- a/sillyhub-daemon/tests/linked-repos-snapshot.test.ts
++++ b/sillyhub-daemon/tests/linked-repos-snapshot.test.ts
+@@ -139,6 +139,24 @@ describe('runLinkedReposSnapshot', () => {
+     expect(snap.projects_skipped).toContain('未安装');
+     expect(snap.repos_skipped).toContain('未安装');
+   });
++
++  // ── 2026-10-11-linked-repos-path-guard（24h 审查 P3-2：形态校验）──────────
++
++  it('相对形态 root_path 抛错不 spawn CLI', async () => {
++    const { deps, calls } = makeExec();
++    for (const bad of ['ws-root', '../x', '']) {
++      await expect(runLinkedReposSnapshot(bad, deps)).rejects.toThrow('非绝对路径');
++    }
++    expect(calls.length).toBe(0);
++  });
++
++  it('UNC 与 POSIX 绝对形态放行', async () => {
++    for (const good of ['/ws', '\\\\srv\\share\\ws']) {
++      // bin 缺失走 skipped 分支——能到达该分支即证明入口守卫放行。
++      const snap = await runLinkedReposSnapshot(good, { resolveBin: () => null });
++      expect(snap.projects_skipped).toBe('sillyspec 未安装');
++    }
++  });
+ });
+ 
+ // 供 bin 缺失用例复用的 calls 断言（上面 makeExec 的 exec 不会被调用）
+diff --git a/sillyhub-daemon/tests/linked-repos-sync.test.ts b/sillyhub-daemon/tests/linked-repos-sync.test.ts
+index 0672507eb..2137354a3 100644
+--- a/sillyhub-daemon/tests/linked-repos-sync.test.ts
++++ b/sillyhub-daemon/tests/linked-repos-sync.test.ts
+@@ -211,4 +211,59 @@ describe('R-07 失败重试一次', () => {
+     expect(out.results.find((r) => r.layer === 'projects_yaml')!.status).toBe('skipped');
+     expect(calls.filter((c) => c.args[0] === 'workspace').length).toBe(1);
+   });
++
++  // ── 2026-10-11-linked-repos-path-guard（24h 审查 P3-2：形态校验）──────────
++
++  it('root_path 形态守卫：相对形态抛错零 spawn；POSIX/盘符/UNC 三绝对形态放行', async () => {
++    const { exec, calls } = makeExec();
++    for (const bad of ['ws-root', '../x', '']) {
++      await expect(
++        runLinkedReposSync({ ...basePayload, root_path: bad }, { resolveBin: () => '/bin/s.js', exec }),
++      ).rejects.toThrow('非绝对路径');
++    }
++    expect(calls.length).toBe(0);
++    // 三种绝对形态照常执行（每仓两层 → 仓×2 命令）。
++    for (const good of ['/ws', 'C:/ws', '\\\\srv\\share\\ws']) {
++      await runLinkedReposSync(
++        { ...basePayload, root_path: good, repos: [{ name: 'a', rel_path: '../a', abs_path: 'C:/a' }] },
++        { resolveBin: () => '/bin/s.js', exec },
++      );
++    }
++    expect(calls.length).toBe(6);
++  });
++
++  it('rel_path 绝对形态：projects_yaml 层 failed 不 spawn（abs 合法层照常）', async () => {
++    const { exec, calls } = makeExec();
++    const out = await runLinkedReposSync(
++      { ...basePayload, repos: [{ name: 'a', rel_path: 'C:/a', abs_path: 'C:/abs' }] },
++      { resolveBin: () => '/bin/s.js', exec },
++    );
++    const proj = out.results.find((r) => r.layer === 'projects_yaml')!;
++    expect(proj.status).toBe('failed');
++    expect(proj.detail).toContain('须相对路径');
++    expect(calls.length).toBe(1);
++    expect(calls[0].args[0]).toBe('local');
++  });
++
++  it('abs_path 相对形态：repos_registry 层 failed 不 spawn（rel 合法层照常）', async () => {
++    const { exec, calls } = makeExec();
++    const out = await runLinkedReposSync(
++      { ...basePayload, repos: [{ name: 'a', rel_path: '../a', abs_path: 'a/b' }] },
++      { resolveBin: () => '/bin/s.js', exec },
++    );
++    const reg = out.results.find((r) => r.layer === 'repos_registry')!;
++    expect(reg.status).toBe('failed');
++    expect(reg.detail).toContain('须绝对路径');
++    expect(calls.length).toBe(1);
++    expect(calls[0].args[0]).toBe('workspace');
++  });
++
++  it('合法约定零回归：兄弟相对路径与绝对本机路径照常 spawn', async () => {
++    const { exec, calls } = makeExec();
++    await runLinkedReposSync(basePayload, { resolveBin: () => '/bin/s.js', exec });
++    // '../platform-specs' 相对约定 + 绝对 abs_path 双层照常（既有 basePayload）。
++    expect(calls.length).toBe(2);
++    expect(calls[0].args[3]).toBe('../platform-specs');
++    expect(calls[1].args[3]).toBe('C:/Users/me/works/platform-specs');
++  });
+ });
+diff --git a/.sillyspec/changes/2026-10-11-linked-repos-path-guard/design.md b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/design.md
+new file mode 100644
+index 000000000..71b83bf2b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/design.md
+@@ -0,0 +1,56 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:49:03.217Z
++---
++# 设计记录（Design Record）— 2026-10-11-linked-repos-path-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查 P3-2：daemon 的 linked_repos_snapshot/linked_repos_sync 对 root_path 仅非空校验即用作 CLI 的 cwd 与参数，rel_path/abs_path 仅 trim 直传写命令，而 backend 侧 MyPathUpdate.path 只限长度不限形态——daemon 无第二道边界，backend 数据被污染或未来新增调用方时即成任意路径执行跳板。修复为**形态校验**（最小且不破既有约定）：新增纯函数 `isAbsoluteLikePath`（POSIX `/` 根、Windows 盘符 `X:`、UNC `\\\\`/`//` 三形态任一即真——不用裸 `path.isAbsolute`，它平台相关，Linux CI（ubuntu-latest）会拒 `C:/` fixture）；两条例程入口对 root_path 非绝对形态抛错（payload 级=RPC 错误，对齐 handler 缺参语义）；sync 逐仓 rel_path 须**相对**形态（`../` 兄弟仓是既有合法约定，不禁 `..`）、abs_path 须**绝对**形态，违者该层 `failed` 结果体不 spawn（数据级失败，对齐模块「能力降级与命令失败都是数据不是异常」契约）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 新增 `sillyhub-daemon/src/linked-repos-path.ts`：导出 `isAbsoluteLikePath(p: string): boolean` 纯函数（正则三形态：盘符 / UNC 反斜双 / UNC 正斜双 / POSIX 根；空串与相对形态 false）。
++- `linked-repos-snapshot.ts` `runLinkedReposSnapshot`：入口守卫——root_path 非绝对形态 throw `Error('linked_repos_snapshot: root_path 非绝对路径')`（先于 resolveBin，坏形态不触任何外部调用）。
++- `linked-repos-sync.ts` `runLinkedReposSync`：入口同款守卫（先于 bin 解析与循环）；逐仓 rel_path 绝对形态 → `{layer:'projects_yaml', status:'failed', detail:'约定相对路径非法（须相对路径）'}` 不 spawn；abs_path 相对形态 → `{layer:'repos_registry', status:'failed', detail:'本机路径非法（须绝对路径）'}` 不 spawn；合法形态逐字透传（toPosix 既有口径）。
++- daemon.ts 两个 RPC handler、backend、协议帧格式：零改动（「无」——校验下沉在例程内，handler 缺参 throw 语义保留）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++不适用：请求-响应 RPC，例程无状态；校验在入口/逐条同步点做，与到达顺序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++不适用：校验是纯函数读；既有串行 spawn（R-07 一次一条命令）不变，同步例程无并发面变化。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++逐仓 failed 不中断循环（后续仓照常处理）、report 回调照常携带全部结果；root_path 抛错发生在任何 spawn 之前，无半执行态。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++校验按 payload/条目自身做，无跨工作区状态；root_path/abs_path 的绝对路径内容不加白名单（用户登记本机任意仓库是功能本体），形态校验不引入机器归属判定（归属由 backend 绑定行既有语义负责）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：形态校验挡不住「合法形态的恶意绝对路径」——但那正是功能本体（用户登记自己机器上的任意路径），真正的边界在 backend 归属校验与 sillyspec CLI 自身的写入范围，本变更是把「垃圾/相对形态导致的 cwd 漂移与未定义行为」关掉（纵深防御第二道），不冒充完整授权模型。声明边界：`..` 段在 rel_path 合法（兄弟仓约定）、在 abs_path 不受限。
++
++放弃的方案：① 裸 `path.isAbsolute`——平台相关，ubuntu-latest CI 上 `C:/` fixture 全线假红；② rel_path 禁 `..` 段——打翻既有 `../platform-specs` 兄弟仓约定（fixture 实证），把合法流判成非法；③ daemon 侧维护「已登记路径白名单」——daemon 无 backend 登记面视图，引入状态同步问题且与 RPC 请求-响应模型相悖。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 新增 | sillyhub-daemon/src/linked-repos-path.ts | isAbsoluteLikePath 纯函数 |
++| 修改 | sillyhub-daemon/src/linked-repos-snapshot.ts | 入口 root_path 形态守卫 |
++| 修改 | sillyhub-daemon/src/linked-repos-sync.ts | 入口守卫 + 逐仓 rel/abs 形态校验 |
++| 修改 | sillyhub-daemon/tests/linked-repos-snapshot.test.ts | 相对形态抛错/三形态放行用例 |
++| 修改 | sillyhub-daemon/tests/linked-repos-sync.test.ts | root_path 守卫 + 逐层 failed 用例 |
+diff --git a/.sillyspec/changes/2026-10-11-linked-repos-path-guard/proposal.md b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/proposal.md
+new file mode 100644
+index 000000000..25be48bcc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:49:03.217Z
++---
++# 提案书（Proposal）— 2026-10-11-linked-repos-path-guard
++
++## 动机
++
++任务原话转写：linked_repos 两条 RPC 对路径参数零校验（24h 审查 P3-2 遗留）：daemon.ts 的 linked_repos_snapshot/linked_repos_sync 对 root_path 只做非空校验即用作外部 CLI 的 cwd 与参数，rel_path/abs_path 仅 trim 后直传 sillyspec 写命令（对比 name 有正则白名单）；backend 侧 MyPathUpdate.path 只限长度不限形态，daemon 无第二道边界——backend 数据被污染或未来新增调用方时，daemon 成为以其进程权限执行任意路径命令的跳板。修复（形态校验，不动既有约定）：新增 isAbsoluteLikePath 助手（POSIX 根 / Windows 盘符 / UNC 任一绝对形态；裸 path.isAbsolute 会在 Linux CI 打翻 Windows 盘符 fixture）；快照 root_path 与 sync root_path 非绝对形态 throw；sync 逐仓 rel_path 须相对路径（../ 兄弟仓是既有合法约定，不禁 ..）、abs_path 须绝对路径，违者该层 failed 不 spawn，合法形态逐字透传零回归。
++成功标准：
++- runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
++- runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
++- sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
++- sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
++- 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
++- 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
++2. runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
++3. sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
++4. sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
++5. 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
++6. 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
++
++## 成功标准（可验证）
++
++1. runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
++2. runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
++3. sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
++4. sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
++5. 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
++6. 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
+diff --git a/.sillyspec/changes/2026-10-11-linked-repos-path-guard/requirements.md b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/requirements.md
+new file mode 100644
+index 000000000..5817904ae
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/requirements.md
+@@ -0,0 +1,75 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:49:03.217Z
++---
++# 需求规格（Requirements）— 2026-10-11-linked-repos-path-guard
++
++## 功能需求
++
++### FR-01: runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
++
++- 快照例程入口**必须**校验 root_path 为绝对路径形态（POSIX `/` 根 / Windows 盘符 / UNC 任一），相对/空/垃圾形态**必须**抛错且**禁止** spawn 任何 CLI（root_path 是两条读命令的 cwd 与 `--spec-dir` 参数，当前零校验直传——24h 审查 P3-2 纵深防御缺口）。
++
++#### 场景：相对形态拒绝
++
++- Given deps.exec 为记录调用的 mock
++- When runLinkedReposSnapshot('ws-root') 或 ('../x')
++- Then 抛错（消息含「非绝对路径」）；exec 零调用
++
++### FR-02: runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
++
++- 同步例程入口**必须**对 payload.root_path 同款校验抛错（cwd 是全部写命令的公共落点，payload 级失败=RPC 错误，对齐 handler 缺参 throw 语义）；三种绝对形态**必须**放行——助手**禁止**依赖运行平台（裸 `path.isAbsolute` 在 Linux 上拒 Windows 盘符形态，会打翻 ubuntu-latest CI 的 `C:/` fixture）。
++
++#### 场景：三形态放行 + 相对拒绝
++
++- When root_path ∈ {'/ws', 'C:/ws', '\\\\srv\\share\\ws'}
++- Then 照常执行（不因形态抛错）
++- When root_path ∈ {'ws-root', '../x', ''}
++- Then 抛错
++
++### FR-03: sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
++
++- 逐仓 rel_path **必须**为**相对**路径形态（`../` 兄弟仓是既有合法约定——工作区根的兄弟目录，**禁止**禁 `..`）；绝对形态**必须**该层 `failed`（detail 含「须相对路径」）且不 spawn——逐条数据级失败走结果体，不抛 RPC 错误（对齐模块「能力降级与命令失败都是数据」契约）。
++
++#### 场景：绝对形态 rel_path
++
++- Given repos=[{name:'a', rel_path:'C:/a'}]
++- When runLinkedReposSync
++- Then projects_yaml 层 failed；exec 未收到该层的 spawn
++
++### FR-04: sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
++
++- 逐仓 abs_path **必须**为绝对路径形态（本机路径注册语义）；相对形态**必须**该层 `failed`（detail 含「须绝对路径」）且不 spawn；绝对路径内容（含 `..` 段）**不**受限——用户登记本机任意仓库路径是功能本体。
++
++#### 场景：相对形态 abs_path
++
++- Given repos=[{name:'a', abs_path:'a/b'}]
++- When runLinkedReposSync
++- Then repos_registry 层 failed；该层无 spawn
++
++### FR-05: 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
++
++- 既有合法形态**必须**逐字透传零回归：`../platform-specs` 相对约定、`C:\...`/`/...` 绝对本机路径、name 白名单、skipped/failed/unsupported 三态语义；linked-repos-snapshot.test.ts 与 linked-repos-sync.test.ts 既有用例全绿。
++
++#### 场景：合法 fixture 零回归
++
++- When 运行既有两测试文件
++- Then 全绿（fixture 的 'C:/Users/me/works/platform' root_path 与 '../platform-specs' rel_path 不受影响）
++
++### FR-06: 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
++
++- 新用例在旧实现上**必须**先红（旧实现无校验，相对 root_path 不抛错/非法形态照 spawn）；实现后全绿；`tsc --noEmit` 零错；助手为纯函数无平台依赖（CI ubuntu-latest 与本机 Windows 行为一致）。
++
++#### 场景：先红后绿
++
++- When 旧实现运行 FR-01~04 新用例
++- Then 失败（红）；实现后全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「相对形态 root_path 抛错不 spawn CLI」
++FR-02: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「root_path 三种绝对形态放行 + 相对形态抛错」
++FR-03: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「rel_path 绝对形态该层 failed 不 spawn」
++FR-04: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「abs_path 相对形态该层 failed 不 spawn」
++FR-05: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「合法约定零回归：兄弟相对路径与绝对本机路径照常 spawn」（既有用例组）
++FR-06: test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「UNC 与 POSIX 绝对形态放行」
+diff --git a/.sillyspec/changes/2026-10-11-linked-repos-path-guard/tasks.md b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/tasks.md
+new file mode 100644
+index 000000000..671c00004
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-linked-repos-path-guard/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:49:03.217Z
++---
++# 任务注册表（Tasks）— 2026-10-11-linked-repos-path-guard
++
++- [x] task-01: 测试先行：linked-repos-snapshot/sync 两测试文件新增形态校验用例（相对 root_path 抛错 / 三绝对形态放行 / rel_path 绝对形态层 failed / abs_path 相对形态层 failed / 非法层零 spawn）——旧实现先红
++- [x] task-02: 新增 linked-repos-path.ts（isAbsoluteLikePath 纯函数，平台无关三形态）+ 快照/同步入口 root_path 守卫——FR-01/02 用例转绿
++- [x] task-03: sync 逐仓 rel_path 相对形态 / abs_path 绝对形态校验（违者层 failed 不 spawn，合法约定零回归）——FR-03/04/05 用例转绿
++- [x] task-04: 两测试文件全量回归 + daemon tsc 零错 + 显式 pathspec 提交（消息带 task-NN）
