@@ -1,0 +1,323 @@
+{
+  "change": "2026-10-11-retire-components-page",
+  "baseline": "437996ec474e37d8b58b620272087abedd27a708",
+  "head": "bc0cac931980b9a1145369a9bfd7ddd377776ee5",
+  "files": [
+    "backend/app/modules/agent/provider_caps.py",
+    "frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+    "frontend/src/components/__tests__/app-shell.test.tsx",
+    "frontend/src/components/app-shell.tsx",
+    "frontend/src/components/workspace-config-card.test.tsx",
+    "frontend/src/components/workspace-config-card.tsx",
+    "frontend/src/components/workspace-tabs.tsx",
+    "frontend/src/components/workspace/stats-row.tsx",
+    "frontend/src/hooks/use-page-session-context.test.ts",
+    "frontend/src/hooks/use-page-session-context.ts",
+    "frontend/src/lib/__tests__/menu-permissions.test.ts",
+    "frontend/src/lib/components.ts",
+    "frontend/src/lib/menu-permissions.ts",
+    "frontend/src/lib/provider-caps.ts",
+    "frontend/src/lib/spec-workspaces.ts",
+    "frontend/src/lib/workspaces.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/codex-settings.ts",
+    "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+    "sillyhub-daemon/src/interactive/cursor-driver.ts",
+    "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+    "sillyhub-daemon/src/interactive/providers.ts",
+    "sillyhub-daemon/src/pi-settings.ts",
+    "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+    "sillyhub-daemon/tests/mcp-config.test.ts",
+    "sillyhub-daemon/tests/pi-settings-mcp.test.ts",
+    ".sillyspec/changes/2026-10-11-retire-components-page/design.md",
+    ".sillyspec/changes/2026-10-11-retire-components-page/proposal.md",
+    ".sillyspec/changes/2026-10-11-retire-components-page/requirements.md",
+    ".sillyspec/changes/2026-10-11-retire-components-page/review.json.superseded-20261011T044450",
+    ".sillyspec/changes/2026-10-11-retire-components-page/tasks.md"
+  ],
+  "totals": {
+    "files": 35,
+    "additions": 815,
+    "deletions": 620
+  },
+  "savedAt": "2026-10-11T04:44:51.275Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 19,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 10,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "437996ec474e37d8b58b620272087abedd27a708",
+    "totals": {
+      "files": 30,
+      "additions": 625,
+      "deletions": 620
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/provider_caps.py",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx",
+        "additions": 0,
+        "deletions": 187,
+        "kind": "deleted"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx",
+        "additions": 0,
+        "deletions": 178,
+        "kind": "deleted"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx",
+        "additions": 2,
+        "deletions": 13,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx",
+        "additions": 4,
+        "deletions": 25,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/page.tsx",
+        "additions": 1,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/__tests__/app-shell.test.tsx",
+        "additions": 3,
+        "deletions": 17,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/app-shell.tsx",
+        "additions": 0,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/workspace-config-card.test.tsx",
+        "additions": 12,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/workspace-config-card.tsx",
+        "additions": 7,
+        "deletions": 54,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/workspace-tabs.tsx",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/workspace/stats-row.tsx",
+        "additions": 4,
+        "deletions": 11,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/hooks/use-page-session-context.test.ts",
+        "additions": 1,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/hooks/use-page-session-context.ts",
+        "additions": 2,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+        "additions": 5,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/components.ts",
+        "additions": 0,
+        "deletions": 19,
+        "kind": "deleted"
+      },
+      {
+        "path": "frontend/src/lib/menu-permissions.ts",
+        "additions": 3,
+        "deletions": 23,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/provider-caps.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/spec-workspaces.ts",
+        "additions": 0,
+        "deletions": 19,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/workspaces.ts",
+        "additions": 0,
+        "deletions": 14,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 12,
+        "deletions": 17,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/codex-settings.ts",
+        "additions": 101,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/codex-app-server-driver.ts",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/cursor-driver.ts",
+        "additions": 7,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/pi-rpc-driver.ts",
+        "additions": 105,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/providers.ts",
+        "additions": 45,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/pi-settings.ts",
+        "additions": 47,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/codex-settings-mcp.test.ts",
+        "additions": 85,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "sillyhub-daemon/tests/mcp-config.test.ts",
+        "additions": 44,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/tests/pi-settings-mcp.test.ts",
+        "additions": 105,
+        "deletions": 0,
+        "kind": "new"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "90ea7b5cf3025813254b85412b9dd9a4e531a6a66966c8f8fd60ba1dde447f97",
+  "patchStatus": "ok"
+}

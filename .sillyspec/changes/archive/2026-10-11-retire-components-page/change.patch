@@ -1,0 +1,2155 @@
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index f19b370dd..6fcb566d6 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -64,7 +64,7 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+     },
+     "pi": {
+         "resume": True,
+-        "mcp": False,
++        "mcp": True,
+         "multimodal": True,
+         "attachments": True,
+         "thinking": True,
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx
+deleted file mode 100644
+index a2ffbbef1..000000000
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx
++++ /dev/null
+@@ -1,187 +0,0 @@
+-"use client";
+-
+-import Link from "next/link";
+-import { useEffect, useState } from "react";
+-import { FolderGit2 } from "lucide-react";
+-
+-import {
+-  PageContainer,
+-  PageHeader,
+-  SectionCard,
+-} from "@/components/layout";
+-import { buttonVariants } from "@/components/ui/button";
+-import { EmptyState } from "@/components/ui/empty-state";
+-import { ErrorBanner } from "@/components/ui/error-banner";
+-import { Input } from "@/components/ui/input";
+-import { StatusBadge } from "@/components/ui/status-badge";
+-import { ApiError } from "@/lib/api";
+-import { cn } from "@/lib/utils";
+-import {
+-  getWorkspace,
+-  getWorkspaceComponents,
+-  type Component,
+-  type Workspace,
+-} from "@/lib/workspaces";
+-
+-interface Props {
+-  params: { id: string };
+-}
+-
+-export default function ComponentsPage({ params }: Props) {
+-  const workspaceId = params.id;
+-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+-  const [components, setComponents] = useState<Component[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [pageError, setPageError] = useState<string | null>(null);
+-  const [searchQuery, setSearchQuery] = useState("");
+-
+-  const load = async () => {
+-    setLoading(true);
+-    setPageError(null);
+-    try {
+-      const [ws, compData] = await Promise.all([
+-        getWorkspace(workspaceId),
+-        getWorkspaceComponents(workspaceId),
+-      ]);
+-      setWorkspace(ws);
+-      setComponents(compData.items);
+-    } catch (err) {
+-      setPageError(err instanceof ApiError ? err.message : "加载组件失败");
+-    } finally {
+-      setLoading(false);
+-    }
+-  };
+-
+-  useEffect(() => {
+-    void load();
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [workspaceId]);
+-
+-  // D-007@V1：组件只读，无出入边/重新扫描（关系层已砍，组件来自 projects/*.yaml）。
+-  const filtered = searchQuery.trim()
+-    ? components.filter((c) => {
+-        const q = searchQuery.toLowerCase();
+-        return (
+-          c.name.toLowerCase().includes(q) ||
+-          c.component_key.toLowerCase().includes(q) ||
+-          (c.role ?? "").toLowerCase().includes(q)
+-        );
+-      })
+-    : components;
+-
+-  return (
+-    <PageContainer size="full">
+-      <PageHeader
+-        title="项目组件"
+-        subtitle="查看项目组的内部组件（只读，来自 projects/*.yaml）"
+-        actions={
+-          <div className="flex flex-wrap items-center gap-1.5">
+-            <Link
+-              href={`/workspaces/${workspaceId}`}
+-              className="text-xs text-muted-foreground hover:text-foreground"
+-            >
+-              ← 工作区
+-            </Link>
+-            <Input
+-              className="h-8 w-40 px-2.5 text-xs"
+-              placeholder="搜索组件..."
+-              value={searchQuery}
+-              onChange={(e) => setSearchQuery(e.target.value)}
+-            />
+-          </div>
+-        }
+-      />
+-
+-      {pageError && <ErrorBanner message={pageError} />}
+-
+-      {/* Workspace metadata card */}
+-      {workspace && (
+-        <SectionCard>
+-          <div className="mb-2 flex items-center gap-2">
+-            <span className="text-sm font-semibold">{workspace.name}</span>
+-            <StatusBadge kind={workspace.status === "active" ? "success" : "neutral"}>
+-              {workspace.status}
+-            </StatusBadge>
+-            {workspace.type && (
+-              <StatusBadge kind="neutral">{workspace.type}</StatusBadge>
+-            )}
+-          </div>
+-          <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1 text-xs">
+-            <dt className="text-muted-foreground">slug</dt>
+-            <dd className="font-mono">{workspace.slug}</dd>
+-            {workspace.component_key && (
+-              <>
+-                <dt className="text-muted-foreground">component_key</dt>
+-                <dd className="font-mono">{workspace.component_key}</dd>
+-              </>
+-            )}
+-            {workspace.role && (
+-              <>
+-                <dt className="text-muted-foreground">role</dt>
+-                <dd>{workspace.role}</dd>
+-              </>
+-            )}
+-            {workspace.tech_stack.length > 0 && (
+-              <>
+-                <dt className="text-muted-foreground">技术栈</dt>
+-                <dd className="flex flex-wrap gap-1">
+-                  {workspace.tech_stack.map((t) => (
+-                    <StatusBadge key={t} kind="neutral">
+-                      {t}
+-                    </StatusBadge>
+-                  ))}
+-                </dd>
+-              </>
+-            )}
+-          </dl>
+-        </SectionCard>
+-      )}
+-
+-      {/* 一级子项目组件列表（只读） */}
+-      <SectionCard title={`一级子项目组件 · ${filtered.length} 个`} bodyPadding="p-0">
+-        {loading ? (
+-          <p className="py-6 text-center text-xs text-muted-foreground">加载中…</p>
+-        ) : filtered.length === 0 ? (
+-          <EmptyState
+-            icon={<FolderGit2 className="h-5 w-5" />}
+-            title="暂无组件"
+-            description="若未生成，可在变更中运行 generate_projects 重建 projects/*.yaml。"
+-          />
+-        ) : (
+-          <div className="divide-y">
+-            {filtered.map((c) => (
+-              <div
+-                key={c.component_key}
+-                className="flex items-center justify-between px-3 py-2"
+-              >
+-                <div className="flex items-center gap-2">
+-                  <StatusBadge kind={c.status === "active" ? "success" : "neutral"}>
+-                    {c.status}
+-                  </StatusBadge>
+-                  <span className="text-sm font-medium">{c.name}</span>
+-                  <span className="font-mono text-[11px] text-muted-foreground">
+-                    {c.component_key}
+-                  </span>
+-                </div>
+-                <div className="flex items-center gap-2">
+-                  {c.role && (
+-                    <span className="text-xs text-muted-foreground">{c.role}</span>
+-                  )}
+-                  {c.tech_stack.length > 0 && (
+-                    <div className="flex gap-1">
+-                      {c.tech_stack.map((t) => (
+-                        <StatusBadge key={t} kind="neutral">
+-                          {t}
+-                        </StatusBadge>
+-                      ))}
+-                    </div>
+-                  )}
+-                </div>
+-              </div>
+-            ))}
+-          </div>
+-        )}
+-      </SectionCard>
+-    </PageContainer>
+-  );
+-}
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx
+deleted file mode 100644
+index 1de95465f..000000000
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/components/topology/page.tsx
++++ /dev/null
+@@ -1,178 +0,0 @@
+-"use client";
+-
+-import {
+-  Background,
+-  Controls,
+-  Handle,
+-  Position,
+-  ReactFlow,
+-  type Edge,
+-  type Node,
+-  type NodeProps,
+-} from "@xyflow/react";
+-import "@xyflow/react/dist/style.css";
+-import Link from "next/link";
+-import { useEffect, useMemo, useState } from "react";
+-
+-import { ApiError } from "@/lib/api";
+-import {
+-  getTopology,
+-  type TopologyResponse,
+-} from "@/lib/workspaces";
+-import { DEFAULT_THEME, themes } from "@/styles";
+-
+-interface Props {
+-  params: { id: string };
+-}
+-
+-/**
+- * 节点类型 → 边框/手柄色。
+- *
+- * 全部取自主题注册表 themes(brand 色阶 + accent/semantic + slate),
+- * 编译期静态取色(themes[DEFAULT_THEME]),主题切换不变——设计决定。
+- * 设计依据:tasks/task-09.md §topology。
+- */
+-const TYPE_COLORS: Record<string, string> = {
+-  frontend: themes[DEFAULT_THEME].color.brand[500],
+-  backend: themes[DEFAULT_THEME].color.semantic.success,
+-  tooling: themes[DEFAULT_THEME].color.semantic.warning,
+-  docs: themes[DEFAULT_THEME].color.brand[800],
+-  test: themes[DEFAULT_THEME].color.semantic.error,
+-  library: themes[DEFAULT_THEME].color.brand[700],
+-  service: themes[DEFAULT_THEME].color.accent,
+-  monorepo: themes[DEFAULT_THEME].color.brand[400],
+-};
+-
+-type WorkspaceNodeData = {
+-  label: string;
+-  type: string | null;
+-  slug: string;
+-};
+-
+-function WorkspaceNode({ data }: NodeProps<Node<WorkspaceNodeData>>) {
+-  const bg = data.type ? TYPE_COLORS[data.type] ?? themes[DEFAULT_THEME].color.slate[500] : themes[DEFAULT_THEME].color.slate[500];
+-  return (
+-    <div
+-      className="rounded border bg-card px-3 py-2 text-xs shadow-sm"
+-      style={{ borderColor: bg }}
+-    >
+-      <Handle type="target" position={Position.Left} style={{ background: bg }} />
+-      <div className="font-semibold text-[11px]">{data.label}</div>
+-      <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+-        <span>{data.type ?? "—"}</span>
+-        <span className="font-mono">{data.slug}</span>
+-      </div>
+-      <Handle type="source" position={Position.Right} style={{ background: bg }} />
+-    </div>
+-  );
+-}
+-
+-const nodeTypes = { component: WorkspaceNode };
+-
+-export default function TopologyPage({ params }: Props) {
+-  const workspaceId = params.id;
+-  const [topology, setTopology] = useState<TopologyResponse | null>(null);
+-  const [loading, setLoading] = useState(true);
+-  const [pageError, setPageError] = useState<string | null>(null);
+-
+-  useEffect(() => {
+-    let cancelled = false;
+-    setLoading(true);
+-    // Global topology API — no workspace_id needed
+-    getTopology()
+-      .then((data) => {
+-        if (!cancelled) setTopology(data);
+-      })
+-      .catch((err) => {
+-        if (!cancelled) {
+-          setPageError(err instanceof ApiError ? err.message : "加载拓扑失败");
+-        }
+-      })
+-      .finally(() => {
+-        if (!cancelled) setLoading(false);
+-      });
+-    return () => {
+-      cancelled = true;
+-    };
+-  }, []);
+-
+-  const { nodes, edges } = useMemo(() => {
+-    if (!topology) return { nodes: [] as Node[], edges: [] as Edge[] };
+-    const cols = Math.max(1, Math.ceil(Math.sqrt(topology.nodes.length)));
+-    const nodes: Node[] = topology.nodes.map((n, idx) => ({
+-      id: n.id,
+-      type: "component",
+-      position: {
+-        x: 60 + (idx % cols) * 220,
+-        y: 60 + Math.floor(idx / cols) * 140,
+-      },
+-      data: {
+-        label: n.name,
+-        type: n.component_key ?? null,
+-        slug: n.slug,
+-      } satisfies WorkspaceNodeData,
+-    }));
+-    const edges: Edge[] = topology.edges.map((e, idx) => ({
+-      id: `edge-${idx}`,
+-      source: e.source_id,
+-      target: e.target_id,
+-      label: e.relation_type,
+-      animated: true,
+-      style: { stroke: themes[DEFAULT_THEME].color.slate[400] },
+-      labelStyle: { fontSize: 10, fill: themes[DEFAULT_THEME].color.slate[600] },
+-    }));
+-    return { nodes, edges };
+-  }, [topology]);
+-
+-  return (
+-    <div className="flex h-screen flex-col">
+-      <header className="flex items-center justify-between border-b bg-card px-6 py-3">
+-        <div>
+-          <p className="text-[11px] text-muted-foreground">
+-            <Link href={`/workspaces/${workspaceId}/components`} className="hover:underline">
+-              ← 项目组件
+-            </Link>
+-          </p>
+-          <h1 className="text-base font-semibold">工作区拓扑</h1>
+-        </div>
+-        <div className="text-[11px] text-muted-foreground">
+-          {topology ? `${topology.nodes.length} 节点 · ${topology.edges.length} 边` : ""}
+-          {/* D-004@V1：关系层已砍，edges 恒 0；保留入口显示项目组节点。 */}
+-        </div>
+-      </header>
+-
+-      <div className="flex-1 bg-muted/20">
+-        {loading ? (
+-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+-            加载中…
+-          </div>
+-        ) : pageError ? (
+-          <div className="flex h-full items-center justify-center text-xs text-destructive">
+-            {pageError}
+-          </div>
+-        ) : nodes.length === 0 ? (
+-          <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+-            <p>暂无工作区拓扑数据。</p>
+-            <Link
+-              href="/workspaces"
+-              className="text-primary hover:underline"
+-            >
+-              返回工作区列表
+-            </Link>
+-          </div>
+-        ) : (
+-          <ReactFlow
+-            nodes={nodes}
+-            edges={edges}
+-            nodeTypes={nodeTypes}
+-            fitView
+-            proOptions={{ hideAttribution: true }}
+-          >
+-            <Background gap={16} size={1} />
+-            <Controls position="bottom-right" />
+-          </ReactFlow>
+-        )}
+-      </div>
+-    </div>
+-  );
+-}
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+index e3110cf40..3492bdf02 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx
+@@ -1,7 +1,5 @@
+ "use client";
+ 
+-import { usePathname } from "next/navigation";
+-
+ import { SpecSyncConflictBanner } from "@/components/spec-sync-conflict-banner";
+ import { WorkspaceTabs } from "@/components/workspace-tabs";
+ 
+@@ -12,17 +10,8 @@ export default function WorkspaceDetailLayout({
+   params: { id: string };
+   children: React.ReactNode;
+ }) {
+-  const pathname = usePathname();
+-  // 2026-08-20-workspace-nav-consolidate（D-403）：standalone 收窄为仅 components/topology。
+-  // ql-20260707-004 的宽度理由与现码不符（AppShell 无 max-w，包裹层不裁切宽度），
+-  // 双前缀剥离连带 changes/[cid] 等普通子页丢顶部菜单——普通页全部恢复统一布局；
+-  // 仅 topology 是 h-screen 整屏画布页，包裹后 +88px chrome 必然溢出裁切，保留其 standalone。
+-  const isStandalone = pathname.includes(
+-    `/workspaces/${params.id}/components/topology`,
+-  );
+-  if (isStandalone) {
+-    return <>{children}</>;
+-  }
++  // 2026-10-11-retire-components-page：components/topology 随组件页一并下线，
++  // 无整屏画布子页——所有子页统一 WorkspaceTabs 布局（D-403 收窄理由随页退役）。
+   // 2026-09-26-spec-sync-receipt-visibility：spec 同步冲突横幅（开放行非空才渲染）
+   const conflictBanner = <SpecSyncConflictBanner workspaceId={params.id} />;
+   // ql-20260827-011：main 彻底移除 max-w-[1440px] 宽度帽（含配套 mx-auto）——
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+index 585204c79..3953a50c5 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx
+@@ -125,9 +125,6 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+   }),
+ }));
+ 
+-const componentsApi = vi.hoisted(() => ({ listComponents: vi.fn() }));
+-vi.mock("@/lib/components", () => ({ listComponents: componentsApi.listComponents }));
+-
+ vi.mock("@/lib/changes", () => ({ listChanges: vi.fn(async () => ({ items: [], total: 0 })) }));
+ vi.mock("@/lib/agent", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
+@@ -212,17 +209,12 @@ async function renderWithStrategy(
+   strategy: "platform-managed" | "repo-mirrored" | "repo-native",
+   overrides?: {
+     initSyncedAt?: string | null;
+-    componentCount?: number;
+   },
+ ) {
+   const { ws, specWs } = makeWorkspace(strategy);
+   workspacesApi.getWorkspace.mockResolvedValue(ws);
+   specApi.getSpecWorkspace.mockResolvedValue(specWs);
+   workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-  componentsApi.listComponents.mockResolvedValue({
+-    items: [],
+-    total: overrides?.componentCount ?? 0,
+-  });
+ 
+   // 默认未初始化
+   mockDefaultBinding();
+@@ -279,7 +271,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+   it("page 不再渲染已迁入卡片的操作按钮（初始化/扫描/同步到服务器）", async () => {
+     await renderWithStrategy("platform-managed", {
+       initSyncedAt: "2026-07-02T10:00:00Z",
+-      componentCount: 3,
+     });
+     // 这些按钮随 task-07 迁入卡片，page 层不再渲染（行为由 task-08 组件测试覆盖）
+     expect(screen.queryByRole("button", { name: "初始化" })).not.toBeInTheDocument();
+@@ -314,10 +305,10 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+   // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字 ──
+   //（快速入口宫格已随 2026-08-20-workspace-nav-consolidate 删除，入口统一走顶部 WorkspaceTabs）
+ 
+-  it("统计四数字按 mock 数据渲染（组件/进行中/已归档/快速修复）", async () => {
+-    await renderWithStrategy("platform-managed", { componentCount: 7 });
+-    // 四张统计卡标签应存在（ql-20260820-013 第四卡=快速修复）
+-    expect(screen.getByText("项目组组件")).toBeInTheDocument();
++  it("统计三数字按 mock 数据渲染（进行中/已归档/快速修复）", async () => {
++    await renderWithStrategy("platform-managed");
++    // 2026-10-11-retire-components-page：组件卡随组件页下线，余三卡
++    expect(screen.queryByText("项目组组件")).not.toBeInTheDocument();
+     expect(screen.getByText("进行中变更")).toBeInTheDocument();
+     expect(screen.getByText("已归档变更")).toBeInTheDocument();
+     const quickCard = screen.getByText(/快速修复/).closest("a");
+@@ -326,12 +317,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+       "/workspaces/ws-1/changes?tab=quicklog",
+     );
+     expect(quickCard).toHaveTextContent("0");
+-    // 组件数显式断言
+-    const componentCard = screen.getByText("项目组组件").closest("a");
+-    expect(componentCard).toHaveTextContent("7");
+-    // 进行中 / 已归档变更因 mock 返回 total=0，断言卡片存在即可
+-    expect(screen.getByText("进行中变更")).toBeInTheDocument();
+-    expect(screen.getByText("已归档变更")).toBeInTheDocument();
+   });
+ 
+   // ── task-11 / daemon-entity-binding：default_agent 独立选择器（保留，其他区块行为不变）──
+@@ -379,7 +364,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     workspacesApi.getWorkspace.mockResolvedValue(ws);
+     specApi.getSpecWorkspace.mockResolvedValue(specWs);
+     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
+     // 设置 binding 有 daemon_id
+     bindingApi.fetchMyBinding.mockResolvedValue({
+       workspace_id: "ws-1",
+@@ -443,7 +427,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     workspacesApi.getWorkspace.mockResolvedValue(ws);
+     specApi.getSpecWorkspace.mockResolvedValue(specWs);
+     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 3 });
+     bindingApi.fetchMyBinding.mockResolvedValue({
+       workspace_id: "ws-1",
+       user_id: "user-1",
+@@ -521,7 +504,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     workspacesApi.getWorkspace.mockResolvedValue(ws);
+     specApi.getSpecWorkspace.mockResolvedValue(specWs);
+     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+     bindingApi.fetchMyBinding.mockResolvedValue({
+       workspace_id: "ws-1",
+       user_id: "user-1",
+@@ -559,7 +541,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     workspacesApi.getWorkspace.mockResolvedValue(ws);
+     specApi.getSpecWorkspace.mockResolvedValue(specWs);
+     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+     bindingApi.fetchMyBinding.mockResolvedValue({
+       workspace_id: "ws-1",
+       user_id: "user-1",
+@@ -591,7 +572,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     workspacesApi.getWorkspace.mockResolvedValue(ws);
+     specApi.getSpecWorkspace.mockResolvedValue(specWs);
+     workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+     mockDefaultBinding();
+     workspacesApi.updateWorkspace.mockResolvedValue({ ...ws, status: "archived" });
+ 
+@@ -631,7 +611,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
+     const active = makeWorkspace("platform-managed");
+     workspacesApi.getWorkspace.mockResolvedValue(active.ws);
+     specApi.getSpecWorkspace.mockResolvedValue(active.specWs);
+-    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+     mockDefaultBinding();
+     const { unmount } = render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+     await waitFor(() =>
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+index 7e6aac14d..9ff8bc1fe 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/page.tsx
+@@ -27,7 +27,6 @@ import {
+ } from "@/lib/workspace-types";
+ import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
+ import { useDaemonMachines } from "@/lib/use-daemon-machines";
+-import { listComponents } from "@/lib/components";
+ import { listChanges } from "@/lib/changes";
+ import { listQuicklogEntries } from "@/lib/quicklog";
+ import {
+@@ -76,7 +75,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
+   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+   const [boundRuntime, setBoundRuntime] = useState<DaemonRuntimeRead | null>(null);
+   const [specWs, setSpecWs] = useState<SpecWorkspace | null>(null);
+-  const [componentCount, setComponentCount] = useState<number>(0);
+   const [activeChanges, setActiveChanges] = useState<number>(0);
+   const [archivedChanges, setArchivedChanges] = useState<number>(0);
+   // ql-20260820-013：统计第四卡由"运行时阶段"改为快速修复条数（用户反馈）
+@@ -188,10 +186,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
+     try {
+       // 第六批：fetchMyBinding 仅依赖 workspaceId，与上 6 路相互独立，并入
+       // Promise.all 并行（原串行排在 6 路之后，白多一个 RTT）。各路已有 .catch 降级。
+-      const [ws, sw, comps, active, archived, ql, binding] = await Promise.all([
++      const [ws, sw, active, archived, ql, binding] = await Promise.all([
+         getWorkspace(workspaceId),
+         getSpecWorkspace(workspaceId).catch(() => null),
+-        listComponents(workspaceId).catch(() => ({ items: [], total: 0 })),
+         // ql-20260821-004 口径对齐变更中心 tab 徽标（pageSize=1 取 total +
+         // quicklog 含空壳占位 include_placeholder，与 tabTotalsQuery 同参）
+         listChanges(workspaceId, { location: "active", pageSize: 1 }).catch(() => ({ items: [], total: 0 })),
+@@ -213,7 +210,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
+       // （WorkspacePathFields 的 daemon prop）。
+       setBoundRuntime(null);
+       setSpecWs(sw);
+-      setComponentCount(comps.total ?? comps.items?.length ?? 0);
+       setActiveChanges(active.total ?? active.items?.length ?? 0);
+       setArchivedChanges(archived.total ?? archived.items?.length ?? 0);
+       setQuickTotal(ql.total ?? ql.items?.length ?? 0);
+@@ -653,7 +649,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
+             换 GitHub Insights 竖排四格） */}
+         <WorkspaceStatsRow
+           workspaceId={workspaceId}
+-          componentCount={componentCount}
+           activeChanges={activeChanges}
+           archivedChanges={archivedChanges}
+           quickTotal={quickTotal}
+@@ -725,7 +720,6 @@ export default function WorkspaceDetailPage({ params }: Props) {
+           boundDaemon={boundDaemon}
+           isOwner={isOwner}
+           onRefresh={load}
+-          componentCount={componentCount}
+         />
+ 
+         {/* 段③-2b：关联仓维护（2026-10-10-workspec-maintenance task-05 / FR-06）。
+diff --git a/frontend/src/components/__tests__/app-shell.test.tsx b/frontend/src/components/__tests__/app-shell.test.tsx
+index e7f592e5e..4ca8cffde 100644
+--- a/frontend/src/components/__tests__/app-shell.test.tsx
++++ b/frontend/src/components/__tests__/app-shell.test.tsx
+@@ -4,8 +4,7 @@
+  * 背景（bug）：isActive 对菜单逐个做前缀判断，兄弟路径互相连累——
+  *   - absolute 分支 startsWith：「设置」(/settings) 命中 /settings/providers 等全部
+  *     /settings/* 兄弟菜单页，「我的供应商」选中时「设置」同时亮；
+- *   - 相对分支 includes：「项目组组件」(/components) 命中 /workspaces/:id/components/topology，
+- *     「拓扑图」选中时「项目组组件」同时亮。
++
+  *
+  * 契约：侧边栏渲染出的菜单中，只有「匹配当前 pathname 匹配段最长」的那个高亮；
+  * 无任何命中时全不高亮。等长命中（数据退化）保持原有可多重高亮语义。
+@@ -152,21 +151,8 @@ describe("侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）
+     expect(activeLabels()).toEqual(["API 密钥"]);
+   });
+ 
+-  it("/workspaces/:id/components/topology：仅「拓扑图」高亮，「项目组组件」不再连亮（相对菜单 includes 分支）", () => {
+-    ws.workspaceId = "1";
+-    nav.pathname = "/workspaces/1/components/topology";
+-    renderShell();
+-
+-    expect(activeLabels()).toEqual(["拓扑图"]);
+-  });
+-
+-  it("/workspaces/:id/components：仅「项目组组件」高亮（相对菜单自身页回归）", () => {
+-    ws.workspaceId = "1";
+-    nav.pathname = "/workspaces/1/components";
+-    renderShell();
+-
+-    expect(activeLabels()).toEqual(["项目组组件"]);
+-  });
++  // 2026-10-11-retire-components-page：/components 与 /components/topology 两页
++  // 已下线，对应高亮用例随之移除（菜单条目同删，无可高亮项）。
+ 
+   it("/workspaces：仅「工作区首页」高亮（精确匹配分支回归）", () => {
+     nav.pathname = "/workspaces";
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 27a90c970..3f6c235fd 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -11,7 +11,6 @@ import {
+   AlertTriangle,
+   BarChart3,
+   Bot,
+-  Boxes,
+   CalendarDays,
+   ClipboardList,
+   Circle,
+@@ -33,7 +32,6 @@ import {
+   LogOut,
+   MessageSquare,
+   type LucideIcon,
+-  Network,
+   Package,
+   PlugZap,
+   Puzzle,
+@@ -74,8 +72,6 @@ import { useWorkspaceContext } from "@/lib/use-workspace-context";
+  */
+ const MENU_ICON_MAP: Record<string, LucideIcon> = {
+   // overview / management（相对 href，workspace 前缀）
+-  components: Boxes,
+-  "components/topology": Network,
+   changes: GitBranch,
+   "scan-docs": FileText,
+   runtime: Activity,
+diff --git a/frontend/src/components/workspace-config-card.test.tsx b/frontend/src/components/workspace-config-card.test.tsx
+index db83b1983..5621a8922 100644
+--- a/frontend/src/components/workspace-config-card.test.tsx
++++ b/frontend/src/components/workspace-config-card.test.tsx
+@@ -291,7 +291,6 @@ function renderCard(overrides: {
+         }
+         isOwner={overrides.isOwner ?? true}
+         onRefresh={onRefresh}
+-        componentCount={overrides.componentCount ?? 0}
+       />
+     </ConfigProvider>,
+   );
+@@ -532,7 +531,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+       { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 20, files_processed: 8 },
+     ]);
+ 
+-    renderCard({ myBinding: binding, componentCount: 5 });
++    renderCard({ myBinding: binding });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+     await flushMicrotasks();
+@@ -559,7 +558,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+         { task_id: "t-1", status: "done", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z", files_total: 35, files_processed: 35 },
+       ]);
+ 
+-    renderCard({ myBinding: binding, componentCount: 5, onRefresh });
++    renderCard({ myBinding: binding, onRefresh });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+     await flushMicrotasks();
+@@ -598,7 +597,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+       { task_id: "t-1", status: "pending", runtime_id: "rid-1", created_at: "2026-07-01T00:00:00Z" },
+     ]);
+ 
+-    renderCard({ myBinding: binding, componentCount: 5 });
++    renderCard({ myBinding: binding });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+     await flushMicrotasks();
+@@ -625,7 +624,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+       { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: "invalid byte sequence 0x00", created_at: "2026-07-01T00:00:00Z" },
+     ]);
+ 
+-    renderCard({ myBinding: binding, componentCount: 5 });
++    renderCard({ myBinding: binding });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+     await flushMicrotasks();
+@@ -648,7 +647,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+       { task_id: "t-1", status: "failed", runtime_id: "rid-1", error: null, created_at: "2026-07-01T00:00:00Z" },
+     ]);
+ 
+-    renderCard({ myBinding: binding, componentCount: 5 });
++    renderCard({ myBinding: binding });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "同步到服务器" }));
+     await flushMicrotasks();
+@@ -669,7 +668,7 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+     expect(scanBtn).toBeDisabled();
+   });
+ 
+-  it("扫描：componentCount>0 弹 Modal.confirm（确认 false 不调用 scanGenerate）", () => {
++  it("扫描：已扫过（specWs.last_synced_at 在场）弹 Modal.confirm（确认 false 不调用 scanGenerate）", () => {
+     const ws = makeWorkspace();
+     // FR-04：W2 改 antd Modal.confirm（不再用 window.confirm）。spy Modal.confirm
+     // 模拟用户点「取消」（调 onCancel → resolve(false)），不触发 onOk。
+@@ -687,7 +686,12 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
+       message: "",
+     });
+ 
+-    renderCard({ workspace: ws, componentCount: 3 });
++    // 2026-10-11-retire-components-page：判据从 componentCount 改为
++    // specWs.last_synced_at（组件数据源已下线）——默认 specWs 带同步时间即命中。
++    renderCard({
++      workspace: ws,
++      myBinding: makeBinding({ init_synced_at: "2026-06-30T00:50:00Z" }),
++    });
+ 
+     fireEvent.click(screen.getByRole("button", { name: "扫描" }));
+     expect(confirmSpy).toHaveBeenCalledWith(
+diff --git a/frontend/src/components/workspace-config-card.tsx b/frontend/src/components/workspace-config-card.tsx
+index 0c17e08d4..ab580c97b 100644
+--- a/frontend/src/components/workspace-config-card.tsx
++++ b/frontend/src/components/workspace-config-card.tsx
+@@ -12,7 +12,6 @@ import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
+ import { useNotify } from "@/lib/errors";
+ import {
+   downloadSpecBundle,
+-  generateProjects,
+   getSpecWorkspace,
+   importSpecWorkspace,
+   initDispatch,
+@@ -45,7 +44,6 @@ interface WorkspaceConfigCardProps {
+    * 按钮门禁与三态引导消费；Workspace 类型无此字段，故作可选 prop 由 page.tsx 注入。
+    * 不传时按 0 处理。
+    */
+-  componentCount?: number;
+ }
+ 
+ /* ------------------------------------------------------------------ */
+@@ -120,7 +118,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+     boundDaemon,
+     isOwner,
+     onRefresh,
+-    componentCount = 0,
+   } = props;
+   const workspaceId = workspace.id;
+ 
+@@ -152,7 +149,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+   const [scanning, setScanning] = useState(false);
+   const [importing, setImporting] = useState(false);
+   const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
+-  const [generatingProjects, setGeneratingProjects] = useState(false);
+   // task-09（FR-06/FR-08）：下载文档包独立 loading 态——即时 HTTP 拉流，
+   // 不建 DaemonChangeWrite 任务、不轮询，与 syncManual/syncStatus 状态机完全独立。
+   const [downloading, setDownloading] = useState(false);
+@@ -385,9 +381,11 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+       return;
+     }
+ 
+-    // D-003@V2：已扫过时弹确认（componentCount > 0）。FR-04 规范对齐：antd Modal.confirm
+-    // 替代浏览器原生 window.confirm（FRONTEND_PAGE_STYLE §11）。
+-    if (componentCount > 0) {
++    // D-003@V2：已扫过时弹确认。FR-04 规范对齐：antd Modal.confirm 替代原生 confirm
++    //（FRONTEND_PAGE_STYLE §11）。2026-10-11-retire-components-page：判据从
++    // componentCount（已随组件页下线失去数据源）改为 specWs.last_synced_at——
++    // spec 同步过即扫过，与下方三态引导同口径。
++    if (initSyncedAt && !!specWs?.last_synced_at) {
+       const ok = await confirmRescan();
+       if (!ok) return;
+     }
+@@ -457,26 +455,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+     }
+   }
+ 
+-  /* ---- Generate Projects handler ---- */
+-  async function handleGenerateProjects(): Promise<void> {
+-    setGeneratingProjects(true);
+-    setLocalError(null);
+-    try {
+-      const result = await generateProjects(workspaceId);
+-      if (result.reparse.created > 0) {
+-        onRefresh();
+-      } else {
+-        setLocalError("未生成新的项目组件（projects/*.yaml 可能已存在）");
+-      }
+-    } catch (err) {
+-      setLocalError(
+-        err instanceof ApiError ? err.message : "生成项目组件失败",
+-      );
+-    } finally {
+-      setGeneratingProjects(false);
+-    }
+-  }
+-
+   /* ================================================================ */
+   /*  Render                                                          */
+   /* ================================================================ */
+@@ -524,7 +502,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+           </Button>
+         </span>
+       </Tooltip>
+-      {initSyncedAt && componentCount > 0 && (
++      {initSyncedAt && !!specWs?.last_synced_at && (
+         <Tooltip
+           title={
+             syncStatus === "syncing"
+@@ -574,23 +552,6 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+           </span>
+         </Tooltip>
+       )}
+-      <Tooltip
+-        title={
+-          generatingProjects
+-            ? "生成中，请稍候"
+-            : "根据 projects/*.yaml 生成项目组件"
+-        }
+-      >
+-        <span>
+-          <Button
+-            onClick={() => void handleGenerateProjects()}
+-            loading={generatingProjects}
+-            disabled={!!busyReason()}
+-          >
+-            生成项目
+-          </Button>
+-        </span>
+-      </Tooltip>
+     </div>
+   ) : undefined;
+ 
+@@ -835,15 +796,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
+             </p>
+           </div>
+         )}
+-        {generatingProjects && (
+-          <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
+-            <p className="font-medium">生成项目组件中...</p>
+-            <p className="mt-0.5 text-brand-600">
+-              正在根据 projects/*.yaml 生成项目组件，请稍候...
+-            </p>
+-          </div>
+-        )}
+-        {initSyncedAt && !!specWs?.last_synced_at && !importing && !generatingProjects && (
++        {initSyncedAt && !!specWs?.last_synced_at && !importing && (
+           <div className="rounded border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+             <p className="font-medium">工作区已就绪。</p>
+             <p className="mt-0.5 text-green-600">规范文档已同步，可直接使用。</p>
+diff --git a/frontend/src/components/workspace-tabs.tsx b/frontend/src/components/workspace-tabs.tsx
+index 2e78d20f3..bae2c14b7 100644
+--- a/frontend/src/components/workspace-tabs.tsx
++++ b/frontend/src/components/workspace-tabs.tsx
+@@ -19,8 +19,8 @@ const TABS = [
+   // knowledge:read——菜单 matchPattern "/knowledge" startsWith 前缀天然覆盖 /knowledge/graph）
+   { key: "knowledge-graph", label: "知识图谱", path: "/knowledge/graph" },
+   // 2026-08-20-workspace-nav-consolidate：概览宫格退役，4 入口并入菜单（顺序按使用频率）
+-  // ql-20260821-009：组件移到扫描文档之前（用户指定）
+-  { key: "components", label: "组件", path: "/components" },
++  // 2026-10-11-retire-components-page：组件页下线（生成入口缺失长期空页，
++  // 信息已被关联仓「本机现状回显」覆盖）——tab 移除。
+   { key: "scan-docs", label: "扫描文档", path: "/scan-docs" },
+   { key: "runtime", label: "运行时", path: "/runtime" },
+   { key: "agent-profiles", label: "智能体档案", path: "/agent-profiles" },
+diff --git a/frontend/src/components/workspace/stats-row.tsx b/frontend/src/components/workspace/stats-row.tsx
+index f3bffff2e..79f05959d 100644
+--- a/frontend/src/components/workspace/stats-row.tsx
++++ b/frontend/src/components/workspace/stats-row.tsx
+@@ -1,13 +1,12 @@
+ "use client";
+ 
+ import Link from "next/link";
+-import { Archive, GitBranch, Puzzle, Zap } from "lucide-react";
++import { Archive, GitBranch, Zap } from "lucide-react";
+ 
+ import { cn } from "@/lib/utils";
+ 
+ interface WorkspaceStatsRowProps {
+   workspaceId: string;
+-  componentCount: number;
+   activeChanges: number;
+   archivedChanges: number;
+   /** 快速修复总条数（QUICKLOG；用户反馈 ql-20260820-013：原"运行时阶段"卡替换）。 */
+@@ -55,24 +54,18 @@ function StatCard({
+ 
+ export function WorkspaceStatsRow({
+   workspaceId,
+-  componentCount,
+   activeChanges,
+   archivedChanges,
+   quickTotal,
+ }: WorkspaceStatsRowProps): JSX.Element {
++  // 2026-10-11-retire-components-page：「项目组组件」卡随组件页下线移除（空数据源 +
++  // 死链），余三格（lg:grid-cols-3）。
+   return (
+     <section
+       className={cn(
+-        "grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4",
++        "grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-3",
+       )}
+     >
+-      <StatCard
+-        href={`/workspaces/${workspaceId}/components`}
+-        icon={Puzzle}
+-        label="项目组组件"
+-        value={componentCount}
+-        clickable
+-      />
+       <StatCard
+         href={`/workspaces/${workspaceId}/changes`}
+         icon={GitBranch}
+diff --git a/frontend/src/hooks/use-page-session-context.test.ts b/frontend/src/hooks/use-page-session-context.test.ts
+index 5d45724ca..c9b4e1f4e 100644
+--- a/frontend/src/hooks/use-page-session-context.test.ts
++++ b/frontend/src/hooks/use-page-session-context.test.ts
+@@ -85,15 +85,11 @@ describe("usePageSessionContext", () => {
+     );
+   });
+ 
+-  it("工作区 tab：知识库/拓扑/审批/Git 记录", () => {
++  it("工作区 tab：知识库/审批/Git 记录（拓扑页已下线 2026-10-11）", () => {
+     pathnameRef.current = "/workspaces/w1/knowledge";
+     expect(tabKeyOf(renderHook(() => usePageSessionContext()).result.current.pageContext)).toBe(
+       "workspace_knowledge",
+     );
+-    pathnameRef.current = "/workspaces/w1/components/topology";
+-    expect(tabKeyOf(renderHook(() => usePageSessionContext()).result.current.pageContext)).toBe(
+-      "workspace_topology",
+-    );
+     pathnameRef.current = "/workspaces/w1/approvals";
+     expect(renderHook(() => usePageSessionContext()).result.current.label).toBe("工作区 · 审批中心");
+     pathnameRef.current = "/workspaces/w1/git-log";
+diff --git a/frontend/src/hooks/use-page-session-context.ts b/frontend/src/hooks/use-page-session-context.ts
+index 3927b406e..5aa910453 100644
+--- a/frontend/src/hooks/use-page-session-context.ts
++++ b/frontend/src/hooks/use-page-session-context.ts
+@@ -82,9 +82,8 @@ function workspaceTabKeyOf(rest: string): string {
+     if (rest === "changes" || rest === "changes/") return "workspace_changes";
+     return rest.includes("/sessions") ? "workspace_change_sessions" : "workspace_change_detail";
+   }
+-  if (seg === "components") {
+-    return rest.startsWith("components/topology") ? "workspace_topology" : "workspace_components";
+-  }
++  // 2026-10-11-retire-components-page：components 段（含 topology）页面已下线，
++  // 走 WORKSPACE_TAB_MAP 兜底（回落 workspace_overview）。
+   if (seg === "incidents") return "workspace_incidents";
+   return WORKSPACE_TAB_MAP[rest.replace(/\/$/, "")] ?? "workspace_overview";
+ }
+@@ -130,8 +129,6 @@ export const ROUTE_LABELS: Record<string, string> = {
+   workspace_sessions_tab: "工作区 · 会话",
+   workspace_explorer: "工作区 · 文件",
+   workspace_knowledge: "工作区 · 知识库",
+-  workspace_components: "工作区 · 组件",
+-  workspace_topology: "工作区 · 组件拓扑",
+   workspace_scan_docs: "工作区 · 扫描文档",
+   workspace_runtime_tab: "工作区 · 运行时",
+   workspace_agent_profiles_tab: "工作区 · 智能体档案",
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index d75e894fb..91c14790d 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -40,9 +40,9 @@ const BACKEND_PERMISSION_KEYS = [
+   "workspace:member:manage",
+   // Workspace 子菜单独立 read (7, 2026-06-18 ql-003 新增 6 + 2026-09-17
+   // knowledge-precipitation task-02 新增 knowledge:write——镜像曾漏补)
+-  "topology:read",
+   "scan-docs:read",
+   "runtime:read",
++  "topology:read",
+   "knowledge:read",
+   "knowledge:write",
+   "incident:read",
+@@ -105,8 +105,6 @@ const BACKEND_PERMISSION_KEYS = [
+ /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
+ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
+   "workspaces",
+-  "components",
+-  "topology",
+   "changes",
+   "scan-docs",
+   "runtime",
+@@ -159,8 +157,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
+ ]);
+ 
+ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+-  it("MENU_PERMISSION_GROUPS 长度 === 38（task-08 新增 menus 菜单项）", () => {
+-    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
++  it("MENU_PERMISSION_GROUPS 长度 === 36（2026-10-11-retire-components-page 下线 components/topology 两项）", () => {
++    expect(MENU_PERMISSION_GROUPS).toHaveLength(36);
+   });
+ 
+   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
+@@ -175,7 +173,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（task-08 system 组新增 menus）", () => {
++  it("section 分布：workspace 6 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（components/topology 下线）", () => {
+     const counter: Record<MenuSection, number> = {
+       workspace: 0,
+       agent: 0,
+@@ -187,7 +185,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+       counter[g.section] += 1;
+     });
+-    expect(counter.workspace).toBe(8);
++    expect(counter.workspace).toBe(6); // 2026-10-11 下线 components/topology
+     expect(counter.agent).toBe(4);
+     expect(counter.config).toBe(4);
+     expect(counter.governance).toBe(3);
+@@ -255,7 +253,6 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     // 死键删除后卡片收敛为 [workspace:read]（组件列表端点鉴权即
+     // workspace:read），退出本清单——独立 read key 剩 5 个。
+     const EXPECTED: Record<string, string> = {
+-      topology: "topology:read",
+       "scan-docs": "scan-docs:read",
+       runtime: "runtime:read",
+       knowledge: "knowledge:read",
+diff --git a/frontend/src/lib/components.ts b/frontend/src/lib/components.ts
+deleted file mode 100644
+index 6dc963bde..000000000
+--- a/frontend/src/lib/components.ts
++++ /dev/null
+@@ -1,19 +0,0 @@
+-/**
+- * 组件清单 API 客户端（D-001@V1，变更 2026-07-06-component-readonly-split）。
+- *
+- * 组件从 projects/*.yaml 只读派生（GET /workspaces/{id}/components），不再是 workspace 行。
+- * 本模块是 listComponents 的薄封装；Component 类型与 getWorkspaceComponents 客户端
+- * 在 @/lib/workspaces（避免循环依赖，单一真相）。
+- */
+-import { getWorkspaceComponents, type Component } from "@/lib/workspaces";
+-
+-export type { Component };
+-
+-/**
+- * 列出项目组的一级子项目组件（只读，来自 projects/*.yaml）。
+- */
+-export async function listComponents(
+-  workspaceId: string,
+-): Promise<{ items: Component[]; total: number }> {
+-  return getWorkspaceComponents(workspaceId);
+-}
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index e9781412d..290463ccc 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -110,29 +110,9 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+       { key: "workspace:member:manage", name: "工作区成员管理" },
+     ],
+   },
+-  {
+-    section: "workspace",
+-    menuKey: "components",
+-    menuLabel: "项目组组件",
+-    icon: "\u{1F4E6}",
+-    href: "components",
+-    matchPattern: "/components",
+-    // 2026-10-08-menu-permissions-page-audit：补 workspace:read——组件列表端点
+-    // GET /api/workspaces/{ws}/components（workspace/router.py list_components）
+-    // 鉴权 workspace:read。
+-    // 2026-10-08-rbac-dead-permissions-cleanup：component:read 死键删除（零端点
+-    // 消费，ql-003 接线意图从未落地），卡片收敛为页面真实所需。
+-    permissions: [{ key: "workspace:read", name: "组件查看" }],
+-  },
+-  {
+-    section: "workspace",
+-    menuKey: "topology",
+-    menuLabel: "拓扑图",
+-    icon: "\u{1F5FA}",
+-    href: "components/topology",
+-    matchPattern: "/components/topology",
+-    permissions: [{ key: "topology:read", name: "拓扑查看" }],
+-  },
++  // 2026-10-11-retire-components-page：「项目组组件」「拓扑图」菜单随组件页
++  // （含 components/topology 子页）一并下线——生成入口缺失长期空页，信息已被
++  // 关联仓卡片「本机现状回显」覆盖（用户裁决选项 A）。
+   {
+     section: "workspace",
+     menuKey: "changes",
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index ae2cb8cf9..aa850b531 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -142,7 +142,7 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   },
+   pi: {
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+diff --git a/frontend/src/lib/spec-workspaces.ts b/frontend/src/lib/spec-workspaces.ts
+index 484018c08..472089c8d 100644
+--- a/frontend/src/lib/spec-workspaces.ts
++++ b/frontend/src/lib/spec-workspaces.ts
+@@ -151,25 +151,6 @@ export async function importSpecWorkspace(
+   if (buffer.trim()) flush(buffer);
+ }
+ 
+-export interface GenerateProjectsResult {
+-  generated_files: number;
+-  reparse: {
+-    parsed: number;
+-    created: number;
+-    updated: number;
+-    deleted: number;
+-  };
+-  children: { id: string; name: string; component_key: string; slug: string }[];
+-}
+-
+-export async function generateProjects(
+-  workspaceId: string,
+-): Promise<GenerateProjectsResult> {
+-  return apiFetch<GenerateProjectsResult>(
+-    `/api/workspaces/${workspaceId}/generate-projects`,
+-    { method: "POST" },
+-  );
+-}
+ 
+ // ── Init dispatch (D-002/D-009, task-08) ──
+ 
+diff --git a/frontend/src/lib/workspaces.ts b/frontend/src/lib/workspaces.ts
+index c0b2aba69..c61a725a1 100644
+--- a/frontend/src/lib/workspaces.ts
++++ b/frontend/src/lib/workspaces.ts
+@@ -45,7 +45,6 @@ export type TopologyNode = Schemas["TopologyNode"];
+ 
+ export type TopologyEdge = Schemas["TopologyEdge"];
+ 
+-export type TopologyResponse = Schemas["TopologyResponse"];
+ 
+ // task-11：对齐 OpenAPI 生成类型。
+ export type ScanGenerateResponse = Schemas["ScanGenerateResponse"];
+@@ -271,16 +270,3 @@ export type ComponentListResponse = {
+   total: number;
+ };
+ 
+-export async function getWorkspaceComponents(
+-  workspaceId: string,
+-): Promise<ComponentListResponse> {
+-  return apiFetch<ComponentListResponse>(
+-    `/api/workspaces/${workspaceId}/components`,
+-  );
+-}
+-
+-// ── Global Topology ──
+-
+-export async function getTopology(): Promise<TopologyResponse> {
+-  return apiFetch<TopologyResponse>("/api/workspaces/topology");
+-}
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index 5bf630e0c..7bb1aee81 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -77,6 +77,7 @@ import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
+ // createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
+ import { CursorDriver } from './interactive/cursor-driver.js';
+ import { SessionManager } from './interactive/session-manager.js';
++import { isMainAgentMcpCandidate } from './interactive/providers.js';
+ import type { SessionEventForBackend } from './interactive/types.js';
+ import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
+ import { DAEMON_VERSION } from './daemon-version.js';
+@@ -962,18 +963,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // isMainAgentSession：读 ctx.provider + ctx.stage 判定本 session 是否注入
+       // 主 agent MCP tool。链路：backend 写 lease.metadata.stage → daemon claim
+       // payload stage（lease/context.py:479）→ execPayload.stage（daemon.ts:3760）
+-      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。判据
+-      // （design §5 Phase 2）：
+-      //   - provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true：
+-      //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
+-      //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
+-      //   - provider=claude 且 stage='mission_worker'（backend execution.py
+-      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不进主控分支（防 worker
+-      //     递归派发与 converge 干扰，审查 CC-12）——但改走下方 isWorkerSession
+-      //     分支注入受限 server（task-06 2026-08-25-team-subsession-governance
+-      //     / D-003@v1，谓词三态化：普通 / 主控 / 分身）；其它非空 stage 值不注入。
+-      //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
+-      //     不消费 mcpServers，另立后续变更）。
++      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。
++      //
++      // 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）能力化：判定逻辑
++      // 单源收编 providers.ts isMainAgentMcpCandidate——provider !== 'claude' 硬拒
++      // （2026-08-26-workspace-mcp-edit 时代口径，codex 旧注释 D-003@v1"另立后续
++      // 变更"即本变更）改为按 getProviderCaps(provider).mcp 判定：caps.mcp=true
++      // 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值）注入，未知
++      // provider 默认拒绝；stage 判定维持原口径（缺省/orchestrator 注入）。
++      //   - stage='mission_worker'（分身）不进主控分支——isWorkerSession（下方）
++      //     维持 claude-only 受限注入（D-002 循既有 D-008@v1 治理决策，未放开）。
+       //
+       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
+       // task-07（2026-08-26-workspace-mcp-edit）起为三件套合并注入：读会话级缓存
+@@ -992,11 +991,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
+       // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
+       // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
+-      isMainAgentSession: (ctx) => {
+-        if (ctx.provider !== 'claude') return false;
+-        const stage = ctx.stage ?? '';
+-        return stage === '' || stage === 'orchestrator';
+-      },
++      isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx),
+       mainAgentMcpConfigProvider: (ctx) => {
+         // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
+         // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。
+diff --git a/sillyhub-daemon/src/codex-settings.ts b/sillyhub-daemon/src/codex-settings.ts
+index 2ca597a57..ccc2c7df1 100644
+--- a/sillyhub-daemon/src/codex-settings.ts
++++ b/sillyhub-daemon/src/codex-settings.ts
+@@ -340,6 +340,107 @@ async function writeAuthJson(dir: string, key: string): Promise<void> {
+  * 日志安全：warn/error 载荷只含路径 / 字段名 / api_format / 错误 message，
+  * 永不含 api_key / daemonApiKey 明文。
+  */
++/**
++ * codex per-session MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver；本写盘器按结构类型直传）。
++ */
++export interface CodexMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1）：把平台 MCP
++ * 配置表序列化为 config.toml [mcp_servers.*] 托管段并差量合并（纯函数，无 IO）。
++ *
++ * 序列化形态（codex CLI config.toml 官方 schema）：
++ *   [mcp_servers.<name>]
++ *   command = "<cmd>"
++ *   args = ["<a>", "<b>"]          （可选，字符串数组）
++ *   [mcp_servers.<name>.env]        （可选，KEY = "value" 子表）
++ *
++ * 托管语义：[mcp_servers.*] 命名空间为 daemon 独占（per-session 目录内的
++ * config.toml 由 daemon 管理，宿主全局 ~/.codex 不受影响）——现有 mcp_servers
++ * 段整段丢弃重写（防幽灵 server 残留），其余行（含 model 托管段与用户行）
++ * 原样保留。空表 → 返回 existing 原文（不动文件）。env 空对象不产生子表。
++ * 值转义复用 tomlString；数组/子表键名按 TOML 裸键规则（name 由 daemon 白名单
++ * 控制为安全标识符：sillyhub-daemon / sillyhub-file 等连字符形态合法）。
++ */
++export function mergeCodexMcpToml(
++  existing: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): string {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return existing;
++  const lines = existing.split(/\r?\n/);
++  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') lines.pop();
++
++  const kept: string[] = [];
++  let inMcpNamespace = false;
++  for (const line of lines) {
++    const path = parseHeaderPath(line);
++    if (path !== null) {
++      inMcpNamespace = path[0] === 'mcp_servers';
++      if (!inMcpNamespace) kept.push(line);
++      continue;
++    }
++    if (inMcpNamespace) continue; // 旧 mcp_servers 段（含尾随空行/注释）整段丢弃
++    kept.push(line);
++  }
++  while (kept.length > 0 && kept[kept.length - 1]?.trim() === '') kept.pop();
++
++  const mcpBlock: string[] = [];
++  for (const name of names) {
++    const cfg = mcpServers[name];
++    if (cfg === undefined) continue;
++    mcpBlock.push(`[mcp_servers.${name}]`);
++    mcpBlock.push(`command = ${tomlString(cfg.command)}`);
++    if (cfg.args !== undefined && cfg.args.length > 0) {
++      const items = cfg.args.map((a) => tomlString(a)).join(', ');
++      mcpBlock.push(`args = [${items}]`);
++    }
++    const envKeys = cfg.env === undefined ? [] : Object.keys(cfg.env);
++    if (envKeys.length > 0) {
++      mcpBlock.push(`[mcp_servers.${name}.env]`);
++      for (const k of envKeys) {
++        mcpBlock.push(`${k} = ${tomlString(cfg.env?.[k] ?? '')}`);
++      }
++    }
++  }
++
++  const head = kept.length > 0 ? `${kept.join('\n')}\n\n` : '';
++  return `${head}${mcpBlock.join('\n')}\n`;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-06：写 per-session CODEX_HOME 内
++ * config.toml 的 [mcp_servers.*] 托管段（读 config.toml → mergeCodexMcpToml →
++ * writeFileAtomic）。空表跳过不写；写 IO 失败 throw（调用方 codex driver start
++ * 捕获降级 warn 不阻断 spawn——MCP 是增强能力）。本文件由 daemon 与本函数共同
++ * 管理（provider 托管段归 writeCodexHome，mcp_servers 段归本函数），两写路径
++ * 均为「读原文→差量合并→原子写」幂等形态。
++ */
++export async function writeCodexMcpServers(
++  codexHome: string,
++  mcpServers: Record<string, CodexMcpServerConfig>,
++): Promise<void> {
++  if (Object.keys(mcpServers).length === 0) return;
++  const path = join(codexHome, CONFIG_FILENAME);
++  const existing = await readTextIfExists(path);
++  const merged = mergeCodexMcpToml(existing, mcpServers);
++  try {
++    await writeFileAtomic(path, merged);
++  } catch (e) {
++    console.error('codex_mcp_config_write_failed', {
++      codexHome,
++      servers: Object.keys(mcpServers),
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export async function writeCodexHome(input: CodexHomeWriteInput): Promise<void> {
+   const { codexHome, provider, daemonApiKey } = input;
+ 
+diff --git a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+index 881d069f2..ce1b4f7fe 100644
+--- a/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/codex-app-server-driver.ts
+@@ -59,6 +59,7 @@ import { mkdir } from 'node:fs/promises';
+ import { join } from 'node:path';
+ import readline from 'node:readline';
+ import { resolveWindowsCmdShim } from '../cmd-shim.js';
++import { writeCodexMcpServers } from '../codex-settings.js';
+ import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
+ import { daemonStateDir } from '../config.js';
+ import type { AgentEvent, AgentEventUsage } from '../types.js';
+@@ -829,6 +830,31 @@ export class CodexAppServerDriver implements InteractiveDriver {
+     args.unshift('-c', 'features.default_mode_request_user_input=true');
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-06 / D-006@v1 + D-011@v1）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出）写 per-session CODEX_HOME 内
++    // config.toml [mcp_servers.*] 托管段（codex CLI 原生读取）。caps 侧 codex.mcp
++    // 当前维持 false（SPIKE-01 未能实测——引擎二进制缺失，D-011@v1），本消费路径
++    // 在 caps 翻值前不会被触发（机制就绪待复评：复测通过翻值即活）。降级面：
++    // CODEX_HOME 缺失（provider 文件层未写）→ 不写 + warn；写盘失败 → warn 不阻断
++    // spawn（MCP 是增强能力）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const codexHome = env['CODEX_HOME'];
++      if (!codexHome || codexHome.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[codex-driver] mcp skip: no CODEX_HOME in spawn env');
++      } else {
++        try {
++          await writeCodexMcpServers(codexHome, opts.mcpServers);
++        } catch (e) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[codex-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++            (e as Error).message,
++          );
++        }
++      }
++    }
++
+     // ql-20260624-002 R-exe（修复 Windows spawn EINVAL）：agent-detector 在 Windows 给的
+     // 是 codex.cmd（npm cmd-shim），直接 spawn .cmd 无 shell → CreateProcess EINVAL
+     //（claude driver task-01 R-exe 同类问题，design §10 / interactive.md:38）。复用
+diff --git a/sillyhub-daemon/src/interactive/cursor-driver.ts b/sillyhub-daemon/src/interactive/cursor-driver.ts
+index cebae2ab9..ecc5fa3db 100644
+--- a/sillyhub-daemon/src/interactive/cursor-driver.ts
++++ b/sillyhub-daemon/src/interactive/cursor-driver.ts
+@@ -19,7 +19,11 @@
+  *
+  * 忽略的 StartOptions（无对应 CLI 通道，docblock 声明）：
+  *   - manualApproval / askUserOnly（permission_dialog=false，D-003@v2）
+- *   - mcpServers（CLI 无 per-session --mcp-config，D-008@v1）
++ *   - mcpServers（2026-10-10-all-engines-mcp-injection task-07 留档：CLI 无
++ *     per-session MCP 配置通道且 headless 审批上游坑未解——caps cursor.mcp=false，
++ *     实测证据/坑点/复评条件见 providers.ts cursor 注释块与
++ *     changes/2026-10-10-all-engines-mcp-injection/spike-cursor-mcp.md
++ *     （原 D-008@v1 口径由本次留档取代））
+  *   - blocks 附件（multimodal=false）
+  *
+  * E7：handle 含子进程资源，不可序列化、禁止落盘。
+@@ -93,6 +97,8 @@ export class CursorExecutableNotFoundError extends Error {
+  * cursor 专属启动选项（经 CreateSessionInput 传入，值来自 daemon `_agentPaths.get('cursor')`）。
+  *
+  * 忽略（无对应 CLI 通道，见文件头）：manualApproval / askUserOnly / mcpServers / blocks。
++ * mcpServers 留档细节（task-07）：caps.mcp=false 期不透传，翻值前需先过
++ * spike-cursor-mcp.md 复评 SOP。
+  */
+ export interface CursorDriverStartOptions extends InteractiveDriverStartOptions {
+   /** cursor-agent 可执行入口（.cmd/.ps1/或直 exe；Windows 下经 resolveWindowsCmdShim 解析）。 */
+diff --git a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+index d9e117016..eed2ce28c 100644
+--- a/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
++++ b/sillyhub-daemon/src/interactive/pi-rpc-driver.ts
+@@ -100,6 +100,7 @@ import { mapPlatformLevelToEngine } from './thinking-levels.js';
+ import type { CanUseToolDecision } from './types.js';
+ 
+ import { CodepageDetectorDecoder } from '../spawn-env.js';
++import { writePiMcpConfig } from '../pi-settings.js';
+ 
+ /** close 时 SIGTERM→SIGKILL 升级宽限（对齐 codex driver KILL_GRACE_MS=2000）。 */
+ const KILL_GRACE_MS = 2_000;
+@@ -177,6 +178,64 @@ const EXTENSION_UI_FIRE_AND_FORGET_METHODS: ReadonlySet<string> = new Set([
+  * pi 的会话 jsonl 全部落本目录，resume（`--session <id>`）也在本目录内查找。
+  * 导出纯函数供测试断言（daemon-state-dir 隔离收口同款锚点）。
+  */
++/**
++ * 解析 pi --version 输出的主版本号（纯函数，2026-10-10-all-engines-mcp-injection
++ * task-05 / FR-06）。pi 1.0 起原生内置 MCP（SPIKE-00 实测）；主版本 <1 或无法
++ * 解析 → 返回 -1（视为不支持，调用方降级不注入）。
++ */
++export function parsePiMajorVersion(output: string): number {
++  const m = /(^|[\sv])([0-9]+)\.[0-9]+/.exec(output.trim());
++  return m ? Number(m[2]) : -1;
++}
++
++/**
++ * 探测宿主 pi 主版本（spawn --version；每会话至多一次，MCP 注入路径才触发）。
++ * spawn 失败/超时/输出不可解析 → -1（调用方降级 warn，不阻断会话）。
++ * 不做模块级缓存：宿主升级 pi 后无需重启 daemon 即生效；会话创建频率低，
++ * 多一次短命子进程可接受。
++ */
++export async function detectPiMajorVersion(
++  cmdPath: string,
++  useShell: boolean,
++  env: NodeJS.ProcessEnv,
++): Promise<number> {
++  return new Promise((resolve) => {
++    let settled = false;
++    const done = (v: number) => {
++      if (!settled) {
++        settled = true;
++        resolve(v);
++      }
++    };
++    let child;
++    try {
++      child = spawn(cmdPath, ['--version'], {
++        env,
++        stdio: ['ignore', 'pipe', 'pipe'],
++        shell: useShell,
++        windowsHide: true,
++      });
++    } catch {
++      done(-1);
++      return;
++    }
++    let out = '';
++    child.stdout?.on('data', (d: unknown) => {
++      out += String(d);
++    });
++    child.on('error', () => done(-1));
++    child.on('close', () => done(parsePiMajorVersion(out)));
++    setTimeout(() => {
++      done(-1);
++      try {
++        child.kill();
++      } catch {
++        /* noop */
++      }
++    }, 5000);
++  });
++}
++
+ export function piRpcSessionDir(): string {
+   return join(daemonStateDir(), 'runs', 'pi-sessions');
+ }
+@@ -843,6 +902,52 @@ export class PiRpcDriver implements InteractiveDriver {
+ 
+     const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
+ 
++    // MCP 注入（2026-10-10-all-engines-mcp-injection task-05 / D-005@v1 形态①）：
++    // 平台 MCP 配置表（resolveMainAgentMcp 产出，经 buildDriverOptions 透传）写
++    // per-session mcp.json——pi 1.1.0+ 原生 MCP 客户端启动时读取并连接（SPIKE-00：
++    // PI_CODING_AGENT_DIR 重定向后读取路径 = <dir>/mcp.json）。降级面（FR-06 两层
++    // 门控：caps 翻值描述机制支持，此处运行时二次门控）：宿主 pi < 1.0 → 不写 +
++    // warn；PI_CODING_AGENT_DIR 缺失（官方端点形态无 per-session 目录）→ 不写 +
++    // warn。写盘失败 warn 不阻断 spawn（MCP 是增强能力，失败不拖垮会话）。
++    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
++      const piAgentDir = env['PI_CODING_AGENT_DIR'];
++      if (!piAgentDir || piAgentDir.trim() === '') {
++        // eslint-disable-next-line no-console
++        console.warn('[pi-rpc-driver] mcp skip: no PI_CODING_AGENT_DIR in spawn env');
++      } else {
++        // 版本探测在 spawn 前完成写盘，此处内联同款 shim 解析（与下方 spawnCmdPath
++        // 同一输入同款逻辑，结果一致；正式 spawn 的解析在其后独立执行不回读）。
++        let verCmdPath = opts.pathToAgentExecutable;
++        let verShell = false;
++        if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
++          const verResolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
++          if (verResolved) {
++            verCmdPath = verResolved.exe;
++          } else {
++            verShell = true;
++          }
++        }
++        const major = await detectPiMajorVersion(verCmdPath, verShell, env);
++        if (major < 1) {
++          // eslint-disable-next-line no-console
++          console.warn(
++            '[pi-rpc-driver] mcp skip: pi native MCP requires >=1.0 (detected major:',
++            major,
++          );
++        } else {
++          try {
++            await writePiMcpConfig(piAgentDir, opts.mcpServers);
++          } catch (e) {
++            // eslint-disable-next-line no-console
++            console.warn(
++              '[pi-rpc-driver] mcp config write failed（继续 spawn，会话无 MCP 工具）:',
++              (e as Error).message,
++            );
++          }
++        }
++      }
++    }
++
+     // R-exe（design §10 R-05）：Windows 下 detector 给的是 pi.cmd（npm cmd-shim），
+     // 直接 spawn .cmd 无 shell → CreateProcess EINVAL。复用 codex driver 同款
+     // resolveWindowsCmdShim（batch task-runner 先例）解析为 node + pi.js；解析
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 75ae767ff..50fae3926 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -367,6 +367,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     sessionFork: 'native',
+   },
+   codex: {
++    // 2026-10-10-all-engines-mcp-injection task-06（D-011@v1）：机制就绪待复评——
++    // SPIKE-01 未能实测（宿主 codex 0.162.0 缺 win32 平台二进制且网络限断无法修复，
++    // 见 changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md 复评 SOP）；
++    // 消费通道已交付（codex-settings mergeCodexMcpToml / writeCodexMcpServers +
++    // driver start 写 CODEX_HOME config.toml [mcp_servers.*]，单测绿）。旧注释
++    // 「driver.ts codex 对 mcpServers 仅暂存不消费」已被 task-06 推翻。翻值 =
++    // 复测通过后本键 false→true + 重跑 gen-provider-caps。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -393,8 +400,15 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // ——task-06 实证聚合型无 per-child 归属，见 docblock 与 onboarding §5.3；
+   // permission_dialog / dialog 随 2026-09-09-askuser-pi-cursor Wave A 翻值）。
+   pi: {
++    // 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：SPIKE-00
++    // 全过（pi 1.1.0 原生 MCP + PI_CODING_AGENT_DIR 重定向 per-session 隔离，
++    // spike-pi-10-compat.md）——通道已落地（pi-settings writePiMcpConfig +
++    // driver 版本门控写盘），task-08 已翻值（SPIKE-00 实测通过为唯一依据，gen-provider-caps
++    // 三端同步）。旧注释「pi 无原生 MCP（自家 extension 生态另轨），桥接留
++    // 后续变更」基于 0.81.1 基线，已被 SPIKE-00 推翻——pi 1.0 起反转加入原生
++    // MCP（pi mcp 子命令 / --no-mcp 开关 / mcp__ 工具命名空间）。
+     resume: true,
+-    mcp: false,
++    mcp: true,
+     multimodal: true,
+     attachments: true,
+     thinking: true,
+@@ -417,6 +431,13 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+   // 归一化器已映射 delta→thinking；dialog='marker' 为 2026-09-09-askuser-pi-cursor
+   // task-12 初值，spike no-go 则随 task-08 三端改 'none'）。
+   cursor: {
++    // 2026-10-10-all-engines-mcp-injection task-07（D-003@v1 / D-011@v1）：留档
++    // 分支——SPIKE-02 未能实测（宿主无 cursor-agent CLI 且网络限断无法安装，
++    // spike-cursor-mcp.md）。坑点：上游反馈 headless 模式 MCP 工具审批未实现
++    //（工具调用可能挂起，未经本地实测验证）；CLI 无 per-session MCP 配置通道，
++    // 全局 ~/.cursor/mcp.json 与项目级 .cursor/mcp.json 均为禁写落点（宿主
++    // 资产 / workspace 污染）。复评条件：cursor-agent 可安装后按
++    // spike-cursor-mcp.md SOP 实测审批行为与落点隔离，两项通过才翻值。
+     resume: true,
+     mcp: false,
+     multimodal: false,
+@@ -474,6 +495,29 @@ export function getProviderCaps(provider: string): ProviderCaps {
+   };
+ }
+ 
++/**
++ * 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控/普通会话 MCP
++ * 注入候选判定（引擎无关纯函数，无副作用可单测）。
++ *
++ * 取代 cli.ts 装配处 `provider !== 'claude'` 硬拒（2026-08-26-workspace-mcp-edit
++ * D-008 时代仅 claude 消费 mcpServers 的口径）：改为按能力矩阵 mcp 键判定——
++ * caps.mcp=true 的引擎（claude 既有；pi/codex/cursor 按 SPIKE 实测翻值后）均
++ * 进入主控注入；未知 provider 经 getProviderCaps 默认拒绝（mcp=false），禁止
++ * 对 PROVIDER_CAPS 直接下标（undefined 链 TypeError，Grill B-3）。
++ *
++ * stage 判定维持原口径：缺省（''）= 普通会话常驻注入；'orchestrator' = 存量
++ * 外部主控照常注入；'mission_worker'（分身）不进本判定——分身走 isWorkerSession
++ * 受限注入（cli.ts:1118-1120 维持 claude-only，D-002 循既有 D-008@v1 治理决策）。
++ */
++export function isMainAgentMcpCandidate(ctx: {
++  provider: string;
++  stage?: string | null;
++}): boolean {
++  if (!getProviderCaps(ctx.provider).mcp) return false;
++  const stage = ctx.stage ?? '';
++  return stage === '' || stage === 'orchestrator';
++}
++
+ // ── task-05（FR-05 / design §5.2）：provider 注册表 ───────────────────────────
+ //
+ // 分层：上方 PROVIDER_CAPS 是能力矩阵单源（task-02，内容不动）；本节在其上建
+diff --git a/sillyhub-daemon/src/pi-settings.ts b/sillyhub-daemon/src/pi-settings.ts
+index 446ef9b05..b8d90b6b8 100644
+--- a/sillyhub-daemon/src/pi-settings.ts
++++ b/sillyhub-daemon/src/pi-settings.ts
+@@ -290,6 +290,53 @@ export async function writePiDir(input: PiDirWriteInput): Promise<void> {
+  *（default_fallback_model ?? model）非空。聚合表 pi writer 的 isSufficient 与
+  * spawn/reload 分派共用。
+  */
++/**
++ * pi 1.1.0+ 原生 MCP server 配置条目（结构兼容 interactive/driver.js 的
++ * McpServerConfigForDriver——本文件是低依赖纯写盘层，不回引 interactive/，
++ * driver 侧按结构类型直传）。
++ */
++export interface PiMcpServerConfig {
++  command: string;
++  args?: string[];
++  env?: Record<string, string>;
++}
++
++/**
++ * 2026-10-10-all-engines-mcp-injection task-05（D-005@v1 形态①）：写 per-session
++ * `<PI_CODING_AGENT_DIR>/mcp.json`（pi 1.1.0+ 原生 MCP 配置）。
++ *
++ * SPIKE-00 实测（spike-pi-10-compat.md，pi 1.1.0）：PI_CODING_AGENT_DIR 重定向后
++ * pi root 直接对应 agent 层——原生 MCP 配置读取路径 = `<dir>/mcp.json`（非宿主
++ * ~/.pi/agent/mcp.json 的 agent 子层），格式与 codex 同风格：
++ * `{ "mcpServers": { "<name>": { command, args?, env? } } }`；per-server env
++ * （MCP_SESSION_ID 等）经条目 env 字段透传（conventions「env 必须进 mcpServers
++ * 条目 env 字段」）。
++ *
++ * 语义：daemon 独占管理本文件（区别于 auth/models/settings 三文件的先读后写
++ * 保留语义）——每次会话创建按 resolveMainAgentMcp 产出的配置表全量覆写，不合并
++ * 旧条目（旧 server 残留 = 幽灵工具面）；空表跳过不写（保持目录干净，pi 侧
++ * 视为无 MCP 配置）。写 IO 失败 throw（reject）——调用方（pi-rpc-driver start）
++ * 捕获降级 warn 不阻断 spawn（MCP 是增强能力）。
++ */
++export async function writePiMcpConfig(
++  piDir: string,
++  mcpServers: Record<string, PiMcpServerConfig>,
++): Promise<void> {
++  const names = Object.keys(mcpServers);
++  if (names.length === 0) return;
++  const payload = { mcpServers: mcpServers };
++  try {
++    await writeFileAtomic(join(piDir, 'mcp.json'), JSON.stringify(payload, null, 2) + '\n');
++  } catch (e) {
++    console.error('pi_mcp_config_write_failed', {
++      piDir,
++      servers: names,
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
++
+ export function isPiFormSufficient(provider: ProviderConfig): boolean {
+   return (
+     provider.api_format !== 'openai_chat' &&
+diff --git a/sillyhub-daemon/tests/codex-settings-mcp.test.ts b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+new file mode 100644
+index 000000000..fbc283689
+--- /dev/null
++++ b/sillyhub-daemon/tests/codex-settings-mcp.test.ts
+@@ -0,0 +1,85 @@
++import { mkdtempSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { describe, expect, it } from 'vitest';
++import { mergeCodexMcpToml, writeCodexMcpServers } from '../src/codex-settings.js';
++
++/** 2026-10-10-all-engines-mcp-injection task-06（D-006@v1 / D-011@v1 机制就绪分支）。 */
++
++const Q = '"';
++
++describe('codex-settings: mergeCodexMcpToml（task-06 [mcp_servers.*] 托管段）', () => {
++  it('托管段写入：command/args 数组/env 子表完整序列化', () => {
++    const out = mergeCodexMcpToml('', {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1' },
++      },
++    });
++    expect(out).toContain('[mcp_servers.sillyhub-file]');
++    expect(out).toContain(`command = ${Q}node${Q}`);
++    expect(out).toContain(`args = [${Q}mcp-server.js${Q}, ${Q}--toolset${Q}, ${Q}file${Q}]`);
++    expect(out).toContain('[mcp_servers.sillyhub-file.env]');
++    expect(out).toContain(`MCP_SESSION_ID = ${Q}sess-1${Q}`);
++  });
++
++  it('非托管行保留：既有 model 托管段与用户行原样不动', () => {
++    const existing = [
++      `model = ${Q}gpt-5${Q}`,
++      `model_provider = ${Q}sillyhub${Q}`,
++      '',
++      '[model_providers.sillyhub]',
++      `name = ${Q}SillyHub${Q}`,
++      '',
++      '# user comment',
++      '[projects."X/repo"]',
++      `trust_level = ${Q}trusted${Q}`,
++    ].join('\n');
++    const out = mergeCodexMcpToml(existing, { s: { command: 'x' } });
++    expect(out).toContain(`model = ${Q}gpt-5${Q}`);
++    expect(out).toContain('[model_providers.sillyhub]');
++    expect(out).toContain('# user comment');
++    expect(out).toContain('[projects."X/repo"]');
++    expect(out).toContain('[mcp_servers.s]');
++  });
++
++  it('幂等：merge 两次同配置结果一致（不重复不残留）', () => {
++    const cfg = { s: { command: 'x', env: { K: 'v' } } };
++    const once = mergeCodexMcpToml('', cfg);
++    const twice = mergeCodexMcpToml(once, cfg);
++    expect(twice).toBe(once);
++    expect(twice.split('[mcp_servers.s]').length - 1).toBe(1);
++  });
++
++  it('旧段重写：换配置后旧 server 不残留（幽灵 server 防护）', () => {
++    const withOld = mergeCodexMcpToml('', { old: { command: 'a' } });
++    const replaced = mergeCodexMcpToml(withOld, { fresh: { command: 'b' } });
++    expect(replaced).not.toContain('[mcp_servers.old]');
++    expect(replaced).toContain('[mcp_servers.fresh]');
++  });
++
++  it('空表：返回原文不动（跳过语义）', () => {
++    const existing = `model = ${Q}x${Q}\n`;
++    expect(mergeCodexMcpToml(existing, {})).toBe(existing);
++  });
++});
++
++describe('codex-settings: writeCodexMcpServers（task-06 写盘）', () => {
++  it('写盘落 CODEX_HOME/config.toml 且与既有内容合并', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {
++      s: { command: 'node', args: ['a.js'], env: { K: 'v' } },
++    });
++    const text = readFileSync(join(dir, 'config.toml'), 'utf-8');
++    expect(text).toContain('[mcp_servers.s]');
++    expect(text).toContain(`command = ${Q}node${Q}`);
++    expect(text).toContain(`K = ${Q}v${Q}`);
++  });
++
++  it('空表跳过：不写 config.toml', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'codex-mcp-'));
++    await writeCodexMcpServers(dir, {});
++    expect(() => readFileSync(join(dir, 'config.toml'), 'utf-8')).toThrow();
++  });
++});
+diff --git a/sillyhub-daemon/tests/mcp-config.test.ts b/sillyhub-daemon/tests/mcp-config.test.ts
+index ac4b26237..2952ed101 100644
+--- a/sillyhub-daemon/tests/mcp-config.test.ts
++++ b/sillyhub-daemon/tests/mcp-config.test.ts
+@@ -107,6 +107,7 @@ describe('mcp-config: loadPlatformMcpConfig', () => {
+ 
+ // task-07: backend 拉 + 回落
+ import { fetchPlatformMcpConfig, loadPlatformMcpConfigFromBackend } from '../src/mcp-config.js';
++import { PROVIDER_CAPS, isMainAgentMcpCandidate } from '../src/interactive/providers.js';
+ 
+ describe('mcp-config: fetchPlatformMcpConfig（task-07 backend 拉）', () => {
+   it('200 + platform_default → 返回 mcpServers', async () => {
+@@ -662,3 +663,46 @@ describe('mcp-config: fetchMcpBundle user_id 查询参数（task-06 / D-008@v2
+     spy.mockRestore();
+   });
+ });
++
++// ── 2026-10-10-all-engines-mcp-injection task-04（D-001@v1）：主控 MCP 注入谓词能力化 ──
++// 谓词行为跟随 PROVIDER_CAPS 的 mcp 键（数据驱动）：caps.mcp=true 引擎 × stage 缺省/orchestrator 注入，
++// mission_worker 不进主控；caps.mcp=false 引擎与未知 provider 一律 false（默认拒绝不抛错，Grill B-3）。
++// 翻值（task-08）后本矩阵自动跟随 caps 表，无需改测试。
++describe('mcp-config: isMainAgentMcpCandidate 谓词能力化（task-04 D-001@v1）', () => {
++  const engines = Object.keys(PROVIDER_CAPS);
++
++  it('未知 provider 默认拒绝且不抛错（禁直下标语义）', () => {
++    expect(() => isMainAgentMcpCandidate({ provider: 'no-such-engine' })).not.toThrow();
++    expect(isMainAgentMcpCandidate({ provider: 'no-such-engine' })).toBe(false);
++  });
++
++  it('caps.mcp=true 引擎：stage 缺省与 orchestrator 注入', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: undefined })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: null })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: '' })).toBe(true);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(true);
++    }
++  });
++
++  it('caps.mcp=true 引擎：mission_worker 与其它非空 stage 不进主控', () => {
++    for (const e of engines.filter((k) => PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'unknown_stage' })).toBe(false);
++    }
++  });
++
++  it('caps.mcp=false 引擎：任意 stage 均不注入（现状行为保持）', () => {
++    for (const e of engines.filter((k) => !PROVIDER_CAPS[k].mcp)) {
++      expect(isMainAgentMcpCandidate({ provider: e })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'orchestrator' })).toBe(false);
++      expect(isMainAgentMcpCandidate({ provider: e, stage: 'mission_worker' })).toBe(false);
++    }
++  });
++
++  it('claude 引擎恒在注入集（回归锚：claude 链路零变化）', () => {
++    expect(PROVIDER_CAPS.claude.mcp).toBe(true);
++    expect(isMainAgentMcpCandidate({ provider: 'claude' })).toBe(true);
++  });
++});
+diff --git a/sillyhub-daemon/tests/pi-settings-mcp.test.ts b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+new file mode 100644
+index 000000000..5504f3182
+--- /dev/null
++++ b/sillyhub-daemon/tests/pi-settings-mcp.test.ts
+@@ -0,0 +1,105 @@
++import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { afterEach, describe, expect, it, vi } from 'vitest';
++import { writePiMcpConfig } from '../src/pi-settings.js';
++import { detectPiMajorVersion, parsePiMajorVersion } from '../src/interactive/pi-rpc-driver.js';
++
++// detectPiMajorVersion 经 ESM import 绑定 node:child_process 的 spawn——
++// vi.stubGlobal 不生效，必须模块级 vi.mock（版本探测行为单测的 mock 面）。
++vi.mock('node:child_process', () => ({
++  spawn: vi.fn(),
++}));
++
++/** 2026-10-10-all-engines-mcp-injection task-05：pi 通道 MCP 写盘与版本门控单测。 */
++describe('pi-settings: writePiMcpConfig（task-05 D-005@v1 形态①）', () => {
++  let dir: string;
++
++  it('配置落盘隔离：只写指定 per-session 目录的 mcp.json', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-daemon': { command: 'node', args: ['mcp-server.js'] },
++    });
++    const file = join(dir, 'mcp.json');
++    expect(existsSync(file)).toBe(true);
++    const parsed = JSON.parse(readFileSync(file, 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-daemon']).toEqual({
++      command: 'node',
++      args: ['mcp-server.js'],
++    });
++  });
++
++  it('env 透传：条目 env 字段（MCP_SESSION_ID）原样落盘', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {
++      'sillyhub-file': {
++        command: 'node',
++        args: ['mcp-server.js', '--toolset', 'file'],
++        env: { MCP_SESSION_ID: 'sess-1', MCP_SERVER_DAEMON_API_KEY: 'k1' },
++      },
++    });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers['sillyhub-file'].env).toEqual({
++      MCP_SESSION_ID: 'sess-1',
++      MCP_SERVER_DAEMON_API_KEY: 'k1',
++    });
++  });
++
++  it('空表跳过：不写文件（保持目录干净，pi 视为无 MCP 配置）', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, {});
++    expect(existsSync(join(dir, 'mcp.json'))).toBe(false);
++  });
++
++  it('覆写语义：二次写替换旧条目，不残留幽灵 server', async () => {
++    dir = mkdtempSync(join(tmpdir(), 'pi-mcp-'));
++    await writePiMcpConfig(dir, { old: { command: 'a' } });
++    await writePiMcpConfig(dir, { fresh: { command: 'b' } });
++    const parsed = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf-8'));
++    expect(parsed.mcpServers.old).toBeUndefined();
++    expect(parsed.mcpServers.fresh).toEqual({ command: 'b' });
++  });
++});
++
++describe('pi-rpc-driver: pi 版本门控（task-05 FR-06 两层门控的运行时层）', () => {
++  afterEach(async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReset();
++  });
++
++  it('parsePiMajorVersion：1.x 支持 / 0.x 不支持 / 乱串与空串返回 -1', () => {
++    expect(parsePiMajorVersion('1.1.0')).toBe(1);
++    expect(parsePiMajorVersion('1.0.0')).toBe(1);
++    expect(parsePiMajorVersion('0.81.1')).toBe(0);
++    expect(parsePiMajorVersion('pi version weird')).toBe(-1);
++    expect(parsePiMajorVersion('')).toBe(-1);
++  });
++
++  it('detectPiMajorVersion：正常输出解析为主版本号', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: (_e: string, cb: (d: unknown) => void) => cb('1.1.0') },
++        on: (ev: string, cb: () => void) => {
++          if (ev === 'close') setTimeout(cb, 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(1);
++  });
++
++  it('detectPiMajorVersion：spawn 报错返回 -1（降级不抛）', async () => {
++    const { spawn } = await import('node:child_process');
++    vi.mocked(spawn).mockReturnValue(
++      {
++        stdout: { on: () => undefined },
++        on: (ev: string, cb: (e?: unknown) => void) => {
++          if (ev === 'error') setTimeout(() => cb(new Error('boom')), 0);
++        },
++        kill: () => undefined,
++      } as never,
++    );
++    await expect(detectPiMajorVersion('pi', false, {})).resolves.toBe(-1);
++  });
++});
+diff --git a/.sillyspec/changes/2026-10-11-retire-components-page/design.md b/.sillyspec/changes/2026-10-11-retire-components-page/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-retire-components-page/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:59:27.322Z
++---
++# 设计记录（Design Record）— 2026-10-11-retire-components-page
++
++## 做法概述
++
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-retire-components-page 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++纯前端下线：删除 /components 与 /components/topology 两个页面目录、侧边栏「项目组组件/拓扑图」
++两个菜单项、工作区 tabs 组件入口、统计卡组件格、config-card 的「生成项目组件」按钮（判据
++componentCount 已无数据源——扫描确认门与同步按钮显隐改用 specWs.last_synced_at 同口径）、
++lib/components.ts 与 spec-workspaces.ts 的 generateProjects 封装、
++use-page-session-context 的 components 分支。后端 components/generate-projects 端点原样保留
++（零 API 破坏），信息面由关联仓卡片「本机现状回显」（2026-10-10-linked-repos-local-echo）
++承接——它读的就是真实现状而非这份长期为空的派生物。
++
++## 接口契约
++
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-retire-components-page 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++不适用：后端零改动——components/generate-projects 端点、openapi.json、api-types.ts 全部
++不动。前端侧删除的均为页面层/菜单层/lib 封装，无对外签名。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-retire-components-page 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++1. 乱序/迟到到达：不适用——纯静态页面下线，无事件流；已打开的旧页面标签在部署后刷新即 404，属预期。
++2. 并发写：不适用——无共享数据写面。
++3. 切换/生命周期：会话 pageContext 的 workspace_components/workspace_topology tabKey 分支
++   一并删除，路径回落 workspace_overview（use-page-session-context 兜底）。
++4. 作用域：全局菜单（menu-permissions）与工作区 tabs 两处入口同步删除，无跨工作区差异；
++   权限枚举镜像 topology:read 保留（后端仍枚举），仅组内引用消失。
++
++## 风险与死路
++
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-retire-components-page 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++最大风险：有外部脚本/书签直连 /components 路径——下线后 404。接受理由：该页 13/15 工作区
++本就空数据，无可书签价值；信息已在关联仓回显。放弃的方案：①加「从模块索引生成」按钮复活
++组件页（选项 B）——为空页续命而非解决问题；②后端端点一并删——破坏 openapi 面且无收益
++（无人调用的 GET 无害）。
+
+diff --git a/.sillyspec/changes/2026-10-11-retire-components-page/proposal.md b/.sillyspec/changes/2026-10-11-retire-components-page/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-retire-components-page/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:59:27.322Z
++---
++# 提案书（Proposal）— 2026-10-11-retire-components-page
++
++## 动机
++
++任务原话转写：项目组件页自 2026-07 组件只读化后生成入口缺失（扫描不产 projects yaml、daemon 同步排除该目录），生产 15 工作区 13 个为空页；其信息已被关联仓卡片「本机现状回显」覆盖（读同一 projects 登记面且是真实现状）。选项 A 裁决：下线该页面入口，避免空页与双入口困惑。
++成功标准：
++- 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
++- 后端零改动（components 端点保留，openapi/api-types 零变化，不破坏任何既有调用方）
++- 前端对已删页面的引用（导航/链接/测试/类型引用）全部清理，无死链
++- 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
++2. 后端零改动（components 端点保留，openapi/api-types 零变化，不破坏任何既有调用方）
++3. 前端对已删页面的引用（导航/链接/测试/类型引用）全部清理，无死链
++4. 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
++
++## 成功标准（可验证）
++
++1. 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
++2. 后端零改动（components 端点保留，openapi/api-types 零变化，不破坏任何既有调用方）
++3. 前端对已删页面的引用（导航/链接/测试/类型引用）全部清理，无死链
++4. 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
+
+diff --git a/.sillyspec/changes/2026-10-11-retire-components-page/requirements.md b/.sillyspec/changes/2026-10-11-retire-components-page/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-retire-components-page/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:59:27.322Z
++---
++# 需求规格（Requirements）— 2026-10-11-retire-components-page
++
++## 功能需求
++
++### FR-01: 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
++
++- 前端**必须**移除「项目组组件/拓扑图」侧边栏菜单项、工作区 tabs 的组件入口、/components 与 /components/topology 两个页面路由及统计卡「项目组组件」格；桌面与移动端**禁止**残留任何指向已删页面的入口。
++
++#### 场景：主路径
++
++- Given 已部署本变更的前端
++- When 打开任意工作区详情（桌面或移动端）
++- Then 侧边栏/tabs/统计卡均无「项目组组件」「拓扑图」入口，直接访问 /workspaces/{id}/components 返回 404- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- 本变更 diff **必须**仅触 frontend/src；backend 代码、openapi.json、api-types.ts **禁止**有任何变化（components/generate-projects 端点保留不删）。
++
++#### 场景：主路径
++
++- Given 本变更提交
++- When 审查 diff 文件清单
++- Then 全部路径以前端 src/ 前缀，生成物零 diff- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- 前端**必须**清理对已删页面的全部引用（导航/链接/lib 封装/hook 分支/测试用例），`tsc --noEmit` 与 `pnpm lint` **必须**零错误（悬空引用即编译失败）。
++
++#### 场景：主路径
++
++- Given 引用清理完成后
++- When 跑 pnpm typecheck 与 pnpm lint
++- Then 两者零错误零警告新增- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- 验证**必须**仅跑本变更触达的测试文件（六文件 117 用例）+ typecheck + lint；**禁止**跑全量测试套件（留给 CI）。
++
++#### 场景：主路径
++
++- Given 代码清理完成
++- When 跑受影响六测试文件
++- Then 117/117 全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 长度 === 36」+ src/app/(dashboard)/workspaces/[id]/page.test.tsx「统计三数字按 mock 数据渲染」（queryByText 项目组组件 not.toBeInTheDocument）
++FR-02: 不适用：后端零改动（成功标准即约束本身——本变更 diff 仅 frontend/src）
++FR-03: src/components/__tests__/app-shell.test.tsx「/workspaces：仅工作区首页高亮」等既有高亮回归 + tsc --noEmit 零死引用（typecheck 过=无悬空 import/类型）
++FR-04: 本次实跑触达五测试文件（menu-permissions/page/app-shell/workspace-config-card/use-page-session-context）+ menu-overrides 回归共 117 用例全绿；pnpm exec tsc --noEmit 与 pnpm lint 双零错（实跑于 2026-10-11 会话）
+
+diff --git a/.sillyspec/changes/2026-10-11-retire-components-page/review.json.superseded-20261011T044450 b/.sillyspec/changes/2026-10-11-retire-components-page/review.json.superseded-20261011T044450
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-retire-components-page/review.json.superseded-20261011T044450
+@@ -0,0 +1,46 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-retire-components-page",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "5d02552ca93e1dbb91787d376001b41b60820717",
++  "findings": [
++    {
++      "severity": "P1",
++      "title": "change.patch 冻结件混入并行变更 diff（baseAnchor=437996ec 基线漂移）",
++      "evidence": "代码事实合规（8a928588f 纯 frontend/src 16 文件）+ acceptedDirtyGap=8 留痕 + 根因档案 docs/sillyspec/finished/verify-reconcile-base-stale-parallel-drift.md——复审裁决留痕接受（重出 patch 需伪造基线反破坏审计链）",
++      "location": ".sillyspec/changes/2026-10-11-retire-components-page/change.patch:1"
++    },
++    {
++      "severity": "P3",
++      "title": "死导出 getWorkspaceComponents/getTopology/TopologyResponse（已修 bc0cac931）",
++      "evidence": "复审 grep 零命中 + 实跑 tsc 退出 0",
++      "location": "frontend/src/lib/workspaces.ts:274"
++    },
++    {
++      "severity": "P3",
++      "title": "MENU_ICON_MAP 两死键（已修 bc0cac931）",
++      "evidence": "现态无 components/components-topology 键与 Boxes/Network import",
++      "location": "frontend/src/components/app-shell.tsx:78"
++    },
++    {
++      "severity": "P3",
++      "title": "测试绑定数字措辞（已修）",
++      "evidence": "绑定区改为五触达文件+menu-overrides 回归共 117 用例",
++      "location": "requirements.md:54"
++    },
++    {
++      "severity": "P3",
++      "title": "判据 componentCount→last_synced_at 边界差异（维持接受）",
++      "evidence": "罕见场景防护减弱、保守方向、无数据正确性风险",
++      "location": "workspace-config-card.tsx:388"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewerNotes": "两轮评审：初审 FAIL（P1 patch 基线污染+4×P3）→ 整改（P3 代码修复 bc0cac931+绑定措辞+41 行旧字样清理）→ 复审 PASS（reviewedAgainst=bc0cac931 父链，P1 留痕接受三证齐备）。"
++}
+
+diff --git a/.sillyspec/changes/2026-10-11-retire-components-page/tasks.md b/.sillyspec/changes/2026-10-11-retire-components-page/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-retire-components-page/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:59:27.322Z
++---
++# 任务注册表（Tasks）— 2026-10-11-retire-components-page
++
++- [x] task-01: 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
++- [x] task-02: 后端零改动（components 端点保留，openapi/api-types 零变化，不破坏任何既有调用方）
++- [x] task-03: 前端对已删页面的引用（导航/链接/测试/类型引用）全部清理，无死链
++- [x] task-04: 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI

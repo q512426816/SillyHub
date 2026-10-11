@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-retire-components-page",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "5d02552ca93e1dbb91787d376001b41b60820717",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "change.patch 冻结件混入并行变更 diff（baseAnchor=437996ec 基线漂移）",
+      "evidence": "代码事实合规（8a928588f 纯 frontend/src 16 文件）+ acceptedDirtyGap=8 留痕 + 根因档案 docs/sillyspec/finished/verify-reconcile-base-stale-parallel-drift.md——复审裁决留痕接受（重出 patch 需伪造基线反破坏审计链）",
+      "location": ".sillyspec/changes/2026-10-11-retire-components-page/change.patch:1"
+    },
+    {
+      "severity": "P3",
+      "title": "死导出 getWorkspaceComponents/getTopology/TopologyResponse（已修 bc0cac931）",
+      "evidence": "复审 grep 零命中 + 实跑 tsc 退出 0",
+      "location": "frontend/src/lib/workspaces.ts:274"
+    },
+    {
+      "severity": "P3",
+      "title": "MENU_ICON_MAP 两死键（已修 bc0cac931）",
+      "evidence": "现态无 components/components-topology 键与 Boxes/Network import",
+      "location": "frontend/src/components/app-shell.tsx:78"
+    },
+    {
+      "severity": "P3",
+      "title": "测试绑定数字措辞（已修）",
+      "evidence": "绑定区改为五触达文件+menu-overrides 回归共 117 用例",
+      "location": "requirements.md:54"
+    },
+    {
+      "severity": "P3",
+      "title": "判据 componentCount→last_synced_at 边界差异（维持接受）",
+      "evidence": "罕见场景防护减弱、保守方向、无数据正确性风险",
+      "location": "workspace-config-card.tsx:388"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewerNotes": "两轮评审：初审 FAIL（P1 patch 基线污染+4×P3）→ 整改（P3 代码修复 bc0cac931+绑定措辞+41 行旧字样清理）→ 复审 PASS（reviewedAgainst=bc0cac931 父链，P1 留痕接受三证齐备）。"
+}

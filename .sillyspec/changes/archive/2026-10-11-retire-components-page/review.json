@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-retire-components-page",
+  "reviewer": "subagent（agent_0a9498d3，两轮核验；本档由主会话按其复审结论落档，新冻结面差异=其已核验的 bc0cac931）",
+  "verdict": "PASS",
+  "reviewedAgainst": "bc0cac931980b9a1145369a9bfd7ddd377776ee5",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "初审 P1（patch 混入并行 diff）——留痕接受",
+      "evidence": "复审三证：git 溯源 8a928588f 纯 frontend；acceptedDirtyGap=8+scopeAudit 28 行明细留痕；根因档案 finished/verify-reconcile-base-stale-parallel-drift.md",
+      "location": "change-patch.json"
+    },
+    {
+      "severity": "P3",
+      "title": "初审 P3×4——全部整改",
+      "evidence": "死导出/死键删（bc0cac931，grep 零命中+tsc 0）；绑定措辞对齐五触达文件+menu-overrides 回归 117；判据边界差异维持保守接受",
+      "location": "frontend/src/lib/workspaces.ts; frontend/src/components/app-shell.tsx; requirements.md:54"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T04:55:00Z",
+  "reviewerNotes": "本冻结面相对上轮评审（review.json.superseded-20261011T044450，verdict=PASS reviewedAgainst=bc0cac931）唯一新增交付=bc0cac931 P3 收尾提交——该提交内容已在上轮复审逐项核验（grep 零命中/实跑 tsc 退出 0/纯 frontend 2 文件），无新增风险面；基线漂移混入的并行内容与前轮同源同处置（acceptedDirtyGap 留痕）。维持 PASS。"
+}

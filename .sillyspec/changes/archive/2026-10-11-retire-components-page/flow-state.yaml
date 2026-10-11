@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  项目组件页自 2026-07 组件只读化后生成入口缺失（扫描不产 projects yaml、daemon 同步排除该目录），生产 15 工作区 13 个为空页；其信息已被关联仓卡片「本机现状回显」覆盖（读同一 projects
+  登记面且是真实现状）。选项 A 裁决：下线该页面入口，避免空页与双入口困惑。
+
+  成功标准：
+
+  - 工作区详情不再出现「项目组件」入口与页面（桌面 + 移动端子页均移除）
+
+  - 后端零改动（components 端点保留，openapi/api-types 零变化，不破坏任何既有调用方）
+
+  - 前端对已删页面的引用（导航/链接/测试/类型引用）全部清理，无死链
+
+  - 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
+autopilot: false
+baseline_commit: 437996ec474e37d8b58b620272087abedd27a708
+updatedAt: '2026-10-11T04:46:30.219Z'
+baseline_sha256: df3d3aac4d75d135c0538a08a81506669d3d5c9be932b1fcc3d487324644a940
+spec_approved: true
+spec_approved_at: '2026-10-11T04:34:09.080Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+autopilot_ticked: 4
+gate_summary: >-
+  test: passed ← module[]+deps(py3+jsx10)+fr(7)（33.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011043503\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011043503\test-result.json｜门文件
+  27 个
+

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-retire-components-page",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-retire-components-page:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 长度 === 36」",
+        "page.test.tsx「统计三数字按 mock 数据渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-retire-components-page"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-retire-components-page:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/app-shell.test.tsx「/workspaces：仅工作区首页高亮」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-retire-components-page"
+    }
+  ]
+}
