@@ -140,6 +140,10 @@ export async function pullSpecBundle(
   // resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被调用方 catch。
   const specDir = resolveSpecDir(wsId);
   const strategy = opts.strategy || 'platform-managed';
+  // 2026-10-11-junction-fallback-backup-sweep：清扫前置到策略分支之前——既有
+  // 调用点（pull 主路径中段）在 repo-native junction 成功早返回路径上不可达，
+  // 备份/残留只在走 pull 时才被清。幂等 best-effort，与中段调用重复无害。
+  await sweepStalePullScraps(dirname(specDir), basename(specDir));
 
   // ── repo-native（D-005）：建 junction 让缓存指向源项目 .sillyspec，跳过 pull 覆盖 ──
   // scan 直接写源项目（实时双向）。R-01：repo-native 不走 rm/不覆盖，避免顺链删源项目。
@@ -325,9 +329,15 @@ async function renameWithRetry(from: string, to: string, attempts = 3): Promise<
  * ql-20260904-016：清理本 workspace 上一次崩溃 pull 留下的 tmp/trash 残留
  * （`${wsId}.tmp-*` / `${wsId}.trash-*` 同级兄弟目录）。仅清 mtime 距今超 10 分钟的
  * ——进行中的并发 pull（tmp 名含 pid+ts，必然新鲜）不受影响。best-effort，失败静默。
+ *
+ * 2026-10-11-junction-fallback-backup-sweep（P3-1）：增配 `${wsId}.pre-junction-backup-*`
+ * （261dc22e9 备份交换产物，此前全仓无删除路径、磁盘无界增长）——保留期 7 天
+ * （区别于 in-flight tmp/trash 的 10 分钟：备份是旧缓存的完整数据快照，留人工
+ * 检查/取回窗口；repo-native 场景真数据在源项目，超期备份按废弃缓存清理）。
  */
 async function sweepStalePullScraps(parent: string, base: string): Promise<void> {
   const STALE_SCRAP_AGE_MS = 10 * 60 * 1000;
+  const STALE_BACKUP_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   let entries: string[];
   try {
     entries = await readdir(parent);
@@ -337,12 +347,20 @@ async function sweepStalePullScraps(parent: string, base: string): Promise<void>
   const now = Date.now();
   await Promise.all(
     entries
-      .filter((n) => n.startsWith(`${base}.tmp-`) || n.startsWith(`${base}.trash-`))
+      .filter(
+        (n) =>
+          n.startsWith(`${base}.tmp-`) ||
+          n.startsWith(`${base}.trash-`) ||
+          n.startsWith(`${base}.pre-junction-backup-`),
+      )
       .map(async (n) => {
         const p = join(parent, n);
+        const ageMs = n.startsWith(`${base}.pre-junction-backup-`)
+          ? STALE_BACKUP_AGE_MS
+          : STALE_SCRAP_AGE_MS;
         try {
           const st = await lstat(p);
-          if (now - st.mtimeMs > STALE_SCRAP_AGE_MS) {
+          if (now - st.mtimeMs > ageMs) {
             await rm(p, { recursive: true, force: true });
             console.warn('spec_sync: stale_scrap_swept', p);
           }
@@ -534,13 +552,26 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
       return false;
     }
   }
-  await mkdir(dirname(specDir), { recursive: true });
-  // Win 用 junction（目录联接，fs.symlink type='junction' 无需提权）；
-  // Linux·macOS 用普通 symlink。target 须绝对路径（rootPath/.sillyspec 是绝对路径）。
-  if (process.platform === 'win32') {
-    await symlink(target, specDir, 'junction');
-  } else {
-    await symlink(target, specDir);
+  // 2026-10-11-junction-fallback-backup-sweep（24h 审查 P2-1）：半交换收口——
+  // 上方 rename(specDir→backup) 成功后，此处的 mkdir/symlink 裸抛异常会飞出
+  // 本函数、绕过 pullSpecBundle 的降级 pull（其只覆盖 return false 路径），
+  // Windows symlink EPERM/EBUSY 等失败时该次 pull 整体失败且持久失败永不降级。
+  // 收进 try/catch：失败 warn + return false → 走既有降级 pull（旧数据已在
+  // backup 不丢；下次 pull 重试 junction 可自愈）。注：repo-native 分支的
+  // mkdir(sourceSillyspec) 保持 fail-loud 不降级——降级会重开 261dc22e9 收口的
+  // 平台标记投毒面（显式边界，见 change design）。
+  try {
+    await mkdir(dirname(specDir), { recursive: true });
+    // Win 用 junction（目录联接，fs.symlink type='junction' 无需提权）；
+    // Linux·macOS 用普通 symlink。target 须绝对路径（rootPath/.sillyspec 是绝对路径）。
+    if (process.platform === 'win32') {
+      await symlink(target, specDir, 'junction');
+    } else {
+      await symlink(target, specDir);
+    }
+  } catch (e) {
+    console.warn('spec_sync: junction_create_failed_fallback', specDir, '->', target, e);
+    return false;
   }
   return true;
 }

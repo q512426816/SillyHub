@@ -40,7 +40,24 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
   return { ...actual, writeLocalYaml: localYamlWriterMock };
 });
 
-import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir } from 'node:fs/promises';
+// 2026-10-11-junction-fallback-backup-sweep：fs/promises 透传式 mock——默认逐字
+// 透传（既有用例零影响），半交换降级用例内联注入 symlink/mkdir 失败（按
+// specDir 精确路径匹配，不伤其它 fs 调用）。fsReal 持有真实实现供条件分支回 delegates 委托。
+const { fsSymlinkMock, fsMkdirMock, fsReal } = vi.hoisted(() => ({
+  fsSymlinkMock: vi.fn(),
+  fsMkdirMock: vi.fn(),
+  fsReal: { symlink: null as null | typeof import('node:fs/promises').symlink, mkdir: null as null | typeof import('node:fs/promises').mkdir },
+}));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  fsReal.symlink = actual.symlink;
+  fsReal.mkdir = actual.mkdir;
+  fsSymlinkMock.mockImplementation((...args: Parameters<typeof actual.symlink>) => actual.symlink(...args));
+  fsMkdirMock.mockImplementation((...args: Parameters<typeof actual.mkdir>) => actual.mkdir(...args));
+  return { ...actual, symlink: fsSymlinkMock, mkdir: fsMkdirMock };
+});
+
+import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir, utimes } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -108,6 +125,8 @@ const TEST_WS_IDS = [
   'ws-init-native', 'ws-init-mirror', 'ws-init-pm-state', 'ws-init-bump-recreate', 'ws-init-batch-native',
   // 2026-10-10-repo-native-no-platform-markers：源缺失不降级 / 残留备份交换两用例
   'ws-init-native-nosource', 'ws-init-native-stale',
+  // 2026-10-11-junction-fallback-backup-sweep：半交换降级两用例 + 备份清扫用例
+  'ws-init-halfswap-link', 'ws-init-halfswap-mkdir', 'ws-init-sweep-bak',
 ];
 afterAll(async () => {
   await Promise.all(
@@ -1158,6 +1177,175 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
       expect(localYamlWriterMock).toHaveBeenCalled();
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+});
+
+// ── junction 半交换收口 + 备份清扫（2026-10-11-junction-fallback-backup-sweep）──
+//
+// 24h 审查 P2-1/P3-1：261dc22e9 的备份交换在 rename(specDir→backup) 成功后
+// mkdir/symlink 裸抛异常飞出 ensureSpecJunction，绕过 pullSpecBundle 的降级
+// pull（只覆盖 return false 路径）；.pre-junction-backup-* 全仓无清理。
+// 修复：post-rename 两调用收进 try/catch（失败 return false 降级）；
+// sweepStalePullScraps 增备份前缀（7 天保留期）+ pullSpecBundle 顶部清扫
+//（repo-native junction 成功早返回路径不可达既有 :225 调用点）。
+
+describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-backup-sweep)', () => {
+  let tmpProject: string;
+
+  beforeEach(async () => {
+    tmpProject = await mkdtemp(join(tmpdir(), 'init-junction-fallback-'));
+  });
+  afterEach(async () => {
+    await rm(tmpProject, { recursive: true, force: true }).catch(() => {});
+  });
+
+  /** 普通目录残留缓存 + 源项目 .sillyspec 就绪（repo-native 半交换前置态）。 */
+  async function seedResidueAndSource(wsId: string): Promise<string> {
+    const cacheRoot = resolveSpecDir(wsId);
+    await mkdir(join(cacheRoot, 'legacy'), { recursive: true });
+    await writeFile(join(cacheRoot, 'legacy', 'old.md'), '# old');
+    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
+    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
+    return cacheRoot;
+  }
+
+  /** 清掉本 wsId 在真实缓存根的全部兄弟目录（cache + tmp/trash/backup 残留）。 */
+  async function cleanupWsScraps(wsId: string): Promise<void> {
+    const parent = dirname(resolveSpecDir(wsId));
+    for (const n of await readdir(parent).catch(() => [] as string[])) {
+      if (n === wsId || n.startsWith(`${wsId}.`)) {
+        await rm(join(parent, n), { recursive: true, force: true }).catch(() => {});
+      }
+    }
+  }
+
+  it('半交换 symlink 失败（EPERM 注入）→ 降级 pull：数据留 backup + 双 warn + ok=true', async () => {
+    const wsId = 'ws-init-halfswap-link';
+    const cacheRoot = await seedResidueAndSource(wsId);
+    const getSpecBundle = vi.fn().mockResolvedValue(Buffer.alloc(0));
+    const client = makeClient({ getSpecBundle });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // 仅对指向本 wsId specDir 的 symlink 注入 EPERM，其余透传。
+    const originalSymlink = fsSymlinkMock.getMockImplementation()!;
+    fsSymlinkMock.mockImplementation(async (...args: Parameters<typeof import('node:fs/promises')['symlink']>) => {
+      if (String(args[1]).includes(wsId)) {
+        throw Object.assign(new Error('injected EPERM'), { code: 'EPERM' });
+      }
+      return fsReal.symlink!(...args);
+    });
+    try {
+      const result = await handleInitLease(client as never, {
+        workspaceId: wsId,
+        rootPath: tmpProject,
+        serverOrigin: 'http://127.0.0.1:8000',
+        strategy: 'repo-native',
+        spawnFn: makeInitSpawn(),
+        latestSpecVersion: 1,
+      });
+
+      // 降级 pull 生效：init 成功 + 走了 bundle 拉取 + specDir 重建为普通目录。
+      expect(result.ok).toBe(true);
+      expect(getSpecBundle).toHaveBeenCalled();
+      expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(false);
+      // 双 warn 可达：半交换收口 warn + 既有降级分支 warn。
+      const warnText = warnSpy.mock.calls.map((c) => String(c?.[0])).join('\n');
+      expect(warnText).toContain('junction_create_failed_fallback');
+      expect(warnText).toContain('repo_native_junction_blocked_fallback');
+      // 旧数据完整保留在 backup（rename 备份非删除）。
+      const parent = dirname(cacheRoot);
+      const backups = (await readdir(parent)).filter((n) =>
+        n.startsWith(`${wsId}.pre-junction-backup-`),
+      );
+      expect(backups.length).toBe(1);
+      expect(await readFile(join(parent, backups[0], 'legacy', 'old.md'), 'utf-8')).toBe('# old');
+    } finally {
+      warnSpy.mockRestore();
+      fsSymlinkMock.mockImplementation(originalSymlink);
+      await cleanupWsScraps(wsId);
+    }
+  });
+
+  it('半交换 mkdir(dirname(specDir)) 失败 → 同一 catch 收口降级（无裸异常飞出）', async () => {
+    const wsId = 'ws-init-halfswap-mkdir';
+    const cacheRoot = await seedResidueAndSource(wsId);
+    const getSpecBundle = vi.fn().mockResolvedValue(Buffer.alloc(0));
+    const client = makeClient({ getSpecBundle });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // 仅对 specDir 父目录的 mkdir 注入失败（ensureSpecJunction 半交换后重建调用），
+    // 其余 mkdir 透传（源项目 .sillyspec 创建等不受影响）。
+    const parentDir = dirname(cacheRoot);
+    const originalMkdir = fsMkdirMock.getMockImplementation()!;
+    fsMkdirMock.mockImplementation(async (...args: Parameters<typeof import('node:fs/promises')['mkdir']>) => {
+      if (String(args[0]) === parentDir) {
+        throw Object.assign(new Error('injected EACCES'), { code: 'EACCES' });
+      }
+      return fsReal.mkdir!(...args);
+    });
+    try {
+      const result = await handleInitLease(client as never, {
+        workspaceId: wsId,
+        rootPath: tmpProject,
+        serverOrigin: 'http://127.0.0.1:8000',
+        strategy: 'repo-native',
+        spawnFn: makeInitSpawn(),
+        latestSpecVersion: 1,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(getSpecBundle).toHaveBeenCalled();
+      const warnText = warnSpy.mock.calls.map((c) => String(c?.[0])).join('\n');
+      expect(warnText).toContain('junction_create_failed_fallback');
+      expect(warnText).toContain('repo_native_junction_blocked_fallback');
+    } finally {
+      warnSpy.mockRestore();
+      fsMkdirMock.mockImplementation(originalMkdir);
+      await cleanupWsScraps(wsId);
+    }
+  });
+
+  it('repo-native 成功路径清扫过期备份（8 天清/10 分钟留）；tmp/trash 10 分钟语义零回归', async () => {
+    const wsId = 'ws-init-sweep-bak';
+    await seedResidueAndSource(wsId); // 普通残留 → 本次运行会产生新备份（新鲜）
+    const parent = dirname(resolveSpecDir(wsId));
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const MIN = 60 * 1000;
+    const mkScratch = async (name: string, ageMs: number) => {
+      const p = join(parent, name);
+      await mkdir(p, { recursive: true });
+      await writeFile(join(p, 'x.md'), 'x');
+      await utimes(p, new Date(now - ageMs), new Date(now - ageMs));
+    };
+    await mkScratch(`${wsId}.pre-junction-backup-${now - 8 * DAY}`, 8 * DAY); // 过期备份
+    const freshBackupName = `${wsId}.pre-junction-backup-${now - 5 * MIN}`;
+    await mkScratch(freshBackupName, 5 * MIN); // 保留期内备份
+    await mkScratch(`${wsId}.tmp-111-${now - 11 * MIN}`, 11 * MIN); // 过期 tmp
+    await mkScratch(`${wsId}.tmp-222-${now - 5 * MIN}`, 5 * MIN); // in-flight tmp
+    const client = makeClient(); // junction 成功 → getSpecBundle 不应被调
+
+    try {
+      const result = await handleInitLease(client as never, {
+        workspaceId: wsId,
+        rootPath: tmpProject,
+        serverOrigin: 'http://127.0.0.1:8000',
+        strategy: 'repo-native',
+        spawnFn: makeInitSpawn(),
+        latestSpecVersion: 1,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(client.getSpecBundle).not.toHaveBeenCalled();
+      const names = await readdir(parent);
+      // 过期备份被清（旧实现 repo-native 路径不清扫 → 残留，本用例红点）。
+      expect(names.some((n) => n.startsWith(`${wsId}.pre-junction-backup-`) && n.endsWith(`${now - 8 * DAY}`))).toBe(false);
+      // 保留期内备份不误删 + 本次运行新产生的备份（新鲜）在。
+      expect(names).toContain(freshBackupName);
+      // tmp/trash 既有 10 分钟语义零回归（repo-native 路径此前不扫，顶部清扫后照扫）。
+      expect(names.some((n) => n.startsWith(`${wsId}.tmp-111-`))).toBe(false);
+      expect(names.some((n) => n.startsWith(`${wsId}.tmp-222-`))).toBe(true);
+    } finally {
+      await cleanupWsScraps(wsId);
     }
   });
 });
