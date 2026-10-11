@@ -464,7 +464,7 @@ async def fetch_local_snapshot(
     except DaemonRpcRemoteError as exc:
         if exc.code == "method_not_found":
             return {"status": SNAPSHOT_STATUS_UNSUPPORTED, "entries": [], "platform_only_names": []}
-        raise  # offline/timeout 等走既有 504 家族上抛（router 层捕获转 daemon_offline）
+        raise  # offline/timeout 等走既有 504 家族上抛（router 层精确分派：offline→daemon_offline / timeout→daemon_timeout，2026-10-11-snapshot-timeout-distinct）
 
     # 平台登记面
     platform_rows = (
