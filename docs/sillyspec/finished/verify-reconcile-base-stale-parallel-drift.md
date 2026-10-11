@@ -34,3 +34,17 @@ diff-base 取**变更立项时**记录的主仓 HEAD，而非当前 merge-base�
   （undeclared 24 条中 21 条为并行演进；sources 字段两源）
 - `git -C <worktree> status --porcelain`（23 条全部本变更）
 - `git log --name-only a55a48248..8dd6e9f32` 含 turn-catalog/borrow/placement 命中
+
+## 处置记录（2026-10-11）
+
+**护栏①已修**（sillyspec 仓工作树，未提交）：`resolveMainChangedFiles` 的 worktree 侧
+diff 基点 merge-base 化——锚 `merge-base(<baseBranch|main/master>, HEAD)`，执行期合入
+main 后并行演进不再圈入本变更产出面。**三重不放大守卫**：mb == HEAD（in-place 形态、
+主分支即本变更线——收窄到 HEAD 会清空 diff 面，cross-repo 既有用例拦住的回归）或
+mb == 立项点（零变化）或 mb 非立项点后代（窗口放大）时一律保持旧锚，仅「严格收窄」
+形态才采用。护栏②③（undeclared 二次过滤折叠、剔除源扩已归档变更）未采纳实装——
+①收窄后两源本身已不含并行演进面，②③的额外机制收益归零，留档不修。
+
+测试：`test/verify-reconcile-merge-base.test.mjs` 3/3（merge 后收敛/未合零变化/退旧区间）
++ cross-repo-verify / reconcile-source-isolation / baseline-anchor 回归 16 例 +
+scope-audit 两套件 46 例全绿。归档。

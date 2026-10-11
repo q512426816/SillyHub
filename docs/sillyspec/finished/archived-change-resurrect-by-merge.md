@@ -34,3 +34,17 @@
 ## 复发判据
 本仓多机/多会话并行 + 频繁 merge 远端时，任何已归档变更的活跃路径旧文件都可能被带回。
 merge 后跑 `sillyspec next` 若出现「已归档过的变更名」即命中本坑。
+
+## 处置记录（2026-10-11）
+
+**工具侧双守卫已修**（sillyspec 仓工作树，未提交）：
+
+1. **run 注册守卫**（command.js）：`pm.initChange` 前检 `changes/archive/<同名>/` 存在
+   且库内无活跃行 → 拒绝注册 exit 2，指认幽灵复活 + 两出口指引（认归档 git rm 清幽灵 /
+   重开换新名）+ 递归 diff 核对提示；库内有活跃行（恢复归档场景）放行不误拦。
+2. **doctor 检测项**（doctor-diagnostics.js `detectArchiveIntegrity`）：活跃×归档同名
+   并存 → FAILED + `resurrected` 清单 + **勿用 --align-execute-progress 警示**（会给
+   幽灵补 execute 戳）；函数导出供测试。
+
+测试：`test/archived-resurrect-guard.test.mjs` 3/3（拒绝注册不建幽灵行 / 活跃行放行 /
+doctor 检测与干净仓零误报）。建议③（merge 后人工核对）属流程守则，坑内已记。归档。

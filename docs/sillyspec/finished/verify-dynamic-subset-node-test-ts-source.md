@@ -46,3 +46,14 @@ vitest（auto-jsx）。node --test 对 TS 源码是必然失败的错误运行�
 ## 复核条件
 
 sillyspec 发版修复动态子集推断后，删除 local.yaml 该锚定条目与本文件（移 finished/）。
+
+## 处置记录（2026-10-11）
+
+**已修**（sillyspec 仓 `e11f8205`，2026-10-10 同日落地的 `deps(auto-nontest-skip)` 拆批）：
+非测试形态文件（无 `.test.`/`_test`/`test_` 命名）不进任何单测执行批，单独成 skip 批点名
+留痕（含 FR 绑定脏数据的 tests --unbind 指引）。本日按坑现场形态功能复验：TS 源码
+`spec-sync.ts` → nontest-skip 批（skip 不跑）、真 node:test 文件照旧进 `deps(auto-js)` 批
+——伪败链不可达。
+
+**复核条件兑现**：本仓 local.yaml 两条坑锚定条目已删（`^not ok 1 - sillyhub-daemon…spec-
+sync`）；相关 vitest 套件本日全绿（tombstone 处置轮 20/20 实证族）。归档。
