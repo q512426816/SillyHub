@@ -2744,3 +2744,22 @@
   confirmed_at: null
   source_change: 2026-10-11-queue-wakeup-origin-guard
   status: active
+
+## FR-lib-api-132 LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
+变更：2026-10-11-snapshot-timeout-distinct
+状态：active
+摘要：主路径；主路径；主路径；主路径；主路径
+全文：.sillyspec/changes/archive/2026-10-11-snapshot-timeout-distinct/requirements.md#FR-01
+最近确认：d2c1b83a609869a3b817dc087520d1df691095bf
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-snapshot-timeout-distinct:flow:测试绑定FR-01
+  tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py「test_local_snapshot_http_timeout_distinct」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-snapshot-timeout-distinct
+  status: active

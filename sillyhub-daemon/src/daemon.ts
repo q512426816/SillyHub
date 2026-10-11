@@ -146,6 +146,11 @@ import { syncSkills, linkSkillsToWorkdir, syncWorkspaceGitSkills } from './skill
 // 2026-09-04-conflict-resolve-entry task-06：SILLYSPEC_COMMAND_TIMEOUT_MS——平台
 // 命令执行超时默认（config 键 sillyspec_command_timeout_sec 非法/<=0 时回退）。
 import { SillySpecManager, SILLYSPEC_COMMAND_TIMEOUT_MS } from './sillyspec-manager.js';
+// 2026-10-11-snapshot-timeout-distinct 修复补丁：关联仓两 handler 原为 await import() 懒加载——
+// ncc bundle 对动态 import 拆独立 asset 文件（如 700.index.js），而 daemon 分发自更新只复制
+// 主 bundle 文件，运行时 Cannot find module（生产实证 2026-10-11）。改静态 import 由 ncc 内联。
+import { runLinkedReposSync } from './linked-repos-sync.js';
+import { runLinkedReposSnapshot } from './linked-repos-snapshot.js';
 
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
@@ -6619,7 +6624,6 @@ export class Daemon {
       return;
     }
     ws.registerRpcHandler('linked_repos_sync', async (params) => {
-      const { runLinkedReposSync } = await import('./linked-repos-sync.js');
       const repos = (
         Array.isArray(params.repos) ? params.repos : []
       ) as Array<Record<string, unknown>>;
@@ -6653,7 +6657,6 @@ export class Daemon {
     // --spec-dir 两条读命令，零写盘）；业务全在 linked-repos-snapshot.runLinkedReposSnapshot
     //（平名注册，protocol 零改动）。root_path 缺失 throw（backend 恒下发，与写链路同口径）。
     ws.registerRpcHandler('linked_repos_snapshot', async (params) => {
-      const { runLinkedReposSnapshot } = await import('./linked-repos-snapshot.js');
       const rootPath = typeof params.root_path === 'string' ? params.root_path : '';
       if (!rootPath) {
         throw new Error('linked_repos_snapshot: payload 缺 root_path');
