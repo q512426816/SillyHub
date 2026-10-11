@@ -101,3 +101,74 @@ created_at: 2026-10-08T17:55:09.787Z
   confirmed_at: null
   source_change: 2026-10-10-daemon-tombstone-change-guard
   status: active
+
+## FR-api-types-010 backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
+变更：2026-10-11-ci-red-batch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-01
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-ci-red-batch-fix:flow:测试绑定FR-01
+  tests: backend/tests/modules/agent/test_agent_run_log_tool_kind.py「test_session_channel_payload_contains_tool_kind」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-ci-red-batch-fix
+  status: active
+
+## FR-api-types-011 backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
+变更：2026-10-11-ci-red-batch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-02
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-ci-red-batch-fix:flow:测试绑定FR-02
+  tests: backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-ci-red-batch-fix
+  status: active
+
+## FR-api-types-012 frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
+变更：2026-10-11-ci-red-batch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-03
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-ci-red-batch-fix:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx「组内上移/组内下移」 | frontend/src/components/git-log/__tests__/git-log-page.test.tsx「TABS 15 项」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-ci-red-batch-fix
+  status: active
+
+## FR-api-types-013 sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
+变更：2026-10-11-ci-red-batch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-04
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+
+## FR-api-types-014 不跑全量测试（规则 0），全量留给 CI
+变更：2026-10-11-ci-red-batch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-05
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f

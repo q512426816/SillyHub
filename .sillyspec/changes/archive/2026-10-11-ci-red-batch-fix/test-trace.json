@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-ci-red-batch-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-ci-red-batch-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/agent/test_agent_run_log_tool_kind.py「test_session_channel_payload_contains_tool_kind」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-ci-red-batch-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-ci-red-batch-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-ci-red-batch-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-ci-red-batch-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx「组内上移/组内下移」",
+        "frontend/src/components/git-log/__tests__/git-log-page.test.tsx「TABS 15 项」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-ci-red-batch-fix"
+    }
+  ]
+}

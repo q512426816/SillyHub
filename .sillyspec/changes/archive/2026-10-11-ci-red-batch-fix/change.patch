@@ -1,0 +1,1427 @@
+diff --git a/backend/tests/modules/agent/test_agent_run_log_tool_kind.py b/backend/tests/modules/agent/test_agent_run_log_tool_kind.py
+index 53ba749e9..3959fa075 100644
+--- a/backend/tests/modules/agent/test_agent_run_log_tool_kind.py
++++ b/backend/tests/modules/agent/test_agent_run_log_tool_kind.py
+@@ -428,6 +428,9 @@ async def test_session_channel_payload_contains_tool_kind(monkeypatch: pytest.Mo
+         cache_creation_tokens=None,
+         # task-05 / FR-01 新增字段（老 daemon/未上报 None → payload 不带该键）。
+         ctx_tokens=None,
++        # 2026-10-10-live-token-speed-daemon-timing 新增必填位（老 daemon/未上报
++        # None → payload 不带该键，design §9 同款）。
++        duration_api_ms=None,
+         agent_session_id=uuid.uuid4(),  # 非 None → 进入 session publish 分支
+         timestamp_iso="2026-07-05T00:00:00Z",
+     )
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 72c2cd67c..d445730e6 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -102,8 +102,9 @@ class TestMigrationStructure:
+         # 20261008100000（drop_dead_rbac_permissions，2026-10-08）→
+         # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
+         # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
+-        # 拦截后顺手清偿）。
+-        assert heads[0] == "20261010190000"  # workspace_linked_repos 成为新 head
++        # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
++        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）。
++        assert heads[0] == "c515ffd62859"  # merge 迁移成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+index 4a98a933c..ea5594e76 100644
+--- a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+@@ -221,22 +221,24 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+     renderPage();
+     await screen.findByText("/admin/roles");
+ 
+-    // system 组声明序：users=19 / organizations=20 / roles=21（未覆盖 → 生效值=声明序索引）
++    // system 组声明序：users=17 / organizations=18 / roles=19（未覆盖 → 生效值=
++    // 声明序索引；2026-10-11-retire-components-page 删 components/topology 两项，
++    // 旧锚 19/20/21 全体前移 2）
+     const rolesRow = menuRow("/admin/roles");
+     fireEvent.click(within(rolesRow).getByTitle("上移"));
+ 
+-    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 20）
++    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 18）
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
+         method: "PUT",
+-        json: { label: null, sort_order: 20, hidden: false },
++        json: { label: null, sort_order: 18, hidden: false },
+       }),
+     );
+-    // 再 PUT 相邻行（organizations 取 roles 原生效值 21）
++    // 再 PUT 相邻行（organizations 取 roles 原生效值 19）
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
+         method: "PUT",
+-        json: { label: null, sort_order: 21, hidden: false },
++        json: { label: null, sort_order: 19, hidden: false },
+       }),
+     );
+   });
+@@ -245,20 +247,20 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+     renderPage();
+     await screen.findByText("/admin/roles");
+ 
+-    // organizations(20) 下移 ↔ roles(21)
++    // organizations(18) 下移 ↔ roles(19)（声明序见上移用例注释）
+     const orgRow = menuRow("/admin/organizations");
+     fireEvent.click(within(orgRow).getByTitle("下移"));
+ 
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
+         method: "PUT",
+-        json: { label: null, sort_order: 21, hidden: false },
++        json: { label: null, sort_order: 19, hidden: false },
+       }),
+     );
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
+         method: "PUT",
+-        json: { label: null, sort_order: 20, hidden: false },
++        json: { label: null, sort_order: 18, hidden: false },
+       }),
+     );
+   });
+diff --git a/frontend/src/components/git-log/__tests__/git-log-page.test.tsx b/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
+index 671460b3e..56f53161b 100644
+--- a/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
++++ b/frontend/src/components/git-log/__tests__/git-log-page.test.tsx
+@@ -332,7 +332,7 @@ describe("Git 日志页正常态", () => {
+ // ── WorkspaceTabs 注册（explorer-page.test.tsx 先例照抄）──────────────
+ 
+ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
+-  it("TABS 增至 16 项，「Git 日志」末位且 href 为 /git-log", () => {
++  it("TABS 15 项（2026-10-11-retire-components-page 组件页 tab 下线），「Git 日志」末位且 href 为 /git-log", () => {
+     render(
+       <WorkspaceTabs workspaceId="ws-1">
+         <div />
+@@ -340,7 +340,7 @@ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
+     );
+ 
+     const links = screen.getAllByRole("link");
+-    expect(links).toHaveLength(16);
++    expect(links).toHaveLength(15);
+     const labels = links.map((a) => a.textContent);
+     const gitLogIdx = labels.indexOf("Git 日志");
+     expect(gitLogIdx).toBe(labels.length - 1);
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index cc4709154..184b7f13a 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -1261,6 +1261,145 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/linked-repos": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Linked Repos
++         * @description 列出工作区关联仓（成员视角含 my_path；状态摘要由 task-03 接管填充）。
++         */
++        get: operations["list_linked_repos_api_workspaces__workspace_id__linked_repos_get"];
++        put?: never;
++        /**
++         * Create Linked Repo
++         * @description 登记关联仓（owner/admin）。重名 409。
++         */
++        post: operations["create_linked_repo_api_workspaces__workspace_id__linked_repos_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        post?: never;
++        /**
++         * Delete Linked Repo
++         * @description 删除关联仓（owner/admin；成员路径与落盘状态级联清理；归属校验 404）。
++         */
++        delete: operations["delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete"];
++        options?: never;
++        head?: never;
++        /**
++         * Update Linked Repo
++         * @description 编辑共享字段（owner/admin；name 不可改，见 schema 注）。
++         *
++         *     显式提交键即更新（JSON null=显式清除，缺省=不动——exclude_unset 语义）；
++         *     repo 必须归属路径工作区（跨工作区 404）。
++         */
++        patch: operations["update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch"];
++        trace?: never;
++    };
++    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}/my-path": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        /**
++         * Save My Path
++         * @description 成员级本机路径 upsert（成员本人；path=null 清除；归属校验 404）。
++         */
++        put: operations["save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put"];
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/workspaces/{workspace_id}/linked-repos/sync": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Trigger Linked Repos Sync
++         * @description 「立即同步」：向当前成员绑定 daemon 发请求-响应 RPC（受理即返，FR-05）。
++         *
++         *     无入参（幂等触发，POST 空 body）；结果经 daemon REST 回报端点落库
++         *     （唯一通道），GET 轮询可见；老 daemon method_not_found → 状态层
++         *     skipped(需升级) 且本端点不报错（FR-07）。
++         */
++        post: operations["trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/workspaces/{workspace_id}/linked-repos/local-snapshot": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Local Snapshot
++         * @description 本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
++         *     与平台登记三态对照；五态降级（ok/offline/**timeout**\/unsupported/binding_missing——
++         *     timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
++         *     2026-10-11 生产实证）。
++         */
++        get: operations["get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/workspaces/{workspace_id}/linked-repos/import": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Import From Local
++         * @description 从本机快照条目导入为平台登记（owner/admin；合并条目一次落 rel_path+my_path，
++         *     Grill Gap A；重名 skipped 幂等；逐条独立成败）。
++         */
++        post: operations["import_from_local_api_workspaces__workspace_id__linked_repos_import_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/explorer/tree": {
+         parameters: {
+             query?: never;
+@@ -1590,7 +1729,8 @@ export interface paths {
+         };
+         /**
+          * List Api Keys
+-         * @description List the caller's API keys (plaintext never included).
++         * @description List the caller's API keys (plaintext never included; rows carry
++         *     ``plaintext_recoverable`` so the UI knows whether copy is possible).
+          */
+         get: operations["list_api_keys_api_auth_api_keys_get"];
+         put?: never;
+@@ -1598,8 +1738,9 @@ export interface paths {
+          * Create Api Key
+          * @description Issue a new long-lived API key for the daemon.
+          *
+-         *     Plaintext is returned **only** here; subsequent GETs will only expose
+-         *     ``key_prefix``. ``api_key:admin``-gated.
++         *     Plaintext is returned here (canonical one-time return); when the master
++         *     key is configured the row also stores it encrypted, and the per-id
++         *     plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
+          */
+         post: operations["create_api_key_api_auth_api_keys_post"];
+         delete?: never;
+@@ -1608,6 +1749,29 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/auth/api-keys/{api_key_id}/plaintext": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Api Key Plaintext
++         * @description 取回某把活跃 key 的明文（管理端「复制密钥」入口）。
++         *
++         *     仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
++         *     不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++         */
++        get: operations["get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/auth/api-keys/{api_key_id}": {
+         parameters: {
+             query?: never;
+@@ -1621,6 +1785,9 @@ export interface paths {
+         /**
+          * Revoke Api Key
+          * @description Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
++         *
++         *     ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
++         *     未吊销 → 409（先吊销再删除）。
+          */
+         delete: operations["revoke_api_key_api_auth_api_keys__api_key_id__delete"];
+         options?: never;
+@@ -3917,6 +4084,29 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Mcp Token Plaintext
++         * @description 取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
++         *
++         *     仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
++         *     探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++         */
++        get: operations["get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
+         parameters: {
+             query?: never;
+@@ -3934,6 +4124,9 @@ export interface paths {
+          *     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
+          *     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
+          *     精确 DEL，无 TTL 放行窗口）。
++         *
++         *     ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
++         *     CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
+          */
+         delete: operations["revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete"];
+         options?: never;
+@@ -5066,6 +5259,28 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/machines/{instance_id}/linked-repos-sync-result": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Report Linked Repos Sync Result
++         * @description daemon 回报关联仓双落盘结果（归属校验同裁决端点；宽容收数）。
++         *
++         *     未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
++         */
++        post: operations["report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/runtimes/{runtime_id}/disable": {
+         parameters: {
+             query?: never;
+@@ -13121,6 +13336,8 @@ export interface components {
+             created_at: string;
+             /** Revoked At */
+             revoked_at: string | null;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+             /** Plaintext */
+             plaintext: string;
+         };
+@@ -13129,6 +13346,17 @@ export interface components {
+             /** Items */
+             items: components["schemas"]["ApiKeyRead"][];
+         };
++        /**
++         * ApiKeyPlaintextResponse
++         * @description GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。
++         */
++        ApiKeyPlaintextResponse: {
++            /**
++             * Plaintext
++             * @description 完整密钥明文，仅复制入口使用，勿入日志
++             */
++            plaintext: string;
++        };
+         /**
+          * ApiKeyRead
+          * @description List-row shape — safe to return on every GET.
+@@ -13154,6 +13382,8 @@ export interface components {
+             created_at: string;
+             /** Revoked At */
+             revoked_at: string | null;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+         };
+         /** ApprovalRead */
+         ApprovalRead: {
+@@ -18142,6 +18372,21 @@ export interface components {
+             /** Rows */
+             rows: components["schemas"]["ImportPreviewRow"][];
+         };
++        /**
++         * ImportEntryInput
++         * @description 导入条目（合并形态：一次导入同时落 rel_path 与 my_path）。
++         *
++         *     名合法性不在请求级校验（422 会拒整批）——service 层逐条判定 failed
++         *     （快照来源理论合法，运行时脏值按条目级容错，FR-03 逐条独立成败）。
++         */
++        ImportEntryInput: {
++            /** Name */
++            name: string;
++            /** Rel Path */
++            rel_path?: string | null;
++            /** Abs Path */
++            abs_path?: string | null;
++        };
+         /**
+          * ImportPreviewResp
+          * @description 预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。
+@@ -18205,6 +18450,28 @@ export interface components {
+             /** Rows */
+             rows: components["schemas"]["ImportPreviewRow"][];
+         };
++        /** ImportRequest */
++        ImportRequest: {
++            /** Entries */
++            entries?: components["schemas"]["ImportEntryInput"][];
++        };
++        /** ImportResponse */
++        ImportResponse: {
++            /** Results */
++            results?: components["schemas"]["ImportResultItem"][];
++        };
++        /** ImportResultItem */
++        ImportResultItem: {
++            /** Name */
++            name: string;
++            /**
++             * Result
++             * @enum {string}
++             */
++            result: "imported" | "skipped" | "failed";
++            /** Detail */
++            detail?: string | null;
++        };
+         /**
+          * ImportResultResp
+          * @description 导入结果 — 计数 + 失败行描述。
+@@ -18685,6 +18952,85 @@ export interface components {
+              */
+             skills?: components["schemas"]["LibrarySkillItem"][];
+         };
++        /**
++         * LinkedRepoCreate
++         * @description 登记关联仓（owner/admin）。name 对齐 sillyspec 子项目名规则。
++         */
++        LinkedRepoCreate: {
++            /** Name */
++            name: string;
++            /** Repo Url */
++            repo_url?: string | null;
++            /** Description */
++            description?: string | null;
++            /** Rel Path */
++            rel_path?: string | null;
++            /** Ref Workspace Id */
++            ref_workspace_id?: string | null;
++        };
++        /** LinkedRepoOut */
++        LinkedRepoOut: {
++            /**
++             * Id
++             * Format: uuid
++             */
++            id: string;
++            /** Name */
++            name: string;
++            /** Repo Url */
++            repo_url?: string | null;
++            /** Description */
++            description?: string | null;
++            /** Rel Path */
++            rel_path?: string | null;
++            ref_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
++            /** My Path */
++            my_path?: string | null;
++            /** Sync Status Summary */
++            sync_status_summary?: components["schemas"]["SyncStateBrief"][];
++        };
++        /** LinkedRepoSyncResultItem */
++        LinkedRepoSyncResultItem: {
++            /** Repo Name */
++            repo_name: string;
++            /**
++             * Layer
++             * @enum {string}
++             */
++            layer: "projects_yaml" | "repos_registry";
++            /**
++             * Status
++             * @enum {string}
++             */
++            status: "ok" | "skipped" | "failed";
++            /** Detail */
++            detail?: string | null;
++        };
++        /** LinkedRepoSyncResultRequest */
++        LinkedRepoSyncResultRequest: {
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Results */
++            results?: components["schemas"]["LinkedRepoSyncResultItem"][];
++        };
++        /**
++         * LinkedRepoUpdate
++         * @description 编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生
++         *     落盘产物错位——design 数据模型节）。ref_workspace_id 键在场 null=摘除。
++         */
++        LinkedRepoUpdate: {
++            /** Repo Url */
++            repo_url?: string | null;
++            /** Description */
++            description?: string | null;
++            /** Rel Path */
++            rel_path?: string | null;
++            /** Ref Workspace Id */
++            ref_workspace_id?: string | null;
++        };
+         /**
+          * ListDirRequest
+          * @description Request body for POST /runtimes/{runtime_id}/list-dir.
+@@ -18884,6 +19230,57 @@ export interface components {
+             /** Is Default */
+             is_default?: boolean | null;
+         };
++        /**
++         * LocalSnapshotEntry
++         * @description 对照条目（双源合并后：rel_path 取 projects 源、abs_path 取 repos 源，Grill Gap A）。
++         */
++        LocalSnapshotEntry: {
++            /** Key */
++            key: string;
++            /** Sources */
++            sources?: string[];
++            /** Rel Path */
++            rel_path?: string | null;
++            /** Abs Path */
++            abs_path?: string | null;
++            /** Role */
++            role?: string | null;
++            /** State */
++            state?: string | null;
++            /** Detail */
++            detail?: string | null;
++            /**
++             * Match
++             * @enum {string}
++             */
++            match: "both" | "local_only" | "platform_only";
++            /** Platform Repo Id */
++            platform_repo_id?: string | null;
++            /** Platform Rel Path */
++            platform_rel_path?: string | null;
++            matched_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
++        };
++        /**
++         * LocalSnapshotResponse
++         * @description 本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。
++         */
++        LocalSnapshotResponse: {
++            /**
++             * Status
++             * @enum {string}
++             */
++            status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
++            /** Fetched At */
++            fetched_at?: string | null;
++            /** Projects Skipped */
++            projects_skipped?: string | null;
++            /** Repos Skipped */
++            repos_skipped?: string | null;
++            /** Entries */
++            entries?: components["schemas"]["LocalSnapshotEntry"][];
++            /** Platform Only Names */
++            platform_only_names?: string[];
++        };
+         /** LoginRequest */
+         LoginRequest: {
+             /** Account */
+@@ -19541,9 +19938,23 @@ export interface components {
+             /** Items */
+             items: components["schemas"]["McpTokenRead"][];
+         };
++        /**
++         * McpTokenPlaintextResponse
++         * @description GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。
++         */
++        McpTokenPlaintextResponse: {
++            /**
++             * Token
++             * @description 完整令牌明文，仅复制入口使用，勿入日志
++             */
++            token: string;
++        };
+         /**
+          * McpTokenRead
+          * @description 列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
++         *
++         *     ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
++         *     端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
+          */
+         McpTokenRead: {
+             /**
+@@ -19564,6 +19975,8 @@ export interface components {
+              * Format: date-time
+              */
+             created_at: string;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+         };
+         /**
+          * McpWebhookCreateRequest
+@@ -19973,6 +20386,14 @@ export interface components {
+              */
+             api_requests: number;
+         };
++        /**
++         * MyPathUpdate
++         * @description 成员级本机路径 upsert（成员本人；path=None 清除）。
++         */
++        MyPathUpdate: {
++            /** Path */
++            path?: string | null;
++        };
+         /**
+          * NotificationListResponse
+          * @description 列表分页响应（total 为本人（可选未读过滤后）总数）。
+@@ -24522,6 +24943,8 @@ export interface components {
+              * @default
+              */
+             prompt: string;
++            /** Origin */
++            origin?: "task_wakeup" | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+@@ -24785,6 +25208,8 @@ export interface components {
+             cache_creation_tokens?: number | null;
+             /** Ctx Tokens */
+             ctx_tokens?: number | null;
++            /** Duration Api Ms */
++            duration_api_ms?: number | null;
+             /** Failure Summary */
+             failure_summary?: string | null;
+             /** Engine Anchor */
+@@ -26028,6 +26453,34 @@ export interface components {
+             /** Runs Failed */
+             runs_failed: number;
+         };
++        /**
++         * SyncStateBrief
++         * @description 单层落盘状态摘要（GET 聚合视图用；task-03 填充）。
++         */
++        SyncStateBrief: {
++            /**
++             * Machine Id
++             * Format: uuid
++             */
++            machine_id: string;
++            /**
++             * Layer
++             * @enum {string}
++             */
++            layer: "projects_yaml" | "repos_registry";
++            /**
++             * Status
++             * @enum {string}
++             */
++            status: "ok" | "skipped" | "failed";
++            /** Detail */
++            detail?: string | null;
++            /**
++             * Synced At
++             * Format: date-time
++             */
++            synced_at: string;
++        };
+         /**
+          * SystemStatusResponse
+          * @description 服务器性能(psutil) + 业务统计(首页运行状态看板)。
+@@ -28168,30 +28621,6 @@ export interface components {
+                 [key: string]: number;
+             };
+         };
+-        /**
+-         * WorkspaceBrief
+-         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+-         *
+-         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+-         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
+-         */
+-        WorkspaceBrief: {
+-            /**
+-             * Workspace Id
+-             * Format: uuid
+-             */
+-            workspace_id: string;
+-            /** Name */
+-            name: string;
+-            /** Status */
+-            status: string;
+-            /** Type */
+-            type?: string | null;
+-            /** Role */
+-            role?: string | null;
+-            /** Description */
+-            description?: string | null;
+-        };
+         /**
+          * WorkspaceCreate
+          * @description Request body for ``POST /api/workspaces``.
+@@ -28947,6 +29376,21 @@ export interface components {
+              */
+             created_at: string;
+         };
++        /**
++         * WorkspaceBrief
++         * @description 挂载引用/匹配提示的工作区摘要 {id,name,slug}（读时过滤软删）。
++         */
++        app__modules__workspace__linked_repos__schema__WorkspaceBrief: {
++            /**
++             * Id
++             * Format: uuid
++             */
++            id: string;
++            /** Name */
++            name: string;
++            /** Slug */
++            slug: string;
++        };
+         /**
+          * OwnerRead
+          * @description Nested owner DTO for platform-admin global views (task-05 / D-006@v1).
+@@ -28959,6 +29403,30 @@ export interface components {
+             /** Display Name */
+             display_name?: string | null;
+         };
++        /**
++         * WorkspaceBrief
++         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
++         *
++         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
++         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
++         */
++        app__modules__workspace__schema__WorkspaceBrief: {
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Name */
++            name: string;
++            /** Status */
++            status: string;
++            /** Type */
++            type?: string | null;
++            /** Role */
++            role?: string | null;
++            /** Description */
++            description?: string | null;
++        };
+     };
+     responses: never;
+     parameters: never;
+@@ -30950,6 +31418,273 @@ export interface operations {
+             };
+         };
+     };
++    list_linked_repos_api_workspaces__workspace_id__linked_repos_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["LinkedRepoOut"][];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    create_linked_repo_api_workspaces__workspace_id__linked_repos_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["LinkedRepoCreate"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            201: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["LinkedRepoOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                repo_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            204: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content?: never;
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                repo_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["LinkedRepoUpdate"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["LinkedRepoOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                repo_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["MyPathUpdate"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["LinkedRepoOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: unknown;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["LocalSnapshotResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    import_from_local_api_workspaces__workspace_id__linked_repos_import_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["ImportRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ImportResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get: {
+         parameters: {
+             query?: {
+@@ -31511,7 +32246,7 @@ export interface operations {
+             };
+         };
+     };
+-    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
++    get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get: {
+         parameters: {
+             query?: never;
+             header?: never;
+@@ -31521,6 +32256,40 @@ export interface operations {
+             cookie?: never;
+         };
+         requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ApiKeyPlaintextResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
++        parameters: {
++            query?: {
++                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
++                hard?: boolean;
++            };
++            header?: never;
++            path: {
++                api_key_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
+         responses: {
+             /** @description Successful Response */
+             204: {
+@@ -35440,7 +36209,7 @@ export interface operations {
+             };
+         };
+     };
+-    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
++    get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get: {
+         parameters: {
+             query?: never;
+             header?: never;
+@@ -35451,6 +36220,41 @@ export interface operations {
+             cookie?: never;
+         };
+         requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["McpTokenPlaintextResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
++        parameters: {
++            query?: {
++                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
++                hard?: boolean;
++            };
++            header?: never;
++            path: {
++                workspace_id: string;
++                token_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
+         responses: {
+             /** @description Successful Response */
+             204: {
+@@ -37257,6 +38061,43 @@ export interface operations {
+             };
+         };
+     };
++    report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                instance_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["LinkedRepoSyncResultRequest"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": {
++                        [key: string]: unknown;
++                    };
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     disable_runtime_api_daemon_runtimes__runtime_id__disable_post: {
+         parameters: {
+             query?: never;
+@@ -43153,7 +43994,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["WorkspaceBrief"][];
++                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"][];
+                 };
+             };
+             /** @description Validation Error */
+@@ -43188,7 +44029,7 @@ export interface operations {
+                     [name: string]: unknown;
+                 };
+                 content: {
+-                    "application/json": components["schemas"]["WorkspaceBrief"];
++                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"];
+                 };
+             };
+             /** @description Validation Error */
+diff --git a/.sillyspec/changes/2026-10-11-ci-red-batch-fix/tasks.md b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/tasks.md
+new file mode 100644
+index 000000000..4e87a502f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:27:11.533Z
++---
++# 任务注册表（Tasks）— 2026-10-11-ci-red-batch-fix
++
++- [x] task-01: backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
++- [x] task-02: backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
++- [x] task-03: frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
++- [x] task-04: sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
++- [x] task-05: 不跑全量测试（规则 0），全量留给 CI
+diff --git a/.sillyspec/changes/2026-10-11-ci-red-batch-fix/design.md b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:27:11.533Z
++---
++# 设计记录（Design Record）— 2026-10-11-ci-red-batch-fix
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++5 处 CI 红灯全部属「生产契约变更漏同步钉子测试/生成物」一类技术债，生产代码零缺陷零改动：backend PublishIntent 测试夹具补上 21eb98d53 引入的必填位 `duration_api_ms=None`（production submit_commit.py 一直由关键字传入，仅手工构造的夹具漏更）；迁移链尾锚按测试自载的「随主线新迁移接续前移」惯例从 20261010190000 前移到 cc3c022b6 并入的 merge 迁移 c515ffd62859；frontend 两处钉子（menus 声明序 19/20/21、git-log TABS 16）按 8a928588f 组件页下线后的注册表现状重算为 17/18/19 与 15——正是 4746ac875 登记的「共享断言面」同款坑复现；daemon 漂移以 gen:types 重生成清偿（消费已提交 openapi.json，不碰后端）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无生产接口变化。全部改动限于测试文件（backend×2、frontend×2）与生成物（sillyhub-daemon/src/api-types.ts，机器重生成非手写）。PublishIntent 构造签名不变（夹具补参数对齐既有签名）；迁移 head 断言值前移不改变迁移链本身。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用——本变更为测试锚与生成物同步，无运行时输入/事件序假设；drift check 以「重生成输出 == 提交内容」判定，与执行顺序无关（openapi-typescript 确定性输出）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   生成物重生成与并行会话冲突由 gen-api-types.mjs 自带的未提交改动守卫拦截（openapi.json/api-types.ts dirty 即中止）；本次两文件在重生成前均干净，无卷入他人 WIP 风险。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   flow done 中间态拒收（空槽/问题文本改写）属协议内断点续——已按要求填 FR 行为句/测试绑定/design 四节（问题原文钉死、答案写下方）后重跑同命令，已完成子步幂等跳过。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   sillyhub-daemon/src/api-types.ts 仅 daemon 侧消费；WorkspaceBrief→app__modules__workspace__schema__WorkspaceBrief 改名经 grep 证实 daemon/frontend 源码零直接引用（前端用 lib/workspace.ts 手写同名接口），不串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：daemon api-types.ts 的 872 行漂移里除已核实的改名外还可能藏其它 schema 形态变化，daemon 源码若引用了被改窄的类型会 typecheck 红灯——已用 `pnpm -C sillyhub-daemon typecheck`（0 错）实测兜住，残余风险由 daemon-ci 的 typecheck+test 复核。放弃的方案：给 PublishIntent.duration_api_ms 补默认值 `= None`（需移动字段位置避开 dataclass 非默认位序约束，会改变既有位置参数语义，波及 production 构造点，收益仅省一处夹具参数——不做）；让迁移锚测试改为不锚具体 revision（已有 test_migration_single_head.py 动态断言单头，本锚的价值恰在钉具体链尾，按惯例前移即可）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/tests/modules/agent/test_agent_run_log_tool_kind.py | PublishIntent 夹具补 duration_api_ms=None |
++| 修改 | backend/tests/test_align_platform_change_events_migration.py | head 锚 →c515ffd62859 + 注释链续写 |
++| 修改 | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | 上移/下移声明序锚 17/18/19 |
++| 修改 | frontend/src/components/git-log/__tests__/git-log-page.test.tsx | TABS 数锚 16→15 |
++| 重生成 | sillyhub-daemon/src/api-types.ts | gen:types 清偿 872 行漂移 |
+
+diff --git a/.sillyspec/changes/2026-10-11-ci-red-batch-fix/proposal.md b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:27:11.533Z
++---
++# 提案书（Proposal）— 2026-10-11-ci-red-batch-fix
++
++## 动机
++
++任务原话转写：动机：main 分支 5 处 CI 红灯（backend-ci 2 测试失败、frontend-ci 3 测试失败、daemon-ci api-types 漂移），全部属「生产契约变更漏同步钉子测试/生成物」一类技术债清偿，无生产代码缺陷需改。
++
++成功标准：
++- backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
++- backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
++- frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
++- sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
++- 不跑全量测试（规则 0），全量留给 CI
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
++2. backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
++3. frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
++4. sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
++5. 不跑全量测试（规则 0），全量留给 CI
++
++## 成功标准（可验证）
++
++1. backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
++2. backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
++3. frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
++4. sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
++5. 不跑全量测试（规则 0），全量留给 CI
+
+diff --git a/.sillyspec/changes/2026-10-11-ci-red-batch-fix/requirements.md b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-ci-red-batch-fix/requirements.md
+@@ -0,0 +1,65 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:27:11.533Z
++---
++# 需求规格（Requirements）— 2026-10-11-ci-red-batch-fix
++
++## 功能需求
++
++### FR-01: backend tests/modules/agent/test_agent_run_log_tool_kind.py 定向 pytest 绿（PublishIntent 夹具补 duration_api_ms=None，21eb98d53 加必填位漏更夹具）
++
++- PublishIntent 测试夹具必须携带 `duration_api_ms=None`（2026-10-10-live-token-speed-daemon-timing 将该字段加为必填位后，全部直接构造 PublishIntent 的测试夹具必须同步携带该参数），且 `tests/modules/agent/test_agent_run_log_tool_kind.py::test_session_channel_payload_contains_tool_kind` 定向 pytest 必须通过。
++
++#### 场景：主路径
++
++- Given：PublishIntent 构造签名含必填位 `duration_api_ms`（21eb98d53 引入）。
++- When：以关键字参数构造 PublishIntent（夹具补 `duration_api_ms=None`）并执行 `publish_submitted_messages`。
++- Then：session 频道 log 事件含 `tool_kind=skill` 与 `parent_tool_use_id`，pytest 绿。
++
++### FR-02: backend tests/test_align_platform_change_events_migration.py 定向 pytest 绿（head 锚 20261010190000→c515ffd62859 并续写注释链，cc3c022b6 merge 迁移漏更锚）
++
++- 迁移链尾锚测试的 head 断言必须随主线迁移接续前移：merge 迁移 `c515ffd62859`（2026-10-11-alembic-single-head-guard 并入）成为唯一 head 后，`tests/test_align_platform_change_events_migration.py::TestMigrationStructure::test_file_exists_and_single_head_chain` 必须断言 `heads[0] == "c515ffd62859"` 且注释链续写该锚来历，整文件定向 pytest 必须通过。
++
++#### 场景：主路径
++
++- Given：versions 目录含 merge 迁移 c515ffd62859（down_revision = 双头 20261011020000 + 20261011160000）。
++- When：ScriptDirectory.get_heads 取当前链尾。
++- Then：单头且等于 c515ffd62859，7 个测试全过。
++
++### FR-03: frontend admin/menus page.test.tsx 组内上移/下移声明序 19/20/21→17/18/19（8a928588f 删 components/topology 两项）+ git-log-page.test.tsx TABS 数 16→15，两文件定向 vitest 绿
++
++- 前端钉子测试必须与生产契约同步：菜单注册表删 2 项后 menus 页组内上移/下移用例的声明序锚必须为 users=17 / organizations=18 / roles=19，WorkspaceTabs 组件页 tab 下线后 git-log 页用例的 TABS 数量锚必须为 15（「Git 日志」仍末位、href 不变），两测试文件定向 vitest 必须全绿。
++
++#### 场景：主路径
++
++- Given：MENU_PERMISSION_GROUPS 已删 components/topology 两项（8a928588f）、TABS 已删组件 tab。
++- When：点击 system 组 roles「上移」/organizations「下移」。
++- Then：双 PUT payload 的 sort_order 为 18/19 互换；TABS 链接总数 15 且「Git 日志」末位。
++
++### FR-04: sillyhub-daemon pnpm gen:types 重生成 src/api-types.ts 并提交，gen:types:check 语义（重生成后 git diff 为空）+ daemon typecheck 过
++
++- daemon 生成物必须与 `backend/openapi.json` 单一契约源零漂移：以已提交的 openapi.json 重生成 `sillyhub-daemon/src/api-types.ts` 并提交（重生成后与提交内容 git diff 为空，即 daemon-ci api-types drift check 语义通过），且 daemon `tsc --noEmit` 必须零错误。
++
++#### 场景：主路径
++
++- Given：backend/openapi.json 已含 report_linked_repos_sync_result 等新端点与 WorkspaceBrief 改名，daemon/src/api-types.ts 停在旧契约（872 行漂移）。
++- When：`pnpm -C sillyhub-daemon gen:types` 重生成并提交。
++- Then：drift check 重生成后 diff 为空；daemon typecheck 0 错（改名 schema 无消费方受波及）。
++
++### FR-05: 不跑全量测试（规则 0），全量留给 CI
++
++- 本变更必须只跑定向相关测试（两个 backend pytest 面 + 两个 frontend 测试文件 + daemon typecheck），禁止跑全量测试套件，全量验证留给 CI。
++
++#### 场景：主路径
++
++- Given：CLAUDE.md 规则 0（全量测试留给 CI）。
++- When：本变更各任务验证。
++- Then：仅定向面被执行，未触发任何全量套件。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/agent/test_agent_run_log_tool_kind.py「test_session_channel_payload_contains_tool_kind」
++FR-02: backend/tests/test_align_platform_change_events_migration.py「TestMigrationStructure::test_file_exists_and_single_head_chain」（整文件 7 例）
++FR-03: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx「组内上移/组内下移」+ frontend/src/components/git-log/__tests__/git-log-page.test.tsx「TABS 15 项」（两文件 17 例）
++FR-04: sillyhub-daemon pnpm typecheck（tsc --noEmit）+ daemon-ci api-types drift check 语义（重生成后 git diff 为空；CI 复核）
++FR-05: 不适用：流程约束条款（禁止跑全量），无独立测试面——由各定向测试命令范围本身佐证

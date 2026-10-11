@@ -2304,3 +2304,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
 理由：答：最大风险是各 CLI 构建的 duration_api_ms 语义不一（真 Anthropic 可能为 per-query 纯 API 时长）——差分逻辑对「真 per-query」值也正确（第二轮起 snapshot≥base 时差值=snapshot−base 会把 per-query 值误差分！）。缓解：差分仅在 snapshot ≥ base 时做，per-query 形态下 snapshot 无单调性（12s→9s 走复位分支报 全量）→ 不会误差分；单调递增的 per-query 序列理论上会被误差分，但 DB 实证本 部署形态是累计量，真 per-query 序列含工具等待通常非单调——留档该假设。 放弃方案：仅做 backend 守卫不做 daemon 差分（守卫后合法累计增量被整段拒收， 正确数据也进不来）；仅做 daemon 差分不做 backend 守卫（防线单薄，其他引擎再犯 无兜底）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-ci-red-batch-fix
+锚点：未记录
+最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+理由：最大风险：daemon api-types.ts 的 872 行漂移里除已核实的改名外还可能藏其它 schema 形态变化，daemon 源码若引用了被改窄的类型会 typecheck 红灯——已用 `pnpm -C sillyhub-daemon typecheck`（0 错）实测兜住，残余风险由 daemon-ci 的 typecheck+test 复核。放弃的方案：给 PublishIntent.duration_api_ms 补默认值 `= None`（需移动字段位置避开 dataclass 非默认位序约束，会改变既有位置参数语义，波及 production 构造点，收益仅省一处夹具参数——不做）；让迁移锚测试改为不锚具体 revision（已有 test_migration_single_head.py 动态断言单头，本锚的价值恰在钉具体链尾，按惯例前移即可）。
