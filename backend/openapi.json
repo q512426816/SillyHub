@@ -4260,7 +4260,7 @@
           "auth"
         ],
         "summary": "List Api Keys",
-        "description": "List the caller's API keys (plaintext never included).",
+        "description": "List the caller's API keys (plaintext never included; rows carry\n``plaintext_recoverable`` so the UI knows whether copy is possible).",
         "operationId": "list_api_keys_api_auth_api_keys_get",
         "responses": {
           "200": {
@@ -4280,7 +4280,7 @@
           "auth"
         ],
         "summary": "Create Api Key",
-        "description": "Issue a new long-lived API key for the daemon.\n\nPlaintext is returned **only** here; subsequent GETs will only expose\n``key_prefix``. ``api_key:admin``-gated.",
+        "description": "Issue a new long-lived API key for the daemon.\n\nPlaintext is returned here (canonical one-time return); when the master\nkey is configured the row also stores it encrypted, and the per-id\nplaintext endpoint can re-fetch it later. ``api_key:admin``-gated.",
         "operationId": "create_api_key_api_auth_api_keys_post",
         "requestBody": {
           "content": {
@@ -4316,13 +4316,57 @@
         }
       }
     },
+    "/api/auth/api-keys/{api_key_id}/plaintext": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Api Key Plaintext",
+        "description": "取回某把活跃 key 的明文（管理端「复制密钥」入口）。\n\n仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，\n不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。",
+        "operationId": "get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Api Key Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyPlaintextResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/api-keys/{api_key_id}": {
       "delete": {
         "tags": [
           "auth"
         ],
         "summary": "Revoke Api Key",
-        "description": "Revoke an API key. Idempotent for unknown / already-revoked ids → 404.",
+        "description": "Revoke an API key. Idempotent for unknown / already-revoked ids → 404.\n\n``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；\n未吊销 → 409（先吊销再删除）。",
         "operationId": "revoke_api_key_api_auth_api_keys__api_key_id__delete",
         "parameters": [
           {
@@ -4334,6 +4378,18 @@
               "format": "uuid",
               "title": "Api Key Id"
             }
+          },
+          {
+            "name": "hard",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "物理删除（仅已吊销记录放行；未吊销返回 409）",
+              "default": false,
+              "title": "Hard"
+            },
+            "description": "物理删除（仅已吊销记录放行；未吊销返回 409）"
           }
         ],
         "responses": {
@@ -10905,6 +10961,61 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
+      "get": {
+        "tags": [
+          "mcp-tokens",
+          "mcp-tokens"
+        ],
+        "summary": "Get Mcp Token Plaintext",
+        "description": "取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。\n\n仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性\n探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。",
+        "operationId": "get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Token Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpTokenPlaintextResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
       "delete": {
         "tags": [
@@ -10912,7 +11023,7 @@
           "mcp-tokens"
         ],
         "summary": "Revoke Mcp Token",
-        "description": "吊销（``revoked_at = now``，幂等）。\n\nservice.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体\n原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被\n精确 DEL，无 TTL 放行窗口）。",
+        "description": "吊销（``revoked_at = now``，幂等）。\n\nservice.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体\n原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被\n精确 DEL，无 TTL 放行窗口）。\n\n``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键\nCASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。",
         "operationId": "revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete",
         "parameters": [
           {
@@ -10934,6 +11045,18 @@
               "format": "uuid",
               "title": "Token Id"
             }
+          },
+          {
+            "name": "hard",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "物理删除（仅已吊销记录放行；未吊销返回 409）",
+              "default": false,
+              "title": "Hard"
+            },
+            "description": "物理删除（仅已吊销记录放行；未吊销返回 409）"
           }
         ],
         "responses": {
@@ -38809,6 +38932,10 @@
             ],
             "title": "Revoked At"
           },
+          "plaintext_recoverable": {
+            "type": "boolean",
+            "title": "Plaintext Recoverable"
+          },
           "plaintext": {
             "type": "string",
             "title": "Plaintext"
@@ -38823,6 +38950,7 @@
           "expires_at",
           "created_at",
           "revoked_at",
+          "plaintext_recoverable",
           "plaintext"
         ],
         "title": "ApiKeyCreated",
@@ -38843,6 +38971,21 @@
           "items"
         ],
         "title": "ApiKeyListResponse"
+      },
+      "ApiKeyPlaintextResponse": {
+        "properties": {
+          "plaintext": {
+            "type": "string",
+            "title": "Plaintext",
+            "description": "完整密钥明文，仅复制入口使用，勿入日志"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plaintext"
+        ],
+        "title": "ApiKeyPlaintextResponse",
+        "description": "GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。"
       },
       "ApiKeyRead": {
         "properties": {
@@ -38899,6 +39042,10 @@
               }
             ],
             "title": "Revoked At"
+          },
+          "plaintext_recoverable": {
+            "type": "boolean",
+            "title": "Plaintext Recoverable"
           }
         },
         "type": "object",
@@ -38909,7 +39056,8 @@
           "last_used_at",
           "expires_at",
           "created_at",
-          "revoked_at"
+          "revoked_at",
+          "plaintext_recoverable"
         ],
         "title": "ApiKeyRead",
         "description": "List-row shape — safe to return on every GET."
@@ -54015,6 +54163,21 @@
         ],
         "title": "McpTokenListResponse"
       },
+      "McpTokenPlaintextResponse": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token",
+            "description": "完整令牌明文，仅复制入口使用，勿入日志"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "McpTokenPlaintextResponse",
+        "description": "GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。"
+      },
       "McpTokenRead": {
         "properties": {
           "id": {
@@ -54061,6 +54224,10 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "plaintext_recoverable": {
+            "type": "boolean",
+            "title": "Plaintext Recoverable"
           }
         },
         "type": "object",
@@ -54070,10 +54237,11 @@
           "scope",
           "last_used_at",
           "revoked_at",
-          "created_at"
+          "created_at",
+          "plaintext_recoverable"
         ],
         "title": "McpTokenRead",
-        "description": "列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。"
+        "description": "列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。\n\n``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext\n端点再取回（签发时加密存档）；UI 据此点亮复制按钮。"
       },
       "McpWebhookCreateRequest": {
         "properties": {

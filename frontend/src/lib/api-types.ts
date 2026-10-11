@@ -1729,7 +1729,8 @@ export interface paths {
         };
         /**
          * List Api Keys
-         * @description List the caller's API keys (plaintext never included).
+         * @description List the caller's API keys (plaintext never included; rows carry
+         *     ``plaintext_recoverable`` so the UI knows whether copy is possible).
          */
         get: operations["list_api_keys_api_auth_api_keys_get"];
         put?: never;
@@ -1737,10 +1738,34 @@ export interface paths {
          * Create Api Key
          * @description Issue a new long-lived API key for the daemon.
          *
-         *     Plaintext is returned **only** here; subsequent GETs will only expose
-         *     ``key_prefix``. ``api_key:admin``-gated.
+         *     Plaintext is returned here (canonical one-time return); when the master
+         *     key is configured the row also stores it encrypted, and the per-id
+         *     plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
          */
         post: operations["create_api_key_api_auth_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/api-keys/{api_key_id}/plaintext": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Api Key Plaintext
+         * @description 取回某把活跃 key 的明文（管理端「复制密钥」入口）。
+         *
+         *     仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
+         *     不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+         */
+        get: operations["get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1760,6 +1785,9 @@ export interface paths {
         /**
          * Revoke Api Key
          * @description Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
+         *
+         *     ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
+         *     未吊销 → 409（先吊销再删除）。
          */
         delete: operations["revoke_api_key_api_auth_api_keys__api_key_id__delete"];
         options?: never;
@@ -4056,6 +4084,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Token Plaintext
+         * @description 取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
+         *
+         *     仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
+         *     探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+         */
+        get: operations["get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
         parameters: {
             query?: never;
@@ -4073,6 +4124,9 @@ export interface paths {
          *     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
          *     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
          *     精确 DEL，无 TTL 放行窗口）。
+         *
+         *     ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
+         *     CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
          */
         delete: operations["revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete"];
         options?: never;
@@ -13282,6 +13336,8 @@ export interface components {
             created_at: string;
             /** Revoked At */
             revoked_at: string | null;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
             /** Plaintext */
             plaintext: string;
         };
@@ -13289,6 +13345,17 @@ export interface components {
         ApiKeyListResponse: {
             /** Items */
             items: components["schemas"]["ApiKeyRead"][];
+        };
+        /**
+         * ApiKeyPlaintextResponse
+         * @description GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。
+         */
+        ApiKeyPlaintextResponse: {
+            /**
+             * Plaintext
+             * @description 完整密钥明文，仅复制入口使用，勿入日志
+             */
+            plaintext: string;
         };
         /**
          * ApiKeyRead
@@ -13315,6 +13382,8 @@ export interface components {
             created_at: string;
             /** Revoked At */
             revoked_at: string | null;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
         };
         /** ApprovalRead */
         ApprovalRead: {
@@ -19864,8 +19933,22 @@ export interface components {
             items: components["schemas"]["McpTokenRead"][];
         };
         /**
+         * McpTokenPlaintextResponse
+         * @description GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。
+         */
+        McpTokenPlaintextResponse: {
+            /**
+             * Token
+             * @description 完整令牌明文，仅复制入口使用，勿入日志
+             */
+            token: string;
+        };
+        /**
          * McpTokenRead
          * @description 列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
+         *
+         *     ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
+         *     端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
          */
         McpTokenRead: {
             /**
@@ -19886,6 +19969,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
         };
         /**
          * McpWebhookCreateRequest
@@ -32140,9 +32225,43 @@ export interface operations {
             };
         };
     };
-    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
+    get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyPlaintextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
+        parameters: {
+            query?: {
+                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
+                hard?: boolean;
+            };
             header?: never;
             path: {
                 api_key_id: string;
@@ -36069,9 +36188,44 @@ export interface operations {
             };
         };
     };
-    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
+    get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenPlaintextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
+        parameters: {
+            query?: {
+                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
+                hard?: boolean;
+            };
             header?: never;
             path: {
                 workspace_id: string;
