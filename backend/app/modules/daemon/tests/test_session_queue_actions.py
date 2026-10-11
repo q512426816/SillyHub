@@ -460,8 +460,8 @@ class TestEditEntry:
     ) -> None:
         """origin=task_wakeup 条目 409 不可编辑（D-009——改文破坏合并锚）。
 
-        2026-10-11-queue-wakeup-origin-guard：守卫改结构化 origin 判定，
-        存量前缀行（origin NULL）保持 409 兼容（第二段）。
+        2026-10-11-queue-wakeup-origin-guard：守卫改纯结构化 origin 判定
+        （存量/伪造前缀行的编辑语义见相邻两个用例）。
         """
         svc, uid, _rt, session_id, _run = await _setup_busy_session(db_session)
         result = await svc.inject_session(
