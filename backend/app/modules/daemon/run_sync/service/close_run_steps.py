@@ -41,6 +41,34 @@ from app.modules.git_gateway.service import redact_output
 from .group_bridge import _close_group_hooks
 
 
+async def _delayed_task_resweep(run_id: uuid.UUID) -> None:
+    """2026-10-11-task-sweep-liveness-guard：run 收口后的延迟任务复扫。
+
+    收口时点处于心跳宽限窗内（或带异步标记）而未被立即收口的任务行，若此后
+    再无心跳，宽限窗 + 60s 缓冲后由本复扫收口——孤儿收敛不依赖后端重启。
+    独立 DB session（H1）；复扫幂等（finalize 条件同款，已终态/仍新鲜行 no-op）。
+    """
+    import asyncio
+
+    from app.core.db import get_session_factory
+    from app.modules.daemon.agent_task_store import (
+        TASK_SWEEP_GRACE,
+        finalize_running_tasks_for_run,
+    )
+
+    await asyncio.sleep(TASK_SWEEP_GRACE.total_seconds() + 60)
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        swept = await finalize_running_tasks_for_run(db, run_id=run_id)
+        await db.commit()
+    if swept:
+        _rsvc.log.info(
+            "run_close_task_resweep",
+            agent_run_id=str(run_id),
+            swept_tasks=swept,
+        )
+
+
 async def close_interactive_run(
     svc,
     *,
@@ -130,7 +158,12 @@ async def close_interactive_run(
     # 被放弃/未上报终态时 agent_session_task 永卡 running（会话 47e2ff1a run
     # 5e485ba2 实证 17 条），任务列表在会话结束后仍显示「进行中」。已终态行
     # 不触碰；清扫后迟到 running 心跳被 upsert 终态吸收挡下（语义②）。
-    from app.modules.daemon.agent_task_store import finalize_running_tasks_for_run
+    # 2026-10-11-task-sweep-liveness-guard：finalize 只收「宽限窗外无心跳」行
+    # （跨轮次后台任务不误收）；窗内活跃任务由下方延迟复扫在窗后收敛，不靠
+    # 后端重启兜底。
+    from app.modules.daemon.agent_task_store import (
+        finalize_running_tasks_for_run,
+    )
 
     swept_tasks = await finalize_running_tasks_for_run(svc._session, run_id=agent_run.id, now=now)
     if swept_tasks:
@@ -139,6 +172,11 @@ async def close_interactive_run(
             agent_run_id=str(agent_run.id),
             swept_tasks=swept_tasks,
         )
+    # 延迟复扫（恒排——本次「宽限窗内活跃/异步标记」未扫的行，若此后再无心跳，
+    # 宽限+缓冲后由本复扫收口，不靠后端重启兜底；无非终态行时 UPDATE no-op
+    # 代价可忽略）：独立 DB session，对齐 dispatch_next_queued_message 的 H1
+    # 模式；异常交 _fire_background_task done_callback 记日志，不影响已提交终态。
+    svc._fire_background_task(_delayed_task_resweep(agent_run.id), run_id=agent_run.id)
     await svc._session.commit()
     await svc._session.refresh(agent_run)
     await _close_post_commit(
