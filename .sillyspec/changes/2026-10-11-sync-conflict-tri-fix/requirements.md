@@ -91,6 +91,7 @@ FR-01: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx�
 FR-01: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行与机器行同名去重——机器行优先不重复渲染」
 FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」
 FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」
+FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」
 FR-03: sillyspec 仓 test/platform-sync-fulltree.test.mjs「全树冲突归因单一 CJK 变更——冲突文件按变更名落盘（per-change 兼容）」（跨仓：commit e0b1ce16）
 FR-03: sillyspec 仓 test/assert-safe-change-name.test.mjs「日期前缀+中文描述」（跨仓：commit e0b1ce16）
-FR-04: 三处用例见 FR-01/02/03 绑定行——daemon 17 用例 + 前端 23 用例 + CLI 3 用例全绿，另生产冒烟两条（platform sync 全树 0 差异 exit 0；中文名 --change 同步终态墓碑上行 exit 0）
+FR-04: 三处用例见 FR-01/02/03 绑定行——daemon 18 用例 + 前端 23 用例 + CLI 3 用例全绿，另生产冒烟两条（platform sync 全树 0 差异 exit 0；中文名 --change 同步终态墓碑上行 exit 0）
