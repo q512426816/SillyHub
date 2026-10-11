@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-daemon-masked-test-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts「MSG 总数 = 25」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-daemon-masked-test-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-daemon-masked-test-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-daemon-masked-test-fix"
+    }
+  ]
+}

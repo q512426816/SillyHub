@@ -1,0 +1,98 @@
+{
+  "change": "2026-10-11-daemon-masked-test-fix",
+  "baseline": "662ee6f0e713a765bf42fbb984a0b85108676b6a",
+  "head": "2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b",
+  "files": [
+    ".sillyspec/changes/2026-10-11-daemon-masked-test-fix/tasks.md",
+    "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts",
+    "sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json",
+    "sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts",
+    "sillyhub-daemon/tests/protocol-session-contract.test.ts",
+    ".sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md",
+    ".sillyspec/changes/2026-10-11-daemon-masked-test-fix/proposal.md",
+    ".sillyspec/changes/2026-10-11-daemon-masked-test-fix/requirements.md"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 193,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-11T14:49:07.395Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "662ee6f0e713a765bf42fbb984a0b85108676b6a",
+    "totals": {
+      "files": 4,
+      "additions": 49,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts",
+        "additions": 35,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/protocol-session-contract.test.ts",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ba185f3d97f7c8b4121e98ddd730305a627a3eae3423cede302c1ac10b39bce3",
+  "patchStatus": "ok"
+}

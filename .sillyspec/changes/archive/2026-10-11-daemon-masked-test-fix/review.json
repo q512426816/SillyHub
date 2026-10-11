@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-daemon-masked-test-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 盲维 Q4「golden fixture 无跨仓消费方」失实：backend 奇偶校验测试直接消费该 fixture（实害未发生）",
+      "evidence": "design.md Q4 称「golden fixture 为 daemon 仓内测试专用，无跨仓消费方」，但 backend/app/modules/daemon/tests/test_run_sync_golden_parity.py:9-12 自述源2 事件快照「本文件消费」且头注明言「monorepo 内跨端共享：backend ↔ sillyhub-daemon」，_load_events_doc（:69-71）直接读取 golden-session.events.json。实害追踪为空：补键仅在帧 7/15/29 的 partial usage；该后端测试 §3 两轨共用同一 partial_ev[\"usage\"] 字典（:706，对称无差）、§2 只比完整帧（未获键）、_first_content_usage（:96）为零调用点死代码、SSE canon 白名单 4 个短名——补键不破坏 parity。降为 P3：设计记录对爆炸半径的断言失实，且本变更定向面未含该后端消费方测试（其回归风险由 CI 全量兜底）。",
+      "location": ".sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md:35 (vs backend/app/modules/daemon/tests/test_run_sync_golden_parity.py:9-12,69-71)"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——diff 仅在既有 usage 对象内补 api_duration_ms 三键 + 头注，不动帧序/时序结构；§2 帧 7/15 锚点同步；design 声称的乱序锚（partial 中途 flush/override 晚到/空白 result 晚到全文补报）用例未被动且 golden 文件实测绿",
+    "并发": "ok——pi 零代报钉子（workerDone 零调用 + notifyRunResult 恰一次）真实存在于 patch 且实测绿，实证生产门控（getProviderCaps(provider).mcp，providers.ts:516；pi mcp=true providers.ts:411）防双写生效；+90s 探测跳过用例保留且绿",
+    "切换": "ok——纯测试面同步，diff 无运行态生命周期风险面，design「不适用」作答成立；409 迟到收敛/网络错误容错用例（codex 载体）保留且绿",
+    "作用域": "finding——P3：backend parity 测试跨模块消费该 fixture，design「无跨仓消费方」断言失实（静态追踪实害为空，见 findings）"
+  },
+  "reviewedAt": "2026-10-11T14:52:24Z"
+}

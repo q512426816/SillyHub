@@ -2311,3 +2311,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
 理由：最大风险：daemon api-types.ts 的 872 行漂移里除已核实的改名外还可能藏其它 schema 形态变化，daemon 源码若引用了被改窄的类型会 typecheck 红灯——已用 `pnpm -C sillyhub-daemon typecheck`（0 错）实测兜住，残余风险由 daemon-ci 的 typecheck+test 复核。放弃的方案：给 PublishIntent.duration_api_ms 补默认值 `= None`（需移动字段位置避开 dataclass 非默认位序约束，会改变既有位置参数语义，波及 production 构造点，收益仅省一处夹具参数——不做）；让迁移锚测试改为不锚具体 revision（已有 test_migration_single_head.py 动态断言单头，本锚的价值恰在钉具体链尾，按惯例前移即可）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-daemon-masked-test-fix
+锚点：未记录
+最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
+理由：最大风险：pi 翻 mcp=true 后兜底代报的 codex/cursor 载体若未来也翻 true，本测试面将再失载体——届时应按 caps 现状再选载体或改测 caps 注入而非硬编码 provider 名（当前 getProviderCaps 直接读注册表，测试无注入点，故先硬编码）。放弃的方案：把 daemon.ts 门控改回对 pi 也代报（推翻 task-08 SPIKE-00 实测结论，制造双写缺陷——不做）；给 golden 快照写自动再生成脚本（一次性三键补齐用不上专用管线，且驱动协议依赖 vitest fake timers，脚本化收益低于维护成本——手补 + 头注留痕）。

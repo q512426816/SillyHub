@@ -101,3 +101,67 @@ created_at: 2026-10-08T15:19:22.662Z
 - 场景：主路径 — Given 修复落地 / When 本地相关面跑测 / Then 全绿；When push / When 五 workflow 完成 / Then 全部 success。
 全文：.sillyspec/changes/archive/2026-10-08-ci-sweep-2/requirements.md#FR-05
 最近确认：97c6598b93fd8f805dda5ab1c3f94386881a116b
+
+## FR-auto-sillyhub-daemon-026 tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
+变更：2026-10-11-daemon-masked-test-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-daemon-masked-test-fix/requirements.md#FR-01
+最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/protocol-session-contract.test.ts「MSG 总数 = 25」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-daemon-masked-test-fix
+  status: active
+
+## FR-auto-sillyhub-daemon-027 tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
+变更：2026-10-11-daemon-masked-test-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-daemon-masked-test-fix/requirements.md#FR-02
+最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-daemon-masked-test-fix
+  status: active
+
+## FR-auto-sillyhub-daemon-028 tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
+变更：2026-10-11-daemon-masked-test-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-daemon-masked-test-fix/requirements.md#FR-03
+最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-daemon-masked-test-fix:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-daemon-masked-test-fix
+  status: active
+
+## FR-auto-sillyhub-daemon-029 daemon typecheck 过；不跑全量（规则 0），全量留给 CI
+变更：2026-10-11-daemon-masked-test-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-daemon-masked-test-fix/requirements.md#FR-04
+最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b

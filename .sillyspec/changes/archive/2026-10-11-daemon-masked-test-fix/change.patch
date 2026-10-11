@@ -1,0 +1,396 @@
+diff --git a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+index 643b610b9..68ce0275c 100644
+--- a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
++++ b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+@@ -3,19 +3,25 @@
+ // daemon.onTurnResult 对 mission_worker 分身（provider 无原生 MCP）成功轮终态
+ // 兜底代报 worker_done。
+ //
+-// 背景：pi/codex/cursor 的 caps.mcp===false（providers.ts PROVIDER_CAPS），物理上
++// 背景：caps.mcp===false 的 provider（providers.ts PROVIDER_CAPS）物理上
+ // 无法经 worker_prompt 约定的 worker_done MCP 工具自报，get_worker_result 的
+ // artifacts 恒空；daemon 在既有 notifyRunResult 终态上报之后，用轮终 assistant
+ // 全文 fire-and-forget 代报 hubClient.workerDone(undefined, undefined,
+ // {summary: 全文}, {sessionId: 分身会话})，backend _worker_done_core 沉淀
+ // kind=summary artifact。
+ //
++// 2026-10-11-ci-red-batch-fix 契约同步：7bd743230（all-engines-mcp-injection
++// task-08）把 pi.caps.mcp false→true（SPIKE-00 实测），pi 分身改走 worker_done
++// MCP 工具自报路径——兜底代报门 caps.mcp===false 对 pi 不再放行（防双写）。
++// 正例与门控矩阵测试载体从 pi 换成仍 mcp=false 的 codex（机制断言不变）；
++// pi 新契约（零代报）补独立钉子。
++//
+ // 覆盖（门控矩阵 + 顺序 + 容错）：
+-//   - mission_worker + pi(mcp=false) + success + 全文非空 → 恰一次代报：
++//   - mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报：
+ //     前两参 undefined、summary=全文（不截断）、opts.sessionId=分身会话 id、
+ //     且调用发生在 notifyRunResult 之后（顺序数组断言）
+ //   - 非 mission_worker（stage 缺省）→ 零调用
+-//   - claude(mcp=true) → 零调用（自报路径，防 _worker_done_core artifact 双写）
++//   - claude(mcp=true) / pi(mcp=true 自 task-08) → 零调用（自报路径，防双写）
+ //   - is_error=true → 零调用
+ //   - result 空串 / 纯空白 / undefined / 非 string → 零调用
+ //   - workerDone reject（含 HubHttpError 409 形状）→ 仅 warn worker_auto_done_failed，
+@@ -227,11 +233,11 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     return spies;
+   }
+ 
+-  it('mission_worker + pi(mcp=false) + success + 全文非空 → 恰一次代报（参数=全文+sessionId，顺序在 notifyRunResult 之后）', async () => {
++  it('mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报（参数=全文+sessionId，顺序在 notifyRunResult 之后）', async () => {
+     track(spyConsole());
+     const { daemon, client, order } = buildHarness({
+       stage: 'mission_worker',
+-      provider: 'pi',
++      provider: 'codex',
+     });
+     daemons.push(daemon);
+ 
+@@ -285,7 +291,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     expect(client['workerDone']).not.toHaveBeenCalled();
+   });
+ 
+-  it('is_error=true → 零代报', async () => {
++  it('pi（caps.mcp false→true 自 7bd743230 / task-08，worker MCP 自报路径）→ 零代报（防双写）', async () => {
+     track(spyConsole());
+     const { daemon, client } = buildHarness({
+       stage: 'mission_worker',
+@@ -293,6 +299,21 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     });
+     daemons.push(daemon);
+ 
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await flushMicrotasks();
++
++    expect(client['workerDone']).not.toHaveBeenCalled();
++    expect(client['notifyRunResult']).toHaveBeenCalledTimes(1);
++  });
++
++  it('is_error=true → 零代报', async () => {
++    track(spyConsole());
++    const { daemon, client } = buildHarness({
++      stage: 'mission_worker',
++      provider: 'codex',
++    });
++    daemons.push(daemon);
++
+     const result = {
+       type: 'result',
+       subtype: 'error_during_execution',
+@@ -315,7 +336,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     track(spyConsole());
+     const { daemon, client } = buildHarness({
+       stage: 'mission_worker',
+-      provider: 'pi',
++      provider: 'codex',
+     });
+     daemons.push(daemon);
+ 
+@@ -328,7 +349,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+   it('workerDone reject HubHttpError(409 迟到收敛) → 仅 warn worker_auto_done_failed，onTurnResult 不 reject', async () => {
+     const spies = track(spyConsole());
+     const { daemon, client } = buildHarness(
+-      { stage: 'mission_worker', provider: 'pi' },
++      { stage: 'mission_worker', provider: 'codex' },
+       async () => {
+         throw new HubHttpError(
+           409,
+@@ -363,7 +384,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+   it('workerDone reject 普通网络错误 → 同样仅 warn 收敛不 reject', async () => {
+     const spies = track(spyConsole());
+     const { daemon } = buildHarness(
+-      { stage: 'mission_worker', provider: 'pi' },
++      { stage: 'mission_worker', provider: 'codex' },
+       async () => {
+         throw new Error('fetch failed: ECONNREFUSED');
+       },
+@@ -383,7 +404,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+   it('client 未实现 workerDone（可选成员）→ debug 日志 + onTurnResult 正常返回', async () => {
+     const spies = track(spyConsole());
+     const { daemon, client } = buildHarness(
+-      { stage: 'mission_worker', provider: 'pi' },
++      { stage: 'mission_worker', provider: 'codex' },
+       'omit',
+     );
+     daemons.push(daemon);
+@@ -412,7 +433,7 @@ describe('task-03：onTurnResult mission_worker 兜底代报 worker_done', () =>
+     track(spyConsole());
+     const { daemon, client } = buildHarness({
+       stage: 'mission_worker',
+-      provider: 'pi',
++      provider: 'codex',
+     });
+     daemons.push(daemon);
+ 
+@@ -529,10 +550,10 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白
+     expect(client['workerDone']).not.toHaveBeenCalled();
+   });
+ 
+-  it('pi 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
++  it('codex 立即代报成功后 +90s：探测 artifacts 已存在 → 不二次代报', async () => {
+     vi.useFakeTimers();
+     const { daemon, client } = buildFallbackHarness(
+-      { stage: 'mission_worker', provider: 'pi' },
++      { stage: 'mission_worker', provider: 'codex' },
+       async () => ({
+         active: true,
+         workers: [{ id: 'run-mw-1', artifacts: [{ kind: 'summary' }] }],
+@@ -550,7 +571,7 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白
+   it('result 空白 + 晚到完整 text 事件（onTurnMessage）→ 兜底用会话级最后全文', async () => {
+     vi.useFakeTimers();
+     const { daemon, client } = buildFallbackHarness(
+-      { stage: 'mission_worker', provider: 'pi' },
++      { stage: 'mission_worker', provider: 'codex' },
+       async () => ({
+         active: true,
+         workers: [{ id: 'run-mw-1', artifacts: [] }],
+diff --git a/sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json b/sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json
+index 4f201239c..1ca6fd4e1 100644
+--- a/sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json
++++ b/sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json
+@@ -1,5 +1,5 @@
+ {
+-  "_comment": "task-12 golden：ClaudeEventNormalizer 对 golden-session.json 的完整事件流（含 partial flush）。驱动协议：假时钟每帧 +100ms；帧 4/26 后推进 500ms（节流中途 flush）；帧 22/37 后 onTurnEnd；末尾 dispose。由 tests/interactive/golden/claude-events-golden.test.ts 锚定（快照防实现回归漂移）。",
++  "_comment": "task-12 golden：ClaudeEventNormalizer 对 golden-session.json 的完整事件流（含 partial flush）。驱动协议：假时钟每帧 +100ms；帧 4/26 后推进 500ms（节流中途 flush）；帧 22/37 后 onTurnEnd；末尾 dispose。由 tests/interactive/golden/claude-events-golden.test.ts 锚定（快照防实现回归漂移）。2026-10-11 再生成：帧 7/15/29 partial usage 补 api_duration_ms（2026-10-10-live-token-speed-daemon-timing 新产出键当时漏更快照，被 daemon-ci drift gate 遮蔽，2026-10-11-ci-red-batch-fix 清偿）。",
+   "advance_after_frames": [
+     4,
+     26
+@@ -74,6 +74,7 @@
+           "usage": {
+             "input_tokens": 100,
+             "output_tokens": 50,
++            "api_duration_ms": 500,
+             "cache_read_tokens": 500,
+             "cache_creation_tokens": 0,
+             "ctx_tokens": 600
+@@ -142,6 +143,7 @@
+           "usage": {
+             "input_tokens": 420,
+             "output_tokens": 170,
++            "api_duration_ms": 1100,
+             "cache_read_tokens": 700,
+             "cache_creation_tokens": 64,
+             "ctx_tokens": 1084
+@@ -381,6 +383,7 @@
+           "usage": {
+             "input_tokens": 900,
+             "output_tokens": 40,
++            "api_duration_ms": 400,
+             "cache_read_tokens": 1500,
+             "cache_creation_tokens": 64,
+             "ctx_tokens": 2400
+diff --git a/sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts b/sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts
+index 38c826b3a..a02593a12 100644
+--- a/sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts
++++ b/sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts
+@@ -338,10 +338,12 @@ describe('golden 事件序列快照', () => {
+       segment_id: 'main:msg_t1_m1:thinking',
+     });
+     expect(byFrame.get(4)!.partials[0]!.usage).toBeUndefined();
+-    // 帧 7：message_stop 边界 flush 携带中途 usage（含 ctx_tokens，D-003/D-005）。
++    // 帧 7：message_stop 边界 flush 携带中途 usage（含 ctx_tokens，D-003/D-005；
++    // api_duration_ms 为 live-token-speed FR-04 产出键）。
+     expect(byFrame.get(7)!.partials[0]!.usage).toEqual({
+       input_tokens: 100,
+       output_tokens: 50,
++      api_duration_ms: 500,
+       cache_read_tokens: 500,
+       cache_creation_tokens: 0,
+       ctx_tokens: 600,
+@@ -353,10 +355,12 @@ describe('golden 事件序列快照', () => {
+       usage: { input_tokens: 100, output_tokens: 50, cache_read_tokens: 500 },
+       session_id: 'sess-sample-0003',
+     });
+-    // 帧 15：轮级累计 usage（input 100+320 / output 50+120）+ ctx 重建 320+700+64。
++    // 帧 15：轮级累计 usage（input 100+320 / output 50+120）+ ctx 重建 320+700+64
++    // + api_duration_ms 桶计时（live-token-speed FR-04）。
+     expect(byFrame.get(15)!.partials[0]!.usage).toEqual({
+       input_tokens: 420,
+       output_tokens: 170,
++      api_duration_ms: 1100,
+       cache_read_tokens: 700,
+       cache_creation_tokens: 64,
+       ctx_tokens: 1084,
+diff --git a/sillyhub-daemon/tests/protocol-session-contract.test.ts b/sillyhub-daemon/tests/protocol-session-contract.test.ts
+index 7236711be..8c9ed49b6 100644
+--- a/sillyhub-daemon/tests/protocol-session-contract.test.ts
++++ b/sillyhub-daemon/tests/protocol-session-contract.test.ts
+@@ -115,8 +115,10 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
+     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
+   });
+ 
+-  it('MSG 总数 = 24（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令），互不干扰', () => {
+-    expect(Object.keys(MSG)).toHaveLength(24);
++  it('MSG 总数 = 25（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE + 2 平台同步命令 + 1 TOMBSTONE_CLEANUP），互不干扰', () => {
++    // 0b09d1555（2026-10-09-tombstone-conflict-root-fix）加 SILLYSPEC_TOMBSTONE_CLEANUP
++    // 漏更本钉——24→25。
++    expect(Object.keys(MSG)).toHaveLength(25);
+   });
+ 
+   it('SILLYSPEC_UPDATE（sillyspec 升级指令）字符串值 = daemon:sillyspec_update（与 backend DAEMON_MSG_SILLYSPEC_UPDATE 逐字对齐）', () => {
+diff --git a/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/tasks.md b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/tasks.md
+new file mode 100644
+index 000000000..11605817f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:47:54.562Z
++---
++# 任务注册表（Tasks）— 2026-10-11-daemon-masked-test-fix
++
++- [x] task-01: tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
++- [x] task-02: tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
++- [x] task-03: tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
++- [x] task-04: daemon typecheck 过；不跑全量（规则 0），全量留给 CI
+diff --git a/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:47:54.562Z
++---
++# 设计记录（Design Record）— 2026-10-11-daemon-masked-test-fix
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++drift 门自 2026-10-09 引入起一直在 Test 步前红灯，daemon 测试面从未在 CI 真正跑过——上一变更清偿 drift 后首次执行即暴露 8 例存量失败，三类全部为测试面滞后于有意生产行为：①协议 MSG 计数钉 24 落后于 0b09d1555 新增的 SILLYSPEC_TOMBSTONE_CLEANUP（实 25）；②golden 事件流快照缺 live-token-speed（21eb98d53）新增的 usage.api_duration_ms 产出键（帧 7/15/29 = 500/1100/400）；③mission_worker 兜底代报 6 例拿 pi 当 mcp=false 载体，而 7bd743230（all-engines-mcp-injection task-08，SPIKE-00 实测）已把 pi.caps.mcp 翻 true——daemon 对 pi 停止代报是防双写的有意行为。修法：①计数钉前移 + 来历注释；②快照按实测产出补三键 + 头注记录 + §2 锚点同步；③机制断言原样换 codex 载体（仍 mcp=false）+ 新增 pi 零代报钉子。生产代码零改动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无生产接口变化。改动限于 2 个测试文件 + 1 个测试 fixture（golden-session.events.json 机器快照补键，非手写业务数据）。daemon 运行时行为以 daemon.ts 既有门控为准（caps.mcp===false 才兜底代报）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   golden 快照的驱动协议本身即乱序场景的锚（partial 中途 flush / override 晚到 / 空白 result 晚到全文补报各有 §1/§4/ql-028 用例钉住），本次只补 usage 键不动帧序/时序结构，时序假设不变。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   兜底代报防双写语义由生产门控保证（mcp=true 不代报 + +90s 探测 artifacts 非空跳过）——新增 pi 零代报钉子正是把该并发防重断言钉进测试面；测试文件本身无并发写。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用——纯测试面同步，无运行态生命周期；409 迟到收敛 / 网络错误容错用例（codex 载体）继续钉住兜底通道的中断安全语义。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   载体切换只影响测试内 mock 会话的 provider 字段，不触真实多实例；golden fixture 为 daemon 仓内测试专用，无跨仓消费方。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：pi 翻 mcp=true 后兜底代报的 codex/cursor 载体若未来也翻 true，本测试面将再失载体——届时应按 caps 现状再选载体或改测 caps 注入而非硬编码 provider 名（当前 getProviderCaps 直接读注册表，测试无注入点，故先硬编码）。放弃的方案：把 daemon.ts 门控改回对 pi 也代报（推翻 task-08 SPIKE-00 实测结论，制造双写缺陷——不做）；给 golden 快照写自动再生成脚本（一次性三键补齐用不上专用管线，且驱动协议依赖 vitest fake timers，脚本化收益低于维护成本——手补 + 头注留痕）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/tests/protocol-session-contract.test.ts | MSG 计数钉 24→25 + 来历注释 |
++| 修改 | sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json | 帧 7/15/29 usage 补 api_duration_ms + 头注 |
++| 修改 | sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts | §2 帧 7/15 锚点同步该键 |
++| 修改 | sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts | 载体 pi→codex（9 处）+ pi 零代报新钉 |
+
+diff --git a/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/proposal.md b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/proposal.md
+@@ -0,0 +1,30 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:47:54.562Z
++---
++# 提案书（Proposal）— 2026-10-11-daemon-masked-test-fix
++
++## 动机
++
++任务原话转写：动机：上一变更清偿 daemon-ci drift 门后，被其遮蔽的 Test 步首次真正执行，暴露 3 个测试文件 8 例存量失败（协议 MSG 计数钉 24 实 25、golden 快照缺 api_duration_ms 三处、mission_worker 兜底代报 6 例用 pi 当 mcp=false 载体而 task-08 已翻 true）——全部为测试面滞后于有意生产行为，生产代码零缺陷。
++
++成功标准：
++- tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
++- tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
++- tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
++- daemon typecheck 过；不跑全量（规则 0），全量留给 CI
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
++2. tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
++3. tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
++4. daemon typecheck 过；不跑全量（规则 0），全量留给 CI
++
++## 成功标准（可验证）
++
++1. tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
++2. tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
++3. tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
++4. daemon typecheck 过；不跑全量（规则 0），全量留给 CI
+
+diff --git a/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/requirements.md b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-daemon-masked-test-fix/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T14:47:54.562Z
++---
++# 需求规格（Requirements）— 2026-10-11-daemon-masked-test-fix
++
++## 功能需求
++
++### FR-01: tests/protocol-session-contract.test.ts MSG 总数钉 24→25（补 TOMBSTONE_CLEANUP 来历注释），定向 vitest 绿
++
++- 协议 MSG 常量计数钉子必须与 protocol.ts 实际常量数一致：`Object.keys(MSG))` 断言必须为 25（0b09d1555 增 SILLYSPEC_TOMBSTONE_CLEANUP 后的实际值），用例标题与注释必须写明该常量来历，该文件定向 vitest 必须全绿。
++
++#### 场景：主路径
++
++- Given：protocol.ts MSG 含 SILLYSPEC_TOMBSTONE_CLEANUP（共 25 键）。
++- When：运行「MSG 总数」计数钉子用例。
++- Then：断言 25 通过，无键值回归。
++
++### FR-02: tests/fixtures/claude-sdk-messages/golden-session.events.json 帧 7/15/29 补 usage.api_duration_ms（500/1100/400）+ 头注再生成记录 + §2 锚点两处同步，定向 vitest 绿
++
++- golden 事件流快照必须与 ClaudeEventNormalizer 当前产出逐字段一致：帧 7/15/29 partial 的 usage 必须携带 api_duration_ms 500/1100/400（live-token-speed FR-01/FR-04 新产出键），fixture 头注必须记录再生成来历，测试 §2 帧 7/15 两处 usage 锚点断言必须同步含该键，golden 文件定向 vitest 必须全绿。
++
++#### 场景：主路径
++
++- Given：normalizer 自 live-token-speed 起 usage 产出 api_duration_ms，快照停在该变更前。
++- When：按快照驱动协议（假时钟 +100ms/帧、帧 4/26 推 500ms、帧 22/37 onTurnEnd）跑 §1 逐字段对照。
++- Then：三处 usage 补键后全帧一致，§2/§3/§4 语义锚不回归。
++
++### FR-03: tests/daemon-mission-worker-artifact.test.ts 兜底代报载体 pi→codex（caps.mcp 仍 false，机制断言原样保留）+ 新增 pi 零代报钉子（自报路径防双写），定向 vitest 绿
++
++- mission_worker 兜底代报测试的载体 provider 必须与现行 caps 契约匹配：caps.mcp===false 的门控/容错/多轮机制断言必须改用仍为 mcp=false 的 codex 载体（断言原样保留），并必须新增 pi 零代报钉子（7bd743230 翻值后 pi 走 worker_done MCP 自报路径，daemon 代报会双写 artifacts），该文件定向 vitest 必须全绿（19 例）。
++
++#### 场景：主路径
++
++- Given：pi caps.mcp=true（7bd743230 / all-engines-mcp-injection task-08）、codex 仍 false。
++- When：mission_worker + codex 成功轮 onTurnResult。
++- Then：兜底代报恰一次、顺序在 notifyRunResult 后；pi 同场景零代报。
++
++### FR-04: daemon typecheck 过；不跑全量（规则 0），全量留给 CI
++
++- 本变更必须只跑定向面（3 个测试文件 vitest + daemon tsc --noEmit），禁止跑全量测试套件，全量验证留给 CI。
++
++#### 场景：主路径
++
++- Given：CLAUDE.md 规则 0。
++- When：本变更各任务验证。
++- Then：仅定向面被执行。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/protocol-session-contract.test.ts「MSG 总数 = 25」
++FR-02: sillyhub-daemon/tests/interactive/golden/claude-events-golden.test.ts「逐帧 partials+events 与 golden-session.events.json 逐字段一致」+「关键语义锚点抽查」
++FR-03: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报」+「pi（caps.mcp false→true 自 7bd743230）→ 零代报」
++FR-04: 不适用：流程约束条款（禁止跑全量），无独立测试面——由各定向测试命令范围本身佐证
