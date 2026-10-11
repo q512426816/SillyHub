@@ -1,0 +1,612 @@
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/flow-state.yaml b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/flow-state.yaml
+new file mode 100644
+index 000000000..2670a3132
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/flow-state.yaml
+@@ -0,0 +1,32 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  junction 备份交换的半交换异常路径绕过降级 pull（24h 审查 P2-1）+ .pre-junction-backup-* 备份目录无清理无界增长（P3-1）：261dc22e9 后 spec-sync.ts
++  ensureSpecJunction 在普通目录残留场景 rename(specDir→backup) 成功后，mkdir/symlink 裸抛异常直接飞出函数，而降级 pull 只覆盖 return false 路径——Windows
++  symlink EPERM/EBUSY 等暂态或持久失败时该次 pull 整体失败且永不降级；备份目录全仓无删除路径（sweepStalePullScraps 只清 .tmp-/.trash-）。修复：post-rename
++  mkdir+symlink 收进 try/catch，失败 warn 后 return false 走既有降级 pull（数据留在 backup 不丢）；sweepStalePullScraps 增
++  .pre-junction-backup- 前缀清扫（保留期 7 天，区别于 tmp/trash 的 10 分钟）。
++
++  成功标准：
++
++  - rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync:
++  repo_native_junction_blocked_fallback 日志可达）
++
++  - mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
++
++  - rename 自身失败仍走既有 return false 降级（零回归）
++
++  - 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
++
++  - sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
++
++  - .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
++autopilot: true
++baseline_commit: 5a0c18fe3e961a539a1796269362f67c93e7dd3a
++updatedAt: '2026-10-11T04:11:49.690Z'
++baseline_sha256: ba427f364cad95cddcc6997e29163744eff888beb25fed77ea17890dad78253d
++
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 80cf71de3..72c2cd67c 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -99,8 +99,11 @@ class TestMigrationStructure:
+         # 2026-10-03-local-usage-segment-attribution）→ 20261006120000
+         # （provider_agent_kinds，2026-10-06-provider-multi-agent-kind）→
+         # 20261006200000（四旧列删/存量折算，2026-10-06-provider-model-list）→
+-        # 20261008100000（drop_dead_rbac_permissions，2026-10-08）。
+-        assert heads[0] == "20261008100000"  # drop_dead_rbac_permissions 成为新 head
++        # 20261008100000（drop_dead_rbac_permissions，2026-10-08）→
++        # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
++        # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
++        # 拦截后顺手清偿）。
++        assert heads[0] == "20261010190000"  # workspace_linked_repos 成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 56812f0d6..405749b5a 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
+ import { spawn as cpSpawn, type ChildProcess } from 'node:child_process';
+ import { homedir } from 'node:os';
+ import { join, relative, isAbsolute, dirname, resolve, basename, sep as pathSep } from 'node:path';
+-import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename } from 'node:fs/promises';
++import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile, rename, utimes } from 'node:fs/promises';
+ import type { HubClient } from './hub-client.js';
+ import type { FileOp } from './hub-client.js';
+ import { daemonStateDir } from './config.js';
+@@ -140,6 +140,10 @@ export async function pullSpecBundle(
+   // resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被调用方 catch。
+   const specDir = resolveSpecDir(wsId);
+   const strategy = opts.strategy || 'platform-managed';
++  // 2026-10-11-junction-fallback-backup-sweep：清扫前置到策略分支之前——既有
++  // 调用点（pull 主路径中段）在 repo-native junction 成功早返回路径上不可达，
++  // 备份/残留只在走 pull 时才被清。幂等 best-effort，与中段调用重复无害。
++  await sweepStalePullScraps(dirname(specDir), basename(specDir));
+ 
+   // ── repo-native（D-005）：建 junction 让缓存指向源项目 .sillyspec，跳过 pull 覆盖 ──
+   // scan 直接写源项目（实时双向）。R-01：repo-native 不走 rm/不覆盖，避免顺链删源项目。
+@@ -325,9 +329,15 @@ async function renameWithRetry(from: string, to: string, attempts = 3): Promise<
+  * ql-20260904-016：清理本 workspace 上一次崩溃 pull 留下的 tmp/trash 残留
+  * （`${wsId}.tmp-*` / `${wsId}.trash-*` 同级兄弟目录）。仅清 mtime 距今超 10 分钟的
+  * ——进行中的并发 pull（tmp 名含 pid+ts，必然新鲜）不受影响。best-effort，失败静默。
++ *
++ * 2026-10-11-junction-fallback-backup-sweep（P3-1）：增配 `${wsId}.pre-junction-backup-*`
++ * （261dc22e9 备份交换产物，此前全仓无删除路径、磁盘无界增长）——保留期 7 天
++ * （区别于 in-flight tmp/trash 的 10 分钟：备份是旧缓存的完整数据快照，留人工
++ * 检查/取回窗口；repo-native 场景真数据在源项目，超期备份按废弃缓存清理）。
+  */
+ async function sweepStalePullScraps(parent: string, base: string): Promise<void> {
+   const STALE_SCRAP_AGE_MS = 10 * 60 * 1000;
++  const STALE_BACKUP_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+   let entries: string[];
+   try {
+     entries = await readdir(parent);
+@@ -337,12 +347,20 @@ async function sweepStalePullScraps(parent: string, base: string): Promise<void>
+   const now = Date.now();
+   await Promise.all(
+     entries
+-      .filter((n) => n.startsWith(`${base}.tmp-`) || n.startsWith(`${base}.trash-`))
++      .filter(
++        (n) =>
++          n.startsWith(`${base}.tmp-`) ||
++          n.startsWith(`${base}.trash-`) ||
++          n.startsWith(`${base}.pre-junction-backup-`),
++      )
+       .map(async (n) => {
+         const p = join(parent, n);
++        const ageMs = n.startsWith(`${base}.pre-junction-backup-`)
++          ? STALE_BACKUP_AGE_MS
++          : STALE_SCRAP_AGE_MS;
+         try {
+           const st = await lstat(p);
+-          if (now - st.mtimeMs > STALE_SCRAP_AGE_MS) {
++          if (now - st.mtimeMs > ageMs) {
+             await rm(p, { recursive: true, force: true });
+             console.warn('spec_sync: stale_scrap_swept', p);
+           }
+@@ -518,6 +536,11 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
+     );
+     try {
+       await renameWithRetry(specDir, backup);
++      // 评审 P3 清偿：保留期锚定**创建时刻**——rename 继承旧目录 mtime（残留
++      // 可携月级旧值），不清零则 7 天人工窗口对老残留形同虚设（下次清扫即删）。
++      // best-effort：盖戳失败不阻塞（sweep 判龄退化回 mtime 原值）。
++      const now = new Date();
++      await utimes(backup, now, now).catch(() => {});
+       console.info('spec_sync: junction_stale_dir_backed_up', specDir, '->', backup);
+     } catch (e) {
+       console.warn('spec_sync: junction_backup_rename_failed_fallback', specDir, e);
+@@ -534,13 +557,26 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
+       return false;
+     }
+   }
+-  await mkdir(dirname(specDir), { recursive: true });
+-  // Win 用 junction（目录联接，fs.symlink type='junction' 无需提权）；
+-  // Linux·macOS 用普通 symlink。target 须绝对路径（rootPath/.sillyspec 是绝对路径）。
+-  if (process.platform === 'win32') {
+-    await symlink(target, specDir, 'junction');
+-  } else {
+-    await symlink(target, specDir);
++  // 2026-10-11-junction-fallback-backup-sweep（24h 审查 P2-1）：半交换收口——
++  // 上方 rename(specDir→backup) 成功后，此处的 mkdir/symlink 裸抛异常会飞出
++  // 本函数、绕过 pullSpecBundle 的降级 pull（其只覆盖 return false 路径），
++  // Windows symlink EPERM/EBUSY 等失败时该次 pull 整体失败且持久失败永不降级。
++  // 收进 try/catch：失败 warn + return false → 走既有降级 pull（旧数据已在
++  // backup 不丢；下次 pull 重试 junction 可自愈）。注：repo-native 分支的
++  // mkdir(sourceSillyspec) 保持 fail-loud 不降级——降级会重开 261dc22e9 收口的
++  // 平台标记投毒面（显式边界，见 change design）。
++  try {
++    await mkdir(dirname(specDir), { recursive: true });
++    // Win 用 junction（目录联接，fs.symlink type='junction' 无需提权）；
++    // Linux·macOS 用普通 symlink。target 须绝对路径（rootPath/.sillyspec 是绝对路径）。
++    if (process.platform === 'win32') {
++      await symlink(target, specDir, 'junction');
++    } else {
++      await symlink(target, specDir);
++    }
++  } catch (e) {
++    console.warn('spec_sync: junction_create_failed_fallback', specDir, '->', target, e);
++    return false;
+   }
+   return true;
+ }
+diff --git a/sillyhub-daemon/tests/test_init_lease.test.ts b/sillyhub-daemon/tests/test_init_lease.test.ts
+index 3a40b871d..c61c6f935 100644
+--- a/sillyhub-daemon/tests/test_init_lease.test.ts
++++ b/sillyhub-daemon/tests/test_init_lease.test.ts
+@@ -40,7 +40,24 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
+   return { ...actual, writeLocalYaml: localYamlWriterMock };
+ });
+ 
+-import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir } from 'node:fs/promises';
++// 2026-10-11-junction-fallback-backup-sweep：fs/promises 透传式 mock——默认逐字
++// 透传（既有用例零影响），半交换降级用例内联注入 symlink/mkdir 失败（按
++// specDir 精确路径匹配，不伤其它 fs 调用）。fsReal 持有真实实现供条件分支回 delegates 委托。
++const { fsSymlinkMock, fsMkdirMock, fsReal } = vi.hoisted(() => ({
++  fsSymlinkMock: vi.fn(),
++  fsMkdirMock: vi.fn(),
++  fsReal: { symlink: null as null | typeof import('node:fs/promises').symlink, mkdir: null as null | typeof import('node:fs/promises').mkdir },
++}));
++vi.mock('node:fs/promises', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:fs/promises')>();
++  fsReal.symlink = actual.symlink;
++  fsReal.mkdir = actual.mkdir;
++  fsSymlinkMock.mockImplementation((...args: Parameters<typeof actual.symlink>) => actual.symlink(...args));
++  fsMkdirMock.mockImplementation((...args: Parameters<typeof actual.mkdir>) => actual.mkdir(...args));
++  return { ...actual, symlink: fsSymlinkMock, mkdir: fsMkdirMock };
++});
++
++import { mkdtemp, mkdir, writeFile, rm, readFile, lstat, stat, realpath, readdir, utimes } from 'node:fs/promises';
+ import { writeFileSync } from 'node:fs';
+ import { tmpdir, homedir } from 'node:os';
+ import { join, dirname } from 'node:path';
+@@ -108,6 +125,8 @@ const TEST_WS_IDS = [
+   'ws-init-native', 'ws-init-mirror', 'ws-init-pm-state', 'ws-init-bump-recreate', 'ws-init-batch-native',
+   // 2026-10-10-repo-native-no-platform-markers：源缺失不降级 / 残留备份交换两用例
+   'ws-init-native-nosource', 'ws-init-native-stale',
++  // 2026-10-11-junction-fallback-backup-sweep：半交换降级两用例 + 备份清扫用例
++  'ws-init-halfswap-link', 'ws-init-halfswap-mkdir', 'ws-init-sweep-bak',
+ ];
+ afterAll(async () => {
+   await Promise.all(
+@@ -1162,5 +1181,186 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
+   });
+ });
+ 
++// ── junction 半交换收口 + 备份清扫（2026-10-11-junction-fallback-backup-sweep）──
++//
++// 24h 审查 P2-1/P3-1：261dc22e9 的备份交换在 rename(specDir→backup) 成功后
++// mkdir/symlink 裸抛异常飞出 ensureSpecJunction，绕过 pullSpecBundle 的降级
++// pull（只覆盖 return false 路径）；.pre-junction-backup-* 全仓无清理。
++// 修复：post-rename 两调用收进 try/catch（失败 return false 降级）；
++// sweepStalePullScraps 增备份前缀（7 天保留期）+ pullSpecBundle 顶部清扫
++//（repo-native junction 成功早返回路径不可达既有 :225 调用点）。
++
++describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-backup-sweep)', () => {
++  let tmpProject: string;
++
++  beforeEach(async () => {
++    tmpProject = await mkdtemp(join(tmpdir(), 'init-junction-fallback-'));
++  });
++  afterEach(async () => {
++    await rm(tmpProject, { recursive: true, force: true }).catch(() => {});
++  });
++
++  /** 普通目录残留缓存 + 源项目 .sillyspec 就绪（repo-native 半交换前置态）。 */
++  async function seedResidueAndSource(wsId: string): Promise<string> {
++    const cacheRoot = resolveSpecDir(wsId);
++    await mkdir(join(cacheRoot, 'legacy'), { recursive: true });
++    await writeFile(join(cacheRoot, 'legacy', 'old.md'), '# old');
++    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
++    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
++    return cacheRoot;
++  }
++
++  /** 清掉本 wsId 在真实缓存根的全部兄弟目录（cache + tmp/trash/backup 残留）。 */
++  async function cleanupWsScraps(wsId: string): Promise<void> {
++    const parent = dirname(resolveSpecDir(wsId));
++    for (const n of await readdir(parent).catch(() => [] as string[])) {
++      if (n === wsId || n.startsWith(`${wsId}.`)) {
++        await rm(join(parent, n), { recursive: true, force: true }).catch(() => {});
++      }
++    }
++  }
++
++  it('半交换 symlink 失败（EPERM 注入）→ 降级 pull：数据留 backup + 双 warn + ok=true', async () => {
++    const wsId = 'ws-init-halfswap-link';
++    const cacheRoot = await seedResidueAndSource(wsId);
++    const getSpecBundle = vi.fn().mockResolvedValue(Buffer.alloc(0));
++    const client = makeClient({ getSpecBundle });
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++    // 仅对指向本 wsId specDir 的 symlink 注入 EPERM，其余透传。
++    const originalSymlink = fsSymlinkMock.getMockImplementation()!;
++    fsSymlinkMock.mockImplementation(async (...args: Parameters<typeof import('node:fs/promises')['symlink']>) => {
++      if (String(args[1]).includes(wsId)) {
++        throw Object.assign(new Error('injected EPERM'), { code: 'EPERM' });
++      }
++      return fsReal.symlink!(...args);
++    });
++    try {
++      const result = await handleInitLease(client as never, {
++        workspaceId: wsId,
++        rootPath: tmpProject,
++        serverOrigin: 'http://127.0.0.1:8000',
++        strategy: 'repo-native',
++        spawnFn: makeInitSpawn(),
++        latestSpecVersion: 1,
++      });
++
++      // 降级 pull 生效：init 成功 + 走了 bundle 拉取 + specDir 重建为普通目录。
++      expect(result.ok).toBe(true);
++      expect(getSpecBundle).toHaveBeenCalled();
++      expect((await lstat(cacheRoot)).isSymbolicLink()).toBe(false);
++      // 双 warn 可达：半交换收口 warn + 既有降级分支 warn。
++      const warnText = warnSpy.mock.calls.map((c) => String(c?.[0])).join('\n');
++      expect(warnText).toContain('junction_create_failed_fallback');
++      expect(warnText).toContain('repo_native_junction_blocked_fallback');
++      // 旧数据完整保留在 backup（rename 备份非删除）。
++      const parent = dirname(cacheRoot);
++      const backups = (await readdir(parent)).filter((n) =>
++        n.startsWith(`${wsId}.pre-junction-backup-`),
++      );
++      expect(backups.length).toBe(1);
++      expect(await readFile(join(parent, backups[0], 'legacy', 'old.md'), 'utf-8')).toBe('# old');
++    } finally {
++      warnSpy.mockRestore();
++      fsSymlinkMock.mockImplementation(originalSymlink);
++      await cleanupWsScraps(wsId);
++    }
++  });
++
++  it('半交换 mkdir(dirname(specDir)) 失败 → 同一 catch 收口降级（无裸异常飞出）', async () => {
++    const wsId = 'ws-init-halfswap-mkdir';
++    const cacheRoot = await seedResidueAndSource(wsId);
++    const getSpecBundle = vi.fn().mockResolvedValue(Buffer.alloc(0));
++    const client = makeClient({ getSpecBundle });
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
++    // 仅对 specDir 父目录的 mkdir 注入失败（ensureSpecJunction 半交换后重建调用），
++    // 其余 mkdir 透传（源项目 .sillyspec 创建等不受影响）。
++    const parentDir = dirname(cacheRoot);
++    const originalMkdir = fsMkdirMock.getMockImplementation()!;
++    fsMkdirMock.mockImplementation(async (...args: Parameters<typeof import('node:fs/promises')['mkdir']>) => {
++      if (String(args[0]) === parentDir) {
++        throw Object.assign(new Error('injected EACCES'), { code: 'EACCES' });
++      }
++      return fsReal.mkdir!(...args);
++    });
++    try {
++      const result = await handleInitLease(client as never, {
++        workspaceId: wsId,
++        rootPath: tmpProject,
++        serverOrigin: 'http://127.0.0.1:8000',
++        strategy: 'repo-native',
++        spawnFn: makeInitSpawn(),
++        latestSpecVersion: 1,
++      });
++
++      expect(result.ok).toBe(true);
++      expect(getSpecBundle).toHaveBeenCalled();
++      const warnText = warnSpy.mock.calls.map((c) => String(c?.[0])).join('\n');
++      expect(warnText).toContain('junction_create_failed_fallback');
++      expect(warnText).toContain('repo_native_junction_blocked_fallback');
++    } finally {
++      warnSpy.mockRestore();
++      fsMkdirMock.mockImplementation(originalMkdir);
++      await cleanupWsScraps(wsId);
++    }
++  });
++
++  it('repo-native 成功路径清扫过期备份（8 天清/10 分钟留）；tmp/trash 10 分钟语义零回归', async () => {
++    const wsId = 'ws-init-sweep-bak';
++    await seedResidueAndSource(wsId); // 普通残留 → 本次运行会产生新备份（新鲜）
++    // 评审 P3 钉：残留缓存盖 30 天旧 mtime——rename 继承旧值，备份创建时刻
++    // 盖戳后仍须视为新鲜（不清扫），7 天人工窗口对老残留真实生效。
++    const residueRoot = resolveSpecDir(wsId);
++    await utimes(residueRoot, new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
++    const parent = dirname(resolveSpecDir(wsId));
++    const now = Date.now();
++    const DAY = 24 * 60 * 60 * 1000;
++    const MIN = 60 * 1000;
++    const mkScratch = async (name: string, ageMs: number) => {
++      const p = join(parent, name);
++      await mkdir(p, { recursive: true });
++      await writeFile(join(p, 'x.md'), 'x');
++      await utimes(p, new Date(now - ageMs), new Date(now - ageMs));
++    };
++    await mkScratch(`${wsId}.pre-junction-backup-${now - 8 * DAY}`, 8 * DAY); // 过期备份
++    const freshBackupName = `${wsId}.pre-junction-backup-${now - 5 * MIN}`;
++    await mkScratch(freshBackupName, 5 * MIN); // 保留期内备份
++    await mkScratch(`${wsId}.tmp-111-${now - 11 * MIN}`, 11 * MIN); // 过期 tmp
++    await mkScratch(`${wsId}.tmp-222-${now - 5 * MIN}`, 5 * MIN); // in-flight tmp
++    const client = makeClient(); // junction 成功 → getSpecBundle 不应被调
++
++    try {
++      const result = await handleInitLease(client as never, {
++        workspaceId: wsId,
++        rootPath: tmpProject,
++        serverOrigin: 'http://127.0.0.1:8000',
++        strategy: 'repo-native',
++        spawnFn: makeInitSpawn(),
++        latestSpecVersion: 1,
++      });
++
++      expect(result.ok).toBe(true);
++      expect(client.getSpecBundle).not.toHaveBeenCalled();
++      const names = await readdir(parent);
++      // 过期备份被清（旧实现 repo-native 路径不清扫 → 残留，本用例红点）。
++      expect(names.some((n) => n.startsWith(`${wsId}.pre-junction-backup-`) && n.endsWith(`${now - 8 * DAY}`))).toBe(false);
++      // 保留期内备份不误删 + 本次运行新产生的备份在（残留 mtime 30 天旧——
++      // 创建时刻盖戳锚定，不因继承旧 mtime 被立即清扫）。
++      expect(names).toContain(freshBackupName);
++      const runBackups = names.filter(
++        (n) => n.startsWith(`${wsId}.pre-junction-backup-`) && n !== freshBackupName,
++      );
++      expect(runBackups.length).toBe(1);
++      // 盖戳直接证据：新备份 mtime 距今 < 60s（未盖戳则继承残留的 30 天旧值）。
++      const runBackupStat = await lstat(join(parent, runBackups[0]));
++      expect(Date.now() - runBackupStat.mtimeMs).toBeLessThan(60_000);
++      // tmp/trash 既有 10 分钟语义零回归（repo-native 路径此前不扫，顶部清扫后照扫）。
++      expect(names.some((n) => n.startsWith(`${wsId}.tmp-111-`))).toBe(false);
++      expect(names.some((n) => n.startsWith(`${wsId}.tmp-222-`))).toBe(true);
++    } finally {
++      await cleanupWsScraps(wsId);
++    }
++  });
++});
++
+ // 防止 "homedir 未使用" lint（清理路径预留扩展用）
+ void homedir;
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md
+new file mode 100644
+index 000000000..5b7f6463e
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md
+@@ -0,0 +1,53 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:11:49.668Z
++---
++# 设计记录（Design Record）— 2026-10-11-junction-fallback-backup-sweep
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查 P2-1 + P3-1：261dc22e9 引入的 junction 备份交换在 `rename(specDir→backup)` 成功后，`mkdir(dirname(specDir))` 与 `symlink(...)`（:537/:541/:543）是裸 await——异常直接飞出 `ensureSpecJunction`，而 `pullSpecBundle` 的降级 pull（:161-162）只覆盖 `return false` 路径，半交换失败时该次 pull 整体失败且持久性失败（杀软长锁等）永不降级；同时 `.pre-junction-backup-<ts>` 备份目录全仓无删除路径，磁盘无界增长。修复：post-rename 两调用收进单一 try/catch，失败 warn（`junction_create_failed_fallback`）后 `return false` 走既有降级 pull（旧数据已在 backup，不丢，下次 pull 重试 junction 可自愈）；`sweepStalePullScraps` 增 `.pre-junction-backup-` 前缀（7 天保留期，区别于 in-flight tmp/trash 的 10 分钟——备份是用户数据的完整快照，留人工检查窗口），并在 `pullSpecBundle` 顶部（策略分支前）增一次清扫调用——既有调用点（:225）在 repo-native junction 成功早返回路径上不可达。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `sillyhub-daemon/src/spec-sync.ts` `ensureSpecJunction`（内部函数，未导出）：post-rename `mkdir`+`symlink` 收进 try/catch → 失败 `return false`（新增 warn 日志键 `spec_sync: junction_create_failed_fallback`）；`return true` 路径行为不变。备份 rename 成功后 `utimes(backup, now)` 盖创建时刻戳（评审 P3 清偿：rename 继承旧目录 mtime 会让老残留的 7 天保留窗形同虚设；best-effort，失败退化 mtime 原值）。
++- `sweepStalePullScraps`（内部函数）：过滤增 `.pre-junction-backup-` 前缀，按前缀选保留期（backup 7 天 / tmp·trash 10 分钟既有）；docstring 同步。
++- `pullSpecBundle`（导出）：函数体顶部（resolveSpecDir 之后、策略分支之前）增一次 `sweepStalePullScraps` 调用；既有 :225 调用保留（双清扫幂等，成本一次 readdir）。
++- 模块导出面、daemon.ts 调用方、backend、前端：零改动（「无」）。repo-native 分支 `mkdir(sourceSillyspec)`（:153）保持 fail-loud（见边界裁决）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++清扫按 mtime 判龄（tmp 名含 pid+ts 必然新鲜；备份在 rename 成功后以 utimes 显式盖创建时刻戳——rename 会继承旧目录 mtime，老残留不盖戳则 7 天窗口形同虚设；盖戳 best-effort 失败退化 mtime 原值），并发 pull 的在途目录不受影响；半交换降级后下次 pull 重试 junction，迟到到达不改变收敛方向。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++pullSpecBundle 有 single-flight（daemon.ts:1830 同工作区去重），同 ws 并发清扫不重叠；清扫 best-effort（失败静默），误删面仅限「mtime 超 7 天的备份」——同 ws 7 天内不可能既有新备份又被并发清扫（mtime 是创建时刻，新备份恒新鲜）。跨 ws 清扫按 (parent, base) 前缀隔离不串台。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++半交换失败态（specDir 缺位、数据在 backup）本身就是旧实现已存在的形态，本变更只是把「抛异常」改成「降级 pull 重建 specDir」——比旧态更安全；7 天保留期内 backup 可人工取回，超期按废弃缓存清理（源项目 repo-native 场景数据本就在源项目，备份只是旧缓存快照）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++清扫前缀按 wsId（base）锚定，只清本 workspace 的兄弟目录；junction/symlink 目标恒为源项目绝对路径，不跨仓。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：7 天保留期是拍的工程值——太长磁盘压力延续、太短丢人工检查窗口；选 7 天依据是「缓存快照 + repo-native 真数据在源项目」的双重冗余，误删后果有限。声明边界：repo-native 分支 `mkdir(sourceSillyspec)` 失败保持 fail-loud 不降级——降级 pull 会把缓存落回普通目录、sillyspec CLI 自指守卫（realpath 穿透 junction）失效、重新打开 261dc22e9 收口的平台标记投毒面；fail-loud 由调用方 catch 记日志，会话无 spec 缓存但不投毒，两害取轻（可接受：投毒写脏源项目 vs 本会话读不到 spec）。
++
++放弃的方案：① symlink 失败时回滚（rename backup→specDir 复原）——回滚 rename 同样可能 EBUSY 失败，引入第二层半交换态，复杂度不划算；降级 pull 重建 specDir 等价且更简单。② 清扫复用 10 分钟保留期——备份是完整数据快照非 in-flight 残留，10 分钟等于变相「删备份」，与 261dc22e9「数据不丢」的承诺冲突。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | sillyhub-daemon/src/spec-sync.ts | ensureSpecJunction 半交换收口 + sweep 备份前缀/7 天期 + pullSpecBundle 顶部清扫 |
++| 修改 | sillyhub-daemon/tests/test_init_lease.test.ts | fs/promises 透传式 mock + 半交换降级两用例 + 备份清扫用例（tmp/trash 零回归断言） |
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/proposal.md b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/proposal.md
+new file mode 100644
+index 000000000..d42d4f673
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:11:49.668Z
++---
++# 提案书（Proposal）— 2026-10-11-junction-fallback-backup-sweep
++
++## 动机
++
++任务原话转写：junction 备份交换的半交换异常路径绕过降级 pull（24h 审查 P2-1）+ .pre-junction-backup-* 备份目录无清理无界增长（P3-1）：261dc22e9 后 spec-sync.ts ensureSpecJunction 在普通目录残留场景 rename(specDir→backup) 成功后，mkdir/symlink 裸抛异常直接飞出函数，而降级 pull 只覆盖 return false 路径——Windows symlink EPERM/EBUSY 等暂态或持久失败时该次 pull 整体失败且永不降级；备份目录全仓无删除路径（sweepStalePullScraps 只清 .tmp-/.trash-）。修复：post-rename mkdir+symlink 收进 try/catch，失败 warn 后 return false 走既有降级 pull（数据留在 backup 不丢）；sweepStalePullScraps 增 .pre-junction-backup- 前缀清扫（保留期 7 天，区别于 tmp/trash 的 10 分钟）。
++成功标准：
++- rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync: repo_native_junction_blocked_fallback 日志可达）
++- mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
++- rename 自身失败仍走既有 return false 降级（零回归）
++- 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
++- sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
++- .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync: repo_native_junction_blocked_fallback 日志可达）
++2. mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
++3. rename 自身失败仍走既有 return false 降级（零回归）
++4. 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
++5. sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
++6. .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
++
++## 成功标准（可验证）
++
++1. rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync: repo_native_junction_blocked_fallback 日志可达）
++2. mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
++3. rename 自身失败仍走既有 return false 降级（零回归）
++4. 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
++5. sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
++6. .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/requirements.md b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/requirements.md
+new file mode 100644
+index 000000000..2582914c6
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/requirements.md
+@@ -0,0 +1,72 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:11:49.668Z
++---
++# 需求规格（Requirements）— 2026-10-11-junction-fallback-backup-sweep
++
++## 功能需求
++
++### FR-01: rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync: repo_native_junction_blocked_fallback 日志可达）
++
++- junction 备份交换的半交换路径（rename(specDir→backup) 成功后）的 `mkdir(dirname(specDir))` 与 `symlink(...)` 调用**必须**整体收进 try/catch：任一抛异常时 warn（`spec_sync: junction_create_failed_fallback`）并 `return false`，使 `pullSpecBundle` 走既有降级 pull 分支；**禁止**裸异常飞出函数绕过降级（24h 审查 P2-1：Windows symlink EPERM/EBUSY 等失败时该次 pull 整体失败且永不降级）。
++
++#### 场景：半交换 symlink 失败降级
++
++- Given repo-native 工作区、缓存为普通目录残留（含旧数据）、源项目有 .sillyspec
++- When symlink 抛 EPERM（测试注入）
++- Then 旧数据完整保留在 backup 目录；warn 含 junction_create_failed_fallback 与 repo_native_junction_blocked_fallback；init lease 结果 ok=true（经降级 pull，getSpecBundle 被调）
++
++### FR-02: mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
++
++- 半交换后 `mkdir(dirname(specDir), {recursive:true})` 抛异常**必须**与 FR-01 同一 try/catch 收口（同一降级路径）；同一 catch 覆盖两调用，**禁止**分别裸抛。
++
++#### 场景：mkdir 失败同降级
++
++- When mkdir(dirname(specDir)) 抛错（测试注入）
++- Then 行为与 FR-01 场景一致（return false + 降级 pull）
++
++### FR-03: rename 自身失败仍走既有 return false 降级（零回归）
++
++- `renameWithRetry(specDir→backup)` 失败路径**必须**保持既有 `return false` 降级语义逐字不变（261dc22e9 既有行为零回归）。
++
++#### 场景：rename 失败
++
++- When rename 重试穷尽仍失败（既有 catch）
++- Then warn `junction_backup_rename_failed_fallback` + return false（既有断言不改动即覆盖）
++
++### FR-04: 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
++
++- repo-native 分支的 `mkdir(sourceSillyspec)` 失败**必须**保持异常上抛（调用方 catch 记日志）；**禁止**为它加降级——降级 pull 会把缓存落回普通目录、使 sillyspec CLI 自指守卫失效、重新打开 261dc22e9 收口的平台标记投毒面。该边界为显式设计取舍，非遗漏。
++
++#### 场景：源项目根只读
++
++- When 源项目 .sillyspec 不存在且 mkdir 失败
++- Then 异常上抛（fail-loud），不落降级 pull
++
++### FR-05: sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
++
++- `sweepStalePullScraps` **必须**增配 `.pre-junction-backup-` 前缀（保留期 7 天，mtime 判定），到期备份 best-effort 删除；**禁止**误删保留期内的备份；且 `pullSpecBundle` 顶部（策略分支之前）**必须**也执行一次清扫——既有调用点（pull 主路径中段）在 repo-native junction 成功早返回路径上永远不执行，清扫必须覆盖该路径。
++
++#### 场景：repo-native 成功路径清扫过期备份
++
++- Given repo-native 工作区、同级存在 mtime 8 天前的 .pre-junction-backup-* 与 10 分钟内的同名前缀备份、mtime 11 分钟的 .tmp- 与 5 分钟的 .tmp-
++- When handleInitLease repo-native 成功（junction 早返回）
++- Then 8 天备份与 11 分钟 tmp 被清；10 分钟备份与 5 分钟 tmp 保留
++
++### FR-06: .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
++
++- tmp/trash 既有 10 分钟清扫语义**必须**零回归；本变更新增用例在旧实现上**必须**先红（半交换降级用例与备份清扫用例）、实现后全绿；`tsc --noEmit` 零错。
++
++#### 场景：先红后绿
++
++- When 在旧实现上运行 FR-01/FR-05 新用例
++- Then 失败（红）；实现后全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例」`；空行/待填在 flow done 拒收）
++
++FR-01: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 symlink 失败降级 pull：数据留 backup + 双 warn 可达」
++FR-02: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 mkdir 失败同降级」
++FR-03: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 残留备份交换（既有用例零改动回归）」
++FR-04: test/sillyhub-daemon/tests/test_init_lease.test.ts「源缺失不降级（既有用例零改动回归）」
++FR-05: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 成功路径清扫过期备份/保留期内不误删」
++FR-06: test/sillyhub-daemon/tests/test_init_lease.test.ts「备份清扫：tmp/trash 10 分钟语义零回归」
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/tasks.md b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/tasks.md
+new file mode 100644
+index 000000000..5657525d1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T04:11:49.668Z
++---
++# 任务注册表（Tasks）— 2026-10-11-junction-fallback-backup-sweep
++
++- [x] task-01: 测试先行：test_init_lease.test.ts 加 fs/promises 透传式 symlink mock + 半交换 symlink/mkdir 失败降级用例 + 备份清扫用例（utimes 构造 8 天/10 分钟备份 + 11/5 分钟 tmp）——旧实现先红
++- [x] task-02: ensureSpecJunction 半交换收口：post-rename mkdir+symlink 收进 try/catch，失败 warn junction_create_failed_fallback + return false 走降级 pull——降级用例转绿
++- [x] task-03: sweepStalePullScraps 增 .pre-junction-backup- 前缀 7 天保留期 + pullSpecBundle 顶部清扫调用（覆盖 repo-native 早返回路径）——清扫用例转绿，tmp/trash 零回归
++- [x] task-04: 全文件回归 + daemon tsc 零错，显式 pathspec 提交（消息带 task-NN）
+diff --git a/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/review.json b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/review.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/review.json
+@@ -0,0 +1,22 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-junction-fallback-backup-sweep",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "aa809dc912e6e40aada0e2e9c2dad913f3807714",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "备注（非缺陷）：原 P3 已修复清偿；design.md 盲维 Q1 的新鲜性论据措辞未随盖戳机制同步更新",
++      "evidence": "增量提交 aa809dc91 仅改 spec-sync.ts(+7/-1)+测试(+14/-1)，无其它文件。原 P3（rename 继承旧目录 mtime 致 7 天窗口对老残留失效）已清偿：spec-sync.ts:538-543 在 renameWithRetry 成功后 utimes(backup, now, now) best-effort 盖戳（.catch 空捕获在 try 内，utimes 失败不可能误入 rename 失败 catch 分支，退化回 mtime 原值有注释留档）；测试 test_init_lease.test.ts:1312-1313 预盖残留 30 天旧 mtime，:1349-1355 断言本次运行新产生备份恰 1 个且 mtime 距今 <60s——未盖戳的旧实现该断言必红（继承 30 天旧值），直接证据成立。残留备注：design.md 未在本提交内，Q1 仍以「备份名含 Date.now()」作备份必然新鲜的论据（name 时间戳从来不是判龄依据，修复前后都不是），且 design 未记录盖戳机制与 utimes 失败 best-effort 退化语义（仅 commit message 与代码注释留档）——纯文档漂移，不影响行为。",
++      "location": ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md:26（Q1 措辞）；修复锚 sillyhub-daemon/src/spec-sync.ts:538-543、sillyhub-daemon/tests/test_init_lease.test.ts:1310-1355"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-11T04:28:54Z"
++}

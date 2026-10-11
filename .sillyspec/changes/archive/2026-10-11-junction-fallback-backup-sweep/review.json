@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-junction-fallback-backup-sweep",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "aa809dc912e6e40aada0e2e9c2dad913f3807714",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "备注（非缺陷）：原 P3 已修复清偿；design.md 盲维 Q1 的新鲜性论据措辞未随盖戳机制同步更新",
+      "evidence": "增量提交 aa809dc91 仅改 spec-sync.ts(+7/-1)+测试(+14/-1)，无其它文件。原 P3（rename 继承旧目录 mtime 致 7 天窗口对老残留失效）已清偿：spec-sync.ts:538-543 在 renameWithRetry 成功后 utimes(backup, now, now) best-effort 盖戳（.catch 空捕获在 try 内，utimes 失败不可能误入 rename 失败 catch 分支，退化回 mtime 原值有注释留档）；测试 test_init_lease.test.ts:1312-1313 预盖残留 30 天旧 mtime，:1349-1355 断言本次运行新产生备份恰 1 个且 mtime 距今 <60s——未盖戳的旧实现该断言必红（继承 30 天旧值），直接证据成立。残留备注：design.md 未在本提交内，Q1 仍以「备份名含 Date.now()」作备份必然新鲜的论据（name 时间戳从来不是判龄依据，修复前后都不是），且 design 未记录盖戳机制与 utimes 失败 best-effort 退化语义（仅 commit message 与代码注释留档）——纯文档漂移，不影响行为。",
+      "location": ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md:26（Q1 措辞）；修复锚 sillyhub-daemon/src/spec-sync.ts:538-543、sillyhub-daemon/tests/test_init_lease.test.ts:1310-1355"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T04:28:54Z"
+}

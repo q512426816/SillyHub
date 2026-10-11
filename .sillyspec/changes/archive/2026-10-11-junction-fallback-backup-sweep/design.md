@@ -14,7 +14,7 @@ created_at: 2026-10-11T04:11:49.668Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-- `sillyhub-daemon/src/spec-sync.ts` `ensureSpecJunction`（内部函数，未导出）：post-rename `mkdir`+`symlink` 收进 try/catch → 失败 `return false`（新增 warn 日志键 `spec_sync: junction_create_failed_fallback`）；`return true` 路径行为不变。
+- `sillyhub-daemon/src/spec-sync.ts` `ensureSpecJunction`（内部函数，未导出）：post-rename `mkdir`+`symlink` 收进 try/catch → 失败 `return false`（新增 warn 日志键 `spec_sync: junction_create_failed_fallback`）；`return true` 路径行为不变。备份 rename 成功后 `utimes(backup, now)` 盖创建时刻戳（评审 P3 清偿：rename 继承旧目录 mtime 会让老残留的 7 天保留窗形同虚设；best-effort，失败退化 mtime 原值）。
 - `sweepStalePullScraps`（内部函数）：过滤增 `.pre-junction-backup-` 前缀，按前缀选保留期（backup 7 天 / tmp·trash 10 分钟既有）；docstring 同步。
 - `pullSpecBundle`（导出）：函数体顶部（resolveSpecDir 之后、策略分支之前）增一次 `sweepStalePullScraps` 调用；既有 :225 调用保留（双清扫幂等，成本一次 readdir）。
 - 模块导出面、daemon.ts 调用方、backend、前端：零改动（「无」）。repo-native 分支 `mkdir(sourceSillyspec)`（:153）保持 fail-loud（见边界裁决）。
@@ -23,7 +23,7 @@ created_at: 2026-10-11T04:11:49.668Z
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
-清扫按 mtime 判龄（tmp 名含 pid+ts 必然新鲜；备份名含 Date.now()），并发 pull 的在途目录不受影响；半交换降级后下次 pull 重试 junction，迟到到达不改变收敛方向。
+清扫按 mtime 判龄（tmp 名含 pid+ts 必然新鲜；备份在 rename 成功后以 utimes 显式盖创建时刻戳——rename 会继承旧目录 mtime，老残留不盖戳则 7 天窗口形同虚设；盖戳 best-effort 失败退化 mtime 原值），并发 pull 的在途目录不受影响；半交换降级后下次 pull 重试 junction，迟到到达不改变收敛方向。
 
 2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
 

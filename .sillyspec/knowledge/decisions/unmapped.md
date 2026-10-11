@@ -2200,3 +2200,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：845aafad21e9a98ee571837f09f648ac2bcd4dcf
 理由：最大风险：服务凭证判别依赖「API key 仅管理员签发给 daemon」的既有治理事实——若未来开放普通用户自助 API key，需同步收紧（已在 auth_deps helper 的 docstring 钉死该前提）。 试过但放弃的方案：① 入口拒收/剥离用户前缀——daemon 与用户走同一端点、后端无法按端点区分，剥错方向必伤一边；② 专用内部端点——权限模型里 daemon 的 API key 就是普通 User 权限（runtime owner），无独立服务主体可 gate，新端点同样被用户可达，等于换皮不换实质；③ 内容前缀 + API-key 双条件——省 wire 改动但仍把安全语义绑在内容上，与「结构化判定」的审查结论相悖。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-junction-fallback-backup-sweep
+锚点：未记录
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+理由：最大风险：7 天保留期是拍的工程值——太长磁盘压力延续、太短丢人工检查窗口；选 7 天依据是「缓存快照 + repo-native 真数据在源项目」的双重冗余，误删后果有限。声明边界：repo-native 分支 `mkdir(sourceSillyspec)` 失败保持 fail-loud 不降级——降级 pull 会把缓存落回普通目录、sillyspec CLI 自指守卫（realpath 穿透 junction）失效、重新打开 261dc22e9 收口的平台标记投毒面；fail-loud 由调用方 catch 记日志，会话无 spec 缓存但不投毒，两害取轻（可接受：投毒写脏源项目 vs 本会话读不到 spec）。 放弃的方案：① symlink 失败时回滚（rename backup→specDir 复原）——回滚 rename 同样可能 EBUSY 失败，引入第二层半交换态，复杂度不划算；降级 pull 重建 specDir 等价且更简单。② 清扫复用 10 分钟保留期——备份是完整数据快照非 in-flight 残留，10 分钟等于变相「删备份」，与 261dc22e9「数据不丢」的承诺冲突。

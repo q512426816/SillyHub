@@ -328,3 +328,117 @@ created_at: 2026-09-22T17:27:13.449Z
 摘要：rename 失败降级
 全文：.sillyspec/changes/archive/2026-10-10-repo-native-no-platform-markers/requirements.md#FR-05
 最近确认：1c9c0e40dae6ee77ad07859f3b80e0dc2d7e269c
+
+## FR-spec-sync-017 rename 成功后 symlink 抛异常（注入 EPERM）时 ensureSpecJunction 返回 false 并 warn，pullSpecBundle 走降级 pull 分支（spec_sync: repo_native_junction_blocked_fallback 日志可达）
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：半交换 symlink 失败降级
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-01
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 symlink 失败降级 pull：数据留 backup + 双 warn 可达」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active
+
+## FR-spec-sync-018 mkdir(dirname(specDir)) 抛异常同上收口，不再有裸异常飞出
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：mkdir 失败同降级
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-02
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 mkdir 失败同降级」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active
+
+## FR-spec-sync-019 rename 自身失败仍走既有 return false 降级（零回归）
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：rename 失败
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-03
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 残留备份交换（既有用例零改动回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active
+
+## FR-spec-sync-020 源项目 .sillyspec mkdir 失败（:153）保持 fail-loud 不降级——降级 pull 会重新引入平台标记投毒路径（261dc22e9 修的就是这个），此边界显式留档
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：源项目根只读
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-04
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「源缺失不降级（既有用例零改动回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active
+
+## FR-spec-sync-021 sweepStalePullScraps 清扫 7 天前的 .pre-junction-backup-* 目录；10 分钟内的备份不被误删
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：repo-native 成功路径清扫过期备份
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-05
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 成功路径清扫过期备份/保留期内不误删」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active
+
+## FR-spec-sync-022 .tmp-/.trash- 既有 10 分钟语义零回归；相关测试先红后绿全绿 + tsc 零错
+变更：2026-10-11-junction-fallback-backup-sweep
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-11-junction-fallback-backup-sweep/requirements.md#FR-06
+最近确认：aa809dc912e6e40aada0e2e9c2dad913f3807714
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-06
+  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「备份清扫：tmp/trash 10 分钟语义零回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-junction-fallback-backup-sweep
+  status: active

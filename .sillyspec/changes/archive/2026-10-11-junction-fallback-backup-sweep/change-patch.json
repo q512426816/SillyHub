@@ -1,0 +1,99 @@
+{
+  "change": "2026-10-11-junction-fallback-backup-sweep",
+  "baseline": "5a0c18fe3e961a539a1796269362f67c93e7dd3a",
+  "head": "aa809dc912e6e40aada0e2e9c2dad913f3807714",
+  "files": [
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/design.md",
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/proposal.md",
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/requirements.md",
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/tasks.md",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/test_init_lease.test.ts",
+    ".sillyspec/changes/2026-10-11-junction-fallback-backup-sweep/review.json"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 488,
+    "deletions": 13
+  },
+  "savedAt": "2026-10-11T04:30:17.465Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 23,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5a0c18fe3e961a539a1796269362f67c93e7dd3a",
+    "totals": {
+      "files": 3,
+      "additions": 252,
+      "deletions": 13
+    },
+    "rows": [
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 5,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 46,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/test_init_lease.test.ts",
+        "additions": 201,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fe8db1d67fc709aba5dbefb2305ffacddc314aa5a2634ae2107a87954adffaab",
+  "patchStatus": "ok"
+}
