@@ -221,22 +221,24 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
     renderPage();
     await screen.findByText("/admin/roles");
 
-    // system 组声明序：users=19 / organizations=20 / roles=21（未覆盖 → 生效值=声明序索引）
+    // system 组声明序：users=17 / organizations=18 / roles=19（未覆盖 → 生效值=
+    // 声明序索引；2026-10-11-retire-components-page 删 components/topology 两项，
+    // 旧锚 19/20/21 全体前移 2）
     const rolesRow = menuRow("/admin/roles");
     fireEvent.click(within(rolesRow).getByTitle("上移"));
 
-    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 20）
+    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 18）
     await waitFor(() =>
       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
         method: "PUT",
-        json: { label: null, sort_order: 20, hidden: false },
+        json: { label: null, sort_order: 18, hidden: false },
       }),
     );
-    // 再 PUT 相邻行（organizations 取 roles 原生效值 21）
+    // 再 PUT 相邻行（organizations 取 roles 原生效值 19）
     await waitFor(() =>
       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
         method: "PUT",
-        json: { label: null, sort_order: 21, hidden: false },
+        json: { label: null, sort_order: 19, hidden: false },
       }),
     );
   });
@@ -245,20 +247,20 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
     renderPage();
     await screen.findByText("/admin/roles");
 
-    // organizations(20) 下移 ↔ roles(21)
+    // organizations(18) 下移 ↔ roles(19)（声明序见上移用例注释）
     const orgRow = menuRow("/admin/organizations");
     fireEvent.click(within(orgRow).getByTitle("下移"));
 
     await waitFor(() =>
       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
         method: "PUT",
-        json: { label: null, sort_order: 21, hidden: false },
+        json: { label: null, sort_order: 19, hidden: false },
       }),
     );
     await waitFor(() =>
       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
         method: "PUT",
-        json: { label: null, sort_order: 20, hidden: false },
+        json: { label: null, sort_order: 18, hidden: false },
       }),
     );
   });

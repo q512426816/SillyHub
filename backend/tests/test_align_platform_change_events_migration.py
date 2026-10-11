@@ -102,8 +102,9 @@ class TestMigrationStructure:
         # 20261008100000（drop_dead_rbac_permissions，2026-10-08）→
         # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
         # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
-        # 拦截后顺手清偿）。
-        assert heads[0] == "20261010190000"  # workspace_linked_repos 成为新 head
+        # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
+        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）。
+        assert heads[0] == "c515ffd62859"  # merge 迁移成为新 head
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

@@ -1261,6 +1261,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/linked-repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Linked Repos
+         * @description 列出工作区关联仓（成员视角含 my_path；状态摘要由 task-03 接管填充）。
+         */
+        get: operations["list_linked_repos_api_workspaces__workspace_id__linked_repos_get"];
+        put?: never;
+        /**
+         * Create Linked Repo
+         * @description 登记关联仓（owner/admin）。重名 409。
+         */
+        post: operations["create_linked_repo_api_workspaces__workspace_id__linked_repos_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Linked Repo
+         * @description 删除关联仓（owner/admin；成员路径与落盘状态级联清理；归属校验 404）。
+         */
+        delete: operations["delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Linked Repo
+         * @description 编辑共享字段（owner/admin；name 不可改，见 schema 注）。
+         *
+         *     显式提交键即更新（JSON null=显式清除，缺省=不动——exclude_unset 语义）；
+         *     repo 必须归属路径工作区（跨工作区 404）。
+         */
+        patch: operations["update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/{repo_id}/my-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save My Path
+         * @description 成员级本机路径 upsert（成员本人；path=null 清除；归属校验 404）。
+         */
+        put: operations["save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Linked Repos Sync
+         * @description 「立即同步」：向当前成员绑定 daemon 发请求-响应 RPC（受理即返，FR-05）。
+         *
+         *     无入参（幂等触发，POST 空 body）；结果经 daemon REST 回报端点落库
+         *     （唯一通道），GET 轮询可见；老 daemon method_not_found → 状态层
+         *     skipped(需升级) 且本端点不报错（FR-07）。
+         */
+        post: operations["trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/local-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Local Snapshot
+         * @description 本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
+         *     与平台登记三态对照；五态降级（ok/offline/**timeout**\/unsupported/binding_missing——
+         *     timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
+         *     2026-10-11 生产实证）。
+         */
+        get: operations["get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/linked-repos/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import From Local
+         * @description 从本机快照条目导入为平台登记（owner/admin；合并条目一次落 rel_path+my_path，
+         *     Grill Gap A；重名 skipped 幂等；逐条独立成败）。
+         */
+        post: operations["import_from_local_api_workspaces__workspace_id__linked_repos_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/explorer/tree": {
         parameters: {
             query?: never;
@@ -1590,7 +1729,8 @@ export interface paths {
         };
         /**
          * List Api Keys
-         * @description List the caller's API keys (plaintext never included).
+         * @description List the caller's API keys (plaintext never included; rows carry
+         *     ``plaintext_recoverable`` so the UI knows whether copy is possible).
          */
         get: operations["list_api_keys_api_auth_api_keys_get"];
         put?: never;
@@ -1598,10 +1738,34 @@ export interface paths {
          * Create Api Key
          * @description Issue a new long-lived API key for the daemon.
          *
-         *     Plaintext is returned **only** here; subsequent GETs will only expose
-         *     ``key_prefix``. ``api_key:admin``-gated.
+         *     Plaintext is returned here (canonical one-time return); when the master
+         *     key is configured the row also stores it encrypted, and the per-id
+         *     plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
          */
         post: operations["create_api_key_api_auth_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/api-keys/{api_key_id}/plaintext": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Api Key Plaintext
+         * @description 取回某把活跃 key 的明文（管理端「复制密钥」入口）。
+         *
+         *     仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
+         *     不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+         */
+        get: operations["get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1621,6 +1785,9 @@ export interface paths {
         /**
          * Revoke Api Key
          * @description Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
+         *
+         *     ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
+         *     未吊销 → 409（先吊销再删除）。
          */
         delete: operations["revoke_api_key_api_auth_api_keys__api_key_id__delete"];
         options?: never;
@@ -3917,6 +4084,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mcp Token Plaintext
+         * @description 取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
+         *
+         *     仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
+         *     探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
+         */
+        get: operations["get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
         parameters: {
             query?: never;
@@ -3934,6 +4124,9 @@ export interface paths {
          *     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
          *     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
          *     精确 DEL，无 TTL 放行窗口）。
+         *
+         *     ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
+         *     CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
          */
         delete: operations["revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete"];
         options?: never;
@@ -5060,6 +5253,28 @@ export interface paths {
         get: operations["compare_machine_sillyspec_conflict_api_daemon_machines__instance_id__sillyspec_conflicts__change__compare_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/linked-repos-sync-result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Linked Repos Sync Result
+         * @description daemon 回报关联仓双落盘结果（归属校验同裁决端点；宽容收数）。
+         *
+         *     未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
+         */
+        post: operations["report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13121,6 +13336,8 @@ export interface components {
             created_at: string;
             /** Revoked At */
             revoked_at: string | null;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
             /** Plaintext */
             plaintext: string;
         };
@@ -13128,6 +13345,17 @@ export interface components {
         ApiKeyListResponse: {
             /** Items */
             items: components["schemas"]["ApiKeyRead"][];
+        };
+        /**
+         * ApiKeyPlaintextResponse
+         * @description GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。
+         */
+        ApiKeyPlaintextResponse: {
+            /**
+             * Plaintext
+             * @description 完整密钥明文，仅复制入口使用，勿入日志
+             */
+            plaintext: string;
         };
         /**
          * ApiKeyRead
@@ -13154,6 +13382,8 @@ export interface components {
             created_at: string;
             /** Revoked At */
             revoked_at: string | null;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
         };
         /** ApprovalRead */
         ApprovalRead: {
@@ -18143,6 +18373,21 @@ export interface components {
             rows: components["schemas"]["ImportPreviewRow"][];
         };
         /**
+         * ImportEntryInput
+         * @description 导入条目（合并形态：一次导入同时落 rel_path 与 my_path）。
+         *
+         *     名合法性不在请求级校验（422 会拒整批）——service 层逐条判定 failed
+         *     （快照来源理论合法，运行时脏值按条目级容错，FR-03 逐条独立成败）。
+         */
+        ImportEntryInput: {
+            /** Name */
+            name: string;
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Abs Path */
+            abs_path?: string | null;
+        };
+        /**
          * ImportPreviewResp
          * @description 预览响应 — 多 Sheet + 整体解析错误 (如找不到表头)。
          */
@@ -18204,6 +18449,28 @@ export interface components {
             row_count: number;
             /** Rows */
             rows: components["schemas"]["ImportPreviewRow"][];
+        };
+        /** ImportRequest */
+        ImportRequest: {
+            /** Entries */
+            entries?: components["schemas"]["ImportEntryInput"][];
+        };
+        /** ImportResponse */
+        ImportResponse: {
+            /** Results */
+            results?: components["schemas"]["ImportResultItem"][];
+        };
+        /** ImportResultItem */
+        ImportResultItem: {
+            /** Name */
+            name: string;
+            /**
+             * Result
+             * @enum {string}
+             */
+            result: "imported" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
         };
         /**
          * ImportResultResp
@@ -18686,6 +18953,85 @@ export interface components {
             skills?: components["schemas"]["LibrarySkillItem"][];
         };
         /**
+         * LinkedRepoCreate
+         * @description 登记关联仓（owner/admin）。name 对齐 sillyspec 子项目名规则。
+         */
+        LinkedRepoCreate: {
+            /** Name */
+            name: string;
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Ref Workspace Id */
+            ref_workspace_id?: string | null;
+        };
+        /** LinkedRepoOut */
+        LinkedRepoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+            ref_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
+            /** My Path */
+            my_path?: string | null;
+            /** Sync Status Summary */
+            sync_status_summary?: components["schemas"]["SyncStateBrief"][];
+        };
+        /** LinkedRepoSyncResultItem */
+        LinkedRepoSyncResultItem: {
+            /** Repo Name */
+            repo_name: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "projects_yaml" | "repos_registry";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
+        };
+        /** LinkedRepoSyncResultRequest */
+        LinkedRepoSyncResultRequest: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Results */
+            results?: components["schemas"]["LinkedRepoSyncResultItem"][];
+        };
+        /**
+         * LinkedRepoUpdate
+         * @description 编辑共享字段（owner/admin）。name 不可改（唯一键 + yaml 文件名，改名会产生
+         *     落盘产物错位——design 数据模型节）。ref_workspace_id 键在场 null=摘除。
+         */
+        LinkedRepoUpdate: {
+            /** Repo Url */
+            repo_url?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Ref Workspace Id */
+            ref_workspace_id?: string | null;
+        };
+        /**
          * ListDirRequest
          * @description Request body for POST /runtimes/{runtime_id}/list-dir.
          */
@@ -18883,6 +19229,57 @@ export interface components {
             } | null;
             /** Is Default */
             is_default?: boolean | null;
+        };
+        /**
+         * LocalSnapshotEntry
+         * @description 对照条目（双源合并后：rel_path 取 projects 源、abs_path 取 repos 源，Grill Gap A）。
+         */
+        LocalSnapshotEntry: {
+            /** Key */
+            key: string;
+            /** Sources */
+            sources?: string[];
+            /** Rel Path */
+            rel_path?: string | null;
+            /** Abs Path */
+            abs_path?: string | null;
+            /** Role */
+            role?: string | null;
+            /** State */
+            state?: string | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Match
+             * @enum {string}
+             */
+            match: "both" | "local_only" | "platform_only";
+            /** Platform Repo Id */
+            platform_repo_id?: string | null;
+            /** Platform Rel Path */
+            platform_rel_path?: string | null;
+            matched_workspace?: components["schemas"]["app__modules__workspace__linked_repos__schema__WorkspaceBrief"] | null;
+        };
+        /**
+         * LocalSnapshotResponse
+         * @description 本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。
+         */
+        LocalSnapshotResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Projects Skipped */
+            projects_skipped?: string | null;
+            /** Repos Skipped */
+            repos_skipped?: string | null;
+            /** Entries */
+            entries?: components["schemas"]["LocalSnapshotEntry"][];
+            /** Platform Only Names */
+            platform_only_names?: string[];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -19542,8 +19939,22 @@ export interface components {
             items: components["schemas"]["McpTokenRead"][];
         };
         /**
+         * McpTokenPlaintextResponse
+         * @description GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。
+         */
+        McpTokenPlaintextResponse: {
+            /**
+             * Token
+             * @description 完整令牌明文，仅复制入口使用，勿入日志
+             */
+            token: string;
+        };
+        /**
          * McpTokenRead
          * @description 列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
+         *
+         *     ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
+         *     端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
          */
         McpTokenRead: {
             /**
@@ -19564,6 +19975,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Plaintext Recoverable */
+            plaintext_recoverable: boolean;
         };
         /**
          * McpWebhookCreateRequest
@@ -19972,6 +20385,14 @@ export interface components {
              * @default 0
              */
             api_requests: number;
+        };
+        /**
+         * MyPathUpdate
+         * @description 成员级本机路径 upsert（成员本人；path=None 清除）。
+         */
+        MyPathUpdate: {
+            /** Path */
+            path?: string | null;
         };
         /**
          * NotificationListResponse
@@ -24522,6 +24943,8 @@ export interface components {
              * @default
              */
             prompt: string;
+            /** Origin */
+            origin?: "task_wakeup" | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */
@@ -24785,6 +25208,8 @@ export interface components {
             cache_creation_tokens?: number | null;
             /** Ctx Tokens */
             ctx_tokens?: number | null;
+            /** Duration Api Ms */
+            duration_api_ms?: number | null;
             /** Failure Summary */
             failure_summary?: string | null;
             /** Engine Anchor */
@@ -26027,6 +26452,34 @@ export interface components {
             suspended: number;
             /** Runs Failed */
             runs_failed: number;
+        };
+        /**
+         * SyncStateBrief
+         * @description 单层落盘状态摘要（GET 聚合视图用；task-03 填充）。
+         */
+        SyncStateBrief: {
+            /**
+             * Machine Id
+             * Format: uuid
+             */
+            machine_id: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "projects_yaml" | "repos_registry";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "skipped" | "failed";
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
         };
         /**
          * SystemStatusResponse
@@ -28169,30 +28622,6 @@ export interface components {
             };
         };
         /**
-         * WorkspaceBrief
-         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
-         *
-         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
-         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
-         */
-        WorkspaceBrief: {
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-            /** Name */
-            name: string;
-            /** Status */
-            status: string;
-            /** Type */
-            type?: string | null;
-            /** Role */
-            role?: string | null;
-            /** Description */
-            description?: string | null;
-        };
-        /**
          * WorkspaceCreate
          * @description Request body for ``POST /api/workspaces``.
          *
@@ -28948,6 +29377,21 @@ export interface components {
             created_at: string;
         };
         /**
+         * WorkspaceBrief
+         * @description 挂载引用/匹配提示的工作区摘要 {id,name,slug}（读时过滤软删）。
+         */
+        app__modules__workspace__linked_repos__schema__WorkspaceBrief: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+        };
+        /**
          * OwnerRead
          * @description Nested owner DTO for platform-admin global views (task-05 / D-006@v1).
          */
@@ -28958,6 +29402,30 @@ export interface components {
             email?: string | null;
             /** Display Name */
             display_name?: string | null;
+        };
+        /**
+         * WorkspaceBrief
+         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+         *
+         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
+         */
+        app__modules__workspace__schema__WorkspaceBrief: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Type */
+            type?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Description */
+            description?: string | null;
         };
     };
     responses: never;
@@ -30950,6 +31418,273 @@ export interface operations {
             };
         };
     };
+    list_linked_repos_api_workspaces__workspace_id__linked_repos_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_linked_repo_api_workspaces__workspace_id__linked_repos_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_linked_repo_api_workspaces__workspace_id__linked_repos__repo_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_my_path_api_workspaces__workspace_id__linked_repos__repo_id__my_path_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MyPathUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkedRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_linked_repos_sync_api_workspaces__workspace_id__linked_repos_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_from_local_api_workspaces__workspace_id__linked_repos_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get: {
         parameters: {
             query?: {
@@ -31511,9 +32246,43 @@ export interface operations {
             };
         };
     };
-    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
+    get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyPlaintextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
+        parameters: {
+            query?: {
+                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
+                hard?: boolean;
+            };
             header?: never;
             path: {
                 api_key_id: string;
@@ -35440,9 +36209,44 @@ export interface operations {
             };
         };
     };
-    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
+    get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpTokenPlaintextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
+        parameters: {
+            query?: {
+                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
+                hard?: boolean;
+            };
             header?: never;
             path: {
                 workspace_id: string;
@@ -37244,6 +38048,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SillySpecConflictCompareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkedRepoSyncResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -43153,7 +43994,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceBrief"][];
+                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"][];
                 };
             };
             /** @description Validation Error */
@@ -43188,7 +44029,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceBrief"];
+                    "application/json": components["schemas"]["app__modules__workspace__schema__WorkspaceBrief"];
                 };
             };
             /** @description Validation Error */

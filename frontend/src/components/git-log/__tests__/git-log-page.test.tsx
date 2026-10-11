@@ -332,7 +332,7 @@ describe("Git 日志页正常态", () => {
 // ── WorkspaceTabs 注册（explorer-page.test.tsx 先例照抄）──────────────
 
 describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
-  it("TABS 增至 16 项，「Git 日志」末位且 href 为 /git-log", () => {
+  it("TABS 15 项（2026-10-11-retire-components-page 组件页 tab 下线），「Git 日志」末位且 href 为 /git-log", () => {
     render(
       <WorkspaceTabs workspaceId="ws-1">
         <div />
@@ -340,7 +340,7 @@ describe("WorkspaceTabs「Git 日志」标签（task-06）", () => {
     );
 
     const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(16);
+    expect(links).toHaveLength(15);
     const labels = links.map((a) => a.textContent);
     const gitLogIdx = labels.indexOf("Git 日志");
     expect(gitLogIdx).toBe(labels.length - 1);
