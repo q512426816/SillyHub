@@ -1,0 +1,3889 @@
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/flow-state.yaml b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/flow-state.yaml
+new file mode 100644
+index 000000000..201f79ce0
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/flow-state.yaml
+@@ -0,0 +1,20 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: |-
++  守护进程运行时复制命令需直接携带用户 API 密钥明文（无密钥时自动创建永不过期密钥）；密钥列表与 MCP 令牌列表支持复制已生成凭据明文；已吊销记录支持物理删除。
++
++  成功标准：
++  - runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
++  - api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
++  - mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
++  - 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
++  - 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
++autopilot: true
++baseline_commit: a62c8e24d52fa2d33f6231cd90caabd09c6af1ad
++updatedAt: '2026-10-11T07:19:50.781Z'
++baseline_sha256: 36f21875606781258e6ada50ea5531f60f2e210adc2e3ae7ced32f455d881133
++
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml b/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
+index 09aa93d23..857fc24d5 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
++++ b/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
+@@ -361,21 +361,24 @@ modules:
+       - "sillyhub-daemon/src/interactive/session-manager.ts"
+       - "sillyhub-daemon/src/interactive/claude-sdk-driver.ts"
+       - "sillyhub-daemon/src/interactive/codex-app-server-driver.ts"
++      - "sillyhub-daemon/src/interactive/pi-rpc-driver.ts"
++      - "sillyhub-daemon/src/interactive/cursor-driver.ts"
++      - "sillyhub-daemon/src/interactive/providers.ts"
+       - "sillyhub-daemon/src/interactive/driver.ts"
+       - "sillyhub-daemon/src/interactive/input-queue.ts"
+       - "sillyhub-daemon/src/interactive/permission-resolver.ts"
+       - "sillyhub-daemon/src/interactive/session-store-persistence.ts"
+       - "sillyhub-daemon/src/interactive/types.ts"
+-    tags: [interactive, session, claude-sdk, codex, agent-driver, permission, persistence, 会话]
+-    aliases: [interactive-session, session-manager, claude-sdk-driver, codex-app-server-driver]
++    tags: [interactive, session, claude-sdk, codex, pi, cursor, agent-driver, permission, persistence, provider-caps, 会话]
++    aliases: [interactive-session, session-manager, claude-sdk-driver, codex-app-server-driver, pi-rpc-driver, cursor-driver, providers]
+     entrypoints: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver]
+-    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, InteractiveDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState]
+-    depends_on: [config, protocol, types, adapters, adapter-json-rpc, cmd-shim, mcp-config, model-error, policy, spawn-env]
++    main_symbols: [SessionManager, ClaudeSdkDriver, CodexAppServerDriver, InteractiveDriver, InputQueue, PermissionResolver, JsonSessionPersistence, SessionState, isMainAgentMcpCandidate, PROVIDER_CAPS]
++    depends_on: [config, protocol, types, adapters, adapter-json-rpc, cmd-shim, mcp-config, model-error, policy, spawn-env, pi-settings, codex-settings]
+     used_by: [cli, daemon]
+     needs_review: false
+     concerns: []
+     review_reasons: []
+-    notes: "session-manager 实测还 import mcp-config/policy(path-utils+filesystem-policy+shell-paths)/model-error/spawn-env（旧版未计）；interactive/types.ts 独立于 src/types.ts"
++    notes: "session-manager 实测还 import mcp-config/policy(path-utils+filesystem-policy+shell-paths)/model-error/spawn-env（旧版未计）；interactive/types.ts 独立于 src/types.ts；2026-10-10-all-engines-mcp-injection 起 pi/codex driver start 消费 opts.mcpServers 调两写盘器（pi-settings/codex-settings），providers.ts 出 isMainAgentMcpCandidate 谓词与 PROVIDER_CAPS 单源（pi.mcp=true，codex/cursor=false D-011）；pi-rpc-driver.ts/cursor-driver.ts/providers.ts 三文件 2026-10-11 归档时补登 paths（此前 unmapped 存量缺口）"
+ 
+   daemon-version:
+     status: active
+@@ -772,28 +775,28 @@ modules:
+     status: active
+     doc: modules/codex-settings.md
+     paths: ["sillyhub-daemon/src/codex-settings.ts"]
+-    tags: [codex, settings, config, 写盘, 供应商注入]
++    tags: [codex, settings, config, 写盘, 供应商注入, mcp]
+     aliases: []
+-    entrypoints: [writeCodexHome]
+-    main_symbols: [writeCodexHome, CodexHomeWriteInput]
++    entrypoints: [writeCodexHome, writeCodexMcpServers]
++    main_symbols: [writeCodexHome, CodexHomeWriteInput, writeCodexMcpServers, mergeCodexMcpToml, CodexMcpServerConfig]
+     depends_on: [types]
+-    used_by: [task-runner]
++    used_by: [task-runner, interactive]
+     needs_review: false
+     concerns: []
+     review_reasons: []
+-    notes: "写 per-session CODEX_HOME/{auth.json, config.toml}（task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派）；wire_api 恒 responses（codex 0.147.0 基线 R-03，'chat' 已移除）；openai_chat 形态 auth key=daemonApiKey 走 litellm_proxy 通道（D-006）；保守合并保留非托管段；golden=change spike/a2b-config.toml+a2-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
++    notes: "凭证面：写 per-session CODEX_HOME/{auth.json, config.toml}（task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派）；wire_api 恒 responses（codex 0.147.0 基线 R-03，'chat' 已移除）；openai_chat 形态 auth key=daemonApiKey 走 litellm_proxy 通道（D-006）；保守合并保留非托管段；golden=change spike/a2b-config.toml+a2-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts。MCP 面（2026-10-10-all-engines-mcp-injection，caps=false 未触达 D-011）：writeCodexMcpServers/mergeCodexMcpToml 写 [mcp_servers.*] 托管段（整段重写防幽灵，非托管行保留）；调用方 codex-app-server-driver start；复评 SOP=spike-codex-mcp.md"
+ 
+   pi-settings:
+     status: active
+     doc: modules/pi-settings.md
+     paths: ["sillyhub-daemon/src/pi-settings.ts"]
+-    tags: [pi, settings, config, 写盘, 供应商注入]
++    tags: [pi, settings, config, 写盘, 供应商注入, mcp]
+     aliases: []
+-    entrypoints: [writePiDir]
+-    main_symbols: [writePiDir, PiDirWriteInput]
++    entrypoints: [writePiDir, writePiMcpConfig]
++    main_symbols: [writePiDir, PiDirWriteInput, writePiMcpConfig, PiMcpServerConfig]
+     depends_on: [types]
+-    used_by: [task-runner]
++    used_by: [task-runner, interactive]
+     needs_review: false
+     concerns: []
+     review_reasons: []
+-    notes: "写 per-session PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}（applyProviderFileSettings 按 agent_kind='pi' 分派）；providers.sillyhub.api 恒 openai-completions 打 /chat/completions（pi 0.81.1 基线 R-03）；auth 官方形状 {type:'api_key', key}；官方端点（base_url 空）零写入归 env 层（D-008/R-04）；golden=change spike/b1-models.json+b1b-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts"
++    notes: "凭证面：写 per-session PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}（applyProviderFileSettings 按 agent_kind='pi' 分派）；providers.sillyhub.api 恒 openai-completions 打 /chat/completions（pi 0.81.1 基线 R-03）；auth 官方形状 {type:'api_key', key}；官方端点（base_url 空）零写入归 env 层（D-008/R-04）；golden=change spike/b1-models.json+b1b-auth.json，冒烟=tests/provider-injection-smoke.integ.test.ts。MCP 面（2026-10-10-all-engines-mcp-injection）：writePiMcpConfig 覆写语义写 <dir>/mcp.json（pi 1.1.0 原生形态①，daemon 独占整表重写防幽灵 server；空表跳过）；调用方 pi-rpc-driver start（detectPiMajorVersion<1 跳过）"
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/cli.md b/.sillyspec/docs/sillyhub-daemon/modules/cli.md
+index fe5631c01..b9e6d9162 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/cli.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/cli.md
+@@ -50,6 +50,7 @@ statusAction: running 时 resolveRunningDaemonConfig(pid) 反查实际 server 
+ - RuntimeLockManager（`--force`）：同机同 provider 已有活跃 daemon 时 start 抛 LockHeldError 退 1；--force 仅回收 stale/corrupt lock，不强杀活跃进程。
+ - TaskRunner 构造是位置参数（含 config、resilience、policyCache 等），非 options 对象；TaskRunner 创建必须在 PolicyCache 之后（共享实例）。
+ - interactive 组装顺序：先 new SessionManager（deps 闭包引用 daemon）再 new Daemon，靠 `let daemon` 闭包延迟绑定解决循环引用。
++- 主控 MCP 引擎门装配（2026-10-10-all-engines-mcp-injection）：SessionManager 构造处 `isMainAgentSession: (ctx) => isMainAgentMcpCandidate(ctx)`——谓词单源在 providers.ts（getProviderCaps(provider).mcp 能力驱动，未知 provider 默认拒绝；pi 已翻 true、codex/cursor 维持 false D-011）；分身谓词 isWorkerSession 不动（claude-only，D-008）。cli 层只做委托装配，判定语义改动归 interactive 模块。
+ - 三循环 fire-and-forget 的未捕获 rejection 由顶层 handler 吞掉保活——排查「daemon 静默不退」时先 grep `[FATAL ...]`。
+ 
+ ## 人工备注
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md b/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
+index 8b7c5714b..6e166c1cb 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/codex-settings.md
+@@ -10,10 +10,16 @@ created_at: 2026-09-11 01:06:00
+ 
+ ## 定位
+ 把 lease 下发的 codex 形态 provider_config 凭证写进 per-session 隔离目录 `CODEX_HOME/{auth.json, config.toml}`（change 2026-09-10-multi-provider-injection FR-01）。背景（spike 实测硬发现）：codex CLI 0.147.0 无 base_url 环境变量注入面（二进制仅 OPENAI_API_KEY / CODEX_API_KEY 等 key 入口），端点重定向唯一载体是 config.toml `[model_providers.<id>]` 表。本模块与 pi-settings 同属「配置写盘层」，由 task-runner.applyProviderFileSettings 按 agent_kind='codex' 分派调用（interactive / batch 两接线点 + 热切换重写共用同一函数）。
++2026-10-10-all-engines-mcp-injection（task-06，D-006@v1 / D-011@v1）起新增 MCP 面：`mergeCodexMcpToml` + `writeCodexMcpServers` 把平台 MCP 配置表序列化为同文件 `[mcp_servers.*]` 托管段（codex CLI 官方 config.toml schema）；调用方为 codex-app-server-driver start。**codex caps 当前维持 false（D-011@v1 宿主平台二进制受阻未能实测生效）——机制就绪不触达**，复评 SOP 见 providers.ts codex 注释块与 spike-codex-mcp.md。
+ 
+ ## 契约摘要
+-- 唯一导出：`writeCodexHome(input: CodexHomeWriteInput): Promise<void>`；入参 `{codexHome, provider, daemonApiKey}`（目录由调用方 spawn 前创建，写盘器不自建）。
+-- per-form 映射（两形态）：
++- 导出（MCP 面新增三个 + 既有凭证面/镜像/迁移面）：
++  - `writeCodexHome(input: CodexHomeWriteInput): Promise<void>`——凭证面；入参 `{codexHome, provider, daemonApiKey}`（目录由调用方 spawn 前创建，写盘器不自建）。
++  - `mergeCodexMcpToml(existing, mcpServers: Record<string, CodexMcpServerConfig>): string`——纯函数无 IO：`[mcp_servers.*]` 段序列化（`command` 标量 + `args` 字符串数组 + `[mcp_servers.<name>.env]` 子表）与差量合并。
++  - `writeCodexMcpServers(codexHome, mcpServers): Promise<void>`——读 config.toml → mergeCodexMcpToml → writeFileAtomic；空表跳过不写；IO 失败 throw（调用方捕获降级 warn 不阻断 spawn）。
++  - `CodexMcpServerConfig`（结构类型 `{command, args?, env?}`，driver 侧直传）。
++- config.toml 托管段分工（两写路径均「读原文→差量合并→原子写」幂等）：provider 托管段（根区 model/model_provider 行 + `[model_providers.sillyhub]` 表）归 writeCodexHome；`[mcp_servers.*]` 命名空间归 writeCodexMcpServers（daemon 独占：现有 mcp_servers 段整段丢弃重写防幽灵 server，其余行原样保留）。
++- per-form 映射（两形态，凭证面）：
+   - anthropic 直连（api_format 缺省 / 'anthropic'）：auth key = provider.api_key；base_url = provider.base_url；model = default_fallback_model ?? model（裸 id）。
+   - openai_chat（api_format = 'openai_chat'，经 litellm_proxy 通道 D-006）：auth key = daemonApiKey（进程级 master key 不出 backend，payload 刻意不含 api_key）；base_url = provider.litellm_base_url（hub 代理地址）；model = provider.litellm_model_name（usr-<uid>-<pid> LiteLLM 路由键）。
+ - 产物：auth.json `{"OPENAI_API_KEY": key}`（先读后写保留未知兄弟键；key 缺省整文件不写——keyless 自定义 provider 合法）；config.toml 顶层 `model`（缺省不写该行）+ `model_provider = "sillyhub"` + `[model_providers.sillyhub]` 表（name / base_url / wire_api）。
+@@ -32,6 +38,13 @@ writeCodexHome({codexHome, provider, daemonApiKey}):
+     产出恒为合法 TOML
+   任一 IO 失败 → console.error 后 throw（reject）→ 调用方跳过 CODEX_HOME env
+     注入仍 spawn（失败语义唯一化：半写目录被 CLI 读到 ≠ 按宿主现状运行）
++
++mergeCodexMcpToml(existing, mcpServers):
++  空表 → 返回 existing 原文（不动文件）
++  逐行扫描：表头路径首段 = mcp_servers 的段（含尾随空行/注释）整段丢弃，
++    其余行保留 → 追加新 [mcp_servers.<name>] 块（command/args?/env 子表）
++  键名按 TOML 裸键规则（name 由 daemon 白名单控制为安全标识符：
++    sillyhub-daemon / sillyhub-file 等连字符形态合法）；值转义复用 tomlString
+ ```
+ 
+ ## 注意事项
+@@ -43,8 +56,8 @@ writeCodexHome({codexHome, provider, daemonApiKey}):
+ - **`.sillyhub-managed` 生效标记**（D-004@v2）：ForReload 分支四镜像**标记先行**（标记
+   写失败跳过整个镜像含删除动作）；restore 探测消费该标记（详见 provider-file-settings
+   模块）。改写盘/镜像序时保持「删除类动作晚于标记持久化」不变量。
+-- CLI 版本基线（R-03）：写盘形状以 **codex 0.147.0** 实测为 golden——`wire_api = "responses"` 是自定义 provider 唯一合法值（0.147.0 已移除 "chat"，配置加载即报错）；CLI 升级若改文件格式，由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 codex-cli 0.147.0，mock 全链 exit=0）。
+-- spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/a2b-config.toml` 与 `a2-auth.json`（产物逐字段同形）；冒烟测试对该 golden 做整文件逐字段断言。
++- CLI 版本基线（R-03）：凭证面写盘形状以 **codex 0.147.0** 实测为 golden——`wire_api = "responses"` 是自定义 provider 唯一合法值（0.147.0 已移除 "chat"，配置加载即报错）；CLI 升级若改文件格式，由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 codex-cli 0.147.0，mock 全链 exit=0）。MCP 面 `[mcp_servers.*]` 序列化形状按 codex CLI 官方 config.toml schema 落地、7 用例（含 TOML 往返/幂等/幽灵 server 防残留/非托管行保留）锁定，但**未在宿主引擎实测生效**（D-011@v1 受阻——宿主 codex 平台二进制不可用；复评通过即翻 caps 触达）。
++- spike golden 证据：凭证面 `.sillyspec/changes/2026-09-10-multi-provider-injection/spike/a2b-config.toml` 与 `a2-auth.json`（产物逐字段同形）；冒烟测试对该 golden 做整文件逐字段断言。MCP 面受阻裁定与复评 SOP：`.sillyspec/changes/2026-10-10-all-engines-mcp-injection/spike-codex-mcp.md`。
+ - 自定义 provider 不强制 key（spike A3a：无 key 请求照发、Authorization 空）→ key 缺省不写 auth.json 是合法形态而非错误。
+ - 保守合并是「托管段差量替换」不是全文件重写：codex 运行时会在 CODEX_HOME 落 [projects.*] 信任记录等状态，全量覆盖会丢非托管内容。
+ - 手写极小 TOML 序列化（daemon 无 TOML 库且不新增依赖），仅覆盖字符串标量 + 最小完备转义；既有文件损坏时按空文件重建（per-session 托管目录，无宿主数据损失面）。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+index 3748780f6..76a0b78ec 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/interactive.md
+@@ -58,7 +58,9 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
+   MultiEdit + Bash 经 extractShellWritePaths 提取写目标；读工具不拦；
+   policyEngine 未注入时退化 allowedRootsProvider fallback（空数组放行防全 deny）
+ 主 agent MCP: isMainAgentSession(ctx.stage==='orchestrator') → mainAgentMcpConfigProvider
+-  经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入
++  经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入；
++  引擎门 2026-10-10 起由 cli.ts 装配 providers.isMainAgentMcpCandidate（caps 驱动，
++  见 2026-10-10-all-engines-mcp-injection 增量节）——谓词判定与注入管道分居两层
+ reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
+   provider 维度门 PROVIDER_RELOAD_ENGINES（D-005@v2；2026-09-13 由手写
+   ['claude','codex','pi'] 改 INTERACTIVE_PROVIDERS.switchable 派生，照前端
+@@ -153,3 +155,12 @@ restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快
+ - 撞号缺陷：CodexHandle 曾有双 id 计数器——`nextRpcId`（turn/start·turn/interrupt，≥3 无上界）与 `nextJsonRpcId`（compact 等「等 response」请求，seed 100）。seed 100 只在会话前 ~97 次轮级 RPC 内避开 nextRpcId 空间；长会话越过交叉点后两计数器分到同号，同 id 并发在途时 `_maybeResolveJsonRpcResponse` 按先到回执错配唤醒 compact pending（误报成功/失败，压缩命令本体仍会发出执行）。
+ - 修法：删 `nextJsonRpcId` 字段，`_sendJsonRpcRequest` 改复用 `nextRpcId++` 单源分配——任意时刻在途请求 id 全局唯一，撞号结构性消除；turn 路径零改动（fire-and-forget 不经 jsonRpcPending 表的语义不变）。
+ - 回归锚：tests/interactive/codex-app-server-driver.test.ts 新增防碰撞用例（把 nextRpcId 推到旧交叉点 100 → compact 取 100、并发 turn/start 取 101 分号不同、turn 回执先到不误唤醒 compact、正主 id 回执才 resolve）；既有 pending 机制/compact 组 8 处 seed-100 断言同步改为统一计数器语义（未发 turn 时首取 3）。
++
++## 2026-10-10-all-engines-mcp-injection 增量（四引擎 MCP 注入）
++
++- **providers.ts**：新增导出 `isMainAgentMcpCandidate(provider, stage?)`——主控会话 MCP 引擎门从 `provider !== 'claude'` 硬拒改为 `getProviderCaps(provider).mcp` 能力驱动（未知 provider 默认拒绝；stage 口径不变：orchestrator/缺省注入、mission_worker 走分身分支不受影响）；`PROVIDER_CAPS.pi.mcp` 翻 true（唯一依据 SPIKE-00 实测，pi 1.1.0）；codex/cursor 维持 false（D-011@v1 受阻裁定——宿主引擎不可用未能实测，机制代码就绪，复评 SOP 见 providers.ts 两注释块 + spike-codex-mcp.md / spike-cursor-mcp.md）。三端同步：frontend/src/lib/provider-caps.ts 与 backend provider_caps.py 产物由 gen-provider-caps.mjs 重刷（各 1 行 diff），backend 对齐守护测试锁定。
++- **pi-rpc-driver.ts**：start 函数体内消费 `opts.mcpServers`——有配置时调 pi-settings.writePiMcpConfig 写 per-session mcp.json（形态①原生配置）；版本门控 `detectPiMajorVersion`（spawn pi --version，5s 超时/失败/乱串 → -1）：major<1 跳过写盘 warn 不阻断（pi 0.x 无 MCP）；PI_CODING_AGENT_DIR 缺失或写盘失败同样降级 warn 不阻断 spawn（MCP 是增强能力，三重降级）。`parsePiMajorVersion` 纯函数可单测。
++- **codex-app-server-driver.ts**：start 函数体内调 codex-settings.writeCodexMcpServers 写 per-session CODEX_HOME/config.toml [mcp_servers.*] 托管段——caps=false 当前不触达（谓词层先拦），机制就绪待 SPIKE-01 复评翻值。
++- **cursor-driver.ts**：零逻辑 diff，仅忽略注释同步（cursor 通道留档分支）。
++- 写盘调用点纪律（D-012@v1）：两处消费均在 driver start 函数体内运行时执行，模块顶层零调用，写盘器（pi-settings/codex-settings）低依赖不回引 interactive/（无 TDZ 环）；driver-factory/driver.ts 注入管道零 diff（引擎无关管道复用）。
++- 端到端证据：acceptance-e2e.md 五环节（注入→connected→工具可见 upload_file/list_uploaded_files→JSON-RPC 调用→backend 出站 401 结构化回传）；真实上传落文件中心为 daemon 部署后线上复验项（D-013@v1）。
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+index fe06c5d15..026eca6d2 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
++++ b/.sillyspec/docs/sillyhub-daemon/modules/pi-settings.md
+@@ -10,10 +10,15 @@ created_at: 2026-09-11 01:06:00
+ 
+ ## 定位
+ 把 lease 下发的 pi 形态 provider_config 凭证写进 per-session 隔离目录 `PI_CODING_AGENT_DIR/{auth.json, models.json, settings.json}`（change 2026-09-10-multi-provider-injection FR-02）。背景（spike B 实测）：`PI_CODING_AGENT_DIR` 整体重定向 pi root（模型解析 / auth / settings 全从该目录读），自定义端点注入走该目录三文件。本模块与 codex-settings 同属「配置写盘层」，由 task-runner.applyProviderFileSettings 按 agent_kind='pi' 分派调用（interactive / batch 两接线点 + 热切换重写共用同一函数）。
++2026-10-10-all-engines-mcp-injection（task-05，D-005@v1 形态①）起新增 MCP 面：`writePiMcpConfig` 把平台 MCP 配置表写进同目录 `mcp.json`（pi 1.0+ 原生 MCP 配置，SPIKE-00 实测读取路径 = `<dir>/mcp.json` 直对 pi root——非宿主 `~/.pi/agent/mcp.json` 的 agent 子层）；调用方为 pi-rpc-driver start（非 task-runner）。
+ 
+ ## 契约摘要
+-- 唯一导出：`writePiDir(input: PiDirWriteInput): Promise<void>`；入参 `{piDir, provider}`（目录由调用方 spawn 前创建，写盘器不自建）。
+-- 仅消费「自定义端点」形态（provider.base_url 非空 + api_key + 裸 model id 齐）；api_format='openai_chat' 为 pi × openai_chat 禁配组合（后端 422 归 Create/Update 校验、前端禁选归表单，此处防御性双保险 warn 跳过）。
++- 导出两个写盘函数 + 两个纯判定：
++  - `writePiDir(input: PiDirWriteInput): Promise<void>`——凭证三文件；入参 `{piDir, provider}`（目录由调用方 spawn 前创建，写盘器不自建）。
++  - `writePiMcpConfig(piDir, mcpServers: Record<string, PiMcpServerConfig>): Promise<void>`——MCP 配置 `{ "mcpServers": { <name>: { command, args?, env? } } }`（pi 1.1.0 实测同 codex 风格平铺形态）；per-server env（MCP_SESSION_ID / MCP_SERVER_* 等）经条目 env 字段透传（conventions「env 必须进 mcpServers 条目 env 字段」）。
++  - `PiMcpServerConfig`（结构类型，driver 侧直传）；`isPiFormSufficient(provider)`。
++- writePiDir 仅消费「自定义端点」形态（provider.base_url 非空 + api_key + 裸 model id 齐）；api_format='openai_chat' 为 pi × openai_chat 禁配组合（后端 422 归 Create/Update 校验、前端禁选归表单，此处防御性双保险 warn 跳过）。
++- writePiMcpConfig 语义与三文件相反——**daemon 独占全量覆写**（区别于 auth/models/settings 的先读后写保留）：每次会话创建按 resolveMainAgentMcp 产出的配置表整表重写、不合并旧条目（旧 server 残留 = 幽灵工具面）；空表跳过不写（pi 侧视为无 MCP 配置）。
+ - 产物三文件（托管键差量替换，未知键 / 兄弟 provider 保留）：
+   - auth.json：`{"sillyhub": {"type": "api_key", "key": api_key}}`（官方形状）；
+   - models.json：`providers.sillyhub = {name: "SillyHub", api: <按 api_format 映射>, baseUrl, models: [{id: 裸 model id}]}`——anthropic/缺省 → `"anthropic-messages"`（Anthropic SDK 打 `{baseUrl}/v1/messages`，鉴权 `x-api-key` 头；baseUrl 不得带 `/v1` 后缀，客户端自拼。ql-20260911-029：原写死 openai-completions 导致智谱 anthropic 端点协议错配全断流）；未知 api_format → warn 跳过零写入；
+@@ -33,17 +38,24 @@ writePiDir({piDir, provider}):
+   auth.json → models.json(api) → settings.json 依序先读后写（preserve unknown）
+   任一 IO 失败 → console.error 后 throw（reject）→ 调用方跳过 PI_CODING_AGENT_DIR
+     env 注入仍 spawn（失败语义唯一化）
++
++writePiMcpConfig(piDir, mcpServers):
++  空表 → return（不落文件）
++  {mcpServers} 整表 JSON 序列化 → writeFileAtomic(<piDir>/mcp.json)（覆写语义）
++  IO 失败 → console.error('pi_mcp_config_write_failed') 后 throw → 调用方
++    （pi-rpc-driver start）捕获降级 warn 不阻断 spawn（MCP 是增强能力）
+ ```
+ 
+ ## 注意事项
+ 
+ - **写入一律原子**（2026-09-12-provider-file-tx D-003@v1）：auth.json/models.json/
+-  settings.json 三文件走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接
++  settings.json/mcp.json 四文件走 `atomic-write.ts` writeFileAtomic（tmp+fsync+rename）——直接
+   writeFile 崩溃留半截 JSON。pi 无 null 探测/无镜像删除面，不涉及生效标记先行序。
+-- CLI 版本基线（R-03）：写盘形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api` 按 api_format 映射（ql-20260911-029 起 anthropic 形态 = `"anthropic-messages"`，Anthropic SDK 打 `{baseUrl}/v1/messages` + `x-api-key` 头，智谱真实端点实测 exit=0；spike B1 的 openai-completions 形态仅适用于 OpenAI 兼容端点，当前词表无该形态合法入口）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
+-- spike golden 证据：`.sillyspec/changes/2026-09-10-multi-provider-injection/spike/b1-models.json`、`b1b-auth.json`、`b1-settings.json`；冒烟测试对 b1 系 golden 做逐字段断言。
++- CLI 版本基线（R-03）：凭证三文件形状以 **pi 0.81.1** 实测为 golden——`providers.<key>.api` 按 api_format 映射（ql-20260911-029 起 anthropic 形态 = `"anthropic-messages"`，Anthropic SDK 打 `{baseUrl}/v1/messages` + `x-api-key` 头，智谱真实端点实测 exit=0；spike B1 的 openai-completions 形态仅适用于 OpenAI 兼容端点，当前词表无该形态合法入口）；auth.json 官方形状是 `{"type": "api_key", "key": ...}`（`{"apiKey": ...}` 投影形状实测被拒：`No API key found for the selected model.`，不采用）；CLI 升级漂移由 tests/provider-injection-smoke.integ.test.ts 真跑冒烟暴露（本机验证基线 0.81.1，mock 全链 exit=0）。
++- MCP 面版本门控（2026-10-10-all-engines-mcp-injection FR-06/R-04）：mcp.json 形状以 **pi 1.1.0** 实测为 golden（SPIKE-00：rpc envelope 兼容、vendored 扩展装载、mcp.json 平铺路径三验证全过）；宿主 pi major<1 时调用方（pi-rpc-driver start 内 detectPiMajorVersion）跳过写盘不注入（caps 机制层 + 运行时 detect 层双层门控）；写盘责任在本模块、版本判定责任在 driver。
++- spike golden 证据：凭证面 `.sillyspec/changes/2026-09-10-multi-provider-injection/spike/b1-models.json`、`b1b-auth.json`、`b1-settings.json`；MCP 面 `.sillyspec/changes/2026-10-10-all-engines-mcp-injection/spike-pi-10-compat.md`（形态①裁定）+ `acceptance-e2e.md`（五环节链）。
+ - 与 env 层共存（R-04）：pi key 解析优先级 CLI `--api-key` > auth.json > env > models.json 内联 apiKey——文件层与 env 层并存时 auth.json 文件值压制 env 同键值，两层叠加无歧义路由；官方端点（base_url 空）本模块零写入，对 env 层零干扰。
+-- 安全：api_key 明文只进文件不进任何日志。
++- 安全：api_key 明文只进文件不进任何日志（MCP 写盘 error 载荷仅目录/server 名/error message）。
+ 
+ ## 人工备注
+ 
+diff --git a/backend/app/modules/auth/api_key_schema.py b/backend/app/modules/auth/api_key_schema.py
+index a505d1f46..a17497055 100644
+--- a/backend/app/modules/auth/api_key_schema.py
++++ b/backend/app/modules/auth/api_key_schema.py
+@@ -1,8 +1,11 @@
+ """Pydantic DTOs for the API Key endpoints.
+ 
+-Plaintext is *only* returned by ``ApiKeyCreated`` immediately after
+-creation. ``ApiKeyRead`` (used for list endpoints) never contains the
+-plaintext or the hash.
++Plaintext surfaces in two places only: ``ApiKeyCreated`` (POST 201, the
++canonical one-time return) and ``ApiKeyPlaintextResponse`` (per-id
++re-fetch, gated to active keys with a stored ``encrypted_key`` —
++2026-10-11-apikey-mcp-copy-delete). ``ApiKeyRead`` (list rows) never
++contains the plaintext or the hash, only the ``plaintext_recoverable``
++hint so the UI can enable its copy button.
+ """
+ 
+ from __future__ import annotations
+@@ -30,6 +33,9 @@ class ApiKeyRead(BaseModel):
+     expires_at: datetime | None
+     created_at: datetime
+     revoked_at: datetime | None
++    # 明文是否可再取回（签发时加密存档；存量行/未配主密钥 = False）。吊销/过期
++    # 状态由 revoked_at / expires_at 表达，前端组合判断是否显示复制按钮。
++    plaintext_recoverable: bool
+ 
+ 
+ class ApiKeyCreated(ApiKeyRead):
+@@ -38,5 +44,11 @@ class ApiKeyCreated(ApiKeyRead):
+     plaintext: str
+ 
+ 
++class ApiKeyPlaintextResponse(BaseModel):
++    """GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。"""
++
++    plaintext: str = Field(description="完整密钥明文，仅复制入口使用，勿入日志")
++
++
+ class ApiKeyListResponse(BaseModel):
+     items: list[ApiKeyRead]
+diff --git a/backend/app/modules/auth/api_key_service.py b/backend/app/modules/auth/api_key_service.py
+index a2cbc755f..c232af6d1 100644
+--- a/backend/app/modules/auth/api_key_service.py
++++ b/backend/app/modules/auth/api_key_service.py
+@@ -2,7 +2,11 @@
+ 
+ Long-lived credentials for daemon processes. Mirrors the refresh-token
+ pattern in :mod:`app.modules.auth.service`: plaintext is generated with
+-``secrets.token_urlsafe``, persisted as ``bcrypt(plaintext)``.
++``secrets.token_urlsafe``, persisted as ``bcrypt(plaintext)`` (authenticate
++path). Since 2026-10-11-apikey-mcp-copy-delete the plaintext is *also*
++kept reversibly-encrypted in ``encrypted_key`` (libsodium secretbox + KEK
++in ``SILLYSPEC_MASTER_KEY``) so the admin UI can copy an already-issued key
++on demand; rows without it (pre-change or no master key) are not recoverable.
+ 
+ The ``shk_live_`` prefix is prepended to the plaintext so GitHub secret
+ scanning custom rules can match leaked keys, and so the UI can render a
+@@ -19,11 +23,13 @@ import secrets
+ import uuid
+ from datetime import UTC, datetime
+ 
+-from sqlalchemy import select, update
++from sqlalchemy import delete, select, update
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+ 
+ from app.core.config import Settings
++from app.core.crypto import CipherKeyMismatch, get_cipher
++from app.core.errors import ApiKeyNotFound, AppError
+ from app.core.logging import get_logger
+ from app.core.redis import get_redis
+ from app.core.security import hash_refresh_token, password_hasher, verify_refresh_token
+@@ -35,6 +41,23 @@ API_KEY_PREFIX = "shk_live_"
+ _KEY_PREFIX_DISPLAY_LEN = 12
+ 
+ 
++class ApiKeyPlaintextUnavailable(AppError):
++    """明文不可再取回（存量行未存加密明文 / 主密钥已轮换）→ 409。
++
++    定义在 service 模块（对齐 McpTokenNotFound 模式），detail 中文引导重新签发。
++    """
++
++    code = "HTTP_409_API_KEY_PLAINTEXT_UNAVAILABLE"
++    http_status = 409
++
++
++class ApiKeyDeleteBlocked(AppError):
++    """物理删除未吊销的 key → 409（防误删活跃凭证，先吊销再删除）。"""
++
++    code = "HTTP_409_API_KEY_NOT_REVOKED"
++    http_status = 409
++
++
+ def _utc_now() -> datetime:
+     return datetime.now(UTC)
+ 
+@@ -78,6 +101,40 @@ def _neg_cache_key(plaintext: str) -> str:
+     return f"auth:apikey:neg:{_key_digest(plaintext)}"
+ 
+ 
++def _encrypt_plaintext(plaintext: str) -> str | None:
++    """加密明文 → 单列存储串 ``{key_id}:{hex(ciphertext)}``（与 mcp_webhooks.secret 同构）。
++
++    任何加密侧异常（含主密钥未配置 ``MasterKeyMissing``）都降级为 ``None``：签发
++    链路绝不因「可恢复明文」这层增值能力而回归——明文仍一次性返回，只是事后不可
++    再复制（UI 降级禁用，FR-05）。失败原因记 WARNING 供运维定位。
++    """
++    try:
++        ciphertext, key_id = get_cipher().encrypt(plaintext)
++    except Exception as exc:  # 降级：主密钥缺失/加密故障不阻断签发
++        log.warning("api_key.plaintext_encrypt_skipped", error=str(exc))
++        return None
++    return f"{key_id}:{ciphertext.hex()}"
++
++
++def _decrypt_plaintext(stored: str) -> str:
++    """从单列存储串还原明文（仅管理端复制入口用，绝不入日志）。
++
++    密钥轮换（``CipherKeyMismatch``）或主密钥缺失统一转
++    :class:`ApiKeyPlaintextUnavailable`（409 引导重新签发），不 500。
++    """
++    key_id, _, hex_ct = stored.partition(":")
++    try:
++        return get_cipher().decrypt(bytes.fromhex(hex_ct), key_id)
++    except CipherKeyMismatch as exc:
++        raise ApiKeyPlaintextUnavailable(
++            "该密钥的加密明文无法用当前主密钥解密（主密钥已轮换），请吊销后重新签发。",
++        ) from exc
++    except Exception as exc:
++        raise ApiKeyPlaintextUnavailable(
++            "该密钥未保存可恢复的明文，请新建密钥后使用复制功能。",
++        ) from exc
++
++
+ class ApiKeyService:
+     """CRUD + authenticate for long-lived API keys."""
+ 
+@@ -95,8 +152,9 @@ class ApiKeyService:
+         name: str,
+         expires_at: datetime | None,
+     ) -> tuple[ApiKey, str]:
+-        """Issue a new key. Returns ``(row, plaintext)`` — plaintext must be
+-        returned to the caller *now* and is never recoverable later."""
++        """Issue a new key. Returns ``(row, plaintext)`` — plaintext is
++        returned to the caller *now*; if ``encrypted_key`` landed, it can
++        also be re-fetched later via :meth:`get_plaintext`."""
+         plaintext = _generate_plaintext()
+         row = ApiKey(
+             id=uuid.uuid4(),
+@@ -104,6 +162,7 @@ class ApiKeyService:
+             name=name.strip(),
+             key_prefix=_display_prefix(plaintext),
+             key_hash=hash_refresh_token(plaintext),
++            encrypted_key=_encrypt_plaintext(plaintext),
+             last_used_at=None,
+             expires_at=expires_at,
+             created_at=_utc_now(),
+@@ -174,6 +233,70 @@ class ApiKeyService:
+             )
+         return bool(rowcount)
+ 
++    async def get_plaintext(self, *, api_key_id: uuid.UUID, user_id: uuid.UUID) -> str:
++        """按 id 取回明文（管理端「复制密钥」入口）。
++
++        放行条件：行存在 + 属于 ``user_id`` + 未吊销 + 未过期；否则
++        :class:`ApiKeyNotFound`（404，与吊销端点同文案，不泄露具体原因）。
++        存量行（``encrypted_key`` 为空）/ 主密钥轮换 →
++        :class:`ApiKeyPlaintextUnavailable`（409，引导重新签发）。
++        """
++        row = (
++            await self._db.execute(
++                select(ApiKey)
++                .where(col(ApiKey.id) == api_key_id)
++                .where(col(ApiKey.user_id) == user_id)
++            )
++        ).scalar_one_or_none()
++        now = _utc_now()
++        if (
++            row is None
++            or row.revoked_at is not None
++            or (row.expires_at is not None and _as_utc(row.expires_at) <= now)
++        ):
++            raise ApiKeyNotFound("API 密钥不存在或已被吊销。")
++        if not row.encrypted_key:
++            raise ApiKeyPlaintextUnavailable(
++                "该密钥签发时未保存可恢复的明文（旧版本签发或未配置主密钥），请新建密钥后使用复制功能。",
++            )
++        return _decrypt_plaintext(row.encrypted_key)
++
++    async def hard_delete(self, *, api_key_id: uuid.UUID, user_id: uuid.UUID) -> None:
++        """物理删除行（仅已吊销记录放行）。
++
++        不存在 / 跨用户 → :class:`ApiKeyNotFound`（404）；存在但未吊销 →
++        :class:`ApiKeyDeleteBlocked`（409，防误删活跃凭证）。删除后按
++        ``key_prefix`` 防御性清一次正缓存——正常路径 revoke 时已清，这里兜底
++        「吊销后缓存清理失败、随后 hard delete」的残余窗口。
++        """
++        row = (
++            await self._db.execute(
++                select(ApiKey)
++                .where(col(ApiKey.id) == api_key_id)
++                .where(col(ApiKey.user_id) == user_id)
++            )
++        ).scalar_one_or_none()
++        if row is None:
++            raise ApiKeyNotFound("API 密钥不存在或已被吊销。")
++        if row.revoked_at is None:
++            raise ApiKeyDeleteBlocked("该密钥尚未吊销，请先吊销再删除。")
++        key_prefix = row.key_prefix
++        # DELETE 复带 revoked_at IS NOT NULL 条件（不止靠上方 check）：即便出现
++        # un-revoke 类未来路径翻转状态，并发窗口内也不会误删活跃凭证。
++        await self._db.execute(
++            delete(ApiKey)
++            .where(col(ApiKey.id) == api_key_id)
++            .where(col(ApiKey.user_id) == user_id)
++            .where(col(ApiKey.revoked_at).is_not(None))
++        )
++        await self._db.commit()
++        await self._invalidate_prefix_cache(key_prefix)
++        log.info(
++            "api_key.hard_deleted",
++            api_key_id=str(api_key_id),
++            user_id=str(user_id),
++        )
++
+     # ── Authenticate ──────────────────────────────────────────────────────
+ 
+     async def authenticate(self, *, plaintext: str) -> User | None:
+diff --git a/backend/app/modules/auth/model.py b/backend/app/modules/auth/model.py
+index 8e4931a5a..72f12d464 100644
+--- a/backend/app/modules/auth/model.py
++++ b/backend/app/modules/auth/model.py
+@@ -16,7 +16,7 @@ import uuid
+ from datetime import UTC, datetime
+ from typing import Literal
+ 
+-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Uuid, text
++from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
+ from sqlmodel import Field
+ 
+ from app.models.base import BaseModel
+@@ -204,10 +204,14 @@ class RolePermission(BaseModel, table=True):
+ class ApiKey(BaseModel, table=True):
+     """A long-lived API key issued by a platform admin.
+ 
+-    The plaintext key is shown to the admin **once** at creation time and
+-    never persisted. The DB row stores ``bcrypt(plaintext)`` in
+-    ``key_hash`` plus a non-sensitive ``key_prefix`` (the first 12 chars
+-    of the plaintext) for display in the admin UI.
++    The DB row stores ``bcrypt(plaintext)`` in ``key_hash`` (authenticate
++    path) plus a non-sensitive ``key_prefix`` (the first 12 chars of the
++    plaintext) for display. Since 2026-10-11-apikey-mcp-copy-delete the
++    plaintext is *also* kept reversibly-encrypted in ``encrypted_key``
++    (libsodium secretbox, KEK in ``SILLYSPEC_MASTER_KEY``) so the admin UI
++    can copy an already-issued key on demand; rows created before that
++    change (or without the master key configured) have ``encrypted_key =
++    NULL`` and are not recoverable.
+ 
+     Revocation sets ``revoked_at``; expiry sets ``expires_at``. Both are
+     checked at authenticate time. ``last_used_at`` is updated on a successful
+@@ -237,6 +241,14 @@ class ApiKey(BaseModel, table=True):
+     name: str = Field(sa_column=Column(String(100), nullable=False))
+     key_prefix: str = Field(sa_column=Column(String(16), nullable=False))
+     key_hash: str = Field(sa_column=Column(String(255), nullable=False))
++    # 可逆加密的明文（``{key_id}:{hex(ciphertext)}``，libsodium secretbox + KEK=
++    # SILLYSPEC_MASTER_KEY，与 mcp_webhooks.secret 同构）：管理端「复制密钥」按需
++    # 解密返回（2026-10-11-apikey-mcp-copy-delete）。NULL = 存量行或签发时未配置
++    # 主密钥——明文不可恢复，UI 复制入口降级禁用。bcrypt key_hash 鉴权路径不依赖本列。
++    encrypted_key: str | None = Field(
++        default=None,
++        sa_column=Column(Text, nullable=True),
++    )
+     last_used_at: datetime | None = Field(
+         default=None,
+         sa_column=Column(DateTime(timezone=True), nullable=True),
+@@ -254,6 +266,11 @@ class ApiKey(BaseModel, table=True):
+         sa_column=Column(DateTime(timezone=True), nullable=True),
+     )
+ 
++    @property
++    def plaintext_recoverable(self) -> bool:
++        """明文是否可再取回（签发时加密存档）。吊销/过期状态由字段自表达。"""
++        return self.encrypted_key is not None
++
+ 
+ class UserWorkspaceRole(BaseModel, table=True):
+     """Bind a User to a Role inside a Workspace.
+diff --git a/backend/app/modules/auth/router.py b/backend/app/modules/auth/router.py
+index 70b07b096..0d7a41545 100644
+--- a/backend/app/modules/auth/router.py
++++ b/backend/app/modules/auth/router.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import uuid
+ from typing import Annotated
+ 
+-from fastapi import APIRouter, Depends, Path, Request, status
++from fastapi import APIRouter, Depends, Path, Query, Request, status
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.auth_deps import get_current_user, require_permission_any
+@@ -16,6 +16,7 @@ from app.modules.auth.api_key_schema import (
+     ApiKeyCreated,
+     ApiKeyCreateRequest,
+     ApiKeyListResponse,
++    ApiKeyPlaintextResponse,
+     ApiKeyRead,
+ )
+ from app.modules.auth.api_key_service import ApiKeyService
+@@ -221,8 +222,9 @@ async def create_api_key(
+ ) -> ApiKeyCreated:
+     """Issue a new long-lived API key for the daemon.
+ 
+-    Plaintext is returned **only** here; subsequent GETs will only expose
+-    ``key_prefix``. ``api_key:admin``-gated.
++    Plaintext is returned here (canonical one-time return); when the master
++    key is configured the row also stores it encrypted, and the per-id
++    plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
+     """
+     row, plaintext = await ApiKeyService(session, settings=settings).create(
+         user_id=user.id,
+@@ -237,6 +239,7 @@ async def create_api_key(
+         expires_at=row.expires_at,
+         created_at=row.created_at,
+         revoked_at=row.revoked_at,
++        plaintext_recoverable=row.plaintext_recoverable,
+         plaintext=plaintext,
+     )
+ 
+@@ -247,11 +250,34 @@ async def list_api_keys(
+     settings: SettingsDep,
+     user: ApiKeyAdminUser,
+ ) -> ApiKeyListResponse:
+-    """List the caller's API keys (plaintext never included)."""
++    """List the caller's API keys (plaintext never included; rows carry
++    ``plaintext_recoverable`` so the UI knows whether copy is possible)."""
+     rows = await ApiKeyService(session, settings=settings).list_for_user(user_id=user.id)
+     return ApiKeyListResponse(items=[ApiKeyRead.model_validate(r) for r in rows])
+ 
+ 
++@router.get(
++    "/api-keys/{api_key_id}/plaintext",
++    response_model=ApiKeyPlaintextResponse,
++)
++async def get_api_key_plaintext(
++    api_key_id: Annotated[uuid.UUID, Path(...)],
++    session: SessionDep,
++    settings: SettingsDep,
++    user: ApiKeyAdminUser,
++) -> ApiKeyPlaintextResponse:
++    """取回某把活跃 key 的明文（管理端「复制密钥」入口）。
++
++    仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
++    不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++    """
++    plaintext = await ApiKeyService(session, settings=settings).get_plaintext(
++        api_key_id=api_key_id,
++        user_id=user.id,
++    )
++    return ApiKeyPlaintextResponse(plaintext=plaintext)
++
++
+ @router.delete(
+     "/api-keys/{api_key_id}",
+     status_code=status.HTTP_204_NO_CONTENT,
+@@ -261,9 +287,21 @@ async def revoke_api_key(
+     session: SessionDep,
+     settings: SettingsDep,
+     user: ApiKeyAdminUser,
++    hard: Annotated[
++        bool,
++        Query(description="物理删除（仅已吊销记录放行；未吊销返回 409）"),
++    ] = False,
+ ) -> None:
+-    """Revoke an API key. Idempotent for unknown / already-revoked ids → 404."""
+-    updated = await ApiKeyService(session, settings=settings).revoke(
++    """Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
++
++    ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
++    未吊销 → 409（先吊销再删除）。
++    """
++    svc = ApiKeyService(session, settings=settings)
++    if hard:
++        await svc.hard_delete(api_key_id=api_key_id, user_id=user.id)
++        return None
++    updated = await svc.revoke(
+         api_key_id=api_key_id,
+         user_id=user.id,
+     )
+diff --git a/backend/app/modules/mcp_gateway/model.py b/backend/app/modules/mcp_gateway/model.py
+index bf0f7ace1..15afd9ddb 100644
+--- a/backend/app/modules/mcp_gateway/model.py
++++ b/backend/app/modules/mcp_gateway/model.py
+@@ -29,6 +29,7 @@ from sqlalchemy import (
+     ForeignKey,
+     Index,
+     String,
++    Text,
+     Uuid,
+     text,
+ )
+@@ -40,9 +41,12 @@ from app.models.base import BaseModel
+ class McpTokenORM(BaseModel, table=True):
+     """第三方接入平台的 MCP token（design §8.1）。
+ 
+-    明文 token 仅签发时返回一次；库存 ``token_hash = sha256(明文)``，不存明文（R-06）。
+-    middleware 校验：hash 传入 token → 等值查本表 → 未吊销（``revoked_at`` IS NULL）
+-    才放行，命中后回写 ``last_used_at``。``scope`` 决定可调用的 tool 集合。
++    鉴权库存 ``token_hash = sha256(明文)``；middleware 校验：hash 传入 token →
++    等值查本表 → 未吊销（``revoked_at`` IS NULL）才放行，命中后回写
++    ``last_used_at``。``scope`` 决定可调用的 tool 集合。自
++    2026-10-11-apikey-mcp-copy-delete 起明文另存可逆加密列 ``encrypted_token``
++    （libsodium secretbox + KEK）供管理端「复制令牌」按需取回；存量行为 NULL
++    （不可恢复，R-06 原语义仅对此类行继续成立）。
+     """
+ 
+     __tablename__ = "mcp_tokens"
+@@ -65,8 +69,16 @@ class McpTokenORM(BaseModel, table=True):
+         ),
+     )
+     name: str = Field(sa_column=Column(String(100), nullable=False))  # 人类可读标签
+-    # sha256(明文 token) hex；不存明文（R-06）。唯一性由 ix_mcp_tokens_token_hash 承担。
++    # sha256(明文 token) hex；鉴权按 hash 等值 O(1) 查表。唯一性由 ix_mcp_tokens_token_hash 承担。
+     token_hash: str = Field(sa_column=Column(String(128), nullable=False))
++    # 可逆加密的明文（``{key_id}:{hex(ciphertext)}``，libsodium secretbox + KEK=
++    # SILLYSPEC_MASTER_KEY，与 mcp_webhooks.secret 同构）：管理端「复制令牌」按需
++    # 解密返回（2026-10-11-apikey-mcp-copy-delete）。NULL = 存量行或签发时未配置
++    # 主密钥——明文不可恢复，UI 复制入口降级禁用。token_hash 鉴权路径不依赖本列。
++    encrypted_token: str | None = Field(
++        default=None,
++        sa_column=Column(Text, nullable=True),
++    )
+     # scope 集合：["read","dispatch","converge"]。middleware 按 scope 拒绝越界 tool。
+     scope: list[str] = Field(
+         default_factory=list,
+@@ -99,6 +111,11 @@ class McpTokenORM(BaseModel, table=True):
+         sa_column=Column(DateTime(timezone=True), nullable=True),
+     )
+ 
++    @property
++    def plaintext_recoverable(self) -> bool:
++        """明文是否可再取回（签发时加密存档）。吊销状态由 revoked_at 自表达。"""
++        return self.encrypted_token is not None
++
+ 
+ class McpWebhookORM(BaseModel, table=True):
+     """第三方 webhook 回调注册（design §8.2）。
+diff --git a/backend/app/modules/mcp_gateway/router.py b/backend/app/modules/mcp_gateway/router.py
+index 9f4047c2f..fe517a72c 100644
+--- a/backend/app/modules/mcp_gateway/router.py
++++ b/backend/app/modules/mcp_gateway/router.py
+@@ -1,12 +1,13 @@
+ """McpToken workspace 级管理 HTTP API（非 MCP，workspace owner/admin 用）。
+ 
+-design §7.2 / D-002@v1 / task-02。三个端点：
++design §7.2 / D-002@v1 / task-02。端点：
+ 
+-- ``POST   /workspaces/{workspace_id}/mcp-tokens``      签发（明文 token **仅此一次**返回）
+-- ``GET    /workspaces/{workspace_id}/mcp-tokens``      列出（不返明文，含 last_used_at / revoked_at）
+-- ``DELETE /workspaces/{workspace_id}/mcp-tokens/{id}`` 吊销（204）
++- ``POST   /workspaces/{workspace_id}/mcp-tokens``                      签发（明文 token 返回）
++- ``GET    /workspaces/{workspace_id}/mcp-tokens``                      列出（不返明文，含 last_used_at / revoked_at）
++- ``DELETE /workspaces/{workspace_id}/mcp-tokens/{id}``                 吊销（204；``?hard=true`` 物理删除）
++- ``GET    /workspaces/{workspace_id}/mcp-tokens/{id}/plaintext``       取回明文（2026-10-11-apikey-mcp-copy-delete）
+ 
+-鉴权：三端点均 ``require_permission(Permission.WORKSPACE_WRITE)``（RBAC 层级满足：
++鉴权：均 ``require_permission(Permission.WORKSPACE_WRITE)``（RBAC 层级满足：
+ WORKSPACE_ADMIN 自动继承 WRITE；viewer 只读 → 403）。``require_permission`` 自动从路径
+ 取 ``{workspace_id}`` 注入 RBAC 闭包（与 agent/profile router 同模式）。
+ 
+@@ -15,7 +16,8 @@ main.py 外层挂 ``prefix="/api"`` → 落地 ``/api/workspaces/{workspace_id}/
+ 
+ DTO 内联在 router（task-02 allowed_paths 未含 schema.py，对齐 daemon/profile router
+ 的内联 DTO 习惯）。响应 DTO 用 ``from_attributes=True`` 直接从 ORM 行构造；``token_hash``
+-与明文均**不出现在任何响应**（R-06：仅 POST 201 的 ``token`` 字段返回一次明文）。
++不出现在任何响应。明文出现在 POST 201（``token``，一次性返回）与按 id plaintext 端点
++（2026-10-11 变更：签发时已加密存档的活跃 token 可再取回，R-06 对存量未存档行继续成立）。
+ 
+ 异常风格：service 抛 ``AppError`` 子类（``McpTokenNotFound`` 404），由全局 ``AppError``
+ handler 统一序列化，router 不额外捕获。
+@@ -27,7 +29,7 @@ import uuid
+ from datetime import datetime
+ from typing import Annotated, Literal
+ 
+-from fastapi import APIRouter, Depends, Path, Request, status
++from fastapi import APIRouter, Depends, Path, Query, Request, status
+ from pydantic import BaseModel, ConfigDict, Field
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+@@ -70,7 +72,11 @@ class McpTokenCreateRequest(BaseModel):
+ 
+ 
+ class McpTokenRead(BaseModel):
+-    """列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。"""
++    """列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
++
++    ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
++    端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
++    """
+ 
+     model_config = ConfigDict(from_attributes=True)
+ 
+@@ -80,6 +86,13 @@ class McpTokenRead(BaseModel):
+     last_used_at: datetime | None
+     revoked_at: datetime | None
+     created_at: datetime
++    plaintext_recoverable: bool
++
++
++class McpTokenPlaintextResponse(BaseModel):
++    """GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。"""
++
++    token: str = Field(description="完整令牌明文，仅复制入口使用，勿入日志")
+ 
+ 
+ class McpTokenCreated(BaseModel):
+@@ -185,6 +198,26 @@ async def list_mcp_tokens(
+     return McpTokenListResponse(items=[McpTokenRead.model_validate(r) for r in rows])
+ 
+ 
++@router.get(
++    "/{workspace_id}/mcp-tokens/{token_id}/plaintext",
++    response_model=McpTokenPlaintextResponse,
++)
++async def get_mcp_token_plaintext(
++    workspace_id: Annotated[uuid.UUID, Path(...)],
++    token_id: Annotated[uuid.UUID, Path(...)],
++    session: SessionDep,
++    _user: WorkspaceWriter,
++) -> McpTokenPlaintextResponse:
++    """取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
++
++    仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
++    探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++    """
++    svc = _service(session)
++    plaintext = await svc.get_plaintext(token_id=token_id, workspace_id=workspace_id)
++    return McpTokenPlaintextResponse(token=plaintext)
++
++
+ @router.delete(
+     "/{workspace_id}/mcp-tokens/{token_id}",
+     status_code=status.HTTP_204_NO_CONTENT,
+@@ -194,14 +227,24 @@ async def revoke_mcp_token(
+     token_id: Annotated[uuid.UUID, Path(...)],
+     session: SessionDep,
+     _user: WorkspaceWriter,
++    hard: Annotated[
++        bool,
++        Query(description="物理删除（仅已吊销记录放行；未吊销返回 409）"),
++    ] = False,
+ ) -> None:
+     """吊销（``revoked_at = now``，幂等）。
+ 
+     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
+     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
+     精确 DEL，无 TTL 放行窗口）。
++
++    ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
++    CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
+     """
+     svc = _service(session)
++    if hard:
++        await svc.hard_delete(token_id=token_id, workspace_id=workspace_id)
++        return None
+     revoked = await svc.revoke(token_id=token_id, workspace_id=workspace_id)
+     if not revoked:
+         raise McpTokenNotFound(
+diff --git a/backend/app/modules/mcp_gateway/service.py b/backend/app/modules/mcp_gateway/service.py
+index ed130c3a2..af5e8fba1 100644
+--- a/backend/app/modules/mcp_gateway/service.py
++++ b/backend/app/modules/mcp_gateway/service.py
+@@ -9,8 +9,10 @@
+ - 正/负 Redis 缓存模式与 ``ApiKeyService`` 一致（命中缓存避免每请求查库），
+   best-effort 降级（redis 故障回退直查 DB），``last_used_at`` 节流写（复用
+   ``auth_api_key_last_used_throttle_seconds``，避免每请求 UPDATE 同一行锁串行化）。
+-- 签发返回明文 token **仅一次**（DB 只存 sha256，不存明文，R-06）；token_hash 与
+-  明文均不入日志。
++- 明文存取（2026-10-11-apikey-mcp-copy-delete）：鉴权只查 token_hash；明文另以
++  libsodium secretbox 可逆加密存 ``encrypted_token``（KEK=SILLYSPEC_MASTER_KEY），
++  管理端「复制令牌」按需解密返回。存量行未存档（NULL）→ 不可恢复，409 引导重签。
++  token_hash 与明文均不入日志。
+ 
+ TTL 复用说明：``auth_api_key_cache_ttl`` / ``auth_api_key_negative_cache_ttl`` /
+ ``auth_api_key_last_used_throttle_seconds`` 直接复用（config.py 非本任务 allowed_path，
+@@ -65,6 +67,23 @@ class McpTokenNotFound(AppError):
+     http_status = 404
+ 
+ 
++class McpTokenPlaintextUnavailable(AppError):
++    """明文不可再取回（存量行未存加密明文 / 主密钥已轮换）→ 409。
++
++    2026-10-11-apikey-mcp-copy-delete：detail 中文引导重新签发。
++    """
++
++    code = "HTTP_409_MCP_TOKEN_PLAINTEXT_UNAVAILABLE"
++    http_status = 409
++
++
++class McpTokenDeleteBlocked(AppError):
++    """物理删除未吊销的 token → 409（防误删活跃凭证，先吊销再删除）。"""
++
++    code = "HTTP_409_MCP_TOKEN_NOT_REVOKED"
++    http_status = 409
++
++
+ # ``shmcp_`` 前缀（SillyHub MCP）：供 GitHub secret scanning 自定义规则匹配泄漏的
+ # token，也让 UI 能渲染友好标签。与 ApiKeyService 的 ``shk_live_`` 同思路。前缀不入
+ # 单独列——authenticate 先判前缀，明文无此前缀直接 return None（不查库）。
+@@ -126,10 +145,41 @@ def _pos_cache_key(token_hash: str) -> str:
+ 
+ 
+ def _neg_cache_key(token_hash: str) -> str:
+-    """负缓存 key：``auth:mcptoken:neg:{token_hash}``。"""
++    """负缓存 key：``auth:mcptoken:neg:{sha256}``。"""
+     return f"{_NEG_CACHE_PREFIX}{token_hash}"
+ 
+ 
++def _encrypt_plaintext(plaintext: str) -> str | None:
++    """加密明文 → 单列存储串 ``{key_id}:{hex(ciphertext)}``。
++
++    2026-10-11-apikey-mcp-copy-delete：与 ApiKeyService._encrypt_plaintext 及
++    McpWebhookService._encode_secret 同构（libsodium secretbox + KEK=
++    SILLYSPEC_MASTER_KEY）。任何加密侧异常（含主密钥未配置）降级 ``None``：
++    签发链路绝不因「可恢复明文」回归——明文仍一次性返回，事后不可再复制。
++    """
++    try:
++        ciphertext, key_id = get_cipher().encrypt(plaintext)
++    except Exception as exc:  # 降级：主密钥缺失/加密故障不阻断签发
++        log.warning("mcp_token.plaintext_encrypt_skipped", error=str(exc))
++        return None
++    return f"{key_id}:{ciphertext.hex()}"
++
++
++def _decrypt_plaintext(stored: str) -> str:
++    """从单列存储串还原明文（仅管理端复制入口用，绝不入日志）。
++
++    主密钥轮换 / 缺失 / 密文损坏统一转 :class:`McpTokenPlaintextUnavailable`
++    （409 引导重新签发），不 500。
++    """
++    key_id, _, hex_ct = stored.partition(":")
++    try:
++        return get_cipher().decrypt(bytes.fromhex(hex_ct), key_id)
++    except Exception as exc:
++        raise McpTokenPlaintextUnavailable(
++            "该令牌的加密明文无法解密（主密钥已轮换或未配置），请吊销后重新签发。",
++        ) from exc
++
++
+ def _encode_principal(principal: McpTokenPrincipal) -> str:
+     """正缓存 value：JSON({token_id, workspace_id, scope})。
+ 
+@@ -176,14 +226,15 @@ class McpTokenService:
+         scope: list[str],
+         created_by: uuid.UUID | None,
+     ) -> tuple[McpTokenORM, str]:
+-        """签发新 token。返回 ``(row, 明文)``——明文必须**立刻**返回给调用方，
+-        此后不可恢复（DB 只存 sha256）。"""
++        """签发新 token。返回 ``(row, 明文)``——明文立刻返回给调用方；若
++        ``encrypted_token`` 落库成功，此后还可经 :meth:`get_plaintext` 再取回。"""
+         plaintext = _generate_plaintext()
+         row = McpTokenORM(
+             id=uuid.uuid4(),
+             workspace_id=workspace_id,
+             name=name.strip(),
+             token_hash=_token_hash(plaintext),
++            encrypted_token=_encrypt_plaintext(plaintext),
+             scope=list(scope),
+             created_by=created_by,
+             created_at=_utc_now(),
+@@ -203,7 +254,8 @@ class McpTokenService:
+         return row, plaintext
+ 
+     async def list_for_workspace(self, *, workspace_id: uuid.UUID) -> list[McpTokenORM]:
+-        """该 workspace 全部 token（含已吊销），新→旧。不返明文（明文从未持久化）。"""
++        """该 workspace 全部 token（含已吊销），新→旧。行明文不直接外露（管理端
++        复制走 :meth:`get_plaintext` 按需解密）。"""
+         stmt = (
+             select(McpTokenORM)
+             .where(col(McpTokenORM.workspace_id) == workspace_id)
+@@ -253,6 +305,74 @@ class McpTokenService:
+             )
+         return bool(rowcount)
+ 
++    async def get_plaintext(self, *, token_id: uuid.UUID, workspace_id: uuid.UUID) -> str:
++        """按 id 取回明文（管理端「复制令牌」入口，2026-10-11 变更）。
++
++        放行条件：行存在 + 属于 ``workspace_id`` + 未吊销；否则
++        :class:`McpTokenNotFound`（404，与吊销端点同文案，防存在性探测）。
++        存量行（``encrypted_token`` 为空）/ 主密钥轮换 →
++        :class:`McpTokenPlaintextUnavailable`（409，引导重新签发）。
++        """
++        row = (
++            await self._db.execute(
++                select(McpTokenORM)
++                .where(col(McpTokenORM.id) == token_id)
++                .where(col(McpTokenORM.workspace_id) == workspace_id)
++            )
++        ).scalar_one_or_none()
++        if row is None or row.revoked_at is not None:
++            raise McpTokenNotFound(
++                "MCP 令牌不存在或已被吊销。",
++                details={"mcp_token_id": str(token_id), "workspace_id": str(workspace_id)},
++            )
++        if not row.encrypted_token:
++            raise McpTokenPlaintextUnavailable(
++                "该令牌签发时未保存可恢复的明文（旧版本签发或未配置主密钥），请新建令牌后使用复制功能。",
++            )
++        return _decrypt_plaintext(row.encrypted_token)
++
++    async def hard_delete(self, *, token_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
++        """物理删除行（仅已吊销记录放行，2026-10-11 变更）。
++
++        不存在 / 跨 workspace → :class:`McpTokenNotFound`（404）；存在但未吊销 →
++        :class:`McpTokenDeleteBlocked`（409）。行删除时其 mcp_webhooks 子行由 service
++        **显式删除**（与外键 ``ondelete=CASCADE`` 双保险——SQLite 单测库不开外键
++        PRAGMA，纯 FK 级联在测试面会残留）；删除后按 ``token_hash`` 精确清一次正缓存
++        （正常路径 revoke 已清，这里兜底残余窗口）。
++        """
++        row = (
++            await self._db.execute(
++                select(McpTokenORM)
++                .where(col(McpTokenORM.id) == token_id)
++                .where(col(McpTokenORM.workspace_id) == workspace_id)
++            )
++        ).scalar_one_or_none()
++        if row is None:
++            raise McpTokenNotFound(
++                "MCP 令牌不存在或已被吊销。",
++                details={"mcp_token_id": str(token_id), "workspace_id": str(workspace_id)},
++            )
++        if row.revoked_at is None:
++            raise McpTokenDeleteBlocked("该令牌尚未吊销，请先吊销再删除。")
++        token_hash = row.token_hash
++        # 先删 webhook 子行（显式，不依赖 FK CASCADE），同事务保证原子。
++        await self._db.execute(delete(McpWebhookORM).where(col(McpWebhookORM.token_id) == token_id))
++        # DELETE 复带 revoked_at IS NOT NULL 条件（不止靠上方 check）：即便出现
++        # un-revoke 类未来路径翻转状态，并发窗口内也不会误删活跃凭证。
++        await self._db.execute(
++            delete(McpTokenORM)
++            .where(col(McpTokenORM.id) == token_id)
++            .where(col(McpTokenORM.workspace_id) == workspace_id)
++            .where(col(McpTokenORM.revoked_at).is_not(None))
++        )
++        await self._db.commit()
++        await self._invalidate_cache(token_hash)
++        log.info(
++            "mcp_token.hard_deleted",
++            mcp_token_id=str(token_id),
++            workspace_id=str(workspace_id),
++        )
++
+     async def get_or_issue(
+         self, *, workspace_id: uuid.UUID, created_by: uuid.UUID | None
+     ) -> tuple[McpTokenORM, str]:
+diff --git a/backend/app/modules/mcp_gateway/tests/test_router.py b/backend/app/modules/mcp_gateway/tests/test_router.py
+index 484ccbcc9..6273a8c5e 100644
+--- a/backend/app/modules/mcp_gateway/tests/test_router.py
++++ b/backend/app/modules/mcp_gateway/tests/test_router.py
+@@ -227,3 +227,211 @@ async def test_create_gateway_url_settings_override_wins(
+     assert resp.status_code == 201, resp.text
+     # 尾斜杠归一后拼 /mcp/，不产生双斜杠。
+     assert resp.json()["gateway_url"] == "https://mcp.example.com/mcp/"
++
++
++# ── 2026-10-11-apikey-mcp-copy-delete：plaintext 端点 + hard 删除 ─────────
++
++
++async def _create_token(client: AsyncClient, h: dict, ws_id: str, name: str = "t") -> dict:
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/mcp-tokens",
++        headers=h,
++        json={"name": name, "scope": ["read"]},
++    )
++    assert resp.status_code == 201, resp.text
++    return resp.json()
++
++
++@pytest.mark.asyncio
++async def test_plaintext_endpoint_roundtrip_and_404_after_revoke(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_token(client, h, str(ws.id), name="copyable")
++
++    got = await client.get(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
++    )
++    assert got.status_code == 200, got.text
++    assert got.json()["token"] == created["token"]
++
++    revoked = await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
++    assert revoked.status_code == 204
++    gone = await client.get(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
++    )
++    assert gone.status_code == 404
++
++
++@pytest.mark.asyncio
++async def test_plaintext_endpoint_rejects_foreign_workspace(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """跨 workspace 取明文 → 404（防存在性探测，与吊销同语义）。"""
++    ws = await _make_workspace(db_session)
++    other_ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_token(client, h, str(ws.id))
++
++    resp = await client.get(
++        f"/api/workspaces/{other_ws.id}/mcp-tokens/{created['id']}/plaintext", headers=h
++    )
++    assert resp.status_code == 404
++
++
++@pytest.mark.asyncio
++async def test_plaintext_endpoint_legacy_row_returns_409(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """存量 hash-only 行（encrypted_token=NULL，直接插 ORM）→ 409 引导新建。"""
++    from datetime import UTC, datetime
++
++    from app.modules.mcp_gateway.model import McpTokenORM
++
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++
++    legacy = McpTokenORM(
++        id=uuid.uuid4(),
++        workspace_id=ws.id,
++        name="legacy",
++        token_hash=uuid.uuid4().hex,
++        encrypted_token=None,
++        scope=["read"],
++        created_at=datetime.now(UTC),
++        last_used_at=None,
++        revoked_at=None,
++    )
++    db_session.add(legacy)
++    await db_session.commit()
++
++    resp = await client.get(f"/api/workspaces/{ws.id}/mcp-tokens/{legacy.id}/plaintext", headers=h)
++    assert resp.status_code == 409
++    assert "新建" in resp.json()["message"]
++
++
++@pytest.mark.asyncio
++async def test_list_carries_plaintext_recoverable_flag(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    await _create_token(client, h, str(ws.id), name="fresh")
++
++    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
++    assert items[0]["plaintext_recoverable"] is True
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_revoked_token_204_and_removed(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_token(client, h, str(ws.id), name="doomed")
++
++    await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
++    resp = await client.delete(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
++    )
++    assert resp.status_code == 204
++
++    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
++    assert all(it["id"] != created["id"] for it in items)
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_active_token_returns_409(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_token(client, h, str(ws.id), name="alive")
++
++    resp = await client.delete(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
++    )
++    assert resp.status_code == 409
++    assert "吊销" in resp.json()["message"]
++
++    items = (await client.get(f"/api/workspaces/{ws.id}/mcp-tokens", headers=h)).json()["items"]
++    mine = next(it for it in items if it["id"] == created["id"])
++    assert mine["revoked_at"] is None  # 原吊销语义不受影响
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_unknown_token_returns_404(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    resp = await client.delete(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{uuid.uuid4()}?hard=true",
++        headers={"Authorization": f"Bearer {token}"},
++    )
++    assert resp.status_code == 404
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_cleans_up_bound_webhooks(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    """hard delete 后该 token 名下 webhook 行一并移除（FR-04 级联承诺）。
++
++    service 层显式删 webhook 子行（不依赖 FK CASCADE——单测 SQLite 不开外键
++    PRAGMA，纯 FK 级联在测试面会残留），生产 PG 上与 FK CASCADE 双保险。
++    """
++    from datetime import UTC, datetime
++
++    from sqlalchemy import select
++
++    from app.modules.mcp_gateway.model import McpTokenORM, McpWebhookORM
++
++    ws = await _make_workspace(db_session)
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_token(client, h, str(ws.id), name="hooked")
++
++    webhook = McpWebhookORM(
++        id=uuid.uuid4(),
++        token_id=uuid.uuid4(),  # 占位，下面替换为真实 token id
++        workspace_id=ws.id,
++        url="https://hooks.example.com/done",
++        secret="v1:" + "ab" * 8,
++        events=["worker.completed"],
++        active=True,
++        created_at=datetime.now(UTC),
++    )
++    webhook.token_id = uuid.UUID(created["id"])
++    db_session.add(webhook)
++    await db_session.commit()
++
++    await client.delete(f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}", headers=h)
++    resp = await client.delete(
++        f"/api/workspaces/{ws.id}/mcp-tokens/{created['id']}?hard=true", headers=h
++    )
++    assert resp.status_code == 204
++
++    tokens_left = (
++        await db_session.execute(
++            select(McpTokenORM).where(McpTokenORM.id == uuid.UUID(created["id"]))
++        )
++    ).scalar_one_or_none()
++    webhooks_left = (
++        (
++            await db_session.execute(
++                select(McpWebhookORM).where(McpWebhookORM.token_id == uuid.UUID(created["id"]))
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert tokens_left is None
++    assert webhooks_left == []
+diff --git a/backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py b/backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py
+new file mode 100644
+index 000000000..4a721b983
+--- /dev/null
++++ b/backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py
+@@ -0,0 +1,33 @@
++"""api_keys.encrypted_key / mcp_tokens.encrypted_token（2026-10-11-apikey-mcp-copy-delete task-01）
++
++两凭据表各加一可空 TEXT 列，存可逆加密的明文（``{key_id}:{hex(ciphertext)}``，
++libsodium secretbox，KEK=SILLYSPEC_MASTER_KEY，与 mcp_webhooks.secret 存储格式同构）：
++管理面「复制已生成凭据」按需解密返回。鉴权面（api_keys bcrypt key_hash /
++mcp_tokens sha256 token_hash 唯一索引）零改动。
++
++存量行保持 NULL——明文不可恢复，UI 复制入口降级禁用（FR-05）；签发时未配置
++主密钥的新行同样置 NULL（创建不因此失败）。
++
++Revision ID: 20261011160000
++Revises: 20261010190000
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20261011160000"
++down_revision = "20261010190000"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column("api_keys", sa.Column("encrypted_key", sa.Text(), nullable=True))
++    op.add_column("mcp_tokens", sa.Column("encrypted_token", sa.Text(), nullable=True))
++
++
++def downgrade() -> None:
++    op.drop_column("mcp_tokens", "encrypted_token")
++    op.drop_column("api_keys", "encrypted_key")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 9796cebab..3b194a921 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4260,7 +4260,7 @@
+           "auth"
+         ],
+         "summary": "List Api Keys",
+-        "description": "List the caller's API keys (plaintext never included).",
++        "description": "List the caller's API keys (plaintext never included; rows carry\n``plaintext_recoverable`` so the UI knows whether copy is possible).",
+         "operationId": "list_api_keys_api_auth_api_keys_get",
+         "responses": {
+           "200": {
+@@ -4280,7 +4280,7 @@
+           "auth"
+         ],
+         "summary": "Create Api Key",
+-        "description": "Issue a new long-lived API key for the daemon.\n\nPlaintext is returned **only** here; subsequent GETs will only expose\n``key_prefix``. ``api_key:admin``-gated.",
++        "description": "Issue a new long-lived API key for the daemon.\n\nPlaintext is returned here (canonical one-time return); when the master\nkey is configured the row also stores it encrypted, and the per-id\nplaintext endpoint can re-fetch it later. ``api_key:admin``-gated.",
+         "operationId": "create_api_key_api_auth_api_keys_post",
+         "requestBody": {
+           "content": {
+@@ -4316,13 +4316,57 @@
+         }
+       }
+     },
++    "/api/auth/api-keys/{api_key_id}/plaintext": {
++      "get": {
++        "tags": [
++          "auth"
++        ],
++        "summary": "Get Api Key Plaintext",
++        "description": "取回某把活跃 key 的明文（管理端「复制密钥」入口）。\n\n仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，\n不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。",
++        "operationId": "get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get",
++        "parameters": [
++          {
++            "name": "api_key_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Api Key Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ApiKeyPlaintextResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/auth/api-keys/{api_key_id}": {
+       "delete": {
+         "tags": [
+           "auth"
+         ],
+         "summary": "Revoke Api Key",
+-        "description": "Revoke an API key. Idempotent for unknown / already-revoked ids → 404.",
++        "description": "Revoke an API key. Idempotent for unknown / already-revoked ids → 404.\n\n``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；\n未吊销 → 409（先吊销再删除）。",
+         "operationId": "revoke_api_key_api_auth_api_keys__api_key_id__delete",
+         "parameters": [
+           {
+@@ -4334,6 +4378,18 @@
+               "format": "uuid",
+               "title": "Api Key Id"
+             }
++          },
++          {
++            "name": "hard",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "boolean",
++              "description": "物理删除（仅已吊销记录放行；未吊销返回 409）",
++              "default": false,
++              "title": "Hard"
++            },
++            "description": "物理删除（仅已吊销记录放行；未吊销返回 409）"
+           }
+         ],
+         "responses": {
+@@ -10905,6 +10961,61 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
++      "get": {
++        "tags": [
++          "mcp-tokens",
++          "mcp-tokens"
++        ],
++        "summary": "Get Mcp Token Plaintext",
++        "description": "取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。\n\n仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性\n探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。",
++        "operationId": "get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          },
++          {
++            "name": "token_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Token Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/McpTokenPlaintextResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
+       "delete": {
+         "tags": [
+@@ -10912,7 +11023,7 @@
+           "mcp-tokens"
+         ],
+         "summary": "Revoke Mcp Token",
+-        "description": "吊销（``revoked_at = now``，幂等）。\n\nservice.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体\n原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被\n精确 DEL，无 TTL 放行窗口）。",
++        "description": "吊销（``revoked_at = now``，幂等）。\n\nservice.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体\n原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被\n精确 DEL，无 TTL 放行窗口）。\n\n``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键\nCASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。",
+         "operationId": "revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete",
+         "parameters": [
+           {
+@@ -10934,6 +11045,18 @@
+               "format": "uuid",
+               "title": "Token Id"
+             }
++          },
++          {
++            "name": "hard",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "boolean",
++              "description": "物理删除（仅已吊销记录放行；未吊销返回 409）",
++              "default": false,
++              "title": "Hard"
++            },
++            "description": "物理删除（仅已吊销记录放行；未吊销返回 409）"
+           }
+         ],
+         "responses": {
+@@ -38809,6 +38932,10 @@
+             ],
+             "title": "Revoked At"
+           },
++          "plaintext_recoverable": {
++            "type": "boolean",
++            "title": "Plaintext Recoverable"
++          },
+           "plaintext": {
+             "type": "string",
+             "title": "Plaintext"
+@@ -38823,6 +38950,7 @@
+           "expires_at",
+           "created_at",
+           "revoked_at",
++          "plaintext_recoverable",
+           "plaintext"
+         ],
+         "title": "ApiKeyCreated",
+@@ -38844,6 +38972,21 @@
+         ],
+         "title": "ApiKeyListResponse"
+       },
++      "ApiKeyPlaintextResponse": {
++        "properties": {
++          "plaintext": {
++            "type": "string",
++            "title": "Plaintext",
++            "description": "完整密钥明文，仅复制入口使用，勿入日志"
++          }
++        },
++        "type": "object",
++        "required": [
++          "plaintext"
++        ],
++        "title": "ApiKeyPlaintextResponse",
++        "description": "GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。"
++      },
+       "ApiKeyRead": {
+         "properties": {
+           "id": {
+@@ -38899,6 +39042,10 @@
+               }
+             ],
+             "title": "Revoked At"
++          },
++          "plaintext_recoverable": {
++            "type": "boolean",
++            "title": "Plaintext Recoverable"
+           }
+         },
+         "type": "object",
+@@ -38909,7 +39056,8 @@
+           "last_used_at",
+           "expires_at",
+           "created_at",
+-          "revoked_at"
++          "revoked_at",
++          "plaintext_recoverable"
+         ],
+         "title": "ApiKeyRead",
+         "description": "List-row shape — safe to return on every GET."
+@@ -54015,6 +54163,21 @@
+         ],
+         "title": "McpTokenListResponse"
+       },
++      "McpTokenPlaintextResponse": {
++        "properties": {
++          "token": {
++            "type": "string",
++            "title": "Token",
++            "description": "完整令牌明文，仅复制入口使用，勿入日志"
++          }
++        },
++        "type": "object",
++        "required": [
++          "token"
++        ],
++        "title": "McpTokenPlaintextResponse",
++        "description": "GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。"
++      },
+       "McpTokenRead": {
+         "properties": {
+           "id": {
+@@ -54061,6 +54224,10 @@
+             "type": "string",
+             "format": "date-time",
+             "title": "Created At"
++          },
++          "plaintext_recoverable": {
++            "type": "boolean",
++            "title": "Plaintext Recoverable"
+           }
+         },
+         "type": "object",
+@@ -54070,10 +54237,11 @@
+           "scope",
+           "last_used_at",
+           "revoked_at",
+-          "created_at"
++          "created_at",
++          "plaintext_recoverable"
+         ],
+         "title": "McpTokenRead",
+-        "description": "列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。"
++        "description": "列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。\n\n``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext\n端点再取回（签发时加密存档）；UI 据此点亮复制按钮。"
+       },
+       "McpWebhookCreateRequest": {
+         "properties": {
+diff --git a/backend/tests/modules/auth/test_api_key_router.py b/backend/tests/modules/auth/test_api_key_router.py
+index ad381ec5c..89e112a1d 100644
+--- a/backend/tests/modules/auth/test_api_key_router.py
++++ b/backend/tests/modules/auth/test_api_key_router.py
+@@ -132,3 +132,127 @@ async def test_revoke_unknown_id_returns_404(client: AsyncClient, db_session: As
+         headers={"Authorization": f"Bearer {token}"},
+     )
+     assert resp.status_code == 404
++
++
++# ── 2026-10-11-apikey-mcp-copy-delete：plaintext 端点 + hard 删除 ─────────
++
++
++async def _create_key(client: AsyncClient, h: dict, name: str = "k") -> dict:
++    resp = await client.post(
++        "/api/auth/api-keys", headers=h, json={"name": name, "expires_at": None}
++    )
++    assert resp.status_code == 201, resp.text
++    return resp.json()
++
++
++async def _insert_legacy_key(db_session: AsyncSession, user: User) -> str:
++    """模拟存量 hash-only 行：不经 service.create（无加密列）。"""
++    from datetime import UTC, datetime
++
++    from app.modules.auth.model import ApiKey
++
++    legacy = ApiKey(
++        id=uuid.uuid4(),
++        user_id=user.id,
++        name="legacy",
++        key_prefix="shk_live_leg",
++        key_hash="not-bcrypt-legacy",
++        encrypted_key=None,
++        expires_at=None,
++        created_at=datetime.now(UTC),
++        revoked_at=None,
++    )
++    db_session.add(legacy)
++    await db_session.commit()
++    return str(legacy.id)
++
++
++@pytest.mark.asyncio
++async def test_plaintext_endpoint_roundtrip_and_404_after_revoke(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_key(client, h, name="copyable")
++
++    got = await client.get(f"/api/auth/api-keys/{created['id']}/plaintext", headers=h)
++    assert got.status_code == 200, got.text
++    assert got.json()["plaintext"] == created["plaintext"]
++
++    revoked = await client.delete(f"/api/auth/api-keys/{created['id']}", headers=h)
++    assert revoked.status_code == 204
++    gone = await client.get(f"/api/auth/api-keys/{created['id']}/plaintext", headers=h)
++    assert gone.status_code == 404
++
++
++@pytest.mark.asyncio
++async def test_plaintext_endpoint_legacy_row_returns_409(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    user, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    kid = await _insert_legacy_key(db_session, user)
++
++    resp = await client.get(f"/api/auth/api-keys/{kid}/plaintext", headers=h)
++    assert resp.status_code == 409
++    assert "新建" in resp.json()["message"]
++
++
++@pytest.mark.asyncio
++async def test_list_carries_plaintext_recoverable_flag(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    user, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    await _create_key(client, h, name="new")
++    await _insert_legacy_key(db_session, user)
++
++    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
++    by_name = {it["name"]: it for it in items}
++    assert by_name["new"]["plaintext_recoverable"] is True
++    assert by_name["legacy"]["plaintext_recoverable"] is False
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_revoked_row_204_and_removed(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_key(client, h, name="doomed")
++
++    await client.delete(f"/api/auth/api-keys/{created['id']}", headers=h)
++    resp = await client.delete(f"/api/auth/api-keys/{created['id']}?hard=true", headers=h)
++    assert resp.status_code == 204
++
++    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
++    assert all(it["id"] != created["id"] for it in items)
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_active_row_returns_409(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    _, token = await _make_user(db_session, admin=True)
++    h = {"Authorization": f"Bearer {token}"}
++    created = await _create_key(client, h, name="alive")
++
++    resp = await client.delete(f"/api/auth/api-keys/{created['id']}?hard=true", headers=h)
++    assert resp.status_code == 409
++    assert "吊销" in resp.json()["message"]
++
++    items = (await client.get("/api/auth/api-keys", headers=h)).json()["items"]
++    mine = next(it for it in items if it["id"] == created["id"])
++    assert mine["revoked_at"] is None  # 原吊销语义不受影响
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_unknown_id_returns_404(
++    client: AsyncClient, db_session: AsyncSession
++) -> None:
++    _, token = await _make_user(db_session, admin=True)
++    resp = await client.delete(
++        f"/api/auth/api-keys/{uuid.uuid4()}?hard=true",
++        headers={"Authorization": f"Bearer {token}"},
++    )
++    assert resp.status_code == 404
+diff --git a/backend/tests/modules/auth/test_api_key_service.py b/backend/tests/modules/auth/test_api_key_service.py
+index 2acccd7c6..9839fdd21 100644
+--- a/backend/tests/modules/auth/test_api_key_service.py
++++ b/backend/tests/modules/auth/test_api_key_service.py
+@@ -451,3 +451,133 @@ async def test_authenticate_unknown_plaintext_still_negative_caches(
+     bogus = API_KEY_PREFIX + "definitely-not-a-real-key-0xC0FFEE"
+     assert await svc.authenticate(plaintext=bogus) is None
+     assert fake.store.get(_neg_cache_key(bogus)) == "1"
++
++
++# ── 2026-10-11-apikey-mcp-copy-delete：可恢复明文 + 物理删除 ──────────────
++
++
++@pytest.mark.asyncio
++async def test_create_persists_reversible_encrypted_plaintext(
++    db_session: AsyncSession,
++) -> None:
++    """create 同时落 bcrypt hash（鉴权）与加密明文（管理面再取回）。
++
++    encrypted_key 非空、``{key_id}:{hex}`` 格式且不含明文；get_plaintext
++    解密回同一明文；key_hash 仍是 bcrypt。
++    """
++    user = await _make_user(db_session)
++    svc = ApiKeyService(db_session, settings=get_settings())
++
++    row, plaintext = await svc.create(user_id=user.id, name="copyable", expires_at=None)
++
++    assert row.encrypted_key is not None
++    key_id, _, hex_ct = row.encrypted_key.partition(":")
++    assert key_id and hex_ct
++    assert plaintext not in row.encrypted_key  # 密文不含明文
++    assert row.plaintext_recoverable is True
++    assert row.key_hash.startswith("$2")
++    assert await svc.get_plaintext(api_key_id=row.id, user_id=user.id) == plaintext
++
++
++@pytest.mark.asyncio
++async def test_get_plaintext_rejects_revoked_expired_foreign_or_missing(
++    db_session: AsyncSession,
++) -> None:
++    """吊销 / 过期 / 跨用户 / 不存在一律 404（防存在性探测）。"""
++    from app.core.errors import ApiKeyNotFound
++
++    user = await _make_user(db_session)
++    other = await _make_user(db_session)
++    svc = ApiKeyService(db_session, settings=get_settings())
++
++    row_revoked, _ = await svc.create(user_id=user.id, name="r", expires_at=None)
++    await svc.revoke(api_key_id=row_revoked.id, user_id=user.id)
++
++    row_expired, _ = await svc.create(
++        user_id=user.id,
++        name="e",
++        expires_at=datetime.now(UTC) - timedelta(seconds=1),
++    )
++    row_foreign, _ = await svc.create(user_id=other.id, name="f", expires_at=None)
++
++    for kid, uid in [
++        (row_revoked.id, user.id),
++        (row_expired.id, user.id),
++        (row_foreign.id, user.id),  # 他人 key 对 user 不可见
++        (uuid.uuid4(), user.id),
++    ]:
++        with pytest.raises(ApiKeyNotFound):
++            await svc.get_plaintext(api_key_id=kid, user_id=uid)
++
++
++@pytest.mark.asyncio
++async def test_get_plaintext_legacy_row_without_encrypted_returns_409(
++    db_session: AsyncSession,
++) -> None:
++    """存量 hash-only 行（encrypted_key=NULL）→ 409 引导新建，而非 500。"""
++    from app.modules.auth.api_key_service import ApiKeyPlaintextUnavailable
++
++    user = await _make_user(db_session)
++    legacy = ApiKey(
++        id=uuid.uuid4(),
++        user_id=user.id,
++        name="legacy",
++        key_prefix="shk_live_leg",
++        key_hash="not-bcrypt-legacy",
++        encrypted_key=None,
++        expires_at=None,
++        created_at=datetime.now(UTC),
++        revoked_at=None,
++    )
++    db_session.add(legacy)
++    await db_session.commit()
++
++    svc = ApiKeyService(db_session, settings=get_settings())
++    assert legacy.plaintext_recoverable is False
++    with pytest.raises(ApiKeyPlaintextUnavailable):
++        await svc.get_plaintext(api_key_id=legacy.id, user_id=user.id)
++
++
++@pytest.mark.asyncio
++async def test_hard_delete_only_accepts_revoked_rows(
++    db_session: AsyncSession,
++) -> None:
++    """活跃行 hard_delete → 409；吊销后 → 行物理移除。"""
++    from app.modules.auth.api_key_service import ApiKeyDeleteBlocked
++
++    user = await _make_user(db_session)
++    svc = ApiKeyService(db_session, settings=get_settings())
++    row, _ = await svc.create(user_id=user.id, name="d", expires_at=None)
++
++    with pytest.raises(ApiKeyDeleteBlocked):
++        await svc.hard_delete(api_key_id=row.id, user_id=user.id)
++
++    await svc.revoke(api_key_id=row.id, user_id=user.id)
++    await svc.hard_delete(api_key_id=row.id, user_id=user.id)
++
++    gone = (
++        await db_session.execute(select(ApiKey).where(ApiKey.id == row.id))
++    ).scalar_one_or_none()
++    assert gone is None
++
++
++@pytest.mark.asyncio
++async def test_create_degrades_gracefully_without_master_key(
++    db_session: AsyncSession,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """主密钥缺失时创建仍成功（加密列置空、明文一次性返回），不 503。"""
++    from app.core.crypto import MasterKeyMissing
++
++    def _no_cipher():
++        raise MasterKeyMissing("no key")
++
++    monkeypatch.setattr("app.modules.auth.api_key_service.get_cipher", _no_cipher)
++
++    user = await _make_user(db_session)
++    svc = ApiKeyService(db_session, settings=get_settings())
++    row, plaintext = await svc.create(user_id=user.id, name="nokek", expires_at=None)
++
++    assert plaintext.startswith(API_KEY_PREFIX)
++    assert row.encrypted_key is None
++    assert row.plaintext_recoverable is False
+diff --git a/frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx b/frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx
+new file mode 100644
+index 000000000..47cad7d56
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx
+@@ -0,0 +1,159 @@
++/**
++ * 2026-10-11-apikey-mcp-copy-delete：CopyDaemonCommand 复制命令内嵌真实密钥测试。
++ *
++ * 依据:
++ *   - frontend/src/app/(dashboard)/runtimes/page.tsx（CopyDaemonCommand）
++ *   - 变更 FR-01：复制命令内嵌最新活跃 key 明文；无活跃 key 自动创建永不过期
++ *     key；非 admin 回退 access_token；渲染面保持打码
++ *
++ * 覆盖:
++ *   1. admin + 活跃 key：点「复制命令」→ 剪贴板命令含 --api-key <完整明文>，
++ *      渲染面只显示打码前缀（明文不进 DOM）
++ *   2. admin + 无 key：显示自动创建提示；复制后回显已自动创建（含名称）
++ *   3. 非 admin（list 403）：渲染 --token 回退形态 + 黄色警示；复制走 access_token
++ *   4. resolveDaemonApiKey 返回 forbidden → 命令回退 --token
++ *
++ * session store 直接 useSession.setState（zustand 原生 API）；lib 层 vi.mock
++ * 拦截动态 import；clipboard mock 对齐 install-daemon-os.test.tsx 惯例。
++ */
++
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { CopyDaemonCommand } from "@/app/(dashboard)/runtimes/page";
++import { useSession } from "@/stores/session";
++
++const apiKeysLib = vi.hoisted(() => ({
++  getLatestActiveApiKey: vi.fn(),
++  resolveDaemonApiKey: vi.fn(),
++}));
++
++vi.mock("@/lib/api-keys", () => apiKeysLib);
++
++let writeText: ReturnType<typeof vi.fn>;
++
++beforeEach(() => {
++  apiKeysLib.getLatestActiveApiKey.mockReset();
++  apiKeysLib.resolveDaemonApiKey.mockReset();
++  writeText = vi.fn().mockResolvedValue(undefined);
++  Object.defineProperty(navigator, "clipboard", {
++    value: { writeText },
++    configurable: true,
++  });
++  useSession.setState({ accessToken: "jwt-short-lived" });
++});
++
++afterEach(() => {
++  cleanup();
++  vi.unstubAllGlobals();
++});
++
++describe("CopyDaemonCommand · admin 有活跃 key（FR-01 主路径）", () => {
++  it("复制 → 剪贴板命令内嵌完整明文；渲染面保持打码", async () => {
++    apiKeysLib.getLatestActiveApiKey.mockResolvedValueOnce({
++      id: "k1",
++      key_prefix: "shk_live_ab",
++      plaintext_recoverable: true,
++    });
++    apiKeysLib.resolveDaemonApiKey.mockResolvedValueOnce({
++      status: "ok",
++      plaintext: "shk_live_full_secret_value",
++      keyPrefix: "shk_live_ab",
++    });
++
++    render(<CopyDaemonCommand />);
++    // 预取完成后渲染 --api-key 打码形态
++    await waitFor(() => {
++      expect(screen.getByText(/--api-key/)).toBeInTheDocument();
++    });
++    expect(screen.getByText(/shk_live_ab…/)).toBeInTheDocument();
++    // 明文绝不进 DOM
++    expect(document.body.textContent).not.toContain("shk_live_full_secret_value");
++
++    fireEvent.click(screen.getByRole("button", { name: /复制命令/ }));
++
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledTimes(1);
++    });
++    const cmd = writeText.mock.calls[0]?.[0] as string;
++    expect(cmd).toContain("--api-key shk_live_full_secret_value");
++    expect(cmd).toContain(window.location.origin);
++    expect(apiKeysLib.resolveDaemonApiKey).toHaveBeenCalledTimes(1);
++    // 成功回显
++    await waitFor(() => {
++      expect(screen.getByText("已复制")).toBeInTheDocument();
++    });
++  });
++});
++
++describe("CopyDaemonCommand · admin 无活跃 key（自动创建）", () => {
++  it("渲染提示自动创建；复制后回显已自动创建 + 命令内嵌新密钥", async () => {
++    apiKeysLib.getLatestActiveApiKey.mockResolvedValueOnce(null);
++    apiKeysLib.resolveDaemonApiKey.mockResolvedValueOnce({
++      status: "ok",
++      plaintext: "shk_live_auto_created",
++      keyPrefix: "shk_live_au",
++      createdName: "守护进程启动命令自动签发 2026-10-11",
++    });
++
++    render(<CopyDaemonCommand />);
++    await waitFor(() => {
++      expect(screen.getByText(/复制时会自动创建一个永不过期的新密钥/)).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /复制命令/ }));
++
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledTimes(1);
++    });
++    expect((writeText.mock.calls[0]?.[0] as string)).toContain(
++      "--api-key shk_live_auto_created",
++    );
++    await waitFor(() => {
++      expect(screen.getByText(/已自动创建 API 密钥「守护进程启动命令自动签发/)).toBeInTheDocument();
++    });
++  });
++});
++
++describe("CopyDaemonCommand · 非 admin 回退 access_token", () => {
++  it("list 失败 → 渲染 --token 形态 + 黄色警示；复制命令用 access_token", async () => {
++    apiKeysLib.getLatestActiveApiKey.mockRejectedValueOnce(new Error("403"));
++
++    render(<CopyDaemonCommand />);
++    await waitFor(() => {
++      expect(screen.getAllByText(/--token/).length).toBeGreaterThanOrEqual(1);
++    });
++    expect(screen.getByText(/access_token（15 分钟过期）/)).toBeInTheDocument();
++
++    fireEvent.click(screen.getByRole("button", { name: /复制命令/ }));
++
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledTimes(1);
++    });
++    expect((writeText.mock.calls[0]?.[0] as string)).toContain("--token jwt-short-lived");
++    // 非 admin 不触发明文解析
++    expect(apiKeysLib.resolveDaemonApiKey).not.toHaveBeenCalled();
++  });
++
++  it("复制时权限被收回（resolve 返回 forbidden）→ 命令回退 --token 不报错", async () => {
++    apiKeysLib.getLatestActiveApiKey.mockResolvedValueOnce({
++      id: "k1",
++      key_prefix: "shk_live_ab",
++      plaintext_recoverable: true,
++    });
++    apiKeysLib.resolveDaemonApiKey.mockResolvedValueOnce({ status: "forbidden" });
++
++    render(<CopyDaemonCommand />);
++    await waitFor(() => {
++      expect(screen.getByText(/--api-key/)).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /复制命令/ }));
++
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledTimes(1);
++    });
++    expect((writeText.mock.calls[0]?.[0] as string)).toContain("--token jwt-short-lived");
++    expect(screen.getByText("已复制")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/runtimes/page.tsx b/frontend/src/app/(dashboard)/runtimes/page.tsx
+index 975d51988..618cea57e 100644
+--- a/frontend/src/app/(dashboard)/runtimes/page.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/page.tsx
+@@ -101,10 +101,16 @@ const WINDOW_LABELS: Record<RuntimeUsageWindow, string> = {
+ const SILLYSPEC_ECHO_FAST_POLL_MS = 5_000;
+ const SILLYSPEC_ECHO_BOOST_WINDOW_MS = 60_000;
+ 
+-function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
++export function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+   const accessToken = useSession((s) => s.accessToken);
+   const [copied, setCopied] = useState(false);
+-  const [apiKey, setApiKey] = useState<string | null>(null);
++  // admin 探测结果：true=可签发/列出 API key（渲染 --api-key 形态）。
++  const [apiKeyCapable, setApiKeyCapable] = useState(false);
++  // 已有活跃 key 的前缀（打码展示）；null=尚无活跃 key（复制时自动创建）。
++  const [apiKeyPrefix, setApiKeyPrefix] = useState<string | null>(null);
++  // 复制后的回显：自动创建提示 / 失败原因（成功提示由 copied 态承担）。
++  const [notice, setNotice] = useState<string | null>(null);
++  const [resolving, setResolving] = useState(false);
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -112,10 +118,13 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+       try {
+         const { getLatestActiveApiKey } = await import("@/lib/api-keys");
+         const latest = await getLatestActiveApiKey();
+-        if (!cancelled) setApiKey(latest ? latest.key_prefix + "…" : null);
++        if (!cancelled) {
++          setApiKeyCapable(true);
++          setApiKeyPrefix(latest ? latest.key_prefix + "…" : null);
++        }
+       } catch {
+-        // 非 admin 或尚未签发：fallback 到 access_token
+-        if (!cancelled) setApiKey(null);
++        // 非 admin 或接口失败：fallback 到 access_token 形态
++        if (!cancelled) setApiKeyCapable(false);
+       }
+     })();
+     return () => {
+@@ -123,8 +132,8 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+     };
+   }, []);
+ 
+-  // 渲染所需：apiKey（优先）或 accessToken（fallback）
+-  if (!apiKey && !accessToken) return null;
++  // 渲染所需：apiKeyCapable（优先）或 accessToken（fallback）
++  if (!apiKeyCapable && !accessToken) return null;
+ 
+   // server-url 用客户端实际访问地址：前端经 rewrite 代理 /api/* 与 /daemon/* 到 backend，
+   // daemon 全程连前端地址即可。不做端口替换——避免硬编码 :3001→:8001 随部署端口变化失效
+@@ -132,16 +141,46 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+   const serverUrl =
+     typeof window !== "undefined" ? window.location.origin : "http://localhost:3001";
+   // 优先用长期 API Key；fallback 到浏览器短期 access_token（TTL 15min，不适合长期运行）。
+-  const useApiKey = !!apiKey;
+-  const placeholderCred = useApiKey ? (apiKey as string) : "<access_token>";
+-  const cmd = useApiKey
+-    ? `sillyhub-daemon start --server ${serverUrl} --api-key <粘贴你的 API Key>`
+-    : `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
++  const useApiKey = apiKeyCapable;
++  // 渲染面永远打码：完整明文只在点击复制时解析并进剪贴板，不常驻屏幕/DOM。
++  const placeholderCred = useApiKey
++    ? (apiKeyPrefix ?? "shk_live_…（复制时自动创建）")
++    : "<access_token>";
+ 
+   const handleCopy = async () => {
+-    await navigator.clipboard.writeText(cmd);
+-    setCopied(true);
+-    setTimeout(() => setCopied(false), 2000);
++    if (resolving) return;
++    setResolving(true);
++    setNotice(null);
++    try {
++      let cmd: string;
++      if (useApiKey) {
++        // FR-01（2026-10-11-apikey-mcp-copy-delete）：有活跃 key 取其明文；
++        // 无（或存量不可恢复）自动签发永不过期的新 key，命令内嵌完整明文。
++        const { resolveDaemonApiKey } = await import("@/lib/api-keys");
++        const res = await resolveDaemonApiKey();
++        if (res.status === "ok") {
++          cmd = `sillyhub-daemon start --server ${serverUrl} --api-key ${res.plaintext}`;
++          setApiKeyPrefix(res.keyPrefix + "…");
++          if (res.createdName) {
++            setNotice(
++              `✅ 已自动创建 API 密钥「${res.createdName}」（永不过期），复制的命令中已包含其完整密钥。`,
++            );
++          }
++        } else {
++          // 探测期是 admin、复制时被降权：回退 access_token（不静默拼错命令）
++          cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
++        }
++      } else {
++        cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
++      }
++      await navigator.clipboard.writeText(cmd);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 2000);
++    } catch (err) {
++      setNotice(`复制失败：${err instanceof Error ? err.message : "未知错误"}`);
++    } finally {
++      setResolving(false);
++    }
+   };
+ 
+   return (
+@@ -159,13 +198,22 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+           variant="outline"
+           className="h-8 shrink-0 gap-1.5 px-2.5"
+           onClick={handleCopy}
+-          title={copied ? "已复制" : "复制完整命令"}
++          disabled={resolving}
++          title={copied ? "已复制" : "复制完整命令（含完整密钥）"}
+         >
+           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+-          <span className="hidden sm:inline">{copied ? "已复制" : "复制命令"}</span>
++          <span className="hidden sm:inline">
++            {copied ? "已复制" : resolving ? "解析密钥…" : "复制命令"}
++          </span>
+         </Button>
+       </div>
+-      {!useApiKey && (
++      {useApiKey ? (
++        <p className="text-[10px] text-muted-foreground">
++          {apiKeyPrefix
++            ? "复制的命令中将包含该密钥的完整明文，可直接粘贴运行。"
++            : "尚无 API 密钥：点击复制时会自动创建一个永不过期的新密钥并写入命令。"}
++        </p>
++      ) : (
+         <p className="text-[10px] text-amber-600">
+           ⚠️ 当前显示的 --token 是浏览器 access_token（15 分钟过期），守护进程长期运行建议{" "}
+           <a href="/settings/api-keys" className="underline">
+@@ -174,6 +222,11 @@ function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+           后用 --api-key。
+         </p>
+       )}
++      {notice && (
++        <p className="text-[10px] text-muted-foreground" role="status">
++          {notice}
++        </p>
++      )}
+     </div>
+   );
+ }
+diff --git a/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+new file mode 100644
+index 000000000..786d8a3ca
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+@@ -0,0 +1,213 @@
++/**
++ * 2026-10-11-apikey-mcp-copy-delete：API 密钥设置页单测。
++ *
++ * 依据:
++ *   - frontend/src/app/(dashboard)/settings/api-keys/page.tsx
++ *   - 变更 FR-02/FR-04/FR-05：活跃可恢复行复制明文；已吊销行物理删除；
++ *     不可恢复行复制按钮禁用降级
++ *
++ * 覆盖:
++ *   1. 活跃可恢复行 → 「复制密钥」写入剪贴板并回显已复制
++ *   2. 存量不可恢复行（plaintext_recoverable=false）→ 复制按钮禁用 + tooltip
++ *   3. 已吊销行 → 「删除」confirm 后调 deleteApiKey 并刷新；取消不调
++ *   4. 活跃行有吊销无删除；已吊销行有删除无吊销/复制
++ *
++ * mock @/lib/api-keys（hoisted vi.fn），风格对齐 mcp-tokens/__tests__/page.test.tsx。
++ */
++
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import ApiKeysSettingsPage from "@/app/(dashboard)/settings/api-keys/page";
++import type { ApiKeyRead } from "@/lib/api-keys";
++
++vi.mock("next/link", () => ({
++  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
++    <a href={href}>{children}</a>
++  ),
++}));
++
++// ApiKeyCreateDialog 仅在点击签发时渲染，这里 stub 掉避免拉入真实组件树。
++vi.mock("@/components/api-key-create-dialog", () => ({
++  ApiKeyCreateDialog: () => <div data-testid="create-dialog-stub" />,
++}));
++
++const apiKeysApi = vi.hoisted(() => ({
++  listApiKeys: vi.fn(),
++  revokeApiKey: vi.fn(),
++  deleteApiKey: vi.fn(),
++  fetchApiKeyPlaintext: vi.fn(),
++}));
++
++vi.mock("@/lib/api-keys", () => ({
++  listApiKeys: apiKeysApi.listApiKeys,
++  revokeApiKey: apiKeysApi.revokeApiKey,
++  deleteApiKey: apiKeysApi.deleteApiKey,
++  fetchApiKeyPlaintext: apiKeysApi.fetchApiKeyPlaintext,
++}));
++
++function makeKey(overrides: Partial<ApiKeyRead> = {}): ApiKeyRead {
++  return {
++    id: "11111111-2222-3333-4444-555555555555",
++    name: "my-daemon",
++    key_prefix: "shk_live_ab",
++    last_used_at: null,
++    expires_at: null,
++    created_at: "2026-10-11T10:00:00Z",
++    revoked_at: null,
++    plaintext_recoverable: true,
++    ...overrides,
++  };
++}
++
++const activeKey = makeKey();
++const legacyKey = makeKey({
++  id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
++  name: "legacy-key",
++  plaintext_recoverable: false,
++});
++const revokedKey = makeKey({
++  id: "99999999-8888-7777-6666-555555555555",
++  name: "old-key",
++  revoked_at: "2026-10-01T10:00:00Z",
++});
++
++function renderPage() {
++  return render(<ApiKeysSettingsPage />);
++}
++
++beforeEach(() => {
++  apiKeysApi.listApiKeys.mockReset();
++  apiKeysApi.revokeApiKey.mockReset();
++  apiKeysApi.deleteApiKey.mockReset();
++  apiKeysApi.fetchApiKeyPlaintext.mockReset();
++});
++
++afterEach(() => {
++  cleanup();
++  vi.unstubAllGlobals();
++});
++
++describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {
++  it("活跃可恢复行点「复制密钥」→ 明文写入剪贴板并回显已复制", async () => {
++    const writeText = vi.fn().mockResolvedValue(undefined);
++    Object.defineProperty(navigator, "clipboard", {
++      value: { writeText },
++      configurable: true,
++    });
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey]);
++    apiKeysApi.fetchApiKeyPlaintext.mockResolvedValueOnce("shk_live_secret123");
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("my-daemon")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /复制密钥/ }));
++
++    await waitFor(() => {
++      expect(apiKeysApi.fetchApiKeyPlaintext).toHaveBeenCalledWith(activeKey.id);
++    });
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledWith("shk_live_secret123");
++    });
++    await waitFor(() => {
++      expect(screen.getByText("已复制")).toBeInTheDocument();
++    });
++  });
++
++  it("存量不可恢复行 → 复制按钮禁用 + tooltip 提示，不调明文端点", async () => {
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([legacyKey]);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("legacy-key")).toBeInTheDocument();
++    });
++
++    const btn = screen.getByRole("button", { name: /复制密钥/ }) as HTMLButtonElement;
++    expect(btn.disabled).toBe(true);
++    expect(
++      screen.getByTitle("旧版本签发的密钥未保存明文，无法复制；请新签发一把"),
++    ).toBeInTheDocument();
++    expect(apiKeysApi.fetchApiKeyPlaintext).not.toHaveBeenCalled();
++  });
++});
++
++describe("API 密钥设置页 · 已吊销密钥物理删除（FR-04）", () => {
++  it("confirm 确认 → 调 deleteApiKey 并重新加载列表", async () => {
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([revokedKey]).mockResolvedValueOnce([]);
++    apiKeysApi.deleteApiKey.mockResolvedValueOnce(undefined);
++    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-key")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
++
++    await waitFor(() => {
++      expect(apiKeysApi.deleteApiKey).toHaveBeenCalledWith(revokedKey.id);
++    });
++    await waitFor(() => {
++      expect(apiKeysApi.listApiKeys).toHaveBeenCalledTimes(2);
++    });
++    await waitFor(() => {
++      expect(screen.getByText("还没有 API 密钥")).toBeInTheDocument();
++    });
++  });
++
++  it("confirm 取消 → 不调 deleteApiKey", async () => {
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([revokedKey]);
++    const confirmMock = vi.fn().mockReturnValue(false);
++    vi.stubGlobal("confirm", confirmMock);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-key")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
++
++    expect(confirmMock).toHaveBeenCalledTimes(1);
++    expect(confirmMock.mock.calls[0]?.[0]).toContain("old-key");
++    expect(apiKeysApi.deleteApiKey).not.toHaveBeenCalled();
++  });
++});
++
++describe("API 密钥设置页 · 按钮矩阵", () => {
++  it("活跃行有吊销无删除；已吊销行有删除无吊销/复制", async () => {
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey, revokedKey]);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-key")).toBeInTheDocument();
++    });
++
++    expect(screen.getAllByRole("button", { name: "吊销" })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: /复制密钥/ })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: /删除/ })).toHaveLength(1);
++  });
++});
++
++describe("API 密钥设置页 · 过期行（评审 P1 修复回归）", () => {
++  it("过期未吊销行不渲染复制按钮（明文端点对过期行 404，可点只会报错）", async () => {
++    const expiredKey = makeKey({
++      id: "eeeeeeee-0000-0000-0000-000000000000",
++      name: "expired-key",
++      expires_at: "2026-10-01T00:00:00Z",
++    });
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey, expiredKey]);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("expired-key")).toBeInTheDocument();
++    });
++
++    // 状态列显示「已过期」；仅活跃行有复制按钮；过期行吊销按钮保留（仍可吊销清理）
++    expect(screen.getAllByText("已过期").length).toBeGreaterThanOrEqual(1);
++    expect(screen.getAllByRole("button", { name: /复制密钥/ })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: "吊销" })).toHaveLength(2);
++    expect(apiKeysApi.fetchApiKeyPlaintext).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/settings/api-keys/page.tsx b/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
+index 28af8a19d..f7254c23f 100644
+--- a/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
++++ b/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+ import Link from "next/link";
+-import { Ban, Clock3, KeyRound, Plus, RefreshCw, ShieldCheck } from "lucide-react";
++import { Ban, Clock3, Copy, KeyRound, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+ 
+ import { ApiKeyCreateDialog } from "@/components/api-key-create-dialog";
+ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+@@ -10,7 +10,13 @@ import { EmptyState } from "@/components/ui/empty-state";
+ import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
+ import { Button } from "@/components/ui/button";
+ import { errMessage } from "@/lib/errors";
+-import { listApiKeys, revokeApiKey, type ApiKeyRead } from "@/lib/api-keys";
++import {
++  deleteApiKey,
++  fetchApiKeyPlaintext,
++  listApiKeys,
++  revokeApiKey,
++  type ApiKeyRead,
++} from "@/lib/api-keys";
+ import { cn } from "@/lib/utils";
+ 
+ type ApiKeyStatus = {
+@@ -40,6 +46,9 @@ export default function ApiKeysSettingsPage() {
+   const [loading, setLoading] = useState(true);
+   const [pageError, setPageError] = useState<string | null>(null);
+   const [showCreate, setShowCreate] = useState(false);
++  // 正在复制明文的 key id（按钮转圈防重复点击）与刚复制完成的 key id（✓ 回显）。
++  const [copyingId, setCopyingId] = useState<string | null>(null);
++  const [copiedId, setCopiedId] = useState<string | null>(null);
+ 
+   const load = useCallback(async () => {
+     setLoading(true);
+@@ -83,6 +92,39 @@ export default function ApiKeysSettingsPage() {
+     }
+   };
+ 
++  /** 复制密钥明文（2026-10-11-apikey-mcp-copy-delete）：仅活跃且可恢复的 key。 */
++  const handleCopyKey = async (k: ApiKeyRead) => {
++    if (copyingId) return;
++    setCopyingId(k.id);
++    try {
++      const plaintext = await fetchApiKeyPlaintext(k.id);
++      await navigator.clipboard.writeText(plaintext);
++      setCopiedId(k.id);
++      setTimeout(() => setCopiedId(null), 2000);
++    } catch (err) {
++      setPageError(errMessage(err, "复制密钥失败"));
++    } finally {
++      setCopyingId(null);
++    }
++  };
++
++  /** 物理删除已吊销的密钥（后端仅对已吊销记录放行）。 */
++  const handleDelete = async (k: ApiKeyRead) => {
++    if (
++      !confirm(
++        `确定彻底删除已吊销的密钥 "${k.name}"？该记录将从列表中永久移除，此操作不可恢复。`,
++      )
++    ) {
++      return;
++    }
++    try {
++      await deleteApiKey(k.id);
++      await load();
++    } catch (err) {
++      setPageError(errMessage(err, "删除失败"));
++    }
++  };
++
+   return (
+     <PageContainer size="full" className="gap-5">
+       <PageHeader
+@@ -93,7 +135,7 @@ export default function ApiKeysSettingsPage() {
+               设置
+             </Link>
+             <span className="px-1 text-muted-foreground/60">/</span>
+-            为守护进程签发长期凭证，明文仅在创建时显示一次
++            为守护进程签发长期凭证，支持随时复制密钥明文（旧版本签发的密钥除外）
+           </span>
+         }
+         actions={
+@@ -169,6 +211,9 @@ export default function ApiKeysSettingsPage() {
+               <tbody>
+                 {keys.map((k) => {
+                   const status = getKeyStatus(k);
++                  // 与 getKeyStatus 同判据：过期未吊销行不提供复制入口（明文端点 404）。
++                  const expired =
++                    !!k.expires_at && new Date(k.expires_at) <= new Date();
+                   return (
+                     <tr key={k.id} className="border-b last:border-0 hover:bg-muted/25">
+                       <td className="px-4 py-3">
+@@ -191,16 +236,55 @@ export default function ApiKeysSettingsPage() {
+                         {formatExpiry(k.expires_at)}
+                       </td>
+                       <td className="px-4 py-3 text-right">
+-                        {!k.revoked_at && (
+-                          <Button
+-                            variant="ghost"
+-                            size="sm"
+-                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+-                            onClick={() => void handleRevoke(k)}
+-                          >
+-                            吊销
+-                          </Button>
+-                        )}
++                        <div className="flex items-center justify-end gap-1">
++                          {/* 复制按钮仅活跃行渲染：过期/已吊销行的明文端点一律 404（FR-02），
++                              渲染了可点的按钮只会得到报错横幅。吊销对未吊销行（含过期）仍开放。 */}
++                          {!k.revoked_at && !expired && (
++                            <Button
++                              variant="ghost"
++                              size="sm"
++                              className="gap-1"
++                              disabled={!k.plaintext_recoverable || copyingId === k.id}
++                              title={
++                                k.plaintext_recoverable
++                                  ? "复制该密钥的完整明文"
++                                  : "旧版本签发的密钥未保存明文，无法复制；请新签发一把"
++                              }
++                              onClick={() => void handleCopyKey(k)}
++                            >
++                              {copiedId === k.id ? (
++                                "已复制"
++                              ) : (
++                                <>
++                                  <Copy className="h-3.5 w-3.5" />
++                                  复制密钥
++                                </>
++                              )}
++                            </Button>
++                          )}
++                          {!k.revoked_at && (
++                            <Button
++                              variant="ghost"
++                              size="sm"
++                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
++                              onClick={() => void handleRevoke(k)}
++                            >
++                              吊销
++                            </Button>
++                          )}
++                          {k.revoked_at && (
++                            <Button
++                              variant="ghost"
++                              size="sm"
++                              className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
++                              title="从列表永久移除该已吊销记录（不可恢复）"
++                              onClick={() => void handleDelete(k)}
++                            >
++                              <Trash2 className="h-3.5 w-3.5" />
++                              删除
++                            </Button>
++                          )}
++                        </div>
+                       </td>
+                     </tr>
+                   );
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx
+index 8f89f7400..da1184ce3 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx
+@@ -12,6 +12,8 @@
+  *   3. 非 403 错误 → 红条错误文案
+  *   4. 空列表 → 「还没有 MCP 令牌」空态
+  *   5. 吊销二次确认：confirm 取消不调 revokeMcpToken；确认后调用并重新加载列表
++ *   6. (2026-10-11-apikey-mcp-copy-delete) 复制令牌：活跃可恢复行 → 明文入剪贴板；
++ *      存量不可恢复行 → 按钮禁用；已吊销行 → 删除按钮（confirm 后物理删除）
+  *
+  * mock @/lib/mcp-tokens（hoisted vi.fn），风格对齐 workspaces/[id]/mcp/__tests__/page.test.tsx。
+  */
+@@ -38,11 +40,15 @@ vi.mock("next/link", () => ({
+ const mcpTokensApi = vi.hoisted(() => ({
+   listMcpTokens: vi.fn(),
+   revokeMcpToken: vi.fn(),
++  deleteMcpToken: vi.fn(),
++  fetchMcpTokenPlaintext: vi.fn(),
+ }));
+ 
+ vi.mock("@/lib/mcp-tokens", () => ({
+   listMcpTokens: mcpTokensApi.listMcpTokens,
+   revokeMcpToken: mcpTokensApi.revokeMcpToken,
++  deleteMcpToken: mcpTokensApi.deleteMcpToken,
++  fetchMcpTokenPlaintext: mcpTokensApi.fetchMcpTokenPlaintext,
+ }));
+ 
+ function makeToken(overrides: Partial<McpTokenRead> = {}): McpTokenRead {
+@@ -53,6 +59,7 @@ function makeToken(overrides: Partial<McpTokenRead> = {}): McpTokenRead {
+     last_used_at: null,
+     revoked_at: null,
+     created_at: "2026-08-01T10:00:00Z",
++    plaintext_recoverable: true,
+     ...overrides,
+   };
+ }
+@@ -72,6 +79,8 @@ function renderPage() {
+ beforeEach(() => {
+   mcpTokensApi.listMcpTokens.mockReset();
+   mcpTokensApi.revokeMcpToken.mockReset();
++  mcpTokensApi.deleteMcpToken.mockReset();
++  mcpTokensApi.fetchMcpTokenPlaintext.mockReset();
+ });
+ 
+ afterEach(() => {
+@@ -215,3 +224,111 @@ describe("workspace MCP 令牌管理页 · 吊销二次确认", () => {
+     });
+   });
+ });
++
++// ── 2026-10-11-apikey-mcp-copy-delete：复制令牌 + 物理删除 ────────────────
++
++describe("workspace MCP 令牌管理页 · 复制令牌", () => {
++  it("活跃可恢复行点「复制令牌」→ 明文写入剪贴板并回显已复制", async () => {
++    const writeText = vi.fn().mockResolvedValue(undefined);
++    Object.defineProperty(navigator, "clipboard", {
++      value: { writeText },
++      configurable: true,
++    });
++    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([activeToken]);
++    mcpTokensApi.fetchMcpTokenPlaintext.mockResolvedValueOnce("shmcp_secret_plaintext");
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("ci-runner")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /复制令牌/ }));
++
++    await waitFor(() => {
++      expect(mcpTokensApi.fetchMcpTokenPlaintext).toHaveBeenCalledWith(
++        "ws-1",
++        activeToken.id,
++      );
++    });
++    await waitFor(() => {
++      expect(writeText).toHaveBeenCalledWith("shmcp_secret_plaintext");
++    });
++    await waitFor(() => {
++      expect(screen.getByText("已复制")).toBeInTheDocument();
++    });
++  });
++
++  it("存量不可恢复行（plaintext_recoverable=false）→ 复制按钮禁用、不调明文端点", async () => {
++    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([
++      makeToken({ plaintext_recoverable: false }),
++    ]);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("ci-runner")).toBeInTheDocument();
++    });
++
++    const btn = screen.getByRole("button", { name: /复制令牌/ }) as HTMLButtonElement;
++    expect(btn.disabled).toBe(true);
++    expect(
++      screen.getByTitle("旧版本签发的令牌未保存明文，无法复制；请新签发一个"),
++    ).toBeInTheDocument();
++    expect(mcpTokensApi.fetchMcpTokenPlaintext).not.toHaveBeenCalled();
++  });
++});
++
++describe("workspace MCP 令牌管理页 · 已吊销令牌物理删除", () => {
++  it("confirm 确认 → 调 deleteMcpToken 并重新加载列表", async () => {
++    mcpTokensApi.listMcpTokens
++      .mockResolvedValueOnce([revokedToken])
++      .mockResolvedValueOnce([]);
++    mcpTokensApi.deleteMcpToken.mockResolvedValueOnce(undefined);
++    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-token")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
++
++    await waitFor(() => {
++      expect(mcpTokensApi.deleteMcpToken).toHaveBeenCalledWith("ws-1", revokedToken.id);
++    });
++    await waitFor(() => {
++      expect(mcpTokensApi.listMcpTokens).toHaveBeenCalledTimes(2);
++    });
++    await waitFor(() => {
++      expect(screen.getByText("还没有 MCP 令牌")).toBeInTheDocument();
++    });
++  });
++
++  it("confirm 取消 → 不调 deleteMcpToken", async () => {
++    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([revokedToken]);
++    const confirmMock = vi.fn().mockReturnValue(false);
++    vi.stubGlobal("confirm", confirmMock);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-token")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /删除/ }));
++
++    expect(confirmMock).toHaveBeenCalledTimes(1);
++    expect(mcpTokensApi.deleteMcpToken).not.toHaveBeenCalled();
++  });
++
++  it("已吊销行不渲染吊销与复制按钮，活跃行不渲染删除按钮", async () => {
++    mcpTokensApi.listMcpTokens.mockResolvedValueOnce([activeToken, revokedToken]);
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("old-token")).toBeInTheDocument();
++    });
++
++    expect(screen.getAllByRole("button", { name: "吊销" })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: /复制令牌/ })).toHaveLength(1);
++    expect(screen.getAllByRole("button", { name: /删除/ })).toHaveLength(1);
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
+index 0a317704f..ae01db9cf 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
+@@ -2,7 +2,7 @@
+ 
+ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+ import Link from "next/link";
+-import { Ban, KeyRound, Plus, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
++import { Ban, Copy, KeyRound, Plus, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+ 
+ import { McpTokenCreateDialog } from "@/components/mcp-token-create-dialog";
+ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+@@ -12,7 +12,13 @@ import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
+ import { Button } from "@/components/ui/button";
+ import { ApiError } from "@/lib/api";
+ import { errMessage } from "@/lib/errors";
+-import { listMcpTokens, revokeMcpToken, type McpTokenRead } from "@/lib/mcp-tokens";
++import {
++  deleteMcpToken,
++  fetchMcpTokenPlaintext,
++  listMcpTokens,
++  revokeMcpToken,
++  type McpTokenRead,
++} from "@/lib/mcp-tokens";
+ import { cn } from "@/lib/utils";
+ 
+ interface Props {
+@@ -36,6 +42,9 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
+   const [pageError, setPageError] = useState<string | null>(null);
+   const [forbidden, setForbidden] = useState(false);
+   const [showCreate, setShowCreate] = useState(false);
++  // 复制令牌明文的行级状态（2026-10-11-apikey-mcp-copy-delete）。
++  const [copyingId, setCopyingId] = useState<string | null>(null);
++  const [copiedId, setCopiedId] = useState<string | null>(null);
+ 
+   const load = useCallback(async () => {
+     setLoading(true);
+@@ -82,11 +91,44 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
+     }
+   };
+ 
++  /** 复制令牌明文（2026-10-11-apikey-mcp-copy-delete）：仅活跃且可恢复的 token。 */
++  const handleCopyToken = async (t: McpTokenRead) => {
++    if (copyingId) return;
++    setCopyingId(t.id);
++    try {
++      const plaintext = await fetchMcpTokenPlaintext(workspaceId, t.id);
++      await navigator.clipboard.writeText(plaintext);
++      setCopiedId(t.id);
++      setTimeout(() => setCopiedId(null), 2000);
++    } catch (err) {
++      setPageError(errMessage(err, "复制令牌失败"));
++    } finally {
++      setCopyingId(null);
++    }
++  };
++
++  /** 物理删除已吊销的令牌（后端仅对已吊销记录放行；webhook 配置级联清理）。 */
++  const handleDelete = async (t: McpTokenRead) => {
++    if (
++      !confirm(
++        `确定彻底删除已吊销的令牌 "${t.name}"？该记录及其 webhook 配置将从列表中永久移除，不可恢复。`,
++      )
++    ) {
++      return;
++    }
++    try {
++      await deleteMcpToken(workspaceId, t.id);
++      await load();
++    } catch (err) {
++      setPageError(errMessage(err, "删除失败"));
++    }
++  };
++
+   return (
+     <PageContainer size="full" className="gap-5">
+       <PageHeader
+         title="MCP 令牌"
+-        subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，明文仅在签发后显示一次"
++        subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，支持随时复制令牌明文（旧版本签发的令牌除外）"
+         actions={
+           <>
+             <Link
+@@ -210,16 +252,53 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
+                             {formatDateTime(t.created_at)}
+                           </td>
+                           <td className="px-4 py-3 text-right">
+-                            {!revoked && (
+-                              <Button
+-                                variant="ghost"
+-                                size="sm"
+-                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+-                                onClick={() => void handleRevoke(t)}
+-                              >
+-                                吊销
+-                              </Button>
+-                            )}
++                            <div className="flex items-center justify-end gap-1">
++                              {!revoked && (
++                                <>
++                                  <Button
++                                    variant="ghost"
++                                    size="sm"
++                                    className="gap-1"
++                                    disabled={!t.plaintext_recoverable || copyingId === t.id}
++                                    title={
++                                      t.plaintext_recoverable
++                                        ? "复制该令牌的完整明文"
++                                        : "旧版本签发的令牌未保存明文，无法复制；请新签发一个"
++                                    }
++                                    onClick={() => void handleCopyToken(t)}
++                                  >
++                                    {copiedId === t.id ? (
++                                      "已复制"
++                                    ) : (
++                                      <>
++                                        <Copy className="h-3.5 w-3.5" />
++                                        复制令牌
++                                      </>
++                                    )}
++                                  </Button>
++                                  <Button
++                                    variant="ghost"
++                                    size="sm"
++                                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
++                                    onClick={() => void handleRevoke(t)}
++                                  >
++                                    吊销
++                                  </Button>
++                                </>
++                              )}
++                              {revoked && (
++                                <Button
++                                  variant="ghost"
++                                  size="sm"
++                                  className="gap-1 text-destructive hover:bg-destructive/10 hover:text-destructive"
++                                  title="从列表永久移除该已吊销记录（其 webhook 配置一并清理，不可恢复）"
++                                  onClick={() => void handleDelete(t)}
++                                >
++                                  <Trash2 className="h-3.5 w-3.5" />
++                                  删除
++                                </Button>
++                              )}
++                            </div>
+                           </td>
+                         </tr>
+                       );
+diff --git a/frontend/src/components/api-key-create-dialog.tsx b/frontend/src/components/api-key-create-dialog.tsx
+index cee9ad637..78dab10ac 100644
+--- a/frontend/src/components/api-key-create-dialog.tsx
++++ b/frontend/src/components/api-key-create-dialog.tsx
+@@ -78,7 +78,7 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
+               </div>
+               <DialogTitle>签发 API 密钥</DialogTitle>
+               <DialogDescription>
+-                为守护进程签发长期凭证。明文仅在签发后显示一次，请妥善保存。
++                为守护进程签发长期凭证。明文在签发后展示，支持复制的部署可在列表中随时再次复制。
+               </DialogDescription>
+             </DialogHeader>
+ 
+@@ -134,7 +134,9 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
+               </div>
+               <DialogTitle>API 密钥已签发</DialogTitle>
+               <DialogDescription>
+-                这是该 Key 的唯一一次明文展示。关闭后将无法再次查看。
++                {issued.plaintext_recoverable
++                  ? "请立即复制保存。关闭后仍可在密钥列表中随时复制该明文。"
++                  : "该部署未启用密钥找回，关闭后将无法再次查看明文，请立即复制保存。"}
+               </DialogDescription>
+             </DialogHeader>
+ 
+diff --git a/frontend/src/lib/__tests__/api-keys.test.ts b/frontend/src/lib/__tests__/api-keys.test.ts
+new file mode 100644
+index 000000000..f1e240554
+--- /dev/null
++++ b/frontend/src/lib/__tests__/api-keys.test.ts
+@@ -0,0 +1,208 @@
++/**
++ * 2026-10-11-apikey-mcp-copy-delete：API key lib 新增面单测。
++ *
++ * 依据:
++ *   - frontend/src/lib/api-keys.ts（resolveDaemonApiKey / deleteApiKey /
++ *     fetchApiKeyPlaintext）
++ *   - 变更 FR-01：复制命令时内嵌真实明文；无活跃 key 自动签发永不过期 key
++ *
++ * 覆盖:
++ *   1. resolveDaemonApiKey：最新活跃 key 可恢复 → 取回明文，不新建
++ *   2. resolveDaemonApiKey：无活跃 key → 自动创建 expires_at=null 的 key
++ *   3. resolveDaemonApiKey：活跃 key 是存量 hash-only（不可恢复）→ 仍自动创建
++ *   4. resolveDaemonApiKey：明文取回 404（并发吊销）→ 兜底自动创建
++ *   5. resolveDaemonApiKey：list 403 → forbidden（页面回退 access_token）
++ *   6. deleteApiKey：DELETE ?hard=true 物理删除
++ *   7. fetchApiKeyPlaintext：GET plaintext 路径
++ *
++ * mock 方式与 lib/__tests__/mcp-tokens.test.ts 一致：vi.stubGlobal("fetch")。
++ */
++
++import { beforeEach, describe, expect, it, vi } from "vitest";
++
++import {
++  deleteApiKey,
++  fetchApiKeyPlaintext,
++  resolveDaemonApiKey,
++} from "@/lib/api-keys";
++
++type FetchMock = ReturnType<typeof vi.fn>;
++
++interface RespLike {
++  ok: boolean;
++  status: number;
++  body?: unknown;
++}
++
++function _resp(r: RespLike) {
++  return {
++    ok: r.ok,
++    status: r.status,
++    statusText: r.ok ? "" : "Error",
++    headers: { get: () => null },
++    text: () =>
++      Promise.resolve(r.body === undefined ? "" : JSON.stringify(r.body)),
++  };
++}
++
++/** 按调用顺序回放响应序列（超出序列的调用返回最后一个）。 */
++function stubFetchSequence(responses: RespLike[]): FetchMock {
++  const mock = vi.fn((_url: string, _init?: RequestInit) => {
++    const idx = Math.min(mock.mock.calls.length - 1, responses.length - 1);
++    return Promise.resolve(_resp(responses[idx] as RespLike));
++  });
++  vi.stubGlobal("fetch", mock);
++  return mock;
++}
++
++const errBody = {
++  code: "x",
++  message: "失败",
++  request_id: null,
++  details: null,
++};
++
++function apiKeyRow(overrides: Record<string, unknown> = {}) {
++  return {
++    id: "key-1",
++    name: "daemon",
++    key_prefix: "shk_live_ab",
++    last_used_at: null,
++    expires_at: null,
++    created_at: "2026-10-11T00:00:00Z",
++    revoked_at: null,
++    plaintext_recoverable: true,
++    ...overrides,
++  };
++}
++
++beforeEach(() => {
++  vi.restoreAllMocks();
++  vi.unstubAllGlobals();
++});
++
++describe("resolveDaemonApiKey", () => {
++  it("最新活跃 key 可恢复 → 取回明文返回，不创建新 key", async () => {
++    const mock = stubFetchSequence([
++      { ok: true, status: 200, body: { items: [apiKeyRow()] } },
++      { ok: true, status: 200, body: { plaintext: "shk_live_secret123" } },
++    ]);
++
++    const result = await resolveDaemonApiKey();
++
++    expect(result).toEqual({
++      status: "ok",
++      plaintext: "shk_live_secret123",
++      keyPrefix: "shk_live_ab",
++    });
++    expect(mock).toHaveBeenCalledTimes(2);
++    const [url, init] = mock.mock.calls[1] as [string, RequestInit];
++    expect(url).toContain("/api/auth/api-keys/key-1/plaintext");
++    expect(init.method).toBeUndefined(); // GET
++  });
++
++  it("无活跃 key → 自动创建永不过期（expires_at=null）的 key 并回显名称", async () => {
++    const mock = stubFetchSequence([
++      { ok: true, status: 200, body: { items: [apiKeyRow({ revoked_at: "2026-10-01T00:00:00Z" })] } },
++      {
++        ok: true,
++        status: 201,
++        body: {
++          ...apiKeyRow({ id: "key-new", key_prefix: "shk_live_new" }),
++          plaintext: "shk_live_fresh_key",
++        },
++      },
++    ]);
++
++    const result = await resolveDaemonApiKey();
++
++    expect(result.status).toBe("ok");
++    if (result.status === "ok") {
++      expect(result.plaintext).toBe("shk_live_fresh_key");
++      expect(result.createdName).toContain("守护进程启动命令自动签发");
++    }
++    const [url, init] = mock.mock.calls[1] as [string, RequestInit];
++    expect(url).toContain("/api/auth/api-keys");
++    expect(init.method).toBe("POST");
++    expect(JSON.parse(init.body as string).expires_at).toBeNull();
++  });
++
++  it("活跃 key 是存量 hash-only（不可恢复）→ 仍走自动创建", async () => {
++    const mock = stubFetchSequence([
++      {
++        ok: true,
++        status: 200,
++        body: { items: [apiKeyRow({ plaintext_recoverable: false })] },
++      },
++      {
++        ok: true,
++        status: 201,
++        body: {
++          ...apiKeyRow({ id: "key-new2" }),
++          plaintext: "shk_live_fresh2",
++        },
++      },
++    ]);
++
++    const result = await resolveDaemonApiKey();
++
++    expect(result.status).toBe("ok");
++    expect(mock).toHaveBeenCalledTimes(2); // 没有调 plaintext 端点，直接创建
++    const [, init] = mock.mock.calls[1] as [string, RequestInit];
++    expect(init.method).toBe("POST");
++  });
++
++  it("明文取回 404（并发吊销）→ 兜底自动创建", async () => {
++    const mock = stubFetchSequence([
++      { ok: true, status: 200, body: { items: [apiKeyRow()] } },
++      { ok: false, status: 404, body: errBody },
++      {
++        ok: true,
++        status: 201,
++        body: { ...apiKeyRow({ id: "key-new3" }), plaintext: "shk_live_fresh3" },
++      },
++    ]);
++
++    const result = await resolveDaemonApiKey();
++
++    expect(result.status).toBe("ok");
++    if (result.status === "ok") expect(result.plaintext).toBe("shk_live_fresh3");
++    expect(mock).toHaveBeenCalledTimes(3);
++  });
++
++  it("list 返回 403 → forbidden（调用方回退 access_token）", async () => {
++    stubFetchSequence([{ ok: false, status: 403, body: errBody }]);
++
++    const result = await resolveDaemonApiKey();
++
++    expect(result).toEqual({ status: "forbidden" });
++  });
++});
++
++describe("deleteApiKey", () => {
++  it("DELETE /api/auth/api-keys/{id}?hard=true 物理删除", async () => {
++    const mock = stubFetchSequence([{ ok: true, status: 204 }]);
++
++    await expect(deleteApiKey("k 1/x")).resolves.toBeUndefined();
++
++    const [url, init] = mock.mock.calls[0] as [string, RequestInit];
++    expect(url).toContain(
++      `/api/auth/api-keys/${encodeURIComponent("k 1/x")}?hard=true`,
++    );
++    expect(init.method).toBe("DELETE");
++  });
++});
++
++describe("fetchApiKeyPlaintext", () => {
++  it("GET plaintext 端点并解包 plaintext 字段", async () => {
++    const mock = stubFetchSequence([
++      { ok: true, status: 200, body: { plaintext: "shk_live_copy_me" } },
++    ]);
++
++    await expect(fetchApiKeyPlaintext("key-9")).resolves.toBe("shk_live_copy_me");
++
++    const [url, init] = mock.mock.calls[0] as [string, RequestInit];
++    expect(url).toContain("/api/auth/api-keys/key-9/plaintext");
++    expect(init.method).toBeUndefined();
++  });
++});
+diff --git a/frontend/src/lib/api-keys.ts b/frontend/src/lib/api-keys.ts
+index 53b88e70e..41fef870c 100644
+--- a/frontend/src/lib/api-keys.ts
++++ b/frontend/src/lib/api-keys.ts
+@@ -1,22 +1,25 @@
+ /**
+  * API Keys 客户端 (daemon-api-key 变更)。
+  *
+- * 长期凭证管理：admin 签发 / 列表 / 吊销。Plaintext 仅在创建时一次性返回，
+- * 后续 GET 不再包含。
++ * 长期凭证管理：admin 签发 / 列表 / 吊销 / 物理删除 / 按需取回明文。
++ * 明文在创建时一次性返回（canonical）；2026-10-11-apikey-mcp-copy-delete 起，
++ * 签发时已加密存档的活跃 key 还可经 plaintext 端点再取回（供列表复制与
++ * runtimes 页启动命令内嵌）。存量 hash-only 行不可恢复（409）。
+  *
+  * 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+  * 消除手写类型漂移。后端 schema 来源：backend/app/modules/auth。
+  */
+ 
+-import { apiFetch } from "@/lib/api";
++import { ApiError, apiFetch } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
+ 
+ export type ApiKeyRead = components["schemas"]["ApiKeyRead"];
+ export type ApiKeyCreated = components["schemas"]["ApiKeyCreated"];
+ export type ApiKeyListResponse = components["schemas"]["ApiKeyListResponse"];
+ export type ApiKeyCreateRequest = components["schemas"]["ApiKeyCreateRequest"];
++export type ApiKeyPlaintextResponse = components["schemas"]["ApiKeyPlaintextResponse"];
+ 
+-/** 列出当前 admin 的所有 API Key（不含 plaintext）。 */
++/** 列出当前 admin 的所有 API Key（不含 plaintext，行带 plaintext_recoverable）。 */
+ export async function listApiKeys(): Promise<ApiKeyRead[]> {
+   const resp = await apiFetch<ApiKeyListResponse>("/api/auth/api-keys");
+   return resp.items;
+@@ -37,6 +40,24 @@ export async function revokeApiKey(id: string): Promise<void> {
+   });
+ }
+ 
++/**
++ * 物理删除已吊销的 API Key（?hard=true；行从列表与数据库移除）。
++ * 未吊销的 key 后端拒绝（409，需先吊销）。
++ */
++export async function deleteApiKey(id: string): Promise<void> {
++  await apiFetch<void>(`/api/auth/api-keys/${encodeURIComponent(id)}?hard=true`, {
++    method: "DELETE",
++  });
++}
++
++/** 按需取回某把活跃 key 的明文（列表「复制密钥」入口）。 */
++export async function fetchApiKeyPlaintext(id: string): Promise<string> {
++  const resp = await apiFetch<ApiKeyPlaintextResponse>(
++    `/api/auth/api-keys/${encodeURIComponent(id)}/plaintext`,
++  );
++  return resp.plaintext;
++}
++
+ /**
+  * 拉取最新的活跃 key（用于 CopyDaemonCommand 默认填充）。
+  * 活跃定义：revoked_at == null && (expires_at == null || expires_at > now)。
+@@ -53,3 +74,58 @@ export async function getLatestActiveApiKey(): Promise<ApiKeyRead | null> {
+   // listApiKeys 已按 created_at desc 排序，取第一个即最新。
+   return active[0] ?? null;
+ }
++
++/** resolveDaemonApiKey 的结果。 */
++export type DaemonApiKeyResolution =
++  /** 拿到了可直接拼进启动命令的明文（createdName 非空表示本次自动签发了新 key）。 */
++  | { status: "ok"; plaintext: string; keyPrefix: string; createdName?: string }
++  /** 无 API_KEY_ADMIN 权限（list/create 均 403），调用方回退 access_token。 */
++  | { status: "forbidden" };
++
++/** 自动签发 key 的名称前缀（runtimes 页「复制命令」触发，永不过期）。 */
++export const AUTO_CREATED_KEY_PREFIX = "守护进程启动命令自动签发";
++
++function _isForbidden(err: unknown): boolean {
++  return err instanceof ApiError && err.status === 403;
++}
++
++/**
++ * 解析守护进程启动命令要内嵌的 API key 明文（runtimes 页复制入口）。
++ *
++ * 分支：
++ * 1. 最新活跃 key 可恢复明文 → 取回明文返回；
++ * 2. 无活跃 key、或最新活跃 key 是存量 hash-only（不可恢复）/ 取回失败（并发
++ *    吊销等）→ 自动签发一把永不过期（expires_at=null）的新 key 并用其明文
++ *    （createdName 回显给用户）；
++ * 3. list/create 返回 403 → forbidden（非 admin，调用方回退浏览器 access_token）。
++ * 其余意外错误向上抛（调用方按复制失败处理，不静默降级成错命令）。
++ */
++export async function resolveDaemonApiKey(): Promise<DaemonApiKeyResolution> {
++  try {
++    const latest = await getLatestActiveApiKey();
++    if (latest?.plaintext_recoverable) {
++      try {
++        return {
++          status: "ok",
++          plaintext: await fetchApiKeyPlaintext(latest.id),
++          keyPrefix: latest.key_prefix,
++        };
++      } catch (err) {
++        // 明文取回失败：403 属权限态上抛；其余（404 并发吊销 / 409 旧档损坏）
++        // 落到下方自动签发兜底。
++        if (_isForbidden(err)) throw err;
++      }
++    }
++    const name = `${AUTO_CREATED_KEY_PREFIX} ${new Date().toISOString().slice(0, 10)}`;
++    const created = await createApiKey({ name, expires_at: null });
++    return {
++      status: "ok",
++      plaintext: created.plaintext,
++      keyPrefix: created.key_prefix,
++      createdName: name,
++    };
++  } catch (err) {
++    if (_isForbidden(err)) return { status: "forbidden" };
++    throw err;
++  }
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 044fd7c0a..2a2be51ff 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1729,7 +1729,8 @@ export interface paths {
+         };
+         /**
+          * List Api Keys
+-         * @description List the caller's API keys (plaintext never included).
++         * @description List the caller's API keys (plaintext never included; rows carry
++         *     ``plaintext_recoverable`` so the UI knows whether copy is possible).
+          */
+         get: operations["list_api_keys_api_auth_api_keys_get"];
+         put?: never;
+@@ -1737,8 +1738,9 @@ export interface paths {
+          * Create Api Key
+          * @description Issue a new long-lived API key for the daemon.
+          *
+-         *     Plaintext is returned **only** here; subsequent GETs will only expose
+-         *     ``key_prefix``. ``api_key:admin``-gated.
++         *     Plaintext is returned here (canonical one-time return); when the master
++         *     key is configured the row also stores it encrypted, and the per-id
++         *     plaintext endpoint can re-fetch it later. ``api_key:admin``-gated.
+          */
+         post: operations["create_api_key_api_auth_api_keys_post"];
+         delete?: never;
+@@ -1747,6 +1749,29 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/auth/api-keys/{api_key_id}/plaintext": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Api Key Plaintext
++         * @description 取回某把活跃 key 的明文（管理端「复制密钥」入口）。
++         *
++         *     仅放行属于当前用户、未吊销且未过期的 key（否则 404，与吊销端点同文案，
++         *     不泄露具体原因）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++         */
++        get: operations["get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/auth/api-keys/{api_key_id}": {
+         parameters: {
+             query?: never;
+@@ -1760,6 +1785,9 @@ export interface paths {
+         /**
+          * Revoke Api Key
+          * @description Revoke an API key. Idempotent for unknown / already-revoked ids → 404.
++         *
++         *     ``hard=true`` 物理删除该行（仅已吊销记录放行）：不存在 / 跨用户 → 404；
++         *     未吊销 → 409（先吊销再删除）。
+          */
+         delete: operations["revoke_api_key_api_auth_api_keys__api_key_id__delete"];
+         options?: never;
+@@ -4056,6 +4084,29 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}/plaintext": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Mcp Token Plaintext
++         * @description 取回某个活跃 token 的明文（管理端「复制令牌」入口，2026-10-11 变更）。
++         *
++         *     仅放行属于本 workspace 且未吊销的 token（否则 404，与吊销端点同文案，防存在性
++         *     探测）；存量行未存加密明文 / 主密钥已轮换 → 409 引导重新签发。
++         */
++        get: operations["get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/mcp-tokens/{token_id}": {
+         parameters: {
+             query?: never;
+@@ -4073,6 +4124,9 @@ export interface paths {
+          *     service.revoke 返 False（不存在 / 已吊销 / 跨 workspace 越权）→ 404，不泄露具体
+          *     原因（防存在性探测）。成功返 204；吊销后 ``authenticate`` 立即返 None（正缓存被
+          *     精确 DEL，无 TTL 放行窗口）。
++         *
++         *     ``hard=true``（2026-10-11 变更）物理删除该行：其 mcp_webhooks 子行随外键
++         *     CASCADE 一并移除；不存在 / 跨 workspace → 404；未吊销 → 409（先吊销再删除）。
+          */
+         delete: operations["revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete"];
+         options?: never;
+@@ -13282,6 +13336,8 @@ export interface components {
+             created_at: string;
+             /** Revoked At */
+             revoked_at: string | null;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+             /** Plaintext */
+             plaintext: string;
+         };
+@@ -13290,6 +13346,17 @@ export interface components {
+             /** Items */
+             items: components["schemas"]["ApiKeyRead"][];
+         };
++        /**
++         * ApiKeyPlaintextResponse
++         * @description GET /api-keys/{id}/plaintext 响应——管理端「复制密钥」按需取回明文。
++         */
++        ApiKeyPlaintextResponse: {
++            /**
++             * Plaintext
++             * @description 完整密钥明文，仅复制入口使用，勿入日志
++             */
++            plaintext: string;
++        };
+         /**
+          * ApiKeyRead
+          * @description List-row shape — safe to return on every GET.
+@@ -13315,6 +13382,8 @@ export interface components {
+             created_at: string;
+             /** Revoked At */
+             revoked_at: string | null;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+         };
+         /** ApprovalRead */
+         ApprovalRead: {
+@@ -19863,9 +19932,23 @@ export interface components {
+             /** Items */
+             items: components["schemas"]["McpTokenRead"][];
+         };
++        /**
++         * McpTokenPlaintextResponse
++         * @description GET .../mcp-tokens/{id}/plaintext 响应——管理端「复制令牌」按需取回明文。
++         */
++        McpTokenPlaintextResponse: {
++            /**
++             * Token
++             * @description 完整令牌明文，仅复制入口使用，勿入日志
++             */
++            token: string;
++        };
+         /**
+          * McpTokenRead
+          * @description 列表行——所有 GET 都安全返回。绝不包含明文或 ``token_hash``（R-06）。
++         *
++         *     ``plaintext_recoverable``（2026-10-11 变更）：明文是否可经按 id plaintext
++         *     端点再取回（签发时加密存档）；UI 据此点亮复制按钮。
+          */
+         McpTokenRead: {
+             /**
+@@ -19886,6 +19969,8 @@ export interface components {
+              * Format: date-time
+              */
+             created_at: string;
++            /** Plaintext Recoverable */
++            plaintext_recoverable: boolean;
+         };
+         /**
+          * McpWebhookCreateRequest
+@@ -32140,7 +32225,7 @@ export interface operations {
+             };
+         };
+     };
+-    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
++    get_api_key_plaintext_api_auth_api_keys__api_key_id__plaintext_get: {
+         parameters: {
+             query?: never;
+             header?: never;
+@@ -32150,6 +32235,40 @@ export interface operations {
+             cookie?: never;
+         };
+         requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ApiKeyPlaintextResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    revoke_api_key_api_auth_api_keys__api_key_id__delete: {
++        parameters: {
++            query?: {
++                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
++                hard?: boolean;
++            };
++            header?: never;
++            path: {
++                api_key_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
+         responses: {
+             /** @description Successful Response */
+             204: {
+@@ -36069,7 +36188,7 @@ export interface operations {
+             };
+         };
+     };
+-    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
++    get_mcp_token_plaintext_api_workspaces__workspace_id__mcp_tokens__token_id__plaintext_get: {
+         parameters: {
+             query?: never;
+             header?: never;
+@@ -36080,6 +36199,41 @@ export interface operations {
+             cookie?: never;
+         };
+         requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["McpTokenPlaintextResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    revoke_mcp_token_api_workspaces__workspace_id__mcp_tokens__token_id__delete: {
++        parameters: {
++            query?: {
++                /** @description 物理删除（仅已吊销记录放行；未吊销返回 409） */
++                hard?: boolean;
++            };
++            header?: never;
++            path: {
++                workspace_id: string;
++                token_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
+         responses: {
+             /** @description Successful Response */
+             204: {
+diff --git a/frontend/src/lib/mcp-tokens.ts b/frontend/src/lib/mcp-tokens.ts
+index 30a2343fb..b597fe4ba 100644
+--- a/frontend/src/lib/mcp-tokens.ts
++++ b/frontend/src/lib/mcp-tokens.ts
+@@ -1,12 +1,13 @@
+ /**
+  * McpToken 客户端（2026-08-11-mcp-token-management-ui 变更）。
+  *
+- * workspace 级 MCP 访问凭据管理：签发 / 列表 / 吊销。
+- * 明文 token 仅在 POST 201 一次返回（R-06），后续 GET 与列表永不包含明文。
++ * workspace 级 MCP 访问凭据管理：签发 / 列表 / 吊销 / 物理删除 / 按需取回明文。
++ * 明文 token 在 POST 201 一次返回（canonical）；2026-10-11-apikey-mcp-copy-delete
++ * 起已加密存档的活跃 token 可经 plaintext 端点再取回（列表「复制令牌」）。
++ * 存量 hash-only 行不可恢复（409）。
+  *
+  * 风格 1:1 对齐 @/lib/api-keys：复用 @/lib/api 的 apiFetch 做鉴权与错误归一，
+  * 不引入 react-query、不手写 fetch。类型从 OpenAPI 自动生成（@/lib/api-types）。
+- * 后端三端点 + DTO 已在变更 2026-08-06-public-mcp-server 交付，本文件零后端改动。
+  */
+ 
+ import { apiFetch } from "@/lib/api";
+@@ -19,8 +20,9 @@ export type McpTokenRead = components["schemas"]["McpTokenRead"];
+ export type McpTokenCreated = components["schemas"]["McpTokenCreated"];
+ export type McpTokenListResponse = components["schemas"]["McpTokenListResponse"];
+ export type McpTokenCreateRequest = components["schemas"]["McpTokenCreateRequest"];
++export type McpTokenPlaintextResponse = components["schemas"]["McpTokenPlaintextResponse"];
+ 
+-/** 列出 workspace 下所有 McpToken（不含明文）。直接返回 items 数组，与 listApiKeys 同形。 */
++/** 列出 workspace 下所有 McpToken（不含明文，行带 plaintext_recoverable）。 */
+ export async function listMcpTokens(workspaceId: string): Promise<McpTokenRead[]> {
+   const resp = await apiFetch<McpTokenListResponse>(
+     `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-tokens`,
+@@ -54,3 +56,30 @@ export async function revokeMcpToken(
+     },
+   );
+ }
++
++/**
++ * 物理删除已吊销的 McpToken（?hard=true；行从列表与数据库移除，其 webhook
++ * 配置随外键级联清理）。未吊销的 token 后端拒绝（409，需先吊销）。
++ */
++export async function deleteMcpToken(
++  workspaceId: string,
++  tokenId: string,
++): Promise<void> {
++  await apiFetch<void>(
++    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-tokens/${encodeURIComponent(tokenId)}?hard=true`,
++    {
++      method: "DELETE",
++    },
++  );
++}
++
++/** 按需取回某个活跃 token 的明文（列表「复制令牌」入口）。 */
++export async function fetchMcpTokenPlaintext(
++  workspaceId: string,
++  tokenId: string,
++): Promise<string> {
++  const resp = await apiFetch<McpTokenPlaintextResponse>(
++    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp-tokens/${encodeURIComponent(tokenId)}/plaintext`,
++  );
++  return resp.token;
++}
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/design.md b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/design.md
+new file mode 100644
+index 000000000..57a8618f7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/design.md
+@@ -0,0 +1,116 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T07:00:52.199Z
++---
++# 设计记录（Design Record）— 2026-10-11-apikey-mcp-copy-delete
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++核心矛盾：API key 存 bcrypt、MCP token 存 sha256，均为单向哈希，明文「只此一次」——这是
++现有产品文档反复声明的安全契约（R-06 / api_key_schema.py docstring）。用户需求要求列表可
++复制已生成凭据、命令可直接携带密钥，即放弃「一次性明文」模型。方案是**保留原哈希鉴权路径
++完全不动**，新增一列可逆加密存储（libsodium secretbox，复用 `app/core/crypto.py` 的
++`CredentialCipher` 与 `SILLYSPEC_MASTER_KEY` KEK），存储格式与 mcp_webhooks.secret 既有
++惯例同构：`{key_id}:{hex(ciphertext)}`。这样鉴权面零改动（bcrypt O(n) 扫描 / sha256 O(1)
++查表 / Redis 缓存全部原样），只在「管理面」多一条可逆通道。
++
++配套：按 id 取明文的 GET 端点（仅活跃记录）、DELETE 端点加 `hard=true` 查询参数做物理删除
++（仅已吊销记录放行）、列表 DTO 加 `plaintext_recoverable` 布尔。前端三个页面（runtimes /
++settings/api-keys / workspaces/[id]/mcp-tokens）接新端点。runtimes 页复制时走「有活跃 key
++→ 取明文；无 → 自动创建永不过期 key」的解析函数，明文只进剪贴板、渲染面保持 prefix 打码。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++后端新增/变更（均挂既有权限门，OpenAPI 随 `pnpm gen:types` 再生成）：
++
++1. `GET /api/auth/api-keys/{id}/plaintext`（新）→ `{"plaintext": "shk_live_..."}`。
++   权限 `API_KEY_ADMIN` 且属于当前用户；不存在/已吊销/已过期 → 404（沿用 `ApiKeyNotFound`）；
++   存量无加密列 → 409（新 `ApiKeyPlaintextUnavailable`，中文 detail 引导新建）。
++2. `GET /api/workspaces/{wid}/mcp-tokens/{tid}/plaintext`（新）→ `{"token": "shmcp_..."}`。
++   权限 `WORKSPACE_WRITE`；不存在/已吊销/跨 workspace → 404（沿用 `McpTokenNotFound`）；
++   存量无加密列 → 409。
++3. `DELETE /api/auth/api-keys/{id}?hard=true`（变）：hard 且已吊销 → 物理删行 204；
++   hard 且未吊销 → 409（中文 detail「请先吊销再删除」）；无 hard 参数 → 原吊销语义逐字不变。
++4. `DELETE /api/workspaces/{wid}/mcp-tokens/{tid}?hard=true`（变）：同上；删行时其
++   mcp_webhooks 子行由 service 显式删除（与外键 `ondelete=CASCADE` 双保险——单测
++   SQLite 不开外键 PRAGMA，纯 FK 级联在测试面会残留）。
++5. DTO：`ApiKeyRead` / `McpTokenRead` 增 `plaintext_recoverable: bool`（加密列非空）。
++   `ApiKeyCreated` / `McpTokenCreated` 响应形态不变（明文字段仍在，语义从「此后不可恢复」
++   改为「列表可再取」，对应 docstring 同步修正）。
++6. 数据模型：`api_keys` 加列 `encrypted_key TEXT NULL`；`mcp_tokens` 加列
++   `encrypted_token TEXT NULL`。单个 alembic 迁移（20261011160000）完成两列。
++7. 前端 `frontend/src/lib/api-keys.ts` / `mcp-tokens.ts`：新增 `fetchApiKeyPlaintext` /
++   `deleteApiKey` / `fetchMcpTokenPlaintext` / `deleteMcpToken` 与
++   `resolveDaemonApiKey`（无活跃 key 时自动创建 `expires_at=null` 的 key）。
++8. daemon 侧：无改动（`--api-key` 消费方式不变）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   明文列与哈希列在同一 `create` 事务内写入，不存在半行状态；复制命令是即时请求-响应，
++   无乱序面。硬删除与吊销的先后顺序由 409 门保证（未吊销拒绝删除），即使用户先点删除后点
++   吊销，重试即成功，无乱序损坏。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   物理删除的 DELETE 带 `revoked_at IS NOT NULL` 条件（`hard_delete` 先读行校验再删），
++   与并发 revoke 的 `revoked_at IS NULL` 条件互斥；plaintext 读取与并发 revoke 之间最多
++   读到一条刚被吊销的 key（读时校验 revoked_at，窗口毫秒级，且吊销后 60s 正缓存已由现有
++   revoke 清缓存逻辑保证失效）。hard_delete 后防御性按前缀/token_hash 再清一次正缓存。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   KEK 轮换（key_id 变更）后旧密文 `CipherKeyMismatch`——明文端点捕获转 409（提示重新
++   签发），不 500；master key 缺失时 create 跳过加密列（置 NULL）而非 503，保证未配置
++   KEK 的部署创建链路不回归（有测试覆盖该降级分支）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   plaintext 端点复用各自现有权限门与归属校验（api-key 按 user_id + `API_KEY_ADMIN`、
++   mcp-token 按 workspace_id + `require_permission` 路径注入），无跨用户/跨工作区串面
++   （mcp 侧有跨 workspace 404 用例）；自动创建 key 走现有 POST 端点（同权限门），不引入
++   旁路。Redis 缓存 namespace（`auth:apikey:*` / `auth:mcptoken:*`）维持独立。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：**可逆存储是安全降级**——DB 全量泄露 + KEK 同时泄露时凭据直接暴露（原 bcrypt
++方案下不可能）。接受理由：内部平台、用户明确要求列表可复制；缓解措施是密文落库（DB 备份/
++日志拖库单独不构成泄露）+ KEK 走环境变量与 DB 分离，与 mcp_webhooks.secret 既有风险面
++持平。
++
++试过放弃的方案：(a) 明文直接入库——放弃，密文列成本极低而拖库面显著恶化；(b) 每次「复制」
++都新建 key（保持 hash-only 模型）——放弃，key 会随复制次数无限堆积，且「列表复制已生成
++凭据」的需求语义不符；(c) 单独 `POST .../purge` 端点——放弃，`?hard=true` 查询参数复用
++既有 DELETE 路由与权限门，改动面更小。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | backend/app/modules/auth/model.py | ApiKey 加 `encrypted_key` 列 + `plaintext_recoverable` property |
++| 改 | backend/app/modules/auth/api_key_schema.py | ApiKeyRead 加 `plaintext_recoverable`；新增 ApiKeyPlaintextResponse |
++| 改 | backend/app/modules/auth/api_key_service.py | create 落加密列；新增 `get_plaintext` / `hard_delete` 与 409 错误类 |
++| 改 | backend/app/modules/auth/router.py | plaintext GET 端点；DELETE 支持 `hard` 参数 |
++| 改 | backend/app/modules/mcp_gateway/model.py | McpTokenORM 加 `encrypted_token` 列 + property |
++| 改 | backend/app/modules/mcp_gateway/service.py | create 落加密列；`get_plaintext` / `hard_delete` 与 409 错误类 |
++| 改 | backend/app/modules/mcp_gateway/router.py | plaintext GET 端点；DELETE 支持 `hard` 参数 |
++| 增 | backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py | 两表各加一可空 TEXT 列 |
++| 改 | frontend/src/lib/api-keys.ts | plaintext/hard-delete 封装 + `resolveDaemonApiKey`（自动创建永不过期） |
++| 改 | frontend/src/lib/mcp-tokens.ts | plaintext/hard-delete 封装 |
++| 改 | frontend/src/app/(dashboard)/runtimes/page.tsx | CopyDaemonCommand 复制时解析真实凭据（渲染打码） |
++| 改 | frontend/src/app/(dashboard)/settings/api-keys/page.tsx | 复制密钥 + 删除按钮 + 禁用降级 |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx | 复制令牌 + 删除按钮 |
++| 改 | frontend/src/components/api-key-create-dialog.tsx | 明文展示文案按 plaintext_recoverable 动态 |
++| 改 | frontend/src/lib/api-types.ts + backend/openapi.json | gen:types 再生成 |
++| 改 | backend/tests/modules/auth/test_api_key_service.py 等 3 件 | 新端点/新列用例 |
++| 增 | frontend/src/lib/__tests__/api-keys.test.ts | resolveDaemonApiKey 分支（7 用例） |
++| 增 | frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx | 复制/删除/降级 UI（5 用例） |
++| 增 | frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx | 命令内嵌真实密钥（4 用例） |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx | 复制/删除 UI（+5 用例） |
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/proposal.md b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/proposal.md
+new file mode 100644
+index 000000000..4457229ee
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T07:00:52.198Z
++---
++# 提案书（Proposal）— 2026-10-11-apikey-mcp-copy-delete
++
++## 动机
++
++任务原话转写：守护进程运行时复制命令需直接携带用户 API 密钥明文（无密钥时自动创建永不过期密钥）；密钥列表与 MCP 令牌列表支持复制已生成凭据明文；已吊销记录支持物理删除。
++
++成功标准：
++- runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
++- api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
++- mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
++- 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
++- 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
++2. api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
++3. mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
++4. 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
++5. 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
++
++## 成功标准（可验证）
++
++1. runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
++2. api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
++3. mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
++4. 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
++5. 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md
+new file mode 100644
+index 000000000..354b23c6b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md
+@@ -0,0 +1,113 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T07:00:52.199Z
++---
++# 需求规格（Requirements）— 2026-10-11-apikey-mcp-copy-delete
++
++## 功能需求
++
++### FR-01: runtimes 页复制启动命令时，命令内嵌当前用户最新活跃 API key 明文；若无活跃 key 则自动创建一个永不过期 key 并使用
++
++- 点击「复制命令」时必须解析出可直接运行的完整命令：优先取当前用户最新活跃 API key 的明文拼入 `--api-key`；无活跃 key 时必须自动创建一个 `expires_at = null`（永不过期）的 key 并使用其明文，同时向用户提示已自动创建（含 key 名称）。
++- 页面渲染的命令必须保持打码形态（仅显示 `key_prefix`），完整明文只进剪贴板，不常驻屏幕。
++- 无 `API_KEY_ADMIN` 权限的用户（list/create 均 403）必须保持现状回退：命令用浏览器 `--token` 短期凭证并显示原有警示，不因新逻辑报错。
++- 自动创建的 key 必须遵守现有创建端点语义（名称非空、走同一权限门），禁止绕过权限校验。
++
++#### 场景：有活跃 key
++
++- Given 当前用户已有至少一个活跃（未吊销未过期）API key
++- When 用户点击「复制命令」
++- Then 剪贴板中的命令为 `sillyhub-daemon start --server <origin> --api-key <该 key 明文>`，且不产生新 key
++
++#### 场景：无任何活跃 key
++
++- Given 当前用户无活跃 key（无记录或全部吊销/过期）
++- When 用户点击「复制命令」
++- Then 系统自动创建名称带「自动创建」标识、`expires_at=null` 的 key，剪贴板命令内嵌其明文，页面出现已自动创建的提示
++
++#### 场景：非 admin 用户
++
++- Given 当前用户无 `API_KEY_ADMIN` 权限
++- When 页面加载 / 点击复制
++- Then 行为与现状一致（access_token 回退 + 黄色警示），无新增报错
++
++### FR-02: api-keys 列表对可恢复明文的活跃密钥提供复制按钮，一键复制明文
++
++- 后端必须为 API key 增加可恢复明文能力：创建时以 libsodium secretbox 加密存储明文（格式与 mcp_webhooks.secret 同构 `{key_id}:{hex(ct)}`），bcrypt `key_hash` 鉴权路径必须保持不变。
++- 后端必须提供按 id 获取明文的端点：仅对属于当前用户、未吊销的 key 返回明文；已吊销/过期/不存在一律 404。
++- api-keys 列表每行必须对「活跃且可恢复」的 key 显示复制按钮，点击后明文进剪贴板并给出复制成功反馈；已吊销/过期行禁止显示复制按钮。
++
++#### 场景：活跃可恢复 key 复制
++
++- Given 用户有一个创建于本变更之后、未吊销未过期的 key
++- When 点击该行「复制密钥」
++- Then 剪贴板内容与创建时签发的明文完全一致
++
++#### 场景：已吊销 key
++
++- Given key 已吊销
++- When 列表渲染 / 尝试调明文端点
++- Then 前端不显示复制入口；直接调端点返回 404
++
++### FR-03: mcp-tokens 列表对可恢复明文的活跃令牌提供复制按钮，一键复制明文
++
++- 后端必须为 McpToken 增加可恢复明文能力：创建时加密存储明文（同 FR-02 格式），`token_hash`（sha256 唯一索引）鉴权路径必须保持不变。
++- 后端必须提供按 id 获取明文的端点：仅对属于该 workspace、未吊销的 token 返回明文；已吊销/不存在/跨 workspace 一律 404；权限沿用 `WORKSPACE_WRITE`。
++- mcp-tokens 列表每行必须对「活跃且可恢复」的 token 显示复制按钮；已吊销行禁止显示复制按钮。
++
++#### 场景：活跃可恢复 token 复制
++
++- Given workspace 下有一个未吊销、创建于本变更之后的 token
++- When 点击该行「复制令牌」
++- Then 剪贴板内容与签发时的明文完全一致
++
++### FR-04: 已吊销的 API key 与 MCP token 支持从列表物理删除（后端仅对已吊销记录放行删除）
++
++- 后端必须在现有 DELETE 端点上支持 `hard=true` 查询参数：仅当记录已吊销（`revoked_at` 非空）时执行物理删除（行从表中移除），否则返回 409 并提示需先吊销；不带参数时必须保持原吊销语义完全不变。
++- McpToken 物理删除时其关联 mcp_webhooks 行随外键 CASCADE 一并移除，行为必须与文档一致。
++- 前端两个列表必须对已吊销行显示「删除」按钮：点击需 confirm 确认，成功后列表刷新；活跃行禁止显示删除按钮。
++
++#### 场景：删除已吊销 key
++
++- Given key 已吊销
++- When 调 `DELETE /api/auth/api-keys/{id}?hard=true`
++- Then 返回 204，列表中该行消失，数据库该行被移除
++
++#### 场景：对活跃 key 请求硬删除
++
++- Given key 未吊销
++- When 调 `DELETE /api/auth/api-keys/{id}?hard=true`
++- Then 返回 409，行保持不变，错误文案引导先吊销
++
++### FR-05: 存量 hash-only 记录明文不可恢复时，复制入口降级提示而非报错
++
++- 本变更之前创建的存量记录（无加密明文列值）必须继续正常列示；其明文端点必须返回 409 并携带「旧密钥未保存明文，请新建后使用」语义的中文提示，禁止返回 500。
++- 列表 DTO 必须包含 `plaintext_recoverable` 布尔字段（加密列非空且未吊销）；前端对不可恢复的活跃行必须将复制按钮降级为禁用态并带 tooltip 说明，禁止点击后抛错。
++- 主加密密钥（`SILLYSPEC_MASTER_KEY`）缺失时创建必须仍成功（加密列置空、明文仍一次性返回），禁止因新增加密逻辑导致原有创建链路 503。
++
++#### 场景：存量旧 key 复制
++
++- Given 存量 key 创建于本变更前，`encrypted_key` 为空，且仍活跃
++- When 列表渲染
++- Then 复制按钮呈禁用态，tooltip 提示旧密钥无法恢复明文
++
++#### 场景：master key 缺失时创建
++
++- Given 部署未配置 `SILLYSPEC_MASTER_KEY`
++- When 用户签发新 key
++- Then 创建成功且明文一次性返回（`plaintext_recoverable=false`），不抛 503
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/auth/test_api_key_service.py「create 同时落 bcrypt hash 与加密明文」
++FR-01: frontend/src/lib/__tests__/api-keys.test.ts「resolveDaemonApiKey：有活跃 key 返回明文 / 无活跃 key 自动创建永不过期 key」
++FR-01: frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx「复制命令写入剪贴板的命令内嵌真实密钥、渲染面保持打码」
++FR-02: backend/tests/modules/auth/test_api_key_router.py「GET /api/auth/api-keys/{id}/plaintext 活跃 key 返回明文、已吊销 404」
++FR-02: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「活跃可恢复行显示复制密钥并写入剪贴板」
++FR-03: backend/app/modules/mcp_gateway/tests/test_router.py「GET plaintext 端点活跃 token 返回明文、已吊销/越权 404」
++FR-03: frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx「活跃可恢复行显示复制令牌并写入剪贴板」
++FR-04: backend/tests/modules/auth/test_api_key_router.py「DELETE ?hard=true 已吊销 204 且行消失、活跃 409、无参保持吊销语义」
++FR-04: backend/app/modules/mcp_gateway/tests/test_router.py「DELETE ?hard=true 已吊销 204、活跃 409、webhook 级联删除」
++FR-04: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「已吊销行显示删除按钮，confirm 后调用硬删除」
++FR-05: backend/tests/modules/auth/test_api_key_router.py「存量 hash-only 记录 plaintext 端点 409、列表 plaintext_recoverable=false」
++FR-05: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「不可恢复行复制按钮禁用带 tooltip」
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/tasks.md b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/tasks.md
+new file mode 100644
+index 000000000..c482d1fd1
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/tasks.md
+@@ -0,0 +1,12 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T07:00:52.199Z
++---
++# 任务注册表（Tasks）— 2026-10-11-apikey-mcp-copy-delete
++
++- [x] task-01: 后端 model+迁移：api_keys 加 `encrypted_key`、mcp_tokens 加 `encrypted_token`（可空 TEXT），alembic 迁移落两列并本地 `alembic upgrade head` 验证
++- [x] task-02: 后端 API key 侧：service create 落加密列（KEK 缺失降级置空）、`get_plaintext`/`hard_delete`；router 加 plaintext GET 端点、DELETE `hard` 参数；schema 加 `plaintext_recoverable`——tests/modules/auth 三件套新增用例跑绿
++- [x] task-03: 后端 MCP token 侧：service/router 同 task-02 模式（WORKSPACE_WRITE 门 + webhook CASCADE 删除用例）——mcp_gateway/tests 新增用例跑绿
++- [x] task-04: 前端 lib 层：api-keys.ts / mcp-tokens.ts 加 plaintext、hard 删除、`resolveDaemonApiKey`（无活跃 key 自动创建永不过期），`pnpm gen:types` 再生成并提交
++- [x] task-05: 前端页面：runtimes CopyDaemonCommand 复制带真实密钥（渲染保持打码）、api-keys / mcp-tokens 列表加复制与删除按钮、不可恢复行降级禁用——对应 vitest 用例跑绿
++- [x] task-06: 回归验证：后端 ruff/mypy + 相关 pytest 子集、前端 lint + 相关 vitest 子集；核对 FR-01~05 场景逐条通过
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/verify-note.md b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/verify-note.md
+new file mode 100644
+index 000000000..e68fe6539
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/verify-note.md
+@@ -0,0 +1,31 @@
++# task-06 回归验证记录 — 2026-10-11-apikey-mcp-copy-delete
++
++执行时间：2026-10-11 15:2x–15:4x（本地，Windows / Git Bash）
++
++## 后端
++
++| 项 | 命令 | 结果 |
++| --- | --- | --- |
++| 迁移链 | `python -m alembic heads` + `pytest tests/test_migrations_graph.py` | head=20261011160000；2 passed |
++| ruff | `python -m ruff check app/modules/auth app/modules/mcp_gateway migrations/versions/2026101160000* tests/modules/auth` | All checks passed（pre-commit ruff-format 拦截后已按 hook 指定 `uv run ruff format` 修复 3 文件并复跑） |
++| mypy | `python -m mypy`（5 个改动 py 文件） | Success: no issues found in 5 source files |
++| pytest 子集 | `pytest app/modules/mcp_gateway tests/modules/auth tests/core/test_auth_deps_principal.py -q --no-cov` | **355 passed, 2 xfailed**（xfail 为预存标记，与本变更无关） |
++| format 后复跑 | `pytest tests/modules/auth/test_api_key_router.py app/modules/mcp_gateway/tests/test_router.py -q --no-cov` | 27 passed |
++
++## 前端
++
++| 项 | 命令 | 结果 |
++| --- | --- | --- |
++| node_modules 健康 | `pnpm exec tsc --version`（修复前失败 → `pnpm install --force` 后 5.5.4） | 已修复（CLAUDE.md 规则 21 预警场景） |
++| gen:types | `pnpm gen:types` | openapi.json + api-types.ts 再生成，`plaintext_recoverable` / 两个 PlaintextResponse DTO 均入列 |
++| ESLint | `pnpm exec next lint --file`（6 个改动文件） | 无新增 warning（runtimes 页 3 个 no-unused-vars 为 HEAD 基线预存债，行号 755/1016/1230 均在 CopyDaemonCommand 之外，经 stash 对照确认） |
++| vitest 子集 | runtimes + settings/api-keys + mcp-tokens 页面测试、lib api-keys/mcp-tokens、create-dialog 共 11 文件 | **105 passed** |
++| tsc | `pnpm exec tsc --noEmit` | exit 0（测试文件 2 处 noUncheckedIndexedAccess 索引访问已修） |
++
++## FR 对照
++
++- FR-01：lib 5 分支用例 + CopyDaemonCommand 4 用例（剪贴板含完整明文、渲染面打码、自动创建回显、非 admin 回退）绿。
++- FR-02：router 3 用例（roundtrip/404/409/flag）+ api-keys 页 5 用例（复制/禁用降级/删除矩阵）绿。
++- FR-03：mcp router 7 用例（含跨 workspace 404）+ mcp 页 11 用例（复制/删除）绿。
++- FR-04：两侧 hard-delete 用例（已吊销 204 行消失 / 活跃 409 / 未知 404）绿。
++- FR-05：存量 hash-only 409 + `plaintext_recoverable=false` 禁用降级 + master key 缺失创建降级用例绿。
+diff --git a/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/review.json.superseded-20261011T075638 b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/review.json.superseded-20261011T075638
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/review.json.superseded-20261011T075638
+@@ -0,0 +1,40 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-apikey-mcp-copy-delete",
++  "reviewer": "subagent",
++  "verdict": "FAIL",
++  "reviewedAgainst": "c84c4b773d3266354b3ee0c4e96e97b161d8e228",
++  "findings": [
++    {
++      "severity": "P1",
++      "title": "FR-02「已吊销/过期行禁止显示复制按钮」的过期半边未兑现：过期未吊销行仍渲染启用的复制按钮，点击必然 404 报错横幅",
++      "evidence": "复制按钮仅由 !k.revoked_at 门控、disabled 仅看 plaintext_recoverable，不看 expires_at；而过期未吊销行 revoked_at=null 且创建于本变更后 plaintext_recoverable=true，按钮显示且可点；后端 get_plaintext 对 expires_at<=now 的行抛 ApiKeyNotFound(404)，点击后用户看到「复制密钥失败: API 密钥不存在或已被吊销」——既是 FR-02 明文承诺的直接违反，也违背 FR-05「降级提示而非报错」的精神（对过期态）。测试矩阵只覆盖 active/revoked 两态，未覆盖 expired 态。",
++      "location": "frontend/src/app/(dashboard)/settings/api-keys/page.tsx:237-249 (+ backend/app/modules/auth/api_key_service.py get_plaintext 过期→404 分支)"
++    },
++    {
++      "severity": "P2",
++      "title": "FR-04 测试绑定声称 mcp test_router.py 覆盖「webhook 级联删除」，该用例不存在",
++      "evidence": "grep 全文证实 backend/app/modules/mcp_gateway/tests/test_router.py 零次提及 webhook/McpWebhookORM；新增 7 个用例只创建 token 行，无一插入 mcp_webhooks 行断言 hard delete 后级联消失。实现面 FK ondelete=CASCADE 真实存在（model.py:144），行为大概率正确，但绑定量声称的测试证据不存在（绑定规则：声称的测试必须真存在且断言该行为）。",
++      "location": "backend/app/modules/mcp_gateway/tests/test_router.py:230-379（新增段无 webhook 用例）；绑定声称见 .sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md:110"
++    },
++    {
++      "severity": "P3",
++      "title": "FR-01 测试绑定路径失实：绑定为 runtimes/__tests__/page.test.tsx，实际用例全部在 copy-daemon-command.test.tsx",
++      "evidence": "page.test.tsx（预存 18 用例）grep 零命中 clipboard/api-key/复制/resolveDaemonApiKey；4 个新用例（剪贴板内嵌完整明文、渲染面打码、自动创建回显、非 admin 回退）确在 copy-daemon-command.test.tsx 且确实断言绑定声称的行为——覆盖存在，绑定路径错。",
++      "location": ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md:104；实际 frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx"
++    },
++    {
++      "severity": "P3",
++      "title": "design 并发作答与实现不符：声称「DELETE 带 revoked_at IS NOT NULL 条件」，实际是 check-then-delete，DELETE 语句无该条件",
++      "evidence": "hard_delete 先 select 读行校验 revoked_at，随后 delete().where(id==, user_id==)（api_key_service.py；mcp service.py 同构）——TOCTOU 而非带条件删除。当前不变量成立仅因不存在「取消吊销」路径：若未来加入 un-revoke，读校验与删除之间的窗口可物理删除一把重新激活的凭证。防护现状有效但设计自述的机制不实。",
++      "location": "backend/app/modules/auth/api_key_service.py:265-292 (hard_delete)；backend/app/modules/mcp_gateway/service.py hard_delete 同构"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-11T16:45:00+08:00"
++}

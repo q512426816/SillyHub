@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-apikey-mcp-copy-delete",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "c84c4b773d3266354b3ee0c4e96e97b161d8e228",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "FR-02「已吊销/过期行禁止显示复制按钮」的过期半边未兑现：过期未吊销行仍渲染启用的复制按钮，点击必然 404 报错横幅",
+      "evidence": "复制按钮仅由 !k.revoked_at 门控、disabled 仅看 plaintext_recoverable，不看 expires_at；而过期未吊销行 revoked_at=null 且创建于本变更后 plaintext_recoverable=true，按钮显示且可点；后端 get_plaintext 对 expires_at<=now 的行抛 ApiKeyNotFound(404)，点击后用户看到「复制密钥失败: API 密钥不存在或已被吊销」——既是 FR-02 明文承诺的直接违反，也违背 FR-05「降级提示而非报错」的精神（对过期态）。测试矩阵只覆盖 active/revoked 两态，未覆盖 expired 态。",
+      "location": "frontend/src/app/(dashboard)/settings/api-keys/page.tsx:237-249 (+ backend/app/modules/auth/api_key_service.py get_plaintext 过期→404 分支)"
+    },
+    {
+      "severity": "P2",
+      "title": "FR-04 测试绑定声称 mcp test_router.py 覆盖「webhook 级联删除」，该用例不存在",
+      "evidence": "grep 全文证实 backend/app/modules/mcp_gateway/tests/test_router.py 零次提及 webhook/McpWebhookORM；新增 7 个用例只创建 token 行，无一插入 mcp_webhooks 行断言 hard delete 后级联消失。实现面 FK ondelete=CASCADE 真实存在（model.py:144），行为大概率正确，但绑定量声称的测试证据不存在（绑定规则：声称的测试必须真存在且断言该行为）。",
+      "location": "backend/app/modules/mcp_gateway/tests/test_router.py:230-379（新增段无 webhook 用例）；绑定声称见 .sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md:110"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 测试绑定路径失实：绑定为 runtimes/__tests__/page.test.tsx，实际用例全部在 copy-daemon-command.test.tsx",
+      "evidence": "page.test.tsx（预存 18 用例）grep 零命中 clipboard/api-key/复制/resolveDaemonApiKey；4 个新用例（剪贴板内嵌完整明文、渲染面打码、自动创建回显、非 admin 回退）确在 copy-daemon-command.test.tsx 且确实断言绑定声称的行为——覆盖存在，绑定路径错。",
+      "location": ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md:104；实际 frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx"
+    },
+    {
+      "severity": "P3",
+      "title": "design 并发作答与实现不符：声称「DELETE 带 revoked_at IS NOT NULL 条件」，实际是 check-then-delete，DELETE 语句无该条件",
+      "evidence": "hard_delete 先 select 读行校验 revoked_at，随后 delete().where(id==, user_id==)（api_key_service.py；mcp service.py 同构）——TOCTOU 而非带条件删除。当前不变量成立仅因不存在「取消吊销」路径：若未来加入 un-revoke，读校验与删除之间的窗口可物理删除一把重新激活的凭证。防护现状有效但设计自述的机制不实。",
+      "location": "backend/app/modules/auth/api_key_service.py:265-292 (hard_delete)；backend/app/modules/mcp_gateway/service.py hard_delete 同构"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T16:45:00+08:00"
+}

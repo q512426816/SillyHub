@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-apikey-mcp-copy-delete",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/auth/test_api_key_service.py「create 同时落 bcrypt hash 与加密明文」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/lib/__tests__/api-keys.test.ts「resolveDaemonApiKey：有活跃 key 返回明文 / 无活跃 key 自动创建永不过期 key」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx「复制命令写入剪贴板的命令内嵌真实密钥、渲染面保持打码」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/auth/test_api_key_router.py「GET /api/auth/api-keys/{id}/plaintext 活跃 key 返回明文、已吊销 404」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「活跃可恢复行显示复制密钥并写入剪贴板」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/mcp_gateway/tests/test_router.py「GET plaintext 端点活跃 token 返回明文、已吊销/越权 404」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx「活跃可恢复行显示复制令牌并写入剪贴板」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-04",
+      "tests": [
+        "backend/tests/modules/auth/test_api_key_router.py「DELETE ?hard=true 已吊销 204 且行消失、活跃 409、无参保持吊销语义」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/mcp_gateway/tests/test_router.py「DELETE ?hard=true 已吊销 204、活跃 409、webhook 级联删除」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「已吊销行显示删除按钮，confirm 后调用硬删除」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-05",
+      "tests": [
+        "backend/tests/modules/auth/test_api_key_router.py「存量 hash-only 记录 plaintext 端点 409、列表 plaintext_recoverable=false」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-11-apikey-mcp-copy-delete:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「不可恢复行复制按钮禁用带 tooltip」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-apikey-mcp-copy-delete"
+    }
+  ]
+}

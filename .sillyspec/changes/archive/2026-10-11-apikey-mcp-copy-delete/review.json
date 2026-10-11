@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-apikey-mcp-copy-delete",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fffc17f482902ef9655bf2f848d94807658e7f90",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T15:59:36+08:00",
+  "fixVerification": {
+    "P1-expired-copy-button": {
+      "fixed": true,
+      "evidence": "page.tsx:215 行内计算 const expired = !!k.expires_at && new Date(k.expires_at) <= new Date()；复制按钮条件 {!k.revoked_at && !expired && (...)}，吊销按钮独立条件 {!k.revoked_at && (...)}（过期行仍可吊销）；回归用例「过期未吊销行不渲染复制按钮」page.test.tsx:194 断言复制按钮仅 1（active 行）、吊销按钮 2（含过期行）、fetchApiKeyPlaintext 零调用"
+    },
+    "P2-webhook-cascade-test-missing": {
+      "fixed": true,
+      "evidence": "test_hard_delete_cleans_up_bound_webhooks 存在于 test_router.py:383（插 McpWebhookORM 子行→revoke→hard delete→断言 token 行 None 且 webhooks_left==[]）；实现面 mcp service.py:359 显式 delete(McpWebhookORM).where(token_id==)，同事务，不依赖 FK CASCADE"
+    },
+    "P3-binding-path": {
+      "fixed": true,
+      "evidence": "requirements.md:104 FR-01 第三条绑定已改指 frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx，与实际用例文件一致（CopyDaemonCommand 已 export，page.tsx:104）"
+    },
+    "P3-concurrency-claim-mismatch": {
+      "fixed": true,
+      "evidence": "两侧 hard_delete 的 DELETE 语句均补 revoked_at IS NOT NULL：api_key_service.py:290、mcp_gateway/service.py:366（.where(col(X.revoked_at).is_not(None))）；design 并发作答「DELETE 带 revoked_at IS NOT NULL 条件（先读行校验再删）」现与实现一致"
+    }
+  },
+  "boundaryRulings": {
+    "可逆存储安全降级": "可接受——用户明确要求列表可复制；密文落库+KEK 环境变量与 DB 分离，与 mcp_webhooks.secret 既有风险面持平，风险已在 design「风险与死路」显式披露",
+    "存量不可恢复409": "可接受——明文从未存储故物理上不可恢复；409 中文引导新建（auth+mcp 两侧均有 legacy 行用例），前端禁用+tooltip 降级，无 500",
+    "hard仅已吊销放行": "可接受——两步（先吊销后删除）防误删活跃凭证；无 hard 参数走原 revoke 路径逐字不变（router if hard 分支隔离），测试断言活跃行 revoked_at 不受影响",
+    "master key缺失创建降级": "可接受——可用性优先，加密列置 NULL、明文仍一次性返回，test_create_degrades_gracefully_without_master_key 覆盖该分支，杜绝 503 回归",
+    "KEK轮换旧密文409": "可接受——CipherKeyMismatch→409 引导重签不 500；mcp 侧全部解密异常统一 409，语义一致",
+    "明文端点毫秒级吊销竞态窗口": "可接受——仅管理员取自己凭据、窗口毫秒级，且 revoke 精确清缓存 + hard_delete 后防御性再清正缓存兜底",
+    "requirements FR-05 括注「加密列非空且未吊销」": "可接受（细化非失实）——实现为「加密列非空」，design §接口契约5 与 schema 注释明确吊销/过期由 revoked_at/expires_at 自表达、前端组合判断；吊销/过期行根本不渲染复制按钮，两种定义无行为差异"
+  },
+  "protectionClaims": {
+    "鉴权路径零改动": "已核实——create 仍写 bcrypt key_hash（hash_refresh_token），authenticate 段零 diff；mcp token_hash 鉴权未动",
+    "明文不入日志": "已核实——hard_deleted 日志仅记 id/user/workspace；加密失败 WARNING 仅含异常 message（不含明文）；无任何 plaintext 落日志路径",
+    "权限门": "已核实——两个 plaintext 端点分别挂 ApiKeyAdminUser(API_KEY_ADMIN) / WorkspaceWriter(WORKSPACE_WRITE)；hard delete 复用既有 DELETE 路由同门；跨用户/跨 workspace 404 用例齐",
+    "生成物同步": "已核实——openapi.json(8处) 与 api-types.ts(5处) 均含 plaintext_recoverable、两个 PlaintextResponse DTO、hard query 参数与两个新端点"
+  },
+  "workspaceNote": "git status 非 clean 的 13 项均为 .sillyspec/docs 簿记（change.patch 本体、superseded 评审件、docs 目录挪移、flow-state），评审涉及的 backend/frontend 源码与测试全部等于 HEAD fffc17f 状态"
+}

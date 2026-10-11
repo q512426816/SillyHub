@@ -1,0 +1,382 @@
+{
+  "change": "2026-10-11-apikey-mcp-copy-delete",
+  "baseline": "a62c8e24d52fa2d33f6231cd90caabd09c6af1ad",
+  "head": "fffc17f482902ef9655bf2f848d94807658e7f90",
+  "files": [
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/design.md",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/proposal.md",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/requirements.md",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/tasks.md",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/verify-note.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml",
+    ".sillyspec/docs/sillyhub-daemon/modules/cli.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/codex-settings.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+    ".sillyspec/docs/sillyhub-daemon/modules/pi-settings.md",
+    "backend/app/modules/auth/api_key_schema.py",
+    "backend/app/modules/auth/api_key_service.py",
+    "backend/app/modules/auth/model.py",
+    "backend/app/modules/auth/router.py",
+    "backend/app/modules/mcp_gateway/model.py",
+    "backend/app/modules/mcp_gateway/router.py",
+    "backend/app/modules/mcp_gateway/service.py",
+    "backend/app/modules/mcp_gateway/tests/test_router.py",
+    "backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py",
+    "backend/openapi.json",
+    "backend/tests/modules/auth/test_api_key_router.py",
+    "backend/tests/modules/auth/test_api_key_service.py",
+    "frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx",
+    "frontend/src/app/(dashboard)/runtimes/page.tsx",
+    "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/settings/api-keys/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx",
+    "frontend/src/components/api-key-create-dialog.tsx",
+    "frontend/src/lib/__tests__/api-keys.test.ts",
+    "frontend/src/lib/api-keys.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/mcp-tokens.ts",
+    ".sillyspec/changes/2026-10-11-apikey-mcp-copy-delete/review.json.superseded-20261011T075638"
+  ],
+  "totals": {
+    "files": 35,
+    "additions": 2750,
+    "deletions": 128
+  },
+  "savedAt": "2026-10-11T07:56:48.651Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "auth",
+      "files": 4,
+      "doc": "docs/backend/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "mcp_gateway",
+      "files": 4,
+      "doc": "docs/backend/modules/mcp_gateway.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "migrations",
+      "files": 1,
+      "doc": "docs/backend/modules/migrations.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 12,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 11,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "auth",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/auth.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "mcp_gateway",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/mcp_gateway.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 9,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a62c8e24d52fa2d33f6231cd90caabd09c6af1ad",
+    "totals": {
+      "files": 29,
+      "additions": 2375,
+      "deletions": 128
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml",
+        "additions": 18,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/cli.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/codex-settings.md",
+        "additions": 17,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/interactive.md",
+        "additions": 12,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/pi-settings.md",
+        "additions": 18,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/auth/api_key_schema.py",
+        "additions": 15,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/api_key_service.py",
+        "additions": 127,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/model.py",
+        "additions": 22,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/router.py",
+        "additions": 44,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/mcp_gateway/model.py",
+        "additions": 21,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/mcp_gateway/router.py",
+        "additions": 51,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/mcp_gateway/service.py",
+        "additions": 126,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/mcp_gateway/tests/test_router.py",
+        "additions": 208,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/migrations/versions/20261011160000_add_credential_plaintext_columns.py",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 175,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_api_key_router.py",
+        "additions": 124,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_api_key_service.py",
+        "additions": 130,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx",
+        "additions": 159,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+        "additions": 71,
+        "deletions": 18,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+        "additions": 213,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/settings/api-keys/page.tsx",
+        "additions": 97,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/__tests__/page.test.tsx",
+        "additions": 117,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx",
+        "additions": 92,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/api-key-create-dialog.tsx",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/api-keys.test.ts",
+        "additions": 208,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-keys.ts",
+        "additions": 80,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 159,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/mcp-tokens.ts",
+        "additions": 33,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_api_key_service.py 等 3 件",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a722bd3e82ee113cc28a5fea1c716aab191f03b94f8b222ffc8c761cc0dd48f2",
+  "patchStatus": "ok"
+}
