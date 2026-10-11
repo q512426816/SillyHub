@@ -45,7 +45,6 @@ export type TopologyNode = Schemas["TopologyNode"];
 
 export type TopologyEdge = Schemas["TopologyEdge"];
 
-export type TopologyResponse = Schemas["TopologyResponse"];
 
 // task-11：对齐 OpenAPI 生成类型。
 export type ScanGenerateResponse = Schemas["ScanGenerateResponse"];
@@ -271,16 +270,3 @@ export type ComponentListResponse = {
   total: number;
 };
 
-export async function getWorkspaceComponents(
-  workspaceId: string,
-): Promise<ComponentListResponse> {
-  return apiFetch<ComponentListResponse>(
-    `/api/workspaces/${workspaceId}/components`,
-  );
-}
-
-// ── Global Topology ──
-
-export async function getTopology(): Promise<TopologyResponse> {
-  return apiFetch<TopologyResponse>("/api/workspaces/topology");
-}

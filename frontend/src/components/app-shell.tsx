@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   BarChart3,
   Bot,
-  Boxes,
   CalendarDays,
   ClipboardList,
   Circle,
@@ -33,7 +32,6 @@ import {
   LogOut,
   MessageSquare,
   type LucideIcon,
-  Network,
   Package,
   PlugZap,
   Puzzle,
@@ -74,8 +72,6 @@ import { useWorkspaceContext } from "@/lib/use-workspace-context";
  */
 const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // overview / management（相对 href，workspace 前缀）
-  components: Boxes,
-  "components/topology": Network,
   changes: GitBranch,
   "scan-docs": FileText,
   runtime: Activity,
