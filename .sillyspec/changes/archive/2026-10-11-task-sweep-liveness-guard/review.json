@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "460c2474d9377ddeef2971b481f8a56cd0700b5a",
+  "reviewedAt": "2026-10-11T11:47:58+08:00",
+  "findings": [
+    {
+      "id": "P3-1",
+      "severity": "P3",
+      "title": "宽限窗边界用 <= 而非严格「超过」：updated_at 恰为清扫时刻前 5 分钟整的行会被收口",
+      "detail": "FR-01 措辞为「updated_at 距清扫时刻超过 TASK_SWEEP_GRACE（5 分钟）」，语义上是严格大于；实现（agent_task_store.py:87 与 :123）为 AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE，即恰满 5 分钟整的行也被收（含等号）。差异仅存在于精确边界的一个瞬间，实际心跳时间戳命中概率趋零，且即便误收也有 FR-02 复活分支兜底。属措辞级边界偏差，非行为缺陷。",
+      "location": "backend/app/modules/daemon/agent_task_store.py:87,123"
+    },
+    {
+      "id": "P3-2",
+      "severity": "P3",
+      "title": "FR-03「恒排延迟复扫」的 close 接线行无测试锁定",
+      "detail": "测试绑定 test_delayed_resweep_catches_now_silent 通过两次直接调用 finalize_running_tasks_for_run（now=+1min / +10min）锁定了复扫语义（宽限内不收、窗后收口），但 close_interactive_run 中的恒排接线（close_run_steps.py:179 svc._fire_background_task(_delayed_task_resweep(agent_run.id), run_id=...)）与 _delayed_task_resweep 本体（sleep 时长、独立 session、异常仅日志）均无测试覆盖。tasks.md task-03 已自述「sleep 包装为薄管道不单测」。接线行为经手工核对兑现（恒排：无条件调用，与 swept_tasks 数量无关）；实测 close 回归 16 passed 证明接线不破坏既有链路。属测试覆盖缺口，非实现缺陷。",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:179"
+    },
+    {
+      "id": "P3-3",
+      "severity": "P3",
+      "title": "复活识别标记存在理论碰撞面，design 未声明",
+      "detail": "复活分支以 message 文本等于 RUN_CLOSE_SWEEP_REASON（「轮次已结束，任务未上报终态」）为识别标记。若某事件驱动的真实 stopped 事件恰好携带相同 message 文本，该行将被误判为清扫行而在迟到 running 心跳时复活。实际概率趋零（事件驱动停止通常携带「用户停止」等异质文案，且需与清扫文案逐字节相同），且 completed/failed 终态行即使 message 撞文本也不复活（代码仅对 status==\"stopped\" 且标记命中放行）。属未声明的理论残留，风险可忽略。",
+      "location": "backend/app/modules/daemon/agent_task_store.py:210-218"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklistResults": {
+    "frImplementationTestAlignment": {
+      "FR-01": "兑现且锁定。finalize/sweep 双函数均加 is_async.is_(False) + updated_at <= sweep_at - TASK_SWEEP_GRACE（agent_task_store.py:86-87,122-123）；test_finalize_sweeps_only_stale_sync（窗内新鲜/异步/终态三豁免+窗外收口）与 test_sweep_orphans_stale_terminal_run_only（启动兜底同款）双覆盖。唯一残留为 P3-1 边界措辞。",
+      "FR-02": "兑现且锁定。清扫行写 RUN_CLOSE_SWEEP_REASON 标记；upsert 复活分支对 stopped+标记行放行 running（finished_at=None、message=None 清除后 latest-wins 累积，progress=42 断言钉死）；test_sweep_stopped_row_revives_on_running_heartbeat 与 test_genuine_stopped_absorbs_running_heartbeat 分别钉死复活与吸收两面。真实终态事件（completed/failed）到达清扫行时代码路径手核正确：走 else 分支清标记后语义③覆盖、finished_at 重置为事件 now，与 design 盲维1声明一致（此子分支无专测，风险低）。",
+      "FR-03": "兑现，测试部分锁定。close_interactive_run 在 finalize 后无条件恒排 _delayed_task_resweep（宽限+60s 后独立 session 重跑 finalize，幂等、异常仅日志）；复扫语义由 test_delayed_resweep_catches_now_silent 锁定，恒排接线无测试（P3-2）。",
+      "FR-04": "实测通过。本评审实跑 test_agent_session_tasks.py 23/23 passed（8.77s）+ 两个 close 回归文件 16 passed（3.93s），与 tasks.md 自述一致（其「close 回归 12/12」计数口径与当前两文件 16 例有出入，实质全绿成立）。ruff/mypy 未由本评审复跑。"
+    },
+    "blindSpotFourQuestions": {
+      "乱序": "声明成立。复活仅认 running+标记；迟到 running 对真实终态行吸收（测试钉死）；真实终态事件对清扫行照常 latest-wins 覆盖（手核代码路径正确）。",
+      "并发": "声明成立。upsert 持行 FOR UPDATE（上一变更 P3-1 修复在位，agent_task_store.py:175-184）与清扫 UPDATE 单行锁串行化：清扫先落→upsert 读 stopped+标记复活；upsert 先落 running→清扫 UPDATE 条件按已提交 updated_at 重判窗 no-op。复扫与立即清扫/启动兜底并发为同款条件幂等 UPDATE，收敛 stopped。四种交错手推均收敛，无死锁窗口（单行单锁）。",
+      "切换": "声明成立。复扫独立 session_factory（H1 模式）；异常经 fire_background_task 的 add_done_callback → on_background_task_done 记 background_task_failed 日志（daemon/_background_tasks.py:79-84 已核实），不触碰已 commit 终态；进程重启丢复扫任务由启动兜底清扫补位（run 已终态必落入 TERMINAL_TURN_STATUSES 扫描口径）。",
+      "作用域": "声明成立。复扫 finalize 按 run_id 限定；sweep 全局扫描但条件含 run 终态+宽限；多实例并发复扫为条件原子 UPDATE，幂等收敛。"
+    },
+    "disclosedTradeoffRulings": [
+      {
+        "tradeoff": "宽限窗 5 分钟启发式——长静默活任务（超 5 分钟无心跳）仍被误收，由复活分支兜底，最坏窗口=下一心跳间隔",
+        "ruling": "可接受",
+        "reason": "误收是 UI 状态级错误（stopped 显示）而非数据损坏，下一心跳即自愈；长纯计算任务心跳稀疏的残留已在 design「风险与死路」如实声明。声明边界兑现。"
+      },
+      {
+        "tradeoff": "放弃「按 is_async 排除」方案",
+        "ruling": "可接受",
+        "reason": "线上 is_async 恒 false（实证 0 条异步行）排除无效；且实现并未丢弃该条件——保留 is_async=false 过滤作双保险，未来 daemon 打标后自动生效。裁决有据。"
+      },
+      {
+        "tradeoff": "放弃「run 收口不清扫、只靠启动兜底」方案",
+        "ruling": "可接受",
+        "reason": "会退回原始 bug（不重启永卡 running），放弃理由成立，与本变更目标直接冲突。"
+      },
+      {
+        "tradeoff": "修正前一变更（run-close-task-sweep）「run 终态后任务不可能仍合法运行」裁决",
+        "ruling": "可接受",
+        "reason": "design「风险与死路」末条明确声明该表述作废、收口面由本变更收窄，前后变更关系交代完整。"
+      },
+      {
+        "tradeoff": "未声明边界：标记碰撞面（P3-3）与宽限 <= 边界措辞（P3-1）",
+        "ruling": "可接受但应知晓",
+        "reason": "两处均未在 design 披露，实际风险趋零，列为 P3 备案而非阻塞。"
+      }
+    ],
+    "protectionClaimsVerification": {
+      "reviveOnlyForSweptRows": "核实通过。放行条件为 row.status=='stopped' 且 row.message==RUN_CLOSE_SWEEP_REASON 的精确双条件（agent_task_store.py:210-218）：事件驱动 stopped（message 非标记文本）与 completed/failed 终态行（即使 message 撞文本）均维持吸收不复活。",
+      "resweepIsolatedSessionAndFailureSafety": "核实通过。_delayed_task_resweep 经 get_session_factory() 开独立 session（app/core/db.py:88 返回 async_sessionmaker，async with 用法正确）；finalize 抛错时 coroutine 异常由 on_background_task_done 记日志（background_task_failed + exc_info），不影响已 commit 的 run 终态。",
+      "importsAndFireUsage": "核实通过。asyncio/get_session_factory/finalize/TASK_SWEEP_GRACE 均为函数内局部 import（防顶层依赖/循环导入，模块顶确无 asyncio）；svc._fire_background_task(coro, run_id=...) 与 daemon/_background_tasks.py:100-108 签名（coro, *, workspace_id, run_id）匹配，且与同文件既有调用（:593 gate 任务）用法一致；TASK_SWEEP_GRACE 为模块级常量 import 正确。"
+    },
+    "artifactSync": "无涉及。HTTP API/表结构零改动，前端 api-types.ts/openapi.json 无需同步（已确认变更面仅 2 个后端源文件 + 1 个测试文件）。"
+  },
+  "verificationEvidence": {
+    "headSha": "460c2474d9377ddeef2971b481f8a56cd0700b5a（git rev-parse 确认）",
+    "workspaceVsHead": "三个交付源文件（agent_task_store.py / close_run_steps.py / test_agent_session_tasks.py）均不在 git status 修改列表，工作区实态与 HEAD 一致，且逐字节核对与 change.patch 冻结件一致",
+    "testsRun": [
+      "app/modules/daemon/tests/test_agent_session_tasks.py → 23 passed, 8.77s",
+      "app/modules/daemon/tests/test_close_interactive_run_model_error.py + test_close_interactive_run_session_status.py → 16 passed, 3.93s"
+    ],
+    "staticChecks": "ruff/mypy 未由本评审复跑（tasks.md 自述零错，未采信为承诺兑现依据，因属 P3 级且测试全绿佐证代码健康）"
+  }
+}

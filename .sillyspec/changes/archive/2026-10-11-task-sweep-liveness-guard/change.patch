@@ -1,0 +1,607 @@
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/flow-state.yaml b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/flow-state.yaml
+new file mode 100644
+index 000000000..9e4265b09
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/flow-state.yaml
+@@ -0,0 +1,26 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  上一变更 2026-10-10-run-close-task-sweep 的设计缺陷修正（用户指正）：run 终态≠任务必死——后台子代理任务本来就跨轮次存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知]
++  唤醒新轮继续回复），且线上表 is_async 恒为 false（daemon 上报未打标），按 is_async 排除保护不了它们；run 关闭即清扫会把真实在跑的后台任务错标「已停止」（迟到 running
++  心跳又被终态吸收冻结在错误状态）。服务器实测清扫已上线且一次扫了 112 条（当时恰好零异步任务、零误伤，但语义缺口真实存在）。
++
++  成功标准：
++
++  - 清扫（run 收口 + 启动兜底）只收「最近无心跳」的任务：updated_at 距清扫时刻超过宽限窗（5 分钟）且 is_async=false 才收口；活跃心跳中的任务（含跨轮次后台任务）不被误收
++
++  - 被清扫行保留可识别标记（message=清扫原因），后续到达的 running 心跳在「清扫收口行」上复活（status 回 running、finished_at 清空），真实在跑的任务下一个心跳即自愈；真实终态行（事件驱动的
++  stopped/completed/failed）维持终态吸收不复活
++
++  - run 收口时对「宽限窗内活跃」的任务安排延迟复扫（宽限+缓冲后重扫该 run），不靠后端重启兜底孤儿
++
++  - 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿
++autopilot: true
++baseline_commit: f0d24f51dd296c86dc2093343e1084d935db5515
++updatedAt: '2026-10-11T03:36:49.967Z'
++baseline_sha256: 1e2602e8117263a1db8a65c73a7838a3d990cc46b7f796c940063608a284c989
++
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index 1e8bc399a..62ae8be27 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -25,7 +25,7 @@ insert-or-update 单行写入（R-03 控写放大，刻意不做事件流水表
+ from __future__ import annotations
+ 
+ import uuid
+-from datetime import UTC, datetime
++from datetime import UTC, datetime, timedelta
+ 
+ from sqlalchemy import select, update
+ from sqlalchemy.ext.asyncio import AsyncSession
+@@ -39,7 +39,18 @@ from app.modules.daemon.schema import AgentTaskStatusEvent
+ _TERMINAL_STATUSES: frozenset[str] = frozenset({"completed", "failed", "stopped"})
+ 
+ # 2026-10-10-run-close-task-sweep：轮终态清扫的可读原因（任务列表 message 列）。
+-_RUN_CLOSED_REASON = "轮次已结束，任务未上报终态"
++# 2026-10-11-task-sweep-liveness-guard：该 message 兼作「清扫收口行」识别标记
++# ——upsert 对携带本标记的 stopped 行放行 running 心跳复活（自愈误收的活跃
++# 任务），事件驱动的真实终态行（message 非本标记）维持终态吸收。
++RUN_CLOSE_SWEEP_REASON = "轮次已结束，任务未上报终态"
++
++# 2026-10-11-task-sweep-liveness-guard：清扫心跳宽限窗——后台子代理任务跨轮次
++# 存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮
++# 继续回复，用户指正），且线上 is_async 恒 false（daemon 上报未打标），按标记
++# 排除保护不了它们。以「最近无心跳」为死判：updated_at 距清扫时刻超过本窗才
++# 收口；宽限内活跃（含跨轮次后台任务）不误收，真死的任务由延迟复扫/启动兜底
++# 在窗后收敛。
++TASK_SWEEP_GRACE = timedelta(minutes=5)
+ 
+ 
+ async def finalize_running_tasks_for_run(
+@@ -52,30 +63,40 @@ async def finalize_running_tasks_for_run(
+ 
+     线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理被放弃/未上报终态
+     时 agent_session_task 永卡 running（17 条），任务列表在会话结束后仍显示
+-    「进行中」。run 终态后其任务不可能仍合法运行——调用方（close_interactive_run
+-    同事务 / 启动兜底清扫）以本函数收口。已终态行不触碰（终态定格语义①③不破坏）；
+-    upsert 语义②天然幂等（清扫后迟到的 running 心跳不复活）。
++    「进行中」。调用方（close_interactive_run 同事务 / 启动兜底清扫 / 延迟复扫）
++    以本函数收口。
++
++    2026-10-11-task-sweep-liveness-guard 收窄（用户指正 run 终态≠任务必死）：
++    只收「最近无心跳」（updated_at 距 now 超过 TASK_SWEEP_GRACE）且非异步标记
++    （is_async，双保险——线上恒 false 但语义上后台任务应打标）的行；宽限窗内
++    活跃的任务（跨轮次后台任务）不误收——真死任务由调用方的延迟复扫在窗后
++    收敛。已终态行不触碰（终态定格语义①③不破坏）；清扫行带
++    RUN_CLOSE_SWEEP_REASON 标记，误收的活跃任务下一个 running 心跳经 upsert
++    复活分支自愈（真实终态行维持终态吸收不复活）。
+ 
+     Returns:
+         实际收口的行数。
+     """
++    sweep_at = now or datetime.now(UTC)
+     result = await session.execute(
+         update(AgentSessionTask)
+         .where(
+             AgentSessionTask.run_id == run_id,
+             AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
++            AgentSessionTask.is_async.is_(False),
++            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
+         )
+         .values(
+             status="stopped",
+-            finished_at=now or datetime.now(UTC),
+-            updated_at=now or datetime.now(UTC),
+-            message=_RUN_CLOSED_REASON,
++            finished_at=sweep_at,
++            updated_at=sweep_at,
++            message=RUN_CLOSE_SWEEP_REASON,
+         )
+     )
+     return int(result.rowcount or 0)
+ 
+ 
+-async def sweep_orphan_running_tasks(session: AsyncSession) -> int:
++async def sweep_orphan_running_tasks(session: AsyncSession, *, now: datetime | None = None) -> int:
+     """2026-10-10-run-close-task-sweep：启动兜底清扫——run 已终态但任务仍 running 的行。
+ 
+     自愈两类存量：①历史收口无清扫（close_interactive_run 接清扫前的旧数据）；
+@@ -83,25 +104,32 @@ async def sweep_orphan_running_tasks(session: AsyncSession) -> int:
+     daemon 收口、无 task 事件。仅扫 run 已终态（TERMINAL_TURN_STATUSES）的行——
+     running run 的任务是活跃心跳，不误伤。
+ 
++    2026-10-11-task-sweep-liveness-guard：同 finalize 的心跳宽限与 is_async
++    豁免（跨轮次后台任务可跨后端重启存活，updated_at 新鲜的不误收；真死任务
++    下次重启收敛）。
++
+     Returns:
+         实际收口的行数。
+     """
+     # late import 防 agent ↔ daemon 循环依赖（对齐本模块 upsert 的调用方惯例）。
+     from app.modules.daemon.session.service import TERMINAL_TURN_STATUSES
+ 
++    sweep_at = now or datetime.now(UTC)
+     result = await session.execute(
+         update(AgentSessionTask)
+         .where(
+             AgentSessionTask.status.notin_(_TERMINAL_STATUSES),
++            AgentSessionTask.is_async.is_(False),
++            AgentSessionTask.updated_at <= sweep_at - TASK_SWEEP_GRACE,
+             AgentSessionTask.run_id.in_(
+                 select(AgentRun.id).where(AgentRun.status.in_(TERMINAL_TURN_STATUSES))
+             ),
+         )
+         .values(
+             status="stopped",
+-            finished_at=datetime.now(UTC),
+-            updated_at=datetime.now(UTC),
+-            message=_RUN_CLOSED_REASON,
++            finished_at=sweep_at,
++            updated_at=sweep_at,
++            message=RUN_CLOSE_SWEEP_REASON,
+         )
+     )
+     swept = int(result.rowcount or 0)
+@@ -174,8 +202,20 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent)
+     else:
+         # 语义②：终态吸收态——行已定格再收 running 整行跳过（不 commit、不刷新
+         # 任何字段含 updated_at），迟到 running 心跳不复活任务。
+-        if row.status in _TERMINAL_STATUSES and event.status == "running":
++        # 2026-10-11-task-sweep-liveness-guard 复活例外：行是**清扫收口**的
++        # stopped（message=RUN_CLOSE_SWEEP_REASON 识别标记）且本事件是 running
++        # 心跳 → 该任务实为跨轮次存活的后台任务被宽限误判收口，放行复活
++        # （status 回 running、finished_at 清空、清扫标记清除），后续字段照常
++        # latest-wins 累积。事件驱动的真实终态行（message 非本标记）维持吸收。
++        if (
++            row.status in _TERMINAL_STATUSES
++            and event.status == "running"
++            and not (row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON)
++        ):
+             return row
++        if row.status == "stopped" and row.message == RUN_CLOSE_SWEEP_REASON:
++            row.finished_at = None
++            row.message = None
+         # 必填字段（run_id / task_name / status）latest-wins 逐次覆盖（与前端
+         # taskName 逐次覆盖同构）；语义④ Optional 字段只在事件非 None 时覆盖。
+         row.run_id = event.run_id
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 809f73ee4..e7df078aa 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -41,6 +41,34 @@ from app.modules.git_gateway.service import redact_output
+ from .group_bridge import _close_group_hooks
+ 
+ 
++async def _delayed_task_resweep(run_id: uuid.UUID) -> None:
++    """2026-10-11-task-sweep-liveness-guard：run 收口后的延迟任务复扫。
++
++    收口时点处于心跳宽限窗内（或带异步标记）而未被立即收口的任务行，若此后
++    再无心跳，宽限窗 + 60s 缓冲后由本复扫收口——孤儿收敛不依赖后端重启。
++    独立 DB session（H1）；复扫幂等（finalize 条件同款，已终态/仍新鲜行 no-op）。
++    """
++    import asyncio
++
++    from app.core.db import get_session_factory
++    from app.modules.daemon.agent_task_store import (
++        TASK_SWEEP_GRACE,
++        finalize_running_tasks_for_run,
++    )
++
++    await asyncio.sleep(TASK_SWEEP_GRACE.total_seconds() + 60)
++    session_factory = get_session_factory()
++    async with session_factory() as db:
++        swept = await finalize_running_tasks_for_run(db, run_id=run_id)
++        await db.commit()
++    if swept:
++        _rsvc.log.info(
++            "run_close_task_resweep",
++            agent_run_id=str(run_id),
++            swept_tasks=swept,
++        )
++
++
+ async def close_interactive_run(
+     svc,
+     *,
+@@ -130,7 +158,12 @@ async def close_interactive_run(
+     # 被放弃/未上报终态时 agent_session_task 永卡 running（会话 47e2ff1a run
+     # 5e485ba2 实证 17 条），任务列表在会话结束后仍显示「进行中」。已终态行
+     # 不触碰；清扫后迟到 running 心跳被 upsert 终态吸收挡下（语义②）。
+-    from app.modules.daemon.agent_task_store import finalize_running_tasks_for_run
++    # 2026-10-11-task-sweep-liveness-guard：finalize 只收「宽限窗外无心跳」行
++    # （跨轮次后台任务不误收）；窗内活跃任务由下方延迟复扫在窗后收敛，不靠
++    # 后端重启兜底。
++    from app.modules.daemon.agent_task_store import (
++        finalize_running_tasks_for_run,
++    )
+ 
+     swept_tasks = await finalize_running_tasks_for_run(svc._session, run_id=agent_run.id, now=now)
+     if swept_tasks:
+@@ -139,6 +172,11 @@ async def close_interactive_run(
+             agent_run_id=str(agent_run.id),
+             swept_tasks=swept_tasks,
+         )
++    # 延迟复扫（恒排——本次「宽限窗内活跃/异步标记」未扫的行，若此后再无心跳，
++    # 宽限+缓冲后由本复扫收口，不靠后端重启兜底；无非终态行时 UPDATE no-op
++    # 代价可忽略）：独立 DB session，对齐 dispatch_next_queued_message 的 H1
++    # 模式；异常交 _fire_background_task done_callback 记日志，不影响已提交终态。
++    svc._fire_background_task(_delayed_task_resweep(agent_run.id), run_id=agent_run.id)
+     await svc._session.commit()
+     await svc._session.refresh(agent_run)
+     await _close_post_commit(
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index 16e810479..7c2d40275 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -869,20 +869,27 @@ class TestSessionDeleteCascade:
+         assert count_after == 0
+ 
+ 
+-# ── 2026-10-10-run-close-task-sweep：run 终态任务清扫 ────────────────────────
++# ── 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-liveness-guard ───
+ 
+ 
+ class TestRunCloseTaskSweep:
+-    """finalize_running_tasks_for_run / sweep_orphan_running_tasks 行为钉死。
++    """run 终态任务清扫（心跳宽限 + is_async 豁免 + 清扫行复活）行为钉死。
+ 
+     线上实证（会话 47e2ff1a，run 5e485ba2 completed）：子代理未上报终态时
+-    agent_session_task 永卡 running，任务列表在会话结束后仍显示「进行中」。
++    agent_session_task 永卡 running。2026-10-11 修正（用户指正 run 终态≠任务
++    必死——后台任务跨轮次存活）：清扫只收「宽限窗外无心跳」的同步行；清扫行
++    带标记，迟到 running 心跳复活自愈；真实终态行维持终态吸收。
+     """
+ 
++    @staticmethod
++    def _future(minutes: float) -> datetime:
++        return datetime.now(UTC) + timedelta(minutes=minutes)
++
+     @pytest.mark.asyncio
+-    async def test_finalize_sweeps_running_to_stopped_terminal_untouched(
++    async def test_finalize_sweeps_only_stale_sync(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
++        """宽限窗外同步行收口；窗内新鲜行（活跃心跳）与异步标记行豁免。"""
+         from app.modules.daemon.agent_task_store import (
+             finalize_running_tasks_for_run,
+             upsert_agent_task,
+@@ -891,26 +898,41 @@ class TestRunCloseTaskSweep:
+         user_id = await _admin_id(db_session)
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-run"))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-stale"))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-fresh"))
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-async", async_=True))
+         await upsert_agent_task(
+             db_session, _event(ag_session.id, run.id, "t-done", status="completed")
+         )
++        # 老化 t-stale / t-async（updated_at 拨回 1 小时前=长期无心跳）；t-fresh
++        # 保持刚心跳（真实 now 下宽限窗内）。
++        from sqlalchemy import update as sa_update
++
++        await db_session.execute(
++            sa_update(AgentSessionTask)
++            .where(AgentSessionTask.task_id.in_(["t-stale", "t-async"]))
++            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
++        )
++        await db_session.commit()
+ 
++        # 清扫时刻 = 真实 now：仅 t-stale（窗外无心跳且非异步）收口；t-fresh
++        # （窗内心跳）/ t-async（异步标记，虽已无心跳）豁免；t-done 已终态不触碰。
+         swept = await finalize_running_tasks_for_run(db_session, run_id=run.id)
+ 
+         assert swept == 1
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-run"].status == "stopped"
+-        assert rows["t-run"].finished_at is not None
+-        assert "轮次已结束" in (rows["t-run"].message or "")
+-        # 已终态行不触碰（终态定格不破坏）。
++        assert rows["t-stale"].status == "stopped"
++        assert rows["t-stale"].finished_at is not None
++        assert "轮次已结束" in (rows["t-stale"].message or "")
++        assert rows["t-fresh"].status == "running"
++        assert rows["t-async"].status == "running"
+         assert rows["t-done"].status == "completed"
+ 
+     @pytest.mark.asyncio
+-    async def test_finalize_after_sweep_running_heartbeat_no_revive(
++    async def test_sweep_stopped_row_revives_on_running_heartbeat(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """清扫后迟到的 running 心跳不复活任务（upsert 语义② 终态吸收）。"""
++        """清扫收口行（message=清扫原因）收 running 心跳 → 复活自愈。"""
+         from app.modules.daemon.agent_task_store import (
+             finalize_running_tasks_for_run,
+             upsert_agent_task,
+@@ -920,17 +942,48 @@ class TestRunCloseTaskSweep:
+         rt = await _create_runtime(db_session, user_id)
+         ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+         await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
+-        await finalize_running_tasks_for_run(db_session, run_id=run.id)
+-        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-x"))
++        await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
++
++        # 误收的活跃任务下一个心跳复活（跨轮次后台任务场景）。
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-x", status="running", progress=42),
++        )
++
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-x"].status == "running"
++        assert rows["t-x"].finished_at is None
++        assert rows["t-x"].message is None
++        assert rows["t-x"].progress == 42
++
++    @pytest.mark.asyncio
++    async def test_genuine_stopped_absorbs_running_heartbeat(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """事件驱动的真实 stopped 行（message 非清扫标记）维持终态吸收。"""
++        from app.modules.daemon.agent_task_store import upsert_agent_task
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(
++            db_session,
++            _event(ag_session.id, run.id, "t-s", status="stopped", message="用户停止"),
++        )
++
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-s", status="running"))
+ 
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+-        assert rows["t-x"].status == "stopped"
++        assert rows["t-s"].status == "stopped"
++        assert (rows["t-s"].message or "") == "用户停止"
+ 
+     @pytest.mark.asyncio
+-    async def test_sweep_orphans_terminal_run_only(
++    async def test_sweep_orphans_stale_terminal_run_only(
+         self, auth_headers: dict[str, str], db_session: AsyncSession
+     ) -> None:
+-        """启动兜底：终态 run 的 running 任务收口；running run 的任务不误扫。"""
++        """启动兜底：终态 run + 宽限窗外无心跳收口；新鲜行 / running run / 异步行不误扫。"""
++        from sqlalchemy import update as sa_update
++
+         from app.modules.agent.model import AgentRun
+         from app.modules.daemon.agent_task_store import (
+             sweep_orphan_running_tasks,
+@@ -950,11 +1003,53 @@ class TestRunCloseTaskSweep:
+         db_session.add(done_run)
+         await db_session.commit()
+         await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan"))
++        await upsert_agent_task(db_session, _event(ag_session.id, done_run.id, "t-orphan-fresh"))
++        await upsert_agent_task(
++            db_session, _event(ag_session.id, done_run.id, "t-orphan-async", async_=True)
++        )
+         await upsert_agent_task(db_session, _event(ag_session.id, live_run.id, "t-live"))
++        # 老化 t-orphan / t-orphan-async（真孤儿/停跳异步——均拨回 1 小时前）。
++        await db_session.execute(
++            sa_update(AgentSessionTask)
++            .where(AgentSessionTask.task_id.in_(["t-orphan", "t-orphan-async"]))
++            .values(updated_at=datetime.now(UTC) - timedelta(hours=1))
++        )
++        await db_session.commit()
+ 
++        # 真实 now：仅终态 run + 窗外无心跳 + 非异步的 t-orphan 收口。
+         swept = await sweep_orphan_running_tasks(db_session)
+ 
+         assert swept == 1
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+         assert rows["t-orphan"].status == "stopped"
++        assert rows["t-orphan-fresh"].status == "running"
++        assert rows["t-orphan-async"].status == "running"
+         assert rows["t-live"].status == "running"
++
++    @pytest.mark.asyncio
++    async def test_delayed_resweep_catches_now_silent(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """延迟复扫语义：收口时新鲜的行，若此后无心跳，宽限+缓冲后同款 finalize 收口。"""
++        from app.modules.daemon.agent_task_store import (
++            finalize_running_tasks_for_run,
++            upsert_agent_task,
++        )
++
++        user_id = await _admin_id(db_session)
++        rt = await _create_runtime(db_session, user_id)
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-wait"))
++
++        # 收口时点（now）：宽限内 → 不收。
++        assert (
++            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(1))
++            == 0
++        )
++        # 复扫时点（宽限+60s 后）：仍无心跳 → 收口。
++        assert (
++            await finalize_running_tasks_for_run(db_session, run_id=run.id, now=self._future(10))
++            == 1
++        )
++        rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
++        assert rows["t-wait"].status == "stopped"
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/design.md b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/design.md
+new file mode 100644
+index 000000000..ff55177aa
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:36:49.940Z
++---
++# 设计记录（Design Record）— 2026-10-11-task-sweep-liveness-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户指正上一变更（2026-10-10-run-close-task-sweep）的核心假设错误：「run 终态 = 任务必死」不成立——后台子代理任务本来就跨轮次存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮继续回复），且线上 agent_session_task.is_async 恒为 false（daemon 上报未打标），按标记排除保护不了它们；run 关闭即清扫会把真实在跑的后台任务错标「已停止」，而迟到 running 心跳又被终态吸收冻结在错误状态（该清扫代码已被并行会话部署上线，一次扫了 112 条，当时恰好零异步任务零实际误伤，语义缺口真实存在）。修法三件：①死判改「最近无心跳」——两个清扫函数条件收紧为 is_async=false 且 updated_at 距清扫时刻超 TASK_SWEEP_GRACE（5 分钟，心跳活跃即豁免）；②清扫行带 RUN_CLOSE_SWEEP_REASON 标记 + upsert 复活分支（标记行收 running 心跳即复活，自愈误收；真实终态行维持吸收）；③close 恒排延迟复扫（宽限+60s 后重跑 finalize，新鲜后沉默的孤儿不靠后端重启收敛）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `finalize_running_tasks_for_run` / `sweep_orphan_running_tasks`（agent_task_store）：收口条件收紧（新增 is_async 与 updated_at 宽限过滤）；sweep 新增可选 `now` 参数（测试确定性）。
++- `upsert_agent_task`（agent_task_store）：语义②新增清扫标记行复活例外（仅 message=RUN_CLOSE_SWEEP_REASON 的 stopped 行放行 running）。
++- 新增导出常量 `RUN_CLOSE_SWEEP_REASON` / `TASK_SWEEP_GRACE`（原模块私有 _RUN_CLOSED_REASON 转公开，复活识别需要）。
++- `close_run_steps` 新增模块级 `_delayed_task_resweep`（内部后台任务，不导出）；close_interactive_run 恒排复扫。
++- HTTP API / 表结构零改动。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | backend/app/modules/daemon/agent_task_store.py | 清扫条件收紧 + 常量公开 + upsert 复活分支 |
++| 修改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | _delayed_task_resweep + close 恒排复扫 |
++| 修改 | backend/app/modules/daemon/tests/test_agent_session_tasks.py | TestRunCloseTaskSweep 重写为 5 用例（新语义） |
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立。复活分支只认「running 事件 + 清扫标记行」——误收任务下一心跳即自愈；真实终态事件（completed/failed）对清扫行照常 latest-wins 覆盖（语义③），终态信息不失真。迟到 running 对真实终态行维持吸收（零回归，测试钉死）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++安全。upsert 持任务行 FOR UPDATE（上一变更 P3-1 修复），与清扫 UPDATE 行级锁串行化：清扫先落则 upsert 读到 stopped+标记走复活；upsert 先落 running 则清扫按其 updated_at 重新判窗。延迟复扫与立即清扫/启动兜底并发时均为幂等 UPDATE（条件同款，重复收敛 stopped）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全。延迟复扫为独立 DB session 的后台任务（对齐 dispatch_next_queued_message 的 H1 模式），异常交 _fire_background_task done_callback 记日志，不影响已提交终态；进程重启丢失复扫任务时由启动兜底清扫补位（条件同款）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会。复扫按 run_id 限定、清扫条件不跨会话；多 backend 实例并发复扫幂等收敛（UPDATE 条件原子）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：宽限窗 5 分钟是启发式——「真死但 5 分钟内曾心跳」的任务在收口时点不被收、依赖延迟复扫；「活着但超 5 分钟无心跳」（长静默后台任务）仍会被误收——由复活分支兜底（下一心跳自愈），最坏窗口=下一心跳间隔。心跳间隔取决于 daemon 上报节奏（工具调用/进度行），长纯计算任务可能稀疏——已知残留，如实接受。
++- 放弃方案「按 is_async 排除」：线上标记恒 false，保护不了实际跨轮任务（已验证 0 条异步行）；放弃「run 收口不清扫、只靠启动兜底」：回到原始 bug（不重启永卡 running）。
++- 前一变更被本次修正的裁决：其「run 终态后任务不可能仍合法运行」表述作废，收口面由本变更收窄。
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/proposal.md b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/proposal.md
+new file mode 100644
+index 000000000..697c7ded2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:36:49.940Z
++---
++# 提案书（Proposal）— 2026-10-11-task-sweep-liveness-guard
++
++## 动机
++
++任务原话转写：上一变更 2026-10-10-run-close-task-sweep 的设计缺陷修正（用户指正）：run 终态≠任务必死——后台子代理任务本来就跨轮次存活（主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮继续回复），且线上表 is_async 恒为 false（daemon 上报未打标），按 is_async 排除保护不了它们；run 关闭即清扫会把真实在跑的后台任务错标「已停止」（迟到 running 心跳又被终态吸收冻结在错误状态）。服务器实测清扫已上线且一次扫了 112 条（当时恰好零异步任务、零误伤，但语义缺口真实存在）。
++成功标准：
++- 清扫（run 收口 + 启动兜底）只收「最近无心跳」的任务：updated_at 距清扫时刻超过宽限窗（5 分钟）且 is_async=false 才收口；活跃心跳中的任务（含跨轮次后台任务）不被误收
++- 被清扫行保留可识别标记（message=清扫原因），后续到达的 running 心跳在「清扫收口行」上复活（status 回 running、finished_at 清空），真实在跑的任务下一个心跳即自愈；真实终态行（事件驱动的 stopped/completed/failed）维持终态吸收不复活
++- run 收口时对「宽限窗内活跃」的任务安排延迟复扫（宽限+缓冲后重扫该 run），不靠后端重启兜底孤儿
++- 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 清扫（run 收口 + 启动兜底）只收「最近无心跳」的任务：updated_at 距清扫时刻超过宽限窗（5 分钟）且 is_async=false 才收口；活跃心跳中的任务（含跨轮次后台任务）不被误收
++2. 被清扫行保留可识别标记（message=清扫原因），后续到达的 running 心跳在「清扫收口行」上复活（status 回 running、finished_at 清空），真实在跑的任务下一个心跳即自愈；真实终态行（事件驱动的 stopped/completed/failed）维持终态吸收不复活
++3. run 收口时对「宽限窗内活跃」的任务安排延迟复扫（宽限+缓冲后重扫该 run），不靠后端重启兜底孤儿
++4. 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿
++
++## 成功标准（可验证）
++
++1. 清扫（run 收口 + 启动兜底）只收「最近无心跳」的任务：updated_at 距清扫时刻超过宽限窗（5 分钟）且 is_async=false 才收口；活跃心跳中的任务（含跨轮次后台任务）不被误收
++2. 被清扫行保留可识别标记（message=清扫原因），后续到达的 running 心跳在「清扫收口行」上复活（status 回 running、finished_at 清空），真实在跑的任务下一个心跳即自愈；真实终态行（事件驱动的 stopped/completed/failed）维持终态吸收不复活
++3. run 收口时对「宽限窗内活跃」的任务安排延迟复扫（宽限+缓冲后重扫该 run），不靠后端重启兜底孤儿
++4. 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/requirements.md b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/requirements.md
+new file mode 100644
+index 000000000..59f803cde
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/requirements.md
+@@ -0,0 +1,60 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:36:49.940Z
++---
++# 需求规格（Requirements）— 2026-10-11-task-sweep-liveness-guard
++
++## 功能需求
++
++### FR-01: 清扫只收「最近无心跳」的任务（心跳宽限 + is_async 豁免）
++
++- `finalize_running_tasks_for_run` 与 `sweep_orphan_running_tasks` 的收口条件必须收紧为：status 非终态 **且** `is_async=false` **且** `updated_at` 距清扫时刻超过 `TASK_SWEEP_GRACE`（5 分钟）；宽限窗内心跳活跃的任务（含跨轮次存活的后台子代理任务——主代理开轮派发后轮结束、任务继续跑、跑完发 [后台任务通知] 唤醒新轮继续回复）不得被误收。
++
++#### 场景：后台任务跨轮存活不被误收
++
++- Given 一个 run 收口时，其名下有一个 3 分钟前刚心跳过的后台任务（running）
++- When run 收口清扫 / 启动兜底清扫执行
++- Then 该任务保持 running（宽限窗内），不被标「已停止」
++
++### FR-02: 清扫收口行可被 running 心跳复活（误收自愈）；真实终态行维持吸收
++
++- 清扫收口必须写可识别标记（`message=RUN_CLOSE_SWEEP_REASON`）；`upsert_agent_task` 对携带该标记的 stopped 行收到 running 事件时必须复活（status 回 running、`finished_at` 清空、标记清除、事件字段照常累积）；事件驱动的真实终态行（message 非该标记）必须维持终态吸收（迟到 running 不复活）。
++
++#### 场景：误收自愈
++
++- Given 一个被清扫收口（stopped+标记）但其实仍在跑的后台任务
++- When 它的下一个 running/progress 心跳到达
++- Then 行复活为 running（finished_at 空、标记清除、progress 累积）
++
++#### 场景：真实终态不复活
++
++- Given 事件驱动写入的 stopped 行（message=用户停止等）
++- When 迟到 running 心跳到达
++- Then 维持 stopped 不复活（既有语义②零回归）
++
++### FR-03: run 收口安排延迟复扫（孤儿不靠重启兜底）
++
++- run 收口时必须恒排一个延迟复扫后台任务（宽限窗 + 60s 缓冲后对该 run 重跑 finalize）：收口时点宽限内活跃、此后再无心跳的任务在窗后收敛；复扫幂等（已终态/仍新鲜行 no-op），失败仅记日志不影响已提交终态。
++
++#### 场景：新鲜后沉默的孤儿
++
++- Given 收口时任务 1 分钟前刚心跳（未收口），此后再无任何心跳
++- When 宽限+缓冲后的延迟复扫执行
++- Then 该任务被收口为 stopped（带标记，仍可被复活分支自愈）
++
++### FR-04: 既有行为回归
++
++- 既有 `agent_session_tasks` 全部测试必须通过（upsert 语义/快照端点/上报旁路/级联）；close 链路回归通过；ruff/mypy 零错。
++
++#### 场景：回归
++
++- Given 本变更合入
++- When 运行上述测试与静态检查
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_finalize_sweeps_only_stale_sync」
++FR-02: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_stopped_row_revives_on_running_heartbeat」
++FR-03: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_delayed_resweep_catches_now_silent」
++FR-04: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_genuine_stopped_absorbs_running_heartbeat」
+diff --git a/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/tasks.md b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/tasks.md
+new file mode 100644
+index 000000000..6df755f06
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-task-sweep-liveness-guard/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T03:36:49.940Z
++---
++# 任务注册表（Tasks）— 2026-10-11-task-sweep-liveness-guard
++
++- [x] task-01: 清扫（run 收口 + 启动兜底）只收「最近无心跳」的任务：updated_at 距清扫时刻超过宽限窗（5 分钟）且 is_async=false 才收口；活跃心跳中的任务（含跨轮次后台任务）不被误收（finalize/sweep 双函数条件收紧；用例 test_finalize_sweeps_only_stale_sync + test_sweep_orphans_stale_terminal_run_only）
++- [x] task-02: 被清扫行保留可识别标记（message=RUN_CLOSE_SWEEP_REASON），后续到达的 running 心跳在「清扫收口行」上复活（status 回 running、finished_at 清空、标记清除），真实在跑的任务下一个心跳即自愈；真实终态行维持终态吸收不复活（用例 test_sweep_stopped_row_revives_on_running_heartbeat + test_genuine_stopped_absorbs_running_heartbeat）
++- [x] task-03: run 收口时恒排延迟复扫（_delayed_task_resweep：宽限+60s 后重跑 finalize，独立 DB session，异常仅日志），不靠后端重启兜底孤儿（复扫语义用例 test_delayed_resweep_catches_now_silent；sleep 包装为薄管道不单测）
++- [x] task-04: 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿（文件 23/23 + close 回归 12/12 + ruff/format/mypy 零错）

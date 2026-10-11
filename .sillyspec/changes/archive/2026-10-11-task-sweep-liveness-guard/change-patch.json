@@ -1,0 +1,98 @@
+{
+  "change": "2026-10-11-task-sweep-liveness-guard",
+  "baseline": "f0d24f51dd296c86dc2093343e1084d935db5515",
+  "head": "460c2474d9377ddeef2971b481f8a56cd0700b5a",
+  "files": [
+    ".sillyspec/changes/2026-10-11-task-sweep-liveness-guard/design.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-liveness-guard/flow-state.yaml",
+    ".sillyspec/changes/2026-10-11-task-sweep-liveness-guard/proposal.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-liveness-guard/requirements.md",
+    ".sillyspec/changes/2026-10-11-task-sweep-liveness-guard/tasks.md",
+    "backend/app/modules/daemon/agent_task_store.py",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 391,
+    "deletions": 30
+  },
+  "savedAt": "2026-10-11T03:43:58.009Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 8,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f0d24f51dd296c86dc2093343e1084d935db5515",
+    "totals": {
+      "files": 3,
+      "additions": 203,
+      "deletions": 30
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/agent_task_store.py",
+        "additions": 53,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 39,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "additions": 111,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "1ba706f6f4d44d7453e56e28ca9c53ca23c1253ec65e539c02637ed7df11424b",
+  "patchStatus": "ok"
+}

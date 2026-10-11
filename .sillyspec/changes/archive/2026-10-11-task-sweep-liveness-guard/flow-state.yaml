@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -21,6 +29,12 @@ input: >-
   - 新单测覆盖：心跳豁免/is_async 豁免/迟到心跳复活/真实终态不复活/延迟复扫；既有 agent_session_tasks 全绿
 autopilot: true
 baseline_commit: f0d24f51dd296c86dc2093343e1084d935db5515
-updatedAt: '2026-10-11T03:36:49.967Z'
+updatedAt: '2026-10-11T03:48:53.749Z'
 baseline_sha256: 1e2602e8117263a1db8a65c73a7838a3d990cc46b7f796c940063608a284c989
+gate_summary: >-
+  test: passed ← module[]+deps(py2)（14.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261011034325\test-result.json｜lint:
+  skipped ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（5.6s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
+  不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 12 个
 
