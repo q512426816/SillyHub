@@ -1,0 +1,38 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  local-snapshot 的 daemon_offline 误报实证（用户生产案例 2026-10-11）：daemon 自更新后进程未重启跑旧代码，旧 dispatch 对未知 RPC 静默不回 → 15s 超时被并入
+  daemon_offline 显示「守护进程离线」，但机器实际在线——误导排障方向。修复：超时从离线态拆分独立状态与引导文案。
+
+  成功标准：
+
+  - LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再
+  except-All 归 offline
+
+  - 超时态前端文案引导正确方向：「守护进程无响应——若刚更新过 daemon 请重启进程」（本案例根因即此）
+
+  - 既有四态（ok/offline/unsupported/binding_missing）行为回归不变；api-types 重新生成同步
+
+  - 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
+autopilot: false
+baseline_commit: b7c8e0aa721e50e9c944e0ef5e67a74842dfc2e6
+updatedAt: '2026-10-11T05:30:38.960Z'
+baseline_sha256: 85cd27d814923df6942c3bb06eec6f619d217c276fc3381e8e6478fb18a1084e
+spec_approved: true
+spec_approved_at: '2026-10-11T05:10:36.037Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: 'test: —｜lint: —｜门文件 16 个'
+

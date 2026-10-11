@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-snapshot-timeout-distinct",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a4ad57b9b88141c2b8283b42f57e3eb5e70d6b82",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "requirements 机器草稿模板残片（FR 内容可辨识且全满足）",
+      "evidence": "FR-02/03/04 内容被吸入 FR-01 场景占位行",
+      "location": "requirements.md:17-41"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 文件清单表述与实际 8 文件不符（daemon 零改动实质成立）",
+      "evidence": "表述 6 文件实际 8 文件",
+      "location": "requirements.md:53"
+    },
+    {
+      "severity": "P3",
+      "title": "sync 层旧注释称 timeout 归 offline（过时，该文件未触达）",
+      "evidence": "linked_repos_sync.py:467 注释与本变更后路由语义相悖",
+      "location": "backend/app/modules/daemon/linked_repos_sync.py:467"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T05:28:41Z",
+  "reviewerNotes": "五项检查全闭合：异常传播链（ws_hub raise→sync 兄弟类不拦截→router 精确捕获）/前端未知枚举默认分支在场/生成物同步/测试 30+11 计数吻合。三处 P3 文档级瑕疵（注释过时顺手修，其余随归档留痕）。"
+}

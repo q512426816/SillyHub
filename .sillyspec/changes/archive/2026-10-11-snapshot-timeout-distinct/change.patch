@@ -1,0 +1,447 @@
+diff --git a/backend/app/modules/daemon/linked_repos_sync.py b/backend/app/modules/daemon/linked_repos_sync.py
+index bb2f4b139..293294382 100644
+--- a/backend/app/modules/daemon/linked_repos_sync.py
++++ b/backend/app/modules/daemon/linked_repos_sync.py
+@@ -464,7 +464,7 @@ async def fetch_local_snapshot(
+     except DaemonRpcRemoteError as exc:
+         if exc.code == "method_not_found":
+             return {"status": SNAPSHOT_STATUS_UNSUPPORTED, "entries": [], "platform_only_names": []}
+-        raise  # offline/timeout 等走既有 504 家族上抛（router 层捕获转 daemon_offline）
++        raise  # offline/timeout 等走既有 504 家族上抛（router 层精确分派：offline→daemon_offline / timeout→daemon_timeout，2026-10-11-snapshot-timeout-distinct）
+ 
+     # 平台登记面
+     platform_rows = (
+diff --git a/backend/app/modules/workspace/linked_repos/router.py b/backend/app/modules/workspace/linked_repos/router.py
+index 77608c997..b912e0d31 100644
+--- a/backend/app/modules/workspace/linked_repos/router.py
++++ b/backend/app/modules/workspace/linked_repos/router.py
+@@ -227,15 +227,29 @@ async def get_local_snapshot(
+     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+ ) -> LocalSnapshotResponse:
+     """本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
+-    与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。"""
++    与平台登记三态对照；五态降级（ok/offline/**timeout**/unsupported/binding_missing——
++    timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
++    2026-10-11 生产实证）。"""
+     from app.modules.daemon import linked_repos_sync as sync_mod
++    from app.modules.daemon.runtime.service import DaemonRpcTimeout, DaemonRuntimeOffline
+ 
+     try:
+         payload = await sync_mod.fetch_local_snapshot(session, workspace_id, user.id)
+     except sync_mod.SnapshotBindingMissing:
+         payload = {"status": "binding_missing", "entries": [], "platform_only_names": []}
++    except DaemonRuntimeOffline:
++        # 无活跃 WS 连接——机器掉线/未启动
++        payload = {"status": "daemon_offline", "entries": [], "platform_only_names": []}
++    except DaemonRpcTimeout:
++        # 连接在但 15s 无响应——典型根因：daemon 自更新换了文件但进程未重启跑旧代码，
++        # 旧 dispatch 对未知 method 静默不回（2026-10-11 生产实证）。独立于离线态，
++        # 前端文案引导「重启 daemon」而非「检查连接」。
++        payload = {"status": "daemon_timeout", "entries": [], "platform_only_names": []}
+     except Exception:
+-        # offline/timeout（既有 504 家族）→ 结构化 daemon_offline 降级（不 5xx，FR-02）
++        # 其余意外（编排层缺陷等）→ 结构化 offline 兜底不 5xx（FR-02）；留痕可查。
++        import logging
++
++        logging.getLogger(__name__).exception("local_snapshot unexpected error")
+         payload = {"status": "daemon_offline", "entries": [], "platform_only_names": []}
+     return LocalSnapshotResponse.model_validate(payload)
+ 
+diff --git a/backend/app/modules/workspace/linked_repos/schema.py b/backend/app/modules/workspace/linked_repos/schema.py
+index fcf148dfd..8ac9de9a5 100644
+--- a/backend/app/modules/workspace/linked_repos/schema.py
++++ b/backend/app/modules/workspace/linked_repos/schema.py
+@@ -85,7 +85,9 @@ class LocalSnapshotEntry(BaseModel):
+ class LocalSnapshotResponse(BaseModel):
+     """本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。"""
+ 
+-    status: Literal["ok", "daemon_offline", "daemon_unsupported", "binding_missing"]
++    status: Literal[
++        "ok", "daemon_offline", "daemon_timeout", "daemon_unsupported", "binding_missing"
++    ]
+     fetched_at: str | None = None
+     projects_skipped: str | None = None
+     repos_skipped: str | None = None
+diff --git a/backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py b/backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
+index 59837b214..afaae92a6 100644
+--- a/backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
++++ b/backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py
+@@ -590,3 +590,91 @@ async def test_local_snapshot_http_unsupported(
+     )
+     assert resp.status_code == 200
+     assert resp.json()["status"] == "daemon_unsupported"
++
++
++async def test_local_snapshot_http_timeout_distinct(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    auth_headers: dict[str, str],
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """2026-10-11-snapshot-timeout-distinct：DaemonRpcTimeout → daemon_timeout 独立态
++    （生产实证：daemon 更新后进程未重启跑旧代码，旧 dispatch 静默不回 → 15s 超时，
++    旧版误并入 daemon_offline 误导排障方向）。"""
++    from sqlalchemy import select as _select
++
++    from app.modules.auth.model import User
++    from app.modules.daemon.runtime.service import DaemonRpcTimeout
++    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++
++    ws, _, machine = await _seed(db_session, tag="tmout")
++    admin = (
++        (await db_session.execute(_select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .one()
++    )
++    db_session.add(
++        WorkspaceMemberRuntime(
++            workspace_id=ws.id,
++            user_id=admin.id,
++            daemon_id=machine.id,
++            root_path="/ws",
++            path_source="manual",
++        )
++    )
++    await db_session.commit()
++
++    import app.modules.daemon.linked_repos_sync as sync_mod
++
++    async def raise_timeout(*args, **kwargs):
++        raise DaemonRpcTimeout("rpc timeout")
++
++    monkeypatch.setattr(sync_mod, "fetch_local_snapshot", raise_timeout)
++    resp = await client.get(
++        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
++    )
++    assert resp.status_code == 200
++    assert resp.json()["status"] == "daemon_timeout"
++
++
++async def test_local_snapshot_http_offline_still_offline(
++    client: AsyncClient,
++    db_session: AsyncSession,
++    auth_headers: dict[str, str],
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """DaemonRuntimeOffline（无 WS 连接）仍归 daemon_offline——回归不变。"""
++    from sqlalchemy import select as _select
++
++    from app.modules.auth.model import User
++    from app.modules.daemon.runtime.service import DaemonRuntimeOffline
++    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
++
++    ws, _, machine = await _seed(db_session, tag="offln")
++    admin = (
++        (await db_session.execute(_select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .one()
++    )
++    db_session.add(
++        WorkspaceMemberRuntime(
++            workspace_id=ws.id,
++            user_id=admin.id,
++            daemon_id=machine.id,
++            root_path="/ws",
++            path_source="manual",
++        )
++    )
++    await db_session.commit()
++
++    import app.modules.daemon.linked_repos_sync as sync_mod
++
++    async def raise_offline(*args, **kwargs):
++        raise DaemonRuntimeOffline("no ws")
++
++    monkeypatch.setattr(sync_mod, "fetch_local_snapshot", raise_offline)
++    resp = await client.get(
++        f"/api/workspaces/{ws.id}/linked-repos/local-snapshot", headers=auth_headers
++    )
++    assert resp.status_code == 200
++    assert resp.json()["status"] == "daemon_offline"
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 8ce4a40a5..9796cebab 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -3406,7 +3406,7 @@
+           "workspace-linked-repos"
+         ],
+         "summary": "Get Local Snapshot",
+-        "description": "本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +\n与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。",
++        "description": "本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +\n与平台登记三态对照；五态降级（ok/offline/**timeout**/unsupported/binding_missing——\ntimeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，\n2026-10-11 生产实证）。",
+         "operationId": "get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get",
+         "parameters": [
+           {
+@@ -52581,6 +52581,7 @@
+             "enum": [
+               "ok",
+               "daemon_offline",
++              "daemon_timeout",
+               "daemon_unsupported",
+               "binding_missing"
+             ],
+diff --git a/frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx b/frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+index d6ddacc63..e41759d89 100644
+--- a/frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
++++ b/frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
+@@ -193,3 +193,16 @@ describe("LinkedReposCard 本机现状区", () => {
+     expect(screen.queryByLabelText("选择导入 demo")).toBeNull();
+   });
+ });
++
++describe("本机现状区 timeout 态（2026-10-11-snapshot-timeout-distinct）", () => {
++  it("daemon_timeout 显示重启引导文案（非离线文案）", async () => {
++    listMock.mockResolvedValue([]);
++    fetchSnapMock.mockResolvedValue({ status: "daemon_timeout", entries: [], platform_only_names: [] });
++    mount({ canManage: true });
++    await screen.findByText(/尚未登记关联仓/);
++    fireEvent.click(screen.getByRole("button", { name: "刷新本机现状" }));
++    expect(await screen.findByText(/守护进程无响应/)).toBeTruthy();
++    expect(await screen.findByText(/请重启进程/)).toBeTruthy();
++    expect(screen.queryByText(/守护进程离线/)).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/workspace/linked-repos-card.tsx b/frontend/src/components/workspace/linked-repos-card.tsx
+index 1b69dd046..47c78f78c 100644
+--- a/frontend/src/components/workspace/linked-repos-card.tsx
++++ b/frontend/src/components/workspace/linked-repos-card.tsx
+@@ -420,6 +420,10 @@ function LocalEchoSection({
+         <p className="py-2 text-xs text-amber-600">请先绑定守护进程后再读取本机配置。</p>
+       ) : snapshot.status === "daemon_offline" ? (
+         <p className="py-2 text-xs text-amber-600">守护进程离线，无法读取本机配置。</p>
++      ) : snapshot.status === "daemon_timeout" ? (
++        <p className="py-2 text-xs text-amber-600">
++          守护进程无响应——若刚更新过 daemon 请重启进程（更新只替换文件，进程需重启才加载新能力）。
++        </p>
+       ) : snapshot.status === "daemon_unsupported" ? (
+         <p className="py-2 text-xs text-amber-600">守护进程需升级（不支持本机现状读取）。</p>
+       ) : snapshot.entries.length === 0 ? (
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 722b16c05..044fd7c0a 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1366,7 +1366,9 @@ export interface paths {
+         /**
+          * Get Local Snapshot
+          * @description 本机现状快照（手动现拉即弃，D-003）：RPC 拉 daemon 侧只读快照 + 双源合并 +
+-         *     与平台登记三态对照；四态降级（ok/offline/unsupported/binding_missing，Gap B）。
++         *     与平台登记三态对照；五态降级（ok/offline/**timeout**\/unsupported/binding_missing——
++         *     timeout 独立于 offline：连接在但无响应，典型为 daemon 更新后进程未重启，
++         *     2026-10-11 生产实证）。
+          */
+         get: operations["get_local_snapshot_api_workspaces__workspace_id__linked_repos_local_snapshot_get"];
+         put?: never;
+@@ -19192,7 +19194,7 @@ export interface components {
+              * Status
+              * @enum {string}
+              */
+-            status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
++            status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
+             /** Fetched At */
+             fetched_at?: string | null;
+             /** Projects Skipped */
+diff --git a/frontend/src/lib/linked-repos.ts b/frontend/src/lib/linked-repos.ts
+index 769321a50..c6fb40729 100644
+--- a/frontend/src/lib/linked-repos.ts
++++ b/frontend/src/lib/linked-repos.ts
+@@ -90,7 +90,7 @@ export interface LocalSnapshotEntryView {
+ }
+ 
+ export interface LocalSnapshotView {
+-  status: "ok" | "daemon_offline" | "daemon_unsupported" | "binding_missing";
++  status: "ok" | "daemon_offline" | "daemon_timeout" | "daemon_unsupported" | "binding_missing";
+   fetched_at?: string | null;
+   projects_skipped?: string | null;
+   repos_skipped?: string | null;
+diff --git a/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/design.md b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/design.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T05:04:48.021Z
++---
++# 设计记录（Design Record）— 2026-10-11-snapshot-timeout-distinct
++
++## 做法概述
++
++<!-- MACHINE-DRAFT:design-approach:4fa550e9aac26c5f5a3c89b853d9af0ad0749943358808fbc1196064a42c1173:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-snapshot-timeout-distinct 留痕重锚 -->
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++<!-- MACHINE-DRAFT:design-approach:end -->
++router 的 get_local_snapshot 把 except-All 拆为三类精确捕获：DaemonRuntimeOffline→daemon_offline（无 WS 连接）、DaemonRpcTimeout→**daemon_timeout**（新态：连接在但 15s 无响应，生产实证根因=daemon 自更新换文件进程未重启跑旧代码，旧 dispatch 对未知 method 静默）、其余→offline 兜底+log.exception 可观测性。前端 timeout 占位文案引导重启进程。schema 枚举/前端类型/gen:types 同步五态。
++
++## 接口契约
++
++<!-- MACHINE-DRAFT:design-contract:86ee80e3cad9ae1c299a0c54bf5503a112d318bb2e5490a32fcd5c1724293a0b:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-snapshot-timeout-distinct 留痕重锚 -->
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++<!-- MACHINE-DRAFT:design-contract:end -->
++LocalSnapshotResponse.status 枚举加 "daemon_timeout"（additive——旧前端遇新枚举走默认分支，无破坏）；端点路径/权限/其余字段零变化。daemon 侧零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++<!-- MACHINE-DRAFT:design-boundaries:98046ccf043ed9302175b492d297f70dfd943c39f2e8770e8a6039ea302cbb6a:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-snapshot-timeout-distinct 留痕重锚 -->
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++<!-- MACHINE-DRAFT:design-boundaries:end -->
++1. 乱序/迟到：不适用——单次 RPC 请求响应，无事件流。2. 并发写：不适用——只读快照。3. 切换/生命周期：超时判定在 hub.send_rpc 的 15s 预算内完成，进程重启窗口内请求按 offline/timeout 归类即弃，无残留态。4. 作用域：状态字段是响应内标量，按请求独立返回，无跨工作区串台面。
++
++## 风险与死路
++
++<!-- MACHINE-DRAFT:design-risks:03ff22f024c81093b38d2bb78b9d095acf5be70d5c09b17c10da44e4655ddb72:begin 机器预填段——整段改写会被 flow done 拒收；确要修改：sillyspec flow amend-draft --change 2026-10-11-snapshot-timeout-distinct 留痕重锚 -->
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++<!-- MACHINE-DRAFT:design-risks:end -->
++最大风险：timeout 语义不止「进程未重启」一种（daemon 忙碌/网络劣化也超时）——文案用「若刚更新过请重启」条件句而非断言根因。放弃的方案：①daemon 自更新后自动重启进程——会中断活跃会话，留独立变更评估；②超时归入 unsupported——语义错误（unsupported=版本不支持，timeout=无响应），会把「忙」误报成「需升级」。
+
+diff --git a/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/proposal.md b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T05:04:48.021Z
++---
++# 提案书（Proposal）— 2026-10-11-snapshot-timeout-distinct
++
++## 动机
++
++任务原话转写：local-snapshot 的 daemon_offline 误报实证（用户生产案例 2026-10-11）：daemon 自更新后进程未重启跑旧代码，旧 dispatch 对未知 RPC 静默不回 → 15s 超时被并入 daemon_offline 显示「守护进程离线」，但机器实际在线——误导排障方向。修复：超时从离线态拆分独立状态与引导文案。
++成功标准：
++- LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
++- 超时态前端文案引导正确方向：「守护进程无响应——若刚更新过 daemon 请重启进程」（本案例根因即此）
++- 既有四态（ok/offline/unsupported/binding_missing）行为回归不变；api-types 重新生成同步
++- 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
++2. 超时态前端文案引导正确方向：「守护进程无响应——若刚更新过 daemon 请重启进程」（本案例根因即此）
++3. 既有四态（ok/offline/unsupported/binding_missing）行为回归不变；api-types 重新生成同步
++4. 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
++
++## 成功标准（可验证）
++
++1. LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
++2. 超时态前端文案引导正确方向：「守护进程无响应——若刚更新过 daemon 请重启进程」（本案例根因即此）
++3. 既有四态（ok/offline/unsupported/binding_missing）行为回归不变；api-types 重新生成同步
++4. 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI
+
+diff --git a/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/requirements.md b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/requirements.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T05:04:48.021Z
++---
++# 需求规格（Requirements）— 2026-10-11-snapshot-timeout-distinct
++
++## 功能需求
++
++### FR-01: LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
++
++- LocalSnapshotResponse.status **必须**新增 "daemon_timeout" 枚举；router **必须**按异常类型精确映射（DaemonRpcTimeout→timeout / DaemonRuntimeOffline→offline），**禁止** except-All 把超时并入离线；其余意外**必须**落 log.exception 后 offline 兜底。
++
++#### 场景：主路径
++
++- Given daemon WS 在线但 15s 内无响应（如进程未重启跑旧代码）
++- When 请求 local-snapshot
++- Then 200 且 status=daemon_timeout（非 daemon_offline）- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- 前端 timeout 态**必须**显示重启引导文案（含「守护进程无响应」与「重启进程」）；**禁止**沿用离线文案误导该场景；既有四态文案与行为回归不变；api-types **必须**经 gen:types 再生成含新枚举。
++
++#### 场景：主路径
++
++- Given 快照返回 daemon_timeout
++- When 本机现状区渲染
++- Then 显示重启引导文案且不出现「守护进程离线」- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- daemon 侧（sillyhub-daemon）**必须**零改动；LocalSnapshotResponse 其余字段与端点路径/权限**禁止**变化（additive）。
++
++#### 场景：主路径
++
++- Given 本变更 diff
++- When 审查文件清单
++- Then daemon 目录零文件变化- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
++
++#### 场景：主路径
++
++（按需保留或改写：Given 前提 / When 触发 / Then 可判定预期——每边界情形一个场景块，归档索引用场景名作摘要）- 验证**必须**仅跑 backend linked_repos 两测试文件 + frontend 卡片测试 + typecheck/lint；**禁止**全量（留 CI）。
++
++#### 场景：主路径
++
++- Given 修复完成
++- When 跑指定测试
++- Then backend 30 + frontend 11 全绿
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py「test_local_snapshot_http_timeout_distinct」（DaemonRpcTimeout→daemon_timeout 断言）+「test_local_snapshot_http_offline_still_offline」（回归）
++FR-02: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx「daemon_timeout 显示重启引导文案（非离线文案）」
++FR-03: 不适用：daemon 零改动与 additive 由 diff 文件清单守护（提交 d04d4ad48 仅 backend 2 文件+frontend 4 文件+生成物）
++FR-04: backend 30 用例+frontend 11 用例+tsc/lint 双零错实跑于 2026-10-11 会话（命令见 design 记录：pytest 两文件/vitest 卡片文件/pnpm typecheck+lint）
+
+diff --git a/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/review.json.superseded-20261011T052955 b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/review.json.superseded-20261011T052955
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/review.json.superseded-20261011T052955
+@@ -0,0 +1,35 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-11-snapshot-timeout-distinct",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "a4ad57b9b88141c2b8283b42f57e3eb5e70d6b82",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "requirements 机器草稿模板残片（FR 内容可辨识且全满足）",
++      "evidence": "FR-02/03/04 内容被吸入 FR-01 场景占位行",
++      "location": "requirements.md:17-41"
++    },
++    {
++      "severity": "P3",
++      "title": "FR-03 文件清单表述与实际 8 文件不符（daemon 零改动实质成立）",
++      "evidence": "表述 6 文件实际 8 文件",
++      "location": "requirements.md:53"
++    },
++    {
++      "severity": "P3",
++      "title": "sync 层旧注释称 timeout 归 offline（过时，该文件未触达）",
++      "evidence": "linked_repos_sync.py:467 注释与本变更后路由语义相悖",
++      "location": "backend/app/modules/daemon/linked_repos_sync.py:467"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "n/a",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-11T05:28:41Z",
++  "reviewerNotes": "五项检查全闭合：异常传播链（ws_hub raise→sync 兄弟类不拦截→router 精确捕获）/前端未知枚举默认分支在场/生成物同步/测试 30+11 计数吻合。三处 P3 文档级瑕疵（注释过时顺手修，其余随归档留痕）。"
++}
+
+diff --git a/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/tasks.md b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-11-snapshot-timeout-distinct/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-11T05:04:48.021Z
++---
++# 任务注册表（Tasks）— 2026-10-11-snapshot-timeout-distinct
++
++- [x] task-01: LocalSnapshotResponse 的 status 拆出 daemon_timeout 五态（offline=无 WS 连接/timeout=连接在但 15s 无响应），router 按异常类型精确映射不再 except-All 归 offline
++- [x] task-02: 超时态前端文案引导正确方向：「守护进程无响应——若刚更新过 daemon 请重启进程」（本案例根因即此）
++- [x] task-03: 既有四态（ok/offline/unsupported/binding_missing）行为回归不变；api-types 重新生成同步
++- [x] task-04: 仅跑改动相关测试 + typecheck/lint 绿，全量留给 CI

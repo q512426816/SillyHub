@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-snapshot-timeout-distinct",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-snapshot-timeout-distinct:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py「test_local_snapshot_http_timeout_distinct」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-snapshot-timeout-distinct"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-snapshot-timeout-distinct:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx「daemon_timeout 显示重启引导文案（非离线文案）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-snapshot-timeout-distinct"
+    }
+  ]
+}
