@@ -281,3 +281,117 @@ created_at: 2026-10-08T01:03:54.861Z
   confirmed_at: null
   source_change: 2026-10-11-borrow-ctx-metadata-truncate
   status: active
+
+## FR-auto-sillyspec-068 runLinkedReposSnapshot 收到相对形态 root_path（如 ws-root、../x）时抛错，不 spawn 任何 CLI
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：相对形态拒绝
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-01
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「相对形态 root_path 抛错不 spawn CLI」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
+
+## FR-auto-sillyspec-069 runLinkedReposSync 收到相对形态 root_path 时抛错；POSIX / 根、Windows 盘符 C:/、UNC \\srv\share 三种绝对形态均放行
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：三形态放行 + 相对拒绝
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-02
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「root_path 三种绝对形态放行 + 相对形态抛错」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
+
+## FR-auto-sillyspec-070 sync 逐仓 rel_path 为绝对形态（/a、C:/a）→ projects_yaml 层 failed（路径非法）且不 spawn
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：绝对形态 rel_path
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-03
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「rel_path 绝对形态该层 failed 不 spawn」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
+
+## FR-auto-sillyspec-071 sync 逐仓 abs_path 为相对形态（a/b、../x）→ repos_registry 层 failed 且不 spawn
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：相对形态 abs_path
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-04
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「abs_path 相对形态该层 failed 不 spawn」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
+
+## FR-auto-sillyspec-072 合法约定零回归：rel_path '../platform-specs' 兄弟相对路径、abs_path 绝对路径照常 spawn；既有两测试文件全绿
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：合法 fixture 零回归
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-05
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/linked-repos-sync.test.ts「合法约定零回归：兄弟相对路径与绝对本机路径照常 spawn」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
+
+## FR-auto-sillyspec-073 新增校验用例先红后绿 + daemon tsc 零错（Linux CI 兼容：助手不依赖运行平台）
+变更：2026-10-11-linked-repos-path-guard
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-11-linked-repos-path-guard/requirements.md#FR-06
+最近确认：3e7f497db56fb37bc8737fd0ef3f02a78dcb27b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-linked-repos-path-guard:flow:测试绑定FR-06
+  tests: test/sillyhub-daemon/tests/linked-repos-snapshot.test.ts「UNC 与 POSIX 绝对形态放行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-linked-repos-path-guard
+  status: active
