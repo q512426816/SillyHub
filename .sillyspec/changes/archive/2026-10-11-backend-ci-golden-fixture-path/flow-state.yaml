@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：backend parity 测试（app/modules/daemon/tests/test_run_sync_golden_parity.py）直接消费
+  sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session*.json 三件套（docstring 自载跨端共享），但 backend-ci.yml 的 paths
+  过滤只含 backend/**——daemon 侧 fixture 变更不会触发 backend-ci，parity 回归只能靠人肉本地跑兜底（2026-10-11-daemon-masked-test-fix 独立评审 P3 指出的
+  CI 盲区）。
+
+
+  成功标准：
+
+  - backend-ci.yml push 与 pull_request 两处 paths 各加 sillyhub-daemon/tests/fixtures/**，workflow 文件自身路径保留
+
+  - YAML 语法可解析（python yaml.safe_load 过）
+
+  - 不跑全量测试（规则 0），workflow 生效由推送后 backend-ci 实跑验证
+autopilot: true
+baseline_commit: 5a8e6a0294e9724656d9a5fcd2fc93eb8ecb325f
+updatedAt: '2026-10-11T15:26:47.635Z'
+baseline_sha256: 28839bdf37dbbf4df2bd00916d575e078d2832cc81066544d979a1b0a88bb835
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
+

@@ -2318,3 +2318,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
 理由：最大风险：pi 翻 mcp=true 后兜底代报的 codex/cursor 载体若未来也翻 true，本测试面将再失载体——届时应按 caps 现状再选载体或改测 caps 注入而非硬编码 provider 名（当前 getProviderCaps 直接读注册表，测试无注入点，故先硬编码）。放弃的方案：把 daemon.ts 门控改回对 pi 也代报（推翻 task-08 SPIKE-00 实测结论，制造双写缺陷——不做）；给 golden 快照写自动再生成脚本（一次性三键补齐用不上专用管线，且驱动协议依赖 vitest fake timers，脚本化收益低于维护成本——手补 + 头注留痕）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-11-backend-ci-golden-fixture-path
+锚点：未记录
+最近确认：4892540870bff8d45997995ad89d60eb9ed323ed
+理由：最大风险：fixture 再生成若频繁（daemon 侧 gen 流程再跑），每次都会白跑一轮 20 分钟 backend 全量——但 fixture 变更本就低频（快照锚定实现回归），且 parity 恰恰是这些变更最需要验证的面，代价与收益对等。放弃的方案：①把 paths 放宽到 `sillyhub-daemon/**`（daemon 任意改动都触发 backend 全量，20 分钟白跑成常态，不做）；②把 parity 测试的 fixture 复制进 backend/ 目录断开跨端引用（复制即漂移，三源对照设计的目的就是单一 fixture 源，不做）；③用 paths-filter 之类动态 job（对单路径需求过重，YAML 两行的事）。

@@ -1,0 +1,64 @@
+{
+  "change": "2026-10-11-backend-ci-golden-fixture-path",
+  "baseline": "5a8e6a0294e9724656d9a5fcd2fc93eb8ecb325f",
+  "head": "4892540870bff8d45997995ad89d60eb9ed323ed",
+  "files": [
+    ".github/workflows/backend-ci.yml",
+    ".sillyspec/changes/2026-10-11-backend-ci-golden-fixture-path/tasks.md",
+    ".sillyspec/changes/2026-10-11-backend-ci-golden-fixture-path/design.md",
+    ".sillyspec/changes/2026-10-11-backend-ci-golden-fixture-path/proposal.md",
+    ".sillyspec/changes/2026-10-11-backend-ci-golden-fixture-path/requirements.md"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 131,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-11T15:26:46.368Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "ci",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/ci.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5a8e6a0294e9724656d9a5fcd2fc93eb8ecb325f",
+    "totals": {
+      "files": 1,
+      "additions": 5,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": ".github/workflows/backend-ci.yml",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "850d9b578e4dea47481000764426625dbe421fdd13221027d3cc59c3afec3b47",
+  "patchStatus": "ok"
+}

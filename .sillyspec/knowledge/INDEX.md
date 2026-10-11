@@ -201,3 +201,4 @@
 - auto-claude|claude|FR|需求|承接 → [fr/auto-claude.md](fr/auto-claude.md)
 - api-types|FR|需求|承接 → [fr/api-types.md](fr/api-types.md)
 - unmapped|FR|需求|承接 → [fr/unmapped.md](fr/unmapped.md)
+- auto-github|github|FR|需求|承接 → [fr/auto-github.md](fr/auto-github.md)
