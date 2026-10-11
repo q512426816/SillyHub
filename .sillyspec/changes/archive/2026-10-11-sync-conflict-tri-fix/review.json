@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-sync-conflict-tri-fix",
+  "reviewer": "subagent（ZCode Agent 通用代理）",
+  "verdict": "PASS",
+  "reviewedAgainst": "0c821b2ec492f134411d4ab2429e8b7f1da438b0",
+  "findings": [
+    {
+      "severity": "P2",
+      "status": "resolved-fixed",
+      "title": "[首轮 P2-1·已修复验证] daemon 首推已见 conflict 后，重试遇传输类错误会落入旧 tar 全量回退，违背「conflict 不回退 tar」既有不变量（design 弃案②）",
+      "evidence": "增量修复核验（b35fa7f→37c9ce67，c4ff833b0）：spec-sync.ts:902-911 重试轮独立 try/catch，传输失败 warn 后 throw new SpecPushConflict(wsId, result.server_versions ?? {})——此时 result 仍是首推响应（重试赋值在其内层 try 中，抛出前未覆盖），server_versions 正确取首推冲突面；外层 catch :918 对 SpecPushConflict rethrow 不落 tar；包装器 postSpecSync :975 对 SpecPushConflict 不写 pending_push。新用例 spec-sync-incremental.test.ts:370-394 断言三要点全在（rejects SpecPushConflict / incrSpy 恰 2 次 / postSpy 未调 / pending_push 不存在），18 用例实跑全绿。守卫 catch 不区分传输错与程序错（任何重试异常都转抛）——语义偏保守方向（永不覆盖），可接受。",
+      "location": "sillyhub-daemon/src/spec-sync.ts:902-911"
+    },
+    {
+      "severity": "P2",
+      "status": "accepted-boundary",
+      "title": "[首轮 P2-2·已披露为声明边界，裁决可接受] 注册表版本冲突面全为非 changes/ 路径（docs/、quicklog/ 等整树同步对象）时归因失败：区块 0 行而横幅 1 条、无区块裁决入口",
+      "evidence": "design.md「评审后加固」节（:57）已显式声明为边界：当前生产无实证案例、横幅仍可见（listSpecConflicts 同源渲染）、裁决入口留后续按「路径域」扩展 compare 语义并留 knowledge 信号。裁决：可接受——展示层残口无数据正确性风险，有可见性兜底（横幅）与后续路线；实现与 FR-01 字面（「可归因出变更名」为前提）一致。",
+      "location": "frontend/src/components/changes/platform-sync-section.tsx:357-364; design.md 评审后加固节"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-fixed",
+      "title": "[首轮 P3-3·已删除验证] re-base 后重算 ops 为空的「收敛成功」分支不触发 apply_ops，注册表开放行无全绿关闭时机，且语义未入 requirements/design",
+      "evidence": "增量核验：空 ops 特判分支已删（c4ff833b0），原位留推演注释（spec-sync.ts:886-889「op 生成条件与 version 无关→重算 ops 恒与首推同集」）——与首轮独立推演一致（computeIncrementalOps 按 hash/存在性 diff，version 仅进 base_version 字段）；design 弃案④记录。删除无副作用：正常流不可达；极端并发盘回退使重算为空时改为推送空批——backend apply_ops 空 ops 走全绿路径（service.py:2723-2724 关闭注册表行）+ 缓存回写记账正常，反优于原分支的行滞留。语义现入 design（弃案④+加固节），文档面同步收口。",
+      "location": "sillyhub-daemon/src/spec-sync.ts:886-899"
+    },
+    {
+      "severity": "P3",
+      "status": "accepted-boundary",
+      "title": "[首轮 P3-4·已披露，裁决可接受] change.patch 冻结件混入并行变更 2026-10-11-linked-repo-workspace-ref 的模块文档 diff",
+      "evidence": "design「评审后加固」节（:59）披露冻结配方=baseline→工作区全量 diff、并行在途变更无法剔除，归档读者以 commit 链为准（1e8a4a275/c83531fe1/e0b1ce16+评审加固提交）。重冻结件核验：代码文件部分仍仅本变更四处（daemon src/test + 前端组件/test），无 api-types.ts/openapi.json 文件改动（39 处字样命中均为文档文本）；随配方带入的 review.json/备份/change.patch 自引用条目属同源噪音框架，可接受。",
+      "location": ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/change.patch; design.md 评审后加固节"
+    },
+    {
+      "severity": "P3",
+      "status": "resolved-fixed",
+      "title": "[复审新增·已修复验证] requirements.md FR-04 绑定节用例计数未随评审加固更新：仍写「daemon 17 用例」（实际 18），新增传输守卫用例未入 FR-02 绑定行",
+      "evidence": "终审增量核验（37c9ce67→0c821b2e，仅 requirements.md 一处）：FR-02 绑定节新增「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」行——用例名与 spec-sync-incremental.test.ts:370 实际用例逐字一致；FR-04 计数改「daemon 18 用例」与实跑 18 passed 相符。无代码改动，文档与实态对齐。",
+      "location": ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/requirements.md:94-97"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-11T10:55:45Z",
+  "reviewDetail": {
+    "reviewScope": "三轮评审累计：b35fa7f5（首轮全量）→ 37c9ce677（复审：c4ff833b0 传输守卫+死代码删除、工件/披露收口）→ 0c821b2e（终审：仅 requirements.md 绑定节补传输守卫用例行 + FR-04 计数 17→18，无代码改动）。未动部分沿用前轮结论。",
+    "dispositionVerification": {
+      "P2-1传输守卫": "代码与声明相符：转抛用首推 server_versions（result 在重试赋值抛出时未覆盖，仍持首推冲突响应）、不落 tar（外层 catch :918 rethrow）、不写 pending_push（包装器 :975 instanceof 分支）；新用例名与声明逐字一致且断言三要点，18/18 实跑全绿。",
+      "P2-2声明边界": "design 加固节表述与代码实态一致（归因正则未变）；裁决可接受（横幅可见兜底+后续路径域扩展信号）。",
+      "P3-3死代码删除": "删除点正确、推演注释与 computeIncrementalOps 实际逻辑相符（op 生成由 hash/存在性驱动，version 仅进 base_version）；无副作用路径（空批推送走 backend 全绿关闭语义）。",
+      "P3-4冻结件噪音": "披露与重冻结件实态一致；以 commit 链为准的裁决可接受。"
+    },
+    "newFindings": "终审无新发现——增量仅一处文档修订且与实态逐字核对相符。",
+    "verdictBasis": "无 P1；5 条 findings 全部闭环（3 修复验证 + 2 披露裁决可接受，无 open 项）；盲维四问全 ok；终审增量（requirements.md 绑定节补行/计数）与测试实态逐字一致。PASS。"
+  }
+}

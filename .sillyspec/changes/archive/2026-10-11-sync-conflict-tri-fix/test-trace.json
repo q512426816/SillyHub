@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-sync-conflict-tri-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行——机器 pending_conflicts 为空也渲染：spec 徽章 + 变更名 + 查看对比 + 计数对齐」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行与机器行同名去重——机器行优先不重复渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-03",
+      "tests": [
+        "test/platform-sync-fulltree.test.mjs「全树冲突归因单一 CJK 变更——冲突文件按变更名落盘（per-change 兼容）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-03",
+      "tests": [
+        "test/assert-safe-change-name.test.mjs「日期前缀+中文描述」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-sync-conflict-tri-fix"
+    }
+  ]
+}

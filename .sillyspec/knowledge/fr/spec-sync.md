@@ -442,3 +442,80 @@ created_at: 2026-09-22T17:27:13.449Z
   confirmed_at: null
   source_change: 2026-10-11-junction-fallback-backup-sweep
   status: active
+
+## FR-spec-sync-023 platform-sync-section 渲染注册表「版本冲突」型开放行（非纯墓碑）并给对比/裁决入口，未决冲突计数与横幅口径一致
+变更：2026-10-11-sync-conflict-tri-fix
+状态：active
+摘要：主路径（注册表行可见可裁决）；与机器行去重；混合行（版本冲突 + 墓碑并集）
+场景正文：
+- 场景：主路径（注册表行可见可裁决） — Given 注册表有 1 条开放行（conflicting_paths 含 `changes/archive/X/tasks.md`，platform_deleted 为空；When 渲染平台同步区块；Then 渲染 1 行 spec 徽章 + 变更名 X + 「查看对比」按钮，卡头「未决冲突」= 1（与横幅计数一致）。
+- 场景：与机器行去重 — Given 同一变更名已存在于机器 pending_conflicts 行（CLI 侧冲突）；When 渲染；Then 只渲染机器行一次，不因注册表行重复渲染。
+- 场景：混合行（版本冲突 + 墓碑并集） — Given conflicting_paths 同时含版本冲突路径与 platform_deleted 路径；When 渲染；Then 按版本冲突面归因渲染（墓碑行判定要求纯墓碑，混合行不额外渲染墓碑行）。
+全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-01
+最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/__tests__/platform-sync-section.test.tsx「注册表版本冲突行与机器行同名去重——机器行优先不重复渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-sync-conflict-tri-fix
+  status: active
+
+## FR-spec-sync-024 daemon 增量推送撞乐观锁冲突后自动重拉 re-base 一次并重试，re-base 后仍冲突才落注册表
+变更：2026-10-11-sync-conflict-tri-fix
+状态：active
+摘要：主路径（re-base 自愈）；真分叉仍上抛；无版本面不重试
+场景正文：
+- 场景：主路径（re-base 自愈） — Given 缓存 base_version 过期（他端已把文件推到 v4，本地持 v2，内容相同——2026-10-11 生产实证 workflow 工作区形态）；When 增量推送撞 conflict → re-base 到 v4 → 重算 ops（同内容豁免 / base 匹配）→ 重试；Then 全绿返回，不抛 SpecPushConflict，注册表开放行随全绿自动关闭。
+- 场景：真分叉仍上抛 — Given 两端对同路径内容真分叉；When 首推 conflict → re-base → 重试仍 conflict；Then 抛 SpecPushConflict，调用方语义与现状一致（warn + 人工裁决）。
+- 场景：无版本面不重试 — Given conflict=true 但 server_versions 为空；When 推送；Then 直接抛 SpecPushConflict（无从 re-base，不做无意义重算）。
+全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-02
+最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-sync-conflict-tri-fix
+  status: active
+
+## FR-spec-sync-025 sillyspec CLI platform sync 支持不带 --change 的全树同步；assertSafeChangeName 放行磁盘已存在的变更名
+变更：2026-10-11-sync-conflict-tri-fix
+状态：active
+摘要：主路径（全树同步）；中文名放行（生产实证用例）；穿越仍拦；未连接明确提示
+场景正文：
+- 场景：主路径（全树同步） — Given 工作区已 platform connect、归档目录与活跃目录均有待同步内容；When `sillyspec platform sync`（无 --change）；Then 走 syncSpecTree 全树 diff 推送完成，退出码 0，无「需要指定变更名称」报错。
+- 场景：中文名放行（生产实证用例） — Given 磁盘存在 `changes/archive/2026-10-10-取消LTC宽表校验规则/`；When `sillyspec platform sync --change 2026-10-10-取消LTC宽表校验规则`；Then 守卫放行进入同步（不再报「含非法字符」）。
+- 场景：穿越仍拦 — Given `--change "a/../b"` 或 `--change "a/b"`；When 任一经守卫入口；Then 仍被拒（安全语义不回归）。
+- 场景：未连接明确提示 — Given 未 platform connect；When `sillyspec platform sync`（无 --change）；Then 输出明确「未连接平台」提示，不静默成功。
+全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-03
+最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-sync-conflict-tri-fix:flow:测试绑定FR-03
+  tests: test/assert-safe-change-name.test.mjs「日期前缀+中文描述」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-sync-conflict-tri-fix
+  status: active
+
+## FR-spec-sync-026 三处修复各有单测覆盖且相关测试全绿
+变更：2026-10-11-sync-conflict-tri-fix
+状态：active
+摘要：（无场景名）
+全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-04
+最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0

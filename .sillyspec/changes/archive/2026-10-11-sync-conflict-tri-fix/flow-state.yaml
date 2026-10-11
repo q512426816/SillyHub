@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,7 +28,7 @@ input: >-
   - 三处修复各有单测覆盖且相关测试全绿
 autopilot: true
 baseline_commit: 0f7af00fe3d1835655461c9f2a8c59223819dfb6
-updatedAt: '2026-10-11T10:39:09.444Z'
+updatedAt: '2026-10-11T10:56:22.884Z'
 baseline_sha256: cddf059213b9fe296ad2fe0068d39c5b412f88d5f25c1dab5d136186f65f7252
 gate_summary: >-
   test: skipped ← module[]+deps(py1+nontest-skip1+jsx7)+fr(7)（13.7s）

@@ -1,12 +1,13 @@
 {
   "change": "2026-10-11-sync-conflict-tri-fix",
   "baseline": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
-  "head": "b35fa7f538e33886242ec20ee06ce99ba3fd57d0",
+  "head": "0c821b2ec492f134411d4ab2429e8b7f1da438b0",
   "files": [
     ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/design.md",
     ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/flow-state.yaml",
     ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/proposal.md",
     ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/requirements.md",
+    ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/review.json",
     ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/tasks.md",
     ".sillyspec/docs/multi-agent-platform/modules/_module-map.yaml",
     ".sillyspec/docs/multi-agent-platform/modules/backend.md",
@@ -14,14 +15,15 @@
     "frontend/src/components/changes/__tests__/platform-sync-section.test.tsx",
     "frontend/src/components/changes/platform-sync-section.tsx",
     "sillyhub-daemon/src/spec-sync.ts",
-    "sillyhub-daemon/tests/spec-sync-incremental.test.ts"
+    "sillyhub-daemon/tests/spec-sync-incremental.test.ts",
+    ".sillyspec/changes/2026-10-11-sync-conflict-tri-fix/review.json.superseded-20261011T105112"
   ],
   "totals": {
-    "files": 12,
-    "additions": 523,
+    "files": 14,
+    "additions": 696,
     "deletions": 10
   },
-  "savedAt": "2026-10-11T10:39:09.442Z",
+  "savedAt": "2026-10-11T10:56:21.404Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
   "modules": [
     {
@@ -68,7 +70,7 @@
     "baseAnchor": "0f7af00fe3d1835655461c9f2a8c59223819dfb6",
     "totals": {
       "files": 7,
-      "additions": 298,
+      "additions": 335,
       "deletions": 10
     },
     "rows": [
@@ -104,13 +106,13 @@
       },
       {
         "path": "sillyhub-daemon/src/spec-sync.ts",
-        "additions": 74,
+        "additions": 84,
         "deletions": 5,
         "kind": "modified"
       },
       {
         "path": "sillyhub-daemon/tests/spec-sync-incremental.test.ts",
-        "additions": 65,
+        "additions": 92,
         "deletions": 1,
         "kind": "modified"
       }
@@ -121,6 +123,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "68ef492d850b1b5edf08ebfe00d70277de3c5240d4773c444440481be443962a",
+  "patchSha256": "f766e77204217b23c8f78139878aae2bda010e825ecc0963d76572cb986ce851",
   "patchStatus": "ok"
 }
