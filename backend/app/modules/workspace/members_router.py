@@ -144,6 +144,7 @@ async def _row_to_view(
     return WorkspaceMemberView(
         user_id=row.user_id,
         email=user.email,
+        username=user.username,
         display_name=user.display_name,
         role_key=role.key,
         role_name=role.name,

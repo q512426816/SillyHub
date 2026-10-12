@@ -37,6 +37,7 @@ function makeMember(overrides: Partial<WorkspaceMemberView> = {}): WorkspaceMemb
   return {
     user_id: "lender-uuid-0",
     email: "dev@test.com",
+    username: "dev-user",
     display_name: "张开发",
     role_key: "developer",
     role_name: "开发者",

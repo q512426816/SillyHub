@@ -839,3 +839,71 @@ async def test_fr06_transfer_concurrent_only_one_succeeds(
     # succeeding would have left the workspace with 3 owners, violating R-01.
     ok = [r for r in (r1, r2) if r.status_code == 200]
     assert len(ok) <= 1
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# email=None（纯用户名账号，D-001）可空性回归 —— 2026-10-12-nullable-email-dto-fix
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def test_list_and_search_return_200_for_email_null_user(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+):
+    """email=None 成员：列表与邀请搜索均返回 200 且 email=null、username 有值。
+
+    线上实证（request_id f9c93f39，RoleUserRead 同类缺陷）：WorkspaceMemberView /
+    UserSearchHit 的 email 曾声明必填 str，纯用户名账号（2026-06-24-username-login
+    D-001）触发 pydantic ValidationError → 500。成员与工作区外候选两种形态都覆盖。
+    """
+    from app.core.security import password_hasher
+    from app.modules.auth.model import User
+
+    owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
+    ws = await ws_factory(owner_id=owner.id)
+    await member_factory(ws.id, owner.id, "workspace_owner")
+
+    def _null_email_user(prefix: str, display_name: str) -> User:
+        return User(
+            id=uuid.uuid4(),
+            email=None,
+            username=f"{prefix}-{uuid.uuid4().hex[:6]}",
+            password_hash=password_hasher.hash("Pass123!"),
+            display_name=display_name,
+            status="active",
+        )
+
+    null_member = _null_email_user("nullm", "Null Member")
+    null_outside = _null_email_user("nullo", "Null Outside")
+    db_session.add_all([null_member, null_outside])
+    await db_session.commit()
+
+    await member_factory(ws.id, null_member.id, "developer")
+    headers = _bearer(owner_tok)
+
+    # 列表：email=None 成员 → 200，email=null、username 有值。
+    resp = await client.get(f"/api/workspaces/{ws.id}/members", headers=headers)
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    row = next(it for it in items if it["user_id"] == str(null_member.id))
+    assert row["email"] is None
+    assert row["username"] == null_member.username
+    assert row["role_key"] == "developer"
+
+    # 搜索：按 display_name 命中工作区外的 email=None 用户 → 200，不炸。
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/members/search",
+        params={"q": "null outside"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    hits = resp.json()["items"]
+    assert len(hits) == 1
+    assert hits[0]["user_id"] == str(null_outside.id)
+    assert hits[0]["email"] is None
+    assert hits[0]["username"] == null_outside.username
+    assert hits[0]["is_member"] is False

@@ -55,7 +55,9 @@ export function WorkspaceMemberRow({
   const setOwnerDisabled = actionLoading || isCurrentUser;
   const removeDisabled = actionLoading || isCurrentUser;
 
-  const displayName = member.display_name?.trim() || member.email;
+  // email/username 均可空（D-001 纯用户名账号），逐级回退
+  const displayName =
+    member.display_name?.trim() || member.email || member.username;
 
   return (
     <tr className="border-t border-border hover:bg-muted/25">
@@ -71,7 +73,7 @@ export function WorkspaceMemberRow({
             )}
           </span>
           <span className="text-[11px] text-muted-foreground">
-            {member.email}
+            {member.email ?? `用户名：${member.username ?? "—"}`}
           </span>
         </div>
       </td>

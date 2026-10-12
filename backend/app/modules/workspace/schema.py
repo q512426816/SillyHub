@@ -311,7 +311,11 @@ def slugify(name: str) -> str:
 
 class WorkspaceMemberView(BaseModel):
     user_id: uuid.UUID
-    email: str
+    # email 可空：D-001 纯用户名账号（2026-06-24-username-login）email=None，
+    # 必填 str 会直接 ValidationError → 500（与 admin RoleUserRead 同类，
+    # 线上 request_id f9c93f39 实证）；username 作该类账号的可识别回退标识。
+    email: str | None
+    username: str | None = None
     display_name: str | None
     role_key: str
     role_name: str
@@ -337,7 +341,8 @@ class WorkspaceMemberUpdateRequest(BaseModel):
 
 class UserSearchHit(BaseModel):
     user_id: uuid.UUID
-    email: str
+    email: str | None
+    username: str | None = None
     display_name: str | None
     is_member: bool  # 通常为 False（搜索时已排除），保留字段供前端展示
 

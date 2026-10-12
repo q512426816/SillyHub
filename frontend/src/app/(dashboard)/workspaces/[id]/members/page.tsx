@@ -192,11 +192,15 @@ export default function MembersPage({ params }: Props) {
                   onSetOwner={() =>
                     handleTransferOwnership(
                       m.user_id,
-                      m.display_name ?? m.email,
+                      // email/username 均可空（D-001 纯用户名账号），兜底短 id
+                      m.display_name ?? m.email ?? m.username ?? m.user_id.slice(0, 8),
                     )
                   }
                   onRemove={() =>
-                    handleRemove(m.user_id, m.display_name ?? m.email)
+                    handleRemove(
+                      m.user_id,
+                      m.display_name ?? m.email ?? m.username ?? m.user_id.slice(0, 8),
+                    )
                   }
                 />
               ))}

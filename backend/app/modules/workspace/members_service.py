@@ -121,6 +121,7 @@ async def list_members(
         select(
             col(User.id),
             col(User.email),
+            col(User.username),
             col(User.display_name),
             col(Role.key),
             col(Role.name),
@@ -135,11 +136,12 @@ async def list_members(
     rows = (await session.execute(stmt)).all()
 
     views: list[WorkspaceMemberView] = []
-    for uid, email, display_name, role_key, role_name, granted_at in rows:
+    for uid, email, username, display_name, role_key, role_name, granted_at in rows:
         views.append(
             WorkspaceMemberView(
                 user_id=uid,
                 email=email,
+                username=username,
                 display_name=display_name,
                 role_key=role_key,
                 role_name=role_name,
@@ -196,6 +198,7 @@ async def search_users_for_invite(
         select(
             col(User.id),
             col(User.email),
+            col(User.username),
             col(User.display_name),
         )
         .where(col(User.status) == "active")
@@ -214,10 +217,11 @@ async def search_users_for_invite(
         UserSearchHit(
             user_id=uid,
             email=email,
+            username=username,
             display_name=display_name,
             is_member=False,
         )
-        for uid, email, display_name in rows
+        for uid, email, username, display_name in rows
     ]
 
 

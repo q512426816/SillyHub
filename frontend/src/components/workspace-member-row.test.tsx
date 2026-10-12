@@ -16,6 +16,7 @@ function makeMember(
   return {
     user_id: "u-1",
     email: "biz@test.com",
+    username: "biz-user",
     display_name: "李业务",
     role_key: "viewer",
     role_name: "只读成员",
@@ -80,5 +81,30 @@ describe("WorkspaceMemberRow business_member 选项（task-12 / FR-02）", () =>
     );
     // 业务成员在白名单，不应出现「不可修改」兜底 option
     expect(screen.queryByText(/不可修改/)).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkspaceMemberRow email=null 回退（2026-10-12-nullable-email-dto-fix / FR-04）", () => {
+  afterEach(() => cleanup());
+
+  it("email=null（纯用户名账号）主名回退 username、副行显示用户名，不渲染 null 不崩", () => {
+    render(
+      <WorkspaceMemberRow
+        member={makeMember({
+          email: null,
+          username: "nulluser",
+          display_name: null,
+        })}
+        actionLoading={false}
+        onRoleChange={vi.fn()}
+        onSetOwner={vi.fn()}
+        onRemove={vi.fn()}
+      />,
+    );
+    // 主名回退链 display_name → email → username 命中 username
+    expect(screen.getByText("nulluser")).toBeInTheDocument();
+    // 副行回退展示「用户名：…」而不是渲染空/字面 null
+    expect(screen.getByText("用户名：nulluser")).toBeInTheDocument();
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
   });
 });

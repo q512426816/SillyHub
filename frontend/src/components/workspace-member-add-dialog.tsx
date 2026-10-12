@@ -185,7 +185,10 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
                         <span>
                           {hit.display_name ?? "（无显示名）"}{" "}
                           <span className="text-muted-foreground">
-                            &lt;{hit.email}&gt;
+                            {/* email 可空（D-001 纯用户名账号），回退展示用户名 */}
+                            {hit.email
+                              ? `<${hit.email}>`
+                              : `用户名：${hit.username ?? "—"}`}
                           </span>
                         </span>
                         {active && <span className="text-primary">已选</span>}

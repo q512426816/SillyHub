@@ -23,7 +23,10 @@ export type WorkspaceMemberRoleKey =
 
 export interface WorkspaceMemberView {
   user_id: string; // backend: uuid.UUID → 前端 string
-  email: string;
+  // email 可空：D-001 纯用户名账号（2026-06-24-username-login）后端 email=None；
+  // username 作该类账号的可识别回退标识（与 backend schema.py 1:1）。
+  email: string | null;
+  username: string | null;
   display_name: string | null;
   // 响应里用 str（不用 Literal），允许 service 回显 platform_admin 等用于显示
   role_key: string;
@@ -38,7 +41,8 @@ export interface WorkspaceMemberListResponse {
 
 export interface UserSearchHit {
   user_id: string;
-  email: string;
+  email: string | null; // D-001 纯用户名账号可为 null，展示回退 username
+  username: string | null;
   display_name: string | null;
   is_member: boolean; // 通常 false（搜索时已排除已是成员的）
 }

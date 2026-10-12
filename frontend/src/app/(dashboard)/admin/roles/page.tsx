@@ -637,7 +637,9 @@ function RoleUsersDrawer({
 
 interface AggregatedRoleUser {
   id: string;
-  email: string;
+  // email/username 均可空（D-001 纯用户名账号），渲染与排序须空值回退
+  email: string | null;
+  username: string | null;
   display_name: string | null;
   is_platform_admin: boolean;
   status: string;
@@ -662,6 +664,7 @@ function aggregateUsers(users: RoleUserRead[]): AggregatedRoleUser[] {
       map.set(u.id, {
         id: u.id,
         email: u.email,
+        username: u.username,
         display_name: u.display_name,
         is_platform_admin: u.is_platform_admin,
         status: u.status,
@@ -674,8 +677,11 @@ function aggregateUsers(users: RoleUserRead[]): AggregatedRoleUser[] {
       });
     }
   }
-  // 按邮箱排序保证稳定顺序
-  return Array.from(map.values()).sort((a, b) => a.email.localeCompare(b.email));
+  // 排序键空值安全：email/username 均可空，null 上调 localeCompare 会抛错
+  const sortKey = (u: AggregatedRoleUser) => u.email ?? u.username ?? "";
+  return Array.from(map.values()).sort((a, b) =>
+    sortKey(a).localeCompare(sortKey(b)),
+  );
 }
 
 function RoleUsersTable({ users }: { users: RoleUserRead[] }) {
@@ -709,8 +715,12 @@ function RoleUsersTable({ users }: { users: RoleUserRead[] }) {
               );
             return (
               <tr key={u.id} className="border-b last:border-0">
-                <td className="px-2 py-1.5 font-mono text-[11px]">{u.email}</td>
-                <td className="px-2 py-1.5">{u.display_name ?? "—"}</td>
+                <td className="px-2 py-1.5 font-mono text-[11px]">
+                  {u.email ?? "—"}
+                </td>
+                <td className="px-2 py-1.5">
+                  {u.display_name ?? u.username ?? "—"}
+                </td>
                 <td className="px-2 py-1.5">{bindingBadge}</td>
                 <td className="px-2 py-1.5 text-[11px] align-top">
                   {wsCount === 0 ? (

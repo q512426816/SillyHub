@@ -357,7 +357,10 @@ export type RoleUserBindingType = "platform" | "workspace";
 
 export interface RoleUserRead {
   id: string;
-  email: string;
+  // email 可空：D-001 纯用户名账号（2026-06-24-username-login）后端 email=None；
+  // username 作该类账号的可识别回退标识（与 backend admin/schema.py 1:1）。
+  email: string | null;
+  username: string | null;
   display_name: string | null;
   is_platform_admin: boolean;
   status: string;

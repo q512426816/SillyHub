@@ -23881,7 +23881,9 @@ export interface components {
              */
             id: string;
             /** Email */
-            email: string;
+            email: string | null;
+            /** Username */
+            username?: string | null;
             /** Display Name */
             display_name: string | null;
             /** Is Platform Admin */
@@ -28035,7 +28037,9 @@ export interface components {
              */
             user_id: string;
             /** Email */
-            email: string;
+            email: string | null;
+            /** Username */
+            username?: string | null;
             /** Display Name */
             display_name: string | null;
             /** Is Member */
@@ -28768,7 +28772,9 @@ export interface components {
              */
             user_id: string;
             /** Email */
-            email: string;
+            email: string | null;
+            /** Username */
+            username?: string | null;
             /** Display Name */
             display_name: string | null;
             /** Role Key */

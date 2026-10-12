@@ -44,7 +44,8 @@ function resolveLenderLabel(
 ): string {
   const m = members?.find((x) => x.user_id === lenderUserId);
   if (!m) return lenderUserId.slice(0, 8);
-  return m.display_name?.trim() || m.email;
+  // email/username 均可空（D-001 纯用户名账号），兜底短 id
+  return m.display_name?.trim() || m.email || m.username || lenderUserId.slice(0, 8);
 }
 
 function shortId(id: string | null): string {
