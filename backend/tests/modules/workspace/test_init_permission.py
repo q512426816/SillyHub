@@ -138,6 +138,7 @@ async def test_init_non_member_still_403(client: AsyncClient, db_session, readon
     assert resp.status_code == 403, resp.text
     body = resp.json()
     assert body["details"]["workspace_id"] == str(ws.id)
+    assert body["details"]["permission"] == "workspace:read"
 
 
 @pytest.mark.asyncio
