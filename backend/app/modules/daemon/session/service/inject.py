@@ -613,6 +613,12 @@ async def _inject_into_session(
             status="pending",
             spec_strategy="interactive",
             agent_session_id=session.id,
+            # 2026-10-12-run-level-change-attribution task-03 / FR-01：轮级打锚
+            # ——新开轮记为会话「当前变更上下文」（run_sync 命令解析通道回写的
+            # current_change_id），使一个会话先后执行多个变更时执行用量可按轮
+            # 拆分归属。上下文为空（NULL）保持现状无锚行为；与 create_session
+            # 首 run 的 change_id（派发参数，create.py:428）语义衔接一致。
+            change_id=session.current_change_id,
             # 2026-09-10-auto-resume-interrupted-turn：续跑轮审计标记（源 run id）。
             metadata_=(
                 {"auto_resume_of": str(auto_resume_of)} if auto_resume_of is not None else None
