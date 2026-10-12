@@ -125,6 +125,9 @@ export function hitTestAttRefOverlay(
   return null;
 }
 
+/** 悬停浮层高度粗估（px）——底部空间不足时的翻转判定用（两行文本 + padding）。 */
+const TIP_EST_HEIGHT = 48;
+
 export function InputRefOverlay({
   value,
   tokens,
@@ -149,8 +152,13 @@ export function InputRefOverlay({
         data-ws-ref-hover-tip
         aria-hidden
         style={{
-          left: Math.min(hoverTip.x + 14, window.innerWidth - 320),
-          top: Math.min(hoverTip.y + 16, window.innerHeight - 56),
+          left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
+          /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外，
+           * 2026-10-12 实测 tip y=965 > 视口 940 物理不可见的根因）。 */
+          top:
+            hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
+              ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
+              : hoverTip.y + 16,
         }}
         className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
       >

@@ -188,6 +188,32 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
     expect(container.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
   });
 
+  it("hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="【📄 design.md】"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        /* jsdom innerHeight 默认 768：y=720 时 720+16+48=784 超出 → 翻转上方。 */
+        hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 720 }}
+      />,
+    );
+    const tip = container.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    expect(tip).not.toBeNull();
+    expect(tip.style.top).toBe("662px"); // 720 - 48(TIP_EST_HEIGHT) - 10
+    // 常规位置（下方 16px）不受影响
+    const { container: c2 } = render(
+      <InputRefOverlay
+        value="【📄 design.md】"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        hoverTip={{ text: "x", x: 100, y: 200 }}
+      />,
+    );
+    const tip2 = c2.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    expect(tip2.style.top).toBe("216px");
+  });
+
   it("× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）", () => {
     render(
       <InputRefOverlay
