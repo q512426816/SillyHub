@@ -27,3 +27,16 @@ repos:
         language: system
         types: [python]
         pass_filenames: true
+
+# 2026-10-11-assertion-surface-guard：共享断言面同步闸门（check-only）——契约源
+# （六面清单 + ⑦菜单注册表 ⑧协议 MSG）被触碰而配对钉子测试未同提交时 fail-closed。
+# 清单权威：.sillyspec/knowledge/testing-gotchas.md「共享断言面」条目（与
+# scripts/check-assertion-surfaces.py RULES 两处同步登记）。提醒性注释拦不住
+#（本周 4 处漏跟实证），故上机制闸；单测 scripts/test_check_assertion_surfaces.py。
+      - id: assertion-surfaces
+        name: check assertion surfaces
+        entry: >-
+          bash -c 'python scripts/check-assertion-surfaces.py || { echo "  ↩ 本闸 check-only 不改文件；按上面指引同步钉子测试后重新 add（勿绕过——仓库规则 10）"; exit 1; }' --
+        language: system
+        pass_filenames: false
+        always_run: true

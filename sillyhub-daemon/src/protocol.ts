@@ -17,6 +17,9 @@ import type { components } from './api-types.js';
 
 // ── WebSocket 消息类型 ───────────────────────────────────────────────────────
 // 值形如 `daemon:<action>`，前缀 `daemon:` 不可漏。
+// 共享断言面⑧（2026-10-11-assertion-surface-guard 登记）：本表增删常量必须同一
+// 提交同步 tests/protocol-session-contract.test.ts 的 MSG 总数钉（N→N+1）——
+// pre-commit 闸门 scripts/check-assertion-surfaces.py 会拦漏跟提交。
 
 /** Server → Daemon 消息类型 + 双向消息（HEARTBEAT 既入又出）。 */
 export const MSG = {

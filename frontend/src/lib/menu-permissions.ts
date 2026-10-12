@@ -94,6 +94,10 @@ export interface MenuPermissionGroup {
   navHidden?: boolean;
 }
 
+// 共享断言面⑦（2026-10-11-assertion-surface-guard 登记）：本注册表增删条目会
+// 平移全部后续条目的声明序索引，必须同一提交重算 admin/menus 管理页测试的
+// 组内上移/下移声明序锚（8a928588f 删两项全体前移 2 实证）——pre-commit 闸门
+// scripts/check-assertion-surfaces.py 会拦漏跟提交。
 export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   // ── workspace 工作区（8 条，原 overview 组平移）───────────────
   {
