@@ -4192,6 +4192,11 @@ export class Daemon {
     //     不代报——_worker_done_core 每调用 INSERT artifact 无去重，双通道会双写；
     //   - !isError 且 result 为非空白 string：失败轮 / 空产出不代报（防空 summary
     //     噪声行）。
+    // 2026-10-12-pi-oldhost-fallback-pin：pi 静态 caps.mcp=true 描述机制支持
+    // （SPIKE-00 pi>=1.0），宿主旧版由 pi-rpc-driver 运行时门控跳过注入（会话无
+    // worker_done 工具）——该形态不立即代报也无人自报，经下方 provider 无关的
+    // +90s 延迟探测兜底收敛（90s 延迟属设计内）；静态表不感知宿主版本属有意
+    // 设计，勿在延迟探测上加 provider 门（会静默回归旧版 pi 收敛面，测试有钉）。
     if (
       state.stage === 'mission_worker' &&
       getProviderCaps(state.provider).mcp === false &&

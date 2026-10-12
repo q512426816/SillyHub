@@ -16,6 +16,11 @@
 // 正例与门控矩阵测试载体从 pi 换成仍 mcp=false 的 codex（机制断言不变）；
 // pi 新契约（零代报）补独立钉子。
 //
+// 2026-10-12-pi-oldhost-fallback-pin：旧版 pi 宿主（pi-rpc-driver 运行时探测
+// major<1 跳过 MCP 注入、会话无 worker_done 工具）不立即代报也无人自报，经
+// provider 无关的 +90s 延迟探测兜底收敛（ql-20260911-028 安全网）——补 pi 载体
+// 延迟兜底钉子，静态 caps 表不感知宿主版本属有意设计（两层门控分工不变）。
+//
 // 覆盖（门控矩阵 + 顺序 + 容错）：
 //   - mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报：
 //     前两参 undefined、summary=全文（不截断）、opts.sessionId=分身会话 id、
@@ -506,6 +511,40 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白 
     // 立即路径：mcp=true 不代报（防双写语义保留）。
     expect(client['workerDone']).not.toHaveBeenCalled();
     expect(client['getMissionStatus']).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(client['getMissionStatus']).toHaveBeenCalledWith(undefined, undefined, {
+      sessionId: 'sess-mw-1',
+    });
+    expect(client['workerDone']).toHaveBeenCalledTimes(1);
+    expect(client['workerDone']).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      { summary: FULL_TEXT },
+      { sessionId: 'sess-mw-1' },
+    );
+  });
+
+  it('pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）', async () => {
+    // 7bd743230 把 pi.caps.mcp 翻 true（SPIKE-00 pi>=1.0 实测）后，立即代报门对
+    // pi 不再放行；宿主 pi<1.0 时 pi-rpc-driver 运行时门控跳过 MCP 注入（会话无
+    // worker_done 工具、无法自报）——该形态与「claude 分身未调工具」同构，经本处
+    // provider 无关的 +90s 延迟探测兜底收敛（90s 延迟属设计内）。此钉子防未来给
+    // 延迟探测加 provider 门或改立即门语义时静默回归旧版 pi 收敛面。
+    vi.useFakeTimers();
+    const { daemon, client } = buildFallbackHarness(
+      { stage: 'mission_worker', provider: 'pi' },
+      async () => ({
+        active: true,
+        workers: [{ id: 'run-mw-1', artifacts: [] }],
+      }),
+    );
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
+    await vi.advanceTimersByTimeAsync(0);
+    // 立即路径：caps.mcp=true 不放行（防双写语义保留）。
+    expect(client['workerDone']).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(90_000);
     expect(client['getMissionStatus']).toHaveBeenCalledWith(undefined, undefined, {
