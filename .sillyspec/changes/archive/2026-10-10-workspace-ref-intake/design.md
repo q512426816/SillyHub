@@ -64,17 +64,20 @@ scale: large
 | 修改 | frontend/src/components/daemon/session-input-bar.tsx | wsRefTokens 状态 + onWsRefTokensChange 受控回传（producer=输入区，consumer=组装位经父级）+ pendingWsRefInsert prop 消费插入 + 删附件联动只剥附件 token |
 | 修改 | frontend/src/components/daemon/input-ref-overlay.tsx | props 扩展 tokenMetas → 左上类型角标（D-001）+ 悬停 tooltip 元数据；背景块仍严禁 margin/padding |
 | 修改 | frontend/src/components/daemon/attachment-ref-tag.tsx | InlineAttRefText 内部换 parseInlineRefs；三类标记标签渲染 + onOpenWsRef 回调 |
-| 修改 | frontend/src/components/daemon/turn-segment-views.tsx | 正文段消费点接 onOpenWsRef → FilePreviewModal（fetch=fetchDownload） |
+| 修改 | frontend/src/components/daemon/turn-segment-views.tsx | 正文段消费点接 onOpenWsRef → FilePreviewModal（fetch=fetchDownload）——实际零改动：渲染内聚至 InlineAttRefTextWithPreview（D-014），消费点自动获得三类标签 |
+| 修改 | frontend/src/components/daemon/session-panel/index.tsx | SessionPanel 分发器透传 pendingWsRefInsert/onWsRefTokensChange 到 page/dialog（D-012 执行期裁决：plan 漏通道文件，纯透传） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 透传 pendingWsRefInsert 槽位；定时/队列/handleSend 组装位接入 substituteWsRefsForSend |
-| 修改 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | 透传槽位；两处组装位接入置换 |
+| 修改 | frontend/src/components/daemon/session-panel/session-panel-dialog.tsx | 透传槽位；三处组装位接入置换（312/392/1343，D-008@v2 实测） |
 | 修改 | frontend/src/components/group-chat/group-chat-panel.tsx | 群聊输入区同款接入（wsRefTokens/插入/置换/历史渲染）+ pendingWsRefInsert prop |
 | 修改 | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | 用例：并集分配（同名 ·2 / 异基名免序号）/三类置换/三类解析/孤儿降级 |
 | 修改 | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | 用例：类型角标按 kind 渲染、tooltip 元数据 |
+| 修改 | frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | 用例：三类标记解析渲染标签/点击预览分流/历史逐字不变（task-09） |
 | 修改 | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | 用例：右键插入工作区引用/退格整删/删附件不误剥工作区 token/pendingWsRefInsert 消费 |
 | 修改 | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | 用例：群聊插入 + 发送置换 + 历史标签 |
 | 修改 | frontend/src/components/explorer/__tests__/file-explorer.test.tsx | 用例：文件/目录右键菜单项触发回调 |
 | 修改 | frontend/src/components/explorer/__tests__/file-preview.test.tsx | 用例：行号渲染 / 选中行右键回调（desc 行号正确）/ 无选区不拦截 |
-| 修改 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | 用例：pendingWsRefInsert 槽位下发（真会话/预会话/群聊分支）、空门户 toast |
+| 修改 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | 用例：pendingWsRefInsert 槽位下发（真会话/预会话/群聊分支）、端到端插入 |
+| 修改 | frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | 用例：两壳回调透传（task-06 用例落点，计划审查 P2 建议） |
 
 ## 接口定义
 

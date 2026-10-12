@@ -2423,3 +2423,92 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：b63e251d656e77106b36eabed32f96d9f629e30c
 理由：- 风险：移除机器白名单后，linked_repos 对「失陷 backend 下发任意存在路径」的防线回落到与会话路径相同的信任模型（backend 绑定 vouch + 存在性检查）——这是 ql-20260831-006 已裁决的平台信任边界，本变更是恢复一致性而非新增暴露；残余面（lease/spec-sync 路径同样信任 backend rootPath）在此一并留档为已知边界。 - 放弃方案 A：保留白名单但 forbidden 降级为结果体 skipped——同步仍然不做（功能回归未修复），只是把 5xx 变安静失败，更难排障。 - 放弃方案 B：机器主人把工作区根手工加入 allowed_roots 作为上线前提——把配置负担转嫁用户且与 ql-20260831-006「不该拦截」的裁决直接相悖。 - 放弃方案 C：num_turns/duration_ms 保持裸 typeof（危害止于单轮 NULL）——与同函数另两字段口径统一是一行事，成本两行。
+||||||| C:/Users/12532/AppData/Local/Temp/k.base
+
+## D-002@v1 选区引用本期只覆盖代码/纯文本预览分支
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：用户确认本期只做代码（SyntaxHighlighter）与纯文本（pre）分支；.md 富文本态不做选区引用，后续需要再补「源码视角」。
+故障面：用户在 .md 预览选中文字右键无菜单，可能误以为功能失效（tooltip/引导文案缓解）
+
+## D-003@v1 引用为「指向」语义——只存路径+行号，不嵌选中文本快照
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：不嵌入。token 置换为 [代码引用:wid|path|L起-L止]，智能体按路径+行号自读最新内容（原型确认轮）。
+故障面：发送后文件内容变化，智能体读到的是新内容而非用户选择时的内容（接受：引用语义即指向）
+退役判据：若用户反馈需要快照语义，再评估嵌入文本或版本号锚定
+
+## D-004@v1 正式引用文本协议三类标记，后端零改动
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：复用附件引用的正文透传机制，扩展三类标记：[文件引用:wid|path] / [目录引用:wid|path] / [代码引用:wid|path|L起-L止]；wid=工作区 id，path=相对工作区根 POSIX 路径；后端/API/schema 零改动。
+故障面：协议字面被用户手改正文破坏 → 解析不命中降级为纯文本显示（与附件引用孤儿降级同口径）
+退役判据：若未来引用升级为结构化消息块（非文本协议），三类标记整体退役
+
+## D-005@v1 附件 token 与工作区引用 token 序号池合并
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：唯一化分配池合并两类 token（附件 id 映射 + 工作区引用映射共用 existingTokens 并集）；序号按「完整显示基名」分配——显示文本不同（如文件 design.md vs 代码块 design.md:10-16）不加序号，完全相同才 ·2 起。
+故障面：两池若漏合并，同名附件+同名文件引用 token 文本撞车，置换时错绑
+退役判据：两类 token 若改为不同括号形态（如工作区引用用『』），池分离后本决策退役
+
+## D-006@v1 预览区无选区右键不拦截；非文本分支无选区功能
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：仅当预览内容区存在非折叠选区且落在行元素内才拦截右键弹自定义菜单；无选区/选区在行号槽外不拦截（浏览器默认菜单）；图片/PDF/二进制分支永不拦截。
+故障面：用户期望无选区也能右键添加整个文件——本期预览区菜单只有选区项（整文件入口在文件树右键），引导文案说明
+
+## D-008@v2 组装位以 grep 实测现状为准（7 处，非 R-04 旧记 8 处）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：2026-10-10 独立审查（review-2026-10-10-131956 UB-1）grep 实测 substituteAttRefsForSend 调用点 7 处：session-panel-dialog.tsx:312/392/1343、session-panel-page.tsx:835/2748/3258、group-chat-panel.tsx:1969（2026-10-09 R-04 记 8 处已漂移）。
+supersedes：D-008@v1
+故障面：照抄旧清单漏接新点位（如 dialog:1343）导致该路径 token 直发
+退役判据：无（与 D-008@v1 同生命周期）
+
+## D-009@v1 实现架构=扩展附件引用库（方案 A）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：用户选 A（2026-10-10 方案选择轮）：扩展 frontend/src/lib/attachment-refs.ts 纯函数库 + 复用 InputRefOverlay——附件与工作区引用共用同一 token 机制/退格/角标；序号池合并（D-005）在同库自然落地；原型即此方案已实测。
+故障面：函数签名需同时容纳 uuid 锚（附件）与 wid+path 锚（工作区），泛化不当会复杂化既有附件路径（设计时统一为「引用描述符」结构化解耦）
+退役判据：若附件与工作区引用未来分化为不同编辑器体系，再评估拆库
+
+## D-012@v1 槽位透传经 SessionPanel 分发器（index.tsx）——plan allowed_paths 通道缺口补齐
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：按 design 接口定义的 props 正路实现：index.tsx SessionPanelProps 增两个可选 prop（pendingWsRefInsert/onPendingWsRefInsertHandled）并在 page 分支显式透传（dialog 分支既有 {...props} spread 自动携带）；槽位类型 interface 定义在 session-panel-page.tsx（task-07 allowed_paths 内）随签名并入，page-helpers.tsx 不动。
+故障面：透传遗漏会让 portal 下发的槽位在分发器层断链（输入区收不到）——sessions-portal 测试覆盖三分支断言兜底
+
+## D-013@v1 预览区右键菜单内联实现（不复用 floating-context-menu）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：execute 验收评审偏差 1（execute-review-2026-10-10-164613）：task-02 与 task-03 同 Wave 并行，预览区内联实现避免对并行新建组件的运行时依赖；同为看板 fixed div 同模式，行为等价。
+故障面：两处菜单样式/行为漂移（接受：体量小，视觉走同一 token 体系）
+退役判据：第二个菜单需求出现时统一收敛
+
+## D-014@v1 FR-07 历史渲染内聚至 InlineAttRefTextWithPreview（turn-segment-views 零改动）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：execute 验收评审偏差 2：组件内部升级（InlineAttRefText 换 parseInlineRefs + WithPreview 按 kind 分流 fetchDownload/mime=null）使单聊+群聊全部既有消费点自动获得三类渲染，覆盖面优于逐点接线。
+故障面：组件承担多职责（解析+预览分流）；可接受（与附件引用先例同构）
+退役判据：若预览分流逻辑复杂化再拆独立 hook
