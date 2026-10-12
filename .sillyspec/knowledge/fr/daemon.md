@@ -3215,3 +3215,60 @@
   confirmed_at: null
   source_change: 2026-10-12-daemon-path-guard-completion
   status: active
+
+## FR-daemon-097 duration_api_ms 差分入口改 Number.isFinite 门控（对齐同函数 total_cost_usd 既有口径），非有限值不进基线读写、payload 不携带该键（或保持 undefined 语义与既有「SDK 未报」路径一致），零新日志面
+变更：2026-10-12-duration-nan-guard
+状态：active
+摘要：NaN 不进 payload 不污染基线
+全文：.sillyspec/changes/archive/2026-10-12-duration-nan-guard/requirements.md#FR-01
+最近确认：eba4ab5904d2f969b479704e0062bcbbfacb20ad
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-duration-nan-guard:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 为 NaN → 不进差分不污染基线（Number.isFinite 门，对齐 total_cost_usd 口径，2026-10-12-duration-nan-guard）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-duration-nan-guard
+  status: active
+
+## FR-daemon-098 新增用例先红后绿：duration_api_ms=NaN 时 payload 不含 duration_api_ms 键且基线 Map 不被污染（后续合法值差分仍正确）；既有 duration 差分用例全绿
+变更：2026-10-12-duration-nan-guard
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-12-duration-nan-guard/requirements.md#FR-02
+最近确认：eba4ab5904d2f969b479704e0062bcbbfacb20ad
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-duration-nan-guard:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 为 NaN → 不进差分不污染基线（Number.isFinite 门，对齐 total_cost_usd 口径，2026-10-12-duration-nan-guard）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-duration-nan-guard
+  status: active
+
+## FR-daemon-099 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-interactive-bridge.test.ts 全文件
+变更：2026-10-12-duration-nan-guard
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-duration-nan-guard/requirements.md#FR-03
+最近确认：eba4ab5904d2f969b479704e0062bcbbfacb20ad
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-duration-nan-guard:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-duration-nan-guard
+  status: active

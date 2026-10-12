@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-duration-nan-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "eba4ab5904d2f969b479704e0062bcbbfacb20ad",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "「先红后绿 / 45-45 全绿 / tsc 零错」未独立复跑，依据机理推断+提交留痕采信",
+      "evidence": "只读评审纪律（禁止修改文件）下未执行 vitest（会产生缓存写入）。红态由机理必然推出：旧 typeof 门下首轮 NaN 走 durBase===undefined 分支 payload.duration_api_ms=NaN（≠undefined，断言红）且 set(NaN)；次轮 12000<NaN 恒 false → 12000-NaN=NaN（第二断言红）。绿态由提交 a2122f2d5 留痕（45/45 全绿、tsc --noEmit 0 错）+ 新用例断言与新实现逐条对得上佐证。",
+      "location": "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts:1403-1426"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）",
+    "并发": "ok（边界已裁决：可接受）",
+    "切换": "ok（边界已裁决：可接受）",
+    "作用域": "ok（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-12T01:46:25Z"
+}

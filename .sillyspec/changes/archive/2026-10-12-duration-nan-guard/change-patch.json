@@ -1,0 +1,81 @@
+{
+  "change": "2026-10-12-duration-nan-guard",
+  "baseline": "5ed1375fc9cbe3d295b187a7bb985c141f7874ce",
+  "head": "eba4ab5904d2f969b479704e0062bcbbfacb20ad",
+  "files": [
+    ".sillyspec/changes/2026-10-12-duration-nan-guard/tasks.md",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts",
+    ".sillyspec/changes/2026-10-12-duration-nan-guard/design.md",
+    ".sillyspec/changes/2026-10-12-duration-nan-guard/proposal.md",
+    ".sillyspec/changes/2026-10-12-duration-nan-guard/requirements.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 155,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-12T01:44:53.034Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5ed1375fc9cbe3d295b187a7bb985c141f7874ce",
+    "totals": {
+      "files": 2,
+      "additions": 29,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "9cf665764b6dda405efe21a3ea42d166b1ca7220bef0646336eb45d684a1515b",
+  "patchStatus": "ok"
+}

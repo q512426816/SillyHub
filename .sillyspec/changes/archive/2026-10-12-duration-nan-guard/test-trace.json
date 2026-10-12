@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-duration-nan-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-duration-nan-guard:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 为 NaN → 不进差分不污染基线（Number.isFinite 门，对齐 total_cost_usd 口径，2026-10-12-duration-nan-guard）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-duration-nan-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-duration-nan-guard:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「duration_api_ms 为 NaN → 不进差分不污染基线（Number.isFinite 门，对齐 total_cost_usd 口径，2026-10-12-duration-nan-guard）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-duration-nan-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-duration-nan-guard:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-duration-nan-guard"
+    }
+  ]
+}
