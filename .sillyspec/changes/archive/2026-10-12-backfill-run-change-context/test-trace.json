@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-backfill-run-change-context",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-backfill-run-change-context:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_backfill_replays_cursor_in_run_order_splitting_two_changes」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backfill-run-change-context"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-backfill-run-change-context:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_backfill_is_idempotent_second_run_stamps_zero + test_anchored_run_skipped_but_advances_cursor」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backfill-run-change-context"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-backfill-run-change-context:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_unknown_change_key_skipped_without_placeholder」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backfill-run-change-context"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-backfill-run-change-context:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_session_cursor_written_only_when_commands_found」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backfill-run-change-context"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-backfill-run-change-context:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_workspace_scope_filters_linked_sessions（服务层工作区编排：无链接会话不处理）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backfill-run-change-context"
+    }
+  ]
+}

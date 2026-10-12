@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话的 run 无 change_id 锚，变更列表执行用量仍显示会话总和；需要按会话消息时间线回填存量
+  agent_runs.change_id，让历史数据按新口径拆分显示。
+
+  成功标准：
+
+  - 回填服务按会话内 run 时间序重放 sillyspec 绑定命令游标：run 先按当前游标打锚（无锚才写），再用该 run 消息里的命令更新游标（最后一条生效），与线上运行时语义一致
+
+  - 只回填 change_id 为 NULL 的 run，已锚 run（派发）跳过但命令照常推进游标；幂等可重跑
+
+  - 命令的 change_key 按（workspace_id, change_key）映射 Change 行，映射不到跳过计数；quicklog 链路与会话链接不改动
+
+  - 会话回填结束时把游标终值写 agent_sessions.current_change_id（仅当该会话解析出过命令）
+
+  - CLI 脚本默认 dry-run 输出计数，--apply 才落库；支持 --workspace 限定范围
+
+  - 测试：同会话先后两变更拆分正确、命令前无锚 run 保持 NULL、幂等重跑结果不变
+autopilot: true
+baseline_commit: 94b977abe67ff46b0d4ec02bdbebec150d5beb19
+updatedAt: '2026-10-12T08:13:31.337Z'
+baseline_sha256: 51a7e3abc4d90a6b78bb70f5ba28fa72e39f38da5fd41f7ee5931d331bd27c96
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（5.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012074041\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（10.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012074041\test-result.json｜门文件
+  5 个
+

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-backfill-run-change-context",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c2b40e4353d99d2d605a08a109dc1aa256df3462",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "logs_parse_failed 计数口径过宽：解析成功但无绑定产出的 sillyspec 命令也被计入「日志解析失败」",
+      "evidence": "_parse_change_key_from_log 对 JSON 合法但 extract_spec_bindings 无产出（progress show / flow status 等无 --change 命令）同样返回 None，调用方一律计 logs_parse_failed；与 design 风险节「脱敏破坏 JSON 可解析性才计失败」的语义不符，真实数据 dry-run 报告里该计数会被大量正常命令撑大，误导运维判读（不影响数据正确性，仅报告口径）",
+      "location": "backend/app/modules/change/backfill_service.py:190-195"
+    },
+    {
+      "severity": "P3",
+      "title": "工作区小计/总计行打印的「会话游标终值」实为最后 merge 的单个会话游标，多会话场景误导",
+      "evidence": "BackfillStats.merge 对 cursor_change_id 做后值覆盖，脚本对 ws_total/total 复用 _print_stats 打印「会话游标终值 <uuid>」——工作区含多会话时该 uuid 只是最后一个被 merge 会话的游标，却以单会话语义标签出现在小计/总计行",
+      "location": "backend/scripts/backfill_run_change_context.py:57-59,104-108"
+    },
+    {
+      "severity": "P3",
+      "title": "--workspace 传入重复 UUID 不去重，重复工作区被处理两遍、总计 runs_scanned/commands_parsed 虚增",
+      "evidence": "targets = workspace_ids 未去重，同 UUID 传两次则逐会话重放两遍；第二遍 runs_stamped=0（幂等、无数据危害）但扫描/解析计数被双计入小计与总计",
+      "location": "backend/scripts/backfill_run_change_context.py:78-80"
+    },
+    {
+      "severity": "P3",
+      "title": "backfill_service._now() 为死代码",
+      "evidence": "_now 定义后全文件无任何引用（grep 仅命中定义行），属残留未清理",
+      "location": "backend/app/modules/change/backfill_service.py:79-80"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok —— run 与日志均按 (created_at|timestamp, id) 确定序重放；同 submit 批次 timestamp 并列面已在 ambiguous_parallel_groups 显式暴露（AgentRunLog 列定义实证无 created_at/seq，backend/app/modules/agent/model.py:583-640），design 风险节如实披露取边近似随机 + 幂等固化",
+    "并发": "ok —— design 盲维问 2 如实披露 agent_sessions.current_change_id 同列双写窗（运行时回写点实证 submit_commit.py:353-355 ∥ 回填 FR-04 终值写），重放种子恒 None（backfill_service.py:144）保证幂等重放收敛；run 锚写集（仅 NULL→锚）与运行时（inject.py:621 只读）不相交",
+    "切换": "ok —— 脚本单事务（conn.begin()），dry-run 抛 _DryRunRollback 经 begin() 上下文真实回滚、--apply 正常退出即 commit；中断即整体回滚无半态",
+    "作用域": "ok —— change_key 一律按 (sess.workspace_id, change_key) 解析（backfill_service.py:130-137）；会话选取以 change_session_links 为范围门（test_workspace_scope_filters_linked_sessions 锁定）；quicklog/链接表不在写集"
+  },
+  "reviewedAt": "2026-10-12T08:12:32Z"
+}

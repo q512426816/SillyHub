@@ -1207,3 +1207,98 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-05
 最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19
+
+## FR-auto-backend-191 回填服务按会话内 run 时间序重放 sillyspec 绑定命令游标：run 先按当前游标打锚（无锚才写），再用该 run 消息里的命令更新游标（最后一条生效），与线上运行时语义一致
+变更：2026-10-12-backfill-run-change-context
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-backfill-run-change-context/requirements.md#FR-01
+最近确认：f48221530edcc4242cce6f30c827420f5a5ffdbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backfill-run-change-context:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_backfill_replays_cursor_in_run_order_splitting_two_changes」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backfill-run-change-context
+  status: active
+
+## FR-auto-backend-192 只回填 change_id 为 NULL 的 run，已锚 run（派发）跳过但命令照常推进游标；幂等可重跑
+变更：2026-10-12-backfill-run-change-context
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-backfill-run-change-context/requirements.md#FR-02
+最近确认：f48221530edcc4242cce6f30c827420f5a5ffdbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backfill-run-change-context:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_backfill_is_idempotent_second_run_stamps_zero + test_anchored_run_skipped_but_advances_cursor」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backfill-run-change-context
+  status: active
+
+## FR-auto-backend-193 命令的 change_key 按（workspace_id, change_key）映射 Change 行，映射不到跳过计数；quicklog 链路与会话链接不改动
+变更：2026-10-12-backfill-run-change-context
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-backfill-run-change-context/requirements.md#FR-03
+最近确认：f48221530edcc4242cce6f30c827420f5a5ffdbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backfill-run-change-context:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_unknown_change_key_skipped_without_placeholder」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backfill-run-change-context
+  status: active
+
+## FR-auto-backend-194 会话回填结束时把游标终值写 agent_sessions.current_change_id（仅当该会话解析出过命令）
+变更：2026-10-12-backfill-run-change-context
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-backfill-run-change-context/requirements.md#FR-04
+最近确认：f48221530edcc4242cce6f30c827420f5a5ffdbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backfill-run-change-context:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_session_cursor_written_only_when_commands_found」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backfill-run-change-context
+  status: active
+
+## FR-auto-backend-195 CLI 脚本默认 dry-run 输出计数，--apply 才落库；支持 --workspace 限定范围
+变更：2026-10-12-backfill-run-change-context
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-backfill-run-change-context/requirements.md#FR-05
+最近确认：f48221530edcc4242cce6f30c827420f5a5ffdbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backfill-run-change-context:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_workspace_scope_filters_linked_sessions（服务层工作区编排：无链接会话不处理）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backfill-run-change-context
+  status: active

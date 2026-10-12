@@ -1,0 +1,804 @@
+diff --git a/backend/app/modules/change/backfill_service.py b/backend/app/modules/change/backfill_service.py
+new file mode 100644
+index 000000000..09463e643
+--- /dev/null
++++ b/backend/app/modules/change/backfill_service.py
+@@ -0,0 +1,244 @@
++"""存量 run 变更上下文回填服务（2026-10-12-backfill-run-change-context）。
++
++2026-10-12-run-level-change-attribution 的轮级打锚只对新会话生效：存量会话的
++run 无 ``change_id`` 锚，变更执行用量聚合（D-002@v2）对无锚 run 只能走会话链
++接摊派——变更列表仍显示同一组会话总和。本服务按会话重放绑定命令游标，把存量
++``agent_runs.change_id`` 按时间线补齐，使历史数据按新口径拆分。
++
++游标重放语义与线上 run_sync 通道逐点对齐（FR-01）：
++
++- run 按 ``created_at, id`` 升序；每个 run **先**以当前游标打锚（仅当
++  ``change_id IS NULL`` 且游标非空），**再**从该 run 的 sillyspec 命令日志
++  （``channel='tool_call'`` 且 ``tool_kind='sillyspec'``，与 submit_steps 收集
++  口径同源）解析绑定覆盖游标（同 run 多条取消息序最后一条）——命令所在轮保持
++  旧上下文、下一轮才继承，与「submit 时写 current_change_id、inject 建轮时
++  读」的运行时时序一致；
++- 已锚 run（派发链写入）跳过打锚但命令照常推进游标（FR-02）；
++- change_key 按 ``(session.workspace_id, change_key)`` 查 Change 行，查不到
++  跳过计数、不建 placeholder（FR-03）；
++- 会话处理完且解析出过命令时，游标终值写 ``agent_sessions.current_change_id``
++  （FR-04，后续新轮自动接续）。
++
++写集只有 ``agent_runs.change_id``（NULL → 锚）与 ``agent_sessions.current_change_id``
++两列；链接表、quicklog、用量数值零触碰（FR-02/03）。全流程幂等：锚只补 NULL，
++重跑新增打锚恒 0。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from dataclasses import dataclass, field
++from datetime import UTC, datetime
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++from sqlmodel import col
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.change.binding import extract_spec_bindings
++from app.modules.change.model import Change, ChangeSessionLink
++
++
++@dataclass
++class BackfillStats:
++    """单个会话（或工作区汇总）的回填计数（dry-run / apply 同口径上报）。"""
++
++    runs_scanned: int = 0
++    runs_stamped: int = 0
++    runs_already_anchored: int = 0
++    commands_parsed: int = 0
++    commands_skipped_unknown_key: int = 0
++    logs_parse_failed: int = 0
++    #: 同 run 同 submit 批次（timestamp 并列）解析出不同绑定目标的命令组数
++    #: ——批内消息序在 DB 无可靠序号（AgentRunLog 无 seq/created_at 列），终值
++    #: 取 timestamp,id 决胜序（id 仅 SQL 确定性，语义取边近似随机，见风险节），
++    #: 该计数>0 表示该会话存在理论错锚面（dry-run 报告暴露，人工可查）。
++    ambiguous_parallel_groups: int = 0
++    cursor_written: bool = False
++    cursor_change_id: uuid.UUID | None = None
++    unknown_keys: list[str] = field(default_factory=list)
++
++    def merge(self, other: BackfillStats) -> None:
++        """工作区汇总：数值相加、布尔取或、unknown_keys 保序去重合并。"""
++        self.runs_scanned += other.runs_scanned
++        self.runs_stamped += other.runs_stamped
++        self.runs_already_anchored += other.runs_already_anchored
++        self.commands_parsed += other.commands_parsed
++        self.commands_skipped_unknown_key += other.commands_skipped_unknown_key
++        self.logs_parse_failed += other.logs_parse_failed
++        self.ambiguous_parallel_groups += other.ambiguous_parallel_groups
++        self.cursor_written = self.cursor_written or other.cursor_written
++        if other.cursor_change_id is not None:
++            self.cursor_change_id = other.cursor_change_id
++        for key in other.unknown_keys:
++            if key not in self.unknown_keys:
++                self.unknown_keys.append(key)
++
++
++def _now() -> datetime:
++    return datetime.now(UTC)
++
++
++class ChangeContextBackfillService:
++    """存量 run 变更上下文回填（只读解析 + 两列写集，幂等）。"""
++
++    def __init__(self, session: AsyncSession) -> None:
++        self._session = session
++
++    # ── 工作区编排（FR-05：链接是天然范围门）────────────────────────────
++
++    async def linked_session_ids(self, workspace_id: uuid.UUID) -> list[uuid.UUID]:
++        """工作区内有 change_session_links 链接的会话 id（去重、按 id 稳定序）。
++
++        命令绑定先建链接（W2.1/W2.2 双通道共同前提），链接即「该会话出现过绑定
++        命令」的保守超集——无链接会话天然无命令，跳过省扫。
++        """
++        rows = (
++            await self._session.execute(
++                select(ChangeSessionLink.session_id)
++                .distinct()
++                .where(col(ChangeSessionLink.session_id).is_not(None))
++                .join(AgentSession, col(AgentSession.id) == col(ChangeSessionLink.session_id))
++                .where(col(AgentSession.workspace_id) == workspace_id)
++                .order_by(col(ChangeSessionLink.session_id))
++            )
++        ).all()
++        return [r[0] for r in rows]
++
++    async def backfill_workspace(self, workspace_id: uuid.UUID) -> BackfillStats:
++        """工作区内全部链接会话逐一回填，计数汇总。"""
++        total = BackfillStats()
++        for session_id in await self.linked_session_ids(workspace_id):
++            total.merge(await self.backfill_session(session_id))
++        return total
++
++    # ── 单会话游标重放（FR-01..04）──────────────────────────────────────
++
++    async def backfill_session(self, session_id: uuid.UUID) -> BackfillStats:
++        """重放单会话游标并打锚（调用方负责事务边界；本方法只 add/flush 不 commit）。"""
++        sess = await self._session.get(AgentSession, session_id)
++        if sess is None or sess.workspace_id is None:
++            return BackfillStats()
++        stats = BackfillStats()
++
++        # 命令 change_key → Change.id 解析表（会话工作区 scoped，懒加载缓存）。
++        change_id_by_key: dict[str, uuid.UUID | None] = {}
++
++        async def _resolve(change_key: str) -> uuid.UUID | None:
++            if change_key not in change_id_by_key:
++                change_id_by_key[change_key] = (
++                    await self._session.execute(
++                        select(Change.id).where(
++                            col(Change.workspace_id) == sess.workspace_id,
++                            col(Change.change_key) == change_key,
++                        )
++                    )
++                ).scalar_one_or_none()
++            return change_id_by_key[change_key]
++
++        # 重放种子恒 None（FR-02 幂等的关键）：锚只由该会话命令历史决定，与
++        # 重跑次数无关。若从 sess.current_change_id 起步，重跑会把「首命令所在
++        # 轮」（运行时语义必须保持旧上下文）也拖进锚。会话游标是重放的输出
++        # （FR-04 终值写回），不是输入。
++        cursor: uuid.UUID | None = None
++        runs = list(
++            (
++                await self._session.execute(
++                    select(AgentRun)
++                    .where(col(AgentRun.agent_session_id) == session_id)
++                    .order_by(col(AgentRun.created_at), col(AgentRun.id))
++                )
++            )
++            .scalars()
++            .all()
++        )
++        for run in runs:
++            stats.runs_scanned += 1
++            # ① 先打锚：仅无锚 run 继承当前游标（命令所在轮保持旧上下文）。
++            if run.change_id is not None:
++                stats.runs_already_anchored += 1
++            elif cursor is not None:
++                run.change_id = cursor
++                self._session.add(run)
++                stats.runs_stamped += 1
++            # ② 再推进游标：本 run 的 sillyspec 命令按消息序，最后一条生效。
++            # 排序 timestamp → id：同一 submit 批次全部日志行共享 st.now
++            # （submit_steps 取一次 now），批内消息序在 DB 无可靠序号（无 seq /
++            # created_at 列）——id（uuid4）只保证 SQL 层确定性（幂等重跑同序），
++            # 语义上面内「批内多条不同绑定命令」的取边近似随机；并列组计入
++            # ambiguous_parallel_groups 显式暴露（dry-run 报告可见，人工可查）。
++            logs = list(
++                (
++                    await self._session.execute(
++                        select(
++                            AgentRunLog.timestamp,
++                            AgentRunLog.id,
++                            AgentRunLog.content_redacted,
++                        )
++                        .where(
++                            col(AgentRunLog.run_id) == run.id,
++                            col(AgentRunLog.channel) == "tool_call",
++                            col(AgentRunLog.tool_kind) == "sillyspec",
++                        )
++                        .order_by(col(AgentRunLog.timestamp), col(AgentRunLog.id))
++                    )
++                ).all()
++            )
++            # 解析全部命令行 → (timestamp, resolved, key)，顺带统计批内并列组。
++            entries: list[tuple[datetime, uuid.UUID | None, str | None]] = []
++            for ts, _log_id, content in logs:
++                key = _parse_change_key_from_log(content)
++                if key is None:
++                    if content is not None:
++                        stats.logs_parse_failed += 1
++                    continue
++                entries.append((ts, await _resolve(key), key))
++            resolved_by_ts: dict[datetime, set[uuid.UUID]] = {}
++            for ts, resolved, _key in entries:
++                if resolved is not None:
++                    resolved_by_ts.setdefault(ts, set()).add(resolved)
++            stats.ambiguous_parallel_groups += sum(
++                1 for targets in resolved_by_ts.values() if len(targets) > 1
++            )
++            for _ts, resolved, key in entries:
++                if resolved is None:
++                    stats.commands_skipped_unknown_key += 1
++                    if key not in stats.unknown_keys:
++                        stats.unknown_keys.append(key)
++                    continue
++                stats.commands_parsed += 1
++                cursor = resolved
++
++        # FR-04：解析出过命令才写游标终值（后续新轮自动接续）。
++        if stats.commands_parsed > 0 and cursor is not None and sess.current_change_id != cursor:
++            sess.current_change_id = cursor
++            self._session.add(sess)
++            stats.cursor_written = True
++            stats.cursor_change_id = cursor
++        elif stats.commands_parsed > 0:
++            stats.cursor_change_id = cursor
++        await self._session.flush()
++        return stats
++
++
++def _parse_change_key_from_log(content: str | None) -> str | None:
++    """sillyspec 命令日志行 → 绑定 change_key（无绑定返回 None）。
++
++    content 与 submit_steps 收集口径同源（JSON：``args.command``），解析失败 /
++    结构不符返回 None（调用方计 parse_failed）；绑定解析复用
++    ``extract_spec_bindings``（run/flow 两族同规则，quick/default 无产出），
++    多产出取最后一条（与运行时「最后一条生效」一致）。
++    """
++    if not content:
++        return None
++    try:
++        parsed = json.loads(content)
++    except (TypeError, ValueError):
++        return None
++    args = parsed.get("args") if isinstance(parsed, dict) else None
++    command = args.get("command") if isinstance(args, dict) else None
++    if not isinstance(command, str) or not command:
++        return None
++    bindings = extract_spec_bindings(command)
++    return bindings[-1].change_key if bindings else None
+diff --git a/backend/app/modules/change/tests/test_backfill_run_context.py b/backend/app/modules/change/tests/test_backfill_run_context.py
+new file mode 100644
+index 000000000..9268152da
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_backfill_run_context.py
+@@ -0,0 +1,385 @@
++"""存量 run 变更上下文回填测试（2026-10-12-backfill-run-change-context）。
++
++验证游标重放语义与线上运行时逐点对齐（FR-01..05）：
++
++- 命令所在轮保持旧上下文、下一轮才继承（先打锚再推进游标，FR-01）；
++- 幂等重跑零新增（FR-02）、已锚 run 跳过但命令推进游标（FR-02）；
++- 未知 change_key 跳过计数、不建 placeholder（FR-03）；
++- 游标终值仅在解析出命令时写会话列（FR-04）；
++- 工作区编排只处理有链接会话（FR-05）。
++
++DB 用例走根 conftest ``db_session`` SQLite create_all（镜像 test_spec_binding.py
++模式）；日志行按 submit_steps 收集口径造（channel=tool_call / tool_kind=sillyspec /
++content=JSON ``args.command``）。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from datetime import UTC, datetime, timedelta
++
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.auth.model import User
++from app.modules.change.backfill_service import ChangeContextBackfillService
++from app.modules.change.model import Change, ChangeSessionLink
++from app.modules.workspace.model import Workspace
++
++_T0 = datetime(2026, 10, 12, 10, 0, 0, tzinfo=UTC)
++
++
++async def _make_user(db_session: AsyncSession) -> User:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"bfc-{uuid.uuid4().hex[:8]}@example.com",
++        password_hash="x",
++        display_name="Bfc",
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    await db_session.refresh(user)
++    return user
++
++
++async def _make_ws(db_session: AsyncSession) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="backfill ws",
++        slug=f"bfc-{uuid.uuid4().hex[:8]}",
++        root_path=f"/tmp/backfill-test-{uuid.uuid4().hex[:12]}",
++        status="active",
++        component_key="comp",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _make_change(db_session: AsyncSession, workspace_id: uuid.UUID, key: str) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=workspace_id,
++        change_key=key,
++        title=key,
++        status="active",
++        location="active",
++        path=f"changes/{key}",
++    )
++    db_session.add(change)
++    await db_session.commit()
++    await db_session.refresh(change)
++    return change
++
++
++async def _make_session(
++    db_session: AsyncSession, *, user_id: uuid.UUID, workspace_id: uuid.UUID
++) -> AgentSession:
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        workspace_id=workspace_id,
++        provider="claude",
++        status="ended",
++        created_at=_T0,
++    )
++    db_session.add(sess)
++    await db_session.commit()
++    await db_session.refresh(sess)
++    return sess
++
++
++async def _make_link(db_session: AsyncSession, change_id: uuid.UUID, session_id: uuid.UUID) -> None:
++    db_session.add(ChangeSessionLink(id=uuid.uuid4(), change_id=change_id, session_id=session_id))
++    await db_session.commit()
++
++
++async def _make_run(
++    db_session: AsyncSession,
++    session_id: uuid.UUID,
++    *,
++    seq: int,
++    change_id: uuid.UUID | None = None,
++    commands: list[str] | None = None,
++) -> AgentRun:
++    """run 行 + 可选 sillyspec 命令日志（消息序按 timestamp 递增）。"""
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="completed",
++        agent_session_id=session_id,
++        change_id=change_id,
++        created_at=_T0 + timedelta(minutes=seq),
++    )
++    db_session.add(run)
++    await db_session.flush()
++    for i, command in enumerate(commands or []):
++        db_session.add(
++            AgentRunLog(
++                id=uuid.uuid4(),
++                run_id=run.id,
++                timestamp=_T0 + timedelta(minutes=seq, seconds=i),
++                channel="tool_call",
++                tool_kind="sillyspec",
++                content_redacted=json.dumps({"tool": "Bash", "args": {"command": command}}),
++                dedup_key=f"{run.id}:{i}",
++            )
++        )
++    await db_session.commit()
++    await db_session.refresh(run)
++    return run
++
++
++async def _run_anchors(db_session: AsyncSession, session_id: uuid.UUID) -> list[uuid.UUID | None]:
++    runs = list(
++        (
++            await db_session.execute(
++                select(AgentRun)
++                .where(AgentRun.agent_session_id == session_id)
++                .order_by(AgentRun.created_at, AgentRun.id)
++            )
++        )
++        .scalars()
++        .all()
++    )
++    return [r.change_id for r in runs]
++
++
++# ── FR-01：游标重放拆分两变更 ────────────────────────────────────────────────
++
++
++async def test_backfill_replays_cursor_in_run_order_splitting_two_changes(db_session):
++    """r0 无命令保持 NULL；r1 含 start a 保持 NULL（命令所在轮不归新变更）；
++    r2 含 start b 打锚 a（先打锚再推进）；r3 无命令打锚 b。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-bfc-a")
++    change_b = await _make_change(db_session, ws.id, "2026-10-12-bfc-b")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_link(db_session, change_b.id, sess.id)
++
++    await _make_run(db_session, sess.id, seq=0)
++    await _make_run(
++        db_session, sess.id, seq=1, commands=["sillyspec flow start --change 2026-10-12-bfc-a"]
++    )
++    await _make_run(
++        db_session, sess.id, seq=2, commands=["sillyspec flow start --change 2026-10-12-bfc-b"]
++    )
++    await _make_run(db_session, sess.id, seq=3)
++
++    stats = await ChangeContextBackfillService(db_session).backfill_session(sess.id)
++
++    assert stats.runs_stamped == 2  # r2→a, r3→b
++    assert stats.commands_parsed == 2
++    assert await _run_anchors(db_session, sess.id) == [None, None, change_a.id, change_b.id]
++    assert stats.cursor_written is True
++    assert stats.cursor_change_id == change_b.id
++    await db_session.refresh(sess)
++    assert sess.current_change_id == change_b.id
++
++
++# ── FR-02：幂等 + 已锚跳过 ──────────────────────────────────────────────────
++
++
++async def test_backfill_is_idempotent_second_run_stamps_zero(db_session):
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-idem-a")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_run(
++        db_session, sess.id, seq=0, commands=["sillyspec flow start --change 2026-10-12-idem-a"]
++    )
++    await _make_run(db_session, sess.id, seq=1)
++
++    svc = ChangeContextBackfillService(db_session)
++    first = await svc.backfill_session(sess.id)
++    assert first.runs_stamped == 1
++
++    second = await svc.backfill_session(sess.id)
++    assert second.runs_stamped == 0
++    assert await _run_anchors(db_session, sess.id) == [None, change_a.id]
++
++
++async def test_anchored_run_skipped_but_advances_cursor(db_session):
++    """已锚 run（派发形态）不打锚但命令推进游标：其后无锚轮归命令目标。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-anch-a")
++    change_b = await _make_change(db_session, ws.id, "2026-10-12-anch-b")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_link(db_session, change_b.id, sess.id)
++
++    await _make_run(db_session, sess.id, seq=0)
++    # 派发 run：已锚 b（其消息里也有绑定命令）。
++    await _make_run(
++        db_session,
++        sess.id,
++        seq=1,
++        change_id=change_b.id,
++        commands=["sillyspec flow done --change 2026-10-12-anch-b"],
++    )
++    tail = await _make_run(db_session, sess.id, seq=2)
++
++    stats = await ChangeContextBackfillService(db_session).backfill_session(sess.id)
++
++    assert stats.runs_already_anchored == 1
++    assert stats.runs_stamped == 1  # 只有 tail（→ b）
++    anchors = await _run_anchors(db_session, sess.id)
++    assert anchors == [None, change_b.id, change_b.id]
++    assert anchors[2] == tail.change_id
++
++
++# ── FR-03：未知 key 跳过 ────────────────────────────────────────────────────
++
++
++async def test_unknown_change_key_skipped_without_placeholder(db_session):
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-unk-a")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_run(
++        db_session, sess.id, seq=0, commands=["sillyspec flow start --change 2026-10-12-unk-a"]
++    )
++    await _make_run(
++        db_session, sess.id, seq=1, commands=["sillyspec flow start --change ghost-key"]
++    )
++    tail = await _make_run(db_session, sess.id, seq=2)
++
++    changes_before = list(
++        (await db_session.execute(select(Change).where(Change.workspace_id == ws.id)))
++        .scalars()
++        .all()
++    )
++
++    stats = await ChangeContextBackfillService(db_session).backfill_session(sess.id)
++
++    assert stats.commands_skipped_unknown_key == 1
++    assert stats.unknown_keys == ["ghost-key"]
++    # ghost 轮不推进游标：tail 仍归 a（游标保持 a）。
++    assert tail.change_id == change_a.id
++    changes_after = list(
++        (await db_session.execute(select(Change).where(Change.workspace_id == ws.id)))
++        .scalars()
++        .all()
++    )
++    assert changes_after == changes_before  # 未建 placeholder
++
++
++# ── FR-04：无命令不写游标 ───────────────────────────────────────────────────
++
++
++async def test_session_cursor_written_only_when_commands_found(db_session):
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-cur-a")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_run(db_session, sess.id, seq=0)
++
++    stats = await ChangeContextBackfillService(db_session).backfill_session(sess.id)
++
++    assert stats.commands_parsed == 0
++    assert stats.cursor_written is False
++    await db_session.refresh(sess)
++    assert sess.current_change_id is None
++
++
++# ── P1-2 修复面：同 submit 批次并列绑定组显式计数 ───────────────────────────
++
++
++async def test_same_batch_parallel_binding_commands_counted_ambiguous(db_session):
++    """同 run 同 timestamp（同一 submit 批次）两条不同绑定命令：批内消息序 DB
++    不可复原——必须计入 ambiguous_parallel_groups（dry-run 报告可见），且重放
++    确定性成立（id 序固定，重跑同锚幂等）。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-amb-a")
++    change_b = await _make_change(db_session, ws.id, "2026-10-12-amb-b")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, sess.id)
++    await _make_link(db_session, change_b.id, sess.id)
++
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_type="claude_code",
++        provider="claude",
++        status="completed",
++        agent_session_id=sess.id,
++        created_at=_T0,
++    )
++    db_session.add(run)
++    await db_session.flush()
++    same_ts = _T0 + timedelta(minutes=1)
++    for i, command in enumerate(
++        [
++            "sillyspec flow done --change 2026-10-12-amb-a",
++            "sillyspec flow start --change 2026-10-12-amb-b",
++        ]
++    ):
++        db_session.add(
++            AgentRunLog(
++                id=uuid.uuid4(),
++                run_id=run.id,
++                timestamp=same_ts,  # 同一 submit 批次：timestamp 全同
++                channel="tool_call",
++                tool_kind="sillyspec",
++                content_redacted=json.dumps({"tool": "Bash", "args": {"command": command}}),
++                dedup_key=f"{run.id}:{i}",
++            )
++        )
++    await db_session.commit()
++
++    svc = ChangeContextBackfillService(db_session)
++    first = await svc.backfill_session(sess.id)
++    assert first.ambiguous_parallel_groups == 1
++    assert first.commands_parsed == 2
++
++    second = await svc.backfill_session(sess.id)
++    assert second.runs_stamped == 0  # 幂等：重跑同序同锚零新增
++    assert second.ambiguous_parallel_groups == 1
++    # 重跑同锚：两轮游标终值一致（确定性重放）。
++    assert second.cursor_change_id == first.cursor_change_id
++
++
++# ── FR-05：工作区编排范围 ───────────────────────────────────────────────────
++
++
++async def test_workspace_scope_filters_linked_sessions(db_session):
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_a = await _make_change(db_session, ws.id, "2026-10-12-ws-a")
++    linked = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    unlinked = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_a.id, linked.id)
++    await _make_run(
++        db_session,
++        linked.id,
++        seq=0,
++        commands=["sillyspec flow start --change 2026-10-12-ws-a"],
++    )
++    await _make_run(db_session, linked.id, seq=1)
++    await _make_run(
++        db_session,
++        unlinked.id,
++        seq=0,
++        commands=["sillyspec flow start --change 2026-10-12-ws-a"],
++    )
++    await _make_run(db_session, unlinked.id, seq=1)
++
++    stats = await ChangeContextBackfillService(db_session).backfill_workspace(ws.id)
++
++    # 只有链接会话进处理面。
++    assert stats.runs_scanned == 2
++    assert stats.runs_stamped == 1
++    assert await _run_anchors(db_session, linked.id) == [None, change_a.id]
++    assert await _run_anchors(db_session, unlinked.id) == [None, None]
+diff --git a/backend/scripts/backfill_run_change_context.py b/backend/scripts/backfill_run_change_context.py
+new file mode 100644
+index 000000000..51f2f3a50
+--- /dev/null
++++ b/backend/scripts/backfill_run_change_context.py
+@@ -0,0 +1,157 @@
++"""一次性运维脚本：存量 run 变更上下文回填（2026-10-12-backfill-run-change-context）。
++
++背景：2026-10-12-run-level-change-attribution 上线（轮级打锚 + 聚合口径 D-002@v2）
++后，存量会话的 run 无 ``change_id`` 锚，变更中心执行用量仍按会话链接摊派显示会话
++总和。本脚本按会话重放绑定命令游标，把存量 ``agent_runs.change_id`` 按时间线补齐，
++历史数据即按新口径拆分（聚合是实时计算，回填完页面刷新即生效）。
++
++写集（见 backfill_service 模块 docstring）：
++  1. ``agent_runs.change_id``：NULL → 游标锚（已锚不动）；
++  2. ``agent_sessions.current_change_id``：会话游标终值（仅解析出过命令的会话）。
++链接表 / quicklog / 用量数值零触碰；幂等可重跑。
++
++用法（在 backend/ 目录或容器 /app）：
++
++    python scripts/backfill_run_change_context.py                        # dry-run（全工作区）
++    python scripts/backfill_run_change_context.py --workspace <uuid> ... # 限定工作区（可多次）
++    python scripts/backfill_run_change_context.py --apply                # 落库（单事务）
++
++建议低峰执行；dry-run 与 --apply 计数同口径，先 dry-run 核对再 apply。
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import sys
++import uuid
++from pathlib import Path
++
++# scripts/ 不是包：直接执行时 sys.path[0] 是 scripts 目录，`import app` 不可达——
++# 照 reset_agent_log_attribution.py 先例引导仓库根。
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
++
++from sqlalchemy.ext.asyncio import create_async_engine
++
++from app.core.config import get_settings
++from app.modules.change.backfill_service import BackfillStats, ChangeContextBackfillService
++
++
++def _print_stats(title: str, stats: BackfillStats) -> None:
++    print(f"  {title}")
++    print(
++        f"    runs 扫描 {stats.runs_scanned} | 待打锚 {stats.runs_stamped} | "
++        f"已锚跳过 {stats.runs_already_anchored}"
++    )
++    print(
++        f"    命令解析 {stats.commands_parsed} | 未知 key 跳过 {stats.commands_skipped_unknown_key} | "
++        f"日志解析失败 {stats.logs_parse_failed}"
++    )
++    if stats.ambiguous_parallel_groups:
++        print(
++            f"    ⚠️ 批内并列绑定组 {stats.ambiguous_parallel_groups} 个"
++            "（同 submit 批次多条不同绑定命令，批内消息序 DB 不可复原，取边近似随机）"
++        )
++    if stats.unknown_keys:
++        print(f"    未知 key：{', '.join(stats.unknown_keys)}")
++    if stats.cursor_change_id is not None:
++        flag = "已写" if stats.cursor_written else "一致(未动)"
++        print(f"    会话游标终值 {stats.cursor_change_id}（{flag}）")
++
++
++async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
++    engine = create_async_engine(get_settings().database_url)
++    try:
++        async with engine.connect() as conn:
++            try:
++                # 单事务：begin() 块正常退出即 commit（--apply）；dry-run 抛
++                # _DryRunRollback 触发回滚（库零触碰）。
++                async with conn.begin():
++                    from sqlalchemy import select
++                    from sqlalchemy.ext.asyncio import AsyncSession
++                    from sqlmodel import col
++
++                    from app.modules.workspace.model import Workspace
++
++                    db = AsyncSession(conn, expire_on_commit=False)
++                    svc = ChangeContextBackfillService(db)
++                    targets: list[uuid.UUID]
++                    if workspace_ids:
++                        targets = workspace_ids
++                    else:
++                        rows = (await db.execute(select(col(Workspace.id)))).all()
++                        targets = [r[0] for r in rows]
++                    total = BackfillStats()
++                    mode = "APPLY（落库）" if apply else "DRY-RUN（事务回滚，库零触碰）"
++                    print(f"=== 存量 run 变更上下文回填 · {mode} · 工作区 {len(targets)} 个 ===")
++                    for ws_id in targets:
++                        session_ids = await svc.linked_session_ids(ws_id)
++                        if not session_ids:
++                            continue
++                        print(f"[workspace {ws_id}] 链接会话 {len(session_ids)} 个")
++                        ws_total = BackfillStats()
++                        # 会话级输出（FR-05）：逐会话计数，改数前可审计定位。
++                        for sid in session_ids:
++                            stats = await svc.backfill_session(sid)
++                            if (
++                                stats.runs_scanned == 0
++                                and stats.commands_parsed == 0
++                                and stats.runs_already_anchored == 0
++                            ):
++                                continue
++                            _print_stats(f"session {sid}", stats)
++                            ws_total.merge(stats)
++                        if ws_total.runs_scanned or ws_total.commands_parsed:
++                            _print_stats(f"workspace {ws_id} 小计", ws_total)
++                        total.merge(ws_total)
++                    print("=== 总计 ===")
++                    _print_stats("全部工作区", total)
++                    if not apply:
++                        raise _DryRunRollback()
++            except _DryRunRollback:
++                print("dry-run 完成：事务已回滚，数据库零触碰。核对计数后加 --apply 执行。")
++    finally:
++        await engine.dispose()
++    return 0
++
++
++class _DryRunRollback(Exception):
++    """dry-run 控制流：抛出使 begin() 块回滚（不用 rollback() 显式调用以便单路径）。"""
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description="存量 run 变更上下文回填（默认 dry-run）")
++    parser.add_argument(
++        "--apply", action="store_true", help="落库（缺省 dry-run：事务回滚只打印计数）"
++    )
++    parser.add_argument(
++        "--workspace",
++        action="append",
++        default=[],
++        metavar="UUID",
++        help="限定工作区 id（可多次；缺省处理全部工作区）",
++    )
++    parser.add_argument(
++        "--yes",
++        action="store_true",
++        help="全工作区 --apply 的显式确认门（带 --workspace 的定向 apply 不需要）",
++    )
++    args = parser.parse_args()
++    workspace_ids: list[uuid.UUID] = []
++    for raw in args.workspace:
++        try:
++            workspace_ids.append(uuid.UUID(raw))
++        except ValueError:
++            print(f"❌ --workspace 不是合法 UUID：{raw}", file=sys.stderr)
++            return 2
++    if args.apply and not workspace_ids and not args.yes:
++        print(
++            "❌ 全工作区 --apply 影响面大：确认请加 --yes，或用 --workspace <uuid> 定向执行。",
++            file=sys.stderr,
++        )
++        return 2
++    return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
