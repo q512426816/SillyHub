@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组合件单测（coalescerFlushAllMessages + forwardSubmitMessages
+  直调），收尾序列本身（break 出 readline 后 flushAll → 转发 → await pendingForwards）无执行级测试守护，未来重构该段时测试不会红。补直调 spawnAndStream 的执行级测试。
+
+  成功标准：
+
+  - 新测试文件直调 spawnAndStream（mock node:child_process.spawn 返回 FakeChild 驱动真实 readline 链），不绕过收尾序列
+
+  - 取消（AbortSignal abort）break 路径：流式 delta 残留缓冲在收尾被冲刷并经 client.submitMessages 单行转发（内容拼接、带 timestamp），result
+  status=cancelled
+
+  - 超时（看门狗触发）break 路径：同上残留冲刷转发，result status=timeout
+
+  - 正常流关闭（消息无完结行）路径：残留冲刷转发，result status=completed
+
+  - 新用例与相关既有测试全绿 + pnpm typecheck 通过，不跑全量
+autopilot: false
+baseline_commit: 92013965be9189f00a6002cef658c176bea782b9
+updatedAt: '2026-10-12T23:38:34.244Z'
+baseline_sha256: 02673cd01743ee1890db0ee2ee059ab095e47bdbdc871e164f9d8587f94dc7b2
+spec_approved: true
+spec_approved_at: '2026-10-12T23:38:34.243Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
