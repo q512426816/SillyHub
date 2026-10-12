@@ -667,19 +667,19 @@ created_at: 2026-10-08T01:35:36.843Z
 - row: 2026-10-11-linked-repo-workspace-ref:task-01:acc-0-3c9095f1
   tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: eed231994c23d9f6e11d4cc211532c609f9635e7
   source_change: 2026-10-11-linked-repo-workspace-ref
   status: active
 - row: 2026-10-11-linked-repo-workspace-ref:task-01:acc-1-349bd3a6
   tests: backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: eed231994c23d9f6e11d4cc211532c609f9635e7
   source_change: 2026-10-11-linked-repo-workspace-ref
   status: active
 
@@ -715,10 +715,10 @@ created_at: 2026-10-08T01:35:36.843Z
 - row: 2026-10-11-linked-repo-workspace-ref:task-02:acc-0-5034f1dd
   tests: frontend/src/components/workspace/__tests__/linked-repos-card.test.tsx
   reason: spec
-  state: candidate
+  state: active
   discovery: machine
-  confirmed_by: null
-  confirmed_at: null
+  confirmed_by: agent
+  confirmed_at: eed231994c23d9f6e11d4cc211532c609f9635e7
   source_change: 2026-10-11-linked-repo-workspace-ref
   status: active
 
