@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-duration-backfill-harness-align",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a339d492bcea7f038e3715617f6004967c8f3368",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 达成：守卫已撤、仅回填语义落地，两用例真实且断言有判别力",
+      "evidence": "close 路径现为 `if duration_api_ms is not None and agent_run.duration_api_ms is None: agent_run.duration_api_ms = duration_api_ms`，墙钟守卫（wall = duration_ms …）整段删除。test_close_backfills_duration_api_ms_when_null：新种子 run（列 NULL）close 入参 3171192 > duration_ms=13246，断言列写入 3171192——该值在昨日守卫下必被拒收，故用例对旧语义有判别力；test_close_does_not_override_measured_duration_api_ms：先直写列 11800 并 commit，close 入参 3171192，断言列保持 11800、duration_ms=13246。两用例与 FR-01 两场景一一对应，AgentRun 已在文件头部 import（第 29 行），无 NameError 面。增量复核（41e72a42 → HEAD a339d492b）：仅测试文件 docstring 两行改写（within_wall_written 重述为回填子形态），行号 656-697 引用面未移位。",
+      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:357-363; backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py:656-697"
+    },
+    {
+      "severity": "P3",
+      "title": "披露边界裁决（可接受）：过渡期回填累计垃圾风险已披露且有缓解；放弃「close 完全不写」的理由成立",
+      "evidence": "①旧 daemon（未含 27695397c 实时差分计时）+ 新 backend 的分步部署场景下，close 回填值仍可能是会话累计快照垃圾（正是昨日守卫要拒的形态）——design 风险节已如实披露，缓解手段具体（deploy-to-server 单包同批换镜像，过渡窗口仅存在于人为分步部署），且用户对守卫否决在先、对回填权衡知情，裁决：可接受（残余风险登记于此，不作阻塞）。②放弃「close 完全不写」：无 usage 实时计时的引擎/旧 daemon 将永远空白（tok/s 永远无分母），回填好于空白且差分部署后值语义为正确增量，裁决：理由成立。增量核对：git diff 41e72a42 → a339d492b 仅 test_interactive_lifecycle_patch.py 2 insertions/1 deletion（within_wall_written docstring 改写，初审 P3 已修复）；daemon.ts 与 usage 写回管线零改动——昨日 daemon 差分修复未受触碰。备注：复审任务给定的完整哈希 a339d492b46069c489028a549a58b8388682b646 在仓内为 bad object，实际 HEAD 完整哈希为 a339d492bcea7f038e3715617f6004967c8f3368（短前缀一致），reviewedAgainst 以实测为准。",
+      "location": ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md:50-55"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T00:35:08Z"
+}

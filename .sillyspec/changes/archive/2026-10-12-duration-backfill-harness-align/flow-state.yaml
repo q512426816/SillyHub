@@ -1,0 +1,40 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：昨日守卫（duration_api_ms > duration_ms 拒收）被用户正确质疑——子代理并行时 Σ(各代理 API 窗口) > 父轮墙钟是合法形态，守卫会拒掉真实值。对照
+  deepseek-harness（packages/session/session-stats/src/projection.ts:154-175）本地源码：终态时长权威=事件层自测窗口逐步累加（llmMs/decodeMs），不消费提供方
+  duration 聚合，Σ窗口>墙钟合法无守卫。本平台等价物=已建的实时窗口累加（usage.api_duration_ms），close 的 SDK 元数据只能当回填。
+
+  成功标准：
+
+  - close_interactive_run 撤墙钟拒收守卫，改为仅回填：AgentRun.duration_api_ms 列已有值（daemon 实时窗口累计）时 close 不覆盖，列 NULL 时才写 close 值
+
+  - 删除昨日两守卫用例，新增/改写用例：已有值不覆盖、NULL 时回填
+
+  - 模块卡（backend daemon.md）同步修正语义描述
+
+  - 两侧测试绿，不跑全量
+autopilot: true
+baseline_commit: 1371e6516cb78420290369d5147f25f16f951350
+updatedAt: '2026-10-12T00:36:12.696Z'
+baseline_sha256: c63972a3fb3ed00e6d752846809a41c2c95d9acb3c710ca28cb56e9533a27218
+gate_summary: >-
+  test: passed ← module[]+deps(py29)+fr(3)（118.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012003121\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（12.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012003121\test-result.json｜门文件
+  5 个
+

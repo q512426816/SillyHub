@@ -1,0 +1,98 @@
+{
+  "change": "2026-10-12-duration-backfill-harness-align",
+  "baseline": "1371e6516cb78420290369d5147f25f16f951350",
+  "head": "a339d492bcea7f038e3715617f6004967c8f3368",
+  "files": [
+    ".sillyspec/docs/backend/modules/daemon.md",
+    "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+    "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+    ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md",
+    ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/proposal.md",
+    ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/requirements.md",
+    ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/review.json.superseded-20261012T003437",
+    ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/tasks.md"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 225,
+    "deletions": 15
+  },
+  "savedAt": "2026-10-12T00:34:39.069Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "1371e6516cb78420290369d5147f25f16f951350",
+    "totals": {
+      "files": 3,
+      "additions": 42,
+      "deletions": 15
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/backend/modules/daemon.md",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/close_run_steps.py",
+        "additions": 7,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+        "additions": 32,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "df2c4ecc741b2a8fb937a842156cd18ee2085915e86ab06880f9b2cc0cca40fc",
+  "patchStatus": "ok"
+}

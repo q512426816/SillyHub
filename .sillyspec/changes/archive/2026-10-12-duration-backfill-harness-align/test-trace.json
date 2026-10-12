@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-duration-backfill-harness-align",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-duration-backfill-harness-align:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_backfills_duration_api_ms_when_null」",
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_does_not_override_measured_duration_api_ms」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-duration-backfill-harness-align"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-duration-backfill-harness-align:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-duration-backfill-harness-align"
+    }
+  ]
+}

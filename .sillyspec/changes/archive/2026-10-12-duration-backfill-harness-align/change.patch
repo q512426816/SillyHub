@@ -1,0 +1,317 @@
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index 8f2982336..661034b19 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -58,7 +58,9 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
+   - usage 管线补维（2026-10-10-live-token-speed-daemon-timing）：submit_messages 提取
+   message 顶层 `usage.api_duration_ms`（daemon 三引擎逐调用计时生产的轮内累计生成
+   时长 ms，不含工具窗口）→ max 累积（乱序不回退）→ submit_commit **仅增不减**写回
+-  `AgentRun.duration_api_ms`（防跨轮回退；close 结果元数据非 None 仍权威覆盖）→
++  `AgentRun.duration_api_ms`（防跨轮回退；close 元数据仅回填不覆盖实测值——
++  2026-10-12-duration-backfill-harness-align 对齐 deepseek-harness projection.ts
++  的窗口自测哲学，子代理并行时 Σ窗口>墙钟合法故无墙钟守卫）→
+   tokens SSE 事件与 run channel summary 增键 `duration_api_ms`（None 不带键，
+   design §9 同款）——前端运行中 tok/s 分母数据源；
+   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+diff --git a/backend/app/modules/daemon/run_sync/service/close_run_steps.py b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+index 42c2d2993..309c4df95 100644
+--- a/backend/app/modules/daemon/run_sync/service/close_run_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/close_run_steps.py
+@@ -354,14 +354,13 @@ async def _close_apply_terminal(
+         agent_run.num_turns = num_turns
+     if duration_ms is not None:
+         agent_run.duration_ms = duration_ms
+-    if duration_api_ms is not None:
+-        # 2026-10-10-duration-api-cumulative-fix 物理守卫：API 调用时长不可能超过
+-        # 轮墙钟（duration_ms）。会话级累计快照形态的引擎（线上实证：13s 轮被写
+-        # 3171s 累计值 → 终态 tok/s 分母放大 239 倍显示 0.4）在此拒收——保留既有
+-        # 值（daemon 实时计时累计或 NULL），不静默放大分母。
+-        wall = duration_ms if duration_ms is not None else agent_run.duration_ms
+-        if wall is None or duration_api_ms <= wall:
+-            agent_run.duration_api_ms = duration_api_ms
++    if duration_api_ms is not None and agent_run.duration_api_ms is None:
++        # 2026-10-12-duration-backfill-harness-align：终态时长权威=daemon 实时窗口
++        # 累计（usage.api_duration_ms，逐调用窗口求和——deepseek-harness
++        # projection.ts llmMs/decodeMs 同款哲学），close 的 SDK 元数据仅在列 NULL
++        # 时回填、**不覆盖已实测值**。不设墙钟守卫：子代理并行时 Σ(各代理窗口)>
++        # 父轮墙钟是合法形态（harness 同款，无守卫）。
++        agent_run.duration_api_ms = duration_api_ms
+     if input_tokens is not None:
+         agent_run.input_tokens = input_tokens
+     if output_tokens is not None:
+diff --git a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+index 921b0f26f..b1d6bd570 100644
+--- a/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
++++ b/backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+@@ -653,12 +653,37 @@ class TestGap3CloseInteractiveRun:
+         assert payload2["duration_api_ms"] is None
+ 
+     @pytest.mark.asyncio
+-    async def test_close_duration_api_ms_over_wall_rejected(self, db_session, mocked_redis) -> None:
+-        """2026-10-10-duration-api-cumulative-fix：duration_api_ms > duration_ms（墙钟）
+-        物理不可能——会话级累计快照形态的引擎（线上实证 13s 轮被写 3171s）拒收，
+-        列保留既有值（NULL / daemon 实时计时累计），不放大终态 tok/s 分母。"""
++    async def test_close_backfills_duration_api_ms_when_null(
++        self, db_session, mocked_redis
++    ) -> None:
++        """2026-10-12-duration-backfill-harness-align：列 NULL（无实时计时）→ close
++        元数据回填（api > 墙钟也合法——子代理并行时 Σ窗口>墙钟，不设墙钟守卫）。"""
++        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
++        svc = DaemonService(db_session)
++        run1 = await svc.close_interactive_run(
++            lease_id,
++            run_id,
++            token,
++            status="success",
++            is_error=False,
++            duration_ms=13246,
++            duration_api_ms=3171192,
++        )
++        assert run1.duration_ms == 13246
++        assert run1.duration_api_ms == 3171192
++
++    @pytest.mark.asyncio
++    async def test_close_does_not_override_measured_duration_api_ms(
++        self, db_session, mocked_redis
++    ) -> None:
++        """列已有实测值（daemon 实时窗口累计，先用 usage 管线预写 11800）→ close
++        元数据（哪怕是累计快照垃圾 3171192）**不覆盖**——实测值权威（harness 对齐）。"""
+         lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+         svc = DaemonService(db_session)
++        # 模拟轮内实时窗口累计先落列（usage 管线写回路径产物）。
++        run_row = await db_session.get(AgentRun, run_id)
++        run_row.duration_api_ms = 11800
++        await db_session.commit()
+         run1 = await svc.close_interactive_run(
+             lease_id,
+             run_id,
+@@ -668,14 +693,15 @@ class TestGap3CloseInteractiveRun:
+             duration_ms=13246,
+             duration_api_ms=3171192,
+         )
++        assert run1.duration_api_ms == 11800
+         assert run1.duration_ms == 13246
+-        assert run1.duration_api_ms is None
+ 
+     @pytest.mark.asyncio
+     async def test_close_duration_api_ms_within_wall_written(
+         self, db_session, mocked_redis
+     ) -> None:
+-        """合法值（api ≤ 墙钟）照常写入。"""
++        """NULL 回填子形态（api ≤ 墙钟）——2026-10-12 回填语义下与超界值同路径
++        （仅回填不设墙钟守卫），保留用例锚定常见量级。"""
+         lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+         svc = DaemonService(db_session)
+         run1 = await svc.close_interactive_run(
+diff --git a/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md
+@@ -0,0 +1,63 @@
++---
++author: qinyi
++created_at: 2026-10-12T10:05:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-12-duration-backfill-harness-align
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++答：用户正确质疑昨日守卫（duration_api_ms > duration_ms 拒收）——子代理并行时
++Σ(各代理 API 窗口) > 父轮墙钟是合法形态，守卫会拒掉真实值。对照 deepseek-harness
++本地源码（packages/session/session-stats/src/projection.ts:154-175）：终态时长权威
++=事件层自测窗口逐步累加（llmMs=完成时刻−step 开始、decodeMs=完成−首 token，
++按 step 求和），不消费提供方 duration 聚合，Σ窗口>墙钟合法无守卫。本平台等价物
++=已建的实时窗口累加（usage.api_duration_ms，claude/codex/pi 桶计时）。故撤销墙钟
++守卫，close 元数据降级为回填（列 NULL 才写，实测值权威不覆盖）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++答：签名零变化。close_interactive_run 行为变化：duration_api_ms 由「有值即覆盖
++（昨日版含墙钟守卫）」改为「仅列 NULL 时回填」——实测值（实时窗口累计）权威。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   答：成立。close 每轮一次（TERMINAL 幂等既有）；usage 管线实时值先于 close
++   落列（submit_messages 在 close 之前），回填只发生在无实时值时。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   答：不适用——单 run 的 close 单点收口；实时写回（submit）与 close 分属请求
++   边界，TERMINAL 终态守卫防 close 复活。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   答：安全。回填不引入新状态；列值要么实测要么回填一次，无累加面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   答：不串台——按 run 行操作。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++答：最大风险——旧 daemon（未部署实时计时）+ 新 backend 下，close 回填的值仍
++可能是会话累计垃圾（daemon 差分修复 27695397c 未部署时），过渡期老轮显示仍
++失真。缓解：部署时 backend 与 daemon 同批换镜像（deploy-to-server 单包交付），
++过渡窗口仅存在于分步部署场景。放弃方案：①保留墙钟守卫（拒真实并行子代理值，
++用户正确否决）；②close 完全不写 duration_api_ms（无实时计时的引擎/旧 daemon
++彻底没速度，回填好于空白——值语义在 daemon 差分部署后为正确增量）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | backend/app/modules/daemon/run_sync/service/close_run_steps.py | 撤墙钟守卫 → 仅回填 |
++| 改 | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | 两守卫用例 → 回填/不覆盖两用例 |
++| 改 | .sillyspec/docs/backend/modules/daemon.md | usage 管线段语义修正 |
+
+diff --git a/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/proposal.md b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:26:50.073Z
++---
++# 提案书（Proposal）— 2026-10-12-duration-backfill-harness-align
++
++## 动机
++
++任务原话转写：动机：昨日守卫（duration_api_ms > duration_ms 拒收）被用户正确质疑——子代理并行时 Σ(各代理 API 窗口) > 父轮墙钟是合法形态，守卫会拒掉真实值。对照 deepseek-harness（packages/session/session-stats/src/projection.ts:154-175）本地源码：终态时长权威=事件层自测窗口逐步累加（llmMs/decodeMs），不消费提供方 duration 聚合，Σ窗口>墙钟合法无守卫。本平台等价物=已建的实时窗口累加（usage.api_duration_ms），close 的 SDK 元数据只能当回填。
++成功标准：
++- close_interactive_run 撤墙钟拒收守卫，改为仅回填：AgentRun.duration_api_ms 列已有值（daemon 实时窗口累计）时 close 不覆盖，列 NULL 时才写 close 值
++- 删除昨日两守卫用例，新增/改写用例：已有值不覆盖、NULL 时回填
++- 模块卡（backend daemon.md）同步修正语义描述
++- 两侧测试绿，不跑全量
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. close_interactive_run 撤墙钟拒收守卫，改为仅回填：AgentRun.duration_api_ms 列已有值（daemon 实时窗口累计）时 close 不覆盖，列 NULL 时才写 close 值
++2. 删除昨日两守卫用例，新增/改写用例：已有值不覆盖、NULL 时回填
++3. 模块卡（backend daemon.md）同步修正语义描述
++4. 两侧测试绿，不跑全量
++
++## 成功标准（可验证）
++
++1. close_interactive_run 撤墙钟拒收守卫，改为仅回填：AgentRun.duration_api_ms 列已有值（daemon 实时窗口累计）时 close 不覆盖，列 NULL 时才写 close 值
++2. 删除昨日两守卫用例，新增/改写用例：已有值不覆盖、NULL 时回填
++3. 模块卡（backend daemon.md）同步修正语义描述
++4. 两侧测试绿，不跑全量
+
+diff --git a/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/requirements.md b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/requirements.md
+@@ -0,0 +1,49 @@
++---
++author: qinyi
++created_at: 2026-10-12T10:05:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-12-duration-backfill-harness-align
++
++## 功能需求
++
++### FR-01: close 对 duration_api_ms 仅回填不覆盖
++
++close_interactive_run 必须在 `AgentRun.duration_api_ms` 列已有值（实时窗口
++累计实测值）时不覆盖；列 NULL 时才以 close 元数据回填（api > 墙钟合法——子代理
++并行时 Σ窗口>墙钟，禁止设墙钟守卫）。
++
++#### 场景：实测值权威
++
++- Given：列已预写 11800（实时累计），close 入参 duration_api_ms=3171192
++- When：close_interactive_run
++- Then：列保持 11800
++
++#### 场景：NULL 回填
++
++- Given：列 NULL，close 入参 duration_api_ms=3171192
++- When：close_interactive_run
++- Then：列写入 3171192
++
++### FR-02: 模块卡语义同步
++
++backend daemon 模块卡 usage 管线段必须同步回填语义与 harness 对齐说明。
++
++#### 场景：卡面一致
++
++- When：读 backend daemon.md usage 管线段
++- Then：描述为「close 元数据仅回填不覆盖实测值；Σ窗口>墙钟合法无守卫」
++
++### FR-03: 相关测试通过（不跑全量）
++
++改写后的 lifecycle 用例（回填/不覆盖）必须全绿；禁止运行全量测试套件。
++
++#### 场景：绿
++
++- When：跑 lifecycle duration_api 用例
++- Then：全过
++
++## 测试绑定（每条 FR 至少一行）
++
++FR-01: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_backfills_duration_api_ms_when_null」「test_close_does_not_override_measured_duration_api_ms」
++FR-02: .sillyspec/docs/backend/modules/daemon.md（usage 管线段人工核对）
++FR-03: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py -k duration_api 全绿
+
+diff --git a/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/review.json.superseded-20261012T003437 b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/review.json.superseded-20261012T003437
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/review.json.superseded-20261012T003437
+@@ -0,0 +1,34 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-12-duration-backfill-harness-align",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "41e72a42fb443b097ad5979651c85570d6acca48",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "FR-01 达成：守卫已撤、仅回填语义落地，两用例真实且断言有判别力",
++      "evidence": "close 路径现为 `if duration_api_ms is not None and agent_run.duration_api_ms is None: agent_run.duration_api_ms = duration_api_ms`，墙钟守卫（wall = duration_ms …）整段删除。test_close_backfills_duration_api_ms_when_null：新种子 run（列 NULL）close 入参 3171192 > duration_ms=13246，断言列写入 3171192——该值在昨日守卫下必被拒收，故用例对旧语义有判别力；test_close_does_not_override_measured_duration_api_ms：先直写列 11800 并 commit，close 入参 3171192，断言列保持 11800、duration_ms=13246。两用例与 FR-01 两场景一一对应，AgentRun 已在文件头部 import（第 29 行），无 NameError 面。",
++      "location": "backend/app/modules/daemon/run_sync/service/close_run_steps.py:357-363; backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py:656-697"
++    },
++    {
++      "severity": "P3",
++      "title": "遗留用例 test_close_duration_api_ms_within_wall_written 仍带昨日墙钟话语（docstring 过时），提案「删除昨日两守卫用例」仅删其一",
++      "evidence": "该用例（NULL 列 + duration_api_ms=12500 ≤ 墙钟 13246 → 照常写入）在新语义下仍绿——本质已成为「NULL 回填」的子用例而非守卫用例，无语义冲突；但其 docstring「合法值（api ≤ 墙钟）照常写入」仍在暗示墙钟判据，与 daemon.md 新表述（无墙钟守卫）不一致。requirements.md 测试绑定未要求删除它，FR-03（-k duration_api 全绿）不受影响；仅 proposal.md 措辞「删除昨日两守卫用例」与事实有一处出入。建议后续顺手把 docstring 改为回填语义。",
++      "location": "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py:700-716"
++    },
++    {
++      "severity": "P3",
++      "title": "披露边界裁决（可接受）：过渡期回填累计垃圾风险已披露且有缓解；放弃「close 完全不写」的理由成立",
++      "evidence": "①旧 daemon（未含 27695397c 实时差分计时）+ 新 backend 的分步部署场景下，close 回填值仍可能是会话累计快照垃圾（正是昨日守卫要拒的形态）——design 风险节已如实披露，缓解手段具体（deploy-to-server 单包同批换镜像，过渡窗口仅存在于人为分步部署），且用户对守卫否决在先、对回填权衡知情，裁决：可接受（残余风险登记于此，不作阻塞）。②放弃「close 完全不写」：无 usage 实时计时的引擎/旧 daemon 将永远空白（tok/s 永远无分母），回填好于空白且差分部署后值语义为正确增量，裁决：理由成立。另核对：git diff 41e72a42 → 工作区仅 docs/sillyspec/stage-review-verify-enum-gap.md 移动（并行会话已 accept-dirty-gap 留痕，不计入），三处代码面（close_run_steps.py / lifecycle 测试 / daemon.md）工作区与 reviewedAgainst 完全一致，daemon.ts 与 usage 写回管线零改动——昨日 daemon 差分修复未受触碰。",
++      "location": ".sillyspec/changes/2026-10-12-duration-backfill-harness-align/design.md:50-55"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-12T00:33:29Z"
++}
+
+diff --git a/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/tasks.md b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-duration-backfill-harness-align/tasks.md
+@@ -0,0 +1,8 @@
++---
++author: qinyi
++created_at: 2026-10-12T10:05:00.000Z
++---
++# 任务注册表（Tasks）— 2026-10-12-duration-backfill-harness-align
++
++- [x] task-01: close_run_steps 撤守卫改仅回填 + lifecycle 两用例改写，pytest 绿
++- [x] task-02: backend daemon.md 模块卡语义修正 + 交付提交
