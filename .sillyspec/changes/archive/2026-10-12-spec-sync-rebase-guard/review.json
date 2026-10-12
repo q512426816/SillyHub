@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-sync-rebase-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok — 边界已裁决：可接受。首推/重试同 await 链顺序调用（spec-sync.ts:882,908），守卫转抛复用首推响应 server_versions 快照（:916），无乱序窗口",
+    "并发": "ok — 边界已裁决：可接受。守卫 catch 仅 warn+throw（:910-917）零磁盘写入；writeLocalManifest 仍在成功路径唯一写入点（:923），失败路径不落盘 re-base，写时序零变化",
+    "切换": "ok — 边界已裁决：可接受。cached 为调用局部对象（:828），re-base 改写仅在内存；转 SpecPushConflict 后 wrapper 仅对非 SpecPushConflict 写 pending_push（:988），人工拍板语义成立",
+    "作用域": "ok — 边界已裁决：可接受。守卫为单次推送调用内控制流，SpecPushConflict 携带本 wsId 响应的 server_versions，无跨工作区数据面"
+  },
+  "reviewedAt": "2026-10-12T08:41:53+08:00"
+}

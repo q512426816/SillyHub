@@ -2346,3 +2346,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：a339d492bcea7f038e3715617f6004967c8f3368
 理由：答：最大风险——旧 daemon（未部署实时计时）+ 新 backend 下，close 回填的值仍 可能是会话累计垃圾（daemon 差分修复 27695397c 未部署时），过渡期老轮显示仍 失真。缓解：部署时 backend 与 daemon 同批换镜像（deploy-to-server 单包交付）， 过渡窗口仅存在于分步部署场景。放弃方案：①保留墙钟守卫（拒真实并行子代理值， 用户正确否决）；②close 完全不写 duration_api_ms（无实时计时的引擎/旧 daemon 彻底没速度，回填好于空白——值语义在 daemon 差分部署后为正确增量）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-spec-sync-rebase-guard
+锚点：未记录
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+理由：- 最大风险：守卫扩大后，re-base 段内原本「tar 回退能自愈」的异常现在全部上抛人工裁决——但首推已 conflict 的前提下 tar 回退不是自愈而是静默覆盖（NFR-02 明文禁止），所谓自愈面本不存在，上抛是唯一正确语义；真实代价仅为冲突人工处理频次的口径更严。 - 放弃方案 A：仅给 `computeIncrementalOps` 单独套 try/catch（失败时跳过重试、维持首推 conflict 抛出）——粒度更细但留不住 onProgress 回调与未来新增语句的裸奔面，守卫区间再次漂移；整段包裹与「conflict 后不自动覆盖」不变量一一同构。 - 放弃方案 B：重算失败时降级为直接抛首推的 conflict（复用既有 `if (result.conflict) throw`）——与方案 A 同缺陷，且多一条隐式控制流路径；统一转 `SpecPushConflict` 单出口更可测。

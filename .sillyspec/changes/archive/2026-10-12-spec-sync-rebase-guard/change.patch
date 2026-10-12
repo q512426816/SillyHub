@@ -1,0 +1,368 @@
+diff --git a/docs/sillyspec/stage-review-verify-enum-gap.md b/docs/sillyspec/finished/stage-review-verify-enum-gap.md
+similarity index 52%
+rename from docs/sillyspec/stage-review-verify-enum-gap.md
+rename to docs/sillyspec/finished/stage-review-verify-enum-gap.md
+index fae8b737c..3c1ae38b3 100644
+--- a/docs/sillyspec/stage-review-verify-enum-gap.md
++++ b/docs/sillyspec/finished/stage-review-verify-enum-gap.md
+@@ -36,3 +36,26 @@ Stage Review Gate 的提示文案与 register-stage-review 的 stage 枚举不
+ ## 修复建议
+ 
+ 二选一对齐：① register-stage-review 枚举补 verify（生成骨架/adopt 与其他 stage 同构）；② gate 提示降级为与实现一致（verify 阶段不要求 stage review）。
++
++## 处置记录（2026-10-12）
++
++**按方向②修复**（sillyspec 仓工作树，未提交）：期望面对齐门禁现实——Stage Review Gate
++（gates.js:1513）实际只拦 `brainstorm|plan|execute`，verify 从不在列。修法：
++
++1. **默认档 hint**（machine-interface.js e3 块）：`stage === 'verify' || 'execute'` 收窄为
++   仅 execute；文案「verify/execute --done 的 Stage Review Gate 会拦」改「execute --done
++   的…」。verify 不再产提示（提示命令 `--stage verify` 不可执行 + 指称的门禁不存在，
++   双重误导消除）。
++2. **--full 档**（e2 块）：`full-stage-review` 检查限 execute；verify 的真实门面 e1
++   target-files 对账检查保留不动。
++3. **测试契约同步**（gate-full-preflight.test.mjs）：F1/F2/F4 的 verify stage-review 期望
++   改为「不在场」断言（原契约钉的是超前于门禁实现的期望面——即本坑病灶），新增 F5
++   （verify 默认档无 hint / execute 有且文案指称 execute）。
++
++方向①（register 枚举补 verify）不采纳：全仓从未存在 verify-* stage-review 目录，无
++消费面，补枚举是铸造无人使用的新工件惯例。死锁风险（护栏②提及的「未来硬拦+枚举缺」）
++随期望面收敛而消失——若未来真引入 verify 阶段评审，枚举与提示须同变更落地。
++
++**测试**：gate-full-preflight 4/4 + gate-docs-only / gate-derive-spec-drift /
++diagnostic-codes-parity / register-stage-review-cwd-deep 6/6 + stage-review 族
++（align-execute-review-gate / stage-review-checklist / platform-register）11/11 全绿。归档。
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index f8b8203d6..c28e497ca 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -881,36 +881,39 @@ async function postSpecSyncImpl(
+     let pushChangeDirs = changeDirs;
+     let result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+     if (result.conflict) {
+-      const rebased = rebaseManifestVersions(cached, result.server_versions ?? {});
+-      if (rebased > 0) {
+-        // 重算说明：rebase 只改缓存 version，不改 op 生成逻辑（add/update/delete/rename
+-        // 的产生条件与 version 无关）→ 重算 ops 与首推同集、仅 base_version 对齐服务端；
+-        // 服务端同内容豁免（apply_ops D-008@v2）使「他端先推」型冲突重试即全绿并关闭
+-        // 注册表开放行，无需空批特判（曾设的空 ops 分支为不可达死代码，已删）。
+-        const recomputed = await computeIncrementalOps(specRoot, cached);
+-        pushOps = recomputed.ops;
+-        pushLocalFiles = recomputed.localFiles;
+-        try {
+-          pushChangeDirs = extractChangeDirs(pushOps);
+-        } catch {
+-          pushChangeDirs = [];
+-        }
+-        onProgress?.({ files_total: pushOps.length, files_processed: 0 });
+-        console.warn(
+-          `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
+-        );
+-        // 重试轮推送守卫（review P2 2026-10-11）：首推已 conflict 后，重试的传输类失败
+-        // **不得**落入外层 tar 全量回退——静默覆盖违背 NFR-02；转抛 SpecPushConflict
+-        // （首推冲突面），保住「conflict 后不自动覆盖」不变量。
+-        try {
+-          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+-        } catch (e) {
++      // re-base 段整段守卫（2026-10-12-spec-sync-rebase-guard，扩自 review P2 2026-10-11
++      // 的重试传输守卫）：首推已 conflict 后，re-base/version 对齐、ops 重算 IO、
++      // onProgress 回调、重试推送——任何异常都**不得**落入外层 tar 全量回退（静默
++      // 覆盖违背 NFR-02「conflict 后不自动覆盖」），统一转抛 SpecPushConflict 走
++      // 人工裁决；SpecPushConflict 本身（重试仍 conflict 的真分叉）原样透传。
++      try {
++        const rebased = rebaseManifestVersions(cached, result.server_versions ?? {});
++        if (rebased > 0) {
++          // 重算说明：rebase 只改缓存 version，不改 op 生成逻辑（add/update/delete/rename
++          // 的产生条件与 version 无关）→ 重算 ops 与首推同集、仅 base_version 对齐服务端；
++          // 服务端同内容豁免（apply_ops D-008@v2）使「他端先推」型冲突重试即全绿并关闭
++          // 注册表开放行，无需空批特判（曾设的空 ops 分支为不可达死代码，已删）。
++          const recomputed = await computeIncrementalOps(specRoot, cached);
++          pushOps = recomputed.ops;
++          pushLocalFiles = recomputed.localFiles;
++          try {
++            pushChangeDirs = extractChangeDirs(pushOps);
++          } catch {
++            pushChangeDirs = [];
++          }
++          onProgress?.({ files_total: pushOps.length, files_processed: 0 });
+           console.warn(
+-            `spec_sync: rebase retry transport failure, escalate to manual adjudication ws=${wsId}:`,
+-            e,
++            `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
+           );
+-          throw new SpecPushConflict(wsId, result.server_versions ?? {});
++          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
+         }
++      } catch (e) {
++        if (e instanceof SpecPushConflict) throw e;
++        console.warn(
++          `spec_sync: rebase phase failure after conflict, escalate to manual adjudication ws=${wsId}:`,
++          e,
++        );
++        throw new SpecPushConflict(wsId, result.server_versions ?? {});
+       }
+       if (result.conflict) {
+         throw new SpecPushConflict(wsId, result.server_versions ?? {});
+diff --git a/sillyhub-daemon/tests/spec-sync-incremental.test.ts b/sillyhub-daemon/tests/spec-sync-incremental.test.ts
+index a0d68525e..a4918c9e1 100644
+--- a/sillyhub-daemon/tests/spec-sync-incremental.test.ts
++++ b/sillyhub-daemon/tests/spec-sync-incremental.test.ts
+@@ -24,6 +24,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+ // ── hoisted mocks（homedir 必须在 spec-sync import 前替换）────────────────────
+ const hoisted = vi.hoisted(() => ({
+   homedirMock: vi.fn((): string => '/nonexistent-spec-sync-incr-home'),
++  // 2026-10-12-spec-sync-rebase-guard：readFile 故障旗标（默认透传；仅 conflict 后
++  // re-base 重算 IO 异常用例在首推桩回调内临时置位）。
++  failReadFile: { value: false },
+ }));
+ 
+ vi.mock('node:os', async (importOriginal) => {
+@@ -31,6 +34,19 @@ vi.mock('node:os', async (importOriginal) => {
+   return { ...actual, homedir: hoisted.homedirMock };
+ });
+ 
++vi.mock('node:fs/promises', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:fs/promises')>();
++  return {
++    ...actual,
++    readFile: async (...args: Parameters<typeof actual.readFile>) => {
++      if (hoisted.failReadFile.value) {
++        throw new Error('EBUSY: resource busy (simulated AV lock)');
++      }
++      return actual.readFile(...args);
++    },
++  };
++});
++
+ // spec-sync 在 homedir mock 就位后 import。
+ const { postSpecSync, resolveManifestCachePath, SpecPushConflict } =
+   await import('../src/spec-sync.js');
+@@ -394,6 +410,35 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
+     expect(existsSync(join(scratch, '.runtime', 'pending_push'))).toBe(false);
+   });
+ 
++  it('conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）', async () => {
++    // c4ff833b0 的守卫只盖「重试推送传输失败」；conflict 后 computeIncrementalOps
++    // 的 readFile 异常（Windows 杀软短暂锁 EBUSY / walk 与 read 之间竞删）会穿透
++    // 外层 catch 走 tar 全量覆盖——守卫必须覆盖整段 re-base 区。
++    const wsId = 'ws-rebase-io-fail';
++    await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
++    write('docs/a.md', 'v2');
++
++    const incrSpy = vi.fn().mockImplementationOnce(async () => {
++      // 首推 conflict 后、重算 ops 前的确定性注入窗口。
++      hoisted.failReadFile.value = true;
++      return { ok: true, new_versions: {}, conflict: true, server_versions: { 'docs/a.md': 9 } };
++    });
++    const postSpy = vi.fn();
++    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
++
++    try {
++      await expect(postSpecSync(client as never, wsId, scratch)).rejects.toBeInstanceOf(
++        SpecPushConflict,
++      );
++    } finally {
++      hoisted.failReadFile.value = false;
++    }
++    // 首推 conflict 恰好一次（重算抛错未达重试推送）；不落 tar 全量覆盖、不写 pending_push
++    expect(incrSpy).toHaveBeenCalledTimes(1);
++    expect(postSpy).not.toHaveBeenCalled();
++    expect(existsSync(join(scratch, '.runtime', 'pending_push'))).toBe(false);
++  });
++
+   it('new_versions 回写缓存 version（下次 diff 用新 version 作 base_version）', async () => {
+     const wsId = 'ws-rev';
+     await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
+diff --git a/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/tasks.md b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/tasks.md
+new file mode 100644
+index 000000000..ade1b8588
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:36:25.792Z
++---
++# 任务注册表（Tasks）— 2026-10-12-spec-sync-rebase-guard
++
++- [x] task-01: 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
++- [x] task-02: 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
++- [x] task-03: 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
++- [x] task-04: 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
++- [x] task-05: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
+diff --git a/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/design.md b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:36:25.792Z
++---
++# 设计记录（Design Record）— 2026-10-12-spec-sync-rebase-guard
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++c4ff833b0 在 `postSpecSyncImpl` 的 conflict 分支里只给「重试推送」套了传输失败守卫（catch 后转抛 `SpecPushConflict`），但同分支内 `rebaseManifestVersions` 之后、重试推送之前还有 `computeIncrementalOps`（内部 `readFile` 无保护——Windows 杀软短暂锁文件 EBUSY/EPERM、或活跃会话在 walk 与 read 之间删文件即抛）与 `onProgress` 回调两处裸奔点：它们抛出的异常穿透到外层 `catch`（`SpecPushConflict` instanceof 之外的分支），走 `packSpecDir` + `postSpecSync` tar 全量覆盖推送——首推已知冲突面下静默覆盖服务端，正是 c4ff833b0 自述要堵的 NFR-02 违背在非传输路径上的残留。修法：把守卫从「重试推送一圈」扩大到「conflict 后整段 re-base 区」——外层 try 包住 rebase/重算/onProgress/重推全部语句，catch 内 `SpecPushConflict` 原样透传、其余异常统一转 `SpecPushConflict`（附 server_versions 快照），成功路径与「重试仍 conflict」判定移到守卫外保持原语义。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 仅改 `sillyhub-daemon/src/spec-sync.ts` 的 `postSpecSyncImpl` conflict 分支内部异常映射；`postSpecSync` 对外签名、`SpecPushConflict` 形态、返回值结构零变化。行为变化一处：conflict 后 re-base 段的非传输异常从「落 tar 全量回退」收紧为「上抛 `SpecPushConflict` 人工裁决」——原行为是缺陷路径，无消费方依赖。
++- 无 schema/端点/迁移变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   首推响应与重试响应是同一 await 链上的顺序调用，无并发响应交错面；`server_versions` 快照在首推响应中一次性携带，守卫转抛时复用该快照（与 c4ff833b0 重试传输失败路径同源），不存在读到更新版本集的乱序窗口。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   重算期间文件被并发改动（其他进程/杀软）正是本守卫的目标场景——原来会落 tar 全量覆盖（把并发改动连同冲突一起静默盖掉），现在转人工裁决；守卫不改变任何磁盘写入时序（`writeLocalManifest` 仍在成功路径唯一写入点，失败路径不落盘 re-base 的语义保持）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   `cached` 是调用局部对象，re-base 对它的 version 改写只在内存；转 `SpecPushConflict` 后不写本地清单缓存、不写 pending_push（与既有重试传输失败路径一致——人工拍板语义），下次推送以磁盘缓存原状重新 diff，状态安全。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   守卫是单次推送调用内的控制流，作用域仅限当前 `wsId` 的 conflict 处理；`SpecPushConflict` 携带的 `server_versions` 来自本 wsId 的响应，无跨工作区数据面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：守卫扩大后，re-base 段内原本「tar 回退能自愈」的异常现在全部上抛人工裁决——但首推已 conflict 的前提下 tar 回退不是自愈而是静默覆盖（NFR-02 明文禁止），所谓自愈面本不存在，上抛是唯一正确语义；真实代价仅为冲突人工处理频次的口径更严。
++- 放弃方案 A：仅给 `computeIncrementalOps` 单独套 try/catch（失败时跳过重试、维持首推 conflict 抛出）——粒度更细但留不住 onProgress 回调与未来新增语句的裸奔面，守卫区间再次漂移；整段包裹与「conflict 后不自动覆盖」不变量一一同构。
++- 放弃方案 B：重算失败时降级为直接抛首推的 conflict（复用既有 `if (result.conflict) throw`）——与方案 A 同缺陷，且多一条隐式控制流路径；统一转 `SpecPushConflict` 单出口更可测。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | sillyhub-daemon/src/spec-sync.ts | conflict 后 re-base 段整段守卫：非 SpecPushConflict 异常统一转抛 |
++| 改 | sillyhub-daemon/tests/spec-sync-incremental.test.ts | 新增 node:fs/promises 部分替身 + 重算 IO 异常用例 |
+
+diff --git a/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/proposal.md b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:36:25.792Z
++---
++# 提案书（Proposal）— 2026-10-12-spec-sync-rebase-guard
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P1——c4ff833b0 自述要保住的不变量「首推已知 conflict 后，重试失败不得落入外层 tar 全量回退（静默覆盖违背 NFR-02）」守卫不完整：sillyhub-daemon/src/spec-sync.ts 首推 conflict=true 之后，同分支内 computeIncrementalOps（重算 ops，内部 readFile 无保护，Windows 杀软短暂锁 EBUSY/EPERM 或文件在 walk 与 read 之间被删即抛）与 onProgress 回调抛出的异常会穿透到外层 catch（if e instanceof SpecPushConflict throw 之外的其余异常），走 packSpecDir+postSpecSync tar 全量覆盖推送——正是该 commit 要堵的静默覆盖在非传输失败路径上仍然可达。
++成功标准：
++- 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
++- 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
++- 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
++- 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
++- 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
++2. 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
++3. 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
++4. 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
++5. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
++
++## 成功标准（可验证）
++
++1. 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
++2. 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
++3. 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
++4. 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
++5. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
+
+diff --git a/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/requirements.md b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-spec-sync-rebase-guard/requirements.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:36:25.792Z
++---
++# 需求规格（Requirements）— 2026-10-12-spec-sync-rebase-guard
++
++## 功能需求
++
++### FR-01: 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
++
++- 首推已返回 conflict=true 后，re-base 段内（清单 version re-base、ops 重算的文件 IO、onProgress 回调、重试推送）抛出的任何异常必须统一转为 `SpecPushConflict` 上抛（`SpecPushConflict` 本身原样透传），禁止落入外层 `packSpecDir` + `postSpecSync` tar 全量回退——已知冲突面下静默全量覆盖违背 NFR-02「conflict 后不自动覆盖」。
++
++#### 场景：重算 IO 异常不落 tar 回退
++
++- Given 桩首推返回 conflict=true 且 server_versions 非空，重算 ops 期间文件读取抛 EBUSY 形态异常
++- When 执行增量推送
++- Then 抛 `SpecPushConflict`，且 tar 全量端点 `postSpecSync` 零调用、不写 pending_push 标记
++
++#### 场景：onProgress 回调异常同样受守卫
++
++- Given 首推 conflict=true 后 onProgress 回调抛异常
++- When 执行增量推送
++- Then 同样转 `SpecPushConflict` 上抛，不落 tar 回退
++
++### FR-02: 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
++
++- 重试推送响应仍 `conflict=true`（真分叉）必须原样抛 `SpecPushConflict`；重试推送传输失败必须转抛 `SpecPushConflict`（c4ff833b0 review P2 既有语义）——两者在守卫重构后行为逐字不变。
++
++#### 场景：真分叉原样上抛
++
++- Given 首推与重试均返回 conflict=true
++- When 执行增量推送
++- Then 抛 `SpecPushConflict`，增量端点恰好调用两次，tar 端点零调用
++
++#### 场景：重试传输失败转抛
++
++- Given 首推 conflict=true、重试推送 reject ECONNRESET
++- When 执行增量推送
++- Then 抛 `SpecPushConflict`，增量端点恰好两次，tar 端点零调用，不写 pending_push
++
++### FR-03: 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
++
++- re-base 后重试成功（conflict=false）的路径必须零行为变化：重试 op base_version 对齐服务端 version、成功后缓存按 new_versions 回写、返回 `{ok:true}`；既有 spec-sync-incremental 全部用例必须保持全绿，不得为通过而改语义。
++
++#### 场景：他端先推型自愈不变
++
++- Given 首推 conflict=true + server_versions、重试返回 new_versions
++- When 执行增量推送
++- Then 成功返回、重试 op base_version 对齐、缓存 version 回写为 new_versions（既有用例口径）
++
++### FR-04: 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
++
++- 必须存在用例：在首推 conflict=true 与 ops 重算之间的确定性窗口注入 `readFile` EBUSY 形态异常，断言抛 `SpecPushConflict`、增量端点恰好一次、tar 端点 `postSpecSync` 零调用；该用例在守卫前为红（异常穿透外层 catch 走 tar 回退）、守卫后为绿。
++
++#### 场景：注入窗口确定性
++
++- Given `node:fs/promises.readFile` 部分替身受旗标控制（默认透传），旗标在首推桩回调内置位、finally 复位
++- When 首推 conflict 后重算 ops 触发 readFile
++- Then 抛 EBUSY 形态异常并被守卫转为 `SpecPushConflict`
++
++### FR-05: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
++
++- 本变更只必须运行 `sillyhub-daemon/tests/spec-sync-incremental.test.ts` 全文件，禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面回归
++
++- When 运行该测试文件
++- Then 新增用例与既有用例全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」
++FR-02: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」
++FR-03: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」
++FR-04: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」
++FR-05: sillyhub-daemon/tests/spec-sync-incremental.test.ts（全文件回归）

@@ -1,0 +1,96 @@
+{
+  "change": "2026-10-12-spec-sync-rebase-guard",
+  "baseline": "c3451db19db55ce601d1ea4d7c2ccae7c73afbe1",
+  "head": "f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060",
+  "files": [
+    ".sillyspec/changes/2026-10-12-spec-sync-rebase-guard/tasks.md",
+    "docs/sillyspec/finished/stage-review-verify-enum-gap.md",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/spec-sync-incremental.test.ts",
+    ".sillyspec/changes/2026-10-12-spec-sync-rebase-guard/design.md",
+    ".sillyspec/changes/2026-10-12-spec-sync-rebase-guard/proposal.md",
+    ".sillyspec/changes/2026-10-12-spec-sync-rebase-guard/requirements.md"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 268,
+    "deletions": 27
+  },
+  "savedAt": "2026-10-12T00:39:47.828Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c3451db19db55ce601d1ea4d7c2ccae7c73afbe1",
+    "totals": {
+      "files": 3,
+      "additions": 98,
+      "deletions": 27
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/finished/stage-review-verify-enum-gap.md",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 30,
+        "deletions": 27,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/spec-sync-incremental.test.ts",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "45ea0d6a740474af74086fc322706caeb192b52d68a4e8dbff6d5b0f5cd38ecc",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,45 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24h 风险审查 P1——c4ff833b0 自述要保住的不变量「首推已知 conflict 后，重试失败不得落入外层 tar 全量回退（静默覆盖违背
+  NFR-02）」守卫不完整：sillyhub-daemon/src/spec-sync.ts 首推 conflict=true 之后，同分支内 computeIncrementalOps（重算 ops，内部 readFile
+  无保护，Windows 杀软短暂锁 EBUSY/EPERM 或文件在 walk 与 read 之间被删即抛）与 onProgress 回调抛出的异常会穿透到外层 catch（if e instanceof
+  SpecPushConflict throw 之外的其余异常），走 packSpecDir+postSpecSync tar 全量覆盖推送——正是该 commit 要堵的静默覆盖在非传输失败路径上仍然可达。
+
+  成功标准：
+
+  - 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base
+  段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
+
+  - 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
+
+  - 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
+
+  - 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
+
+  - 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
+autopilot: true
+baseline_commit: c3451db19db55ce601d1ea4d7c2ccae7c73afbe1
+updatedAt: '2026-10-12T00:42:12.869Z'
+baseline_sha256: 1d48c2cc12fcc7f19b8e2ee79fed3c94c2c19239d4b62227531c60a16e56e63f
+gate_summary: >-
+  test: skipped ← module[]+deps(py1+nontest-skip1+jsx7)+fr(9)（12.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012003940\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（6.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012003940\test-result.json｜门文件
+  3 个
+

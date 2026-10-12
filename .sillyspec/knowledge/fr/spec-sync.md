@@ -519,3 +519,98 @@ created_at: 2026-09-22T17:27:13.449Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-04
 最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0
+
+## FR-spec-sync-027 首推 postSpecSyncIncremental 返回 conflict=true 后，re-base 段内（rebaseManifestVersions/computeIncrementalOps/onProgress/重试推送）抛出的任何异常必须统一转为 SpecPushConflict 上抛人工裁决，禁止落入外层 tar 全量回退
+变更：2026-10-12-spec-sync-rebase-guard
+状态：active
+摘要：重算 IO 异常不落 tar 回退；onProgress 回调异常同样受守卫
+全文：.sillyspec/changes/archive/2026-10-12-spec-sync-rebase-guard/requirements.md#FR-01
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-sync-rebase-guard
+  status: active
+
+## FR-spec-sync-028 重试推送仍 conflict（真分叉）与重试传输失败转抛 SpecPushConflict 的既有语义保持不变
+变更：2026-10-12-spec-sync-rebase-guard
+状态：active
+摘要：真分叉原样上抛；重试传输失败转抛
+全文：.sillyspec/changes/archive/2026-10-12-spec-sync-rebase-guard/requirements.md#FR-02
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」 | sillyhub-daemon/tests/spec-sync-incremental.test.ts「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-sync-rebase-guard
+  status: active
+
+## FR-spec-sync-029 成功路径（rebase 后推送成功、无 conflict）行为零变化，既有 spec-sync-incremental 用例全绿
+变更：2026-10-12-spec-sync-rebase-guard
+状态：active
+摘要：他端先推型自愈不变
+全文：.sillyspec/changes/archive/2026-10-12-spec-sync-rebase-guard/requirements.md#FR-03
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-sync-rebase-guard
+  status: active
+
+## FR-spec-sync-030 新增用例：conflict 后 computeIncrementalOps 抛 IO 异常 → 断言抛 SpecPushConflict 且 postSpecSync（tar 全量）零调用（先红后绿）
+变更：2026-10-12-spec-sync-rebase-guard
+状态：active
+摘要：注入窗口确定性
+全文：.sillyspec/changes/archive/2026-10-12-spec-sync-rebase-guard/requirements.md#FR-04
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-sync-rebase-guard
+  status: active
+
+## FR-spec-sync-031 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/spec-sync-incremental.test.ts 全文件
+变更：2026-10-12-spec-sync-rebase-guard
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-spec-sync-rebase-guard/requirements.md#FR-05
+最近确认：f3203a38d920fa3ea9ca51cf3a87d8fb76fd4060
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/spec-sync-incremental.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-sync-rebase-guard
+  status: active

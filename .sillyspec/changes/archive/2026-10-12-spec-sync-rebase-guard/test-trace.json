@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-sync-rebase-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-sync-rebase-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试仍 conflict → 抛 SpecPushConflict（不静默覆盖，NFR-02 / 2026-10-11-sync-conflict-tri-fix FR-02）」",
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「re-base 重试遇传输失败 → 转抛 SpecPushConflict 不落 tar 回退不写 pending_push（review P2 2026-10-11）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-sync-rebase-guard"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict → re-base 重试全绿 → 自愈成功（他端先推型，2026-10-11-sync-conflict-tri-fix FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-sync-rebase-guard"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts「conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-sync-rebase-guard"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-spec-sync-rebase-guard:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync-incremental.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-sync-rebase-guard"
+    }
+  ]
+}
