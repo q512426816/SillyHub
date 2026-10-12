@@ -1,11 +1,14 @@
 {
   "change": "2026-10-12-run-level-change-attribution",
   "baseline": "6e10f6d20f42be2dcf966e6644b39751af255c9c",
-  "head": "c57df121365d980b0889526f17a767bda09d95b9",
+  "head": "74fbd1ec26e5d14e6cd93fbe686c32b339010057",
   "files": [
     ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md",
+    ".sillyspec/changes/2026-10-12-run-level-change-attribution/flow-state.yaml",
+    ".sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md",
     ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md",
     ".sillyspec/changes/2026-10-12-run-level-change-attribution/review.json",
+    ".sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901",
     ".sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md",
     "backend/app/modules/agent/model.py",
     "backend/app/modules/agent/tests/test_agent_session_model.py",
@@ -17,16 +20,14 @@
     "backend/app/modules/daemon/session/service/inject.py",
     "backend/app/modules/daemon/tests/test_inject_change_context.py",
     "backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py",
-    "backend/tests/test_align_platform_change_events_migration.py",
-    ".sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md",
-    ".sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901"
+    "backend/tests/test_align_platform_change_events_migration.py"
   ],
   "totals": {
-    "files": 17,
-    "additions": 692,
+    "files": 18,
+    "additions": 768,
     "deletions": 27
   },
-  "savedAt": "2026-10-12T07:09:02.282Z",
+  "savedAt": "2026-10-12T07:10:53.980Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
   "modules": [
     {
@@ -201,6 +202,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "c71fd8fb8330387b8f378dd56eec9aee301b28787567ce9549127006b33ce35f",
+  "patchSha256": "fcbaf11dfc8d898b7fd5d7be1be1936c0ce240bd5dd0144b927ac4cee1703ab9",
   "patchStatus": "ok"
 }

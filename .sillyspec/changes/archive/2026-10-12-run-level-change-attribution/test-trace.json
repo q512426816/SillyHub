@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-run-level-change-attribution",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-run-level-change-attribution:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_inject_change_context.py「TestInjectChangeContextStamp::test_inject_run_stamped_with_session_context + ::test_inject_run_unstamped_when_context_none + ::test_context_switch_retargets_next_run」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-run-level-change-attribution"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-run-level-change-attribution:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_returns_change_id_contract + test_bind_change_failure_is_best_effort_no_raise（失败路径 None 断言）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-run-level-change-attribution"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-run-level-change-attribution:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_anchored_run_exclusive_to_owning_change + ::test_shared_session_counted_in_both_changes（无锚 run 回归护栏）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-run-level-change-attribution"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-run-level-change-attribution:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_two_changes_sequential_split」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-run-level-change-attribution"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-run-level-change-attribution:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/agent/tests/test_agent_session_model.py「全量通过」",
+        "backend/app/modules/change/tests/test_spec_binding.py",
+        "backend/app/modules/change/tests/test_usage_stats.py",
+        "backend/app/modules/daemon/tests/test_inject_change_context.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-run-level-change-attribution"
+    }
+  ]
+}

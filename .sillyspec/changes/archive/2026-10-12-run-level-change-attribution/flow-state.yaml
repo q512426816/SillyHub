@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -27,7 +32,7 @@ input: >-
   - 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
 autopilot: true
 baseline_commit: 6e10f6d20f42be2dcf966e6644b39751af255c9c
-updatedAt: '2026-10-12T07:09:02.284Z'
+updatedAt: '2026-10-12T07:10:55.631Z'
 baseline_sha256: 1660d9c12a173cf4c64ab81ba5a99114705f21063cffdfc8f23588f8667b5b66
 upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 gate_summary: >-

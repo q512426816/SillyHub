@@ -1,0 +1,2241 @@
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/change-patch.json b/.sillyspec/changes/2026-10-12-run-level-change-attribution/change-patch.json
+new file mode 100644
+index 000000000..bdd4119de
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/change-patch.json
+@@ -0,0 +1,206 @@
++{
++  "change": "2026-10-12-run-level-change-attribution",
++  "baseline": "6e10f6d20f42be2dcf966e6644b39751af255c9c",
++  "head": "c57df121365d980b0889526f17a767bda09d95b9",
++  "files": [
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md",
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md",
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/review.json",
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md",
++    "backend/app/modules/agent/model.py",
++    "backend/app/modules/agent/tests/test_agent_session_model.py",
++    "backend/app/modules/change/binding.py",
++    "backend/app/modules/change/tests/test_spec_binding.py",
++    "backend/app/modules/change/tests/test_usage_stats.py",
++    "backend/app/modules/change/usage_service.py",
++    "backend/app/modules/daemon/run_sync/service/submit_commit.py",
++    "backend/app/modules/daemon/session/service/inject.py",
++    "backend/app/modules/daemon/tests/test_inject_change_context.py",
++    "backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py",
++    "backend/tests/test_align_platform_change_events_migration.py",
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md",
++    ".sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901"
++  ],
++  "totals": {
++    "files": 17,
++    "additions": 692,
++    "deletions": 27
++  },
++  "savedAt": "2026-10-12T07:09:02.282Z",
++  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
++  "modules": [
++    {
++      "id": "change",
++      "files": 4,
++      "doc": "docs/backend/modules/change.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "agent",
++      "files": 2,
++      "doc": "docs/backend/modules/agent.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "daemon",
++      "files": 3,
++      "doc": "docs/backend/modules/daemon.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "migrations",
++      "files": 1,
++      "doc": "docs/backend/modules/migrations.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "backend",
++      "files": 11,
++      "doc": "docs/multi-agent-platform/modules/backend.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "agent",
++      "files": 2,
++      "doc": "docs/SillyHub/modules/agent.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "daemon",
++      "files": 3,
++      "doc": "docs/SillyHub/modules/daemon.md",
++      "docTouched": false,
++      "docMissing": false
++    },
++    {
++      "id": "change",
++      "files": 4,
++      "doc": "docs/SillyHub/modules/change.md",
++      "docTouched": false,
++      "docMissing": false
++    }
++  ],
++  "uncoveredDirs": [],
++  "moduleMaps": [
++    "docs/backend/modules/_module-map.yaml",
++    "docs/frontend/modules/_module-map.yaml",
++    "docs/multi-agent-platform/modules/_module-map.yaml",
++    "docs/SillyHub/modules/_module-map.yaml",
++    "docs/sillyhub-daemon/modules/_module-map.yaml"
++  ],
++  "acceptedDirtyGap": 2,
++  "scopeAudit": {
++    "mode": "full-flow",
++    "ok": true,
++    "degradedReason": null,
++    "baseAnchor": "6e10f6d20f42be2dcf966e6644b39751af255c9c",
++    "totals": {
++      "files": 11,
++      "additions": 467,
++      "deletions": 27
++    },
++    "rows": [
++      {
++        "path": "backend/app/modules/agent/model.py",
++        "additions": 14,
++        "deletions": 0,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/agent/tests/test_agent_session_model.py",
++        "additions": 5,
++        "deletions": 2,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/change/binding.py",
++        "additions": 11,
++        "deletions": 4,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/change/tests/test_spec_binding.py",
++        "additions": 24,
++        "deletions": 2,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/change/tests/test_usage_stats.py",
++        "additions": 139,
++        "deletions": 2,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/change/usage_service.py",
++        "additions": 31,
++        "deletions": 14,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/daemon/run_sync/service/submit_commit.py",
++        "additions": 13,
++        "deletions": 1,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/daemon/session/service/inject.py",
++        "additions": 6,
++        "deletions": 0,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/app/modules/daemon/tests/test_inject_change_context.py",
++        "additions": 179,
++        "deletions": 0,
++        "kind": "new",
++        "planned": "新增",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py",
++        "additions": 41,
++        "deletions": 0,
++        "kind": "new",
++        "planned": "新增",
++        "verdict": "planned"
++      },
++      {
++        "path": "backend/tests/test_align_platform_change_events_migration.py",
++        "additions": 4,
++        "deletions": 2,
++        "kind": "modified",
++        "planned": "修改",
++        "verdict": "planned"
++      }
++    ],
++    "excluded": {
++      "foreignDeclared": []
++    },
++    "note": "flow done 时点冻结（本文件落盘时采集）",
++    "closedBy": "flow done"
++  },
++  "patchSha256": "c71fd8fb8330387b8f378dd56eec9aee301b28787567ce9549127006b33ce35f",
++  "patchStatus": "ok"
++}
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/change.patch b/.sillyspec/changes/2026-10-12-run-level-change-attribution/change.patch
+new file mode 100644
+index 000000000..d95eec2a7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/change.patch
+@@ -0,0 +1,987 @@
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json
++new file mode 100644
++index 000000000..89863fdd8
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json
++@@ -0,0 +1,34 @@
+++{
+++  "schemaVersion": 1,
+++  "change": "2026-10-12-run-level-change-attribution",
+++  "reviewer": "subagent",
+++  "verdict": "PASS",
+++  "reviewedAgainst": "75d6cf9a302f9393038efe2160f2bb20da175f7e",
+++  "findings": [
+++    {
+++      "severity": "P3",
+++      "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
+++      "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
+++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72"
+++    },
+++    {
+++      "severity": "P3",
+++      "title": "design 乱序作答「迟到重放影响限于 ≤1 轮偏差」量化偏乐观",
+++      "evidence": "submit_commit 回写无 run 序号/水位防御，旧 run 的迟到重放只要发生在更新提交之后就会把 current_change_id 拉回旧值，其后所有无绑定命令的新轮 inject 均错锚旧值直至下一条绑定命令到达——极端迟到场景偏差可超 1 轮。design 已显式声明「接受不设防」（best-effort 通道既有口径、后续新命令自然自愈、仅统计归属误差非数据正确性），裁决仍为可接受，仅量化表述不严谨。",
+++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md:35（代码面：backend/app/modules/daemon/run_sync/service/submit_commit.py:347-356）"
+++    },
+++    {
+++      "severity": "P3",
+++      "title": "@ 联想绑定通道不回写 current_change_id，design 未披露其与新聚合口径的交互",
+++      "evidence": "inject @ 联想路径（helpers.py:610-617）调 bind_session_to_change 落 change_session_links 但不消费返回值、不更新会话上下文——@ 选中的变更在打锚会话中收不到带锚轮（其链接分支被 IS NULL 谓词排除），统计偏小而非双计。FR-01 范围只承诺命令解析通道，不构成违约；属未声明的次级口径缝隙，建议后续变更补齐或在 usage docstring 说明。",
+++      "location": "backend/app/modules/daemon/session/service/helpers.py:610-617"
+++    }
+++  ],
+++  "dimensionNotes": {
+++    "乱序": "边界已裁决：可接受——design 显式声明旧 run 迟到重放不设防（best-effort 通道既有口径、自愈、统计性误差）；代码核实确无防御（作答真实），另记 P3 量化表述偏差",
+++    "并发": "ok——上下文列写入随 _submit_finalize 末尾既有 commit 同事务提交（submit_commit.py:395），失败随 IntegrityError rollback；同会话单活跃轮守卫（inject.py:315-317 turn-conflict guards）与外层 try/except 核实存在。design「与 link 行同 savepoint 事务边界」措辞不精确：列写实际发生在 bind 的 begin_nested 释放后、同一外层事务内，失败同回滚，结论不变",
+++    "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
+++    "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
+++  },
+++  "reviewedAt": "2026-10-12T15:08:11+08:00"
+++}
++diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
++index 8f0e10f34..32ae18bad 100644
++--- a/backend/app/modules/agent/model.py
+++++ b/backend/app/modules/agent/model.py
++@@ -764,6 +764,20 @@ class AgentSession(BaseModel, table=True):
++             nullable=True,
++         ),
++     )
+++    # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
+++    # ——run_sync 命令解析通道（W2.1）每次解析出 sillyspec 绑定命令时回写
+++    # （最后一条生效），inject 建轮时据此给 AgentRun.change_id 打锚。与上方
+++    # change_id（会话创建时的派发绑定，只读语义）刻意分列：一个会话先后执行
+++    # 多个变更时上下文随命令游走，派发锚不动。删变更 SET NULL → 新轮回落
+++    # 无锚（经 change_session_links 认领的旧口径）。
+++    current_change_id: uuid.UUID | None = Field(
+++        default=None,
+++        sa_column=Column(
+++            Uuid(as_uuid=True),
+++            ForeignKey("changes.id", ondelete="SET NULL"),
+++            nullable=True,
+++        ),
+++    )
++     # Redundant workspace binding for change-scoped session listing & cwd
++     # resolution (D-003@v1).
++     workspace_id: uuid.UUID | None = Field(
++diff --git a/backend/app/modules/agent/tests/test_agent_session_model.py b/backend/app/modules/agent/tests/test_agent_session_model.py
++index b28bee1ea..63b818146 100644
++--- a/backend/app/modules/agent/tests/test_agent_session_model.py
+++++ b/backend/app/modules/agent/tests/test_agent_session_model.py
++@@ -20,13 +20,16 @@ def test_agent_session_tablename() -> None:
++     assert AgentSession.__tablename__ == "agent_sessions"
++ 
++ 
++-def test_agent_session_has_all_29_fields() -> None:
+++def test_agent_session_has_all_34_fields() -> None:
++     expected = {
++         "id",
++         "user_id",
++         "runtime_id",
++         "lease_id",
++         "change_id",
+++        # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
+++        # 列（run_sync 命令解析回写、inject 建轮打锚；与 change_id 派发绑定分列）。
+++        "current_change_id",
++         "workspace_id",
++         "provider",
++         "status",
++@@ -78,7 +81,7 @@ def test_agent_session_has_all_29_fields() -> None:
++     assert actual == expected, (
++         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
++     )
++-    assert len(AgentSession.model_fields) == 33
+++    assert len(AgentSession.model_fields) == 34
++ 
++ 
++ def test_agent_session_defaults() -> None:
++diff --git a/backend/app/modules/change/binding.py b/backend/app/modules/change/binding.py
++index 5ea0cad3a..b112bf74f 100644
++--- a/backend/app/modules/change/binding.py
+++++ b/backend/app/modules/change/binding.py
++@@ -142,10 +142,10 @@ async def bind_session_to_change(
++     workspace_id: uuid.UUID,
++     change_key: str,
++     session_id: uuid.UUID,
++-) -> None:
+++) -> uuid.UUID | None:
++     """把会话绑到变更（幂等 best-effort，design §5 W1.3 / §7）。
++ 
++-    - ``change_key == "default"`` 直接返回（D-005@v2 函数内兜底：命令解析与
+++    - ``change_key == "default"`` 直接返回 None（D-005@v2 函数内兜底：命令解析与
++       agent-logs 两写通道统一受保护，无 placeholder 行、无 link 行）。
++     - 按 ``(workspace_id, change_key)`` 查 Change，不存在则建 placeholder 行
++       （defaults 对齐 ``platform_sync/service.py:_ensure_change_row``：
++@@ -154,9 +154,14 @@ async def bind_session_to_change(
++     - upsert link：查 ``ChangeSessionLink(change_id, session_id)`` 存在即返回，
++       否则插入（unique 兜底并发）。
++     - 整体 savepoint + flush，不自行 commit；失败仅 ``log.warning`` 不抛。
+++    - 返回值（2026-10-12-run-level-change-attribution task-02 / FR-02）：绑定
+++      （或既有 link）对应的变更行 id，供 run_sync 交互通道回写会话「当前变更
+++      上下文」（``AgentSession.current_change_id``）；default 守卫跳过或整体
+++      失败返回 None。其余调用方（platform_sync agent-logs W2.2）不消费返回值，
+++      绑定行为不变。
++     """
++     if change_key == DEFAULT_CHANGE_KEY:
++-        return
+++        return None
++     try:
++         async with db.begin_nested():
++             change = (
++@@ -197,7 +202,7 @@ async def bind_session_to_change(
++                 )
++             ).scalar_one_or_none()
++             if link is not None:
++-                return
+++                return change.id
++             db.add(
++                 ChangeSessionLink(
++                     id=uuid.uuid4(),
++@@ -206,6 +211,7 @@ async def bind_session_to_change(
++                 )
++             )
++             await db.flush()
+++            return change.id
++     except Exception as exc:
++         log.warning(
++             "change.spec_session_bind_failed",
++@@ -214,6 +220,7 @@ async def bind_session_to_change(
++             session_id=str(session_id),
++             error=str(exc),
++         )
+++        return None
++ 
++ 
++ async def bind_session_to_quicklog(
++diff --git a/backend/app/modules/change/tests/test_spec_binding.py b/backend/app/modules/change/tests/test_spec_binding.py
++index fe3f9dda6..78c8fbea4 100644
++--- a/backend/app/modules/change/tests/test_spec_binding.py
+++++ b/backend/app/modules/change/tests/test_spec_binding.py
++@@ -288,8 +288,30 @@ async def test_bind_change_failure_is_best_effort_no_raise(db_session, monkeypat
++ 
++     monkeypatch.setattr("app.modules.change.binding.Change", _boom)
++ 
++-    # 不抛异常即通过（savepoint 回滚，外层事务可继续）
++-    await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id)
+++    # 不抛异常即通过（savepoint 回滚，外层事务可继续）；失败路径返回 None
+++    # （2026-10-12-run-level-change-attribution task-02 / FR-02 返回值契约）。
+++    assert await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id) is None
+++
+++
+++async def test_bind_change_returns_change_id_contract(db_session):
+++    """返回值契约（2026-10-12-run-level-change-attribution task-02 / FR-02）：
+++    绑定返回变更行 id（幂等重入同 id）；default 伪键守卫返回 None。"""
+++    user = await _make_user(db_session)
+++    ws = await _make_ws(db_session)
+++    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+++    key = "2026-10-12-return-contract"
+++
+++    first = await bind_session_to_change(db_session, ws.id, key, s.id)
+++    assert first is not None
+++    rows = await _changes_in_ws(db_session, ws.id)
+++    assert [c.id for c in rows] == [first]
+++
+++    # 幂等重入：同 id（既有 link 分支同样返回变更 id）。
+++    second = await bind_session_to_change(db_session, ws.id, key, s.id)
+++    assert second == first
+++
+++    # default 伪键：函数内兜底返回 None，不落任何行。
+++    assert await bind_session_to_change(db_session, ws.id, "default", s.id) is None
++ 
++ 
++ # ===========================================================================
++diff --git a/backend/app/modules/change/tests/test_usage_stats.py b/backend/app/modules/change/tests/test_usage_stats.py
++index 7dd063d45..4df8ae819 100644
++--- a/backend/app/modules/change/tests/test_usage_stats.py
+++++ b/backend/app/modules/change/tests/test_usage_stats.py
++@@ -575,8 +575,14 @@ class TestChangeAggregationSemantics:
++         }
++ 
++     async def test_shared_session_counted_in_both_changes(self, db_session: AsyncSession) -> None:
++-        """6 跨变更共享会话：一个会话绑两个变更 → 两变更各自完整计该会话消耗
++-        （D-002@v1 / R-03 口径特性，非 bug）。"""
+++        """6 跨变更共享会话（无锚 run）：一个会话绑两个变更、run 无 change_id →
+++        两变更各自完整计该会话消耗。
+++
+++        2026-10-12-run-level-change-attribution 后口径收窄为 D-002@v2：无锚 run
+++        （存量 / 绑定命令前轮次）维持经链接认领的旧口径——本用例即其回归护栏；
+++        带锚 run 独占归锚定变更、不再摊给其它绑定变更（见
+++        test_anchored_run_exclusive / test_two_changes_sequential_split）。
+++        """
++         ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
++         owner = await _make_user(db_session)
++         change_a = await _make_change(db_session, ws.id, "2026-08-30-usage-shared-a")
++@@ -615,6 +621,137 @@ class TestChangeAggregationSemantics:
++         assert summary_map[change_a.id].totals == usage_a.totals
++         assert summary_map[change_b.id].totals == usage_b.totals
++ 
+++    async def test_anchored_run_exclusive_to_owning_change(self, db_session: AsyncSession) -> None:
+++        """6b 轮级独占（2026-10-12-run-level-change-attribution task-04 / FR-03）：
+++        会话同时绑 A、B，带锚 run（change_id=A，inject 打锚形态）只归 A，不再
+++        经共享会话摊给 B；无锚 run 维持旧口径两变更都认领。
+++
+++        手算：r1（锚 A，有明细）input=100/output=10/api=1；r2（无锚，兜底）
+++        input=50/output=5。A = 100+50=150，B = 仅 50（若带锚摊派则为 150，
+++        锁定独占）；详情与批量摘要两路同断言。
+++        """
+++        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
+++        owner = await _make_user(db_session)
+++        change_a = await _make_change(db_session, ws.id, "2026-10-12-anchor-a")
+++        change_b = await _make_change(db_session, ws.id, "2026-10-12-anchor-b")
+++        sess = await _make_session(db_session, owner)
+++        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
+++        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
+++
+++        run_anchored = await _make_run(
+++            db_session, change_id=change_a.id, agent_session_id=sess.id, num_turns=5
+++        )
+++        await _make_model_usage(
+++            db_session,
+++            run_id=run_anchored.id,
+++            model="anchor-model",
+++            input_tokens=100,
+++            output_tokens=10,
+++            api_requests=1,
+++        )
+++        run_unanchored = await _make_run(db_session, agent_session_id=sess.id)
+++        await _make_model_usage(
+++            db_session,
+++            run_id=run_unanchored.id,
+++            model="unanchor-model",
+++            input_tokens=50,
+++            output_tokens=5,
+++            api_requests=1,
+++        )
+++
+++        svc = ChangeUsageQueryService(db_session)
+++        usage_a = await svc.get_change_usage(ws.id, change_a.id)
+++        usage_b = await svc.get_change_usage(ws.id, change_b.id)
+++        assert usage_a.totals.model_dump() == {
+++            "input_tokens": 150,
+++            "output_tokens": 15,
+++            "cache_read_tokens": 0,
+++            "cache_creation_tokens": 0,
+++            "api_requests": 2,
+++            "num_turns": 5,
+++        }
+++        # B 只拿到无锚 run（带锚 run 独占归 A）。
+++        assert usage_b.totals.model_dump() == {
+++            "input_tokens": 50,
+++            "output_tokens": 5,
+++            "cache_read_tokens": 0,
+++            "cache_creation_tokens": 0,
+++            "api_requests": 1,
+++            "num_turns": 0,
+++        }
+++
+++        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
+++        assert summary_map[change_a.id].totals.input_tokens == 150
+++        assert summary_map[change_b.id].totals.input_tokens == 50
+++
+++    async def test_two_changes_sequential_split(self, db_session: AsyncSession) -> None:
+++        """6c 同会话先后两变更（FR-04）：两段轮各自打锚后，两变更统计互不相同
+++        且各只含自己时段的轮——列表不再显示同一组会话总和。
+++
+++        手算：A 段 r1 input=200/turns=8/duration=1000ms，B 段 r2
+++        input=30/turns=2/duration=200ms。A ≠ B 且各自等于自己锚定 run 之和。
+++        """
+++        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
+++        owner = await _make_user(db_session)
+++        change_a = await _make_change(db_session, ws.id, "2026-10-12-seq-a")
+++        change_b = await _make_change(db_session, ws.id, "2026-10-12-seq-b")
+++        sess = await _make_session(db_session, owner)
+++        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
+++        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
+++
+++        run_a = await _make_run(
+++            db_session,
+++            change_id=change_a.id,
+++            agent_session_id=sess.id,
+++            num_turns=8,
+++            duration_ms=1000,
+++            started_at=_T10,
+++            finished_at=_T1030,
+++        )
+++        await _make_model_usage(
+++            db_session,
+++            run_id=run_a.id,
+++            model="seq-model",
+++            input_tokens=200,
+++            output_tokens=20,
+++            api_requests=3,
+++        )
+++        run_b = await _make_run(
+++            db_session,
+++            change_id=change_b.id,
+++            agent_session_id=sess.id,
+++            num_turns=2,
+++            duration_ms=200,
+++            started_at=_T1045,
+++            finished_at=_T11,
+++        )
+++        await _make_model_usage(
+++            db_session,
+++            run_id=run_b.id,
+++            model="seq-model",
+++            input_tokens=30,
+++            output_tokens=3,
+++            api_requests=1,
+++        )
+++
+++        svc = ChangeUsageQueryService(db_session)
+++        usage_a = await svc.get_change_usage(ws.id, change_a.id)
+++        usage_b = await svc.get_change_usage(ws.id, change_b.id)
+++        assert usage_a.totals.input_tokens == 200
+++        assert usage_b.totals.input_tokens == 30
+++        assert usage_a.totals.input_tokens != usage_b.totals.input_tokens
+++        assert (usage_a.totals.num_turns, usage_a.duration_ms) == (8, 1000)
+++        assert (usage_b.totals.num_turns, usage_b.duration_ms) == (2, 200)
+++        # 时间三元组各归各段（A 段 10:00-10:30，B 段 10:45-11:00）。
+++        assert _naive(usage_a.started_at) == _naive(_T10)
+++        assert _naive(usage_a.finished_at) == _naive(_T1030)
+++        assert _naive(usage_b.started_at) == _naive(_T1045)
+++        assert _naive(usage_b.finished_at) == _naive(_T11)
+++
+++        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
+++        assert summary_map[change_a.id].totals.input_tokens == 200
+++        assert summary_map[change_b.id].totals.input_tokens == 30
+++
++     async def test_soft_deleted_session_runs_counted(self, db_session: AsyncSession) -> None:
++         """7 软删会话（agent_sessions.deleted_at 非空）执行仍计入（D-006@v1：
++         消耗真实发生；会话卡 UI 隐藏是展示层考虑，与用量口径不矛盾）。"""
++diff --git a/backend/app/modules/change/usage_service.py b/backend/app/modules/change/usage_service.py
++index 6bc818586..8319adcee 100644
++--- a/backend/app/modules/change/usage_service.py
+++++ b/backend/app/modules/change/usage_service.py
++@@ -3,8 +3,10 @@
++ 以「去重执行集合」为统一口径，为变更中心两个维度聚合执行用量（纯 SELECT，
++ 零迁移、不改 daemon，D-003@v1 实时聚合）：
++ 
++-- 变更集合（D-002@v1 并集去重）：``agent_runs.change_id`` 派发锚点 ∪
++-  ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计一次；
+++- 变更集合（D-002@v2 并集去重 + 轮级独占）：``agent_runs.change_id`` 派发锚
+++  点 ∪ ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计
+++  一次；带锚 run（派发锚点 / inject 打锚，2026-10-12-run-level-change-attribution）
+++  独占归锚定变更，会话链接只认领无锚 run（存量会话全无锚 → 行为不变防回归）；
++ - 快速修复集合：恒走 ``quicklog_session_links`` 会话链路（无派发锚点）；
++ - 详情两段聚合对齐 ``daemon/session/service.get_session_usage`` 先例：明细段
++   ``agent_run_model_usage`` GROUP BY model，兜底段无明细 run 按 run 四维列
++@@ -192,15 +194,20 @@ class ChangeUsageQueryService:
++ 
++     @staticmethod
++     def _change_run_ids(change_id: uuid.UUID) -> Subquery:
++-        """变更侧去重执行集合（D-002@v1 并集去重）：
+++        """变更侧去重执行集合（D-002@v2 并集去重 + 轮级独占）：
++ 
++         ``agent_runs.change_id`` 派发锚点 UNION ``change_session_links`` 会话
++         锚点（两分支均只选 id，UNION 整行去重 = 按 run 去重）——同 run 双锚点
++-        只计一次；跨变更共享会话时同一消耗在两个变更各完整计一次（R-03 口径
++-        特性，非 bug）。两锚点均经 change 定位（link 行挂 change、change 属
++-        workspace），天然限定本工作区，无需额外 workspace join。
++-        不过滤 ``agent_sessions.deleted_at``（D-006@v1 软删计入）；无
++-        ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
+++        只计一次。
+++
+++        2026-10-12-run-level-change-attribution task-04（FR-03）轮级打锚口径：
+++        会话链接分支追加 ``AgentRun.change_id IS NULL`` 谓词——带锚 run 独占归
+++        其锚定变更，不再经共享会话重复摊给其它绑定变更（一个会话先后执行多个
+++        变更时各归各段）；无锚 run（存量/绑定命令前轮次）维持经链接认领的旧
+++        口径，全部无锚的存量会话行为逐字节不变（防回归）。两锚点均经 change
+++        定位（link 行挂 change、change 属 workspace），天然限定本工作区，无需
+++        额外 workspace join。不过滤 ``agent_sessions.deleted_at``（D-006@v1 软
+++        删计入）；无 ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
++         """
++         dispatched = select(AgentRun.id).where(col(AgentRun.change_id) == change_id)
++         linked = (
++@@ -209,7 +216,11 @@ class ChangeUsageQueryService:
++                 ChangeSessionLink,
++                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
++             )
++-            .where(col(ChangeSessionLink.change_id) == change_id)
+++            .where(
+++                col(ChangeSessionLink.change_id) == change_id,
+++                # 轮级独占（FR-03）：带锚 run 只走派发锚点分支。
+++                col(AgentRun.change_id).is_(None),
+++            )
++         )
++         return union(dispatched, linked).subquery()
++ 
++@@ -259,10 +270,12 @@ class ChangeUsageQueryService:
++     def _change_summary_anchor(change_ids: list[uuid.UUID]) -> Subquery:
++         """变更批量摘要锚点：(锚点 change_id, run 度量列) 两分支 UNION 整行去重。
++ 
++-        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——跨变更
++-        共享会话时 run 自带锚点可能指向别的变更或为 NULL，归属以 link 行为准；
++-        UNION 整行去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定
++-        其余 run 列，D-002@v1 同 run 双锚点只计一次）。
+++        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——无锚
+++        run（change_id IS NULL，2026-10-12-run-level-change-attribution task-04
+++        FR-03 谓词）归属以 link 行为准；带锚 run 只走第一分支独占归锚定变更，
+++        不再经共享会话摊给其它绑定变更（列表摘要与详情口径一致）。UNION 整行
+++        去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定其余 run 列，
+++        D-002@v2 同 run 双锚点只计一次）。
++         """
++         cols = ChangeUsageQueryService._run_metric_columns()
++         dispatched = select(col(AgentRun.change_id).label("group_key"), *cols).where(
++@@ -275,7 +288,11 @@ class ChangeUsageQueryService:
++                 ChangeSessionLink,
++                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
++             )
++-            .where(col(ChangeSessionLink.change_id).in_(change_ids))
+++            .where(
+++                col(ChangeSessionLink.change_id).in_(change_ids),
+++                # 轮级独占（FR-03）：带锚 run 不经会话链接重复认领。
+++                col(AgentRun.change_id).is_(None),
+++            )
++         )
++         return union(dispatched, linked).subquery()
++ 
++diff --git a/backend/app/modules/daemon/run_sync/service/submit_commit.py b/backend/app/modules/daemon/run_sync/service/submit_commit.py
++index d69e0a2ed..0d84c6966 100644
++--- a/backend/app/modules/daemon/run_sync/service/submit_commit.py
+++++ b/backend/app/modules/daemon/run_sync/service/submit_commit.py
++@@ -336,12 +336,24 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
++                     # 函数内兜底双保险（D-005@v2）。
++                     for spec_binding in extract_spec_bindings(sillyspec_command):
++                         try:
++-                            await bind_session_to_change(
+++                            bound_change_id = await bind_session_to_change(
++                                 svc._session,
++                                 binding_session_row.workspace_id,
++                                 spec_binding.change_key,
++                                 binding_session_row.id,
++                             )
+++                            # 2026-10-12-run-level-change-attribution task-02 /
+++                            # FR-01：绑定成功即回写会话「当前变更上下文」——同批
+++                            # 多条绑定命令按消息序循环覆盖，最后一条生效；inject
+++                            # 建轮据此给新 run.change_id 打锚（轮级归属拆分）。
+++                            # 列写入与 link 落库同事务（随本方法末尾 commit），
+++                            # 失败不抛（值不等才置 dirty，无谓 UPDATE 免掉）。
+++                            if (
+++                                bound_change_id is not None
+++                                and binding_session_row.current_change_id != bound_change_id
+++                            ):
+++                                binding_session_row.current_change_id = bound_change_id
+++                                svc._session.add(binding_session_row)
++                         except Exception as exc:
++                             # 外层兜底：bind 自身已 best-effort，此处仅防御
++                             # 意外（如 ORM 状态异常），绑定失败不影响消息入库。
++diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
++index 278d4bb83..a2455f668 100644
++--- a/backend/app/modules/daemon/session/service/inject.py
+++++ b/backend/app/modules/daemon/session/service/inject.py
++@@ -613,6 +613,12 @@ async def _inject_into_session(
++             status="pending",
++             spec_strategy="interactive",
++             agent_session_id=session.id,
+++            # 2026-10-12-run-level-change-attribution task-03 / FR-01：轮级打锚
+++            # ——新开轮记为会话「当前变更上下文」（run_sync 命令解析通道回写的
+++            # current_change_id），使一个会话先后执行多个变更时执行用量可按轮
+++            # 拆分归属。上下文为空（NULL）保持现状无锚行为；与 create_session
+++            # 首 run 的 change_id（派发参数，create.py:428）语义衔接一致。
+++            change_id=session.current_change_id,
++             # 2026-09-10-auto-resume-interrupted-turn：续跑轮审计标记（源 run id）。
++             metadata_=(
++                 {"auto_resume_of": str(auto_resume_of)} if auto_resume_of is not None else None
++diff --git a/backend/app/modules/daemon/tests/test_inject_change_context.py b/backend/app/modules/daemon/tests/test_inject_change_context.py
++new file mode 100644
++index 000000000..b9cae771d
++--- /dev/null
+++++ b/backend/app/modules/daemon/tests/test_inject_change_context.py
++@@ -0,0 +1,179 @@
+++"""inject 建轮打锚会话「当前变更上下文」（2026-10-12-run-level-change-attribution
+++task-03 / FR-01）。
+++
+++背景：一个交互会话先后执行多个变更时，inject 产生的轮（AgentRun）原先 change_id
+++恒 None，变更执行用量聚合只能整会话摊派（每个绑定变更显示同一组总和）。本变更：
+++run_sync 命令解析通道把 sillyspec 绑定命令指向的变更回写
+++``AgentSession.current_change_id``（task-02），inject 建轮时据此打锚
+++``change_id=session.current_change_id``——轮级归属可拆分（≤1 轮切换误差，与本地
+++CLI 水位差分粒度同级）。
+++
+++本文件验证 inject 侧打锚契约：
+++- 上下文有值 → 当轮 run.change_id 记为该上下文；
+++- 上下文为空（存量/未绑定）→ run.change_id 保持 NULL，行为与改动前一致；
+++- 上下文切换 → 下一轮跟随新值。
+++
+++fixtures 镜像 test_inject_orchestrator_tagging.py（SQLite create_all，FK 不强制，
+++current_change_id 直接落 uuid 无需真实 Change 行——打锚契约只关心 id 透传）。
+++"""
+++
+++from __future__ import annotations
+++
+++import uuid
+++from datetime import UTC, datetime
+++from unittest.mock import AsyncMock, MagicMock, patch
+++
+++import pytest
+++from sqlalchemy import select
+++from sqlalchemy.ext.asyncio import AsyncSession
+++
+++from app.modules.agent.model import AgentRun
+++from app.modules.daemon.model import DaemonRuntime
+++from app.modules.daemon.service import DaemonService
+++
+++# ── fixtures / helpers（镜像 test_inject_orchestrator_tagging.py）────────────
+++
+++
+++async def _create_user(session: AsyncSession) -> uuid.UUID:
+++    from app.modules.auth.model import User
+++
+++    uid = uuid.uuid4()
+++    session.add(
+++        User(
+++            id=uid,
+++            email=f"ctx-{uid}@example.com",
+++            password_hash="x",
+++            display_name="CtxT",
+++            status="active",
+++        )
+++    )
+++    await session.commit()
+++    return uid
+++
+++
+++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
+++    rt = DaemonRuntime(
+++        id=uuid.uuid4(),
+++        user_id=user_id,
+++        name="daemon",
+++        provider="claude",
+++        status="online",
+++        last_heartbeat_at=datetime.now(UTC),
+++    )
+++    session.add(rt)
+++    await session.commit()
+++    await session.refresh(rt)
+++    return rt
+++
+++
+++def _mock_hub(*, connected: bool = True) -> MagicMock:
+++    hub = MagicMock()
+++    hub.is_connected.return_value = connected
+++    hub.connected_runtime_ids = []
+++    hub.connected_daemon_ids = []
+++    hub.send_wakeup = AsyncMock(return_value=True)
+++    hub.send_session_control = AsyncMock(return_value=connected)
+++    return hub
+++
+++
+++@pytest.fixture()
+++def mocked_hub():
+++    hub = _mock_hub()
+++    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
+++        yield hub
+++
+++
+++@pytest.fixture()
+++def mocked_redis():
+++    redis = AsyncMock()
+++    redis.publish = AsyncMock()
+++    with patch("app.modules.daemon.session.service.get_redis", return_value=redis):
+++        yield redis
+++
+++
+++async def _finish_run(db_session: AsyncSession, run: AgentRun) -> None:
+++    run.status = "completed"
+++    run.finished_at = datetime.now(UTC)
+++    await db_session.commit()
+++
+++
+++async def _session_runs(db_session: AsyncSession, session_id: uuid.UUID) -> list[AgentRun]:
+++    return list(
+++        (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == session_id)))
+++        .scalars()
+++        .all()
+++    )
+++
+++
+++async def _set_context(db_session: AsyncSession, session_row, change_id: uuid.UUID | None) -> None:
+++    """直接写上下文列（模拟 task-02 run_sync 通道的回写产物，单列直写等价）。"""
+++    session_row.current_change_id = change_id
+++    db_session.add(session_row)
+++    await db_session.commit()
+++
+++
+++async def _setup_injectable_session(db_session: AsyncSession, *, first_prompt: str = "first"):
+++    """建用户/runtime/会话并完结首 turn，返回 (svc, uid, created)。"""
+++    uid = await _create_user(db_session)
+++    await _create_runtime(db_session, uid)
+++    svc = DaemonService(db_session)
+++    created = await svc.create_session(uid, provider="claude", prompt=first_prompt)
+++    await _finish_run(db_session, created.agent_run)
+++    return svc, uid, created
+++
+++
+++# ── 用例 ─────────────────────────────────────────────────────────────────────
+++
+++
+++class TestInjectChangeContextStamp:
+++    @pytest.mark.asyncio
+++    async def test_inject_run_stamped_with_session_context(
+++        self, db_session, mocked_hub, mocked_redis
+++    ) -> None:
+++        """上下文有值 → 当轮 run.change_id 记为该上下文。"""
+++        svc, uid, created = await _setup_injectable_session(db_session)
+++        sid = created.agent_session.id
+++        change_x = uuid.uuid4()
+++        await _set_context(db_session, created.agent_session, change_x)
+++
+++        result = await svc.inject_session(sid, uid, prompt="继续变更 X 的活")
+++
+++        assert result.agent_run.change_id == change_x
+++
+++    @pytest.mark.asyncio
+++    async def test_inject_run_unstamped_when_context_none(
+++        self, db_session, mocked_hub, mocked_redis
+++    ) -> None:
+++        """上下文为空（未出现任何绑定命令）→ run.change_id 保持 NULL（零回归）。"""
+++        svc, uid, created = await _setup_injectable_session(db_session)
+++        assert created.agent_session.current_change_id is None
+++
+++        result = await svc.inject_session(created.agent_session.id, uid, prompt="普通追问")
+++
+++        assert result.agent_run.change_id is None
+++
+++    @pytest.mark.asyncio
+++    async def test_context_switch_retargets_next_run(
+++        self, db_session, mocked_hub, mocked_redis
+++    ) -> None:
+++        """上下文 X → 切到 Y 后，下一轮打锚 Y（前一轮保持 X）——同会话两变更
+++        用量可按轮拆分。"""
+++        svc, uid, created = await _setup_injectable_session(db_session)
+++        sid = created.agent_session.id
+++        change_x, change_y = uuid.uuid4(), uuid.uuid4()
+++
+++        await _set_context(db_session, created.agent_session, change_x)
+++        first = await svc.inject_session(sid, uid, prompt="做 X")
+++        assert first.agent_run.change_id == change_x
+++
+++        await _finish_run(db_session, first.agent_run)
+++        # run_sync 通道解析到 flow start --change Y → 上下文覆盖为 Y。
+++        await _set_context(db_session, created.agent_session, change_y)
+++        second = await svc.inject_session(sid, uid, prompt="切到 Y")
+++
+++        assert second.agent_run.change_id == change_y
+++        runs = sorted(await _session_runs(db_session, sid), key=lambda r: (r.created_at, r.id))
+++        assert [r.change_id for r in runs if r.id != created.agent_run.id] == [
+++            change_x,
+++            change_y,
+++        ]
++diff --git a/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py b/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py
++new file mode 100644
++index 000000000..bb616db42
++--- /dev/null
+++++ b/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py
++@@ -0,0 +1,41 @@
+++"""agent_sessions current_change_id（会话当前变更上下文）
+++
+++Revision ID: 20261012123000
+++Revises: c515ffd62859
+++Create Date: 2026-10-12
+++
+++为 agent_sessions 新增 current_change_id 列（2026-10-12-run-level-change-attribution
+++task-01 / FR-01）：会话「当前变更上下文」——run_sync 命令解析通道解析出 sillyspec
+++绑定命令时回写（最后一条生效），inject 建轮时据此给 AgentRun.change_id 打锚，
+++使一个会话先后执行多个变更时轮级归属可拆分（对齐本地 CLI 水位差分的分段思想）。
+++
+++与既有 change_id（会话创建时的派发绑定，只读）分列。FK ondelete=SET NULL：
+++变更删除时上下文清空，新轮回落无锚（经 change_session_links 认领的旧口径）。
+++存量行恒 NULL（nullable，Postgres 加列不锁表），行为不变。
+++"""
+++
+++from __future__ import annotations
+++
+++import sqlalchemy as sa
+++from alembic import op
+++
+++revision = "20261012123000"
+++down_revision = "c515ffd62859"
+++branch_labels = None
+++depends_on = None
+++
+++
+++def upgrade() -> None:
+++    op.add_column(
+++        "agent_sessions",
+++        sa.Column(
+++            "current_change_id",
+++            sa.Uuid(as_uuid=True),
+++            sa.ForeignKey("changes.id", ondelete="SET NULL"),
+++            nullable=True,
+++        ),
+++    )
+++
+++
+++def downgrade() -> None:
+++    op.drop_column("agent_sessions", "current_change_id")
++diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
++index d445730e6..5596c96e3 100644
++--- a/backend/tests/test_align_platform_change_events_migration.py
+++++ b/backend/tests/test_align_platform_change_events_migration.py
++@@ -103,8 +103,10 @@ class TestMigrationStructure:
++         # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
++         # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
++         # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
++-        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）。
++-        assert heads[0] == "c515ffd62859"  # merge 迁移成为新 head
+++        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）→
+++        # 20261012123000（agent_sessions.current_change_id，
+++        # 2026-10-12-run-level-change-attribution）。
+++        assert heads[0] == "20261012123000"  # 当前上下文列迁移成为新 head
++ 
++     def test_revision_chain(self) -> None:
++         mod = _load_migration_module()
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md
++new file mode 100644
++index 000000000..caf8289a4
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md
++@@ -0,0 +1,76 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-12T06:43:13.857Z
+++---
+++# 设计记录（Design Record）— 2026-10-12-run-level-change-attribution
+++
+++## 做法概述
+++
+++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+++
+++问题：一个交互会话先后执行多个变更时，轮级（AgentRun）不带变更锚（inject.py 创建 run 时 change_id 恒 None），聚合口径（usage_service「派发锚点 ∪ 会话锚点」）把绑定会话的全部 run 完整摊给每个绑定变更——列表里每个变更显示同一组会话总和。
+++
+++方案：参考本地 CLI 水位差分（2026-10-03-local-usage-segment-attribution）的「分段归属」思想，但不在平台侧照抄水位表——平台已有更细的天然单位「轮」（每轮自带 token 四维/按模型明细/耗时），等价做法是轮级打锚：
+++
+++1. `agent_sessions` 新增 `current_change_id` 列（FK changes.id, SET NULL），语义=会话「当前变更上下文」（最近一次被解析出的 sillyspec 绑定目标）。
+++2. run_sync 命令解析点（submit_commit，既有 W2.1 通道）在绑会话的同时回写该列；`bind_session_to_change` 改为返回变更 id 供其使用。
+++3. inject 建轮时 `change_id=session.current_change_id`（一轮一 run 已确认，inject.py:608）。
+++4. 聚合口径：会话链接分支加 `AgentRun.change_id IS NULL` 谓词——带锚 run 独占归锚定变更，无锚 run 维持现状经链接认领（存量会话全部无锚 → 行为逐字节不变，防回归）。
+++
+++为什么不用水位表/消息回放：轮已是原子用量单位，打锚即可达到同等拆分效果；水位差分需对会话消息流做序回放，复杂度高收益相同。
+++
+++## 接口契约
+++
+++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+++
+++- `ChangeUsageQueryService` 相关聚合（usage_service.py `_change_run_ids` / `_change_summary_anchor`）：会话链接分支新增 `AgentRun.change_id.is_(None)` 谓词；`ChangeUsageRead`/`UsageSummaryRead` DTO 不变，端点签名不变，**无 API schema 变化（不需 gen:types）**。
+++- `bind_session_to_change(db, workspace_id, change_key, session_id) -> uuid.UUID | None`：返回类型从 None 改为变更 id（default 守卫跳过/异常时 None）；幂等 upsert、savepoint 不 commit、best-effort 契约不变。既有调用方（platform_sync W2.2）不消费返回值，行为不变。
+++- `AgentSession` 新列 `current_change_id: uuid.UUID | None`（FK `changes.id` ondelete SET NULL，nullable）+ alembic 迁移 20261012123000（down_revision=c515ffd62859）。
+++- inject 建轮（`_inject_into_session`）：AgentRun 构造新增 `change_id=session.current_change_id`；create_session 首 run 不动（change_id 由既有派发参数决定）。
+++
+++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+++
+++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+++
+++成立边界内成立：同一 run 的 submit 可能多次到达（流式/重试），命令按消息序收集、上下文取最后一条，重放幂等（最后一条不变则结果不变）。旧 run 的迟到重放理论上可能把上下文拉回旧值（如 run N 重放覆盖 run N+2 已写入的 Y）——影响限于统计归属 ≤1 轮偏差，且后续任意新命令自然纠正，接受不设防（与绑定通道既有 best-effort 口径一致）。
+++
+++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+++
+++同会话轮次有 turn 冲突守卫（单活跃轮），submit 串行；上下文列写在 submit 的既有事务内（与 link 行同 savepoint 事务边界），跨会话互不冲突。一批多条绑定命令按循环序覆盖，最后一条生效（顺序=消息序，确定性）。
+++
+++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+++
+++安全：会话 reopen 复用同一行，上下文延续（重开后继续同一对话语境，期望行为）；变更被删 → FK SET NULL 清上下文，新轮回落无锚（经链接认领的旧口径）；执行中会话切换目标由「下一条绑定命令」覆盖上下文，无中间态暴露。inject 打锚发生在建轮事务内，失败随事务回滚不落半锚。
+++
+++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+++
+++不会：bind 按（session.workspace_id, change_key）解析变更行，上下文存的是变更行全局 id（FK），不存 key 文本——跨工作区不串台；quicklog（快速修复）聚合不动，本地 CLI 水位差分通道不动（其会话级防双计谓词与本变更无交集）。
+++
+++## 风险与死路
+++
+++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
+++
+++最大风险：口径双轨期混乱——存量会话（如用户 10-10~10-12 那条 665 轮会话）轮上无锚，仍按会话链接全量摊派，与新会话的拆分口径并存。缓解：FR-03 显式冻结存量行为（防回归用例钉死）；仓库规则 11 允许重置开发数据，用户可选择重跑。
+++
+++试过但放弃：
+++- 复用 `AgentSession.change_id` 作可变上下文——该列语义是「会话创建时绑定的变更」（派发链写入、会话列表展示消费），拿它当游标会混淆两个含义，且派发会话 change_id 不应被后续命令覆盖；弃。
+++- submit 时回溯打锚（把 run.change_id 按当轮出现的命令改写）——会把整轮摊给轮中才出现的命令，归属误差方向更差；弃。
+++- 平台会话水位表（照抄本地机制）——需消息序回放与水位修剪，复杂度高；轮级打锚同效且复用既有原子单位；弃。
+++
+++已知口径缝隙（评审 P3 披露，范围外不违约）：@ 联想绑定通道（`daemon/session/service/helpers.py` 落 change_session_links）只落 link 不回写 `current_change_id`——经 @ 绑定的变更收不到带锚轮，其统计按旧口径走链接认领（偏小非双计，不会错归别的变更）。本变更上下文回写仅覆盖 run_sync 命令解析通道（run/flow 两命令族）；@ 通道跟进留待后续变更。
+++
+++## 文件变更清单
+++
+++| 操作 | 路径 | 说明 |
+++|---|---|---|
+++| 修改 | backend/app/modules/agent/model.py | AgentSession 新列 current_change_id（FK changes.id SET NULL） |
+++| 修改 | backend/app/modules/agent/tests/test_agent_session_model.py | AgentSession 字段集钉子同步 33→34（新列入表契约；实测门拦截后清偿） |
+++| 新增 | backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py | alembic 迁移（down_revision=c515ffd62859） |
+++| 修改 | backend/tests/test_align_platform_change_events_migration.py | 迁移链尾锚随新 head 前移（断言面闸门配对钉子） |
+++| 修改 | backend/app/modules/change/binding.py | bind_session_to_change 返回变更 id（None 兜底） |
+++| 修改 | backend/app/modules/daemon/run_sync/service/submit_commit.py | 绑定循环后回写 session.current_change_id（最后一条生效） |
+++| 修改 | backend/app/modules/daemon/session/service/inject.py | 建轮 change_id=session.current_change_id |
+++| 修改 | backend/app/modules/change/usage_service.py | 会话链接分支 IS NULL 谓词 + 口径 docstring 更新 |
+++| 修改 | backend/app/modules/change/tests/test_spec_binding.py | 新增返回值契约用例 |
+++| 修改 | backend/app/modules/change/tests/test_usage_stats.py | 新增拆分/独占/回归护栏用例 |
+++| 新增 | backend/app/modules/daemon/tests/test_inject_change_context.py | inject 打锚用例 |
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md
++new file mode 100644
++index 000000000..c5946b524
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md
++@@ -0,0 +1,72 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-12T06:43:13.857Z
+++---
+++# 需求规格（Requirements）— 2026-10-12-run-level-change-attribution
+++
+++## 功能需求
+++
+++### FR-01: 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
+++
+++- 会话（AgentSession）必须新增「当前变更上下文」持久列：会话轮次消息中被解析出 sillyspec 绑定命令（`sillyspec run --change X` / `sillyspec flow start|done|amend-draft --change X`）时，服务端必须把该列更新为该命令指向的变更；同一批消息出现多条绑定命令时以消息序最后一条为准。
+++- 后续新开轮（`inject` 路径创建的 AgentRun）创建时必须把 `change_id` 记为会话当前上下文；上下文为空时 `change_id` 保持 NULL（现状行为）。
+++- 会话首建路径（create_session）产生的首 run 不在本条范围：其 `change_id` 语义由既有派发参数决定，本变更禁止改动。
+++- 历史存量轮（打锚机制上线前创建）禁止回填——不做数据迁移改写存量 `agent_runs.change_id`。
+++
+++#### 场景：主路径
+++
+++- Given 会话 S 的当前上下文为变更 X（前序轮执行过 `flow start --change X` 并已被 run_sync 通道回写），When 用户发起新一轮触发 inject，Then 新建 AgentRun 的 `change_id == X.id`。
+++- Given 会话 S 从未出现任何 sillyspec 绑定命令（上下文列为 NULL），When inject 新开轮，Then 新建 AgentRun 的 `change_id` 为 NULL，行为与改动前一致。
+++
+++#### 场景：切换
+++
+++- Given 会话上下文为 X，When 某轮消息先后出现 `flow done --change X` 与 `flow start --change Y`，Then 上下文最终为 Y（最后一条生效），且「执行 start Y 命令的那一轮」仍按其创建时的上下文归属（X）——允许 ≤1 轮的切换误差，与本地 CLI 水位 ~10s 粒度同级。
+++
+++### FR-02: bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
+++
+++- `bind_session_to_change` 必须返回本次绑定（或已存在的 link）对应的变更行 id（UUID）；绑定被 default 伪键守卫跳过或整体失败时返回 None。
+++- 既有调用方中仅 run_sync 交互通道（submit_commit）消费返回值回写会话上下文；platform_sync agent-logs 通道（W2.2）调用该函数后的绑定行为（link 行落库、placeholder 创建、default 守卫、savepoint 不 commit）必须与改动前逐字节一致，且禁止在 platform_sync 通道回写会话上下文（该通道面向本地 CLI 日志，会话对象可能是 tool_report 聚合会话，语义不同）。
+++
+++#### 场景：主路径
+++
+++- Given workspace 内已有变更 X，When 以 change_key=X 调用 `bind_session_to_change`，Then 返回 X 的 id 且 `change_session_links` 落行（幂等重入返回同一 id）。
+++- Given change_key="default"，When 调用 `bind_session_to_change`，Then 返回 None 且不落任何行（守卫行为不变）。
+++
+++### FR-03: 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
+++
+++- 变更执行用量聚合（详情与列表摘要同一口径）中，带 `change_id` 的 run 必须只归其锚定的变更：会话链接分支必须排除 `change_id` 非空的 run（`IS NULL` 谓词），使打锚 run 不再经共享会话重复摊给其它绑定变更。
+++- 无锚 run（`change_id IS NULL`）在会话链接分支的认领行为必须与改动前一致——存量会话（全部 run 无锚）的统计数字禁止因本变更变化（防回归）。
+++- 快速修复（quicklog）聚合口径禁止改动（quicklog 走本地 CLI 链路，无轮级锚概念）。
+++
+++#### 场景：主路径
+++
+++- Given 会话 S 同时链接变更 X 与 Y，S 含 run r1(change_id=X)、r2(change_id=NULL)，When 聚合 X 与 Y 的执行用量，Then r1 只计入 X；r2 经会话链接同时计入 X 与 Y（现状口径）。
+++- Given 存量会话全部 run 的 change_id 均为 NULL，When 聚合其绑定变更用量，Then 结果与改动前一致（回归护栏）。
+++
+++### FR-04: 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
+++
+++- 同一会话先后执行两个变更、各时段轮均已打锚时，两个变更的执行用量统计（列表摘要与详情端点同口径）必须互不相同，且各自必须只含自己锚定轮的用量——除两端各自恰为空集的退化情形外，禁止再把会话总和原样显示在每个变更行。
+++
+++#### 场景：主路径
+++
+++- Given 会话先执行变更 X（其时段轮 r1 打锚 X）再执行变更 Y（其时段轮 r2 打锚 Y），When 分别查询 X、Y 的执行用量，Then X 的统计只含 r1 时段的轮、Y 的统计只含 r2 时段的轮，两者 token/轮次/耗时互不相同。
+++
+++#### 场景：主路径
+++
+++- Given 同会话两变更各至少一个打锚 run 且 token 用量不同，When 查询两变更用量，Then 两变更 totals 互不相等且各自等于自己锚定 run 之和。
+++
+++### FR-05: 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
+++
+++- 本变更合并后，既有 `test_usage_stats.py`、`test_spec_binding.py` 及 inject 相关测试必须全部通过（禁止为通过而修改测试语义，非测试逻辑有误除外）；必须新增覆盖以下面的用例：bind 返回值契约（FR-02）、inject 打锚（FR-01）、聚合拆分与回归护栏（FR-03/FR-04）。
+++
+++#### 场景：主路径
+++
+++- When 运行本变更相关测试文件（usage_stats / spec_binding / inject 打锚新用例），Then 全部通过。
+++
+++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
+++
+++FR-01: backend/app/modules/daemon/tests/test_inject_change_context.py「TestInjectChangeContextStamp::test_inject_run_stamped_with_session_context + ::test_inject_run_unstamped_when_context_none + ::test_context_switch_retargets_next_run」
+++FR-02: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_returns_change_id_contract + test_bind_change_failure_is_best_effort_no_raise（失败路径 None 断言）」
+++FR-03: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_anchored_run_exclusive_to_owning_change + ::test_shared_session_counted_in_both_changes（无锚 run 回归护栏）」
+++FR-04: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_two_changes_sequential_split」
+++FR-05: backend/app/modules/change/tests/test_usage_stats.py + backend/app/modules/change/tests/test_spec_binding.py + backend/app/modules/daemon/tests/test_inject_change_context.py + backend/app/modules/agent/tests/test_agent_session_model.py「全量通过」
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md
++new file mode 100644
++index 000000000..3a4e53566
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md
++@@ -0,0 +1,11 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-12T06:43:13.857Z
+++---
+++# 任务注册表（Tasks）— 2026-10-12-run-level-change-attribution
+++
+++- [x] task-01: agent_sessions 新列 current_change_id（model.py + alembic 迁移 down_revision=c515ffd62859）；验证：迁移文件可被 alembic 加载、pytest 收集无错
+++- [x] task-02: bind_session_to_change 返回变更 id + submit_commit 绑定循环后回写 session.current_change_id；验证：test_spec_binding.py 新用例绿
+++- [x] task-03: inject 建轮 change_id=session.current_change_id；验证：test_inject_change_context.py 新用例绿
+++- [x] task-04: usage_service 会话链接分支加 IS NULL 谓词 + docstring 口径更新；验证：test_usage_stats.py 新增拆分/独占/回归护栏用例绿
+++- [x] task-05: 跑本变更全部相关测试（usage_stats + spec_binding + inject 新用例）全绿并按 pathspec 提交；验证：pytest 三处退出码 0
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md
++new file mode 100644
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md
++@@ -0,0 +1,32 @@
+++---
+++author: flow-machine-draft
+++created_at: 2026-10-12T06:43:13.857Z
+++---
+++# 提案书（Proposal）— 2026-10-12-run-level-change-attribution
+++
+++## 动机
+++
+++任务原话转写：动机：一个会话先后执行多个变更（sillyspec run / flow 两命令族）时，交互轮 AgentRun 创建不带变更锚点（agent/service.py:1910、daemon/session/service/inject.py:608 change_id 恒 None），变更执行用量聚合（change/usage_service.py R-03 口径）把绑定会话的全部 run 完整摊给每个绑定变更，导致每个变更行显示同一组会话总和数字，无法区分各变更真实消耗；参考本地 CLI 水位差分（2026-10-03-local-usage-segment-attribution）思想改为轮级归属。
+++成功标准：
+++- 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
+++- bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
+++- 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
+++- 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
+++- 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
+++
+++## 变更范围
+++
+++按成功标准机械推导，共 5 条验收面：
+++1. 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
+++2. bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
+++3. 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
+++4. 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
+++5. 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
+++
+++## 成功标准（可验证）
+++
+++1. 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
+++2. bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
+++3. 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
+++4. 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
+++5. 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
++
++diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901 b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901
++new file mode 100644
++--- /dev/null
+++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901
++@@ -0,0 +1,34 @@
+++{
+++  "schemaVersion": 1,
+++  "change": "2026-10-12-run-level-change-attribution",
+++  "reviewer": "subagent",
+++  "verdict": "PASS",
+++  "reviewedAgainst": "75d6cf9a302f9393038efe2160f2bb20da175f7e",
+++  "findings": [
+++    {
+++      "severity": "P3",
+++      "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
+++      "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
+++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72"
+++    },
+++    {
+++      "severity": "P3",
+++      "title": "design 乱序作答「迟到重放影响限于 ≤1 轮偏差」量化偏乐观",
+++      "evidence": "submit_commit 回写无 run 序号/水位防御，旧 run 的迟到重放只要发生在更新提交之后就会把 current_change_id 拉回旧值，其后所有无绑定命令的新轮 inject 均错锚旧值直至下一条绑定命令到达——极端迟到场景偏差可超 1 轮。design 已显式声明「接受不设防」（best-effort 通道既有口径、后续新命令自然自愈、仅统计归属误差非数据正确性），裁决仍为可接受，仅量化表述不严谨。",
+++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md:35（代码面：backend/app/modules/daemon/run_sync/service/submit_commit.py:347-356）"
+++    },
+++    {
+++      "severity": "P3",
+++      "title": "@ 联想绑定通道不回写 current_change_id，design 未披露其与新聚合口径的交互",
+++      "evidence": "inject @ 联想路径（helpers.py:610-617）调 bind_session_to_change 落 change_session_links 但不消费返回值、不更新会话上下文——@ 选中的变更在打锚会话中收不到带锚轮（其链接分支被 IS NULL 谓词排除），统计偏小而非双计。FR-01 范围只承诺命令解析通道，不构成违约；属未声明的次级口径缝隙，建议后续变更补齐或在 usage docstring 说明。",
+++      "location": "backend/app/modules/daemon/session/service/helpers.py:610-617"
+++    }
+++  ],
+++  "dimensionNotes": {
+++    "乱序": "边界已裁决：可接受——design 显式声明旧 run 迟到重放不设防（best-effort 通道既有口径、自愈、统计性误差）；代码核实确无防御（作答真实），另记 P3 量化表述偏差",
+++    "并发": "ok——上下文列写入随 _submit_finalize 末尾既有 commit 同事务提交（submit_commit.py:395），失败随 IntegrityError rollback；同会话单活跃轮守卫（inject.py:315-317 turn-conflict guards）与外层 try/except 核实存在。design「与 link 行同 savepoint 事务边界」措辞不精确：列写实际发生在 bind 的 begin_nested 释放后、同一外层事务内，失败同回滚，结论不变",
+++    "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
+++    "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
+++  },
+++  "reviewedAt": "2026-10-12T15:08:11+08:00"
+++}
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/flow-state.yaml b/.sillyspec/changes/2026-10-12-run-level-change-attribution/flow-state.yaml
+new file mode 100644
+index 000000000..1a581867a
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/flow-state.yaml
+@@ -0,0 +1,40 @@
++tier: thick
++legacy_fallback: false
++substeps:
++  artifacts: done
++  ledger: done
++  patch: done
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  动机：一个会话先后执行多个变更（sillyspec run / flow 两命令族）时，交互轮 AgentRun
++  创建不带变更锚点（agent/service.py:1910、daemon/session/service/inject.py:608 change_id 恒 None），变更执行用量聚合（change/usage_service.py
++  R-03 口径）把绑定会话的全部 run 完整摊给每个绑定变更，导致每个变更行显示同一组会话总和数字，无法区分各变更真实消耗；参考本地 CLI
++  水位差分（2026-10-03-local-usage-segment-attribution）思想改为轮级归属。
++
++  成功标准：
++
++  - 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id
++  记为该上下文
++
++  - bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
++
++  - 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
++
++  - 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
++
++  - 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
++autopilot: true
++baseline_commit: 6e10f6d20f42be2dcf966e6644b39751af255c9c
++updatedAt: '2026-10-12T07:09:02.284Z'
++baseline_sha256: 1660d9c12a173cf4c64ab81ba5a99114705f21063cffdfc8f23588f8667b5b66
++upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
++gate_summary: >-
++  test: passed ← module[]+deps(py30)+fr(1)（122.7s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012070329\test-result.json｜lint:
++  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
++  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.5s）
++  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012070329\test-result.json｜门文件
++  13 个
++
+diff --git a/backend/app/modules/agent/model.py b/backend/app/modules/agent/model.py
+index 8f0e10f34..32ae18bad 100644
+--- a/backend/app/modules/agent/model.py
++++ b/backend/app/modules/agent/model.py
+@@ -764,6 +764,20 @@ class AgentSession(BaseModel, table=True):
+             nullable=True,
+         ),
+     )
++    # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
++    # ——run_sync 命令解析通道（W2.1）每次解析出 sillyspec 绑定命令时回写
++    # （最后一条生效），inject 建轮时据此给 AgentRun.change_id 打锚。与上方
++    # change_id（会话创建时的派发绑定，只读语义）刻意分列：一个会话先后执行
++    # 多个变更时上下文随命令游走，派发锚不动。删变更 SET NULL → 新轮回落
++    # 无锚（经 change_session_links 认领的旧口径）。
++    current_change_id: uuid.UUID | None = Field(
++        default=None,
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("changes.id", ondelete="SET NULL"),
++            nullable=True,
++        ),
++    )
+     # Redundant workspace binding for change-scoped session listing & cwd
+     # resolution (D-003@v1).
+     workspace_id: uuid.UUID | None = Field(
+diff --git a/backend/app/modules/agent/tests/test_agent_session_model.py b/backend/app/modules/agent/tests/test_agent_session_model.py
+index b28bee1ea..63b818146 100644
+--- a/backend/app/modules/agent/tests/test_agent_session_model.py
++++ b/backend/app/modules/agent/tests/test_agent_session_model.py
+@@ -20,13 +20,16 @@ def test_agent_session_tablename() -> None:
+     assert AgentSession.__tablename__ == "agent_sessions"
+ 
+ 
+-def test_agent_session_has_all_29_fields() -> None:
++def test_agent_session_has_all_34_fields() -> None:
+     expected = {
+         "id",
+         "user_id",
+         "runtime_id",
+         "lease_id",
+         "change_id",
++        # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
++        # 列（run_sync 命令解析回写、inject 建轮打锚；与 change_id 派发绑定分列）。
++        "current_change_id",
+         "workspace_id",
+         "provider",
+         "status",
+@@ -78,7 +81,7 @@ def test_agent_session_has_all_29_fields() -> None:
+     assert actual == expected, (
+         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
+     )
+-    assert len(AgentSession.model_fields) == 33
++    assert len(AgentSession.model_fields) == 34
+ 
+ 
+ def test_agent_session_defaults() -> None:
+diff --git a/backend/app/modules/change/binding.py b/backend/app/modules/change/binding.py
+index 5ea0cad3a..b112bf74f 100644
+--- a/backend/app/modules/change/binding.py
++++ b/backend/app/modules/change/binding.py
+@@ -142,10 +142,10 @@ async def bind_session_to_change(
+     workspace_id: uuid.UUID,
+     change_key: str,
+     session_id: uuid.UUID,
+-) -> None:
++) -> uuid.UUID | None:
+     """把会话绑到变更（幂等 best-effort，design §5 W1.3 / §7）。
+ 
+-    - ``change_key == "default"`` 直接返回（D-005@v2 函数内兜底：命令解析与
++    - ``change_key == "default"`` 直接返回 None（D-005@v2 函数内兜底：命令解析与
+       agent-logs 两写通道统一受保护，无 placeholder 行、无 link 行）。
+     - 按 ``(workspace_id, change_key)`` 查 Change，不存在则建 placeholder 行
+       （defaults 对齐 ``platform_sync/service.py:_ensure_change_row``：
+@@ -154,9 +154,14 @@ async def bind_session_to_change(
+     - upsert link：查 ``ChangeSessionLink(change_id, session_id)`` 存在即返回，
+       否则插入（unique 兜底并发）。
+     - 整体 savepoint + flush，不自行 commit；失败仅 ``log.warning`` 不抛。
++    - 返回值（2026-10-12-run-level-change-attribution task-02 / FR-02）：绑定
++      （或既有 link）对应的变更行 id，供 run_sync 交互通道回写会话「当前变更
++      上下文」（``AgentSession.current_change_id``）；default 守卫跳过或整体
++      失败返回 None。其余调用方（platform_sync agent-logs W2.2）不消费返回值，
++      绑定行为不变。
+     """
+     if change_key == DEFAULT_CHANGE_KEY:
+-        return
++        return None
+     try:
+         async with db.begin_nested():
+             change = (
+@@ -197,7 +202,7 @@ async def bind_session_to_change(
+                 )
+             ).scalar_one_or_none()
+             if link is not None:
+-                return
++                return change.id
+             db.add(
+                 ChangeSessionLink(
+                     id=uuid.uuid4(),
+@@ -206,6 +211,7 @@ async def bind_session_to_change(
+                 )
+             )
+             await db.flush()
++            return change.id
+     except Exception as exc:
+         log.warning(
+             "change.spec_session_bind_failed",
+@@ -214,6 +220,7 @@ async def bind_session_to_change(
+             session_id=str(session_id),
+             error=str(exc),
+         )
++        return None
+ 
+ 
+ async def bind_session_to_quicklog(
+diff --git a/backend/app/modules/change/tests/test_spec_binding.py b/backend/app/modules/change/tests/test_spec_binding.py
+index fe3f9dda6..78c8fbea4 100644
+--- a/backend/app/modules/change/tests/test_spec_binding.py
++++ b/backend/app/modules/change/tests/test_spec_binding.py
+@@ -288,8 +288,30 @@ async def test_bind_change_failure_is_best_effort_no_raise(db_session, monkeypat
+ 
+     monkeypatch.setattr("app.modules.change.binding.Change", _boom)
+ 
+-    # 不抛异常即通过（savepoint 回滚，外层事务可继续）
+-    await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id)
++    # 不抛异常即通过（savepoint 回滚，外层事务可继续）；失败路径返回 None
++    # （2026-10-12-run-level-change-attribution task-02 / FR-02 返回值契约）。
++    assert await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id) is None
++
++
++async def test_bind_change_returns_change_id_contract(db_session):
++    """返回值契约（2026-10-12-run-level-change-attribution task-02 / FR-02）：
++    绑定返回变更行 id（幂等重入同 id）；default 伪键守卫返回 None。"""
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
++    key = "2026-10-12-return-contract"
++
++    first = await bind_session_to_change(db_session, ws.id, key, s.id)
++    assert first is not None
++    rows = await _changes_in_ws(db_session, ws.id)
++    assert [c.id for c in rows] == [first]
++
++    # 幂等重入：同 id（既有 link 分支同样返回变更 id）。
++    second = await bind_session_to_change(db_session, ws.id, key, s.id)
++    assert second == first
++
++    # default 伪键：函数内兜底返回 None，不落任何行。
++    assert await bind_session_to_change(db_session, ws.id, "default", s.id) is None
+ 
+ 
+ # ===========================================================================
+diff --git a/backend/app/modules/change/tests/test_usage_stats.py b/backend/app/modules/change/tests/test_usage_stats.py
+index 7dd063d45..4df8ae819 100644
+--- a/backend/app/modules/change/tests/test_usage_stats.py
++++ b/backend/app/modules/change/tests/test_usage_stats.py
+@@ -575,8 +575,14 @@ class TestChangeAggregationSemantics:
+         }
+ 
+     async def test_shared_session_counted_in_both_changes(self, db_session: AsyncSession) -> None:
+-        """6 跨变更共享会话：一个会话绑两个变更 → 两变更各自完整计该会话消耗
+-        （D-002@v1 / R-03 口径特性，非 bug）。"""
++        """6 跨变更共享会话（无锚 run）：一个会话绑两个变更、run 无 change_id →
++        两变更各自完整计该会话消耗。
++
++        2026-10-12-run-level-change-attribution 后口径收窄为 D-002@v2：无锚 run
++        （存量 / 绑定命令前轮次）维持经链接认领的旧口径——本用例即其回归护栏；
++        带锚 run 独占归锚定变更、不再摊给其它绑定变更（见
++        test_anchored_run_exclusive / test_two_changes_sequential_split）。
++        """
+         ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
+         owner = await _make_user(db_session)
+         change_a = await _make_change(db_session, ws.id, "2026-08-30-usage-shared-a")
+@@ -615,6 +621,137 @@ class TestChangeAggregationSemantics:
+         assert summary_map[change_a.id].totals == usage_a.totals
+         assert summary_map[change_b.id].totals == usage_b.totals
+ 
++    async def test_anchored_run_exclusive_to_owning_change(self, db_session: AsyncSession) -> None:
++        """6b 轮级独占（2026-10-12-run-level-change-attribution task-04 / FR-03）：
++        会话同时绑 A、B，带锚 run（change_id=A，inject 打锚形态）只归 A，不再
++        经共享会话摊给 B；无锚 run 维持旧口径两变更都认领。
++
++        手算：r1（锚 A，有明细）input=100/output=10/api=1；r2（无锚，兜底）
++        input=50/output=5。A = 100+50=150，B = 仅 50（若带锚摊派则为 150，
++        锁定独占）；详情与批量摘要两路同断言。
++        """
++        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
++        owner = await _make_user(db_session)
++        change_a = await _make_change(db_session, ws.id, "2026-10-12-anchor-a")
++        change_b = await _make_change(db_session, ws.id, "2026-10-12-anchor-b")
++        sess = await _make_session(db_session, owner)
++        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
++        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
++
++        run_anchored = await _make_run(
++            db_session, change_id=change_a.id, agent_session_id=sess.id, num_turns=5
++        )
++        await _make_model_usage(
++            db_session,
++            run_id=run_anchored.id,
++            model="anchor-model",
++            input_tokens=100,
++            output_tokens=10,
++            api_requests=1,
++        )
++        run_unanchored = await _make_run(db_session, agent_session_id=sess.id)
++        await _make_model_usage(
++            db_session,
++            run_id=run_unanchored.id,
++            model="unanchor-model",
++            input_tokens=50,
++            output_tokens=5,
++            api_requests=1,
++        )
++
++        svc = ChangeUsageQueryService(db_session)
++        usage_a = await svc.get_change_usage(ws.id, change_a.id)
++        usage_b = await svc.get_change_usage(ws.id, change_b.id)
++        assert usage_a.totals.model_dump() == {
++            "input_tokens": 150,
++            "output_tokens": 15,
++            "cache_read_tokens": 0,
++            "cache_creation_tokens": 0,
++            "api_requests": 2,
++            "num_turns": 5,
++        }
++        # B 只拿到无锚 run（带锚 run 独占归 A）。
++        assert usage_b.totals.model_dump() == {
++            "input_tokens": 50,
++            "output_tokens": 5,
++            "cache_read_tokens": 0,
++            "cache_creation_tokens": 0,
++            "api_requests": 1,
++            "num_turns": 0,
++        }
++
++        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
++        assert summary_map[change_a.id].totals.input_tokens == 150
++        assert summary_map[change_b.id].totals.input_tokens == 50
++
++    async def test_two_changes_sequential_split(self, db_session: AsyncSession) -> None:
++        """6c 同会话先后两变更（FR-04）：两段轮各自打锚后，两变更统计互不相同
++        且各只含自己时段的轮——列表不再显示同一组会话总和。
++
++        手算：A 段 r1 input=200/turns=8/duration=1000ms，B 段 r2
++        input=30/turns=2/duration=200ms。A ≠ B 且各自等于自己锚定 run 之和。
++        """
++        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
++        owner = await _make_user(db_session)
++        change_a = await _make_change(db_session, ws.id, "2026-10-12-seq-a")
++        change_b = await _make_change(db_session, ws.id, "2026-10-12-seq-b")
++        sess = await _make_session(db_session, owner)
++        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
++        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
++
++        run_a = await _make_run(
++            db_session,
++            change_id=change_a.id,
++            agent_session_id=sess.id,
++            num_turns=8,
++            duration_ms=1000,
++            started_at=_T10,
++            finished_at=_T1030,
++        )
++        await _make_model_usage(
++            db_session,
++            run_id=run_a.id,
++            model="seq-model",
++            input_tokens=200,
++            output_tokens=20,
++            api_requests=3,
++        )
++        run_b = await _make_run(
++            db_session,
++            change_id=change_b.id,
++            agent_session_id=sess.id,
++            num_turns=2,
++            duration_ms=200,
++            started_at=_T1045,
++            finished_at=_T11,
++        )
++        await _make_model_usage(
++            db_session,
++            run_id=run_b.id,
++            model="seq-model",
++            input_tokens=30,
++            output_tokens=3,
++            api_requests=1,
++        )
++
++        svc = ChangeUsageQueryService(db_session)
++        usage_a = await svc.get_change_usage(ws.id, change_a.id)
++        usage_b = await svc.get_change_usage(ws.id, change_b.id)
++        assert usage_a.totals.input_tokens == 200
++        assert usage_b.totals.input_tokens == 30
++        assert usage_a.totals.input_tokens != usage_b.totals.input_tokens
++        assert (usage_a.totals.num_turns, usage_a.duration_ms) == (8, 1000)
++        assert (usage_b.totals.num_turns, usage_b.duration_ms) == (2, 200)
++        # 时间三元组各归各段（A 段 10:00-10:30，B 段 10:45-11:00）。
++        assert _naive(usage_a.started_at) == _naive(_T10)
++        assert _naive(usage_a.finished_at) == _naive(_T1030)
++        assert _naive(usage_b.started_at) == _naive(_T1045)
++        assert _naive(usage_b.finished_at) == _naive(_T11)
++
++        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
++        assert summary_map[change_a.id].totals.input_tokens == 200
++        assert summary_map[change_b.id].totals.input_tokens == 30
++
+     async def test_soft_deleted_session_runs_counted(self, db_session: AsyncSession) -> None:
+         """7 软删会话（agent_sessions.deleted_at 非空）执行仍计入（D-006@v1：
+         消耗真实发生；会话卡 UI 隐藏是展示层考虑，与用量口径不矛盾）。"""
+diff --git a/backend/app/modules/change/usage_service.py b/backend/app/modules/change/usage_service.py
+index 6bc818586..8319adcee 100644
+--- a/backend/app/modules/change/usage_service.py
++++ b/backend/app/modules/change/usage_service.py
+@@ -3,8 +3,10 @@
+ 以「去重执行集合」为统一口径，为变更中心两个维度聚合执行用量（纯 SELECT，
+ 零迁移、不改 daemon，D-003@v1 实时聚合）：
+ 
+-- 变更集合（D-002@v1 并集去重）：``agent_runs.change_id`` 派发锚点 ∪
+-  ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计一次；
++- 变更集合（D-002@v2 并集去重 + 轮级独占）：``agent_runs.change_id`` 派发锚
++  点 ∪ ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计
++  一次；带锚 run（派发锚点 / inject 打锚，2026-10-12-run-level-change-attribution）
++  独占归锚定变更，会话链接只认领无锚 run（存量会话全无锚 → 行为不变防回归）；
+ - 快速修复集合：恒走 ``quicklog_session_links`` 会话链路（无派发锚点）；
+ - 详情两段聚合对齐 ``daemon/session/service.get_session_usage`` 先例：明细段
+   ``agent_run_model_usage`` GROUP BY model，兜底段无明细 run 按 run 四维列
+@@ -192,15 +194,20 @@ class ChangeUsageQueryService:
+ 
+     @staticmethod
+     def _change_run_ids(change_id: uuid.UUID) -> Subquery:
+-        """变更侧去重执行集合（D-002@v1 并集去重）：
++        """变更侧去重执行集合（D-002@v2 并集去重 + 轮级独占）：
+ 
+         ``agent_runs.change_id`` 派发锚点 UNION ``change_session_links`` 会话
+         锚点（两分支均只选 id，UNION 整行去重 = 按 run 去重）——同 run 双锚点
+-        只计一次；跨变更共享会话时同一消耗在两个变更各完整计一次（R-03 口径
+-        特性，非 bug）。两锚点均经 change 定位（link 行挂 change、change 属
+-        workspace），天然限定本工作区，无需额外 workspace join。
+-        不过滤 ``agent_sessions.deleted_at``（D-006@v1 软删计入）；无
+-        ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
++        只计一次。
++
++        2026-10-12-run-level-change-attribution task-04（FR-03）轮级打锚口径：
++        会话链接分支追加 ``AgentRun.change_id IS NULL`` 谓词——带锚 run 独占归
++        其锚定变更，不再经共享会话重复摊给其它绑定变更（一个会话先后执行多个
++        变更时各归各段）；无锚 run（存量/绑定命令前轮次）维持经链接认领的旧
++        口径，全部无锚的存量会话行为逐字节不变（防回归）。两锚点均经 change
++        定位（link 行挂 change、change 属 workspace），天然限定本工作区，无需
++        额外 workspace join。不过滤 ``agent_sessions.deleted_at``（D-006@v1 软
++        删计入）；无 ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
+         """
+         dispatched = select(AgentRun.id).where(col(AgentRun.change_id) == change_id)
+         linked = (
+@@ -209,7 +216,11 @@ class ChangeUsageQueryService:
+                 ChangeSessionLink,
+                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
+             )
+-            .where(col(ChangeSessionLink.change_id) == change_id)
++            .where(
++                col(ChangeSessionLink.change_id) == change_id,
++                # 轮级独占（FR-03）：带锚 run 只走派发锚点分支。
++                col(AgentRun.change_id).is_(None),
++            )
+         )
+         return union(dispatched, linked).subquery()
+ 
+@@ -259,10 +270,12 @@ class ChangeUsageQueryService:
+     def _change_summary_anchor(change_ids: list[uuid.UUID]) -> Subquery:
+         """变更批量摘要锚点：(锚点 change_id, run 度量列) 两分支 UNION 整行去重。
+ 
+-        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——跨变更
+-        共享会话时 run 自带锚点可能指向别的变更或为 NULL，归属以 link 行为准；
+-        UNION 整行去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定
+-        其余 run 列，D-002@v1 同 run 双锚点只计一次）。
++        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——无锚
++        run（change_id IS NULL，2026-10-12-run-level-change-attribution task-04
++        FR-03 谓词）归属以 link 行为准；带锚 run 只走第一分支独占归锚定变更，
++        不再经共享会话摊给其它绑定变更（列表摘要与详情口径一致）。UNION 整行
++        去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定其余 run 列，
++        D-002@v2 同 run 双锚点只计一次）。
+         """
+         cols = ChangeUsageQueryService._run_metric_columns()
+         dispatched = select(col(AgentRun.change_id).label("group_key"), *cols).where(
+@@ -275,7 +288,11 @@ class ChangeUsageQueryService:
+                 ChangeSessionLink,
+                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
+             )
+-            .where(col(ChangeSessionLink.change_id).in_(change_ids))
++            .where(
++                col(ChangeSessionLink.change_id).in_(change_ids),
++                # 轮级独占（FR-03）：带锚 run 不经会话链接重复认领。
++                col(AgentRun.change_id).is_(None),
++            )
+         )
+         return union(dispatched, linked).subquery()
+ 
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_commit.py b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+index d69e0a2ed..0d84c6966 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_commit.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_commit.py
+@@ -336,12 +336,24 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
+                     # 函数内兜底双保险（D-005@v2）。
+                     for spec_binding in extract_spec_bindings(sillyspec_command):
+                         try:
+-                            await bind_session_to_change(
++                            bound_change_id = await bind_session_to_change(
+                                 svc._session,
+                                 binding_session_row.workspace_id,
+                                 spec_binding.change_key,
+                                 binding_session_row.id,
+                             )
++                            # 2026-10-12-run-level-change-attribution task-02 /
++                            # FR-01：绑定成功即回写会话「当前变更上下文」——同批
++                            # 多条绑定命令按消息序循环覆盖，最后一条生效；inject
++                            # 建轮据此给新 run.change_id 打锚（轮级归属拆分）。
++                            # 列写入与 link 落库同事务（随本方法末尾 commit），
++                            # 失败不抛（值不等才置 dirty，无谓 UPDATE 免掉）。
++                            if (
++                                bound_change_id is not None
++                                and binding_session_row.current_change_id != bound_change_id
++                            ):
++                                binding_session_row.current_change_id = bound_change_id
++                                svc._session.add(binding_session_row)
+                         except Exception as exc:
+                             # 外层兜底：bind 自身已 best-effort，此处仅防御
+                             # 意外（如 ORM 状态异常），绑定失败不影响消息入库。
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index 278d4bb83..a2455f668 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -613,6 +613,12 @@ async def _inject_into_session(
+             status="pending",
+             spec_strategy="interactive",
+             agent_session_id=session.id,
++            # 2026-10-12-run-level-change-attribution task-03 / FR-01：轮级打锚
++            # ——新开轮记为会话「当前变更上下文」（run_sync 命令解析通道回写的
++            # current_change_id），使一个会话先后执行多个变更时执行用量可按轮
++            # 拆分归属。上下文为空（NULL）保持现状无锚行为；与 create_session
++            # 首 run 的 change_id（派发参数，create.py:428）语义衔接一致。
++            change_id=session.current_change_id,
+             # 2026-09-10-auto-resume-interrupted-turn：续跑轮审计标记（源 run id）。
+             metadata_=(
+                 {"auto_resume_of": str(auto_resume_of)} if auto_resume_of is not None else None
+diff --git a/backend/app/modules/daemon/tests/test_inject_change_context.py b/backend/app/modules/daemon/tests/test_inject_change_context.py
+new file mode 100644
+index 000000000..b9cae771d
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_inject_change_context.py
+@@ -0,0 +1,179 @@
++"""inject 建轮打锚会话「当前变更上下文」（2026-10-12-run-level-change-attribution
++task-03 / FR-01）。
++
++背景：一个交互会话先后执行多个变更时，inject 产生的轮（AgentRun）原先 change_id
++恒 None，变更执行用量聚合只能整会话摊派（每个绑定变更显示同一组总和）。本变更：
++run_sync 命令解析通道把 sillyspec 绑定命令指向的变更回写
++``AgentSession.current_change_id``（task-02），inject 建轮时据此打锚
++``change_id=session.current_change_id``——轮级归属可拆分（≤1 轮切换误差，与本地
++CLI 水位差分粒度同级）。
++
++本文件验证 inject 侧打锚契约：
++- 上下文有值 → 当轮 run.change_id 记为该上下文；
++- 上下文为空（存量/未绑定）→ run.change_id 保持 NULL，行为与改动前一致；
++- 上下文切换 → 下一轮跟随新值。
++
++fixtures 镜像 test_inject_orchestrator_tagging.py（SQLite create_all，FK 不强制，
++current_change_id 直接落 uuid 无需真实 Change 行——打锚契约只关心 id 透传）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++from unittest.mock import AsyncMock, MagicMock, patch
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.daemon.service import DaemonService
++
++# ── fixtures / helpers（镜像 test_inject_orchestrator_tagging.py）────────────
++
++
++async def _create_user(session: AsyncSession) -> uuid.UUID:
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    session.add(
++        User(
++            id=uid,
++            email=f"ctx-{uid}@example.com",
++            password_hash="x",
++            display_name="CtxT",
++            status="active",
++        )
++    )
++    await session.commit()
++    return uid
++
++
++async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    session.add(rt)
++    await session.commit()
++    await session.refresh(rt)
++    return rt
++
++
++def _mock_hub(*, connected: bool = True) -> MagicMock:
++    hub = MagicMock()
++    hub.is_connected.return_value = connected
++    hub.connected_runtime_ids = []
++    hub.connected_daemon_ids = []
++    hub.send_wakeup = AsyncMock(return_value=True)
++    hub.send_session_control = AsyncMock(return_value=connected)
++    return hub
++
++
++@pytest.fixture()
++def mocked_hub():
++    hub = _mock_hub()
++    with patch("app.modules.daemon.ws_hub.get_daemon_ws_hub", return_value=hub):
++        yield hub
++
++
++@pytest.fixture()
++def mocked_redis():
++    redis = AsyncMock()
++    redis.publish = AsyncMock()
++    with patch("app.modules.daemon.session.service.get_redis", return_value=redis):
++        yield redis
++
++
++async def _finish_run(db_session: AsyncSession, run: AgentRun) -> None:
++    run.status = "completed"
++    run.finished_at = datetime.now(UTC)
++    await db_session.commit()
++
++
++async def _session_runs(db_session: AsyncSession, session_id: uuid.UUID) -> list[AgentRun]:
++    return list(
++        (await db_session.execute(select(AgentRun).where(AgentRun.agent_session_id == session_id)))
++        .scalars()
++        .all()
++    )
++
++
++async def _set_context(db_session: AsyncSession, session_row, change_id: uuid.UUID | None) -> None:
++    """直接写上下文列（模拟 task-02 run_sync 通道的回写产物，单列直写等价）。"""
++    session_row.current_change_id = change_id
++    db_session.add(session_row)
++    await db_session.commit()
++
++
++async def _setup_injectable_session(db_session: AsyncSession, *, first_prompt: str = "first"):
++    """建用户/runtime/会话并完结首 turn，返回 (svc, uid, created)。"""
++    uid = await _create_user(db_session)
++    await _create_runtime(db_session, uid)
++    svc = DaemonService(db_session)
++    created = await svc.create_session(uid, provider="claude", prompt=first_prompt)
++    await _finish_run(db_session, created.agent_run)
++    return svc, uid, created
++
++
++# ── 用例 ─────────────────────────────────────────────────────────────────────
++
++
++class TestInjectChangeContextStamp:
++    @pytest.mark.asyncio
++    async def test_inject_run_stamped_with_session_context(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """上下文有值 → 当轮 run.change_id 记为该上下文。"""
++        svc, uid, created = await _setup_injectable_session(db_session)
++        sid = created.agent_session.id
++        change_x = uuid.uuid4()
++        await _set_context(db_session, created.agent_session, change_x)
++
++        result = await svc.inject_session(sid, uid, prompt="继续变更 X 的活")
++
++        assert result.agent_run.change_id == change_x
++
++    @pytest.mark.asyncio
++    async def test_inject_run_unstamped_when_context_none(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """上下文为空（未出现任何绑定命令）→ run.change_id 保持 NULL（零回归）。"""
++        svc, uid, created = await _setup_injectable_session(db_session)
++        assert created.agent_session.current_change_id is None
++
++        result = await svc.inject_session(created.agent_session.id, uid, prompt="普通追问")
++
++        assert result.agent_run.change_id is None
++
++    @pytest.mark.asyncio
++    async def test_context_switch_retargets_next_run(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """上下文 X → 切到 Y 后，下一轮打锚 Y（前一轮保持 X）——同会话两变更
++        用量可按轮拆分。"""
++        svc, uid, created = await _setup_injectable_session(db_session)
++        sid = created.agent_session.id
++        change_x, change_y = uuid.uuid4(), uuid.uuid4()
++
++        await _set_context(db_session, created.agent_session, change_x)
++        first = await svc.inject_session(sid, uid, prompt="做 X")
++        assert first.agent_run.change_id == change_x
++
++        await _finish_run(db_session, first.agent_run)
++        # run_sync 通道解析到 flow start --change Y → 上下文覆盖为 Y。
++        await _set_context(db_session, created.agent_session, change_y)
++        second = await svc.inject_session(sid, uid, prompt="切到 Y")
++
++        assert second.agent_run.change_id == change_y
++        runs = sorted(await _session_runs(db_session, sid), key=lambda r: (r.created_at, r.id))
++        assert [r.change_id for r in runs if r.id != created.agent_run.id] == [
++            change_x,
++            change_y,
++        ]
+diff --git a/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py b/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py
+new file mode 100644
+index 000000000..bb616db42
+--- /dev/null
++++ b/backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py
+@@ -0,0 +1,41 @@
++"""agent_sessions current_change_id（会话当前变更上下文）
++
++Revision ID: 20261012123000
++Revises: c515ffd62859
++Create Date: 2026-10-12
++
++为 agent_sessions 新增 current_change_id 列（2026-10-12-run-level-change-attribution
++task-01 / FR-01）：会话「当前变更上下文」——run_sync 命令解析通道解析出 sillyspec
++绑定命令时回写（最后一条生效），inject 建轮时据此给 AgentRun.change_id 打锚，
++使一个会话先后执行多个变更时轮级归属可拆分（对齐本地 CLI 水位差分的分段思想）。
++
++与既有 change_id（会话创建时的派发绑定，只读）分列。FK ondelete=SET NULL：
++变更删除时上下文清空，新轮回落无锚（经 change_session_links 认领的旧口径）。
++存量行恒 NULL（nullable，Postgres 加列不锁表），行为不变。
++"""
++
++from __future__ import annotations
++
++import sqlalchemy as sa
++from alembic import op
++
++revision = "20261012123000"
++down_revision = "c515ffd62859"
++branch_labels = None
++depends_on = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "agent_sessions",
++        sa.Column(
++            "current_change_id",
++            sa.Uuid(as_uuid=True),
++            sa.ForeignKey("changes.id", ondelete="SET NULL"),
++            nullable=True,
++        ),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("agent_sessions", "current_change_id")
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index d445730e6..5596c96e3 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -103,8 +103,10 @@ class TestMigrationStructure:
+         # 20261010190000（workspace_linked_repos，2026-10-10-workspec-maintenance
+         # 加迁移漏更本锚，2026-10-11-junction-fallback-backup-sweep 收口实测门
+         # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
+-        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）。
+-        assert heads[0] == "c515ffd62859"  # merge 迁移成为新 head
++        # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）→
++        # 20261012123000（agent_sessions.current_change_id，
++        # 2026-10-12-run-level-change-attribution）。
++        assert heads[0] == "20261012123000"  # 当前上下文列迁移成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md
+new file mode 100644
+index 000000000..caf8289a4
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/design.md
+@@ -0,0 +1,76 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:43:13.857Z
++---
++# 设计记录（Design Record）— 2026-10-12-run-level-change-attribution
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++问题：一个交互会话先后执行多个变更时，轮级（AgentRun）不带变更锚（inject.py 创建 run 时 change_id 恒 None），聚合口径（usage_service「派发锚点 ∪ 会话锚点」）把绑定会话的全部 run 完整摊给每个绑定变更——列表里每个变更显示同一组会话总和。
++
++方案：参考本地 CLI 水位差分（2026-10-03-local-usage-segment-attribution）的「分段归属」思想，但不在平台侧照抄水位表——平台已有更细的天然单位「轮」（每轮自带 token 四维/按模型明细/耗时），等价做法是轮级打锚：
++
++1. `agent_sessions` 新增 `current_change_id` 列（FK changes.id, SET NULL），语义=会话「当前变更上下文」（最近一次被解析出的 sillyspec 绑定目标）。
++2. run_sync 命令解析点（submit_commit，既有 W2.1 通道）在绑会话的同时回写该列；`bind_session_to_change` 改为返回变更 id 供其使用。
++3. inject 建轮时 `change_id=session.current_change_id`（一轮一 run 已确认，inject.py:608）。
++4. 聚合口径：会话链接分支加 `AgentRun.change_id IS NULL` 谓词——带锚 run 独占归锚定变更，无锚 run 维持现状经链接认领（存量会话全部无锚 → 行为逐字节不变，防回归）。
++
++为什么不用水位表/消息回放：轮已是原子用量单位，打锚即可达到同等拆分效果；水位差分需对会话消息流做序回放，复杂度高收益相同。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `ChangeUsageQueryService` 相关聚合（usage_service.py `_change_run_ids` / `_change_summary_anchor`）：会话链接分支新增 `AgentRun.change_id.is_(None)` 谓词；`ChangeUsageRead`/`UsageSummaryRead` DTO 不变，端点签名不变，**无 API schema 变化（不需 gen:types）**。
++- `bind_session_to_change(db, workspace_id, change_key, session_id) -> uuid.UUID | None`：返回类型从 None 改为变更 id（default 守卫跳过/异常时 None）；幂等 upsert、savepoint 不 commit、best-effort 契约不变。既有调用方（platform_sync W2.2）不消费返回值，行为不变。
++- `AgentSession` 新列 `current_change_id: uuid.UUID | None`（FK `changes.id` ondelete SET NULL，nullable）+ alembic 迁移 20261012123000（down_revision=c515ffd62859）。
++- inject 建轮（`_inject_into_session`）：AgentRun 构造新增 `change_id=session.current_change_id`；create_session 首 run 不动（change_id 由既有派发参数决定）。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++成立边界内成立：同一 run 的 submit 可能多次到达（流式/重试），命令按消息序收集、上下文取最后一条，重放幂等（最后一条不变则结果不变）。旧 run 的迟到重放理论上可能把上下文拉回旧值（如 run N 重放覆盖 run N+2 已写入的 Y）——影响限于统计归属 ≤1 轮偏差，且后续任意新命令自然纠正，接受不设防（与绑定通道既有 best-effort 口径一致）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++同会话轮次有 turn 冲突守卫（单活跃轮），submit 串行；上下文列写在 submit 的既有事务内（与 link 行同 savepoint 事务边界），跨会话互不冲突。一批多条绑定命令按循环序覆盖，最后一条生效（顺序=消息序，确定性）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++安全：会话 reopen 复用同一行，上下文延续（重开后继续同一对话语境，期望行为）；变更被删 → FK SET NULL 清上下文，新轮回落无锚（经链接认领的旧口径）；执行中会话切换目标由「下一条绑定命令」覆盖上下文，无中间态暴露。inject 打锚发生在建轮事务内，失败随事务回滚不落半锚。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++不会：bind 按（session.workspace_id, change_key）解析变更行，上下文存的是变更行全局 id（FK），不存 key 文本——跨工作区不串台；quicklog（快速修复）聚合不动，本地 CLI 水位差分通道不动（其会话级防双计谓词与本变更无交集）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：口径双轨期混乱——存量会话（如用户 10-10~10-12 那条 665 轮会话）轮上无锚，仍按会话链接全量摊派，与新会话的拆分口径并存。缓解：FR-03 显式冻结存量行为（防回归用例钉死）；仓库规则 11 允许重置开发数据，用户可选择重跑。
++
++试过但放弃：
++- 复用 `AgentSession.change_id` 作可变上下文——该列语义是「会话创建时绑定的变更」（派发链写入、会话列表展示消费），拿它当游标会混淆两个含义，且派发会话 change_id 不应被后续命令覆盖；弃。
++- submit 时回溯打锚（把 run.change_id 按当轮出现的命令改写）——会把整轮摊给轮中才出现的命令，归属误差方向更差；弃。
++- 平台会话水位表（照抄本地机制）——需消息序回放与水位修剪，复杂度高；轮级打锚同效且复用既有原子单位；弃。
++
++已知口径缝隙（评审 P3 披露，范围外不违约）：@ 联想绑定通道（`daemon/session/service/helpers.py` 落 change_session_links）只落 link 不回写 `current_change_id`——经 @ 绑定的变更收不到带锚轮，其统计按旧口径走链接认领（偏小非双计，不会错归别的变更）。本变更上下文回写仅覆盖 run_sync 命令解析通道（run/flow 两命令族）；@ 通道跟进留待后续变更。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++|---|---|---|
++| 修改 | backend/app/modules/agent/model.py | AgentSession 新列 current_change_id（FK changes.id SET NULL） |
++| 修改 | backend/app/modules/agent/tests/test_agent_session_model.py | AgentSession 字段集钉子同步 33→34（新列入表契约；实测门拦截后清偿） |
++| 新增 | backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py | alembic 迁移（down_revision=c515ffd62859） |
++| 修改 | backend/tests/test_align_platform_change_events_migration.py | 迁移链尾锚随新 head 前移（断言面闸门配对钉子） |
++| 修改 | backend/app/modules/change/binding.py | bind_session_to_change 返回变更 id（None 兜底） |
++| 修改 | backend/app/modules/daemon/run_sync/service/submit_commit.py | 绑定循环后回写 session.current_change_id（最后一条生效） |
++| 修改 | backend/app/modules/daemon/session/service/inject.py | 建轮 change_id=session.current_change_id |
++| 修改 | backend/app/modules/change/usage_service.py | 会话链接分支 IS NULL 谓词 + 口径 docstring 更新 |
++| 修改 | backend/app/modules/change/tests/test_spec_binding.py | 新增返回值契约用例 |
++| 修改 | backend/app/modules/change/tests/test_usage_stats.py | 新增拆分/独占/回归护栏用例 |
++| 新增 | backend/app/modules/daemon/tests/test_inject_change_context.py | inject 打锚用例 |
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md
+new file mode 100644
+index 000000000..9ffaeef98
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:43:13.857Z
++---
++# 提案书（Proposal）— 2026-10-12-run-level-change-attribution
++
++## 动机
++
++任务原话转写：动机：一个会话先后执行多个变更（sillyspec run / flow 两命令族）时，交互轮 AgentRun 创建不带变更锚点（agent/service.py:1910、daemon/session/service/inject.py:608 change_id 恒 None），变更执行用量聚合（change/usage_service.py R-03 口径）把绑定会话的全部 run 完整摊给每个绑定变更，导致每个变更行显示同一组会话总和数字，无法区分各变更真实消耗；参考本地 CLI 水位差分（2026-10-03-local-usage-segment-attribution）思想改为轮级归属。
++成功标准：
++- 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
++- bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
++- 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
++- 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
++- 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
++2. bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
++3. 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
++4. 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
++5. 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
++
++## 成功标准（可验证）
++
++1. 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
++2. bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
++3. 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
++4. 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
++5. 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md
+new file mode 100644
+index 000000000..c5946b524
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md
+@@ -0,0 +1,72 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:43:13.857Z
++---
++# 需求规格（Requirements）— 2026-10-12-run-level-change-attribution
++
++## 功能需求
++
++### FR-01: 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
++
++- 会话（AgentSession）必须新增「当前变更上下文」持久列：会话轮次消息中被解析出 sillyspec 绑定命令（`sillyspec run --change X` / `sillyspec flow start|done|amend-draft --change X`）时，服务端必须把该列更新为该命令指向的变更；同一批消息出现多条绑定命令时以消息序最后一条为准。
++- 后续新开轮（`inject` 路径创建的 AgentRun）创建时必须把 `change_id` 记为会话当前上下文；上下文为空时 `change_id` 保持 NULL（现状行为）。
++- 会话首建路径（create_session）产生的首 run 不在本条范围：其 `change_id` 语义由既有派发参数决定，本变更禁止改动。
++- 历史存量轮（打锚机制上线前创建）禁止回填——不做数据迁移改写存量 `agent_runs.change_id`。
++
++#### 场景：主路径
++
++- Given 会话 S 的当前上下文为变更 X（前序轮执行过 `flow start --change X` 并已被 run_sync 通道回写），When 用户发起新一轮触发 inject，Then 新建 AgentRun 的 `change_id == X.id`。
++- Given 会话 S 从未出现任何 sillyspec 绑定命令（上下文列为 NULL），When inject 新开轮，Then 新建 AgentRun 的 `change_id` 为 NULL，行为与改动前一致。
++
++#### 场景：切换
++
++- Given 会话上下文为 X，When 某轮消息先后出现 `flow done --change X` 与 `flow start --change Y`，Then 上下文最终为 Y（最后一条生效），且「执行 start Y 命令的那一轮」仍按其创建时的上下文归属（X）——允许 ≤1 轮的切换误差，与本地 CLI 水位 ~10s 粒度同级。
++
++### FR-02: bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
++
++- `bind_session_to_change` 必须返回本次绑定（或已存在的 link）对应的变更行 id（UUID）；绑定被 default 伪键守卫跳过或整体失败时返回 None。
++- 既有调用方中仅 run_sync 交互通道（submit_commit）消费返回值回写会话上下文；platform_sync agent-logs 通道（W2.2）调用该函数后的绑定行为（link 行落库、placeholder 创建、default 守卫、savepoint 不 commit）必须与改动前逐字节一致，且禁止在 platform_sync 通道回写会话上下文（该通道面向本地 CLI 日志，会话对象可能是 tool_report 聚合会话，语义不同）。
++
++#### 场景：主路径
++
++- Given workspace 内已有变更 X，When 以 change_key=X 调用 `bind_session_to_change`，Then 返回 X 的 id 且 `change_session_links` 落行（幂等重入返回同一 id）。
++- Given change_key="default"，When 调用 `bind_session_to_change`，Then 返回 None 且不落任何行（守卫行为不变）。
++
++### FR-03: 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
++
++- 变更执行用量聚合（详情与列表摘要同一口径）中，带 `change_id` 的 run 必须只归其锚定的变更：会话链接分支必须排除 `change_id` 非空的 run（`IS NULL` 谓词），使打锚 run 不再经共享会话重复摊给其它绑定变更。
++- 无锚 run（`change_id IS NULL`）在会话链接分支的认领行为必须与改动前一致——存量会话（全部 run 无锚）的统计数字禁止因本变更变化（防回归）。
++- 快速修复（quicklog）聚合口径禁止改动（quicklog 走本地 CLI 链路，无轮级锚概念）。
++
++#### 场景：主路径
++
++- Given 会话 S 同时链接变更 X 与 Y，S 含 run r1(change_id=X)、r2(change_id=NULL)，When 聚合 X 与 Y 的执行用量，Then r1 只计入 X；r2 经会话链接同时计入 X 与 Y（现状口径）。
++- Given 存量会话全部 run 的 change_id 均为 NULL，When 聚合其绑定变更用量，Then 结果与改动前一致（回归护栏）。
++
++### FR-04: 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
++
++- 同一会话先后执行两个变更、各时段轮均已打锚时，两个变更的执行用量统计（列表摘要与详情端点同口径）必须互不相同，且各自必须只含自己锚定轮的用量——除两端各自恰为空集的退化情形外，禁止再把会话总和原样显示在每个变更行。
++
++#### 场景：主路径
++
++- Given 会话先执行变更 X（其时段轮 r1 打锚 X）再执行变更 Y（其时段轮 r2 打锚 Y），When 分别查询 X、Y 的执行用量，Then X 的统计只含 r1 时段的轮、Y 的统计只含 r2 时段的轮，两者 token/轮次/耗时互不相同。
++
++#### 场景：主路径
++
++- Given 同会话两变更各至少一个打锚 run 且 token 用量不同，When 查询两变更用量，Then 两变更 totals 互不相等且各自等于自己锚定 run 之和。
++
++### FR-05: 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
++
++- 本变更合并后，既有 `test_usage_stats.py`、`test_spec_binding.py` 及 inject 相关测试必须全部通过（禁止为通过而修改测试语义，非测试逻辑有误除外）；必须新增覆盖以下面的用例：bind 返回值契约（FR-02）、inject 打锚（FR-01）、聚合拆分与回归护栏（FR-03/FR-04）。
++
++#### 场景：主路径
++
++- When 运行本变更相关测试文件（usage_stats / spec_binding / inject 打锚新用例），Then 全部通过。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/daemon/tests/test_inject_change_context.py「TestInjectChangeContextStamp::test_inject_run_stamped_with_session_context + ::test_inject_run_unstamped_when_context_none + ::test_context_switch_retargets_next_run」
++FR-02: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_returns_change_id_contract + test_bind_change_failure_is_best_effort_no_raise（失败路径 None 断言）」
++FR-03: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_anchored_run_exclusive_to_owning_change + ::test_shared_session_counted_in_both_changes（无锚 run 回归护栏）」
++FR-04: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_two_changes_sequential_split」
++FR-05: backend/app/modules/change/tests/test_usage_stats.py + backend/app/modules/change/tests/test_spec_binding.py + backend/app/modules/daemon/tests/test_inject_change_context.py + backend/app/modules/agent/tests/test_agent_session_model.py「全量通过」
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json
+new file mode 100644
+index 000000000..dae21e51d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json
+@@ -0,0 +1,36 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-12-run-level-change-attribution",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "c57df121365d980b0889526f17a767bda09d95b9",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
++      "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72",
++      "status": "resolved",
++      "resolutionNote": "增量复核（c57df1213）：requirements 测试绑定行已改为精确 pytest 节点名（FR-01 三用例全名、FR-02 契约+failure 用例、FR-03 独占+回归护栏、FR-04 拆分用例、FR-05 补 test_agent_session_model.py），节点名与实测通过用例逐一吻合，无编造；代码面零变化。"
++    },
++    {
++      "severity": "P3",
++      "title": "design 乱序作答「迟到重放影响限于 ≤1 轮偏差」量化偏乐观",
++      "evidence": "submit_commit 回写无 run 序号/水位防御，旧 run 的迟到重放只要发生在更新提交之后就会把 current_change_id 拉回旧值，其后所有无绑定命令的新轮 inject 均错锚旧值直至下一条绑定命令到达——极端迟到场景偏差可超 1 轮。design 已显式声明「接受不设防」（best-effort 通道既有口径、后续新命令自然自愈、仅统计归属误差非数据正确性），裁决仍为可接受，仅量化表述不严谨。",
++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md:35（代码面：backend/app/modules/daemon/run_sync/service/submit_commit.py:347-356）"
++    },
++    {
++      "severity": "P3",
++      "title": "@ 联想绑定通道不回写 current_change_id，design 未披露其与新聚合口径的交互",
++      "evidence": "inject @ 联想路径（helpers.py:610-617）调 bind_session_to_change 落 change_session_links 但不消费返回值、不更新会话上下文——@ 选中的变更在打锚会话中收不到带锚轮（其链接分支被 IS NULL 谓词排除），统计偏小而非双计。FR-01 范围只承诺命令解析通道，不构成违约；属未声明的次级口径缝隙，建议后续变更补齐或在 usage docstring 说明。",
++      "location": "backend/app/modules/daemon/session/service/helpers.py:610-617"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "边界已裁决：可接受——design 显式声明旧 run 迟到重放不设防（best-effort 通道既有口径、自愈、统计性误差）；代码核实确无防御（作答真实），另记 P3 量化表述偏差",
++    "并发": "ok——上下文列写入随 _submit_finalize 末尾既有 commit 同事务提交（submit_commit.py:395），失败随 IntegrityError rollback；同会话单活跃轮守卫（inject.py:315-317 turn-conflict guards）与外层 try/except 核实存在。design「与 link 行同 savepoint 事务边界」措辞不精确：列写实际发生在 bind 的 begin_nested 释放后、同一外层事务内，失败同回滚，结论不变",
++    "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
++    "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
++  },
++  "reviewedAt": "2026-10-12T15:10:14+08:00"
++}
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901 b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901
+new file mode 100644
+index 000000000..89863fdd8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/review.json.superseded-20261012T070901
+@@ -0,0 +1,34 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-12-run-level-change-attribution",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "75d6cf9a302f9393038efe2160f2bb20da175f7e",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
++      "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72"
++    },
++    {
++      "severity": "P3",
++      "title": "design 乱序作答「迟到重放影响限于 ≤1 轮偏差」量化偏乐观",
++      "evidence": "submit_commit 回写无 run 序号/水位防御，旧 run 的迟到重放只要发生在更新提交之后就会把 current_change_id 拉回旧值，其后所有无绑定命令的新轮 inject 均错锚旧值直至下一条绑定命令到达——极端迟到场景偏差可超 1 轮。design 已显式声明「接受不设防」（best-effort 通道既有口径、后续新命令自然自愈、仅统计归属误差非数据正确性），裁决仍为可接受，仅量化表述不严谨。",
++      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md:35（代码面：backend/app/modules/daemon/run_sync/service/submit_commit.py:347-356）"
++    },
++    {
++      "severity": "P3",
++      "title": "@ 联想绑定通道不回写 current_change_id，design 未披露其与新聚合口径的交互",
++      "evidence": "inject @ 联想路径（helpers.py:610-617）调 bind_session_to_change 落 change_session_links 但不消费返回值、不更新会话上下文——@ 选中的变更在打锚会话中收不到带锚轮（其链接分支被 IS NULL 谓词排除），统计偏小而非双计。FR-01 范围只承诺命令解析通道，不构成违约；属未声明的次级口径缝隙，建议后续变更补齐或在 usage docstring 说明。",
++      "location": "backend/app/modules/daemon/session/service/helpers.py:610-617"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "边界已裁决：可接受——design 显式声明旧 run 迟到重放不设防（best-effort 通道既有口径、自愈、统计性误差）；代码核实确无防御（作答真实），另记 P3 量化表述偏差",
++    "并发": "ok——上下文列写入随 _submit_finalize 末尾既有 commit 同事务提交（submit_commit.py:395），失败随 IntegrityError rollback；同会话单活跃轮守卫（inject.py:315-317 turn-conflict guards）与外层 try/except 核实存在。design「与 link 行同 savepoint 事务边界」措辞不精确：列写实际发生在 bind 的 begin_nested 释放后、同一外层事务内，失败同回滚，结论不变",
++    "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
++    "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
++  },
++  "reviewedAt": "2026-10-12T15:08:11+08:00"
++}
+diff --git a/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md b/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md
+new file mode 100644
+index 000000000..3a4e53566
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-run-level-change-attribution/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:43:13.857Z
++---
++# 任务注册表（Tasks）— 2026-10-12-run-level-change-attribution
++
++- [x] task-01: agent_sessions 新列 current_change_id（model.py + alembic 迁移 down_revision=c515ffd62859）；验证：迁移文件可被 alembic 加载、pytest 收集无错
++- [x] task-02: bind_session_to_change 返回变更 id + submit_commit 绑定循环后回写 session.current_change_id；验证：test_spec_binding.py 新用例绿
++- [x] task-03: inject 建轮 change_id=session.current_change_id；验证：test_inject_change_context.py 新用例绿
++- [x] task-04: usage_service 会话链接分支加 IS NULL 谓词 + docstring 口径更新；验证：test_usage_stats.py 新增拆分/独占/回归护栏用例绿
++- [x] task-05: 跑本变更全部相关测试（usage_stats + spec_binding + inject 新用例）全绿并按 pathspec 提交；验证：pytest 三处退出码 0

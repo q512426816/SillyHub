@@ -1029,3 +1029,98 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：契约零变化
 全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-06
 最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+## FR-auto-backend-181 会话轮消息中出现 sillyspec run/flow --change 命令后，平台记录会话级「当前变更上下文」（agent_sessions 新列），后续新开轮（inject）创建的 AgentRun.change_id 记为该上下文
+变更：2026-10-12-run-level-change-attribution
+状态：active
+摘要：主路径；切换
+全文：.sillyspec/changes/archive/2026-10-12-run-level-change-attribution/requirements.md#FR-01
+最近确认：74fbd1ec26e5d14e6cd93fbe686c32b339010057
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-run-level-change-attribution:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_inject_change_context.py「TestInjectChangeContextStamp::test_inject_run_stamped_with_session_context + ::test_inject_run_unstamped_when_context_none + ::test_context_switch_retargets_next_run」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-run-level-change-attribution
+  status: active
+
+## FR-auto-backend-182 bind_session_to_change 返回变更 id 供 run_sync 通道回写上下文；platform_sync agent-logs 通道绑定行为不变
+变更：2026-10-12-run-level-change-attribution
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-run-level-change-attribution/requirements.md#FR-02
+最近确认：74fbd1ec26e5d14e6cd93fbe686c32b339010057
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-run-level-change-attribution:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_returns_change_id_contract + test_bind_change_failure_is_best_effort_no_raise（失败路径 None 断言）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-run-level-change-attribution
+  status: active
+
+## FR-auto-backend-183 变更用量聚合口径调整：带 change_id 的 run 独占归该变更；change_session_links 会话链路只认领 change_id 为空的 run（存量无锚 run 行为不变，防回归）
+变更：2026-10-12-run-level-change-attribution
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-run-level-change-attribution/requirements.md#FR-03
+最近确认：74fbd1ec26e5d14e6cd93fbe686c32b339010057
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-run-level-change-attribution:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_anchored_run_exclusive_to_owning_change + ::test_shared_session_counted_in_both_changes（无锚 run 回归护栏）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-run-level-change-attribution
+  status: active
+
+## FR-auto-backend-184 同一会话先后执行两个变更（打锚后）时，两个变更的执行用量统计互不相同且各只含自己时段的轮
+变更：2026-10-12-run-level-change-attribution
+状态：active
+摘要：主路径；主路径
+全文：.sillyspec/changes/archive/2026-10-12-run-level-change-attribution/requirements.md#FR-04
+最近确认：74fbd1ec26e5d14e6cd93fbe686c32b339010057
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-run-level-change-attribution:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_two_changes_sequential_split」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-run-level-change-attribution
+  status: active
+
+## FR-auto-backend-185 既有 usage_stats 与相关 binding 测试全部通过，并新增打锚与聚合拆分用例
+变更：2026-10-12-run-level-change-attribution
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-run-level-change-attribution/requirements.md#FR-05
+最近确认：74fbd1ec26e5d14e6cd93fbe686c32b339010057
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-run-level-change-attribution:flow:测试绑定FR-05
+  tests: backend/app/modules/agent/tests/test_agent_session_model.py「全量通过」 | backend/app/modules/change/tests/test_spec_binding.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_inject_change_context.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-run-level-change-attribution
+  status: active
