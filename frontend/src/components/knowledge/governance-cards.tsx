@@ -31,6 +31,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Popconfirm } from "antd";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 export const governanceQueryKey = (workspaceId: string) => [
   "workspaces",
@@ -116,7 +117,7 @@ function SignalCard({
 
   const copyPrompt = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied("ok");
     } catch {
       setCopied("fail");

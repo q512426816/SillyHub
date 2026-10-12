@@ -176,7 +176,8 @@ import {
 } from "@/components/permissions/minimized-dialog-capsule";
 import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
  * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
@@ -1873,7 +1874,7 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
             type="button"
             onClick={() => {
               const ct = parsed?.copyText ?? "";
-              void navigator.clipboard?.writeText(ct);
+              void copyTextToClipboard(ct);
             }}
             className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
             title="复制命令"

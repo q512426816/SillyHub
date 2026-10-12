@@ -43,6 +43,7 @@ import { MobileTopBar } from "@/components/mobile/mobile-top-bar";
 import { ApiError } from "@/lib/api";
 import { deleteChange, getChange, reparseChanges } from "@/lib/changes";
 import { useNotify } from "@/lib/errors";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 export default function MobileChangeDetailPage() {
   const params = useParams<{ id: string; cid: string }>();
@@ -115,7 +116,7 @@ export default function MobileChangeDetailPage() {
     const name = change ? change.title || change.change_key : "";
     if (!name) return;
     try {
-      await navigator.clipboard.writeText(name);
+      await copyTextToClipboard(name);
       setActionMsg("已复制变更名");
     } catch {
       setActionError("复制失败，请手动复制");

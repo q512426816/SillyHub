@@ -2402,3 +2402,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
 理由：- 风险：execCommand 已被 WHATWG 废弃，未来浏览器可能移除——届时降级路径失效回到报错横幅（与修复前同等），Async Clipboard 主路径不受影响；非安全上下文下无其它程序化通道（Service Worker 剪贴板方案依赖 HTTPS），移除前该方案是唯一解。 - 放弃方案 A：改部署形态强制 HTTPS/localhost——部署约束变更不归前端代码管，且局域网自签证书有额外运维成本；代码侧降级是即时空运的解。 - 放弃方案 B：navigator.clipboard 缺失时直接报「请在 HTTPS 下使用」引导文案——不解决功能不可用本身，execCommand 降级在目标浏览器（Chrome/Edge/Firefox 全支持）下即可用。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ci-guard-diagnosability
+锚点：未记录
+最近确认：775cb3de8104fb40bd864ed6b1bc223e50d7e749
+理由：- 风险：`|| true` 把「grep 自身异常退出」与「计数 0」混为一谈——grep 非 0 非正常退出仅有内存/参数错误等病态场景，且计数变量此时为空串 → `[-ne 1]` 整数比较报语法错退出（仍是 fail-closed 有输出），不劣化于现状。 - 放弃方案 A：改用 `grep -c ... | wc -l` 或 awk 计数——多一层管道语义更绕；`|| true` 是 set -e 下容忍「0 计数即非零退出」的标准习语，一行最小改动。 - 放弃方案 B：迁移测试改 shell out `python -m alembic heads` 并断言输出——docstring 明言「走 alembic API 不 shell out（CI/本地环境无差异）」，改 shell 反而引入环境差异；set_main_option 是 alembic API 的正规覆盖通道。

@@ -882,3 +882,48 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-12-duration-backfill-harness-align
   status: active
+
+## FR-auto-backend-172 build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
+变更：2026-10-12-ci-guard-diagnosability
+状态：active
+摘要：零头给引导
+全文：.sillyspec/changes/archive/2026-10-12-ci-guard-diagnosability/requirements.md#FR-01
+最近确认：775cb3de8104fb40bd864ed6b1bc223e50d7e749
+
+## FR-auto-backend-173 test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
+变更：2026-10-12-ci-guard-diagnosability
+状态：active
+摘要：双 CWD 均绿
+全文：.sillyspec/changes/archive/2026-10-12-ci-guard-diagnosability/requirements.md#FR-02
+最近确认：775cb3de8104fb40bd864ed6b1bc223e50d7e749
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ci-guard-diagnosability:flow:测试绑定FR-02
+  tests: backend/tests/test_migration_single_head.py「test_alembic_single_head」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ci-guard-diagnosability
+  status: active
+
+## FR-auto-backend-174 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
+变更：2026-10-12-ci-guard-diagnosability
+状态：active
+摘要：相关面验证
+全文：.sillyspec/changes/archive/2026-10-12-ci-guard-diagnosability/requirements.md#FR-03
+最近确认：775cb3de8104fb40bd864ed6b1bc223e50d7e749
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ci-guard-diagnosability:flow:测试绑定FR-03
+  tests: backend/tests/test_migration_single_head.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ci-guard-diagnosability
+  status: active

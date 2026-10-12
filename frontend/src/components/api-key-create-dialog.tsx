@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errMessage } from "@/lib/errors";
 import { createApiKey, type ApiKeyCreated } from "@/lib/api-keys";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type Phase = "form" | "plaintext";
 
@@ -59,7 +60,7 @@ export function ApiKeyCreateDialog({ onCreated, onClose }: Props) {
   const handleCopy = async () => {
     if (!issued) return;
     try {
-      await navigator.clipboard.writeText(issued.plaintext);
+      await copyTextToClipboard(issued.plaintext);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

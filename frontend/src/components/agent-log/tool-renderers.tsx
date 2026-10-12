@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ToolCallEntry } from "./types";
 
 import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
  * ql-20260709-001：tool_result 命令输出展示兜底上限（字符）。
@@ -77,7 +78,7 @@ function StatusBadge({
 export function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text).then(() => {
+    copyTextToClipboard(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });

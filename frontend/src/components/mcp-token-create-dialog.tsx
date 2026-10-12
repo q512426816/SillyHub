@@ -19,6 +19,7 @@ import {
   type McpTokenCreated,
   type McpScope,
 } from "@/lib/mcp-tokens";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type Phase = "form" | "plaintext";
 
@@ -86,7 +87,7 @@ export function McpTokenCreateDialog({ workspaceId, onCreated, onClose }: Props)
   const handleCopy = async () => {
     if (!issued) return;
     try {
-      await navigator.clipboard.writeText(issued.token);
+      await copyTextToClipboard(issued.token);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

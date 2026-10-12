@@ -18,6 +18,7 @@ import { Check, ChevronDown, ChevronUp, Copy, Loader2, Terminal, X } from "lucid
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 export interface BashChunkItem {
   channel: "stdout" | "stderr";
@@ -121,7 +122,7 @@ export function BashProgressCard({
 
   const handleCopyCommand = async () => {
     try {
-      await navigator.clipboard.writeText(command);
+      await copyTextToClipboard(command);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {

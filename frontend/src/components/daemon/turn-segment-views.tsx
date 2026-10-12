@@ -82,7 +82,8 @@ import type {
 import { getProviderCaps } from "@/lib/provider-caps";
 import type { ProviderCaps } from "@/lib/provider-caps";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ───────────────── 段动画 keyframes（自包含注入，见文件头说明） ───────────────── */
 
@@ -661,7 +662,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              void navigator.clipboard?.writeText(copyText);
+              void copyTextToClipboard(copyText);
             }}
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
             title="复制命令"

@@ -41,6 +41,7 @@ import { App as AntdApp } from "antd";
 
 import { CardMarkdown } from "@/components/knowledge/card-markdown";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 // ── 公共解析 ────────────────────────────────────────────────────────────────
 
@@ -396,13 +397,13 @@ function UseBadge({ count, title }: { count: number; title: string }) {
 
 /**
  * 复制文本：返回是否真写入剪贴板——不安全上下文（http 非 localhost）下
- * ``navigator.clipboard`` 为 undefined、权限拒绝/焦点丢失时 writeText 抛错，
+ * 非安全上下文（clipboard 缺失，经 copyTextToClipboard 降级）、权限拒绝/焦点丢失时 writeText 抛错，
  * 一律 false（2026-10-09 风险审查：原 void+可选链形态让假成功提示成为可能）。
  * 全文路径等「本体已是可见文本」的调用方仍可忽略返回值静默降级。
  */
 async function copyText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text);
+    await copyTextToClipboard(text);
     return true;
   } catch {
     return false;

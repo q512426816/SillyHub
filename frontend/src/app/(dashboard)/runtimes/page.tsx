@@ -257,6 +257,9 @@ export function detectOs(ua: string): "windows" | "unix" {
 export function InstallDaemonBlock() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 2026-10-12-clipboard-helper-full-migration 回归复审 F6：降级失败可见——裸 await
+  // 无反馈且 unhandled rejection，错误行就地展示（下次点击重试时清除）。
+  const [error, setError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   // task-06：OS 默认 unix（mounted 后由 navigator.userAgent 覆盖，防 hydration 不一致）。
   const [os, setOs] = useState<"windows" | "unix">("unix");
@@ -279,9 +282,14 @@ export function InstallDaemonBlock() {
 
   const handleCopy = async () => {
     if (!cmd) return;
-    await copyTextToClipboard(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setError(null);
+    try {
+      await copyTextToClipboard(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setError(`复制失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
   };
 
   return (
@@ -341,6 +349,9 @@ export function InstallDaemonBlock() {
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
             </Button>
+          {error && (
+            <p className="text-[10px] text-destructive">{error}</p>
+          )}
           </div>
           {/* task-06 / FR-02：irm/iex 是 PowerShell 专属 cmdlet，cmd.exe 不认识，提示用户打开 PowerShell 再粘贴。 */}
           {os === "windows" && (
@@ -371,6 +382,9 @@ export function InstallDaemonBlock() {
 export function AutostartDaemonBlock() {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 2026-10-12-clipboard-helper-full-migration 回归复审 F6：降级失败可见——裸 await
+  // 无反馈且 unhandled rejection，错误行就地展示（下次点击重试时清除）。
+  const [error, setError] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -386,9 +400,14 @@ export function AutostartDaemonBlock() {
 
   const handleCopy = async () => {
     if (!cmd) return;
-    await copyTextToClipboard(cmd);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setError(null);
+    try {
+      await copyTextToClipboard(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setError(`复制失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
   };
 
   return (
@@ -399,6 +418,9 @@ export function AutostartDaemonBlock() {
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
       >
         <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          {error && (
+            <p className="text-[10px] text-destructive">{error}</p>
+          )}
         <span className="text-[11px] font-medium text-foreground">开机自启动（可选）</span>
         <span className="ml-auto text-[10px] text-muted-foreground">
           {open ? "收起" : "展开"}
@@ -429,6 +451,9 @@ export function AutostartDaemonBlock() {
               {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
               <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
             </Button>
+          {error && (
+            <p className="text-[10px] text-destructive">{error}</p>
+          )}
           </div>
           {/* R-12 / Grill C-20：登录 Token 短时效，开机后大概率已过期——自启场景必须引导 API Key。 */}
           <p className="text-[10px] text-amber-600">

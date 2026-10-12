@@ -176,7 +176,8 @@ import {
   type SessionPermissionRequest,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ────────────────────── 常量 ────────────────────── */
 
@@ -2507,8 +2508,7 @@ export function GroupChatPanel({
             title={`点击复制群聊 ID：${groupId}`}
             data-testid="group-chat-copy-id"
             onClick={() => {
-              void navigator.clipboard
-                ?.writeText(groupId)
+              void copyTextToClipboard(groupId)
                 .then(() => notify.success("已复制群聊 ID"))
                 .catch(() => {
                   /* 剪贴板不可用静默（http 环境） */

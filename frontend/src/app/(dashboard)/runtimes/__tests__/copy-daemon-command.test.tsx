@@ -8,7 +8,7 @@
  *
  * 覆盖:
  *   1. admin + 活跃 key：点「复制命令」→ 剪贴板命令含 --api-key <完整明文>，
- *      渲染面只显示打码前缀（明文不进 DOM）
+ *      渲染面只显示打码前缀（安全上下文 Async Clipboard 明文不进 DOM；非安全上下文降级经即取即删临时节点）
  *   2. admin + 无 key：显示自动创建提示；复制后回显已自动创建（含名称）
  *   3. 非 admin（list 403）：渲染 --token 回退形态 + 黄色警示；复制走 access_token
  *   4. resolveDaemonApiKey 返回 forbidden → 命令回退 --token
@@ -67,7 +67,7 @@ describe("CopyDaemonCommand · admin 有活跃 key（FR-01 主路径）", () => 
       expect(screen.getByText(/--api-key/)).toBeInTheDocument();
     });
     expect(screen.getByText(/shk_live_ab…/)).toBeInTheDocument();
-    // 明文绝不进 DOM
+    // 明文不进 DOM（安全上下文主路径；降级路径经即取即删临时节点，见 lib/clipboard.ts）
     expect(document.body.textContent).not.toContain("shk_live_full_secret_value");
 
     fireEvent.click(screen.getByRole("button", { name: /复制命令/ }));

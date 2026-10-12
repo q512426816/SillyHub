@@ -65,7 +65,8 @@ import {
   ToolResultCard,
 } from "@/components/agent-log/tool-renderers";
 import type { ToolCallEntry } from "@/components/agent-log/types";
-import { MarkdownText } from "@/components/ui/markdown-text";
+import { MarkdownText } from "@/components/ui/markdown-text";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 // 全仓首次 extend（X-15）：relativeTime 提供 fromNow；zh-cn 使 fromNow 输出
 // 「N 分钟前」中文（antd-providers 只覆盖 antd 组件语境，dayjs 需自设 locale）。
@@ -415,7 +416,7 @@ function renderSegment(seg: ConversationSegment) {
   }
 }
 
-/* ───────────────── 复制反馈（navigator.clipboard + 瞬时文案） ─────────── */
+/* ───────────────── 复制反馈（copyTextToClipboard + 瞬时文案） ─────────── */
 
 /**
  * 复制反馈小 hook：writeText 后 900ms 内 copiedKey 命中目标显示「已复制 ✓」；
@@ -434,7 +435,7 @@ function useCopyFeedback() {
 
   const copy = useCallback(({ key, text }: CopyTarget) => {
     // 剪贴板不可用（非安全上下文等）静默失败——反馈文案照常给出，不阻塞排障主路径。
-    void navigator.clipboard?.writeText(text).catch(() => undefined);
+    void copyTextToClipboard(text).catch(() => undefined);
     setCopiedKey(key);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopiedKey(null), COPY_FEEDBACK_MS);

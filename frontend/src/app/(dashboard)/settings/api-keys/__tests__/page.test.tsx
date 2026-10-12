@@ -86,6 +86,10 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // defineProperty 注入的桩不受 unstubAllGlobals 管理，显式删除防后续用例假绿
+  //（2026-10-12 回归复审 F9）。
+  Reflect.deleteProperty(navigator, "clipboard");
+  Reflect.deleteProperty(document, "execCommand");
 });
 
 describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {

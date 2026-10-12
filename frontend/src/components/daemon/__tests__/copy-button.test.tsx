@@ -89,11 +89,15 @@ describe("CopyButton 成功路径", () => {
 });
 
 describe("CopyButton 降级路径（R-06 静默，不阻塞聊天）", () => {
-  it("clipboard 不可用（navigator.clipboard undefined）：点击不抛错 + console.warn + 短暂「复制失败」", () => {
+  it("clipboard 不可用（navigator.clipboard undefined）：降级失败不抛错 + console.warn + 短暂「复制失败」（迁移后经 helper 异步 reject）", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
     render(<CopyButton text="答复正文" />);
-    expect(() => fireEvent.click(screen.getByRole("button", { name: "复制" }))).not.toThrow();
+    // 2026-10-12-clipboard-helper-full-migration：helper 降级在 jsdom（无 execCommand）
+    // reject，经 .catch(fail) 异步落 failed——不再同步 throw，await act 等微任务落地。
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    });
     expect(warnSpy).toHaveBeenCalledTimes(1);
     expect(String(warnSpy.mock.calls[0]?.[0])).toContain("复制失败");
     expect(screen.getByRole("button", { name: "复制" }).textContent).toBe("复制失败");

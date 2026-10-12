@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ci-guard-diagnosability",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ci-guard-diagnosability:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/test_migration_single_head.py「test_alembic_single_head」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ci-guard-diagnosability"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ci-guard-diagnosability:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/test_migration_single_head.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ci-guard-diagnosability"
+    }
+  ]
+}

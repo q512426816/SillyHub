@@ -3,6 +3,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /** 复制反馈时长（ms）：成功「✓ 已复制」/ 失败「复制失败」显示窗口，到点复位。 */
 const FEEDBACK_RESET_MS = 1200;
@@ -32,7 +33,7 @@ export interface CopyButtonProps {
  *     ——纯 CSS `:hover` 零状态（design Phase 3），不占外层组件任何 state；
  *   - 定位默认气泡右下角外侧下方（原型 right:6px / bottom:-22px；用户气泡
  *     原型为 right:0 / bottom:-24px，经 className 覆盖），不遮正文；
- *   - 点击 `navigator.clipboard?.writeText` 写纯文本，成功文案「✓ 已复制」
+ *   - 点击经 `copyTextToClipboard` 写纯文本（非安全上下文 execCommand 降级），成功文案「✓ 已复制」
  *     1.2s 后复位（本地 useState + setTimeout，卸载清理定时器）；
  *   - clipboard 不可用（http 局域网非安全上下文）/ 写入失败 → console.warn
  *     静默降级 + 短暂「复制失败」（R-06：不阻塞聊天，禁 alert/notify 弹层）；
@@ -75,12 +76,7 @@ export const CopyButton = memo(function CopyButton({
       scheduleReset();
     };
     try {
-      const clipboard = navigator.clipboard;
-      if (!clipboard?.writeText) {
-        throw new Error("navigator.clipboard 不可用（非安全上下文？）");
-      }
-      void clipboard
-        .writeText(value)
+      void copyTextToClipboard(value)
         .then(() => {
           setStatus("done");
           scheduleReset();

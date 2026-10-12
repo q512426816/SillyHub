@@ -5,7 +5,8 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { ChangeRead } from "@/lib/changes";
-import type { AgentSessionListItem } from "@/lib/daemon";
+import type { AgentSessionListItem } from "@/lib/daemon";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
  * 审批卡（2026-08-14-change-center-conversation-driven task-10 / D-003@v1 / D-006@v2）。
@@ -169,9 +170,9 @@ export function ChangeStageActions({
   const degrade = notifyResult ? degradeMessage(notifyResult, change) : null;
 
   const handleCopy = async () => {
-    if (!degrade || !navigator.clipboard) return;
+    if (!degrade) return;
     try {
-      await navigator.clipboard.writeText(degrade.copyable);
+      await copyTextToClipboard(degrade.copyable);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

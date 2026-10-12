@@ -49,7 +49,8 @@ import type { components } from "@/lib/api-types";
 import { getScopeAudit, type ScopeAuditRow } from "@/lib/changes";
 import { listDaemonMachines } from "@/lib/daemon";
 import { fetchMyBinding } from "@/lib/workspace-binding";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /** 心跳 sillyspec_status.changes[] 单项（api-types 生成版，禁止手写）。 */
 type SillySpecChange = components["schemas"]["DaemonHeartbeatSillySpecChange"];
@@ -267,8 +268,7 @@ function CommandRow({
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
     try {
-      if (!navigator.clipboard) return;
-      await navigator.clipboard.writeText(command);
+      await copyTextToClipboard(command);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

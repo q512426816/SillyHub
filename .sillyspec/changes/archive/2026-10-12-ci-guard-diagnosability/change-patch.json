@@ -1,0 +1,81 @@
+{
+  "change": "2026-10-12-ci-guard-diagnosability",
+  "baseline": "a92e13a378c07d3fd7b09be6abd67ae1cff7ea00",
+  "head": "775cb3de8104fb40bd864ed6b1bc223e50d7e749",
+  "files": [
+    ".sillyspec/changes/2026-10-12-ci-guard-diagnosability/tasks.md",
+    "backend/tests/test_migration_single_head.py",
+    "deploy/scripts/build-and-save.sh",
+    ".sillyspec/changes/2026-10-12-ci-guard-diagnosability/design.md",
+    ".sillyspec/changes/2026-10-12-ci-guard-diagnosability/proposal.md",
+    ".sillyspec/changes/2026-10-12-ci-guard-diagnosability/requirements.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 135,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-12T02:04:03.042Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "deploy",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a92e13a378c07d3fd7b09be6abd67ae1cff7ea00",
+    "totals": {
+      "files": 2,
+      "additions": 9,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/tests/test_migration_single_head.py",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "deploy/scripts/build-and-save.sh",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c3603349c9c15c5dfe5921de6c47753f0f873a7fcb06fc6be740b871a539fff8",
+  "patchStatus": "ok"
+}

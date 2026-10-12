@@ -1,0 +1,182 @@
+diff --git a/backend/tests/test_migration_single_head.py b/backend/tests/test_migration_single_head.py
+index 20d4e516e..e53479c29 100644
+--- a/backend/tests/test_migration_single_head.py
++++ b/backend/tests/test_migration_single_head.py
+@@ -19,7 +19,12 @@ from alembic.script import ScriptDirectory
+ 
+ def test_alembic_single_head() -> None:
+     backend_root = Path(__file__).resolve().parents[1]
+-    script = ScriptDirectory.from_config(Config(str(backend_root / "alembic.ini")))
++    # 2026-10-12-ci-guard-diagnosability：script_location 显式绝对路径——alembic.ini
++    # 里的相对值按进程 CWD 解析，从仓库根跑测试会 CommandError: Path doesn't exist
++    # 而非给出设计的多头提示（CI 靠 working-directory 钉住是隐式依赖，本地双 CWD 均绿）。
++    config = Config(str(backend_root / "alembic.ini"))
++    config.set_main_option("script_location", str(backend_root / "migrations"))
++    script = ScriptDirectory.from_config(config)
+     heads = script.get_heads()
+     assert len(heads) == 1, (
+         "alembic 迁移多头（并行变更各自加迁移未合流）——部署会 crash-loop："
+diff --git a/deploy/scripts/build-and-save.sh b/deploy/scripts/build-and-save.sh
+index 76b3f6759..1eeb68f94 100644
+--- a/deploy/scripts/build-and-save.sh
++++ b/deploy/scripts/build-and-save.sh
+@@ -36,7 +36,9 @@ ALEMBIC_HEADS="$(cd backend && python -m alembic heads 2>&1)" || {
+   echo "       $ALEMBIC_HEADS"
+   exit 1
+ }
+-ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)')"
++# 2026-10-12-ci-guard-diagnosability：grep -c 计 0 时退出码 1，set -e 下赋值即死
++# （零条 head 形态在打印引导前静默退出）——容忍之，让 0 走下方 [-ne 1] 分支给全量引导。
++ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)' || true)"
+ if [ "$ALEMBIC_HEAD_COUNT" -ne 1 ]; then
+   echo "    ❌ alembic 迁移多头（并行变更各自加迁移未合流）——部署后 backend upgrade head 会 crash-loop："
+   printf '%s\n' "$ALEMBIC_HEADS" | sed 's/^/       /'
+diff --git a/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/tasks.md b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/tasks.md
+new file mode 100644
+index 000000000..6d6c4b7d2
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T02:00:40.987Z
++---
++# 任务注册表（Tasks）— 2026-10-12-ci-guard-diagnosability
++
++- [x] task-01: build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
++- [x] task-02: test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
++- [x] task-03: 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
+diff --git a/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/design.md b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-ci-guard-diagnosability
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++cc3c022b6 的两条守卫各自有已披露的 fail-closed 边缘：①build-and-save.sh 的 `grep -c '(head)'` 在计数 0 时退出码 1，`set -euo pipefail` 下赋值语句即死——「零条 head」形态在打印 ❌ 引导前静默退出；②test_migration_single_head.py 依赖 alembic.ini 的相对 `script_location=migrations`（alembic 按进程 CWD 解析），CI 用 working-directory=backend 钉住所以绿，本地从仓库根跑必 CommandError。修法：①计数赋值加 `|| true`（grep -c 照样打印 "0"，让既有 `[-ne 1]` 分支接管给全量引导）；②测试显式 `config.set_main_option("script_location", str(backend_root / "migrations"))`（基于 __file__ 的绝对路径，CWD 无关）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- build-and-save.sh：仅零条 head 形态的行为从「静默退出」变「引导后退出 1」（缺陷修复）；多头/单头路径逐字不变。测试文件：断言与文案零变化，仅 Config 构造两行。无 schema/端点变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用：两者都是启动期同步单次检查，无事件流；alembic heads 输出格式按行解析，与到达时序无关。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用：只读检查（alembic heads 不写库）；并行变更同时加迁移正是守卫要拦的形态，守卫本身无写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用：进程级一次性校验；失败即退出，无状态残留。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   script_location 锚定本仓 backend/migrations（__file__ 推导），打包机/CI/本地三环境一致；不涉跨仓。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：`|| true` 把「grep 自身异常退出」与「计数 0」混为一谈——grep 非 0 非正常退出仅有内存/参数错误等病态场景，且计数变量此时为空串 → `[-ne 1]` 整数比较报语法错退出（仍是 fail-closed 有输出），不劣化于现状。
++- 放弃方案 A：改用 `grep -c ... | wc -l` 或 awk 计数——多一层管道语义更绕；`|| true` 是 set -e 下容忍「0 计数即非零退出」的标准习语，一行最小改动。
++- 放弃方案 B：迁移测试改 shell out `python -m alembic heads` 并断言输出——docstring 明言「走 alembic API 不 shell out（CI/本地环境无差异）」，改 shell 反而引入环境差异；set_main_option 是 alembic API 的正规覆盖通道。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | deploy/scripts/build-and-save.sh | 计数赋值容忍 grep -c 零计数退出码 |
++| 改 | backend/tests/test_migration_single_head.py | script_location 显式绝对路径（CWD 无关） |
+
+diff --git a/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/proposal.md b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T02:00:40.987Z
++---
++# 提案书（Proposal）— 2026-10-12-ci-guard-diagnosability
++
++## 动机
++
++任务原话转写：动机：24h 风险审查两条已披露 fail-closed 边缘路径的可诊断性清偿（cc3c022b6 评审记录自披露、零生产风险但误导排障）：①deploy/scripts/build-and-save.sh:39 在 set -euo pipefail 下 grep -c 输出 0 时退出码 1，「零条 head」（versions 目录被清空等异常形态）会在打印引导信息之前静默 exit 1；②backend/tests/test_migration_single_head.py 用 alembic.ini 的相对 script_location=migrations（按进程 CWD 解析），从仓库根跑该测试直接 CommandError: Path doesn't exist 而非给出设计的多头提示（CI 已用 working-directory 钉住所以绿，本地从根跑必红）。
++成功标准：
++- build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
++- test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
++- 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
++2. test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
++3. 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
++
++## 成功标准（可验证）
++
++1. build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
++2. test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
++3. 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
+
+diff --git a/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/requirements.md b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ci-guard-diagnosability/requirements.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-ci-guard-diagnosability
++
++## 功能需求
++
++### FR-01: build-and-save.sh 零条 head 不再静默退出：grep -c 的非零退出被容忍（|| true），计数 0 走既有 [-ne 1] 分支打印 alembic heads 全文与解法引导后退出 1；多头路径行为逐字不变
++
++- `ALEMBIC_HEAD_COUNT` 赋值必须在 `set -e` 下容忍 grep -c 的「0 计数即退出码 1」：零条 head（versions 目录被清空等异常形态）必须进入既有错误分支——打印 ❌ 引导、alembic heads 全文与 merge 解法提示后以非零退出，禁止在打印引导前静默退出；≥2 条多头路径与单头路径行为逐字不变。
++
++#### 场景：零头给引导
++
++- Given alembic heads 输出不含 '(head)' 行
++- When 执行计数构造（set -euo pipefail 下）
++- Then 计数变量为 0 且构造不中断脚本，错误分支可达
++
++### FR-02: test_migration_single_head.py 对 CWD 不敏感：Config 显式 set_main_option script_location 为 backend_root/migrations 绝对路径，从仓库根与从 backend/ 两处跑均绿且多头时给出设计的中文提示（bash -n 校验脚本语法）
++
++- 测试必须显式覆盖 `script_location` 为基于 `Path(__file__)` 的绝对路径；从仓库根与从 backend/ 两个 CWD 运行该测试文件均通过；多头断言文案（merge 解法中文提示）保持逐字不变。
++
++#### 场景：双 CWD 均绿
++
++- When 分别以仓库根、backend/ 为 CWD 运行该测试
++- Then 均 passed（修复前从仓库根跑 CommandError: Path doesn't exist）
++
++### FR-03: 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
++
++- 本变更只必须运行上述验证，禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面验证
++
++- When 执行三项验证
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: deploy/scripts/build-and-save.sh（bash -n 语法 + grep 计数模拟：`set -euo pipefail` 下 `OUT="$(printf 'x' | grep -c '(head)' || true)"` 必须产出 0 不中断——模拟片段与结果留痕 tasks 勾选证据）
++FR-02: backend/tests/test_migration_single_head.py「test_alembic_single_head」（仓库根与 backend/ 双 CWD 运行）
++FR-03: backend/tests/test_migration_single_head.py（同上双 CWD + bash -n）

@@ -6,6 +6,8 @@
  * （lib/api.ts 注释自证），凭据复制（api-keys/mcp-tokens/runtimes）在该主部署
  * 形态下调用即抛 TypeError。降级路径：隐藏 textarea + `document.execCommand('copy')`
  * （legacy API，非安全上下文可用；已废弃但为该形态下唯一程序化写入通道）。
+ * 目标浏览器：桌面 Chrome/Edge/Firefox + iOS Safari（规避法后）；旧版 Safari/Android
+ * 低端 WebView 无承诺。
  *
  * 仓内其它复制点（daemon/copy-button 等）仍为旧实现，后续触碰时迁移本 helper。
  */
@@ -33,7 +35,20 @@ export async function copyTextToClipboard(text: string): Promise<void> {
   const selection = document.getSelection();
   const previousRange =
     selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-  textarea.select();
+  // iOS Safari：readonly 控件程序化 select() 不产生选区（clipboard.js/copy-to-clipboard
+  // 的已知规避形态）——iOS 形态走 contentEditable + Range 选区 + setSelectionRange。
+  const isIos = /ipad|iphone|ipod/i.test(navigator.userAgent);
+  if (isIos) {
+    textarea.contentEditable = "true";
+    textarea.removeAttribute("readonly");
+    const range = document.createRange();
+    range.selectNodeContents(textarea);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    textarea.setSelectionRange(0, text.length);
+  } else {
+    textarea.select();
+  }
   try {
     if (!document.execCommand("copy")) {
       throw new Error("浏览器拒绝了剪贴板写入（execCommand copy 返回 false）");

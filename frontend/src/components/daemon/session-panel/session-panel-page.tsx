@@ -138,7 +138,8 @@ import {
   ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
 } from "./page-helpers";
 import { listAgentLogs } from "@/lib/agent-logs";
-import { TakeoverBridgeNote } from "./takeover-bridge-note";
+import { TakeoverBridgeNote } from "./takeover-bridge-note";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
  *    轮次目录 catalogEntries 派生的局部纯工具（非导出，仅供下方 useMemo 消费；
@@ -4234,8 +4235,7 @@ export function SessionPanelPage({
                   aria-label="复制会话 ID"
                   title={`点击复制会话 ID：${session.id}`}
                   onClick={() => {
-                    void navigator.clipboard
-                      ?.writeText(session.id)
+                    void copyTextToClipboard(session.id)
                       .then(() => notify.success("已复制会话 ID"))
                       .catch(() => notify.error(new Error("复制失败")));
                   }}
@@ -4598,8 +4598,7 @@ export function SessionPanelPage({
                     aria-label="复制会话 ID"
                     title={`点击复制会话 ID：${session.id}`}
                     onClick={() => {
-                      void navigator.clipboard
-                        ?.writeText(session.id)
+                      void copyTextToClipboard(session.id)
                         .then(() => notify.success("已复制会话 ID"))
                         .catch(() => notify.error(new Error("复制失败")));
                     }}
@@ -4692,8 +4691,7 @@ export function SessionPanelPage({
                 aria-label="复制会话 ID"
                 title={`点击复制会话 ID：${session.id}`}
                 onClick={() => {
-                  void navigator.clipboard
-                    ?.writeText(session.id)
+                  void copyTextToClipboard(session.id)
                     .then(() => notify.success("已复制会话 ID"))
                     .catch(() => notify.error(new Error("复制失败")));
                 }}
