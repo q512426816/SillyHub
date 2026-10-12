@@ -1132,3 +1132,145 @@ class TestRunCloseTaskSweep:
         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
         assert rows["t-s"].status == "stopped"
         assert (rows["t-s"].message or "") == "用户停止"
+
+    @pytest.mark.asyncio
+    async def test_sweep_routes_rpc_by_daemon_instance_id(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """2026-10-12-task-sweep-rpc-route-key：RPC 路由键必须是 daemon_instance_id。
+
+        WS Hub 连接表按 daemon_instance_id 注册（ws_hub._connections），runtime
+        主键是注册时随机 uuid4 的独立 UUID 空间——此前直接拿 runtime_id 发
+        session_live_tasks 恒 is_connected 失败被当「离线」跳过，确认制不可达。
+        """
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+        from app.modules.daemon.model import DaemonInstance
+
+        user_id = await _admin_id(db_session)
+        instance = DaemonInstance(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            hostname="route-key-host",
+            server_url="http://route-key.example",
+            status="online",
+        )
+        db_session.add(instance)
+        await db_session.flush()
+        rt = await _create_runtime(db_session, user_id)
+        rt.daemon_instance_id = instance.id
+        db_session.add(rt)
+        await db_session.commit()
+        await db_session.refresh(rt)
+        assert rt.daemon_instance_id == instance.id
+
+        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
+        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-live"))
+
+        hub = _StubHub({(instance.id, str(ag_session.id)): ["t-live"]})
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+
+        # daemon 报活 → 零收口；且 RPC 按映射键问询，而非 runtime 原键。
+        assert swept == 0
+        assert hub.calls == [
+            (instance.id, "session_live_tasks", {"session_id": str(ag_session.id)})
+        ]
+
+    @pytest.mark.asyncio
+    async def test_sweep_skips_missing_runtime_row_without_rpc(
+        self, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """runtime 行缺失（悬空引用）→ 无路由键可解析，fail-open 跳过不发 RPC。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.agent.model import AgentSession as AgSessionModel
+        from app.modules.daemon.agent_task_store import (
+            sweep_confirmed_dead_tasks,
+            upsert_agent_task,
+        )
+
+        user_id = await _admin_id(db_session)
+        dangling = AgSessionModel(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            runtime_id=uuid.uuid4(),  # 不存在对应 daemon_runtimes 行
+            provider="claude",
+            status="active",
+        )
+        db_session.add(dangling)
+        await db_session.commit()
+        r = AgentRun(
+            id=uuid.uuid4(),
+            task_id=uuid.uuid4(),
+            agent_type="claude_code",
+            agent_session_id=dangling.id,
+            status="completed",
+        )
+        db_session.add(r)
+        await db_session.commit()
+        await upsert_agent_task(db_session, _event(dangling.id, r.id, "t-dangling"))
+
+        hub = _StubHub({})
+        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
+
+        assert swept == 0  # fail-open 保活，不误收
+        assert hub.calls == []  # 无路由键，不发 RPC
+        rows = {r.task_id: r for r in await _task_rows(db_session, dangling.id)}
+        assert rows["t-dangling"].status == "running"
+
+    @pytest.mark.asyncio
+    async def test_startup_orphan_task_sweep_deferred_on_own_session(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """启动清扫延迟任务：独立 session 执行（非调用方 lifespan session）。"""
+        from app.modules.agent import service as agent_service
+
+        captured: dict = {}
+
+        class _FakeCtx:
+            async def __aenter__(self) -> object:
+                captured["marker"] = object()
+                return captured["marker"]
+
+            async def __aexit__(self, *args: object) -> bool:
+                return False
+
+        async def _fake_sweep(session, *, hub, run_id=None, rpc_timeout=5.0):
+            captured["session"] = session
+            return 3
+
+        monkeypatch.setattr(agent_service, "_STARTUP_TASK_SWEEP_DELAY_SECONDS", 0)
+        monkeypatch.setattr(agent_service, "get_session_factory", lambda: _FakeCtx)
+        monkeypatch.setattr(
+            "app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks",
+            _fake_sweep,
+        )
+
+        await agent_service._startup_orphan_task_sweep()
+
+        assert captured["session"] is captured["marker"]  # factory 新开的独立 session
+        assert captured["session"] is not db_session
+
+    @pytest.mark.asyncio
+    async def test_startup_orphan_task_sweep_swallows_errors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """清扫异常不冒泡——启动兜底失败只记日志，不阻断 lifespan。"""
+        from app.modules.agent import service as agent_service
+
+        class _FakeCtx:
+            async def __aenter__(self) -> None:
+                return None
+
+            async def __aexit__(self, *args: object) -> bool:
+                return False
+
+        async def _boom(session, *, hub, run_id=None, rpc_timeout=5.0):
+            raise RuntimeError("sweep exploded")
+
+        monkeypatch.setattr(agent_service, "_STARTUP_TASK_SWEEP_DELAY_SECONDS", 0)
+        monkeypatch.setattr(agent_service, "get_session_factory", lambda: _FakeCtx)
+        monkeypatch.setattr("app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks", _boom)
+
+        await agent_service._startup_orphan_task_sweep()  # 不抛即过

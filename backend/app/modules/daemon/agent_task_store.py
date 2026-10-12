@@ -87,6 +87,10 @@ async def sweep_confirmed_dead_tasks(
     """
     from app.modules.agent.model import AgentSession
 
+    # 2026-10-12-task-sweep-rpc-route-key：函数级 import（对齐上款）——helper
+    # 挂在 session.service 包下，顶层引会拖入整包且有无谓循环风险。
+    from app.modules.daemon.session.service.helpers import _resolve_daemon_id_for_runtime
+
     cand = (
         await session.execute(
             select(
@@ -117,10 +121,23 @@ async def sweep_confirmed_dead_tasks(
         pending.setdefault(row.runtime_id, {}).setdefault(row.session_id, {})[row.task_id] = row.id
 
     for runtime_id, sessions in pending.items():
+        # 2026-10-12-task-sweep-rpc-route-key：WS Hub 连接表按 daemon_instance_id
+        # 注册（gateway 握手 daemon_local_id），AgentSession.runtime_id 是
+        # daemon_runtimes 主键——独立 UUID 空间，直接拿它发 RPC 恒 is_connected
+        # 失败被当「离线」，确认制不可达。先经既有帮手映射路由键（D-007 legacy
+        # NULL 回落 runtime_id；行缺失无键可解析 → fail-open 跳过，同离线语义）。
+        daemon_id = await _resolve_daemon_id_for_runtime(session, runtime_id)
+        if daemon_id is None:
+            _log.warning(
+                "task_sweep_runtime_row_missing",
+                runtime_id=str(runtime_id),
+                sessions=len(sessions),
+            )
+            continue
         for sess_id, tasks in sessions.items():
             try:
                 res = await hub.send_rpc(
-                    runtime_id,
+                    daemon_id,
                     "session_live_tasks",
                     {"session_id": str(sess_id)},
                     timeout=rpc_timeout,
@@ -131,6 +148,7 @@ async def sweep_confirmed_dead_tasks(
                 _log.warning(
                     "task_sweep_daemon_confirm_failed",
                     runtime_id=str(runtime_id),
+                    daemon_id=str(daemon_id),
                     session_id=str(sess_id),
                     error=str(exc),
                 )

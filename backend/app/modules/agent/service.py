@@ -1445,19 +1445,12 @@ class AgentService:
         # 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-daemon-truth：
         # 启动确认清扫——run 已终态但 agent_session_task 行仍 running 的存量
         # （历史无清扫 / 终态事件丢失），经 daemon 注册表确认（session_live_tasks
-        # RPC；会话终态直接收）才收口；失败仅日志不阻塞启动。
-        try:
-            from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-            swept = await sweep_confirmed_dead_tasks(self._session, hub=get_daemon_ws_hub())
-            if swept:
-                log.info("startup_orphan_task_sweep", swept_tasks=swept)
-        except Exception as exc:
-            # sweep 失败时回滚本事务——session 不留 aborted 态，免得同 session 的
-            # 后续启动逻辑（gate reconcile 等）撞 PendingRollbackError 被连带跳过。
-            await self._session.rollback()
-            log.warning("startup_orphan_task_sweep_failed", error=str(exc))
+        # RPC；会话终态直接收）才收口。
+        # 2026-10-12-task-sweep-rpc-route-key：改延迟后台任务——lifespan 时点 hub
+        # 连接表必空（uvicorn 未开始 accept），同步 await 时确认分支恒伪离线落空；
+        # 延迟给 daemon WS 重连留窗口后再确认。任务自开独立 session、强引用防 GC
+        # + done 回收（对齐 _recheck_stale_runs_loop 模式），异常仅日志不阻断启动。
+        _schedule_startup_orphan_task_sweep()
         return cleaned
 
     # ------------------------------------------------------------------
@@ -2743,6 +2736,46 @@ async def _recheck_stale_runs_loop(deferred_run_ids: list[uuid.UUID]) -> None:
                 log.error("stale_run_recheck_gave_up", remaining=len(tracked))
                 return
     log.info("stale_run_recheck_completed")
+
+
+# 2026-10-12-task-sweep-rpc-route-key：启动确认清扫的延迟——lifespan 时点 hub
+# 连接表必空（uvicorn 未开始 accept，单进程部署无 --workers），同步执行时
+# session_live_tasks 确认分支恒伪离线落空；等 daemon WS 重连注册后再问注册表。
+# 实证 daemon 断线重连秒级完成，60s 为保守值。
+_STARTUP_TASK_SWEEP_DELAY_SECONDS = 60.0
+
+
+async def _startup_orphan_task_sweep() -> None:
+    """启动确认清扫（延迟后台任务）——见 cleanup_stale_runs 调用点注释。
+
+    自开独立 session（不与 lifespan bootstrap session 共享事务）；全程
+    try/except 记日志不外溢（对齐同启动兜底的「异常不阻断启动」口径），
+    进程在延迟窗内退出则任务随事件循环取消，孤儿留待下次启动（fail-open）。
+    """
+    try:
+        await asyncio.sleep(_STARTUP_TASK_SWEEP_DELAY_SECONDS)
+        from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        async with get_session_factory()() as session:
+            swept = await sweep_confirmed_dead_tasks(session, hub=get_daemon_ws_hub())
+            if swept:
+                log.info("startup_orphan_task_sweep", swept_tasks=swept)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("startup_orphan_task_sweep_failed")
+
+
+def _schedule_startup_orphan_task_sweep() -> None:
+    """创建启动清扫后台任务——强引用防 GC + done 回调收异常（防静默死亡）。"""
+    task = asyncio.create_task(_startup_orphan_task_sweep())
+    AgentService._background_tasks.add(task)
+    task.add_done_callback(AgentService._on_background_task_done)
+    log.info(
+        "startup_orphan_task_sweep_scheduled",
+        delay_seconds=_STARTUP_TASK_SWEEP_DELAY_SECONDS,
+    )
 
 
 def redact_agent_output(text: str) -> str:
