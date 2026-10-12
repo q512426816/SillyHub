@@ -150,10 +150,10 @@ export default function AuditPage({ params }: Props) {
         title={
           <span>
             <Link
-              href={`/workspaces/${workspaceId}/components`}
+              href={`/workspaces/${workspaceId}`}
               className="text-[11px] font-normal text-muted-foreground hover:underline"
             >
-              ← 组件列表
+              ← 工作区
             </Link>
             <span className="mt-0.5 block">审计日志</span>
           </span>

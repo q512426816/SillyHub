@@ -184,7 +184,7 @@ export default function ApprovalsPage({ params }: Props) {
         title={
           <span>
             <Link
-              href={`/workspaces/${workspaceId}/components`}
+              href={`/workspaces/${workspaceId}`}
               className="text-[11px] font-normal text-muted-foreground hover:underline"
             >
               &larr; 工作区
