@@ -7,6 +7,8 @@ substeps:
   review: done
   probes: done
   distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -27,7 +29,7 @@ input: >-
   - 仅跑本改动相关测试（规则 0）：pytest 该测试文件（backend/ 与仓库根两处 CWD 各跑一次）+ bash -n 脚本语法校验 + grep 计数模拟
 autopilot: true
 baseline_commit: a92e13a378c07d3fd7b09be6abd67ae1cff7ea00
-updatedAt: '2026-10-12T02:04:04.442Z'
+updatedAt: '2026-10-12T02:04:06.422Z'
 baseline_sha256: 65b5aec8dd77dea143974f39d6a7e9ce854fddd16281eac894d6f4a754bb5418
 gate_summary: >-
   test: passed ← module[]+deps(py1)+fr(1)（5.4s）

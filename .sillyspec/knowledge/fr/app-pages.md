@@ -384,3 +384,98 @@
   confirmed_at: null
   source_change: 2026-10-12-clipboard-fallback
   status: active
+
+## FR-app-pages-027 frontend/src 内除 lib/clipboard.ts 与测试桩外零 navigator.clipboard 直调残留（grep 复核验收）；全部调用点改走 copyTextToClipboard
+变更：2026-10-12-clipboard-helper-full-migration
+状态：active
+摘要：残留清零
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-helper-full-migration/requirements.md#FR-01
+最近确认：8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/copy-button.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-helper-full-migration
+  status: active
+
+## FR-app-pages-028 三类特殊形态正确迁移：①阻塞守卫「if (!navigator.clipboard) return」移除（守卫会挡住降级路径，非安全上下文从静默 no-op 升级为实际复制）；②copy-button 的显式抛错分支由 helper 失败抛错承接（done/failed 状态机语义不变）；③fire-and-forget 链（void ...?.writeText().then().catch()）改为 void copyTextToClipboard().then().catch()，成功/失败回调语义逐字不变
+变更：2026-10-12-clipboard-helper-full-migration
+状态：active
+摘要：状态机不变
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-helper-full-migration/requirements.md#FR-02
+最近确认：8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/copy-button.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-helper-full-migration
+  status: active
+
+## FR-app-pages-029 触碰组件既有测试全绿（stub clipboard 的用例证明委托无损），tsc --noEmit 零错、触碰文件 eslint 零错
+变更：2026-10-12-clipboard-helper-full-migration
+状态：active
+摘要：回归绿
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-helper-full-migration/requirements.md#FR-03
+最近确认：8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/copy-button.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-helper-full-migration
+  status: active
+
+## FR-app-pages-030 仅跑本改动相关测试（规则 0）：触碰组件的测试文件 + tsc/eslint 门
+变更：2026-10-12-clipboard-helper-full-migration
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-helper-full-migration/requirements.md#FR-04
+最近确认：8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/copy-button.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-helper-full-migration
+  status: active
+
+## FR-app-pages-031 回归复审驱动加固（F1/F4/F6/F9/F10）：iOS Safari 降级路径、runtimes 裸 await 失败可见性、「明文不进 DOM」过期注释同步、page 测试桩泄漏、选区断言强度
+变更：2026-10-12-clipboard-helper-full-migration
+状态：active
+摘要：iOS 形态；裸 await 失败可见
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-helper-full-migration/requirements.md#FR-05
+最近确认：8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-05
+  tests: frontend/src/lib/__tests__/clipboard.test.ts「降级失败（execCommand 返回 false）→ 抛错且节点仍被清理（finally 保证）」 | frontend/src/lib/__tests__/clipboard.test.ts「非安全上下文（clipboard 缺失）：textarea + execCommand 降级，节点清理、选区恢复」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-helper-full-migration
+  status: active
