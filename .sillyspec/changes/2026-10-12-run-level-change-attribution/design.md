@@ -6,6 +6,8 @@ created_at: 2026-10-12T06:43:13.857Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 问题：一个交互会话先后执行多个变更时，轮级（AgentRun）不带变更锚（inject.py 创建 run 时 change_id 恒 None），聚合口径（usage_service「派发锚点 ∪ 会话锚点」）把绑定会话的全部 run 完整摊给每个绑定变更——列表里每个变更显示同一组会话总和。
 
 方案：参考本地 CLI 水位差分（2026-10-03-local-usage-segment-attribution）的「分段归属」思想，但不在平台侧照抄水位表——平台已有更细的天然单位「轮」（每轮自带 token 四维/按模型明细/耗时），等价做法是轮级打锚：
@@ -19,19 +21,34 @@ created_at: 2026-10-12T06:43:13.857Z
 
 ## 接口契约
 
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
 - `ChangeUsageQueryService` 相关聚合（usage_service.py `_change_run_ids` / `_change_summary_anchor`）：会话链接分支新增 `AgentRun.change_id.is_(None)` 谓词；`ChangeUsageRead`/`UsageSummaryRead` DTO 不变，端点签名不变，**无 API schema 变化（不需 gen:types）**。
 - `bind_session_to_change(db, workspace_id, change_key, session_id) -> uuid.UUID | None`：返回类型从 None 改为变更 id（default 守卫跳过/异常时 None）；幂等 upsert、savepoint 不 commit、best-effort 契约不变。既有调用方（platform_sync W2.2）不消费返回值，行为不变。
-- `AgentSession` 新列 `current_change_id: uuid.UUID | None`（FK `changes.id` ondelete SET NULL，nullable）+ alembic 迁移（down_revision=c515ffd62859）。
+- `AgentSession` 新列 `current_change_id: uuid.UUID | None`（FK `changes.id` ondelete SET NULL，nullable）+ alembic 迁移 20261012123000（down_revision=c515ffd62859）。
 - inject 建轮（`_inject_into_session`）：AgentRun 构造新增 `change_id=session.current_change_id`；create_session 首 run 不动（change_id 由既有派发参数决定）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
-1. 乱序/迟到到达：同一 run 的 submit 可能多次到达（流式/重试），命令按消息序收集、上下文取最后一条，重放幂等（最后一条不变则结果不变）。旧 run 的迟到重放理论上可能把上下文拉回旧值（如 run N 重放覆盖 run N+2 已写入的 Y）——影响限于统计归属 ≤1 轮偏差，且后续任意新命令自然纠正，接受不设防（与绑定通道既有 best-effort 口径一致）。
-2. 并发写：同会话轮次有 turn 冲突守卫（单活跃轮），submit 串行；上下文列写在 submit 的既有事务内（与 link 行同 savepoint 事务边界），跨会话互不冲突。一批多条绑定命令按循环序覆盖，最后一条生效（顺序=消息序，确定性）。
-3. 切换/生命周期：会话 reopen 复用同一行，上下文延续（重开后继续同一对话语境，期望行为）；变更被删 → FK SET NULL 清上下文，新轮回落无锚（经链接认领的旧口径）；执行中会话切换目标由「下一条绑定命令」覆盖上下文，无中间态暴露。inject 打锚发生在建轮事务内，失败随事务回滚不落半锚。
-4. 作用域：bind 按（session.workspace_id, change_key）解析变更行，上下文存的是变更行全局 id（FK），不存 key 文本——跨工作区不串台；quicklog（快速修复）聚合不动，本地 CLI 水位差分通道不动（其会话级防双计谓词与本变更无交集）。
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
+
+成立边界内成立：同一 run 的 submit 可能多次到达（流式/重试），命令按消息序收集、上下文取最后一条，重放幂等（最后一条不变则结果不变）。旧 run 的迟到重放理论上可能把上下文拉回旧值（如 run N 重放覆盖 run N+2 已写入的 Y）——影响限于统计归属 ≤1 轮偏差，且后续任意新命令自然纠正，接受不设防（与绑定通道既有 best-effort 口径一致）。
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+同会话轮次有 turn 冲突守卫（单活跃轮），submit 串行；上下文列写在 submit 的既有事务内（与 link 行同 savepoint 事务边界），跨会话互不冲突。一批多条绑定命令按循环序覆盖，最后一条生效（顺序=消息序，确定性）。
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+安全：会话 reopen 复用同一行，上下文延续（重开后继续同一对话语境，期望行为）；变更被删 → FK SET NULL 清上下文，新轮回落无锚（经链接认领的旧口径）；执行中会话切换目标由「下一条绑定命令」覆盖上下文，无中间态暴露。inject 打锚发生在建轮事务内，失败随事务回滚不落半锚。
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+不会：bind 按（session.workspace_id, change_key）解析变更行，上下文存的是变更行全局 id（FK），不存 key 文本——跨工作区不串台；quicklog（快速修复）聚合不动，本地 CLI 水位差分通道不动（其会话级防双计谓词与本变更无交集）。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：口径双轨期混乱——存量会话（如用户 10-10~10-12 那条 665 轮会话）轮上无锚，仍按会话链接全量摊派，与新会话的拆分口径并存。缓解：FR-03 显式冻结存量行为（防回归用例钉死）；仓库规则 11 允许重置开发数据，用户可选择重跑。
 
@@ -46,6 +63,7 @@ created_at: 2026-10-12T06:43:13.857Z
 |---|---|---|
 | 修改 | backend/app/modules/agent/model.py | AgentSession 新列 current_change_id（FK changes.id SET NULL） |
 | 新增 | backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py | alembic 迁移（down_revision=c515ffd62859） |
+| 修改 | backend/tests/test_align_platform_change_events_migration.py | 迁移链尾锚随新 head 前移（断言面闸门配对钉子） |
 | 修改 | backend/app/modules/change/binding.py | bind_session_to_change 返回变更 id（None 兜底） |
 | 修改 | backend/app/modules/daemon/run_sync/service/submit_commit.py | 绑定循环后回写 session.current_change_id（最后一条生效） |
 | 修改 | backend/app/modules/daemon/session/service/inject.py | 建轮 change_id=session.current_change_id |
