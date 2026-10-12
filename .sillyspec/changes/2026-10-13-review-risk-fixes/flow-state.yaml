@@ -1,6 +1,7 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,7 +24,7 @@ input: >-
   两文件）通过；不跑全量
 autopilot: false
 baseline_commit: 49e311b5a7b9c1f825b53697ca74b577ed4bafdf
-updatedAt: '2026-10-12T23:11:26.032Z'
+updatedAt: '2026-10-12T23:19:56.627Z'
 baseline_sha256: 8d119d37fe8182947e6f5e20f20583312cf4fa03c00e69c3f22cd51f627415c4
 spec_approved: true
 spec_approved_at: '2026-10-12T23:11:26.031Z'
