@@ -1,0 +1,106 @@
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index a18c5d00c..ab90dc8b4 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -16,3 +16,4 @@ created_at: 2026-08-29 22:56:30
+ 
+ ## 2026-10-07 — 归档留档缺件回退（thin 2026-10-07-assets-patch-scope-audit-fallback）
+ - assets.py 读侧回退补镜像缺口（docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md）：`_read_patch_meta` 缺 change-patch.json 时回退读 scope-audit.json（totals/patchStatus/savedAt 同构直取，file_list 从 rows[].path 投影）——厚流程归档「归档留档」patch 块不再整块缺失；`_read_patch_file_diff` 缺 change.patch 回退切 scope-audit.patch（note 指名实际留档）。两份并存 change-patch.json 优先，thin 形态零变化；DTO/前端零改动。测试：test_assets 28 绿（新增 4：快照回退投影/切片回退/双缺 fail-open/并存优先级）。
++- 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index f35ef989b..97231504e 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -27,3 +27,4 @@
+ - ql-20260904-005-a41b | CLI 鉴权自动重投防副作用重复（24h 审计 M1）——_maybe_autoretry_auth_transient_turn 补 tool_call 活动守卫：401 发生在 turn 中途（本 run 已有 tool_call 日志）时跳过重投（重放会再执行已落地的工具副作用）；仅无工具活动的干净轮（首 LLM 调用即 401）保持自动重投自愈。新增 test_tool_activity_skips_enqueue 回归（6 用例绿 ruff/mypy 0）
+ - ql-20260909-008-d78c | 会话列表首条 user_input 摘要查询三处性能优化（阿里云 2026-09-09 slow.query 实测 3.1s）：daemon/router/session_crud.py、change/router.py _fetch_session_titles、agent/router.py 三处同款窗口函数（ROW_NUMBER 分区取每会话首条 user_input 做标题摘要）原样 SELECT content_redacted 全文（线上单行均值 33KB/上限 50KB）回 Python 只取前 30 字——改 SQL 内 substr(content_redacted,1,64) 截断（PG/SQLite 双方言语符语义，64>30 保证派生零回归），免 TOAST 全文解压与传输；session_crud 一处额外只对 title 为空的会话查询（有 title 会话跳过，tool_report 会话带自动标题，下方 get(r.id) or 派生不变）。纯性能优化零行为变化；三模块 3887 用例绿 + ruff/format/mypy 净。
+ - change 2026-09-25-change-precipitated-assets | 变更沉淀资产聚合端点：NEW change/assets.py（ChangeAssetsQueryService——按变更名解析 spec 树镜像：knowledge/fr/*.md 与 knowledge/decisions/*.md 节头分条+「变更：」行归属过滤，归档目录 test-trace.json/change-patch.json/delta.md 容错读，asyncio.to_thread 读盘，逐项 fail-open）+ GET /api/workspaces/{ws}/changes/{cid}/assets（CHANGE_READ，404 对齐 usage 端点口径）+ schema 六 DTO（ChangeAssetsRead 及五个子模型）；在途变更（未归档）跳过目录件读取。test_assets.py 5 用例（纯函数归属过滤/金样本聚合含 patch 缺席 None/在途跳过/损坏 JSON fail-open/跨工作区 404）。
++- 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index c2f700d53..bdb63f2c2 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -268,6 +268,21 @@ class Settings(BaseSettings):
+         "opportunistically prunes timestamped backup dirs older than N days.",
+     )
+ 
++    @field_validator("spec_backup_retention_days")
++    @classmethod
++    def _validate_spec_backup_retention_days(cls, raw: object) -> object:
++        """fail-fast：只允许 None 或正整数（2026-10-12-spec-backup-retention-validation）。
++
++        0/负数会令 ``_prune_spec_backups`` 的 cutoff 晚于全部时间戳目录——软删触发
++        修剪即全删备份，恰为长期保留决策要防止的后果，构造期拒绝（P3-1 清偿）。
++        """
++        if isinstance(raw, int) and raw < 1:
++            raise ValueError(
++                "spec_backup_retention_days must be None (keep forever) or a "
++                f"positive number of days, got {raw!r}"
++            )
++        return raw
++
+     # ── CLI progress naive 时间戳解释时区（ql-20260822-006）─────────────────
+     # CLI 写的是宿主机墙钟（无时区标记），后端进程时区（Docker 容器 UTC）≠ CLI
+     # 宿主机时区，解释时区必须显式配置（详见 resolve_cli_tzinfo docstring）。
+diff --git a/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py b/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
+index 7dd9f14ac..58b59b708 100644
+--- a/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
++++ b/backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py
+@@ -556,10 +556,20 @@ class TestPruneSpecBackups:
+         assert len(scans) == 1, f"冷却窗口内不应重复扫描，实扫 {len(scans)} 次"
+         assert (tmp_path / newer_old_ts).exists(), "冷却窗口内保留是预期（机会式修剪）"
+ 
+-    def test_missing_backup_root_is_noop(self, tmp_path) -> None:
+-        """备份区目录不存在（首次软删前）→ FileNotFound 容错静默返回，不抛。"""
++    def test_missing_backup_root_is_noop(self, tmp_path, monkeypatch) -> None:
++        """备份区目录不存在（首次软删前）→ FileNotFound 容错静默返回，不抛。
++
++        双形态：默认 None（早退在前）与注入 30（走进 scandir 触发 FileNotFoundError
++        分支）各跑一次——2026-10-12-spec-backup-keep-forever 评审 P3-4：默认早退
++        让容错分支失去直接锁定，注入 30 恢复覆盖。
++        """
++        _reset_prune_throttle()
++        missing = tmp_path / "does-not-exist"
++        SpecWorkspaceService._prune_spec_backups(missing)  # 默认 None：不抛即通过
++
++        self._patch_retention(monkeypatch, 30)
+         _reset_prune_throttle()
+-        SpecWorkspaceService._prune_spec_backups(tmp_path / "does-not-exist")  # 不抛即通过
++        SpecWorkspaceService._prune_spec_backups(missing)  # 启用修剪：走容错分支，不抛即通过
+ 
+ 
+ # Suppress unused-import warning for pytest (fixture discovery).
+diff --git a/backend/tests/test_config.py b/backend/tests/test_config.py
+index f72b5ecb3..b1f17b2ac 100644
+--- a/backend/tests/test_config.py
++++ b/backend/tests/test_config.py
+@@ -45,3 +45,29 @@ def test_secret_key_min_length(monkeypatch: pytest.MonkeyPatch) -> None:
+     settings_cls = _settings_cls()
+     with pytest.raises(ValueError):
+         settings_cls()
++
++
++# ── spec_backup_retention_days 值域校验（2026-10-12-spec-backup-retention-validation）──
++
++
++@pytest.mark.parametrize("bad", ["0", "-3"])
++def test_spec_backup_retention_days_rejects_non_positive(
++    monkeypatch: pytest.MonkeyPatch, bad: str
++) -> None:
++    """0/负数构造期 fail-fast（P3-1）——误配进不了运行期，不可能全删备份。"""
++    monkeypatch.setenv("SPEC_BACKUP_RETENTION_DAYS", bad)
++    settings_cls = _settings_cls()
++    with pytest.raises(ValueError, match="spec_backup_retention_days"):
++        settings_cls()
++
++
++def test_spec_backup_retention_days_accepts_none_and_positive(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """合法值域：缺省 None（长期保留）与正整数（逃生门）原样保留，不抛。"""
++    settings_cls = _settings_cls()
++    monkeypatch.delenv("SPEC_BACKUP_RETENTION_DAYS", raising=False)
++    assert settings_cls().spec_backup_retention_days is None
++
++    monkeypatch.setenv("SPEC_BACKUP_RETENTION_DAYS", "90")
++    assert settings_cls().spec_backup_retention_days == 90

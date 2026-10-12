@@ -1302,3 +1302,67 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-12-backfill-run-change-context
   status: active
+
+## FR-auto-backend-196 spec_backup_retention_days 配 0 或负数时启动期（Settings 构造）fail-fast 拒绝（ValidationError）
+变更：2026-10-12-spec-backup-retention-validation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-retention-validation/requirements.md#FR-01
+最近确认：da47981a0f5360823b97253a1b0990b0ee91e462
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-01
+  tests: backend/tests/test_config.py「test_spec_backup_retention_days_rejects_non_positive」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-retention-validation
+  status: active
+
+## FR-auto-backend-197 None 与正整数仍合法，既有测试零回归
+变更：2026-10-12-spec-backup-retention-validation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-retention-validation/requirements.md#FR-02
+最近确认：da47981a0f5360823b97253a1b0990b0ee91e462
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-02
+  tests: backend/tests/test_config.py「test_spec_backup_retention_days_accepts_none_and_positive」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-retention-validation
+  status: active
+
+## FR-auto-backend-198 新增用例：启用修剪（注入 30）时备份区根不存在 → 静默容错不抛（FileNotFoundError 分支恢复锁定）
+变更：2026-10-12-spec-backup-retention-validation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-retention-validation/requirements.md#FR-03
+最近确认：da47981a0f5360823b97253a1b0990b0ee91e462
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-03
+  tests: backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_missing_backup_root_is_noop」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-retention-validation
+  status: active
+
+## FR-auto-backend-199 相关测试全绿，ruff/mypy 过
+变更：2026-10-12-spec-backup-retention-validation
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-retention-validation/requirements.md#FR-04
+最近确认：da47981a0f5360823b97253a1b0990b0ee91e462

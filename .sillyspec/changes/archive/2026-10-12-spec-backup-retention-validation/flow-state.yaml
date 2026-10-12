@@ -1,0 +1,39 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：上变更评审 P3-1——spec_backup_retention_days 无正数校验，env 误配 0/负数会把 cutoff 推到当前时刻之后，软删触发修剪时全删时间戳备份目录（恰为用户明令禁止的后果）；P3-4——默认
+  None 早退后 FileNotFoundError 容错分支失去测试锁定。
+
+  成功标准：
+
+  - spec_backup_retention_days 配 0 或负数时启动期（Settings 构造）fail-fast 拒绝（ValidationError）
+
+  - None 与正整数仍合法，既有测试零回归
+
+  - 新增用例：启用修剪（注入 30）时备份区根不存在 → 静默容错不抛（FileNotFoundError 分支恢复锁定）
+
+  - 相关测试全绿，ruff/mypy 过
+autopilot: true
+baseline_commit: 2bbb2f7b5807dae348f720052bd552c19aa499e6
+updatedAt: '2026-10-12T08:23:14.762Z'
+baseline_sha256: 255bb79d4707a337c9618c45211bcfdf87126bc0a19facbdacfd378e49b11625
+gate_summary: >-
+  test: passed ← module[]+deps(py30)+fr(2)（189.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012081549\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（46.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012081549\test-result.json｜门文件
+  6 个
+

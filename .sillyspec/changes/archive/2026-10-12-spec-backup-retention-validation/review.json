@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-backup-retention-validation",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "310a051650e5631cbcc73d2420f5bcdd7310f2c7",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结 change.patch 混入他变更（2026-10-12-backfill-run-change-context）的 changelog hunk",
+      "evidence": "冻结件含 2 个 changelog 追加 hunk（截断行「2026-10-12-backfill-run-change-context | 动机：…存量会话」），该内容实由归档提交 310a05165 落库；本变更提交 f48221530 仅改 3 个代码文件且工作区与 HEAD 零差异——冻结面把他人变更的文档改动一并冻入，易被误读为 5 文件交付。代码事实已按工作区实态与 git log/show 核对，不受影响。",
+      "location": ".sillyspec/changes/2026-10-12-spec-backup-retention-validation/change.patch:9,18"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T08:22:34Z"
+}

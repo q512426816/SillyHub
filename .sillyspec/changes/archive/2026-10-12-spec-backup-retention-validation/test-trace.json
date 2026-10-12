@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-backup-retention-validation",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/test_config.py「test_spec_backup_retention_days_rejects_non_positive」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-retention-validation"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/test_config.py「test_spec_backup_retention_days_accepts_none_and_positive」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-retention-validation"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-spec-backup-retention-validation:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_missing_backup_root_is_noop」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-retention-validation"
+    }
+  ]
+}
