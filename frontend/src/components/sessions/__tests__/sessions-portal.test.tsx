@@ -995,6 +995,88 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled();
   });
 
+  // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口共用
+  // 同一过滤分支（三入口左侧列表同为工作区树），it.each 逐一锁契约。
+  it.each([
+    ["workspace", WORKSPACE_SCOPE],
+    ["change", CHANGE_SCOPE],
+    ["quicklog", QUICKLOG_SCOPE],
+  ])(
+    "2026-10-12-ws-scoped-recent-session %s 入口最近会话属其他工作区时按本工作区取",
+    async (_kind: string, scope: SessionListScope) => {
+      // 全局最近是 B 工作区会话（last_active_at 更新），本工作区（ws-1）会话较旧。
+      mocks.machinesHook.mockReturnValue({
+        items: [],
+        sharedToMe: [],
+        machineCandidates: [],
+        total: 0,
+        sessions: [
+          makeSession({
+            id: "s-ws-b",
+            title: "B 工作区的最新会话",
+            workspace_id: "ws-b",
+            last_active_at: "2026-08-15T10:00:00Z",
+          }),
+          makeSession({
+            id: "s-ws-1",
+            title: "本工作区的会话",
+            workspace_id: "ws-1",
+            last_active_at: "2026-08-15T09:00:00Z",
+          }),
+        ],
+        isLoading: false,
+        isFetching: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      renderPortal(scope);
+
+      // 按钮取本工作区会话（全局取最近则显示 B 工作区标题，断言即失败）。
+      const resumeBtn = await screen.findByRole("button", {
+        name: /继续最近会话/,
+      });
+      expect(resumeBtn).toHaveTextContent("本工作区的会话");
+      expect(resumeBtn).not.toHaveTextContent("B 工作区的最新会话");
+      // 直达选中：真会话面板挂载的是本工作区会话。
+      fireEvent.click(resumeBtn);
+      await waitFor(() => {
+        expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-ws-1");
+      });
+    },
+  );
+
+  it("2026-10-12-ws-scoped-recent-session scope 入口本工作区无会话时不渲染继续最近会话入口", async () => {
+    // 全局仅有 B 工作区会话——修复前空门户会显示并继续 B 的会话（串档 bug
+    // 原样），修复后过滤为空 → recentSession=null → 入口不渲染（null 契约）。
+    mocks.machinesHook.mockReturnValue({
+      items: [],
+      sharedToMe: [],
+      machineCandidates: [],
+      total: 0,
+      sessions: [
+        makeSession({
+          id: "s-ws-b",
+          title: "B 工作区的最新会话",
+          workspace_id: "ws-b",
+        }),
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPortal(WORKSPACE_SCOPE);
+
+    expect(screen.getByLabelText("门户空态")).toBeTruthy();
+    // 等 machinesHook 消费到位（recentSession 派生源）再断言入口不存在。
+    await waitFor(() => expect(mocks.machinesHook).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("button", { name: /继续最近会话/ }),
+    ).toBeNull();
+  });
+
   it("workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」，空门户态 + defaultExpandedWorkspaceId 预展开传参（FR-06）", async () => {
     renderPortal(WORKSPACE_SCOPE);
 

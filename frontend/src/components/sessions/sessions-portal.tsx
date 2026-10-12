@@ -364,16 +364,28 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
 
   // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
   // created_at；无会话返回 null 不渲染入口。
+  // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口
+  // （workspace/change/quicklog，列表同为工作区树）先按 workspace_id 过滤——
+  // 原全局取最近会 A 工作区页显示并继续 B 工作区会话（selectedWorkspaceId
+  // 快照与 📁 文件树跟随串档）；本工作区未进全局前 100 → 过滤后空 → 沿用
+  // null 不渲染契约（少显示而非错显示）。全局门户无 scope 不过滤；runtime
+  // scope 仅悬浮窗使用，不经空门户此入口。
   const recentSession = useMemo(() => {
-    if (sessions.length === 0) return null;
+    const scopedSessions =
+      scope?.kind === "workspace" ||
+      scope?.kind === "change" ||
+      scope?.kind === "quicklog"
+        ? sessions.filter((s) => s.workspace_id === scope.workspaceId)
+        : sessions;
+    if (scopedSessions.length === 0) return null;
     return (
-      [...sessions].sort(
+      [...scopedSessions].sort(
         (a, b) =>
           parseTs(b.last_active_at ?? b.created_at) -
           parseTs(a.last_active_at ?? a.created_at),
       )[0] ?? null
     );
-  }, [sessions]);
+  }, [sessions, scope]);
 
   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
   // quick（ql-20260916-006）：裸 listProviders() 调用统一 basic 键——与
