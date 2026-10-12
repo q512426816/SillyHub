@@ -622,6 +622,20 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
     expect(buildErrorLogItem(42 as any)).toBeNull();
   });
 
+  it("buildErrorLogItem 无模型错误键的系统字典 → null（回落 buildSystemFailureItem）", () => {
+    // 2026-10-12-stale-run-askwait-fix：启动清理落库的 {reason, finished_by}
+    // 形状不含任何模型错误键 → 返回 null，让调用方 ?? 链走系统失败映射；
+    // 此前被解析成 type=unknown / message=运行失败，挡住 SERVICE_RESTART_INTERRUPTED
+    // 中文卡（生产实证会话 47e2ff1a）。
+    expect(
+      buildErrorLogItem({
+        reason: "no daemon activity within grace window (startup cleanup / deferred recheck)",
+        finished_by: "stale_run_cleanup",
+      }),
+    ).toBeNull();
+    expect(buildErrorLogItem({})).toBeNull();
+  });
+
   // ---- isAssistantApiErrorText：错误文本识别 ----
   it("isAssistantApiErrorText 识别 daemon 模型失败文本（API Error / Request rejected）", () => {
     // design §1 真实文本：[ASSISTANT] API Error: Request rejected (429) · [1310]...
@@ -702,6 +716,33 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
     expect(errItem?.errorLogItem?.type).toBe("unknown");
     expect(errItem?.errorLogItem?.message).toBe("运行失败（无详情）");
     expect(errItem?.errorLogItem?.retryable).toBe(false);
+  });
+
+  // ---- 2026-10-12-stale-run-askwait-fix：系统失败映射兜底链 ----
+  it("normalizeLogs errorCode + failureSummary → 末尾追加系统失败项（中文 message）", () => {
+    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+    const result = normalizeLogs(logs, {
+      errorCode: "SERVICE_RESTART_INTERRUPTED",
+      failureSummary: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
+    });
+    const errItem = result[result.length - 1];
+    expect(errItem?.semanticCategory).toBe("error");
+    expect(errItem?.hidden).toBe(false);
+    expect(errItem?.errorLogItem?.type).toBe("unknown");
+    expect(errItem?.errorLogItem?.code).toBe("SERVICE_RESTART_INTERRUPTED");
+    expect(errItem?.errorLogItem?.message).toContain("平台服务重启");
+  });
+
+  it("normalizeLogs errorDetail 为系统字典（无模型错误键）→ 回落系统失败映射", () => {
+    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+    const result = normalizeLogs(logs, {
+      errorDetail: { reason: "no daemon activity within grace window", finished_by: "stale_run_cleanup" },
+      errorCode: "SERVICE_RESTART_INTERRUPTED",
+      failureSummary: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
+    });
+    const errItem = result[result.length - 1];
+    expect(errItem?.errorLogItem?.code).toBe("SERVICE_RESTART_INTERRUPTED");
+    expect(errItem?.errorLogItem?.message).toContain("平台服务重启");
   });
 
   // ---- 成功路径零回归 ----

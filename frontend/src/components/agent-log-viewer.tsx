@@ -667,6 +667,8 @@ export function AgentLogViewer({
   permissionRequests,
   onPermissionResolved,
   runErrorDetail,
+  runErrorCode,
+  runFailureSummary,
   runStatus,
   onRunErrorResend,
   onRunErrorSwitchProvider,
@@ -707,6 +709,14 @@ export function AgentLogViewer({
    */
   runErrorDetail?: { [key: string]: unknown } | null;
   /**
+   * 2026-10-12-stale-run-askwait-fix：run.error_code（SessionRunRead）——
+   * runErrorDetail 为空/无模型错误键时喂 normalizeLogs 的系统失败映射
+   * （buildSystemFailureItem，按码给中文文案 + 服务重启类卡片元数据）。
+   */
+  runErrorCode?: string | null;
+  /** run 的人类可读失败原因（SessionRunRead.failure_summary = output_redacted）。 */
+  runFailureSummary?: string | null;
+  /**
    * task-10：run 状态。'failed' 且无 runErrorDetail 时，normalizeLogs 兜底追加
    * 「运行失败（无详情）」error 项（design §9 brownfield）；同时本 viewer 头部
    * 渲染红色「运行失败」状态徽标（会话页 run failed 标红，D-002@v1）。
@@ -741,13 +751,20 @@ export function AgentLogViewer({
 
   // ql-20260622-003 / P1-1：normalize + 过滤 + turn 分组全部 memo，依赖 logs 引用 /
   // activeFilters，避免大日志列表每次 render 全量重算（normalize O(N)、turn 分组 O(N)）。
-  // task-10 / FR-03：normalize 透传 run 级错误（error_detail + status）。runErrorDetail
-  // 有值或 runStatus='failed' 时，normalizeLogs 在日志末尾追加结构化 error 类项
+  // task-10 / FR-03：normalize 透传 run 级错误（error_detail + status；2026-10-12
+  // 起含 errorCode/failureSummary 系统失败映射源）。任一在场面存在时，
+  // normalizeLogs 在日志末尾追加结构化 error 类项
   // （errorLogItem），供 AgentLogRow 渲染 RunErrorItem。依赖含 runErrorDetail/runStatus，
   // 任一变化重算（与 logs 引用一起 memo，O(N) 不每帧重算）。
   const processedLogs = useMemo(
-    () => normalizeLogs(logs ?? [], { errorDetail: runErrorDetail, runStatus }),
-    [logs, runErrorDetail, runStatus],
+    () =>
+      normalizeLogs(logs ?? [], {
+        errorDetail: runErrorDetail,
+        runStatus,
+        errorCode: runErrorCode,
+        failureSummary: runFailureSummary,
+      }),
+    [logs, runErrorDetail, runStatus, runErrorCode, runFailureSummary],
   );
   const visibleLogs = useMemo(
     () => processedLogs.filter((p) => !p.hidden),

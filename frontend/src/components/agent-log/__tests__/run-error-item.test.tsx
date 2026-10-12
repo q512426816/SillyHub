@@ -222,6 +222,28 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
     expect(screen.getAllByText(/任务中断 · daemon_interrupted/).length).toBeGreaterThan(0);
   });
 
+  // 2026-10-12-stale-run-askwait-fix：后端启动清理码收录——此前不在本表，
+  // 落 unknown 兜底显示「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a：
+  // AskUserQuestion 等待回答期间后端重启被清理判死）。
+  it("SERVICE_RESTART_INTERRUPTED → 「服务重启中断」标签 + 中文 message/hint（不再 unknown）", () => {
+    render(
+      <RunErrorItem
+        item={makeItem({
+          code: "SERVICE_RESTART_INTERRUPTED",
+          message: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(/服务重启中断 · SERVICE_RESTART_INTERRUPTED/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/平台服务重启，本轮执行被中断/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("unknown")).toBeNull();
+  });
+
   it("code 优先于 type：系统码 + 模型 type 并存时走系统映射；非系统码回落 type 表", () => {
     render(
       <RunErrorItem

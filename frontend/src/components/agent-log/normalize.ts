@@ -418,6 +418,16 @@ export function buildErrorLogItem(
   errorDetail: { [key: string]: unknown } | null | undefined,
 ): ErrorLogItem | null {
   if (!errorDetail || typeof errorDetail !== "object") return null;
+  // 2026-10-12-stale-run-askwait-fix：系统级 error_detail（调度层落库形态，如
+  // 启动清理 _mark_stale_run_failed 的 {reason, finished_by}）不含任何模型错误
+  // 键 → 返回 null，让调用方 ?? 链回落 buildSystemFailureItem（按 error_code
+  // 映射中文）。此前非空字典一律按模型错误解析成 type=unknown / message=运行
+  // 失败，把系统失败映射挡在链外，SERVICE_RESTART_INTERRUPTED 只显示
+  // 「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a）。
+  const hasModelErrorKey = (
+    ["type", "code", "message", "retryable", "hint", "raw", "reset_at"] as const
+  ).some((k) => errorDetail[k] !== undefined);
+  if (!hasModelErrorKey) return null;
   const raw = asStringOrNull(errorDetail["raw"]);
   const isCliAuthTransient =
     raw !== null &&
@@ -1004,6 +1014,14 @@ export function classifyLog(
 export interface NormalizeOptions {
   errorDetail?: { [key: string]: unknown } | null;
   runStatus?: string | null;
+  /**
+   * 2026-10-12-stale-run-askwait-fix：run.error_code（调度层/系统错误码）——
+   * errorDetail 为空或无模型错误键（buildErrorLogItem → null）时，与
+   * failureSummary 一起喂 buildSystemFailureItem（系统失败 → ErrorLogItem）。
+   */
+  errorCode?: string | null;
+  /** run 的人类可读失败原因（SessionRunRead.failure_summary = output_redacted）。 */
+  failureSummary?: string | null;
 }
 
 export function normalizeLogs(
@@ -1025,10 +1043,15 @@ function normalizeLogsImpl(
   logs: AgentRunLogEntry[],
   options?: NormalizeOptions,
 ): ProcessedLog[] {
-  // task-08：是否已具备结构化错误（error_detail 或 failed 兜底）。若有，则
-  // [ASSISTANT] API Error 文本行将被结构化项取代（hidden，避免重复/误导）。
+  // task-08：是否已具备结构化错误（error_detail / 系统失败映射 / failed 兜底）。
+  // 若有，则 [ASSISTANT] API Error 文本行将被结构化项取代（hidden，避免重复/误导）。
+  // 2026-10-12-stale-run-askwait-fix：errorCode/failureSummary（系统失败映射源）
+  // 也算结构化错误在场面。
   const hasStructuredError =
-    !!options?.errorDetail || options?.runStatus === "failed";
+    !!options?.errorDetail ||
+    options?.errorCode != null ||
+    options?.failureSummary != null ||
+    options?.runStatus === "failed";
 
   // 2026-07-09-agent-log-display-fix / D-002@v2 原保留 [SYSTEM:thinking_tokens] 折叠显示；
   // ql-20260709-003 推翻为默认隐藏（用户反馈 token 估算意义不大、且穿插把 thinking 切碎）。
@@ -1349,11 +1372,14 @@ function normalizeLogsImpl(
     }
   }
 
-  // task-08 / FR-03 / D-002@v1：在常规归一化后追加结构化 error 类日志项。
-  // errorDetail 有值 → 结构化项；failed 无 errorDetail → brownfield 兜底项
-  // （「运行失败（无详情）」）。两者 hidden=false（R-02：不进 NOISE 折叠白名单），
-  // semanticCategory=error。errorDetail 缺失且非 failed → 不追加（成功路径零回归）。
-  const errorItem = buildErrorLogItem(options?.errorDetail);
+  // 2026-10-12-stale-run-askwait-fix：兜底链扩为两级——模型错误（errorDetail）
+  // 优先；无模型错误键/缺 errorDetail 时喂系统失败映射（error_code +
+  // failure_summary），仍无果且 failed → 「运行失败（无详情）」既有兜底。
+  // 两者 hidden=false（R-02：不进 NOISE 折叠白名单），semanticCategory=error。
+  // 成功路径零回归。
+  const errorItem =
+    buildErrorLogItem(options?.errorDetail) ??
+    buildSystemFailureItem(options?.errorCode ?? null, options?.failureSummary ?? null);
   if (errorItem) {
     result.push(makeErrorProcessedLog(errorItem));
   } else if (options?.runStatus === "failed") {

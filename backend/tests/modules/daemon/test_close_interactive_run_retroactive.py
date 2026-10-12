@@ -126,7 +126,7 @@ async def _make_run(
         change_id=None,
         error_code=error_code,
         exit_code=-1 if status == "failed" else 0,
-        output_redacted="Run interrupted: service restarted while agent was running."
+        output_redacted="平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。"
         if status == "failed"
         else None,
     )
@@ -169,7 +169,7 @@ async def test_late_success_result_rehabilates_service_restart_interrupted_run(
     # 误杀残留全部清除
     assert result.error_code is None
     assert result.error_detail is None
-    assert "Run interrupted" not in (result.output_redacted or "")
+    assert "平台服务重启" not in (result.output_redacted or "")
     # 迟到结果携带的 usage / 摘要正常落库
     assert result.input_tokens == 132772
     assert result.output_tokens == 38259

@@ -189,6 +189,11 @@ export function AgentRunPanel({
   // RunErrorItem 渲染原因 + 操作。每个 run 只拉一次（errorDetailFetchedRef 防重）。
   const [runStatus, setRunStatus] = React.useState<string | null>(null);
   const [runErrorDetail, setRunErrorDetail] = React.useState<{ [key: string]: unknown } | null>(null);
+  // 2026-10-12-stale-run-askwait-fix：系统失败映射源（SessionRunRead 同源字段）
+  // ——error_detail 无模型错误键（如启动清理的 {reason, finished_by}）时，
+  // normalize 据此走 buildSystemFailureItem 出「服务重启中断」中文卡。
+  const [runErrorCode, setRunErrorCode] = React.useState<string | null>(null);
+  const [runFailureSummary, setRunFailureSummary] = React.useState<string | null>(null);
   const errorDetailFetchedRef = React.useRef(false);
 
   // fetchUsage 通过 ref 暴露给 handleDone：handleDone 闭包在 useAgentRunStream 内部
@@ -235,6 +240,8 @@ export function AgentRunPanel({
       setTokenUsage(null);
       setRunStatus(null);
       setRunErrorDetail(null);
+      setRunErrorCode(null);
+      setRunFailureSummary(null);
       errorDetailFetchedRef.current = false;
       fetchUsageRef.current = null;
       return;
@@ -242,6 +249,8 @@ export function AgentRunPanel({
     // runId 变化：重置错误状态 + 拉取标记（切 run 不串错 error_detail）。
     setRunStatus(null);
     setRunErrorDetail(null);
+    setRunErrorCode(null);
+    setRunFailureSummary(null);
     errorDetailFetchedRef.current = false;
     let cancelled = false;
     const fetchUsage = () => {
@@ -270,6 +279,9 @@ export function AgentRunPanel({
                   if (!cancelled) {
                     const matched = sessionRuns.find((sr) => sr.id === runId);
                     setRunErrorDetail(matched?.error_detail ?? null);
+                    // 2026-10-12-stale-run-askwait-fix：系统失败映射源同批透出。
+                    setRunErrorCode(matched?.error_code ?? null);
+                    setRunFailureSummary(matched?.failure_summary ?? null);
                   }
                 })
                 .catch(() => {
@@ -383,6 +395,8 @@ export function AgentRunPanel({
         permissionRequests={perms}
         onPermissionResolved={handlePermissionResolved}
         runErrorDetail={runErrorDetail}
+        runErrorCode={runErrorCode}
+        runFailureSummary={runFailureSummary}
         runStatus={runStatus}
         onRunErrorSwitchProvider={onRunErrorSwitchProvider}
       />

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -2444,7 +2444,12 @@ def _mark_stale_run_failed(run: AgentRun, now: datetime) -> None:
     run.status = "failed"
     run.finished_at = now
     run.exit_code = -1
-    run.output_redacted = "Run interrupted: service restarted while agent was running."
+    # 2026-10-12-stale-run-askwait-fix：原因文案改中文可读（经
+    # output_redacted → SessionRunRead.failure_summary 透出前端错误卡的
+    # message，对齐 close_run_steps._failure_summary_by_code 口径）；此前
+    # 英文技术串在前端错误卡原样裸出。error_detail 形状不变（前端
+    # buildErrorLogItem 对无模型错误键的字典返回 null 回落系统失败映射）。
+    run.output_redacted = "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。"
     # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
     # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
     # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
@@ -2463,6 +2468,45 @@ async def _last_run_log_at(session: AsyncSession, run_id: uuid.UUID) -> datetime
             select(func.max(AgentRunLog.timestamp)).where(AgentRunLog.run_id == run_id)
         )
     ).scalar_one_or_none()
+
+
+async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> bool:
+    """run 是否处于「等待用户回答提问」状态（2026-10-12-stale-run-askwait-fix）。
+
+    ask 信号 = agent_run_logs 中 ``channel='pending_input'`` 或（``channel='tool_call'``
+    且 ``tool_kind='ask'``）的行（AskUserQuestion 类提问的落库形态，ql-20260705-007）；
+    ``user_input`` 行 = 用户回答/注入。最后 ask 信号晚于最后 user_input → 提问未答，
+    agent 停在等用户，日志静默不代表 daemon 死亡。
+
+    生产实证（2026-10-12 会话 47e2ff1a run e31ec8fc）：AskUserQuestion 等待回答
+    近 20 分钟，后端重启的启动清理按 10 分钟宽限窗误判 SERVICE_RESTART_INTERRUPTED。
+    信号纯读日志列，重启免疫（lease/心跳在重启瞬间必然陈旧，不可作判据）。
+    """
+    last_ask_at = (
+        await session.execute(
+            select(func.max(AgentRunLog.timestamp)).where(
+                AgentRunLog.run_id == run_id,
+                or_(
+                    AgentRunLog.channel == "pending_input",
+                    and_(
+                        AgentRunLog.channel == "tool_call",
+                        AgentRunLog.tool_kind == "ask",
+                    ),
+                ),
+            )
+        )
+    ).scalar_one_or_none()
+    if last_ask_at is None:
+        return False
+    last_user_at = (
+        await session.execute(
+            select(func.max(AgentRunLog.timestamp)).where(
+                AgentRunLog.run_id == run_id,
+                AgentRunLog.channel == "user_input",
+            )
+        )
+    ).scalar_one_or_none()
+    return last_user_at is None or _as_utc(last_ask_at) > _as_utc(last_user_at)
 
 
 async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
@@ -2517,6 +2561,16 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
                     "stale_run_cleanup_deferred_active",
                     run_id=str(run.id),
                     last_log_age_seconds=int((now - _as_utc(last_log_at)).total_seconds()),
+                )
+                continue
+            # 2026-10-12-stale-run-askwait-fix：等待用户回答提问的轮豁免判死——
+            # 提问（AskUserQuestion）未答期间日志静默是正常态（人离开很常见），
+            # 不是 daemon 死亡；daemon 真死由 daemon 离线清扫（sweep）兜底，
+            # 用户回答后日志恢复流动，等真终态。纯日志列判定，重启瞬间可用。
+            if await _run_awaiting_user_input(session, run.id):
+                log.info(
+                    "stale_run_cleanup_deferred_awaiting_user",
+                    run_id=str(run.id),
                 )
                 continue
         # 写前 FOR UPDATE 重读（评审 P2）：快照读与落库之间可能有并发收口——

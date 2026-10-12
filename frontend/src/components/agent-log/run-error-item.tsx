@@ -182,6 +182,18 @@ export const SYSTEM_ERROR_CODE_META: Record<string, ModelErrorMeta> = {
     badgeClass: "border-slate-200 bg-card text-slate-700",
     defaultHint: "执行环境中断了本轮任务，如需继续可重新发送。",
   },
+  // 后端启动清理/延迟复扫终态化（agent/service._mark_stale_run_failed 落码）——
+  // 2026-10-12-stale-run-askwait-fix 收录：此前不在本表，unknown 兜底显示
+  // 「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a：AskUserQuestion
+  // 等待回答期间后端重启被清理判死）。
+  SERVICE_RESTART_INTERRUPTED: {
+    label: "服务重启中断",
+    Icon: PowerOff,
+    containerClass: "border-l-slate-400 bg-slate-50",
+    titleClass: "text-slate-700",
+    badgeClass: "border-slate-200 bg-card text-slate-700",
+    defaultHint: "平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。",
+  },
 };
 
 /**
