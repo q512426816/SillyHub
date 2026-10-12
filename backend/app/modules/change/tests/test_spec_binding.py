@@ -288,8 +288,30 @@ async def test_bind_change_failure_is_best_effort_no_raise(db_session, monkeypat
 
     monkeypatch.setattr("app.modules.change.binding.Change", _boom)
 
-    # 不抛异常即通过（savepoint 回滚，外层事务可继续）
-    await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id)
+    # 不抛异常即通过（savepoint 回滚，外层事务可继续）；失败路径返回 None
+    # （2026-10-12-run-level-change-attribution task-02 / FR-02 返回值契约）。
+    assert await bind_session_to_change(db_session, ws.id, "2026-08-25-boom", s.id) is None
+
+
+async def test_bind_change_returns_change_id_contract(db_session):
+    """返回值契约（2026-10-12-run-level-change-attribution task-02 / FR-02）：
+    绑定返回变更行 id（幂等重入同 id）；default 伪键守卫返回 None。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+    key = "2026-10-12-return-contract"
+
+    first = await bind_session_to_change(db_session, ws.id, key, s.id)
+    assert first is not None
+    rows = await _changes_in_ws(db_session, ws.id)
+    assert [c.id for c in rows] == [first]
+
+    # 幂等重入：同 id（既有 link 分支同样返回变更 id）。
+    second = await bind_session_to_change(db_session, ws.id, key, s.id)
+    assert second == first
+
+    # default 伪键：函数内兜底返回 None，不落任何行。
+    assert await bind_session_to_change(db_session, ws.id, "default", s.id) is None
 
 
 # ===========================================================================

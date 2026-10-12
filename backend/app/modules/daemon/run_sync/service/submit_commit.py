@@ -336,12 +336,24 @@ async def _submit_finalize(svc, st: _SubmitState) -> SubmittedMessages:
                     # 函数内兜底双保险（D-005@v2）。
                     for spec_binding in extract_spec_bindings(sillyspec_command):
                         try:
-                            await bind_session_to_change(
+                            bound_change_id = await bind_session_to_change(
                                 svc._session,
                                 binding_session_row.workspace_id,
                                 spec_binding.change_key,
                                 binding_session_row.id,
                             )
+                            # 2026-10-12-run-level-change-attribution task-02 /
+                            # FR-01：绑定成功即回写会话「当前变更上下文」——同批
+                            # 多条绑定命令按消息序循环覆盖，最后一条生效；inject
+                            # 建轮据此给新 run.change_id 打锚（轮级归属拆分）。
+                            # 列写入与 link 落库同事务（随本方法末尾 commit），
+                            # 失败不抛（值不等才置 dirty，无谓 UPDATE 免掉）。
+                            if (
+                                bound_change_id is not None
+                                and binding_session_row.current_change_id != bound_change_id
+                            ):
+                                binding_session_row.current_change_id = bound_change_id
+                                svc._session.add(binding_session_row)
                         except Exception as exc:
                             # 外层兜底：bind 自身已 best-effort，此处仅防御
                             # 意外（如 ORM 状态异常），绑定失败不影响消息入库。

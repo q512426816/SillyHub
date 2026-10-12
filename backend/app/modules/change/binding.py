@@ -142,10 +142,10 @@ async def bind_session_to_change(
     workspace_id: uuid.UUID,
     change_key: str,
     session_id: uuid.UUID,
-) -> None:
+) -> uuid.UUID | None:
     """把会话绑到变更（幂等 best-effort，design §5 W1.3 / §7）。
 
-    - ``change_key == "default"`` 直接返回（D-005@v2 函数内兜底：命令解析与
+    - ``change_key == "default"`` 直接返回 None（D-005@v2 函数内兜底：命令解析与
       agent-logs 两写通道统一受保护，无 placeholder 行、无 link 行）。
     - 按 ``(workspace_id, change_key)`` 查 Change，不存在则建 placeholder 行
       （defaults 对齐 ``platform_sync/service.py:_ensure_change_row``：
@@ -154,9 +154,14 @@ async def bind_session_to_change(
     - upsert link：查 ``ChangeSessionLink(change_id, session_id)`` 存在即返回，
       否则插入（unique 兜底并发）。
     - 整体 savepoint + flush，不自行 commit；失败仅 ``log.warning`` 不抛。
+    - 返回值（2026-10-12-run-level-change-attribution task-02 / FR-02）：绑定
+      （或既有 link）对应的变更行 id，供 run_sync 交互通道回写会话「当前变更
+      上下文」（``AgentSession.current_change_id``）；default 守卫跳过或整体
+      失败返回 None。其余调用方（platform_sync agent-logs W2.2）不消费返回值，
+      绑定行为不变。
     """
     if change_key == DEFAULT_CHANGE_KEY:
-        return
+        return None
     try:
         async with db.begin_nested():
             change = (
@@ -197,7 +202,7 @@ async def bind_session_to_change(
                 )
             ).scalar_one_or_none()
             if link is not None:
-                return
+                return change.id
             db.add(
                 ChangeSessionLink(
                     id=uuid.uuid4(),
@@ -206,6 +211,7 @@ async def bind_session_to_change(
                 )
             )
             await db.flush()
+            return change.id
     except Exception as exc:
         log.warning(
             "change.spec_session_bind_failed",
@@ -214,6 +220,7 @@ async def bind_session_to_change(
             session_id=str(session_id),
             error=str(exc),
         )
+        return None
 
 
 async def bind_session_to_quicklog(
