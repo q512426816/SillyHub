@@ -187,10 +187,23 @@ const mocks = vi.hoisted(() => ({
   lastFileExplorerProps: null as {
     workspaceId: string;
     onSelectFile: (_path: string) => void;
+    onAddNodeRef?: (desc: {
+      kind: string;
+      workspaceId: string;
+      path: string;
+      name: string;
+    }) => void;
   } | null,
   lastFilePreviewProps: null as {
     workspaceId: string;
     filePath: string | null;
+    onAddSelectionRef?: (desc: {
+      kind: string;
+      workspaceId: string;
+      path: string;
+      name: string;
+      lines?: [number, number];
+    }) => void;
   } | null,
 }));
 
@@ -408,17 +421,38 @@ vi.mock("@/components/explorer/file-explorer", () => {
   const FileExplorerStub = ({
     workspaceId,
     onSelectFile,
+    onAddNodeRef,
   }: {
     workspaceId: string;
     onSelectFile: (_path: string) => void;
+    onAddNodeRef?: (desc: {
+      kind: string;
+      workspaceId: string;
+      path: string;
+      name: string;
+    }) => void;
   }) => {
-    mocks.lastFileExplorerProps = { workspaceId, onSelectFile };
+    mocks.lastFileExplorerProps = { workspaceId, onSelectFile, onAddNodeRef };
     return (
       <div data-testid="file-explorer-stub">
         {workspaceId}
         {/* 模拟点文件：直通 onSelectFile（portal 接线归 setFilePreview 断言） */}
         <button type="button" onClick={() => onSelectFile("README.md")}>
           stub-选文件
+        </button>
+        {/* workspace-ref-intake task-06：模拟树右键入口回调 */}
+        <button
+          type="button"
+          onClick={() =>
+            onAddNodeRef?.({
+              kind: "file",
+              workspaceId,
+              path: "docs/design.md",
+              name: "design.md",
+            })
+          }
+        >
+          stub-右键引用
         </button>
       </div>
     );
@@ -430,14 +464,37 @@ vi.mock("@/components/explorer/file-preview", () => {
   const FilePreviewStub = ({
     workspaceId,
     filePath,
+    onAddSelectionRef,
   }: {
     workspaceId: string;
     filePath: string | null;
+    onAddSelectionRef?: (desc: {
+      kind: string;
+      workspaceId: string;
+      path: string;
+      name: string;
+      lines?: [number, number];
+    }) => void;
   }) => {
-    mocks.lastFilePreviewProps = { workspaceId, filePath };
+    mocks.lastFilePreviewProps = { workspaceId, filePath, onAddSelectionRef };
     return (
       <div data-testid="file-preview-stub">
         {workspaceId}:{filePath ?? ""}
+        {/* workspace-ref-intake task-06：模拟选区右键入口回调 */}
+        <button
+          type="button"
+          onClick={() =>
+            onAddSelectionRef?.({
+              kind: "code",
+              workspaceId,
+              path: filePath ?? "",
+              name: "a.py",
+              lines: [10, 16],
+            })
+          }
+        >
+          stub-选区引用
+        </button>
       </div>
     );
   };
@@ -2407,7 +2464,7 @@ describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
     clickFilesToggle();
     await stubPickFile();
     await waitFor(() =>
-      expect(mocks.lastFilePreviewProps).toEqual({
+      expect(mocks.lastFilePreviewProps).toMatchObject({
         workspaceId: "ws-1",
         filePath: "README.md",
       }),
@@ -2419,7 +2476,7 @@ describe("SessionsPortal 文件预览列开关（task-03 FR-03）", () => {
 
     // 同文件重复点：幂等（列仍在，props 同值）。
     await stubPickFile();
-    expect(mocks.lastFilePreviewProps).toEqual({
+    expect(mocks.lastFilePreviewProps).toMatchObject({
       workspaceId: "ws-1",
       filePath: "README.md",
     });
@@ -2496,7 +2553,7 @@ describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
     clickFilesToggle();
     await stubPickFile();
     await waitFor(() =>
-      expect(mocks.lastFilePreviewProps).toEqual({
+      expect(mocks.lastFilePreviewProps).toMatchObject({
         workspaceId: "ws-a",
         filePath: "README.md",
       }),
@@ -2516,7 +2573,7 @@ describe("SessionsPortal 切回会话预览保留（task-03 D-004）", () => {
     await waitFor(() =>
       expect(mocks.lastFileExplorerProps?.workspaceId).toBe("ws-b"),
     );
-    expect(mocks.lastFilePreviewProps).toEqual({
+    expect(mocks.lastFilePreviewProps).toMatchObject({
       workspaceId: "ws-a",
       filePath: "README.md",
     });
@@ -2652,7 +2709,7 @@ describe("SessionsPortal 子代理右栏槽位互斥（task-04 subagent-three-pa
       expect(screen.queryByTestId("subagent-panel-close")).toBeNull(),
     );
     await waitFor(() =>
-      expect(mocks.lastFilePreviewProps).toEqual({
+      expect(mocks.lastFilePreviewProps).toMatchObject({
         workspaceId: "ws-a",
         filePath: "README.md",
       }),
@@ -2727,3 +2784,79 @@ describe("SessionsPortal 子代理右栏槽位互斥（task-04 subagent-three-pa
   });
 });
 
+
+
+// ── 15. 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06 / FR-01） ──
+
+describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task-06）", () => {
+  /** 真会话态 + 进文件模式（树入口可达）。 */
+  async function enterFilesModeWithSession() {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: [makeSession({ id: "s-ws", title: "工作区会话", workspace_id: "ws-1" })],
+      total: 1,
+      limit: 50,
+      offset: 0,
+    });
+    renderPortal();
+    await openWorkspaceGroup("未知工作区");
+    fireEvent.click(screen.getByRole("button", { name: "会话 工作区会话" }));
+    await waitFor(() => expect(screen.getByLabelText("会话面板")).toBeTruthy());
+    clickFilesToggle();
+    await screen.findByTestId("file-explorer-stub");
+  }
+
+  it("树右键入口：真会话输入框光标处插入【design.md】，重复触发再插一枚（端到端：槽位下发→面板透传→输入区消费→清槽）", async () => {
+    await enterFilesModeWithSession();
+    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
+    // 端到端效果断言：token 落进真渲染的 SessionInputBar textarea（比断言
+    // 槽位中间态稳——消费后即清槽，中间态与清槽态有 racing）。
+    const ta = await waitFor(() => {
+      const el = screen.getAllByPlaceholderText(/.+/).find(
+        (n) => (n as HTMLTextAreaElement).value.includes("【design.md】"),
+      );
+      expect(el).toBeTruthy();
+      return el as HTMLTextAreaElement;
+    });
+    // 同一引用连续添加：nonce 自增 → 再插一枚（重复触发契约）。
+    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
+    await waitFor(() => {
+      expect(
+        (ta as HTMLTextAreaElement).value.match(/【design\.md】/g)?.length,
+      ).toBe(2);
+    });
+  });
+
+  it("预览选区入口：desc 带行号 → 输入框插入【a.py:10-16】", async () => {
+    await enterFilesModeWithSession();
+    await stubPickFile();
+    await screen.findByTestId("file-preview-stub");
+    fireEvent.click(screen.getByRole("button", { name: "stub-选区引用" }));
+    await waitFor(() => {
+      const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
+        (n as HTMLTextAreaElement).value.includes("【a.py:10-16】"),
+      );
+      expect(el).toBeTruthy();
+    });
+  });
+
+  it("预会话分支：workspace scope 组头＋建立预会话后切文件模式，树右键落到预会话输入框", async () => {
+    // 预会话走非工作区分组时 fileWorkspaceId=null（📁 置灰进不了文件模式）——
+    // 用 workspace scope（scopedWorkspaceId=ws-1）建预会话。
+    renderPortal(WORKSPACE_SCOPE);
+    await enterPreSession("在 当前工作区 新建会话");
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    clickFilesToggle();
+    await screen.findByTestId("file-explorer-stub");
+    fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
+    await waitFor(() => {
+      const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
+        (n as HTMLTextAreaElement).value.includes("【design.md】"),
+      );
+      expect(el).toBeTruthy();
+    });
+  });
+
+  // 空门户 toast：入口（文件树/预览列）在 UI 层均要求先选中会话（📁 门控），
+  // 空门户态组合不可达——toast 为防御性兜底（design R-08 声明触达面小），
+  // 不构造 UI 驱动用例（宁缺毋滥）。
+});

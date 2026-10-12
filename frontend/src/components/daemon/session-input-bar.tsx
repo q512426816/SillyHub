@@ -60,8 +60,12 @@ import {
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
   allocateAttRefToken,
+  allocateWsRefToken,
   stripAttRefTokens,
+  wsRefMapKey,
   type AttRefTokenMap,
+  type WsRefDesc,
+  type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
 import {
@@ -172,6 +176,15 @@ export interface SessionInputBarProps {
    *  入口——点击开父层定时弹窗（草稿预览 + 分钟级时间选择）；未传不渲染（预会话
    *  idle 态父层不注入即不出现入口）。 */
   onSchedule?: () => void;
+  /** 2026-10-10-workspace-ref-intake task-05：工作区引用插入槽位（FR-01 通道
+   *  消费端）——portal 侧右键入口组装 desc 落槽，effect 依赖 nonce 消费（同一
+   *  引用连续添加可重复触发），在光标处插入【名称】/【名称:起-止】标签。 */
+  pendingWsRefInsert?: { desc: WsRefDesc; nonce: number } | null;
+  /** 槽位消费完成回抛（portal 清槽；null = 清空）。 */
+  onPendingWsRefInsertHandled?: (next: { desc: WsRefDesc; nonce: number } | null) => void;
+  /** 工作区引用 token 映射受控回传（producer=输入区，组装位经父级
+   *  substituteWsRefsForSend 消费，同 onAttTokenMapChange 模式）。 */
+  onWsRefTokensChange?: (next: WsRefTokenMap) => void;
 }
 
 function formatBytes(n: number): string {
@@ -254,6 +267,9 @@ export function SessionInputBar({
   teamTriggerDisabled = false,
   teamTriggerTitle,
   onSchedule,
+  pendingWsRefInsert,
+  onPendingWsRefInsertHandled,
+  onWsRefTokensChange,
 }: SessionInputBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -288,6 +304,63 @@ export function SessionInputBar({
     onAttTokenMapChange?.(next);
   };
 
+  /* 2026-10-10-workspace-ref-intake task-05：工作区引用 token 映射（key =
+   * wsRefMapKey 约定：path / path:起-止）。分配池与附件同构并入正文 inText
+   * 保守占位（D-005 并集池——附件 token ∪ 工作区 token ∪ 手打【…】）；
+   * 映射随 onWsRefTokensChange 受控回传父级（组装位 substituteWsRefsForSend
+   * 消费，同 syncTokenMap 模式，D-009）。 */
+  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
+  const syncWsRefTokens = (next: WsRefTokenMap) => {
+    setWsRefTokens(next);
+    onWsRefTokensChange?.(next);
+  };
+
+  /** 两池并集 token 集（overlay 高亮 / 退格整删 / 唯一化分配池共用）。 */
+  const allRefTokens = [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)];
+
+  /** 工作区引用插入（槽位消费与未来直插共用）：分配/复用 token 后按
+   *  handleInsertAttRef 同款光标机制插入（聚焦插当前光标、失焦插失焦前光标位、
+   *  从未聚焦插末尾；插入后聚焦、光标落 token 尾；允许重复插入）。 */
+  const insertWsRefToken = (desc: WsRefDesc) => {
+    const key = wsRefMapKey(desc);
+    let entry = wsRefTokens[key];
+    if (!entry) {
+      // 唯一化并集：附件 token ∪ 工作区 token ∪ 正文中出现的所有【…】文本
+      // （保守占位防手打碰撞，对齐附件 allocateAttRefToken 既有口径）。
+      const inText = value.match(/【[^】]*】/g) ?? [];
+      const pool = [...allRefTokens, ...inText].filter(Boolean);
+      const base = desc.lines
+        ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
+        : desc.name;
+      entry = { desc, token: allocateWsRefToken(base, pool) };
+      syncWsRefTokens({ ...wsRefTokens, [key]: entry });
+    }
+    const ta = textareaRef.current;
+    const focused = !!ta && document.activeElement === ta;
+    const caret = focused
+      ? (ta.selectionStart ?? value.length)
+      : (lastCaretRef.current ?? value.length);
+    const next = value.slice(0, caret) + entry.token + value.slice(caret);
+    onChange(next);
+    pendingCaretRef.current = caret + entry.token.length;
+    lastCaretRef.current = caret + entry.token.length;
+    ta?.focus();
+  };
+
+  /* 槽位消费（FR-01 通道落地点）：依赖 nonce（同引用连续添加可重复触发——
+   * desc 引用相等会让 effect 判等跳过）；消费后回抛清槽。pendingWsRefInsert
+   * 未传（dialog 等旧宿主）零 effect 副作用。 */
+  const handledNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingWsRefInsert) return;
+    if (handledNonceRef.current === pendingWsRefInsert.nonce) return;
+    handledNonceRef.current = pendingWsRefInsert.nonce;
+    insertWsRefToken(pendingWsRefInsert.desc);
+    onPendingWsRefInsertHandled?.(null);
+    // insertWsRefToken 为实例内闭包（随渲染重建），依赖省略走 latest 语义。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWsRefInsert?.nonce]);
+
   /** 右击 chip 插入引用（D-006@v3：聚焦态插当前光标处；失焦态插**失焦前记住的
    *  光标位**——右击 chip 必先使输入框失焦，故 onBlur 时记忆 selectionStart；
    *  从未聚焦过才插末尾。插入后自动聚焦、光标落 token 尾；允许重复）。 */
@@ -315,11 +388,20 @@ export function SessionInputBar({
     ta?.focus();
   };
 
-  /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。 */
+  /** × 角标删除该 token 一次出现（D-004 第二删除通道；退格=普通文本删除天然支持）。
+   *  task-05 起附件与工作区 token 一视同仁（removeRefOnce 统一入口）。 */
   const removeAttRefOnce = (token: string) => {
     const idx = value.indexOf(token);
     if (idx < 0) return;
     onChange(value.slice(0, idx) + value.slice(idx + token.length));
+    // 同步清工作区映射条目（附件映射由删附件联动独立管理）。
+    if (Object.values(wsRefTokens).some((e) => e.token === token)) {
+      const nextMap = { ...wsRefTokens };
+      for (const [k, e] of Object.entries(nextMap)) {
+        if (e.token === token) delete nextMap[k];
+      }
+      syncWsRefTokens(nextMap);
+    }
   };
 
   /* ── task-03：联想接入状态 ──────────────────────────────────────────── */
@@ -340,6 +422,36 @@ export function SessionInputBar({
    * 容器 ref（wrapper pointermove hitTest 回写）。 */
   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
   const attOverlayRef = useRef<HTMLDivElement | null>(null);
+  /* task-05（FR-03）：overlay 类型角标元数据——附件 token 按附件名、工作区
+   * token 按 desc 组装（类型 + 路径 + 行号的完整绑定 tooltip）。 */
+  const overlayTokenMetas = useMemo(() => {
+    const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
+    for (const att of attachments) {
+      const token = attTokenMap[att.id];
+      if (token) metas[token] = { kind: "att", title: `附件：${att.name}` };
+    }
+    for (const { desc, token } of Object.values(wsRefTokens)) {
+      if (desc.kind === "code" && desc.lines) {
+        metas[token] = {
+          kind: "code",
+          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceId}）`,
+        };
+      } else if (desc.kind === "dir") {
+        metas[token] = {
+          kind: "dir",
+          title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceId}）`,
+        };
+      } else {
+        metas[token] = {
+          kind: "file",
+          title: `文件：${desc.path}（工作区 ${desc.workspaceId}）`,
+        };
+      }
+    }
+    return metas;
+    // attachments 参与（附件 token 的 title 取上传名）；attTokenMap/wsRefTokens 键值源。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attTokenMap, wsRefTokens, attachments]);
   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
@@ -565,6 +677,7 @@ export function SessionInputBar({
     // 引用映射随外部清空归零（新建/切换会话等不经 clearAttachments 的路径；
     // token 已不在正文，此处只清映射防陈旧槽位跨消息泄漏——同 mentions 口径）。
     if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
+    if (Object.keys(wsRefTokens).length > 0) syncWsRefTokens({});
     if (!mention) return;
     setMention(null);
     setMentionActiveIndex(0);
@@ -641,8 +754,9 @@ export function SessionInputBar({
   registerClearAttachments?.(() => {
     setAttachments([]);
     onAttachmentsChange?.([]);
-    // 引用映射随发送成功清空一并复位（task-03）。
+    // 引用映射随发送成功清空一并复位（task-03）；工作区映射同口径（task-05）。
     if (Object.keys(attTokenMap).length > 0) syncTokenMap({});
+    if (Object.keys(wsRefTokens).length > 0) syncWsRefTokens({});
   });
 
   const handleFiles = async (files: FileList | null) => {
@@ -950,12 +1064,15 @@ export function SessionInputBar({
         >
           <InputRefOverlay
             value={value}
-            tokens={Object.values(attTokenMap)}
+            tokens={allRefTokens}
             onRemoveToken={removeAttRefOnce}
             overlayClassName="min-h-11 px-1 py-2 text-sm leading-5"
             overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
             visibleBadgeIndex={hoveredRefOcc}
             containerRef={attOverlayRef}
+            /* task-04/05（FR-03/D-001）：两池 token 均补类型元数据（附件 att /
+               工作区 file/dir/code），角标+tooltip 按命中渲染。 */
+            tokenMetas={overlayTokenMetas}
           />
           <textarea
             ref={textareaRef}
@@ -1023,7 +1140,8 @@ export function SessionInputBar({
             }
             // 退格整删引用标签（用户反馈 2026-10-09，D-004@v2）：无选区、光标
             // 贴在已注册 token 尾部时，一次退格删除整个标签（非逐字）；标签
-            // 中部/普通文本退格不受影响；多 token 同尾时取最长匹配。
+            // 中部/普通文本退格不受影响；多 token 同尾时取最长匹配。task-05 起
+            // 匹配集=附件∪工作区并集（两池一视同仁）。
             if (
               e.key === "Backspace" &&
               !mention &&
@@ -1033,7 +1151,7 @@ export function SessionInputBar({
               const { selectionStart: s, selectionEnd: en } = ta;
               if (s === en && s > 0) {
                 const before = value.slice(0, s);
-                const matched = Object.values(attTokenMap)
+                const matched = allRefTokens
                   .filter((t) => t && before.endsWith(t))
                   .sort((a, b) => b.length - a.length);
                 const token = matched[0];
@@ -1041,6 +1159,14 @@ export function SessionInputBar({
                   e.preventDefault();
                   onChange(value.slice(0, s - token.length) + value.slice(s));
                   pendingCaretRef.current = s - token.length;
+                  // 整删同步清工作区映射条目（附件映射由删附件联动管理）。
+                  if (Object.values(wsRefTokens).some((e2) => e2.token === token)) {
+                    const nextMap = { ...wsRefTokens };
+                    for (const [k, e2] of Object.entries(nextMap)) {
+                      if (e2.token === token) delete nextMap[k];
+                    }
+                    syncWsRefTokens(nextMap);
+                  }
                   return;
                 }
               }

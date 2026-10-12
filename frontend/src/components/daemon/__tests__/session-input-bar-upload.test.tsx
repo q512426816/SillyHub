@@ -7,7 +7,7 @@
 // 渲染骨架对齐 session-input-bar-mention.test.tsx（mock @/lib/session-mention-sources
 // 隔离联想数据源）；@/lib/errors 半保真——errMessage 用真实现（断言中文兜底文案），
 // useNotify 换 spy（toast 断言面）。
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -311,5 +311,130 @@ describe("待发附件右击插入正文引用（2026-10-09-attachment-inline-re
   it("未右击任何附件 → 镜像层零渲染（无「移除引用」角标）", async () => {
     await mountAndUpload([{ id: "att-noref-1", name: "未引用.png" }]);
     expect(screen.queryByLabelText(/移除引用/)).toBeNull();
+  });
+});
+
+// 2026-10-10-workspace-ref-intake task-05：工作区引用槽位消费/并集分配/删除联动隔离。
+describe("工作区引用插入槽位（workspace-ref-intake task-05）", () => {
+  /** 受控容器：value 受控 + 槽位受控（handled 清槽回环）。 */
+  function SlotBar({
+    initial = "",
+    onWsTokens,
+  }: {
+    initial?: string;
+    onWsTokens?: (m: Record<string, unknown>) => void;
+  }) {
+    const [v, setV] = useState(initial);
+    const [slot, setSlot] = useState<{ desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] }; nonce: number } | null>(null);
+    // 暴露 setSlot 给测试（挂在容器 DOM 上）
+    (globalThis as any).__setSlot = setSlot;
+    return (
+      <SessionInputBar
+        value={v}
+        onChange={setV}
+        onSend={() => {}}
+        disabled={false}
+        placeholder="测试输入框"
+        creating={false}
+        workspaceId="ws-1"
+        onWsRefTokensChange={onWsTokens as never}
+        pendingWsRefInsert={slot as never}
+        onPendingWsRefInsertHandled={setSlot as never}
+      />
+    );
+  }
+
+  type SlotDesc = { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
+  function pushSlot(desc: SlotDesc, nonce: number) {
+    act(() => {
+      (globalThis as { __setSlot?: (s: unknown) => void }).__setSlot?.({ desc, nonce });
+    });
+  }
+
+  const fileDesc = (name: string, path: string) => ({
+    kind: "file" as const,
+    workspaceId: "ws-9",
+    path,
+    name,
+  });
+  const codeDesc = (name: string, path: string, lines: [number, number]) => ({
+    kind: "code" as const,
+    workspaceId: "ws-9",
+    path,
+    name,
+    lines,
+  });
+
+  it("槽位插入：nonce 首次触发在正文末尾插入【名称】，消费后清槽回抛", async () => {
+    render(<SlotBar initial="看这个" />);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    pushSlot(fileDesc("design.md", "docs/design.md"), 1);
+    await waitFor(() => expect(ta.value).toBe("看这个【design.md】"));
+  });
+
+  it("同一引用连续添加可重复触发（nonce 自增）；code 引用带行号段", async () => {
+    render(<SlotBar initial="" />);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    pushSlot(codeDesc("a.py", "src/a.py", [10, 16]), 1);
+    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】"));
+    pushSlot(codeDesc("a.py", "src/a.py", [10, 16]), 2);
+    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】【a.py:10-16】"));
+  });
+
+  it("并集同名 ·2：正文已有手打【design.md】→ 槽位插入同名文件取 ·2；不同行段免序号", async () => {
+    render(<SlotBar initial="已有【design.md】在场" />);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    pushSlot(fileDesc("design.md", "docs/design.md"), 1);
+    await waitFor(() => expect(ta.value).toBe("已有【design.md】在场【design.md·2】"));
+    // 不同行段的代码引用基名不同 → 免序号
+    pushSlot(codeDesc("design.md", "docs/design.md", [3, 5]), 2);
+    await waitFor(() =>
+      expect(ta.value).toBe("已有【design.md】在场【design.md·2】【design.md:3-5】"),
+    );
+  });
+
+  it("退格整删工作区标签；onWsRefTokensChange 回传映射", async () => {
+    const onWsTokens = vi.fn();
+    render(<SlotBar initial="前文" onWsTokens={onWsTokens} />);
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    pushSlot(fileDesc("x.md", "docs/x.md"), 1);
+    await waitFor(() => expect(ta.value).toBe("前文【x.md】"));
+    expect(onWsTokens).toHaveBeenLastCalledWith({
+      "docs/x.md": {
+        desc: { kind: "file", workspaceId: "ws-9", path: "docs/x.md", name: "x.md" },
+        token: "【x.md】",
+      },
+    });
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    await waitFor(() => expect(ta.value).toBe("前文"));
+  });
+
+  it("删附件 chip 只剥附件 token，工作区 token 原样保留（删除联动隔离）", async () => {
+    uploadMock.mockImplementation(async () => ({
+      id: "att-mix-1",
+      kind: "file",
+      media_type: "text/plain",
+      bytes: 64,
+      name: "同名.md",
+      created_at: "2026-10-10T00:00:00Z",
+    }));
+    render(<SlotBar initial="" />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new File(["x"], "同名.md", { type: "text/plain" })],
+    });
+    fireEvent.change(input);
+    await waitFor(() => expect(screen.getAllByTitle(/右击插入正文引用/).length).toBe(1));
+    // 右击附件 → 插入【同名.md】
+    fireEvent.contextMenu(screen.getByTitle(/右击插入正文引用/));
+    const ta = (await screen.findByPlaceholderText("测试输入框")) as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toBe("【同名.md】"));
+    // 槽位插入同名工作区文件 → ·2
+    pushSlot(fileDesc("同名.md", "docs/同名.md"), 1);
+    await waitFor(() => expect(ta.value).toBe("【同名.md】【同名.md·2】"));
+    // 点 X 删附件 → 只剥附件 token，工作区 ·2 保留
+    fireEvent.click(screen.getByLabelText("移除附件 同名.md"));
+    await waitFor(() => expect(ta.value).toBe("【同名.md·2】"));
   });
 });

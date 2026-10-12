@@ -36,6 +36,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useState } from "react";
 import {
   cleanup,
   createEvent,
@@ -3054,3 +3055,168 @@ describe("汇总收口状态卡（task-10）", () => {
   });
 });
 
+
+// 2026-10-10-workspace-ref-intake task-08：群聊工作区引用全链路（槽位消费/并集分配/
+// 退格整删/发送置换/历史三类标签）。
+describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () => {
+  /** 带槽位 props 的挂载（受控槽位经全局 setter 驱动，单聊 SlotBar 同款）。 */
+  function renderPanelWithSlot(): ReturnType<typeof render> {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    panelQc = qc;
+    function SlotHost() {
+      const [slot, setSlot] = useState<{
+        desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
+        nonce: number;
+      } | null>(null);
+      (globalThis as {
+        __setGroupSlot?: (s: {
+          desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] };
+          nonce: number;
+        } | null) => void;
+      }).__setGroupSlot = setSlot;
+      return (
+        <QueryClientProvider client={qc}>
+          <GroupChatPanel
+            groupId="g-1"
+            group={null}
+            onSessionListRefresh={vi.fn()}
+            pendingWsRefInsert={slot as never}
+            onPendingWsRefInsertHandled={setSlot as never}
+          />
+        </QueryClientProvider>
+      );
+    }
+    return render(<SlotHost />);
+  }
+
+  function pushGroupSlot(
+    desc: { kind: string; workspaceId: string; path: string; name: string; lines?: [number, number] },
+    nonce: number,
+  ) {
+    act(() => {
+      (globalThis as { __setGroupSlot?: (s: unknown) => void }).__setGroupSlot?.({ desc, nonce });
+    });
+  }
+
+  it("槽位插入【design.md】→ 发送置换为 [文件引用:wid|path] → 草稿与映射清空", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    renderPanelWithSlot();
+    await waitForStreamWired();
+    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    pushGroupSlot(
+      { kind: "file", workspaceId: "ws-9", path: "docs/design.md", name: "design.md" },
+      1,
+    );
+    await waitFor(() => expect(ta.value).toContain("【design.md】"));
+    // 输入尾追加正文后发送（守卫空文本）。
+    fireEvent.change(ta, { target: { value: ta.value + " 看下方案" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+    });
+    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1));
+    expect(mocks.sendGroupMessage.mock.calls[0]![1]).toBe(
+      "[文件引用:ws-9|docs/design.md] 看下方案",
+    );
+  });
+
+  it("代码引用槽位带行号段；重复触发同 token 再插一枚", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    renderPanelWithSlot();
+    await waitForStreamWired();
+    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    pushGroupSlot(
+      { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
+      1,
+    );
+    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】"));
+    pushGroupSlot(
+      { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
+      2,
+    );
+    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】【a.py:10-16】"));
+  });
+
+  it("退格整删工作区标签（光标贴尾一次删整枚）", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    renderPanelWithSlot();
+    await waitForStreamWired();
+    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    pushGroupSlot(
+      { kind: "file", workspaceId: "ws-9", path: "x.md", name: "x.md" },
+      1,
+    );
+    await waitFor(() => expect(ta.value).toBe("【x.md】"));
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    fireEvent.keyDown(ta, { key: "Backspace" });
+    await waitFor(() => expect(ta.value).toBe(""));
+  });
+
+  it("删附件不误剥工作区 token（删除联动隔离）", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    renderPanelWithSlot();
+    await waitForStreamWired();
+    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    // 上传附件（upload mock 固定回包 name=报错日志.txt）并右击插入。
+    const fileInput = screen.getByLabelText("选择群消息附件") as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["x"], "任意名.md", { type: "text/plain" })],
+    });
+    await act(async () => {
+      fireEvent.change(fileInput);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1),
+    );
+    fireEvent.contextMenu(screen.getByTitle(/右击插入正文引用/));
+    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】"));
+    // 槽位插入同名工作区文件 → ·2（并集池跨类唯一化）。
+    pushGroupSlot(
+      { kind: "file", workspaceId: "ws-9", path: "docs/报错日志.txt", name: "报错日志.txt" },
+      1,
+    );
+    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】【报错日志.txt·2】"));
+    // 点 X 删附件 → 只剥附件 token。
+    fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
+    await waitFor(() => expect(ta.value).toBe("【报错日志.txt·2】"));
+  });
+
+  it("历史气泡三类标记渲染标签（code 引用图标+行号段）", async () => {
+    const WID = "cccccccc-1111-2222-3333-444444444444";
+    window.localStorage.clear();
+    harness.logsJson = [
+      {
+        id: "log-ws-1",
+        run_id: "r-ws",
+        timestamp: "2026-10-10T10:00:00Z",
+        channel: "user_input",
+        content_redacted: "看[代码引用:" + WID + "|src/a.py|L10-L16]这段",
+        metadata: { sender_member_name: "u1", sender_user_id: "u-1" },
+      },
+    ];
+    renderPanel();
+    await waitForStreamWired();
+    const tag = await screen.findByTitle("代码：src/a.py 第 10-16 行（点击预览）");
+    expect(tag.textContent).toBe("a.py:10-16");
+    expect(tag.querySelector("svg")!.getAttribute("class")).toContain("lucide-braces");
+    // 无标记消息仍走原高亮路径（renderMentionHighlights，其余既有用例覆盖）。
+  });
+
+  it("未接槽位的旧挂载（不传 props）零回归：无插入无置换直发原文", async () => {
+    window.localStorage.clear();
+    harness.logsJson = [];
+    renderPanel();
+    await waitForStreamWired();
+    const ta = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
+    fireEvent.change(ta, { target: { value: "普通消息" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+    });
+    await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalledTimes(1));
+    expect(mocks.sendGroupMessage.mock.calls[0]![1]).toBe("普通消息");
+  });
+});

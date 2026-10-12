@@ -133,3 +133,109 @@ describe("InputRefOverlay 角标悬停显示（att-ref-badge-hover）", () => {
     expect(onRemove).toHaveBeenCalledWith("【A.png】");
   });
 });
+
+// 2026-10-10-workspace-ref-intake task-04：类型角标与 tooltip 元数据（FR-03/D-001）。
+describe("InputRefOverlay 类型角标（tokenMetas）", () => {
+  const METAS = {
+    "【截图.png】": { kind: "att" as const, title: "附件：截图.png" },
+    "【design.md】": { kind: "file" as const, title: "文件：docs/design.md（工作区 ws-1）" },
+    "【docs】": { kind: "dir" as const, title: "目录：docs（工作区 ws-1）" },
+    "【a.py:10-16】": { kind: "code" as const, title: "代码：src/a.py 第 10-16 行（工作区 ws-1）" },
+  };
+
+  it("四类 kind 角标按映射渲染且 title 元数据正确", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="一【截图.png】二【design.md】三【docs】四【a.py:10-16】"
+        tokens={Object.keys(METAS)}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+      />,
+    );
+    const badges = container.querySelectorAll("[data-ws-ref-kind-badge]");
+    expect(Array.from(badges).map((el) => el.getAttribute("data-ws-ref-kind-badge"))).toEqual([
+      "att", "file", "dir", "code",
+    ]);
+    expect(badges[0]).toHaveAttribute("title", "附件：截图.png");
+    expect(badges[1]).toHaveAttribute("title", "文件：docs/design.md（工作区 ws-1）");
+    expect(badges[3]).toHaveAttribute("title", "代码：src/a.py 第 10-16 行（工作区 ws-1）");
+    // 图标按 kind 映射渲染（lucide svg class）
+    expect(badges[0]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-paperclip");
+    expect(badges[1]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-file-text");
+    expect(badges[2]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-folder");
+    expect(badges[3]!.querySelector("svg")!.getAttribute("class")).toContain("lucide-braces");
+  });
+
+  it("角标默认隐藏，visibleBadgeIndex 命中处淡入（沿用既有悬停机制）", () => {
+    const { rerender } = render(
+      <InputRefOverlay
+        value="【design.md】和【a.py:10-16】"
+        tokens={["【design.md】", "【a.py:10-16】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+      />,
+    );
+    const badges = document.querySelectorAll("[data-ws-ref-kind-badge]");
+    expect(badges[0]).toHaveClass("opacity-0", "pointer-events-none");
+    expect(badges[1]).toHaveClass("opacity-0", "pointer-events-none");
+    rerender(
+      <InputRefOverlay
+        value="【design.md】和【a.py:10-16】"
+        tokens={["【design.md】", "【a.py:10-16】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+        visibleBadgeIndex={1}
+      />,
+    );
+    expect(badges[0]).toHaveClass("opacity-0");
+    expect(badges[1]).toHaveClass("opacity-100", "pointer-events-auto");
+  });
+
+  it("未传 tokenMetas / token 未命中：零角标渲染，与现状逐字一致", () => {
+    const { container } = render(
+      <InputRefOverlay value="【A.png】和【B.png】" tokens={["【A.png】", "【B.png】"]} onRemoveToken={() => {}} />,
+    );
+    expect(container.querySelectorAll("[data-ws-ref-kind-badge]").length).toBe(0);
+    // 部分命中：仅命中 token 出角标
+    const t2 = render(
+      <InputRefOverlay
+        value="【A.png】和【B.png】"
+        tokens={["【A.png】", "【B.png】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={{ "【B.png】": { kind: "att", title: "附件：B.png" } }}
+      />,
+    );
+    const badges2 = t2.container.querySelectorAll("[data-ws-ref-kind-badge]");
+    expect(badges2.length).toBe(1);
+    expect(badges2[0]).toHaveAttribute("data-ws-ref-kind-badge", "att");
+  });
+
+  it("版式守卫（R-01）：加角标后占位文本保留、token span 无 margin/padding/border/opacity/transform、× 角标 z-20 不受影响", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="前文【design.md】后文"
+        tokens={["【design.md】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={{ "【design.md】": { kind: "file", title: "文件：design.md" } }}
+        visibleBadgeIndex={0}
+      />,
+    );
+    const tokenSpan = container.querySelector<HTMLElement>("[data-att-ref-occ]")!;
+    expect(tokenSpan).not.toBeNull();
+    // 背景块零布局类（铁律：严禁 margin/padding/border）
+    expect(tokenSpan.className).not.toMatch(/(^|s)(m|p|border)([-s]|$)/);
+    // token span 不得带 opacity/transform（stacking context 触发器）
+    expect(tokenSpan.className).not.toContain("opacity");
+    expect(tokenSpan.className).not.toContain("translate");
+    expect(tokenSpan.style.opacity).toBe("");
+    expect(tokenSpan.style.transform).toBe("");
+    // 占位文本仍在 DOM 撑宽（角标不改变标签文本宽度）
+    expect(tokenSpan.querySelector("span.text-transparent")?.textContent).toBe("【design.md】");
+    // 角标 absolute 不进文本流；× 角标 z-20 层级保留
+    const kindBadge = tokenSpan.querySelector("[data-ws-ref-kind-badge]")!;
+    expect(kindBadge.className).toContain("absolute");
+    const xBadge = screen.getByLabelText("移除引用 design.md");
+    expect(xBadge.className).toContain("z-20");
+    expect(xBadge.className).toContain("opacity-100");
+  });
+});

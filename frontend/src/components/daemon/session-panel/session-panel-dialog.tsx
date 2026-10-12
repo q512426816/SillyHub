@@ -25,7 +25,10 @@ import { type AttachmentRead } from "@/lib/api/session-attachments";
 import { joinAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
   substituteAttRefsForSend,
+  substituteWsRefsForSend,
   type AttRefTokenMap,
+  type WsRefDesc,
+  type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import {
   SessionInputBar, type SessionInputMentions,
@@ -107,6 +110,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     workspaceId,
     onTeamMissionCreated,
     offlineReadOnly = false,
+    // 2026-10-10-workspace-ref-intake task-07：工作区引用插入槽位（FR-01 通道；
+    // dialog 宿主未传时 null 零回归）。
+    pendingWsRefInsert,
+    onPendingWsRefInsertHandled,
   } = props;
 
   const [provider, setProvider] = useState(defaultProvider);
@@ -191,6 +198,9 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（D-003
   // 发送置换消费；dialog 与 page 同款）。
   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+  // 2026-10-10-workspace-ref-intake task-07：工作区引用 token 映射（D-008@v2
+  // 发送置换消费；dialog 与 page 同款）。
+  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化选中
@@ -309,7 +319,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     const sid = view.sessionId;
     const rawPrompt = input.trim();
     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换。
+    const prompt = substituteWsRefsForSend(
+      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+      wsRefTokens,
+    );
     if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
     setSchedSubmitting(true);
     try {
@@ -330,7 +344,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     } finally {
       setSchedSubmitting(false);
     }
-  }, [view.sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
+  }, [view.sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments, wsRefTokens]);
 
   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
   // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
@@ -389,7 +403,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     setInput((prev) => {
       const t = prev.trim();
       // task-04：prompt 为 token 置换版——草稿同样置换后比对（同 page 口径）。
-      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
+      // task-07：工作区 token 同点位串联置换（D-008@v2）。
+      const substituted = substituteWsRefsForSend(
+        substituteAttRefsForSend(t, attTokenMap, pendingAttachments),
+        wsRefTokens,
+      );
       return t === prompt || substituted === prompt || parseTeamCommand(t) === prompt ? "" : prev;
     });
     setPendingAttachments((prev) =>
@@ -399,7 +417,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
     // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机）。
     setPendingMentions({});
-  }, [attTokenMap, pendingAttachments]);
+  }, [attTokenMap, pendingAttachments, wsRefTokens]);
 
   // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
   // 不丢）；忙轮发送由 sendToServerQueue 直达后端入队。idle / creating 首条消息
@@ -1353,8 +1371,12 @@ export function SessionPanelDialog(props: SessionPanelProps) {
   const handleSend = useCallback(async () => {
     const rawPrompt = input.trim();
     // task-04（D-003）：入口置换引用 token，后续 sendFromQueue/steered 全路径
-    // 消费置换版；守卫/长度口径用 rawPrompt。
-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    // 消费置换版；守卫/长度口径用 rawPrompt。task-07（FR-06/D-008@v2）：工作区
+    // token 同点位串联置换。
+    const prompt = substituteWsRefsForSend(
+      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+      wsRefTokens,
+    );
     // ql-20260825-007：D-7 对齐 page——附件非空豁免空文本（看图说话）；纯文本
     // 仍要求非空。idle 首句走 createSession（无附件可带），但该态附件入口已被
     // 门控（attachmentsDisabled），pendingAttachments 恒空。
@@ -1523,7 +1545,7 @@ export function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, notify, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, attTokenMap, wsRefTokens, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active / 在线守卫；ql-20260904-010 起 RunErrorItem 对所有失败
@@ -2178,6 +2200,11 @@ export function SessionPanelDialog(props: SessionPanelProps) {
         attachmentsDisabledTitle={attachmentsDisabledTitle}
         onAttachmentsChange={setPendingAttachments}
         onAttTokenMapChange={setAttTokenMap}
+        // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
+        //（dialog 输入区，同 page 口径；宿主未传槽位时零回归）。
+        onWsRefTokensChange={setWsRefTokens}
+        pendingWsRefInsert={pendingWsRefInsert}
+        onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
         registerClearAttachments={(fn) => {
           clearAttachmentsRef.current = fn;
         }}

@@ -15,6 +15,10 @@
  *   pointer-events-none，不拦截下方 textarea），宿主经 wrapper onPointerMove 调
  *   hitTestAttRefOverlay 命中检测（标签区被 textarea 覆盖，CSS :hover 不可行），
  *   以 visibleBadgeIndex 控制仅命中处淡入显示；
+ * - 左上类型角标（2026-10-10-workspace-ref-intake task-04，FR-03/D-001）：
+ *   tokenMetas 命中的 token 挂 lucide 类型角标（附件 Paperclip / 文件 FileText /
+ *   目录 Folder / 代码块 Braces），absolute 不进文本流；悬停命中处随同淡入并显
+ *   示 title 元数据 tooltip；未传 tokenMetas 渲染与现状逐字一致；
  * - 版式对齐（R-01）：overlayClassName 传与 textarea 完全相同的字体/行高/
  *   padding/宽度 class，overlayStyle 透传高度拖拽同步值；本层自带
  *   whitespace-pre-wrap break-words 对齐 textarea 软换行。
@@ -22,14 +26,25 @@
  */
 
 import { useMemo } from "react";
-import { X } from "lucide-react";
+import { Braces, FileText, Folder, Paperclip, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+/** token 类型元数据（2026-10-10-workspace-ref-intake task-04，FR-03/D-001）：
+ *  kind 决定左上角类型角标图标，title 为悬停 tooltip 完整绑定元数据。 */
+export interface InputRefTokenMeta {
+  kind: "att" | "file" | "dir" | "code";
+  /** 悬停 tooltip：类型 + 工作区路径 + 行号 / 附件名等完整绑定。 */
+  title: string;
+}
+
+/** 类型角标图标映射（D-001：附件 Paperclip / 文件 FileText / 目录 Folder / 代码块 Braces）。 */
+const KIND_ICON = { att: Paperclip, file: FileText, dir: Folder, code: Braces } as const;
 
 interface InputRefOverlayProps {
   /** 输入框当前值（受控，与 textarea 同源）。 */
   value: string;
-  /** 需高亮的编辑态 token 文本集（attTokenMap 值集）。 */
+  /** 需高亮的编辑态 token 文本集（attTokenMap 值集 ∪ 工作区 wsRefTokens 值集）。 */
   tokens: string[];
   /** × 角标点击：从 value 中移除该 token 一次出现（由宿主执行并 onChange）。 */
   onRemoveToken: (token: string) => void;
@@ -42,6 +57,9 @@ interface InputRefOverlayProps {
   visibleBadgeIndex?: number | null;
   /** 容器 ref（宿主 hitTest 时查询 [data-att-ref-occ] 用）。 */
   containerRef?: React.Ref<HTMLDivElement>;
+  /** token → 类型元数据（FR-03/D-001）：命中渲染左上类型角标 + 悬停 tooltip；
+   *  未传或 token 未命中时不渲染角标（与现状逐字一致）。 */
+  tokenMetas?: Record<string, InputRefTokenMeta>;
 }
 
 /** 正则元字符转义（文件名可含 ()[] 等）。 */
@@ -113,6 +131,7 @@ export function InputRefOverlay({
   overlayStyle,
   visibleBadgeIndex,
   containerRef,
+  tokenMetas,
 }: InputRefOverlayProps) {
   const parts = useMemo(() => splitByTokens(value, tokens), [value, tokens]);
   if (tokens.length === 0) return null;
@@ -137,6 +156,8 @@ export function InputRefOverlay({
         occ += 1;
         const occIndex = occ;
         const visible = visibleBadgeIndex === occIndex;
+        const meta = tokenMetas?.[p.text];
+        const KindIcon = meta ? KIND_ICON[meta.kind] : null;
         return (
           <span
             key={i}
@@ -150,6 +171,24 @@ export function InputRefOverlay({
             <span aria-hidden className="text-transparent">
               {p.text}
             </span>
+            {/* 左上类型角标（FR-03/D-001）：absolute 不进文本流（不改变标签文本
+                宽度），与右上 × 角标同视觉语言；不进 hitTest 序号（删除交互仍归
+                × 角标）。z-20 越过 textarea；span 本体不带 opacity/transform
+                （stacking context 铁律）。未命中 tokenMetas 不渲染。 */}
+            {KindIcon && meta && (
+              <span
+                data-ws-ref-kind-badge={meta.kind}
+                title={meta.title}
+                className={cn(
+                  "absolute -left-1 -top-1 z-20 flex h-3.5 w-3.5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm transition-all",
+                  visible
+                    ? "pointer-events-auto opacity-100"
+                    : "pointer-events-none opacity-0",
+                )}
+              >
+                <KindIcon aria-hidden className="h-2.5 w-2.5" />
+              </span>
+            )}
             <button
               type="button"
               aria-label={`移除引用 ${p.text.replace(/^【|】$/g, "")}`}

@@ -157,6 +157,8 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
 // ql-20260829-010：scoped 工作区归档态判定（页头「新建会话」置灰）。
 import { getWorkspace } from "@/lib/workspaces";
 import { debounceLeadingTrailing } from "@/lib/utils";
+import type { WsRefDesc } from "@/lib/attachment-refs";
+import { useNotify } from "@/lib/errors";
 
 /* ────────────────────── 组件 ────────────────────── */
 
@@ -213,6 +215,28 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   const [subagentView, setSubagentView] = useState<{
     segmentId: string;
   } | null>(null);
+  // ── 2026-10-10-workspace-ref-intake task-06（FR-01 通道）：工作区引用插入
+  //    槽位——树右键/预览选区右键两入口组装 desc 落槽，nonce 自增保证同一
+  //    引用连续添加可重复触发；下发中栏四分支（群聊/真会话/预会话输入区
+  //    消费后回抛清槽；空门户态无消费者时 toast 兜底不落槽）。──
+  const [pendingWsRefInsert, setPendingWsRefInsert] = useState<{
+    desc: WsRefDesc;
+    nonce: number;
+  } | null>(null);
+  const wsRefInsertNonceRef = useRef(0);
+  const notify = useNotify();
+  /** 入口回调统一落槽（nonce 自增；空门户态无输入区消费者 → toast 不落槽）。 */
+  const handleAddWsRef = useCallback(
+    (desc: WsRefDesc) => {
+      if (!selectedGroupId && !selectedSessionId && !preContext) {
+        notify.warning("当前无可用输入区，请先选择或创建会话");
+        return;
+      }
+      wsRefInsertNonceRef.current += 1;
+      setPendingWsRefInsert({ desc, nonce: wsRefInsertNonceRef.current });
+    },
+    [selectedGroupId, selectedSessionId, preContext, notify],
+  );
   // 全局入口当前选中归属工作区（六写入点显式快照，D-006——原派生链有群深链不
   // 回填 selectedGroup、旁路列表外 find 不命中两处缺口；scope 入口不经此值）。
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
@@ -703,6 +727,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 setSubagentView(null);
                 setFilePreview({ workspaceId: filesModeWorkspaceId, path });
               }}
+              // 2026-10-10-workspace-ref-intake task-06：树右键「添加文件/目录到
+              // 会话输入框」入口（desc.workspaceId 由 FileExplorer 取树快照组好）。
+              onAddNodeRef={handleAddWsRef}
             />
           ) : (
             <SessionListPanel
@@ -925,6 +952,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             groupId={selectedGroupId}
             group={selectedGroup}
             onSessionListRefresh={refreshSessionLists}
+            // 2026-10-10-workspace-ref-intake task-06：槽位下发（群聊输入区
+            // task-08 消费；未接时 prop 冗余零影响）。
+            pendingWsRefInsert={pendingWsRefInsert}
+            onPendingWsRefInsertHandled={setPendingWsRefInsert}
           />
         ) : selectedSessionId ? (
           <SessionPanel
@@ -941,6 +972,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             openSubagentId={subagentView?.segmentId ?? null}
             onOpenSubagent={handleOpenSubagent}
             onSubagentPanelClose={() => setSubagentView(null)}
+            // 2026-10-10-workspace-ref-intake task-06：槽位下发（task-07 已接
+            // SessionPanelPage 消费链）。
+            pendingWsRefInsert={pendingWsRefInsert}
+            onPendingWsRefInsertHandled={setPendingWsRefInsert}
           />
         ) : preContext ? (
           <SessionPanel
@@ -951,6 +986,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             llmProviders={providers}
             preContext={preContext}
             onPreSessionCreated={handlePreSessionCreated}
+            // 2026-10-10-workspace-ref-intake task-06：槽位下发（预会话输入区）。
+            pendingWsRefInsert={pendingWsRefInsert}
+            onPendingWsRefInsertHandled={setPendingWsRefInsert}
           />
         ) : (
           // 空门户态（task-06 / X-12；2026-08-23-sessions-page-style 原型
@@ -1049,6 +1087,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 workspaceId={filePreview.workspaceId}
                 filePath={filePreview.path}
                 onClose={() => setFilePreview(null)}
+                // 2026-10-10-workspace-ref-intake task-06：预览选区右键入口
+                //（desc.workspaceId 由 FilePreview 取预览列自身工作区，防跨
+                // 工作区串档——desc 直接透传不重写）。
+                onAddSelectionRef={handleAddWsRef}
               />
             </div>
           </>

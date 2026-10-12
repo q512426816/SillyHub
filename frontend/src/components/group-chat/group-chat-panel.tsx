@@ -147,10 +147,14 @@ import {
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import {
   allocateAttRefToken,
-  parseInlineAttRefs,
+  allocateWsRefToken,
+  parseInlineRefs,
   stripAttRefTokens,
   substituteAttRefsForSend,
+  substituteWsRefsForSend,
+  wsRefMapKey,
   type AttRefTokenMap,
+  type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
@@ -176,7 +180,7 @@ import {
   type SessionPermissionRequest,
 } from "@/lib/daemon";
 import { useSession } from "@/stores/session";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ────────────────────── 常量 ────────────────────── */
@@ -1039,6 +1043,16 @@ export interface GroupChatPanelProps {
   /** 列表刷新信号（群解散/成员变更后 invalidate 通道，同 SessionPanel 语义）。 */
   onSessionListRefresh?: () => void;
   className?: string;
+  /**
+   * 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06 下发 / task-08
+   * 消费）：{desc, nonce}，nonce 自增保证同引用可重复触发；未传（本变更前
+   * 挂载方）零回归。类型先行声明归 D-012 裁决（通道文件缺口）。
+   */
+  pendingWsRefInsert?: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null;
+  /** 槽位消费完成回抛（portal 清槽）。 */
+  onPendingWsRefInsertHandled?: (
+    next: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null,
+  ) => void;
 }
 
 /**
@@ -1050,6 +1064,8 @@ export function GroupChatPanel({
   group,
   onSessionListRefresh,
   className,
+  pendingWsRefInsert,
+  onPendingWsRefInsertHandled,
 }: GroupChatPanelProps) {
   const notify = useNotify();
   const qc = useQueryClient();
@@ -1762,11 +1778,58 @@ export function GroupChatPanel({
    * （attId → 编辑态 token，D-002/D-003/D-004——右击插入/删附件联动剥离/
    * handleSend 置换，单聊 session-input-bar 同款口径）。 */
   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+  /* 2026-10-10-workspace-ref-intake task-08：工作区引用 token 映射（FR-08 三输入
+   * 区行为一致——分配池=附件∪工作区∪正文 inText 并集，D-005；组装位
+   * substituteWsRefsForSend 消费，D-008@v2）。 */
+  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
+  /** 两池并集 token 集（overlay 高亮 / 退格整删共用）。 */
+  const allRefTokens = [
+    ...Object.values(attTokenMap),
+    ...Object.values(wsRefTokens).map((e) => e.token),
+  ];
+  /** × 角标删除统一入口：一处出现移除 + 同步清工作区映射条目。 */
+  const removeRefOnce = (token: string) => {
+    setDraft((prev) => {
+      const idx = prev.indexOf(token);
+      return idx < 0 ? prev : prev.slice(0, idx) + prev.slice(idx + token.length);
+    });
+    if (Object.values(wsRefTokens).some((e) => e.token === token)) {
+      setWsRefTokens((prev) => {
+        const next = { ...prev };
+        for (const [k, e] of Object.entries(next)) {
+          if (e.token === token) delete next[k];
+        }
+        return next;
+      });
+    }
+  };
   /** 失焦前光标位（D-006@v3）：右击 chip 必先失焦，onBlur 记 selectionStart。 */
   const groupLastCaretRef = useRef<number | null>(null);
   /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示（单聊同款）。 */
   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
   const attOverlayRef = useRef<HTMLDivElement | null>(null);
+  /* task-08（FR-03）：overlay 类型角标元数据（单聊 session-input-bar 同款）。 */
+  const overlayTokenMetas = useMemo(() => {
+    const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
+    for (const att of pendingAttachments) {
+      const token = attTokenMap[att.id];
+      if (token) metas[token] = { kind: "att", title: `附件：${att.name}` };
+    }
+    for (const { desc, token } of Object.values(wsRefTokens)) {
+      if (desc.kind === "code" && desc.lines) {
+        metas[token] = {
+          kind: "code",
+          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceId}）`,
+        };
+      } else if (desc.kind === "dir") {
+        metas[token] = { kind: "dir", title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceId}）` };
+      } else {
+        metas[token] = { kind: "file", title: `文件：${desc.path}（工作区 ${desc.workspaceId}）` };
+      }
+    }
+    return metas;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attTokenMap, wsRefTokens, pendingAttachments]);
   const openPendingAttachmentPreview = (att: AttachmentRead) => {
     setPendingPreview({
       fetch: () => fetchAttachmentBlob(att.id),
@@ -1954,20 +2017,63 @@ export function GroupChatPanel({
     }
   };
 
-  const removeAttRefOnce = (token: string) => {
-    setDraft((prev) => {
-      const idx = prev.indexOf(token);
-      return idx < 0 ? prev : prev.slice(0, idx) + prev.slice(idx + token.length);
-    });
+  /* task-08：工作区引用插入（portal 槽位消费）——分配/复用 token 后按
+   *  handleInsertAttRef 同款光标机制（groupLastCaretRef 失焦光标位 + rAF 复位）。 */
+  const insertWsRefToken = (desc: import("@/lib/attachment-refs").WsRefDesc) => {
+    const key = wsRefMapKey(desc);
+    let entry = wsRefTokens[key];
+    if (!entry) {
+      const inText = draft.match(/【[^】]*】/g) ?? [];
+      const pool = [...allRefTokens, ...inText].filter(Boolean);
+      const base = desc.lines
+        ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
+        : desc.name;
+      entry = { desc, token: allocateWsRefToken(base, pool) };
+      setWsRefTokens({ ...wsRefTokens, [key]: entry });
+    }
+    const input = inputRef.current;
+    const focused = !!input && document.activeElement === input;
+    const caret = focused
+      ? (input.selectionStart ?? draft.length)
+      : (groupLastCaretRef.current ?? draft.length);
+    const next = draft.slice(0, caret) + entry.token + draft.slice(caret);
+    setDraft(next);
+    groupLastCaretRef.current = caret + entry.token.length;
+    const restore = () => {
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(caret + entry!.token.length, caret + entry!.token.length);
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(restore);
+    } else {
+      restore();
+    }
   };
+
+  /* 槽位消费（FR-01 落地点，单聊同款）：依赖 nonce（同引用连续添加可重复触发）；
+   *  消费后回抛清槽。未传槽位（旧挂载方）零 effect 副作用。 */
+  const handledWsNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingWsRefInsert) return;
+    if (handledWsNonceRef.current === pendingWsRefInsert.nonce) return;
+    handledWsNonceRef.current = pendingWsRefInsert.nonce;
+    insertWsRefToken(pendingWsRefInsert.desc);
+    onPendingWsRefInsertHandled?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWsRefInsert?.nonce]);
 
   const performSend = useCallback(async () => {
     const rawContent = draft.trim();
     const attachmentIds = pendingAttachments.map((a) => a.id);
     if ((!rawContent && attachmentIds.length === 0) || sending) return;
     // task-05（D-003）：正文引用 token 置换为 uuid 锚定正式引用（群聊出口仅
-    // 此处；tokenMap 空时原样返回）。守卫口径用原文。
-    const content = substituteAttRefsForSend(rawContent, attTokenMap, pendingAttachments);
+    // 此处；tokenMap 空时原样返回）。守卫口径用原文。task-08（FR-06/D-008@v2）：
+    // 工作区 token 同点位串联置换（三类标记）。
+    const content = substituteWsRefsForSend(
+      substituteAttRefsForSend(rawContent, attTokenMap, pendingAttachments),
+      wsRefTokens,
+    );
     setSending(true);
     // 发送即收口 typing（停顿指示器 + 心跳）。
     stopTypingReport();
@@ -1984,6 +2090,7 @@ export function GroupChatPanel({
       setDraft("");
       setPendingAttachments([]);
       setAttTokenMap({});
+      setWsRefTokens({});
       setReplyTarget(null);
       setUploadError(null);
       /* ── quick 群 P2 触发失败展示：消息恒 200 已落时间线，单成员触发失败
@@ -2003,7 +2110,7 @@ export function GroupChatPanel({
       setSending(false);
       inputRef.current?.focus();
     }
-  }, [draft, sending, groupId, pendingAttachments, attTokenMap, replyTarget, notify, stopTypingReport]);
+  }, [draft, sending, groupId, pendingAttachments, attTokenMap, wsRefTokens, replyTarget, notify, stopTypingReport]);
 
   const handleSend = useCallback(async () => {
     const content = draft.trim();
@@ -2057,7 +2164,7 @@ export function GroupChatPanel({
       const { selectionStart: s, selectionEnd: en } = ta;
       if (s === en && s > 0) {
         const before = draft.slice(0, s);
-        const matched = Object.values(attTokenMap)
+        const matched = allRefTokens
           .filter((t) => t && before.endsWith(t))
           .sort((a, b) => b.length - a.length);
         const token = matched[0];
@@ -2065,6 +2172,16 @@ export function GroupChatPanel({
           e.preventDefault();
           const next = draft.slice(0, s - token.length) + draft.slice(s);
           setDraft(next);
+          // 整删同步清工作区映射条目（附件映射由删附件联动管理）。
+          if (Object.values(wsRefTokens).some((e2) => e2.token === token)) {
+            setWsRefTokens((prev) => {
+              const nm = { ...prev };
+              for (const [k, e2] of Object.entries(nm)) {
+                if (e2.token === token) delete nm[k];
+              }
+              return nm;
+            });
+          }
           // 光标复位到标签原起点（受控 value DOM 更新后延迟执行）。
           const input = inputRef.current;
           const caret = s - token.length;
@@ -3042,12 +3159,14 @@ export function GroupChatPanel({
             >
               <InputRefOverlay
                 value={draft}
-                tokens={Object.values(attTokenMap)}
-                onRemoveToken={removeAttRefOnce}
+                tokens={allRefTokens}
+                onRemoveToken={removeRefOnce}
                 overlayClassName="min-h-[44px] w-full px-3.5 py-2.5 text-[13.5px]"
                 overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
                 visibleBadgeIndex={hoveredRefOcc}
                 containerRef={attOverlayRef}
+                /* task-08（FR-03/D-001）：两池 token 补类型元数据（角标+tooltip）。 */
+                tokenMetas={overlayTokenMetas}
               />
               <textarea
                 ref={inputRef}
@@ -3424,7 +3543,7 @@ function GroupTimelineRowInner({
                   /* task-06：正文含行内附件引用 → 标签化渲染（点击预览）；
                      该分支下 @提及暂不走高亮管线（引用+@ 同存为少数组合，
                      文本原样保留语义不变）；绝大多数消息走原高亮路径零变化。 */
-                  parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                  parseInlineRefs(entry.content).some((p) => p.type === "ref") ? (
                     <InlineAttRefTextWithPreview text={entry.content} tone="onPrimary" />
                   ) : (
                     renderMentionHighlights(entry.content, memberNames, true)
@@ -3481,7 +3600,7 @@ function GroupTimelineRowInner({
               {entry.replyTo && <ReplyQuoteBar snapshot={entry.replyTo} self={false} />}
               {entry.content ? (
                 /* task-06：他人消息同款分支——正文含行内引用走标签渲染。 */
-                parseInlineAttRefs(entry.content).some((p) => p.type === "ref") ? (
+                parseInlineRefs(entry.content).some((p) => p.type === "ref") ? (
                   <InlineAttRefTextWithPreview text={entry.content} />
                 ) : (
                   renderMentionHighlights(entry.content, memberNames, false)

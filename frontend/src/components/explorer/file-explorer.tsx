@@ -29,13 +29,15 @@
  * 依据：design.md §7.2 / Wave3 + tasks/task-06.md。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Button, Input, Spin, Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import { FolderOpen } from "lucide-react";
 
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
+import { FloatingContextMenu } from "@/components/ui/floating-context-menu";
 import { TreeBox } from "@/components/ui/tree-box";
+import type { WsRefDesc } from "@/lib/attachment-refs";
 import { ApiError } from "@/lib/api";
 import {
   fetchSearch,
@@ -56,6 +58,12 @@ export interface FileExplorerProps {
   workspaceId: string;
   /** 文件节点被选中（树内点击 / 搜索直达命中）时回调，入参为相对工作区根的 POSIX 路径。 */
   onSelectFile: (path: string) => void;
+  /**
+   * 树右键入口（2026-10-10-workspace-ref-intake FR-01）：右键文件/目录/根节点
+   * 出「添加文件/目录到会话输入框」菜单，点击组装 WsRefDesc 上抛（workspaceId
+   * 取组件 prop）。未传时右键为浏览器默认菜单，树行为与现状一致。
+   */
+  onAddNodeRef?: (desc: WsRefDesc) => void;
 }
 
 /** 文件大小缩写：B / KB / MB / GB（文件条目右侧灰字，目录不显示）。 */
@@ -108,11 +116,29 @@ function sortEntries(entries: ExplorerEntry[]): ExplorerEntry[] {
 
 /** 条目标题：名称 + 文件大小缩写（灰字）。整行单行展示——容器 whitespace-nowrap，
  *  行宽超出容器由树容器 w-max 放开靠外层 overflow-auto 横向滚动看全名
- *  （ql-20260818-010-f551 滚动语义 + ql-20260821-008-fade 单行修复）。 */
-function renderTitle(entry: ExplorerEntry) {
+ *  （ql-20260818-010-f551 滚动语义 + ql-20260821-008-fade 单行修复）。
+ *  onContextMenu 挂 title 行元素（FR-01 树右键入口），闭包携带 kind 与 relPath。 */
+function renderTitle(
+  entry: ExplorerEntry,
+  relPath: string,
+  onNodeContextMenu?: (e: ReactMouseEvent, kind: "file" | "dir", path: string, name: string) => void,
+) {
   const size = entry.type === "file" ? formatSize(entry.size) : "";
   return (
-    <span className="inline-flex items-baseline gap-1 whitespace-nowrap">
+    <span
+      className="inline-flex items-baseline gap-1 whitespace-nowrap"
+      onContextMenu={
+        onNodeContextMenu
+          ? (e) =>
+              onNodeContextMenu(
+                e,
+                entry.type === "dir" ? "dir" : "file",
+                relPath,
+                entry.name,
+              )
+          : undefined
+      }
+    >
       <span title={entry.name}>{entry.name}</span>
       {size ? <span className="shrink-0 text-[11px] text-muted-foreground">{size}</span> : null}
     </span>
@@ -120,23 +146,43 @@ function renderTitle(entry: ExplorerEntry) {
 }
 
 /** 目录项 → 树节点（key = 相对根 POSIX 路径；目录可展开、文件为叶子）。 */
-function entriesToNodes(entries: ExplorerEntry[], parentPath: string): DataNode[] {
-  return sortEntries(entries).map((entry) => ({
-    key: parentPath === "" ? entry.name : `${parentPath}/${entry.name}`,
-    title: renderTitle(entry),
-    isLeaf: entry.type === "file",
-    icon: <FileNodeIcon name={entry.name} type={entry.type} />,
-  }));
+function entriesToNodes(
+  entries: ExplorerEntry[],
+  parentPath: string,
+  onNodeContextMenu?: Parameters<typeof renderTitle>[2],
+): DataNode[] {
+  return sortEntries(entries).map((entry) => {
+    const relPath = parentPath === "" ? entry.name : `${parentPath}/${entry.name}`;
+    return {
+      key: relPath,
+      title: renderTitle(entry, relPath, onNodeContextMenu),
+      isLeaf: entry.type === "file",
+      icon: <FileNodeIcon name={entry.name} type={entry.type} />,
+    };
+  });
 }
 
-/** 根节点：标题「工作区根」，首层 children 挂载时预挂（rc-tree 对已有 children 的节点不再触发 loadData）。 */
-function makeRootNode(entries: ExplorerEntry[]): DataNode {
+/** 根节点：标题「工作区根」，首层 children 挂载时预挂（rc-tree 对已有 children 的节点不再触发 loadData）。
+ *  根节点 title 行同样挂右键（kind=dir、path="" 空串、name=工作区根，FR-01）。 */
+function makeRootNode(
+  entries: ExplorerEntry[],
+  onNodeContextMenu?: Parameters<typeof renderTitle>[2],
+): DataNode {
   return {
     key: ROOT_KEY,
-    title: <span className="font-medium">{ROOT_TITLE}</span>,
+    title: (
+      <span
+        className="font-medium"
+        onContextMenu={
+          onNodeContextMenu ? (e) => onNodeContextMenu(e, "dir", "", ROOT_TITLE) : undefined
+        }
+      >
+        {ROOT_TITLE}
+      </span>
+    ),
     isLeaf: entries.length === 0,
     icon: <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />,
-    children: entriesToNodes(entries, ""),
+    children: entriesToNodes(entries, "", onNodeContextMenu),
   };
 }
 
@@ -151,7 +197,7 @@ function formatExplorerError(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
+export function FileExplorer({ workspaceId, onSelectFile, onAddNodeRef }: FileExplorerProps) {
   // ── 树状态（受控）──────────────────────────────────────────────────────
   const [treeData, setTreeData] = useState<DataNode[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
@@ -160,6 +206,32 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
   const [treeError, setTreeError] = useState("");
   /** 根层重试计数器（自增触发 effect 重载）。 */
   const [rootNonce, setRootNonce] = useState(0);
+
+  // ── 树右键菜单（FR-01）：未传 onAddNodeRef 时零拦截（浏览器默认菜单）────
+  const [nodeMenu, setNodeMenu] = useState<{
+    x: number;
+    y: number;
+    kind: "file" | "dir";
+    path: string;
+    name: string;
+  } | null>(null);
+
+  /** 行右键：preventDefault 出受控菜单（右键不改变选中与展开语义——不走 antd
+   *  onRightClick/onSelect 链路，选中仍走 onSelect）。 */
+  const handleNodeContextMenu = useCallback(
+    (
+      e: ReactMouseEvent,
+      kind: "file" | "dir",
+      path: string,
+      name: string,
+    ) => {
+      if (!onAddNodeRef) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setNodeMenu({ x: e.clientX, y: e.clientY, kind, path, name });
+    },
+    [onAddNodeRef],
+  );
 
   // ── 搜索状态 ─────────────────────────────────────────────────────────
   /** 输入框当前值（逐键变化）。 */
@@ -196,7 +268,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
       try {
         const resp = await fetchTree(workspaceId, "");
         if (cancelled) return;
-        setTreeData([makeRootNode(resp.entries)]);
+        setTreeData([makeRootNode(resp.entries, handleNodeContextMenu)]);
         // 根自动展开，首层目录直接可见（children 已预挂，不再触发 loadData）。
         setExpandedKeys([ROOT_KEY]);
       } catch (err) {
@@ -218,7 +290,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
     const path = keyToPath(node.key);
     try {
       const resp = await fetchTree(workspaceId, path);
-      setTreeData((prev) => updateTreeData(prev, node.key, entriesToNodes(resp.entries, path)));
+      setTreeData((prev) => updateTreeData(prev, node.key, entriesToNodes(resp.entries, path, handleNodeContextMenu)));
     } catch (err) {
       // 单节点失败：置空 children（与空目录区分靠红条）+ 提示，不崩溃。
       setTreeData((prev) => updateTreeData(prev, node.key, []));
@@ -301,7 +373,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
             continue;
           }
           const resp = await fetchTree(workspaceId, dir);
-          tree = updateTreeData(tree, dir, entriesToNodes(resp.entries, dir));
+          tree = updateTreeData(tree, dir, entriesToNodes(resp.entries, dir, handleNodeContextMenu));
           expanded.add(dir);
           // 逐层落盘渲染（受控 expandedKeys 同步更新才能逐层展开）。
           setTreeData(tree);
@@ -316,7 +388,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
           const existing = findNode(tree, match.path);
           if (!existing?.children) {
             const resp = await fetchTree(workspaceId, match.path);
-            tree = updateTreeData(tree, match.path, entriesToNodes(resp.entries, match.path));
+            tree = updateTreeData(tree, match.path, entriesToNodes(resp.entries, match.path, handleNodeContextMenu));
           }
           expanded.add(match.path);
           setTreeData(tree);
@@ -331,7 +403,7 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
         navigatingRef.current = false;
       }
     },
-    [workspaceId, onSelectFile],
+    [workspaceId, onSelectFile, handleNodeContextMenu],
   );
 
   const showResultPanel = searching || searchError !== "" || results !== null;
@@ -428,6 +500,36 @@ export function FileExplorer({ workspaceId, onSelectFile }: FileExplorerProps) {
           />
         </TreeBox>
       )}
+
+      {/* 树右键菜单（FR-01）：受控 FloatingContextMenu，单项「添加文件/目录到会话
+          输入框」；点击组装 WsRefDesc（workspaceId 取组件 prop）上抛后关闭。 */}
+      <FloatingContextMenu
+        open={nodeMenu !== null}
+        x={nodeMenu?.x ?? 0}
+        y={nodeMenu?.y ?? 0}
+        onClose={() => setNodeMenu(null)}
+        items={
+          nodeMenu
+            ? [
+                {
+                  key: "add-ws-ref",
+                  label:
+                    nodeMenu.kind === "file"
+                      ? "添加文件到会话输入框"
+                      : "添加目录到会话输入框",
+                  onSelect: () => {
+                    onAddNodeRef?.({
+                      kind: nodeMenu.kind,
+                      workspaceId,
+                      path: nodeMenu.path,
+                      name: nodeMenu.name,
+                    });
+                  },
+                },
+              ]
+            : []
+        }
+      />
     </div>
   );
 }

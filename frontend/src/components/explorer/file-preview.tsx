@@ -33,8 +33,8 @@
  */
 
 import dynamic from "next/dynamic";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Image, Spin, Typography } from "antd";
 import {
   CodeOutlined,
@@ -46,6 +46,7 @@ import {
 
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { MarkdownText } from "@/components/ui/markdown-text";
+import type { WsRefDesc } from "@/lib/attachment-refs";
 import { formatFileSize } from "@/lib/file/utils";
 import { downloadExplorerFile, fetchDownload, useExplorerFile } from "@/lib/explorer";
 
@@ -336,6 +337,159 @@ function BinaryMetaCard({ name, size, mtime }: { name: string; size: number; mti
   );
 }
 
+// ── 行号与选区引用（2026-10-10-workspace-ref-intake task-02，FR-04/FR-05）──
+
+/**
+ * 纯文本分支行号槽统一标记——selectionLineRange 的行号锚（textContent=行号）。
+ * 代码分支（SyntaxHighlighter）用其内置行号 span（class=
+ * ``react-syntax-highlighter-line-number``）作锚，两类锚统一按文本解析行号。
+ */
+const WS_REF_LINE_ATTR = "data-ws-ref-line";
+/** 行号锚选择器：自绘行号槽 + SyntaxHighlighter 内置行号。 */
+const LINE_ANCHOR_SELECTOR = `[${WS_REF_LINE_ATTR}], .react-syntax-highlighter-line-number`;
+
+/** 文本内容按行拆分（尾换行不产空末行，行号与编辑器 1 起始语义一致）。 */
+function splitContentLines(content: string): string[] {
+  const lines = content.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/**
+ * 纯文本分支行结构渲染：行号槽（不可选中）+ 内容行（挂 data-line），保留
+ * ``whitespace-pre`` 不软折行 + 横向滚动语义（ql-20260818-010-f551）。
+ * 行号列宽按总行数位数自适应（等宽字体 ch 单位），右对齐留 gutter。
+ */
+function PlainTextWithLineNumbers({ content }: { content: string }) {
+  const lines = splitContentLines(content);
+  const gutterCh = String(lines.length).length + 1;
+  return (
+    <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed">
+      {lines.map((line, i) => (
+        <div key={i} data-line={i + 1} className="flex whitespace-pre">
+          <span
+            {...{ [WS_REF_LINE_ATTR]: i + 1 }}
+            className="flex-none select-none pr-3 text-right text-muted-foreground/70"
+            style={{ minWidth: `${gutterCh}ch` }}
+          >
+            {i + 1}
+          </span>
+          <span className="whitespace-pre">{line || "\u00A0"}</span>
+        </div>
+      ))}
+    </pre>
+  );
+}
+
+/**
+ * 选区行范围（FR-05/D-006/R-04）：按选区起止节点的「前序最近行号锚」取实际文档
+ * 行号（非字符 offset——软折行/横向滚动天然免疫），反向选区取 min-max。选区
+ * 折叠、为空或起止不在内容区行结构内 → null（调用方放行浏览器默认右键菜单）。
+ */
+export function selectionLineRange(container: HTMLElement): [number, number] | null {
+  const sel = typeof window === "undefined" ? null : window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) {
+    return null;
+  }
+  const anchors = Array.from(container.querySelectorAll<HTMLElement>(LINE_ANCHOR_SELECTOR));
+  if (anchors.length === 0) return null;
+
+  /** node 的前序最近行号锚下标（含自身/祖先命中）；无 → -1。 */
+  const precedingAnchorIdx = (node: Node): number => {
+    const el = node instanceof HTMLElement ? node : node.parentElement;
+    if (!el) return -1;
+    let best = -1;
+    anchors.forEach((anchor, i) => {
+      if (anchor === el || anchor.contains(el) || el.contains(anchor)) {
+        best = i;
+        return;
+      }
+      // rel 中 FOLLOWING 位=el 在 anchor 之后（anchor 前置于 el）
+      const rel = anchor.compareDocumentPosition(el);
+      if (rel & Node.DOCUMENT_POSITION_FOLLOWING) best = i;
+    });
+    return best;
+  };
+
+  const startIdx = precedingAnchorIdx(range.startContainer);
+  const endIdx = precedingAnchorIdx(range.endContainer);
+  if (startIdx < 0 || endIdx < 0) return null;
+  const l0 = Number(anchors[startIdx]!.textContent);
+  const l1 = Number(anchors[endIdx]!.textContent);
+  if (!Number.isFinite(l0) || !Number.isFinite(l1) || l0 < 1 || l1 < 1) return null;
+  return [Math.min(l0, l1), Math.max(l0, l1)];
+}
+
+/** 选区右键菜单态（FR-05）：右键坐标 + 选区行范围。 */
+interface SelectionMenuState {
+  x: number;
+  y: number;
+  lines: [number, number];
+}
+
+/**
+ * 选区右键菜单（本文件内联实现，task-03 的通用浮动菜单组件并行无依赖——
+ * 看板 kanban-task-context-menu.tsx:29-47 同模式）：fixed 定位 + document 级
+ * click/contextmenu/scroll 关闭（capture 兜内部滚动）+ 视口 clamp。受控 React
+ * 状态，监听随菜单关闭/卸载移除，无残留。
+ */
+function SelectionContextMenu({
+  state,
+  fileName,
+  onPick,
+  onClose,
+}: {
+  state: SelectionMenuState;
+  fileName: string;
+  onPick: (lines: [number, number]) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const close = () => onClose();
+    document.addEventListener("click", close);
+    document.addEventListener("contextmenu", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("contextmenu", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [onClose]);
+
+  const [l0, l1] = state.lines;
+  // 视口 clamp：菜单右/下缘不溢出（粗估菜单尺寸 220x44，右键坐标即左上角）。
+  const left = Math.max(8, Math.min(state.x, window.innerWidth - 228));
+  const top = Math.max(8, Math.min(state.y, window.innerHeight - 52));
+  return (
+    <div
+      role="menu"
+      style={{ left, top }}
+      className="fixed z-50 min-w-[13rem] rounded-md border border-border bg-popover p-1 shadow-md"
+    >
+      <button
+        type="button"
+        role="menuitem"
+        className="block w-full truncate rounded px-2 py-1.5 text-left text-xs text-popover-foreground hover:bg-brand-50 hover:text-brand-700 dark:hover:bg-brand-600/20"
+        onClick={() => {
+          onPick(state.lines);
+          onClose();
+        }}
+      >
+        添加选中内容到会话输入框（{fileName}:{l0}-{l1}）
+      </button>
+    </div>
+  );
+}
+
+/** 路径末段文件名（path 末空段过滤，兼容反斜杠）。 */
+function nameOf(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
 // ── 主组件 ────────────────────────────────────────────────────────────
 
 export interface FilePreviewProps {
@@ -343,9 +497,15 @@ export interface FilePreviewProps {
   workspaceId: string;
   /** 选中文件相对路径（相对工作区根）；null=未选中，显示空态占位。 */
   filePath: string | null;
+  /**
+   * 选区右键入口回调（2026-10-10-workspace-ref-intake FR-05）：代码/纯文本分支
+   * 选中行右键「添加选中内容到会话输入框」时组装 kind=code 的引用描述符上抛；
+   * 未传（explorer 页等其它消费方）不拦截 contextmenu，行为与现状一致（D-002）。
+   */
+  onAddSelectionRef?: (desc: WsRefDesc) => void;
 }
 
-export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
+export function FilePreview({ workspaceId, filePath, onAddSelectionRef }: FilePreviewProps) {
   const query = useExplorerFile(workspaceId, filePath);
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
@@ -360,6 +520,38 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
   useEffect(() => {
     setSourceMode(false);
   }, [filePath]);
+  // 选区右键菜单态（FR-05）：null=无菜单；内容区 ref 供 selectionLineRange 圈定。
+  const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  /** 选区右键（D-006）：仅文本类分支（代码/纯文本）+ 已传回调 + 非空选区才拦截；
+   *  其余场景放行浏览器默认菜单。 */
+  const handleContentContextMenu = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!onAddSelectionRef || !contentRef.current) return;
+      const lines = selectionLineRange(contentRef.current);
+      if (!lines) return;
+      e.preventDefault();
+      setSelectionMenu({ x: e.clientX, y: e.clientY, lines });
+    },
+    [onAddSelectionRef],
+  );
+
+  /** 菜单项点击：组装 kind=code 的引用描述符上抛（D-003 指向语义——只带行范围）。 */
+  const handlePickSelection = useCallback(
+    (lines: [number, number]) => {
+      if (filePath == null) return;
+      const fileName = nameOf(filePath);
+      onAddSelectionRef?.({
+        kind: "code",
+        workspaceId,
+        path: filePath,
+        name: fileName,
+        lines,
+      });
+    },
+    [onAddSelectionRef, workspaceId, filePath],
+  );
 
   const handleDownload = useCallback(async () => {
     if (filePath == null || downloading) return;
@@ -408,12 +600,16 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
   const data = query.data;
   if (!data) return null;
 
-  const name = data.name || filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
+  const name = data.name || nameOf(filePath);
   const ext = fileExtension(name);
   const isImage = IMAGE_EXTENSIONS.has(ext);
   const isNativePreview = BROWSER_PREVIEW_EXTENSIONS.has(ext);
   const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
   const language = CODE_LANGUAGES[ext];
+  // 选区右键仅覆盖文本类分支（代码/纯文本，D-002：.md 富文本无行号概念不拦截）；
+  // 原生预览默认态走 iframe、源码态的 pdf 走 binary 卡，同样无选区功能。
+  const selectionBranch =
+    !isImage && !data.binary && !isMarkdown && !(isNativePreview && !sourceMode);
 
   // 内容区分发（原生预览默认态优先：pdf/html/htm 直接 iframe 渲染，「源码」切换
   // 后走原分支——html→高亮源码、pdf→binary 元信息卡；图片优先于 binary 判定）
@@ -439,18 +635,23 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
         language={language}
         style={oneDark}
         customStyle={{ margin: 0, borderRadius: 6, fontSize: 12 }}
+        // 行号（FR-04/D-007）：oneDark 自带行号配色；列不可选中（选区锚点只落内容区），
+        // 对齐 fontSize 12 观感（R-03）。
+        showLineNumbers
+        lineNumberStyle={{
+          userSelect: "none",
+          minWidth: "3ch",
+          paddingRight: "0.75rem",
+          fontSize: 12,
+        }}
       >
         {data.content}
       </SyntaxHighlighter>
     );
   } else {
-    // 纯文本与代码高亮分支统一「不软折行 + 横向滚动」语义（ql-20260818-010-f551），
-    // 避免长行代码被 wrap 折得难读；容器 overflow-auto 提供横向滚动。
-    body = (
-      <pre className="overflow-auto rounded-md bg-muted/40 p-3 font-mono text-xs leading-relaxed whitespace-pre">
-        {data.content}
-      </pre>
-    );
+    // 纯文本分支行结构化（FR-04）：行号槽 + 内容行（data-line），保留 whitespace-pre
+    // 与横向滚动语义（ql-20260818-010-f551）；行号列为 selectionLineRange 锚。
+    body = <PlainTextWithLineNumbers content={data.content} />;
   }
 
   // 截断警示仅对实际渲染文本内容的分支展示（原生预览/图片/二进制不渲染 content，无截断可言）
@@ -509,7 +710,11 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div
+        ref={contentRef}
+        className="min-h-0 flex-1 overflow-auto p-3"
+        onContextMenu={selectionBranch ? handleContentContextMenu : undefined}
+      >
         {showTruncatedTip && (
           <Alert
             type="warning"
@@ -520,6 +725,16 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
         )}
         {body}
       </div>
+      {/* 选区右键菜单（FR-05）：fixed 定位随内容区滚动关闭；Modal 之后渲染不影响
+          既有 flex 布局（脱离文档流）。 */}
+      {selectionMenu && (
+        <SelectionContextMenu
+          state={selectionMenu}
+          fileName={name}
+          onPick={handlePickSelection}
+          onClose={() => setSelectionMenu(null)}
+        />
+      )}
       {/* 统一预览弹窗（2026-08-26-file-fullscreen-preview / FR-05）：打开即全屏，
           target 构造见头部「全屏预览」按钮（不携带 officeSource，D-007）。Modal 经
           Portal 渲染到 body，作为根 div 的 JSX 子节点不影响 flex 布局 */}

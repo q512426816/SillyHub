@@ -428,4 +428,91 @@ describe("FileExplorer（task-06）", () => {
     const paths = mockFetchTree.mock.calls.map((c) => c[1]);
     expect(paths).toEqual(["", "backend"]);
   });
+
+  // ── 树右键菜单（2026-10-10-workspace-ref-intake task-03，FR-01）────────────────
+
+  it("右键文件节点出单项菜单，点击回调 desc 逐字段正确（file）", async () => {
+    mockDefaultTree();
+    const onAddNodeRef = vi.fn();
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    await waitForRoot();
+
+    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 120, clientY: 80 });
+    const item = screen.getByRole("menuitem");
+    expect(item).toHaveTextContent("添加文件到会话输入框");
+    fireEvent.click(item);
+    expect(onAddNodeRef).toHaveBeenCalledTimes(1);
+    expect(onAddNodeRef).toHaveBeenCalledWith({
+      kind: "file",
+      workspaceId: "ws1",
+      path: "README.md",
+      name: "README.md",
+    });
+    // 点击后菜单关闭
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("右键目录节点菜单文案为目录，desc path 为相对根路径", async () => {
+    mockDefaultTree();
+    const onAddNodeRef = vi.fn();
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    await waitForRoot();
+
+    fireEvent.contextMenu(screen.getByText("backend"), { clientX: 60, clientY: 40 });
+    const item = screen.getByRole("menuitem");
+    expect(item).toHaveTextContent("添加目录到会话输入框");
+    fireEvent.click(item);
+    expect(onAddNodeRef).toHaveBeenCalledWith({
+      kind: "dir",
+      workspaceId: "ws1",
+      path: "backend",
+      name: "backend",
+    });
+  });
+
+  it("右键根节点：kind=dir、path 空串、name=工作区根", async () => {
+    mockDefaultTree();
+    const onAddNodeRef = vi.fn();
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />);
+    await waitForRoot();
+
+    fireEvent.contextMenu(screen.getByText("工作区根"), { clientX: 30, clientY: 30 });
+    fireEvent.click(screen.getByRole("menuitem"));
+    expect(onAddNodeRef).toHaveBeenCalledWith({
+      kind: "dir",
+      workspaceId: "ws1",
+      path: "",
+      name: "工作区根",
+    });
+  });
+
+  it("document 点击/右键别处关闭菜单；未传 onAddNodeRef 时右键零拦截", async () => {
+    mockDefaultTree();
+    const onAddNodeRef = vi.fn();
+    const { unmount } = render(
+      <FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} onAddNodeRef={onAddNodeRef} />,
+    );
+    await waitForRoot();
+
+    // 出菜单后 document 级点击关闭
+    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // 再出菜单后右键别处也关闭
+    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.contextMenu(document.body, { clientX: 200, clientY: 200 });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onAddNodeRef).not.toHaveBeenCalled();
+
+    // 未传回调（新实例）：右键为浏览器默认菜单（不 preventDefault）
+    unmount();
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    await waitForRoot();
+    const evt = fireEvent.contextMenu(screen.getByText("backend"), { clientX: 5, clientY: 5 });
+    expect(evt).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
 });
