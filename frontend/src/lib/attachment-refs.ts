@@ -143,6 +143,9 @@ export type WsRefKind = "file" | "dir" | "code";
 export interface WsRefDesc {
   kind: WsRefKind;
   workspaceId: string;
+  /** 显示用工作区名（2026-10-12：portal 组装时填充，tooltip 显示中文名；缺省
+   *  回退 id。纯显示字段——发送置换/历史解析零消费，不进任何标记协议）。 */
+  workspaceName?: string;
   /** 相对工作区根 POSIX 路径；目录引用根为 ""。 */
   path: string;
   /** 显示名（路径末段；根目录 = "工作区根"）。 */

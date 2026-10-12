@@ -155,7 +155,8 @@ import {
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 // ql-20260829-010：scoped 工作区归档态判定（页头「新建会话」置灰）。
-import { getWorkspace } from "@/lib/workspaces";
+import { getWorkspace, listWorkspaces } from "@/lib/workspaces";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 import { debounceLeadingTrailing } from "@/lib/utils";
 import type { WsRefDesc } from "@/lib/attachment-refs";
 import { useNotify } from "@/lib/errors";
@@ -225,7 +226,28 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   } | null>(null);
   const wsRefInsertNonceRef = useRef(0);
   const notify = useNotify();
-  /** 入口回调统一落槽（nonce 自增；空门户态无输入区消费者 → toast 不落槽）。 */
+  /* 2026-10-12-ws-ref-ws-name：工作区 id → 中文名（tooltip 显示用；与
+   * SessionListPanel 同 key 同 queryFn，react-query 缓存共享零额外请求）。 */
+  const wsNameQuery = useQuery({
+    queryKey: ["workspace-switcher-list"] as const,
+    queryFn: async () => {
+      const [{ items }, bindings] = await Promise.all([
+        listWorkspaces({ limit: 100 }),
+        fetchMyBindings(),
+      ]);
+      return { items, bindings };
+    },
+    staleTime: 60_000,
+  });
+  const wsIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ws of wsNameQuery.data?.items ?? []) {
+      map.set(ws.id, ws.display_alias ?? ws.name);
+    }
+    return map;
+  }, [wsNameQuery.data]);
+  /** 入口回调统一落槽（nonce 自增；空门户态无输入区消费者 → toast 不落槽）；
+   *  desc 补工作区中文名（tooltip 显示，两输入区 metas 构造消费）。 */
   const handleAddWsRef = useCallback(
     (desc: WsRefDesc) => {
       if (!selectedGroupId && !selectedSessionId && !preContext) {
@@ -233,9 +255,12 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         return;
       }
       wsRefInsertNonceRef.current += 1;
-      setPendingWsRefInsert({ desc, nonce: wsRefInsertNonceRef.current });
+      setPendingWsRefInsert({
+        desc: { ...desc, workspaceName: wsIdToName.get(desc.workspaceId) },
+        nonce: wsRefInsertNonceRef.current,
+      });
     },
-    [selectedGroupId, selectedSessionId, preContext, notify],
+    [selectedGroupId, selectedSessionId, preContext, notify, wsIdToName],
   );
   // 全局入口当前选中归属工作区（六写入点显式快照，D-006——原派生链有群深链不
   // 回填 selectedGroup、旁路列表外 find 不命中两处缺口；scope 入口不经此值）。

@@ -446,17 +446,17 @@ export function SessionInputBar({
       if (desc.kind === "code" && desc.lines) {
         metas[token] = {
           kind: "code",
-          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceId}）`,
+          title: `代码：${desc.path || "工作区根"} 第 ${desc.lines[0]}-${desc.lines[1]} 行（工作区 ${desc.workspaceName ?? desc.workspaceId}）`,
         };
       } else if (desc.kind === "dir") {
         metas[token] = {
           kind: "dir",
-          title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceId}）`,
+          title: `目录：${desc.path || "工作区根"}（工作区 ${desc.workspaceName ?? desc.workspaceId}）`,
         };
       } else {
         metas[token] = {
           kind: "file",
-          title: `文件：${desc.path}（工作区 ${desc.workspaceId}）`,
+          title: `文件：${desc.path}（工作区 ${desc.workspaceName ?? desc.workspaceId}）`,
         };
       }
     }
