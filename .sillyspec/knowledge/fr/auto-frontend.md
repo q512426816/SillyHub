@@ -1637,3 +1637,129 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-emoji-inline
   status: active
+
+## FR-auto-frontend-168 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 标签在场且光标被点击/键盘落入内部 / When 落位吸附触发 / Then selectionStart 位于标签边界之一。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-01
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头；后半 → 吸附块尾」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-169 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 光标贴标签尾 / When 按 ← / Then 光标到块头；对称 → 从块头到块尾。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-02
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「贴尾按 ← 跳到块头；再按一次才离开标签」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-170 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 目标 range 部分触碰标签 / When beforeinput / Then 输入被拒绝、value 不变；Given range 完整覆盖标签 / Th
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-03
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「标签内部打字/删字（部分重叠）拒绝」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-171 Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：兜底
+场景正文：
+- 场景：兜底 — Given Home 落入标签内部 / When select 事件触发吸附 / Then 光标到最近边界。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-04
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-172 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：零回归
+场景正文：
+- 场景：零回归 — Given 贴尾按退格 / Then 整枚标签删除（既有）；Given 联想浮层激活 / Then ↑↓/Enter/Tab/Esc 归浮层（既有）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-05
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-173 单聊+群聊两输入区一致；相关测试全绿
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 群聊输入框 / Then 与单聊同款跳块/吸附/拒绝行为。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-06
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-06
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active

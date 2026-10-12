@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-atomic-caret",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头；后半 → 吸附块尾」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「贴尾按 ← 跳到块头；再按一次才离开标签」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「标签内部打字/删字（部分重叠）拒绝」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-06",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-atomic-caret"
+    }
+  ]
+}

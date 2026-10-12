@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户反馈：引用标签应是一个整体——当前光标能点进标签内部改文字，左右移动光标签被当普通文字逐字符穿过。为标签加原子性拦截（不动 textarea
+  架构）：点击吸附边界、方向键整块跳过、内部编辑拒绝、部分重叠删除拒绝（选区完整覆盖整块放行随选删除）
+
+
+  成功标准：
+
+  - 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
+
+  - 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
+
+  - 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
+
+  - Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
+
+  - 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
+
+  - 单聊+群聊两输入区一致；相关测试全绿
+autopilot: false
+baseline_commit: 9904157b995bbf83085c52dd884a81a6e9e0ab3c
+updatedAt: '2026-10-12T02:09:50.458Z'
+baseline_sha256: 994ecc37629e0850e5568f61b2ae5183ecdd01d2846975151a02e6b36fce363e
+spec_approved: true
+spec_approved_at: '2026-10-12T02:01:34.877Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+gate_summary: >-
+  test: passed ← module[]+deps(jsx10)+fr(9)（46.9s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261012020306\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 4 个
+

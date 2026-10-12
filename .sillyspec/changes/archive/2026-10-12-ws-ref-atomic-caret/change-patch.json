@@ -1,0 +1,91 @@
+{
+  "change": "2026-10-12-ws-ref-atomic-caret",
+  "baseline": "9904157b995bbf83085c52dd884a81a6e9e0ab3c",
+  "head": "6199917b53ffc249caab23f350cb796e863a5a37",
+  "files": [
+    "frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/use-atomic-ref-caret.ts",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    ".sillyspec/changes/2026-10-12-ws-ref-atomic-caret/design.md",
+    ".sillyspec/changes/2026-10-12-ws-ref-atomic-caret/proposal.md",
+    ".sillyspec/changes/2026-10-12-ws-ref-atomic-caret/requirements.md",
+    ".sillyspec/changes/2026-10-12-ws-ref-atomic-caret/review.json",
+    ".sillyspec/changes/2026-10-12-ws-ref-atomic-caret/tasks.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 536,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-12T02:09:47.228Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9904157b995bbf83085c52dd884a81a6e9e0ab3c",
+    "totals": {
+      "files": 4,
+      "additions": 340,
+      "deletions": 6
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx",
+        "additions": 175,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 20,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/use-atomic-ref-caret.ts",
+        "additions": 124,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+        "additions": 21,
+        "deletions": 5,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "3b0ec6f4fd5732ebb2bd427e3a9c8cac96922272f7d929c9e6518a7f925b6801",
+  "patchStatus": "ok"
+}
