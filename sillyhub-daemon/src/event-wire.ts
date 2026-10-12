@@ -450,3 +450,19 @@ export function eventToSubmitMessages(
   }
   return messages;
 }
+
+/**
+ * F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 收尾冲刷残留 delta
+ * 缓冲为 submitMessages 行。bf4c47c07 只落了 eventToSubmitMessages 可选参，
+ * 唯一生产调用点 spawn-stream 未传实例（死代码）——本导出供 spawnAndStream
+ * 收尾组合使用：flushAll 输出 + 消息级 timestamp（F2a 同口径）。冲刷时刻无
+ * 源事件，session 三列（appendSessionWireColumns 以事件为单位注入）不携带
+ * ——行仍按 run_id 归属（submit 调用自带 run 维度），session 级 metadata
+ * 缺列影响限于一条消息的尾部残片。
+ */
+export function coalescerFlushAllMessages(
+  coalescer: import('./agent-log/message-coalescer.js').MessageCoalescer,
+): Record<string, unknown>[] {
+  const ts = new Date().toISOString();
+  return coalescer.flushAll().map((m) => ({ ...m, timestamp: ts }));
+}

@@ -23,6 +23,9 @@ import type { ProtocolAdapter } from '../adapters/protocol-adapter.js';
 import type { Envelope } from '../resilience/service.js';
 import { dedupKeyFor, toCauseInfo } from '../resilience/error-classify.js';
 import type { AgentEvent, LeaseCtx } from '../types.js';
+// F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级合并缓冲器 + 收尾冲刷导出。
+import { MessageCoalescer } from '../agent-log/message-coalescer.js';
+import { coalescerFlushAllMessages } from '../event-wire.js';
 import type {
   SpawnOpts,
   TaskRunnerCore,
@@ -245,6 +248,12 @@ export async function spawnAndStream(
   // ql-20260706-010：收集 fire-and-forget forward promise，claude exit 后 await，
   // 防尾部消息（429 attempt/API Error/最后 tool_result）在 daemon 收尾时丢失。
   const pendingForwards: Promise<unknown>[] = [];
+  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级流式 delta 合并
+  // 缓冲器——bf4c47c07 落了 eventToSubmitMessages 可选参但本调用点未传（死
+  // 代码），此处激活。生命周期=单次 spawn attempt（readline 单协程串行 feed，
+  // 无跨执行体共享；delta 不跨 attempt——新进程消息 id 不延续）；收尾在
+  // pendingForwards await 前统一冲刷（见下方 flushAll 接线）。
+  const coalescer = new MessageCoalescer();
   // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
   // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
   let lastStats: Record<string, unknown> | undefined;
@@ -457,6 +466,7 @@ export async function spawnAndStream(
           prompt,
           model: ctx.model,
           pendingForwards,
+          coalescer,
         });
       }
       child.off('exit', exitCloser);
@@ -484,6 +494,24 @@ export async function spawnAndStream(
   // ql-20260706-010：await 所有 pending forward，确保 claude exit 前瞬间产生的
   // 尾部消息（429 attempt / API Error / 最后 tool_result）发完再返回，防
   // fire-and-forget 在 daemon 收尾时丢失（c76562cd 实证 10 条 429 attempt 全丢）。
+  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 收尾冲刷残留 delta
+  // 缓冲——取消/超时 break 出循环同样到达此处，残留内容保底提交（宁碎片不丢
+  // 内容）；空 claimToken/agentRunId 与逐行转发同守卫跳过（forwardSubmitMessages
+  // 内 ql-004 口径）。冲刷行按 run_id 归属，不带 session 三列（无源事件，见
+  // event-wire.ts coalescerFlushAllMessages 注释）。
+  const flushedMessages = coalescerFlushAllMessages(coalescer);
+  if (flushedMessages.length > 0) {
+    forwardSubmitMessages(
+      runner,
+      {
+        leaseId,
+        claimToken,
+        agentRunId: ctx.agentRunId ?? '',
+        pendingForwards,
+      },
+      flushedMessages,
+    );
+  }
   if (pendingForwards.length > 0) {
     await Promise.allSettled(pendingForwards);
   }
@@ -552,6 +580,12 @@ export interface HandleLineEnv {
   model?: string;
   /** ql-20260706-010：收集本行 forward promise，runLease exit 后统一 await。 */
   pendingForwards: Promise<unknown>[];
+  /**
+   * F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级流式 delta 合并
+   * 缓冲器——spawnAndStream 创建并随 env 透传给 _eventToMessages；仅
+   * spawn-stream 内部构造，外部无新增实现方。
+   */
+  coalescer: MessageCoalescer;
 }
 
 /**
@@ -703,8 +737,9 @@ export async function handleLine(
         env.outputParts.push(ev.content);
       }
     }
-    // 转 submitMessages 负载
-    const msgs = runner._eventToMessages(ev);
+    // 转 submitMessages 负载（F2b 接线：透传 attempt 级合并缓冲器——流式
+    // delta 并入缓冲不直发，完结行触发冲刷，2026-10-13-review-risk-fixes FR-01）。
+    const msgs = runner._eventToMessages(ev, env.coalescer);
     if (msgs && msgs.length > 0) {
       messages.push(...msgs);
     }
@@ -716,34 +751,54 @@ export async function handleLine(
 
   // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
   // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
+  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：转发逻辑提取为
+  // forwardSubmitMessages 单源（与 attempt 收尾冲刷共用），守卫与通道语义
+  // 逐条保留（ql-004 空 claimToken/agentRunId 不发；task-11 resilience
+  // submitWithRetry + dedup_key / 未注入回退 client.submitMessages）。
+  forwardSubmitMessages(runner, env, messages);
+}
+
+/**
+ * F2b 接线（2026-10-13-review-risk-fixes FR-01）：submitMessages 转发单源——
+ * 从 handleLine 内联体原样提取（resilience envelopes/dedup_key、fire-and-forget
+ * catch、claimToken/agentRunId 守卫逐条保留），供 handleLine 批次与 attempt
+ * 收尾冲刷（coalescerFlushAllMessages 产出）共用。行为与提取前逐字节等价。
+ */
+export function forwardSubmitMessages(
+  runner: TaskRunnerCore,
+  env: Pick<
+    HandleLineEnv,
+    'leaseId' | 'claimToken' | 'agentRunId' | 'pendingForwards'
+  >,
+  messages: Record<string, unknown>[],
+): void {
   // ql-004：空 agentRunId 不发 submitMessages，防空 agent_run_id 422 风暴。
-  // task-11（FR-10 / D-005@v1）：注入 resilience 时走 submitWithRetry（带退避重试 +
-  // dedup_key），保持非阻塞（void + catch）；未注入回退原 client.submitMessages。
-  if (env.claimToken && env.agentRunId) {
-    if (runner.resilience) {
-      const envelopes: Envelope[] = messages.map((m, idx) => ({
-        message: m,
-        dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
-      }));
-      env.pendingForwards.push(
-        runner.resilience
-          .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
-          .catch((e) => {
-            console.warn(
-              'task_runner: event_forward_failed',
-              env.leaseId,
-              toCauseInfo(e),
-            );
-          }),
-      );
-    } else {
-      env.pendingForwards.push(
-        runner.client
-          .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
-          .catch((e) => {
-            console.warn('task_runner: event_forward_failed', env.leaseId, e);
-          }),
-      );
-    }
+  if (!(env.claimToken && env.agentRunId)) {
+    return;
+  }
+  if (runner.resilience) {
+    const envelopes: Envelope[] = messages.map((m, idx) => ({
+      message: m,
+      dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
+    }));
+    env.pendingForwards.push(
+      runner.resilience
+        .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
+        .catch((e) => {
+          console.warn(
+            'task_runner: event_forward_failed',
+            env.leaseId,
+            toCauseInfo(e),
+          );
+        }),
+    );
+  } else {
+    env.pendingForwards.push(
+      runner.client
+        .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
+        .catch((e) => {
+          console.warn('task_runner: event_forward_failed', env.leaseId, e);
+        }),
+    );
   }
 }

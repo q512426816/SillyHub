@@ -18,6 +18,7 @@ import type { ResilienceService } from '../resilience/service.js';
 import type { PolicyEngine } from '../policy/filesystem-policy.js';
 import type { ProtocolAdapter } from '../adapters/protocol-adapter.js';
 import type { TerminalObserver } from '../terminal-observer.js';
+import type { MessageCoalescer } from '../agent-log/message-coalescer.js';
 import type {
   AgentEvent,
   TaskResult,
@@ -227,8 +228,16 @@ export interface TaskRunnerCore {
   readonly config?: DaemonConfig;
   /** 网络层重试编排（可选注入）。 */
   readonly resilience?: ResilienceService | null;
-  /** AgentEvent → submitMessages message dict 列表（本体在 facade）。 */
-  _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null;
+  /**
+   * AgentEvent → submitMessages message dict 列表（本体在 facade）。
+   * F2b 接线（2026-10-13-review-risk-fixes FR-01）：可选 coalescer——spawn-stream
+   * 传 attempt 级实例激活流式 delta 合并；缺省（undefined）保持 legacy 直发
+   * （既有实现/测试 fake 少参签名结构兼容，零破坏）。
+   */
+  _eventToMessages(
+    ev: AgentEvent,
+    coalescer?: MessageCoalescer,
+  ): Record<string, unknown>[] | null;
   /** batch Codex 带内审批决策（本体在 facade）。 */
   _handleApprovalDecision(
     adapter: ProtocolAdapter,

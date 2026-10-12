@@ -97,6 +97,8 @@ import type { PendingServerRequest } from './adapters/json-rpc.js';
 // 与 backend/app/modules/agent/tool_kind.py 同逻辑，修改须同步（R-05 防漂移）。
 // task-04 轻重构②：_eventToMessages 转换核心收敛至此（AgentEvent→wire dict 单一实现源）。
 import { eventToSubmitMessages } from './event-wire.js';
+// F2b 接线（2026-10-13-review-risk-fixes FR-01）：_eventToMessages 可选参类型。
+import type { MessageCoalescer } from './agent-log/message-coalescer.js';
 import type {
   AgentEvent,
   LeaseCtx,
@@ -1406,8 +1408,13 @@ export class TaskRunner {
    *
    * 返回 null：未知 event type 或所有 message 都被过滤。
    */
-  private _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null {
-    return eventToSubmitMessages(ev);
+  private _eventToMessages(
+    ev: AgentEvent,
+    coalescer?: MessageCoalescer,
+  ): Record<string, unknown>[] | null {
+    // F2b 接线（2026-10-13-review-risk-fixes FR-01）：透传 attempt 级合并缓冲器
+    // ——spawn-stream 传实例激活流式 delta 合并，缺省保持 legacy 直发。
+    return eventToSubmitMessages(ev, coalescer);
   }
 
   // ── task-08（D-006 / D-009）：budget 软切断事件回传 ─────────────────────────
