@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-init-permission-relax",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4c27f731d5dec5a89ad1d7e3bc9503808c73a424",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "design 风险披露缺口：\"init 不产生服务端提权\"评估不实——viewer 经 init 间接获得服务端 spec 源直写能力",
+      "evidence": "init lease claim 是 shpsync_ sync token 全仓唯一签发点（daemon/lease/context.py:856），持 token 可调 POST /changes/-/spec-sync → apply_ops 单事务直写落盘服务端 spec 源（platform_sync/router.py:233-264，无审批门）+五个同通道写端点；viewer 可经 PUT /my-binding（同为 WORKSPACE_READ 门，member_runtimes/router.py:121）自建绑定。已清偿：补正提交 4c27f731d 重写 design「风险与死路」——删除两处不准确表述，逐条落锚点（router.py:121 / context.py:856 / router.py:233-264），净新增面评估（触发人群扩大到全部只读成员、shpsync 写链路本身未改）与我首评 evidence 一致，裁决改「有条件可接受」并留痕跟进项（服务层按角色收窄 init 或收窄 shpsync token 写域，独立变更不阻塞）",
+      "location": "backend/app/modules/daemon/lease/context.py:856",
+      "status": "resolved"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-03 绑定测试断言弱于场景描述：未断言 details.permission 字段",
+      "evidence": "已清偿：补正提交 4c27f731d 为 test_init_non_member_still_403 增加 assert body[\"details\"][\"permission\"] == \"workspace:read\"（test_init_permission.py:141），值正确（PermissionDenied details.permission=permission.value，auth_deps.py:123；WORKSPACE_READ=\"workspace:read\"，permissions.py:58），补强后三用例实测 3 passed",
+      "location": "backend/tests/modules/workspace/test_init_permission.py:141",
+      "status": "resolved"
+    },
+    {
+      "severity": "P3",
+      "title": "ensure_spec_workspace 先于成员绑定解析执行，无绑定者每次 init 都留下服务端容器行（已知留债）",
+      "evidence": "start_init_dispatch 中 ensure_spec_workspace（agent/service.py:2094）在 MemberBindingResolver.resolve_member_binding（:2097）之前，无绑定成员/访客必先幂等创建 SpecWorkspace 容器行再吃 409。留债合理：副作用仅一行幂等默认容器（R10 唯一约束并发收口，spec_workspace/service.py:627-632）、无内容写入、不影响 FR-02 的 409 语义；修复需调整 start_init_dispatch 内错误优先级顺序（归档 409 vs 绑定 409 谁先），属行为变更非纯修复，与本权限放宽正交，复审确认留债",
+      "location": "backend/app/modules/agent/service.py:2094",
+      "status": "open"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklistNotes": {
+    "frTraceability": "FR-01..06 三方一致（首评核实，补正提交未触碰实现）：FR-01 router.py:461 WORKSPACE_READ 且 require_permission 按路径 {workspace_id} 解析（auth_deps.py:114）；FR-02 测试断言 409+code=member_binding_not_found，实测 3 passed；FR-03 测试断言 403+details.workspace_id+details.permission=workspace:read（补强后），隔离由 has_permission workspace 段仅认 user_workspace_roles 该行保证（rbac.py:144-149）；FR-04 router.py:275 activate 仍 WORKSPACE_WRITE，测试断言 details.permission=workspace:write；FR-05 三用例全绿；FR-06 openapi.json 与 api-types.ts 零 diff",
+    "blindDimensions": "首评已核实全部属实（乱序/并发/切换/作用域），补正提交仅改 design 文档与测试断言、未触碰实现，结论不变",
+    "disclosureRulings": "补正后 design 裁决「有条件可接受」与我首评结论一致：①viewer 获得 init 权限有条件可接受——init 本体无害、shpsync 链路沿用既有语义、跟进项（角色收窄 init 或收窄 token 写域）已如实留痕为独立变更；②③④三条放弃方案理由维持可接受，未被补正触碰",
+    "guardVerification": "三道防护均真实存在且在权限门之后（首评核实，实现未动）：MemberBindingResolver 复合主键查发起者自己绑定无行 409（resolver.py:35-37 / exceptions.py:10-33）；ensure_writable 归档 409（workspace/service.py:472-488，调用点 agent/service.py:2091）；非成员 403（auth_deps.py:114-126 + rbac.py:144-149）",
+    "artifactSync": "openapi.json 与 api-types.ts 零 diff（首评核实；补正提交 4c27f731d 仅含 design.md + test_init_permission.py，不触契约面）",
+    "revisionCompliance": "FR-09 修订合规（首评核实）：只调档位、保留 workspace-scoped 隔离意图，activate 未动",
+    "reReview": "复审范围=补正提交 4c27f731d（design.md 风险节重写 + 测试断言补强，非全量首评）。核实：①工作树 design.md/test 与 HEAD 一致（git diff HEAD 为空，design.md 系首次入库故 diff 显示全量新增，内容即补正后口径）；②design 补正表述与我 P2 事实逐条吻合（router.py:121 自建绑定 READ 门 / context.py:856 唯一签发点 / router.py:233-264 apply_ops 直写无审批门 / 五个同通道写端点 / 净新增面=人群扩大），跟进项如实留痕；③断言补强到位且值正确，3 passed；④P3-1 未修，留债合理（副作用幂等轻微、修复属行为变更与本变更正交）。复审 verdict 维持 PASS",
+    "firstReviewAgainst": "ec6806f648531d9276f48856c5ce4618d1324042"
+  },
+  "reviewedAt": "2026-10-12T14:31:54+08:00"
+}

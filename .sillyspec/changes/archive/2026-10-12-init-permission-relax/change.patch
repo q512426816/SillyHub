@@ -1,0 +1,443 @@
+diff --git a/backend/app/modules/workspace/router.py b/backend/app/modules/workspace/router.py
+index 972fc5816..97e4337af 100644
+--- a/backend/app/modules/workspace/router.py
++++ b/backend/app/modules/workspace/router.py
+@@ -458,7 +458,7 @@ async def get_workspace(
+ async def init_workspace(
+     workspace_id: uuid.UUID,
+     session: SessionDep,
+-    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
++    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+ ) -> dict:
+     """Initialize the workspace for the current user (D-002/D-009).
+ 
+@@ -469,9 +469,14 @@ async def init_workspace(
+ 
+     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+ 
+-    鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
+-    workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
+-    ``start_init_dispatch`` 的 actor binding 解析。
++    鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped
++    WORKSPACE_READ——init 语义是"为当前成员初始化本地副本"，developer 等
++    只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id
++    62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409
++    MemberBindingNotFound），归档区禁写由 ensure_writable 兜底。
++    修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；
++    其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有
++    workspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。
+     """
+     from app.modules.agent.service import AgentService
+ 
+diff --git a/backend/tests/modules/workspace/test_init_permission.py b/backend/tests/modules/workspace/test_init_permission.py
+new file mode 100644
+index 000000000..a6b3b9128
+--- /dev/null
++++ b/backend/tests/modules/workspace/test_init_permission.py
+@@ -0,0 +1,154 @@
++"""Init endpoint permission boundary tests — 2026-10-12-init-permission-relax.
++
++修订 2026-08-14-security-audit-remediation FR-09 的权限档位：``POST
++/api/workspaces/{id}/init`` 由 workspace-scoped ``workspace:write`` 放宽为
++``workspace:read``（用户裁决 2026-10-12：init 语义是"为当前成员初始化本地
++副本"（D-002/D-009），developer 等只读角色是它的日常消费者；服务层本就
++强制成员 daemon 绑定，无绑定走既有 409 MemberBindingNotFound）。
++
++三用例：
++- developer 成员（角色仅 workspace:read，与生产权限精简后种子一致）无绑定
++  → 409 而非 403（权限门放行的判别信号）；
++- 非本工作区成员 → 仍 403（FR-09 工作区隔离意图不回退）；
++- activate 端点不动 → 非成员仍 403（WORKSPACE_WRITE 保持，FR-04）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++
++import pytest
++from httpx import AsyncClient
++
++pytestmark = pytest.mark.asyncio
++
++
++@pytest.fixture()
++async def readonly_role(db_session):
++    """仅含 ``workspace:read`` 一个权限点的成员角色。
++
++    对齐生产权限精简（2026-10-08-rbac-dead-permissions-cleanup）后 developer
++    的真实权限面——不复刻旧测试夹具里 developer 带 workspace:write 的漂移。
++    """
++    from app.modules.auth.model import Role, RolePermission
++    from app.modules.auth.permissions import Permission
++
++    role = Role(
++        id=uuid.uuid4(),
++        key="dev_readonly_init_t",
++        name="Developer (read-only, init test)",
++        is_system=True,
++    )
++    db_session.add(role)
++    await db_session.flush()
++    db_session.add(RolePermission(role_id=role.id, permission=Permission.WORKSPACE_READ.value))
++    await db_session.commit()
++    return role
++
++
++async def _make_user_and_token(db_session, *, email: str):
++    """Create an active user + bearer token (hermetic, per-test SQLite)."""
++    from app.core.config import get_settings
++    from app.core.security import create_access_token, password_hasher
++    from app.modules.auth.model import User
++
++    u = User(
++        id=uuid.uuid4(),
++        email=email,
++        password_hash=password_hasher.hash("Pass123!"),
++        display_name="U",
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add(u)
++    await db_session.commit()
++    await db_session.refresh(u)
++    token, _ = create_access_token(
++        user_id=u.id,
++        email=u.email,
++        is_admin=False,
++        settings=get_settings(),
++    )
++    return u, token
++
++
++async def _make_workspace(db_session, tmp_path, *, name: str):
++    from app.modules.workspace.model import Workspace
++
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=name,
++        slug=f"ws-{uuid.uuid4().hex[:8]}",
++        root_path=str(tmp_path),
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _bind_member(db_session, *, workspace_id, user_id, role_id):
++    from app.modules.auth.model import UserWorkspaceRole
++
++    db_session.add(
++        UserWorkspaceRole(
++            user_id=user_id,
++            workspace_id=workspace_id,
++            role_id=role_id,
++            granted_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++
++
++def _bearer(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++@pytest.mark.asyncio
++async def test_init_developer_member_without_binding_gets_409_not_403(
++    client: AsyncClient, db_session, readonly_role, tmp_path
++):
++    """仅 workspace:read 的成员发起 init 必须过权限门：无 daemon 绑定 → 409。
++
++    旧实现（WORKSPACE_WRITE 门）下此用例得 403 —— 本变更的先红信号。
++    """
++    user, token = await _make_user_and_token(db_session, email="dev-init@x.com")
++    ws = await _make_workspace(db_session, tmp_path, name="InitRelax WS")
++    await _bind_member(db_session, workspace_id=ws.id, user_id=user.id, role_id=readonly_role.id)
++
++    resp = await client.post(f"/api/workspaces/{ws.id}/init", headers=_bearer(token))
++    assert resp.status_code == 409, resp.text
++    body = resp.json()
++    assert body["code"] == "member_binding_not_found"
++
++
++@pytest.mark.asyncio
++async def test_init_non_member_still_403(client: AsyncClient, db_session, readonly_role, tmp_path):
++    """非本工作区成员发起 init → 仍 403（FR-09 工作区隔离意图不回退）。"""
++    _outsider, token = await _make_user_and_token(db_session, email="outsider-init@x.com")
++    member, _ = await _make_user_and_token(db_session, email="member-init@x.com")
++    ws = await _make_workspace(db_session, tmp_path, name="InitIsolation WS")
++    # member 有绑定、outsider 没有——outsider 的 403 与角色无关。
++    await _bind_member(db_session, workspace_id=ws.id, user_id=member.id, role_id=readonly_role.id)
++
++    resp = await client.post(f"/api/workspaces/{ws.id}/init", headers=_bearer(token))
++    assert resp.status_code == 403, resp.text
++    body = resp.json()
++    assert body["details"]["workspace_id"] == str(ws.id)
++
++
++@pytest.mark.asyncio
++async def test_activate_still_requires_write_non_member_403(
++    client: AsyncClient, db_session, readonly_role, tmp_path
++):
++    """activate 端点不动（FR-04）：非成员仍 403，权限门保持 WORKSPACE_WRITE。"""
++    _outsider, token = await _make_user_and_token(db_session, email="outsider-act@x.com")
++    ws = await _make_workspace(db_session, tmp_path, name="ActUntouched WS")
++
++    resp = await client.post(f"/api/workspaces/{ws.id}/activate", headers=_bearer(token))
++    assert resp.status_code == 403, resp.text
++    body = resp.json()
++    assert body["details"]["permission"] == "workspace:write"
+diff --git a/.sillyspec/changes/2026-10-12-init-permission-relax/tasks.md b/.sillyspec/changes/2026-10-12-init-permission-relax/tasks.md
+new file mode 100644
+index 000000000..35c882279
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-init-permission-relax/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:19:08.221Z
++---
++# 任务注册表（Tasks）— 2026-10-12-init-permission-relax
++
++- [x] task-01: 新建 backend/tests/modules/workspace/test_init_permission.py——developer 成员(仅 workspace:read)POST /init 期望 409、非成员期望 403、activate 非成员期望 403;旧实现下跑出 developer 用例红(403)(验证:pytest -k init 1 failed)
++- [x] task-02: workspace/router.py init 端点权限依赖改 WORKSPACE_READ + docstring 口径更新为修订说明;task-01 三用例转绿(验证:pytest tests/modules/workspace/test_init_permission.py 全绿)
++- [x] task-03: 回归与提交——重跑 test_init_permission.py + 相邻 workspace 测试抽样;显式 pathspec 提交(消息带 task-NN);确认 openapi.json 零变化(验证:git diff backend/openapi.json 为空)
+diff --git a/.sillyspec/changes/2026-10-12-init-permission-relax/design.md b/.sillyspec/changes/2026-10-12-init-permission-relax/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-init-permission-relax/design.md
+@@ -0,0 +1,93 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:19:08.221Z
++---
++# 设计记录（Design Record）— 2026-10-12-init-permission-relax
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`POST /api/workspaces/{id}/init`（`backend/app/modules/workspace/router.py:457`）
++的权限依赖从 `require_permission(Permission.WORKSPACE_WRITE)` 改为
++`require_permission(Permission.WORKSPACE_READ)`，并把 docstring 里的
++"鉴权收紧为 workspace-scoped（task-09）"注释更新为修订后的口径。
++
++选这个方案的依据：①init 的语义是"为当前成员初始化本地副本"（D-002/D-009），
++服务层 `AgentService.start_init_dispatch` 本就强制发起者必须有成员 daemon
++绑定（`MemberBindingResolver.resolve_member_binding` 无绑定即 409
++MemberBindingNotFound），权限门只是第二道闸——降为 `workspace:read`
++（= 是本工作区成员）后，防线仍由成员绑定+归档区禁写
++（`WorkspaceService.ensure_writable`）兜底；②2026-08-14-security-audit-remediation
++FR-09 的核心意图是 workspace 隔离（非本工作区成员即便全局有写权限也 403），
++本变更保留隔离、只调档位，是修订不是回退；③生产实证 developer 成员
++（181144@spdemo）被挡在初始化之外，而开发者正是需要初始化本地环境的日常角色。
++
++测试先行：新建 `tests/modules/workspace/test_init_permission.py`，
++developer 成员（角色仅 `workspace:read`，与生产权限精简后的真实种子一致）
++期望 409 而非 403（旧实现下先红），非成员期望 403（守护 FR-09 隔离不回退），
++activate 非成员仍 403（FR-04 不动面）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `POST /api/workspaces/{id}/init`：权限要求由 workspace-scoped
++  `workspace:write` 放宽为 workspace-scoped `workspace:read`。路径、请求体
++  （无 body）、成功响应（lease_id/runtime_id/claim_token）与错误体系均不变。
++- 成员视角行为变化：developer / viewer / business_member 等仅读角色可进入
++  服务层；无 daemon 绑定时得到既有 409 MemberBindingNotFound（此前是 403）。
++- 非成员行为不变：403（details 的 permission 字段值随依赖变为 workspace:read）。
++- `POST /api/workspaces/{id}/activate` 不动（仍 WORKSPACE_WRITE）。
++- 无 DTO/OpenAPI schema 变化，无需重生成 api-types；函数签名无变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++答：单请求同步权限判定，无事件流。权限缓存（Redis 三键）失效链路不受
++影响——权限判定读的是角色权限点，本次只改"要求哪个权限点"，缓存语义不变。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++答：init 并发语义不变——服务层 ensure_spec_workspace 幂等建容器、lease
++创建为独立行，两个成员并发各自初始化各自的本地副本互不冲突；本变更不改
++任何写入路径，仅改前置权限判定。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++答：部署窗口内新旧版本共存时，新前端+旧后端的成员 init 仍会 403（旧行为），
++不产生脏状态；旧前端+新后端下成员 init 直接可用。无需灰度——放宽类变更
++失败面是"继续 403"，与现状一致。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++答：权限判定仍按路径 `{workspace_id}` 逐工作区解析（require_permission 的
++workspace-scoped 语义），在 A 工作区有角色不会解锁 B 工作区的 init；
++归档区禁写守卫（ensure_writable）在服务层按目标工作区生效，不受影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：viewer（访客）也获得 init 权限——访客若配置了成员 daemon 绑定，
++可把 spec 包拉到自己本地。评估为可接受：访客本就有 workspace:read（能通过
++API 读全部规范），init 不产生服务端提权；且访客通常无 daemon 绑定，实际会
++停在 409。若日后要区分，可在服务层按角色再收窄，不阻塞本次。
++
++试过/考虑过但放弃的方案：
++- 保持 WORKSPACE_WRITE、给 developer 角色加 workspace:write 权限点：
++  动的是全局角色种子，波及所有带写语义的端点（成员管理、配置修改等全部
++  对 developer 开放），远超"允许初始化本地环境"的诉求，弃。
++- 仅对 init 例外放行 business_member/developer 白名单角色：在权限体系外
++  引入角色名硬编码（ROLE_KEY_WHITELIST 模式），角色演进时易漂移，
++  workspace:read 已是"成员"的最自然表达，弃。
++- activate 一并放宽：用户裁决仅放宽 init，activate 语义（激活工作区本体）
++  仍是写操作，不动，弃。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | backend/app/modules/workspace/router.py | init 端点权限依赖 WORKSPACE_WRITE→WORKSPACE_READ + 注释口径更新 |
++| 增 | backend/tests/modules/workspace/test_init_permission.py | init 权限边界测试（developer 409/非成员 403/activate 不动） |
+
+diff --git a/.sillyspec/changes/2026-10-12-init-permission-relax/proposal.md b/.sillyspec/changes/2026-10-12-init-permission-relax/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-init-permission-relax/proposal.md
+@@ -0,0 +1,35 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:19:08.220Z
++---
++# 提案书（Proposal）— 2026-10-12-init-permission-relax
++
++## 动机
++
++任务原话转写：用户裁决:放宽工作区 init 权限——开发者(developer)等只读角色需要初始化自己的本地环境,当前 /init 要求 workspace-scoped workspace:write 导致 developer 403(生产实证 181144@spdemo request_id 62c277ac)。修订 2026-08-14-security-audit-remediation FR-09 的权限档位,保留其工作区隔离意图。
++成功标准：
++ - POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
++ - 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
++ - 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
++ - workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
++ - 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
++ - 接口契约无 DTO 变化,无需重生成 api-types
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
++2. 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
++3. 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
++4. workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
++5. 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
++6. 接口契约无 DTO 变化,无需重生成 api-types
++
++## 成功标准（可验证）
++
++1. POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
++2. 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
++3. 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
++4. workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
++5. 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
++6. 接口契约无 DTO 变化,无需重生成 api-types
+
+diff --git a/.sillyspec/changes/2026-10-12-init-permission-relax/requirements.md b/.sillyspec/changes/2026-10-12-init-permission-relax/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-init-permission-relax/requirements.md
+@@ -0,0 +1,92 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T06:19:08.221Z
++---
++# 需求规格（Requirements）— 2026-10-12-init-permission-relax
++
++背景：生产实证（request_id 62c277ac，2026-10-12）——spdemo 工作区的 developer
++成员 181144 发起 `POST /api/workspaces/{id}/init` 被拒 403（缺
++workspace:write）。init 的语义是"为当前成员初始化本地环境"（D-002/D-009：
++向成员自己的 daemon 派发 init lease、写成员本地项目目录），开发者恰恰是
++需要它的日常角色。用户裁决放宽权限；本变更修订
++2026-08-14-security-audit-remediation FR-09 的权限档位，保留其工作区隔离意图。
++
++## 功能需求
++
++### FR-01: POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
++
++init 端点的权限依赖必须从 `require_permission(Permission.WORKSPACE_WRITE)`
++改为 `require_permission(Permission.WORKSPACE_READ)`，且必须保持
++workspace-scoped 判定（按 `{workspace_id}` 路径参数解析角色权限）；
++禁止改为全局任意权限判定。
++
++#### 场景：权限档位替换
++
++- Given 路由声明面
++- When 检查 `/{workspace_id}/init` 端点的依赖
++- Then 权限依赖为 workspace-scoped `WORKSPACE_READ`
++
++### FR-02: 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
++
++持有本工作区任意成员角色（含仅 `workspace:read` 的 developer/viewer 等）
++的用户发起 init 必须通过权限门进入服务层；无 daemon 绑定时必须返回既有
++409 `MemberBindingNotFound` 业务错误，禁止再以 403 权限拒绝。
++
++#### 场景：developer 成员无 daemon 绑定发起初始化
++
++- Given 用户通过角色绑定为本工作区成员，角色仅有 `workspace:read` 权限点，且无成员 daemon 绑定
++- When POST /api/workspaces/{id}/init
++- Then 返回 409（MemberBindingNotFound 语义），不是 403
++
++### FR-03: 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
++
++不在本工作区持有任何成员角色的用户发起 init 必须仍被 403 拒绝；
++FR-09 的 workspace 隔离意图禁止回退（即便用户在其它工作区持有写权限）。
++
++#### 场景：非成员发起初始化
++
++- Given 用户不属于目标工作区（无任何 UserWorkspaceRole 绑定）
++- When POST /api/workspaces/{id}/init
++- Then 返回 403，details 含 permission 与 workspace_id
++
++### FR-04: workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
++
++`POST /api/workspaces/{id}/activate` 的权限依赖必须保持
++`WORKSPACE_WRITE` 不变；本变更禁止触碰 activate 的鉴权面。
++
++#### 场景：activate 端点不受影响
++
++- Given 路由声明面
++- When 检查 `/{workspace_id}/activate` 端点的依赖
++- Then 权限依赖仍为 workspace-scoped `WORKSPACE_WRITE`
++
++### FR-05: 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
++
++必须先写覆盖 FR-02/FR-03 的失败用例（developer 成员期望 409、非成员期望
++403），在旧实现下确认先红（developer 用例得 403）再改实现转绿；
++完成后相关 pytest 必须全绿。
++
++#### 场景：先红后绿
++
++- Given 新增的 init 权限测试文件
++- When 旧实现下运行 developer 用例
++- Then 失败（得到 403）；实现改为 WORKSPACE_READ 后同一用例通过（得到 409）
++
++### FR-06: 接口契约无 DTO 变化,无需重生成 api-types
++
++本变更禁止改动任何请求/响应 DTO 与 OpenAPI schema；响应结构必须与变更前
++逐字段一致（错误路径的 code/message 由既有异常体系决定）。
++
++#### 场景：契约零变化
++
++- When 对比变更前后的 openapi.json
++- Then 无差异（不重生成 api-types）
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」
++FR-02: backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」
++FR-03: backend/tests/modules/workspace/test_init_permission.py「test_init_non_member_still_403」
++FR-04: backend/tests/modules/workspace/test_init_permission.py「test_activate_still_requires_write_non_member_403」
++FR-05: backend/tests/modules/workspace/test_init_permission.py「全文件先红后绿」
++FR-06: 不适用：纯权限门替换无契约面，由既有路由响应结构不变性保证

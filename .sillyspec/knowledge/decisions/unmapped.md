@@ -2430,3 +2430,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
 理由：最大风险：前端既有代码把 `email` 当非空用的隐藏点位漏改，tsc 抓不全的 （如模板里直接插值）运行时渲染出空白。缓解：渲染点逐一回退处理 + workspace-member-row 补 null 用例 + tsc --noEmit 全量类型检查； `localeCompare` 调用点仅角色页聚合排序一处（已全局搜索确认）。 实际执行中 tsc 全量扫出 3 处（members/page 两处 + shared-daemon-manager 一处）， 另在 task-05 人工排查出 lib/admin.ts 手写 DTO 漏同步（tsc 因本地类型未改而放行）。 试过/考虑过但放弃的方案： - service 层兜底 `email=user.email or ""`：契约撒谎（空串≠无邮箱），且 前端无法区分"无邮箱"与"空邮箱"，弃。 - 只改 RoleUserRead 不动 workspace 两处：同类 500 隐患原地保留 （成员列表/搜索遇纯用户名账号必炸），修一半等于没修，弃。 - 邀请搜索补 `username ILIKE` 匹配：属于搜索行为增强，与本 500 无关， 留作后续独立小变更，避免本次 diff 膨胀。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-init-permission-relax
+锚点：未记录
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+理由：最大风险：viewer（访客）也获得 init 权限。独立评审（review.json P2， 2026-10-12）修正本节初稿的两处不准确表述，以下为补正后口径： - 初稿称"访客通常无 daemon 绑定，实际停在 409"——不准确：访客可以 自建绑定，`PUT /my-binding` 权限门同为 WORKSPACE_READ （member_runtimes/router.py:121），"通常无绑定"只是运营假设，不是防线。 - 初稿称"init 不产生服务端提权"——不准确：init lease claim 是 `shpsync_` sync token 的全仓唯一签发点（daemon/lease/context.py:856）， 持 token 可经 `POST /changes/-/spec-sync` 由 `SpecWorkspaceService.apply_ops` 单事务直写服务端 spec 源 （platform_sync/router.py:233-264，无审批门），另有 progress/documents/ approval/quicklog/agent-logs 五个写端点同通道。 - 净新增面评估：shpsync 写链路对可写角色本就存在、本次未改它；本次把 触发人群扩大到全部只读成员（viewer 含绑定自建路径）。 - 裁决：有条件可接受——init 本体（拉自己本地副本、lease 有 runtime owner 归属校验跨用户 404）无害；shpsync 链路沿用既有权限语义。 跟进项（独立变更，不阻塞本收口）：服务层按角色收窄 init 触发面， 或收窄 shpsync sync token 的写域。 试过/考虑过但放弃的方案： - 保持 WORKSPACE_WRITE、给 developer 角色加 workspace:write 权限点： 动的是全局角色种子，波及所有带写语义的端点（成员管理、配置修改等全部 对 developer 开放），远超"允许初始化本地环境"的诉求，弃。 - 仅对 init 例外放行 business_member/developer 白名单角色：在权限体系外 引入角色名硬编码（ROLE_KEY_WHITELIST 模式），角色演进时易漂移， workspace:read 已是"成员"的最自然表达，弃。 - activate 一并放宽：用户裁决仅放宽 init，activate 语义（激活工作区本体） 仍是写操作，不动，弃。

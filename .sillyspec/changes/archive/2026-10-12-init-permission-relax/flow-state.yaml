@@ -1,0 +1,37 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户裁决:放宽工作区 init 权限——开发者(developer)等只读角色需要初始化自己的本地环境,当前 /init 要求 workspace-scoped workspace:write 导致 developer 403(生产实证
+  181144@spdemo request_id 62c277ac)。修订 2026-08-14-security-audit-remediation FR-09 的权限档位,保留其工作区隔离意图。
+
+  成功标准：
+   - POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
+   - 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
+   - 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
+   - workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
+   - 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
+   - 接口契约无 DTO 变化,无需重生成 api-types
+autopilot: true
+baseline_commit: ff90caaed24cfbb986240f72e10b9f0de4834e74
+updatedAt: '2026-10-12T06:32:32.050Z'
+baseline_sha256: 18955e239c3916589ffb1c36d4debc0b5da8b76f89bcb46abf0837fd7e9165e4
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（10.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012062423\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（16.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012062423\test-result.json｜门文件
+  4 个
+

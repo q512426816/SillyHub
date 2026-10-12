@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-init-permission-relax",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-init-permission-relax:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-init-permission-relax"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-init-permission-relax:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-init-permission-relax"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-init-permission-relax:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/workspace/test_init_permission.py「test_init_non_member_still_403」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-init-permission-relax"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-init-permission-relax:flow:测试绑定FR-04",
+      "tests": [
+        "backend/tests/modules/workspace/test_init_permission.py「test_activate_still_requires_write_non_member_403」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-init-permission-relax"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-init-permission-relax:flow:测试绑定FR-05",
+      "tests": [
+        "backend/tests/modules/workspace/test_init_permission.py「全文件先红后绿」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-init-permission-relax"
+    }
+  ]
+}

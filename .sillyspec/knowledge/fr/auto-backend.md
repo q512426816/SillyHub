@@ -927,3 +927,105 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-12-ci-guard-diagnosability
   status: active
+
+## FR-auto-backend-175 POST /api/workspaces/{id}/init 的权限门从 WORKSPACE_WRITE 改为 WORKSPACE_READ,仍 workspace-scoped
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：权限档位替换
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-01
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-init-permission-relax:flow:测试绑定FR-01
+  tests: backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-init-permission-relax
+  status: active
+
+## FR-auto-backend-176 本工作区成员(含 developer 等只读角色)发起 init 不再 403,无 daemon 绑定时走既有 409 MemberBindingNotFound 业务路径
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：developer 成员无 daemon 绑定发起初始化
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-02
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-init-permission-relax:flow:测试绑定FR-02
+  tests: backend/tests/modules/workspace/test_init_permission.py「test_init_developer_member_without_binding_gets_409_not_403」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-init-permission-relax
+  status: active
+
+## FR-auto-backend-177 非本工作区成员发起 init 仍 403(FR-09 隔离意图不回退)
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：非成员发起初始化
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-03
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-init-permission-relax:flow:测试绑定FR-03
+  tests: backend/tests/modules/workspace/test_init_permission.py「test_init_non_member_still_403」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-init-permission-relax
+  status: active
+
+## FR-auto-backend-178 workspace activate 端点不动(仍是 WORKSPACE_WRITE,本次仅放宽 init)
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：activate 端点不受影响
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-04
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-init-permission-relax:flow:测试绑定FR-04
+  tests: backend/tests/modules/workspace/test_init_permission.py「test_activate_still_requires_write_non_member_403」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-init-permission-relax
+  status: active
+
+## FR-auto-backend-179 先写失败测试(developer 409 而非 403 / 非成员仍 403)再改实现,相关 pytest 全绿
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-05
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-init-permission-relax:flow:测试绑定FR-05
+  tests: backend/tests/modules/workspace/test_init_permission.py「全文件先红后绿」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-init-permission-relax
+  status: active
+
+## FR-auto-backend-180 接口契约无 DTO 变化,无需重生成 api-types
+变更：2026-10-12-init-permission-relax
+状态：active
+摘要：契约零变化
+全文：.sillyspec/changes/archive/2026-10-12-init-permission-relax/requirements.md#FR-06
+最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
