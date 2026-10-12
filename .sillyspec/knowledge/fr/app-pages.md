@@ -308,3 +308,79 @@
   confirmed_at: null
   source_change: 2026-10-11-apikey-mcp-copy-delete
   status: active
+
+## FR-app-pages-023 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
+变更：2026-10-12-clipboard-fallback
+状态：active
+摘要：安全上下文委托；非安全上下文降级
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-fallback/requirements.md#FR-01
+最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-fallback:flow:测试绑定FR-01
+  tests: frontend/src/lib/__tests__/clipboard.test.ts「降级失败（execCommand 返回 false）→ 抛错且节点仍被清理（finally 保证）」 | frontend/src/lib/__tests__/clipboard.test.ts「非安全上下文（clipboard 缺失）：textarea + execCommand 降级，节点清理、选区恢复」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-fallback
+  status: active
+
+## FR-app-pages-024 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
+变更：2026-10-12-clipboard-fallback
+状态：active
+摘要：委托无损
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-fallback/requirements.md#FR-02
+最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-fallback:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「非安全上下文（clipboard 缺失，HTTP 局域网主部署形态）→ execCommand 降级复制成功回显（2026-10-12-clipboard-fallback）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-fallback
+  status: active
+
+## FR-app-pages-025 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
+变更：2026-10-12-clipboard-fallback
+状态：active
+摘要：降级集成
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-fallback/requirements.md#FR-03
+最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-fallback:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/clipboard.test.ts「安全上下文：委托 navigator.clipboard.writeText，不走 execCommand」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-fallback
+  status: active
+
+## FR-app-pages-026 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
+变更：2026-10-12-clipboard-fallback
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-clipboard-fallback/requirements.md#FR-04
+最近确认：5b6889fc8e9a74a581f8f2324c363aa8a0e07989
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-clipboard-fallback:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/clipboard.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-clipboard-fallback
+  status: active
