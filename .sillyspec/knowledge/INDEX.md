@@ -203,3 +203,4 @@
 - unmapped|FR|需求|承接 → [fr/unmapped.md](fr/unmapped.md)
 - auto-github|github|FR|需求|承接 → [fr/auto-github.md](fr/auto-github.md)
 - components-agent-log|FR|需求|承接 → [fr/components-agent-log.md](fr/components-agent-log.md)
+- policy|FR|需求|承接 → [fr/policy.md](fr/policy.md)

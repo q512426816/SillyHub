@@ -1,0 +1,160 @@
+{
+  "change": "2026-10-13-review-risk-fixes",
+  "baseline": "49e311b5a7b9c1f825b53697ca74b577ed4bafdf",
+  "head": "4caba5b215fd2dc2147694f0afaf9aec48ce936d",
+  "files": [
+    "backend/app/modules/agent/service.py",
+    "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+    "sillyhub-daemon/src/event-wire.ts",
+    "sillyhub-daemon/src/policy/path-utils.ts",
+    "sillyhub-daemon/src/policy/shell-paths.ts",
+    "sillyhub-daemon/src/task-runner.ts",
+    "sillyhub-daemon/src/task-runner/runner-types.ts",
+    "sillyhub-daemon/src/task-runner/spawn-stream.ts",
+    "sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 383,
+    "deletions": 38
+  },
+  "savedAt": "2026-10-12T23:22:56.137Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "49e311b5a7b9c1f825b53697ca74b577ed4bafdf",
+    "totals": {
+      "files": 9,
+      "additions": 383,
+      "deletions": 38
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/service.py",
+        "additions": 22,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/event-wire.ts",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/policy/path-utils.ts",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/policy/shell-paths.ts",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/task-runner.ts",
+        "additions": 9,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/task-runner/runner-types.ts",
+        "additions": 11,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/task-runner/spawn-stream.ts",
+        "additions": 85,
+        "deletions": 30,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts",
+        "additions": 185,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "9b736c14c9d05b50a9be36eefebe9ddeeab8ffe19c5fd7522f76b991ef611320",
+  "patchStatus": "ok"
+}

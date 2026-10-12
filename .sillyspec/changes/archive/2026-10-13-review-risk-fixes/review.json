@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-review-risk-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4caba5b215fd2dc2147694f0afaf9aec48ce936d",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "spawnAndStream 收尾冲刷接线为代码锚定而非执行级测试覆盖",
+      "evidence": "第三组测试测的是组合件（coalescerFlushAllMessages + forwardSubmitMessages 直接调用），未执行 spawnAndStream 的收尾序列；attempt 边界冲刷接线（env 构造处传 coalescer、取消/超时 break 后无条件到达 flushAll 再 await pendingForwards）经代码审查成立但无测试守护，未来重构该收尾段时测试不会红。FR-01 测试绑定按字面（透传/合并/收尾冲刷转发三组）均真实存在且断言成立，不构成承诺违反，降 P3 记档。",
+      "location": "sillyhub-daemon/src/task-runner/spawn-stream.ts:469,502-514; sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts:148-184"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok。coalescer.feed 完整行先冲刷同 id 残留与超龄条目再输出完整行（message-coalescer.ts:82-96），attempt 边界 flushAll 兜底缺完结序列，与 design 四问1 相符。边界已裁决：可接受——tail 冲刷行不带 session 三列（appendSessionWireColumns 以事件为单位注入，冲刷时刻无源事件，event-wire.ts:459-461 记档）；内容不丢、行仍按 run_id 归属，仅一条消息尾部残片缺 session 级 metadata 索引，非数据正确性风险。",
+    "并发": "ok。coalescer 为 spawnAndStream 局部 const（spawn-stream.ts:256），readline for-await 单协程串行 feed（:442-471），grep 确认无全局单例/落盘/跨模块共享；backend 24h 判定只读 MAX 聚合日志列（service.py:2499-2516），写路径仍是既有 _mark_stale_run_failed + FOR UPDATE 重读，不新增写面，与 design 四问2 相符。",
+    "切换": "ok。取消/超时 break（spawn-stream.ts:443-445）与 try/catch 兜底后控制流均无条件到达收尾冲刷（:502-514），冲刷先于 await Promise.allSettled(pendingForwards)（:515-517）；backend now 由清理循环单点取值传入（service.py:2556/2590，唯一调用点），不读墙钟二次取值，与 design 四问3 相符。",
+    "作用域": "ok。coalescer 不落盘、不跨进程、attempt 级实例互不可见；24h 为模块级常量（service.py:2438）。边界已裁决：可接受——24h 全局统一阈值不按会话/工作区分化（service.py:2436-2437 注释记档）：生产实证正常等待 ~20 分钟，24h 留足裕量，统一阈值避免额外配置面。另 FR-04 残留放行面边界已裁决：可接受——注释准确记档 write-guard.ts:206「提取不到=放行」真实口径与 cd 盲区既有边界，显式记档而非静默收缩，收紧需命令解析/沙箱超出轻量修复范围。"
+  },
+  "reviewedAt": "2026-10-13T07:27:35+08:00"
+}

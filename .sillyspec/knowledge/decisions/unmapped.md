@@ -2595,3 +2595,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：c782a92497f30a946075b57442b9dcd11dcd74f8
 理由：最大风险：**豁免过宽导致 run 永卡 running**——若提问落库形态判定漏/多。控制：信号仅两种窄形态（pending_input 通道、tool_call+tool_kind=ask，均实证于生产数据），且 daemon 死亡面有 sweep 独立兜底，宽限跳过与判死兜底（延迟复扫）链路不变。 试过但放弃的方案： - **复用 `_run_daemon_alive` 给启动清理加活性门**——放弃：启动清理发生在后端重启瞬间，daemon 可能尚未重连续约，lease updated_at 必然陈旧 → 活性门恒 False，等于没加；且多一次 lease/runtime/instance 三级查询。日志 ask 信号是重启免疫的确定性判据。 - **SessionDialogRequest pending 行作豁免信号**——放弃：生产实证交互会话的 AskUserQuestion 不落该表（run e31ec8fc 在 dialog 表 0 行），信号覆盖率不足。 - **error_detail 直接补 type/message 键**（不动前端）——放弃：调度层错误不是模型错误，硬塞 type 会进 8 类模型错误映射语义；且存量已落库的 {reason, finished_by} 行仍显示 unknown，前端回落才是全量修复。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-review-risk-fixes
+锚点：未记录
+最近确认：4caba5b215fd2dc2147694f0afaf9aec48ce936d
+理由：答：最大风险：tail 冲刷行不带 session 三列（`appendSessionWireColumns` 以事件为单位注入，冲刷时刻无源事件可取）——冲刷行仍按 run_id 归属（submit 调用自带 run 维度），session 级 metadata 索引缺列的影响限于一条消息的尾部残片，接受并在 `coalescerFlushAllMessages` 注释记档。次风险：`forwardSubmitMessages` 提取若漏抄任一守卫会改变 handleLine 既有转发行为——以「逐条保留 + 定向测试回归」对冲。 试过但放弃的方案：① coalescer 挂全局单例（跨 attempt 状态泄漏、消息 id 空间不隔离，放弃）；② flushAll 输出复刻 session 三列注入（冲刷时刻无源事件，伪造成分大于收益，放弃）；③ askwait 上限改读 lease 心跳判 daemon 死活（重启瞬间心跳必陈旧，生产实证已否定该判据，维持日志列信号 + 时间上限方案）。

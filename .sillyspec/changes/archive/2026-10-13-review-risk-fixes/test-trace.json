@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-review-risk-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-review-risk-fixes:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts「handleLine 透传 coalescer / 多 delta 合并单行 / 收尾 flushAll 冲刷转发」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-review-risk-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-review-risk-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_awaiting_user_ask_over_24h_killed / 既有 test_stale_run_awaiting_user_answer_skipped 零回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-review-risk-fixes"
+    }
+  ]
+}

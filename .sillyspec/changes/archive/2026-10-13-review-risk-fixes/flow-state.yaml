@@ -2,6 +2,13 @@ tier: thin
 legacy_fallback: false
 substeps:
   artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,11 +31,17 @@ input: >-
   两文件）通过；不跑全量
 autopilot: false
 baseline_commit: 49e311b5a7b9c1f825b53697ca74b577ed4bafdf
-updatedAt: '2026-10-12T23:19:56.627Z'
+updatedAt: '2026-10-12T23:28:09.807Z'
 baseline_sha256: 8d119d37fe8182947e6f5e20f20583312cf4fa03c00e69c3f22cd51f627415c4
 spec_approved: true
 spec_approved_at: '2026-10-12T23:11:26.031Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py25+jsx1)（67.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012232248\test-result.json｜lint:
+  skipped ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（6.7s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
+  不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 9 个
 

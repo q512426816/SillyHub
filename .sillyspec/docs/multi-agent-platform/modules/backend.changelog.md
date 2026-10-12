@@ -30,3 +30,4 @@
 - 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
 - 2026-10-12-spec-backup-retention-validation | 动机：上变更评审 P3-1——spec_backup_retention_days 无正数校验，env 误配 0/负数会
 - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+- 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码

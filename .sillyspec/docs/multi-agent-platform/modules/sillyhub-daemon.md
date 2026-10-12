@@ -149,6 +149,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - `src/agent-log/liveness/` 新子层：五态模型（working/blocked/idle/ended/unknown）+ format→deriver 注册表（zcode/codex/claude 三推导器，永不产 blocked——R-01）；tailer 周期 10s offset 差量读（轮转 reset/消失超窗 ended 回收/watch≤16/4MB 预算/R-02 fail-open）；自发现三源（spawn 记录/sessions.json 恢复/窗口重扫）+ 两档定位（claude·pi 直算、codex·zcode 窄扫标记匹配 fail-closed）。
 - `hub-client.ts` 增 liveness 上报：Bearer shpsync 直推 `POST /api/agent-logs/states`（daemon 各 workspace root local.yaml platform token）；`buildAgentLogStatePushGroups` 落 D-012 优先级（第一方 PERMISSION_REQUEST pending 覆写 blocked）。
 - `daemon.ts`：`_livenessLoop` 独立 `_fire`（60s 发现刷新 + tailer 10s tick；abortableSleep 信号感知——裸 setTimeout 会拖死 stop）。
+- 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

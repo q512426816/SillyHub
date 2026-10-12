@@ -1,0 +1,593 @@
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 6e5e4421f..049b2bfeb 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -2428,6 +2428,15 @@ class AgentService:
+ # 期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量），跳过判死等真终态。
+ STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)
+ 
++# 2026-10-13-review-risk-fixes FR-02：askwait 豁免时间上限。等待用户回答豁免
++# （_run_awaiting_user_input）原无时限——风险审查实证 run 级 daemon 真死兜底
++# 缺失（sweep_confirmed_dead_tasks 只扫 agent_session_task，不碰 AgentRun，且
++# daemon 离线时 fail-open 跳过）：daemon 真死 + 提问未答 → run 永远 running、
++# 用户后续发言按 busy 进队列永不派发，会话楔死。24h 给「人离开很久」留足
++# 裕量（生产实证正常等待 ~20 分钟），超龄回落既有判死路径；后端全局统一
++# 阈值，不按会话/工作区分化。
++_ASKWAIT_EXEMPT_MAX_AGE = timedelta(hours=24)
++
+ 
+ def _as_utc(value: datetime) -> datetime:
+     """把 naive datetime 视作 UTC 归一（SQLite DateTime 列 round-trip 丢 tzinfo）。"""
+@@ -2470,7 +2479,7 @@ async def _last_run_log_at(session: AsyncSession, run_id: uuid.UUID) -> datetime
+     ).scalar_one_or_none()
+ 
+ 
+-async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> bool:
++async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID, now: datetime) -> bool:
+     """run 是否处于「等待用户回答提问」状态（2026-10-12-stale-run-askwait-fix）。
+ 
+     ask 信号 = agent_run_logs 中 ``channel='pending_input'`` 或（``channel='tool_call'``
+@@ -2481,6 +2490,11 @@ async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) ->
+     生产实证（2026-10-12 会话 47e2ff1a run e31ec8fc）：AskUserQuestion 等待回答
+     近 20 分钟，后端重启的启动清理按 10 分钟宽限窗误判 SERVICE_RESTART_INTERRUPTED。
+     信号纯读日志列，重启免疫（lease/心跳在重启瞬间必然陈旧，不可作判据）。
++
++    2026-10-13-review-risk-fixes FR-02：豁免受 24h 时间上限约束（_ASKWAIT_
++    EXEMPT_MAX_AGE）——最后 ask 信号距 ``now`` 超龄即返回 False（回落既有判死
++    路径），防 daemon 真死场景 run 永远 running（run 级兜底缺失见常量注释）。
++    ``now`` 由调用方（清理循环）传入，不读墙钟二次取值，复扫/重启判定稳定。
+     """
+     last_ask_at = (
+         await session.execute(
+@@ -2498,6 +2512,8 @@ async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) ->
+     ).scalar_one_or_none()
+     if last_ask_at is None:
+         return False
++    if now - _as_utc(last_ask_at) > _ASKWAIT_EXEMPT_MAX_AGE:
++        return False
+     last_user_at = (
+         await session.execute(
+             select(func.max(AgentRunLog.timestamp)).where(
+@@ -2567,7 +2583,11 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+             # 提问（AskUserQuestion）未答期间日志静默是正常态（人离开很常见），
+             # 不是 daemon 死亡；daemon 真死由 daemon 离线清扫（sweep）兜底，
+             # 用户回答后日志恢复流动，等真终态。纯日志列判定，重启瞬间可用。
+-            if await _run_awaiting_user_input(session, run.id):
++            # 2026-10-13-review-risk-fixes FR-02：豁免受 24h 上限约束（函数内
++            # 判定）——超龄回落下方既有判死路径（原注释宣称的 run 级 sweep 兜底
++            # 经查不存在：sweep_confirmed_dead_tasks 只扫任务表，见 _ASKWAIT_
++            # EXEMPT_MAX_AGE 注释）。
++            if await _run_awaiting_user_input(session, run.id, now):
+                 log.info(
+                     "stale_run_cleanup_deferred_awaiting_user",
+                     run_id=str(run.id),
+diff --git a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+index 44767f22b..494dd080e 100644
+--- a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
++++ b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+@@ -170,3 +170,44 @@ async def test_stale_run_user_answered_after_ask_still_killed(db_session) -> Non
+     assert run.status == "failed"
+     assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
+     assert cleaned >= 1
++
++
++# ── 2026-10-13-review-risk-fixes FR-02：askwait 豁免 24h 时间上限 ────────────
++
++
++@pytest.mark.asyncio
++async def test_stale_run_awaiting_user_ask_over_24h_killed(db_session) -> None:
++    """ask 超 24h 未答（askwait 上限）→ 不再豁免，照常判死。
++
++    风险审查实证：豁免无时限 + run 级 daemon 真死兜底缺失（任务表清扫不碰
++    AgentRun 且 daemon 离线时 fail-open）→ daemon 真死场景 run 永远 running、
++    会话楔死。24h 上限给「人离开很久」留足裕量，超龄回落既有判死路径。
++    """
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++    # user_input 30h 前、ask 25h 前（ask 晚于 user_input 且超 24h 上限）。
++    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=30 * 60)
++    await _add_run_log(
++        db_session, run.id, channel="tool_call", tool_kind="ask", minutes_ago=25 * 60
++    )
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "failed"
++    assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
++    assert cleaned >= 1
++
++
++@pytest.mark.asyncio
++async def test_stale_run_awaiting_user_ask_under_24h_cap_zero_regression(db_session) -> None:
++    """ask 未超 24h 上限（23h）→ 豁免仍生效（时限内零回归）。"""
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=24 * 60)
++    await _add_run_log(db_session, run.id, channel="pending_input", minutes_ago=23 * 60)
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "running"
++    assert run.error_code is None
++    assert cleaned == 0
+diff --git a/sillyhub-daemon/src/event-wire.ts b/sillyhub-daemon/src/event-wire.ts
+index ef976593b..cfab5d3ae 100644
+--- a/sillyhub-daemon/src/event-wire.ts
++++ b/sillyhub-daemon/src/event-wire.ts
+@@ -450,3 +450,19 @@ export function eventToSubmitMessages(
+   }
+   return messages;
+ }
++
++/**
++ * F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 收尾冲刷残留 delta
++ * 缓冲为 submitMessages 行。bf4c47c07 只落了 eventToSubmitMessages 可选参，
++ * 唯一生产调用点 spawn-stream 未传实例（死代码）——本导出供 spawnAndStream
++ * 收尾组合使用：flushAll 输出 + 消息级 timestamp（F2a 同口径）。冲刷时刻无
++ * 源事件，session 三列（appendSessionWireColumns 以事件为单位注入）不携带
++ * ——行仍按 run_id 归属（submit 调用自带 run 维度），session 级 metadata
++ * 缺列影响限于一条消息的尾部残片。
++ */
++export function coalescerFlushAllMessages(
++  coalescer: import('./agent-log/message-coalescer.js').MessageCoalescer,
++): Record<string, unknown>[] {
++  const ts = new Date().toISOString();
++  return coalescer.flushAll().map((m) => ({ ...m, timestamp: ts }));
++}
+diff --git a/sillyhub-daemon/src/policy/path-utils.ts b/sillyhub-daemon/src/policy/path-utils.ts
+index 7518c67ff..234adbcea 100644
+--- a/sillyhub-daemon/src/policy/path-utils.ts
++++ b/sillyhub-daemon/src/policy/path-utils.ts
+@@ -173,8 +173,10 @@ function normalizeCase(p: string): string {
+  * @param target  目标路径（字符串，未规范化亦可，函数内部将规范化）
+  * @param allowedRoots 白名单根目录数组（绝对路径）
+  * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
+- *   target 与 roots 双解析均透传（roots 相对形态罕见，但同一基点语义一致；
+- *   undefined=现行为 process.cwd()）。
++ *   仅透传 target 解析（见下方 resolved 单点）——roots 维持单参 resolveRealPath
++ *   解析（锚 process.cwd()）：roots 契约为绝对路径（见参数说明），anchor 对其
++ *   无意义；若未来 roots 支持相对形态，需同步评估是否透传。
++ *   target 侧 undefined=现行为 process.cwd()。
+  * @returns true 当目标路径在任一 allowedRoot 下
+  */
+ export function isPathUnderAnyRoot(
+diff --git a/sillyhub-daemon/src/policy/shell-paths.ts b/sillyhub-daemon/src/policy/shell-paths.ts
+index 4c59bfbbc..1f98b3e01 100644
+--- a/sillyhub-daemon/src/policy/shell-paths.ts
++++ b/sillyhub-daemon/src/policy/shell-paths.ts
+@@ -51,6 +51,16 @@ function trimShellSeparators(p: string): string {
+  * 目标以 `-` 开头（`-p`/`-d`/`-o` 等被正则贪婪误吞的开关），捕获即弃不产出
+  * 目标。生产实证：deny 文案目标路径为 `<工作区>/-p`（mkdir -p 的 flag 被当
+  * 路径，会话 47e2ff1a 02:51 deny）。Bash/PowerShell/CMD 三提取器共用。
++ *
++ * 已知残留放行面（2026-10-13-review-risk-fixes FR-04 记档，接受现状）：
++ *  1. 真以 `-` 开头的合法文件名写入目标（如 `echo x > -p`）经本判定弃出
++ *     提取结果 → writePaths 为空 → judgeWriteViaPolicyEngine 按「提取不到=
++ *     放行」口径不拦截。短横线开头文件名极罕见，且 shell 初始 cwd 即会话根
++ *     （写入点通常本就在白名单内）；实际越界需配合下条 cd 盲区。
++ *  2. cd 盲区（既有边界，非 F4 引入）：静态提取不追踪 `cd`——`cd /etc && echo
++ *     x > conf` 的相对目标按会话根锚定解析（F4 语义）必判 under-root 放行，
++ *     而真实写入发生在 cd 后目录。写守卫对 Bash 是命令串静态启发式层，非
++ *     文件系统级沙箱；收紧需走命令解析/沙箱方案，超出轻量修复范围。
+  */
+ function isFlagToken(t: string | undefined): boolean {
+   return typeof t === 'string' && t.startsWith('-');
+diff --git a/sillyhub-daemon/src/task-runner.ts b/sillyhub-daemon/src/task-runner.ts
+index 50c752fcd..d1502af90 100644
+--- a/sillyhub-daemon/src/task-runner.ts
++++ b/sillyhub-daemon/src/task-runner.ts
+@@ -97,6 +97,8 @@ import type { PendingServerRequest } from './adapters/json-rpc.js';
+ // 与 backend/app/modules/agent/tool_kind.py 同逻辑，修改须同步（R-05 防漂移）。
+ // task-04 轻重构②：_eventToMessages 转换核心收敛至此（AgentEvent→wire dict 单一实现源）。
+ import { eventToSubmitMessages } from './event-wire.js';
++// F2b 接线（2026-10-13-review-risk-fixes FR-01）：_eventToMessages 可选参类型。
++import type { MessageCoalescer } from './agent-log/message-coalescer.js';
+ import type {
+   AgentEvent,
+   LeaseCtx,
+@@ -1406,8 +1408,13 @@ export class TaskRunner {
+    *
+    * 返回 null：未知 event type 或所有 message 都被过滤。
+    */
+-  private _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null {
+-    return eventToSubmitMessages(ev);
++  private _eventToMessages(
++    ev: AgentEvent,
++    coalescer?: MessageCoalescer,
++  ): Record<string, unknown>[] | null {
++    // F2b 接线（2026-10-13-review-risk-fixes FR-01）：透传 attempt 级合并缓冲器
++    // ——spawn-stream 传实例激活流式 delta 合并，缺省保持 legacy 直发。
++    return eventToSubmitMessages(ev, coalescer);
+   }
+ 
+   // ── task-08（D-006 / D-009）：budget 软切断事件回传 ─────────────────────────
+diff --git a/sillyhub-daemon/src/task-runner/runner-types.ts b/sillyhub-daemon/src/task-runner/runner-types.ts
+index 794ca0dcc..6af5d4a80 100644
+--- a/sillyhub-daemon/src/task-runner/runner-types.ts
++++ b/sillyhub-daemon/src/task-runner/runner-types.ts
+@@ -18,6 +18,7 @@ import type { ResilienceService } from '../resilience/service.js';
+ import type { PolicyEngine } from '../policy/filesystem-policy.js';
+ import type { ProtocolAdapter } from '../adapters/protocol-adapter.js';
+ import type { TerminalObserver } from '../terminal-observer.js';
++import type { MessageCoalescer } from '../agent-log/message-coalescer.js';
+ import type {
+   AgentEvent,
+   TaskResult,
+@@ -227,8 +228,16 @@ export interface TaskRunnerCore {
+   readonly config?: DaemonConfig;
+   /** 网络层重试编排（可选注入）。 */
+   readonly resilience?: ResilienceService | null;
+-  /** AgentEvent → submitMessages message dict 列表（本体在 facade）。 */
+-  _eventToMessages(ev: AgentEvent): Record<string, unknown>[] | null;
++  /**
++   * AgentEvent → submitMessages message dict 列表（本体在 facade）。
++   * F2b 接线（2026-10-13-review-risk-fixes FR-01）：可选 coalescer——spawn-stream
++   * 传 attempt 级实例激活流式 delta 合并；缺省（undefined）保持 legacy 直发
++   * （既有实现/测试 fake 少参签名结构兼容，零破坏）。
++   */
++  _eventToMessages(
++    ev: AgentEvent,
++    coalescer?: MessageCoalescer,
++  ): Record<string, unknown>[] | null;
+   /** batch Codex 带内审批决策（本体在 facade）。 */
+   _handleApprovalDecision(
+     adapter: ProtocolAdapter,
+diff --git a/sillyhub-daemon/src/task-runner/spawn-stream.ts b/sillyhub-daemon/src/task-runner/spawn-stream.ts
+index 0b04f902e..2139eb0f8 100644
+--- a/sillyhub-daemon/src/task-runner/spawn-stream.ts
++++ b/sillyhub-daemon/src/task-runner/spawn-stream.ts
+@@ -23,6 +23,9 @@ import type { ProtocolAdapter } from '../adapters/protocol-adapter.js';
+ import type { Envelope } from '../resilience/service.js';
+ import { dedupKeyFor, toCauseInfo } from '../resilience/error-classify.js';
+ import type { AgentEvent, LeaseCtx } from '../types.js';
++// F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级合并缓冲器 + 收尾冲刷导出。
++import { MessageCoalescer } from '../agent-log/message-coalescer.js';
++import { coalescerFlushAllMessages } from '../event-wire.js';
+ import type {
+   SpawnOpts,
+   TaskRunnerCore,
+@@ -245,6 +248,12 @@ export async function spawnAndStream(
+   // ql-20260706-010：收集 fire-and-forget forward promise，claude exit 后 await，
+   // 防尾部消息（429 attempt/API Error/最后 tool_result）在 daemon 收尾时丢失。
+   const pendingForwards: Promise<unknown>[] = [];
++  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级流式 delta 合并
++  // 缓冲器——bf4c47c07 落了 eventToSubmitMessages 可选参但本调用点未传（死
++  // 代码），此处激活。生命周期=单次 spawn attempt（readline 单协程串行 feed，
++  // 无跨执行体共享；delta 不跨 attempt——新进程消息 id 不延续）；收尾在
++  // pendingForwards await 前统一冲刷（见下方 flushAll 接线）。
++  const coalescer = new MessageCoalescer();
+   // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
+   // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
+   let lastStats: Record<string, unknown> | undefined;
+@@ -457,6 +466,7 @@ export async function spawnAndStream(
+           prompt,
+           model: ctx.model,
+           pendingForwards,
++          coalescer,
+         });
+       }
+       child.off('exit', exitCloser);
+@@ -484,6 +494,24 @@ export async function spawnAndStream(
+   // ql-20260706-010：await 所有 pending forward，确保 claude exit 前瞬间产生的
+   // 尾部消息（429 attempt / API Error / 最后 tool_result）发完再返回，防
+   // fire-and-forget 在 daemon 收尾时丢失（c76562cd 实证 10 条 429 attempt 全丢）。
++  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 收尾冲刷残留 delta
++  // 缓冲——取消/超时 break 出循环同样到达此处，残留内容保底提交（宁碎片不丢
++  // 内容）；空 claimToken/agentRunId 与逐行转发同守卫跳过（forwardSubmitMessages
++  // 内 ql-004 口径）。冲刷行按 run_id 归属，不带 session 三列（无源事件，见
++  // event-wire.ts coalescerFlushAllMessages 注释）。
++  const flushedMessages = coalescerFlushAllMessages(coalescer);
++  if (flushedMessages.length > 0) {
++    forwardSubmitMessages(
++      runner,
++      {
++        leaseId,
++        claimToken,
++        agentRunId: ctx.agentRunId ?? '',
++        pendingForwards,
++      },
++      flushedMessages,
++    );
++  }
+   if (pendingForwards.length > 0) {
+     await Promise.allSettled(pendingForwards);
+   }
+@@ -552,6 +580,12 @@ export interface HandleLineEnv {
+   model?: string;
+   /** ql-20260706-010：收集本行 forward promise，runLease exit 后统一 await。 */
+   pendingForwards: Promise<unknown>[];
++  /**
++   * F2b 接线（2026-10-13-review-risk-fixes FR-01）：attempt 级流式 delta 合并
++   * 缓冲器——spawnAndStream 创建并随 env 透传给 _eventToMessages；仅
++   * spawn-stream 内部构造，外部无新增实现方。
++   */
++  coalescer: MessageCoalescer;
+ }
+ 
+ /**
+@@ -703,8 +737,9 @@ export async function handleLine(
+         env.outputParts.push(ev.content);
+       }
+     }
+-    // 转 submitMessages 负载
+-    const msgs = runner._eventToMessages(ev);
++    // 转 submitMessages 负载（F2b 接线：透传 attempt 级合并缓冲器——流式
++    // delta 并入缓冲不直发，完结行触发冲刷，2026-10-13-review-risk-fixes FR-01）。
++    const msgs = runner._eventToMessages(ev, env.coalescer);
+     if (msgs && msgs.length > 0) {
+       messages.push(...msgs);
+     }
+@@ -716,34 +751,54 @@ export async function handleLine(
+ 
+   // submitMessages：fire-and-forget，不阻塞 stdout readline（每条 await HTTP
+   // 会让 cursor/codex 执行慢一个数量级；失败仅 warn，对齐容错策略）。
++  // F2b 接线（2026-10-13-review-risk-fixes FR-01）：转发逻辑提取为
++  // forwardSubmitMessages 单源（与 attempt 收尾冲刷共用），守卫与通道语义
++  // 逐条保留（ql-004 空 claimToken/agentRunId 不发；task-11 resilience
++  // submitWithRetry + dedup_key / 未注入回退 client.submitMessages）。
++  forwardSubmitMessages(runner, env, messages);
++}
++
++/**
++ * F2b 接线（2026-10-13-review-risk-fixes FR-01）：submitMessages 转发单源——
++ * 从 handleLine 内联体原样提取（resilience envelopes/dedup_key、fire-and-forget
++ * catch、claimToken/agentRunId 守卫逐条保留），供 handleLine 批次与 attempt
++ * 收尾冲刷（coalescerFlushAllMessages 产出）共用。行为与提取前逐字节等价。
++ */
++export function forwardSubmitMessages(
++  runner: TaskRunnerCore,
++  env: Pick<
++    HandleLineEnv,
++    'leaseId' | 'claimToken' | 'agentRunId' | 'pendingForwards'
++  >,
++  messages: Record<string, unknown>[],
++): void {
+   // ql-004：空 agentRunId 不发 submitMessages，防空 agent_run_id 422 风暴。
+-  // task-11（FR-10 / D-005@v1）：注入 resilience 时走 submitWithRetry（带退避重试 +
+-  // dedup_key），保持非阻塞（void + catch）；未注入回退原 client.submitMessages。
+-  if (env.claimToken && env.agentRunId) {
+-    if (runner.resilience) {
+-      const envelopes: Envelope[] = messages.map((m, idx) => ({
+-        message: m,
+-        dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
+-      }));
+-      env.pendingForwards.push(
+-        runner.resilience
+-          .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
+-          .catch((e) => {
+-            console.warn(
+-              'task_runner: event_forward_failed',
+-              env.leaseId,
+-              toCauseInfo(e),
+-            );
+-          }),
+-      );
+-    } else {
+-      env.pendingForwards.push(
+-        runner.client
+-          .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
+-          .catch((e) => {
+-            console.warn('task_runner: event_forward_failed', env.leaseId, e);
+-          }),
+-      );
+-    }
++  if (!(env.claimToken && env.agentRunId)) {
++    return;
++  }
++  if (runner.resilience) {
++    const envelopes: Envelope[] = messages.map((m, idx) => ({
++      message: m,
++      dedup_key: dedupKeyFor(m, env.agentRunId, 0, idx),
++    }));
++    env.pendingForwards.push(
++      runner.resilience
++        .submitWithRetry(env.leaseId, env.claimToken, env.agentRunId, envelopes)
++        .catch((e) => {
++          console.warn(
++            'task_runner: event_forward_failed',
++            env.leaseId,
++            toCauseInfo(e),
++          );
++        }),
++    );
++  } else {
++    env.pendingForwards.push(
++      runner.client
++        .submitMessages(env.leaseId, env.claimToken, env.agentRunId, messages)
++        .catch((e) => {
++          console.warn('task_runner: event_forward_failed', env.leaseId, e);
++        }),
++    );
+   }
+ }
+diff --git a/sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts b/sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts
+new file mode 100644
+index 000000000..ea985aa8d
+--- /dev/null
++++ b/sillyhub-daemon/tests/task-runner/spawn-stream-coalescer.test.ts
+@@ -0,0 +1,185 @@
++/**
++ * tests/task-runner/spawn-stream-coalescer.test.ts —— F2b 接线
++ * （2026-10-13-review-risk-fixes FR-01）渲染轨合并缓冲器生产接线测试。
++ *
++ * 背景缺陷：bf4c47c07 落了 eventToSubmitMessages(ev, coalescer?) 可选参与
++ * MessageCoalescer 本体，但唯一生产调用点（spawn-stream handleLine →
++ * _eventToMessages）未传实例——功能死代码，提交宣称的碎片行修复未生效。
++ * 本文件守护接线成立：
++ *  1. handleLine 把 env.coalescer 透传给 _eventToMessages（接线断言）；
++ *  2. 接线后同 id 多条 delta 仅在完结行到达时产出「保底冲刷行 + 完结行」
++ *     单批次（前序 delta 零直发，不再逐条碎片行）；
++ *  3. attempt 收尾冲刷组合件：coalescerFlushAllMessages 产出带消息级
++ *     timestamp 的残留行并清空缓冲；forwardSubmitMessages 经 client
++ *     fire-and-forget 转发并入 pendingForwards，空 claimToken 守卫不转发
++ *     （与 handleLine 既有口径一致）。
++ */
++
++import type { ChildProcess } from 'node:child_process';
++import { describe, expect, it } from 'vitest';
++
++import { MessageCoalescer } from '../../src/agent-log/message-coalescer.js';
++import { coalescerFlushAllMessages, eventToSubmitMessages } from '../../src/event-wire.js';
++import {
++  forwardSubmitMessages,
++  handleLine,
++} from '../../src/task-runner/spawn-stream.js';
++import type { ProtocolAdapter } from '../../src/adapters/protocol-adapter.js';
++import type { TaskRunnerCore } from '../../src/task-runner/runner-types.js';
++import type { AgentEvent } from '../../src/types.js';
++
++function delta(id: string, text: string): AgentEvent {
++  return { type: 'text', content: text, metadata: { streaming: true, message_id: id } };
++}
++
++function complete(id: string, text: string): AgentEvent {
++  return { type: 'text', content: text, metadata: { message_id: id } };
++}
++
++interface TestEnv {
++  outputParts: string[];
++  onSessionId: (sid: string) => void;
++  leaseId: string;
++  claimToken: string;
++  agentRunId: string;
++  runtimeId: string;
++  observer: { writeParsed: (s: string) => void; writeRawStdout: (s: string) => void };
++  pendingForwards: Promise<unknown>[];
++  coalescer: MessageCoalescer;
++}
++
++function makeEnv(coalescer: MessageCoalescer): TestEnv {
++  return {
++    outputParts: [],
++    onSessionId: () => {},
++    leaseId: 'lease-1',
++    claimToken: 'token-1',
++    agentRunId: 'run-1',
++    runtimeId: 'rt-1',
++    observer: { writeParsed: () => {}, writeRawStdout: () => {} },
++    pendingForwards: [],
++    coalescer,
++  };
++}
++
++/** 每次 parse 吐一批事件的假 adapter（逐行喂 handleLine）。 */
++function adapterReturning(batches: AgentEvent[][]): ProtocolAdapter {
++  let i = 0;
++  return { parse: () => batches[i++] ?? null } as unknown as ProtocolAdapter;
++}
++
++const fakeChild = { stdin: null } as unknown as ChildProcess;
++
++/** 真实 eventToSubmitMessages 委托的 fake runner（可选捕获透传的 coalescer）。 */
++function makeRunner(
++  submits: Record<string, unknown>[][],
++  received?: { coalescer?: unknown },
++): TaskRunnerCore {
++  return {
++    client: {
++      submitMessages: async (
++        _l: string,
++        _t: string,
++        _r: string,
++        messages: Record<string, unknown>[],
++      ) => {
++        submits.push(messages);
++      },
++    },
++    resilience: null,
++    _eventToMessages: (ev: AgentEvent, coalescer?: MessageCoalescer) => {
++      if (received) received.coalescer = coalescer;
++      return eventToSubmitMessages(ev, coalescer);
++    },
++    _handleApprovalDecision: async () => {},
++    _killChild: () => {},
++  } as unknown as TaskRunnerCore;
++}
++
++describe('spawn-stream coalescer 接线（FR-01）', () => {
++  it('handleLine 把 env.coalescer 透传给 _eventToMessages（接线断言）', async () => {
++    const received: { coalescer?: unknown } = {};
++    const runner = makeRunner([], received);
++    const env = makeEnv(new MessageCoalescer());
++    await handleLine(
++      runner,
++      '{"i":0}',
++      adapterReturning([[delta('m1', 'A')]]),
++      fakeChild,
++      env as Parameters<typeof handleLine>[4],
++    );
++    expect(received.coalescer).toBe(env.coalescer);
++  });
++
++  it('同 id 多条 delta 仅在完结行到达时产出合并行 + 完结行（不再逐条直发）', async () => {
++    const submits: Record<string, unknown>[][] = [];
++    const runner = makeRunner(submits);
++    const env = makeEnv(new MessageCoalescer());
++    const adapter = adapterReturning([
++      [delta('m1', '你')],
++      [delta('m1', '好，')],
++      [delta('m1', '世界')],
++      [complete('m1', '你好，世界')],
++    ]);
++    for (let i = 0; i < 4; i++) {
++      await handleLine(
++        runner,
++        `{"i":${i}}`,
++        adapter,
++        fakeChild,
++        env as Parameters<typeof handleLine>[4],
++      );
++    }
++    // 前三条 delta 全入缓冲零提交；完结行批次 = 同 id 保底冲刷行（合并文本）
++    // + 完结行本体（[ASSISTANT] 前缀渲染），共一批两行。
++    expect(submits).toHaveLength(1);
++    const batch = submits[0]!;
++    expect(batch).toHaveLength(2);
++    expect(batch[0]).toMatchObject({
++      event_type: 'text',
++      content: '你好，世界',
++      channel: 'stdout',
++    });
++    expect(String(batch[1]!['content'])).toContain('你好，世界');
++    // 完结批次走 pendingForwards fire-and-forget 通道。
++    await Promise.allSettled(env.pendingForwards);
++  });
++
++  it('attempt 收尾冲刷：残留缓冲 → 带时间戳单行 → forwardSubmitMessages 转发', async () => {
++    // ① 残留缓冲经 coalescerFlushAllMessages 产出带消息级 timestamp 的单行，缓冲清空。
++    const c = new MessageCoalescer();
++    c.feed(delta('m9', 'TAIL'));
++    const flushed = coalescerFlushAllMessages(c);
++    expect(flushed).toHaveLength(1);
++    expect(flushed[0]).toMatchObject({
++      event_type: 'text',
++      content: 'TAIL',
++      channel: 'stdout',
++    });
++    expect(typeof flushed[0]!['timestamp']).toBe('string');
++    expect(c.size).toBe(0);
++
++    // ② forwardSubmitMessages 经 client 转发（fire-and-forget promise 入队）。
++    const submits: Record<string, unknown>[][] = [];
++    const runner = makeRunner(submits);
++    const pendingForwards: Promise<unknown>[] = [];
++    forwardSubmitMessages(
++      runner,
++      { leaseId: 'l', claimToken: 't', agentRunId: 'r', pendingForwards },
++      flushed,
++    );
++    expect(pendingForwards).toHaveLength(1);
++    await Promise.allSettled(pendingForwards);
++    expect(submits).toHaveLength(1);
++    expect(submits[0]).toEqual(flushed);
++
++    // ③ 守卫：claimToken 为空不转发（与 handleLine 既有 ql-004 口径一致）。
++    const pending2: Promise<unknown>[] = [];
++    forwardSubmitMessages(
++      runner,
++      { leaseId: 'l', claimToken: '', agentRunId: 'r', pendingForwards: pending2 },
++      flushed,
++    );
++    expect(pending2).toHaveLength(0);
++  });
++});
