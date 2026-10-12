@@ -38,20 +38,22 @@ from app.modules.change.backfill_service import BackfillStats, ChangeContextBack
 
 
 def _load_full_model_registry() -> None:
-    """导入全部模块 model——脚本只触及 change/agent 两模块时，ORM 注册表缺
-    AgentRun FK 指向的远端表（llm_providers/daemon_task_leases/...），flush 的
-    mapper 配置会抛 NoReferencedTableError；本地测试不踩（conftest 全量导入）。
-    逐模块容错导入（无 model 子模块的跳过）。"""
+    """导入全部模块 model（含子包，如 agent/profile/model）——脚本只触及
+    change/agent 两模块时，ORM 注册表缺 AgentRun FK 指向的远端表
+    （llm_providers/agent_profiles/daemon_task_leases/...），flush 的 mapper
+    配置会抛 NoReferencedTableError；本地测试不踩（conftest 全量导入）。
+    walk_packages 递归容错导入（无 model 子模块的跳过）。"""
     import importlib
     import pkgutil
 
     import app.modules as _pkg
 
-    for m in pkgutil.iter_modules(_pkg.__path__):
-        try:
-            importlib.import_module(f"app.modules.{m.name}.model")
-        except ModuleNotFoundError:
-            continue
+    for m in pkgutil.walk_packages(_pkg.__path__, prefix="app.modules."):
+        if not m.ispkg and m.name.rsplit(".", 1)[-1] == "model":
+            try:
+                importlib.import_module(m.name)
+            except ModuleNotFoundError:
+                continue
 
 
 def _print_stats(title: str, stats: BackfillStats) -> None:
