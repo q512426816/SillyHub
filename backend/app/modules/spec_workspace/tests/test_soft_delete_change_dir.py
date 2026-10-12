@@ -556,10 +556,20 @@ class TestPruneSpecBackups:
         assert len(scans) == 1, f"冷却窗口内不应重复扫描，实扫 {len(scans)} 次"
         assert (tmp_path / newer_old_ts).exists(), "冷却窗口内保留是预期（机会式修剪）"
 
-    def test_missing_backup_root_is_noop(self, tmp_path) -> None:
-        """备份区目录不存在（首次软删前）→ FileNotFound 容错静默返回，不抛。"""
+    def test_missing_backup_root_is_noop(self, tmp_path, monkeypatch) -> None:
+        """备份区目录不存在（首次软删前）→ FileNotFound 容错静默返回，不抛。
+
+        双形态：默认 None（早退在前）与注入 30（走进 scandir 触发 FileNotFoundError
+        分支）各跑一次——2026-10-12-spec-backup-keep-forever 评审 P3-4：默认早退
+        让容错分支失去直接锁定，注入 30 恢复覆盖。
+        """
         _reset_prune_throttle()
-        SpecWorkspaceService._prune_spec_backups(tmp_path / "does-not-exist")  # 不抛即通过
+        missing = tmp_path / "does-not-exist"
+        SpecWorkspaceService._prune_spec_backups(missing)  # 默认 None：不抛即通过
+
+        self._patch_retention(monkeypatch, 30)
+        _reset_prune_throttle()
+        SpecWorkspaceService._prune_spec_backups(missing)  # 启用修剪：走容错分支，不抛即通过
 
 
 # Suppress unused-import warning for pytest (fixture discovery).

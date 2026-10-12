@@ -268,6 +268,21 @@ class Settings(BaseSettings):
         "opportunistically prunes timestamped backup dirs older than N days.",
     )
 
+    @field_validator("spec_backup_retention_days")
+    @classmethod
+    def _validate_spec_backup_retention_days(cls, raw: object) -> object:
+        """fail-fast：只允许 None 或正整数（2026-10-12-spec-backup-retention-validation）。
+
+        0/负数会令 ``_prune_spec_backups`` 的 cutoff 晚于全部时间戳目录——软删触发
+        修剪即全删备份，恰为长期保留决策要防止的后果，构造期拒绝（P3-1 清偿）。
+        """
+        if isinstance(raw, int) and raw < 1:
+            raise ValueError(
+                "spec_backup_retention_days must be None (keep forever) or a "
+                f"positive number of days, got {raw!r}"
+            )
+        return raw
+
     # ── CLI progress naive 时间戳解释时区（ql-20260822-006）─────────────────
     # CLI 写的是宿主机墙钟（无时区标记），后端进程时区（Docker 容器 UTC）≠ CLI
     # 宿主机时区，解释时区必须显式配置（详见 resolve_cli_tzinfo docstring）。
