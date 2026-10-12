@@ -172,7 +172,7 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
         hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 200 }}
       />,
     );
-    const tip = container.querySelector("[data-ws-ref-hover-tip]");
+    const tip = document.querySelector("[data-ws-ref-hover-tip]");
     expect(tip).not.toBeNull();
     expect(tip!.textContent).toBe("文件：docs/design.md（工作区 ws-1）");
     expect(tip!.className).toContain("fixed");
@@ -185,11 +185,11 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
         hoverTip={null}
       />,
     );
-    expect(container.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
+    expect(document.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
   });
 
   it("hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）", () => {
-    const { container } = render(
+    const first = render(
       <InputRefOverlay
         value="【📄 design.md】"
         tokens={["【📄 design.md】"]}
@@ -198,11 +198,12 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
         hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 720 }}
       />,
     );
-    const tip = container.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    const tip = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
     expect(tip).not.toBeNull();
     expect(tip.style.top).toBe("662px"); // 720 - 48(TIP_EST_HEIGHT) - 10
-    // 常规位置（下方 16px）不受影响
-    const { container: c2 } = render(
+    // 常规位置（下方 16px）不受影响——portal 挂 body，先卸载前者再断言后者。
+    first.unmount();
+    render(
       <InputRefOverlay
         value="【📄 design.md】"
         tokens={["【📄 design.md】"]}
@@ -210,7 +211,7 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
         hoverTip={{ text: "x", x: 100, y: 200 }}
       />,
     );
-    const tip2 = c2.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    const tip2 = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
     expect(tip2.style.top).toBe("216px");
   });
 

@@ -27,6 +27,7 @@
  */
 
 import { useMemo } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -147,24 +148,29 @@ export function InputRefOverlay({
     {/* 悬停元数据气泡（2026-10-12-ws-ref-emoji-inline）：宿主 hitTest 命中驱动；
         fixed 定位不受本层 pointer-events:none 影响，纯展示不收事件；视口右/下
         边界防溢出。 */}
-    {hoverTip && (
-      <div
-        data-ws-ref-hover-tip
-        aria-hidden
-        style={{
-          left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
-          /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外，
-           * 2026-10-12 实测 tip y=965 > 视口 940 物理不可见的根因）。 */
-          top:
-            hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
-              ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
-              : hoverTip.y + 16,
-        }}
-        className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
-      >
-        {hoverTip.text}
-      </div>
-    )}
+    {hoverTip &&
+      createPortal(
+        <div
+          data-ws-ref-hover-tip
+          aria-hidden
+          style={{
+            left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
+            /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外）。
+             * 经 createPortal 挂 document.body：2026-10-12 实测发现页面某祖先带
+             * transform 创建 containing block，fixed 相对该祖先定位致视口坐标整体
+             * 偏移（style.top=824 实渲染在 965）——body 下无该祖先，fixed 恢复
+             * 相对视口，clamp 数学才成立。 */
+            top:
+              hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
+                ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
+                : hoverTip.y + 16,
+          }}
+          className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
+        >
+          {hoverTip.text}
+        </div>,
+        document.body,
+      )}
     <div
       ref={containerRef}
       className={cn(
