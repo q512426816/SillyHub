@@ -39,7 +39,7 @@ function strField(ctx: BorrowWorkspaceContext, key: string): string | undefined 
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现三处共用）。 */
+/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现六处共用）。 */
 function truncateText(raw: string): string {
   if (raw.length <= METADATA_MAX_CHARS) return raw;
   return `${raw.slice(0, METADATA_MAX_CHARS)}…（已截断）`;
