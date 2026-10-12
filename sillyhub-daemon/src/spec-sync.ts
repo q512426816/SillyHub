@@ -27,6 +27,7 @@ import type { HubClient } from './hub-client.js';
 import type { FileOp } from './hub-client.js';
 import { daemonStateDir } from './config.js';
 import { writeLocalYaml } from './local-yaml-writer.js';
+import { isAbsoluteLikePath } from './linked-repos-path.js';
 import { uploadKnowledgeHitsIfNeeded } from './knowledge-hits-upload.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
@@ -136,6 +137,13 @@ export async function pullSpecBundle(
 ): Promise<string | null> {
   if (!wsId) return null; // 防御兜底：quick-chat / 共享 session 等无 workspace 场景（2026-07-10-remove-server-local-workspace-mode 后 wsId 永远非空，server-local 已移除）
   if (opts.existingSpecRoot) return null; // 防御：execution-context 已带
+  // 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态校验——repo-native/
+  // mirrored 会 mkdir rootPath/.sillyspec 并以它为 junction target，相对形态按
+  // daemon 进程 cwd 解析（写进错误位置）；backend resolve_root_path_for_daemon
+  // 产出恒为宿主绝对路径，非绝对即契约违约，fail-loud 先于任何 fs 操作。
+  if (opts.rootPath !== undefined && !isAbsoluteLikePath(opts.rootPath)) {
+    throw new Error(`pullSpecBundle: rootPath 非绝对路径: ${opts.rootPath}`);
+  }
 
   // resolveSpecDir 先做 wsId 路径分隔符校验（§5 E-07），抛错即被调用方 catch。
   const specDir = resolveSpecDir(wsId);
@@ -2188,6 +2196,13 @@ export async function handleInitLease(
   client: HubClient,
   params: HandleInitLeaseParams,
 ): Promise<HandleInitLeaseResult> {
+  // 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态校验——本函数以
+  // rootPath 为 cwd 跑 sillyspec init（三写）+ writeLocalYaml，相对形态按 daemon
+  // cwd 漂移写盘；形态非法 throw（对齐 linked-repos「归一非法 throw、数据级失败
+  // 走结果体」口径），先于任何 fs/spawn 操作。
+  if (!isAbsoluteLikePath(params.rootPath)) {
+    throw new Error(`handleInitLease: rootPath 非绝对路径: ${params.rootPath}`);
+  }
   const strategy = params.strategy || 'platform-managed';
   const specVersion =
     typeof params.latestSpecVersion === 'number' && Number.isFinite(params.latestSpecVersion)

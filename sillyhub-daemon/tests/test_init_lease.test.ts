@@ -1364,3 +1364,17 @@ describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-
 
 // 防止 "homedir 未使用" lint（清理路径预留扩展用）
 void homedir;
+
+
+// ── 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态守卫 ──────────────
+describe('handleInitLease rootPath 绝对形态守卫（2026-10-12-daemon-path-guard-completion）', () => {
+  it('rootPath 相对形态 → 入口 throw（先于 pull/init/writeLocalYaml 任何 fs/spawn）', async () => {
+    await expect(
+      handleInitLease({} as never, {
+        workspaceId: 'ws-rel-guard',
+        rootPath: 'rel/proj',
+        serverOrigin: 'http://127.0.0.1:8000',
+      }),
+    ).rejects.toThrow('rootPath 非绝对路径');
+  });
+});

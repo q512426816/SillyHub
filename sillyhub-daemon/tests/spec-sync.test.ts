@@ -387,3 +387,23 @@ describe('postSpecSync pending_push 标记 (ql-20260816-003)', () => {
     expect(await hasUnsyncedLocalChanges(specRoot)).toBe(false);
   });
 });
+
+
+// ── 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态守卫 ──────────────
+describe('pullSpecBundle rootPath 绝对形态守卫（2026-10-12-daemon-path-guard-completion）', () => {
+  it('rootPath 相对形态 → 抛错先于任何 fs 操作（repo-native mkdir/junction 不可达）', async () => {
+    const { pullSpecBundle: pull } = await import('../src/spec-sync.js');
+    await expect(
+      pull({} as never, 'ws-rel-root', { strategy: 'repo-native', rootPath: 'rel/proj' }),
+    ).rejects.toThrow('rootPath 非绝对路径');
+  });
+
+  it('rootPath 绝对形态 → 守卫放行（盘符/UNC/POSIX 三形态判定见 linked-repos-path 单测，此处钉不误杀）', async () => {
+    const { pullSpecBundle: pull } = await import('../src/spec-sync.js');
+    const abs = join(tmpdir(), 'proj-abs');
+    // 形态守卫放行后进入既有策略逻辑（本 harness 下可能正常完成或按策略返回），
+    // 只需不因形态抛错——结果值不构成本测对象。
+    const r = await pull({} as never, 'ws-abs-root', { strategy: 'repo-native', rootPath: abs });
+    expect(r === null || typeof r === 'string').toBe(true);
+  });
+});

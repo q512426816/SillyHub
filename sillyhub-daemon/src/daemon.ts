@@ -6672,6 +6672,12 @@ export class Daemon {
       if (!payload.workspace_id || !payload.root_path || payload.repos.length === 0) {
         throw new Error('linked_repos_sync: payload 缺 workspace_id/root_path/repos');
       }
+      // 2026-10-12-daemon-path-guard-completion：allowed_roots 归属校验——本 RPC
+      // 是写路径（spawn sillyspec CLI 以 root_path 为 cwd 落 .sillyspec/projects），
+      // af5daeca2 只收了「非空 + 绝对形态」，失陷 backend 可下发宿主任意绝对路径
+      // 写入（如启动目录）；对齐同文件 get_spec_bundle DA-2 先例（realpath 穿透
+      // 判定），越界 RpcError forbidden 经 _dispatchRpc 原样回填。
+      assertWithinAllowedRoots(payload.root_path, this._effectiveAllowedRoots());
       const instanceId = this._config.runtime_id;
       const report = this._client.postLinkedReposSyncResult?.bind(this._client);
       return runLinkedReposSync(payload, {
@@ -6691,6 +6697,9 @@ export class Daemon {
       if (!rootPath) {
         throw new Error('linked_repos_snapshot: payload 缺 root_path');
       }
+      // 2026-10-12-daemon-path-guard-completion：只读快照同门——读宿主路径与
+      // get_spec_bundle 同性质（DA-2），越界 forbidden。
+      assertWithinAllowedRoots(rootPath, this._effectiveAllowedRoots());
       return runLinkedReposSnapshot(rootPath);
     });
   }
