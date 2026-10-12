@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  工作区会话页空门户「继续最近会话」跨工作区串档：recentSession 派生自全局最近 100 条会话未按页面 scope 过滤，A 工作区页显示并继续 B 工作区最近会话，selectedWorkspaceId
+  快照与文件树跟随串档。
+
+
+  成功标准：
+
+  - workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
+
+  - 全局 /sessions（无 scope）行为不变，仍取全局最近会话
+
+  - 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
+
+  - resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
+
+  - 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
+autopilot: true
+baseline_commit: 71b382cfb0eb2e04a7bcb7c20bea0b5db2f0def8
+updatedAt: '2026-10-12T07:28:11.169Z'
+baseline_sha256: 9c66524d8c8e478e740884ce6413bb3c1266d427d1f196335430fc4ed0d3be28
+
