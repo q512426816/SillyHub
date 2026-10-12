@@ -1165,3 +1165,79 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-11-mobile-subagent-drawer
   status: active
+
+## FR-auto-frontend-178 approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
+变更：2026-10-12-workspace-dead-link-fix
+状态：active
+摘要：审批中心页返回链接；审计日志页返回链接
+全文：.sillyspec/changes/archive/2026-10-12-workspace-dead-link-fix/requirements.md#FR-01
+最近确认：b417851478119d5774b018a105ed0e2a5df813e1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-workspace-dead-link-fix
+  status: active
+
+## FR-auto-frontend-179 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
+变更：2026-10-12-workspace-dead-link-fix
+状态：active
+摘要：残留清零
+全文：.sillyspec/changes/archive/2026-10-12-workspace-dead-link-fix/requirements.md#FR-02
+最近确认：b417851478119d5774b018a105ed0e2a5df813e1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-workspace-dead-link-fix
+  status: active
+
+## FR-auto-frontend-180 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
+变更：2026-10-12-workspace-dead-link-fix
+状态：active
+摘要：链接断言钉住
+全文：.sillyspec/changes/archive/2026-10-12-workspace-dead-link-fix/requirements.md#FR-03
+最近确认：b417851478119d5774b018a105ed0e2a5df813e1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-workspace-dead-link-fix
+  status: active
+
+## FR-auto-frontend-181 仅跑本改动相关测试（规则 0）
+变更：2026-10-12-workspace-dead-link-fix
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-workspace-dead-link-fix/requirements.md#FR-04
+最近确认：b417851478119d5774b018a105ed0e2a5df813e1
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-workspace-dead-link-fix
+  status: active

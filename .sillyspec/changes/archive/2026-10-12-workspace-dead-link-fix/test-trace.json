@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-workspace-dead-link-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-workspace-dead-link-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-workspace-dead-link-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-workspace-dead-link-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-workspace-dead-link-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-workspace-dead-link-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-workspace-dead-link-fix"
+    }
+  ]
+}

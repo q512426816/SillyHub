@@ -1,0 +1,327 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx
+new file mode 100644
+index 000000000..4b70786c9
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx
+@@ -0,0 +1,70 @@
++/**
++ * 2026-10-12-workspace-dead-link-fix：审批中心页返回链接钉住。
++ *
++ * 依据:
++ *   - frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx（页头返回链接）
++ *   - 8a928588f 下线「项目组组件」页删除 workspaces/[id]/components 路由后，
++ *     本页返回链接曾指向已删路由、点击即 404；钉住其指向工作区详情首页。
++ *
++ * mock 风格对齐 workspaces/[id]/mcp-tokens/__tests__/page.test.tsx（next/link 渲染
++ * 真实 <a> 以断言 href）；数据面取空列表，SessionPermissionPanel 桩化（非本测对象）。
++ */
++
++import { cleanup, render, screen } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import WorkspaceApprovalsPage from "@/app/(dashboard)/workspaces/[id]/approvals/page";
++
++vi.mock("next/link", () => ({
++  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
++    <a href={href}>{children}</a>
++  ),
++}));
++
++vi.mock("@/lib/approvals", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/approvals")>();
++  return {
++    ...actual,
++    listPendingApprovals: vi.fn().mockResolvedValue([]),
++    listApprovalHistory: vi.fn().mockResolvedValue([]),
++  };
++});
++
++vi.mock("@/lib/agent", async (importOriginal) => ({
++  ...(await importOriginal<Record<string, unknown>>()),
++  listWorkspaceAgentSessions: vi.fn().mockResolvedValue([]),
++}));
++
++vi.mock("@/lib/daemon", async (importOriginal) => ({
++  ...(await importOriginal<Record<string, unknown>>()),
++  listWorkspaceDialogs: vi.fn().mockResolvedValue([]),
++}));
++
++vi.mock("@/components/permissions/session-permission-panel", () => ({
++  SessionPermissionPanel: () => <div data-testid="session-permission-panel-stub" />,
++}));
++
++function renderPage() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <WorkspaceApprovalsPage params={{ id: "ws-1" }} />
++    </QueryClientProvider>,
++  );
++}
++
++describe("审批中心页返回链接（2026-10-12-workspace-dead-link-fix）", () => {
++  afterEach(() => {
++    cleanup();
++    vi.clearAllMocks();
++  });
++
++  it("页头「← 工作区」链接指向工作区详情首页（components 页下线后不得 404）", async () => {
++    renderPage();
++    const link = await screen.findByText("← 工作区");
++    expect(link.closest("a")).toHaveAttribute("href", "/workspaces/ws-1");
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx
+index ad21b759b..794553f51 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx
+@@ -184,7 +184,7 @@ export default function ApprovalsPage({ params }: Props) {
+         title={
+           <span>
+             <Link
+-              href={`/workspaces/${workspaceId}/components`}
++              href={`/workspaces/${workspaceId}`}
+               className="text-[11px] font-normal text-muted-foreground hover:underline"
+             >
+               &larr; 工作区
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx
+new file mode 100644
+index 000000000..b30c0c7b7
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx
+@@ -0,0 +1,44 @@
++/**
++ * 2026-10-12-workspace-dead-link-fix：审计日志页返回链接钉住。
++ *
++ * 依据:
++ *   - frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx（页头返回链接）
++ *   - 8a928588f 下线「项目组组件」页删除 workspaces/[id]/components 路由后，
++ *     本页返回链接文案「← 组件列表」指向已删路由、点击即 404；改为「← 工作区」
++ *     并钉住指向工作区详情首页。
++ *
++ * mock 风格对齐 workspaces/[id]/mcp-tokens/__tests__/page.test.tsx（next/link 渲染
++ * 真实 <a> 以断言 href）；数据面取空列表。
++ */
++
++import { cleanup, render, screen } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++
++import WorkspaceAuditPage from "@/app/(dashboard)/workspaces/[id]/audit/page";
++
++vi.mock("next/link", () => ({
++  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
++    <a href={href}>{children}</a>
++  ),
++}));
++
++vi.mock("@/lib/audit", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/audit")>();
++  return {
++    ...actual,
++    listAuditLogs: vi.fn().mockResolvedValue([]),
++  };
++});
++
++describe("审计日志页返回链接（2026-10-12-workspace-dead-link-fix）", () => {
++  afterEach(() => {
++    cleanup();
++    vi.clearAllMocks();
++  });
++
++  it("页头「← 工作区」链接指向工作区详情首页（原「← 组件列表」指向已删路由）", async () => {
++    render(<WorkspaceAuditPage params={{ id: "ws-1" }} />);
++    const link = await screen.findByText("← 工作区");
++    expect(link.closest("a")).toHaveAttribute("href", "/workspaces/ws-1");
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx
+index 3e6218dcf..e5c5fb497 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx
+@@ -150,10 +150,10 @@ export default function AuditPage({ params }: Props) {
+         title={
+           <span>
+             <Link
+-              href={`/workspaces/${workspaceId}/components`}
++              href={`/workspaces/${workspaceId}`}
+               className="text-[11px] font-normal text-muted-foreground hover:underline"
+             >
+-              ← 组件列表
++              ← 工作区
+             </Link>
+             <span className="mt-0.5 block">审计日志</span>
+           </span>
+diff --git a/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/tasks.md b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/tasks.md
+new file mode 100644
+index 000000000..3affc94c7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 任务注册表（Tasks）— 2026-10-12-workspace-dead-link-fix
++
++- [x] task-01: approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
++- [x] task-02: 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
++- [x] task-03: 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
++- [x] task-04: 仅跑本改动相关测试（规则 0）
+diff --git a/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/design.md b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/design.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-workspace-dead-link-fix
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++8a928588f 下线「项目组组件」页时删除了 `workspaces/[id]/components` 路由（含 topology 子页），但审批中心与审计日志两页页头的返回 `<Link>` 仍指向该路由——点击即 Next.js 404，audit 页文案还是「← 组件列表」。修法：两处 `href` 改指 `/workspaces/${workspaceId}`（工作区详情首页，与平台其余「← 工作区」返回约定一致），audit 文案同步改「← 工作区」；两页此前无页面级测试，各补一个最小渲染测试钉住链接文案与 href（next/link mock 成真实 `<a>` 以可断言，数据面取空列表、SessionPermissionPanel 桩化）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 纯前端两处 JSX `href`/文案改动与两个新增测试文件；无函数签名、端点、schema、路由结构变化；`pnpm gen:types` 不需跑。用户可见变化：两页返回链接从 404 死链变为工作区详情首页。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   链接是纯静态 JSX 渲染，无数据依赖与时序面；页面数据加载失败不影响页头渲染（header 不在 loading 分支内），断言用 `findByText` 容忍异步首帧。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用：纯展示链接改动，无共享可变状态；测试侧各用独立 QueryClient 与 cleanup，无跨用例污染面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用：无状态迁移；两页卸载/重挂载仅重复既有取数行为，链接渲染与生命周期解耦。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   href 模板按当前页 `params.id` 插值，不跨 workspace 串台；不触及其它仓。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：指向工作区首页后若用户期望回到「上一列表页」会多一跳——但两页入口本就来自工作区详情（侧边栏/卡片），回首页即原入口，且与平台其余子页「← 工作区」约定一致；无更优既有目标。
++- 放弃方案：删除返回链接（对齐组件页下线的减法思路）——否，页头返回锚是既有导航约定，删除损失导航一致性且改动面反而更大（需动 PageHeader 结构）。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/approvals/page.tsx | 返回链接 href 改指工作区首页 |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/audit/page.tsx | 返回链接 href 改指工作区首页 + 文案「← 组件列表」→「← 工作区」 |
++| 增 | frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx | 返回链接最小断言测试 |
++| 增 | frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx | 返回链接最小断言测试 |
+
+diff --git a/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/proposal.md b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 提案书（Proposal）— 2026-10-12-workspace-dead-link-fix
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P2——8a928588f 下线「项目组组件」页删除了 workspaces/[id]/components 路由，但审批中心与审计日志两页的返回链接仍指向已删路由，点击即 Next.js 404（audit 页文案还是「← 组件列表」指向不存在页）。
++成功标准：
++- approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
++- 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
++- 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
++- 仅跑本改动相关测试（规则 0）
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
++2. 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
++3. 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
++4. 仅跑本改动相关测试（规则 0）
++
++## 成功标准（可验证）
++
++1. approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
++2. 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
++3. 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
++4. 仅跑本改动相关测试（规则 0）
+
+diff --git a/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/requirements.md b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-workspace-dead-link-fix/requirements.md
+@@ -0,0 +1,58 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-workspace-dead-link-fix
++
++## 功能需求
++
++### FR-01: approvals 与 audit 两页返回链接改指 /workspaces/${workspaceId}（工作区详情首页），文案与指向一致
++
++- 两页页头返回链接的 `href` 必须为 `/workspaces/${workspaceId}`，且链接文案必须与指向一致（「← 工作区」）；禁止再指向已下线的 `workspaces/[id]/components` 路由（点击 404）。
++
++#### 场景：审批中心页返回链接
++
++- Given 审批中心页以 workspaceId=ws-1 渲染
++- When 点击页头「← 工作区」链接
++- Then href 为 `/workspaces/ws-1`
++
++#### 场景：审计日志页返回链接
++
++- Given 审计日志页以 workspaceId=ws-1 渲染
++- When 点击页头「← 工作区」链接（原「← 组件列表」）
++- Then href 为 `/workspaces/ws-1`
++
++### FR-02: 全仓不再存在指向 workspaces/[id]/components 的用户可见链接（grep 复核）
++
++- frontend `src/` 内必须不存在指向 `workspaces/${workspaceId}/components` 的用户可见 `<Link>`/路由跳转（生成类型与注释除外）；复核以 grep 证据留痕。
++
++#### 场景：残留清零
++
++- When 对 src/ 执行链接指向 grep
++- Then 零命中（不含测试 mock 与生成文件）
++
++### FR-03: 两页既有测试全绿；如两页无既有链接断言则补最小断言钉住返回链接指向
++
++- 两页均无既有页面级测试，必须各补一个最小渲染测试：断言返回链接文案与 href；渲染所需数据面取空列表、重子组件桩化（本测对象仅为链接）。
++
++#### 场景：链接断言钉住
++
++- When 运行两页新增测试
++- Then 断言「← 工作区」链接 href=/workspaces/ws-1 且两文件全绿
++
++### FR-04: 仅跑本改动相关测试（规则 0）
++
++- 本变更只必须运行两页新增测试文件与 eslint（改动 4 文件），禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面回归
++
++- When 运行相关测试与 lint
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」链接指向工作区详情首页（components 页下线后不得 404）」
++FR-01: frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」链接指向工作区详情首页（原「← 组件列表」指向已删路由）」
++FR-02: frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」链接指向工作区详情首页（components 页下线后不得 404）」
++FR-03: frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx「页头「← 工作区」链接指向工作区详情首页（components 页下线后不得 404）」
++FR-04: frontend/src/app/(dashboard)/workspaces/[id]/audit/__tests__/page.test.tsx「页头「← 工作区」链接指向工作区详情首页（原「← 组件列表」指向已删路由）」

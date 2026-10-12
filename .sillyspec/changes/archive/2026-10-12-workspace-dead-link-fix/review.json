@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-workspace-dead-link-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b417851478119d5774b018a105ed0e2a5df813e1",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 的测试绑定属名义性：绑定测试只钉住单页链接，仓库级零残留实际由 grep 保证",
+      "evidence": "FR-02 绑定行指向 approvals 页测试，该测试仅断言本页 href=/workspaces/ws-1，天然无法覆盖「全仓无死链」；FR-02 实际验证手段是其自述的 grep，评审员独立 grep（MSYS 安全模式）确认 src/ 零用户可见残留（仅注释与生成类型 api-types.ts 命中，均为 FR 明示豁免类），承诺本身兑现，故仅 P3 留痕：该钉住测试防不住未来其它页面再引入同类死链。",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/approvals/__tests__/page.test.tsx:71"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design 称「header 不在 loading 分支内」经代码核实为真：approvals/page.tsx:183 与 audit/page.tsx:149 的 PageHeader 均无条件渲染，loading 分支只包列表体（approvals:265/362，audit:214）；断言用 findByText 容忍异步首帧，与实现一致。",
+    "并发": "ok——diff 为纯展示 JSX 改动，无共享可变状态，「不适用」属实；测试侧每用例独立 QueryClient + afterEach cleanup，在 patch 中核实存在，无跨用例污染面。",
+    "切换": "ok——无状态迁移/中断面，卸载重挂载仅重复既有取数行为，链接渲染与生命周期解耦，「不适用」属实。",
+    "作用域": "ok——两页 workspaceId 均取自当前页 params.id（approvals/page.tsx:96、audit/page.tsx:74），href 按本页参数插值，不跨 workspace 串台；「不触及其它仓」属实。"
+  },
+  "reviewedAt": "2026-10-12T00:47:52Z"
+}
