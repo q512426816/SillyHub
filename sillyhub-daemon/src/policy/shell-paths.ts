@@ -51,6 +51,16 @@ function trimShellSeparators(p: string): string {
  * 目标以 `-` 开头（`-p`/`-d`/`-o` 等被正则贪婪误吞的开关），捕获即弃不产出
  * 目标。生产实证：deny 文案目标路径为 `<工作区>/-p`（mkdir -p 的 flag 被当
  * 路径，会话 47e2ff1a 02:51 deny）。Bash/PowerShell/CMD 三提取器共用。
+ *
+ * 已知残留放行面（2026-10-13-review-risk-fixes FR-04 记档，接受现状）：
+ *  1. 真以 `-` 开头的合法文件名写入目标（如 `echo x > -p`）经本判定弃出
+ *     提取结果 → writePaths 为空 → judgeWriteViaPolicyEngine 按「提取不到=
+ *     放行」口径不拦截。短横线开头文件名极罕见，且 shell 初始 cwd 即会话根
+ *     （写入点通常本就在白名单内）；实际越界需配合下条 cd 盲区。
+ *  2. cd 盲区（既有边界，非 F4 引入）：静态提取不追踪 `cd`——`cd /etc && echo
+ *     x > conf` 的相对目标按会话根锚定解析（F4 语义）必判 under-root 放行，
+ *     而真实写入发生在 cd 后目录。写守卫对 Bash 是命令串静态启发式层，非
+ *     文件系统级沙箱；收紧需走命令解析/沙箱方案，超出轻量修复范围。
  */
 function isFlagToken(t: string | undefined): boolean {
   return typeof t === 'string' && t.startsWith('-');

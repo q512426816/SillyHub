@@ -173,8 +173,10 @@ function normalizeCase(p: string): string {
  * @param target  目标路径（字符串，未规范化亦可，函数内部将规范化）
  * @param allowedRoots 白名单根目录数组（绝对路径）
  * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
- *   target 与 roots 双解析均透传（roots 相对形态罕见，但同一基点语义一致；
- *   undefined=现行为 process.cwd()）。
+ *   仅透传 target 解析（见下方 resolved 单点）——roots 维持单参 resolveRealPath
+ *   解析（锚 process.cwd()）：roots 契约为绝对路径（见参数说明），anchor 对其
+ *   无意义；若未来 roots 支持相对形态，需同步评估是否透传。
+ *   target 侧 undefined=现行为 process.cwd()。
  * @returns true 当目标路径在任一 allowedRoot 下
  */
 export function isPathUnderAnyRoot(
