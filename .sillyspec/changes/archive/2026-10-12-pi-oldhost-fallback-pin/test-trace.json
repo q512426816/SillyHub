@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-pi-oldhost-fallback-pin",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-pi-oldhost-fallback-pin"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-pi-oldhost-fallback-pin"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-pi-oldhost-fallback-pin"
+    }
+  ]
+}

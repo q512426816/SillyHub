@@ -1,0 +1,236 @@
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 17f56fd8d..9955897af 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4192,6 +4192,11 @@ export class Daemon {
+     //     不代报——_worker_done_core 每调用 INSERT artifact 无去重，双通道会双写；
+     //   - !isError 且 result 为非空白 string：失败轮 / 空产出不代报（防空 summary
+     //     噪声行）。
++    // 2026-10-12-pi-oldhost-fallback-pin：pi 静态 caps.mcp=true 描述机制支持
++    // （SPIKE-00 pi>=1.0），宿主旧版由 pi-rpc-driver 运行时门控跳过注入（会话无
++    // worker_done 工具）——该形态不立即代报也无人自报，经下方 provider 无关的
++    // +90s 延迟探测兜底收敛（90s 延迟属设计内）；静态表不感知宿主版本属有意
++    // 设计，勿在延迟探测上加 provider 门（会静默回归旧版 pi 收敛面，测试有钉）。
+     if (
+       state.stage === 'mission_worker' &&
+       getProviderCaps(state.provider).mcp === false &&
+diff --git a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+index 68ce0275c..f0f45b65d 100644
+--- a/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
++++ b/sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+@@ -16,6 +16,11 @@
+ // 正例与门控矩阵测试载体从 pi 换成仍 mcp=false 的 codex（机制断言不变）；
+ // pi 新契约（零代报）补独立钉子。
+ //
++// 2026-10-12-pi-oldhost-fallback-pin：旧版 pi 宿主（pi-rpc-driver 运行时探测
++// major<1 跳过 MCP 注入、会话无 worker_done 工具）不立即代报也无人自报，经
++// provider 无关的 +90s 延迟探测兜底收敛（ql-20260911-028 安全网）——补 pi 载体
++// 延迟兜底钉子，静态 caps 表不感知宿主版本属有意设计（两层门控分工不变）。
++//
+ // 覆盖（门控矩阵 + 顺序 + 容错）：
+ //   - mission_worker + codex(mcp=false) + success + 全文非空 → 恰一次代报：
+ //     前两参 undefined、summary=全文（不截断）、opts.sessionId=分身会话 id、
+@@ -520,6 +525,40 @@ describe('ql-20260911-028：延迟兜底代报（mcp=true 自报缺失 / 空白
+     );
+   });
+ 
++  it('pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）', async () => {
++    // 7bd743230 把 pi.caps.mcp 翻 true（SPIKE-00 pi>=1.0 实测）后，立即代报门对
++    // pi 不再放行；宿主 pi<1.0 时 pi-rpc-driver 运行时门控跳过 MCP 注入（会话无
++    // worker_done 工具、无法自报）——该形态与「claude 分身未调工具」同构，经本处
++    // provider 无关的 +90s 延迟探测兜底收敛（90s 延迟属设计内）。此钉子防未来给
++    // 延迟探测加 provider 门或改立即门语义时静默回归旧版 pi 收敛面。
++    vi.useFakeTimers();
++    const { daemon, client } = buildFallbackHarness(
++      { stage: 'mission_worker', provider: 'pi' },
++      async () => ({
++        active: true,
++        workers: [{ id: 'run-mw-1', artifacts: [] }],
++      }),
++    );
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-mw-1', 'run-mw-1', successResult(FULL_TEXT));
++    await vi.advanceTimersByTimeAsync(0);
++    // 立即路径：caps.mcp=true 不放行（防双写语义保留）。
++    expect(client['workerDone']).not.toHaveBeenCalled();
++
++    await vi.advanceTimersByTimeAsync(90_000);
++    expect(client['getMissionStatus']).toHaveBeenCalledWith(undefined, undefined, {
++      sessionId: 'sess-mw-1',
++    });
++    expect(client['workerDone']).toHaveBeenCalledTimes(1);
++    expect(client['workerDone']).toHaveBeenCalledWith(
++      undefined,
++      undefined,
++      { summary: FULL_TEXT },
++      { sessionId: 'sess-mw-1' },
++    );
++  });
++
+   it('已自报（探测到 artifacts 非空）→ 不兜底（防双写）', async () => {
+     vi.useFakeTimers();
+     const { daemon, client } = buildFallbackHarness(
+diff --git a/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/tasks.md b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/tasks.md
+new file mode 100644
+index 000000000..856cfec53
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:09:42.270Z
++---
++# 任务注册表（Tasks）— 2026-10-12-pi-oldhost-fallback-pin
++
++- [x] task-01: 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
++- [x] task-02: daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
++- [x] task-03: 生产代码零逻辑改动（注释与测试面变更）
++- [x] task-04: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
+diff --git a/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/design.md b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-pi-oldhost-fallback-pin
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++24h 审查 P2-2 原判「旧版 pi 宿主 mission_worker 产出无人上报」经复核**降级**：daemon.ts:4236 的 +90s 延迟兜底探测（ql-20260911-028）对一切 mission_worker 成功轮生效、`_fallbackWorkerDone` 无 provider 门——旧版 pi 宿主（pi-rpc-driver 运行时探测 major<1 跳过 MCP 注入、会话无 worker_done 工具）实际经该探测在 90s 后收敛，与「claude 分身未调工具」同一安全网形态，90s 延迟属设计内代价而非产出丢失。残余风险是覆盖面无测试钉住、注释未披露（未来重构若给延迟探测加 provider 门或改立即门语义，旧版 pi 收敛面会静默回归）。修法：测试面补 pi 载体钉子（对齐既有 claude 延迟兜底用例的 harness 与断言形态）+ daemon.ts 立即代报门注释与测试头注补披露；生产逻辑零改动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 无：生产代码仅注释行增改（daemon.ts 立即代报门三重门控注释补一句披露）；测试文件新增 1 用例 + 头注同步。无 schema/端点变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不受影响：钉子只覆盖既有 onTurnResult → setTimeout(90s) → 探测的既有时序（fake 计时器确定性推进）；pi 空白 result 因 override 晚到由既有会话级全文缓存兜住（注释已述），不在本变更面。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用：测试单会话单轮，无并发写；生产路径的防双写（立即门 mcp=true 不放行 + 探测 artifacts 非空跳过）语义零改动且被既有用例钉住。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用：测试用 fake 计时器 + afterEach 恢复真实计时器与 mock，daemon 实例 afterEach stop，无跨用例状态泄漏。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不适用：workerDone/getMissionStatus 调用均携 sessionId（session-scoped），断言逐字核对载体 sessionId，无串台面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：披露注释与实现漂移（规则 18 万恶之源）——缓解：披露文本与钉子用例同变更落盘，用例红即披露失真，可被常规回归捕获。
++- 放弃方案 A：立即代报门改为读运行时注入结果（driver 上报「MCP 未注入」信号）——可省旧版 pi 宿主 90s 延迟，但需 driver→daemon 新增状态通道，复杂度与收益不成比例（mission 本为长耗时流程），且延迟探测已是 claude 未自报形态的既定安全网，双通道徒增双写回归面。
++- 放弃方案 B：caps 表按宿主版本参数化——静态表承载运行时事实会破坏「caps 描述机制支持」的既有语义（FR-06 两层门控分工），且 daemon 启动时无法预知所有会话宿主版本。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | sillyhub-daemon/src/daemon.ts | 立即代报门注释补旧版 pi 宿主收敛披露（仅注释） |
++| 改 | sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts | 新增 pi 旧版宿主延迟兜底钉子 + 头注同步 |
+
+diff --git a/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/proposal.md b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:09:42.269Z
++---
++# 提案书（Proposal）— 2026-10-12-pi-oldhost-fallback-pin
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P2-2 复核修正——pi.caps.mcp 静态表翻 true（7bd743230）后 daemon.ts:4197 立即代报门对 pi 不再放行，而 pi-rpc-driver.ts:930 运行时探测 pi<1.0 会跳过 MCP 注入（会话无 worker_done 工具），旧版 pi 宿主两头都不立即报；但 daemon.ts:4236 的 +90s 延迟兜底探测对一切 mission_worker 成功轮生效（无 provider 门），旧版 pi 宿主实际经延迟探测收敛（90s 延迟，非产出丢失）——该覆盖面无测试钉住、代码注释亦未披露，防未来改动误伤。
++成功标准：
++- 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
++- daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
++- 生产代码零逻辑改动（注释与测试面变更）
++- 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
++2. daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
++3. 生产代码零逻辑改动（注释与测试面变更）
++4. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
++
++## 成功标准（可验证）
++
++1. 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
++2. daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
++3. 生产代码零逻辑改动（注释与测试面变更）
++4. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
+
+diff --git a/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/requirements.md b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/requirements.md
+@@ -0,0 +1,51 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-pi-oldhost-fallback-pin
++
++## 功能需求
++
++### FR-01: 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
++
++- 测试必须存在 pi 载体用例：mission_worker 成功轮立即路径零代报（workerDone 零调用）、fake 计时推进 90s 且 getMissionStatus 返回 artifacts 空且 active=true 后 workerDone 恰一次（summary=全文、sessionId=分身会话）；既有门控矩阵与 codex/claude 用例语义不变。
++
++#### 场景：旧版 pi 宿主收敛面钉住
++
++- Given mission_worker + pi + 成功轮全文非空 + 探测返回 artifacts 空且 mission 活跃
++- When 立即检查与 +90s 计时推进
++- Then 立即零代报、90s 后兜底代报恰一次
++
++### FR-02: daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
++
++- daemon.ts 立即代报门控注释与测试文件头注必须写明：pi 静态 caps.mcp=true 描述机制支持（SPIKE-00 pi>=1.0），宿主旧版由 pi-rpc-driver 运行时门控跳过注入、该形态经 provider 无关的 +90s 延迟探测兜底收敛（90s 延迟属设计内），两道门依据不一致不构成产出丢失。
++
++#### 场景：披露落盘
++
++- When 审阅 daemon.ts 兜底代报段注释与测试头注
++- Then 上述披露文本可见且与实现行为一致
++
++### FR-03: 生产代码零逻辑改动（注释与测试面变更）
++
++- 本变更禁止改动任何生产逻辑：daemon.ts 仅允许注释行增改，providers/caps/驱动门控/延迟探测逻辑零变化；交付面仅 daemon.ts 注释 + 测试文件。
++
++#### 场景：零逻辑改动核验
++
++- When 对比基线 diff
++- Then 生产代码仅注释行差异，测试仅新增用例与头注
++
++### FR-04: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
++
++- 本变更只必须运行该测试文件全文件，禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面回归
++
++- When 运行该测试文件
++- Then 新增 pi 钉子与既有用例全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」
++FR-02: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」
++FR-03: 不适用：零逻辑改动承诺由 change.patch 冻结面 diff 直接核验，无独立测试面
++FR-04: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts（全文件回归）

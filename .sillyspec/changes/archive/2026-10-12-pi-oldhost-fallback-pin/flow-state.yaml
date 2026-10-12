@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24h 风险审查 P2-2 复核修正——pi.caps.mcp 静态表翻 true（7bd743230）后 daemon.ts:4197 立即代报门对 pi 不再放行，而 pi-rpc-driver.ts:930 运行时探测
+  pi<1.0 会跳过 MCP 注入（会话无 worker_done 工具），旧版 pi 宿主两头都不立即报；但 daemon.ts:4236 的 +90s 延迟兜底探测对一切 mission_worker 成功轮生效（无
+  provider 门），旧版 pi 宿主实际经延迟探测收敛（90s 延迟，非产出丢失）——该覆盖面无测试钉住、代码注释亦未披露，防未来改动误伤。
+
+  成功标准：
+
+  - 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有
+  claude 延迟兜底用例
+
+  - daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
+
+  - 生产代码零逻辑改动（注释与测试面变更）
+
+  - 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
+autopilot: true
+baseline_commit: 570bb7b198afc0423e69d35d992fd1a724d27981
+updatedAt: '2026-10-12T01:15:00.318Z'
+baseline_sha256: c8826d23c4c9a94aaf70e58b93ebcb8ba84a99d34c4c83fe256d843c0f7b0594
+gate_summary: >-
+  test: passed ← module[]+deps(py18+jsx30)+fr(47)（102.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012011238\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（6.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012011238\test-result.json｜门文件
+  3 个
+

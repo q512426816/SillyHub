@@ -1,0 +1,81 @@
+{
+  "change": "2026-10-12-pi-oldhost-fallback-pin",
+  "baseline": "570bb7b198afc0423e69d35d992fd1a724d27981",
+  "head": "293d1ec98be0e4e8bf0f8891cfba554052cfdd58",
+  "files": [
+    ".sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/tasks.md",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts",
+    ".sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/design.md",
+    ".sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/proposal.md",
+    ".sillyspec/changes/2026-10-12-pi-oldhost-fallback-pin/requirements.md"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 184,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-12T01:12:54.402Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "570bb7b198afc0423e69d35d992fd1a724d27981",
+    "totals": {
+      "files": 2,
+      "additions": 44,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "b0e27f27beeabff1839ebd144bb6919737c5fe611727b5bc0474fc28ab642b67",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-pi-oldhost-fallback-pin",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "293d1ec98be0e4e8bf0f8891cfba554052cfdd58",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "新 pi 钉子比同组 claude 兄弟用例少一条立即路径辅助断言（getMissionStatus 未被调用），FR-01 未要求、不构成违约",
+      "evidence": "claude 延迟兜底用例在 advanceTimersByTimeAsync(0) 后同时断言 workerDone 零调用且 getMissionStatus 未被调用（tests/daemon-mission-worker-artifact.test.ts:512-513）；新 pi 用例（:544-547）仅断言 workerDone 零调用。FR-01 仅绑定「立即零代报（workerDone 零调用）」，该断言已存在且成立（90s 定时器未到点探测本就不会触发），故仅为与兄弟用例的形态不对称，非缺陷。",
+      "location": "sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts:544-547"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——design 声明「pi 空白 result 因 override 晚到不在本变更面」，该面由既有会级全文缓存兜住且被既有用例 tests:610-640 钉住；本变更零生产逻辑改动，未引入新乱序面）",
+    "并发": "ok（边界已裁决：可接受——「不适用」成立：测试单会话单轮无并发写；生产防双写语义零改动且被既有用例钉住：探测 artifacts 非空跳过（daemon.ts:4338-4345）← tests:562-577、592-608，立即门 mcp=true 不放行（daemon.ts:4200-4206）← tests:285-312）",
+    "切换": "ok（边界已裁决：可接受——「90s 延迟属设计内」声明成立：延迟探测对一切 mission_worker 成功轮排定（daemon.ts:4241-4253，无 provider 条件），claude 同形态早已承受该延迟，非本变更引入；测试面 fake 计时器 + afterEach useRealTimers/restoreAllMocks/daemon.stop（tests:479-486）无跨用例泄漏）",
+    "作用域": "ok（边界已裁决：可接受——「静态 caps 表不感知宿主版本属有意设计」声明成立：providers.ts:402-428 pi mcp=true 为机制级描述，宿主版本由 pi-rpc-driver.ts:930-935 运行时探测（major<1 跳过 MCP 注入，已核实真实存在）；workerDone/getMissionStatus 均携 sessionId 且断言逐字核对 sess-mw-1（tests:550-559））"
+  },
+  "reviewedAt": "2026-10-12T01:14:24Z"
+}

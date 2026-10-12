@@ -1,0 +1,12 @@
+{"ts":1791767408795,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791767408795,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791767416048,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/tests/daemon-mission-worker-artifact.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791767426191,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/daemon.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791767444746,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791767445047,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791767445333,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791767445609,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791767445783,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791767445783,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791767449363,"kind":"commit","stage":null,"detail":"293d1ec98","provisional":true}
+{"ts":1791767560954,"kind":"gate-run","stage":"verify","detail":"门实测 passed（102.9s） · 20261012011238","provisional":true}

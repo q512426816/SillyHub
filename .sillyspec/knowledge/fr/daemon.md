@@ -3056,3 +3056,67 @@
 摘要：双侧绿
 全文：.sillyspec/changes/archive/2026-10-10-duration-api-cumulative-fix/requirements.md#FR-03
 最近确认：303963b6019cd66b1865cd655f3f1e5e8ab4b86b
+
+## FR-daemon-088 测试钉子：pi(mcp=true) mission_worker 成功轮立即零代报（防双写语义不变），+90s 探测 artifacts 仍空且 mission 活跃 → 兜底代报恰一次（旧版 pi 宿主收敛面），载体对齐既有 claude 延迟兜底用例
+变更：2026-10-12-pi-oldhost-fallback-pin
+状态：active
+摘要：旧版 pi 宿主收敛面钉住
+全文：.sillyspec/changes/archive/2026-10-12-pi-oldhost-fallback-pin/requirements.md#FR-01
+最近确认：293d1ec98be0e4e8bf0f8891cfba554052cfdd58
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-pi-oldhost-fallback-pin
+  status: active
+
+## FR-daemon-089 daemon.ts 立即代报门注释与测试文件头注补披露：旧版 pi 宿主（运行时门控跳过注入）经 +90s 延迟探测兜底收敛，静态 caps 表不感知宿主版本属有意设计
+变更：2026-10-12-pi-oldhost-fallback-pin
+状态：active
+摘要：披露落盘
+全文：.sillyspec/changes/archive/2026-10-12-pi-oldhost-fallback-pin/requirements.md#FR-02
+最近确认：293d1ec98be0e4e8bf0f8891cfba554052cfdd58
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts「pi(mcp=true，旧版宿主注入跳过形态) 成功轮：立即零代报；+90s 探测无 artifacts → 兜底代报（旧版 pi 宿主经延迟探测收敛，2026-10-12-pi-oldhost-fallback-pin）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-pi-oldhost-fallback-pin
+  status: active
+
+## FR-daemon-090 生产代码零逻辑改动（注释与测试面变更）
+变更：2026-10-12-pi-oldhost-fallback-pin
+状态：active
+摘要：零逻辑改动核验
+全文：.sillyspec/changes/archive/2026-10-12-pi-oldhost-fallback-pin/requirements.md#FR-03
+最近确认：293d1ec98be0e4e8bf0f8891cfba554052cfdd58
+
+## FR-daemon-091 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts 全文件
+变更：2026-10-12-pi-oldhost-fallback-pin
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-pi-oldhost-fallback-pin/requirements.md#FR-04
+最近确认：293d1ec98be0e4e8bf0f8891cfba554052cfdd58
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-pi-oldhost-fallback-pin:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/daemon-mission-worker-artifact.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-pi-oldhost-fallback-pin
+  status: active
