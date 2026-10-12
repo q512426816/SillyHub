@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-spawn-flush-e2e-test",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「直调 spawnAndStream 驱动真实收尾序列（文件级 mock spawn + FakeChild）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-spawn-flush-e2e-test"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「取消（AbortSignal）break → 残留缓冲收尾冲刷转发 + status=cancelled」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-spawn-flush-e2e-test"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「超时（看门狗）break → 残留缓冲收尾冲刷转发 + status=timeout」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-spawn-flush-e2e-test"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「正常流关闭 → 残留缓冲收尾冲刷转发 + status=completed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-spawn-flush-e2e-test"
+    }
+  ]
+}

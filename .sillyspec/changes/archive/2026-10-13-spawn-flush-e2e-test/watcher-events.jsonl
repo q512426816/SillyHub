@@ -1,0 +1,14 @@
+{"ts":1791848307891,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791848307891,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791848378136,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791848378435,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791848380199,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791848380199,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791848391108,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791848391392,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791848391651,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791848393846,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791848393846,"kind":"task-done","stage":"tasks","detail":"checked 2→5","provisional":true}
+{"ts":1791848393846,"kind":"commit","stage":null,"detail":"771c8ad8e","provisional":true}
+{"ts":1791848400969,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-13-spawn-flush-e2e-test/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791848404144,"kind":"gate-run","stage":"verify","detail":"门实测 passed（2.2s） · 20261012234002","provisional":true}

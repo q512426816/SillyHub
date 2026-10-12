@@ -150,6 +150,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - `hub-client.ts` 增 liveness 上报：Bearer shpsync 直推 `POST /api/agent-logs/states`（daemon 各 workspace root local.yaml platform token）；`buildAgentLogStatePushGroups` 落 D-012 优先级（第一方 PERMISSION_REQUEST pending 覆写 blocked）。
 - `daemon.ts`：`_livenessLoop` 独立 `_fire`（60s 发现刷新 + tailer 10s tick；abortableSleep 信号感知——裸 setTimeout 会拖死 stop）。
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
+- 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-spawn-flush-e2e-test",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "收尾序列第三步 await pendingForwards 无失败守护：仅删除该 await（保留 flushAll+forwardSubmitMessages）三用例仍绿",
+      "evidence": "FR-01（requirements.md:17）承诺「测试覆盖到收尾序列（flushAll → forwardSubmitMessages → await pendingForwards），未来重构该段时测试会红」。前两步硬守护成立：删 spawn-stream.ts:502-514 任一环 → delta 永留 coalescer 缓冲 → submits 恒空 → spawn-flush-e2e.test.ts:128/:163/:194 的 toHaveLength(1) 全红；删 handleLine 透传 coalescer（spawn-stream.ts:469）→ delta 直发 → :119/:154/:185 零直发断言红。但第三步 await（spawn-stream.ts:515-517）被删时测试不红：fake client 的 submitMessages 是无 await 的 async 函数（spawn-flush-e2e.test.ts:60-68），submits.push 在 forwardSubmitMessages 调用瞬间同步完成，断言不依赖 await 发生。要守护该步需 deferred client promise 断言「spawnAndStream resolve 晚于 push」。",
+      "location": "sillyhub-daemon/src/task-runner/spawn-stream.ts:515"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——design 声明固定 tick 时序脆弱风险及对冲，与代码相符：tick 默认 25ms（spawn-flush-e2e.test.ts:43）远大于 readline pipe/nextTick 级消费链，超时用例 tick(150)=3 倍于 50ms 看门狗（:157），FakeChild stdout 为真实 Readable 顺序消费（fake-child.ts:82-86）；实跑 78 passed 稳定复现）",
+    "并发": "ok（每用例独立 submits/runner/FakeChild/AbortController（spawn-flush-e2e.test.ts:108-112/:139-144/:174-179），coalescer 为 spawnAndStream 函数内 attempt 级局部变量（spawn-stream.ts:256），文件内用例默认串行，零共享状态——与 design 盲维2 相符）",
+    "切换": "ok（边界已裁决：可接受——design 声明「killTimer 清理未直接断言但函数返回即 cleanup」：watchdog/killTimer 在 return 前 clearTimeout（spawn-stream.ts:519-521）+ removeEventListener（:522），await p 即函数完全返回，killTimer 若泄漏只会拖慢进程退出不会假绿；abort 在 tick 隔离 delta 已缓冲后触发，exitCloser（:434-437）保证 for-await 必然跳出无死等——与 design 盲维3 相符）",
+    "作用域": "ok（边界已裁决：可接受——design 声明 createTerminalObserver 写配置目录 runs/<leaseId> 副作用沿用既有测试先例：terminal-observer.ts:134-151 确写 DEFAULT_CONFIG_DIR/runs/<leaseId>/terminal.log 且 config 缺省安全不抛错，测试断言面全内存不读该目录；注：三用例共用固定 leaseId 'lease-flush-e2e'（spawn-flush-e2e.test.ts:84），design「leaseId 唯一化」指相对其它测试文件的专用名而非用例间唯一，串行执行 + 无断言依赖，terminal.log 互覆写无后果——纯测试新增零 src 改动已核对（git show --stat 771c8ad8e 仅 .sillyspec 文档 + 1 测试文件），fake runner _eventToMessages 确实委托真实 eventToSubmitMessages(ev, coalescer) 未 mock 渲染轨（:70-72），diff 无 api-types.ts/openapi.json 生成物——n/a 确认）"
+  },
+  "reviewedAt": "2026-10-12T23:44:21Z"
+}

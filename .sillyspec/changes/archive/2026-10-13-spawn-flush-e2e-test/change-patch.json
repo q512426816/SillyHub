@@ -1,0 +1,67 @@
+{
+  "change": "2026-10-13-spawn-flush-e2e-test",
+  "baseline": "92013965be9189f00a6002cef658c176bea782b9",
+  "head": "771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5",
+  "files": [
+    "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 204,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-12T23:40:05.111Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "92013965be9189f00a6002cef658c176bea782b9",
+    "totals": {
+      "files": 1,
+      "additions": 204,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts",
+        "additions": 204,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "8016b506ddc67bfe2fe0e85865f56179e948ceb709f03262f2d30671bca3d42b",
+  "patchStatus": "ok"
+}

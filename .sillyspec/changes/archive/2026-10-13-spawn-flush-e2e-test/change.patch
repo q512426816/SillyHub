@@ -1,0 +1,210 @@
+diff --git a/sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts b/sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts
+new file mode 100644
+index 000000000..ff38936ab
+--- /dev/null
++++ b/sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts
+@@ -0,0 +1,204 @@
++/**
++ * tests/task-runner/spawn-flush-e2e.test.ts —— 收尾冲刷执行级守护
++ * （2026-10-13-spawn-flush-e2e-test FR-01~04）。
++ *
++ * 上一变更 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 的
++ * attempt 边界冲刷（break 出 readline 后 flushAll → forwardSubmitMessages →
++ * await pendingForwards）只有组合件单测（coalescerFlushAllMessages +
++ * forwardSubmitMessages 直调），收尾序列本身无执行级测试守护——未来重构
++ * 该段时测试不会红。本文件直调 spawnAndStream 全函数驱动真实收尾序列：
++ * mock node:child_process.spawn 返回 FakeChild（同 tests/task-runner.test.ts
++ * 先例），fake runner 的 _eventToMessages 委托真实 eventToSubmitMessages
++ * (ev, coalescer)，client.submitMessages 捕获转发批次。
++ *
++ * 三条路径（FR-02/03/04）：取消（AbortSignal）/ 超时（毫秒级看门狗）/
++ * 正常流关闭（无完结行）——统一断言：触发前 delta 已缓冲零直发；收尾后
++ * 残留冲刷为单行（拼接内容 + timestamp）恰经 client.submitMessages 转发
++ * 一批，status 分别为 cancelled / timeout / completed。
++ */
++
++import { describe, expect, it, vi } from 'vitest';
++
++// vi.mock 必须在 import 之前（vitest 提升 hoist）——同 tests/task-runner.test.ts 先例。
++vi.mock('node:child_process', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:child_process')>();
++  return {
++    ...actual,
++    spawn: vi.fn(() => null as unknown),
++  };
++});
++
++import { spawn } from 'node:child_process';
++import { createFakeChild } from '../helpers/fake-child.js';
++import { eventToSubmitMessages } from '../../src/event-wire.js';
++import {
++  spawnAndStream,
++  type SpawnStreamParams,
++} from '../../src/task-runner/spawn-stream.js';
++import type { TaskRunnerCore } from '../../src/task-runner/runner-types.js';
++import type { ProtocolAdapter } from '../../src/adapters/protocol-adapter.js';
++import type { AgentEvent, LeaseCtx } from '../../src/types.js';
++
++/** 固定等待：让 pipe/decode/readline 微任务链与 setImmediate 充分消化（25ms 覆盖既有测试同量级时序）。 */
++const tick = (ms = 25): Promise<void> => new Promise((r) => setTimeout(r, ms));
++
++function delta(id: string, text: string): AgentEvent {
++  return { type: 'text', content: text, metadata: { streaming: true, message_id: id } };
++}
++
++/** 每 parse 一行吐一条同 id 流式 delta 的假 adapter（行文本即 delta 文本）。 */
++function deltaAdapter(id: string): ProtocolAdapter {
++  return {
++    parse: (line: string): AgentEvent[] => (line ? [delta(id, line)] : []),
++  } as unknown as ProtocolAdapter;
++}
++
++/** fake runner：真实 eventToSubmitMessages 委托（含 coalescer 透传）+ 捕获 submit 批次。 */
++function makeRunner(submits: Record<string, unknown>[][]): TaskRunnerCore {
++  return {
++    client: {
++      submitMessages: async (
++        _l: string,
++        _t: string,
++        _r: string,
++        messages: Record<string, unknown>[],
++      ) => {
++        submits.push(messages);
++      },
++    },
++    resilience: null,
++    _eventToMessages: (ev: AgentEvent, coalescer?: Parameters<
++      typeof eventToSubmitMessages
++    >[1]) => eventToSubmitMessages(ev, coalescer),
++    _handleApprovalDecision: async () => {},
++    _killChild: () => {},
++  } as unknown as TaskRunnerCore;
++}
++
++function makeParams(
++  adapter: ProtocolAdapter,
++  signal: AbortSignal,
++  ctxOverrides: Partial<LeaseCtx> = {},
++): SpawnStreamParams {
++  const ctx: LeaseCtx = {
++    leaseId: 'lease-flush-e2e',
++    runtimeId: 'rt-flush',
++    agentRunId: 'run-flush-e2e',
++    // 显式 -1=不限时（取消/正常收尾用例不武装看门狗；超时用例覆写为小数秒）。
++    timeoutSeconds: -1,
++    ...ctxOverrides,
++  };
++  return {
++    cmdPath: 'fake-agent',
++    args: [],
++    opts: { cwd: process.cwd(), env: {} },
++    adapter,
++    prompt: 'hi',
++    ctx,
++    signal,
++    outputParts: [],
++    onSessionId: () => {},
++    leaseId: ctx.leaseId,
++    claimToken: 'tok-flush-e2e',
++  };
++}
++
++describe('spawnAndStream 收尾冲刷执行级守护（FR-01~04）', () => {
++  it('FR-02 取消（AbortSignal）break → 残留缓冲收尾冲刷转发 + status=cancelled', async () => {
++    const submits: Record<string, unknown>[][] = [];
++    const runner = makeRunner(submits);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const ac = new AbortController();
++
++    const p = spawnAndStream(runner, makeParams(deltaAdapter('m-cancel'), ac.signal));
++    await tick();
++    child._emitLines(['取消残留']);
++    await tick();
++    // delta 已入缓冲，触发前零直发。
++    expect(submits).toHaveLength(0);
++
++    ac.abort();
++    child._emitExit(null, 'SIGTERM');
++
++    const result = await p;
++    expect(result.status).toBe('cancelled');
++    expect(result.error).toContain('cancelled');
++    // 残留缓冲收尾冲刷：单行（拼接内容 + timestamp）恰经 client 转发一批。
++    expect(submits).toHaveLength(1);
++    const batch = submits[0]!;
++    expect(batch).toHaveLength(1);
++    expect(batch[0]).toMatchObject({
++      event_type: 'text',
++      content: '取消残留',
++      channel: 'stdout',
++    });
++    expect(typeof batch[0]!['timestamp']).toBe('string');
++  });
++
++  it('FR-03 超时（看门狗）break → 残留缓冲收尾冲刷转发 + status=timeout', async () => {
++    const submits: Record<string, unknown>[][] = [];
++    const runner = makeRunner(submits);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const ac = new AbortController();
++
++    // timeoutSeconds=0.05（毫秒级看门狗，resolveTimeout 优先读该字段）。
++    const p = spawnAndStream(
++      runner,
++      makeParams(deltaAdapter('m-timeout'), ac.signal, { timeoutSeconds: 0.05 }),
++    );
++    await tick();
++    child._emitLines(['超时残留']);
++    await tick();
++    expect(submits).toHaveLength(0);
++
++    // 等看门狗触发（50ms）再收口：3 倍等待窗。
++    await tick(150);
++    child._emitExit(null, 'SIGTERM');
++
++    const result = await p;
++    expect(result.status).toBe('timeout');
++    expect(result.error).toContain('timed out');
++    expect(submits).toHaveLength(1);
++    const batch = submits[0]!;
++    expect(batch).toHaveLength(1);
++    expect(batch[0]).toMatchObject({
++      event_type: 'text',
++      content: '超时残留',
++      channel: 'stdout',
++    });
++    expect(typeof batch[0]!['timestamp']).toBe('string');
++  });
++
++  it('FR-04 正常流关闭（无完结行）→ 残留缓冲收尾冲刷转发 + status=completed', async () => {
++    const submits: Record<string, unknown>[][] = [];
++    const runner = makeRunner(submits);
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const ac = new AbortController();
++
++    const p = spawnAndStream(runner, makeParams(deltaAdapter('m-normal'), ac.signal));
++    await tick();
++    child._emitLines(['正常A', '正常B']);
++    await tick();
++    expect(submits).toHaveLength(0);
++
++    child._endStdout();
++    child._emitExit(0);
++
++    const result = await p;
++    expect(result.status).toBe('completed');
++    expect(result.exitCode).toBe(0);
++    // 两条同 id delta 合并为单行冲刷转发。
++    expect(submits).toHaveLength(1);
++    const batch = submits[0]!;
++    expect(batch).toHaveLength(1);
++    expect(batch[0]).toMatchObject({
++      event_type: 'text',
++      content: '正常A正常B',
++      channel: 'stdout',
++    });
++    expect(typeof batch[0]!['timestamp']).toBe('string');
++  });
++});
