@@ -20,6 +20,7 @@ import {
   type McpTokenRead,
 } from "@/lib/mcp-tokens";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 interface Props {
   params: { id: string };
@@ -97,7 +98,7 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
     setCopyingId(t.id);
     try {
       const plaintext = await fetchMcpTokenPlaintext(workspaceId, t.id);
-      await navigator.clipboard.writeText(plaintext);
+      await copyTextToClipboard(plaintext);
       setCopiedId(t.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {

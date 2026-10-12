@@ -83,6 +83,7 @@ import { useNotify } from "@/lib/errors";
 import { RemoteFolderPicker } from "@/components/daemon/remote-folder-picker";
 // task-07 / D-003@v1：平台管理员人员搜索复用既有 admin 用户列表。
 import { listUsers, type UserRead } from "@/lib/admin";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /** 时间窗中文 label（FR-04，CLAUDE.md 规则 11 中文 UI）。
  *  task-09：其余 RuntimeCard/MachineCard 专属 helper（getStatusMeta / getProviderLabel /
@@ -173,7 +174,7 @@ export function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
       } else {
         cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
       }
-      await navigator.clipboard.writeText(cmd);
+      await copyTextToClipboard(cmd);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -278,7 +279,7 @@ export function InstallDaemonBlock() {
 
   const handleCopy = async () => {
     if (!cmd) return;
-    await navigator.clipboard.writeText(cmd);
+    await copyTextToClipboard(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -385,7 +386,7 @@ export function AutostartDaemonBlock() {
 
   const handleCopy = async () => {
     if (!cmd) return;
-    await navigator.clipboard.writeText(cmd);
+    await copyTextToClipboard(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

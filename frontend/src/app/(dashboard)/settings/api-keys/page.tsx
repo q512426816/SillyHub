@@ -18,6 +18,7 @@ import {
   type ApiKeyRead,
 } from "@/lib/api-keys";
 import { cn } from "@/lib/utils";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 type ApiKeyStatus = {
   label: string;
@@ -98,7 +99,7 @@ export default function ApiKeysSettingsPage() {
     setCopyingId(k.id);
     try {
       const plaintext = await fetchApiKeyPlaintext(k.id);
-      await navigator.clipboard.writeText(plaintext);
+      await copyTextToClipboard(plaintext);
       setCopiedId(k.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {

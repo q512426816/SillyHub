@@ -89,6 +89,31 @@ afterEach(() => {
 });
 
 describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {
+  it("非安全上下文（clipboard 缺失，HTTP 局域网主部署形态）→ execCommand 降级复制成功回显（2026-10-12-clipboard-fallback）", async () => {
+    Reflect.deleteProperty(navigator, "clipboard");
+    // jsdom 不实现 document.execCommand（原型链上也无），defineProperty 直桩。
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", {
+      value: execCommand,
+      configurable: true,
+      writable: true,
+    });
+    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey]);
+    apiKeysApi.fetchApiKeyPlaintext.mockResolvedValueOnce("shk_live_secret123");
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("my-daemon")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /复制密钥/ }));
+
+    await waitFor(() => {
+      expect(execCommand).toHaveBeenCalledWith("copy");
+    });
+    expect(screen.getByText("已复制")).toBeInTheDocument();
+  });
+
   it("活跃可恢复行点「复制密钥」→ 明文写入剪贴板并回显已复制", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
