@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-scoped-recent-session",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7b2c7634f9f61dab59ee167179fd3931feeffe07",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T07:42:47Z"
+}

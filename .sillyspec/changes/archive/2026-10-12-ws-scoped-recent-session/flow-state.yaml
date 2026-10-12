@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,6 +30,11 @@ input: >-
   - 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
 autopilot: true
 baseline_commit: 71b382cfb0eb2e04a7bcb7c20bea0b5db2f0def8
-updatedAt: '2026-10-12T07:28:11.169Z'
+updatedAt: '2026-10-12T07:43:23.244Z'
 baseline_sha256: 9c66524d8c8e478e740884ce6413bb3c1266d427d1f196335430fc4ed0d3be28
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（32.1s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261012073841\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 22 个
 

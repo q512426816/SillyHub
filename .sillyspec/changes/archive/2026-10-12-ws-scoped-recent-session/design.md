@@ -6,6 +6,8 @@ created_at: 2026-10-12T07:27:53.013Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 `sessions-portal.tsx` 的空门户快捷动作「继续最近会话」派生 `recentSession` 时消费的是 `useDaemonMachines` 旁路的全局最近 100 条未归档会话，未按页面 scope 过滤——A 工作区会话页会显示并继续 B 工作区的最近会话（点击后 `selectedWorkspaceId` 快照与 📁 文件树跟随串档）。
 
 修复取纯前端过滤方案（探索阶段方案 B）：在 `recentSession` 的 useMemo 内，scope 携带 workspaceId 的三种入口（workspace/change/quicklog——三者左侧列表同为工作区树，语义一致）先按 `s.workspace_id === scope.workspaceId` 过滤再排序取最近；无 scope 的全局门户不过滤，行为不变。选择过滤而非砍入口：数据已带 `workspace_id`（门户选中快照本就在消费），一行过滤零新请求，保留快捷续聊功能。放弃「工作区入口直接隐藏按钮」方案：丢功能且治标不治本；放弃「后端按工作区查询最近会话」方案：旁路数据已在手，新端点属过度设计。
@@ -14,7 +16,9 @@ runtime scope（悬浮窗锁定机器场景）不经空门户该入口（唯一�
 
 ## 接口契约
 
-对外可见签名与行为变化：无。`SessionsPortal` props、`resolveDefaultMachineId` 导出签名、URL ?session= 协议均不变；变化仅限组件内部 `recentSession` 派生逻辑（scope 入口下按钮候选集收窄为本工作区会话）。后端零改动。
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
+无。`SessionsPortal` props、`resolveDefaultMachineId` 导出签名、URL ?session= 协议均不变；变化仅限组件内部 `recentSession` 派生逻辑（scope 入口下按钮候选集收窄为本工作区会话）。后端零改动。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
@@ -31,6 +35,8 @@ runtime scope（悬浮窗锁定机器场景）不经空门户该入口（唯一�
    答：本变更正是修作用域串台：scope 入口按 workspace_id 过滤后按钮恒为本工作区会话；全局门户不过滤是设计意图（全局视角）。已知可接受降级：本工作区会话未进全局前 100 条时按钮静默不渲染（少显示而非错显示，FR-03 契约）。`resolveDefaultMachineId` 故意保持全局 sessions（用户机器偏好语义，FR-04）。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：过滤依赖 `AgentSessionRead.workspace_id` 字段可靠性——后端该字段自 2026-08-22 起即为列表稳定字段（深链选中快照同源消费，sessions-portal.tsx:1072），风险低；测试以跨工作区固件直接锁定。次要风险：三入口共分支若未来新增 scope 种类（如 runtime 空门户化）需显式决策过滤维度，本变更注释已留判别说明。
 

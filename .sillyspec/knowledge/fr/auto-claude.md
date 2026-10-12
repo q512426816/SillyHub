@@ -212,3 +212,98 @@ created_at: 2026-10-08T17:53:22.647Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-ws-name
   status: active
+
+## FR-auto-claude-013 workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：跨工作区取最近
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-01
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-01
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-014 全局 /sessions（无 scope）行为不变，仍取全局最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：全局门户不受影响
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-02
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-02
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-015 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：本工作区无会话
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-03
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-03
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-016 resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：默认机器解析不变
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-04
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-04
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-017 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-05
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-05
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
