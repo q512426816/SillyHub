@@ -37,6 +37,23 @@ from app.core.config import get_settings
 from app.modules.change.backfill_service import BackfillStats, ChangeContextBackfillService
 
 
+def _load_full_model_registry() -> None:
+    """导入全部模块 model——脚本只触及 change/agent 两模块时，ORM 注册表缺
+    AgentRun FK 指向的远端表（llm_providers/daemon_task_leases/...），flush 的
+    mapper 配置会抛 NoReferencedTableError；本地测试不踩（conftest 全量导入）。
+    逐模块容错导入（无 model 子模块的跳过）。"""
+    import importlib
+    import pkgutil
+
+    import app.modules as _pkg
+
+    for m in pkgutil.iter_modules(_pkg.__path__):
+        try:
+            importlib.import_module(f"app.modules.{m.name}.model")
+        except ModuleNotFoundError:
+            continue
+
+
 def _print_stats(title: str, stats: BackfillStats) -> None:
     print(f"  {title}")
     print(
@@ -150,6 +167,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    _load_full_model_registry()
     return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
 
 
