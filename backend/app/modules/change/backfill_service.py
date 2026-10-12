@@ -50,8 +50,9 @@ class BackfillStats:
     commands_parsed: int = 0
     commands_skipped_unknown_key: int = 0
     logs_parse_failed: int = 0
-    #: 同 run 同 submit 批次（timestamp+created_at 并列）解析出不同绑定目标的
-    #: 命令组数——批内消息序在 DB 无可靠序号，终值取 created_at,id 决胜序，
+    #: 同 run 同 submit 批次（timestamp 并列）解析出不同绑定目标的命令组数
+    #: ——批内消息序在 DB 无可靠序号（AgentRunLog 无 seq/created_at 列），终值
+    #: 取 timestamp,id 决胜序（id 仅 SQL 确定性，语义取边近似随机，见风险节），
     #: 该计数>0 表示该会话存在理论错锚面（dry-run 报告暴露，人工可查）。
     ambiguous_parallel_groups: int = 0
     cursor_written: bool = False

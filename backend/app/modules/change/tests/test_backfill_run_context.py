@@ -347,6 +347,8 @@ async def test_same_batch_parallel_binding_commands_counted_ambiguous(db_session
     second = await svc.backfill_session(sess.id)
     assert second.runs_stamped == 0  # 幂等：重跑同序同锚零新增
     assert second.ambiguous_parallel_groups == 1
+    # 重跑同锚：两轮游标终值一致（确定性重放）。
+    assert second.cursor_change_id == first.cursor_change_id
 
 
 # ── FR-05：工作区编排范围 ───────────────────────────────────────────────────
