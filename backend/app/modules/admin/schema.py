@@ -83,7 +83,11 @@ class RoleUserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: str
+    # email 可空：D-001 纯用户名账号（2026-06-24-username-login）email=None，
+    # 必填 str 会让 list_users 直接 ValidationError → 500（线上 request_id
+    # f9c93f39 实证）；username 作为该类账号的可识别回退标识一并下发。
+    email: str | None
+    username: str | None = None
     display_name: str | None
     is_platform_admin: bool
     status: str

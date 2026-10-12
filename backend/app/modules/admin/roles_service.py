@@ -449,6 +449,7 @@ class RoleService:
                     RoleUserRead(
                         id=user.id,
                         email=user.email,
+                        username=user.username,
                         display_name=user.display_name,
                         is_platform_admin=user.is_platform_admin,
                         status=user.status,
@@ -475,6 +476,7 @@ class RoleService:
                 RoleUserRead(
                     id=user.id,
                     email=user.email,
+                    username=user.username,
                     display_name=user.display_name,
                     is_platform_admin=user.is_platform_admin,
                     status=user.status,

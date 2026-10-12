@@ -312,6 +312,59 @@ async def test_list_role_users_merges_platform_and_workspace(
 
 
 @pytest.mark.asyncio
+async def test_list_role_users_email_null_username_present(
+    client: AsyncClient, auth_headers, db_session
+):
+    """``email=None``（纯用户名账号，D-001）绑定角色 → 200 且 email=null、username 有值。
+
+    线上实证（request_id f9c93f39）：RoleUserRead.email 曾声明必填 str，
+    库中无邮箱用户触发 pydantic ValidationError → 500。platform 与
+    workspace 两种绑定形态都必须返回 200。
+    """
+    from app.modules.admin.model import UserRole
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        name="Null Email WS", slug="null-email-ws-lu", root_path="/tmp/test-nelu", type="app"
+    )
+    db_session.add(ws)
+    role = Role(key="null_email_role_lu", name="Null Email Role", is_system=False, is_active=True)
+    db_session.add(role)
+    platform_user = User(
+        email=None,
+        username=f"nulluser-p-{uuid.uuid4().hex[:6]}",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        status="active",
+        is_platform_admin=False,
+    )
+    ws_user = User(
+        email=None,
+        username=f"nulluser-w-{uuid.uuid4().hex[:6]}",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        status="active",
+        is_platform_admin=False,
+    )
+    db_session.add_all([platform_user, ws_user])
+    await db_session.flush()
+
+    db_session.add(UserRole(user_id=platform_user.id, role_id=role.id))
+    db_session.add(UserWorkspaceRole(user_id=ws_user.id, role_id=role.id, workspace_id=ws.id))
+    await db_session.commit()
+    await db_session.refresh(role)
+
+    resp = await client.get(f"/api/admin/roles/{role.id}/users", headers=auth_headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["total"] == 2
+    by_username = {item["username"]: item for item in data["items"]}
+    assert by_username[platform_user.username]["email"] is None
+    assert by_username[platform_user.username]["binding_type"] == "platform"
+    assert by_username[ws_user.username]["email"] is None
+    assert by_username[ws_user.username]["binding_type"] == "workspace"
+    assert by_username[ws_user.username]["workspace_name"] == "Null Email WS"
+
+
+@pytest.mark.asyncio
 async def test_list_role_users_empty(client: AsyncClient, auth_headers, db_session):
     """Role with no bindings returns ``{items: [], total: 0}``."""
     role = Role(key="empty_role_lu", name="Empty", is_system=False, is_active=True)
