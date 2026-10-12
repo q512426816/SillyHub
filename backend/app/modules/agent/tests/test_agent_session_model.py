@@ -20,13 +20,16 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_29_fields() -> None:
+def test_agent_session_has_all_34_fields() -> None:
     expected = {
         "id",
         "user_id",
         "runtime_id",
         "lease_id",
         "change_id",
+        # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
+        # 列（run_sync 命令解析回写、inject 建轮打锚；与 change_id 派发绑定分列）。
+        "current_change_id",
         "workspace_id",
         "provider",
         "status",
@@ -78,7 +81,7 @@ def test_agent_session_has_all_29_fields() -> None:
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 33
+    assert len(AgentSession.model_fields) == 34
 
 
 def test_agent_session_defaults() -> None:
