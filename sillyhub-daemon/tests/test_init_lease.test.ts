@@ -1360,6 +1360,48 @@ describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-
       await cleanupWsScraps(wsId);
     }
   });
+
+  it('清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）', async () => {
+    // ① utimes 盖戳失败 + 残留 mtime 本来就老（aa809dc91 的 30 天场景叠加）：
+    //    rename 继承老 mtime 且盖戳静默失败 → 名内嵌创建时刻（新鲜）必须兜底，
+    //    否则刚建的备份在下次清扫即被删（7 天人工窗口归零）。修复前红点。
+    // ② 名内嵌 ts 老、mtime 新鲜 → max 语义下任一信号新鲜即保留（保守方向钉）。
+    const wsId = 'ws-init-sweep-namets';
+    await seedResidueAndSource(wsId);
+    const parent = dirname(resolveSpecDir(wsId));
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const MIN = 60 * 1000;
+    const mkScratch = async (name: string, ageMs: number) => {
+      const p = join(parent, name);
+      await mkdir(p, { recursive: true });
+      await writeFile(join(p, 'x.md'), 'x');
+      await utimes(p, new Date(now - ageMs), new Date(now - ageMs));
+    };
+    const stampFailName = `${wsId}.pre-junction-backup-${now - 5 * MIN}`; // 名 ts 新鲜
+    await mkScratch(stampFailName, 30 * DAY); // mtime 继承老值（盖戳失败形态）
+    const conservativeName = `${wsId}.pre-junction-backup-${now - 8 * DAY}`; // 名 ts 老
+    await mkScratch(conservativeName, 5 * MIN); // mtime 新鲜
+    const client = makeClient();
+    try {
+      const result = await handleInitLease(client as never, {
+        workspaceId: wsId,
+        rootPath: tmpProject,
+        serverOrigin: 'http://127.0.0.1:8000',
+        strategy: 'repo-native',
+        spawnFn: makeInitSpawn(),
+        latestSpecVersion: 1,
+      });
+      expect(result.ok).toBe(true);
+      const names = await readdir(parent);
+      // ① 盖戳失败形态：名 ts 兜底 → 不误删（修复前按 mtime 判龄即删，红）。
+      expect(names).toContain(stampFailName);
+      // ② 保守语义：双信号均老才清，mtime 新鲜即留。
+      expect(names).toContain(conservativeName);
+    } finally {
+      await cleanupWsScraps(wsId);
+    }
+  });
 });
 
 // 防止 "homedir 未使用" lint（清理路径预留扩展用）

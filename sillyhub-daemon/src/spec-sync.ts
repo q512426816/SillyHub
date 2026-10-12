@@ -363,12 +363,26 @@ async function sweepStalePullScraps(parent: string, base: string): Promise<void>
       )
       .map(async (n) => {
         const p = join(parent, n);
-        const ageMs = n.startsWith(`${base}.pre-junction-backup-`)
-          ? STALE_BACKUP_AGE_MS
-          : STALE_SCRAP_AGE_MS;
+        const isBackup = n.startsWith(`${base}.pre-junction-backup-`);
+        const ageMs = isBackup ? STALE_BACKUP_AGE_MS : STALE_SCRAP_AGE_MS;
         try {
           const st = await lstat(p);
-          if (now - st.mtimeMs > ageMs) {
+          // 2026-10-12-backup-sweep-name-ts：备份计龄取 max(mtime, 名内嵌创建时刻)
+          // ——rename 继承被备份残留的旧 mtime（aa809dc91 场景），utimes 盖戳失败
+          //（best-effort 静默）时按 mtime 判龄会把刚建的备份立即清掉（7 天人工
+          // 窗口归零）；目录名内嵌创建时 Date.now()（ff8eb4ce3 引入的命名形态），
+          // 解析失败回落 mtime。max = 双信号均老才清（保守，绝不误删任一信号
+          // 新鲜的备份）；时钟回拨时名 ts 大于当前 → 保留至追平，与 mtime 同款
+          // 既有边界。
+          let birth = st.mtimeMs;
+          if (isBackup) {
+            const m = /(\d{13,})$/.exec(n);
+            if (m) {
+              const created = Number(m[1]);
+              if (Number.isFinite(created) && created > birth) birth = created;
+            }
+          }
+          if (now - birth > ageMs) {
             await rm(p, { recursive: true, force: true });
             console.warn('spec_sync: stale_scrap_swept', p);
           }
