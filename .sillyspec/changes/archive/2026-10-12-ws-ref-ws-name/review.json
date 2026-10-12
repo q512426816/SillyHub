@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-ws-name",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级条款如实标注）",
+  "verdict": "PASS",
+  "reviewedAgainst": "40622e032cbece20e57db17154d582ce835e67b2",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "名称快照语义：工作区改名后旧标签 tooltip 显示旧名",
+      "evidence": "名称随 desc 落入 wsRefTokens 持有（与路径快照同语义），编辑态生命周期内可接受",
+      "location": "frontend/src/components/sessions/sessions-portal.tsx:252"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T03:50:00.000Z",
+  "reviewerNotes": "评审面 4 文件 +38/-10：① WsRefDesc 可选纯显示字段（grep 置换/解析零引用 workspaceName ✓ 协议无污染）；② query 同 key 同 queryFn（与 session-list-panel:685 逐字一致，缓存共享契约成立）；③ 六处拼接名称优先回退 id（缺省链完备）；④ 154/154 + tsc 0。P3 快照语义为设计选择已声明。reviewedAgainst 取 HEAD 简写（收口时 CLI 以基线对账为准）。"
+}

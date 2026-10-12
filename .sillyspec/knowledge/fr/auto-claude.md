@@ -151,3 +151,64 @@ created_at: 2026-10-08T17:53:22.647Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-hover-tip-portal
   status: active
+
+## FR-auto-claude-010 悬停浮层显示工作区中文名（别名优先），查不到回退 id
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 工作区列表已加载（名称 SillyHub）/ When 插入引用并悬停 / Then 浮层显示「（工作区 SillyHub）」。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-01
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active
+
+## FR-auto-claude-011 不新增网络请求
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 列表已拉取 / When 进文件模式插引用 / Then 无第二次 listWorkspaces 调用（缓存命中）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-02
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-02
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active
+
+## FR-auto-claude-012 发送置换/历史标记协议零变化；相关测试全绿
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-03
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active

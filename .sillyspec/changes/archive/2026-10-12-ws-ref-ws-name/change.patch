@@ -1,0 +1,166 @@
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-ws-name/design.md b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/design.md
+@@ -0,0 +1,41 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T03:45:00.000Z
++---
++# 设计记录（Design Record）— 2026-10-12-ws-ref-ws-name
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户反馈悬停浮层显示「工作区 a8a0fde6-…」uuid 不可读。方案：portal 组装槽位时按 workspaceId 查工作区名称（display_alias 别名优先，与 SessionListPanel 分组同名口径）塞进 desc 新增的纯显示字段 workspaceName；两输入区 tooltip 六处拼接改为名称优先、缺省回退 id。名称查询与工作区列表同 queryKey 同 queryFn（react-query 缓存共享，零额外请求）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++WsRefDesc 加可选字段 workspaceName?: string（纯显示：置换/解析/标记协议零消费）；sessions-portal 增 wsNameQuery + handleAddWsRef 塞名；两输入区 overlayTokenMetas 拼接六处。后端 0 端点。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++名称查询异步，未就绪时 handleAddWsRef 拿不到名 → workspaceName=undefined → tooltip 回退 id（降级可读），不阻塞插入。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++react-query 缓存单源；desc 一次性快照，无并发写面。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++名称随 desc 落入 wsRefTokens 持有（快照语义）——工作区改名后旧标签 tooltip 仍显示插入时名称，可接受（与路径快照同语义）。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++wsIdToName 按 id 精确映射，不串台。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++风险：无（纯显示增强，降级路径完备）。放弃的方案：两输入区各自拉工作区列表（重复请求+群聊面板无现成数据源）；历史标记协议加名称字段（协议污染，历史气泡本就显示路径不需要）。
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-ws-name/proposal.md b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/proposal.md
+@@ -0,0 +1,27 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:10:17.086Z
++---
++# 提案书（Proposal）— 2026-10-12-ws-ref-ws-name
++
++## 动机
++
++任务原话转写：用户反馈：悬停浮层「工作区 a8a0fde6-…」显示的是 uuid，应显示工作区中文名称
++
++成功标准：
++- 悬停浮层显示「工作区 SillyHub」（中文名/别名优先），查不到名称时回退 id
++- 不新增请求（与工作区列表同 query 缓存共享）
++- 发送置换/历史标记协议零变化；相关测试全绿
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. 悬停浮层显示「工作区 SillyHub」（中文名/别名优先），查不到名称时回退 id
++2. 不新增请求（与工作区列表同 query 缓存共享）
++3. 发送置换/历史标记协议零变化；相关测试全绿
++
++## 成功标准（可验证）
++
++1. 悬停浮层显示「工作区 SillyHub」（中文名/别名优先），查不到名称时回退 id
++2. 不新增请求（与工作区列表同 query 缓存共享）
++3. 发送置换/历史标记协议零变化；相关测试全绿
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-ws-name/requirements.md b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/requirements.md
+@@ -0,0 +1,37 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T03:45:00.000Z
++---
++# 需求规格（Requirements）— 2026-10-12-ws-ref-ws-name
++
++## 功能需求
++
++### FR-01: 悬停浮层显示工作区中文名（别名优先），查不到回退 id
++
++- 必须：tooltip 的「工作区 X」段必须显示 desc.workspaceName（portal 组装时 display_alias ?? name 填充）；名称缺失时必须回退 workspaceId，禁止空白。
++
++#### 场景：主路径
++
++Given 工作区列表已加载（名称 SillyHub）/ When 插入引用并悬停 / Then 浮层显示「（工作区 SillyHub）」。
++
++### FR-02: 不新增网络请求
++
++- 必须：名称查询必须复用工作区列表既有 query（同 key 同 queryFn 缓存共享），禁止独立请求。
++
++#### 场景：主路径
++
++Given 列表已拉取 / When 进文件模式插引用 / Then 无第二次 listWorkspaces 调用（缓存命中）。
++
++### FR-03: 发送置换/历史标记协议零变化；相关测试全绿
++
++- 必须：workspaceName 不得进入任何发送标记；三文件相关测试全绿。
++
++#### 场景：主路径
++
++vitest 3 文件 154/154（logs/wsname-test.log）。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx 既有 metas 链路用例（名称拼接经 tsc 类型+浏览器实测门验证显示）
++FR-02: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx 既有 mocks.listWorkspaces 复用面（query 同 key 缓存共享由 react-query 契约保证）
++FR-03: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx + session-input-bar-upload.test.tsx + group-chat-panel.test.tsx 154/154（logs/wsname-test.log）
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-ws-name/review.json b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/review.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/review.json
+@@ -0,0 +1,23 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-12-ws-ref-ws-name",
++  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级条款如实标注）",
++  "verdict": "PASS",
++  "reviewedAgainst": "40622e032cbece20e57db17154d582ce835e67b2",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "名称快照语义：工作区改名后旧标签 tooltip 显示旧名",
++      "evidence": "名称随 desc 落入 wsRefTokens 持有（与路径快照同语义），编辑态生命周期内可接受",
++      "location": "frontend/src/components/sessions/sessions-portal.tsx:252"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok",
++    "并发": "ok",
++    "切换": "ok",
++    "作用域": "ok"
++  },
++  "reviewedAt": "2026-10-12T03:50:00.000Z",
++  "reviewerNotes": "评审面 4 文件 +38/-10：① WsRefDesc 可选纯显示字段（grep 置换/解析零引用 workspaceName ✓ 协议无污染）；② query 同 key 同 queryFn（与 session-list-panel:685 逐字一致，缓存共享契约成立）；③ 六处拼接名称优先回退 id（缺省链完备）；④ 154/154 + tsc 0。P3 快照语义为设计选择已声明。reviewedAgainst 取 HEAD 简写（收口时 CLI 以基线对账为准）。"
++}
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-ws-name/tasks.md b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-ws-name/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:10:17.086Z
++---
++# 任务注册表（Tasks）— 2026-10-12-ws-ref-ws-name
++
++- [x] task-01: 悬停浮层显示「工作区 SillyHub」（中文名/别名优先），查不到名称时回退 id
++- [x] task-02: 不新增请求（与工作区列表同 query 缓存共享）
++- [x] task-03: 发送置换/历史标记协议零变化；相关测试全绿

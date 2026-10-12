@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-ws-name",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-ws-ref-ws-name:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-ws-name"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ws-ref-ws-name:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-ws-name"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ws-ref-ws-name:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-ws-name"
+    }
+  ]
+}
