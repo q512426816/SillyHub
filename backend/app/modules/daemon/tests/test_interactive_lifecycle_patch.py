@@ -700,7 +700,8 @@ class TestGap3CloseInteractiveRun:
     async def test_close_duration_api_ms_within_wall_written(
         self, db_session, mocked_redis
     ) -> None:
-        """合法值（api ≤ 墙钟）照常写入。"""
+        """NULL 回填子形态（api ≤ 墙钟）——2026-10-12 回填语义下与超界值同路径
+        （仅回填不设墙钟守卫），保留用例锚定常见量级。"""
         lease_id, run_id, token = await _seed_active_interactive_session(db_session)
         svc = DaemonService(db_session)
         run1 = await svc.close_interactive_run(
