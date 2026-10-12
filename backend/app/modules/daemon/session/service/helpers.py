@@ -37,6 +37,26 @@ from app.modules.ppm.common.session_binding import (
 
 from .errors import DaemonSessionInvariantViolation, DaemonSessionNotFound
 
+# D-006（2026-10-12-session-defects task-09）：会话级可自动恢复的模型层失败
+# 类型集——恢复编排归 close 钩子 auto_resume（quota 定时续跑 / context_overflow
+# 原生压缩续跑），用户手动续发也依赖 active 门。
+_RECOVERABLE_MODEL_FAILURE_TYPES = frozenset({"quota_exceeded", "context_overflow"})
+
+
+def _is_recoverable_model_failure(run: AgentRun) -> bool:
+    """run 是否为「可自动恢复」的模型层失败（error_detail.type 判定）。
+
+    error_detail 与 error_code 正交（D-009）；JSON 列读回为 dict，容错解析
+    （脏数据/缺键 → False 走既有语义）。
+    """
+    if run.status != "failed":
+        return False
+    detail = run.error_detail
+    if not isinstance(detail, dict):
+        return False
+    return str(detail.get("type") or "") in _RECOVERABLE_MODEL_FAILURE_TYPES
+
+
 # ql-20260827-015：后台任务通知排队合并。daemon 任务终态唤醒（session-manager
 # _scheduleTaskWakeup，2026-08-27-background-subagent-progress ql-20260827-007）
 # 在忙轮期间经 inject 端点（恒 queue_when_busy=True）反复注入「[后台任务通知]」，
@@ -127,6 +147,19 @@ def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str 
     is_multi_turn = run.spec_strategy == "interactive" and run.change_id is None
     if is_multi_turn:
         return "active"  # 多轮对话保持 active，等下一个 AgentRun
+    # D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免。
+    # 生产实证（会话 47e2ff1a run 30）：轮级变更归因（run-level-change-
+    # attribution）让聊天轮携带 change_id → is_multi_turn 判定失效 → 429
+    # 失败轮把整个 interactive 会话终态化 failed，用户被锁死无法续发。
+    # 会话型轮（spec_strategy=interactive）遭遇可自动恢复失败
+    # （quota_exceeded / context_overflow）时保持 active——自动恢复编排
+    # （auto_resume 钩子：quota 定时续跑 / context_overflow 原生压缩续跑）
+    # 与用户手动续发都需要 active 门；自动恢复预算耗尽后用户仍可手动重试，
+    # 会话不再被单次可恢复失败锁死。闸拒绝覆写（close_run_steps
+    # _is_gate_rejected_first_failure）在本函数返回 active 之后仍生效，
+    # 优先级不变（设计组合推演：无死锁格）。
+    if run.spec_strategy == "interactive" and _is_recoverable_model_failure(run):
+        return "active"
     return "ended" if run.status == "completed" else "failed"
 
 

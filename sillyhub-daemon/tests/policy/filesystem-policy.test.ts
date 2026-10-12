@@ -218,3 +218,53 @@ describe('PolicyEngine', () => {
 
 // 触发 isWin 静态引用，避免未用警告（保留跨平台语义可见性）。
 void isWin;
+
+
+// ── F4（2026-10-12-session-defects task-10）：anchor 透传 + deny 双拼写 ─────
+
+describe('F4: PolicyEngine anchor 透传 + deny 双拼写', () => {
+  let cache: PolicyCache;
+  let sink: ReturnType<typeof createMockSink>;
+  let engine: PolicyEngine;
+
+  beforeEach(() => {
+    cache = new PolicyCache();
+    sink = createMockSink();
+    engine = new PolicyEngine(cache, sink);
+    cache.set('rt-claude', [ALLOWED]);
+  });
+
+  it('anchor 传入：相对写锚定基点后命中白名单（放行）', () => {
+    // 相对目标 out.txt 经 anchor=ALLOWED 解析为 ALLOWED/out.txt → allow。
+    const d = engine.canWrite('rt-claude', 'out.txt', 'claude', 'Bash', ALLOWED);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('anchor 未传：相对写按 daemon cwd 解析（越界 deny，现行为零回归）', () => {
+    const d = engine.canWrite('rt-claude', 'out.txt', 'claude', 'Bash');
+    // daemon cwd（测试进程 cwd）不在 ALLOWED 下 → deny；anchor 语义改变判定。
+    expect(d.allowed).toBe(false);
+  });
+
+  it('deny 且拼写不一致：文案附「原始路径 X 解析为 Y」双拼写提示', () => {
+    // 构造拼写不一致：normalizeCase 将盘符归一小写 → 原始大写盘符拼写
+    // （OUTSIDE = 'D:\evil_test.txt'）与 normalizedPath（'d:\evil_test.txt'）
+    // 字面不同 → 提示行携带双拼写。
+    const d = engine.canWrite('rt-claude', OUTSIDE, 'claude', 'Bash');
+    expect(d.allowed).toBe(false);
+    if (isWin && OUTSIDE !== d.normalizedPath) {
+      expect(d.reason).toContain('解析为');
+      expect(d.reason).toContain(OUTSIDE);
+    }
+  });
+
+  it('拼写一致（UNC 拒绝路径）：文案不含「解析为」提示行', () => {
+    // TS 源四反斜杠 = 运行时双反斜杠 UNC 前缀（resolveRealPath → UNC_REJECTED，
+    // buildDenyReason 走 CAUSE_UNC 三参调用，rawPath 未传 → 无提示行）。
+    const uncPath = '\\\\server' + '\\\\share' + '\\\\f';
+    const unc = engine.canWrite('rt-claude', uncPath, 'claude', 'Bash');
+    expect(unc.allowed).toBe(false);
+    expect(unc.reason).toContain('UNC');
+    expect(unc.reason).not.toContain('解析为');
+  });
+});

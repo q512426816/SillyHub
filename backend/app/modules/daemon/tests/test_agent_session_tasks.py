@@ -34,10 +34,11 @@ from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentSession
+from app.modules.daemon.agent_task_store import RUN_CLOSE_SWEEP_REASON, upsert_agent_task
 from app.modules.daemon.model import AgentSessionTask
 from app.modules.daemon.schema import AgentTaskStatusEvent
 
@@ -1274,3 +1275,147 @@ class TestRunCloseTaskSweep:
         monkeypatch.setattr("app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks", _boom)
 
         await agent_service._startup_orphan_task_sweep()  # 不抛即过
+
+
+# ── 6. 幽灵成对行根治组（2026-10-12-session-defects task-03 / FR-04 / D-005） ──
+
+
+class TestGhostPairToolUseIdReconciliation:
+    """生产幽灵成对行复现与根治（会话 47e2ff1a 实证 21 组同名
+    stopped(空摘要)+completed(真摘要) 成对行）。
+
+    根因：tool_use 派生的 running 事件以 tool-use call id 冒充 task_id
+    （claude-events.ts `strOf(toolInput?.['task_id']) || tId`——Agent 工具
+    入参无 task_id，回落 call id），而 SDK 帧携带真实 harness task_id。
+    同一任务两个 id 在 (session_id, task_id) 定位键下各落一行：call-id 行
+    永收不到终态事件、被 sweep_confirmed_dead_tasks 清扫成 stopped(空摘要)，
+    harness 行正常 completed(真摘要)——成对行成形。
+
+    修复口径（D-005 不变量「一逻辑任务至多一行真实终态」）：事件携带
+    tool_use_id 且异于 task_id 时，把同会话内 task_id==tool_use_id 的冒名行
+    重映射到真实 task_id（无真实行）或吸收删除（真实行已并存）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_call_id_row_remapped_not_duplicated(self, db_session: AsyncSession) -> None:
+        """复现主路径：冒名行先落（tool_use 派生），真帧后到（带 tool_use_id）
+        → 重映射而非新插，全程单行。修复前此断言失败（两行成对）。"""
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        # ① tool_use 派生 running（call id 冒充 task_id）
+        await upsert_agent_task(
+            db_session, _event(sid, rid, "callu_01ABC", task_name="独立评审 VO 改名修复")
+        )
+        # ② SDK task_started 真帧（harness id + tool_use_id 关联键）
+        await upsert_agent_task(
+            db_session,
+            _event(
+                sid,
+                rid,
+                "adc8e182d947f76bc",
+                task_name="独立评审 VO 改名修复",
+                tool_use_id="callu_01ABC",
+            ),
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 1, f"幽灵成对行复现：期望 1 行，实际 {len(rows)} 行"
+        assert rows[0].task_id == "adc8e182d947f76bc"
+        assert rows[0].status == "running"
+        # ③ 真帧 completed → 单行收终态
+        await upsert_agent_task(
+            db_session,
+            _event(
+                sid,
+                rid,
+                "adc8e182d947f76bc",
+                task_name="独立评审 VO 改名修复",
+                status="completed",
+                summary="评审完成，review.json 已写入",
+                tool_use_id="callu_01ABC",
+            ),
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 1
+        assert rows[0].status == "completed"
+        assert rows[0].summary == "评审完成，review.json 已写入"
+
+    @pytest.mark.asyncio
+    async def test_pre_existing_pair_absorbed_on_later_event(
+        self, db_session: AsyncSession
+    ) -> None:
+        """存量成对行补救：冒名行已被清扫 stopped(清扫标记)、真实行已
+        completed——迟到的带 tool_use_id 事件到达时吸收冒名行，恢复单行。"""
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        await upsert_agent_task(
+            db_session, _event(sid, rid, "callu_02DEF", task_name="task-02 设计文档 v0.3")
+        )
+        await upsert_agent_task(
+            db_session,
+            _event(sid, rid, "abdfdbcd944eee7f4", task_name="task-02 设计文档 v0.3"),
+        )
+        # 模拟历史态：call-id 行被清扫 stopped（写 RUN_CLOSE_SWEEP_REASON 标记），
+        # 真实行 completed。
+        await db_session.execute(
+            update(AgentSessionTask)
+            .where(AgentSessionTask.task_id == "callu_02DEF")
+            .values(status="stopped", message=RUN_CLOSE_SWEEP_REASON)
+        )
+        await upsert_agent_task(
+            db_session,
+            _event(
+                sid,
+                rid,
+                "abdfdbcd944eee7f4",
+                task_name="task-02 设计文档 v0.3",
+                status="completed",
+                summary="task-02 完成",
+            ),
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 2  # 吸收前的存量成对行（历史数据）
+        # 迟到事件（带 tool_use_id 关联键）触发吸收 → 恢复单行
+        await upsert_agent_task(
+            db_session,
+            _event(
+                sid,
+                rid,
+                "abdfdbcd944eee7f4",
+                task_name="task-02 设计文档 v0.3",
+                status="completed",
+                summary="task-02 完成",
+                tool_use_id="callu_02DEF",
+            ),
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 1, f"存量成对行未吸收：仍 {len(rows)} 行"
+        assert rows[0].task_id == "abdfdbcd944eee7f4"
+        assert rows[0].status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_tool_use_id_self_match_no_remap(self, db_session: AsyncSession) -> None:
+        """task_id == tool_use_id（正常关联）不触发重映射，行为与现状一致。"""
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        await upsert_agent_task(
+            db_session,
+            _event(sid, rid, "harness_x", task_name="任务甲", tool_use_id="harness_x"),
+        )
+        await upsert_agent_task(
+            db_session,
+            _event(sid, rid, "harness_x", task_name="任务甲", tool_use_id="harness_x"),
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 1
+        assert rows[0].task_id == "harness_x"
+
+    @pytest.mark.asyncio
+    async def test_no_tool_use_id_insert_path_unchanged(self, db_session: AsyncSession) -> None:
+        """无 tool_use_id 的异 task_id 事件（合法重试重生成，如「评审后断点续跑
+        收口」×6 生产实证）照旧各落一行——合并仅限 tool_use_id 关联键证据。"""
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        await upsert_agent_task(
+            db_session, _event(sid, rid, "id_a", task_name="评审后断点续跑收口")
+        )
+        await upsert_agent_task(
+            db_session, _event(sid, rid, "id_b", task_name="评审后断点续跑收口")
+        )
+        rows = await _task_rows(db_session, sid)
+        assert len(rows) == 2  # 合法重试：不同实例各一行

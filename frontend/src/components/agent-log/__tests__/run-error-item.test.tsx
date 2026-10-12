@@ -108,6 +108,8 @@ describe("task-09: 各 type 渲染对应颜色 / 文案 / 图标", () => {
     ["auth_failed", "凭证失效", "red"],
     ["quota_exceeded", "额度耗尽", "orange"],
     ["rate_limited", "触发限流", "amber"],
+    // F1a（2026-10-12-session-defects task-07）：上下文超窗专属卡。
+    ["context_overflow", "上下文超限", "indigo"],
     ["timeout", "响应超时", "purple"],
     ["model_not_found", "模型不存在", "rose"],
     ["network", "网络异常", "cyan"],

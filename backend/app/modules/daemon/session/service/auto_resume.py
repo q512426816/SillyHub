@@ -113,6 +113,21 @@ QUOTA_NUDGE_PROMPT = (
 # 比 transient 紧链（2）放宽一档。
 QUOTA_CHAIN_LIMIT = 3
 
+# F1b（2026-10-12-session-defects task-08 / FR-01 / D-003）：上下文超窗自动
+# 压缩续跑——连续 context_overflow 链 ≥2 不再自动压缩（防压缩失败循环烧窗）。
+CONTEXT_OVERFLOW_CHAIN_LIMIT = 2
+
+# 重放提示词场景化模板（Grill 复审注记：不复用 wrap_resume_prompt 的 daemon
+# 重启语境文案；wrap_resume_prompt 机制仅由 origin 链标记位承载）。
+CONTEXT_OVERFLOW_REPLAY_HEADER = (
+    "[系统续跑] 会话上下文已满，平台已自动调用引擎原生压缩（/compact）。\n"
+    "以下为你的原始消息，请继续处理；已完成的步骤不要重复执行：\n"
+)
+_CONTEXT_CHAIN_LIMIT_HINT = (
+    "上下文超限自动压缩续跑已达上限（2 次）；请手动压缩会话（/compact）后重发，或新建会话继续"
+)
+_COMPACT_FAILURE_HINT = "自动压缩会话失败；请手动压缩会话（/compact）后重发原消息，或新建会话继续"
+
 # 到点缓冲（秒）：reset_at 后再加缓冲防上游时钟偏差/边界复位延迟（design
 # §5.3「+120s」）；reset_at 已过（时钟偏差/积压条目）→ 尽快派发再兜 30s。
 QUOTA_DISPATCH_BUFFER_SECONDS = 120
@@ -474,6 +489,101 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
             )
             return
 
+        # ── 分支 A2：上下文超窗 → agent 原生压缩续跑（F1b / D-003） ──────────
+        # 压缩能力是 agent CLI 原生能力，平台只编排：调既有 compact_session
+        # 双分路（claude 注入原生 /compact；pi/codex 走 session_compact RPC），
+        # 成功后内联直插 AgentSessionScheduledMessage 重放本轮原文（delay=0；
+        # busy 由 queue 队列自然承接）。禁走 maybe_enqueue_auto_resume——其 G3
+        # 门禁仅放行 error_code=daemon_restarted（Grill X2 阻断修正）。
+        if error_type == "context_overflow":
+            from app.modules.agent.provider_caps import get_provider_caps
+
+            # caps.compact=false（引擎不支持原生压缩）→ 自动跳过走既有路径
+            # （不压缩、不报错、不写引导——兼容策略 §3）。
+            if not get_provider_caps(session.provider or "")["compact"]:
+                return
+            # 熔断：连续 context_overflow 链 ≥2 停跑（防压缩失败循环烧窗）。
+            co_chain = await _count_chain_type(svc, agent_run, context_overflow_only=True)
+            if co_chain >= CONTEXT_OVERFLOW_CHAIN_LIMIT:
+                log.info(
+                    "auto_recover_context_chain_limit",
+                    session_id=str(session_id),
+                    run_id=str(agent_run.id),
+                    chain=co_chain,
+                )
+                await _write_chain_limit_hint(svc, agent_run, hint_text=_CONTEXT_CHAIN_LIMIT_HINT)
+                return
+            # 压缩编排（AppError/异常 → 引导写入不吞，Grill X2 gap 修正；
+            # 仅 _write_chain_limit_hint 自身 DB 失败才降级纯日志）。
+            from app.modules.daemon.session.service.compact import compact_session
+
+            # rollback 会 expire run 对象（属性访问触发同步 IO → MissingGreenlet），
+            # 异常路径需要的标量先于 compact 调用捕获。
+            co_run_id = str(agent_run.id)
+            try:
+                resp = await compact_session(svc, session_id, user_id)
+            except Exception as exc:
+                await svc._session.rollback()
+                log.warning(
+                    "auto_recover_compact_failed",
+                    session_id=str(session_id),
+                    run_id=co_run_id,
+                    error=str(exc),
+                )
+                # rollback 过期了 run 对象属性（expire_on_commit 语义），hint 写入
+                # 前经 get 重载（异步安全）；get 返回 None（极端）降级纯日志。
+                fresh_run = await svc._session.get(AgentRun, uuid.UUID(co_run_id))
+                if fresh_run is not None:
+                    await _write_chain_limit_hint(svc, fresh_run, hint_text=_COMPACT_FAILURE_HINT)
+                return
+            if not getattr(resp, "accepted", False):
+                log.warning(
+                    "auto_recover_compact_not_accepted",
+                    session_id=str(session_id),
+                    run_id=str(agent_run.id),
+                )
+                await _write_chain_limit_hint(svc, agent_run, hint_text=_COMPACT_FAILURE_HINT)
+                return
+            # 重放本轮原文（场景化模板头 + 原文；origin 链标记供熔断计数）。
+            original_prompt = (
+                await svc._session.execute(
+                    select(AgentRunLog.content_redacted)
+                    .where(
+                        AgentRunLog.run_id == agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                    .order_by(AgentRunLog.timestamp)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if original_prompt is None or not original_prompt.strip():
+                return
+            now_co = datetime.now(UTC)
+            svc._session.add(
+                AgentSessionScheduledMessage(
+                    agent_session_id=session_id,
+                    sender_user_id=user_id,
+                    prompt=f"{CONTEXT_OVERFLOW_REPLAY_HEADER}{original_prompt.strip()}",
+                    origin=origin,
+                    dispatch_at=now_co,
+                    status="pending",
+                    llm_provider_id=(
+                        str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
+                    ),
+                    agent_profile_id=(
+                        str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
+                    ),
+                )
+            )
+            await svc._session.commit()
+            log.info(
+                "auto_recover_context_overflow_scheduled",
+                session_id=str(session_id),
+                run_id=str(agent_run.id),
+                origin=origin,
+            )
+            return
+
         # ── 分支 B：瞬时四类 / CLI 合成鉴权 raw ────────────────────────────
         is_transient = error_type in TRANSIENT_ERROR_TYPES
         is_cli_auth_transient = bool(_CLI_AUTH_TRANSIENT_RE.search(error_raw))
@@ -662,12 +772,14 @@ async def _count_chain_type(
     run: AgentRun,
     *,
     quota_exceeded_only: bool = False,
+    context_overflow_only: bool = False,
 ) -> int:
     """沿 metadata_.auto_resume_of 链回溯计数。
 
     quota_exceeded_only=True：只数连续 error_detail.type == 'quota_exceeded' 的
-    节点（quota 链上限专用，遇非 quota 节点断链）；False：数全链长（紧链上限
-    专用，对齐 9-10 G7 语义）。含当前节点。guard 防环。
+    节点（quota 链上限专用，遇非 quota 节点断链）；context_overflow_only=True：
+    只数连续 'context_overflow' 节点（F1b 压缩续跑熔断专用，同构）；False：数
+    全链长（紧链上限专用，对齐 9-10 G7 语义）。含当前节点。guard 防环。
     """
     chain = 0
     cursor: AgentRun | None = run
@@ -675,9 +787,10 @@ async def _count_chain_type(
     while cursor is not None and guard < 10:
         guard += 1
         detail = cursor.metadata_ if isinstance(cursor.metadata_, dict) else {}
-        if quota_exceeded_only:
+        if quota_exceeded_only or context_overflow_only:
+            wanted = "quota_exceeded" if quota_exceeded_only else "context_overflow"
             d = cursor.error_detail if isinstance(cursor.error_detail, dict) else {}
-            if str(d.get("type") or "") == "quota_exceeded":
+            if str(d.get("type") or "") == wanted:
                 chain += 1
             else:
                 break
@@ -693,7 +806,7 @@ async def _count_chain_type(
     return chain
 
 
-async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
+async def _write_chain_limit_hint(svc, agent_run: AgentRun, hint_text: str | None = None) -> None:
     """链上限停跑补写 error_detail 接续指引（2026-09-12-session-live-display-fixes
     R5 / D-004；nudge 与重放分支共用）。
 
@@ -705,7 +818,7 @@ async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
     """
     try:
         detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
-        detail["hint"] = (
+        detail["hint"] = hint_text or (
             "上游连续中断，自动续跑已达上限（2 次）；请手动发送继续接续，或切换供应商后重发"
         )
         detail["auto_resume_stopped"] = True

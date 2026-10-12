@@ -858,3 +858,119 @@ class TestPlainInjectZeroRegression:
         }
         assert payload["prompt"] == "second"
         assert payload["run_id"] == str(run.id)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8. 绑定前 NULL 窗口回填（2026-10-12-session-defects task-04 / FR-06）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestUnboundSnapshotBackfill:
+    """未绑定会话（daemon 按用户默认供应商注入凭证运行）的快照回填。
+
+    生产实证（会话 47e2ff1a）：绑定前创建（快照 model/provider_name 落 NULL）
+    → 普通轮 inject 不构成 config_switch → 快照永不回填，导出三键全 NULL。
+    回填口径：非切换轮 + 未绑定 + 快照缺显示键 → 按用户默认供应商
+    （is_default + 引擎命中）补 provider_name/model 展示键——不落
+    session.llm_provider_id 绑定、不触发 SESSION_SWITCH_CONFIG。
+    """
+
+    @pytest.mark.asyncio
+    async def test_unbound_session_backfills_snapshot_from_default_provider(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        default_provider = await _seed_provider(db_session, uid, model="glm-5.3", name="GLM默认")
+        default_provider.is_default = True
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid, provider=None, prompt="first", runtime_id=str(rt.id)
+        )
+        # 绑定前创建：快照在（pinned runtime 分支）但 provider/model 为 NULL 现状。
+        await db_session.refresh(created.agent_session)
+        snap_before = created.agent_session.config_snapshot
+        assert snap_before is not None
+        assert snap_before["provider_name"] is None
+        assert snap_before["model"] is None
+        assert created.agent_session.llm_provider_id is None
+        await _finish_first_turn(db_session, created)
+        mocked_hub.send_session_control.reset_mock()
+
+        # 普通轮（不带任何切换字段，不构成 config_switch）。
+        result = await svc.inject_session(created.agent_session.id, uid, prompt="plain turn")
+
+        await db_session.refresh(created.agent_session)
+        s = created.agent_session
+        # 不落绑定：会话供应商仍 NULL，消息仍走 SESSION_INJECT（非切换）。
+        assert s.llm_provider_id is None
+        msg_type, payload = (
+            mocked_hub.send_session_control.await_args.args[1],
+            mocked_hub.send_session_control.await_args.args[2],
+        )
+        assert msg_type == DAEMON_MSG_SESSION_INJECT
+        assert payload["prompt"] == "plain turn"
+        # 快照回填：provider_name/model 非空（导出 export.py:466 读同源）。
+        snap_after = s.config_snapshot
+        assert snap_after is not None
+        assert snap_after["provider_name"] == "GLM默认"
+        assert snap_after["model"] == "glm-5.3"
+        assert snap_after["engine"] == s.provider
+        # run 级归属不变（run.llm_provider_id 仍随会话 NULL，切供应商语义不动）。
+        assert result.agent_run.llm_provider_id is None
+
+    @pytest.mark.asyncio
+    async def test_unbound_without_default_provider_keeps_null(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """无默认供应商（真·未配置）→ 快照保持 NULL 现状（零回归）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        # 非默认供应商存在也不回填（is_default 才是口径）。
+        await _seed_provider(db_session, uid, model="glm-4.7", name="非默认")
+
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid, provider=None, prompt="first", runtime_id=str(rt.id)
+        )
+        await _finish_first_turn(db_session, created)
+
+        await svc.inject_session(created.agent_session.id, uid, prompt="plain turn")
+
+        await db_session.refresh(created.agent_session)
+        snap = created.agent_session.config_snapshot
+        assert snap is not None
+        assert snap["provider_name"] is None
+        assert snap["model"] is None
+
+    @pytest.mark.asyncio
+    async def test_backfill_idempotent_no_overwrite_on_next_turn(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """回填后下一普通轮不再改写（provider_name 已非空即跳过）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        default_provider = await _seed_provider(db_session, uid, model="glm-5.3", name="GLM默认")
+        default_provider.is_default = True
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        created = await svc.create_session(
+            uid, provider=None, prompt="first", runtime_id=str(rt.id)
+        )
+        await _finish_first_turn(db_session, created)
+        await svc.inject_session(created.agent_session.id, uid, prompt="turn 2")
+        await db_session.refresh(created.agent_session)
+        snapshot_after_fill = dict(created.agent_session.config_snapshot)
+        # 手动收口第二轮（inject 建的 run）
+        runs = await _session_runs(db_session, created.agent_session.id)
+        runs.sort(key=lambda r: r.created_at)
+        runs[-1].status = "completed"
+        runs[-1].finished_at = datetime.now(UTC)
+        await db_session.commit()
+
+        await svc.inject_session(created.agent_session.id, uid, prompt="turn 3")
+        await db_session.refresh(created.agent_session)
+        assert created.agent_session.config_snapshot == snapshot_after_fill

@@ -47,6 +47,16 @@ function trimShellSeparators(p: string): string {
 }
 
 /**
+ * F4（2026-10-12-session-defects task-10 / D-007）：flag token 判定——捕获
+ * 目标以 `-` 开头（`-p`/`-d`/`-o` 等被正则贪婪误吞的开关），捕获即弃不产出
+ * 目标。生产实证：deny 文案目标路径为 `<工作区>/-p`（mkdir -p 的 flag 被当
+ * 路径，会话 47e2ff1a 02:51 deny）。Bash/PowerShell/CMD 三提取器共用。
+ */
+function isFlagToken(t: string | undefined): boolean {
+  return typeof t === 'string' && t.startsWith('-');
+}
+
+/**
  * 简易 Bash 分词：考虑单/双引号；返回 token 数组（保留引号，
  * 由调用方按需 strip）。开关 token（`-x`）会被吞掉且不进入位置参数列表。
  */
@@ -106,11 +116,14 @@ export function extractBashWritePaths(command: string): string[] {
   const paths: string[] = [];
   let m: RegExpExecArray | null;
 
-  // 1. 重定向 > / >>（排除 2>&1 / >&2 等文件描述符）。目标支持带引号路径（含空格）。
+  // 1. 重定向 > / >>（排除 2>&1 / >&2 等文件描述符；同口径弃 `-` 前缀目标）。
+  //    目标支持带引号路径（含空格）。
   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
   while ((m = redirRe.exec(command)) !== null) {
     const target = m[1];
-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
+    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
+      paths.push(stripQuotes(target));
+    }
   }
   // 2. cp/mv/install src... dst（支持多源参数；跳过开关；取最后位置参数为目标）
   //    先吞掉所有形如 `-x` 的开关与普通 token，最后剩下的位置参数即 dst。
@@ -121,17 +134,19 @@ export function extractBashWritePaths(command: string): string[] {
     const dst = lastBashPositional(rest);
     if (dst) paths.push(dst);
   }
-  // 3. tee [-options] path（支持带引号路径）
+  // 3. tee [-options] path（支持带引号路径；flag 目标弃）
   const teeRe = /\btee\s+(?:-[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/g;
   while ((m = teeRe.exec(command)) !== null) {
     const target = m[1];
-    if (target) paths.push(stripQuotes(target));
+    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
   }
-  // 4. mkdir/touch [-options] path（支持带引号路径）
+  // 4. mkdir/touch [-options] path（支持带引号路径；flag 目标弃——`-p` 主实证）
   const mkRe = /\b(?:mkdir|touch)\s+(?:-[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/g;
   while ((m = mkRe.exec(command)) !== null) {
     const target = m[1];
-    if (target) paths.push(stripQuotes(target));
+    if (target && !isFlagToken(target)) {
+      paths.push(stripQuotes(target));
+    }
   }
   // 归一化（git bash /x/ → X:/ + strip 引号）
   return paths.map(normalizeBashWritePath);
@@ -149,11 +164,13 @@ export function extractPowerShellWritePaths(command: string): string[] {
   const paths: string[] = [];
   let m: RegExpExecArray | null;
 
-  // 重定向 > / >>（PowerShell 也支持，且可与管道叠加）
+  // 重定向 > / >>（PowerShell 也支持，且可与管道叠加；F4 同口径弃 flag 目标）
   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
   while ((m = redirRe.exec(command)) !== null) {
     const target = m[1];
-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
+    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
+      paths.push(stripQuotes(target));
+    }
   }
 
   // Set-Content / Add-Content / Out-File：取 -Path/-FilePath，否则首个位置参数
@@ -275,34 +292,36 @@ function tokenizeSkippingNamed(rest: string): string[] {
 export function extractCmdWritePaths(command: string): string[] {
   const paths: string[] = [];
 
-  // 重定向 > / >>（排除文件描述符）；目标支持带引号路径
+  // 重定向 > / >>（排除文件描述符；F4 同口径弃 flag 目标）；目标支持带引号路径
   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
   let m: RegExpExecArray | null;
   while ((m = redirRe.exec(command)) !== null) {
     const target = m[1];
-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
+    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
+      paths.push(stripQuotes(target));
+    }
   }
 
-  // copy/move src dst（取最后位置参数，跳过开关）
+  // copy/move src dst（取最后位置参数，跳过开关；F4 同口径弃 flag 目标）
   const cmRe =
     /\b(?:copy|move)\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)\s+("[^"]*"|'[^']*'|\S+)/gi;
   while ((m = cmRe.exec(command)) !== null) {
     const dst = m[2];
-    if (dst) paths.push(stripQuotes(dst));
+    if (dst && !isFlagToken(dst)) paths.push(stripQuotes(dst));
   }
 
-  // mkdir dir
+  // mkdir dir（F4 同口径弃 flag 目标）
   const mkRe = /\bmkdir\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/gi;
   while ((m = mkRe.exec(command)) !== null) {
     const target = m[1];
-    if (target) paths.push(stripQuotes(target));
+    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
   }
 
-  // del file
+  // del file（F4 同口径弃 flag 目标）
   const delRe = /\bdel\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/gi;
   while ((m = delRe.exec(command)) !== null) {
     const target = m[1];
-    if (target) paths.push(stripQuotes(target));
+    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
   }
 
   // quick-f2c10985：剥尾部命令分隔符（cmd 的 & 链接符紧贴目标时 \S+ 吞入）。

@@ -700,14 +700,23 @@ async def _fetch_export_runs_logs(
 
 
 async def _fetch_export_tasks(svc, session_id: uuid.UUID) -> list[AgentSessionTask]:
-    """任务卡快照（照 GET /sessions/{id}/tasks：updated_at desc 最近 200 条）。"""
+    """任务卡快照（照 GET /sessions/{id}/tasks：updated_at desc 最近 200 条）。
+
+    2026-10-12-session-defects task-06 / FR-07：取数后应用读侧去重
+    （task_snapshot_dedupe.dedupe_task_snapshots）——历史幽灵成对行（写侧
+    task-03 根治前的存量）收敛为每任务名至多一条真实终态行，与任务列表 API
+    同口径（D-005 兜底）。
+    """
+    from app.modules.daemon.task_snapshot_dedupe import dedupe_task_snapshots
+
     stmt = (
         select(AgentSessionTask)
         .where(AgentSessionTask.session_id == session_id)
         .order_by(AgentSessionTask.updated_at.desc())
         .limit(_EXPORT_TASKS_MAX_ROWS)
     )
-    return list((await svc._session.execute(stmt)).scalars().all())
+    rows = list((await svc._session.execute(stmt)).scalars().all())
+    return dedupe_task_snapshots(rows)
 
 
 async def _fetch_export_attachments(

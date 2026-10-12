@@ -69,6 +69,15 @@ const ERROR_INFO: Record<
     hint: '请求过于频繁，请稍候重试或降低并发',
     retryable: true,
   },
+  // F1a（2026-10-12-session-defects task-07 / FR-01）：上下文超窗——生产实证
+  // "Prompt is too long" 连续 10 轮落 unknown 无归因无引导（会话 47e2ff1a
+  // runs 3-12）。不可重试（重发同文本必然再爆窗），恢复路径=平台编排
+  // agent 原生压缩（auto_resume context_overflow 分支调 compact_session）。
+  context_overflow: {
+    message: '会话上下文超出模型窗口',
+    hint: '平台将自动压缩会话并续跑；若自动恢复失败请手动 /compact 或新建会话',
+    retryable: false,
+  },
   auth_failed: {
     message: '凭证无效或已失效',
     hint: '凭证失效，请检查或更换供应商配置',
@@ -182,6 +191,19 @@ function classifyBlob(blob: string): ModelErrorType {
   //    含明确的限流关键词（too many requests/rate limit/限流/频繁/throttle）或裸 429。
   if (has429) {
     return 'rate_limited';
+  }
+
+  // 2.5 context_overflow（F1a，2026-10-12-session-defects task-07 / FR-01）：
+  //     上下文超窗关键词（Claude CLI 主实证 "Prompt is too long"，provider
+  //     无关——anthropic/openai 的 context length exceeded / context window
+  //     同语义）。插在 429 之后 auth 之前：超窗错误常带 4xx 状态码字面，
+  //     先于 auth 判定防误归 auth_failed。
+  if (
+    /prompt[\s_-]{0,5}is[\s_-]{0,5}too[\s_-]{0,5}long|maximum[\s_-]{0,5}context[\s_-]{0,5}length|context[\s_-]{0,5}length[\s_-]{0,5}exceeded|context[\s_-]{0,5}(?:window|length)[\s_-]{0,10}(?:exceeded|too[\s_-]{0,5}long|overflow)|prompts?[\s_-]{0,10}(?:exceed(?:ed|es)?|too[\s_-]{0,5}long)[\s\S]{0,20}(?:context|window|length)/i.test(
+      blob,
+    )
+  ) {
+    return 'context_overflow';
   }
 
   // 3. auth_failed：401/403/unauthorized/forbidden/invalid api key/凭证失效。

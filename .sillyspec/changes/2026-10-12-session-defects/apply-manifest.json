@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-session-defects",
+  "appliedAt": "2026-10-12T15:24:13.998Z",
+  "baseHash": "75d290f87b03a45da590e41bced0d058dd10fddb",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/agent_task_store.py",
+      "sha256": "1a828d3152f34c53f7fb99af1389143ccea3ed8863670d73348867ef5f6be97c"
+    },
+    {
+      "path": "backend/app/modules/daemon/model_error.py",
+      "sha256": "2a0bbeab24871128d3dfa419ea3dd1eda3eb745fb53bb98b62eecf0a3f2dd3bd"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/session_insights.py",
+      "sha256": "7fe16b3754e75131de33ab01feedd3570495addf706a0ba8e5b068e6ac4e166e"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+      "sha256": "393577fce9c8e65f1ba0cd436eb6ac9ccc59f3bcd98632f2543e7255a5672453"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/auto_resume.py",
+      "sha256": "c90d4f3528eb824020db2c7af383f3a0c8f6519f193359ef6eaa204a316631c5"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/export.py",
+      "sha256": "267bfde495d2dcec4070ddee8f8b9a8984cc9563f9f961f22e2566e24a56acb2"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/helpers.py",
+      "sha256": "8fb5c7283ef354a50cf3a3c785c0b3855603976357e26cca5efd18d3a9c86575"
+    },
+    {
+      "path": "backend/app/modules/daemon/session/service/inject.py",
+      "sha256": "f9037f15ecab492fe4733bf2c120afe6e76485271769c1479a0bd71fc9803510"
+    },
+    {
+      "path": "backend/app/modules/daemon/task_snapshot_dedupe.py",
+      "sha256": "94067040ec343fcb9e2d24a5ae137c4f5f3479fc1aa58b46f4254b8fa85ad41b"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+      "sha256": "23bcd13c681c5d2437d4fdc2d518e43a4e69aeb21d9f1d864e264dcc4b24ae92"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_apply_session_terminal_status.py",
+      "sha256": "142f003064fdce42f558241854e55507d6c3e80d80cd6eb7ef59a3a214d2a5b1"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py",
+      "sha256": "a863752eded3a8a470ec673170668ef472ff36a72543589160c5c74b21cabf4c"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py",
+      "sha256": "8bd671088367d71a73bba2c1943e74c17f25292f60fed72dae9c2c5d63b89e12"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py",
+      "sha256": "7a2b8093f77a2f7ef5906e7ade529c5604c3480679f041e65d7de6c745d07860"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_switch_config.py",
+      "sha256": "9948bdc8651a9103a5766f667830f388005d806c8e031055f11ab459a18ed519"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_session_tasks_dedupe.py",
+      "sha256": "aa62049f08337395d35f1ac5c23d2a7d13fddbcbcfbba26646d1fc41291b90d2"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "09797e35a472e39c683498a5236ff970a5a9ea3bbd39c18e06cf466cd75609d6"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_session_export.py",
+      "sha256": "2aa61f3d002b429404e7430bec2b8fe6ecb346bbe144c259657e16fa1c19f84c"
+    },
+    {
+      "path": "docs/sillyspec/cli-cwd-coupling.md",
+      "sha256": "16e789020042bd12932589d46d7e1e476978a604aa20e68c858d9f71c83429eb"
+    },
+    {
+      "path": "docs/sillyspec/deps-gate-offline-fragile.md",
+      "sha256": "c328c28321346df0e1ec01d08711908d510d5b3dfe6a3c26e02dfb9f76606036"
+    },
+    {
+      "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+      "sha256": "28938ec2df313de7aeb4b56723b353cbfc8aebdec01f175aba619938d8ab1222"
+    },
+    {
+      "path": "frontend/src/components/agent-log/normalize.ts",
+      "sha256": "ba164cfcaf98facf5c194efa51d0a57905a09a58448af8307636108c03893dde"
+    },
+    {
+      "path": "frontend/src/components/agent-log/run-error-item.tsx",
+      "sha256": "5b42a6855d773a82b8b1576940c19d5538a3bfb5d6ba5f94149112e12ef8f64a"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "405e7813aa90879807ff0feb73e12e3d1564e5adc1e9cd737239d2f912bd1bde"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-log/message-coalescer.ts",
+      "sha256": "b06b70d46003efd0920c47219849abfb94cb898b3ef4b7cb9817824cf0ecfa98"
+    },
+    {
+      "path": "sillyhub-daemon/src/event-wire.ts",
+      "sha256": "94525cd388ae4bb3cd8358665db3945a18a6454f4c152fd554ec9898d0dbedf2"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/write-guard.ts",
+      "sha256": "1b2156e27e87efb10635f3eaf8419971fa488b82f2953f46bb254bcc67764c8c"
+    },
+    {
+      "path": "sillyhub-daemon/src/model-error/classifier.ts",
+      "sha256": "81d11f35c5763134ac2b7e181e4c8387cd9eec87347578779a22a1327099f889"
+    },
+    {
+      "path": "sillyhub-daemon/src/model-error/types.ts",
+      "sha256": "b197022438e15222f20fca0f9032363e80fad067607c992b086cb569dc782e1a"
+    },
+    {
+      "path": "sillyhub-daemon/src/policy/filesystem-policy.ts",
+      "sha256": "1af62ad5a57ca2159f2e288b3691f6e719135ac1fa03170323723a16fbd3ca69"
+    },
+    {
+      "path": "sillyhub-daemon/src/policy/path-utils.ts",
+      "sha256": "3e1f89ab272dc4b4db1e36ea08cf550fae3f7b05adf10f7a80ceedfa62e97e1a"
+    },
+    {
+      "path": "sillyhub-daemon/src/policy/shell-paths.ts",
+      "sha256": "7ff03e16a1af2270f1318f54f6b6dc7f9b10403dd3924d6e8e4890d346337edd"
+    },
+    {
+      "path": "sillyhub-daemon/src/types.ts",
+      "sha256": "a6266c146c5d8dfd8ed976df0fa4b35a7b7e41c007df4556a0098cdfac5f59a1"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-log/message-coalescer.test.ts",
+      "sha256": "de0edc4758daf9741f7c882839277d3fd37983131e61f41cdec41bf9694928fb"
+    },
+    {
+      "path": "sillyhub-daemon/tests/event-wire-timestamp.test.ts",
+      "sha256": "3ac967434e55646eeb0598c2f9a20e0163842b910851ca2e178f5e816ea959d9"
+    },
+    {
+      "path": "sillyhub-daemon/tests/event-wire.test.ts",
+      "sha256": "950fbca0d0dcbc3381f201d7a08da9a256e8e2f2a530dce7f42a7038fdcc6394"
+    },
+    {
+      "path": "sillyhub-daemon/tests/model-error/classifier.test.ts",
+      "sha256": "ea0b5b1c1de14de08dee14cdccf8d2e71f374f3b43ca03d1daf0453fbee9e825"
+    },
+    {
+      "path": "sillyhub-daemon/tests/policy/filesystem-policy.test.ts",
+      "sha256": "5b43ddae9d9a522542d65b11b4b39ab9812cdb2ead5de12315c8a86305847b48"
+    },
+    {
+      "path": "sillyhub-daemon/tests/policy/path-utils.test.ts",
+      "sha256": "dfa8c0e089623ea8700b961236a52568de0227db5575846d8bc31e20958b023a"
+    },
+    {
+      "path": "sillyhub-daemon/tests/policy/shell-paths.test.ts",
+      "sha256": "c7db5edb59b7a27acd00019297c4aff3836f88637b8325f23ace475b7bc09f11"
+    },
+    {
+      "path": "sillyhub-daemon/tests/task-runner.test.ts",
+      "sha256": "17edeb75cc14681ac81bb695157db58ce71600b5802cf4835ea53c750d2b41e1"
+    }
+  ]
+}

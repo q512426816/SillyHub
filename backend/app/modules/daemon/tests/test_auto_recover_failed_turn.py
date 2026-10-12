@@ -34,6 +34,9 @@ from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service.auto_resume import (
+    _COMPACT_FAILURE_HINT,
+    _CONTEXT_CHAIN_LIMIT_HINT,
+    CONTEXT_OVERFLOW_REPLAY_HEADER,
     QUOTA_CHAIN_LIMIT,
     QUOTA_DISPATCH_BUFFER_SECONDS,
     QUOTA_NUDGE_PROMPT,
@@ -575,3 +578,127 @@ def test_nudge_prompt_text_lock() -> None:
     assert QUOTA_CHAIN_LIMIT == 3
     assert QUOTA_DISPATCH_BUFFER_SECONDS == 120
     assert {"rate_limited", "timeout", "network", "provider_error"} == TRANSIENT_ERROR_TYPES
+
+
+# ══ F1b（2026-10-12-session-defects task-08 / FR-01 / D-003）：上下文超窗压缩续跑 ══
+
+
+def _context_overflow_error() -> ModelErrorDTO:
+    return ModelErrorDTO(
+        type=ModelErrorType.CONTEXT_OVERFLOW,
+        code=None,
+        message="会话上下文超出模型窗口",
+        retryable=False,
+        hint=None,
+        raw="Prompt is too long",
+    )
+
+
+class TestContextOverflowAutoCompact:
+    """context_overflow → compact_session 编排（D-003：压缩是 agent 原生能力，
+    平台只编排触发与重放；compact_session 本体行为由其自身测试覆盖，此处 mock）。"""
+
+    @pytest.mark.asyncio
+    async def test_first_failure_compacts_and_schedules_replay(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """首次触发：compact_session 被调 + 调度消息入队（场景化模板 + 原文）。"""
+        from types import SimpleNamespace
+
+        lease_id, run_id, token, session_id, _ = await _seed(db_session)
+        with patch(
+            "app.modules.daemon.session.service.compact.compact_session",
+            new=AsyncMock(return_value=SimpleNamespace(accepted=True)),
+        ) as mock_compact:
+            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
+        mock_compact.assert_awaited_once()
+        scheduled = await _scheduled(db_session, session_id)
+        assert len(scheduled) == 1
+        assert scheduled[0].prompt.startswith(CONTEXT_OVERFLOW_REPLAY_HEADER)
+        assert "继续任务" in scheduled[0].prompt  # _seed 默认原文
+        assert scheduled[0].origin == f"auto_resume:{run_id}"
+        assert scheduled[0].status == "pending"
+        # D-006 / task-09：可恢复失败会话保持 active。
+        sess = await db_session.get(AgentSession, session_id)
+        assert sess is not None and sess.status == "active"
+
+    @pytest.mark.asyncio
+    async def test_chain_limit_stops_and_writes_hint(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """连续链 ≥2：不再压缩、不再入队，链上限提示写入（熔断生效）。"""
+        lease_id, run_id, token, session_id, uid = await _seed(db_session)
+        prev1 = await _add_prev_run(
+            db_session,
+            session_id,
+            uid,
+            minutes_before=30,
+            error_detail={"type": "context_overflow"},
+        )
+        prev2 = await _add_prev_run(
+            db_session,
+            session_id,
+            uid,
+            minutes_before=20,
+            metadata_={"auto_resume_of": str(prev1)},
+            error_detail={"type": "context_overflow"},
+        )
+        run = await db_session.get(AgentRun, run_id)
+        run.metadata_ = {"auto_resume_of": str(prev2)}
+        await db_session.commit()
+
+        with patch(
+            "app.modules.daemon.session.service.compact.compact_session",
+            new=AsyncMock(),
+        ) as mock_compact:
+            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
+        mock_compact.assert_not_awaited()
+        assert await _scheduled(db_session, session_id) == []
+        run_row = await db_session.get(AgentRun, run_id)
+        assert run_row is not None
+        assert isinstance(run_row.error_detail, dict)
+        assert run_row.error_detail["hint"] == _CONTEXT_CHAIN_LIMIT_HINT
+        assert run_row.error_detail.get("auto_resume_stopped") is True
+
+    @pytest.mark.asyncio
+    async def test_compact_failure_writes_hint_not_swallowed(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """compact 抛异常（含 AppError 类业务拒绝）：引导仍写入不被吞（Grill X2 gap），
+        run 终态不受影响（钩子静默容错边界收窄）。"""
+        lease_id, run_id, token, session_id, _ = await _seed(db_session)
+        with patch(
+            "app.modules.daemon.session.service.compact.compact_session",
+            new=AsyncMock(side_effect=RuntimeError("rpc down")),
+        ):
+            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
+        assert await _scheduled(db_session, session_id) == []
+        run_row = await db_session.get(AgentRun, run_id)
+        assert run_row is not None
+        assert run_row.status == "failed"  # 终态不受钩子影响
+        assert isinstance(run_row.error_detail, dict)
+        assert run_row.error_detail["hint"] == _COMPACT_FAILURE_HINT
+
+    @pytest.mark.asyncio
+    async def test_caps_compact_false_skips_branch(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """caps.compact=false：自动跳过（不压缩不报错不写引导，兼容策略 §3）。"""
+        lease_id, run_id, token, session_id, _ = await _seed(db_session)
+        with (
+            patch(
+                "app.modules.daemon.session.service.compact.compact_session",
+                new=AsyncMock(),
+            ) as mock_compact,
+            patch(
+                "app.modules.agent.provider_caps.get_provider_caps",
+                return_value={"compact": False},
+            ),
+        ):
+            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
+        mock_compact.assert_not_awaited()
+        assert await _scheduled(db_session, session_id) == []
+        run_row = await db_session.get(AgentRun, run_id)
+        assert run_row is not None
+        assert isinstance(run_row.error_detail, dict)
+        assert "auto_resume_stopped" not in run_row.error_detail

@@ -1,0 +1,427 @@
+{
+  "change": "2026-10-12-session-defects",
+  "baseline": "head-uncommitted-window",
+  "head": "930d739bc3132025078b6cd6010d0be9235fd21d",
+  "files": [
+    "backend/app/modules/daemon/agent_task_store.py",
+    "backend/app/modules/daemon/model_error.py",
+    "backend/app/modules/daemon/router/session_insights.py",
+    "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+    "backend/app/modules/daemon/session/service/auto_resume.py",
+    "backend/app/modules/daemon/session/service/export.py",
+    "backend/app/modules/daemon/session/service/helpers.py",
+    "backend/app/modules/daemon/session/service/inject.py",
+    "backend/app/modules/daemon/task_snapshot_dedupe.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+    "backend/app/modules/daemon/tests/test_apply_session_terminal_status.py",
+    "backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py",
+    "backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py",
+    "backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py",
+    "backend/app/modules/daemon/tests/test_session_switch_config.py",
+    "backend/app/modules/daemon/tests/test_session_tasks_dedupe.py",
+    "backend/openapi.json",
+    "backend/tests/modules/daemon/test_session_export.py",
+    "docs/sillyspec/cli-cwd-coupling.md",
+    "docs/sillyspec/deps-gate-offline-fragile.md",
+    "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+    "frontend/src/components/agent-log/normalize.ts",
+    "frontend/src/components/agent-log/run-error-item.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/agent-log/message-coalescer.ts",
+    "sillyhub-daemon/src/event-wire.ts",
+    "sillyhub-daemon/src/interactive/session-manager/write-guard.ts",
+    "sillyhub-daemon/src/model-error/classifier.ts",
+    "sillyhub-daemon/src/model-error/types.ts",
+    "sillyhub-daemon/src/policy/filesystem-policy.ts",
+    "sillyhub-daemon/src/policy/path-utils.ts",
+    "sillyhub-daemon/src/policy/shell-paths.ts",
+    "sillyhub-daemon/src/types.ts",
+    "sillyhub-daemon/tests/agent-log/message-coalescer.test.ts",
+    "sillyhub-daemon/tests/event-wire-timestamp.test.ts",
+    "sillyhub-daemon/tests/event-wire.test.ts",
+    "sillyhub-daemon/tests/model-error/classifier.test.ts",
+    "sillyhub-daemon/tests/policy/filesystem-policy.test.ts",
+    "sillyhub-daemon/tests/policy/path-utils.test.ts",
+    "sillyhub-daemon/tests/policy/shell-paths.test.ts",
+    "sillyhub-daemon/tests/task-runner.test.ts"
+  ],
+  "totals": {
+    "files": 41,
+    "additions": 2299,
+    "deletions": 84
+  },
+  "savedAt": "2026-10-12T15:30:29.440Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "head-uncommitted-window",
+    "totals": {
+      "files": 44,
+      "additions": 2299,
+      "deletions": 84
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/agent_task_store.py",
+        "additions": 91,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/model_error.py",
+        "additions": 17,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/session_insights.py",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/run_sync/service/submit_steps.py",
+        "additions": 35,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/auto_resume.py",
+        "additions": 119,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/export.py",
+        "additions": 11,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/helpers.py",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/inject.py",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/task_snapshot_dedupe.py",
+        "additions": 70,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "additions": 146,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_apply_session_terminal_status.py",
+        "additions": 59,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py",
+        "additions": 127,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py",
+        "additions": 34,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py",
+        "additions": 210,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_switch_config.py",
+        "additions": 116,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_tasks_dedupe.py",
+        "additions": 189,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_session_export.py",
+        "additions": 55,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/cli-cwd-coupling.md",
+        "additions": 39,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/sillyspec/deps-gate-offline-fragile.md",
+        "additions": 44,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/normalize.ts",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/run-error-item.tsx",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-log/message-coalescer.ts",
+        "additions": 143,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/event-wire.ts",
+        "additions": 72,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/write-guard.ts",
+        "additions": 15,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/model-error/classifier.ts",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/model-error/types.ts",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/policy/filesystem-policy.ts",
+        "additions": 32,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/policy/path-utils.ts",
+        "additions": 25,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/policy/shell-paths.ts",
+        "additions": 35,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/types.ts",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-log/message-coalescer.test.ts",
+        "additions": 127,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-wire-timestamp.test.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/event-wire.test.ts",
+        "additions": 73,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/model-error/classifier.test.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/policy/filesystem-policy.test.ts",
+        "additions": 50,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/policy/path-utils.test.ts",
+        "additions": 52,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/policy/shell-paths.test.ts",
+        "additions": 32,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/task-runner.test.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/session/service/create.py",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/turn-control.ts",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "26eb9cd9b2d756978ec18bd1f2e51ade599c748a3d1e8e94e5a88cf79dd4721f",
+  "patchStatus": "ok"
+}

@@ -83,6 +83,11 @@ export function eventToReportWireDict(
     type: ev.type,
     content: ev.content,
     seq,
+    // F2a（2026-10-12-session-defects task-01 / FR-02）：事件到达时刻逐条捕获
+    // ——backend 落库优先取此值（钟差守卫回落本地时钟），消除整批共享
+    // st.now 单值的同毫秒时间戳塌缩（生产 8~31 行同刻度实证）。本函数逐事件
+    // 调用，转换时刻即事件到达时刻。
+    timestamp: new Date().toISOString(),
   };
   if (ev.subtype !== undefined) dict['subtype'] = ev.subtype;
   if (ev.tool_name !== undefined) dict['tool_name'] = ev.tool_name;
@@ -131,6 +136,7 @@ export function eventToReportWireDict(
  */
 export function eventToSubmitMessages(
   ev: AgentEvent,
+  coalescer?: import('./agent-log/message-coalescer.js').MessageCoalescer,
 ): Record<string, unknown>[] | null {
   const md = ev.metadata ?? {};
   const rawContent = ev.content ?? '';
@@ -146,7 +152,17 @@ export function eventToSubmitMessages(
       // 前缀，直接发原始 delta 文本。前端 chat 面板会逐字 append 拼"打字效果"。
       // 若加 [ASSISTANT] 前缀，每个 delta 都带前缀 → "[ASSISTANT] 我[ASSISTANT]  Cod"。
       // Agent 控制台日志会按原样展示每条 delta（无前缀），可读性也 OK（每条 = 一次推送）。
-      if (isStreaming && rawContent) {
+      // F2b（2026-10-12-session-defects task-02 / FR-03）：传入 coalescer 时
+      // 所有 text 事件先过缓冲器——流式 delta 并入缓冲不直发（消除逐 delta
+      // 碎片行）；完整行触发同 id 保底冲刷 + 超龄惰性冲刷（冲刷行先于完整行
+      // 输出）。不传 coalescer 保持 legacy 直发（零回归，向后兼容）。
+      if (coalescer) {
+        const flushed = coalescer.feed(ev);
+        for (const f of flushed) messages.push(f);
+        if (isStreaming && rawContent) {
+          break; // delta 已入缓冲，本事件零直发
+        }
+      } else if (isStreaming && rawContent) {
         messages.push({
           event_type: ev.type,
           content: rawContent,
@@ -228,6 +244,54 @@ export function eventToSubmitMessages(
           event_type: ev.type,
           content: `[APPROVAL:DECLINE] ${name}\n${reason}`.slice(0, 5000),
           channel: 'stderr',
+        });
+        // F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝同样落 tool_call
+        // 留痕行（工具名+入参，status 扩展 'denied' 取值，对齐 allow 路径
+        // 'allowed' 模式）——生产实证 run27 拒绝只有对结果日志、无 tool_call 行，
+        // 工具调用不留痕。interrupt abortAll 全 deny 经同一事件形态，一并覆盖。
+        const declineInput =
+          md.tool_input &&
+          typeof md.tool_input === 'object' &&
+          !Array.isArray(md.tool_input)
+            ? (md.tool_input as Record<string, unknown>)
+            : {};
+        const declineId =
+          (typeof md.tool_use_id === 'string' && md.tool_use_id) ||
+          (typeof md.id === 'string' && md.id) ||
+          (typeof md.call_id === 'string' && md.call_id) ||
+          '';
+        const declineTs = new Date().toISOString();
+        let declineJson: string;
+        try {
+          declineJson = JSON.stringify({
+            tool: name,
+            ...(declineId ? { tool_use_id: declineId } : {}),
+            args: declineInput,
+            timestamp: declineTs,
+            status: 'denied',
+            success: false,
+            ...(typeof md.deny_reason === 'string' && md.deny_reason
+              ? { reason: md.deny_reason }
+              : {}),
+          });
+        } catch {
+          declineJson = JSON.stringify({
+            tool: name,
+            args: {},
+            timestamp: declineTs,
+            status: 'denied',
+            success: false,
+          });
+        }
+        const declineKind = classifyToolKind(
+          typeof md.tool_name === 'string' && md.tool_name ? md.tool_name : null,
+          declineInput,
+        );
+        messages.push({
+          event_type: ev.type,
+          content: declineJson,
+          channel: 'tool_call',
+          ...(declineKind ? { tool_kind: declineKind } : {}),
         });
         break;
       }
@@ -377,5 +441,12 @@ export function eventToSubmitMessages(
   // session_id 索引等）。call_id 仅 tool_use 类型有意义，写第一条即可。
   // task-04 轻重构②：三列映射与事件轨共用 appendSessionWireColumns（metadata 口径）。
   appendSessionWireColumns(messages[0]!, ev, 'metadata');
+  // F2a（2026-10-12-session-defects task-01 / FR-02）：渲染轨同款消息级
+  // timestamp（单返回点统一注入，本函数逐事件调用=到达时刻；tool_call JSON
+  // content 内嵌 ts 为既有展示值，不受影响）。
+  const wireTs = new Date().toISOString();
+  for (const m of messages) {
+    m['timestamp'] = wireTs;
+  }
   return messages;
 }

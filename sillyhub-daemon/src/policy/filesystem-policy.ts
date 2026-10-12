@@ -42,13 +42,28 @@ const ALLOW_DECISION = '';
  *   Agent：<provider>
  *   目标路径：<normalizedPath>
  *   原因：<cause>
+ *
+ * F4（2026-10-12-session-defects task-10）：rawPath 与解析后拼写不一致时附
+ * 「原始路径 X 解析为 Y」提示——allowed_roots 按一种拼写配置、实际解析成
+ * 另一种（WSL /mnt/e ↔ /mnt/c junction、大小写归一）是该类误拒的主排查
+ * 路径，文案必须自证两个拼写才可操作（生产实证 deny 只给解析后路径无从
+ * 对账，会话 47e2ff1a）。
  */
-function buildDenyReason(provider: string, normalizedPath: string, cause: string): string {
+function buildDenyReason(
+  provider: string,
+  normalizedPath: string,
+  cause: string,
+  rawPath?: string,
+): string {
+  const spellingHint =
+    rawPath !== undefined && rawPath !== '' && rawPath !== normalizedPath
+      ? `\n提示：原始路径 ${rawPath} 解析为 ${normalizedPath}（allowed_roots 需覆盖实际拼写）。`
+      : '';
   return (
     `Runtime Policy 拒绝本次写入。\n` +
     `Agent：${provider}\n` +
     `目标路径：${normalizedPath}\n` +
-    `原因：${cause}`
+    `原因：${cause}${spellingHint}`
   );
 }
 
@@ -107,8 +122,9 @@ export class PolicyEngine {
     path: string,
     provider: string,
     tool: string,
+    anchor?: string,
   ): PolicyDecision {
-    return this.judgeWrite(runtimeId, path, provider, tool);
+    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
   }
 
   /** 创建新文件裁决（流程同 {@link canWrite}）。 */
@@ -117,8 +133,9 @@ export class PolicyEngine {
     path: string,
     provider: string,
     tool: string,
+    anchor?: string,
   ): PolicyDecision {
-    return this.judgeWrite(runtimeId, path, provider, tool);
+    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
   }
 
   /** 删除裁决（流程同 {@link canWrite}）。 */
@@ -127,8 +144,9 @@ export class PolicyEngine {
     path: string,
     provider: string,
     tool: string,
+    anchor?: string,
   ): PolicyDecision {
-    return this.judgeWrite(runtimeId, path, provider, tool);
+    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
   }
 
   // ── canRename（两端皆需 allow）─────────────────────────────────────────────
@@ -144,8 +162,9 @@ export class PolicyEngine {
     newPath: string,
     provider: string,
     tool: string,
+    anchor?: string,
   ): PolicyDecision {
-    const fromDecision = this.judgeWrite(runtimeId, oldPath, provider, tool);
+    const fromDecision = this.judgeWrite(runtimeId, oldPath, provider, tool, anchor);
     if (!fromDecision.allowed) {
       // 源端越界：reason 顶部追加「源路径」标识。
       return {
@@ -154,7 +173,7 @@ export class PolicyEngine {
         normalizedPath: fromDecision.normalizedPath,
       };
     }
-    const toDecision = this.judgeWrite(runtimeId, newPath, provider, tool);
+    const toDecision = this.judgeWrite(runtimeId, newPath, provider, tool, anchor);
     if (!toDecision.allowed) {
       return {
         allowed: false,
@@ -178,8 +197,9 @@ export class PolicyEngine {
     path: string,
     provider: string,
     tool: string,
+    anchor?: string,
   ): PolicyDecision {
-    const normalizedPath = resolveRealPath(path);
+    const normalizedPath = resolveRealPath(path, anchor);
     const ts = Date.now();
 
     // UNC → deny（reason 注明 UNC 不允许）
@@ -197,16 +217,16 @@ export class PolicyEngine {
       return { allowed: false, reason, normalizedPath };
     }
 
-    // 边界校验
-    const underRoot = isPathUnderAnyRoot(normalizedPath, policy.allowedRoots);
+    // 边界校验（F4：anchor 透传——target 解析基点=会话工作区根）
+    const underRoot = isPathUnderAnyRoot(normalizedPath, policy.allowedRoots, anchor);
     if (underRoot) {
       // allow：reason 空串，仍记 audit（D-006 全量）
       this.recordAudit('ALLOW', runtimeId, provider, tool, normalizedPath, ALLOW_DECISION, ts);
       return { allowed: true, reason: ALLOW_DECISION, normalizedPath };
     }
 
-    // deny：统一中文文案
-    const reason = buildDenyReason(provider, normalizedPath, CAUSE_NOT_CONFIGURED);
+    // deny：统一中文文案（F4：拼写不一致时附双拼写提示）
+    const reason = buildDenyReason(provider, normalizedPath, CAUSE_NOT_CONFIGURED, path);
     this.recordAudit('DENY', runtimeId, provider, tool, normalizedPath, reason, ts);
     return { allowed: false, reason, normalizedPath };
   }

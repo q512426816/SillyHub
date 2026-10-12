@@ -36,9 +36,14 @@ export const UNC_REJECTED = '@@UNC_REJECTED@@';
  *   4. `pathResolve` 折叠 `..` 段。
  *
  * @param raw 路径字符串（含可能的前导引号、git bash 斜杠等）
+ * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
+ *   undefined/空 = process.cwd()（现行为，全部既有调用点零变化）；
+ *   write-guard 裁决路径传会话工作区根，使会话内相对写锚定会话根而非
+ *   daemon 进程 cwd（生产实证：daemon 启动目录 /mnt/c/Users/... 与工作区
+ *   /mnt/e/... 拼写分裂 → 相对写全部误拒）。
  * @returns 规范化后的路径
  */
-export function normalizePath(raw: string): string {
+export function normalizePath(raw: string, anchor?: string): string {
   let p = raw;
   // strip 外层引号
   if (
@@ -61,6 +66,13 @@ export function normalizePath(raw: string): string {
   if (p.startsWith(UNC_PREFIX) || p.startsWith(UNC_PREFIX_POSIX)) {
     return p;
   }
+  // F4：相对路径按 anchor 解析（QA 审查 P1 修正：anchor 缺省时必须回落
+  // pathResolve(p) 单参形态——resolve(p, p) 会把相对路径双重拼接成 cwd/p/p，
+  // 与旧行为 cwd/p 不一致；绝对路径两种形态等价，anchor 显式分支仅相对路径
+  // 生效，语义清晰且测试可断言）。
+  if (anchor && anchor.length > 0) {
+    return pathResolve(anchor, p);
+  }
   return pathResolve(p);
 }
 
@@ -75,10 +87,11 @@ export function normalizePath(raw: string): string {
  * - UNC 路径（`\\server\share`）返回 `UNC_REJECTED` 特殊标记。
  *
  * @param p 目标路径（字符串）
+ * @param anchor 相对路径解析基点（F4，透传 normalizePath；undefined=现行为）
  * @returns 解析后的真实路径，或 UNC_REJECTED
  */
-export function resolveRealPath(p: string): string {
-  const normalized = normalizePath(p);
+export function resolveRealPath(p: string, anchor?: string): string {
+  const normalized = normalizePath(p, anchor);
 
   // 拒 UNC（\\server\share 与 //server/share 两种形态）。
   // normalizePath 对 UNC 原样返回（不 resolve），故此处两种前缀都在，
@@ -159,13 +172,20 @@ function normalizeCase(p: string): string {
  *
  * @param target  目标路径（字符串，未规范化亦可，函数内部将规范化）
  * @param allowedRoots 白名单根目录数组（绝对路径）
+ * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
+ *   target 与 roots 双解析均透传（roots 相对形态罕见，但同一基点语义一致；
+ *   undefined=现行为 process.cwd()）。
  * @returns true 当目标路径在任一 allowedRoot 下
  */
-export function isPathUnderAnyRoot(target: string, allowedRoots: string[]): boolean {
+export function isPathUnderAnyRoot(
+  target: string,
+  allowedRoots: string[],
+  anchor?: string,
+): boolean {
   // D-001@v1 / task-02：比较前对 target 与每个 root 调 resolveRealPath（realpath + 盘符小写），
   // 下沉到判定层防 symlink/junction/borrow root 绕过；不在 PolicyCache.set 存（与 task-01 配合）。
   // resolveRealPath 内部已 normalizePath + normalizeCase + UNC 标记 + 不存在 fallback。
-  const resolved = resolveRealPath(target);
+  const resolved = resolveRealPath(target, anchor);
 
   // 若 target 是 UNC（resolveRealPath 返回 UNC_REJECTED）→ 拒（不落在任何 root 下）
   if (resolved === UNC_REJECTED) return false;

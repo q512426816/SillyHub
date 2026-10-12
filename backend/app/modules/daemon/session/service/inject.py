@@ -27,6 +27,7 @@ from app.modules.agent.model import (
     AgentSession,
 )
 from app.modules.daemon.schema import PageContextCreateBlock
+from app.modules.llm_provider.service import LlmProviderService as _PSvc
 from app.modules.ppm.common.session_binding import PpmItemKind
 
 from .attachments import _finalize_inject_turn_writes
@@ -680,6 +681,46 @@ async def _inject_into_session(
                 "machine_name": machine_name,
                 "agent_name": agent_name,
             }
+        elif session.llm_provider_id is None:
+            # F5a 绑定前 NULL 窗口回填（2026-10-12-session-defects task-04 / FR-06）：
+            # 未绑定会话由 daemon 按用户默认供应商注入凭证运行
+            # （lease/context.py resolve_default_provider_config，claim 路径），
+            # 但快照回写只在 config_switch 分支 → create 绑定前窗口落 NULL 后
+            # 快照 model/provider_name 永不回填（生产实证 47e2ff1a 导出三键全
+            # NULL）。此处对「非切换轮 + 未绑定 + 快照缺显示键」按用户默认
+            # 供应商（is_default + 引擎命中，D-008 同口径）回填快照——只补展示
+            # 字段（provider_name/model，engine/machine/agent 照既有值兜底），
+            # 不落 session.llm_provider_id 绑定、不触碰 SESSION_SWITCH_CONFIG
+            # 下发行为；用户无默认供应商（真·未配置）保持 NULL 现状零回归。
+            snap = dict(session.config_snapshot or {})
+            if snap.get("provider_name") is None or snap.get("model") is None:
+                from app.modules.llm_provider.model import LlmProvider
+
+                _cand = (
+                    (
+                        await svc._session.execute(
+                            select(LlmProvider).where(
+                                LlmProvider.user_id == session.user_id,
+                                LlmProvider.is_default.is_(True),
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                _default_row = next(
+                    (p for p in _cand if session.provider in (p.agent_kinds or [])), None
+                )
+                if _default_row is not None:
+                    machine_name, agent_name = await svc._resolve_runtime_labels(session.runtime_id)
+                    session.config_snapshot = {
+                        "profile_name": snap.get("profile_name"),
+                        "provider_name": _default_row.name,
+                        "model": snap.get("model") or _PSvc._derive_primary_model(_default_row),
+                        "engine": session.provider,
+                        "machine_name": snap.get("machine_name") or machine_name,
+                        "agent_name": snap.get("agent_name") or agent_name,
+                    }
         svc._session.add(session)
 
         # task-01 / FR-02 / D-005@v1：后续 turn 同样落一条 channel="user_input"

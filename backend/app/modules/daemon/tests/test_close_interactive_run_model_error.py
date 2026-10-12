@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentSession
@@ -370,3 +371,36 @@ async def test_close_success_without_summary_no_failure_summary(
     )
     assert run.status == "completed"
     assert not (run.output_redacted or "").strip()
+
+
+class TestContextOverflowTypeAndLenientCoercion:
+    """F1a（2026-10-12-session-defects task-07 / FR-01）：context_overflow 归因
+    + R-05 宽松校验（未知枚举归 UNKNOWN 而非 422 拒绝卡 running）。"""
+
+    def test_context_overflow_member_accepted(self) -> None:
+        """新枚举值 context_overflow 可解析（daemon 归类回传契约）。"""
+        dto = ModelErrorDTO(
+            type="context_overflow",
+            code=None,
+            message="会话上下文超出模型窗口",
+            retryable=False,
+            hint="平台将自动压缩会话并续跑；若自动恢复失败请手动 /compact 或新建会话",
+        )
+        assert dto.type == ModelErrorType.CONTEXT_OVERFLOW
+
+    def test_unknown_type_coerced_to_unknown_not_422(self) -> None:
+        """部署倒置窗口（新 daemon 先发新枚举）：未知值归 UNKNOWN，不抛
+        ValidationError——close_interactive_run 请求体硬拒会导致 run 无法
+        收口（R-05 主害：卡 running）。"""
+        dto = ModelErrorDTO(
+            type="context_overflow_v9",
+            code=None,
+            message="未知形态错误",
+            retryable=False,
+        )
+        assert dto.type == ModelErrorType.UNKNOWN
+
+    def test_non_string_type_still_rejected(self) -> None:
+        """宽松仅对字符串形态；类型错误照常拒绝（契约不失守）。"""
+        with pytest.raises(ValidationError):
+            ModelErrorDTO(type=123, code=None, message="x", retryable=False)

@@ -631,7 +631,12 @@ async def list_session_tasks(
         .scalars()
         .all()
     )
-    return [AgentSessionTaskRead.model_validate(row) for row in rows]
+    # 2026-10-12-session-defects task-06 / FR-07：读侧去重（与导出同口径，
+    # D-005 兜底）——历史幽灵成对行收敛为每任务名至多一条真实终态行；
+    # running 行透传（同名多在途实例合法），AgentSessionTaskRead 形状不变。
+    from app.modules.daemon.task_snapshot_dedupe import dedupe_task_snapshots
+
+    return [AgentSessionTaskRead.model_validate(row) for row in dedupe_task_snapshots(list(rows))]
 
 
 # ── 2026-09-27-session-fast-replay task-02 / FR-02：run_id 单轮直达 + slim 截断 ──

@@ -326,6 +326,7 @@ export type ModelErrorType =
   | "auth_failed"
   | "quota_exceeded"
   | "rate_limited"
+  | "context_overflow"
   | "timeout"
   | "model_not_found"
   | "network"
@@ -355,6 +356,7 @@ const MODEL_ERROR_TYPES: ReadonlySet<ModelErrorType> = new Set<ModelErrorType>([
   "auth_failed",
   "quota_exceeded",
   "rate_limited",
+  "context_overflow",
   "timeout",
   "model_not_found",
   "network",

@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-12-session-defects",
+  "generatedAt": "2026-10-12T15:40:09.606Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "tasks": 12,
+        "hasTest": 11
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "backendEndpoints": 4962,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-12-session-defects",
+      "metrics": {
+        "checkedFiles": 13,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend daemon 域全量（改动模块）组装测试通过——含幽灵行合并/快照回填/去重/压缩续跑编排/会话状态豁免/时间戳解析全部集成链",
+      "command": "cd backend && uv run pytest app/modules/daemon tests/modules/daemon -q --no-cov",
+      "exitCode": 0,
+      "logPath": "会话内实测（2701 passed = 2548+153，两段）"
+    },
+    {
+      "claim": "daemon 改动子项目全量组装（typecheck+相关面 265 用例）",
+      "command": "cd sillyhub-daemon && pnpm typecheck && pnpm test -- tests/policy tests/interactive/... tests/agent-log/... tests/model-error/... tests/event-wire...",
+      "exitCode": 0,
+      "logPath": "会话内实测（265 passed + task-runner 门面 72 passed）"
+    },
+    {
+      "claim": "frontend agent-log 面组装（错误卡渲染+类型链）",
+      "command": "cd frontend && pnpm typecheck && pnpm test -- src/components/agent-log/__tests__/",
+      "exitCode": 0,
+      "logPath": "会话内实测（157 passed）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "daemon 全量套件 2 个与本变更无关的既有失败：tests/provider-injection-smoke.integ.test.ts（需真实 codex CLI，主仓 main 同败对照实证）、tests/interactive/pi-rpc-driver-turn-result.test.ts（全量并行负载 flaky，单跑 13/13 绿）",
+        "condition": "有真实 codex CLI 的环境跑 integ 冒烟；并行 flaky 单跑复核",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "context_overflow 全自动压缩续跑的端到端真机会话验证（需要真实上下文超窗场景）",
+        "condition": "部署后观察首个真实超窗会话：失败卡显示「上下文超限」→ 自动 /compact → 原文重放成功",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "F2b 批处理道（task-runner）coalescer 接线留 follow-up（D-010@v1：可选参已就位，接线为 task-runner 一行传参，interactive 主受害面由既有 override 协议覆盖）",
+        "condition": "后续小变更：task-runner facade 创建 per-turn MessageCoalescer 并传入 _eventToMessages",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/agent-log/message-coalescer.test.ts",
+      "sillyhub-daemon/tests/model-error/classifier.test.ts",
+      "sillyhub-daemon/tests/task-runner.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

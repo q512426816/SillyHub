@@ -24,6 +24,7 @@ import {
   ArrowRightLeft,
   ChevronDown,
   ChevronRight,
+  FileWarning,
   Gauge,
   Lock,
   PackageSearch,
@@ -88,6 +89,18 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     titleClass: "text-amber-700",
     badgeClass: "border-amber-200 bg-card text-amber-700",
     defaultHint: "请求过于频繁，请稍候片刻再重试。",
+  },
+  // F1a（2026-10-12-session-defects task-07 / FR-01）：上下文超窗专属卡——
+  // 生产实证该形态曾落 unknown 兜底卡（会话 47e2ff1a runs 3-12 无引导堵死
+  // 43 分钟）。靛蓝色族（上下文容量语义），hint 引导自动压缩续跑。
+  context_overflow: {
+    label: "上下文超限",
+    Icon: FileWarning,
+    containerClass: "border-l-indigo-400 bg-indigo-50",
+    titleClass: "text-indigo-700",
+    badgeClass: "border-indigo-200 bg-card text-indigo-700",
+    defaultHint:
+      "会话上下文已满，平台将自动压缩会话并续跑；若自动恢复失败，请手动压缩会话（/compact）或新建会话。",
   },
   timeout: {
     label: "响应超时",

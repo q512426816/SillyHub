@@ -125,8 +125,12 @@ export function wrapWithWriteGuard(
     const overlayRoots = sessionOverlayRoots(mgr, sessionId);
     const roots = overlayRoots ?? providerRoots;
     if (roots.length > 0) {
+      // F4（2026-10-12-session-defects task-10）：相对路径锚定会话工作区根。
+      const sessionCwd = mgr._store.get(sessionId)?.cwd;
       const writePaths = extractWritePathsForTool(mgr, toolName, toolInput);
-      const outside = writePaths.find((p) => !isPathUnderAnyRoot(p, roots));
+      const outside = writePaths.find(
+        (p) => !isPathUnderAnyRoot(p, roots, sessionCwd),
+      );
       if (outside !== undefined) {
         return {
           behavior: 'deny',
@@ -191,6 +195,12 @@ export function judgeWriteViaPolicyEngine(
 ): string | null {
   const engine = mgr._policyEngine;
 
+  // F4（2026-10-12-session-defects task-10 / D-007）：会话工作区根作为相对
+  // 路径解析基点——四条裁决分支（borrow/overlay/policyEngine 主路径及 fallback
+  // 见 wrapWithWriteGuard）统一透传，使会话内相对写锚定会话根而非 daemon
+  // 进程 cwd（生产实证：daemon 启动目录拼写与工作区分裂 → 相对写全拒）。
+  const sessionCwd = mgr._store.get(sessionId)?.cwd;
+
   // 提取写目标路径。
   const writePaths = extractWritePathsForTool(mgr, toolName, toolInput);
   if (writePaths.length === 0) return null; // 非写工具 / 提取不到 → 放行
@@ -203,7 +213,7 @@ export function judgeWriteViaPolicyEngine(
   const borrowRoot = mgr._borrowSandboxRoots.get(sessionId);
   if (borrowRoot) {
     for (const p of writePaths) {
-      const np = resolveRealPath(p);
+      const np = resolveRealPath(p, sessionCwd);
       if (np === UNC_REJECTED) {
         return (
           `借用任务沙箱隔离拒绝写入。\n` +
@@ -212,7 +222,7 @@ export function judgeWriteViaPolicyEngine(
           `原因：UNC 路径（\\\\server\\share）不允许写入。`
         );
       }
-      if (!isPathUnderAnyRoot(np, [borrowRoot])) {
+      if (!isPathUnderAnyRoot(np, [borrowRoot], sessionCwd)) {
         return (
           `借用任务沙箱隔离拒绝写入。\n` +
           `Agent：${provider}\n` +
@@ -235,7 +245,7 @@ export function judgeWriteViaPolicyEngine(
   const overlayRoots = sessionOverlayRoots(mgr, sessionId);
   if (overlayRoots !== null) {
     const outsideOverlay = writePaths.find(
-      (p) => !isPathUnderAnyRoot(p, overlayRoots),
+      (p) => !isPathUnderAnyRoot(p, overlayRoots, sessionCwd),
     );
     if (outsideOverlay !== undefined) {
       return `path outside allowed_roots: ${outsideOverlay}`;
@@ -247,7 +257,7 @@ export function judgeWriteViaPolicyEngine(
   const runtimeId = mgr._runtimeIdProvider?.(provider) ?? '';
   const tool = toolName; // PolicyEngine audit 字段（Write/Edit/Bash/...）。
   for (const p of writePaths) {
-    const decision = engine.canWrite(runtimeId, p, provider, tool);
+    const decision = engine.canWrite(runtimeId, p, provider, tool, sessionCwd);
     if (!decision.allowed) {
       // 取首个 deny 的 reason（PolicyEngine 已组装中文文案）。
       return decision.reason;

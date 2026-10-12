@@ -168,3 +168,62 @@ def test_idempotent_ended_even_for_multi_turn() -> None:
     run = _make_run(status="completed", spec_strategy="interactive", change_id=None)
     session = _make_session(status="ended")
     assert _apply_session_terminal_status(run, session) is None
+
+
+# ---- D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免 -------
+
+
+class TestRecoverableFailureKeepsSessionActive:
+    """生产实证（会话 47e2ff1a）：轮级变更归因（change_id≠NULL）的聊天轮遇
+    429 失败（run 30）→ is_multi_turn 判定失效 → 整个会话被终态化 failed，
+    用户无法续发。修复后：interactive 会话遭遇可自动恢复的模型层失败
+    （quota_exceeded / context_overflow）时保持 active——自动恢复编排
+    （auto_resume）与用户手动续发都需要 active 门；非可恢复失败语义不变。"""
+
+    def test_interactive_change_quota_failure_keeps_active(self) -> None:
+        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
+        run.error_detail = {
+            "type": "quota_exceeded",
+            "code": "1308",
+            "message": "额度或配额已耗尽",
+            "retryable": False,
+            "reset_at": "2026-10-12T18:13:52+08:00",
+        }
+        session = _make_session(status="active")
+        assert _apply_session_terminal_status(run, session) == "active"
+
+    def test_interactive_change_context_overflow_keeps_active(self) -> None:
+        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
+        run.error_detail = {
+            "type": "context_overflow",
+            "code": None,
+            "message": "会话上下文超出模型窗口",
+            "retryable": False,
+        }
+        session = _make_session(status="active")
+        assert _apply_session_terminal_status(run, session) == "active"
+
+    def test_interactive_change_non_recoverable_failure_still_failed(self) -> None:
+        """非可恢复失败（无 error_detail / 其他 type）维持既有 failed 语义
+        （既有 test_interactive_with_change_failed_returns_failed 零回归）。"""
+        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
+        run.error_detail = {
+            "type": "auth_failed",
+            "code": "401",
+            "message": "凭证失效",
+            "retryable": False,
+        }
+        session = _make_session(status="active")
+        assert _apply_session_terminal_status(run, session) == "failed"
+
+    def test_non_interactive_quota_failure_still_failed(self) -> None:
+        """非会话型轮（stage/scan 等单轮任务）不受豁免——照旧按 run 收口。"""
+        run = _make_run(status="failed", spec_strategy="quick_chat", change_id=None)
+        run.error_detail = {
+            "type": "quota_exceeded",
+            "code": None,
+            "message": "x",
+            "retryable": False,
+        }
+        session = _make_session(status="active")
+        assert _apply_session_terminal_status(run, session) == "failed"

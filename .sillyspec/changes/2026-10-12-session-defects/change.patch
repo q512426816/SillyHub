@@ -1,0 +1,3156 @@
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index f231ff5e1..1f4533ec8 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -201,30 +201,106 @@ def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:
+     return {key: value for key, value in candidates.items() if value is not None}
+ 
+ 
+-async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) -> AgentSessionTask:
+-    """Upsert one ``agent_session_task`` row from an ``agent_task_status`` event.
++async def _resolve_row_with_ghost_reconciliation(
++    session: AsyncSession, event: AgentTaskStatusEvent
++) -> AgentSessionTask | None:
++    """定位 upsert 目标行（含幽灵冒名行重映射/吸收，task-03 / D-009@v1）。
+ 
+-    定位键 (session_id, task_id)（表唯一约束 uq_agent_session_task_session_task），
+-    查行 insert-or-update 并 commit，返回写入后的行（终态吸收跳过时返回原行，
+-    不产生写、不 commit）。并发同键双插由唯一约束兜底——后写者撞约束抛错进
+-    调用方旁路 except，下一次事件即恢复单行，无需在此重试。
++    事件携带 tool_use_id 且异于 task_id（SDK 真帧关联键形态）时，先查同会话
++    task_id==tool_use_id 的冒名行（tool_use 派生 running 以 call id 冒名，见
++    upsert docstring 根因段）：
++
++    - 冒名行存在 + 真实行不存在 → 冒名行 task_id/task_name 重映射转正后作为
++      目标行（保 started_at 首见时点，后续字段照常 latest-wins）；
++    - 冒名行存在 + 真实行已并存（存量成对行）→ 吸收删除冒名行，目标行=真实行
++      （同实例无独有信息，删除满足「一逻辑任务一行」不变量）；
++    - 冒名行 task_name 与事件名不同 → 不合并（防误并异实例，读侧去重兜底）。
++
++    均带 FOR UPDATE 行锁（对齐既有 P3-1 口径）；未命中冒名行或事件无关联键时
++    退化为按 (session_id, task_id) 的原定位。
+     """
+-    now = datetime.now(UTC)
+-    # 评审 P3-1 修复（2026-10-10-run-close-task-sweep）：FOR UPDATE 行锁读——
+-    # 与 close 清扫（持 run 行锁后 UPDATE 本表）的跨 commit 并发交错中，无锁
+-    # SELECT 快照可能读过期 running（close 已 commit stopped），随后 UPDATE 把
+-    # stopped 覆写回 running（丢失更新 + 残留 finished_at）。行锁串行化后读到
+-    # 的必是已提交终值，语义②「迟到 running 不复活」对在途事件同样成立。
+-    row = (
++    tool_use_id = event.tool_use_id
++    if not tool_use_id or tool_use_id == event.task_id:
++        return await _select_row_for_update(session, event.session_id, event.task_id)
++
++    ghost = await _select_row_for_update(session, event.session_id, tool_use_id)
++    if ghost is None:
++        return await _select_row_for_update(session, event.session_id, event.task_id)
++    if (ghost.task_name or "") != (event.task_name or ""):
++        _log.warning(
++            "agent_task_ghost_merge_skipped_name_mismatch",
++            session_id=str(event.session_id),
++            ghost_task_id=tool_use_id,
++            event_task_id=event.task_id,
++        )
++        return await _select_row_for_update(session, event.session_id, event.task_id)
++
++    real = await _select_row_for_update(session, event.session_id, event.task_id)
++    if real is not None:
++        # 存量成对行：真实行已在，吸收删除冒名行（无独有信息）。
++        await session.delete(ghost)
++        await session.flush()
++        _log.info(
++            "agent_task_ghost_row_absorbed",
++            session_id=str(event.session_id),
++            ghost_task_id=tool_use_id,
++            real_task_id=event.task_id,
++        )
++        return real
++    # 真实行不存在：冒名行重映射转正（唯一约束无冲突——real 已查空）。
++    ghost.task_id = event.task_id
++    ghost.task_name = event.task_name
++    await session.flush()
++    _log.info(
++        "agent_task_ghost_row_remapped",
++        session_id=str(event.session_id),
++        old_task_id=tool_use_id,
++        new_task_id=event.task_id,
++    )
++    return ghost
++
++
++async def _select_row_for_update(
++    session: AsyncSession, session_id: uuid.UUID, task_id: str
++) -> AgentSessionTask | None:
++    """按 (session_id, task_id) 行锁读单行（评审 P3-1 口径：FOR UPDATE 串行化
++    与 close 清扫的并发交错，迟到 running 不复活语义对在途事件同样成立）。"""
++    return (
+         await session.execute(
+             select(AgentSessionTask)
+             .where(
+-                AgentSessionTask.session_id == event.session_id,
+-                AgentSessionTask.task_id == event.task_id,
++                AgentSessionTask.session_id == session_id,
++                AgentSessionTask.task_id == task_id,
+             )
+             .with_for_update()
+         )
+     ).scalar_one_or_none()
++
++
++async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) -> AgentSessionTask:
++    """Upsert one ``agent_session_task`` row from an ``agent_task_status`` event.
++
++    定位键 (session_id, task_id)（表唯一约束 uq_agent_session_task_session_task），
++    查行 insert-or-update 并 commit，返回写入后的行（终态吸收跳过时返回原行，
++    不产生写、不 commit）。并发同键双插由唯一约束兜底——后写者撞约束抛错进
++    调用方旁路 except，下一次事件即恢复单行，无需在此重试。
++
++    2026-10-12-session-defects task-03（FR-04 / D-005 / 执行期裁决 D-009@v1）
++    幽灵成对行根治：tool_use 派生的 running 事件以 tool-use call id 冒充
++    task_id（sillyhub-daemon/src/interactive/claude-events.ts:895
++    ``strOf(toolInput?.['task_id']) || tId``——Agent 工具入参无 task_id 时回落
++    call id），与 SDK 帧的真实 harness task_id 同任务双 id，(session_id, task_id)
++    定位键各落一行；call-id 行永收不到终态、被清扫成 stopped(空摘要)，真实行
++    completed(真摘要)——生产 21 组「同名 stopped+completed」成对行成因。收口：
++    事件携带 tool_use_id 且异于 task_id、同会话存在 task_id==tool_use_id 且
++    task_name 同名的冒名行时——真实行不存在则把冒名行 task_id 重映射转正
++    （保 started_at），真实行已并存则吸收删除冒名行（同实例无独有信息）；
++    名不同不合并（防误并异实例，残留成对行由读侧去重兜底）。无 tool_use_id
++    的合法重试重生成（同名异 task_id，生产「评审后断点续跑收口」×6 实证）
++    照旧各落一行，零影响。
++    """
++    now = datetime.now(UTC)
++    row = await _resolve_row_with_ghost_reconciliation(session, event)
+     overrides = _non_none_overrides(event)
+ 
+     if row is None:
+diff --git a/backend/app/modules/daemon/model_error.py b/backend/app/modules/daemon/model_error.py
+index 63ff8ffb9..5f1be3e1b 100644
+--- a/backend/app/modules/daemon/model_error.py
++++ b/backend/app/modules/daemon/model_error.py
+@@ -9,7 +9,7 @@ from __future__ import annotations
+ 
+ from enum import StrEnum
+ 
+-from pydantic import BaseModel
++from pydantic import BaseModel, field_validator
+ 
+ 
+ class ModelErrorType(StrEnum):
+@@ -18,6 +18,7 @@ class ModelErrorType(StrEnum):
+     AUTH_FAILED = "auth_failed"  # 凭证失效/无效（401/403）
+     QUOTA_EXCEEDED = "quota_exceeded"  # 额度/配额耗尽（429，不可重试）
+     RATE_LIMITED = "rate_limited"  # 瞬时限流（429，可重试）
++    CONTEXT_OVERFLOW = "context_overflow"  # 上下文超窗（F1a，走原生压缩续跑编排）
+     TIMEOUT = "timeout"
+     MODEL_NOT_FOUND = "model_not_found"
+     NETWORK = "network"  # 连接失败/DNS
+@@ -33,6 +34,21 @@ class ModelErrorDTO(BaseModel):
+     """
+ 
+     type: ModelErrorType
++
++    @field_validator("type", mode="before")
++    @classmethod
++    def _coerce_unknown_type(cls, value: object) -> object:
++        """R-05 宽松校验（2026-10-12-session-defects task-07）：未知枚举值归
++        UNKNOWN 而非 422 拒绝——error 挂在 close_interactive_run 请求体，硬拒
++        会导致 run 无法收口（卡 running，比归因退化严重）。部署倒置窗口
++        （新 daemon 先于 backend 发新枚举）据此安全降级为 unknown 归因。"""
++        if isinstance(value, str):
++            try:
++                return ModelErrorType(value)
++            except ValueError:
++                return ModelErrorType.UNKNOWN
++        return value
++
+     code: str | None = None  # 原始错误码（如 "1310" / "429" / null）
+     message: str  # 可读原因（中文）
+     retryable: bool
+diff --git a/backend/app/modules/daemon/router/session_insights.py b/backend/app/modules/daemon/router/session_insights.py
+index d3de33de3..88ed14933 100644
+--- a/backend/app/modules/daemon/router/session_insights.py
++++ b/backend/app/modules/daemon/router/session_insights.py
+@@ -631,7 +631,12 @@ async def list_session_tasks(
+         .scalars()
+         .all()
+     )
+-    return [AgentSessionTaskRead.model_validate(row) for row in rows]
++    # 2026-10-12-session-defects task-06 / FR-07：读侧去重（与导出同口径，
++    # D-005 兜底）——历史幽灵成对行收敛为每任务名至多一条真实终态行；
++    # running 行透传（同名多在途实例合法），AgentSessionTaskRead 形状不变。
++    from app.modules.daemon.task_snapshot_dedupe import dedupe_task_snapshots
++
++    return [AgentSessionTaskRead.model_validate(row) for row in dedupe_task_snapshots(list(rows))]
+ 
+ 
+ # ── 2026-09-27-session-fast-replay task-02 / FR-02：run_id 单轮直达 + slim 截断 ──
+diff --git a/backend/app/modules/daemon/run_sync/service/submit_steps.py b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+index 4827f3a90..e15ad4580 100644
+--- a/backend/app/modules/daemon/run_sync/service/submit_steps.py
++++ b/backend/app/modules/daemon/run_sync/service/submit_steps.py
+@@ -74,6 +74,31 @@ class _SubmitState:
+     agent_run: AgentRun | None = None
+ 
+ 
++# F2a（2026-10-12-session-defects task-01 / FR-02）：wire 事件时间戳钟差容忍带
++# ——daemon 侧时钟漂移超此带视为不可信，回落本地时钟（防污染时间线）。
++_EVENT_TS_MAX_SKEW = timedelta(minutes=5)
++
++
++def _event_timestamp(msg: dict, fallback: datetime) -> datetime:
++    """解析 wire 消息级 timestamp（ISO-8601 事件到达时刻，event-wire 注入）。
++
++    daemon 缺省（旧版零回归）/ 非 str / 解析失败 / naive 无时区 / 与本地钟差
++    超 5 分钟 → 回落 fallback（st.now，旧行为逐字节一致）。
++    """
++    raw = msg.get("timestamp")
++    if not isinstance(raw, str) or not raw:
++        return fallback
++    try:
++        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
++    except ValueError:
++        return fallback
++    if parsed.tzinfo is None:
++        return fallback
++    if abs((datetime.now(UTC) - parsed).total_seconds()) > _EVENT_TS_MAX_SKEW.total_seconds():
++        return fallback
++    return parsed
++
++
+ async def submit_messages(
+     svc,
+     lease_id: uuid.UUID,
+@@ -563,10 +588,16 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
+         # 独立 INSERT 自带 metadata_，与本键互不覆盖，design §8）。
+         agent_event_payload = msg.get("_agent_event") if isinstance(msg, dict) else None
+ 
++        # F2a（task-01 / FR-02）：行级时间戳优先取 wire 事件时刻（旧版 daemon
++        # 无字段 / 非法 / 钟差超带回落后 st.now）——消除整批共享 st.now 单值的
++        # 同毫秒时间戳塌缩（生产 8~31 行同刻度实证）。SSE 推送（下方
++        # published_logs）用同一解析值，实时流与落库时间线一致。
++        row_timestamp = _event_timestamp(msg, st.now)
++
+         log_entry = AgentRunLog(
+             id=log_id,
+             run_id=effective_run_id,
+-            timestamp=st.now,
++            timestamp=row_timestamp,
+             channel=channel,
+             # ql-20260626-001 放宽（原 5000 截断 agent 长答复/总结）
+             content_redacted=content[:50000],
+@@ -602,7 +633,9 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
+                 "log_id": str(log_id),
+                 "channel": channel,
+                 "content": content[:50000],  # ql-20260626-001 同 DB 放宽
+-                "timestamp": st.now.isoformat().replace("+00:00", "Z"),
++                # F2a（task-01 / FR-02）：与落库行同一解析值——实时流与 DB
++                # 时间线一致（上方 override 撤回令箭行不落库，st.now 口径不变）。
++                "timestamp": row_timestamp.isoformat().replace("+00:00", "Z"),
+                 # 2026-06-28-daemon-subagent-transcript task-09 / FR-08：归属三列
+                 # 透传到 SSE 实时流——run channel publish 整个 payload，session
+                 # channel（publish_submitted_messages）也取这三字段。让前端实时
+diff --git a/backend/app/modules/daemon/session/service/auto_resume.py b/backend/app/modules/daemon/session/service/auto_resume.py
+index af71efcd4..bbb39f4a0 100644
+--- a/backend/app/modules/daemon/session/service/auto_resume.py
++++ b/backend/app/modules/daemon/session/service/auto_resume.py
+@@ -113,6 +113,21 @@ QUOTA_NUDGE_PROMPT = (
+ # 比 transient 紧链（2）放宽一档。
+ QUOTA_CHAIN_LIMIT = 3
+ 
++# F1b（2026-10-12-session-defects task-08 / FR-01 / D-003）：上下文超窗自动
++# 压缩续跑——连续 context_overflow 链 ≥2 不再自动压缩（防压缩失败循环烧窗）。
++CONTEXT_OVERFLOW_CHAIN_LIMIT = 2
++
++# 重放提示词场景化模板（Grill 复审注记：不复用 wrap_resume_prompt 的 daemon
++# 重启语境文案；wrap_resume_prompt 机制仅由 origin 链标记位承载）。
++CONTEXT_OVERFLOW_REPLAY_HEADER = (
++    "[系统续跑] 会话上下文已满，平台已自动调用引擎原生压缩（/compact）。\n"
++    "以下为你的原始消息，请继续处理；已完成的步骤不要重复执行：\n"
++)
++_CONTEXT_CHAIN_LIMIT_HINT = (
++    "上下文超限自动压缩续跑已达上限（2 次）；请手动压缩会话（/compact）后重发，或新建会话继续"
++)
++_COMPACT_FAILURE_HINT = "自动压缩会话失败；请手动压缩会话（/compact）后重发原消息，或新建会话继续"
++
+ # 到点缓冲（秒）：reset_at 后再加缓冲防上游时钟偏差/边界复位延迟（design
+ # §5.3「+120s」）；reset_at 已过（时钟偏差/积压条目）→ 尽快派发再兜 30s。
+ QUOTA_DISPATCH_BUFFER_SECONDS = 120
+@@ -474,6 +489,101 @@ async def maybe_auto_recover_failed_turn(svc, agent_run: AgentRun) -> None:
+             )
+             return
+ 
++        # ── 分支 A2：上下文超窗 → agent 原生压缩续跑（F1b / D-003） ──────────
++        # 压缩能力是 agent CLI 原生能力，平台只编排：调既有 compact_session
++        # 双分路（claude 注入原生 /compact；pi/codex 走 session_compact RPC），
++        # 成功后内联直插 AgentSessionScheduledMessage 重放本轮原文（delay=0；
++        # busy 由 queue 队列自然承接）。禁走 maybe_enqueue_auto_resume——其 G3
++        # 门禁仅放行 error_code=daemon_restarted（Grill X2 阻断修正）。
++        if error_type == "context_overflow":
++            from app.modules.agent.provider_caps import get_provider_caps
++
++            # caps.compact=false（引擎不支持原生压缩）→ 自动跳过走既有路径
++            # （不压缩、不报错、不写引导——兼容策略 §3）。
++            if not get_provider_caps(session.provider or "")["compact"]:
++                return
++            # 熔断：连续 context_overflow 链 ≥2 停跑（防压缩失败循环烧窗）。
++            co_chain = await _count_chain_type(svc, agent_run, context_overflow_only=True)
++            if co_chain >= CONTEXT_OVERFLOW_CHAIN_LIMIT:
++                log.info(
++                    "auto_recover_context_chain_limit",
++                    session_id=str(session_id),
++                    run_id=str(agent_run.id),
++                    chain=co_chain,
++                )
++                await _write_chain_limit_hint(svc, agent_run, hint_text=_CONTEXT_CHAIN_LIMIT_HINT)
++                return
++            # 压缩编排（AppError/异常 → 引导写入不吞，Grill X2 gap 修正；
++            # 仅 _write_chain_limit_hint 自身 DB 失败才降级纯日志）。
++            from app.modules.daemon.session.service.compact import compact_session
++
++            # rollback 会 expire run 对象（属性访问触发同步 IO → MissingGreenlet），
++            # 异常路径需要的标量先于 compact 调用捕获。
++            co_run_id = str(agent_run.id)
++            try:
++                resp = await compact_session(svc, session_id, user_id)
++            except Exception as exc:
++                await svc._session.rollback()
++                log.warning(
++                    "auto_recover_compact_failed",
++                    session_id=str(session_id),
++                    run_id=co_run_id,
++                    error=str(exc),
++                )
++                # rollback 过期了 run 对象属性（expire_on_commit 语义），hint 写入
++                # 前经 get 重载（异步安全）；get 返回 None（极端）降级纯日志。
++                fresh_run = await svc._session.get(AgentRun, uuid.UUID(co_run_id))
++                if fresh_run is not None:
++                    await _write_chain_limit_hint(svc, fresh_run, hint_text=_COMPACT_FAILURE_HINT)
++                return
++            if not getattr(resp, "accepted", False):
++                log.warning(
++                    "auto_recover_compact_not_accepted",
++                    session_id=str(session_id),
++                    run_id=str(agent_run.id),
++                )
++                await _write_chain_limit_hint(svc, agent_run, hint_text=_COMPACT_FAILURE_HINT)
++                return
++            # 重放本轮原文（场景化模板头 + 原文；origin 链标记供熔断计数）。
++            original_prompt = (
++                await svc._session.execute(
++                    select(AgentRunLog.content_redacted)
++                    .where(
++                        AgentRunLog.run_id == agent_run.id,
++                        AgentRunLog.channel == "user_input",
++                    )
++                    .order_by(AgentRunLog.timestamp)
++                    .limit(1)
++                )
++            ).scalar_one_or_none()
++            if original_prompt is None or not original_prompt.strip():
++                return
++            now_co = datetime.now(UTC)
++            svc._session.add(
++                AgentSessionScheduledMessage(
++                    agent_session_id=session_id,
++                    sender_user_id=user_id,
++                    prompt=f"{CONTEXT_OVERFLOW_REPLAY_HEADER}{original_prompt.strip()}",
++                    origin=origin,
++                    dispatch_at=now_co,
++                    status="pending",
++                    llm_provider_id=(
++                        str(agent_run.llm_provider_id) if agent_run.llm_provider_id else None
++                    ),
++                    agent_profile_id=(
++                        str(agent_run.agent_profile_id) if agent_run.agent_profile_id else None
++                    ),
++                )
++            )
++            await svc._session.commit()
++            log.info(
++                "auto_recover_context_overflow_scheduled",
++                session_id=str(session_id),
++                run_id=str(agent_run.id),
++                origin=origin,
++            )
++            return
++
+         # ── 分支 B：瞬时四类 / CLI 合成鉴权 raw ────────────────────────────
+         is_transient = error_type in TRANSIENT_ERROR_TYPES
+         is_cli_auth_transient = bool(_CLI_AUTH_TRANSIENT_RE.search(error_raw))
+@@ -662,12 +772,14 @@ async def _count_chain_type(
+     run: AgentRun,
+     *,
+     quota_exceeded_only: bool = False,
++    context_overflow_only: bool = False,
+ ) -> int:
+     """沿 metadata_.auto_resume_of 链回溯计数。
+ 
+     quota_exceeded_only=True：只数连续 error_detail.type == 'quota_exceeded' 的
+-    节点（quota 链上限专用，遇非 quota 节点断链）；False：数全链长（紧链上限
+-    专用，对齐 9-10 G7 语义）。含当前节点。guard 防环。
++    节点（quota 链上限专用，遇非 quota 节点断链）；context_overflow_only=True：
++    只数连续 'context_overflow' 节点（F1b 压缩续跑熔断专用，同构）；False：数
++    全链长（紧链上限专用，对齐 9-10 G7 语义）。含当前节点。guard 防环。
+     """
+     chain = 0
+     cursor: AgentRun | None = run
+@@ -675,9 +787,10 @@ async def _count_chain_type(
+     while cursor is not None and guard < 10:
+         guard += 1
+         detail = cursor.metadata_ if isinstance(cursor.metadata_, dict) else {}
+-        if quota_exceeded_only:
++        if quota_exceeded_only or context_overflow_only:
++            wanted = "quota_exceeded" if quota_exceeded_only else "context_overflow"
+             d = cursor.error_detail if isinstance(cursor.error_detail, dict) else {}
+-            if str(d.get("type") or "") == "quota_exceeded":
++            if str(d.get("type") or "") == wanted:
+                 chain += 1
+             else:
+                 break
+@@ -693,7 +806,7 @@ async def _count_chain_type(
+     return chain
+ 
+ 
+-async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
++async def _write_chain_limit_hint(svc, agent_run: AgentRun, hint_text: str | None = None) -> None:
+     """链上限停跑补写 error_detail 接续指引（2026-09-12-session-live-display-fixes
+     R5 / D-004；nudge 与重放分支共用）。
+ 
+@@ -705,7 +818,7 @@ async def _write_chain_limit_hint(svc, agent_run: AgentRun) -> None:
+     """
+     try:
+         detail = dict(agent_run.error_detail) if agent_run.error_detail else {}
+-        detail["hint"] = (
++        detail["hint"] = hint_text or (
+             "上游连续中断，自动续跑已达上限（2 次）；请手动发送继续接续，或切换供应商后重发"
+         )
+         detail["auto_resume_stopped"] = True
+diff --git a/backend/app/modules/daemon/session/service/export.py b/backend/app/modules/daemon/session/service/export.py
+index 3e9b3d3bb..747245735 100644
+--- a/backend/app/modules/daemon/session/service/export.py
++++ b/backend/app/modules/daemon/session/service/export.py
+@@ -700,14 +700,23 @@ async def _fetch_export_runs_logs(
+ 
+ 
+ async def _fetch_export_tasks(svc, session_id: uuid.UUID) -> list[AgentSessionTask]:
+-    """任务卡快照（照 GET /sessions/{id}/tasks：updated_at desc 最近 200 条）。"""
++    """任务卡快照（照 GET /sessions/{id}/tasks：updated_at desc 最近 200 条）。
++
++    2026-10-12-session-defects task-06 / FR-07：取数后应用读侧去重
++    （task_snapshot_dedupe.dedupe_task_snapshots）——历史幽灵成对行（写侧
++    task-03 根治前的存量）收敛为每任务名至多一条真实终态行，与任务列表 API
++    同口径（D-005 兜底）。
++    """
++    from app.modules.daemon.task_snapshot_dedupe import dedupe_task_snapshots
++
+     stmt = (
+         select(AgentSessionTask)
+         .where(AgentSessionTask.session_id == session_id)
+         .order_by(AgentSessionTask.updated_at.desc())
+         .limit(_EXPORT_TASKS_MAX_ROWS)
+     )
+-    return list((await svc._session.execute(stmt)).scalars().all())
++    rows = list((await svc._session.execute(stmt)).scalars().all())
++    return dedupe_task_snapshots(rows)
+ 
+ 
+ async def _fetch_export_attachments(
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index c7c477a45..aa24c3caa 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -37,6 +37,26 @@ from app.modules.ppm.common.session_binding import (
+ 
+ from .errors import DaemonSessionInvariantViolation, DaemonSessionNotFound
+ 
++# D-006（2026-10-12-session-defects task-09）：会话级可自动恢复的模型层失败
++# 类型集——恢复编排归 close 钩子 auto_resume（quota 定时续跑 / context_overflow
++# 原生压缩续跑），用户手动续发也依赖 active 门。
++_RECOVERABLE_MODEL_FAILURE_TYPES = frozenset({"quota_exceeded", "context_overflow"})
++
++
++def _is_recoverable_model_failure(run: AgentRun) -> bool:
++    """run 是否为「可自动恢复」的模型层失败（error_detail.type 判定）。
++
++    error_detail 与 error_code 正交（D-009）；JSON 列读回为 dict，容错解析
++    （脏数据/缺键 → False 走既有语义）。
++    """
++    if run.status != "failed":
++        return False
++    detail = run.error_detail
++    if not isinstance(detail, dict):
++        return False
++    return str(detail.get("type") or "") in _RECOVERABLE_MODEL_FAILURE_TYPES
++
++
+ # ql-20260827-015：后台任务通知排队合并。daemon 任务终态唤醒（session-manager
+ # _scheduleTaskWakeup，2026-08-27-background-subagent-progress ql-20260827-007）
+ # 在忙轮期间经 inject 端点（恒 queue_when_busy=True）反复注入「[后台任务通知]」，
+@@ -127,6 +147,19 @@ def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str
+     is_multi_turn = run.spec_strategy == "interactive" and run.change_id is None
+     if is_multi_turn:
+         return "active"  # 多轮对话保持 active，等下一个 AgentRun
++    # D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免。
++    # 生产实证（会话 47e2ff1a run 30）：轮级变更归因（run-level-change-
++    # attribution）让聊天轮携带 change_id → is_multi_turn 判定失效 → 429
++    # 失败轮把整个 interactive 会话终态化 failed，用户被锁死无法续发。
++    # 会话型轮（spec_strategy=interactive）遭遇可自动恢复失败
++    # （quota_exceeded / context_overflow）时保持 active——自动恢复编排
++    # （auto_resume 钩子：quota 定时续跑 / context_overflow 原生压缩续跑）
++    # 与用户手动续发都需要 active 门；自动恢复预算耗尽后用户仍可手动重试，
++    # 会话不再被单次可恢复失败锁死。闸拒绝覆写（close_run_steps
++    # _is_gate_rejected_first_failure）在本函数返回 active 之后仍生效，
++    # 优先级不变（设计组合推演：无死锁格）。
++    if run.spec_strategy == "interactive" and _is_recoverable_model_failure(run):
++        return "active"
+     return "ended" if run.status == "completed" else "failed"
+ 
+ 
+diff --git a/backend/app/modules/daemon/session/service/inject.py b/backend/app/modules/daemon/session/service/inject.py
+index a2455f668..7dd6286c3 100644
+--- a/backend/app/modules/daemon/session/service/inject.py
++++ b/backend/app/modules/daemon/session/service/inject.py
+@@ -27,6 +27,7 @@ from app.modules.agent.model import (
+     AgentSession,
+ )
+ from app.modules.daemon.schema import PageContextCreateBlock
++from app.modules.llm_provider.service import LlmProviderService as _PSvc
+ from app.modules.ppm.common.session_binding import PpmItemKind
+ 
+ from .attachments import _finalize_inject_turn_writes
+@@ -680,6 +681,46 @@ async def _inject_into_session(
+                 "machine_name": machine_name,
+                 "agent_name": agent_name,
+             }
++        elif session.llm_provider_id is None:
++            # F5a 绑定前 NULL 窗口回填（2026-10-12-session-defects task-04 / FR-06）：
++            # 未绑定会话由 daemon 按用户默认供应商注入凭证运行
++            # （lease/context.py resolve_default_provider_config，claim 路径），
++            # 但快照回写只在 config_switch 分支 → create 绑定前窗口落 NULL 后
++            # 快照 model/provider_name 永不回填（生产实证 47e2ff1a 导出三键全
++            # NULL）。此处对「非切换轮 + 未绑定 + 快照缺显示键」按用户默认
++            # 供应商（is_default + 引擎命中，D-008 同口径）回填快照——只补展示
++            # 字段（provider_name/model，engine/machine/agent 照既有值兜底），
++            # 不落 session.llm_provider_id 绑定、不触碰 SESSION_SWITCH_CONFIG
++            # 下发行为；用户无默认供应商（真·未配置）保持 NULL 现状零回归。
++            snap = dict(session.config_snapshot or {})
++            if snap.get("provider_name") is None or snap.get("model") is None:
++                from app.modules.llm_provider.model import LlmProvider
++
++                _cand = (
++                    (
++                        await svc._session.execute(
++                            select(LlmProvider).where(
++                                LlmProvider.user_id == session.user_id,
++                                LlmProvider.is_default.is_(True),
++                            )
++                        )
++                    )
++                    .scalars()
++                    .all()
++                )
++                _default_row = next(
++                    (p for p in _cand if session.provider in (p.agent_kinds or [])), None
++                )
++                if _default_row is not None:
++                    machine_name, agent_name = await svc._resolve_runtime_labels(session.runtime_id)
++                    session.config_snapshot = {
++                        "profile_name": snap.get("profile_name"),
++                        "provider_name": _default_row.name,
++                        "model": snap.get("model") or _PSvc._derive_primary_model(_default_row),
++                        "engine": session.provider,
++                        "machine_name": snap.get("machine_name") or machine_name,
++                        "agent_name": snap.get("agent_name") or agent_name,
++                    }
+         svc._session.add(session)
+ 
+         # task-01 / FR-02 / D-005@v1：后续 turn 同样落一条 channel="user_input"
+diff --git a/backend/app/modules/daemon/task_snapshot_dedupe.py b/backend/app/modules/daemon/task_snapshot_dedupe.py
+new file mode 100644
+index 000000000..5e8f2673d
+--- /dev/null
++++ b/backend/app/modules/daemon/task_snapshot_dedupe.py
+@@ -0,0 +1,70 @@
++"""任务快照读侧去重（2026-10-12-session-defects task-06 / FR-07 / D-005 兜底）。
++
++历史幽灵成对行（写侧根治 2026-10-12-session-defects task-03 落地前的存量数据：
++同名 stopped(空摘要)+completed(真摘要) 双行，生产会话 47e2ff1a 实证 21 组）在
++读侧统一收敛——导出（session/service/export.py:702 _fetch_export_tasks）与
++任务列表 API（router/session_insights.py:602 GET /sessions/{id}/tasks）共用本
++判定，保证「每任务名至多一行真实终态行」的展示不变量。
++
++去重口径（纯函数，不碰 DB、不改行）：
++- 按 (session_id, task_name) 分组；
++- 组内**真实终态行**（completed/failed/stopped）只保留一条：终态优先序
++  completed > failed > stopped，同优先序取 updated_at 最新——清扫 stopped 残影
++  （RUN_CLOSE_SWEEP_REASON 行）与迟到异种终态旧行被收敛；
++- 组内 running 行**全部透传**：同名多 running 是合法的重试重生成在途实例
++  （生产「评审后断点续跑收口」×6 同名异实例实证，D-009@v1），不误杀；
++- 无重复的输入零变化（行集与相对顺序原样）。
++
++与写侧的分界：本模块只做读侧展示收敛，不改 agent_task_store.py（写侧不变量
++归 task-03，Wave 内文件正交）；去重按终态状态判定，不依赖
++RUN_CLOSE_SWEEP_REASON 文案匹配（文案仅兼作复活标记，语义耦合禁入）。
++"""
++
++from __future__ import annotations
++
++from collections.abc import Sequence
++from typing import Final
++
++from app.modules.daemon.model import AgentSessionTask
++
++# 真实终态优先序（数值大者优先）：completed > failed > stopped。
++_TERMINAL_PRIORITY: Final[dict[str, int]] = {"completed": 3, "failed": 2, "stopped": 1}
++
++
++def dedupe_task_snapshots(rows: Sequence[AgentSessionTask]) -> list[AgentSessionTask]:
++    """同 (session_id, task_name) 分组收敛真实终态行至多一条，其余透传。
++
++    输出保持输入相对顺序（调用方 updated_at desc 排序语义不变）。
++    """
++    best_terminal: dict[tuple[object, str], AgentSessionTask] = {}
++    for row in rows:
++        priority = _TERMINAL_PRIORITY.get(row.status)
++        if priority is None:
++            continue  # running 行透传，不参与终态收敛
++        key = (row.session_id, row.task_name or "")
++        incumbent = best_terminal.get(key)
++        if incumbent is None:
++            best_terminal[key] = row
++            continue
++        incumbent_priority = _TERMINAL_PRIORITY.get(incumbent.status, 0)
++        row_updated = row.updated_at
++        incumbent_updated = incumbent.updated_at
++        if priority > incumbent_priority or (
++            priority == incumbent_priority
++            and row_updated is not None
++            and incumbent_updated is not None
++            and row_updated > incumbent_updated
++        ):
++            best_terminal[key] = row
++
++    dropped: set[object] = set()
++    for row in rows:
++        priority = _TERMINAL_PRIORITY.get(row.status)
++        if priority is None:
++            continue
++        key = (row.session_id, row.task_name or "")
++        if best_terminal.get(key) is not row:
++            dropped.add(row.id)
++    if not dropped:
++        return list(rows)
++    return [row for row in rows if row.id not in dropped]
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index 82fde3a21..af7b7386a 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -34,10 +34,11 @@ from unittest.mock import patch
+ 
+ import pytest
+ from httpx import AsyncClient
+-from sqlalchemy import delete, func, select, text
++from sqlalchemy import delete, func, select, text, update
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.agent.model import AgentSession
++from app.modules.daemon.agent_task_store import RUN_CLOSE_SWEEP_REASON, upsert_agent_task
+ from app.modules.daemon.model import AgentSessionTask
+ from app.modules.daemon.schema import AgentTaskStatusEvent
+ 
+@@ -1274,3 +1275,147 @@ class TestRunCloseTaskSweep:
+         monkeypatch.setattr("app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks", _boom)
+ 
+         await agent_service._startup_orphan_task_sweep()  # 不抛即过
++
++
++# ── 6. 幽灵成对行根治组（2026-10-12-session-defects task-03 / FR-04 / D-005） ──
++
++
++class TestGhostPairToolUseIdReconciliation:
++    """生产幽灵成对行复现与根治（会话 47e2ff1a 实证 21 组同名
++    stopped(空摘要)+completed(真摘要) 成对行）。
++
++    根因：tool_use 派生的 running 事件以 tool-use call id 冒充 task_id
++    （claude-events.ts `strOf(toolInput?.['task_id']) || tId`——Agent 工具
++    入参无 task_id，回落 call id），而 SDK 帧携带真实 harness task_id。
++    同一任务两个 id 在 (session_id, task_id) 定位键下各落一行：call-id 行
++    永收不到终态事件、被 sweep_confirmed_dead_tasks 清扫成 stopped(空摘要)，
++    harness 行正常 completed(真摘要)——成对行成形。
++
++    修复口径（D-005 不变量「一逻辑任务至多一行真实终态」）：事件携带
++    tool_use_id 且异于 task_id 时，把同会话内 task_id==tool_use_id 的冒名行
++    重映射到真实 task_id（无真实行）或吸收删除（真实行已并存）。
++    """
++
++    @pytest.mark.asyncio
++    async def test_call_id_row_remapped_not_duplicated(self, db_session: AsyncSession) -> None:
++        """复现主路径：冒名行先落（tool_use 派生），真帧后到（带 tool_use_id）
++        → 重映射而非新插，全程单行。修复前此断言失败（两行成对）。"""
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        # ① tool_use 派生 running（call id 冒充 task_id）
++        await upsert_agent_task(
++            db_session, _event(sid, rid, "callu_01ABC", task_name="独立评审 VO 改名修复")
++        )
++        # ② SDK task_started 真帧（harness id + tool_use_id 关联键）
++        await upsert_agent_task(
++            db_session,
++            _event(
++                sid,
++                rid,
++                "adc8e182d947f76bc",
++                task_name="独立评审 VO 改名修复",
++                tool_use_id="callu_01ABC",
++            ),
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 1, f"幽灵成对行复现：期望 1 行，实际 {len(rows)} 行"
++        assert rows[0].task_id == "adc8e182d947f76bc"
++        assert rows[0].status == "running"
++        # ③ 真帧 completed → 单行收终态
++        await upsert_agent_task(
++            db_session,
++            _event(
++                sid,
++                rid,
++                "adc8e182d947f76bc",
++                task_name="独立评审 VO 改名修复",
++                status="completed",
++                summary="评审完成，review.json 已写入",
++                tool_use_id="callu_01ABC",
++            ),
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].status == "completed"
++        assert rows[0].summary == "评审完成，review.json 已写入"
++
++    @pytest.mark.asyncio
++    async def test_pre_existing_pair_absorbed_on_later_event(
++        self, db_session: AsyncSession
++    ) -> None:
++        """存量成对行补救：冒名行已被清扫 stopped(清扫标记)、真实行已
++        completed——迟到的带 tool_use_id 事件到达时吸收冒名行，恢复单行。"""
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        await upsert_agent_task(
++            db_session, _event(sid, rid, "callu_02DEF", task_name="task-02 设计文档 v0.3")
++        )
++        await upsert_agent_task(
++            db_session,
++            _event(sid, rid, "abdfdbcd944eee7f4", task_name="task-02 设计文档 v0.3"),
++        )
++        # 模拟历史态：call-id 行被清扫 stopped（写 RUN_CLOSE_SWEEP_REASON 标记），
++        # 真实行 completed。
++        await db_session.execute(
++            update(AgentSessionTask)
++            .where(AgentSessionTask.task_id == "callu_02DEF")
++            .values(status="stopped", message=RUN_CLOSE_SWEEP_REASON)
++        )
++        await upsert_agent_task(
++            db_session,
++            _event(
++                sid,
++                rid,
++                "abdfdbcd944eee7f4",
++                task_name="task-02 设计文档 v0.3",
++                status="completed",
++                summary="task-02 完成",
++            ),
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 2  # 吸收前的存量成对行（历史数据）
++        # 迟到事件（带 tool_use_id 关联键）触发吸收 → 恢复单行
++        await upsert_agent_task(
++            db_session,
++            _event(
++                sid,
++                rid,
++                "abdfdbcd944eee7f4",
++                task_name="task-02 设计文档 v0.3",
++                status="completed",
++                summary="task-02 完成",
++                tool_use_id="callu_02DEF",
++            ),
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 1, f"存量成对行未吸收：仍 {len(rows)} 行"
++        assert rows[0].task_id == "abdfdbcd944eee7f4"
++        assert rows[0].status == "completed"
++
++    @pytest.mark.asyncio
++    async def test_tool_use_id_self_match_no_remap(self, db_session: AsyncSession) -> None:
++        """task_id == tool_use_id（正常关联）不触发重映射，行为与现状一致。"""
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        await upsert_agent_task(
++            db_session,
++            _event(sid, rid, "harness_x", task_name="任务甲", tool_use_id="harness_x"),
++        )
++        await upsert_agent_task(
++            db_session,
++            _event(sid, rid, "harness_x", task_name="任务甲", tool_use_id="harness_x"),
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 1
++        assert rows[0].task_id == "harness_x"
++
++    @pytest.mark.asyncio
++    async def test_no_tool_use_id_insert_path_unchanged(self, db_session: AsyncSession) -> None:
++        """无 tool_use_id 的异 task_id 事件（合法重试重生成，如「评审后断点续跑
++        收口」×6 生产实证）照旧各落一行——合并仅限 tool_use_id 关联键证据。"""
++        sid, rid = uuid.uuid4(), uuid.uuid4()
++        await upsert_agent_task(
++            db_session, _event(sid, rid, "id_a", task_name="评审后断点续跑收口")
++        )
++        await upsert_agent_task(
++            db_session, _event(sid, rid, "id_b", task_name="评审后断点续跑收口")
++        )
++        rows = await _task_rows(db_session, sid)
++        assert len(rows) == 2  # 合法重试：不同实例各一行
+diff --git a/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py b/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
+index e19c9d4bf..a7e109ac2 100644
+--- a/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
++++ b/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
+@@ -168,3 +168,62 @@ def test_idempotent_ended_even_for_multi_turn() -> None:
+     run = _make_run(status="completed", spec_strategy="interactive", change_id=None)
+     session = _make_session(status="ended")
+     assert _apply_session_terminal_status(run, session) is None
++
++
++# ---- D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免 -------
++
++
++class TestRecoverableFailureKeepsSessionActive:
++    """生产实证（会话 47e2ff1a）：轮级变更归因（change_id≠NULL）的聊天轮遇
++    429 失败（run 30）→ is_multi_turn 判定失效 → 整个会话被终态化 failed，
++    用户无法续发。修复后：interactive 会话遭遇可自动恢复的模型层失败
++    （quota_exceeded / context_overflow）时保持 active——自动恢复编排
++    （auto_resume）与用户手动续发都需要 active 门；非可恢复失败语义不变。"""
++
++    def test_interactive_change_quota_failure_keeps_active(self) -> None:
++        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
++        run.error_detail = {
++            "type": "quota_exceeded",
++            "code": "1308",
++            "message": "额度或配额已耗尽",
++            "retryable": False,
++            "reset_at": "2026-10-12T18:13:52+08:00",
++        }
++        session = _make_session(status="active")
++        assert _apply_session_terminal_status(run, session) == "active"
++
++    def test_interactive_change_context_overflow_keeps_active(self) -> None:
++        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
++        run.error_detail = {
++            "type": "context_overflow",
++            "code": None,
++            "message": "会话上下文超出模型窗口",
++            "retryable": False,
++        }
++        session = _make_session(status="active")
++        assert _apply_session_terminal_status(run, session) == "active"
++
++    def test_interactive_change_non_recoverable_failure_still_failed(self) -> None:
++        """非可恢复失败（无 error_detail / 其他 type）维持既有 failed 语义
++        （既有 test_interactive_with_change_failed_returns_failed 零回归）。"""
++        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
++        run.error_detail = {
++            "type": "auth_failed",
++            "code": "401",
++            "message": "凭证失效",
++            "retryable": False,
++        }
++        session = _make_session(status="active")
++        assert _apply_session_terminal_status(run, session) == "failed"
++
++    def test_non_interactive_quota_failure_still_failed(self) -> None:
++        """非会话型轮（stage/scan 等单轮任务）不受豁免——照旧按 run 收口。"""
++        run = _make_run(status="failed", spec_strategy="quick_chat", change_id=None)
++        run.error_detail = {
++            "type": "quota_exceeded",
++            "code": None,
++            "message": "x",
++            "retryable": False,
++        }
++        session = _make_session(status="active")
++        assert _apply_session_terminal_status(run, session) == "failed"
+diff --git a/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+index 169aa83e3..cdd9e650c 100644
+--- a/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
++++ b/backend/app/modules/daemon/tests/test_auto_recover_failed_turn.py
+@@ -34,6 +34,9 @@ from app.modules.daemon.model import DaemonRuntime
+ from app.modules.daemon.model_error import ModelErrorDTO, ModelErrorType
+ from app.modules.daemon.service import DaemonService
+ from app.modules.daemon.session.service.auto_resume import (
++    _COMPACT_FAILURE_HINT,
++    _CONTEXT_CHAIN_LIMIT_HINT,
++    CONTEXT_OVERFLOW_REPLAY_HEADER,
+     QUOTA_CHAIN_LIMIT,
+     QUOTA_DISPATCH_BUFFER_SECONDS,
+     QUOTA_NUDGE_PROMPT,
+@@ -575,3 +578,127 @@ def test_nudge_prompt_text_lock() -> None:
+     assert QUOTA_CHAIN_LIMIT == 3
+     assert QUOTA_DISPATCH_BUFFER_SECONDS == 120
+     assert {"rate_limited", "timeout", "network", "provider_error"} == TRANSIENT_ERROR_TYPES
++
++
++# ══ F1b（2026-10-12-session-defects task-08 / FR-01 / D-003）：上下文超窗压缩续跑 ══
++
++
++def _context_overflow_error() -> ModelErrorDTO:
++    return ModelErrorDTO(
++        type=ModelErrorType.CONTEXT_OVERFLOW,
++        code=None,
++        message="会话上下文超出模型窗口",
++        retryable=False,
++        hint=None,
++        raw="Prompt is too long",
++    )
++
++
++class TestContextOverflowAutoCompact:
++    """context_overflow → compact_session 编排（D-003：压缩是 agent 原生能力，
++    平台只编排触发与重放；compact_session 本体行为由其自身测试覆盖，此处 mock）。"""
++
++    @pytest.mark.asyncio
++    async def test_first_failure_compacts_and_schedules_replay(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """首次触发：compact_session 被调 + 调度消息入队（场景化模板 + 原文）。"""
++        from types import SimpleNamespace
++
++        lease_id, run_id, token, session_id, _ = await _seed(db_session)
++        with patch(
++            "app.modules.daemon.session.service.compact.compact_session",
++            new=AsyncMock(return_value=SimpleNamespace(accepted=True)),
++        ) as mock_compact:
++            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
++        mock_compact.assert_awaited_once()
++        scheduled = await _scheduled(db_session, session_id)
++        assert len(scheduled) == 1
++        assert scheduled[0].prompt.startswith(CONTEXT_OVERFLOW_REPLAY_HEADER)
++        assert "继续任务" in scheduled[0].prompt  # _seed 默认原文
++        assert scheduled[0].origin == f"auto_resume:{run_id}"
++        assert scheduled[0].status == "pending"
++        # D-006 / task-09：可恢复失败会话保持 active。
++        sess = await db_session.get(AgentSession, session_id)
++        assert sess is not None and sess.status == "active"
++
++    @pytest.mark.asyncio
++    async def test_chain_limit_stops_and_writes_hint(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """连续链 ≥2：不再压缩、不再入队，链上限提示写入（熔断生效）。"""
++        lease_id, run_id, token, session_id, uid = await _seed(db_session)
++        prev1 = await _add_prev_run(
++            db_session,
++            session_id,
++            uid,
++            minutes_before=30,
++            error_detail={"type": "context_overflow"},
++        )
++        prev2 = await _add_prev_run(
++            db_session,
++            session_id,
++            uid,
++            minutes_before=20,
++            metadata_={"auto_resume_of": str(prev1)},
++            error_detail={"type": "context_overflow"},
++        )
++        run = await db_session.get(AgentRun, run_id)
++        run.metadata_ = {"auto_resume_of": str(prev2)}
++        await db_session.commit()
++
++        with patch(
++            "app.modules.daemon.session.service.compact.compact_session",
++            new=AsyncMock(),
++        ) as mock_compact:
++            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
++        mock_compact.assert_not_awaited()
++        assert await _scheduled(db_session, session_id) == []
++        run_row = await db_session.get(AgentRun, run_id)
++        assert run_row is not None
++        assert isinstance(run_row.error_detail, dict)
++        assert run_row.error_detail["hint"] == _CONTEXT_CHAIN_LIMIT_HINT
++        assert run_row.error_detail.get("auto_resume_stopped") is True
++
++    @pytest.mark.asyncio
++    async def test_compact_failure_writes_hint_not_swallowed(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """compact 抛异常（含 AppError 类业务拒绝）：引导仍写入不被吞（Grill X2 gap），
++        run 终态不受影响（钩子静默容错边界收窄）。"""
++        lease_id, run_id, token, session_id, _ = await _seed(db_session)
++        with patch(
++            "app.modules.daemon.session.service.compact.compact_session",
++            new=AsyncMock(side_effect=RuntimeError("rpc down")),
++        ):
++            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
++        assert await _scheduled(db_session, session_id) == []
++        run_row = await db_session.get(AgentRun, run_id)
++        assert run_row is not None
++        assert run_row.status == "failed"  # 终态不受钩子影响
++        assert isinstance(run_row.error_detail, dict)
++        assert run_row.error_detail["hint"] == _COMPACT_FAILURE_HINT
++
++    @pytest.mark.asyncio
++    async def test_caps_compact_false_skips_branch(
++        self, db_session: AsyncSession, mocked_redis
++    ) -> None:
++        """caps.compact=false：自动跳过（不压缩不报错不写引导，兼容策略 §3）。"""
++        lease_id, run_id, token, session_id, _ = await _seed(db_session)
++        with (
++            patch(
++                "app.modules.daemon.session.service.compact.compact_session",
++                new=AsyncMock(),
++            ) as mock_compact,
++            patch(
++                "app.modules.agent.provider_caps.get_provider_caps",
++                return_value={"compact": False},
++            ),
++        ):
++            await _close_failed(db_session, lease_id, run_id, token, _context_overflow_error())
++        mock_compact.assert_not_awaited()
++        assert await _scheduled(db_session, session_id) == []
++        run_row = await db_session.get(AgentRun, run_id)
++        assert run_row is not None
++        assert isinstance(run_row.error_detail, dict)
++        assert "auto_resume_stopped" not in run_row.error_detail
+diff --git a/backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py b/backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py
+index 4ca448987..a25f42546 100644
+--- a/backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py
++++ b/backend/app/modules/daemon/tests/test_close_interactive_run_model_error.py
+@@ -18,6 +18,7 @@ from datetime import UTC, datetime
+ from unittest.mock import AsyncMock, patch
+ 
+ import pytest
++from pydantic import ValidationError
+ from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.agent.model import AgentRun, AgentSession
+@@ -370,3 +371,36 @@ async def test_close_success_without_summary_no_failure_summary(
+     )
+     assert run.status == "completed"
+     assert not (run.output_redacted or "").strip()
++
++
++class TestContextOverflowTypeAndLenientCoercion:
++    """F1a（2026-10-12-session-defects task-07 / FR-01）：context_overflow 归因
++    + R-05 宽松校验（未知枚举归 UNKNOWN 而非 422 拒绝卡 running）。"""
++
++    def test_context_overflow_member_accepted(self) -> None:
++        """新枚举值 context_overflow 可解析（daemon 归类回传契约）。"""
++        dto = ModelErrorDTO(
++            type="context_overflow",
++            code=None,
++            message="会话上下文超出模型窗口",
++            retryable=False,
++            hint="平台将自动压缩会话并续跑；若自动恢复失败请手动 /compact 或新建会话",
++        )
++        assert dto.type == ModelErrorType.CONTEXT_OVERFLOW
++
++    def test_unknown_type_coerced_to_unknown_not_422(self) -> None:
++        """部署倒置窗口（新 daemon 先发新枚举）：未知值归 UNKNOWN，不抛
++        ValidationError——close_interactive_run 请求体硬拒会导致 run 无法
++        收口（R-05 主害：卡 running）。"""
++        dto = ModelErrorDTO(
++            type="context_overflow_v9",
++            code=None,
++            message="未知形态错误",
++            retryable=False,
++        )
++        assert dto.type == ModelErrorType.UNKNOWN
++
++    def test_non_string_type_still_rejected(self) -> None:
++        """宽松仅对字符串形态；类型错误照常拒绝（契约不失守）。"""
++        with pytest.raises(ValidationError):
++            ModelErrorDTO(type=123, code=None, message="x", retryable=False)
+diff --git a/backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py b/backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py
+new file mode 100644
+index 000000000..7ccd8d377
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_run_sync_submit_timestamp.py
+@@ -0,0 +1,210 @@
++"""submit_messages wire 事件时间戳落库单测（2026-10-12-session-defects task-01 / FR-02）。
++
++覆盖 _event_timestamp 解析与 submit_messages 落库/SSE 双路一致性：
++
++1. N≥3 条携带互异 ISO timestamp 的消息 → agent_run_logs 各行 timestamp 与
++   对应消息一致（不再整批共享 st.now 单值——生产会话 47e2ff1a 同毫秒 8~31 行
++   聚集实证的根因修复）；
++2. 无 timestamp 字段（旧版 daemon）→ 行 timestamp=st.now，行为与现状逐字节
++   一致（向后兼容零回归）；
++3. 钟差 >5 分钟的伪造时戳 → 回落 st.now（daemon 时钟漂移防污染）；
++4. SSE published_logs 的 timestamp 与对应落库行一致（实时流与 DB 时间线同源）。
++
++harness 镜像 test_subagent_log_attribution.py 的最小单 run+lease 构造。
++"""
++
++from __future__ import annotations
++
++import secrets
++import uuid
++from datetime import UTC, datetime, timedelta
++
++import pytest
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
++from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
++from app.modules.daemon.service import DaemonService
++
++# submit_messages 的 Redis publish 在 router commit 后执行（publish 意图延迟），
++# 单测沿用 run_sync 系测试的 redis mock 夹具口径（防意外触网）。
++from .test_run_sync_assistant_override import mocked_redis  # noqa: F401
++
++
++async def _seed_one_run(db_session: AsyncSession) -> tuple[uuid.UUID, str, uuid.UUID]:
++    """建 user/runtime/session/run + lease（submit_messages 校验 lease+token）。"""
++    from app.modules.auth.model import User
++
++    uid = uuid.uuid4()
++    db_session.add(
++        User(
++            id=uid,
++            email=f"ts-{uid}@example.com",
++            password_hash="x",
++            display_name="TS",
++            status="active",
++        )
++    )
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=uid,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(rt)
++    session_id = uuid.uuid4()
++    run_id = uuid.uuid4()
++    db_session.add(
++        AgentSession(
++            id=session_id,
++            user_id=uid,
++            provider="claude",
++            status="active",
++            config={},
++            turn_count=0,
++            runtime_id=rt.id,
++            created_at=datetime.now(UTC),
++            last_active_at=datetime.now(UTC),
++        )
++    )
++    db_session.add(
++        AgentRun(
++            id=run_id,
++            agent_type="claude_code",
++            provider="claude",
++            status="running",
++            spec_strategy="interactive",
++            agent_session_id=session_id,
++        )
++    )
++    token = secrets.token_hex(32)
++    lease_id = uuid.uuid4()
++    db_session.add(
++        DaemonTaskLease(
++            id=lease_id,
++            runtime_id=rt.id,
++            agent_run_id=run_id,
++            kind="batch",
++            status="pending",
++            lease_expires_at=None,
++            metadata_={"claim_token": token},
++            created_at=datetime.now(UTC),
++            updated_at=datetime.now(UTC),
++        )
++    )
++    await db_session.commit()
++    return lease_id, token, run_id
++
++
++def _ts_msg(text: str, ts: str | None) -> dict:
++    msg = {"event_type": "text", "content": text, "channel": "stdout"}
++    if ts is not None:
++        msg["timestamp"] = ts
++    return msg
++
++
++async def _fetch_rows(db_session: AsyncSession, run_id: uuid.UUID) -> list[AgentRunLog]:
++    rows = (
++        (
++            await db_session.execute(
++                select(AgentRunLog)
++                .where(AgentRunLog.run_id == run_id)
++                .order_by(AgentRunLog.timestamp.asc())
++            )
++        )
++        .scalars()
++        .all()
++    )
++    return list(rows)
++
++
++class TestSubmitMessageTimestamps:
++    @pytest.mark.asyncio
++    async def test_distinct_wire_timestamps_land_per_row(
++        self,
++        db_session,
++        mocked_redis,  # noqa: F811
++    ) -> None:
++        """N≥3 条互异 timestamp：各落库行 timestamp 与消息一致，不再整批同值。"""
++        lease_id, token, run_id = await _seed_one_run(db_session)
++        svc = DaemonService(db_session)
++        base = datetime.now(UTC) - timedelta(minutes=3)
++        stamps = [
++            (base + timedelta(seconds=i)).isoformat().replace("+00:00", "+00:00") for i in range(3)
++        ]
++        result = await svc.submit_messages(
++            lease_id,
++            token,
++            run_id,
++            [_ts_msg(f"msg-{i}", stamps[i]) for i in range(3)],
++        )
++        assert result == 3
++        rows = await _fetch_rows(db_session, run_id)
++        assert len(rows) == 3
++        row_ts = [r.timestamp.replace(tzinfo=UTC) for r in rows]
++        expect = [datetime.fromisoformat(s) for s in stamps]
++        for got, want in zip(row_ts, expect, strict=True):
++            assert got == want, "行时间戳应等于消息携带的事件时刻"
++        # 互异性：不再整批共享单值（塌缩回归守卫）。
++        assert len({t.isoformat() for t in row_ts}) == 3
++
++    @pytest.mark.asyncio
++    async def test_missing_timestamp_falls_back_to_batch_now(
++        self,
++        db_session,
++        mocked_redis,  # noqa: F811
++    ) -> None:
++        """旧版 daemon（无 timestamp 字段）→ 行 timestamp=st.now，零回归。"""
++        lease_id, token, run_id = await _seed_one_run(db_session)
++        svc = DaemonService(db_session)
++        before = datetime.now(UTC)
++        result = await svc.submit_messages(
++            lease_id, token, run_id, [_ts_msg("legacy-1", None), _ts_msg("legacy-2", None)]
++        )
++        assert result == 2
++        rows = await _fetch_rows(db_session, run_id)
++        assert len(rows) == 2
++        after = datetime.now(UTC)
++        for r in rows:
++            ts = r.timestamp.replace(tzinfo=UTC)
++            assert before - timedelta(seconds=5) <= ts <= after + timedelta(seconds=5)
++
++    @pytest.mark.asyncio
++    async def test_skewed_timestamp_falls_back(
++        self,
++        db_session,
++        mocked_redis,  # noqa: F811
++    ) -> None:
++        """钟差 6 分钟的伪造时戳 → 回落 st.now（5 分钟容忍带外）。"""
++        lease_id, token, run_id = await _seed_one_run(db_session)
++        svc = DaemonService(db_session)
++        skewed = (datetime.now(UTC) - timedelta(minutes=6)).isoformat()
++        before = datetime.now(UTC)
++        result = await svc.submit_messages(lease_id, token, run_id, [_ts_msg("skewed", skewed)])
++        assert result == 1
++        rows = await _fetch_rows(db_session, run_id)
++        ts = rows[0].timestamp.replace(tzinfo=UTC)
++        after = datetime.now(UTC)
++        assert before - timedelta(seconds=5) <= ts <= after + timedelta(seconds=5)
++
++    @pytest.mark.asyncio
++    async def test_sse_payload_timestamp_matches_row(
++        self,
++        db_session,
++        mocked_redis,  # noqa: F811
++    ) -> None:
++        """SSE published_logs timestamp 与对应落库行一致（实时流与 DB 同源）。"""
++        lease_id, token, run_id = await _seed_one_run(db_session)
++        svc = DaemonService(db_session)
++        stamp = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
++        result = await svc.submit_messages(lease_id, token, run_id, [_ts_msg("sse", stamp)])
++        rows = await _fetch_rows(db_session, run_id)
++        assert result == 1 and len(rows) == 1
++        published = result.published_logs
++        assert len(published) == 1
++        want = rows[0].timestamp.replace(tzinfo=UTC)
++        got = datetime.fromisoformat(published[0]["timestamp"].replace("Z", "+00:00"))
++        assert got == want
+diff --git a/backend/app/modules/daemon/tests/test_session_switch_config.py b/backend/app/modules/daemon/tests/test_session_switch_config.py
+index 737691876..51fab21ed 100644
+--- a/backend/app/modules/daemon/tests/test_session_switch_config.py
++++ b/backend/app/modules/daemon/tests/test_session_switch_config.py
+@@ -858,3 +858,119 @@ class TestPlainInjectZeroRegression:
+         }
+         assert payload["prompt"] == "second"
+         assert payload["run_id"] == str(run.id)
++
++
++# ════════════════════════════════════════════════════════════════════════════
++# 8. 绑定前 NULL 窗口回填（2026-10-12-session-defects task-04 / FR-06）
++# ════════════════════════════════════════════════════════════════════════════
++
++
++class TestUnboundSnapshotBackfill:
++    """未绑定会话（daemon 按用户默认供应商注入凭证运行）的快照回填。
++
++    生产实证（会话 47e2ff1a）：绑定前创建（快照 model/provider_name 落 NULL）
++    → 普通轮 inject 不构成 config_switch → 快照永不回填，导出三键全 NULL。
++    回填口径：非切换轮 + 未绑定 + 快照缺显示键 → 按用户默认供应商
++    （is_default + 引擎命中）补 provider_name/model 展示键——不落
++    session.llm_provider_id 绑定、不触发 SESSION_SWITCH_CONFIG。
++    """
++
++    @pytest.mark.asyncio
++    async def test_unbound_session_backfills_snapshot_from_default_provider(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        default_provider = await _seed_provider(db_session, uid, model="glm-5.3", name="GLM默认")
++        default_provider.is_default = True
++        await db_session.commit()
++
++        svc = DaemonService(db_session)
++        created = await svc.create_session(
++            uid, provider=None, prompt="first", runtime_id=str(rt.id)
++        )
++        # 绑定前创建：快照在（pinned runtime 分支）但 provider/model 为 NULL 现状。
++        await db_session.refresh(created.agent_session)
++        snap_before = created.agent_session.config_snapshot
++        assert snap_before is not None
++        assert snap_before["provider_name"] is None
++        assert snap_before["model"] is None
++        assert created.agent_session.llm_provider_id is None
++        await _finish_first_turn(db_session, created)
++        mocked_hub.send_session_control.reset_mock()
++
++        # 普通轮（不带任何切换字段，不构成 config_switch）。
++        result = await svc.inject_session(created.agent_session.id, uid, prompt="plain turn")
++
++        await db_session.refresh(created.agent_session)
++        s = created.agent_session
++        # 不落绑定：会话供应商仍 NULL，消息仍走 SESSION_INJECT（非切换）。
++        assert s.llm_provider_id is None
++        msg_type, payload = (
++            mocked_hub.send_session_control.await_args.args[1],
++            mocked_hub.send_session_control.await_args.args[2],
++        )
++        assert msg_type == DAEMON_MSG_SESSION_INJECT
++        assert payload["prompt"] == "plain turn"
++        # 快照回填：provider_name/model 非空（导出 export.py:466 读同源）。
++        snap_after = s.config_snapshot
++        assert snap_after is not None
++        assert snap_after["provider_name"] == "GLM默认"
++        assert snap_after["model"] == "glm-5.3"
++        assert snap_after["engine"] == s.provider
++        # run 级归属不变（run.llm_provider_id 仍随会话 NULL，切供应商语义不动）。
++        assert result.agent_run.llm_provider_id is None
++
++    @pytest.mark.asyncio
++    async def test_unbound_without_default_provider_keeps_null(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """无默认供应商（真·未配置）→ 快照保持 NULL 现状（零回归）。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        # 非默认供应商存在也不回填（is_default 才是口径）。
++        await _seed_provider(db_session, uid, model="glm-4.7", name="非默认")
++
++        svc = DaemonService(db_session)
++        created = await svc.create_session(
++            uid, provider=None, prompt="first", runtime_id=str(rt.id)
++        )
++        await _finish_first_turn(db_session, created)
++
++        await svc.inject_session(created.agent_session.id, uid, prompt="plain turn")
++
++        await db_session.refresh(created.agent_session)
++        snap = created.agent_session.config_snapshot
++        assert snap is not None
++        assert snap["provider_name"] is None
++        assert snap["model"] is None
++
++    @pytest.mark.asyncio
++    async def test_backfill_idempotent_no_overwrite_on_next_turn(
++        self, db_session, mocked_hub, mocked_redis
++    ) -> None:
++        """回填后下一普通轮不再改写（provider_name 已非空即跳过）。"""
++        uid = await _create_user(db_session)
++        rt = await _create_runtime(db_session, uid)
++        default_provider = await _seed_provider(db_session, uid, model="glm-5.3", name="GLM默认")
++        default_provider.is_default = True
++        await db_session.commit()
++
++        svc = DaemonService(db_session)
++        created = await svc.create_session(
++            uid, provider=None, prompt="first", runtime_id=str(rt.id)
++        )
++        await _finish_first_turn(db_session, created)
++        await svc.inject_session(created.agent_session.id, uid, prompt="turn 2")
++        await db_session.refresh(created.agent_session)
++        snapshot_after_fill = dict(created.agent_session.config_snapshot)
++        # 手动收口第二轮（inject 建的 run）
++        runs = await _session_runs(db_session, created.agent_session.id)
++        runs.sort(key=lambda r: r.created_at)
++        runs[-1].status = "completed"
++        runs[-1].finished_at = datetime.now(UTC)
++        await db_session.commit()
++
++        await svc.inject_session(created.agent_session.id, uid, prompt="turn 3")
++        await db_session.refresh(created.agent_session)
++        assert created.agent_session.config_snapshot == snapshot_after_fill
+diff --git a/backend/app/modules/daemon/tests/test_session_tasks_dedupe.py b/backend/app/modules/daemon/tests/test_session_tasks_dedupe.py
+new file mode 100644
+index 000000000..699b3a78f
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_session_tasks_dedupe.py
+@@ -0,0 +1,189 @@
++"""任务快照读侧去重单测（2026-10-12-session-defects task-06 / FR-07 / D-005 兜底）。
++
++覆盖 task_snapshot_dedupe.dedupe_task_snapshots 纯函数语义 + GET
++/sessions/{id}/tasks 端点接入（与导出 _fetch_export_tasks 同口径）：
++
++1. 幽灵成对行收敛：同名 stopped(空摘要)+completed(真摘要) → 仅保留
++   completed 真实终态行（生产会话 47e2ff1a 实证 21 组形态）；
++2. 终态优先序：completed > failed > stopped，同优先序取 updated_at 最新；
++3. running 透传：同名多在途实例（合法重试重生成）不误杀；completed+running
++   并存两行都保留；
++4. 无重复输入零变化（行集与相对顺序不变）；
++5. 端点接入：含成对行数据源输出恰一行真实终态行；AgentSessionTaskRead
++   形状与 updated_at desc 排序不变。
++
++HTTP harness 镜像 test_agent_session_tasks.py（client + auth_headers +
++db_session conftest 夹具）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.daemon.model import AgentSessionTask
++from app.modules.daemon.task_snapshot_dedupe import dedupe_task_snapshots
++
++# ── Helpers ──────────────────────────────────────────────────────────────────
++
++
++def _row(
++    session_id: uuid.UUID,
++    task_id: str,
++    name: str,
++    *,
++    status: str = "running",
++    summary: str | None = None,
++    minutes_ago: int = 0,
++) -> AgentSessionTask:
++    """构造内存行（不入库，纯函数直测用；updated_at 按 minutes_ago 回退）。"""
++    now = datetime.now(UTC)
++    return AgentSessionTask(
++        session_id=session_id,
++        run_id=uuid.uuid4(),
++        task_id=task_id,
++        task_name=name,
++        status=status,
++        summary=summary,
++        started_at=now - timedelta(minutes=minutes_ago + 1),
++        finished_at=now - timedelta(minutes=minutes_ago) if status != "running" else None,
++        updated_at=now - timedelta(minutes=minutes_ago),
++    )
++
++
++async def _seed_pair(
++    db_session: AsyncSession, session_id: uuid.UUID
++) -> tuple[AgentSessionTask, AgentSessionTask]:
++    """落库生产幽灵成对行（同名 stopped 空摘要 + completed 真摘要）。"""
++    now = datetime.now(UTC)
++    ghost = AgentSessionTask(
++        session_id=session_id,
++        run_id=uuid.uuid4(),
++        task_id="callu_ghost",
++        task_name="独立评审 VO 改名修复",
++        status="stopped",
++        message="轮次已结束，任务未上报终态",
++        started_at=now - timedelta(minutes=30),
++        finished_at=now - timedelta(minutes=10),
++        updated_at=now - timedelta(minutes=10),
++    )
++    real = AgentSessionTask(
++        session_id=session_id,
++        run_id=uuid.uuid4(),
++        task_id="ad1e466fdeadbeef",
++        task_name="独立评审 VO 改名修复",
++        status="completed",
++        summary="评审完成，review.json 已写入",
++        started_at=now - timedelta(minutes=30),
++        finished_at=now - timedelta(minutes=5),
++        updated_at=now - timedelta(minutes=5),
++    )
++    db_session.add_all([ghost, real])
++    await db_session.commit()
++    return ghost, real
++
++
++# ── 1. 纯函数语义组 ──────────────────────────────────────────────────────────
++
++
++class TestDedupeTaskSnapshots:
++    def test_ghost_pair_keeps_completed_drops_stopped(self) -> None:
++        sid = uuid.uuid4()
++        ghost = _row(sid, "callu_ghost", "独立评审", status="stopped", minutes_ago=10)
++        real = _row(
++            sid,
++            "ad1e466f",
++            "独立评审",
++            status="completed",
++            summary="评审完成",
++            minutes_ago=5,
++        )
++        out = dedupe_task_snapshots([ghost, real])
++        assert [r.task_id for r in out] == ["ad1e466f"]
++        assert out[0].summary == "评审完成"
++
++    def test_terminal_priority_completed_beats_newer_stopped(self) -> None:
++        sid = uuid.uuid4()
++        newer_stopped = _row(sid, "t1", "任务甲", status="stopped", minutes_ago=1)
++        older_completed = _row(sid, "t2", "任务甲", status="completed", minutes_ago=9)
++        out = dedupe_task_snapshots([newer_stopped, older_completed])
++        assert [r.task_id for r in out] == ["t2"]
++
++    def test_same_status_latest_updated_at_wins(self) -> None:
++        sid = uuid.uuid4()
++        older = _row(sid, "t1", "任务乙", status="failed", minutes_ago=8)
++        newer = _row(sid, "t2", "任务乙", status="failed", minutes_ago=2)
++        out = dedupe_task_snapshots([older, newer])
++        assert [r.task_id for r in out] == ["t2"]
++
++    def test_running_rows_pass_through_with_terminal_sibling(self) -> None:
++        """completed + 同名 running（合法重试在途实例）两行都保留。"""
++        sid = uuid.uuid4()
++        done = _row(sid, "t1", "评审后断点续跑收口", status="completed", minutes_ago=6)
++        inflight = _row(sid, "t2", "评审后断点续跑收口", status="running", minutes_ago=1)
++        out = dedupe_task_snapshots([done, inflight])
++        assert {r.task_id for r in out} == {"t1", "t2"}
++
++    def test_all_running_group_unchanged(self) -> None:
++        sid = uuid.uuid4()
++        a = _row(sid, "t1", "任务丙", status="running", minutes_ago=3)
++        b = _row(sid, "t2", "任务丙", status="running", minutes_ago=1)
++        out = dedupe_task_snapshots([a, b])
++        assert len(out) == 2
++
++    def test_no_duplicates_zero_change_preserves_order(self) -> None:
++        sid = uuid.uuid4()
++        rows = [
++            _row(sid, "t1", "任务一", status="completed", minutes_ago=5),
++            _row(sid, "t2", "任务二", status="running", minutes_ago=2),
++        ]
++        out = dedupe_task_snapshots(rows)
++        assert out == rows
++
++    def test_input_order_preserved_after_dedupe(self) -> None:
++        sid = uuid.uuid4()
++        ghost = _row(sid, "g", "同名任务", status="stopped", minutes_ago=9)
++        real = _row(sid, "r", "同名任务", status="completed", minutes_ago=1)
++        other = _row(sid, "o", "其他任务", status="completed", minutes_ago=5)
++        # 输入序（updated_at desc 假设）：real(1m) → other(5m) → ghost(9m)
++        out = dedupe_task_snapshots([real, other, ghost])
++        assert [r.task_id for r in out] == ["r", "o"]
++
++
++# ── 2. 端点接入组 ────────────────────────────────────────────────────────────
++
++
++class TestListSessionTasksDedupe:
++    @pytest.mark.asyncio
++    async def test_endpoint_collapses_ghost_pair(
++        self, client, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """含生产成对行的数据源：GET /sessions/{id}/tasks 每任务名恰一行真实终态行。"""
++        from app.modules.agent.model import AgentSession
++
++        # 归属对齐 conftest 的 admin 用户（test_agent_session_tasks._admin_id 同口径）。
++        from .test_agent_session_tasks import _admin_id
++
++        admin = await _admin_id(db_session)
++        sess = AgentSession(
++            id=uuid.uuid4(),
++            user_id=admin,
++            title="dedupe 冒烟",
++            provider="claude",
++            status="ended",
++        )
++        db_session.add(sess)
++        await db_session.commit()
++        await _seed_pair(db_session, sess.id)
++
++        resp = await client.get(f"/api/daemon/sessions/{sess.id}/tasks", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        items = resp.json()
++        names = [i["task_name"] for i in items]
++        assert names.count("独立评审 VO 改名修复") == 1
++        kept = next(i for i in items if i["task_name"] == "独立评审 VO 改名修复")
++        assert kept["status"] == "completed"
++        assert kept["summary"] == "评审完成，review.json 已写入"
+diff --git a/backend/openapi.json b/backend/openapi.json
+index ee5b8e0f6..f29c07a0d 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -1074,7 +1074,7 @@
+           "workspace"
+         ],
+         "summary": "Init Workspace",
+-        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本\nworkspace 成员（即便在其它 workspace 有 workspace:write）403，不触达\n``start_init_dispatch`` 的 actor binding 解析。",
++        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped\nWORKSPACE_READ——init 语义是\"为当前成员初始化本地副本\"，developer 等\n只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id\n62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409\nMemberBindingNotFound），归档区禁写由 ensure_writable 兜底。\n修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；\n其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有\nworkspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。",
+         "operationId": "init_workspace_api_workspaces__workspace_id__init_post",
+         "parameters": [
+           {
+@@ -55235,6 +55235,7 @@
+           "auth_failed",
+           "quota_exceeded",
+           "rate_limited",
++          "context_overflow",
+           "timeout",
+           "model_not_found",
+           "network",
+diff --git a/backend/tests/modules/daemon/test_session_export.py b/backend/tests/modules/daemon/test_session_export.py
+index 139b34838..678e5d1c6 100644
+--- a/backend/tests/modules/daemon/test_session_export.py
++++ b/backend/tests/modules/daemon/test_session_export.py
+@@ -1298,3 +1298,58 @@ class TestRequestValidation422:
+         _, token = await _create_user(db_session, name="vtier", admin=True)
+         resp = await _post_export(client, token, [uuid.uuid4()], tier="both")
+         assert resp.status_code == 422
++
++
++class TestFullExportTaskDedupe:
++    """full 档任务快照读侧去重（2026-10-12-session-defects task-06 / FR-07）。
++
++    历史幽灵成对行（同名 stopped 空摘要 + completed 真摘要，写侧 task-03
++    根治前的存量）在导出渲染收敛为每任务名恰一行真实终态行。
++    """
++
++    @pytest.mark.asyncio
++    async def test_ghost_pair_collapsed_to_single_terminal_row(
++        self, client: AsyncClient, db_session: AsyncSession
++    ) -> None:
++        owner, token = await _create_user(db_session, name="dedupeexport", admin=True)
++        sess = await _seed_session(db_session, user_id=owner.id, title="去重导出", turn_count=1)
++        now = datetime.now(UTC)
++        db_session.add_all(
++            [
++                AgentSessionTask(
++                    session_id=sess.id,
++                    run_id=uuid.uuid4(),
++                    task_id="callu_ghost",
++                    task_name="独立评审 VO 改名修复",
++                    status="stopped",
++                    message="轮次已结束，任务未上报终态",
++                    started_at=now - timedelta(minutes=30),
++                    finished_at=now - timedelta(minutes=10),
++                    updated_at=now - timedelta(minutes=10),
++                ),
++                AgentSessionTask(
++                    session_id=sess.id,
++                    run_id=uuid.uuid4(),
++                    task_id="ad1e466fdeadbeef",
++                    task_name="独立评审 VO 改名修复",
++                    status="completed",
++                    summary="评审完成，review.json 已写入",
++                    started_at=now - timedelta(minutes=30),
++                    finished_at=now - timedelta(minutes=5),
++                    updated_at=now - timedelta(minutes=5),
++                ),
++            ]
++        )
++        await db_session.commit()
++
++        resp = await _post_export(client, token, [sess.id], tier="full")
++        assert resp.status_code == 200, resp.text
++        base_dir = f"去重导出_{str(sess.id)[:8]}"
++        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
++        assert full["tasks"] == [
++            {
++                "task_name": "独立评审 VO 改名修复",
++                "status": "completed",
++                "summary": "评审完成，review.json 已写入",
++            }
++        ]
+diff --git a/docs/sillyspec/cli-cwd-coupling.md b/docs/sillyspec/cli-cwd-coupling.md
+new file mode 100644
+index 000000000..8d4c2382c
+--- /dev/null
++++ b/docs/sillyspec/cli-cwd-coupling.md
+@@ -0,0 +1,39 @@
++# sillyspec CLI cwd 耦合（worktree 内跑把 cwd 当独立 spec root，进度库分裂）
++
++> 记录时间：2026-10-12 · 来源变更：2026-10-12-session-defects（生产实证：平台会话 47e2ff1a）
++> 状态：活跃坑（现有绕过方案可靠，待工具修复）
++
++## 现象
++
++在 SillySpec worktree（或任何主仓根以外的子目录）内执行 sillyspec CLI 命令（如
++`sillyspec task tick` / `task finish` / `progress show`），CLI 把当前工作目录当作
++独立 spec root：找不到变更（「无进行中标记」「spec root 找不到变更」）或在
++worktree 内写出与主仓分裂的进度库 / artifact / QUICKLOG。
++
++生产实证：会话 47e2ff1a（消防设施器材1轮）中出现 8 条「CLI 错误目录」相关日志——
++主代理三次明确「回主工作区重跑」（10-10 06:13、06:31、06:53 前后），每次浪费
++1-2 个交互来回。
++
++## 根因
++
++CLI 的 spec root 定位策略是「取进程 cwd 向上找 `.sillyspec`」：
++- worktree 内 checkout 了完整 `.sillyspec/` 副本 → CLI 命中副本，把它当权威；
++- 子目录（如 `backend/`）内跑 → 向上探测落在错误边界或找不到。
++
++## 影响
++
++- 进度库（sillyspec.db）双写分裂：worktree 副本里的进度主仓读不到；
++- patch 留档 / artifact / QUICKLOG 写丢或写错位置；
++- 任务勾选状态不同步，execute 收口门对不上账。
++
++## 绕过
++
++一律在主仓根目录跑 sillyspec CLI（CLAUDE.md 规则 22）；需要在 worktree/子目录读
++代码时用绝对路径或 `git -C <path>`，绝不 `cd`。注意 bash cwd 在调用间持久——
++复合命令里 `cd` 进 worktree 后，后续命令即使写在同一行也会继承污染后的 cwd。
++
++## 期望修复
++
++CLI 从 `SILLYSPEC_SESSION_ID` / 环境变量 / `.sillyspec/.runtime` 锚点自动定位主仓
++根（类似 endpoints baseline 的「自动把扫描根锚定主仓」行为），对 worktree cwd
++给出警告而非静默分裂。
+diff --git a/docs/sillyspec/deps-gate-offline-fragile.md b/docs/sillyspec/deps-gate-offline-fragile.md
+new file mode 100644
+index 000000000..9471d1e28
+--- /dev/null
++++ b/docs/sillyspec/deps-gate-offline-fragile.md
+@@ -0,0 +1,44 @@
++# 跨仓 worktree deps 门控离线脆弱（npm ci 必败→手工改 meta.json 绕过）
++
++> 记录时间：2026-10-12 · 来源变更：2026-10-12-session-defects（生产实证：平台会话 47e2ff1a）
++> 状态：活跃坑（高风险手工绕过，待工具修复）
++
++## 现象
++
++execute 阶段 deps 门控在跨仓 worktree 准备依赖时：
++1. 对前端仓 worktree 跑 `npm ci`（registry.npmjs.org 不可达的离线/内网环境）必败，
++   `depsStatus=failed` 卡死 execute deps 门；
++2. 主副本 node_modules 已存在时，快路径「链接主仓 node_modules」又因 lockfile 有
++   本地改动（M 状态，hash 与 worktree HEAD 版不一致）判定失效，回退 npm ci 再次失败；
++3. maven 仓被同一套 npm 探测误判（`mvn -o test` 作为 install 探测，离线必败且过重）。
++
++生产实证：会话 47e2ff1a 10-10 05:35-05:41，主代理最终**手工把跨仓 meta.json 的
++depsStatus 改成 `linked`** 才放行——对平台内部状态文件做手术，高风险且无留痕机制。
++
++## 根因
++
++- 探测顺序硬编码「先 npm ci，失败也不回退链接」；链接快路径以 lockfile hash 一致
++  为前提，但「主副本 lockfile 有本地改动」是常见态（安装后 pnpm 修正），hash 永不
++  一致 → 快路径形同虚设；
++- 离线环境无探测出口（没有「npm ping 失败→直接尝试链接」的降级链）；
++- depsStatus 是持久状态且没有 CLI 重供/覆写命令（agent 只能手改 JSON）。
++
++## 影响
++
++- 离线/内网环境 worktree 准备被阻断，execute 无法开始；
++- 手工改 meta.json 绕过属于未定义行为，状态文件 schema 变更即碎；
++- 每次回退全量 ci 在大仓上以分钟计，拖慢每个变更。
++
++## 绕过
++
++手工把跨仓 worktree 的 `meta.json` 中 depsStatus 改为事实值 `linked`
++（前提：主副本 node_modules 确实存在且可用，链接已手工建立）。**必须留痕**：
++在变更 decisions.md 或任务卡注明「deps 门控手工放行」，供 verify/archive 对账。
++
++## 期望修复
++
++1. 探测链改为：`npm ping`/缓存命中判断离线 → 离线时直接尝试链接主仓 node_modules
++   （忽略 lockfile hash 差异，仅警告）；在线时才走 ci；
++2. 提供 CLI 命令显式重供/覆写 depsStatus（如 `sillyspec worktree deps --set linked
++   --reason "..."`），留审计痕，杜绝手改 JSON；
++3. install 探测按生态分派（maven 仓不跑 npm/mvn test，改用轻量存在性检查）。
+diff --git a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+index f951f828d..06600cab4 100644
+--- a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
++++ b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+@@ -108,6 +108,8 @@ describe("task-09: 各 type 渲染对应颜色 / 文案 / 图标", () => {
+     ["auth_failed", "凭证失效", "red"],
+     ["quota_exceeded", "额度耗尽", "orange"],
+     ["rate_limited", "触发限流", "amber"],
++    // F1a（2026-10-12-session-defects task-07）：上下文超窗专属卡。
++    ["context_overflow", "上下文超限", "indigo"],
+     ["timeout", "响应超时", "purple"],
+     ["model_not_found", "模型不存在", "rose"],
+     ["network", "网络异常", "cyan"],
+diff --git a/frontend/src/components/agent-log/normalize.ts b/frontend/src/components/agent-log/normalize.ts
+index e19adcf5b..201234b55 100644
+--- a/frontend/src/components/agent-log/normalize.ts
++++ b/frontend/src/components/agent-log/normalize.ts
+@@ -326,6 +326,7 @@ export type ModelErrorType =
+   | "auth_failed"
+   | "quota_exceeded"
+   | "rate_limited"
++  | "context_overflow"
+   | "timeout"
+   | "model_not_found"
+   | "network"
+@@ -355,6 +356,7 @@ const MODEL_ERROR_TYPES: ReadonlySet<ModelErrorType> = new Set<ModelErrorType>([
+   "auth_failed",
+   "quota_exceeded",
+   "rate_limited",
++  "context_overflow",
+   "timeout",
+   "model_not_found",
+   "network",
+diff --git a/frontend/src/components/agent-log/run-error-item.tsx b/frontend/src/components/agent-log/run-error-item.tsx
+index 7af1d408a..f7f5d604c 100644
+--- a/frontend/src/components/agent-log/run-error-item.tsx
++++ b/frontend/src/components/agent-log/run-error-item.tsx
+@@ -24,6 +24,7 @@ import {
+   ArrowRightLeft,
+   ChevronDown,
+   ChevronRight,
++  FileWarning,
+   Gauge,
+   Lock,
+   PackageSearch,
+@@ -89,6 +90,18 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
+     badgeClass: "border-amber-200 bg-card text-amber-700",
+     defaultHint: "请求过于频繁，请稍候片刻再重试。",
+   },
++  // F1a（2026-10-12-session-defects task-07 / FR-01）：上下文超窗专属卡——
++  // 生产实证该形态曾落 unknown 兜底卡（会话 47e2ff1a runs 3-12 无引导堵死
++  // 43 分钟）。靛蓝色族（上下文容量语义），hint 引导自动压缩续跑。
++  context_overflow: {
++    label: "上下文超限",
++    Icon: FileWarning,
++    containerClass: "border-l-indigo-400 bg-indigo-50",
++    titleClass: "text-indigo-700",
++    badgeClass: "border-indigo-200 bg-card text-indigo-700",
++    defaultHint:
++      "会话上下文已满，平台将自动压缩会话并续跑；若自动恢复失败，请手动压缩会话（/compact）或新建会话。",
++  },
+   timeout: {
+     label: "响应超时",
+     Icon: Timer,
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index d5105b268..f3301f35f 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -563,9 +563,14 @@ export interface paths {
+          *
+          *     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+          *
+-         *     鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
+-         *     workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
+-         *     ``start_init_dispatch`` 的 actor binding 解析。
++         *     鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped
++         *     WORKSPACE_READ——init 语义是"为当前成员初始化本地副本"，developer 等
++         *     只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id
++         *     62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409
++         *     MemberBindingNotFound），归档区禁写由 ensure_writable 兜底。
++         *     修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；
++         *     其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有
++         *     workspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。
+          */
+         post: operations["init_workspace_api_workspaces__workspace_id__init_post"];
+         delete?: never;
+@@ -20348,7 +20353,7 @@ export interface components {
+          * @description 模型错误类型（与 daemon ModelErrorType 同构）。
+          * @enum {string}
+          */
+-        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
++        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "context_overflow" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
+         /**
+          * ModelUsageItemRead
+          * @description 终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。
+diff --git a/sillyhub-daemon/src/agent-log/message-coalescer.ts b/sillyhub-daemon/src/agent-log/message-coalescer.ts
+new file mode 100644
+index 000000000..a5658c9bf
+--- /dev/null
++++ b/sillyhub-daemon/src/agent-log/message-coalescer.ts
+@@ -0,0 +1,143 @@
++/**
++ * agent-log/message-coalescer.ts —— 流式 delta 消息级合并缓冲器（F2b）。
++ *
++ * 2026-10-12-session-defects task-02 / FR-03 / D-004@v1：同一助手消息的连续
++ * 流式 delta（event-wire.ts 渲染轨 `metadata.streaming === true` 分支曾逐条
++ * 直发——生产会话 47e2ff1a 实证同一消息拆成十几个重复/截断片段行的碎片根因）
++ * 按 message id 缓冲，消息完结（非流式完整行）到达时输出单行完整内容。
++ *
++ * 生命周期（design R-02 防泄漏）：纯请求内缓冲——由调用方按 turn 创建实例并在
++ * turn 边界丢弃（无定时器、无外部资源、无跨请求状态）；缓冲上限与 TTL 双保险：
++ *   - 单缓冲字节数超 CAP_BYTES → 立即按序冲刷为独立行（宁可碎片不丢内容）；
++ *   - 缓冲条目闲置超 TTL_MS（无后续 delta 也无完结）→ 下次 feed 时惰性冲刷。
++ * 任何异常序列（乱序/完结缺失/TTL 边界）下不丢内容，至多退化为碎片行。
++ *
++ * 接入：eventToSubmitMessages(ev, coalescer?) 可选参——传入时流式 delta 走
++ * 缓冲合并；不传零回归（既有直发行为，向后兼容）。
++ */
++
++/** 单缓冲条目字节数上限（超限立即冲刷，UTF-16 长度近似）。 */
++export const COALESCER_CAP_BYTES = 64 * 1024;
++
++/** 缓冲条目闲置 TTL（毫秒）：超龄条目在下次 feed 时按序冲刷。 */
++export const COALESCER_TTL_MS = 30_000;
++
++interface BufferedDelta {
++  /** 首个 delta 到达时刻（TTL 判定基准）。 */
++  startedAtMs: number;
++  /** 最近 delta 到达时刻。 */
++  lastAtMs: number;
++  /** 按序累积的 delta 文本。 */
++  text: string;
++}
++
++export interface CoalescedMessage {
++  event_type: 'text';
++  content: string;
++  channel: 'stdout';
++  [key: string]: unknown;
++}
++
++/** message id 提取：事件 metadata 的 message id / segment id 家族字段。 */
++function messageIdOf(metadata: Record<string, unknown> | undefined): string {
++  if (!metadata) return '';
++  for (const key of ['message_id', 'messageId', 'segmentId', 'segment_id', 'id'] as const) {
++    const v = metadata[key];
++    if (typeof v === 'string' && v.length > 0) return v;
++  }
++  return '';
++}
++
++export class MessageCoalescer {
++  private readonly buffers = new Map<string, BufferedDelta>();
++  private readonly nowMs: () => number;
++
++  constructor(nowMs: () => number = () => Date.now()) {
++    this.nowMs = nowMs;
++  }
++
++  /** 当前缓冲的消息数（测试/观测用）。 */
++  get size(): number {
++    return this.buffers.size;
++  }
++
++  /**
++   * 喂入一个 text 事件，返回「本事件应直发的行」。
++   *
++   * - delta（metadata.streaming=true）：并入缓冲，返回空数组（不直发）；
++   * - 完整行（非 streaming）：冲刷同 id 残留缓冲与超龄条目（保底不丢内容，
++   *   半截撤回由终态协议负责），冲刷行先于完整行输出；调用方随后照常渲染
++   *   完整行。
++   */
++  feed(ev: {
++    type: string;
++    content: string;
++    metadata?: Record<string, unknown> | undefined;
++  }): CoalescedMessage[] {
++    const metadata = ev.metadata;
++    const isStreaming = metadata?.['streaming'] === true;
++    const id = messageIdOf(metadata);
++    const now = this.nowMs();
++
++    if (!isStreaming) {
++      // 完整行：同 id 缓冲即刻保底冲刷（终态协议负责撤回半截，此处防御
++      // 无完结异常序列不丢内容），其余超龄条目惰性冲刷。
++      const flushed: CoalescedMessage[] = [];
++      for (const [key, buf] of this.buffers) {
++        if (key === id || now - buf.lastAtMs > COALESCER_TTL_MS) {
++          flushed.push(this.flushOne(key, buf));
++        }
++      }
++      return flushed;
++    }
++
++    // delta：并入缓冲（无 id 的 delta 无法跨事件归并——保持直发，宁碎片不丢）。
++    if (!id) {
++      return [{ event_type: 'text', content: ev.content, channel: 'stdout' }];
++    }
++    const existing = this.buffers.get(id);
++    if (existing) {
++      existing.text += ev.content;
++      existing.lastAtMs = now;
++    } else {
++      this.buffers.set(id, {
++        startedAtMs: now,
++        lastAtMs: now,
++        text: ev.content,
++      });
++    }
++    // 容量守卫：超限立即冲刷（宁可本消息提前成行，不丢内容）。
++    const buf = this.buffers.get(id);
++    if (buf && buf.text.length > COALESCER_CAP_BYTES) {
++      return [this.flushOne(id, buf)];
++    }
++    // 其他消息的超龄惰性冲刷。
++    const stale: CoalescedMessage[] = [];
++    for (const [key, b] of this.buffers) {
++      if (now - b.lastAtMs > COALESCER_TTL_MS) {
++        stale.push(this.flushOne(key, b));
++      }
++    }
++    return stale;
++  }
++
++  /** turn 边界清理：冲刷全部残留缓冲（调用方在 turn 收尾调用，防跨 turn 泄漏）。 */
++  flushAll(): CoalescedMessage[] {
++    const out: CoalescedMessage[] = [];
++    for (const [key, buf] of this.buffers) {
++      out.push(this.flushOne(key, buf));
++    }
++    return out;
++  }
++
++  private flushOne(key: string, buf: BufferedDelta): CoalescedMessage {
++    this.buffers.delete(key);
++    // 冲刷行与 legacy delta 行同形（裸拼接文本、stdout、无前缀）——TTL/容量
++    // 冲刷是「提前成行的合并结果」，不是渲染形态切换。
++    return {
++      event_type: 'text',
++      content: buf.text,
++      channel: 'stdout',
++    };
++  }
++}
+diff --git a/sillyhub-daemon/src/event-wire.ts b/sillyhub-daemon/src/event-wire.ts
+index d2d483793..ef976593b 100644
+--- a/sillyhub-daemon/src/event-wire.ts
++++ b/sillyhub-daemon/src/event-wire.ts
+@@ -83,6 +83,11 @@ export function eventToReportWireDict(
+     type: ev.type,
+     content: ev.content,
+     seq,
++    // F2a（2026-10-12-session-defects task-01 / FR-02）：事件到达时刻逐条捕获
++    // ——backend 落库优先取此值（钟差守卫回落本地时钟），消除整批共享
++    // st.now 单值的同毫秒时间戳塌缩（生产 8~31 行同刻度实证）。本函数逐事件
++    // 调用，转换时刻即事件到达时刻。
++    timestamp: new Date().toISOString(),
+   };
+   if (ev.subtype !== undefined) dict['subtype'] = ev.subtype;
+   if (ev.tool_name !== undefined) dict['tool_name'] = ev.tool_name;
+@@ -131,6 +136,7 @@ export function eventToReportWireDict(
+  */
+ export function eventToSubmitMessages(
+   ev: AgentEvent,
++  coalescer?: import('./agent-log/message-coalescer.js').MessageCoalescer,
+ ): Record<string, unknown>[] | null {
+   const md = ev.metadata ?? {};
+   const rawContent = ev.content ?? '';
+@@ -146,7 +152,17 @@ export function eventToSubmitMessages(
+       // 前缀，直接发原始 delta 文本。前端 chat 面板会逐字 append 拼"打字效果"。
+       // 若加 [ASSISTANT] 前缀，每个 delta 都带前缀 → "[ASSISTANT] 我[ASSISTANT]  Cod"。
+       // Agent 控制台日志会按原样展示每条 delta（无前缀），可读性也 OK（每条 = 一次推送）。
+-      if (isStreaming && rawContent) {
++      // F2b（2026-10-12-session-defects task-02 / FR-03）：传入 coalescer 时
++      // 所有 text 事件先过缓冲器——流式 delta 并入缓冲不直发（消除逐 delta
++      // 碎片行）；完整行触发同 id 保底冲刷 + 超龄惰性冲刷（冲刷行先于完整行
++      // 输出）。不传 coalescer 保持 legacy 直发（零回归，向后兼容）。
++      if (coalescer) {
++        const flushed = coalescer.feed(ev);
++        for (const f of flushed) messages.push(f);
++        if (isStreaming && rawContent) {
++          break; // delta 已入缓冲，本事件零直发
++        }
++      } else if (isStreaming && rawContent) {
+         messages.push({
+           event_type: ev.type,
+           content: rawContent,
+@@ -229,6 +245,54 @@ export function eventToSubmitMessages(
+           content: `[APPROVAL:DECLINE] ${name}\n${reason}`.slice(0, 5000),
+           channel: 'stderr',
+         });
++        // F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝同样落 tool_call
++        // 留痕行（工具名+入参，status 扩展 'denied' 取值，对齐 allow 路径
++        // 'allowed' 模式）——生产实证 run27 拒绝只有对结果日志、无 tool_call 行，
++        // 工具调用不留痕。interrupt abortAll 全 deny 经同一事件形态，一并覆盖。
++        const declineInput =
++          md.tool_input &&
++          typeof md.tool_input === 'object' &&
++          !Array.isArray(md.tool_input)
++            ? (md.tool_input as Record<string, unknown>)
++            : {};
++        const declineId =
++          (typeof md.tool_use_id === 'string' && md.tool_use_id) ||
++          (typeof md.id === 'string' && md.id) ||
++          (typeof md.call_id === 'string' && md.call_id) ||
++          '';
++        const declineTs = new Date().toISOString();
++        let declineJson: string;
++        try {
++          declineJson = JSON.stringify({
++            tool: name,
++            ...(declineId ? { tool_use_id: declineId } : {}),
++            args: declineInput,
++            timestamp: declineTs,
++            status: 'denied',
++            success: false,
++            ...(typeof md.deny_reason === 'string' && md.deny_reason
++              ? { reason: md.deny_reason }
++              : {}),
++          });
++        } catch {
++          declineJson = JSON.stringify({
++            tool: name,
++            args: {},
++            timestamp: declineTs,
++            status: 'denied',
++            success: false,
++          });
++        }
++        const declineKind = classifyToolKind(
++          typeof md.tool_name === 'string' && md.tool_name ? md.tool_name : null,
++          declineInput,
++        );
++        messages.push({
++          event_type: ev.type,
++          content: declineJson,
++          channel: 'tool_call',
++          ...(declineKind ? { tool_kind: declineKind } : {}),
++        });
+         break;
+       }
+       const inputObj =
+@@ -377,5 +441,12 @@ export function eventToSubmitMessages(
+   // session_id 索引等）。call_id 仅 tool_use 类型有意义，写第一条即可。
+   // task-04 轻重构②：三列映射与事件轨共用 appendSessionWireColumns（metadata 口径）。
+   appendSessionWireColumns(messages[0]!, ev, 'metadata');
++  // F2a（2026-10-12-session-defects task-01 / FR-02）：渲染轨同款消息级
++  // timestamp（单返回点统一注入，本函数逐事件调用=到达时刻；tool_call JSON
++  // content 内嵌 ts 为既有展示值，不受影响）。
++  const wireTs = new Date().toISOString();
++  for (const m of messages) {
++    m['timestamp'] = wireTs;
++  }
+   return messages;
+ }
+diff --git a/sillyhub-daemon/src/interactive/session-manager/write-guard.ts b/sillyhub-daemon/src/interactive/session-manager/write-guard.ts
+index 357b211b3..909214aa3 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/write-guard.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/write-guard.ts
+@@ -125,8 +125,12 @@ export function wrapWithWriteGuard(
+     const overlayRoots = sessionOverlayRoots(mgr, sessionId);
+     const roots = overlayRoots ?? providerRoots;
+     if (roots.length > 0) {
++      // F4（2026-10-12-session-defects task-10）：相对路径锚定会话工作区根。
++      const sessionCwd = mgr._store.get(sessionId)?.cwd;
+       const writePaths = extractWritePathsForTool(mgr, toolName, toolInput);
+-      const outside = writePaths.find((p) => !isPathUnderAnyRoot(p, roots));
++      const outside = writePaths.find(
++        (p) => !isPathUnderAnyRoot(p, roots, sessionCwd),
++      );
+       if (outside !== undefined) {
+         return {
+           behavior: 'deny',
+@@ -191,6 +195,12 @@ export function judgeWriteViaPolicyEngine(
+ ): string | null {
+   const engine = mgr._policyEngine;
+ 
++  // F4（2026-10-12-session-defects task-10 / D-007）：会话工作区根作为相对
++  // 路径解析基点——四条裁决分支（borrow/overlay/policyEngine 主路径及 fallback
++  // 见 wrapWithWriteGuard）统一透传，使会话内相对写锚定会话根而非 daemon
++  // 进程 cwd（生产实证：daemon 启动目录拼写与工作区分裂 → 相对写全拒）。
++  const sessionCwd = mgr._store.get(sessionId)?.cwd;
++
+   // 提取写目标路径。
+   const writePaths = extractWritePathsForTool(mgr, toolName, toolInput);
+   if (writePaths.length === 0) return null; // 非写工具 / 提取不到 → 放行
+@@ -203,7 +213,7 @@ export function judgeWriteViaPolicyEngine(
+   const borrowRoot = mgr._borrowSandboxRoots.get(sessionId);
+   if (borrowRoot) {
+     for (const p of writePaths) {
+-      const np = resolveRealPath(p);
++      const np = resolveRealPath(p, sessionCwd);
+       if (np === UNC_REJECTED) {
+         return (
+           `借用任务沙箱隔离拒绝写入。\n` +
+@@ -212,7 +222,7 @@ export function judgeWriteViaPolicyEngine(
+           `原因：UNC 路径（\\\\server\\share）不允许写入。`
+         );
+       }
+-      if (!isPathUnderAnyRoot(np, [borrowRoot])) {
++      if (!isPathUnderAnyRoot(np, [borrowRoot], sessionCwd)) {
+         return (
+           `借用任务沙箱隔离拒绝写入。\n` +
+           `Agent：${provider}\n` +
+@@ -235,7 +245,7 @@ export function judgeWriteViaPolicyEngine(
+   const overlayRoots = sessionOverlayRoots(mgr, sessionId);
+   if (overlayRoots !== null) {
+     const outsideOverlay = writePaths.find(
+-      (p) => !isPathUnderAnyRoot(p, overlayRoots),
++      (p) => !isPathUnderAnyRoot(p, overlayRoots, sessionCwd),
+     );
+     if (outsideOverlay !== undefined) {
+       return `path outside allowed_roots: ${outsideOverlay}`;
+@@ -247,7 +257,7 @@ export function judgeWriteViaPolicyEngine(
+   const runtimeId = mgr._runtimeIdProvider?.(provider) ?? '';
+   const tool = toolName; // PolicyEngine audit 字段（Write/Edit/Bash/...）。
+   for (const p of writePaths) {
+-    const decision = engine.canWrite(runtimeId, p, provider, tool);
++    const decision = engine.canWrite(runtimeId, p, provider, tool, sessionCwd);
+     if (!decision.allowed) {
+       // 取首个 deny 的 reason（PolicyEngine 已组装中文文案）。
+       return decision.reason;
+diff --git a/sillyhub-daemon/src/model-error/classifier.ts b/sillyhub-daemon/src/model-error/classifier.ts
+index 7942d6d59..36357e937 100644
+--- a/sillyhub-daemon/src/model-error/classifier.ts
++++ b/sillyhub-daemon/src/model-error/classifier.ts
+@@ -69,6 +69,15 @@ const ERROR_INFO: Record<
+     hint: '请求过于频繁，请稍候重试或降低并发',
+     retryable: true,
+   },
++  // F1a（2026-10-12-session-defects task-07 / FR-01）：上下文超窗——生产实证
++  // "Prompt is too long" 连续 10 轮落 unknown 无归因无引导（会话 47e2ff1a
++  // runs 3-12）。不可重试（重发同文本必然再爆窗），恢复路径=平台编排
++  // agent 原生压缩（auto_resume context_overflow 分支调 compact_session）。
++  context_overflow: {
++    message: '会话上下文超出模型窗口',
++    hint: '平台将自动压缩会话并续跑；若自动恢复失败请手动 /compact 或新建会话',
++    retryable: false,
++  },
+   auth_failed: {
+     message: '凭证无效或已失效',
+     hint: '凭证失效，请检查或更换供应商配置',
+@@ -184,6 +193,19 @@ function classifyBlob(blob: string): ModelErrorType {
+     return 'rate_limited';
+   }
+ 
++  // 2.5 context_overflow（F1a，2026-10-12-session-defects task-07 / FR-01）：
++  //     上下文超窗关键词（Claude CLI 主实证 "Prompt is too long"，provider
++  //     无关——anthropic/openai 的 context length exceeded / context window
++  //     同语义）。插在 429 之后 auth 之前：超窗错误常带 4xx 状态码字面，
++  //     先于 auth 判定防误归 auth_failed。
++  if (
++    /prompt[\s_-]{0,5}is[\s_-]{0,5}too[\s_-]{0,5}long|maximum[\s_-]{0,5}context[\s_-]{0,5}length|context[\s_-]{0,5}length[\s_-]{0,5}exceeded|context[\s_-]{0,5}(?:window|length)[\s_-]{0,10}(?:exceeded|too[\s_-]{0,5}long|overflow)|prompts?[\s_-]{0,10}(?:exceed(?:ed|es)?|too[\s_-]{0,5}long)[\s\S]{0,20}(?:context|window|length)/i.test(
++      blob,
++    )
++  ) {
++    return 'context_overflow';
++  }
++
+   // 3. auth_failed：401/403/unauthorized/forbidden/invalid api key/凭证失效。
+   if (
+     /\b401\b|\b403\b|unauthori[sz]ed|forbidden|invalid[\s_-]{0,5}(api[\s_-]?key|token|credential|auth)|api[\s_-]?key[\s_-]{0,5}(invalid|missing|wrong|revoked)|auth(?:entication|orization)?[\s_-]{0,5}(failed|error|denied)|凭证|认证失败|授权失败/i.test(
+diff --git a/sillyhub-daemon/src/model-error/types.ts b/sillyhub-daemon/src/model-error/types.ts
+index f91963a63..6f2c72927 100644
+--- a/sillyhub-daemon/src/model-error/types.ts
++++ b/sillyhub-daemon/src/model-error/types.ts
+@@ -12,6 +12,7 @@ export type ModelErrorType =
+   | 'auth_failed'      // 凭证失效/无效（401/403）
+   | 'quota_exceeded'   // 额度/配额耗尽（429，不可重试）
+   | 'rate_limited'     // 瞬时限流（429，可重试）
++  | 'context_overflow' // 会话上下文超出模型窗口（2026-10-12-session-defects F1a，不可重试，走原生压缩续跑编排）
+   | 'timeout'
+   | 'model_not_found'
+   | 'network'          // 连接失败/DNS
+diff --git a/sillyhub-daemon/src/policy/filesystem-policy.ts b/sillyhub-daemon/src/policy/filesystem-policy.ts
+index ad78ae8fd..ea973ddb9 100644
+--- a/sillyhub-daemon/src/policy/filesystem-policy.ts
++++ b/sillyhub-daemon/src/policy/filesystem-policy.ts
+@@ -42,13 +42,28 @@ const ALLOW_DECISION = '';
+  *   Agent：<provider>
+  *   目标路径：<normalizedPath>
+  *   原因：<cause>
++ *
++ * F4（2026-10-12-session-defects task-10）：rawPath 与解析后拼写不一致时附
++ * 「原始路径 X 解析为 Y」提示——allowed_roots 按一种拼写配置、实际解析成
++ * 另一种（WSL /mnt/e ↔ /mnt/c junction、大小写归一）是该类误拒的主排查
++ * 路径，文案必须自证两个拼写才可操作（生产实证 deny 只给解析后路径无从
++ * 对账，会话 47e2ff1a）。
+  */
+-function buildDenyReason(provider: string, normalizedPath: string, cause: string): string {
++function buildDenyReason(
++  provider: string,
++  normalizedPath: string,
++  cause: string,
++  rawPath?: string,
++): string {
++  const spellingHint =
++    rawPath !== undefined && rawPath !== '' && rawPath !== normalizedPath
++      ? `\n提示：原始路径 ${rawPath} 解析为 ${normalizedPath}（allowed_roots 需覆盖实际拼写）。`
++      : '';
+   return (
+     `Runtime Policy 拒绝本次写入。\n` +
+     `Agent：${provider}\n` +
+     `目标路径：${normalizedPath}\n` +
+-    `原因：${cause}`
++    `原因：${cause}${spellingHint}`
+   );
+ }
+ 
+@@ -107,8 +122,9 @@ export class PolicyEngine {
+     path: string,
+     provider: string,
+     tool: string,
++    anchor?: string,
+   ): PolicyDecision {
+-    return this.judgeWrite(runtimeId, path, provider, tool);
++    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
+   }
+ 
+   /** 创建新文件裁决（流程同 {@link canWrite}）。 */
+@@ -117,8 +133,9 @@ export class PolicyEngine {
+     path: string,
+     provider: string,
+     tool: string,
++    anchor?: string,
+   ): PolicyDecision {
+-    return this.judgeWrite(runtimeId, path, provider, tool);
++    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
+   }
+ 
+   /** 删除裁决（流程同 {@link canWrite}）。 */
+@@ -127,8 +144,9 @@ export class PolicyEngine {
+     path: string,
+     provider: string,
+     tool: string,
++    anchor?: string,
+   ): PolicyDecision {
+-    return this.judgeWrite(runtimeId, path, provider, tool);
++    return this.judgeWrite(runtimeId, path, provider, tool, anchor);
+   }
+ 
+   // ── canRename（两端皆需 allow）─────────────────────────────────────────────
+@@ -144,8 +162,9 @@ export class PolicyEngine {
+     newPath: string,
+     provider: string,
+     tool: string,
++    anchor?: string,
+   ): PolicyDecision {
+-    const fromDecision = this.judgeWrite(runtimeId, oldPath, provider, tool);
++    const fromDecision = this.judgeWrite(runtimeId, oldPath, provider, tool, anchor);
+     if (!fromDecision.allowed) {
+       // 源端越界：reason 顶部追加「源路径」标识。
+       return {
+@@ -154,7 +173,7 @@ export class PolicyEngine {
+         normalizedPath: fromDecision.normalizedPath,
+       };
+     }
+-    const toDecision = this.judgeWrite(runtimeId, newPath, provider, tool);
++    const toDecision = this.judgeWrite(runtimeId, newPath, provider, tool, anchor);
+     if (!toDecision.allowed) {
+       return {
+         allowed: false,
+@@ -178,8 +197,9 @@ export class PolicyEngine {
+     path: string,
+     provider: string,
+     tool: string,
++    anchor?: string,
+   ): PolicyDecision {
+-    const normalizedPath = resolveRealPath(path);
++    const normalizedPath = resolveRealPath(path, anchor);
+     const ts = Date.now();
+ 
+     // UNC → deny（reason 注明 UNC 不允许）
+@@ -197,16 +217,16 @@ export class PolicyEngine {
+       return { allowed: false, reason, normalizedPath };
+     }
+ 
+-    // 边界校验
+-    const underRoot = isPathUnderAnyRoot(normalizedPath, policy.allowedRoots);
++    // 边界校验（F4：anchor 透传——target 解析基点=会话工作区根）
++    const underRoot = isPathUnderAnyRoot(normalizedPath, policy.allowedRoots, anchor);
+     if (underRoot) {
+       // allow：reason 空串，仍记 audit（D-006 全量）
+       this.recordAudit('ALLOW', runtimeId, provider, tool, normalizedPath, ALLOW_DECISION, ts);
+       return { allowed: true, reason: ALLOW_DECISION, normalizedPath };
+     }
+ 
+-    // deny：统一中文文案
+-    const reason = buildDenyReason(provider, normalizedPath, CAUSE_NOT_CONFIGURED);
++    // deny：统一中文文案（F4：拼写不一致时附双拼写提示）
++    const reason = buildDenyReason(provider, normalizedPath, CAUSE_NOT_CONFIGURED, path);
+     this.recordAudit('DENY', runtimeId, provider, tool, normalizedPath, reason, ts);
+     return { allowed: false, reason, normalizedPath };
+   }
+diff --git a/sillyhub-daemon/src/policy/path-utils.ts b/sillyhub-daemon/src/policy/path-utils.ts
+index 2b011f8b3..7518c67ff 100644
+--- a/sillyhub-daemon/src/policy/path-utils.ts
++++ b/sillyhub-daemon/src/policy/path-utils.ts
+@@ -36,9 +36,14 @@ export const UNC_REJECTED = '@@UNC_REJECTED@@';
+  *   4. `pathResolve` 折叠 `..` 段。
+  *
+  * @param raw 路径字符串（含可能的前导引号、git bash 斜杠等）
++ * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
++ *   undefined/空 = process.cwd()（现行为，全部既有调用点零变化）；
++ *   write-guard 裁决路径传会话工作区根，使会话内相对写锚定会话根而非
++ *   daemon 进程 cwd（生产实证：daemon 启动目录 /mnt/c/Users/... 与工作区
++ *   /mnt/e/... 拼写分裂 → 相对写全部误拒）。
+  * @returns 规范化后的路径
+  */
+-export function normalizePath(raw: string): string {
++export function normalizePath(raw: string, anchor?: string): string {
+   let p = raw;
+   // strip 外层引号
+   if (
+@@ -61,6 +66,13 @@ export function normalizePath(raw: string): string {
+   if (p.startsWith(UNC_PREFIX) || p.startsWith(UNC_PREFIX_POSIX)) {
+     return p;
+   }
++  // F4：相对路径按 anchor 解析（QA 审查 P1 修正：anchor 缺省时必须回落
++  // pathResolve(p) 单参形态——resolve(p, p) 会把相对路径双重拼接成 cwd/p/p，
++  // 与旧行为 cwd/p 不一致；绝对路径两种形态等价，anchor 显式分支仅相对路径
++  // 生效，语义清晰且测试可断言）。
++  if (anchor && anchor.length > 0) {
++    return pathResolve(anchor, p);
++  }
+   return pathResolve(p);
+ }
+ 
+@@ -75,10 +87,11 @@ export function normalizePath(raw: string): string {
+  * - UNC 路径（`\\server\share`）返回 `UNC_REJECTED` 特殊标记。
+  *
+  * @param p 目标路径（字符串）
++ * @param anchor 相对路径解析基点（F4，透传 normalizePath；undefined=现行为）
+  * @returns 解析后的真实路径，或 UNC_REJECTED
+  */
+-export function resolveRealPath(p: string): string {
+-  const normalized = normalizePath(p);
++export function resolveRealPath(p: string, anchor?: string): string {
++  const normalized = normalizePath(p, anchor);
+ 
+   // 拒 UNC（\\server\share 与 //server/share 两种形态）。
+   // normalizePath 对 UNC 原样返回（不 resolve），故此处两种前缀都在，
+@@ -159,13 +172,20 @@ function normalizeCase(p: string): string {
+  *
+  * @param target  目标路径（字符串，未规范化亦可，函数内部将规范化）
+  * @param allowedRoots 白名单根目录数组（绝对路径）
++ * @param anchor 相对路径解析基点（F4，2026-10-12-session-defects task-10）：
++ *   target 与 roots 双解析均透传（roots 相对形态罕见，但同一基点语义一致；
++ *   undefined=现行为 process.cwd()）。
+  * @returns true 当目标路径在任一 allowedRoot 下
+  */
+-export function isPathUnderAnyRoot(target: string, allowedRoots: string[]): boolean {
++export function isPathUnderAnyRoot(
++  target: string,
++  allowedRoots: string[],
++  anchor?: string,
++): boolean {
+   // D-001@v1 / task-02：比较前对 target 与每个 root 调 resolveRealPath（realpath + 盘符小写），
+   // 下沉到判定层防 symlink/junction/borrow root 绕过；不在 PolicyCache.set 存（与 task-01 配合）。
+   // resolveRealPath 内部已 normalizePath + normalizeCase + UNC 标记 + 不存在 fallback。
+-  const resolved = resolveRealPath(target);
++  const resolved = resolveRealPath(target, anchor);
+ 
+   // 若 target 是 UNC（resolveRealPath 返回 UNC_REJECTED）→ 拒（不落在任何 root 下）
+   if (resolved === UNC_REJECTED) return false;
+diff --git a/sillyhub-daemon/src/policy/shell-paths.ts b/sillyhub-daemon/src/policy/shell-paths.ts
+index 6b839e1f5..4c59bfbbc 100644
+--- a/sillyhub-daemon/src/policy/shell-paths.ts
++++ b/sillyhub-daemon/src/policy/shell-paths.ts
+@@ -46,6 +46,16 @@ function trimShellSeparators(p: string): string {
+   return p.replace(/[;|&]+$/, '');
+ }
+ 
++/**
++ * F4（2026-10-12-session-defects task-10 / D-007）：flag token 判定——捕获
++ * 目标以 `-` 开头（`-p`/`-d`/`-o` 等被正则贪婪误吞的开关），捕获即弃不产出
++ * 目标。生产实证：deny 文案目标路径为 `<工作区>/-p`（mkdir -p 的 flag 被当
++ * 路径，会话 47e2ff1a 02:51 deny）。Bash/PowerShell/CMD 三提取器共用。
++ */
++function isFlagToken(t: string | undefined): boolean {
++  return typeof t === 'string' && t.startsWith('-');
++}
++
+ /**
+  * 简易 Bash 分词：考虑单/双引号；返回 token 数组（保留引号，
+  * 由调用方按需 strip）。开关 token（`-x`）会被吞掉且不进入位置参数列表。
+@@ -106,11 +116,14 @@ export function extractBashWritePaths(command: string): string[] {
+   const paths: string[] = [];
+   let m: RegExpExecArray | null;
+ 
+-  // 1. 重定向 > / >>（排除 2>&1 / >&2 等文件描述符）。目标支持带引号路径（含空格）。
++  // 1. 重定向 > / >>（排除 2>&1 / >&2 等文件描述符；同口径弃 `-` 前缀目标）。
++  //    目标支持带引号路径（含空格）。
+   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
+   while ((m = redirRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
++    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
++      paths.push(stripQuotes(target));
++    }
+   }
+   // 2. cp/mv/install src... dst（支持多源参数；跳过开关；取最后位置参数为目标）
+   //    先吞掉所有形如 `-x` 的开关与普通 token，最后剩下的位置参数即 dst。
+@@ -121,17 +134,19 @@ export function extractBashWritePaths(command: string): string[] {
+     const dst = lastBashPositional(rest);
+     if (dst) paths.push(dst);
+   }
+-  // 3. tee [-options] path（支持带引号路径）
++  // 3. tee [-options] path（支持带引号路径；flag 目标弃）
+   const teeRe = /\btee\s+(?:-[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/g;
+   while ((m = teeRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target) paths.push(stripQuotes(target));
++    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
+   }
+-  // 4. mkdir/touch [-options] path（支持带引号路径）
++  // 4. mkdir/touch [-options] path（支持带引号路径；flag 目标弃——`-p` 主实证）
+   const mkRe = /\b(?:mkdir|touch)\s+(?:-[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/g;
+   while ((m = mkRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target) paths.push(stripQuotes(target));
++    if (target && !isFlagToken(target)) {
++      paths.push(stripQuotes(target));
++    }
+   }
+   // 归一化（git bash /x/ → X:/ + strip 引号）
+   return paths.map(normalizeBashWritePath);
+@@ -149,11 +164,13 @@ export function extractPowerShellWritePaths(command: string): string[] {
+   const paths: string[] = [];
+   let m: RegExpExecArray | null;
+ 
+-  // 重定向 > / >>（PowerShell 也支持，且可与管道叠加）
++  // 重定向 > / >>（PowerShell 也支持，且可与管道叠加；F4 同口径弃 flag 目标）
+   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
+   while ((m = redirRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
++    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
++      paths.push(stripQuotes(target));
++    }
+   }
+ 
+   // Set-Content / Add-Content / Out-File：取 -Path/-FilePath，否则首个位置参数
+@@ -275,34 +292,36 @@ function tokenizeSkippingNamed(rest: string): string[] {
+ export function extractCmdWritePaths(command: string): string[] {
+   const paths: string[] = [];
+ 
+-  // 重定向 > / >>（排除文件描述符）；目标支持带引号路径
++  // 重定向 > / >>（排除文件描述符；F4 同口径弃 flag 目标）；目标支持带引号路径
+   const redirRe = /(?:>>|>)\s*("[^"]*"|'[^']*'|\S+)/g;
+   let m: RegExpExecArray | null;
+   while ((m = redirRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target && !/^&\d/.test(target)) paths.push(stripQuotes(target));
++    if (target && !/^&\d/.test(target) && !isFlagToken(target)) {
++      paths.push(stripQuotes(target));
++    }
+   }
+ 
+-  // copy/move src dst（取最后位置参数，跳过开关）
++  // copy/move src dst（取最后位置参数，跳过开关；F4 同口径弃 flag 目标）
+   const cmRe =
+     /\b(?:copy|move)\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)\s+("[^"]*"|'[^']*'|\S+)/gi;
+   while ((m = cmRe.exec(command)) !== null) {
+     const dst = m[2];
+-    if (dst) paths.push(stripQuotes(dst));
++    if (dst && !isFlagToken(dst)) paths.push(stripQuotes(dst));
+   }
+ 
+-  // mkdir dir
++  // mkdir dir（F4 同口径弃 flag 目标）
+   const mkRe = /\bmkdir\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/gi;
+   while ((m = mkRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target) paths.push(stripQuotes(target));
++    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
+   }
+ 
+-  // del file
++  // del file（F4 同口径弃 flag 目标）
+   const delRe = /\bdel\s+(?:\/[^\s]+\s+)*("[^"]*"|'[^']*'|\S+)/gi;
+   while ((m = delRe.exec(command)) !== null) {
+     const target = m[1];
+-    if (target) paths.push(stripQuotes(target));
++    if (target && !isFlagToken(target)) paths.push(stripQuotes(target));
+   }
+ 
+   // quick-f2c10985：剥尾部命令分隔符（cmd 的 & 链接符紧贴目标时 \S+ 吞入）。
+diff --git a/sillyhub-daemon/src/types.ts b/sillyhub-daemon/src/types.ts
+index 17c7fcdd6..47e457fd6 100644
+--- a/sillyhub-daemon/src/types.ts
++++ b/sillyhub-daemon/src/types.ts
+@@ -706,6 +706,12 @@ export interface LeaseClaimResult {
+ export interface LeaseMessage {
+   /** 事件类型（Python 原始 event_type 字符串，未做 IR 收敛）。 */
+   eventType: string;
++  /**
++   * 事件到达时刻（ISO-8601；2026-10-12-session-defects task-01 / FR-02）。
++   * producer=event-wire 两轨构造点捕获 → submit payload 透传 → consumer=
++   * backend submit_steps（解析失败/钟差>5min 回落本地时钟）。缺省=旧行为。
++   */
++  timestamp?: string;
+   /** 文本内容（非空时才序列化）。 */
+   content?: string;
+   /** 工具名（非空时才序列化）。 */
+diff --git a/sillyhub-daemon/tests/agent-log/message-coalescer.test.ts b/sillyhub-daemon/tests/agent-log/message-coalescer.test.ts
+new file mode 100644
+index 000000000..a35dfe444
+--- /dev/null
++++ b/sillyhub-daemon/tests/agent-log/message-coalescer.test.ts
+@@ -0,0 +1,127 @@
++/**
++ * tests/agent-log/message-coalescer.test.ts —— F2b（2026-10-12-session-defects
++ * task-02 / FR-03）消息级 delta 合并缓冲器单测。
++ *
++ * 守护点（acceptance 逐条）：
++ *  1. 同一 message id 的 3 个 delta（A/B/C）缓冲后（经完结触发）冲刷为单行
++ *     "ABC"，无独立 delta 行残留；
++ *  2. 无完结事件 + TTL 超龄 → 下次 feed 惰性冲刷为独立行，内容零丢失；
++ *  3. 跨消息隔离：两个 message id 的 delta 序列互不串缓冲；
++ *  4. 容量超限立即冲刷不丢内容；无 id 的 delta 保持直发（宁碎片不丢）；
++ *  5. flushAll turn 边界清空。
++ */
++
++import { describe, expect, it } from 'vitest';
++
++import {
++  COALESCER_CAP_BYTES,
++  COALESCER_TTL_MS,
++  MessageCoalescer,
++} from '../../src/agent-log/message-coalescer.js';
++import { eventToSubmitMessages } from '../../src/event-wire.js';
++import type { AgentEvent } from '../../src/types.js';
++
++function delta(id: string, text: string, thinking = false): AgentEvent {
++  return {
++    type: 'text',
++    content: text,
++    metadata: { streaming: true, message_id: id, ...(thinking ? { thinking: true } : {}) },
++  };
++}
++
++function complete(id: string, text: string): AgentEvent {
++  return { type: 'text', content: text, metadata: { message_id: id } };
++}
++
++describe('MessageCoalescer', () => {
++  it('3 delta 并入缓冲不直发；完结触发冲刷为单行完整内容', () => {
++    const c = new MessageCoalescer();
++    expect(c.feed(delta('m1', 'A'))).toEqual([]);
++    expect(c.feed(delta('m1', 'B'))).toEqual([]);
++    expect(c.feed(delta('m1', 'C'))).toEqual([]);
++    expect(c.size).toBe(1);
++    // 完整行到达 → 同 id 缓冲保底冲刷（单行 ABC）。
++    const flushed = c.feed(complete('m1', 'ABC'));
++    expect(flushed).toHaveLength(1);
++    expect(flushed[0]!.content).toBe('ABC');
++    expect(c.size).toBe(0);
++  });
++
++  it('TTL 超龄：无完结事件时下次 feed 惰性冲刷，内容零丢失', () => {
++    let clock = 1_000;
++    const c = new MessageCoalescer(() => clock);
++    c.feed(delta('m1', 'HELLO'));
++    expect(c.size).toBe(1);
++    clock += COALESCER_TTL_MS + 1;
++    // 新事件（另一消息）触发惰性冲刷。
++    const out = c.feed(delta('m2', 'x'));
++    expect(out).toHaveLength(1);
++    expect(out[0]!.content).toBe('HELLO');
++    expect(c.size).toBe(1); // 仅剩 m2
++  });
++
++  it('跨消息隔离：两个 id 的 delta 互不串缓冲', () => {
++    const c = new MessageCoalescer();
++    c.feed(delta('m1', 'A1'));
++    c.feed(delta('m2', 'B1'));
++    c.feed(delta('m1', 'A2'));
++    c.feed(delta('m2', 'B2'));
++    expect(c.size).toBe(2);
++    const out = c.feed(complete('m1', 'A1A2'));
++    expect(out).toHaveLength(1);
++    expect(out[0]!.content).toBe('A1A2');
++    expect(c.size).toBe(1); // m2 未受影响
++    const rest = c.flushAll();
++    expect(rest[0]!.content).toBe('B1B2');
++  });
++
++  it('容量超限立即冲刷不丢内容', () => {
++    const c = new MessageCoalescer();
++    const big = 'x'.repeat(COALESCER_CAP_BYTES);
++    expect(c.feed(delta('m1', big))).toEqual([]);
++    const out = c.feed(delta('m1', 'TAIL'));
++    expect(out).toHaveLength(1);
++    expect(out[0]!.content.endsWith('TAIL')).toBe(true);
++    expect(out[0]!.content.startsWith(big)).toBe(true);
++  });
++
++  it('无 id 的 delta 保持直发（宁碎片不丢内容）', () => {
++    const c = new MessageCoalescer();
++    const out = c.feed({ type: 'text', content: 'no-id', metadata: { streaming: true } });
++    expect(out).toHaveLength(1);
++    expect(out[0]!.content).toBe('no-id');
++    expect(c.size).toBe(0);
++  });
++
++  it('flushAll turn 边界清空全部缓冲', () => {
++    const c = new MessageCoalescer();
++    c.feed(delta('m1', 'a'));
++    c.feed(delta('m2', 'b'));
++    const out = c.flushAll();
++    expect(out).toHaveLength(2);
++    expect(c.size).toBe(0);
++  });
++});
++
++describe('eventToSubmitMessages × coalescer 接入', () => {
++  it('传入 coalescer：流式 delta 走缓冲（不直发），完结事件照常输出完整行', () => {
++    const c = new MessageCoalescer();
++    // delta 全部入缓冲 → 无直发行（wire 语义 null = 本事件零输出）。
++    expect(eventToSubmitMessages(delta('m1', 'A'), c)).toBeNull();
++    expect(eventToSubmitMessages(delta('m1', 'B'), c)).toBeNull();
++    // 完整行（非 streaming）照常渲染输出。
++    const out = eventToSubmitMessages(complete('m1', 'AB'), c);
++    expect(out).not.toBeNull();
++    // 完整行渲染带 [ASSISTANT] 前缀（legacy 渲染轨口径）；保底冲刷行为裸拼接。
++    const contents = out!.map((m) => String(m['content']));
++    expect(contents).toContain('[ASSISTANT] AB');
++    expect(contents).toContain('AB');
++  });
++
++  it('不传 coalescer：流式 delta 保持 legacy 直发（零回归）', () => {
++    const out = eventToSubmitMessages(delta('m1', 'A'));
++    expect(out).not.toBeNull();
++    expect(out).toHaveLength(1);
++    expect(out![0]!['content']).toBe('A');
++  });
++});
+diff --git a/sillyhub-daemon/tests/event-wire-timestamp.test.ts b/sillyhub-daemon/tests/event-wire-timestamp.test.ts
+new file mode 100644
+index 000000000..f1a8a03d0
+--- /dev/null
++++ b/sillyhub-daemon/tests/event-wire-timestamp.test.ts
+@@ -0,0 +1,68 @@
++/**
++ * tests/event-wire-timestamp.test.ts —— F2a（2026-10-12-session-defects
++ * task-01 / FR-02）消息级事件时间戳专项测试。
++ *
++ * 守护点：
++ *  1. 两轨（eventToReportWireDict / eventToSubmitMessages）每条消息携带
++ *     ISO-8601 timestamp（事件到达时刻，逐事件捕获）；
++ *  2. 同批不同事件的时间戳互异可达（不再整批共享单值——生产同毫秒
++ *     8~31 行聚集的 daemon 侧根因消除）；
++ *  3. tool_call JSON content 内嵌 ts 展示值不受影响（既有语义保持）。
++ */
++
++import { describe, expect, it } from 'vitest';
++
++import {
++  eventToReportWireDict,
++  eventToSubmitMessages,
++} from '../src/event-wire.js';
++import type { AgentEvent } from '../src/types.js';
++
++const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
++
++describe('eventToReportWireDict 消息级 timestamp', () => {
++  it('每条 dict 携带 ISO-8601 timestamp', () => {
++    const dict = eventToReportWireDict({ type: 'text', content: 'hi' }, 1);
++    expect(typeof dict['timestamp']).toBe('string');
++    expect(dict['timestamp']).toMatch(ISO_RE);
++  });
++
++  it('逐事件捕获：先后两事件时间戳单调不回退', async () => {
++    const a = eventToReportWireDict({ type: 'text', content: 'a' }, 1);
++    await new Promise((r) => setTimeout(r, 5));
++    const b = eventToReportWireDict({ type: 'text', content: 'b' }, 2);
++    expect(String(b['timestamp']) >= String(a['timestamp'])).toBe(true);
++  });
++});
++
++describe('eventToSubmitMessages 消息级 timestamp', () => {
++  it('assistant 文本行携带 ISO-8601 timestamp', () => {
++    const ev: AgentEvent = { type: 'text', content: '正文', metadata: {} };
++    const msgs = eventToSubmitMessages(ev);
++    expect(msgs).not.toBeNull();
++    for (const m of msgs!) {
++      expect(typeof m['timestamp']).toBe('string');
++      expect(m['timestamp']).toMatch(ISO_RE);
++    }
++  });
++
++  it('tool_use 双行（stdout + tool_call JSON）都携带 timestamp', () => {
++    const ev: AgentEvent = {
++      type: 'tool_use',
++      content: '{"command":"ls"}',
++      tool_name: 'Bash',
++      call_id: 'call_1',
++    };
++    const msgs = eventToSubmitMessages(ev);
++    expect(msgs).not.toBeNull();
++    expect(msgs!.length).toBe(2);
++    for (const m of msgs!) {
++      expect(m['timestamp']).toMatch(ISO_RE);
++    }
++    // tool_call JSON content 内嵌 ts 展示值不受消息级字段影响。
++    const tc = msgs!.find((m) => m['channel'] === 'tool_call');
++    expect(tc).toBeDefined();
++    const parsed = JSON.parse(String(tc!['content']));
++    expect(parsed.timestamp).toMatch(ISO_RE);
++  });
++});
+diff --git a/sillyhub-daemon/tests/event-wire.test.ts b/sillyhub-daemon/tests/event-wire.test.ts
+index 4f35736da..418ad6e40 100644
+--- a/sillyhub-daemon/tests/event-wire.test.ts
++++ b/sillyhub-daemon/tests/event-wire.test.ts
+@@ -30,9 +30,30 @@ function makeStubState(sessionId = 's1'): SessionState {
+   return { sessionId } as unknown as SessionState;
+ }
+ 
+-/** 逐字节等价断言：JSON.stringify 键序敏感比较。 */
++/**
++ * 逐字节等价断言：JSON.stringify 键序敏感比较。
++ * F2a（2026-10-12-session-defects task-01）：wire 消息级 timestamp 为动态
++ * 事件时刻（值不可字面化），比较前对两侧行递归剥离该字段——既有 golden
++ * 值断言语义保持不变；timestamp 本身的在场性/形态由
++ * event-wire-timestamp.test.ts 专项守护。
++ */
++function stripWireTimestamp(value: unknown): unknown {
++  if (Array.isArray(value)) return value.map(stripWireTimestamp);
++  if (value && typeof value === 'object') {
++    const out: Record<string, unknown> = {};
++    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
++      if (k === 'timestamp') continue;
++      out[k] = stripWireTimestamp(v);
++    }
++    return out;
++  }
++  return value;
++}
++
+ function expectWireEqual(actual: unknown, expected: unknown): void {
+-  expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
++  expect(JSON.stringify(stripWireTimestamp(actual))).toBe(
++    JSON.stringify(stripWireTimestamp(expected)),
++  );
+ }
+ 
+ // ── 事件轨 report dict（session-manager 侧核心）────────────────────────────
+@@ -184,15 +205,23 @@ describe('eventToSubmitMessages（1:N 渲染，1:1 复现老 SERVER 路径格式
+     expect(eventToSubmitMessages({ type: 'text', content: '' })).toBeNull();
+   });
+ 
+-  it('tool_use 审批拒绝 → [APPROVAL:DECLINE] 中文理由（stderr）', () => {
+-    expectWireEqual(
+-      eventToSubmitMessages({
+-        type: 'tool_use',
+-        content: '',
+-        metadata: { tool_name: 'Write', approval_decision: 'decline', deny_reason: '越权路径' },
+-      }),
+-      [{ event_type: 'tool_use', content: '[APPROVAL:DECLINE] Write\n越权路径', channel: 'stderr' }],
+-    );
++  it('tool_use 审批拒绝 → [APPROVAL:DECLINE] stderr 行 + tool_call 留痕行（F5b 双行新语义）', () => {
++    // F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝补发 tool_call 行
++    // （status='denied'，工具名+入参留痕）；timestamp 动态字段由比较器剥离。
++    const msgs = eventToSubmitMessages({
++      type: 'tool_use',
++      content: '',
++      metadata: { tool_name: 'Write', approval_decision: 'decline', deny_reason: '越权路径' },
++    });
++    expect(msgs).not.toBeNull();
++    expect(msgs!.length).toBe(2);
++    expect(msgs![0]!['channel']).toBe('stderr');
++    expect(msgs![0]!['content']).toBe('[APPROVAL:DECLINE] Write\n越权路径');
++    expect(msgs![1]!['channel']).toBe('tool_call');
++    const parsed = JSON.parse(String(msgs![1]!['content']));
++    expect(parsed.tool).toBe('Write');
++    expect(parsed.status).toBe('denied');
++    expect(parsed.reason).toBe('越权路径');
+   });
+ 
+   it('tool_use → 2 条：[TOOL_USE] stdout 行 + tool_call JSON（tool_use_id 多键兼容 + call_id 注入首条）', () => {
+@@ -326,3 +355,36 @@ describe('task-runner facade _eventToMessages 委托核心（收敛后一致性
+     },
+   );
+ });
++
++// ── F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝有痕 ──────────────
++
++describe('F5b: 审批拒绝路径 tool_call 行留痕', () => {
++  it('decline 事件输出 [APPROVAL:DECLINE] stderr 行 + tool_call JSON 行（工具名+入参+denied）', () => {
++    const ev: AgentEvent = {
++      type: 'tool_use',
++      content: '{"command":"rm -rf /tmp/x"}',
++      tool_name: 'Bash',
++      call_id: 'toolu_decline_1',
++      metadata: {
++        approval_decision: 'decline',
++        deny_reason: '用户拒绝该操作',
++        tool_name: 'Bash',
++        tool_input: { command: 'rm -rf /tmp/x' },
++        call_id: 'toolu_decline_1',
++      },
++    };
++    const msgs = eventToSubmitMessages(ev);
++    expect(msgs).not.toBeNull();
++    // 双行：stderr 拒绝行 + tool_call JSON 留痕行（修复前仅 stderr 单行 → 红）。
++    expect(msgs!.length).toBe(2);
++    const decline = msgs!.find((m) => m['channel'] === 'stderr');
++    expect(String(decline!['content'])).toContain('[APPROVAL:DECLINE]');
++    const tc = msgs!.find((m) => m['channel'] === 'tool_call');
++    expect(tc).toBeDefined();
++    const parsed = JSON.parse(String(tc!['content']));
++    expect(parsed.tool).toBe('Bash');
++    expect(parsed.args).toEqual({ command: 'rm -rf /tmp/x' });
++    expect(parsed.status).toBe('denied');
++    expect(parsed.tool_use_id).toBe('toolu_decline_1');
++  });
++});
+diff --git a/sillyhub-daemon/tests/model-error/classifier.test.ts b/sillyhub-daemon/tests/model-error/classifier.test.ts
+index 6e7d11506..60192d41a 100644
+--- a/sillyhub-daemon/tests/model-error/classifier.test.ts
++++ b/sillyhub-daemon/tests/model-error/classifier.test.ts
+@@ -472,3 +472,71 @@ describe('classifyModelError — 2026-09-12-session-live-display-fixes（R2 / D-
+     expect(b?.code).toBeNull();
+   });
+ });
++
++describe('classifyModelError — context_overflow 归类（F1a / 2026-10-12-session-defects task-07）', () => {
++  it('主实证：Claude CLI "Prompt is too long" → context_overflow', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'Prompt is too long',
++    });
++    expect(result?.type).toBe('context_overflow');
++    expect(result?.retryable).toBe(false);
++    expect(result?.message).toBe('会话上下文超出模型窗口');
++    expect(result?.hint).toContain('/compact');
++  });
++
++  it('provider 无关变体：maximum context length / context_length_exceeded / context window', () => {
++    const a = classifyModelError({
++      agent: 'codex',
++      isError: true,
++      resultText: "This model's maximum context length is 128000 tokens",
++    });
++    expect(a?.type).toBe('context_overflow');
++    const b = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      assistantStdout: 'API Error: context_length_exceeded',
++    });
++    expect(b?.type).toBe('context_overflow');
++    const c = classifyModelError({
++      agent: 'pi',
++      isError: true,
++      resultText: 'context window exceeded',
++    });
++    expect(c?.type).toBe('context_overflow');
++  });
++
++  it('插序防误归：4xx 状态码字面的超窗错误不落 auth_failed/rate_limited', () => {
++    const a = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'API Error: 400 prompt is too long: 250000 tokens > 200000 maximum',
++    });
++    expect(a?.type).toBe('context_overflow');
++    const b = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'error 403: prompt is too long',
++    });
++    expect(b?.type).toBe('context_overflow');
++  });
++
++  it('429 优先序保持：额度耗尽仍归 quota_exceeded（不吞并）', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'Request rejected (429) 已达到 5 小时的使用上限',
++    });
++    expect(result?.type).toBe('quota_exceeded');
++  });
++
++  it('非超窗文本不误命中（普通 401 凭证错误保持 auth_failed）', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'authentication error: invalid api key',
++    });
++    expect(result?.type).toBe('auth_failed');
++  });
++});
+diff --git a/sillyhub-daemon/tests/policy/filesystem-policy.test.ts b/sillyhub-daemon/tests/policy/filesystem-policy.test.ts
+index 04b506905..ea136981c 100644
+--- a/sillyhub-daemon/tests/policy/filesystem-policy.test.ts
++++ b/sillyhub-daemon/tests/policy/filesystem-policy.test.ts
+@@ -218,3 +218,53 @@ describe('PolicyEngine', () => {
+ 
+ // 触发 isWin 静态引用，避免未用警告（保留跨平台语义可见性）。
+ void isWin;
++
++
++// ── F4（2026-10-12-session-defects task-10）：anchor 透传 + deny 双拼写 ─────
++
++describe('F4: PolicyEngine anchor 透传 + deny 双拼写', () => {
++  let cache: PolicyCache;
++  let sink: ReturnType<typeof createMockSink>;
++  let engine: PolicyEngine;
++
++  beforeEach(() => {
++    cache = new PolicyCache();
++    sink = createMockSink();
++    engine = new PolicyEngine(cache, sink);
++    cache.set('rt-claude', [ALLOWED]);
++  });
++
++  it('anchor 传入：相对写锚定基点后命中白名单（放行）', () => {
++    // 相对目标 out.txt 经 anchor=ALLOWED 解析为 ALLOWED/out.txt → allow。
++    const d = engine.canWrite('rt-claude', 'out.txt', 'claude', 'Bash', ALLOWED);
++    expect(d.allowed).toBe(true);
++  });
++
++  it('anchor 未传：相对写按 daemon cwd 解析（越界 deny，现行为零回归）', () => {
++    const d = engine.canWrite('rt-claude', 'out.txt', 'claude', 'Bash');
++    // daemon cwd（测试进程 cwd）不在 ALLOWED 下 → deny；anchor 语义改变判定。
++    expect(d.allowed).toBe(false);
++  });
++
++  it('deny 且拼写不一致：文案附「原始路径 X 解析为 Y」双拼写提示', () => {
++    // 构造拼写不一致：normalizeCase 将盘符归一小写 → 原始大写盘符拼写
++    // （OUTSIDE = 'D:\evil_test.txt'）与 normalizedPath（'d:\evil_test.txt'）
++    // 字面不同 → 提示行携带双拼写。
++    const d = engine.canWrite('rt-claude', OUTSIDE, 'claude', 'Bash');
++    expect(d.allowed).toBe(false);
++    if (isWin && OUTSIDE !== d.normalizedPath) {
++      expect(d.reason).toContain('解析为');
++      expect(d.reason).toContain(OUTSIDE);
++    }
++  });
++
++  it('拼写一致（UNC 拒绝路径）：文案不含「解析为」提示行', () => {
++    // TS 源四反斜杠 = 运行时双反斜杠 UNC 前缀（resolveRealPath → UNC_REJECTED，
++    // buildDenyReason 走 CAUSE_UNC 三参调用，rawPath 未传 → 无提示行）。
++    const uncPath = '\\\\server' + '\\\\share' + '\\\\f';
++    const unc = engine.canWrite('rt-claude', uncPath, 'claude', 'Bash');
++    expect(unc.allowed).toBe(false);
++    expect(unc.reason).toContain('UNC');
++    expect(unc.reason).not.toContain('解析为');
++  });
++});
+diff --git a/sillyhub-daemon/tests/policy/path-utils.test.ts b/sillyhub-daemon/tests/policy/path-utils.test.ts
+index 50d88e18d..8f80f74ef 100644
+--- a/sillyhub-daemon/tests/policy/path-utils.test.ts
++++ b/sillyhub-daemon/tests/policy/path-utils.test.ts
+@@ -491,3 +491,55 @@ describe('task-10: isPathUnderAnyRoot 全场景 + 改前改后对照', () => {
+ 
+ // 触发 existsSync 静态引用（setup 用 mkdirSync，但保留 existsSync 以表达 fallback 语义可观测）。
+ void existsSync;
++
++
++
++// ── F4（2026-10-12-session-defects task-10 / D-007）：anchor 相对路径基点 ────
++
++describe('F4: anchor 相对路径解析基点', () => {
++  // 正斜杠形态跨平台可用（pathResolve/normalizePath 均接受）。
++  const ANCHOR = isWin ? 'D:/ws/root' : '/ws/root';
++
++  it('anchor 未传 = 现行为（两次调用同值，零回归）', () => {
++    expect(normalizePath('rel.txt')).toBe(normalizePath('rel.txt', undefined));
++  });
++
++  it('anchor 传入时相对路径锚定基点', () => {
++    expect(normalizePath('out.txt', ANCHOR)).toBe(resolve(ANCHOR, 'out.txt'));
++  });
++
++  it('绝对路径不受 anchor 影响', () => {
++    const abs = isWin ? 'D:/other/f.txt' : '/other/f.txt';
++    expect(normalizePath(abs, ANCHOR)).toBe(resolve(abs));
++  });
++
++  it('resolveRealPath 透传 anchor（不存在路径父目录 fallback 同锚点）', () => {
++    const got = resolveRealPath('out.txt', ANCHOR);
++    // 归一比较（normalizeCase 盘符小写 + 分隔符差异），锚点侧走同款解析。
++    const norm = (v: string) => resolveRealPath(v).toLowerCase();
++    expect(norm(got).startsWith(norm(ANCHOR))).toBe(true);
++  });
++
++  it('isPathUnderAnyRoot：anchor 锚定后相对目标命中根内拼写', () => {
++    // roots 以 ANCHOR 自身表达，target 为相对形态经 anchor 解析后应命中。
++    expect(isPathUnderAnyRoot('out.txt', [ANCHOR], ANCHOR)).toBe(true);
++  });
++
++  it('[SAFETY-INVARIANT] anchor 不传时越权判定与既有语义一致', () => {
++    expect(isPathUnderAnyRoot(OUTSIDE, [INSIDE])).toBe(false);
++  });
++});
++
++describe('F4 QA 回归：anchor 缺省 + 相对路径（P1 双拼修复守卫）', () => {
++  it('anchor 缺省：相对路径解析为 cwd/p（旧行为，非 cwd/p/p）', () => {
++    const got = normalizePath('rel.txt');
++    const want = resolve('rel.txt');
++    expect(got).toBe(want);
++    // 双拼守卫：结果不以「resolve(rel.txt)/rel.txt」结尾（QA P1 回归形态）。
++    expect(got.endsWith('rel.txt/rel.txt'.replace(/\//g, sep))).toBe(false);
++  });
++
++  it('anchor 为空串：与缺省同语义（回落 cwd）', () => {
++    expect(normalizePath('rel.txt', '')).toBe(resolve('rel.txt'));
++  });
++});
+diff --git a/sillyhub-daemon/tests/policy/shell-paths.test.ts b/sillyhub-daemon/tests/policy/shell-paths.test.ts
+index b41ab00f3..fed789e62 100644
+--- a/sillyhub-daemon/tests/policy/shell-paths.test.ts
++++ b/sillyhub-daemon/tests/policy/shell-paths.test.ts
+@@ -201,3 +201,35 @@ describe('extractShellWritePaths', () => {
+     expect(extractShellWritePaths('ls', 'bash')).toEqual([]);
+   });
+ });
++
++// ── F4（2026-10-12-session-defects task-10 / D-007）：flag token 过滤 ────────
++
++describe('F4: flag token 捕获即弃（-p 主实证）', () => {
++  it('bash: mkdir -p foo 不产出 -p', () => {
++    expect(extractShellWritePaths('mkdir -p foo && cd foo', 'bash')).not.toContain('-p');
++    expect(extractShellWritePaths('mkdir -p foo', 'bash')).toContain('foo');
++  });
++
++  it('bash: unzip -p 重定向形态不产出 -p（生产 deny <工作区>/-p 实证同构）', () => {
++    const out = extractShellWritePaths('unzip -p x.zip a > b.txt', 'bash');
++    expect(out).not.toContain('-p');
++    expect(out).toContain('b.txt');
++  });
++
++  it('bash: touch -p / tee -p 同口径过滤', () => {
++    expect(extractShellWritePaths('touch -p x', 'bash')).not.toContain('-p');
++    expect(extractShellWritePaths('tee -p f.log', 'bash')).not.toContain('-p');
++  });
++
++  it('powershell: 位置参数捕获不产出 flag token', () => {
++    const out = extractShellWritePaths('Set-Content -Path out.txt', 'powershell');
++    expect(out).toContain('out.txt');
++    expect(out).not.toContain('-Path');
++  });
++
++  it('cmd: mkdir / del / 重定向同口径过滤', () => {
++    expect(extractShellWritePaths('mkdir /p dir1', 'cmd')).not.toContain('/p');
++    const redir = extractShellWritePaths('echo hi > -p', 'cmd');
++    expect(redir).not.toContain('-p');
++  });
++});
+diff --git a/sillyhub-daemon/tests/task-runner.test.ts b/sillyhub-daemon/tests/task-runner.test.ts
+index d4ad07584..e7936828c 100644
+--- a/sillyhub-daemon/tests/task-runner.test.ts
++++ b/sillyhub-daemon/tests/task-runner.test.ts
+@@ -1008,9 +1008,16 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
+     runner: TaskRunner,
+     ev: AgentEvent,
+   ): Record<string, unknown>[] | null {
+-    return (runner as unknown as {
++    const msgs = (runner as unknown as {
+       _eventToMessages: (ev: AgentEvent) => Record<string, unknown>[] | null;
+     })._eventToMessages(ev);
++    // F2a（2026-10-12-session-defects task-01 / FR-02）：wire 消息级 timestamp
++    // 为动态事件时刻（值不可字面化），golden 比较前剥离——值形态由
++    // event-wire-timestamp.test.ts 专项守护；既有 golden 值断言语义不变。
++    if (Array.isArray(msgs)) {
++      return msgs.map(({ timestamp: _ts, ...rest }) => rest);
++    }
++    return msgs;
+   }
+ 
+   it('text 事件 → 1 条 [ASSISTANT] content (stdout)', () => {

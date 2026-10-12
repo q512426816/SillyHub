@@ -1008,9 +1008,16 @@ describe('_eventToMessages（对齐老 _format_conversation_log）', () => {
     runner: TaskRunner,
     ev: AgentEvent,
   ): Record<string, unknown>[] | null {
-    return (runner as unknown as {
+    const msgs = (runner as unknown as {
       _eventToMessages: (ev: AgentEvent) => Record<string, unknown>[] | null;
     })._eventToMessages(ev);
+    // F2a（2026-10-12-session-defects task-01 / FR-02）：wire 消息级 timestamp
+    // 为动态事件时刻（值不可字面化），golden 比较前剥离——值形态由
+    // event-wire-timestamp.test.ts 专项守护；既有 golden 值断言语义不变。
+    if (Array.isArray(msgs)) {
+      return msgs.map(({ timestamp: _ts, ...rest }) => rest);
+    }
+    return msgs;
   }
 
   it('text 事件 → 1 条 [ASSISTANT] content (stdout)', () => {

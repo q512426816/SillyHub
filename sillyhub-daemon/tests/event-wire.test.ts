@@ -30,9 +30,30 @@ function makeStubState(sessionId = 's1'): SessionState {
   return { sessionId } as unknown as SessionState;
 }
 
-/** 逐字节等价断言：JSON.stringify 键序敏感比较。 */
+/**
+ * 逐字节等价断言：JSON.stringify 键序敏感比较。
+ * F2a（2026-10-12-session-defects task-01）：wire 消息级 timestamp 为动态
+ * 事件时刻（值不可字面化），比较前对两侧行递归剥离该字段——既有 golden
+ * 值断言语义保持不变；timestamp 本身的在场性/形态由
+ * event-wire-timestamp.test.ts 专项守护。
+ */
+function stripWireTimestamp(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripWireTimestamp);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === 'timestamp') continue;
+      out[k] = stripWireTimestamp(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 function expectWireEqual(actual: unknown, expected: unknown): void {
-  expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
+  expect(JSON.stringify(stripWireTimestamp(actual))).toBe(
+    JSON.stringify(stripWireTimestamp(expected)),
+  );
 }
 
 // ── 事件轨 report dict（session-manager 侧核心）────────────────────────────
@@ -184,15 +205,23 @@ describe('eventToSubmitMessages（1:N 渲染，1:1 复现老 SERVER 路径格式
     expect(eventToSubmitMessages({ type: 'text', content: '' })).toBeNull();
   });
 
-  it('tool_use 审批拒绝 → [APPROVAL:DECLINE] 中文理由（stderr）', () => {
-    expectWireEqual(
-      eventToSubmitMessages({
-        type: 'tool_use',
-        content: '',
-        metadata: { tool_name: 'Write', approval_decision: 'decline', deny_reason: '越权路径' },
-      }),
-      [{ event_type: 'tool_use', content: '[APPROVAL:DECLINE] Write\n越权路径', channel: 'stderr' }],
-    );
+  it('tool_use 审批拒绝 → [APPROVAL:DECLINE] stderr 行 + tool_call 留痕行（F5b 双行新语义）', () => {
+    // F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝补发 tool_call 行
+    // （status='denied'，工具名+入参留痕）；timestamp 动态字段由比较器剥离。
+    const msgs = eventToSubmitMessages({
+      type: 'tool_use',
+      content: '',
+      metadata: { tool_name: 'Write', approval_decision: 'decline', deny_reason: '越权路径' },
+    });
+    expect(msgs).not.toBeNull();
+    expect(msgs!.length).toBe(2);
+    expect(msgs![0]!['channel']).toBe('stderr');
+    expect(msgs![0]!['content']).toBe('[APPROVAL:DECLINE] Write\n越权路径');
+    expect(msgs![1]!['channel']).toBe('tool_call');
+    const parsed = JSON.parse(String(msgs![1]!['content']));
+    expect(parsed.tool).toBe('Write');
+    expect(parsed.status).toBe('denied');
+    expect(parsed.reason).toBe('越权路径');
   });
 
   it('tool_use → 2 条：[TOOL_USE] stdout 行 + tool_call JSON（tool_use_id 多键兼容 + call_id 注入首条）', () => {
@@ -325,4 +354,37 @@ describe('task-runner facade _eventToMessages 委托核心（收敛后一致性�
       expect(JSON.stringify(stripTimestamp(viaFacade))).toBe(JSON.stringify(stripTimestamp(viaCore)));
     },
   );
+});
+
+// ── F5b（2026-10-12-session-defects task-05 / FR-06）：拒绝有痕 ──────────────
+
+describe('F5b: 审批拒绝路径 tool_call 行留痕', () => {
+  it('decline 事件输出 [APPROVAL:DECLINE] stderr 行 + tool_call JSON 行（工具名+入参+denied）', () => {
+    const ev: AgentEvent = {
+      type: 'tool_use',
+      content: '{"command":"rm -rf /tmp/x"}',
+      tool_name: 'Bash',
+      call_id: 'toolu_decline_1',
+      metadata: {
+        approval_decision: 'decline',
+        deny_reason: '用户拒绝该操作',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm -rf /tmp/x' },
+        call_id: 'toolu_decline_1',
+      },
+    };
+    const msgs = eventToSubmitMessages(ev);
+    expect(msgs).not.toBeNull();
+    // 双行：stderr 拒绝行 + tool_call JSON 留痕行（修复前仅 stderr 单行 → 红）。
+    expect(msgs!.length).toBe(2);
+    const decline = msgs!.find((m) => m['channel'] === 'stderr');
+    expect(String(decline!['content'])).toContain('[APPROVAL:DECLINE]');
+    const tc = msgs!.find((m) => m['channel'] === 'tool_call');
+    expect(tc).toBeDefined();
+    const parsed = JSON.parse(String(tc!['content']));
+    expect(parsed.tool).toBe('Bash');
+    expect(parsed.args).toEqual({ command: 'rm -rf /tmp/x' });
+    expect(parsed.status).toBe('denied');
+    expect(parsed.tool_use_id).toBe('toolu_decline_1');
+  });
 });

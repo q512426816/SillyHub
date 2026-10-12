@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ModelErrorType(StrEnum):
@@ -18,6 +18,7 @@ class ModelErrorType(StrEnum):
     AUTH_FAILED = "auth_failed"  # 凭证失效/无效（401/403）
     QUOTA_EXCEEDED = "quota_exceeded"  # 额度/配额耗尽（429，不可重试）
     RATE_LIMITED = "rate_limited"  # 瞬时限流（429，可重试）
+    CONTEXT_OVERFLOW = "context_overflow"  # 上下文超窗（F1a，走原生压缩续跑编排）
     TIMEOUT = "timeout"
     MODEL_NOT_FOUND = "model_not_found"
     NETWORK = "network"  # 连接失败/DNS
@@ -33,6 +34,21 @@ class ModelErrorDTO(BaseModel):
     """
 
     type: ModelErrorType
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_unknown_type(cls, value: object) -> object:
+        """R-05 宽松校验（2026-10-12-session-defects task-07）：未知枚举值归
+        UNKNOWN 而非 422 拒绝——error 挂在 close_interactive_run 请求体，硬拒
+        会导致 run 无法收口（卡 running，比归因退化严重）。部署倒置窗口
+        （新 daemon 先于 backend 发新枚举）据此安全降级为 unknown 归因。"""
+        if isinstance(value, str):
+            try:
+                return ModelErrorType(value)
+            except ValueError:
+                return ModelErrorType.UNKNOWN
+        return value
+
     code: str | None = None  # 原始错误码（如 "1310" / "429" / null）
     message: str  # 可读原因（中文）
     retryable: bool

@@ -1074,7 +1074,7 @@
           "workspace"
         ],
         "summary": "Init Workspace",
-        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本\nworkspace 成员（即便在其它 workspace 有 workspace:write）403，不触达\n``start_init_dispatch`` 的 actor binding 解析。",
+        "description": "Initialize the workspace for the current user (D-002/D-009).\n\nEnsures the spec workspace container exists, then dispatches an init-mode\ninteractive lease to the member's daemon.  The daemon writes\n``.sillyspec-platform.json`` to the member's local project directory and\npulls the latest spec bundle.\n\nReturns the ``lease_id``, ``runtime_id``, and ``claim_token``.\n\n鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped\nWORKSPACE_READ——init 语义是\"为当前成员初始化本地副本\"，developer 等\n只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id\n62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409\nMemberBindingNotFound），归档区禁写由 ensure_writable 兜底。\n修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；\n其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有\nworkspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。",
         "operationId": "init_workspace_api_workspaces__workspace_id__init_post",
         "parameters": [
           {
@@ -55235,6 +55235,7 @@
           "auth_failed",
           "quota_exceeded",
           "rate_limited",
+          "context_overflow",
           "timeout",
           "model_not_found",
           "network",

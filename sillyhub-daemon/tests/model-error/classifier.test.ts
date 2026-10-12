@@ -472,3 +472,71 @@ describe('classifyModelError — 2026-09-12-session-live-display-fixes（R2 / D-
     expect(b?.code).toBeNull();
   });
 });
+
+describe('classifyModelError — context_overflow 归类（F1a / 2026-10-12-session-defects task-07）', () => {
+  it('主实证：Claude CLI "Prompt is too long" → context_overflow', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'Prompt is too long',
+    });
+    expect(result?.type).toBe('context_overflow');
+    expect(result?.retryable).toBe(false);
+    expect(result?.message).toBe('会话上下文超出模型窗口');
+    expect(result?.hint).toContain('/compact');
+  });
+
+  it('provider 无关变体：maximum context length / context_length_exceeded / context window', () => {
+    const a = classifyModelError({
+      agent: 'codex',
+      isError: true,
+      resultText: "This model's maximum context length is 128000 tokens",
+    });
+    expect(a?.type).toBe('context_overflow');
+    const b = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      assistantStdout: 'API Error: context_length_exceeded',
+    });
+    expect(b?.type).toBe('context_overflow');
+    const c = classifyModelError({
+      agent: 'pi',
+      isError: true,
+      resultText: 'context window exceeded',
+    });
+    expect(c?.type).toBe('context_overflow');
+  });
+
+  it('插序防误归：4xx 状态码字面的超窗错误不落 auth_failed/rate_limited', () => {
+    const a = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'API Error: 400 prompt is too long: 250000 tokens > 200000 maximum',
+    });
+    expect(a?.type).toBe('context_overflow');
+    const b = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'error 403: prompt is too long',
+    });
+    expect(b?.type).toBe('context_overflow');
+  });
+
+  it('429 优先序保持：额度耗尽仍归 quota_exceeded（不吞并）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'Request rejected (429) 已达到 5 小时的使用上限',
+    });
+    expect(result?.type).toBe('quota_exceeded');
+  });
+
+  it('非超窗文本不误命中（普通 401 凭证错误保持 auth_failed）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'authentication error: invalid api key',
+    });
+    expect(result?.type).toBe('auth_failed');
+  });
+});

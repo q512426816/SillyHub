@@ -74,6 +74,31 @@ class _SubmitState:
     agent_run: AgentRun | None = None
 
 
+# F2a（2026-10-12-session-defects task-01 / FR-02）：wire 事件时间戳钟差容忍带
+# ——daemon 侧时钟漂移超此带视为不可信，回落本地时钟（防污染时间线）。
+_EVENT_TS_MAX_SKEW = timedelta(minutes=5)
+
+
+def _event_timestamp(msg: dict, fallback: datetime) -> datetime:
+    """解析 wire 消息级 timestamp（ISO-8601 事件到达时刻，event-wire 注入）。
+
+    daemon 缺省（旧版零回归）/ 非 str / 解析失败 / naive 无时区 / 与本地钟差
+    超 5 分钟 → 回落 fallback（st.now，旧行为逐字节一致）。
+    """
+    raw = msg.get("timestamp")
+    if not isinstance(raw, str) or not raw:
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return fallback
+    if parsed.tzinfo is None:
+        return fallback
+    if abs((datetime.now(UTC) - parsed).total_seconds()) > _EVENT_TS_MAX_SKEW.total_seconds():
+        return fallback
+    return parsed
+
+
 async def submit_messages(
     svc,
     lease_id: uuid.UUID,
@@ -563,10 +588,16 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
         # 独立 INSERT 自带 metadata_，与本键互不覆盖，design §8）。
         agent_event_payload = msg.get("_agent_event") if isinstance(msg, dict) else None
 
+        # F2a（task-01 / FR-02）：行级时间戳优先取 wire 事件时刻（旧版 daemon
+        # 无字段 / 非法 / 钟差超带回落后 st.now）——消除整批共享 st.now 单值的
+        # 同毫秒时间戳塌缩（生产 8~31 行同刻度实证）。SSE 推送（下方
+        # published_logs）用同一解析值，实时流与落库时间线一致。
+        row_timestamp = _event_timestamp(msg, st.now)
+
         log_entry = AgentRunLog(
             id=log_id,
             run_id=effective_run_id,
-            timestamp=st.now,
+            timestamp=row_timestamp,
             channel=channel,
             # ql-20260626-001 放宽（原 5000 截断 agent 长答复/总结）
             content_redacted=content[:50000],
@@ -602,7 +633,9 @@ async def _submit_process_flat_messages(svc, st: _SubmitState) -> None:
                 "log_id": str(log_id),
                 "channel": channel,
                 "content": content[:50000],  # ql-20260626-001 同 DB 放宽
-                "timestamp": st.now.isoformat().replace("+00:00", "Z"),
+                # F2a（task-01 / FR-02）：与落库行同一解析值——实时流与 DB
+                # 时间线一致（上方 override 撤回令箭行不落库，st.now 口径不变）。
+                "timestamp": row_timestamp.isoformat().replace("+00:00", "Z"),
                 # 2026-06-28-daemon-subagent-transcript task-09 / FR-08：归属三列
                 # 透传到 SSE 实时流——run channel publish 整个 payload，session
                 # channel（publish_submitted_messages）也取这三字段。让前端实时

@@ -201,3 +201,35 @@ describe('extractShellWritePaths', () => {
     expect(extractShellWritePaths('ls', 'bash')).toEqual([]);
   });
 });
+
+// ── F4（2026-10-12-session-defects task-10 / D-007）：flag token 过滤 ────────
+
+describe('F4: flag token 捕获即弃（-p 主实证）', () => {
+  it('bash: mkdir -p foo 不产出 -p', () => {
+    expect(extractShellWritePaths('mkdir -p foo && cd foo', 'bash')).not.toContain('-p');
+    expect(extractShellWritePaths('mkdir -p foo', 'bash')).toContain('foo');
+  });
+
+  it('bash: unzip -p 重定向形态不产出 -p（生产 deny <工作区>/-p 实证同构）', () => {
+    const out = extractShellWritePaths('unzip -p x.zip a > b.txt', 'bash');
+    expect(out).not.toContain('-p');
+    expect(out).toContain('b.txt');
+  });
+
+  it('bash: touch -p / tee -p 同口径过滤', () => {
+    expect(extractShellWritePaths('touch -p x', 'bash')).not.toContain('-p');
+    expect(extractShellWritePaths('tee -p f.log', 'bash')).not.toContain('-p');
+  });
+
+  it('powershell: 位置参数捕获不产出 flag token', () => {
+    const out = extractShellWritePaths('Set-Content -Path out.txt', 'powershell');
+    expect(out).toContain('out.txt');
+    expect(out).not.toContain('-Path');
+  });
+
+  it('cmd: mkdir / del / 重定向同口径过滤', () => {
+    expect(extractShellWritePaths('mkdir /p dir1', 'cmd')).not.toContain('/p');
+    const redir = extractShellWritePaths('echo hi > -p', 'cmd');
+    expect(redir).not.toContain('-p');
+  });
+});

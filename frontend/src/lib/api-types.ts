@@ -563,9 +563,14 @@ export interface paths {
          *
          *     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
          *
-         *     鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
-         *     workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
-         *     ``start_init_dispatch`` 的 actor binding 解析。
+         *     鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped
+         *     WORKSPACE_READ——init 语义是"为当前成员初始化本地副本"，developer 等
+         *     只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id
+         *     62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409
+         *     MemberBindingNotFound），归档区禁写由 ensure_writable 兜底。
+         *     修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；
+         *     其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有
+         *     workspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。
          */
         post: operations["init_workspace_api_workspaces__workspace_id__init_post"];
         delete?: never;
@@ -20348,7 +20353,7 @@ export interface components {
          * @description 模型错误类型（与 daemon ModelErrorType 同构）。
          * @enum {string}
          */
-        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
+        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "context_overflow" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
         /**
          * ModelUsageItemRead
          * @description 终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。

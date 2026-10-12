@@ -1298,3 +1298,58 @@ class TestRequestValidation422:
         _, token = await _create_user(db_session, name="vtier", admin=True)
         resp = await _post_export(client, token, [uuid.uuid4()], tier="both")
         assert resp.status_code == 422
+
+
+class TestFullExportTaskDedupe:
+    """full 档任务快照读侧去重（2026-10-12-session-defects task-06 / FR-07）。
+
+    历史幽灵成对行（同名 stopped 空摘要 + completed 真摘要，写侧 task-03
+    根治前的存量）在导出渲染收敛为每任务名恰一行真实终态行。
+    """
+
+    @pytest.mark.asyncio
+    async def test_ghost_pair_collapsed_to_single_terminal_row(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        owner, token = await _create_user(db_session, name="dedupeexport", admin=True)
+        sess = await _seed_session(db_session, user_id=owner.id, title="去重导出", turn_count=1)
+        now = datetime.now(UTC)
+        db_session.add_all(
+            [
+                AgentSessionTask(
+                    session_id=sess.id,
+                    run_id=uuid.uuid4(),
+                    task_id="callu_ghost",
+                    task_name="独立评审 VO 改名修复",
+                    status="stopped",
+                    message="轮次已结束，任务未上报终态",
+                    started_at=now - timedelta(minutes=30),
+                    finished_at=now - timedelta(minutes=10),
+                    updated_at=now - timedelta(minutes=10),
+                ),
+                AgentSessionTask(
+                    session_id=sess.id,
+                    run_id=uuid.uuid4(),
+                    task_id="ad1e466fdeadbeef",
+                    task_name="独立评审 VO 改名修复",
+                    status="completed",
+                    summary="评审完成，review.json 已写入",
+                    started_at=now - timedelta(minutes=30),
+                    finished_at=now - timedelta(minutes=5),
+                    updated_at=now - timedelta(minutes=5),
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        resp = await _post_export(client, token, [sess.id], tier="full")
+        assert resp.status_code == 200, resp.text
+        base_dir = f"去重导出_{str(sess.id)[:8]}"
+        full = json.loads(_zip_read(resp, f"{base_dir}/full.json"))
+        assert full["tasks"] == [
+            {
+                "task_name": "独立评审 VO 改名修复",
+                "status": "completed",
+                "summary": "评审完成，review.json 已写入",
+            }
+        ]

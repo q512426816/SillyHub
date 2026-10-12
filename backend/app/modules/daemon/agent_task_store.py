@@ -201,6 +201,82 @@ def _non_none_overrides(event: AgentTaskStatusEvent) -> dict[str, object]:
     return {key: value for key, value in candidates.items() if value is not None}
 
 
+async def _resolve_row_with_ghost_reconciliation(
+    session: AsyncSession, event: AgentTaskStatusEvent
+) -> AgentSessionTask | None:
+    """定位 upsert 目标行（含幽灵冒名行重映射/吸收，task-03 / D-009@v1）。
+
+    事件携带 tool_use_id 且异于 task_id（SDK 真帧关联键形态）时，先查同会话
+    task_id==tool_use_id 的冒名行（tool_use 派生 running 以 call id 冒名，见
+    upsert docstring 根因段）：
+
+    - 冒名行存在 + 真实行不存在 → 冒名行 task_id/task_name 重映射转正后作为
+      目标行（保 started_at 首见时点，后续字段照常 latest-wins）；
+    - 冒名行存在 + 真实行已并存（存量成对行）→ 吸收删除冒名行，目标行=真实行
+      （同实例无独有信息，删除满足「一逻辑任务一行」不变量）；
+    - 冒名行 task_name 与事件名不同 → 不合并（防误并异实例，读侧去重兜底）。
+
+    均带 FOR UPDATE 行锁（对齐既有 P3-1 口径）；未命中冒名行或事件无关联键时
+    退化为按 (session_id, task_id) 的原定位。
+    """
+    tool_use_id = event.tool_use_id
+    if not tool_use_id or tool_use_id == event.task_id:
+        return await _select_row_for_update(session, event.session_id, event.task_id)
+
+    ghost = await _select_row_for_update(session, event.session_id, tool_use_id)
+    if ghost is None:
+        return await _select_row_for_update(session, event.session_id, event.task_id)
+    if (ghost.task_name or "") != (event.task_name or ""):
+        _log.warning(
+            "agent_task_ghost_merge_skipped_name_mismatch",
+            session_id=str(event.session_id),
+            ghost_task_id=tool_use_id,
+            event_task_id=event.task_id,
+        )
+        return await _select_row_for_update(session, event.session_id, event.task_id)
+
+    real = await _select_row_for_update(session, event.session_id, event.task_id)
+    if real is not None:
+        # 存量成对行：真实行已在，吸收删除冒名行（无独有信息）。
+        await session.delete(ghost)
+        await session.flush()
+        _log.info(
+            "agent_task_ghost_row_absorbed",
+            session_id=str(event.session_id),
+            ghost_task_id=tool_use_id,
+            real_task_id=event.task_id,
+        )
+        return real
+    # 真实行不存在：冒名行重映射转正（唯一约束无冲突——real 已查空）。
+    ghost.task_id = event.task_id
+    ghost.task_name = event.task_name
+    await session.flush()
+    _log.info(
+        "agent_task_ghost_row_remapped",
+        session_id=str(event.session_id),
+        old_task_id=tool_use_id,
+        new_task_id=event.task_id,
+    )
+    return ghost
+
+
+async def _select_row_for_update(
+    session: AsyncSession, session_id: uuid.UUID, task_id: str
+) -> AgentSessionTask | None:
+    """按 (session_id, task_id) 行锁读单行（评审 P3-1 口径：FOR UPDATE 串行化
+    与 close 清扫的并发交错，迟到 running 不复活语义对在途事件同样成立）。"""
+    return (
+        await session.execute(
+            select(AgentSessionTask)
+            .where(
+                AgentSessionTask.session_id == session_id,
+                AgentSessionTask.task_id == task_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+
 async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) -> AgentSessionTask:
     """Upsert one ``agent_session_task`` row from an ``agent_task_status`` event.
 
@@ -208,23 +284,23 @@ async def upsert_agent_task(session: AsyncSession, event: AgentTaskStatusEvent) 
     查行 insert-or-update 并 commit，返回写入后的行（终态吸收跳过时返回原行，
     不产生写、不 commit）。并发同键双插由唯一约束兜底——后写者撞约束抛错进
     调用方旁路 except，下一次事件即恢复单行，无需在此重试。
+
+    2026-10-12-session-defects task-03（FR-04 / D-005 / 执行期裁决 D-009@v1）
+    幽灵成对行根治：tool_use 派生的 running 事件以 tool-use call id 冒充
+    task_id（sillyhub-daemon/src/interactive/claude-events.ts:895
+    ``strOf(toolInput?.['task_id']) || tId``——Agent 工具入参无 task_id 时回落
+    call id），与 SDK 帧的真实 harness task_id 同任务双 id，(session_id, task_id)
+    定位键各落一行；call-id 行永收不到终态、被清扫成 stopped(空摘要)，真实行
+    completed(真摘要)——生产 21 组「同名 stopped+completed」成对行成因。收口：
+    事件携带 tool_use_id 且异于 task_id、同会话存在 task_id==tool_use_id 且
+    task_name 同名的冒名行时——真实行不存在则把冒名行 task_id 重映射转正
+    （保 started_at），真实行已并存则吸收删除冒名行（同实例无独有信息）；
+    名不同不合并（防误并异实例，残留成对行由读侧去重兜底）。无 tool_use_id
+    的合法重试重生成（同名异 task_id，生产「评审后断点续跑收口」×6 实证）
+    照旧各落一行，零影响。
     """
     now = datetime.now(UTC)
-    # 评审 P3-1 修复（2026-10-10-run-close-task-sweep）：FOR UPDATE 行锁读——
-    # 与 close 清扫（持 run 行锁后 UPDATE 本表）的跨 commit 并发交错中，无锁
-    # SELECT 快照可能读过期 running（close 已 commit stopped），随后 UPDATE 把
-    # stopped 覆写回 running（丢失更新 + 残留 finished_at）。行锁串行化后读到
-    # 的必是已提交终值，语义②「迟到 running 不复活」对在途事件同样成立。
-    row = (
-        await session.execute(
-            select(AgentSessionTask)
-            .where(
-                AgentSessionTask.session_id == event.session_id,
-                AgentSessionTask.task_id == event.task_id,
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
+    row = await _resolve_row_with_ghost_reconciliation(session, event)
     overrides = _non_none_overrides(event)
 
     if row is None:

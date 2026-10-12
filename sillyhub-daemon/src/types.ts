@@ -706,6 +706,12 @@ export interface LeaseClaimResult {
 export interface LeaseMessage {
   /** 事件类型（Python 原始 event_type 字符串，未做 IR 收敛）。 */
   eventType: string;
+  /**
+   * 事件到达时刻（ISO-8601；2026-10-12-session-defects task-01 / FR-02）。
+   * producer=event-wire 两轨构造点捕获 → submit payload 透传 → consumer=
+   * backend submit_steps（解析失败/钟差>5min 回落本地时钟）。缺省=旧行为。
+   */
+  timestamp?: string;
   /** 文本内容（非空时才序列化）。 */
   content?: string;
   /** 工具名（非空时才序列化）。 */

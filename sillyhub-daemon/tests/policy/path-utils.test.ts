@@ -491,3 +491,55 @@ describe('task-10: isPathUnderAnyRoot 全场景 + 改前改后对照', () => {
 
 // 触发 existsSync 静态引用（setup 用 mkdirSync，但保留 existsSync 以表达 fallback 语义可观测）。
 void existsSync;
+
+
+
+// ── F4（2026-10-12-session-defects task-10 / D-007）：anchor 相对路径基点 ────
+
+describe('F4: anchor 相对路径解析基点', () => {
+  // 正斜杠形态跨平台可用（pathResolve/normalizePath 均接受）。
+  const ANCHOR = isWin ? 'D:/ws/root' : '/ws/root';
+
+  it('anchor 未传 = 现行为（两次调用同值，零回归）', () => {
+    expect(normalizePath('rel.txt')).toBe(normalizePath('rel.txt', undefined));
+  });
+
+  it('anchor 传入时相对路径锚定基点', () => {
+    expect(normalizePath('out.txt', ANCHOR)).toBe(resolve(ANCHOR, 'out.txt'));
+  });
+
+  it('绝对路径不受 anchor 影响', () => {
+    const abs = isWin ? 'D:/other/f.txt' : '/other/f.txt';
+    expect(normalizePath(abs, ANCHOR)).toBe(resolve(abs));
+  });
+
+  it('resolveRealPath 透传 anchor（不存在路径父目录 fallback 同锚点）', () => {
+    const got = resolveRealPath('out.txt', ANCHOR);
+    // 归一比较（normalizeCase 盘符小写 + 分隔符差异），锚点侧走同款解析。
+    const norm = (v: string) => resolveRealPath(v).toLowerCase();
+    expect(norm(got).startsWith(norm(ANCHOR))).toBe(true);
+  });
+
+  it('isPathUnderAnyRoot：anchor 锚定后相对目标命中根内拼写', () => {
+    // roots 以 ANCHOR 自身表达，target 为相对形态经 anchor 解析后应命中。
+    expect(isPathUnderAnyRoot('out.txt', [ANCHOR], ANCHOR)).toBe(true);
+  });
+
+  it('[SAFETY-INVARIANT] anchor 不传时越权判定与既有语义一致', () => {
+    expect(isPathUnderAnyRoot(OUTSIDE, [INSIDE])).toBe(false);
+  });
+});
+
+describe('F4 QA 回归：anchor 缺省 + 相对路径（P1 双拼修复守卫）', () => {
+  it('anchor 缺省：相对路径解析为 cwd/p（旧行为，非 cwd/p/p）', () => {
+    const got = normalizePath('rel.txt');
+    const want = resolve('rel.txt');
+    expect(got).toBe(want);
+    // 双拼守卫：结果不以「resolve(rel.txt)/rel.txt」结尾（QA P1 回归形态）。
+    expect(got.endsWith('rel.txt/rel.txt'.replace(/\//g, sep))).toBe(false);
+  });
+
+  it('anchor 为空串：与缺省同语义（回落 cwd）', () => {
+    expect(normalizePath('rel.txt', '')).toBe(resolve('rel.txt'));
+  });
+});

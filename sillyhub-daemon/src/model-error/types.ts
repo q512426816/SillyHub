@@ -12,6 +12,7 @@ export type ModelErrorType =
   | 'auth_failed'      // 凭证失效/无效（401/403）
   | 'quota_exceeded'   // 额度/配额耗尽（429，不可重试）
   | 'rate_limited'     // 瞬时限流（429，可重试）
+  | 'context_overflow' // 会话上下文超出模型窗口（2026-10-12-session-defects F1a，不可重试，走原生压缩续跑编排）
   | 'timeout'
   | 'model_not_found'
   | 'network'          // 连接失败/DNS
