@@ -1,0 +1,82 @@
+{
+  "change": "2026-10-12-borrow-ctx-truncate-rest",
+  "baseline": "ea4c578722067a22ebba63b78fa16ed7f5322e2d",
+  "head": "1cb57618a2cc9c6535c086946005b29ca8938cf0",
+  "files": [
+    ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/requirements.md",
+    ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/tasks.md",
+    "sillyhub-daemon/src/borrow-sandbox-context.ts",
+    "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+    ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/design.md",
+    ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/proposal.md",
+    ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/review.json.superseded-20261012T013711"
+  ],
+  "totals": {
+    "files": 7,
+    "additions": 226,
+    "deletions": 8
+  },
+  "savedAt": "2026-10-12T01:37:13.761Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ea4c578722067a22ebba63b78fa16ed7f5322e2d",
+    "totals": {
+      "files": 2,
+      "additions": 52,
+      "deletions": 8
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/borrow-sandbox-context.ts",
+        "additions": 16,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/borrow-sandbox-context.test.ts",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "624a4a9874b676ffc1b9b6ae5d28c7726d21a5715c3855c79a2e3e6de485ec72",
+  "patchStatus": "ok"
+}

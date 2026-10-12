@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-borrow-ctx-truncate-rest",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1cb57618a2cc9c6535c086946005b29ca8938cf0",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "（原 P3-1，已清偿核销）requirements.md 测试绑定行用例名漏「slug/」",
+      "evidence": "1cb57618a 提交 requirements.md（此前为未跟踪文件，本次随清偿一并入库），FR-01/FR-02 绑定行现为「name/slug/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」，与 sillyhub-daemon/tests/borrow-sandbox-context.test.ts:168 实际用例名逐字一致。核销。",
+      "location": ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/requirements.md:54-55",
+      "disposition": "resolved"
+    },
+    {
+      "severity": "P3",
+      "title": "truncateText JSDoc 计数改「六处」后仍与实现不符（实际七字段/八处调用表达式，漏计 repo_url）",
+      "evidence": "1cb57618a 将注释由「三处共用」改为「六处共用」，沿用原评审 evidence 的六字段清单（description/tech_stack/name/slug/display_alias/root_path）——该清单本身漏了 repo_url。实测当前 HEAD：truncateText 调用表达式 8 处（sillyhub-daemon/src/borrow-sandbox-context.ts:54,57,63,89,90,91,111,121），去重字段 7 个——:111 repo_url 截断系 2026-10-11-borrow-ctx-metadata-truncate 既有防线，真实存在。字段口径应为「七处」。计数误差源头在原评审 P3-2 的 evidence，清偿时未独立复核即照抄。纯注释失准，无行为影响，不改变 PASS 结论；建议后续改为「七处」或去掉具体数字（如「进正文自由文本字段统一共用」）以免再陈旧。",
+      "location": "sillyhub-daemon/src/borrow-sandbox-context.ts:42",
+      "disposition": "open"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——增量仅注释/文档文字，零行为改动，纯函数单次入参渲染结论维持（原评审口径）",
+    "并发": "ok——无共享状态变化，写入落盘仍在 daemon marker 分支（原评审口径维持）",
+    "切换": "ok——无状态迁移，截断只影响单次渲染输出（原评审口径维持）",
+    "作用域": "ok——fba50803b0a5d7e41d2857e34ba00075a44a34e4..HEAD 仅 1cb57618a 一个 commit，触碰且仅触碰 requirements.md 与 borrow-sandbox-context.ts 两文件；交付面（sillyhub-daemon/ frontend/ backend/）diff 仅 ：42 一行注释，无逻辑/行为漂移；工作区另有个别未提交 .sillyspec 知识库/变更目录产物（非交付面），与本评审无关"
+  },
+  "reviewedAt": "2026-10-12T09:39:33+08:00"
+}

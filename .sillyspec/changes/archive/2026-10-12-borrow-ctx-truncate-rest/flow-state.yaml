@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24h 风险审查 P3（408bc0889 收口不全）——借用沙箱 AGENTS.md 注入面截断只覆盖 description/tech_stack/repo_url 三字段，同文件的
+  name/slug/display_alias（工作区行）与 root_path（真实代码目录行，backend 上限 4096 且不删换行/反引号）仍原样进 agent 自动加载正文，防线不一致；lender
+  登记含超长/markdown 的字段即可向 borrower 会话注入多行指令文本，与 R-02 威胁模型同族。
+
+  成功标准：
+
+  - 工作区行的 name/slug/display_alias 与真实代码目录行的 root_path 均套既有 truncateText（500 阈值+省略标注），行为与既有三字段逐字一致；type/default_branch 等
+  backend 受约束短字段不在本变更面
+
+  - 新增用例先红后绿：name>500/root_path>500/三者并存超 500/边界 500 恰好不截（对齐既有用例形态）；既有用例全绿
+
+  - 生产代码零新增防御原语（复用 truncateText），模块头注安全语义段同步
+
+  - 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/borrow-sandbox-context.test.ts 全文件
+autopilot: true
+baseline_commit: ea4c578722067a22ebba63b78fa16ed7f5322e2d
+updatedAt: '2026-10-12T01:40:17.558Z'
+baseline_sha256: 89d6d01df229ba8af725c5cdc1358e48febed82f7c38ea1ecd46454107fce595
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（1.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012013349\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012013349\test-result.json｜门文件
+  4 个
+

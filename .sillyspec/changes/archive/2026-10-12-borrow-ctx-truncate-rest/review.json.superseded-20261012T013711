@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-borrow-ctx-truncate-rest",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fba50803b0a5d7e41d2857e34ba00075a44a34e4",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "requirements.md 测试绑定行的用例名与实际用例名不一致（漏「slug/」）",
+      "evidence": "FR-01/FR-02 绑定行写作「name/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」，实际用例名为「name/slug/display_alias/root_path 超 500 截断（…）」。被引用例真实存在且断言 slug 逐字段截断（toContain('s'.repeat(500)+'…（已截断）')、not.toContain('s'.repeat(501))），仅绑定字符串漏写 slug/，仍可无歧义定位，属文档笔误非行为缺失。",
+      "location": ".sillyspec/changes/2026-10-12-borrow-ctx-truncate-rest/requirements.md:54"
+    },
+    {
+      "severity": "P3",
+      "title": "truncateText JSDoc「单一实现三处共用」注释陈旧（现为六处调用）",
+      "evidence": "模块头注安全语义段已按 FR-03 同步为「进正文的自由文本字段防线全覆盖」，但 truncateText 函数注释仍写「R-02 单一实现三处共用」；本变更后实际调用点为 description/tech_stack/name/slug/display_alias/root_path 共六处。纯注释陈旧，无行为影响。",
+      "location": "sillyhub-daemon/src/borrow-sandbox-context.ts:42"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——纯函数单次入参渲染经代码证实（模块头注自述无 IO，渲染幂等有用例钉住），无时序面",
+    "并发": "ok——渲染无共享状态，写入落盘在 daemon marker 分支与本模块无耦合（头注同口径），四问「不适用」属实",
+    "切换": "ok——无状态迁移，截断只影响单次渲染输出，同 ctx 同输出",
+    "作用域": "ok；边界已裁决：可接受——（1）换行/反引号不在面（截断只限长不限形）：残留注入被 500 字符上限约束（name/slug/alias backend 各 200 上限，截断为纵深防御），换行/反引号是 POSIX 合法路径字符，写隔离唯一权威是 D-003 SessionManager 写守卫、正文文案仅为纵深防御（src 头注自证）；（2）放弃方案 A（不做 markdown 转义）：转义破坏合法路径显示且转义规则自身成为新注入面，截断+免责行是与 408bc0889 一致的既有单一范式；（3）放弃方案 B（type/default_branch 不截断）：已核实 backend——type 为 8 值受控 Literal 词表（backend/app/modules/workspace/schema.py:113-115，Pydantic 422+OpenAPI enum）、default_branch max_length=100（schema.py:121），确无自由文本注入面；注：type 读路径不校验存量历史值（schema.py:222-224）属既有边界且非本变更引入"
+  },
+  "reviewedAt": "2026-10-12T01:36:29Z"
+}

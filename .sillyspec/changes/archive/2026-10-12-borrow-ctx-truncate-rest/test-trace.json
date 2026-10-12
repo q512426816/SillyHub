@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-borrow-ctx-truncate-rest",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts「name/slug/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-borrow-ctx-truncate-rest"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts「name/slug/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-borrow-ctx-truncate-rest"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/borrow-sandbox-context.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-borrow-ctx-truncate-rest"
+    }
+  ]
+}
