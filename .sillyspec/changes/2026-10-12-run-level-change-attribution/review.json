@@ -3,13 +3,15 @@
   "change": "2026-10-12-run-level-change-attribution",
   "reviewer": "subagent",
   "verdict": "PASS",
-  "reviewedAgainst": "75d6cf9a302f9393038efe2160f2bb20da175f7e",
+  "reviewedAgainst": "c57df121365d980b0889526f17a767bda09d95b9",
   "findings": [
     {
       "severity": "P3",
       "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
       "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
-      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72"
+      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72",
+      "status": "resolved",
+      "resolutionNote": "增量复核（c57df1213）：requirements 测试绑定行已改为精确 pytest 节点名（FR-01 三用例全名、FR-02 契约+failure 用例、FR-03 独占+回归护栏、FR-04 拆分用例、FR-05 补 test_agent_session_model.py），节点名与实测通过用例逐一吻合，无编造；代码面零变化。"
     },
     {
       "severity": "P3",
@@ -30,5 +32,5 @@
     "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
     "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
   },
-  "reviewedAt": "2026-10-12T15:08:11+08:00"
+  "reviewedAt": "2026-10-12T15:10:14+08:00"
 }
