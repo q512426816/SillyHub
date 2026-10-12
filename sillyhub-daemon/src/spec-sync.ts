@@ -881,36 +881,39 @@ async function postSpecSyncImpl(
     let pushChangeDirs = changeDirs;
     let result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
     if (result.conflict) {
-      const rebased = rebaseManifestVersions(cached, result.server_versions ?? {});
-      if (rebased > 0) {
-        // 重算说明：rebase 只改缓存 version，不改 op 生成逻辑（add/update/delete/rename
-        // 的产生条件与 version 无关）→ 重算 ops 与首推同集、仅 base_version 对齐服务端；
-        // 服务端同内容豁免（apply_ops D-008@v2）使「他端先推」型冲突重试即全绿并关闭
-        // 注册表开放行，无需空批特判（曾设的空 ops 分支为不可达死代码，已删）。
-        const recomputed = await computeIncrementalOps(specRoot, cached);
-        pushOps = recomputed.ops;
-        pushLocalFiles = recomputed.localFiles;
-        try {
-          pushChangeDirs = extractChangeDirs(pushOps);
-        } catch {
-          pushChangeDirs = [];
-        }
-        onProgress?.({ files_total: pushOps.length, files_processed: 0 });
-        console.warn(
-          `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
-        );
-        // 重试轮推送守卫（review P2 2026-10-11）：首推已 conflict 后，重试的传输类失败
-        // **不得**落入外层 tar 全量回退——静默覆盖违背 NFR-02；转抛 SpecPushConflict
-        // （首推冲突面），保住「conflict 后不自动覆盖」不变量。
-        try {
-          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
-        } catch (e) {
+      // re-base 段整段守卫（2026-10-12-spec-sync-rebase-guard，扩自 review P2 2026-10-11
+      // 的重试传输守卫）：首推已 conflict 后，re-base/version 对齐、ops 重算 IO、
+      // onProgress 回调、重试推送——任何异常都**不得**落入外层 tar 全量回退（静默
+      // 覆盖违背 NFR-02「conflict 后不自动覆盖」），统一转抛 SpecPushConflict 走
+      // 人工裁决；SpecPushConflict 本身（重试仍 conflict 的真分叉）原样透传。
+      try {
+        const rebased = rebaseManifestVersions(cached, result.server_versions ?? {});
+        if (rebased > 0) {
+          // 重算说明：rebase 只改缓存 version，不改 op 生成逻辑（add/update/delete/rename
+          // 的产生条件与 version 无关）→ 重算 ops 与首推同集、仅 base_version 对齐服务端；
+          // 服务端同内容豁免（apply_ops D-008@v2）使「他端先推」型冲突重试即全绿并关闭
+          // 注册表开放行，无需空批特判（曾设的空 ops 分支为不可达死代码，已删）。
+          const recomputed = await computeIncrementalOps(specRoot, cached);
+          pushOps = recomputed.ops;
+          pushLocalFiles = recomputed.localFiles;
+          try {
+            pushChangeDirs = extractChangeDirs(pushOps);
+          } catch {
+            pushChangeDirs = [];
+          }
+          onProgress?.({ files_total: pushOps.length, files_processed: 0 });
           console.warn(
-            `spec_sync: rebase retry transport failure, escalate to manual adjudication ws=${wsId}:`,
-            e,
+            `spec_sync: conflict rebased ${rebased} path(s), retrying once ws=${wsId}`,
           );
-          throw new SpecPushConflict(wsId, result.server_versions ?? {});
+          result = await client.postSpecSyncIncremental(wsId, pushOps, changeWriteId, pushChangeDirs);
         }
+      } catch (e) {
+        if (e instanceof SpecPushConflict) throw e;
+        console.warn(
+          `spec_sync: rebase phase failure after conflict, escalate to manual adjudication ws=${wsId}:`,
+          e,
+        );
+        throw new SpecPushConflict(wsId, result.server_versions ?? {});
       }
       if (result.conflict) {
         throw new SpecPushConflict(wsId, result.server_versions ?? {});

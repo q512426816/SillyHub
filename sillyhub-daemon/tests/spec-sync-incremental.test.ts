@@ -24,11 +24,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ── hoisted mocks（homedir 必须在 spec-sync import 前替换）────────────────────
 const hoisted = vi.hoisted(() => ({
   homedirMock: vi.fn((): string => '/nonexistent-spec-sync-incr-home'),
+  // 2026-10-12-spec-sync-rebase-guard：readFile 故障旗标（默认透传；仅 conflict 后
+  // re-base 重算 IO 异常用例在首推桩回调内临时置位）。
+  failReadFile: { value: false },
 }));
 
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
   return { ...actual, homedir: hoisted.homedirMock };
+});
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      if (hoisted.failReadFile.value) {
+        throw new Error('EBUSY: resource busy (simulated AV lock)');
+      }
+      return actual.readFile(...args);
+    },
+  };
 });
 
 // spec-sync 在 homedir mock 就位后 import。
@@ -391,6 +407,35 @@ describe('postSpecSync 增量 diff（task-08 / change 2026-08-13-platform-manage
     expect(incrSpy).toHaveBeenCalledTimes(2);
     expect(postSpy).not.toHaveBeenCalled();
     // SpecPushConflict 语义：不写 pending_push 标记（人工拍板非传输失败）
+    expect(existsSync(join(scratch, '.runtime', 'pending_push'))).toBe(false);
+  });
+
+  it('conflict 后 re-base 重算遇 IO 异常 → 转 SpecPushConflict 不落 tar 回退（2026-10-12-spec-sync-rebase-guard）', async () => {
+    // c4ff833b0 的守卫只盖「重试推送传输失败」；conflict 后 computeIncrementalOps
+    // 的 readFile 异常（Windows 杀软短暂锁 EBUSY / walk 与 read 之间竞删）会穿透
+    // 外层 catch 走 tar 全量覆盖——守卫必须覆盖整段 re-base 区。
+    const wsId = 'ws-rebase-io-fail';
+    await seedCache(wsId, { 'docs/a.md': { hash: sha256('v1'), version: 1, mtime: 1 } });
+    write('docs/a.md', 'v2');
+
+    const incrSpy = vi.fn().mockImplementationOnce(async () => {
+      // 首推 conflict 后、重算 ops 前的确定性注入窗口。
+      hoisted.failReadFile.value = true;
+      return { ok: true, new_versions: {}, conflict: true, server_versions: { 'docs/a.md': 9 } };
+    });
+    const postSpy = vi.fn();
+    const client = makeClient({ postSpecSyncIncremental: incrSpy, postSpecSync: postSpy });
+
+    try {
+      await expect(postSpecSync(client as never, wsId, scratch)).rejects.toBeInstanceOf(
+        SpecPushConflict,
+      );
+    } finally {
+      hoisted.failReadFile.value = false;
+    }
+    // 首推 conflict 恰好一次（重算抛错未达重试推送）；不落 tar 全量覆盖、不写 pending_push
+    expect(incrSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy).not.toHaveBeenCalled();
     expect(existsSync(join(scratch, '.runtime', 'pending_push'))).toBe(false);
   });
 
