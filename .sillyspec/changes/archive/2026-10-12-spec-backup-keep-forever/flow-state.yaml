@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：2026-10-10 消防项目变更文件（fire-equipment 等）被 30 天修剪机制从服务器备份区清除的风险实测发生（本次靠窗口期找回），用户要求软删备份长期保留、去掉 30 天自动清理。
+  成功标准：
+  - 默认配置（spec_backup_retention_days=None）下 _prune_spec_backups 直接返回，永不删除备份区任何目录、不做磁盘扫描
+  - 配置 spec_backup_retention_days=正整数 N 时恢复原机会式修剪语义（早于 N 天的时间戳目录被清理，逃生门）
+  - 修剪节流（PRUNE_THROTTLE_INTERVAL_S 600s 冷却）在启用修剪时语义不变（ql-20260924 OOM 防护保留）
+  - 测试：TestPruneSpecBackups 三例适配设置项注入 + 新增「默认永不修剪」锁死用例，spec_workspace 相关测试全绿
+  - 跨平台兼容（Windows/Linux/macOS），不新增平台相关 API
+autopilot: false
+baseline_commit: ff90caaed24cfbb986240f72e10b9f0de4834e74
+updatedAt: '2026-10-12T07:34:00.362Z'
+baseline_sha256: 93adb028c0d1afcc21e1184393841c04b9df89d70adf36c9d176b9786fc045a1
+spec_approved: true
+spec_approved_at: '2026-10-12T06:18:24.795Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(py30)+fr(6)（119.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012072658\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012072658\test-result.json｜门文件
+  10 个
+

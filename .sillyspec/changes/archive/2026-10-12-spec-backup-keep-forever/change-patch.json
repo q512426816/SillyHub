@@ -1,0 +1,184 @@
+{
+  "change": "2026-10-12-spec-backup-keep-forever",
+  "baseline": "ff90caaed24cfbb986240f72e10b9f0de4834e74",
+  "head": "94b977abe67ff46b0d4ec02bdbebec150d5beb19",
+  "files": [
+    ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/tasks.md",
+    "backend/app/core/config.py",
+    "backend/app/modules/change/tests/test_usage_stats.py",
+    "backend/app/modules/change/usage_service.py",
+    "backend/app/modules/spec_workspace/service.py",
+    "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+    "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+    "backend/app/modules/workspace/router.py",
+    "backend/tests/modules/workspace/test_init_permission.py",
+    ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/design.md",
+    ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/proposal.md",
+    ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/requirements.md"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 593,
+    "deletions": 42
+  },
+  "savedAt": "2026-10-12T07:27:30.413Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/backend/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "workspace",
+      "files": 1,
+      "doc": "docs/backend/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 3,
+      "doc": "docs/backend/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "core",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/core.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "spec_workspace",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/spec_workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "workspace",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ff90caaed24cfbb986240f72e10b9f0de4834e74",
+    "totals": {
+      "files": 8,
+      "additions": 428,
+      "deletions": 42
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_usage_stats.py",
+        "additions": 139,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/change/usage_service.py",
+        "additions": 31,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/service.py",
+        "additions": 16,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py",
+        "additions": 51,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/spec_workspace/tests/test_sync_incremental.py",
+        "additions": 16,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/router.py",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/workspace/test_init_permission.py",
+        "additions": 155,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "cc815853ce3b6b27ff2966c2ce98d407b23d95fb7aeac34a6727d5f3b472a7a4",
+  "patchStatus": "ok"
+}

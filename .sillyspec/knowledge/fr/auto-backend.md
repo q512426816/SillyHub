@@ -1124,3 +1124,86 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-12-run-level-change-attribution
   status: active
+
+## FR-auto-backend-186 默认配置（spec_backup_retention_days=None）下 _prune_spec_backups 直接返回，永不删除备份区任何目录、不做磁盘扫描
+变更：2026-10-12-spec-backup-keep-forever
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-01
+最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-01
+  tests: backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_default_retention_never_prunes」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-keep-forever
+  status: active
+
+## FR-auto-backend-187 配置 spec_backup_retention_days=正整数 N 时恢复原机会式修剪语义（早于 N 天的时间戳目录被清理，逃生门）
+变更：2026-10-12-spec-backup-keep-forever
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-02
+最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-02
+  tests: backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_deletes_only_dirs_older_than_retention」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-keep-forever
+  status: active
+
+## FR-auto-backend-188 修剪节流（PRUNE_THROTTLE_INTERVAL_S 600s 冷却）在启用修剪时语义不变（ql-20260924 OOM 防护保留）
+变更：2026-10-12-spec-backup-keep-forever
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-03
+最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-03
+  tests: backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_throttled_second_call_is_noop」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-keep-forever
+  status: active
+
+## FR-auto-backend-189 测试：TestPruneSpecBackups 三例适配设置项注入 + 新增「默认永不修剪」锁死用例，spec_workspace 相关测试全绿
+变更：2026-10-12-spec-backup-keep-forever
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-04
+最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-04
+  tests: backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「TestPruneSpecBackups 全类 + 三个相关测试文件全量」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-spec-backup-keep-forever
+  status: active
+
+## FR-auto-backend-190 跨平台兼容（Windows/Linux/macOS），不新增平台相关 API
+变更：2026-10-12-spec-backup-keep-forever
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-spec-backup-keep-forever/requirements.md#FR-05
+最近确认：94b977abe67ff46b0d4ec02bdbebec150d5beb19

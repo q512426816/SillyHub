@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-backup-keep-forever",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "94b977abe67ff46b0d4ec02bdbebec150d5beb19",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "spec_backup_retention_days 缺少正整数校验，env 误配 0/负数将删除全部时间戳备份目录（含新鲜）",
+      "evidence": "字段类型为 int | None 无 ge=1 约束；retention_days<=0 时 cutoff=datetime.now(UTC)-timedelta(days<=0) >= now，:2063 的 ts < cutoff 对所有现存时间戳目录成立，rmtree 全删。默认 None 安全、需显式误配 env 才触发，故 P3 非 P1。",
+      "location": "backend/app/core/config.py:264"
+    },
+    {
+      "severity": "P3",
+      "title": "design 声称 _prune_spec_backups 调用点仅两处，实态三处",
+      "evidence": "design「做法概述」写调用点仅 :1986 收敛与 :2146 软删两处；工作区实态 grep 到三处调用（service.py:1988、:2155、:2665，第三处为基线已有、patch 未新增）。行为无影响（None 早退在函数头覆盖全部调用点，:2665 处同受节流保护），属设计调研陈述精度问题。",
+      "location": ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/design.md:13"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件混入另外两个变更的交付内容",
+      "evidence": "冻结 diff 含 2026-10-12-run-level-change-attribution（change/usage_service.py、change/tests/test_usage_stats.py）与 2026-10-12-init-permission-relax（workspace/router.py、tests/modules/workspace/test_init_permission.py）的完整 hunk，冻结面边界失焦；已按任务书以工作区实态核对，本变更 4 文件与 patch 逐行一致，不影响本变更评审结论。",
+      "location": ".sillyspec/changes/2026-10-12-spec-backup-keep-forever/change.patch:23"
+    },
+    {
+      "severity": "P3",
+      "title": "test_missing_backup_root_is_noop 未注入设置，FileNotFoundError 容错分支保护面弱化",
+      "evidence": "该用例（:559）不注入 retention，默认 None 时 :2043 早退在前，service.py:2056 的 FileNotFoundError 容错分支在默认配置下不可达；该分支仅 env 启用修剪时可达且无用例覆盖（原实现中此用例真实锁死该分支）。行为本身无缺陷，属测试保护面回退。",
+      "location": "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py:559"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T07:32:28Z"
+}

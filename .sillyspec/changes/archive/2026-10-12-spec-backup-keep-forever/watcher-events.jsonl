@@ -1,0 +1,50 @@
+{"ts":1791785601196,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791785614568,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791785953720,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/core/config.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786046249,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/spec_workspace/tests/test_sync_incremental.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786096126,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/tests/modules/workspace/test_init_permission.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786129625,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/workspace/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786176118,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791786176118,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1791786186351,"kind":"commit","stage":null,"detail":"7c3d7a697","provisional":true}
+{"ts":1791786186614,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/workspace/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786193638,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/workspace/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786196972,"kind":"commit","stage":null,"detail":"2a7d843fa","provisional":true}
+{"ts":1791786197207,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/workspace/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786201049,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/workspace/router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786240368,"kind":"commit","stage":null,"detail":"ec6806f64","provisional":true}
+{"ts":1791786626172,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/tests/modules/workspace/test_init_permission.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791786652441,"kind":"commit","stage":null,"detail":"4c27f731d","provisional":true}
+{"ts":1791786770795,"kind":"commit","stage":null,"detail":"6e10f6d20","provisional":true}
+{"ts":1791787519582,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/agent/model.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787574117,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787635576,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/agent/model.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787649037,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/tests/test_align_platform_change_events_migration.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787672456,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1791787675694,"kind":"commit","stage":null,"detail":"f4fcf688e","provisional":true}
+{"ts":1791787686047,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/change/binding.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787699574,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/run_sync/service/submit_commit.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787713009,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/tests/test_spec_binding.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787742490,"kind":"commit","stage":null,"detail":"2edcf1f67","provisional":true}
+{"ts":1791787749558,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/session/service/inject.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787767023,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/tests/test_inject_change_context.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787787207,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/session/service/inject.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787796959,"kind":"commit","stage":null,"detail":"c2acc68ba","provisional":true}
+{"ts":1791787817117,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/change/usage_service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787859968,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/usage_service.py、frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx、frontend/src/components/daemon/__tests__/attachment-refs.test.ts、frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx、frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx、frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx、frontend/src/components/daemon/attachment-ref-tag.tsx、frontend/src/components/daemon/input-ref-overlay.tsx、frontend/src/components/daemon/session-input-bar.tsx、frontend/src/components/daemon/session-panel/index.tsx、frontend/src/components/daemon/session-panel/session-panel-dialog.tsx、frontend/src/components/daemon/session-panel/session-panel-page.tsx、frontend/src/components/daemon/use-atomic-ref-caret.ts、frontend/src/components/explorer/__tests__/file-explorer.test.tsx、frontend/src/components/explorer/__tests__/file-preview.test.tsx、frontend/src/components/explorer/file-explorer.tsx、frontend/src/components/explorer/file-preview.tsx、frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx、frontend/src/components/group-chat/group-chat-panel.tsx、frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx、frontend/src/components/sessions/__tests__/sessions-portal.test.tsx、frontend/src/components/sessions/portal-file-panels.tsx、frontend/src/components/sessions/sessions-portal.tsx、frontend/src/components/ui/floating-context-menu.tsx、frontend/src/lib/attachment-refs.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791787863608,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/tests/test_usage_stats.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791788046280,"kind":"commit","stage":null,"detail":"0b23b4c73","provisional":true}
+{"ts":1791788223121,"kind":"commit","stage":null,"detail":"1c2d53502","provisional":true}
+{"ts":1791788266184,"kind":"commit","stage":null,"detail":"5b8ecc2e9","provisional":true}
+{"ts":1791788451506,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/agent/tests/test_agent_session_model.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791788484476,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/agent/tests/test_agent_session_model.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791788487688,"kind":"commit","stage":null,"detail":"11c4a5d51","provisional":true}
+{"ts":1791788635447,"kind":"commit","stage":null,"detail":"75d6cf9a3","provisional":true}
+{"ts":1791788941066,"kind":"commit","stage":null,"detail":"c57df1213","provisional":true}
+{"ts":1791788941362,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-12-run-level-change-attribution/review.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791789053601,"kind":"commit","stage":null,"detail":"74fbd1ec2","provisional":true}
+{"ts":1791789080103,"kind":"commit","stage":null,"detail":"94b977abe","provisional":true}
+{"ts":1791789864699,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791790019738,"kind":"gate-run","stage":"verify","detail":"门实测 passed（119.7s） · 20261012072658","provisional":true}
+{"ts":1791790353632,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/change/backfill_service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791790387089,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/scripts/backfill_run_change_context.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-spec-backup-keep-forever",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_default_retention_never_prunes」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-keep-forever"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_deletes_only_dirs_older_than_retention」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-keep-forever"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「test_throttled_second_call_is_noop」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-keep-forever"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-spec-backup-keep-forever:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_soft_delete_change_dir.py「TestPruneSpecBackups 全类 + 三个相关测试文件全量」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-spec-backup-keep-forever"
+    }
+  ]
+}
