@@ -1,18 +1,17 @@
 {
   "change": "2026-10-12-ws-ref-ws-name",
-  "baseline": "c74958a1c702af951b3349cbb46f8836d2ea096c",
-  "head": "40622e032cbece20e57db17154d582ce835e67b2",
+  "baseline": "40a3450e1fc75158560b5f0aef7be06e45a7c681",
+  "head": "71b382cfb0eb2e04a7bcb7c20bea0b5db2f0def8",
   "files": [
-    ".sillyspec/changes/2026-10-12-ws-ref-ws-name/design.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-ws-name/proposal.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-ws-name/requirements.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-ws-name/review.json",
-    ".sillyspec/changes/2026-10-12-ws-ref-ws-name/tasks.md"
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    "frontend/src/components/sessions/sessions-portal.tsx",
+    "frontend/src/lib/attachment-refs.ts"
   ],
   "totals": {
-    "files": 5,
-    "additions": 137,
-    "deletions": 0
+    "files": 4,
+    "additions": 38,
+    "deletions": 10
   },
   "savedAt": "2026-10-12T05:11:38.071Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
@@ -30,7 +29,7 @@
     "mode": "full-flow",
     "ok": true,
     "degradedReason": null,
-    "baseAnchor": "c74958a1c702af951b3349cbb46f8836d2ea096c",
+    "baseAnchor": "40a3450e1fc75158560b5f0aef7be06e45a7c681",
     "totals": {
       "files": 0,
       "additions": 0,
@@ -43,6 +42,10 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "678f2ba119185840d418b8154bfe9e0f0bbf4211b9c80ca6e83827d662832ebd",
-  "patchStatus": "ok"
+  "patchSha256": "1e039e262c889adcf7a7dde61d1ca7a276d6c697a0c0afd65d9de694b876000d",
+  "patchStatus": "ok",
+  "worktreeBaseline": "c74958a1c702af951b3349cbb46f8836d2ea096c",
+  "worktreeHead": "40622e032cbece20e57db17154d582ce835e67b2",
+  "reanchoredAt": "2026-10-12T10:12:28.672Z",
+  "reanchorNote": "面重建回填（2026-10-12-close-trace-freeze-integrity 收尾）：原留档 files[] 为工件-only 损伤面（收口冻结缺陷事故——实现提交漏出冻结面），且 worktree 锚（c74958a1c7/40622e032c）随 worktree 清理悬空；按提交主题归属推导主仓区间 40a3450e1f..71b382cfb0，files[]/totals/change.patch 按交付面口径重建（FR-01），原面留于 git 历史"
 }

@@ -1,17 +1,15 @@
 {
   "change": "2026-10-12-ws-ref-hover-tip-flip",
-  "baseline": "56b716671775d29e29da9b11cdb1f1887458fd75",
-  "head": "1ec1af9dd914b8145359bc47258a258ae36335f4",
+  "baseline": "261a1e0241bf8f20401d53c2f479bd58c00417a9",
+  "head": "83d1d9fefc7b3e94d947bd0fc187332ec1ef2cba",
   "files": [
-    ".sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/design.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/proposal.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/requirements.md",
-    ".sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/tasks.md"
+    "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+    "frontend/src/components/daemon/input-ref-overlay.tsx"
   ],
   "totals": {
-    "files": 4,
-    "additions": 115,
-    "deletions": 0
+    "files": 2,
+    "additions": 36,
+    "deletions": 2
   },
   "savedAt": "2026-10-12T03:02:21.431Z",
   "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
@@ -29,7 +27,7 @@
     "mode": "full-flow",
     "ok": true,
     "degradedReason": null,
-    "baseAnchor": "56b716671775d29e29da9b11cdb1f1887458fd75",
+    "baseAnchor": "261a1e0241bf8f20401d53c2f479bd58c00417a9",
     "totals": {
       "files": 0,
       "additions": 0,
@@ -42,6 +40,10 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "c3c5e5909fb44f9825b46f60c9a7121024c8c7120143be043361c749fbbd1079",
-  "patchStatus": "ok"
+  "patchSha256": "f812f51d8557d29ce17e0ff1a86d0a2850dd092c4e36fdf22c0b624a2752f2ba",
+  "patchStatus": "ok",
+  "worktreeBaseline": "56b716671775d29e29da9b11cdb1f1887458fd75",
+  "worktreeHead": "1ec1af9dd914b8145359bc47258a258ae36335f4",
+  "reanchoredAt": "2026-10-12T10:12:29.045Z",
+  "reanchorNote": "面重建回填（2026-10-12-close-trace-freeze-integrity 收尾）：原留档 files[] 为工件-only 损伤面（收口冻结缺陷事故——实现提交漏出冻结面），且 worktree 锚（56b7166717/1ec1af9dd9）随 worktree 清理悬空；按提交主题归属推导主仓区间 261a1e0241..83d1d9fefc，files[]/totals/change.patch 按交付面口径重建（FR-01），原面留于 git 历史"
 }

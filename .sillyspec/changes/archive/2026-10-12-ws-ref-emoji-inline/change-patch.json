@@ -1,7 +1,7 @@
 {
   "change": "2026-10-12-ws-ref-emoji-inline",
-  "baseline": "93cad320acfaab4d3cd16d6ab9b326b99d04fa5a",
-  "head": "20058a3a97f47a4daab0165f5264f62f9fb442de",
+  "baseline": "6aa5f32b6c6953fd3f6b0a2b3eb8b1a868376b86",
+  "head": "d03c97139d8d8b9df2d3f1e24e6832f57d9d1884",
   "files": [
     "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
     "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
@@ -60,7 +60,7 @@
     "mode": "full-flow",
     "ok": true,
     "degradedReason": null,
-    "baseAnchor": "93cad320acfaab4d3cd16d6ab9b326b99d04fa5a",
+    "baseAnchor": "6aa5f32b6c6953fd3f6b0a2b3eb8b1a868376b86",
     "totals": {
       "files": 9,
       "additions": 287,
@@ -128,6 +128,10 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "e9269511e9258d543afa754e96e1b457ae59b34f923df41e9e455717983b669f",
-  "patchStatus": "ok"
+  "patchSha256": "f0e9771cf2b67c9488ee059bd891a517df2f0d4acc6dc244feef3b6ae9199997",
+  "patchStatus": "ok",
+  "worktreeBaseline": "93cad320acfaab4d3cd16d6ab9b326b99d04fa5a",
+  "worktreeHead": "20058a3a97f47a4daab0165f5264f62f9fb442de",
+  "reanchoredAt": "2026-10-12T10:11:14.635Z",
+  "reanchorNote": "apply/回填后主仓重锚（原 worktree 锚悬空：93cad320ac/20058a3a97；归属约定=提交主题含变更名）——2026-10-12-close-trace-freeze-integrity FR-03"
 }

@@ -1,137 +1,112 @@
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/design.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/design.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/design.md
-@@ -0,0 +1,41 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T03:20:10.192Z
-+---
-+# 设计记录（Design Record）— 2026-10-12-ws-ref-hover-tip-portal
-+
-+## 做法概述
-+
-+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
-+
-+hover-tip-flip 修复上线后浏览器实测浮层仍不可见。决定性证据：元素 style.top=824px 而 getBoundingClientRect().top=965——偏移 141px，说明浮层的某页面祖先（布局/动画容器）带 transform 创建了 containing block，position:fixed 相对该祖先而非视口定位，按视口坐标计算的 clamp/翻转数学全部错位（此前偶尔可见是布局巧合）。修复：浮层 div 经 createPortal 挂 document.body——body 下无该祖先，fixed 恢复相对视口，坐标系归位。
-+
-+## 接口契约
-+
-+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
-+
-+InputRefOverlay 的 hoverTip 渲染改 createPortal(…, document.body)；props 签名零变化；DOM 层面浮层从组件树内移到 body 尾部（选择器 data-ws-ref-hover-tip 不变）。后端 0 端点。
-+
-+## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
-+
-+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
-+
-+portal 渲染与状态更新同批次，无乱序面。
-+
-+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
-+
-+纯渲染位置变更，无共享可变状态。
-+
-+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
-+
-+portal 子树随宿主组件卸载同步卸载（React portal 生命周期契约），无残留 DOM；「use client」组件 portal 仅客户端执行，SSR 安全。
-+
-+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
-+
-+浮层单例（hoverTip 状态唯一），portal 至 body 不与其他 z 层冲突（z-50）。
-+
-+## 风险与死路
-+
-+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
-+
-+风险：body 直挂元素的测试断言路径变化——已同步改 document.querySelector 并隔离用例（unmount 后断言）。放弃的方案：向上排查移除页面祖先的 transform（根在布局容器/动画库，影响面大且布局再变会复发）；portal 是标准免疫方案。
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/proposal.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/proposal.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/proposal.md
-@@ -0,0 +1,27 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T03:20:10.192Z
-+---
-+# 提案书（Proposal）— 2026-10-12-ws-ref-hover-tip-portal
-+
-+## 动机
-+
-+任务原话转写：悬停浮层翻转修复上线后实测仍不可见：终极根因是页面某祖先带 transform 创建 containing block，position:fixed 相对该祖先而非视口定位（实测 style.top=824 实渲染在 965，偏移 141px），视口坐标系 clamp 全部失效。修复：浮层经 createPortal 挂 document.body（无该祖先，fixed 恢复相对视口）
-+
-+成功标准：
-+- 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
-+- 底部空间不足翻转逻辑（上一变更引入）在正确坐标系下生效
-+- 相关测试全绿（portal 断言同步）
-+
-+## 变更范围
-+
-+按成功标准机械推导，共 3 条验收面：
-+1. 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
-+2. 底部空间不足翻转逻辑（上一变更引入）在正确坐标系下生效
-+3. 相关测试全绿（portal 断言同步）
-+
-+## 成功标准（可验证）
-+
-+1. 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
-+2. 底部空间不足翻转逻辑（上一变更引入）在正确坐标系下生效
-+3. 相关测试全绿（portal 断言同步）
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/requirements.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/requirements.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/requirements.md
-@@ -0,0 +1,37 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T03:20:00.000Z
-+---
-+# 需求规格（Requirements）— 2026-10-12-ws-ref-hover-tip-portal
-+
-+## 功能需求
-+
-+### FR-01: 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
-+
-+- 必须：浮层 DOM 必须渲染在 document.body 直下（脱离带 transform 的页面祖先），style.top 与 getBoundingClientRect().top 一致（无 containing block 偏移）。
-+
-+#### 场景：主路径
-+
-+Given 悬停命中标签 / When 浮层渲染 / Then rect.top === 解析 style.top（视口坐标系）。
-+
-+### FR-02: 底部空间不足翻转逻辑在正确坐标系下生效
-+
-+- 必须：视口坐标系下 y+16+48 > innerHeight 时必须翻转到鼠标上方；充足时保持 y+16。
-+
-+#### 场景：主路径
-+
-+同 hover-tip-flip 的两断言（662px / 216px），经 portal 后仍成立。
-+
-+### FR-03: 相关测试全绿（portal 断言同步）
-+
-+- 必须：overlay 套件 + 两输入区回归全绿；测试内多 render 的 portal 残留必须隔离（unmount 后断言）。
-+
-+#### 场景：主路径
-+
-+vitest 3 文件 105/105（logs/portalfix2.log）。
-+
-+## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
-+
-+FR-01: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」（document 级断言=body 直挂）
-+FR-02: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
-+FR-03: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx + session-input-bar-upload.test.tsx + group-chat-panel.test.tsx 105/105（logs/portalfix2.log）
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/tasks.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/tasks.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-portal/tasks.md
-@@ -0,0 +1,9 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T03:20:10.192Z
-+---
-+# 任务注册表（Tasks）— 2026-10-12-ws-ref-hover-tip-portal
-+
-+- [x] task-01: 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
-+- [x] task-02: 底部空间不足翻转逻辑（上一变更引入）在正确坐标系下生效
-+- [x] task-03: 相关测试全绿（portal 断言同步）
+diff --git a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+index e6cd221dc..b2401e8ad 100644
+--- a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
++++ b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+@@ -172,7 +172,7 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+         hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 200 }}
+       />,
+     );
+-    const tip = container.querySelector("[data-ws-ref-hover-tip]");
++    const tip = document.querySelector("[data-ws-ref-hover-tip]");
+     expect(tip).not.toBeNull();
+     expect(tip!.textContent).toBe("文件：docs/design.md（工作区 ws-1）");
+     expect(tip!.className).toContain("fixed");
+@@ -185,11 +185,11 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+         hoverTip={null}
+       />,
+     );
+-    expect(container.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
++    expect(document.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
+   });
+ 
+   it("hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）", () => {
+-    const { container } = render(
++    const first = render(
+       <InputRefOverlay
+         value="【📄 design.md】"
+         tokens={["【📄 design.md】"]}
+@@ -198,11 +198,12 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+         hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 720 }}
+       />,
+     );
+-    const tip = container.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
++    const tip = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+     expect(tip).not.toBeNull();
+     expect(tip.style.top).toBe("662px"); // 720 - 48(TIP_EST_HEIGHT) - 10
+-    // 常规位置（下方 16px）不受影响
+-    const { container: c2 } = render(
++    // 常规位置（下方 16px）不受影响——portal 挂 body，先卸载前者再断言后者。
++    first.unmount();
++    render(
+       <InputRefOverlay
+         value="【📄 design.md】"
+         tokens={["【📄 design.md】"]}
+@@ -210,7 +211,7 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+         hoverTip={{ text: "x", x: 100, y: 200 }}
+       />,
+     );
+-    const tip2 = c2.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
++    const tip2 = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+     expect(tip2.style.top).toBe("216px");
+   });
+ 
+diff --git a/frontend/src/components/daemon/input-ref-overlay.tsx b/frontend/src/components/daemon/input-ref-overlay.tsx
+index 95b2a6633..076628c91 100644
+--- a/frontend/src/components/daemon/input-ref-overlay.tsx
++++ b/frontend/src/components/daemon/input-ref-overlay.tsx
+@@ -27,6 +27,7 @@
+  */
+ 
+ import { useMemo } from "react";
++import { createPortal } from "react-dom";
+ import { X } from "lucide-react";
+ 
+ import { cn } from "@/lib/utils";
+@@ -147,24 +148,29 @@ export function InputRefOverlay({
+     {/* 悬停元数据气泡（2026-10-12-ws-ref-emoji-inline）：宿主 hitTest 命中驱动；
+         fixed 定位不受本层 pointer-events:none 影响，纯展示不收事件；视口右/下
+         边界防溢出。 */}
+-    {hoverTip && (
+-      <div
+-        data-ws-ref-hover-tip
+-        aria-hidden
+-        style={{
+-          left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
+-          /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外，
+-           * 2026-10-12 实测 tip y=965 > 视口 940 物理不可见的根因）。 */
+-          top:
+-            hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
+-              ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
+-              : hoverTip.y + 16,
+-        }}
+-        className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
+-      >
+-        {hoverTip.text}
+-      </div>
+-    )}
++    {hoverTip &&
++      createPortal(
++        <div
++          data-ws-ref-hover-tip
++          aria-hidden
++          style={{
++            left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
++            /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外）。
++             * 经 createPortal 挂 document.body：2026-10-12 实测发现页面某祖先带
++             * transform 创建 containing block，fixed 相对该祖先定位致视口坐标整体
++             * 偏移（style.top=824 实渲染在 965）——body 下无该祖先，fixed 恢复
++             * 相对视口，clamp 数学才成立。 */
++            top:
++              hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
++                ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
++                : hoverTip.y + 16,
++          }}
++          className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
++        >
++          {hoverTip.text}
++        </div>,
++        document.body,
++      )}
+     <div
+       ref={containerRef}
+       className={cn(

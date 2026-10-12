@@ -1,138 +1,67 @@
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/design.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/design.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/design.md
-@@ -0,0 +1,42 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T02:58:44.041Z
-+---
-+# 设计记录（Design Record）— 2026-10-12-ws-ref-hover-tip-flip
+diff --git a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+index fe1ea5a28..e6cd221dc 100644
+--- a/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
++++ b/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+@@ -188,6 +188,32 @@ describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+     expect(container.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
+   });
+ 
++  it("hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）", () => {
++    const { container } = render(
++      <InputRefOverlay
++        value="【📄 design.md】"
++        tokens={["【📄 design.md】"]}
++        onRemoveToken={() => {}}
++        /* jsdom innerHeight 默认 768：y=720 时 720+16+48=784 超出 → 翻转上方。 */
++        hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 720 }}
++      />,
++    );
++    const tip = container.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
++    expect(tip).not.toBeNull();
++    expect(tip.style.top).toBe("662px"); // 720 - 48(TIP_EST_HEIGHT) - 10
++    // 常规位置（下方 16px）不受影响
++    const { container: c2 } = render(
++      <InputRefOverlay
++        value="【📄 design.md】"
++        tokens={["【📄 design.md】"]}
++        onRemoveToken={() => {}}
++        hoverTip={{ text: "x", x: 100, y: 200 }}
++      />,
++    );
++    const tip2 = c2.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
++    expect(tip2.style.top).toBe("216px");
++  });
 +
-+## 做法概述
+   it("× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）", () => {
+     render(
+       <InputRefOverlay
+diff --git a/frontend/src/components/daemon/input-ref-overlay.tsx b/frontend/src/components/daemon/input-ref-overlay.tsx
+index 5499a38cb..95b2a6633 100644
+--- a/frontend/src/components/daemon/input-ref-overlay.tsx
++++ b/frontend/src/components/daemon/input-ref-overlay.tsx
+@@ -125,6 +125,9 @@ export function hitTestAttRefOverlay(
+   return null;
+ }
+ 
++/** 悬停浮层高度粗估（px）——底部空间不足时的翻转判定用（两行文本 + padding）。 */
++const TIP_EST_HEIGHT = 48;
 +
-+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
-+
-+用户反馈输入框标签的悬停路径浮层看不到。根因（浏览器实测定位）：会话输入框贴页面最底缘，标签悬停时鼠标 y 通常 >880，浮层定位在鼠标下方 16px（y+16）直接落到 940 高的视口之外（实测浮层 y=965）——DOM 存在但物理不可见，截图也拍不到。修复：浮层定位加「底部空间不足翻转到鼠标上方」逻辑（系统 tooltip 同款行为）——`y+16+TIP_EST_HEIGHT(48) > innerHeight` 时改为 `y-48-10`（顶部 clamp 8px）；同时 left 的视口 clamp 从 `-320` 对齐实际 max-width 改 `-336`。
-+
-+## 接口契约
-+
-+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
-+
-+- `InputRefOverlay` hoverTip 渲染的 style.top 定位逻辑（下方 16px → 空间不足翻上方）；新增内部常量 TIP_EST_HEIGHT=48。props 签名零变化。
-+- 后端 0 端点 0 schema。
-+
-+## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
-+
-+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
-+
-+   浮层位置随每次 pointermove 的坐标重算，无乱序累积；判定用当次渲染的 window.innerHeight。
-+
-+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
-+
-+   纯渲染定位计算，无共享可变状态。
-+
-+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
-+
-+   视口 resize 时已渲染浮层不主动重算——但任何一次鼠标移动即按新 innerHeight 重定位（悬停场景鼠标必在动），可接受；浮层随指针移出即卸载，无残留。
-+
-+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
-+
-+   定位纯客户端视口几何，无数据面。
-+
-+## 风险与死路
-+
-+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
-+
-+风险：TIP_EST_HEIGHT=48 是粗估（实际两行文本≈42px）——翻转判定略保守（早翻），只影响翻转时机不影响可见性。放弃的方案：渲染后读实际高度再翻（useLayoutEffect 二段定位）——复杂度不值（估高误差只导致提前翻转，无功能影响）。
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/proposal.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/proposal.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/proposal.md
-@@ -0,0 +1,27 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T02:58:44.040Z
-+---
-+# 提案书（Proposal）— 2026-10-12-ws-ref-hover-tip-flip
-+
-+## 动机
-+
-+任务原话转写：用户反馈悬停路径浮层看不到：输入框贴页面底缘，tip 显示在鼠标下方 16px 落到视口外（实测 y=965 > 视口 940），修复为底部空间不足翻到鼠标上方
-+
-+成功标准：
-+- 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
-+- 常规位置（下方有空间）仍显示在鼠标下方 16px
-+- 相关测试全绿
-+
-+## 变更范围
-+
-+按成功标准机械推导，共 3 条验收面：
-+1. 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
-+2. 常规位置（下方有空间）仍显示在鼠标下方 16px
-+3. 相关测试全绿
-+
-+## 成功标准（可验证）
-+
-+1. 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
-+2. 常规位置（下方有空间）仍显示在鼠标下方 16px
-+3. 相关测试全绿
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/requirements.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/requirements.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/requirements.md
-@@ -0,0 +1,37 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T02:58:44.040Z
-+---
-+# 需求规格（Requirements）— 2026-10-12-ws-ref-hover-tip-flip
-+
-+## 功能需求
-+
-+### FR-01: 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
-+
-+- 必须：当 `y + 16 + 48 > window.innerHeight`（下方空间不足）时，浮层 top 必须翻转为 `max(8, y - 48 - 10)`（鼠标上方）；禁止浮层渲染在视口外。
-+
-+#### 场景：主路径
-+
-+Given 输入框贴页面底缘、鼠标悬停标签（y≈720，视口高 768）/ When 浮层渲染 / Then top=662（鼠标上方）且在视口内。
-+
-+### FR-02: 常规位置（下方有空间）仍显示在鼠标下方 16px
-+
-+- 必须：下方空间充足时浮层 top 必须保持 y+16（既有行为零变化）。
-+
-+#### 场景：主路径
-+
-+Given y=200 / When 渲染 / Then top=216。
-+
-+### FR-03: 相关测试全绿
-+
-+- 必须：input-ref-overlay 测试套件全绿（含新增翻转用例）。
-+
-+#### 场景：主路径
-+
-+Given vitest run input-ref-overlay.test.tsx / Then 14/14 通过。
-+
-+## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
-+
-+FR-01: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
-+FR-02: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx 同用例常规位置断言（top=216px）
-+FR-03: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx 全文件 14/14（logs/tipfix-test.log）
-
-diff --git a/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/tasks.md b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/tasks.md
-new file mode 100644
---- /dev/null
-+++ b/.sillyspec/changes/2026-10-12-ws-ref-hover-tip-flip/tasks.md
-@@ -0,0 +1,9 @@
-+---
-+author: flow-machine-draft
-+created_at: 2026-10-12T02:58:44.041Z
-+---
-+# 任务注册表（Tasks）— 2026-10-12-ws-ref-hover-tip-flip
-+
-+- [x] task-01: 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
-+- [x] task-02: 常规位置（下方有空间）仍显示在鼠标下方 16px
-+- [x] task-03: 相关测试全绿
+ export function InputRefOverlay({
+   value,
+   tokens,
+@@ -149,8 +152,13 @@ export function InputRefOverlay({
+         data-ws-ref-hover-tip
+         aria-hidden
+         style={{
+-          left: Math.min(hoverTip.x + 14, window.innerWidth - 320),
+-          top: Math.min(hoverTip.y + 16, window.innerHeight - 56),
++          left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
++          /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外，
++           * 2026-10-12 实测 tip y=965 > 视口 940 物理不可见的根因）。 */
++          top:
++            hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
++              ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
++              : hoverTip.y + 16,
+         }}
+         className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
+       >
