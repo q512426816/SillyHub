@@ -1,0 +1,13 @@
+{"ts":1791769924424,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791769924844,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791769924606,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791769924606,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791769924606,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791769924606,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791769924878,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/app/(dashboard)/runtimes/page.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791769925197,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791769925507,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791769929227,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791769929227,"kind":"task-done","stage":"tasks","detail":"checked 1→4","provisional":true}
+{"ts":1791769929227,"kind":"commit","stage":null,"detail":"5b6889fc8","provisional":true}
+{"ts":1791769939661,"kind":"gate-run","stage":"verify","detail":"门实测 passed（8.9s） · 20261012015218","provisional":true}

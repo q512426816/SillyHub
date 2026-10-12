@@ -1,0 +1,427 @@
+diff --git a/frontend/src/app/(dashboard)/runtimes/page.tsx b/frontend/src/app/(dashboard)/runtimes/page.tsx
+index 618cea57e..b33076820 100644
+--- a/frontend/src/app/(dashboard)/runtimes/page.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/page.tsx
+@@ -83,6 +83,7 @@ import { useNotify } from "@/lib/errors";
+ import { RemoteFolderPicker } from "@/components/daemon/remote-folder-picker";
+ // task-07 / D-003@v1：平台管理员人员搜索复用既有 admin 用户列表。
+ import { listUsers, type UserRead } from "@/lib/admin";
++import { copyTextToClipboard } from "@/lib/clipboard";
+ 
+ /** 时间窗中文 label（FR-04，CLAUDE.md 规则 11 中文 UI）。
+  *  task-09：其余 RuntimeCard/MachineCard 专属 helper（getStatusMeta / getProviderLabel /
+@@ -173,7 +174,7 @@ export function CopyDaemonCommand({ compact = false }: { compact?: boolean }) {
+       } else {
+         cmd = `sillyhub-daemon start --server ${serverUrl} --token ${accessToken}`;
+       }
+-      await navigator.clipboard.writeText(cmd);
++      await copyTextToClipboard(cmd);
+       setCopied(true);
+       setTimeout(() => setCopied(false), 2000);
+     } catch (err) {
+@@ -278,7 +279,7 @@ export function InstallDaemonBlock() {
+ 
+   const handleCopy = async () => {
+     if (!cmd) return;
+-    await navigator.clipboard.writeText(cmd);
++    await copyTextToClipboard(cmd);
+     setCopied(true);
+     setTimeout(() => setCopied(false), 2000);
+   };
+@@ -385,7 +386,7 @@ export function AutostartDaemonBlock() {
+ 
+   const handleCopy = async () => {
+     if (!cmd) return;
+-    await navigator.clipboard.writeText(cmd);
++    await copyTextToClipboard(cmd);
+     setCopied(true);
+     setTimeout(() => setCopied(false), 2000);
+   };
+diff --git a/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+index 786d8a3ca..e7fa250a8 100644
+--- a/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+@@ -89,6 +89,31 @@ afterEach(() => {
+ });
+ 
+ describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {
++  it("非安全上下文（clipboard 缺失，HTTP 局域网主部署形态）→ execCommand 降级复制成功回显（2026-10-12-clipboard-fallback）", async () => {
++    Reflect.deleteProperty(navigator, "clipboard");
++    // jsdom 不实现 document.execCommand（原型链上也无），defineProperty 直桩。
++    const execCommand = vi.fn(() => true);
++    Object.defineProperty(document, "execCommand", {
++      value: execCommand,
++      configurable: true,
++      writable: true,
++    });
++    apiKeysApi.listApiKeys.mockResolvedValueOnce([activeKey]);
++    apiKeysApi.fetchApiKeyPlaintext.mockResolvedValueOnce("shk_live_secret123");
++
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("my-daemon")).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /复制密钥/ }));
++
++    await waitFor(() => {
++      expect(execCommand).toHaveBeenCalledWith("copy");
++    });
++    expect(screen.getByText("已复制")).toBeInTheDocument();
++  });
++
+   it("活跃可恢复行点「复制密钥」→ 明文写入剪贴板并回显已复制", async () => {
+     const writeText = vi.fn().mockResolvedValue(undefined);
+     Object.defineProperty(navigator, "clipboard", {
+diff --git a/frontend/src/app/(dashboard)/settings/api-keys/page.tsx b/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
+index f7254c23f..32458dd65 100644
+--- a/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
++++ b/frontend/src/app/(dashboard)/settings/api-keys/page.tsx
+@@ -18,6 +18,7 @@ import {
+   type ApiKeyRead,
+ } from "@/lib/api-keys";
+ import { cn } from "@/lib/utils";
++import { copyTextToClipboard } from "@/lib/clipboard";
+ 
+ type ApiKeyStatus = {
+   label: string;
+@@ -98,7 +99,7 @@ export default function ApiKeysSettingsPage() {
+     setCopyingId(k.id);
+     try {
+       const plaintext = await fetchApiKeyPlaintext(k.id);
+-      await navigator.clipboard.writeText(plaintext);
++      await copyTextToClipboard(plaintext);
+       setCopiedId(k.id);
+       setTimeout(() => setCopiedId(null), 2000);
+     } catch (err) {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
+index ae01db9cf..342352901 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx
+@@ -20,6 +20,7 @@ import {
+   type McpTokenRead,
+ } from "@/lib/mcp-tokens";
+ import { cn } from "@/lib/utils";
++import { copyTextToClipboard } from "@/lib/clipboard";
+ 
+ interface Props {
+   params: { id: string };
+@@ -97,7 +98,7 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
+     setCopyingId(t.id);
+     try {
+       const plaintext = await fetchMcpTokenPlaintext(workspaceId, t.id);
+-      await navigator.clipboard.writeText(plaintext);
++      await copyTextToClipboard(plaintext);
+       setCopiedId(t.id);
+       setTimeout(() => setCopiedId(null), 2000);
+     } catch (err) {
+diff --git a/frontend/src/lib/__tests__/clipboard.test.ts b/frontend/src/lib/__tests__/clipboard.test.ts
+new file mode 100644
+index 000000000..e58a4ff10
+--- /dev/null
++++ b/frontend/src/lib/__tests__/clipboard.test.ts
+@@ -0,0 +1,76 @@
++/**
++ * 2026-10-12-clipboard-fallback：copyTextToClipboard 单测。
++ *
++ * 覆盖：
++ *   1. 安全上下文（navigator.clipboard.writeText 存在）→ 委托 Async Clipboard API，
++ *      不走 execCommand 降级
++ *   2. 非安全上下文（clipboard 缺失，HTTP 局域网主部署形态）→ textarea + execCommand
++ *      降级：execCommand 被调 'copy'、临时节点清理、既有选区恢复
++ *   3. 降级失败（execCommand 返回 false）→ 抛错且节点仍被清理
++ *
++ * jsdom 不实现 document.execCommand（原型链上也无），统一用 defineProperty 桩。
++ */
++
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { copyTextToClipboard } from "@/lib/clipboard";
++
++function stubExecCommand(impl: () => boolean): ReturnType<typeof vi.fn> {
++  const fn = vi.fn(impl);
++  Object.defineProperty(document, "execCommand", {
++    value: fn,
++    configurable: true,
++    writable: true,
++  });
++  return fn;
++}
++
++afterEach(() => {
++  vi.restoreAllMocks();
++  Reflect.deleteProperty(navigator, "clipboard");
++  Reflect.deleteProperty(document, "execCommand");
++  document.body.innerHTML = "";
++});
++
++describe("copyTextToClipboard（2026-10-12-clipboard-fallback）", () => {
++  it("安全上下文：委托 navigator.clipboard.writeText，不走 execCommand", async () => {
++    const writeText = vi.fn().mockResolvedValue(undefined);
++    Object.defineProperty(navigator, "clipboard", {
++      value: { writeText },
++      configurable: true,
++    });
++    const execCommand = stubExecCommand(() => true);
++
++    await copyTextToClipboard("secret-1");
++
++    expect(writeText).toHaveBeenCalledWith("secret-1");
++    expect(execCommand).not.toHaveBeenCalled();
++  });
++
++  it("非安全上下文（clipboard 缺失）：textarea + execCommand 降级，节点清理、选区恢复", async () => {
++    Reflect.deleteProperty(navigator, "clipboard");
++    const execCommand = stubExecCommand(() => true);
++    const addRange = vi.fn();
++    const removeAllRanges = vi.fn();
++    vi.spyOn(document, "getSelection").mockReturnValue({
++      rangeCount: 1,
++      getRangeAt: () => ({}) as Range,
++      removeAllRanges,
++      addRange,
++    } as unknown as Selection);
++
++    await copyTextToClipboard("shk_live_secret123");
++
++    expect(execCommand).toHaveBeenCalledWith("copy");
++    // 临时节点已清理（body 无残留 textarea）。
++    expect(document.body.querySelectorAll("textarea")).toHaveLength(0);
++    expect(addRange).toHaveBeenCalled();
++  });
++
++  it("降级失败（execCommand 返回 false）→ 抛错且节点仍被清理（finally 保证）", async () => {
++    Reflect.deleteProperty(navigator, "clipboard");
++    stubExecCommand(() => false);
++
++    await expect(copyTextToClipboard("x")).rejects.toThrow(/剪贴板写入/);
++    expect(document.body.querySelectorAll("textarea")).toHaveLength(0);
++  });
++});
+diff --git a/frontend/src/lib/clipboard.ts b/frontend/src/lib/clipboard.ts
+new file mode 100644
+index 000000000..501cec18c
+--- /dev/null
++++ b/frontend/src/lib/clipboard.ts
+@@ -0,0 +1,48 @@
++/**
++ * clipboard.ts —— 剪贴板写入（安全上下文 Async Clipboard API + 非安全上下文降级）。
++ *
++ * 2026-10-12-clipboard-fallback（24h 风险审查 P2-5）：`navigator.clipboard` 仅在
++ * 安全上下文（HTTPS/localhost）存在——本仓明示以纯 HTTP 局域网形态部署
++ * （lib/api.ts 注释自证），凭据复制（api-keys/mcp-tokens/runtimes）在该主部署
++ * 形态下调用即抛 TypeError。降级路径：隐藏 textarea + `document.execCommand('copy')`
++ * （legacy API，非安全上下文可用；已废弃但为该形态下唯一程序化写入通道）。
++ *
++ * 仓内其它复制点（daemon/copy-button 等）仍为旧实现，后续触碰时迁移本 helper。
++ */
++
++/**
++ * 写入文本到剪贴板。
++ *
++ * 安全上下文走 Async Clipboard API；非安全上下文走 textarea 选区 + execCommand
++ * 降级（恢复既有选区、清理临时节点）。两条路径都失败时抛错——调用方既有 catch
++ * （errMessage 横幅）承接，本函数不吞错。
++ */
++export async function copyTextToClipboard(text: string): Promise<void> {
++  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
++    await navigator.clipboard.writeText(text);
++    return;
++  }
++  // 非安全上下文降级：execCommand('copy') 只复制当前 DOM 选区，故借用临时
++  // textarea 承载文本；readonly 防移动端键盘弹出，fixed+透明避免布局闪动。
++  const textarea = document.createElement("textarea");
++  textarea.value = text;
++  textarea.setAttribute("readonly", "");
++  textarea.style.position = "fixed";
++  textarea.style.opacity = "0";
++  document.body.appendChild(textarea);
++  const selection = document.getSelection();
++  const previousRange =
++    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
++  textarea.select();
++  try {
++    if (!document.execCommand("copy")) {
++      throw new Error("浏览器拒绝了剪贴板写入（execCommand copy 返回 false）");
++    }
++  } finally {
++    document.body.removeChild(textarea);
++    if (previousRange && selection) {
++      selection.removeAllRanges();
++      selection.addRange(previousRange);
++    }
++  }
++}
+diff --git a/.sillyspec/changes/2026-10-12-clipboard-fallback/tasks.md b/.sillyspec/changes/2026-10-12-clipboard-fallback/tasks.md
+new file mode 100644
+index 000000000..efe04e3d9
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-clipboard-fallback/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:47:39.065Z
++---
++# 任务注册表（Tasks）— 2026-10-12-clipboard-fallback
++
++- [x] task-01: 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
++- [x] task-02: 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
++- [x] task-03: 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
++- [x] task-04: 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
+diff --git a/.sillyspec/changes/2026-10-12-clipboard-fallback/design.md b/.sillyspec/changes/2026-10-12-clipboard-fallback/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-clipboard-fallback/design.md
+@@ -0,0 +1,54 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-clipboard-fallback
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`navigator.clipboard` 仅存在于安全上下文（HTTPS/localhost），而本仓明示以纯 HTTP 局域网形态部署（lib/api.ts 注释自证）——apikey-mcp-copy-delete 交付的三页凭据复制在该主部署形态下调用即抛 TypeError（被 catch 成错误横幅，功能不可用）。修法：新增 `frontend/src/lib/clipboard.ts` 单一 helper——安全上下文委托 Async Clipboard API；缺失时降级隐藏 textarea + `document.execCommand('copy')`（legacy API，非安全上下文唯一程序化写入通道；readonly 防移动端键盘、fixed+透明防布局闪动、finally 清节点并恢复既有选区），失败抛错由调用方既有 catch 承接。三页 5 处调用点全部改走 helper，页面 catch/状态机零变化。仓内其它复制点（daemon/copy-button 等）仍为旧实现，触碰时再迁移（头注已披露）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 新增 lib 导出 `copyTextToClipboard(text: string): Promise<void>`；三页行为变化一处：非安全上下文下复制从「抛错横幅」变为「实际复制成功」（缺陷修复，无消费方依赖旧行为）；安全上下文行为零变化。无 schema/端点变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   不适用：无状态单次调用；并发点击由页面既有 copyingId/copied 状态机互斥（零变化），helper 本身幂等。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   降级路径的临时 textarea 为调用瞬间局部节点（append→select→copy→remove 同步完成），并发调用各建各的节点互不干扰；选区保存/恢复以调用时点快照为准，最坏恢复到并发方的选区，与剪贴板语义无关（可接受，纯展示层细节）。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   finally 保证临时节点移除与选区恢复，中途异常不残留 DOM；无状态迁移面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   不适用：纯客户端单值写入，无跨作用域数据流；明文仅进剪贴板与临时节点（即取即删），不进日志/存储（与既有安全语义一致）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：execCommand 已被 WHATWG 废弃，未来浏览器可能移除——届时降级路径失效回到报错横幅（与修复前同等），Async Clipboard 主路径不受影响；非安全上下文下无其它程序化通道（Service Worker 剪贴板方案依赖 HTTPS），移除前该方案是唯一解。
++- 放弃方案 A：改部署形态强制 HTTPS/localhost——部署约束变更不归前端代码管，且局域网自签证书有额外运维成本；代码侧降级是即时空运的解。
++- 放弃方案 B：navigator.clipboard 缺失时直接报「请在 HTTPS 下使用」引导文案——不解决功能不可用本身，execCommand 降级在目标浏览器（Chrome/Edge/Firefox 全支持）下即可用。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 增 | frontend/src/lib/clipboard.ts | copyTextToClipboard helper（安全委托 + execCommand 降级） |
++| 增 | frontend/src/lib/__tests__/clipboard.test.ts | 3 用例（委托/降级/降级失败） |
++| 改 | frontend/src/app/(dashboard)/settings/api-keys/page.tsx | 调用点改走 helper |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx | 调用点改走 helper |
++| 改 | frontend/src/app/(dashboard)/runtimes/page.tsx | 3 处调用点改走 helper |
++| 改 | frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx | 非安全上下文集成用例 |
+
+diff --git a/.sillyspec/changes/2026-10-12-clipboard-fallback/proposal.md b/.sillyspec/changes/2026-10-12-clipboard-fallback/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-clipboard-fallback/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:47:39.065Z
++---
++# 提案书（Proposal）— 2026-10-12-clipboard-fallback
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P2-5——navigator.clipboard 仅在安全上下文（HTTPS/localhost）存在，而本仓明示以纯 HTTP 局域网形态部署（frontend/src/lib/api.ts:69 注释自证、部署技能面向局域网 IP），2026-10-11-apikey-mcp-copy-delete 交付的三页凭据复制（api-keys/mcp-tokens/runtimes 共 5 处调用点）在该主部署形态下调用即抛 TypeError，核心交付不可用（与仓内既有 copy-button 同局限，平台级既有问题）。
++成功标准：
++- 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
++- 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
++- 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
++- 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
++2. 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
++3. 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
++4. 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
++
++## 成功标准（可验证）
++
++1. 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
++2. 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
++3. 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
++4. 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
+
+diff --git a/.sillyspec/changes/2026-10-12-clipboard-fallback/requirements.md b/.sillyspec/changes/2026-10-12-clipboard-fallback/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-clipboard-fallback/requirements.md
+@@ -0,0 +1,58 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-clipboard-fallback
++
++## 功能需求
++
++### FR-01: 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏 textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
++
++- helper 必须在 `navigator.clipboard?.writeText` 可用时委托 Async Clipboard API；缺失时必须走隐藏 textarea 选区 + `execCommand('copy')` 降级（临时节点必须清理、既有选区恢复、readonly+fixed+透明防布局闪动）；降级失败（execCommand 返回 false）必须抛错，本函数不吞错。
++
++#### 场景：安全上下文委托
++
++- Given navigator.clipboard.writeText 存在
++- When copyTextToClipboard
++- Then writeText 被调且 execCommand 零调用
++
++#### 场景：非安全上下文降级
++
++- Given navigator.clipboard 缺失（HTTP 局域网主部署形态）
++- When copyTextToClipboard
++- Then execCommand('copy') 被调、body 无残留 textarea、选区恢复
++
++### FR-02: 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
++
++- api-keys（1 处）/mcp-tokens（1 处）/runtimes（3 处）的全部 `navigator.clipboard.writeText` 直接调用必须改走 helper；页面复制状态机（copiedId/copied 回显、setTimeout 复位、catch errMessage/notice）逐字不变；既有页面测试语义不变全绿。
++
++#### 场景：委托无损
++
++- When 运行三页既有测试（stub clipboard 的 secure 路径用例）
++- Then 全绿不改语义
++
++### FR-03: 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined + execCommand stub → 复制成功回显）
++
++- lib 三个用例与 api-keys 集成用例必须在 helper 存在前为红（模块不存在无法通过）；jsdom 不实现 document.execCommand（原型链上也无），桩必须用 defineProperty 而非 vi.spyOn。
++
++#### 场景：降级集成
++
++- Given api-keys 页 + clipboard 缺失 + execCommand stub 返回 true
++- When 点「复制密钥」
++- Then execCommand 被调 'copy' 且「已复制」回显
++
++### FR-04: 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
++
++- 本变更只必须运行 4 个测试文件，禁止跑全量测试套件（规则 0，全量留给 CI）；lint/tsc 门跑改动文件。
++
++#### 场景：相关面回归
++
++- When 运行 4 文件 + eslint/tsc
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: frontend/src/lib/__tests__/clipboard.test.ts「非安全上下文（clipboard 缺失）：textarea + execCommand 降级，节点清理、选区恢复」「降级失败（execCommand 返回 false）→ 抛错且节点仍被清理（finally 保证）」
++FR-02: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「非安全上下文（clipboard 缺失，HTTP 局域网主部署形态）→ execCommand 降级复制成功回显（2026-10-12-clipboard-fallback）」
++FR-03: frontend/src/lib/__tests__/clipboard.test.ts「安全上下文：委托 navigator.clipboard.writeText，不走 execCommand」
++FR-04: frontend/src/lib/__tests__/clipboard.test.ts（+ 三页测试文件全文件回归）

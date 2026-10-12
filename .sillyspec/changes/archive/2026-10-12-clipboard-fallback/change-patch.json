@@ -1,0 +1,124 @@
+{
+  "change": "2026-10-12-clipboard-fallback",
+  "baseline": "e3e030496142f23a110dccb4c2b4b29d061ba5a0",
+  "head": "5b6889fc8e9a74a581f8f2324c363aa8a0e07989",
+  "files": [
+    ".sillyspec/changes/2026-10-12-clipboard-fallback/tasks.md",
+    "frontend/src/app/(dashboard)/runtimes/page.tsx",
+    "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/settings/api-keys/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx",
+    "frontend/src/lib/__tests__/clipboard.test.ts",
+    "frontend/src/lib/clipboard.ts",
+    ".sillyspec/changes/2026-10-12-clipboard-fallback/design.md",
+    ".sillyspec/changes/2026-10-12-clipboard-fallback/proposal.md",
+    ".sillyspec/changes/2026-10-12-clipboard-fallback/requirements.md"
+  ],
+  "totals": {
+    "files": 10,
+    "additions": 308,
+    "deletions": 5
+  },
+  "savedAt": "2026-10-12T01:52:37.363Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e3e030496142f23a110dccb4c2b4b29d061ba5a0",
+    "totals": {
+      "files": 6,
+      "additions": 157,
+      "deletions": 5
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/settings/api-keys/page.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/clipboard.test.ts",
+        "additions": 76,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/clipboard.ts",
+        "additions": 48,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e92c3dcfee5650f741057ef0bdcbf18f4a2b42570b1cbcdb89bd0c9f84af1636",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24h 风险审查 P2-5——navigator.clipboard 仅在安全上下文（HTTPS/localhost）存在，而本仓明示以纯 HTTP 局域网形态部署（frontend/src/lib/api.ts:69
+  注释自证、部署技能面向局域网 IP），2026-10-11-apikey-mcp-copy-delete 交付的三页凭据复制（api-keys/mcp-tokens/runtimes 共 5 处调用点）在该主部署形态下调用即抛
+  TypeError，核心交付不可用（与仓内既有 copy-button 同局限，平台级既有问题）。
+
+  成功标准：
+
+  - 新增 frontend/src/lib/clipboard.ts copyTextToClipboard：有 navigator.clipboard.writeText 走 Async Clipboard API；缺失时降级隐藏
+  textarea + document.execCommand('copy')（恢复既有选区、清理节点、失败抛错由调用方既有 catch 走 errMessage 横幅）
+
+  - 三页 5 处调用点全部改走 helper，页面自身 catch/状态机零变化；既有页面测试（secure 路径 stub clipboard）全绿证明委托无损
+
+  - 新增 lib 单测先红后绿：secure 路径委托、非安全路径降级（execCommand 被调、无节点残留）、降级失败抛错；api-keys 页补非安全上下文集成用例（clipboard undefined +
+  execCommand stub → 复制成功回显）
+
+  - 仅跑本改动相关测试（规则 0）：新增 lib 测试 + 三页既有测试文件
+autopilot: true
+baseline_commit: e3e030496142f23a110dccb4c2b4b29d061ba5a0
+updatedAt: '2026-10-12T01:52:38.856Z'
+baseline_sha256: 0f8bf8a54fc5a35680e66b6322c96d52c152a0a6dace5b4087bd5e1063c49b7f
+gate_summary: >-
+  test: passed ← module[]+deps(jsx5)+fr(3)（8.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012015218\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012015218\test-result.json｜门文件
+  7 个
+
