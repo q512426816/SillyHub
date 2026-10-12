@@ -2367,3 +2367,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：293d1ec98be0e4e8bf0f8891cfba554052cfdd58
 理由：- 风险：披露注释与实现漂移（规则 18 万恶之源）——缓解：披露文本与钉子用例同变更落盘，用例红即披露失真，可被常规回归捕获。 - 放弃方案 A：立即代报门改为读运行时注入结果（driver 上报「MCP 未注入」信号）——可省旧版 pi 宿主 90s 延迟，但需 driver→daemon 新增状态通道，复杂度与收益不成比例（mission 本为长耗时流程），且延迟探测已是 claude 未自报形态的既定安全网，双通道徒增双写回归面。 - 放弃方案 B：caps 表按宿主版本参数化——静态表承载运行时事实会破坏「caps 描述机制支持」的既有语义（FR-06 两层门控分工），且 daemon 启动时无法预知所有会话宿主版本。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-daemon-path-guard-completion
+锚点：未记录
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+理由：- 最大风险：存量部署 allowed_roots 未包含工作区根 → linked_repos 同步被 forbidden 拒止——loadConfig 默认 allowed_roots=[homedir()]，宿主项目根通常在家目录之下；且 get_spec_bundle 对同一类值已用同款守卫跑了数月，真实环境已隐式要求「workspace root 在 allowed_roots 内」，不引入新的部署约束。 - 放弃方案 A：把 allowed_roots 校验下沉进 linked-repos-sync.ts 纯函数——纯函数无法访问 daemon 实例的 _effectiveAllowedRoots（需注入 roots 参数，改签名波及既有 25 用例）；入口（daemon.ts handler）是 allowed_roots 的天然作用域，与 get_spec_bundle 同层。 - 放弃方案 B：spec-sync 相对形态改为 warn+按 cwd 解析继续——静默写错误位置正是要堵的缺陷，warn 不可接受；fail-loud 让 backend 侧 502/失败结果可见，登记数据质量问题立即暴露。

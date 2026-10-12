@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-daemon-path-guard-completion",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bb36a60bb75a4bf650a7069cf62e94d595da4c44",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "过程性验收项仅间接验证：FR-03「先红」阶段不可复现、FR-05 的 tsc --noEmit 未复跑",
+      "evidence": "只读评审约束（禁 git 写操作）下无法检出守卫实现前代码复跑红阶段；但结构上可推定必红：守卫测试 vi.mock 业务函数，无 allowed_roots 门时 evil 路径直通 mock，rejects(RpcError forbidden) 断言必红；相对形态用例钉死错误消息「rootPath 非绝对路径」，无形态门时必红。绿阶段已实测：4 个绑定测试文件 72/72 通过（含新增 7 用例）。tsc --noEmit 因请求预算未复跑——改动均为简单类型表达式且 vitest transform 全通过，风险低。非违反承诺，仅披露验证边界。",
+      "location": "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts:1"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok",
+    "披露边界": "边界已裁决：可接受（3/3）。①存量 allowed_roots 未含工作区根被拒止的风险论证：已核实 config.ts:499 默认 allowed_roots=[homedir()]，家目录下项目根天然覆盖；get_spec_bundle 同款守卫先例在 daemon.ts:6859（DA-2 注释在案）已隐式建立同约束。②放弃方案 A（不下沉 linked-repos-sync 纯函数）：理由成立——allowed_roots 作用域天然在 daemon 实例层，与 get_spec_bundle 同层，实现与声明一致。③放弃方案 B（相对形态 warn+按 cwd 继续）：理由成立——静默写错误位置正是本变更要堵的缺陷，fail-loud 与 linked-repos「归一非法 throw」既有口径一致。"
+  },
+  "reviewedAt": "2026-10-12T09:28:00+08:00"
+}

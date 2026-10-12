@@ -3120,3 +3120,98 @@
   confirmed_at: null
   source_change: 2026-10-12-pi-oldhost-fallback-pin
   status: active
+
+## FR-daemon-092 linked_repos_sync 与 linked_repos_snapshot 两 RPC 处理器在形态校验后、任何 spawn/fs 操作前必须过 assertWithinAllowedRoots(root_path, this._effectiveAllowedRoots())，越界抛 RpcError forbidden（对齐 get_spec_bundle DA-2 同款）
+变更：2026-10-12-daemon-path-guard-completion
+状态：active
+摘要：越界拒止；白名单内放行
+全文：.sillyspec/changes/archive/2026-10-12-daemon-path-guard-completion/requirements.md#FR-01
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_snapshot：root_path 越界 → forbidden 且业务函数零调用」 | sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-daemon-path-guard-completion
+  status: active
+
+## FR-daemon-093 pullSpecBundle 在 opts.rootPath 提供时必须 isAbsoluteLikePath 校验，非绝对形态抛错先于任何 fs 操作；handleInitLease 入口对 params.rootPath 同款校验（形态非法 throw，对齐 linked-repos「数据级失败走结果体、归一非法 throw」既有口径）
+变更：2026-10-12-daemon-path-guard-completion
+状态：active
+摘要：相对形态拒止；绝对形态放行
+全文：.sillyspec/changes/archive/2026-10-12-daemon-path-guard-completion/requirements.md#FR-02
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/spec-sync.test.ts「rootPath 相对形态 → 抛错先于任何 fs 操作（repo-native mkdir/junction 不可达）」 | sillyhub-daemon/tests/spec-sync.test.ts「rootPath 绝对形态 → 守卫放行（盘符/UNC/POSIX 三形态判定见 linked-repos-path 单测，此处钉不误杀）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-daemon-path-guard-completion
+  status: active
+
+## FR-daemon-094 新增用例先红后绿：处理器层越界→forbidden 且零 spawn；snapshot 同款；pullSpecBundle/handleInitLease 相对形态→抛错且零 fs 副作用；既有 linked-repos-sync 25 用例与 init_lease/spec-sync 相关面全绿
+变更：2026-10-12-daemon-path-guard-completion
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-12-daemon-path-guard-completion/requirements.md#FR-03
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 在 allowed_roots 内 → 放行（业务函数被调、payload 透传）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-daemon-path-guard-completion
+  status: active
+
+## FR-daemon-095 兼容 Windows/Linux/macOS：allowed_roots 判定复用 isPathUnderAnyRoot（realpath+盘符归一+UNC 拒绝），绝对形态判定复用 isAbsoluteLikePath（POSIX 根/盘符/UNC 三形态）
+变更：2026-10-12-daemon-path-guard-completion
+状态：active
+摘要：三平台可跑
+全文：.sillyspec/changes/archive/2026-10-12-daemon-path-guard-completion/requirements.md#FR-04
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-daemon-path-guard-completion
+  status: active
+
+## FR-daemon-096 仅跑本改动相关测试（规则 0）：新增守卫测试文件 + linked-repos-sync.test.ts + test_init_lease.test.ts + spec-sync.test.ts
+变更：2026-10-12-daemon-path-guard-completion
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-daemon-path-guard-completion/requirements.md#FR-05
+最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-daemon-path-guard-completion
+  status: active

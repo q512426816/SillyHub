@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-daemon-path-guard-completion",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_snapshot：root_path 越界 → forbidden 且业务函数零调用」",
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-daemon-path-guard-completion"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/spec-sync.test.ts「rootPath 相对形态 → 抛错先于任何 fs 操作（repo-native mkdir/junction 不可达）」",
+        "sillyhub-daemon/tests/spec-sync.test.ts「rootPath 绝对形态 → 守卫放行（盘符/UNC/POSIX 三形态判定见 linked-repos-path 单测，此处钉不误杀）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-daemon-path-guard-completion"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 在 allowed_roots 内 → 放行（业务函数被调、payload 透传）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-daemon-path-guard-completion"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-daemon-path-guard-completion"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-daemon-path-guard-completion:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-daemon-path-guard-completion"
+    }
+  ]
+}
