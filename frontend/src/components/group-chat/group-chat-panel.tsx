@@ -1807,8 +1807,10 @@ export function GroupChatPanel({
   const groupLastCaretRef = useRef<number | null>(null);
   /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示（单聊同款）。 */
   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+  /* 2026-10-12-ws-ref-emoji-inline：悬停元数据气泡（hitTest 命中 token 的完整绑定）。 */
+  const [hoverTip, setHoverTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const attOverlayRef = useRef<HTMLDivElement | null>(null);
-  /* task-08（FR-03）：overlay 类型角标元数据（单聊 session-input-bar 同款）。 */
+  /* task-08（FR-03）→ emoji-inline：悬停元数据（hoverTip 数据源，单聊同款；图标视觉已内嵌 token 文本）。 */
   const overlayTokenMetas = useMemo(() => {
     const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
     for (const att of pendingAttachments) {
@@ -2028,7 +2030,7 @@ export function GroupChatPanel({
       const base = desc.lines
         ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
         : desc.name;
-      entry = { desc, token: allocateWsRefToken(base, pool) };
+      entry = { desc, token: allocateWsRefToken(desc.kind, base, pool) };
       setWsRefTokens({ ...wsRefTokens, [key]: entry });
     }
     const input = inputRef.current;
@@ -3151,11 +3153,25 @@ export function GroupChatPanel({
             <div
               className="relative w-full"
               onPointerMove={(e) => {
-                setHoveredRefOcc(
-                  hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
-                );
+                const occ = hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY);
+                setHoveredRefOcc(occ);
+                /* 2026-10-12-ws-ref-emoji-inline：命中 token 挂元数据气泡
+                 * （类型图标已内嵌文本，tooltip 走 hoverTip 浮层，单聊同款）。 */
+                if (occ != null) {
+                  const span = attOverlayRef.current?.querySelector<HTMLElement>(
+                    `[data-att-ref-occ="${occ}"]`,
+                  );
+                  const token = span?.textContent ?? "";
+                  const tip = token ? overlayTokenMetas[token]?.title : undefined;
+                  setHoverTip(tip ? { text: tip, x: e.clientX, y: e.clientY } : null);
+                } else {
+                  setHoverTip(null);
+                }
               }}
-              onPointerLeave={() => setHoveredRefOcc(null)}
+              onPointerLeave={() => {
+                setHoveredRefOcc(null);
+                setHoverTip(null);
+              }}
             >
               <InputRefOverlay
                 value={draft}
@@ -3165,8 +3181,9 @@ export function GroupChatPanel({
                 overlayStyle={inputHeight != null ? { height: inputHeight } : undefined}
                 visibleBadgeIndex={hoveredRefOcc}
                 containerRef={attOverlayRef}
-                /* task-08（FR-03/D-001）：两池 token 补类型元数据（角标+tooltip）。 */
+                /* task-08（FR-03/D-001）：两池 token 补类型元数据（悬停 hoverTip）。 */
                 tokenMetas={overlayTokenMetas}
+                hoverTip={hoverTip}
               />
               <textarea
                 ref={inputRef}

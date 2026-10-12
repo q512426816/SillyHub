@@ -21,41 +21,41 @@ const UUID_A = "aaaaaaaa-1111-2222-3333-444444444444";
 const UUID_B = "bbbbbbbb-1111-2222-3333-444444444444";
 
 describe("buildAttRefToken / allocateAttRefToken（FR-02 同名唯一化）", () => {
-  it("seq=1 无后缀，seq>1 加 ·N", () => {
-    expect(buildAttRefToken("截图.png", 1)).toBe("【截图.png】");
-    expect(buildAttRefToken("截图.png", 3)).toBe("【截图.png·3】");
+  it("seq=1 无后缀，seq>1 加 ·N；📎 前缀内嵌（emoji-inline）", () => {
+    expect(buildAttRefToken("截图.png", 1)).toBe("【📎 截图.png】");
+    expect(buildAttRefToken("截图.png", 3)).toBe("【📎 截图.png·3】");
   });
 
   it("首个同名分配无后缀；占用并集内取最小可用序号", () => {
-    expect(allocateAttRefToken("配置.json", [])).toBe("【配置.json】");
-    // 已有【配置.json】→ 第二个同名取 ·2；·2 也被占（文件名自带后缀）→ 取 ·3。
-    expect(allocateAttRefToken("配置.json", ["【配置.json】"])).toBe("【配置.json·2】");
+    expect(allocateAttRefToken("配置.json", [])).toBe("【📎 配置.json】");
+    // 已有【📎 配置.json】→ 第二个同名取 ·2；·2 也被占（文件名自带后缀）→ 取 ·3。
+    expect(allocateAttRefToken("配置.json", ["【📎 配置.json】"])).toBe("【📎 配置.json·2】");
     expect(
-      allocateAttRefToken("配置.json", ["【配置.json】", "【配置.json·2】"]),
-    ).toBe("【配置.json·3】");
+      allocateAttRefToken("配置.json", ["【📎 配置.json】", "【📎 配置.json·2】"]),
+    ).toBe("【📎 配置.json·3】");
   });
 
   it("删除不重排：剥离已删 token 后，剩余附件 token 文本不变", () => {
-    // A=【配置.json】、B=【配置.json·2】已分配；A 删除剥离后，B 的映射仍是 ·2。
-    const map = { [UUID_A]: "【配置.json】", [UUID_B]: "【配置.json·2】" };
-    const afterStrip = stripAttRefTokens("看下【配置.json】和【配置.json·2】", [
+    // A=【📎 配置.json】、B=【📎 配置.json·2】已分配；A 删除剥离后，B 的映射仍是 ·2。
+    const map = { [UUID_A]: "【📎 配置.json】", [UUID_B]: "【📎 配置.json·2】" };
+    const afterStrip = stripAttRefTokens("看下【📎 配置.json】和【📎 配置.json·2】", [
       map[UUID_A]!,
     ]);
-    expect(afterStrip).toBe("看下和【配置.json·2】");
-    expect(map[UUID_B]).toBe("【配置.json·2】");
+    expect(afterStrip).toBe("看下和【📎 配置.json·2】");
+    expect(map[UUID_B]).toBe("【📎 配置.json·2】");
   });
 });
 
 describe("stripAttRefTokens（FR-05 删除联动）", () => {
   it("全量移除该 token 的所有出现，不误伤其它 token/正文", () => {
-    const value = "第一处【A.png】中间文字第二处【A.png】旁边【B.png】";
-    expect(stripAttRefTokens(value, ["【A.png】"])).toBe(
-      "第一处中间文字第二处旁边【B.png】",
+    const value = "第一处【📎 A.png】中间文字第二处【📎 A.png】旁边【📎 B.png】";
+    expect(stripAttRefTokens(value, ["【📎 A.png】"])).toBe(
+      "第一处中间文字第二处旁边【📎 B.png】",
     );
   });
 
   it("token 不在正文 / 空 token：无操作", () => {
-    expect(stripAttRefTokens("正文", ["【不在.png】"])).toBe("正文");
+    expect(stripAttRefTokens("正文", ["【📎 不在.png】"])).toBe("正文");
     expect(stripAttRefTokens("正文", [""])).toBe("正文");
   });
 });
@@ -67,10 +67,10 @@ describe("substituteAttRefsForSend（FR-04 发送置换）", () => {
   ];
 
   it("token 置换为 uuid 锚定引用，同名两附件 uuid 可区分", () => {
-    const value = "看这个【配置.json】和那个【配置.json·2】";
+    const value = "看这个【📎 配置.json】和那个【📎 配置.json·2】";
     const out = substituteAttRefsForSend(
       value,
-      { [UUID_A]: "【配置.json】", [UUID_B]: "【配置.json·2】" },
+      { [UUID_A]: "【📎 配置.json】", [UUID_B]: "【📎 配置.json·2】" },
       attachments,
     );
     expect(out).toBe(
@@ -79,13 +79,13 @@ describe("substituteAttRefsForSend（FR-04 发送置换）", () => {
   });
 
   it("孤儿 token（附件已删不在列表）原样保留；重复出现全量置换", () => {
-    const value = "两处【配置.json】孤儿【已删.png】";
+    const value = "两处【📎 配置.json】孤儿【📎 已删.png】";
     const out = substituteAttRefsForSend(
       value,
-      { [UUID_A]: "【配置.json】", [UUID_B]: "【已删.png】" },
+      { [UUID_A]: "【📎 配置.json】", [UUID_B]: "【📎 已删.png】" },
       [attachments[0]!],
     );
-    expect(out).toBe(`两处[附件引用:${UUID_A}|配置.json]孤儿【已删.png】`);
+    expect(out).toBe(`两处[附件引用:${UUID_A}|配置.json]孤儿【📎 已删.png】`);
   });
 
   it("tokenMap 空 → 原样返回（零开销旁路）", () => {
@@ -128,60 +128,67 @@ describe("parseInlineAttRefs（FR-06 历史解析）", () => {
 const WID = "cccccccc-1111-2222-3333-444444444444";
 
 describe("buildWsRefToken / allocateWsRefToken（FR-02 并集唯一化，D-005）", () => {
-  it("基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N", () => {
-    expect(buildWsRefToken("design.md", undefined, 1)).toBe("【design.md】");
-    expect(buildWsRefToken("design.md", [10, 16], 1)).toBe("【design.md:10-16】");
-    expect(buildWsRefToken("design.md", undefined, 2)).toBe("【design.md·2】");
-    expect(buildWsRefToken("a.py", [3, 5], 3)).toBe("【a.py:3-5·3】");
+  it("基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N；emoji 按类型内嵌（📄/📁/🧾）", () => {
+    expect(buildWsRefToken("file", "design.md", undefined, 1)).toBe("【📄 design.md】");
+    expect(buildWsRefToken("code", "design.md", [10, 16], 1)).toBe("【🧾 design.md:10-16】");
+    expect(buildWsRefToken("file", "design.md", undefined, 2)).toBe("【📄 design.md·2】");
+    expect(buildWsRefToken("code", "a.py", [3, 5], 3)).toBe("【🧾 a.py:3-5·3】");
+    expect(buildWsRefToken("dir", "docs", undefined, 1)).toBe("【📁 docs】");
   });
 
-  it("并集池：附件 token 与工作区 token 完全同名才 ·2（跨池撞名）", () => {
-    // 池内已有附件 token【design.md】→ 工作区同名文件取 ·2。
-    expect(allocateWsRefToken("design.md", ["【design.md】"])).toBe("【design.md·2】");
-    // 池内已有工作区 code token【design.md:10-16】→ 同行段再分配取 ·2。
-    expect(allocateWsRefToken("design.md:10-16", ["【design.md:10-16】"])).toBe(
-      "【design.md:10-16·2】",
+  it("同类型同名才互斥 ·2（emoji 前缀参与占用文本整体比对）", () => {
+    // 池内已有同类 file token【📄 design.md】→ 同类同名取 ·2。
+    expect(allocateWsRefToken("file", "design.md", ["【📄 design.md】"])).toBe("【📄 design.md·2】");
+    // 池内已有 code token【🧾 design.md:10-16】→ 同行段再分配取 ·2。
+    expect(allocateWsRefToken("code", "design.md:10-16", ["【🧾 design.md:10-16】"])).toBe(
+      "【🧾 design.md:10-16·2】",
     );
+  });
+
+  it("跨类型同名互不占位（emoji 图标自区分，不构成显示歧义）；手打无 emoji 亦不互斥", () => {
+    // 附件 token【📎 design.md】在池 → 工作区 file 同名不受影响（图标已区分）。
+    expect(allocateWsRefToken("file", "design.md", ["【📎 design.md】"])).toBe("【📄 design.md】");
+    // 正文手打【design.md】（无 emoji）与槽位插入互不占位（显示形态不同）。
+    expect(allocateWsRefToken("file", "design.md", ["【design.md】"])).toBe("【📄 design.md】");
   });
 
   it("异基名免序号：文件与代码块、不同行段互不加号", () => {
-    // 文件 design.md vs 代码块 design.md:10-16 显示基名不同 → 各自 seq=1。
-    expect(allocateWsRefToken("design.md:10-16", ["【design.md】"])).toBe(
-      "【design.md:10-16】",
+    expect(allocateWsRefToken("code", "design.md:10-16", ["【📄 design.md】"])).toBe(
+      "【🧾 design.md:10-16】",
     );
-    expect(allocateWsRefToken("design.md:20-30", ["【design.md】", "【design.md:10-16】"])).toBe(
-      "【design.md:20-30】",
-    );
+    expect(
+      allocateWsRefToken("code", "design.md:20-30", ["【📄 design.md】", "【🧾 design.md:10-16】"]),
+    ).toBe("【🧾 design.md:20-30】");
   });
 });
 
 describe("stripWsRefTokens（FR-02 清除）", () => {
   it("全量移除工作区 token，不误伤附件 token 与正文", () => {
-    const value = "文件【design.md】代码【a.py:3-5】附件【截图.png】";
-    expect(stripWsRefTokens(value, ["【design.md】", "【a.py:3-5】"])).toBe(
-      "文件代码附件【截图.png】",
+    const value = "文件【📄 design.md】代码【🧾 a.py:3-5】附件【📎 截图.png】";
+    expect(stripWsRefTokens(value, ["【📄 design.md】", "【🧾 a.py:3-5】"])).toBe(
+      "文件代码附件【📎 截图.png】",
     );
   });
 });
 
 describe("substituteWsRefsForSend（FR-06 三类置换，D-003/D-004）", () => {
-  it("file/dir/code 三类 token 置换为对应正式标记", () => {
+  it("file/dir/code 三类 token 置换为对应正式标记（emoji 内嵌形态全文匹配）", () => {
     const map: WsRefTokenMap = {
       "docs/design.md": {
         desc: { kind: "file", workspaceId: WID, path: "docs/design.md", name: "design.md" },
-        token: "【design.md】",
+        token: "【📄 design.md】",
       },
       "docs": {
         desc: { kind: "dir", workspaceId: WID, path: "docs", name: "docs" },
-        token: "【docs】",
+        token: "【📁 docs】",
       },
       "src/a.py:10-16": {
         desc: { kind: "code", workspaceId: WID, path: "src/a.py", name: "a.py", lines: [10, 16] },
-        token: "【a.py:10-16】",
+        token: "【🧾 a.py:10-16】",
       },
     };
     const out = substituteWsRefsForSend(
-      "看【design.md】目录【docs】选段【a.py:10-16】",
+      "看【📄 design.md】目录【📁 docs】选段【🧾 a.py:10-16】",
       map,
     );
     expect(out).toBe(
@@ -193,10 +200,10 @@ describe("substituteWsRefsForSend（FR-06 三类置换，D-003/D-004）", () => 
     const map: WsRefTokenMap = {
       "": {
         desc: { kind: "dir", workspaceId: WID, path: "", name: "工作区根" },
-        token: "【工作区根】",
+        token: "【📁 工作区根】",
       },
     };
-    expect(substituteWsRefsForSend("根【工作区根】", map)).toBe(`根[目录引用:${WID}|]`);
+    expect(substituteWsRefsForSend("根【📁 工作区根】", map)).toBe(`根[目录引用:${WID}|]`);
   });
 
   it("孤儿 token（正文有但 map 无该映射）原样保留；map 空 → 原样返回", () => {
@@ -204,23 +211,23 @@ describe("substituteWsRefsForSend（FR-06 三类置换，D-003/D-004）", () => 
     const map: WsRefTokenMap = {
       "a.py:1-2": {
         desc: { kind: "code", workspaceId: WID, path: "a.py", name: "a.py", lines: [1, 2] },
-        token: "【a.py:1-2】",
+        token: "【🧾 a.py:1-2】",
       },
     };
-    expect(substituteWsRefsForSend("别家的【b.py:1-2】", map)).toBe("别家的【b.py:1-2】");
+    expect(substituteWsRefsForSend("别家的【🧾 b.py:1-2】", map)).toBe("别家的【🧾 b.py:1-2】");
   });
 
   it("重复出现全量置换；与附件 token 互不误伤", () => {
     const map: WsRefTokenMap = {
       "x.md": {
         desc: { kind: "file", workspaceId: WID, path: "x.md", name: "x.md" },
-        token: "【同名.png】",
+        token: "【📄 同名.png】",
       },
     };
-    const out = substituteWsRefsForSend("两处【同名.png】附件【同名.png】", map);
-    // token 文本相同则一并置换（同文本同锚，附件置换先行占位后此处不再出现）——
-    // 互不误伤指映射键各管各池：附件 map 不含工作区条目。
-    expect(out).toBe(`两处[文件引用:${WID}|x.md]附件[文件引用:${WID}|x.md]`);
+    const out = substituteWsRefsForSend("两处【📄 同名.png】附件【📎 同名.png】", map);
+    // 工作区 token 全文含 📄 只置换自身出现；附件 token（📎）不受影响——
+    // 两池映射键各管各池，互不误伤。
+    expect(out).toBe(`两处[文件引用:${WID}|x.md]附件【📎 同名.png】`);
   });
 });
 

@@ -332,7 +332,7 @@ export function SessionInputBar({
       const base = desc.lines
         ? `${desc.name}:${desc.lines[0]}-${desc.lines[1]}`
         : desc.name;
-      entry = { desc, token: allocateWsRefToken(base, pool) };
+      entry = { desc, token: allocateWsRefToken(desc.kind, base, pool) };
       syncWsRefTokens({ ...wsRefTokens, [key]: entry });
     }
     const ta = textareaRef.current;
@@ -421,9 +421,11 @@ export function SessionInputBar({
   /* 2026-10-10-att-ref-badge-hover：× 角标悬停显示——命中序号 state + overlay
    * 容器 ref（wrapper pointermove hitTest 回写）。 */
   const [hoveredRefOcc, setHoveredRefOcc] = useState<number | null>(null);
+  /* 2026-10-12-ws-ref-emoji-inline：悬停元数据气泡（hitTest 命中 token 的完整绑定）。 */
+  const [hoverTip, setHoverTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const attOverlayRef = useRef<HTMLDivElement | null>(null);
-  /* task-05（FR-03）：overlay 类型角标元数据——附件 token 按附件名、工作区
-   * token 按 desc 组装（类型 + 路径 + 行号的完整绑定 tooltip）。 */
+  /* task-05（FR-03）→ emoji-inline：悬停元数据（hoverTip 数据源）——附件 token 按附件名、
+   * 工作区 token 按 desc 组装（类型 + 路径 + 行号的完整绑定；图标视觉已内嵌 token 文本）。 */
   const overlayTokenMetas = useMemo(() => {
     const metas: Record<string, { kind: "att" | "file" | "dir" | "code"; title: string }> = {};
     for (const att of attachments) {
@@ -1056,11 +1058,25 @@ export function SessionInputBar({
         <div
           className="relative min-w-0 flex-1"
           onPointerMove={(e) => {
-            setHoveredRefOcc(
-              hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY),
-            );
+            const occ = hitTestAttRefOverlay(attOverlayRef.current, e.clientX, e.clientY);
+            setHoveredRefOcc(occ);
+            /* 2026-10-12-ws-ref-emoji-inline：命中 token 时挂元数据气泡（类型图标
+             * 已内嵌文本，tooltip 走 hoverTip 浮层——overlay 层原生 title 不可依赖）。 */
+            if (occ != null) {
+              const span = attOverlayRef.current?.querySelector<HTMLElement>(
+                `[data-att-ref-occ="${occ}"]`,
+              );
+              const token = span?.textContent ?? "";
+              const tip = token ? overlayTokenMetas[token]?.title : undefined;
+              setHoverTip(tip ? { text: tip, x: e.clientX, y: e.clientY } : null);
+            } else {
+              setHoverTip(null);
+            }
           }}
-          onPointerLeave={() => setHoveredRefOcc(null)}
+          onPointerLeave={() => {
+            setHoveredRefOcc(null);
+            setHoverTip(null);
+          }}
         >
           <InputRefOverlay
             value={value}
@@ -1071,8 +1087,9 @@ export function SessionInputBar({
             visibleBadgeIndex={hoveredRefOcc}
             containerRef={attOverlayRef}
             /* task-04/05（FR-03/D-001）：两池 token 均补类型元数据（附件 att /
-               工作区 file/dir/code），角标+tooltip 按命中渲染。 */
+               工作区 file/dir/code），悬停 hoverTip 按命中显示完整绑定。 */
             tokenMetas={overlayTokenMetas}
+            hoverTip={hoverTip}
           />
           <textarea
             ref={textareaRef}

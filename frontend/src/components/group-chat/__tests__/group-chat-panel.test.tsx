@@ -1633,15 +1633,15 @@ describe("群消息附件（FR-05 补遗）", () => {
     await waitFor(() => {
       expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1);
     });
-    // 右击 chip → 草稿末尾追加【报错日志.txt】（镜像层角标随之渲染）。
+    // 右击 chip → 草稿末尾追加【📎 报错日志.txt】（镜像层角标随之渲染）。
     fireEvent.contextMenu(
       screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
     );
     const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    await waitFor(() => expect(input.value).toContain("【📎 报错日志.txt】"));
     expect(screen.getAllByLabelText("移除引用 报错日志.txt").length).toBe(1);
     // 追加正文后发送：sendGroupMessage 收到置换版（uuid 与上传 id 一致）。
-    fireEvent.change(input, { target: { value: "看看这份【报错日志.txt】日志" } });
+    fireEvent.change(input, { target: { value: "看看这份【📎 报错日志.txt】日志" } });
     await flushAsync(2);
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(mocks.sendGroupMessage).toHaveBeenCalled());
@@ -1654,6 +1654,7 @@ describe("群消息附件（FR-05 补遗）", () => {
   });
 
   it("删附件联动：点 X 剥离正文该附件全部引用（群聊 task-05）", async () => {
+    window.localStorage.clear();
     harness.logsJson = [];
     renderPanel();
     await waitForStreamWired();
@@ -1666,9 +1667,9 @@ describe("群消息附件（FR-05 补遗）", () => {
       screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
     );
     const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    await waitFor(() => expect(input.value).toContain("【📎 报错日志.txt】"));
     fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
-    await waitFor(() => expect(input.value).not.toContain("【报错日志.txt】"));
+    await waitFor(() => expect(input.value).not.toContain("【📎 报错日志.txt】"));
     expect(
       screen.queryByLabelText("移除引用 报错日志.txt"),
     ).toBeNull();
@@ -1676,6 +1677,7 @@ describe("群消息附件（FR-05 补遗）", () => {
 
   // D-004@v2（用户反馈 2026-10-09）：群聊退格贴标签尾部一次整删。
   it("退格整删：光标贴标签尾部 → 一次删除整个标签（群聊 D-004@v2）", async () => {
+    window.localStorage.clear();
     harness.logsJson = [];
     renderPanel();
     await waitForStreamWired();
@@ -1685,12 +1687,12 @@ describe("群消息附件（FR-05 补遗）", () => {
       screen.getByTitle("报错日志.txt · 1KB（点击在线预览 / 右击插入正文引用）"),
     );
     const input = screen.getByLabelText("群消息输入框") as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toContain("【报错日志.txt】"));
+    await waitFor(() => expect(input.value).toContain("【📎 报错日志.txt】"));
     const before = input.value;
     input.setSelectionRange(before.length, before.length);
     fireEvent.keyDown(input, { key: "Backspace" });
     await waitFor(() =>
-      expect(input.value).toBe(before.replace("【报错日志.txt】", "")),
+      expect(input.value).toBe(before.replace("【📎 报错日志.txt】", "")),
     );
   });
 
@@ -1712,7 +1714,7 @@ describe("群消息附件（FR-05 补遗）", () => {
     input.setSelectionRange(1, 1);
     fireEvent.blur(input);
     fireEvent.contextMenu(chip);
-    await waitFor(() => expect(input.value).toBe("A【报错日志.txt】BCD"));
+    await waitFor(() => expect(input.value).toBe("A【📎 报错日志.txt】BCD"));
     expect(document.activeElement).toBe(input);
   });
 
@@ -3098,7 +3100,7 @@ describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () =
     });
   }
 
-  it("槽位插入【design.md】→ 发送置换为 [文件引用:wid|path] → 草稿与映射清空", async () => {
+  it("槽位插入【📄 design.md】→ 发送置换为 [文件引用:wid|path] → 草稿与映射清空", async () => {
     window.localStorage.clear();
     harness.logsJson = [];
     renderPanelWithSlot();
@@ -3108,7 +3110,7 @@ describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () =
       { kind: "file", workspaceId: "ws-9", path: "docs/design.md", name: "design.md" },
       1,
     );
-    await waitFor(() => expect(ta.value).toContain("【design.md】"));
+    await waitFor(() => expect(ta.value).toContain("【📄 design.md】"));
     // 输入尾追加正文后发送（守卫空文本）。
     fireEvent.change(ta, { target: { value: ta.value + " 看下方案" } });
     await act(async () => {
@@ -3130,12 +3132,12 @@ describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () =
       { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
       1,
     );
-    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】"));
+    await waitFor(() => expect(ta.value).toBe("【🧾 a.py:10-16】"));
     pushGroupSlot(
       { kind: "code", workspaceId: "ws-9", path: "src/a.py", name: "a.py", lines: [10, 16] },
       2,
     );
-    await waitFor(() => expect(ta.value).toBe("【a.py:10-16】【a.py:10-16】"));
+    await waitFor(() => expect(ta.value).toBe("【🧾 a.py:10-16】【🧾 a.py:10-16】"));
   });
 
   it("退格整删工作区标签（光标贴尾一次删整枚）", async () => {
@@ -3148,7 +3150,7 @@ describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () =
       { kind: "file", workspaceId: "ws-9", path: "x.md", name: "x.md" },
       1,
     );
-    await waitFor(() => expect(ta.value).toBe("【x.md】"));
+    await waitFor(() => expect(ta.value).toBe("【📄 x.md】"));
     ta.setSelectionRange(ta.value.length, ta.value.length);
     fireEvent.keyDown(ta, { key: "Backspace" });
     await waitFor(() => expect(ta.value).toBe(""));
@@ -3173,16 +3175,16 @@ describe("群聊工作区引用（workspace-ref-intake task-08，FR-08）", () =
       expect(screen.getAllByTestId("group-pending-attachment-chip").length).toBe(1),
     );
     fireEvent.contextMenu(screen.getByTitle(/右击插入正文引用/));
-    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】"));
-    // 槽位插入同名工作区文件 → ·2（并集池跨类唯一化）。
+    await waitFor(() => expect(ta.value).toBe("【📎 报错日志.txt】"));
+    // 槽位插入同名工作区文件 → 图标自区分不加号（emoji-inline 跨类型语义）。
     pushGroupSlot(
       { kind: "file", workspaceId: "ws-9", path: "docs/报错日志.txt", name: "报错日志.txt" },
       1,
     );
-    await waitFor(() => expect(ta.value).toBe("【报错日志.txt】【报错日志.txt·2】"));
+    await waitFor(() => expect(ta.value).toBe("【📎 报错日志.txt】【📄 报错日志.txt】"));
     // 点 X 删附件 → 只剥附件 token。
     fireEvent.click(screen.getByLabelText("移除附件 报错日志.txt"));
-    await waitFor(() => expect(ta.value).toBe("【报错日志.txt·2】"));
+    await waitFor(() => expect(ta.value).toBe("【📄 报错日志.txt】"));
   });
 
   it("历史气泡三类标记渲染标签（code 引用图标+行号段）", async () => {

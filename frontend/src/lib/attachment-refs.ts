@@ -16,26 +16,46 @@
  * 纯函数零 React 依赖；token 与引用均为消息正文内文本协议，不动后端。
  */
 
-/** 附件 id → 编辑态 token 文本（【name】/【name·2】）映射（组件持有并回传父级）。 */
+/** 附件 id → 编辑态 token 文本（【📎 name】/【📎 name·2】）映射（组件持有并回传父级）。 */
 export type AttRefTokenMap = Record<string, string>;
+
+/**
+ * 引用类型内嵌图标（emoji 文本字符）。2026-10-12-ws-ref-emoji-inline：用户反馈
+ * 类型图标从左上角角标改为内嵌标签文字最前——emoji 是唯一能进文本流的图标形态
+ * （textarea 纯文本与镜像层占位天然同宽，逐字符对齐铁律零破坏；lucide 等
+ * inline 图标会撑宽背景块造成后续 token 累积漂移，不可用）。
+ */
+const ATT_REF_EMOJI = "📎";
+const WS_REF_EMOJI: Record<WsRefKind, string> = { file: "📄", dir: "📁", code: "🧾" };
+
+/** 内部统一构造：【emoji 基名】/【emoji 基名·seq】（seq>1 唯一化后缀）。 */
+function buildRefToken(emoji: string, base: string, seq: number): string {
+  return seq > 1 ? `【${emoji} ${base}·${seq}】` : `【${emoji} ${base}】`;
+}
 
 /**
  * 构建编辑态 token：seq=1 无后缀，seq>1 加 `·seq`（同名唯一化，D-002）。
  */
 export function buildAttRefToken(name: string, seq: number): string {
-  return seq > 1 ? `【${name}·${seq}】` : `【${name}】`;
+  return buildRefToken(ATT_REF_EMOJI, name, seq);
 }
 
 /**
- * 唯一化分配 token：existingTokens（调用方传"正文已出现 token + 已分配映射"并集——
- * 并集口径同时防住文件名自带 `·N` 的构造性碰撞：任何已被占用的文本都跳过）中按
- * 名字取最小可用序号。不随删除重排：分配后序号即固定，剥离不回收重用。
+ * 唯一化分配 token：existingTokens（调用方传"正文已出现 token + 已分配映射"并集）
+ * 内按名字取最小可用序号。不随删除重排：分配后序号即固定，剥离不回收重用。
+ * emoji 前缀参与占用文本整体比对——跨类型（如附件 📎 与文件 📄 同名）互不占位
+ * （显示形态已由图标区分，不构成歧义）；同类型同名照常 ·2。
  */
 export function allocateAttRefToken(name: string, existingTokens: string[]): string {
-  const used = new Set(existingTokens);
+  return allocateRefToken(ATT_REF_EMOJI, name, existingTokens);
+}
+
+/** 占位分配内部实现（附件/工作区共用，emoji 区分类型形态）。 */
+function allocateRefToken(emoji: string, base: string, poolTokens: string[]): string {
+  const used = new Set(poolTokens);
   let seq = 1;
-  while (used.has(buildAttRefToken(name, seq))) seq += 1;
-  return buildAttRefToken(name, seq);
+  while (used.has(buildRefToken(emoji, base, seq))) seq += 1;
+  return buildRefToken(emoji, base, seq);
 }
 
 /**
@@ -145,24 +165,29 @@ export function wsRefMapKey(desc: WsRefDesc): string {
 
 /**
  * 工作区引用 token：基名 = name(+`:起-止`，无 L 前缀，D-005「完整显示基名」)，
- * seq>1 加 `·seq`——与附件 token 同形态（【design.md】/【design.md:10-16】/【a·2】），
- * 两池可共处一个并集序号池。
+ * seq>1 加 `·seq`——emoji 前缀按类型（📄/📁/🧾，2026-10-12-ws-ref-emoji-inline），
+ * 与附件 token 同形态可共处一个并集序号池。
  */
 export function buildWsRefToken(
+  kind: WsRefKind,
   name: string,
   lines: [number, number] | undefined,
   seq: number,
 ): string {
-  return buildAttRefToken(lines ? `${name}:${lines[0]}-${lines[1]}` : name, seq);
+  return buildRefToken(
+    WS_REF_EMOJI[kind],
+    lines ? `${name}:${lines[0]}-${lines[1]}` : name,
+    seq,
+  );
 }
 
 /**
  * 唯一化分配（D-005）：poolTokens = 附件 token ∪ 工作区 token（∪ 正文 inText
  * 保守占位，由调用方组并集）内按完整显示基名取最小可用序号；不随删除重排。
- * 与 allocateAttRefToken 同构（基名整体参与占位判定），直接委托（D-009 复用）。
+ * kind 决定 emoji 前缀（同类型同名才互斥 ·2，跨类型图标自区分）。
  */
-export function allocateWsRefToken(base: string, poolTokens: string[]): string {
-  return allocateAttRefToken(base, poolTokens);
+export function allocateWsRefToken(kind: WsRefKind, base: string, poolTokens: string[]): string {
+  return allocateRefToken(WS_REF_EMOJI[kind], base, poolTokens);
 }
 
 /**

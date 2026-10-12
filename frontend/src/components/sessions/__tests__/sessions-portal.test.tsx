@@ -2805,14 +2805,14 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
     await screen.findByTestId("file-explorer-stub");
   }
 
-  it("树右键入口：真会话输入框光标处插入【design.md】，重复触发再插一枚（端到端：槽位下发→面板透传→输入区消费→清槽）", async () => {
+  it("树右键入口：真会话输入框光标处插入【📄 design.md】，重复触发再插一枚（端到端：槽位下发→面板透传→输入区消费→清槽）", async () => {
     await enterFilesModeWithSession();
     fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
     // 端到端效果断言：token 落进真渲染的 SessionInputBar textarea（比断言
     // 槽位中间态稳——消费后即清槽，中间态与清槽态有 racing）。
     const ta = await waitFor(() => {
       const el = screen.getAllByPlaceholderText(/.+/).find(
-        (n) => (n as HTMLTextAreaElement).value.includes("【design.md】"),
+        (n) => (n as HTMLTextAreaElement).value.includes("【📄 design.md】"),
       );
       expect(el).toBeTruthy();
       return el as HTMLTextAreaElement;
@@ -2821,7 +2821,7 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
     fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
     await waitFor(() => {
       expect(
-        (ta as HTMLTextAreaElement).value.match(/【design\.md】/g)?.length,
+        (ta as HTMLTextAreaElement).value.match(/【📄 design\.md】/g)?.length,
       ).toBe(2);
     });
   });
@@ -2833,7 +2833,7 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
     fireEvent.click(screen.getByRole("button", { name: "stub-选区引用" }));
     await waitFor(() => {
       const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
-        (n as HTMLTextAreaElement).value.includes("【a.py:10-16】"),
+        (n as HTMLTextAreaElement).value.includes("【🧾 a.py:10-16】"),
       );
       expect(el).toBeTruthy();
     });
@@ -2850,7 +2850,7 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
     fireEvent.click(screen.getByRole("button", { name: "stub-右键引用" }));
     await waitFor(() => {
       const el = screen.getAllByPlaceholderText(/.+/).find((n) =>
-        (n as HTMLTextAreaElement).value.includes("【design.md】"),
+        (n as HTMLTextAreaElement).value.includes("【📄 design.md】"),
       );
       expect(el).toBeTruthy();
     });
