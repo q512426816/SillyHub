@@ -19,7 +19,12 @@ from alembic.script import ScriptDirectory
 
 def test_alembic_single_head() -> None:
     backend_root = Path(__file__).resolve().parents[1]
-    script = ScriptDirectory.from_config(Config(str(backend_root / "alembic.ini")))
+    # 2026-10-12-ci-guard-diagnosability：script_location 显式绝对路径——alembic.ini
+    # 里的相对值按进程 CWD 解析，从仓库根跑测试会 CommandError: Path doesn't exist
+    # 而非给出设计的多头提示（CI 靠 working-directory 钉住是隐式依赖，本地双 CWD 均绿）。
+    config = Config(str(backend_root / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_root / "migrations"))
+    script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
     assert len(heads) == 1, (
         "alembic 迁移多头（并行变更各自加迁移未合流）——部署会 crash-loop："

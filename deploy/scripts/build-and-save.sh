@@ -36,7 +36,9 @@ ALEMBIC_HEADS="$(cd backend && python -m alembic heads 2>&1)" || {
   echo "       $ALEMBIC_HEADS"
   exit 1
 }
-ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)')"
+# 2026-10-12-ci-guard-diagnosability：grep -c 计 0 时退出码 1，set -e 下赋值即死
+# （零条 head 形态在打印引导前静默退出）——容忍之，让 0 走下方 [-ne 1] 分支给全量引导。
+ALEMBIC_HEAD_COUNT="$(printf '%s\n' "$ALEMBIC_HEADS" | grep -c '(head)' || true)"
 if [ "$ALEMBIC_HEAD_COUNT" -ne 1 ]; then
   echo "    ❌ alembic 迁移多头（并行变更各自加迁移未合流）——部署后 backend upgrade head 会 crash-loop："
   printf '%s\n' "$ALEMBIC_HEADS" | sed 's/^/       /'
