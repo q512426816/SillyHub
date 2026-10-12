@@ -8,4 +8,4 @@ created_at: 2026-10-12T06:43:13.857Z
 - [x] task-02: bind_session_to_change 返回变更 id + submit_commit 绑定循环后回写 session.current_change_id；验证：test_spec_binding.py 新用例绿
 - [x] task-03: inject 建轮 change_id=session.current_change_id；验证：test_inject_change_context.py 新用例绿
 - [x] task-04: usage_service 会话链接分支加 IS NULL 谓词 + docstring 口径更新；验证：test_usage_stats.py 新增拆分/独占/回归护栏用例绿
-- [ ] task-05: 跑本变更全部相关测试（usage_stats + spec_binding + inject 新用例）全绿并按 pathspec 提交；验证：pytest 三处退出码 0
+- [x] task-05: 跑本变更全部相关测试（usage_stats + spec_binding + inject 新用例）全绿并按 pathspec 提交；验证：pytest 三处退出码 0
