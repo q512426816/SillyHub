@@ -418,9 +418,6 @@ export function AutostartDaemonBlock() {
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
       >
         <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          {error && (
-            <p className="text-[10px] text-destructive">{error}</p>
-          )}
         <span className="text-[11px] font-medium text-foreground">开机自启动（可选）</span>
         <span className="ml-auto text-[10px] text-muted-foreground">
           {open ? "收起" : "展开"}

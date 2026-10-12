@@ -9,7 +9,8 @@
  * 目标浏览器：桌面 Chrome/Edge/Firefox + iOS Safari（规避法后）；旧版 Safari/Android
  * 低端 WebView 无承诺。
  *
- * 仓内其它复制点（daemon/copy-button 等）仍为旧实现，后续触碰时迁移本 helper。
+ * 2026-10-12-clipboard-helper-full-migration：全仓生产复制点已全部迁移本 helper
+ * （grep navigator.clipboard 仅剩本文件与测试桩）。
  */
 
 /**

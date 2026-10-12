@@ -58,8 +58,12 @@ describe("copyTextToClipboard（2026-10-12-clipboard-fallback）", () => {
       addRange,
     } as unknown as Selection);
 
+    // 回归复审 FR-05：select 原型 spy 钉「选区真被产生」——删掉 helper 的
+    // textarea.select() 本用例必须红（防守卫退化为摆设）。
+    const selectSpy = vi.spyOn(HTMLTextAreaElement.prototype, "select");
     await copyTextToClipboard("shk_live_secret123");
 
+    expect(selectSpy).toHaveBeenCalledTimes(1);
     expect(execCommand).toHaveBeenCalledWith("copy");
     // 临时节点已清理（body 无残留 textarea）。
     expect(document.body.querySelectorAll("textarea")).toHaveLength(0);
