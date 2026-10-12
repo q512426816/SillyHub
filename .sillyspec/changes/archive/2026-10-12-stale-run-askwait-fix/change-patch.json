@@ -1,0 +1,233 @@
+{
+  "change": "2026-10-12-stale-run-askwait-fix",
+  "baseline": "0a98be186e984765d154bf37486d387acdda2f94",
+  "head": "c782a92497f30a946075b57442b9dcd11dcd74f8",
+  "files": [
+    "backend/app/modules/agent/service.py",
+    "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+    "backend/tests/modules/daemon/test_close_interactive_run_retroactive.py",
+    "frontend/src/components/agent-log-viewer.tsx",
+    "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+    "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+    "frontend/src/components/agent-log/normalize.ts",
+    "frontend/src/components/agent-log/run-error-item.tsx",
+    "frontend/src/components/agent-run-panel.tsx"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 285,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-12T11:04:00.634Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0a98be186e984765d154bf37486d387acdda2f94",
+    "totals": {
+      "files": 18,
+      "additions": 285,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/service.py",
+        "additions": 56,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py",
+        "additions": 83,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_close_interactive_run_retroactive.py",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log-viewer.tsx",
+        "additions": 21,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx",
+        "additions": 22,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/normalize.ts",
+        "additions": 34,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/run-error-item.tsx",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-run-panel.tsx",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/service.py（FR-01/02",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py（FR-06",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_close_interactive_run_retroactive.py（FR-02 夹具同步",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-log/normalize.ts（FR-03/05",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-log/run-error-item.tsx（FR-04",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/normalize.test.ts（FR-07",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx（FR-07",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-log-viewer.tsx（FR-05",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/agent-run-panel.tsx（FR-05",
+        "planned": null,
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "c81168fc05630ea9ec57686f86919f11f1f36facc04d36c3331e6d7418692e10",
+  "patchStatus": "ok"
+}

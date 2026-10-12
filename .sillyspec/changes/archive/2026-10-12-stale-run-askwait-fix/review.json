@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-stale-run-askwait-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c782a92497f30a946075b57442b9dcd11dcd74f8",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "pending_input 通道豁免用例断言偏弱",
+      "evidence": "test_stale_run_awaiting_user_pending_input_channel_skipped 仅断言 run.status=='running'，未像主豁免用例那样断言 error_code 为空、finished_at 为空、cleaned==0（零写入证据链弱一档）；功能行为已由实现与主用例覆盖，不影响承诺兑现。",
+      "location": "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py:148-157"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-07 测试绑定声称「新增 5 个用例」与实际新增 it 数不符",
+      "evidence": "冻结 diff 中前端实际新增 4 个 it（normalize.test.ts 3 个：alien 字典 null、errorCode+failureSummary 兜底链、系统字典回落；run-error-item.test.tsx 1 个：SERVICE_RESTART_INTERRUPTED 渲染），requirements 写「含新增 5 个用例」；4 个 it 的断言已完整覆盖 FR-07 列出的全部行为点，属文档计数口径瑕疵。",
+      "location": ".sillyspec/changes/2026-10-12-stale-run-askwait-fix/requirements.md:109"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok —— 判定只取 ask 信号 max(timestamp) 与 user_input max(timestamp) 的 Python 层相对时序，两边均经 _as_utc 归一（service.py:2509-2510），不依赖日志到达顺序；user_input 晚于 ask 即失效豁免（test_stale_run_user_answered_after_ask_still_killed 实证），无 ask 信号（last_ask_at None → False）与无日志轮照旧判死，防永卡兜底不缩小。",
+    "并发": "ok —— 豁免段位于无锁预判段（宽限窗检查之后、FOR UPDATE 之前，service.py:2570-2575），跳过路径仅 log.info + continue，不 session.add 不 commit，零写入承诺属实；判死路径 FOR UPDATE + populate_existing 重读守卫原样保留（2583-2597）；豁免轮不进复扫追踪集（_deferred_run_ids 只收日志新鲜轮，2648），不存在复扫误杀豁免轮的暗道。",
+    "切换": "ok —— 豁免 run 保持 running；daemon 真死兜底链验证为真：main.py lifespan 启动常驻 session_reconnect_sweeper，每轮顺带调 session_offline_sweep_once（sweep.py:795-800），对 runtime 长期离线的 active/pending 会话把挂起 run 终态化（worker 落 daemon_interrupted、主会话组补码），不产生永久僵尸；重启免疫论证成立（lease/心跳在重启瞬间必陈旧，_run_daemon_alive 在启动清理时点不可用作判据）。",
+    "作用域": "ok —— _run_awaiting_user_input 两条查询均以 run_id == run.id 过滤（service.py:2488,2504），run_id 为 uuid 全局唯一，逐轮独立判定，跨会话/跨工作区/多 daemon 不串台；AgentRunPanel 切 run 时四个错误状态同批重置（agent-run-panel.tsx:250-253），不串错。",
+    "披露边界裁决": "1) 日志 ask 信号作豁免判据（弃 SessionDialogRequest 表）：可接受——tool_kind.py 实证 askuserquestion→ask 映射（tool_kind.py:116-117），pending_input/tool_call+ask 两形态均有生产实证，dialog 表对交互会话 AskUserQuestion 0 行覆盖率不足；豁免过宽风险由宽限窗、daemon_alive、sweep 三层兜底收敛。2) daemon 死亡由 sweep 兜底：可接受——常驻 sweeper 周期驱动（非依赖 daemon 回连），永久死亡场景已覆盖。3) 弃 _run_daemon_alive 活性门：可接受——重启瞬间 lease updated_at 必陈旧致活性门恒 False，等于没加且多三级查询，论证与代码语义一致。4) 弃 error_detail 补 type/message：可接受——硬塞 type 会误入 8 类模型错误映射且存量已落库行仍 unknown，前端回落是全量修复。5) user_input 晚于 ask 失效豁免的防护：真实存在（service.py:2510 + 测试）。"
+  },
+  "reviewedAt": "2026-10-12T19:08:17+08:00"
+}

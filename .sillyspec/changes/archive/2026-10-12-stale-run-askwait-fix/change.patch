@@ -1,0 +1,534 @@
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index f5b3283aa..6e5e4421f 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
+ from pathlib import Path
+ from typing import TYPE_CHECKING
+ 
+-from sqlalchemy import func, select
++from sqlalchemy import and_, func, or_, select
+ from sqlalchemy.ext.asyncio import AsyncSession
+ from sqlmodel import col
+ 
+@@ -2444,7 +2444,12 @@ def _mark_stale_run_failed(run: AgentRun, now: datetime) -> None:
+     run.status = "failed"
+     run.finished_at = now
+     run.exit_code = -1
+-    run.output_redacted = "Run interrupted: service restarted while agent was running."
++    # 2026-10-12-stale-run-askwait-fix：原因文案改中文可读（经
++    # output_redacted → SessionRunRead.failure_summary 透出前端错误卡的
++    # message，对齐 close_run_steps._failure_summary_by_code 口径）；此前
++    # 英文技术串在前端错误卡原样裸出。error_detail 形状不变（前端
++    # buildErrorLogItem 对无模型错误键的字典返回 null 回落系统失败映射）。
++    run.output_redacted = "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。"
+     # 2026-09-15-background-task-permission-lockout（FR-04）：补结构化错误码——
+     # 线上实证重启终态化的 run 无 error_code/error_detail，出现「无声失败」
+     # 无从分辨（与模型/平台故障混同）。completed 恢复分支不写（run 实际
+@@ -2465,6 +2470,45 @@ async def _last_run_log_at(session: AsyncSession, run_id: uuid.UUID) -> datetime
+     ).scalar_one_or_none()
+ 
+ 
++async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> bool:
++    """run 是否处于「等待用户回答提问」状态（2026-10-12-stale-run-askwait-fix）。
++
++    ask 信号 = agent_run_logs 中 ``channel='pending_input'`` 或（``channel='tool_call'``
++    且 ``tool_kind='ask'``）的行（AskUserQuestion 类提问的落库形态，ql-20260705-007）；
++    ``user_input`` 行 = 用户回答/注入。最后 ask 信号晚于最后 user_input → 提问未答，
++    agent 停在等用户，日志静默不代表 daemon 死亡。
++
++    生产实证（2026-10-12 会话 47e2ff1a run e31ec8fc）：AskUserQuestion 等待回答
++    近 20 分钟，后端重启的启动清理按 10 分钟宽限窗误判 SERVICE_RESTART_INTERRUPTED。
++    信号纯读日志列，重启免疫（lease/心跳在重启瞬间必然陈旧，不可作判据）。
++    """
++    last_ask_at = (
++        await session.execute(
++            select(func.max(AgentRunLog.timestamp)).where(
++                AgentRunLog.run_id == run_id,
++                or_(
++                    AgentRunLog.channel == "pending_input",
++                    and_(
++                        AgentRunLog.channel == "tool_call",
++                        AgentRunLog.tool_kind == "ask",
++                    ),
++                ),
++            )
++        )
++    ).scalar_one_or_none()
++    if last_ask_at is None:
++        return False
++    last_user_at = (
++        await session.execute(
++            select(func.max(AgentRunLog.timestamp)).where(
++                AgentRunLog.run_id == run_id,
++                AgentRunLog.channel == "user_input",
++            )
++        )
++    ).scalar_one_or_none()
++    return last_user_at is None or _as_utc(last_ask_at) > _as_utc(last_user_at)
++
++
+ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+     """Scan for stale running-state AgentRuns and mark them as failed.
+ 
+@@ -2519,6 +2563,16 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
+                     last_log_age_seconds=int((now - _as_utc(last_log_at)).total_seconds()),
+                 )
+                 continue
++            # 2026-10-12-stale-run-askwait-fix：等待用户回答提问的轮豁免判死——
++            # 提问（AskUserQuestion）未答期间日志静默是正常态（人离开很常见），
++            # 不是 daemon 死亡；daemon 真死由 daemon 离线清扫（sweep）兜底，
++            # 用户回答后日志恢复流动，等真终态。纯日志列判定，重启瞬间可用。
++            if await _run_awaiting_user_input(session, run.id):
++                log.info(
++                    "stale_run_cleanup_deferred_awaiting_user",
++                    run_id=str(run.id),
++                )
++                continue
+         # 写前 FOR UPDATE 重读（评审 P2）：快照读与落库之间可能有并发收口——
+         # daemon 迟到成功结果经 close_interactive_run 行锁收口把 run 置
+         # completed，此处若按快照盲写会把它覆盖回 failed，复刻本变更要修的
+diff --git a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+index eb11dfaff..44767f22b 100644
+--- a/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
++++ b/backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py
+@@ -2,20 +2,25 @@
+ _cleanup_stale_runs_impl 重启终态化补结构化错误码。
+ 
+ - failed 分支（无可恢复元数据）→ status=failed + error_code=
+-  SERVICE_RESTART_INTERRUPTED + error_detail（reason/finished_by）。
++  SERVICE_RESTART_INTERRUPTED + error_detail（reason/finished_by）+ 中文可读
++  原因（output_redacted，2026-10-12-stale-run-askwait-fix）。
+ - completed 恢复分支（num_turns>0 + exit_code>=0）→ 不写 error_code（run 实际
+   已正常完成，重启只是丢 commit，非错误）。
+ 
++2026-10-12-stale-run-askwait-fix：等待用户回答提问的 running 轮豁免判死——
++生产实证（会话 47e2ff1a run e31ec8fc）：AskUserQuestion 等待回答近 20 分钟，
++后端重启的启动清理按 10 分钟宽限窗误判 SERVICE_RESTART_INTERRUPTED。
++
+ 线上实证（会话 6e213eb3 / run d9426bc3）：重启终态化的 run 无错误码，排障无从
+ 分辨「无声失败」与模型故障。
+ """
+ 
+ import uuid
+-from datetime import UTC, datetime
++from datetime import UTC, datetime, timedelta
+ 
+ import pytest
+ 
+-from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+ from app.modules.agent.service import _cleanup_stale_runs_impl
+ from app.modules.auth.model import User
+ 
+@@ -58,6 +63,26 @@ async def _make_stale_session_and_run(db_session, *, num_turns: int, exit_code):
+     return run
+ 
+ 
++async def _add_run_log(
++    db_session,
++    run_id: uuid.UUID,
++    *,
++    channel: str,
++    tool_kind: str | None = None,
++    minutes_ago: int,
++) -> None:
++    """插入一条 run 日志（timestamp 相对现在回拨，构造日志停滞场景）。"""
++    db_session.add(
++        AgentRunLog(
++            run_id=run_id,
++            channel=channel,
++            tool_kind=tool_kind,
++            timestamp=datetime.now(UTC) - timedelta(minutes=minutes_ago),
++        )
++    )
++    await db_session.commit()
++
++
+ @pytest.mark.asyncio
+ async def test_stale_run_failed_branch_writes_error_code(db_session) -> None:
+     """无可恢复元数据（num_turns=0 / exit_code=None）→ failed + 结构化错误码。"""
+@@ -77,6 +102,11 @@ async def test_stale_run_failed_branch_writes_error_code(db_session) -> None:
+         "finished_by": "stale_run_cleanup",
+     }
+     assert run.exit_code == -1
++    # 2026-10-12-stale-run-askwait-fix：output_redacted 中文可读原因（经
++    # SessionRunRead.failure_summary 透出前端错误卡 message）。
++    assert run.output_redacted == (
++        "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。"
++    )
+ 
+ 
+ @pytest.mark.asyncio
+@@ -90,3 +120,53 @@ async def test_stale_run_restored_completed_branch_no_error_code(db_session) ->
+     assert run.status == "completed"
+     assert run.error_code is None
+     assert run.error_detail is None
++
++
++# ── 2026-10-12-stale-run-askwait-fix：等待用户回答的轮豁免判死 ──────────────
++
++
++@pytest.mark.asyncio
++async def test_stale_run_awaiting_user_answer_skipped(db_session) -> None:
++    """ask 提问（tool_kind=ask）晚于 user_input → 日志停滞仍豁免，保持 running。
++
++    生产实证形态（会话 47e2ff1a）：AskUserQuestion 后等待用户回答近 20 分钟，
++    后端重启的启动清理不得按宽限窗误判 SERVICE_RESTART_INTERRUPTED。
++    """
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=30)
++    await _add_run_log(db_session, run.id, channel="tool_call", tool_kind="ask", minutes_ago=25)
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "running"
++    assert run.error_code is None
++    assert run.finished_at is None
++    assert cleaned == 0
++
++
++@pytest.mark.asyncio
++async def test_stale_run_awaiting_user_pending_input_channel_skipped(db_session) -> None:
++    """pending_input 通道的 ask 信号同样豁免（提问落库的另一形态）。"""
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++    await _add_run_log(db_session, run.id, channel="pending_input", minutes_ago=25)
++
++    await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "running"
++
++
++@pytest.mark.asyncio
++async def test_stale_run_user_answered_after_ask_still_killed(db_session) -> None:
++    """user_input 晚于 ask（已回答）→ 不豁免，日志停滞照常判死（防永卡兜底不缩小）。"""
++    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
++    await _add_run_log(db_session, run.id, channel="tool_call", tool_kind="ask", minutes_ago=30)
++    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=25)
++
++    cleaned = await _cleanup_stale_runs_impl(db_session)
++
++    await db_session.refresh(run)
++    assert run.status == "failed"
++    assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
++    assert cleaned >= 1
+diff --git a/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py b/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
+index f472c7395..ab3836db7 100644
+--- a/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
++++ b/backend/tests/modules/daemon/test_close_interactive_run_retroactive.py
+@@ -126,7 +126,7 @@ async def _make_run(
+         change_id=None,
+         error_code=error_code,
+         exit_code=-1 if status == "failed" else 0,
+-        output_redacted="Run interrupted: service restarted while agent was running."
++        output_redacted="平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。"
+         if status == "failed"
+         else None,
+     )
+@@ -169,7 +169,7 @@ async def test_late_success_result_rehabilates_service_restart_interrupted_run(
+     # 误杀残留全部清除
+     assert result.error_code is None
+     assert result.error_detail is None
+-    assert "Run interrupted" not in (result.output_redacted or "")
++    assert "平台服务重启" not in (result.output_redacted or "")
+     # 迟到结果携带的 usage / 摘要正常落库
+     assert result.input_tokens == 132772
+     assert result.output_tokens == 38259
+diff --git a/frontend/src/components/agent-log-viewer.tsx b/frontend/src/components/agent-log-viewer.tsx
+index 48445ff19..c1d6af9a0 100644
+--- a/frontend/src/components/agent-log-viewer.tsx
++++ b/frontend/src/components/agent-log-viewer.tsx
+@@ -667,6 +667,8 @@ export function AgentLogViewer({
+   permissionRequests,
+   onPermissionResolved,
+   runErrorDetail,
++  runErrorCode,
++  runFailureSummary,
+   runStatus,
+   onRunErrorResend,
+   onRunErrorSwitchProvider,
+@@ -706,6 +708,14 @@ export function AgentLogViewer({
+    * 缺失且 runStatus!=='failed' → 不追加（成功路径零回归）。
+    */
+   runErrorDetail?: { [key: string]: unknown } | null;
++  /**
++   * 2026-10-12-stale-run-askwait-fix：run.error_code（SessionRunRead）——
++   * runErrorDetail 为空/无模型错误键时喂 normalizeLogs 的系统失败映射
++   * （buildSystemFailureItem，按码给中文文案 + 服务重启类卡片元数据）。
++   */
++  runErrorCode?: string | null;
++  /** run 的人类可读失败原因（SessionRunRead.failure_summary = output_redacted）。 */
++  runFailureSummary?: string | null;
+   /**
+    * task-10：run 状态。'failed' 且无 runErrorDetail 时，normalizeLogs 兜底追加
+    * 「运行失败（无详情）」error 项（design §9 brownfield）；同时本 viewer 头部
+@@ -741,13 +751,20 @@ export function AgentLogViewer({
+ 
+   // ql-20260622-003 / P1-1：normalize + 过滤 + turn 分组全部 memo，依赖 logs 引用 /
+   // activeFilters，避免大日志列表每次 render 全量重算（normalize O(N)、turn 分组 O(N)）。
+-  // task-10 / FR-03：normalize 透传 run 级错误（error_detail + status）。runErrorDetail
+-  // 有值或 runStatus='failed' 时，normalizeLogs 在日志末尾追加结构化 error 类项
++  // task-10 / FR-03：normalize 透传 run 级错误（error_detail + status；2026-10-12
++  // 起含 errorCode/failureSummary 系统失败映射源）。任一在场面存在时，
++  // normalizeLogs 在日志末尾追加结构化 error 类项
+   // （errorLogItem），供 AgentLogRow 渲染 RunErrorItem。依赖含 runErrorDetail/runStatus，
+   // 任一变化重算（与 logs 引用一起 memo，O(N) 不每帧重算）。
+   const processedLogs = useMemo(
+-    () => normalizeLogs(logs ?? [], { errorDetail: runErrorDetail, runStatus }),
+-    [logs, runErrorDetail, runStatus],
++    () =>
++      normalizeLogs(logs ?? [], {
++        errorDetail: runErrorDetail,
++        runStatus,
++        errorCode: runErrorCode,
++        failureSummary: runFailureSummary,
++      }),
++    [logs, runErrorDetail, runStatus, runErrorCode, runFailureSummary],
+   );
+   const visibleLogs = useMemo(
+     () => processedLogs.filter((p) => !p.hidden),
+diff --git a/frontend/src/components/agent-log/__tests__/normalize.test.ts b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+index f3867b932..1fbf69236 100644
+--- a/frontend/src/components/agent-log/__tests__/normalize.test.ts
++++ b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+@@ -622,6 +622,20 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
+     expect(buildErrorLogItem(42 as any)).toBeNull();
+   });
+ 
++  it("buildErrorLogItem 无模型错误键的系统字典 → null（回落 buildSystemFailureItem）", () => {
++    // 2026-10-12-stale-run-askwait-fix：启动清理落库的 {reason, finished_by}
++    // 形状不含任何模型错误键 → 返回 null，让调用方 ?? 链走系统失败映射；
++    // 此前被解析成 type=unknown / message=运行失败，挡住 SERVICE_RESTART_INTERRUPTED
++    // 中文卡（生产实证会话 47e2ff1a）。
++    expect(
++      buildErrorLogItem({
++        reason: "no daemon activity within grace window (startup cleanup / deferred recheck)",
++        finished_by: "stale_run_cleanup",
++      }),
++    ).toBeNull();
++    expect(buildErrorLogItem({})).toBeNull();
++  });
++
+   // ---- isAssistantApiErrorText：错误文本识别 ----
+   it("isAssistantApiErrorText 识别 daemon 模型失败文本（API Error / Request rejected）", () => {
+     // design §1 真实文本：[ASSISTANT] API Error: Request rejected (429) · [1310]...
+@@ -704,6 +718,33 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
+     expect(errItem?.errorLogItem?.retryable).toBe(false);
+   });
+ 
++  // ---- 2026-10-12-stale-run-askwait-fix：系统失败映射兜底链 ----
++  it("normalizeLogs errorCode + failureSummary → 末尾追加系统失败项（中文 message）", () => {
++    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
++    const result = normalizeLogs(logs, {
++      errorCode: "SERVICE_RESTART_INTERRUPTED",
++      failureSummary: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
++    });
++    const errItem = result[result.length - 1];
++    expect(errItem?.semanticCategory).toBe("error");
++    expect(errItem?.hidden).toBe(false);
++    expect(errItem?.errorLogItem?.type).toBe("unknown");
++    expect(errItem?.errorLogItem?.code).toBe("SERVICE_RESTART_INTERRUPTED");
++    expect(errItem?.errorLogItem?.message).toContain("平台服务重启");
++  });
++
++  it("normalizeLogs errorDetail 为系统字典（无模型错误键）→ 回落系统失败映射", () => {
++    const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
++    const result = normalizeLogs(logs, {
++      errorDetail: { reason: "no daemon activity within grace window", finished_by: "stale_run_cleanup" },
++      errorCode: "SERVICE_RESTART_INTERRUPTED",
++      failureSummary: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
++    });
++    const errItem = result[result.length - 1];
++    expect(errItem?.errorLogItem?.code).toBe("SERVICE_RESTART_INTERRUPTED");
++    expect(errItem?.errorLogItem?.message).toContain("平台服务重启");
++  });
++
+   // ---- 成功路径零回归 ----
+   it("normalizeLogs 无 errorDetail 且非 failed → 不追加 error 项（成功路径零回归）", () => {
+     const logs: AgentRunLogEntry[] = [makeLog("stdout", "[ASSISTANT] 你好", "a1")];
+diff --git a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+index ede246a12..f951f828d 100644
+--- a/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
++++ b/frontend/src/components/agent-log/__tests__/run-error-item.test.tsx
+@@ -222,6 +222,28 @@ describe("task-09: 标题 / message / hint / code 渲染", () => {
+     expect(screen.getAllByText(/任务中断 · daemon_interrupted/).length).toBeGreaterThan(0);
+   });
+ 
++  // 2026-10-12-stale-run-askwait-fix：后端启动清理码收录——此前不在本表，
++  // 落 unknown 兜底显示「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a：
++  // AskUserQuestion 等待回答期间后端重启被清理判死）。
++  it("SERVICE_RESTART_INTERRUPTED → 「服务重启中断」标签 + 中文 message/hint（不再 unknown）", () => {
++    render(
++      <RunErrorItem
++        item={makeItem({
++          code: "SERVICE_RESTART_INTERRUPTED",
++          message: "平台服务重启，本轮执行被中断；会话上下文已保留，可重新发送继续。",
++        })}
++      />,
++    );
++    expect(
++      screen.getByText(/服务重启中断 · SERVICE_RESTART_INTERRUPTED/),
++    ).toBeInTheDocument();
++    expect(screen.getByText(/平台服务重启，本轮执行被中断/)).toBeInTheDocument();
++    expect(
++      screen.getByText(/平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。/),
++    ).toBeInTheDocument();
++    expect(screen.queryByText("unknown")).toBeNull();
++  });
++
+   it("code 优先于 type：系统码 + 模型 type 并存时走系统映射；非系统码回落 type 表", () => {
+     render(
+       <RunErrorItem
+diff --git a/frontend/src/components/agent-log/normalize.ts b/frontend/src/components/agent-log/normalize.ts
+index 6e085f08b..e19adcf5b 100644
+--- a/frontend/src/components/agent-log/normalize.ts
++++ b/frontend/src/components/agent-log/normalize.ts
+@@ -418,6 +418,16 @@ export function buildErrorLogItem(
+   errorDetail: { [key: string]: unknown } | null | undefined,
+ ): ErrorLogItem | null {
+   if (!errorDetail || typeof errorDetail !== "object") return null;
++  // 2026-10-12-stale-run-askwait-fix：系统级 error_detail（调度层落库形态，如
++  // 启动清理 _mark_stale_run_failed 的 {reason, finished_by}）不含任何模型错误
++  // 键 → 返回 null，让调用方 ?? 链回落 buildSystemFailureItem（按 error_code
++  // 映射中文）。此前非空字典一律按模型错误解析成 type=unknown / message=运行
++  // 失败，把系统失败映射挡在链外，SERVICE_RESTART_INTERRUPTED 只显示
++  // 「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a）。
++  const hasModelErrorKey = (
++    ["type", "code", "message", "retryable", "hint", "raw", "reset_at"] as const
++  ).some((k) => errorDetail[k] !== undefined);
++  if (!hasModelErrorKey) return null;
+   const raw = asStringOrNull(errorDetail["raw"]);
+   const isCliAuthTransient =
+     raw !== null &&
+@@ -1004,6 +1014,14 @@ export function classifyLog(
+ export interface NormalizeOptions {
+   errorDetail?: { [key: string]: unknown } | null;
+   runStatus?: string | null;
++  /**
++   * 2026-10-12-stale-run-askwait-fix：run.error_code（调度层/系统错误码）——
++   * errorDetail 为空或无模型错误键（buildErrorLogItem → null）时，与
++   * failureSummary 一起喂 buildSystemFailureItem（系统失败 → ErrorLogItem）。
++   */
++  errorCode?: string | null;
++  /** run 的人类可读失败原因（SessionRunRead.failure_summary = output_redacted）。 */
++  failureSummary?: string | null;
+ }
+ 
+ export function normalizeLogs(
+@@ -1025,10 +1043,15 @@ function normalizeLogsImpl(
+   logs: AgentRunLogEntry[],
+   options?: NormalizeOptions,
+ ): ProcessedLog[] {
+-  // task-08：是否已具备结构化错误（error_detail 或 failed 兜底）。若有，则
+-  // [ASSISTANT] API Error 文本行将被结构化项取代（hidden，避免重复/误导）。
++  // task-08：是否已具备结构化错误（error_detail / 系统失败映射 / failed 兜底）。
++  // 若有，则 [ASSISTANT] API Error 文本行将被结构化项取代（hidden，避免重复/误导）。
++  // 2026-10-12-stale-run-askwait-fix：errorCode/failureSummary（系统失败映射源）
++  // 也算结构化错误在场面。
+   const hasStructuredError =
+-    !!options?.errorDetail || options?.runStatus === "failed";
++    !!options?.errorDetail ||
++    options?.errorCode != null ||
++    options?.failureSummary != null ||
++    options?.runStatus === "failed";
+ 
+   // 2026-07-09-agent-log-display-fix / D-002@v2 原保留 [SYSTEM:thinking_tokens] 折叠显示；
+   // ql-20260709-003 推翻为默认隐藏（用户反馈 token 估算意义不大、且穿插把 thinking 切碎）。
+@@ -1349,11 +1372,14 @@ function normalizeLogsImpl(
+     }
+   }
+ 
+-  // task-08 / FR-03 / D-002@v1：在常规归一化后追加结构化 error 类日志项。
+-  // errorDetail 有值 → 结构化项；failed 无 errorDetail → brownfield 兜底项
+-  // （「运行失败（无详情）」）。两者 hidden=false（R-02：不进 NOISE 折叠白名单），
+-  // semanticCategory=error。errorDetail 缺失且非 failed → 不追加（成功路径零回归）。
+-  const errorItem = buildErrorLogItem(options?.errorDetail);
++  // 2026-10-12-stale-run-askwait-fix：兜底链扩为两级——模型错误（errorDetail）
++  // 优先；无模型错误键/缺 errorDetail 时喂系统失败映射（error_code +
++  // failure_summary），仍无果且 failed → 「运行失败（无详情）」既有兜底。
++  // 两者 hidden=false（R-02：不进 NOISE 折叠白名单），semanticCategory=error。
++  // 成功路径零回归。
++  const errorItem =
++    buildErrorLogItem(options?.errorDetail) ??
++    buildSystemFailureItem(options?.errorCode ?? null, options?.failureSummary ?? null);
+   if (errorItem) {
+     result.push(makeErrorProcessedLog(errorItem));
+   } else if (options?.runStatus === "failed") {
+diff --git a/frontend/src/components/agent-log/run-error-item.tsx b/frontend/src/components/agent-log/run-error-item.tsx
+index 7e1d94dcf..7af1d408a 100644
+--- a/frontend/src/components/agent-log/run-error-item.tsx
++++ b/frontend/src/components/agent-log/run-error-item.tsx
+@@ -182,6 +182,18 @@ export const SYSTEM_ERROR_CODE_META: Record<string, ModelErrorMeta> = {
+     badgeClass: "border-slate-200 bg-card text-slate-700",
+     defaultHint: "执行环境中断了本轮任务，如需继续可重新发送。",
+   },
++  // 后端启动清理/延迟复扫终态化（agent/service._mark_stale_run_failed 落码）——
++  // 2026-10-12-stale-run-askwait-fix 收录：此前不在本表，unknown 兜底显示
++  // 「运行失败 · unknown」且无详情（生产实证会话 47e2ff1a：AskUserQuestion
++  // 等待回答期间后端重启被清理判死）。
++  SERVICE_RESTART_INTERRUPTED: {
++    label: "服务重启中断",
++    Icon: PowerOff,
++    containerClass: "border-l-slate-400 bg-slate-50",
++    titleClass: "text-slate-700",
++    badgeClass: "border-slate-200 bg-card text-slate-700",
++    defaultHint: "平台服务重启中断了本轮，会话与上下文已保留，可重新发送继续。",
++  },
+ };
+ 
+ /**
+diff --git a/frontend/src/components/agent-run-panel.tsx b/frontend/src/components/agent-run-panel.tsx
+index 2a40c6781..b1e521294 100644
+--- a/frontend/src/components/agent-run-panel.tsx
++++ b/frontend/src/components/agent-run-panel.tsx
+@@ -189,6 +189,11 @@ export function AgentRunPanel({
+   // RunErrorItem 渲染原因 + 操作。每个 run 只拉一次（errorDetailFetchedRef 防重）。
+   const [runStatus, setRunStatus] = React.useState<string | null>(null);
+   const [runErrorDetail, setRunErrorDetail] = React.useState<{ [key: string]: unknown } | null>(null);
++  // 2026-10-12-stale-run-askwait-fix：系统失败映射源（SessionRunRead 同源字段）
++  // ——error_detail 无模型错误键（如启动清理的 {reason, finished_by}）时，
++  // normalize 据此走 buildSystemFailureItem 出「服务重启中断」中文卡。
++  const [runErrorCode, setRunErrorCode] = React.useState<string | null>(null);
++  const [runFailureSummary, setRunFailureSummary] = React.useState<string | null>(null);
+   const errorDetailFetchedRef = React.useRef(false);
+ 
+   // fetchUsage 通过 ref 暴露给 handleDone：handleDone 闭包在 useAgentRunStream 内部
+@@ -235,6 +240,8 @@ export function AgentRunPanel({
+       setTokenUsage(null);
+       setRunStatus(null);
+       setRunErrorDetail(null);
++      setRunErrorCode(null);
++      setRunFailureSummary(null);
+       errorDetailFetchedRef.current = false;
+       fetchUsageRef.current = null;
+       return;
+@@ -242,6 +249,8 @@ export function AgentRunPanel({
+     // runId 变化：重置错误状态 + 拉取标记（切 run 不串错 error_detail）。
+     setRunStatus(null);
+     setRunErrorDetail(null);
++    setRunErrorCode(null);
++    setRunFailureSummary(null);
+     errorDetailFetchedRef.current = false;
+     let cancelled = false;
+     const fetchUsage = () => {
+@@ -270,6 +279,9 @@ export function AgentRunPanel({
+                   if (!cancelled) {
+                     const matched = sessionRuns.find((sr) => sr.id === runId);
+                     setRunErrorDetail(matched?.error_detail ?? null);
++                    // 2026-10-12-stale-run-askwait-fix：系统失败映射源同批透出。
++                    setRunErrorCode(matched?.error_code ?? null);
++                    setRunFailureSummary(matched?.failure_summary ?? null);
+                   }
+                 })
+                 .catch(() => {
+@@ -383,6 +395,8 @@ export function AgentRunPanel({
+         permissionRequests={perms}
+         onPermissionResolved={handlePermissionResolved}
+         runErrorDetail={runErrorDetail}
++        runErrorCode={runErrorCode}
++        runFailureSummary={runFailureSummary}
+         runStatus={runStatus}
+         onRunErrorSwitchProvider={onRunErrorSwitchProvider}
+       />

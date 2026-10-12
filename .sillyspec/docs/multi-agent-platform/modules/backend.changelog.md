@@ -29,3 +29,4 @@
 - change 2026-09-25-change-precipitated-assets | 变更沉淀资产聚合端点：NEW change/assets.py（ChangeAssetsQueryService——按变更名解析 spec 树镜像：knowledge/fr/*.md 与 knowledge/decisions/*.md 节头分条+「变更：」行归属过滤，归档目录 test-trace.json/change-patch.json/delta.md 容错读，asyncio.to_thread 读盘，逐项 fail-open）+ GET /api/workspaces/{ws}/changes/{cid}/assets（CHANGE_READ，404 对齐 usage 端点口径）+ schema 六 DTO（ChangeAssetsRead 及五个子模型）；在途变更（未归档）跳过目录件读取。test_assets.py 5 用例（纯函数归属过滤/金样本聚合含 patch 缺席 None/在途跳过/损坏 JSON fail-open/跨工作区 404）。
 - 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
 - 2026-10-12-spec-backup-retention-validation | 动机：上变更评审 P3-1——spec_backup_retention_days 无正数校验，env 误配 0/负数会
+- 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重

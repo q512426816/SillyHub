@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-stale-run-askwait-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_awaiting_user_answer_skipped」",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_awaiting_user_pending_input_channel_skipped」",
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_user_answered_after_ask_still_killed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py「test_stale_run_failed_branch_writes_error_code」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/normalize.test.ts「buildErrorLogItem 无模型错误键的系统字典 → null（回落 buildSystemFailureItem）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx「SERVICE_RESTART_INTERRUPTED → 「服务重启中断」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/normalize.test.ts「normalizeLogs errorCode + failureSummary → 末尾追加系统失败项（中文 message）」",
+        "frontend/src/components/agent-log/__tests__/normalize.test.ts「normalizeLogs errorDetail 为系统字典（无模型错误键）→ 回落系统失败映射」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-06",
+      "tests": [
+        "backend/app/modules/agent/tests/test_cleanup_stale_runs_error_code.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-12-stale-run-askwait-fix:flow:测试绑定FR-07",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+        "frontend/src/components/agent-log/__tests__/run-error-item.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-stale-run-askwait-fix"
+    }
+  ]
+}
