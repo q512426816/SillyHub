@@ -1400,6 +1400,31 @@ describe('duration_api_ms 跨轮累计快照差分', () => {
     expect(p2.duration_ms).toBe(13000);
   });
 
+  it('duration_api_ms 为 NaN → 不进差分不污染基线（Number.isFinite 门，对齐 total_cost_usd 口径，2026-10-12-duration-nan-guard）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-1', 'run-1', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: NaN,
+    } as unknown as SDKResultMessage);
+    // 非有限值不进 payload（语义同「SDK 未报」，backend int|None 不收 NaN）。
+    const p1 = payloadOf(client, 0);
+    expect(p1.duration_api_ms).toBeUndefined();
+
+    // 基线未被污染：后续合法快照按无基线全量报（NaN 残留会误差分为 NaN）。
+    await daemon.onTurnResult('sess-1', 'run-2', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      duration_api_ms: 12000,
+    } as unknown as SDKResultMessage);
+    const p2 = payloadOf(client, 1);
+    expect(p2.duration_api_ms).toBe(12000);
+  });
+
   it('快照复位（当前 < 基线）：报全量（同 cost 口径）', async () => {
     const { daemon, client } = buildDaemon();
     daemons.push(daemon);

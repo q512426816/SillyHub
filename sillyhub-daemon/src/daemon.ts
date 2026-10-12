@@ -4012,7 +4012,10 @@ export class Daemon {
     if (typeof resultMeta.duration_ms === 'number') {
       payload.duration_ms = resultMeta.duration_ms;
     }
-    if (typeof resultMeta.duration_api_ms === 'number') {
+    // 2026-10-12-duration-nan-guard：Number.isFinite 门对齐上方 total_cost_usd
+    // 既有口径——typeof 门对 NaN/Infinity 放行，NaN 参与差分（< 恒 false）后
+    // 序列化为 null 被 backend int|None 静默吞掉且污染基线（后续合法快照误差分）。
+    if (typeof resultMeta.duration_api_ms === 'number' && Number.isFinite(resultMeta.duration_api_ms)) {
       // 2026-10-10-duration-api-cumulative-fix：duration_api_ms 与 total_cost_usd /
       // modelUsage 同生命周期——SDK streaming 会话每轮终态报「会话至今累计」（线上
       // 实证会话 0d6b2ba9：13s 轮被写 52.8min 累计值 → 终态 tok/s 分母放大 239 倍

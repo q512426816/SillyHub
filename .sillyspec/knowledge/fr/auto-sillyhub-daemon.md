@@ -165,3 +165,67 @@ created_at: 2026-10-08T15:19:22.662Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-11-daemon-masked-test-fix/requirements.md#FR-04
 最近确认：2e2f4cc17fdda1c14c1bb12669c2e8ac1d0e927b
+
+## FR-auto-sillyhub-daemon-030 工作区行的 name/slug/display_alias 与真实代码目录行的 root_path 均套既有 truncateText（500 阈值+省略标注），行为与既有三字段逐字一致；type/default_branch 等 backend 受约束短字段不在本变更面
+变更：2026-10-12-borrow-ctx-truncate-rest
+状态：active
+摘要：超长字段截断；边界不截
+全文：.sillyspec/changes/archive/2026-10-12-borrow-ctx-truncate-rest/requirements.md#FR-01
+最近确认：1cb57618a2cc9c6535c086946005b29ca8938cf0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts「name/slug/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-borrow-ctx-truncate-rest
+  status: active
+
+## FR-auto-sillyhub-daemon-031 新增用例先红后绿：name>500/root_path>500/三者并存超 500/边界 500 恰好不截（对齐既有用例形态）；既有用例全绿
+变更：2026-10-12-borrow-ctx-truncate-rest
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-12-borrow-ctx-truncate-rest/requirements.md#FR-02
+最近确认：1cb57618a2cc9c6535c086946005b29ca8938cf0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts「name/slug/display_alias/root_path 超 500 截断（2026-10-12-borrow-ctx-truncate-rest，防线覆盖剩余自由文本字段）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-borrow-ctx-truncate-rest
+  status: active
+
+## FR-auto-sillyhub-daemon-032 生产代码零新增防御原语（复用 truncateText），模块头注安全语义段同步
+变更：2026-10-12-borrow-ctx-truncate-rest
+状态：active
+摘要：单一实现核验
+全文：.sillyspec/changes/archive/2026-10-12-borrow-ctx-truncate-rest/requirements.md#FR-03
+最近确认：1cb57618a2cc9c6535c086946005b29ca8938cf0
+
+## FR-auto-sillyhub-daemon-033 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/borrow-sandbox-context.test.ts 全文件
+变更：2026-10-12-borrow-ctx-truncate-rest
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-borrow-ctx-truncate-rest/requirements.md#FR-04
+最近确认：1cb57618a2cc9c6535c086946005b29ca8938cf0
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-borrow-ctx-truncate-rest:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/borrow-sandbox-context.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-borrow-ctx-truncate-rest
+  status: active
