@@ -157,6 +157,7 @@ import {
   type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
+import { useAtomicRefCaret } from "@/components/daemon/use-atomic-ref-caret";
 import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
 import {
   PROVIDER_META,
@@ -1782,11 +1783,17 @@ export function GroupChatPanel({
    * 区行为一致——分配池=附件∪工作区∪正文 inText 并集，D-005；组装位
    * substituteWsRefsForSend 消费，D-008@v2）。 */
   const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
-  /** 两池并集 token 集（overlay 高亮 / 退格整删共用）。 */
-  const allRefTokens = [
-    ...Object.values(attTokenMap),
-    ...Object.values(wsRefTokens).map((e) => e.token),
-  ];
+  /** 两池并集 token 集（overlay 高亮 / 退格整删共用；useMemo 稳定引用防 hook 区间每渲染重算）。 */
+  const allRefTokens = useMemo(
+    () => [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)],
+    [attTokenMap, wsRefTokens],
+  );
+  /* 2026-10-12-ws-ref-atomic-caret：标签原子性拦截（跳块/吸附/内部编辑拒绝，单聊同款）。 */
+  const { handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret } = useAtomicRefCaret({
+    value: draft,
+    tokens: allRefTokens,
+    textareaRef: inputRef,
+  });
   /** × 角标删除统一入口：一处出现移除 + 同步清工作区映射条目。 */
   const removeRefOnce = (token: string) => {
     setDraft((prev) => {
@@ -2140,6 +2147,9 @@ export function GroupChatPanel({
   }, [draft, sending, pendingAttachments, members, performSend]);
 
   const handleInputKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    /* 2026-10-12-ws-ref-atomic-caret：方向键跳块（单聊同款，置于联想处理前——
+       浮层只管 ↑↓/Enter/Tab/Esc 无冲突；IME 组合期在 hook 内统一放行）。 */
+    if (handleAtomicKeyDown(e)) return;
     // IME 组合期不劫持（联想浮层键盘契约前置守卫）。
     if (e.nativeEvent.isComposing) return;
     if (mentionOpen && mentionFiltered.length > 0) {
@@ -3193,6 +3203,12 @@ export function GroupChatPanel({
                 placeholder="发送消息，@昵称 唤起指定 Agent，@全体 通知所有 Agent…"
                 onChange={(e) => handleInputChange(e.target.value)}
                 onKeyDown={handleInputKeyDown}
+                /* 2026-10-12-ws-ref-atomic-caret：标签原子性（点击吸附/方向键跳块/
+                   内部编辑拒绝），见 use-atomic-ref-caret.ts。 */
+                onBeforeInput={handleAtomicBeforeInput}
+                onClick={snapCaret}
+                onKeyUp={snapCaret}
+                onSelect={snapCaret}
                 onPaste={(e) => {
                   // 剪贴板带文件（截图等）→ 与 📎 同上传管线（单聊同口径）。
                   const files = e.clipboardData?.files;

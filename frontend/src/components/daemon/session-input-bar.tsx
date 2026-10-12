@@ -68,6 +68,7 @@ import {
   type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
+import { useAtomicRefCaret } from "./use-atomic-ref-caret";
 import {
   SessionMentionPopover,
   buildAtMentionItems,
@@ -316,7 +317,16 @@ export function SessionInputBar({
   };
 
   /** 两池并集 token 集（overlay 高亮 / 退格整删 / 唯一化分配池共用）。 */
-  const allRefTokens = [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)];
+  const allRefTokens = useMemo(
+    () => [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)],
+    [attTokenMap, wsRefTokens],
+  );
+  /* 2026-10-12-ws-ref-atomic-caret：标签原子性拦截（跳块/吸附/内部编辑拒绝）。 */
+  const { handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret } = useAtomicRefCaret({
+    value,
+    tokens: allRefTokens,
+    textareaRef,
+  });
 
   /** 工作区引用插入（槽位消费与未来直插共用）：分配/复用 token 后按
    *  handleInsertAttRef 同款光标机制插入（聚焦插当前光标、失焦插失焦前光标位、
@@ -1098,6 +1108,12 @@ export function SessionInputBar({
             rows={2}
             disabled={disabled}
             style={inputHeight != null ? { height: inputHeight } : undefined}
+            /* 2026-10-12-ws-ref-atomic-caret：标签原子性（点击吸附/方向键跳块/
+               内部编辑拒绝），见 use-atomic-ref-caret.ts。 */
+            onBeforeInput={handleAtomicBeforeInput}
+            onClick={snapCaret}
+            onKeyUp={snapCaret}
+            onSelect={snapCaret}
             onChange={(e) => {
               onChange(e.target.value);
               // task-03 检测驱动：读 e.target.selectionStart（光标左侧回看），
@@ -1135,6 +1151,9 @@ export function SessionInputBar({
             void handleFiles(files);
           }}
           onKeyDown={(e) => {
+            /* 2026-10-12-ws-ref-atomic-caret：方向键跳块（←/→ 跨整块，shift 选区
+               扩展不拦）——置于联想处理前（浮层只管 ↑↓/Enter/Tab/Esc 无冲突）。 */
+            if (handleAtomicKeyDown(e)) return;
             // task-03 联想键盘首位（R-2 拦截规则集中于此）：浮层激活且非 IME
             // 组合期时，↑↓/Enter/Tab/Esc 由 handleMentionKeyDown（task-02）统一
             // 处置，命中拦截（preventDefault + 不外溢）即返回——Enter 不落入
