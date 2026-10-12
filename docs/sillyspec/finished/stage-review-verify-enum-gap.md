@@ -36,3 +36,26 @@ Stage Review Gate 的提示文案与 register-stage-review 的 stage 枚举不�
 ## 修复建议
 
 二选一对齐：① register-stage-review 枚举补 verify（生成骨架/adopt 与其他 stage 同构）；② gate 提示降级为与实现一致（verify 阶段不要求 stage review）。
+
+## 处置记录（2026-10-12）
+
+**按方向②修复**（sillyspec 仓工作树，未提交）：期望面对齐门禁现实——Stage Review Gate
+（gates.js:1513）实际只拦 `brainstorm|plan|execute`，verify 从不在列。修法：
+
+1. **默认档 hint**（machine-interface.js e3 块）：`stage === 'verify' || 'execute'` 收窄为
+   仅 execute；文案「verify/execute --done 的 Stage Review Gate 会拦」改「execute --done
+   的…」。verify 不再产提示（提示命令 `--stage verify` 不可执行 + 指称的门禁不存在，
+   双重误导消除）。
+2. **--full 档**（e2 块）：`full-stage-review` 检查限 execute；verify 的真实门面 e1
+   target-files 对账检查保留不动。
+3. **测试契约同步**（gate-full-preflight.test.mjs）：F1/F2/F4 的 verify stage-review 期望
+   改为「不在场」断言（原契约钉的是超前于门禁实现的期望面——即本坑病灶），新增 F5
+   （verify 默认档无 hint / execute 有且文案指称 execute）。
+
+方向①（register 枚举补 verify）不采纳：全仓从未存在 verify-* stage-review 目录，无
+消费面，补枚举是铸造无人使用的新工件惯例。死锁风险（护栏②提及的「未来硬拦+枚举缺」）
+随期望面收敛而消失——若未来真引入 verify 阶段评审，枚举与提示须同变更落地。
+
+**测试**：gate-full-preflight 4/4 + gate-docs-only / gate-derive-spec-drift /
+diagnostic-codes-parity / register-stage-review-cwd-deep 6/6 + stage-review 族
+（align-execute-review-gate / stage-review-checklist / platform-register）11/11 全绿。归档。
