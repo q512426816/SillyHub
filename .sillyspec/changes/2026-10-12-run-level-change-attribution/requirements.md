@@ -65,8 +65,8 @@ created_at: 2026-10-12T06:43:13.857Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: backend/app/modules/daemon/tests/test_inject_change_context.py「inject 轮打锚会话当前变更上下文」
-FR-02: backend/app/modules/change/tests/test_spec_binding.py「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」
-FR-03: backend/app/modules/change/tests/test_usage_stats.py「打锚 run 独占归锚定变更 + 存量无锚 run 行为不变」
-FR-04: backend/app/modules/change/tests/test_usage_stats.py「同会话先后两变更用量互不相同各归各段」
-FR-05: backend/app/modules/change/tests/test_usage_stats.py + test_spec_binding.py + test_inject_change_context.py「全量通过」
+FR-01: backend/app/modules/daemon/tests/test_inject_change_context.py「TestInjectChangeContextStamp::test_inject_run_stamped_with_session_context + ::test_inject_run_unstamped_when_context_none + ::test_context_switch_retargets_next_run」
+FR-02: backend/app/modules/change/tests/test_spec_binding.py「test_bind_change_returns_change_id_contract + test_bind_change_failure_is_best_effort_no_raise（失败路径 None 断言）」
+FR-03: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_anchored_run_exclusive_to_owning_change + ::test_shared_session_counted_in_both_changes（无锚 run 回归护栏）」
+FR-04: backend/app/modules/change/tests/test_usage_stats.py「TestChangeAggregationSemantics::test_two_changes_sequential_split」
+FR-05: backend/app/modules/change/tests/test_usage_stats.py + backend/app/modules/change/tests/test_spec_binding.py + backend/app/modules/daemon/tests/test_inject_change_context.py + backend/app/modules/agent/tests/test_agent_session_model.py「全量通过」

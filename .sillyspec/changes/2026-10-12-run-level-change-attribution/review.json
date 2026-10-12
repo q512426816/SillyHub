@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-run-level-change-attribution",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "75d6cf9a302f9393038efe2160f2bb20da175f7e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR 测试绑定名为描述性短语而非精确 pytest 用例名",
+      "evidence": "FR-01..FR-04 四行绑定的「用例名」（如「inject 轮打锚会话当前变更上下文」「bind_session_to_change 返回变更 id（含 default 守卫返回 None）」）均无同名 pytest 节点；实际用例为 TestInjectChangeContextStamp 三用例、test_bind_change_returns_change_id_contract、test_anchored_run_exclusive_to_owning_change、test_two_changes_sequential_split。测试本身真实存在、断言与 FR 行为一一对应且实测通过（独立复核 44 passed）；archive 惯例（如 2026-10-11-alembic-single-head-guard 绑定「test_alembic_single_head」）用精确节点名，本次仅追溯精度不足。",
+      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/requirements.md:68-72"
+    },
+    {
+      "severity": "P3",
+      "title": "design 乱序作答「迟到重放影响限于 ≤1 轮偏差」量化偏乐观",
+      "evidence": "submit_commit 回写无 run 序号/水位防御，旧 run 的迟到重放只要发生在更新提交之后就会把 current_change_id 拉回旧值，其后所有无绑定命令的新轮 inject 均错锚旧值直至下一条绑定命令到达——极端迟到场景偏差可超 1 轮。design 已显式声明「接受不设防」（best-effort 通道既有口径、后续新命令自然自愈、仅统计归属误差非数据正确性），裁决仍为可接受，仅量化表述不严谨。",
+      "location": ".sillyspec/changes/2026-10-12-run-level-change-attribution/design.md:35（代码面：backend/app/modules/daemon/run_sync/service/submit_commit.py:347-356）"
+    },
+    {
+      "severity": "P3",
+      "title": "@ 联想绑定通道不回写 current_change_id，design 未披露其与新聚合口径的交互",
+      "evidence": "inject @ 联想路径（helpers.py:610-617）调 bind_session_to_change 落 change_session_links 但不消费返回值、不更新会话上下文——@ 选中的变更在打锚会话中收不到带锚轮（其链接分支被 IS NULL 谓词排除），统计偏小而非双计。FR-01 范围只承诺命令解析通道，不构成违约；属未声明的次级口径缝隙，建议后续变更补齐或在 usage docstring 说明。",
+      "location": "backend/app/modules/daemon/session/service/helpers.py:610-617"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受——design 显式声明旧 run 迟到重放不设防（best-effort 通道既有口径、自愈、统计性误差）；代码核实确无防御（作答真实），另记 P3 量化表述偏差",
+    "并发": "ok——上下文列写入随 _submit_finalize 末尾既有 commit 同事务提交（submit_commit.py:395），失败随 IntegrityError rollback；同会话单活跃轮守卫（inject.py:315-317 turn-conflict guards）与外层 try/except 核实存在。design「与 link 行同 savepoint 事务边界」措辞不精确：列写实际发生在 bind 的 begin_nested 释放后、同一外层事务内，失败同回滚，结论不变",
+    "切换": "边界已裁决：可接受——「≤1 轮切换误差」为轮级锚固有粒度（命令在轮中后段出现时其执行轮按创建时上下文归属），与本地 CLI 水位 ~10s 粒度同级，仅统计归属非数据正确性；FK ondelete=SET NULL（model.py + 迁移两侧一致）与 reopen 上下文延续均核实；inject 打锚在建轮事务内失败随回滚",
+    "作用域": "ok——上下文存变更行全局 id（FK changes.id），bind 按 (workspace_id, change_key) 解析，跨工作区不串台；quicklog 两聚合函数（_quicklog_run_ids/_quicklog_summary_anchor）与本地 CLI 水位通道 diff 确认未动。「存量会话保持旧口径」边界已裁决：可接受——FR-03 将其定为防回归承诺并由 test_shared_session_counted_in_both_changes 护栏钉死，仓库规则 11 允许重置开发数据"
+  },
+  "reviewedAt": "2026-10-12T15:08:11+08:00"
+}
