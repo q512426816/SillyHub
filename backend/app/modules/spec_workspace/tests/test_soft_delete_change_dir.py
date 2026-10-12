@@ -33,11 +33,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+import app.modules.spec_workspace.service as spec_workspace_service
 from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.spec_workspace.schema import FileOp
 from app.modules.spec_workspace.service import (
     BACKUP_TS_FORMAT,
-    SPEC_BACKUP_RETENTION_DAYS,
     SpecWorkspaceService,
     _reset_prune_throttle,
 )
@@ -454,16 +454,56 @@ class TestApplyOpsBatchBackup:
 
 
 # ===========================================================================
-# ⑦ _prune_spec_backups 行为：只删过期目录 / 非时间戳跳过 / 节流
+# ⑦ _prune_spec_backups 行为：默认永不修剪 / 只删过期目录 / 非时间戳跳过 / 节流
 # ===========================================================================
 
 
 class TestPruneSpecBackups:
-    def test_deletes_only_dirs_older_than_retention(self, tmp_path) -> None:
-        """只 rmtree 早于 30 天的可解析时间戳目录；新鲜的与非时间戳目录零触碰。"""
-        old_ts = (datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 1)).strftime(
-            BACKUP_TS_FORMAT
-        )
+    @staticmethod
+    def _patch_retention(monkeypatch: pytest.MonkeyPatch, days: int | None) -> None:
+        """把 service 模块绑定的 get_settings 换成仅覆写保留天数的替身。
+
+        用真实 Settings 的 model_copy 只改 spec_backup_retention_days——桩不缺字段，
+        同批次其它 get_settings 消费点不受影响（monkeypatch 目标是 service.py:35
+        的导入面绑定，先例 agent/tests/test_patrol.py）。
+        """
+        from app.core.config import get_settings as real_get_settings
+
+        stub = real_get_settings().model_copy(update={"spec_backup_retention_days": days})
+        monkeypatch.setattr(spec_workspace_service, "get_settings", lambda: stub)
+
+    def test_default_retention_never_prunes(self, tmp_path, monkeypatch) -> None:
+        """默认（spec_backup_retention_days=None）永不修剪：过期目录保留、备份区零扫描。
+
+        锁死 2026-10-12-spec-backup-keep-forever 的用户决策——软删备份长期保留，
+        30 天自动清理退役；零扫描是判定面（scandir 不得触达 backup_root）。
+        """
+        old_ts = (datetime.now(UTC) - timedelta(days=365)).strftime(BACKUP_TS_FORMAT)
+        (tmp_path / old_ts).mkdir()
+        (tmp_path / old_ts / "keep.md").write_text("keep", encoding="utf-8")
+
+        scans: list[Path] = []
+        real_scandir = os.scandir
+
+        def _counting_scandir(path):
+            if isinstance(path, (str, os.PathLike)) and Path(path) == tmp_path:
+                scans.append(Path(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", _counting_scandir)
+        self._patch_retention(monkeypatch, None)
+        _reset_prune_throttle()  # 隔离上一用例的进程级节流态
+
+        SpecWorkspaceService._prune_spec_backups(tmp_path)
+
+        assert scans == [], "默认配置禁止扫描备份区（零 scandir）"
+        assert (tmp_path / old_ts / "keep.md").exists(), "过期目录必须原样保留（长期保留）"
+
+    def test_deletes_only_dirs_older_than_retention(self, tmp_path, monkeypatch) -> None:
+        """retention=30（逃生门启用）：只 rmtree 早于 30 天的可解析时间戳目录；新鲜的与非时间戳目录零触碰。"""
+        self._patch_retention(monkeypatch, 30)
+        _reset_prune_throttle()
+        old_ts = (datetime.now(UTC) - timedelta(days=31)).strftime(BACKUP_TS_FORMAT)
         fresh_ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
         (tmp_path / old_ts).mkdir()
         (tmp_path / old_ts / "file.md").write_text("old", encoding="utf-8")
@@ -483,9 +523,8 @@ class TestPruneSpecBackups:
         锁死 ql-20260924 修复的第三层防护——即便上游仍高频触发，扫描频率也被
         冷却窗口封顶（线上 delete 重放 ~5 次/秒，不节流则每批仍触发全量扫）。
         """
-        old_ts = (datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 1)).strftime(
-            BACKUP_TS_FORMAT
-        )
+        self._patch_retention(monkeypatch, 30)
+        old_ts = (datetime.now(UTC) - timedelta(days=31)).strftime(BACKUP_TS_FORMAT)
         (tmp_path / old_ts).mkdir()
         (tmp_path / old_ts / "first.md").write_text("1", encoding="utf-8")
 
@@ -510,9 +549,7 @@ class TestPruneSpecBackups:
         assert not (tmp_path / old_ts).exists()
 
         # 冷却窗口内二次调用：不再扫描（即使又冒出新的过期目录）
-        newer_old_ts = (
-            datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS + 2)
-        ).strftime(BACKUP_TS_FORMAT)
+        newer_old_ts = (datetime.now(UTC) - timedelta(days=32)).strftime(BACKUP_TS_FORMAT)
         (tmp_path / newer_old_ts).mkdir()
         SpecWorkspaceService._prune_spec_backups(tmp_path)
 
@@ -527,7 +564,7 @@ class TestPruneSpecBackups:
 
 # Suppress unused-import warning for pytest (fixture discovery).
 # 模块级 asyncio 标记：本文件绝大多数用例是 async（走 db_session fixture）；
-# ``TestPruneSpecBackups`` 三个纯同步用例（直调静态方法）会被此标记覆盖成
+# ``TestPruneSpecBackups`` 四个纯同步用例（直调静态方法）会被此标记覆盖成
 # 「非 async 函数」告警——显式过滤该告警，保留 async 默认。
 pytestmark = [
     pytest.mark.asyncio,

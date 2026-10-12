@@ -36,9 +36,18 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+import app.modules.spec_workspace.service as _spec_workspace_service
 from app.core.config import get_settings
 from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.workspace.model import Workspace
+
+
+# 2026-10-12-spec-backup-keep-forever：修剪天数默认 None（永不修剪），本文件
+# TestBackupPrune 走 API 路径验证「启用修剪」语义，须向 service 模块的
+# get_settings 绑定注入替身（只覆写保留天数，其余字段用真实 Settings 拷贝）。
+def _patch_retention_days(monkeypatch: pytest.MonkeyPatch, days: int | None) -> None:
+    stub = get_settings().model_copy(update={"spec_backup_retention_days": days})
+    monkeypatch.setattr(_spec_workspace_service, "get_settings", lambda: stub)
 
 
 def _b64(text: str) -> str:
@@ -701,8 +710,14 @@ class TestHashFallback:
 
 class TestBackupPrune:
     async def test_old_backup_dir_pruned(
-        self, db_session, client: AsyncClient, auth_headers, tmp_path
+        self, db_session, client: AsyncClient, auth_headers, tmp_path, monkeypatch
     ) -> None:
+        """retention=30（逃生门启用）：软删触发机会式修剪，早于保留期的备份目录被清。
+
+        2026-10-12-spec-backup-keep-forever 起默认 None=永不修剪；本用例经
+        _patch_retention_days 钉回 30 天验证逃生门语义（R-06 原断言不丢）。
+        """
+        _patch_retention_days(monkeypatch, 30)
         ws = await _make_workspace(db_session)
         spec_root = tmp_path / "spec-root"
         await _make_spec_workspace(db_session, ws, spec_root)

@@ -121,16 +121,18 @@ SPEC_BUNDLE_INVALID_CODE = "HTTP_422_SPEC_BUNDLE_INVALID"
 
 # 软删备份区（change 2026-08-13-platform-managed-file-sync / R-06）：
 #   - BACKUP_TS_FORMAT：timestamped 备份子目录名（可排序、可 strptime 解析）。
-#   - SPEC_BACKUP_RETENTION_DAYS：默认保留 30 天，软删时机会式修剪早于该天数的旧目录。
+#   - 保留天数由 Settings.spec_backup_retention_days 控制（2026-10-12-spec-backup-keep-forever）：
+#     默认 None = 长期保留，永不修剪、零扫描；正整数 N = 机会式修剪早于 N 天的目录
+#     （原 SPEC_BACKUP_RETENTION_DAYS=30 语义退役为逃生门）。
 BACKUP_TS_FORMAT = "%Y%m%d%H%M%S%f"
-SPEC_BACKUP_RETENTION_DAYS = 30
 
 # ql-20260924（生产 OOM 修复）：备份区修剪节流窗口（秒）。
 # 实测事故：delete 重放风暴（~5 op/秒）下每 op 一次全量扫描 spec-backups（线上堆积
 # 3.5 万时间戳目录），listdir+逐目录 strptime 抢死 GIL → event_loop.blocked 5.7s、
 # 内存被顶到 mem_limit 被 oom-kill。即便修复了「每批一次修剪」，重放持续时仍是
-# 每批一次全量扫；本冷却窗口把扫描频率封顶（机会式修剪，延迟清理无副作用——备份
-# 区保留 30 天，10 分钟才剪一次远快于任何保留窗口）。
+# 每批一次全量扫；本冷却窗口把扫描频率封顶（机会式修剪，延迟清理无副作用——
+# 启用修剪时 10 分钟才剪一次远快于任何保留窗口；默认 None 时本函数在节流记账前
+# 即返回，无扫描即无风暴面）。
 PRUNE_THROTTLE_INTERVAL_S = 600.0
 # 每个 backup_root 的上次修剪时刻（time.monotonic 基准），进程内节流态。
 _prune_last_pruned_at: dict[str, float] = {}
@@ -2021,18 +2023,25 @@ class SpecWorkspaceService:
 
     @staticmethod
     def _prune_spec_backups(backup_root: Path) -> None:
-        """R-06：机会式修剪备份区早于 30 天的旧 timestamp 目录。
+        """R-06：机会式修剪备份区早于保留天数的旧 timestamp 目录。
+
+        保留天数读 ``Settings.spec_backup_retention_days``（2026-10-12-spec-backup-keep-forever）：
+        默认 None = **长期保留**——立即返回，不删除任何目录、不扫描磁盘；正整数 N
+        才走修剪，语义与退役的 ``SPEC_BACKUP_RETENTION_DAYS=30`` 常量逐字节一致。
 
         只删能解析为 ``BACKUP_TS_FORMAT`` 时间戳的目录；解析失败/非目录跳过（保守
         不误删）。软删时调用，无独立清理任务/定时器（P2 落盘决策）。
 
-        ql-20260924（生产 OOM 修复）加两层防护：
+        ql-20260924（生产 OOM 修复）加两层防护（仅启用修剪时生效）：
         1. **节流**：同一 ``backup_root`` 在 ``PRUNE_THROTTLE_INTERVAL_S`` 冷却窗口内
            直接返回（机会式修剪语义允许延迟清理），把高频软删/重放下的扫描频率封顶；
         2. **scandir** 替代 ``listdir``+逐条 ``is_dir()``——后者对 3.5 万目录每条多
            一次 stat syscall，scandir 的 dirent 自带类型（多数文件系统免 stat），syscall
            减半。
         """
+        retention_days = get_settings().spec_backup_retention_days
+        if retention_days is None:
+            return  # 默认长期保留：零扫描零删除（在节流记账前返回，无副作用）
         key = str(backup_root)
         now_mono = time.monotonic()
         with _prune_lock:
@@ -2040,7 +2049,7 @@ class SpecWorkspaceService:
             if last is not None and (now_mono - last) < PRUNE_THROTTLE_INTERVAL_S:
                 return  # 冷却窗口内 → 本次跳过扫描
             _prune_last_pruned_at[key] = now_mono
-        cutoff = datetime.now(UTC) - timedelta(days=SPEC_BACKUP_RETENTION_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         try:
             with os.scandir(backup_root) as entries:
                 names = [entry.name for entry in entries if entry.is_dir()]

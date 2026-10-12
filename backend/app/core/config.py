@@ -257,6 +257,17 @@ class Settings(BaseSettings):
         "prompts. SPEC_DATA_ROOT is the in-container path bind-mounted to this host path.",
     )
 
+    # ── Spec 软删备份区保留天数（2026-10-12-spec-backup-keep-forever）──────
+    # None（默认）= 长期保留：_prune_spec_backups 直接返回，永不删除备份区目录、
+    # 不做磁盘扫描；正整数 N = 机会式修剪早于 N 天的时间戳备份目录（逃生门，
+    # 原 SPEC_BACKUP_RETENTION_DAYS=30 语义，含 ql-20260924 OOM 节流防护）。
+    spec_backup_retention_days: int | None = Field(
+        default=None,
+        description="Soft-delete backup retention in days. None (default) keeps "
+        "spec-backups forever (never pruned, zero scans); a positive int "
+        "opportunistically prunes timestamped backup dirs older than N days.",
+    )
+
     # ── CLI progress naive 时间戳解释时区（ql-20260822-006）─────────────────
     # CLI 写的是宿主机墙钟（无时区标记），后端进程时区（Docker 容器 UTC）≠ CLI
     # 宿主机时区，解释时区必须显式配置（详见 resolve_cli_tzinfo docstring）。
