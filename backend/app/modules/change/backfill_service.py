@@ -50,6 +50,10 @@ class BackfillStats:
     commands_parsed: int = 0
     commands_skipped_unknown_key: int = 0
     logs_parse_failed: int = 0
+    #: 同 run 同 submit 批次（timestamp+created_at 并列）解析出不同绑定目标的
+    #: 命令组数——批内消息序在 DB 无可靠序号，终值取 created_at,id 决胜序，
+    #: 该计数>0 表示该会话存在理论错锚面（dry-run 报告暴露，人工可查）。
+    ambiguous_parallel_groups: int = 0
     cursor_written: bool = False
     cursor_change_id: uuid.UUID | None = None
     unknown_keys: list[str] = field(default_factory=list)
@@ -62,6 +66,7 @@ class BackfillStats:
         self.commands_parsed += other.commands_parsed
         self.commands_skipped_unknown_key += other.commands_skipped_unknown_key
         self.logs_parse_failed += other.logs_parse_failed
+        self.ambiguous_parallel_groups += other.ambiguous_parallel_groups
         self.cursor_written = self.cursor_written or other.cursor_written
         if other.cursor_change_id is not None:
             self.cursor_change_id = other.cursor_change_id
@@ -157,10 +162,19 @@ class ChangeContextBackfillService:
                 self._session.add(run)
                 stats.runs_stamped += 1
             # ② 再推进游标：本 run 的 sillyspec 命令按消息序，最后一条生效。
+            # 排序 timestamp → id：同一 submit 批次全部日志行共享 st.now
+            # （submit_steps 取一次 now），批内消息序在 DB 无可靠序号（无 seq /
+            # created_at 列）——id（uuid4）只保证 SQL 层确定性（幂等重跑同序），
+            # 语义上面内「批内多条不同绑定命令」的取边近似随机；并列组计入
+            # ambiguous_parallel_groups 显式暴露（dry-run 报告可见，人工可查）。
             logs = list(
                 (
                     await self._session.execute(
-                        select(AgentRunLog.timestamp, AgentRunLog.id, AgentRunLog.content_redacted)
+                        select(
+                            AgentRunLog.timestamp,
+                            AgentRunLog.id,
+                            AgentRunLog.content_redacted,
+                        )
                         .where(
                             col(AgentRunLog.run_id) == run.id,
                             col(AgentRunLog.channel) == "tool_call",
@@ -170,13 +184,23 @@ class ChangeContextBackfillService:
                     )
                 ).all()
             )
-            for _ts, _log_id, content in logs:
+            # 解析全部命令行 → (timestamp, resolved, key)，顺带统计批内并列组。
+            entries: list[tuple[datetime, uuid.UUID | None, str | None]] = []
+            for ts, _log_id, content in logs:
                 key = _parse_change_key_from_log(content)
                 if key is None:
                     if content is not None:
                         stats.logs_parse_failed += 1
                     continue
-                resolved = await _resolve(key)
+                entries.append((ts, await _resolve(key), key))
+            resolved_by_ts: dict[datetime, set[uuid.UUID]] = {}
+            for ts, resolved, _key in entries:
+                if resolved is not None:
+                    resolved_by_ts.setdefault(ts, set()).add(resolved)
+            stats.ambiguous_parallel_groups += sum(
+                1 for targets in resolved_by_ts.values() if len(targets) > 1
+            )
+            for _ts, resolved, key in entries:
                 if resolved is None:
                     stats.commands_skipped_unknown_key += 1
                     if key not in stats.unknown_keys:

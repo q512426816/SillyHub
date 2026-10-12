@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-backfill-run-change-context",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "2bbb2f7b5807dae348f720052bd552c19aa499e6",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "FR-05 承诺「打印每个会话与总计的计数」，脚本实际只输出工作区汇总+总计，无每会话行",
+      "evidence": "FR-05 明文要求 dry-run 打印『每个会话与总计的计数』，design 接口契约同写『输出每会话+总计计数』；但 backfill_workspace 只 merge 各会话 stats 不落会话明细，脚本 _run 循环仅打印『[workspace …] +（工作区汇总）』，会话粒度计数（哪个会话打几锚/未知 key 属于谁）在 dry-run 报告中不可见，削弱改数前审计面。",
+      "location": "backend/scripts/backfill_run_change_context.py:84-92; backend/app/modules/change/backfill_service.py:109-114"
+    },
+    {
+      "severity": "P1",
+      "title": "同一 submit 批次内多条绑定命令 timestamp 恒等，「消息序最后一条生效」退化为 uuid4 随机序，游标（及后续锚）可能与运行时相反",
+      "evidence": "submit_steps.py:95 每次 submit_messages 取一次 st.now，:584 该批所有日志行 timestamp=st.now（同一时刻）；回填按 order_by(timestamp, id) 排序而 id 是 uuid4——同一 run 同一批次出现两条不同 change_key 绑定命令（如重连补发批次里 flow done --change a 后 flow start --change b）时『最后一条生效』随机选边，游标终值可错，其后全部 NULL run 打错锚且重跑幂等固化错误。触发窗窄（常规流式上报两命令分属不同批次时间戳可区分），但属数据正确性风险且无测试覆盖同批并列形态。",
+      "location": "backend/app/modules/change/backfill_service.py:167-178; backend/app/modules/daemon/run_sync/service/submit_steps.py:95,584"
+    },
+    {
+      "severity": "P2",
+      "title": "design 盲维问2断言『二者写集不相交（不同行）』不准确：线上 submit_commit 与回填写同一 agent_sessions 行同列",
+      "evidence": "design 称回填只写 agent_runs.change_id、线上只 inject 读 current_change_id 故写集不相交；实际 submit_commit.py:355 在命令绑定时写 agent_sessions.current_change_id（与回填 FR-04 写点同行同列）。回填与活跃会话 submit 并发时存在 lost-update：回填以重放值覆盖运行时较新游标。低峰手动执行缓解、run 锚写集（仅 NULL）确实不相交，但设计表述与代码不符。",
+      "location": ".sillyspec/changes/2026-10-12-backfill-run-change-context/design.md:31（盲维问2）; backend/app/modules/daemon/run_sync/service/submit_commit.py:351-356; backend/app/modules/change/backfill_service.py:195-199"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-05 主路径场景（dry-run N → apply == N → 再 dry-run 0）无自动化测试，CLI 层零测试",
+      "evidence": "requirements 测试绑定 FR-05 只挂服务层 test_workspace_scope_filters_linked_sessions；脚本 --apply/rollback 路径靠 --help + 代码走查（tasks.md task-03 自认）。dry-run 回滚机制经审查真实成立（conn.begin() 块内 raise _DryRunRollback → SQLAlchemy 契约回滚 → 外层 except 捕获返回 0），但无回归保护。",
+      "location": ".sillyspec/changes/2026-10-12-backfill-run-change-context/requirements.md:59; .sillyspec/changes/2026-10-12-backfill-run-change-context/tasks.md:9"
+    },
+    {
+      "severity": "P3",
+      "title": "--apply 无二次确认（无 --yes / 交互确认），误用面存在",
+      "evidence": "解析到 --apply 即对全库（缺省全工作区）单事务落库。dry-run 默认 + 全有全无事务 + run 锚只写 NULL 缓解了后果，但一次手滑仍直接改写存量数据；对数据改写类运维脚本惯例是要求显式确认或 --workspace 必填。",
+      "location": "backend/scripts/backfill_run_change_context.py:108-111,125"
+    },
+    {
+      "severity": "P3",
+      "title": "全工作区模式为逐会话逐 run 查日志的 N+1 扫描，无进度输出",
+      "evidence": "linked_session_ids → 每会话 1 次 get + 1 次 runs 查询 + 每 run 1 次 logs 查询；大库全工作区耗时长且循环中零输出（P1-1 修复每会话打印可同时充当进度心跳）。一次性运维可容忍，不建议为本改架构。",
+      "location": "backend/app/modules/change/backfill_service.py:109-114,145-178"
+    },
+    {
+      "severity": "P3",
+      "title": "design 风险段计数器名 commands_parse_failed 与实现字段 logs_parse_failed 不一致",
+      "evidence": "design.md:45 写『解析失败静默计数（commands_parse_failed）』，实现 dataclass 字段为 logs_parse_failed（且语义按行计数：content 非空但解析失败才计 1）。文档与实现命名不一致，违反『注释/文档与实现一致』项目规则。",
+      "location": ".sillyspec/changes/2026-10-12-backfill-run-change-context/design.md:45; backend/app/modules/change/backfill_service.py:58,182-184"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "finding",
+    "并发": "finding",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T15:49:39+08:00"
+}

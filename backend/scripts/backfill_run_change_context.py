@@ -47,6 +47,11 @@ def _print_stats(title: str, stats: BackfillStats) -> None:
         f"    命令解析 {stats.commands_parsed} | 未知 key 跳过 {stats.commands_skipped_unknown_key} | "
         f"日志解析失败 {stats.logs_parse_failed}"
     )
+    if stats.ambiguous_parallel_groups:
+        print(
+            f"    ⚠️ 批内并列绑定组 {stats.ambiguous_parallel_groups} 个"
+            "（同 submit 批次多条不同绑定命令，批内消息序 DB 不可复原，取边近似随机）"
+        )
     if stats.unknown_keys:
         print(f"    未知 key：{', '.join(stats.unknown_keys)}")
     if stats.cursor_change_id is not None:
@@ -62,7 +67,11 @@ async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
                 # 单事务：begin() 块正常退出即 commit（--apply）；dry-run 抛
                 # _DryRunRollback 触发回滚（库零触碰）。
                 async with conn.begin():
+                    from sqlalchemy import select
                     from sqlalchemy.ext.asyncio import AsyncSession
+                    from sqlmodel import col
+
+                    from app.modules.workspace.model import Workspace
 
                     db = AsyncSession(conn, expire_on_commit=False)
                     svc = ChangeContextBackfillService(db)
@@ -70,23 +79,31 @@ async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
                     if workspace_ids:
                         targets = workspace_ids
                     else:
-                        from sqlalchemy import select
-                        from sqlmodel import col
-
-                        from app.modules.workspace.model import Workspace
-
                         rows = (await db.execute(select(col(Workspace.id)))).all()
                         targets = [r[0] for r in rows]
                     total = BackfillStats()
                     mode = "APPLY（落库）" if apply else "DRY-RUN（事务回滚，库零触碰）"
                     print(f"=== 存量 run 变更上下文回填 · {mode} · 工作区 {len(targets)} 个 ===")
                     for ws_id in targets:
-                        stats = await svc.backfill_workspace(ws_id)
-                        if stats.runs_scanned == 0 and stats.commands_parsed == 0:
+                        session_ids = await svc.linked_session_ids(ws_id)
+                        if not session_ids:
                             continue
-                        print(f"[workspace {ws_id}]")
-                        _print_stats("  （工作区汇总）", stats)
-                        total.merge(stats)
+                        print(f"[workspace {ws_id}] 链接会话 {len(session_ids)} 个")
+                        ws_total = BackfillStats()
+                        # 会话级输出（FR-05）：逐会话计数，改数前可审计定位。
+                        for sid in session_ids:
+                            stats = await svc.backfill_session(sid)
+                            if (
+                                stats.runs_scanned == 0
+                                and stats.commands_parsed == 0
+                                and stats.runs_already_anchored == 0
+                            ):
+                                continue
+                            _print_stats(f"session {sid}", stats)
+                            ws_total.merge(stats)
+                        if ws_total.runs_scanned or ws_total.commands_parsed:
+                            _print_stats(f"workspace {ws_id} 小计", ws_total)
+                        total.merge(ws_total)
                     print("=== 总计 ===")
                     _print_stats("全部工作区", total)
                     if not apply:
@@ -114,6 +131,11 @@ def main() -> int:
         metavar="UUID",
         help="限定工作区 id（可多次；缺省处理全部工作区）",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="全工作区 --apply 的显式确认门（带 --workspace 的定向 apply 不需要）",
+    )
     args = parser.parse_args()
     workspace_ids: list[uuid.UUID] = []
     for raw in args.workspace:
@@ -122,6 +144,12 @@ def main() -> int:
         except ValueError:
             print(f"❌ --workspace 不是合法 UUID：{raw}", file=sys.stderr)
             return 2
+    if args.apply and not workspace_ids and not args.yes:
+        print(
+            "❌ 全工作区 --apply 影响面大：确认请加 --yes，或用 --workspace <uuid> 定向执行。",
+            file=sys.stderr,
+        )
+        return 2
     return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
 
 

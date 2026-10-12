@@ -294,6 +294,61 @@ async def test_session_cursor_written_only_when_commands_found(db_session):
     assert sess.current_change_id is None
 
 
+# ── P1-2 修复面：同 submit 批次并列绑定组显式计数 ───────────────────────────
+
+
+async def test_same_batch_parallel_binding_commands_counted_ambiguous(db_session):
+    """同 run 同 timestamp（同一 submit 批次）两条不同绑定命令：批内消息序 DB
+    不可复原——必须计入 ambiguous_parallel_groups（dry-run 报告可见），且重放
+    确定性成立（id 序固定，重跑同锚幂等）。"""
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_a = await _make_change(db_session, ws.id, "2026-10-12-amb-a")
+    change_b = await _make_change(db_session, ws.id, "2026-10-12-amb-b")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_a.id, sess.id)
+    await _make_link(db_session, change_b.id, sess.id)
+
+    run = AgentRun(
+        id=uuid.uuid4(),
+        agent_type="claude_code",
+        provider="claude",
+        status="completed",
+        agent_session_id=sess.id,
+        created_at=_T0,
+    )
+    db_session.add(run)
+    await db_session.flush()
+    same_ts = _T0 + timedelta(minutes=1)
+    for i, command in enumerate(
+        [
+            "sillyspec flow done --change 2026-10-12-amb-a",
+            "sillyspec flow start --change 2026-10-12-amb-b",
+        ]
+    ):
+        db_session.add(
+            AgentRunLog(
+                id=uuid.uuid4(),
+                run_id=run.id,
+                timestamp=same_ts,  # 同一 submit 批次：timestamp 全同
+                channel="tool_call",
+                tool_kind="sillyspec",
+                content_redacted=json.dumps({"tool": "Bash", "args": {"command": command}}),
+                dedup_key=f"{run.id}:{i}",
+            )
+        )
+    await db_session.commit()
+
+    svc = ChangeContextBackfillService(db_session)
+    first = await svc.backfill_session(sess.id)
+    assert first.ambiguous_parallel_groups == 1
+    assert first.commands_parsed == 2
+
+    second = await svc.backfill_session(sess.id)
+    assert second.runs_stamped == 0  # 幂等：重跑同序同锚零新增
+    assert second.ambiguous_parallel_groups == 1
+
+
 # ── FR-05：工作区编排范围 ───────────────────────────────────────────────────
 
 
