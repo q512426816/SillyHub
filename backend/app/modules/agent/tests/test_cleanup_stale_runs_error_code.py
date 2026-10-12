@@ -170,3 +170,44 @@ async def test_stale_run_user_answered_after_ask_still_killed(db_session) -> Non
     assert run.status == "failed"
     assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
     assert cleaned >= 1
+
+
+# ── 2026-10-13-review-risk-fixes FR-02：askwait 豁免 24h 时间上限 ────────────
+
+
+@pytest.mark.asyncio
+async def test_stale_run_awaiting_user_ask_over_24h_killed(db_session) -> None:
+    """ask 超 24h 未答（askwait 上限）→ 不再豁免，照常判死。
+
+    风险审查实证：豁免无时限 + run 级 daemon 真死兜底缺失（任务表清扫不碰
+    AgentRun 且 daemon 离线时 fail-open）→ daemon 真死场景 run 永远 running、
+    会话楔死。24h 上限给「人离开很久」留足裕量，超龄回落既有判死路径。
+    """
+    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
+    # user_input 30h 前、ask 25h 前（ask 晚于 user_input 且超 24h 上限）。
+    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=30 * 60)
+    await _add_run_log(
+        db_session, run.id, channel="tool_call", tool_kind="ask", minutes_ago=25 * 60
+    )
+
+    cleaned = await _cleanup_stale_runs_impl(db_session)
+
+    await db_session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "SERVICE_RESTART_INTERRUPTED"
+    assert cleaned >= 1
+
+
+@pytest.mark.asyncio
+async def test_stale_run_awaiting_user_ask_under_24h_cap_zero_regression(db_session) -> None:
+    """ask 未超 24h 上限（23h）→ 豁免仍生效（时限内零回归）。"""
+    run = await _make_stale_session_and_run(db_session, num_turns=0, exit_code=None)
+    await _add_run_log(db_session, run.id, channel="user_input", minutes_ago=24 * 60)
+    await _add_run_log(db_session, run.id, channel="pending_input", minutes_ago=23 * 60)
+
+    cleaned = await _cleanup_stale_runs_impl(db_session)
+
+    await db_session.refresh(run)
+    assert run.status == "running"
+    assert run.error_code is None
+    assert cleaned == 0

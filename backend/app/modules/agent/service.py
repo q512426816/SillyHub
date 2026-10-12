@@ -2428,6 +2428,15 @@ class AgentService:
 # 期间 daemon 上报中断通常 <2 分钟，10 分钟留足余量），跳过判死等真终态。
 STALE_RUN_ACTIVE_GRACE = timedelta(minutes=10)
 
+# 2026-10-13-review-risk-fixes FR-02：askwait 豁免时间上限。等待用户回答豁免
+# （_run_awaiting_user_input）原无时限——风险审查实证 run 级 daemon 真死兜底
+# 缺失（sweep_confirmed_dead_tasks 只扫 agent_session_task，不碰 AgentRun，且
+# daemon 离线时 fail-open 跳过）：daemon 真死 + 提问未答 → run 永远 running、
+# 用户后续发言按 busy 进队列永不派发，会话楔死。24h 给「人离开很久」留足
+# 裕量（生产实证正常等待 ~20 分钟），超龄回落既有判死路径；后端全局统一
+# 阈值，不按会话/工作区分化。
+_ASKWAIT_EXEMPT_MAX_AGE = timedelta(hours=24)
+
 
 def _as_utc(value: datetime) -> datetime:
     """把 naive datetime 视作 UTC 归一（SQLite DateTime 列 round-trip 丢 tzinfo）。"""
@@ -2470,7 +2479,7 @@ async def _last_run_log_at(session: AsyncSession, run_id: uuid.UUID) -> datetime
     ).scalar_one_or_none()
 
 
-async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> bool:
+async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID, now: datetime) -> bool:
     """run 是否处于「等待用户回答提问」状态（2026-10-12-stale-run-askwait-fix）。
 
     ask 信号 = agent_run_logs 中 ``channel='pending_input'`` 或（``channel='tool_call'``
@@ -2481,6 +2490,11 @@ async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> 
     生产实证（2026-10-12 会话 47e2ff1a run e31ec8fc）：AskUserQuestion 等待回答
     近 20 分钟，后端重启的启动清理按 10 分钟宽限窗误判 SERVICE_RESTART_INTERRUPTED。
     信号纯读日志列，重启免疫（lease/心跳在重启瞬间必然陈旧，不可作判据）。
+
+    2026-10-13-review-risk-fixes FR-02：豁免受 24h 时间上限约束（_ASKWAIT_
+    EXEMPT_MAX_AGE）——最后 ask 信号距 ``now`` 超龄即返回 False（回落既有判死
+    路径），防 daemon 真死场景 run 永远 running（run 级兜底缺失见常量注释）。
+    ``now`` 由调用方（清理循环）传入，不读墙钟二次取值，复扫/重启判定稳定。
     """
     last_ask_at = (
         await session.execute(
@@ -2497,6 +2511,8 @@ async def _run_awaiting_user_input(session: AsyncSession, run_id: uuid.UUID) -> 
         )
     ).scalar_one_or_none()
     if last_ask_at is None:
+        return False
+    if now - _as_utc(last_ask_at) > _ASKWAIT_EXEMPT_MAX_AGE:
         return False
     last_user_at = (
         await session.execute(
@@ -2567,7 +2583,11 @@ async def _cleanup_stale_runs_impl(session: AsyncSession) -> int:
             # 提问（AskUserQuestion）未答期间日志静默是正常态（人离开很常见），
             # 不是 daemon 死亡；daemon 真死由 daemon 离线清扫（sweep）兜底，
             # 用户回答后日志恢复流动，等真终态。纯日志列判定，重启瞬间可用。
-            if await _run_awaiting_user_input(session, run.id):
+            # 2026-10-13-review-risk-fixes FR-02：豁免受 24h 上限约束（函数内
+            # 判定）——超龄回落下方既有判死路径（原注释宣称的 run 级 sweep 兜底
+            # 经查不存在：sweep_confirmed_dead_tasks 只扫任务表，见 _ASKWAIT_
+            # EXEMPT_MAX_AGE 注释）。
+            if await _run_awaiting_user_input(session, run.id, now):
                 log.info(
                     "stale_run_cleanup_deferred_awaiting_user",
                     run_id=str(run.id),
