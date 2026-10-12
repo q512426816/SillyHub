@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-11-assertion-surface-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-11-assertion-surface-guard:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/test_check_assertion_surfaces.py「TestEvaluate::test_diff_mode_content_hit_without_test_is_violation」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-assertion-surface-guard"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-11-assertion-surface-guard:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/test_check_assertion_surfaces.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-11-assertion-surface-guard"
+    }
+  ]
+}

@@ -404,3 +404,62 @@
   confirmed_at: null
   source_change: 2026-10-08-menu-permissions-page-audit
   status: active
+
+## FR-lib-menu-permissions-038 scripts/check-assertion-surfaces.py：8 条规则（六面清单 + 本周新登记的菜单注册表/协议 MSG），触发模式区分 FILE（迁移文件新增）与 DIFF 内容（TABS 条目行、menuKey 行、daemon: 常量行、_sendHeartbeatOnce、agent_kinds、export 行、caps 形状行），命中触发而配对测试文件不在 staged 面则 exit 1 并打印同步指引
+变更：2026-10-11-assertion-surface-guard
+状态：active
+摘要：主路径；注释级改动不误拦
+全文：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/requirements.md#FR-01
+最近确认：1371e6516cb78420290369d5147f25f16f951350
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-assertion-surface-guard:flow:测试绑定FR-01
+  tests: backend/tests/test_check_assertion_surfaces.py「TestEvaluate::test_diff_mode_content_hit_without_test_is_violation」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-assertion-surface-guard
+  status: active
+
+## FR-lib-menu-permissions-039 backend/tests/test_check_assertion_surfaces.py 单元测试覆盖规则匹配纯函数（照 scan-drift-check 测试先例 importlib 加载），定向 pytest 绿
+变更：2026-10-11-assertion-surface-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/requirements.md#FR-02
+最近确认：1371e6516cb78420290369d5147f25f16f951350
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-11-assertion-surface-guard:flow:测试绑定FR-02
+  tests: backend/tests/test_check_assertion_surfaces.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-11-assertion-surface-guard
+  status: active
+
+## FR-lib-menu-permissions-040 backend/.pre-commit-config.yaml 增 check-only hook（always_run，不修改文件，与既有 ruff 双钩同款风格）
+变更：2026-10-11-assertion-surface-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/requirements.md#FR-03
+最近确认：1371e6516cb78420290369d5147f25f16f951350
+
+## FR-lib-menu-permissions-041 知识库 testing-gotchas 登记⑦菜单注册表⑧协议 MSG 两新面 + 通用口径补机制化闸门说明；两新面源码处加同步提醒注释
+变更：2026-10-11-assertion-surface-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/requirements.md#FR-04
+最近确认：1371e6516cb78420290369d5147f25f16f951350
+
+## FR-lib-menu-permissions-042 脚本与 hook 兼容 Windows Git Bash / Linux（规则 13）；不跑全量测试（规则 0）
+变更：2026-10-11-assertion-surface-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-11-assertion-surface-guard/requirements.md#FR-05
+最近确认：1371e6516cb78420290369d5147f25f16f951350

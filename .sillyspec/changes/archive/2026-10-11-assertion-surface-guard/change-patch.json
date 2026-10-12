@@ -1,0 +1,136 @@
+{
+  "change": "2026-10-11-assertion-surface-guard",
+  "baseline": "89e1560ccb2ba7cb9c845fed2b5f3c9c7abf7abd",
+  "head": "1371e6516cb78420290369d5147f25f16f951350",
+  "files": [
+    ".sillyspec/changes/2026-10-11-assertion-surface-guard/design.md",
+    ".sillyspec/changes/2026-10-11-assertion-surface-guard/requirements.md",
+    ".sillyspec/changes/2026-10-11-assertion-surface-guard/tasks.md",
+    "backend/.pre-commit-config.yaml",
+    "backend/tests/test_check_assertion_surfaces.py",
+    "frontend/src/lib/menu-permissions.ts",
+    "scripts/check-assertion-surfaces.py",
+    "sillyhub-daemon/src/protocol.ts",
+    ".sillyspec/changes/2026-10-11-assertion-surface-guard/proposal.md"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 582,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-12T00:27:39.315Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "scripts",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/scripts.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 3,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "89e1560ccb2ba7cb9c845fed2b5f3c9c7abf7abd",
+    "totals": {
+      "files": 5,
+      "additions": 415,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "backend/.pre-commit-config.yaml",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_check_assertion_surfaces.py",
+        "additions": 177,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/menu-permissions.ts",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "scripts/check-assertion-surfaces.py",
+        "additions": 218,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/protocol.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "cfa1bb611045e94cc2cd4dbe50653b6f13c49242832e35e57614cb0a8d4a5741",
+  "patchStatus": "ok"
+}
