@@ -1,16 +1,18 @@
 // tests/daemon-linked-repos-guard.test.ts
-// 2026-10-12-daemon-path-guard-completion：linked_repos_sync / linked_repos_snapshot
-// 两 RPC 处理器的 allowed_roots 归属守卫。
+// 2026-10-12-daemon-path-guard-completion（初版 allowed_roots 白名单守卫）→
+// 2026-10-12-regression-review-remediation（语义修正为 ql-20260831-006 存在性检查）：
+// linked_repos_sync / linked_repos_snapshot 两 RPC 的 root_path 守卫。
 //
-// 背景（24h 风险审查 P2-3）：两 handler 是写/读宿主路径的入口，af5daeca2 只收了
-// 「非空 + 绝对形态」（linked-repos-sync.ts / linked-repos-snapshot.ts 内），失陷
-// backend 可下发宿主任意绝对路径（如启动目录）让 daemon 在其下落 .sillyspec/projects
-// 结构。对齐同文件 get_spec_bundle DA-2 先例：入口 assertWithinAllowedRoots
-//（realpath 穿透判定），越界 RpcError forbidden 经 _dispatchRpc 原样回填。
+// 演进：初版按 get_spec_bundle DA-2 先例加机器白名单——回归复审 F1 指出与
+// ql-20260831-006 产品决策冲突（工作区绑定根不在机器白名单属合法形态，仓内
+// 生产实证 E:\sgm / F:\WorkNew；会话 cwd 守卫为此专门跳过白名单），现网存量
+// 部署会被首次 forbidden 拒止。现语义：root_path 与会话 lease workspaceRoot
+// 同源同信任级 → 机器白名单不拦，错机派发保护由存在性检查承担（stat 目录
+// 必存性；错机上目录必不存在）。
 //
 // 本文件测 daemon.ts 的 handler 接线守卫（形态校验后、spawn/fs 前）：
-//   - root_path 在 allowed_roots 内 → 放行（业务函数被调用、payload 透传）
-//   - root_path 越界 → RpcError forbidden，业务函数零调用（零 spawn/零 fs）
+//   - root_path 存在（白名单内外皆可）→ 放行（业务函数被调用、payload 透传）
+//   - root_path 不存在/非目录 → 抛错，业务函数零调用（零 spawn/零 fs）
 // 业务函数内部行为（逐层结果体/相对形态校验）见 linked-repos-sync.test.ts /
 // linked-repos-snapshot.test.ts（本文件 vi.mock 隔离真实 spawn）。
 
@@ -20,7 +22,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Daemon } from '../src/daemon.js';
-import { RpcError } from '../src/ws-client.js';
 import type { DaemonConfig } from '../src/config.js';
 
 const runSyncMock = vi.hoisted(() => vi.fn(async () => ({ results: [] })));
@@ -96,15 +97,26 @@ describe('linked_repos RPC allowed_roots 守卫（2026-10-12-daemon-path-guard-c
     });
   });
 
-  it('linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）', async () => {
+  it('linked_repos_sync：root_path 白名单外但存在 → ql-20260831-006 语义放行（机器白名单不拦工作区根）', async () => {
+    // 回归复审 F1（2026-10-12-regression-review-remediation）：白名单守卫与
+    // ql-20260831-006 产品决策冲突（工作区绑定根不在机器白名单属合法形态，
+    // 仓内生产实证 E:\sgm / F:\WorkNew）——守卫语义修正为存在性检查。
     const handlers = buildHandlers();
-    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
-    await expect(handlers.get('linked_repos_sync')!(syncPayload(evil))).rejects.toBeInstanceOf(
-      RpcError,
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'linked-repos-outside-'));
+    try {
+      await handlers.get('linked_repos_sync')!(syncPayload(outsideRoot));
+      expect(runSyncMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('linked_repos_sync：root_path 不存在 → 抛错且业务函数零调用（错机派发保护）', async () => {
+    const handlers = buildHandlers();
+    const ghost = join(tmpRoot, 'does-not-exist');
+    await expect(handlers.get('linked_repos_sync')!(syncPayload(ghost))).rejects.toThrow(
+      /不存在或非目录/,
     );
-    await expect(handlers.get('linked_repos_sync')!(syncPayload(evil))).rejects.toMatchObject({
-      code: 'forbidden',
-    });
     expect(runSyncMock).not.toHaveBeenCalled();
   });
 
@@ -115,14 +127,19 @@ describe('linked_repos RPC allowed_roots 守卫（2026-10-12-daemon-path-guard-c
     expect(runSnapshotMock).toHaveBeenCalledWith(tmpRoot);
   });
 
-  it('linked_repos_snapshot：root_path 越界 → forbidden 且业务函数零调用', async () => {
+  it('linked_repos_snapshot：root_path 白名单外但存在 → 放行（ql-20260831-006）；不存在 → 抛错零调用', async () => {
     const handlers = buildHandlers();
-    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
-    await expect(handlers.get('linked_repos_snapshot')!({ root_path: evil })).rejects.toMatchObject(
-      {
-        code: 'forbidden',
-      },
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'linked-repos-snap-out-'));
+    try {
+      await handlers.get('linked_repos_snapshot')!({ root_path: outsideRoot });
+      expect(runSnapshotMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(outsideRoot, { recursive: true, force: true });
+    }
+    const ghost = join(tmpRoot, 'missing-dir');
+    await expect(handlers.get('linked_repos_snapshot')!({ root_path: ghost })).rejects.toThrow(
+      /不存在或非目录/,
     );
-    expect(runSnapshotMock).not.toHaveBeenCalled();
+    expect(runSnapshotMock).toHaveBeenCalledTimes(1); // 不存在那次未新增调用
   });
 });

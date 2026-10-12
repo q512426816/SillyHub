@@ -2212,10 +2212,19 @@ export async function handleInitLease(
 ): Promise<HandleInitLeaseResult> {
   // 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态校验——本函数以
   // rootPath 为 cwd 跑 sillyspec init（三写）+ writeLocalYaml，相对形态按 daemon
-  // cwd 漂移写盘；形态非法 throw（对齐 linked-repos「归一非法 throw、数据级失败
-  // 走结果体」口径），先于任何 fs/spawn 操作。
+  // cwd 漂移写盘。2026-10-12-regression-review-remediation（回归复审 F3）：形态
+  // 非法从 throw 改为 ok:false 结果体——本函数契约是「逐步 catch 返 ok:false，
+  // 不上抛」（task-runner _runInitLease 刻意不加 try/catch 保证终态/统计链），
+  // 头部 throw 会穿到 runLease 顶层 generic failed 且丢 init_error 诊断；先于任何
+  // fs/spawn 操作的次序不变。
   if (!isAbsoluteLikePath(params.rootPath)) {
-    throw new Error(`handleInitLease: rootPath 非绝对路径: ${params.rootPath}`);
+    return {
+      ok: false,
+      specVersion: 0,
+      error: `handleInitLease: rootPath 非绝对路径: ${params.rootPath}`,
+      daemonState: null,
+      specDir: null,
+    };
   }
   const strategy = params.strategy || 'platform-managed';
   const specVersion =

@@ -4006,15 +4006,20 @@ export class Daemon {
         cost_delta_usd: payload.total_cost_usd ?? null,
       });
     }
-    if (typeof resultMeta.num_turns === 'number') {
+    // 2026-10-12-regression-review-remediation（回归复审 F1）：isFinite 口径统一——
+    // 裸 typeof 对 NaN/Infinity 放行，序列化为 null 进 backend int|None（单轮字段
+    // NULL，无基线污染）。有限值行为逐字不变。
+    if (typeof resultMeta.num_turns === 'number' && Number.isFinite(resultMeta.num_turns)) {
       payload.num_turns = resultMeta.num_turns;
     }
-    if (typeof resultMeta.duration_ms === 'number') {
+    if (typeof resultMeta.duration_ms === 'number' && Number.isFinite(resultMeta.duration_ms)) {
       payload.duration_ms = resultMeta.duration_ms;
     }
     // 2026-10-12-duration-nan-guard：Number.isFinite 门对齐上方 total_cost_usd
     // 既有口径——typeof 门对 NaN/Infinity 放行，NaN 参与差分（< 恒 false）后
-    // 序列化为 null 被 backend int|None 静默吞掉且污染基线（后续合法快照误差分）。
+    // 序列化为 null 被 backend int|None 静默吞掉；基线随即被 set(NaN) 覆写，
+    // 污染窗口为 1 轮（下一合法快照先误差分为 NaN 再覆写基线，回归复审 F3 勘误：
+    // 并非「恒 NaN」）。
     if (typeof resultMeta.duration_api_ms === 'number' && Number.isFinite(resultMeta.duration_api_ms)) {
       // 2026-10-10-duration-api-cumulative-fix：duration_api_ms 与 total_cost_usd /
       // modelUsage 同生命周期——SDK streaming 会话每轮终态报「会话至今累计」（线上
@@ -4200,6 +4205,11 @@ export class Daemon {
     // worker_done 工具）——该形态不立即代报也无人自报，经下方 provider 无关的
     // +90s 延迟探测兜底收敛（90s 延迟属设计内）；静态表不感知宿主版本属有意
     // 设计，勿在延迟探测上加 provider 门（会静默回归旧版 pi 收敛面，测试有钉）。
+    // 已知边界（2026-10-12-regression-review-remediation 回归复审 F6 披露）：探测按
+    // runId 匹配 backend workers 行，而 workers 行 id = 分身「首 run id」——分身被
+    // 追问产生后续轮时，后续轮 runId 恒 miss（worker_auto_done_fallback_run_missing
+    // 跳过），多轮收敛完全押首轮 timer + 会话级末文缓存；后续轮跨过首轮 +90s 才
+    // 结束的形态产出无补报通道（ql-20260911-028 既有行为，非本变更引入）。
     if (
       state.stage === 'mission_worker' &&
       getProviderCaps(state.provider).mcp === false &&
@@ -6675,12 +6685,22 @@ export class Daemon {
       if (!payload.workspace_id || !payload.root_path || payload.repos.length === 0) {
         throw new Error('linked_repos_sync: payload 缺 workspace_id/root_path/repos');
       }
-      // 2026-10-12-daemon-path-guard-completion：allowed_roots 归属校验——本 RPC
-      // 是写路径（spawn sillyspec CLI 以 root_path 为 cwd 落 .sillyspec/projects），
-      // af5daeca2 只收了「非空 + 绝对形态」，失陷 backend 可下发宿主任意绝对路径
-      // 写入（如启动目录）；对齐同文件 get_spec_bundle DA-2 先例（realpath 穿透
-      // 判定），越界 RpcError forbidden 经 _dispatchRpc 原样回填。
-      assertWithinAllowedRoots(payload.root_path, this._effectiveAllowedRoots());
+      // 2026-10-12-regression-review-remediation：守卫语义修正（回归复审 F1）——
+      // 前版 assertWithinAllowedRoots 白名单与 ql-20260831-006 产品决策冲突（工作区
+      // 绑定根不在机器白名单属合法形态，仓内生产实证 E:\sgm / F:\WorkNew；会话
+      // cwd 守卫 interactive-cwd-guard 为此专门跳过白名单）。root_path 与会话 lease
+      // workspaceRoot 同源同信任级（backend 绑定下发）→ 同语义：机器白名单不拦，
+      // 错机派发保护由存在性检查承担（错机上目录必不存在）；绝对形态门在
+      // linked-repos-sync.ts 内保持不变。形态非法 throw（backend 502 族），
+      // 不存在 throw（环境级失败，逐层结果体不可达——root_path 是全部命令的 cwd）。
+      {
+        const st = await stat(payload.root_path).catch(() => null);
+        if (!st?.isDirectory()) {
+          throw new Error(
+            `linked_repos_sync: root_path 不存在或非目录（错机派发或登记漂移？）: ${payload.root_path}`,
+          );
+        }
+      }
       const instanceId = this._config.runtime_id;
       const report = this._client.postLinkedReposSyncResult?.bind(this._client);
       return runLinkedReposSync(payload, {
@@ -6700,9 +6720,16 @@ export class Daemon {
       if (!rootPath) {
         throw new Error('linked_repos_snapshot: payload 缺 root_path');
       }
-      // 2026-10-12-daemon-path-guard-completion：只读快照同门——读宿主路径与
-      // get_spec_bundle 同性质（DA-2），越界 forbidden。
-      assertWithinAllowedRoots(rootPath, this._effectiveAllowedRoots());
+      // 2026-10-12-regression-review-remediation：与 sync 同款 ql-20260831-006 语义
+      // （存在性检查替机器白名单，见 sync handler 注释）。
+      {
+        const st = await stat(rootPath).catch(() => null);
+        if (!st?.isDirectory()) {
+          throw new Error(
+            `linked_repos_snapshot: root_path 不存在或非目录（错机派发或登记漂移？）: ${rootPath}`,
+          );
+        }
+      }
       return runLinkedReposSnapshot(rootPath);
     });
   }

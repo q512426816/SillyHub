@@ -1410,13 +1410,14 @@ void homedir;
 
 // ── 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态守卫 ──────────────
 describe('handleInitLease rootPath 绝对形态守卫（2026-10-12-daemon-path-guard-completion）', () => {
-  it('rootPath 相对形态 → 入口 throw（先于 pull/init/writeLocalYaml 任何 fs/spawn）', async () => {
-    await expect(
-      handleInitLease({} as never, {
-        workspaceId: 'ws-rel-guard',
-        rootPath: 'rel/proj',
-        serverOrigin: 'http://127.0.0.1:8000',
-      }),
-    ).rejects.toThrow('rootPath 非绝对路径');
+  it('rootPath 相对形态 → ok:false 结果体（对齐「逐步 catch 不上抛」契约，先于任何 fs/spawn；2026-10-12-regression-review-remediation F3 改判）', async () => {
+    const result = await handleInitLease({} as never, {
+      workspaceId: 'ws-rel-guard',
+      rootPath: 'rel/proj',
+      serverOrigin: 'http://127.0.0.1:8000',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('rootPath 非绝对路径');
+    expect(result.specVersion).toBe(0);
   });
 });

@@ -1425,6 +1425,26 @@ describe('duration_api_ms 跨轮累计快照差分', () => {
     expect(p2.duration_api_ms).toBe(12000);
   });
 
+  it('num_turns/duration_ms 非有限值 → 不进 payload（isFinite 口径统一，2026-10-12-regression-review-remediation F1）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult('sess-1', 'run-1', {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      num_turns: NaN,
+      duration_ms: Infinity,
+      duration_api_ms: 12000,
+    } as unknown as SDKResultMessage);
+
+    const p1 = payloadOf(client, 0);
+    expect(p1.num_turns).toBeUndefined();
+    expect(p1.duration_ms).toBeUndefined();
+    // duration_api_ms 合法值照常差分（全量首报）。
+    expect(p1.duration_api_ms).toBe(12000);
+  });
+
   it('快照复位（当前 < 基线）：报全量（同 cost 口径）', async () => {
     const { daemon, client } = buildDaemon();
     daemons.push(daemon);
