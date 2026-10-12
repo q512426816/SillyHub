@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-backup-sweep-name-ts",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1f4f6562f1b0ff62c3f34d89542488042d8e6396",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok。边界已裁决：可接受——时钟回拨时名内嵌 ts > now → 两信号均判新鲜 → 保守保留至时钟追平，与 mtime 时代回拨行为同款，方向只向保留倾斜、绝不向误删倾斜，时钟追平后自愈",
+    "并发": "ok。design 并发答案与代码一致：清扫与新建备份并发时，新备份名 ts 新鲜 → 即使 utimes 盖戳尚未落盘也不被另一协程误删（spec-sync.ts:377-385 正是该窗口的收窄实现）；rm recursive+force 对已删路径静默，双清扫幂等",
+    "切换": "n/a——design「不适用」核实成立：sweepStalePullScraps 为纯读-判-删（readdir→lstat→rm），无状态迁移、无会话/请求生命周期态；解析失败回落 mtime 与旧行为逐字一致，无新失败面",
+    "作用域": "ok。条目过滤前缀 `${base}`=specDir basename（spec-sync.ts:358-366），内嵌 ts 解析仅在 isBackup 门控内执行（spec-sync.ts:378），只影响本 workspace 前缀的备份条目计龄，不跨 workspace 串台",
+    "声明边界": "全部已逐条裁决：①时钟回拨=可接受（与 mtime 同款既有边界，方向保守、追平自愈）；②放弃方案 A（盖戳失败同步重试/换 fstat）=可接受（EPERM 类根因重试同样失败，Node birthtime 在 Linux 不可移植不可靠属实，名内嵌 Date.now() 是创建时刻唯一跨平台可靠载体）；③放弃方案 B（7 天内按名 ts、之外按 mtime 的切换语义）=可接受（max=双确认才删，语义更简且保守单调；「双旧仍清」由既有 8 天清用例钉住，磁盘无界增长防线不弱化）。边界已裁决：可接受（三条全可接受）"
+  },
+  "reviewedAt": "2026-10-12T09:31:18+08:00"
+}

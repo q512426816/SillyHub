@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-backup-sweep-name-ts",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backup-sweep-name-ts"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backup-sweep-name-ts"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-backup-sweep-name-ts"
+    }
+  ]
+}

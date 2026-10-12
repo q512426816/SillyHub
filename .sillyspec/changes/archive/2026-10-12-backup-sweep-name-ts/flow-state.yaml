@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：24h 风险审查 P2-4——备份 7 天人工取回窗口在「utimes 盖戳失败 + 被备份残留 mtime 本来就老」组合下退化为 0：spec-sync.ts:543 utimes(backup, now,
+  now).catch(() => {}) 静默吞错，rename 继承旧目录 mtime（aa809dc91 自举的 30 天残留场景），清扫（spec-sync.ts:341-372）按 mtimeMs 判 7
+  天——刚创建的备份在下次 pull 顶部清扫即被删，而备份里可能有未回灌的本地改动。
+
+  成功标准：
+
+  - sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落
+  mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
+
+  - 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10
+  分钟留」与盖戳证据用例语义不变
+
+  - 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
+autopilot: true
+baseline_commit: d443f6f102c1308556c538004bc675c2a28cc233
+updatedAt: '2026-10-12T01:31:47.086Z'
+baseline_sha256: b1273b8f94ee7577b5d9151907fb672deb82da7ad1c26f29348b3de5190bcf17
+gate_summary: >-
+  test: skipped ← module[]+deps(py1+nontest-skip1+jsx7)+fr(9)（14.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012012914\test-result.json —
+  跳过原因：模块子集含环境缺件跳过（已跑模块全绿）：deps(auto-nontest-skip)——补装依赖后恢复实测。｜lint: passed ← cd backend && uv run ruff check . && uv
+  run ruff format --check . && uv run mypy app && cd ../frontend && pnpm lint && cd ../sillyhub-daemon && pnpm
+  typecheck（7.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012012914\test-result.json｜门文件
+  3 个
+

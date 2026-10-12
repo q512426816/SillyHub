@@ -2374,3 +2374,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：bb36a60bb75a4bf650a7069cf62e94d595da4c44
 理由：- 最大风险：存量部署 allowed_roots 未包含工作区根 → linked_repos 同步被 forbidden 拒止——loadConfig 默认 allowed_roots=[homedir()]，宿主项目根通常在家目录之下；且 get_spec_bundle 对同一类值已用同款守卫跑了数月，真实环境已隐式要求「workspace root 在 allowed_roots 内」，不引入新的部署约束。 - 放弃方案 A：把 allowed_roots 校验下沉进 linked-repos-sync.ts 纯函数——纯函数无法访问 daemon 实例的 _effectiveAllowedRoots（需注入 roots 参数，改签名波及既有 25 用例）；入口（daemon.ts handler）是 allowed_roots 的天然作用域，与 get_spec_bundle 同层。 - 放弃方案 B：spec-sync 相对形态改为 warn+按 cwd 解析继续——静默写错误位置正是要堵的缺陷，warn 不可接受；fail-loud 让 backend 侧 502/失败结果可见，登记数据质量问题立即暴露。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-backup-sweep-name-ts
+锚点：未记录
+最近确认：1f4f6562f1b0ff62c3f34d89542488042d8e6396
+理由：- 风险：机器时钟回拨后创建的备份名 ts 大于「现在」，两信号均不老 → 备份保留至时钟追平——与 mtime 语义下时钟回拨的行为一致（既有同款边界），且方向是保守保留，可接受。 - 放弃方案 A：utimes 失败时改同步重试/换 fstat——盖戳失败的根因（属主/文件系统 EPERM）重试同样失败，fstat 取不到创建时刻（跨平台不可移植）；名字内嵌 ts 是创建时刻唯一可靠的跨平台载体。 - 放弃方案 B：清扫改为「7 天内以名 ts、之外以 mtime」的切换语义——比 max 更复杂且无额外收益；max 即「双确认才删」，语义最简最保守。

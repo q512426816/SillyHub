@@ -1,0 +1,243 @@
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 0f2cc8da0..a04abf01e 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -363,12 +363,26 @@ async function sweepStalePullScraps(parent: string, base: string): Promise<void>
+       )
+       .map(async (n) => {
+         const p = join(parent, n);
+-        const ageMs = n.startsWith(`${base}.pre-junction-backup-`)
+-          ? STALE_BACKUP_AGE_MS
+-          : STALE_SCRAP_AGE_MS;
++        const isBackup = n.startsWith(`${base}.pre-junction-backup-`);
++        const ageMs = isBackup ? STALE_BACKUP_AGE_MS : STALE_SCRAP_AGE_MS;
+         try {
+           const st = await lstat(p);
+-          if (now - st.mtimeMs > ageMs) {
++          // 2026-10-12-backup-sweep-name-ts：备份计龄取 max(mtime, 名内嵌创建时刻)
++          // ——rename 继承被备份残留的旧 mtime（aa809dc91 场景），utimes 盖戳失败
++          //（best-effort 静默）时按 mtime 判龄会把刚建的备份立即清掉（7 天人工
++          // 窗口归零）；目录名内嵌创建时 Date.now()（ff8eb4ce3 引入的命名形态），
++          // 解析失败回落 mtime。max = 双信号均老才清（保守，绝不误删任一信号
++          // 新鲜的备份）；时钟回拨时名 ts 大于当前 → 保留至追平，与 mtime 同款
++          // 既有边界。
++          let birth = st.mtimeMs;
++          if (isBackup) {
++            const m = /(\d{13,})$/.exec(n);
++            if (m) {
++              const created = Number(m[1]);
++              if (Number.isFinite(created) && created > birth) birth = created;
++            }
++          }
++          if (now - birth > ageMs) {
+             await rm(p, { recursive: true, force: true });
+             console.warn('spec_sync: stale_scrap_swept', p);
+           }
+diff --git a/sillyhub-daemon/tests/test_init_lease.test.ts b/sillyhub-daemon/tests/test_init_lease.test.ts
+index d34052d0c..1afb44e95 100644
+--- a/sillyhub-daemon/tests/test_init_lease.test.ts
++++ b/sillyhub-daemon/tests/test_init_lease.test.ts
+@@ -1360,6 +1360,48 @@ describe('junction 半交换收口 + 备份清扫 (2026-10-11-junction-fallback-
+       await cleanupWsScraps(wsId);
+     }
+   });
++
++  it('清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）', async () => {
++    // ① utimes 盖戳失败 + 残留 mtime 本来就老（aa809dc91 的 30 天场景叠加）：
++    //    rename 继承老 mtime 且盖戳静默失败 → 名内嵌创建时刻（新鲜）必须兜底，
++    //    否则刚建的备份在下次清扫即被删（7 天人工窗口归零）。修复前红点。
++    // ② 名内嵌 ts 老、mtime 新鲜 → max 语义下任一信号新鲜即保留（保守方向钉）。
++    const wsId = 'ws-init-sweep-namets';
++    await seedResidueAndSource(wsId);
++    const parent = dirname(resolveSpecDir(wsId));
++    const now = Date.now();
++    const DAY = 24 * 60 * 60 * 1000;
++    const MIN = 60 * 1000;
++    const mkScratch = async (name: string, ageMs: number) => {
++      const p = join(parent, name);
++      await mkdir(p, { recursive: true });
++      await writeFile(join(p, 'x.md'), 'x');
++      await utimes(p, new Date(now - ageMs), new Date(now - ageMs));
++    };
++    const stampFailName = `${wsId}.pre-junction-backup-${now - 5 * MIN}`; // 名 ts 新鲜
++    await mkScratch(stampFailName, 30 * DAY); // mtime 继承老值（盖戳失败形态）
++    const conservativeName = `${wsId}.pre-junction-backup-${now - 8 * DAY}`; // 名 ts 老
++    await mkScratch(conservativeName, 5 * MIN); // mtime 新鲜
++    const client = makeClient();
++    try {
++      const result = await handleInitLease(client as never, {
++        workspaceId: wsId,
++        rootPath: tmpProject,
++        serverOrigin: 'http://127.0.0.1:8000',
++        strategy: 'repo-native',
++        spawnFn: makeInitSpawn(),
++        latestSpecVersion: 1,
++      });
++      expect(result.ok).toBe(true);
++      const names = await readdir(parent);
++      // ① 盖戳失败形态：名 ts 兜底 → 不误删（修复前按 mtime 判龄即删，红）。
++      expect(names).toContain(stampFailName);
++      // ② 保守语义：双信号均老才清，mtime 新鲜即留。
++      expect(names).toContain(conservativeName);
++    } finally {
++      await cleanupWsScraps(wsId);
++    }
++  });
+ });
+ 
+ // 防止 "homedir 未使用" lint（清理路径预留扩展用）
+diff --git a/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/tasks.md b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/tasks.md
+new file mode 100644
+index 000000000..4ffd54b5b
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:27:35.280Z
++---
++# 任务注册表（Tasks）— 2026-10-12-backup-sweep-name-ts
++
++- [x] task-01: sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
++- [x] task-02: 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
++- [x] task-03: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
+diff --git a/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/design.md b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-backup-sweep-name-ts
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++aa809dc91 用 utimes(backup, now) 把备份保留期锚定创建时刻，但盖戳是 best-effort（`.catch(() => {})`，属主/文件系统 EPERM 即失败）；rename 又继承被备份残留的旧 mtime——两事件叠加（残留本来就老 + 盖戳失败）时，sweepStalePullScraps 按 mtimeMs 判 7 天会把刚创建的备份立即清掉，7 天人工取回窗口归零，而备份里可能有未回灌的本地改动。备份目录名本身内嵌创建时刻（`${base}.pre-junction-backup-${Date.now()}`，ff8eb4ce3 引入）——修法：清扫时解析名字尾部内嵌 ts，取 `max(mtimeMs, 内嵌 ts)` 计龄（解析失败/更小则回落 mtime），双信号均老才清。保守方向：任一信号新鲜都保留，绝不误删。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 仅 `sweepStalePullScraps` 内部计龄逻辑（私有函数，签名不变）；可观察行为变化一处：备份目录在「mtime 老 + 名 ts 新」组合下不再被清扫（缺陷行为修正，无消费方依赖旧行为）。tmp/trash 10 分钟与备份 7 天保留期常数零变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   计龄基于创建时固化的目录名 ts 与文件系统 mtime，均不随读取时序漂移；并发 pull 各自产生独立命名的备份/残留（名含 Date.now()），清扫互不影响（既有语义）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   清扫与新建备份并发时：新备份名 ts 新鲜 → 即使 mtime 尚未盖戳（utimes 在 rename 后异步落）也不被另一协程的清扫误删（本修复恰好收窄了该窗口）；rm 对不存在路径 force 静默，双清扫幂等。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   不适用：纯读-判-删，无状态迁移；解析失败回落 mtime 与旧行为一致，无新失败面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   目录名前缀 `${base}`（=workspace specDir basename）隔离各 workspace 残留；内嵌 ts 只影响本前缀条目计龄，不跨 workspace。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：机器时钟回拨后创建的备份名 ts 大于「现在」，两信号均不老 → 备份保留至时钟追平——与 mtime 语义下时钟回拨的行为一致（既有同款边界），且方向是保守保留，可接受。
++- 放弃方案 A：utimes 失败时改同步重试/换 fstat——盖戳失败的根因（属主/文件系统 EPERM）重试同样失败，fstat 取不到创建时刻（跨平台不可移植）；名字内嵌 ts 是创建时刻唯一可靠的跨平台载体。
++- 放弃方案 B：清扫改为「7 天内以名 ts、之外以 mtime」的切换语义——比 max 更复杂且无额外收益；max 即「双确认才删」，语义最简最保守。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | sillyhub-daemon/src/spec-sync.ts | sweepStalePullScraps 备份条目按 max(mtime, 名内嵌 ts) 计龄 |
++| 改 | sillyhub-daemon/tests/test_init_lease.test.ts | 新增盖戳失败形态/保守语义两用例 |
+
+diff --git a/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/proposal.md b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/proposal.md
+@@ -0,0 +1,26 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:27:35.280Z
++---
++# 提案书（Proposal）— 2026-10-12-backup-sweep-name-ts
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P2-4——备份 7 天人工取回窗口在「utimes 盖戳失败 + 被备份残留 mtime 本来就老」组合下退化为 0：spec-sync.ts:543 utimes(backup, now, now).catch(() => {}) 静默吞错，rename 继承旧目录 mtime（aa809dc91 自举的 30 天残留场景），清扫（spec-sync.ts:341-372）按 mtimeMs 判 7 天——刚创建的备份在下次 pull 顶部清扫即被删，而备份里可能有未回灌的本地改动。
++成功标准：
++- sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
++- 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
++- 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
++
++## 变更范围
++
++按成功标准机械推导，共 3 条验收面：
++1. sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
++2. 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
++3. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
++
++## 成功标准（可验证）
++
++1. sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
++2. 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
++3. 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
+
+diff --git a/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/requirements.md b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-backup-sweep-name-ts/requirements.md
+@@ -0,0 +1,47 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-backup-sweep-name-ts
++
++## 功能需求
++
++### FR-01: sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
++
++- 备份条目计龄必须取 `max(lstat().mtimeMs, 目录名尾部内嵌时间戳)`（内嵌 ts 可解析且更大时用内嵌值），超 7 天保留期才清扫；内嵌 ts 解析失败必须回落 mtime（与旧行为一致）；tmp/trash 残留 10 分钟语义零变化。
++
++#### 场景：盖戳失败组合不误删
++
++- Given 备份目录名内嵌 ts 新鲜、mtime 为继承的 30 天旧值（utimes 盖戳失败形态）
++- When 清扫执行
++- Then 备份保留（7 天人工窗口有效）
++
++#### 场景：双旧仍清
++
++- Given 内嵌 ts 与 mtime 均超 7 天
++- When 清扫执行
++- Then 备份被清（磁盘无界增长防线不弱化）
++
++### FR-02: 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
++
++- 用例①必须在修复前为红（按 mtime 判龄会删）修复后为绿；用例②钉 max 语义的保守方向；既有清扫用例（8 天备份清/新鲜备份留/tmp 10 分钟/盖戳 mtime<60s 证据）必须全绿不改语义。
++
++#### 场景：先红后绿
++
++- When 修复前运行用例①
++- Then 红（备份被清扫）；修复后绿
++
++### FR-03: 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
++
++- 本变更只必须运行该测试文件全文件，禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面回归
++
++- When 运行该测试文件
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」
++FR-02: sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」
++FR-03: sillyhub-daemon/tests/test_init_lease.test.ts（全文件回归，含既有 sweep 用例）
