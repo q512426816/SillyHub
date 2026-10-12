@@ -764,6 +764,20 @@ class AgentSession(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
+    # ——run_sync 命令解析通道（W2.1）每次解析出 sillyspec 绑定命令时回写
+    # （最后一条生效），inject 建轮时据此给 AgentRun.change_id 打锚。与上方
+    # change_id（会话创建时的派发绑定，只读语义）刻意分列：一个会话先后执行
+    # 多个变更时上下文随命令游走，派发锚不动。删变更 SET NULL → 新轮回落
+    # 无锚（经 change_session_links 认领的旧口径）。
+    current_change_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("changes.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     # Redundant workspace binding for change-scoped session listing & cwd
     # resolution (D-003@v1).
     workspace_id: uuid.UUID | None = Field(
