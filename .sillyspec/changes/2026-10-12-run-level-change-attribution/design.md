@@ -62,6 +62,7 @@ created_at: 2026-10-12T06:43:13.857Z
 | 操作 | 路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/agent/model.py | AgentSession 新列 current_change_id（FK changes.id SET NULL） |
+| 修改 | backend/app/modules/agent/tests/test_agent_session_model.py | AgentSession 字段集钉子同步 33→34（新列入表契约；实测门拦截后清偿） |
 | 新增 | backend/migrations/versions/20261012123000_add_agent_sessions_current_change_id.py | alembic 迁移（down_revision=c515ffd62859） |
 | 修改 | backend/tests/test_align_platform_change_events_migration.py | 迁移链尾锚随新 head 前移（断言面闸门配对钉子） |
 | 修改 | backend/app/modules/change/binding.py | bind_session_to_change 返回变更 id（None 兜底） |
