@@ -761,3 +761,124 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：（无场景名）
 全文：.sillyspec/changes/archive/2026-10-11-alembic-single-head-guard/requirements.md#FR-03
 最近确认：e81fef9f12b4d99f7bfa71cb3354adfb2e40f5fb
+
+## FR-auto-backend-165 sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
+变更：2026-10-12-task-sweep-rpc-route-key
+状态：active
+摘要：绑定 instance 的 runtime 按映射键路由；runtime 行缺失跳过；legacy NULL 回落不变
+全文：.sillyspec/changes/archive/2026-10-12-task-sweep-rpc-route-key/requirements.md#FR-01
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-task-sweep-rpc-route-key
+  status: active
+
+## FR-auto-backend-166 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
+变更：2026-10-12-task-sweep-rpc-route-key
+状态：active
+摘要：路由键断言用例
+全文：.sillyspec/changes/archive/2026-10-12-task-sweep-rpc-route-key/requirements.md#FR-02
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-task-sweep-rpc-route-key
+  status: active
+
+## FR-auto-backend-167 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
+变更：2026-10-12-task-sweep-rpc-route-key
+状态：active
+摘要：延迟任务在独立 session 上执行清扫；清扫异常不冒泡
+全文：.sillyspec/changes/archive/2026-10-12-task-sweep-rpc-route-key/requirements.md#FR-03
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_startup_orphan_task_sweep_deferred_on_own_session」 | backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_startup_orphan_task_sweep_swallows_errors」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-task-sweep-rpc-route-key
+  status: active
+
+## FR-auto-backend-168 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
+变更：2026-10-12-task-sweep-rpc-route-key
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-task-sweep-rpc-route-key/requirements.md#FR-04
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_agent_session_tasks.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-task-sweep-rpc-route-key
+  status: active
+
+## FR-auto-backend-169 close 对 duration_api_ms 仅回填不覆盖
+变更：2026-10-12-duration-backfill-harness-align
+状态：active
+摘要：实测值权威；NULL 回填
+全文：.sillyspec/changes/archive/2026-10-12-duration-backfill-harness-align/requirements.md#FR-01
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-duration-backfill-harness-align:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_backfills_duration_api_ms_when_null」 | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py「test_close_does_not_override_measured_duration_api_ms」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-duration-backfill-harness-align
+  status: active
+
+## FR-auto-backend-170 模块卡语义同步
+变更：2026-10-12-duration-backfill-harness-align
+状态：active
+摘要：卡面一致
+全文：.sillyspec/changes/archive/2026-10-12-duration-backfill-harness-align/requirements.md#FR-02
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+## FR-auto-backend-171 相关测试通过（不跑全量）
+变更：2026-10-12-duration-backfill-harness-align
+状态：active
+摘要：绿
+全文：.sillyspec/changes/archive/2026-10-12-duration-backfill-harness-align/requirements.md#FR-03
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-duration-backfill-harness-align:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-duration-backfill-harness-align
+  status: active

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-task-sweep-rpc-route-key",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "41e72a42fb443b097ad5979651c85570d6acca48",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03 场景「桩被调用恰好一次」无用例计数断言",
+      "evidence": "test_startup_orphan_task_sweep_deferred_on_own_session 仅断言传入 session 为 factory 新开标记且异于 db_session；桩经 captured dict 记录属覆写式，多次调用断言仍通过，「恰一次」仅靠协程单 async-with 结构隐式成立，非数据正确性风险。",
+      "location": "backend/app/modules/daemon/tests/test_agent_session_tasks.py:1223"
+    },
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结件混入与本变更无关的 daemon.md hunk",
+      "evidence": "patch 头部含 .sillyspec/docs/backend/modules/daemon.md 的 duration_api_ms 语义改动（属 2026-10-12-duration-backfill-harness-align，已在 9f7f030eb 单独提交）；实际交付 commit c74d379ec 只含 3 个代码文件，与 design 文件变更清单一致，纯冻结窗口噪声，无代码风险。",
+      "location": ".sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/change.patch:1-15"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T08:35:30+08:00"
+}

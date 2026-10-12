@@ -1,0 +1,480 @@
+diff --git a/.sillyspec/docs/backend/modules/daemon.md b/.sillyspec/docs/backend/modules/daemon.md
+index 8f2982336..661034b19 100644
+--- a/.sillyspec/docs/backend/modules/daemon.md
++++ b/.sillyspec/docs/backend/modules/daemon.md
+@@ -58,7 +58,9 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
+   - usage 管线补维（2026-10-10-live-token-speed-daemon-timing）：submit_messages 提取
+   message 顶层 `usage.api_duration_ms`（daemon 三引擎逐调用计时生产的轮内累计生成
+   时长 ms，不含工具窗口）→ max 累积（乱序不回退）→ submit_commit **仅增不减**写回
+-  `AgentRun.duration_api_ms`（防跨轮回退；close 结果元数据非 None 仍权威覆盖）→
++  `AgentRun.duration_api_ms`（防跨轮回退；close 元数据仅回填不覆盖实测值——
++  2026-10-12-duration-backfill-harness-align 对齐 deepseek-harness projection.ts
++  的窗口自测哲学，子代理并行时 Σ窗口>墙钟合法故无墙钟守卫）→
+   tokens SSE 事件与 run channel summary 增键 `duration_api_ms`（None 不带键，
+   design §9 同款）——前端运行中 tok/s 分母数据源；
+   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+diff --git a/backend/app/modules/agent/service.py b/backend/app/modules/agent/service.py
+index 1b2c3eb96..f5b3283aa 100644
+--- a/backend/app/modules/agent/service.py
++++ b/backend/app/modules/agent/service.py
+@@ -1445,19 +1445,12 @@ class AgentService:
+         # 2026-10-10-run-close-task-sweep / 2026-10-11-task-sweep-daemon-truth：
+         # 启动确认清扫——run 已终态但 agent_session_task 行仍 running 的存量
+         # （历史无清扫 / 终态事件丢失），经 daemon 注册表确认（session_live_tasks
+-        # RPC；会话终态直接收）才收口；失败仅日志不阻塞启动。
+-        try:
+-            from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
+-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+-
+-            swept = await sweep_confirmed_dead_tasks(self._session, hub=get_daemon_ws_hub())
+-            if swept:
+-                log.info("startup_orphan_task_sweep", swept_tasks=swept)
+-        except Exception as exc:
+-            # sweep 失败时回滚本事务——session 不留 aborted 态，免得同 session 的
+-            # 后续启动逻辑（gate reconcile 等）撞 PendingRollbackError 被连带跳过。
+-            await self._session.rollback()
+-            log.warning("startup_orphan_task_sweep_failed", error=str(exc))
++        # RPC；会话终态直接收）才收口。
++        # 2026-10-12-task-sweep-rpc-route-key：改延迟后台任务——lifespan 时点 hub
++        # 连接表必空（uvicorn 未开始 accept），同步 await 时确认分支恒伪离线落空；
++        # 延迟给 daemon WS 重连留窗口后再确认。任务自开独立 session、强引用防 GC
++        # + done 回收（对齐 _recheck_stale_runs_loop 模式），异常仅日志不阻断启动。
++        _schedule_startup_orphan_task_sweep()
+         return cleaned
+ 
+     # ------------------------------------------------------------------
+@@ -2745,6 +2738,46 @@ async def _recheck_stale_runs_loop(deferred_run_ids: list[uuid.UUID]) -> None:
+     log.info("stale_run_recheck_completed")
+ 
+ 
++# 2026-10-12-task-sweep-rpc-route-key：启动确认清扫的延迟——lifespan 时点 hub
++# 连接表必空（uvicorn 未开始 accept，单进程部署无 --workers），同步执行时
++# session_live_tasks 确认分支恒伪离线落空；等 daemon WS 重连注册后再问注册表。
++# 实证 daemon 断线重连秒级完成，60s 为保守值。
++_STARTUP_TASK_SWEEP_DELAY_SECONDS = 60.0
++
++
++async def _startup_orphan_task_sweep() -> None:
++    """启动确认清扫（延迟后台任务）——见 cleanup_stale_runs 调用点注释。
++
++    自开独立 session（不与 lifespan bootstrap session 共享事务）；全程
++    try/except 记日志不外溢（对齐同启动兜底的「异常不阻断启动」口径），
++    进程在延迟窗内退出则任务随事件循环取消，孤儿留待下次启动（fail-open）。
++    """
++    try:
++        await asyncio.sleep(_STARTUP_TASK_SWEEP_DELAY_SECONDS)
++        from app.modules.daemon.agent_task_store import sweep_confirmed_dead_tasks
++        from app.modules.daemon.ws_hub import get_daemon_ws_hub
++
++        async with get_session_factory()() as session:
++            swept = await sweep_confirmed_dead_tasks(session, hub=get_daemon_ws_hub())
++            if swept:
++                log.info("startup_orphan_task_sweep", swept_tasks=swept)
++    except asyncio.CancelledError:
++        raise
++    except Exception:
++        log.exception("startup_orphan_task_sweep_failed")
++
++
++def _schedule_startup_orphan_task_sweep() -> None:
++    """创建启动清扫后台任务——强引用防 GC + done 回调收异常（防静默死亡）。"""
++    task = asyncio.create_task(_startup_orphan_task_sweep())
++    AgentService._background_tasks.add(task)
++    task.add_done_callback(AgentService._on_background_task_done)
++    log.info(
++        "startup_orphan_task_sweep_scheduled",
++        delay_seconds=_STARTUP_TASK_SWEEP_DELAY_SECONDS,
++    )
++
++
+ def redact_agent_output(text: str) -> str:
+     """Redact sensitive patterns from agent output."""
+     from app.modules.git_gateway.service import redact_output
+diff --git a/backend/app/modules/daemon/agent_task_store.py b/backend/app/modules/daemon/agent_task_store.py
+index b5b6cb44b..f231ff5e1 100644
+--- a/backend/app/modules/daemon/agent_task_store.py
++++ b/backend/app/modules/daemon/agent_task_store.py
+@@ -87,6 +87,10 @@ async def sweep_confirmed_dead_tasks(
+     """
+     from app.modules.agent.model import AgentSession
+ 
++    # 2026-10-12-task-sweep-rpc-route-key：函数级 import（对齐上款）——helper
++    # 挂在 session.service 包下，顶层引会拖入整包且有无谓循环风险。
++    from app.modules.daemon.session.service.helpers import _resolve_daemon_id_for_runtime
++
+     cand = (
+         await session.execute(
+             select(
+@@ -117,10 +121,23 @@ async def sweep_confirmed_dead_tasks(
+         pending.setdefault(row.runtime_id, {}).setdefault(row.session_id, {})[row.task_id] = row.id
+ 
+     for runtime_id, sessions in pending.items():
++        # 2026-10-12-task-sweep-rpc-route-key：WS Hub 连接表按 daemon_instance_id
++        # 注册（gateway 握手 daemon_local_id），AgentSession.runtime_id 是
++        # daemon_runtimes 主键——独立 UUID 空间，直接拿它发 RPC 恒 is_connected
++        # 失败被当「离线」，确认制不可达。先经既有帮手映射路由键（D-007 legacy
++        # NULL 回落 runtime_id；行缺失无键可解析 → fail-open 跳过，同离线语义）。
++        daemon_id = await _resolve_daemon_id_for_runtime(session, runtime_id)
++        if daemon_id is None:
++            _log.warning(
++                "task_sweep_runtime_row_missing",
++                runtime_id=str(runtime_id),
++                sessions=len(sessions),
++            )
++            continue
+         for sess_id, tasks in sessions.items():
+             try:
+                 res = await hub.send_rpc(
+-                    runtime_id,
++                    daemon_id,
+                     "session_live_tasks",
+                     {"session_id": str(sess_id)},
+                     timeout=rpc_timeout,
+@@ -131,6 +148,7 @@ async def sweep_confirmed_dead_tasks(
+                 _log.warning(
+                     "task_sweep_daemon_confirm_failed",
+                     runtime_id=str(runtime_id),
++                    daemon_id=str(daemon_id),
+                     session_id=str(sess_id),
+                     error=str(exc),
+                 )
+diff --git a/backend/app/modules/daemon/tests/test_agent_session_tasks.py b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+index b73b164cb..82fde3a21 100644
+--- a/backend/app/modules/daemon/tests/test_agent_session_tasks.py
++++ b/backend/app/modules/daemon/tests/test_agent_session_tasks.py
+@@ -1132,3 +1132,145 @@ class TestRunCloseTaskSweep:
+         rows = {r.task_id: r for r in await _task_rows(db_session, ag_session.id)}
+         assert rows["t-s"].status == "stopped"
+         assert (rows["t-s"].message or "") == "用户停止"
++
++    @pytest.mark.asyncio
++    async def test_sweep_routes_rpc_by_daemon_instance_id(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """2026-10-12-task-sweep-rpc-route-key：RPC 路由键必须是 daemon_instance_id。
++
++        WS Hub 连接表按 daemon_instance_id 注册（ws_hub._connections），runtime
++        主键是注册时随机 uuid4 的独立 UUID 空间——此前直接拿 runtime_id 发
++        session_live_tasks 恒 is_connected 失败被当「离线」跳过，确认制不可达。
++        """
++        from app.modules.daemon.agent_task_store import (
++            sweep_confirmed_dead_tasks,
++            upsert_agent_task,
++        )
++        from app.modules.daemon.model import DaemonInstance
++
++        user_id = await _admin_id(db_session)
++        instance = DaemonInstance(
++            id=uuid.uuid4(),
++            user_id=user_id,
++            hostname="route-key-host",
++            server_url="http://route-key.example",
++            status="online",
++        )
++        db_session.add(instance)
++        await db_session.flush()
++        rt = await _create_runtime(db_session, user_id)
++        rt.daemon_instance_id = instance.id
++        db_session.add(rt)
++        await db_session.commit()
++        await db_session.refresh(rt)
++        assert rt.daemon_instance_id == instance.id
++
++        ag_session, run = await _create_session_with_run(db_session, user_id, rt.id)
++        await upsert_agent_task(db_session, _event(ag_session.id, run.id, "t-live"))
++
++        hub = _StubHub({(instance.id, str(ag_session.id)): ["t-live"]})
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
++
++        # daemon 报活 → 零收口；且 RPC 按映射键问询，而非 runtime 原键。
++        assert swept == 0
++        assert hub.calls == [
++            (instance.id, "session_live_tasks", {"session_id": str(ag_session.id)})
++        ]
++
++    @pytest.mark.asyncio
++    async def test_sweep_skips_missing_runtime_row_without_rpc(
++        self, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """runtime 行缺失（悬空引用）→ 无路由键可解析，fail-open 跳过不发 RPC。"""
++        from app.modules.agent.model import AgentRun
++        from app.modules.agent.model import AgentSession as AgSessionModel
++        from app.modules.daemon.agent_task_store import (
++            sweep_confirmed_dead_tasks,
++            upsert_agent_task,
++        )
++
++        user_id = await _admin_id(db_session)
++        dangling = AgSessionModel(
++            id=uuid.uuid4(),
++            user_id=user_id,
++            runtime_id=uuid.uuid4(),  # 不存在对应 daemon_runtimes 行
++            provider="claude",
++            status="active",
++        )
++        db_session.add(dangling)
++        await db_session.commit()
++        r = AgentRun(
++            id=uuid.uuid4(),
++            task_id=uuid.uuid4(),
++            agent_type="claude_code",
++            agent_session_id=dangling.id,
++            status="completed",
++        )
++        db_session.add(r)
++        await db_session.commit()
++        await upsert_agent_task(db_session, _event(dangling.id, r.id, "t-dangling"))
++
++        hub = _StubHub({})
++        swept = await sweep_confirmed_dead_tasks(db_session, hub=hub)
++
++        assert swept == 0  # fail-open 保活，不误收
++        assert hub.calls == []  # 无路由键，不发 RPC
++        rows = {r.task_id: r for r in await _task_rows(db_session, dangling.id)}
++        assert rows["t-dangling"].status == "running"
++
++    @pytest.mark.asyncio
++    async def test_startup_orphan_task_sweep_deferred_on_own_session(
++        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """启动清扫延迟任务：独立 session 执行（非调用方 lifespan session）。"""
++        from app.modules.agent import service as agent_service
++
++        captured: dict = {}
++
++        class _FakeCtx:
++            async def __aenter__(self) -> object:
++                captured["marker"] = object()
++                return captured["marker"]
++
++            async def __aexit__(self, *args: object) -> bool:
++                return False
++
++        async def _fake_sweep(session, *, hub, run_id=None, rpc_timeout=5.0):
++            captured["session"] = session
++            return 3
++
++        monkeypatch.setattr(agent_service, "_STARTUP_TASK_SWEEP_DELAY_SECONDS", 0)
++        monkeypatch.setattr(agent_service, "get_session_factory", lambda: _FakeCtx)
++        monkeypatch.setattr(
++            "app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks",
++            _fake_sweep,
++        )
++
++        await agent_service._startup_orphan_task_sweep()
++
++        assert captured["session"] is captured["marker"]  # factory 新开的独立 session
++        assert captured["session"] is not db_session
++
++    @pytest.mark.asyncio
++    async def test_startup_orphan_task_sweep_swallows_errors(
++        self, monkeypatch: pytest.MonkeyPatch
++    ) -> None:
++        """清扫异常不冒泡——启动兜底失败只记日志，不阻断 lifespan。"""
++        from app.modules.agent import service as agent_service
++
++        class _FakeCtx:
++            async def __aenter__(self) -> None:
++                return None
++
++            async def __aexit__(self, *args: object) -> bool:
++                return False
++
++        async def _boom(session, *, hub, run_id=None, rpc_timeout=5.0):
++            raise RuntimeError("sweep exploded")
++
++        monkeypatch.setattr(agent_service, "_STARTUP_TASK_SWEEP_DELAY_SECONDS", 0)
++        monkeypatch.setattr(agent_service, "get_session_factory", lambda: _FakeCtx)
++        monkeypatch.setattr("app.modules.daemon.agent_task_store.sweep_confirmed_dead_tasks", _boom)
++
++        await agent_service._startup_orphan_task_sweep()  # 不抛即过
+diff --git a/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/tasks.md b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/tasks.md
+new file mode 100644
+index 000000000..7541c20a8
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/tasks.md
+@@ -0,0 +1,10 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:20:58.111Z
++---
++# 任务注册表（Tasks）— 2026-10-12-task-sweep-rpc-route-key
++
++- [x] task-01: sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
++- [x] task-02: 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
++- [x] task-03: 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
++- [x] task-04: 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
+diff --git a/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/design.md b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/design.md
+@@ -0,0 +1,55 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:20:58.110Z
++---
++# 设计记录（Design Record）— 2026-10-12-task-sweep-rpc-route-key
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++确认制清扫的候选按 `AgentSession.runtime_id`（=`daemon_runtimes.id`）分组，而 `DaemonWsHub` 连接表按 `daemon_instance_id` 注册（`gateway_misc.py` 握手 `daemon_local_id`、`ws_hub.py:106`）——runtime 主键是注册时随机 uuid4，与 instance id 永不相等，`is_connected(runtime_id)` 恒 False，确认 RPC 全部被当「离线」跳过。修法：分组后逐 runtime 经既有帮手 `_resolve_daemon_id_for_runtime`（`session/service/helpers.py:133`：`session.get(DaemonRuntime)` 查归属 instance；NULL 回落 runtime_id；行缺失返 None）解析路由键再发 RPC；行缺失时该 runtime 候选整体跳过（fail-open，与离线同语义）。帮手在函数内延迟 import（对齐本模块 `AgentSession` 同款，避免 `session.service` 包级循环依赖）。测试未拦截的根因一并说明：共享夹具 `_create_runtime` 不设 `daemon_instance_id`（恰好走 legacy 回退=错误键）且 `_StubHub` 按错误键收调用——新增用例显式建 instance 并断言映射键。
++
++启动清扫（`cleanup_stale_runs` 内联 await，lifespan 时点执行）在此刻 hub 连接表必空（uvicorn 未开始 accept，单进程 CMD 无 --workers），确认分支恒落空。改为延迟后台任务：对齐 `_recheck_stale_runs_loop` 既有模式——`asyncio.create_task` + `AgentService._background_tasks` 强引用 + `_on_background_task_done` 回收；协程内 `asyncio.sleep(_STARTUP_TASK_SWEEP_DELAY_SECONDS)`（默认 60s，给 daemon WS 重连留窗口）后自开 `get_session_factory()` 独立 session 执行 sweep；全程 try/except 记日志，异常不阻断启动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- `sweep_confirmed_dead_tasks(session, *, hub, run_id=None, rpc_timeout=5.0)` 签名不变；行为变化仅一处——`send_rpc` 第一参由 runtime_id 改为解析后的 daemon 路由键（对外语义：修复；此前现网恒伪离线，无消费方依赖旧错误行为）。
++- `app/modules/agent/service.py` 新增模块级常量 `_STARTUP_TASK_SWEEP_DELAY_SECONDS = 60.0` 与模块级协程 `_startup_orphan_task_sweep()`（私有，不进对外 API）；`cleanup_stale_runs` 内联清扫块替换为创建后台任务。main.py lifespan 调用点零改动（仍调 `cleanup_stale_runs`）。
++- 无 schema/端点/迁移变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   RPC 结果晚到不影响——收口按候选 SELECT 快照 + UPDATE 非终态守卫（评审 F1 既有守卫覆盖唯一 UPDATE 点），迟到终态事件先提交则 UPDATE 排除、后提交则复活分支自愈；映射只改路由键，不改变候选判定与收口语义。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   映射查询为只读 `session.get`；两个触发点（run 收口 60s 复扫 / 启动延迟任务）并发执行同一候选时，UPDATE 幂等（终态守卫 + rowcount 归一），重复收口无害；runtime 在 SELECT 与 RPC 之间重绑定 instance 以快照键为准，最坏一次伪离线跳过，下轮触发点自愈。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   启动任务持独立 session（factory 新开），不与 lifespan bootstrap session 交叉（原内联版的 aborted-session 连坐风险随之消失）；进程在延迟窗内退出，任务随事件循环取消，孤儿行留待下次启动——fail-open 不丢数据。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   映射按 runtime 行查归属 instance，不跨 daemon 串台；hub 连接表按 daemon 天然隔离，`session_live_tasks` params 携 session_id 由 daemon 侧会话表二次定位，无双写面。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 最大风险：现网若存在 `daemon_instance_id=NULL` 的 legacy runtime 行，其路由键回落 runtime_id——若 hub 恰也无该键连接，行为与修复前相同（伪离线跳过），不劣化于现状；D-007 迁移已完成（register 必绑定），存量 NULL 行按设计不可达。
++- 放弃方案 A：在 `hub.send_rpc` 内做 runtime→instance 兼容映射——否，hub 是纯内存路由层，引入 DB 依赖破坏职责边界且掩盖调用方缺映射的事实；映射归调用方（`daemon_rpc.py:79` 先例）。
++- 放弃方案 B：启动清扫挂 daemon 首次连接事件触发——需 hub 新增回调钩子，改动面大且首连早于多 runtime 就绪；固定 60s 延迟达成同等效果、零新耦合，常数可调。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | backend/app/modules/daemon/agent_task_store.py | sweep 逐 runtime 经 helper 解析 daemon 路由键；行缺失跳过 |
++| 改 | backend/app/modules/agent/service.py | 启动清扫改延迟后台任务（独立 session+强引用+done 回收） |
++| 改 | backend/app/modules/daemon/tests/test_agent_session_tasks.py | 新增路由键断言 + 启动延迟任务两用例；既有用例不动 |
+
+diff --git a/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/proposal.md b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/proposal.md
+@@ -0,0 +1,29 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:20:58.110Z
++---
++# 提案书（Proposal）— 2026-10-12-task-sweep-rpc-route-key
++
++## 动机
++
++任务原话转写：动机：24h 风险审查 P1——sweep_confirmed_dead_tasks（backend/app/modules/daemon/agent_task_store.py:122）把 AgentSession.runtime_id 直接当 hub.send_rpc 路由键，而 WS Hub 连接表按 daemon_instance_id 注册（gateway_misc.py 握手 daemon_local_id、ws_hub.py:106 self._connections[daemon_id]=ws），两个 UUID 空间不同——确认 RPC 在现网恒 is_connected 失败被按「离线」跳过，「问 daemon 注册表才收口」整条链路不可达；仓库既有帮手 session/service/helpers.py:133 _resolve_daemon_id_for_runtime 与 router/daemon_rpc.py:79 都先做映射，唯独本处漏了。叠加启动清扫在 lifespan 阶段同步执行（main.py:154 → agent/service.py:1450），此刻 hub 必无连接，确认分支启动期也必然落空。测试没拦住是因为夹具 _create_runtime 未设 daemon_instance_id（恰好走 legacy 回退路由键=runtime_id）且 _StubHub 按错误键收调用。
++成功标准：
++- sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
++- 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
++- 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
++- 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
++
++## 变更范围
++
++按成功标准机械推导，共 4 条验收面：
++1. sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
++2. 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
++3. 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
++4. 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
++
++## 成功标准（可验证）
++
++1. sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
++2. 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
++3. 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
++4. 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
+
+diff --git a/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/requirements.md b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-task-sweep-rpc-route-key/requirements.md
+@@ -0,0 +1,73 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:20:58.110Z
++---
++# 需求规格（Requirements）— 2026-10-12-task-sweep-rpc-route-key
++
++## 功能需求
++
++### FR-01: sweep_confirmed_dead_tasks 对每个候选 runtime 先经 _resolve_daemon_id_for_runtime 映射出 daemon 路由键再发 session_live_tasks RPC；runtime 行缺失时该 runtime 的候选跳过（fail-open 保活）；daemon_instance_id 为 NULL（D-007 迁移窗）沿用 helper 既有语义回落 runtime_id 作路由键
++
++- 确认制清扫向 daemon 发 `session_live_tasks` RPC 时，必须以 `_resolve_daemon_id_for_runtime` 解析出的 daemon 路由键为 `hub.send_rpc` 第一参，禁止直接使用 `AgentSession.runtime_id` 原值（WS Hub 连接表按 daemon_instance_id 注册，两个 UUID 空间不同）。
++- runtime 行已不存在（helper 返 None）时，该 runtime 名下全部候选必须跳过不收口（与 daemon 离线同语义，fail-open 保活），且不得发送 RPC。
++- `daemon_instance_id` 为 NULL 的 legacy 行（D-007 迁移窗）必须沿用 helper 既有回落语义，以 runtime_id 本身作路由键。
++
++#### 场景：绑定 instance 的 runtime 按映射键路由
++
++- Given runtime 行 `daemon_instance_id=I`（I≠runtime_id），其活跃会话下有非终态任务行
++- When 执行 `sweep_confirmed_dead_tasks`
++- Then `hub.send_rpc` 收到的路由键为 I 而非 runtime_id
++
++#### 场景：runtime 行缺失跳过
++
++- Given AgentSession.runtime_id 指向不存在的 runtime 行，会话状态 active
++- When 执行清扫
++- Then 不发 RPC、该候选行保持 running（不误收）
++
++#### 场景：legacy NULL 回落不变
++
++- Given runtime 行 `daemon_instance_id=None`（既有夹具形态）
++- When 执行清扫
++- Then RPC 路由键为 runtime_id 本身（既有 5 用例口径不变）
++
++### FR-02: 新增用例：runtime 绑定 daemon_instance_id 后 send_rpc 收到的路由键为 daemon_instance_id 而非 runtime_id（先红后绿）；既有清扫用例语义不变全绿
++
++- 测试必须存在断言「send_rpc 第一参 == daemon_instance_id」的用例，且在修复前为红、修复后为绿；既有清扫行为用例（确认收口/离线跳过/终态直收/run 限定/竞态守卫/复活）必须保持全绿，不得为通过而改语义。
++
++#### 场景：路由键断言用例
++
++- Given 夹具建 daemon_instance + 绑定它的 runtime + 活跃会话与任务行
++- When 以按 (路由键, session_id) 脚本化的桩 hub 执行清扫
++- Then 桩记录的调用键为 instance id，且 daemon 报活的任务行保持 running
++
++### FR-03: 启动清扫从 lifespan 同步 await 改为延迟后台任务（对齐 _recheck_stale_runs_loop 模式：独立 session、强引用防 GC、done 回收异常），给 daemon 留重连窗口后再确认，异常不阻断启动
++
++- 启动确认清扫必须以延迟后台协程执行（延迟常量默认 60 秒，给 daemon WS 重连留窗口），禁止在 `cleanup_stale_runs` 内同步 await 阻断 lifespan；任务必须自开独立 session（`get_session_factory()`），必须被强引用持有防 GC 并经 `_on_background_task_done` 回收；任务内任何异常必须记日志返回、禁止向外抛出阻断启动。
++
++#### 场景：延迟任务在独立 session 上执行清扫
++
++- Given 延迟常量被置 0、`sweep_confirmed_dead_tasks` 被替身为记录调用的桩
++- When await `_startup_orphan_task_sweep`
++- Then 桩被调用恰好一次，且传入的 session 非 cleanup_stale_runs 的调用方 session
++
++#### 场景：清扫异常不冒泡
++
++- Given 替身桩抛 RuntimeError
++- When await `_startup_orphan_task_sweep`
++- Then 协程正常返回不抛异常（日志留痕）
++
++### FR-04: 仅跑本改动相关测试（规则 0）：test_agent_session_tasks.py 全文件
++
++- 本变更只必须运行 `backend/app/modules/daemon/tests/test_agent_session_tasks.py` 全文件（含既有清扫用例回归），禁止跑全量测试套件（规则 0，全量留给 CI）。
++
++#### 场景：相关面回归
++
++- When 运行该测试文件
++- Then 新增用例与既有用例全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」
++FR-02: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」
++FR-03: backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_startup_orphan_task_sweep_deferred_on_own_session」「test_startup_orphan_task_sweep_swallows_errors」
++FR-04: backend/app/modules/daemon/tests/test_agent_session_tasks.py（全文件回归，含既有清扫用例）

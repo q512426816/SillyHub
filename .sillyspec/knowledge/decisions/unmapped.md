@@ -2332,3 +2332,17 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：1371e6516cb78420290369d5147f25f16f951350
 理由：最大风险：DIFF 内容锚的误拦（注释/重构碰巧命中锚形态）逼开发者做无意义测试 touch 或生绕心——已用窄锚压制（⑧要求常量形态 `^\s*[A-Z_]+: 'daemon:`、③要求 TABS 条目行 `\{.*key:.*path:`），残余误拦属低频且指引面给了处置话术；长期若误拦率高再按面加白名单。第二风险：规则清单三处登记（knowledge/脚本 RULES/源码注释）漂移——已在三处互指并写进通用口径登记约定。放弃的方案：①CI 侧拦（后端全量 20 分钟才见红，反馈太迟，且 daemon/前端 CI 还要各配一份——不做）；②husky/自写 .git/hooks（仓库已用 pre-commit 框架，另起炉灶双轨维护——不做）；③白名单豁免机制（--force/SKIP 类）——规则 10 禁绕钩，加豁免口子等于劝人绕（不做，真需豁免时改脚本规则走评审）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-task-sweep-rpc-route-key
+锚点：未记录
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+理由：- 最大风险：现网若存在 `daemon_instance_id=NULL` 的 legacy runtime 行，其路由键回落 runtime_id——若 hub 恰也无该键连接，行为与修复前相同（伪离线跳过），不劣化于现状；D-007 迁移已完成（register 必绑定），存量 NULL 行按设计不可达。 - 放弃方案 A：在 `hub.send_rpc` 内做 runtime→instance 兼容映射——否，hub 是纯内存路由层，引入 DB 依赖破坏职责边界且掩盖调用方缺映射的事实；映射归调用方（`daemon_rpc.py:79` 先例）。 - 放弃方案 B：启动清扫挂 daemon 首次连接事件触发——需 hub 新增回调钩子，改动面大且首连早于多 runtime 就绪；固定 60s 延迟达成同等效果、零新耦合，常数可调。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-duration-backfill-harness-align
+锚点：未记录
+最近确认：a339d492bcea7f038e3715617f6004967c8f3368
+理由：答：最大风险——旧 daemon（未部署实时计时）+ 新 backend 下，close 回填的值仍 可能是会话累计垃圾（daemon 差分修复 27695397c 未部署时），过渡期老轮显示仍 失真。缓解：部署时 backend 与 daemon 同批换镜像（deploy-to-server 单包交付）， 过渡窗口仅存在于分步部署场景。放弃方案：①保留墙钟守卫（拒真实并行子代理值， 用户正确否决）；②close 完全不写 duration_api_ms（无实时计时的引擎/旧 daemon 彻底没速度，回填好于空白——值语义在 daemon 差分部署后为正确增量）。

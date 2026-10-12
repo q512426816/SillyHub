@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-task-sweep-rpc-route-key",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-task-sweep-rpc-route-key"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_sweep_routes_rpc_by_daemon_instance_id」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-task-sweep-rpc-route-key"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_startup_orphan_task_sweep_deferred_on_own_session」",
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py「test_startup_orphan_task_sweep_swallows_errors」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-task-sweep-rpc-route-key"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-task-sweep-rpc-route-key:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-task-sweep-rpc-route-key"
+    }
+  ]
+}
