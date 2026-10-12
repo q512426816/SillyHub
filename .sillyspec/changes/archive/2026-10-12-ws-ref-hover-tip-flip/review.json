@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-hover-tip-flip",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——环境无嵌套派发时降级条款，如实标注）",
+  "verdict": "PASS",
+  "reviewedAgainst": "1ec1af9dd914b8145359bc47258a258ae36335f4",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "TIP_EST_HEIGHT=48 为粗估（实际两行约 42px）",
+      "evidence": "翻转判定略保守（早翻 6px），仅影响翻转时机不影响可见性；接受披露",
+      "location": "frontend/src/components/daemon/input-ref-overlay.tsx:128"
+    }
+  ],
+  "dimensionNotes": { "乱序": "ok", "并发": "ok", "切换": "ok", "作用域": "ok" },
+  "reviewedAt": "2026-10-12T03:00:00.000Z",
+  "reviewerNotes": "评审面：diff 2 文件（overlay 定位逻辑 12 行 + 测试 26 行）。核心验证：① 翻转条件 y+16+48>innerHeight 与 top=max(8,y-58) 数学自洽（jsdom innerHeight=768 用例 y=720 → 662 断言过）；② 常规路径 y+16 零变化（y=200→216 断言）；③ left clamp 320→336 与 max-w-[320px]+padding 对齐；④ 视口 resize 不主动重算——指针任意移动即重定位，悬停场景可接受（design 边界第 3 问已声明）。根因证据链：实测 tip rect y=965 > 视口 940（物理不可见）与用户反馈/截图缺失完全吻合。"
+}

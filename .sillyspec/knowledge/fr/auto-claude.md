@@ -29,3 +29,66 @@ created_at: 2026-10-08T17:53:22.647Z
 摘要：最小改动面
 全文：.sillyspec/changes/archive/2026-10-09-msys-fonts-guard/requirements.md#FR-03
 最近确认：f8f068a1fa86fad636f25df52ea68838e7b1c73b
+
+## FR-auto-claude-004 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 输入框贴页面底缘、鼠标悬停标签（y≈720，视口高 768）/ When 浮层渲染 / Then top=662（鼠标上方）且在视口内。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-01
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
+
+## FR-auto-claude-005 常规位置（下方有空间）仍显示在鼠标下方 16px
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given y=200 / When 渲染 / Then top=216。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-02
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
+
+## FR-auto-claude-006 相关测试全绿
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given vitest run input-ref-overlay.test.tsx / Then 14/14 通过。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-03
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
