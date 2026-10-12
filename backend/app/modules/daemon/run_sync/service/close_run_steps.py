@@ -354,14 +354,13 @@ async def _close_apply_terminal(
         agent_run.num_turns = num_turns
     if duration_ms is not None:
         agent_run.duration_ms = duration_ms
-    if duration_api_ms is not None:
-        # 2026-10-10-duration-api-cumulative-fix 物理守卫：API 调用时长不可能超过
-        # 轮墙钟（duration_ms）。会话级累计快照形态的引擎（线上实证：13s 轮被写
-        # 3171s 累计值 → 终态 tok/s 分母放大 239 倍显示 0.4）在此拒收——保留既有
-        # 值（daemon 实时计时累计或 NULL），不静默放大分母。
-        wall = duration_ms if duration_ms is not None else agent_run.duration_ms
-        if wall is None or duration_api_ms <= wall:
-            agent_run.duration_api_ms = duration_api_ms
+    if duration_api_ms is not None and agent_run.duration_api_ms is None:
+        # 2026-10-12-duration-backfill-harness-align：终态时长权威=daemon 实时窗口
+        # 累计（usage.api_duration_ms，逐调用窗口求和——deepseek-harness
+        # projection.ts llmMs/decodeMs 同款哲学），close 的 SDK 元数据仅在列 NULL
+        # 时回填、**不覆盖已实测值**。不设墙钟守卫：子代理并行时 Σ(各代理窗口)>
+        # 父轮墙钟是合法形态（harness 同款，无守卫）。
+        agent_run.duration_api_ms = duration_api_ms
     if input_tokens is not None:
         agent_run.input_tokens = input_tokens
     if output_tokens is not None:

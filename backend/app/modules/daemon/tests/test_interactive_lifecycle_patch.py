@@ -653,10 +653,11 @@ class TestGap3CloseInteractiveRun:
         assert payload2["duration_api_ms"] is None
 
     @pytest.mark.asyncio
-    async def test_close_duration_api_ms_over_wall_rejected(self, db_session, mocked_redis) -> None:
-        """2026-10-10-duration-api-cumulative-fix：duration_api_ms > duration_ms（墙钟）
-        物理不可能——会话级累计快照形态的引擎（线上实证 13s 轮被写 3171s）拒收，
-        列保留既有值（NULL / daemon 实时计时累计），不放大终态 tok/s 分母。"""
+    async def test_close_backfills_duration_api_ms_when_null(
+        self, db_session, mocked_redis
+    ) -> None:
+        """2026-10-12-duration-backfill-harness-align：列 NULL（无实时计时）→ close
+        元数据回填（api > 墙钟也合法——子代理并行时 Σ窗口>墙钟，不设墙钟守卫）。"""
         lease_id, run_id, token = await _seed_active_interactive_session(db_session)
         svc = DaemonService(db_session)
         run1 = await svc.close_interactive_run(
@@ -669,7 +670,31 @@ class TestGap3CloseInteractiveRun:
             duration_api_ms=3171192,
         )
         assert run1.duration_ms == 13246
-        assert run1.duration_api_ms is None
+        assert run1.duration_api_ms == 3171192
+
+    @pytest.mark.asyncio
+    async def test_close_does_not_override_measured_duration_api_ms(
+        self, db_session, mocked_redis
+    ) -> None:
+        """列已有实测值（daemon 实时窗口累计，先用 usage 管线预写 11800）→ close
+        元数据（哪怕是累计快照垃圾 3171192）**不覆盖**——实测值权威（harness 对齐）。"""
+        lease_id, run_id, token = await _seed_active_interactive_session(db_session)
+        svc = DaemonService(db_session)
+        # 模拟轮内实时窗口累计先落列（usage 管线写回路径产物）。
+        run_row = await db_session.get(AgentRun, run_id)
+        run_row.duration_api_ms = 11800
+        await db_session.commit()
+        run1 = await svc.close_interactive_run(
+            lease_id,
+            run_id,
+            token,
+            status="success",
+            is_error=False,
+            duration_ms=13246,
+            duration_api_ms=3171192,
+        )
+        assert run1.duration_api_ms == 11800
+        assert run1.duration_ms == 13246
 
     @pytest.mark.asyncio
     async def test_close_duration_api_ms_within_wall_written(
