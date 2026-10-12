@@ -1,0 +1,20 @@
+{"ts":1791767513954,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791767513954,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791767513954,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791768633051,"kind":"commit","stage":null,"detail":"aaab48b91","provisional":true}
+{"ts":1791768694622,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791768719264,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791768760157,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791768811140,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791768811772,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791768811810,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791768811810,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791768812318,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791768812802,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791768813338,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791768815607,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791768815607,"kind":"task-done","stage":"tasks","detail":"checked 2→5","provisional":true}
+{"ts":1791768833423,"kind":"commit","stage":null,"detail":"4791331fa","provisional":true}
+{"ts":1791768905572,"kind":"gate-run","stage":"verify","detail":"门实测 passed（60.0s） · 20261012013505","provisional":true}
+{"ts":1791769070078,"kind":"commit","stage":null,"detail":"20058a3a9","provisional":true}
+{"ts":1791769140219,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}

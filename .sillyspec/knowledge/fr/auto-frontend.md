@@ -1532,3 +1532,108 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-10-workspace-ref-intake
   status: active
+
+## FR-auto-frontend-163 输入框内引用标签（附件/文件/目录/代码块）文本形如【📄 name】，图标与文字同处文本流零错位
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 输入区经右键/槽位插入任一类型引用 / When token 渲染 / Then textarea 纯文本与 overlay 占位文本同串同宽（emoji 为文
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-01
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N；emoji 按类型内嵌（📄/📁/🧾）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-164 overlay 左上角类型角标移除，悬停 tooltip 元数据仍显示类型+路径+行号
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 标签在场且指针悬停命中 / When hitTest 命中 / Then data-ws-ref-hover-tip 气泡渲染 title 文本；移出 → 气泡
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-02
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-165 同名 ·2 唯一化口径不因 emoji 前缀失效（手打【name】与槽位插入【📄 name】按基名正确撞池）
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：同名碰撞
+场景正文：
+- 场景：同名碰撞 — 
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-03
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「同类型同名才互斥 ·2（emoji 前缀参与占用文本整体比对）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-166 发送置换产物不变（map 全文匹配），退格整删/× 删除对新 token 形态正确
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：发送与删除
+场景正文：
+- 场景：发送与删除 — Given token【🧾 a.py:10-16】在场 / When 发送 / Then 置换为 [代码引用:wid|path|L10-L16]；贴尾退格一次整删整枚 t
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-04
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）」 | test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「file/dir/code 三类 token 置换为对应正式标记（emoji 内嵌形态全文匹配）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-167 既有相关测试同步更新全绿，无引用时零视觉差异
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：零回归
+场景正文：
+- 场景：零回归 — Given 无引用 / Then overlay 不渲染（tokens 空返回 null），hoverTip 无渲染。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-05
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-05
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-emoji-inline",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "20058a3a97f47a4daab0165f5264f62f9fb442de",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "注释陈旧：overlayTokenMetas 仍被描述为「类型角标元数据」",
+      "evidence": "角标已随本变更退役，该注释描述的 tokenMetas 实为 hoverTip 数据源，同文件 1058 行新注释已用新语义，此两处旧注释未同步，轻微违反 CLAUDE.md 规则 18（注释与实现不一致）",
+      "location": "frontend/src/components/daemon/session-input-bar.tsx:427, frontend/src/components/group-chat/group-chat-panel.tsx:1812"
+    },
+    {
+      "severity": "P3",
+      "title": "hoverTip 反查 token 依赖 span.textContent，隐含前提脆弱",
+      "evidence": "occ 命中后用 querySelector(\"[data-att-ref-occ]\").textContent 反查 token 再查 overlayTokenMetas；textContent 会拼接子节点全部文本，当前 × 按钮内仅有 lucide svg（无文本节点）故取值正确，但未来 × 按钮一旦加入文字节点 token 即被串污导致 tooltip 失联；建议改为从 data 属性或渲染序数组取 token",
+      "location": "frontend/src/components/daemon/session-input-bar.tsx:1066-1072, frontend/src/components/group-chat/group-chat-panel.tsx:3161-3167"
+    },
+    {
+      "severity": "P3",
+      "title": "hoverTip 气泡注释机理表述不精确",
+      "evidence": "注释称「fixed 定位不受本层 pointer-events:none 影响」——pointer-events 是继承性属性与定位方式无关，气泡实际安全的原因是纯展示（aria-hidden 无交互子元素）；另 render 期间直读 window.innerWidth/innerHeight 在纯客户端组件无碍但非惯用法",
+      "location": "frontend/src/components/daemon/input-ref-overlay.tsx:140-152"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-12T09:37:10+08:00",
+  "reviewerNotes": "｜主代理留痕：P3-1/P3-3 两处陈旧注释已修复并入同提交（amend 后 sha 更新；注释级无行为变化，verdict 维持 PASS）。"
+}

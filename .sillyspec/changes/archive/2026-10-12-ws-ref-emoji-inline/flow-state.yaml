@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  引用标签类型图标从左上角悬浮改为内嵌标签文字最前（用户 2026-10-12 反馈：图标一直回显在标签文字前面）——emoji 进 token 文本流（唯一保住镜像层逐字符对齐的形态，原型 A 方案），移除 overlay
+  左上角类型角标，悬停 tooltip 路径提示保留；附件+工作区两类 token 统一；历史气泡标签（lucide 渲染）不变
+
+
+  成功标准：
+
+  - 输入框内引用标签（附件/文件/目录/代码块）文本形如【📄 name】，图标与文字同处文本流零错位
+
+  - overlay 左上角类型角标移除，悬停 tooltip 元数据仍显示类型+路径+行号
+
+  - 同名 ·2 唯一化口径不因 emoji 前缀失效（手打【name】与槽位插入【📄 name】按基名正确撞池）
+
+  - 发送置换产物不变（map 全文匹配），退格整删/× 删除对新 token 形态正确
+
+  - 既有相关测试同步更新全绿，无引用时零视觉差异
+autopilot: false
+baseline_commit: 93cad320acfaab4d3cd16d6ab9b326b99d04fa5a
+updatedAt: '2026-10-12T01:39:02.367Z'
+baseline_sha256: 6cc88f182f0abb8cf41ac8911bb04e5c8b4719f82a6c8c9c165214ce15425f86
+spec_approved: true
+spec_approved_at: '2026-10-12T01:33:23.480Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+gate_summary: >-
+  test: passed ← module[]+deps(jsx9)+fr(9)（60.0s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261012013505\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 9 个
+

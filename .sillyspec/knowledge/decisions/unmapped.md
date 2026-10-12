@@ -2512,3 +2512,10 @@ supersedes：D-008@v1
 理由：execute 验收评审偏差 2：组件内部升级（InlineAttRefText 换 parseInlineRefs + WithPreview 按 kind 分流 fetchDownload/mime=null）使单聊+群聊全部既有消费点自动获得三类渲染，覆盖面优于逐点接线。
 故障面：组件承担多职责（解析+预览分流）；可接受（与附件引用先例同构）
 退役判据：若预览分流逻辑复杂化再拆独立 hook
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-emoji-inline
+锚点：未记录
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+理由：最大风险：emoji 宽度在不同平台字体下的渲染差异（Windows/macOS/Linux 不一致）——但占位文本与 textarea 用同一字符同一字体栈，两侧永远同宽（同源对齐），风险仅剩视觉观感，可接受。放弃的方案：lucide inline 图标内嵌（撑宽背景块→后续 token 漂移，否决）；图标 absolute 悬浮在文字前（遮挡前文字符且盖住【，观感差，否决）。
