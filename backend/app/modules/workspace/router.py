@@ -458,7 +458,7 @@ async def get_workspace(
 async def init_workspace(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
 ) -> dict:
     """Initialize the workspace for the current user (D-002/D-009).
 
@@ -469,9 +469,14 @@ async def init_workspace(
 
     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
 
-    鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
-    workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
-    ``start_init_dispatch`` 的 actor binding 解析。
+    鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped
+    WORKSPACE_READ——init 语义是"为当前成员初始化本地副本"，developer 等
+    只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id
+    62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409
+    MemberBindingNotFound），归档区禁写由 ensure_writable 兜底。
+    修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；
+    其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有
+    workspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。
     """
     from app.modules.agent.service import AgentService
 
