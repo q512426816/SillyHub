@@ -1,0 +1,930 @@
+diff --git a/backend/app/modules/admin/roles_service.py b/backend/app/modules/admin/roles_service.py
+index 8a3f75bb6..97a2d00e7 100644
+--- a/backend/app/modules/admin/roles_service.py
++++ b/backend/app/modules/admin/roles_service.py
+@@ -449,6 +449,7 @@ class RoleService:
+                     RoleUserRead(
+                         id=user.id,
+                         email=user.email,
++                        username=user.username,
+                         display_name=user.display_name,
+                         is_platform_admin=user.is_platform_admin,
+                         status=user.status,
+@@ -475,6 +476,7 @@ class RoleService:
+                 RoleUserRead(
+                     id=user.id,
+                     email=user.email,
++                    username=user.username,
+                     display_name=user.display_name,
+                     is_platform_admin=user.is_platform_admin,
+                     status=user.status,
+diff --git a/backend/app/modules/admin/schema.py b/backend/app/modules/admin/schema.py
+index e17095bab..ab7f8683a 100644
+--- a/backend/app/modules/admin/schema.py
++++ b/backend/app/modules/admin/schema.py
+@@ -83,7 +83,11 @@ class RoleUserRead(BaseModel):
+     model_config = ConfigDict(from_attributes=True)
+ 
+     id: uuid.UUID
+-    email: str
++    # email 可空：D-001 纯用户名账号（2026-06-24-username-login）email=None，
++    # 必填 str 会让 list_users 直接 ValidationError → 500（线上 request_id
++    # f9c93f39 实证）；username 作为该类账号的可识别回退标识一并下发。
++    email: str | None
++    username: str | None = None
+     display_name: str | None
+     is_platform_admin: bool
+     status: str
+diff --git a/backend/app/modules/workspace/members_router.py b/backend/app/modules/workspace/members_router.py
+index 58497e1f4..dcd075075 100644
+--- a/backend/app/modules/workspace/members_router.py
++++ b/backend/app/modules/workspace/members_router.py
+@@ -144,6 +144,7 @@ async def _row_to_view(
+     return WorkspaceMemberView(
+         user_id=row.user_id,
+         email=user.email,
++        username=user.username,
+         display_name=user.display_name,
+         role_key=role.key,
+         role_name=role.name,
+diff --git a/backend/app/modules/workspace/members_service.py b/backend/app/modules/workspace/members_service.py
+index a96b1cd7a..ff99f1bb9 100644
+--- a/backend/app/modules/workspace/members_service.py
++++ b/backend/app/modules/workspace/members_service.py
+@@ -121,6 +121,7 @@ async def list_members(
+         select(
+             col(User.id),
+             col(User.email),
++            col(User.username),
+             col(User.display_name),
+             col(Role.key),
+             col(Role.name),
+@@ -135,11 +136,12 @@ async def list_members(
+     rows = (await session.execute(stmt)).all()
+ 
+     views: list[WorkspaceMemberView] = []
+-    for uid, email, display_name, role_key, role_name, granted_at in rows:
++    for uid, email, username, display_name, role_key, role_name, granted_at in rows:
+         views.append(
+             WorkspaceMemberView(
+                 user_id=uid,
+                 email=email,
++                username=username,
+                 display_name=display_name,
+                 role_key=role_key,
+                 role_name=role_name,
+@@ -196,6 +198,7 @@ async def search_users_for_invite(
+         select(
+             col(User.id),
+             col(User.email),
++            col(User.username),
+             col(User.display_name),
+         )
+         .where(col(User.status) == "active")
+@@ -214,10 +217,11 @@ async def search_users_for_invite(
+         UserSearchHit(
+             user_id=uid,
+             email=email,
++            username=username,
+             display_name=display_name,
+             is_member=False,
+         )
+-        for uid, email, display_name in rows
++        for uid, email, username, display_name in rows
+     ]
+ 
+ 
+diff --git a/backend/app/modules/workspace/schema.py b/backend/app/modules/workspace/schema.py
+index 5b2eee9de..105e6da3b 100644
+--- a/backend/app/modules/workspace/schema.py
++++ b/backend/app/modules/workspace/schema.py
+@@ -311,7 +311,11 @@ def slugify(name: str) -> str:
+ 
+ class WorkspaceMemberView(BaseModel):
+     user_id: uuid.UUID
+-    email: str
++    # email 可空：D-001 纯用户名账号（2026-06-24-username-login）email=None，
++    # 必填 str 会直接 ValidationError → 500（与 admin RoleUserRead 同类，
++    # 线上 request_id f9c93f39 实证）；username 作该类账号的可识别回退标识。
++    email: str | None
++    username: str | None = None
+     display_name: str | None
+     role_key: str
+     role_name: str
+@@ -337,7 +341,8 @@ class WorkspaceMemberUpdateRequest(BaseModel):
+ 
+ class UserSearchHit(BaseModel):
+     user_id: uuid.UUID
+-    email: str
++    email: str | None
++    username: str | None = None
+     display_name: str | None
+     is_member: bool  # 通常为 False（搜索时已排除），保留字段供前端展示
+ 
+diff --git a/backend/openapi.json b/backend/openapi.json
+index e733a6761..ee5b8e0f6 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -66471,9 +66471,27 @@
+             "title": "Id"
+           },
+           "email": {
+-            "type": "string",
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
+             "title": "Email"
+           },
++          "username": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Username"
++          },
+           "display_name": {
+             "anyOf": [
+               {
+@@ -75821,9 +75839,27 @@
+             "title": "User Id"
+           },
+           "email": {
+-            "type": "string",
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
+             "title": "Email"
+           },
++          "username": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Username"
++          },
+           "display_name": {
+             "anyOf": [
+               {
+@@ -77642,9 +77678,27 @@
+             "title": "User Id"
+           },
+           "email": {
+-            "type": "string",
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
+             "title": "Email"
+           },
++          "username": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Username"
++          },
+           "display_name": {
+             "anyOf": [
+               {
+diff --git a/backend/tests/modules/admin/test_roles_router.py b/backend/tests/modules/admin/test_roles_router.py
+index 705cd4189..d4ab7b184 100644
+--- a/backend/tests/modules/admin/test_roles_router.py
++++ b/backend/tests/modules/admin/test_roles_router.py
+@@ -311,6 +311,59 @@ async def test_list_role_users_merges_platform_and_workspace(
+     assert by_email["ws-user@example.com"]["workspace_name"] == "Test WS"
+ 
+ 
++@pytest.mark.asyncio
++async def test_list_role_users_email_null_username_present(
++    client: AsyncClient, auth_headers, db_session
++):
++    """``email=None``（纯用户名账号，D-001）绑定角色 → 200 且 email=null、username 有值。
++
++    线上实证（request_id f9c93f39）：RoleUserRead.email 曾声明必填 str，
++    库中无邮箱用户触发 pydantic ValidationError → 500。platform 与
++    workspace 两种绑定形态都必须返回 200。
++    """
++    from app.modules.admin.model import UserRole
++    from app.modules.workspace.model import Workspace
++
++    ws = Workspace(
++        name="Null Email WS", slug="null-email-ws-lu", root_path="/tmp/test-nelu", type="app"
++    )
++    db_session.add(ws)
++    role = Role(key="null_email_role_lu", name="Null Email Role", is_system=False, is_active=True)
++    db_session.add(role)
++    platform_user = User(
++        email=None,
++        username=f"nulluser-p-{uuid.uuid4().hex[:6]}",
++        password_hash=password_hasher.hash("Xx1!abcd"),
++        status="active",
++        is_platform_admin=False,
++    )
++    ws_user = User(
++        email=None,
++        username=f"nulluser-w-{uuid.uuid4().hex[:6]}",
++        password_hash=password_hasher.hash("Xx1!abcd"),
++        status="active",
++        is_platform_admin=False,
++    )
++    db_session.add_all([platform_user, ws_user])
++    await db_session.flush()
++
++    db_session.add(UserRole(user_id=platform_user.id, role_id=role.id))
++    db_session.add(UserWorkspaceRole(user_id=ws_user.id, role_id=role.id, workspace_id=ws.id))
++    await db_session.commit()
++    await db_session.refresh(role)
++
++    resp = await client.get(f"/api/admin/roles/{role.id}/users", headers=auth_headers)
++    assert resp.status_code == 200, resp.text
++    data = resp.json()
++    assert data["total"] == 2
++    by_username = {item["username"]: item for item in data["items"]}
++    assert by_username[platform_user.username]["email"] is None
++    assert by_username[platform_user.username]["binding_type"] == "platform"
++    assert by_username[ws_user.username]["email"] is None
++    assert by_username[ws_user.username]["binding_type"] == "workspace"
++    assert by_username[ws_user.username]["workspace_name"] == "Null Email WS"
++
++
+ @pytest.mark.asyncio
+ async def test_list_role_users_empty(client: AsyncClient, auth_headers, db_session):
+     """Role with no bindings returns ``{items: [], total: 0}``."""
+diff --git a/backend/tests/modules/workspace/test_members_router.py b/backend/tests/modules/workspace/test_members_router.py
+index 66a45b32e..4b7c91b3b 100644
+--- a/backend/tests/modules/workspace/test_members_router.py
++++ b/backend/tests/modules/workspace/test_members_router.py
+@@ -839,3 +839,71 @@ async def test_fr06_transfer_concurrent_only_one_succeeds(
+     # succeeding would have left the workspace with 3 owners, violating R-01.
+     ok = [r for r in (r1, r2) if r.status_code == 200]
+     assert len(ok) <= 1
++
++
++# ────────────────────────────────────────────────────────────────────────────
++# email=None（纯用户名账号，D-001）可空性回归 —— 2026-10-12-nullable-email-dto-fix
++# ────────────────────────────────────────────────────────────────────────────
++
++
++async def test_list_and_search_return_200_for_email_null_user(
++    client: AsyncClient,
++    db_session,
++    role_seeder,
++    user_factory,
++    ws_factory,
++    member_factory,
++):
++    """email=None 成员：列表与邀请搜索均返回 200 且 email=null、username 有值。
++
++    线上实证（request_id f9c93f39，RoleUserRead 同类缺陷）：WorkspaceMemberView /
++    UserSearchHit 的 email 曾声明必填 str，纯用户名账号（2026-06-24-username-login
++    D-001）触发 pydantic ValidationError → 500。成员与工作区外候选两种形态都覆盖。
++    """
++    from app.core.security import password_hasher
++    from app.modules.auth.model import User
++
++    owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
++    ws = await ws_factory(owner_id=owner.id)
++    await member_factory(ws.id, owner.id, "workspace_owner")
++
++    def _null_email_user(prefix: str, display_name: str) -> User:
++        return User(
++            id=uuid.uuid4(),
++            email=None,
++            username=f"{prefix}-{uuid.uuid4().hex[:6]}",
++            password_hash=password_hasher.hash("Pass123!"),
++            display_name=display_name,
++            status="active",
++        )
++
++    null_member = _null_email_user("nullm", "Null Member")
++    null_outside = _null_email_user("nullo", "Null Outside")
++    db_session.add_all([null_member, null_outside])
++    await db_session.commit()
++
++    await member_factory(ws.id, null_member.id, "developer")
++    headers = _bearer(owner_tok)
++
++    # 列表：email=None 成员 → 200，email=null、username 有值。
++    resp = await client.get(f"/api/workspaces/{ws.id}/members", headers=headers)
++    assert resp.status_code == 200, resp.text
++    items = resp.json()["items"]
++    row = next(it for it in items if it["user_id"] == str(null_member.id))
++    assert row["email"] is None
++    assert row["username"] == null_member.username
++    assert row["role_key"] == "developer"
++
++    # 搜索：按 display_name 命中工作区外的 email=None 用户 → 200，不炸。
++    resp = await client.get(
++        f"/api/workspaces/{ws.id}/members/search",
++        params={"q": "null outside"},
++        headers=headers,
++    )
++    assert resp.status_code == 200, resp.text
++    hits = resp.json()["items"]
++    assert len(hits) == 1
++    assert hits[0]["user_id"] == str(null_outside.id)
++    assert hits[0]["email"] is None
++    assert hits[0]["username"] == null_outside.username
++    assert hits[0]["is_member"] is False
+diff --git a/frontend/src/app/(dashboard)/admin/roles/page.tsx b/frontend/src/app/(dashboard)/admin/roles/page.tsx
+index 842e1de9b..fe89825c1 100644
+--- a/frontend/src/app/(dashboard)/admin/roles/page.tsx
++++ b/frontend/src/app/(dashboard)/admin/roles/page.tsx
+@@ -637,7 +637,9 @@ function RoleUsersDrawer({
+ 
+ interface AggregatedRoleUser {
+   id: string;
+-  email: string;
++  // email/username 均可空（D-001 纯用户名账号），渲染与排序须空值回退
++  email: string | null;
++  username: string | null;
+   display_name: string | null;
+   is_platform_admin: boolean;
+   status: string;
+@@ -662,6 +664,7 @@ function aggregateUsers(users: RoleUserRead[]): AggregatedRoleUser[] {
+       map.set(u.id, {
+         id: u.id,
+         email: u.email,
++        username: u.username,
+         display_name: u.display_name,
+         is_platform_admin: u.is_platform_admin,
+         status: u.status,
+@@ -674,8 +677,11 @@ function aggregateUsers(users: RoleUserRead[]): AggregatedRoleUser[] {
+       });
+     }
+   }
+-  // 按邮箱排序保证稳定顺序
+-  return Array.from(map.values()).sort((a, b) => a.email.localeCompare(b.email));
++  // 排序键空值安全：email/username 均可空，null 上调 localeCompare 会抛错
++  const sortKey = (u: AggregatedRoleUser) => u.email ?? u.username ?? "";
++  return Array.from(map.values()).sort((a, b) =>
++    sortKey(a).localeCompare(sortKey(b)),
++  );
+ }
+ 
+ function RoleUsersTable({ users }: { users: RoleUserRead[] }) {
+@@ -709,8 +715,12 @@ function RoleUsersTable({ users }: { users: RoleUserRead[] }) {
+               );
+             return (
+               <tr key={u.id} className="border-b last:border-0">
+-                <td className="px-2 py-1.5 font-mono text-[11px]">{u.email}</td>
+-                <td className="px-2 py-1.5">{u.display_name ?? "—"}</td>
++                <td className="px-2 py-1.5 font-mono text-[11px]">
++                  {u.email ?? "—"}
++                </td>
++                <td className="px-2 py-1.5">
++                  {u.display_name ?? u.username ?? "—"}
++                </td>
+                 <td className="px-2 py-1.5">{bindingBadge}</td>
+                 <td className="px-2 py-1.5 text-[11px] align-top">
+                   {wsCount === 0 ? (
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx
+index fb89df12b..e9ee57959 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx
+@@ -192,11 +192,15 @@ export default function MembersPage({ params }: Props) {
+                   onSetOwner={() =>
+                     handleTransferOwnership(
+                       m.user_id,
+-                      m.display_name ?? m.email,
++                      // email/username 均可空（D-001 纯用户名账号），兜底短 id
++                      m.display_name ?? m.email ?? m.username ?? m.user_id.slice(0, 8),
+                     )
+                   }
+                   onRemove={() =>
+-                    handleRemove(m.user_id, m.display_name ?? m.email)
++                    handleRemove(
++                      m.user_id,
++                      m.display_name ?? m.email ?? m.username ?? m.user_id.slice(0, 8),
++                    )
+                   }
+                 />
+               ))}
+diff --git a/frontend/src/components/workspace-member-add-dialog.tsx b/frontend/src/components/workspace-member-add-dialog.tsx
+index 12157e3a9..f9065a9f8 100644
+--- a/frontend/src/components/workspace-member-add-dialog.tsx
++++ b/frontend/src/components/workspace-member-add-dialog.tsx
+@@ -185,7 +185,10 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
+                         <span>
+                           {hit.display_name ?? "（无显示名）"}{" "}
+                           <span className="text-muted-foreground">
+-                            &lt;{hit.email}&gt;
++                            {/* email 可空（D-001 纯用户名账号），回退展示用户名 */}
++                            {hit.email
++                              ? `<${hit.email}>`
++                              : `用户名：${hit.username ?? "—"}`}
+                           </span>
+                         </span>
+                         {active && <span className="text-primary">已选</span>}
+diff --git a/frontend/src/components/workspace-member-row.test.tsx b/frontend/src/components/workspace-member-row.test.tsx
+index c55e3b972..4c4013d69 100644
+--- a/frontend/src/components/workspace-member-row.test.tsx
++++ b/frontend/src/components/workspace-member-row.test.tsx
+@@ -16,6 +16,7 @@ function makeMember(
+   return {
+     user_id: "u-1",
+     email: "biz@test.com",
++    username: "biz-user",
+     display_name: "李业务",
+     role_key: "viewer",
+     role_name: "只读成员",
+@@ -82,3 +83,28 @@ describe("WorkspaceMemberRow business_member 选项（task-12 / FR-02）", () =>
+     expect(screen.queryByText(/不可修改/)).not.toBeInTheDocument();
+   });
+ });
++
++describe("WorkspaceMemberRow email=null 回退（2026-10-12-nullable-email-dto-fix / FR-04）", () => {
++  afterEach(() => cleanup());
++
++  it("email=null（纯用户名账号）主名回退 username、副行显示用户名，不渲染 null 不崩", () => {
++    render(
++      <WorkspaceMemberRow
++        member={makeMember({
++          email: null,
++          username: "nulluser",
++          display_name: null,
++        })}
++        actionLoading={false}
++        onRoleChange={vi.fn()}
++        onSetOwner={vi.fn()}
++        onRemove={vi.fn()}
++      />,
++    );
++    // 主名回退链 display_name → email → username 命中 username
++    expect(screen.getByText("nulluser")).toBeInTheDocument();
++    // 副行回退展示「用户名：…」而不是渲染空/字面 null
++    expect(screen.getByText("用户名：nulluser")).toBeInTheDocument();
++    expect(screen.queryByText("null")).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/workspace-member-row.tsx b/frontend/src/components/workspace-member-row.tsx
+index dc67a3c54..6c2882aef 100644
+--- a/frontend/src/components/workspace-member-row.tsx
++++ b/frontend/src/components/workspace-member-row.tsx
+@@ -55,7 +55,9 @@ export function WorkspaceMemberRow({
+   const setOwnerDisabled = actionLoading || isCurrentUser;
+   const removeDisabled = actionLoading || isCurrentUser;
+ 
+-  const displayName = member.display_name?.trim() || member.email;
++  // email/username 均可空（D-001 纯用户名账号），逐级回退
++  const displayName =
++    member.display_name?.trim() || member.email || member.username;
+ 
+   return (
+     <tr className="border-t border-border hover:bg-muted/25">
+@@ -71,7 +73,7 @@ export function WorkspaceMemberRow({
+             )}
+           </span>
+           <span className="text-[11px] text-muted-foreground">
+-            {member.email}
++            {member.email ?? `用户名：${member.username ?? "—"}`}
+           </span>
+         </div>
+       </td>
+diff --git a/frontend/src/components/workspace/shared-daemon-manager.test.tsx b/frontend/src/components/workspace/shared-daemon-manager.test.tsx
+index 3d41c3881..6771d5f24 100644
+--- a/frontend/src/components/workspace/shared-daemon-manager.test.tsx
++++ b/frontend/src/components/workspace/shared-daemon-manager.test.tsx
+@@ -37,6 +37,7 @@ function makeMember(overrides: Partial<WorkspaceMemberView> = {}): WorkspaceMemb
+   return {
+     user_id: "lender-uuid-0",
+     email: "dev@test.com",
++    username: "dev-user",
+     display_name: "张开发",
+     role_key: "developer",
+     role_name: "开发者",
+diff --git a/frontend/src/components/workspace/shared-daemon-manager.tsx b/frontend/src/components/workspace/shared-daemon-manager.tsx
+index a6db05968..1fe09900f 100644
+--- a/frontend/src/components/workspace/shared-daemon-manager.tsx
++++ b/frontend/src/components/workspace/shared-daemon-manager.tsx
+@@ -44,7 +44,8 @@ function resolveLenderLabel(
+ ): string {
+   const m = members?.find((x) => x.user_id === lenderUserId);
+   if (!m) return lenderUserId.slice(0, 8);
+-  return m.display_name?.trim() || m.email;
++  // email/username 均可空（D-001 纯用户名账号），兜底短 id
++  return m.display_name?.trim() || m.email || m.username || lenderUserId.slice(0, 8);
+ }
+ 
+ function shortId(id: string | null): string {
+diff --git a/frontend/src/lib/admin.ts b/frontend/src/lib/admin.ts
+index 4b77cd102..ff2289997 100644
+--- a/frontend/src/lib/admin.ts
++++ b/frontend/src/lib/admin.ts
+@@ -357,7 +357,10 @@ export type RoleUserBindingType = "platform" | "workspace";
+ 
+ export interface RoleUserRead {
+   id: string;
+-  email: string;
++  // email 可空：D-001 纯用户名账号（2026-06-24-username-login）后端 email=None；
++  // username 作该类账号的可识别回退标识（与 backend admin/schema.py 1:1）。
++  email: string | null;
++  username: string | null;
+   display_name: string | null;
+   is_platform_admin: boolean;
+   status: string;
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 184b7f13a..d5105b268 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -23881,7 +23881,9 @@ export interface components {
+              */
+             id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Is Platform Admin */
+@@ -28035,7 +28037,9 @@ export interface components {
+              */
+             user_id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Is Member */
+@@ -28768,7 +28772,9 @@ export interface components {
+              */
+             user_id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Role Key */
+diff --git a/frontend/src/lib/workspace-members.ts b/frontend/src/lib/workspace-members.ts
+index 45877c5a6..424f9631f 100644
+--- a/frontend/src/lib/workspace-members.ts
++++ b/frontend/src/lib/workspace-members.ts
+@@ -23,7 +23,10 @@ export type WorkspaceMemberRoleKey =
+ 
+ export interface WorkspaceMemberView {
+   user_id: string; // backend: uuid.UUID → 前端 string
+-  email: string;
++  // email 可空：D-001 纯用户名账号（2026-06-24-username-login）后端 email=None；
++  // username 作该类账号的可识别回退标识（与 backend schema.py 1:1）。
++  email: string | null;
++  username: string | null;
+   display_name: string | null;
+   // 响应里用 str（不用 Literal），允许 service 回显 platform_admin 等用于显示
+   role_key: string;
+@@ -38,7 +41,8 @@ export interface WorkspaceMemberListResponse {
+ 
+ export interface UserSearchHit {
+   user_id: string;
+-  email: string;
++  email: string | null; // D-001 纯用户名账号可为 null，展示回退 username
++  username: string | null;
+   display_name: string | null;
+   is_member: boolean; // 通常 false（搜索时已排除已是成员的）
+ }
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 184b7f13a..d5105b268 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -23881,7 +23881,9 @@ export interface components {
+              */
+             id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Is Platform Admin */
+@@ -28035,7 +28037,9 @@ export interface components {
+              */
+             user_id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Is Member */
+@@ -28768,7 +28772,9 @@ export interface components {
+              */
+             user_id: string;
+             /** Email */
+-            email: string;
++            email: string | null;
++            /** Username */
++            username?: string | null;
+             /** Display Name */
+             display_name: string | null;
+             /** Role Key */
+diff --git a/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/tasks.md b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/tasks.md
+new file mode 100644
+index 000000000..661e566b7
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/tasks.md
+@@ -0,0 +1,12 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:44:39.275Z
++---
++# 任务注册表（Tasks）— 2026-10-12-nullable-email-dto-fix
++
++- [x] task-01: 写 admin 失败测试——test_roles_router.py 新增「email=None 用户经 user_roles/user_workspace_roles 绑定 → GET roles/{id}/users 返回 200 且 email=null、username 有值」用例，跑出 500 红（验证:pytest -k email_null 复现 ValidationError）
++- [x] task-02: admin 修复——RoleUserRead.email 可空+username 字段（admin/schema.py），roles_service.list_users 两处构造补 username，task-01 用例转绿（验证:pytest tests/modules/admin/test_roles_router.py 全绿）
++- [x] task-03: workspace 修复——members_router 测试新增「email=None 成员列表 200 + 搜索命中 200」用例先红；WorkspaceMemberView/UserSearchHit email 可空+username（workspace/schema.py），members_service 列表/搜索 select 与构造补 username，members_router._row_to_view 补 username（验证:pytest tests/modules/workspace/test_members_router.py 全绿）
++- [x] task-04: 前端类型同步——frontend `pnpm gen:types`（刷新 backend/openapi.json + api-types.ts）、sillyhub-daemon `pnpm gen:types`、workspace-members.ts 手写 DTO 改 email 可空+username（验证:两个 gen:types:check 无 diff）
++- [x] task-05: 前端空值回退——roles/page.tsx 聚合 email 可空+排序 null 安全+单元格回退，workspace-member-row.tsx 回退链，workspace-member-add-dialog.tsx 候选回退，members/page.tsx 标签回退，workspace-member-row.test.tsx 补 null 用例（验证:frontend tsc --noEmit 0 错 + vitest 该测试文件绿）
++- [x] task-06: 回归与提交——重跑 backend 两个相关测试文件全绿；显式 pathspec 分批提交全部改动（提交消息带对应 task-NN）
+diff --git a/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/design.md b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/design.md
+@@ -0,0 +1,109 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:44:39.274Z
++---
++# 设计记录（Design Record）— 2026-10-12-nullable-email-dto-fix
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++线上 500 的直接原因是 pydantic 校验：`RoleUserRead.email` 声明为必填 `str`，
++而库中存在 `email=NULL` 的纯用户名账号（D-001，2026-06-24-username-login 起合法）
++绑定在该角色上。方案与 `UserRead` 的既有修法保持同构（admin/schema.py:245
++`email: str | None`）：三处响应 DTO 的 `email` 改可空，同时新增
++`username: str | None`——只把 email 放空会让纯用户名账号在列表里变成"无任何
++可识别标识的空行"，username 是这类账号唯一的天然标识，顺带补上才可审计。
++
++改动面：admin 的 `RoleUserRead` + `roles_service.list_users`（两处构造，
++User 是整实体查询直接取 `user.username`）；workspace 的 `WorkspaceMemberView` /
++`UserSearchHit` + `members_service`（列表与搜索的 select 元组补 `User.username`）
+++ `members_router._row_to_view`（`session.get(User,…)` 整实体，直接取）。
++前端三处手写/生成类型同步（`workspace-members.ts` 与 `lib/admin.ts` 是手写 DTO，
++必须手动对齐；`api-types.ts` 走 `pnpm gen:types` 重生成），渲染点做空值回退，
++角色页聚合排序的 `a.email.localeCompare(b.email)` 改为 null 安全键
++（`email ?? username ?? ""`）。测试先行：先写 email=None 的失败用例再改实现。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++对外可见变化（均为向后兼容的响应放宽/扩展，无破坏性变更；函数签名无变化，
++均为 DTO 字段级改动）：
++
++- `GET /api/admin/roles/{role_id}/users`：items 项 `email` 由必填变为可空
++  （可为 `null`），新增 `username: string | null`。
++- `GET /api/workspaces/{id}/members`、`POST …/members`、`PATCH …/members/{uid}`：
++  `WorkspaceMemberView` 同上。
++- `GET /api/workspaces/{id}/members/search`：`UserSearchHit` 同上。
++- OpenAPI（backend/openapi.json）随上述 DTO 变化重生成；
++  frontend `src/lib/api-types.ts`、sillyhub-daemon `src/api-types.ts` 由脚本重生成；
++  `frontend/src/lib/workspace-members.ts`、`frontend/src/lib/admin.ts` 手写接口同步。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++答：不涉及事件流；HTTP 请求无状态。搜索排序 `ORDER BY email ASC` 在 PG 下
++NULL 排最后（ASC 默认 NULLS LAST），响应顺序稳定，不受本改动影响。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++答：本变更是只读查询的 DTO 投影放宽，不新增写入路径；成员绑定行的并发增删
++与现状一致（事务内一致快照读），无新竞态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++答：DTO 字段放宽对在途旧客户端向后兼容（新增字段、必填变可空均不破坏旧
++消费者解析）；前端 build 时固化的是类型而非数据，运行时对 `null` 已有
++回退分支，无需灰度。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++答：admin 与 workspace 两个模块的 DTO 均从同一 `User.email` 取值，不存在
++跨工作区串台；`username` 全局唯一（建表唯一约束），作为回退展示标识不会
++撞名。daemon 侧 api-types.ts 仅类型消费，运行时不解析这三个端点的响应
++（daemon 走 lease/heartbeat 等端点），重新生成即可，无行为影响。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：前端既有代码把 `email` 当非空用的隐藏点位漏改，tsc 抓不全的
++（如模板里直接插值）运行时渲染出空白。缓解：渲染点逐一回退处理 +
++workspace-member-row 补 null 用例 + tsc --noEmit 全量类型检查；
++`localeCompare` 调用点仅角色页聚合排序一处（已全局搜索确认）。
++实际执行中 tsc 全量扫出 3 处（members/page 两处 + shared-daemon-manager 一处），
++另在 task-05 人工排查出 lib/admin.ts 手写 DTO 漏同步（tsc 因本地类型未改而放行）。
++
++试过/考虑过但放弃的方案：
++- service 层兜底 `email=user.email or ""`：契约撒谎（空串≠无邮箱），且
++  前端无法区分"无邮箱"与"空邮箱"，弃。
++- 只改 RoleUserRead 不动 workspace 两处：同类 500 隐患原地保留
++  （成员列表/搜索遇纯用户名账号必炸），修一半等于没修，弃。
++- 邀请搜索补 `username ILIKE` 匹配：属于搜索行为增强，与本 500 无关，
++  留作后续独立小变更，避免本次 diff 膨胀。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | backend/app/modules/admin/schema.py | RoleUserRead.email 可空 + username 字段 |
++| 改 | backend/app/modules/admin/roles_service.py | list_users 两处构造补 username |
++| 改 | backend/app/modules/workspace/schema.py | WorkspaceMemberView/UserSearchHit email 可空 + username |
++| 改 | backend/app/modules/workspace/members_service.py | 成员列表/搜索 select 补 username、构造补参 |
++| 改 | backend/app/modules/workspace/members_router.py | _row_to_view 补 username |
++| 改 | backend/tests/modules/admin/test_roles_router.py | 新增 email=None 绑定用例（platform+workspace） |
++| 改 | backend/tests/modules/workspace/test_members_router.py | 新增 email=None 列表+搜索用例 |
++| 改 | backend/openapi.json | pnpm gen:types 重生成 |
++| 改 | frontend/src/lib/api-types.ts | pnpm gen:types 重生成 |
++| 改 | sillyhub-daemon/src/api-types.ts | daemon pnpm gen:types 重生成 |
++| 改 | frontend/src/lib/workspace-members.ts | 手写 DTO 同步（email 可空 + username） |
++| 改 | frontend/src/lib/admin.ts | 手写 RoleUserRead 同步（email 可空 + username） |
++| 改 | frontend/src/app/(dashboard)/admin/roles/page.tsx | 聚合类型/排序 null 安全/单元格回退 |
++| 改 | frontend/src/components/workspace-member-row.tsx | displayName 回退链 + email 空展示 |
++| 改 | frontend/src/components/workspace-member-add-dialog.tsx | 候选项 email 空时回退 username |
++| 改 | frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx | 操作确认标签回退链补 username |
++| 改 | frontend/src/components/workspace/shared-daemon-manager.tsx | 出借人标签回退链补 username |
++| 改 | frontend/src/components/workspace-member-row.test.tsx | 新增 email null 回退用例 |
++| 改 | frontend/src/components/workspace/shared-daemon-manager.test.tsx | 夹具补 username 字段 |
+
+diff --git a/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/proposal.md b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:44:39.274Z
++---
++# 提案书（Proposal）— 2026-10-12-nullable-email-dto-fix
++
++## 动机
++
++任务原话转写：线上 GET /api/admin/roles/{id}/users 返回 500:User.email 自 2026-06-24-username-login 起可空(D-001 纯用户名账号),但 RoleUserRead / WorkspaceMemberView / UserSearchHit 三个响应 DTO 仍声明 email 必填,库中 email 为 NULL 的绑定用户触发 pydantic ValidationError(生产日志 request_id f9c93f39 实证)。
++成功标准：
++ - 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
++ - GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
++ - 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
++ - 前端 pnpm gen:types 重生成并提交,角色用户表/工作区成员行/邀请搜索弹窗对 email=null 有回退展示,排序不再对 null 调 localeCompare
++ - 后端仅跑本次相关 pytest 全绿,前端 tsc --noEmit 通过,提交 api-types.ts 与 backend/openapi.json
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
++2. GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
++3. 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
++4. 前端 pnpm gen:types 重生成并提交,角色用户表/工作区成员行/邀请搜索弹窗对 email=null 有回退展示,排序不再对 null 调 localeCompare
++5. 后端仅跑本次相关 pytest 全绿,前端 tsc --noEmit 通过,提交 api-types.ts 与 backend/openapi.json
++
++## 成功标准（可验证）
++
++1. 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
++2. GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
++3. 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
++4. 前端 pnpm gen:types 重生成并提交,角色用户表/工作区成员行/邀请搜索弹窗对 email=null 有回退展示,排序不再对 null 调 localeCompare
++5. 后端仅跑本次相关 pytest 全绿,前端 tsc --noEmit 通过,提交 api-types.ts 与 backend/openapi.json
+
+diff --git a/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/requirements.md b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-nullable-email-dto-fix/requirements.md
+@@ -0,0 +1,103 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T05:44:39.274Z
++---
++# 需求规格（Requirements）— 2026-10-12-nullable-email-dto-fix
++
++背景：生产环境（crrcdt.ppdmq.top）`GET /api/admin/roles/62f2f23f-…/users` 返回 500。
++后端日志（request_id f9c93f39-7702-4d22-aa60-b38101c05b5b）实证为
++`pydantic ValidationError for RoleUserRead: email Input should be a valid string,
++input_value=None`。根因：`User.email` 自 2026-06-24-username-login（D-001）起可空
++（`backend/app/modules/auth/model.py:40-44`），而 admin/workspace 模块三处响应 DTO
++仍把 `email` 声明为必填 `str`。
++
++## 功能需求
++
++### FR-01: 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
++
++`RoleUserRead`（admin/schema.py）、`WorkspaceMemberView` 与 `UserSearchHit`
++（workspace/schema.py）的 `email` 字段必须声明为可空（`str | None`），禁止再以必填
++`str` 承接可能为 NULL 的 `User.email`；三者必须同时新增 `username: str | None`
++字段，`RoleService.list_users`、`members_service`（成员列表 / 邀请搜索）与
++`members_router._row_to_view` 必须在查询与 DTO 构造处填充 `username`，
++保证 email 为空的纯用户名账号在响应里可识别。
++
++#### 场景：DTO 契约与取数补齐
++
++- Given 2026-06-24-username-login 之后 `User.email` 允许 NULL
++- When 三个响应 DTO 任一被构造或序列化
++- Then `email=None` 不再触发 pydantic ValidationError，且响应项带 `username` 字段
++
++### FR-02: GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
++
++该端点对绑定了 `email=None` 用户的角色必须返回 200，响应项中该用户
++`email` 为 `null` 且 `username` 有值；禁止再抛未处理异常导致 500。
++platform 与 workspace 两种绑定形态都必须满足。
++
++#### 场景：平台级绑定的纯用户名账号
++
++- Given 角色通过 `user_roles` 绑定了一个 `email=None, username="xxx"` 的用户
++- When GET /api/admin/roles/{role_id}/users
++- Then 200，items 含该用户且 `email=null`、`username="xxx"`、`binding_type="platform"`
++
++#### 场景：工作区级绑定的纯用户名账号
++
++- Given 角色通过 `user_workspace_roles` 绑定了一个 `email=None` 用户
++- When GET /api/admin/roles/{role_id}/users
++- Then 200，对应项 `email=null` 且带 workspace_id/workspace_name
++
++### FR-03: 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
++
++`GET /api/workspaces/{id}/members`（列表）与
++`GET /api/workspaces/{id}/members/search`（邀请搜索）在成员/候选为
++`email=None` 用户时必须返回 200 且该项 `email=null`、`username` 有值；
++禁止因此 500。邀请搜索按 display_name 命中的纯用户名账号必须正常出现在候选中。
++
++#### 场景：成员列表含纯用户名账号
++
++- Given 工作区成员中有 `email=None` 用户
++- When GET /api/workspaces/{id}/members
++- Then 200，该项 `email=null` 且 `username` 有值
++
++#### 场景：邀请搜索命中纯用户名账号
++
++- Given 存在 `email=None` 且 display_name 含关键字的工作区外用户
++- When GET /api/workspaces/{id}/members/search?q=<关键字>
++- Then 200，候选含该用户且 `email=null`、`username` 有值
++
++### FR-04: 前端类型同步与空值回退展示,排序不再对 null 调 localeCompare
++
++`pnpm gen:types`（frontend，刷新 backend/openapi.json）与
++sillyhub-daemon `pnpm gen:types` 必须重跑并提交产物；
++`frontend/src/lib/workspace-members.ts` 手写 DTO 必须同步为 email 可空 + username。
++角色用户表（admin/roles/page.tsx）、工作区成员行（workspace-member-row.tsx）、
++邀请搜索弹窗（workspace-member-add-dialog.tsx）、成员页（members/page.tsx）
++对 `email=null` 必须有回退展示（依次回退 username / 占位符），
++禁止对 null 值直接调用 `localeCompare` 或渲染空行。
++
++#### 场景：角色用户表渲染纯用户名账号
++
++- Given 接口返回 `email=null, username="xxx"` 的角色用户项
++- When 角色用户表渲染
++- Then 邮箱列显示占位符不报错，显示名列回退展示 username，排序稳定不抛错
++
++### FR-05: 相关测试全绿与产物提交
++
++后端必须仅跑本次相关 pytest（admin roles + workspace members）全绿；
++前端必须 `tsc --noEmit` 通过；`backend/openapi.json`、
++`frontend/src/lib/api-types.ts`、`sillyhub-daemon/src/api-types.ts`
++必须与后端 DTO 同步提交，禁止手写类型落后于后端契约。
++
++#### 场景：回归验证
++
++- When 跑 backend/tests/modules/admin/test_roles_router.py 与
++  tests/modules/workspace/test_members_router.py 全部用例
++- Then 全绿；前端 tsc --noEmit 0 错
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」
++FR-02: backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」
++FR-03: backend/tests/modules/workspace/test_members_router.py「test_list_and_search_return_200_for_email_null_user」
++FR-04: frontend/src/components/workspace-member-row.test.tsx「email null 时回退展示 username 且不崩」
++FR-05: backend/tests/modules/admin/test_roles_router.py「全文件回归」；frontend tsc --noEmit（无单测面，验证命令见 FR-05 正文）

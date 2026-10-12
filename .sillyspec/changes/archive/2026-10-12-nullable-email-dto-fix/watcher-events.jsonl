@@ -1,0 +1,36 @@
+{"ts":1791784001400,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791784021294,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791784021294,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784091152,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/tests/modules/admin/test_roles_router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784140393,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/admin/schema.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784147095,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/admin/roles_service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784169748,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791784170044,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791784169896,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784169896,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791784174536,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784174536,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1791784181203,"kind":"commit","stage":null,"detail":"370827547","provisional":true}
+{"ts":1791784217614,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/tests/modules/workspace/test_members_router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784248160,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/workspace/schema.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784258289,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/workspace/members_service.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784261773,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/workspace/members_router.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784298259,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791784301452,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784301452,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791784361696,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791784364809,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784364809,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1791784418169,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/workspace/shared-daemon-manager.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784441402,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/admin.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784494161,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/workspace/shared-daemon-manager.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791784545440,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791784546935,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784546935,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true}
+{"ts":1791784614728,"kind":"task-done","stage":"tasks","detail":"checked 5→6","provisional":true,"source":"task-tick"}
+{"ts":1791784616384,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784616384,"kind":"task-done","stage":"tasks","detail":"checked 5→6","provisional":true}
+{"ts":1791784672565,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791784721889,"kind":"commit","stage":null,"detail":"9e1023756","provisional":true}
+{"ts":1791784764531,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791784956029,"kind":"gate-run","stage":"verify","detail":"门实测 passed（182.9s） · 20261012060235","provisional":true}

@@ -1,0 +1,37 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  线上 GET /api/admin/roles/{id}/users 返回 500:User.email 自 2026-06-24-username-login 起可空(D-001 纯用户名账号),但 RoleUserRead /
+  WorkspaceMemberView / UserSearchHit 三个响应 DTO 仍声明 email 必填,库中 email 为 NULL 的绑定用户触发 pydantic ValidationError(生产日志
+  request_id f9c93f39 实证)。
+
+  成功标准：
+   - 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
+   - GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
+   - 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
+   - 前端 pnpm gen:types 重生成并提交,角色用户表/工作区成员行/邀请搜索弹窗对 email=null 有回退展示,排序不再对 null 调 localeCompare
+   - 后端仅跑本次相关 pytest 全绿,前端 tsc --noEmit 通过,提交 api-types.ts 与 backend/openapi.json
+autopilot: true
+baseline_commit: 7115748fb386a5090fbbe5135f6a4daf9fdd485d
+updatedAt: '2026-10-12T06:07:30.636Z'
+baseline_sha256: c0087769e7912211c1db9c0500e22ac35760e65f7b27050ed033efd1cdea0d5b
+gate_summary: >-
+  test: passed ← module[]+deps(py29+jsx30)+fr(55)（182.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012060235\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（13.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261012060235\test-result.json｜门文件
+  21 个
+

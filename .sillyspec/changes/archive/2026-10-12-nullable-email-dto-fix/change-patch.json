@@ -1,0 +1,297 @@
+{
+  "change": "2026-10-12-nullable-email-dto-fix",
+  "baseline": "7115748fb386a5090fbbe5135f6a4daf9fdd485d",
+  "head": "9e1023756c326d287faf5c93b00676f41b34fb11",
+  "files": [
+    ".sillyspec/changes/2026-10-12-nullable-email-dto-fix/tasks.md",
+    "backend/app/modules/admin/roles_service.py",
+    "backend/app/modules/admin/schema.py",
+    "backend/app/modules/workspace/members_router.py",
+    "backend/app/modules/workspace/members_service.py",
+    "backend/app/modules/workspace/schema.py",
+    "backend/openapi.json",
+    "backend/tests/modules/admin/test_roles_router.py",
+    "backend/tests/modules/workspace/test_members_router.py",
+    "frontend/src/app/(dashboard)/admin/roles/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx",
+    "frontend/src/components/workspace-member-add-dialog.tsx",
+    "frontend/src/components/workspace-member-row.test.tsx",
+    "frontend/src/components/workspace-member-row.tsx",
+    "frontend/src/components/workspace/shared-daemon-manager.test.tsx",
+    "frontend/src/components/workspace/shared-daemon-manager.tsx",
+    "frontend/src/lib/admin.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/workspace-members.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    ".sillyspec/changes/2026-10-12-nullable-email-dto-fix/design.md",
+    ".sillyspec/changes/2026-10-12-nullable-email-dto-fix/proposal.md",
+    ".sillyspec/changes/2026-10-12-nullable-email-dto-fix/requirements.md"
+  ],
+  "totals": {
+    "files": 23,
+    "additions": 541,
+    "deletions": 28
+  },
+  "savedAt": "2026-10-12T06:03:02.072Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "workspace",
+      "files": 3,
+      "doc": "docs/backend/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "admin",
+      "files": 2,
+      "doc": "docs/backend/modules/admin.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "workspace",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/workspace.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "admin",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/admin.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 2,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7115748fb386a5090fbbe5135f6a4daf9fdd485d",
+    "totals": {
+      "files": 19,
+      "additions": 285,
+      "deletions": 28
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/admin/roles_service.py",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/admin/schema.py",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/members_router.py",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/members_service.py",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/workspace/schema.py",
+        "additions": 7,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 57,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/admin/test_roles_router.py",
+        "additions": 53,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/workspace/test_members_router.py",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/roles/page.tsx",
+        "additions": 15,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/members/page.tsx",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace-member-add-dialog.tsx",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace-member-row.test.tsx",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace-member-row.tsx",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/shared-daemon-manager.test.tsx",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/workspace/shared-daemon-manager.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/admin.ts",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 9,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/workspace-members.ts",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 9,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "f2b0ff69c28e6a6114d7147e5c07a71a60ebe08880c0dba2ab494ca75dc2492e",
+  "patchStatus": "ok"
+}

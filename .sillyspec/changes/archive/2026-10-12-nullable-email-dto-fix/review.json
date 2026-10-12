@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-nullable-email-dto-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9e1023756c326d287faf5c93b00676f41b34fb11",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "workspace-member-row 主名回退链无终端兜底，三字段全空时渲染空白",
+      "evidence": "displayName 回退链为 display_name?.trim() || email || username，无最终占位符；User.username 在 ORM 层 nullable=True（auth/model.py 注释自认仅测试 fixture 允许 NULL，生产由迁移 NOT NULL 保证），display_name/email/username 三者皆空时主名渲染 undefined 空白，触碰 FR-04「禁止渲染空行」字面。生产不可达，仅 ORM/fixture 理论场景；同文件副行与 roles 页、members 页、shared-daemon-manager 均有终端兜底，仅此处缺。",
+      "location": "frontend/src/components/workspace-member-row.tsx:58-59"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维第 3 问「无需灰度」作答未覆盖旧前端 build 与新后端的混布窗口",
+      "evidence": "design 称「运行时对 null 已有回退分支」，该断言仅对新前端成立；旧 build 的角色页聚合排序 a.email.localeCompare(b.email) 在新后端返回 email=null 时会 TypeError。前后端同仓同部署且 admin/workspace 前端未上线（CLAUDE.md 规则 11 仅 PPM 上线），实际风险为零，但作答本身存在盲点。",
+      "location": ".sillyspec/changes/2026-10-12-nullable-email-dto-fix/design.md:57-59"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维第 4 问断言 username 作回退标识，未披露 username 列本身可空",
+      "evidence": "design 称「username 全局唯一（建表唯一约束），作为回退展示标识不会撞名」——唯一约束属实（ux_users_username），但 backend/app/modules/auth/model.py:44-47 username 列 nullable=True，NULL 合法（仅生产迁移保证非空），回退标识可能缺失。role 页/members 页/shared-daemon-manager 链尾有兜底，workspace-member-row 无（见 P3-1）。",
+      "location": "backend/app/modules/auth/model.py:44-47"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok —— design 作答与 diff 一致：members_service.search 沿用 ORDER BY email ASC（members_service.py:209），本变更未改任何排序；role users 两处构造同样沿用既有 email 排序，NULL 顺序 PG NULLS LAST 稳定。",
+    "并发": "ok —— diff 为纯只读 DTO 投影放宽（5 处后端改动均为 select 列/构造参数），无新增写入路径，无新竞态；40 passed/1 skipped（既有 SQLite 并发 skip）回归实测。",
+    "切换": "finding —— DTO 放宽（必填变可空+新增字段）对旧消费者向后兼容属实；但「无需灰度」作答默认前端同步更新，未覆盖旧前端 build + 新后端窗口（旧角色页排序对 null localeCompare 崩溃），实际因项目未上线+同仓同发不可达，定 P3。",
+    "作用域": "finding —— username 唯一约束属实、daemon 侧确仅类型消费（grep 证实 daemon 运行时不调这三个端点）；但 design 未披露 ORM 层 username nullable=True，三 null 极端场景下 workspace-member-row 主名链无终端兜底，定 P3。"
+  },
+  "reviewedAt": "2026-10-12T14:06:55+08:00"
+}

@@ -55,3 +55,98 @@
 - 场景：默认场景 — Given 现有搜索/状态筛选/分页/编辑/删除/会话/审计/重置密码；When 操作；Then 全部正常工作（organization_id 默认 None 时零影响）
 全文：.sillyspec/changes/archive/2026-06-25-2026-06-25-admin-users-org-tree/requirements.md#FR-06
 最近确认：5a6a57578
+
+## FR-admin-007 后端三处响应 DTO 的 email 改为可空并补充 username 字段,对应 service 查询补 select/构造
+变更：2026-10-12-nullable-email-dto-fix
+状态：active
+摘要：DTO 契约与取数补齐
+全文：.sillyspec/changes/archive/2026-10-12-nullable-email-dto-fix/requirements.md#FR-01
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-01
+  tests: backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-nullable-email-dto-fix
+  status: active
+
+## FR-admin-008 GET /api/admin/roles/{role_id}/users 对 email 为 NULL 的绑定用户返回 200(email=null 且 username 有值),不再 500
+变更：2026-10-12-nullable-email-dto-fix
+状态：active
+摘要：平台级绑定的纯用户名账号；工作区级绑定的纯用户名账号
+全文：.sillyspec/changes/archive/2026-10-12-nullable-email-dto-fix/requirements.md#FR-02
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-02
+  tests: backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-nullable-email-dto-fix
+  status: active
+
+## FR-admin-009 工作区成员列表与邀请搜索接口对 email 为 NULL 的用户同样返回 200
+变更：2026-10-12-nullable-email-dto-fix
+状态：active
+摘要：成员列表含纯用户名账号；邀请搜索命中纯用户名账号
+全文：.sillyspec/changes/archive/2026-10-12-nullable-email-dto-fix/requirements.md#FR-03
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-03
+  tests: backend/tests/modules/workspace/test_members_router.py「test_list_and_search_return_200_for_email_null_user」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-nullable-email-dto-fix
+  status: active
+
+## FR-admin-010 前端类型同步与空值回退展示,排序不再对 null 调 localeCompare
+变更：2026-10-12-nullable-email-dto-fix
+状态：active
+摘要：角色用户表渲染纯用户名账号
+全文：.sillyspec/changes/archive/2026-10-12-nullable-email-dto-fix/requirements.md#FR-04
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/workspace-member-row.test.tsx「email null 时回退展示 username 且不崩」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-nullable-email-dto-fix
+  status: active
+
+## FR-admin-011 相关测试全绿与产物提交
+变更：2026-10-12-nullable-email-dto-fix
+状态：active
+摘要：回归验证
+全文：.sillyspec/changes/archive/2026-10-12-nullable-email-dto-fix/requirements.md#FR-05
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-05
+  tests: backend/tests/modules/admin/test_roles_router.py「全文件回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-nullable-email-dto-fix
+  status: active

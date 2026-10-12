@@ -2423,3 +2423,10 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：b63e251d656e77106b36eabed32f96d9f629e30c
 理由：- 风险：移除机器白名单后，linked_repos 对「失陷 backend 下发任意存在路径」的防线回落到与会话路径相同的信任模型（backend 绑定 vouch + 存在性检查）——这是 ql-20260831-006 已裁决的平台信任边界，本变更是恢复一致性而非新增暴露；残余面（lease/spec-sync 路径同样信任 backend rootPath）在此一并留档为已知边界。 - 放弃方案 A：保留白名单但 forbidden 降级为结果体 skipped——同步仍然不做（功能回归未修复），只是把 5xx 变安静失败，更难排障。 - 放弃方案 B：机器主人把工作区根手工加入 allowed_roots 作为上线前提——把配置负担转嫁用户且与 ql-20260831-006「不该拦截」的裁决直接相悖。 - 放弃方案 C：num_turns/duration_ms 保持裸 typeof（危害止于单轮 NULL）——与同函数另两字段口径统一是一行事，成本两行。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-nullable-email-dto-fix
+锚点：未记录
+最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
+理由：最大风险：前端既有代码把 `email` 当非空用的隐藏点位漏改，tsc 抓不全的 （如模板里直接插值）运行时渲染出空白。缓解：渲染点逐一回退处理 + workspace-member-row 补 null 用例 + tsc --noEmit 全量类型检查； `localeCompare` 调用点仅角色页聚合排序一处（已全局搜索确认）。 实际执行中 tsc 全量扫出 3 处（members/page 两处 + shared-daemon-manager 一处）， 另在 task-05 人工排查出 lib/admin.ts 手写 DTO 漏同步（tsc 因本地类型未改而放行）。 试过/考虑过但放弃的方案： - service 层兜底 `email=user.email or ""`：契约撒谎（空串≠无邮箱），且 前端无法区分"无邮箱"与"空邮箱"，弃。 - 只改 RoleUserRead 不动 workspace 两处：同类 500 隐患原地保留 （成员列表/搜索遇纯用户名账号必炸），修一半等于没修，弃。 - 邀请搜索补 `username ILIKE` 匹配：属于搜索行为增强，与本 500 无关， 留作后续独立小变更，避免本次 diff 膨胀。

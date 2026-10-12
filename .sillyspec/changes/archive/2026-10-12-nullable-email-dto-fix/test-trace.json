@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-nullable-email-dto-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-nullable-email-dto-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/tests/modules/admin/test_roles_router.py「test_list_role_users_email_null_username_present」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-nullable-email-dto-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/tests/modules/workspace/test_members_router.py「test_list_and_search_return_200_for_email_null_user」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-nullable-email-dto-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/workspace-member-row.test.tsx「email null 时回退展示 username 且不崩」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-nullable-email-dto-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-nullable-email-dto-fix:flow:测试绑定FR-05",
+      "tests": [
+        "backend/tests/modules/admin/test_roles_router.py「全文件回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-nullable-email-dto-fix"
+    }
+  ]
+}
