@@ -1,0 +1,267 @@
+{
+  "change": "2026-10-12-clipboard-helper-full-migration",
+  "baseline": "775cb3de8104fb40bd864ed6b1bc223e50d7e749",
+  "head": "8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e",
+  "files": [
+    ".sillyspec/changes/2026-10-12-clipboard-helper-full-migration/tasks.md",
+    "frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx",
+    "frontend/src/app/(dashboard)/runtimes/page.tsx",
+    "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/agent-log/tool-renderers.tsx",
+    "frontend/src/components/api-key-create-dialog.tsx",
+    "frontend/src/components/changes/detail/change-stage-actions.tsx",
+    "frontend/src/components/changes/scope-audit-command-card.tsx",
+    "frontend/src/components/daemon/__tests__/copy-button.test.tsx",
+    "frontend/src/components/daemon/agent-log-card.tsx",
+    "frontend/src/components/daemon/bash-progress-card.tsx",
+    "frontend/src/components/daemon/copy-button.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-segment-views.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    "frontend/src/components/knowledge/entry-card-list.tsx",
+    "frontend/src/components/knowledge/governance-cards.tsx",
+    "frontend/src/components/mcp-token-create-dialog.tsx",
+    "frontend/src/lib/__tests__/clipboard.test.ts",
+    "frontend/src/lib/clipboard.ts",
+    ".sillyspec/changes/2026-10-12-clipboard-helper-full-migration/design.md",
+    ".sillyspec/changes/2026-10-12-clipboard-helper-full-migration/proposal.md",
+    ".sillyspec/changes/2026-10-12-clipboard-helper-full-migration/requirements.md",
+    ".sillyspec/changes/2026-10-12-clipboard-helper-full-migration/review.json"
+  ],
+  "totals": {
+    "files": 26,
+    "additions": 15123,
+    "deletions": 14845
+  },
+  "savedAt": "2026-10-12T02:27:26.054Z",
+  "note": "flow done 时点冻结（本变更可归属面：baseline..HEAD 提交面过滤 .sillyspec/ 非本变更目录但保留 .sillyspec/docs/ 交付文档 + 本变更目录工作树件；含未提交与 untracked，排除 flow-state.yaml 运行态）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 21,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 15,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "775cb3de8104fb40bd864ed6b1bc223e50d7e749",
+    "totals": {
+      "files": 21,
+      "additions": 14900,
+      "deletions": 14845
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx",
+        "additions": 2,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+        "additions": 28,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-renderers.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/api-key-create-dialog.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-stage-actions.tsx",
+        "additions": 268,
+        "deletions": 267,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/scope-audit-command-card.tsx",
+        "additions": 778,
+        "deletions": 778,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/copy-button.test.tsx",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/agent-log-card.tsx",
+        "additions": 1016,
+        "deletions": 1015,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/bash-progress-card.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/copy-button.tsx",
+        "additions": 3,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 5413,
+        "deletions": 5415,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "additions": 1492,
+        "deletions": 1491,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 2123,
+        "deletions": 2122,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+        "additions": 3730,
+        "deletions": 3730,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/entry-card-list.tsx",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/knowledge/governance-cards.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/mcp-token-create-dialog.tsx",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/clipboard.test.ts",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/clipboard.ts",
+        "additions": 18,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "419157c98145d1933e48b5a1a92210a062d4fd41a37bf3434a097879fd11f312",
+  "patchStatus": "ok"
+}

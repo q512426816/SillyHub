@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-clipboard-helper-full-migration",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/copy-button.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-clipboard-helper-full-migration"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/copy-button.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-clipboard-helper-full-migration"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/copy-button.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-clipboard-helper-full-migration"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/copy-button.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-clipboard-helper-full-migration"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-clipboard-helper-full-migration:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/clipboard.test.ts「降级失败（execCommand 返回 false）→ 抛错且节点仍被清理（finally 保证）」",
+        "frontend/src/lib/__tests__/clipboard.test.ts「非安全上下文（clipboard 缺失）：textarea + execCommand 降级，节点清理、选区恢复」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-clipboard-helper-full-migration"
+    }
+  ]
+}

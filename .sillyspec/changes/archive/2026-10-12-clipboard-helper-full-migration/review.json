@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-clipboard-helper-full-migration",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e",
+  "incrementalReview": {
+    "previousVerdict": "FAIL",
+    "previousReviewedAgainst": "6ae76881e1c4d66bea05c3b01577467a3d931e7c",
+    "clearingCommit": "8fc2491b7ea87a435111d715cc74a2fc4fd1ed9e",
+    "driftCheck": "git diff 6ae76881e1c4d66bea05c3b01577467a3d931e7c..HEAD --stat 全仓仅 frontend/src/app/(dashboard)/runtimes/page.tsx(-3)、frontend/src/lib/__tests__/clipboard.test.ts(+4)、frontend/src/lib/clipboard.ts(+1/-1) 三文件，无其它漂移"
+  },
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "无 catch 的直迁点在降级也失败的环境从静默 no-op 变 unhandled rejection（属已披露排除面）",
+      "location": "frontend/src/components/daemon/turn-segment-views.tsx; frontend/src/components/daemon/turn-timeline.tsx; frontend/src/components/agent-log/tool-renderers.tsx",
+      "status": "DISCLOSED-KEPT",
+      "verification": "按上轮评审约定保留不改行为：design 已披露排除面（旧版 Safari/Android 低端 WebView 无承诺），用户可见行为与迁移前一致（均为「未复制」），不作为阻塞项",
+      "disposition": "disclosed-kept（已披露排除面，降级也失败的环境 unhandled rejection 为 console 噪音级；上轮评审 P3 原样保留）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——清偿 commit 仅删 3 行/加 4 行断言/改 1 行注释，未触碰任何点击链路、Promise 形态与回调体；上轮「乱序 ok」结论对 HEAD 仍成立",
+    "并发": "n/a——清偿 commit 不含并发逻辑改动（测试原型 spy 为同步断言）；沿用上轮 ok 结论",
+    "切换": "ok——6ae76881e..HEAD 全仓 diff 仅限三份清偿文件，无其它漂移；helper finally 清理逻辑零变化",
+    "作用域": "ok——清偿改动严格限于上轮 findings 范围（测试加固+UI 去重+注释同步），无越界重构；上轮边界裁决（排除面/单一实现原则）继续有效"
+  },
+  "reviewedAt": "2026-10-12T10:26:52+08:00"
+}

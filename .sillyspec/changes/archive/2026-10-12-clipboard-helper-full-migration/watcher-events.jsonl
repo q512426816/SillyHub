@@ -1,0 +1,22 @@
+{"ts":1791770738386,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791770738386,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791770980064,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791770980064,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791770993646,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/clipboard.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771039621,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/runtimes/__tests__/copy-daemon-command.test.tsx、frontend/src/app/(dashboard)/runtimes/page.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771306451,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771408676,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/copy-button.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771498106,"kind":"commit","stage":null,"detail":"16b5dd4dc","provisional":true}
+{"ts":1791771498370,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/archive/2026-10-12-ci-guard-diagnosability/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771518730,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791771519065,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791771519350,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791771519648,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791771521383,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791771521383,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791771521383,"kind":"commit","stage":null,"detail":"6ae76881e","provisional":true}
+{"ts":1791771554877,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791771581671,"kind":"gate-run","stage":"verify","detail":"门实测 passed（25.7s） · 20261012021939","provisional":true}
+{"ts":1791771939098,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/app/(dashboard)/runtimes/page.tsx、frontend/src/lib/__tests__/clipboard.test.ts、frontend/src/lib/clipboard.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791771968688,"kind":"commit","stage":null,"detail":"8fc2491b7","provisional":true}
+{"ts":1791772106463,"kind":"file","stage":"proposal","detail":"decisions.md 出现","provisional":true}
