@@ -92,3 +92,62 @@ created_at: 2026-10-08T17:53:22.647Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-hover-tip-flip
   status: active
+
+## FR-auto-claude-007 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 悬停命中标签 / When 浮层渲染 / Then rect.top === 解析 style.top（视口坐标系）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-01
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active
+
+## FR-auto-claude-008 底部空间不足翻转逻辑在正确坐标系下生效
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-02
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active
+
+## FR-auto-claude-009 相关测试全绿（portal 断言同步）
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-03
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active

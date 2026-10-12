@@ -2533,3 +2533,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
 理由：风险：TIP_EST_HEIGHT=48 是粗估（实际两行文本≈42px）——翻转判定略保守（早翻），只影响翻转时机不影响可见性。放弃的方案：渲染后读实际高度再翻（useLayoutEffect 二段定位）——复杂度不值（估高误差只导致提前翻转，无功能影响）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-hover-tip-portal
+锚点：未记录
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+理由：风险：body 直挂元素的测试断言路径变化——已同步改 document.querySelector 并隔离用例（unmount 后断言）。放弃的方案：向上排查移除页面祖先的 transform（根在布局容器/动画库，影响面大且布局再变会复发）；portal 是标准免疫方案。

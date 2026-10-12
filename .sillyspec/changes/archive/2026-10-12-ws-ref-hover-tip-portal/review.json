@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-hover-tip-portal",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行——降级条款如实标注）",
+  "verdict": "PASS",
+  "reviewedAgainst": "f9406f124",
+  "findings": [],
+  "dimensionNotes": { "乱序": "ok", "并发": "ok", "切换": "ok", "作用域": "ok" },
+  "reviewedAt": "2026-10-12T03:30:00.000Z",
+  "reviewerNotes": "评审面：portal 化 2 文件（overlay 渲染位置 + 测试断言）。① 根因证据链决定性：style.top=824 vs rect.top=965 偏移 141px=containing block 失效，portal 挂 body 为标准免疫；② createPortal 生命周期随宿主卸载（React 契约）无 DOM 残留，测试 unmount 隔离断言覆盖；③ 翻转公式不变，坐标系归位后 clamp 数学成立（jsdom 662/216 两断言过）；④ 105/105 合跑 + tsc 0 error。浏览器部署后实测门在收口后执行（用户标签页验证）。"
+}
