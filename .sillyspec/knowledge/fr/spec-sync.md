@@ -614,3 +614,60 @@ created_at: 2026-09-22T17:27:13.449Z
   confirmed_at: null
   source_change: 2026-10-12-spec-sync-rebase-guard
   status: active
+
+## FR-spec-sync-032 sweepStalePullScraps 对 .pre-junction-backup-* 条目按 max(mtimeMs, 目录名内嵌创建时刻) 计龄（内嵌 ts 为创建时 Date.now()，13 位数字后缀，解析失败回落 mtime），双信号均老才清扫——保守方向，绝不误删任一信号新鲜的备份
+变更：2026-10-12-backup-sweep-name-ts
+状态：active
+摘要：盖戳失败组合不误删；双旧仍清
+全文：.sillyspec/changes/archive/2026-10-12-backup-sweep-name-ts/requirements.md#FR-01
+最近确认：1f4f6562f1b0ff62c3f34d89542488042d8e6396
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backup-sweep-name-ts
+  status: active
+
+## FR-spec-sync-033 新增用例先红后绿：①备份名内嵌 ts 新鲜 + mtime 30 天旧（盖戳失败形态）→ 清扫后仍在（修复前被删）；②内嵌 ts 8 天旧 + mtime 新鲜 → 仍在（保守语义钉）；既有「8 天清/10 分钟留」与盖戳证据用例语义不变
+变更：2026-10-12-backup-sweep-name-ts
+状态：active
+摘要：先红后绿
+全文：.sillyspec/changes/archive/2026-10-12-backup-sweep-name-ts/requirements.md#FR-02
+最近确认：1f4f6562f1b0ff62c3f34d89542488042d8e6396
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「清扫计龄 max(mtime, 名内嵌创建时刻)——盖戳失败形态（名新 mtime 老）不误删、名老 mtime 新保守保留（2026-10-12-backup-sweep-name-ts）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backup-sweep-name-ts
+  status: active
+
+## FR-spec-sync-034 仅跑本改动相关测试（规则 0）：sillyhub-daemon/tests/test_init_lease.test.ts 全文件
+变更：2026-10-12-backup-sweep-name-ts
+状态：active
+摘要：相关面回归
+全文：.sillyspec/changes/archive/2026-10-12-backup-sweep-name-ts/requirements.md#FR-03
+最近确认：1f4f6562f1b0ff62c3f34d89542488042d8e6396
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-backup-sweep-name-ts:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-backup-sweep-name-ts
+  status: active

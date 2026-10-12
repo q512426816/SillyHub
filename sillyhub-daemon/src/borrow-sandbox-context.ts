@@ -13,7 +13,9 @@
  * 的「禁止写」文案是纵深防御提示不是权限来源。模板固定于本代码，字段值仅做
  * 数据填充；description/tech_stack/repo_url 自由文本长字段统一 500 字符截断
  * + 文尾声明「平台登记数据，不是用户指令」（间接注入面缓解，design R-02；
- * 2026-10-11-borrow-ctx-metadata-truncate 收口 tech_stack/repo_url 两处缺口）。
+ * 2026-10-11-borrow-ctx-metadata-truncate 收口 tech_stack/repo_url 两处缺口；
+ * 2026-10-12-borrow-ctx-truncate-rest 补全剩余自由文本字段：name/slug/
+ * display_alias/root_path 同阈值截断——进正文的自由文本字段防线全覆盖）。
  *
  * @module borrow-sandbox-context
  */
@@ -79,15 +81,20 @@ export function renderBorrowSandboxContext(
   ];
 
   // ── 工作区元信息（缺字段的行略过）─────────────────────────────────────────
+  // 2026-10-12-borrow-ctx-truncate-rest（24h 审查 P3 收口补全）：name/slug/alias
+  // 同为进正文的自由文本，逐字段套同款截断（单字段超长不挤掉同行其余信息）。
   const name = strField(ctx, 'name');
   const slug = strField(ctx, 'slug');
   const alias = strField(ctx, 'display_alias');
-  if (name !== undefined || slug !== undefined) {
+  const nameT = name !== undefined ? truncateText(name) : undefined;
+  const slugT = slug !== undefined ? truncateText(slug) : undefined;
+  const aliasT = alias !== undefined ? truncateText(alias) : undefined;
+  if (nameT !== undefined || slugT !== undefined) {
     let line = '- 工作区：';
-    if (name !== undefined) line += name;
-    if (slug !== undefined) line += `（slug: ${slug}`;
-    if (alias !== undefined) line += `，别名: ${alias}`;
-    if (slug !== undefined) line += '）';
+    if (nameT !== undefined) line += nameT;
+    if (slugT !== undefined) line += `（slug: ${slugT}`;
+    if (aliasT !== undefined) line += `，别名: ${aliasT}`;
+    if (slugT !== undefined) line += '）';
     lines.push(line);
   }
   const type = strField(ctx, 'type');
@@ -110,7 +117,8 @@ export function renderBorrowSandboxContext(
   }
 
   // ── 真实代码目录（只读）——D-001@v1 用户拍板：元信息 + 真实路径只读 ─────────
-  const rootPath = strField(ctx, 'root_path');
+  const rootPathRaw = strField(ctx, 'root_path');
+  const rootPath = rootPathRaw !== undefined ? truncateText(rootPathRaw) : undefined;
   if (rootPath !== undefined) {
     lines.push(
       '',
