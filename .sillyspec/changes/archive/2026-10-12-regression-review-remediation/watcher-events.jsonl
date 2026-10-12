@@ -1,0 +1,12 @@
+{"ts":1791772380481,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791772380801,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791772381105,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791772381396,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791772381678,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791772382535,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791772382535,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791772382535,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791772382535,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1791772382787,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/borrow-sandbox-context.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791772396257,"kind":"commit","stage":null,"detail":"b63e251d6","provisional":true}
+{"ts":1791772505298,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（108.2s） · 20261012023504","provisional":true}

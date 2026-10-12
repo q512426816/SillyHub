@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-regression-review-remediation",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-regression-review-remediation:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 不存在 → 抛错且业务函数零调用（错机派发保护）」",
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 白名单外但存在 → ql-20260831-006 语义放行（机器白名单不拦工作区根）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-regression-review-remediation"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-regression-review-remediation:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/test_init_lease.test.ts「rootPath 相对形态 → ok:false 结果体（对齐「逐步 catch 不上抛」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-regression-review-remediation"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-regression-review-remediation:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「num_turns/duration_ms 非有限值 → 不进 payload（isFinite 口径统一，2026-10-12-regression-review-remediation F1）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-regression-review-remediation"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-regression-review-remediation:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-regression-review-remediation"
+    }
+  ]
+}

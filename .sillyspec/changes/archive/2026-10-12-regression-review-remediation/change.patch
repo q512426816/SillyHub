@@ -1,0 +1,481 @@
+diff --git a/sillyhub-daemon/src/borrow-sandbox-context.ts b/sillyhub-daemon/src/borrow-sandbox-context.ts
+index d403b1f3d..ca4e04b4a 100644
+--- a/sillyhub-daemon/src/borrow-sandbox-context.ts
++++ b/sillyhub-daemon/src/borrow-sandbox-context.ts
+@@ -39,7 +39,8 @@ function strField(ctx: BorrowWorkspaceContext, key: string): string | undefined
+   return typeof v === 'string' && v.length > 0 ? v : undefined;
+ }
+ 
+-/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现六处共用）。 */
++/** 平台登记文本截断（超阈值截断加省略标注，R-02 单一实现，自由文本字段共用——
++ *  调用点随渲染面增长，勿在此维护具体计数）。 */
+ function truncateText(raw: string): string {
+   if (raw.length <= METADATA_MAX_CHARS) return raw;
+   return `${raw.slice(0, METADATA_MAX_CHARS)}…（已截断）`;
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index a8743be83..3afe8fe71 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -4006,15 +4006,20 @@ export class Daemon {
+         cost_delta_usd: payload.total_cost_usd ?? null,
+       });
+     }
+-    if (typeof resultMeta.num_turns === 'number') {
++    // 2026-10-12-regression-review-remediation（回归复审 F1）：isFinite 口径统一——
++    // 裸 typeof 对 NaN/Infinity 放行，序列化为 null 进 backend int|None（单轮字段
++    // NULL，无基线污染）。有限值行为逐字不变。
++    if (typeof resultMeta.num_turns === 'number' && Number.isFinite(resultMeta.num_turns)) {
+       payload.num_turns = resultMeta.num_turns;
+     }
+-    if (typeof resultMeta.duration_ms === 'number') {
++    if (typeof resultMeta.duration_ms === 'number' && Number.isFinite(resultMeta.duration_ms)) {
+       payload.duration_ms = resultMeta.duration_ms;
+     }
+     // 2026-10-12-duration-nan-guard：Number.isFinite 门对齐上方 total_cost_usd
+     // 既有口径——typeof 门对 NaN/Infinity 放行，NaN 参与差分（< 恒 false）后
+-    // 序列化为 null 被 backend int|None 静默吞掉且污染基线（后续合法快照误差分）。
++    // 序列化为 null 被 backend int|None 静默吞掉；基线随即被 set(NaN) 覆写，
++    // 污染窗口为 1 轮（下一合法快照先误差分为 NaN 再覆写基线，回归复审 F3 勘误：
++    // 并非「恒 NaN」）。
+     if (typeof resultMeta.duration_api_ms === 'number' && Number.isFinite(resultMeta.duration_api_ms)) {
+       // 2026-10-10-duration-api-cumulative-fix：duration_api_ms 与 total_cost_usd /
+       // modelUsage 同生命周期——SDK streaming 会话每轮终态报「会话至今累计」（线上
+@@ -4200,6 +4205,11 @@ export class Daemon {
+     // worker_done 工具）——该形态不立即代报也无人自报，经下方 provider 无关的
+     // +90s 延迟探测兜底收敛（90s 延迟属设计内）；静态表不感知宿主版本属有意
+     // 设计，勿在延迟探测上加 provider 门（会静默回归旧版 pi 收敛面，测试有钉）。
++    // 已知边界（2026-10-12-regression-review-remediation 回归复审 F6 披露）：探测按
++    // runId 匹配 backend workers 行，而 workers 行 id = 分身「首 run id」——分身被
++    // 追问产生后续轮时，后续轮 runId 恒 miss（worker_auto_done_fallback_run_missing
++    // 跳过），多轮收敛完全押首轮 timer + 会话级末文缓存；后续轮跨过首轮 +90s 才
++    // 结束的形态产出无补报通道（ql-20260911-028 既有行为，非本变更引入）。
+     if (
+       state.stage === 'mission_worker' &&
+       getProviderCaps(state.provider).mcp === false &&
+@@ -6675,12 +6685,22 @@ export class Daemon {
+       if (!payload.workspace_id || !payload.root_path || payload.repos.length === 0) {
+         throw new Error('linked_repos_sync: payload 缺 workspace_id/root_path/repos');
+       }
+-      // 2026-10-12-daemon-path-guard-completion：allowed_roots 归属校验——本 RPC
+-      // 是写路径（spawn sillyspec CLI 以 root_path 为 cwd 落 .sillyspec/projects），
+-      // af5daeca2 只收了「非空 + 绝对形态」，失陷 backend 可下发宿主任意绝对路径
+-      // 写入（如启动目录）；对齐同文件 get_spec_bundle DA-2 先例（realpath 穿透
+-      // 判定），越界 RpcError forbidden 经 _dispatchRpc 原样回填。
+-      assertWithinAllowedRoots(payload.root_path, this._effectiveAllowedRoots());
++      // 2026-10-12-regression-review-remediation：守卫语义修正（回归复审 F1）——
++      // 前版 assertWithinAllowedRoots 白名单与 ql-20260831-006 产品决策冲突（工作区
++      // 绑定根不在机器白名单属合法形态，仓内生产实证 E:\sgm / F:\WorkNew；会话
++      // cwd 守卫 interactive-cwd-guard 为此专门跳过白名单）。root_path 与会话 lease
++      // workspaceRoot 同源同信任级（backend 绑定下发）→ 同语义：机器白名单不拦，
++      // 错机派发保护由存在性检查承担（错机上目录必不存在）；绝对形态门在
++      // linked-repos-sync.ts 内保持不变。形态非法 throw（backend 502 族），
++      // 不存在 throw（环境级失败，逐层结果体不可达——root_path 是全部命令的 cwd）。
++      {
++        const st = await stat(payload.root_path).catch(() => null);
++        if (!st?.isDirectory()) {
++          throw new Error(
++            `linked_repos_sync: root_path 不存在或非目录（错机派发或登记漂移？）: ${payload.root_path}`,
++          );
++        }
++      }
+       const instanceId = this._config.runtime_id;
+       const report = this._client.postLinkedReposSyncResult?.bind(this._client);
+       return runLinkedReposSync(payload, {
+@@ -6700,9 +6720,16 @@ export class Daemon {
+       if (!rootPath) {
+         throw new Error('linked_repos_snapshot: payload 缺 root_path');
+       }
+-      // 2026-10-12-daemon-path-guard-completion：只读快照同门——读宿主路径与
+-      // get_spec_bundle 同性质（DA-2），越界 forbidden。
+-      assertWithinAllowedRoots(rootPath, this._effectiveAllowedRoots());
++      // 2026-10-12-regression-review-remediation：与 sync 同款 ql-20260831-006 语义
++      // （存在性检查替机器白名单，见 sync handler 注释）。
++      {
++        const st = await stat(rootPath).catch(() => null);
++        if (!st?.isDirectory()) {
++          throw new Error(
++            `linked_repos_snapshot: root_path 不存在或非目录（错机派发或登记漂移？）: ${rootPath}`,
++          );
++        }
++      }
+       return runLinkedReposSnapshot(rootPath);
+     });
+   }
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index a04abf01e..a39adb7bc 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -2212,10 +2212,19 @@ export async function handleInitLease(
+ ): Promise<HandleInitLeaseResult> {
+   // 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态校验——本函数以
+   // rootPath 为 cwd 跑 sillyspec init（三写）+ writeLocalYaml，相对形态按 daemon
+-  // cwd 漂移写盘；形态非法 throw（对齐 linked-repos「归一非法 throw、数据级失败
+-  // 走结果体」口径），先于任何 fs/spawn 操作。
++  // cwd 漂移写盘。2026-10-12-regression-review-remediation（回归复审 F3）：形态
++  // 非法从 throw 改为 ok:false 结果体——本函数契约是「逐步 catch 返 ok:false，
++  // 不上抛」（task-runner _runInitLease 刻意不加 try/catch 保证终态/统计链），
++  // 头部 throw 会穿到 runLease 顶层 generic failed 且丢 init_error 诊断；先于任何
++  // fs/spawn 操作的次序不变。
+   if (!isAbsoluteLikePath(params.rootPath)) {
+-    throw new Error(`handleInitLease: rootPath 非绝对路径: ${params.rootPath}`);
++    return {
++      ok: false,
++      specVersion: 0,
++      error: `handleInitLease: rootPath 非绝对路径: ${params.rootPath}`,
++      daemonState: null,
++      specDir: null,
++    };
+   }
+   const strategy = params.strategy || 'platform-managed';
+   const specVersion =
+diff --git a/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts b/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
+index 5df141848..2220757d0 100644
+--- a/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
++++ b/sillyhub-daemon/tests/daemon-interactive-bridge.test.ts
+@@ -1425,6 +1425,26 @@ describe('duration_api_ms 跨轮累计快照差分', () => {
+     expect(p2.duration_api_ms).toBe(12000);
+   });
+ 
++  it('num_turns/duration_ms 非有限值 → 不进 payload（isFinite 口径统一，2026-10-12-regression-review-remediation F1）', async () => {
++    const { daemon, client } = buildDaemon();
++    daemons.push(daemon);
++
++    await daemon.onTurnResult('sess-1', 'run-1', {
++      type: 'result',
++      subtype: 'success',
++      is_error: false,
++      num_turns: NaN,
++      duration_ms: Infinity,
++      duration_api_ms: 12000,
++    } as unknown as SDKResultMessage);
++
++    const p1 = payloadOf(client, 0);
++    expect(p1.num_turns).toBeUndefined();
++    expect(p1.duration_ms).toBeUndefined();
++    // duration_api_ms 合法值照常差分（全量首报）。
++    expect(p1.duration_api_ms).toBe(12000);
++  });
++
+   it('快照复位（当前 < 基线）：报全量（同 cost 口径）', async () => {
+     const { daemon, client } = buildDaemon();
+     daemons.push(daemon);
+diff --git a/sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts b/sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts
+index fb1599f4e..b80c1c467 100644
+--- a/sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts
++++ b/sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts
+@@ -1,16 +1,18 @@
+ // tests/daemon-linked-repos-guard.test.ts
+-// 2026-10-12-daemon-path-guard-completion：linked_repos_sync / linked_repos_snapshot
+-// 两 RPC 处理器的 allowed_roots 归属守卫。
++// 2026-10-12-daemon-path-guard-completion（初版 allowed_roots 白名单守卫）→
++// 2026-10-12-regression-review-remediation（语义修正为 ql-20260831-006 存在性检查）：
++// linked_repos_sync / linked_repos_snapshot 两 RPC 的 root_path 守卫。
+ //
+-// 背景（24h 风险审查 P2-3）：两 handler 是写/读宿主路径的入口，af5daeca2 只收了
+-// 「非空 + 绝对形态」（linked-repos-sync.ts / linked-repos-snapshot.ts 内），失陷
+-// backend 可下发宿主任意绝对路径（如启动目录）让 daemon 在其下落 .sillyspec/projects
+-// 结构。对齐同文件 get_spec_bundle DA-2 先例：入口 assertWithinAllowedRoots
+-//（realpath 穿透判定），越界 RpcError forbidden 经 _dispatchRpc 原样回填。
++// 演进：初版按 get_spec_bundle DA-2 先例加机器白名单——回归复审 F1 指出与
++// ql-20260831-006 产品决策冲突（工作区绑定根不在机器白名单属合法形态，仓内
++// 生产实证 E:\sgm / F:\WorkNew；会话 cwd 守卫为此专门跳过白名单），现网存量
++// 部署会被首次 forbidden 拒止。现语义：root_path 与会话 lease workspaceRoot
++// 同源同信任级 → 机器白名单不拦，错机派发保护由存在性检查承担（stat 目录
++// 必存性；错机上目录必不存在）。
+ //
+ // 本文件测 daemon.ts 的 handler 接线守卫（形态校验后、spawn/fs 前）：
+-//   - root_path 在 allowed_roots 内 → 放行（业务函数被调用、payload 透传）
+-//   - root_path 越界 → RpcError forbidden，业务函数零调用（零 spawn/零 fs）
++//   - root_path 存在（白名单内外皆可）→ 放行（业务函数被调用、payload 透传）
++//   - root_path 不存在/非目录 → 抛错，业务函数零调用（零 spawn/零 fs）
+ // 业务函数内部行为（逐层结果体/相对形态校验）见 linked-repos-sync.test.ts /
+ // linked-repos-snapshot.test.ts（本文件 vi.mock 隔离真实 spawn）。
+ 
+@@ -20,7 +22,6 @@ import { join } from 'node:path';
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+ 
+ import { Daemon } from '../src/daemon.js';
+-import { RpcError } from '../src/ws-client.js';
+ import type { DaemonConfig } from '../src/config.js';
+ 
+ const runSyncMock = vi.hoisted(() => vi.fn(async () => ({ results: [] })));
+@@ -96,15 +97,26 @@ describe('linked_repos RPC allowed_roots 守卫（2026-10-12-daemon-path-guard-c
+     });
+   });
+ 
+-  it('linked_repos_sync：root_path 越界 → forbidden 且业务函数零调用（零 spawn）', async () => {
++  it('linked_repos_sync：root_path 白名单外但存在 → ql-20260831-006 语义放行（机器白名单不拦工作区根）', async () => {
++    // 回归复审 F1（2026-10-12-regression-review-remediation）：白名单守卫与
++    // ql-20260831-006 产品决策冲突（工作区绑定根不在机器白名单属合法形态，
++    // 仓内生产实证 E:\sgm / F:\WorkNew）——守卫语义修正为存在性检查。
+     const handlers = buildHandlers();
+-    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
+-    await expect(handlers.get('linked_repos_sync')!(syncPayload(evil))).rejects.toBeInstanceOf(
+-      RpcError,
++    const outsideRoot = await mkdtemp(join(tmpdir(), 'linked-repos-outside-'));
++    try {
++      await handlers.get('linked_repos_sync')!(syncPayload(outsideRoot));
++      expect(runSyncMock).toHaveBeenCalledTimes(1);
++    } finally {
++      await rm(outsideRoot, { recursive: true, force: true });
++    }
++  });
++
++  it('linked_repos_sync：root_path 不存在 → 抛错且业务函数零调用（错机派发保护）', async () => {
++    const handlers = buildHandlers();
++    const ghost = join(tmpRoot, 'does-not-exist');
++    await expect(handlers.get('linked_repos_sync')!(syncPayload(ghost))).rejects.toThrow(
++      /不存在或非目录/,
+     );
+-    await expect(handlers.get('linked_repos_sync')!(syncPayload(evil))).rejects.toMatchObject({
+-      code: 'forbidden',
+-    });
+     expect(runSyncMock).not.toHaveBeenCalled();
+   });
+ 
+@@ -115,14 +127,19 @@ describe('linked_repos RPC allowed_roots 守卫（2026-10-12-daemon-path-guard-c
+     expect(runSnapshotMock).toHaveBeenCalledWith(tmpRoot);
+   });
+ 
+-  it('linked_repos_snapshot：root_path 越界 → forbidden 且业务函数零调用', async () => {
++  it('linked_repos_snapshot：root_path 白名单外但存在 → 放行（ql-20260831-006）；不存在 → 抛错零调用', async () => {
+     const handlers = buildHandlers();
+-    const evil = IS_WIN ? 'C:\\Windows' : '/etc';
+-    await expect(handlers.get('linked_repos_snapshot')!({ root_path: evil })).rejects.toMatchObject(
+-      {
+-        code: 'forbidden',
+-      },
++    const outsideRoot = await mkdtemp(join(tmpdir(), 'linked-repos-snap-out-'));
++    try {
++      await handlers.get('linked_repos_snapshot')!({ root_path: outsideRoot });
++      expect(runSnapshotMock).toHaveBeenCalledTimes(1);
++    } finally {
++      await rm(outsideRoot, { recursive: true, force: true });
++    }
++    const ghost = join(tmpRoot, 'missing-dir');
++    await expect(handlers.get('linked_repos_snapshot')!({ root_path: ghost })).rejects.toThrow(
++      /不存在或非目录/,
+     );
+-    expect(runSnapshotMock).not.toHaveBeenCalled();
++    expect(runSnapshotMock).toHaveBeenCalledTimes(1); // 不存在那次未新增调用
+   });
+ });
+diff --git a/sillyhub-daemon/tests/test_init_lease.test.ts b/sillyhub-daemon/tests/test_init_lease.test.ts
+index 1afb44e95..4c17cc645 100644
+--- a/sillyhub-daemon/tests/test_init_lease.test.ts
++++ b/sillyhub-daemon/tests/test_init_lease.test.ts
+@@ -1410,13 +1410,14 @@ void homedir;
+ 
+ // ── 2026-10-12-daemon-path-guard-completion：rootPath 绝对形态守卫 ──────────────
+ describe('handleInitLease rootPath 绝对形态守卫（2026-10-12-daemon-path-guard-completion）', () => {
+-  it('rootPath 相对形态 → 入口 throw（先于 pull/init/writeLocalYaml 任何 fs/spawn）', async () => {
+-    await expect(
+-      handleInitLease({} as never, {
+-        workspaceId: 'ws-rel-guard',
+-        rootPath: 'rel/proj',
+-        serverOrigin: 'http://127.0.0.1:8000',
+-      }),
+-    ).rejects.toThrow('rootPath 非绝对路径');
++  it('rootPath 相对形态 → ok:false 结果体（对齐「逐步 catch 不上抛」契约，先于任何 fs/spawn；2026-10-12-regression-review-remediation F3 改判）', async () => {
++    const result = await handleInitLease({} as never, {
++      workspaceId: 'ws-rel-guard',
++      rootPath: 'rel/proj',
++      serverOrigin: 'http://127.0.0.1:8000',
++    });
++    expect(result.ok).toBe(false);
++    expect(result.error).toContain('rootPath 非绝对路径');
++    expect(result.specVersion).toBe(0);
+   });
+ });
+diff --git a/.sillyspec/changes/2026-10-12-regression-review-remediation/tasks.md b/.sillyspec/changes/2026-10-12-regression-review-remediation/tasks.md
+new file mode 100644
+index 000000000..30af8a4fd
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-regression-review-remediation/tasks.md
+@@ -0,0 +1,11 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T02:29:15.576Z
++---
++# 任务注册表（Tasks）— 2026-10-12-regression-review-remediation
++
++- [x] task-01: linked_repos 两 RPC 的白名单守卫改为 ql-20260831-006 信任语义：root_path 是 backend 下发的绑定工作区根（与会话 lease workspaceRoot 同源同信任级），不再过机器白名单，错机派发保护由存在性检查承担（stat 非目录/不存在即抛错，业务函数零调用）；绝对形态门保持不变
++- [x] task-02: handleInitLease 形态门从 throw 改为返回 ok:false+error（对齐函数自身「逐步 catch 不上抛」契约与 init 统计链），pullSpecBundle 抛错语义不变（三处调用方均 catch 可见）
++- [x] task-03: daemon.ts NaN 门注释修正旧危害表述（污染窗口 1 轮）；pi 延迟探测注释补多轮收敛 caveat（追问轮 runId 与 workers 首 run id 错配、本探针跳过）；borrow truncateText JSDoc 计数改准确口径
++- [x] task-04: num_turns/duration_ms 两处 typeof 门叠 Number.isFinite（对齐同函数 cost/duration_api 口径），NaN 不进 payload；新增用例先红后绿
++- [x] task-05: 测试：linked-repos 守卫测试改写为新语义（白名单外但存在→放行、不存在→拒止零调用、快照同款）；handleInitLease 用例改 ok:false 断言；NaN 用例扩 num_turns/duration_ms；既有相关面全绿；仅跑相关测试（规则 0）
+diff --git a/.sillyspec/changes/2026-10-12-regression-review-remediation/design.md b/.sillyspec/changes/2026-10-12-regression-review-remediation/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-regression-review-remediation/design.md
+@@ -0,0 +1,57 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 设计记录（Design Record）— 2026-10-12-regression-review-remediation
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++回归复审（三代理对抗审查）对六条防线修复的清偿：①**高优先**——daemon-path-guard 给 linked_repos 两 RPC 加的机器白名单守卫与 ql-20260831-006 产品决策冲突（用户决策明确「工作区绑定会话的默认工作目录就在工作区内，机器白名单不该拦截它」，仓内生产实证 E:\sgm/F:\WorkNew 两处工作区根均不在家目录白名单；会话 cwd 守卫 interactive-cwd-guard 为此专门跳过白名单、错机保护走存在性检查），现网存量部署会被首次 forbidden 拒止。修法：两 handler 白名单门改存在性检查（stat 非目录/不存在即抛错），与 interactive-cwd-guard 同一信任语义；②handleInitLease 头部 throw 穿透 _runInitLease 的「逐步 catch 不上抛」契约 → 改 ok:false 结果体（保 init 统计诊断链），pullSpecBundle 抛错不动（三处调用方均 catch 可见）；③注释勘误：NaN 污染窗口实为 1 轮（set 随即覆写，非「恒 NaN」）、pi 延迟探测补多轮收敛 caveat（workers 行按首 run id 锚定，追问轮 runId 恒 miss——ql-20260911-028 既有行为非本窗口引入）、borrow JSDoc 去具体计数；④num_turns/duration_ms 裸 typeof 叠 isFinite 对齐口径（NaN 单轮字段 NULL 面消除）。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- linked_repos_sync/snapshot：错误形态从「白名单越界 forbidden」变「不存在/非目录 plain Error」；白名单外但存在的合法工作区从「被拒」恢复为「放行」（回归修复）。get_spec_bundle 的 DA-2 白名单门不动（手动 import 场景，非本变更面）。
++- handleInitLease：非绝对 rootPath 从异常变为 ok:false 结果体（错误信息经 result.error 透传，backend init 统计链恢复）；其余行为零变化。
++- num_turns/duration_ms：非有限值不再进 payload（此前 NaN→null）；有限值逐字不变。无 schema/端点变化，`pnpm gen:types` 不需跑。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   存在性检查在 spawn/fs 前同步执行，与到达时序无关；存在性 TOCTOU 窗口（检查后目录被删）由既有 execFile cwd 失败路径承接（与 interactive-cwd-guard 同款边界）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   不适用：守卫为只读 stat；两 handler 并发各自独立判定，无共享可变状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   ok:false 结果体走既有 init 失败上报链（complete 携 spec_version=0），终态/统计一致性由既有路径保证；throw 路径删除后无 aborted 事务面。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   存在性检查针对本 workspace 绑定根，无跨工作区数据流；白名单移除不改变 backend 侧绑定归属校验（授权面在 backend，daemon 信任 backend 下发的绑定根——与会话路径同一信任模型）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++- 风险：移除机器白名单后，linked_repos 对「失陷 backend 下发任意存在路径」的防线回落到与会话路径相同的信任模型（backend 绑定 vouch + 存在性检查）——这是 ql-20260831-006 已裁决的平台信任边界，本变更是恢复一致性而非新增暴露；残余面（lease/spec-sync 路径同样信任 backend rootPath）在此一并留档为已知边界。
++- 放弃方案 A：保留白名单但 forbidden 降级为结果体 skipped——同步仍然不做（功能回归未修复），只是把 5xx 变安静失败，更难排障。
++- 放弃方案 B：机器主人把工作区根手工加入 allowed_roots 作为上线前提——把配置负担转嫁用户且与 ql-20260831-006「不该拦截」的裁决直接相悖。
++- 放弃方案 C：num_turns/duration_ms 保持裸 typeof（危害止于单轮 NULL）——与同函数另两字段口径统一是一行事，成本两行。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 改 | sillyhub-daemon/src/daemon.ts | 两 handler 白名单门改存在性检查；NaN 注释勘误；pi 探测多轮 caveat；num_turns/duration_ms isFinite |
++| 改 | sillyhub-daemon/src/spec-sync.ts | handleInitLease 形态门 throw→ok:false 结果体 |
++| 改 | sillyhub-daemon/src/borrow-sandbox-context.ts | truncateText JSDoc 去具体计数 |
++| 改 | sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts | 用例与头注改新语义（放行/拒止矩阵） |
++| 改 | sillyhub-daemon/tests/test_init_lease.test.ts | 形态门用例改 ok:false 断言 |
++| 改 | sillyhub-daemon/tests/daemon-interactive-bridge.test.ts | 新增 num_turns/duration_ms 非有限值用例 |
+
+diff --git a/.sillyspec/changes/2026-10-12-regression-review-remediation/proposal.md b/.sillyspec/changes/2026-10-12-regression-review-remediation/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-regression-review-remediation/proposal.md
+@@ -0,0 +1,32 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T02:29:15.575Z
++---
++# 提案书（Proposal）— 2026-10-12-regression-review-remediation
++
++## 动机
++
++任务原话转写：动机：回归复审（三代理）对六条防线修复的清偿项——高优先一条：daemon-path-guard-completion 给 linked_repos 两 RPC 加的 assertWithinAllowedRoots 白名单守卫与仓内既有产品决策 ql-20260831-006 冲突（工作区绑定路径不在机器白名单属合法形态，会话 cwd 守卫为此专门跳过白名单；仓内生产实证 E:\sgm、F:\WorkNew 两处工作区根均不在家目录白名单），现网存量部署的 linked_repos 同步会被首次 forbidden 拒止（功能回归）；另有复审小项：handleInitLease 头部 throw 违反自身「逐步 catch 返 ok:false」契约致 init 统计诊断链断、NaN 注释对旧危害表述夸大（污染窗口实为 1 轮非恒 NaN）、pi 延迟探测多轮收敛缺口未披露（backend workers 行按首 run id 锚定，追问轮 runId 恒 miss）、borrow JSDoc 调用计数失准、num_turns/duration_ms 裸 typeof 与 isFinite 口径不对称。
++成功标准：
++- linked_repos 两 RPC 的白名单守卫改为 ql-20260831-006 信任语义：root_path 是 backend 下发的绑定工作区根（与会话 lease workspaceRoot 同源同信任级），不再过机器白名单，错机派发保护由存在性检查承担（stat 非目录/不存在即抛错，业务函数零调用）；绝对形态门保持不变
++- handleInitLease 形态门从 throw 改为返回 ok:false+error（对齐函数自身「逐步 catch 不上抛」契约与 init 统计链），pullSpecBundle 抛错语义不变（三处调用方均 catch 可见）
++- daemon.ts NaN 门注释修正旧危害表述（污染窗口 1 轮）；pi 延迟探测注释补多轮收敛 caveat（追问轮 runId 与 workers 首 run id 错配、本探针跳过）；borrow truncateText JSDoc 计数改准确口径
++- num_turns/duration_ms 两处 typeof 门叠 Number.isFinite（对齐同函数 cost/duration_api 口径），NaN 不进 payload；新增用例先红后绿
++- 测试：linked-repos 守卫测试改写为新语义（白名单外但存在→放行、不存在→拒止零调用、快照同款）；handleInitLease 用例改 ok:false 断言；NaN 用例扩 num_turns/duration_ms；既有相关面全绿；仅跑相关测试（规则 0）
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. linked_repos 两 RPC 的白名单守卫改为 ql-20260831-006 信任语义：root_path 是 backend 下发的绑定工作区根（与会话 lease workspaceRoot 同源同信任级），不再过机器白名单，错机派发保护由存在性检查承担（stat 非目录/不存在即抛错，业务函数零调用）；绝对形态门保持不变
++2. handleInitLease 形态门从 throw 改为返回 ok:false+error（对齐函数自身「逐步 catch 不上抛」契约与 init 统计链），pullSpecBundle 抛错语义不变（三处调用方均 catch 可见）
++3. daemon.ts NaN 门注释修正旧危害表述（污染窗口 1 轮）；pi 延迟探测注释补多轮收敛 caveat（追问轮 runId 与 workers 首 run id 错配、本探针跳过）；borrow truncateText JSDoc 计数改准确口径
++4. num_turns/duration_ms 两处 typeof 门叠 Number.isFinite（对齐同函数 cost/duration_api 口径），NaN 不进 payload；新增用例先红后绿
++5. 测试：linked-repos 守卫测试改写为新语义（白名单外但存在→放行、不存在→拒止零调用、快照同款）；handleInitLease 用例改 ok:false 断言；NaN 用例扩 num_turns/duration_ms；既有相关面全绿；仅跑相关测试（规则 0）
++
++## 成功标准（可验证）
++
++1. linked_repos 两 RPC 的白名单守卫改为 ql-20260831-006 信任语义：root_path 是 backend 下发的绑定工作区根（与会话 lease workspaceRoot 同源同信任级），不再过机器白名单，错机派发保护由存在性检查承担（stat 非目录/不存在即抛错，业务函数零调用）；绝对形态门保持不变
++2. handleInitLease 形态门从 throw 改为返回 ok:false+error（对齐函数自身「逐步 catch 不上抛」契约与 init 统计链），pullSpecBundle 抛错语义不变（三处调用方均 catch 可见）
++3. daemon.ts NaN 门注释修正旧危害表述（污染窗口 1 轮）；pi 延迟探测注释补多轮收敛 caveat（追问轮 runId 与 workers 首 run id 错配、本探针跳过）；borrow truncateText JSDoc 计数改准确口径
++4. num_turns/duration_ms 两处 typeof 门叠 Number.isFinite（对齐同函数 cost/duration_api 口径），NaN 不进 payload；新增用例先红后绿
++5. 测试：linked-repos 守卫测试改写为新语义（白名单外但存在→放行、不存在→拒止零调用、快照同款）；handleInitLease 用例改 ok:false 断言；NaN 用例扩 num_turns/duration_ms；既有相关面全绿；仅跑相关测试（规则 0）
+
+diff --git a/.sillyspec/changes/2026-10-12-regression-review-remediation/requirements.md b/.sillyspec/changes/2026-10-12-regression-review-remediation/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-regression-review-remediation/requirements.md
+@@ -0,0 +1,69 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T00:42:29.656Z
++---
++# 需求规格（Requirements）— 2026-10-12-regression-review-remediation
++
++## 功能需求
++
++### FR-01: linked_repos 两 RPC 的白名单守卫改为 ql-20260831-006 信任语义：root_path 是 backend 下发的绑定工作区根（与会话 lease workspaceRoot 同源同信任级），不再过机器白名单，错机派发保护由存在性检查承担（stat 非目录/不存在即抛错，业务函数零调用）；绝对形态门保持不变
++
++- 两 handler 必须删除 `assertWithinAllowedRoots` 机器白名单门（ql-20260831-006 用户决策：工作区绑定根不在机器白名单属合法形态，仓内生产实证 E:\sgm/F:\WorkNew；会话 cwd 守卫 interactive-cwd-guard 为此专门跳过白名单），改为存在性检查：`stat` 失败或非目录必须抛错（含「不存在或非目录」文案），业务函数零调用；`linked-repos-sync.ts` 的 isAbsoluteLikePath 绝对形态门零变化。
++
++#### 场景：白名单外但存在 → 放行
++
++- Given root_path 为存在的目录且在 allowed_roots 之外
++- When 调用 sync/snapshot
++- Then 业务函数被调用（ql-20260831-006 语义钉）
++
++#### 场景：不存在 → 拒止
++
++- Given root_path 指向不存在的目录（错机派发形态）
++- When 调用 sync/snapshot
++- Then 抛「不存在或非目录」，业务函数零调用
++
++### FR-02: handleInitLease 形态门从 throw 改为返回 ok:false+error（对齐函数自身「逐步 catch 不上抛」契约与 init 统计链），pullSpecBundle 抛错语义不变（三处调用方均 catch 可见）
++
++- `handleInitLease` 对非绝对 rootPath 必须返回 `{ok:false, specVersion:0, error, daemonState:null, specDir:null}` 结果体（不再 throw——头部 throw 会穿透 task-runner _runInitLease 的刻意不加 try/catch，落顶层 generic failed 且丢 init_error 诊断）；先于任何 fs/spawn 的次序不变；`pullSpecBundle` 的形态抛错与三处调用方 catch 保持不变。
++
++#### 场景：结果体失败
++
++- Given rootPath='rel/proj'
++- When handleInitLease
++- Then 返回 ok:false、error 含「rootPath 非绝对路径」、specVersion=0，无异常上抛
++
++### FR-03: daemon.ts NaN 门注释修正旧危害表述（污染窗口 1 轮）；pi 延迟探测注释补多轮收敛 caveat（追问轮 runId 与 workers 首 run id 错配、本探针跳过）；borrow truncateText JSDoc 计数改准确口径
++
++- 注释三处勘误必须落盘：①NaN 门注释「污染基线（后续合法快照误差分）」改为「基线随即被 set(NaN) 覆写、污染窗口 1 轮」（回归复审 F3 勘误：非恒 NaN）；②pi 延迟探测注释补「workers 行 id=分身首 run id，追问轮 runId 恒 miss、多轮收敛押首轮 timer+末文缓存」caveat（回归复审 F6）；③truncateText JSDoc 去具体计数（调用点随渲染面增长）。
++
++#### 场景：注释勘误
++
++- When 审阅三处注释
++- Then 表述与实现/复审结论一致
++
++### FR-04: num_turns/duration_ms 两处 typeof 门叠 Number.isFinite（对齐同函数 cost/duration_api 口径），NaN 不进 payload；新增用例先红后绿
++
++- 两处门必须叠加 `Number.isFinite`（对齐同函数 cost/duration_api 既有口径）：非有限值不进 payload（NaN 序列化 null 的单轮字段 NULL 面消除）；有限值行为逐字不变；新增 NaN/Infinity 用例先红后绿。
++
++#### 场景：口径统一
++
++- Given num_turns=NaN、duration_ms=Infinity、duration_api_ms=12000
++- When onTurnResult
++- Then 前两键 undefined、duration_api_ms=12000（合法值差分不受影响）
++
++### FR-05: 测试：linked-repos 守卫测试改写为新语义（白名单外但存在→放行、不存在→拒止零调用、快照同款）；handleInitLease 用例改 ok:false 断言；NaN 用例扩 num_turns/duration_ms；既有相关面全绿；仅跑相关测试（规则 0）
++
++- 守卫测试文件头注与用例语义必须同步新信任模型（含与 ql-20260831-006 的关系说明）；handleInitLease 用例改断言 ok:false 结果体；bridge 新增非有限值用例；三个测试文件全绿；只跑相关测试（规则 0）。
++
++#### 场景：相关面回归
++
++- When 运行三个测试文件 + tsc
++- Then 全部通过
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts「linked_repos_sync：root_path 白名单外但存在 → ql-20260831-006 语义放行（机器白名单不拦工作区根）」「linked_repos_sync：root_path 不存在 → 抛错且业务函数零调用（错机派发保护）」
++FR-02: sillyhub-daemon/tests/test_init_lease.test.ts「rootPath 相对形态 → ok:false 结果体（对齐「逐步 catch 不上抛」契约，先于任何 fs/spawn；2026-10-12-regression-review-remediation F3 改判）」
++FR-03: 不适用：注释勘误由 change.patch 冻结面 diff 直接核验，无独立测试面
++FR-04: sillyhub-daemon/tests/daemon-interactive-bridge.test.ts「num_turns/duration_ms 非有限值 → 不进 payload（isFinite 口径统一，2026-10-12-regression-review-remediation F1）」
++FR-05: sillyhub-daemon/tests/daemon-linked-repos-guard.test.ts（+ test_init_lease + daemon-interactive-bridge 三文件全文件回归）

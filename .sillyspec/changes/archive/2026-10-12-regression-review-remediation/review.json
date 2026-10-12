@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-regression-review-remediation",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b63e251d656e77106b36eabed32f96d9f629e30c",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——存在性 TOCTOU 窗口由既有 execFile cwd 失败路径承接，与 interactive-cwd-guard 同款既有边界）",
+    "并发": "ok（无声明边界；design「不适用」属实：守卫为只读 stat、两 handler 无共享可变状态）",
+    "切换": "ok（无声明边界；ok:false 结果体走既有 init 失败上报链，task-runner.ts:1043 裸 await 消费 result 证实 throw 穿透风险与修法依据）",
+    "作用域": "ok（边界已裁决：可接受——残余面回落 ql-20260831-006 既有信任模型：backend 绑定 vouch + 存在性检查，授权真面在 backend；本变更是恢复一致性非新增暴露；get_spec_bundle DA-2 白名单门不动（daemon.ts:6889 实存）属独立审计裁决面，披露充分，一并裁决可接受）"
+  },
+  "reviewedAt": "2026-10-12T10:38:00+08:00"
+}
