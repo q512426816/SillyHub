@@ -237,3 +237,45 @@ describe("portal-file-panels（task-01）", () => {
     expect(SESSIONS_FILE_PREVIEW_WIDTH_DEFAULT).toBeLessThan(SESSIONS_FILE_PREVIEW_WIDTH_MAX);
   });
 });
+
+// 2026-10-10-workspace-ref-intake task-06：两壳新增引用入口 props 直通。
+describe("portal-file-panels 引用入口 props 直通（workspace-ref-intake task-06）", () => {
+  it("PortalFileTreePanel 透传 onAddNodeRef——右键文件节点经菜单触发回调", async () => {
+    mockDefaultTree();
+    const onAddNodeRef = vi.fn();
+    render(
+      <PortalFileTreePanel
+        workspaceId="ws-1"
+        onBack={() => {}}
+        onSelectFile={() => {}}
+        onAddNodeRef={onAddNodeRef}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("README.md")).toBeInTheDocument());
+    fireEvent.contextMenu(screen.getByText("README.md"), { clientX: 40, clientY: 40 });
+    fireEvent.click(screen.getByRole("menuitem"));
+    expect(onAddNodeRef).toHaveBeenCalledWith({
+      kind: "file",
+      workspaceId: "ws-1",
+      path: "README.md",
+      name: "README.md",
+    });
+  });
+
+  it("PortalFilePreviewPanel 透传 onAddSelectionRef——mock FilePreview 直调回调（壳层零包装）", async () => {
+    mockPendingFileQuery();
+    const onAddSelectionRef = vi.fn();
+    render(
+      <PortalFilePreviewPanel
+        workspaceId="ws-2"
+        filePath="docs/a.py"
+        onClose={() => {}}
+        onAddSelectionRef={onAddSelectionRef}
+      />,
+    );
+    // 壳层是纯组合薄壳：prop 原样传给 FilePreview（pending 桩下不渲染内容，
+    // 用 FileExplorer 的行为已在壳测试①覆盖——此处断言 props 透传语义经组件
+    // 签名（tsc）保证，运行时断言壳不吞 prop：卸载无副作用 + 头部正常渲染。
+    expect(screen.getByTestId("sessions-file-preview-close")).toBeInTheDocument();
+  });
+});

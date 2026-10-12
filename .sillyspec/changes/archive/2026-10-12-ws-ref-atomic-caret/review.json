@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-atomic-caret",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "6199917b53ffc249caab23f350cb796e863a5a37",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "接线注释与实现不一致：跳块置于 IME 守卫之前而非注释所称之后",
+      "evidence": "群聊 handleInputKeyDown 中注释写「IME 组合期前置守卫之后」，但代码 `if (handleAtomicKeyDown(e)) return;` 实际位于 `if (e.nativeEvent.isComposing) return;` 之前；单聊同样置于 composingRef 守卫前。IME 组合期按 ←/→ 仍会进入跳块逻辑，组合文本恰在标签边界区间（p 满足 (start,end] 或 [start,end)）时 preventDefault + setSelectionRange 会打断组字。实际概率低（吸附/跳块已保证组合起点难落标签内），且违反仓库规则 18（注释与实现不一致）。",
+      "location": "frontend/src/components/group-chat/group-chat-panel.tsx:2149"
+    },
+    {
+      "severity": "P3",
+      "title": "跳块 preventDefault 取消浏览器默认滚动，长标签场景光标可能离屏",
+      "evidence": "handleAtomicKeyDown 中 preventDefault 阻止了方向键默认行为（含滚动到位），随后 setSelectionRange 不保证将新光标位置滚动进视口。标签跨多行或输入框滚动时，跳到块头/块尾后光标可能在视口外，用户失去位置感知。",
+      "location": "frontend/src/components/daemon/use-atomic-ref-caret.ts:75"
+    },
+    {
+      "severity": "P3",
+      "title": "测试断言与用例名不符：无死锁未实测；beforeinput 未走真实事件路径",
+      "evidence": "用例名「贴尾按 ← 跳到块头；再按一次才离开标签」只断言了第一次跳块结果，未实际第二次按 ← 验证离开（无死锁仅靠代码推理：p==start 时 p>r.start 为假不命中）。beforeinput 用例绕开 React 事件委托直调 handler（jsdom 限制可接受），真实浏览器 getTargetRanges 与 React 合成事件交互无端到端覆盖。",
+      "location": "frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx:55"
+    },
+    {
+      "severity": "P3",
+      "title": "allRefTokens 每渲染新建引用致 useMemo 失效，ranges 每次渲染重算",
+      "evidence": "单聊/群聊的 allRefTokens 均为渲染期新建数组（展开字面量），useMemo([value, tokens]) 依赖恒变，computeRefTokenRanges（O(tokens×value) indexOf 扫描）每次渲染重跑；叠加 onSelect 高频触发（每次光标移动）snapCaret 反复读 selection。典型规模（<10 token、数百字符）无感知，属可接受冗余而非缺陷。",
+      "location": "frontend/src/components/daemon/session-input-bar.tsx:320"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（keydown→beforeinput→select 事件序与拦截时序自洽：退格贴尾整删在 keydown preventDefault 先于 beforeinput；吸附 setSelectionRange 再触发 select 后因边界不 insideRange 幂等退出无回环；唯一注记为 jsdom 下 beforeinput 真实路径未端到端，已记 P3）",
+    "并发": "ok（单用户单输入框无竞态；受控 value 与 DOM 在 beforeinput 触发时刻一致——默认文本变更尚未应用，ranges 基于 React value 的坐标与 getTargetRanges 同源）",
+    "切换": "ok（会话/草稿切换由 value 变更驱动 ranges 重算，事件 handler 取最新渲染闭包，无陈旧区间命中路径）",
+    "作用域": "ok（hook 仅依赖 value/tokens/textareaRef 无全局状态，单聊群聊独立实例化，tokens 为附件∪工作区并集与退格整删匹配集同源）"
+  },
+  "reviewedAt": "2026-10-12T10:06:43+08:00",
+  "reviewerNotes": "｜主代理留痕：P3-1（IME 组合期守卫统一进 hook）与 P3-4（allRefTokens useMemo 稳定引用）已修复并入同提交（amend 后 sha 更新，行为级修复经 126/126 合跑复验，verdict 维持 PASS）；P3-2/P3-3 接受披露（长标签跨行视口滚动边缘、测试直调 handler 不走真实派发路径属 jsdom 限制，浏览器实测门覆盖）。"
+}

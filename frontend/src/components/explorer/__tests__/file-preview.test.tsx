@@ -50,11 +50,33 @@ vi.mock("@/components/ui/markdown-text", () => ({
 }));
 
 // ── mock：Prism Light 高亮器（dynamic loader 的装载目标；jsdom 不做真实高亮）──
+// showLineNumbers 开启时按真实库行为穿插渲染行号 span（行号锚 class=
+// react-syntax-highlighter-line-number，selectionLineRange 依赖该结构）。
 const highlighter = vi.hoisted(() => ({ registerLanguage: vi.fn() }));
 vi.mock("react-syntax-highlighter/dist/esm/prism-light", () => {
-  const Highlighter = (props: { language?: string; children?: ReactNode }) => (
-    <pre data-testid="code-highlight" data-language={props.language}>
-      <code>{props.children}</code>
+  const Highlighter = (props: {
+    language?: string;
+    children?: ReactNode;
+    showLineNumbers?: boolean;
+  }) => (
+    <pre
+      data-testid="code-highlight"
+      data-language={props.language}
+      data-show-line-numbers={String(props.showLineNumbers === true)}
+    >
+      <code>
+        {props.showLineNumbers
+          ? String(props.children ?? "")
+              .split("\n")
+              .map((line, i) => (
+                <span key={i}>
+                  <span className="react-syntax-highlighter-line-number">{i + 1}</span>
+                  <span className="line-content">{line}</span>
+                  {"\n"}
+                </span>
+              ))
+          : props.children}
+      </code>
     </pre>
   );
   Highlighter.registerLanguage = highlighter.registerLanguage;
@@ -215,7 +237,7 @@ describe("FilePreview", () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("truncated=true 顶部黄条提示截断并引导下载（未识别扩展名退化纯文本 pre）", () => {
+  it("truncated=true 顶部黄条提示截断并引导下载（未识别扩展名退化纯文本行结构 pre）", () => {
     mockQueryResult(
       makeFile({ name: "server.log", truncated: true, content: "line1\nline2" }),
     );
@@ -224,9 +246,14 @@ describe("FilePreview", () => {
     );
 
     expect(screen.getByText(/文件超过 10MB，仅显示前 10MB/)).toBeInTheDocument();
-    // .log 不在语言映射表 → 纯文本 pre 兜底（原始内容直出，不经任何解析）
+    // .log 不在语言映射表 → 纯文本分支行结构（task-02 起带行号）：内容逐字还原，
+    // 行号槽独立标记（不混入正文文本）。
     const pre = container.querySelector("pre");
-    expect(pre?.textContent).toBe("line1\nline2");
+    expect(pre).not.toBeNull();
+    const lineEls = pre!.querySelectorAll<HTMLElement>("[data-line]");
+    expect(Array.from(lineEls).map((el) => el.dataset.line)).toEqual(["1", "2"]);
+    const contents = pre!.querySelectorAll("[data-line] > span:last-child");
+    expect(Array.from(contents).map((el) => el.textContent)).toEqual(["line1", "line2"]);
     expect(screen.queryByTestId("code-highlight")).not.toBeInTheDocument();
   });
 
@@ -482,5 +509,166 @@ describe("FilePreview", () => {
 
     unmount();
     expect(revokeObjectURL).toHaveBeenCalledWith(url2);
+  });
+
+  // ── 行号与选区右键（2026-10-10-workspace-ref-intake task-02，FR-04/FR-05）──────
+
+  /** 模拟浏览器文本选区（jsdom Selection 可用，渲染无效但 range 语义真实）。 */
+  function setDomSelection(startNode: Node, endNode: Node) {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.setStart(startNode, 0);
+    range.setEnd(endNode, (endNode.textContent ?? "").length);
+    sel!.removeAllRanges();
+    sel!.addRange(range);
+  }
+
+  /** 内容区容器（selectionLineRange 圈定范围）。 */
+  function contentContainer(): HTMLDivElement {
+    const el = document.querySelector(".min-h-0.flex-1.overflow-auto");
+    if (!(el instanceof HTMLDivElement)) throw new Error("内容区容器未找到");
+    return el;
+  }
+
+  it("代码分支开 showLineNumbers（行号穿插渲染，对齐 oneDark 观感）", async () => {
+    mockQueryResult(makeFile({ name: "main.py", content: "a\nb\nc" }));
+    render(<FilePreview workspaceId="ws-1" filePath="backend/main.py" />);
+    const code = await screen.findByTestId("code-highlight");
+    expect(code).toHaveAttribute("data-show-line-numbers", "true");
+    const anchors = code.querySelectorAll(".react-syntax-highlighter-line-number");
+    expect(Array.from(anchors).map((el) => el.textContent)).toEqual(["1", "2", "3"]);
+  });
+
+  it("纯文本分支渲染行号槽与 data-line 行结构，行号列不可选中", () => {
+    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb\ncc" }));
+    const { container } = render(
+      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" />,
+    );
+    const gutters = container.querySelectorAll("[data-ws-ref-line]");
+    expect(Array.from(gutters).map((el) => el.textContent)).toEqual(["1", "2", "3"]);
+    // 行号列 select-none（选区锚点只落内容区，D-007）
+    expect(gutters[0]).toHaveClass("select-none");
+    const lineEls = container.querySelectorAll<HTMLElement>("[data-line]");
+    expect(Array.from(lineEls).map((el) => el.dataset.line)).toEqual(["1", "2", "3"]);
+  });
+
+  it("纯文本分支选中行右键：菜单单项文案含名称:起-止，点击回调 desc 字段正确", () => {
+    const onAddSelectionRef = vi.fn();
+    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb\ncc" }));
+    const { container } = render(
+      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" onAddSelectionRef={onAddSelectionRef} />,
+    );
+    // 选中第 2~3 行内容
+    const lineContents = container.querySelectorAll("[data-line] > span:last-child");
+    setDomSelection(lineContents[1]!.firstChild!, lineContents[2]!.firstChild!);
+    fireEvent.contextMenu(contentContainer(), { clientX: 100, clientY: 100 });
+
+    const item = screen.getByRole("menuitem");
+    expect(item).toHaveTextContent("添加选中内容到会话输入框（notes.txt:2-3）");
+    fireEvent.click(item);
+    expect(onAddSelectionRef).toHaveBeenCalledTimes(1);
+    expect(onAddSelectionRef).toHaveBeenCalledWith({
+      kind: "code",
+      workspaceId: "ws-1",
+      path: "docs/notes.txt",
+      name: "notes.txt",
+      lines: [2, 3],
+    });
+    // 点击后菜单关闭
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("代码分支选中行右键：跨行选区按实际文档行号（反向免疫力由 min-max 结构保证，R-04）", async () => {
+    const onAddSelectionRef = vi.fn();
+    mockQueryResult(makeFile({ name: "main.py", content: "l1\nl2\nl3\nl4" }));
+    const { container } = render(
+      <FilePreview workspaceId="ws-1" filePath="src/main.py" onAddSelectionRef={onAddSelectionRef} />,
+    );
+    await screen.findByTestId("code-highlight");
+    const contents = container.querySelectorAll(".line-content");
+
+    // 跨行正向选区：行 2 → 行 4（构造顺序交替验证 min-max 兜底：先 end 后 start 段落）
+    setDomSelection(contents[1]!.firstChild!, contents[3]!.firstChild!);
+    fireEvent.contextMenu(contentContainer(), { clientX: 50, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem"));
+    expect(onAddSelectionRef).toHaveBeenLastCalledWith(
+      expect.objectContaining({ lines: [2, 4] }),
+    );
+
+    // 行 1 → 行 2
+    setDomSelection(contents[0]!.firstChild!, contents[1]!.firstChild!);
+    fireEvent.contextMenu(contentContainer(), { clientX: 60, clientY: 60 });
+    fireEvent.click(screen.getByRole("menuitem"));
+    expect(onAddSelectionRef).toHaveBeenLastCalledWith(
+      expect.objectContaining({ lines: [1, 2] }),
+    );
+    // 注：浏览器反向选区（Shift+点击从后往前）在 DOM Range 层恒 forward（规范
+    // setStart/setEnd 自动 normalize），方向信息只在 Selection anchor/focus——
+    // selectionLineRange 的 min-max 为结构级反向免疫，jsdom 无法构造反向用例。
+  });
+
+  it("无选区右键不拦截（浏览器默认菜单，D-006）；document 点击关闭菜单", () => {
+    const onAddSelectionRef = vi.fn();
+    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb" }));
+    render(
+      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" onAddSelectionRef={onAddSelectionRef} />,
+    );
+    // 清空选区后右键：defaultPrevented=false
+    window.getSelection()!.removeAllRanges();
+    const evt = fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
+    expect(evt).toBe(true); // 未被 preventDefault
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // 有选区右键出菜单后，document 级点击关闭
+    const lineContents = document.querySelectorAll("[data-line] > span:last-child");
+    setDomSelection(lineContents[0]!.firstChild!, lineContents[1]!.firstChild!);
+    fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("未传 onAddSelectionRef 时选区右键零拦截（explorer 页消费方行为不变）", () => {
+    mockQueryResult(makeFile({ name: "notes.txt", content: "aa\nbb" }));
+    const { container } = render(
+      <FilePreview workspaceId="ws-1" filePath="docs/notes.txt" />,
+    );
+    const lineContents = container.querySelectorAll("[data-line] > span:last-child");
+    setDomSelection(lineContents[0]!.firstChild!, lineContents[1]!.firstChild!);
+    const evt = fireEvent.contextMenu(contentContainer(), { clientX: 10, clientY: 10 });
+    expect(evt).toBe(true);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it(".md/图片/二进制/原生预览分支零改动：无行号结构、无选区拦截（D-002）", async () => {
+    // .md：MarkdownText 渲染，无 data-line
+    mockQueryResult(makeFile({ name: "README.md", content: "# t\n\n正文" }));
+    const t1 = render(<FilePreview workspaceId="ws-1" filePath="a/README.md" onAddSelectionRef={vi.fn()} />);
+    await screen.findByTestId("markdown-text");
+    expect(t1.container.querySelector("[data-line]")).toBeNull();
+    expect(t1.container.querySelector("[data-ws-ref-line]")).toBeNull();
+    t1.unmount();
+
+    // 图片：objectURL 内联
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    mockQueryResult(makeFile({ name: "logo.png", binary: true, content: "" }));
+    const t2 = render(<FilePreview workspaceId="ws-1" filePath="a/logo.png" onAddSelectionRef={vi.fn()} />);
+    await screen.findByRole("img", { name: "logo.png" });
+    expect(t2.container.querySelector("[data-line]")).toBeNull();
+    t2.unmount();
+
+    // 二进制：元信息卡
+    mockQueryResult(makeFile({ name: "app.exe", binary: true, content: "" }));
+    const t3 = render(<FilePreview workspaceId="ws-1" filePath="bin/app.exe" onAddSelectionRef={vi.fn()} />);
+    expect(await screen.findByText(/二进制文件不预览/)).toBeInTheDocument();
+    expect(t3.container.querySelector("[data-line]")).toBeNull();
+    t3.unmount();
+
+    // pdf 原生预览默认态：iframe（sourceMode=false）
+    mockQueryResult(makeFile({ name: "report.pdf", binary: true, content: "" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["%pdf"]));
+    const t4 = render(<FilePreview workspaceId="ws-1" filePath="docs/report.pdf" onAddSelectionRef={vi.fn()} />);
+    await screen.findByTitle("report.pdf 浏览器预览");
+    expect(t4.container.querySelector("[data-line]")).toBeNull();
   });
 });

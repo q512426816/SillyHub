@@ -2437,3 +2437,126 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：4c27f731d5dec5a89ad1d7e3bc9503808c73a424
 理由：最大风险：viewer（访客）也获得 init 权限。独立评审（review.json P2， 2026-10-12）修正本节初稿的两处不准确表述，以下为补正后口径： - 初稿称"访客通常无 daemon 绑定，实际停在 409"——不准确：访客可以 自建绑定，`PUT /my-binding` 权限门同为 WORKSPACE_READ （member_runtimes/router.py:121），"通常无绑定"只是运营假设，不是防线。 - 初稿称"init 不产生服务端提权"——不准确：init lease claim 是 `shpsync_` sync token 的全仓唯一签发点（daemon/lease/context.py:856）， 持 token 可经 `POST /changes/-/spec-sync` 由 `SpecWorkspaceService.apply_ops` 单事务直写服务端 spec 源 （platform_sync/router.py:233-264，无审批门），另有 progress/documents/ approval/quicklog/agent-logs 五个写端点同通道。 - 净新增面评估：shpsync 写链路对可写角色本就存在、本次未改它；本次把 触发人群扩大到全部只读成员（viewer 含绑定自建路径）。 - 裁决：有条件可接受——init 本体（拉自己本地副本、lease 有 runtime owner 归属校验跨用户 404）无害；shpsync 链路沿用既有权限语义。 跟进项（独立变更，不阻塞本收口）：服务层按角色收窄 init 触发面， 或收窄 shpsync sync token 的写域。 试过/考虑过但放弃的方案： - 保持 WORKSPACE_WRITE、给 developer 角色加 workspace:write 权限点： 动的是全局角色种子，波及所有带写语义的端点（成员管理、配置修改等全部 对 developer 开放），远超"允许初始化本地环境"的诉求，弃。 - 仅对 init 例外放行 business_member/developer 白名单角色：在权限体系外 引入角色名硬编码（ROLE_KEY_WHITELIST 模式），角色演进时易漂移， workspace:read 已是"成员"的最自然表达，弃。 - activate 一并放宽：用户裁决仅放宽 init，activate 语义（激活工作区本体） 仍是写操作，不动，弃。
+
+## D-002@v1 选区引用本期只覆盖代码/纯文本预览分支
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：用户确认本期只做代码（SyntaxHighlighter）与纯文本（pre）分支；.md 富文本态不做选区引用，后续需要再补「源码视角」。
+故障面：用户在 .md 预览选中文字右键无菜单，可能误以为功能失效（tooltip/引导文案缓解）
+
+## D-003@v1 引用为「指向」语义——只存路径+行号，不嵌选中文本快照
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：不嵌入。token 置换为 [代码引用:wid|path|L起-L止]，智能体按路径+行号自读最新内容（原型确认轮）。
+故障面：发送后文件内容变化，智能体读到的是新内容而非用户选择时的内容（接受：引用语义即指向）
+退役判据：若用户反馈需要快照语义，再评估嵌入文本或版本号锚定
+
+## D-004@v1 正式引用文本协议三类标记，后端零改动
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：复用附件引用的正文透传机制，扩展三类标记：[文件引用:wid|path] / [目录引用:wid|path] / [代码引用:wid|path|L起-L止]；wid=工作区 id，path=相对工作区根 POSIX 路径；后端/API/schema 零改动。
+故障面：协议字面被用户手改正文破坏 → 解析不命中降级为纯文本显示（与附件引用孤儿降级同口径）
+退役判据：若未来引用升级为结构化消息块（非文本协议），三类标记整体退役
+
+## D-005@v1 附件 token 与工作区引用 token 序号池合并
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：唯一化分配池合并两类 token（附件 id 映射 + 工作区引用映射共用 existingTokens 并集）；序号按「完整显示基名」分配——显示文本不同（如文件 design.md vs 代码块 design.md:10-16）不加序号，完全相同才 ·2 起。
+故障面：两池若漏合并，同名附件+同名文件引用 token 文本撞车，置换时错绑
+退役判据：两类 token 若改为不同括号形态（如工作区引用用『』），池分离后本决策退役
+
+## D-006@v1 预览区无选区右键不拦截；非文本分支无选区功能
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：仅当预览内容区存在非折叠选区且落在行元素内才拦截右键弹自定义菜单；无选区/选区在行号槽外不拦截（浏览器默认菜单）；图片/PDF/二进制分支永不拦截。
+故障面：用户期望无选区也能右键添加整个文件——本期预览区菜单只有选区项（整文件入口在文件树右键），引导文案说明
+
+## D-008@v2 组装位以 grep 实测现状为准（7 处，非 R-04 旧记 8 处）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：2026-10-10 独立审查（review-2026-10-10-131956 UB-1）grep 实测 substituteAttRefsForSend 调用点 7 处：session-panel-dialog.tsx:312/392/1343、session-panel-page.tsx:835/2748/3258、group-chat-panel.tsx:1969（2026-10-09 R-04 记 8 处已漂移）。
+supersedes：D-008@v1
+故障面：照抄旧清单漏接新点位（如 dialog:1343）导致该路径 token 直发
+退役判据：无（与 D-008@v1 同生命周期）
+
+## D-009@v1 实现架构=扩展附件引用库（方案 A）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：用户选 A（2026-10-10 方案选择轮）：扩展 frontend/src/lib/attachment-refs.ts 纯函数库 + 复用 InputRefOverlay——附件与工作区引用共用同一 token 机制/退格/角标；序号池合并（D-005）在同库自然落地；原型即此方案已实测。
+故障面：函数签名需同时容纳 uuid 锚（附件）与 wid+path 锚（工作区），泛化不当会复杂化既有附件路径（设计时统一为「引用描述符」结构化解耦）
+退役判据：若附件与工作区引用未来分化为不同编辑器体系，再评估拆库
+
+## D-012@v1 槽位透传经 SessionPanel 分发器（index.tsx）——plan allowed_paths 通道缺口补齐
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：按 design 接口定义的 props 正路实现：index.tsx SessionPanelProps 增两个可选 prop（pendingWsRefInsert/onPendingWsRefInsertHandled）并在 page 分支显式透传（dialog 分支既有 {...props} spread 自动携带）；槽位类型 interface 定义在 session-panel-page.tsx（task-07 allowed_paths 内）随签名并入，page-helpers.tsx 不动。
+故障面：透传遗漏会让 portal 下发的槽位在分发器层断链（输入区收不到）——sessions-portal 测试覆盖三分支断言兜底
+
+## D-013@v1 预览区右键菜单内联实现（不复用 floating-context-menu）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：execute 验收评审偏差 1（execute-review-2026-10-10-164613）：task-02 与 task-03 同 Wave 并行，预览区内联实现避免对并行新建组件的运行时依赖；同为看板 fixed div 同模式，行为等价。
+故障面：两处菜单样式/行为漂移（接受：体量小，视觉走同一 token 体系）
+退役判据：第二个菜单需求出现时统一收敛
+
+## D-014@v1 FR-07 历史渲染内聚至 InlineAttRefTextWithPreview（turn-segment-views 零改动）
+状态：implemented
+变更：2026-10-10-workspace-ref-intake
+锚点：未记录
+最近确认：38bb5b21e
+理由：execute 验收评审偏差 2：组件内部升级（InlineAttRefText 换 parseInlineRefs + WithPreview 按 kind 分流 fetchDownload/mime=null）使单聊+群聊全部既有消费点自动获得三类渲染，覆盖面优于逐点接线。
+故障面：组件承担多职责（解析+预览分流）；可接受（与附件引用先例同构）
+退役判据：若预览分流逻辑复杂化再拆独立 hook
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-emoji-inline
+锚点：未记录
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+理由：最大风险：emoji 宽度在不同平台字体下的渲染差异（Windows/macOS/Linux 不一致）——但占位文本与 textarea 用同一字符同一字体栈，两侧永远同宽（同源对齐），风险仅剩视觉观感，可接受。放弃的方案：lucide inline 图标内嵌（撑宽背景块→后续 token 漂移，否决）；图标 absolute 悬浮在文字前（遮挡前文字符且盖住【，观感差，否决）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-atomic-caret
+锚点：未记录
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+理由：最大风险：拦截面过宽误伤正常输入——部分重叠拒绝会让「拖选从标签中间开始的一段删除」被拒（用户需重选）；接受（行为可预期，完整覆盖整块的选区放行覆盖主路径）。放弃的方案：换 contenteditable 富文本（原子节点原生支持，但 2026-10-09 D-001 已否决——IME/退格/联想全链路回归风险大，本诉求未达「token 机制不可维护」的复潮条件）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-hover-tip-flip
+锚点：未记录
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+理由：风险：TIP_EST_HEIGHT=48 是粗估（实际两行文本≈42px）——翻转判定略保守（早翻），只影响翻转时机不影响可见性。放弃的方案：渲染后读实际高度再翻（useLayoutEffect 二段定位）——复杂度不值（估高误差只导致提前翻转，无功能影响）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-hover-tip-portal
+锚点：未记录
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+理由：风险：body 直挂元素的测试断言路径变化——已同步改 document.querySelector 并隔离用例（unmount 后断言）。放弃的方案：向上排查移除页面祖先的 transform（根在布局容器/动画库，影响面大且布局再变会复发）；portal 是标准免疫方案。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-12-ws-ref-ws-name
+锚点：未记录
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+理由：风险：无（纯显示增强，降级路径完备）。放弃的方案：两输入区各自拉工作区列表（重复请求+群聊面板无现成数据源）；历史标记协议加名称字段（协议污染，历史气泡本就显示路径不需要）。

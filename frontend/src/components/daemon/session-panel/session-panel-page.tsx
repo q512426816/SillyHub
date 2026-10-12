@@ -25,7 +25,10 @@ import {
   joinAttachmentMarkers, logsToTurns, parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import {
   substituteAttRefsForSend,
+  substituteWsRefsForSend,
   type AttRefTokenMap,
+  type WsRefDesc,
+  type WsRefTokenMap,
 } from "@/lib/attachment-refs";
 import {
   SessionInputBar, type SessionInputMentions,
@@ -138,7 +141,7 @@ import {
   ACTIVE_RUN_STATUSES, deriveTakeoverChrome,
 } from "./page-helpers";
 import { listAgentLogs } from "@/lib/agent-logs";
-import { TakeoverBridgeNote } from "./takeover-bridge-note";
+import { TakeoverBridgeNote } from "./takeover-bridge-note";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ── task-03（2026-09-08-session-turn-nav / FR-03 / D-002@v1 D-004@v1）：
@@ -556,6 +559,18 @@ export interface SessionPanelSubagentProps {
   onSubagentPanelClose?: () => void;
 }
 
+/**
+ * 工作区引用插入槽位 props（2026-10-10-workspace-ref-intake task-07，FR-01
+ * 通道消费端）——portal（task-06）经 SessionPanel 分发器透传；未传（悬浮宿主
+ * 等旧消费方）内部视为 null 零回归。
+ */
+export interface SessionPanelWsRefSlotProps {
+  /** 待消费槽位（nonce 自增保证同引用可重复触发）。 */
+  pendingWsRefInsert?: { desc: WsRefDesc; nonce: number } | null;
+  /** 槽位消费完成回抛（portal 清槽）。 */
+  onPendingWsRefInsertHandled?: (next: { desc: WsRefDesc; nonce: number } | null) => void;
+}
+
 export function SessionPanelPage({
   sessionId,
   machines,
@@ -569,7 +584,9 @@ export function SessionPanelPage({
   openSubagentId,
   onOpenSubagent,
   onSubagentPanelClose,
-}: SessionPanelPageProps & SessionPanelSubagentProps) {
+  pendingWsRefInsert,
+  onPendingWsRefInsertHandled,
+}: SessionPanelPageProps & SessionPanelSubagentProps & SessionPanelWsRefSlotProps) {
   const qc = useQueryClient();
   const notify = useNotify();
 
@@ -766,6 +783,9 @@ export function SessionPanelPage({
   // 2026-10-09-attachment-inline-reference task-04：附件引用 token 映射（输入区
   // 受控回传；发送组装时置换为 uuid 锚定正式引用，D-003）。
   const [attTokenMap, setAttTokenMap] = useState<AttRefTokenMap>({});
+  // 2026-10-10-workspace-ref-intake task-07：工作区引用 token 映射（输入区
+  // onWsRefTokensChange 受控回传；发送组装 substituteWsRefsForSend 消费，D-008@v2）。
+  const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
   // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化
@@ -845,7 +865,10 @@ export function SessionPanelPage({
     const sid = sessionId;
     const rawPrompt = input.trim();
     // task-04（D-003）：定时路径同样置换引用 token；摘要/清空比对用原文。
-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    const prompt = substituteWsRefsForSend(
+      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+      wsRefTokens,
+    );
     if (!sid || !schedAt || !rawPrompt || schedSubmitting) return;
     setSchedSubmitting(true);
     try {
@@ -866,7 +889,7 @@ export function SessionPanelPage({
     } finally {
       setSchedSubmitting(false);
     }
-  }, [sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments]);
+  }, [sessionId, input, schedAt, schedSubmitting, notify, attTokenMap, pendingAttachments, wsRefTokens]);
 
   // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
   // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
@@ -2869,8 +2892,12 @@ export function SessionPanelPage({
     setInput((prev) => {
       const t = prev.trim();
       // 草稿同样置换后与发送文本比对（token 剥离版 ≠ 置换版——uuid 文本
-      // 只在发送侧注入，草稿侧补齐同款置换才是同文判定）。
-      const substituted = substituteAttRefsForSend(t, attTokenMap, pendingAttachments);
+      // 只在发送侧注入，草稿侧补齐同款置换才是同文判定）。task-07 起工作区
+      // token 同点位串联置换（D-008@v2）。
+      const substituted = substituteWsRefsForSend(
+        substituteAttRefsForSend(t, attTokenMap, pendingAttachments),
+        wsRefTokens,
+      );
       return (
         t === prompt ||
         substituted === prompt ||
@@ -2886,7 +2913,7 @@ export function SessionPanelPage({
     // 绑定已随本次请求上送，残留会错绑到下一条消息）。
     setPendingMentions({});
     },
-    [attTokenMap, pendingAttachments],
+    [attTokenMap, pendingAttachments, wsRefTokens],
   );
 
   /**
@@ -3381,7 +3408,11 @@ export function SessionPanelPage({
     // 为 [附件引用:uuid|name]——入口一处置换，后续 createSession 直发 / 队列
     // sendFromQueue / steered / /team / takeover 全路径消费置换版；tokenMap 空
     // 时原样返回（零开销旁路）。守卫/长度口径用 rawPrompt（用户所见原文）。
-    const prompt = substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments);
+    // task-07（FR-06/D-008@v2）：工作区 token 同点位串联置换（三类标记）。
+    const prompt = substituteWsRefsForSend(
+      substituteAttRefsForSend(rawPrompt, attTokenMap, pendingAttachments),
+      wsRefTokens,
+    );
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
     // ql-20260825-007：D-7 对齐——附件非空豁免空文本（看图说话）；纯文本仍要求非空。
     // 空文本静默（发送按钮本已禁用）；超长/队满 toast 明示（ql-20260903-014：
@@ -3469,7 +3500,7 @@ export function SessionPanelPage({
       return;
     }
     void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, attTokenMap, wsRefTokens, notify, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions, isToolReportBody, handleTakeoverSend]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -3985,6 +4016,11 @@ export function SessionPanelPage({
             multimodalDowngraded={false}
             onAttachmentsChange={setPendingAttachments}
             onAttTokenMapChange={setAttTokenMap}
+            // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
+            //（预会话输入区，同真会话输入区口径）。
+            onWsRefTokensChange={setWsRefTokens}
+            pendingWsRefInsert={pendingWsRefInsert}
+            onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
             registerClearAttachments={(fn) => {
               clearAttachmentsRef.current = fn;
             }}
@@ -5076,6 +5112,11 @@ export function SessionPanelPage({
           multimodalDowngraded={multimodalDowngraded}
           onAttachmentsChange={setPendingAttachments}
           onAttTokenMapChange={setAttTokenMap}
+          // 2026-10-10-workspace-ref-intake task-07：工作区引用回传与槽位透传
+          //（真会话输入区，同预会话输入区口径）。
+          onWsRefTokensChange={setWsRefTokens}
+          pendingWsRefInsert={pendingWsRefInsert}
+          onPendingWsRefInsertHandled={onPendingWsRefInsertHandled}
           registerClearAttachments={(fn) => {
             clearAttachmentsRef.current = fn;
           }}

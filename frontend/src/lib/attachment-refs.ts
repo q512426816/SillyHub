@@ -16,26 +16,46 @@
  * 纯函数零 React 依赖；token 与引用均为消息正文内文本协议，不动后端。
  */
 
-/** 附件 id → 编辑态 token 文本（【name】/【name·2】）映射（组件持有并回传父级）。 */
+/** 附件 id → 编辑态 token 文本（【📎 name】/【📎 name·2】）映射（组件持有并回传父级）。 */
 export type AttRefTokenMap = Record<string, string>;
+
+/**
+ * 引用类型内嵌图标（emoji 文本字符）。2026-10-12-ws-ref-emoji-inline：用户反馈
+ * 类型图标从左上角角标改为内嵌标签文字最前——emoji 是唯一能进文本流的图标形态
+ * （textarea 纯文本与镜像层占位天然同宽，逐字符对齐铁律零破坏；lucide 等
+ * inline 图标会撑宽背景块造成后续 token 累积漂移，不可用）。
+ */
+const ATT_REF_EMOJI = "📎";
+const WS_REF_EMOJI: Record<WsRefKind, string> = { file: "📄", dir: "📁", code: "🧾" };
+
+/** 内部统一构造：【emoji 基名】/【emoji 基名·seq】（seq>1 唯一化后缀）。 */
+function buildRefToken(emoji: string, base: string, seq: number): string {
+  return seq > 1 ? `【${emoji} ${base}·${seq}】` : `【${emoji} ${base}】`;
+}
 
 /**
  * 构建编辑态 token：seq=1 无后缀，seq>1 加 `·seq`（同名唯一化，D-002）。
  */
 export function buildAttRefToken(name: string, seq: number): string {
-  return seq > 1 ? `【${name}·${seq}】` : `【${name}】`;
+  return buildRefToken(ATT_REF_EMOJI, name, seq);
 }
 
 /**
- * 唯一化分配 token：existingTokens（调用方传"正文已出现 token + 已分配映射"并集——
- * 并集口径同时防住文件名自带 `·N` 的构造性碰撞：任何已被占用的文本都跳过）中按
- * 名字取最小可用序号。不随删除重排：分配后序号即固定，剥离不回收重用。
+ * 唯一化分配 token：existingTokens（调用方传"正文已出现 token + 已分配映射"并集）
+ * 内按名字取最小可用序号。不随删除重排：分配后序号即固定，剥离不回收重用。
+ * emoji 前缀参与占用文本整体比对——跨类型（如附件 📎 与文件 📄 同名）互不占位
+ * （显示形态已由图标区分，不构成歧义）；同类型同名照常 ·2。
  */
 export function allocateAttRefToken(name: string, existingTokens: string[]): string {
-  const used = new Set(existingTokens);
+  return allocateRefToken(ATT_REF_EMOJI, name, existingTokens);
+}
+
+/** 占位分配内部实现（附件/工作区共用，emoji 区分类型形态）。 */
+function allocateRefToken(emoji: string, base: string, poolTokens: string[]): string {
+  const used = new Set(poolTokens);
   let seq = 1;
-  while (used.has(buildAttRefToken(name, seq))) seq += 1;
-  return buildAttRefToken(name, seq);
+  while (used.has(buildRefToken(emoji, base, seq))) seq += 1;
+  return buildRefToken(emoji, base, seq);
 }
 
 /**
@@ -91,16 +111,215 @@ const INLINE_ATT_REF_RE =
 /**
  * 历史正文解析（FR-06/D-005）：按行内引用拆 text/ref 段；非法片段（uuid 形态
  * 不符等）归入 text 段原样保留（容错，不丢字）。
+ * 2026-10-10-workspace-ref-intake task-01 起为 parseInlineRefs 的兼容薄封装
+ * （仅投影附件段），既有消费零改动。
  */
 export function parseInlineAttRefs(text: string): InlineAttRefPart[] {
   const parts: InlineAttRefPart[] = [];
-  let last = 0;
+  for (const p of parseInlineRefs(text)) {
+    if (p.type === "text") {
+      parts.push({ type: "text", value: p.value });
+    } else if (p.ref?.kind === "att") {
+      parts.push({ type: "ref", value: p.value, ref: { id: p.ref.id!, name: p.ref.name } });
+    } else {
+      // 工作区三类标记对旧消费方不存在（本变更前历史消息无此类标记）——
+      // 按普通文本透传（raw 保留原始标记字面），保证段拼接逐字还原。
+      parts.push({ type: "text", value: p.raw ?? p.value });
+    }
+  }
+  return parts;
+}
+
+// ── 工作区引用（2026-10-10-workspace-ref-intake task-01，FR-02/06/07 数据面）──
+
+/** 工作区引用三类：文件 / 目录 / 代码块（选中行范围）。 */
+export type WsRefKind = "file" | "dir" | "code";
+
+/**
+ * 工作区引用描述符：工作区 id + 相对根 POSIX 路径锚定（explorer 寻址坐标，
+ * frontend/src/lib/explorer.ts）。目录引用根 path 为空串、name 为「工作区根」；
+ * kind=code 必填 lines（1 起始，含端点）。
+ */
+export interface WsRefDesc {
+  kind: WsRefKind;
+  workspaceId: string;
+  /** 显示用工作区名（2026-10-12：portal 组装时填充，tooltip 显示中文名；缺省
+   *  回退 id。纯显示字段——发送置换/历史解析零消费，不进任何标记协议）。 */
+  workspaceName?: string;
+  /** 相对工作区根 POSIX 路径；目录引用根为 ""。 */
+  path: string;
+  /** 显示名（路径末段；根目录 = "工作区根"）。 */
+  name: string;
+  /** kind=code 必填：[起始行, 结束行]，1 起始含端点。 */
+  lines?: [number, number];
+}
+
+/** 工作区引用条目（key 约定见 wsRefMapKey）。 */
+export type WsRefTokenEntry = { desc: WsRefDesc; token: string };
+export type WsRefTokenMap = Record<string, WsRefTokenEntry>;
+
+/**
+ * map 键约定：file/dir = path；code = `${path}:${起}-${止}`（同 path 不同行段
+ * 是不同引用；key 由输入区分配与组装位置换两处共用，禁散拼字符串）。
+ */
+export function wsRefMapKey(desc: WsRefDesc): string {
+  return desc.lines ? `${desc.path}:${desc.lines[0]}-${desc.lines[1]}` : desc.path;
+}
+
+/**
+ * 工作区引用 token：基名 = name(+`:起-止`，无 L 前缀，D-005「完整显示基名」)，
+ * seq>1 加 `·seq`——emoji 前缀按类型（📄/📁/🧾，2026-10-12-ws-ref-emoji-inline），
+ * 与附件 token 同形态可共处一个并集序号池。
+ */
+export function buildWsRefToken(
+  kind: WsRefKind,
+  name: string,
+  lines: [number, number] | undefined,
+  seq: number,
+): string {
+  return buildRefToken(
+    WS_REF_EMOJI[kind],
+    lines ? `${name}:${lines[0]}-${lines[1]}` : name,
+    seq,
+  );
+}
+
+/**
+ * 唯一化分配（D-005）：poolTokens = 附件 token ∪ 工作区 token（∪ 正文 inText
+ * 保守占位，由调用方组并集）内按完整显示基名取最小可用序号；不随删除重排。
+ * kind 决定 emoji 前缀（同类型同名才互斥 ·2，跨类型图标自区分）。
+ */
+export function allocateWsRefToken(kind: WsRefKind, base: string, poolTokens: string[]): string {
+  return allocateRefToken(WS_REF_EMOJI[kind], base, poolTokens);
+}
+
+/**
+ * 从 value 中移除 tokens 全部出现（清工作区引用 / 发送后清空用）；逐 token
+ * 全量替换，与 stripAttRefTokens 同构（附件/工作区各用各的 token 集，删除
+ * 精确匹配自身不互扰——D-005 组合推演）。
+ */
+export function stripWsRefTokens(value: string, tokens: string[]): string {
+  return stripAttRefTokens(value, tokens);
+}
+
+/** 工作区引用发送态标记（D-003/D-004：指向语义，只含 wid+path+行号）。 */
+function wsRefSendMarker(desc: WsRefDesc): string {
+  if (desc.kind === "code" && desc.lines) {
+    return `[代码引用:${desc.workspaceId}|${desc.path}|L${desc.lines[0]}-L${desc.lines[1]}]`;
+  }
+  return `[${desc.kind === "dir" ? "目录引用" : "文件引用"}:${desc.workspaceId}|${desc.path}]`;
+}
+
+/**
+ * 发送置换（FR-06）：map 命中且正文出现的 token → 三类正式标记；孤儿 token
+ * （map 不命中/用户手改坏）原样保留（降级纯文本，与附件 R-03 同口径）；map 空
+ * → 原样返回（零开销旁路，未插入引用零行为差异）。
+ */
+export function substituteWsRefsForSend(value: string, map: WsRefTokenMap): string {
+  let next = value;
+  for (const { desc, token } of Object.values(map)) {
+    if (!token || !next.includes(token)) continue;
+    next = next.split(token).join(wsRefSendMarker(desc));
+  }
+  return next;
+}
+
+/** 统一历史解析产物段：附件 ref 带 id；工作区三类带 workspaceId/path(/lines)。 */
+export interface InlineRefPart {
+  type: "text" | "ref";
+  /** text 段原文 / ref 段显示名。 */
+  value: string;
+  /** 仅 ref 段携带：原始标记字面（兼容投影/调试还原用）。 */
+  raw?: string;
+  /** 仅 ref 段携带。 */
+  ref?: {
+    kind: "att" | WsRefKind;
+    /** kind=att：附件 uuid。 */
+    id?: string;
+    /** 工作区三类：工作区 id。 */
+    workspaceId?: string;
+    /** 工作区三类：相对根 POSIX 路径（目录引用根为 ""）。 */
+    path?: string;
+    /** kind=code：[起始行, 结束行]（1 起始含端点）。 */
+    lines?: [number, number];
+    /** 显示名：附件=上传名；工作区=路径末段（根 = "工作区根"）。 */
+    name: string;
+  };
+}
+
+/** uuid 36 位（附件既有口径，工作区 id 同为 uuid 锚）。 */
+const REF_UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+
+/**
+ * 工作区三类标记：path 段**不含** `]` `|` 与换行——路径含竖线或右方括号时整段
+ * 匹配失败降级为纯文本（审查 X-5 声明边界，与孤儿降级同口径）；目录空 path
+ * （`[目录引用:wid|]` 空尾段）显式容忍；代码行段 `L起-L止`（1 起始）。
+ * path 用非贪婪 + 行段可选拆三段：`[代码引用:wid|a.py|L1-L2]` 的 path 不会
+ * 吞行段；行段非法（如 `L1-L2x`）整段回溯失配归 text。
+ */
+const INLINE_WS_REF_RE = new RegExp(
+  "\\[(文件引用|目录引用|代码引用):(" + REF_UUID + ")\\|([^\\]|\\r\\n]*?)(?:\\|L(\\d+)-L(\\d+))?\\]",
+  "g",
+);
+
+/** 工作区 path → 显示名（末段；根 = "工作区根"）。 */
+function wsRefDisplayName(path: string): string {
+  const segs = path.split("/").filter(Boolean);
+  return segs.length ? segs[segs.length - 1]! : "工作区根";
+}
+
+/**
+ * 统一历史解析（FR-07）：附件 + 工作区三类标记拆 text/ref 段。附件段沿用
+ * INLINE_ATT_REF_RE 独立口径（name 允许 `|`，兼容既有消息不回归）；工作区三类
+ * 走 INLINE_WS_REF_RE（path 禁 `|`/`]`）。非法片段归 text 段原样保留（容错，
+ * 不丢字）。
+ */
+export function parseInlineRefs(text: string): InlineRefPart[] {
+  type Hit = { start: number; end: number; part: InlineRefPart };
+  const hits: Hit[] = [];
   for (const m of text.matchAll(INLINE_ATT_REF_RE)) {
-    const idx = m.index ?? 0;
-    if (idx > last) parts.push({ type: "text", value: text.slice(last, idx) });
-    parts.push({ type: "ref", value: m[2] ?? "", ref: { id: m[1] ?? "", name: m[2] ?? "" } });
-    last = idx + m[0].length;
+    hits.push({
+      start: m.index ?? 0,
+      end: (m.index ?? 0) + m[0].length,
+      part: {
+        type: "ref",
+        value: m[2] ?? "",
+        raw: m[0],
+        ref: { kind: "att", id: m[1] ?? "", name: m[2] ?? "" },
+      },
+    });
+  }
+  for (const m of text.matchAll(INLINE_WS_REF_RE)) {
+    // 捕获组 1 是中文标记字面，映射到 WsRefKind 枚举。
+    const kind: WsRefKind =
+      m[1] === "文件引用" ? "file" : m[1] === "目录引用" ? "dir" : "code";
+    const workspaceId = m[2] ?? "";
+    const path = m[3] ?? "";
+    const name = wsRefDisplayName(path);
+    const ref: NonNullable<InlineRefPart["ref"]> = { kind, workspaceId, path, name };
+    if (kind === "code") {
+      if (m[4] === undefined || m[5] === undefined) continue; // 防御：code 必有行段
+      const l0 = Number(m[4]);
+      const l1 = Number(m[5]);
+      if (l0 < 1 || l1 < l0) continue; // 非法行段（0 起 / 倒序）整段降级 text
+      ref.lines = [l0, l1];
+      ref.name = linesSuffix(name, [l0, l1]);
+    }
+    hits.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, part: { type: "ref", value: ref.name, raw: m[0], ref } });
+  }
+  hits.sort((a, b) => a.start - b.start);
+  const parts: InlineRefPart[] = [];
+  let last = 0;
+  for (const hit of hits) {
+    if (hit.start > last) parts.push({ type: "text", value: text.slice(last, hit.start) });
+    parts.push(hit.part);
+    last = hit.end;
   }
   if (last < text.length) parts.push({ type: "text", value: text.slice(last) });
   return parts;
+}
+
+/** 代码引用显示名（末段 + 行号段，无 L 前缀，与编辑态 token 基名一致）。 */
+function linesSuffix(name: string, lines: [number, number]): string {
+  return `${name}:${lines[0]}-${lines[1]}`;
 }

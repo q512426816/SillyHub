@@ -26,6 +26,7 @@ import { ArrowLeft, X } from "lucide-react";
 
 import { FileExplorer } from "@/components/explorer/file-explorer";
 import { FilePreview } from "@/components/explorer/file-preview";
+import type { WsRefDesc } from "@/lib/attachment-refs";
 
 export interface PortalFileTreePanelProps {
   /** 文件树目标工作区（portal 进文件模式时快照，D-004）。 */
@@ -34,6 +35,9 @@ export interface PortalFileTreePanelProps {
   onBack: () => void;
   /** 文件节点选中回调（FileExplorer 直通，入参为相对工作区根的 POSIX 路径）。 */
   onSelectFile: (path: string) => void;
+  /** 2026-10-10-workspace-ref-intake task-06（FR-01）：树右键「添加文件/目录到
+   *  会话输入框」回调直通（desc.workspaceId=树快照；未传不拦截右键）。 */
+  onAddNodeRef?: (desc: WsRefDesc) => void;
 }
 
 export interface PortalFilePreviewPanelProps {
@@ -43,6 +47,9 @@ export interface PortalFilePreviewPanelProps {
   filePath: string;
   /** 「✕」关闭整列回调。 */
   onClose: () => void;
+  /** 2026-10-10-workspace-ref-intake task-06（FR-05）：预览选区右键「添加选中
+   *  内容到会话输入框」回调直通（desc.workspaceId=预览列自身；未传不拦截）。 */
+  onAddSelectionRef?: (desc: WsRefDesc) => void;
 }
 
 // ── 宽度常量（task-03 sessions-portal 消费；本文件只导出不消费） ──────────
@@ -72,6 +79,7 @@ export function PortalFileTreePanel({
   workspaceId,
   onBack,
   onSelectFile,
+  onAddNodeRef,
 }: PortalFileTreePanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -92,7 +100,11 @@ export function PortalFileTreePanel({
 
       {/* 主体：FileExplorer 直通（自带搜索/懒加载/错误态/刷新，壳内零包装逻辑） */}
       <div className="min-h-0 flex-1">
-        <FileExplorer workspaceId={workspaceId} onSelectFile={onSelectFile} />
+        <FileExplorer
+          workspaceId={workspaceId}
+          onSelectFile={onSelectFile}
+          onAddNodeRef={onAddNodeRef}
+        />
       </div>
     </div>
   );
@@ -103,6 +115,7 @@ export function PortalFilePreviewPanel({
   workspaceId,
   filePath,
   onClose,
+  onAddSelectionRef,
 }: PortalFilePreviewPanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
@@ -124,7 +137,11 @@ export function PortalFilePreviewPanel({
 
       {/* 主体：FilePreview 直通（loading/错误/二进制降级/下载/全屏均在其内部） */}
       <div className="min-h-0 flex-1">
-        <FilePreview workspaceId={workspaceId} filePath={filePath} />
+        <FilePreview
+          workspaceId={workspaceId}
+          filePath={filePath}
+          onAddSelectionRef={onAddSelectionRef}
+        />
       </div>
     </div>
   );

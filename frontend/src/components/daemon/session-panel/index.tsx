@@ -270,6 +270,17 @@ export interface SessionPanelProps {
   onOpenSubagent?: (segmentId: string) => void;
   /** page 可选：右栏 ✕ / 段失效自动关闭上抛（门户清槽位）。〔prop〕 */
   onSubagentPanelClose?: () => void;
+
+  // ── 工作区引用插入槽位（2026-10-10-workspace-ref-intake task-06/07 / FR-01
+  //    通道——portal 右键入口 → 输入区光标处插入标签）──────────────────
+  /** 可选：待消费的工作区引用插入槽位（{desc, nonce}，nonce 自增保证同引用
+   *  可重复触发）；未传零回归（悬浮宿主/dialog 旧消费方）。〔prop〕 */
+  pendingWsRefInsert?: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null;
+  /** 可选：槽位消费完成回抛（portal 清槽）。〔prop〕 */
+  // eslint-disable-next-line no-unused-vars -- 接口回调签名形参（同上惯例）
+  onPendingWsRefInsertHandled?: (
+    next: { desc: import("@/lib/attachment-refs").WsRefDesc; nonce: number } | null,
+  ) => void;
 }
 
 /**
@@ -299,6 +310,10 @@ export function SessionPanel(props: SessionPanelProps) {
         openSubagentId={props.openSubagentId}
         onOpenSubagent={props.onOpenSubagent}
         onSubagentPanelClose={props.onSubagentPanelClose}
+        // 2026-10-10-workspace-ref-intake task-07（D-012 裁决）：工作区引用插入
+        // 槽位透传（仅门户 page 装配传入；未传内部视为 null 零回归）。
+        pendingWsRefInsert={props.pendingWsRefInsert}
+        onPendingWsRefInsertHandled={props.onPendingWsRefInsertHandled}
       />
     );
   }

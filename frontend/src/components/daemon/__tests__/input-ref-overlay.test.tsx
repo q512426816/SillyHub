@@ -133,3 +133,123 @@ describe("InputRefOverlay 角标悬停显示（att-ref-badge-hover）", () => {
     expect(onRemove).toHaveBeenCalledWith("【A.png】");
   });
 });
+
+// 2026-10-12-ws-ref-emoji-inline：类型图标内嵌 token 文本（构造层落字），overlay
+// 零角标渲染；悬停元数据走 hoverTip 浮层（FR-03 形态更新）。
+describe("InputRefOverlay emoji 内嵌形态与 hoverTip", () => {
+  const METAS = {
+    "【📎 截图.png】": { kind: "att" as const, title: "附件：截图.png" },
+    "【📄 design.md】": { kind: "file" as const, title: "文件：docs/design.md（工作区 ws-1）" },
+    "【📁 docs】": { kind: "dir" as const, title: "目录：docs（工作区 ws-1）" },
+    "【🧾 a.py:10-16】": { kind: "code" as const, title: "代码：src/a.py 第 10-16 行（工作区 ws-1）" },
+  };
+
+  it("token（含内嵌 emoji）整段高亮为背景块；无左上类型角标（已随形态退役）", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="一【📎 截图.png】二【📄 design.md】三【📁 docs】四【🧾 a.py:10-16】"
+        tokens={Object.keys(METAS)}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+      />,
+    );
+    // emoji 是 token 文本的一部分：占位文本含 emoji（textarea 同文本同宽度）。
+    const spans = container.querySelectorAll("[data-att-ref-occ]");
+    expect(spans.length).toBe(4);
+    expect(spans[0]!.querySelector("span.text-transparent")?.textContent).toBe("【📎 截图.png】");
+    expect(spans[3]!.querySelector("span.text-transparent")?.textContent).toBe("【🧾 a.py:10-16】");
+    // 类型角标已移除（图标内嵌文本，不再有独立角标元素）。
+    expect(container.querySelectorAll("[data-ws-ref-kind-badge]").length).toBe(0);
+  });
+
+  it("hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染", () => {
+    const { container, rerender } = render(
+      <InputRefOverlay
+        value="看【📄 design.md】这段"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+        hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 200 }}
+      />,
+    );
+    const tip = document.querySelector("[data-ws-ref-hover-tip]");
+    expect(tip).not.toBeNull();
+    expect(tip!.textContent).toBe("文件：docs/design.md（工作区 ws-1）");
+    expect(tip!.className).toContain("fixed");
+    rerender(
+      <InputRefOverlay
+        value="看【📄 design.md】这段"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        tokenMetas={METAS}
+        hoverTip={null}
+      />,
+    );
+    expect(document.querySelector("[data-ws-ref-hover-tip]")).toBeNull();
+  });
+
+  it("hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）", () => {
+    const first = render(
+      <InputRefOverlay
+        value="【📄 design.md】"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        /* jsdom innerHeight 默认 768：y=720 时 720+16+48=784 超出 → 翻转上方。 */
+        hoverTip={{ text: "文件：docs/design.md（工作区 ws-1）", x: 100, y: 720 }}
+      />,
+    );
+    const tip = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    expect(tip).not.toBeNull();
+    expect(tip.style.top).toBe("662px"); // 720 - 48(TIP_EST_HEIGHT) - 10
+    // 常规位置（下方 16px）不受影响——portal 挂 body，先卸载前者再断言后者。
+    first.unmount();
+    render(
+      <InputRefOverlay
+        value="【📄 design.md】"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        hoverTip={{ text: "x", x: 100, y: 200 }}
+      />,
+    );
+    const tip2 = document.querySelector<HTMLElement>("[data-ws-ref-hover-tip]")!;
+    expect(tip2.style.top).toBe("216px");
+  });
+
+  it("× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）", () => {
+    render(
+      <InputRefOverlay
+        value="【📄 design.md】"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+      />,
+    );
+    const btn = screen.getByLabelText("移除引用 design.md");
+    expect(btn.className).toContain("z-20");
+  });
+
+  it("版式守卫（R-01）：token span 无 margin/padding/border/opacity/transform、× 角标 z-20 不受影响", () => {
+    const { container } = render(
+      <InputRefOverlay
+        value="前文【📄 design.md】后文"
+        tokens={["【📄 design.md】"]}
+        onRemoveToken={() => {}}
+        visibleBadgeIndex={0}
+      />,
+    );
+    const tokenSpan = container.querySelector<HTMLElement>("[data-att-ref-occ]")!;
+    expect(tokenSpan).not.toBeNull();
+    // 背景块零布局类（铁律：严禁 margin/padding/border）
+    expect(tokenSpan.className).not.toMatch(/(^|s)(m|p|border)([-s]|$)/);
+    // token span 不得带 opacity/transform（stacking context 触发器）
+    expect(tokenSpan.className).not.toContain("opacity");
+    expect(tokenSpan.className).not.toContain("translate");
+    expect(tokenSpan.style.opacity).toBe("");
+    expect(tokenSpan.style.transform).toBe("");
+    // 占位文本仍在 DOM 撑宽
+    expect(tokenSpan.querySelector("span.text-transparent")?.textContent).toBe("【📄 design.md】");
+    // × 角标 z-20 层级保留
+    const xBadge = screen.getByLabelText("移除引用 design.md");
+    expect(xBadge.className).toContain("z-20");
+    expect(xBadge.className).toContain("opacity-100");
+  });
+});

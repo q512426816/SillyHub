@@ -1,0 +1,647 @@
+diff --git a/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx b/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx
+new file mode 100644
+index 000000000..4c58831f3
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx
+@@ -0,0 +1,175 @@
++/**
++ * 引用标签原子性拦截测试（2026-10-12-ws-ref-atomic-caret）。
++ *
++ * 覆盖：方向键跳块（贴尾←到块头/贴头→到块尾/内部逃逸/shift 不拦/普通文本不拦）、
++ * 落位吸附（点击/键盘落入内部 → 最近边界）、内部编辑拒绝（打字/删除部分重叠
++ * preventDefault；选区完整覆盖放行；无 token 区间放行）。
++ */
++
++import { render, fireEvent, screen } from "@testing-library/react";
++import { useState } from "react";
++
++import { useAtomicRefCaret } from "../use-atomic-ref-caret";
++
++const TOKEN = "【📄 design.md】";
++
++/** 测试宿主：受控 textarea + hook 全量接线（与两输入区同款）。 */
++function Host({ initial, tokens }: { initial: string; tokens: string[] }) {
++  const [value, setValue] = useState(initial);
++  const ref = useState({ current: null as HTMLTextAreaElement | null })[0];
++  const { handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret } = useAtomicRefCaret({
++    value,
++    tokens,
++    textareaRef: ref,
++  });
++  return (
++    <textarea
++      ref={(el) => {
++        ref.current = el;
++      }}
++      aria-label="t"
++      value={value}
++      onChange={(e) => setValue(e.target.value)}
++      onKeyDown={handleAtomicKeyDown}
++      onBeforeInput={handleAtomicBeforeInput}
++      onClick={snapCaret}
++      onKeyUp={snapCaret}
++      onSelect={snapCaret}
++    />
++  );
++}
++
++/** 构造带 token 的值：前文【token】后文 → 返回值与 token 区间。 */
++const PREFIX = "前文";
++const SUFFIX = "后文";
++function valueWithToken(): { value: string; start: number; end: number } {
++  return {
++    value: `${PREFIX}${TOKEN}${SUFFIX}`,
++    start: PREFIX.length,
++    end: PREFIX.length + TOKEN.length,
++  };
++}
++
++describe("方向键跳块", () => {
++  it("贴尾按 ← 跳到块头；再按一次才离开标签", () => {
++    const { value, start, end } = valueWithToken();
++    render(<Host initial={value} tokens={[TOKEN]} />);
++    const ta = screen.getByLabelText("t") as HTMLTextAreaElement;
++    ta.setSelectionRange(end, end);
++    fireEvent.keyDown(ta, { key: "ArrowLeft" });
++    expect(ta.selectionStart).toBe(start);
++  });
++
++  it("贴头按 → 跳到块尾", () => {
++    const { value, start, end } = valueWithToken();
++    render(<Host initial={value} tokens={[TOKEN]} />);
++    const ta = screen.getByLabelText("t") as HTMLTextAreaElement;
++    ta.setSelectionRange(start, start);
++    fireEvent.keyDown(ta, { key: "ArrowRight" });
++    expect(ta.selectionStart).toBe(end);
++  });
++
++  it("shift+方向（选区扩展）与普通文本处方向键不拦截", () => {
++    const { value, start } = valueWithToken();
++    render(<Host initial={value} tokens={[TOKEN]} />);
++    const ta = screen.getByLabelText("t") as HTMLTextAreaElement;
++    // shift+← 在贴尾：不拦（浏览器默认扩展选区，selectionStart 变为 end-1）
++    ta.setSelectionRange(value.length, value.length);
++    fireEvent.keyDown(ta, { key: "ArrowLeft", shiftKey: true });
++    expect(ta.selectionStart).toBe(value.length); // 未被 hook 改动（默认行为 jsdom 不模拟）
++    // 普通文本处（前文首字符）←：不拦
++    ta.setSelectionRange(1, 1);
++    fireEvent.keyDown(ta, { key: "ArrowLeft" });
++    expect(ta.selectionStart).toBe(1);
++    expect(start).toBe(PREFIX.length); // 语义锚：token 区间起点
++  });
++});
++
++describe("落位吸附", () => {
++  it("光标落入标签前半 → 吸附块头；后半 → 吸附块尾", () => {
++    const { value, start, end } = valueWithToken();
++    render(<Host initial={value} tokens={[TOKEN]} />);
++    const ta = screen.getByLabelText("t") as HTMLTextAreaElement;
++    ta.setSelectionRange(start + 2, start + 2);
++    fireEvent.keyUp(ta, {}); // 触发 snap
++    expect(ta.selectionStart).toBe(start);
++    ta.setSelectionRange(end - 1, end - 1);
++    fireEvent.keyUp(ta, {});
++    expect(ta.selectionStart).toBe(end);
++  });
++
++  it("边界与外部不吸附；有选区不吸附", () => {
++    const { value, start, end } = valueWithToken();
++    render(<Host initial={value} tokens={[TOKEN]} />);
++    const ta = screen.getByLabelText("t") as HTMLTextAreaElement;
++    ta.setSelectionRange(start, start);
++    fireEvent.keyUp(ta, {});
++    expect(ta.selectionStart).toBe(start);
++    ta.setSelectionRange(start + 2, end - 1);
++    fireEvent.keyUp(ta, {});
++    expect(ta.selectionStart).toBe(start + 2); // 选区不动
++  });
++});
++
++describe("内部编辑拒绝（beforeinput）", () => {
++  /** 直接调 handler（jsdom 的原生 beforeinput 派发不经 React 委托层，测逻辑本体）。 */
++  function callBeforeInput(
++    handlers: ReturnType<typeof useAtomicRefCaret>,
++    startOffset: number,
++    endOffset: number,
++  ): boolean {
++    let prevented = false;
++    handlers.handleAtomicBeforeInput({
++      nativeEvent: { getTargetRanges: () => [{ startOffset, endOffset }] },
++      preventDefault: () => {
++        prevented = true;
++      },
++    } as unknown as React.FormEvent<HTMLTextAreaElement>);
++    return prevented;
++  }
++
++  it("标签内部打字/删字（部分重叠）拒绝", () => {
++    const { start, end } = valueWithToken();
++    let handlers!: ReturnType<typeof useAtomicRefCaret>;
++    function DebugHost() {
++      const [value] = useState(valueWithToken().value);
++      const ref = { current: null as HTMLTextAreaElement | null };
++      handlers = useAtomicRefCaret({ value, tokens: [TOKEN], textareaRef: ref });
++      return null;
++    }
++    render(<DebugHost />);
++    // 内部单字符区间（模拟删字/组字目标）
++    expect(callBeforeInput(handlers, start + 2, start + 3)).toBe(true);
++    // 跨标签尾部与外部后文（部分重叠）同样拒绝
++    expect(callBeforeInput(handlers, end - 2, end + 1)).toBe(true);
++    // 跨标签头部与前文（部分重叠）
++    expect(callBeforeInput(handlers, start - 1, start + 2)).toBe(true);
++  });
++
++  it("选区完整覆盖整块放行；无 token 区间放行；无目标区间放行", () => {
++    const { start, end } = valueWithToken();
++    let handlers!: ReturnType<typeof useAtomicRefCaret>;
++    function DebugHost() {
++      const [value] = useState(valueWithToken().value);
++      const ref = { current: null as HTMLTextAreaElement | null };
++      handlers = useAtomicRefCaret({ value, tokens: [TOKEN], textareaRef: ref });
++      return null;
++    }
++    render(<DebugHost />);
++    // 完整覆盖（含整块 + 两侧部分文本）
++    expect(callBeforeInput(handlers, start - 1, end + 1)).toBe(false);
++    // 恰好整块
++    expect(callBeforeInput(handlers, start, end)).toBe(false);
++    // 纯外部区间
++    expect(callBeforeInput(handlers, 0, 1)).toBe(false);
++    // 无目标区间（getTargetRanges 空数组）
++    let prevented = false;
++    handlers.handleAtomicBeforeInput({
++      nativeEvent: { getTargetRanges: () => [] },
++      preventDefault: () => {
++        prevented = true;
++      },
++    } as unknown as React.FormEvent<HTMLTextAreaElement>);
++    expect(prevented).toBe(false);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-input-bar.tsx b/frontend/src/components/daemon/session-input-bar.tsx
+index d11c96a7d..583d40622 100644
+--- a/frontend/src/components/daemon/session-input-bar.tsx
++++ b/frontend/src/components/daemon/session-input-bar.tsx
+@@ -68,6 +68,7 @@ import {
+   type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import { InputRefOverlay, hitTestAttRefOverlay } from "./input-ref-overlay";
++import { useAtomicRefCaret } from "./use-atomic-ref-caret";
+ import {
+   SessionMentionPopover,
+   buildAtMentionItems,
+@@ -316,7 +317,16 @@ export function SessionInputBar({
+   };
+ 
+   /** 两池并集 token 集（overlay 高亮 / 退格整删 / 唯一化分配池共用）。 */
+-  const allRefTokens = [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)];
++  const allRefTokens = useMemo(
++    () => [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)],
++    [attTokenMap, wsRefTokens],
++  );
++  /* 2026-10-12-ws-ref-atomic-caret：标签原子性拦截（跳块/吸附/内部编辑拒绝）。 */
++  const { handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret } = useAtomicRefCaret({
++    value,
++    tokens: allRefTokens,
++    textareaRef,
++  });
+ 
+   /** 工作区引用插入（槽位消费与未来直插共用）：分配/复用 token 后按
+    *  handleInsertAttRef 同款光标机制插入（聚焦插当前光标、失焦插失焦前光标位、
+@@ -1098,6 +1108,12 @@ export function SessionInputBar({
+             rows={2}
+             disabled={disabled}
+             style={inputHeight != null ? { height: inputHeight } : undefined}
++            /* 2026-10-12-ws-ref-atomic-caret：标签原子性（点击吸附/方向键跳块/
++               内部编辑拒绝），见 use-atomic-ref-caret.ts。 */
++            onBeforeInput={handleAtomicBeforeInput}
++            onClick={snapCaret}
++            onKeyUp={snapCaret}
++            onSelect={snapCaret}
+             onChange={(e) => {
+               onChange(e.target.value);
+               // task-03 检测驱动：读 e.target.selectionStart（光标左侧回看），
+@@ -1135,6 +1151,9 @@ export function SessionInputBar({
+             void handleFiles(files);
+           }}
+           onKeyDown={(e) => {
++            /* 2026-10-12-ws-ref-atomic-caret：方向键跳块（←/→ 跨整块，shift 选区
++               扩展不拦）——置于联想处理前（浮层只管 ↑↓/Enter/Tab/Esc 无冲突）。 */
++            if (handleAtomicKeyDown(e)) return;
+             // task-03 联想键盘首位（R-2 拦截规则集中于此）：浮层激活且非 IME
+             // 组合期时，↑↓/Enter/Tab/Esc 由 handleMentionKeyDown（task-02）统一
+             // 处置，命中拦截（preventDefault + 不外溢）即返回——Enter 不落入
+diff --git a/frontend/src/components/daemon/use-atomic-ref-caret.ts b/frontend/src/components/daemon/use-atomic-ref-caret.ts
+new file mode 100644
+index 000000000..8c168ad72
+--- /dev/null
++++ b/frontend/src/components/daemon/use-atomic-ref-caret.ts
+@@ -0,0 +1,124 @@
++"use client";
++
++/**
++ * 引用标签原子性光标拦截（2026-10-12-ws-ref-atomic-caret）。
++ *
++ * textarea 纯文本方案下 token 就是普通文本（D-001 架构），光标天然能进入标签
++ * 内部逐字符移动/改字——本 hook 在不动编辑器架构的前提下补「整体感」三拦截：
++ * - 方向键跳块：无选区时 ←/→ 在标签区间边界一次跨过整块（贴尾 ← 到块头、
++ *   贴头 → 到块尾）；shift 扩展选区不拦（选区可跨块，配合部分重叠拒绝兜底）。
++ * - 点击/落位吸附：click / keyup / select 后光标无选区且落在标签内部 →
++ *   吸附最近边界（前半去头、后半去尾）；Home/End/Ctrl+方向落入内部由此兜底。
++ * - 内部编辑拒绝：beforeinput 的目标 range 与任一标签部分重叠（交集非空且
++ *   未完整覆盖该标签）→ preventDefault——打字/删字/IME 组字/粘贴均拒；
++ *   选区完整覆盖整块放行（随选区整块删除）。
++ *
++ * 退格贴尾整删与 × 角标删除在宿主既有处理器（本 hook 不触碰）；发送置换/
++ * 联想检测零关联。幂等：吸附仅在位置实际改变时 setSelectionRange（防 select
++ * 事件回环）。
++ */
++
++import { useMemo, type EventHandler, type KeyboardEvent, type FormEvent } from "react";
++
++/** token 在 value 中的一次出现区间（字符 index，[start, end)）。 */
++export interface RefTokenRange {
++  start: number;
++  end: number;
++  token: string;
++}
++
++/** 全部 token 的全部出现区间（长 token 优先匹配已由 tokens 顺序无关的 indexOf 循环保证逐个计入）。 */
++export function computeRefTokenRanges(value: string, tokens: string[]): RefTokenRange[] {
++  const ranges: RefTokenRange[] = [];
++  for (const token of tokens) {
++    if (!token) continue;
++    let from = 0;
++    for (;;) {
++      const idx = value.indexOf(token, from);
++      if (idx < 0) break;
++      ranges.push({ start: idx, end: idx + token.length, token });
++      from = idx + token.length;
++    }
++  }
++  return ranges;
++}
++
++/** 光标 p 是否落在某标签内部（不含两端边界）。 */
++function insideRange(p: number, r: RefTokenRange): boolean {
++  return p > r.start && p < r.end;
++}
++
++export interface UseAtomicRefCaretOptions {
++  /** 输入框当前值（受控，与 textarea 同源）。 */
++  value: string;
++  /** 原子化 token 全集（附件 ∪ 工作区两池）。 */
++  tokens: string[];
++  /** textarea ref（吸附 setSelectionRange 用）。 */
++  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
++}
++
++export function useAtomicRefCaret({ value, tokens, textareaRef }: UseAtomicRefCaretOptions) {
++  const ranges = useMemo(() => computeRefTokenRanges(value, tokens), [value, tokens]);
++
++  /** 方向键跳块：命中（已 preventDefault + 复位光标）返回 true，宿主应即刻 return。 */
++  const handleAtomicKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): boolean => {
++    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return false;
++    if (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return false;
++    if (e.nativeEvent.isComposing) return false; // IME 组合期不劫持（评审 P3-1，单/群聊统一）
++    const ta = e.currentTarget;
++    if (ta.selectionStart !== ta.selectionEnd) return false;
++    const p = ta.selectionStart ?? 0;
++    if (e.key === "ArrowLeft") {
++      // 从右侧接近（贴尾或内部）→ 跳到块头。
++      const hit = ranges.find((r) => p > r.start && p <= r.end);
++      if (hit) {
++        e.preventDefault();
++        ta.setSelectionRange(hit.start, hit.start);
++        return true;
++      }
++    } else {
++      // 从左侧接近（贴头或内部）→ 跳到块尾。
++      const hit = ranges.find((r) => p >= r.start && p < r.end);
++      if (hit) {
++        e.preventDefault();
++        ta.setSelectionRange(hit.end, hit.end);
++        return true;
++      }
++    }
++    return false;
++  };
++
++  /** 内部编辑拒绝（beforeinput）。 */
++  const handleAtomicBeforeInput: EventHandler<FormEvent<HTMLTextAreaElement>> = (e) => {
++    const input = e.nativeEvent as InputEvent;
++    const targetRanges =
++      typeof input.getTargetRanges === "function" ? input.getTargetRanges() : [];
++    const range = targetRanges[0];
++    if (!range) return; // 无目标区间（如全量 setRangeText）不拦
++    const rs = range.startOffset;
++    const re = range.endOffset;
++    for (const r of ranges) {
++      // 交集非空 = 部分触碰；完整覆盖（rs<=start && re>=end）放行整块删除。
++      const overlaps = rs < r.end && re > r.start;
++      const fullyCovers = rs <= r.start && re >= r.end;
++      if (overlaps && !fullyCovers) {
++        e.preventDefault();
++        return;
++      }
++    }
++  };
++
++  /** 落位吸附（click/keyup/select 后）：无选区且在内部 → 最近边界。幂等。 */
++  const snapCaret = () => {
++    const ta = textareaRef.current;
++    if (!ta) return;
++    if (ta.selectionStart !== ta.selectionEnd) return;
++    const p = ta.selectionStart ?? 0;
++    const hit = ranges.find((r) => insideRange(p, r));
++    if (!hit) return;
++    const to = p - hit.start <= hit.end - p ? hit.start : hit.end;
++    ta.setSelectionRange(to, to);
++  };
++
++  return { ranges, handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret };
++}
+diff --git a/frontend/src/components/group-chat/group-chat-panel.tsx b/frontend/src/components/group-chat/group-chat-panel.tsx
+index 19d273d7b..5704a7bed 100644
+--- a/frontend/src/components/group-chat/group-chat-panel.tsx
++++ b/frontend/src/components/group-chat/group-chat-panel.tsx
+@@ -157,6 +157,7 @@ import {
+   type WsRefTokenMap,
+ } from "@/lib/attachment-refs";
+ import { InputRefOverlay, hitTestAttRefOverlay } from "@/components/daemon/input-ref-overlay";
++import { useAtomicRefCaret } from "@/components/daemon/use-atomic-ref-caret";
+ import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
+ import {
+   PROVIDER_META,
+@@ -1781,11 +1782,17 @@ export function GroupChatPanel({
+    * 区行为一致——分配池=附件∪工作区∪正文 inText 并集，D-005；组装位
+    * substituteWsRefsForSend 消费，D-008@v2）。 */
+   const [wsRefTokens, setWsRefTokens] = useState<WsRefTokenMap>({});
+-  /** 两池并集 token 集（overlay 高亮 / 退格整删共用）。 */
+-  const allRefTokens = [
+-    ...Object.values(attTokenMap),
+-    ...Object.values(wsRefTokens).map((e) => e.token),
+-  ];
++  /** 两池并集 token 集（overlay 高亮 / 退格整删共用；useMemo 稳定引用防 hook 区间每渲染重算）。 */
++  const allRefTokens = useMemo(
++    () => [...Object.values(attTokenMap), ...Object.values(wsRefTokens).map((e) => e.token)],
++    [attTokenMap, wsRefTokens],
++  );
++  /* 2026-10-12-ws-ref-atomic-caret：标签原子性拦截（跳块/吸附/内部编辑拒绝，单聊同款）。 */
++  const { handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret } = useAtomicRefCaret({
++    value: draft,
++    tokens: allRefTokens,
++    textareaRef: inputRef,
++  });
+   /** × 角标删除统一入口：一处出现移除 + 同步清工作区映射条目。 */
+   const removeRefOnce = (token: string) => {
+     setDraft((prev) => {
+@@ -2139,6 +2146,9 @@ export function GroupChatPanel({
+   }, [draft, sending, pendingAttachments, members, performSend]);
+ 
+   const handleInputKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
++    /* 2026-10-12-ws-ref-atomic-caret：方向键跳块（单聊同款，置于联想处理前——
++       浮层只管 ↑↓/Enter/Tab/Esc 无冲突；IME 组合期在 hook 内统一放行）。 */
++    if (handleAtomicKeyDown(e)) return;
+     // IME 组合期不劫持（联想浮层键盘契约前置守卫）。
+     if (e.nativeEvent.isComposing) return;
+     if (mentionOpen && mentionFiltered.length > 0) {
+@@ -3193,6 +3203,12 @@ export function GroupChatPanel({
+                 placeholder="发送消息，@昵称 唤起指定 Agent，@全体 通知所有 Agent…"
+                 onChange={(e) => handleInputChange(e.target.value)}
+                 onKeyDown={handleInputKeyDown}
++                /* 2026-10-12-ws-ref-atomic-caret：标签原子性（点击吸附/方向键跳块/
++                   内部编辑拒绝），见 use-atomic-ref-caret.ts。 */
++                onBeforeInput={handleAtomicBeforeInput}
++                onClick={snapCaret}
++                onKeyUp={snapCaret}
++                onSelect={snapCaret}
+                 onPaste={(e) => {
+                   // 剪贴板带文件（截图等）→ 与 📎 同上传管线（单聊同口径）。
+                   const files = e.clipboardData?.files;
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/design.md b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/design.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/design.md
+@@ -0,0 +1,43 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:51:16.320Z
++---
++# 设计记录（Design Record）— 2026-10-12-ws-ref-atomic-caret
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++用户反馈：引用标签应是一个整体——当前光标能点进标签内部改字、左右移动被当普通文字逐字符穿过。根因是 textarea 纯文本方案（D-001 架构）下 token 就是普通文本。本变更不动编辑器架构，新增公共 hook `use-atomic-ref-caret.ts` 以事件拦截补「整体感」：① 方向键跳块（无选区时 ←/→ 在标签区间边界一次跨过整块，shift 选区扩展不拦）；② 落位吸附（click/keyup/select 后光标无选区且在标签内部 → 吸附最近边界，兜底 Home/End/Ctrl+方向落入内部的情况）；③ 内部编辑拒绝（beforeinput 目标 range 与任一标签部分重叠且未完整覆盖 → preventDefault，覆盖打字/删字/IME 组字/粘贴；选区完整覆盖整块放行随选删除）。单聊与群聊两输入区同款接线；退格贴尾整删与 × 角标删除既有处理器不触碰。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++- 新增 `frontend/src/components/daemon/use-atomic-ref-caret.ts`：`useAtomicRefCaret({ value, tokens, textareaRef })` 返回 `{ ranges, handleAtomicKeyDown, handleAtomicBeforeInput, snapCaret }`；`computeRefTokenRanges(value, tokens)` 导出（token 全部出现区间）。
++- session-input-bar / group-chat-panel：textarea 新增 onBeforeInput/onClick/onKeyUp/onSelect 四 props；onKeyDown 首位接方向键跳块（mention 联想只管 ↑↓/Enter/Tab/Esc 无冲突；群聊接在 IME 组合期守卫之后）。
++- 后端 0 端点 0 schema；发送置换/历史渲染协议零变化。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++
++   事件顺序由浏览器保证（keydown → beforeinput → input）；区间集每次 value/tokens 变化 useMemo 重算，拦截判定始终对当前值，无陈旧区间窗口。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++
++   单输入区受控状态（React 单线程）；两输入区各自持 hook 实例（token 集独立），无共享可变状态。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++
++   hook 无自持状态（纯派生 + ref 操作）；卸载零清理面。IME 组合期：beforeinput 的 insertComposition 部分重叠同样拒绝（组字不会进入标签内部）；群聊 keydown 跳块在 isComposing 守卫之后放行组合期。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++
++   token 区间按当前输入区 value 计算，拦截只作用于本 textarea；孤儿 token（map 不命中）不在 tokens 集内不拦截（纯文本语义，与降级口径一致）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：拦截面过宽误伤正常输入——部分重叠拒绝会让「拖选从标签中间开始的一段删除」被拒（用户需重选）；接受（行为可预期，完整覆盖整块的选区放行覆盖主路径）。放弃的方案：换 contenteditable 富文本（原子节点原生支持，但 2026-10-09 D-001 已否决——IME/退格/联想全链路回归风险大，本诉求未达「token 机制不可维护」的复潮条件）。
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/proposal.md b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/proposal.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/proposal.md
+@@ -0,0 +1,36 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:51:16.320Z
++---
++# 提案书（Proposal）— 2026-10-12-ws-ref-atomic-caret
++
++## 动机
++
++任务原话转写：用户反馈：引用标签应是一个整体——当前光标能点进标签内部改文字，左右移动光标签被当普通文字逐字符穿过。为标签加原子性拦截（不动 textarea 架构）：点击吸附边界、方向键整块跳过、内部编辑拒绝、部分重叠删除拒绝（选区完整覆盖整块放行随选删除）
++
++成功标准：
++- 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
++- 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
++- 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
++- Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
++- 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
++- 单聊+群聊两输入区一致；相关测试全绿
++
++## 变更范围
++
++按成功标准机械推导，共 6 条验收面：
++1. 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
++2. 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
++3. 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
++4. Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
++5. 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
++6. 单聊+群聊两输入区一致；相关测试全绿
++
++## 成功标准（可验证）
++
++1. 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
++2. 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
++3. 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
++4. Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
++5. 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
++6. 单聊+群聊两输入区一致；相关测试全绿
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/requirements.md b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/requirements.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/requirements.md
+@@ -0,0 +1,64 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:51:16.320Z
++---
++# 需求规格（Requirements）— 2026-10-12-ws-ref-atomic-caret
++
++## 功能需求
++
++### FR-01: 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
++
++- 必须：光标无选区且落在标签内部时，落位事件（click/keyup/select）必须把光标吸附到最近边界（前半去头、后半去尾）；禁止光标停留在标签内部。
++
++#### 场景：主路径
++
++Given 标签在场且光标被点击/键盘落入内部 / When 落位吸附触发 / Then selectionStart 位于标签边界之一。
++
++### FR-02: 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
++
++- 必须：无选区时 ←/→ 触碰标签区间必须整块跳过（preventDefault + 复位光标到对侧边界）；shift/meta/ctrl/alt 组合与有选区时禁止拦截。
++
++#### 场景：主路径
++
++Given 光标贴标签尾 / When 按 ← / Then 光标到块头；对称 → 从块头到块尾。
++
++### FR-03: 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
++
++- 必须：beforeinput 目标 range 与任一标签部分重叠（交集非空且未完整覆盖）必须 preventDefault；选区完整覆盖整块（含两侧额外文本）必须放行。
++
++#### 场景：主路径
++
++Given 目标 range 部分触碰标签 / When beforeinput / Then 输入被拒绝、value 不变；Given range 完整覆盖标签 / Then 放行随选区删除。
++
++### FR-04: Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
++
++- 必须：非 ←/→ 键移动（Home/End/Ctrl+方向）落位后由同一吸附逻辑兜底；SHOULD 吸附幂等（位置未变不重复 set）。
++
++#### 场景：兜底
++
++Given Home 落入标签内部 / When select 事件触发吸附 / Then 光标到最近边界。
++
++### FR-05: 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
++
++- 必须：既有退格整删、× 角标删除、mention 联想、IME 组合期守卫行为必须零变化；相关既有测试必须全绿。
++
++#### 场景：零回归
++
++Given 贴尾按退格 / Then 整枚标签删除（既有）；Given 联想浮层激活 / Then ↑↓/Enter/Tab/Esc 归浮层（既有）。
++
++### FR-06: 单聊+群聊两输入区一致；相关测试全绿
++
++- 必须：两输入区必须接同一 hook 同款行为；hook 测试 + 两输入区既有套件合跑全绿。
++
++#### 场景：主路径
++
++Given 群聊输入框 / Then 与单聊同款跳块/吸附/拒绝行为。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头；后半 → 吸附块尾」
++FR-02: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「贴尾按 ← 跳到块头；再按一次才离开标签」+「贴头按 → 跳到块尾」+「shift+方向（选区扩展）与普通文本处方向键不拦截」
++FR-03: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「标签内部打字/删字（部分重叠）拒绝」+「选区完整覆盖整块放行；无 token 区间放行；无目标区间放行」
++FR-04: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头」keyUp 路径（select 兜底同函数）
++FR-05: test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx + session-input-bar-mention.test.tsx + group-chat-panel.test.tsx 既有套件合跑 126/126（logs/atomic-final.log）
++FR-06: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx 全文件 + 两输入区接线（onKeyDown 首位/IME 守卫后）——同上合跑覆盖
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/review.json b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/review.json
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/review.json
+@@ -0,0 +1,41 @@
++{
++  "schemaVersion": 1,
++  "change": "2026-10-12-ws-ref-atomic-caret",
++  "reviewer": "subagent",
++  "verdict": "PASS",
++  "reviewedAgainst": "6199917b53ffc249caab23f350cb796e863a5a37",
++  "findings": [
++    {
++      "severity": "P3",
++      "title": "接线注释与实现不一致：跳块置于 IME 守卫之前而非注释所称之后",
++      "evidence": "群聊 handleInputKeyDown 中注释写「IME 组合期前置守卫之后」，但代码 `if (handleAtomicKeyDown(e)) return;` 实际位于 `if (e.nativeEvent.isComposing) return;` 之前；单聊同样置于 composingRef 守卫前。IME 组合期按 ←/→ 仍会进入跳块逻辑，组合文本恰在标签边界区间（p 满足 (start,end] 或 [start,end)）时 preventDefault + setSelectionRange 会打断组字。实际概率低（吸附/跳块已保证组合起点难落标签内），且违反仓库规则 18（注释与实现不一致）。",
++      "location": "frontend/src/components/group-chat/group-chat-panel.tsx:2149"
++    },
++    {
++      "severity": "P3",
++      "title": "跳块 preventDefault 取消浏览器默认滚动，长标签场景光标可能离屏",
++      "evidence": "handleAtomicKeyDown 中 preventDefault 阻止了方向键默认行为（含滚动到位），随后 setSelectionRange 不保证将新光标位置滚动进视口。标签跨多行或输入框滚动时，跳到块头/块尾后光标可能在视口外，用户失去位置感知。",
++      "location": "frontend/src/components/daemon/use-atomic-ref-caret.ts:75"
++    },
++    {
++      "severity": "P3",
++      "title": "测试断言与用例名不符：无死锁未实测；beforeinput 未走真实事件路径",
++      "evidence": "用例名「贴尾按 ← 跳到块头；再按一次才离开标签」只断言了第一次跳块结果，未实际第二次按 ← 验证离开（无死锁仅靠代码推理：p==start 时 p>r.start 为假不命中）。beforeinput 用例绕开 React 事件委托直调 handler（jsdom 限制可接受），真实浏览器 getTargetRanges 与 React 合成事件交互无端到端覆盖。",
++      "location": "frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx:55"
++    },
++    {
++      "severity": "P3",
++      "title": "allRefTokens 每渲染新建引用致 useMemo 失效，ranges 每次渲染重算",
++      "evidence": "单聊/群聊的 allRefTokens 均为渲染期新建数组（展开字面量），useMemo([value, tokens]) 依赖恒变，computeRefTokenRanges（O(tokens×value) indexOf 扫描）每次渲染重跑；叠加 onSelect 高频触发（每次光标移动）snapCaret 反复读 selection。典型规模（<10 token、数百字符）无感知，属可接受冗余而非缺陷。",
++      "location": "frontend/src/components/daemon/session-input-bar.tsx:320"
++    }
++  ],
++  "dimensionNotes": {
++    "乱序": "ok（keydown→beforeinput→select 事件序与拦截时序自洽：退格贴尾整删在 keydown preventDefault 先于 beforeinput；吸附 setSelectionRange 再触发 select 后因边界不 insideRange 幂等退出无回环；唯一注记为 jsdom 下 beforeinput 真实路径未端到端，已记 P3）",
++    "并发": "ok（单用户单输入框无竞态；受控 value 与 DOM 在 beforeinput 触发时刻一致——默认文本变更尚未应用，ranges 基于 React value 的坐标与 getTargetRanges 同源）",
++    "切换": "ok（会话/草稿切换由 value 变更驱动 ranges 重算，事件 handler 取最新渲染闭包，无陈旧区间命中路径）",
++    "作用域": "ok（hook 仅依赖 value/tokens/textareaRef 无全局状态，单聊群聊独立实例化，tokens 为附件∪工作区并集与退格整删匹配集同源）"
++  },
++  "reviewedAt": "2026-10-12T10:06:43+08:00",
++  "reviewerNotes": "｜主代理留痕：P3-1（IME 组合期守卫统一进 hook）与 P3-4（allRefTokens useMemo 稳定引用）已修复并入同提交（amend 后 sha 更新，行为级修复经 126/126 合跑复验，verdict 维持 PASS）；P3-2/P3-3 接受披露（长标签跨行视口滚动边缘、测试直调 handler 不走真实派发路径属 jsdom 限制，浏览器实测门覆盖）。"
++}
+
+diff --git a/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/tasks.md b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/tasks.md
+new file mode 100644
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-ref-atomic-caret/tasks.md
+@@ -0,0 +1,12 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T01:51:16.320Z
++---
++# 任务注册表（Tasks）— 2026-10-12-ws-ref-atomic-caret
++
++- [x] task-01: 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
++- [x] task-02: 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
++- [x] task-03: 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
++- [x] task-04: Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
++- [x] task-05: 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
++- [x] task-06: 单聊+群聊两输入区一致；相关测试全绿

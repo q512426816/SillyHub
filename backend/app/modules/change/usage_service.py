@@ -3,8 +3,10 @@
 以「去重执行集合」为统一口径，为变更中心两个维度聚合执行用量（纯 SELECT，
 零迁移、不改 daemon，D-003@v1 实时聚合）：
 
-- 变更集合（D-002@v1 并集去重）：``agent_runs.change_id`` 派发锚点 ∪
-  ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计一次；
+- 变更集合（D-002@v2 并集去重 + 轮级独占）：``agent_runs.change_id`` 派发锚
+  点 ∪ ``change_session_links`` 会话锚点，UNION 整行去重——同 run 双锚点只计
+  一次；带锚 run（派发锚点 / inject 打锚，2026-10-12-run-level-change-attribution）
+  独占归锚定变更，会话链接只认领无锚 run（存量会话全无锚 → 行为不变防回归）；
 - 快速修复集合：恒走 ``quicklog_session_links`` 会话链路（无派发锚点）；
 - 详情两段聚合对齐 ``daemon/session/service.get_session_usage`` 先例：明细段
   ``agent_run_model_usage`` GROUP BY model，兜底段无明细 run 按 run 四维列
@@ -192,15 +194,20 @@ class ChangeUsageQueryService:
 
     @staticmethod
     def _change_run_ids(change_id: uuid.UUID) -> Subquery:
-        """变更侧去重执行集合（D-002@v1 并集去重）：
+        """变更侧去重执行集合（D-002@v2 并集去重 + 轮级独占）：
 
         ``agent_runs.change_id`` 派发锚点 UNION ``change_session_links`` 会话
         锚点（两分支均只选 id，UNION 整行去重 = 按 run 去重）——同 run 双锚点
-        只计一次；跨变更共享会话时同一消耗在两个变更各完整计一次（R-03 口径
-        特性，非 bug）。两锚点均经 change 定位（link 行挂 change、change 属
-        workspace），天然限定本工作区，无需额外 workspace join。
-        不过滤 ``agent_sessions.deleted_at``（D-006@v1 软删计入）；无
-        ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
+        只计一次。
+
+        2026-10-12-run-level-change-attribution task-04（FR-03）轮级打锚口径：
+        会话链接分支追加 ``AgentRun.change_id IS NULL`` 谓词——带锚 run 独占归
+        其锚定变更，不再经共享会话重复摊给其它绑定变更（一个会话先后执行多个
+        变更时各归各段）；无锚 run（存量/绑定命令前轮次）维持经链接认领的旧
+        口径，全部无锚的存量会话行为逐字节不变（防回归）。两锚点均经 change
+        定位（link 行挂 change、change 属 workspace），天然限定本工作区，无需
+        额外 workspace join。不过滤 ``agent_sessions.deleted_at``（D-006@v1 软
+        删计入）；无 ``agent_session_id`` 的孤儿 run 经派发锚点仍命中，不丢数。
         """
         dispatched = select(AgentRun.id).where(col(AgentRun.change_id) == change_id)
         linked = (
@@ -209,7 +216,11 @@ class ChangeUsageQueryService:
                 ChangeSessionLink,
                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
             )
-            .where(col(ChangeSessionLink.change_id) == change_id)
+            .where(
+                col(ChangeSessionLink.change_id) == change_id,
+                # 轮级独占（FR-03）：带锚 run 只走派发锚点分支。
+                col(AgentRun.change_id).is_(None),
+            )
         )
         return union(dispatched, linked).subquery()
 
@@ -259,10 +270,12 @@ class ChangeUsageQueryService:
     def _change_summary_anchor(change_ids: list[uuid.UUID]) -> Subquery:
         """变更批量摘要锚点：(锚点 change_id, run 度量列) 两分支 UNION 整行去重。
 
-        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——跨变更
-        共享会话时 run 自带锚点可能指向别的变更或为 NULL，归属以 link 行为准；
-        UNION 整行去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定
-        其余 run 列，D-002@v1 同 run 双锚点只计一次）。
+        第二分支锚点列取 ``csl.change_id`` 而非 run 自带 ``change_id``——无锚
+        run（change_id IS NULL，2026-10-12-run-level-change-attribution task-04
+        FR-03 谓词）归属以 link 行为准；带锚 run 只走第一分支独占归锚定变更，
+        不再经共享会话摊给其它绑定变更（列表摘要与详情口径一致）。UNION 整行
+        去重等价 ``(锚点 change_id, run_id)`` 维度去重（run_id 决定其余 run 列，
+        D-002@v2 同 run 双锚点只计一次）。
         """
         cols = ChangeUsageQueryService._run_metric_columns()
         dispatched = select(col(AgentRun.change_id).label("group_key"), *cols).where(
@@ -275,7 +288,11 @@ class ChangeUsageQueryService:
                 ChangeSessionLink,
                 col(ChangeSessionLink.session_id) == col(AgentRun.agent_session_id),
             )
-            .where(col(ChangeSessionLink.change_id).in_(change_ids))
+            .where(
+                col(ChangeSessionLink.change_id).in_(change_ids),
+                # 轮级独占（FR-03）：带锚 run 不经会话链接重复认领。
+                col(AgentRun.change_id).is_(None),
+            )
         )
         return union(dispatched, linked).subquery()
 

@@ -15,6 +15,11 @@
  *   pointer-events-none，不拦截下方 textarea），宿主经 wrapper onPointerMove 调
  *   hitTestAttRefOverlay 命中检测（标签区被 textarea 覆盖，CSS :hover 不可行），
  *   以 visibleBadgeIndex 控制仅命中处淡入显示；
+ * - 类型图标（2026-10-12-ws-ref-emoji-inline，用户反馈替代原左上角角标）：
+ *   图标以 emoji 文本字符内嵌 token 首位（【📄 name】）——由 attachment-refs.ts
+ *   构造层统一落字，本层零渲染逻辑；lucide inline 图标会撑宽背景块造成累积
+ *   漂移，不可用（逐字符对齐铁律）。悬停元数据改由宿主 hitTest 命中后经
+ *   hoverTip（fixed 气泡）显示（pointer-events:none 层的原生 title 不可依赖）；
  * - 版式对齐（R-01）：overlayClassName 传与 textarea 完全相同的字体/行高/
  *   padding/宽度 class，overlayStyle 透传高度拖拽同步值；本层自带
  *   whitespace-pre-wrap break-words 对齐 textarea 软换行。
@@ -22,14 +27,23 @@
  */
 
 import { useMemo } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
+/** token 类型元数据（宿主构造：kind 已由 token 内嵌 emoji 承载视觉，title 供
+ *  悬停 hoverTip 显示完整绑定元数据）。 */
+export interface InputRefTokenMeta {
+  kind: "att" | "file" | "dir" | "code";
+  /** 悬停 tooltip：类型 + 工作区路径 + 行号 / 附件名等完整绑定。 */
+  title: string;
+}
+
 interface InputRefOverlayProps {
   /** 输入框当前值（受控，与 textarea 同源）。 */
   value: string;
-  /** 需高亮的编辑态 token 文本集（attTokenMap 值集）。 */
+  /** 需高亮的编辑态 token 文本集（attTokenMap 值集 ∪ 工作区 wsRefTokens 值集）。 */
   tokens: string[];
   /** × 角标点击：从 value 中移除该 token 一次出现（由宿主执行并 onChange）。 */
   onRemoveToken: (token: string) => void;
@@ -42,6 +56,13 @@ interface InputRefOverlayProps {
   visibleBadgeIndex?: number | null;
   /** 容器 ref（宿主 hitTest 时查询 [data-att-ref-occ] 用）。 */
   containerRef?: React.Ref<HTMLDivElement>;
+  /** token → 类型元数据（悬停 tooltip 数据源；不参与渲染形态——图标已内嵌
+   *  token 文本）。 */
+  tokenMetas?: Record<string, InputRefTokenMeta>;
+  /** 悬停元数据气泡（2026-10-12-ws-ref-emoji-inline）：宿主 hitTest 命中时传
+   *  {text,x,y}（视口坐标），未命中传 null；fixed 定位不受本层
+   *  pointer-events:none 影响（纯展示不收事件）。 */
+  hoverTip?: { text: string; x: number; y: number } | null;
 }
 
 /** 正则元字符转义（文件名可含 ()[] 等）。 */
@@ -105,6 +126,9 @@ export function hitTestAttRefOverlay(
   return null;
 }
 
+/** 悬停浮层高度粗估（px）——底部空间不足时的翻转判定用（两行文本 + padding）。 */
+const TIP_EST_HEIGHT = 48;
+
 export function InputRefOverlay({
   value,
   tokens,
@@ -113,11 +137,40 @@ export function InputRefOverlay({
   overlayStyle,
   visibleBadgeIndex,
   containerRef,
+  tokenMetas,
+  hoverTip,
 }: InputRefOverlayProps) {
   const parts = useMemo(() => splitByTokens(value, tokens), [value, tokens]);
   if (tokens.length === 0) return null;
   let occ = -1;
   return (
+    <>
+    {/* 悬停元数据气泡（2026-10-12-ws-ref-emoji-inline）：宿主 hitTest 命中驱动；
+        fixed 定位不受本层 pointer-events:none 影响，纯展示不收事件；视口右/下
+        边界防溢出。 */}
+    {hoverTip &&
+      createPortal(
+        <div
+          data-ws-ref-hover-tip
+          aria-hidden
+          style={{
+            left: Math.min(hoverTip.x + 14, window.innerWidth - 336),
+            /* 底部空间不足翻到鼠标上方（输入框贴页面底缘：下方 16px 常落视口外）。
+             * 经 createPortal 挂 document.body：2026-10-12 实测发现页面某祖先带
+             * transform 创建 containing block，fixed 相对该祖先定位致视口坐标整体
+             * 偏移（style.top=824 实渲染在 965）——body 下无该祖先，fixed 恢复
+             * 相对视口，clamp 数学才成立。 */
+            top:
+              hoverTip.y + 16 + TIP_EST_HEIGHT > window.innerHeight
+                ? Math.max(8, hoverTip.y - TIP_EST_HEIGHT - 10)
+                : hoverTip.y + 16,
+          }}
+          className="fixed z-50 max-w-[320px] rounded-md bg-foreground/90 px-2 py-1.5 text-[11px] leading-snug text-background shadow-lg"
+        >
+          {hoverTip.text}
+        </div>,
+        document.body,
+      )}
     <div
       ref={containerRef}
       className={cn(
@@ -146,14 +199,17 @@ export function InputRefOverlay({
              * 背景块只用 background+radius 零布局影响。 */
             className="relative rounded bg-brand-500/15 dark:bg-brand-400/20"
           >
-            {/* 占位文本撑出背景块宽度（透明，不与 textarea 文字叠加重影）。 */}
+            {/* 占位文本撑出背景块宽度（透明，不与 textarea 文字叠加重影）；
+                类型图标已内嵌 token 文本（emoji，attachment-refs.ts 构造层）。 */}
             <span aria-hidden className="text-transparent">
               {p.text}
             </span>
+            {/* 右上 × 角标（D-004）：absolute 不进文本流，z-20 越过 textarea；
+                不带 opacity/transform（stacking context 铁律）；命中淡入显示。 */}
             <button
               type="button"
-              aria-label={`移除引用 ${p.text.replace(/^【|】$/g, "")}`}
-              title={`移除引用 ${p.text.replace(/^【|】$/g, "")}`}
+              aria-label={`移除引用 ${p.text.slice(1, -1).replace(/^\S+\s/, "")}`}
+              title={`移除引用 ${p.text.slice(1, -1).replace(/^\S+\s/, "")}`}
               onPointerDown={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -176,5 +232,6 @@ export function InputRefOverlay({
         );
       })}
     </div>
+    </>
   );
 }

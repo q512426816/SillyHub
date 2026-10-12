@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  用户反馈悬停路径浮层看不到：输入框贴页面底缘，tip 显示在鼠标下方 16px 落到视口外（实测 y=965 > 视口 940），修复为底部空间不足翻到鼠标上方
+
+  成功标准：
+  - 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
+  - 常规位置（下方有空间）仍显示在鼠标下方 16px
+  - 相关测试全绿
+autopilot: false
+baseline_commit: 56b716671775d29e29da9b11cdb1f1887458fd75
+updatedAt: '2026-10-12T03:03:01.979Z'
+baseline_sha256: 557067b39ce9a2677f3c63cf7b8cb8e6141872e54ecbe09604138fb57a3e256f
+spec_approved: true
+spec_approved_at: '2026-10-12T03:01:21.554Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+gate_summary: 'test: —｜lint: —｜门文件 20 个'
+

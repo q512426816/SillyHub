@@ -575,8 +575,14 @@ class TestChangeAggregationSemantics:
         }
 
     async def test_shared_session_counted_in_both_changes(self, db_session: AsyncSession) -> None:
-        """6 跨变更共享会话：一个会话绑两个变更 → 两变更各自完整计该会话消耗
-        （D-002@v1 / R-03 口径特性，非 bug）。"""
+        """6 跨变更共享会话（无锚 run）：一个会话绑两个变更、run 无 change_id →
+        两变更各自完整计该会话消耗。
+
+        2026-10-12-run-level-change-attribution 后口径收窄为 D-002@v2：无锚 run
+        （存量 / 绑定命令前轮次）维持经链接认领的旧口径——本用例即其回归护栏；
+        带锚 run 独占归锚定变更、不再摊给其它绑定变更（见
+        test_anchored_run_exclusive / test_two_changes_sequential_split）。
+        """
         ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
         owner = await _make_user(db_session)
         change_a = await _make_change(db_session, ws.id, "2026-08-30-usage-shared-a")
@@ -614,6 +620,137 @@ class TestChangeAggregationSemantics:
         assert set(summary_map) == {change_a.id, change_b.id}
         assert summary_map[change_a.id].totals == usage_a.totals
         assert summary_map[change_b.id].totals == usage_b.totals
+
+    async def test_anchored_run_exclusive_to_owning_change(self, db_session: AsyncSession) -> None:
+        """6b 轮级独占（2026-10-12-run-level-change-attribution task-04 / FR-03）：
+        会话同时绑 A、B，带锚 run（change_id=A，inject 打锚形态）只归 A，不再
+        经共享会话摊给 B；无锚 run 维持旧口径两变更都认领。
+
+        手算：r1（锚 A，有明细）input=100/output=10/api=1；r2（无锚，兜底）
+        input=50/output=5。A = 100+50=150，B = 仅 50（若带锚摊派则为 150，
+        锁定独占）；详情与批量摘要两路同断言。
+        """
+        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
+        owner = await _make_user(db_session)
+        change_a = await _make_change(db_session, ws.id, "2026-10-12-anchor-a")
+        change_b = await _make_change(db_session, ws.id, "2026-10-12-anchor-b")
+        sess = await _make_session(db_session, owner)
+        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
+        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
+
+        run_anchored = await _make_run(
+            db_session, change_id=change_a.id, agent_session_id=sess.id, num_turns=5
+        )
+        await _make_model_usage(
+            db_session,
+            run_id=run_anchored.id,
+            model="anchor-model",
+            input_tokens=100,
+            output_tokens=10,
+            api_requests=1,
+        )
+        run_unanchored = await _make_run(db_session, agent_session_id=sess.id)
+        await _make_model_usage(
+            db_session,
+            run_id=run_unanchored.id,
+            model="unanchor-model",
+            input_tokens=50,
+            output_tokens=5,
+            api_requests=1,
+        )
+
+        svc = ChangeUsageQueryService(db_session)
+        usage_a = await svc.get_change_usage(ws.id, change_a.id)
+        usage_b = await svc.get_change_usage(ws.id, change_b.id)
+        assert usage_a.totals.model_dump() == {
+            "input_tokens": 150,
+            "output_tokens": 15,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "api_requests": 2,
+            "num_turns": 5,
+        }
+        # B 只拿到无锚 run（带锚 run 独占归 A）。
+        assert usage_b.totals.model_dump() == {
+            "input_tokens": 50,
+            "output_tokens": 5,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+            "api_requests": 1,
+            "num_turns": 0,
+        }
+
+        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
+        assert summary_map[change_a.id].totals.input_tokens == 150
+        assert summary_map[change_b.id].totals.input_tokens == 50
+
+    async def test_two_changes_sequential_split(self, db_session: AsyncSession) -> None:
+        """6c 同会话先后两变更（FR-04）：两段轮各自打锚后，两变更统计互不相同
+        且各只含自己时段的轮——列表不再显示同一组会话总和。
+
+        手算：A 段 r1 input=200/turns=8/duration=1000ms，B 段 r2
+        input=30/turns=2/duration=200ms。A ≠ B 且各自等于自己锚定 run 之和。
+        """
+        ws = await _make_workspace(db_session, root_path=f"/tmp/usage-{uuid.uuid4()}")
+        owner = await _make_user(db_session)
+        change_a = await _make_change(db_session, ws.id, "2026-10-12-seq-a")
+        change_b = await _make_change(db_session, ws.id, "2026-10-12-seq-b")
+        sess = await _make_session(db_session, owner)
+        await _make_change_link(db_session, change_id=change_a.id, session_id=sess.id)
+        await _make_change_link(db_session, change_id=change_b.id, session_id=sess.id)
+
+        run_a = await _make_run(
+            db_session,
+            change_id=change_a.id,
+            agent_session_id=sess.id,
+            num_turns=8,
+            duration_ms=1000,
+            started_at=_T10,
+            finished_at=_T1030,
+        )
+        await _make_model_usage(
+            db_session,
+            run_id=run_a.id,
+            model="seq-model",
+            input_tokens=200,
+            output_tokens=20,
+            api_requests=3,
+        )
+        run_b = await _make_run(
+            db_session,
+            change_id=change_b.id,
+            agent_session_id=sess.id,
+            num_turns=2,
+            duration_ms=200,
+            started_at=_T1045,
+            finished_at=_T11,
+        )
+        await _make_model_usage(
+            db_session,
+            run_id=run_b.id,
+            model="seq-model",
+            input_tokens=30,
+            output_tokens=3,
+            api_requests=1,
+        )
+
+        svc = ChangeUsageQueryService(db_session)
+        usage_a = await svc.get_change_usage(ws.id, change_a.id)
+        usage_b = await svc.get_change_usage(ws.id, change_b.id)
+        assert usage_a.totals.input_tokens == 200
+        assert usage_b.totals.input_tokens == 30
+        assert usage_a.totals.input_tokens != usage_b.totals.input_tokens
+        assert (usage_a.totals.num_turns, usage_a.duration_ms) == (8, 1000)
+        assert (usage_b.totals.num_turns, usage_b.duration_ms) == (2, 200)
+        # 时间三元组各归各段（A 段 10:00-10:30，B 段 10:45-11:00）。
+        assert _naive(usage_a.started_at) == _naive(_T10)
+        assert _naive(usage_a.finished_at) == _naive(_T1030)
+        assert _naive(usage_b.started_at) == _naive(_T1045)
+        assert _naive(usage_b.finished_at) == _naive(_T11)
+
+        summary_map = await svc.summarize_changes(ws.id, [change_a.id, change_b.id])
+        assert summary_map[change_a.id].totals.input_tokens == 200
+        assert summary_map[change_b.id].totals.input_tokens == 30
 
     async def test_soft_deleted_session_runs_counted(self, db_session: AsyncSession) -> None:
         """7 软删会话（agent_sessions.deleted_at 非空）执行仍计入（D-006@v1：

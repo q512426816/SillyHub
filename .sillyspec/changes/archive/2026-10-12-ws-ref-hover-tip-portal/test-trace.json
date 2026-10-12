@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-hover-tip-portal",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-hover-tip-portal"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-hover-tip-portal"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-hover-tip-portal"
+    }
+  ]
+}

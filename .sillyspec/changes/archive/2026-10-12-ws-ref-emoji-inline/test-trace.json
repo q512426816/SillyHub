@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-ref-emoji-inline",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N；emoji 按类型内嵌（📄/📁/🧾）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-emoji-inline"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-emoji-inline"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「同类型同名才互斥 ·2（emoji 前缀参与占用文本整体比对）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-emoji-inline"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）」",
+        "test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「file/dir/code 三类 token 置换为对应正式标记（emoji 内嵌形态全文匹配）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-emoji-inline"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-ref-emoji-inline"
+    }
+  ]
+}

@@ -729,7 +729,7 @@ created_at: 2026-10-08T03:33:17.438Z
 全文：.sillyspec/changes/archive/2026-10-10-att-ref-badge-hover/requirements.md#FR-04
 最近确认：b9b67aa80c9a306c4bfeeee1f03eaab6a192f7f0
 
-## FR-auto-frontend-155 enrichDisplayTurns 的 apiDurationMs 回填语义必须有行为测试锁定（上变更评审 P3）
+## FR-auto-frontend-182 enrichDisplayTurns 的 apiDurationMs 回填语义必须有行为测试锁定（上变更评审 P3）
 变更：2026-10-10-turn-speed-enrich-backfill-test
 状态：active
 摘要：历史轮回填；实时值优先
@@ -748,7 +748,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-turn-speed-enrich-backfill-test
   status: active
 
-## FR-auto-frontend-156 测试全绿（不跑全量）
+## FR-auto-frontend-183 测试全绿（不跑全量）
 变更：2026-10-10-turn-speed-enrich-backfill-test
 状态：active
 摘要：相关测试绿
@@ -767,7 +767,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-turn-speed-enrich-backfill-test
   status: active
 
-## FR-auto-frontend-157 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
+## FR-auto-frontend-184 单轮会话（1 条轮目）左侧轮次导航可见，显示该轮并可点击定位
 变更：2026-10-10-single-turn-nav-and-jump-head
 状态：active
 摘要：单轮会话导航可见；空轮次仍不渲染
@@ -786,7 +786,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
 
-## FR-auto-frontend-158 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
+## FR-auto-frontend-185 桌面 TurnNavList 与移动端 Drawer 轮次导航行为一致（空态文案不回归）
 变更：2026-10-10-single-turn-nav-and-jump-head
 状态：active
 摘要：移动端一致性
@@ -805,7 +805,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
 
-## FR-auto-frontend-159 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
+## FR-auto-frontend-186 时间线顶部在还有更早历史时提供「回到会话开头」入口，点击后程序化连续翻页直至游标到头，并定位到最早内容
 变更：2026-10-10-single-turn-nav-and-jump-head
 状态：active
 摘要：点击直达开头；页上限兜底
@@ -824,7 +824,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
 
-## FR-auto-frontend-160 连续加载期间有可见 loading 状态；到头后入口消失
+## FR-auto-frontend-187 连续加载期间有可见 loading 状态；到头后入口消失
 变更：2026-10-10-single-turn-nav-and-jump-head
 状态：active
 摘要：loading 可见与消失
@@ -843,7 +843,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
 
-## FR-auto-frontend-161 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
+## FR-auto-frontend-188 既有触顶翻页/跳转/贴底跟随相关测试全部保持通过
 变更：2026-10-10-single-turn-nav-and-jump-head
 状态：active
 摘要：回归
@@ -862,7 +862,7 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-10-single-turn-nav-and-jump-head
   status: active
 
-## FR-auto-frontend-162 ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
+## FR-auto-frontend-189 ScopeAuditView 渲染 repos[]（非空数组时）：每仓一段=仓标识（key==='main' 显示「主仓」brand 色）+锚点 chip（anchor.label 文案+base 前 7 位短哈希，degraded 显示降级锚）+三态 chips（计划内/计划外/计划未动计数取 repos[].totals 单一源）+该仓 files/+−；degraded 仓段不渲染 chips，整段 ⚠️ degradedReason
 变更：2026-10-10-change-patch-cross-repo-view
 状态：active
 摘要：跨仓冻结件按仓分段；降级仓整段警示
@@ -1240,4 +1240,526 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-12-workspace-dead-link-fix
+  status: active
+||||||| C:/Users/12532/AppData/Local/Temp/k.base
+
+## FR-auto-frontend-182 文件树右键添加引用
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-008@v1
+场景正文：
+- 场景：默认场景 — Given 会话页左栏处于「工作区文件」模式且中栏有输入区（真会话/预会话/群聊）；When 用户右键文件树中的文件或目录节点；Then 出现上下文菜单（单项）；点击「添加文件/目录到会话输入框」后，当前输入区光标处插入该节点的引用标签（输入区失焦时插入失焦前光标位）；空门户态（无输入区）时 to
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-01
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-03:acc-0-5c7e2814
+  tests: frontend/src/components/explorer/__tests__/file-explorer.test.tsx | frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-03:acc-1-d7085b37
+  tests: frontend/src/components/explorer/__tests__/file-explorer.test.tsx | frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-06:acc-0-f5647a9e
+  tests: frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-06:acc-1-25ac9d78
+  tests: frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-06:acc-2-f20c7f7d
+  tests: frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-183 引用标签编辑与路径绑定
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-005@v1、D-009@v1
+场景正文：
+- 场景：默认场景 — Given 输入区已插入工作区引用标签；Then 标签显示名称（代码块为「名称:起始行-结束行」）；悬停显示类型 + 工作区 + 完整相对路径（代码块含行号）；右上 × 角标删该处一次出现；光标贴标签尾按退格一
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-02
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-01:acc-0-c3d0e5a9
+  tests: frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-05:acc-0-e31eee83
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-05:acc-1-da26c83e
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-05:acc-2-45bba167
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-05:acc-3-3024a717
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-184 类型角标
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 输入区存在引用标签（附件或工作区）；Then 镜像层标签左上角显示 lucide 类型角标：文件 FileText / 目录 Folder / 代码块 Braces / 附件 Paperclip（D-001
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-03
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-04:acc-0-2e832fd9
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-04:acc-1-4d931d00
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-185 预览区行号（前置）
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 右侧预览列展示代码或纯文本文件；Then 内容按行显示行号；行号列不可被选中（选区锚点只落内容区）；.md/图片/PDF/二进制分支无行号且行为与现状一致
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-04
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-02:acc-0-e07fdcdd
+  tests: frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-02:acc-1-2e44829d
+  tests: frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-186 选区右键添加代码块引用
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-006@v1、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 预览区为代码/纯文本文件且用户选中了若干行（选区非折叠且起止落在行元素内）；When 用户在选区内右键；Then 出现菜单「添加选中内容到会话输入框（名称:起始行-结束行）」，点击后光标处插入代码块引用标签；行号按选区起止行元素的文档实际位置计算（反向选区取 min-max
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-05
+最近确认：38bb5b21e
+
+## FR-auto-frontend-187 发送置换
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-004@v1、D-008@v2、D-009@v1
+场景正文：
+- 场景：默认场景 — Given 待发正文含工作区引用标签；When 消息发送（含定时发送、团队直发、群聊）；Then 标签全部置换为 `[文件引用:wid|path]` / `[目录引用:wid|path]` / `[代码引用:wid|path|L起-L止]`（全部组装位覆盖—
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-06
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-07:acc-0-af16cfc2
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-07:acc-1-74dc11c4
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-07:acc-2-b8e01635
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx | frontend/src/components/daemon/__tests__/attachment-refs.test.ts | frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-188 历史渲染与预览
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-009@v1
+场景正文：
+- 场景：默认场景 — Given 历史消息正文含三类引用标记；Then 渲染为可点击标签（类型图标 + 名称 + 行号）；点击经 fetchDownload(workspaceId, path) 打开 FilePreviewModa
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-07
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-09:acc-0-f2b7b04e
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-09:acc-1-e7a99eae
+  tests: frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-189 三输入区一致
+变更：2026-10-10-workspace-ref-intake
+状态：active
+摘要：默认场景
+依据决策：D-008@v1
+场景正文：
+- 场景：默认场景 — Given 单聊（session-input-bar）、预会话、群聊（group-chat-panel）任一输入区；Then FR-01/02/03/06 行为一致（同一槽位契约与置换接线）
+全文：.sillyspec/changes/archive/2026-10-10-workspace-ref-intake/requirements.md#FR-08
+最近确认：38bb5b21e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-workspace-ref-intake:task-08:acc-0-449ccf0e
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+- row: 2026-10-10-workspace-ref-intake:task-08:acc-1-f91784ba
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-workspace-ref-intake
+  status: active
+
+## FR-auto-frontend-163 输入框内引用标签（附件/文件/目录/代码块）文本形如【📄 name】，图标与文字同处文本流零错位
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 输入区经右键/槽位插入任一类型引用 / When token 渲染 / Then textarea 纯文本与 overlay 占位文本同串同宽（emoji 为文
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-01
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「基名 = 名称(+行号段无 L 前缀)；seq>1 加 ·N；emoji 按类型内嵌（📄/📁/🧾）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-164 overlay 左上角类型角标移除，悬停 tooltip 元数据仍显示类型+路径+行号
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 标签在场且指针悬停命中 / When hitTest 命中 / Then data-ws-ref-hover-tip 气泡渲染 title 文本；移出 → 气泡
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-02
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-165 同名 ·2 唯一化口径不因 emoji 前缀失效（手打【name】与槽位插入【📄 name】按基名正确撞池）
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：同名碰撞
+场景正文：
+- 场景：同名碰撞 — 
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-03
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「同类型同名才互斥 ·2（emoji 前缀参与占用文本整体比对）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-166 发送置换产物不变（map 全文匹配），退格整删/× 删除对新 token 形态正确
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：发送与删除
+场景正文：
+- 场景：发送与删除 — Given token【🧾 a.py:10-16】在场 / When 发送 / Then 置换为 [代码引用:wid|path|L10-L16]；贴尾退格一次整删整枚 t
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-04
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「× 角标 aria-label 剥离内嵌 emoji 前缀（提示语只留名称）」 | test/frontend/src/components/daemon/__tests__/attachment-refs.test.ts「file/dir/code 三类 token 置换为对应正式标记（emoji 内嵌形态全文匹配）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-167 既有相关测试同步更新全绿，无引用时零视觉差异
+变更：2026-10-12-ws-ref-emoji-inline
+状态：active
+摘要：零回归
+场景正文：
+- 场景：零回归 — Given 无引用 / Then overlay 不渲染（tokens 空返回 null），hoverTip 无渲染。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-emoji-inline/requirements.md#FR-05
+最近确认：20058a3a97f47a4daab0165f5264f62f9fb442de
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-emoji-inline:flow:测试绑定FR-05
+  tests: frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-emoji-inline
+  status: active
+
+## FR-auto-frontend-168 点击标签内部任意位置，光标吸附到标签前或后边界（不进入内部）
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 标签在场且光标被点击/键盘落入内部 / When 落位吸附触发 / Then selectionStart 位于标签边界之一。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-01
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头；后半 → 吸附块尾」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-169 左/右方向键在标签边界处一次跳过整块（贴尾按左到块头，贴头按右到块尾）；shift 选区扩展不受影响
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 光标贴标签尾 / When 按 ← / Then 光标到块头；对称 → 从块头到块尾。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-02
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「贴尾按 ← 跳到块头；再按一次才离开标签」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-170 标签内部打字/删字/IME 组字/粘贴（目标 range 与标签部分重叠）一律拒绝；选区完整覆盖整块的删除放行
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 目标 range 部分触碰标签 / When beforeinput / Then 输入被拒绝、value 不变；Given range 完整覆盖标签 / Th
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-03
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「标签内部打字/删字（部分重叠）拒绝」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-171 Home/End/Ctrl+方向落入标签内部时兜底吸附到最近边界
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：兜底
+场景正文：
+- 场景：兜底 — Given Home 落入标签内部 / When select 事件触发吸附 / Then 光标到最近边界。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-04
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx「光标落入标签前半 → 吸附块头」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-172 退格贴尾整删/× 角标删除/发送置换等既有行为零回归
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：零回归
+场景正文：
+- 场景：零回归 — Given 贴尾按退格 / Then 整枚标签删除（既有）；Given 联想浮层激活 / Then ↑↓/Enter/Tab/Esc 归浮层（既有）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-05
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
+  status: active
+
+## FR-auto-frontend-173 单聊+群聊两输入区一致；相关测试全绿
+变更：2026-10-12-ws-ref-atomic-caret
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 群聊输入框 / Then 与单聊同款跳块/吸附/拒绝行为。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-atomic-caret/requirements.md#FR-06
+最近确认：6199917b53ffc249caab23f350cb796e863a5a37
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-atomic-caret:flow:测试绑定FR-06
+  tests: test/frontend/src/components/daemon/__tests__/use-atomic-ref-caret.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-atomic-caret
   status: active

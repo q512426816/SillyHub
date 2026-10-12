@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-10-workspace-ref-intake",
+  "appliedAt": "2026-10-12T00:30:26.052Z",
+  "baseHash": "b5b7f43f1c27464406ba26939cb738d3d86b0bae",
+  "files": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+      "sha256": "285c03ed4e75249d86b5c3f92fe0a40c9cd80f2f077f17299b069e92bf65b826"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+      "sha256": "f034a2b032780297718eeefbe03a9212f03e2b383cfd8c1ec5bd46efb29d3fcb"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+      "sha256": "562b6a6d5899b35eb180924179f848fe408c63c0c738fb6bd0423374a5c74e54"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+      "sha256": "0771cb66f5b82c14ba06e8e3cf86bd90464e53d1945b9dcc4cc76fee97245fdb"
+    },
+    {
+      "path": "frontend/src/components/daemon/attachment-ref-tag.tsx",
+      "sha256": "55286bb877e17a0d5c344d407cf2d485d62904de37a9517b7d4ad7ec79bdfaf0"
+    },
+    {
+      "path": "frontend/src/components/daemon/input-ref-overlay.tsx",
+      "sha256": "47e1392597c7ea2f6c2fc95edf326823a9fb6608a6039ed5a23c290abbb65a97"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-input-bar.tsx",
+      "sha256": "56250c3d050f563fa23311692a9d87f9bf77868c707990323ddf596b0f837346"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/index.tsx",
+      "sha256": "b782c0e528e11f4d86248089daa4fb0e5dbd3907b35b1861ff9a7d3c178d2bc2"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+      "sha256": "40dca4a5bf4665ad18d097b3d02e0556b2728b065fbaa54a0e3c9376edbcd31b"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "7d5fc528b7b468e07c4861b40330e91c1f5f8db883f813658d699bde2ad5cdfa"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+      "sha256": "1b1e868482639baa16463588e798f6ea92c130a9236eafd66ad2c111f0b9645d"
+    },
+    {
+      "path": "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+      "sha256": "d967ecfb790a7738cc49121fb52bf3bbb6b0146063478069d66c66fae9cea96d"
+    },
+    {
+      "path": "frontend/src/components/explorer/file-explorer.tsx",
+      "sha256": "c6ec6822d7c785306e139666032d9a61d2c369b46ad7ba9d1ede6286e5b79958"
+    },
+    {
+      "path": "frontend/src/components/explorer/file-preview.tsx",
+      "sha256": "62b7c6284a6c36486d5f526b94e8def8c4ecf97defb9a11cba81899f11f7ab68"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+      "sha256": "1c209778d07059f6d1920634ad2ace48c9859bca8abc958aa757fc377daf4c93"
+    },
+    {
+      "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+      "sha256": "506e78e67807f474026bfcbc1e71f954e3023e87e3be8f9a8d591063ef871590"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+      "sha256": "a0fbef84ad7ccbef1d5b71b61635021bc1333c1243288d98996e63d4f53f9052"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "sha256": "fd899c84019b9347a7833cd63506274c3def0e72eb028b32e2ea6a14909d3dc3"
+    },
+    {
+      "path": "frontend/src/components/sessions/portal-file-panels.tsx",
+      "sha256": "c86324b4780affcc57b74153bb1da74d60c02526b8eb27ba2a567f12f327e2e9"
+    },
+    {
+      "path": "frontend/src/components/sessions/sessions-portal.tsx",
+      "sha256": "e4e2932477935d69e4384e88515770356d3967638d70fa7e32ae1f3013594c40"
+    },
+    {
+      "path": "frontend/src/components/ui/floating-context-menu.tsx",
+      "sha256": "49c7ec7b9f64497ac37f54d5f8565f573c7ca492f79a88a7784b6628cfc63170"
+    },
+    {
+      "path": "frontend/src/lib/attachment-refs.ts",
+      "sha256": "fcbe80b239e04e45e578331895471ac048ff17bfa65b19a4c3e2d3c9f988702f"
+    }
+  ]
+}

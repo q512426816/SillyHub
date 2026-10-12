@@ -1,0 +1,240 @@
+{
+  "change": "2026-10-10-workspace-ref-intake",
+  "baseline": "b5b7f43f1c27464406ba26939cb738d3d86b0bae",
+  "head": "b5b7f43f1c27464406ba26939cb738d3d86b0bae",
+  "files": [
+    "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+    "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+    "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+    "frontend/src/components/daemon/attachment-ref-tag.tsx",
+    "frontend/src/components/daemon/input-ref-overlay.tsx",
+    "frontend/src/components/daemon/session-input-bar.tsx",
+    "frontend/src/components/daemon/session-panel/index.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+    "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+    "frontend/src/components/explorer/file-explorer.tsx",
+    "frontend/src/components/explorer/file-preview.tsx",
+    "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+    "frontend/src/components/group-chat/group-chat-panel.tsx",
+    "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+    "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+    "frontend/src/components/sessions/portal-file-panels.tsx",
+    "frontend/src/components/sessions/sessions-portal.tsx",
+    "frontend/src/components/ui/floating-context-menu.tsx",
+    "frontend/src/lib/attachment-refs.ts"
+  ],
+  "totals": {
+    "files": 22,
+    "additions": 2367,
+    "deletions": 125
+  },
+  "savedAt": "2026-10-10T08:56:12.670Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b5b7f43f1c27464406ba26939cb738d3d86b0bae",
+    "totals": {
+      "files": 23,
+      "additions": 2367,
+      "deletions": 125
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/attachment-ref-tag.test.tsx",
+        "additions": 98,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/attachment-refs.test.ts",
+        "additions": 184,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx",
+        "additions": 106,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx",
+        "additions": 126,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/attachment-ref-tag.tsx",
+        "additions": 105,
+        "deletions": 33,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/input-ref-overlay.tsx",
+        "additions": 41,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-input-bar.tsx",
+        "additions": 131,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/index.tsx",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx",
+        "additions": 34,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 49,
+        "deletions": 8,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/explorer/__tests__/file-explorer.test.tsx",
+        "additions": 87,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/explorer/__tests__/file-preview.test.tsx",
+        "additions": 194,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/explorer/file-explorer.tsx",
+        "additions": 123,
+        "deletions": 21,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/explorer/file-preview.tsx",
+        "additions": 227,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx",
+        "additions": 166,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/group-chat/group-chat-panel.tsx",
+        "additions": 133,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/portal-file-panels.test.tsx",
+        "additions": 42,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "additions": 140,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/portal-file-panels.tsx",
+        "additions": 19,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/sessions-portal.tsx",
+        "additions": 42,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/ui/floating-context-menu.tsx",
+        "additions": 109,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/attachment-refs.ts",
+        "additions": 196,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-segment-views.tsx",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "901d59595bdc3f3a498735d8e42c3ffa4cbcef30c47c335833d97e14bbc555b3",
+  "patchStatus": "ok"
+}
