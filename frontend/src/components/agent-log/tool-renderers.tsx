@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ToolCallEntry } from "./types";
 
 import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
-import { DiffView, parseStructuredPatch } from "./tool-diff";
+import { DiffView, computeLineDiff, parseStructuredPatch } from "./tool-diff";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -476,13 +476,18 @@ function ReadToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) 
 /*  Edit                                                               */
 /* ------------------------------------------------------------------ */
 
-function EditToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
+function EditToolPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const filePath = String(rawArgs?.file_path ?? "");
   const fileName = filePath.split("/").pop() ?? filePath;
   const oldStr = typeof rawArgs?.old_string === "string" ? rawArgs.old_string : "";
   const newStr = typeof rawArgs?.new_string === "string" ? rawArgs.new_string : "";
   const replaceAll = Boolean(rawArgs?.replace_all);
+  // 2026-10-13-editpatch-fullchain：行级 diff 三级——structuredPatch（真实文件
+  // 行号）优先 → 无 patch 回退 computeLineDiff LCS 自算（片段相对行号）→ 超大
+  // 输入（null 护栏）回退既有红/绿两块。
+  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
+  const rows = patchRows ?? (oldStr && newStr ? computeLineDiff(oldStr, newStr) : null);
 
   return (
     <div className="min-w-0 space-y-1">
@@ -501,16 +506,31 @@ function EditToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) 
         <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
       )}
       <CollapsibleSection title="变更内容">
-        <div className="space-y-1.5">
+        {rows ? (
           <div>
-            <div className="mb-0.5 text-[10px] font-semibold text-red-700">-</div>
-            <pre className={cn(CODE_CLS, "line-clamp-6")}>{oldStr}</pre>
+            <div className="mb-0.5 text-[10px] font-semibold text-zinc-500">
+              变更对比（旧 {oldStr ? oldStr.split("\n").length : 0} 行 → 新{" "}
+              {newStr ? newStr.split("\n").length : 0} 行）
+            </div>
+            <DiffView rows={rows} />
+            {newStr && (
+              <div className="mt-1">
+                <CopyButton text={newStr} label="复制新文本" />
+              </div>
+            )}
           </div>
-          <div>
-            <div className="mb-0.5 text-[10px] font-semibold text-emerald-700">+</div>
-            <pre className={cn(CODE_CLS, "line-clamp-6")}>{newStr}</pre>
+        ) : (
+          <div className="space-y-1.5">
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold text-red-700">-</div>
+              <pre className={cn(CODE_CLS, "line-clamp-6")}>{oldStr}</pre>
+            </div>
+            <div>
+              <div className="mb-0.5 text-[10px] font-semibold text-emerald-700">+</div>
+              <pre className={cn(CODE_CLS, "line-clamp-6")}>{newStr}</pre>
+            </div>
           </div>
-        </div>
+        )}
       </CollapsibleSection>
       <CollapsibleSection title="原始数据">
         <pre className={CODE_CLS}>{entry.args}</pre>
@@ -560,7 +580,7 @@ export function ToolCallPreview({ entry, mergedResult, durationMs, editPatch }: 
     case "read":
       return <ReadToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "edit":
-      return <EditToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
+      return <EditToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} editPatch={editPatch} />;
     default:
       return <GenericToolPreview entry={entry} durationMs={durationMs} />;
   }

@@ -65,7 +65,7 @@ import {
   ToolResultCard,
 } from "@/components/agent-log/tool-renderers";
 import type { ToolCallEntry } from "@/components/agent-log/types";
-import { MarkdownText } from "@/components/ui/markdown-text";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 // 全仓首次 extend（X-15）：relativeTime 提供 fromNow；zh-cn 使 fromNow 输出
@@ -206,6 +206,9 @@ type ConversationSegment =
       entry: ToolCallEntry;
       mergedResult?: string;
       durationMs?: number;
+      /** 2026-10-13-editpatch-fullchain：配对 tool_result 段的 structuredPatch
+       *  JSON（daemon claude-code 解析器附着），Write/Edit 卡行级 diff 用。 */
+      editPatch?: string;
       hasResult: boolean;
     }
   | { kind: "tool_result"; seq: number; body: string };
@@ -304,6 +307,7 @@ function buildConversationTurns(
             Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
               ? endMs - startMs
               : undefined,
+          editPatch: result?.edit_patch ?? undefined,
           hasResult: Boolean(result),
         });
         break;
@@ -378,6 +382,7 @@ function renderSegment(seg: ConversationSegment) {
             entry={seg.entry}
             mergedResult={seg.mergedResult}
             durationMs={seg.durationMs}
+            editPatch={seg.editPatch}
           />
         </div>
       ) : (

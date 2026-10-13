@@ -11,6 +11,8 @@
  *   分隔行。JSON 非法 / hunk 形状不符 → null（调用方回退自身既有展示）。
  * - DiffView：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）；
  *   超 DIFF_MAX_ROWS 截断展示（复制按钮由调用方提供完整原文兜底）。
+ * - computeLineDiff：LCS 行级 diff（2026-10-13-editpatch-fullchain 自 daemon
+ *   迁入——Edit 无 structuredPatch 时回退自算，daemon 侧 re-export 兼容）。
  */
 
 import { cn } from "@/lib/utils";
@@ -70,6 +72,84 @@ export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
         return null;
       }
     }
+  }
+  return rows;
+}
+
+/** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
+const DIFF_MAX_CELLS = 1_000_000;
+
+/**
+ * 行级 diff（LCS 最长公共子序列，dp 反向表 + 前向回溯）。旧/新文本按行对齐：
+ * ctx 行双侧推进，del 行仅旧侧行号，add 行仅新侧行号（unified diff 语义）。
+ * 任一侧行数乘积超 DIFF_MAX_CELLS → null（调用方回退红/绿两块，防巨型编辑
+ * 卡顿——Write 型整文件重写走 Write 工具不进此路径）。
+ */
+export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | null {
+  const a = oldStr.split("\n");
+  const b = newStr.split("\n");
+  if (a.length * b.length > DIFF_MAX_CELLS) return null;
+  const n = a.length;
+  const m = b.length;
+  // dp[i][j] = a[i:] 与 b[j:] 的 LCS 长度（反向填充，回溯从 [0][0] 前向走）。
+  // Int32Array 扁平化——noUncheckedIndexedAccess 下 number[][] 索引返回
+  // number|undefined，扁平 typed array 索引恒为 number（越界语义不存在于
+  // 本函数受控下标域）。
+  // noUncheckedIndexedAccess 下 typed array 索引也返回 number|undefined——
+  // 下标域受控（i≤n, j≤m），经 asArray 断言收窄（读取值不存在即算法 bug）。
+  const dp = new Int32Array((n + 1) * (m + 1));
+  const at = (i: number, j: number) => dp[i * (m + 1) + j] as number;
+  const setAt = (i: number, j: number, v: number) => {
+    dp[i * (m + 1) + j] = v;
+  };
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const ai = a[i];
+    if (ai === undefined) continue;
+    for (let j = m - 1; j >= 0; j -= 1) {
+      const bj = b[j];
+      const nextDown = at(i + 1, j);
+      const nextRight = at(i, j + 1);
+      setAt(i, j, ai === bj ? at(i + 1, j + 1) + 1 : Math.max(nextDown, nextRight));
+    }
+  }
+  const rows: DiffRow[] = [];
+  let i = 0;
+  let j = 0;
+  let oldNo = 0;
+  let newNo = 0;
+  while (i < n && j < m) {
+    const ai = a[i];
+    const bj = b[j];
+    if (ai === undefined || bj === undefined) break;
+    if (ai === bj) {
+      oldNo += 1;
+      newNo += 1;
+      rows.push({ type: "ctx", oldNo, newNo, text: ai });
+      i += 1;
+      j += 1;
+    } else if (at(i + 1, j) >= at(i, j + 1)) {
+      oldNo += 1;
+      rows.push({ type: "del", oldNo, newNo: null, text: ai });
+      i += 1;
+    } else {
+      newNo += 1;
+      rows.push({ type: "add", oldNo: null, newNo, text: bj });
+      j += 1;
+    }
+  }
+  while (i < n) {
+    const ai = a[i];
+    if (ai === undefined) break;
+    oldNo += 1;
+    rows.push({ type: "del", oldNo, newNo: null, text: ai });
+    i += 1;
+  }
+  while (j < m) {
+    const bj = b[j];
+    if (bj === undefined) break;
+    newNo += 1;
+    rows.push({ type: "add", oldNo: null, newNo, text: bj });
+    j += 1;
   }
   return rows;
 }
