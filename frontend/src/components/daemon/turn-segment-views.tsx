@@ -420,11 +420,22 @@ export function subagentHeaderOf(
   // 2026-10-13-subagent-stub-reconcile（FR-01）：对账只在「无任务元数据且段
   // 三态 running」时生效（stub 恒 running；tool 段已配对结果 ok/deny 不覆盖）
   // ——元数据 > 对账 > 段三态三级优先，既有路径零回归。
+  //
+  // 2026-10-13-turn-live-visibility（FR-02）：running 元数据 + 快照终态 → 单向
+  // 收敛——治理 [TASK_*] 终态 stdout 行丢失导致的永久「后台运行中」残留（快照
+  // 行是服务端 agent_session_task 权威）。方向单向：终态元数据不被任何快照回退
+  // （终态即终），快照 running 不动摇元数据展示；收敛时不受段三态配对限制
+  // （async 派发段回执配对 status=ok 而任务仍在跑，收敛看任务不看回执）。
+  const terminalReconciled =
+    reconciled != null && metaStatus === "running" && reconciled.status !== "running";
   const reconciledStatus =
-    reconciled && metaStatus == null && (segment.kind === "subagent_stub" || segment.status === "running")
+    !terminalReconciled && reconciled && metaStatus == null &&
+    (segment.kind === "subagent_stub" || segment.status === "running")
       ? reconciled.status
       : null;
-  const status = metaStatus ?? reconciledStatus ?? subagentStatus(segment);
+  const status = terminalReconciled && reconciled
+    ? reconciled.status
+    : (metaStatus ?? reconciledStatus ?? subagentStatus(segment));
   const running = status === "running";
   const dotCls =
     status === "running"
@@ -439,7 +450,16 @@ export function subagentHeaderOf(
       ? (segment.primary?.trim() || reconciled?.taskName || segment.subagentType || "子代理")
       : (reconciled?.taskName || segment.subagentType || "子代理");
   let durationText: string | null = null;
-  if (metaStatus != null && taskSeg != null) {
+  if (terminalReconciled) {
+    // FR-02 收敛终态：服务端权威时长优先（快照 elapsedMs），段元数据 elapsedMs 兜底；
+    // 两者皆缺不伪造（null 不渲染）。
+    durationText =
+      reconciled && reconciled.elapsedMs != null
+        ? formatClockDuration(reconciled.elapsedMs)
+        : taskSeg != null && taskSeg.taskElapsedMs != null
+          ? formatClockDuration(taskSeg.taskElapsedMs)
+          : null;
+  } else if (metaStatus != null && taskSeg != null) {
     if (metaStatus === "running") {
       durationText =
         taskSeg.startedAt != null
@@ -476,11 +496,13 @@ export function subagentHeaderOf(
     name,
     subagentType: segment.subagentType ?? null,
     badge:
-      metaStatus != null
-        ? TASK_STATUS_BADGE[metaStatus]
-        : reconciledStatus != null
-          ? TASK_STATUS_BADGE[reconciledStatus]
-          : null,
+      terminalReconciled && reconciled
+        ? TASK_STATUS_BADGE[reconciled.status]
+        : metaStatus != null
+          ? TASK_STATUS_BADGE[metaStatus]
+          : reconciledStatus != null
+            ? TASK_STATUS_BADGE[reconciledStatus]
+            : null,
     durationText,
   };
 }
@@ -846,14 +868,23 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 契约），历史窗口截断 stub 按快照收敛名称/徽标/时长。
   const taskLookup = useContext(SubagentTaskLookupContext);
   const reconciledRaw = taskLookup?.byToolUseId.get(segment.id) ?? null;
+  const metaStatus = taskMetaStatusOf(segment);
+  // 2026-10-13-turn-live-visibility（FR-02）：对账传递放开两态——原「无元数据且
+  // 段三态 running」（stub-reconcile 面，段三态限制由纯函数双保险裁决）与新增
+  // 「running 元数据 + 快照终态」单向收敛面（终态事件丢失治理，见 subagentHeaderOf
+  // 同名注释）；终态元数据永不被快照回退。
   const reconciled: SubagentReconciledTask | null =
-    reconciledRaw && taskMetaStatusOf(segment) == null && (segment.kind === "subagent_stub" || segment.status === "running")
+    reconciledRaw &&
+    (metaStatus == null || (metaStatus === "running" && reconciledRaw.status !== "running"))
       ? reconciledRaw
       : null;
-  // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
+  // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）；
+  // FR-02 收敛：running 元数据 + 快照终态 → 快照终态（与 subagentHeaderOf 同一裁决）。
   const taskSeg = segment.kind === "tool" ? segment : null;
-  const metaStatus = taskMetaStatusOf(segment);
-  const status = metaStatus ?? reconciled?.status ?? subagentStatus(segment);
+  const status =
+    reconciled && metaStatus === "running" && reconciled.status !== "running"
+      ? reconciled.status
+      : (metaStatus ?? reconciled?.status ?? subagentStatus(segment));
   const running = status === "running";
   const [open, setOpen] = useState(running);
   // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
@@ -867,7 +898,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // tick 是组件局部 state，仅 async 运行中启动，终态/卸载清理）；锚点 = 段
   // startedAt（派发时刻）。
   const [now, setNow] = useState<number>(() => Date.now());
-  const asyncRunning = metaStatus === "running";
+  // FR-02：收敛终态即停走秒 tick（metaStatus 仍 running 但展示已终态——tick 只
+  // 服务元数据驱动的运行中走秒；前台阻塞式（无元数据）维持原不 tick 零回归）。
+  const asyncRunning = metaStatus === "running" && status === "running";
   useEffect(() => {
     if (!asyncRunning) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);

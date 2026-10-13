@@ -152,12 +152,32 @@ describe("subagentHeaderOf 对账（FR-01：stub 命中终态收敛）", () => {
     expect(stopped.durationText).toBe("01:00");
   });
 
-  it("FR-03：带 [TASK_*] 元数据的 tool 段元数据优先，对账不覆盖", () => {
+  it("turn-live-visibility FR-02：running 元数据 + 快照终态 → 单向收敛（终态事件丢失治理，规格变更替换原「对账不覆盖」契约）", () => {
     const seg = toolSeg({ id: "call_a", taskStatus: "running", taskAsync: true, startedAt: 1000 });
     const h = subagentHeaderOf(seg, 5000, reconciledCompleted);
-    expect(h.metaStatus).toBe("running");
-    expect(h.status).toBe("running"); // 元数据权威——对账 completed 不抢
-    expect(h.badge?.label).toBe("后台运行中");
+    expect(h.metaStatus).toBe("running"); // 段元数据本体不变
+    expect(h.status).toBe("completed"); // 展示按快照终态收敛
+    expect(h.badge?.label).toBe("已完成");
+    expect(h.durationText).toBe("02:49"); // 服务端权威时长（快照 elapsedMs）
+    expect(h.running).toBe(false);
+  });
+
+  it("终态即终：终态元数据不被 running 快照回退（原契约保留面）", () => {
+    const seg = toolSeg({
+      id: "call_a",
+      taskStatus: "completed",
+      taskAsync: true,
+      startedAt: 1000,
+      endedAt: 9000,
+      taskElapsedMs: 8000,
+    });
+    const h = subagentHeaderOf(seg, 5000, {
+      taskName: "滞后心跳",
+      status: "running",
+      elapsedMs: null,
+    });
+    expect(h.status).toBe("completed");
+    expect(h.durationText).toBe("00:08"); // 元数据终态时长路径不变
   });
 
   it("FR-01：无元数据且 running 的 tool 段对账收敛（窗口截断形态）", () => {

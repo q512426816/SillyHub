@@ -1632,3 +1632,73 @@ describe("parseTaskOutputWait（turn-live-visibility FR-01）", () => {
     expect(parseTaskOutputWait(JSON.stringify({ tool: "Bash", args: { command: "ls" } }))).toBeNull();
   });
 });
+
+/* ── 2026-10-13-turn-live-visibility FR-02：状态栏计数快照收敛 ────────────── */
+
+describe("deriveTurnActivity 快照终态收敛（turn-live-visibility FR-02）", () => {
+  function makeAsyncAgentSeg(overrides: Partial<ToolTurnSegment> = {}): ToolTurnSegment {
+    return {
+      kind: "tool",
+      id: "call_ag",
+      raw: JSON.stringify({ tool: "Agent", args: { description: "评审" } }),
+      status: "ok", // 派发回执已配对——async 语义下不是完成信号
+      toolName: "Agent",
+      primary: "评审",
+      startedAt: 1_000,
+      endedAt: 1_100,
+      children: [
+        { kind: "text", id: "c1", text: "子代理输出", streaming: false, startedAt: null },
+      ],
+      subagentType: "general-purpose",
+      taskStatus: "running",
+      taskAsync: true,
+      taskTaskId: "bm9",
+      ...overrides,
+    };
+  }
+  const doneSnap = { taskName: "评审", status: "completed" as const, elapsedMs: 5_000 };
+
+  it("running 任务元数据按快照终态收敛：子代理 activity 转 done", () => {
+    const lookup: SubagentTaskLookup = {
+      byToolUseId: new Map([["call_ag", doneSnap]]),
+      byTaskId: new Map(),
+    };
+    const act = deriveTurnActivity([makeAsyncAgentSeg()], lookup);
+    expect(act.subagents[0]?.status).toBe("done");
+    expect(act.subagents[0]?.taskStatus).toBe("completed");
+    expect(act.subagents[0]?.taskElapsedMs).toBe(5_000); // 服务端权威时长
+  });
+
+  it("taskTaskId 兜底：tool_use_id 未命中时按任务 id 收敛", () => {
+    const lookup: SubagentTaskLookup = {
+      byToolUseId: new Map(),
+      byTaskId: new Map([["bm9", doneSnap]]),
+    };
+    const act = deriveTurnActivity([makeAsyncAgentSeg()], lookup);
+    expect(act.subagents[0]?.status).toBe("done");
+  });
+
+  it("无快照零回归：running 元数据保持 running；快照 running 不动摇", () => {
+    const actNoLookup = deriveTurnActivity([makeAsyncAgentSeg()]);
+    expect(actNoLookup.subagents[0]?.status).toBe("running");
+    const lookupRunning: SubagentTaskLookup = {
+      byToolUseId: new Map([["call_ag", { taskName: "评审", status: "running", elapsedMs: null }]]),
+      byTaskId: new Map(),
+    };
+    const actRunning = deriveTurnActivity([makeAsyncAgentSeg()], lookupRunning);
+    expect(actRunning.subagents[0]?.status).toBe("running");
+  });
+
+  it("终态元数据不被快照回退（终态即终）", () => {
+    const lookup: SubagentTaskLookup = {
+      byToolUseId: new Map([["call_ag", { taskName: "评审", status: "running", elapsedMs: null }]]),
+      byTaskId: new Map(),
+    };
+    const act = deriveTurnActivity(
+      [makeAsyncAgentSeg({ taskStatus: "completed", taskElapsedMs: 4_000 })],
+      lookup,
+    );
+    expect(act.subagents[0]?.status).toBe("done");
+    expect(act.subagents[0]?.taskElapsedMs).toBe(4_000); // 元数据终态时长不被快照覆盖
+  });
+});

@@ -61,11 +61,19 @@ export const SubagentDetailPanel = memo(function SubagentDetailPanel({
   // 头部派生共享纯函数（design §5.E：与 SubagentBlockView 头部一处派生）；
   // 2026-10-13-subagent-stub-reconcile：按 tool_use_id 对账任务快照（context
   // 由 session-panel 页面级 Provider 下发），窗口截断 stub 收敛名称/徽标/时长。
+  // 2026-10-13-turn-live-visibility（FR-02）：同 SubagentBlockView 放开「running
+  // 元数据 + 快照终态」单向收敛面（终态事件丢失治理，裁决在 subagentHeaderOf）。
   const taskLookup = useContext(SubagentTaskLookupContext);
   const reconciledRaw = taskLookup?.byToolUseId.get(segment.id) ?? null;
+  const metaStatus =
+    segment.kind === "tool"
+      ? segment.taskStatus === undefined && segment.taskAsync === undefined
+        ? null
+        : (segment.taskStatus ?? "running")
+      : null;
   const reconciled =
     reconciledRaw &&
-    (segment.kind === "subagent_stub" || segment.status === "running")
+    (metaStatus == null || (metaStatus === "running" && reconciledRaw.status !== "running"))
       ? reconciledRaw
       : null;
   const header = subagentHeaderOf(segment, now, reconciled);

@@ -30,9 +30,11 @@
  * 由消费方本地 tick）；无元数据段走原推导（前台阻塞式子代理零回归）。
  */
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useState } from "react";
 
 import type { ToolTurnSegment, TurnSegment } from "./session-log-assembler";
+import { SubagentTaskLookupContext } from "./turn-segment-views";
+import type { SubagentTaskLookup } from "./turn-segment-views";
 
 /* ───────────── 派生统计（纯函数，design §7 TurnActivitySummary） ───────────── */
 
@@ -218,7 +220,11 @@ function taskStatusToActivity(
 }
 
 /** DFS 收集子代理清单：有 children 归属的 tool 段 + subagent_stub 兜底段（嵌套递归收集）。 */
-function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): void {
+function collectSubagents(
+  segments: TurnSegment[],
+  out: SubagentActivity[],
+  lookup?: SubagentTaskLookup | null,
+): void {
   for (const s of segments) {
     if (s.kind === "subagent_stub") {
       out.push({
@@ -230,7 +236,7 @@ function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): voi
         endedAt: null,
         latestActivity: latestActivityWithin(s.children),
       });
-      collectSubagents(s.children, out);
+      collectSubagents(s.children, out, lookup);
     } else if (s.kind === "tool") {
       if (s.children.length > 0) {
         // task-13：段带 [TASK_*] 元数据（taskStatus 或 taskAsync 存在 = async 后台
@@ -238,13 +244,30 @@ function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): voi
         // 时按 running 防御；同时透传五字段供目录/会话块消费（终态时长用服务端
         // taskElapsedMs，运行中走秒由消费方 tick）。无元数据段走原 result 配对推导
         //（前台阻塞式子代理零回归）。
+        //
+        // 2026-10-13-turn-live-visibility（FR-02）：running 元数据按任务快照终态
+        // 单向收敛（治理 [TASK_*] 终态 stdout 行丢失导致的永久 running——状态栏
+        // 计数与目录一起收敛）；终态元数据不回退（终态即终，与渲染层
+        // subagentHeaderOf 同一契约）。快照查找：tool_use_id 直查，taskTaskId 兜底。
+        const snap =
+          lookup == null
+            ? null
+            : lookup.byToolUseId.get(s.id) ??
+              (s.taskTaskId ? lookup.byTaskId.get(s.taskTaskId) : undefined) ??
+              null;
+        const converged =
+          s.taskStatus === "running" && snap != null && snap.status !== "running";
+        const effMetaStatus = converged ? snap.status : (s.taskStatus ?? "running");
         const metaDriven = s.taskStatus !== undefined || s.taskAsync !== undefined;
+        const effElapsedMs = converged
+          ? (snap?.elapsedMs ?? s.taskElapsedMs)
+          : s.taskElapsedMs;
         out.push({
           segmentId: s.id,
           name: subagentDisplayName(s),
           subagentType: s.subagentType,
           status: metaDriven
-            ? taskStatusToActivity(s.taskStatus ?? "running")
+            ? taskStatusToActivity(effMetaStatus)
             : s.result === undefined
               ? "running"
               : s.status === "deny"
@@ -253,14 +276,14 @@ function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): voi
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           latestActivity: latestActivityWithin(s.children),
-          ...(s.taskStatus !== undefined ? { taskStatus: s.taskStatus } : {}),
-          ...(s.taskElapsedMs !== undefined ? { taskElapsedMs: s.taskElapsedMs } : {}),
+          ...(s.taskStatus !== undefined ? { taskStatus: effMetaStatus } : {}),
+          ...(effElapsedMs !== undefined ? { taskElapsedMs: effElapsedMs } : {}),
           ...(s.taskAsync !== undefined ? { taskAsync: s.taskAsync } : {}),
           ...(s.taskSummary !== undefined ? { taskSummary: s.taskSummary } : {}),
           ...(s.taskToolName !== undefined ? { taskToolName: s.taskToolName } : {}),
         });
       }
-      collectSubagents(s.children, out);
+      collectSubagents(s.children, out, lookup);
     }
   }
 }
@@ -287,9 +310,12 @@ function countTools(segments: TurnSegment[]): number {
  * currentActivity 终级回退链：running 工具段摘要 → streaming 段「正在输出文本/正在思考」
  * → 「思考中」；仅空轮（无任何段）返回 null。
  */
-export function deriveTurnActivity(segments: TurnSegment[]): TurnActivitySummary {
+export function deriveTurnActivity(
+  segments: TurnSegment[],
+  lookup?: SubagentTaskLookup | null,
+): TurnActivitySummary {
   const subagents: SubagentActivity[] = [];
-  collectSubagents(segments, subagents);
+  collectSubagents(segments, subagents, lookup);
   return {
     toolCount: countTools(segments),
     subagents,
@@ -347,7 +373,13 @@ export const TurnStatusBar = memo(function TurnStatusBar({
     return () => window.clearInterval(id);
   }, []);
 
-  const activity = useMemo(() => deriveTurnActivity(segments), [segments]);
+  // 2026-10-13-turn-live-visibility（FR-02）：任务快照对账——running 子代理计数按
+  // 快照终态单向收敛（终态事件丢失不再永久计数）；context 变化穿透 memo。
+  const taskLookup = useContext(SubagentTaskLookupContext);
+  const activity = useMemo(
+    () => deriveTurnActivity(segments, taskLookup),
+    [segments, taskLookup],
+  );
   const runningSubagents = useMemo(
     () => activity.subagents.filter((s) => s.status === "running").length,
     [activity],
