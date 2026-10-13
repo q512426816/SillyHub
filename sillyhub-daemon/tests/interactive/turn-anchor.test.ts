@@ -13,7 +13,10 @@
  *   4. 二进制文件 additions/deletions 记 null（numstat '-' 列）；
  *   5. 非 git 目录返回 null 永不抛（失败安全）；
  *   6. 「重启续锚」：模块状态清空后从 JSONL 尾行恢复 prev 锚（daemon 重启场景）；
- *   7. 中文文件名不转义（core.quotePath=false，numstat 原样 UTF-8 路径）。
+ *   7. 中文文件名不转义（core.quotePath=false，numstat 原样 UTF-8 路径）；
+ *   8. 会话级缓存清理（2026-10-14-turn-anchor-cache-eviction）：未知 id 幂等 /
+ *      清理后 prev 经 JSONL 尾行兜底恢复（去重与 diff 链无回归）/ 在飞链竞态
+ *      清理挂链收尾后执行。
  *
  * 模块级状态（per-session 串行链 + prev 锚内存）隔离手法：每个用例独立
  * sessionId + 关键用例 vi.resetModules 后动态重导入（等价 daemon 重启）。
@@ -82,6 +85,8 @@ interface AnchorModule {
     deduped: boolean;
     files: Array<{ path: string; additions: number | null; deletions: number | null }>;
   } | null>;
+  /** 2026-10-14-turn-anchor-cache-eviction：会话级缓存清理（实现见 src 同名导出）。 */
+  clearTurnAnchorCache(sessionId: string): void;
 }
 
 /** 动态导入被测模块（vi.resetModules 后调用 = 模块级状态清零，模拟 daemon 重启）。 */
@@ -269,5 +274,72 @@ describe('interactive/turn-anchor 轮锚点快照', () => {
     const shape = shapeMod.toFlowDiffShape(legacyRecord);
     expect(shape.rows).toEqual(legacyRecord.files);
     expect(shape.totals).toEqual({ files: 2, additions: 3, deletions: 1 });
+  });
+
+  // ── 2026-10-14-turn-anchor-cache-eviction：会话级缓存清理 ──
+  it('未知 sessionId 调用清理：无操作不抛（幂等）', async () => {
+    const mod = await loadModule();
+    expect(() =>
+      mod.clearTurnAnchorCache(`s-never-${randomUUID().slice(0, 8)}`),
+    ).not.toThrow();
+  });
+
+  it('清理后续锚：prev 经 JSONL 尾行兜底恢复，diff 基线链与去重判定无回归', async () => {
+    const mod = await loadModule();
+    const repo = await makeRepo();
+    const anchors = await makeAnchorsDir();
+    const sid = `s-evict-${randomUUID().slice(0, 8)}`;
+    try {
+      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
+      const first = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+
+      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
+      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      expect(second!.prevTreeSha).toBe(first!.treeSha);
+
+      // 会话终结清理：prev 锚内存条目删除——此后同会话再打锚，prev 只能来自
+      // JSONL 尾行兜底（与「重启续锚」同构路径）。
+      mod.clearTurnAnchorCache(sid);
+
+      await writeFile(join(repo, 'turn3.txt'), 'c\n', 'utf-8');
+      const third = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      expect(third!.prevTreeSha).toBe(second!.treeSha);
+      expect(third!.files).toEqual([{ path: 'turn3.txt', additions: 1, deletions: 0 }]);
+
+      // 零变化轮去重恢复：清理不使判重失效（同 treeSha → deduped 且不落盘）。
+      const dup = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      expect(dup!.deduped).toBe(true);
+
+      const records = await readRecords(anchors, sid);
+      expect(records).toHaveLength(3); // 三条变化锚；去重轮不落盘
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+      await rm(anchors, { recursive: true, force: true });
+    }
+  });
+
+  it('在飞锚链竞态：清理挂链收尾后执行，在飞锚与后续锚行为正确', async () => {
+    const mod = await loadModule();
+    const repo = await makeRepo();
+    const anchors = await makeAnchorsDir();
+    const sid = `s-race-${randomUUID().slice(0, 8)}`;
+    try {
+      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
+      // 不 await：锚链在飞（真 git 子进程未收尾）时同步触发清理——实现必须把
+      // 删除挂到链收尾之后（doRecord 尾部会回写缓存，先清会被在飞链回写）。
+      const pending = mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      mod.clearTurnAnchorCache(sid);
+      const first = await pending;
+      expect(first).not.toBeNull();
+
+      // 清理不破坏在飞锚的落盘与后续锚的基线链（prev 经尾行兜底恢复）。
+      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
+      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      expect(second!.prevTreeSha).toBe(first!.treeSha);
+      expect(second!.files).toEqual([{ path: 'turn2.txt', additions: 1, deletions: 0 }]);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+      await rm(anchors, { recursive: true, force: true });
+    }
   });
 });

@@ -23,6 +23,8 @@
  * 失败安全（观测面不抛穿）：非 git 目录 / git 不可用 / 任何 git 错误 → 返回 null；
  * 接线方 fire-and-forget，不阻塞轮结果链路。同会话并发轮经 per-session promise 链
  * 串行化（prev 锚读写无竞态）；prev 锚优先内存、miss（daemon 重启）时读 JSONL 尾行。
+ * 会话终结经 clearTurnAnchorCache 清内存缓存（2026-10-14-turn-anchor-cache-eviction，
+ * terminateSession 第 4c 步调用；JSONL 不动，续锚走尾行兜底）。
  *
  * Windows：execFile 直跑 `git`（daemon 已假定 git 在 PATH，host-fs-handler 同款），
  * 临时 index 落 os.tmpdir() 绝对路径；中文路径经 `-c core.quotePath=false` 原样
@@ -285,4 +287,26 @@ export async function recordTurnAnchor(opts: {
       _chainBySession.delete(opts.sessionId);
     }
   }
+}
+
+/**
+ * 会话级缓存清理（2026-10-14-turn-anchor-cache-eviction）：会话终结
+ * （terminateSession 第 4c 步）调用——删除该会话的 prev 锚内存缓存条目，防
+ * `_lastTreeBySession` 只 set 不 delete 的慢性增长（对照 `_chainBySession` 链
+ * 收尾有自清理，本缓存此前无删除路径）。
+ *
+ * 在飞锚链存在时（fire-and-forget 锚未收尾）挂到链收尾后执行——doRecord 尾部
+ * 会回写缓存，先清会被在飞链回写；无链立即删除。JSONL 落盘记录不受影响：同
+ * 会话若再打锚，prev 经 readLastRecord 尾行兜底恢复（与 daemon 重启续锚同构）。
+ * 未存在 sessionId 幂等无操作，永不抛错。
+ */
+export function clearTurnAnchorCache(sessionId: string): void {
+  const chain = _chainBySession.get(sessionId);
+  if (chain) {
+    void chain
+      .catch(() => undefined) // 链本身已收口为 null，防御性兜底
+      .then(() => _lastTreeBySession.delete(sessionId));
+    return;
+  }
+  _lastTreeBySession.delete(sessionId);
 }
