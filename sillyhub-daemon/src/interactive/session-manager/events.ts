@@ -26,6 +26,10 @@ import type {
 import { classifyModelError } from '../../model-error/classifier.js';
 import type { ModelError } from '../../model-error/types.js';
 import { eventToReportWireDict } from '../../event-wire.js';
+// 2026-10-13-daemon-turn-anchor-snapshot FR-01：轮锚点快照——轮边界对会话 cwd 的
+// git 工作区打内容锚（add -A 覆盖 untracked，tree sha 去重），JSONL 落 daemon
+// .runtime/turn-anchors/。fire-and-forget：模块内部永不抛错，观测面不阻塞轮结果链路。
+import { recordTurnAnchor } from '../turn-anchor.js';
 import { eventMetaOf, numOf, strOf } from './helpers.js';
 import type { SessionManagerCore } from './types.js';
 
@@ -124,6 +128,17 @@ export async function onResult(
       mgr.deps.onTurnResult(state.sessionId, runId, result),
     );
   }
+  // 2026-10-13-daemon-turn-anchor-snapshot FR-01：轮锚点快照——干净 turn 边界
+  // （status 已收敛 active、currentRunId 已清）对会话 cwd 的 git 工作区打内容锚。
+  // fire-and-forget（void）：模块内部永不抛错 + per-session 串行链，不 await、
+  // 不阻塞轮结果链路；非 git cwd / git 失败静默 null（观测面best-effort）。
+  // 无条件执行（不挂 if (runId)）：锚是会话级内容观测，与 backend 是否下发 runId
+  // 无关；记录里 runId 为 null 的锚消费方可按会话时刻对齐。
+  void recordTurnAnchor({
+    cwd: state.cwd,
+    sessionId: state.sessionId,
+    runId: runId ?? null,
+  });
   // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
   mgr._scheduleFlush();
   // task-11（边界 7）注：completedSegments 跨 turn 重置已随 partial 链下沉归一化器
