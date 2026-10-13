@@ -650,6 +650,25 @@ _SLIM_TOOL_CHANNEL = "tool_call"
 _SLIM_TOOL_CONTENT_MAX_CHARS = 2000
 
 
+def _extract_tool_use_id(content: str) -> str | None:
+    """2026-10-13-slim-subagent-false-running / FR-01：tool_call 完整原文的配对键解析。
+
+    slim 截断会把超长 tool_call JSON 截残，前端 parseToolUseRaw 解析失败拿不到
+    tool_use_id（子代理日志路由不进派发 tool 段、跌落 stub 恒「运行中」）——截断
+    前从完整原文抢救配对键随 DTO 回传。非 JSON / 非对象 / 缺字符串键 → None
+    （不阻断截断，防御 daemon 历史上的非 JSON tool_call 行形态）。
+    """
+    try:
+        obj = json.loads(content.strip())
+    except (TypeError, ValueError):
+        return None
+    if isinstance(obj, dict):
+        value = obj.get("tool_use_id")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 @router.get(
     "/sessions/{session_id}/logs",
     response_model=list,  # response items are AgentRunLogEntry
@@ -813,6 +832,9 @@ async def get_session_logs(
     payload = [AgentRunLogEntry.model_validate(log) for log in logs]
     # slim 截断：只动 tool 通道超长行（DTO 是 model_validate 产出的独立实例，
     # 直接赋值不影响 ORM / 库数据）；其余通道与非超长行零触碰。
+    # 2026-10-13-slim-subagent-false-running / FR-01：截断行先从完整原文抢救
+    # tool_use_id 回传（截残后前端解析不出配对键，子代理归属断裂）；仅截断行
+    # 设置，非 slim / 未截断行恒 None。
     if slim:
         for item in payload:
             if (
@@ -820,6 +842,7 @@ async def get_session_logs(
                 and item.content_redacted is not None
                 and len(item.content_redacted) > _SLIM_TOOL_CONTENT_MAX_CHARS
             ):
+                item.tool_use_id = _extract_tool_use_id(item.content_redacted)
                 item.content_redacted = item.content_redacted[:_SLIM_TOOL_CONTENT_MAX_CHARS]
                 item.content_truncated = True
     # ql-20260909-012：json.dumps + gzip.compress 均为纯 CPU 同步调用——长会话

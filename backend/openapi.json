@@ -37761,6 +37761,17 @@
               }
             ],
             "title": "Content Truncated"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Use Id"
           }
         },
         "type": "object",
