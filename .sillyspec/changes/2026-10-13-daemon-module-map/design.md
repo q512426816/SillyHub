@@ -32,7 +32,7 @@ created_at: 2026-10-12T23:57:14.731Z
 
    答：安全。三文件改动原子性由单次 git commit 保证；迁移中途被打断最坏态=条目在两文件重复或双缺，`knowledge validate` 可检出、重放迁移步骤即收敛（幂等：按条目段头 id 定位搬移）。
 
-4. 作用域：跨工作区/跨工作仓/多实例时数据会不会串台？
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
 
    答：不会。模块图合并是跨项目并集（discoverModuleIndex 全 docs/* 合并），登记的路径前缀带 `sillyhub-daemon/` 项目段，不与 backend/frontend 等其它项目路径相交；fr/task-runner.md 的 task-runner 模块 id 全局唯一（合并器按 id 并 paths）。
 
