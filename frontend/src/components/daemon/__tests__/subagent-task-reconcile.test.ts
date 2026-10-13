@@ -17,12 +17,10 @@ import {
 } from "@/hooks/use-session-tasks";
 import {
   subagentHeaderOf,
+  type SubagentContainerSegment,
   type SubagentReconciledTask,
 } from "../turn-segment-views";
-import type {
-  SubagentContainerSegment,
-  ToolTurnSegment,
-} from "../session-log-assembler";
+import type { ToolTurnSegment } from "../session-log-assembler";
 
 /* ───────── 夹具 ───────── */
 
