@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-daemon-turn-anchor-snapshot",
+  "reviewer": "main-agent(self-review，独立复核代码与测试事实)",
+  "verdict": "PASS",
+  "reviewedAgainst": "4bf6f9b6567a716137312a8d9eb665091f5d637d",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "首轮 diff 退 HEAD 树，「轮内已 commit」部分被 HEAD 吸收不进首轮 files（内容仍在 tree-to-tree 链上）",
+      "evidence": "doRecord 的 baseTree = prevTreeSha ?? snap.headSha——首轮无 prev 时 diff HEAD→本锚，agent 在首轮内先 commit 再改的部分变化已含于 HEAD。仅首轮口径偏小，后续轮 tree-to-tree 全覆盖；design「风险与死路」已声明为最小闭环已知边界，会话 create 时刻预打锚可治（下一切片）",
+      "location": "sillyhub-daemon/src/interactive/turn-anchor.ts:201"
+    },
+    {
+      "severity": "P3",
+      "title": "廉价门（本轮触过文件才打锚）未实现，大仓零变化轮仍付一次 add -A 成本",
+      "evidence": "评审 Gap4 的触发器方案（工具事件触文件才锚）留作后续切片；当前以复制现场 index 的 stat 缓存（≈git status 成本）+tree sha 去重扛。design 已声明",
+      "location": "sillyhub-daemon/src/interactive/turn-anchor.ts:160"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（锚只看轮边界时刻内容快照；迟到 result 在 onResult 头部早退不触发锚——events.ts:40-42 早退分支在接线点之前）",
+    "并发": "ok（per-session promise 链串行 + .catch 不断链；临时 index 名带 pid+uuid；git add 只写临时 index 不改工作区；不同会话互不阻塞——代码证实）",
+    "切换": "ok（重启后 JSONL 尾行兜底恢复 prev 锚（用例「重启续锚」实证）；临时 index finally unlink；.runtime 数据随 daemon 目录生命周期，无会话清理需求）",
+    "作用域": "ok（daemonStateDir() 受 SILLYHUB_DAEMON_DIR 隔离，测试注入 anchorsDir 零污染真实目录（夹具全部 mkdtemp）；execFile 非 shell 无注入面，路径无用户输入拼接）"
+  },
+  "reviewedAt": "2026-10-13T10:55:00Z",
+  "_checklist": {
+    "FR三方一致": "FR-01~06 实现与测试绑定逐条核对：untracked 进 files（用例1 new-untracked.ts 断言）、去重不落盘（用例2 JSONL 行数=1）、失败安全 null（用例5）、重启续锚（用例6）、二进制 null（用例4）、中文路径（用例7）；实测 turn-anchor.test.ts 7/7 passed、tests/interactive/ 全套 1115 passed（两轮）、pnpm typecheck 零错（本会话亲跑）",
+    "盲维四问": "design 四问与代码事实相符（早退分支位置、串行链 catch、尾行恢复、anchorsDir 注入均已核实）",
+    "披露边界裁决": [
+      "onResult 接线无独立单测（既有 session-manager 测试以假 cwd 覆盖到 void 调用路径=静默 null 不炸）→ 可接受：typecheck 门 + 1115 用例回归面；端到端真会话验证留给平台部署后观测",
+      "首跑 tests/interactive/ 有 1 例 pi-rpc-driver 60ms 握手抖动，复跑全套+单跑该文件均绿 → 判定既有紧凑计时 flake 与本改动无关（本改动不触该文件路径）",
+      "同窗自评（非独立子代理复审）→ 可接受：纯增量新模块+3 行接线，风险面已在 findings 声明"
+    ],
+    "防护声明": "锚不改工作区（add 只写 GIT_INDEX_FILE 临时文件）；JSONL 只追加（appendFile 单行）；失败路径在 mkdir 之前抛出→无孤儿目录",
+    "生成物同步": "n/a（daemon-local，无后端 OpenAPI/前端类型面；api-types.ts 不涉及）"
+  }
+}

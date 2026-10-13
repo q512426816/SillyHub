@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-daemon-turn-anchor-snapshot",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「首轮（有基线提交）：tracked 修改与 untracked 新文件都进 diff；JSONL 落一条；prevTreeSha=null」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「首轮（有基线提交）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「零变化轮去重：treeSha 与上一锚相同 → deduped=true 且不追加 JSONL」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「非 git 目录：返回 null 且不抛错（失败安全）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「重启续锚：模块状态清空后从 JSONL 尾行恢复 prev 锚（内存 miss → 尾行兜底）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-06",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-turn-anchor-snapshot"
+    }
+  ]
+}

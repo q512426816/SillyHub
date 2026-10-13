@@ -1,0 +1,85 @@
+{
+  "change": "2026-10-13-daemon-turn-anchor-snapshot",
+  "baseline": "83a4caf547a751e1b8d64fba71ba242999a7ad89",
+  "head": "4bf6f9b6567a716137312a8d9eb665091f5d637d",
+  "files": [
+    "sillyhub-daemon/src/interactive/session-manager/events.ts",
+    "sillyhub-daemon/src/interactive/turn-anchor.ts",
+    "sillyhub-daemon/tests/interactive/turn-anchor.test.ts"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 495,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-13T10:53:07.334Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "83a4caf547a751e1b8d64fba71ba242999a7ad89",
+    "totals": {
+      "files": 3,
+      "additions": 495,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/events.ts",
+        "additions": 15,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-anchor.ts",
+        "additions": 244,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-anchor.test.ts",
+        "additions": 236,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "55ae8b7d5c965e9900bc214cefc6fc0dddb03dc009a59a7e1d6f42a4db9f69e3",
+  "patchStatus": "ok"
+}

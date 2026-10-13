@@ -2771,3 +2771,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：c7a48c2e1a9d161b1f79bdff052013cdc77fb317
 理由：- 风险①：后续有人把 sr-only 改成 `hidden`/`display:none` 之类，标题会从可访问性树消失（等于删标题）——单测以 `toHaveClass("sr-only")` 锁形态。 - 风险②：高度链回归（有人给分栏行去 `flex-1`、或给标题块加回可见占位）——`sessions-portal-panes` 类名契约（flex-1 + min-h-0）与容器 `h-[calc(100vh-64px)]` 断言兜住。 - 风险③：workspace scope 顶部仍留一行 ≈26px 的紧凑 Git 条（保留功能件的代价，非回归）；用户若要求该 scope 也彻底全屏，属新诉求（可后续把 Git 条移入左栏头或折叠）。 - 放弃的方案：a) 整块删 PageHeader 且不留标题——丢无障碍一级标题 + 四处 scope 标题断言（回归面缩小）；b) Git 状态条一并删——未经要求的功能回归；c) Git 条塞进左栏面板头——左栏自有 📁/筛选控件，语义错位、改动面扩大；d) 用 `hidden` 隐藏标题——可访问性树同步丢失，即 a 的变体。 - 存量债风险：`page.test.tsx` 的 emoji token 断言修正属「测试跟随已交付实现」而非「改测试掩盖实现错误」——实现侧 token 形态由 2026-10-12-ws-ref-emoji-inline 交付且另有专门用例覆盖。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-daemon-turn-anchor-snapshot
+锚点：未记录
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+理由：最大风险：大仓上每轮 git add -A 的 IO 成本——mitigated by 复制现场 index（stat 缓存命中）+ tree sha 去重（零变化轮零落盘）；廉价门（本轮工具事件触过文件才打锚，评审 Gap4）留作后续切片，当前以去重+缓存先扛。次风险：首轮 diff 退 HEAD 树会漏掉"轮内已 commit"的归因（内容变化仍在 tree-to-tree 链上，仅首轮 files 口径偏小）——最小闭环已知边界，记档不扩。既有测试影响：onResult 接线在既有 session-manager 测试中对假 cwd（C:\work 等不存在路径）静默 null，实测 tests/interactive/ 1115 用例两轮全绿（首跑 1 例 pi-rpc 60ms 握手抖动，复跑+单跑均绿，与本改动无关）。 放弃的方案：①`git stash create` 打锚——不含 untracked（评审 Gap1 定性为雷，直接否决）；②每轮 commit 到 side ref——写引用有状态、并发清理复杂，write-tree 无引用纯内容寻址更干净；③`git status --porcelain` 轮询比对——无行级统计且 rename/untracked 口径碎；④锚存 DB（backend 落库）——本切片刻意 daemon-local（零 API 面），DB 化留给下一切片连同前端展示一起做。

@@ -337,3 +337,129 @@ created_at: 2026-10-08T15:19:22.662Z
   confirmed_at: null
   source_change: 2026-10-13-editpatch-p3-cleanup
   status: active
+
+## FR-auto-sillyhub-daemon-040 新模块 turn-anchor:recordTurnAnchor(cwd,sessionId,runId,anchorsDir?) 在轮边界对 git 工作区快照(临时 index 复制现场 index→GIT_INDEX_FILE 下 git add -A→write-tree 记 treeSha+HEAD sha),与该会话上一锚 diff-tree -r --numstat 得逐文件 additions/deletions(二进制记 null),追加 JSONL 到 <daemonStateDir>/.runtime/turn-anchors/<sessionId>.jsonl
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 带一次基线提交的 git 仓、anchorsDir 注入临时目录 / When 首次调用 recordTurnAnchor / Then 返回记录含 treeS
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-01
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「首轮（有基线提交）：tracked 修改与 untracked 新文件都进 diff；JSONL 落一条；prevTreeSha=null」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active
+
+## FR-auto-sillyhub-daemon-041 untracked 新文件必须进锚与 diff(add -A 覆盖,验收:新增未跟踪文件出现在该轮 files)
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 基线提交后新建未跟踪文件 new-untracked.ts / When recordTurnAnchor / Then files 含 `{path:'new
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-02
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「首轮（有基线提交）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active
+
+## FR-auto-sillyhub-daemon-042 零变化轮去重:treeSha 与上一锚相同则 deduped=true 且不追加记录
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 连续两次调用之间工作区零变化 / When 第二次 recordTurnAnchor / Then deduped=true、files=[]、JSONL 行数
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-03
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「零变化轮去重：treeSha 与上一锚相同 → deduped=true 且不追加 JSONL」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active
+
+## FR-auto-sillyhub-daemon-043 失败安全:非 git 目录/git 不可用返回 null 永不抛错,onResult 接线为 fire-and-forget 不阻塞轮结果链路
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 不含 .git 的临时目录 / When recordTurnAnchor / Then 返回 null 且不抛错、不创建任何锚文件。
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-04
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「非 git 目录：返回 null 且不抛错（失败安全）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active
+
+## FR-auto-sillyhub-daemon-044 同会话并发轮串行化(per-session promise 链),prev 锚优先内存、miss 时读 JSONL 尾行
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 已打过一锚后模块状态清零（vi.resetModules 重导入，等价重启）/ When 再打一锚 / Then prevTreeSha 从 JSONL 尾行恢
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-05
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「重启续锚：模块状态清空后从 JSONL 尾行恢复 prev 锚（内存 miss → 尾行兜底）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active
+
+## FR-auto-sillyhub-daemon-045 单测覆盖:首轮 vs HEAD/增量轮/untracked/二进制 null/去重/非 git 仓 null/JSONL 落盘形态,tests 镜像 src 结构全绿
+变更：2026-10-13-daemon-turn-anchor-snapshot
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 实现与测试就位 / When `pnpm vitest run tests/interactive/turn-anchor.test.ts` / Then 7/
+全文：.sillyspec/changes/archive/2026-10-13-daemon-turn-anchor-snapshot/requirements.md#FR-06
+最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-turn-anchor-snapshot:flow:测试绑定FR-06
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-turn-anchor-snapshot
+  status: active

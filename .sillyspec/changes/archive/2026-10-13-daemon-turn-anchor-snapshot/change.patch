@@ -1,0 +1,525 @@
+diff --git a/sillyhub-daemon/src/interactive/session-manager/events.ts b/sillyhub-daemon/src/interactive/session-manager/events.ts
+index 6fd920831..5263b5f42 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/events.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/events.ts
+@@ -26,6 +26,10 @@ import type {
+ import { classifyModelError } from '../../model-error/classifier.js';
+ import type { ModelError } from '../../model-error/types.js';
+ import { eventToReportWireDict } from '../../event-wire.js';
++// 2026-10-13-daemon-turn-anchor-snapshot FR-01：轮锚点快照——轮边界对会话 cwd 的
++// git 工作区打内容锚（add -A 覆盖 untracked，tree sha 去重），JSONL 落 daemon
++// .runtime/turn-anchors/。fire-and-forget：模块内部永不抛错，观测面不阻塞轮结果链路。
++import { recordTurnAnchor } from '../turn-anchor.js';
+ import { eventMetaOf, numOf, strOf } from './helpers.js';
+ import type { SessionManagerCore } from './types.js';
+ 
+@@ -124,6 +128,17 @@ export async function onResult(
+       mgr.deps.onTurnResult(state.sessionId, runId, result),
+     );
+   }
++  // 2026-10-13-daemon-turn-anchor-snapshot FR-01：轮锚点快照——干净 turn 边界
++  // （status 已收敛 active、currentRunId 已清）对会话 cwd 的 git 工作区打内容锚。
++  // fire-and-forget（void）：模块内部永不抛错 + per-session 串行链，不 await、
++  // 不阻塞轮结果链路；非 git cwd / git 失败静默 null（观测面best-effort）。
++  // 无条件执行（不挂 if (runId)）：锚是会话级内容观测，与 backend 是否下发 runId
++  // 无关；记录里 runId 为 null 的锚消费方可按会话时刻对齐。
++  void recordTurnAnchor({
++    cwd: state.cwd,
++    sessionId: state.sessionId,
++    runId: runId ?? null,
++  });
+   // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
+   mgr._scheduleFlush();
+   // task-11（边界 7）注：completedSegments 跨 turn 重置已随 partial 链下沉归一化器
+diff --git a/sillyhub-daemon/src/interactive/turn-anchor.ts b/sillyhub-daemon/src/interactive/turn-anchor.ts
+new file mode 100644
+index 000000000..e92fbeb6b
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/turn-anchor.ts
+@@ -0,0 +1,244 @@
++/**
++ * interactive/turn-anchor.ts —— 轮锚点快照（2026-10-13-daemon-turn-anchor-snapshot
++ * FR-01，轮次文件变化追踪 Route B 真相源最小闭环）。
++ *
++ * 职责：agent 每轮结束（onResult turn 边界）对会话 cwd 的 git 工作区打**内容锚点**，
++ * 与该会话上一锚 diff 出逐文件 additions/deletions，追加 JSONL 到
++ * `<daemonStateDir>/.runtime/turn-anchors/<sessionId>.jsonl`，供平台后续轮锚对账
++ * 消费（--json 口同 flow diff 的 rows/totals 形状对齐留给后续切片）。
++ *
++ * 锚形态（评审定案，Gap1 防漏）：
++ *   - **复制现场 index → GIT_INDEX_FILE 下 `git add -A` → `git write-tree`**：
++ *     复制现场 index 让 add -A 命中 stat 缓存（只有真正变化的文件重新哈希，成本
++ *     ≈ 一次 git status，不是全仓重扫）；add -A 天然覆盖 **untracked 新文件**
++ *     （`git stash create` 不含未跟踪是评审明确定性过的雷——agent 主要产出恰恰
++ *     是新文件）；tree sha 内容寻址，两锚相同 = 零变化，天然去重免存储。
++ *   - 同时记 `rev-parse HEAD`（区分「未提交改动」与「新提交进来」留给消费方）。
++ *   - diff 基线：有上一锚用上一锚（tree-to-tree 捕获轮间**全部**内容变化，含轮内
++ *     commit——这正是 Route B「真实」语义）；首轮无上一锚退 HEAD 树（轮内已 commit
++ *     的部分会被 HEAD 吸收，最小闭环的已知边界，design 有记）；空仓（无 HEAD 无
++ *     prev）files 留空。
++ *
++ * 失败安全（观测面不抛穿）：非 git 目录 / git 不可用 / 任何 git 错误 → 返回 null；
++ * 接线方 fire-and-forget，不阻塞轮结果链路。同会话并发轮经 per-session promise 链
++ * 串行化（prev 锚读写无竞态）；prev 锚优先内存、miss（daemon 重启）时读 JSONL 尾行。
++ *
++ * Windows：execFile 直跑 `git`（daemon 已假定 git 在 PATH，host-fs-handler 同款），
++ * 临时 index 落 os.tmpdir() 绝对路径；中文路径经 `-c core.quotePath=false` 原样
++ * UTF-8 输出（numstat 默认会转义非 ASCII）。
++ *
++ * @module interactive/turn-anchor
++ */
++import { execFile } from 'node:child_process';
++import { randomUUID } from 'node:crypto';
++import { appendFile, copyFile, mkdir, readFile, unlink } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { isAbsolute, join, resolve } from 'node:path';
++import { promisify } from 'node:util';
++
++import { daemonStateDir } from '../config.js';
++
++const execFileAsync = promisify(execFile);
++
++/** 单次 git 子命令超时（对齐 host-fs-handler runCommand 15s 惯例）。 */
++const GIT_TIMEOUT_MS = 15_000;
++/** git 输出缓冲上限（write-tree/diff-tree 输出远小于此，防御性兜底）。 */
++const GIT_MAX_BUFFER = 16 * 1024 * 1024;
++
++/** 逐文件行级统计；二进制文件 git numstat 记 "-"，映射为 null（不伪造行数）。 */
++export interface TurnAnchorFileStat {
++  path: string;
++  additions: number | null;
++  deletions: number | null;
++}
++
++/** 一条轮锚记录（JSONL 单行，字段名与 flow diff --json 的 rows 同风格）。 */
++export interface TurnAnchorRecord {
++  sessionId: string;
++  runId: string | null;
++  /** ISO 时间戳（轮边界时刻）。 */
++  ts: string;
++  /** 打锚时的 HEAD sha；空仓/异常为 null。 */
++  headSha: string | null;
++  /** 本锚工作区全量内容树（add -A 后 write-tree）。 */
++  treeSha: string;
++  /** 上一锚 treeSha（首轮 null）；去重判定与 diff 基线。 */
++  prevTreeSha: string | null;
++  /** true = 与上一锚内容树相同（零变化轮），不落盘不计数。 */
++  deduped: boolean;
++  /** 基线→本锚的逐文件变化；deduped=true 或无基线（空仓首轮）为空数组。 */
++  files: TurnAnchorFileStat[];
++}
++
++/** 默认锚存储目录：<daemonStateDir>/.runtime/turn-anchors（SILLYHUB_DAEMON_DIR 可覆盖）。 */
++export function defaultAnchorsDir(): string {
++  return join(daemonStateDir(), '.runtime', 'turn-anchors');
++}
++
++/** git 子命令包装：execFile 非 shell（防注入）+ 超时 + 可选额外 env（GIT_INDEX_FILE）。 */
++async function git(
++  cwd: string,
++  args: string[],
++  extraEnv?: Record<string, string>,
++): Promise<string> {
++  const { stdout } = await execFileAsync('git', args, {
++    cwd,
++    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
++    timeout: GIT_TIMEOUT_MS,
++    maxBuffer: GIT_MAX_BUFFER,
++    windowsHide: true,
++  });
++  return stdout;
++}
++
++/**
++ * 工作区内容树快照：复制现场 index → 临时 index 上 add -A → write-tree。
++ * 非 git 目录 / git 失败 → 抛错由上层 recordTurnAnchor 收口为 null。
++ */
++async function snapshotWorktree(
++  cwd: string,
++): Promise<{ treeSha: string; headSha: string | null }> {
++  // 现场 index 路径（--git-path 相对 cwd 输出，需归一为绝对路径）。
++  const indexRel = (await git(cwd, ['rev-parse', '--git-path', 'index'])).trim();
++  const indexPath = isAbsolute(indexRel) ? indexRel : resolve(cwd, indexRel);
++  const tmpIndex = join(tmpdir(), `turn-anchor-index-${process.pid}-${randomUUID().slice(0, 8)}`);
++  try {
++    // 复制现场 index（stat 缓存暖场）；空仓无 index 文件 → 忽略，add 自建。
++    await copyFile(indexPath, tmpIndex).catch(() => undefined);
++    const env = { GIT_INDEX_FILE: tmpIndex };
++    await git(cwd, ['add', '-A', '--'], env);
++    const treeSha = (await git(cwd, ['write-tree'], env)).trim();
++    let headSha: string | null = null;
++    try {
++      headSha = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
++    } catch {
++      // 空仓（无任何提交）：headSha=null，消费方按「无提交基线」理解。
++    }
++    return { treeSha, headSha };
++  } finally {
++    await unlink(tmpIndex).catch(() => undefined);
++  }
++}
++
++/** 两棵树 diff 为逐文件行级统计（--no-renames：改名记删+增两行，口径简单可加总）。 */
++async function diffTrees(
++  cwd: string,
++  baseTree: string,
++  nextTree: string,
++): Promise<TurnAnchorFileStat[]> {
++  const out = await git(cwd, [
++    '-c', 'core.quotePath=false',
++    'diff-tree', '-r', '--numstat', '--no-renames',
++    baseTree, nextTree,
++  ]);
++  return out
++    .split(/\r?\n/)
++    .filter((line) => line.trim() !== '')
++    .map((line) => {
++      const cols = line.split('\t');
++      const adds = cols[0];
++      const dels = cols[1];
++      // numstat 行 = "adds\tdels\tpath"；路径含 \t 时剩余列并回（罕见，保守拼接）。
++      const path = cols.slice(2).join('\t');
++      if (adds === undefined || dels === undefined || path === '') return null;
++      return {
++        path,
++        additions: adds === '-' ? null : Number(adds),
++        deletions: dels === '-' ? null : Number(dels),
++      };
++    })
++    .filter((entry): entry is TurnAnchorFileStat => entry !== null);
++}
++
++/* ── 模块级运行态（per-session）：prev 锚内存 + 并发轮串行链 ── */
++const _lastTreeBySession = new Map<string, string>();
++const _chainBySession = new Map<string, Promise<TurnAnchorRecord | null>>();
++
++/** 读 JSONL 尾行恢复 prev 锚（daemon 重启后内存 miss 的兜底；坏行跳过）。 */
++async function readLastRecord(
++  anchorsDir: string,
++  sessionId: string,
++): Promise<TurnAnchorRecord | null> {
++  let text: string;
++  try {
++    text = await readFile(join(anchorsDir, `${sessionId}.jsonl`), 'utf-8');
++  } catch {
++    return null;
++  }
++  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== '');
++  for (let i = lines.length - 1; i >= 0; i -= 1) {
++    try {
++      return JSON.parse(lines[i]!) as TurnAnchorRecord;
++    } catch {
++      // 尾行截断/坏行：继续向前找最后一条可解析记录。
++    }
++  }
++  return null;
++}
++
++/** 实际打锚 + diff + 落盘（只经 recordTurnAnchor 的串行链调用）。 */
++async function doRecord(opts: {
++  cwd: string;
++  sessionId: string;
++  runId?: string | null;
++  anchorsDir?: string;
++}): Promise<TurnAnchorRecord | null> {
++  const anchorsDir = opts.anchorsDir ?? defaultAnchorsDir();
++  const snap = await snapshotWorktree(opts.cwd); // 失败上抛 → 外层 catch 收口 null
++  let prevTreeSha = _lastTreeBySession.get(opts.sessionId) ?? null;
++  if (prevTreeSha === null) {
++    prevTreeSha = (await readLastRecord(anchorsDir, opts.sessionId))?.treeSha ?? null;
++  }
++  const deduped = prevTreeSha !== null && prevTreeSha === snap.treeSha;
++  const record: TurnAnchorRecord = {
++    sessionId: opts.sessionId,
++    runId: opts.runId ?? null,
++    ts: new Date().toISOString(),
++    headSha: snap.headSha,
++    treeSha: snap.treeSha,
++    prevTreeSha,
++    deduped,
++    files: [],
++  };
++  if (!deduped) {
++    // diff 基线：上一锚 → 本锚；首轮退 HEAD 树（轮内已 commit 部分被吸收，design 记边界）。
++    const baseTree = prevTreeSha ?? snap.headSha;
++    if (baseTree !== null) {
++      record.files = await diffTrees(opts.cwd, baseTree, snap.treeSha);
++    }
++    await mkdir(anchorsDir, { recursive: true });
++    await appendFile(
++      join(anchorsDir, `${opts.sessionId}.jsonl`),
++      `${JSON.stringify(record)}\n`,
++      'utf-8',
++    );
++    _lastTreeBySession.set(opts.sessionId, snap.treeSha);
++  }
++  return record;
++}
++
++/**
++ * 轮锚点快照入口（永不抛错；失败返回 null）。
++ * 同会话并发调用经 per-session promise 链串行化（prev 锚读写无竞态）；
++ * 不同会话互不阻塞。onResult 接线为 fire-and-forget（void 调用）。
++ */
++export async function recordTurnAnchor(opts: {
++  cwd: string;
++  sessionId: string;
++  runId?: string | null;
++  anchorsDir?: string;
++}): Promise<TurnAnchorRecord | null> {
++  const prevChain = _chainBySession.get(opts.sessionId) ?? Promise.resolve(null);
++  const task = prevChain
++    .catch(() => null) // 前一环失败不断链（失败安全逐轮独立）
++    .then(() => doRecord(opts))
++    .catch(() => null); // 任何 git/fs 错误 → null，观测面不抛穿
++  _chainBySession.set(opts.sessionId, task);
++  try {
++    return await task;
++  } finally {
++    if (_chainBySession.get(opts.sessionId) === task) {
++      _chainBySession.delete(opts.sessionId);
++    }
++  }
++}
+diff --git a/sillyhub-daemon/tests/interactive/turn-anchor.test.ts b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+new file mode 100644
+index 000000000..b20e6487f
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+@@ -0,0 +1,236 @@
++/**
++ * interactive/turn-anchor 单测——轮锚点快照（2026-10-13-daemon-turn-anchor-snapshot）。
++ *
++ * Route B 真相源最小闭环的核心算法面：真实临时 git 仓跑锚点全链（copy index →
++ * add -A → write-tree → diff-tree --numstat），不 mock git/child_process（daemon
++ * 测试惯例：host-fs-handler 等同样真子进程；testTimeout 30s 覆盖 git init 开销）。
++ *
++ * 覆盖（= 成功标准逐条）：
++ *   1. 首轮（有基线提交）：tracked 修改 + untracked 新文件都进锚与 diff
++ *      （untracked 覆盖 = 评审 Gap1：stash create 不含未跟踪是雷，add -A 天然覆盖）；
++ *   2. 零变化轮去重（treeSha 相同 → deduped=true 且不追加 JSONL）；
++ *   3. 增量轮（第二个非零锚）prevTreeSha 链正确、files 只含本轮变化；
++ *   4. 二进制文件 additions/deletions 记 null（numstat '-' 列）；
++ *   5. 非 git 目录返回 null 永不抛（失败安全）；
++ *   6. 「重启续锚」：模块状态清空后从 JSONL 尾行恢复 prev 锚（daemon 重启场景）；
++ *   7. 中文文件名不转义（core.quotePath=false，numstat 原样 UTF-8 路径）。
++ *
++ * 模块级状态（per-session 串行链 + prev 锚内存）隔离手法：每个用例独立
++ * sessionId + 关键用例 vi.resetModules 后动态重导入（等价 daemon 重启）。
++ */
++import { describe, it, expect, beforeEach, vi } from 'vitest';
++import { execFile } from 'node:child_process';
++import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { promisify } from 'node:util';
++import { randomUUID } from 'node:crypto';
++
++const execFileAsync = promisify(execFile);
++
++/** 真 git 命令（测试夹具自用；被测模块自己持有 git 实现）。 */
++async function git(cwd: string, args: string[]): Promise<string> {
++  const { stdout } = await execFileAsync('git', args, { cwd, timeout: 20_000, windowsHide: true });
++  return stdout;
++}
++
++/** 造一个带一次基线提交的临时 git 仓（config 本地化，GPG 关，跨平台 CI 可跑）。 */
++async function makeRepo(): Promise<string> {
++  const dir = await mkdtemp(join(tmpdir(), 'turn-anchor-'));
++  try {
++    await git(dir, ['init', '-b', 'main']);
++  } catch {
++    await git(dir, ['init']); // 旧版 git 无 -b，默认分支名无关紧要
++  }
++  await git(dir, ['config', 'user.email', 't@t.local']);
++  await git(dir, ['config', 'user.name', 't']);
++  await git(dir, ['config', 'commit.gpgsign', 'false']);
++  await writeFile(join(dir, 'base.txt'), 'line1\nline2\n', 'utf-8');
++  await git(dir, ['add', '-A']);
++  await git(dir, ['commit', '-m', 'base']);
++  return dir;
++}
++
++/** 夹具级 anchorsDir（隔离 daemonStateDir 默认值，测试不碰真实 ~/.sillyhub）。 */
++async function makeAnchorsDir(): Promise<string> {
++  return mkdtemp(join(tmpdir(), 'turn-anchor-store-'));
++}
++
++async function readRecords(
++  anchorsDir: string,
++  sessionId: string,
++): Promise<unknown[]> {
++  const text = await readFile(join(anchorsDir, `${sessionId}.jsonl`), 'utf-8');
++  return text
++    .split(/\r?\n/)
++    .filter((l) => l.trim() !== '')
++    .map((l) => JSON.parse(l));
++}
++
++interface AnchorModule {
++  recordTurnAnchor(opts: {
++    cwd: string;
++    sessionId: string;
++    runId?: string | null;
++    anchorsDir?: string;
++  }): Promise<{
++    sessionId: string;
++    runId: string | null;
++    treeSha: string;
++    prevTreeSha: string | null;
++    headSha: string | null;
++    deduped: boolean;
++    files: Array<{ path: string; additions: number | null; deletions: number | null }>;
++  } | null>;
++}
++
++/** 动态导入被测模块（vi.resetModules 后调用 = 模块级状态清零，模拟 daemon 重启）。 */
++async function loadModule(): Promise<AnchorModule> {
++  return (await import('../../src/interactive/turn-anchor.js')) as AnchorModule;
++}
++
++beforeEach(() => {
++  vi.resetModules();
++});
++
++describe('interactive/turn-anchor 轮锚点快照', () => {
++  it('首轮（有基线提交）：tracked 修改与 untracked 新文件都进 diff；JSONL 落一条；prevTreeSha=null', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-first-${randomUUID().slice(0, 8)}`;
++    try {
++      // 轮内改动：改 tracked + 新建 untracked（agent 产出的主要形态）。
++      await writeFile(join(repo, 'base.txt'), 'line1\nline2\nline3\n', 'utf-8');
++      await writeFile(join(repo, 'new-untracked.ts'), 'export const x = 1;\n', 'utf-8');
++
++      const rec = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, runId: 'run-1', anchorsDir: anchors });
++      expect(rec).not.toBeNull();
++      expect(rec!.deduped).toBe(false);
++      expect(rec!.prevTreeSha).toBeNull();
++      expect(rec!.headSha).toMatch(/^[0-9a-f]{7,40}$/);
++      expect(rec!.treeSha).toMatch(/^[0-9a-f]{7,40}$/);
++      const byPath = new Map(rec!.files.map((f) => [f.path, f]));
++      expect(byPath.get('base.txt')).toEqual({ path: 'base.txt', additions: 1, deletions: 0 });
++      expect(byPath.get('new-untracked.ts')).toEqual({ path: 'new-untracked.ts', additions: 1, deletions: 0 });
++
++      const records = await readRecords(anchors, sid);
++      expect(records).toHaveLength(1);
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('零变化轮去重：treeSha 与上一锚相同 → deduped=true 且不追加 JSONL', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-dedup-${randomUUID().slice(0, 8)}`;
++    try {
++      const first = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(first!.deduped).toBe(false);
++
++      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(second!.deduped).toBe(true);
++      expect(second!.treeSha).toBe(first!.treeSha);
++      expect(second!.files).toEqual([]);
++
++      const records = await readRecords(anchors, sid);
++      expect(records).toHaveLength(1); // 去重轮不落盘
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('增量轮：prevTreeSha 链到上一锚，files 只含本轮变化文件', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-incr-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
++      const first = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++
++      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
++      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(second!.prevTreeSha).toBe(first!.treeSha);
++      expect(second!.files).toEqual([{ path: 'turn2.txt', additions: 1, deletions: 0 }]);
++
++      const records = await readRecords(anchors, sid);
++      expect(records).toHaveLength(2);
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('二进制文件：additions/deletions 记 null（numstat "-" 列）', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-bin-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, 'blob.bin'), Buffer.from([0x00, 0x01, 0x02, 0xff]));
++      const rec = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      const entry = rec!.files.find((f) => f.path === 'blob.bin');
++      expect(entry).toEqual({ path: 'blob.bin', additions: null, deletions: null });
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('非 git 目录：返回 null 且不抛错（失败安全）', async () => {
++    const mod = await loadModule();
++    const dir = await mkdtemp(join(tmpdir(), 'turn-anchor-nogit-'));
++    const anchors = await makeAnchorsDir();
++    const sid = `s-nogit-${randomUUID().slice(0, 8)}`;
++    try {
++      const rec = await mod.recordTurnAnchor({ cwd: dir, sessionId: sid, anchorsDir: anchors });
++      expect(rec).toBeNull();
++    } finally {
++      await rm(dir, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('重启续锚：模块状态清空后从 JSONL 尾行恢复 prev 锚（内存 miss → 尾行兜底）', async () => {
++    const mod1 = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-restart-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
++      const first = await mod1.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++
++      // 「重启」：模块级 Map 清零（vi.resetModules + 重新动态导入），prev 锚只能来自 JSONL 尾行。
++      vi.resetModules();
++      const mod2 = await loadModule();
++      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
++      const second = await mod2.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(second!.prevTreeSha).toBe(first!.treeSha);
++      expect(second!.files).toEqual([{ path: 'turn2.txt', additions: 1, deletions: 0 }]);
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('中文文件名：numstat 路径原样 UTF-8（core.quotePath=false 不转义）', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-cjk-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, '中文文件.md'), '# 你好\n', 'utf-8');
++      const rec = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      const entry = rec!.files.find((f) => f.path === '中文文件.md');
++      expect(entry).toEqual({ path: '中文文件.md', additions: 1, deletions: 0 });
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++});
