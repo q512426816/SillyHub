@@ -473,8 +473,9 @@ export interface AssemblerLogInput {
    *  tool_call 行经 classifySessionLog 第三参优先映射为 file 段。 */
   toolKind?: string | null;
   /** ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（backend 落库透传，
-   *  hunks 含真实文件行号）。仅 Edit tool_result 行携带；配对时写到 tool 段
-   *  editPatch，展开区优先于 LCS 自算。 */
+   *  hunks 含真实文件行号）。抓取链不限工具名（2026-10-13-write-tool-diff 实证：
+   *  Edit 与 Write 覆盖写均携带）；配对时写到 tool 段 editPatch，展开区优先于
+   *  LCS 自算。 */
   editPatch?: string | null;
   /**
    * 2026-09-27-session-fast-replay task-04 / FR-07：slim 截断标记（历史日志
@@ -1541,8 +1542,8 @@ export function applyLogToSegments(
               {
                 ...t,
                 result: seg.text,
-                // ql-20260824-020：structuredPatch 随配对写入（仅 Edit tool_result
-                // 行携带；undefined 不影响其他工具）。
+                // ql-20260824-020：structuredPatch 随配对写入（抓取链不限工具名，
+                // Edit 与 Write 覆盖写均携带；undefined 不影响其他工具）。
                 editPatch: input.editPatch ?? undefined,
                 // result 拒绝优先覆盖 use 的 success（daemon success 恒 true 不可信，
                 // isToolResultDenied 注）；仅 running（success 未解析出）时兜底 ok。

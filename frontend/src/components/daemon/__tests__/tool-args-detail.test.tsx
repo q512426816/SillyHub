@@ -230,6 +230,9 @@ describe("ToolExpandBody Write 展开 diff（2026-10-13-write-tool-diff）", () 
     const row2 = screen.getByText("line-2").closest("div.flex");
     expect(row1?.className).toContain("bg-emerald-500/10");
     expect(row2?.className).toContain("bg-emerald-500/10");
+    // 新侧行号列自 1 起计（行内第 2 列 span = newNo；旧侧恒空）
+    expect(row1?.children[1]?.textContent).toBe("1");
+    expect(row2?.children[1]?.textContent).toBe("2");
     expect(screen.getByText(/写入内容（2 行）/)).toBeTruthy();
     expect(screen.getByText("复制内容")).toBeTruthy();
     cleanup();
