@@ -233,4 +233,41 @@ describe('interactive/turn-anchor 轮锚点快照', () => {
       await rm(anchors, { recursive: true, force: true });
     }
   });
+
+  // ── 2026-10-13-turn-anchor-flowdiff-shape：totals + toFlowDiffShape 投影 ──
+  it('totals：落盘记录携带 files 行数与加总（二进制 null 行不计入）；JSONL 行含 totals 键', async () => {
+    const mod = await loadModule();
+    const repo = await makeRepo();
+    const anchors = await makeAnchorsDir();
+    const sid = `s-totals-${randomUUID().slice(0, 8)}`;
+    try {
+      // 一文本改动（+1/-1）+ 一二进制新文件（null/null，不计入加总）
+      await writeFile(join(repo, 'base.txt'), 'line1' + String.fromCharCode(10) + 'line2-changed' + String.fromCharCode(10), 'utf-8');
+      await writeFile(join(repo, 'blob.bin'), Buffer.from([0x00, 0x01, 0x02, 0xff]));
+      const rec = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
+      expect(rec).not.toBeNull();
+      expect(rec!.totals).toEqual({ files: 2, additions: 1, deletions: 1 });
+      const lines = await readRecords(anchors, sid);
+      expect(lines[0]).toMatchObject({ totals: { files: 2, additions: 1, deletions: 1 } });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+      await rm(anchors, { recursive: true, force: true });
+    }
+  });
+
+  it('toFlowDiffShape：rows=files 原样、totals 从 files 重算（存量无 totals 键的旧记录兜底）', async () => {
+    const shapeMod = (await import('../../src/interactive/turn-anchor.js')) as {
+      toFlowDiffShape(record: unknown): { rows: unknown[]; totals: { files: number; additions: number; deletions: number } };
+    };
+    // 存量旧记录形态：无 totals 键（cast 绕过类型——投影函数不信任存量字段）
+    const legacyRecord = {
+      files: [
+        { path: 'a.txt', additions: 3, deletions: 1 },
+        { path: 'b.bin', additions: null, deletions: null },
+      ],
+    } as unknown as Parameters<typeof shapeMod.toFlowDiffShape>[0];
+    const shape = shapeMod.toFlowDiffShape(legacyRecord);
+    expect(shape.rows).toEqual(legacyRecord.files);
+    expect(shape.totals).toEqual({ files: 2, additions: 3, deletions: 1 });
+  });
 });
