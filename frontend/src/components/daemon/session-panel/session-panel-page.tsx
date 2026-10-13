@@ -12,7 +12,7 @@ import {
 import { Badge, Button, Drawer, Input, Spin } from "antd";
 import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import {
-  extractPreambleText, finishTurn, stripPreambleText, type UserMsgTurnSegment,
+  extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
 import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
@@ -1273,8 +1273,12 @@ export function SessionPanelPage({
                   env,
                   (turn) => {
                     let next = turn;
+                    // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统
+                    // 通知，不落 preamble 段（与回放路径同口径——进度视图无「上下文
+                    // 注入」卡）；prompt 补写仍走 strip 剥空不写，开轮槽语义不变。
                     if (
                       preambleText &&
+                      !isTaskWakeupInjection(env.content ?? "") &&
                       !next.segments?.some((s) => s.kind === "preamble")
                     ) {
                       next = {
