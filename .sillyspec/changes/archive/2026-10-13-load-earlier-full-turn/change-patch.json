@@ -1,7 +1,7 @@
 {
   "change": "2026-10-13-load-earlier-full-turn",
   "baseline": "3f1f02f496152800fa5133ef44192739dabd04bc",
-  "head": "4b969b5a5514a11b0a7e1f458019b014be31d016",
+  "head": "a20ae3e3dea00f945697455f3c920858fcf01da5",
   "files": [
     "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
     "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx",
@@ -10,10 +10,10 @@
   ],
   "totals": {
     "files": 4,
-    "additions": 530,
+    "additions": 573,
     "deletions": 46
   },
-  "savedAt": "2026-10-13T10:51:54.037Z",
+  "savedAt": "2026-10-13T11:04:10.996Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {
@@ -53,7 +53,7 @@
     "baseAnchor": "3f1f02f496152800fa5133ef44192739dabd04bc",
     "totals": {
       "files": 4,
-      "additions": 530,
+      "additions": 573,
       "deletions": 46
     },
     "rows": [
@@ -71,13 +71,13 @@
       },
       {
         "path": "frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx",
-        "additions": 330,
+        "additions": 352,
         "deletions": 0,
         "kind": "new"
       },
       {
         "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
-        "additions": 122,
+        "additions": 143,
         "deletions": 11,
         "kind": "modified"
       }
@@ -88,6 +88,6 @@
     "note": "flow done 时点冻结（本文件落盘时采集）",
     "closedBy": "flow done"
   },
-  "patchSha256": "3263602d3c8a999bf63ae87b1ee2e97dafc187a8635086c035e0422b60f4281b",
+  "patchSha256": "d3c5d9efb851af4442e0b996e2a61d3858670a486a5146415cba176d059169aa",
   "patchStatus": "ok"
 }

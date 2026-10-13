@@ -186,10 +186,10 @@ index c078709c6..b0108cbd6 100644
          return beforeIds.length === 1 ? older1 : older2;
 diff --git a/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
 new file mode 100644
-index 000000000..ba37e6613
+index 000000000..dbcc9b074
 --- /dev/null
 +++ b/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
-@@ -0,0 +1,330 @@
+@@ -0,0 +1,352 @@
 +// 2026-10-13-load-earlier-full-turn：「加载更早」轮边界对齐回归——(ts,id)
 +// 复合游标按 400 行翻页，页边界 / 已加载窗口边界会把一轮（run）切成两半：
 +// 触顶加载后顶部那轮只有后半段（提问在更早未加载区）；「回到会话开头」复用
@@ -519,9 +519,31 @@ index 000000000..ba37e6613
 +      ).length,
 +    ).toBe(0);
 +  });
++
++  it("直达 ASC 上限截断丢最新段 → 采纳闸降级该轮：窗口块保留不摘、内容零丢失（评审 P2）", async () => {
++    olderPage = olderPageFull();
++    probePage = [log("z-2", "run-Z", tsAt("09:00:00", 2), "stdout", "Z-输出-2")];
++    // run-A 直达模拟后端 ASC+上限截断：只回最旧 101 行（max ts 远早于当页
++    // 该轮最新行 a-397）——采纳闸须判截断降级；run-Z 直达完整照常合并。
++    directRunLogs = { "run-A": runAFull().slice(0, 101), "run-Z": runZFull() };
++
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    // run-Z（直达完整）正常合并：整轮提问出现。
++    await waitFor(() => expect(screen.getByText("Z 完整提问")).toBeTruthy());
++    // run-A 降级现状：当页 398 行原样装配（含 a-0 提问行）+ 窗口旧块保留——
++    // 采纳闸缺失时窗口块被摘而截断直达又不含末 2 行，「A-窗口尾部-398」
++    // 会静默消失（P2 场景）；保留即降级生效。
++    await waitFor(() =>
++      expect(markdownElsContaining("A-输出-1").length).toBeGreaterThan(0),
++    );
++    expect(markdownElsContaining("A-窗口尾部-398").length).toBe(1);
++    expect(markdownElsContaining("A-窗口尾部-399").length).toBe(1);
++  });
 +});
 diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
-index f926e45c0..5eb4593f8 100644
+index f926e45c0..b1a4a6cc9 100644
 --- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
 +++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
 @@ -343,6 +343,40 @@ function steeredTurnIndexOf(turns: SessionTurnView[], runId: string): number {
@@ -579,7 +601,7 @@ index f926e45c0..5eb4593f8 100644
    // 触顶自动加载（quick 迭代）：原顶部按钮改滚动触发——滚动接线与 prepend
    // 滚动锚的 DOM 组装在 sessionBody 处（isToolReportBody 之后），经 ref 间接
    // 供本回调读取，避免块级声明顺序耦合。
-@@ -1735,22 +1772,76 @@ export function SessionPanelPage({
+@@ -1735,22 +1772,97 @@ export function SessionPanelPage({
          (m, l) => (l.timestamp < m.timestamp ? l : m),
          older[0]!,
        );
@@ -624,8 +646,29 @@ index f926e45c0..5eb4593f8 100644
 +          }),
 +        );
 +        if (epochAtStart !== sessionEpochRef.current) return;
++        // okRuns 采纳闸（评审 P2 修复）：直达端点 ASC + 上限截断丢的是该轮
++        // **最新段**（session_insights.py read_session_logs run_id 分支）——直达
++        // 行集未覆盖到当页该轮最新行（更覆盖不到更晚的窗口段）即判定截断，
++        // 该轮降级现状（当页行原样装配、不摘窗口块），防替换合并静默丢尾部
++        // 内容。判定不依赖上限魔法数：ASC 完整返回必含当页段与窗口段。
++        const pageMaxTsByRun = new Map<string, string>();
++        for (const l of older) {
++          const cur = pageMaxTsByRun.get(l.run_id);
++          if (cur === undefined || l.timestamp > cur) pageMaxTsByRun.set(l.run_id, l.timestamp);
++        }
 +        const okRuns = new Set(
-+          fulls.filter((f) => (f.logs?.length ?? 0) > 0).map((f) => f.run),
++          fulls
++            .filter((f) => {
++              if ((f.logs?.length ?? 0) === 0) return false;
++              const pageMax = pageMaxTsByRun.get(f.run);
++              if (pageMax === undefined) return true;
++              const directMax = f.logs!.reduce(
++                (m, l) => (l.timestamp > m ? l.timestamp : m),
++                f.logs![0]!.timestamp,
++              );
++              return directMax >= pageMax;
++            })
++            .map((f) => f.run),
 +        );
 +        if (okRuns.size > 0) {
 +          const extra = fulls.filter((f) => okRuns.has(f.run)).flatMap((f) => f.logs!);
@@ -661,7 +704,7 @@ index f926e45c0..5eb4593f8 100644
          // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
          // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
          // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
-@@ -1762,6 +1853,19 @@ export function SessionPanelPage({
+@@ -1762,6 +1874,19 @@ export function SessionPanelPage({
            runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
          }));
          setTurnState((prev) => {
@@ -681,7 +724,7 @@ index f926e45c0..5eb4593f8 100644
            // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
            // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
            // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
-@@ -1770,10 +1874,8 @@ export function SessionPanelPage({
+@@ -1770,10 +1895,8 @@ export function SessionPanelPage({
            // ts 全量数字串 + 本页首行 id 前 8 位，task-06）——纯 ts 数字串在
            // 「同 ts 满 100 行批跨页」时两页撞 key。realRunId 保持原值——SSE
            // 增量与孤儿 run 补建按 realRunId 匹配不受影响（upsertTurn 实时
@@ -694,7 +737,7 @@ index f926e45c0..5eb4593f8 100644
          });
        }
      } catch {
-@@ -1797,6 +1899,15 @@ export function SessionPanelPage({
+@@ -1797,6 +1920,15 @@ export function SessionPanelPage({
    useEffect(() => {
      hasEarlierRef.current = hasEarlier;
    }, [hasEarlier]);

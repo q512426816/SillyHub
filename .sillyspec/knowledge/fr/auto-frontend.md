@@ -2135,3 +2135,117 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-session-changefiles-select-fix
   status: active
+
+## FR-auto-frontend-208 触顶加载一页后，若页顶边界切在轮中间，该轮被完整加载（拉全整轮行并合并装配成一个轮块，含提问）
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 初始窗口满页且翻页页满页、页顶最旧行与其紧邻更早行同 run，When 触顶触发
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-01
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-load-earlier-full-turn:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx「窗口跨界 + 页顶跨界轮直达整轮合并：提问出现、旧行单显、窗口同轮旧块被摘」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-load-earlier-full-turn
+  status: active
+
+## FR-auto-frontend-209 回到会话开头到头后，顶部第一轮完整（跨页/跨窗口边界的轮合并为单块显示）
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 会话历史跨多页且存在跨边界轮，When 点击「回到会话开头」到头，Then 顶部
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-02
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-load-earlier-full-turn:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「回到会话开头（2026-10-10-single-turn-nav-and-jump-head）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-load-earlier-full-turn
+  status: active
+
+## FR-auto-frontend-210 跨「已加载窗口与翻页页」边界的轮同样合并，不再出现同轮分裂双块
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮 A 的后半段在已加载窗口（终态块）、前半段在翻页页内，When 触顶加载，；Then A 收敛为单个完整块，窗口内 A 旧块不再渲染（文本单显不双条）。
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-03
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-load-earlier-full-turn:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx「窗口跨界 + 页顶跨界轮直达整轮合并：提问出现、旧行单显、窗口同轮旧块被摘」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-load-earlier-full-turn
+  status: active
+
+## FR-auto-frontend-211 直达请求失败时静默降级为现状行为（照常 prepend 当页），不报错不卡死
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 跨界轮的直达请求 reject，When 触顶加载完成，Then 当页内容照常渲染（现状
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-04
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-load-earlier-full-turn:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx「直达失败 → 静默降级：当页原样 prepend，不报错不卡死」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-load-earlier-full-turn
+  status: active
+
+## FR-auto-frontend-212 运行中的轮（当前 currentRunId）不做合并重建，保持现状路径
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 当前轮超长横跨窗口最旧行边界（历史段在翻页方向），When 触顶加载，Then 该轮
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-05
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+## FR-auto-frontend-213 既有翻页/跳转/回到开头相关测试全部保持通过
+变更：2026-10-13-load-earlier-full-turn
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given main 基线测试状态，When 应用本次变更，Then 除基线存量失败外无新增失败，
+全文：.sillyspec/changes/archive/2026-10-13-load-earlier-full-turn/requirements.md#FR-06
+最近确认：a20ae3e3dea00f945697455f3c920858fcf01da5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-load-earlier-full-turn:flow:测试绑定FR-06
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx | frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-load-earlier-full-turn
+  status: active

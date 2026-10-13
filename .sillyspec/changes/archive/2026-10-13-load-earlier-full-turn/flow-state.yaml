@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -27,7 +32,7 @@ input: >-
   - 既有翻页/跳转/回到开头相关测试全部保持通过
 autopilot: false
 baseline_commit: 3f1f02f496152800fa5133ef44192739dabd04bc
-updatedAt: '2026-10-13T10:51:54.039Z'
+updatedAt: '2026-10-13T11:11:20.646Z'
 baseline_sha256: 7990d7a8f0a071271763ac10cc49c15ee9622973fc171ff57bbb2e56564cfa52
 spec_approved: true
 spec_approved_at: '2026-10-13T10:47:42.227Z'
