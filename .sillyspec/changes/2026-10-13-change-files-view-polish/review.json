@@ -3,32 +3,32 @@
   "change": "2026-10-13-change-files-view-polish",
   "reviewer": "subagent",
   "verdict": "PASS",
-  "reviewedAgainst": "f2aa4729f3879e0e4617266044c6c2e39217a0a7",
+  "reviewedAgainst": "ca86e918a7762cc0b88ec32abe61616ea3ed56dd",
   "findings": [
     {
-      "severity": "P2",
-      "title": "timeline.md 任务行「?/未勾」真实形态不入任务面，落为脚注且不触发回落",
-      "evidence": "TIMELINE_TASK_RE 强制时刻段（≈?HH:MM[:SS]），而真实归档 timeline.md 存在两类无时刻任务行——「? 推断缺失」（archive/2026-10-10-fire-equipment 全部 15 条）与「未勾」态（2026-09-28-drop-observation-card 等 5+ 变更）；这些行不匹配正则被 push 进 footnotes，以脚注小字渲染、任务面分区整体缺席，且事件区块在场使 sawEvents=true 不返回 null，design 盲维 Q1 声称「无时刻行……tryParseTimeline 返回 null 回落」与代码实际行为不符（事件时间轴主体与内容本身均完整不失）。",
-      "location": "frontend/src/components/files/structured-views.tsx:846"
-    },
-    {
       "severity": "P3",
-      "title": "vi.mock 内联中文名表与 lib 真实 CHANGE_FILE_CN 表的一致性无测试钉住",
-      "evidence": "change-file-tree.test.tsx 的 7 名断言经 vi.mock 内联替身表消费（刻意测试替身，文件头已注明），frontend 全测试树无任何用例直接消费 lib/change-files.ts 真实 CHANGE_FILE_CN——本次人工逐键比对两表同步无缺陷，但未来单侧增改键名只会静默漂移无护栏。",
+      "title": "mock 内联中文名表与 lib 真实表一致性无护栏（上轮 P3，裁决接受）",
+      "evidence": "change-file-tree.test.tsx 以 vi.mock 内联 changeFileCnName 映射表，本轮已同步新增 7 名与 timeline/change.patch 两名，但 lib 真实表未来增删时无护栏防 mock 漂移——仅影响展示断言的测试面，不改产品行为，维持裁决接受。",
       "location": "frontend/src/components/__tests__/change-file-tree.test.tsx:15"
     },
     {
       "severity": "P3",
-      "title": "patch 正文新增/删除行自身以 \"++ \"/\"-- \" 开头会被误判为 +++/--- 文件头",
-      "evidence": "tryParsePatchFiles 以 l.startsWith(\"+++ \")/\"--- \" 识别文件头，diff 里内容为 \"++ x\"/\"-- x\" 的添加/删除行（渲染为 \"+++ x\"）会命中该分支：路径可能被覆写、该行漏计入 adds/dels——启发式切分的固有罕见边界，常见 patch 不触发。",
-      "location": "frontend/src/components/files/structured-views.tsx:1016"
+      "title": "patch 正文行以 ++ / -- 开头的罕见启发式边界（上轮 P3，裁决接受）",
+      "evidence": "tryParsePatchFiles 用 startsWith(\"+++ \")/startsWith(\"+\") 启发式区分文件头与增删行：新增内容本身以「++ x」开头时 patch 正文行「+++ x」会被误判为 +++ 文件头（路径提取与计数偏差）；unified diff 罕见场景，维持裁决接受。",
+      "location": "frontend/src/components/files/structured-views.tsx:1026"
+    },
+    {
+      "severity": "P3",
+      "title": "时刻正则容许 1 位小时与字典序排序假设存在理论缺口（本轮新观察，非阻断）",
+      "evidence": "TIMELINE_EVENT_RE/TIMELINE_TASK_RE 的 \\d{1,2} 接受 9:05:00 形态，而排序按字符串 localeCompare（design 假设 HH:MM:SS 恒两位），单数字小时事件会排到 10:xx 之后；用两个归档实文件核验 CLI 恒输出两位补零（08:00:00/09:42:46 等），实际输入不触发，仅记录不改。",
+      "location": "frontend/src/components/files/structured-views.tsx:844"
     }
   ],
   "dimensionNotes": {
-    "乱序": "finding",
+    "乱序": "ok",
     "并发": "ok",
     "切换": "ok",
     "作用域": "ok"
   },
-  "reviewedAt": "2026-10-13T06:41:52Z"
+  "reviewedAt": "2026-10-13T06:51:32Z"
 }
