@@ -675,6 +675,19 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
     expect((turn.segments ?? []).some((s) => s.kind === "user_msg")).toBe(false);
   });
 
+  it("系统通知注入不产出 preamble 段（进度视图无上下文注入卡）", () => {
+    // 2026-10-13-session-taskwakeup-hide FR-01：TASK_WAKEUP 纯系统通知不再进
+    // 段模型——进度视图不显示「上下文注入（N 字，已随消息发送）」卡（该文案
+    // 对纯系统通知本就不符）；真实前导（【影子直聊】等）仍照旧建段（上方用例）。
+    const turns = logsToTurns([
+      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
+      makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("");
+    expect((turn.segments ?? []).some((s) => s.kind === "preamble")).toBe(false);
+  });
+
   it("正常轮不受影响：真实开轮 prompt 保持，第二条消息仍转 user_msg；中途系统行不占槽", () => {
     const turns = logsToTurns([
       makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),

@@ -12,6 +12,7 @@ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import {
   extractPreambleText,
+  isTaskWakeupInjection,
   logsToSegments,
   segmentsToLegacy,
   stripPreambleText,
@@ -448,7 +449,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         // user_input 含完整 dispatch_prompt——提取前导块为 preamble 段（对话视图
         // 不渲染，「全部」视图显示注入来源）；其余照原逻辑收 prompt。
         const preambleText = extractPreambleText(seg.text);
-        if (preambleText) {
+        // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
+        // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
+        // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
+        if (preambleText && !isTaskWakeupInjection(seg.text)) {
           preambleSegments.push({
             kind: "preamble",
             id: `preamble:${entry.id ?? `idx${turnIndex}`}`,
