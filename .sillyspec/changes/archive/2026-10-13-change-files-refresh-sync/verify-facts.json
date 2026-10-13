@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-13-change-files-refresh-sync",
+  "generatedAt": "2026-10-13T05:41:55.064Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 6
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "backendEndpoints": 2378,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-13-change-files-refresh-sync",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "daemon 侧 handler+执行器+防抖单元链路全绿（真实 Daemon 构造+假 manager 注入，覆盖参数守卫→防抖→执行器回执全链）",
+      "command": "cd sillyhub-daemon && npx vitest run tests/sillyspec-sync-change-rpc.test.ts",
+      "exitCode": 0,
+      "logPath": "/tmp/daemon-tests.log"
+    },
+    {
+      "claim": "backend 前置+四路降级全绿（真实 FastAPI 路由+mock RPC 三依赖）",
+      "command": "cd backend && uv run pytest -q app/modules/change/tests/test_files_refresh_sync.py --no-cov",
+      "exitCode": 0,
+      "logPath": "/tmp/backend-tests.log"
+    }
+  ],
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "真机端到端：daemon 在线时平台点刷新，daemon 本机改动在同步完成后出现在文件树（含 CLI 后台续跑后二次刷新见新数据）",
+        "condition": "单测环境无真实 daemon+WS+CLI 链路；验收步骤：①开发机改某变更 proposal.md → ②平台变更详情点刷新（首次可能超 15s 降级返回旧数据）→ ③≤2min 后再点刷新（防抖窗已过）→ 文件树/内容预览见新数据；daemon 日志可见 sillyspec_sync_change_started/done",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/change/tests/test_files_refresh_sync.py",
+      "sillyhub-daemon/tests/sillyspec-sync-change-rpc.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py48+jsx77)+fr(121)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-13T06:54:30.160Z"
+  }
+}

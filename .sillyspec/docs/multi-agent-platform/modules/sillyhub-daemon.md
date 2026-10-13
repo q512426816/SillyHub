@@ -150,6 +150,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - `hub-client.ts` 增 liveness 上报：Bearer shpsync 直推 `POST /api/agent-logs/states`（daemon 各 workspace root local.yaml platform token）；`buildAgentLogStatePushGroups` 落 D-012 优先级（第一方 PERMISSION_REQUEST pending 覆写 blocked）。
 - `daemon.ts`：`_livenessLoop` 独立 `_fire`（60s 发现刷新 + tailer 10s tick；abortableSleep 信号感知——裸 setTimeout 会拖死 stop）。
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
+- 2026-10-13-change-files-refresh-sync | 平台刷新文件树触发绑定 daemon 定向上行同步：sillyspec-manager 新增 runSyncChange 执行器（串行 platform sync --change 落镜像 + sync-docs --change 落 DB 四件套）+ daemon.ts 注册 sillyspec_sync_change RPC（SAFE_CHANGE_NAME_RE/UUID 双守卫 + 15s TTL 防抖 + in-flight 去重 + 1000 帽），结构化回执不走结果槽
 - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
 - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
 - 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok

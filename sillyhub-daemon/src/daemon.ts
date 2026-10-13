@@ -155,6 +155,9 @@ import { runLinkedReposSnapshot } from './linked-repos-snapshot.js';
 // 2026-09-02-changes-overview-card task-02：heartbeat sillyspec_status 键的载荷
 // 形状（progress 总览摘要），组装时从 manager.getStatusSnapshot() 取。
 import type { SillySpecStatusSummary, SillySpecStatusError } from './sillyspec-manager.js';
+// 2026-10-13-change-files-refresh-sync task-02：sillyspec.sync_change RPC 同步
+// 回执通道的执行器返回结构（type-only，manager 不反向依赖 daemon 无环）。
+import type { SillySpecSyncChangeResult } from './sillyspec-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -1574,6 +1577,17 @@ export interface SillySpecCommandExecutor {
    */
   runTombstoneCleanup(change: string, workspaceId?: string): Promise<void>;
   /**
+   * 定向上行同步（2026-10-13-change-files-refresh-sync task-02 / D-001@v1）：
+   * 串行 `platform sync --change <名>` → `platform sync-docs --change <名>`。
+   * 与本接口其余三执行器的关键差异：**RPC 同步回执通道**——结构化结果直接
+   * resolve 给 sillyspec.sync_change handler（daemon:rpc_result 回传 backend），
+   * 不写结果槽不进心跳（同 runResolve 的根解析/CLI 执行基建，回执面独立）。
+   */
+  runSyncChange(
+    change: string,
+    workspaceId?: string,
+  ): Promise<SillySpecSyncChangeResult>;
+  /**
    * npm 升级链在跑判定（running/deferred 期间 true）——排队命令出队执行前轮询
    * 等待的依据（2026-09-26-sillyspec-command-queue：原忙拒第二臂改等待）。
    */
@@ -1609,6 +1623,15 @@ const SILLYSPEC_COMMAND_UPGRADE_WAIT_MAX_MS = 300_000;
  * （后续 doctor 命令数组不含 change），入口必须自校验。
  */
 const SAFE_CHANGE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+/**
+ * sillyspec.sync_change 防抖参数（2026-10-13-change-files-refresh-sync task-02 /
+ * D-004@v1）：15s TTL——覆盖前端 TanStack Query 窗口聚焦自动 refetch 窗口，
+ * 同 (workspaceId, change) 距上次同步结束 15s 内直接回 skipped 不起 CLI；Map
+ * 硬帽 1000 条防异常膨胀（惰性清理过期项 + 超帽淘汰最旧，R-06）。
+ */
+const SILLYSPEC_SYNC_CHANGE_DEBOUNCE_MS = 15_000;
+const SILLYSPEC_SYNC_CHANGE_MAP_MAX = 1000;
 
 // ── Daemon class（核心）──────────────────────────────────────────────────────
 
@@ -1946,6 +1969,19 @@ export class Daemon {
   // ── 2026-09-07-agent-liveness-states task-06：liveness 接线状态 ──
   /** spawn 记录（自发现数据源①）：sessionId → provider/cwd（_startInteractiveSession 填）。 */
   private readonly _livenessSpawnRecords = new Map<string, { provider: string; cwd: string }>();
+
+  /**
+   * sillyspec.sync_change 防抖状态（2026-10-13-change-files-refresh-sync task-02 /
+   * D-004@v1）：key=`${workspaceId}:${change}`。value.inFlight=true 表示该 key 的
+   * CLI 串行执行在跑（重复请求回 in_flight 秒回）；false 携带完成时刻 ts（15s
+   * TTL 内回 debounced 秒回）。进程内存态不落盘——daemon 重启清零属可接受
+   * （首次刷新重新同步一次）。设计文档写「模块级 Map」，实现取实例字段：
+   * 语义等效（daemon 单实例）且测试可多实例隔离，偏差已记录。
+   */
+  private readonly _syncChangeDebounce = new Map<
+    string,
+    { inFlight: true } | { inFlight: false; ts: number }
+  >();
   /** liveness tailer（10s tick；独立 try 包裹，R-02 崩溃不影响主循环）。 */
   private _livenessTailer: LivenessTailer | null = null;
   /** logPath → 推送元数据（serverUrl/token 分组 + create 元信息 + D-012 覆盖键）。 */
@@ -7193,6 +7229,83 @@ export class Daemon {
         typeof params.workspace_id === 'string' ? params.workspace_id : '';
       return this._sillyspecManager.auditTable(change, workspaceId);
     });
+    // 2026-10-13-change-files-refresh-sync task-02（D-001/D-002@v1）：定向上行
+    // 同步——backend GET files 刷新前置触发，串行 platform sync --change（落
+    // 镜像，文件树变新鲜）→ platform sync-docs --change（四件套全文进 DB）。
+    // 结构化回执直接 resolve（ok/skipped 形态，manager 恒不 reject）；参数守卫
+    // 在本入口（SAFE_CHANGE_NAME_RE 与墓碑收敛双端对齐 + workspace_id UUID
+    // 形态守卫），防抖在 _runSyncChangeWithDebounce（15s TTL + in-flight 去重）。
+    ws.registerRpcHandler('sillyspec_sync_change', async (params) => {
+      const change = typeof params.change === 'string' ? params.change : '';
+      const workspaceId =
+        typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      if (SAFE_CHANGE_NAME_RE.test(change) === false) {
+        throw new RpcError(
+          'invalid_params',
+          `非法 change 名（白名单拦截，拒路径穿越形态）：${change.slice(0, 48)}`,
+        );
+      }
+      if (!isWorkspaceIdShape(workspaceId)) {
+        throw new RpcError('invalid_params', 'workspace_id 必须为合法 UUID 形态');
+      }
+      return this._runSyncChangeWithDebounce(change, workspaceId);
+    });
+  }
+
+  /**
+   * sillyspec_sync_change 防抖包装（2026-10-13-change-files-refresh-sync task-02 /
+   * D-004@v1 / R-05/R-06）：in-flight 标记以执行器 Promise 生命周期为界——CLI
+   * 结束（无论成败）才落 done 时间戳，覆盖「backend RPC 已 15s 超时降级但
+   * CLI 仍在跑」的窗口错位（期间重复请求回 in_flight 秒回不重入）；done 态
+   * 15s TTL 内回 debounced 秒回。Map 惰性清理过期 done 项 + 1000 条硬帽
+   * （超帽先清过期、再淘汰最旧 done；in-flight 项不淘汰防并发去重失效）。
+   */
+  private async _runSyncChangeWithDebounce(
+    change: string,
+    workspaceId: string,
+  ): Promise<SillySpecSyncChangeResult> {
+    const key = `${workspaceId}:${change}`;
+    const prev = this._syncChangeDebounce.get(key);
+    if (prev) {
+      if (prev.inFlight) {
+        this._logger.info('sillyspec_sync_change_debounce', {
+          change,
+          workspace_id: workspaceId,
+          skipped: 'in_flight',
+        });
+        return { skipped: 'in_flight' };
+      }
+      if (Date.now() - prev.ts < SILLYSPEC_SYNC_CHANGE_DEBOUNCE_MS) {
+        this._logger.info('sillyspec_sync_change_debounce', {
+          change,
+          workspace_id: workspaceId,
+          skipped: 'debounced',
+        });
+        return { skipped: 'debounced', last_sync_at: prev.ts };
+      }
+    }
+    if (this._syncChangeDebounce.size >= SILLYSPEC_SYNC_CHANGE_MAP_MAX) {
+      const now = Date.now();
+      for (const [k, v] of this._syncChangeDebounce) {
+        if (this._syncChangeDebounce.size < SILLYSPEC_SYNC_CHANGE_MAP_MAX) break;
+        if (!v.inFlight && now - v.ts >= SILLYSPEC_SYNC_CHANGE_DEBOUNCE_MS) {
+          this._syncChangeDebounce.delete(k);
+        }
+      }
+      while (this._syncChangeDebounce.size >= SILLYSPEC_SYNC_CHANGE_MAP_MAX) {
+        const oldest = this._syncChangeDebounce.keys().next().value;
+        if (oldest === undefined) break;
+        const oldestEntry = this._syncChangeDebounce.get(oldest);
+        if (oldestEntry?.inFlight) break;
+        this._syncChangeDebounce.delete(oldest);
+      }
+    }
+    this._syncChangeDebounce.set(key, { inFlight: true });
+    try {
+      return await this._sillyspecManager.runSyncChange(change, workspaceId);
+    } finally {
+      this._syncChangeDebounce.set(key, { inFlight: false, ts: Date.now() });
+    }
   }
 
   /**

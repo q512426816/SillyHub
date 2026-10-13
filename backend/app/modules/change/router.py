@@ -24,7 +24,7 @@ from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
 from app.modules.change.assets import ChangeAssetsQueryService
-from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
 from app.modules.change.quicklog_service import QuicklogQueryService
 from app.modules.change.schema import (
     ApprovalRead,
@@ -100,6 +100,80 @@ def _get_user_role(user: User) -> str:
     if getattr(user, "is_platform_admin", False):
         return "admin"
     return "business_user"
+
+
+# GET files 刷新前置同步预算（2026-10-13-change-files-refresh-sync / D-002@v1）：
+# backend 等 daemon 串行两条 sillyspec CLI 的 RPC 硬预算；daemon 侧单条 CLI 120s
+# 超时、防抖 15s（窗口错位语义见 design R-05——超时后 CLI 后台跑完，下次刷新
+# 见新数据）。超预算/任何失败一律降级返回现有镜像数据（D-003@v1）。
+_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 15.0
+
+
+async def _sync_change_via_daemon(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change: Change,
+    user_id: uuid.UUID,
+) -> None:
+    """GET files 刷新前置：绑定 daemon 在线则触发其对此变更的定向上行同步。
+
+    2026-10-13-change-files-refresh-sync task-04（D-002/D-003@v1）。链路：
+    per-member binding 解析（未绑定 = 等效离线，不接入借用兜底——避免借他机
+    CLI 的副作用）→ daemon 在线判断 → ``send_rpc('sillyspec_sync_change')``
+    （daemon 串行 ``platform sync --change`` 落镜像 + ``platform sync-docs
+    --change`` 落 DB 四件套，15s 防抖防频繁刷新打爆 CLI）。降级铁律（D-003）：
+    未绑定 / 离线 / DaemonRpcTimeout / DaemonRpcRemoteError（含老 daemon 未注册
+    method 的 method not found）四路全部 log.info 后静默返回——本函数任何情况
+    不抛，GET files 永不因同步失败报错。
+    """
+    try:
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        from app.modules.workspace.member_runtimes.queries import (
+            query_daemon_online_by_id,
+        )
+        from app.modules.workspace.member_runtimes.resolver import (
+            MemberBindingResolver,
+        )
+
+        # 懒导入防循环依赖（对齐 daemon/router/machines.py 同款惯例）；
+        # resolve_member_binding_or_none：无绑定行 / 意外异常均回 None（不抛）。
+        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+            session, workspace_id, user_id
+        )
+        if binding is None or binding.daemon_id is None:
+            return
+        daemon_id = (
+            binding.daemon_id
+            if isinstance(binding.daemon_id, uuid.UUID)
+            else uuid.UUID(str(binding.daemon_id))
+        )
+        if await query_daemon_online_by_id(session, daemon_id, user_id) is None:
+            return
+
+        hub = get_daemon_ws_hub()
+        log.info(
+            "change.files_refresh_sync_triggered",
+            workspace_id=str(workspace_id),
+            change_id=str(change.id),
+            change_key=change.change_key,
+            daemon_id=str(daemon_id),
+        )
+        await hub.send_rpc(
+            daemon_id,
+            "sillyspec_sync_change",
+            {
+                "change": change.change_key,
+                "workspace_id": str(workspace_id),
+            },
+            timeout=_FILES_REFRESH_SYNC_RPC_TIMEOUT_S,
+        )
+    except Exception as exc:  # 降级收口：同步失败绝不阻断 GET（D-003@v1）
+        log.info(
+            "change.files_refresh_sync_skipped",
+            workspace_id=str(workspace_id),
+            change_id=str(change.id),
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
 
 async def _build_transition_response(
@@ -366,9 +440,18 @@ async def list_change_files(
     workspace_id: uuid.UUID,
     change_id: uuid.UUID,
     session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
 ) -> ChangeFileList:
+    """变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
+
+    2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
+    此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+    任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
+    ``service.list_files`` 纯读语义零改动。
+    """
     service = ChangeService(session)
+    change = await service.get(workspace_id, change_id)
+    await _sync_change_via_daemon(session, workspace_id, change, user.id)
     items = await service.list_files(workspace_id, change_id)
     return ChangeFileList(
         change_id=change_id,

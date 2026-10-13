@@ -1,0 +1,79 @@
+{
+  "change": "2026-10-13-change-files-refresh-sync",
+  "baseline": "9de370e4425f4d2c3307f625d1b126d2eeb4ce1b",
+  "head": "e5b5f85d8295b94698e1d66fc8976242b55ffc4b",
+  "files": [
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/tests/test_files_refresh_sync.py",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/sillyspec-sync-change-rpc.test.ts"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 906,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-13T05:36:28.082Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "9de370e4425f4d2c3307f625d1b126d2eeb4ce1b",
+    "totals": {
+      "files": 5,
+      "additions": 906,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/router.py",
+        "additions": 85,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "additions": 231,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 113,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 112,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-sync-change-rpc.test.ts",
+        "additions": 365,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "54c3072dab2a30d80922ad998f5bcb8e06f8d5ec0f9e151cbdb88c698a10a685",
+  "patchStatus": "ok"
+}

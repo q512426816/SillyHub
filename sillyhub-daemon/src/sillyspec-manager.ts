@@ -207,6 +207,30 @@ export interface SillySpecProgressOutcome {
 }
 
 /**
+ * 定向上行同步回执（2026-10-13-change-files-refresh-sync task-01 / design
+ * 接口定义）：runSyncChange 的返回结构——RPC 同步回执通道的契约面，
+ * backend `_sync_change_via_daemon` 仅 log 消费（skipped/ok 均放行降级语义）。
+ * cli 失败时 stderr_tail 取输出尾段（截断），failed_cmd 指向先失败的哪条；
+ * skipped 两形态由 daemon.ts 防抖层（task-02）产出，manager 恒产 ok/失败形态。
+ */
+export interface SillySpecSyncChangeAction {
+  cmd: 'sync' | 'sync-docs';
+  code: number | null;
+  ms: number;
+}
+
+export type SillySpecSyncChangeResult =
+  | { ok: true; actions: SillySpecSyncChangeAction[] }
+  | {
+      ok: false;
+      reason: 'no_workspace_root' | 'cli_failed';
+      failed_cmd?: string;
+      stderr_tail?: string;
+    }
+  | { skipped: 'debounced'; last_sync_at: number }
+  | { skipped: 'in_flight' };
+
+/**
  * 心跳 sillyspec_status 摘要（design §4 数据契约，backend 契约锚 task-01
  * DaemonHeartbeatSillySpecStatus）。envelope 的 readable/command 字段容忍但不透传。
  */
@@ -1193,6 +1217,94 @@ export class SillySpecManager {
     } catch (e) {
       this._recordCommandExecutorError('ghost_cleanup', identify, e);
     }
+  }
+
+  /**
+   * 定向上行同步（2026-10-13-change-files-refresh-sync task-01 / D-001@v1）：
+   * 串行 `platform sync --change <名>`（spec 树增量 → apply_ops 落平台镜像，
+   * 文件树变新鲜）→ `platform sync-docs --change <名>`（四件套全文 upsert 进
+   * DB documents 列）。与 runResolve 族（fire-and-forget 结果槽 + 心跳回传）
+   * 的关键差异：本方法是 **RPC 同步回执通道**的执行器——结构化结果直接 return
+   * 给 daemon.ts 的 sillyspec.sync_change handler（daemon:rpc_result envelope
+   * 回传 backend），**不写结果槽不进心跳**。根解析与 runResolve 同源
+   * （_resolveWorkspaceRoot：带 workspaceId 查映射不回退单槽位）；CLI 执行复用
+   * _execSillySpecCli（node <bin> 数组形参 + windowsHide + 超时杀进程）；change
+   * 白名单守卫归 daemon.ts 入口（SAFE_CHANGE_NAME_RE 双端对齐，同 runResolve
+   * 分工），CLI 侧 assertSafeChangeName 兜底。
+   */
+  async runSyncChange(
+    change: string,
+    workspaceId?: string,
+  ): Promise<SillySpecSyncChangeResult> {
+    const cwd = this._resolveWorkspaceRoot(workspaceId);
+    if (!cwd) {
+      this._log('info', 'sillyspec_sync_change_skipped', {
+        change,
+        workspace_id: workspaceId ?? null,
+        reason: 'no_workspace_root',
+      });
+      return { ok: false, reason: 'no_workspace_root' };
+    }
+    const bin = this._resolveSillySpecBin();
+    if (bin === null) {
+      this._log('warn', 'sillyspec_sync_change_failed', {
+        change,
+        workspace_id: workspaceId ?? null,
+        reason: 'cli_missing',
+      });
+      return {
+        ok: false,
+        reason: 'cli_failed',
+        stderr_tail: '未找到 sillyspec CLI（bin 解析失败），请先安装 sillyspec',
+      };
+    }
+    this._log('info', 'sillyspec_sync_change_started', {
+      change,
+      workspace_id: workspaceId ?? null,
+      cwd,
+    });
+    const actions: SillySpecSyncChangeAction[] = [];
+    const commands: Array<{ cmd: 'sync' | 'sync-docs'; args: string[] }> = [
+      { cmd: 'sync', args: ['platform', 'sync', '--change', change] },
+      { cmd: 'sync-docs', args: ['platform', 'sync-docs', '--change', change] },
+    ];
+    for (const c of commands) {
+      const startedAt = this._now();
+      const outcome = await this._execSillySpecCli(bin, c.args, cwd);
+      actions.push({ cmd: c.cmd, code: outcome.code, ms: this._now() - startedAt });
+      if (outcome.timedOut) {
+        return {
+          ok: false,
+          reason: 'cli_failed',
+          failed_cmd: c.cmd,
+          stderr_tail: `执行超时（${Math.round(this._commandTimeoutMs / 1000)}s）被终止`,
+        };
+      }
+      if (outcome.code === null) {
+        return {
+          ok: false,
+          reason: 'cli_failed',
+          failed_cmd: c.cmd,
+          stderr_tail: `进程启动失败（${outcome.errorCode ?? 'unknown'}）`,
+        };
+      }
+      if (outcome.code !== 0) {
+        // 错误横幅走 console.error（stderr），stdout 恒空时回退——两源取尾段
+        const tail = cliOutputSnippet(outcome.stderr ?? '') || cliOutputSnippet(outcome.stdout);
+        return {
+          ok: false,
+          reason: 'cli_failed',
+          failed_cmd: c.cmd,
+          stderr_tail: `exit ${outcome.code}${tail}`,
+        };
+      }
+    }
+    this._log('info', 'sillyspec_sync_change_done', {
+      change,
+      workspace_id: workspaceId ?? null,
+      actions,
+    });
+    return { ok: true, actions };
   }
 
   /**

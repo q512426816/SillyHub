@@ -258,3 +258,24 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 理由：引擎侧全链验收（配置注入→pi 连接→工具面可见→JSON-RPC 直调→HTTP 到达本地 backend 401 结构化错误）作为 FR-09 的交付证据；真实上传落文件中心列为 daemon 部署本变更构建后的线上复验项（凭证由 daemon 注入链自动携带，复验动作=平台 pi 会话内让 agent 调 upload_file）。
 故障面：引擎侧全链不含 backend 会话定位真实链（e2e 假凭证 401 即止）——生产真实上传的唯一未验证面，由线上复验项闭合
 退役判据：daemon 部署后线上复验通过（真实上传成功落文件中心），本裁决的复验项闭环
+
+## D-001@v1 daemon 上行同步执行「串行两条 CLI」（platform sync --change + platform sync-docs --change）
+状态：implemented
+变更：2026-10-13-change-files-refresh-sync
+锚点：未记录
+最近确认：76ea8a958
+理由：串行两条：先 `sillyspec platform sync --change X`（spec 树增量 → apply_ops 落平台镜像目录 + 进度六表，文件树变新鲜）再 `sillyspec platform sync-docs --change X`（四件套全文 upsert 进 DB documents 列）。字面与目标双覆盖；无差异时两条均秒级短路。
+
+## D-002@v1 触发机制采用「GET 内同步 RPC」（send_rpc 阻塞等 daemon 跑完再返回）
+状态：implemented
+变更：2026-10-13-change-files-refresh-sync
+锚点：未记录
+最近确认：76ea8a958
+理由：GET files 端点内经 DaemonWsHub.send_rpc(daemon_id, 'sillyspec_sync_change', {change, workspace_id}, timeout=15) 同步等 daemon 串行跑完两条 CLI 后再 list_files 返回。刷新一次即最新数据；改动面 backend+daemon 两端，前端零改动。
+
+## D-004@v1 daemon 侧防抖——15s TTL + in-flight 去重（模块级内存 Map）
+状态：implemented
+变更：2026-10-13-change-files-refresh-sync
+锚点：未记录
+最近确认：76ea8a958
+理由：daemon handler 内模块级 Map<workspaceId:change, 时间戳>：15s 内已同步过返回 {skipped:'debounced'} 秒回；同 key 在跑返回 {skipped:'in_flight'}。单机内存态不落盘——daemon 重启清零属可接受（首次刷新重新同步一次）。

@@ -379,3 +379,17 @@ supersedes：D-005@v1
 理由：方案 A（用户 AskUserQuestion 确认）。CLI 每次 POST /api/agent-logs 上报后，backend 异步经现有 WS RPC 通道让 daemon 解析本次涉及 entry 的日志用量并落库。理由：触发高频自然（CLI 每条命令都上报）、复用回放已有的解析器与 RPC 通道、改动集中 backend；daemon 离线仅暂缓（下次上报全量解析幂等补齐）。否决 B（两端改动 + 持续解析开销与观看需求无关）与 C（列表页批量 RPC 爆炸、离线空数据，不可行）。
 故障面：后台摄取任务可能因 daemon 离线/超时长期空转记日志（无失败放大，快照滞后）；上报高峰期重复解析受节流钳制但仍有 RPC 开销
 退役判据：若后续 daemon 原生周期推送用量（方案 B 复潮条件：多机环境下报频率不足、新鲜度成为实际痛点），本摄取链路可整体下线，落库快照消费端（聚合/展示）不变
+
+## D-001@v1 daemon 上行同步执行「串行两条 CLI」（platform sync --change + platform sync-docs --change）
+状态：implemented
+变更：2026-10-13-change-files-refresh-sync
+锚点：未记录
+最近确认：76ea8a958
+理由：串行两条：先 `sillyspec platform sync --change X`（spec 树增量 → apply_ops 落平台镜像目录 + 进度六表，文件树变新鲜）再 `sillyspec platform sync-docs --change X`（四件套全文 upsert 进 DB documents 列）。字面与目标双覆盖；无差异时两条均秒级短路。
+
+## D-002@v1 触发机制采用「GET 内同步 RPC」（send_rpc 阻塞等 daemon 跑完再返回）
+状态：implemented
+变更：2026-10-13-change-files-refresh-sync
+锚点：未记录
+最近确认：76ea8a958
+理由：GET files 端点内经 DaemonWsHub.send_rpc(daemon_id, 'sillyspec_sync_change', {change, workspace_id}, timeout=15) 同步等 daemon 串行跑完两条 CLI 后再 list_files 返回。刷新一次即最新数据；改动面 backend+daemon 两端，前端零改动。

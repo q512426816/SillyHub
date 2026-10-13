@@ -1,0 +1,44 @@
+{"ts":1791872676114,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/structured-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872682971,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/change-file-tree.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872689971,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：vdone-tmp.log——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872710222,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/previewers/markdown-previewer.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872723700,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/previewers/patch-previewer.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872757281,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/__tests__/structured-views.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872831550,"kind":"commit","stage":null,"detail":"47c3f98d0","provisional":true}
+{"ts":1791872874839,"kind":"gate-run","stage":"verify","detail":"门实测 failed（178.4s） · 20261013062752","provisional":true}
+{"ts":1791872884927,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791872895317,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/__tests__/markdown-previewer.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872939158,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/__tests__/patch-previewer.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791872989374,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/__tests__/change-file-tree.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873125333,"kind":"gate-run","stage":"verify","detail":"门实测 failed（181.5s） · 20261013063203","provisional":true}
+{"ts":1791873135617,"kind":"commit","stage":null,"detail":"cb4ad2c83","provisional":true}
+{"ts":1791873135617,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791873176791,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873180329,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/turn-nav-list.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873223823,"kind":"commit","stage":null,"detail":"df580490c","provisional":true}
+{"ts":1791873347437,"kind":"commit","stage":null,"detail":"f2aa4729f","provisional":true}
+{"ts":1791873350895,"kind":"gate-run","stage":"verify","detail":"门实测 failed（189.1s） · 20261013063550","provisional":true}
+{"ts":1791873361180,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791873371986,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：vstep6-tmp.log——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873559803,"kind":"commit","stage":null,"detail":"79968f77e","provisional":true}
+{"ts":1791873559803,"kind":"gate-run","stage":"verify","detail":"门实测 failed（179.6s） · 20261013063916","provisional":true}
+{"ts":1791873566967,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791873708290,"kind":"commit","stage":null,"detail":"0fd0dfb4d","provisional":true}
+{"ts":1791873715589,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/sessions-portal.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873802341,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：vstep6b-tmp.log——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873812643,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/turn-nav-list.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873816148,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873826259,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/structured-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873909738,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/files/__tests__/structured-views.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791873944956,"kind":"commit","stage":null,"detail":"af8b1cf8f","provisional":true}
+{"ts":1791873962665,"kind":"commit","stage":null,"detail":"ca86e918a","provisional":true}
+{"ts":1791873966210,"kind":"gate-run","stage":"verify","detail":"门实测 passed（159.1s） · 20261013064605","provisional":true}
+{"ts":1791873976392,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791874010558,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791874034413,"kind":"commit","stage":null,"detail":"eb393c41d","provisional":true}
+{"ts":1791874354294,"kind":"commit","stage":null,"detail":"b6df42cbc","provisional":true}
+{"ts":1791874355090,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/sessions/__tests__/sessions-portal.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791874463783,"kind":"commit","stage":null,"detail":"76ea8a958","provisional":true}
+{"ts":1791874471476,"kind":"gate-run","stage":"verify","detail":"门实测 passed（425.2s） · 20261013065430","provisional":true}
+{"ts":1791874690173,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：arch-tmp.log——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791874952857,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
