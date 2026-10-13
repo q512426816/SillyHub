@@ -141,6 +141,9 @@ function makeFakeManager(controls: FakeManagerControls) {
     // ql-20260902-003：WS 手动指令改走版本门前置入口。
     requestManualUpgrade: vi.fn(async () => undefined),
     checkAndUpgrade: vi.fn(async () => undefined),
+    // 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探入口
+    //（心跳每拍触发；旧形态缺该方法的守卫用例在 describe 内 delete 模拟）。
+    retryProbeLocalIfUnknown: vi.fn(async () => undefined),
     getStatusSnapshot: vi.fn(() =>
       controls.statusSnapshot === undefined ? undefined : controls.statusSnapshot,
     ),
@@ -545,6 +548,39 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
     expect(call.length).toBe(11); // task-02 machine-id 尾参（machineId undefined 占位）使平铺形态 10→11
     expect(call[3]).toBeUndefined();
     expect(call[4]).toBeUndefined();
+  });
+
+  // ── 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探接线 ──
+
+  it('version 未知 → 心跳触发限频重探（void 不阻塞心跳发送）', async () => {
+    const h = makeHeartbeatHarness({
+      snapshot: { version: null, latest_version: null },
+      probeLocalResult: null,
+      probeLatestResult: null,
+    });
+    // 探测替换为永不 resolve 的 pending——心跳仍须完成（fire-and-forget 铁证：
+    // 若实现误 await，本断言超时失败）。
+    (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown = vi.fn(
+      () => new Promise<void>(() => {}),
+    );
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+    expect(
+      (h.manager as { retryProbeLocalIfUnknown: { mock: { calls: unknown[] } } })
+        .retryProbeLocalIfUnknown.mock.calls,
+    ).toHaveLength(1);
+  });
+
+  it('旧假 manager 缺 retryProbeLocalIfUnknown → 心跳不崩按旧语义组包（duck-type 守卫）', async () => {
+    const h = makeHeartbeatHarness({
+      snapshot: { version: null, latest_version: null },
+      probeLocalResult: null,
+      probeLatestResult: null,
+    });
+    delete (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown;
+    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+    const call = h.heartbeatMock.mock.calls[0]!;
+    expect(call[4]).toBeUndefined(); // 三键全无 → 第 5 参 undefined（旧语义不变）
   });
 });
 
