@@ -114,6 +114,14 @@ export const SILLYSPEC_DEFERRED_RECHECK_MS = 30_000;
 /** 终态（success/failed）展示窗口（10 分钟后回 idle，design F14）。 */
 export const SILLYSPEC_TERMINAL_WINDOW_MS = 10 * 60 * 1000;
 
+/**
+ * version 未知时限频重探间隔（2 分钟，2026-10-13-sillyspec-version-probe-fast-retry）：
+ * 注册期 probeLocal 瞬态失败（冷启动慢超时等）后不再等第四循环（默认 1h 先睡后查），
+ * 心跳每拍触发 retryProbeLocalIfUnknown 按此间隔重探——假「未安装」存活期压到
+ * 2 分钟 + 至多一个心跳间隔。
+ */
+export const SILLYSPEC_VERSION_RETRY_MS = 120_000;
+
 /** failed 态 error 摘要截断上限（字符，design 接口定义）。 */
 const SILLYSPEC_ERROR_MAX_CHARS = 200;
 
@@ -558,6 +566,11 @@ export interface SillySpecManagerDeps {
   /** 终态展示窗口（毫秒），默认 {@link SILLYSPEC_TERMINAL_WINDOW_MS}。 */
   terminalWindowMs?: number;
   /**
+   * version 未知时限频重探间隔（毫秒，2026-10-13-sillyspec-version-probe-fast-retry）：
+   * 默认 {@link SILLYSPEC_VERSION_RETRY_MS}；测试注入调小。
+   */
+  versionRetryMs?: number;
+  /**
    * 2026-09-02-changes-overview-card task-02（FR-02/NFR-02）：progress 采集执行器
    * （execFile 数组形参，file=node、args[0]=sillyspec bin JS）。默认真实 execFile；
    * 测试注入假实现避免真实 spawn。
@@ -624,9 +637,16 @@ export class SillySpecManager {
   private readonly _latestCacheTtlMs: number;
   private readonly _deferredRecheckMs: number;
   private readonly _terminalWindowMs: number;
+  private readonly _versionRetryMs: number;
 
   /** 最近一次本机探测结果（null=未安装/未知）。 */
   private _version: string | null = null;
+  /**
+   * 最近一次 probeLocal 尝试时刻（毫秒 epoch，2026-10-13-sillyspec-version-probe-fast-retry）：
+   * 所有探测路径（注册期/手动升级/第四循环/限频重探）统一在 probeLocal 入口记账，
+   * retryProbeLocalIfUnknown 的限频窗口以最近一次尝试为基准；null=从未尝试。
+   */
+  private _versionLastAttemptAt: number | null = null;
   /** latest 成功探测缓存（失败不缓存，TTL 过期即重探）。 */
   private _latestCache: { value: string; at: number } | null = null;
   /** 升级状态；null=idle。 */
@@ -716,6 +736,13 @@ export class SillySpecManager {
     this._latestCacheTtlMs = deps.latestCacheTtlMs ?? SILLYSPEC_LATEST_CACHE_TTL_MS;
     this._deferredRecheckMs = deps.deferredRecheckMs ?? SILLYSPEC_DEFERRED_RECHECK_MS;
     this._terminalWindowMs = deps.terminalWindowMs ?? SILLYSPEC_TERMINAL_WINDOW_MS;
+    // 对齐 commandTimeoutMs 惯例：undefined/非有限/<=0 一律回退默认。
+    this._versionRetryMs =
+      typeof deps.versionRetryMs === 'number' &&
+      Number.isFinite(deps.versionRetryMs) &&
+      deps.versionRetryMs > 0
+        ? deps.versionRetryMs
+        : SILLYSPEC_VERSION_RETRY_MS;
     this._runProgressJson = deps.runProgressJson ?? runProgressJsonDefault;
     this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
     this._statusCwd = deps.statusCwd ?? (() => null);
@@ -739,6 +766,9 @@ export class SillySpecManager {
    * null 且缓存置 null（未安装语义）。
    */
   async probeLocal(): Promise<string | null> {
+    // 2026-10-13-sillyspec-version-probe-fast-retry：所有探测路径统一在入口记
+    // 尝试时刻——重探限频窗口以最近一次尝试为基准（探测本身失败也重计时）。
+    this._versionLastAttemptAt = this._now();
     const out = await this._runCommand('sillyspec --version');
     // trim/空串归一在 manager 侧兜底（默认 runCmd 已做，注入 runner 时契约不变）。
     const version = out !== null ? out.trim() : null;
@@ -747,6 +777,24 @@ export class SillySpecManager {
       this._log('warn', 'sillyspec_local_probe_failed');
     }
     return this._version;
+  }
+
+  /**
+   * version 未知时限频重探（2026-10-13-sillyspec-version-probe-fast-retry，心跳
+   * 每拍触发）：version 非 null 纯 no-op；null 且距上次 probeLocal 尝试 ≥
+   * versionRetryMs 才真正重探（注册期瞬态失败 2 分钟自愈，不再等 1h 第四循环）；
+   * 窗口内跳过。全路径自收敛不 reject（requestUpgrade 同款取舍——探测执行异常
+   * 仅 warn，留给下一窗口重试）。
+   */
+  async retryProbeLocalIfUnknown(): Promise<void> {
+    if (this._version !== null) return;
+    const last = this._versionLastAttemptAt;
+    if (last !== null && this._now() - last < this._versionRetryMs) return;
+    try {
+      await this.probeLocal();
+    } catch (e) {
+      this._log('warn', 'sillyspec_version_retry_error', { error: fmtErrorSnippet(e) });
+    }
   }
 
   /**
