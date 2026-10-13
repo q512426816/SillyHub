@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-agent-task-stuck-running",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-agent-task-stuck-running:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/claude-events.test.ts「Task/Agent tool_use 派生 agent_task_status 必带 tool_use_id」",
+        "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task_notification 别名条目补发终态/静默注销/三无 WARN 日志」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-agent-task-stuck-running"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-agent-task-stuck-running:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/task-line-assembler.test.ts「[TASK_*] parent 未命中按 task_id 兜底反查（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-agent-task-stuck-running"
+    }
+  ]
+}

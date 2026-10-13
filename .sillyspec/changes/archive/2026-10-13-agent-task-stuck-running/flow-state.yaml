@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默丢弃(background-tasks.ts 无处可归跳过),前端时间线装配对 run_id
+  错位的完成通知行整行丢弃(session-log-assembler.ts),状态卡死无法自愈。
+
+  成功标准:
+
+  - daemon 侧 task_notification 到达但内存注册表无对应条目时,不再静默丢弃:尽力归属到会话并照常上报终态事件,有日志可查
+
+  - 前端时间线装配对找不到父段的 [TASK_NOTIFICATION] 终态行,按 task_id 兜底匹配既有子代理段吸收终态,派发段不再永久转圈
+
+  - 为上述两处修复补回归测试,daemon 与 frontend 现有相关测试不回归
+autopilot: false
+baseline_commit: 3eac3e09d0bb502518e6e08960c5c6cdb06b4bec
+updatedAt: '2026-10-13T01:32:28.298Z'
+baseline_sha256: 3719f8c653fac480a3f229e5f437374a4bcb80e931b90ffaf66733637ee9fd47
+spec_approved: true
+spec_approved_at: '2026-10-13T01:11:41.674Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx6)+fr(3)（2.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013012332\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013012332\test-result.json｜门文件
+  9 个
+

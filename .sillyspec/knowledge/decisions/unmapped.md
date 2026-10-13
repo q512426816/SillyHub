@@ -2630,3 +2630,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
 理由：最大风险：把"interactive + run.change_id 非空"原本唯一指代的 stage 派发会话误改成 active——已排除：stage 派发会话在 create.py:291 写 session 级 change_id，新锚下仍命中单轮收口（FR-02 场景锁定）；线上验证存在 session.change_id 非空的存量 stage 会话。放弃方案：①按 session_kind/origin=='chat' 判定——线上实证 stage 会话 kind/origin 同为 'chat'（见排查记录），不可区分，弃；②扩展 D-006 豁免表到 completed——治标不治本（completed 本不该进豁免判断），且会误保活真单轮任务，弃；③daemon 侧不给聊天轮打 change_id 锚——归因功能是 2026-10-12 刚上的产品能力，回退损失审计面，弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-agent-task-stuck-running
+锚点：未记录
+最近确认：4cc145d9dd4e9cebe7d743be0cb5d4c7ec5cf10e
+理由：最大风险：前端 task_id 兜底把行吸收到**非派发段**（taskTaskId 撞车）。task_id 由 SDK harness 全局唯一生成（call id 亦然），且反查域限于单轮树，实际撞车概率趋零；即便撞车，后果仅是段元数据被终态覆盖（展示层），无数据损坏。 试过但放弃的方案：① backend 读侧把同名组 running 行也参与终态收敛——被 D-009@v1 裁决否决（同名多 running 是合法重试在途实例，会误杀），不动；② daemon 三无场景强行落行/emit——无 runId 载体（`onTurnMessage`/`_emitSessionEvent` 均必填 runId），强行造 run id 会产生脏轮，降级为 WARN 日志；③ 前端 upsertTurn 层按 task_id 跨轮路由——需在轮路由层解析行 content JSON（越层），且 2026-09-15 已有 parent_tool_use_id 跨轮路由覆盖「行落错轮」主场景，收益边际小、风险面大，不做；④ 修存量脏数据（迁移/清洗脚本）——项目未正式上线允许重置数据，且存量行经既有清扫（run 收口 60s / 启动清扫）→ stopped → 读侧去重收敛闭环，无需脚本。

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-agent-task-stuck-running",
+  "reviewer": "inline-self（子代理通道用量限额不可用[1308 5h 上限，12:02 重置]，主会话按任务书降级条款代行自审）",
+  "verdict": "PASS",
+  "reviewedAgainst": "0bdf89c9040ff7158bb56931f0d243a251fd97ef",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结面混入他侧未认领提交的 docs 文件",
+      "evidence": "并行会话 09:18 提交 1a7e9abd7（docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md，+71 行工具缺陷记录）落在本变更冻结窗口 baseline..HEAD 内，提交消息不含任何活跃变更名 token 无法被 foreign 认领，被扫入 change.patch（8 文件中 1 文件非本变更交付）。纯文档零代码影响，CLI 已并入 scopeAudit 对账面，不构成数据正确性风险。",
+      "location": "change.patch:1-77（docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md）"
+    },
+    {
+      "severity": "P3",
+      "title": "注册表条目无 runId 且终态时无 currentRunId 的窄边下别名补发不可达",
+      "evidence": "别名条目若在注册时无 currentRunId（handleAgentTaskStatusEvent 极端时序分支，注册无 runId）且终态到达时 currentRunId 已清，runId 兜底链全空 → 三无 WARN return 先于别名补发；且 WARN 仅记主 taskId 不列已注销的别名。概率极窄（daemon 重启场景注册表整体清空不触发此边），且有 WARN 可查，不影响 FR-01 主路径兑现。",
+      "location": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts:263-276"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——别名补发块置于唤醒门槛 return 之前（补发不被短任务门槛短路，patch 实证）；终态覆盖 running 沿用「到达顺序即权威」既有语义；迟到 task_started 走懒注册，终态已发由 backend 终态吸收 + 前端终态忽略迟到 running 双端兜住。边界已裁决：可接受",
+    "并发": "ok——别名扫描与注销在同一同步块内完成（先收集后逐个 delete，Map 迭代中删除为 JS 定义行为），无 await 夹杂；backend 写侧并发由既有唯一约束兜底，本变更未触碰。边界已裁决：可接受",
+    "切换": "ok——daemon 重启后注册表整体清空且 SDK 子进程消亡，别名扫描不会误触发；会话 end 走 clearBackgroundTasks 全量清理先于迟到扫描；重启窗口孤儿终态降级 WARN 可查。边界已裁决：可接受",
+    "作用域": "ok——findToolByTaskId 仅在单轮 segments 树内 DFS（调用点传 turn.segments），不跨轮不跨会话；别名扫描以会话级注册表 Map 为界。声明边界裁决：task_id 撞车风险趋零且后果仅展示层元数据覆盖——可接受"
+  },
+  "declaredBoundariesVerdict": [
+    "主条目存在时别名仅静默注销不补发——可接受：backend 幽灵收口（修复①后事件携带 tool_use_id 生效）已管冒名行归并，补发只产生重复行；测试用例 2 断言单条终态",
+    "三无孤儿终态只 WARN 不落行不 emit——可接受：无 runId 载体，伪造 run id 产生脏轮；WARN 满足可排查性；测试用例 3 断言零 emit 零落行",
+    "backend 清扫维持只写 stopped 不动——可接受：无完成证据不得标 completed，保守语义正确",
+    "存量脏数据不写清洗脚本——可接受：未上线（除 PPM）数据可重置，清扫→stopped→读侧去重闭环已实证收敛生产 21 组成对行",
+    "upsertTurn 层不做按 task_id 跨轮路由——可接受：2026-09-15 parent_tool_use_id 跨轮路由已覆盖「行落错轮」主场景，轮路由层解析 content JSON 属越层"
+  ],
+  "protectionClaimsVerified": "FR 正文中引用的既有防护真实存在：backend 终态吸收（agent_task_store.py upsert_agent_task 语义②，行已定格再收 running 整行跳过）；前端任务卡终态忽略迟到 running（agent-task-store.ts applyAgentTaskStatusEvent 终态行吸收）。两处均为 2026-10 前存量代码，本变更未削弱。",
+  "generatedArtifactsSync": "无 OpenAPI/DTO/生成类型变化——AgentEvent metadata 为 daemon 内部类型不经 API schema；change.patch 不含任何 api-types.ts / openapi.json 改动，与 design「gen:types 不需要跑」声明一致。daemon tsc --noEmit 与 frontend tsc --noEmit 均零错误。",
+  "frImplementationTestTriangulation": "FR-01：claude-events.ts 派生信号补 tool_use_id（patch:365-384）+ 三处消费面（toolUseId 捕获/行 parent 挂靠/backend 收口前提）+ claude-events.test.ts 新用例断言精确 metadata + task-lifecycle.test.ts 三用例（别名补发行 parent=toolu_T/静默注销单行/三无 WARN 零 emit）逐一对齐 FR 场景。FR-02：session-log-assembler.ts 三处契约字段 + findToolByTaskId + 两级路由（patch:190-360）+ task-line-assembler.test.ts 四用例（错位吸收/缺 parent 吸收/无命中维持丢弃/嵌套不误伤）。FR-03：daemon tests/interactive 1113 passed + frontend src/components/daemon 1177 passed + 双端 tsc 零错误（回执在 task-04 提交消息）。三方一致。",
+  "reviewedAt": "2026-10-13T09:35:00+08:00"
+}

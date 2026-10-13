@@ -30,3 +30,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
 - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
 - 2026-10-13-multiturn-changeid-misjudge | 动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.c
+- 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默

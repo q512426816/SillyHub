@@ -64,3 +64,4 @@
 - change 2026-09-02-changes-overview-card | 工作台活跃变更总览卡片：changes-overview-card.tsx（健康条/变更行管线/ghost 折叠/冲突区/过滤/null 占位与过期态/超限降级）+ /workspaces/[id] SectionCard 网格挂载 + 变更中心引导；类型链走 gen:types（api-types 含 MachineSillySpecStatusRead）。卡片+页面 23 绿 tsc 0。
 - change 2026-09-25-change-precipitated-assets | 变更详情「沉淀资产」折叠卡：NEW change-assets-card.tsx（ChangeEventsCard 同款范式——useQuery 自取数/retry:false/失败静默 null；四组逐组有数据才渲染：FR 索引/决策蒸馏行可点击跳知识库页（?file= 前向参数）、测试绑定行、patch+delta 归档留档；在途变更引导空态）+ lib/changes.ts getChangeAssets 客户端 + [cid]/page.tsx aside 尾挂载。组件 5 用例全绿 tsc 0。
 - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+- 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默

@@ -1,0 +1,35 @@
+{"ts":1791853872954,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791853886507,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791853895992,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791853909517,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：illyhub-daemon/src/interactive/claude-events.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791853946454,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/src/interactive/session-manager/background-tasks.ts.tmp.26348.d22e3384194c——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854056683,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/interactive/claude-events.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854086526,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/interactive/task-lifecycle.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854136038,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854159232,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/tests/test_apply_session_terminal_status.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854189121,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854199059,"kind":"commit","stage":null,"detail":"1c0d106a4","provisional":true}
+{"ts":1791854207030,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791854207335,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791854209170,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791854209170,"kind":"task-done","stage":"tasks","detail":"checked 0→2","provisional":true}
+{"ts":1791854219703,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/app/modules/daemon/session/service/helpers.py、backend/app/modules/daemon/tests/test_apply_session_terminal_status.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854318708,"kind":"commit","stage":null,"detail":"1a7e9abd7","provisional":true}
+{"ts":1791854359832,"kind":"commit","stage":null,"detail":"2fe772561","provisional":true}
+{"ts":1791854360180,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/task-line-assembler.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854400520,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-13-multiturn-changeid-misjudge/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791854446777,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791854455855,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791854456805,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791854456805,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791854456805,"kind":"commit","stage":null,"detail":"ea3f5a77f","provisional":true}
+{"ts":1791854567291,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791854568448,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791854568448,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1791854572082,"kind":"commit","stage":null,"detail":"0bdf89c90","provisional":true}
+{"ts":1791854592073,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791854602248,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791854612370,"kind":"gate-run","stage":"verify","detail":"门实测 passed（2.6s） · 20261013012332","provisional":true}
+{"ts":1791854893942,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791854897491,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791854897491,"kind":"commit","stage":null,"detail":"4cc145d9d","provisional":true}

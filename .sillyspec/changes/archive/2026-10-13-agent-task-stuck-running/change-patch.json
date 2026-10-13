@@ -1,0 +1,151 @@
+{
+  "change": "2026-10-13-agent-task-stuck-running",
+  "baseline": "3eac3e09d0bb502518e6e08960c5c6cdb06b4bec",
+  "head": "0bdf89c9040ff7158bb56931f0d243a251fd97ef",
+  "files": [
+    "docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md",
+    "frontend/src/components/daemon/__tests__/task-line-assembler.test.ts",
+    "frontend/src/components/daemon/session-log-assembler.ts",
+    "sillyhub-daemon/src/interactive/claude-events.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json",
+    "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 406,
+    "deletions": 21
+  },
+  "savedAt": "2026-10-13T01:23:40.838Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3eac3e09d0bb502518e6e08960c5c6cdb06b4bec",
+    "totals": {
+      "files": 8,
+      "additions": 406,
+      "deletions": 21
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md",
+        "additions": 71,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/task-line-assembler.test.ts",
+        "additions": 84,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-log-assembler.ts",
+        "additions": 68,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/claude-events.ts",
+        "additions": 12,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 61,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/fixtures/claude-sdk-messages/golden-session.events.json",
+        "additions": 6,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/claude-events.test.ts",
+        "additions": 30,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 74,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7a1c9c9af55d3533a49022ad38eef385228eea7a64dd500422810b9a5851be9e",
+  "patchStatus": "ok"
+}

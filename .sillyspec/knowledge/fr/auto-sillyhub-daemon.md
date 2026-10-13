@@ -229,3 +229,48 @@ created_at: 2026-10-08T15:19:22.662Z
   confirmed_at: null
   source_change: 2026-10-12-borrow-ctx-truncate-rest
   status: active
+
+## FR-auto-sillyhub-daemon-034 daemon 侧 task_notification 到达但内存注册表无对应条目时,不再静默丢弃:尽力归属到会话并照常上报终态事件,有日志可查
+变更：2026-10-13-agent-task-stuck-running
+状态：active
+摘要：task_started 帧丢失、注册表仅剩 tool_use 派生的别名条目；三无孤儿终态（注册表缺失且无在跑 runId）
+全文：.sillyspec/changes/archive/2026-10-13-agent-task-stuck-running/requirements.md#FR-01
+最近确认：4cc145d9dd4e9cebe7d743be0cb5d4c7ec5cf10e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-agent-task-stuck-running:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts「Task/Agent tool_use 派生 agent_task_status 必带 tool_use_id」 | sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task_notification 别名条目补发终态/静默注销/三无 WARN 日志」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-agent-task-stuck-running
+  status: active
+
+## FR-auto-sillyhub-daemon-035 前端时间线装配对找不到父段的 [TASK_NOTIFICATION] 终态行,按 task_id 兜底匹配既有子代理段吸收终态,派发段不再永久转圈
+变更：2026-10-13-agent-task-stuck-running
+状态：active
+摘要：TASK_NOTIFICATION 行 parent 缺失/错位，派发段在本轮已存在；task_id 也无法命中（任务从未在本轮出现）
+全文：.sillyspec/changes/archive/2026-10-13-agent-task-stuck-running/requirements.md#FR-02
+最近确认：4cc145d9dd4e9cebe7d743be0cb5d4c7ec5cf10e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-agent-task-stuck-running:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/task-line-assembler.test.ts「[TASK_*] parent 未命中按 task_id 兜底反查（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-agent-task-stuck-running
+  status: active
+
+## FR-auto-sillyhub-daemon-036 为上述两处修复补回归测试,daemon 与 frontend 现有相关测试不回归
+变更：2026-10-13-agent-task-stuck-running
+状态：active
+摘要：回归防线
+全文：.sillyspec/changes/archive/2026-10-13-agent-task-stuck-running/requirements.md#FR-03
+最近确认：4cc145d9dd4e9cebe7d743be0cb5d4c7ec5cf10e
