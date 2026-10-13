@@ -1,0 +1,94 @@
+{
+  "change": "2026-10-13-sillyspec-version-probe-fast-retry",
+  "baseline": "e7eb35e5dfa8dc15b352b656c555216b9665cbc9",
+  "head": "ba179664cde9032f3a3fe4b4a59c78fde971957c",
+  "files": [
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/sillyspec-manager.ts",
+    "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+    "sillyhub-daemon/tests/sillyspec-manager.test.ts"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 170,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-13T15:12:52.550Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "e7eb35e5dfa8dc15b352b656c555216b9665cbc9",
+    "totals": {
+      "files": 4,
+      "additions": 170,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/sillyspec-manager.ts",
+        "additions": 48,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts",
+        "additions": 36,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/sillyspec-manager.test.ts",
+        "additions": 78,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fa9fb35b8aba7e6981e87ac5d1712e8371259adc90e2904deae4316fbc2b04b1",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-sillyspec-version-probe-fast-retry",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyspec-manager.test.ts「retryProbeLocalIfUnknown：版本未知+窗口已过 → 执行探测并刷新快照」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sillyspec-version-probe-fast-retry"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-02",
+      "tests": [
+        "test/daemon-heartbeat-sillyspec.test.ts「心跳触发 version 未知限频重探（void 不阻塞心跳）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sillyspec-version-probe-fast-retry"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-03",
+      "tests": [
+        "test/daemon-heartbeat-sillyspec.test.ts「旧假 manager 缺 retryProbeLocalIfUnknown → 心跳不崩按旧语义组包」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sillyspec-version-probe-fast-retry"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-04",
+      "tests": [
+        "test/sillyspec-manager.test.ts「注册失败后窗口过期重探成功 → 下一拍心跳携带 version」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sillyspec-version-probe-fast-retry"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-05",
+      "tests": [
+        "test/sillyspec-manager.test.ts「重探失败窗口重计时 → 一个窗口至多一次探测」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sillyspec-version-probe-fast-retry"
+    }
+  ]
+}

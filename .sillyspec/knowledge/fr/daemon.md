@@ -3728,3 +3728,105 @@
 - 场景：默认场景 — Given 机器离线（无 WS 连接）；When 查看机器卡；Then 「日志」「配置」按钮禁用并给出离线 tooltip；若拉取过程中离线则展示错误条
 全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-08
 最近确认：255a46d66
+
+## FR-daemon-118 SillySpecManager 新增限频重探入口 retryProbeLocalIfUnknown：version 未知（null）且距上次 probeLocal 尝试超过 120 秒才真正重探；版本已知不重探；全路径自收敛不抛异常
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：版本未知且窗口已过；版本已知；限频窗口内
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-01
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-01
+  tests: test/sillyspec-manager.test.ts「retryProbeLocalIfUnknown：版本未知+窗口已过 → 执行探测并刷新快照」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sillyspec-version-probe-fast-retry
+  status: active
+
+## FR-daemon-119 daemon 心跳每拍触发该入口且不阻塞心跳节奏（void 不 await，探测最坏 30 秒超时不拖心跳发送）
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：version 未知时心跳触发重探
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-02
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-02
+  tests: test/daemon-heartbeat-sillyspec.test.ts「心跳触发 version 未知限频重探（void 不阻塞心跳）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sillyspec-version-probe-fast-retry
+  status: active
+
+## FR-daemon-120 旧假 manager（无新方法）注入时心跳不崩（duck-type 守卫，对齐 getCommandResult 惯例）
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：旧假 manager 无新方法
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-03
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-03
+  tests: test/daemon-heartbeat-sillyspec.test.ts「旧假 manager 缺 retryProbeLocalIfUnknown → 心跳不崩按旧语义组包」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sillyspec-version-probe-fast-retry
+  status: active
+
+## FR-daemon-121 注册期探测失败场景：假「未安装」在 2 分钟限频窗口过后随重探自愈，成功后下一拍心跳带上真实版本
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：注册失败 → 心跳自愈链路
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-04
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-04
+  tests: test/sillyspec-manager.test.ts「注册失败后窗口过期重探成功 → 下一拍心跳携带 version」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sillyspec-version-probe-fast-retry
+  status: active
+
+## FR-daemon-122 重探仍失败时限频窗口重新计时，不产生每拍连发探测
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：连续失败不连发
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-05
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sillyspec-version-probe-fast-retry:flow:测试绑定FR-05
+  tests: test/sillyspec-manager.test.ts「重探失败窗口重计时 → 一个窗口至多一次探测」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sillyspec-version-probe-fast-retry
+  status: active
+
+## FR-daemon-123 新增单测覆盖上述分支，相关既有测试（sillyspec-manager / daemon-heartbeat-sillyspec）不回归
+变更：2026-10-13-sillyspec-version-probe-fast-retry
+状态：active
+摘要：测试面
+全文：.sillyspec/changes/archive/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md#FR-06
+最近确认：3cab26f0d4064e25eaa6102dcab0387145d15bd6

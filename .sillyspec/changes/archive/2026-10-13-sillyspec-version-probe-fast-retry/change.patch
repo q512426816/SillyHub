@@ -1,0 +1,280 @@
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index a6e451a89..3ff8a4964 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -5725,6 +5725,14 @@ export class Daemon {
+       // 知道（非 null）时携带（兄弟字段语义=backend 保留），update 仅非 null 携带
+       //（键不出现=backend 清除，pending_update 同款反向语义）。三键全无 → 第 5
+       // 参不占位（heartbeat 调用保持 4 参旧形态，既有心跳测试断言零回归）。
++      // 2026-10-13-sillyspec-version-probe-fast-retry：version 未知时限频重探——
++      // 注册期 probeLocal 瞬态失败（冷启动慢超时等）不再等 1h 第四循环自愈，心跳
++      // 每拍触发（manager 内 120s 限频，窗口内为 no-op）。void 不 await：探测最坏
++      // 30s 超时不拖本拍心跳节奏，成功后下一拍快照带上 version。duck-type 守卫对齐
++      // 下方 getCommandResult 惯例（旧假 manager 缺方法静默跳过）。
++      if (typeof this._sillyspecManager.retryProbeLocalIfUnknown === 'function') {
++        void this._sillyspecManager.retryProbeLocalIfUnknown();
++      }
+       const snap = this._sillyspecManager.getSnapshot();
+       const sillyspec: HeartbeatSillySpecParam = {};
+       if (snap.version !== null) sillyspec.version = snap.version;
+diff --git a/sillyhub-daemon/src/sillyspec-manager.ts b/sillyhub-daemon/src/sillyspec-manager.ts
+index c57281340..23b991032 100644
+--- a/sillyhub-daemon/src/sillyspec-manager.ts
++++ b/sillyhub-daemon/src/sillyspec-manager.ts
+@@ -114,6 +114,14 @@ export const SILLYSPEC_DEFERRED_RECHECK_MS = 30_000;
+ /** 终态（success/failed）展示窗口（10 分钟后回 idle，design F14）。 */
+ export const SILLYSPEC_TERMINAL_WINDOW_MS = 10 * 60 * 1000;
+ 
++/**
++ * version 未知时限频重探间隔（2 分钟，2026-10-13-sillyspec-version-probe-fast-retry）：
++ * 注册期 probeLocal 瞬态失败（冷启动慢超时等）后不再等第四循环（默认 1h 先睡后查），
++ * 心跳每拍触发 retryProbeLocalIfUnknown 按此间隔重探——假「未安装」存活期压到
++ * 2 分钟 + 至多一个心跳间隔。
++ */
++export const SILLYSPEC_VERSION_RETRY_MS = 120_000;
++
+ /** failed 态 error 摘要截断上限（字符，design 接口定义）。 */
+ const SILLYSPEC_ERROR_MAX_CHARS = 200;
+ 
+@@ -557,6 +565,11 @@ export interface SillySpecManagerDeps {
+   deferredRecheckMs?: number;
+   /** 终态展示窗口（毫秒），默认 {@link SILLYSPEC_TERMINAL_WINDOW_MS}。 */
+   terminalWindowMs?: number;
++  /**
++   * version 未知时限频重探间隔（毫秒，2026-10-13-sillyspec-version-probe-fast-retry）：
++   * 默认 {@link SILLYSPEC_VERSION_RETRY_MS}；测试注入调小。
++   */
++  versionRetryMs?: number;
+   /**
+    * 2026-09-02-changes-overview-card task-02（FR-02/NFR-02）：progress 采集执行器
+    * （execFile 数组形参，file=node、args[0]=sillyspec bin JS）。默认真实 execFile；
+@@ -624,9 +637,16 @@ export class SillySpecManager {
+   private readonly _latestCacheTtlMs: number;
+   private readonly _deferredRecheckMs: number;
+   private readonly _terminalWindowMs: number;
++  private readonly _versionRetryMs: number;
+ 
+   /** 最近一次本机探测结果（null=未安装/未知）。 */
+   private _version: string | null = null;
++  /**
++   * 最近一次 probeLocal 尝试时刻（毫秒 epoch，2026-10-13-sillyspec-version-probe-fast-retry）：
++   * 所有探测路径（注册期/手动升级/第四循环/限频重探）统一在 probeLocal 入口记账，
++   * retryProbeLocalIfUnknown 的限频窗口以最近一次尝试为基准；null=从未尝试。
++   */
++  private _versionLastAttemptAt: number | null = null;
+   /** latest 成功探测缓存（失败不缓存，TTL 过期即重探）。 */
+   private _latestCache: { value: string; at: number } | null = null;
+   /** 升级状态；null=idle。 */
+@@ -716,6 +736,13 @@ export class SillySpecManager {
+     this._latestCacheTtlMs = deps.latestCacheTtlMs ?? SILLYSPEC_LATEST_CACHE_TTL_MS;
+     this._deferredRecheckMs = deps.deferredRecheckMs ?? SILLYSPEC_DEFERRED_RECHECK_MS;
+     this._terminalWindowMs = deps.terminalWindowMs ?? SILLYSPEC_TERMINAL_WINDOW_MS;
++    // 对齐 commandTimeoutMs 惯例：undefined/非有限/<=0 一律回退默认。
++    this._versionRetryMs =
++      typeof deps.versionRetryMs === 'number' &&
++      Number.isFinite(deps.versionRetryMs) &&
++      deps.versionRetryMs > 0
++        ? deps.versionRetryMs
++        : SILLYSPEC_VERSION_RETRY_MS;
+     this._runProgressJson = deps.runProgressJson ?? runProgressJsonDefault;
+     this._resolveSillySpecBin = deps.resolveSillySpecBin ?? resolveSillySpecBinDefault;
+     this._statusCwd = deps.statusCwd ?? (() => null);
+@@ -739,6 +766,9 @@ export class SillySpecManager {
+    * null 且缓存置 null（未安装语义）。
+    */
+   async probeLocal(): Promise<string | null> {
++    // 2026-10-13-sillyspec-version-probe-fast-retry：所有探测路径统一在入口记
++    // 尝试时刻——重探限频窗口以最近一次尝试为基准（探测本身失败也重计时）。
++    this._versionLastAttemptAt = this._now();
+     const out = await this._runCommand('sillyspec --version');
+     // trim/空串归一在 manager 侧兜底（默认 runCmd 已做，注入 runner 时契约不变）。
+     const version = out !== null ? out.trim() : null;
+@@ -749,6 +779,24 @@ export class SillySpecManager {
+     return this._version;
+   }
+ 
++  /**
++   * version 未知时限频重探（2026-10-13-sillyspec-version-probe-fast-retry，心跳
++   * 每拍触发）：version 非 null 纯 no-op；null 且距上次 probeLocal 尝试 ≥
++   * versionRetryMs 才真正重探（注册期瞬态失败 2 分钟自愈，不再等 1h 第四循环）；
++   * 窗口内跳过。全路径自收敛不 reject（requestUpgrade 同款取舍——探测执行异常
++   * 仅 warn，留给下一窗口重试）。
++   */
++  async retryProbeLocalIfUnknown(): Promise<void> {
++    if (this._version !== null) return;
++    const last = this._versionLastAttemptAt;
++    if (last !== null && this._now() - last < this._versionRetryMs) return;
++    try {
++      await this.probeLocal();
++    } catch (e) {
++      this._log('warn', 'sillyspec_version_retry_error', { error: fmtErrorSnippet(e) });
++    }
++  }
++
+   /**
+    * 探测 npm 最新版（`npm view sillyspec version --prefer-online`——跳过本地
+    * HTTP 缓存新鲜度检查，ql-20260907-001），成功结果缓存 TTL 10 分钟。
+diff --git a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+index 791b40a64..7b27ca08d 100644
+--- a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
++++ b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+@@ -141,6 +141,9 @@ function makeFakeManager(controls: FakeManagerControls) {
+     // ql-20260902-003：WS 手动指令改走版本门前置入口。
+     requestManualUpgrade: vi.fn(async () => undefined),
+     checkAndUpgrade: vi.fn(async () => undefined),
++    // 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探入口
++    //（心跳每拍触发；旧形态缺该方法的守卫用例在 describe 内 delete 模拟）。
++    retryProbeLocalIfUnknown: vi.fn(async () => undefined),
+     getStatusSnapshot: vi.fn(() =>
+       controls.statusSnapshot === undefined ? undefined : controls.statusSnapshot,
+     ),
+@@ -546,6 +549,39 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
+     expect(call[3]).toBeUndefined();
+     expect(call[4]).toBeUndefined();
+   });
++
++  // ── 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探接线 ──
++
++  it('version 未知 → 心跳触发限频重探（void 不阻塞心跳发送）', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    // 探测替换为永不 resolve 的 pending——心跳仍须完成（fire-and-forget 铁证：
++    // 若实现误 await，本断言超时失败）。
++    (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown = vi.fn(
++      () => new Promise<void>(() => {}),
++    );
++    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
++    expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
++    expect(
++      (h.manager as { retryProbeLocalIfUnknown: { mock: { calls: unknown[] } } })
++        .retryProbeLocalIfUnknown.mock.calls,
++    ).toHaveLength(1);
++  });
++
++  it('旧假 manager 缺 retryProbeLocalIfUnknown → 心跳不崩按旧语义组包（duck-type 守卫）', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    delete (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown;
++    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
++    const call = h.heartbeatMock.mock.calls[0]!;
++    expect(call[4]).toBeUndefined(); // 三键全无 → 第 5 参 undefined（旧语义不变）
++  });
+ });
+ 
+ // ── Daemon._registerDaemon 注册前探测 + 携带（design §1 启动衔接）────────────
+diff --git a/sillyhub-daemon/tests/sillyspec-manager.test.ts b/sillyhub-daemon/tests/sillyspec-manager.test.ts
+index 87d7eb0f3..22c8258b8 100644
+--- a/sillyhub-daemon/tests/sillyspec-manager.test.ts
++++ b/sillyhub-daemon/tests/sillyspec-manager.test.ts
+@@ -67,6 +67,11 @@ interface HarnessOptions {
+     logger: PreflightLogger,
+     opts?: { officialRegistry?: boolean },
+   ) => Promise<void>;
++  /**
++   * version 未知限频重探间隔（2026-10-13-sillyspec-version-probe-fast-retry）：
++   * 缺省走 manager 默认 120s；测试注入调小推进假钟验证窗口语义。
++   */
++  versionRetryMs?: number;
+ }
+ 
+ /**
+@@ -114,6 +119,7 @@ function makeHarness(opts: HarnessOptions = {}) {
+     isBusy: () => busyFlag.busy,
+     now: () => clockNow,
+     logger,
++    versionRetryMs: opts.versionRetryMs,
+   });
+   return {
+     manager,
+@@ -131,6 +137,9 @@ function makeHarness(opts: HarnessOptions = {}) {
+       runCommand.mock.calls.filter(
+         ([c]) => c === 'npm view sillyspec version --prefer-online',
+       ).length,
++    /** `sillyspec --version` 被真实执行的次数（限频重探断言用）。 */
++    localProbeCalls: () =>
++      runCommand.mock.calls.filter(([c]) => c === 'sillyspec --version').length,
+   };
+ }
+ 
+@@ -171,6 +180,75 @@ describe('task-04 probeLocal / probeLatest 探测', () => {
+   });
+ });
+ 
++// ── version 未知时限频重探（2026-10-13-sillyspec-version-probe-fast-retry）────
++
++describe('retryProbeLocalIfUnknown version 未知限频重探', () => {
++  it('版本未知+窗口已过 → 执行探测并刷新快照（注册期失败自愈链路）', async () => {
++    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
++    // 注册期探测失败（瞬态超时语义）：version 落 null 并记尝试时刻。
++    await expect(h.manager.probeLocal()).resolves.toBeNull();
++    expect(h.manager.getSnapshot().version).toBeNull();
++    expect(h.localProbeCalls()).toBe(1);
++
++    // 窗口过 + 瞬态原因消失（命令恢复出数）→ 重探成功，快照刷新。
++    h.advance(1_000);
++    h.state.local = '3.32.8';
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(2);
++    expect(h.manager.getSnapshot().version).toBe('3.32.8');
++  });
++
++  it('版本已知 → 纯 no-op 不探测', async () => {
++    const h = makeHarness({ local: '3.32.8', versionRetryMs: 1_000 });
++    await h.manager.probeLocal();
++    expect(h.localProbeCalls()).toBe(1);
++
++    await h.manager.retryProbeLocalIfUnknown();
++    h.advance(10_000); // 窗口再远也不重探（version 已知即 no-op）
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(1);
++  });
++
++  it('限频窗口内 → 跳过探测（连续调用不连发）', async () => {
++    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
++    await h.manager.probeLocal(); // 注册期失败记账
++    expect(h.localProbeCalls()).toBe(1);
++
++    h.advance(999); // 窗内
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(1);
++
++    h.advance(1); // 恰到窗口
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(2);
++  });
++
++  it('重探失败窗口重计时 → 一个窗口至多一次探测', async () => {
++    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
++    await h.manager.probeLocal(); // 注册期失败（t0）
++    expect(h.localProbeCalls()).toBe(1);
++
++    h.advance(1_000); // 窗口过 → retry#1 探测（仍失败，lastAt=t0+1000）
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(2);
++
++    h.advance(999); // 新窗口内 → retry#2 跳过
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(2);
++
++    h.advance(1); // 新窗口过 → retry#3 探测
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(3);
++  });
++
++  it('从未尝试（构造即调）→ 立即探测一次', async () => {
++    const h = makeHarness({ local: '3.32.8', versionRetryMs: 1_000 });
++    await h.manager.retryProbeLocalIfUnknown();
++    expect(h.localProbeCalls()).toBe(1);
++    expect(h.manager.getSnapshot().version).toBe('3.32.8');
++  });
++});
++
+ // ── latest 10min 缓存 TTL ─────────────────────────────────────────────────────
+ 
+ describe('task-04 probeLatest 10min 缓存 TTL', () => {

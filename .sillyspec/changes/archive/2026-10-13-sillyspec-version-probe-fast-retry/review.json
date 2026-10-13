@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-sillyspec-version-probe-fast-retry",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ba179664cde9032f3a3fe4b4a59c78fde971957c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-04 绑定作答声称的测试名「注册失败后窗口过期重探成功 → 下一拍心跳携带 version」不存在于任何测试文件，实际新用例仅覆盖 manager 半程",
+      "evidence": "requirements.md 测试绑定 FR-04 行声称的用例名与 tests/sillyspec-manager.test.ts 实际用例名「版本未知+窗口已过 → 执行探测并刷新快照（注册期失败自愈链路）」不一致，且该实际用例只断言快照刷新（localProbeCalls=2、version='3.32.8'），未断言「下一拍心跳携带 version」；后半程由变更前既有用例（daemon-heartbeat-sillyspec.test.ts:237/256/455 断言 version 非 null 时 body.sillyspec_version 携带、:277/:482 断言 null 时键缺席）组合承载——绑定作答自身已括号披露『与 daemon 层键存在性既有用例组合验证』，两半均实跑通过（105/105），实质覆盖成立，仅绑定名称记录失真",
+      "location": ".sillyspec/changes/2026-10-13-sillyspec-version-probe-fast-retry/requirements.md:86 / sillyhub-daemon/tests/sillyspec-manager.test.ts:212-225"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（设计称『不存在乱序输入』属实：重探仅由心跳循环串行触发，无新事件源；探测迟到 void 未 await，本拍快照后于探测完成只影响下一拍——边界已裁决：可接受，最终一致且时延有界 120s+≤15s）",
+    "并发": "ok（设计称『Node 单线程原子赋值无撕裂』属实：retryProbeLocalIfUnknown 仅写 _version/_versionLastAttemptAt 原子赋值；且 probeLocal 入口同步记账 lastAttemptAt 于 await 之前（sillyspec-manager.ts:769-771），30s 在飞探测期间后续 15s 心跳拍全被限频窗口挡住，无 spawn 堆叠；直接调 probeLocal 的手动升级路径有意绕过限频——接口契约已披露，边界已裁决：可接受，重复探测=幂等只读命令）",
+    "切换": "ok（设计称『无悬挂定时器、stop 随心跳退出』属实：diff 未引入任何 setTimeout，重探完全复用心跳节奏；进程重启后内存态归零由注册期重探恢复——边界已裁决：可接受，与 _update 状态机同取舍）",
+    "作用域": "ok（设计称『全部状态在单进程单 manager 实例』属实：_versionLastAttemptAt 为实例私有字段，per-server 一个 Daemon 一个 manager，无跨工作区共享面）"
+  },
+  "reviewedAt": "2026-10-13T23:16:30+08:00"
+}
