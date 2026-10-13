@@ -1,9 +1,10 @@
 {
   "schemaVersion": 1,
+  "rescan": "a314b501..30b5e695 增量核对无影响（三个提交：并行变更 owner-backfill 收口——其变更目录文档+新增独立测试 test_reparse_owner_backfill.py+前端页面；已复审的 design.md 补救披露 1df95ab5d；review.json 留档 30b5e695e；本变更冻结 8 个交付文件零触碰，绑定语义与 41 用例结论不变）",
   "change": "2026-10-13-change-reparse-autobind-remove",
   "reviewer": "subagent",
   "verdict": "PASS",
-  "reviewedAgainst": "a314b5011420932704da79f0907ba8cb63b8ea79",
+  "reviewedAgainst": "30b5e695e25d40abf3dfc903b79073446b4e104f",
   "findings": [
     {
       "severity": "P1",
@@ -30,5 +31,5 @@
     "切换": "ok",
     "作用域": "ok"
   },
-  "reviewedAt": "2026-10-13T23:37:33+08:00"
+  "reviewedAt": "2026-10-13T23:38:57+08:00"
 }
