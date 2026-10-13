@@ -80,6 +80,25 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+# ── 锚点错配扫描/修复（2026-10-13-anchor-mismatch-fix）──────────────────────
+
+#: 主导型信息项阈值：最高占比 ≥80% 且条数 ≥5（仅报告，不自动修——阈值武断性
+#: 由人工裁决兜底，design 风险节）。
+DOMINANT_SHARE = 0.8
+DOMINANT_MIN_COMMANDS = 5
+
+
+@dataclass
+class AnchorMismatch:
+    """一致错配/主导型信息项的逐轮记录（报告与修复共用载体）。"""
+
+    run_id: uuid.UUID
+    current_anchor: uuid.UUID | None
+    target: uuid.UUID
+    commands: int
+    unknown_keys: int
+
+
 class ChangeContextBackfillService:
     """存量 run 变更上下文回填（只读解析 + 两列写集，幂等）。"""
 
@@ -112,6 +131,104 @@ class ChangeContextBackfillService:
         for session_id in await self.linked_session_ids(workspace_id):
             total.merge(await self.backfill_session(session_id))
         return total
+
+    # ── 锚点错配扫描/修复（FR-01..03）────────────────────────────────────
+
+    async def scan_anchor_mismatches(
+        self, workspace_id: uuid.UUID
+    ) -> tuple[list[AnchorMismatch], list[AnchorMismatch]]:
+        """扫描工作区交互轮的锚点错配（只读，零写库）。
+
+        判定基于每轮**全部已解析**绑定命令（unknown key 计数呈现、不参与判定）：
+
+        - 一致错配：已解析命令 ≥1 条、全部指向同一变更 X、且轮锚 != X（含无
+          锚轮）——「整个变更生命周期发生在单轮内」的实测形态；
+        - 主导型信息项：指向 ≥2 个变更、最高占比 ≥DOMINANT_SHARE 且条数
+          ≥DOMINANT_MIN_COMMANDS、最高目标 != 轮锚——仅报告人工裁决
+          （巨轮类形态，自动修阈值武断，design 风险节）。
+
+        混合指向但未达主导阈值、或最高目标恰为轮锚的轮：不进任何清单（切换轮
+        ≤1 轮误差既有裁决）。批量两条查询（交互轮 + 命令日志 JOIN），零 N+1。
+        """
+        runs = (
+            await self._session.execute(
+                select(AgentRun.id, AgentRun.change_id)
+                .select_from(AgentRun)
+                .join(AgentSession, col(AgentSession.id) == col(AgentRun.agent_session_id))
+                .where(
+                    col(AgentSession.workspace_id) == workspace_id,
+                    col(AgentRun.spec_strategy) == "interactive",
+                )
+            )
+        ).all()
+        if not runs:
+            return [], []
+        run_ids = [r[0] for r in runs]
+        anchor_by_run = {r[0]: r[1] for r in runs}
+        logs = (
+            await self._session.execute(
+                select(AgentRunLog.run_id, AgentRunLog.content_redacted).where(
+                    col(AgentRunLog.run_id).in_(run_ids),
+                    col(AgentRunLog.channel) == "tool_call",
+                    col(AgentRunLog.tool_kind) == "sillyspec",
+                )
+            )
+        ).all()
+        commands_by_run: dict[uuid.UUID, list[str | None]] = {}
+        for rid, content in logs:
+            commands_by_run.setdefault(rid, []).append(content)
+        change_ids = (
+            await self._session.execute(
+                select(Change.change_key, Change.id).where(col(Change.workspace_id) == workspace_id)
+            )
+        ).all()
+        id_by_key = {k: i for k, i in change_ids}
+
+        mismatches: list[AnchorMismatch] = []
+        dominants: list[AnchorMismatch] = []
+        for rid in run_ids:
+            contents = commands_by_run.get(rid, [])
+            if not contents:
+                continue
+            unknown = 0
+            targets: dict[uuid.UUID, int] = {}
+            for content in contents:
+                key = _parse_change_key_from_log(content)
+                if key is None:
+                    if content is not None:
+                        unknown += 1
+                    continue
+                target = id_by_key.get(key)
+                if target is None:
+                    unknown += 1
+                    continue
+                targets[target] = targets.get(target, 0) + 1
+            if not targets:
+                continue
+            anchor = anchor_by_run[rid]
+            top, top_n = max(targets.items(), key=lambda kv: kv[1])
+            if len(targets) == 1:
+                if top != anchor:
+                    mismatches.append(AnchorMismatch(rid, anchor, top, top_n, unknown))
+            elif (
+                top_n / sum(targets.values()) >= DOMINANT_SHARE
+                and top_n >= DOMINANT_MIN_COMMANDS
+                and top != anchor
+            ):
+                dominants.append(AnchorMismatch(rid, anchor, top, top_n, unknown))
+        return mismatches, dominants
+
+    async def fix_anchor_mismatches(self, workspace_id: uuid.UUID) -> int:
+        """把一致错配的交互轮重锚到其命令唯一指向的变更（幂等；调用方控制事务）。"""
+        mismatches, _dominants = await self.scan_anchor_mismatches(workspace_id)
+        for m in mismatches:
+            run = await self._session.get(AgentRun, m.run_id)
+            if run is None or run.change_id == m.target:
+                continue
+            run.change_id = m.target
+            self._session.add(run)
+        await self._session.flush()
+        return len(mismatches)
 
     # ── 单会话游标重放（FR-01..04）──────────────────────────────────────
 

@@ -1,0 +1,26 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：轮级打锚的「轮归开始时上下文」语义在「整个变更的生命周期发生在单轮内」时产生错配——该轮全部 sillyspec 绑定命令指向新变更 X，但轮锚留在上一个变更（实测两例：10-10 巨轮 126 命令、10-13
+  fire-ledger-form-strict 9 命令），后者用量虚增、X 空卡。需系统性检出与修复。
+
+  成功标准：
+
+  - 扫描模式列出工作区内「交互轮的已解析绑定命令全部一致指向变更 X、且轮锚 != X」的错配轮（run、当前锚、目标 X、命令数、未知 key 数），零写库
+
+  - 修复模式把一致错配的交互轮（spec_strategy=interactive）重锚到 X；正确锚定轮、混合命令轮（指向多个变更）、派发轮禁止触碰；幂等可重跑
+
+  - 主导型信息项（指向多变更但最高占比 ≥80% 且 ≥5 条）单独列出仅报告，不自动修
+
+  - 脚本 --mismatch 默认只报告，与 --apply 组合才落库；全工作区 --apply 沿用 --yes 门
+
+  - 既有测试全过并新增用例绑定上述行为
+autopilot: true
+baseline_commit: 2fa91301fa0651f98a2b66fd4ffe57e54d889b32
+updatedAt: '2026-10-13T00:50:41.650Z'
+baseline_sha256: da5fdd6489d62eee64ad01f0941dd26ca6952cad0d91a908d5a31cdc84f18964
+

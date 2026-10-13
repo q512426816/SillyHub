@@ -34,7 +34,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
-from app.modules.change.backfill_service import BackfillStats, ChangeContextBackfillService
+from app.modules.change.backfill_service import (
+    DOMINANT_MIN_COMMANDS,
+    DOMINANT_SHARE,
+    BackfillStats,
+    ChangeContextBackfillService,
+)
 
 
 def _load_full_model_registry() -> None:
@@ -78,7 +83,7 @@ def _print_stats(title: str, stats: BackfillStats) -> None:
         print(f"    会话游标终值 {stats.cursor_change_id}（{flag}）")
 
 
-async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
+async def _run(apply: bool, workspace_ids: list[uuid.UUID], args_mismatch: bool = False) -> int:
     engine = create_async_engine(get_settings().database_url)
     try:
         async with engine.connect() as conn:
@@ -102,6 +107,35 @@ async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
                         targets = [r[0] for r in rows]
                     total = BackfillStats()
                     mode = "APPLY（落库）" if apply else "DRY-RUN（事务回滚，库零触碰）"
+                    if args_mismatch:
+                        # 锚点错配模式（2026-10-13-anchor-mismatch-fix）：一致错配
+                        # 报告/修复 + 主导型信息项（仅报告）。
+                        print(f"=== 锚点错配扫描 · {mode} · 工作区 {len(targets)} 个 ===")
+                        for ws_id in targets:
+                            mismatches, dominants = await svc.scan_anchor_mismatches(ws_id)
+                            if not mismatches and not dominants:
+                                continue
+                            print(
+                                f"[workspace {ws_id}] 一致错配 {len(mismatches)} / 主导型 {len(dominants)}"
+                            )
+                            for m in mismatches:
+                                print(
+                                    f"  错配 run {m.run_id} 锚={m.current_anchor or 'NULL'} → {m.target}"
+                                    f"（命令 {m.commands} 条，未知 key {m.unknown_keys}）"
+                                )
+                            for m in dominants:
+                                print(
+                                    f"  主导型（仅报告）run {m.run_id} 锚={m.current_anchor or 'NULL'}"
+                                    f" 主={m.target}（{m.commands} 条 ≥{DOMINANT_SHARE:.0%} 且"
+                                    f" ≥{DOMINANT_MIN_COMMANDS}，待人工裁决）"
+                                )
+                            if apply:
+                                fixed = await svc.fix_anchor_mismatches(ws_id)
+                                print(f"  已重锚 {fixed} 轮")
+                        if not apply:
+                            raise _DryRunRollback()
+                        print("错配修复完成。")
+                        return 0
                     print(f"=== 存量 run 变更上下文回填 · {mode} · 工作区 {len(targets)} 个 ===")
                     for ws_id in targets:
                         session_ids = await svc.linked_session_ids(ws_id)
@@ -151,6 +185,12 @@ def main() -> int:
         help="限定工作区 id（可多次；缺省处理全部工作区）",
     )
     parser.add_argument(
+        "--mismatch",
+        action="store_true",
+        help="锚点错配模式：扫描「全部绑定命令一致指向 X 但轮锚 != X」的交互轮"
+        "（缺省只报告；与 --apply 组合落库修复；主导型仅报告）",
+    )
+    parser.add_argument(
         "--yes",
         action="store_true",
         help="全工作区 --apply 的显式确认门（带 --workspace 的定向 apply 不需要）",
@@ -170,7 +210,9 @@ def main() -> int:
         )
         return 2
     _load_full_model_registry()
-    return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
+    return asyncio.run(
+        _run(apply=args.apply, workspace_ids=workspace_ids, args_mismatch=args.mismatch)
+    )
 
 
 if __name__ == "__main__":

@@ -383,3 +383,188 @@ async def test_workspace_scope_filters_linked_sessions(db_session):
     assert stats.runs_stamped == 1
     assert await _run_anchors(db_session, linked.id) == [None, change_a.id]
     assert await _run_anchors(db_session, unlinked.id) == [None, None]
+
+
+# ── 锚点错配扫描/修复（2026-10-13-anchor-mismatch-fix）──────────────────────
+
+
+async def _make_interactive_run(
+    db_session: AsyncSession,
+    session_id: uuid.UUID,
+    *,
+    seq: int,
+    change_id: uuid.UUID | None = None,
+    commands: list[str] | None = None,
+    spec_strategy: str | None = "interactive",
+) -> AgentRun:
+    run = await _make_run(
+        db_session,
+        session_id,
+        seq=seq,
+        change_id=change_id,
+        commands=commands,
+    )
+    if spec_strategy is not None:
+        run.spec_strategy = spec_strategy
+        db_session.add(run)
+        await db_session.commit()
+    return run
+
+
+async def test_scan_mismatch_reports_unanimous_run_targeting_single_change(db_session):
+    """FR-01：交互轮锚在 Y、全部已解析命令指向 X → 进错配清单（未知 key 计数呈现）。"""
+    from app.modules.change.backfill_service import ChangeContextBackfillService
+
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_x = await _make_change(db_session, ws.id, "2026-10-13-mm-x")
+    prev = await _make_change(db_session, ws.id, "2026-10-13-mm-prev")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_x.id, sess.id)
+    await _make_link(db_session, prev.id, sess.id)
+    await _make_interactive_run(
+        db_session,
+        sess.id,
+        seq=0,
+        change_id=prev.id,
+        commands=[
+            "sillyspec flow start --change 2026-10-13-mm-x",
+            "sillyspec flow done --change 2026-10-13-mm-x",
+            "sillyspec flow start --change ghost-key",
+        ],
+    )
+
+    mismatches, dominants = await ChangeContextBackfillService(db_session).scan_anchor_mismatches(
+        ws.id
+    )
+
+    assert dominants == []
+    assert len(mismatches) == 1
+    m = mismatches[0]
+    assert m.target == change_x.id
+    assert m.current_anchor == prev.id
+    assert m.commands == 2
+    assert m.unknown_keys == 1
+
+
+async def test_fix_mismatch_reanchors_interactive_run(db_session):
+    """FR-02：一致错配的交互轮重锚到 X。"""
+    from app.modules.change.backfill_service import ChangeContextBackfillService
+
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_x = await _make_change(db_session, ws.id, "2026-10-13-fx-x")
+    prev = await _make_change(db_session, ws.id, "2026-10-13-fx-prev")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_x.id, sess.id)
+    run = await _make_interactive_run(
+        db_session,
+        sess.id,
+        seq=0,
+        change_id=prev.id,
+        commands=["sillyspec flow start --change 2026-10-13-fx-x"],
+    )
+
+    svc = ChangeContextBackfillService(db_session)
+    fixed = await svc.fix_anchor_mismatches(ws.id)
+
+    assert fixed == 1
+    await db_session.refresh(run)
+    assert run.change_id == change_x.id
+    # 幂等：重跑零修复。
+    assert await svc.fix_anchor_mismatches(ws.id) == 0
+
+
+async def test_fix_mismatch_skips_mixed_and_dispatched(db_session):
+    """FR-02：切换轮（命令指向多变更）与派发轮（非 interactive）不触发修复。"""
+    from app.modules.change.backfill_service import ChangeContextBackfillService
+
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_x = await _make_change(db_session, ws.id, "2026-10-13-sk-x")
+    prev = await _make_change(db_session, ws.id, "2026-10-13-sk-prev")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_x.id, sess.id)
+    mixed = await _make_interactive_run(
+        db_session,
+        sess.id,
+        seq=0,
+        change_id=prev.id,
+        commands=[
+            "sillyspec flow done --change 2026-10-13-sk-prev",
+            "sillyspec flow start --change 2026-10-13-sk-x",
+        ],
+    )
+    dispatched = await _make_interactive_run(
+        db_session,
+        sess.id,
+        seq=1,
+        change_id=prev.id,
+        commands=["sillyspec flow start --change 2026-10-13-sk-x"],
+        spec_strategy="sillyspec",
+    )
+
+    svc = ChangeContextBackfillService(db_session)
+    mismatches, dominants = await svc.scan_anchor_mismatches(ws.id)
+    assert mismatches == []
+    assert dominants == []
+    await svc.fix_anchor_mismatches(ws.id)
+    await db_session.refresh(mixed)
+    await db_session.refresh(dispatched)
+    assert mixed.change_id == prev.id
+    assert dispatched.change_id == prev.id
+
+
+async def test_dominant_mixture_reported_but_not_fixed(db_session):
+    """FR-03：11/12 指向 X 的混合轮进主导型信息项（不进错配、不被修复）。"""
+    from app.modules.change.backfill_service import ChangeContextBackfillService
+
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_x = await _make_change(db_session, ws.id, "2026-10-13-dm-x")
+    prev = await _make_change(db_session, ws.id, "2026-10-13-dm-prev")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_x.id, sess.id)
+    cmds = ["sillyspec run execute --change 2026-10-13-dm-x"] * 11
+    cmds.append("sillyspec flow done --change 2026-10-13-dm-prev")
+    run = await _make_interactive_run(db_session, sess.id, seq=0, change_id=prev.id, commands=cmds)
+
+    svc = ChangeContextBackfillService(db_session)
+    mismatches, dominants = await svc.scan_anchor_mismatches(ws.id)
+
+    assert mismatches == []
+    assert len(dominants) == 1
+    assert dominants[0].target == change_x.id
+    assert dominants[0].commands == 11
+    await svc.fix_anchor_mismatches(ws.id)
+    await db_session.refresh(run)
+    assert run.change_id == prev.id  # 主导型不被自动修
+
+
+async def test_scan_mismatch_is_read_only(db_session):
+    """FR-04：扫描零写库——前后锚分布一致。"""
+    from app.modules.change.backfill_service import ChangeContextBackfillService
+
+    user = await _make_user(db_session)
+    ws = await _make_ws(db_session)
+    change_x = await _make_change(db_session, ws.id, "2026-10-13-ro-x")
+    prev = await _make_change(db_session, ws.id, "2026-10-13-ro-prev")
+    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
+    await _make_link(db_session, change_x.id, sess.id)
+    await _make_interactive_run(
+        db_session,
+        sess.id,
+        seq=0,
+        change_id=prev.id,
+        commands=["sillyspec flow start --change 2026-10-13-ro-x"],
+    )
+
+    svc = ChangeContextBackfillService(db_session)
+    before = await _run_anchors(db_session, sess.id)
+    first = await svc.scan_anchor_mismatches(ws.id)
+    second = await svc.scan_anchor_mismatches(ws.id)
+    after = await _run_anchors(db_session, sess.id)
+
+    assert before == after
+    assert first == second
+    assert len(first[0]) == 1
