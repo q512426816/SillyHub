@@ -1,0 +1,142 @@
+{
+  "change": "2026-10-13-session-change-files-hover",
+  "baseline": "head-uncommitted-window",
+  "head": "e5b5f85d8295b94698e1d66fc8976242b55ffc4b",
+  "files": [
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+    "backend/openapi.json",
+    "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+    "frontend/src/components/change-file-tree.tsx",
+    "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+    "frontend/src/components/daemon/session-change-files-hover.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/changes.ts",
+    "frontend/src/lib/query-keys.ts"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 1169,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-13T05:04:16.471Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "head-uncommitted-window",
+    "totals": {
+      "files": 12,
+      "additions": 1169,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/router.py",
+        "additions": 42,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 45,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "additions": 327,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+        "additions": 118,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/change-file-tree.tsx",
+        "additions": 25,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+        "additions": 197,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-change-files-hover.tsx",
+        "additions": 228,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 62,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/changes.ts",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/query-keys.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "9da1be048349fe92facb541cbc84c5647eea5e9177fe748c772fab559f620220",
+  "patchStatus": "ok"
+}

@@ -1,5 +1,8 @@
+import { useQuery } from "@tanstack/react-query";
+
 import { apiFetch } from "./api";
 import type { components } from "./api-types";
+import { queryKeys } from "./query-keys";
 
 /**
  * 变更摘要（列表项）。对齐后端 schema（components.schemas.ChangeSummary）。
@@ -113,6 +116,44 @@ export function getChange(workspaceId: string, changeId: string) {
   return apiFetch<ChangeRead>(
     `/api/workspaces/${workspaceId}/changes/${changeId}`,
   );
+}
+
+// ── 会话关联变更列表（2026-10-13-session-change-files-hover task-03 / FR-01）──
+//
+// GET /api/workspaces/{wid}/changes/-/by-session/{sid}——change_session_links
+// M:N 表反向查询（后端 service.list_changes_for_session），排序「未归档优先 →
+// created_at desc」；软删排除。会话页悬浮变更文件面板的数据源（D-001@v2）。
+
+/**
+ * 拉取某会话关联的全部变更摘要。`-` 为路径占位符（对齐 platform_sync 端点
+ * 惯例），非参数。404（会话不存在/跨空间）经 apiFetch 抛 ApiError。
+ */
+export function listSessionChanges(workspaceId: string, sessionId: string) {
+  return apiFetch<ChangeSummary[]>(
+    `/api/workspaces/${workspaceId}/changes/-/by-session/${sessionId}`,
+  );
+}
+
+/**
+ * 会话关联变更列表 hook（悬浮面板消费）。
+ *
+ * - `active` 为真（悬浮下拉/弹窗打开）时 15s 轮询刷新（FR-05——跑动中的变更
+ *   状态迁移/新增变更低频变化），关闭即停（不后台空转）；
+ * - staleTime 10s：入口显隐/徽标数需要较新数据但不必秒级；
+ * - placeholderData 保上次数据：列表短暂 refetch 不闪空。
+ */
+export function useSessionChanges(
+  workspaceId: string,
+  sessionId: string,
+  options?: { active?: boolean },
+) {
+  return useQuery({
+    queryKey: queryKeys.sessionChanges.list(workspaceId, sessionId),
+    queryFn: () => listSessionChanges(workspaceId, sessionId),
+    staleTime: 10_000,
+    refetchInterval: options?.active ? 15_000 : false,
+    placeholderData: (prev) => prev,
+  });
 }
 
 // ── 单文件变化比对（ql-20260910-017-2006，scope-audit --file 平台入口）─────

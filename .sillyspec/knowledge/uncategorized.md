@@ -31,3 +31,7 @@ daemon 侧 stdio MCP server（mcp-server.js）从 env 读 backend URL：键名�
 ## 【待确认】async session rollback 后访问 ORM 对象属性触发 MissingGreenlet（异常路径标量先捕获）
 
 SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` 会 expire 会话内全部 ORM 对象——异常处理路径里再访问 `obj.attr`（哪怕记日志 `str(agent_run.id)`）会触发同步 lazy load → `MissingGreenlet: greenlet_spawn has not been called`，且该异常常发生在 except 块自身，把原异常吞成误导性的 greenlet 报错（2026-10-12-session-defects task-08 实证：auto_resume 压缩失败分支 rollback 后记日志访问 agent_run.id 连环爆）。修法：进入可能 rollback 的 try 前把异常路径需要的标量先捕获（`co_run_id = str(agent_run.id)`），rollback 后需要对象时经 `await session.get(Model, pk)` 异步重载再操作。来源：task-08（commit 954cb88f 修正过程）。
+
+## 【待确认】fake timers 下 testing-library waitFor 不推进（挂载微任务用 advanceTimersByTimeAsync(0) 排干）
+
+组件挂载 effect 内的异步链（Promise.all 拉数）在 vi.useFakeTimers() 后用 waitFor 等「请求已发出」会挂满 testTimeout——fake timers 冻结了 waitFor 轮询依赖的计时器（vitest waitFor 走 setInterval 轮询），微任务队列又不随真实时间推进。修法：挂载后直接 await vi.advanceTimersByTimeAsync(0)（推进零毫秒但排干微任务队列，初始请求落地），再断言 mock 已调用；后续周期断言用 advanceTimersByTimeAsync(ms) 同步推进。来源：2026-10-13-session-change-files-hover task-02 change-file-tree-autorefresh.test.tsx（首跑 3 用例全 45s 超时挂，改后 3/3 绿 125ms）。

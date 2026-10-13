@@ -45,6 +45,7 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeReparseResponse,
     ChangeReparseStats,
+    ChangeSummary,
     ChangeTimelineRead,
     ChangeUsageRead,
     ChangeWarning,
@@ -504,6 +505,47 @@ async def list_change_sessions(
         reverse=True,
     )
     return items
+
+
+@router.get(
+    "/changes/-/by-session/{session_id}",
+    response_model=list[ChangeSummary],
+)
+async def list_session_changes(
+    workspace_id: uuid.UUID,
+    session_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> list[ChangeSummary]:
+    """列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
+
+    会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询
+    （正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐
+    platform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量
+    ``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。
+
+    排序（service.list_changes_for_session）：未归档（``location != 'archive'``）
+    优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组
+    直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径
+    一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。
+    """
+    # 会话存在性 + 工作空间归属校验：不匹配 → 404（中文文案，l10n 守护把关）。
+    agent_session = (
+        await session.execute(
+            select(AgentSession).where(
+                col(AgentSession.id) == session_id,
+                col(AgentSession.workspace_id) == workspace_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if agent_session is None:
+        raise AppError(
+            "会话不存在或不属于该工作空间。",
+            http_status=404,
+            details={"session_id": str(session_id)},
+        )
+    svc = ChangeService(session)
+    return await svc.list_changes_for_session(workspace_id, session_id)
 
 
 @router.get(

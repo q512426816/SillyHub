@@ -1,5 +1,5 @@
 # backend 变更索引
-
+- change 2026-10-13-session-change-files-hover | 会话关联变更反向端点 GET /changes/-/by-session/{sid}（CHANGE_READ，AgentSession workspace 归属校验 404 中文）；service.list_changes_for_session（change_session_links JOIN，deleted 排除，enrich_summaries 复用投影，Python 稳定排序未归档优先/created_at desc，limit 100）。pytest 6 用例（排序分组含 is_thin/空列表/软删排除/404 文案/跨空间会话与 link 隔离）；ruff/mypy 过。
 > 自动生成。正文历史已迁出，详见 backend.md。
 
 - change 2026-09-25-change-center-thin-flow | 变更中心接入轻量变更（thin）：StageEnum THIN 辅助阶段 + STAGE_AGENT_CONFIG thin 条目（thin.md 2 调用协议 prompt）+ 派发入口 change_key 白名单（拒 ../default/quick-hex8，纵深防御）+ change_writer 双入口 quick→thin 分流（标签不动）+ binding 识别 flow start/done/amend-draft 命令族 + parser flow-state.yaml→thin 推断 + _stage_group_order 辅助阶段已知序（quick→thin→未知）+ 阶段回洗双守卫（A dispatch.sync_stage_status / B platform_sync._sync_change_stage_status，同一谓词防 CLI scan 停留态洗回平台 thin，archived 放行翻转）。测试：test_thin_stage 14 + test_thin_stage_guard 5 + test_spec_binding 37 + test_dispatch 族 91 + change_writer 22 + test_parser 29 + ingest 回归 10。

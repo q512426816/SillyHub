@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 会话页面悬浮变更文件面板（2026-10-13-session-change-files-hover）</title>
+<style>
+  :root {
+    --ai-purple: #7C3AED;
+    --ai-cyan: #0891B2;
+    --bg: #FAFAFA;
+    --card: #FFFFFF;
+    --border: #E4E4E7;
+    --muted: #71717A;
+    --text: #18181B;
+    --accent-soft: #F3EEFD;
+    --cyan-soft: #E6F6FA;
+    --green: #16A34A;
+    --amber: #D97706;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); font-size: 13px; height: 100vh; overflow: hidden; }
+
+  /* ===== 模拟会话页面三栏 ===== */
+  .page { display: flex; height: 100vh; }
+  .col-list { width: 260px; border-right: 1px solid var(--border); background: var(--card); padding: 12px; }
+  .col-chat { flex: 1; display: flex; flex-direction: column; position: relative; background: var(--bg); }
+  .col-detail { width: 300px; border-left: 1px solid var(--border); background: var(--card); padding: 12px; }
+  .col-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 10px; }
+  .mock-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 6px; border: 1px solid transparent; }
+  .mock-item.on { background: var(--accent-soft); border-color: #D8C9F8; }
+  .mock-line { height: 8px; border-radius: 4px; background: #E4E4E7; margin: 4px 0; }
+  .chat-msg { max-width: 70%; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; margin: 8px 16px; }
+  .chat-msg.user { align-self: flex-end; background: var(--accent-soft); border-color: #D8C9F8; }
+  .chat-stream { flex: 1; padding: 12px 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; }
+  .running-tip { margin: 0 16px 6px; padding: 6px 10px; border-radius: 8px; background: var(--cyan-soft); color: var(--ai-cyan); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .spinner { width: 10px; height: 10px; border: 2px solid #B9E7F0; border-top-color: var(--ai-cyan); border-radius: 50%; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .input-bar { margin: 8px 16px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 10px 12px; color: var(--muted); }
+
+  /* ===== 悬浮入口：非圆圈胶囊按钮，hover 弹下拉列表 ===== */
+  .hover-entry {
+    position: absolute; right: 20px; bottom: 76px; z-index: 60;
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid #D8C9F8; background: var(--card); color: var(--text);
+    border-radius: 9px; padding: 5px 11px; font-size: 12px; font-weight: 600;
+    cursor: pointer; box-shadow: 0 3px 12px rgba(124, 58, 237, 0.16);
+  }
+  .hover-entry:hover, .hover-entry.open { border-color: var(--ai-purple); background: var(--accent-soft); }
+  .hover-entry .cnt-pill {
+    background: var(--green); color: #fff; border-radius: 8px;
+    font-size: 10px; padding: 0 6px; font-weight: 700;
+  }
+  .hover-entry .cnt-pill.pulse { animation: pillPulse 1.6s ease infinite; }
+  @keyframes pillPulse { 50% { opacity: .45; } }
+  .hover-entry .arr { color: var(--muted); font-size: 10px; }
+
+  /* hover 下拉浮层：变更分组列表（下拉项样式） */
+  .chg-popover {
+    position: absolute; right: 20px; bottom: 118px; z-index: 61;
+    width: 340px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 11px; box-shadow: 0 12px 36px rgba(24,24,27,.16);
+    padding: 8px; display: none;
+  }
+  .chg-popover.open { display: block; }
+  .chg-popover .grp-title { margin: 4px 6px 6px; }
+
+  /* ===== 大弹窗 ===== */
+  .overlay { position: fixed; inset: 0; background: rgba(24,24,27,.45); z-index: 100; display: none; align-items: center; justify-content: center; }
+  .overlay.open { display: flex; }
+  .modal {
+    width: min(1152px, 94vw); height: 85vh; background: var(--card);
+    border-radius: 12px; box-shadow: 0 24px 64px rgba(0,0,0,.28);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .modal-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { font-size: 14px; font-weight: 600; }
+  .modal-head .sub { font-size: 11px; color: var(--muted); }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: blink 1.4s ease infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .refresh-hint { margin-left: auto; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+  .modal-close { margin-left: 12px; border: none; background: none; font-size: 17px; color: var(--muted); cursor: pointer; }
+  .modal-body { display: flex; min-height: 0; flex: 1; }
+
+  /* 左栏：变更分组列表 */
+  .chg-col { width: 268px; shrink: 0; border-right: 1px solid var(--border); overflow: auto; padding: 10px; }
+  .grp-title { font-size: 11px; font-weight: 600; color: var(--muted); margin: 6px 4px 6px; display: flex; align-items: center; gap: 5px; }
+  .grp-title .cnt { background: var(--accent-soft); color: var(--ai-purple); border-radius: 8px; padding: 0 6px; font-size: 10px; }
+  .chg-item {
+    border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; margin-bottom: 6px;
+    cursor: pointer; background: var(--card); transition: border-color .12s;
+  }
+  .chg-item:hover { border-color: #C4B5FD; }
+  .chg-item.sel { border-color: var(--ai-purple); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--ai-purple) inset; }
+  .chg-row1 { display: flex; align-items: center; gap: 6px; }
+  .chg-key { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .tag { font-size: 10px; border-radius: 5px; padding: 1px 6px; font-weight: 600; white-space: nowrap; }
+  .tag.thin { background: #FEF3C7; color: var(--amber); }
+  .tag.full { background: var(--cyan-soft); color: var(--ai-cyan); }
+  .tag.arch { background: #F4F4F5; color: var(--muted); }
+  .chg-row2 { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .stage-pill { background: #ECFDF5; color: var(--green); border-radius: 5px; padding: 0 6px; font-size: 10px; font-weight: 600; }
+  .chg-time { margin-left: auto; }
+  .arch-toggle {
+    width: 100%; text-align: left; border: 1px dashed var(--border); background: none; border-radius: 9px;
+    padding: 7px 10px; font-size: 11px; color: var(--muted); cursor: pointer; margin-top: 2px;
+  }
+  .arch-toggle:hover { border-color: #C4B5FD; color: var(--text); }
+  .arch-wrap { margin-top: 6px; }
+  .arch-wrap .chg-item { opacity: .78; }
+
+  /* 右栏：ChangeFileTree 复用（示意） */
+  .tree-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .tree-breadcrumb { padding: 8px 14px 2px; font-size: 11px; color: var(--muted); }
+  .tree-body { flex: 1; min-height: 0; display: flex; padding: 6px 12px 12px; gap: 12px; }
+  .file-tree { width: 252px; border: 1px solid var(--border); border-radius: 9px; overflow: auto; padding: 8px; background: var(--card); }
+  .fnode { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; font-size: 12px; cursor: pointer; color: var(--text); }
+  .fnode:hover { background: var(--accent-soft); }
+  .fnode.sel { background: var(--accent-soft); color: var(--ai-purple); font-weight: 600; }
+  .fnode .arr { color: var(--muted); font-size: 10px; width: 10px; }
+  .fnode .badge-mini { font-size: 9px; border-radius: 4px; padding: 0 4px; background: #FEF3C7; color: var(--amber); margin-left: auto; }
+  .preview { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--card); display: flex; flex-direction: column; overflow: hidden; }
+  .preview-head { display: flex; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 12px; gap: 8px; }
+  .preview-head .path { font-family: Consolas, monospace; font-size: 11px; color: var(--muted); }
+  .btn-full { margin-left: auto; border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 2px 9px; font-size: 11px; cursor: pointer; }
+  .preview-body { flex: 1; overflow: auto; padding: 12px 14px; font-size: 12px; line-height: 1.75; }
+  .preview-body h4 { margin: 8px 0 4px; font-size: 13px; }
+  .preview-body code { background: #F4F4F5; border-radius: 4px; padding: 1px 5px; font-family: Consolas, monospace; font-size: 11px; }
+  .diff-add { color: var(--green); background: #F0FDF4; display: block; font-family: Consolas, monospace; font-size: 11px; padding: 0 6px; }
+  .diff-del { color: #DC2626; background: #FEF2F2; display: block; font-family: Consolas, monospace; font-size: 11px; padding: 0 6px; }
+  .diff-ctx { display: block; font-family: Consolas, monospace; font-size: 11px; color: var(--muted); padding: 0 6px; }
+  .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+
+  /* 全屏预览模拟 */
+  .fullscreen { position: fixed; inset: 0; background: #fff; z-index: 200; display: none; flex-direction: column; }
+  .fullscreen.open { display: flex; }
+  .fs-head { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); font-size: 13px; gap: 8px; }
+</style>
+</head>
+<body>
+
+<!-- ============ 模拟会话页面（简化三栏） ============ -->
+<div class="page">
+  <div class="col-list">
+    <div class="col-title">会话</div>
+    <div class="mock-item"><div class="mock-line" style="width:70%"></div><div class="mock-line" style="width:45%"></div></div>
+    <div class="mock-item on"><div class="mock-line" style="width:80%;background:#D8C9F8"></div><div class="mock-line" style="width:50%"></div></div>
+    <div class="mock-item"><div class="mock-line" style="width:60%"></div><div class="mock-line" style="width:38%"></div></div>
+  </div>
+  <div class="col-chat">
+    <div class="chat-stream">
+      <div class="chat-msg user">帮我做一下这个需求：会话页面悬浮展示变更文件……</div>
+      <div class="chat-msg">好的，我先用 SillySpec 流程分析需求，启动变更 2026-10-13-session-change-files-hover……</div>
+      <div class="running-tip"><span class="spinner"></span> 正在执行任务 task-02：实现后端端点（会话在跑变更，右下角悬浮球呼吸提示）</div>
+    </div>
+    <div class="input-bar">输入消息，@ 可引用变更…</div>
+
+    <!-- ===== 悬浮入口：非圆圈，hover 直接弹下拉列表 ===== -->
+    <button class="hover-entry" id="hoverEntry" title="悬浮查看会话关联的变更文件">
+      <span>🗂 变更文件</span>
+      <span class="cnt-pill pulse">2</span>
+      <span class="arr" id="entryArr">▴</span>
+    </button>
+
+    <!-- hover 弹出的下拉列表（进行中置顶 / 已归档折叠） -->
+    <div class="chg-popover" id="chgPopover">
+      <div class="grp-title">进行中 <span class="cnt">2</span></div>
+      <div class="chg-item sel" onclick="pickAndOpen(this)">
+        <div class="chg-row1"><span class="chg-key">2026-10-13-session-change-files-hover</span><span class="tag thin">轻量</span></div>
+        <div class="chg-row2"><span class="stage-pill">干活中</span><span class="chg-time">刚刚</span></div>
+      </div>
+      <div class="chg-item" onclick="pickAndOpen(this)">
+        <div class="chg-row1"><span class="chg-key">2026-10-13-agentlog-write-diff</span><span class="tag full">全量</span></div>
+        <div class="chg-row2"><span class="stage-pill">execute · 3/5</span><span class="chg-time">5 分钟前</span></div>
+      </div>
+      <button class="arch-toggle" id="archToggle" onclick="toggleArch(event)">▸ 已归档（2）— 点击展开</button>
+      <div class="arch-wrap" id="archWrap" style="display:none">
+        <div class="chg-item" onclick="pickAndOpen(this, true)">
+          <div class="chg-row1"><span class="chg-key">2026-10-12-subagent-stub-reconcile</span><span class="tag arch">已归档</span></div>
+          <div class="chg-row2"><span class="chg-time">10-13 09:12</span></div>
+        </div>
+        <div class="chg-item" onclick="pickAndOpen(this, true)">
+          <div class="chg-row1"><span class="chg-key">2026-10-12-turn-live-visibility</span><span class="tag arch">已归档</span></div>
+          <div class="chg-row2"><span class="chg-time">10-12 22:40</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-detail">
+    <div class="col-title">会话详情</div>
+    <div class="mock-item" style="border-color:var(--border)"><div class="mock-line" style="width:55%"></div><div class="mock-line" style="width:88%"></div></div>
+    <div class="col-title" style="margin-top:14px">任务执行</div>
+    <div class="mock-item" style="border-color:var(--border)"><div class="mock-line" style="width:70%"></div><div class="mock-line" style="width:40%"></div></div>
+  </div>
+</div>
+
+<!-- ============ 大弹窗：max-w-6xl × 85vh ============ -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="live-dot"></span>
+      <h3>变更文件实时预览</h3>
+      <select id="chgSwitch" onchange="switchChg(this.value)" style="border:1px solid var(--border);border-radius:7px;padding:3px 8px;font-size:12px;background:var(--card);max-width:300px">
+        <option value="2026-10-13-session-change-files-hover">2026-10-13-session-change-files-hover（轻量·干活中）</option>
+        <option value="2026-10-13-agentlog-write-diff">2026-10-13-agentlog-write-diff（全量·execute 3/5）</option>
+        <option value="2026-10-12-subagent-stub-reconcile">2026-10-12-subagent-stub-reconcile（已归档）</option>
+        <option value="2026-10-12-turn-live-visibility">2026-10-12-turn-live-visibility（已归档）</option>
+      </select>
+      <span class="refresh-hint">🔄 每 15 秒自动刷新</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- 右栏：ChangeFileTree 零改造复用（树 + 预览 + 全屏，组件内部自带轮询） -->
+      <div class="tree-col">
+        <div class="tree-breadcrumb">与变更文件页同一组件 ChangeFileTree · 选中变更的文件实时刷新</div>
+        <div class="tree-body">
+          <div class="file-tree" id="fileTree">
+            <div class="fnode"><span class="arr">▾</span>📂 <b>2026-10-13-session-change-files-hover</b></div>
+            <div class="fnode" style="padding-left:22px"><span class="arr">▾</span>📂 docs</div>
+            <div class="fnode sel" style="padding-left:40px" onclick="pickFile(this,'design.md')">📄 design.md <span class="badge-mini">排队中</span></div>
+            <div class="fnode" style="padding-left:40px" onclick="pickFile(this,'tasks.md')">📄 tasks.md</div>
+            <div class="fnode" style="padding-left:22px"><span class="arr">▸</span>📂 frontend</div>
+            <div class="fnode" style="padding-left:40px" onclick="pickFile(this,'session-change-files-button.tsx')">📄 session-change-files-button.tsx</div>
+          </div>
+          <div class="preview">
+            <div class="preview-head">
+              📄 <span id="pvName">design.md</span>
+              <span class="path" id="pvPath">.sillyspec/changes/2026-10-13-session-change-files-hover/design.md</span>
+              <button class="btn-full" onclick="openFull()">⛶ 全屏预览</button>
+            </div>
+            <div class="preview-body" id="pvBody">
+              <h4>design.md — Markdown 结构化预览</h4>
+              <p>与变更文件页相同的 <code>ChangeFileTree</code> 组件：Markdown / diff / json / jsonl 均有结构化视图，非文本文件（图片等）走只读卡片。</p>
+              <p style="margin-top:6px">「排队中」徽标 = daemon 尚未落盘的 pending 文件，实时刷新可见。</p>
+              <span class="diff-ctx">@@ 变更文件实时预览（示意 diff 视图）@@</span>
+              <span class="diff-add">+ 悬浮球：会话关联变更时显示，进行中变更呼吸徽标</span>
+              <span class="diff-add">+ 大弹窗：左分组列表 + 右 ChangeFileTree 零改造复用</span>
+              <span class="diff-del">- （无删除行，纯新增功能示意）</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 全屏预览（FilePreviewModal，示意） ============ -->
+<div class="fullscreen" id="fullscreen">
+  <div class="fs-head">📄 <span id="fsName">design.md</span> · 全屏预览（FilePreviewModal 同款）<button class="modal-close" onclick="document.getElementById('fullscreen').classList.remove('open')">✕</button></div>
+  <div class="preview-body" style="padding:20px 28px">全屏预览内容与弹窗内预览同源（组件内置），Esc / ✕ 关闭。</div>
+</div>
+
+<script>
+  const overlay = document.getElementById('overlay');
+  const entry = document.getElementById('hoverEntry');
+  const pop = document.getElementById('chgPopover');
+
+  // hover 入口弹下拉列表；点击也可固定展开（触屏友好）
+  let popOpen = false;
+  entry.addEventListener('mouseenter', () => showPop(true));
+  entry.addEventListener('mouseleave', () => { if (!popOpen) showPop(false); });
+  pop.addEventListener('mouseleave', () => { if (!popOpen) showPop(false); });
+  entry.addEventListener('click', (e) => { e.stopPropagation(); popOpen = !popOpen; showPop(popOpen); });
+  pop.addEventListener('click', (e) => e.stopPropagation());
+  document.addEventListener('click', () => { popOpen = false; showPop(false); });
+  function showPop(on) {
+    pop.classList.toggle('open', on);
+    entry.classList.toggle('open', on);
+    document.getElementById('entryArr').textContent = on ? '▾' : '▴';
+  }
+
+  function closeModal(){ overlay.classList.remove('open'); document.getElementById('fullscreen').classList.remove('open'); }
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
+
+  // 点下拉项：选中并打开大弹窗（弹窗头部下拉同步）
+  function pickAndOpen(el, archived){
+    document.querySelectorAll('#chgPopover .chg-item').forEach(x => x.classList.remove('sel'));
+    el.classList.add('sel');
+    const key = el.querySelector('.chg-key').textContent;
+    document.getElementById('chgSwitch').value = key;
+    switchChg(key);
+    popOpen = false; showPop(false);
+    overlay.classList.add('open');
+  }
+  function switchChg(key){
+    document.getElementById('pvPath').textContent = '.sillyspec/changes/' + key + '/' + document.getElementById('pvName').textContent;
+  }
+  function toggleArch(e){
+    e.stopPropagation();
+    const w = document.getElementById('archWrap'); const t = document.getElementById('archToggle');
+    if (w.style.display === 'none') { w.style.display = 'block'; t.textContent = '▾ 已归档（2）'; }
+    else { w.style.display = 'none'; t.textContent = '▸ 已归档（2）— 点击展开'; }
+  }
+  function pickFile(el, name){
+    document.querySelectorAll('.file-tree .fnode').forEach(x => x.classList.remove('sel'));
+    el.classList.add('sel');
+    document.getElementById('pvName').textContent = name;
+    switchChg(document.getElementById('chgSwitch').value);
+  }
+  function openFull(){
+    document.getElementById('fsName').textContent = document.getElementById('pvName').textContent;
+    document.getElementById('fullscreen').classList.add('open');
+  }
+</script>
+</body>
+</html>

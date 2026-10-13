@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-change-files-hover",
+  "appliedAt": "2026-10-13T05:03:00.866Z",
+  "baseHash": "3a61c468bef542e000e2a649bda6205eddaad508",
+  "files": [
+    {
+      "path": "backend/app/modules/change/router.py",
+      "sha256": "8f3c371993d1d7ea9273933f6bc61b10e7e2308ac6cc6788503f07fd3c30d688"
+    },
+    {
+      "path": "backend/app/modules/change/service.py",
+      "sha256": "bbf0f209110d8aa74b26bfccb88e786d8e6d8d06583caee84dd7ed4ba0e8b505"
+    },
+    {
+      "path": "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+      "sha256": "25e16851ed13b5e6306c6fd57386e5b57bd98dd1e693a38f840d2d49b03aa8d4"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "415107fa9dc451beee0b806da7bfc257f96607c04075859b017486eee7570331"
+    },
+    {
+      "path": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+      "sha256": "7ef38d46f5934cc387b7aa35e3ef5dc98c9024743f0135b2678783a80b8cad47"
+    },
+    {
+      "path": "frontend/src/components/change-file-tree.tsx",
+      "sha256": "34b312e9337c5152be270b302fa942b9de19b4d1615be5d80627c5c57b2486b6"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+      "sha256": "2f223eb2cf83e8efa4ca059ec0c7d9c13453255acb22f9bf748b76e46ca54178"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-change-files-hover.tsx",
+      "sha256": "fe6505a99c5ee40b83fdfff33b6e0c8b22276468649161439d9a4616c0a1c784"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "3a39f9320d3ab4246e0f6232023fa4bf53b5531ba3764b47ad7909f5e3198c91"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "89f3fb4ca937c7c11e83b1855d298ae598c89f5f8a50b87d949e164ee7b62640"
+    },
+    {
+      "path": "frontend/src/lib/changes.ts",
+      "sha256": "6d1ecc57dc7c5c47fac2b389d0e9b50b04b2b7aeb2899a6a8c70ef01a7606610"
+    },
+    {
+      "path": "frontend/src/lib/query-keys.ts",
+      "sha256": "3ef7b21fdb3db02ad2b95f5c04f00f62ff8a83dfe2ab5e2d654ccb6a28cc374c"
+    }
+  ]
+}

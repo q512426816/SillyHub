@@ -27,6 +27,13 @@ export const queryKeys = {
     list: (workspaceId: string, location: string) =>
       ["changeAutolink", "list", workspaceId, location] as const,
   },
+  // 2026-10-13-session-change-files-hover task-03：会话关联变更列表缓存键
+  // （会话页悬浮面板数据源；wid+sid 全进 key——影响结果的变量进 key 本文件头规则）。
+  sessionChanges: {
+    all: ["sessionChanges"] as const,
+    list: (workspaceId: string, sessionId: string) =>
+      ["sessionChanges", "list", workspaceId, sessionId] as const,
+  },
   daemonRuntimes: {
     all: ["daemonRuntimes"] as const,
     list: (params: DaemonRuntimeListParams) =>

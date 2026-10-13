@@ -34,6 +34,9 @@ import {
   SessionInputBar, type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+// 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
+// （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
+import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
 // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
 // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
 // 不破，panel 层零 react-query）。
@@ -4992,6 +4995,22 @@ export function SessionPanelPage({
         <p className="shrink-0 px-5 pb-1 pt-2 text-xs font-medium text-brand-700">
           后台任务仍在运行，会话未结束（详情见头部「后台」）
         </p>
+      )}
+
+      {/* 2026-10-13-session-change-files-hover task-05：悬浮变更文件入口——
+          h-0 相对锚不占布局位，子组件 absolute 悬浮于聊天区右下（bottom 基线
+          = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
+          sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
+          null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
+          进行中变更徽标呼吸提示（FR-02）。 */}
+      {sessionId != null && session?.workspace_id != null && (
+        <div className="relative h-0 w-full">
+          <SessionChangeFilesHover
+            workspaceId={session.workspace_id}
+            sessionId={sessionId}
+            running={running}
+          />
+        </div>
       )}
 
       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：

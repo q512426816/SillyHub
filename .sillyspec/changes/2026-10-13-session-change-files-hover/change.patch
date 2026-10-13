@@ -1,0 +1,1330 @@
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index b72114553..08ec8a4d0 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -45,6 +45,7 @@ from app.modules.change.schema import (
+     ChangeRead,
+     ChangeReparseResponse,
+     ChangeReparseStats,
++    ChangeSummary,
+     ChangeTimelineRead,
+     ChangeUsageRead,
+     ChangeWarning,
+@@ -506,6 +507,47 @@ async def list_change_sessions(
+     return items
+ 
+ 
++@router.get(
++    "/changes/-/by-session/{session_id}",
++    response_model=list[ChangeSummary],
++)
++async def list_session_changes(
++    workspace_id: uuid.UUID,
++    session_id: uuid.UUID,
++    session: SessionDep,
++    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
++) -> list[ChangeSummary]:
++    """列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
++
++    会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询
++    （正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐
++    platform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量
++    ``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。
++
++    排序（service.list_changes_for_session）：未归档（``location != 'archive'``）
++    优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组
++    直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径
++    一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。
++    """
++    # 会话存在性 + 工作空间归属校验：不匹配 → 404（中文文案，l10n 守护把关）。
++    agent_session = (
++        await session.execute(
++            select(AgentSession).where(
++                col(AgentSession.id) == session_id,
++                col(AgentSession.workspace_id) == workspace_id,
++            )
++        )
++    ).scalar_one_or_none()
++    if agent_session is None:
++        raise AppError(
++            "会话不存在或不属于该工作空间。",
++            http_status=404,
++            details={"session_id": str(session_id)},
++        )
++    svc = ChangeService(session)
++    return await svc.list_changes_for_session(workspace_id, session_id)
++
++
+ @router.get(
+     "/changes/{change_id}/usage",
+     response_model=ChangeUsageRead,
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index b4023f9ac..ea202c8f7 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -83,6 +83,11 @@ MAX_RAW_BYTES = 50 * 1024 * 1024  # 50 MB
+ # _ensure_change_row 的 upsert 语义会重建占位行，不丢数据。
+ PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
+ 
++# 2026-10-13-session-change-files-hover task-01 / FR-01：list_changes_for_session
++# 取数窗口（会话关联变更数有界——一个会话挂的变更远少于变更挂的会话；对齐
++# router._CHANGE_SESSIONS_MAX=200 惯例，100 覆盖会话页面悬浮面板全量展示）。
++_SESSION_CHANGES_MAX = 100
++
+ # 2026-08-29-approval-notify-push task-05（D-007@v1 / design §7.3②）：审批结果
+ # 通知 owner 的门中文名映射（title 文案常量集中于此，勿散落触发点）。
+ # 四个审核门 + 旧版 approve/reject（approval）。
+@@ -2245,6 +2250,46 @@ class ChangeService:
+             summaries.append(summary)
+         return summaries
+ 
++    async def list_changes_for_session(
++        self, workspace_id: uuid.UUID, session_id: uuid.UUID
++    ) -> list[ChangeSummary]:
++        """列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
++
++        会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表是
++        会话-变更关联唯一真相（D-001@v2），此前只有正向「变更 → 会话列表」
++        （router.list_change_sessions），本方法补反向查询。
++
++        - 软删变更（``location='deleted'``）排除——与变更中心读侧口径一致；
++        - 取数窗口 ``created_at desc + limit``（对齐 router._CHANGE_SESSIONS_MAX=200
++          惯例；会话挂的变更数远低于上限）；
++        - 复用 ``enrich_summaries`` 批量投影（is_thin/last_pushed_at/pending_review
++          等，R-03 禁 N+1）；
++        - Python 最终排序（规避 PG/SQLite 方言差异，对齐 list_change_sessions
++          模式）：未归档（``location != 'archive'``）优先 → 组内保持 created_at
++          desc（list 稳定排序不破坏取数序）。
++        """
++        changes = (
++            (
++                await self._session.execute(
++                    select(Change)
++                    .join(ChangeSessionLink, ChangeSessionLink.change_id == Change.id)
++                    .where(
++                        ChangeSessionLink.session_id == session_id,
++                        col(Change.workspace_id) == workspace_id,
++                        col(Change.location) != "deleted",
++                    )
++                    .order_by(col(Change.created_at).desc())
++                    .limit(_SESSION_CHANGES_MAX)
++                )
++            )
++            .scalars()
++            .all()
++        )
++        summaries = await self.enrich_summaries(list(changes))
++        # 稳定排序：未归档（False=0）沉底归档（True=1），组内序保持取数序。
++        summaries.sort(key=lambda s: s.location == "archive")
++        return summaries
++
+     # ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token
+     #    task-04，design §5 Phase 2.1/2.2/2.4；R-03/R-06 两次批量 IN 禁 N+1）──
+ 
+diff --git a/backend/app/modules/change/tests/test_session_changes_endpoint.py b/backend/app/modules/change/tests/test_session_changes_endpoint.py
+new file mode 100644
+index 000000000..66d328313
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_session_changes_endpoint.py
+@@ -0,0 +1,327 @@
++"""会话关联变更列表端点单测（2026-10-13-session-change-files-hover / task-01）。
++
++覆盖 ``GET /api/workspaces/{wid}/changes/-/by-session/{session_id}``（FR-01 /
++D-001@v2 反向查询 / D-003@v1 纯前端拼凑否决的证据性对立面）：
++
++1. 多变更排序——未归档（active）优先、组内 created_at desc，归档沉底；
++2. 无关联变更返回空列表（不 404——会话刚建、尚未跑变更是常态）；
++3. 软删变更（location='deleted'）排除，与变更中心读侧口径一致；
++4. 归档变更正常返回（沉底，不丢——前端「已归档折叠可展开」数据源）；
++5. 会话不存在 / 不属于该工作空间 → 404 中文文案；
++6. 跨工作空间隔离——ws_b 的 link 不串到 ws_a；
++7. is_thin 投影——change_type='quick' 且建行在分流时间窗内 → True（悬浮面板
++   轻量/全量徽标数据源，三分支②口径）。
++
++复用 backend/conftest.py 的 in-memory SQLite + AsyncClient + admin auth
++fixture，构造真实 Workspace / User / DaemonRuntime / AgentSession（带
++workspace_id 归属）/ Change / ChangeSessionLink 行（不 mock model，避免遮蔽
++真实 FK 路径；fixture 模式参照 test_quicklog_sessions_api.py）。
++
++Author: SillySpec change 2026-10-13-session-change-files-hover (W1 task-01)
++Created: 2026-10-13
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++from pathlib import Path
++
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentSession
++from app.modules.auth.model import User
++from app.modules.change.model import Change, ChangeSessionLink
++from app.modules.daemon.model import DaemonRuntime
++from app.modules.workspace.model import Workspace
++
++# ── Fixtures / helpers（模式对齐 test_quicklog_sessions_api.py）──────────────
++
++
++async def _make_admin(db_session: AsyncSession) -> User:
++    """取根 conftest ``auth_headers`` fixture 已建好的平台管理员。"""
++    admin = (
++        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin
++
++
++async def _make_workspace(db_session: AsyncSession, *, root_path: str) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="t-ws",
++        slug=f"t-ws-{uuid.uuid4().hex[:8]}",
++        root_path=root_path,
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++async def _make_runtime(db_session: AsyncSession, user_id: uuid.UUID) -> DaemonRuntime:
++    rt = DaemonRuntime(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        name="daemon",
++        provider="claude",
++        status="online",
++        last_heartbeat_at=datetime.now(UTC),
++    )
++    db_session.add(rt)
++    await db_session.commit()
++    await db_session.refresh(rt)
++    return rt
++
++
++async def _make_session(
++    db_session: AsyncSession,
++    *,
++    user_id: uuid.UUID,
++    runtime_id: uuid.UUID,
++    workspace_id: uuid.UUID,
++) -> AgentSession:
++    """造会话行——本端点校验 ``AgentSession.workspace_id`` 归属，必传。"""
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=runtime_id,
++        workspace_id=workspace_id,
++        provider="claude",
++        status="ended",
++        turn_count=1,
++        created_at=now,
++        last_active_at=now,
++        ended_at=now,
++    )
++    db_session.add(sess)
++    await db_session.commit()
++    await db_session.refresh(sess)
++    return sess
++
++
++async def _make_change(
++    db_session: AsyncSession,
++    *,
++    workspace_id: uuid.UUID,
++    change_key: str,
++    location: str = "active",
++    created_at: datetime | None = None,
++    change_type: str | None = None,
++) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=workspace_id,
++        change_key=change_key,
++        title=f"变更 {change_key}",
++        location=location,
++        path=f".sillyspec/changes/{change_key}",
++        change_type=change_type,
++        created_at=created_at or datetime.now(UTC),
++    )
++    db_session.add(change)
++    await db_session.commit()
++    await db_session.refresh(change)
++    return change
++
++
++async def _make_link(
++    db_session: AsyncSession,
++    *,
++    change_id: uuid.UUID,
++    session_id: uuid.UUID,
++) -> ChangeSessionLink:
++    """造 change_session_links 绑定行（本端点唯一数据源，D-001@v2）。"""
++    link = ChangeSessionLink(
++        id=uuid.uuid4(),
++        change_id=change_id,
++        session_id=session_id,
++    )
++    db_session.add(link)
++    await db_session.commit()
++    await db_session.refresh(link)
++    return link
++
++
++# ── GET /workspaces/{wid}/changes/-/by-session/{session_id} ─────────────────
++
++
++class TestListSessionChanges:
++    """task-01（FR-01）：会话关联变更反向列表。"""
++
++    async def test_sorted_unarchived_first_then_created_desc(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """排序：未归档优先、组内 created_at desc、归档沉底（FR-01 主路径）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++
++        base = datetime.now(UTC) - timedelta(hours=3)
++        # 造序：归档最新 → active 较旧 → active 最旧。期望返回序反转 active 在前。
++        c_active_old = await _make_change(
++            db_session, workspace_id=ws.id, change_key="active-old", created_at=base
++        )
++        c_active_new = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="active-new",
++            created_at=base + timedelta(minutes=10),
++            change_type="quick",  # 分流窗内 quick → is_thin True（三分支②）
++        )
++        c_archived = await _make_change(
++            db_session,
++            workspace_id=ws.id,
++            change_key="archived-1",
++            location="archive",
++            created_at=base + timedelta(minutes=20),
++        )
++        for c in (c_active_old, c_active_new, c_archived):
++            await _make_link(db_session, change_id=c.id, session_id=sess.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        items = resp.json()
++        assert [i["change_key"] for i in items] == [
++            "active-new",
++            "active-old",
++            "archived-1",
++        ]
++        # 投影字段在位：轻量出身徽标数据源（quick 分流窗内 → True；其余 False）。
++        by_key = {i["change_key"]: i for i in items}
++        assert by_key["active-new"]["is_thin"] is True
++        assert by_key["active-old"]["is_thin"] is False
++        assert by_key["archived-1"]["location"] == "archive"
++
++    async def test_empty_when_no_links(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """会话存在但无关联变更 → 200 空列表（不 404，FR-01 场景约束）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        assert resp.json() == []
++
++    async def test_deleted_change_excluded(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """软删变更（location='deleted'）排除——读侧防复活口径对齐变更中心。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        sess = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws.id
++        )
++        c_alive = await _make_change(db_session, workspace_id=ws.id, change_key="alive")
++        c_deleted = await _make_change(
++            db_session, workspace_id=ws.id, change_key="tombstone", location="deleted"
++        )
++        await _make_link(db_session, change_id=c_alive.id, session_id=sess.id)
++        await _make_link(db_session, change_id=c_deleted.id, session_id=sess.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{sess.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        items = resp.json()
++        assert [i["change_key"] for i in items] == ["alive"]
++
++    async def test_404_when_session_missing(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """会话不存在 → 404 中文文案（l10n 守护口径）。"""
++        ws = await _make_workspace(db_session, root_path=str(tmp_path))
++        resp = await client.get(
++            f"/api/workspaces/{ws.id}/changes/-/by-session/{uuid.uuid4()}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 404, resp.text
++        # AppError 统一错误体为 {code, message}（core/errors.py §契约），非 FastAPI detail。
++        assert "会话不存在" in resp.json()["message"]
++
++    async def test_404_cross_workspace_session(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """会话属于 ws_b、用 ws_a 查 → 404（工作空间归属校验，防跨空间枚举）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws_a = await _make_workspace(db_session, root_path=str(tmp_path / "a"))
++        ws_b = await _make_workspace(db_session, root_path=str(tmp_path / "b"))
++        sess_b = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws_b.id
++        )
++
++        resp = await client.get(
++            f"/api/workspaces/{ws_a.id}/changes/-/by-session/{sess_b.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 404, resp.text
++
++    async def test_cross_workspace_links_not_leaked(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++        tmp_path: Path,
++    ) -> None:
++        """ws_b 的变更 link 不串到 ws_a 的会话（link JOIN 带 workspace 过滤）。"""
++        admin = await _make_admin(db_session)
++        rt = await _make_runtime(db_session, admin.id)
++        ws_a = await _make_workspace(db_session, root_path=str(tmp_path / "a"))
++        ws_b = await _make_workspace(db_session, root_path=str(tmp_path / "b"))
++        sess_a = await _make_session(
++            db_session, user_id=admin.id, runtime_id=rt.id, workspace_id=ws_a.id
++        )
++        # 变更挂在 ws_b 名下，但 link 指向 ws_a 的会话——workspace 过滤应拦下。
++        c_b = await _make_change(db_session, workspace_id=ws_b.id, change_key="ws-b-only")
++        await _make_link(db_session, change_id=c_b.id, session_id=sess_a.id)
++
++        resp = await client.get(
++            f"/api/workspaces/{ws_a.id}/changes/-/by-session/{sess_a.id}",
++            headers=auth_headers,
++        )
++        assert resp.status_code == 200, resp.text
++        assert resp.json() == []
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 424997886..0bba6310a 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4951,6 +4951,64 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/changes/-/by-session/{session_id}": {
++      "get": {
++        "tags": [
++          "change"
++        ],
++        "summary": "List Session Changes",
++        "description": "列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。\n\n会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询\n（正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐\nplatform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量\n``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。\n\n排序（service.list_changes_for_session）：未归档（``location != 'archive'``）\n优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组\n直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径\n一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。",
++        "operationId": "list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          },
++          {
++            "name": "session_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Session Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "type": "array",
++                  "items": {
++                    "$ref": "#/components/schemas/ChangeSummary"
++                  },
++                  "title": "Response List Session Changes Api Workspaces  Workspace Id  Changes   By Session  Session Id  Get"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
+       "get": {
+         "tags": [
+diff --git a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+new file mode 100644
+index 000000000..bad725cc8
+--- /dev/null
++++ b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+@@ -0,0 +1,118 @@
++import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
++
++// vi.mock 解耦后端（对齐 __tests__/change-file-tree.test.tsx 模式）；
++// 本文件只测 autoRefreshMs 定时器行为，中文名映射等无关导出一并 stub。
++vi.mock("@/lib/change-files", () => ({
++  buildChangeFileTree: (items: { path: string; name: string; is_text: boolean }[]) =>
++    items.map((i) => ({ name: i.name, path: i.path, children: [], doc: i })),
++  listChangeFiles: vi.fn(),
++  getChangeFileContent: vi.fn(),
++  saveChangeFileContent: vi.fn(),
++  listPendingChangeFiles: vi.fn(),
++  fetchChangeFileRaw: vi.fn(),
++  changeFileCnName: () => null,
++}));
++
++// FilePreviewModal 浅 stub：本文件不交互预览，仅防真实弹窗树拖累 jsdom。
++vi.mock("@/components/files/file-preview-modal", () => ({
++  FilePreviewModal: () => null,
++}));
++
++import { render } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactElement } from "react";
++import { ChangeFileTree } from "@/components/change-file-tree";
++import { listChangeFiles, listPendingChangeFiles } from "@/lib/change-files";
++
++const mockedList = vi.mocked(listChangeFiles);
++const mockedPending = vi.mocked(listPendingChangeFiles);
++
++function fileResp() {
++  // 对齐 ChangeFileList / ChangeFileEntry 契约（change_id/size/last_modified_at 必填）
++  return {
++    change_id: "chg-1",
++    items: [
++      {
++        path: "docs/design.md",
++        name: "design.md",
++        is_text: true,
++        size: 1024,
++        last_modified_at: "2026-10-13T12:00:00Z",
++      },
++    ],
++  };
++}
++
++function renderTree(ui: ReactElement) {
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
++}
++
++async function flushInitialLoad() {
++  // 挂载 effect 的 Promise.all 走微任务；fake timers 下 waitFor 不推进，
++  // 用 advanceTimersByTimeAsync(0) 排干微任务队列让初始请求落地。
++  await vi.advanceTimersByTimeAsync(0);
++  expect(mockedList).toHaveBeenCalled();
++}
++
++beforeAll(() => {
++  // jsdom 未实现 blob URL（对齐既有测试 beforeAll 模式）
++  Object.defineProperty(URL, "createObjectURL", { value: vi.fn(() => "blob:mock"), writable: true });
++  Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), writable: true });
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.clearAllMocks();
++});
++
++describe("ChangeFileTree autoRefreshMs（2026-10-13-session-change-files-hover task-02 / D-004@v1）", () => {
++  it("不传 autoRefreshMs：无新增定时器，请求次数不随时间增长（既有行为回归守护）", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    renderTree(<ChangeFileTree workspaceId="ws-1" changeId="chg-1" />);
++    await flushInitialLoad();
++    const afterMount = mockedList.mock.calls.length;
++
++    await vi.advanceTimersByTimeAsync(45_000);
++    expect(mockedList.mock.calls.length).toBe(afterMount);
++    expect(mockedPending.mock.calls.length).toBe(afterMount);
++  });
++
++  it("传 autoRefreshMs=15000：每 15s 轮询文件树与排队清单", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    renderTree(<ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />);
++    await flushInitialLoad();
++    expect(mockedList.mock.calls.length).toBe(1);
++
++    await vi.advanceTimersByTimeAsync(15_000);
++    expect(mockedList.mock.calls.length).toBe(2);
++    expect(mockedPending.mock.calls.length).toBe(2);
++
++    await vi.advanceTimersByTimeAsync(30_000);
++    expect(mockedList.mock.calls.length).toBe(4);
++  });
++
++  it("卸载后定时器清除：unmount 再推进时间无新请求", async () => {
++    vi.useFakeTimers();
++    mockedList.mockResolvedValue(fileResp());
++    mockedPending.mockResolvedValue({ items: [] });
++
++    const { unmount } = renderTree(
++      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />,
++    );
++    await flushInitialLoad();
++
++    unmount();
++    const atUnmount = mockedList.mock.calls.length;
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(mockedList.mock.calls.length).toBe(atUnmount);
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 23a4a1753..8d49cfab4 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -43,6 +43,10 @@ interface Props {
+   changeId: string;
+   lastSyncedAt?: string | null;
+   daemonOnline?: boolean;
++  /** 文件树自动刷新周期（毫秒）。不传（默认）不轮询——既有消费方行为不变
++   * （2026-10-13-session-change-files-hover task-02 / D-004@v1：会话悬浮弹窗
++   * 等实时消费方传 15000，agent 跑动中产出文件即时可见）。 */
++  autoRefreshMs?: number;
+ }
+ 
+ type SaveStatus = "idle" | "saving" | "done" | "pending" | "failed";
+@@ -363,7 +367,13 @@ function TreeView({
+   );
+ }
+ 
+-export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true }: Props) {
++export function ChangeFileTree({
++  workspaceId,
++  changeId,
++  lastSyncedAt,
++  daemonOnline = true,
++  autoRefreshMs,
++}: Props) {
+   const [tree, setTree] = useState<ChangeFileTreeNode[]>([]);
+   const [selected, setSelected] = useState<ChangeFileEntry | null>(null);
+   const [content, setContent] = useState<string>("");
+@@ -426,6 +436,20 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
+     };
+   }, [refreshTree, refreshPending]);
+ 
++  // 可选自动刷新（2026-10-13-session-change-files-hover task-02 / D-004@v1）：
++  // 传周期（毫秒）时轮询文件树 + 排队清单，卸载清除；不传 / 非正值零定时器，
++  // 既有消费方（变更详情页、移动端）行为不变。与保存 pending 轮询（上方 2s，
++  // 职责正交——那个只收敛保存状态）互不干扰；document.hidden 跳过对齐其口径。
++  useEffect(() => {
++    if (!autoRefreshMs || autoRefreshMs <= 0) return;
++    const id = setInterval(() => {
++      if (typeof document !== "undefined" && document.hidden) return;
++      void refreshTree();
++      void refreshPending();
++    }, autoRefreshMs);
++    return () => clearInterval(id);
++  }, [autoRefreshMs, refreshTree, refreshPending]);
++
+   // 保存后 pending 轮询：daemon-client 返 pending 时 2s 轮询直到该 path 消失或翻 failed
+   useEffect(() => {
+     if (saveStatus !== "pending") return;
+diff --git a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+new file mode 100644
+index 000000000..fd0aab684
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+@@ -0,0 +1,197 @@
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++// useSessionChanges 解耦后端（本文件只测 UI 分组/交互，数据层 hook 有独立职责）
++vi.mock("@/lib/changes", () => ({
++  useSessionChanges: vi.fn(),
++}));
++
++// ChangeFileTree 浅 mock：组件本体（树+预览+全屏）已有专属测试
++// （__tests__/change-file-tree*.test.tsx），此处捕获 props 断言接线契约——
++// changeId 正确 / autoRefreshMs=15000 / key 随切换重挂载。
++const treeMounts = vi.hoisted(
++  () => [] as Array<{ changeId: string; autoRefreshMs?: number }>,
++);
++vi.mock("@/components/change-file-tree", () => ({
++  ChangeFileTree: (props: { changeId: string; autoRefreshMs?: number }) => {
++    treeMounts.push({ changeId: props.changeId, autoRefreshMs: props.autoRefreshMs });
++    return <div data-testid={`change-file-tree-${props.changeId}`} />;
++  },
++}));
++
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++import {
++  SessionChangeFilesHover,
++  splitByArchive,
++} from "@/components/daemon/session-change-files-hover";
++import { useSessionChanges } from "@/lib/changes";
++import type { ChangeSummary } from "@/lib/changes";
++
++const mockedHook = vi.mocked(useSessionChanges);
++
++function change(partial: Partial<ChangeSummary>): ChangeSummary {
++  return {
++    id: "id-x",
++    change_key: "k",
++    title: null,
++    description: null,
++    status: "active",
++    location: "active",
++    change_type: null,
++    is_thin: false,
++    affected_components: [],
++    owner_id: null,
++    current_stage: null,
++    pending_review: null,
++    step_progress: null,
++    owner_name: null,
++    last_pushed_at: null,
++    usage: null,
++    updated_at: "2026-10-13T12:00:00Z",
++    ...partial,
++  } as ChangeSummary;
++}
++
++const activeThin = change({
++  id: "c-1",
++  change_key: "2026-10-13-hover-demo",
++  current_stage: "execute",
++  is_thin: true,
++});
++const activeFull = change({
++  id: "c-2",
++  change_key: "2026-10-13-agentlog-diff",
++  current_stage: "plan",
++});
++const archivedOne = change({
++  id: "c-3",
++  change_key: "2026-10-12-old-change",
++  location: "archive",
++});
++
++function mockData(data: ChangeSummary[] | undefined) {
++  mockedHook.mockReturnValue({ data } as ReturnType<typeof useSessionChanges>);
++}
++
++/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
++async function openPopover() {
++  fireEvent.mouseEnter(screen.getByTestId("session-change-files-hover").querySelector("button")!);
++  await screen.findByTestId("session-change-popover");
++}
++
++/** 触发 antd v6 Select 选某选项（mousedown 打开 portal 下拉 + click 选项）。 */
++async function selectAntdOption(optionText: string) {
++  const zone = document.querySelector(".ant-select") as HTMLElement;
++  expect(zone).toBeTruthy();
++  fireEvent.mouseDown(zone.querySelector(".ant-select-selector") ?? zone);
++  const option = await waitFor(
++    () => {
++      const el = [
++        ...document.querySelectorAll(".ant-select-item-option"),
++      ].find((o) => o.textContent?.includes(optionText)) as HTMLElement;
++      expect(el).toBeTruthy();
++      return el;
++    },
++    { timeout: 3000 },
++  );
++  fireEvent.mouseDown(option);
++  fireEvent.click(option);
++}
++
++beforeEach(() => {
++  treeMounts.length = 0;
++});
++
++afterEach(() => {
++  vi.clearAllMocks();
++});
++
++describe("splitByArchive（纯函数）", () => {
++  it("未归档在前归档在后分组，保持入参序（后端已排序）", () => {
++    const { active, archived } = splitByArchive([activeThin, archivedOne, activeFull]);
++    expect(active.map((c) => c.id)).toEqual(["c-1", "c-2"]);
++    expect(archived.map((c) => c.id)).toEqual(["c-3"]);
++  });
++});
++
++describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-04）", () => {
++  it("无关联变更（data 空数组/未就绪）不渲染入口", () => {
++    mockData([]);
++    const { container } = render(
++      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />,
++    );
++    expect(container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
++
++    mockData(undefined);
++    const r2 = render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    expect(r2.container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
++  });
++
++  it("hover 弹下拉：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
++    mockData([activeThin, activeFull, archivedOne]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    await openPopover();
++
++    expect(screen.getByText("进行中（2）")).toBeTruthy();
++    expect(screen.getByText("轻量")).toBeTruthy();
++    expect(screen.getByText("全量")).toBeTruthy();
++    // 阶段中文名（WORKFLOW_STAGE_LABELS 口径）
++    expect(screen.getByText("执行")).toBeTruthy();
++    expect(screen.getByText("规划")).toBeTruthy();
++    // 归档项默认收起
++    expect(screen.queryByTestId("session-change-item-2026-10-12-old-change")).toBeNull();
++    expect(screen.getByTestId("session-change-archive-toggle").textContent).toContain("已归档（1）");
++  });
++
++  it("已归档组点击展开/再收起", async () => {
++    mockData([activeThin, archivedOne]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-change-archive-toggle"));
++    expect(screen.getByTestId("session-change-item-2026-10-12-old-change")).toBeTruthy();
++
++    fireEvent.click(screen.getByTestId("session-change-archive-toggle"));
++    expect(screen.queryByTestId("session-change-item-2026-10-12-old-change")).toBeNull();
++  });
++
++  it("点下拉项开大弹窗：ChangeFileTree 接收正确 changeId 与 autoRefreshMs=15000（FR-04/D-004@v1）", async () => {
++    mockData([activeThin, archivedOne]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-change-item-2026-10-13-hover-demo"));
++    await screen.findByTestId("change-file-tree-c-1");
++    expect(treeMounts.at(-1)).toEqual({ changeId: "c-1", autoRefreshMs: 15000 });
++    expect(screen.getByText("变更文件实时预览")).toBeTruthy();
++  });
++
++  it("弹窗头部 Select 切换变更：ChangeFileTree key 重挂载换 changeId", async () => {
++    mockData([activeThin, archivedOne]);
++    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-change-item-2026-10-13-hover-demo"));
++    await screen.findByTestId("change-file-tree-c-1");
++    expect(treeMounts).toHaveLength(1);
++
++    await selectAntdOption("2026-10-12-old-change");
++    await screen.findByTestId("change-file-tree-c-3");
++    expect(treeMounts).toHaveLength(2);
++    expect(treeMounts.at(-1)).toEqual({ changeId: "c-3", autoRefreshMs: 15000 });
++  });
++
++  it("running 且有进行中变更时入口徽标呼吸；非 running 不呼吸", () => {
++    mockData([activeThin]);
++    const { rerender } = render(
++      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" running />,
++    );
++    expect(screen.getByTestId("session-change-count").className).toContain("animate-pulse");
++
++    rerender(
++      <SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" running={false} />,
++    );
++    expect(screen.getByTestId("session-change-count").className).not.toContain("animate-pulse");
++    // 徽标计数 = 进行中变更数
++    expect(screen.getByTestId("session-change-count").textContent).toBe("1");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+new file mode 100644
+index 000000000..dd502eae0
+--- /dev/null
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -0,0 +1,228 @@
++"use client";
++
++import { useMemo, useState } from "react";
++import { FolderGit2 } from "lucide-react";
++import { Popover, Select } from "antd";
++
++import { ChangeFileTree } from "@/components/change-file-tree";
++import { WORKFLOW_STAGE_LABELS } from "@/components/changes/detail/change-stage-header";
++import { Button } from "@/components/ui/button";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { useSessionChanges, type ChangeSummary } from "@/lib/changes";
++
++/**
++ * 会话页面悬浮变更文件面板（2026-10-13-session-change-files-hover task-04 /
++ * FR-02~05 / D-001@v2：胶囊入口 + hover 下拉列表 + 点项开大弹窗）。
++ *
++ * - 胶囊入口非圆圈（用户 step5 修正），右下角悬浮于输入条上方；无关联变更
++ *   （含已归档）不渲染（FR-02 显隐）；
++ * - hover（或触屏点击）弹下拉分组列表：进行中置顶（轻量/全量徽标 + 阶段 +
++ *   时间），已归档默认折叠可展开（FR-03）；
++ * - 点项开大弹窗（规格对齐 changes/detail/change-files-card.tsx：shadcn
++ *   Dialog max-w-6xl × 85vh，Modal 形态不用 Drawer——FRONTEND_PAGE_STYLE §6），
++ *   内嵌与变更文件页相同的 ChangeFileTree（key=changeId 切换重挂载），
++ *   autoRefreshMs=15000 文件树实时刷新（D-004@v1）；头部 Select 可切换变更（FR-04）；
++ * - 下拉/弹窗任一打开时数据层 15s 轮询（useSessionChanges active）。
++ */
++export interface SessionChangeFilesHoverProps {
++  workspaceId: string;
++  sessionId: string;
++  /** 会话在跑（turnState.currentRunId != null）——进行中变更徽标呼吸提示 */
++  running?: boolean;
++}
++
++/** 进行中/归档分组（纯函数，测试导出；后端已按未归档优先+created_at desc 排序）。 */
++export function splitByArchive(changes: ChangeSummary[]): {
++  active: ChangeSummary[];
++  archived: ChangeSummary[];
++} {
++  const active: ChangeSummary[] = [];
++  const archived: ChangeSummary[] = [];
++  for (const c of changes) {
++    if (c.location === "archive") archived.push(c);
++    else active.push(c);
++  }
++  return { active, archived };
++}
++
++function stageLabel(c: ChangeSummary): string {
++  if (c.location === "archive") return "已归档";
++  if (!c.current_stage) return "未开始";
++  return WORKFLOW_STAGE_LABELS[c.current_stage] ?? c.current_stage;
++}
++
++function shortTime(iso: string | null | undefined): string {
++  if (!iso) return "—";
++  const d = new Date(iso);
++  if (Number.isNaN(d.getTime())) return "—";
++  return d.toLocaleString("zh-CN", {
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++  });
++}
++
++export function SessionChangeFilesHover({
++  workspaceId,
++  sessionId,
++  running = false,
++}: SessionChangeFilesHoverProps) {
++  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底），antd 只发
++  // onOpenChange 事件，state 是唯一真相。
++  const [popoverOpen, setPopoverOpen] = useState(false);
++  const [archiveExpanded, setArchiveExpanded] = useState(false);
++  const [dialogChangeId, setDialogChangeId] = useState<string | null>(null);
++
++  const { data } = useSessionChanges(workspaceId, sessionId, {
++    active: popoverOpen || dialogChangeId !== null,
++  });
++
++  const { active, archived } = useMemo(() => splitByArchive(data ?? []), [data]);
++
++  // 查询未就绪（undefined）或确无关联变更：不渲染入口，不占位（FR-02）。
++  if (!data || data.length === 0) return null;
++
++  const openDialog = (changeId: string) => {
++    setPopoverOpen(false);
++    setDialogChangeId(changeId);
++  };
++
++  const renderItem = (c: ChangeSummary) => (
++    <button
++      key={c.id}
++      type="button"
++      onClick={() => openDialog(c.id)}
++      data-testid={`session-change-item-${c.change_key}`}
++      className="w-full rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:border-brand-400 hover:bg-accent"
++    >
++      <div className="flex items-center gap-1.5">
++        <span className="truncate text-xs font-medium">{c.change_key}</span>
++        {c.location !== "archive" && (
++          <span
++            className={`shrink-0 rounded px-1 py-px text-[10px] font-semibold ${
++              c.is_thin
++                ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
++                : "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300"
++            }`}
++          >
++            {c.is_thin ? "轻量" : "全量"}
++          </span>
++        )}
++      </div>
++      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
++        <span className="rounded bg-emerald-50 px-1 py-px font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
++          {stageLabel(c)}
++        </span>
++        <span className="ml-auto">{shortTime(c.updated_at)}</span>
++      </div>
++    </button>
++  );
++
++  const popoverContent = (
++    <div
++      data-testid="session-change-popover"
++      className="max-h-[60vh] w-80 overflow-auto p-1"
++    >
++      <div className="px-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">
++        进行中（{active.length}）
++      </div>
++      {active.map(renderItem)}
++      {archived.length > 0 && (
++        <>
++          <button
++            type="button"
++            data-testid="session-change-archive-toggle"
++            onClick={() => setArchiveExpanded((v) => !v)}
++            className="mt-1.5 w-full rounded-md border border-dashed px-2.5 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-brand-400 hover:text-foreground"
++          >
++            {archiveExpanded ? "▾" : "▸"} 已归档（{archived.length}）
++            {archiveExpanded ? "" : "— 点击展开"}
++          </button>
++          {archiveExpanded && archived.map(renderItem)}
++        </>
++      )}
++    </div>
++  );
++
++  const selectOptions = data.map((c) => ({
++    value: c.id,
++    label:
++      c.location === "archive"
++        ? `${c.change_key}（已归档）`
++        : `${c.change_key}（${c.is_thin ? "轻量" : "全量"}·${stageLabel(c)}）`,
++  }));
++
++  return (
++    <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex justify-end print:hidden">
++      <div className="pointer-events-auto" data-testid="session-change-files-hover">
++        <Popover
++          open={popoverOpen}
++          onOpenChange={setPopoverOpen}
++          trigger={["hover", "click"]}
++          placement="topRight"
++          content={popoverContent}
++          styles={{ container: { padding: 4 } }}
++        >
++          <Button
++            variant="outline"
++            size="sm"
++            className="gap-1.5 rounded-lg shadow-sm"
++            aria-label="悬浮查看会话关联的变更文件"
++          >
++            <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
++            变更文件
++            <span
++              data-testid="session-change-count"
++              className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
++                running && active.length > 0 ? "animate-pulse" : ""
++              }`}
++            >
++              {active.length}
++            </span>
++          </Button>
++        </Popover>
++
++        <Dialog
++          open={dialogChangeId !== null}
++          onOpenChange={(o) => {
++            if (!o) setDialogChangeId(null);
++          }}
++        >
++          <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
++            <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3">
++              <DialogTitle className="text-sm">变更文件实时预览</DialogTitle>
++              <Select
++                size="small"
++                value={dialogChangeId ?? undefined}
++                onChange={(v: string) => setDialogChangeId(v)}
++                options={selectOptions}
++                className="min-w-0 max-w-[360px] flex-1"
++                data-testid="session-change-select"
++              />
++              <DialogDescription className="shrink-0 text-[11px]">
++                与变更文件页同组件 · 15 秒自动刷新
++              </DialogDescription>
++            </DialogHeader>
++            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++              {dialogChangeId && (
++                <ChangeFileTree
++                  key={dialogChangeId}
++                  workspaceId={workspaceId}
++                  changeId={dialogChangeId}
++                  autoRefreshMs={15000}
++                />
++              )}
++            </div>
++          </DialogContent>
++        </Dialog>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 0314b72cd..006ccfbec 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -34,6 +34,9 @@ import {
+   SessionInputBar, type SessionInputMentions,
+ } from "@/components/daemon/session-input-bar";
+ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
++// 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
++// （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
++import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
+ // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+ // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+ // 不破，panel 层零 react-query）。
+@@ -4994,6 +4997,22 @@ export function SessionPanelPage({
+         </p>
+       )}
+ 
++      {/* 2026-10-13-session-change-files-hover task-05：悬浮变更文件入口——
++          h-0 相对锚不占布局位，子组件 absolute 悬浮于聊天区右下（bottom 基线
++          = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
++          sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
++          null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
++          进行中变更徽标呼吸提示（FR-02）。 */}
++      {sessionId != null && session?.workspace_id != null && (
++        <div className="relative h-0 w-full">
++          <SessionChangeFilesHover
++            workspaceId={session.workspace_id}
++            sessionId={sessionId}
++            running={running}
++          />
++        </div>
++      )}
++
+       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：
+           ctx 用量行（圆环+额度胶囊）自输入框上方独占行收进配置条行尾插槽
+           （trailing），不再独占一行；输入区顶部间距由容器 pt-3 保持。 */}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 53f1584f0..17d15d309 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1954,6 +1954,36 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/changes/-/by-session/{session_id}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Session Changes
++         * @description 列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
++         *
++         *     会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询
++         *     （正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐
++         *     platform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量
++         *     ``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。
++         *
++         *     排序（service.list_changes_for_session）：未归档（``location != 'archive'``）
++         *     优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组
++         *     直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径
++         *     一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。
++         */
++        get: operations["list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
+         parameters: {
+             query?: never;
+@@ -32593,6 +32623,38 @@ export interface operations {
+             };
+         };
+     };
++    list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++                session_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ChangeSummary"][];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index c90cf8979..9d87397cf 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -1,5 +1,8 @@
++import { useQuery } from "@tanstack/react-query";
++
+ import { apiFetch } from "./api";
+ import type { components } from "./api-types";
++import { queryKeys } from "./query-keys";
+ 
+ /**
+  * 变更摘要（列表项）。对齐后端 schema（components.schemas.ChangeSummary）。
+@@ -115,6 +118,44 @@ export function getChange(workspaceId: string, changeId: string) {
+   );
+ }
+ 
++// ── 会话关联变更列表（2026-10-13-session-change-files-hover task-03 / FR-01）──
++//
++// GET /api/workspaces/{wid}/changes/-/by-session/{sid}——change_session_links
++// M:N 表反向查询（后端 service.list_changes_for_session），排序「未归档优先 →
++// created_at desc」；软删排除。会话页悬浮变更文件面板的数据源（D-001@v2）。
++
++/**
++ * 拉取某会话关联的全部变更摘要。`-` 为路径占位符（对齐 platform_sync 端点
++ * 惯例），非参数。404（会话不存在/跨空间）经 apiFetch 抛 ApiError。
++ */
++export function listSessionChanges(workspaceId: string, sessionId: string) {
++  return apiFetch<ChangeSummary[]>(
++    `/api/workspaces/${workspaceId}/changes/-/by-session/${sessionId}`,
++  );
++}
++
++/**
++ * 会话关联变更列表 hook（悬浮面板消费）。
++ *
++ * - `active` 为真（悬浮下拉/弹窗打开）时 15s 轮询刷新（FR-05——跑动中的变更
++ *   状态迁移/新增变更低频变化），关闭即停（不后台空转）；
++ * - staleTime 10s：入口显隐/徽标数需要较新数据但不必秒级；
++ * - placeholderData 保上次数据：列表短暂 refetch 不闪空。
++ */
++export function useSessionChanges(
++  workspaceId: string,
++  sessionId: string,
++  options?: { active?: boolean },
++) {
++  return useQuery({
++    queryKey: queryKeys.sessionChanges.list(workspaceId, sessionId),
++    queryFn: () => listSessionChanges(workspaceId, sessionId),
++    staleTime: 10_000,
++    refetchInterval: options?.active ? 15_000 : false,
++    placeholderData: (prev) => prev,
++  });
++}
++
+ // ── 单文件变化比对（ql-20260910-017-2006，scope-audit --file 平台入口）─────
+ 
+ /** 单文件 diff 响应。对齐后端 schema（components.schemas.ScopeFileDiffResponse）。 */
+diff --git a/frontend/src/lib/query-keys.ts b/frontend/src/lib/query-keys.ts
+index 837037ffa..8302a8506 100644
+--- a/frontend/src/lib/query-keys.ts
++++ b/frontend/src/lib/query-keys.ts
+@@ -27,6 +27,13 @@ export const queryKeys = {
+     list: (workspaceId: string, location: string) =>
+       ["changeAutolink", "list", workspaceId, location] as const,
+   },
++  // 2026-10-13-session-change-files-hover task-03：会话关联变更列表缓存键
++  // （会话页悬浮面板数据源；wid+sid 全进 key——影响结果的变量进 key 本文件头规则）。
++  sessionChanges: {
++    all: ["sessionChanges"] as const,
++    list: (workspaceId: string, sessionId: string) =>
++      ["sessionChanges", "list", workspaceId, sessionId] as const,
++  },
+   daemonRuntimes: {
+     all: ["daemonRuntimes"] as const,
+     list: (params: DaemonRuntimeListParams) =>

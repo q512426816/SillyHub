@@ -43,6 +43,10 @@ interface Props {
   changeId: string;
   lastSyncedAt?: string | null;
   daemonOnline?: boolean;
+  /** 文件树自动刷新周期（毫秒）。不传（默认）不轮询——既有消费方行为不变
+   * （2026-10-13-session-change-files-hover task-02 / D-004@v1：会话悬浮弹窗
+   * 等实时消费方传 15000，agent 跑动中产出文件即时可见）。 */
+  autoRefreshMs?: number;
 }
 
 type SaveStatus = "idle" | "saving" | "done" | "pending" | "failed";
@@ -363,7 +367,13 @@ function TreeView({
   );
 }
 
-export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnline = true }: Props) {
+export function ChangeFileTree({
+  workspaceId,
+  changeId,
+  lastSyncedAt,
+  daemonOnline = true,
+  autoRefreshMs,
+}: Props) {
   const [tree, setTree] = useState<ChangeFileTreeNode[]>([]);
   const [selected, setSelected] = useState<ChangeFileEntry | null>(null);
   const [content, setContent] = useState<string>("");
@@ -425,6 +435,20 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
       cancelled = true;
     };
   }, [refreshTree, refreshPending]);
+
+  // 可选自动刷新（2026-10-13-session-change-files-hover task-02 / D-004@v1）：
+  // 传周期（毫秒）时轮询文件树 + 排队清单，卸载清除；不传 / 非正值零定时器，
+  // 既有消费方（变更详情页、移动端）行为不变。与保存 pending 轮询（上方 2s，
+  // 职责正交——那个只收敛保存状态）互不干扰；document.hidden 跳过对齐其口径。
+  useEffect(() => {
+    if (!autoRefreshMs || autoRefreshMs <= 0) return;
+    const id = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshTree();
+      void refreshPending();
+    }, autoRefreshMs);
+    return () => clearInterval(id);
+  }, [autoRefreshMs, refreshTree, refreshPending]);
 
   // 保存后 pending 轮询：daemon-client 返 pending 时 2s 轮询直到该 path 消失或翻 failed
   useEffect(() => {

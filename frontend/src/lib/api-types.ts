@@ -1954,6 +1954,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/-/by-session/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Changes
+         * @description 列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
+         *
+         *     会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询
+         *     （正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐
+         *     platform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量
+         *     ``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。
+         *
+         *     排序（service.list_changes_for_session）：未归档（``location != 'archive'``）
+         *     优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组
+         *     直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径
+         *     一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。
+         */
+        get: operations["list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
         parameters: {
             query?: never;
@@ -32580,6 +32610,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentSessionListItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSummary"][];
                 };
             };
             /** @description Validation Error */

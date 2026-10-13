@@ -1,5 +1,5 @@
 # frontend 变更索引
-
+- change 2026-10-13-session-change-files-hover | 会话页悬浮变更文件：ChangeFileTree 可选 autoRefreshMs prop（默认零定时器行为不变，弹窗传 15000 周期刷树+pending）；lib/changes.ts 增 listSessionChanges/useSessionChanges（GET /changes/-/by-session/{sid}，active 时 15s 轮询）+ queryKeys.sessionChanges 工厂；NEW session-change-files-hover.tsx（胶囊入口+hover/click 下拉分组：进行中置顶轻量/全量徽标+阶段中文+时间、已归档默认折叠展开；大弹窗 shadcn Dialog 85vh max-w-6xl + antd Select 切换 key 重挂载）挂 session-panel-page 真会话输入区上方 h-0 锚。前端 29 用例绿（autorefresh 3/悬浮 7/既有回归 19）；tsc 0；eslint 0 新增。
 > 自动生成。正文历史已迁出，详见 frontend.md。
 > author: qinyi
 > created_at: 2026-08-26 10:20:00

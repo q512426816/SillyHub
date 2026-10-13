@@ -83,6 +83,11 @@ MAX_RAW_BYTES = 50 * 1024 * 1024  # 50 MB
 # _ensure_change_row 的 upsert 语义会重建占位行，不丢数据。
 PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
 
+# 2026-10-13-session-change-files-hover task-01 / FR-01：list_changes_for_session
+# 取数窗口（会话关联变更数有界——一个会话挂的变更远少于变更挂的会话；对齐
+# router._CHANGE_SESSIONS_MAX=200 惯例，100 覆盖会话页面悬浮面板全量展示）。
+_SESSION_CHANGES_MAX = 100
+
 # 2026-08-29-approval-notify-push task-05（D-007@v1 / design §7.3②）：审批结果
 # 通知 owner 的门中文名映射（title 文案常量集中于此，勿散落触发点）。
 # 四个审核门 + 旧版 approve/reject（approval）。
@@ -2243,6 +2248,46 @@ class ChangeService:
                 latest_progress=stage_info[2] if stage_info is not None else None,
             )
             summaries.append(summary)
+        return summaries
+
+    async def list_changes_for_session(
+        self, workspace_id: uuid.UUID, session_id: uuid.UUID
+    ) -> list[ChangeSummary]:
+        """列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
+
+        会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表是
+        会话-变更关联唯一真相（D-001@v2），此前只有正向「变更 → 会话列表」
+        （router.list_change_sessions），本方法补反向查询。
+
+        - 软删变更（``location='deleted'``）排除——与变更中心读侧口径一致；
+        - 取数窗口 ``created_at desc + limit``（对齐 router._CHANGE_SESSIONS_MAX=200
+          惯例；会话挂的变更数远低于上限）；
+        - 复用 ``enrich_summaries`` 批量投影（is_thin/last_pushed_at/pending_review
+          等，R-03 禁 N+1）；
+        - Python 最终排序（规避 PG/SQLite 方言差异，对齐 list_change_sessions
+          模式）：未归档（``location != 'archive'``）优先 → 组内保持 created_at
+          desc（list 稳定排序不破坏取数序）。
+        """
+        changes = (
+            (
+                await self._session.execute(
+                    select(Change)
+                    .join(ChangeSessionLink, ChangeSessionLink.change_id == Change.id)
+                    .where(
+                        ChangeSessionLink.session_id == session_id,
+                        col(Change.workspace_id) == workspace_id,
+                        col(Change.location) != "deleted",
+                    )
+                    .order_by(col(Change.created_at).desc())
+                    .limit(_SESSION_CHANGES_MAX)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        summaries = await self.enrich_summaries(list(changes))
+        # 稳定排序：未归档（False=0）沉底归档（True=1），组内序保持取数序。
+        summaries.sort(key=lambda s: s.location == "archive")
         return summaries
 
     # ── owner_name 批量投影 + 时间线事件合成（2026-08-16-change-owner-from-token

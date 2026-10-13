@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-13-session-change-files-hover",
+  "generatedAt": "2026-10-13T05:13:08.301Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "backendEndpoints": 2378,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-13-session-change-files-hover",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "CLI quality-scan 实测（verify-test/lint）因主仓根 vitest/next 二进制不可达 SKIPPED",
+        "condition": "CI 全量跑 local.yaml commands.test + commands.lint；本机复跑可先 cd frontend && pnpm exec vitest --version 验证环境",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "会话页悬浮面板人工验收（真实 daemon 会话 + 关联变更数据面）",
+        "condition": "打开任一跑过变更的会话页面：①悬浮胶囊入口在聊天区右下 ②hover 弹下拉分组 ③点项开弹窗文件树可预览/全屏 ④无关联变更会话无入口",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/changes/{cid}/sessions",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/workspaces/{workspace_id}/changes/-/by-session/{session_id}",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/change/tests/test_session_changes_endpoint.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "runtimeEvidence": [
+    {
+      "claim": "backend 端点跨层实测（HTTP 栈 + in-memory DB，排序/404/隔离全过）",
+      "command": "cd backend && uv run pytest app/modules/change/tests/test_session_changes_endpoint.py -q --no-cov",
+      "exitCode": 0,
+      "logPath": "本会话 execute step10/verify 实测回执（13 passed 含正向端点回归；worktree 分支 sillyspec/2026-10-13-session-change-files-hover）"
+    },
+    {
+      "claim": "frontend 跨层消费实测（悬浮组件 × ChangeFileTree × react-query 数据层接线）",
+      "command": "cd frontend && pnpm vitest run src/components/daemon/__tests__/session-change-files-hover.test.tsx src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+      "exitCode": 0,
+      "logPath": "本会话 execute step10 实测回执（31 passed 四文件并跑；tsc --noEmit 0 错）"
+    }
+  ],
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
