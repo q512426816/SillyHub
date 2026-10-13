@@ -56,11 +56,20 @@ scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
    「patch 整体缺席」；
 2. **跨仓冻结未触发**：flow.js 跨仓 patch 冻结前提是 design 文件变更清单
    解析出 `e.repo` 标注（段头「## <注册key> 仓变更」/ 子段「### <注册key>」/
-   `cross-repo:<key>:` 前缀三选一）。本变更 design 承诺「改动面仅
-   LedgerForm.js 单文件」但清单未按规范标注 → planEntries 无 repo 标注 →
-   跨仓对账与 repos[] patch 冻结全不触发（已知坑
-   design-filelist-crossrepo-prefix-silent-main 的活体复现，且 thin 通道下
-   零告警——未标注路径静默按主仓对账成「计划未动」）。
+   `cross-repo:<key>:` 前缀三选一）。full.json 实证本变更 design 清单实际写的是
+   `sub-grid-security/src/routes/Fire/Ledger/LedgerForm.js`（带仓目录名前缀）
+   ——未按段头规范，planEntries 无 repo 标注，跨仓对账与 repos[] patch 冻结
+   全不触发。**更关键的结构性短路（2026-10-13 full.json + 源码逐行核实）**：
+   CLI 3.32.7 本有一条「疑似跨仓声明未按规范标注」防呆告警（flow.js L1631），
+   其触发条件（路径主仓不存在 + 首段命中注册仓 key/basename）本变更**完全
+   满足**——但该告警连同 planEntries 解析、跨仓冻结、writeCloseTraceArtifacts
+   整段挂在 `else`（非空冻结面）分支内（L1528 空面 if → L1531 else），空面
+   走 L1529 一行提示即 patchOk=true 短路，**能救场的告警一次都没执行**。
+   会话侧叠加输出截断：agent 跑 flow done 一律 `2>&1 | tail -N`（N=10~16），
+   首跑（00:22:38）打印的「📦 patch 留档跳过：…若实现代码应在此，先提交后
+   重跑」被 tail 截掉（且该句方向性误导——跨仓代码本就不该提交主仓）；断点
+   续跑后 patch 子步幂等 skip，连这行提示也永久消失。flow start 横幅源码零
+   跨仓字样（会话捕获的输出亦仅剩协议调用两行）。
 
 蒸馏侧连锁：distill 实测面同样只看主仓（跨仓文件在主仓 git 不可见）→
 空实测面 → FR-022/023/024 落伪域 auto-sillyspec、决策落 unmapped.md。
@@ -98,12 +107,13 @@ scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
    （剔除 `.sillyspec/` 前缀后）→ 至少 advisory 点名「声明了 N 个交付文件
    但冻结面为空」，建议升格为阻断（三选一：先提交后重跑 / 确认纯文档
    变更后 `--accept-empty-face` 显式签收留痕 / 清单裁剪同步 design）；
-2. **跨仓声明防呆的覆盖面**：现有 advisory 只在「声明路径首段 token 命中
-   注册仓 key/basename」时触发（`sub-grid-security/src/...` 形态）；裸仓根
-   相对路径（`src/routes/.../LedgerForm.js`，首段 `src` 不命中）与绝对路径
-   形态完全无告警——而段头规范恰恰要求段内写仓根相对路径，合规路径本身
-   就落在这个盲区里（本变更大概率即此形态，advisory 与跨仓冻结双双缺席）。
-   空面 + 声明文件在主仓不存在（无论首段是否命中注册仓）就应点名，并可
-   对所有 local.yaml 注册仓做一次存在性探测提示；
+2. **跨仓声明防呆挪出非空分支 + 覆盖面**：现告警（L1631）与 planEntries
+   解析、跨仓冻结整段挂在非空 else 分支内，空面短路——本变更 design 写的
+   `sub-grid-security/src/...` 前缀形态本可命中告警却从未执行。应把「声明
+   清单解析 + 防呆告警」提到 ownFiles 判空之前（空面更该跑——正是跨仓声明
+   撞空面的高危形态）。另首段 token 匹配对合规的仓根相对路径形态
+   （`src/routes/...`，首段不命中）仍有盲区：空面 + 声明文件在主仓不存在
+   （无论首段是否命中注册仓）就应点名，并可对所有 local.yaml 注册仓做一次
+   存在性探测提示；
 3. 顺带可评估：共享主仓路径是否也补一个轻量的「窗口外同名文件交付」探测
    （worktree 已有 reflog 扫描先例）。
