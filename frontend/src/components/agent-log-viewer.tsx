@@ -427,6 +427,7 @@ export function AgentLogRow({
               entry={toolCall}
               mergedResult={processedLog.mergedToolResult}
               durationMs={toolDurationMs}
+              editPatch={processedLog.editPatch}
             />
           </div>
         ) : processedLog.parsedStdoutTool ? (
@@ -436,6 +437,7 @@ export function AgentLogRow({
               entry={processedLog.parsedStdoutTool}
               mergedResult={processedLog.mergedToolResult}
               durationMs={toolDurationMs}
+              editPatch={processedLog.editPatch}
             />
           </div>
         ) : processedLog.parsedToolResult ? (

@@ -193,7 +193,7 @@ function diffLogMs(startLog: AgentRunLogEntry, endLog: AgentRunLogEntry): number
 }
 
 /**
- * 合并 [TOOL_RESULT] body 到 tool 卡片，并预算 toolDurationMs。
+ * 合并 [TOOL_RESULT] body 到 tool 卡片，并预算 toolDurationMs / editPatch。
  *
  * ql-20260622-003 / P1-2：耗时计算从 render 期（AgentLogRow.computeToolDurationMs 回查
  * allLogs，N×M）迁移至此。tool_use_id / tool 名 + 窗口配对已由主循环完成，sourceLog 是
@@ -202,13 +202,30 @@ function diffLogMs(startLog: AgentRunLogEntry, endLog: AgentRunLogEntry): number
  *   与原「找后续 result」行为一致）
  * - 首次设置（同卡多 result 取首条，对齐原「首条 result」语义）
  * - 仅 tool 卡片（channel=tool_call 或 parsedStdoutTool）
+ *
+ * 2026-10-13-agentlog-write-diff：editPatch 拾取——v2 轨显式传 ev.edit_patch
+ * （AgentEvent 一等字段），旧轨不传回落 sourceLog.edit_patch 行列（backend
+ * submit_steps SSE 透传同名列）；二者皆 tool_use_result.structuredPatch 的
+ * JSON 串。首条语义（同卡多 result 取首条 patch），非工具卡不写。
  */
-function mergeToolResult(target: ProcessedLog, body: string, sourceLog?: AgentRunLogEntry) {
+function mergeToolResult(
+  target: ProcessedLog,
+  body: string,
+  sourceLog?: AgentRunLogEntry,
+  editPatch?: string | null,
+) {
   if (!body) return;
   if (target.mergedToolResult) {
     target.mergedToolResult += "\n" + body;
   } else {
     target.mergedToolResult = body;
+  }
+  if (
+    target.editPatch === undefined &&
+    (target.log.channel === "tool_call" || target.parsedStdoutTool != null)
+  ) {
+    const patch = editPatch ?? sourceLog?.edit_patch;
+    if (typeof patch === "string" && patch) target.editPatch = patch;
   }
   if (
     sourceLog &&
@@ -638,7 +655,8 @@ export interface AgentEvent {
   is_partial?: boolean;
   /** true = 替换同 segment_id 已落库 partial（[ASSISTANT_OVERRIDE] 等价语义）。 */
   override?: boolean;
-  /** Edit 工具 structuredPatch JSON 文本（行 edit_patch 列承载，渲染器直读）。 */
+  /** structuredPatch JSON 文本（tool_use_result 透传；抓取链不限工具名——Edit
+   *  与 Write 覆盖写均携带，2026-10-13-write-tool-diff 实证）。 */
   edit_patch?: string;
   /** provider 长尾元数据（model/tool_input/tool_kind/...）。 */
   metadata?: Record<string, unknown>;
@@ -892,11 +910,11 @@ export function fromAgentEvent(
         if (candidate !== undefined) matchedIdx = candidate;
       }
       if (matchedIdx >= 0 && ctx.result[matchedIdx]) {
-        mergeToolResult(ctx.result[matchedIdx]!, content, target.log);
+        mergeToolResult(ctx.result[matchedIdx]!, content, target.log, ev.edit_patch);
         target.hidden = true;
       } else if (ctx.lastToolSourceIdx >= 0) {
         const tc = ctx.result[ctx.lastToolSourceIdx];
-        if (tc) mergeToolResult(tc, content, target.log);
+        if (tc) mergeToolResult(tc, content, target.log, ev.edit_patch);
         target.hidden = true;
       } else {
         target.parsedToolResult = content;
