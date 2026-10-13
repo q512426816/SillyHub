@@ -122,7 +122,8 @@ export interface ProcessedLog {
    * 2026-10-13-agentlog-write-diff：tool_result 行/事件的 structuredPatch JSON
    * （backend edit_patch 列 / AgentEvent.edit_patch 透传，hunks 含真实文件行号）。
    * mergeToolResult 配对时随结果写入工具卡（首条语义，同 toolDurationMs）；
-   * Edit/Write 预览渲染红删绿增 DiffView。undefined=无 patch（Bash/Read 等
+   * agent-log 侧 WriteToolPreview 消费渲染红删绿增 DiffView（EditToolPreview
+   * 仍走 args 红绿两块，未消费本字段）。undefined=无 patch（Bash/Read 等
    * 零变化行，或旧数据）。
    */
   editPatch?: string;

@@ -83,9 +83,10 @@ export interface AgentRunLogEntry {
   // 透传。非工具调用 / 主 agent 历史日志（未升级 daemon）→ null/undefined，
   // viewer 按通用「工具」徽标渲染（toolKindMeta 灰色兜底）。
   tool_kind?: string | null;
-  // ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（hunks 含 oldStart/
-  // newStart 真实文件行号）。仅 Edit tool_result 行有值；旧数据 / 其他工具 →
-  // null/undefined，进度视图 Edit 展开区回退 LCS 自算行号。
+  // ql-20260824-020：工具结果 structuredPatch JSON 串（hunks 含 oldStart/
+  // newStart 真实文件行号）。抓取链不限工具名（2026-10-13-write-tool-diff 实证：
+  // Edit 与 Write 覆盖写均携带）；旧数据 / 其他工具 → null/undefined，Edit 展开
+  // 区回退 LCS 自算行号、Write 展开区回退全文/全绿展示。
   edit_patch?: string | null;
   // quick-fdd8219a：流式半截行标识 + 群聊身份/附件/链路 metadata（群投影行
   // member_id/member_name、user_input sender/attachments 等；后端 DTO 已有，
