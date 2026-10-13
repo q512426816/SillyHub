@@ -16,7 +16,7 @@ created_at: 2026-10-13T03:30:35.880Z
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-- turn-segment-views.tsx：`SubagentTaskLookupContext` 值类型 `Map<string, SubagentReconciledTask> | null` → `SubagentTaskLookup | null`（新接口 `{ byToolUseId: Map<string, SubagentReconciledTask>; byTaskId: Map<string, SubagentReconciledTask> }`；`SubagentReconciledTask` 字段不变）；新导出 `parseTaskOutputWait(raw)`（tool 段 raw JSON 解析出 {taskId, block}，解析失败 null）；subagentHeaderOf 内联 terminalReconciled 单向收敛判定（running 元数据 + 快照终态 → 快照终态，不受段三态配对限制；终态元数据不回退；时长/徽标随收敛态取快照权威值），SubagentBlockView / subagent-detail-panel 的对账传递条件同步放开；ToolRowView 对 toolName="TaskOutput" 且 running 的段特判渲染（人话摘要 + 局部走秒），终态回归原渲染。
+- turn-segment-views.tsx：`SubagentTaskLookupContext` 值类型 `Map<string, SubagentReconciledTask> | null` → `SubagentTaskLookup | null`（新接口 `{ byToolUseId: Map<string, SubagentReconciledTask>; byTaskId: Map<string, SubagentReconciledTask> }`；`SubagentReconciledTask` 字段不变）；新导出 `parseTaskOutputWait(raw)`（tool 段 raw JSON 解析出 {taskId}，解析失败 null）；subagentHeaderOf 内联 terminalReconciled 单向收敛判定（running 元数据 + 快照终态 → 快照终态，不受段三态配对限制；终态元数据不回退；时长/徽标随收敛态取快照权威值），SubagentBlockView / subagent-detail-panel 的对账传递条件同步放开；ToolRowView 对 toolName="TaskOutput" 且 running 的段特判渲染（人话摘要 + 局部走秒），终态回归原渲染。
 - use-session-tasks.ts：`buildSubagentTaskLookup(rows)` 返回值改双索引形态（byToolUseId 既有择优逻辑不变，byTaskId 同款择优按 taskId 建；新导出 `SubagentTaskLookupIndex` 接口）。
 - turn-status-bar.tsx：`deriveTurnActivity(segments, lookup?)` / `collectSubagents(segments, out, lookup?)` 增可选参数（缺省行为与改前一致），metaDriven 分支内联同款单向收敛（tool_use_id 直查 + taskTaskId 兜底，终态收敛时 taskElapsedMs 取快照权威值）；TurnStatusBar 组件读 SubagentTaskLookupContext 传入。
 - session-panel-page.tsx：轮终态（usageRefresh）与 SSE 重连恢复（tasksRefresh，state 上移）两对账信号合流为 taskReconcileSignal，同时供给时间线 lookup 实例（subagentReconcileSource.refreshSignal）与任务面板（TaskExecutionPanel tasksRefreshSignal，两处挂点）。
@@ -24,14 +24,6 @@ created_at: 2026-10-13T03:30:35.880Z
 - 无后端 API/DB/协议改动；无前端路由与样式系统改动（样式用既有 brand 阶语义类）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
-
-4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
-
-3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
-
-2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
-
-1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
 1. 乱序/迟到到达：快照行可能在 TaskOutput 段建成前到达（首渲染 byTaskId 未命中→回退通用文案，快照重拉后重渲染出任务名，渐进增强安全）；agent_task_status 事件与 [TASK_*] stdout 行双通道到达顺序不定——收敛判定只读快照当前值且单向（running→终态），迟到重放不产生回退；段 taskStatus 已是终态时快照任何状态不覆盖（终态即终，与既有 NOTIFICATION 覆盖语义同向）。TaskOutput 段 result 配对终态由装配器既有状态机处理，本变更不触碰。
 2. 并发写：纯前端展示层——快照经 useSessionTasks setState 单线程合并，context 值 useMemo 派生；daemon 侧单适配器实例顺序消费事件流，无跨实例写面；refreshSignal 递增是幂等信号（重拉合并以服务端为准）。
