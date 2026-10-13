@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-ci-flaky-probe-mock",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "0756c886494656426818263e03a6520f548b4185",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02「全部 11 用例本地转绿」为执行性声明，本次只读评审未复跑测试",
+      "evidence": "静态分析未见违规证据：CI 失败面仅「连续 before 翻页到头」一例（探查 push 所致）；同文件其余 before 类用例口径自洽——99 行先例用例已带同款探查分支，487 行 FR-04 用例末页 50<400 不满页不触发探查、517 行 beforeCalls=1 断言不受影响",
+      "location": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx:99,457,487,517"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T01:08:14+08:00"
+}

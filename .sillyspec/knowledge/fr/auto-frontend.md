@@ -2149,6 +2149,7 @@ created_at: 2026-10-08T03:33:17.438Z
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-01
   tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「status=archived 而 location=active 的变更归入已归档组（用户实测：平台已归档但仍显示进行中）」
+
 ## FR-auto-frontend-208 触顶加载一页后，若页顶边界切在轮中间，该轮被完整加载（拉全整轮行并合并装配成一个轮块，含提问）
 变更：2026-10-13-load-earlier-full-turn
 状态：active
@@ -2370,3 +2371,48 @@ created_at: 2026-10-08T03:33:17.438Z
   source_change: 2026-10-13-sessions-portal-header-remove
   source_change: 2026-10-13-load-earlier-full-turn
   status: active
+
+## FR-auto-frontend-215 「连续 before 翻页到头」用例 mock 必须对 limit=1 页顶探查返回空响应且不计入 beforeCursors
+变更：2026-10-14-ci-flaky-probe-mock
+状态：active
+摘要：满页翻页含探查的完整序列
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-probe-mock/requirements.md#FR-01
+最近确认：0756c886494656426818263e03a6520f548b4185
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-flaky-probe-mock:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「点击回到会话开头：连续 before 翻页到头并定位顶部（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-flaky-probe-mock
+  status: active
+
+## FR-auto-frontend-216 该用例及同文件全部 11 用例必须本地转绿，且断言不再依赖竞速窗口
+变更：2026-10-14-ci-flaky-probe-mock
+状态：active
+摘要：CI 慢机下断言稳定
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-probe-mock/requirements.md#FR-02
+最近确认：0756c886494656426818263e03a6520f548b4185
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-flaky-probe-mock:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「点击回到会话开头：连续 before 翻页到头并定位顶部（FR-03）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-flaky-probe-mock
+  status: active
+
+## FR-auto-frontend-217 零生产代码改动
+变更：2026-10-14-ci-flaky-probe-mock
+状态：active
+摘要：交付面审查
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-probe-mock/requirements.md#FR-03
+最近确认：0756c886494656426818263e03a6520f548b4185
