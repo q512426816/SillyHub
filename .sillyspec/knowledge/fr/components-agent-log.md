@@ -289,3 +289,93 @@ created_at: 2026-10-12T11:08:58.569Z
   confirmed_at: null
   source_change: 2026-10-13-agentlog-write-diff
   status: active
+
+## FR-components-agent-log-016 TaskOutput（block=true）运行中时，时间线该工具行显示人话摘要「等待后台任务：<任务名>」+ 每秒跳动的已等时长（mm:ss），任务名/最后活跃时间经任务快照（agent_session_task）对账获得，查不到时优雅回退不崩
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：快照命中显示任务名；快照未命中优雅回退；终态回归普通行
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-01
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-live-visibility:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「TaskOutput 等待行：任务名人话摘要与走秒/快照未命中回退/终态回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-live-visibility
+  status: active
+
+## FR-components-agent-log-017 后台任务派发段（含子代理容器段）的 running 任务元数据在任务快照为终态时收敛为终态徽标，治理 [TASK_*] 终态事件丢失导致的永久「后台运行中」残留
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：徽标与计数收敛；终态不回退
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-02
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-live-visibility:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「subagentHeaderOf 单向收敛与终态不回退（徽标）」 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「deriveTurnActivity 快照终态收敛（计数/兜底/零回归/终态不回退）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-live-visibility
+  status: active
+
+## FR-components-agent-log-018 任务面板清单在轮完成对账点（schedulePostTurnReconcile）同步重拉任务快照，终态残留卡片收敛
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：轮边界卡片收敛
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-03
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+
+## FR-components-agent-log-019 daemon usage_update 估算推送从「累计 ≥20 token」改为「≥20 token 或距上次推送 ≥500ms」双门限，低速生成时 token 数字约每 0.5 秒一跳；真 usage 到达后 API call 进行中估算继续推送（仍被 message_delta 真值覆盖校正）
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：低速生成定时跳；真值覆盖校正
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-04
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-live-visibility:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/stream-json.test.ts「usage_update 双门限节流：时间门限兜底/零增量不推/真值覆盖后基线同步与超调回落校正」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-live-visibility
+  status: active
+
+## FR-components-agent-log-020 既有工具行/子代理块/任务卡片其余渲染与既有测试不回归
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：零回归守卫
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-05
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-live-visibility:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-live-visibility
+  status: active
+
+## FR-components-agent-log-021 相关单测新增/更新并跑通
+变更：2026-10-13-turn-live-visibility
+状态：active
+摘要：新增用例绿
+全文：.sillyspec/changes/archive/2026-10-13-turn-live-visibility/requirements.md#FR-06
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-live-visibility",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-turn-live-visibility:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「TaskOutput 等待行：任务名人话摘要与走秒/快照未命中回退/终态回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-live-visibility"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-turn-live-visibility:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「subagentHeaderOf 单向收敛与终态不回退（徽标）」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「deriveTurnActivity 快照终态收敛（计数/兜底/零回归/终态不回退）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-live-visibility"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-turn-live-visibility:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/stream-json.test.ts「usage_update 双门限节流：时间门限兜底/零增量不推/真值覆盖后基线同步与超调回落校正」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-live-visibility"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-turn-live-visibility:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-live-visibility"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-live-visibility",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3a61c468bef542e000e2a649bda6205eddaad508",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "FR-02 对账键口径在子代理块头消费面未完整兑现：collectSubagents 有 taskTaskId 兜底而 SubagentBlockView/subagent-detail-panel 仅查 byToolUseId",
+      "evidence": "FR-02 正文要求快照「按 tool_use_id 或 task_id 对账」为终态时块头徽标与状态栏计数同步收敛；turn-status-bar.tsx collectSubagents 实现了 byToolUseId 直查 + s.taskTaskId 兜底 byTaskId（deriveTurnActivity 测试「taskTaskId 兜底」用例断言了该面），但 turn-segment-views.tsx SubagentBlockView 与 subagent-detail-panel.tsx 的 reconciledRaw 只调 taskLookup?.byToolUseId.get(segment.id)——快照行 tool_use_id 缺失（AgentSessionTaskRead.tool_use_id 可空，snapshotRowToView 以 ?? null 兜底）而 task_id 可对账时，状态栏计数已收敛、块头徽标仍「后台运行中」，正是 FR-02 要治理的残留形态在块头残留",
+      "location": "frontend/src/components/daemon/turn-segment-views.tsx:870"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 标题限定 TaskOutput(block=true) 但实现不区分 block，parseTaskOutputWait 的 block 字段无消费方",
+      "evidence": "FR-01 细化条款按「toolName=TaskOutput 且 status=running」口径（实现与测试一致），但标题写 block=true；parseTaskOutputWait 解析并导出 block 字段（TaskOutputWaitInfo.block）却没有任何消费方读它，block=false 快速查询运行中同样显示「等待后台任务输出」+走秒；建议 waitInfo 判断加 block===true 或删除死字段，统一标题与正文口径",
+      "location": "frontend/src/components/daemon/turn-segment-views.tsx:715"
+    },
+    {
+      "severity": "P3",
+      "title": "design/代码注释「最坏 2 条/s/call」容量声明与双门限机理不符",
+      "evidence": "500ms 时间门限只在低速生成（token 门限不满）时兜底，此时频率上限才是 2 条/s；高速生成时 20-token 门限主导（如 60 tok/s 约 3 条/s），频率与改前持平非本变更引入；声明应表述为「低速兜底 ≤2 条/s，高速面与改前一致」",
+      "location": "sillyhub-daemon/src/adapters/stream-json.ts:160"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定行仅指向 turn-segment-views.test.tsx，徽标收敛断言实际在 subagent-task-reconcile.test.ts",
+      "evidence": "绑定行用例名「快照终态收敛：…徽标与计数、终态不回退」中「计数/终态不回退」由 turn-segment-views.test.tsx deriveTurnActivity describe 承载，「徽标」断言（subagentHeaderOf 收敛用例）在 subagent-task-reconcile.test.ts；两文件用例均真实存在且断言正确，仅绑定路径追溯不完整",
+      "location": ".sillyspec/changes/2026-10-13-turn-live-visibility/requirements.md:96"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T12:33:44+08:00"
+}

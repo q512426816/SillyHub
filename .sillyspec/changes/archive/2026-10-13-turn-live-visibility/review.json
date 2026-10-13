@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-live-visibility",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "61c118ebb3564e8ed9859efa116d3daf7f059175",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "修复提交向 design.md 注入 7 处模板占位问句行，与既有正文重复且编号错乱",
+      "evidence": "ba141f9d9 在 design.md「做法概述/接口契约/边界与并发/风险与死路」四节标题下新增「本变更怎么解决问题？…」「4. 作用域：…会不会串台？」等模板引导问句（第 9/17/28-34/43 行），系模板骨架文本被当作正文写入；「边界与并发」原正文本已按 1-4 逐问作答（第 36-39 行），插入的 4/3/2/1 问句与之重复且编号倒序，终态设计文档残留脚手架噪音（疑似 sillyspec 工具注入，建议核对 docs/sillyspec 记录）",
+      "location": ".sillyspec/changes/2026-10-13-turn-live-visibility/design.md:9"
+    },
+    {
+      "severity": "P3",
+      "title": "parseTaskOutputWait 删 block 字段的文档同步不完整：design 接口契约仍写 {taskId, block}，requirements FR-01 标题仍限定 block=true",
+      "evidence": "同一修复提交内代码已将 TaskOutputWaitInfo 缩为 { taskId }（turn-segment-views.tsx:367-389），但 design.md:19 接口契约行仍写「tool 段 raw JSON 解析出 {taskId, block}」，requirements.md:9 FR-01 标题仍写「TaskOutput（block=true）」而细化条款与实现均按 toolName=TaskOutput 且 running 统一判定（block=false 快速查询同样短暂显示等待行，注释已声明无形态差）——旧 P3「统一标题与正文口径」的文档半边未同步，违反 CLAUDE.md 规则 18（注释/文档与实现不一致及时修正）",
+      "location": ".sillyspec/changes/2026-10-13-turn-live-visibility/design.md:19"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T12:51:30+08:00"
+}

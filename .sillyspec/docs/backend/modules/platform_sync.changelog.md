@@ -18,3 +18,4 @@ created_at: 2026-08-29 22:56:30
 - ChangeEventPush.ts 补 le 上界（datetime.max 毫秒 253402300799999）+ 非有限值 before 校验器转 None（防 422 详情回显 inf 被 starlette allow_nan=False 渲染炸 500）；测试超域 1e15 与 Infinity 字面量（原始 body）均 422。
 - 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok
 - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
+- 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
