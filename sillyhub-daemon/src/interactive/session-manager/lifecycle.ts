@@ -14,6 +14,8 @@
 import type { SessionState } from '../types.js';
 import type { InteractiveDriverHandle } from '../driver.js';
 import type { SessionManagerCore } from './types.js';
+// 2026-10-14-turn-anchor-cache-eviction：会话终结清轮锚 prev 内存缓存（4c 步）。
+import { clearTurnAnchorCache } from '../turn-anchor.js';
 
 /** 终态条目延迟清理时长（ms）：给终态对账 / 立即查询留 10 分钟窗口。 */
 const TERMINAL_CLEANUP_DELAY_MS = 10 * 60 * 1000;
@@ -227,6 +229,11 @@ export async function terminateSession(
   //     Task/Agent tool_use 元数据（session 终态 SDK 进程已 kill，后台任务随之
   //     消亡，task_* 不会再到达；防 Map 泄漏）。
   mgr._clearBackgroundTasks(state.sessionId);
+
+  // 4c. 2026-10-14-turn-anchor-cache-eviction：清轮锚 prev 内存缓存（会话终态
+  //     不再有新轮，条目滞留 = Map 慢性增长；JSONL 落盘不动，同会话重启续锚走
+  //     readLastRecord 尾行兜底）。在飞锚链由清理函数自行挂链收尾后执行。
+  clearTurnAnchorCache(state.sessionId);
 
   // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
   //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
