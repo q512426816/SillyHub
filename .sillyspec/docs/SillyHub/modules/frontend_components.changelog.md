@@ -49,3 +49,4 @@ created_at: 2026-08-30 22:23:33
 - 2026-10-13-session-scroll-layout-storm | 会话页连续滚动（触顶自动加载 / 回到开头后快速滚到底）在系统 Chrome 上 100% 单页崩溃白屏（rendere
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
 | 2026-10-13 | 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切 |
+| 2026-10-13 | 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026- |

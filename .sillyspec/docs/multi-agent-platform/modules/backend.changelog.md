@@ -38,3 +38,4 @@
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
 - change 2026-10-13-daemon-log-config-view | 机器诊断只读端点 GET /api/daemon/machines/{instance_id}/logs?tail= 与 /config?reveal=（RuntimeAdminUser + _get_owned_instance 归属校验；ws_hub.send_rpc timeout=30 转发 daemon_log_tail/daemon_config_get；错误映射：离线/超时原样透传 504、method_not_found→422 HTTP_422_DAEMON_DIAG_UNSUPPORTED、其余→502）；schema.py 增 DaemonLogTailResponse/DaemonConfigResponse（字段与 daemon result 键逐字一致）；_ENDPOINT_ORDER 同步两行。pytest 11 用例（转发成功+参数透传+四类错误映射+admin 放行+非 admin 403+openapi 可见）；openapi.json/api-types.ts 产物同步。
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
+- 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-

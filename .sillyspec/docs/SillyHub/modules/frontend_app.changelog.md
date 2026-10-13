@@ -12,3 +12,4 @@ created_at: 2026-09-03 14:49:48
 - ql-20260903-012-7c69 | 组织管理页 /admin/organizations 全 antd 重构——按 FRONTEND_PAGE_STYLE 规范从手搓 div 抽屉/弹窗/Toast + shadcn Button 改为 PageContainer+PageHeader+SectionCard+DataTable 树表（antd Table treeData 承载组织层级，子组织默认展开、关键词/状态客户端过滤保留祖先链）；新建/编辑统一 antd Modal+Form vertical（父组织 TreeSelect 防环禁选自身后代、edit 模式 code 只读）；删除确认 antd Modal + toast 走 useNotify（AntApp message）；新增页测试 5 用例
 - 2026-10-13-sessions-portal-header-remove | 智能体会话页面（/sessions 及 workspace/change/quicklog 三 scoped 入口）页头
 - 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切
+- 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-

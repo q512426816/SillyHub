@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-change-reparse-autobind-remove",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_session_binding.py「test_reparse_created_writes_no_session_link」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-reparse-autobind-remove"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_session_binding.py「test_bind_change_to_session_removed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-reparse-autobind-remove"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_spec_binding.py「既有全部用例回归零改动通过」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-reparse-autobind-remove"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_session_binding.py「test_reparse_repeat_and_scoped_still_no_link」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-reparse-autobind-remove"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "change": "2026-10-13-change-reparse-autobind-remove",
   "baseline": "ba179664cde9032f3a3fe4b4a59c78fde971957c",
-  "head": "30b5e695e25d40abf3dfc903b79073446b4e104f",
+  "head": "851526254fa79a33b2bbd2fcac960b6b370cb1e6",
   "files": [
     ".sillyspec/docs/SillyHub/modules/change.md",
     ".sillyspec/docs/backend/modules/_module-map.yaml",
@@ -23,7 +23,7 @@
     "additions": 344,
     "deletions": 412
   },
-  "savedAt": "2026-10-13T15:38:04.280Z",
+  "savedAt": "2026-10-13T15:39:57.960Z",
   "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
   "modules": [
     {

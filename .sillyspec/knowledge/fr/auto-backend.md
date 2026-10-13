@@ -1537,3 +1537,86 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-13-multiturn-changeid-misjudge
   status: active
+
+## FR-auto-backend-209 reparse 首次创建变更行（created）不再写任何 change_session_links，即使工作区存在最近活跃会话
+变更：2026-10-13-change-reparse-autobind-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-reparse-autobind-remove/requirements.md#FR-01
+最近确认：851526254fa79a33b2bbd2fcac960b6b370cb1e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_change_session_binding.py「test_reparse_created_writes_no_session_link」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-reparse-autobind-remove
+  status: active
+
+## FR-auto-backend-210 _bind_change_to_session 方法及其唯一调用点删除，无死代码残留
+变更：2026-10-13-change-reparse-autobind-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-reparse-autobind-remove/requirements.md#FR-02
+最近确认：851526254fa79a33b2bbd2fcac960b6b370cb1e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_change_session_binding.py「test_bind_change_to_session_removed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-reparse-autobind-remove
+  status: active
+
+## FR-auto-backend-211 reparse docstring 与 .sillyspec/docs/backend/modules/change.md、_module-map.yaml 中「自动绑定最近活跃会话」描述同步更新
+变更：2026-10-13-change-reparse-autobind-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-reparse-autobind-remove/requirements.md#FR-03
+最近确认：851526254fa79a33b2bbd2fcac960b6b370cb1e6
+
+## FR-auto-backend-212 既有命令解析通道绑定行为不变（test_spec_binding.py 全绿）
+变更：2026-10-13-change-reparse-autobind-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-reparse-autobind-remove/requirements.md#FR-04
+最近确认：851526254fa79a33b2bbd2fcac960b6b370cb1e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_spec_binding.py「既有全部用例回归零改动通过」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-reparse-autobind-remove
+  status: active
+
+## FR-auto-backend-213 test_change_session_binding.py 重写为断言新行为：存在最近活跃会话时 reparse created 仍零 link，重复 reparse 仍零 link
+变更：2026-10-13-change-reparse-autobind-remove
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-reparse-autobind-remove/requirements.md#FR-05
+最近确认：851526254fa79a33b2bbd2fcac960b6b370cb1e6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-reparse-autobind-remove:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_change_session_binding.py「test_reparse_repeat_and_scoped_still_no_link」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-reparse-autobind-remove
+  status: active
