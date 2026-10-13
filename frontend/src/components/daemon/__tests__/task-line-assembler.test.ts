@@ -109,12 +109,16 @@ describe("[TASK_*] 行分类（task-11 / FR-03·07）", () => {
       text: '{"task_id":"bg-1","async":true}',
       taskStatus: "running",
       taskAsync: true,
+      // 2026-10-13-agent-task-stuck-running FR-02：task_id 提取为 taskTaskId
+      //（parent 未命中时的兜底反查键）
+      taskTaskId: "bg-1",
     });
     // 旧数据 / 异常形态无 async 字段 → 只写 running，不写 taskAsync
     expect(classifySessionLog('[TASK_STARTED] {"task_id":"bg-1"}', "stdout")).toEqual({
       kind: "task",
       text: '{"task_id":"bg-1"}',
       taskStatus: "running",
+      taskTaskId: "bg-1",
     });
   });
 
@@ -357,6 +361,86 @@ describe("[TASK_*] 孤儿行丢弃（task-11：找不到段不崩，不建 stub 
       taskElapsedMs: 7000,
       subagentType: "researcher", // stub 的 children / subagentType 随迁不受影响
     });
+  });
+});
+
+/* ───────── 5b. task_id 兜底路由（2026-10-13-agent-task-stuck-running FR-02） ───────── */
+
+describe("[TASK_*] parent 未命中按 task_id 兜底反查（FR-02：派发段吸收终态不再永久转圈）", () => {
+  /** 派发段 + STARTED 行（parent 命中写入 taskTaskId=bg-1）的基线轮。 */
+  function baselineTurn(): AssembledTurn {
+    return applyAll([
+      makeLog("1", "tool_call", DISPATCH_RAW),
+      taskLine("TASK_STARTED", '{"task_id":"bg-1","async":true}'),
+    ]);
+  }
+
+  it("parent 指向不存在段（错位通知行）但 task_id 命中 → 兜底吸收终态到派发段", () => {
+    const turn = baselineTurn();
+    const after = applyLogToSegments(
+      turn,
+      taskLine("TASK_NOTIFICATION", '{"task_id":"bg-1","status":"completed","elapsed_ms":45000,"summary":"全部通过"}', {
+        parentToolUseId: "tu_ghost",
+        timestamp: T2,
+      }),
+    );
+    expect(after).not.toBe(turn); // 元数据有变，非原引用
+    expect(toolById(after.segments, "tu_bg")).toMatchObject({
+      taskStatus: "completed",
+      taskElapsedMs: 45_000,
+      taskSummary: "全部通过",
+    });
+    // 行不产正文段
+    expect(after.output).toBe(turn.output);
+  });
+
+  it("行缺失 parent_tool_use_id 但 task_id 命中 → 同样兜底吸收", () => {
+    const turn = baselineTurn();
+    const after = applyLogToSegments(
+      turn,
+      taskLine("TASK_NOTIFICATION", '{"task_id":"bg-1","status":"failed","elapsed_ms":9000}', {
+        parentToolUseId: undefined,
+        timestamp: T2,
+      }),
+    );
+    expect(toolById(after.segments, "tu_bg")).toMatchObject({
+      taskStatus: "failed",
+      taskElapsedMs: 9000,
+    });
+  });
+
+  it("task_id 也无命中 → 维持丢弃原引用返回（不建 stub、不落顶层）", () => {
+    const turn = baselineTurn();
+    const after = applyLogToSegments(
+      turn,
+      taskLine("TASK_NOTIFICATION", '{"task_id":"bg-unknown","status":"completed"}', {
+        parentToolUseId: undefined,
+      }),
+    );
+    expect(after).toBe(turn);
+    expect(after.segments).toHaveLength(1);
+  });
+
+  it("兜底不误伤：task_id 命中只更新目标段，嵌套外层段不受影响", () => {
+    const turn = applyAll([
+      makeLog("1", "tool_call", DISPATCH_RAW),
+      makeLog(
+        "2",
+        "tool_call",
+        '{"tool":"Task","args":{"description":"内层"},"tool_use_id":"tu_inner","success":true}',
+        { parentToolUseId: "tu_bg", subagentType: "researcher" },
+      ),
+      taskLine("TASK_STARTED", '{"task_id":"bg-inner"}', { parentToolUseId: "tu_inner" }),
+    ]);
+    const after = applyLogToSegments(
+      turn,
+      taskLine("TASK_NOTIFICATION", '{"task_id":"bg-inner","status":"completed"}', {
+        parentToolUseId: undefined,
+      }),
+    );
+    expect(toolById(after.segments, "tu_inner").taskStatus).toBe("completed");
+    // 外层从未收过 task 行，兜底不得波及（taskStatus 恒缺省）
+    expect(toolById(after.segments, "tu_bg").taskStatus).toBeUndefined();
   });
 });
 

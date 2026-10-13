@@ -167,6 +167,8 @@ export interface SessionLogSegment {
   taskAsync?: boolean;
   taskSummary?: string;
   taskToolName?: string;
+  /** 2026-10-13-agent-task-stuck-running（FR-02）：payload.task_id（三行恒带）。 */
+  taskTaskId?: string;
 }
 
 /**
@@ -230,10 +232,10 @@ function parseFileUploadContent(raw: string): FileUploadContent | null {
  */
 const TASK_LINE_RE = /^\[(TASK_STARTED|TASK_PROGRESS|TASK_NOTIFICATION)\]\s?/;
 
-/** parseTaskLine 产物：tool 段任务元数据五字段的可选子集（task_segment_metadata 契约）。 */
+/** parseTaskLine 产物：tool 段任务元数据六字段的可选子集（task_segment_metadata 契约）。 */
 type TaskLineMeta = Pick<
   SessionLogSegment,
-  "taskStatus" | "taskElapsedMs" | "taskAsync" | "taskSummary" | "taskToolName"
+  "taskStatus" | "taskElapsedMs" | "taskAsync" | "taskSummary" | "taskToolName" | "taskTaskId"
 >;
 
 /**
@@ -250,8 +252,10 @@ type TaskLineMeta = Pick<
  *     taskElapsedMs / taskSummary（终态覆盖，到达顺序即权威）。
  *
  * 坏行容错（R-07）：非 JSON / 非对象 / NOTIFICATION 缺合法 status → null，调用方
- * 降级为普通文本行（不抛错不丢行）；未知字段（task_id/total_tokens/tool_uses 等）
- * 忽略——路由走行级 parent_tool_use_id，token 计数走 SSE 卡片通道，均不在此消费。
+ * 降级为普通文本行（不抛错不丢行）；未知字段（total_tokens/tool_uses 等）忽略。
+ * task_id 自 2026-10-13-agent-task-stuck-running（FR-02）起提取为 taskTaskId——
+ * 行级 parent_tool_use_id 未命中时按它兜底反查派发段（旧注释「忽略 task_id」
+ * 已随兜底路由退役）；token 计数走 SSE 卡片通道，仍不在此消费。
  */
 function parseTaskLine(trimmed: string): TaskLineMeta | null {
   const match = TASK_LINE_RE.exec(trimmed);
@@ -263,6 +267,7 @@ function parseTaskLine(trimmed: string): TaskLineMeta | null {
       summary?: unknown;
       last_tool_name?: unknown;
       async?: unknown;
+      task_id?: unknown;
     } | null;
     if (!obj || typeof obj !== "object") return null;
     const elapsedMs =
@@ -270,10 +275,13 @@ function parseTaskLine(trimmed: string): TaskLineMeta | null {
         ? obj.elapsed_ms
         : undefined;
     const summary = typeof obj.summary === "string" ? obj.summary : undefined;
+    const taskTaskId =
+      typeof obj.task_id === "string" && obj.task_id ? obj.task_id : undefined;
     if (match[1] === "TASK_STARTED") {
       return {
         taskStatus: "running",
         ...(typeof obj.async === "boolean" ? { taskAsync: obj.async } : {}),
+        ...(taskTaskId ? { taskTaskId } : {}),
       };
     }
     if (match[1] === "TASK_PROGRESS") {
@@ -281,6 +289,7 @@ function parseTaskLine(trimmed: string): TaskLineMeta | null {
         ...(elapsedMs !== undefined ? { taskElapsedMs: elapsedMs } : {}),
         ...(summary !== undefined ? { taskSummary: summary } : {}),
         ...(typeof obj.last_tool_name === "string" ? { taskToolName: obj.last_tool_name } : {}),
+        ...(taskTaskId ? { taskTaskId } : {}),
       };
     }
     // TASK_NOTIFICATION：status 必须是三值终态，缺失/非法视为坏行降级文本（防御
@@ -292,6 +301,7 @@ function parseTaskLine(trimmed: string): TaskLineMeta | null {
       taskStatus: obj.status,
       ...(elapsedMs !== undefined ? { taskElapsedMs: elapsedMs } : {}),
       ...(summary !== undefined ? { taskSummary: summary } : {}),
+      ...(taskTaskId ? { taskTaskId } : {}),
     };
   } catch {
     return null;
@@ -522,6 +532,13 @@ export type TurnSegment =
       taskAsync?: boolean;
       taskSummary?: string;
       taskToolName?: string;
+      /**
+       * 2026-10-13-agent-task-stuck-running（FR-02）：[TASK_*] 行 JSON 载荷的
+       * task_id（STARTED/PROGRESS/NOTIFICATION 恒带）——段元数据持久后可被
+       * parent 未命中的 task 行按 task_id 兜底反查吸收（别名/孤儿通知行
+       * parent 缺失或错位时，派发段仍能收到终态不再永久「运行中」）。
+       */
+      taskTaskId?: string;
       /**
        * 2026-09-27-session-fast-replay task-04 / FR-07：slim 全文回填关联键与
        * 截断标记（可选——实时 SSE / 非 slim 历史恒缺省，零影响）：
@@ -938,6 +955,29 @@ function findToolById(segments: TurnSegment[], id: string): ToolTurnSegment | nu
   return null;
 }
 
+/**
+ * 2026-10-13-agent-task-stuck-running（FR-02）：DFS 全树按段元数据 taskTaskId
+ * 反查 tool 段——task 行 parent_tool_use_id 未命中/缺失时的兜底路由键（daemon
+ * 别名通知行可能无 parent、历史孤儿行 parent 可能错位）。命中同段多处时取
+ * 先序第一个（task_id 由 harness 全局唯一，实践不撞）。
+ */
+function findToolByTaskId(
+  segments: TurnSegment[],
+  taskTaskId: string,
+): ToolTurnSegment | null {
+  for (const s of segments) {
+    if (s.kind === "tool") {
+      if (s.taskTaskId === taskTaskId) return s;
+      const inner = findToolByTaskId(s.children, taskTaskId);
+      if (inner) return inner;
+    } else if (s.kind === "subagent_stub") {
+      const inner = findToolByTaskId(s.children, taskTaskId);
+      if (inner) return inner;
+    }
+  }
+  return null;
+}
+
 /** DFS 全树找 id 匹配的 subagent_stub 段（stub 只在顶层创建，DFS 为防御兜底）。 */
 function findStubById(segments: TurnSegment[], id: string): StubTurnSegment | null {
   for (const s of segments) {
@@ -1054,6 +1094,9 @@ function applyTaskMeta(tool: ToolTurnSegment, meta: TaskLineMeta): ToolTurnSegme
     ...(meta.taskAsync !== undefined ? { taskAsync: meta.taskAsync } : {}),
     ...(meta.taskSummary !== undefined ? { taskSummary: meta.taskSummary } : {}),
     ...(meta.taskToolName !== undefined ? { taskToolName: meta.taskToolName } : {}),
+    // 2026-10-13-agent-task-stuck-running（FR-02）：task_id 随行持久为段元数据
+    //（latest-wins 同字段覆盖），parent 未命中的后续 task 行按它兜底反查。
+    ...(meta.taskTaskId !== undefined ? { taskTaskId: meta.taskTaskId } : {}),
   };
 }
 
@@ -1291,22 +1334,35 @@ export function applyLogToSegments(
   }
 
   // task-11（2026-08-27-background-subagent-progress / FR-03·07 前端半）：[TASK_*]
-  // 后台任务生命周期行 → 按行级 parent_tool_use_id 路由写入派发 tool 段元数据
+  // 后台任务生命周期行 → 路由写入派发 tool 段元数据
   // （刷新/历史回放重建状态；实时卡片状态另有 agent_task_status SSE 通道）。
   // 与 override 同属「信号非内容」提前路径：
   //   - 行本身不产生任何正文/过程段（消费后折叠进段元数据，不显示为普通文本行）；
-  //   - 路由目标 = parent_tool_use_id 匹配的 tool 段（复用既有归属路由的容器定位
-  //     DFS，含嵌套 children）。找不到（历史孤儿 / 行级归属缺失 / 目标仅为
-  //     subagent_stub 的极端时序——stub 无元数据槽，tool_call JSON 到达合并后由
-  //     后续 [TASK_*] 行补写）→ 丢弃该行原引用返回，不建 stub 空壳、不落顶层
-  //     （硬约束：找不到段时不崩，取更安全者）；
+  //   - 路由目标两级：① parent_tool_use_id 匹配的 tool 段（复用既有归属路由的
+  //     容器定位 DFS，含嵌套 children）；② 2026-10-13-agent-task-stuck-running
+  //     （FR-02）起，①未命中/缺失时按行 task_id 反查段元数据 taskTaskId（别名/
+  //     孤儿通知行 parent 缺失或错位时派发段仍吸收终态——此前一律丢弃导致派发
+  //     段永久「运行中」，turn-state.ts 跨轮路由注释实证）。两路都落空（目标仅
+  //     为 subagent_stub 的极端时序——stub 无元数据槽，tool_call JSON 到达合并
+  //     后由后续 [TASK_*] 行补写）→ 丢弃该行原引用返回，不建 stub 空壳、不落
+  //     顶层（硬约束：找不到段时不崩，取更安全者）；
   //   - 元数据不参与兼容投影（output/processItems 值不变）→ 投影 cell 原样复用，
   //     不触发全量重投影（F7 增量链不断；外部构造 turn 无 cell 时全量建一次，
   //     维持「携带 cell 则恒等全量投影」不变式）。
   if (seg.kind === "task") {
     const parent = nonEmptyString(input.parentToolUseId);
-    if (parent && findToolById(turn.segments, parent)) {
-      const next = updateContainerById(turn.segments, parent, (c) =>
+    // 2026-10-13-agent-task-stuck-running（FR-02）：路由目标优先按行级
+    // parent_tool_use_id（既有契约）；未命中/缺失时按行 task_id 兜底反查段
+    // 元数据（别名/孤儿通知行 parent 缺失或错位——派发段吸收终态，不再永久
+    // 「运行中」）。两路都落空才维持丢弃（不建 stub 空壳、不落顶层）。
+    const targetId =
+      parent && findToolById(turn.segments, parent)
+        ? parent
+        : seg.taskTaskId
+          ? (findToolByTaskId(turn.segments, seg.taskTaskId)?.id ?? null)
+          : null;
+    if (targetId) {
+      const next = updateContainerById(turn.segments, targetId, (c) =>
         c.kind === "tool" ? applyTaskMeta(c, seg) : c,
       );
       const prevCell = (turn as AssembledTurn & AssemblerInternalsCarrier)[LEGACY_CELL];
