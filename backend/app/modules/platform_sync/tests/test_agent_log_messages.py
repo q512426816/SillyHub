@@ -43,6 +43,12 @@ from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime  
 
 _RPC = "app.modules.daemon.host_fs.ws_rpc.send_host_fs_rpc"
 
+#: 2026-10-13-editpatch-fullchain：daemon claude-code 解析器附着的 structuredPatch
+#: JSON 串（行级 toolUseResult.structuredPatch 序列化，tool_result 段专用）。
+_PATCH_JSON = (
+    '[{"oldStart": 1, "newStart": 1, "oldLines": 1, "newLines": 2, "lines": ["-a", "+b", "+c"]}]'
+)
+
 #: daemon 契约（task-02 + task-08 token/轮次扩展）外层 camelCase 返回的 parsed
 #: 形状样例（messages 内层 snake_case 与 NormalizedLogMessage 逐字对齐，design
 #: §7.1；usage 子对象键为 daemon camelCase，外层 totalUsage 同理——schema 侧
@@ -65,6 +71,7 @@ _PARSED_RESULT: dict[str, Any] = {
             "model": "GLM-5.3",
             "duration_ms": None,
             "usage": None,
+            "edit_patch": None,
         },
         {
             "seq": 2,
@@ -87,6 +94,7 @@ _PARSED_RESULT: dict[str, Any] = {
                 "cacheReadTokens": 5,
                 "cacheWriteTokens": 0,
             },
+            "edit_patch": None,
         },
         {
             "seq": 3,
@@ -103,6 +111,7 @@ _PARSED_RESULT: dict[str, Any] = {
             "model": None,
             "duration_ms": None,
             "usage": None,
+            "edit_patch": _PATCH_JSON,
         },
     ],
     "truncated": True,
@@ -263,6 +272,7 @@ class TestStatusLayering:
             "model": "GLM-5.3",
             "duration_ms": None,
             "usage": None,
+            "edit_patch": None,
         }
         tool_use = body["messages"][1]
         assert tool_use["kind"] == "tool_use"
@@ -282,6 +292,9 @@ class TestStatusLayering:
         assert tool_result["kind"] == "tool_result"
         assert tool_result["tool_use_id"] == "toolu_01"
         assert tool_result["is_error"] is False
+        # 2026-10-13-editpatch-fullchain：structuredPatch JSON 串随 tool_result
+        # 项原样透传（daemon claude-code 解析器附着；缺省 None）。
+        assert tool_result["edit_patch"] == _PATCH_JSON
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -648,6 +661,7 @@ class TestOpenapiExposure:
             "model",
             "duration_ms",
             "usage",
+            "edit_patch",
         }
         usage_props = schemas["AgentLogMessageUsage"]["properties"]
         assert set(usage_props) == {

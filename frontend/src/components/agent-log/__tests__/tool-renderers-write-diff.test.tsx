@@ -63,3 +63,58 @@ describe("WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）", () 
     cleanup();
   });
 });
+
+// ── 2026-10-13-editpatch-fullchain：EditToolPreview 行级 diff ────────────────
+
+function editEntry(oldStr: string, newStr: string): ToolCallEntry {
+  return {
+    timestamp: "2026-10-13T10:00:00.000Z",
+    tool: "Edit",
+    args: JSON.stringify({ file_path: "src/a.ts", old_string: oldStr, new_string: newStr }),
+    status: "allowed",
+    success: true,
+    rawArgs: { file_path: "src/a.ts", old_string: oldStr, new_string: newStr },
+  };
+}
+
+describe("EditToolPreview diff 渲染（2026-10-13-editpatch-fullchain）", () => {
+  it("有 editPatch：structuredPatch 红删绿增渲染（真实文件行号）", () => {
+    const patch = JSON.stringify([
+      { oldStart: 55, newStart: 55, oldLines: 1, newLines: 1, lines: ["-old-line", "+new-line"] },
+    ]);
+    render(
+      <ToolCallPreview
+        entry={editEntry("old-line", "new-line")}
+        mergedResult="updated"
+        editPatch={patch}
+      />,
+    );
+    const delRow = screen.getByText("old-line").closest("div.flex");
+    const addRow = screen.getByText("new-line").closest("div.flex");
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(addRow?.className).toContain("bg-emerald-500/10");
+    expect(screen.getByText(/变更对比/)).toBeTruthy();
+    cleanup();
+  });
+
+  it("无 editPatch：回退 computeLineDiff LCS 行级 diff（红删绿增，片段相对行号）", () => {
+    render(<ToolCallPreview entry={editEntry("a\nb\nc", "a\nX\nc")} mergedResult="updated" />);
+    const delRow = screen.getByText("b").closest("div.flex");
+    const addRow = screen.getByText("X").closest("div.flex");
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(addRow?.className).toContain("bg-emerald-500/10");
+    expect(screen.getByText(/变更对比/)).toBeTruthy();
+    cleanup();
+  });
+
+  it("超大输入（LCS 超 100 万单元格护栏）→ 回退既有红/绿两块展示", () => {
+    const big = Array.from({ length: 1200 }, (_, i) => `line-${i}`).join("\n");
+    render(<ToolCallPreview entry={editEntry(big, big + "\nextra")} mergedResult="updated" />);
+    expect(screen.queryByText(/变更对比/)).toBeNull();
+    // 既有两块形态的结构标记：裸 "-" / "+" 块标签（diff 路径渲染的是 DiffView
+    // 行内标记，不产生裸标签节点）
+    expect(screen.getByText("-")).toBeTruthy();
+    expect(screen.getByText("+")).toBeTruthy();
+    cleanup();
+  });
+});

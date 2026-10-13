@@ -259,6 +259,73 @@ describe('parseClaudeCodeJsonlLog — user 行归一（C4 / D-003@v1 / R-06）',
     expect(orphan).toMatchObject({ tool_name: null, tool_use_id: 'orphan-1', tool_result: '迟到/失配的结果' });
   });
 
+  // ── 2026-10-13-editpatch-fullchain：行级 toolUseResult.structuredPatch → edit_patch ──
+
+  /** user 行（带顶层 toolUseResult——claude-code 把 Edit/Write 覆盖写的
+   *  structuredPatch 放在载体行顶层，非 message 内）。 */
+  function userLineWithToolUseResult(
+    content: Array<Record<string, unknown>>,
+    toolUseResult: Record<string, unknown>,
+  ): string {
+    return JSON.stringify({
+      parentUuid: 'p_fixture',
+      type: 'user',
+      message: { role: 'user', content },
+      toolUseResult,
+      timestamp: TS(0),
+      sessionId: 'sess_fixture',
+      cwd: 'FIXTURE_CWD',
+    });
+  }
+
+  it('行级 toolUseResult.structuredPatch（非空数组）→ edit_patch JSON 串附着该行 tool_result 段', async () => {
+    const patch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ['-a', '+b', '+c'] }];
+    const content = jsonl(
+      asstLine([{ type: 'tool_use', id: 'toolu_w1', name: 'Write', input: { file_path: 'a.ts', content: 'b\nc' } }]),
+      userLineWithToolUseResult(
+        [{ tool_use_id: 'toolu_w1', type: 'tool_result', content: 'updated' }],
+        { type: 'update', filePath: 'a.ts', originalFile: 'a', structuredPatch: patch },
+      ),
+    );
+    const result = await parseClaudeCodeJsonlLog(content);
+    expect(result.status).toBe('parsed');
+    const tr = ofKind(result.messages, 'tool_result')[0];
+    expect(tr?.tool_use_id).toBe('toolu_w1');
+    expect(tr?.edit_patch).toBe(JSON.stringify(patch));
+  });
+
+  it('toolUseResult 无 structuredPatch（create / 缺字段 / 空数组 / 非数组）→ edit_patch 缺省（undefined）', async () => {
+    const mk = (tur: Record<string, unknown>): string =>
+      userLineWithToolUseResult([{ tool_use_id: 'tu_x', type: 'tool_result', content: 'ok' }], tur);
+    const result = await parseClaudeCodeJsonlLog(
+      jsonl(
+        asstLine([{ type: 'tool_use', id: 'tu_x', name: 'Write', input: {} }]),
+        mk({ type: 'create', filePath: 'new.ts', content: 'x' }),
+        mk({ type: 'update', structuredPatch: [] }),
+        mk({ type: 'update', structuredPatch: 'not-array' }),
+        mk({}),
+      ),
+    );
+    const toolResults = ofKind(result.messages, 'tool_result');
+    expect(toolResults).toHaveLength(4);
+    for (const tr of toolResults) expect(tr.edit_patch).toBeUndefined();
+  });
+
+  it('structuredPatch 序列化超 64KB → 整体不附着（残缺 JSON 无消费价值，all-or-nothing）', async () => {
+    const bigLine = '-'.repeat(70_000);
+    const patch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${bigLine}`] }];
+    const content = jsonl(
+      asstLine([{ type: 'tool_use', id: 'tu_big', name: 'Write', input: {} }]),
+      userLineWithToolUseResult(
+        [{ tool_use_id: 'tu_big', type: 'tool_result', content: 'ok' }],
+        { type: 'update', structuredPatch: patch },
+      ),
+    );
+    const result = await parseClaudeCodeJsonlLog(content);
+    const tr = ofKind(result.messages, 'tool_result')[0];
+    expect(tr?.edit_patch).toBeUndefined();
+  });
+
   it('user 数组含 text 块 → user_input 段（text 原文 + sender 归一），不因数组形状丢弃', async () => {
     const content = jsonl(
       userLine([{ type: 'text', text: '数组携带的真人输入' }], { isMeta: false }),
