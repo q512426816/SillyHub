@@ -577,10 +577,12 @@ describe("quick-a0458ac9：门户机器选择器接入共享机器（machineCand
 });
 
 describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖；task-07 表单态断言迁移预会话/空门户态）", () => {
-  it("无选中：左会话列表 + 右空门户态 + 页头标题（task-07：原「新建会话表单」断言迁移）", async () => {
+  it("无选中：左会话列表 + 右空门户态 + 页标题语义（sr-only，页头块 2026-10-13 移除）", async () => {
     renderPage();
 
-    // 页头
+    // 页标题降级 sr-only h1（2026-10-13-sessions-portal-header-remove：原
+    // PageHeader 标题块+副标题整体退役，视觉零占位；语义仍在——视觉面契约
+    // 断言见 sessions-portal.test.tsx 同名用例）。
     expect(screen.getByRole("heading", { name: "智能体会话" })).toBeTruthy();
 
     // 左栏：列表（ql-20260824-001 起分组默认折叠，组头计数可见；task-05
@@ -1536,7 +1538,10 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     const ta = screen.getByPlaceholderText(
       /继续追问|消息将排队/,
     ) as HTMLTextAreaElement;
-    await waitFor(() => expect(ta.value).toContain("【截图.png】"));
+    // 2026-10-12-ws-ref-emoji-inline：引用 token 内嵌类型 emoji（📎 附件）——
+    // 断言随实际形态补前缀（本行原写「【截图.png】」是 emoji 进 token 前的
+    // 存量断言，2026-10-13-sessions-portal-header-remove 顺手修正）。
+    await waitFor(() => expect(ta.value).toContain("【📎 截图.png】"));
 
     mocks.injectSession.mockResolvedValueOnce({
       session_id: "s-1",

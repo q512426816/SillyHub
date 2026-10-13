@@ -109,6 +109,13 @@
  * 页头「新建会话」按钮已移除（X-12：新建入口收敛到组头「＋」，actions 空）；
  * ql-20260823-003：change 页头按钮移除（D-106 修订，树组头「＋」统一承载；原 task-07 例外（其左侧
  * 平铺列表无组头「＋」，见上）。
+ *
+ * 页头标题块移除（2026-10-13-sessions-portal-header-remove，用户反馈：标题+
+ *   一句话说明占掉一段高度，下方分栏要占满屏幕）：原 PageHeader（title
+ *   portalTitle + 副标题「跨机器、跨智能体的统一会话入口…」）整体退役——标题
+ *   降级为 sr-only h1（视觉零占位，读屏/测试仍可按标题识别四 scope 后缀），
+ *   副标题文案删除；workspace scope 的紧凑 Git 状态条是功能件非标题文案，
+ *   原样保留为右对齐紧缩一行（CC-08 语义不变，其余 scope 零渲染）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -142,7 +149,7 @@ import {
 } from "@/components/sessions/session-list-panel";
 import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { GitStatusBar } from "@/components/git-log/git-status-bar";
-import { PageContainer, PageHeader } from "@/components/layout";
+import { PageContainer } from "@/components/layout";
 import { listProviders } from "@/lib/api/llm-providers";
 import {
   getAgentSession,
@@ -154,7 +161,7 @@ import {
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
-// ql-20260829-010：scoped 工作区归档态判定（页头「新建会话」置灰）。
+// ql-20260829-010：scoped 工作区归档态判定（空态「新建会话」按钮置灰）。
 import { getWorkspace, listWorkspaces } from "@/lib/workspaces";
 import { fetchMyBindings } from "@/lib/workspace-binding";
 import { debounceLeadingTrailing } from "@/lib/utils";
@@ -443,7 +450,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   }, [refreshSessionLists]);
 
   // ql-20260829-010：scoped 工作区归档态（workspace/change/quicklog scope 才
-  // 拉；全局门户不拉零开销）。归档 → 页头「新建会话」置灰（后端 409 同款守卫）。
+  // 拉；全局门户不拉零开销）。归档 → 空态「新建会话」按钮置灰（后端 409 同款守卫）。
   const scopedWorkspaceId =
     scope?.kind === "workspace" || scope?.kind === "change" || scope?.kind === "quicklog"
       ? scope.workspaceId
@@ -589,6 +596,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   }`;
   // change scope（task-07 / FR-06 / D-106）：左侧平铺列表无组头「＋」，预会话
   // 入口由页头 actions 承载（X-12 的例外，仅此 scope 有页头按钮）。
+  // ↑ 已过时：ql-20260823-003 起 change 与其它 scope 统一树形态（组头「＋」承载
+  // 新建），页头按钮与整个页头标题块均已移除（2026-10-13-sessions-portal-header-remove）。
 
   /**
    * 组头「＋」（FR-04 / D-107 优先级链第一段，ql-20260823-001 补齐）：两层筛选
@@ -713,16 +722,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           ql-20260823-003：change 亦树形态，页头按钮移除（D-106 修订）。
           task-03（2026-08-26-workspace-git-status）：workspace scope 挂紧凑态
           Git 状态条（CC-08——change/quicklog scope 虽携带 workspaceId，但语义
-          是「围绕某变更的会话」，挂工作区健康状态偏离主题，不挂）。 */}
-      <PageHeader
-        title={portalTitle}
-        subtitle="跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建"
-        actions={
-          scope?.kind === "workspace" ? (
-            <GitStatusBar workspaceId={scope.workspaceId} variant="compact" />
-          ) : undefined
-        }
-      />
+          是「围绕某变更的会话」，挂工作区健康状态偏离主题，不挂）。
+          2026-10-13-sessions-portal-header-remove：PageHeader 标题块（title +
+          副标题）整体移除，下方分栏占满视口高度——标题降级 sr-only h1（绝对
+          定位零占位，仅保留无障碍/测试可识别的页面标题语义），副标题文案删
+          除；Git 状态条保留为右对齐紧缩一行（仅 workspace scope 渲染）。 */}
+      <h1 className="sr-only">{portalTitle}</h1>
+      {scope?.kind === "workspace" && (
+        <div className="flex shrink-0 justify-end">
+          <GitStatusBar workspaceId={scope.workspaceId} variant="compact" />
+        </div>
+      )}
       {/* 原型 .main-grid：左 320px 列表 + 右面板；gap-3 与 PageContainer 卡片间距
           统一（ql-20260908-016，原 3.5 与页头间距不一致）。
           task-03（FR-04）：grid 换 flex 三栏——左栏宽度 usePanelWidth 可拖
@@ -730,7 +740,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           （R-01：grid 1fr ↔ flex-1 min-w-0 等价，四分支原样迁入）+ filePreview
           时追加右把手与预览列（320–860，默认 480）；overflow-hidden 兜窄视口
           三栏总宽溢出（R-03，用户可拖窄/关列）。 */}
-      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
+      <div
+        data-testid="sessions-portal-panes"
+        className="flex min-h-0 flex-1 gap-3 overflow-hidden"
+      >
         {/* 左栏：leftMode 二模（D-003 files 模式卸载 SessionListPanel，宽度两模
             共用同一 usePanelWidth 状态）。 */}
         <div className="min-w-0 shrink-0" style={{ width: `${leftWidth}px` }}>

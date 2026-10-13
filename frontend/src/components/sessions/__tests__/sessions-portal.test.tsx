@@ -17,7 +17,9 @@
  *   1. 三 scope 渲染（D-003@v2 / D-001@v1）：标题后缀 + 端点过滤参 + 右侧
  *      空门户态（NewSessionForm 渲染分支 task-06 起替换，X-12 / D-109——原
  *      锁定表单断言语义迁移归 task-07 change 入口用例）；workspace scope 经
- *      defaultExpandedWorkspaceId 预展开传参（FR-06）
+ *      defaultExpandedWorkspaceId 预展开传参（FR-06）；页头标题块移除
+ *      （2026-10-13-sessions-portal-header-remove：副标题不渲染 / 标题
+ *      sr-only / 分栏 flex-1 高度链）
  *   2. scope 过滤参透传即端点职责（D-003@v2，task-11 v3 语义原样保留）
  *   3. ?session= 深链（D-004@v1）：有效直达选中；无参/无效静默落空门户态
  *     （原落新建表单态，design §9）；页头「新建会话」按钮移除断言（X-12）
@@ -946,6 +948,29 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(screen.queryByTestId("git-status-bar")).toBeNull();
   });
 
+  it("页头标题块移除（2026-10-13-sessions-portal-header-remove）：副标题文案不再渲染、标题降级 sr-only、分栏 flex-1 占满视口高度", async () => {
+    const { container } = renderPortal();
+
+    // 标题以 sr-only h1 保留：视觉零占位（绝对定位），读屏/测试仍可按标题
+    // 识别四 scope 后缀（上方各 scope 用例的 heading 断言即此语义）。
+    const heading = screen.getByRole("heading", { name: "智能体会话" });
+    expect(heading).toHaveClass("sr-only");
+    // 原 PageHeader 副标题文案整体删除——DOM 任何位置都不再出现。
+    expect(
+      screen.queryByText(
+        "跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建",
+      ),
+    ).toBeNull();
+
+    // 高度链：容器锚定视口高（TopBar 实际 h-16=64px）+ 分栏 flex-1 min-h-0
+    // ——页头块退役后左列表＋右面板直接占满剩余高度，无标题占位空白。
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-[calc(100vh-64px)]");
+    const panes = screen.getByTestId("sessions-portal-panes");
+    expect(panes.className).toContain("flex-1");
+    expect(panes.className).toContain("min-h-0");
+  });
+
   it("ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照", async () => {
     // 修复①（轮询拆分回归）：门户挂载必须传 includeSessions:true——漏传则
     // hook sessions 恒 []，空门户「继续最近会话」入口消失（本用例后半段
@@ -1019,8 +1044,10 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(screen.queryByLabelText("新建会话表单")).toBeNull();
     // FR-06 workspace 入口预展开：scope.workspaceId 传受控展开 prop
     expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBe("ws-1");
-    // task-03：workspace scope 页头 actions 槽挂紧凑态 Git 状态条（CC-08；
-    // fixture 干净工作区 → 紧凑态只出分支徽标「⎇ main」）
+    // task-03：workspace scope 顶部右对齐行挂紧凑态 Git 状态条（CC-08；
+    // 2026-10-13-sessions-portal-header-remove 后由页头 actions 槽改为独立
+    // 紧缩行，仅形态容器变化、组件与语义不变；fixture 干净工作区 → 紧凑态
+    // 只出分支徽标「⎇ main」）
     expect(screen.getByTestId("git-status-bar")).toHaveAttribute(
       "data-variant",
       "compact",

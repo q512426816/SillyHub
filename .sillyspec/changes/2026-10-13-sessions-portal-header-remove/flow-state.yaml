@@ -1,0 +1,25 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  智能体会话页面（/sessions 及 workspace/change/quicklog 三 scoped 入口）页头「智能体会话 ·
+  xxx」标题与「跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建」副标题占掉一段高度，用户要求去掉该标题块，让下方会话列表/会话面板占满屏幕。
+
+
+  成功标准：
+
+  - 四个入口页面不再渲染可见的标题/副标题文字块（DOM 中不再出现该副标题文案，标题仅保留无障碍隐藏语义）。
+
+  - 标题块移除后，下方左列表＋右面板分栏容器向上占满可用视口高度，无标题占位留下的空白。
+
+  - workspace scope 的紧凑 Git 状态条功能不回归（仍渲染且可查询到）。
+
+  - 相关单测更新并通过（sessions-portal / sessions page 冒烟），不破坏其它会话功能断言。
+autopilot: true
+baseline_commit: 13c7d29c9768627aeb07b04ed248c0661d052f8a
+updatedAt: '2026-10-13T09:10:03.596Z'
+baseline_sha256: bf30886943d3cfc617e873b78ac0d970d6f45dd3bee616364e6501d57b3ddff4
+
