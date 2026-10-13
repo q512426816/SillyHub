@@ -796,6 +796,32 @@ describe("SegmentView 统一分发器", () => {
     expect(screen.getByText("子代理")).toBeInTheDocument();
   });
 
+  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」、默认折叠", () => {
+    render(
+      <SegmentView
+        segment={makeStubSeg({
+          orphaned: true,
+          children: [makeTextSeg({ id: "text:orphan", text: "孤儿内部文本" })],
+        })}
+      />,
+    );
+    expect(screen.queryByText("运行中")).not.toBeInTheDocument();
+    expect(document.querySelector(".animate-pulse")).toBeNull();
+    expect(document.querySelector(".bg-brand-600")).toBeNull();
+    expect(document.querySelector(".bg-muted-foreground")).not.toBeNull(); // 中性灰点
+    // 非 running → 默认折叠（点击仍可展开看子内容，数据不丢）。
+    expect(screen.queryByText("孤儿内部文本")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByText("Explore")[0]!);
+    expect(screen.getByText("孤儿内部文本")).toBeInTheDocument();
+  });
+
+  it("实时暂态 stub（未标记 orphaned）仍 running 脉冲——孤儿兜底不误伤实时路径（FR-05）", () => {
+    render(<SegmentView segment={makeStubSeg()} />);
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(document.querySelector(".animate-pulse")).not.toBeNull();
+    expect(document.querySelector(".bg-brand-600")).not.toBeNull();
+  });
+
   it("file 段 → FileMessageCard 接线：「agent 上传了文件」标注 + 五字段透传（task-08）", () => {
     render(<SegmentView segment={makeFileSeg()} />);
     expect(screen.getByText("agent 上传了文件")).toBeInTheDocument();

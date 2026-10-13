@@ -1562,3 +1562,105 @@ describe("压缩摘要与压缩状态协议行（ql-20260917-006）", () => {
     expect(batch.map((s) => s.kind)).toEqual(live.segments.map((s) => s.kind));
   });
 });
+
+/* ───────── 2026-10-13-slim-subagent-false-running：slim 截断配对键回退 + 孤儿 stub ───────── */
+
+describe("slim 截断行回退 toolUseId（2026-10-13-slim-subagent-false-running / FR-02）", () => {
+  /** 会话 f231ca18 实证形态：超长 Agent 派发 tool_call JSON 被 slim 截残（解析失败）。 */
+  const truncatedDispatch =
+    '{"tool": "Agent", "args": {"description": "独立设计审查", "prompt": "你是独立设计审查员（长指令被截断处…';
+
+  it("截残派发行回退回传 toolUseId：子代理日志挂进派发 tool 段，不再产生 stub", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
+      makeLog("l2", "stdout", "[THINKING] 子代理思考", {
+        parentToolUseId: "call_x",
+        subagentType: "general-purpose",
+      }),
+      makeLog("l3", "stdout", "子代理结论", {
+        parentToolUseId: "call_x",
+        subagentType: "general-purpose",
+      }),
+    ]);
+    // 无 stub：子日志全部路由进恢复配对键的 tool 段 children。
+    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
+    const tool = toolById(segments, "call_x");
+    expect(tool.raw).toBe(truncatedDispatch);
+    expect(tool.subagentType).toBe("general-purpose");
+    expect(tool.children.map((c) => c.kind)).toEqual(["thinking", "text"]);
+  });
+
+  it("子消息先到 + 截残派发行后到：stub 以恢复键合并迁入（键源同源不拆两段）", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "stdout", "子消息先到", { parentToolUseId: "call_x", subagentType: "Explore" }),
+      makeLog("l2", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
+    ]);
+    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
+    const tool = toolById(segments, "call_x");
+    expect(tool.subagentType).toBe("Explore");
+    expect(tool.children.map((c) => c.kind)).toEqual(["text"]);
+  });
+
+  it("恢复配对后 [TASK_*] 元数据路由命中：taskStatus 终态接管（FR-03）", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
+      makeLog("l2", "stdout", '[TASK_STARTED] {"task_id":"t1","tool_use_id":"call_x","async":true}', {
+        parentToolUseId: "call_x",
+      }),
+      makeLog("l3", "stdout", '[TASK_NOTIFICATION] {"task_id":"t1","status":"completed","elapsed_ms":233683}', {
+        parentToolUseId: "call_x",
+      }),
+    ]);
+    const tool = toolById(segments, "call_x");
+    expect(tool.taskStatus).toBe("completed");
+    expect(tool.taskElapsedMs).toBe(233683);
+    expect(tool.taskAsync).toBe(true);
+  });
+
+  it("result 位置配对兜底截残段状态：非 running（FR-03 result 接管）", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
+      makeLog("l2", "stdout", "[TOOL_RESULT] 设计审查完成，PASS"),
+    ]);
+    const tool = toolById(segments, "call_x");
+    expect(tool.status).toBe("ok");
+  });
+
+  it("行内解析成功时零回归：JSON 内 tool_use_id 优先，不消费回退字段（FR-05）", () => {
+    const full = '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"call_real","success":true}';
+    const segments = logsToSegments([
+      makeLog("l1", "tool_call", full, { toolUseId: "call_fallback" }),
+    ]);
+    expect(toolById(segments, "call_real").status).toBe("ok");
+    expect(segments.some((s) => s.kind === "tool" && (s as ToolTurnSegment).id === "call_fallback")).toBe(false);
+  });
+
+  it("实时增量路径（applyLogToSegments）零变化：无回退字段时截残行行为与改前一致（FR-05）", () => {
+    const turn = applyAll([
+      makeLog("l1", "tool_call", truncatedDispatch),
+      makeLog("l2", "stdout", "子消息", { parentToolUseId: "call_x" }),
+    ]);
+    // 派发行 id 走 logId 兜底（改前行为），子消息跌落 stub（实时暂态，无 orphaned 标记）。
+    expect(turn.segments.map((s) => s.kind)).toEqual(["tool", "subagent_stub"]);
+    const stub = findSeg(turn.segments, (s) => s.kind === "subagent_stub");
+    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBeUndefined();
+  });
+});
+
+describe("历史批量孤儿 stub 标记（2026-10-13-slim-subagent-false-running / FR-04）", () => {
+  it("logsToSegments 收尾仍残留的 stub 标记 orphaned=true", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "stdout", "孤儿子消息", { parentToolUseId: "call_gone", subagentType: "Explore" }),
+    ]);
+    const stub = findSeg(segments, (s) => s.kind === "subagent_stub");
+    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBe(true);
+  });
+
+  it("批量路径全部合并成功时无孤儿标记（无 stub 残留）", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "stdout", "子消息", { parentToolUseId: "call_ok", subagentType: "Explore" }),
+      makeLog("l2", "tool_call", '{"tool":"Task","args":{},"tool_use_id":"call_ok","success":true}'),
+    ]);
+    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
+  });
+});

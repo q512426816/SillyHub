@@ -13018,6 +13018,8 @@ export interface components {
             } | null;
             /** Content Truncated */
             content_truncated?: boolean | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {

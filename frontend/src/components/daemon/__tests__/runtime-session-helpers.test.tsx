@@ -522,6 +522,27 @@ describe("logsToTurns 父归属跨 run 重挂（2026-09-15-subagent-three-pane-d
     ).toBe(true);
   });
 
+  it("截残派发行回退 tool_use_id 登记：跨 run 终态行仍重挂（2026-10-13-slim-subagent-false-running / FR-02）", () => {
+    // slim 截断形态：派发 JSON 被截残（toolUseIdOfContent 解析失败），后端回传
+    // tool_use_id 字段——登记须回退消费，否则跨 run 终态行不重挂、派发段恒 running。
+    const logs = base();
+    const dispatch = logs[1]!;
+    const truncated = {
+      ...dispatch,
+      content_redacted:
+        '{"tool": "Task", "args": {"description": "后台调研", "prompt": "你是调研员（长指令截断处…',
+      tool_use_id: "toolu_A1",
+    } as AgentRunLogEntry;
+    const turns = toSegmentTurns([logs[0]!, truncated, ...logs.slice(2)]);
+    const dispatchTurn = turns.find((t) => t.realRunId === runA);
+    const laterTurn = turns.find((t) => t.realRunId === runB);
+    const tool = findToolSeg(dispatchTurn?.segments, "toolu_A1");
+    expect(tool).toMatchObject({ kind: "tool", taskStatus: "completed", taskElapsedMs: 1200 });
+    expect(
+      (laterTurn?.segments ?? []).some((s) => s.kind === "subagent_stub"),
+    ).toBe(false);
+  });
+
   it("无跨 run 散落时零位移（同 run 归属行为与既有完全一致）", () => {
     const logs = base().map((l) => ({ ...l, run_id: runA }) as AgentRunLogEntry);
     const turns = toSegmentTurns(logs);

@@ -219,6 +219,9 @@ function toAssemblerInput(entry: AgentRunLogEntry): AssemblerLogInput {
     editPatch: entry.edit_patch ?? null,
     // 2026-09-27-session-fast-replay FR-07：slim 截断标记透传（tool 段全文回填键）。
     contentTruncated: entry.content_truncated ?? null,
+    // 2026-10-13-slim-subagent-false-running FR-02：slim 截断行回传的配对键
+    // （截残 JSON 解析不出 tool_use_id 时装配器回退采用）。
+    toolUseId: entry.tool_use_id ?? null,
   };
 }
 
@@ -309,7 +312,10 @@ function regroupSubagentLogsByParent(map: Map<string, AgentRunLogEntry[]>): void
         (moved.get(runId) ?? moved.set(runId, []).get(runId)!).push(entry);
       }
       if (entry.channel === "tool_call") {
-        const toolUseId = toolUseIdOfContent(entry.content_redacted);
+        // 2026-10-13-slim-subagent-false-running / FR-02：截残行解析失败时回退
+        // 后端回传的 tool_use_id（否则派发键登记失败，跨 run 终态行不重挂）。
+        const toolUseId =
+          toolUseIdOfContent(entry.content_redacted) ?? (entry.tool_use_id ?? null);
         if (toolUseId) ownerOf.set(toolUseId, target);
       }
     }
