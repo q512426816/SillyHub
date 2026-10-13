@@ -66,4 +66,45 @@ describe("MarkdownPreviewer", () => {
       expect(screen.getByRole("button", { name: /下载文件/ })).toBeInTheDocument();
     });
   });
+
+  // ── 2026-10-13-change-files-view-polish：timeline.md 全屏转发时间线视图 ──
+  describe("timeline.md 分发", () => {
+    const timelineContent = [
+      "# 合成时间线快照 — demo",
+      "",
+      "── 事件时间轴 ──",
+      "05:39:32  🁢 变更诞生",
+      "06:05:57  📝 tasks.md 内容变更",
+      "",
+      "墙钟：26min｜事件 2 条",
+    ].join("\n");
+
+    it("timeline.md 且结构命中 → TimelineView（与内联同源视图）", async () => {
+      render(
+        <MarkdownPreviewer
+          blob={new Blob([timelineContent], { type: "text/markdown" })}
+          url="blob:mock"
+          meta={{ name: "timeline.md", mime: "text/markdown", size: 100 }}
+        />,
+      );
+      await waitFor(() => {
+        expect(document.querySelector('[data-testid="timeline-view"]')).not.toBeNull();
+      });
+      expect(screen.queryByTestId("markdown-text")).toBeNull();
+    });
+
+    it("timeline.md 但格式漂移（无事件时间轴区块）→ 回落 MarkdownText", async () => {
+      render(
+        <MarkdownPreviewer
+          blob={new Blob(["# 普通文档\n\n正文"], { type: "text/markdown" })}
+          url="blob:mock"
+          meta={{ name: "timeline.md", mime: "text/markdown", size: 100 }}
+        />,
+      );
+      await waitFor(() => {
+        expect(screen.getByTestId("markdown-text")).toBeInTheDocument();
+      });
+      expect(document.querySelector('[data-testid="timeline-view"]')).toBeNull();
+    });
+  });
 });

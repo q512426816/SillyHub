@@ -7,6 +7,10 @@
  * + MARKDOWN_SANITIZE_SCHEMA + ssr:false），禁止裸用 @uiw/react-markdown-preview
  * 直出不可信内容（存储型 XSS 防线）。
  *
+ * timeline.md（2026-10-13-change-files-view-polish）：全屏转发竖向时间线视图
+ * （TimelineView 与内联 change-file-tree 同源，FR-04 不做两套）；结构不命中
+ * 回落下方 MarkdownText。
+ *
  * 统一消费 PreviewerProps。
  */
 
@@ -14,6 +18,7 @@ import { useEffect, useState } from "react";
 import { DownloadOutlined } from "@ant-design/icons";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { TimelineView, tryParseTimeline } from "@/components/files/structured-views";
 import { formatFileSize } from "@/lib/file/utils";
 import type { PreviewerProps } from "./index";
 
@@ -70,6 +75,19 @@ export function MarkdownPreviewer({ blob, meta, onDownload, fill }: PreviewerPro
             下载文件（{formatFileSize(meta.size ?? 0)}）
           </button>
         )}
+      </div>
+    );
+  }
+
+  // timeline.md 全屏走时间线视图（与内联同源）；结构不命中回落 MarkdownText
+  const timeline =
+    (meta.name.split("/").pop() ?? meta.name) === "timeline.md" && content !== null
+      ? tryParseTimeline(content)
+      : null;
+  if (timeline !== null) {
+    return (
+      <div className={fill ? "h-full min-h-[420px] w-full p-6" : "min-h-[420px] w-full p-6"}>
+        <TimelineView data={timeline} />
       </div>
     );
   }

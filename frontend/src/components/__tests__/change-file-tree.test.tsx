@@ -17,6 +17,9 @@ vi.mock("@/lib/change-files", () => ({
       "proposal.md": "变更提案",
       "watcher-events.jsonl": "观测事件流",
       // 2026-10-13-change-files-view-polish：新增 7 名（与 lib 真实表同步）
+      // + timeline/change.patch 两名（分发测试用，真实表本就有）
+      "timeline.md": "时间线记录",
+      "change.patch": "代码补丁",
       "plan.md": "实现计划",
       "delta.md": "变更增量",
       "module-impact.md": "模块影响分析",
@@ -484,5 +487,115 @@ describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
     // 任一行非法 → 纯文本兜底（无 jsonl-view）
     await waitFor(() => expect(screen.getByText(/not-json-line/)).toBeInTheDocument());
     expect(document.querySelector('[data-testid="jsonl-view"]')).toBeNull();
+  });
+});
+
+// ── 2026-10-13-change-files-view-polish：timeline.md / change.patch 内联专用视图 ──
+describe("ChangeFileTree timeline.md 与 change.patch 内联预览分发", () => {
+  const timelineContent = [
+    "# 合成时间线快照 — demo",
+    "",
+    "── 事件时间轴 ──",
+    "05:39:32  🁢 变更诞生（工件 frontmatter created_at）",
+    "06:05:57  📝 tasks.md 内容变更",
+    "",
+    "── 任务面（勾选时刻 ≈ 顺序推断）──",
+    "task-01  ≈06:05:57   先做的任务描述…  66ba4df44",
+    "",
+    "墙钟：26min｜事件 2 条｜任务 1/1 勾选",
+  ].join("\n");
+
+  const multiFilePatch = [
+    "diff --git a/src/a.ts b/src/a.ts",
+    "index 123..456 100644",
+    "--- a/src/a.ts",
+    "+++ b/src/a.ts",
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    "diff --git a/src/b.ts b/src/b.ts",
+    "index 789..abc 100644",
+    "--- a/src/b.ts",
+    "+++ b/src/b.ts",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+
+  it("timeline.md 结构命中 → 竖向时间线视图（时刻升序 + 任务面）", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "timeline.md", name: "timeline.md", size: 300, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({ path: "timeline.md", content: timelineContent, exists: true });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("时间线记录")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("时间线记录"));
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="timeline-view"]')).not.toBeNull(),
+    );
+    const view = document.querySelector('[data-testid="timeline-view"]')!;
+    expect(view.textContent).toContain("变更诞生");
+    expect(view.textContent).toContain("66ba4df44");
+    expect(view.textContent).toContain("墙钟：26min");
+  });
+
+  it("timeline.md 格式漂移 → 回落 markdown 渲染", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "timeline.md", name: "timeline.md", size: 50, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({ path: "timeline.md", content: "# 漂移格式\n\n正文", exists: true });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("时间线记录")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("时间线记录"));
+    await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
+    expect(document.querySelector('[data-testid="timeline-view"]')).toBeNull();
+  });
+
+  it("change.patch 多文件 → 按文件折叠树，默认收起、展开见 diff", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "change.patch", name: "change.patch", size: 300, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({ path: "change.patch", content: multiFilePatch, exists: true });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("代码补丁")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("代码补丁"));
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="patch-tree-view"]')).not.toBeNull(),
+    );
+    const view = document.querySelector('[data-testid="patch-tree-view"]')!;
+    expect(view.textContent).toContain("2 个文件");
+    expect(view.textContent).toContain("src/a.ts");
+    // 收起态无 diff 行；展开后该文件 diff 在场
+    expect(document.querySelector('[data-testid="diff-view"]')).toBeNull();
+    fireEvent.click(view.querySelector('[data-testid="patch-file-row"]')!);
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="diff-view"]')).not.toBeNull(),
+    );
+  });
+
+  it("其他 patch 文件（scope-audit.patch）→ 整片 DiffView 行为不变", async () => {
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: [
+        { path: "scope-audit.patch", name: "scope-audit.patch", size: 300, last_modified_at: null, is_text: true },
+      ],
+    });
+    mockedGetContent.mockResolvedValue({ path: "scope-audit.patch", content: multiFilePatch, exists: true });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("scope-audit.patch")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("scope-audit.patch"));
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="diff-view"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-testid="patch-tree-view"]')).toBeNull();
   });
 });

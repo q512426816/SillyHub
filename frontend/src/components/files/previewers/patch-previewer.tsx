@@ -5,15 +5,17 @@
  *
  * scope-audit.patch / quicklog patches 等统一 diff 文本：DiffView 共享
  * 红绿渲染（parseUnifiedDiff + 行号）；非 diff 格式由 DiffView 内部回落
- * 纯文本。统一消费 PreviewerProps。
+ * 纯文本。change.patch（2026-10-13-change-files-view-polish）全屏转发
+ * 按文件折叠树（PatchTreeView 与内联 change-file-tree 同源，FR-04 不做
+ * 两套）；无 diff --git 头回落 DiffView。统一消费 PreviewerProps。
  */
 
 import { useEffect, useState } from "react";
 
-import { DiffView } from "@/components/files/structured-views";
+import { DiffView, PatchTreeView, tryParsePatchFiles } from "@/components/files/structured-views";
 import type { PreviewerProps } from "./index";
 
-export function PatchPreviewer({ blob, fill }: PreviewerProps) {
+export function PatchPreviewer({ blob, meta, fill }: PreviewerProps) {
   const [text, setText] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +61,18 @@ export function PatchPreviewer({ blob, fill }: PreviewerProps) {
   }
 
   const wrap = fill ? "flex h-full min-h-[420px] w-full flex-col p-4" : "flex max-h-[60vh] w-full flex-col p-4";
+  // change.patch 全屏走按文件折叠树（与内联同源）；无 diff --git 头回落 DiffView
+  const sections =
+    (meta.name.split("/").pop() ?? meta.name) === "change.patch" && text !== null
+      ? tryParsePatchFiles(text)
+      : null;
+  if (sections !== null) {
+    return (
+      <div className={wrap}>
+        <PatchTreeView sections={sections} />
+      </div>
+    );
+  }
   return (
     <div className={wrap}>
       <DiffView content={text ?? ""} />

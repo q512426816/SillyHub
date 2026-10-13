@@ -19,7 +19,21 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { useObjectUrl } from "@/components/files/use-object-url";
 // ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
-import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl } from "@/components/files/structured-views";
+// 2026-10-13-change-files-view-polish：timeline.md 竖向时间线 + change.patch
+// 按文件折叠树两视图同源此处，全屏 previewers 共用（FR-04 不做两套）
+import {
+  DiffView,
+  JsonView,
+  JsonlView,
+  knownJsonView,
+  knownJsonlView,
+  PatchTreeView,
+  TimelineView,
+  tryParseJson,
+  tryParseJsonl,
+  tryParsePatchFiles,
+  tryParseTimeline,
+} from "@/components/files/structured-views";
 import { ApiError } from "@/lib/api";
 // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
 // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
@@ -87,7 +101,20 @@ function FilePreview({
   content: string;
   remarkPlugins?: ComponentProps<typeof MarkdownText>["remarkPlugins"];
 }) {
+  const basename = path.split("/").pop() ?? path;
+  // timeline.md（2026-10-13-change-files-view-polish）：固定时间线格式优先专用
+  // 视图（与全屏 markdown-previewer 同源），结构不命中回落下方 markdown 分支
   if (path.endsWith(".md")) {
+    if (basename === "timeline.md") {
+      const timeline = tryParseTimeline(content);
+      if (timeline !== null) {
+        return (
+          <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">
+            <TimelineView data={timeline} />
+          </div>
+        );
+      }
+    }
     return (
       // reading 尺寸自带 p-2/text-sm/leading-7，容器仅留 muted 底与圆角滚动
       <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
@@ -125,8 +152,13 @@ function FilePreview({
     }
   }
   // .patch/.diff 红绿视图（scope-audit.patch 等）；非 diff 格式由 DiffView
-  // 内部回落纯文本
+  // 内部回落纯文本。change.patch（2026-10-13-change-files-view-polish）优先
+  // 按文件折叠树（默认收起，展开看该文件 diff），无 diff --git 头回落整片
   if (fileExt(path) === "patch" || fileExt(path) === "diff") {
+    if (basename === "change.patch") {
+      const sections = tryParsePatchFiles(content);
+      if (sections !== null) return <PatchTreeView sections={sections} />;
+    }
     return <DiffView content={content} />;
   }
   // jsonl 逐行视图（2026-09-29-change-detail-timeline-files-polish）：
