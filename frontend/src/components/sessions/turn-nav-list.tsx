@@ -278,8 +278,14 @@ export default function TurnNavList({
       onMouseLeave={handleLeave}
     >
       {/* ── 窄轨（常驻 44px）：把手 + 垂直刻度 ── */}
+      {/* 2026-10-13-turn-nav-rail-overflow-fix：不带 shrink-0——轮次很多时
+          轨道随面板高度收缩（root 交叉轴 stretch 高度=行高），nav 的
+          flex-1+overflow-y-auto 才有高度钳制，超出轮次轨内滚动；带上
+          shrink-0 时轨道被内容撑高直接溢出面板，刻度叠到输入区/底部配置
+          条上（线上 53 轮截图实证）。少量轮次 flex-basis auto 高度=内容高，
+          形态零变化。 */}
       <div
-        className="flex min-h-0 shrink-0 flex-col border-r border-border/60 bg-card/40"
+        className="flex min-h-0 flex-col border-r border-border/60 bg-card/40"
         style={{ width: `${RAIL_WIDTH}px` }}
         data-testid="turn-nav-rail"
       >
@@ -307,7 +313,7 @@ export default function TurnNavList({
           role="navigation"
           aria-label="轮次导航"
           aria-busy={loadingEarlier || undefined}
-          className="flex min-h-0 flex-1 flex-col items-center gap-px overflow-y-auto py-1.5"
+          className="flex min-h-0 flex-1 flex-col items-center gap-px overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           data-testid="turn-nav-rail-ticks"
         >
           {entries.map((entry) => {

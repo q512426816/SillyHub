@@ -475,3 +475,50 @@ describe("TurnNavList 浮层指向标记", () => {
     }
   });
 });
+
+// ── 6. 窄轨溢出修复（2026-10-13-turn-nav-rail-overflow-fix） ──────────────
+// 线上实证 53 轮会话：turn-nav-rail 带 shrink-0 时轨道被内容撑高溢出面板，
+// 刻度叠到输入区/底部配置条上，nav 的 overflow-y-auto 永不生效。jsdom 无真实
+// flex 布局，断布局契约 className（先例：本文件 h-[44px]/ring-inset 断言）。
+
+describe("TurnNavList 窄轨溢出修复", () => {
+  it("turn-nav-rail 不带 shrink-0（长会话轨道可随面板高度收缩，不溢出叠到输入区）", () => {
+    const { container } = renderNav(FIXTURES);
+    const rail = within(container).getByTestId("turn-nav-rail");
+    expect(rail.className).not.toContain("shrink-0");
+    // min-h-0 保留：flex-col 内允许收缩是 nav 获得高度钳制的前提。
+    expect(rail.className).toContain("min-h-0");
+  });
+
+  it("turn-nav-rail-ticks 轨内滚动且隐藏滚动条（与 turn-catalog 同款）", () => {
+    const { container } = renderNav(FIXTURES);
+    const ticks = within(container).getByTestId("turn-nav-rail-ticks");
+    expect(ticks.className).toContain("overflow-y-auto");
+    expect(ticks.className).toContain("scrollbar-width:none");
+    expect(ticks.className).toContain("[&::-webkit-scrollbar]:hidden");
+  });
+
+  it("密集刻度契约：>60 轮刻度 mini（h-1.5），≤60 轮常规（h-2.5）", () => {
+    function makeDense(n: number): TurnNavEntry[] {
+      return Array.from({ length: n }, (_, i) => ({
+        key: `dense-${i}`,
+        turnNo: i + 1,
+        startedAt: AT_0925,
+        status: "completed" as const,
+        senderName: null,
+        promptSummary: `第 ${i + 1} 轮摘要`,
+        answerSummary: undefined,
+        loaded: true,
+      }));
+    }
+    const normal = renderNav(FIXTURES);
+    const normalTick = getTicks(normal.container)[0]!;
+    expect(normalTick.className).toContain("h-2.5");
+    normal.unmount();
+
+    const dense = renderNav(makeDense(61));
+    const denseTick = getTicks(dense.container)[0]!;
+    expect(denseTick.className).toContain("h-1.5");
+    expect(denseTick.className).not.toContain("h-2.5");
+  });
+});

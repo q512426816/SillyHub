@@ -1,0 +1,30 @@
+{
+  "verdict": "pass",
+  "checked": [
+    {
+      "item": "task-01：turn-nav-rail 已去 shrink-0，长会话轨道可收缩、nav 滚动钳制恢复",
+      "status": "pass",
+      "note": "turn-nav-list.tsx:286 rail className 现为「flex min-h-0 flex-col border-r border-border/60 bg-card/40」（无 shrink-0）；挂载链核对：session-panel-page.tsx:4959 外层 flex min-h-0 flex-1 → root(275 行 relative flex min-h-0 shrink-0 flex-col，交叉轴 stretch 高度=行高，shrink-0 仅水平主轴保宽) → rail 默认 flex:0 1 auto 可收缩 → nav(316 行 flex-1 min-h-0 overflow-y-auto) 获高度钳制，超出轮次轨内滚动。对照工作先例 turn-catalog.tsx:218-226（nav 直接被 stretch 行钳制）机制等价。"
+    },
+    {
+      "item": "task-02：nav 滚动条隐藏与 turn-catalog 同款",
+      "status": "pass",
+      "note": "turn-nav-list.tsx:316 nav className 含 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden，与 turn-catalog.tsx:226 逐类一致；arbitrary property/variant 为项目已用形态（turn-catalog 在产），tailwind 编译无新依赖。"
+    },
+    {
+      "item": "task-03：少量轮次形态零变化，浮层行为不受影响",
+      "status": "pass",
+      "note": "rail 高度 basis auto：内容不超面板高时高度=内容高，与修复前一致；浮层 absolute top-0 bottom-0 相对 root（root 高度=面板高，未动），left-[44px] 锚 rail 宽不变。既有 20 用例（把手 pin/hover 防抖/浮层行跳转/指向标记/scrollIntoView 联动）全绿佐证行为未回归。"
+    },
+    {
+      "item": "task-04：布局契约断言已补，测试全绿",
+      "status": "pass",
+      "note": "turn-nav-list.test.tsx 新增 describe「窄轨溢出修复」3 用例：rail 无 shrink-0+含 min-h-0、nav 含 overflow-y-auto+scrollbar-width:none+webkit hidden、密集刻度阈值（61 轮 h-1.5 / 3 轮 h-2.5）。实测 pnpm vitest run src/components/sessions/__tests__/turn-nav-list.test.tsx → 23/23 passed（20 既有 + 3 新增）；另跑跳转滚动链路 session-history-scroll.test.tsx → 10/10 passed。grep 全仓无其他测试耦合 turn-nav-rail/turn-nav-tick testid。"
+    },
+    {
+      "item": "风险面：修复未引入新边界问题",
+      "status": "pass",
+      "note": "①溢出消除后无 overflow-hidden 副作用（未加裁切）；②轨内 scrollTop 初始为顶，首屏当前轮刻度可能不在可视区——既有语义（mountedRef 首挂载不滚 + 把手 #N 常显），未扩范围，已记 visual-evidence.md 人工验收项；③mobile 分支不挂 TurnNavList（Drawer），零影响。"
+    }
+  ]
+}
