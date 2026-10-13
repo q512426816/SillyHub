@@ -171,6 +171,71 @@ describe("parseStructuredPatch（ql-20260824-020：SDK structuredPatch → 真�
   });
 });
 
+// ── 2026-10-13-write-tool-diff：Write 展开区 diff 渲染 ─────────────────────
+
+/** Write 工具段固件（raw 可解析 args.file_path/args.content，同 bashSegment 惯例）。 */
+function writeSegment(overrides: Partial<ToolTurnSegment> = {}): ToolTurnSegment {
+  return {
+    kind: "tool",
+    id: "tw-1",
+    raw: JSON.stringify({
+      tool_use_id: "tw-1",
+      args: { file_path: "src/a.ts", content: "line-1\nline-2" },
+    }),
+    status: "ok",
+    toolName: "Write",
+    primary: "src/a.ts",
+    startedAt: Date.now(),
+    endedAt: Date.now(),
+    children: [],
+    subagentType: null,
+    ...overrides,
+  };
+}
+
+describe("ToolExpandBody Write 展开 diff（2026-10-13-write-tool-diff）", () => {
+  it("有 editPatch：structuredPatch 红删绿增渲染（覆盖写真实 diff），标题含「变更对比」", () => {
+    const patch = JSON.stringify([
+      {
+        oldStart: 1,
+        newStart: 1,
+        oldLines: 2,
+        newLines: 2,
+        lines: ["-old-a", "+new-A", " ctx-line"],
+      },
+    ]);
+    render(
+      <ToolExpandBody
+        segment={writeSegment({ editPatch: patch, result: "更新成功" })}
+        running={false}
+      />,
+    );
+    const delRow = screen.getByText("old-a").closest("div.flex");
+    const addRow = screen.getByText("new-A").closest("div.flex");
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(addRow?.className).toContain("bg-emerald-500/10");
+    expect(screen.getByText(/变更对比/)).toBeTruthy();
+    expect(screen.getByText("复制内容")).toBeTruthy();
+    cleanup();
+  });
+
+  it("无 editPatch：整文件按新增行全绿展示（新侧行号自 1 起计）+ 复制内容按钮", () => {
+    render(
+      <ToolExpandBody
+        segment={writeSegment({ result: "创建成功" })}
+        running={false}
+      />,
+    );
+    const row1 = screen.getByText("line-1").closest("div.flex");
+    const row2 = screen.getByText("line-2").closest("div.flex");
+    expect(row1?.className).toContain("bg-emerald-500/10");
+    expect(row2?.className).toContain("bg-emerald-500/10");
+    expect(screen.getByText(/写入内容（2 行）/)).toBeTruthy();
+    expect(screen.getByText("复制内容")).toBeTruthy();
+    cleanup();
+  });
+});
+
 // ── FR-07（2026-09-27-session-fast-replay）：slim 截断全文按需回填 ─────────
 
 /** Bash 工具段固件（raw 可解析 args；result 按 case 装配）。 */

@@ -7,7 +7,9 @@
  * 单一入口 ToolExpandBody——ToolRowView 展开容器的全部内容（参数详情 + 工具
  * result 区）：
  *
- *   - Write  内容预览（5 万字符截断+标注，复制完整原文；ql-20260709-002 规则）
+ *   - Write  行级 diff——覆盖写优先 SDK structuredPatch（backend edit_patch 不限
+ *            工具名抓取，2026-10-13-write-tool-diff）红删绿增 + 复制完整原文；
+ *            无 patch（新建文件 / 非 claude provider）整文件按新增行全绿展示
  *   - Edit   行级 diff——优先 SDK structuredPatch（tool_use_result 透传，
  *            oldStart/newStart 为文件内真实行号；ql-20260824-020），无 patch
  *            回退 computeLineDiff LCS 自算（片段相对行号）；DiffView 双侧行号
@@ -277,7 +279,7 @@ export function DiffView({ rows }: { rows: DiffRow[] }) {
       ))}
       {capped && (
         <div className="border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
-          …diff 超过 {DIFF_MAX_ROWS} 行已截断，完整内容用「复制新文本」
+          …diff 超过 {DIFF_MAX_ROWS} 行已截断，完整内容用「复制」按钮
         </div>
       )}
     </div>
@@ -287,17 +289,36 @@ export function DiffView({ rows }: { rows: DiffRow[] }) {
 /* ───────────── 各工具参数详情（展开区上半部） ───────────── */
 
 /** Write：内容预览（规则平移 WriteToolPreview / ql-20260709-002）。 */
-function WriteArgsDetail({ raw }: { raw: string }) {
+/**
+ * Write：覆盖写有 SDK structuredPatch（tool_use_result.structuredPatch 经
+ * edit_patch 透传，抓取链不限工具名——Write 覆盖已有文件同样携带）→ 红删绿增
+ * 真实 diff；无 patch（新建文件 / 非 claude provider 无此通道）→ 整文件按新增
+ * 行全绿展示（DiffView 2000 行截断护栏复用，复制按钮恒给完整原文）。
+ */
+function WriteArgsDetail({ raw, editPatch }: { raw: string; editPatch?: string }) {
   const args = parseToolArgs(raw);
   const content = strArg(args, "content");
   if (!content) return null;
   const lineCount = content.split("\n").length;
+  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
+  const rows: DiffRow[] =
+    patchRows ??
+    content.split("\n").map((text, idx) => ({
+      type: "add",
+      oldNo: null,
+      newNo: idx + 1,
+      text,
+    }));
+  const addCount = rows.filter((r) => r.type === "add").length;
+  const delCount = rows.filter((r) => r.type === "del").length;
   return (
     <div className="mb-2">
-      <div className={DETAIL_LABEL_CLS}>写入内容（{lineCount} 行）</div>
-      <pre className={ARGS_PRE_CLS}>
-        {content.length > 50000 ? `${content.slice(0, 50000)}\n... (截断)` : content}
-      </pre>
+      <div className={DETAIL_LABEL_CLS}>
+        {patchRows
+          ? `变更对比（覆盖写入 +${addCount} −${delCount}）`
+          : `写入内容（${lineCount} 行）`}
+      </div>
+      <DiffView rows={rows} />
       <div className="mt-1">
         <CopyButton text={content} label="复制内容" />
       </div>
@@ -474,7 +495,7 @@ function argsDetailOf(segment: ToolTurnSegment, result: string): ReactNode {
   if (!raw) return null;
   switch (segment.toolName) {
     case "Write":
-      return <WriteArgsDetail raw={raw} />;
+      return <WriteArgsDetail raw={raw} editPatch={segment.editPatch} />;
     case "Edit":
       return <EditArgsDetail raw={raw} editPatch={segment.editPatch} />;
     case "Bash": {

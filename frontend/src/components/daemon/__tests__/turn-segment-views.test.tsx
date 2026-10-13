@@ -362,7 +362,7 @@ describe("ToolRowView 工具行", () => {
     success: true,
   });
 
-  it("Write 展开：参数详情（内容预览 + 复制内容按钮）在上方，工具结果在下方", () => {
+  it("Write 展开：整文件全绿新增行 + 复制内容按钮在上方，工具结果在下方（2026-10-13-write-tool-diff 起 diff 化）", () => {
     render(
       <ToolRowView
         segment={makeToolSeg({
@@ -380,8 +380,8 @@ describe("ToolRowView 工具行", () => {
     expect(screen.getByTestId("markdown-text").textContent).toBe(
       "The file src/theme.ts has been updated",
     );
-    // 参数详情块在 result 之前（DOM 序：pre 在 markdown-text 前；位掩码非零即跟随其后）
-    const detail = screen.getByText(/export const theme/).closest("pre");
+    // 参数详情块在 result 之前（DOM 序：diff 行在 markdown-text 前；位掩码非零即跟随其后）
+    const detail = screen.getByText(/export const theme/).closest("div.flex");
     const resultEl = screen.getByTestId("markdown-text");
     expect(
       detail && resultEl
@@ -390,11 +390,11 @@ describe("ToolRowView 工具行", () => {
     ).toBeTruthy();
   });
 
-  it("Write 超长内容 5 万字符截断（沿用 ql-20260709-002 规则），复制仍带完整原文", () => {
+  it("Write 超长内容：diff 行 2000 行截断护栏（DiffView 复用），复制仍带完整原文", () => {
     // CopyButton 依赖 writeText().then(...)，mock 必须返回 Promise（非 undefined）
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const long = "x".repeat(50_001);
+    const long = Array.from({ length: 2500 }, (_, i) => `line-${i}`).join("\n");
     render(
       <ToolRowView
         segment={makeToolSeg({
@@ -412,8 +412,7 @@ describe("ToolRowView 工具行", () => {
       />,
     );
     fireEvent.click(rowOf("Write"));
-    const pre = screen.getByText(/\(截断\)/);
-    expect(pre.textContent).toBe(`${"x".repeat(50_000)}\n... (截断)`);
+    expect(screen.getByText(/diff 超过 2000 行已截断/)).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("复制内容"));
     expect(writeText).toHaveBeenCalledWith(long); // 复制完整原文不截断
   });
