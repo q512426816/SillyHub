@@ -43,3 +43,4 @@ created_at: 2026-08-29 22:56:30
 
 - submit_commit `_persisted_engine_anchors` 对齐候选排除 override 标记行（log_id 非空 + stale=True 无对应 flat record，双指针卡死丢锚 → fork 截断点偏早丢轮尾）；守护测试 test_override_marker_row_not_stall_anchor_cursor。
 - create.py native fork（prompt 空且无附件）dispatch_prompt 归零：lease metadata prompt 与首轮 SESSION_INJECT 均不再携带前导-only 载荷（原行为＝前导被当首轮执行 / 空载荷被 daemon 判「缺少必要字段」回报 run 失败）；对照回归 seed 档种子文本照常下发。
+- 2026-10-13-multiturn-changeid-misjudge | 动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.c

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-multiturn-changeid-misjudge",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2fe772561177c0404e2827bd7f7c0d3e8e627fc0",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结 diff 内含非本变更声明面的治理文件（docs/sillyspec 工具缺陷记档）",
+      "evidence": "change.patch 含 docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md（由窗口内前序提交 1a7e9abd7 带入，非 2fe7725 本体），design 接口契约未声明该文件；属 CLAUDE.md 规则 15 强制产物、纯文档无运行时影响，仅记账层面未在设计文件清单中点名。",
+      "location": ".sillyspec/changes/2026-10-13-multiturn-changeid-misjudge/change.patch:365-441"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "checklist": {
+    "fr_impl_test_consistency": "FR-01/02/03/04 全部三方一致：helpers.py:155 判定锚已换 session.change_id 且多轮分支先于 D-006；requirements 绑定的全部用例（TestChatTurnAttributionNotTerminal 四例、test_interactive_with_change_completed_returns_ended、TestRecoverableFailureKeepsSessionActive 四例、FR-03 四策略例、test_idempotent_ended_even_for_multi_turn）均真实存在且断言与 FR 场景逐字对应，另有 close_interactive_run 端到端归因用例闭环；两测试文件 30 例实跑全过。",
+    "blind_dimensions": "四问作答属实：乱序——D-005 幂等守卫（helpers.py:153-154）先于锚判定，未被本次改动触碰；并发——全仓检索证实 session.change_id 仅在会话创建时一次写入（create.py:291、mcp_tools.py:1214 change_id=mission.change_id），无事后赋值点，与 current_change_id（model.py:773）分列互不覆盖，收口走 close_run_steps 同事务；切换——ACTIVE_SESSION_STATUSES={pending,active,reconnecting}，reconnecting 属活跃族照常返 active，binding.py 只写 link 表与 current_change_id 不写 session.change_id；作用域——纯单会话内存函数无共享态。",
+    "declared_boundaries": "逐条裁决均为可接受：①行为变化仅落聊天轮归因面——实测枚举全部 5 处 interactive 创建面（create.py:426 stage / mcp_tools.py:1240 子会话 / worker_redispatch.py:281 重派 / inject.py:615 聊天轮 / shadow.py:612 群影子），仅 inject.py 面存在 session 与 run 级 change_id 分叉，与 design 声明完全吻合；②群影子归因轮修复后保持 active——恢复归因上线前语义，已声明且经 shadow.py:574（无 change_id）核实；③D-006 适用面收敛为会话级绑定会话——聊天会话在多轮分支已先行返 active，两分支返回值相同，无行为差；④冻结面含治理文档——P3 记账项（见 findings）。",
+    "guard_claims": "防护声明全部真实：D-005 幂等（helpers.py:153-154）与 D-009 同事务收口（close_run_steps.py:458-477）在位；闸拒绝覆写在返 active 之后仍生效（close_run_steps.py:486-489 _is_gate_rejected_first_failure 优先于多轮 keep-active）。",
+    "artifact_sync": "不涉及：无 API/DTO/wire 改动（design 声明无变化，diff 仅 helpers.py + 两测试文件 + 治理文档），无需 gen:types 同步。"
+  },
+  "reviewedAt": "2026-10-13T01:24:00Z"
+}

@@ -1,0 +1,100 @@
+{
+  "change": "2026-10-13-multiturn-changeid-misjudge",
+  "baseline": "3eac3e09d0bb502518e6e08960c5c6cdb06b4bec",
+  "head": "2fe772561177c0404e2827bd7f7c0d3e8e627fc0",
+  "files": [
+    "backend/app/modules/daemon/session/service/helpers.py",
+    "backend/app/modules/daemon/tests/test_apply_session_terminal_status.py",
+    "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py",
+    "docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 230,
+    "deletions": 33
+  },
+  "savedAt": "2026-10-13T01:20:01.219Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3eac3e09d0bb502518e6e08960c5c6cdb06b4bec",
+    "totals": {
+      "files": 4,
+      "additions": 230,
+      "deletions": 33
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/session/service/helpers.py",
+        "additions": 19,
+        "deletions": 11,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_apply_session_terminal_status.py",
+        "additions": 77,
+        "deletions": 18,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py",
+        "additions": 63,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md",
+        "additions": 71,
+        "deletions": 0,
+        "kind": "new"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "2353d0b7736f814aa28750a8de54c6eb77dcdf7fd37f0b521371a4b652570540",
+  "patchStatus": "ok"
+}

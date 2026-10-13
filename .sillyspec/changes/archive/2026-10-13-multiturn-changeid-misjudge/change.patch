@@ -1,0 +1,441 @@
+diff --git a/backend/app/modules/daemon/session/service/helpers.py b/backend/app/modules/daemon/session/service/helpers.py
+index aa24c3caa..a904f6dc3 100644
+--- a/backend/app/modules/daemon/session/service/helpers.py
++++ b/backend/app/modules/daemon/session/service/helpers.py
+@@ -119,18 +119,26 @@ def _merge_task_wakeup_prompt(old: str, new: str) -> str:
+ def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str | None:
+     """按 run 终态 + 任务类型计算 session 终态（D-002@v2 反向判定 + D-005 幂等）。
+ 
+-    多轮对话（``spec_strategy == "interactive"`` 且 ``change_id is None``）保持
+-    ``active``，等待下一个 AgentRun 接管；其余所有单轮任务（stage / scan /
+-    mission worker / quick-chat / oneshot）按 ``run.status`` 收口：
++    多轮对话（``spec_strategy == "interactive"`` 且 **会话级** ``session.change_id
++    is None``）保持 ``active``，等待下一个 AgentRun；其余所有单轮任务（stage /
++    scan / mission worker / quick-chat / oneshot）按 ``run.status`` 收口：
+     ``completed → "ended"``，其余（failed/killed/...）→ ``"failed"``。
+ 
++    2026-10-13-multiturn-changeid-misjudge：锚从 ``run.change_id`` 换到
++    ``session.change_id``——轮级变更归因（2026-10-12-run-level-change-attribution，
++    ``AgentSession.current_change_id`` 列注释）给聊天轮 run.change_id 打锚后，
++    旧 run 级锚把聊天会话误判成单轮任务，每轮 completed 即误置 ended，用户每轮
++    都要手动「重新开启」（生产实证会话 47e2ff1a 当日三次）。会话级 change_id
++    语义是"会话本身为 change 而建"（model.py AgentSession.change_id 列注释，
++    stage 派发创建时写入），不受轮级归因污染。
++
+     幂等（D-005）：session 已处于终态（``ended`` / ``failed``，即不在
+     :data:`ACTIVE_SESSION_STATUSES` 中）时直接返回 ``None``，由调用方判定是否跳过
+     落库，避免覆盖已被其它路径（如 cancel_lease）写入的终态。
+ 
+     Args:
+-        run: 刚结束的 AgentRun（取 ``status`` / ``spec_strategy`` / ``change_id``）。
+-        session: 该 run 所属的 AgentSession（取当前 ``status``）。
++        run: 刚结束的 AgentRun（取 ``status`` / ``spec_strategy``）。
++        session: 该 run 所属的 AgentSession（取当前 ``status`` / ``change_id``）。
+ 
+     Returns:
+         计算出的新 session 状态（``"active"`` / ``"ended"`` / ``"failed"``），
+@@ -144,15 +152,15 @@ def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str
+     """
+     if session.status not in _svc.ACTIVE_SESSION_STATUSES:
+         return None  # D-005 幂等：已 ended/failed，不覆盖
+-    is_multi_turn = run.spec_strategy == "interactive" and run.change_id is None
++    is_multi_turn = run.spec_strategy == "interactive" and session.change_id is None
+     if is_multi_turn:
+         return "active"  # 多轮对话保持 active，等下一个 AgentRun
+     # D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免。
+-    # 生产实证（会话 47e2ff1a run 30）：轮级变更归因（run-level-change-
+-    # attribution）让聊天轮携带 change_id → is_multi_turn 判定失效 → 429
+-    # 失败轮把整个 interactive 会话终态化 failed，用户被锁死无法续发。
+-    # 会话型轮（spec_strategy=interactive）遭遇可自动恢复失败
+-    # （quota_exceeded / context_overflow）时保持 active——自动恢复编排
++    # 起源（会话 47e2ff1a run 30）：轮级变更归因曾使 429 失败轮把 interactive
++    # 会话终态化 failed，用户被锁死无法续发。2026-10-13-multiturn-changeid-
++    # misjudge 之后聊天会话在上方多轮分支已先行返回 active，本豁免的适用面收敛
++    # 为「会话级绑定 change 的 interactive 任务会话」（stage 派发）：遭遇可自动
++    # 恢复失败（quota_exceeded / context_overflow）时保持 active——自动恢复编排
+     # （auto_resume 钩子：quota 定时续跑 / context_overflow 原生压缩续跑）
+     # 与用户手动续发都需要 active 门；自动恢复预算耗尽后用户仍可手动重试，
+     # 会话不再被单次可恢复失败锁死。闸拒绝覆写（close_run_steps
+diff --git a/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py b/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
+index a7e109ac2..5efe1f072 100644
+--- a/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
++++ b/backend/app/modules/daemon/tests/test_apply_session_terminal_status.py
+@@ -1,10 +1,13 @@
+ """task-01 单测：_apply_session_terminal_status（D-002@v2 反向判定 + D-005 幂等）。
+ 
+ 覆盖 design §7.1 判定表全部 case：
+-- 多轮对话（interactive + 无 change_id）→ active
+-- 单轮任务（interactive+change / platform-managed / sillyspec / quick-chat）→ ended
++- 多轮对话（interactive + session 级 change_id 为 NULL）→ active
++- 单轮任务（interactive+会话级 change 绑定 / platform-managed / sillyspec / quick-chat）→ ended
+ - run.status=failed/killed 的单轮 → failed（killed→failed 是 task-04 不复用本函数的原因，D-003）
+ - 幂等：session 已 ended/failed → None
++- 2026-10-13-multiturn-changeid-misjudge：多轮锚从 run.change_id 换到 session.change_id
++  ——轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.change_id
++  打锚后，旧锚把聊天会话误判为单轮任务，每轮完成即误置 ended（生产实证会话 47e2ff1a）。
+ """
+ 
+ from __future__ import annotations
+@@ -29,9 +32,17 @@ def _make_run(
+     )
+ 
+ 
+-def _make_session(*, status: str = "active") -> AgentSession:
+-    """构造一个仅含判定所需字段的 AgentSession（纯内存对象，不入库）。"""
+-    return AgentSession(status=status)
++def _make_session(
++    *,
++    status: str = "active",
++    change_id: uuid.UUID | None = None,
++) -> AgentSession:
++    """构造一个仅含判定所需字段的 AgentSession（纯内存对象，不入库）。
++
++    change_id 语义对齐 AgentSession.change_id 列（model.py：会话本身为 change
++    而建，stage 派发创建时写入）——非 run 级归因锚 current_change_id。
++    """
++    return AgentSession(status=status, change_id=change_id)
+ 
+ 
+ # ---- 多轮对话：interactive + 无 change_id → active --------------------------
+@@ -58,28 +69,28 @@ def test_multi_turn_interactive_failed_run_still_active() -> None:
+     assert _apply_session_terminal_status(run, session) == "active"
+ 
+ 
+-# ---- 单轮任务：interactive + 有 change_id（stage 经 interactive dispatch） ---
++# ---- 单轮任务：stage 派发（会话级 change 绑定 + interactive dispatch） ------
+ 
+ 
+ def test_interactive_with_change_completed_returns_ended() -> None:
+-    """stage 经 interactive dispatch（change_id 非空）→ ended。"""
++    """stage 经 interactive dispatch（session 级 change_id 绑定）→ ended。"""
+     run = _make_run(
+         status="completed",
+         spec_strategy="interactive",
+         change_id=uuid.uuid4(),
+     )
+-    session = _make_session(status="active")
++    session = _make_session(status="active", change_id=uuid.uuid4())
+     assert _apply_session_terminal_status(run, session) == "ended"
+ 
+ 
+ def test_interactive_with_change_failed_returns_failed() -> None:
+-    """stage 经 interactive dispatch 但失败 → failed。"""
++    """stage 经 interactive dispatch（session 级绑定）但失败 → failed。"""
+     run = _make_run(
+         status="failed",
+         spec_strategy="interactive",
+         change_id=uuid.uuid4(),
+     )
+-    session = _make_session(status="active")
++    session = _make_session(status="active", change_id=uuid.uuid4())
+     assert _apply_session_terminal_status(run, session) == "failed"
+ 
+ 
+@@ -128,7 +139,7 @@ def test_single_turn_killed_returns_failed() -> None:
+         spec_strategy="interactive",
+         change_id=uuid.uuid4(),
+     )
+-    session = _make_session(status="active")
++    session = _make_session(status="active", change_id=uuid.uuid4())
+     assert _apply_session_terminal_status(run, session) == "failed"
+ 
+ 
+@@ -171,14 +182,18 @@ def test_idempotent_ended_even_for_multi_turn() -> None:
+ 
+ 
+ # ---- D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免 -------
++# 2026-10-13-multiturn-changeid-misjudge 之后豁免的适用面：会话级绑定 change 的
++# interactive 任务会话（聊天会话在多轮分支已先行返回 active，不进豁免判定）——
++# 本组用例以 session.change_id 非空构造，锁定豁免对该面零回归。
+ 
+ 
+ class TestRecoverableFailureKeepsSessionActive:
+     """生产实证（会话 47e2ff1a）：轮级变更归因（change_id≠NULL）的聊天轮遇
+-    429 失败（run 30）→ is_multi_turn 判定失效 → 整个会话被终态化 failed，
+-    用户无法续发。修复后：interactive 会话遭遇可自动恢复的模型层失败
+-    （quota_exceeded / context_overflow）时保持 active——自动恢复编排
+-    （auto_resume）与用户手动续发都需要 active 门；非可恢复失败语义不变。"""
++    429 失败（run 30）→ 旧 is_multi_turn 判定失效 → 整个会话被终态化 failed，
++    用户无法续发。修复后：聊天会话（session 级无 change 绑定）在多轮分支保持
++    active；本组锁定 change 绑定会话（stage 派发）遭遇可自动恢复的模型层失败
++    （quota_exceeded / context_overflow）时仍走 D-006 豁免保持 active——自动
++    恢复编排与手动续发都需要 active 门；非可恢复失败语义不变。"""
+ 
+     def test_interactive_change_quota_failure_keeps_active(self) -> None:
+         run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
+@@ -189,7 +204,7 @@ class TestRecoverableFailureKeepsSessionActive:
+             "retryable": False,
+             "reset_at": "2026-10-12T18:13:52+08:00",
+         }
+-        session = _make_session(status="active")
++        session = _make_session(status="active", change_id=uuid.uuid4())
+         assert _apply_session_terminal_status(run, session) == "active"
+ 
+     def test_interactive_change_context_overflow_keeps_active(self) -> None:
+@@ -200,7 +215,7 @@ class TestRecoverableFailureKeepsSessionActive:
+             "message": "会话上下文超出模型窗口",
+             "retryable": False,
+         }
+-        session = _make_session(status="active")
++        session = _make_session(status="active", change_id=uuid.uuid4())
+         assert _apply_session_terminal_status(run, session) == "active"
+ 
+     def test_interactive_change_non_recoverable_failure_still_failed(self) -> None:
+@@ -213,7 +228,7 @@ class TestRecoverableFailureKeepsSessionActive:
+             "message": "凭证失效",
+             "retryable": False,
+         }
+-        session = _make_session(status="active")
++        session = _make_session(status="active", change_id=uuid.uuid4())
+         assert _apply_session_terminal_status(run, session) == "failed"
+ 
+     def test_non_interactive_quota_failure_still_failed(self) -> None:
+@@ -227,3 +242,47 @@ class TestRecoverableFailureKeepsSessionActive:
+         }
+         session = _make_session(status="active")
+         assert _apply_session_terminal_status(run, session) == "failed"
++
++
++# ---- 2026-10-13-multiturn-changeid-misjudge：聊天轮归因 change_id 不收口 -----
++
++
++class TestChatTurnAttributionNotTerminal:
++    """生产实证（会话 47e2ff1a，2026-10-13）：轮级变更归因给聊天轮 run.change_id
++    打锚后，旧判定 `run.change_id is None` 把聊天会话误判成单轮任务——每轮
++    completed 即误置 ended，用户每轮都要手动「重新开启」（当日 08:40:38 /
++    08:47:49 / 09:04:38 三次）。修复：多轮锚换 session.change_id——聊天会话
++    （会话级无 change 绑定）的 interactive 轮无论 run.change_id / run.status
++    如何一律保持 active。"""
++
++    def test_chat_turn_with_attribution_completed_keeps_active(self) -> None:
++        """聊天轮带归因 change_id 且 completed → active（本轮核心回归）。"""
++        run = _make_run(status="completed", spec_strategy="interactive", change_id=uuid.uuid4())
++        session = _make_session(status="active", change_id=None)
++        assert _apply_session_terminal_status(run, session) == "active"
++
++    def test_chat_turn_with_attribution_non_recoverable_failure_keeps_active(self) -> None:
++        """聊天轮带归因 change_id 且不可恢复失败 → 仍 active（多轮分支先行，
++        用户可续发；与归因功能上线前「单轮失败不收口会话」语义对齐）。"""
++        run = _make_run(status="failed", spec_strategy="interactive", change_id=uuid.uuid4())
++        run.error_detail = {
++            "type": "auth_failed",
++            "code": "401",
++            "message": "凭证失效",
++            "retryable": False,
++        }
++        session = _make_session(status="active", change_id=None)
++        assert _apply_session_terminal_status(run, session) == "active"
++
++    def test_chat_pending_session_with_attribution_completed_keeps_active(self) -> None:
++        """聊天会话 pending 态遇归因轮完成 → 激活进多轮（对齐既有 pending 用例）。"""
++        run = _make_run(status="completed", spec_strategy="interactive", change_id=uuid.uuid4())
++        session = _make_session(status="pending", change_id=None)
++        assert _apply_session_terminal_status(run, session) == "active"
++
++    def test_stage_session_completed_still_ended_is_regression_guard(self) -> None:
++        """反向守卫：同形 run（interactive+归因 change_id）在会话级绑定的 stage
++        会话上仍收口 ended——锚换列后单轮语义不松绑。"""
++        run = _make_run(status="completed", spec_strategy="interactive", change_id=uuid.uuid4())
++        session = _make_session(status="active", change_id=uuid.uuid4())
++        assert _apply_session_terminal_status(run, session) == "ended"
+diff --git a/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py b/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
+index 2d0b6d280..56f69df78 100644
+--- a/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
++++ b/backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py
+@@ -1,11 +1,13 @@
+ """task-03 单测：close_interactive_run 接入 session 终态回写（D-001 / D-009 / D-005）。
+ 
+ 钉死 :929 commit 之前对 AgentSession 的终态回写：
+-- 单轮任务（change_id 非空 或 spec_strategy 非 interactive+None）run completed
++- 单轮任务（会话级 change 绑定 或 spec_strategy 非 interactive+None）run completed
+   → session.status='ended' + ended_at 非空
+ - 单轮任务 run failed → session.status='failed' + ended_at 非空
+-- 多轮对话（spec_strategy=='interactive' AND change_id is None）run completed
+-  → session 保持 active + last_active_at 刷新（ended_at 仍为 None）
++- 多轮对话（spec_strategy=='interactive' AND session 级 change_id is None）run
++  completed → session 保持 active + last_active_at 刷新（ended_at 仍为 None）
++- 2026-10-13-multiturn-changeid-misjudge：聊天轮带轮级归因 run.change_id（会话级
++  无绑定）completed → 仍保持 active（锚换 session 级，端到端回归用例在文件尾）
+ - 幂等：session 已 ended/failed → 不被覆盖（D-005，由 _apply_session_terminal_status 守卫）
+ 
+ 参照 test_interactive_lifecycle_patch.py 的 _seed_active_interactive_session + DaemonService
+@@ -84,6 +86,7 @@ async def _seed_session_and_run(
+     *,
+     spec_strategy: str | None = "interactive",
+     change_id: uuid.UUID | None = None,
++    session_change_id: uuid.UUID | None = None,
+     run_status: str = "running",
+     session_status: str = "active",
+ ) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
+@@ -91,6 +94,10 @@ async def _seed_session_and_run(
+ 
+     用 RunPlacementService.prepare_interactive_dispatch 建带 claim_token 的真实 lease，
+     再补 session + run 行（最小集，create_session 会写更多但本测试不需要）。
++
++    session_change_id 是会话级 AgentSession.change_id（stage 派发绑定，判定锚，
++    2026-10-13-multiturn-changeid-misjudge），与 run 级 change_id（轮级归因锚）
++    正交——聊天轮归因场景=change_id 非空 + session_change_id 为 None。
+     """
+     uid = await _create_user(db_session)
+     rt = await _create_runtime(db_session, uid)
+@@ -116,6 +123,7 @@ async def _seed_session_and_run(
+         lease_id=dispatch.lease_id,
+         last_active_at=datetime.now(UTC),
+         created_at=datetime.now(UTC),
++        change_id=session_change_id,
+     )
+     run = AgentRun(
+         id=run_id,
+@@ -138,12 +146,13 @@ async def _seed_session_and_run(
+ async def test_single_turn_completed_marks_session_ended(
+     db_session: AsyncSession, mocked_redis
+ ) -> None:
+-    """单轮任务（change_id 非空）run completed → session ended + ended_at。"""
++    """单轮任务（stage 会话级 change 绑定）run completed → session ended + ended_at。"""
+     change_id = uuid.uuid4()
+     lease_id, run_id, token, session_id = await _seed_session_and_run(
+         db_session,
+         spec_strategy="interactive",
+         change_id=change_id,
++        session_change_id=change_id,
+     )
+     svc = DaemonService(db_session)
+     run = await svc.close_interactive_run(
+@@ -312,6 +321,7 @@ async def test_single_turn_terminal_flip_sends_session_end(
+         db_session,
+         spec_strategy="interactive",
+         change_id=change_id,
++        session_change_id=change_id,
+     )
+     svc = DaemonService(db_session)
+     await svc.close_interactive_run(
+@@ -370,3 +380,52 @@ async def test_multi_turn_active_flip_sends_no_session_end(
+     assert refreshed is not None
+     assert refreshed.status == "active"
+     assert sent == []
++
++
++# ── 2026-10-13-multiturn-changeid-misjudge：聊天轮归因不收口（端到端） --------
++
++
++@pytest.mark.asyncio
++async def test_chat_turn_with_run_attribution_keeps_session_active(
++    db_session: AsyncSession, mocked_redis, monkeypatch
++) -> None:
++    """聊天轮带轮级归因 change_id（session 级无绑定）completed → 会话保持 active。
++
++    生产回归（会话 47e2ff1a，2026-10-13）：轮级变更归因给聊天轮 run.change_id
++    打锚后，旧判定误把聊天会话当单轮任务，每轮完成即置 ended——用户每轮都要
++    手动「重新开启」。修复后多轮锚为 session.change_id，本端到端用例经
++    close_interactive_run 全链路锁定：不翻终态、不写 ended_at、不发 SESSION_END。
++    """
++    from app.modules.daemon import ws_hub
++
++    sent: list[tuple[object, str, dict]] = []
++
++    async def fake_send(daemon_id, msg_type, payload):
++        sent.append((daemon_id, msg_type, payload))
++        return True
++
++    hub = ws_hub.get_daemon_ws_hub()
++    monkeypatch.setattr(hub, "send_session_control", fake_send)
++
++    lease_id, run_id, token, session_id = await _seed_session_and_run(
++        db_session,
++        spec_strategy="interactive",
++        change_id=uuid.uuid4(),  # 轮级归因锚（聊天轮被打了 change_id）
++        session_change_id=None,  # 会话级无 change 绑定（真聊天会话）
++    )
++    svc = DaemonService(db_session)
++    run = await svc.close_interactive_run(
++        lease_id,
++        run_id,
++        token,
++        status="success",
++        is_error=False,
++        subtype="success",
++    )
++    assert run.status == "completed"
++
++    refreshed = await db_session.get(AgentSession, session_id, populate_existing=True)
++    assert refreshed is not None
++    assert refreshed.status == "active"
++    assert refreshed.ended_at is None
++    assert sent == []
+diff --git a/docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md b/docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md
+new file mode 100644
+index 000000000..5c7474b59
+--- /dev/null
++++ b/docs/sillyspec/thin-done-empty-face-no-declared-crosscheck.md
+@@ -0,0 +1,71 @@
++# thin flow done 空冻结面分支不做 design 声明面自证（声明了交付文件却空面归档零告警）
++
++> 记录时间：2026-10-13 · 来源变更：2026-10-12-fire-ledger-form-strict（生产实证：平台工作区「消防设施器材」4e9eb05b，会话 47e2ff1a）
++> 状态：活跃坑（CLI 3.32.7 实证，待工具修复）
++
++## 现象
++
++变更 `2026-10-12-fire-ledger-form-strict`（改 LedgerForm.js 单文件）经 thin 通道
++`flow done` 正常归档成功，但归档目录里 **没有任何 patch 留档**：change.patch、
++change-patch.json、scope-audit.json/.patch 全缺。平台资产面（changes assets API）
++相应显示 `patch: null`、`touched_modules: []`、`test_rows: []`、`delta: null`。
++蒸馏旁证：FR 落伪域 `auto-sillyspec`、决策落 `decisions/unmapped.md`——蒸馏时
++可见交付面只剩 `.sillyspec` 治理文件，实现代码不在其中。
++
++时间线：flow start 00:12:31 → 窗口内唯一提交 11f042c（00:22:41，scope-drift
++警告只点名 flow-state.yaml——即提交内容全是治理件）→ flow done 约 00:22:42 起
++跑 → 归档 00:38:49（中间 15 分钟无事件停滞，为 review 子步采样）。
++
++## 根因
++
++CLI 3.32.7（`src/flow.js` cmdFlowDone patch 子步）的冻结面口径：
++
++- committed = `git diff --name-only baseline..HEAD` 经
++  `filterCommittedFace` 过滤（`.sillyspec/` 全剔、只留 `.sillyspec/docs/`）；
++- 窗口内只提交了 tasks.md / flow-state.yaml 等治理件 → committed 过滤后为空；
++- `git status --porcelain -uall` 无未提交交付文件（或脏面被**他侧变更的声明**
++  认领为 foreign，从 dirtyWarned 剔除）→ 脏门静默通过；
++- `ownFiles.length === 0` → 走空面分支：一行
++  `📦 patch 留档跳过：本变更可归属文件面为空…` → `patchOk = true` → 继续
++  review → distill → 归档，全程非阻断（这是 2026-10-12-close-trace-freeze-integrity
++  FR-01「空面哨兵恢复有效」的**有意设计**，对真·纯文档变更语义正确）。
++
++缺陷在分支不对称：**「design 声明面自证」（design 文件变更清单 vs 冻结面，
++2026-09-25-platform-feedback-batch2 E）只在非空分支、写完 patch 之后执行**。
++空面分支不读 design 声明清单。于是最危险的形态——design 明确声明了交付文件、
++冻结面却为空（实现根本没进冻结窗口）——反而是**唯一零告警**的形态。本例
++design/FR-024 写明「改动面仅 LedgerForm.js 单文件」，冻结面却为空，无任何
++warning，归档绿灯。
++
++实现代码为何不在窗口内（按可能性排序，服务器侧需核实）：
++
++1. **baseline 前置提交（redo 形态）**：会话名 `claude-xiaofang-redo`——此前
++   轮次已把 LedgerForm.js 提交掉，本次 flow start 的 baseline_commit 落在
++   该提交之后，baseline..HEAD 天然看不到实现；
++2. **提交不在 HEAD 祖先链**：孤儿提交守卫（FR-02 scanOrphanFace）只覆盖
++   会话专属 worktree 路径；共享主仓跑 flow done 不做 reflog 扫描；
++3. **代码在嵌套/忽略位置**：LedgerForm.js 所在目录是嵌套 git 仓或被
++   .gitignore，root 仓的 diff/status 均不可见。
++
++## 影响
++
++- 归档件永久缺 patch 留档（归档即拒收重入，事后无法 `--refreeze` 补冻）；
++- 平台资产卡 patch/delta/影响模块/测试绑定全空，审计断档；
++- 与 cli-cwd-coupling 坑叠加时（会话曾 8 次跑错目录），冻结窗口错位的
++  概率进一步放大。
++
++## 绕过
++
++收口前人工核对一行：design 文件变更清单里的交付文件是否已提交且在
++`git diff --name-only <baseline>..HEAD` 输出里。若无，先提交（信息尾缀带
++变更名）再跑 `flow done`。已归档的存量只能手工补 change.patch /
++change-patch.json 进归档目录（平台 assets 读侧会认），或接受缺口。
++
++## 期望修复
++
++把 design 声明面自证从非空分支提到 patch 子步空/非空共享位置：空冻结面且
++design 声明清单非空（剔除 `.sillyspec/` 前缀后）→ 至少 advisory 点名
++「声明了 N 个交付文件但冻结面为空」，建议升格为阻断（三选一：先提交后重跑 /
++确认纯文档变更后 `--accept-empty-face` 显式签收留痕 / 清单裁剪同步 design）。
++顺带可评估：共享主仓路径是否也补一个轻量的「窗口外同名文件交付」探测
++（worktree 已有 reflog 扫描先例）。

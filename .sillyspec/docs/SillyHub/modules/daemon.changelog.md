@@ -29,3 +29,4 @@ created_at: 2026-08-27 14:32:24
 - ql-20260922-001-37e7 | 24h 审查五修（daemon/backend 3 项）——①附件落盘原子化：writeAttachmentFile 弃 `wx` 直写（崩溃半截文件被 EEXIST 永久复用，cursor disk-only 唯一通道无兜底），改 size 校验复用 + tmp/rename 原子落位，存量半截自愈；②applyClaudeSettings 移入 task-runner 重试循环：并发 lease「撤下 unlink」可删掉全局 settings.json，循环外只写一次致 attempt 2+ 丢配置，改每次 attempt spawn 前重写（幂等）；③PPM 附件门控补漏：ppm_activation 阶段-1 仍查 multimodal 键（ql-20260921-005 三处改键漏改），cursor 会话 PPM 附件被错误降级 GET 链接，改 attachments 键对齐。daemon 31+144 passed、tsc 0；ppm 门控 +2（旧码红）、scan_docs 46、ruff/format/mypy 0（另 2 项 scan_docs 修复见该模块卡）
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
 - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
+- 2026-10-13-multiturn-changeid-misjudge | 动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.c

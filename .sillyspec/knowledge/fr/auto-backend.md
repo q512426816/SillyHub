@@ -1461,3 +1461,79 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-13-anchor-mismatch-fix
   status: active
+
+## FR-auto-backend-205 聊天会话的 interactive 轮保持 active，不再被 run.change_id 误收口
+变更：2026-10-13-multiturn-changeid-misjudge
+状态：active
+摘要：聊天轮带归因 change_id 完成不收口；聊天轮失败不收口
+全文：.sillyspec/changes/archive/2026-10-13-multiturn-changeid-misjudge/requirements.md#FR-01
+最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-multiturn-changeid-misjudge:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_apply_session_terminal_status.py「TestChatTurnAttributionNotTerminal」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-multiturn-changeid-misjudge
+  status: active
+
+## FR-auto-backend-206 真绑定会话（session.change_id 非空）维持既有收口语义
+变更：2026-10-13-multiturn-changeid-misjudge
+状态：active
+摘要：stage 会话完成收口；stage 会话可恢复失败豁免不变
+全文：.sillyspec/changes/archive/2026-10-13-multiturn-changeid-misjudge/requirements.md#FR-02
+最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-multiturn-changeid-misjudge:flow:测试绑定FR-02
+  tests: backend/app/modules/daemon/tests/test_apply_session_terminal_status.py「test_interactive_with_change_completed_returns_edge_ended / TestRecoverableFailureKeepsSessionActive」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-multiturn-changeid-misjudge
+  status: active
+
+## FR-auto-backend-207 单轮任务收口语义零回归
+变更：2026-10-13-multiturn-changeid-misjudge
+状态：active
+摘要：quick-chat 完成收口
+全文：.sillyspec/changes/archive/2026-10-13-multiturn-changeid-misjudge/requirements.md#FR-03
+最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-multiturn-changeid-misjudge:flow:测试绑定FR-03
+  tests: backend/app/modules/daemon/tests/test_apply_session_terminal_status.py「test_quick_chat_completed_returns_ended / test_platform_managed_completed_returns_ended / test_sillyspec_completed_returns_ended / test_none_spec_strategy_completed_returns_ended」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-multiturn-changeid-misjudge
+  status: active
+
+## FR-auto-backend-208 D-005 幂等守卫零回归
+变更：2026-10-13-multiturn-changeid-misjudge
+状态：active
+摘要：已终态会话不复活
+全文：.sillyspec/changes/archive/2026-10-13-multiturn-changeid-misjudge/requirements.md#FR-04
+最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-multiturn-changeid-misjudge:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_apply_session_terminal_status.py「test_idempotent_ended_even_for_multi_turn」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-multiturn-changeid-misjudge
+  status: active

@@ -2623,3 +2623,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：2434a7500615f639e0283ced746a8586e8954de9
 理由：最大风险：一致指向 X 的轮内实际可能混有上一变更的收尾工作（命令只测到 sillyspec 调用面）——重锚会把这点收尾量记给 X。裁决为可接受：这是既有数据下最优归属，且比现状（整轮错挂上一变更、X 空卡）显著更接近真实；已在报告中呈现命令数供人工复核。 试过但放弃： - 自动修主导型（80% 阈值）——阈值武断且巨轮类形态（126/150 含已删变更命令）语义复杂，降级为仅报告人工裁决；弃。 - token 按消息数比例分摊——无逐轮 token，编造精度；弃。 - 扩展到非交互轮——派发锚是 task 权威链，会话命令不应改写；弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-multiturn-changeid-misjudge
+锚点：未记录
+最近确认：0bdf89c9040ff7158bb56931f0d243a251fd97ef
+理由：最大风险：把"interactive + run.change_id 非空"原本唯一指代的 stage 派发会话误改成 active——已排除：stage 派发会话在 create.py:291 写 session 级 change_id，新锚下仍命中单轮收口（FR-02 场景锁定）；线上验证存在 session.change_id 非空的存量 stage 会话。放弃方案：①按 session_kind/origin=='chat' 判定——线上实证 stage 会话 kind/origin 同为 'chat'（见排查记录），不可区分，弃；②扩展 D-006 豁免表到 completed——治标不治本（completed 本不该进豁免判断），且会误保活真单轮任务，弃；③daemon 侧不给聊天轮打 change_id 锚——归因功能是 2026-10-12 刚上的产品能力，回退损失审计面，弃。
