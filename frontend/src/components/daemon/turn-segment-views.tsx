@@ -62,7 +62,7 @@
  *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
  */
 
-import { Children, memo, useEffect, useRef, useState } from "react";
+import { Children, createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
@@ -82,7 +82,7 @@ import type {
 import { getProviderCaps } from "@/lib/provider-caps";
 import type { ProviderCaps } from "@/lib/provider-caps";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /* ───────────────── 段动画 keyframes（自包含注入，见文件头说明） ───────────────── */
@@ -174,6 +174,28 @@ export interface ToolRowViewProps {
 export interface SubagentBlockViewProps {
   segment: SubagentContainerSegment;
 }
+
+/**
+ * 2026-10-13-subagent-stub-reconcile（FR-01/02）：子代理容器头对账命中产物——
+ * 服务端任务快照（GET /sessions/{id}/tasks 的 AgentSessionTaskRead，按
+ * tool_use_id 关联）的展示最小面。结构化类型：session-panel 页面级经
+ * buildSubagentTaskLookup（use-session-tasks.ts）构建 Map 后经
+ * SubagentTaskLookupContext 下发，本组件不 import hooks 文件（防环）。
+ */
+export interface SubagentReconciledTask {
+  taskName: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  elapsedMs: number | null;
+}
+
+/**
+ * 2026-10-13-subagent-stub-reconcile：子代理容器头对账索引（tool_use_id →
+ * 快照行）。Provider 在 session-panel-page 页面级（同时覆盖时间线与右栏详情
+ * 面板）；null（dialog 弹窗等旧宿主）= 不对账，行为与修复前一致。
+ */
+export const SubagentTaskLookupContext = createContext<
+  Map<string, SubagentReconciledTask> | null
+>(null);
 export interface StderrRowViewProps {
   segment: StderrTurnSegment;
 }
@@ -352,10 +374,18 @@ export interface SubagentHeaderInfo {
 export function subagentHeaderOf(
   segment: SubagentContainerSegment,
   now: number,
+  reconciled?: SubagentReconciledTask | null,
 ): SubagentHeaderInfo {
   const taskSeg = segment.kind === "tool" ? segment : null;
   const metaStatus = taskMetaStatusOf(segment);
-  const status = metaStatus ?? subagentStatus(segment);
+  // 2026-10-13-subagent-stub-reconcile（FR-01）：对账只在「无任务元数据且段
+  // 三态 running」时生效（stub 恒 running；tool 段已配对结果 ok/deny 不覆盖）
+  // ——元数据 > 对账 > 段三态三级优先，既有路径零回归。
+  const reconciledStatus =
+    reconciled && metaStatus == null && (segment.kind === "subagent_stub" || segment.status === "running")
+      ? reconciled.status
+      : null;
+  const status = metaStatus ?? reconciledStatus ?? subagentStatus(segment);
   const running = status === "running";
   const dotCls =
     status === "running"
@@ -367,8 +397,8 @@ export function subagentHeaderOf(
           : "bg-emerald-600";
   const name =
     segment.kind === "tool"
-      ? (segment.primary?.trim() || segment.subagentType || "子代理")
-      : (segment.subagentType || "子代理");
+      ? (segment.primary?.trim() || reconciled?.taskName || segment.subagentType || "子代理")
+      : (reconciled?.taskName || segment.subagentType || "子代理");
   let durationText: string | null = null;
   if (metaStatus != null && taskSeg != null) {
     if (metaStatus === "running") {
@@ -382,6 +412,14 @@ export function subagentHeaderOf(
       durationText =
         taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
     }
+  } else if (reconciledStatus != null) {
+    // 对账路径（FR-01/02）：终态用服务端权威时长；running 占位同原推导。
+    durationText =
+      reconciledStatus === "running"
+        ? "运行中"
+        : reconciled && reconciled.elapsedMs != null
+          ? formatClockDuration(reconciled.elapsedMs)
+          : null;
   } else if (running) {
     durationText = "运行中";
   } else if (
@@ -398,7 +436,12 @@ export function subagentHeaderOf(
     dotCls,
     name,
     subagentType: segment.subagentType ?? null,
-    badge: metaStatus != null ? TASK_STATUS_BADGE[metaStatus] : null,
+    badge:
+      metaStatus != null
+        ? TASK_STATUS_BADGE[metaStatus]
+        : reconciledStatus != null
+          ? TASK_STATUS_BADGE[reconciledStatus]
+          : null,
     durationText,
   };
 }
@@ -719,10 +762,19 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 展开分支；有值（page 模式）提前 return 紧凑卡片。两分支共享全部头部派生
   //（metaStatus/taskSeg/durationText/dotCls/name），零复制粘贴。
   const panel = useSubagentPanel();
+  // 2026-10-13-subagent-stub-reconcile：任务快照对账（tool_use_id = 段 id）——
+  // 仅在「无元数据且段三态 running」时生效（与 subagentHeaderOf 同一优先级
+  // 契约），历史窗口截断 stub 按快照收敛名称/徽标/时长。
+  const taskLookup = useContext(SubagentTaskLookupContext);
+  const reconciledRaw = taskLookup?.get(segment.id) ?? null;
+  const reconciled: SubagentReconciledTask | null =
+    reconciledRaw && taskMetaStatusOf(segment) == null && (segment.kind === "subagent_stub" || segment.status === "running")
+      ? reconciledRaw
+      : null;
   // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
   const taskSeg = segment.kind === "tool" ? segment : null;
   const metaStatus = taskMetaStatusOf(segment);
-  const status = metaStatus ?? subagentStatus(segment);
+  const status = metaStatus ?? reconciled?.status ?? subagentStatus(segment);
   const running = status === "running";
   const [open, setOpen] = useState(running);
   // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
@@ -745,8 +797,9 @@ export const SubagentBlockView = memo(function SubagentBlockView({
 
   // task-03（design §5.E）：头部派生收敛到共享纯函数 subagentHeaderOf（状态点/
   // 名称/徽标/时长一处派生）——右栏 SubagentDetailPanel 头部复用同一份逻辑，
-  // 防两处复制漂移；now 走上方 tick state（async 运行中走秒）。
-  const header = subagentHeaderOf(segment, now);
+  // 防两处复制漂移；now 走上方 tick state（async 运行中走秒）；对账命中经第三
+  // 参传入（纯函数内同一优先级契约再裁决一次，双保险）。
+  const header = subagentHeaderOf(segment, now, reconciled);
   const { dotCls, name, durationText } = header;
   // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
   // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS

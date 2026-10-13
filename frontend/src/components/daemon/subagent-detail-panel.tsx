@@ -22,8 +22,9 @@
  *   自动关闭（design §5.E），本组件契约 segment 恒非 null。
  */
 
-import { memo, useEffect, useState } from "react";
+import { memo, useContext, useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { SubagentTaskLookupContext } from "./turn-segment-views";
 import { Button } from "antd";
 
 import { SegmentView, subagentHeaderOf } from "@/components/daemon/turn-segment-views";
@@ -57,8 +58,17 @@ export const SubagentDetailPanel = memo(function SubagentDetailPanel({
     return () => window.clearInterval(id);
   }, [asyncRunning]);
 
-  // 头部派生共享纯函数（design §5.E：与 SubagentBlockView 头部一处派生）。
-  const header = subagentHeaderOf(segment, now);
+  // 头部派生共享纯函数（design §5.E：与 SubagentBlockView 头部一处派生）；
+  // 2026-10-13-subagent-stub-reconcile：按 tool_use_id 对账任务快照（context
+  // 由 session-panel 页面级 Provider 下发），窗口截断 stub 收敛名称/徽标/时长。
+  const taskLookup = useContext(SubagentTaskLookupContext);
+  const reconciledRaw = taskLookup?.get(segment.id) ?? null;
+  const reconciled =
+    reconciledRaw &&
+    (segment.kind === "subagent_stub" || segment.status === "running")
+      ? reconciledRaw
+      : null;
+  const header = subagentHeaderOf(segment, now, reconciled);
 
   // 用户验收返工（2026-09-15）：初始化提示词——派发 tool_call JSON 的 args.prompt
   // 全文。children 只含子代理侧日志，派发指令本体在父级 tool 段 raw 里，不提取

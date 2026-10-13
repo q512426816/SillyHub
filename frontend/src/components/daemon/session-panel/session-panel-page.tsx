@@ -125,6 +125,9 @@ import {
 import { useStreamConnectionGuard } from "./use-stream-connection-guard";
 import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
 import { applyAgentTaskStatusEvent } from "../agent-task-store";
+// 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
+import { buildSubagentTaskLookup, useSessionTasks } from "@/hooks/use-session-tasks";
+import { SubagentTaskLookupContext } from "../turn-segment-views";
 import {
   deriveMachineMeta, derivePreMachineLabels, derivePreSessionChrome,
   deriveSessionPlaceholder, deriveSessionStatusFlags, deriveStatusBadge,
@@ -762,6 +765,16 @@ export function SessionPanelPage({
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
   const [usageRefresh, setUsageRefresh] = useState(0);
+  // 2026-10-13-subagent-stub-reconcile（FR-01/02）：页面级任务快照对账实例——
+  // 与 TaskExecutionPanel 内部实例相互独立（本实例不消费 SSE 事件，只供时间线
+  // 子代理容器头按 tool_use_id 对账；usageRefresh 同信号，SSE 重连/轮终态重拉）。
+  const subagentReconcileSource = useSessionTasks(session?.id ?? "", {
+    refreshSignal: usageRefresh,
+  });
+  const subagentTaskLookup = useMemo(
+    () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
+    [subagentReconcileSource.tasks],
+  );
   // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
@@ -4190,6 +4203,7 @@ export function SessionPanelPage({
         jumpHeadLoading,
         onJumpToHead: handleJumpToHead,
       })}
+      <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
       <TurnTimeline
         suppressFollowBottom={jumpFollowSuppress}
         turns={dialogTurns}
@@ -4233,6 +4247,7 @@ export function SessionPanelPage({
           schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null
         }
       />
+      </SubagentTaskLookupContext.Provider>
     </>
   );
 
@@ -5385,10 +5400,12 @@ export function SessionPanelPage({
         data-testid="subagent-panel-column"
       >
         {subagentPanelOpen ? (
-          <SubagentDetailPanel
-            segment={openSubagentSegment}
-            onClose={handleSubagentPanelClose}
-          />
+          <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
+            <SubagentDetailPanel
+              segment={openSubagentSegment}
+              onClose={handleSubagentPanelClose}
+            />
+          </SubagentTaskLookupContext.Provider>
         ) : (
           detailColumn
         )}
@@ -5421,10 +5438,12 @@ export function SessionPanelPage({
         rootClassName="session-subagent-drawer-root"
         styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
       >
-        <SubagentDetailPanel
-          segment={openSubagentSegment}
-          onClose={closeSubagentSlot}
-        />
+        <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
+          <SubagentDetailPanel
+            segment={openSubagentSegment}
+            onClose={closeSubagentSlot}
+          />
+        </SubagentTaskLookupContext.Provider>
       </Drawer>
     ) : null;
   return withSlimLogFull(

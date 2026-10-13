@@ -68,6 +68,12 @@ export interface AgentSessionTaskView extends AgentTaskEntry {
    */
   runId?: string | null;
   /**
+   * 2026-10-13-subagent-stub-reconcile：派发 tool_use 关联键（快照
+   * tool_use_id / 事件 tool_use_id 透传）——时间线子代理容器头按 segment.id
+   * （= 派发 call id）对账本键，收敛窗口截断 stub 的名称与状态。
+   */
+  toolUseId?: string | null;
+  /**
    * 服务端最近更新时刻（ISO）。快照行回填（列表排序基准——服务端按
    * updated_at 倒序返回）；纯实时合并行（快照未见、事件先行到达）事件载荷
    * 无该字段故为 null，下次快照重拉回填。
@@ -106,6 +112,7 @@ function snapshotRowToView(
     totalTokens: row.total_tokens ?? null,
     toolUses: row.tool_uses ?? null,
     runId: row.run_id,
+    toolUseId: row.tool_use_id ?? null,
     updatedAt: row.updated_at,
   };
 }
@@ -134,18 +141,73 @@ function mergeAgentTaskEvent(
     copy[idx] = {
       ...reduced,
       runId: event.run_id ?? existing.runId,
+      toolUseId: event.tool_use_id ?? existing.toolUseId,
       updatedAt: existing.updatedAt,
     };
     return copy;
   }
   const [seed] = applyAgentTaskStatusEvent([], event);
   if (!seed) return rows;
-  return [{ ...seed, runId: event.run_id, updatedAt: null }, ...rows];
+  return [{ ...seed, runId: event.run_id, toolUseId: event.tool_use_id ?? null, updatedAt: null }, ...rows];
 }
 
 /** 已知竞态状态码：catch 后静默（会话恰被删 / 切换中，重拉以服务端为准收敛），
  *  其余真实失败 toast（ql-20260903-014 口径）。 */
 const RECONCILE_SILENT_STATUSES = new Set([404, 409, 422]);
+
+/* ── 2026-10-13-subagent-stub-reconcile：时间线子代理容器头对账 ────────────── */
+
+/** 对账命中产物（渲染层消费的最小面——名称/状态/权威时长）。 */
+export interface SubagentTaskSnapshotInfo {
+  taskName: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  elapsedMs: number | null;
+}
+
+/** 真实终态优先序（数值大者优先）：completed > failed > stopped > running。 */
+const RECONCILE_TERMINAL_PRIORITY: Record<string, number> = {
+  completed: 3,
+  failed: 2,
+  stopped: 1,
+};
+
+/**
+ * 按 tool_use_id 构建子代理容器头对账索引（纯函数）。
+ *
+ * 同 tool_use_id 多行取舍：终态优先序高者胜；同优先序（含全 running）取
+ * updated_at 最新（缺 updatedAt 视为最旧）。无 toolUseId 的行跳过（无关联键，
+ * 历史重试重生成实例不参账）。
+ */
+export function buildSubagentTaskLookup(
+  rows: AgentSessionTaskView[],
+): Map<string, SubagentTaskSnapshotInfo> {
+  const best = new Map<
+    string,
+    { info: SubagentTaskSnapshotInfo; priority: number; updatedAt: string | null }
+  >();
+  for (const row of rows) {
+    const toolUseId = row.toolUseId;
+    if (!toolUseId) continue;
+    const priority = RECONCILE_TERMINAL_PRIORITY[row.status] ?? 0;
+    const incumbent = best.get(toolUseId);
+    const newer =
+      (row.updatedAt ?? "") > (incumbent?.updatedAt ?? "") || !incumbent;
+    if (!incumbent || priority > incumbent.priority || (priority === incumbent.priority && newer)) {
+      best.set(toolUseId, {
+        info: {
+          taskName: row.taskName,
+          status: row.status,
+          elapsedMs: row.elapsedMs ?? null,
+        },
+        priority,
+        updatedAt: row.updatedAt ?? null,
+      });
+    }
+  }
+  const out = new Map<string, SubagentTaskSnapshotInfo>();
+  for (const [toolUseId, v] of best) out.set(toolUseId, v.info);
+  return out;
+}
 
 export interface UseSessionTasksOptions {
   /**
