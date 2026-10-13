@@ -16,6 +16,14 @@ vi.mock("@/lib/change-files", () => ({
     const table: Record<string, string> = {
       "proposal.md": "变更提案",
       "watcher-events.jsonl": "观测事件流",
+      // 2026-10-13-change-files-view-polish：新增 7 名（与 lib 真实表同步）
+      "plan.md": "实现计划",
+      "delta.md": "变更增量",
+      "module-impact.md": "模块影响分析",
+      "symbol-impact.md": "符号影响面",
+      "apply-manifest.json": "应用清单",
+      "verify-facts.json": "验证事实",
+      "scope-audit.json": "范围审计",
     };
     return table[name.split("/").pop() ?? name] ?? null;
   },
@@ -398,6 +406,37 @@ describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
     fireEvent.click(screen.getByRole("button", { name: "全屏预览" }));
     await waitFor(() => expect(screen.getByTestId("file-preview-modal")).toBeInTheDocument());
     expect(modalProps.at(-1)!.target?.meta.name).toBe("proposal.md");
+  });
+
+  // 2026-10-13-change-files-view-polish：thin/full 常态产物中文名补齐
+  it("新增 7 个固定产物中文名主显 + 原名对照（plan/delta/两 impact/两 json）", async () => {
+    const names = [
+      ["plan.md", "实现计划"],
+      ["delta.md", "变更增量"],
+      ["module-impact.md", "模块影响分析"],
+      ["symbol-impact.md", "符号影响面"],
+      ["apply-manifest.json", "应用清单"],
+      ["verify-facts.json", "验证事实"],
+      ["scope-audit.json", "范围审计"],
+    ] as const;
+    mockedListChangeFiles.mockResolvedValue({
+      change_id: "c1",
+      items: names.map(([path]) => ({
+        path,
+        name: path,
+        size: 10,
+        last_modified_at: null,
+        is_text: true,
+      })),
+    });
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    await waitFor(() => expect(screen.getByText("实现计划")).toBeInTheDocument());
+    for (const [, cn] of names) {
+      expect(screen.getByText(cn)).toBeInTheDocument();
+    }
+    // 原名以小字对照同场
+    expect(screen.getByText("plan.md")).toBeInTheDocument();
+    expect(screen.getByText("verify-facts.json")).toBeInTheDocument();
   });
 
   it("watcher-events.jsonl 内联预览：专用表格视图渲染（时刻/类型/详情）", async () => {

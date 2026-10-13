@@ -194,6 +194,16 @@ const CHANGE_FILE_CN: Record<string, string> = {
   "visual-evidence.md": "视觉证据",
   "watcher-events.jsonl": "观测事件流",
   "timeline.md": "时间线记录",
+  // 2026-10-13-change-files-view-polish：thin/full 常态产物与归档件补齐——
+  // plan/delta/module-impact/symbol-impact（文档面）、apply-manifest/
+  // verify-facts/scope-audit（报告件，结构化视图早已有、中文名漏配）
+  "plan.md": "实现计划",
+  "delta.md": "变更增量",
+  "module-impact.md": "模块影响分析",
+  "symbol-impact.md": "符号影响面",
+  "apply-manifest.json": "应用清单",
+  "verify-facts.json": "验证事实",
+  "scope-audit.json": "范围审计",
 };
 
 /** 文件名（或含路径）→ 中文名；非固定产物返回 null。 */
