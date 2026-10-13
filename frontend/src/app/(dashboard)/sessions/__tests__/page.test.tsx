@@ -2201,10 +2201,15 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
   });
 
-  /** 「加载更早」before 请求计数（初始历史拉取不带 before，不计入）。 */
+  /** 「加载更早」before 请求计数（初始历史拉取不带 before，不计入；
+   *  2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+   *  （轮边界对齐）非翻页本体，排除不计）。 */
   const beforeCallCount = () =>
     mocks.getAgentSessionLogs.mock.calls.filter(
-      (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
+      (c) =>
+        c[1] &&
+        "before" in (c[1] as Record<string, unknown>) &&
+        (c[1] as { limit?: number }).limit !== 1,
     ).length;
 
   /** jump 定位断言：scrollIntoView 收到 smooth + block:start。 */
@@ -2508,20 +2513,27 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
 
   it("desktop 未加载轮循环翻页：连续 loadEarlier 到命中即停（两页即止、不误报兜底 toast）", async () => {
     mockThreeRuns();
-    mocks.getAgentSessionLogs
-      .mockResolvedValueOnce(
-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
-      )
-      // 翻页第 1 页：满页中间轮（hasEarlier 保持 true），仍无目标轮。
-      .mockResolvedValueOnce(
-        fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"),
-      )
-      // 翻页第 2 页：目标轮出现（不满页 → 到头）。
-      .mockResolvedValueOnce([
-        navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
-        navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
-      ])
-      .mockResolvedValue([]); // 兜底（命中即停，理论不达）
+    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
+    // 分流返回空（页顶轮完整，不触发直达），不占翻页响应序号。
+    let pageSeq = 0;
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string; limit?: number }) => {
+        if (opts?.before && opts.limit === 1) return [];
+        if (!opts?.before) {
+          return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+        }
+        pageSeq += 1;
+        // 翻页第 1 页：满页中间轮（hasEarlier 保持 true），仍无目标轮。
+        if (pageSeq === 1) {
+          return fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z");
+        }
+        // 翻页第 2 页：目标轮出现（不满页 → 到头）。
+        return [
+          navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
+          navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
+        ];
+      },
+    );
     renderPage();
     await selectDefaultSession();
     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
@@ -2559,8 +2571,10 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       )
       // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 50 页达
       // 上限（JUMP_LOAD_EARLIER_MAX_PAGES）；每页时间戳随序号递减（跨页 pageKey
-      // 唯一防 React 撞 key）。
-      .mockImplementation(() => {
+      // 唯一防 React 撞 key）。2026-10-13-load-earlier-full-turn：满页后的
+      // limit=1 页顶探查分流空响应（不触发直达、不占填充页序号）。
+      .mockImplementation((_sid: string, opts?: { before?: string; limit?: number }) => {
+        if (opts?.before && opts.limit === 1) return [];
         fillerSeq += 1;
         return fullPage(
           `r-filler-${fillerSeq}`,
@@ -2595,13 +2609,22 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       resolvePage2 = r;
     });
     mockThreeRuns();
-    mocks.getAgentSessionLogs
-      .mockResolvedValueOnce(
-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
-      )
-      .mockReturnValueOnce(page1)
-      .mockReturnValueOnce(page2)
-      .mockResolvedValue([]);
+    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
+    // 分流空响应（不触发直达）；翻页响应用受控 promise（原 Once 队列会被
+    // 探查请求消耗错位，改序号分流保时序可控）。
+    let pageSeq = 0;
+    mocks.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string; limit?: number }) => {
+        if (opts?.before && opts.limit === 1) return [];
+        if (!opts?.before) {
+          return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
+        }
+        pageSeq += 1;
+        if (pageSeq === 1) return page1;
+        if (pageSeq === 2) return page2;
+        return []; // 正向对照第 3 页：空页到头。
+      },
+    );
     renderPage();
     await selectDefaultSession();
     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
@@ -2639,13 +2662,24 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
       releasePage1 = r;
     });
     mockThreeRuns();
-    mocks.getAgentSessionLogs
-      .mockResolvedValueOnce(
-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
-      )
-      .mockReturnValueOnce(page1)
-      // 守卫失效时的对照分支：满页填充页会驱动循环继续翻第 3 页（断言不达）。
-      .mockImplementation(() => fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"));
+    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
+    // 分流空响应；第 1 页受控 promise，其后守卫失效对照走填充页。
+    let released = false;
+    mocks.getAgentSessionLogs.mockImplementation(
+      (_sid: string, opts?: { before?: string; limit?: number }) => {
+        if (opts?.before && opts.limit === 1) return [];
+        if (!opts?.before) {
+          return Promise.resolve(
+            fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+          );
+        }
+        if (!released) return page1;
+        // 守卫失效时的对照分支：满页填充页会驱动循环继续翻第 3 页（断言不达）。
+        return Promise.resolve(
+          fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"),
+        );
+      },
+    );
     const view = renderPage();
     await selectDefaultSession();
     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
@@ -2657,6 +2691,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     // 不执行——守卫必须靠组件级 mountedRef）。
     await waitFor(() => expect(beforeCallCount()).toBe(1));
     view.unmount();
+    released = true;
     releasePage1(fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"));
     await new Promise((r) => setTimeout(r, 150));
     // 卸载后循环即停：无第 2 个翻页请求、无幽灵 toast。

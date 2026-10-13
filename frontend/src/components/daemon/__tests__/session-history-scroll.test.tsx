@@ -99,7 +99,10 @@ describe("scroll-up history integration", () => {
   it("3 consecutive scroll-to-top = 1 initial + 3 before calls, cursor monotonically decreases", async () => {
     const beforeCursors: string[] = [];
     sessionApi.getAgentSessionLogs.mockImplementation(
-      async (_sid: string, opts?: { before?: string }) => {
+      async (_sid: string, opts?: { before?: string; limit?: number }) => {
+        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+        //（轮边界对齐）——非翻页本体，空响应（页顶轮完整）不进游标记账。
+        if (opts?.before && opts.limit === 1) return [];
         if (opts?.before) {
           beforeCursors.push(opts.before);
           // 每页比上一页早 1 小时（简单固定递减，不做 epoch 换算）
@@ -170,7 +173,10 @@ describe("scroll-up history integration", () => {
     const older2 = sameTsPage("o2", 4800);
     const beforeIds: string[] = [];
     sessionApi.getAgentSessionLogs.mockImplementation(
-      async (_sid: string, opts?: { before?: string; beforeId?: string }) => {
+      async (_sid: string, opts?: { before?: string; beforeId?: string; limit?: number }) => {
+        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+        //（轮边界对齐）——非翻页本体，空响应不进 beforeId 记账。
+        if (opts?.before && opts.limit === 1) return [];
         if (!opts?.before) return initPage;
         beforeIds.push(opts.beforeId ?? "");
         return beforeIds.length === 1 ? older1 : older2;
