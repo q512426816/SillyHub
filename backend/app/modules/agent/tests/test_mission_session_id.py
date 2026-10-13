@@ -245,6 +245,10 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "fork_of_session_id",
         "fork_at_run_id",
         "engine_fork_anchor",
+        # 2026-10-12-run-level-change-attribution task-01：会话「当前变更上下文」
+        # 列（run_sync 命令解析回写、inject 建轮打锚；与 change_id 派发绑定分列）。
+        # 口径同 test_agent_session_model（11c4a5d51 已同步，本守卫补齐漏更）。
+        "current_change_id",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

@@ -110,6 +110,10 @@ async def _seed_gate_shape(
     返回待 close 的 (lease_id, run_id, claim_token, session_id)。默认 1 个
     running run（首 run）；``earlier_run_completed=True`` 时额外补一个已完成
     的更早 run（追问轮形态——待 close 的是第 2 个 run），各配独立 lease。
+
+    change_id 非 None 时同时落在 session 与 run（2026-10-13-multiturn-
+    changeid-misjudge 后单轮判定锚是会话级 ``session.change_id``——「会话
+    本身为 change 而建」；run 级锚保留模拟轮级归因真实形态）。
     """
     uid = await _create_user(db_session)
     rt = await _create_runtime(db_session, uid)
@@ -128,6 +132,7 @@ async def _seed_gate_shape(
         last_active_at=now,
         created_at=now,
         parent_session_id=parent_session_id,
+        change_id=change_id,
     )
     db_session.add(session)
     await db_session.flush()

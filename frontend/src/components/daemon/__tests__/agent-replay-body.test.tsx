@@ -260,6 +260,13 @@ describe("AgentReplayBody 正常态（主日志 parsed → 时间线）", () => 
       expect(agentLogsApi.readAgentLogMessages).toHaveBeenCalledWith("log-main"),
     );
 
+    // 渲染完成锚：mock 被调用 ≠ React 已提交渲染（CI 慢机并行下会滞后一拍，
+    // loading 态直接断言异步内容即挂）。TurnTimeline 挂载 ⇒ messages 渲染完成，
+    // 累计用量 / 气泡等同源数据必然就位，后续同步断言不再与时序竞态。
+    await waitFor(() =>
+      expect(screen.getByTestId("turn-timeline-scroll")).toBeInTheDocument(),
+    );
+
     // 顶部说明行（原型 .topbar）+ 累计用量（daemon 返回，千分位）。
     expect(
       screen.getByText("🧾 由 SillySpec CLI 自动上报创建 · 内容从本机日志实时读取"),

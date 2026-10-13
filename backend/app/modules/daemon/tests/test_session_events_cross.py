@@ -86,10 +86,16 @@ async def _seed_interactive_run(
     spec_strategy: str | None,
     change_id: uuid.UUID | None,
     session_status: str = "active",
+    session_change_id: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
     """lease（带 claim_token）+ session + run，返回 (lease_id, run_id, token, session_id)。
 
     镜像 test_close_interactive_run_session_status.py 的 _seed_session_and_run。
+
+    ``session_change_id`` 落 ``AgentSession.change_id``（会话级绑定，缺省 None
+    零影响）——2026-10-13-multiturn-changeid-misjudge 后多轮/单轮判定锚是
+    会话级 ``session.change_id``，「会话本身为 change 而建」的单轮任务形态
+    必须落此列；run 级 ``change_id`` 保留模拟轮级归因真实形态。
     """
     session_id = uuid.uuid4()
     run_id = uuid.uuid4()
@@ -115,6 +121,7 @@ async def _seed_interactive_run(
                 lease_id=dispatch.lease_id,
                 last_active_at=now,
                 created_at=now,
+                change_id=session_change_id,
             ),
             AgentRun(
                 id=run_id,
@@ -147,7 +154,12 @@ def mocked_redis():
 async def test_close_interactive_run_terminal_flip_publishes_status_changed(
     db_session: AsyncSession, mocked_redis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """单轮任务 run completed → session ended：commit 后发一条 status_changed。"""
+    """单轮任务 run completed → session ended：commit 后发一条 status_changed。
+
+    单轮形态按 2026-10-13-multiturn-changeid-misjudge 新契约落会话级锚
+    （``session_change_id`` 非空；run 级 change_id 仅为轮级归因真实形态，
+    不参与多轮/单轮判定）。
+    """
     calls = _capture_publish(monkeypatch, "app.modules.daemon.run_sync.service")
     user = await _make_user(db_session, prefix="runsync")
     rt = DaemonRuntime(
@@ -161,7 +173,12 @@ async def test_close_interactive_run_terminal_flip_publishes_status_changed(
     db_session.add(rt)
     await db_session.commit()
     lease_id, run_id, token, session_id = await _seed_interactive_run(
-        db_session, user, rt, spec_strategy="interactive", change_id=uuid.uuid4()
+        db_session,
+        user,
+        rt,
+        spec_strategy="interactive",
+        change_id=uuid.uuid4(),
+        session_change_id=uuid.uuid4(),
     )
 
     await DaemonService(db_session).close_interactive_run(

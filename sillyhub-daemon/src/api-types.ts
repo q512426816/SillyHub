@@ -563,9 +563,14 @@ export interface paths {
          *
          *     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
          *
-         *     鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
-         *     workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
-         *     ``start_init_dispatch`` 的 actor binding 解析。
+         *     鉴权（2026-10-12-init-permission-relax 修订）：workspace-scoped
+         *     WORKSPACE_READ——init 语义是"为当前成员初始化本地副本"，developer 等
+         *     只读角色是它的日常消费者（生产实证 181144@spdemo 403，request_id
+         *     62c277ac）；服务层本就强制成员 daemon 绑定（无绑定 409
+         *     MemberBindingNotFound），归档区禁写由 ensure_writable 兜底。
+         *     修订 2026-08-14-security-audit-remediation task-09 的 WORKSPACE_WRITE 档位；
+         *     其工作区隔离意图保留：非本 workspace 成员（即便在其它 workspace 有
+         *     workspace:write）仍 403，不触达 ``start_init_dispatch`` 的 actor binding 解析。
          */
         post: operations["init_workspace_api_workspaces__workspace_id__init_post"];
         delete?: never;
@@ -1905,7 +1910,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Change Files */
+        /**
+         * List Change Files
+         * @description 变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
+         *
+         *     2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
+         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+         *     任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
+         *     ``service.list_files`` 纯读语义零改动。
+         */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
         put?: never;
         post?: never;
@@ -1941,6 +1954,36 @@ export interface paths {
          *     最终排序保留（幂等，口径不变）——超窗的远古会话不再返回。
          */
         get: operations["list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/-/by-session/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Changes
+         * @description 列出某会话关联的全部变更（2026-10-13-session-change-files-hover task-01 / FR-01）。
+         *
+         *     会话页面悬浮变更文件面板的数据源：``change_session_links`` M:N 表反向查询
+         *     （正向端点为上方 ``list_change_sessions``；``-`` 路径占位符写法对齐
+         *     platform_sync 的 ``/changes/-/spec-manifest`` 惯例，第二段为固定字面量
+         *     ``by-session``，与 ``/changes/{change_id}/xxx`` 动态段不冲突）。
+         *
+         *     排序（service.list_changes_for_session）：未归档（``location != 'archive'``）
+         *     优先 → 组内 ``created_at`` desc——前端「进行中置顶、归档折叠可展开」分组
+         *     直接消费该序；软删（``location='deleted'``）变更排除，与变更中心读侧口径
+         *     一致。鉴权复用 CHANGE_READ 跨成员可见（对齐 list_change_sessions / D-005@v1）。
+         */
+        get: operations["list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5275,6 +5318,51 @@ export interface paths {
          *     未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
          */
         post: operations["report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Machine Daemon Logs
+         * @description 查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。
+         *
+         *     行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
+         *     文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
+         */
+        get: operations["get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Machine Daemon Config
+         * @description 查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。
+         *
+         *     reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
+         */
+        get: operations["get_machine_daemon_config_api_daemon_machines__instance_id__config_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -12469,6 +12557,11 @@ export interface components {
              */
             is_error?: boolean | null;
             /**
+             * Edit Patch
+             * @description tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）
+             */
+            edit_patch?: string | null;
+            /**
              * Ts
              * @description 所属行 completedAt 原文
              */
@@ -12978,6 +13071,8 @@ export interface components {
             } | null;
             /** Content Truncated */
             content_truncated?: boolean | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -15053,6 +15148,23 @@ export interface components {
             level?: string | null;
         };
         /**
+         * DaemonConfigResponse
+         * @description GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。
+         *
+         *     ``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出
+         *     本次被掩码的字段名（reveal=true 时为空）。
+         */
+        DaemonConfigResponse: {
+            /** Path */
+            path: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Masked Fields */
+            masked_fields: string[];
+        };
+        /**
          * DaemonHeartbeatPendingUpdate
          * @description 心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。
          *
@@ -15405,6 +15517,29 @@ export interface components {
             build_id?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
+        };
+        /**
+         * DaemonLogTailResponse
+         * @description GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。
+         *
+         *     字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，
+         *     前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。
+         */
+        DaemonLogTailResponse: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+            /** Exists */
+            exists: boolean;
+            /** Lines */
+            lines: string[];
+            /** Line Count */
+            line_count: number;
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * DaemonMachineListResponseWithPending
@@ -20348,7 +20483,7 @@ export interface components {
          * @description 模型错误类型（与 daemon ModelErrorType 同构）。
          * @enum {string}
          */
-        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
+        ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "context_overflow" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
         /**
          * ModelUsageItemRead
          * @description 终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。
@@ -32583,6 +32718,38 @@ export interface operations {
             };
         };
     };
+    list_session_changes_api_workspaces__workspace_id__changes___by_session__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get: {
         parameters: {
             query?: never;
@@ -38091,6 +38258,74 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get: {
+        parameters: {
+            query?: {
+                /** @description 尾部行数 */
+                tail?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonLogTailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_machine_daemon_config_api_daemon_machines__instance_id__config_get: {
+        parameters: {
+            query?: {
+                /** @description true 时返回明文凭据 */
+                reveal?: boolean;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonConfigResponse"];
                 };
             };
             /** @description Validation Error */
