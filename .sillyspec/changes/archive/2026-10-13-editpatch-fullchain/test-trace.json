@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-editpatch-fullchain",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-editpatch-fullchain:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx「EditToolPreview diff 渲染（2026-10-13-editpatch-fullchain）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-editpatch-fullchain"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-editpatch-fullchain:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/platform_sync/tests/test_agent_log_messages.py「test_parsed_200_camelcase_to_snake_case」",
+        "frontend/src/components/daemon/__tests__/agent-log-card.test.tsx",
+        "sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts「行级 toolUseResult.structuredPatch（非空数组）→ edit_patch JSON 串附着该行 tool_result 段」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-editpatch-fullchain"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-editpatch-fullchain:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-editpatch-fullchain"
+    }
+  ]
+}

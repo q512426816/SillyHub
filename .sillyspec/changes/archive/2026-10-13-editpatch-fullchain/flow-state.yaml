@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行级 diff：①EditToolPreview 接 editPatch（parseStructuredPatch
+  优先、computeLineDiff 回退，computeLineDiff 迁入共享 tool-diff）；②daemon read_agent_log_messages 解析 structuredPatch 让对话视图
+  Write/Edit 卡带 diff
+
+  成功标准：
+
+  - agent-log EditToolPreview 有 editPatch 渲染红删绿增 DiffView，无 patch 回退 LCS 行级 diff，超大输入回退既有红绿两块
+
+  - daemon 消息解析在 claude 日志 toolUseResult.structuredPatch 存在时把 edit_patch 带到 tool_result 消息项，前端对话视图 Write/Edit 卡消费
+
+  - 相关 daemon/backend/前端测试通过，gen:types 同步（若 backend schema 变更），既有行为零回归
+autopilot: false
+baseline_commit: 793086b93fc0c2ea755093cc92c5f7ecb4e98895
+updatedAt: '2026-10-13T04:35:47.825Z'
+baseline_sha256: 5c667f60516bc2284375fffe6364737917552d866d59fce863f2908bb74ba602
+spec_approved: true
+spec_approved_at: '2026-10-13T04:19:40.488Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py28+jsx29)+fr(54)（268.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013042553\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013042553\test-result.json｜门文件
+  12 个
+

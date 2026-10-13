@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-editpatch-fullchain",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3a61c468bef542e000e2a649bda6205eddaad508",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "64KB 上限按 UTF-16 字符计（EDIT_PATCH_MAX_CHARS=64_000），非 ASCII patch 的 UTF-8 字节数可超 64KB（至多约 3 倍）仍附着",
+      "evidence": "上限用 JSON.stringify().length（字符数）而非字节数判定；all-or-nothing 语义与有界性完好，仅 64KB 字节精度对 CJK 内容漂移，测试用 70_000 ASCII 字符仍覆盖超限路径",
+      "location": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts:74,396"
+    },
+    {
+      "severity": "P3",
+      "title": "载体行多 tool_result 块共享同一 edit_patch（代码注释自认「无害超集」），并行工具调用场景下可能把 patch 渲染到同行其他工具卡",
+      "evidence": "userSegments 把行级 editPatch 附着到该行全部 tool_result 块；claude-code 实证一行单 tool_result，且仅回放展示面（diff 预览），错卡不产生数据损坏",
+      "location": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts:289-290,318"
+    },
+    {
+      "severity": "P3",
+      "title": "agent-log-card 接线（result.edit_patch → ConversationSegment.editPatch → ToolCallPreview）无直接断言测试",
+      "evidence": "FR-02 绑定仅把 agent-log-card.test.tsx 列为装配回归；消费行为由 ToolCallPreview 单测（editPatch prop 直喂）覆盖，接线两行经代码走读确认（result?.edit_patch ?? undefined / editPatch={seg.editPatch}）",
+      "location": "frontend/src/components/daemon/agent-log-card.tsx:310,385"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T04:34:05Z"
+}

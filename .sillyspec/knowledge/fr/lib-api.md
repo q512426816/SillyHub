@@ -2763,3 +2763,68 @@
   confirmed_at: null
   source_change: 2026-10-11-snapshot-timeout-distinct
   status: active
+
+## FR-lib-api-133 agent-log EditToolPreview 有 editPatch 渲染红删绿增 DiffView，无 patch 回退 LCS 行级 diff，超大输入回退既有红绿两块
+变更：2026-10-13-editpatch-fullchain
+状态：active
+摘要：patch 真实行号；LCS 回退与超大护栏
+场景正文：
+- 场景：patch 真实行号 — Given 带 structuredPatch JSON 的 Edit 工具卡；When 渲染；Then 删除行红底、新增行绿底（行号取 hunk oldStart/newStart），标题含「变更对比」
+- 场景：LCS 回退与超大护栏 — Given 无 editPatch 的 Edit 卡（old/new 可解析）；When 渲染；Then 走 computeLineDiff 行级 diff；输入超 100 万 LCS 单元格时回退既有红/绿两块（不渲染 DiffView）
+全文：.sillyspec/changes/archive/2026-10-13-editpatch-fullchain/requirements.md#FR-01
+最近确认：7b08406b35298e9620bb41056530a531114d5c60
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-editpatch-fullchain:flow:测试绑定FR-01
+  tests: frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx「EditToolPreview diff 渲染（2026-10-13-editpatch-fullchain）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-editpatch-fullchain
+  status: active
+
+## FR-lib-api-134 daemon 消息解析在 claude 日志 toolUseResult.structuredPatch 存在时把 edit_patch 带到 tool_result 消息项，前端对话视图 Write/Edit 卡消费
+变更：2026-10-13-editpatch-fullchain
+状态：active
+摘要：daemon 附着；全链透传与消费
+场景正文：
+- 场景：daemon 附着 — Given claude-code JSONL 载体行带 toolUseResult.structuredPatch（非空数组）；When parseClaudeCodeJsonlLog 解析；Then 该行 tool_result 段 edit_patch 等于序列化 JSON 串；create/缺字段/空数组/非数组/超 64KB → 缺省 undefine
+- 场景：全链透传与消费 — Given daemon RPC 返回的 tool_result 消息项带 edit_patch；When 经 backend schema 校透传 + agent-log-card 配对成工具卡；Then Write/Edit 卡拿到 editPatch 渲染行级 diff；缺省项照常渲染无 patch 回退形态
+全文：.sillyspec/changes/archive/2026-10-13-editpatch-fullchain/requirements.md#FR-02
+最近确认：7b08406b35298e9620bb41056530a531114d5c60
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-editpatch-fullchain:flow:测试绑定FR-02
+  tests: backend/app/modules/platform_sync/tests/test_agent_log_messages.py「test_parsed_200_camelcase_to_snake_case」 | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts「行级 toolUseResult.structuredPatch（非空数组）→ edit_patch JSON 串附着该行 tool_result 段」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-editpatch-fullchain
+  status: active
+
+## FR-lib-api-135 相关 daemon/backend/前端测试通过，gen:types 同步（若 backend schema 变更），既有行为零回归
+变更：2026-10-13-editpatch-fullchain
+状态：active
+摘要：三端回归
+场景正文：
+- 场景：三端回归 — Given 三端相关测试套件与生成物守门；When 全部运行；Then 全绿 + typecheck 零错误 + gen:types 产物随本变更提交
+全文：.sillyspec/changes/archive/2026-10-13-editpatch-fullchain/requirements.md#FR-03
+最近确认：7b08406b35298e9620bb41056530a531114d5c60
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-editpatch-fullchain:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-editpatch-fullchain
+  status: active

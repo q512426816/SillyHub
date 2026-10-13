@@ -70,3 +70,4 @@
 - 2026-10-13-session-taskwakeup-hide | 会话面板中 [后台任务通知] 系统注入对用户是纯噪音：进度视图每条通知落一张「上下文注入（N 字，已随消息发送）」卡（文
 - 2026-10-13-agentlog-write-diff | 变更运行日志视图（agent-log）的 Write 工具卡仍只显示全文预览，与会话面板已上线的 Write diff 
 - 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok
+- 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
