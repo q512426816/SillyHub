@@ -28,7 +28,8 @@
  *   - ✎ 重新编辑（FR-06）：队列行下方展开单条 inline 编辑浮层（说明行 + textarea
  *     + 取消/保存；trim 非空才可保存，后端 422 双保险）；failed 条目浮层说明
  *     「保存后转为等待中并尝试派发」；TASK_WAKEUP 前缀（[后台任务通知]）系统通知
- *     条目不渲染 ✎（D-009，后端 409 双保险）；展开查看态与编辑态互斥（开编辑收起展开）；
+ *     条目不渲染 ✎（D-009，后端 409 双保险），chip 摘要与展开正文不显示前缀
+ *     原文（2026-10-13-session-taskwakeup-hide）；展开查看态与编辑态互斥（开编辑收起展开）；
  *   - failed 条目红色语义边框（border/text-destructive）+ ↻ 重试/✕ 删除按钮
  *     （D-003 失败留队头，不自动重试，重试仅由用户点击触发）；
  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
@@ -60,17 +61,13 @@ import { Button, Input, Tag, Tooltip } from "antd";
 import { cn } from "@/lib/utils";
 import type { QueueEntry } from "@/hooks/use-message-queue";
 import { getProviderCaps } from "@/lib/provider-caps";
+import {
+  isTaskWakeupInjection,
+  TASK_WAKEUP_PROMPT_PREFIX,
+} from "@/components/daemon/session-log-assembler";
 
 /** 摘要截断长度（design §3.2：prompt 前 40 字）。 */
 const SUMMARY_LIMIT = 40;
-
-/**
- * TASK_WAKEUP 系统通知条目 prompt 前缀（D-009）：该前缀条目由后端任务唤醒自动
- * 并入，不开放 ✎ 编辑（后端 409 双保险）。与
- * backend/app/modules/daemon/session/service.py 的 TASK_WAKEUP_PROMPT_PREFIX 同值
- * ——跨语言无法共享 import，改前缀需两侧同步。
- */
-const TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]";
 
 /** 各投递状态的视觉元数据（chip 边框/底色 + 状态图标 + 中文文案）。 */
 const STATUS_META: Record<
@@ -286,10 +283,18 @@ export function MessageQueueBar({
           const meta = STATUS_META[entry.status];
           const StatusIcon = meta.icon;
           const expanded = expandedId === entry.id;
+          // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 系统通知条目不显示
+          // 「[后台任务通知]」前缀原文——chip 摘要与展开正文只显示通知正文
+          //（正文剥空时兜底「系统通知」，不渲染空 chip）。
+          const wakeupBody = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
+            ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
+              "系统通知"
+            : null;
+          const summarySource = wakeupBody ?? entry.prompt;
           const summary =
-            entry.prompt.length > SUMMARY_LIMIT
-              ? `${entry.prompt.slice(0, SUMMARY_LIMIT)}…`
-              : entry.prompt;
+            summarySource.length > SUMMARY_LIMIT
+              ? `${summarySource.slice(0, SUMMARY_LIMIT)}…`
+              : summarySource;
           // ⇅ 拖拽仅对可操作条目开放（sending 投递中不参与，D-003 既有不变式）。
           const canDrag = Boolean(onReorder) && entry.status !== "sending";
           const isDragging = dragId === entry.id;
@@ -299,7 +304,7 @@ export function MessageQueueBar({
           const canEdit =
             Boolean(onEdit) &&
             entry.status !== "sending" &&
-            !entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX);
+            !isTaskWakeupInjection(entry.prompt);
 
           return (
             <div
@@ -361,7 +366,7 @@ export function MessageQueueBar({
                         : "max-w-[280px] truncate",
                     )}
                   >
-                    {expanded ? entry.displayPrompt : summary}
+                    {expanded ? (wakeupBody ?? entry.displayPrompt) : summary}
                   </span>
                   {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
                   {!expanded && entry.attachmentIds.length > 0 && (

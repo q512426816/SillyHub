@@ -541,6 +541,31 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", () 
     expect(screen.getByText(/失败条目保存后转为等待中并尝试派发/)).toBeTruthy();
   });
 
+  it("TASK_WAKEUP 条目 chip 摘要与展开正文不显示 [后台任务通知] 前缀", () => {
+    // 2026-10-13-session-taskwakeup-hide FR-03：系统通知条目在队列条上只显示
+    // 通知正文——前缀原文（含其截断形态）不得再出现在 chip 摘要与展开正文。
+    render(
+      <MessageQueueBar
+        entries={[
+          makeEntry({
+            id: "mq-wake",
+            prompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
+            displayPrompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
+          }),
+        ]}
+        onRemove={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    // 折叠摘要：正文原样（<40 字不截断），无前缀。
+    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
+    expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
+    // 展开正文：同样无前缀（点击 chip 主体切换展开态）。
+    fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
+    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
+    expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
+  });
+
   it("未传三回调（可选门控显式断言）：不渲染 ⇅ 手柄/⚡/✎，chip 不可拖", () => {
     const { container } = render(
       <MessageQueueBar
