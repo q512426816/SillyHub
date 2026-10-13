@@ -20,7 +20,7 @@ Given 任意用户打开 /sessions（或三 scoped 入口任一，不区分登�
 
 #### 场景：主路径
 
-Given 1440×900 视口打开 /sessions（全局或 workspace scope） / When 门户主体渲染完成 / Then 分栏行（`sessions-portal-panes`）顶边紧贴页容器内边距上缘（无标题块位移），底边到视口底部；对照截图 00（改前，分栏起点 ≈y140）与 01/02（改后 ≈y80）差 ≈60px 即释放的标题块高度。
+Given 1440×900 视口打开 /sessions（全局 scope；workspace scope 同判定，其分栏顶边在紧凑 Git 条行之下——FR-03 优先） / When 门户主体渲染完成 / Then 分栏行（`sessions-portal-panes`）顶边紧贴页容器内边距上缘（无标题块位移），底边到视口底部；对照截图 00（改前，分栏起点 ≈y140）与 01/02（改后 ≈y80）差 ≈60px 即释放的标题块高度。
 
 ### FR-03: workspace scope 的紧凑 Git 状态条功能不回归（仍渲染且可查询到）。
 

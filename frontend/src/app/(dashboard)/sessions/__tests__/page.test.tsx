@@ -583,7 +583,16 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     // 页标题降级 sr-only h1（2026-10-13-sessions-portal-header-remove：原
     // PageHeader 标题块+副标题整体退役，视觉零占位；语义仍在——视觉面契约
     // 断言见 sessions-portal.test.tsx 同名用例）。
-    expect(screen.getByRole("heading", { name: "智能体会话" })).toBeTruthy();
+    // 路由级同样锁形态（只断存在会被改前的可见 h1 满足，零鉴别力——review
+    // P3-1）：sr-only 隐藏 + 副标题文案不渲染，两条都断。
+    expect(screen.getByRole("heading", { name: "智能体会话" })).toHaveClass(
+      "sr-only",
+    );
+    expect(
+      screen.queryByText(
+        "跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建",
+      ),
+    ).toBeNull();
 
     // 左栏：列表（ql-20260824-001 起分组默认折叠，组头计数可见；task-05
     // 树形态下固件会话落「非工作区」组）

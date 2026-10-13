@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-sessions-portal-header-remove",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c2c0085103bda6b2c794d0bf712609e74dc82070",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "page.test.tsx 绑定用例名承诺 sr-only，正文无相应断言（对「页头块移除」零鉴别力）",
+      "evidence": "该用例（行 580 命名含「页标题语义（sr-only，页头块 2026-10-13 移除）」）正文仅断言 screen.getByRole(\"heading\", { name: \"智能体会话\" }) 存在（行 586），未断言 sr-only 类、未断言副标题 queryByText 为 null——改前 PageHeader 渲染同名可见 h1 时该断言同样为真，故不能区分改前/改后；requirements.md:48 把该用例列为 FR-01 的测试绑定，属绑定作答夸大（FR-01 行为实际由 sessions-portal.test.tsx:951「页头标题块移除…」用例完整覆盖，故不影响验收）。",
+      "location": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx:586"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok；边界已裁决：可接受（page.test.tsx 存量附件 token 断言修正属「测试跟随已交付实现」——buildRefToken 的 📎 前缀由 3ef41b910 / 2026-10-12-ws-ref-emoji-inline 交付，基线 13c7d29c9 处断言即为红，修正方向与实现一致，非改测试掩盖实现错误）",
+    "作用域": "ok；边界已裁决：可接受（① 标题以 sr-only 保留而非删除——Tailwind 核心工具类，项目已有 dialog.tsx:53 等先例，绝对定位零占位，无障碍一级标题与四 scope 后缀回归面保留；② workspace scope 顶部保留一行 ≈26px 紧凑 Git 条——CC-08 功能件非用户点名的标题文案，change/quicklog/全局 scope 零渲染已由 sessions-portal.test.tsx:948/1087/1191 三处 queryByTestId 为 null 锁住，故 FR-02「分栏顶边紧贴」按 FR-03 例外解释，建议后续给 FR-02 场景文案补一句「workspace scope 的 Git 行除外」以消措辞张力）"
+  },
+  "reviewedAt": "2026-10-13T17:16:57+08:00"
+}

@@ -1,0 +1,92 @@
+{
+  "change": "2026-10-13-sessions-portal-header-remove",
+  "baseline": "13c7d29c9768627aeb07b04ed248c0661d052f8a",
+  "head": "c2c0085103bda6b2c794d0bf712609e74dc82070",
+  "files": [
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+    "frontend/src/components/sessions/sessions-portal.tsx"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 65,
+    "deletions": 20
+  },
+  "savedAt": "2026-10-13T09:11:50.021Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "13c7d29c9768627aeb07b04ed248c0661d052f8a",
+    "totals": {
+      "files": 3,
+      "additions": 65,
+      "deletions": 20
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 8,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "additions": 30,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/sessions-portal.tsx",
+        "additions": 27,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "f170c0e496b706158929bc85ad01438bf85fdaea72e02acd08733a9858a58c7e",
+  "patchStatus": "ok"
+}
