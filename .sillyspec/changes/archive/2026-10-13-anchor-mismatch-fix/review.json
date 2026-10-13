@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-anchor-mismatch-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2434a7500615f639e0283ced746a8586e8954de9",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 字面「两条查询内完成」与实现的三条查询不符（意图满足）",
+      "evidence": "scan_anchor_mismatches 实际三条批查询：交互轮、命令日志 IN、工作区 Change key→id 映射表；意图（按工作区批量化、零 N+1）完全满足，第三条为常量批查询，属规格措辞与实现的字面偏差。",
+      "location": "backend/app/modules/change/backfill_service.py:153-185"
+    },
+    {
+      "severity": "P3",
+      "title": "无锚轮（change_id IS NULL）错配候选路径无直接测试覆盖",
+      "evidence": "FR-01 正文明确「无锚轮同样属于错配候选」，实现经 top != anchor（None 不等）天然覆盖，但新增 5 用例的错配轮均带非 NULL 锚，无锚轮形态无回归保护。",
+      "location": "backend/app/modules/change/tests/test_backfill_run_context.py:386-570"
+    },
+    {
+      "severity": "P3",
+      "title": "scan 的 runs/logs 查询均无 ORDER BY，报告呈现顺序依赖 DB 返回序",
+      "evidence": "与既有 backfill_session 的 (created_at,id) 稳定序惯例不一致，跨执行报告行序可能抖动；一致性判定与修复结果与序无关，仅影响报告可读性。",
+      "location": "backend/app/modules/change/backfill_service.py:153-176"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T08:55:00+08:00"
+}

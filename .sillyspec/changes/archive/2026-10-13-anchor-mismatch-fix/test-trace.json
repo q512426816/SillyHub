@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-anchor-mismatch-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_scan_mismatch_reports_unanimous_run_targeting_single_change」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-anchor-mismatch-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_fix_mismatch_reanchors_interactive_run + test_fix_mismatch_skips_mixed_and_dispatched + test_fix_mismatch_idempotent」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-anchor-mismatch-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_dominant_mixture_reported_but_not_fixed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-anchor-mismatch-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「test_scan_mismatch_is_read_only」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-anchor-mismatch-fix"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_backfill_run_context.py「全量通过」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-anchor-mismatch-fix"
+    }
+  ]
+}

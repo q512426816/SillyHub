@@ -1,0 +1,415 @@
+diff --git a/backend/app/modules/change/backfill_service.py b/backend/app/modules/change/backfill_service.py
+index 09463e643..c41af1244 100644
+--- a/backend/app/modules/change/backfill_service.py
++++ b/backend/app/modules/change/backfill_service.py
+@@ -80,6 +80,25 @@ def _now() -> datetime:
+     return datetime.now(UTC)
+ 
+ 
++# ── 锚点错配扫描/修复（2026-10-13-anchor-mismatch-fix）──────────────────────
++
++#: 主导型信息项阈值：最高占比 ≥80% 且条数 ≥5（仅报告，不自动修——阈值武断性
++#: 由人工裁决兜底，design 风险节）。
++DOMINANT_SHARE = 0.8
++DOMINANT_MIN_COMMANDS = 5
++
++
++@dataclass
++class AnchorMismatch:
++    """一致错配/主导型信息项的逐轮记录（报告与修复共用载体）。"""
++
++    run_id: uuid.UUID
++    current_anchor: uuid.UUID | None
++    target: uuid.UUID
++    commands: int
++    unknown_keys: int
++
++
+ class ChangeContextBackfillService:
+     """存量 run 变更上下文回填（只读解析 + 两列写集，幂等）。"""
+ 
+@@ -113,6 +132,104 @@ class ChangeContextBackfillService:
+             total.merge(await self.backfill_session(session_id))
+         return total
+ 
++    # ── 锚点错配扫描/修复（FR-01..03）────────────────────────────────────
++
++    async def scan_anchor_mismatches(
++        self, workspace_id: uuid.UUID
++    ) -> tuple[list[AnchorMismatch], list[AnchorMismatch]]:
++        """扫描工作区交互轮的锚点错配（只读，零写库）。
++
++        判定基于每轮**全部已解析**绑定命令（unknown key 计数呈现、不参与判定）：
++
++        - 一致错配：已解析命令 ≥1 条、全部指向同一变更 X、且轮锚 != X（含无
++          锚轮）——「整个变更生命周期发生在单轮内」的实测形态；
++        - 主导型信息项：指向 ≥2 个变更、最高占比 ≥DOMINANT_SHARE 且条数
++          ≥DOMINANT_MIN_COMMANDS、最高目标 != 轮锚——仅报告人工裁决
++          （巨轮类形态，自动修阈值武断，design 风险节）。
++
++        混合指向但未达主导阈值、或最高目标恰为轮锚的轮：不进任何清单（切换轮
++        ≤1 轮误差既有裁决）。批量两条查询（交互轮 + 命令日志 JOIN），零 N+1。
++        """
++        runs = (
++            await self._session.execute(
++                select(AgentRun.id, AgentRun.change_id)
++                .select_from(AgentRun)
++                .join(AgentSession, col(AgentSession.id) == col(AgentRun.agent_session_id))
++                .where(
++                    col(AgentSession.workspace_id) == workspace_id,
++                    col(AgentRun.spec_strategy) == "interactive",
++                )
++            )
++        ).all()
++        if not runs:
++            return [], []
++        run_ids = [r[0] for r in runs]
++        anchor_by_run = {r[0]: r[1] for r in runs}
++        logs = (
++            await self._session.execute(
++                select(AgentRunLog.run_id, AgentRunLog.content_redacted).where(
++                    col(AgentRunLog.run_id).in_(run_ids),
++                    col(AgentRunLog.channel) == "tool_call",
++                    col(AgentRunLog.tool_kind) == "sillyspec",
++                )
++            )
++        ).all()
++        commands_by_run: dict[uuid.UUID, list[str | None]] = {}
++        for rid, content in logs:
++            commands_by_run.setdefault(rid, []).append(content)
++        change_ids = (
++            await self._session.execute(
++                select(Change.change_key, Change.id).where(col(Change.workspace_id) == workspace_id)
++            )
++        ).all()
++        id_by_key = {k: i for k, i in change_ids}
++
++        mismatches: list[AnchorMismatch] = []
++        dominants: list[AnchorMismatch] = []
++        for rid in run_ids:
++            contents = commands_by_run.get(rid, [])
++            if not contents:
++                continue
++            unknown = 0
++            targets: dict[uuid.UUID, int] = {}
++            for content in contents:
++                key = _parse_change_key_from_log(content)
++                if key is None:
++                    if content is not None:
++                        unknown += 1
++                    continue
++                target = id_by_key.get(key)
++                if target is None:
++                    unknown += 1
++                    continue
++                targets[target] = targets.get(target, 0) + 1
++            if not targets:
++                continue
++            anchor = anchor_by_run[rid]
++            top, top_n = max(targets.items(), key=lambda kv: kv[1])
++            if len(targets) == 1:
++                if top != anchor:
++                    mismatches.append(AnchorMismatch(rid, anchor, top, top_n, unknown))
++            elif (
++                top_n / sum(targets.values()) >= DOMINANT_SHARE
++                and top_n >= DOMINANT_MIN_COMMANDS
++                and top != anchor
++            ):
++                dominants.append(AnchorMismatch(rid, anchor, top, top_n, unknown))
++        return mismatches, dominants
++
++    async def fix_anchor_mismatches(self, workspace_id: uuid.UUID) -> int:
++        """把一致错配的交互轮重锚到其命令唯一指向的变更（幂等；调用方控制事务）。"""
++        mismatches, _dominants = await self.scan_anchor_mismatches(workspace_id)
++        for m in mismatches:
++            run = await self._session.get(AgentRun, m.run_id)
++            if run is None or run.change_id == m.target:
++                continue
++            run.change_id = m.target
++            self._session.add(run)
++        await self._session.flush()
++        return len(mismatches)
++
+     # ── 单会话游标重放（FR-01..04）──────────────────────────────────────
+ 
+     async def backfill_session(self, session_id: uuid.UUID) -> BackfillStats:
+diff --git a/backend/app/modules/change/tests/test_backfill_run_context.py b/backend/app/modules/change/tests/test_backfill_run_context.py
+index 9268152da..9edbcb532 100644
+--- a/backend/app/modules/change/tests/test_backfill_run_context.py
++++ b/backend/app/modules/change/tests/test_backfill_run_context.py
+@@ -383,3 +383,188 @@ async def test_workspace_scope_filters_linked_sessions(db_session):
+     assert stats.runs_stamped == 1
+     assert await _run_anchors(db_session, linked.id) == [None, change_a.id]
+     assert await _run_anchors(db_session, unlinked.id) == [None, None]
++
++
++# ── 锚点错配扫描/修复（2026-10-13-anchor-mismatch-fix）──────────────────────
++
++
++async def _make_interactive_run(
++    db_session: AsyncSession,
++    session_id: uuid.UUID,
++    *,
++    seq: int,
++    change_id: uuid.UUID | None = None,
++    commands: list[str] | None = None,
++    spec_strategy: str | None = "interactive",
++) -> AgentRun:
++    run = await _make_run(
++        db_session,
++        session_id,
++        seq=seq,
++        change_id=change_id,
++        commands=commands,
++    )
++    if spec_strategy is not None:
++        run.spec_strategy = spec_strategy
++        db_session.add(run)
++        await db_session.commit()
++    return run
++
++
++async def test_scan_mismatch_reports_unanimous_run_targeting_single_change(db_session):
++    """FR-01：交互轮锚在 Y、全部已解析命令指向 X → 进错配清单（未知 key 计数呈现）。"""
++    from app.modules.change.backfill_service import ChangeContextBackfillService
++
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_x = await _make_change(db_session, ws.id, "2026-10-13-mm-x")
++    prev = await _make_change(db_session, ws.id, "2026-10-13-mm-prev")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_x.id, sess.id)
++    await _make_link(db_session, prev.id, sess.id)
++    await _make_interactive_run(
++        db_session,
++        sess.id,
++        seq=0,
++        change_id=prev.id,
++        commands=[
++            "sillyspec flow start --change 2026-10-13-mm-x",
++            "sillyspec flow done --change 2026-10-13-mm-x",
++            "sillyspec flow start --change ghost-key",
++        ],
++    )
++
++    mismatches, dominants = await ChangeContextBackfillService(db_session).scan_anchor_mismatches(
++        ws.id
++    )
++
++    assert dominants == []
++    assert len(mismatches) == 1
++    m = mismatches[0]
++    assert m.target == change_x.id
++    assert m.current_anchor == prev.id
++    assert m.commands == 2
++    assert m.unknown_keys == 1
++
++
++async def test_fix_mismatch_reanchors_interactive_run(db_session):
++    """FR-02：一致错配的交互轮重锚到 X。"""
++    from app.modules.change.backfill_service import ChangeContextBackfillService
++
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_x = await _make_change(db_session, ws.id, "2026-10-13-fx-x")
++    prev = await _make_change(db_session, ws.id, "2026-10-13-fx-prev")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_x.id, sess.id)
++    run = await _make_interactive_run(
++        db_session,
++        sess.id,
++        seq=0,
++        change_id=prev.id,
++        commands=["sillyspec flow start --change 2026-10-13-fx-x"],
++    )
++
++    svc = ChangeContextBackfillService(db_session)
++    fixed = await svc.fix_anchor_mismatches(ws.id)
++
++    assert fixed == 1
++    await db_session.refresh(run)
++    assert run.change_id == change_x.id
++    # 幂等：重跑零修复。
++    assert await svc.fix_anchor_mismatches(ws.id) == 0
++
++
++async def test_fix_mismatch_skips_mixed_and_dispatched(db_session):
++    """FR-02：切换轮（命令指向多变更）与派发轮（非 interactive）不触发修复。"""
++    from app.modules.change.backfill_service import ChangeContextBackfillService
++
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_x = await _make_change(db_session, ws.id, "2026-10-13-sk-x")
++    prev = await _make_change(db_session, ws.id, "2026-10-13-sk-prev")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_x.id, sess.id)
++    mixed = await _make_interactive_run(
++        db_session,
++        sess.id,
++        seq=0,
++        change_id=prev.id,
++        commands=[
++            "sillyspec flow done --change 2026-10-13-sk-prev",
++            "sillyspec flow start --change 2026-10-13-sk-x",
++        ],
++    )
++    dispatched = await _make_interactive_run(
++        db_session,
++        sess.id,
++        seq=1,
++        change_id=prev.id,
++        commands=["sillyspec flow start --change 2026-10-13-sk-x"],
++        spec_strategy="sillyspec",
++    )
++
++    svc = ChangeContextBackfillService(db_session)
++    mismatches, dominants = await svc.scan_anchor_mismatches(ws.id)
++    assert mismatches == []
++    assert dominants == []
++    await svc.fix_anchor_mismatches(ws.id)
++    await db_session.refresh(mixed)
++    await db_session.refresh(dispatched)
++    assert mixed.change_id == prev.id
++    assert dispatched.change_id == prev.id
++
++
++async def test_dominant_mixture_reported_but_not_fixed(db_session):
++    """FR-03：11/12 指向 X 的混合轮进主导型信息项（不进错配、不被修复）。"""
++    from app.modules.change.backfill_service import ChangeContextBackfillService
++
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_x = await _make_change(db_session, ws.id, "2026-10-13-dm-x")
++    prev = await _make_change(db_session, ws.id, "2026-10-13-dm-prev")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_x.id, sess.id)
++    cmds = ["sillyspec run execute --change 2026-10-13-dm-x"] * 11
++    cmds.append("sillyspec flow done --change 2026-10-13-dm-prev")
++    run = await _make_interactive_run(db_session, sess.id, seq=0, change_id=prev.id, commands=cmds)
++
++    svc = ChangeContextBackfillService(db_session)
++    mismatches, dominants = await svc.scan_anchor_mismatches(ws.id)
++
++    assert mismatches == []
++    assert len(dominants) == 1
++    assert dominants[0].target == change_x.id
++    assert dominants[0].commands == 11
++    await svc.fix_anchor_mismatches(ws.id)
++    await db_session.refresh(run)
++    assert run.change_id == prev.id  # 主导型不被自动修
++
++
++async def test_scan_mismatch_is_read_only(db_session):
++    """FR-04：扫描零写库——前后锚分布一致。"""
++    from app.modules.change.backfill_service import ChangeContextBackfillService
++
++    user = await _make_user(db_session)
++    ws = await _make_ws(db_session)
++    change_x = await _make_change(db_session, ws.id, "2026-10-13-ro-x")
++    prev = await _make_change(db_session, ws.id, "2026-10-13-ro-prev")
++    sess = await _make_session(db_session, user_id=user.id, workspace_id=ws.id)
++    await _make_link(db_session, change_x.id, sess.id)
++    await _make_interactive_run(
++        db_session,
++        sess.id,
++        seq=0,
++        change_id=prev.id,
++        commands=["sillyspec flow start --change 2026-10-13-ro-x"],
++    )
++
++    svc = ChangeContextBackfillService(db_session)
++    before = await _run_anchors(db_session, sess.id)
++    first = await svc.scan_anchor_mismatches(ws.id)
++    second = await svc.scan_anchor_mismatches(ws.id)
++    after = await _run_anchors(db_session, sess.id)
++
++    assert before == after
++    assert first == second
++    assert len(first[0]) == 1
+diff --git a/backend/scripts/backfill_run_change_context.py b/backend/scripts/backfill_run_change_context.py
+index 6cd093358..4af7addba 100644
+--- a/backend/scripts/backfill_run_change_context.py
++++ b/backend/scripts/backfill_run_change_context.py
+@@ -34,7 +34,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ from sqlalchemy.ext.asyncio import create_async_engine
+ 
+ from app.core.config import get_settings
+-from app.modules.change.backfill_service import BackfillStats, ChangeContextBackfillService
++from app.modules.change.backfill_service import (
++    DOMINANT_MIN_COMMANDS,
++    DOMINANT_SHARE,
++    BackfillStats,
++    ChangeContextBackfillService,
++)
+ 
+ 
+ def _load_full_model_registry() -> None:
+@@ -78,7 +83,7 @@ def _print_stats(title: str, stats: BackfillStats) -> None:
+         print(f"    会话游标终值 {stats.cursor_change_id}（{flag}）")
+ 
+ 
+-async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
++async def _run(apply: bool, workspace_ids: list[uuid.UUID], args_mismatch: bool = False) -> int:
+     engine = create_async_engine(get_settings().database_url)
+     try:
+         async with engine.connect() as conn:
+@@ -102,6 +107,35 @@ async def _run(apply: bool, workspace_ids: list[uuid.UUID]) -> int:
+                         targets = [r[0] for r in rows]
+                     total = BackfillStats()
+                     mode = "APPLY（落库）" if apply else "DRY-RUN（事务回滚，库零触碰）"
++                    if args_mismatch:
++                        # 锚点错配模式（2026-10-13-anchor-mismatch-fix）：一致错配
++                        # 报告/修复 + 主导型信息项（仅报告）。
++                        print(f"=== 锚点错配扫描 · {mode} · 工作区 {len(targets)} 个 ===")
++                        for ws_id in targets:
++                            mismatches, dominants = await svc.scan_anchor_mismatches(ws_id)
++                            if not mismatches and not dominants:
++                                continue
++                            print(
++                                f"[workspace {ws_id}] 一致错配 {len(mismatches)} / 主导型 {len(dominants)}"
++                            )
++                            for m in mismatches:
++                                print(
++                                    f"  错配 run {m.run_id} 锚={m.current_anchor or 'NULL'} → {m.target}"
++                                    f"（命令 {m.commands} 条，未知 key {m.unknown_keys}）"
++                                )
++                            for m in dominants:
++                                print(
++                                    f"  主导型（仅报告）run {m.run_id} 锚={m.current_anchor or 'NULL'}"
++                                    f" 主={m.target}（{m.commands} 条 ≥{DOMINANT_SHARE:.0%} 且"
++                                    f" ≥{DOMINANT_MIN_COMMANDS}，待人工裁决）"
++                                )
++                            if apply:
++                                fixed = await svc.fix_anchor_mismatches(ws_id)
++                                print(f"  已重锚 {fixed} 轮")
++                        if not apply:
++                            raise _DryRunRollback()
++                        print("错配修复完成。")
++                        return 0
+                     print(f"=== 存量 run 变更上下文回填 · {mode} · 工作区 {len(targets)} 个 ===")
+                     for ws_id in targets:
+                         session_ids = await svc.linked_session_ids(ws_id)
+@@ -150,6 +184,12 @@ def main() -> int:
+         metavar="UUID",
+         help="限定工作区 id（可多次；缺省处理全部工作区）",
+     )
++    parser.add_argument(
++        "--mismatch",
++        action="store_true",
++        help="锚点错配模式：扫描「全部绑定命令一致指向 X 但轮锚 != X」的交互轮"
++        "（缺省只报告；与 --apply 组合落库修复；主导型仅报告）",
++    )
+     parser.add_argument(
+         "--yes",
+         action="store_true",
+@@ -170,7 +210,9 @@ def main() -> int:
+         )
+         return 2
+     _load_full_model_registry()
+-    return asyncio.run(_run(apply=args.apply, workspace_ids=workspace_ids))
++    return asyncio.run(
++        _run(apply=args.apply, workspace_ids=workspace_ids, args_mismatch=args.mismatch)
++    )
+ 
+ 
+ if __name__ == "__main__":

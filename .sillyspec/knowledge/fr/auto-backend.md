@@ -1366,3 +1366,98 @@ created_at: 2026-10-08T01:35:36.843Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-12-spec-backup-retention-validation/requirements.md#FR-04
 最近确认：da47981a0f5360823b97253a1b0990b0ee91e462
+
+## FR-auto-backend-200 扫描模式列出工作区内「交互轮的已解析绑定命令全部一致指向变更 X、且轮锚 != X」的错配轮（run、当前锚、目标 X、命令数、未知 key 数），零写库
+变更：2026-10-13-anchor-mismatch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-anchor-mismatch-fix/requirements.md#FR-01
+最近确认：2434a7500615f639e0283ced746a8586e8954de9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_scan_mismatch_reports_unanimous_run_targeting_single_change」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-anchor-mismatch-fix
+  status: active
+
+## FR-auto-backend-201 修复模式把一致错配的交互轮（spec_strategy=interactive）重锚到 X；正确锚定轮、混合命令轮（指向多个变更）、派发轮禁止触碰；幂等可重跑
+变更：2026-10-13-anchor-mismatch-fix
+状态：active
+摘要：主路径；不触发
+全文：.sillyspec/changes/archive/2026-10-13-anchor-mismatch-fix/requirements.md#FR-02
+最近确认：2434a7500615f639e0283ced746a8586e8954de9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_fix_mismatch_reanchors_interactive_run + test_fix_mismatch_skips_mixed_and_dispatched + test_fix_mismatch_idempotent」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-anchor-mismatch-fix
+  status: active
+
+## FR-auto-backend-202 主导型信息项（指向多变更但最高占比 ≥80% 且 ≥5 条）单独列出仅报告，不自动修
+变更：2026-10-13-anchor-mismatch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-anchor-mismatch-fix/requirements.md#FR-03
+最近确认：2434a7500615f639e0283ced746a8586e8954de9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_dominant_mixture_reported_but_not_fixed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-anchor-mismatch-fix
+  status: active
+
+## FR-auto-backend-203 脚本 --mismatch 默认只报告，与 --apply 组合才落库；全工作区 --apply 沿用 --yes 门
+变更：2026-10-13-anchor-mismatch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-anchor-mismatch-fix/requirements.md#FR-04
+最近确认：2434a7500615f639e0283ced746a8586e8954de9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「test_scan_mismatch_is_read_only」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-anchor-mismatch-fix
+  status: active
+
+## FR-auto-backend-204 既有测试全过并新增用例绑定上述行为
+变更：2026-10-13-anchor-mismatch-fix
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-anchor-mismatch-fix/requirements.md#FR-05
+最近确认：2434a7500615f639e0283ced746a8586e8954de9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-anchor-mismatch-fix:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_backfill_run_context.py「全量通过」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-anchor-mismatch-fix
+  status: active

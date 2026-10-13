@@ -1,0 +1,92 @@
+{
+  "change": "2026-10-13-anchor-mismatch-fix",
+  "baseline": "2fa91301fa0651f98a2b66fd4ffe57e54d889b32",
+  "head": "2434a7500615f639e0283ced746a8586e8954de9",
+  "files": [
+    "backend/app/modules/change/backfill_service.py",
+    "backend/app/modules/change/tests/test_backfill_run_context.py",
+    "backend/scripts/backfill_run_change_context.py"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 347,
+    "deletions": 3
+  },
+  "savedAt": "2026-10-13T00:53:18.552Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "2fa91301fa0651f98a2b66fd4ffe57e54d889b32",
+    "totals": {
+      "files": 3,
+      "additions": 347,
+      "deletions": 3
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/backfill_service.py",
+        "additions": 117,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_backfill_run_context.py",
+        "additions": 185,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/scripts/backfill_run_change_context.py",
+        "additions": 45,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a06a09a7877c8323cea609cb860d79270babb5af731a6c56894a471e436b0ba5",
+  "patchStatus": "ok"
+}
