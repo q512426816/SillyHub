@@ -633,6 +633,65 @@ describe("查看内容 · 对话化渲染（status=parsed）", () => {
     // 禁止「执行中 ⏳」假运行语义（含 ToolCallPreview 待审批 pending 态文案）。
     expect(screen.queryByText(/执行中|待审批/)).not.toBeInTheDocument();
   });
+
+  // 2026-10-13-editpatch-p3-cleanup：result.edit_patch → segment.editPatch →
+  // ToolCallPreview 直连断言（真实渲染路径，patch 被 Write/Edit 预览消费出
+  // 变更对比区即证明全链通）。
+  it("edit_patch 直连：tool_result 段携带 structuredPatch 时 Write/Edit 卡渲染变更对比 diff", async () => {
+    const patch = JSON.stringify([
+      { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old-line", "+new-A", "+new-B"] },
+    ]);
+    agentLogsApi.listAgentLogs.mockResolvedValue({ items: [makeItem()] });
+    agentLogsApi.readAgentLogMessages.mockResolvedValue(
+      parsedMessagesResponse([
+        makeMsg({
+          seq: 1,
+          kind: "tool_use",
+          tool_name: "Write",
+          tool_use_id: "tu-w-1",
+          tool_input: JSON.stringify({ file_path: "src/a.ts", content: "new-A\nnew-B" }),
+        }),
+        makeMsg({
+          seq: 2,
+          kind: "tool_result",
+          tool_use_id: "tu-w-1",
+          tool_result: "updated",
+          is_error: false,
+          edit_patch: patch,
+        }),
+        makeMsg({
+          seq: 3,
+          kind: "tool_use",
+          tool_name: "Edit",
+          tool_use_id: "tu-e-2",
+          tool_input: JSON.stringify({
+            file_path: "src/a.ts",
+            old_string: "old-line",
+            new_string: "new-A",
+          }),
+        }),
+        makeMsg({
+          seq: 4,
+          kind: "tool_result",
+          tool_use_id: "tu-e-2",
+          tool_result: "updated",
+          is_error: false,
+          edit_patch: patch,
+        }),
+      ]),
+    );
+    setupCard();
+    await openEntries();
+
+    fireEvent.click(screen.getByTestId("agent-log-content-toggle"));
+    await screen.findByTestId("agent-log-conversation-stream");
+
+    // Write 卡：diff 行红删绿增 + 覆盖写入标题（edit_patch 已穿透到预览；
+    // Edit 卡同 patch 也渲染 old-line，取首个 del 行断言行底）。
+    const delRow = screen.getAllByText("old-line")[0]?.closest("div.flex");
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(screen.getByText(/变更对比（覆盖写入 \+2 −1）/)).toBeInTheDocument();
+  });
 });
 
 /* ───────── 6b. 查看内容 · 静默回落四通道（task-05 新增） ───────── */
