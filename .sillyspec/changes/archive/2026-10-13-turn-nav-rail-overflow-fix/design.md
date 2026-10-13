@@ -18,6 +18,11 @@ created_at: 2026-10-13T06:32:14.177Z
 
 无对外签名/端点/命令/文件格式变化。纯 `frontend/src/components/sessions/turn-nav-list.tsx` 组件内部布局类名调整（`turn-nav-rail` 去 `shrink-0`、`turn-nav-rail-ticks` 追加滚动条隐藏类）；组件 props（`TurnNavListProps`）、testid、aria 语义、浮层行为均不变，desktop 会话页唯一挂载点 `session-panel-page.tsx:4960` 零改动。
 
+### 文件变更清单（自声明）
+
+- frontend/src/components/sessions/turn-nav-list.tsx（交付：rail 去 shrink-0 + nav 滚动条隐藏 + 注释）
+- frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx（交付：新增「窄轨溢出修复」describe 3 用例）
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？

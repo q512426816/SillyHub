@@ -73,3 +73,4 @@
 - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
 - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
+- 2026-10-13-turn-nav-rail-overflow-fix | 会话页轮次导航窄轨在轮次很多时溢出面板错乱:turn-nav-rail 容器 shrink-0 导致刻度轨不随面板高度收

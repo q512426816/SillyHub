@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-nav-rail-overflow-fix",
+  "reviewer": "main-agent(self-review，独立复核代码与测试事实)",
+  "verdict": "PASS",
+  "reviewedAgainst": "79968f77eb4ed6dc337f3c7fd2bd0bec5045acda",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "长会话首屏窄轨滚动停在顶部，当前轮（最新）刻度可能不在轨内可视区",
+      "evidence": "轨内滚动生效后 scrollTop 初始为 0；既有 mountedRef 守卫「首挂载不 scrollIntoView」（turn-nav-list.tsx:243-247）未随本变更调整。当前轮号经把手 #N 常显可辨识，active 变化（聊天滚动）即触发滚入联动；如需首屏对齐当前轮属行为增强，超出本修复范围",
+      "location": "frontend/src/components/sessions/turn-nav-list.tsx:243"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a（纯静态布局类名调整，entries 增删只改刻度数量，钳制行为与顺序无关——代码证实无事件序依赖）",
+    "并发": "n/a（组件无共享可变态，hoverOpen/pinned/hoverTurnKey 均组件内 useState，无跨执行体写面）",
+    "切换": "ok（会话切换 key 重挂载后 rail 按新 entries 重排，钳制为纯 CSS 派生无持久状态；轨内 scrollTop 归顶为既有语义——已记 P3 finding 人工验收项）",
+    "作用域": "ok（改动仅在 desktop 会话面板组件内部；mobile 分支不挂 TurnNavList 用 Drawer，悬浮窗 host 不传 variant 自动同构受益，无跨工作区串台面）"
+  },
+  "reviewedAt": "2026-10-13T06:45:00Z",
+  "_checklist": {
+    "FR三方一致": "FR-01 实现（turn-nav-list.tsx rail 无 shrink-0 保留 min-h-0）与测试绑定「turn-nav-rail 不带 shrink-0」用例逐字核对相符；FR-02（nav [scrollbar-width:none] [&::-webkit-scrollbar]:hidden，与 turn-catalog.tsx:226 逐类一致）绑定用例相符；FR-03 由既有 20 用例（pin/hover 防抖/浮层/指向标记/scrollIntoView）全绿佐证 + 密集阈值新用例；FR-04 实测 pnpm vitest run turn-nav-list.test.tsx 23/23 passed（本会话亲跑）",
+    "盲维四问": "design 四问作答与代码事实相符，无失实（mobile 不挂载、root shrink-0 仅水平主轴均核实）",
+    "披露边界裁决": [
+      "jsdom 无真实 flex 布局，布局契约以 className 断言替代（先例：同文件 h-[44px]/ring-inset 断言）→ 可接受：断言锚 data-testid 命中容器，真实行为由 CSS 标准与 turn-catalog 工作先例双担保，另留 50+ 轮会话人工视觉验收项（visual-evidence.md）",
+      "工作区 7 个他侧 dirty 文件 --accept-dirty-gap 留痕 → 可接受：全部归属并行活跃变更 2026-10-13-change-files-refresh-sync / view-polish（工具归属收窄亦证实），本变更不代提交不误冻结"
+    ],
+    "防护声明": "挂载链事实核对：session-panel-page.tsx:4959 外层 flex min-h-0 flex-1 → root(275) 交叉轴 stretch → rail(286) flex:0 1 auto 可收缩 → nav(316) flex-1+overflow-y-auto 获钳制；root 的 shrink-0 保留（水平主轴保 44px 宽）未误删",
+    "生成物同步": "n/a（无后端/OpenAPI/前端类型面，gen:types 不适用）"
+  }
+}

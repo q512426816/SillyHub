@@ -2711,3 +2711,10 @@ supersedes：D-008@v1
 理由：方案 C：不改后端，前端用 `AgentSessionRead.change_id` + `current_change_id` 两个字段逐个 `getChange` 拼变更列表。
 否决理由：两个字段最多覆盖 2 个变更（创建绑定 + 当前绑定），`change_session_links` M:N 表才是一个会话全部关联变更的唯一真相；历史执行过的其它变更全部丢失，不满足「一个会话内多个变更、归档可展开」的核心需求；且逐个串行请求无排序/归档分组信息（还要逐条补 ChangeSummary）。
 复潮条件：若后端把关联变更全量内嵌进会话详情 DTO（目前评估为 DTO 膨胀、实时性差而否决），纯前端方案的自然上限才会解除。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-turn-nav-rail-overflow-fix
+锚点：未记录
+最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
+理由：最大风险：jsdom 无法断真实 flex 布局，契约测试只能断 className（若未来有人改回 shrink-0 而同时改 testid/类名结构，断言可能失守）——已用 `data-testid="turn-nav-rail"` 命中容器并把「无 shrink-0 + min-h-0」写成显式用例降低静默回归概率；真实视觉验收（50+ 轮会话）留人工确认项记入 visual-evidence.md。 放弃的方案：① 沿用 turn-catalog 结构把 nav 直接提为行的 stretch 子项——需重排把手/浮层 DOM 层级，改动面大于收益；② 提高密集阈值或按容器高度自适应刻度尺寸——只缓解不治本（溢出仍在），且引入测量逻辑复杂度；③ root 加 overflow-hidden 裁切——会连把手/浮层一起裁，且不可滚动更差。

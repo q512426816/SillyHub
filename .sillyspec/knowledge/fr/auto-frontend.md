@@ -1883,3 +1883,87 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-subagent-stub-reconcile
   status: active
+
+## FR-auto-frontend-196 轮次很多(内容高超过面板高)时窄轨刻度不再溢出面板,超出部分在轨内滚动(turn-nav-rail 去掉 shrink-0,nav flex-1+overflow-y-auto 真正生效)
+变更：2026-10-13-turn-nav-rail-overflow-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 53 轮长会话（刻度内容高 > 面板剩余高） / When 打开会话页 desktop 面板 / Then 刻度止于聊天区底缘，全部刻度可在轨内滚动查看，输入区
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-rail-overflow-fix/requirements.md#FR-01
+最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-rail 不带 shrink-0（长会话轨道可随面板高度收缩，不溢出叠到输入区）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-rail-overflow-fix
+  status: active
+
+## FR-auto-frontend-197 轨内滚动不显示滚动条(与 turn-catalog 同款 scrollbar-width:none + webkit hidden)
+变更：2026-10-13-turn-nav-rail-overflow-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 轮次超出可视高度触发轨内滚动 / When 用户在窄轨滚动查看 / Then 轨道右缘不出现可见滚动条（44px 窄轨视觉不变）。
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-rail-overflow-fix/requirements.md#FR-02
+最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-rail-ticks 轨内滚动且隐藏滚动条（与 turn-catalog 同款）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-rail-overflow-fix
+  status: active
+
+## FR-auto-frontend-198 少量轮次时形态不变(44px 窄轨+把手+居中刻度,浮层行为不受影响)
+变更：2026-10-13-turn-nav-rail-overflow-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 3 轮短会话 / When 打开会话页 / Then 窄轨高度=内容高、刻度居中，悬停/pin 展开浮层（top-0 bottom-0 absolute）行为与
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-rail-overflow-fix/requirements.md#FR-03
+最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「密集刻度契约：>60 轮刻度 mini（h-1.5），≤60 轮常规（h-2.5）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-rail-overflow-fix
+  status: active
+
+## FR-auto-frontend-199 turn-nav-list 单测补齐布局契约断言(rail 无 shrink-0、nav 可滚动+滚动条隐藏),既有测试全绿
+变更：2026-10-13-turn-nav-rail-overflow-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 修复后的 turn-nav-list.tsx / When 运行 `pnpm vitest run src/components/sessions/__test
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-rail-overflow-fix/requirements.md#FR-04
+最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-rail-overflow-fix
+  status: active

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-nav-rail-overflow-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-rail 不带 shrink-0（长会话轨道可随面板高度收缩，不溢出叠到输入区）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-nav-rail-overflow-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「turn-nav-rail-ticks 轨内滚动且隐藏滚动条（与 turn-catalog 同款）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-nav-rail-overflow-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「密集刻度契约：>60 轮刻度 mini（h-1.5），≤60 轮常规（h-2.5）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-nav-rail-overflow-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-turn-nav-rail-overflow-fix:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-nav-rail-overflow-fix"
+    }
+  ]
+}
