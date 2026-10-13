@@ -739,11 +739,11 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     expect(a.parse(line)).toBeNull();
   });
 
-  it('message_delta 覆盖估算值（_currentTurnHasRealUsage 后 delta 不再更新）', () => {
+  it('真 usage 后 text_delta 估算继续（自真值续算增量；2026-10-13-turn-live-visibility FR-04 规格变更替换原「忽略」契约）', () => {
     const a = new StreamJsonAdapter('claude');
     a.resetAccumulator();
 
-    // 1) 先发 message_delta 给真 usage
+    // 1) 先发 message_delta 给真 usage 100（emit 同步基线 = 100）
     const realLine = JSON.stringify({
       type: 'stream_event',
       event: {
@@ -754,7 +754,8 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
     const realEv = a.parse(realLine) ?? [];
     expect(realEv[0]!.metadata?.usage?.output_tokens).toBe(100);
 
-    // 2) 后续 content_block_delta 应被忽略（不覆盖真值）
+    // 2) 后续 text_delta 估算继续：100 + est(60/3=20) = 120，token 门限（≥20）即推——
+    //    增量累加不覆盖真值，call 进行中数字持续跳动
     const deltaLine = JSON.stringify({
       type: 'stream_event',
       event: {
@@ -762,7 +763,21 @@ describe('ql-006/007 stream_event 实时 usage 累加', () => {
         delta: { type: 'text_delta', text: 'a'.repeat(60) },
       },
     });
-    expect(a.parse(deltaLine)).toBeNull();
+    const deltaEv = a.parse(deltaLine) ?? [];
+    expect(deltaEv).toHaveLength(1);
+    expect(deltaEv[0]!.metadata?.usage?.output_tokens).toBe(120);
+
+    // 3) 估算超调后真值回落（120 → 105）也要推送校正（数字向真值收敛，不滞留估算值）
+    const realLine2 = JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        usage: { input_tokens: 1000, output_tokens: 105 },
+      },
+    });
+    const realEv2 = a.parse(realLine2) ?? [];
+    expect(realEv2).toHaveLength(1);
+    expect(realEv2[0]!.metadata?.usage?.output_tokens).toBe(105);
   });
 
   it('assistant 事件 commit 后 _currentTurnHasRealUsage 重置（下一 turn 可重新估算）', () => {
@@ -1186,5 +1201,65 @@ describe('task-01 cache 词元采集', () => {
     expect(usage.cache_creation_tokens).toBe(15);
     expect(usage.cache_read_tokens).toBe(25);
     // 不含第一轮污染的 200/300
+  });
+});
+
+// ===========================================================================
+// 2026-10-13-turn-live-visibility FR-04：usage_update 双门限节流
+//   - 时间门限兜底：低速生成（<20 token/500ms）约每 0.5s 一推
+//   - 零增量到期不空推；token 门限行为不变（既有用例回归守卫）
+// ===========================================================================
+
+describe('usage_update 双门限节流（turn-live-visibility FR-04）', () => {
+  const deltaLine = (text: string) =>
+    JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text },
+      },
+    });
+
+  it('时间门限兜底：低速生成累计 <20 token 时 500ms 后照样推送', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      const a = new StreamJsonAdapter('claude');
+      a.resetAccumulator(); // 时间基线 = 当前时刻
+
+      // t+100ms：est=2，token 门限不满、时间门限未到 → 不推
+      vi.setSystemTime(1_000_100);
+      expect(a.parse(deltaLine('abcdef'))).toBeNull();
+
+      // t+600ms：est 再 +2（累计 4 < 20），时间门限（≥500ms 且有增量）→ 推
+      vi.setSystemTime(1_000_600);
+      const events = a.parse(deltaLine('abcdef')) ?? [];
+      expect(events).toHaveLength(1);
+      expect(events[0]!.metadata?.usage?.output_tokens).toBe(4);
+
+      // 推送即同步时间基线：紧接的小 delta（增量 1，未满 20 也未满 500ms）不推
+      expect(a.parse(deltaLine('ab'))).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('时间到期但零增量不空推（无新 delta 到达即无评估，防御条件不误发）', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(2_000_000);
+      const a = new StreamJsonAdapter('claude');
+      a.resetAccumulator();
+
+      // 首个 delta 直接满 token 门限推送（est=20），基线同步
+      const ev = a.parse(deltaLine('a'.repeat(60))) ?? [];
+      expect(ev).toHaveLength(1);
+
+      // 时间推进 1s 后到达的空文本 delta：parse 前置守卫（!text）返回 null，不触发推送
+      vi.setSystemTime(2_001_000);
+      expect(a.parse(deltaLine(''))).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

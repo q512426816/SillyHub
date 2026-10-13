@@ -148,15 +148,6 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   };
 
   /**
-   * ql-20260617-007：当前 turn 是否已经收到过 message_delta（真 usage）。
-   *
-   * 用于让 content_block_delta 估算值不要在 message_delta 到达后继续覆盖真值。
-   * 一旦 message_delta 给出了真 usage，本 turn 内后续 delta 不再更新
-   * `_currentTurnUsage.output_tokens`（避免估算值覆盖真值）。
-   */
-  private _currentTurnHasRealUsage = false;
-
-  /**
    * ql-20260617-007：上次 emit usage_update 时的 output_tokens 快照值。
    *
    * content_block_delta 单次 text 通常 1-5 字符 → est=1，单 delta 增量永远 < 20。
@@ -164,6 +155,16 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * resetAccumulator / message_start / commit 时一并清零。
    */
   private _lastEmittedOutputTokens = 0;
+
+  /**
+   * 2026-10-13-turn-live-visibility（FR-04）：上次 emit usage_update 的墙钟时刻。
+   *
+   * token 门限在低速生成时（如 ~10 tok/s 需 ~2s 才攒满 20）前端数字跳动过慢，
+   * 叠加时间门限：距上次 emit ≥ 500ms 且有增量即推（字符/时间双门限，
+   * THINKING_FLUSH_MS 同款先例；最坏 2 条/s/call，落库+publish 批量管线可承受）。
+   * 零增量到期不空推。与 _lastEmittedOutputTokens 同点位清零/同步。
+   */
+  private _lastUsageEmitAt = Date.now();
 
   /**
    * ql-20260617-010：本 turn 是否已通过 thinking_delta 流式输出过 thinking。
@@ -243,9 +244,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       cache_read_tokens: 0,
       cache_creation_tokens: 0,
     };
-    // ql-20260617-007：估算状态也清零。
-    this._currentTurnHasRealUsage = false;
+    // ql-20260617-007：估算状态也清零；FR-04 时间门限基线一并重置（重置时刻起算）。
     this._lastEmittedOutputTokens = 0;
+    this._lastUsageEmitAt = Date.now();
     // ql-20260617-010：thinking 流式标记也清零。
     this._currentTurnEmittedThinking = false;
     // ql-20260617-012：thinking buffer 也清零。
@@ -487,7 +488,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * ql-20260617-006 / ql-20260617-007：解析 stream_event 事件（仅 --include-partial-messages 启用）。
    *
    * 关键子事件 event.type：
-   *   - message_start：新 turn 开始，reset _currentTurnHasRealUsage（实际 commit 在
+   *   - message_start：新 turn 开始，reset 估算节流状态（实际 commit 在
    *     assistant 事件做，这里只是兜底防多 turn 串扰）
    *   - content_block_delta（text_delta）：流式内容 → 按 chars/3 粗估 output_tokens
    *     累加（仅在尚未收到真 usage 时），让前端在 turn 进行中就能看到 output 增长
@@ -506,9 +507,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // task-07（2026-08-29-usage-by-provider-model / FR-02-2）：API 调用计数 +1
       //（message_start 每次模型调用一发，实测 == num_turns，design §2 batch 口径）。
       this._messageStartCount += 1;
-      this._currentTurnHasRealUsage = false;
-      // ql-20260617-007：新 turn 开始时清掉 emit 节流状态
+      // ql-20260617-007：新 turn 开始时清掉 emit 节流状态（FR-04 时间基线 = 本 call 起算）
       this._lastEmittedOutputTokens = 0;
+      this._lastUsageEmitAt = Date.now();
       // ql-20260617-010：新 turn 开始时清掉 thinking 流式标记
       this._currentTurnEmittedThinking = false;
       // ql-20260617-012：新 turn 开始时清掉 thinking buffer（防御多 turn 残留）
@@ -539,7 +540,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         this._currentTurnUsage.input_tokens > 0 ||
         this._currentTurnUsage.cache_read_tokens > 0
       ) {
-        this._currentTurnHasRealUsage = true;
+        // FR-04：emit 即同步双门限基线（后续 text_delta 估算从本时刻/本值续算）。
+        this._lastEmittedOutputTokens = this._currentTurnUsage.output_tokens;
+        this._lastUsageEmitAt = Date.now();
         return this._buildUsageUpdateEvent();
       }
       return null;
@@ -576,8 +579,11 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         return null;
       }
 
-      if (this._currentTurnHasRealUsage) return null;
       if (deltaType !== 'text_delta') return null;
+      // 2026-10-13-turn-live-visibility（FR-04）：删除原「真 usage 到达后整段拦截
+      // text_delta 估算」——估算只对 output_tokens 做增量累加（不覆盖真值），真
+      // usage 后 API call 进行中数字继续跳动，message_delta 到达时被真值覆盖校正
+      //（message_start 每 call 重置节流基线，跨 call 估算本就恢复）。
       const text = typeof delta.text === 'string' ? delta.text : '';
       if (!text) return null;
 
@@ -586,11 +592,23 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       const est = Math.max(1, Math.ceil(text.length / 3));
       this._currentTurnUsage.output_tokens += est;
 
-      // 节流：累计自上次 emit 增长 ≥ 20 token 才推一次 event（避免每个 delta 都刷 backend）
-      if (this._currentTurnUsage.output_tokens - this._lastEmittedOutputTokens < 20) {
+      // 节流（2026-10-13-turn-live-visibility FR-04 双门限）：累计增量 ≥ 20 token
+      // 或距上次 emit ≥ 500ms（且期间有增量，零增量不空推）才发 event——避免每个
+      // delta 都刷 backend，同时低速生成时数字也能 ~0.5s 一跳。真 usage 到达后
+      //（真 usage 已到达）估算继续走本分支：只 += 增量不覆盖真值，
+      // 下一次 message_delta 到达时被真值覆盖校正（原 579 行整段拦截仅保留对
+      // 非 text_delta 的防御，见下）。
+      const nowMs = Date.now();
+      const tokenDue =
+        this._currentTurnUsage.output_tokens - this._lastEmittedOutputTokens >= 20;
+      const timeDue =
+        nowMs - this._lastUsageEmitAt >= 500 &&
+        this._currentTurnUsage.output_tokens > this._lastEmittedOutputTokens;
+      if (!tokenDue && !timeDue) {
         return null;
       }
       this._lastEmittedOutputTokens = this._currentTurnUsage.output_tokens;
+      this._lastUsageEmitAt = nowMs;
       return this._buildUsageUpdateEvent();
     }
 
@@ -619,17 +637,20 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     if (typeof usage.cache_read_input_tokens === 'number') {
       this._currentTurnUsage.cache_read_tokens = usage.cache_read_input_tokens;
     }
-    // 标记本 turn 已拿到真 usage，后续 content_block_delta 不再覆盖
-    this._currentTurnHasRealUsage = true;
-
-    // task-01: grew 四维 — cache 任一增长也要 emit（否则 cache 涨但 input/output 不变
-    // 时不产 usage_update，前端实时看不到 cache）
-    const grew =
-      this._currentTurnUsage.input_tokens > prevInput ||
-      this._currentTurnUsage.output_tokens > prevOutput ||
-      this._currentTurnUsage.cache_read_tokens > prevCacheRead ||
-      this._currentTurnUsage.cache_creation_tokens > prevCacheCreation;
-    if (!grew) return null;
+    // task-01: 四维变化 — cache 任一增长也要 emit（否则 cache 涨但 input/output
+    // 不变时不产 usage_update，前端实时看不到 cache）。FR-04（turn-live-visibility）：
+    // 覆盖后任一维「变化」（含估算超调后真值回落，如估算 500 → 真 480）都推送——
+    // 数字必须向真值收敛，仅重复同值（prev 四维全等）不推。
+    const changed =
+      this._currentTurnUsage.input_tokens !== prevInput ||
+      this._currentTurnUsage.output_tokens !== prevOutput ||
+      this._currentTurnUsage.cache_read_tokens !== prevCacheRead ||
+      this._currentTurnUsage.cache_creation_tokens !== prevCacheCreation;
+    if (!changed) return null;
+    // FR-04：真值 emit 即同步基线——后续 text_delta 估算自真值续算（增量累加，
+    // 不覆盖），下一次 message_delta 到达再被新真值覆盖校正。
+    this._lastEmittedOutputTokens = this._currentTurnUsage.output_tokens;
+    this._lastUsageEmitAt = Date.now();
     return this._buildUsageUpdateEvent();
   }
 
@@ -755,9 +776,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
         cache_read_tokens: 0,
         cache_creation_tokens: 0,
       };
-      // ql-20260617-007：commit 后 reset 估算 flag + emit 节流状态
-      this._currentTurnHasRealUsage = false;
+      // ql-20260617-007：commit 后 reset emit 节流状态（FR-04 时间基线一并重置）
       this._lastEmittedOutputTokens = 0;
+      this._lastUsageEmitAt = Date.now();
     } else {
       // 兜底：未开启 --include-partial-messages 或 CLI 未吐 message_delta 时，
       // 从 assistant.message.usage 取（通常是 {0,0}，等于无数据但保留 task-06 行为）。
