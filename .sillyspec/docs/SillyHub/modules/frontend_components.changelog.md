@@ -32,3 +32,4 @@ created_at: 2026-08-30 22:23:33
 - 2026-09-20-agent-reply-no-bubble | 会话时间线 agent 回复去气泡（用户气泡保留）——方案 B 容器语义重构：TextSegmentView 容器（turn-segment-views.tsx）与旧数据回退答复容器（turn-timeline.tsx）统一换无框类 .seg-text-body（无边框/底色/阴影/内边距，max-w min(100%,48rem) 阅读限宽；旧路径不取 w-full 保行尾时间戳尾随语义）；删 SEGMENT_ANIMATION_CSS 子代理透明化补丁（去气泡后天然无框）；globals.css mobile 规则迁新类名（仅字号 14px/行高 24px，不带 max-width 防压 48rem 限宽），.turn-bubble 自此仅用户气泡持有。全流程 verify PASS WITH NOTES：vitest 174（turn-segment-views 72 含新增无框形态用例+session-panel-dialog+sessions page 40）、tsc 0 错、全仓 grep seg-text-bubble 零残留；移交 3 项视觉终验（旧数据回退分支目验/mobile 观感/限宽与段间距）
 - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
 - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+- 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri

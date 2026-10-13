@@ -2637,3 +2637,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：4cc145d9dd4e9cebe7d743be0cb5d4c7ec5cf10e
 理由：最大风险：前端 task_id 兜底把行吸收到**非派发段**（taskTaskId 撞车）。task_id 由 SDK harness 全局唯一生成（call id 亦然），且反查域限于单轮树，实际撞车概率趋零；即便撞车，后果仅是段元数据被终态覆盖（展示层），无数据损坏。 试过但放弃的方案：① backend 读侧把同名组 running 行也参与终态收敛——被 D-009@v1 裁决否决（同名多 running 是合法重试在途实例，会误杀），不动；② daemon 三无场景强行落行/emit——无 runId 载体（`onTurnMessage`/`_emitSessionEvent` 均必填 runId），强行造 run id 会产生脏轮，降级为 WARN 日志；③ 前端 upsertTurn 层按 task_id 跨轮路由——需在轮路由层解析行 content JSON（越层），且 2026-09-15 已有 parent_tool_use_id 跨轮路由覆盖「行落错轮」主场景，收益边际小、风险面大，不做；④ 修存量脏数据（迁移/清洗脚本）——项目未正式上线允许重置数据，且存量行经既有清扫（run 收口 60s / 启动清扫）→ stopped → 读侧去重收敛闭环，无需脚本。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-write-tool-diff
+锚点：未记录
+最近确认：757aad15b51c9a47acc9ce4bb23c680a88d6742e
+理由：最大风险：无 patch 的覆盖写（非 claude provider）被整文件全绿展示，视觉上像新建文件。缓解：该分支标题保留「写入内容（N 行）」不称「新增文件」，复制按钮给完整原文兜底；claude 会话（主场景）覆盖写必有 patch、不受影响。 放弃的方案：(a) 嗅探 tool_result 文本（"File created successfully" vs "updated"）区分新建/覆盖——依赖各 provider 文案措辞，脆弱，放弃；(b) 同步接线 agent-log 变更运行日志视图——该视图 edit_patch 数据链未通（normalize 链需另动），超出薄跑道范围，留后续变更。

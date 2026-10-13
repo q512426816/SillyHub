@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-write-tool-diff",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-write-tool-diff:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「有 editPatch：structuredPatch 红删绿增渲染（覆盖写真实 diff），标题含「变更对比」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-write-tool-diff"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-write-tool-diff:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「无 editPatch：整文件按新增行全绿展示（新侧行号自 1 起计）+ 复制内容按钮」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「Write 超长内容：diff 行 2000 行截断护栏（DiffView 复用），复制仍带完整原文」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-write-tool-diff"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-write-tool-diff:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「parseStructuredPatch」组",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「Edit 展开渲染行级 diff：红底 - 旧行 / 绿底 + 新行 + 双侧行号列，不再是两个裸代码块」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-write-tool-diff"
+    }
+  ]
+}

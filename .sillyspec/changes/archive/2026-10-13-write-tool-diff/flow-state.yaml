@@ -1,0 +1,38 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Write 的 diff 渲染
+  成功标准：
+  - Write 工具展开区在有 edit_patch（structuredPatch）时渲染红删绿增 DiffView，与 Edit 分支同管线
+  - 无 edit_patch 时整文件按新增行全绿展示，保留复制内容按钮
+  - 相关前端测试通过，不改动 Edit 分支现有行为
+autopilot: false
+baseline_commit: 37c7d146bc3233a860a5fb795c2f5b5e4f837610
+updatedAt: '2026-10-13T03:10:58.592Z'
+baseline_sha256: 4221c0e6f7cc1fe06325a40b7d69fc31823ceaab153637a9649e95a98398d9d6
+spec_approved: true
+spec_approved_at: '2026-10-13T02:58:56.446Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)（7.7s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013025931\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（13.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013025931\test-result.json｜门文件
+  3 个
+

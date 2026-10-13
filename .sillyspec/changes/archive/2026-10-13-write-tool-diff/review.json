@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-write-tool-diff",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "757aad15b51c9a47acc9ce4bb23c680a88d6742e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "session-log-assembler 配对处注释已因本变更前提失准（『仅 Edit tool_result 行携带』）",
+      "evidence": "本变更的设计前提与实证是 structuredPatch 对 Write 覆盖写同样携带（抓取链 sdk_pipeline.py L321-332 本就工具名无关），但装配器配对写入处的旧注释仍写『仅 Edit tool_result 行携带；undefined 不影响其他工具』，与 design.md 做法概述矛盾，误导后续维护（CLAUDE.md 规则 18：注释与实现不一致是万恶之源）。非本 diff 文件，留待后续变更顺手修正即可。",
+      "location": "frontend/src/components/daemon/session-log-assembler.ts:1539-1540"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 绑定用例名声称『新侧行号自 1 起计』但未断言行号渲染",
+      "evidence": "『无 editPatch：整文件按新增行全绿展示（新侧行号自 1 起计）+ 复制内容按钮』用例只断言行底 bg-emerald-500/10、标题「写入内容（2 行）」与复制按钮，未断言 newNo=1/2 的行号列；实现正确（tool-args-detail.tsx L306-310 newNo: idx+1），仅断言弱于用例命名，行号护栏缺一块（有 patch 路径的行号由 parseStructuredPatch 组 toEqual 覆盖，无 patch 回退路径无行号断言）。",
+      "location": "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx:224-238"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——渲染只读装配产物 segment.editPatch 单字段，parseStructuredPatch 非法 JSON/空数组/形状不符均返回 null（tool-args-detail.tsx L194-239，有单测 L156-157 断言）→ 全绿回退不崩；位置配对为装配器既有规则，本 diff 未触碰、未引入新风险面",
+    "并发": "n/a——纯渲染层属实：WriteArgsDetail 为无状态函数组件（无 useState/useEffect/无 I/O 写面），与 design 作答一致",
+    "切换": "ok——ToolExpandBody 仅在 open 时条件挂载（turn-segment-views.tsx L678-681），WriteArgsDetail 无跨渲染持久状态；slim 回填路径 effectiveSegment.raw 替换后同一条渲染逻辑（L589-595），回填 effect 有 cancelled 清理（L583-585）",
+    "作用域": "ok——diff 仅 tool-args-detail.tsx 单文件 + 两测试文件；editPatch 按段携带随段消亡；agent-log/tool-renderers.tsx（变更运行日志视图）确未改动，与 design 声明的范围外一致",
+    "边界裁决": "边界已裁决：可接受×3——(1) 无 patch 覆盖写整文件全绿视觉似新建：展示内容真实（这些行确被写入），标题只称「写入内容（N 行）」不称「新增文件」，复制按钮兜底完整原文，主场景 claude 会话覆盖写必有 patch 不受影响，属 UI 框定不完整而非数据正确性风险；(2) DiffView 2000 行截断展示/复制恒完整：显式护栏 + 复制兜底，与 FR-02 明文一致；(3) DiffView 截断提示文案中性化（无测试断言）：纯文案且新文案对 Edit/Write 两分支均准确"
+  },
+  "reviewedAt": "2026-10-13T11:08:33+08:00"
+}

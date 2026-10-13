@@ -1763,3 +1763,66 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-atomic-caret
   status: active
+
+## FR-auto-frontend-190 Write 工具展开区在有 edit_patch（structuredPatch）时渲染红删绿增 DiffView，与 Edit 分支同管线
+变更：2026-10-13-write-tool-diff
+状态：active
+摘要：覆盖写真实 diff
+场景正文：
+- 场景：覆盖写真实 diff — Given 一条带合法 editPatch 的 Write 工具段（覆盖已有文件）；When 用户展开该工具卡；Then 删除行红底（仅旧侧行号）、新增行绿底（仅新侧行号），标题含「变更对比」，且保留复制完整原文按钮
+全文：.sillyspec/changes/archive/2026-10-13-write-tool-diff/requirements.md#FR-01
+最近确认：757aad15b51c9a47acc9ce4bb23c680a88d6742e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-write-tool-diff:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「有 editPatch：structuredPatch 红删绿增渲染（覆盖写真实 diff），标题含「变更对比」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-write-tool-diff
+  status: active
+
+## FR-auto-frontend-191 无 edit_patch 时整文件按新增行全绿展示，保留复制内容按钮
+变更：2026-10-13-write-tool-diff
+状态：active
+摘要：新建文件全绿展示
+场景正文：
+- 场景：新建文件全绿展示 — Given 无 editPatch 的 Write 工具段（新建文件或非 claude provider）；When 用户展开该工具卡；Then 内容行全部绿底 add 展示、标题「写入内容（N 行）」、复制按钮复制完整原文；超 2000 行时 DiffView 截断护栏生效且复制仍完整
+全文：.sillyspec/changes/archive/2026-10-13-write-tool-diff/requirements.md#FR-02
+最近确认：757aad15b51c9a47acc9ce4bb23c680a88d6742e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-write-tool-diff:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「无 editPatch：整文件按新增行全绿展示（新侧行号自 1 起计）+ 复制内容按钮」 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「Write 超长内容：diff 行 2000 行截断护栏（DiffView 复用），复制仍带完整原文」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-write-tool-diff
+  status: active
+
+## FR-auto-frontend-192 相关前端测试通过，不改动 Edit 分支现有行为
+变更：2026-10-13-write-tool-diff
+状态：active
+摘要：Edit 接线回归
+场景正文：
+- 场景：Edit 接线回归 — Given 既有 tool-args-detail / turn-segment-views 测试套件；When 跑这两个文件的全部用例；Then 全绿——Edit 既有用例零改动通过，Write 用例按新契约通过，`pnpm typecheck` 零错误
+全文：.sillyspec/changes/archive/2026-10-13-write-tool-diff/requirements.md#FR-03
+最近确认：757aad15b51c9a47acc9ce4bb23c680a88d6742e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-write-tool-diff:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx「parseStructuredPatch」组 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「Edit 展开渲染行级 diff：红底 - 旧行 / 绿底 + 新行 + 双侧行号列，不再是两个裸代码块」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-write-tool-diff
+  status: active

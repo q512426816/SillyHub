@@ -1,0 +1,11 @@
+{"ts":1791859898405,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791860158787,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791860158787,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1791860178878,"kind":"commit","stage":null,"detail":"757aad15b","provisional":true}
+{"ts":1791860281068,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791860304376,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791860373554,"kind":"gate-run","stage":"verify","detail":"门实测 passed（7.7s） · 20261013025931","provisional":true}
+{"ts":1791860604260,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/hooks/use-session-tasks.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791860856679,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/hooks/use-session-tasks.ts、rontend/src/components/daemon/turn-segment-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791860966971,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/subagent-detail-panel.tsx.tmp.26348.ea2e9f48b9b2——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791860970571,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/turn-segment-views.tsx、rontend/src/components/daemon/subagent-detail-panel.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
