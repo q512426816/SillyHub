@@ -1412,7 +1412,13 @@ export function applyLogToSegments(
   //    2026-10-13-slim-subagent-false-running / FR-02：slim 截残行解析不出
   //    tool_use_id 时回退采用回传 toolUseId（合并键与段 id 必须同源，否则拆两段）。
   const parsedTool = seg.kind === "tool_use" ? parseToolUseRaw(seg.text) : null;
-  const resolvedToolUseId = parsedTool?.toolUseId ?? nonEmptyString(input.toolUseId);
+  // 回退键收窄到 tool_use 段型（评审 P3 加固）：后端仅对截断 tool_call 行置
+  // toolUseId，非 tool_use 输入携带该字段属异常形态——若放行会在步骤 1 摘走
+  // stub 而 children 无处回挂（拆两段丢归属）。
+  const resolvedToolUseId =
+    seg.kind === "tool_use"
+      ? (parsedTool?.toolUseId ?? nonEmptyString(input.toolUseId))
+      : null;
   let adoptedChildren: TurnSegment[] = [];
   let adoptedSubagentType: string | null = null;
   if (resolvedToolUseId) {

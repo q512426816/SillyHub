@@ -188,6 +188,26 @@ describe("collectSubagents 元数据驱动分叉（task-13 / FR-07）", () => {
       ["sa_fg_done", "done"], // 原推导：result 配对即 done
     ]);
   });
+
+  it("孤儿 stub（orphaned）目录面同显 stopped 灰态；实时暂态 stub 仍 running（2026-10-13-slim-subagent-false-running / FR-04 评审 P1）", () => {
+    const orphaned: TurnSegment = {
+      kind: "subagent_stub",
+      id: "tu_orphan",
+      subagentType: "Explore",
+      children: [makeTextSeg("text:orphan")],
+      orphaned: true,
+    };
+    const sa = deriveTurnActivity([orphaned]).subagents[0];
+    expect(sa?.status).toBe("stopped"); // 目录/状态条不再假「运行中」
+
+    const live: TurnSegment = {
+      kind: "subagent_stub",
+      id: "tu_live",
+      subagentType: "Explore",
+      children: [makeTextSeg("text:live")],
+    };
+    expect(deriveTurnActivity([live]).subagents[0]?.status).toBe("running"); // 零变化
+  });
 });
 
 /* ───────── 2. SubagentCatalog 行渲染口径（走秒 / 终态时长） ───────── */

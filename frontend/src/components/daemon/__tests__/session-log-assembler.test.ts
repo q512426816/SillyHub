@@ -1664,3 +1664,17 @@ describe("历史批量孤儿 stub 标记（2026-10-13-slim-subagent-false-runnin
     expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
   });
 });
+
+describe("回退键收窄 tool_use 段型（2026-10-13-slim-subagent-false-running 评审 P3 加固）", () => {
+  it("非 tool_use 行携带 toolUseId 不消费：不触发 stub 摘除（children 无处回挂的丢失路径封死）", () => {
+    const segments = logsToSegments([
+      makeLog("l1", "stdout", "子消息先到", { parentToolUseId: "call_x", subagentType: "Explore" }),
+      makeLog("l2", "stderr", "一条 stderr", { toolUseId: "call_x" }),
+    ]);
+    // stub 原样保留（被 orphaned 标记），children 未被摘走。
+    const stub = findSeg(segments, (s) => s.kind === "subagent_stub");
+    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBe(true);
+    const inner = stub && stub.kind === "subagent_stub" ? stub.children : [];
+    expect(inner.map((c) => c.kind)).toEqual(["text"]);
+  });
+});
