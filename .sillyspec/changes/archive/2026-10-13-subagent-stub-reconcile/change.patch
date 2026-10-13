@@ -1,0 +1,3491 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 82b65328c..686d1be00 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -32,3 +32,4 @@ created_at: 2026-08-30 22:23:33
+ - 2026-09-20-agent-reply-no-bubble | 会话时间线 agent 回复去气泡（用户气泡保留）——方案 B 容器语义重构：TextSegmentView 容器（turn-segment-views.tsx）与旧数据回退答复容器（turn-timeline.tsx）统一换无框类 .seg-text-body（无边框/底色/阴影/内边距，max-w min(100%,48rem) 阅读限宽；旧路径不取 w-full 保行尾时间戳尾随语义）；删 SEGMENT_ANIMATION_CSS 子代理透明化补丁（去气泡后天然无框）；globals.css mobile 规则迁新类名（仅字号 14px/行高 24px，不带 max-width 防压 48rem 限宽），.turn-bubble 自此仅用户气泡持有。全流程 verify PASS WITH NOTES：vitest 174（turn-segment-views 72 含新增无框形态用例+session-panel-dialog+sessions page 40）、tsc 0 错、全仓 grep seg-text-bubble 零残留；移交 3 项视觉终验（旧数据回退分支目验/mobile 观感/限宽与段间距）
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
++- 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 1397ecaa0..96e9354c8 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -65,3 +65,4 @@
+ - change 2026-09-25-change-precipitated-assets | 变更详情「沉淀资产」折叠卡：NEW change-assets-card.tsx（ChangeEventsCard 同款范式——useQuery 自取数/retry:false/失败静默 null；四组逐组有数据才渲染：FR 索引/决策蒸馏行可点击跳知识库页（?file= 前向参数）、测试绑定行、patch+delta 归档留档；在途变更引导空态）+ lib/changes.ts getChangeAssets 客户端 + [cid]/page.tsx aside 尾挂载。组件 5 用例全绿 tsc 0。
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
++- 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
+diff --git a/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+new file mode 100644
+index 000000000..035eb916f
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+@@ -0,0 +1,168 @@
++/**
++ * 2026-10-13-subagent-stub-reconcile 回归测试：
++ *   - buildSubagentTaskLookup（FR-01）：tool_use_id 索引、终态优先序、同优先序
++ *     取 updated_at 最新、无 toolUseId 行跳过；
++ *   - subagentHeaderOf 第三参对账（FR-01/02）：stub 命中终态收敛名称/徽标/时长、
++ *     未命中维持现状、tool 段三级优先（元数据 > 对账 > 段三态）、已配对结果
++ *     段不被覆盖（FR-03）。
++ *
++ * 纪律对齐既有套件：纯函数直测 + 真实段结构构造，不 mock 被测函数。
++ */
++
++import { describe, it, expect } from "vitest";
++
++import {
++  buildSubagentTaskLookup,
++  type AgentSessionTaskView,
++} from "@/hooks/use-session-tasks";
++import {
++  subagentHeaderOf,
++  type SubagentContainerSegment,
++  type SubagentReconciledTask,
++} from "../turn-segment-views";
++import type { ToolTurnSegment } from "../session-log-assembler";
++
++/* ───────── 夹具 ───────── */
++
++function row(over: Partial<AgentSessionTaskView> & { taskId: string }): AgentSessionTaskView {
++  return {
++    taskName: "默认任务名",
++    status: "running",
++    progress: null,
++    message: null,
++    isAsync: true,
++    lastToolName: null,
++    summary: null,
++    elapsedMs: null,
++    elapsedSyncedAt: null,
++    startedAt: null,
++    lastActivityAt: null,
++    terminalAt: null,
++    totalTokens: null,
++    toolUses: null,
++    ...over,
++  } as AgentSessionTaskView;
++}
++
++const stubSeg: SubagentContainerSegment = {
++  kind: "subagent_stub",
++  id: "call_a",
++  subagentType: "general-purpose",
++  children: [],
++};
++
++function toolSeg(over: Partial<ToolTurnSegment>): SubagentContainerSegment {
++  return {
++    kind: "tool",
++    id: "call_t",
++    raw: '{"tool":"Task"}',
++    status: "running",
++    toolName: "Task",
++    primary: null,
++    startedAt: null,
++    endedAt: null,
++    children: [],
++    subagentType: "general-purpose",
++    ...over,
++  };
++}
++
++const reconciledCompleted: SubagentReconciledTask = {
++  taskName: "独立评审单位弹窗重排",
++  status: "completed",
++  elapsedMs: 169_000,
++};
++
++/* ── FR-01：buildSubagentTaskLookup ─────────────────────────────── */
++
++describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => {
++  it("终态优先序：completed 压过同名 tool_use_id 的 running/stopped 行", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_a", status: "running", taskName: "在途" }),
++      row({ taskId: "k2", toolUseId: "call_a", status: "stopped", taskName: "清扫影" }),
++      row({ taskId: "k3", toolUseId: "call_a", status: "completed", taskName: "真终态", elapsedMs: 1000 }),
++    ]);
++    expect(lookup.get("call_a")).toEqual({
++      taskName: "真终态",
++      status: "completed",
++      elapsedMs: 1000,
++    });
++  });
++
++  it("同优先序取 updated_at 最新；failed > stopped", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_b", status: "failed", taskName: "旧失败", updatedAt: "2026-10-13T01:00:00Z" }),
++      row({ taskId: "k2", toolUseId: "call_b", status: "failed", taskName: "新失败", updatedAt: "2026-10-13T02:00:00Z" }),
++      row({ taskId: "k3", toolUseId: "call_c", status: "stopped", taskName: "停" }),
++      row({ taskId: "k4", toolUseId: "call_c", status: "failed", taskName: "败" }),
++    ]);
++    expect(lookup.get("call_b")?.taskName).toBe("新失败");
++    expect(lookup.get("call_c")?.status).toBe("failed");
++  });
++
++  it("无 toolUseId 的行跳过（无关联键不参账）", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: null, status: "completed", taskName: "x" }),
++      row({ taskId: "k2", status: "completed", taskName: "y" }),
++    ]);
++    expect(lookup.size).toBe(0);
++  });
++});
++
++/* ── FR-01/02：subagentHeaderOf 对账 ────────────────────────────── */
++
++describe("subagentHeaderOf 对账（FR-01：stub 命中终态收敛）", () => {
++  it("stub 命中 completed → 名称=快照 task_name、徽标「已完成」、权威时长、非 running", () => {
++    const h = subagentHeaderOf(stubSeg, 0, reconciledCompleted);
++    expect(h.name).toBe("独立评审单位弹窗重排");
++    expect(h.status).toBe("completed");
++    expect(h.running).toBe(false);
++    expect(h.badge?.label).toBe("已完成");
++    expect(h.durationText).toBe("02:49"); // 169000ms → mm:ss 权威时长
++    expect(h.dotCls).not.toContain("animate-pulse");
++  });
++
++  it("stub 未命中 → 维持现状（名称=subagentType、durationText=运行中）", () => {
++    const h = subagentHeaderOf(stubSeg, 0, null);
++    expect(h.name).toBe("general-purpose");
++    expect(h.status).toBe("running");
++    expect(h.durationText).toBe("运行中");
++    expect(h.badge).toBeNull();
++  });
++
++  it("stub 命中 failed / stopped → 徽标与状态点随行", () => {
++    const failed = subagentHeaderOf(stubSeg, 0, { taskName: "x", status: "failed", elapsedMs: null });
++    expect(failed.status).toBe("failed");
++    expect(failed.badge?.label).toBe("失败");
++    expect(failed.dotCls).toContain("bg-destructive");
++    expect(failed.durationText).toBeNull(); // 无 elapsed 不伪造
++    const stopped = subagentHeaderOf(stubSeg, 0, { taskName: "y", status: "stopped", elapsedMs: 60_000 });
++    expect(stopped.badge?.label).toBe("已停止");
++    expect(stopped.durationText).toBe("01:00");
++  });
++
++  it("FR-03：带 [TASK_*] 元数据的 tool 段元数据优先，对账不覆盖", () => {
++    const seg = toolSeg({ id: "call_a", taskStatus: "running", taskAsync: true, startedAt: 1000 });
++    const h = subagentHeaderOf(seg, 5000, reconciledCompleted);
++    expect(h.metaStatus).toBe("running");
++    expect(h.status).toBe("running"); // 元数据权威——对账 completed 不抢
++    expect(h.badge?.label).toBe("后台运行中");
++  });
++
++  it("FR-01：无元数据且 running 的 tool 段对账收敛（窗口截断形态）", () => {
++    const seg = toolSeg({ id: "call_t", primary: null });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("completed");
++    expect(h.name).toBe("独立评审单位弹窗重排"); // primary 空 → 快照名
++    expect(h.badge?.label).toBe("已完成");
++  });
++
++  it("FR-03：已配对结果段（ok）不被对账覆盖，徽标不渲染", () => {
++    const seg = toolSeg({ id: "call_a", status: "ok", startedAt: 0, endedAt: 8000, primary: "已有结果" });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("ok");
++    expect(h.badge).toBeNull(); // 段三态胜出——metaStatus/reconciledStatus 均空
++    expect(h.name).toBe("已有结果"); // primary 优先
++    expect(h.durationText).toBe("00:08"); // 原起止时长路径（mm:ss 格式）
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx b/frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx
+index 9f9d31438..1d786c5a5 100644
+--- a/frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx
++++ b/frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx
+@@ -230,6 +230,9 @@ describe("ToolExpandBody Write 展开 diff（2026-10-13-write-tool-diff）", ()
+     const row2 = screen.getByText("line-2").closest("div.flex");
+     expect(row1?.className).toContain("bg-emerald-500/10");
+     expect(row2?.className).toContain("bg-emerald-500/10");
++    // 新侧行号列自 1 起计（行内第 2 列 span = newNo；旧侧恒空）
++    expect(row1?.children[1]?.textContent).toBe("1");
++    expect(row2?.children[1]?.textContent).toBe("2");
+     expect(screen.getByText(/写入内容（2 行）/)).toBeTruthy();
+     expect(screen.getByText("复制内容")).toBeTruthy();
+     cleanup();
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index 6705f690e..6c58af0c4 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -473,8 +473,9 @@ export interface AssemblerLogInput {
+    *  tool_call 行经 classifySessionLog 第三参优先映射为 file 段。 */
+   toolKind?: string | null;
+   /** ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（backend 落库透传，
+-   *  hunks 含真实文件行号）。仅 Edit tool_result 行携带；配对时写到 tool 段
+-   *  editPatch，展开区优先于 LCS 自算。 */
++   *  hunks 含真实文件行号）。抓取链不限工具名（2026-10-13-write-tool-diff 实证：
++   *  Edit 与 Write 覆盖写均携带）；配对时写到 tool 段 editPatch，展开区优先于
++   *  LCS 自算。 */
+   editPatch?: string | null;
+   /**
+    * 2026-09-27-session-fast-replay task-04 / FR-07：slim 截断标记（历史日志
+@@ -1541,8 +1542,8 @@ export function applyLogToSegments(
+               {
+                 ...t,
+                 result: seg.text,
+-                // ql-20260824-020：structuredPatch 随配对写入（仅 Edit tool_result
+-                // 行携带；undefined 不影响其他工具）。
++                // ql-20260824-020：structuredPatch 随配对写入（抓取链不限工具名，
++                // Edit 与 Write 覆盖写均携带；undefined 不影响其他工具）。
+                 editPatch: input.editPatch ?? undefined,
+                 // result 拒绝优先覆盖 use 的 success（daemon success 恒 true 不可信，
+                 // isToolResultDenied 注）；仅 running（success 未解析出）时兜底 ok。
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 343ce51de..e6a367a08 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -125,6 +125,9 @@ import {
+ import { useStreamConnectionGuard } from "./use-stream-connection-guard";
+ import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
+ import { applyAgentTaskStatusEvent } from "../agent-task-store";
++// 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
++import { buildSubagentTaskLookup, useSessionTasks } from "@/hooks/use-session-tasks";
++import { SubagentTaskLookupContext } from "../turn-segment-views";
+ import {
+   deriveMachineMeta, derivePreMachineLabels, derivePreSessionChrome,
+   deriveSessionPlaceholder, deriveSessionStatusFlags, deriveStatusBadge,
+@@ -762,6 +765,16 @@ export function SessionPanelPage({
+   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
+   const [usageRefresh, setUsageRefresh] = useState(0);
++  // 2026-10-13-subagent-stub-reconcile（FR-01/02）：页面级任务快照对账实例——
++  // 与 TaskExecutionPanel 内部实例相互独立（本实例不消费 SSE 事件，只供时间线
++  // 子代理容器头按 tool_use_id 对账；usageRefresh 同信号，SSE 重连/轮终态重拉）。
++  const subagentReconcileSource = useSessionTasks(session?.id ?? "", {
++    refreshSignal: usageRefresh,
++  });
++  const subagentTaskLookup = useMemo(
++    () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
++    [subagentReconcileSource.tasks],
++  );
+   // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
+   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
+   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
+@@ -4190,6 +4203,7 @@ export function SessionPanelPage({
+         jumpHeadLoading,
+         onJumpToHead: handleJumpToHead,
+       })}
++      <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
+       <TurnTimeline
+         suppressFollowBottom={jumpFollowSuppress}
+         turns={dialogTurns}
+@@ -4233,6 +4247,7 @@ export function SessionPanelPage({
+           schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null
+         }
+       />
++      </SubagentTaskLookupContext.Provider>
+     </>
+   );
+ 
+@@ -5385,10 +5400,12 @@ export function SessionPanelPage({
+         data-testid="subagent-panel-column"
+       >
+         {subagentPanelOpen ? (
+-          <SubagentDetailPanel
+-            segment={openSubagentSegment}
+-            onClose={handleSubagentPanelClose}
+-          />
++          <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
++            <SubagentDetailPanel
++              segment={openSubagentSegment}
++              onClose={handleSubagentPanelClose}
++            />
++          </SubagentTaskLookupContext.Provider>
+         ) : (
+           detailColumn
+         )}
+@@ -5421,10 +5438,12 @@ export function SessionPanelPage({
+         rootClassName="session-subagent-drawer-root"
+         styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
+       >
+-        <SubagentDetailPanel
+-          segment={openSubagentSegment}
+-          onClose={closeSubagentSlot}
+-        />
++        <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
++          <SubagentDetailPanel
++            segment={openSubagentSegment}
++            onClose={closeSubagentSlot}
++          />
++        </SubagentTaskLookupContext.Provider>
+       </Drawer>
+     ) : null;
+   return withSlimLogFull(
+diff --git a/frontend/src/components/daemon/subagent-detail-panel.tsx b/frontend/src/components/daemon/subagent-detail-panel.tsx
+index 885695848..5cc2732a1 100644
+--- a/frontend/src/components/daemon/subagent-detail-panel.tsx
++++ b/frontend/src/components/daemon/subagent-detail-panel.tsx
+@@ -22,8 +22,9 @@
+  *   自动关闭（design §5.E），本组件契约 segment 恒非 null。
+  */
+ 
+-import { memo, useEffect, useState } from "react";
++import { memo, useContext, useEffect, useState } from "react";
+ import { X } from "lucide-react";
++import { SubagentTaskLookupContext } from "./turn-segment-views";
+ import { Button } from "antd";
+ 
+ import { SegmentView, subagentHeaderOf } from "@/components/daemon/turn-segment-views";
+@@ -57,8 +58,17 @@ export const SubagentDetailPanel = memo(function SubagentDetailPanel({
+     return () => window.clearInterval(id);
+   }, [asyncRunning]);
+ 
+-  // 头部派生共享纯函数（design §5.E：与 SubagentBlockView 头部一处派生）。
+-  const header = subagentHeaderOf(segment, now);
++  // 头部派生共享纯函数（design §5.E：与 SubagentBlockView 头部一处派生）；
++  // 2026-10-13-subagent-stub-reconcile：按 tool_use_id 对账任务快照（context
++  // 由 session-panel 页面级 Provider 下发），窗口截断 stub 收敛名称/徽标/时长。
++  const taskLookup = useContext(SubagentTaskLookupContext);
++  const reconciledRaw = taskLookup?.get(segment.id) ?? null;
++  const reconciled =
++    reconciledRaw &&
++    (segment.kind === "subagent_stub" || segment.status === "running")
++      ? reconciledRaw
++      : null;
++  const header = subagentHeaderOf(segment, now, reconciled);
+ 
+   // 用户验收返工（2026-09-15）：初始化提示词——派发 tool_call JSON 的 args.prompt
+   // 全文。children 只含子代理侧日志，派发指令本体在父级 tool 段 raw 里，不提取
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 2d0f660b3..718d574c3 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -1,1492 +1,1545 @@
+-"use client";
+-
+-/**
+- * task-05（2026-08-19-session-stream-ux / FR-01 / FR-03 / FR-06 / D-003@v1）：
+- * 段渲染组件族——消费 session-log-assembler（task-01）的 TurnSegment 结构化段
+- * 模型，按 prototype-session-stream.html 视觉基准（D-003）渲染五类段：
+- *
+- *   - TextSegmentView   文本段无框正文（MarkdownText + streaming 尾部闪烁光标；
+- *                       task-11：正文右下角 hover 浮出 CopyButton 复制 segment.text）
+- *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
+- *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
+- *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
+- *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
+- *                       turn-timeline parseToolRaw 的 copyText 规则；
+- *                       task-12：团队 MCP 工具（dispatch_worker 等 5 个）泛化微调
+- *                       ——短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要；
+- *                       ql-20260824-018/019：展开区内容整体收编到
+- *                       tool-args-detail 的 ToolExpandBody（Write 内容预览 / Edit
+- *                       行级 diff 行号+红绿高亮 / Bash 纯文本输出 / Grep 命中数 /
+- *                       Agent Prompt / 通用参数 JSON 兜底），下方接工具 result）
+- *   - SubagentBlockView 子代理嵌套块（头部状态点/名称/类型/时长 + children 递归
+- *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
+- *                       兜底段复用同组件；task-13：段带 [TASK_*] 元数据（async 后台
+- *                       派发）时块头改状态徽标「后台运行中+走秒 / 已完成(真实时长) /
+- *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终；
+- *                       2026-09-15-subagent-three-pane-display task-01：消费
+- *                       SubagentPanelContext（page 模式 Provider）时改紧凑卡片——
+- *                       只显头部行、children 移右栏、点击 toggle 面板；无 context
+- *                       （dialog 等旧宿主）保持原内联展开零回归）
+- *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
+- *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
+- *                       brand 折叠卡——角色/目标工作区徽标/状态/耗时 + children
+- *                       日志产物；dispatch_worker tool 段在 SegmentView 升级路由到此）
+- *   - file 段 → FileMessageCard（task-08 / 2026-08-23-agent-file-upload-mcp FR-01 /
+- *                       D-001@v1：agent 上传文件卡片——图片缩略图 / 通用文件卡两
+- *                       形态；本文件只包一层「agent 上传了文件」标注，卡片本体在
+- *                       daemon/file-message-card.tsx）
+- *   - SegmentView       统一入口分发器（按 kind 分发；tool 段有 children 时升级为
+- *                       子代理块渲染；dispatch_worker 团队工具升级为分身段块）
+- *   - TurnForkEntry     轮头「⑂ 从此分叉」入口（2026-09-22-session-fork-continuation
+- *                       task-07 / FR-01：caps≠none / 终态轮 / native 锚点缺失三重
+- *                       门控，纯展示 props 驱动零请求，点击回调上抛挂载方）
+- *
+- * 渲染经济性（FR-06 / R-03）：全部组件 React.memo（默认浅比较）——装配器
+- * path-copy 保证未触及段引用稳定，流式 delta 只重渲染当前段；列表层以段 id 为
+- * 稳定 key（消费方 task-06 负责 map）；折叠内容按需挂载（默认折叠不渲染重内容）。
+- *
+- * 约束（task-05 constraints）：纯展示组件只消费 segment props，不读 SSE /
+- * store / 本地时钟（运行中段不显示实时秒数——live 计时归 task-07/08 状态条）；
+- * 不用 antd；动画走 CSS 类；颜色走 tailwind 项目 token / CSS 变量，不硬编码 hex。
+- *
+- * 动画实现说明：原型 keyframes（sweep 1.8s 扫动 / blink 0.9s step-end 光标）项目
+- * tailwind.config 与 globals.css 均未定义且不在本卡允许路径内，故本文件自包含注入
+- * （ensureSegmentAnimations：文档级幂等 <style>，见下）。类名固定为 seg-sweep /
+- * seg-caret，供 task-12 断言「扫动动画类名到位」。
+- *
+- * 与原型的一处已知偏差（备注）：
+- *   1. 流式光标落在正文块末尾的下一行行首——MarkdownText 是块级容器，无法把
+- *      inline 光标拼进 markdown 正文尾（sanitize 会剥注入的 HTML）；原型为 inline。
+- *      （原偏差 2「子代理块内文本段去气泡底色（.seg-subagent-body 父级选择器
+- *      覆盖）」已消除：2026-09-20-agent-reply-no-bubble 起文本段整体改无框正文
+- *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
+- */
+-
+-import { Children, memo, useEffect, useRef, useState } from "react";
+-import type { ReactNode } from "react";
+-
+-import { MarkdownText } from "@/components/ui/markdown-text";
+-import { CopyButton } from "@/components/daemon/copy-button";
+-import { FileMessageCard } from "@/components/daemon/file-message-card";
+-import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
+-import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
+-// ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
+-// 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
+-import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+-import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
+-import type {
+-  StubTurnSegment,
+-  ToolTurnSegment,
+-  TurnSegment,
+-} from "@/components/daemon/session-log-assembler";
+-import { getProviderCaps } from "@/lib/provider-caps";
+-import type { ProviderCaps } from "@/lib/provider-caps";
+-import { workspaceTypeBadge } from "@/lib/workspace-types";
+-import { cn } from "@/lib/utils";
++"use client";
++
++/**
++ * task-05（2026-08-19-session-stream-ux / FR-01 / FR-03 / FR-06 / D-003@v1）：
++ * 段渲染组件族——消费 session-log-assembler（task-01）的 TurnSegment 结构化段
++ * 模型，按 prototype-session-stream.html 视觉基准（D-003）渲染五类段：
++ *
++ *   - TextSegmentView   文本段无框正文（MarkdownText + streaming 尾部闪烁光标；
++ *                       task-11：正文右下角 hover 浮出 CopyButton 复制 segment.text）
++ *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
++ *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
++ *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
++ *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
++ *                       turn-timeline parseToolRaw 的 copyText 规则；
++ *                       task-12：团队 MCP 工具（dispatch_worker 等 5 个）泛化微调
++ *                       ——短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要；
++ *                       ql-20260824-018/019：展开区内容整体收编到
++ *                       tool-args-detail 的 ToolExpandBody（Write 内容预览 / Edit
++ *                       行级 diff 行号+红绿高亮 / Bash 纯文本输出 / Grep 命中数 /
++ *                       Agent Prompt / 通用参数 JSON 兜底），下方接工具 result）
++ *   - SubagentBlockView 子代理嵌套块（头部状态点/名称/类型/时长 + children 递归
++ *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
++ *                       兜底段复用同组件；task-13：段带 [TASK_*] 元数据（async 后台
++ *                       派发）时块头改状态徽标「后台运行中+走秒 / 已完成(真实时长) /
++ *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终；
++ *                       2026-09-15-subagent-three-pane-display task-01：消费
++ *                       SubagentPanelContext（page 模式 Provider）时改紧凑卡片——
++ *                       只显头部行、children 移右栏、点击 toggle 面板；无 context
++ *                       （dialog 等旧宿主）保持原内联展开零回归）
++ *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
++ *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
++ *                       brand 折叠卡——角色/目标工作区徽标/状态/耗时 + children
++ *                       日志产物；dispatch_worker tool 段在 SegmentView 升级路由到此）
++ *   - file 段 → FileMessageCard（task-08 / 2026-08-23-agent-file-upload-mcp FR-01 /
++ *                       D-001@v1：agent 上传文件卡片——图片缩略图 / 通用文件卡两
++ *                       形态；本文件只包一层「agent 上传了文件」标注，卡片本体在
++ *                       daemon/file-message-card.tsx）
++ *   - SegmentView       统一入口分发器（按 kind 分发；tool 段有 children 时升级为
++ *                       子代理块渲染；dispatch_worker 团队工具升级为分身段块）
++ *   - TurnForkEntry     轮头「⑂ 从此分叉」入口（2026-09-22-session-fork-continuation
++ *                       task-07 / FR-01：caps≠none / 终态轮 / native 锚点缺失三重
++ *                       门控，纯展示 props 驱动零请求，点击回调上抛挂载方）
++ *
++ * 渲染经济性（FR-06 / R-03）：全部组件 React.memo（默认浅比较）——装配器
++ * path-copy 保证未触及段引用稳定，流式 delta 只重渲染当前段；列表层以段 id 为
++ * 稳定 key（消费方 task-06 负责 map）；折叠内容按需挂载（默认折叠不渲染重内容）。
++ *
++ * 约束（task-05 constraints）：纯展示组件只消费 segment props，不读 SSE /
++ * store / 本地时钟（运行中段不显示实时秒数——live 计时归 task-07/08 状态条）；
++ * 不用 antd；动画走 CSS 类；颜色走 tailwind 项目 token / CSS 变量，不硬编码 hex。
++ *
++ * 动画实现说明：原型 keyframes（sweep 1.8s 扫动 / blink 0.9s step-end 光标）项目
++ * tailwind.config 与 globals.css 均未定义且不在本卡允许路径内，故本文件自包含注入
++ * （ensureSegmentAnimations：文档级幂等 <style>，见下）。类名固定为 seg-sweep /
++ * seg-caret，供 task-12 断言「扫动动画类名到位」。
++ *
++ * 与原型的一处已知偏差（备注）：
++ *   1. 流式光标落在正文块末尾的下一行行首——MarkdownText 是块级容器，无法把
++ *      inline 光标拼进 markdown 正文尾（sanitize 会剥注入的 HTML）；原型为 inline。
++ *      （原偏差 2「子代理块内文本段去气泡底色（.seg-subagent-body 父级选择器
++ *      覆盖）」已消除：2026-09-20-agent-reply-no-bubble 起文本段整体改无框正文
++ *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
++ */
++
++import { Children, createContext, memo, useContext, useEffect, useRef, useState } from "react";
++import type { ReactNode } from "react";
++
++import { MarkdownText } from "@/components/ui/markdown-text";
++import { CopyButton } from "@/components/daemon/copy-button";
++import { FileMessageCard } from "@/components/daemon/file-message-card";
++import { useSubagentPanel } from "@/components/daemon/subagent-panel-context";
++import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
++// ql-20260920-006：user_msg 段文本剥附件标记行（页内 import 惯例——turn-timeline
++// 同源引用 runtime-session-helpers 的既有 util，此处沿用）。
++import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
++import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-tag";
++import type {
++  StubTurnSegment,
++  ToolTurnSegment,
++  TurnSegment,
++} from "@/components/daemon/session-log-assembler";
++import { getProviderCaps } from "@/lib/provider-caps";
++import type { ProviderCaps } from "@/lib/provider-caps";
++import { workspaceTypeBadge } from "@/lib/workspace-types";
++import { cn } from "@/lib/utils";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+-
+-/* ───────────────── 段动画 keyframes（自包含注入，见文件头说明） ───────────────── */
+-
+-/**
+- * 原型动画 CSS：sweep 1.8s 无限扫动（工具行 / 子代理头部运行中覆盖层）+
+- * caret 0.9s step-end 闪烁（文本段流式光标）。颜色取 --primary CSS 变量
+- * （shadcn token，hsl 数值格式），不硬编码 hex。prefers-reduced-motion 时关闭。
+- */
+-const SEGMENT_ANIMATION_CSS = `
+-@keyframes seg-sweep {
+-  0% { transform: translateX(-100%); }
+-  100% { transform: translateX(100%); }
+-}
+-@keyframes seg-caret-blink {
+-  0%, 100% { opacity: 1; }
+-  50% { opacity: 0; }
+-}
+-.seg-sweep::after {
+-  content: "";
+-  position: absolute;
+-  inset: 0;
+-  pointer-events: none;
+-  background: linear-gradient(100deg, transparent 30%, hsl(var(--primary) / 0.16) 50%, transparent 70%);
+-  animation: seg-sweep 1.8s infinite;
+-}
+-.seg-caret {
+-  animation: seg-caret-blink 0.9s step-end infinite;
+-}
+-@media (prefers-reduced-motion: reduce) {
+-  .seg-sweep::after,
+-  .seg-caret {
+-    animation: none;
+-  }
+-}
+-`;
+-
+-const SEGMENT_ANIMATION_STYLE_ID = "turn-segment-views-animations";
+-let segmentAnimationsInjected = false;
+-
+-/**
+- * 文档级幂等注入段动画 keyframes（SSR 安全：服务端无 document 直接跳过，
+- * 动画均在客户端水合后生效）。模块标记 + DOM id 双保险，多实例 / StrictMode
+- * 重复渲染 / 测试多文件隔离下均只注入一份。
+- */
+-function ensureSegmentAnimations(): void {
+-  if (segmentAnimationsInjected || typeof document === "undefined") return;
+-  if (!document.getElementById(SEGMENT_ANIMATION_STYLE_ID)) {
+-    const el = document.createElement("style");
+-    el.id = SEGMENT_ANIMATION_STYLE_ID;
+-    el.textContent = SEGMENT_ANIMATION_CSS;
+-    document.head.appendChild(el);
+-  }
+-  segmentAnimationsInjected = true;
+-}
+-
+-/** 需要动画 CSS 的段组件统一挂载（注入本身幂等，组件卸载不回收——文档级共享）。 */
+-function useSegmentAnimations(): void {
+-  useEffect(() => {
+-    ensureSegmentAnimations();
+-  }, []);
+-}
+-
+-/* ───────────────────── props 契约（task-06 / task-12 消费） ───────────────────── */
+-
+-/** 段类型收窄别名（assembler 只导出 tool/stub 两个，此处补齐其余四类）。 */
+-export type TextTurnSegment = Extract<TurnSegment, { kind: "text" }>;
+-export type ThinkingTurnSegment = Extract<TurnSegment, { kind: "thinking" }>;
+-export type StderrTurnSegment = Extract<TurnSegment, { kind: "stderr" }>;
+-/** 文件段（task-08 / design §7.3）：FileMessageCard 的段级数据源。 */
+-export type FileTurnSegment = Extract<TurnSegment, { kind: "file" }>;
+-/** 子代理容器段：有 children 的 tool 段 + subagent_stub 兜底段（复用同一组件）。 */
+-export type SubagentContainerSegment = ToolTurnSegment | StubTurnSegment;
+-
+-/** 统一入口 props（task-05 provides 契约：字段 [segment]）。 */
+-export interface SegmentViewProps {
+-  segment: TurnSegment;
+-}
+-
+-export interface TextSegmentViewProps {
+-  segment: TextTurnSegment;
+-}
+-export interface ThinkingRowViewProps {
+-  segment: ThinkingTurnSegment;
+-}
+-export interface ToolRowViewProps {
+-  segment: ToolTurnSegment;
+-}
+-export interface SubagentBlockViewProps {
+-  segment: SubagentContainerSegment;
+-}
+-export interface StderrRowViewProps {
+-  segment: StderrTurnSegment;
+-}
+-/** ql-20260825-011：上下文前导段（默认收起、可展开）。 */
+-export interface PreambleSegmentViewProps {
+-  segment: Extract<TurnSegment, { kind: "preamble" }>;
+-}
+-/** ql-20260917-006：上下文压缩续接摘要段（默认收起、可展开，同 preamble 展示语义）。 */
+-export interface CompactSegmentViewProps {
+-  segment: Extract<TurnSegment, { kind: "compact" }>;
+-}
+-/** ql-20260917-006：压缩过程状态段（[COMPACT_STATUS] 协议行，渲染层解析 phase）。 */
+-export interface CompactStatusRowViewProps {
+-  segment: Extract<TurnSegment, { kind: "compact_status" }>;
+-}
+-/** ql-20260920-006：轮内用户消息段（引导注入留痕，三态右对齐用户气泡）。 */
+-export interface UserMsgSegmentViewProps {
+-  segment: Extract<TurnSegment, { kind: "user_msg" }>;
+-}
+-
+-/* ───────────────────────────── 内部工具（纯函数） ───────────────────────────── */
+-
+-/** 摘要截断：空白折叠 + 60 字 + 省略号（规则平移自现有 TurnDetailsList 思考摘要）。 */
+-function summaryOf(text: string, max = 60): string {
+-  const s = text.replace(/\s+/g, " ").trim();
+-  return s.length > max ? `${s.slice(0, max)}…` : s;
+-}
+-
+-/** 工具行耗时：<10s 一位小数（0.3s），≥10s 取整（12s）——原型 t-dur 格式。 */
+-function formatToolDuration(ms: number): string {
+-  const s = Math.max(0, ms) / 1000;
+-  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+-}
+-
+-/** 子代理块时长：mm:ss（01:24，分钟可 >59）——原型 sa-dur 格式。 */
+-function formatClockDuration(ms: number): string {
+-  const total = Math.max(0, Math.round(ms / 1000));
+-  const p = (n: number) => String(n).padStart(2, "0");
+-  return `${p(Math.floor(total / 60))}:${p(total % 60)}`;
+-}
+-
+-/**
+- * 复制文本提取——规则平移自 turn-timeline parseToolRaw 的 copyText 分支
+- * （design §12 解析规则平移不重造；parseToolRaw 未导出且 assembler 的
+- * parseToolUseRaw 是私有函数，本地实现精简版，只用复制语义）：
+- * Bash→command；Write/Edit/Read→file_path（有 content 则附带）；Agent→
+- * description??prompt；通用→完整 args JSON。解析失败（非 JSON，R-07）/ raw
+- * 空串（孤儿 result）→ null（不渲染复制按钮）。
+- */
+-function toolCopyText(raw: string, toolName: string | null): string | null {
+-  if (!raw) return null;
+-  try {
+-    const obj = JSON.parse(raw.trim()) as { args?: unknown } | null;
+-    if (!obj || typeof obj !== "object") return null;
+-    const args = (obj.args && typeof obj.args === "object" ? obj.args : {}) as Record<
+-      string,
+-      unknown
+-    >;
+-    const str = (v: unknown) => (typeof v === "string" ? v : null);
+-    if (toolName === "Bash") return str(args.command) ?? null;
+-    if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
+-      const fp = str(args.file_path) ?? "";
+-      const content = str(args.content);
+-      return content ? `${fp}\n\n${content}` : fp || null;
+-    }
+-    if (toolName === "Agent") return str(args.description) ?? str(args.prompt) ?? null;
+-    return JSON.stringify(args, null, 2);
+-  } catch {
+-    return null;
+-  }
+-}
+-
+-/** 工具行图标——原型 t-icon 语义映射（未列工具统一 🔧 扳手，同现有 Wrench 语义）。 */
+-const TOOL_ICON: Record<string, string> = {
+-  Read: "📂",
+-  Write: "🎨",
+-  Edit: "✏️",
+-  Grep: "🔧",
+-  Glob: "🔧",
+-  Bash: "💻",
+-  Task: "🤖",
+-  Agent: "🤖",
+-};
+-
+-function toolIconOf(toolName: string | null): string {
+-  return (toolName && TOOL_ICON[toolName]) || "🔧";
+-}
+-
+-
+-/** 工具状态徽章元数据（图标/颜色/提示文案平移现有 ToolEventCard）。 */
+-const TOOL_STATUS_META: Record<
+-  ToolTurnSegment["status"],
+-  { icon: string; cls: string; title: string }
+-> = {
+-  ok: { icon: "✓", cls: "text-emerald-600", title: "执行成功" },
+-  deny: { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" },
+-  running: { icon: "⏳", cls: "text-brand-600", title: "执行中" },
+-};
+-
+-/**
+- * 子代理块状态：tool 段取自身 status；stub 段无状态字段——它是 tool_use 段
+- * 尚未到达（或永不到达）的临时容器，子消息仍在流入，视为 running（后续合并
+- * 迁入 tool 段后由其 status 接管，design §9.5）。
+- */
+-function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "deny" {
+-  return segment.kind === "subagent_stub" ? "running" : segment.status;
+-}
+-
+-/* ───────── task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）───────── */
+-
+-/** [TASK_*] 任务状态（tool 段 taskStatus 元数据，task-11 装配）。 */
+-type SubagentTaskStatus = "running" | "completed" | "failed" | "stopped";
+-
+-/**
+- * 块头状态徽标（原型 .st 药丸：bg-running=brand 阶 / done=绿 / 失败=红 / 停止=灰；
+- * 三主题语义阶——brand-* 随主题换肤，emerald/destructive 同既有完成/拒绝点色系）。
+- */
+-const TASK_STATUS_BADGE: Record<SubagentTaskStatus, { label: string; cls: string }> = {
+-  running: { label: "后台运行中", cls: "bg-brand-100 text-brand-700" },
+-  completed: { label: "已完成", cls: "bg-emerald-600/15 text-emerald-600" },
+-  failed: { label: "失败", cls: "bg-destructive/15 text-destructive" },
+-  stopped: { label: "已停止", cls: "bg-muted text-muted-foreground" },
+-};
+-
+-/**
+- * task-13：子代理容器段的 [TASK_*] 元数据收窄——段带元数据（taskStatus 或
+- * taskAsync 存在 = async 后台派发，task-11 装配）时返回任务状态：taskStatus
+- * 有值即权威（终态即终，不再因 result 配对判完成——async 启动回执 0.1s 配对
+- * 不是完成信号，design §1）；仅 taskAsync 时按 running。stub 段无这些字段恒
+- * null；无元数据的前台阻塞式子代理也恒 null → 消费方走原推导，零回归。
+- */
+-function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus | null {
+-  if (segment.kind !== "tool") return null;
+-  if (segment.taskStatus === undefined && segment.taskAsync === undefined) return null;
+-  return segment.taskStatus ?? "running";
+-}
+-
+-/* ───────────── task-03（2026-09-15-subagent-three-pane-display / FR-02 / design §5.E）───────── */
+-
+-/**
+- * 子代理块头部派生结果（subagentHeaderOf 产出）——SubagentBlockView 两种模式
+- * （紧凑卡片 / 内联展开）与右栏 SubagentDetailPanel 头部共用同一份派生，
+- * 防两处复制漂移。
+- */
+-export interface SubagentHeaderInfo {
+-  /** 综合状态（[TASK_*] 元数据优先，否则段三态；stub 恒 running）。 */
+-  status: SubagentTaskStatus | "ok" | "deny";
+-  /** task-13 元数据状态（无元数据 null——消费方据此不渲染状态徽标）。 */
+-  metaStatus: SubagentTaskStatus | null;
+-  /** 是否运行中（status === "running"，seg-sweep / 展开默认等消费）。 */
+-  running: boolean;
+-  /** 状态点样式（running=brand 阶 pulse / deny·failed=红 / stopped=灰 / 其余绿）。 */
+-  dotCls: string;
+-  /** 头部名称（tool 段 primary 优先，回退 subagentType / 「子代理」；stub 无 primary）。 */
+-  name: string;
+-  /** subagentType 标签（null 不渲染标签）。 */
+-  subagentType: string | null;
+-  /** task-13 状态徽标（后台运行中/已完成/失败/已停止；无元数据 null）。 */
+-  badge: { label: string; cls: string } | null;
+-  /** 时长文本（mm:ss / 「运行中」/ null 不渲染——推导规则见 subagentHeaderOf）。 */
+-  durationText: string | null;
+-}
+-
+-/**
+- * 子代理块头部公共纯函数（task-03 / design §5.E「复用 SubagentBlockView 头部
+- * 派生逻辑，抽公共纯函数 subagentHeaderOf(segment)」）——名称/状态点/徽标/时长
+- * 一处派生，SubagentBlockView（两模式）与右栏 SubagentDetailPanel 共用。
+- *
+- * 时长推导（task-13 元数据双路径原样收敛）：
+- *   - 元数据终态 → 服务端权威 taskElapsedMs（缺失 null）；
+- *   - 元数据运行中 → 本地走秒 now - startedAt（now 由消费方 tick state 传入，
+- *     纯函数不读时钟）；缺 startedAt 锚点回退最近一次 taskElapsedMs 校准值；
+- *   - 无元数据运行中 → 「运行中」（不读时钟，与原实现一致）；
+- *   - 无元数据终态 → endedAt - startedAt（起止均有才显示）。
+- */
+-export function subagentHeaderOf(
+-  segment: SubagentContainerSegment,
+-  now: number,
+-): SubagentHeaderInfo {
+-  const taskSeg = segment.kind === "tool" ? segment : null;
+-  const metaStatus = taskMetaStatusOf(segment);
+-  const status = metaStatus ?? subagentStatus(segment);
+-  const running = status === "running";
+-  const dotCls =
+-    status === "running"
+-      ? "bg-brand-600 animate-pulse"
+-      : status === "deny" || status === "failed"
+-        ? "bg-destructive"
+-        : status === "stopped"
+-          ? "bg-muted-foreground"
+-          : "bg-emerald-600";
+-  const name =
+-    segment.kind === "tool"
+-      ? (segment.primary?.trim() || segment.subagentType || "子代理")
+-      : (segment.subagentType || "子代理");
+-  let durationText: string | null = null;
+-  if (metaStatus != null && taskSeg != null) {
+-    if (metaStatus === "running") {
+-      durationText =
+-        taskSeg.startedAt != null
+-          ? formatClockDuration(now - taskSeg.startedAt)
+-          : taskSeg.taskElapsedMs != null
+-            ? formatClockDuration(taskSeg.taskElapsedMs)
+-            : null;
+-    } else {
+-      durationText =
+-        taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
+-    }
+-  } else if (running) {
+-    durationText = "运行中";
+-  } else if (
+-    segment.kind === "tool" &&
+-    segment.startedAt != null &&
+-    segment.endedAt != null
+-  ) {
+-    durationText = formatClockDuration(segment.endedAt - segment.startedAt);
+-  }
+-  return {
+-    status,
+-    metaStatus,
+-    running,
+-    dotCls,
+-    name,
+-    subagentType: segment.subagentType ?? null,
+-    badge: metaStatus != null ? TASK_STATUS_BADGE[metaStatus] : null,
+-    durationText,
+-  };
+-}
+-
+-/* ─────────────── 团队 MCP 工具识别与摘要（task-12 / FR-07） ─────────────── */
+-
+-/** 主控团队 MCP 5 工具（sillyhub-daemon mcp-server.ts registerTool 名单）。 */
+-const TEAM_MCP_TOOLS: ReadonlySet<string> = new Set([
+-  "dispatch_worker",
+-  "get_worker_result",
+-  "list_workers",
+-  "converge_mission",
+-  "report_progress",
+-]);
+-
+-/**
+- * 团队 MCP 工具短名识别：Claude 上报形态带 `mcp__<server>__` 前缀（如
+- * mcp__sillyhub__dispatch_worker），daemon 直报裸名（dispatch_worker）——取末段
+- * 匹配 5 工具白名单；非团队工具返回 null（走既有 ToolRowView 泛化路径）。
+- */
+-function teamMcpToolName(toolName: string | null): string | null {
+-  if (!toolName) return null;
+-  const last = toolName.split("__").pop() ?? "";
+-  return TEAM_MCP_TOOLS.has(last) ? last : null;
+-}
+-
+-/** 团队工具 args 解析（raw 为 tool_call JSON；解析失败返回空对象）。 */
+-function parseTeamToolArgs(raw: string): Record<string, unknown> {
+-  try {
+-    const obj = JSON.parse((raw ?? "").trim()) as { args?: unknown } | null;
+-    if (obj && typeof obj === "object" && obj.args && typeof obj.args === "object") {
+-      return obj.args as Record<string, unknown>;
+-    }
+-  } catch {
+-    // 非 JSON → 空对象（desc 回退既有 primary/raw 链）
+-  }
+-  return {};
+-}
+-
+-/** 摘要截断（团队工具主参数，40 字）。 */
+-function teamBrief(text: string, max = 40): string {
+-  const s = text.replace(/\s+/g, " ").trim();
+-  return s.length > max ? `${s.slice(0, max)}…` : s;
+-}
+-
+-/**
+- * 团队 MCP 工具主参数摘要（原型 §03 tool-card .cmd 语义）：
+- * dispatch_worker → 「角色 · 目标」；get_worker_result → 读取产出；
+- * converge_mission → 收敛分身产出；list_workers → 列出分身进度；
+- * report_progress → 进度备注。args 空时返回 null（回退既有 desc 链）。
+- */
+-function teamToolSummaryOf(tool: string, raw: string): string | null {
+-  const args = parseTeamToolArgs(raw);
+-  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+-  switch (tool) {
+-    case "dispatch_worker": {
+-      const role = str(args.role);
+-      const objective = str(args.objective);
+-      if (!role && !objective) return null;
+-      return objective ? `${role ?? "分身"} · ${teamBrief(objective)}` : (role ?? "分身");
+-    }
+-    case "get_worker_result": {
+-      const role = str(args.role) ?? str(args.run_id);
+-      return role ? `读取 ${teamBrief(role)} 产出` : "读取分身产出";
+-    }
+-    case "converge_mission":
+-      return "收敛分身产出";
+-    case "list_workers":
+-      return "列出分身进度";
+-    case "report_progress": {
+-      const note = str(args.note) ?? str(args.progress);
+-      return note ? `进度：${teamBrief(note)}` : "上报进度";
+-    }
+-    default:
+-      return null;
+-  }
+-}
+-
+-/** dispatch_worker tool 段 → 分身段块（SegmentView 升级路由用，见 TeamWorkerBlockView）。 */
+-function isTeamDispatchTool(toolName: string | null): boolean {
+-  return teamMcpToolName(toolName) === "dispatch_worker";
+-}
+-
+-/**
+- * ql-20260825-011：用户是否正在选中文字（选区非空）。可点击折叠行（思考/工具/
+- * 子代理/分身/前导）的 onClick 先查本函数——拖选文本松开鼠标触发的 click 不再
+- * 触发折叠/展开，选中内容可正常复制（用户反馈「聊天页选不了文字想复制不方便」）。
+- */
+-function hasActiveTextSelection(): boolean {
+-  if (typeof window === "undefined") return false;
+-  const sel = window.getSelection();
+-  return sel != null && !sel.isCollapsed && sel.toString().length > 0;
+-}
+-
+-/* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
+-
+-/**
+- * 文本段：无框正文（MarkdownText 直接铺在时间线背景上；2026-09-20-agent-reply-
+- * no-bubble 去气泡——原 rounded-2xl 卡片气泡容器废弃，字号行高交由 MarkdownText
+- * 内部与既有 .markdown-text 规则承担）。streaming=true 时尾部流式光标（原型
+- * streaming-caret：7×15px 竖条（brand 阶随主题），blink 0.9s step-end；因 MarkdownText 是
+- * 块级容器，光标落在正文末段之后的新行行首，见文件头偏差说明 1）。
+- */
+-export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSegmentViewProps) {
+-  useSegmentAnimations();
+-  return (
+-    // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
+-    // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
+-    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
+-    // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
+-    <div className="seg-text-body group relative w-full max-w-[min(100%,48rem)] self-start">
+-      <MarkdownText content={segment.text} />
+-      {segment.streaming && (
+-        <span
+-          aria-hidden
+-          className="seg-caret ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-brand-600 align-[-2px]"
+-        />
+-      )}
+-      <CopyButton text={segment.text} />
+-    </div>
+-  );
+-});
+-
+-/**
+- * 思考折叠行（原型 seg-thinking / deepseek ReasoningRow 风格）：折叠头部 =
+- * 箭头 + 💭 思考过程 + 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
+- * streaming 时标题旁「思考中」脉冲标记；默认折叠（R-03 展开才挂载正文）；
+- * 展开正文 MarkdownText 限高 180px 滚动。
+- */
+-export const ThinkingRowView = memo(function ThinkingRowView({ segment }: ThinkingRowViewProps) {
+-  const [open, setOpen] = useState(false);
+-  const summary = summaryOf(segment.text);
+-  return (
+-    <div className="w-full">
+-      <button
+-        type="button"
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+-          setOpen(!open);
+-        }}
+-        aria-expanded={open}
+-        className="flex w-full cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] text-muted-foreground hover:bg-muted"
+-      >
+-        <span
+-          aria-hidden
+-          className={cn(
+-            "shrink-0 text-[9px] transition-transform duration-150",
+-            open && "rotate-90",
+-          )}
+-        >
+-          ▶
+-        </span>
+-        <span className="shrink-0 font-medium">💭 思考过程</span>
+-        {segment.streaming && (
+-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-brand-600">
+-            <span aria-hidden className="h-[5px] w-[5px] animate-pulse rounded-full bg-brand-600" />
+-            思考中
+-          </span>
+-        )}
+-        {!open && summary && (
+-          <span className="ml-1 min-w-0 flex-1 truncate opacity-75">{summary}</span>
+-        )}
+-      </button>
+-      {open && (
+-        /* task-11（FR-07）：group+relative 外包一层挂 CopyButton（右下角 hover 浮出）——
+-            不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
+-        <div className="group relative mt-1">
+-          <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+-            <MarkdownText content={segment.text} />
+-          </div>
+-          <CopyButton text={segment.text} />
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * 工具行（原型 seg-tool / deepseek ToolRow 风格）：单行摘要 = 图标 + 工具名 +
+- * 主参数（truncate）+ 状态徽章（✓/✗/⏳）+ 耗时（起止均有时才显示；运行中不显
+- * 秒数——纯组件不读时钟，live 计时归状态条）+ 复制按钮（copyText 规则平移）。
+- * status=running 时整行 seg-sweep 扫动动画（1.8s）。点击整行展开 result
+- * （MarkdownText，默认折叠，限高 200px 滚动）；运行中无 result 展开显示
+- * 「执行中…」占位。toolName 为空：孤儿 result 段显示「工具结果」，解析失败
+- * （R-07）主参数位置原样显示 raw。
+- *
+- * task-12（2026-08-22-team-session-unify FR-07）团队 MCP 工具泛化微调（原型 §03
+- * tool-card）：5 团队工具（mcp__server__ 前缀或裸名）→ 👥 图标 + mcp 来源标识 +
+- * 短名（剥前缀）+ 角色/目标主参数摘要；其余工具渲染零改动。
+- */
+-export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewProps) {
+-  useSegmentAnimations();
+-  const [open, setOpen] = useState(false);
+-  const running = segment.status === "running";
+-  const badge = TOOL_STATUS_META[segment.status];
+-  const duration =
+-    segment.startedAt != null && segment.endedAt != null
+-      ? formatToolDuration(segment.endedAt - segment.startedAt)
+-      : null;
+-  const copyText = toolCopyText(segment.raw, segment.toolName);
+-  const teamTool = teamMcpToolName(segment.toolName);
+-  const teamSummary = teamTool ? teamToolSummaryOf(teamTool, segment.raw) : null;
+-  const desc = teamSummary ?? segment.primary ?? (segment.raw || null);
+-  return (
+-    <div className="w-full">
+-      <div
+-        role="button"
+-        tabIndex={0}
+-        aria-expanded={open}
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+-          setOpen(!open);
+-        }}
+-        onKeyDown={(e) => {
+-          if (e.key === "Enter" || e.key === " ") {
+-            e.preventDefault();
+-            setOpen(!open);
+-          }
+-        }}
+-        className={cn(
+-          "relative flex w-full cursor-pointer select-text items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
+-          running && "seg-sweep",
+-        )}
+-      >
+-        <span aria-hidden className="shrink-0 text-xs">
+-          {teamTool ? "👥" : toolIconOf(segment.toolName)}
+-        </span>
+-        {teamTool && (
+-          <span
+-            className="shrink-0 rounded border border-brand-200 bg-brand-50 px-1 py-px text-[9.5px] font-semibold leading-none text-brand-700"
+-            title="团队 MCP 工具"
+-          >
+-            mcp
+-          </span>
+-        )}
+-        <span className="shrink-0 text-[11.5px] font-semibold text-brand-600">
+-          {teamTool ?? segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
+-        </span>
+-        {desc && (
+-          <span
+-            className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+-            title={segment.raw || desc}
+-          >
+-            {desc}
+-          </span>
+-        )}
+-        <span
+-          className={cn("ml-auto shrink-0 font-mono text-[11px]", badge.cls)}
+-          title={badge.title}
+-          aria-label={badge.title}
+-        >
+-          {badge.icon}
+-        </span>
+-        {duration && (
+-          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+-            {duration}
+-          </span>
+-        )}
+-        {copyText && (
+-          <button
+-            type="button"
+-            onClick={(e) => {
+-              e.stopPropagation();
+-              void copyTextToClipboard(copyText);
+-            }}
+-            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+-            title="复制命令"
+-          >
+-            复制
+-          </button>
+-        )}
+-      </div>
+-      {open && (
+-        <div className="mt-1 max-h-[200px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+-          {/* ql-20260824-018/019：展开区内容（参数详情 + result 区）整体收编到
+-              tool-args-detail 的 ToolExpandBody——Write 内容预览 / Edit 行级 diff /
+-              Bash 纯文本输出+复制 / Read 行范围+复制 / Grep 参数+命中数 / Agent
+-              Prompt 预览 / 其余工具通用参数 JSON 兜底。 */}
+-          <ToolExpandBody segment={segment} running={running} />
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * 子代理嵌套块（原型 seg-subagent）：容器 = indigo 底嵌套卡；头部 = 状态点
+- * （running 蓝色脉冲 / ok 绿 / deny 红）+ 🤖 名称（tool.primary 或 subagentType，
+- * stub 显示 subagentType 或「子代理」）+ subagentType 标签 + 时长（起止差 mm:ss；
+- * 运行中显示「运行中」，不读时钟）。运行中头部 seg-sweep 扫动。默认：运行中
+- * 展开、完成折叠，均可点击切换；running→终态过渡时自动收敛为折叠（跟随
+- * 「完成折叠」默认，task-05 implementation）。body 内 children 段序列经
+- * SegmentView 递归渲染（支持 depth>1 嵌套），折叠时不挂载（R-03）。
+- *
+- * task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）：段带
+- * [TASK_*] 元数据（async 后台派发，task-11 装配）时块头改元数据驱动——状态徽标
+- * 「后台运行中 / 已完成 / 失败 / 已停止」+ 时长（运行中本地走秒；终态 = 服务端
+- * 权威 taskElapsedMs 真实用时，不再显示回执差值 00:00），正文尾行补最近一条
+- * [TASK_*] 消费后的进度摘要（taskToolName + taskSummary）。走秒为组件局部 tick
+- *（仅 async 运行中启动）——task-05「纯组件不读本地时钟」约束在此让位：运行中
+- * 不显示秒数会重新制造「00:00 假完成」盲区。无元数据段走原推导（前台阻塞式
+- * 子代理零回归）。
+- *
+- * task-01（2026-09-15-subagent-three-pane-display / FR-02 / FR-05 / D-001@v1 /
+- * D-002@v1，design §5.C）：双模式——useSubagentPanel() 消费到右栏面板 context
+- * （page 模式 Provider）时渲染中栏紧凑卡片：仅头部行（状态点/🤖/名称/类型标签/
+- * 徽标/时长全复用，running 时 seg-sweep 保留），不内联 children、无折叠语义
+- * （aria-expanded 移除）；点击头部 toggle 右栏（未激活 → openSubagent(segment.id)，
+- * 已激活 → closeSubagent()），根容器带 data-segment-id 锚点 + activeId 命中
+- * ring-brand-300 描边高亮。无 context（dialog 弹窗/悬浮宿主等旧消费方）走原
+- * 内联展开分支，行为零回归（FR-05）。
+- */
+-export const SubagentBlockView = memo(function SubagentBlockView({
+-  segment,
+-}: SubagentBlockViewProps) {
+-  useSegmentAnimations();
+-  // task-01：右栏面板 context——null（dialog 等旧宿主无 Provider）走下方原内联
+-  // 展开分支；有值（page 模式）提前 return 紧凑卡片。两分支共享全部头部派生
+-  //（metaStatus/taskSeg/durationText/dotCls/name），零复制粘贴。
+-  const panel = useSubagentPanel();
+-  // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
+-  const taskSeg = segment.kind === "tool" ? segment : null;
+-  const metaStatus = taskMetaStatusOf(segment);
+-  const status = metaStatus ?? subagentStatus(segment);
+-  const running = status === "running";
+-  const [open, setOpen] = useState(running);
+-  // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
+-  const prevRunningRef = useRef(running);
+-  useEffect(() => {
+-    if (prevRunningRef.current && !running) setOpen(false);
+-    prevRunningRef.current = running;
+-  }, [running]);
+-
+-  // task-13：后台异步运行中本地走秒（FR-06 渲染经济性对齐 subagent-catalog 模式：
+-  // tick 是组件局部 state，仅 async 运行中启动，终态/卸载清理）；锚点 = 段
+-  // startedAt（派发时刻）。
+-  const [now, setNow] = useState<number>(() => Date.now());
+-  const asyncRunning = metaStatus === "running";
+-  useEffect(() => {
+-    if (!asyncRunning) return;
+-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+-    return () => window.clearInterval(id);
+-  }, [asyncRunning]);
+-
+-  // task-03（design §5.E）：头部派生收敛到共享纯函数 subagentHeaderOf（状态点/
+-  // 名称/徽标/时长一处派生）——右栏 SubagentDetailPanel 头部复用同一份逻辑，
+-  // 防两处复制漂移；now 走上方 tick state（async 运行中走秒）。
+-  const header = subagentHeaderOf(segment, now);
+-  const { dotCls, name, durationText } = header;
+-  // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
+-  // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS
+-  // 行）；终态 = 终态文案 + 摘要（NOTIFICATION 行，taskToolName 已陈旧不展示）。
+-  // 无摘要不渲染。
+-  const progressLine: { label: string | null; tool: string | null; summary: string } | null =
+-    (() => {
+-      if (taskSeg == null || metaStatus == null) return null;
+-      const summary = taskSeg.taskSummary?.trim() ?? "";
+-      if (metaStatus === "running") {
+-        const tool = taskSeg.taskToolName?.trim() ?? "";
+-        return tool || summary ? { label: null, tool: tool || null, summary } : null;
+-      }
+-      return summary
+-        ? { label: TASK_STATUS_BADGE[metaStatus].label, tool: null, summary }
+-        : null;
+-    })();
+-  // 头部行内容子结构（task-01 抽出，两分支共享）：状态点 / 🤖 / 名称 / 类型
+-  // 标签 / task-13 徽标 / 时长——紧凑卡片与内联展开同源派生，避免大段 JSX
+-  // 复制漂移。
+-  const headerContent = (
+-    <>
+-      <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
+-      <span aria-hidden className="shrink-0">
+-        🤖
+-      </span>
+-      <span className="min-w-0 truncate font-semibold">{name}</span>
+-      {segment.subagentType && (
+-        <span className="shrink-0 rounded-lg border border-border bg-card px-1.5 text-[10px] text-muted-foreground">
+-          {segment.subagentType}
+-        </span>
+-      )}
+-      {/* task-13：元数据驱动的块头状态徽标（后台运行中/已完成/失败/已停止，
+-          原型 .st 药丸）；前台路径不渲染（保持原形态零回归）。 */}
+-      {metaStatus != null && (
+-        <span
+-          className={cn(
+-            "shrink-0 rounded-[5px] px-2 py-px text-[10.5px] font-semibold",
+-            TASK_STATUS_BADGE[metaStatus].cls,
+-          )}
+-        >
+-          {TASK_STATUS_BADGE[metaStatus].label}
+-        </span>
+-      )}
+-      {durationText && (
+-        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+-          {durationText}
+-        </span>
+-      )}
+-    </>
+-  );
+-
+-  // task-01：紧凑卡片分支（page 模式有 context）——中栏只显头部行，无展开
+-  // body、不内联 children（详情移右栏）；头部仍是可点击 button（含 Enter/Space
+-  // 键盘触发），但无折叠语义（不渲染 aria-expanded）；点击 toggle 右栏
+-  //（未激活 → openSubagent(segment.id)，已激活 → closeSubagent()，D-002@v1 ④）；
+-  // 根容器 data-segment-id 供右栏/目录联动定位，activeId 命中加 brand 阶
+-  // ring 描边高亮。
+-  if (panel) {
+-    const active = panel.activeId === segment.id;
+-    const togglePanel = () => {
+-      if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发
+-      if (active) panel.closeSubagent();
+-      else panel.openSubagent(segment.id);
+-    };
+-    return (
+-      <div
+-        data-segment-id={segment.id}
+-        className={cn(
+-          "w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
+-          active && "ring-1 ring-brand-300",
+-        )}
+-      >
+-        <div
+-          role="button"
+-          tabIndex={0}
+-          onClick={togglePanel}
+-          onKeyDown={(e) => {
+-            if (e.key === "Enter" || e.key === " ") {
+-              e.preventDefault();
+-              togglePanel();
+-            }
+-          }}
+-          className={cn(
+-            "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+-            running && "seg-sweep",
+-          )}
+-        >
+-          {headerContent}
+-        </div>
+-      </div>
+-    );
+-  }
+-
+-  return (
+-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
+-      <div
+-        role="button"
+-        tabIndex={0}
+-        aria-expanded={open}
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+-          setOpen(!open);
+-        }}
+-        onKeyDown={(e) => {
+-          if (e.key === "Enter" || e.key === " ") {
+-            e.preventDefault();
+-            setOpen(!open);
+-          }
+-        }}
+-        className={cn(
+-          "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+-          running && "seg-sweep",
+-        )}
+-      >
+-        {headerContent}
+-      </div>
+-      {open && (
+-        <div className="seg-subagent-body flex flex-col gap-[5px] border-t border-indigo-200 px-3.5 pb-2.5 pl-5 pt-2">
+-          {segment.children.map((child) => (
+-            <SegmentView key={child.id} segment={child} />
+-          ))}
+-          {progressLine && (
+-            <p
+-              className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10.5px] text-muted-foreground"
+-              title={`${progressLine.tool ?? progressLine.label ?? ""} ${progressLine.summary}`.trim()}
+-            >
+-              <span aria-hidden className="shrink-0 text-muted-foreground/70">
+-                └
+-              </span>
+-              {progressLine.label && (
+-                <span
+-                  className={cn(
+-                    "shrink-0 font-semibold",
+-                    metaStatus === "completed"
+-                      ? "text-emerald-600"
+-                      : metaStatus === "failed"
+-                        ? "text-destructive"
+-                        : "text-muted-foreground",
+-                  )}
+-                >
+-                  {progressLine.label}
+-                </span>
+-              )}
+-              {progressLine.tool && (
+-                <span className="shrink-0 font-semibold text-brand-600">
+-                  {progressLine.tool}
+-                </span>
+-              )}
+-              {progressLine.summary && (
+-                <span className="min-w-0 truncate">{progressLine.summary}</span>
+-              )}
+-            </p>
+-          )}
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * stderr 警示行：⚠ 前缀 + amber 文本（样式平移现有 TurnDetailsList stderr 行，
+- * 原型 --amber 语义对应）。whitespace-pre-wrap 保留原始换行。
+- */
+-export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowViewProps) {
+-  return (
+-    <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+-      <span aria-hidden className="shrink-0">
+-        ⚠
+-      </span>
+-      <span className="min-w-0 whitespace-pre-wrap break-words">{segment.text}</span>
+-    </div>
+-  );
+-});
+-
+-/**
+- * 上下文前导卡（ql-20260825-011 收紧展示）：进度视图专属（对话视图不渲染
+- * preamble 段），**默认收起**、点击头部展开原文——去除原「（创建轮，仅 AI
+- * 可见）」括号说明（用户反馈），标题带字符数提示。正文 select-text 可选中
+- * 复制；拖选不触发收起（hasActiveTextSelection 守卫）。
+- */
+-export const PreambleSegmentView = memo(function PreambleSegmentView({
+-  segment,
+-}: PreambleSegmentViewProps) {
+-  const [open, setOpen] = useState(false);
+-  const charCount = segment.text.length;
+-  return (
+-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+-      <button
+-        type="button"
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return;
+-          setOpen(!open);
+-        }}
+-        aria-expanded={open}
+-        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+-      >
+-        <span
+-          aria-hidden
+-          className={cn(
+-            "shrink-0 text-[9px] transition-transform duration-150",
+-            open && "rotate-90",
+-          )}
+-        >
+-          ▶
+-        </span>
+-        <span className="shrink-0 font-medium">上下文注入</span>
+-        <span className="shrink-0 opacity-75">{`（${charCount} 字，已随消息发送）`}</span>
+-      </button>
+-      {open && (
+-        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+-          {segment.text}
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * 上下文压缩续接摘要卡（ql-20260917-006）：CLI 自动 compaction 后注入的结构化
+- * 摘要（"This session is being continued from a previous conversation..."）——
+- * 非用户答复，此前被当回复气泡整段刷屏。「全部（进度）」视图专属（对话视图改由
+- * CompactNoticeChip 显示一行短提示），**默认收起**、点击头部展开全文（展示语义
+- * 平移 PreambleSegmentView：字符数提示 + 拖选不触发收起守卫）。
+- */
+-export const CompactSegmentView = memo(function CompactSegmentView({
+-  segment,
+-}: CompactSegmentViewProps) {
+-  const [open, setOpen] = useState(false);
+-  const charCount = segment.text.length;
+-  return (
+-    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+-      <button
+-        type="button"
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return;
+-          setOpen(!open);
+-        }}
+-        aria-expanded={open}
+-        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+-      >
+-        <span
+-          aria-hidden
+-          className={cn(
+-            "shrink-0 text-[9px] transition-transform duration-150",
+-            open && "rotate-90",
+-          )}
+-        >
+-          ▶
+-        </span>
+-        <span className="shrink-0 font-medium">上下文已重新压缩</span>
+-        <span className="shrink-0 opacity-75">{`（${charCount} 字，摘要已注入新窗口）`}</span>
+-      </button>
+-      {open && (
+-        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+-          {segment.text}
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * 对话视图压缩短提示（ql-20260917-006）：compact 摘要段在「对话」视图的原位
+- * 替换渲染——一行弱化提示替代大段摘要气泡（全文进「全部（进度）」视图
+- * CompactSegmentView 折叠卡）。独立于 SegmentView 分发（对话分支特判渲染）。
+- */
+-export function CompactNoticeChip() {
+-  return (
+-    <div className="flex select-none items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground">
+-      <span aria-hidden className="shrink-0">
+-        ⇄
+-      </span>
+-      <span>上下文已重新压缩</span>
+-    </div>
+-  );
+-}
+-
+-/**
+- * 压缩过程状态行（ql-20260917-006）：daemon [COMPACT_STATUS] 协议行的渲染——
+- * phase=compacting 显示「上下文正在重新压缩…」（运行中轮的实时提示，用户要求的
+- * 「压缩过程中回显」）；failed 显示 amber 失败行（压缩失败时续接摘要不会到达，
+- * 这是唯一可见信号）；success 返回 null（紧随的 compact 摘要段已是「已重新压缩」
+- * 标记，避免双提示）。坏 JSON 容错按 compacting 处理（宁可多显示一行进行中提示
+- * 也不吞失败信号）。
+- */
+-export const CompactStatusRowView = memo(function CompactStatusRowView({
+-  segment,
+-}: CompactStatusRowViewProps) {
+-  let phase = "compacting";
+-  let error: string | undefined;
+-  try {
+-    const parsed = JSON.parse(segment.text) as { phase?: unknown; error?: unknown };
+-    if (parsed.phase === "success" || parsed.phase === "failed") phase = parsed.phase;
+-    if (typeof parsed.error === "string" && parsed.error) error = parsed.error;
+-  } catch {
+-    // 坏 JSON：保持 compacting 默认展示（容错不抛错）。
+-  }
+-  if (phase === "success") return null;
+-  if (phase === "failed") {
+-    return (
+-      <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
+-        <span aria-hidden className="shrink-0">
+-          ⚠
+-        </span>
+-        <span className="min-w-0 whitespace-pre-wrap break-words">
+-          上下文压缩失败{error ? `：${error}` : ""}
+-        </span>
+-      </div>
+-    );
+-  }
+-  return (
+-    <div className="flex select-none items-center gap-1.5 px-1 py-0.5 text-[11px] text-muted-foreground">
+-      <span
+-        aria-hidden
+-        className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-[1.5px] border-muted-foreground/30 border-t-muted-foreground"
+-      />
+-      <span>上下文正在重新压缩…</span>
+-    </div>
+-  );
+-});
+-
+-/* ────────────── 轮内用户消息段（ql-20260920-006 / 2026-09-18-single-chat-steering 修订） ────────────── */
+-
+-/**
+- * 轮内用户消息段渲染：mid-turn 引导注入的 user_input 留痕——右对齐用户气泡，
+- * 随段序（实时追加 / 回放按 ts 插入）停在轮内真实时间位置（输出之间），不再
+- * 前移到轮次 prompt 也不垫在时间线末尾。三态视觉平移自原 streamFooter 版
+- * SteeredMessagesFooter（session-panel-page.tsx 留档类名），气泡 token 与既有
+- * 用户气泡一致（bg-primary / brand 语义阶）：
+- *   - steering：虚线 brand 气泡 + 脉冲点 +「引导中 · 本轮工具间隙投递」；
+- *   - delivered：bg-primary 气泡 + emerald「✓ 已投递」小标；
+- *   - ended：弱化气泡（opacity-70）+「本轮已结束，消息未投递」（R-04 如实暴露）。
+- * data-steered-msg={phase} 供测试断言（自旧 footer 迁移）。文本经
+- * parseAttachmentMarkers 剥附件标记行（同 prompt 气泡展示口径）。
+- */
+-export const UserMsgSegmentView = memo(function UserMsgSegmentView({
+-  segment,
+-}: UserMsgSegmentViewProps) {
+-  const text = parseAttachmentMarkers(segment.text).text;
+-  return (
+-    <div
+-      data-steered-msg={segment.phase}
+-      className="flex items-end justify-end gap-1.5"
+-    >
+-      <div className="max-w-[80%]">
+-        {segment.phase === "steering" ? (
+-          <>
+-            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
+-              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+-              <InlineAttRefTextWithPreview text={text} />
+-            </div>
+-            <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
+-              <span
+-                aria-hidden
+-                className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500"
+-              />
+-              引导中 · 本轮工具间隙投递
+-            </p>
+-          </>
+-        ) : segment.phase === "delivered" ? (
+-          <>
+-            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
+-              {/* task-06：引导段正文行内引用标签化（蓝色主气泡内用 onPrimary 色调）。 */}
+-              <InlineAttRefTextWithPreview text={text} tone="onPrimary" />
+-            </div>
+-            <p className="mt-1 text-right text-[11px] text-emerald-600">
+-              ✓ 已投递，agent 已收到引导
+-            </p>
+-          </>
+-        ) : (
+-          <>
+-            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground opacity-70">
+-              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
+-              <InlineAttRefTextWithPreview text={text} />
+-            </div>
+-            <p className="mt-1 text-right text-[11px] text-muted-foreground">
+-              本轮已结束，消息未投递
+-            </p>
+-          </>
+-        )}
+-      </div>
+-    </div>
+-  );
+-});
+-
+-/* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
+-
+-/** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
+- * 段族文件保持零跨模块依赖，故独立维护同款映射）。
+- * task-13：bg_running / stopped 为 [TASK_*] 元数据映射态——async 后台派发运行中
+- * 显示「后台运行中」（brand 阶），任务被停止显示灰；无元数据路径不产生这两态。 */
+-const WORKER_STATUS_META: Record<string, { label: string; cls: string }> = {
+-  pending: { label: "排队中", cls: "text-muted-foreground" },
+-  running: { label: "运行中", cls: "text-brand-700" },
+-  bg_running: { label: "后台运行中", cls: "text-brand-700" },
+-  completed: { label: "已完成", cls: "text-emerald-700" },
+-  failed: { label: "失败", cls: "text-red-600" },
+-  killed: { label: "已终止", cls: "text-muted-foreground" },
+-  cancelled: { label: "已取消", cls: "text-muted-foreground" },
+-  interrupted: { label: "已打断", cls: "text-muted-foreground" },
+-  stopped: { label: "已停止", cls: "text-muted-foreground" },
+-};
+-
+-const WORKER_STATUS_FALLBACK = { label: "未知", cls: "text-muted-foreground" };
+-
+-export interface TeamWorkerBlockProps {
+-  /** 分身角色（dispatch_worker args.role；缺省「分身」）。 */
+-  role: string | null;
+-  /** 分身 run 状态（pending/running/completed/failed/killed…，未知值有兜底）。 */
+-  status: string;
+-  /** 分身目标（dispatch_worker args.objective）。 */
+-  objective?: string | null;
+-  /** 耗时（ms，起止差——纯组件不读本地时钟，由调用方传入）。 */
+-  durationMs?: number | null;
+-  /** 目标工作区徽标：名称 + 类型（类型配色走 workspaceTypeBadge 词表）。 */
+-  workspaceName?: string | null;
+-  workspaceType?: string | null;
+-  /** 目标工作区 id 短标识（无名称时兜底展示 #xxxxxxxx，原型 §03 ws-tag 语义）。 */
+-  workspaceId?: string | null;
+-  /** body 内容（分身归属日志/产物；SegmentView 路由为 children 段递归）。 */
+-  children?: ReactNode;
+-}
+-
+-/**
+- * 分身段块（原型 §03 violet `<details>` .worker 语义，实现已迁 brand 语义阶
+- * ql-20260828-007-7dcf）：brand 折叠卡——头部 =
+- * 👥 分身「角色」+ 状态 + mm:ss 耗时 + 目标工作区徽标；body = 目标一行 + children
+- * （分身日志/产物）。运行中默认展开 + 无扫动（头部轻量），终态默认折叠，点击切换；
+- * running→终态过渡自动收敛折叠（对齐 SubagentBlockView）。无 children 时显示
+- * 日志/产物入口预留说明。
+- *
+- * 数据两条路：① SegmentView 升级路由——dispatch_worker tool 段（主控 MCP 派发
+- * 调用，其 children 为分身归属日志段）自动进本组件；② 父层直传 props（task-11
+- * 接线真实工作区名称/类型徽标）。
+- */
+-export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
+-  role,
+-  status,
+-  objective,
+-  durationMs,
+-  workspaceName,
+-  workspaceType,
+-  workspaceId,
+-  children,
+-}: TeamWorkerBlockProps) {
+-  useSegmentAnimations();
+-  const wsMeta = WORKER_STATUS_META[status] ?? WORKER_STATUS_FALLBACK;
+-  // task-13：bg_running（[TASK_*] 元数据映射态）与 running 同属运行中口径。
+-  const running = status === "pending" || status === "running" || status === "bg_running";
+-  const [open, setOpen] = useState(running);
+-  // running → 终态过渡：收敛为折叠（同 SubagentBlockView 生命周期语义）。
+-  const prevRunningRef = useRef(running);
+-  useEffect(() => {
+-    if (prevRunningRef.current && !running) setOpen(false);
+-    prevRunningRef.current = running;
+-  }, [running]);
+-
+-  const hasWs = Boolean(workspaceName || workspaceId);
+-  return (
+-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
+-      <div
+-        role="button"
+-        tabIndex={0}
+-        aria-expanded={open}
+-        onClick={() => {
+-          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+-          setOpen(!open);
+-        }}
+-        onKeyDown={(e) => {
+-          if (e.key === "Enter" || e.key === " ") {
+-            e.preventDefault();
+-            setOpen(!open);
+-          }
+-        }}
+-        className="flex cursor-pointer select-text items-center gap-2 px-3 py-[7px] text-xs"
+-      >
+-        <span aria-hidden className="shrink-0">
+-          👥
+-        </span>
+-        <span className="min-w-0 shrink-0 truncate font-semibold text-brand-700">
+-          {`分身「${role || "分身"}」`}
+-        </span>
+-        <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>{wsMeta.label}</span>
+-        {durationMs != null && (
+-          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+-            {formatClockDuration(durationMs)}
+-          </span>
+-        )}
+-        {hasWs && (
+-          <span
+-            className={cn(
+-              "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
+-              workspaceName
+-                ? workspaceTypeBadge(workspaceType).className
+-                : "border-brand-200 bg-card font-mono text-brand-700",
+-            )}
+-            title={workspaceId ?? workspaceName ?? undefined}
+-          >
+-            {workspaceName || (workspaceId ? `#${workspaceId.slice(0, 8)}` : "")}
+-          </span>
+-        )}
+-      </div>
+-      {open && (
+-        <div className="flex flex-col gap-[5px] border-t border-dashed border-brand-200 bg-card px-3 pb-2.5 pt-2">
+-          {objective && (
+-            <p className="text-[11.5px] text-muted-foreground">{`目标：${objective}`}</p>
+-          )}
+-          {Children.count(children) > 0 ? (
+-            children
+-          ) : (
+-            <p className="text-[11px] text-muted-foreground/80">
+-              日志与产物入口（接线后开放）
+-            </p>
+-          )}
+-        </div>
+-      )}
+-    </div>
+-  );
+-});
+-
+-/**
+- * dispatch_worker tool 段 → TeamWorkerBlockProps（args 解析 + 段三态映射）。
+- * task-13（FR-07）：段带 [TASK_*] 元数据（async 后台派发）时状态/时长优先走
+- * 元数据——taskStatus 终态即终（不再被段三态误判 completed），运行中映射
+- * bg_running（头部「后台运行中」）；时长终态取服务端 taskElapsedMs，运行中
+- * 不显示冻结值（本组件纯展示不读本地时钟，走秒归子代理块/目录）。无元数据
+- * 走原段三态映射（团队路径零回归）。
+- */
+-function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockProps {
+-  const args = parseTeamToolArgs(segment.raw);
+-  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+-  const metaStatus = taskMetaStatusOf(segment);
+-  return {
+-    role: str(args.role),
+-    status:
+-      metaStatus === "completed"
+-        ? "completed"
+-        : metaStatus === "failed"
+-          ? "failed"
+-          : metaStatus === "stopped"
+-            ? "stopped"
+-            : metaStatus === "running"
+-              ? (segment.taskAsync ? "bg_running" : "running")
+-              : // 段三态 → run 状态口径（running/ok/deny → running/completed/failed）
+-                segment.status === "ok"
+-                ? "completed"
+-                : segment.status === "deny"
+-                  ? "failed"
+-                  : "running",
+-    objective: str(args.objective),
+-    durationMs:
+-      metaStatus === "running"
+-        ? null
+-        : metaStatus != null
+-          ? (segment.taskElapsedMs ?? null)
+-          : segment.startedAt != null && segment.endedAt != null
+-            ? segment.endedAt - segment.startedAt
+-            : null,
+-    workspaceId: str(args.target_workspace_id),
+-    children: segment.children.map((child) => (
+-      <SegmentView key={child.id} segment={child} />
+-    )),
+-  };
+-}
+-
+-/* ────────────── 轮头分叉入口（2026-09-22-session-fork-continuation task-07 / FR-01 / FR-04） ────────────── */
+-
+-/** caps sessionFork 三档（@/lib/provider-caps 单源派生，勿手抄字面量）。 */
+-export type SessionForkTier = ProviderCaps["sessionFork"];
+-
+-/** 轮头「⑂ 从此分叉」入口 props（纯展示零请求；挂载接线归 task-08）。 */
+-export interface TurnForkEntryProps {
+-  /** 会话引擎 provider（经 getProviderCaps 查 sessionFork 档位，单一数据源）。 */
+-  provider: string;
+-  /**
+-   * 该轮 run 状态（turn-timeline TurnUiStatus 字面量）。进行中三态
+-   * （pending/running/interrupting）置灰——对齐 backend fork 409 口径
+-   * （ACTIVE_RUN_STATUSES=pending/running/pending_approval，interrupting
+-   * 映射自 running，本质同属未终态）。
+-   */
+-  runStatus: string;
+-  /**
+-   * 该轮引擎锚点（AgentRun.engine_anchor，经 runs 快照注入——挂载方数据源）。
+-   * native 档缺失（null/undefined/空串）置灰「该轮缺少引擎锚点」（存量轮
+-   * 不回填，D-011 故障面：入口灰即降级面，不炸链路）；seed 档种子路径不
+-   * 消费锚点，不受此门控。
+-   */
+-  engineAnchor?: string | null;
+-  /** 点击回调（上抛挂载方开确认弹层；置灰态不触发）。 */
+-  onFork: () => void;
+-}
+-
+-/**
+- * 轮头动作区「⑂ 从此分叉」入口（design Wave3 第 1 点 / FR-01，原型
+- * prototype-session-fork.html .turn-head .fork-btn）——三重门控纯展示组件：
+- *
+- *   1. caps 门控：provider sessionFork='none'（cursor / 未知引擎）不渲染；
+- *   2. 终态门控：该轮 run 进行中（pending/running/interrupting）置灰
+- *      「⑂ 进行中不可分叉」（FR-01 场景：进行中轮不可选）；
+- *   3. 锚点门控：native 档且该轮 engine_anchor 缺失置灰「⑂ 该轮缺少引擎
+- *      锚点」（tooltip 明示可退种子档，对齐 backend 422 文案语义；seed 档
+- *      不受锚点门控）。
+- *
+- * 交互形态对齐原型：常驻隐藏、父容器（需带 `group` 类，挂载方负责）hover
+- * 或自身 focus 浮出（同 CopyButton 的 opacity 纯 CSS 零状态方案，保键盘可
+- * 达——display:none 方案键盘不可聚焦）；置灰态 hover 同样浮出，颜色降为
+- * muted 阶 + cursor-not-allowed。样式全走 brand 与 muted 语义阶及主题 token
+- * （双主题铁律，不硬编码 hex）。
+- */
+-export const TurnForkEntry = memo(function TurnForkEntry({
+-  provider,
+-  runStatus,
+-  engineAnchor,
+-  onFork,
+-}: TurnForkEntryProps) {
+-  // 门控一：caps=none 不渲染（getProviderCaps 对未知 provider 回退拒绝对象，
+-  // 其 sessionFork='none'——未知引擎天然无入口，R-09）。
+-  const tier = getProviderCaps(provider).sessionFork;
+-  if (tier === "none") return null;
+-  // 门控二：run 进行中置灰（见 props.runStatus 注释的三活态口径）。
+-  const live =
+-    runStatus === "pending" ||
+-    runStatus === "running" ||
+-    runStatus === "interrupting";
+-  // 门控三：native 档锚点缺失置灰（seed 档不受锚点门控）。
+-  const anchorMissing = tier === "native" && !engineAnchor;
+-  const disabled = live || anchorMissing;
+-  const label = live
+-    ? "⑂ 进行中不可分叉"
+-    : anchorMissing
+-      ? "⑂ 该轮缺少引擎锚点"
+-      : "⑂ 从此分叉";
+-  const title = live
+-    ? "进行中的轮不可作为分叉点，请等该轮结束后再分叉"
+-    : anchorMissing
+-      ? "该轮缺少引擎锚点，无法原生分叉；可改用种子档（前情转述）"
+-      : "在此轮之后创建分叉会话";
+-  return (
+-    <button
+-      type="button"
+-      data-testid="turn-fork-entry"
+-      data-fork-tier={tier}
+-      disabled={disabled}
+-      onClick={() => {
+-        // disabled 守卫双保险：原生 disabled 已拦截真实浏览器点击；jsdom 的
+-        // fireEvent.click 会穿透 disabled 派发事件，此处兜底防误触发。
+-        if (!disabled) onFork();
+-      }}
+-      title={title}
+-      className={cn(
+-        "ml-auto shrink-0 rounded-md border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+-        // 常驻隐藏：父容器 group hover / 自身 focus 浮出（纯 CSS 零状态）。
+-        "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+-        disabled
+-          ? "cursor-not-allowed border-border bg-muted text-muted-foreground/70"
+-          : "cursor-pointer border-brand-200 bg-card text-brand-600 hover:bg-brand-50",
+-      )}
+-    >
+-      {label}
+-    </button>
+-  );
+-});
+-
+-/* ───────────────────────── 统一入口分发器 ───────────────────────── */
+-
+-/**
+- * SegmentView：按 kind 分发到段组件（task-05 统一入口）。tool 段带
+- * children（子代理归属，FR-03）时升级为 SubagentBlockView 渲染，普通工具走
+- * ToolRowView；subagent_stub 兜底段复用 SubagentBlockView（design §9.5）。
+- * task-12（FR-07）：dispatch_worker 团队工具段升级为 TeamWorkerBlockView
+- * （分身段块——派发调用即分身在进度视图的代表，其 children 为分身归属日志）。
+- * task-08（FR-01）：file 段渲染 FileMessageCard（agent 上传文件卡片）。
+- * memo 默认浅比较依赖装配器 path-copy 的段引用稳定性（FR-06）；列表层以
+- * segment.id 为稳定 key（消费方 task-06）。
+- */
+-export const SegmentView = memo(function SegmentView({ segment }: SegmentViewProps) {
+-  switch (segment.kind) {
+-    case "text":
+-      return <TextSegmentView segment={segment} />;
+-    case "thinking":
+-      return <ThinkingRowView segment={segment} />;
+-    case "tool":
+-      if (isTeamDispatchTool(segment.toolName)) {
+-        return <TeamWorkerBlockView {...teamWorkerBlockFromSegment(segment)} />;
+-      }
+-      return segment.children.length > 0 ? (
+-        <SubagentBlockView segment={segment} />
+-      ) : (
+-        <ToolRowView segment={segment} />
+-      );
+-    case "subagent_stub":
+-      return <SubagentBlockView segment={segment} />;
+-    case "stderr":
+-      return <StderrRowView segment={segment} />;
+-    case "compact":
+-      // ql-20260917-006：压缩续接摘要——「全部（进度）」视图折叠卡（默认收起，
+-      // 点击展开全文）；对话视图不进 SegmentView（isConversationSegment 含
+-      // compact，由 turn-timeline 特判渲染 CompactNoticeChip 短提示）。
+-      return <CompactSegmentView segment={segment} />;
+-    case "compact_status":
+-      // ql-20260917-006：压缩过程状态行——compacting 实时提示 / failed 警示 /
+-      // success 静默（compact 摘要段已是完成标记）。
+-      return <CompactStatusRowView segment={segment} />;
+-    case "preamble":
+-      // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
+-      // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
+-      // 来源（对话视图保持干净，不渲染本段——时间线仅 all 视图纳入 preamble）。
+-      // ql-20260825-011：默认收起、可展开（PreambleSegmentView）。
+-      return <PreambleSegmentView segment={segment} />;
+-    case "file":
+-      // task-08（FR-01 / D-001@v1）：文件段 → FileMessageCard（图片缩略图 / 通用
+-      // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
+-      // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
+-      return (
+-        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+-          <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
+-            agent 上传了文件
+-          </span>
+-          <FileMessageCard
+-            fileId={segment.fileId}
+-            name={segment.name}
+-            size={segment.size}
+-            mime={segment.mime}
+-            description={segment.description}
+-            ts={segment.ts}
+-          />
+-        </div>
+-      );
+-    case "user_msg":
+-      // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内引导留痕段——
+-      // 三态气泡（steering 引导中 / delivered 已投递 / ended 未投递），data-steered-msg
+-      // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
+-      // 剥附件标记行（同 prompt 气泡展示口径）。
+-      return <UserMsgSegmentView segment={segment} />;
+-    default: {
+-      // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
+-      const exhaustive: never = segment;
+-      void exhaustive;
+-      return null;
+-    }
+-  }
+-});
++
++/* ───────────────── 段动画 keyframes（自包含注入，见文件头说明） ───────────────── */
++
++/**
++ * 原型动画 CSS：sweep 1.8s 无限扫动（工具行 / 子代理头部运行中覆盖层）+
++ * caret 0.9s step-end 闪烁（文本段流式光标）。颜色取 --primary CSS 变量
++ * （shadcn token，hsl 数值格式），不硬编码 hex。prefers-reduced-motion 时关闭。
++ */
++const SEGMENT_ANIMATION_CSS = `
++@keyframes seg-sweep {
++  0% { transform: translateX(-100%); }
++  100% { transform: translateX(100%); }
++}
++@keyframes seg-caret-blink {
++  0%, 100% { opacity: 1; }
++  50% { opacity: 0; }
++}
++.seg-sweep::after {
++  content: "";
++  position: absolute;
++  inset: 0;
++  pointer-events: none;
++  background: linear-gradient(100deg, transparent 30%, hsl(var(--primary) / 0.16) 50%, transparent 70%);
++  animation: seg-sweep 1.8s infinite;
++}
++.seg-caret {
++  animation: seg-caret-blink 0.9s step-end infinite;
++}
++@media (prefers-reduced-motion: reduce) {
++  .seg-sweep::after,
++  .seg-caret {
++    animation: none;
++  }
++}
++`;
++
++const SEGMENT_ANIMATION_STYLE_ID = "turn-segment-views-animations";
++let segmentAnimationsInjected = false;
++
++/**
++ * 文档级幂等注入段动画 keyframes（SSR 安全：服务端无 document 直接跳过，
++ * 动画均在客户端水合后生效）。模块标记 + DOM id 双保险，多实例 / StrictMode
++ * 重复渲染 / 测试多文件隔离下均只注入一份。
++ */
++function ensureSegmentAnimations(): void {
++  if (segmentAnimationsInjected || typeof document === "undefined") return;
++  if (!document.getElementById(SEGMENT_ANIMATION_STYLE_ID)) {
++    const el = document.createElement("style");
++    el.id = SEGMENT_ANIMATION_STYLE_ID;
++    el.textContent = SEGMENT_ANIMATION_CSS;
++    document.head.appendChild(el);
++  }
++  segmentAnimationsInjected = true;
++}
++
++/** 需要动画 CSS 的段组件统一挂载（注入本身幂等，组件卸载不回收——文档级共享）。 */
++function useSegmentAnimations(): void {
++  useEffect(() => {
++    ensureSegmentAnimations();
++  }, []);
++}
++
++/* ───────────────────── props 契约（task-06 / task-12 消费） ───────────────────── */
++
++/** 段类型收窄别名（assembler 只导出 tool/stub 两个，此处补齐其余四类）。 */
++export type TextTurnSegment = Extract<TurnSegment, { kind: "text" }>;
++export type ThinkingTurnSegment = Extract<TurnSegment, { kind: "thinking" }>;
++export type StderrTurnSegment = Extract<TurnSegment, { kind: "stderr" }>;
++/** 文件段（task-08 / design §7.3）：FileMessageCard 的段级数据源。 */
++export type FileTurnSegment = Extract<TurnSegment, { kind: "file" }>;
++/** 子代理容器段：有 children 的 tool 段 + subagent_stub 兜底段（复用同一组件）。 */
++export type SubagentContainerSegment = ToolTurnSegment | StubTurnSegment;
++
++/** 统一入口 props（task-05 provides 契约：字段 [segment]）。 */
++export interface SegmentViewProps {
++  segment: TurnSegment;
++}
++
++export interface TextSegmentViewProps {
++  segment: TextTurnSegment;
++}
++export interface ThinkingRowViewProps {
++  segment: ThinkingTurnSegment;
++}
++export interface ToolRowViewProps {
++  segment: ToolTurnSegment;
++}
++export interface SubagentBlockViewProps {
++  segment: SubagentContainerSegment;
++}
++
++/**
++ * 2026-10-13-subagent-stub-reconcile（FR-01/02）：子代理容器头对账命中产物——
++ * 服务端任务快照（GET /sessions/{id}/tasks 的 AgentSessionTaskRead，按
++ * tool_use_id 关联）的展示最小面。结构化类型：session-panel 页面级经
++ * buildSubagentTaskLookup（use-session-tasks.ts）构建 Map 后经
++ * SubagentTaskLookupContext 下发，本组件不 import hooks 文件（防环）。
++ */
++export interface SubagentReconciledTask {
++  taskName: string;
++  status: "running" | "completed" | "failed" | "stopped";
++  elapsedMs: number | null;
++}
++
++/**
++ * 2026-10-13-subagent-stub-reconcile：子代理容器头对账索引（tool_use_id →
++ * 快照行）。Provider 在 session-panel-page 页面级（同时覆盖时间线与右栏详情
++ * 面板）；null（dialog 弹窗等旧宿主）= 不对账，行为与修复前一致。
++ */
++export const SubagentTaskLookupContext = createContext<
++  Map<string, SubagentReconciledTask> | null
++>(null);
++export interface StderrRowViewProps {
++  segment: StderrTurnSegment;
++}
++/** ql-20260825-011：上下文前导段（默认收起、可展开）。 */
++export interface PreambleSegmentViewProps {
++  segment: Extract<TurnSegment, { kind: "preamble" }>;
++}
++/** ql-20260917-006：上下文压缩续接摘要段（默认收起、可展开，同 preamble 展示语义）。 */
++export interface CompactSegmentViewProps {
++  segment: Extract<TurnSegment, { kind: "compact" }>;
++}
++/** ql-20260917-006：压缩过程状态段（[COMPACT_STATUS] 协议行，渲染层解析 phase）。 */
++export interface CompactStatusRowViewProps {
++  segment: Extract<TurnSegment, { kind: "compact_status" }>;
++}
++/** ql-20260920-006：轮内用户消息段（引导注入留痕，三态右对齐用户气泡）。 */
++export interface UserMsgSegmentViewProps {
++  segment: Extract<TurnSegment, { kind: "user_msg" }>;
++}
++
++/* ───────────────────────────── 内部工具（纯函数） ───────────────────────────── */
++
++/** 摘要截断：空白折叠 + 60 字 + 省略号（规则平移自现有 TurnDetailsList 思考摘要）。 */
++function summaryOf(text: string, max = 60): string {
++  const s = text.replace(/\s+/g, " ").trim();
++  return s.length > max ? `${s.slice(0, max)}…` : s;
++}
++
++/** 工具行耗时：<10s 一位小数（0.3s），≥10s 取整（12s）——原型 t-dur 格式。 */
++function formatToolDuration(ms: number): string {
++  const s = Math.max(0, ms) / 1000;
++  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
++}
++
++/** 子代理块时长：mm:ss（01:24，分钟可 >59）——原型 sa-dur 格式。 */
++function formatClockDuration(ms: number): string {
++  const total = Math.max(0, Math.round(ms / 1000));
++  const p = (n: number) => String(n).padStart(2, "0");
++  return `${p(Math.floor(total / 60))}:${p(total % 60)}`;
++}
++
++/**
++ * 复制文本提取——规则平移自 turn-timeline parseToolRaw 的 copyText 分支
++ * （design §12 解析规则平移不重造；parseToolRaw 未导出且 assembler 的
++ * parseToolUseRaw 是私有函数，本地实现精简版，只用复制语义）：
++ * Bash→command；Write/Edit/Read→file_path（有 content 则附带）；Agent→
++ * description??prompt；通用→完整 args JSON。解析失败（非 JSON，R-07）/ raw
++ * 空串（孤儿 result）→ null（不渲染复制按钮）。
++ */
++function toolCopyText(raw: string, toolName: string | null): string | null {
++  if (!raw) return null;
++  try {
++    const obj = JSON.parse(raw.trim()) as { args?: unknown } | null;
++    if (!obj || typeof obj !== "object") return null;
++    const args = (obj.args && typeof obj.args === "object" ? obj.args : {}) as Record<
++      string,
++      unknown
++    >;
++    const str = (v: unknown) => (typeof v === "string" ? v : null);
++    if (toolName === "Bash") return str(args.command) ?? null;
++    if (toolName === "Write" || toolName === "Edit" || toolName === "Read") {
++      const fp = str(args.file_path) ?? "";
++      const content = str(args.content);
++      return content ? `${fp}\n\n${content}` : fp || null;
++    }
++    if (toolName === "Agent") return str(args.description) ?? str(args.prompt) ?? null;
++    return JSON.stringify(args, null, 2);
++  } catch {
++    return null;
++  }
++}
++
++/** 工具行图标——原型 t-icon 语义映射（未列工具统一 🔧 扳手，同现有 Wrench 语义）。 */
++const TOOL_ICON: Record<string, string> = {
++  Read: "📂",
++  Write: "🎨",
++  Edit: "✏️",
++  Grep: "🔧",
++  Glob: "🔧",
++  Bash: "💻",
++  Task: "🤖",
++  Agent: "🤖",
++};
++
++function toolIconOf(toolName: string | null): string {
++  return (toolName && TOOL_ICON[toolName]) || "🔧";
++}
++
++
++/** 工具状态徽章元数据（图标/颜色/提示文案平移现有 ToolEventCard）。 */
++const TOOL_STATUS_META: Record<
++  ToolTurnSegment["status"],
++  { icon: string; cls: string; title: string }
++> = {
++  ok: { icon: "✓", cls: "text-emerald-600", title: "执行成功" },
++  deny: { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" },
++  running: { icon: "⏳", cls: "text-brand-600", title: "执行中" },
++};
++
++/**
++ * 子代理块状态：tool 段取自身 status；stub 段无状态字段——它是 tool_use 段
++ * 尚未到达（或永不到达）的临时容器，子消息仍在流入，视为 running（后续合并
++ * 迁入 tool 段后由其 status 接管，design §9.5）。
++ */
++function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "deny" {
++  return segment.kind === "subagent_stub" ? "running" : segment.status;
++}
++
++/* ───────── task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）───────── */
++
++/** [TASK_*] 任务状态（tool 段 taskStatus 元数据，task-11 装配）。 */
++type SubagentTaskStatus = "running" | "completed" | "failed" | "stopped";
++
++/**
++ * 块头状态徽标（原型 .st 药丸：bg-running=brand 阶 / done=绿 / 失败=红 / 停止=灰；
++ * 三主题语义阶——brand-* 随主题换肤，emerald/destructive 同既有完成/拒绝点色系）。
++ */
++const TASK_STATUS_BADGE: Record<SubagentTaskStatus, { label: string; cls: string }> = {
++  running: { label: "后台运行中", cls: "bg-brand-100 text-brand-700" },
++  completed: { label: "已完成", cls: "bg-emerald-600/15 text-emerald-600" },
++  failed: { label: "失败", cls: "bg-destructive/15 text-destructive" },
++  stopped: { label: "已停止", cls: "bg-muted text-muted-foreground" },
++};
++
++/**
++ * task-13：子代理容器段的 [TASK_*] 元数据收窄——段带元数据（taskStatus 或
++ * taskAsync 存在 = async 后台派发，task-11 装配）时返回任务状态：taskStatus
++ * 有值即权威（终态即终，不再因 result 配对判完成——async 启动回执 0.1s 配对
++ * 不是完成信号，design §1）；仅 taskAsync 时按 running。stub 段无这些字段恒
++ * null；无元数据的前台阻塞式子代理也恒 null → 消费方走原推导，零回归。
++ */
++function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus | null {
++  if (segment.kind !== "tool") return null;
++  if (segment.taskStatus === undefined && segment.taskAsync === undefined) return null;
++  return segment.taskStatus ?? "running";
++}
++
++/* ───────────── task-03（2026-09-15-subagent-three-pane-display / FR-02 / design §5.E）───────── */
++
++/**
++ * 子代理块头部派生结果（subagentHeaderOf 产出）——SubagentBlockView 两种模式
++ * （紧凑卡片 / 内联展开）与右栏 SubagentDetailPanel 头部共用同一份派生，
++ * 防两处复制漂移。
++ */
++export interface SubagentHeaderInfo {
++  /** 综合状态（[TASK_*] 元数据优先，否则段三态；stub 恒 running）。 */
++  status: SubagentTaskStatus | "ok" | "deny";
++  /** task-13 元数据状态（无元数据 null——消费方据此不渲染状态徽标）。 */
++  metaStatus: SubagentTaskStatus | null;
++  /** 是否运行中（status === "running"，seg-sweep / 展开默认等消费）。 */
++  running: boolean;
++  /** 状态点样式（running=brand 阶 pulse / deny·failed=红 / stopped=灰 / 其余绿）。 */
++  dotCls: string;
++  /** 头部名称（tool 段 primary 优先，回退 subagentType / 「子代理」；stub 无 primary）。 */
++  name: string;
++  /** subagentType 标签（null 不渲染标签）。 */
++  subagentType: string | null;
++  /** task-13 状态徽标（后台运行中/已完成/失败/已停止；无元数据 null）。 */
++  badge: { label: string; cls: string } | null;
++  /** 时长文本（mm:ss / 「运行中」/ null 不渲染——推导规则见 subagentHeaderOf）。 */
++  durationText: string | null;
++}
++
++/**
++ * 子代理块头部公共纯函数（task-03 / design §5.E「复用 SubagentBlockView 头部
++ * 派生逻辑，抽公共纯函数 subagentHeaderOf(segment)」）——名称/状态点/徽标/时长
++ * 一处派生，SubagentBlockView（两模式）与右栏 SubagentDetailPanel 共用。
++ *
++ * 时长推导（task-13 元数据双路径原样收敛）：
++ *   - 元数据终态 → 服务端权威 taskElapsedMs（缺失 null）；
++ *   - 元数据运行中 → 本地走秒 now - startedAt（now 由消费方 tick state 传入，
++ *     纯函数不读时钟）；缺 startedAt 锚点回退最近一次 taskElapsedMs 校准值；
++ *   - 无元数据运行中 → 「运行中」（不读时钟，与原实现一致）；
++ *   - 无元数据终态 → endedAt - startedAt（起止均有才显示）。
++ */
++export function subagentHeaderOf(
++  segment: SubagentContainerSegment,
++  now: number,
++  reconciled?: SubagentReconciledTask | null,
++): SubagentHeaderInfo {
++  const taskSeg = segment.kind === "tool" ? segment : null;
++  const metaStatus = taskMetaStatusOf(segment);
++  // 2026-10-13-subagent-stub-reconcile（FR-01）：对账只在「无任务元数据且段
++  // 三态 running」时生效（stub 恒 running；tool 段已配对结果 ok/deny 不覆盖）
++  // ——元数据 > 对账 > 段三态三级优先，既有路径零回归。
++  const reconciledStatus =
++    reconciled && metaStatus == null && (segment.kind === "subagent_stub" || segment.status === "running")
++      ? reconciled.status
++      : null;
++  const status = metaStatus ?? reconciledStatus ?? subagentStatus(segment);
++  const running = status === "running";
++  const dotCls =
++    status === "running"
++      ? "bg-brand-600 animate-pulse"
++      : status === "deny" || status === "failed"
++        ? "bg-destructive"
++        : status === "stopped"
++          ? "bg-muted-foreground"
++          : "bg-emerald-600";
++  const name =
++    segment.kind === "tool"
++      ? (segment.primary?.trim() || reconciled?.taskName || segment.subagentType || "子代理")
++      : (reconciled?.taskName || segment.subagentType || "子代理");
++  let durationText: string | null = null;
++  if (metaStatus != null && taskSeg != null) {
++    if (metaStatus === "running") {
++      durationText =
++        taskSeg.startedAt != null
++          ? formatClockDuration(now - taskSeg.startedAt)
++          : taskSeg.taskElapsedMs != null
++            ? formatClockDuration(taskSeg.taskElapsedMs)
++            : null;
++    } else {
++      durationText =
++        taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
++    }
++  } else if (reconciledStatus != null) {
++    // 对账路径（FR-01/02）：终态用服务端权威时长；running 占位同原推导。
++    durationText =
++      reconciledStatus === "running"
++        ? "运行中"
++        : reconciled && reconciled.elapsedMs != null
++          ? formatClockDuration(reconciled.elapsedMs)
++          : null;
++  } else if (running) {
++    durationText = "运行中";
++  } else if (
++    segment.kind === "tool" &&
++    segment.startedAt != null &&
++    segment.endedAt != null
++  ) {
++    durationText = formatClockDuration(segment.endedAt - segment.startedAt);
++  }
++  return {
++    status,
++    metaStatus,
++    running,
++    dotCls,
++    name,
++    subagentType: segment.subagentType ?? null,
++    badge:
++      metaStatus != null
++        ? TASK_STATUS_BADGE[metaStatus]
++        : reconciledStatus != null
++          ? TASK_STATUS_BADGE[reconciledStatus]
++          : null,
++    durationText,
++  };
++}
++
++/* ─────────────── 团队 MCP 工具识别与摘要（task-12 / FR-07） ─────────────── */
++
++/** 主控团队 MCP 5 工具（sillyhub-daemon mcp-server.ts registerTool 名单）。 */
++const TEAM_MCP_TOOLS: ReadonlySet<string> = new Set([
++  "dispatch_worker",
++  "get_worker_result",
++  "list_workers",
++  "converge_mission",
++  "report_progress",
++]);
++
++/**
++ * 团队 MCP 工具短名识别：Claude 上报形态带 `mcp__<server>__` 前缀（如
++ * mcp__sillyhub__dispatch_worker），daemon 直报裸名（dispatch_worker）——取末段
++ * 匹配 5 工具白名单；非团队工具返回 null（走既有 ToolRowView 泛化路径）。
++ */
++function teamMcpToolName(toolName: string | null): string | null {
++  if (!toolName) return null;
++  const last = toolName.split("__").pop() ?? "";
++  return TEAM_MCP_TOOLS.has(last) ? last : null;
++}
++
++/** 团队工具 args 解析（raw 为 tool_call JSON；解析失败返回空对象）。 */
++function parseTeamToolArgs(raw: string): Record<string, unknown> {
++  try {
++    const obj = JSON.parse((raw ?? "").trim()) as { args?: unknown } | null;
++    if (obj && typeof obj === "object" && obj.args && typeof obj.args === "object") {
++      return obj.args as Record<string, unknown>;
++    }
++  } catch {
++    // 非 JSON → 空对象（desc 回退既有 primary/raw 链）
++  }
++  return {};
++}
++
++/** 摘要截断（团队工具主参数，40 字）。 */
++function teamBrief(text: string, max = 40): string {
++  const s = text.replace(/\s+/g, " ").trim();
++  return s.length > max ? `${s.slice(0, max)}…` : s;
++}
++
++/**
++ * 团队 MCP 工具主参数摘要（原型 §03 tool-card .cmd 语义）：
++ * dispatch_worker → 「角色 · 目标」；get_worker_result → 读取产出；
++ * converge_mission → 收敛分身产出；list_workers → 列出分身进度；
++ * report_progress → 进度备注。args 空时返回 null（回退既有 desc 链）。
++ */
++function teamToolSummaryOf(tool: string, raw: string): string | null {
++  const args = parseTeamToolArgs(raw);
++  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
++  switch (tool) {
++    case "dispatch_worker": {
++      const role = str(args.role);
++      const objective = str(args.objective);
++      if (!role && !objective) return null;
++      return objective ? `${role ?? "分身"} · ${teamBrief(objective)}` : (role ?? "分身");
++    }
++    case "get_worker_result": {
++      const role = str(args.role) ?? str(args.run_id);
++      return role ? `读取 ${teamBrief(role)} 产出` : "读取分身产出";
++    }
++    case "converge_mission":
++      return "收敛分身产出";
++    case "list_workers":
++      return "列出分身进度";
++    case "report_progress": {
++      const note = str(args.note) ?? str(args.progress);
++      return note ? `进度：${teamBrief(note)}` : "上报进度";
++    }
++    default:
++      return null;
++  }
++}
++
++/** dispatch_worker tool 段 → 分身段块（SegmentView 升级路由用，见 TeamWorkerBlockView）。 */
++function isTeamDispatchTool(toolName: string | null): boolean {
++  return teamMcpToolName(toolName) === "dispatch_worker";
++}
++
++/**
++ * ql-20260825-011：用户是否正在选中文字（选区非空）。可点击折叠行（思考/工具/
++ * 子代理/分身/前导）的 onClick 先查本函数——拖选文本松开鼠标触发的 click 不再
++ * 触发折叠/展开，选中内容可正常复制（用户反馈「聊天页选不了文字想复制不方便」）。
++ */
++function hasActiveTextSelection(): boolean {
++  if (typeof window === "undefined") return false;
++  const sel = window.getSelection();
++  return sel != null && !sel.isCollapsed && sel.toString().length > 0;
++}
++
++/* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
++
++/**
++ * 文本段：无框正文（MarkdownText 直接铺在时间线背景上；2026-09-20-agent-reply-
++ * no-bubble 去气泡——原 rounded-2xl 卡片气泡容器废弃，字号行高交由 MarkdownText
++ * 内部与既有 .markdown-text 规则承担）。streaming=true 时尾部流式光标（原型
++ * streaming-caret：7×15px 竖条（brand 阶随主题），blink 0.9s step-end；因 MarkdownText 是
++ * 块级容器，光标落在正文末段之后的新行行首，见文件头偏差说明 1）。
++ */
++export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSegmentViewProps) {
++  useSegmentAnimations();
++  return (
++    // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
++    // 2026-09-20-agent-reply-no-bubble：去气泡——容器改无框正文（w-full +
++    // max-w-[min(100%,48rem)]，铺在时间线背景上），排版交 .markdown-text 既有
++    // 规则（原 ql-20260909-009 的 80% 收窄 + 描边分层形态被此取代）。
++    <div className="seg-text-body group relative w-full max-w-[min(100%,48rem)] self-start">
++      <MarkdownText content={segment.text} />
++      {segment.streaming && (
++        <span
++          aria-hidden
++          className="seg-caret ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-brand-600 align-[-2px]"
++        />
++      )}
++      <CopyButton text={segment.text} />
++    </div>
++  );
++});
++
++/**
++ * 思考折叠行（原型 seg-thinking / deepseek ReasoningRow 风格）：折叠头部 =
++ * 箭头 + 💭 思考过程 + 摘要（空白折叠 60 字截断，流式自动跟随段文本更新）；
++ * streaming 时标题旁「思考中」脉冲标记；默认折叠（R-03 展开才挂载正文）；
++ * 展开正文 MarkdownText 限高 180px 滚动。
++ */
++export const ThinkingRowView = memo(function ThinkingRowView({ segment }: ThinkingRowViewProps) {
++  const [open, setOpen] = useState(false);
++  const summary = summaryOf(segment.text);
++  return (
++    <div className="w-full">
++      <button
++        type="button"
++        onClick={() => {
++          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
++          setOpen(!open);
++        }}
++        aria-expanded={open}
++        className="flex w-full cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] text-muted-foreground hover:bg-muted"
++      >
++        <span
++          aria-hidden
++          className={cn(
++            "shrink-0 text-[9px] transition-transform duration-150",
++            open && "rotate-90",
++          )}
++        >
++          ▶
++        </span>
++        <span className="shrink-0 font-medium">💭 思考过程</span>
++        {segment.streaming && (
++          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-brand-600">
++            <span aria-hidden className="h-[5px] w-[5px] animate-pulse rounded-full bg-brand-600" />
++            思考中
++          </span>
++        )}
++        {!open && summary && (
++          <span className="ml-1 min-w-0 flex-1 truncate opacity-75">{summary}</span>
++        )}
++      </button>
++      {open && (
++        /* task-11（FR-07）：group+relative 外包一层挂 CopyButton（右下角 hover 浮出）——
++            不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
++        <div className="group relative mt-1">
++          <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
++            <MarkdownText content={segment.text} />
++          </div>
++          <CopyButton text={segment.text} />
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * 工具行（原型 seg-tool / deepseek ToolRow 风格）：单行摘要 = 图标 + 工具名 +
++ * 主参数（truncate）+ 状态徽章（✓/✗/⏳）+ 耗时（起止均有时才显示；运行中不显
++ * 秒数——纯组件不读时钟，live 计时归状态条）+ 复制按钮（copyText 规则平移）。
++ * status=running 时整行 seg-sweep 扫动动画（1.8s）。点击整行展开 result
++ * （MarkdownText，默认折叠，限高 200px 滚动）；运行中无 result 展开显示
++ * 「执行中…」占位。toolName 为空：孤儿 result 段显示「工具结果」，解析失败
++ * （R-07）主参数位置原样显示 raw。
++ *
++ * task-12（2026-08-22-team-session-unify FR-07）团队 MCP 工具泛化微调（原型 §03
++ * tool-card）：5 团队工具（mcp__server__ 前缀或裸名）→ 👥 图标 + mcp 来源标识 +
++ * 短名（剥前缀）+ 角色/目标主参数摘要；其余工具渲染零改动。
++ */
++export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewProps) {
++  useSegmentAnimations();
++  const [open, setOpen] = useState(false);
++  const running = segment.status === "running";
++  const badge = TOOL_STATUS_META[segment.status];
++  const duration =
++    segment.startedAt != null && segment.endedAt != null
++      ? formatToolDuration(segment.endedAt - segment.startedAt)
++      : null;
++  const copyText = toolCopyText(segment.raw, segment.toolName);
++  const teamTool = teamMcpToolName(segment.toolName);
++  const teamSummary = teamTool ? teamToolSummaryOf(teamTool, segment.raw) : null;
++  const desc = teamSummary ?? segment.primary ?? (segment.raw || null);
++  return (
++    <div className="w-full">
++      <div
++        role="button"
++        tabIndex={0}
++        aria-expanded={open}
++        onClick={() => {
++          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
++          setOpen(!open);
++        }}
++        onKeyDown={(e) => {
++          if (e.key === "Enter" || e.key === " ") {
++            e.preventDefault();
++            setOpen(!open);
++          }
++        }}
++        className={cn(
++          "relative flex w-full cursor-pointer select-text items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
++          running && "seg-sweep",
++        )}
++      >
++        <span aria-hidden className="shrink-0 text-xs">
++          {teamTool ? "👥" : toolIconOf(segment.toolName)}
++        </span>
++        {teamTool && (
++          <span
++            className="shrink-0 rounded border border-brand-200 bg-brand-50 px-1 py-px text-[9.5px] font-semibold leading-none text-brand-700"
++            title="团队 MCP 工具"
++          >
++            mcp
++          </span>
++        )}
++        <span className="shrink-0 text-[11.5px] font-semibold text-brand-600">
++          {teamTool ?? segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
++        </span>
++        {desc && (
++          <span
++            className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
++            title={segment.raw || desc}
++          >
++            {desc}
++          </span>
++        )}
++        <span
++          className={cn("ml-auto shrink-0 font-mono text-[11px]", badge.cls)}
++          title={badge.title}
++          aria-label={badge.title}
++        >
++          {badge.icon}
++        </span>
++        {duration && (
++          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
++            {duration}
++          </span>
++        )}
++        {copyText && (
++          <button
++            type="button"
++            onClick={(e) => {
++              e.stopPropagation();
++              void copyTextToClipboard(copyText);
++            }}
++            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
++            title="复制命令"
++          >
++            复制
++          </button>
++        )}
++      </div>
++      {open && (
++        <div className="mt-1 max-h-[200px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
++          {/* ql-20260824-018/019：展开区内容（参数详情 + result 区）整体收编到
++              tool-args-detail 的 ToolExpandBody——Write 内容预览 / Edit 行级 diff /
++              Bash 纯文本输出+复制 / Read 行范围+复制 / Grep 参数+命中数 / Agent
++              Prompt 预览 / 其余工具通用参数 JSON 兜底。 */}
++          <ToolExpandBody segment={segment} running={running} />
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * 子代理嵌套块（原型 seg-subagent）：容器 = indigo 底嵌套卡；头部 = 状态点
++ * （running 蓝色脉冲 / ok 绿 / deny 红）+ 🤖 名称（tool.primary 或 subagentType，
++ * stub 显示 subagentType 或「子代理」）+ subagentType 标签 + 时长（起止差 mm:ss；
++ * 运行中显示「运行中」，不读时钟）。运行中头部 seg-sweep 扫动。默认：运行中
++ * 展开、完成折叠，均可点击切换；running→终态过渡时自动收敛为折叠（跟随
++ * 「完成折叠」默认，task-05 implementation）。body 内 children 段序列经
++ * SegmentView 递归渲染（支持 depth>1 嵌套），折叠时不挂载（R-03）。
++ *
++ * task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）：段带
++ * [TASK_*] 元数据（async 后台派发，task-11 装配）时块头改元数据驱动——状态徽标
++ * 「后台运行中 / 已完成 / 失败 / 已停止」+ 时长（运行中本地走秒；终态 = 服务端
++ * 权威 taskElapsedMs 真实用时，不再显示回执差值 00:00），正文尾行补最近一条
++ * [TASK_*] 消费后的进度摘要（taskToolName + taskSummary）。走秒为组件局部 tick
++ *（仅 async 运行中启动）——task-05「纯组件不读本地时钟」约束在此让位：运行中
++ * 不显示秒数会重新制造「00:00 假完成」盲区。无元数据段走原推导（前台阻塞式
++ * 子代理零回归）。
++ *
++ * task-01（2026-09-15-subagent-three-pane-display / FR-02 / FR-05 / D-001@v1 /
++ * D-002@v1，design §5.C）：双模式——useSubagentPanel() 消费到右栏面板 context
++ * （page 模式 Provider）时渲染中栏紧凑卡片：仅头部行（状态点/🤖/名称/类型标签/
++ * 徽标/时长全复用，running 时 seg-sweep 保留），不内联 children、无折叠语义
++ * （aria-expanded 移除）；点击头部 toggle 右栏（未激活 → openSubagent(segment.id)，
++ * 已激活 → closeSubagent()），根容器带 data-segment-id 锚点 + activeId 命中
++ * ring-brand-300 描边高亮。无 context（dialog 弹窗/悬浮宿主等旧消费方）走原
++ * 内联展开分支，行为零回归（FR-05）。
++ */
++export const SubagentBlockView = memo(function SubagentBlockView({
++  segment,
++}: SubagentBlockViewProps) {
++  useSegmentAnimations();
++  // task-01：右栏面板 context——null（dialog 等旧宿主无 Provider）走下方原内联
++  // 展开分支；有值（page 模式）提前 return 紧凑卡片。两分支共享全部头部派生
++  //（metaStatus/taskSeg/durationText/dotCls/name），零复制粘贴。
++  const panel = useSubagentPanel();
++  // 2026-10-13-subagent-stub-reconcile：任务快照对账（tool_use_id = 段 id）——
++  // 仅在「无元数据且段三态 running」时生效（与 subagentHeaderOf 同一优先级
++  // 契约），历史窗口截断 stub 按快照收敛名称/徽标/时长。
++  const taskLookup = useContext(SubagentTaskLookupContext);
++  const reconciledRaw = taskLookup?.get(segment.id) ?? null;
++  const reconciled: SubagentReconciledTask | null =
++    reconciledRaw && taskMetaStatusOf(segment) == null && (segment.kind === "subagent_stub" || segment.status === "running")
++      ? reconciledRaw
++      : null;
++  // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
++  const taskSeg = segment.kind === "tool" ? segment : null;
++  const metaStatus = taskMetaStatusOf(segment);
++  const status = metaStatus ?? reconciled?.status ?? subagentStatus(segment);
++  const running = status === "running";
++  const [open, setOpen] = useState(running);
++  // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
++  const prevRunningRef = useRef(running);
++  useEffect(() => {
++    if (prevRunningRef.current && !running) setOpen(false);
++    prevRunningRef.current = running;
++  }, [running]);
++
++  // task-13：后台异步运行中本地走秒（FR-06 渲染经济性对齐 subagent-catalog 模式：
++  // tick 是组件局部 state，仅 async 运行中启动，终态/卸载清理）；锚点 = 段
++  // startedAt（派发时刻）。
++  const [now, setNow] = useState<number>(() => Date.now());
++  const asyncRunning = metaStatus === "running";
++  useEffect(() => {
++    if (!asyncRunning) return;
++    const id = window.setInterval(() => setNow(Date.now()), 1000);
++    return () => window.clearInterval(id);
++  }, [asyncRunning]);
++
++  // task-03（design §5.E）：头部派生收敛到共享纯函数 subagentHeaderOf（状态点/
++  // 名称/徽标/时长一处派生）——右栏 SubagentDetailPanel 头部复用同一份逻辑，
++  // 防两处复制漂移；now 走上方 tick state（async 运行中走秒）；对账命中经第三
++  // 参传入（纯函数内同一优先级契约再裁决一次，双保险）。
++  const header = subagentHeaderOf(segment, now, reconciled);
++  const { dotCls, name, durationText } = header;
++  // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
++  // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS
++  // 行）；终态 = 终态文案 + 摘要（NOTIFICATION 行，taskToolName 已陈旧不展示）。
++  // 无摘要不渲染。
++  const progressLine: { label: string | null; tool: string | null; summary: string } | null =
++    (() => {
++      if (taskSeg == null || metaStatus == null) return null;
++      const summary = taskSeg.taskSummary?.trim() ?? "";
++      if (metaStatus === "running") {
++        const tool = taskSeg.taskToolName?.trim() ?? "";
++        return tool || summary ? { label: null, tool: tool || null, summary } : null;
++      }
++      return summary
++        ? { label: TASK_STATUS_BADGE[metaStatus].label, tool: null, summary }
++        : null;
++    })();
++  // 头部行内容子结构（task-01 抽出，两分支共享）：状态点 / 🤖 / 名称 / 类型
++  // 标签 / task-13 徽标 / 时长——紧凑卡片与内联展开同源派生，避免大段 JSX
++  // 复制漂移。
++  const headerContent = (
++    <>
++      <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", dotCls)} />
++      <span aria-hidden className="shrink-0">
++        🤖
++      </span>
++      <span className="min-w-0 truncate font-semibold">{name}</span>
++      {segment.subagentType && (
++        <span className="shrink-0 rounded-lg border border-border bg-card px-1.5 text-[10px] text-muted-foreground">
++          {segment.subagentType}
++        </span>
++      )}
++      {/* task-13：元数据驱动的块头状态徽标（后台运行中/已完成/失败/已停止，
++          原型 .st 药丸）；前台路径不渲染（保持原形态零回归）。 */}
++      {metaStatus != null && (
++        <span
++          className={cn(
++            "shrink-0 rounded-[5px] px-2 py-px text-[10.5px] font-semibold",
++            TASK_STATUS_BADGE[metaStatus].cls,
++          )}
++        >
++          {TASK_STATUS_BADGE[metaStatus].label}
++        </span>
++      )}
++      {durationText && (
++        <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
++          {durationText}
++        </span>
++      )}
++    </>
++  );
++
++  // task-01：紧凑卡片分支（page 模式有 context）——中栏只显头部行，无展开
++  // body、不内联 children（详情移右栏）；头部仍是可点击 button（含 Enter/Space
++  // 键盘触发），但无折叠语义（不渲染 aria-expanded）；点击 toggle 右栏
++  //（未激活 → openSubagent(segment.id)，已激活 → closeSubagent()，D-002@v1 ④）；
++  // 根容器 data-segment-id 供右栏/目录联动定位，activeId 命中加 brand 阶
++  // ring 描边高亮。
++  if (panel) {
++    const active = panel.activeId === segment.id;
++    const togglePanel = () => {
++      if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发
++      if (active) panel.closeSubagent();
++      else panel.openSubagent(segment.id);
++    };
++    return (
++      <div
++        data-segment-id={segment.id}
++        className={cn(
++          "w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50",
++          active && "ring-1 ring-brand-300",
++        )}
++      >
++        <div
++          role="button"
++          tabIndex={0}
++          onClick={togglePanel}
++          onKeyDown={(e) => {
++            if (e.key === "Enter" || e.key === " ") {
++              e.preventDefault();
++              togglePanel();
++            }
++          }}
++          className={cn(
++            "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
++            running && "seg-sweep",
++          )}
++        >
++          {headerContent}
++        </div>
++      </div>
++    );
++  }
++
++  return (
++    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
++      <div
++        role="button"
++        tabIndex={0}
++        aria-expanded={open}
++        onClick={() => {
++          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
++          setOpen(!open);
++        }}
++        onKeyDown={(e) => {
++          if (e.key === "Enter" || e.key === " ") {
++            e.preventDefault();
++            setOpen(!open);
++          }
++        }}
++        className={cn(
++          "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
++          running && "seg-sweep",
++        )}
++      >
++        {headerContent}
++      </div>
++      {open && (
++        <div className="seg-subagent-body flex flex-col gap-[5px] border-t border-indigo-200 px-3.5 pb-2.5 pl-5 pt-2">
++          {segment.children.map((child) => (
++            <SegmentView key={child.id} segment={child} />
++          ))}
++          {progressLine && (
++            <p
++              className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10.5px] text-muted-foreground"
++              title={`${progressLine.tool ?? progressLine.label ?? ""} ${progressLine.summary}`.trim()}
++            >
++              <span aria-hidden className="shrink-0 text-muted-foreground/70">
++                └
++              </span>
++              {progressLine.label && (
++                <span
++                  className={cn(
++                    "shrink-0 font-semibold",
++                    metaStatus === "completed"
++                      ? "text-emerald-600"
++                      : metaStatus === "failed"
++                        ? "text-destructive"
++                        : "text-muted-foreground",
++                  )}
++                >
++                  {progressLine.label}
++                </span>
++              )}
++              {progressLine.tool && (
++                <span className="shrink-0 font-semibold text-brand-600">
++                  {progressLine.tool}
++                </span>
++              )}
++              {progressLine.summary && (
++                <span className="min-w-0 truncate">{progressLine.summary}</span>
++              )}
++            </p>
++          )}
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * stderr 警示行：⚠ 前缀 + amber 文本（样式平移现有 TurnDetailsList stderr 行，
++ * 原型 --amber 语义对应）。whitespace-pre-wrap 保留原始换行。
++ */
++export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowViewProps) {
++  return (
++    <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
++      <span aria-hidden className="shrink-0">
++        ⚠
++      </span>
++      <span className="min-w-0 whitespace-pre-wrap break-words">{segment.text}</span>
++    </div>
++  );
++});
++
++/**
++ * 上下文前导卡（ql-20260825-011 收紧展示）：进度视图专属（对话视图不渲染
++ * preamble 段），**默认收起**、点击头部展开原文——去除原「（创建轮，仅 AI
++ * 可见）」括号说明（用户反馈），标题带字符数提示。正文 select-text 可选中
++ * 复制；拖选不触发收起（hasActiveTextSelection 守卫）。
++ */
++export const PreambleSegmentView = memo(function PreambleSegmentView({
++  segment,
++}: PreambleSegmentViewProps) {
++  const [open, setOpen] = useState(false);
++  const charCount = segment.text.length;
++  return (
++    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++      <button
++        type="button"
++        onClick={() => {
++          if (hasActiveTextSelection()) return;
++          setOpen(!open);
++        }}
++        aria-expanded={open}
++        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
++      >
++        <span
++          aria-hidden
++          className={cn(
++            "shrink-0 text-[9px] transition-transform duration-150",
++            open && "rotate-90",
++          )}
++        >
++          ▶
++        </span>
++        <span className="shrink-0 font-medium">上下文注入</span>
++        <span className="shrink-0 opacity-75">{`（${charCount} 字，已随消息发送）`}</span>
++      </button>
++      {open && (
++        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
++          {segment.text}
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * 上下文压缩续接摘要卡（ql-20260917-006）：CLI 自动 compaction 后注入的结构化
++ * 摘要（"This session is being continued from a previous conversation..."）——
++ * 非用户答复，此前被当回复气泡整段刷屏。「全部（进度）」视图专属（对话视图改由
++ * CompactNoticeChip 显示一行短提示），**默认收起**、点击头部展开全文（展示语义
++ * 平移 PreambleSegmentView：字符数提示 + 拖选不触发收起守卫）。
++ */
++export const CompactSegmentView = memo(function CompactSegmentView({
++  segment,
++}: CompactSegmentViewProps) {
++  const [open, setOpen] = useState(false);
++  const charCount = segment.text.length;
++  return (
++    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++      <button
++        type="button"
++        onClick={() => {
++          if (hasActiveTextSelection()) return;
++          setOpen(!open);
++        }}
++        aria-expanded={open}
++        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
++      >
++        <span
++          aria-hidden
++          className={cn(
++            "shrink-0 text-[9px] transition-transform duration-150",
++            open && "rotate-90",
++          )}
++        >
++          ▶
++        </span>
++        <span className="shrink-0 font-medium">上下文已重新压缩</span>
++        <span className="shrink-0 opacity-75">{`（${charCount} 字，摘要已注入新窗口）`}</span>
++      </button>
++      {open && (
++        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
++          {segment.text}
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * 对话视图压缩短提示（ql-20260917-006）：compact 摘要段在「对话」视图的原位
++ * 替换渲染——一行弱化提示替代大段摘要气泡（全文进「全部（进度）」视图
++ * CompactSegmentView 折叠卡）。独立于 SegmentView 分发（对话分支特判渲染）。
++ */
++export function CompactNoticeChip() {
++  return (
++    <div className="flex select-none items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground">
++      <span aria-hidden className="shrink-0">
++        ⇄
++      </span>
++      <span>上下文已重新压缩</span>
++    </div>
++  );
++}
++
++/**
++ * 压缩过程状态行（ql-20260917-006）：daemon [COMPACT_STATUS] 协议行的渲染——
++ * phase=compacting 显示「上下文正在重新压缩…」（运行中轮的实时提示，用户要求的
++ * 「压缩过程中回显」）；failed 显示 amber 失败行（压缩失败时续接摘要不会到达，
++ * 这是唯一可见信号）；success 返回 null（紧随的 compact 摘要段已是「已重新压缩」
++ * 标记，避免双提示）。坏 JSON 容错按 compacting 处理（宁可多显示一行进行中提示
++ * 也不吞失败信号）。
++ */
++export const CompactStatusRowView = memo(function CompactStatusRowView({
++  segment,
++}: CompactStatusRowViewProps) {
++  let phase = "compacting";
++  let error: string | undefined;
++  try {
++    const parsed = JSON.parse(segment.text) as { phase?: unknown; error?: unknown };
++    if (parsed.phase === "success" || parsed.phase === "failed") phase = parsed.phase;
++    if (typeof parsed.error === "string" && parsed.error) error = parsed.error;
++  } catch {
++    // 坏 JSON：保持 compacting 默认展示（容错不抛错）。
++  }
++  if (phase === "success") return null;
++  if (phase === "failed") {
++    return (
++      <div className="flex items-start gap-1.5 px-1 py-0.5 text-[11px] text-amber-700">
++        <span aria-hidden className="shrink-0">
++          ⚠
++        </span>
++        <span className="min-w-0 whitespace-pre-wrap break-words">
++          上下文压缩失败{error ? `：${error}` : ""}
++        </span>
++      </div>
++    );
++  }
++  return (
++    <div className="flex select-none items-center gap-1.5 px-1 py-0.5 text-[11px] text-muted-foreground">
++      <span
++        aria-hidden
++        className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border-[1.5px] border-muted-foreground/30 border-t-muted-foreground"
++      />
++      <span>上下文正在重新压缩…</span>
++    </div>
++  );
++});
++
++/* ────────────── 轮内用户消息段（ql-20260920-006 / 2026-09-18-single-chat-steering 修订） ────────────── */
++
++/**
++ * 轮内用户消息段渲染：mid-turn 引导注入的 user_input 留痕——右对齐用户气泡，
++ * 随段序（实时追加 / 回放按 ts 插入）停在轮内真实时间位置（输出之间），不再
++ * 前移到轮次 prompt 也不垫在时间线末尾。三态视觉平移自原 streamFooter 版
++ * SteeredMessagesFooter（session-panel-page.tsx 留档类名），气泡 token 与既有
++ * 用户气泡一致（bg-primary / brand 语义阶）：
++ *   - steering：虚线 brand 气泡 + 脉冲点 +「引导中 · 本轮工具间隙投递」；
++ *   - delivered：bg-primary 气泡 + emerald「✓ 已投递」小标；
++ *   - ended：弱化气泡（opacity-70）+「本轮已结束，消息未投递」（R-04 如实暴露）。
++ * data-steered-msg={phase} 供测试断言（自旧 footer 迁移）。文本经
++ * parseAttachmentMarkers 剥附件标记行（同 prompt 气泡展示口径）。
++ */
++export const UserMsgSegmentView = memo(function UserMsgSegmentView({
++  segment,
++}: UserMsgSegmentViewProps) {
++  const text = parseAttachmentMarkers(segment.text).text;
++  return (
++    <div
++      data-steered-msg={segment.phase}
++      className="flex items-end justify-end gap-1.5"
++    >
++      <div className="max-w-[80%]">
++        {segment.phase === "steering" ? (
++          <>
++            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border-2 border-dashed border-brand-400 bg-brand-50 px-4 py-2.5 text-sm leading-6 text-foreground">
++              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
++              <InlineAttRefTextWithPreview text={text} />
++            </div>
++            <p className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium text-brand-600">
++              <span
++                aria-hidden
++                className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-500"
++              />
++              引导中 · 本轮工具间隙投递
++            </p>
++          </>
++        ) : segment.phase === "delivered" ? (
++          <>
++            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-primary">
++              {/* task-06：引导段正文行内引用标签化（蓝色主气泡内用 onPrimary 色调）。 */}
++              <InlineAttRefTextWithPreview text={text} tone="onPrimary" />
++            </div>
++            <p className="mt-1 text-right text-[11px] text-emerald-600">
++              ✓ 已投递，agent 已收到引导
++            </p>
++          </>
++        ) : (
++          <>
++            <div className="turn-bubble whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-border bg-muted/50 px-4 py-2.5 text-sm leading-6 text-muted-foreground opacity-70">
++              {/* task-06：引导段正文行内引用标签化（与主气泡同口径）。 */}
++              <InlineAttRefTextWithPreview text={text} />
++            </div>
++            <p className="mt-1 text-right text-[11px] text-muted-foreground">
++              本轮已结束，消息未投递
++            </p>
++          </>
++        )}
++      </div>
++    </div>
++  );
++});
++
++/* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
++
++/** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
++ * 段族文件保持零跨模块依赖，故独立维护同款映射）。
++ * task-13：bg_running / stopped 为 [TASK_*] 元数据映射态——async 后台派发运行中
++ * 显示「后台运行中」（brand 阶），任务被停止显示灰；无元数据路径不产生这两态。 */
++const WORKER_STATUS_META: Record<string, { label: string; cls: string }> = {
++  pending: { label: "排队中", cls: "text-muted-foreground" },
++  running: { label: "运行中", cls: "text-brand-700" },
++  bg_running: { label: "后台运行中", cls: "text-brand-700" },
++  completed: { label: "已完成", cls: "text-emerald-700" },
++  failed: { label: "失败", cls: "text-red-600" },
++  killed: { label: "已终止", cls: "text-muted-foreground" },
++  cancelled: { label: "已取消", cls: "text-muted-foreground" },
++  interrupted: { label: "已打断", cls: "text-muted-foreground" },
++  stopped: { label: "已停止", cls: "text-muted-foreground" },
++};
++
++const WORKER_STATUS_FALLBACK = { label: "未知", cls: "text-muted-foreground" };
++
++export interface TeamWorkerBlockProps {
++  /** 分身角色（dispatch_worker args.role；缺省「分身」）。 */
++  role: string | null;
++  /** 分身 run 状态（pending/running/completed/failed/killed…，未知值有兜底）。 */
++  status: string;
++  /** 分身目标（dispatch_worker args.objective）。 */
++  objective?: string | null;
++  /** 耗时（ms，起止差——纯组件不读本地时钟，由调用方传入）。 */
++  durationMs?: number | null;
++  /** 目标工作区徽标：名称 + 类型（类型配色走 workspaceTypeBadge 词表）。 */
++  workspaceName?: string | null;
++  workspaceType?: string | null;
++  /** 目标工作区 id 短标识（无名称时兜底展示 #xxxxxxxx，原型 §03 ws-tag 语义）。 */
++  workspaceId?: string | null;
++  /** body 内容（分身归属日志/产物；SegmentView 路由为 children 段递归）。 */
++  children?: ReactNode;
++}
++
++/**
++ * 分身段块（原型 §03 violet `<details>` .worker 语义，实现已迁 brand 语义阶
++ * ql-20260828-007-7dcf）：brand 折叠卡——头部 =
++ * 👥 分身「角色」+ 状态 + mm:ss 耗时 + 目标工作区徽标；body = 目标一行 + children
++ * （分身日志/产物）。运行中默认展开 + 无扫动（头部轻量），终态默认折叠，点击切换；
++ * running→终态过渡自动收敛折叠（对齐 SubagentBlockView）。无 children 时显示
++ * 日志/产物入口预留说明。
++ *
++ * 数据两条路：① SegmentView 升级路由——dispatch_worker tool 段（主控 MCP 派发
++ * 调用，其 children 为分身归属日志段）自动进本组件；② 父层直传 props（task-11
++ * 接线真实工作区名称/类型徽标）。
++ */
++export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
++  role,
++  status,
++  objective,
++  durationMs,
++  workspaceName,
++  workspaceType,
++  workspaceId,
++  children,
++}: TeamWorkerBlockProps) {
++  useSegmentAnimations();
++  const wsMeta = WORKER_STATUS_META[status] ?? WORKER_STATUS_FALLBACK;
++  // task-13：bg_running（[TASK_*] 元数据映射态）与 running 同属运行中口径。
++  const running = status === "pending" || status === "running" || status === "bg_running";
++  const [open, setOpen] = useState(running);
++  // running → 终态过渡：收敛为折叠（同 SubagentBlockView 生命周期语义）。
++  const prevRunningRef = useRef(running);
++  useEffect(() => {
++    if (prevRunningRef.current && !running) setOpen(false);
++    prevRunningRef.current = running;
++  }, [running]);
++
++  const hasWs = Boolean(workspaceName || workspaceId);
++  return (
++    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
++      <div
++        role="button"
++        tabIndex={0}
++        aria-expanded={open}
++        onClick={() => {
++          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
++          setOpen(!open);
++        }}
++        onKeyDown={(e) => {
++          if (e.key === "Enter" || e.key === " ") {
++            e.preventDefault();
++            setOpen(!open);
++          }
++        }}
++        className="flex cursor-pointer select-text items-center gap-2 px-3 py-[7px] text-xs"
++      >
++        <span aria-hidden className="shrink-0">
++          👥
++        </span>
++        <span className="min-w-0 shrink-0 truncate font-semibold text-brand-700">
++          {`分身「${role || "分身"}」`}
++        </span>
++        <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>{wsMeta.label}</span>
++        {durationMs != null && (
++          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
++            {formatClockDuration(durationMs)}
++          </span>
++        )}
++        {hasWs && (
++          <span
++            className={cn(
++              "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
++              workspaceName
++                ? workspaceTypeBadge(workspaceType).className
++                : "border-brand-200 bg-card font-mono text-brand-700",
++            )}
++            title={workspaceId ?? workspaceName ?? undefined}
++          >
++            {workspaceName || (workspaceId ? `#${workspaceId.slice(0, 8)}` : "")}
++          </span>
++        )}
++      </div>
++      {open && (
++        <div className="flex flex-col gap-[5px] border-t border-dashed border-brand-200 bg-card px-3 pb-2.5 pt-2">
++          {objective && (
++            <p className="text-[11.5px] text-muted-foreground">{`目标：${objective}`}</p>
++          )}
++          {Children.count(children) > 0 ? (
++            children
++          ) : (
++            <p className="text-[11px] text-muted-foreground/80">
++              日志与产物入口（接线后开放）
++            </p>
++          )}
++        </div>
++      )}
++    </div>
++  );
++});
++
++/**
++ * dispatch_worker tool 段 → TeamWorkerBlockProps（args 解析 + 段三态映射）。
++ * task-13（FR-07）：段带 [TASK_*] 元数据（async 后台派发）时状态/时长优先走
++ * 元数据——taskStatus 终态即终（不再被段三态误判 completed），运行中映射
++ * bg_running（头部「后台运行中」）；时长终态取服务端 taskElapsedMs，运行中
++ * 不显示冻结值（本组件纯展示不读本地时钟，走秒归子代理块/目录）。无元数据
++ * 走原段三态映射（团队路径零回归）。
++ */
++function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockProps {
++  const args = parseTeamToolArgs(segment.raw);
++  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
++  const metaStatus = taskMetaStatusOf(segment);
++  return {
++    role: str(args.role),
++    status:
++      metaStatus === "completed"
++        ? "completed"
++        : metaStatus === "failed"
++          ? "failed"
++          : metaStatus === "stopped"
++            ? "stopped"
++            : metaStatus === "running"
++              ? (segment.taskAsync ? "bg_running" : "running")
++              : // 段三态 → run 状态口径（running/ok/deny → running/completed/failed）
++                segment.status === "ok"
++                ? "completed"
++                : segment.status === "deny"
++                  ? "failed"
++                  : "running",
++    objective: str(args.objective),
++    durationMs:
++      metaStatus === "running"
++        ? null
++        : metaStatus != null
++          ? (segment.taskElapsedMs ?? null)
++          : segment.startedAt != null && segment.endedAt != null
++            ? segment.endedAt - segment.startedAt
++            : null,
++    workspaceId: str(args.target_workspace_id),
++    children: segment.children.map((child) => (
++      <SegmentView key={child.id} segment={child} />
++    )),
++  };
++}
++
++/* ────────────── 轮头分叉入口（2026-09-22-session-fork-continuation task-07 / FR-01 / FR-04） ────────────── */
++
++/** caps sessionFork 三档（@/lib/provider-caps 单源派生，勿手抄字面量）。 */
++export type SessionForkTier = ProviderCaps["sessionFork"];
++
++/** 轮头「⑂ 从此分叉」入口 props（纯展示零请求；挂载接线归 task-08）。 */
++export interface TurnForkEntryProps {
++  /** 会话引擎 provider（经 getProviderCaps 查 sessionFork 档位，单一数据源）。 */
++  provider: string;
++  /**
++   * 该轮 run 状态（turn-timeline TurnUiStatus 字面量）。进行中三态
++   * （pending/running/interrupting）置灰——对齐 backend fork 409 口径
++   * （ACTIVE_RUN_STATUSES=pending/running/pending_approval，interrupting
++   * 映射自 running，本质同属未终态）。
++   */
++  runStatus: string;
++  /**
++   * 该轮引擎锚点（AgentRun.engine_anchor，经 runs 快照注入——挂载方数据源）。
++   * native 档缺失（null/undefined/空串）置灰「该轮缺少引擎锚点」（存量轮
++   * 不回填，D-011 故障面：入口灰即降级面，不炸链路）；seed 档种子路径不
++   * 消费锚点，不受此门控。
++   */
++  engineAnchor?: string | null;
++  /** 点击回调（上抛挂载方开确认弹层；置灰态不触发）。 */
++  onFork: () => void;
++}
++
++/**
++ * 轮头动作区「⑂ 从此分叉」入口（design Wave3 第 1 点 / FR-01，原型
++ * prototype-session-fork.html .turn-head .fork-btn）——三重门控纯展示组件：
++ *
++ *   1. caps 门控：provider sessionFork='none'（cursor / 未知引擎）不渲染；
++ *   2. 终态门控：该轮 run 进行中（pending/running/interrupting）置灰
++ *      「⑂ 进行中不可分叉」（FR-01 场景：进行中轮不可选）；
++ *   3. 锚点门控：native 档且该轮 engine_anchor 缺失置灰「⑂ 该轮缺少引擎
++ *      锚点」（tooltip 明示可退种子档，对齐 backend 422 文案语义；seed 档
++ *      不受锚点门控）。
++ *
++ * 交互形态对齐原型：常驻隐藏、父容器（需带 `group` 类，挂载方负责）hover
++ * 或自身 focus 浮出（同 CopyButton 的 opacity 纯 CSS 零状态方案，保键盘可
++ * 达——display:none 方案键盘不可聚焦）；置灰态 hover 同样浮出，颜色降为
++ * muted 阶 + cursor-not-allowed。样式全走 brand 与 muted 语义阶及主题 token
++ * （双主题铁律，不硬编码 hex）。
++ */
++export const TurnForkEntry = memo(function TurnForkEntry({
++  provider,
++  runStatus,
++  engineAnchor,
++  onFork,
++}: TurnForkEntryProps) {
++  // 门控一：caps=none 不渲染（getProviderCaps 对未知 provider 回退拒绝对象，
++  // 其 sessionFork='none'——未知引擎天然无入口，R-09）。
++  const tier = getProviderCaps(provider).sessionFork;
++  if (tier === "none") return null;
++  // 门控二：run 进行中置灰（见 props.runStatus 注释的三活态口径）。
++  const live =
++    runStatus === "pending" ||
++    runStatus === "running" ||
++    runStatus === "interrupting";
++  // 门控三：native 档锚点缺失置灰（seed 档不受锚点门控）。
++  const anchorMissing = tier === "native" && !engineAnchor;
++  const disabled = live || anchorMissing;
++  const label = live
++    ? "⑂ 进行中不可分叉"
++    : anchorMissing
++      ? "⑂ 该轮缺少引擎锚点"
++      : "⑂ 从此分叉";
++  const title = live
++    ? "进行中的轮不可作为分叉点，请等该轮结束后再分叉"
++    : anchorMissing
++      ? "该轮缺少引擎锚点，无法原生分叉；可改用种子档（前情转述）"
++      : "在此轮之后创建分叉会话";
++  return (
++    <button
++      type="button"
++      data-testid="turn-fork-entry"
++      data-fork-tier={tier}
++      disabled={disabled}
++      onClick={() => {
++        // disabled 守卫双保险：原生 disabled 已拦截真实浏览器点击；jsdom 的
++        // fireEvent.click 会穿透 disabled 派发事件，此处兜底防误触发。
++        if (!disabled) onFork();
++      }}
++      title={title}
++      className={cn(
++        "ml-auto shrink-0 rounded-md border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
++        // 常驻隐藏：父容器 group hover / 自身 focus 浮出（纯 CSS 零状态）。
++        "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
++        disabled
++          ? "cursor-not-allowed border-border bg-muted text-muted-foreground/70"
++          : "cursor-pointer border-brand-200 bg-card text-brand-600 hover:bg-brand-50",
++      )}
++    >
++      {label}
++    </button>
++  );
++});
++
++/* ───────────────────────── 统一入口分发器 ───────────────────────── */
++
++/**
++ * SegmentView：按 kind 分发到段组件（task-05 统一入口）。tool 段带
++ * children（子代理归属，FR-03）时升级为 SubagentBlockView 渲染，普通工具走
++ * ToolRowView；subagent_stub 兜底段复用 SubagentBlockView（design §9.5）。
++ * task-12（FR-07）：dispatch_worker 团队工具段升级为 TeamWorkerBlockView
++ * （分身段块——派发调用即分身在进度视图的代表，其 children 为分身归属日志）。
++ * task-08（FR-01）：file 段渲染 FileMessageCard（agent 上传文件卡片）。
++ * memo 默认浅比较依赖装配器 path-copy 的段引用稳定性（FR-06）；列表层以
++ * segment.id 为稳定 key（消费方 task-06）。
++ */
++export const SegmentView = memo(function SegmentView({ segment }: SegmentViewProps) {
++  switch (segment.kind) {
++    case "text":
++      return <TextSegmentView segment={segment} />;
++    case "thinking":
++      return <ThinkingRowView segment={segment} />;
++    case "tool":
++      if (isTeamDispatchTool(segment.toolName)) {
++        return <TeamWorkerBlockView {...teamWorkerBlockFromSegment(segment)} />;
++      }
++      return segment.children.length > 0 ? (
++        <SubagentBlockView segment={segment} />
++      ) : (
++        <ToolRowView segment={segment} />
++      );
++    case "subagent_stub":
++      return <SubagentBlockView segment={segment} />;
++    case "stderr":
++      return <StderrRowView segment={segment} />;
++    case "compact":
++      // ql-20260917-006：压缩续接摘要——「全部（进度）」视图折叠卡（默认收起，
++      // 点击展开全文）；对话视图不进 SegmentView（isConversationSegment 含
++      // compact，由 turn-timeline 特判渲染 CompactNoticeChip 短提示）。
++      return <CompactSegmentView segment={segment} />;
++    case "compact_status":
++      // ql-20260917-006：压缩过程状态行——compacting 实时提示 / failed 警示 /
++      // success 静默（compact 摘要段已是完成标记）。
++      return <CompactStatusRowView segment={segment} />;
++    case "preamble":
++      // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
++      // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
++      // 来源（对话视图保持干净，不渲染本段——时间线仅 all 视图纳入 preamble）。
++      // ql-20260825-011：默认收起、可展开（PreambleSegmentView）。
++      return <PreambleSegmentView segment={segment} />;
++    case "file":
++      // task-08（FR-01 / D-001@v1）：文件段 → FileMessageCard（图片缩略图 / 通用
++      // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
++      // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
++      return (
++        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
++          <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
++            agent 上传了文件
++          </span>
++          <FileMessageCard
++            fileId={segment.fileId}
++            name={segment.name}
++            size={segment.size}
++            mime={segment.mime}
++            description={segment.description}
++            ts={segment.ts}
++          />
++        </div>
++      );
++    case "user_msg":
++      // ql-20260920-006（2026-09-18-single-chat-steering 修订）：轮内引导留痕段——
++      // 三态气泡（steering 引导中 / delivered 已投递 / ended 未投递），data-steered-msg
++      // 供测试断言；自旧 SteeredMessagesFooter 迁移，正文经 parseAttachmentMarkers
++      // 剥附件标记行（同 prompt 气泡展示口径）。
++      return <UserMsgSegmentView segment={segment} />;
++    default: {
++      // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
++      const exhaustive: never = segment;
++      void exhaustive;
++      return null;
++    }
++  }
++});
+diff --git a/frontend/src/hooks/use-session-tasks.ts b/frontend/src/hooks/use-session-tasks.ts
+index b9334c4a7..d9e544361 100644
+--- a/frontend/src/hooks/use-session-tasks.ts
++++ b/frontend/src/hooks/use-session-tasks.ts
+@@ -67,6 +67,12 @@ export interface AgentSessionTaskView extends AgentTaskEntry {
+    * 关联消费（design 非目标 5），仅透传供后续增强，避免再动本 hook 签名。
+    */
+   runId?: string | null;
++  /**
++   * 2026-10-13-subagent-stub-reconcile：派发 tool_use 关联键（快照
++   * tool_use_id / 事件 tool_use_id 透传）——时间线子代理容器头按 segment.id
++   * （= 派发 call id）对账本键，收敛窗口截断 stub 的名称与状态。
++   */
++  toolUseId?: string | null;
+   /**
+    * 服务端最近更新时刻（ISO）。快照行回填（列表排序基准——服务端按
+    * updated_at 倒序返回）；纯实时合并行（快照未见、事件先行到达）事件载荷
+@@ -106,6 +112,7 @@ function snapshotRowToView(
+     totalTokens: row.total_tokens ?? null,
+     toolUses: row.tool_uses ?? null,
+     runId: row.run_id,
++    toolUseId: row.tool_use_id ?? null,
+     updatedAt: row.updated_at,
+   };
+ }
+@@ -134,19 +141,74 @@ function mergeAgentTaskEvent(
+     copy[idx] = {
+       ...reduced,
+       runId: event.run_id ?? existing.runId,
++      toolUseId: event.tool_use_id ?? existing.toolUseId,
+       updatedAt: existing.updatedAt,
+     };
+     return copy;
+   }
+   const [seed] = applyAgentTaskStatusEvent([], event);
+   if (!seed) return rows;
+-  return [{ ...seed, runId: event.run_id, updatedAt: null }, ...rows];
++  return [{ ...seed, runId: event.run_id, toolUseId: event.tool_use_id ?? null, updatedAt: null }, ...rows];
+ }
+ 
+ /** 已知竞态状态码：catch 后静默（会话恰被删 / 切换中，重拉以服务端为准收敛），
+  *  其余真实失败 toast（ql-20260903-014 口径）。 */
+ const RECONCILE_SILENT_STATUSES = new Set([404, 409, 422]);
+ 
++/* ── 2026-10-13-subagent-stub-reconcile：时间线子代理容器头对账 ────────────── */
++
++/** 对账命中产物（渲染层消费的最小面——名称/状态/权威时长）。 */
++export interface SubagentTaskSnapshotInfo {
++  taskName: string;
++  status: "running" | "completed" | "failed" | "stopped";
++  elapsedMs: number | null;
++}
++
++/** 真实终态优先序（数值大者优先）：completed > failed > stopped > running。 */
++const RECONCILE_TERMINAL_PRIORITY: Record<string, number> = {
++  completed: 3,
++  failed: 2,
++  stopped: 1,
++};
++
++/**
++ * 按 tool_use_id 构建子代理容器头对账索引（纯函数）。
++ *
++ * 同 tool_use_id 多行取舍：终态优先序高者胜；同优先序（含全 running）取
++ * updated_at 最新（缺 updatedAt 视为最旧）。无 toolUseId 的行跳过（无关联键，
++ * 历史重试重生成实例不参账）。
++ */
++export function buildSubagentTaskLookup(
++  rows: AgentSessionTaskView[],
++): Map<string, SubagentTaskSnapshotInfo> {
++  const best = new Map<
++    string,
++    { info: SubagentTaskSnapshotInfo; priority: number; updatedAt: string | null }
++  >();
++  for (const row of rows) {
++    const toolUseId = row.toolUseId;
++    if (!toolUseId) continue;
++    const priority = RECONCILE_TERMINAL_PRIORITY[row.status] ?? 0;
++    const incumbent = best.get(toolUseId);
++    const newer =
++      (row.updatedAt ?? "") > (incumbent?.updatedAt ?? "") || !incumbent;
++    if (!incumbent || priority > incumbent.priority || (priority === incumbent.priority && newer)) {
++      best.set(toolUseId, {
++        info: {
++          taskName: row.taskName,
++          status: row.status,
++          elapsedMs: row.elapsedMs ?? null,
++        },
++        priority,
++        updatedAt: row.updatedAt ?? null,
++      });
++    }
++  }
++  const out = new Map<string, SubagentTaskSnapshotInfo>();
++  for (const [toolUseId, v] of best) out.set(toolUseId, v.info);
++  return out;
++}
++
+ export interface UseSessionTasksOptions {
+   /**
+    * 快照重拉信号（SessionUsageBar refreshSignal 同款模式）：每次递增触发

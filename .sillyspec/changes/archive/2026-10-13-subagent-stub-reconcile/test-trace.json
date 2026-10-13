@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-subagent-stub-reconcile",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「buildSubagentTaskLookup 终态优先/stub 命中终态收敛/未命中维持现状」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-subagent-stub-reconcile"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「stub 名称显示快照 task_name」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-subagent-stub-reconcile"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「tool 段三优先级(元数据>对账>三态)」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-subagent-stub-reconcile"
+    }
+  ]
+}

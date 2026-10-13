@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-subagent-stub-reconcile",
+  "reviewer": "inline-self（子代理通道用量限额不可用[5h 上限，12:02 重置]，主会话按任务书降级条款代行自审）",
+  "verdict": "PASS",
+  "reviewedAgainst": "d8473ae21044785fe944065eaa431147d0b5a82e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结面混入他侧未认领提交的两个文件",
+      "evidence": "并行会话 11:13 提交 5e2c3f2f4（session-log-assembler.ts 注释对齐 + tool-args-detail.test.tsx 用例补充，Write diff 化工作的评审跟进）落在本变更冻结窗口内，提交消息不含活跃变更名 token 无法 foreign 认领，被扫入 change.patch（9 文件中 2 文件非本变更交付）。纯注释对齐 + 测试断言补充，零行为风险；CLI 已并入 scopeAudit 对账面。",
+      "location": "change.patch（frontend/src/components/daemon/session-log-assembler.ts、frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx）"
+    },
+    {
+      "severity": "P3",
+      "title": "页面级对账实例与 TaskExecutionPanel 内部实例重复拉取同一快照端点",
+      "evidence": "session-panel-page 新增 useSessionTasks 实例与 TaskExecutionPanel 内部实例各自 fetch GET /sessions/{id}/tasks（mount/SSE 重连各多一次 GET，200 行幂等读）。设计已显式披露（独立实例避免动面板内 SSE 合并态），代价为低频重复读，可接受。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx（subagentReconcileSource）"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——对账数据源为快照拉取（updated_at desc + 构建期终态优先 pick 一次性裁决），无流式乱序面；实时轮的子代理派发行必在窗口内，由既有 NOTIFICATION parent 路由收敛（上一变更 FR-02），两路正交。边界已裁决：可接受",
+    "并发": "ok——Map 在 useMemo 内纯构建（渲染期只读）；快照更新走 setState 整体替换无原地写；双实例最坏同刻幂等 GET。边界已裁决：可接受",
+    "切换": "ok——页面级实例复用 useSessionTasks 既有守卫（session?.id 空串态不取数、session_id 过滤、epoch 丢弃迟到响应、换会话清空），Map 随 tasks 重算不跨会话泄漏。边界已裁决：可接受",
+    "作用域": "ok——tool_use_id（SDK call id）全局唯一，Map 仅由当前 sessionId 快照行构建；API 归属闸门（cross-user/soft-delete 404）不变。边界已裁决：可接受"
+  },
+  "declaredBoundariesVerdict": [
+    "三级优先契约（[TASK_*] 元数据 > 对账 > 段三态）——可接受：既有元数据路径零回归，测试「元数据优先」与「ok 段不覆盖」两用例钉死",
+    "快照无匹配维持现状（stub 恒运行中）——可接受：无权威证据不得编造终态，与清扫只写 stopped 的保守语义一致；残留面为行被清/超 200 条窗口的极旧 stub",
+    "对账数据源仅快照不含 SSE——可接受：实时轮派发行必在窗口内由日志路由收敛，对账只兜历史形态，两路正交（design 盲维 1 作答）",
+    "双实例重复 fetch——可接受：幂等读、低频（mount/重连），换取不动 TaskExecutionPanel 内部 SSE 合并态"
+  ],
+  "protectionClaimsVerified": "design 声称的防护真实存在且经测试钉死：三级优先（subagent-task-reconcile.test.ts「元数据优先」「ok 段不覆盖」）；useSessionTasks 会话守卫（session?.id 空串早退 + epoch 迟到丢弃，hook 源码在位）；终态优先序（lookup 索引用例）。FR-03 零回归回执：src/components/daemon/ + src/hooks/ 1229 passed + tsc 零错误（task-04 提交消息在案）。",
+  "generatedArtifactsSync": "无 OpenAPI/DB/生成类型变化——AgentSessionTaskRead.tool_use_id 前端类型与本变更前已存在（api-types.ts 12460 行区域），change.patch 不含 api-types.ts/openapi.json/后端文件，与 design「gen:types 不需要跑」声明一致。",
+  "frImplementationTestTriangulation": "FR-01：subagentHeaderOf 第三参 reconciled + stub/无元数据 running tool 段生效条件（turn-segment-views.tsx，三级优先内联裁决）+ buildSubagentTaskLookup 终态优先序（use-session-tasks.ts）+ 测试「终态优先序」「同优先序取最新」「无 toolUseId 跳过」「stub 命中 completed/failed/stopped」「未命中维持现状」逐条对齐 FR 场景。FR-02：名称派生 stub=快照 task_name 优先、tool=primary→快照名→type→子代理 + 测试「名称=快照 task_name」「未命中 subagentType」。FR-03：三级优先用例 + 既有 1229 passed。三方一致。",
+  "reviewedAt": "2026-10-13T11:30:00+08:00"
+}

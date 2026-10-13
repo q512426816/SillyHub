@@ -1826,3 +1826,60 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-write-tool-diff
   status: active
+
+## FR-auto-frontend-193 子代理容器头(stub 与无任务元数据且运行中的 tool 段)按 tool_use_id 匹配任务快照:匹配到终态行时徽章/状态点/时长按快照展示(已完成/失败/已停止+权威时长),不再恒显「运行中」;无匹配维持现状
+变更：2026-10-13-subagent-stub-reconcile
+状态：active
+摘要：历史 stub 段对账收敛；快照无匹配
+全文：.sillyspec/changes/archive/2026-10-13-subagent-stub-reconcile/requirements.md#FR-01
+最近确认：d8473ae21044785fe944065eaa431147d0b5a82e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「buildSubagentTaskLookup 终态优先/stub 命中终态收敛/未命中维持现状」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-subagent-stub-reconcile
+  status: active
+
+## FR-auto-frontend-194 容器头名称优先快照 task_name(真实任务名),stub 不再显示类型名 general-purpose;无匹配维持 subagentType 回退
+变更：2026-10-13-subagent-stub-reconcile
+状态：active
+摘要：stub 名称显示真实任务名
+全文：.sillyspec/changes/archive/2026-10-13-subagent-stub-reconcile/requirements.md#FR-02
+最近确认：d8473ae21044785fe944065eaa431147d0b5a82e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「stub 名称显示快照 task_name」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-subagent-stub-reconcile
+  status: active
+
+## FR-auto-frontend-195 有任务元数据的 tool 段与已配对结果的段行为不变(零回归);补前端回归测试
+变更：2026-10-13-subagent-stub-reconcile
+状态：active
+摘要：优先级与回归防线
+全文：.sillyspec/changes/archive/2026-10-13-subagent-stub-reconcile/requirements.md#FR-03
+最近确认：d8473ae21044785fe944065eaa431147d0b5a82e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-subagent-stub-reconcile:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「tool 段三优先级(元数据>对账>三态)」 | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-subagent-stub-reconcile
+  status: active
