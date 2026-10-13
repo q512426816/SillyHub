@@ -152,6 +152,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
 - 2026-10-13-spawn-flush-e2e-test | 2026-10-13-review-risk-fixes 评审 P3 留债：spawnAndStream 收尾冲刷只有组
 - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+- 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

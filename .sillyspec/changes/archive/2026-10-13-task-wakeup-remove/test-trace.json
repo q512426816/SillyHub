@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-task-wakeup-remove",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-task-wakeup-remove:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-task-wakeup-remove"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-task-wakeup-remove:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-task-wakeup-remove"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-task-wakeup-remove:flow:测试绑定FR-05",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态不注入唤醒（2026-10-13-task-wakeup-remove）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-task-wakeup-remove"
+    }
+  ]
+}

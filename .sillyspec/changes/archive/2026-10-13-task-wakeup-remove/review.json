@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-task-wakeup-remove",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3a61c468bef542e000e2a649bda6205eddaad508",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——handleTaskNotificationEvent 终态链序（注销→别名扫描→清锚点→非法终态守卫→runId 兜底链→emit→落行→别名补发）与改前一致；孤儿终态收敛为 WARN 静默（background-tasks.ts:264-275），迟到终态无 fail-open 残留；design「无悬挂 timer 面」经全仓 grep 证实 _taskWakeupPending/scheduleTaskWakeup 零存活",
+    "并发": "ok——被删 _taskWakeupPending 为会话级 Map+setTimeout、唯一写者已随机制整体删除，无新增共享写面；任务表/锚点清理逻辑不动（background-tasks.ts:240-242 注销即清锚点仅 status==='active' 守卫保留）",
+    "切换": "ok——lifecycle.ts 终态清理块 diff 核对为只删 pending wakeup 取消块（7 行），前后清理步骤（clearBackgroundTasks/destroyUsageLedger）原样；timer 已不存在故无泄漏面，daemon 重启窗口孤儿终态不再注入",
+    "作用域": "ok——三个提交（f889832d1/0207383c2/3a61c468b）文件面仅 sillyhub-daemon + .sillyspec 治理件，backend/frontend 零改动；前端「后台任务通知」隐藏逻辑仍在（frontend/src/components/daemon/session-log-assembler.ts 等 5 文件命中）；边界①多步后台工作流停空闲至用户下一条消息、②backend 排队合并/豁免保留为休眠代码、③恢复需从 git 历史找回——三项均为 requirements/design 显式声明的用户裁定取舍，边界已裁决：可接受"
+  },
+  "reviewedAt": "2026-10-13T04:29:00Z"
+}

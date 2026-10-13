@@ -1,0 +1,271 @@
+{
+  "change": "2026-10-13-task-wakeup-remove",
+  "baseline": "64268fe37eb0d7cf43afe8ecf4a155aeb0c3d894",
+  "head": "3a61c468bef542e000e2a649bda6205eddaad508",
+  "files": [
+    "backend/app/modules/platform_sync/schema.py",
+    "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+    "backend/openapi.json",
+    "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx",
+    "frontend/src/components/agent-log/tool-diff.tsx",
+    "frontend/src/components/agent-log/tool-renderers.tsx",
+    "frontend/src/components/daemon/agent-log-card.tsx",
+    "frontend/src/components/daemon/tool-args-detail.tsx",
+    "frontend/src/lib/api-types.ts",
+    "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts",
+    "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+    "sillyhub-daemon/src/cli.ts",
+    "sillyhub-daemon/src/interactive/session-manager.ts",
+    "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+    "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+    "sillyhub-daemon/src/interactive/session-manager/types.ts",
+    "sillyhub-daemon/src/interactive/types.ts",
+    "sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts",
+    "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 1385,
+    "deletions": 1396
+  },
+  "savedAt": "2026-10-13T04:25:19.856Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/backend/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 10,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "platform_sync",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/platform_sync.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 5,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "64268fe37eb0d7cf43afe8ecf4a155aeb0c3d894",
+    "totals": {
+      "files": 19,
+      "additions": 1385,
+      "deletions": 1396
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/platform_sync/schema.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/platform_sync/tests/test_agent_log_messages.py",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx",
+        "additions": 55,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-diff.tsx",
+        "additions": 80,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-renderers.tsx",
+        "additions": 30,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/agent-log-card.tsx",
+        "additions": 1020,
+        "deletions": 1015,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/tool-args-detail.tsx",
+        "additions": 4,
+        "deletions": 80,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts",
+        "additions": 34,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/cli.ts",
+        "additions": 2,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager.ts",
+        "additions": 0,
+        "deletions": 24,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/background-tasks.ts",
+        "additions": 14,
+        "deletions": 101,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+        "additions": 0,
+        "deletions": 7,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/types.ts",
+        "additions": 0,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/types.ts",
+        "additions": 0,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts",
+        "additions": 67,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/task-lifecycle.test.ts",
+        "additions": 34,
+        "deletions": 125,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "619d782ccba75d63f13e9015bfd17dc706857b661a5047e2f865f5cd15438ea9",
+  "patchStatus": "ok"
+}

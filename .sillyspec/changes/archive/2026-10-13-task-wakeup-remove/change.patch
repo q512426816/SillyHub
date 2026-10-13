@@ -1,0 +1,3199 @@
+diff --git a/backend/app/modules/platform_sync/schema.py b/backend/app/modules/platform_sync/schema.py
+index 9425d3a52..d8880a25e 100644
+--- a/backend/app/modules/platform_sync/schema.py
++++ b/backend/app/modules/platform_sync/schema.py
+@@ -519,6 +519,13 @@ class AgentLogMessageItem(BaseModel):
+     tool_input: str | None = Field(default=None, description="工具入参摘要（JSON 串，首 2KB 截断）")
+     tool_result: str | None = Field(default=None, description="工具结果摘要（首 4KB 截断）")
+     is_error: bool | None = Field(default=None, description="tool_result 专用：是否报错")
++    # ── 2026-10-13-editpatch-fullchain：structuredPatch JSON 串透传（daemon
++    # claude-code 解析器附着 tool_result 段；extra=ignore 下不声明即被剥离，
++    # 必须显式声明才能到达前端）。老 daemon / 无 patch 缺省 None。──
++    edit_patch: str | None = Field(
++        default=None,
++        description="tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）",
++    )
+     ts: str | None = Field(default=None, description="所属行 completedAt 原文")
+     # ── 2026-09-19-tool-report-session-replay task-08（FR-03 / D-004@v1）：token/
+     # 轮次可选字段，逐字对齐 daemon task-01 契约扩展——老 daemon / 无数据源不
+diff --git a/backend/app/modules/platform_sync/tests/test_agent_log_messages.py b/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
+index 1032fcc38..68ef42aed 100644
+--- a/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
++++ b/backend/app/modules/platform_sync/tests/test_agent_log_messages.py
+@@ -43,6 +43,12 @@ from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+ 
+ _RPC = "app.modules.daemon.host_fs.ws_rpc.send_host_fs_rpc"
+ 
++#: 2026-10-13-editpatch-fullchain：daemon claude-code 解析器附着的 structuredPatch
++#: JSON 串（行级 toolUseResult.structuredPatch 序列化，tool_result 段专用）。
++_PATCH_JSON = (
++    '[{"oldStart": 1, "newStart": 1, "oldLines": 1, "newLines": 2, "lines": ["-a", "+b", "+c"]}]'
++)
++
+ #: daemon 契约（task-02 + task-08 token/轮次扩展）外层 camelCase 返回的 parsed
+ #: 形状样例（messages 内层 snake_case 与 NormalizedLogMessage 逐字对齐，design
+ #: §7.1；usage 子对象键为 daemon camelCase，外层 totalUsage 同理——schema 侧
+@@ -65,6 +71,7 @@ _PARSED_RESULT: dict[str, Any] = {
+             "model": "GLM-5.3",
+             "duration_ms": None,
+             "usage": None,
++            "edit_patch": None,
+         },
+         {
+             "seq": 2,
+@@ -87,6 +94,7 @@ _PARSED_RESULT: dict[str, Any] = {
+                 "cacheReadTokens": 5,
+                 "cacheWriteTokens": 0,
+             },
++            "edit_patch": None,
+         },
+         {
+             "seq": 3,
+@@ -103,6 +111,7 @@ _PARSED_RESULT: dict[str, Any] = {
+             "model": None,
+             "duration_ms": None,
+             "usage": None,
++            "edit_patch": _PATCH_JSON,
+         },
+     ],
+     "truncated": True,
+@@ -263,6 +272,7 @@ class TestStatusLayering:
+             "model": "GLM-5.3",
+             "duration_ms": None,
+             "usage": None,
++            "edit_patch": None,
+         }
+         tool_use = body["messages"][1]
+         assert tool_use["kind"] == "tool_use"
+@@ -282,6 +292,9 @@ class TestStatusLayering:
+         assert tool_result["kind"] == "tool_result"
+         assert tool_result["tool_use_id"] == "toolu_01"
+         assert tool_result["is_error"] is False
++        # 2026-10-13-editpatch-fullchain：structuredPatch JSON 串随 tool_result
++        # 项原样透传（daemon claude-code 解析器附着；缺省 None）。
++        assert tool_result["edit_patch"] == _PATCH_JSON
+ 
+     @pytest.mark.asyncio
+     @pytest.mark.parametrize(
+@@ -648,6 +661,7 @@ class TestOpenapiExposure:
+             "model",
+             "duration_ms",
+             "usage",
++            "edit_patch",
+         }
+         usage_props = schemas["AgentLogMessageUsage"]["properties"]
+         assert set(usage_props) == {
+diff --git a/backend/openapi.json b/backend/openapi.json
+index f29c07a0d..424997886 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -36308,6 +36308,18 @@
+             "title": "Is Error",
+             "description": "tool_result 专用：是否报错"
+           },
++          "edit_patch": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Edit Patch",
++            "description": "tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）"
++          },
+           "ts": {
+             "anyOf": [
+               {
+diff --git a/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+index ea85a101c..973f97e45 100644
+--- a/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
++++ b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+@@ -63,3 +63,58 @@ describe("WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）", ()
+     cleanup();
+   });
+ });
++
++// ── 2026-10-13-editpatch-fullchain：EditToolPreview 行级 diff ────────────────
++
++function editEntry(oldStr: string, newStr: string): ToolCallEntry {
++  return {
++    timestamp: "2026-10-13T10:00:00.000Z",
++    tool: "Edit",
++    args: JSON.stringify({ file_path: "src/a.ts", old_string: oldStr, new_string: newStr }),
++    status: "allowed",
++    success: true,
++    rawArgs: { file_path: "src/a.ts", old_string: oldStr, new_string: newStr },
++  };
++}
++
++describe("EditToolPreview diff 渲染（2026-10-13-editpatch-fullchain）", () => {
++  it("有 editPatch：structuredPatch 红删绿增渲染（真实文件行号）", () => {
++    const patch = JSON.stringify([
++      { oldStart: 55, newStart: 55, oldLines: 1, newLines: 1, lines: ["-old-line", "+new-line"] },
++    ]);
++    render(
++      <ToolCallPreview
++        entry={editEntry("old-line", "new-line")}
++        mergedResult="updated"
++        editPatch={patch}
++      />,
++    );
++    const delRow = screen.getByText("old-line").closest("div.flex");
++    const addRow = screen.getByText("new-line").closest("div.flex");
++    expect(delRow?.className).toContain("bg-red-500/10");
++    expect(addRow?.className).toContain("bg-emerald-500/10");
++    expect(screen.getByText(/变更对比/)).toBeTruthy();
++    cleanup();
++  });
++
++  it("无 editPatch：回退 computeLineDiff LCS 行级 diff（红删绿增，片段相对行号）", () => {
++    render(<ToolCallPreview entry={editEntry("a\nb\nc", "a\nX\nc")} mergedResult="updated" />);
++    const delRow = screen.getByText("b").closest("div.flex");
++    const addRow = screen.getByText("X").closest("div.flex");
++    expect(delRow?.className).toContain("bg-red-500/10");
++    expect(addRow?.className).toContain("bg-emerald-500/10");
++    expect(screen.getByText(/变更对比/)).toBeTruthy();
++    cleanup();
++  });
++
++  it("超大输入（LCS 超 100 万单元格护栏）→ 回退既有红/绿两块展示", () => {
++    const big = Array.from({ length: 1200 }, (_, i) => `line-${i}`).join("\n");
++    render(<ToolCallPreview entry={editEntry(big, big + "\nextra")} mergedResult="updated" />);
++    expect(screen.queryByText(/变更对比/)).toBeNull();
++    // 既有两块形态的结构标记：裸 "-" / "+" 块标签（diff 路径渲染的是 DiffView
++    // 行内标记，不产生裸标签节点）
++    expect(screen.getByText("-")).toBeTruthy();
++    expect(screen.getByText("+")).toBeTruthy();
++    cleanup();
++  });
++});
+diff --git a/frontend/src/components/agent-log/tool-diff.tsx b/frontend/src/components/agent-log/tool-diff.tsx
+index 10f4492f5..69c87a05d 100644
+--- a/frontend/src/components/agent-log/tool-diff.tsx
++++ b/frontend/src/components/agent-log/tool-diff.tsx
+@@ -11,6 +11,8 @@
+  *   分隔行。JSON 非法 / hunk 形状不符 → null（调用方回退自身既有展示）。
+  * - DiffView：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）；
+  *   超 DIFF_MAX_ROWS 截断展示（复制按钮由调用方提供完整原文兜底）。
++ * - computeLineDiff：LCS 行级 diff（2026-10-13-editpatch-fullchain 自 daemon
++ *   迁入——Edit 无 structuredPatch 时回退自算，daemon 侧 re-export 兼容）。
+  */
+ 
+ import { cn } from "@/lib/utils";
+@@ -74,6 +76,84 @@ export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
+   return rows;
+ }
+ 
++/** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
++const DIFF_MAX_CELLS = 1_000_000;
++
++/**
++ * 行级 diff（LCS 最长公共子序列，dp 反向表 + 前向回溯）。旧/新文本按行对齐：
++ * ctx 行双侧推进，del 行仅旧侧行号，add 行仅新侧行号（unified diff 语义）。
++ * 任一侧行数乘积超 DIFF_MAX_CELLS → null（调用方回退红/绿两块，防巨型编辑
++ * 卡顿——Write 型整文件重写走 Write 工具不进此路径）。
++ */
++export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | null {
++  const a = oldStr.split("\n");
++  const b = newStr.split("\n");
++  if (a.length * b.length > DIFF_MAX_CELLS) return null;
++  const n = a.length;
++  const m = b.length;
++  // dp[i][j] = a[i:] 与 b[j:] 的 LCS 长度（反向填充，回溯从 [0][0] 前向走）。
++  // Int32Array 扁平化——noUncheckedIndexedAccess 下 number[][] 索引返回
++  // number|undefined，扁平 typed array 索引恒为 number（越界语义不存在于
++  // 本函数受控下标域）。
++  // noUncheckedIndexedAccess 下 typed array 索引也返回 number|undefined——
++  // 下标域受控（i≤n, j≤m），经 asArray 断言收窄（读取值不存在即算法 bug）。
++  const dp = new Int32Array((n + 1) * (m + 1));
++  const at = (i: number, j: number) => dp[i * (m + 1) + j] as number;
++  const setAt = (i: number, j: number, v: number) => {
++    dp[i * (m + 1) + j] = v;
++  };
++  for (let i = n - 1; i >= 0; i -= 1) {
++    const ai = a[i];
++    if (ai === undefined) continue;
++    for (let j = m - 1; j >= 0; j -= 1) {
++      const bj = b[j];
++      const nextDown = at(i + 1, j);
++      const nextRight = at(i, j + 1);
++      setAt(i, j, ai === bj ? at(i + 1, j + 1) + 1 : Math.max(nextDown, nextRight));
++    }
++  }
++  const rows: DiffRow[] = [];
++  let i = 0;
++  let j = 0;
++  let oldNo = 0;
++  let newNo = 0;
++  while (i < n && j < m) {
++    const ai = a[i];
++    const bj = b[j];
++    if (ai === undefined || bj === undefined) break;
++    if (ai === bj) {
++      oldNo += 1;
++      newNo += 1;
++      rows.push({ type: "ctx", oldNo, newNo, text: ai });
++      i += 1;
++      j += 1;
++    } else if (at(i + 1, j) >= at(i, j + 1)) {
++      oldNo += 1;
++      rows.push({ type: "del", oldNo, newNo: null, text: ai });
++      i += 1;
++    } else {
++      newNo += 1;
++      rows.push({ type: "add", oldNo: null, newNo, text: bj });
++      j += 1;
++    }
++  }
++  while (i < n) {
++    const ai = a[i];
++    if (ai === undefined) break;
++    oldNo += 1;
++    rows.push({ type: "del", oldNo, newNo: null, text: ai });
++    i += 1;
++  }
++  while (j < m) {
++    const bj = b[j];
++    if (bj === undefined) break;
++    newNo += 1;
++    rows.push({ type: "add", oldNo: null, newNo, text: bj });
++    j += 1;
++  }
++  return rows;
++}
++
+ /** diff 渲染行数上限（超长 diff 截断展示，完整原文由调用方复制按钮兜底）。 */
+ export const DIFF_MAX_ROWS = 2000;
+ 
+diff --git a/frontend/src/components/agent-log/tool-renderers.tsx b/frontend/src/components/agent-log/tool-renderers.tsx
+index c6bb5cbcc..30597830b 100644
+--- a/frontend/src/components/agent-log/tool-renderers.tsx
++++ b/frontend/src/components/agent-log/tool-renderers.tsx
+@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
+ import type { ToolCallEntry } from "./types";
+ 
+ import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
+-import { DiffView, parseStructuredPatch } from "./tool-diff";
++import { DiffView, computeLineDiff, parseStructuredPatch } from "./tool-diff";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+ 
+ /**
+@@ -476,13 +476,18 @@ function ReadToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
+ /*  Edit                                                               */
+ /* ------------------------------------------------------------------ */
+ 
+-function EditToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
++function EditToolPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
+   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
+   const filePath = String(rawArgs?.file_path ?? "");
+   const fileName = filePath.split("/").pop() ?? filePath;
+   const oldStr = typeof rawArgs?.old_string === "string" ? rawArgs.old_string : "";
+   const newStr = typeof rawArgs?.new_string === "string" ? rawArgs.new_string : "";
+   const replaceAll = Boolean(rawArgs?.replace_all);
++  // 2026-10-13-editpatch-fullchain：行级 diff 三级——structuredPatch（真实文件
++  // 行号）优先 → 无 patch 回退 computeLineDiff LCS 自算（片段相对行号）→ 超大
++  // 输入（null 护栏）回退既有红/绿两块。
++  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
++  const rows = patchRows ?? (oldStr && newStr ? computeLineDiff(oldStr, newStr) : null);
+ 
+   return (
+     <div className="min-w-0 space-y-1">
+@@ -501,16 +506,31 @@ function EditToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
+         <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
+       )}
+       <CollapsibleSection title="变更内容">
+-        <div className="space-y-1.5">
++        {rows ? (
+           <div>
+-            <div className="mb-0.5 text-[10px] font-semibold text-red-700">-</div>
+-            <pre className={cn(CODE_CLS, "line-clamp-6")}>{oldStr}</pre>
++            <div className="mb-0.5 text-[10px] font-semibold text-zinc-500">
++              变更对比（旧 {oldStr ? oldStr.split("\n").length : 0} 行 → 新{" "}
++              {newStr ? newStr.split("\n").length : 0} 行）
++            </div>
++            <DiffView rows={rows} />
++            {newStr && (
++              <div className="mt-1">
++                <CopyButton text={newStr} label="复制新文本" />
++              </div>
++            )}
+           </div>
+-          <div>
+-            <div className="mb-0.5 text-[10px] font-semibold text-emerald-700">+</div>
+-            <pre className={cn(CODE_CLS, "line-clamp-6")}>{newStr}</pre>
++        ) : (
++          <div className="space-y-1.5">
++            <div>
++              <div className="mb-0.5 text-[10px] font-semibold text-red-700">-</div>
++              <pre className={cn(CODE_CLS, "line-clamp-6")}>{oldStr}</pre>
++            </div>
++            <div>
++              <div className="mb-0.5 text-[10px] font-semibold text-emerald-700">+</div>
++              <pre className={cn(CODE_CLS, "line-clamp-6")}>{newStr}</pre>
++            </div>
+           </div>
+-        </div>
++        )}
+       </CollapsibleSection>
+       <CollapsibleSection title="原始数据">
+         <pre className={CODE_CLS}>{entry.args}</pre>
+@@ -560,7 +580,7 @@ export function ToolCallPreview({ entry, mergedResult, durationMs, editPatch }:
+     case "read":
+       return <ReadToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
+     case "edit":
+-      return <EditToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
++      return <EditToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} editPatch={editPatch} />;
+     default:
+       return <GenericToolPreview entry={entry} durationMs={durationMs} />;
+   }
+diff --git a/frontend/src/components/daemon/agent-log-card.tsx b/frontend/src/components/daemon/agent-log-card.tsx
+index 34fe810a3..b36888f9a 100644
+--- a/frontend/src/components/daemon/agent-log-card.tsx
++++ b/frontend/src/components/daemon/agent-log-card.tsx
+@@ -1,1016 +1,1021 @@
+-"use client";
+-
+-/**
+- * AgentLogCard —— 「本地 Agent 日志」会话化折叠栏
+- * （2026-08-23-agent-activity-sessions task-07 / FR-07 / FR-08 / D-004；
+- * 前身 2026-08-23-platform-agent-log-ingest task-04 ql-20260823-002-6a1a）。
+- *
+- * 依据（design §3.4 + prototype-agent-activity-sessions.html）：
+- *   - AgentLogCard：普通会话（chat 或已激活 tool_report）面板**顶部**的整宽
+- *     折叠栏（ql-20260904-021：原对话流尾部 streamFooter 气泡条目收编顶部，
+- *     不再挤占聊天窗口；session-panel.tsx 挂载于横幅之下、会话主体之上），
+- *     仅关联本会话的上报（listAgentLogs(sessionId)，GET /api/agent-logs?session_id=…）。
+- *     形态：🧾 图标 + 一行摘要「N 个 · 最新 X 前 ▸」细栏，点击展开明细
+- *     （harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
+- *     调用次数 / 最近命令 / log_path 复制）。
+- *     （原 tool_report 纯日志会话主体形态已于 2026-09-19-tool-report-session-
+- *     replay task-12 退役，由 AgentReplayBody 承接，见 agent-replay-body.tsx。）
+- *   - 每个条目行尾「查看内容 ▾」（task-05 对话化升级，2026-08-23-agent-log-
+- *     conversation-view / FR-01 / FR-03 / FR-05 / D-003@v1 / D-006@v1）：展开先
+- *     readAgentLogMessages（GET /api/agent-logs/{id}/messages）——status=parsed
+- *     时直构 NormalizedLogMessage 段列表渲染对话流（user_input 用户气泡 /
+- *     reply MarkdownText / thinking 折叠 / tool_use+tool_result 按 tool_use_id
+- *     配对成 ToolCallPreview 卡片、失配渲染「结果未记录」中性徽章；不走
+- *     session-log-assembler、零协议文本合成），「对话 / 原文」tab（原文懒调
+- *     readAgentLogContent 复用 <pre>），truncated 时「加载更早」带 before_seq
+- *     （当前最小 seq）前插；status≠parsed / ApiError（422 老 daemon / 409 /
+- *     404 / 5xx）一律静默回落原文 <pre> + 黄条原因（不弹错框）；其中 409 二进制
+- *     格式（cursor IDE 聊天库）走专属黄条文案（FR-04，task-13）；仅原文端点
+- *     自身失败保留红条（现状语义，design §7.2 / §7.3 / §5.2）。
+- *
+- * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——顶部
+- * 不出现占位栏（有上报才出现，避免每个会话顶上挂空盒）。
+- *
+- * 视觉（双主题铁律）：harness 徽标走 brand-* 语义阶（bg-brand-50/
+- * text-brand-700/border-brand-100，随 html data-theme 换肤）；zcode 用语义
+- * info 青（cyan 固定阶，对齐 runtime-card-helpers info 徽标，NFR-03）；
+- * 「查看内容」按钮 brand 阶文字色。不硬编码 hex。
+- *
+- * 相对时间：dayjs relativeTime 插件 + zh-cn locale（X-15），日期渲染显式
+- * zh-CN 语境（CONVENTIONS 类型与数据契约 8）。
+- */
+-
+-import { LivenessBadge, livenessTitle } from "@/components/agent-log/liveness-badge";
+-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+-import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import dayjs from "dayjs";
+-import "dayjs/locale/zh-cn";
+-import relativeTime from "dayjs/plugin/relativeTime";
+-import { Bot, FileText, Wrench } from "lucide-react";
+-
+-import {
+-  listAgentLogs,
+-  readAgentLogContent,
+-  readAgentLogMessages,
+-  type AgentLogContentResponse,
+-  type AgentLogListItem,
+-  type AgentLogMessagesResponse,
+-} from "@/lib/agent-logs";
+-import { ApiError } from "@/lib/api";
+-import { queryKeys } from "@/lib/query-keys";
+-import { cn } from "@/lib/utils";
+-import {
+-  CollapsibleSection,
+-  ToolCallPreview,
+-  ToolResultCard,
+-} from "@/components/agent-log/tool-renderers";
+-import type { ToolCallEntry } from "@/components/agent-log/types";
+-import { MarkdownText } from "@/components/ui/markdown-text";
++"use client";
++
++/**
++ * AgentLogCard —— 「本地 Agent 日志」会话化折叠栏
++ * （2026-08-23-agent-activity-sessions task-07 / FR-07 / FR-08 / D-004；
++ * 前身 2026-08-23-platform-agent-log-ingest task-04 ql-20260823-002-6a1a）。
++ *
++ * 依据（design §3.4 + prototype-agent-activity-sessions.html）：
++ *   - AgentLogCard：普通会话（chat 或已激活 tool_report）面板**顶部**的整宽
++ *     折叠栏（ql-20260904-021：原对话流尾部 streamFooter 气泡条目收编顶部，
++ *     不再挤占聊天窗口；session-panel.tsx 挂载于横幅之下、会话主体之上），
++ *     仅关联本会话的上报（listAgentLogs(sessionId)，GET /api/agent-logs?session_id=…）。
++ *     形态：🧾 图标 + 一行摘要「N 个 · 最新 X 前 ▸」细栏，点击展开明细
++ *     （harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
++ *     调用次数 / 最近命令 / log_path 复制）。
++ *     （原 tool_report 纯日志会话主体形态已于 2026-09-19-tool-report-session-
++ *     replay task-12 退役，由 AgentReplayBody 承接，见 agent-replay-body.tsx。）
++ *   - 每个条目行尾「查看内容 ▾」（task-05 对话化升级，2026-08-23-agent-log-
++ *     conversation-view / FR-01 / FR-03 / FR-05 / D-003@v1 / D-006@v1）：展开先
++ *     readAgentLogMessages（GET /api/agent-logs/{id}/messages）——status=parsed
++ *     时直构 NormalizedLogMessage 段列表渲染对话流（user_input 用户气泡 /
++ *     reply MarkdownText / thinking 折叠 / tool_use+tool_result 按 tool_use_id
++ *     配对成 ToolCallPreview 卡片、失配渲染「结果未记录」中性徽章；不走
++ *     session-log-assembler、零协议文本合成），「对话 / 原文」tab（原文懒调
++ *     readAgentLogContent 复用 <pre>），truncated 时「加载更早」带 before_seq
++ *     （当前最小 seq）前插；status≠parsed / ApiError（422 老 daemon / 409 /
++ *     404 / 5xx）一律静默回落原文 <pre> + 黄条原因（不弹错框）；其中 409 二进制
++ *     格式（cursor IDE 聊天库）走专属黄条文案（FR-04，task-13）；仅原文端点
++ *     自身失败保留红条（现状语义，design §7.2 / §7.3 / §5.2）。
++ *
++ * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——顶部
++ * 不出现占位栏（有上报才出现，避免每个会话顶上挂空盒）。
++ *
++ * 视觉（双主题铁律）：harness 徽标走 brand-* 语义阶（bg-brand-50/
++ * text-brand-700/border-brand-100，随 html data-theme 换肤）；zcode 用语义
++ * info 青（cyan 固定阶，对齐 runtime-card-helpers info 徽标，NFR-03）；
++ * 「查看内容」按钮 brand 阶文字色。不硬编码 hex。
++ *
++ * 相对时间：dayjs relativeTime 插件 + zh-cn locale（X-15），日期渲染显式
++ * zh-CN 语境（CONVENTIONS 类型与数据契约 8）。
++ */
++
++import { LivenessBadge, livenessTitle } from "@/components/agent-log/liveness-badge";
++import { useCallback, useEffect, useMemo, useRef, useState } from "react";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
++import dayjs from "dayjs";
++import "dayjs/locale/zh-cn";
++import relativeTime from "dayjs/plugin/relativeTime";
++import { Bot, FileText, Wrench } from "lucide-react";
++
++import {
++  listAgentLogs,
++  readAgentLogContent,
++  readAgentLogMessages,
++  type AgentLogContentResponse,
++  type AgentLogListItem,
++  type AgentLogMessagesResponse,
++} from "@/lib/agent-logs";
++import { ApiError } from "@/lib/api";
++import { queryKeys } from "@/lib/query-keys";
++import { cn } from "@/lib/utils";
++import {
++  CollapsibleSection,
++  ToolCallPreview,
++  ToolResultCard,
++} from "@/components/agent-log/tool-renderers";
++import type { ToolCallEntry } from "@/components/agent-log/types";
++import { MarkdownText } from "@/components/ui/markdown-text";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+-
+-// 全仓首次 extend（X-15）：relativeTime 提供 fromNow；zh-cn 使 fromNow 输出
+-// 「N 分钟前」中文（antd-providers 只覆盖 antd 组件语境，dayjs 需自设 locale）。
+-dayjs.extend(relativeTime);
+-dayjs.locale("zh-cn");
+-
+-/** 展开态默认展示条数（超出走「展开全部 N 条 / 收起」）——仅 AgentLogCard 折叠形态。 */
+-const COLLAPSED_COUNT = 3;
+-
+-/** 「活跃中」判定窗口：last_seen_at 15 分钟内显示绿点（原型 .live-dot）。 */
+-const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
+-
+-/** 复制成功反馈驻留时长（原型 copy()：900ms 后还原文案）。 */
+-const COPY_FEEDBACK_MS = 900;
+-
+-/** 复制反馈 key 前缀（条目内区分 session_id / log_path 两个复制目标）。 */
+-type CopyTarget = { key: string; text: string };
+-
+-/* ───────────────── 纯格式化辅助（null 安全） ───────────────── */
+-
+-/**
+- * session_id 短码：uuid 取前 8 + … + 后 4；非 uuid（如 zcode 的
+- * model-io-sess_* 自构 id）截前 16 + …。展示形态 `sess <短码>`。
+- */
+-function shortSessionId(id: string): string {
+-  const isUuid =
+-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+-  if (isUuid) return `${id.slice(0, 8)}…${id.slice(-4)}`;
+-  return id.length > 16 ? `${id.slice(0, 16)}…` : id;
+-}
+-
+-/** 大小人性化：B → KB → MB（一位小数；null/非数字返回 null 交由上层「—」兜底）。 */
+-function formatBytes(bytes: number | null | undefined): string | null {
+-  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
+-  if (bytes < 1024) return `${bytes} B`;
+-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+-}
+-
+-/** last_seen_at 是否在活跃窗口内（null/非法时间不活跃，绿点不渲染）。 */
+-function isRecentlyActive(lastSeenAt: string | null | undefined): boolean {
+-  if (!lastSeenAt) return false;
+-  const t = dayjs(lastSeenAt);
+-  if (!t.isValid()) return false;
+-  return Date.now() - t.valueOf() < ACTIVE_WINDOW_MS;
+-}
+-
+-/* ───────────── 查看内容 · 对话化渲染辅助（task-05，design §7.3 / §5.2） ───────────── */
+-
+-/** 归一化消息单条（api-types 生成 schema 内层条目，snake_case 原样访问）。 */
+-type AgentLogMessageItem = NonNullable<
+-  AgentLogMessagesResponse["messages"]
+->[number];
+-
+-/** messages 端点响应里前端消费的对话流数据 + 窗口截断元信息。 */
+-interface ConversationData {
+-  messages: AgentLogMessageItem[];
+-  truncated: boolean;
+-  totalSegments: number;
+-}
+-
+-/**
+- * 段时间戳 → 「MM/DD HH:mm」短时间。toLocaleString 显式传 "zh-CN"（CONVENTIONS
+- * 类型与数据契约 8：不传则依赖运行环境 locale，CI 上漂移）；null / 非法时间
+- * 返回 null 不渲染。
+- */
+-function formatSegmentTime(ts: string | null): string | null {
+-  if (!ts) return null;
+-  const t = new Date(ts);
+-  if (Number.isNaN(t.getTime())) return null;
+-  return t.toLocaleString("zh-CN", {
+-    hour12: false,
+-    month: "2-digit",
+-    day: "2-digit",
+-    hour: "2-digit",
+-    minute: "2-digit",
+-  });
+-}
+-
+-/** thinking 折叠态单行摘要（agent-log-viewer thinkingSummary 同款：压平 + 截 60 字符）。 */
+-function thinkingSummary(content: string): string {
+-  const flat = content.replace(/\s+/g, " ").trim();
+-  return flat.length <= 60 ? flat : `${flat.slice(0, 60)}...`;
+-}
+-
+-/** 黄条回落文案尾巴（原文端点口径：尾部 256KB）。 */
+-const FALLBACK_TAIL = "已回落原文尾部查看（最多 256KB）";
+-
+-/** 200 但 status≠parsed 的回落原因（黄条中文文案，参照原型 .fb-note）。 */
+-function fallbackNoteForStatus(
+-  status: AgentLogMessagesResponse["status"],
+-): string {
+-  switch (status) {
+-    case "unsupported":
+-      return `该格式暂不支持对话化解析，${FALLBACK_TAIL}`;
+-    case "parse_error":
+-      return `日志解析失败（格式异常或坏行过多），${FALLBACK_TAIL}`;
+-    case "too_large":
+-      return `日志文件超出对话化解析预算，${FALLBACK_TAIL}`;
+-    default:
+-      return `对话化解析不可用，${FALLBACK_TAIL}`;
+-  }
+-}
+-
+-/**
+- * messages 端点 HTTP 失败（422 老 daemon / 409 / 404 / 5xx）的静默回落原因。
+- *
+- * 409 二进制格式专属分支（2026-09-19-tool-report-session-replay task-13 / FR-04，
+- * 按 code=HTTP_409_AGENT_LOG_BINARY_FORMAT 精确判定）：cursor IDE sqlite 聊天库
+- * 命中 format 黑名单被后端显式拒——文案改死胡同说明（格式性质 + 仍保留的信息），
+- * 且**不拼 FALLBACK_TAIL**（该场景原文端点同被 409 拒，无原文可回落，红条现状
+- * 语义保留）；其余 409（如 allowed_roots 拒读）与 422/404/5xx 维持既有透传
+- * 文案逐字不变。
+- */
+-function fallbackNoteForError(err: unknown): string {
+-  if (err instanceof ApiError) {
+-    // 422 是老 daemon 无 read_agent_log_messages 方法的唯一映射（design §7.2）。
+-    if (err.status === 422) {
+-      return `daemon 未升级，暂不支持对话化解析，${FALLBACK_TAIL}`;
+-    }
+-    // 409 cursor IDE sqlite 二进制库：format 黑名单显式拒绝（FR-04 不可用态显式化）。
+-    if (err.status === 409 && err.code === "HTTP_409_AGENT_LOG_BINARY_FORMAT") {
+-      return "该日志格式（cursor IDE 聊天库）暂不支持对话化回放，仅保留元数据与活性信息";
+-    }
+-    return `对话化解析请求失败（${err.message}），${FALLBACK_TAIL}`;
+-  }
+-  return `对话化解析不可用，${FALLBACK_TAIL}`;
+-}
+-
+-/** 对话流渲染段（由 AgentLogMessageItem 直构，零协议文本合成——D-006@v1）。 */
+-type ConversationSegment =
+-  | { kind: "reply"; seq: number; text: string }
+-  | { kind: "thinking"; seq: number; text: string }
+-  | {
+-      kind: "tool_use";
+-      seq: number;
+-      entry: ToolCallEntry;
+-      mergedResult?: string;
+-      durationMs?: number;
+-      hasResult: boolean;
+-    }
+-  | { kind: "tool_result"; seq: number; body: string };
+-
+-/** 渲染回合：user_input 独占一行用户气泡；其余段聚成 assistant 回合（原型 a-row）。 */
+-type ConversationTurn =
+-  | { role: "user"; key: string; seq: number; text: string }
+-  | {
+-      role: "assistant";
+-      key: string;
+-      segments: ConversationSegment[];
+-      timeText: string | null;
+-    };
+-
+-/**
+- * 由 NormalizedLogMessage 直接构造 ToolCallEntry 纯展示 DTO（agent-log/types.ts，
+- * timestamp/tool/args/status/success/rawArgs/toolUseId 直填）。rawArgs 尽力
+- * JSON.parse（Bash/Read 等专用预览从中取 command/file_path 等），失败退化为
+- * 原始字符串。已结束会话 status 恒 "allowed"（调用已被放行并执行，非待审批）。
+- */
+-function toToolCallEntry(
+-  use: AgentLogMessageItem,
+-  result: AgentLogMessageItem | undefined,
+-): ToolCallEntry {
+-  const args = use.tool_input ?? "";
+-  let rawArgs: unknown = null;
+-  try {
+-    rawArgs = JSON.parse(args);
+-  } catch {
+-    rawArgs = args;
+-  }
+-  return {
+-    timestamp: use.ts ?? "",
+-    tool: use.tool_name ?? "unknown",
+-    args,
+-    status: "allowed",
+-    // is_error 着失败红（success=false → StatusBadge ✗）；失配分支不走
+-    // ToolCallPreview（由「结果未记录」中性徽章承接），此处取值不参与其渲染。
+-    success: result ? !(result.is_error ?? false) : false,
+-    rawArgs,
+-    toolUseId: use.tool_use_id ?? undefined,
+-  };
+-}
+-
+-/**
+- * 直构段列表（design §7.3）：tool_use / tool_result 按 tool_use_id 显式 Map
+- * 配对（非位置配对）——失配 tool_use 保留 hasResult=false 供「结果未记录」中性
+- * 徽章（R-03：已结束会话不得假运行）；未被消费的孤儿 tool_result（use 在更早
+- * 窗口外）独立成 ToolResultCard 段。user_input 切回合边界，其余段聚进
+- * assistant 回合，回合时间取末段有效 ts。
+- */
+-function buildConversationTurns(
+-  messages: AgentLogMessageItem[],
+-): ConversationTurn[] {
+-  // tool_use_id → 首条 tool_result（seq 升序下最早结果；重复结果按孤儿渲染）。
+-  const resultById = new Map<string, AgentLogMessageItem>();
+-  for (const m of messages) {
+-    if (m.kind === "tool_result" && m.tool_use_id && !resultById.has(m.tool_use_id)) {
+-      resultById.set(m.tool_use_id, m);
+-    }
+-  }
+-  const consumedResultIds = new Set<string>();
+-  const turns: ConversationTurn[] = [];
+-  let current: Extract<ConversationTurn, { role: "assistant" }> | null = null;
+-  const flushAssistant = () => {
+-    if (current && current.segments.length > 0) turns.push(current);
+-    current = null;
+-  };
+-  for (const m of messages) {
+-    if (m.kind === "user_input") {
+-      flushAssistant();
+-      turns.push({ role: "user", key: `u-${m.seq}`, seq: m.seq, text: m.text ?? "" });
+-      continue;
+-    }
+-    if (!current) {
+-      current = { role: "assistant", key: `a-${m.seq}`, segments: [], timeText: null };
+-    }
+-    switch (m.kind) {
+-      case "reply":
+-        current.segments.push({ kind: "reply", seq: m.seq, text: m.text ?? "" });
+-        break;
+-      case "thinking":
+-        current.segments.push({ kind: "thinking", seq: m.seq, text: m.text ?? "" });
+-        break;
+-      case "tool_use": {
+-        const result = m.tool_use_id ? resultById.get(m.tool_use_id) : undefined;
+-        if (result?.tool_use_id) consumedResultIds.add(result.tool_use_id);
+-        const startMs = m.ts ? Date.parse(m.ts) : NaN;
+-        const endMs = result?.ts ? Date.parse(result.ts) : NaN;
+-        current.segments.push({
+-          kind: "tool_use",
+-          seq: m.seq,
+-          entry: toToolCallEntry(m, result),
+-          mergedResult: result?.tool_result ?? undefined,
+-          durationMs:
+-            Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+-              ? endMs - startMs
+-              : undefined,
+-          hasResult: Boolean(result),
+-        });
+-        break;
+-      }
+-      case "tool_result":
+-        // 已并入 tool_use 卡片的跳过；孤儿结果独立渲染（不丢信息）。
+-        if (!(m.tool_use_id && consumedResultIds.has(m.tool_use_id))) {
+-          current.segments.push({
+-            kind: "tool_result",
+-            seq: m.seq,
+-            body: m.tool_result ?? "",
+-          });
+-        }
+-        break;
+-    }
+-    if (m.ts) current.timeText = formatSegmentTime(m.ts);
+-  }
+-  flushAssistant();
+-  return turns;
+-}
+-
+-/** 原文视图（「原文」tab 与回落态共用）：truncated 注明 + 尾部文本 <pre>（现状形态）。 */
+-function RawLogContent({ data }: { data: AgentLogContentResponse }) {
+-  return (
+-    <>
+-      {data.truncated && (
+-        <p className="border-b border-border px-2.5 py-1 text-[10.5px] text-muted-foreground">
+-          已截断至末尾 256KB
+-        </p>
+-      )}
+-      <pre
+-        data-testid="agent-log-raw-pre"
+-        className="max-h-64 overflow-auto whitespace-pre-wrap break-all px-2.5 py-2 font-mono text-[10.5px] leading-4 text-foreground"
+-      >
+-        {data.content}
+-      </pre>
+-    </>
+-  );
+-}
+-
+-/** 单段渲染分支（design §7.3：reply→MarkdownText / thinking→折叠 / tool→卡片）。 */
+-function renderSegment(seg: ConversationSegment) {
+-  switch (seg.kind) {
+-    case "reply":
+-      return (
+-        <div
+-          key={seg.seq}
+-          className="min-w-0 rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
+-        >
+-          <MarkdownText content={seg.text} />
+-        </div>
+-      );
+-    case "thinking":
+-      return (
+-        <CollapsibleSection
+-          key={seg.seq}
+-          title="思考过程"
+-          defaultOpen={false}
+-          summary={thinkingSummary(seg.text)}
+-        >
+-          <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
+-            {seg.text}
+-          </div>
+-        </CollapsibleSection>
+-      );
+-    case "tool_use":
+-      // 配对成功：复用 ToolCallPreview（agent-log-viewer 同款导出）+ 结果并入
+-      // 卡片结果区（mergedResult），is_error 经 entry.success 着失败红。
+-      return seg.hasResult ? (
+-        <div key={seg.seq} className="min-w-0 font-mono [overflow-wrap:anywhere]">
+-          <ToolCallPreview
+-            entry={seg.entry}
+-            mergedResult={seg.mergedResult}
+-            durationMs={seg.durationMs}
+-          />
+-        </div>
+-      ) : (
+-        // 配对失配（窗口截断/中断）：中性「结果未记录」徽章（muted/zinc 阶），
+-        // 禁止复用「执行中 ⏳」假运行语义（design §7.3 / R-03）。
+-        <div
+-          key={seg.seq}
+-          data-testid="agent-log-tool-no-result"
+-          className="min-w-0 rounded-md border border-border bg-card px-2.5 py-1.5 font-mono [overflow-wrap:anywhere]"
+-        >
+-          <div className="flex flex-wrap items-center gap-2">
+-            <Wrench aria-hidden className="h-3 w-3 shrink-0 text-cyan-700" />
+-            <span className="min-w-0 break-words text-[11px] font-semibold text-cyan-700">
+-              {seg.entry.tool}
+-            </span>
+-            <span className="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
+-              结果未记录
+-            </span>
+-          </div>
+-          {seg.entry.args && (
+-            <CollapsibleSection title="参数">
+-              <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-2 py-1 text-[11px] leading-5 text-foreground [overflow-wrap:anywhere]">
+-                {seg.entry.args}
+-              </pre>
+-            </CollapsibleSection>
+-          )}
+-        </div>
+-      );
+-    case "tool_result":
+-      // 孤儿结果（对应 tool_use 在更早窗口外）：独立 ToolResultCard，不丢信息。
+-      return (
+-        <div key={seg.seq} className="min-w-0 font-mono [overflow-wrap:anywhere]">
+-          <ToolResultCard body={seg.body} />
+-        </div>
+-      );
+-  }
+-}
+-
+-/* ───────────────── 复制反馈（copyTextToClipboard + 瞬时文案） ─────────── */
+-
+-/**
+- * 复制反馈小 hook：writeText 后 900ms 内 copiedKey 命中目标显示「已复制 ✓」；
+- * 同一时间只保留最后一个目标的反馈，定时器随卸载清理。
+- */
+-function useCopyFeedback() {
+-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+-
+-  useEffect(
+-    () => () => {
+-      if (timerRef.current) clearTimeout(timerRef.current);
+-    },
+-    [],
+-  );
+-
+-  const copy = useCallback(({ key, text }: CopyTarget) => {
+-    // 剪贴板不可用（非安全上下文等）静默失败——反馈文案照常给出，不阻塞排障主路径。
+-    void copyTextToClipboard(text).catch(() => undefined);
+-    setCopiedKey(key);
+-    if (timerRef.current) clearTimeout(timerRef.current);
+-    timerRef.current = setTimeout(() => setCopiedKey(null), COPY_FEEDBACK_MS);
+-  }, []);
+-
+-  return { copiedKey, copy };
+-}
+-
+-/* ───────────────── 条目行 ───────────────── */
+-
+-/**
+- * 单条日志元信息行：harness 徽标 / originator / session 短码 / 大小 + 活跃
+- * 绿点 / 调用次数 + 最近命令 + format / log_path 复制 /「查看内容」内联展开。
+- *
+- * 根元素是 div（不带 li 壳）——AgentLogCard 折叠明细以 <li> 包裹
+- * （列表语义）。
+- */
+-function AgentLogEntry({
+-  entry,
+-  copiedKey,
+-  onCopy,
+-}: {
+-  entry: AgentLogListItem;
+-  copiedKey: string | null;
+-  onCopy: (_target: CopyTarget) => void;
+-}) {
+-  // zcode 徽标走语义 info 青（NFR-03：zcode 是外部 harness 标识而非品牌用途，
+-  // cyan 固定阶对齐 runtime-card-helpers info 徽标）。
+-  const isZcode = entry.harness.toLowerCase() === "zcode";
+-  const isDaemon = entry.originator === "sillyhub-daemon";
+-
+-  const sessionKey = `${entry.id}:session`;
+-  const pathKey = `${entry.id}:path`;
+-  const sizeText = formatBytes(entry.size_bytes);
+-  const timeText = entry.last_seen_at
+-    ? `${dayjs(entry.last_seen_at).fromNow()}活跃`
+-    : null;
+-  const recentlyActive = isRecentlyActive(entry.last_seen_at);
+-  // 2026-09-07-agent-liveness-states task-14：行尾活性徽章（D-004 悬浮详情）
+-  const livenessTitleStr = livenessTitle(entry);
+-
+-  // 「查看内容」内联展开态（task-05 对话化升级）：展开先调 messages 端点——
+-  // parsed 直构对话流；status≠parsed / ApiError 一律静默回落 content 原文
+-  // （黄条注明原因，不弹错框）；仅原文端点自身失败保留红条（现状语义）。
+-  const [peekOpen, setPeekOpen] = useState(false);
+-  const [peekLoading, setPeekLoading] = useState(false);
+-  const [convData, setConvData] = useState<ConversationData | null>(null);
+-  const [viewTab, setViewTab] = useState<"conversation" | "raw">("conversation");
+-  const [rawData, setRawData] = useState<AgentLogContentResponse | null>(null);
+-  const [rawLoading, setRawLoading] = useState(false);
+-  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
+-  const [peekError, setPeekError] = useState<string | null>(null);
+-  const [loadingEarlier, setLoadingEarlier] = useState(false);
+-  const [loadEarlierNote, setLoadEarlierNote] = useState<string | null>(null);
+-  // 展开轮次号：收起 / 重开 / 换条目自增——迟到的异步回调按轮次丢弃陈旧写入。
+-  const peekEpochRef = useRef(0);
+-
+-  const turns = useMemo(
+-    () => (convData ? buildConversationTurns(convData.messages) : []),
+-    [convData],
+-  );
+-
+-  /** 拉原文（回落态立即 / 「原文」tab 懒加载共用）；失败走既有红条语义。 */
+-  const fetchRawContent = useCallback(
+-    (epoch: number) => {
+-      setRawLoading(true);
+-      setPeekError(null);
+-      readAgentLogContent(entry.id)
+-        .then((data) => {
+-          if (peekEpochRef.current !== epoch) return;
+-          setRawData(data);
+-          setRawLoading(false);
+-        })
+-        .catch((err: unknown) => {
+-          if (peekEpochRef.current !== epoch) return;
+-          // ApiError.message 即后端中文文案（409 二进制 / 404 无归属 / 504 离线）。
+-          setPeekError(
+-            err instanceof ApiError ? err.message : "读取日志内容失败",
+-          );
+-          setRawLoading(false);
+-        });
+-    },
+-    [entry.id],
+-  );
+-
+-  useEffect(() => {
+-    const epoch = ++peekEpochRef.current;
+-    // 收起即清态：重开重新拉取，错误/数据不驻留陈旧状态。
+-    if (!peekOpen) {
+-      setPeekLoading(false);
+-      setConvData(null);
+-      setViewTab("conversation");
+-      setRawData(null);
+-      setRawLoading(false);
+-      setFallbackNote(null);
+-      setPeekError(null);
+-      setLoadingEarlier(false);
+-      setLoadEarlierNote(null);
+-      return;
+-    }
+-    let cancelled = false;
+-    setPeekLoading(true);
+-    setPeekError(null);
+-    readAgentLogMessages(entry.id)
+-      .then((resp) => {
+-        if (cancelled || peekEpochRef.current !== epoch) return;
+-        setPeekLoading(false);
+-        if (resp.status === "parsed") {
+-          setConvData({
+-            messages: resp.messages ?? [],
+-            truncated: resp.truncated,
+-            totalSegments: resp.total_segments,
+-          });
+-          return;
+-        }
+-        // 200 但解析分层失败（unsupported / parse_error / too_large）→ 静默回落。
+-        setFallbackNote(fallbackNoteForStatus(resp.status));
+-        fetchRawContent(epoch);
+-      })
+-      .catch((err: unknown) => {
+-        if (cancelled || peekEpochRef.current !== epoch) return;
+-        setPeekLoading(false);
+-        // HTTP 非 200（422 老 daemon / 409 / 404 / 5xx）→ 同样静默回落原文。
+-        setFallbackNote(fallbackNoteForError(err));
+-        fetchRawContent(epoch);
+-      });
+-    return () => {
+-      cancelled = true;
+-    };
+-  }, [peekOpen, entry.id, fetchRawContent]);
+-
+-  /** 「加载更早」（design §5.2）：携带当前最小 seq 重取，返回段前插并刷新截断标记。 */
+-  const handleLoadEarlier = useCallback(() => {
+-    if (!convData || loadingEarlier) return;
+-    const beforeSeq =
+-      convData.messages.length > 0
+-        ? Math.min(...convData.messages.map((m) => m.seq))
+-        : undefined;
+-    const epoch = peekEpochRef.current;
+-    setLoadingEarlier(true);
+-    setLoadEarlierNote(null);
+-    readAgentLogMessages(entry.id, beforeSeq)
+-      .then((resp) => {
+-        if (peekEpochRef.current !== epoch) return;
+-        setLoadingEarlier(false);
+-        if (resp.status !== "parsed") {
+-          // 热文件轮换 / 重解析失败：保持现有内容，静默提示可重试。
+-          setLoadEarlierNote("更早内容暂时无法解析，请稍后重试");
+-          return;
+-        }
+-        setConvData((prev) => {
+-          if (!prev) return prev;
+-          const existingSeqs = new Set(prev.messages.map((m) => m.seq));
+-          const older = (resp.messages ?? []).filter(
+-            (m) => !existingSeqs.has(m.seq),
+-          );
+-          return {
+-            messages: [...older, ...prev.messages].sort((a, b) => a.seq - b.seq),
+-            truncated: resp.truncated,
+-            totalSegments: resp.total_segments,
+-          };
+-        });
+-      })
+-      .catch(() => {
+-        if (peekEpochRef.current !== epoch) return;
+-        setLoadingEarlier(false);
+-        setLoadEarlierNote("加载更早失败，请重试");
+-      });
+-  }, [convData, loadingEarlier, entry.id]);
+-
+-  return (
+-    <div>
+-      {/* 第一行：harness / originator / session 短码 · 大小 + 活跃时间（右侧） */}
+-      <div className="flex flex-wrap items-center gap-2">
+-        <span
+-          className={cn(
+-            "inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-[11px] font-semibold",
+-            isZcode
+-              ? "border-cyan-200 bg-cyan-50 text-cyan-700"
+-              : "border-brand-100 bg-brand-50 text-brand-700",
+-          )}
+-        >
+-          {entry.harness}
+-        </span>
+-        {entry.state && (
+-          <span title={livenessTitleStr}>
+-            <LivenessBadge state={entry.state} />
+-          </span>
+-        )}
+-        {entry.originator && (
+-          <span
+-            title={`上报来源：${entry.originator}`}
+-            className={cn(
+-              "inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-[11px]",
+-              isDaemon
+-                ? "border-brand-600 text-brand-700"
+-                : "border-dashed border-border text-muted-foreground",
+-            )}
+-          >
+-            {entry.originator}
+-          </span>
+-        )}
+-        {entry.session_id && (
+-          <button
+-            type="button"
+-            aria-label={`复制 session_id：${entry.session_id}`}
+-            title={`点击复制 session_id：${entry.session_id}`}
+-            onClick={() =>
+-              onCopy({ key: sessionKey, text: entry.session_id ?? "" })
+-            }
+-            className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+-          >
+-            {copiedKey === sessionKey
+-              ? "已复制 ✓"
+-              : `sess ${shortSessionId(entry.session_id)}`}
+-          </button>
+-        )}
+-        <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground">
+-          {recentlyActive && (
+-            <span
+-              className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+-              aria-label="最近活跃"
+-            />
+-          )}
+-          {sizeText ?? "—"} · {timeText ?? "—"}
+-        </span>
+-      </div>
+-
+-      {/* 第二行：调用次数（常驻，null → 「—」）/ 最近命令（code 样式）/ 日志格式 */}
+-      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+-        <span>调用 {entry.invocations ?? "—"} 次</span>
+-        {entry.last_command != null && (
+-          <span className="flex items-center gap-1">
+-            最近命令
+-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
+-              {entry.last_command}
+-            </code>
+-          </span>
+-        )}
+-        {entry.format != null && <span>{entry.format}</span>}
+-      </div>
+-
+-      {/* 第三行：log_path 截断展示（title 全文 + 点击复制完整路径）+「查看内容」。 */}
+-      <div className="mt-1 flex items-center gap-2">
+-        <button
+-          type="button"
+-          aria-label={`复制日志路径：${entry.log_path}`}
+-          title={entry.log_path}
+-          onClick={() => onCopy({ key: pathKey, text: entry.log_path })}
+-          className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+-        >
+-          {copiedKey === pathKey ? "已复制 ✓" : entry.log_path}
+-        </button>
+-        <button
+-          type="button"
+-          aria-expanded={peekOpen}
+-          title={
+-            peekOpen
+-              ? "收起日志内容"
+-              : "展开查看日志内容（对话化回显，不支持时回落原文）"
+-          }
+-          onClick={() => setPeekOpen((v) => !v)}
+-          data-testid="agent-log-content-toggle"
+-          className="shrink-0 cursor-pointer rounded px-1 py-0.5 text-[11px] text-brand-700 transition-colors hover:bg-brand-50"
+-        >
+-          {peekOpen ? "收起 ▴" : "查看内容 ▾"}
+-        </button>
+-      </div>
+-
+-      {/* 查看内容内联面板（原型 .dialog 对话化 / .fallback 回落双形态）。 */}
+-      {peekOpen && (
+-        <div
+-          data-testid="agent-log-content-panel"
+-          className="mt-1.5 overflow-hidden rounded-md border border-border bg-muted/40"
+-        >
+-          {peekLoading && (
+-            <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
+-              内容加载中…
+-            </p>
+-          )}
+-
+-          {convData && (
+-            <>
+-              {/* 头部：会话回放 + 共 N 段 + 「对话 / 原文」tab（原型 .dialog-head）。 */}
+-              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-2.5 py-1.5">
+-                <span className="text-xs font-medium text-foreground">
+-                  会话回放
+-                </span>
+-                <span className="text-[11px] text-muted-foreground">
+-                  共 {convData.totalSegments} 段
+-                </span>
+-                <div className="ml-auto flex items-center gap-1">
+-                  {(["conversation", "raw"] as const).map((tab) => (
+-                    <button
+-                      key={tab}
+-                      type="button"
+-                      aria-pressed={viewTab === tab}
+-                      data-testid={`agent-log-tab-${tab}`}
+-                      onClick={() => {
+-                        setViewTab(tab);
+-                        // 原文 tab 懒加载：首次切入才调 content 端点。
+-                        if (tab === "raw" && rawData == null && !rawLoading) {
+-                          fetchRawContent(peekEpochRef.current);
+-                        }
+-                      }}
+-                      className={cn(
+-                        "cursor-pointer rounded border px-2 py-0.5 text-[11px] transition-colors",
+-                        viewTab === tab
+-                          ? "border-brand-600 bg-brand-50 font-semibold text-brand-700"
+-                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+-                      )}
+-                    >
+-                      {tab === "conversation" ? "对话" : "原文"}
+-                    </button>
+-                  ))}
+-                </div>
+-              </div>
+-
+-              {viewTab === "conversation" ? (
+-                <div
+-                  data-testid="agent-log-conversation-stream"
+-                  className="flex max-h-80 flex-col gap-3 overflow-y-auto px-2.5 py-2.5"
+-                >
+-                  {convData.truncated && (
+-                    <>
+-                      <button
+-                        type="button"
+-                        onClick={handleLoadEarlier}
+-                        disabled={loadingEarlier}
+-                        data-testid="agent-log-load-earlier"
+-                        className="mx-auto shrink-0 self-center rounded-full border border-border bg-card px-3.5 py-1 text-[11.5px] text-brand-700 transition-colors hover:bg-brand-50 disabled:cursor-default disabled:opacity-60"
+-                      >
+-                        {loadingEarlier ? "加载中…" : "加载更早"}
+-                      </button>
+-                      {loadEarlierNote && (
+-                        <p className="mx-auto self-center text-[11px] text-muted-foreground">
+-                          {loadEarlierNote}
+-                        </p>
+-                      )}
+-                    </>
+-                  )}
+-                  {turns.map((turn) =>
+-                    turn.role === "user" ? (
+-                      <div key={turn.key} className="flex justify-end">
+-                        <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-brand-600 px-3 py-2 text-[12.5px] leading-relaxed text-white">
+-                          {turn.text}
+-                        </div>
+-                      </div>
+-                    ) : (
+-                      <div key={turn.key} className="flex items-start gap-2">
+-                        <span
+-                          aria-hidden
+-                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-card text-muted-foreground"
+-                        >
+-                          <Bot className="h-3.5 w-3.5" />
+-                        </span>
+-                        <div className="flex min-w-0 max-w-[88%] flex-1 flex-col gap-2">
+-                          {turn.segments.map(renderSegment)}
+-                          {turn.timeText && (
+-                            <span className="text-[10px] text-muted-foreground">
+-                              {turn.timeText}
+-                            </span>
+-                          )}
+-                        </div>
+-                      </div>
+-                    ),
+-                  )}
+-                  {convData.truncated && (
+-                    <p className="mx-auto self-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] text-amber-800">
+-                      仅展示最近 {convData.messages.length} 段（共{" "}
+-                      {convData.totalSegments} 段）· 点「加载更早」查看更多
+-                    </p>
+-                  )}
+-                  {turns.length === 0 && (
+-                    <p className="py-3 text-center text-[11px] text-muted-foreground">
+-                      解析成功，但没有可展示的对话内容
+-                    </p>
+-                  )}
+-                </div>
+-              ) : (
+-                <div data-testid="agent-log-raw-view">
+-                  {rawLoading && (
+-                    <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
+-                      原文加载中…
+-                    </p>
+-                  )}
+-                  {peekError && (
+-                    <p
+-                      role="alert"
+-                      className="px-2.5 py-2 text-[11px] text-destructive"
+-                    >
+-                      内容读取失败：{peekError}
+-                    </p>
+-                  )}
+-                  {rawData && <RawLogContent data={rawData} />}
+-                </div>
+-              )}
+-            </>
+-          )}
+-
+-          {/* 回落态（status≠parsed / HTTP 失败）：黄条原因 + 原文（无对话 tab）。 */}
+-          {fallbackNote && (
+-            <div data-testid="agent-log-fallback">
+-              <p
+-                data-testid="agent-log-fallback-note"
+-                className="border-b border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-4 text-amber-800"
+-              >
+-                ⚠ {fallbackNote}
+-              </p>
+-              {rawLoading && (
+-                <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
+-                  内容加载中…
+-                </p>
+-              )}
+-              {peekError && (
+-                <p
+-                  role="alert"
+-                  className="px-2.5 py-2 text-[11px] text-destructive"
+-                >
+-                  内容读取失败：{peekError}
+-                </p>
+-              )}
+-              {rawData && <RawLogContent data={rawData} />}
+-            </div>
+-          )}
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+-/* ───────────────── 会话关联查询 ───────────────── */
+-
+-/** 会话关联日志查询选项（30s 轮询跟随上报节奏，design §3.4，X-20：非秒级心跳）。 */
+-function useSessionAgentLogs(sessionId: string) {
+-  return useQuery({
+-    queryKey: queryKeys.agentLogs.list(sessionId),
+-    queryFn: () => listAgentLogs(sessionId),
+-    refetchInterval: 30_000,
+-    enabled: Boolean(sessionId),
+-  });
+-}
+-
+-/* ───────────────── AgentLogCard：面板顶部折叠栏 ───────────────── */
+-
+-/**
+- * AgentLogCard —— 普通会话（chat / 已激活 tool_report）面板顶部折叠栏：
+- * 默认收起成一行整宽摘要细栏，点击展开明细（>3 条再折叠一层）。
+- * ql-20260904-021：原对话流尾部气泡条目（streamFooter 挂载）收编到顶部
+- * （session-panel 挂横幅之下、会话主体之上），不再挤占聊天窗口。
+- */
+-export function AgentLogCard({
+-  sessionId,
+-  mobile = false,
+-}: {
+-  sessionId: string;
+-  /** 面板级横幅同款：mobile 收窄左右内边距（对齐 StreamConnectionBanner）。 */
+-  mobile?: boolean;
+-}) {
+-  const qc = useQueryClient();
+-  const { copiedKey, copy } = useCopyFeedback();
+-  // 外层折叠（默认收起成一行摘要栏，点击头部展开）；内层 expanded 管
+-  // 「展开全部 N 条」（条数超过 COLLAPSED_COUNT 时）。
+-  const [open, setOpen] = useState(false);
+-  const [expanded, setExpanded] = useState(false);
+-
+-  const logsQ = useSessionAgentLogs(sessionId);
+-
+-  // sessionId 空 / error / loading / 空列表 一律不渲染：顶部不出现占位栏
+-  //（ql-20260823-002-6a1a 语义保留：有上报才出现；design §4 增强信息不干扰主体验）。
+-  // 注意先调完 hook 再 return（hooks 规则）。
+-  if (!sessionId || logsQ.isError || logsQ.isPending) return null;
+-
+-  const items = logsQ.data?.items ?? [];
+-  if (items.length === 0) return null;
+-
+-  const visible = expanded ? items : items.slice(0, COLLAPSED_COUNT);
+-  // 摘要行的「最新」取首条（列表按 last_seen_at 新→旧排序，首条即最新）。
+-  const newest = items[0] ?? null;
+-  const newestText = newest?.last_seen_at
+-    ? dayjs(newest.last_seen_at).fromNow()
+-    : null;
+-
+-  return (
+-    <div
+-      aria-label="本地 Agent 日志"
+-      className="shrink-0 border-b border-border bg-muted/40"
+-      data-testid="agent-log-top-bar"
+-    >
+-      {/* 头部（可点击折叠）：🧾 图标 + 标题 + 概要 + 展开箭头，整宽细栏。 */}
+-      <button
+-        type="button"
+-        aria-expanded={open}
+-        aria-label={open ? "收起本地 Agent 日志" : "展开本地 Agent 日志"}
+-        onClick={() => setOpen((v) => !v)}
+-        className={cn(
+-          "flex w-full cursor-pointer items-center gap-2 px-5 py-1.5 text-left transition-colors hover:bg-muted",
+-          mobile && "px-3",
+-        )}
+-        data-testid="agent-log-toggle"
+-      >
+-        <FileText
+-          aria-hidden
+-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+-        />
+-        <span className="text-xs font-medium text-foreground">
+-          本地 Agent 日志
+-        </span>
+-        <span className="text-[11px] text-muted-foreground">
+-          {items.length} 个 · {newestText ? `最新 ${newestText}` : "—"}
+-        </span>
+-        <span
+-          aria-hidden
+-          className={cn(
+-            "ml-auto shrink-0 text-[10px] text-muted-foreground transition-transform",
+-            open && "rotate-90",
+-          )}
+-        >
+-          ▸
+-        </span>
+-      </button>
+-
+-      {open && (
+-        <div
+-          className={cn(
+-            "max-h-[45vh] overflow-y-auto border-t border-border bg-card px-5 py-2.5",
+-            mobile && "px-3",
+-          )}
+-        >
+-          <p className="text-[11px] leading-4 text-muted-foreground">
+-            agent 会话的完整模型 I/O 日志（本机文件），由 SillySpec CLI 自动上报
+-          </p>
+-          <ul
+-            className="mt-2 flex flex-col gap-2"
+-            data-testid="agent-log-entries"
+-          >
+-            {visible.map((entry) => (
+-              <li
+-                key={entry.id}
+-                className="rounded-md border border-border px-2.5 py-2"
+-              >
+-                <AgentLogEntry
+-                  entry={entry}
+-                  copiedKey={copiedKey}
+-                  onCopy={copy}
+-                />
+-              </li>
+-            ))}
+-          </ul>
+-          <div className="mt-2 flex items-center justify-between gap-2">
+-            {items.length > COLLAPSED_COUNT ? (
+-              <button
+-                type="button"
+-                onClick={() => setExpanded((v) => !v)}
+-                className="cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+-              >
+-                {expanded ? "收起" : `展开全部 ${items.length} 条`}
+-              </button>
+-            ) : (
+-              <span />
+-            )}
+-            {/* 刷新：invalidate agentLogs 键（30s 轮询之外的手动补偿）。 */}
+-            <button
+-              type="button"
+-              title="刷新"
+-              onClick={() => {
+-                void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
+-              }}
+-              className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+-            >
+-              刷新
+-            </button>
+-          </div>
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
++
++// 全仓首次 extend（X-15）：relativeTime 提供 fromNow；zh-cn 使 fromNow 输出
++// 「N 分钟前」中文（antd-providers 只覆盖 antd 组件语境，dayjs 需自设 locale）。
++dayjs.extend(relativeTime);
++dayjs.locale("zh-cn");
++
++/** 展开态默认展示条数（超出走「展开全部 N 条 / 收起」）——仅 AgentLogCard 折叠形态。 */
++const COLLAPSED_COUNT = 3;
++
++/** 「活跃中」判定窗口：last_seen_at 15 分钟内显示绿点（原型 .live-dot）。 */
++const ACTIVE_WINDOW_MS = 15 * 60 * 1000;
++
++/** 复制成功反馈驻留时长（原型 copy()：900ms 后还原文案）。 */
++const COPY_FEEDBACK_MS = 900;
++
++/** 复制反馈 key 前缀（条目内区分 session_id / log_path 两个复制目标）。 */
++type CopyTarget = { key: string; text: string };
++
++/* ───────────────── 纯格式化辅助（null 安全） ───────────────── */
++
++/**
++ * session_id 短码：uuid 取前 8 + … + 后 4；非 uuid（如 zcode 的
++ * model-io-sess_* 自构 id）截前 16 + …。展示形态 `sess <短码>`。
++ */
++function shortSessionId(id: string): string {
++  const isUuid =
++    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
++  if (isUuid) return `${id.slice(0, 8)}…${id.slice(-4)}`;
++  return id.length > 16 ? `${id.slice(0, 16)}…` : id;
++}
++
++/** 大小人性化：B → KB → MB（一位小数；null/非数字返回 null 交由上层「—」兜底）。 */
++function formatBytes(bytes: number | null | undefined): string | null {
++  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null;
++  if (bytes < 1024) return `${bytes} B`;
++  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
++  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
++}
++
++/** last_seen_at 是否在活跃窗口内（null/非法时间不活跃，绿点不渲染）。 */
++function isRecentlyActive(lastSeenAt: string | null | undefined): boolean {
++  if (!lastSeenAt) return false;
++  const t = dayjs(lastSeenAt);
++  if (!t.isValid()) return false;
++  return Date.now() - t.valueOf() < ACTIVE_WINDOW_MS;
++}
++
++/* ───────────── 查看内容 · 对话化渲染辅助（task-05，design §7.3 / §5.2） ───────────── */
++
++/** 归一化消息单条（api-types 生成 schema 内层条目，snake_case 原样访问）。 */
++type AgentLogMessageItem = NonNullable<
++  AgentLogMessagesResponse["messages"]
++>[number];
++
++/** messages 端点响应里前端消费的对话流数据 + 窗口截断元信息。 */
++interface ConversationData {
++  messages: AgentLogMessageItem[];
++  truncated: boolean;
++  totalSegments: number;
++}
++
++/**
++ * 段时间戳 → 「MM/DD HH:mm」短时间。toLocaleString 显式传 "zh-CN"（CONVENTIONS
++ * 类型与数据契约 8：不传则依赖运行环境 locale，CI 上漂移）；null / 非法时间
++ * 返回 null 不渲染。
++ */
++function formatSegmentTime(ts: string | null): string | null {
++  if (!ts) return null;
++  const t = new Date(ts);
++  if (Number.isNaN(t.getTime())) return null;
++  return t.toLocaleString("zh-CN", {
++    hour12: false,
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++  });
++}
++
++/** thinking 折叠态单行摘要（agent-log-viewer thinkingSummary 同款：压平 + 截 60 字符）。 */
++function thinkingSummary(content: string): string {
++  const flat = content.replace(/\s+/g, " ").trim();
++  return flat.length <= 60 ? flat : `${flat.slice(0, 60)}...`;
++}
++
++/** 黄条回落文案尾巴（原文端点口径：尾部 256KB）。 */
++const FALLBACK_TAIL = "已回落原文尾部查看（最多 256KB）";
++
++/** 200 但 status≠parsed 的回落原因（黄条中文文案，参照原型 .fb-note）。 */
++function fallbackNoteForStatus(
++  status: AgentLogMessagesResponse["status"],
++): string {
++  switch (status) {
++    case "unsupported":
++      return `该格式暂不支持对话化解析，${FALLBACK_TAIL}`;
++    case "parse_error":
++      return `日志解析失败（格式异常或坏行过多），${FALLBACK_TAIL}`;
++    case "too_large":
++      return `日志文件超出对话化解析预算，${FALLBACK_TAIL}`;
++    default:
++      return `对话化解析不可用，${FALLBACK_TAIL}`;
++  }
++}
++
++/**
++ * messages 端点 HTTP 失败（422 老 daemon / 409 / 404 / 5xx）的静默回落原因。
++ *
++ * 409 二进制格式专属分支（2026-09-19-tool-report-session-replay task-13 / FR-04，
++ * 按 code=HTTP_409_AGENT_LOG_BINARY_FORMAT 精确判定）：cursor IDE sqlite 聊天库
++ * 命中 format 黑名单被后端显式拒——文案改死胡同说明（格式性质 + 仍保留的信息），
++ * 且**不拼 FALLBACK_TAIL**（该场景原文端点同被 409 拒，无原文可回落，红条现状
++ * 语义保留）；其余 409（如 allowed_roots 拒读）与 422/404/5xx 维持既有透传
++ * 文案逐字不变。
++ */
++function fallbackNoteForError(err: unknown): string {
++  if (err instanceof ApiError) {
++    // 422 是老 daemon 无 read_agent_log_messages 方法的唯一映射（design §7.2）。
++    if (err.status === 422) {
++      return `daemon 未升级，暂不支持对话化解析，${FALLBACK_TAIL}`;
++    }
++    // 409 cursor IDE sqlite 二进制库：format 黑名单显式拒绝（FR-04 不可用态显式化）。
++    if (err.status === 409 && err.code === "HTTP_409_AGENT_LOG_BINARY_FORMAT") {
++      return "该日志格式（cursor IDE 聊天库）暂不支持对话化回放，仅保留元数据与活性信息";
++    }
++    return `对话化解析请求失败（${err.message}），${FALLBACK_TAIL}`;
++  }
++  return `对话化解析不可用，${FALLBACK_TAIL}`;
++}
++
++/** 对话流渲染段（由 AgentLogMessageItem 直构，零协议文本合成——D-006@v1）。 */
++type ConversationSegment =
++  | { kind: "reply"; seq: number; text: string }
++  | { kind: "thinking"; seq: number; text: string }
++  | {
++      kind: "tool_use";
++      seq: number;
++      entry: ToolCallEntry;
++      mergedResult?: string;
++      durationMs?: number;
++      /** 2026-10-13-editpatch-fullchain：配对 tool_result 段的 structuredPatch
++       *  JSON（daemon claude-code 解析器附着），Write/Edit 卡行级 diff 用。 */
++      editPatch?: string;
++      hasResult: boolean;
++    }
++  | { kind: "tool_result"; seq: number; body: string };
++
++/** 渲染回合：user_input 独占一行用户气泡；其余段聚成 assistant 回合（原型 a-row）。 */
++type ConversationTurn =
++  | { role: "user"; key: string; seq: number; text: string }
++  | {
++      role: "assistant";
++      key: string;
++      segments: ConversationSegment[];
++      timeText: string | null;
++    };
++
++/**
++ * 由 NormalizedLogMessage 直接构造 ToolCallEntry 纯展示 DTO（agent-log/types.ts，
++ * timestamp/tool/args/status/success/rawArgs/toolUseId 直填）。rawArgs 尽力
++ * JSON.parse（Bash/Read 等专用预览从中取 command/file_path 等），失败退化为
++ * 原始字符串。已结束会话 status 恒 "allowed"（调用已被放行并执行，非待审批）。
++ */
++function toToolCallEntry(
++  use: AgentLogMessageItem,
++  result: AgentLogMessageItem | undefined,
++): ToolCallEntry {
++  const args = use.tool_input ?? "";
++  let rawArgs: unknown = null;
++  try {
++    rawArgs = JSON.parse(args);
++  } catch {
++    rawArgs = args;
++  }
++  return {
++    timestamp: use.ts ?? "",
++    tool: use.tool_name ?? "unknown",
++    args,
++    status: "allowed",
++    // is_error 着失败红（success=false → StatusBadge ✗）；失配分支不走
++    // ToolCallPreview（由「结果未记录」中性徽章承接），此处取值不参与其渲染。
++    success: result ? !(result.is_error ?? false) : false,
++    rawArgs,
++    toolUseId: use.tool_use_id ?? undefined,
++  };
++}
++
++/**
++ * 直构段列表（design §7.3）：tool_use / tool_result 按 tool_use_id 显式 Map
++ * 配对（非位置配对）——失配 tool_use 保留 hasResult=false 供「结果未记录」中性
++ * 徽章（R-03：已结束会话不得假运行）；未被消费的孤儿 tool_result（use 在更早
++ * 窗口外）独立成 ToolResultCard 段。user_input 切回合边界，其余段聚进
++ * assistant 回合，回合时间取末段有效 ts。
++ */
++function buildConversationTurns(
++  messages: AgentLogMessageItem[],
++): ConversationTurn[] {
++  // tool_use_id → 首条 tool_result（seq 升序下最早结果；重复结果按孤儿渲染）。
++  const resultById = new Map<string, AgentLogMessageItem>();
++  for (const m of messages) {
++    if (m.kind === "tool_result" && m.tool_use_id && !resultById.has(m.tool_use_id)) {
++      resultById.set(m.tool_use_id, m);
++    }
++  }
++  const consumedResultIds = new Set<string>();
++  const turns: ConversationTurn[] = [];
++  let current: Extract<ConversationTurn, { role: "assistant" }> | null = null;
++  const flushAssistant = () => {
++    if (current && current.segments.length > 0) turns.push(current);
++    current = null;
++  };
++  for (const m of messages) {
++    if (m.kind === "user_input") {
++      flushAssistant();
++      turns.push({ role: "user", key: `u-${m.seq}`, seq: m.seq, text: m.text ?? "" });
++      continue;
++    }
++    if (!current) {
++      current = { role: "assistant", key: `a-${m.seq}`, segments: [], timeText: null };
++    }
++    switch (m.kind) {
++      case "reply":
++        current.segments.push({ kind: "reply", seq: m.seq, text: m.text ?? "" });
++        break;
++      case "thinking":
++        current.segments.push({ kind: "thinking", seq: m.seq, text: m.text ?? "" });
++        break;
++      case "tool_use": {
++        const result = m.tool_use_id ? resultById.get(m.tool_use_id) : undefined;
++        if (result?.tool_use_id) consumedResultIds.add(result.tool_use_id);
++        const startMs = m.ts ? Date.parse(m.ts) : NaN;
++        const endMs = result?.ts ? Date.parse(result.ts) : NaN;
++        current.segments.push({
++          kind: "tool_use",
++          seq: m.seq,
++          entry: toToolCallEntry(m, result),
++          mergedResult: result?.tool_result ?? undefined,
++          durationMs:
++            Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
++              ? endMs - startMs
++              : undefined,
++          editPatch: result?.edit_patch ?? undefined,
++          hasResult: Boolean(result),
++        });
++        break;
++      }
++      case "tool_result":
++        // 已并入 tool_use 卡片的跳过；孤儿结果独立渲染（不丢信息）。
++        if (!(m.tool_use_id && consumedResultIds.has(m.tool_use_id))) {
++          current.segments.push({
++            kind: "tool_result",
++            seq: m.seq,
++            body: m.tool_result ?? "",
++          });
++        }
++        break;
++    }
++    if (m.ts) current.timeText = formatSegmentTime(m.ts);
++  }
++  flushAssistant();
++  return turns;
++}
++
++/** 原文视图（「原文」tab 与回落态共用）：truncated 注明 + 尾部文本 <pre>（现状形态）。 */
++function RawLogContent({ data }: { data: AgentLogContentResponse }) {
++  return (
++    <>
++      {data.truncated && (
++        <p className="border-b border-border px-2.5 py-1 text-[10.5px] text-muted-foreground">
++          已截断至末尾 256KB
++        </p>
++      )}
++      <pre
++        data-testid="agent-log-raw-pre"
++        className="max-h-64 overflow-auto whitespace-pre-wrap break-all px-2.5 py-2 font-mono text-[10.5px] leading-4 text-foreground"
++      >
++        {data.content}
++      </pre>
++    </>
++  );
++}
++
++/** 单段渲染分支（design §7.3：reply→MarkdownText / thinking→折叠 / tool→卡片）。 */
++function renderSegment(seg: ConversationSegment) {
++  switch (seg.kind) {
++    case "reply":
++      return (
++        <div
++          key={seg.seq}
++          className="min-w-0 rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[12.5px] leading-relaxed text-foreground"
++        >
++          <MarkdownText content={seg.text} />
++        </div>
++      );
++    case "thinking":
++      return (
++        <CollapsibleSection
++          key={seg.seq}
++          title="思考过程"
++          defaultOpen={false}
++          summary={thinkingSummary(seg.text)}
++        >
++          <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-muted-foreground">
++            {seg.text}
++          </div>
++        </CollapsibleSection>
++      );
++    case "tool_use":
++      // 配对成功：复用 ToolCallPreview（agent-log-viewer 同款导出）+ 结果并入
++      // 卡片结果区（mergedResult），is_error 经 entry.success 着失败红。
++      return seg.hasResult ? (
++        <div key={seg.seq} className="min-w-0 font-mono [overflow-wrap:anywhere]">
++          <ToolCallPreview
++            entry={seg.entry}
++            mergedResult={seg.mergedResult}
++            durationMs={seg.durationMs}
++            editPatch={seg.editPatch}
++          />
++        </div>
++      ) : (
++        // 配对失配（窗口截断/中断）：中性「结果未记录」徽章（muted/zinc 阶），
++        // 禁止复用「执行中 ⏳」假运行语义（design §7.3 / R-03）。
++        <div
++          key={seg.seq}
++          data-testid="agent-log-tool-no-result"
++          className="min-w-0 rounded-md border border-border bg-card px-2.5 py-1.5 font-mono [overflow-wrap:anywhere]"
++        >
++          <div className="flex flex-wrap items-center gap-2">
++            <Wrench aria-hidden className="h-3 w-3 shrink-0 text-cyan-700" />
++            <span className="min-w-0 break-words text-[11px] font-semibold text-cyan-700">
++              {seg.entry.tool}
++            </span>
++            <span className="inline-flex items-center rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
++              结果未记录
++            </span>
++          </div>
++          {seg.entry.args && (
++            <CollapsibleSection title="参数">
++              <pre className="max-w-full whitespace-pre-wrap break-words rounded-md border border-border bg-muted px-2 py-1 text-[11px] leading-5 text-foreground [overflow-wrap:anywhere]">
++                {seg.entry.args}
++              </pre>
++            </CollapsibleSection>
++          )}
++        </div>
++      );
++    case "tool_result":
++      // 孤儿结果（对应 tool_use 在更早窗口外）：独立 ToolResultCard，不丢信息。
++      return (
++        <div key={seg.seq} className="min-w-0 font-mono [overflow-wrap:anywhere]">
++          <ToolResultCard body={seg.body} />
++        </div>
++      );
++  }
++}
++
++/* ───────────────── 复制反馈（copyTextToClipboard + 瞬时文案） ─────────── */
++
++/**
++ * 复制反馈小 hook：writeText 后 900ms 内 copiedKey 命中目标显示「已复制 ✓」；
++ * 同一时间只保留最后一个目标的反馈，定时器随卸载清理。
++ */
++function useCopyFeedback() {
++  const [copiedKey, setCopiedKey] = useState<string | null>(null);
++  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++
++  useEffect(
++    () => () => {
++      if (timerRef.current) clearTimeout(timerRef.current);
++    },
++    [],
++  );
++
++  const copy = useCallback(({ key, text }: CopyTarget) => {
++    // 剪贴板不可用（非安全上下文等）静默失败——反馈文案照常给出，不阻塞排障主路径。
++    void copyTextToClipboard(text).catch(() => undefined);
++    setCopiedKey(key);
++    if (timerRef.current) clearTimeout(timerRef.current);
++    timerRef.current = setTimeout(() => setCopiedKey(null), COPY_FEEDBACK_MS);
++  }, []);
++
++  return { copiedKey, copy };
++}
++
++/* ───────────────── 条目行 ───────────────── */
++
++/**
++ * 单条日志元信息行：harness 徽标 / originator / session 短码 / 大小 + 活跃
++ * 绿点 / 调用次数 + 最近命令 + format / log_path 复制 /「查看内容」内联展开。
++ *
++ * 根元素是 div（不带 li 壳）——AgentLogCard 折叠明细以 <li> 包裹
++ * （列表语义）。
++ */
++function AgentLogEntry({
++  entry,
++  copiedKey,
++  onCopy,
++}: {
++  entry: AgentLogListItem;
++  copiedKey: string | null;
++  onCopy: (_target: CopyTarget) => void;
++}) {
++  // zcode 徽标走语义 info 青（NFR-03：zcode 是外部 harness 标识而非品牌用途，
++  // cyan 固定阶对齐 runtime-card-helpers info 徽标）。
++  const isZcode = entry.harness.toLowerCase() === "zcode";
++  const isDaemon = entry.originator === "sillyhub-daemon";
++
++  const sessionKey = `${entry.id}:session`;
++  const pathKey = `${entry.id}:path`;
++  const sizeText = formatBytes(entry.size_bytes);
++  const timeText = entry.last_seen_at
++    ? `${dayjs(entry.last_seen_at).fromNow()}活跃`
++    : null;
++  const recentlyActive = isRecentlyActive(entry.last_seen_at);
++  // 2026-09-07-agent-liveness-states task-14：行尾活性徽章（D-004 悬浮详情）
++  const livenessTitleStr = livenessTitle(entry);
++
++  // 「查看内容」内联展开态（task-05 对话化升级）：展开先调 messages 端点——
++  // parsed 直构对话流；status≠parsed / ApiError 一律静默回落 content 原文
++  // （黄条注明原因，不弹错框）；仅原文端点自身失败保留红条（现状语义）。
++  const [peekOpen, setPeekOpen] = useState(false);
++  const [peekLoading, setPeekLoading] = useState(false);
++  const [convData, setConvData] = useState<ConversationData | null>(null);
++  const [viewTab, setViewTab] = useState<"conversation" | "raw">("conversation");
++  const [rawData, setRawData] = useState<AgentLogContentResponse | null>(null);
++  const [rawLoading, setRawLoading] = useState(false);
++  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
++  const [peekError, setPeekError] = useState<string | null>(null);
++  const [loadingEarlier, setLoadingEarlier] = useState(false);
++  const [loadEarlierNote, setLoadEarlierNote] = useState<string | null>(null);
++  // 展开轮次号：收起 / 重开 / 换条目自增——迟到的异步回调按轮次丢弃陈旧写入。
++  const peekEpochRef = useRef(0);
++
++  const turns = useMemo(
++    () => (convData ? buildConversationTurns(convData.messages) : []),
++    [convData],
++  );
++
++  /** 拉原文（回落态立即 / 「原文」tab 懒加载共用）；失败走既有红条语义。 */
++  const fetchRawContent = useCallback(
++    (epoch: number) => {
++      setRawLoading(true);
++      setPeekError(null);
++      readAgentLogContent(entry.id)
++        .then((data) => {
++          if (peekEpochRef.current !== epoch) return;
++          setRawData(data);
++          setRawLoading(false);
++        })
++        .catch((err: unknown) => {
++          if (peekEpochRef.current !== epoch) return;
++          // ApiError.message 即后端中文文案（409 二进制 / 404 无归属 / 504 离线）。
++          setPeekError(
++            err instanceof ApiError ? err.message : "读取日志内容失败",
++          );
++          setRawLoading(false);
++        });
++    },
++    [entry.id],
++  );
++
++  useEffect(() => {
++    const epoch = ++peekEpochRef.current;
++    // 收起即清态：重开重新拉取，错误/数据不驻留陈旧状态。
++    if (!peekOpen) {
++      setPeekLoading(false);
++      setConvData(null);
++      setViewTab("conversation");
++      setRawData(null);
++      setRawLoading(false);
++      setFallbackNote(null);
++      setPeekError(null);
++      setLoadingEarlier(false);
++      setLoadEarlierNote(null);
++      return;
++    }
++    let cancelled = false;
++    setPeekLoading(true);
++    setPeekError(null);
++    readAgentLogMessages(entry.id)
++      .then((resp) => {
++        if (cancelled || peekEpochRef.current !== epoch) return;
++        setPeekLoading(false);
++        if (resp.status === "parsed") {
++          setConvData({
++            messages: resp.messages ?? [],
++            truncated: resp.truncated,
++            totalSegments: resp.total_segments,
++          });
++          return;
++        }
++        // 200 但解析分层失败（unsupported / parse_error / too_large）→ 静默回落。
++        setFallbackNote(fallbackNoteForStatus(resp.status));
++        fetchRawContent(epoch);
++      })
++      .catch((err: unknown) => {
++        if (cancelled || peekEpochRef.current !== epoch) return;
++        setPeekLoading(false);
++        // HTTP 非 200（422 老 daemon / 409 / 404 / 5xx）→ 同样静默回落原文。
++        setFallbackNote(fallbackNoteForError(err));
++        fetchRawContent(epoch);
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, [peekOpen, entry.id, fetchRawContent]);
++
++  /** 「加载更早」（design §5.2）：携带当前最小 seq 重取，返回段前插并刷新截断标记。 */
++  const handleLoadEarlier = useCallback(() => {
++    if (!convData || loadingEarlier) return;
++    const beforeSeq =
++      convData.messages.length > 0
++        ? Math.min(...convData.messages.map((m) => m.seq))
++        : undefined;
++    const epoch = peekEpochRef.current;
++    setLoadingEarlier(true);
++    setLoadEarlierNote(null);
++    readAgentLogMessages(entry.id, beforeSeq)
++      .then((resp) => {
++        if (peekEpochRef.current !== epoch) return;
++        setLoadingEarlier(false);
++        if (resp.status !== "parsed") {
++          // 热文件轮换 / 重解析失败：保持现有内容，静默提示可重试。
++          setLoadEarlierNote("更早内容暂时无法解析，请稍后重试");
++          return;
++        }
++        setConvData((prev) => {
++          if (!prev) return prev;
++          const existingSeqs = new Set(prev.messages.map((m) => m.seq));
++          const older = (resp.messages ?? []).filter(
++            (m) => !existingSeqs.has(m.seq),
++          );
++          return {
++            messages: [...older, ...prev.messages].sort((a, b) => a.seq - b.seq),
++            truncated: resp.truncated,
++            totalSegments: resp.total_segments,
++          };
++        });
++      })
++      .catch(() => {
++        if (peekEpochRef.current !== epoch) return;
++        setLoadingEarlier(false);
++        setLoadEarlierNote("加载更早失败，请重试");
++      });
++  }, [convData, loadingEarlier, entry.id]);
++
++  return (
++    <div>
++      {/* 第一行：harness / originator / session 短码 · 大小 + 活跃时间（右侧） */}
++      <div className="flex flex-wrap items-center gap-2">
++        <span
++          className={cn(
++            "inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-[11px] font-semibold",
++            isZcode
++              ? "border-cyan-200 bg-cyan-50 text-cyan-700"
++              : "border-brand-100 bg-brand-50 text-brand-700",
++          )}
++        >
++          {entry.harness}
++        </span>
++        {entry.state && (
++          <span title={livenessTitleStr}>
++            <LivenessBadge state={entry.state} />
++          </span>
++        )}
++        {entry.originator && (
++          <span
++            title={`上报来源：${entry.originator}`}
++            className={cn(
++              "inline-flex h-5 shrink-0 items-center rounded-full border px-2 text-[11px]",
++              isDaemon
++                ? "border-brand-600 text-brand-700"
++                : "border-dashed border-border text-muted-foreground",
++            )}
++          >
++            {entry.originator}
++          </span>
++        )}
++        {entry.session_id && (
++          <button
++            type="button"
++            aria-label={`复制 session_id：${entry.session_id}`}
++            title={`点击复制 session_id：${entry.session_id}`}
++            onClick={() =>
++              onCopy({ key: sessionKey, text: entry.session_id ?? "" })
++            }
++            className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
++          >
++            {copiedKey === sessionKey
++              ? "已复制 ✓"
++              : `sess ${shortSessionId(entry.session_id)}`}
++          </button>
++        )}
++        <span className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground">
++          {recentlyActive && (
++            <span
++              className="h-1.5 w-1.5 rounded-full bg-emerald-500"
++              aria-label="最近活跃"
++            />
++          )}
++          {sizeText ?? "—"} · {timeText ?? "—"}
++        </span>
++      </div>
++
++      {/* 第二行：调用次数（常驻，null → 「—」）/ 最近命令（code 样式）/ 日志格式 */}
++      <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
++        <span>调用 {entry.invocations ?? "—"} 次</span>
++        {entry.last_command != null && (
++          <span className="flex items-center gap-1">
++            最近命令
++            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
++              {entry.last_command}
++            </code>
++          </span>
++        )}
++        {entry.format != null && <span>{entry.format}</span>}
++      </div>
++
++      {/* 第三行：log_path 截断展示（title 全文 + 点击复制完整路径）+「查看内容」。 */}
++      <div className="mt-1 flex items-center gap-2">
++        <button
++          type="button"
++          aria-label={`复制日志路径：${entry.log_path}`}
++          title={entry.log_path}
++          onClick={() => onCopy({ key: pathKey, text: entry.log_path })}
++          className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
++        >
++          {copiedKey === pathKey ? "已复制 ✓" : entry.log_path}
++        </button>
++        <button
++          type="button"
++          aria-expanded={peekOpen}
++          title={
++            peekOpen
++              ? "收起日志内容"
++              : "展开查看日志内容（对话化回显，不支持时回落原文）"
++          }
++          onClick={() => setPeekOpen((v) => !v)}
++          data-testid="agent-log-content-toggle"
++          className="shrink-0 cursor-pointer rounded px-1 py-0.5 text-[11px] text-brand-700 transition-colors hover:bg-brand-50"
++        >
++          {peekOpen ? "收起 ▴" : "查看内容 ▾"}
++        </button>
++      </div>
++
++      {/* 查看内容内联面板（原型 .dialog 对话化 / .fallback 回落双形态）。 */}
++      {peekOpen && (
++        <div
++          data-testid="agent-log-content-panel"
++          className="mt-1.5 overflow-hidden rounded-md border border-border bg-muted/40"
++        >
++          {peekLoading && (
++            <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
++              内容加载中…
++            </p>
++          )}
++
++          {convData && (
++            <>
++              {/* 头部：会话回放 + 共 N 段 + 「对话 / 原文」tab（原型 .dialog-head）。 */}
++              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-2.5 py-1.5">
++                <span className="text-xs font-medium text-foreground">
++                  会话回放
++                </span>
++                <span className="text-[11px] text-muted-foreground">
++                  共 {convData.totalSegments} 段
++                </span>
++                <div className="ml-auto flex items-center gap-1">
++                  {(["conversation", "raw"] as const).map((tab) => (
++                    <button
++                      key={tab}
++                      type="button"
++                      aria-pressed={viewTab === tab}
++                      data-testid={`agent-log-tab-${tab}`}
++                      onClick={() => {
++                        setViewTab(tab);
++                        // 原文 tab 懒加载：首次切入才调 content 端点。
++                        if (tab === "raw" && rawData == null && !rawLoading) {
++                          fetchRawContent(peekEpochRef.current);
++                        }
++                      }}
++                      className={cn(
++                        "cursor-pointer rounded border px-2 py-0.5 text-[11px] transition-colors",
++                        viewTab === tab
++                          ? "border-brand-600 bg-brand-50 font-semibold text-brand-700"
++                          : "border-border bg-card text-muted-foreground hover:text-foreground",
++                      )}
++                    >
++                      {tab === "conversation" ? "对话" : "原文"}
++                    </button>
++                  ))}
++                </div>
++              </div>
++
++              {viewTab === "conversation" ? (
++                <div
++                  data-testid="agent-log-conversation-stream"
++                  className="flex max-h-80 flex-col gap-3 overflow-y-auto px-2.5 py-2.5"
++                >
++                  {convData.truncated && (
++                    <>
++                      <button
++                        type="button"
++                        onClick={handleLoadEarlier}
++                        disabled={loadingEarlier}
++                        data-testid="agent-log-load-earlier"
++                        className="mx-auto shrink-0 self-center rounded-full border border-border bg-card px-3.5 py-1 text-[11.5px] text-brand-700 transition-colors hover:bg-brand-50 disabled:cursor-default disabled:opacity-60"
++                      >
++                        {loadingEarlier ? "加载中…" : "加载更早"}
++                      </button>
++                      {loadEarlierNote && (
++                        <p className="mx-auto self-center text-[11px] text-muted-foreground">
++                          {loadEarlierNote}
++                        </p>
++                      )}
++                    </>
++                  )}
++                  {turns.map((turn) =>
++                    turn.role === "user" ? (
++                      <div key={turn.key} className="flex justify-end">
++                        <div className="max-w-[82%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-brand-600 px-3 py-2 text-[12.5px] leading-relaxed text-white">
++                          {turn.text}
++                        </div>
++                      </div>
++                    ) : (
++                      <div key={turn.key} className="flex items-start gap-2">
++                        <span
++                          aria-hidden
++                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border bg-card text-muted-foreground"
++                        >
++                          <Bot className="h-3.5 w-3.5" />
++                        </span>
++                        <div className="flex min-w-0 max-w-[88%] flex-1 flex-col gap-2">
++                          {turn.segments.map(renderSegment)}
++                          {turn.timeText && (
++                            <span className="text-[10px] text-muted-foreground">
++                              {turn.timeText}
++                            </span>
++                          )}
++                        </div>
++                      </div>
++                    ),
++                  )}
++                  {convData.truncated && (
++                    <p className="mx-auto self-center rounded-lg border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] text-amber-800">
++                      仅展示最近 {convData.messages.length} 段（共{" "}
++                      {convData.totalSegments} 段）· 点「加载更早」查看更多
++                    </p>
++                  )}
++                  {turns.length === 0 && (
++                    <p className="py-3 text-center text-[11px] text-muted-foreground">
++                      解析成功，但没有可展示的对话内容
++                    </p>
++                  )}
++                </div>
++              ) : (
++                <div data-testid="agent-log-raw-view">
++                  {rawLoading && (
++                    <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
++                      原文加载中…
++                    </p>
++                  )}
++                  {peekError && (
++                    <p
++                      role="alert"
++                      className="px-2.5 py-2 text-[11px] text-destructive"
++                    >
++                      内容读取失败：{peekError}
++                    </p>
++                  )}
++                  {rawData && <RawLogContent data={rawData} />}
++                </div>
++              )}
++            </>
++          )}
++
++          {/* 回落态（status≠parsed / HTTP 失败）：黄条原因 + 原文（无对话 tab）。 */}
++          {fallbackNote && (
++            <div data-testid="agent-log-fallback">
++              <p
++                data-testid="agent-log-fallback-note"
++                className="border-b border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-4 text-amber-800"
++              >
++                ⚠ {fallbackNote}
++              </p>
++              {rawLoading && (
++                <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
++                  内容加载中…
++                </p>
++              )}
++              {peekError && (
++                <p
++                  role="alert"
++                  className="px-2.5 py-2 text-[11px] text-destructive"
++                >
++                  内容读取失败：{peekError}
++                </p>
++              )}
++              {rawData && <RawLogContent data={rawData} />}
++            </div>
++          )}
++        </div>
++      )}
++    </div>
++  );
++}
++
++/* ───────────────── 会话关联查询 ───────────────── */
++
++/** 会话关联日志查询选项（30s 轮询跟随上报节奏，design §3.4，X-20：非秒级心跳）。 */
++function useSessionAgentLogs(sessionId: string) {
++  return useQuery({
++    queryKey: queryKeys.agentLogs.list(sessionId),
++    queryFn: () => listAgentLogs(sessionId),
++    refetchInterval: 30_000,
++    enabled: Boolean(sessionId),
++  });
++}
++
++/* ───────────────── AgentLogCard：面板顶部折叠栏 ───────────────── */
++
++/**
++ * AgentLogCard —— 普通会话（chat / 已激活 tool_report）面板顶部折叠栏：
++ * 默认收起成一行整宽摘要细栏，点击展开明细（>3 条再折叠一层）。
++ * ql-20260904-021：原对话流尾部气泡条目（streamFooter 挂载）收编到顶部
++ * （session-panel 挂横幅之下、会话主体之上），不再挤占聊天窗口。
++ */
++export function AgentLogCard({
++  sessionId,
++  mobile = false,
++}: {
++  sessionId: string;
++  /** 面板级横幅同款：mobile 收窄左右内边距（对齐 StreamConnectionBanner）。 */
++  mobile?: boolean;
++}) {
++  const qc = useQueryClient();
++  const { copiedKey, copy } = useCopyFeedback();
++  // 外层折叠（默认收起成一行摘要栏，点击头部展开）；内层 expanded 管
++  // 「展开全部 N 条」（条数超过 COLLAPSED_COUNT 时）。
++  const [open, setOpen] = useState(false);
++  const [expanded, setExpanded] = useState(false);
++
++  const logsQ = useSessionAgentLogs(sessionId);
++
++  // sessionId 空 / error / loading / 空列表 一律不渲染：顶部不出现占位栏
++  //（ql-20260823-002-6a1a 语义保留：有上报才出现；design §4 增强信息不干扰主体验）。
++  // 注意先调完 hook 再 return（hooks 规则）。
++  if (!sessionId || logsQ.isError || logsQ.isPending) return null;
++
++  const items = logsQ.data?.items ?? [];
++  if (items.length === 0) return null;
++
++  const visible = expanded ? items : items.slice(0, COLLAPSED_COUNT);
++  // 摘要行的「最新」取首条（列表按 last_seen_at 新→旧排序，首条即最新）。
++  const newest = items[0] ?? null;
++  const newestText = newest?.last_seen_at
++    ? dayjs(newest.last_seen_at).fromNow()
++    : null;
++
++  return (
++    <div
++      aria-label="本地 Agent 日志"
++      className="shrink-0 border-b border-border bg-muted/40"
++      data-testid="agent-log-top-bar"
++    >
++      {/* 头部（可点击折叠）：🧾 图标 + 标题 + 概要 + 展开箭头，整宽细栏。 */}
++      <button
++        type="button"
++        aria-expanded={open}
++        aria-label={open ? "收起本地 Agent 日志" : "展开本地 Agent 日志"}
++        onClick={() => setOpen((v) => !v)}
++        className={cn(
++          "flex w-full cursor-pointer items-center gap-2 px-5 py-1.5 text-left transition-colors hover:bg-muted",
++          mobile && "px-3",
++        )}
++        data-testid="agent-log-toggle"
++      >
++        <FileText
++          aria-hidden
++          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
++        />
++        <span className="text-xs font-medium text-foreground">
++          本地 Agent 日志
++        </span>
++        <span className="text-[11px] text-muted-foreground">
++          {items.length} 个 · {newestText ? `最新 ${newestText}` : "—"}
++        </span>
++        <span
++          aria-hidden
++          className={cn(
++            "ml-auto shrink-0 text-[10px] text-muted-foreground transition-transform",
++            open && "rotate-90",
++          )}
++        >
++          ▸
++        </span>
++      </button>
++
++      {open && (
++        <div
++          className={cn(
++            "max-h-[45vh] overflow-y-auto border-t border-border bg-card px-5 py-2.5",
++            mobile && "px-3",
++          )}
++        >
++          <p className="text-[11px] leading-4 text-muted-foreground">
++            agent 会话的完整模型 I/O 日志（本机文件），由 SillySpec CLI 自动上报
++          </p>
++          <ul
++            className="mt-2 flex flex-col gap-2"
++            data-testid="agent-log-entries"
++          >
++            {visible.map((entry) => (
++              <li
++                key={entry.id}
++                className="rounded-md border border-border px-2.5 py-2"
++              >
++                <AgentLogEntry
++                  entry={entry}
++                  copiedKey={copiedKey}
++                  onCopy={copy}
++                />
++              </li>
++            ))}
++          </ul>
++          <div className="mt-2 flex items-center justify-between gap-2">
++            {items.length > COLLAPSED_COUNT ? (
++              <button
++                type="button"
++                onClick={() => setExpanded((v) => !v)}
++                className="cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++              >
++                {expanded ? "收起" : `展开全部 ${items.length} 条`}
++              </button>
++            ) : (
++              <span />
++            )}
++            {/* 刷新：invalidate agentLogs 键（30s 轮询之外的手动补偿）。 */}
++            <button
++              type="button"
++              title="刷新"
++              onClick={() => {
++                void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
++              }}
++              className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
++            >
++              刷新
++            </button>
++          </div>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/tool-args-detail.tsx b/frontend/src/components/daemon/tool-args-detail.tsx
+index d0204ce68..0d605a453 100644
+--- a/frontend/src/components/daemon/tool-args-detail.tsx
++++ b/frontend/src/components/daemon/tool-args-detail.tsx
+@@ -101,90 +101,14 @@ function numArg(args: Record<string, unknown> | null, key: string): number {
+ // 2026-10-13-agentlog-write-diff：DiffRow / parseStructuredPatch / DiffView 迁至
+ // agent-log/tool-diff 共享（agent-log WriteToolPreview 同用）；此处 re-export
+ // 保持既有导入面（本文件测试与 computeLineDiff 消费方）零改动。
+-export { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
++// 2026-10-13-editpatch-fullchain：computeLineDiff 一并迁入 tool-diff
++// （agent-log EditToolPreview 无 patch 时 LCS 回退同用）。
++export { parseStructuredPatch, DiffView, DIFF_MAX_ROWS, computeLineDiff } from "@/components/agent-log/tool-diff";
+ export type { DiffRow } from "@/components/agent-log/tool-diff";
+ 
+-import { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
++import { parseStructuredPatch, DiffView, computeLineDiff } from "@/components/agent-log/tool-diff";
+ import type { DiffRow } from "@/components/agent-log/tool-diff";
+ 
+-/** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
+-const DIFF_MAX_CELLS = 1_000_000;
+-
+-/**
+- * 行级 diff（LCS 最长公共子序列，dp 反向表 + 前向回溯）。旧/新文本按行对齐：
+- * ctx 行双侧推进，del 行仅旧侧行号，add 行仅新侧行号（unified diff 语义）。
+- * 任一侧行数乘积超 DIFF_MAX_CELLS → null（调用方回退红/绿两块，防巨型编辑
+- * 卡顿——Write 型整文件重写走 Write 工具不进此路径）。
+- */
+-export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | null {
+-  const a = oldStr.split("\n");
+-  const b = newStr.split("\n");
+-  if (a.length * b.length > DIFF_MAX_CELLS) return null;
+-  const n = a.length;
+-  const m = b.length;
+-  // dp[i][j] = a[i:] 与 b[j:] 的 LCS 长度（反向填充，回溯从 [0][0] 前向走）。
+-  // Int32Array 扁平化——noUncheckedIndexedAccess 下 number[][] 索引返回
+-  // number|undefined，扁平 typed array 索引恒为 number（越界语义不存在于
+-  // 本函数受控下标域）。
+-  // noUncheckedIndexedAccess 下 typed array 索引也返回 number|undefined——
+-  // 下标域受控（i≤n, j≤m），经 asArray 断言收窄（读取值不存在即算法 bug）。
+-  const dp = new Int32Array((n + 1) * (m + 1));
+-  const at = (i: number, j: number) => dp[i * (m + 1) + j] as number;
+-  const setAt = (i: number, j: number, v: number) => {
+-    dp[i * (m + 1) + j] = v;
+-  };
+-  for (let i = n - 1; i >= 0; i -= 1) {
+-    const ai = a[i];
+-    if (ai === undefined) continue;
+-    for (let j = m - 1; j >= 0; j -= 1) {
+-      const bj = b[j];
+-      const nextDown = at(i + 1, j);
+-      const nextRight = at(i, j + 1);
+-      setAt(i, j, ai === bj ? at(i + 1, j + 1) + 1 : Math.max(nextDown, nextRight));
+-    }
+-  }
+-  const rows: DiffRow[] = [];
+-  let i = 0;
+-  let j = 0;
+-  let oldNo = 0;
+-  let newNo = 0;
+-  while (i < n && j < m) {
+-    const ai = a[i];
+-    const bj = b[j];
+-    if (ai === undefined || bj === undefined) break;
+-    if (ai === bj) {
+-      oldNo += 1;
+-      newNo += 1;
+-      rows.push({ type: "ctx", oldNo, newNo, text: ai });
+-      i += 1;
+-      j += 1;
+-    } else if (at(i + 1, j) >= at(i, j + 1)) {
+-      oldNo += 1;
+-      rows.push({ type: "del", oldNo, newNo: null, text: ai });
+-      i += 1;
+-    } else {
+-      newNo += 1;
+-      rows.push({ type: "add", oldNo: null, newNo, text: bj });
+-      j += 1;
+-    }
+-  }
+-  while (i < n) {
+-    const ai = a[i];
+-    if (ai === undefined) break;
+-    oldNo += 1;
+-    rows.push({ type: "del", oldNo, newNo: null, text: ai });
+-    i += 1;
+-  }
+-  while (j < m) {
+-    const bj = b[j];
+-    if (bj === undefined) break;
+-    newNo += 1;
+-    rows.push({ type: "add", oldNo: null, newNo, text: bj });
+-    j += 1;
+-  }
+-  return rows;
+-}
+-
+ /* ───────────── 各工具参数详情（展开区上半部） ───────────── */
+ 
+ /** Write：内容预览（规则平移 WriteToolPreview / ql-20260709-002）。 */
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index f3301f35f..53f1584f0 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -12473,6 +12473,11 @@ export interface components {
+              * @description tool_result 专用：是否报错
+              */
+             is_error?: boolean | null;
++            /**
++             * Edit Patch
++             * @description tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）
++             */
++            edit_patch?: string | null;
+             /**
+              * Ts
+              * @description 所属行 completedAt 原文
+diff --git a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+index c11ead379..d9138e70d 100644
+--- a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
++++ b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+@@ -67,6 +67,12 @@ const TOOL_INPUT_MAX_CHARS = 2048;
+ /** tool_result 摘要截断：首 4KB（对齐 parse-zcode-model-io）。 */
+ const TOOL_RESULT_MAX_CHARS = 4096;
+ 
++/**
++ * edit_patch（structuredPatch 序列化）附着上限：超 64KB 整体不附着——残缺 JSON
++ * 对前端 parseStructuredPatch 无消费价值，all-or-nothing（2026-10-13-editpatch-fullchain）。
++ */
++const EDIT_PATCH_MAX_CHARS = 64_000;
++
+ /**
+  * R-06 注入前缀白名单：文本以任一前缀开头 → sender='system_event'。
+  * 白名单外未识别注入保守归 human（错标系统事件会隐藏真人输入，代价不对称）。
+@@ -195,7 +201,7 @@ export async function parseClaudeCodeJsonlLog(
+           }
+         }
+       } else {
+-        const produced = userSegments(message, ts, parsed.isMeta === true, toolNamesById);
++        const produced = userSegments(message, ts, parsed.isMeta === true, toolNamesById, extractEditPatch(parsed));
+         if (produced === null) {
+           badLines++; // content 既非字符串也非数组
+           skippedLines++;
+@@ -279,7 +285,9 @@ function assistantSegments(message: Record<string, unknown>, ts: string | null):
+ /**
+  * user 行 → user_input / tool_result 段。
+  * - 纯字符串 / 含 text 块 → user_input（text 原文 + sender 归一）；
+- * - tool_result 块 → tool_result 段（配对表反查 tool_name，失配孤儿保留 id）。
++ * - tool_result 块 → tool_result 段（配对表反查 tool_name，失配孤儿保留 id）；
++ * - editPatch（载体行顶层 toolUseResult.structuredPatch 序列化，非空时）附着到
++ *   该行全部 tool_result 段（实证一行单 tool_result；多块同 patch 为无害超集）。
+  * @returns null = content 形状不符（坏行）；空数组 = 合法空行。
+  */
+ function userSegments(
+@@ -287,6 +295,7 @@ function userSegments(
+   ts: string | null,
+   isMeta: boolean,
+   toolNamesById: Map<string, string>,
++  editPatch?: string,
+ ): UnnumberedSegment[] | null {
+   const content = message.content;
+   if (typeof content === 'string') {
+@@ -306,6 +315,7 @@ function userSegments(
+           tool_use_id: toolUseId,
+           tool_result: toolResultText(block.content),
+           is_error: typeof block.is_error === 'boolean' ? block.is_error : null,
++          ...(editPatch !== undefined ? { edit_patch: editPatch } : {}),
+         }),
+       );
+     } else if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
+@@ -352,7 +362,7 @@ function makeSegment(
+   fields: Partial<
+     Pick<
+       NormalizedLogMessage,
+-      'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error' | 'sender'
++      'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error' | 'sender' | 'edit_patch'
+     >
+   > = {},
+ ): UnnumberedSegment {
+@@ -364,11 +374,32 @@ function makeSegment(
+     tool_input: fields.tool_input ?? null,
+     tool_result: fields.tool_result ?? null,
+     is_error: fields.is_error ?? null,
++    ...(fields.edit_patch !== undefined ? { edit_patch: fields.edit_patch } : {}),
+     ts,
+     ...(fields.sender !== undefined ? { sender: fields.sender } : {}),
+   };
+ }
+ 
++/**
++ * 抽取载体行顶层 toolUseResult.structuredPatch（claude-code 把 Edit/Write 覆盖写
++ * 的 hunks 放在行顶层，实证 2026-10-13-write-tool-diff 抽样）→ JSON 串；非记录 /
++ * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化超 EDIT_PATCH_MAX_CHARS
++ * → undefined（all-or-nothing，残缺 JSON 无消费价值）。
++ */
++function extractEditPatch(line: Record<string, unknown>): string | undefined {
++  const tur = line.toolUseResult;
++  if (!isRecord(tur)) return undefined;
++  const patch = tur.structuredPatch;
++  if (!Array.isArray(patch) || patch.length === 0) return undefined;
++  try {
++    const json = JSON.stringify(patch);
++    if (json === undefined || json.length > EDIT_PATCH_MAX_CHARS) return undefined;
++    return json;
++  } catch {
++    return undefined;
++  }
++}
++
+ /** tool input 摘要：JSON.stringify 后首 2KB 截断（对齐 parse-zcode-model-io）。 */
+ function summarizeToolInput(input: unknown): string {
+   try {
+diff --git a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+index a33fd8cd2..3579dee88 100644
+--- a/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
++++ b/sillyhub-daemon/src/agent-log/parse-zcode-model-io.ts
+@@ -102,6 +102,13 @@ export interface NormalizedLogMessage {
+   tool_result: string | null;
+   /** tool_result 专用错误标记。 */
+   is_error: boolean | null;
++  /**
++   * tool_result 专用：structuredPatch JSON 串（claude-code 载体行顶层
++   * toolUseResult.structuredPatch 序列化，2026-10-13-editpatch-fullchain；hunks
++   * 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）。无 patch（create /
++   * 其他 harness / 超 64KB）缺省 undefined，消费方按无 patch 回退。
++   */
++  edit_patch?: string | null;
+   /** 所属行 completedAt（ISO 字符串；行缺失该字段时为 null）。 */
+   ts: string | null;
+   // —— 2026-09-19-tool-report-session-replay 契约扩展：以下五项全部可选，老
+diff --git a/sillyhub-daemon/src/cli.ts b/sillyhub-daemon/src/cli.ts
+index 7bb1aee81..73de88fcd 100644
+--- a/sillyhub-daemon/src/cli.ts
++++ b/sillyhub-daemon/src/cli.ts
+@@ -858,13 +858,8 @@ export async function startAction(opts: StartOptions): Promise<number> {
+       onSessionReloaded: (sessionId) => daemon.onSessionReloaded(sessionId),
+       // task-04（FR-01~03）：session 反馈事件桥接 → HubClient 对应 notify 方法。
+       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
+-      // ql-20260827-007：后台任务终态自动唤醒——session-manager debounce 合并后
+-      // 经 hubClient 注入唤醒消息（失败仅日志，session-manager 侧已 catch）。
+-      // 2026-10-11-queue-wakeup-origin-guard：携带 origin='task_wakeup' 结构化
+-      // 标记（X-API-Key 服务凭证路径）——backend 排队豁免/合并只认该标记。
+-      onTaskWakeupInject: async (sessionId, prompt) => {
+-        await client.injectSessionPrompt(sessionId, prompt, 'task_wakeup');
+-      },
++      //（ql-20260827-007 的终态唤醒注入接线已随 2026-10-13-task-wakeup-remove
++      // 整体移除——后台任务终态不再自动唤醒主代理。）
+       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
+         void (async () => {
+           try {
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index 5ca0e31c8..a126a8419 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -241,7 +241,6 @@ import {
+   handleAgentTaskStatusEvent,
+   handleTaskNotificationEvent,
+   registerAsyncReceiptTask,
+-  scheduleTaskWakeup,
+   writeTaskLine,
+ } from './session-manager/background-tasks.js';
+ 
+@@ -454,16 +453,6 @@ export class SessionManager {
+     Map<string, BackgroundTaskInfo>
+   >();
+ 
+-  /**
+-   * ql-20260827-007：后台任务终态唤醒的 debounce 合并队列。同 session 短窗口
+-   * （2s）内多条 task_notification 合并为一次 inject——并行后台任务（如 A/B
+-   * 同时完成）只唤醒一个 turn，避免连环 turn。fire 后整 entry 移除。
+-   */
+-  private readonly _taskWakeupPending = new Map<
+-    string,
+-    { timer: NodeJS.Timeout; lines: string[] }
+-  >();
+-
+   /**
+    * task-03（design §5 P1.2）：主 agent Task/Agent tool_use 元数据登记。
+    *
+@@ -1518,19 +1507,6 @@ export class SessionManager {
+     return handleTaskNotificationEvent(this._core(), state, ev);
+   }
+ 
+-  private _scheduleTaskWakeup(
+-    sessionId: string,
+-    info: {
+-      taskId: string;
+-      taskName: string;
+-      status: string;
+-      elapsedMs?: number;
+-      summary?: string;
+-    },
+-  ): void {
+-    return scheduleTaskWakeup(this._core(), sessionId, info);
+-  }
+-
+   private async _registerAsyncReceiptTask(
+     state: SessionState,
+     runId: string | undefined,
+diff --git a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+index 767a75aed..25a312514 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/background-tasks.ts
+@@ -1,14 +1,19 @@
+ /**
+  * interactive/session-manager/background-tasks.ts —— 后台任务状态簇
+- * （task-03 后台任务注册表 + task-08 事件化消费 + 终态唤醒 debounce）。
++ * （task-03 后台任务注册表 + task-08 事件化消费）。
+  *
+  * task-02（2026-09-07-arch-large-file-split）：原 SessionManager 的
+  * _handleAgentTaskStatusEvent / _handleTaskNotificationEvent /
+- * _scheduleTaskWakeup / _registerAsyncReceiptTask / _writeTaskLine /
++ * _registerAsyncReceiptTask / _writeTaskLine /
+  * _getOrCreateTaskMap / _clearBackgroundTasks 方法体原样下沉（仅 ``this`` →
+  * ``mgr`` 改显式传参，行为零变化；类静态 TASK_PROGRESS_LINE_THROTTLE_MS
+  * 随方法体落位为本模块常量）。
+  *
++ * 2026-10-13-task-wakeup-remove：终态唤醒链（_scheduleTaskWakeup 2s debounce
++ * 合并 + onTaskWakeupInject 注入「[后台任务通知]」）整体移除——用户裁定终态
++ * 自动汇报轮没必要；任务终态只留 emit/[TASK_NOTIFICATION] 落行/注销侧信道，
++ * 主代理靠用户下一条消息继续（可 TaskOutput block=false 自取结果）。
++ *
+  * @module interactive/session-manager/background-tasks
+  */
+ 
+@@ -24,16 +29,6 @@ import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
+  */
+ const TASK_PROGRESS_LINE_THROTTLE_MS = 2000;
+ 
+-/**
+- * 2026-10-10-task-wakeup-quiet-threshold（FR-01）：后台任务终态唤醒的最短实际
+- * 运行时长（ms）——不足该值的 completed/failed 不注入唤醒（生产实证：13 分钟
+- * 会话被 17 条秒级孙任务通知灌满，而真长任务 770s；60s 在两者间留一个数量级
+- * 安全带）。仅拦唤醒注入；终态 emit/[TASK_NOTIFICATION] 落行/注销不受影响，
+- * 主代理可 TaskOutput 自取短任务结果。时长判定：elapsed_ms（服务端权威）优先，
+- * 缺失用注册条目 startedAt 差值兜底，两者都缺 fail-open 照常唤醒。
+- */
+-const TASK_WAKEUP_MIN_DURATION_MS = 60_000;
+-
+ /**
+  * task-08（对账表 #8）：status/agent_task_status 统一处理器。
+  *
+@@ -198,9 +193,11 @@ export async function handleAgentTaskStatusEvent(
+ 
+ /**
+  * task-08（对账表 #8）：status/task_notification 消费——emit 终态 +
+- * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销 + 完成/失败触发主代理
+- * 唤醒（对齐旧 _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
++ * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销（对齐旧
++ * _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
+  * 从 usage.duration_ms 提升 metadata；缺失时不发，前端本地走秒兜底）。
++ * 2026-10-13-task-wakeup-remove：完成/失败触发主代理唤醒的分支随唤醒链整体
++ * 移除（原 _scheduleTaskWakeup 2s debounce 合并注入「[后台任务通知]」）。
+  */
+ export async function handleTaskNotificationEvent(
+   mgr: SessionManagerCore,
+@@ -299,7 +296,8 @@ export async function handleTaskNotificationEvent(
+   // 终态事件 + 落行——别名侧的前端 SSE 卡片与时间线段元数据才收敛。主条目
+   // 存在时别名补发只会产生重复行（backend 幽灵收口 agent_task_store
+   // _resolve_row_with_ghost_reconciliation 已管冒名行归并），此处静默——注销
+-  // 已在函数头完成。放唤醒判定之前：唤醒的短任务门槛 return 不得跳过补发。
++  // 已在函数头完成。（原「放唤醒判定之前」的顺序约束随唤醒链移除而消——
++  // 2026-10-13-task-wakeup-remove。）
+   if (!info) {
+     for (const [aliasId, aliasInfo] of aliases) {
+       const aliasRunId = aliasInfo.runId ?? runId;
+@@ -317,95 +315,10 @@ export async function handleTaskNotificationEvent(
+         task_id: aliasId,
+         status: rawStatus,
+         ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+-        ...(summary ? { summary } : {}),
++        ...(summary ? { summary: summary } : ''),
+       }, aliasInfo.toolUseId);
+     }
+   }
+-
+-  // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
+-  // 停止，结果无需汇报，不唤醒防噪）。
+-  if (rawStatus === 'completed' || rawStatus === 'failed') {
+-    // 门槛判定（FR-01）：info 已从注册表注销但局部引用仍在，startedAt 可读；
+-    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
+-    const durationMs =
+-      elapsedMs !== undefined
+-        ? elapsedMs
+-        : info?.startedAt !== undefined
+-          ? Date.now() - info.startedAt
+-          : undefined;
+-    if (durationMs !== undefined && durationMs < TASK_WAKEUP_MIN_DURATION_MS) {
+-      return;
+-    }
+-    scheduleTaskWakeup(mgr, state.sessionId, {
+-      taskId,
+-      taskName,
+-      status: rawStatus,
+-      elapsedMs,
+-      summary,
+-    });
+-  }
+-}
+-
+-/**
+- * ql-20260827-007：后台任务终态唤醒调度——2s debounce 合并同会话多条通知后，
+- * 经 deps.onTaskWakeupInject 注入一条「后台任务通知」user 消息（backend inject
+- * 创建新 turn 唤醒主代理汇报；忙态由 queue_when_busy 排队）。未注入回调
+- * （测试/旧构造点）时静默跳过。防环：prompt 明示「汇报后结束本轮、勿重执行」；
+- * 每次唤醒都由真实终态触发，无自持循环。
+- */
+-export function scheduleTaskWakeup(
+-  mgr: SessionManagerCore,
+-  sessionId: string,
+-  info: {
+-    taskId: string;
+-    taskName: string;
+-    status: string;
+-    elapsedMs?: number;
+-    summary?: string;
+-  },
+-): void {
+-  const cb = mgr.deps.onTaskWakeupInject;
+-  if (!cb) return;
+-  const mm = Math.floor((info.elapsedMs ?? 0) / 60000);
+-  const ss = Math.floor(((info.elapsedMs ?? 0) % 60000) / 1000);
+-  const dur = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+-  const summaryClip = (info.summary ?? '').slice(0, 300);
+-  const line =
+-    `- 任务「${info.taskName}」已${info.status === 'completed' ? '完成' : '失败'}`
+-    + `（用时 ${dur}）`
+-    + (summaryClip ? `。结果摘要：${summaryClip}` : '')
+-    + `（task_id: ${info.taskId}，如需完整输出可调用 TaskOutput 查询，block=false）`;
+-  let entry = mgr._taskWakeupPending.get(sessionId);
+-  if (!entry) {
+-    const timer = setTimeout(() => {
+-      const e = mgr._taskWakeupPending.get(sessionId);
+-      mgr._taskWakeupPending.delete(sessionId);
+-      if (!e || e.lines.length === 0) return;
+-      // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
+-      // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
+-      const prompt =
+-        `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
+-        '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
+-        e.lines.join('\n') +
+-        `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
+-        '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+-      void (async () => {
+-        try {
+-          await cb(sessionId, prompt);
+-        } catch (err) {
+-          console.error('[session-manager] task wakeup inject failed', {
+-            sessionId,
+-            error: err instanceof Error ? err.message : String(err),
+-          });
+-        }
+-      })();
+-    }, 2000);
+-    timer.unref?.();
+-    entry = { timer, lines: [line] };
+-    mgr._taskWakeupPending.set(sessionId, entry);
+-  } else {
+-    entry.lines.push(line);
+-  }
+ }
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+index d2403a0f6..124ff6b78 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+@@ -228,13 +228,6 @@ export async function terminateSession(
+   //     消亡，task_* 不会再到达；防 Map 泄漏）。
+   mgr._clearBackgroundTasks(state.sessionId);
+ 
+-  // ql-20260827-007：取消未 fire 的唤醒 debounce（会话已终态，注入无处可去）。
+-  const pendingWakeup = mgr._taskWakeupPending.get(state.sessionId);
+-  if (pendingWakeup) {
+-    clearTimeout(pendingWakeup.timer);
+-    mgr._taskWakeupPending.delete(state.sessionId);
+-  }
+-
+   // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
+   //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
+   mgr._destroyUsageLedger(state.sessionId);
+diff --git a/sillyhub-daemon/src/interactive/session-manager/types.ts b/sillyhub-daemon/src/interactive/session-manager/types.ts
+index abb934928..95b3d1cd3 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/types.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/types.ts
+@@ -516,10 +516,6 @@ export interface SessionManagerCore {
+     | undefined;
+   readonly _borrowSandboxRoots: Map<string, string>;
+   readonly _backgroundTasks: Map<string, Map<string, BackgroundTaskInfo>>;
+-  readonly _taskWakeupPending: Map<
+-    string,
+-    { timer: NodeJS.Timeout; lines: string[] }
+-  >;
+   readonly _agentToolUseMeta: Map<
+     string,
+     { sessionId: string; taskName: string; subagentType?: string }
+@@ -729,17 +725,6 @@ export interface SessionManagerCore {
+   /** background-tasks.ts */
+   _handleTaskNotificationEvent(state: SessionState, ev: AgentEvent): Promise<void>;
+   /** background-tasks.ts */
+-  _scheduleTaskWakeup(
+-    sessionId: string,
+-    info: {
+-      taskId: string;
+-      taskName: string;
+-      status: string;
+-      elapsedMs?: number;
+-      summary?: string;
+-    },
+-  ): void;
+-  /** background-tasks.ts */
+   _registerAsyncReceiptTask(
+     state: SessionState,
+     runId: string | undefined,
+diff --git a/sillyhub-daemon/src/interactive/types.ts b/sillyhub-daemon/src/interactive/types.ts
+index 2d754fd7a..d0b9d7530 100644
+--- a/sillyhub-daemon/src/interactive/types.ts
++++ b/sillyhub-daemon/src/interactive/types.ts
+@@ -591,15 +591,6 @@ export interface SessionManagerDeps {
+     runId: string,
+     event: SessionEventForBackend,
+   ) => void | Promise<void>;
+-  /**
+-   * ql-20260827-007：后台任务终态自动唤醒主代理端口。
+-   *
+-   * task_notification（completed/failed）到达且 debounce 合并后，把唤醒
+-   * prompt（含任务名/用时/摘要/汇报指引）注入同会话（backend inject 创建
+-   * 新 turn，queue_when_busy 处理忙态排队）。可选：未注入时仅不做唤醒，
+-   * 任务事件/持久行行为不变（测试 mock 零影响）。
+-   */
+-  onTaskWakeupInject?: (sessionId: string, prompt: string) => void | Promise<void>;
+   /**
+    * task-10（§4.3）：元数据持久化端口。
+    *
+diff --git a/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts b/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+index 32d05c14b..eaf6570d9 100644
+--- a/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
++++ b/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+@@ -259,6 +259,73 @@ describe('parseClaudeCodeJsonlLog — user 行归一（C4 / D-003@v1 / R-06）',
+     expect(orphan).toMatchObject({ tool_name: null, tool_use_id: 'orphan-1', tool_result: '迟到/失配的结果' });
+   });
+ 
++  // ── 2026-10-13-editpatch-fullchain：行级 toolUseResult.structuredPatch → edit_patch ──
++
++  /** user 行（带顶层 toolUseResult——claude-code 把 Edit/Write 覆盖写的
++   *  structuredPatch 放在载体行顶层，非 message 内）。 */
++  function userLineWithToolUseResult(
++    content: Array<Record<string, unknown>>,
++    toolUseResult: Record<string, unknown>,
++  ): string {
++    return JSON.stringify({
++      parentUuid: 'p_fixture',
++      type: 'user',
++      message: { role: 'user', content },
++      toolUseResult,
++      timestamp: TS(0),
++      sessionId: 'sess_fixture',
++      cwd: 'FIXTURE_CWD',
++    });
++  }
++
++  it('行级 toolUseResult.structuredPatch（非空数组）→ edit_patch JSON 串附着该行 tool_result 段', async () => {
++    const patch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ['-a', '+b', '+c'] }];
++    const content = jsonl(
++      asstLine([{ type: 'tool_use', id: 'toolu_w1', name: 'Write', input: { file_path: 'a.ts', content: 'b\nc' } }]),
++      userLineWithToolUseResult(
++        [{ tool_use_id: 'toolu_w1', type: 'tool_result', content: 'updated' }],
++        { type: 'update', filePath: 'a.ts', originalFile: 'a', structuredPatch: patch },
++      ),
++    );
++    const result = await parseClaudeCodeJsonlLog(content);
++    expect(result.status).toBe('parsed');
++    const tr = ofKind(result.messages, 'tool_result')[0];
++    expect(tr?.tool_use_id).toBe('toolu_w1');
++    expect(tr?.edit_patch).toBe(JSON.stringify(patch));
++  });
++
++  it('toolUseResult 无 structuredPatch（create / 缺字段 / 空数组 / 非数组）→ edit_patch 缺省（undefined）', async () => {
++    const mk = (tur: Record<string, unknown>): string =>
++      userLineWithToolUseResult([{ tool_use_id: 'tu_x', type: 'tool_result', content: 'ok' }], tur);
++    const result = await parseClaudeCodeJsonlLog(
++      jsonl(
++        asstLine([{ type: 'tool_use', id: 'tu_x', name: 'Write', input: {} }]),
++        mk({ type: 'create', filePath: 'new.ts', content: 'x' }),
++        mk({ type: 'update', structuredPatch: [] }),
++        mk({ type: 'update', structuredPatch: 'not-array' }),
++        mk({}),
++      ),
++    );
++    const toolResults = ofKind(result.messages, 'tool_result');
++    expect(toolResults).toHaveLength(4);
++    for (const tr of toolResults) expect(tr.edit_patch).toBeUndefined();
++  });
++
++  it('structuredPatch 序列化超 64KB → 整体不附着（残缺 JSON 无消费价值，all-or-nothing）', async () => {
++    const bigLine = '-'.repeat(70_000);
++    const patch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${bigLine}`] }];
++    const content = jsonl(
++      asstLine([{ type: 'tool_use', id: 'tu_big', name: 'Write', input: {} }]),
++      userLineWithToolUseResult(
++        [{ tool_use_id: 'tu_big', type: 'tool_result', content: 'ok' }],
++        { type: 'update', structuredPatch: patch },
++      ),
++    );
++    const result = await parseClaudeCodeJsonlLog(content);
++    const tr = ofKind(result.messages, 'tool_result')[0];
++    expect(tr?.edit_patch).toBeUndefined();
++  });
++
+   it('user 数组含 text 块 → user_input 段（text 原文 + sender 归一），不因数组形状丢弃', async () => {
+     const content = jsonl(
+       userLine([{ type: 'text', text: '数组携带的真人输入' }], { isMeta: false }),
+diff --git a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+index fc0bbfd73..0932aa1e8 100644
+--- a/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
++++ b/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+@@ -122,14 +122,8 @@ async function createHarness(
+   };
+ }
+ 
+-/** ql-20260827-007：注入唤醒回调的便捷包装。 */
+-async function createHarnessWakeup(
+-  sessionId: string,
+-  runId: string,
+-  onTaskWakeupInject: (sessionId: string, prompt: string) => void | Promise<void>,
+-): Promise<Harness> {
+-  return createHarness(sessionId, runId, { onTaskWakeupInject });
+-}
++/** ql-20260827-007：注入唤醒回调的便捷包装。（2026-10-13-task-wakeup-remove：
++ * 唤醒链整体移除，onTaskWakeupInject dep 已删除——本助手随之退役。） */
+ 
+ // ── 事件信封构造（task-08：mock 形态从 raw system 帧改为归一化器等价事件）────
+ // 每个构造器产出 TurnMessageEnvelope{events}，事件形态与 ClaudeEventNormalizer
+@@ -701,144 +695,59 @@ describe('task-lifecycle FR-01/FR-03 — result 收尾后到达的 task_notifica
+   });
+ });
+ 
+-// ── ql-20260827-007：后台任务终态自动唤醒（debounce 合并 + inject） ──────────
++// ── 2026-10-13-task-wakeup-remove：终态唤醒链已移除（原 ql-20260827-007 ──────
++//    的 debounce 合并注入 + 2026-10-10 的 60s 安静阈值一并退役） ─────────────
+ 
+-describe('task wakeup inject（终态自动唤醒主代理）', () => {
+-  it('FR：同会话两条通知 2s 窗口内合并为一次唤醒注入，prompt 含任务名/用时/摘要/防环指引', async () => {
++describe('task 终态不注入唤醒（2026-10-13-task-wakeup-remove）', () => {
++  it('终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」注入（含 2s debounce 推进与孤儿终态）', async () => {
+     vi.useFakeTimers();
+     try {
+-      const wakeup = vi.fn().mockResolvedValue(undefined);
+-      const h = await createHarnessWakeup('sess-w', 'run-w', wakeup);
++      const h = await createHarness('sess-w', 'run-w');
+       await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A: 数数' }));
+-      await h.emitMessage(msgTaskStarted({ taskId: 'task-b', toolUseId: 'call-b', description: '子代理B: 数数' }));
+-      // durationMs 夹具须在唤醒门槛（60s）之上——2026-10-10-task-wakeup-quiet-threshold
+-      // 后短任务不唤醒，本用例守护的是合并形态，不是门槛。
++      await h.emitMessage(msgTaskStarted({ taskId: 'task-s', toolUseId: 'call-s', description: '停我' }));
++      // completed/failed 用 61s——旧口径（≥60s 门槛）必唤醒的形态；
++      // stopped 旧口径本就不唤醒，此处一并守卫。
+       await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 61000 }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 62000 }));
+-      // 窗口内不注入
+-      expect(wakeup).not.toHaveBeenCalled();
+-      await vi.advanceTimersByTimeAsync(2100);
+-      // 合并为一次，两条任务行都在 prompt 里
+-      expect(wakeup).toHaveBeenCalledTimes(1);
+-      const [sid, prompt] = wakeup.mock.calls[0] as unknown as [string, string];
+-      expect(sid).toBe('sess-w');
+-      expect(prompt).toContain('[后台任务通知]');
+-      // ql-20260827-008：总数与全结束明示 + 禁止声称等待（防主代理漏读/执念）。
+-      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
+-      expect(prompt).toContain('没有仍在运行的任务');
+-      expect(prompt).toContain('共 2 个');
+-      expect(prompt).toContain('禁止声称仍在等待任何任务');
+-      expect(prompt).toContain('子代理A: 数数');
+-      expect(prompt).toContain('子代理B: 数数');
+-      expect(prompt).toContain('01:01');
+-      expect(prompt).toContain('A 数完了');
+-      expect(prompt).toContain('TaskOutput');
+-      expect(prompt).toContain('不要重复执行这些任务');
++      await h.emitMessage(msgTaskNotification({ taskId: 'task-s', status: 'stopped', durationMs: 61000 }));
++      // 原 2s debounce 窗口推进——窗口内外均不得出现任何「[后台任务通知]」。
++      await vi.advanceTimersByTimeAsync(3000);
++      const allLines = h.deps.onTurnMessage.mock.calls
++        .map((c) => String((c[2] as { content?: string })?.content ?? ''));
++      expect(allLines.some((s) => s.includes('[后台任务通知]'))).toBe(false);
++      // 终态侧信道不因移除唤醒而丢：completed 的 [TASK_NOTIFICATION] 行照常落。
++      const notifLine = allLines.find((s) => s.startsWith('[TASK_NOTIFICATION]'));
++      expect(notifLine).toBeDefined();
++      expect(notifLine).toContain('"task_id":"task-a"');
++      expect(notifLine).toContain('"status":"completed"');
++
++      // 孤儿终态（task_started 丢失、无注册条目——旧 fail-open 必唤醒形态）：
++      // 同样零注入。
++      const h2 = await createHarness('sess-w2', 'run-w2');
++      await h2.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'failed', summary: '孤儿终态', durationMs: 61000 }));
++      await vi.advanceTimersByTimeAsync(3000);
++      const orphanLines = h2.deps.onTurnMessage.mock.calls
++        .map((c) => String((c[2] as { content?: string })?.content ?? ''));
++      expect(orphanLines.some((s) => s.includes('[后台任务通知]'))).toBe(false);
+     } finally {
+       vi.useRealTimers();
+     }
+   });
+ 
+-  // ── 2026-10-10-task-wakeup-quiet-threshold：唤醒最短时长门槛（60s） ────────
+-
+-  it('FR：短任务不唤醒——elapsed_ms 2s < 60s 门槛，终态 emit/落行/注销照常', async () => {
++  it('终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变', async () => {
+     vi.useFakeTimers();
+     try {
+-      const wakeup = vi.fn().mockResolvedValue(undefined);
+-      const h = await createHarnessWakeup('sess-q1', 'run-q1', wakeup);
++      const h = await createHarness('sess-q1', 'run-q1');
+       await h.emitMessage(msgTaskStarted({ taskId: 'task-q1', toolUseId: 'call-q1', description: '秒级搜索' }));
+       await h.emitMessage(msgTaskNotification({ taskId: 'task-q1', status: 'completed', summary: '查完了', durationMs: 2000 }));
+       await vi.advanceTimersByTimeAsync(3000);
+-      expect(wakeup).not.toHaveBeenCalled();
+-      // 门槛只拦唤醒注入：终态 emit 与 [TASK_NOTIFICATION] 行照常。
++      // 终态 emit 与 [TASK_NOTIFICATION] 行照常（含 elapsed_ms 服务端权威值）。
+       expect(taskEventCalls(h).some(([, , e]) => (e as { status?: string }).status === 'completed')).toBe(true);
+       const notifLine = h.deps.onTurnMessage.mock.calls
+         .map((c) => String((c[2] as { content?: string })?.content ?? ''))
+         .find((s) => s.startsWith('[TASK_NOTIFICATION]'));
+       expect(notifLine).toBeDefined();
+       expect(notifLine).toContain('"task_id":"task-q1"');
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it('FR：长任务照常唤醒——elapsed_ms 61s ≥ 60s 门槛', async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const wakeup = vi.fn().mockResolvedValue(undefined);
+-      const h = await createHarnessWakeup('sess-q2', 'run-q2', wakeup);
+-      await h.emitMessage(msgTaskStarted({ taskId: 'task-q2', toolUseId: 'call-q2', description: '长调研' }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-q2', status: 'failed', summary: '跑完但失败', durationMs: 61000 }));
+-      await vi.advanceTimersByTimeAsync(2100);
+-      expect(wakeup).toHaveBeenCalledTimes(1);
+-      const prompt = wakeup.mock.calls[0][1] as string;
+-      expect(prompt).toContain('长调研');
+-      expect(prompt).toContain('已失败');
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it('FR：elapsed_ms 缺失用注册表 startedAt 兜底——注册 3s 后终态不唤醒，61s 后终态唤醒', async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const short = vi.fn().mockResolvedValue(undefined);
+-      const h1 = await createHarnessWakeup('sess-q3', 'run-q3', short);
+-      await h1.emitMessage(msgTaskStarted({ taskId: 'task-q3', toolUseId: 'call-q3', description: '短任务' }));
+-      await vi.advanceTimersByTimeAsync(3000);
+-      await h1.emitMessage(msgTaskNotification({ taskId: 'task-q3', status: 'completed', summary: 'x' }));
+-      await vi.advanceTimersByTimeAsync(3000);
+-      expect(short).not.toHaveBeenCalled();
+-
+-      const long = vi.fn().mockResolvedValue(undefined);
+-      const h2 = await createHarnessWakeup('sess-q4', 'run-q4', long);
+-      await h2.emitMessage(msgTaskStarted({ taskId: 'task-q4', toolUseId: 'call-q4', description: '长任务' }));
+-      await vi.advanceTimersByTimeAsync(61000);
+-      await h2.emitMessage(msgTaskNotification({ taskId: 'task-q4', status: 'completed', summary: 'y' }));
+-      await vi.advanceTimersByTimeAsync(2100);
+-      expect(long).toHaveBeenCalledTimes(1);
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it('FR：时长无从判定（无 elapsed_ms 且注册表无条目）保持原唤醒行为（fail-open）', async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const wakeup = vi.fn().mockResolvedValue(undefined);
+-      const h = await createHarnessWakeup('sess-q5', 'run-q5', wakeup);
+-      // 不发 task_started——daemon 重启窗口形态：任务表无条目，靠 currentRunId 兜住。
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-q5', toolUseId: 'call-q5', status: 'completed', summary: '孤儿终态' }));
+-      await vi.advanceTimersByTimeAsync(2100);
+-      expect(wakeup).toHaveBeenCalledTimes(1);
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it('FR：stopped 不唤醒（主动停止无需汇报）', async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const wakeup = vi.fn().mockResolvedValue(undefined);
+-      const h = await createHarnessWakeup('sess-s', 'run-s', wakeup);
+-      await h.emitMessage(msgTaskStarted({ taskId: 'task-s', toolUseId: 'call-s', description: '停我' }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-s', status: 'stopped' }));
+-      await vi.advanceTimersByTimeAsync(3000);
+-      expect(wakeup).not.toHaveBeenCalled();
+-    } finally {
+-      vi.useRealTimers();
+-    }
+-  });
+-
+-  it('R：未注入 onTaskWakeupInject（旧构造点/测试 mock）不抛错，其余行为不变', async () => {
+-    vi.useFakeTimers();
+-    try {
+-      const h = await createHarness('sess-n', 'run-n');
+-      await h.emitMessage(msgTaskStarted({ taskId: 'task-n', toolUseId: 'call-n', description: 'n' }));
+-      await h.emitMessage(msgTaskNotification({ taskId: 'task-n', status: 'completed', summary: 'x' }));
+-      await vi.advanceTimersByTimeAsync(3000);
+-      // 事件/落行照常，无唤醒回调也无异常
+-      expect(h.deps.onSessionEvent).toHaveBeenCalled();
++      expect(notifLine).toContain('"elapsed_ms":2000');
+     } finally {
+       vi.useRealTimers();
+     }

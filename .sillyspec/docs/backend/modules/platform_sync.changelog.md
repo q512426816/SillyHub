@@ -16,3 +16,4 @@ created_at: 2026-08-29 22:56:30
 
 - append_events INSERT+修剪+commit 包 IntegrityError 重试收敛（并发同 dedup_key 撞 uq_platform_change_events_dedup 时 rollback 重查剔除重插，不再整批 500）；确定性测试 test_concurrent_duplicate_key_converges_not_500（patch 首次预取盲看模拟竞态）。
 - ChangeEventPush.ts 补 le 上界（datetime.max 毫秒 253402300799999）+ 非有限值 before 校验器转 None（防 422 详情回显 inf 被 starlette allow_nan=False 渲染炸 500）；测试超域 1e15 与 Infinity 字面量（原始 body）均 422。
+- 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok

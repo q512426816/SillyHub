@@ -33,3 +33,4 @@
 - 2026-10-13-review-risk-fixes | 2026-10-13 风险审查（最近24h两提交只读分析）发现四处需收口缺陷：F2b 流式合并缓冲器提交后未接线成死代码
 - 2026-10-13-anchor-mismatch-fix | 动机：轮级打锚的「轮归开始时上下文」语义在「整个变更的生命周期发生在单轮内」时产生错配——该轮全部 sillyspec 
 - 2026-10-13-multiturn-changeid-misjudge | 动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.c
+- 2026-10-13-task-wakeup-remove | 后台子代理任务终态后 daemon 自动注入「[后台任务通知]」开新轮让主代理汇报——用户裁定该自动汇报轮没必要（tok

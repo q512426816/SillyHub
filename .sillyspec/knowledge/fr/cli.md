@@ -417,3 +417,74 @@
 依据决策：D-001@v1、D-003@v1、D-004@v1、D-006@v1、D-009@v1
 全文：.sillyspec/changes/archive/2026-10-10-all-engines-mcp-injection/requirements.md#FR-09
 最近确认：a62c8e24d
+
+## FR-cli-029 daemon（sillyhub-daemon）任务终态 completed/failed/stopped 一律不再注入唤醒——onTaskWakeupInject 永不被调用，不再产生任何「[后台任务通知]」user_input
+变更：2026-10-13-task-wakeup-remove
+状态：active
+摘要：长任务终态；孤儿终态（原 fail-open 唤醒路径）
+全文：.sillyspec/changes/archive/2026-10-13-task-wakeup-remove/requirements.md#FR-01
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-task-wakeup-remove
+  status: active
+
+## FR-cli-030 终态侧信道不受影响：agent_task_status 终态 emit、[TASK_NOTIFICATION] 落行、任务表注销（含 tool_use 别名收口）、注册表清空清后台锚点均照常
+变更：2026-10-13-task-wakeup-remove
+状态：active
+摘要：终态侧信道回归
+全文：.sillyspec/changes/archive/2026-10-13-task-wakeup-remove/requirements.md#FR-02
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-task-wakeup-remove
+  status: active
+
+## FR-cli-031 唤醒机制代码彻底移除：scheduleTaskWakeup/_taskWakeupPending/TASK_WAKEUP_MIN_DURATION_MS/onTaskWakeupInject dep 及 cli.ts wiring、lifecycle.ts 清理、SessionManagerCore 接口面
+变更：2026-10-13-task-wakeup-remove
+状态：active
+摘要：接口面清零
+全文：.sillyspec/changes/archive/2026-10-13-task-wakeup-remove/requirements.md#FR-03
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+
+## FR-cli-032 backend inject 端点与排队合并/豁免机制保留不动（无生产者后为休眠代码）；前端历史会话回放的隐藏逻辑（2026-10-13-session-taskwakeup-hide）保留
+变更：2026-10-13-task-wakeup-remove
+状态：active
+摘要：休眠机制不动
+全文：.sillyspec/changes/archive/2026-10-13-task-wakeup-remove/requirements.md#FR-04
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+
+## FR-cli-033 sillyhub-daemon 相关单测改写为新口径并通过 + pnpm typecheck 绿
+变更：2026-10-13-task-wakeup-remove
+状态：active
+摘要：验收
+全文：.sillyspec/changes/archive/2026-10-13-task-wakeup-remove/requirements.md#FR-05
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态不注入唤醒（2026-10-13-task-wakeup-remove）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-task-wakeup-remove
+  status: active

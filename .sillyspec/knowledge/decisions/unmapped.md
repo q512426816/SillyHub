@@ -2665,3 +2665,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：e6cbde3e612c38d298b7c60ea5bcd22ff6b4a821
 理由：最大风险：共享模块迁移（daemon/tool-args-detail → agent-log/tool-diff）破坏既有导入面。缓解：daemon 侧保留同名 re-export，既有测试（tool-args-detail.test.tsx 直接 import DiffView/parseStructuredPatch）零改动通过即证明。 放弃的方案：(a) agent-log 直接 import daemon/tool-args-detail 的 DiffView——会形成 tool-renderers ↔ tool-args-detail 循环依赖（后者已 import 前者的 CopyButton），放弃；(b) 同步接线 agent-log-card 会话化对话视图——其数据源是 daemon read_agent_log_messages（另一条链，daemon 侧需动 messages 解析），超出薄跑道范围，留后续变更；(c) Write 无 patch 时也整文件全绿（照搬会话面板行为）——本变更成功标准承诺零回归保持全文预览，且 agent-log 面已提供「原始数据」折叠兜底，不做双面不一致的行为扩散。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-task-wakeup-remove
+锚点：未记录
+最近确认：3a61c468bef542e000e2a649bda6205eddaad508
+理由：最大风险是产品语义回退：依赖自动唤醒续跑的多步后台工作流（主代理派发后台任务后结束本轮、等唤醒汇报）将停在空闲态，直到用户发下一条消息才继续——这是用户明确裁定的取舍（「没必要」，终态汇报轮的 token/轮次噪音 > 自动续跑便利），且与 2026-10-10 安静阈值（短任务不唤醒）同构，非全新形态。次要风险：若未来要恢复唤醒，需从 git 历史找回整链（机制代码彻底删除而非开关停用）——用户裁定没必要时彻底删优于留死开关（规则 18：注释与实现不一致是万恶之源）。 试过但放弃的方案：①backend inject 端点拒收 origin='task_wakeup'——动消费端防御面，backend 测试面大改且端点是通用能力；②加环境开关停用注入——留休眠代码与配置面，违反「彻底去掉」的用户意图；③仅前端隐藏（已完成于 2026-10-13-session-taskwakeup-hide）——汇报轮照跑照烧 token，治标不治本。
