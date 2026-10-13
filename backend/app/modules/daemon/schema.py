@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -1678,3 +1678,34 @@ class PlanResponseRequest(BaseModel):
         ):
             raise ValueError("decision 为 revise/cancel 时 feedback 必填且不可为空白")
         return self
+
+
+# ── 机器诊断端点（2026-10-13-daemon-log-config-view task-02）────────────────
+
+
+class DaemonLogTailResponse(BaseModel):
+    """GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。
+
+    字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，
+    前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。
+    """
+
+    path: str
+    size: int
+    mtime: str
+    exists: bool
+    lines: list[str]
+    line_count: int
+    truncated: bool
+
+
+class DaemonConfigResponse(BaseModel):
+    """GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。
+
+    ``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出
+    本次被掩码的字段名（reveal=true 时为空）。
+    """
+
+    path: str
+    config: dict[str, Any]
+    masked_fields: list[str]

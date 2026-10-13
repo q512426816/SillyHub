@@ -43,7 +43,9 @@ import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir, rm } 
 
 import { join, dirname } from 'node:path';
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots, readOrCreateMachineId } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, configPathForServer, daemonBinDir, daemonStateDir, normalizeAllowedRoots, readOrCreateMachineId } from './config.js';
+// 2026-10-13-daemon-log-config-view task-01：诊断只读 RPC 纯逻辑（日志尾部读 + 配置脱敏）。
+import { LOG_TAIL_DEFAULT_LINES, getMaskedConfig, readLogTail } from './diag-rpc.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
 import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
@@ -6641,6 +6643,9 @@ export class Daemon {
     // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
     // ws_rpc 调本 handler 在宿主执行（FR-02）。方法名带 host_fs. 前缀与 design §7 method 字段对齐。
     this._registerHostFsRpcHandler(ws);
+    // task-01（2026-10-13-daemon-log-config-view）：注册 daemon 诊断只读 RPC——
+    // backend machines/{id}/logs|config 端点经 ws_hub.send_rpc 调用（design §Phase 1）。
+    this._registerDiagRpcHandler(ws);
     // task-03（2026-08-18-workspace-file-browser）：注册 explorer_* 三方法只读浏览
     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
@@ -6767,6 +6772,36 @@ export class Daemon {
         }
       }
       return runLinkedReposSnapshot(rootPath);
+    });
+  }
+
+  /**
+   * 2026-10-13-daemon-log-config-view task-01：注册 daemon 诊断只读 RPC。
+   *
+   * - daemon_log_tail({ tail_lines? })：daemon.log 尾部 N 行（行/字节双上限，
+   *   纯逻辑见 diag-rpc.ts readLogTail）。日志路径与写入方 cli.ts getLogFile()
+   *   同源（DEFAULT_CONFIG_DIR + 'daemon.log'，config.ts 模块常量）——不 import
+   *   cli.ts（其顶层 void main() 无入口守卫，import 会触发 CLI 执行）。
+   * - daemon_config_get({ reveal? })：当前生效配置（this._config，含 CLI 覆盖）
+   *   脱敏返回（D-001@v2）；reveal=true 才返回明文（默认路径不传明文）。
+   * 正常路径全部结构化返回（exists:false / 掩码），不抛 RpcError。
+   */
+  private _registerDiagRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    ws.registerRpcHandler('daemon_log_tail', async (params) => {
+      const tailLines =
+        typeof params.tail_lines === 'number' ? params.tail_lines : LOG_TAIL_DEFAULT_LINES;
+      return readLogTail(join(DEFAULT_CONFIG_DIR, 'daemon.log'), tailLines);
+    });
+    ws.registerRpcHandler('daemon_config_get', async (params) => {
+      const reveal = params.reveal === true;
+      return {
+        path: configPathForServer(this._config.server_url),
+        ...getMaskedConfig(this._config as unknown as Record<string, unknown>, { reveal }),
+      };
     });
   }
 

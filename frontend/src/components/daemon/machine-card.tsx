@@ -28,12 +28,14 @@ import {
   CheckCircle2,
   ChevronRight,
   Download,
+  FileText,
   HardDrive,
   Hourglass,
   Pencil,
   RefreshCw,
   Server,
   ServerOff,
+  Settings,
   Trash2,
 } from "lucide-react";
 
@@ -105,6 +107,12 @@ export interface MachineCardProps {
    * 反馈空窗由它兜底，之后 15s 轮询 sillyspec_update running 态接管）。
    */
   upgradingSillySpec?: boolean;
+  /**
+   * 打开 daemon 诊断弹窗回调（2026-10-13-daemon-log-config-view task-03 /
+   * FR-01~08）。可选（对齐 onUpgradeSillySpec 先例）：page 注入；缺省时
+   * 「日志」「配置」按钮不渲染，不破坏既有测试构造。
+   */
+  onOpenDiagnostic?: (machine: DaemonMachineRead, tab: "logs" | "config") => void;
   actioning: boolean;
   sessions: AgentSessionRead[];
   onEditAlias: (machine: DaemonMachineRead) => void;
@@ -144,6 +152,7 @@ export function MachineCard({
   upgrading,
   onUpgradeSillySpec,
   upgradingSillySpec,
+  onOpenDiagnostic,
   actioning,
   sessions,
   onEditAlias,
@@ -536,6 +545,40 @@ export function MachineCard({
             <HardDrive className="h-3.5 w-3.5" />
             清理
           </button>
+
+          {/* 日志/配置诊断入口（2026-10-13-daemon-log-config-view task-03，
+              offline disabled；onOpenDiagnostic 缺省不渲染——page 未接线时不出现
+              无动作按钮，保既有测试构造零改动）。 */}
+          {onOpenDiagnostic ? (
+            <>
+              <button
+                type="button"
+                className={btnOutlineTiny}
+                disabled={isOffline}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenDiagnostic(machine, "logs");
+                }}
+                title={isOffline ? "离线，无法查看日志" : "查看 daemon.log 尾部（只读）"}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                日志
+              </button>
+              <button
+                type="button"
+                className={btnOutlineTiny}
+                disabled={isOffline}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenDiagnostic(machine, "config");
+                }}
+                title={isOffline ? "离线，无法查看配置" : "查看生效配置（只读，敏感字段掩码）"}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                配置
+              </button>
+            </>
+          ) : null}
 
           {/* 删除机器按钮（ql-20260829-006-6a9e，online disabled） */}
           <button

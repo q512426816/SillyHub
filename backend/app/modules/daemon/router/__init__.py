@@ -169,6 +169,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
     # machines（2026-10-10-workspec-maintenance task-03：关联仓落盘结果回报）
     "report_linked_repos_sync_result",
     "delete_machine",
+    # machines（2026-10-13-daemon-log-config-view task-02：机器诊断只读端点）
+    "get_machine_daemon_logs",
+    "get_machine_daemon_config",
     # runtimes（拆前 #17-21）
     "get_runtime",
     "disable_runtime",

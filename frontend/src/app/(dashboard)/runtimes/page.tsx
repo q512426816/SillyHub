@@ -29,6 +29,10 @@ import {
 // task-09：MachineCard 两级手风琴（machine + 内嵌 RuntimeCard 网格）。
 // RuntimeCard 不再在 page 内联渲染，仅由 MachineCard 展开体透传 props 调用。
 import { MachineCard } from "@/components/daemon/machine-card";
+import {
+  DaemonDiagnosticDialog,
+  type DiagnosticTab,
+} from "@/components/daemon/daemon-diagnostic-dialog";
 // task-09（2026-08-28-daemon-agent-share）：「共享给我的」区块 + 平台共享智能体管理卡。
 import { SharedMachinesSection } from "@/components/daemon/shared-machines-section";
 import { PlatformSharedAgentsCard } from "@/components/daemon/platform-shared-agents-card";
@@ -612,6 +616,12 @@ export default function RuntimesPage() {
   const [aliasEditing, setAliasEditing] = useState<DaemonMachineRead | null>(null);
   const [aliasValue, setAliasValue] = useState("");
   const [aliasSaving, setAliasSaving] = useState(false);
+  // 2026-10-13-daemon-log-config-view task-03：daemon 诊断弹窗态（非 null 才挂载，
+  // 对齐 aliasEditing 模式）；tab 记录入口来源（日志/配置）。
+  const [diagTarget, setDiagTarget] = useState<{
+    machine: DaemonMachineRead;
+    tab: "logs" | "config";
+  } | null>(null);
   // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑态（仍 runtime 级）。
   // rootsEditing：当前编辑的 runtime（null=关闭）；rootsValue：路径数组（每行一个）。
   const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
@@ -1446,6 +1456,9 @@ export default function RuntimesPage() {
                       onUpgrade={handleUpgrade}
                       onUpgradeSillySpec={handleSillySpecUpgrade}
                       upgradingSillySpec={sillyspecUpgradingId === machine.id}
+                      onOpenDiagnostic={(m, tab: DiagnosticTab) =>
+                        setDiagTarget({ machine: m, tab })
+                      }
                       onCleanup={handleCleanup}
                       onDeleteMachine={handleDeleteMachine}
                       onRuntimeToggle={handleToggleRuntime}
@@ -1505,6 +1518,16 @@ export default function RuntimesPage() {
       {/* FR-01：旧 RuntimeSessionDialog 已退役（2026-08-25-runtimes-entry-unified-floating），
           「会话」按钮改为唤起全局悬浮会话助手（FloatingSessionHost 在 layout.tsx 常驻挂载）。
           URL ?session= 恢复改为 store.selectSession（见 useEffect 下方）。 */}
+
+      {/* 2026-10-13-daemon-log-config-view task-03：daemon 诊断弹窗（日志/配置
+          双 Tab 只读查看，diagTarget 非 null 才挂载——对齐 aliasEditing 模式）。 */}
+      {diagTarget ? (
+        <DaemonDiagnosticDialog
+          machine={diagTarget.machine}
+          initialTab={diagTarget.tab}
+          onClose={() => setDiagTarget(null)}
+        />
+      ) : null}
 
       {/* task-09：机器别名编辑 modal（MachineCard onEditAlias 触发，改调 updateDaemonMachine）。 */}
       <Modal

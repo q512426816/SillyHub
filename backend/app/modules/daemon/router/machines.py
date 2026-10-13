@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal
 from app.modules.auth.model import User
@@ -25,8 +26,10 @@ from app.modules.daemon.router.runtimes import (
 )
 from app.modules.daemon.router.version import get_daemon_latest_version
 from app.modules.daemon.schema import (
+    DaemonConfigResponse,
     DaemonInstanceProviderItem,
     DaemonInstanceRead,
+    DaemonLogTailResponse,
     DaemonMachineRead,
     DaemonMachineUpdate,
 )
@@ -650,3 +653,89 @@ async def report_linked_repos_sync_result(
         [item.model_dump() for item in data.results],
     )
     return {"written": written}
+
+
+# ── 机器诊断端点（2026-10-13-daemon-log-config-view task-02）────────────────
+# 两个只读端点经 ws_hub.send_rpc 转发到 daemon 侧 diag RPC（daemon_log_tail /
+# daemon_config_get，design §Phase 1）。错误映射（design 接口定义场景表）：
+# 离线（DaemonRuntimeOffline）/ 超时（DaemonRpcTimeout）原样透传既有 504
+# AppError（不包裹、不改写 code）；method_not_found（老 daemon 未注册）→ 422；
+# 其余远端错 → 502（DaemonRpcRemoteGatewayError）。
+
+
+@router.get(
+    "/machines/{instance_id}/logs",
+    response_model=DaemonLogTailResponse,
+)
+async def get_machine_daemon_logs(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    tail: int = Query(default=500, ge=1, le=5000, description="尾部行数"),
+) -> DaemonLogTailResponse:
+    """查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。
+
+    行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
+    文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
+    """
+    return await _send_diag_rpc(instance_id, session, user, "daemon_log_tail", {"tail_lines": tail})
+
+
+@router.get(
+    "/machines/{instance_id}/config",
+    response_model=DaemonConfigResponse,
+)
+async def get_machine_daemon_config(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+    reveal: bool = Query(default=False, description="true 时返回明文凭据"),
+) -> DaemonConfigResponse:
+    """查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。
+
+    reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
+    """
+    return await _send_diag_rpc(instance_id, session, user, "daemon_config_get", {"reveal": reveal})
+
+
+async def _send_diag_rpc(
+    instance_id: uuid.UUID,
+    session: AsyncSession,
+    user: User,
+    method: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """诊断 RPC 共享转发 + 错误映射（task-02，两端点复用）。
+
+    - 归属校验（非 owner / 不存在同语义 404）+ RuntimeAdminUser 鉴权；
+    - 离线 / 超时原样抛既有 504 AppError（errorhandler 渲染，不改写 code）；
+    - ``method_not_found``（老 daemon 未升级）→ 422 HTTP_422_DAEMON_DIAG_UNSUPPORTED；
+    - 其余远端错 → 502 DaemonRpcRemoteGatewayError。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    # 惰性 import（对齐 daemon_rpc.py 先例）：ws_hub 单例访问器按测试 monkeypatch
+    # 时机绑定，模块顶层 import 会固化旧引用。
+    from app.core.errors import AppError
+    from app.modules.daemon.runtime.service import (
+        DaemonRpcRemoteError,
+        DaemonRpcRemoteGatewayError,
+    )
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    try:
+        return await hub.send_rpc(instance_id, method, params, timeout=30.0)
+    except DaemonRpcRemoteError as exc:
+        if exc.code == "method_not_found":
+            raise AppError(
+                "当前机器的守护进程版本过旧，暂不支持在线查看日志/配置；请先升级守护进程后重试。",
+                code="HTTP_422_DAEMON_DIAG_UNSUPPORTED",
+                http_status=422,
+                details={"daemon_instance_id": str(instance_id), "daemon_code": exc.code},
+            ) from exc
+        raise DaemonRpcRemoteGatewayError(
+            f"读取诊断信息失败（daemon 返回错误：{exc.code}）。",
+            details={"daemon_instance_id": str(instance_id), "daemon_code": exc.code},
+        ) from exc

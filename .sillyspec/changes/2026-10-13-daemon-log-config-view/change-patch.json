@@ -1,0 +1,160 @@
+{
+  "change": "2026-10-13-daemon-log-config-view",
+  "baseline": "head-uncommitted-window",
+  "head": "f77fd9e055b5e3fd8cef6e91702a3208d563e711",
+  "files": [
+    "backend/app/modules/daemon/router/__init__.py",
+    "backend/app/modules/daemon/router/machines.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/openapi.json",
+    "backend/tests/modules/daemon/test_daemon_machine_diag.py",
+    "frontend/src/app/(dashboard)/runtimes/page.tsx",
+    "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+    "frontend/src/components/daemon/daemon-diagnostic-dialog.tsx",
+    "frontend/src/components/daemon/machine-card.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/machines.ts",
+    "sillyhub-daemon/src/daemon.ts",
+    "sillyhub-daemon/src/diag-rpc.ts",
+    "sillyhub-daemon/tests/diag-rpc.test.ts"
+  ],
+  "totals": {
+    "files": 14,
+    "additions": 1919,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-13T12:24:28.628Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "head-uncommitted-window",
+    "totals": {
+      "files": 14,
+      "additions": 1919,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/daemon/router/__init__.py",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/router/machines.py",
+        "additions": 90,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 32,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 190,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/daemon/test_daemon_machine_diag.py",
+        "additions": 293,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+        "additions": 23,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+        "additions": 278,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/daemon-diagnostic-dialog.tsx",
+        "additions": 390,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/machine-card.tsx",
+        "additions": 43,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 162,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/machines.ts",
+        "additions": 34,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/daemon.ts",
+        "additions": 36,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/diag-rpc.ts",
+        "additions": 170,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/diag-rpc.test.ts",
+        "additions": 175,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "efd3d9e6f6abc48dc710aeff5f86bed88928c011370c4c9374417bc90979ef1d",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — daemon 日志与配置查看（2026-10-13-daemon-log-config-view）</title>
+<style>
+  :root {
+    /* ai-native 主题 token（对齐 frontend/src/styles/themes.ts:130-135） */
+    --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+    --bg: #FAF5FF; --card: #ffffff; --border: #DDD6FE; --border-strong: #C4B5FD;
+    --text: #1f2937; --text-muted: #6b7280;
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-700: #6d28d9;
+    --ok: #16a34a; --warn: #d97706; --err: #dc2626;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; padding: 24px; }
+
+  .page-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .page-sub { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+
+  /* 机器卡（模拟 /runtimes MachineCard） */
+  .machine-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; max-width: 960px; box-shadow: 0 1px 2px rgba(124,58,237,.06); }
+  .machine-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .machine-name { font-size: 15px; font-weight: 600; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px 9px; border-radius: 999px; border: 1px solid; }
+  .badge.online { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, white); background: color-mix(in srgb, var(--ok) 8%, white); }
+  .badge.online::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .machine-meta { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; }
+  .machine-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+  .vsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--card); color: var(--text); padding: 4px 14px; font-size: 13px; cursor: pointer; transition: all .15s; }
+  .btn:hover { border-color: var(--primary); color: var(--primary); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { background: var(--primary-hover); }
+  .btn.small { padding: 2px 10px; font-size: 12.5px; }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* Dialog */
+  .overlay { position: fixed; inset: 0; background: rgba(24,17,46,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 24px; }
+  .overlay.open { display: flex; }
+  .dialog { background: var(--card); border-radius: 14px; width: min(920px, 100%); max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(76,29,149,.25); border: 1px solid var(--border); }
+  .dialog-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .dialog-title { font-size: 15px; font-weight: 600; }
+  .dialog-close { margin-left: auto; border: none; background: none; font-size: 18px; color: var(--text-muted); cursor: pointer; padding: 2px 8px; border-radius: 6px; }
+  .dialog-close:hover { background: var(--brand-100); color: var(--brand-700); }
+
+  .tabs { display: flex; gap: 2px; padding: 8px 20px 0; }
+  .tab { padding: 7px 16px; font-size: 13.5px; border: none; background: none; cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0; }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; background: var(--brand-50); }
+  .tab-body { padding: 14px 20px 18px; overflow: auto; }
+
+  .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .meta-line { font-size: 12.5px; color: var(--text-muted); font-family: var(--mono); background: var(--brand-50); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; margin-bottom: 10px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .meta-line b { color: var(--text); font-weight: 500; }
+
+  select.sel { border: 1px solid var(--border-strong); border-radius: 8px; padding: 3px 8px; font-size: 13px; background: var(--card); color: var(--text); }
+
+  /* 日志区 */
+  .log-box { background: #0f0a1e; color: #d8d2f0; font-family: var(--mono); font-size: 12.5px; line-height: 1.75; border-radius: 10px; padding: 12px 14px; height: 380px; overflow: auto; border: 1px solid #2b2150; }
+  .log-box .ln { color: #7f6fb0; display: inline-block; width: 3.2em; user-select: none; }
+  .log-box .lv-warn { color: #fbbf24; }
+  .log-box .lv-err { color: #f87171; }
+
+  /* 配置区 */
+  .cfg-box { background: var(--brand-50); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; font-family: var(--mono); font-size: 12.5px; line-height: 1.8; overflow: auto; max-height: 380px; white-space: pre; }
+  .cfg-box .k { color: var(--brand-700); }
+  .cfg-box .sens { background: #fef3c7; color: #92400e; border-radius: 4px; padding: 0 4px; border: 1px dashed #d97706; }
+  .ro-tag { font-size: 12px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, white); background: color-mix(in srgb, var(--accent) 8%, white); padding: 1px 8px; border-radius: 999px; }
+
+  /* 边界提示条 */
+  .notice { display: none; border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 10px; border: 1px solid; }
+  .notice.warn { background: #fffbeb; border-color: #fcd34d; color: #92400e; display: block; }
+  .notice.err { background: #fef2f2; border-color: #fecaca; color: #991b1b; display: block; }
+  .notice b { font-weight: 600; }
+
+  .demo-bar { max-width: 960px; margin-top: 18px; background: var(--card); border: 1px dashed var(--border-strong); border-radius: 10px; padding: 12px 16px; font-size: 12.5px; color: var(--text-muted); }
+  .demo-bar .btn { margin: 2px 4px 2px 0; }
+</style>
+</head>
+<body>
+
+<div class="page-title">运行时 / 机器</div>
+<div class="page-sub">原型仅演示本变更涉及的增量：机器卡新增「日志」「配置」入口与诊断弹窗（/runtimes 页其余部分从略）</div>
+
+<div class="machine-card">
+  <div class="machine-head">
+    <span class="machine-name">qinyi-DESKTOP（默认机器）</span>
+    <span class="badge online">在线</span>
+    <span class="machine-meta" style="margin:0">daemon v1.42.0 · 心跳 3 秒前</span>
+  </div>
+  <div class="machine-meta">运行时 4 个：claude / codex / glm / pi　·　sillyspec v3.32.0</div>
+  <div class="machine-actions">
+    <button class="btn small">升级 daemon</button>
+    <button class="btn small">升级 sillyspec</button>
+    <button class="btn small">清理本地缓存</button>
+    <span class="vsep"></span>
+    <!-- ▼▼ 本变更新增入口 ▼▼ -->
+    <button class="btn small" onclick="openDialog('logs')">日志</button>
+    <button class="btn small" onclick="openDialog('config')">配置</button>
+    <!-- ▲▲ 本变更新增入口 ▲▲ -->
+    <span class="vsep"></span>
+    <button class="btn small" disabled title="离线时禁用">删除机器</button>
+  </div>
+</div>
+
+<div class="demo-bar">
+  边界态演示（点击后在弹窗内查看效果）：
+  <button class="btn small" onclick="setScenario('normal')">正常数据</button>
+  <button class="btn small" onclick="setScenario('nofile');openDialog('logs')">日志不存在（前台运行）</button>
+  <button class="btn small" onclick="setScenario('truncated');openDialog('logs')">日志截断（>256KB）</button>
+  <button class="btn small" onclick="setScenario('oldver');openDialog('logs')">老 daemon 版本（422）</button>
+  <button class="btn small" onclick="setScenario('offline');openDialog('logs')">机器离线</button>
+</div>
+
+<!-- 诊断 Dialog -->
+<div class="overlay" id="overlay">
+  <div class="dialog" role="dialog" aria-modal="true" aria-label="daemon 诊断">
+    <div class="dialog-head">
+      <span class="dialog-title">daemon 诊断 — qinyi-DESKTOP</span>
+      <span class="ro-tag">只读</span>
+      <button class="dialog-close" onclick="closeDialog()" aria-label="关闭">✕</button>
+    </div>
+    <div class="tabs">
+      <button class="tab" id="tab-logs" onclick="switchTab('logs')">日志</button>
+      <button class="tab" id="tab-config" onclick="switchTab('config')">配置</button>
+    </div>
+
+    <!-- 日志 Tab -->
+    <div class="tab-body" id="body-logs">
+      <div class="notice" id="logs-notice"></div>
+      <div class="toolbar">
+        <label style="font-size:12.5px;color:var(--text-muted)">尾部行数</label>
+        <select class="sel" id="tailSel" onchange="renderLogs()">
+          <option>100</option><option selected>500</option><option>2000</option>
+        </select>
+        <button class="btn small" onclick="refreshLogs()">⟳ 刷新</button>
+        <span style="flex:1"></span>
+        <button class="btn small" onclick="downloadLog()">⬇ 下载日志片段</button>
+      </div>
+      <div class="meta-line" id="logs-meta"></div>
+      <div class="log-box" id="logBox"></div>
+    </div>
+
+    <!-- 配置 Tab -->
+    <div class="tab-body" id="body-config" style="display:none">
+      <div class="notice" id="config-notice"></div>
+      <div class="toolbar">
+        <span style="font-size:12.5px;color:var(--text-muted)">敏感字段默认掩码，切换明文会重新向 daemon 拉取</span>
+        <span style="flex:1"></span>
+        <button class="btn small" id="revealBtn" onclick="toggleReveal()">👁 显示明文</button>
+        <button class="btn small" onclick="downloadConfig()">⬇ 下载配置（脱敏）</button>
+      </div>
+      <div class="meta-line" id="config-meta"></div>
+      <div class="cfg-box" id="cfgBox"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---- 假数据 ---- */
+var LOG_LINES = [
+  "[2026-10-13 15:59:41.201] [daemon.heartbeat] ok=1 server_lag_ms=42 runtimes=4",
+  "[2026-10-13 15:59:56.102] [daemon.heartbeat] ok=1 server_lag_ms=38 runtimes=4",
+  "[2026-10-13 16:00:07.884] [daemon.ws] event=connected attempt=1 ping=30s",
+  "[2026-10-13 16:00:11.330] [daemon.lease] event=claimed lease_id=l-8f31 provider=claude",
+  "[2026-10-13 16:00:12.009] [daemon.task] event=spawn provider=claude cwd=C:\\ws\\proj",
+  "[2026-10-13 16:01:02.517] [daemon.task] event=stderr level=warn msg=retry fetch 2/3",
+  "[2026-10-13 16:01:40.772] [daemon.lease] event=completed lease_id=l-8f31 dur_ms=89442",
+  "[2026-10-13 16:02:00.001] [daemon.outbox] pending=0 flushed=1",
+  "[2026-10-13 16:02:11.445] [daemon.spec_sync] event=sync ok=1 changed=2",
+  "[2026-10-13 16:02:41.209] [daemon.heartbeat] ok=1 server_lag_ms=51 runtimes=4",
+  "[2026-10-13 16:03:02.318] [daemon.update] event=check latest=1.42.1 current=1.42.0",
+  "[2026-10-13 16:03:15.902] [daemon.lease] event=claimed lease_id=l-90c4 provider=glm",
+  "[2026-10-13 16:03:16.511] [daemon.task] event=spawn provider=glm cwd=C:\\ws\\spike",
+  "[2026-10-13 16:04:20.123] [daemon.task] event=stderr level=error msg=socket hang up",
+  "[2026-10-13 16:04:21.001] [daemon.task] event=retry attempt=1 backoff_ms=2000",
+  "[2026-10-13 16:04:41.556] [daemon.heartbeat] ok=1 server_lag_ms=44 runtimes=4"
+];
+var CONFIG_PLAIN = {
+  server_url: "https://hub.example.com",
+  token: "sk-live-9f2ka01bz",
+  api_key: "sh_xxxxxxxx8888aaaa",
+  runtime_id: "rt-claude-main",
+  workspace_dir: "C:\\Users\\qinyi\\IdeaProjects",
+  poll_interval: 30, heartbeat_interval: 15, max_concurrent_tasks: 5,
+  log_level: "info", allowed_roots: ["C:\\Users\\qinyi"],
+  default_timeout_seconds: 3600, max_retries: 3
+};
+var SENSITIVE = ["token", "api_key"];
+var scenario = "normal", revealed = false;
+
+function mask(v) {
+  if (v.length <= 8) return "***";
+  return v.slice(0, 4) + " *** " + v.slice(-4);
+}
+function openDialog(tab) { document.getElementById("overlay").classList.add("open"); switchTab(tab); }
+function closeDialog() { document.getElementById("overlay").classList.remove("open"); }
+function switchTab(t) {
+  ["logs", "config"].forEach(function (x) {
+    document.getElementById("tab-" + x).classList.toggle("active", x === t);
+    document.getElementById("body-" + x).style.display = x === t ? "" : "none";
+  });
+  if (t === "logs") renderLogs(); else renderConfig();
+}
+function setScenario(s) { scenario = s; revealed = false; }
+
+function notice(id, html, cls) {
+  var el = document.getElementById(id);
+  el.className = "notice " + (cls || "");
+  el.innerHTML = html;
+  el.style.display = html ? "block" : "none";
+}
+
+function renderLogs() {
+  var meta = document.getElementById("logs-meta"), box = document.getElementById("logBox");
+  if (scenario === "oldver") {
+    notice("logs-notice", "<b>当前 daemon 版本过旧，不支持在线查看日志。</b>请先升级 daemon（机器卡「升级 daemon」），升级完成后再打开本页。", "warn");
+    meta.style.display = box.style.display = "none"; return;
+  }
+  if (scenario === "offline") {
+    notice("logs-notice", "<b>机器离线，无法拉取。</b>daemon 在线时才能读取其本机日志；请确认 daemon 进程已启动并连上平台。", "err");
+    meta.style.display = box.style.display = "none"; return;
+  }
+  if (scenario === "nofile") {
+    notice("logs-notice", "<b>daemon.log 不存在。</b>前台（终端）运行模式不落盘日志；请以后台模式运行（sillyhub-daemon start 或自启），或在本机执行 sillyhub-daemon logs 查看。", "warn");
+    meta.style.display = box.style.display = "none"; return;
+  }
+  if (scenario === "truncated") {
+    notice("logs-notice", "<b>日志文件较大，仅展示末尾 256KB 内的 " + LOG_LINES.length + " 行。</b>（按字节上限截断，可在本机查看完整文件）", "warn");
+  } else {
+    notice("logs-notice", "");
+  }
+  meta.style.display = box.style.display = "";
+  var n = parseInt(document.getElementById("tailSel").value, 10);
+  meta.innerHTML = "<span>路径 <b>~/.sillyhub/daemon/daemon.log</b></span><span>大小 <b>2.3 MB</b></span><span>最后修改 <b>2026-10-13 16:04:41</b></span><span>展示 <b>尾部 " + Math.min(n, LOG_LINES.length) + " 行</b></span>";
+  var html = "";
+  for (var i = 0; i < Math.min(n, LOG_LINES.length); i++) {
+    var l = LOG_LINES[i], cls = l.includes("level=error") ? "lv-err" : l.includes("level=warn") ? "lv-warn" : "";
+    html += '<span class="ln">' + (i + 1) + "</span> " + '<span class="' + cls + '">' + l.replace(/</g, "&lt;") + "</span><br>";
+  }
+  box.innerHTML = html || "<div style='color:#7f6fb0'>（空）</div>";
+  box.scrollTop = box.scrollHeight;
+}
+function refreshLogs() { renderLogs(); }
+function renderConfig() {
+  var meta = document.getElementById("config-meta"), box = document.getElementById("cfgBox");
+  var btn = document.getElementById("revealBtn");
+  btn.textContent = revealed ? "🙈 隐藏明文" : "👁 显示明文";
+  btn.classList.toggle("primary", revealed);
+  if (scenario === "oldver" || scenario === "offline") {
+    notice("config-notice", scenario === "oldver"
+      ? "<b>当前 daemon 版本过旧，不支持在线查看配置。</b>请先升级 daemon 后重试。"
+      : "<b>机器离线，无法拉取配置。</b>daemon 在线时才能读取其本机配置。", scenario === "oldver" ? "warn" : "err");
+    meta.style.display = box.style.display = "none"; return;
+  }
+  notice("config-notice", "");
+  meta.style.display = box.style.display = "";
+  meta.innerHTML = "<span>路径 <b>~/.sillyhub/daemon/config-3fa9c2e1.json</b></span><span>来源 <b>per-server（sha256(server_url) 前 8 位）</b></span><span>掩码字段 <b>token / api_key</b></span>";
+  var html = "";
+  Object.keys(CONFIG_PLAIN).forEach(function (k) {
+    var v = CONFIG_PLAIN[k], isSens = SENSITIVE.includes(k);
+    if (isSens && !revealed) v = mask(String(v));
+    if (Array.isArray(v)) v = "[" + v.map(function (x) { return '"' + x + '"'; }).join(", ") + "]";
+    else if (typeof v === "string") v = '"' + v + '"';
+    html += '  <span class="k">"' + k + '"</span>: ' + (isSens ? '<span class="sens">' + v + "</span>" : v.replace(/</g, "&lt;")) + ",\n";
+  });
+  box.innerHTML = "{\n" + html.replace(/,\n$/, "\n}") + "";
+}
+function toggleReveal() {
+  revealed = !revealed;
+  renderConfig();
+}
+function dl(name, text) {
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+  a.download = name; a.click(); URL.revokeObjectURL(a.href);
+}
+function downloadLog() {
+  dl("daemon-qinyi-DESKTOP-tail.log", LOG_LINES.join("\n"));
+}
+function downloadConfig() {
+  var c = JSON.parse(JSON.stringify(CONFIG_PLAIN));
+  if (!revealed) SENSITIVE.forEach(function (k) { c[k] = mask(String(c[k])); });
+  dl("daemon-qinyi-DESKTOP-config.json", JSON.stringify(c, null, 2));
+}
+document.getElementById("overlay").addEventListener("click", function (e) { if (e.target === this) closeDialog(); });
+</script>
+</body>
+</html>

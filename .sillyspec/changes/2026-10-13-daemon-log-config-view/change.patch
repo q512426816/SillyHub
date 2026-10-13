@@ -1,0 +1,2181 @@
+diff --git a/backend/app/modules/daemon/router/__init__.py b/backend/app/modules/daemon/router/__init__.py
+index a59e9c94d..2a3b734d9 100644
+--- a/backend/app/modules/daemon/router/__init__.py
++++ b/backend/app/modules/daemon/router/__init__.py
+@@ -169,6 +169,9 @@ _ENDPOINT_ORDER: tuple[str, ...] = (
+     # machines（2026-10-10-workspec-maintenance task-03：关联仓落盘结果回报）
+     "report_linked_repos_sync_result",
+     "delete_machine",
++    # machines（2026-10-13-daemon-log-config-view task-02：机器诊断只读端点）
++    "get_machine_daemon_logs",
++    "get_machine_daemon_config",
+     # runtimes（拆前 #17-21）
+     "get_runtime",
+     "disable_runtime",
+diff --git a/backend/app/modules/daemon/router/machines.py b/backend/app/modules/daemon/router/machines.py
+index fced0308b..f36d4433f 100644
+--- a/backend/app/modules/daemon/router/machines.py
++++ b/backend/app/modules/daemon/router/machines.py
+@@ -9,11 +9,12 @@ from __future__ import annotations
+ 
+ import re
+ import uuid
+-from typing import Annotated, Literal
++from typing import Annotated, Any, Literal
+ 
+ from fastapi import Depends, HTTPException, Query, status
+ from pydantic import BaseModel, Field, field_validator
+ from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.core.auth_deps import get_current_principal
+ from app.modules.auth.model import User
+@@ -25,8 +26,10 @@ from app.modules.daemon.router.runtimes import (
+ )
+ from app.modules.daemon.router.version import get_daemon_latest_version
+ from app.modules.daemon.schema import (
++    DaemonConfigResponse,
+     DaemonInstanceProviderItem,
+     DaemonInstanceRead,
++    DaemonLogTailResponse,
+     DaemonMachineRead,
+     DaemonMachineUpdate,
+ )
+@@ -650,3 +653,89 @@ async def report_linked_repos_sync_result(
+         [item.model_dump() for item in data.results],
+     )
+     return {"written": written}
++
++
++# ── 机器诊断端点（2026-10-13-daemon-log-config-view task-02）────────────────
++# 两个只读端点经 ws_hub.send_rpc 转发到 daemon 侧 diag RPC（daemon_log_tail /
++# daemon_config_get，design §Phase 1）。错误映射（design 接口定义场景表）：
++# 离线（DaemonRuntimeOffline）/ 超时（DaemonRpcTimeout）原样透传既有 504
++# AppError（不包裹、不改写 code）；method_not_found（老 daemon 未注册）→ 422；
++# 其余远端错 → 502（DaemonRpcRemoteGatewayError）。
++
++
++@router.get(
++    "/machines/{instance_id}/logs",
++    response_model=DaemonLogTailResponse,
++)
++async def get_machine_daemon_logs(
++    instance_id: uuid.UUID,
++    session: SessionDep,
++    user: RuntimeAdminUser,
++    tail: int = Query(default=500, ge=1, le=5000, description="尾部行数"),
++) -> DaemonLogTailResponse:
++    """查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。
++
++    行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
++    文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
++    """
++    return await _send_diag_rpc(instance_id, session, user, "daemon_log_tail", {"tail_lines": tail})
++
++
++@router.get(
++    "/machines/{instance_id}/config",
++    response_model=DaemonConfigResponse,
++)
++async def get_machine_daemon_config(
++    instance_id: uuid.UUID,
++    session: SessionDep,
++    user: RuntimeAdminUser,
++    reveal: bool = Query(default=False, description="true 时返回明文凭据"),
++) -> DaemonConfigResponse:
++    """查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。
++
++    reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
++    """
++    return await _send_diag_rpc(instance_id, session, user, "daemon_config_get", {"reveal": reveal})
++
++
++async def _send_diag_rpc(
++    instance_id: uuid.UUID,
++    session: AsyncSession,
++    user: User,
++    method: str,
++    params: dict[str, Any],
++) -> dict[str, Any]:
++    """诊断 RPC 共享转发 + 错误映射（task-02，两端点复用）。
++
++    - 归属校验（非 owner / 不存在同语义 404）+ RuntimeAdminUser 鉴权；
++    - 离线 / 超时原样抛既有 504 AppError（errorhandler 渲染，不改写 code）；
++    - ``method_not_found``（老 daemon 未升级）→ 422 HTTP_422_DAEMON_DIAG_UNSUPPORTED；
++    - 其余远端错 → 502 DaemonRpcRemoteGatewayError。
++    """
++    svc = DaemonService(session)
++    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
++
++    # 惰性 import（对齐 daemon_rpc.py 先例）：ws_hub 单例访问器按测试 monkeypatch
++    # 时机绑定，模块顶层 import 会固化旧引用。
++    from app.core.errors import AppError
++    from app.modules.daemon.runtime.service import (
++        DaemonRpcRemoteError,
++        DaemonRpcRemoteGatewayError,
++    )
++    from app.modules.daemon.ws_hub import get_daemon_ws_hub
++
++    hub = get_daemon_ws_hub()
++    try:
++        return await hub.send_rpc(instance_id, method, params, timeout=30.0)
++    except DaemonRpcRemoteError as exc:
++        if exc.code == "method_not_found":
++            raise AppError(
++                "当前机器的守护进程版本过旧，暂不支持在线查看日志/配置；请先升级守护进程后重试。",
++                code="HTTP_422_DAEMON_DIAG_UNSUPPORTED",
++                http_status=422,
++                details={"daemon_instance_id": str(instance_id), "daemon_code": exc.code},
++            ) from exc
++        raise DaemonRpcRemoteGatewayError(
++            f"读取诊断信息失败（daemon 返回错误：{exc.code}）。",
++            details={"daemon_instance_id": str(instance_id), "daemon_code": exc.code},
++        ) from exc
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index 3ec14158e..f4d1f47db 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import enum
+ import uuid
+ from datetime import datetime
+-from typing import Literal
++from typing import Any, Literal
+ 
+ from pydantic import BaseModel, Field, field_validator, model_validator
+ 
+@@ -1678,3 +1678,34 @@ class PlanResponseRequest(BaseModel):
+         ):
+             raise ValueError("decision 为 revise/cancel 时 feedback 必填且不可为空白")
+         return self
++
++
++# ── 机器诊断端点（2026-10-13-daemon-log-config-view task-02）────────────────
++
++
++class DaemonLogTailResponse(BaseModel):
++    """GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。
++
++    字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，
++    前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。
++    """
++
++    path: str
++    size: int
++    mtime: str
++    exists: bool
++    lines: list[str]
++    line_count: int
++    truncated: bool
++
++
++class DaemonConfigResponse(BaseModel):
++    """GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。
++
++    ``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出
++    本次被掩码的字段名（reveal=true 时为空）。
++    """
++
++    path: str
++    config: dict[str, Any]
++    masked_fields: list[str]
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 0bba6310a..b727e0fdf 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4846,6 +4846,7 @@
+           "change"
+         ],
+         "summary": "List Change Files",
++        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``\n任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体\n``service.list_files`` 纯读语义零改动。",
+         "operationId": "list_change_files_api_workspaces__workspace_id__changes__change_id__files_get",
+         "parameters": [
+           {
+@@ -14232,6 +14233,120 @@
+         }
+       }
+     },
++    "/api/daemon/machines/{instance_id}/logs": {
++      "get": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Get Machine Daemon Logs",
++        "description": "查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。\n\n行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；\n文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。",
++        "operationId": "get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get",
++        "parameters": [
++          {
++            "name": "instance_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Instance Id"
++            }
++          },
++          {
++            "name": "tail",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "integer",
++              "maximum": 5000,
++              "minimum": 1,
++              "description": "尾部行数",
++              "default": 500,
++              "title": "Tail"
++            },
++            "description": "尾部行数"
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/DaemonLogTailResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
++    "/api/daemon/machines/{instance_id}/config": {
++      "get": {
++        "tags": [
++          "daemon"
++        ],
++        "summary": "Get Machine Daemon Config",
++        "description": "查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。\n\nreveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。",
++        "operationId": "get_machine_daemon_config_api_daemon_machines__instance_id__config_get",
++        "parameters": [
++          {
++            "name": "instance_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Instance Id"
++            }
++          },
++          {
++            "name": "reveal",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "boolean",
++              "description": "true 时返回明文凭据",
++              "default": false,
++              "title": "Reveal"
++            },
++            "description": "true 时返回明文凭据"
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/DaemonConfigResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/daemon/runtimes/{runtime_id}/disable": {
+       "post": {
+         "tags": [
+@@ -42846,6 +42961,34 @@
+         "type": "object",
+         "title": "CustomerMaintenanceUpdate"
+       },
++      "DaemonConfigResponse": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "config": {
++            "additionalProperties": true,
++            "type": "object",
++            "title": "Config"
++          },
++          "masked_fields": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "Masked Fields"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path",
++          "config",
++          "masked_fields"
++        ],
++        "title": "DaemonConfigResponse",
++        "description": "GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。\n\n``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出\n本次被掩码的字段名（reveal=true 时为空）。"
++      },
+       "DaemonHeartbeatPendingUpdate": {
+         "properties": {
+           "reason": {
+@@ -43733,6 +43876,53 @@
+         "title": "DaemonInstanceRead",
+         "description": "Frontend-oriented daemon instance DTO with nested provider info.\n\nUsed by GET /api/daemon/instances for the workspace-daemon-switcher\n(task-10, design §7). Includes the list of provider runtimes so the\nfrontend can render provider badges without an extra HTTP round-trip."
+       },
++      "DaemonLogTailResponse": {
++        "properties": {
++          "path": {
++            "type": "string",
++            "title": "Path"
++          },
++          "size": {
++            "type": "integer",
++            "title": "Size"
++          },
++          "mtime": {
++            "type": "string",
++            "title": "Mtime"
++          },
++          "exists": {
++            "type": "boolean",
++            "title": "Exists"
++          },
++          "lines": {
++            "items": {
++              "type": "string"
++            },
++            "type": "array",
++            "title": "Lines"
++          },
++          "line_count": {
++            "type": "integer",
++            "title": "Line Count"
++          },
++          "truncated": {
++            "type": "boolean",
++            "title": "Truncated"
++          }
++        },
++        "type": "object",
++        "required": [
++          "path",
++          "size",
++          "mtime",
++          "exists",
++          "lines",
++          "line_count",
++          "truncated"
++        ],
++        "title": "DaemonLogTailResponse",
++        "description": "GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。\n\n字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，\n前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。"
++      },
+       "DaemonMachineListResponseWithPending": {
+         "properties": {
+           "items": {
+diff --git a/backend/tests/modules/daemon/test_daemon_machine_diag.py b/backend/tests/modules/daemon/test_daemon_machine_diag.py
+new file mode 100644
+index 000000000..c0fd0836f
+--- /dev/null
++++ b/backend/tests/modules/daemon/test_daemon_machine_diag.py
+@@ -0,0 +1,293 @@
++"""Tests for machine diag endpoints (2026-10-13-daemon-log-config-view task-02).
++
++GET /api/daemon/machines/{instance_id}/logs?tail=N
++GET /api/daemon/machines/{instance_id}/config?reveal=
++
++覆盖（design §Phase 2 / 接口定义错误映射表）：
++- 转发成功（result 字段含 truncated / masked_fields 原样透传）
++- tail / reveal 参数透传到 send_rpc params
++- 离线（DaemonRuntimeOffline）→ 504（既有 AppError 原样透传，code 不改写）
++- 超时（DaemonRpcTimeout）→ 504（同上）
++- method_not_found（DaemonRpcRemoteError）→ 422 HTTP_422_DAEMON_DIAG_UNSUPPORTED
++- 其余远端错（code=internal）→ 502 HTTP_502_DAEMON_RPC_REMOTE
++- 平台管理员访问他人机器 → 200 放行（_get_owned_instance 的 admin 语义；
++  非 owner 的 404 归属校验由 _get_owned_instance 既有测试覆盖，此处不重复构造角色用户）
++- 非 admin → 403
++- openapi 可见两条新路径
++"""
++
++from __future__ import annotations
++
++import uuid
++from typing import Any
++
++import pytest
++from httpx import AsyncClient
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.security import create_access_token, password_hasher
++from app.modules.auth.model import User
++from app.modules.daemon.model import DaemonInstance
++from app.modules.daemon.runtime.service import (
++    DaemonRpcRemoteError,
++    DaemonRpcTimeout,
++    DaemonRuntimeOffline,
++)
++
++pytestmark = pytest.mark.asyncio
++
++LOG_RESULT: dict[str, Any] = {
++    "path": "/home/u/.sillyhub/daemon/daemon.log",
++    "size": 1024,
++    "mtime": "2026-10-13T10:00:00Z",
++    "exists": True,
++    "lines": ["[daemon.heartbeat] ok=1", "[daemon.ws] event=connected"],
++    "line_count": 2,
++    "truncated": True,
++}
++
++CONFIG_RESULT: dict[str, Any] = {
++    "path": "/home/u/.sillyhub/daemon/config-3fa9c2e1.json",
++    "config": {"token": "sk-l***efgh", "poll_interval": 30},
++    "masked_fields": ["token"],
++}
++
++
++class FakeHub:
++    """``DaemonWsHub`` 测试替身——记录 send_rpc 调用，可预设 result / 抛异常。"""
++
++    def __init__(self, result: Any = None, exc: BaseException | None = None) -> None:
++        self.calls: list[dict[str, Any]] = []
++        self.result = result
++        self.exc = exc
++
++    async def send_rpc(
++        self,
++        daemon_id: uuid.UUID,
++        method: str,
++        params: dict[str, Any],
++        *,
++        timeout: float | None = None,
++    ) -> dict[str, Any]:
++        self.calls.append(
++            {
++                "daemon_id": daemon_id,
++                "method": method,
++                "params": params,
++                "timeout": timeout,
++            }
++        )
++        if self.exc is not None:
++            raise self.exc
++        return self.result
++
++
++async def _seed_user(session: AsyncSession, *, is_platform_admin: bool) -> tuple[User, str]:
++    user = User(
++        id=uuid.uuid4(),
++        email=f"user-{uuid.uuid4().hex[:6]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++        is_platform_admin=is_platform_admin,
++    )
++    session.add(user)
++    await session.commit()
++    await session.refresh(user)
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return user, token
++
++
++async def _make_instance(session: AsyncSession, owner_id: uuid.UUID) -> DaemonInstance:
++    inst = DaemonInstance(
++        id=uuid.uuid4(),
++        user_id=owner_id,
++        hostname="host-diag",
++        server_url="http://test.local",
++    )
++    session.add(inst)
++    await session.commit()
++    await session.refresh(inst)
++    return inst
++
++
++def _bearer(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++# ── 正常路径 ────────────────────────────────────────────────────────────────
++
++
++async def test_logs_200_forwards_result(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(result=LOG_RESULT)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/logs", headers=_bearer(token))
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == LOG_RESULT
++    # RPC 契约：method + 默认参数 + 30s 超时（design 接口定义）
++    assert len(hub.calls) == 1
++    call = hub.calls[0]
++    assert call["daemon_id"] == inst.id
++    assert call["method"] == "daemon_log_tail"
++    assert call["params"] == {"tail_lines": 500}
++    assert call["timeout"] == 30.0
++
++
++async def test_logs_tail_param_passthrough(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(result=LOG_RESULT)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(
++        f"/api/daemon/machines/{inst.id}/logs?tail=2000", headers=_bearer(token)
++    )
++    assert resp.status_code == 200, resp.text
++    assert hub.calls[0]["params"] == {"tail_lines": 2000}
++
++
++async def test_config_200_masked_fields_passthrough(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(result=CONFIG_RESULT)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/config", headers=_bearer(token))
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == CONFIG_RESULT
++    call = hub.calls[0]
++    assert call["method"] == "daemon_config_get"
++    assert call["params"] == {"reveal": False}
++    assert call["timeout"] == 30.0
++
++
++async def test_config_reveal_true_passthrough(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(result={**CONFIG_RESULT, "masked_fields": []})
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(
++        f"/api/daemon/machines/{inst.id}/config?reveal=true", headers=_bearer(token)
++    )
++    assert resp.status_code == 200, resp.text
++    assert hub.calls[0]["params"] == {"reveal": True}
++
++
++# ── 错误映射（design 接口定义场景表）──────────────────────────────────────
++
++
++async def test_logs_offline_maps_504(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(exc=DaemonRuntimeOffline("offline"))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/logs", headers=_bearer(token))
++    assert resp.status_code == 504, resp.text
++    # 原样透传既有 AppError code（不包裹、不改写）
++    assert resp.json()["code"] == "HTTP_504_DAEMON_RUNTIME_OFFLINE"
++
++
++async def test_logs_timeout_maps_504(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(exc=DaemonRpcTimeout("timed out"))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/config", headers=_bearer(token))
++    assert resp.status_code == 504, resp.text
++    assert resp.json()["code"] == "HTTP_504_DAEMON_RPC_TIMEOUT"
++
++
++async def test_method_not_found_maps_422(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(exc=DaemonRpcRemoteError({"code": "method_not_found", "message": "x"}))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    for path in ("/logs", "/config"):
++        resp = await client.get(f"/api/daemon/machines/{inst.id}{path}", headers=_bearer(token))
++        assert resp.status_code == 422, f"{path}: {resp.text}"
++        assert resp.json()["code"] == "HTTP_422_DAEMON_DIAG_UNSUPPORTED"
++
++
++async def test_remote_internal_maps_502(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    admin, token = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, admin.id)
++    hub = FakeHub(exc=DaemonRpcRemoteError({"code": "internal", "message": "boom"}))
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/logs", headers=_bearer(token))
++    assert resp.status_code == 502, resp.text
++    assert resp.json()["code"] == "HTTP_502_DAEMON_RPC_REMOTE"
++
++
++# ── 鉴权与归属 ──────────────────────────────────────────────────────────────
++
++
++async def test_platform_admin_can_view_others_machine(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    """平台管理员可诊断他人机器（_get_owned_instance 对 admin 放行——与
++    trigger_machine_cleanup 等既有 machines 端点同语义；非 owner 的 404
++    归属校验由 _get_owned_instance 既有测试覆盖，此处不重复构造角色用户）。"""
++    owner, _ = await _seed_user(db_session, is_platform_admin=True)
++    inst = await _make_instance(db_session, owner.id)
++    other, other_token = await _seed_user(db_session, is_platform_admin=True)
++    assert other.id != owner.id
++    hub = FakeHub(result=LOG_RESULT)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/logs", headers=_bearer(other_token))
++    assert resp.status_code == 200, resp.text
++    assert resp.json() == LOG_RESULT
++
++
++async def test_non_admin_returns_403(
++    client: AsyncClient, db_session: AsyncSession, monkeypatch
++) -> None:
++    plain, token = await _seed_user(db_session, is_platform_admin=False)
++    inst = await _make_instance(db_session, plain.id)
++    hub = FakeHub(result=LOG_RESULT)
++    monkeypatch.setattr("app.modules.daemon.ws_hub.get_daemon_ws_hub", lambda: hub)
++
++    resp = await client.get(f"/api/daemon/machines/{inst.id}/logs", headers=_bearer(token))
++    assert resp.status_code == 403, resp.text
++    assert hub.calls == []
++
++
++# ── openapi 可见性 ──────────────────────────────────────────────────────────
++
++
++async def test_openapi_lists_diag_paths() -> None:
++    from app.main import app
++
++    paths = app.openapi()["paths"]
++    base = "/api/daemon/machines/{instance_id}"
++    for suffix in ("/logs", "/config"):
++        assert f"{base}{suffix}" in paths, f"openapi 缺 {suffix}"
+diff --git a/frontend/src/app/(dashboard)/runtimes/page.tsx b/frontend/src/app/(dashboard)/runtimes/page.tsx
+index 6160a9faf..7f1033785 100644
+--- a/frontend/src/app/(dashboard)/runtimes/page.tsx
++++ b/frontend/src/app/(dashboard)/runtimes/page.tsx
+@@ -29,6 +29,10 @@ import {
+ // task-09：MachineCard 两级手风琴（machine + 内嵌 RuntimeCard 网格）。
+ // RuntimeCard 不再在 page 内联渲染，仅由 MachineCard 展开体透传 props 调用。
+ import { MachineCard } from "@/components/daemon/machine-card";
++import {
++  DaemonDiagnosticDialog,
++  type DiagnosticTab,
++} from "@/components/daemon/daemon-diagnostic-dialog";
+ // task-09（2026-08-28-daemon-agent-share）：「共享给我的」区块 + 平台共享智能体管理卡。
+ import { SharedMachinesSection } from "@/components/daemon/shared-machines-section";
+ import { PlatformSharedAgentsCard } from "@/components/daemon/platform-shared-agents-card";
+@@ -612,6 +616,12 @@ export default function RuntimesPage() {
+   const [aliasEditing, setAliasEditing] = useState<DaemonMachineRead | null>(null);
+   const [aliasValue, setAliasValue] = useState("");
+   const [aliasSaving, setAliasSaving] = useState(false);
++  // 2026-10-13-daemon-log-config-view task-03：daemon 诊断弹窗态（非 null 才挂载，
++  // 对齐 aliasEditing 模式）；tab 记录入口来源（日志/配置）。
++  const [diagTarget, setDiagTarget] = useState<{
++    machine: DaemonMachineRead;
++    tab: "logs" | "config";
++  } | null>(null);
+   // task-06 / FR-04 / D-006@v1：可写目录（allowed_roots 沙箱）编辑态（仍 runtime 级）。
+   // rootsEditing：当前编辑的 runtime（null=关闭）；rootsValue：路径数组（每行一个）。
+   const [rootsEditing, setRootsEditing] = useState<DaemonRuntimeRead | null>(null);
+@@ -1446,6 +1456,9 @@ export default function RuntimesPage() {
+                       onUpgrade={handleUpgrade}
+                       onUpgradeSillySpec={handleSillySpecUpgrade}
+                       upgradingSillySpec={sillyspecUpgradingId === machine.id}
++                      onOpenDiagnostic={(m, tab: DiagnosticTab) =>
++                        setDiagTarget({ machine: m, tab })
++                      }
+                       onCleanup={handleCleanup}
+                       onDeleteMachine={handleDeleteMachine}
+                       onRuntimeToggle={handleToggleRuntime}
+@@ -1506,6 +1519,16 @@ export default function RuntimesPage() {
+           「会话」按钮改为唤起全局悬浮会话助手（FloatingSessionHost 在 layout.tsx 常驻挂载）。
+           URL ?session= 恢复改为 store.selectSession（见 useEffect 下方）。 */}
+ 
++      {/* 2026-10-13-daemon-log-config-view task-03：daemon 诊断弹窗（日志/配置
++          双 Tab 只读查看，diagTarget 非 null 才挂载——对齐 aliasEditing 模式）。 */}
++      {diagTarget ? (
++        <DaemonDiagnosticDialog
++          machine={diagTarget.machine}
++          initialTab={diagTarget.tab}
++          onClose={() => setDiagTarget(null)}
++        />
++      ) : null}
++
+       {/* task-09：机器别名编辑 modal（MachineCard onEditAlias 触发，改调 updateDaemonMachine）。 */}
+       <Modal
+         title="编辑展示别名"
+diff --git a/frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx b/frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx
+new file mode 100644
+index 000000000..47335fdf7
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx
+@@ -0,0 +1,278 @@
++// task-03（2026-10-13-daemon-log-config-view / FR-01~FR-08 / D-001@v2 /
++// D-002@v1 / D-003@v1 / D-007@v1）：DaemonDiagnosticDialog（daemon 诊断
++// 只读双 Tab 弹窗）单测。
++//
++// 覆盖：
++//   1. 日志 Tab 正常态：尾部行渲染 + 路径/大小元信息 + 下载触发；
++//   2. truncated 提示（字节上限截断）；
++//   3. exists:false 提示（前台运行不落盘）；
++//   4. 422 老 daemon → 「daemon 版本过旧」升级提示条；
++//   5. 通用错误条（504 离线）；
++//   6. 配置 Tab：掩码数据渲染 + masked_fields 提示 + 只读标注；
++//   7. 「显示明文」→ fetchMachineConfig(id, true) 二次拉取；
++//   8. D-007 下载恒脱敏：明文态点下载，产物仍是 reveal=false 掩码 JSON。
++//
++// 测试纪律：FIRST / AAA / 仅 mock 网络层（@/lib/daemon/machines 两函数）；
++// 断言用 aria-label / 文本，避开样式细节。
++
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++import { render, screen, fireEvent, waitFor } from "@testing-library/react";
++
++import { DaemonDiagnosticDialog } from "../daemon-diagnostic-dialog";
++import type { DaemonMachineRead } from "@/lib/daemon/machines";
++import { ApiError } from "@/lib/api";
++
++/* ----- mock 网络层 ----- */
++
++const machinesApi = vi.hoisted(() => ({
++  fetchMachineLogTail: vi.fn(),
++  fetchMachineConfig: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon/machines", () => ({
++  fetchMachineLogTail: machinesApi.fetchMachineLogTail,
++  fetchMachineConfig: machinesApi.fetchMachineConfig,
++}));
++
++/* ----- fixture ----- */
++
++function makeMachine(overrides: Partial<DaemonMachineRead> = {}): DaemonMachineRead {
++  return {
++    id: "inst-1",
++    hostname: "qinyi-DESKTOP",
++    display_alias: null,
++    os: "windows",
++    arch: "x64",
++    status: "online",
++    last_heartbeat_at: "2026-10-13T10:00:00Z",
++    version: "1.42.0",
++    build_id: "b1",
++    started_at: null,
++    created_at: "2026-10-01T00:00:00Z",
++    runtime_count: 2,
++    online_runtime_count: 2,
++    runtimes: [],
++    ...overrides,
++  } as DaemonMachineRead;
++}
++
++const LOG_OK = {
++  path: "C:/Users/u/.sillyhub/daemon/daemon.log",
++  size: 2345,
++  mtime: "2026-10-13T10:00:00Z",
++  exists: true,
++  lines: ["[daemon.heartbeat] ok=1", "[daemon.ws] event=connected"],
++  line_count: 2,
++  truncated: false,
++};
++
++const CONFIG_MASKED = {
++  path: "C:/Users/u/.sillyhub/daemon/config-3fa9c2e1.json",
++  config: { token: "sk-l***efgh", poll_interval: 30 },
++  masked_fields: ["token"],
++};
++
++const CONFIG_PLAIN = {
++  ...CONFIG_MASKED,
++  config: { token: "sk-live-abcdefgh", poll_interval: 30 },
++  masked_fields: [],
++};
++
++function apiError(status: number, code: string, message: string): ApiError {
++  return new ApiError(status, { message, code, request_id: null, details: null });
++}
++
++let createObjectUrlSpy: ReturnType<typeof vi.fn>;
++
++/** jsdom Blob 无 text()——FileReader 异步读取替代。 */
++function readBlob(blob: Blob): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const fr = new FileReader();
++    fr.onload = () => resolve(String(fr.result));
++    fr.onerror = () => reject(fr.error);
++    fr.readAsText(blob);
++  });
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  createObjectUrlSpy = vi.fn(() => "blob:mock");
++  vi.spyOn(URL, "createObjectURL").mockImplementation(
++    createObjectUrlSpy as unknown as (obj: Blob | MediaSource) => string,
++  );
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++/* ----- 用例 ----- */
++
++describe("DaemonDiagnosticDialog — 日志 Tab", () => {
++  it("正常态：渲染尾部行 + 元信息，下载触发 Blob（FR-01/02）", async () => {
++    machinesApi.fetchMachineLogTail.mockResolvedValue(LOG_OK);
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="logs"
++        onClose={() => {}}
++      />,
++    );
++
++    await waitFor(() => {
++      expect(screen.getByText("[daemon.ws] event=connected")).toBeInTheDocument();
++    });
++    expect(screen.getByText(/daemon\.log/)).toBeInTheDocument();
++    // 默认 tail=500 透传
++    expect(machinesApi.fetchMachineLogTail).toHaveBeenCalledWith("inst-1", 500);
++
++    fireEvent.click(screen.getByRole("button", { name: /下载日志片段/ }));
++    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
++    expect(await readBlob(createObjectUrlSpy.mock.calls[0]![0] as Blob)).toBe(
++      LOG_OK.lines.join("\n"),
++    );
++  });
++
++  it("truncated=true 时提示按字节上限截断（FR-01/D-002）", async () => {
++    machinesApi.fetchMachineLogTail.mockResolvedValue({
++      ...LOG_OK,
++      truncated: true,
++      line_count: 300,
++    });
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="logs"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText(/仅展示末尾 256KB 内的 300 行/)).toBeInTheDocument();
++    });
++  });
++
++  it("exists=false 时提示前台运行不落盘（FR-07）", async () => {
++    machinesApi.fetchMachineLogTail.mockResolvedValue({
++      ...LOG_OK,
++      exists: false,
++      size: 0,
++      mtime: "",
++      lines: [],
++      line_count: 0,
++    });
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="logs"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText("daemon.log 不存在")).toBeInTheDocument();
++    });
++  });
++
++  it("422 → daemon 版本过旧升级提示条（FR-06）", async () => {
++    machinesApi.fetchMachineLogTail.mockRejectedValue(
++      apiError(422, "HTTP_422_DAEMON_DIAG_UNSUPPORTED", "当前机器的守护进程版本过旧"),
++    );
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="logs"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText("daemon 版本过旧，暂不支持在线查看")).toBeInTheDocument();
++    });
++    // 升级指路文案在场
++    expect(screen.getByText(/升级 daemon/)).toBeInTheDocument();
++  });
++
++  it("504 → 通用错误条展示中文信息（FR-08）", async () => {
++    machinesApi.fetchMachineLogTail.mockRejectedValue(
++      apiError(504, "HTTP_504_DAEMON_RUNTIME_OFFLINE", "守护进程当前离线"),
++    );
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="logs"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText("日志拉取失败")).toBeInTheDocument();
++    });
++    expect(screen.getByText("守护进程当前离线")).toBeInTheDocument();
++  });
++});
++
++describe("DaemonDiagnosticDialog — 配置 Tab", () => {
++  it("掩码态：渲染 JSON + 已隐藏字段提示 + 只读标注（FR-03/D-003）", async () => {
++    machinesApi.fetchMachineConfig.mockResolvedValue(CONFIG_MASKED);
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="config"
++        onClose={() => {}}
++      />,
++    );
++
++    await waitFor(() => {
++      expect(screen.getByText(/config-3fa9c2e1\.json/)).toBeInTheDocument();
++    });
++    // 默认不传明文（reveal=false，D-001@v2）
++    expect(machinesApi.fetchMachineConfig).toHaveBeenCalledWith("inst-1", false);
++    expect(screen.getByText(/sk-l\*\*\*efgh/)).toBeInTheDocument();
++    expect(screen.getByText(/已隐藏字段：token/)).toBeInTheDocument();
++    expect(screen.getByText("只读")).toBeInTheDocument();
++  });
++
++  it("「显示明文」触发 reveal=true 二次拉取并展示明文（FR-04）", async () => {
++    machinesApi.fetchMachineConfig.mockResolvedValueOnce(CONFIG_MASKED);
++    machinesApi.fetchMachineConfig.mockResolvedValueOnce(CONFIG_PLAIN);
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="config"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText(/已隐藏字段：token/)).toBeInTheDocument();
++    });
++
++    fireEvent.click(screen.getByRole("button", { name: /显示明文/ }));
++    await waitFor(() => {
++      expect(screen.getByText(/sk-live-abcdefgh/)).toBeInTheDocument();
++    });
++    expect(machinesApi.fetchMachineConfig).toHaveBeenLastCalledWith("inst-1", true);
++  });
++
++  it("D-007 下载恒脱敏：明文态点下载，产物仍是掩码 JSON", async () => {
++    machinesApi.fetchMachineConfig.mockResolvedValueOnce(CONFIG_MASKED);
++    machinesApi.fetchMachineConfig.mockResolvedValueOnce(CONFIG_PLAIN);
++    render(
++      <DaemonDiagnosticDialog
++        machine={makeMachine()}
++        initialTab="config"
++        onClose={() => {}}
++      />,
++    );
++    await waitFor(() => {
++      expect(screen.getByText(/已隐藏字段：token/)).toBeInTheDocument();
++    });
++    // 切到明文态
++    fireEvent.click(screen.getByRole("button", { name: /显示明文/ }));
++    await waitFor(() => {
++      expect(screen.getByText(/sk-live-abcdefgh/)).toBeInTheDocument();
++    });
++    // 下载——即使页面在明文态，产物也必须是掩码数据
++    fireEvent.click(screen.getByRole("button", { name: /下载配置/ }));
++    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
++    const text = await readBlob(createObjectUrlSpy.mock.calls[0]![0] as Blob);
++    expect(text).toContain("sk-l***efgh");
++    expect(text).not.toContain("sk-live-abcdefgh");
++  });
++});
+diff --git a/frontend/src/components/daemon/daemon-diagnostic-dialog.tsx b/frontend/src/components/daemon/daemon-diagnostic-dialog.tsx
+new file mode 100644
+index 000000000..94eae4c4b
+--- /dev/null
++++ b/frontend/src/components/daemon/daemon-diagnostic-dialog.tsx
+@@ -0,0 +1,390 @@
++"use client";
++
++/**
++ * daemon 诊断弹窗（2026-10-13-daemon-log-config-view task-03 / FR-01~08）。
++ *
++ * 机器卡「日志」「配置」入口打开的只读双 Tab 弹窗（antd Modal + Tabs）：
++ * - 日志 Tab：daemon.log 尾部行（Select 100/500/2000 + 刷新 + 下载片段 +
++ *   路径/大小/修改时间元信息 + 等宽滚动区自动滚底；truncated 提示截断）。
++ * - 配置 Tab：生效配置 JSON（只读标注 + 掩码字段高亮 +「显示明文」切换触发
++ *   reveal 二次拉取 + 下载按钮）。
++ *
++ * 关键决策落点：下载恒脱敏（D-007——无论明暗态，下载内容永远取 reveal=false
++ * 的掩码数据，不复用明文 state）；默认打开不请求 reveal=true（默认路径不传
++ * 明文，D-001@v2）；五类边界态提示条（422 版本过旧 / exists:false 前台运行
++ * / truncated / 离线 504 / 其余 ApiError 通用错误）。原型对照
++ * prototype-daemon-log-config-view.html。
++ */
++
++import { useCallback, useEffect, useRef, useState } from "react";
++import { Alert, Button, Modal, Select, Spin, Tabs, Tag, Tooltip } from "antd";
++import { Download, EyeOff, Eye, RefreshCw } from "lucide-react";
++import type { DaemonMachineRead } from "@/lib/daemon/machines";
++import {
++  fetchMachineConfig,
++  fetchMachineLogTail,
++  type DaemonConfigResponse,
++  type DaemonLogTailResponse,
++} from "@/lib/daemon/machines";
++import { ApiError } from "@/lib/api";
++
++export type DiagnosticTab = "logs" | "config";
++
++export interface DaemonDiagnosticDialogProps {
++  machine: DaemonMachineRead;
++  initialTab: DiagnosticTab;
++  onClose: () => void;
++}
++
++/** 弹窗内错误分类：422 = 老 daemon 未升级（升级提示），其余通用错误条。 */
++function classifyError(e: unknown): { kind: "unsupported" | "error"; message: string } {
++  if (
++    e instanceof ApiError &&
++    (e.status === 422 || e.code === "HTTP_422_DAEMON_DIAG_UNSUPPORTED")
++  ) {
++    return { kind: "unsupported", message: e.message };
++  }
++  return { kind: "error", message: e instanceof Error ? e.message : String(e) };
++}
++
++/** Blob 下载（先例 frontend/src/lib/explorer.ts:105-109）。 */
++function downloadText(filename: string, text: string): void {
++  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
++  const objectUrl = URL.createObjectURL(blob);
++  const a = document.createElement("a");
++  a.href = objectUrl;
++  a.download = filename;
++  a.click();
++  URL.revokeObjectURL(objectUrl);
++}
++
++function formatBytes(size: number): string {
++  if (size < 1024) return `${size} B`;
++  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
++  return `${(size / 1024 / 1024).toFixed(1)} MB`;
++}
++
++export function DaemonDiagnosticDialog({
++  machine,
++  initialTab,
++  onClose,
++}: DaemonDiagnosticDialogProps) {
++  const machineLabel = machine.display_alias ?? machine.hostname;
++  const [tab, setTab] = useState<DiagnosticTab>(initialTab);
++
++  // ── 日志 Tab 状态 ──────────────────────────────────────────────────────────
++  const [tailLines, setTailLines] = useState(500);
++  const [logData, setLogData] = useState<DaemonLogTailResponse | null>(null);
++  const [logLoading, setLogLoading] = useState(false);
++  const [logError, setLogError] = useState<{ kind: "unsupported" | "error"; message: string } | null>(
++    null,
++  );
++  const logBoxRef = useRef<HTMLDivElement | null>(null);
++
++  // ── 配置 Tab 状态 ──────────────────────────────────────────────────────────
++  // maskedCfg 恒为 reveal=false 数据（下载恒用它，D-007）；revealed 时另拉明文展示。
++  const [maskedCfg, setMaskedCfg] = useState<DaemonConfigResponse | null>(null);
++  const [displayCfg, setDisplayCfg] = useState<DaemonConfigResponse | null>(null);
++  const [revealed, setRevealed] = useState(false);
++  const [cfgLoading, setCfgLoading] = useState(false);
++  const [cfgError, setCfgError] = useState<{ kind: "unsupported" | "error"; message: string } | null>(
++    null,
++  );
++
++  const loadLogs = useCallback(
++    async (tail: number) => {
++      setLogLoading(true);
++      setLogError(null);
++      try {
++        setLogData(await fetchMachineLogTail(machine.id, tail));
++      } catch (e) {
++        setLogData(null);
++        setLogError(classifyError(e));
++      } finally {
++        setLogLoading(false);
++      }
++    },
++    [machine.id],
++  );
++
++  const loadConfig = useCallback(
++    async (reveal: boolean) => {
++      setCfgLoading(true);
++      setCfgError(null);
++      try {
++        const data = await fetchMachineConfig(machine.id, reveal);
++        if (reveal) {
++          setDisplayCfg(data);
++        } else {
++          setMaskedCfg(data);
++          setDisplayCfg(data);
++        }
++      } catch (e) {
++        setCfgError(classifyError(e));
++      } finally {
++        setCfgLoading(false);
++      }
++    },
++    [machine.id],
++  );
++
++  // 打开时按初始 Tab 拉取；Tab 首次切到另一侧时补拉（未加载过才拉）。
++  useEffect(() => {
++    if (tab === "logs" && logData === null && !logLoading && logError === null) {
++      void loadLogs(tailLines);
++    }
++  }, [tab, logData, logLoading, logError, loadLogs, tailLines]);
++
++  useEffect(() => {
++    if (tab === "config" && maskedCfg === null && !cfgLoading && cfgError === null) {
++      void loadConfig(false);
++    }
++  }, [tab, maskedCfg, cfgLoading, cfgError, loadConfig]);
++
++  // 日志到达后自动滚到底部（看最新日志，design §Phase 3）。
++  useEffect(() => {
++    if (tab === "logs" && logBoxRef.current) {
++      logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
++    }
++  }, [tab, logData, logLoading]);
++
++  const handleToggleReveal = () => {
++    if (revealed) {
++      // 恢复掩码：直接用已缓存的掩码数据（不重拉——数据未变）。
++      setRevealed(false);
++      if (maskedCfg) setDisplayCfg(maskedCfg);
++    } else {
++      setRevealed(true);
++      void loadConfig(true);
++    }
++  };
++
++  const handleDownloadLog = () => {
++    if (!logData) return;
++    downloadText(
++      `daemon-${machineLabel}-tail-${tailLines}.log`,
++      logData.lines.join("\n"),
++    );
++  };
++
++  const handleDownloadConfig = () => {
++    // D-007 下载恒脱敏：永远取 reveal=false 的掩码数据（明文态下载也脱敏）。
++    if (!maskedCfg) return;
++    downloadText(
++      `daemon-${machineLabel}-config.json`,
++      JSON.stringify(maskedCfg.config, null, 2),
++    );
++  };
++
++  // ── 渲染辅助 ───────────────────────────────────────────────────────────────
++  const unsupportedAlert = (
++    <Alert
++      type="warning"
++      showIcon
++      message="daemon 版本过旧，暂不支持在线查看"
++      description="请先在机器卡点击「升级 daemon」，升级完成后再打开本页查看。"
++      className="mb-3"
++    />
++  );
++
++  const logsPane = (
++    <div>
++      {logError?.kind === "unsupported" ? unsupportedAlert : null}
++      {logError?.kind === "error" ? (
++        <Alert
++          type="error"
++          showIcon
++          message="日志拉取失败"
++          description={logError.message}
++          className="mb-3"
++        />
++      ) : null}
++      {!logError && logData && !logData.exists ? (
++        <Alert
++          type="warning"
++          showIcon
++          message="daemon.log 不存在"
++          description="前台（终端）运行模式不落盘日志；请以后台模式运行（sillyhub-daemon start 或自启），或在本机执行 sillyhub-daemon logs 查看。"
++          className="mb-3"
++        />
++      ) : null}
++      <div className="mb-2 flex flex-wrap items-center gap-2">
++        <span className="text-xs text-muted-foreground">尾部行数</span>
++        <Select
++          size="small"
++          value={tailLines}
++          onChange={(v) => {
++            setTailLines(v);
++            void loadLogs(v);
++          }}
++          options={[100, 500, 2000].map((n) => ({ value: n, label: `${n}` }))}
++          style={{ width: 90 }}
++          aria-label="尾部行数"
++        />
++        <Button
++          size="small"
++          icon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
++          onClick={() => void loadLogs(tailLines)}
++          disabled={logLoading}
++        >
++          刷新
++        </Button>
++        <span className="flex-1" />
++        <Button
++          size="small"
++          icon={<Download className="h-3.5 w-3.5" aria-hidden />}
++          onClick={handleDownloadLog}
++          disabled={!logData || !logData.exists || logData.lines.length === 0}
++        >
++          下载日志片段
++        </Button>
++      </div>
++      {logData?.exists ? (
++        <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md border bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground">
++          <span>
++            路径 <span className="text-foreground">{logData.path}</span>
++          </span>
++          <span>
++            大小 <span className="text-foreground">{formatBytes(logData.size)}</span>
++          </span>
++          <span>
++            最后修改 <span className="text-foreground">{logData.mtime || "—"}</span>
++          </span>
++          <span>
++            展示 <span className="text-foreground">{logData.line_count}</span> 行
++          </span>
++        </div>
++      ) : null}
++      {logData?.truncated ? (
++        <Alert
++          type="info"
++          showIcon
++          message={`日志文件较大，仅展示末尾 256KB 内的 ${logData.line_count} 行（已按字节上限截断）。`}
++          className="mb-2"
++        />
++      ) : null}
++      <Spin spinning={logLoading}>
++        <div
++          ref={logBoxRef}
++          className="max-h-[420px] overflow-auto rounded-md border bg-zinc-950 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-200"
++          aria-label="daemon 日志内容"
++        >
++          {logData?.exists
++            ? logData.lines.map((l, i) => (
++                <div key={i} className="whitespace-pre-wrap break-all">
++                  {l || "\u00A0"}
++                </div>
++              ))
++            : !logLoading && !logError
++              ? "—"
++              : null}
++        </div>
++      </Spin>
++    </div>
++  );
++
++  const configPane = (
++    <div>
++      {cfgError?.kind === "unsupported" ? unsupportedAlert : null}
++      {cfgError?.kind === "error" ? (
++        <Alert
++          type="error"
++          showIcon
++          message="配置拉取失败"
++          description={cfgError.message}
++          className="mb-3"
++        />
++      ) : null}
++      <div className="mb-2 flex flex-wrap items-center gap-2">
++        <Tooltip title="切换明文会向 daemon 重新拉取（reveal=true）；下载内容始终为脱敏 JSON">
++          <Button
++            size="small"
++            icon={
++              revealed ? (
++                <EyeOff className="h-3.5 w-3.5" aria-hidden />
++              ) : (
++                <Eye className="h-3.5 w-3.5" aria-hidden />
++              )
++            }
++            onClick={handleToggleReveal}
++            disabled={cfgLoading || cfgError !== null}
++          >
++            {revealed ? "隐藏明文" : "显示明文"}
++          </Button>
++        </Tooltip>
++        <span className="flex-1" />
++        <Button
++          size="small"
++          icon={<Download className="h-3.5 w-3.5" aria-hidden />}
++          onClick={handleDownloadConfig}
++          disabled={!maskedCfg}
++        >
++          下载配置（始终脱敏）
++        </Button>
++      </div>
++      {displayCfg ? (
++        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
++          <span>
++            配置文件 <span className="font-mono text-foreground">{displayCfg.path}</span>
++          </span>
++          <Tag color="cyan" className="m-0">
++            只读
++          </Tag>
++          {revealed ? (
++            <span className="text-warning">明文展示中——请勿截图外发</span>
++          ) : displayCfg.masked_fields.length > 0 ? (
++            <span>已隐藏字段：{displayCfg.masked_fields.join(" / ")}</span>
++          ) : null}
++        </div>
++      ) : null}
++      <Spin spinning={cfgLoading}>
++        <div
++          className="max-h-[420px] overflow-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed"
++          aria-label="daemon 配置内容"
++        >
++          {displayCfg
++            ? JSON.stringify(displayCfg.config, null, 2)
++                .split("\n")
++                .map((l, i) => {
++                  const isMasked = displayCfg.masked_fields.some((f) => l.includes(`"${f}"`));
++                  return (
++                    <div
++                      key={i}
++                      className={
++                        isMasked
++                          ? "rounded bg-warning/15 px-1 text-amber-700 dark:text-amber-400"
++                          : "whitespace-pre-wrap"
++                      }
++                    >
++                      {l}
++                    </div>
++                  );
++                })
++            : !cfgLoading && !cfgError
++              ? "—"
++              : null}
++        </div>
++      </Spin>
++    </div>
++  );
++
++  return (
++    <Modal
++      title={`daemon 诊断 — ${machineLabel}`}
++      open
++      onCancel={onClose}
++      footer={null}
++      width={880}
++      destroyOnClose
++    >
++      <Tabs
++        activeKey={tab}
++        onChange={(k) => setTab(k as DiagnosticTab)}
++        items={[
++          { key: "logs", label: "日志", children: logsPane },
++          { key: "config", label: "配置", children: configPane },
++        ]}
++      />
++    </Modal>
++  );
++}
+diff --git a/frontend/src/components/daemon/machine-card.tsx b/frontend/src/components/daemon/machine-card.tsx
+index f48e8db54..439da42f5 100644
+--- a/frontend/src/components/daemon/machine-card.tsx
++++ b/frontend/src/components/daemon/machine-card.tsx
+@@ -28,12 +28,14 @@ import {
+   CheckCircle2,
+   ChevronRight,
+   Download,
++  FileText,
+   HardDrive,
+   Hourglass,
+   Pencil,
+   RefreshCw,
+   Server,
+   ServerOff,
++  Settings,
+   Trash2,
+ } from "lucide-react";
+ 
+@@ -105,6 +107,12 @@ export interface MachineCardProps {
+    * 反馈空窗由它兜底，之后 15s 轮询 sillyspec_update running 态接管）。
+    */
+   upgradingSillySpec?: boolean;
++  /**
++   * 打开 daemon 诊断弹窗回调（2026-10-13-daemon-log-config-view task-03 /
++   * FR-01~08）。可选（对齐 onUpgradeSillySpec 先例）：page 注入；缺省时
++   * 「日志」「配置」按钮不渲染，不破坏既有测试构造。
++   */
++  onOpenDiagnostic?: (machine: DaemonMachineRead, tab: "logs" | "config") => void;
+   actioning: boolean;
+   sessions: AgentSessionRead[];
+   onEditAlias: (machine: DaemonMachineRead) => void;
+@@ -144,6 +152,7 @@ export function MachineCard({
+   upgrading,
+   onUpgradeSillySpec,
+   upgradingSillySpec,
++  onOpenDiagnostic,
+   actioning,
+   sessions,
+   onEditAlias,
+@@ -537,6 +546,40 @@ export function MachineCard({
+             清理
+           </button>
+ 
++          {/* 日志/配置诊断入口（2026-10-13-daemon-log-config-view task-03，
++              offline disabled；onOpenDiagnostic 缺省不渲染——page 未接线时不出现
++              无动作按钮，保既有测试构造零改动）。 */}
++          {onOpenDiagnostic ? (
++            <>
++              <button
++                type="button"
++                className={btnOutlineTiny}
++                disabled={isOffline}
++                onClick={(e) => {
++                  e.stopPropagation();
++                  onOpenDiagnostic(machine, "logs");
++                }}
++                title={isOffline ? "离线，无法查看日志" : "查看 daemon.log 尾部（只读）"}
++              >
++                <FileText className="h-3.5 w-3.5" />
++                日志
++              </button>
++              <button
++                type="button"
++                className={btnOutlineTiny}
++                disabled={isOffline}
++                onClick={(e) => {
++                  e.stopPropagation();
++                  onOpenDiagnostic(machine, "config");
++                }}
++                title={isOffline ? "离线，无法查看配置" : "查看生效配置（只读，敏感字段掩码）"}
++              >
++                <Settings className="h-3.5 w-3.5" />
++                配置
++              </button>
++            </>
++          ) : null}
++
+           {/* 删除机器按钮（ql-20260829-006-6a9e，online disabled） */}
+           <button
+             type="button"
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 17d15d309..c0cf2f2e7 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -1910,7 +1910,15 @@ export interface paths {
+             path?: never;
+             cookie?: never;
+         };
+-        /** List Change Files */
++        /**
++         * List Change Files
++         * @description 变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
++         *
++         *     2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
++         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
++         *     任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
++         *     ``service.list_files`` 纯读语义零改动。
++         */
+         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
+         put?: never;
+         post?: never;
+@@ -5316,6 +5324,51 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/daemon/machines/{instance_id}/logs": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Machine Daemon Logs
++         * @description 查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。
++         *
++         *     行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
++         *     文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
++         */
++        get: operations["get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/daemon/machines/{instance_id}/config": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Machine Daemon Config
++         * @description 查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。
++         *
++         *     reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
++         */
++        get: operations["get_machine_daemon_config_api_daemon_machines__instance_id__config_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/daemon/runtimes/{runtime_id}/disable": {
+         parameters: {
+             query?: never;
+@@ -15092,6 +15145,23 @@ export interface components {
+             /** Level */
+             level?: string | null;
+         };
++        /**
++         * DaemonConfigResponse
++         * @description GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。
++         *
++         *     ``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出
++         *     本次被掩码的字段名（reveal=true 时为空）。
++         */
++        DaemonConfigResponse: {
++            /** Path */
++            path: string;
++            /** Config */
++            config: {
++                [key: string]: unknown;
++            };
++            /** Masked Fields */
++            masked_fields: string[];
++        };
+         /**
+          * DaemonHeartbeatPendingUpdate
+          * @description 心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。
+@@ -15446,6 +15516,29 @@ export interface components {
+             /** Providers */
+             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
+         };
++        /**
++         * DaemonLogTailResponse
++         * @description GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。
++         *
++         *     字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，
++         *     前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。
++         */
++        DaemonLogTailResponse: {
++            /** Path */
++            path: string;
++            /** Size */
++            size: number;
++            /** Mtime */
++            mtime: string;
++            /** Exists */
++            exists: boolean;
++            /** Lines */
++            lines: string[];
++            /** Line Count */
++            line_count: number;
++            /** Truncated */
++            truncated: boolean;
++        };
+         /**
+          * DaemonMachineListResponseWithPending
+          * @description GET /machines 响应（items 换 pending_update 扩展视图）。
+@@ -38176,6 +38269,74 @@ export interface operations {
+             };
+         };
+     };
++    get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get: {
++        parameters: {
++            query?: {
++                /** @description 尾部行数 */
++                tail?: number;
++            };
++            header?: never;
++            path: {
++                instance_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DaemonLogTailResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    get_machine_daemon_config_api_daemon_machines__instance_id__config_get: {
++        parameters: {
++            query?: {
++                /** @description true 时返回明文凭据 */
++                reveal?: boolean;
++            };
++            header?: never;
++            path: {
++                instance_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DaemonConfigResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     disable_runtime_api_daemon_runtimes__runtime_id__disable_post: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/daemon/machines.ts b/frontend/src/lib/daemon/machines.ts
+index cf8d36bd5..a1686a835 100644
+--- a/frontend/src/lib/daemon/machines.ts
++++ b/frontend/src/lib/daemon/machines.ts
+@@ -343,3 +343,37 @@ export async function deleteDaemonMachine(instanceId: string): Promise<void> {
+     method: "DELETE",
+   });
+ }
++
++/**
++ * GET /api/daemon/machines/{instance_id}/logs — daemon.log 尾部行（2026-10-13-
++ * daemon-log-config-view task-03，FR-01/02，D-002@v1 拉取式）。行上限 5000 与
++ * daemon 侧字节上限 256KB 先到先截（truncated 标识）；文件不存在（前台运行
++ * 不落盘）由 daemon 结构化返回 exists=false。错误抛 ApiError（504 离线/超时 /
++ * 422 老 daemon 未升级 HTTP_422_DAEMON_DIAG_UNSUPPORTED / 502 其余远端错）。
++ */
++export type DaemonLogTailResponse = components["schemas"]["DaemonLogTailResponse"];
++
++export async function fetchMachineLogTail(
++  instanceId: string,
++  tail = 500,
++): Promise<DaemonLogTailResponse> {
++  return apiFetch<DaemonLogTailResponse>(
++    `/api/daemon/machines/${encodeURIComponent(instanceId)}/logs?tail=${tail}`,
++  );
++}
++
++/**
++ * GET /api/daemon/machines/{instance_id}/config — daemon 生效配置（FR-03/04，
++ * D-001@v2 默认掩码：token/api_key 清单字段）。reveal=true 二次拉取明文
++ * （默认路径不传明文）；masked_fields 列出被掩码字段。错误同 logs 端点。
++ */
++export type DaemonConfigResponse = components["schemas"]["DaemonConfigResponse"];
++
++export async function fetchMachineConfig(
++  instanceId: string,
++  reveal = false,
++): Promise<DaemonConfigResponse> {
++  return apiFetch<DaemonConfigResponse>(
++    `/api/daemon/machines/${encodeURIComponent(instanceId)}/config?reveal=${reveal}`,
++  );
++}
+diff --git a/sillyhub-daemon/src/daemon.ts b/sillyhub-daemon/src/daemon.ts
+index 4a9f8ee7a..a6e451a89 100644
+--- a/sillyhub-daemon/src/daemon.ts
++++ b/sillyhub-daemon/src/daemon.ts
+@@ -43,7 +43,9 @@ import { mkdir, stat, readFile, writeFile, rename, unlink, chmod, readdir, rm }
+ 
+ import { join, dirname } from 'node:path';
+ import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+-import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, daemonStateDir, normalizeAllowedRoots, readOrCreateMachineId } from './config.js';
++import { type DaemonConfig, DEFAULT_CONFIG_DIR, configPathForServer, daemonBinDir, daemonStateDir, normalizeAllowedRoots, readOrCreateMachineId } from './config.js';
++// 2026-10-13-daemon-log-config-view task-01：诊断只读 RPC 纯逻辑（日志尾部读 + 配置脱敏）。
++import { LOG_TAIL_DEFAULT_LINES, getMaskedConfig, readLogTail } from './diag-rpc.js';
+ // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
+ // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
+ import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
+@@ -6641,6 +6643,9 @@ export class Daemon {
+     // backend complete_lease 收尾（apply_patch/post_scan/stage_callback）经 HostFsDelegate +
+     // ws_rpc 调本 handler 在宿主执行（FR-02）。方法名带 host_fs. 前缀与 design §7 method 字段对齐。
+     this._registerHostFsRpcHandler(ws);
++    // task-01（2026-10-13-daemon-log-config-view）：注册 daemon 诊断只读 RPC——
++    // backend machines/{id}/logs|config 端点经 ws_hub.send_rpc 调用（design §Phase 1）。
++    this._registerDiagRpcHandler(ws);
+     // task-03（2026-08-18-workspace-file-browser）：注册 explorer_* 三方法只读浏览
+     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
+     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
+@@ -6770,6 +6775,36 @@ export class Daemon {
+     });
+   }
+ 
++  /**
++   * 2026-10-13-daemon-log-config-view task-01：注册 daemon 诊断只读 RPC。
++   *
++   * - daemon_log_tail({ tail_lines? })：daemon.log 尾部 N 行（行/字节双上限，
++   *   纯逻辑见 diag-rpc.ts readLogTail）。日志路径与写入方 cli.ts getLogFile()
++   *   同源（DEFAULT_CONFIG_DIR + 'daemon.log'，config.ts 模块常量）——不 import
++   *   cli.ts（其顶层 void main() 无入口守卫，import 会触发 CLI 执行）。
++   * - daemon_config_get({ reveal? })：当前生效配置（this._config，含 CLI 覆盖）
++   *   脱敏返回（D-001@v2）；reveal=true 才返回明文（默认路径不传明文）。
++   * 正常路径全部结构化返回（exists:false / 掩码），不抛 RpcError。
++   */
++  private _registerDiagRpcHandler(ws: WsClientLike): void {
++    if (typeof ws.registerRpcHandler !== 'function') {
++      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
++      return;
++    }
++    ws.registerRpcHandler('daemon_log_tail', async (params) => {
++      const tailLines =
++        typeof params.tail_lines === 'number' ? params.tail_lines : LOG_TAIL_DEFAULT_LINES;
++      return readLogTail(join(DEFAULT_CONFIG_DIR, 'daemon.log'), tailLines);
++    });
++    ws.registerRpcHandler('daemon_config_get', async (params) => {
++      const reveal = params.reveal === true;
++      return {
++        path: configPathForServer(this._config.server_url),
++        ...getMaskedConfig(this._config as unknown as Record<string, unknown>, { reveal }),
++      };
++    });
++  }
++
+   private _registerListDirRpcHandler(ws: WsClientLike): void {
+     if (typeof ws.registerRpcHandler !== 'function') {
+       this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+diff --git a/sillyhub-daemon/src/diag-rpc.ts b/sillyhub-daemon/src/diag-rpc.ts
+new file mode 100644
+index 000000000..85e617295
+--- /dev/null
++++ b/sillyhub-daemon/src/diag-rpc.ts
+@@ -0,0 +1,170 @@
++/**
++ * diag-rpc.ts — daemon 诊断 RPC 纯逻辑（2026-10-13-daemon-log-config-view）。
++ *
++ * 两个只读诊断能力，供 daemon.ts 注册 WS RPC handler（daemon_log_tail /
++ * daemon_config_get），backend 转发端点调用（design §Phase 1 / 接口定义）：
++ *
++ * - readLogTail(filePath, tailLines)：daemon.log 尾部 N 行——64KB 块从文件末尾
++ *   向前扫描换行符，行上限（clamp 1..5000，默认 500）与尾部字节上限 262144B
++ *   （256KB，与 backend agent-logs 先例同值，D-002@v1 故障面）先到先截；
++ *   窗口起点不在文件头时丢弃不完整首行（同时天然修剪被切断的 UTF-8 多字节
++ *   序列），行数因此不足请求时 truncated=true。
++ * - getMaskedConfig(config, { reveal })：生效配置脱敏（D-001@v2）——清单仅
++ *   token/api_key（新增凭据字段时须同步维护 SENSITIVE_CONFIG_FIELDS）；
++ *   公式 len<16 → '***'，len≥16 → 前4位+'***'+后4位；reveal=true 返回明文。
++ *
++ * 零第三方依赖（仅 node:fs/promises / node:path）；正常路径不抛 RpcError
++ * （文件不存在等全部结构化返回，由前端渲染边界态提示条）。
++ */
++
++import { open, stat } from 'node:fs/promises';
++
++/** daemon_log_tail 默认/上限行数（design 接口定义）。 */
++export const LOG_TAIL_DEFAULT_LINES = 500;
++export const LOG_TAIL_MAX_LINES = 5000;
++
++/** 尾部读取字节上限（262144B = 256KB，先例 platform_sync/router.py 同值）。 */
++export const LOG_TAIL_MAX_BYTES = 262_144;
++
++/** 单次向前读取的块大小。 */
++const READ_CHUNK_BYTES = 64 * 1024;
++
++/**
++ * 敏感配置字段清单（D-001@v2 明文枚举）。
++ * ⚠️ DaemonConfig 新增凭据类字段时必须同步维护本清单（漏加 = 明文泄露）。
++ */
++export const SENSITIVE_CONFIG_FIELDS: readonly string[] = ['token', 'api_key'];
++
++export interface LogTailResult {
++  path: string;
++  size: number;
++  mtime: string;
++  exists: boolean;
++  lines: string[];
++  line_count: number;
++  truncated: boolean;
++}
++
++export interface MaskedConfigResult {
++  config: Record<string, unknown>;
++  masked_fields: string[];
++}
++
++/** 单值掩码（D-001@v2）：len<16 全掩；len≥16 前4位+'***'+后4位。 */
++export function maskValue(value: string): string {
++  if (value.length < 16) return '***';
++  return `${value.slice(0, 4)}***${value.slice(-4)}`;
++}
++
++/**
++ * 读日志文件尾部 N 行（行/字节双上限先到先截）。
++ *
++ * 文件不存在返回 exists:false 且全部字段兜底（size:0 / mtime:'' / lines:[] /
++ * line_count:0 / truncated:false），不抛错——前台 TTY 运行不落盘 daemon.log 是
++ * 已知场景，由前端提示。
++ */
++export async function readLogTail(filePath: string, tailLines: number): Promise<LogTailResult> {
++  // clamp 1..5000：非数/0/负数 → 默认 500；超上限 → 5000。
++  let n = Math.floor(Number(tailLines));
++  if (!Number.isFinite(n) || n <= 0) n = LOG_TAIL_DEFAULT_LINES;
++  if (n > LOG_TAIL_MAX_LINES) n = LOG_TAIL_MAX_LINES;
++
++  let stats;
++  try {
++    stats = await stat(filePath);
++  } catch {
++    return {
++      path: filePath,
++      size: 0,
++      mtime: '',
++      exists: false,
++      lines: [],
++      line_count: 0,
++      truncated: false,
++    };
++  }
++  if (!stats.isFile()) {
++    return {
++      path: filePath,
++      size: 0,
++      mtime: '',
++      exists: false,
++      lines: [],
++      line_count: 0,
++      truncated: false,
++    };
++  }
++
++  const size = stats.size;
++  const mtime = stats.mtime.toISOString();
++  const base = { path: filePath, size, mtime, exists: true };
++
++  if (size === 0) {
++    return { ...base, lines: [], line_count: 0, truncated: false };
++  }
++
++  const fh = await open(filePath, 'r');
++  try {
++    const chunks: Buffer[] = [];
++    let position = size;
++    let bytesCollected = 0;
++    let newlineCount = 0;
++    // 向前逐块读：行数够（newlineCount > n，即窗口内已有超过 n 个行尾）/
++    // 字节到上限 / 到文件头，三者先到即停。
++    while (position > 0 && newlineCount <= n && bytesCollected < LOG_TAIL_MAX_BYTES) {
++      const readSize = Math.min(READ_CHUNK_BYTES, position, LOG_TAIL_MAX_BYTES - bytesCollected);
++      position -= readSize;
++      const buf = Buffer.alloc(readSize);
++      await fh.read(buf, 0, readSize, position);
++      chunks.unshift(buf);
++      bytesCollected += readSize;
++      for (let i = 0; i < readSize; i++) {
++        if (buf[i] === 0x0a) newlineCount++;
++      }
++    }
++
++    const atFileHead = position === 0;
++    let text = Buffer.concat(chunks).toString('utf8');
++    if (!atFileHead) {
++      // 窗口首行不完整（读取起点落在行中间）：丢弃到第一个换行符之后——
++      // 同时天然消除被切断的 UTF-8 多字节序列（后续行均完整）。
++      const firstNl = text.indexOf('\n');
++      text = firstNl >= 0 ? text.slice(firstNl + 1) : '';
++    }
++    let lines = text.length > 0 ? text.split('\n') : [];
++    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
++    // Windows 行尾稳健性：剥离行尾 \r（daemon 写日志用 \n，但 tee 场景不排除 \r\n）。
++    lines = lines.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
++
++    const truncated = !atFileHead && lines.length < n;
++    if (lines.length > n) lines = lines.slice(lines.length - n);
++    return { ...base, lines, line_count: lines.length, truncated };
++  } finally {
++    await fh.close();
++  }
++}
++
++/**
++ * 生效配置脱敏（D-001@v2）：清单字段掩码、其余原样；reveal=true 整体明文。
++ *
++ * 值为空串/缺失的清单字段不掩、不列入 masked_fields（空值无泄露面）。
++ * 不修改传入对象（浅拷贝）。
++ */
++export function getMaskedConfig(
++  config: Record<string, unknown>,
++  opts: { reveal: boolean },
++): MaskedConfigResult {
++  if (opts.reveal) {
++    return { config: { ...config }, masked_fields: [] };
++  }
++  const masked: Record<string, unknown> = { ...config };
++  const maskedFields: string[] = [];
++  for (const key of SENSITIVE_CONFIG_FIELDS) {
++    const v = masked[key];
++    if (typeof v === 'string' && v.length > 0) {
++      masked[key] = maskValue(v);
++      maskedFields.push(key);
++    }
++  }
++  return { config: masked, masked_fields: maskedFields };
++}
+diff --git a/sillyhub-daemon/tests/diag-rpc.test.ts b/sillyhub-daemon/tests/diag-rpc.test.ts
+new file mode 100644
+index 000000000..e48964820
+--- /dev/null
++++ b/sillyhub-daemon/tests/diag-rpc.test.ts
+@@ -0,0 +1,175 @@
++/**
++ * diag-rpc.test.ts — daemon 诊断 RPC 纯逻辑单元测试。
++ *
++ * 覆盖（design 接口定义 + D-001@v2 / D-002@v1）：
++ * - readLogTail：尾部行正确性 / 行数超文件行数 / 空文件 / 文件不存在五字段兜底 /
++ *   字节上限 262144B 截断 truncated / UTF-8 中文边界（无残缺字符）/ 参数 clamp 1..5000
++ * - getMaskedConfig：掩码公式 len<16 全掩 / len≥16 前4***后4 / 空串与缺失原样 /
++ *   字段清单仅 token+api_key / reveal 明文与 masked_fields
++ */
++
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { join } from 'node:path';
++import { tmpdir } from 'node:os';
++import { afterEach, beforeEach, describe, expect, it } from 'vitest';
++import { getMaskedConfig, readLogTail, SENSITIVE_CONFIG_FIELDS } from '../src/diag-rpc.js';
++
++let tmpDir: string;
++
++beforeEach(async () => {
++  tmpDir = await mkdtemp(join(tmpdir(), 'diag-rpc-test-'));
++});
++
++afterEach(async () => {
++  await rm(tmpDir, { recursive: true, force: true });
++});
++
++describe('readLogTail', () => {
++  it('返回尾部 N 行（100 行文件取 10 行）', async () => {
++    const lines = Array.from({ length: 100 }, (_, i) => `line-${String(i).padStart(3, '0')}`);
++    const file = join(tmpDir, 'a.log');
++    await writeFile(file, lines.join('\n') + '\n', 'utf8');
++    const r = await readLogTail(file, 10);
++    expect(r.exists).toBe(true);
++    expect(r.path).toBe(file);
++    expect(r.line_count).toBe(10);
++    expect(r.truncated).toBe(false);
++    expect(r.lines[0]).toBe('line-090');
++    expect(r.lines[9]).toBe('line-099');
++    expect(r.size).toBeGreaterThan(0);
++    expect(r.mtime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
++  });
++
++  it('请求行数超过文件行数时返回全部且不标记截断', async () => {
++    const file = join(tmpDir, 'b.log');
++    await writeFile(file, 'l1\nl2\nl3\n', 'utf8');
++    const r = await readLogTail(file, 10);
++    expect(r.lines).toEqual(['l1', 'l2', 'l3']);
++    expect(r.line_count).toBe(3);
++    expect(r.truncated).toBe(false);
++  });
++
++  it('空文件返回 exists=true 且零行', async () => {
++    const file = join(tmpDir, 'empty.log');
++    await writeFile(file, '', 'utf8');
++    const r = await readLogTail(file, 100);
++    expect(r.exists).toBe(true);
++    expect(r.lines).toEqual([]);
++    expect(r.line_count).toBe(0);
++    expect(r.truncated).toBe(false);
++  });
++
++  it('文件不存在时五字段兜底（exists:false / size:0 / mtime:"" / lines:[] / truncated:false）', async () => {
++    const r = await readLogTail(join(tmpDir, 'nope.log'), 100);
++    expect(r).toEqual({
++      path: join(tmpDir, 'nope.log'),
++      size: 0,
++      mtime: '',
++      exists: false,
++      lines: [],
++      line_count: 0,
++      truncated: false,
++    });
++  });
++
++  it('超过字节上限 262144B 时截断并标记 truncated（行内容与文件尾部一致）', async () => {
++    // 每行 1001 字节（1000 字符 + \n）× 300 行 = 300300B > 262144B。
++    const row = 'x'.repeat(1000);
++    const lines = Array.from({ length: 300 }, (_, i) => `${row}-${i}`);
++    const file = join(tmpDir, 'big.log');
++    await writeFile(file, lines.join('\n') + '\n', 'utf8');
++    const r = await readLogTail(file, 5000);
++    expect(r.truncated).toBe(true);
++    expect(r.line_count).toBeGreaterThan(250);
++    expect(r.line_count).toBeLessThan(300);
++    expect(r.lines[r.lines.length - 1]).toBe(lines[299]);
++    // 每个返回行都应是完整行（1000 字符本体 + "-N" 后缀，长度随行号位数 1002..1004）
++    for (const l of r.lines) expect(l.startsWith(`${row}-`)).toBe(true);
++  });
++
++  it('字节上限触发且窗口起点切在多字节 UTF-8 序列中间时，返回行无残缺字符（无 �）', async () => {
++    // 每行约 60 字节（中文）× 6000 行 ≈ 360KB，超过 256KB 上限；
++    // 窗口起点大概率落在某中文字符的 UTF-8 多字节序列中间——丢弃不完整首行后应无乱码。
++    const cn = '日志中文行内容补齐到大约六十字节左右用于跨越字节上限边界测试场景';
++    const lines = Array.from({ length: 6000 }, (_, i) => `${cn}-${i}`);
++    const file = join(tmpDir, 'cn.log');
++    await writeFile(file, lines.join('\n') + '\n', 'utf8');
++    const r = await readLogTail(file, 5000);
++    expect(r.truncated).toBe(true);
++    expect(r.line_count).toBeGreaterThan(0);
++    for (const l of r.lines) {
++      expect(l).not.toContain('\uFFFD');
++      expect(l.startsWith(cn)).toBe(true);
++    }
++    expect(r.lines[r.lines.length - 1]).toBe(lines[5999]);
++  });
++
++  it('参数 clamp：0 / 负数 / NaN 取默认 500，超过 5000 收敛到 5000', async () => {
++    const lines = Array.from({ length: 8000 }, (_, i) => `n${i}`);
++    const file = join(tmpDir, 'clamp.log');
++    await writeFile(file, lines.join('\n') + '\n', 'utf8');
++    for (const bad of [0, -5, Number.NaN]) {
++      const r = await readLogTail(file, bad);
++      expect(r.line_count).toBe(500);
++    }
++    const r2 = await readLogTail(file, 50000);
++    expect(r2.line_count).toBe(5000);
++    expect(r2.lines[0]).toBe('n3000');
++  });
++
++  it('文件尾部无换行符时最后一行仍完整返回', async () => {
++    const file = join(tmpDir, 'nonl.log');
++    await writeFile(file, 'a\nb\nc', 'utf8'); // 尾行 c 无 \n
++    const r = await readLogTail(file, 2);
++    expect(r.lines).toEqual(['b', 'c']);
++  });
++});
++
++describe('getMaskedConfig', () => {
++  const base = {
++    server_url: 'https://hub.example.com',
++    token: 'sk-live-abcdefgh', // 16 位
++    api_key: 'sh-0123456789abcdef012345', // 24 位
++    short8: '12345678',
++    short15: '123456789012345',
++    empty: '',
++    poll_interval: 30,
++  };
++
++  it('掩码公式：len<16 全掩为 ***，len≥16 前4+***+后4（D-001@v2）', () => {
++    expect(getMaskedConfig({ token: '12345678' }, { reveal: false }).config.token).toBe('***');
++    expect(getMaskedConfig({ token: '123456789' }, { reveal: false }).config.token).toBe('***');
++    expect(getMaskedConfig({ token: '123456789012345' }, { reveal: false }).config.token).toBe(
++      '***',
++    );
++    expect(getMaskedConfig({ token: 'sk-live-abcdefgh' }, { reveal: false }).config.token).toBe(
++      'sk-l***efgh',
++    );
++    expect(
++      getMaskedConfig({ api_key: 'sh-0123456789abcdef012345' }, { reveal: false }).config.api_key,
++    ).toBe('sh-0***2345');
++  });
++
++  it('字段清单仅掩 token/api_key，其余字段原样（空串/数字/非清单字段不动）', () => {
++    const r = getMaskedConfig(base, { reveal: false });
++    expect(SENSITIVE_CONFIG_FIELDS).toEqual(['token', 'api_key']);
++    expect(r.config.token).toBe('sk-l***efgh');
++    expect(r.config.server_url).toBe(base.server_url);
++    expect(r.config.empty).toBe('');
++    expect(r.config.poll_interval).toBe(30);
++    expect(r.config.short8).toBe('12345678'); // 非清单字段不掩
++    expect(r.config.short15).toBe('123456789012345');
++  });
++
++  it('masked_fields 列出实际被掩码的字段；空串的清单字段不列入且值原样', () => {
++    const r = getMaskedConfig({ ...base, api_key: '' }, { reveal: false });
++    expect(r.masked_fields).toEqual(['token']);
++    expect(r.config.api_key).toBe('');
++  });
++
++  it('reveal=true 返回明文且 masked_fields 为空', () => {
++    const r = getMaskedConfig(base, { reveal: true });
++    expect(r.config).toEqual(base);
++    expect(r.masked_fields).toEqual([]);
++  });
++});

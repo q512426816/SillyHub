@@ -1910,7 +1910,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Change Files */
+        /**
+         * List Change Files
+         * @description 变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
+         *
+         *     2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
+         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+         *     任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
+         *     ``service.list_files`` 纯读语义零改动。
+         */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
         put?: never;
         post?: never;
@@ -5310,6 +5318,51 @@ export interface paths {
          *     未知仓/非法枚举由编排层跳过并 log（daemon 半可信端）；返回写入条数。
          */
         post: operations["report_linked_repos_sync_result_api_daemon_machines__instance_id__linked_repos_sync_result_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Machine Daemon Logs
+         * @description 查看目标机器 daemon.log 尾部行（FR-01/02，D-002@v1 拉取式）。
+         *
+         *     行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
+         *     文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
+         */
+        get: operations["get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/machines/{instance_id}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Machine Daemon Config
+         * @description 查看目标机器 daemon 生效配置（FR-03/04，D-001@v2 默认掩码）。
+         *
+         *     reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
+         */
+        get: operations["get_machine_daemon_config_api_daemon_machines__instance_id__config_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15093,6 +15146,23 @@ export interface components {
             level?: string | null;
         };
         /**
+         * DaemonConfigResponse
+         * @description GET /machines/{instance_id}/config 响应——daemon_config_get result 透传。
+         *
+         *     ``config`` 为脱敏后的生效配置（reveal=false 默认）；``masked_fields`` 列出
+         *     本次被掩码的字段名（reveal=true 时为空）。
+         */
+        DaemonConfigResponse: {
+            /** Path */
+            path: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Masked Fields */
+            masked_fields: string[];
+        };
+        /**
          * DaemonHeartbeatPendingUpdate
          * @description 心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。
          *
@@ -15445,6 +15515,29 @@ export interface components {
             build_id?: string | null;
             /** Providers */
             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
+        };
+        /**
+         * DaemonLogTailResponse
+         * @description GET /machines/{instance_id}/logs 响应——daemon_log_tail result 透传。
+         *
+         *     字段与 daemon 侧 diag-rpc.ts readLogTail 返回键逐字一致（snake_case 原样，
+         *     前端 apiFetch 不做 camel 转换）；``truncated`` 表示因字节上限截断。
+         */
+        DaemonLogTailResponse: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+            /** Exists */
+            exists: boolean;
+            /** Lines */
+            lines: string[];
+            /** Line Count */
+            line_count: number;
+            /** Truncated */
+            truncated: boolean;
         };
         /**
          * DaemonMachineListResponseWithPending
@@ -38163,6 +38256,74 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_machine_daemon_logs_api_daemon_machines__instance_id__logs_get: {
+        parameters: {
+            query?: {
+                /** @description 尾部行数 */
+                tail?: number;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonLogTailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_machine_daemon_config_api_daemon_machines__instance_id__config_get: {
+        parameters: {
+            query?: {
+                /** @description true 时返回明文凭据 */
+                reveal?: boolean;
+            };
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonConfigResponse"];
                 };
             };
             /** @description Validation Error */

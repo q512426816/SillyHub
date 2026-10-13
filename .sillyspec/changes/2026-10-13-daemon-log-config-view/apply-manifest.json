@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-daemon-log-config-view",
+  "appliedAt": "2026-10-13T12:22:25.883Z",
+  "baseHash": "f77fd9e055b5e3fd8cef6e91702a3208d563e711",
+  "files": [
+    {
+      "path": "backend/app/modules/daemon/router/__init__.py",
+      "sha256": "46958e9762a1271cf818cb4e9dfe0bcbc4583a5b7ef1c1434ffd07510daa6b69"
+    },
+    {
+      "path": "backend/app/modules/daemon/router/machines.py",
+      "sha256": "5c0e775d5f92352679f30ba9775e704bb4b003f982e1df918ecb58533be59d36"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "645b3ba7d397e691eeb2de6fe93121a4977cdeb8f031649c8cb5484e499f2f37"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "46c0ac5650ffb28b0b1a6d1bc6487a5a9ed9582e01e71e9cbd55dcfcadaa29e4"
+    },
+    {
+      "path": "backend/tests/modules/daemon/test_daemon_machine_diag.py",
+      "sha256": "eeacc16ad4ffb24078b528343b3748479c33634ec7ef06297abdcb91fc34718b"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/runtimes/page.tsx",
+      "sha256": "21087a591c07b60ae6d6c1d9ac2db5b81df727f6b9ba30835b98b78a4be982ba"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+      "sha256": "642acc408dab034ca549d26db7bbedd6a357a4c2d9a2c2f9c142a5ec896fd063"
+    },
+    {
+      "path": "frontend/src/components/daemon/daemon-diagnostic-dialog.tsx",
+      "sha256": "f6aefb2216b7a003d392809155c6aa8ebbce8f08e822a6db51c9a10d02d87776"
+    },
+    {
+      "path": "frontend/src/components/daemon/machine-card.tsx",
+      "sha256": "9ffd77e995236ff2eba5e211205be33e9b531df1444a04ced07a080d3f67de7b"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "35be355fd462852f76291e3ea3ac155c3e5a0c3fd5332f55093baf389cb5c4c1"
+    },
+    {
+      "path": "frontend/src/lib/daemon/machines.ts",
+      "sha256": "1fb9ea88c9aec74758e415a8612c6fb1682dba653e3d1cb1dd1b97af6b3de947"
+    },
+    {
+      "path": "sillyhub-daemon/src/daemon.ts",
+      "sha256": "2a619e7bdf5b7237fd586e1a54edf40f43848b56dfa19b74e8636e79c1e18cd2"
+    },
+    {
+      "path": "sillyhub-daemon/src/diag-rpc.ts",
+      "sha256": "f3dc7e920aea1ea9d74b767905547eb8004ae316ea859ed2328a1b297f468bb7"
+    },
+    {
+      "path": "sillyhub-daemon/tests/diag-rpc.test.ts",
+      "sha256": "45cd408f74f8786ffe83d6c4220a729680e94a144dbab6e597413f788cb0e9f3"
+    }
+  ]
+}

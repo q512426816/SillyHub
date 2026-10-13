@@ -343,3 +343,37 @@ export async function deleteDaemonMachine(instanceId: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+/**
+ * GET /api/daemon/machines/{instance_id}/logs — daemon.log 尾部行（2026-10-13-
+ * daemon-log-config-view task-03，FR-01/02，D-002@v1 拉取式）。行上限 5000 与
+ * daemon 侧字节上限 256KB 先到先截（truncated 标识）；文件不存在（前台运行
+ * 不落盘）由 daemon 结构化返回 exists=false。错误抛 ApiError（504 离线/超时 /
+ * 422 老 daemon 未升级 HTTP_422_DAEMON_DIAG_UNSUPPORTED / 502 其余远端错）。
+ */
+export type DaemonLogTailResponse = components["schemas"]["DaemonLogTailResponse"];
+
+export async function fetchMachineLogTail(
+  instanceId: string,
+  tail = 500,
+): Promise<DaemonLogTailResponse> {
+  return apiFetch<DaemonLogTailResponse>(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/logs?tail=${tail}`,
+  );
+}
+
+/**
+ * GET /api/daemon/machines/{instance_id}/config — daemon 生效配置（FR-03/04，
+ * D-001@v2 默认掩码：token/api_key 清单字段）。reveal=true 二次拉取明文
+ * （默认路径不传明文）；masked_fields 列出被掩码字段。错误同 logs 端点。
+ */
+export type DaemonConfigResponse = components["schemas"]["DaemonConfigResponse"];
+
+export async function fetchMachineConfig(
+  instanceId: string,
+  reveal = false,
+): Promise<DaemonConfigResponse> {
+  return apiFetch<DaemonConfigResponse>(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/config?reveal=${reveal}`,
+  );
+}
