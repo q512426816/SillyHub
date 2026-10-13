@@ -1,7 +1,7 @@
 # thin flow done 空冻结面分支不做 design 声明面自证（声明了交付文件却空面归档零告警）
 
 > 记录时间：2026-10-13 · 来源变更：2026-10-12-fire-ledger-form-strict（生产实证：平台工作区「消防设施器材」4e9eb05b，会话 47e2ff1a）
-> 状态：活跃坑（CLI 3.32.7 实证，待工具修复）
+> 状态：已处理（sillyspec 仓两变更修复归档：**2026-10-13-thin-empty-face-crosscheck**——期望修复 0/1/2 全落实〔flow start 横幅注册仓非空出跨仓清单写法行；空面+声明清单未标注条目阻断三处置一次给全+`--accept-empty-face` 签收留痕 flow-state 持久化；planEntries 解析与防呆告警前移到 ownFiles 判空前+嫌疑判定放宽为主仓不存在即点名〕，另加纯跨仓规范标注空面 advisory；**2026-10-13-h2-repo-heading-parse**——`## <注册key> 仓变更` h2 段头在 thin 收口对账解析器可解析〔此前该形态被节扫描截断解析为空，恰是本坑裸前缀写法的诱因之一〕，REPO_SECTION_HEADER_RE 单一源上移 change-list 导出、与 brainstorm 模板/plan-postcheck 覆盖对账/design-facts 核验四处消费对齐。期望修复 3（共享主仓窗口外同名文件探测）未做——会话专属 worktree 已有 scanOrphanFace 覆盖，共享主仓面留待实证需求再立项）
 
 ## 现象
 
@@ -83,6 +83,8 @@ scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
 
 ## 绕过
 
+**（已处理后备忘）新变更不再需要手工规避**：空冻结面+声明清单未标注条目会在 flow done patch 子步被点名阻断并一次给全三处置（主仓提交/跨仓规范标注/`--accept-empty-face` 签收）；`## <注册key> 仓变更` 段头写法已可被 thin 收口对账解析（h2 段头+`### <key>` 子段+`cross-repo:` 前缀三形态均识别），跨仓对账与 repos[] patch 冻结正常触发。历史规避手段留档：
+
 - 新变更预防：design 文件变更清单里跨仓文件必须写规范标注（推荐段头
   「## sub-grid-security 仓变更」段内写仓根相对路径），flow done 才会对
   跨仓做对账并冻 repos[] patch——本工作区所有代码都在跨仓，这是常态动作
@@ -90,9 +92,11 @@ scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
 - 已归档存量：手工把 change.patch / change-patch.json 补进归档目录（平台
   assets 读侧会认），或从跨仓提交（git show d09478ec + b47d5b36）取 diff
   自制；不补也不影响变更已完成的事实，但平台资产卡 patch/模块/测试面
-  持续为空。
+  持续为空。存量归档件按冻结原则不回填。
 
 ## 期望修复
+
+（已处理注记：0/1/2 已由状态行所列 sillyspec 变更落实〔实现形态比建议更强——空面门直接阻断+签收通道，非 advisory〕；3 未做留档；原文照存供历史检索。）
 
 0. **thin 通道指引缺失（2026-10-13 复核补充）**：跨仓段头契约的指引目前
    只存在于**厚流程**——brainstorm design 模板「跨仓变更写法」必读段
