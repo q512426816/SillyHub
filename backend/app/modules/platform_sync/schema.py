@@ -519,6 +519,13 @@ class AgentLogMessageItem(BaseModel):
     tool_input: str | None = Field(default=None, description="工具入参摘要（JSON 串，首 2KB 截断）")
     tool_result: str | None = Field(default=None, description="工具结果摘要（首 4KB 截断）")
     is_error: bool | None = Field(default=None, description="tool_result 专用：是否报错")
+    # ── 2026-10-13-editpatch-fullchain：structuredPatch JSON 串透传（daemon
+    # claude-code 解析器附着 tool_result 段；extra=ignore 下不声明即被剥离，
+    # 必须显式声明才能到达前端）。老 daemon / 无 patch 缺省 None。──
+    edit_patch: str | None = Field(
+        default=None,
+        description="tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）",
+    )
     ts: str | None = Field(default=None, description="所属行 completedAt 原文")
     # ── 2026-09-19-tool-report-session-replay task-08（FR-03 / D-004@v1）：token/
     # 轮次可选字段，逐字对齐 daemon task-01 契约扩展——老 daemon / 无数据源不

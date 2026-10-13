@@ -12474,6 +12474,11 @@ export interface components {
              */
             is_error?: boolean | null;
             /**
+             * Edit Patch
+             * @description tool_result 专用：structuredPatch JSON 串（hunks 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）
+             */
+            edit_patch?: string | null;
+            /**
              * Ts
              * @description 所属行 completedAt 原文
              */
