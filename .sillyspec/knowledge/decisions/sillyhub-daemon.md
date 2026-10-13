@@ -279,3 +279,21 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 锚点：未记录
 最近确认：76ea8a958
 理由：daemon handler 内模块级 Map<workspaceId:change, 时间戳>：15s 内已同步过返回 {skipped:'debounced'} 秒回；同 key 在跑返回 {skipped:'in_flight'}。单机内存态不落盘——daemon 重启清零属可接受（首次刷新重新同步一次）。
+
+## D-002@v1 日志采用拉取尾部+手动刷新（非实时流）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户选「拉取尾部+手动刷新」：点开查看最近 N 行（默认可调），带刷新按钮；不做 WebSocket 实时滚动
+故障面：大日志文件全量读取导致 RPC 超时——须在 daemon 侧或 backend 侧限制返回尾部字节上限
+退役判据：未来出现「盯日志实时排障」高频诉求时，再评估升级为 WS 实时流（可基于现有 daemon:ws 通道扩展）
+
+## D-004@v1 采用方案 B——daemon 专用诊断 RPC（log_tail + config_get）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户选方案 B：daemon 注册 daemon_log_tail 与 daemon_config_get 两个 RPC handler（路径由 daemon 侧 getLogFile()/loadConfig 权威解析，尾部截断与脱敏在源头做），backend 新增转发端点（复制 daemon_rpc.py 先例），前端 /runtimes 机器卡加入口。理由：路径权威（SILLYHUB_DAEMON_DIR 重定向不影响）、大文件不全量传、脱敏贴近数据源
+故障面：老 daemon（未升级）无这两个 RPC → method_not_found；需在 backend 映射 422 + 前端升级提示
+退役判据：若未来 host_fs RPC 支持按约定 key 寻址 + tail 参数，可考虑合并回通用文件读通道

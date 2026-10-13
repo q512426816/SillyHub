@@ -2778,3 +2778,47 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：4bf6f9b6567a716137312a8d9eb665091f5d637d
 理由：最大风险：大仓上每轮 git add -A 的 IO 成本——mitigated by 复制现场 index（stat 缓存命中）+ tree sha 去重（零变化轮零落盘）；廉价门（本轮工具事件触过文件才打锚，评审 Gap4）留作后续切片，当前以去重+缓存先扛。次风险：首轮 diff 退 HEAD 树会漏掉"轮内已 commit"的归因（内容变化仍在 tree-to-tree 链上，仅首轮 files 口径偏小）——最小闭环已知边界，记档不扩。既有测试影响：onResult 接线在既有 session-manager 测试中对假 cwd（C:\work 等不存在路径）静默 null，实测 tests/interactive/ 1115 用例两轮全绿（首跑 1 例 pi-rpc 60ms 握手抖动，复跑+单跑均绿，与本改动无关）。 放弃的方案：①`git stash create` 打锚——不含 untracked（评审 Gap1 定性为雷，直接否决）；②每轮 commit 到 side ref——写引用有状态、并发清理复杂，write-tree 无引用纯内容寻址更干净；③`git status --porcelain` 轮询比对——无行级统计且 rename/untracked 口径碎；④锚存 DB（backend 落库）——本切片刻意 daemon-local（零 API 面），DB 化留给下一切片连同前端展示一起做。
+
+## D-001@v2 掩码公式收紧（len<16 全掩）与敏感字段清单明文枚举
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：公式收紧为 len<16 整值掩为 '***'、len≥16 前4+'***'+后4；字段清单明文枚举 SENSITIVE_CONFIG_FIELDS=['token','api_key']（DaemonConfig 实测凭据类字段仅此两项，config.ts:256-444 范围核对），新增凭据字段须同步维护
+supersedes：D-001@v1
+故障面：未来 DaemonConfig 新增凭据字段而漏加清单 → 明文泄露；靠「新增凭据字段时同步清单」评审纪律 + 清单常量注释兜底
+退役判据：若 daemon 配置引入统一的凭据字段声明机制（如 schema 标注），可改为声明驱动
+
+## D-005@v1 方案 A（零 daemon 改动，backend 拼 allowed_roots 路径 + host_fs.read_file）被否决
+状态：rejected
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：否决。两个硬伤：① backend 拼不出 daemon 机器上 ~/.sillyhub/daemon/daemon.log 的绝对路径——host_fs.read_file 需绝对路径（sillyhub-daemon/src/host-fs-handler.ts:871 pathResolve），backend 不知道 daemon 侧 home 目录，且 SILLYHUB_DAEMON_DIR 环境变量可整体重定向状态目录（sillyhub-daemon/src/config.ts:57-62），重定向后 backend 拼的路径静默失效；② read_file 为全量读取（readFile utf8 无 tail 参数），daemon.log 无轮转纯追加，大文件全量传输有 RPC 超时/内存风险；③ 脱敏逻辑放 backend 会与 daemon 配置结构演进脱钩
+否决理由：路径不可靠（重定向即失效）+ 全量读大文件超时风险 + 脱敏逻辑远离数据源易漂移
+复潮条件：host_fs RPC 若支持 ~ 约定寻址 + tail 参数 + 字节上限，硬伤①②消解时可重评
+
+## D-006@v1 方案 C（心跳携带日志/配置快照入库）被否决
+状态：rejected
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：否决。心跳每 15s 一次（sillyhub-daemon/src/config.ts 默认 heartbeat_interval=15），携带日志尾部会让心跳 payload 持续膨胀；日志时效性锁定在最后一次心跳时刻，排障场景价值低；为低频排障需求引入持续存储开销与配置变更检测复杂度，收益成本倒挂
+否决理由：心跳 payload 持续膨胀 + 日志时效性锁死于最后一次心跳 + 为低频排障引入持续存储开销
+复潮条件：出现「离线机器也要看最后快照」的强需求，且心跳带宽/存储不再敏感时可重评
+
+## D-007@v1 配置下载恒脱敏（明暗态一致）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户裁定「恒脱敏下载」：无论页面处于掩码态还是明文态，下载永远输出脱敏 JSON；要核对明文在页面上点「显示明文」看即可，下载（外带动作）不携带明文凭据
+故障面：用户预期「所见即所载」时可能困惑——UI 文案明确标注下载恒脱敏
+
+## D-008@v1 测试文件路径对齐 tests/modules/daemon/ 目录结构
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：路径校正为 backend/tests/modules/daemon/test_daemon_machine_diag.py；design.md 文件清单与 task-02 allowed_paths/target_files 已同步
+故障面：无（纯路径校正，语义不变）

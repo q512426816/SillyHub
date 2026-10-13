@@ -3569,3 +3569,162 @@
 - 场景：默认场景 — Given 收到 sillyspec_sync_change 请求；Then change 过 SAFE_CHANGE_NAME_RE 白名单（拒路径穿越），workspace_id 过 UUID 形态守卫；无本地根映射返回结构化失败（n
 全文：.sillyspec/changes/archive/2026-10-13-change-files-refresh-sync/requirements.md#FR-05
 最近确认：76ea8a958
+
+## FR-daemon-110 日志尾部查看
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 一台在线且已升级的 daemon 机器；When 管理员在机器卡点击「日志」并选择行数（100/500/2000，默认 500）；Then 弹窗展示 daemon.log 尾部对应行数内容 + 文件路径/大小/最后修改时间；超出尾部字节上限（256KB）时提示截断；点击「刷新」重新拉取
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-01
+最近确认：255a46d66
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-daemon-log-config-view:task-01:acc-0-eeeeb013
+  tests: sillyhub-daemon/tests/diag-rpc.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-01:acc-1-05db5eb0
+  tests: sillyhub-daemon/tests/diag-rpc.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-01:acc-2-4a3d0203
+  tests: sillyhub-daemon/tests/diag-rpc.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-02:acc-0-3181745b
+  tests: backend/tests/modules/daemon/test_daemon_machine_diag.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-02:acc-1-47e4ef11
+  tests: backend/tests/modules/daemon/test_daemon_machine_diag.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-02:acc-2-fe6949ec
+  tests: backend/tests/modules/daemon/test_daemon_machine_diag.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-03:acc-0-21e140a0
+  tests: frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx | frontend/src/components/daemon/__tests__/machine-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-03:acc-1-9e938628
+  tests: frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx | frontend/src/components/daemon/__tests__/machine-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+- row: 2026-10-13-daemon-log-config-view:task-03:acc-2-11c8d1ea
+  tests: frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx | frontend/src/components/daemon/__tests__/machine-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-daemon-log-config-view
+  status: active
+
+## FR-daemon-111 日志下载
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 日志 Tab 已展示尾部内容；When 点击「下载日志片段」；Then 浏览器下载与当前展示一致的行内容（文件名含机器名与 tail 标识）
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-02
+最近确认：255a46d66
+
+## FR-daemon-112 配置查看（默认脱敏）
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 一台在线且已升级的 daemon 机器；When 管理员在机器卡点击「配置」；Then 弹窗展示当前生效配置 JSON；`token`/`api_key` 等敏感字段为掩码形式（前4位+***+后4位，不足8位整值掩码），并标注被掩码字段清单
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-03
+最近确认：255a46d66
+
+## FR-daemon-113 配置明文按需切换
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 配置 Tab 处于掩码态；When 点击「显示明文」；Then 向 daemon 发起 reveal=true 的二次拉取并显示明文；再次点击恢复掩码态（重新拉取掩码态）
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-04
+最近确认：255a46d66
+
+## FR-daemon-114 配置下载（恒脱敏）
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+依据决策：D-007@v1
+场景正文：
+- 场景：默认场景 — Given 配置 Tab 可见（掩码或明文态）；When 点击「下载配置」；Then 下载恒脱敏 JSON 文件（无论页面处于掩码态还是明文态，敏感字段均为掩码，D-007）；按钮旁标注「下载内容始终脱敏」
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-05
+最近确认：255a46d66
+
+## FR-daemon-115 版本过旧提示
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 目标机器 daemon 未升级（未注册新 RPC）；When 打开日志/配置 Tab；Then 展示 warning 提示条「daemon 版本过旧，请先升级」，引导到机器卡「升级 daemon」，不弹技术错误
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-06
+最近确认：255a46d66
+
+## FR-daemon-116 日志不存在提示
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 目标机器 daemon 前台（TTY）运行，未落盘 daemon.log；When 打开日志 Tab；Then 展示提示条「daemon.log 不存在——前台运行不落盘日志」，说明后台运行/CLI 两种替代查看方式
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-07
+最近确认：255a46d66
+
+## FR-daemon-117 离线禁用
+变更：2026-10-13-daemon-log-config-view
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 机器离线（无 WS 连接）；When 查看机器卡；Then 「日志」「配置」按钮禁用并给出离线 tooltip；若拉取过程中离线则展示错误条
+全文：.sillyspec/changes/archive/2026-10-13-daemon-log-config-view/requirements.md#FR-08
+最近确认：255a46d66

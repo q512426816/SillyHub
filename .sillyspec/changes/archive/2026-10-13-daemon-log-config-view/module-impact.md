@@ -40,4 +40,4 @@
 | `modules/app-pages.md` | runtimes 页新增诊断弹窗接线（一行级） | done（changelog sidecar 登记） |
 | `modules/daemon.md` | daemon 侧新增 diag RPC（handler 注册 + diag-rpc.ts） | done（changelog sidecar 登记） |
 | `modules/lib-api.md` | api-types 产物新增两 schema 类型 | done（changelog sidecar 登记） |
-| `_module-map.yaml` | 未匹配文件均为索引粒度问题（新文件不在 paths 枚举），不在本变更手改索引——留待下次 scan/modules rebuild 周期刷新 | skipped（避免手改索引与 scan 基线漂移；归属判定已在上节逐文件写明） |
+| `_module-map.yaml` | 根 map 三模块 main_symbols 各追加一条（sillyhub-daemon readLogTail/getMaskedConfig、backend machine diag 端点、frontend DaemonDiagnosticDialog）；新文件物理路径已被各模块 paths glob（backend/** 等）覆盖，细粒度索引刷新留给 scan 周期 | done（archive step2 手动同步，2026-10-13） |

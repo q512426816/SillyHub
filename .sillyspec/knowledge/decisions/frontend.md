@@ -329,3 +329,29 @@ supersedes：D-003@v1
 理由：方案 A（用户 AskUserQuestion 确认）。CLI 每次 POST /api/agent-logs 上报后，backend 异步经现有 WS RPC 通道让 daemon 解析本次涉及 entry 的日志用量并落库。理由：触发高频自然（CLI 每条命令都上报）、复用回放已有的解析器与 RPC 通道、改动集中 backend；daemon 离线仅暂缓（下次上报全量解析幂等补齐）。否决 B（两端改动 + 持续解析开销与观看需求无关）与 C（列表页批量 RPC 爆炸、离线空数据，不可行）。
 故障面：后台摄取任务可能因 daemon 离线/超时长期空转记日志（无失败放大，快照滞后）；上报高峰期重复解析受节流钳制但仍有 RPC 开销
 退役判据：若后续 daemon 原生周期推送用量（方案 B 复潮条件：多机环境下报频率不足、新鲜度成为实际痛点），本摄取链路可整体下线，落库快照消费端（聚合/展示）不变
+
+## D-002@v1 日志采用拉取尾部+手动刷新（非实时流）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户选「拉取尾部+手动刷新」：点开查看最近 N 行（默认可调），带刷新按钮；不做 WebSocket 实时滚动
+故障面：大日志文件全量读取导致 RPC 超时——须在 daemon 侧或 backend 侧限制返回尾部字节上限
+退役判据：未来出现「盯日志实时排障」高频诉求时，再评估升级为 WS 实时流（可基于现有 daemon:ws 通道扩展）
+
+## D-003@v1 功能范围=查看+下载（不做在线编辑）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户选「查看+下载」：日志和配置均支持查看与下载为文件；不做在线编辑（allowed_roots 编辑已有现有路径，其余配置改动仍在 daemon 本机做）
+故障面：用户误以为平台可改配置——UI 上需明确标注「只读」
+
+## D-004@v1 采用方案 B——daemon 专用诊断 RPC（log_tail + config_get）
+状态：implemented
+变更：2026-10-13-daemon-log-config-view
+锚点：未记录
+最近确认：255a46d66
+理由：用户选方案 B：daemon 注册 daemon_log_tail 与 daemon_config_get 两个 RPC handler（路径由 daemon 侧 getLogFile()/loadConfig 权威解析，尾部截断与脱敏在源头做），backend 新增转发端点（复制 daemon_rpc.py 先例），前端 /runtimes 机器卡加入口。理由：路径权威（SILLYHUB_DAEMON_DIR 重定向不影响）、大文件不全量传、脱敏贴近数据源
+故障面：老 daemon（未升级）无这两个 RPC → method_not_found；需在 backend 映射 422 + 前端升级提示
+退役判据：若未来 host_fs RPC 支持按约定 key 寻址 + tail 参数，可考虑合并回通用文件读通道
