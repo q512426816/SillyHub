@@ -5725,6 +5725,14 @@ export class Daemon {
       // 知道（非 null）时携带（兄弟字段语义=backend 保留），update 仅非 null 携带
       //（键不出现=backend 清除，pending_update 同款反向语义）。三键全无 → 第 5
       // 参不占位（heartbeat 调用保持 4 参旧形态，既有心跳测试断言零回归）。
+      // 2026-10-13-sillyspec-version-probe-fast-retry：version 未知时限频重探——
+      // 注册期 probeLocal 瞬态失败（冷启动慢超时等）不再等 1h 第四循环自愈，心跳
+      // 每拍触发（manager 内 120s 限频，窗口内为 no-op）。void 不 await：探测最坏
+      // 30s 超时不拖本拍心跳节奏，成功后下一拍快照带上 version。duck-type 守卫对齐
+      // 下方 getCommandResult 惯例（旧假 manager 缺方法静默跳过）。
+      if (typeof this._sillyspecManager.retryProbeLocalIfUnknown === 'function') {
+        void this._sillyspecManager.retryProbeLocalIfUnknown();
+      }
       const snap = this._sillyspecManager.getSnapshot();
       const sillyspec: HeartbeatSillySpecParam = {};
       if (snap.version !== null) sillyspec.version = snap.version;
