@@ -1536,7 +1536,9 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     const ta = screen.getByPlaceholderText(
       /继续追问|消息将排队/,
     ) as HTMLTextAreaElement;
-    await waitFor(() => expect(ta.value).toContain("【截图.png】"));
+    // 3ef41b910（2026-10-12-ws-ref-emoji-inline）：emoji 内嵌 token——附件类
+    // 编辑态格式为【📎 name】（此处补齐断言同步债，置换协议不变）。
+    await waitFor(() => expect(ta.value).toContain("【📎 截图.png】"));
 
     mocks.injectSession.mockResolvedValueOnce({
       session_id: "s-1",
