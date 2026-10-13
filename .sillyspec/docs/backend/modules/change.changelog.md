@@ -17,3 +17,4 @@ created_at: 2026-08-29 22:56:30
 ## 2026-10-07 — 归档留档缺件回退（thin 2026-10-07-assets-patch-scope-audit-fallback）
 - assets.py 读侧回退补镜像缺口（docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md）：`_read_patch_meta` 缺 change-patch.json 时回退读 scope-audit.json（totals/patchStatus/savedAt 同构直取，file_list 从 rows[].path 投影）——厚流程归档「归档留档」patch 块不再整块缺失；`_read_patch_file_diff` 缺 change.patch 回退切 scope-audit.patch（note 指名实际留档）。两份并存 change-patch.json 优先，thin 形态零变化；DTO/前端零改动。测试：test_assets 28 绿（新增 4：快照回退投影/切片回退/双缺 fail-open/并存优先级）。
 - 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
+- 2026-10-13-anchor-mismatch-fix | 动机：轮级打锚的「轮归开始时上下文」语义在「整个变更的生命周期发生在单轮内」时产生错配——该轮全部 sillyspec 
