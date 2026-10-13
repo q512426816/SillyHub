@@ -40,6 +40,7 @@ sillyspec flow start --change <变更名> --input "<动机与背景>
 改代码、写测试。治理工件（proposal/requirements/design）CLI 机器起草，你只需要：
 
 - 填 design.md 四节 AGENT 槽（做法概述/接口契约/边界并发四问/风险与死路）——每节至少一行，写「不适用：<理由>」也算答，空槽 flow done 拒收
+- 变更目录若已有收割生成的 decisions.md（frontmatter `author: flow-machine-draft`），它是底稿不是终稿：槽4 作答含「放弃方案」的，收口前把每个放弃方案拆成独立 rejected 条目（问题=决策专属问句、否决理由=放弃理由、复潮条件=重提前提），风险与对策留在主条目——rejected 条目才走蒸馏防复潮通道，埋在散文里的否决理由进不了通道；无实质放弃方案则不动
 - 干活以 tasks.md 为进度源：做一件 → 勾一格（`- [ ]` → `- [x]`）→ 继续下一条，勿攒一把勾（勾选是收口哨兵的证据面——逐 task 核提交 token/review.json）；`flow status --change <名>` 为自愿查看/恢复面（②阶段给下一任务指针与进度，非协议必需——D-007）
 - 交付代码用显式 pathspec 提交（`git commit -m "..." -- 文件1 文件2`；patch 冻结面=baseline..HEAD 提交面，未提交的代码不进审计件）
 
