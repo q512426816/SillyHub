@@ -816,3 +816,279 @@ export function knownJsonlView(name: string, lines: JsonValue[]): ReactNode | nu
   }
   return null;
 }
+
+// ── timeline.md 时间线视图（2026-10-13-change-files-view-polish）────────
+//
+// timeline.md 是 sillyspec CLI 生成的固定格式合成时间线（标题/引言 +「── 事件
+// 时间轴 ──」时刻行 +「── 任务面 ──」task 行 + 墙钟脚注），裸 markdown 渲染
+// 不像时间线。解析为结构化数据后渲染竖向时间线（时刻列+节点+事件文本，按时刻
+// 升序），任务面与脚注各自分区；结构不命中（无事件时间轴区块=格式漂移）返回
+// null 由调用方回落 markdown 渲染（与 knownJsonView 同一降级范式）。
+
+export type TimelineEvent = { time: string; text: string };
+export type TimelineTask = { id: string; time: string; desc: string; commit: string | null };
+
+export type TimelineData = {
+  title: string | null;
+  intro: string[];
+  meta: string | null;
+  events: TimelineEvent[];
+  taskSectionTitle: string | null;
+  tasks: TimelineTask[];
+  footnotes: string[];
+};
+
+/** 区块头：`── 事件时间轴 ──` / `── 任务面（…）──`。 */
+const TIMELINE_SECTION_RE = /^──\s*(.+?)\s*──$/;
+/** 事件行：`HH:MM[:SS]  事件文本`（秒段可缺，间隔一个以上空白）。 */
+const TIMELINE_EVENT_RE = /^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/;
+/** 任务行：`task-NN  ≈HH:MM:SS  描述  提交短哈希`（≈ 与哈希均可缺）。 */
+const TIMELINE_TASK_RE = /^(task-\S+)\s+(≈?\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/;
+/** 任务描述尾部的 git 提交短哈希（7-12 位十六进制）。 */
+const TIMELINE_COMMIT_TAIL_RE = /\s+([0-9a-f]{7,12})$/;
+
+/**
+ * 解析 timeline.md 正文。命中「── 事件时间轴 ──」区块才返回数据（否则 null
+ * 回落 markdown）；事件与任务均按时刻升序排序（同日 HH:MM:SS 字典序即时间
+ * 序，乱序输入渲染仍有序）；区块外未识别的非空行收进脚注（墙钟统计等）。
+ */
+export function tryParseTimeline(text: string): TimelineData | null {
+  const data: TimelineData = {
+    title: null,
+    intro: [],
+    meta: null,
+    events: [],
+    taskSectionTitle: null,
+    tasks: [],
+    footnotes: [],
+  };
+  let section: "head" | "events" | "tasks" | "tail" = "head";
+  let sawEvents = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    const sec = TIMELINE_SECTION_RE.exec(line);
+    if (sec !== null) {
+      const name = sec[1] ?? "";
+      if (name.startsWith("事件时间轴")) {
+        section = "events";
+        sawEvents = true;
+      } else if (name.startsWith("任务面")) {
+        section = "tasks";
+        data.taskSectionTitle = name;
+      } else {
+        section = "tail";
+      }
+      continue;
+    }
+    if (section === "head") {
+      // 头区只收标题/引言/📅 元信息，其余行（frontmatter 等）不进时间线
+      if (!line) continue;
+      if (line.startsWith("# ") && data.title === null) data.title = line.slice(2).trim();
+      else if (line.startsWith("> ")) data.intro.push(line.slice(2).trim());
+      else if (line.startsWith("📅")) data.meta = line.trim();
+      continue;
+    }
+    if (!line) continue;
+    if (section === "events") {
+      const m = TIMELINE_EVENT_RE.exec(line);
+      if (m !== null) data.events.push({ time: m[1] ?? "", text: (m[2] ?? "").trim() });
+      else data.footnotes.push(line);
+    } else if (section === "tasks") {
+      const m = TIMELINE_TASK_RE.exec(line);
+      if (m !== null) {
+        let desc = (m[3] ?? "").trim();
+        let commit: string | null = null;
+        const cm = TIMELINE_COMMIT_TAIL_RE.exec(desc);
+        if (cm !== null) {
+          commit = cm[1] ?? null;
+          desc = desc.slice(0, cm.index).trim();
+        }
+        data.tasks.push({ id: m[1] ?? "", time: m[2] ?? "", desc, commit });
+      } else {
+        data.footnotes.push(line);
+      }
+    } else {
+      data.footnotes.push(line);
+    }
+  }
+  if (!sawEvents) return null;
+  const plain = (t: string) => t.replace("≈", "");
+  data.events.sort((a, b) => a.time.localeCompare(b.time));
+  data.tasks.sort((a, b) => plain(a.time).localeCompare(plain(b.time)));
+  return data;
+}
+
+/**
+ * timeline.md 专用视图：竖向时间线（时刻列 + 品牌色节点 + 事件文本）+
+ * 任务面（task 徽标/≈时刻/描述/提交锚）+ 脚注（墙钟统计），标题引言置顶。
+ */
+export function TimelineView({ data }: { data: TimelineData }) {
+  return (
+    <div data-testid="timeline-view" className="flex min-w-0 flex-col gap-3 p-1">
+      {(data.title !== null || data.meta !== null || data.intro.length > 0) && (
+        <div className="flex flex-col gap-1">
+          {data.title !== null && <h3 className="text-sm font-semibold text-foreground">{data.title}</h3>}
+          {data.meta !== null && <p className="text-[11px] leading-relaxed text-muted-foreground">{data.meta}</p>}
+          {data.intro.map((l, i) => (
+            <p key={i} className="text-[11px] leading-relaxed text-muted-foreground/80">
+              {l}
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col">
+        {data.events.map((e, i) => (
+          <div key={`${e.time}-${i}`} data-testid="timeline-event" className="flex items-start gap-2">
+            <span className="w-16 shrink-0 pt-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+              {e.time}
+            </span>
+            <div className="relative flex w-3 shrink-0 justify-center self-stretch">
+              <span className="absolute inset-y-0 w-px bg-border" aria-hidden />
+              <span className="relative z-10 mt-1.5 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-card" aria-hidden />
+            </div>
+            <p className="min-w-0 flex-1 pb-3 text-xs leading-relaxed text-foreground">{e.text}</p>
+          </div>
+        ))}
+      </div>
+      {data.tasks.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <SectionTitle>{data.taskSectionTitle ?? "任务面"}</SectionTitle>
+          {data.tasks.map((t) => (
+            <div key={t.id} data-testid="timeline-task" className="flex min-w-0 items-baseline gap-2 text-xs">
+              <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">{t.id}</span>
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{t.time}</span>
+              <span className="min-w-0 flex-1 truncate text-foreground" title={t.desc}>
+                {t.desc}
+              </span>
+              {t.commit !== null && (
+                <span className="shrink-0 rounded bg-brand-50 px-1.5 py-px font-mono text-[10px] text-brand-700" title={t.commit}>
+                  {t.commit}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {data.footnotes.length > 0 && (
+        <div className="flex flex-col gap-0.5 border-t border-border pt-2">
+          {data.footnotes.map((l, i) => (
+            <p key={i} className="text-[10px] leading-relaxed text-muted-foreground/80">
+              {l}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── change.patch 按文件折叠视图（2026-10-13-change-files-view-polish）────
+//
+// change.patch 是多文件 unified diff，整片红绿摊开对人不友好。按 `diff --git`
+// 文件头切分为文件段（路径取 `+++ b/…` 行、删除文件回退 `--- a/…`；增删数按
+// +/- 行计数排除 +++/---），渲染逐文件折叠清单——默认全收起，展开单文件复用
+// DiffView（parseUnifiedDiff 本就跳过文件头行，逐段可直接喂）。无 `diff --git`
+// 头返回 null 由调用方回落整片 DiffView。
+
+export type PatchFileSection = { path: string; adds: number; dels: number; text: string };
+
+/**
+ * 切分多文件 patch。返回文件段数组；无 `diff --git` 头（单文件 diff / 非 diff
+ * 格式）返回 null（调用方回落整片 DiffView）。
+ */
+export function tryParsePatchFiles(content: string): PatchFileSection[] | null {
+  const lines = content.split(/\r?\n/);
+  const starts: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^diff --git /.test(lines[i] ?? "")) starts.push(i);
+  }
+  if (starts.length === 0) return null;
+  const sections: PatchFileSection[] = [];
+  for (let s = 0; s < starts.length; s++) {
+    const from = starts[s] ?? 0;
+    const to = s + 1 < starts.length ? (starts[s + 1] ?? lines.length) : lines.length;
+    const body = lines.slice(from, to);
+    let newPath: string | null = null;
+    let oldPath: string | null = null;
+    let adds = 0;
+    let dels = 0;
+    for (const l of body) {
+      if (l.startsWith("+++ ")) {
+        const p = l.slice(4).replace(/^b\//, "").trim();
+        if (p !== "/dev/null" && p !== "") newPath = p;
+      } else if (l.startsWith("--- ")) {
+        const p = l.slice(4).replace(/^a\//, "").trim();
+        if (p !== "/dev/null" && p !== "") oldPath = p;
+      } else if (l.startsWith("+")) {
+        adds += 1;
+      } else if (l.startsWith("-")) {
+        dels += 1;
+      }
+    }
+    // 删除文件（+++ /dev/null）用旧路径；仍缺则从 diff --git 头 b 侧兜底
+    let path = newPath ?? oldPath;
+    if (path === null) {
+      const gm = /^diff --git a\/(.*) b\/(.*)$/.exec(body[0] ?? "");
+      path = (gm?.[2] ?? gm?.[1] ?? "").trim() || `文件 ${s + 1}`;
+    }
+    sections.push({ path, adds, dels, text: body.join("\n") });
+  }
+  return sections;
+}
+
+/** 单文件折叠行：路径 + 增删计数，展开渲染该文件 DiffView。 */
+function PatchFileRow({ section }: { section: PatchFileSection }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border border-border">
+      <button
+        type="button"
+        data-testid="patch-file-row"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex min-w-0 w-full items-baseline gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50"
+      >
+        <ChevronRight
+          className={cn("h-3 w-3 shrink-0 self-center text-muted-foreground transition-transform", open && "rotate-90")}
+          aria-hidden
+        />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground" title={section.path}>
+          {section.path}
+        </span>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums">
+          <span className="text-success">+{section.adds}</span> <span className="text-error">−{section.dels}</span>
+        </span>
+      </button>
+      {open && (
+        <div className="border-t border-border p-2">
+          <DiffView content={section.text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * change.patch 专用视图：顶部汇总条（文件数 + 总增删）+ 逐文件折叠清单
+ * （默认全收起，点击展开该文件红绿 diff）。
+ */
+export function PatchTreeView({ sections }: { sections: PatchFileSection[] }) {
+  const totalAdds = sections.reduce((sum, s) => sum + s.adds, 0);
+  const totalDels = sections.reduce((sum, s) => sum + s.dels, 0);
+  return (
+    <div data-testid="patch-tree-view" className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
+        <span className="font-medium text-foreground">{sections.length} 个文件</span>
+        <span className="font-mono tabular-nums">
+          <span className="text-success">+{totalAdds}</span> / <span className="text-error">−{totalDels}</span>
+        </span>
+        <span className="text-[11px] text-muted-foreground">点击文件行展开 / 收起改动</span>
+      </div>
+      <div className="flex min-h-0 flex-col gap-1.5 overflow-auto">
+        {sections.map((s, i) => (
+          <PatchFileRow key={`${s.path}-${i}`} section={s} />
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -5,7 +5,20 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl, type JsonValue } from "../structured-views";
+import {
+  DiffView,
+  JsonView,
+  JsonlView,
+  knownJsonView,
+  knownJsonlView,
+  PatchTreeView,
+  TimelineView,
+  tryParseJson,
+  tryParseJsonl,
+  tryParsePatchFiles,
+  tryParseTimeline,
+  type JsonValue,
+} from "../structured-views";
 
 describe("tryParseJson", () => {
   it("合法 json → 解析值", () => {
@@ -451,5 +464,142 @@ describe("JsonlView（通用逐行树）", () => {
     expect(container.textContent).toContain("第 1 行");
     expect(container.textContent).toContain("第 2 行");
     expect(container.querySelectorAll('[data-testid="json-view"]').length).toBe(2);
+  });
+});
+
+// ── 2026-10-13-change-files-view-polish：timeline.md 时间线 + change.patch 文件树 ──
+
+const timelineSample = [
+  "# 合成时间线快照 — demo-change",
+  "",
+  "> 烤制于归档链（2026-10-13T00:00:00.000Z）：事件流机本位。",
+  "> 末尾事件可能晚于烤制未入快照。",
+  "📅 demo-change — 合成时间线（thin｜事件流 × tasks.md × git 提交锚）",
+  "",
+  "── 事件时间轴 ──",
+  "06:05:57  📝 tasks.md 内容变更",
+  "05:39:32  🁢 变更诞生（工件 frontmatter created_at）",
+  "05:40:08  🔀 66393f432  fix(daemon): 示例提交标题",
+  "",
+  "── 任务面（勾选时刻 ≈ 顺序推断）──",
+  "task-02  ≈06:10:00   后做的任务描述…  aabba1111",
+  "task-01  ≈06:05:57   先做的任务描述…  66ba4df44",
+  "",
+  "墙钟：30min｜事件 3 条｜提交 1｜任务 2/2 勾选",
+].join("\n");
+
+describe("tryParseTimeline", () => {
+  it("解析事件/任务/脚注：事件任务按时刻升序，提交锚剥离，≈ 保留", () => {
+    const data = tryParseTimeline(timelineSample);
+    expect(data).not.toBeNull();
+    expect(data!.title).toBe("合成时间线快照 — demo-change");
+    expect(data!.intro).toHaveLength(2);
+    expect(data!.meta).toContain("demo-change");
+    expect(data!.events.map((e) => e.text)).toEqual([
+      "🁢 变更诞生（工件 frontmatter created_at）",
+      "🔀 66393f432  fix(daemon): 示例提交标题",
+      "📝 tasks.md 内容变更",
+    ]);
+    // 任务按 ≈时刻升序（task-01 在前），提交哈希独立成字段
+    expect(data!.tasks).toEqual([
+      { id: "task-01", time: "≈06:05:57", desc: "先做的任务描述…", commit: "66ba4df44" },
+      { id: "task-02", time: "≈06:10:00", desc: "后做的任务描述…", commit: "aabba1111" },
+    ]);
+    expect(data!.footnotes.join("\n")).toContain("墙钟：30min");
+  });
+
+  it("无「── 事件时间轴 ──」区块（格式漂移）→ null（调用方回落 markdown）", () => {
+    expect(tryParseTimeline("# 普通文档\n\n正文而已")).toBeNull();
+    expect(tryParseTimeline("")).toBeNull();
+  });
+});
+
+describe("TimelineView", () => {
+  it("渲染竖向时间线：时刻+事件文本按升序、任务面、脚注分区", () => {
+    const data = tryParseTimeline(timelineSample)!;
+    const { container } = render(<TimelineView data={data} />);
+    const el = container.querySelector('[data-testid="timeline-view"]')!;
+    expect(el).not.toBeNull();
+    expect(el.textContent).toContain("合成时间线快照 — demo-change");
+    const events = Array.from(el.querySelectorAll('[data-testid="timeline-event"]'));
+    expect(events).toHaveLength(3);
+    // 升序：首行是 05:39:32 的变更诞生
+    expect(events[0]!.textContent).toContain("05:39:32");
+    expect(events[0]!.textContent).toContain("变更诞生");
+    // 任务面 + 提交锚 + 脚注
+    expect(el.querySelectorAll('[data-testid="timeline-task"]').length).toBe(2);
+    expect(el.textContent).toContain("66ba4df44");
+    expect(el.textContent).toContain("勾选时刻 ≈ 顺序推断");
+    expect(el.textContent).toContain("墙钟：30min");
+  });
+
+  it("无任务面/脚注时省略对应分区，不渲染空壳", () => {
+    const data = tryParseTimeline("── 事件时间轴 ──\n05:00:00  唯一事件")!;
+    const { container } = render(<TimelineView data={data} />);
+    expect(container.querySelector('[data-testid="timeline-event"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="timeline-task"]')).toBeNull();
+  });
+});
+
+const patchSample = [
+  "diff --git a/src/a.ts b/src/a.ts",
+  "index 123..456 100644",
+  "--- a/src/a.ts",
+  "+++ b/src/a.ts",
+  "@@ -1,3 +1,4 @@",
+  " context",
+  "-removed",
+  "+added",
+  "+added2",
+  "diff --git a/src/gone.py b/src/gone.py",
+  "deleted file mode 100644",
+  "index 789..abc 100644",
+  "--- a/src/gone.py",
+  "+++ /dev/null",
+  "@@ -1,2 +0,0 @@",
+  "-old line 1",
+  "-old line 2",
+].join("\n");
+
+describe("tryParsePatchFiles", () => {
+  it("按 diff --git 切分文件段：路径/增删计数正确，删除文件回退旧路径", () => {
+    const sections = tryParsePatchFiles(patchSample);
+    expect(sections).not.toBeNull();
+    expect(sections).toHaveLength(2);
+    expect(sections![0]!.path).toBe("src/a.ts");
+    expect(sections![0]!.adds).toBe(2);
+    expect(sections![0]!.dels).toBe(1);
+    // +++ /dev/null → 路径回退 --- a/ 侧
+    expect(sections![1]!.path).toBe("src/gone.py");
+    expect(sections![1]!.adds).toBe(0);
+    expect(sections![1]!.dels).toBe(2);
+    // 段文本含完整 diff 头（喂给 DiffView 解析）
+    expect(sections![0]!.text).toContain("diff --git a/src/a.ts");
+  });
+
+  it("无 diff --git 头（单文件 diff / 非 diff）→ null（调用方回落整片 DiffView）", () => {
+    expect(tryParsePatchFiles("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b")).toBeNull();
+    expect(tryParsePatchFiles("")).toBeNull();
+    expect(tryParsePatchFiles("纯文本内容")).toBeNull();
+  });
+});
+
+describe("PatchTreeView", () => {
+  it("默认全收起，点击文件行展开该文件 diff", () => {
+    const sections = tryParsePatchFiles(patchSample)!;
+    const { container } = render(<PatchTreeView sections={sections} />);
+    const el = container.querySelector('[data-testid="patch-tree-view"]')!;
+    expect(el).not.toBeNull();
+    expect(el.textContent).toContain("2 个文件");
+    expect(el.textContent).toContain("src/a.ts");
+    expect(el.textContent).toContain("src/gone.py");
+    // 收起态：hunk 头与 diff 行不渲染
+    expect(el.textContent).not.toContain("@@ -1,3 +1,4 @@");
+    expect(container.querySelector('[data-testid="diff-view"]')).toBeNull();
+    // 展开第一个文件行 → 该文件 diff 在场
+    const rows = Array.from(el.querySelectorAll('[data-testid="patch-file-row"]'));
+    fireEvent.click(rows[0]!);
+    expect(container.querySelector('[data-testid="diff-view"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="diff-view"]')!.textContent).toContain("added2");
   });
 });
