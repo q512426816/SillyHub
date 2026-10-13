@@ -102,6 +102,13 @@ export interface NormalizedLogMessage {
   tool_result: string | null;
   /** tool_result 专用错误标记。 */
   is_error: boolean | null;
+  /**
+   * tool_result 专用：structuredPatch JSON 串（claude-code 载体行顶层
+   * toolUseResult.structuredPatch 序列化，2026-10-13-editpatch-fullchain；hunks
+   * 含真实文件行号，前端 Edit/Write 卡渲染行级 diff）。无 patch（create /
+   * 其他 harness / 超 64KB）缺省 undefined，消费方按无 patch 回退。
+   */
+  edit_patch?: string | null;
   /** 所属行 completedAt（ISO 字符串；行缺失该字段时为 null）。 */
   ts: string | null;
   // —— 2026-09-19-tool-report-session-replay 契约扩展：以下五项全部可选，老

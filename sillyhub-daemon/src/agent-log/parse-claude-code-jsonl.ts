@@ -68,6 +68,12 @@ const TOOL_INPUT_MAX_CHARS = 2048;
 const TOOL_RESULT_MAX_CHARS = 4096;
 
 /**
+ * edit_patch（structuredPatch 序列化）附着上限：超 64KB 整体不附着——残缺 JSON
+ * 对前端 parseStructuredPatch 无消费价值，all-or-nothing（2026-10-13-editpatch-fullchain）。
+ */
+const EDIT_PATCH_MAX_CHARS = 64_000;
+
+/**
  * R-06 注入前缀白名单：文本以任一前缀开头 → sender='system_event'。
  * 白名单外未识别注入保守归 human（错标系统事件会隐藏真人输入，代价不对称）。
  */
@@ -195,7 +201,7 @@ export async function parseClaudeCodeJsonlLog(
           }
         }
       } else {
-        const produced = userSegments(message, ts, parsed.isMeta === true, toolNamesById);
+        const produced = userSegments(message, ts, parsed.isMeta === true, toolNamesById, extractEditPatch(parsed));
         if (produced === null) {
           badLines++; // content 既非字符串也非数组
           skippedLines++;
@@ -279,7 +285,9 @@ function assistantSegments(message: Record<string, unknown>, ts: string | null):
 /**
  * user 行 → user_input / tool_result 段。
  * - 纯字符串 / 含 text 块 → user_input（text 原文 + sender 归一）；
- * - tool_result 块 → tool_result 段（配对表反查 tool_name，失配孤儿保留 id）。
+ * - tool_result 块 → tool_result 段（配对表反查 tool_name，失配孤儿保留 id）；
+ * - editPatch（载体行顶层 toolUseResult.structuredPatch 序列化，非空时）附着到
+ *   该行全部 tool_result 段（实证一行单 tool_result；多块同 patch 为无害超集）。
  * @returns null = content 形状不符（坏行）；空数组 = 合法空行。
  */
 function userSegments(
@@ -287,6 +295,7 @@ function userSegments(
   ts: string | null,
   isMeta: boolean,
   toolNamesById: Map<string, string>,
+  editPatch?: string,
 ): UnnumberedSegment[] | null {
   const content = message.content;
   if (typeof content === 'string') {
@@ -306,6 +315,7 @@ function userSegments(
           tool_use_id: toolUseId,
           tool_result: toolResultText(block.content),
           is_error: typeof block.is_error === 'boolean' ? block.is_error : null,
+          ...(editPatch !== undefined ? { edit_patch: editPatch } : {}),
         }),
       );
     } else if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '') {
@@ -352,7 +362,7 @@ function makeSegment(
   fields: Partial<
     Pick<
       NormalizedLogMessage,
-      'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error' | 'sender'
+      'text' | 'tool_name' | 'tool_use_id' | 'tool_input' | 'tool_result' | 'is_error' | 'sender' | 'edit_patch'
     >
   > = {},
 ): UnnumberedSegment {
@@ -364,9 +374,30 @@ function makeSegment(
     tool_input: fields.tool_input ?? null,
     tool_result: fields.tool_result ?? null,
     is_error: fields.is_error ?? null,
+    ...(fields.edit_patch !== undefined ? { edit_patch: fields.edit_patch } : {}),
     ts,
     ...(fields.sender !== undefined ? { sender: fields.sender } : {}),
   };
+}
+
+/**
+ * 抽取载体行顶层 toolUseResult.structuredPatch（claude-code 把 Edit/Write 覆盖写
+ * 的 hunks 放在行顶层，实证 2026-10-13-write-tool-diff 抽样）→ JSON 串；非记录 /
+ * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化超 EDIT_PATCH_MAX_CHARS
+ * → undefined（all-or-nothing，残缺 JSON 无消费价值）。
+ */
+function extractEditPatch(line: Record<string, unknown>): string | undefined {
+  const tur = line.toolUseResult;
+  if (!isRecord(tur)) return undefined;
+  const patch = tur.structuredPatch;
+  if (!Array.isArray(patch) || patch.length === 0) return undefined;
+  try {
+    const json = JSON.stringify(patch);
+    if (json === undefined || json.length > EDIT_PATCH_MAX_CHARS) return undefined;
+    return json;
+  } catch {
+    return undefined;
+  }
 }
 
 /** tool input 摘要：JSON.stringify 后首 2KB 截断（对齐 parse-zcode-model-io）。 */
