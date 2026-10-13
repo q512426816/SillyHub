@@ -81,7 +81,7 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
     R-08 声明）；summarize_changes 增 workspace 锚参。
   - `ChangeService`：list/get/update_progress/approve/reject/
     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
-    complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /
+    complete_stage + review 四方法 + `_project_current_stage` /
     `enrich_summaries`（批量 IN 投影）/ `enrich_with_workspace_ids` /
     `_upsert_projection_progress` / `_record_stage_rework` / `_maybe_notify_session`。
   - `SillySpecStageDispatchService`（dispatch.py）：`dispatch`（single/team 分流派发）、
