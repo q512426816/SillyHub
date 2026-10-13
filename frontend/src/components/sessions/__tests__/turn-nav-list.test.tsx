@@ -302,7 +302,7 @@ describe("TurnNavList 交互与联动", () => {
     expect(within(b.container).getByTestId("turn-nav-flyout")).toBeTruthy();
   });
 
-  it("activeTurnKey 命中刻度/行 aria-current=true；变化时轨内 scrollIntoView（block:nearest，首渲不滚）", () => {
+  it("activeTurnKey 命中刻度/行 aria-current=true；首挂载即滚对齐当前轮，变化时轨内 scrollIntoView（block:nearest）", () => {
     const onJump = vi.fn();
     const scrollSpy = Element.prototype.scrollIntoView as Mock;
     const view = render(
@@ -311,16 +311,24 @@ describe("TurnNavList 交互与联动", () => {
     const ticks = getTicks(view.container);
     expect(ticks[1]).toHaveAttribute("aria-current", "true");
     expect(ticks[0]).not.toHaveAttribute("aria-current");
-    // ref 守卫：首次渲染（含初始 active）不滚动。
-    expect(scrollSpy).not.toHaveBeenCalled();
+    // 2026-10-13-turn-nav-initial-scroll：首挂载即滚（P3 留债修复——轨内滚动生效后
+    // 长会话轨道停顶部、当前轮刻度在可视区外）。浮层未展开，仅窄轨刻度命中 1 次。
+    expect(scrollSpy).toHaveBeenCalledTimes(1);
+    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollSpy.mock.instances[0]).toBe(ticks[1]);
 
     // active 变化 → 命中刻度 scrollIntoView({ block: "nearest" })。
     view.rerender(
       <TurnNavList entries={FIXTURES} activeTurnKey="run-1" onJump={onJump} />,
     );
-    expect(scrollSpy).toHaveBeenCalledTimes(1);
-    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
-    expect(scrollSpy.mock.instances[0]).toBe(ticks[0]);
+    expect(scrollSpy).toHaveBeenCalledTimes(2);
+    expect(scrollSpy.mock.instances[1]).toBe(ticks[0]);
+  });
+
+  it("首挂载 activeTurnKey=null 不滚（无活跃轮无对齐目标）", () => {
+    const scrollSpy = Element.prototype.scrollIntoView as Mock;
+    renderNav(FIXTURES);
+    expect(scrollSpy).not.toHaveBeenCalled();
   });
 
   it("loadingEarlier → 轨标注 aria-busy（跳转加载进行中）", () => {

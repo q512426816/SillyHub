@@ -238,13 +238,13 @@ export default function TurnNavList({
     entries.find((e) => e.key === activeTurnKey)?.turnNo ?? null;
 
   // active 行变化时滚入可视区（窄轨刻度与浮层行共用 [data-turn-key] 命中，TurnCatalog
-  // R-10 同款）；ref 守卫首次渲染不滚。jsdom 无 scrollIntoView 需 typeof 守卫。
-  const mountedRef = useRef(false);
+  // R-10 同款）。jsdom 无 scrollIntoView 需 typeof 守卫。
+  // 2026-10-13-turn-nav-initial-scroll：首挂载也滚——2026-10-13-turn-nav-rail-overflow-fix
+  // 让轨内滚动真正生效后，长会话首屏轨道停顶部、当前轮（最新）刻度在可视区外（归档件
+  // P3 finding）；「首渲不滚」是 TurnCatalog 居中形态时代（design §5）的决策，窄轨+轨内
+  // 滚动形态下语义反转——首挂载对齐 active，打开长会话即见当前轮高亮。activeTurnKey
+  // 为 null（无活跃轮）无对齐目标不滚。原 mountedRef 守卫删除。
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      return;
-    }
     const root = rootRef.current;
     // 2026-10-08-turn-nav-hover-mark：指向优先——hoverTurnKey 存在时滚指向行
     //（刻度 hover 触发展开后指向行滚入浮层可视区），清除后回落既有 active 联动。
