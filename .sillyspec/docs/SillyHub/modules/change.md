@@ -35,7 +35,7 @@ created_at: 2026-08-18 01:45:00
   - service `_project_current_stage`——列表/详情读时批量 join `platform_change_progress` 取权威 current_stage/completed_stages/latest_progress（复合 IN 防 N+1），读时投影覆盖落库值。
 - **解析器**（parser.py）：目录 → ParsedChange/ParsedDoc/ParseWarning；`_infer_change_type` 与 `_infer_affected_components` 读 `_module-map.yaml` 把变更涉及文件路径反查回模块 id。
 - **quicklog**：quicklog_parser 解析 QUICKLOG 文件 + quicklog_service 与平台同步条目（platform_sync 上行）合并的查询视图（列表/单条）。
-- **会话绑定**：`_bind_change_to_session`（ChangeSessionLink）+ `_maybe_notify_session`/`_notify_bound_session`——阶段/审核事件回推绑定会话。
+- **会话绑定**：ChangeSessionLink 绑定只由命令解析通道（binding.py，会话内实际执行 `sillyspec run/flow --change`）与会话创建显式携带/@ 联想写入——reparse 建行自动绑定已移除（2026-10-13-change-reparse-autobind-remove）+ `_maybe_notify_session`/`_notify_bound_session`——阶段/审核事件回推绑定会话。
 - **数据**：Change / ChangeDocument / ChangeSessionLink / ChangeEventORM（归属事件链）；StageEnum + `can_transition` FSM。
 
 ## 关键逻辑
