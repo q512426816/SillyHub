@@ -37,15 +37,33 @@ CLI 3.32.7（`src/flow.js` cmdFlowDone patch 子步）的冻结面口径：
 design/FR-024 写明「改动面仅 LedgerForm.js 单文件」，冻结面却为空，无任何
 warning，归档绿灯。
 
-实现代码为何不在窗口内（按可能性排序，服务器侧需核实）：
+实现代码为何不在窗口内（2026-10-13 会话导出实证，根因实锤）：
 
-1. **baseline 前置提交（redo 形态）**：会话名 `claude-xiaofang-redo`——此前
-   轮次已把 LedgerForm.js 提交掉，本次 flow start 的 baseline_commit 落在
-   该提交之后，baseline..HEAD 天然看不到实现；
-2. **提交不在 HEAD 祖先链**：孤儿提交守卫（FR-02 scanOrphanFace）只覆盖
-   会话专属 worktree 路径；共享主仓跑 flow done 不做 reflog 扫描；
-3. **代码在嵌套/忽略位置**：LedgerForm.js 所在目录是嵌套 git 仓或被
-   .gitignore，root 仓的 diff/status 均不可见。
+**代码在跨仓，主仓冻结面天然看不到。** 本工作区形态＝主仓（工作区
+/mnt/e/crrcdt/sillyWork/2026/消防设施器材，10-10 由会话现场 git init 而来）
++ 三个 local.yaml 注册跨仓；LedgerForm.js 实际交付在**跨仓**
+/mnt/e/Web/crrc/sub-grid-security（分支 sillyspec/2026-10-10-fire-equipment，
+实现提交 d09478ec + 评审修复 b47d5b36）。工作区主仓窗口内唯一提交 11f042c
+内容＝变更四件套 + flow-state.yaml（全部 `.sillyspec/changes/<名>/` 治理件，
+scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
+
+1. **主仓冻结面为空**：治理件被 filterCommittedFace 全剔（3.32.7
+   e45a3904 FR-01 起 `.sillyspec/changes/` 全子树不入冻）→ 空面 → 跳过留档。
+   旁证（同会话前几轮变更，3.32.6 及以前收口）：change.patch 尚产出、内容
+   只有「变更文档+visual-evidence」——代理在评审任务书里自述「change.patch
+   冻结件只含变更文档；代码事实在前端仓」，即跨仓缺口早已存在，只是
+   3.32.7 治理面剔除后连文档件都不再产出、缺口从「patch 缺代码」劣化为
+   「patch 整体缺席」；
+2. **跨仓冻结未触发**：flow.js 跨仓 patch 冻结前提是 design 文件变更清单
+   解析出 `e.repo` 标注（段头「## <注册key> 仓变更」/ 子段「### <注册key>」/
+   `cross-repo:<key>:` 前缀三选一）。本变更 design 承诺「改动面仅
+   LedgerForm.js 单文件」但清单未按规范标注 → planEntries 无 repo 标注 →
+   跨仓对账与 repos[] patch 冻结全不触发（已知坑
+   design-filelist-crossrepo-prefix-silent-main 的活体复现，且 thin 通道下
+   零告警——未标注路径静默按主仓对账成「计划未动」）。
+
+蒸馏侧连锁：distill 实测面同样只看主仓（跨仓文件在主仓 git 不可见）→
+空实测面 → FR-022/023/024 落伪域 auto-sillyspec、决策落 unmapped.md。
 
 ## 影响
 
@@ -56,16 +74,25 @@ warning，归档绿灯。
 
 ## 绕过
 
-收口前人工核对一行：design 文件变更清单里的交付文件是否已提交且在
-`git diff --name-only <baseline>..HEAD` 输出里。若无，先提交（信息尾缀带
-变更名）再跑 `flow done`。已归档的存量只能手工补 change.patch /
-change-patch.json 进归档目录（平台 assets 读侧会认），或接受缺口。
+- 新变更预防：design 文件变更清单里跨仓文件必须写规范标注（推荐段头
+  「## sub-grid-security 仓变更」段内写仓根相对路径），flow done 才会对
+  跨仓做对账并冻 repos[] patch——本工作区所有代码都在跨仓，这是常态动作
+  而非特例；
+- 已归档存量：手工把 change.patch / change-patch.json 补进归档目录（平台
+  assets 读侧会认），或从跨仓提交（git show d09478ec + b47d5b36）取 diff
+  自制；不补也不影响变更已完成的事实，但平台资产卡 patch/模块/测试面
+  持续为空。
 
 ## 期望修复
 
-把 design 声明面自证从非空分支提到 patch 子步空/非空共享位置：空冻结面且
-design 声明清单非空（剔除 `.sillyspec/` 前缀后）→ 至少 advisory 点名
-「声明了 N 个交付文件但冻结面为空」，建议升格为阻断（三选一：先提交后重跑 /
-确认纯文档变更后 `--accept-empty-face` 显式签收留痕 / 清单裁剪同步 design）。
-顺带可评估：共享主仓路径是否也补一个轻量的「窗口外同名文件交付」探测
-（worktree 已有 reflog 扫描先例）。
+1. **声明面自证提到空/非空共享位置**：空冻结面且 design 声明清单非空
+   （剔除 `.sillyspec/` 前缀后）→ 至少 advisory 点名「声明了 N 个交付文件
+   但冻结面为空」，建议升格为阻断（三选一：先提交后重跑 / 确认纯文档
+   变更后 `--accept-empty-face` 显式签收留痕 / 清单裁剪同步 design）；
+2. **跨仓声明防呆的覆盖面**：现有 advisory 只在「声明路径首段 token 命中
+   注册仓 key/basename」时触发（`sub-grid-security/src/...` 形态）；裸仓根
+   相对路径（`src/routes/.../LedgerForm.js`，首段 `src` 不命中）完全无告警。
+   空面 + 声明文件在主仓不存在（无论首段是否命中注册仓）就应点名，并可
+   对所有 local.yaml 注册仓做一次存在性探测提示；
+3. 顺带可评估：共享主仓路径是否也补一个轻量的「窗口外同名文件交付」探测
+   （worktree 已有 reflog 扫描先例）。
