@@ -67,6 +67,11 @@ interface HarnessOptions {
     logger: PreflightLogger,
     opts?: { officialRegistry?: boolean },
   ) => Promise<void>;
+  /**
+   * version 未知限频重探间隔（2026-10-13-sillyspec-version-probe-fast-retry）：
+   * 缺省走 manager 默认 120s；测试注入调小推进假钟验证窗口语义。
+   */
+  versionRetryMs?: number;
 }
 
 /**
@@ -114,6 +119,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     isBusy: () => busyFlag.busy,
     now: () => clockNow,
     logger,
+    versionRetryMs: opts.versionRetryMs,
   });
   return {
     manager,
@@ -131,6 +137,9 @@ function makeHarness(opts: HarnessOptions = {}) {
       runCommand.mock.calls.filter(
         ([c]) => c === 'npm view sillyspec version --prefer-online',
       ).length,
+    /** `sillyspec --version` 被真实执行的次数（限频重探断言用）。 */
+    localProbeCalls: () =>
+      runCommand.mock.calls.filter(([c]) => c === 'sillyspec --version').length,
   };
 }
 
@@ -168,6 +177,75 @@ describe('task-04 probeLocal / probeLatest 探测', () => {
     await h.manager.probeLatest();
     await h.manager.probeLatest();
     expect(h.npmViewCalls()).toBe(3);
+  });
+});
+
+// ── version 未知时限频重探（2026-10-13-sillyspec-version-probe-fast-retry）────
+
+describe('retryProbeLocalIfUnknown version 未知限频重探', () => {
+  it('版本未知+窗口已过 → 执行探测并刷新快照（注册期失败自愈链路）', async () => {
+    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
+    // 注册期探测失败（瞬态超时语义）：version 落 null 并记尝试时刻。
+    await expect(h.manager.probeLocal()).resolves.toBeNull();
+    expect(h.manager.getSnapshot().version).toBeNull();
+    expect(h.localProbeCalls()).toBe(1);
+
+    // 窗口过 + 瞬态原因消失（命令恢复出数）→ 重探成功，快照刷新。
+    h.advance(1_000);
+    h.state.local = '3.32.8';
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(2);
+    expect(h.manager.getSnapshot().version).toBe('3.32.8');
+  });
+
+  it('版本已知 → 纯 no-op 不探测', async () => {
+    const h = makeHarness({ local: '3.32.8', versionRetryMs: 1_000 });
+    await h.manager.probeLocal();
+    expect(h.localProbeCalls()).toBe(1);
+
+    await h.manager.retryProbeLocalIfUnknown();
+    h.advance(10_000); // 窗口再远也不重探（version 已知即 no-op）
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(1);
+  });
+
+  it('限频窗口内 → 跳过探测（连续调用不连发）', async () => {
+    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
+    await h.manager.probeLocal(); // 注册期失败记账
+    expect(h.localProbeCalls()).toBe(1);
+
+    h.advance(999); // 窗内
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(1);
+
+    h.advance(1); // 恰到窗口
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(2);
+  });
+
+  it('重探失败窗口重计时 → 一个窗口至多一次探测', async () => {
+    const h = makeHarness({ local: null, versionRetryMs: 1_000 });
+    await h.manager.probeLocal(); // 注册期失败（t0）
+    expect(h.localProbeCalls()).toBe(1);
+
+    h.advance(1_000); // 窗口过 → retry#1 探测（仍失败，lastAt=t0+1000）
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(2);
+
+    h.advance(999); // 新窗口内 → retry#2 跳过
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(2);
+
+    h.advance(1); // 新窗口过 → retry#3 探测
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(3);
+  });
+
+  it('从未尝试（构造即调）→ 立即探测一次', async () => {
+    const h = makeHarness({ local: '3.32.8', versionRetryMs: 1_000 });
+    await h.manager.retryProbeLocalIfUnknown();
+    expect(h.localProbeCalls()).toBe(1);
+    expect(h.manager.getSnapshot().version).toBe('3.32.8');
   });
 });
 
