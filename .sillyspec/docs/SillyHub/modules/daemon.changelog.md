@@ -37,3 +37,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
 - 2026-10-13-daemon-turn-anchor-snapshot | daemon 轮锚快照最小闭环(轮次文件变化追踪 Route B 真相源,已评审路线图第②步):agent 每轮结束时刻
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
+- 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho

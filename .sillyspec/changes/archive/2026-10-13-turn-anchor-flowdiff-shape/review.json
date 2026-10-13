@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-anchor-flowdiff-shape",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "d0093bf059dd39691b718ed81ea371dc14263eab",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "P3",
+      "title": "测试绑定用例名为实际用例名的语义等价意译（非逐字一致）",
+      "location": "sillyhub-daemon/tests/interactive/turn-anchor.test.ts vs requirements.md 测试绑定",
+      "claim": "FR-01/FR-02 绑定的用例名与实际用例名为语义等价意译（绑定「totals：落盘记录携带且 null 行不计入（既有七用例零改动）」/「toFlowDiffShape：投影形状与重算兜底（存量无 totals 记录）」；实际「totals：落盘记录携带 files 行数与加总（二进制 null 行不计入）；JSONL 行含 totals 键」/「toFlowDiffShape：rows=files 原样、totals 从 files 重算（存量无 totals 键的旧记录兜底）」）",
+      "evidence": "requirements.md L43-44；git show d0093bf05 测试 diff 两个新增 it 块标题",
+      "impact": "覆盖行为与 FR 完全对应，非承诺违反；仅命名非逐字一致，不影响判定"
+    },
+    {
+      "id": "F2",
+      "severity": "P3",
+      "title": "rows=files 原样引用仅以 toEqual 断言深等而非 toBe 引用同一",
+      "location": "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「toFlowDiffShape」用例",
+      "claim": "rows=files 原样引用（设计承诺）测试以 toEqual 断言深等而非 toBe 引用同一",
+      "evidence": "测试 expect(shape.rows).toEqual(legacyRecord.files)；实现 toFlowDiffShape 返回 rows: record.files（构造上即原样引用，代码可证）",
+      "impact": "实现满足承诺；测试断言弱一档属测试精度问题，无数据正确性风险"
+    }
+  ],
+  "dimensionNotes": {
+    "frImplementationTestAlignment": "4 条 FR 全对齐。FR-01：TurnAnchorRecord.totals 字段+doRecord 落盘前计算，新用例断言 {files:2,additions:1,deletions:1}（二进制 null 行不计入）且 JSONL 行含 totals 键；FR-02：toFlowDiffShape 导出纯函数（rows=record.files 原样、totals=computeTotals(record.files) 重算），存量无 totals 键旧记录兜底用例通过；FR-03：pnpm typecheck（tsc --noEmit）exit 0；FR-04：additive——既有字段零删改、JSONL 追加格式不变（行内多一 totals 键）、测试文件纯增量（+37 行无删改）。实测 pnpm vitest run tests/interactive/turn-anchor.test.ts 于 sillyhub-daemon：9/9 passed（七既有零改动 + 两新增），与承诺一致。",
+    "blindDimensionsFourQuestions": "四问均属实（对照代码非自述）：①乱序——computeTotals 为单记录 files 的确定性纯折叠，在 doRecord 串行链内落盘前计算，与到达顺序无关；②并发——无新共享状态/新写面，投影纯读，totals 计算在既有 per-session promise 链内；③生命周期——toFlowDiffShape 函数体不读 record.totals、恒从 files 重算（代码可证），存量旧记录（无 totals 键）经测试实测兜底成功；④作用域——字段与函数均在单会话记录域，anchorsDir 按 daemon 实例隔离（既有语义未动）。",
+    "disclosureBoundary": "显式裁决在案：rows 无 state 字段的维度差异在 design.md 接口契约段与 toFlowDiffShape JSDoc 双处披露（flow diff state 为变更粒度 committed/dirty/untracked/archived 三源区分，轮锚行天然无此维，消费方按缺省理解）；totals 双算（落盘便利 + 投影重算、真相在 files、同源同算）在风险段明确记述并经单一 computeTotals 落实。",
+    "protectionClaims": "①additive 核实：接口仅增字段、JSONL 行仅多一键、旧读者忽略新键零破坏（追加格式未动）；②computeTotals 单一算式两处消费核实：唯一定义，doRecord（落盘）与 toFlowDiffShape（投影）共用，doRecord 内两调用点（空数组初始化/diff 后）同式；③null 不计入核实：Number.isFinite 守卫（对 null 无强制转换、严格 false），files=行数含二进制行、加总不含——测试实测 2 文件（含 null 行）得 totals {files:2,additions:1,deletions:1}。",
+    "artifactSync": "模块头注已更新：旧句「--json 口同 flow diff 的 rows/totals 形状对齐留给后续切片」已替换为「rows/totals 形状已与 flow diff --json 对齐——toFlowDiffShape 投影口 + 记录内嵌 totals，2026-10-13-turn-anchor-flowdiff-shape」（git show diff 首 hunks 可证）。",
+    "workspaceParity": "评审对象两代码文件（src/interactive/turn-anchor.ts、tests/interactive/turn-anchor.test.ts）工作区与 d0093bf05 零漂移（git diff 空）；工作区仅 .sillyspec 流程元数据（design.md/flow-state.yaml/change-patch.json 等）有提交后变动，不属代码交付面。",
+    "probes": {
+      "cli-copy-selfsufficient": "如实核：本变更无 CLI 用户文案（纯 daemon 进程内模块 + JSDoc），无可独立核验的 CLI 复制面——n/a 如实记录",
+      "config-absent-zero-regression": "diff 未引入任何配置键/配置读取——n/a",
+      "crossrepo-path-compat": "未引入路径处理/跨仓操作（新增纯计算与投影）——n/a"
+    }
+  },
+  "reviewedAt": "2026-10-13T16:01:43Z"
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-turn-anchor-flowdiff-shape",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「totals：落盘记录携带且 null 行不计入（既有七用例零改动）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-anchor-flowdiff-shape"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts「toFlowDiffShape：投影形状与重算兜底（存量无 totals 记录）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-anchor-flowdiff-shape"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/turn-anchor.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-turn-anchor-flowdiff-shape"
+    }
+  ]
+}

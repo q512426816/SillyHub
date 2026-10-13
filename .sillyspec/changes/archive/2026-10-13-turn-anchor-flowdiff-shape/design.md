@@ -6,9 +6,13 @@ created_at: 2026-10-13T15:46:23.344Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 改 sillyhub-daemon/src/interactive/turn-anchor.ts：①TurnAnchorRecord 增 totals 字段（{files, additions, deletions}——files=行数、行数加总时 null 不计入，与 sillyspec flow diff totals 同语义），doRecord 落盘前计算；②导出 toFlowDiffShape(record) 纯函数——返回 {rows, totals}（rows=files 原样引用，不复制不改写），作为 flow diff 消费契约的统一投影口。为什么 additive：JSONL 是追加分块真相源，旧字段与追加格式不动、旧读者（含已归档变更的消费面）忽略新字段零破坏；投影函数让平台后续消费方（后端/前端）一套契约吃轮粒度（轮锚）与变更粒度（flow diff --json）两种数据源，不复制数组不引入第二真相。
 
 ## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 turn-anchor.ts：TurnAnchorRecord 接口增 totals 字段（additive）；新增导出 toFlowDiffShape（纯函数）；doRecord 内增 totals 计算。JSONL 单行多一个 totals 键（旧读者零感知）。无端点/命令/文件格式变化（daemon 对外 API 不动——投影函数供进程内消费）。轮粒度 rows 无 state 字段：flow diff 的 state 是变更粒度三源区分（committed/dirty/untracked/archived），轮锚 diff 行天然无此维度，消费方按缺省理解。
 

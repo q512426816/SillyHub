@@ -463,3 +463,67 @@ created_at: 2026-10-08T15:19:22.662Z
   confirmed_at: null
   source_change: 2026-10-13-daemon-turn-anchor-snapshot
   status: active
+
+## FR-auto-sillyhub-daemon-046 TurnAnchorRecord 新增 totals：files 行数与 additions/deletions 加总（null 不计入），落盘记录携带，既有七用例零改动全绿
+变更：2026-10-13-turn-anchor-flowdiff-shape
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-turn-anchor-flowdiff-shape/requirements.md#FR-01
+最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「totals：落盘记录携带且 null 行不计入（既有七用例零改动）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-anchor-flowdiff-shape
+  status: active
+
+## FR-auto-sillyhub-daemon-047 toFlowDiffShape 导出纯函数：输入记录返回 rows 与 totals（rows=files 原样，totals 同上语义），可直测
+变更：2026-10-13-turn-anchor-flowdiff-shape
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-turn-anchor-flowdiff-shape/requirements.md#FR-02
+最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts「toFlowDiffShape：投影形状与重算兜底（存量无 totals 记录）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-anchor-flowdiff-shape
+  status: active
+
+## FR-auto-sillyhub-daemon-048 typecheck 绿；新用例覆盖 totals 计算（含 null 行）与投影形状
+变更：2026-10-13-turn-anchor-flowdiff-shape
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-turn-anchor-flowdiff-shape/requirements.md#FR-03
+最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
+
+## FR-auto-sillyhub-daemon-049 不改 JSONL 既有字段与追加格式（additive：旧读者忽略新字段）
+变更：2026-10-13-turn-anchor-flowdiff-shape
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-turn-anchor-flowdiff-shape/requirements.md#FR-04
+最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-anchor-flowdiff-shape:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-anchor-flowdiff-shape
+  status: active

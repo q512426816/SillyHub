@@ -1,0 +1,137 @@
+diff --git a/sillyhub-daemon/src/interactive/turn-anchor.ts b/sillyhub-daemon/src/interactive/turn-anchor.ts
+index e92fbeb6b..4c28e7b76 100644
+--- a/sillyhub-daemon/src/interactive/turn-anchor.ts
++++ b/sillyhub-daemon/src/interactive/turn-anchor.ts
+@@ -5,7 +5,8 @@
+  * 职责：agent 每轮结束（onResult turn 边界）对会话 cwd 的 git 工作区打**内容锚点**，
+  * 与该会话上一锚 diff 出逐文件 additions/deletions，追加 JSONL 到
+  * `<daemonStateDir>/.runtime/turn-anchors/<sessionId>.jsonl`，供平台后续轮锚对账
+- * 消费（--json 口同 flow diff 的 rows/totals 形状对齐留给后续切片）。
++ * 消费（rows/totals 形状已与 flow diff --json 对齐——toFlowDiffShape 投影口 +
++ * 记录内嵌 totals，2026-10-13-turn-anchor-flowdiff-shape）。
+  *
+  * 锚形态（评审定案，Gap1 防漏）：
+  *   - **复制现场 index → GIT_INDEX_FILE 下 `git add -A` → `git write-tree`**：
+@@ -52,6 +53,13 @@ export interface TurnAnchorFileStat {
+   deletions: number | null;
+ }
+ 
++/** 行数加总口径（与 sillyspec flow diff --json 的 totals 同语义）：files=行数；null 行不计入加总。 */
++export interface TurnAnchorTotals {
++  files: number;
++  additions: number;
++  deletions: number;
++}
++
+ /** 一条轮锚记录（JSONL 单行，字段名与 flow diff --json 的 rows 同风格）。 */
+ export interface TurnAnchorRecord {
+   sessionId: string;
+@@ -68,6 +76,11 @@ export interface TurnAnchorRecord {
+   deduped: boolean;
+   /** 基线→本锚的逐文件变化；deduped=true 或无基线（空仓首轮）为空数组。 */
+   files: TurnAnchorFileStat[];
++  /**
++   * files 的加总（2026-10-13-turn-anchor-flowdiff-shape，additive）：落盘时随 files 同算；
++   * 消费方经 toFlowDiffShape 取用（投影不信任存量字段、始终重算——旧记录无此键零破坏）。
++   */
++  totals: TurnAnchorTotals;
+ }
+ 
+ /** 默认锚存储目录：<daemonStateDir>/.runtime/turn-anchors（SILLYHUB_DAEMON_DIR 可覆盖）。 */
+@@ -199,12 +212,14 @@ async function doRecord(opts: {
+     prevTreeSha,
+     deduped,
+     files: [],
++    totals: computeTotals([]),
+   };
+   if (!deduped) {
+     // diff 基线：上一锚 → 本锚；首轮退 HEAD 树（轮内已 commit 部分被吸收，design 记边界）。
+     const baseTree = prevTreeSha ?? snap.headSha;
+     if (baseTree !== null) {
+       record.files = await diffTrees(opts.cwd, baseTree, snap.treeSha);
++      record.totals = computeTotals(record.files); // 与 files 同源同算（防两处漂移）
+     }
+     await mkdir(anchorsDir, { recursive: true });
+     await appendFile(
+@@ -217,6 +232,35 @@ async function doRecord(opts: {
+   return record;
+ }
+ 
++/**
++ * files → totals 折叠（flow diff totals 同语义：null 行不计入加总，files=行数）。
++ * toFlowDiffShape 与 doRecord 共用（单一算式两处消费防漂移）。
++ */
++function computeTotals(files: TurnAnchorFileStat[]): TurnAnchorTotals {
++  let additions = 0;
++  let deletions = 0;
++  for (const f of files) {
++    if (Number.isFinite(f.additions)) additions += f.additions as number;
++    if (Number.isFinite(f.deletions)) deletions += f.deletions as number;
++  }
++  return { files: files.length, additions, deletions };
++}
++
++/**
++ * flow diff 消费契约投影（2026-10-13-turn-anchor-flowdiff-shape）：轮锚记录 → sillyspec
++ * `flow diff --json` 的 {rows, totals} 形状——平台消费方一套契约吃轮粒度（本函数）与
++ * 变更粒度（flow diff --json）两种数据源。rows=files 原样引用（零复制零改写，不造第二
++ * 真相）；totals **不信任存量字段、始终从 files 重算**——存量旧记录无 totals 键零破坏，
++ * 新旧记录同口径。维度差异（JSDoc 契约注记）：flow diff 的 rows[].state 是变更粒度三源
++ * 区分（committed/dirty/untracked/archived），轮锚 diff 行天然无此维，消费方按缺省理解。
++ */
++export function toFlowDiffShape(record: TurnAnchorRecord): {
++  rows: TurnAnchorFileStat[];
++  totals: TurnAnchorTotals;
++} {
++  return { rows: record.files, totals: computeTotals(record.files) };
++}
++
+ /**
+  * 轮锚点快照入口（永不抛错；失败返回 null）。
+  * 同会话并发调用经 per-session promise 链串行化（prev 锚读写无竞态）；
+diff --git a/sillyhub-daemon/tests/interactive/turn-anchor.test.ts b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+index b20e6487f..5878f9e6b 100644
+--- a/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+@@ -233,4 +233,41 @@ describe('interactive/turn-anchor 轮锚点快照', () => {
+       await rm(anchors, { recursive: true, force: true });
+     }
+   });
++
++  // ── 2026-10-13-turn-anchor-flowdiff-shape：totals + toFlowDiffShape 投影 ──
++  it('totals：落盘记录携带 files 行数与加总（二进制 null 行不计入）；JSONL 行含 totals 键', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-totals-${randomUUID().slice(0, 8)}`;
++    try {
++      // 一文本改动（+1/-1）+ 一二进制新文件（null/null，不计入加总）
++      await writeFile(join(repo, 'base.txt'), 'line1' + String.fromCharCode(10) + 'line2-changed' + String.fromCharCode(10), 'utf-8');
++      await writeFile(join(repo, 'blob.bin'), Buffer.from([0x00, 0x01, 0x02, 0xff]));
++      const rec = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(rec).not.toBeNull();
++      expect(rec!.totals).toEqual({ files: 2, additions: 1, deletions: 1 });
++      const lines = await readRecords(anchors, sid);
++      expect(lines[0]).toMatchObject({ totals: { files: 2, additions: 1, deletions: 1 } });
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('toFlowDiffShape：rows=files 原样、totals 从 files 重算（存量无 totals 键的旧记录兜底）', async () => {
++    const shapeMod = (await import('../../src/interactive/turn-anchor.js')) as {
++      toFlowDiffShape(record: unknown): { rows: unknown[]; totals: { files: number; additions: number; deletions: number } };
++    };
++    // 存量旧记录形态：无 totals 键（cast 绕过类型——投影函数不信任存量字段）
++    const legacyRecord = {
++      files: [
++        { path: 'a.txt', additions: 3, deletions: 1 },
++        { path: 'b.bin', additions: null, deletions: null },
++      ],
++    } as unknown as Parameters<typeof shapeMod.toFlowDiffShape>[0];
++    const shape = shapeMod.toFlowDiffShape(legacyRecord);
++    expect(shape.rows).toEqual(legacyRecord.files);
++    expect(shape.totals).toEqual({ files: 2, additions: 3, deletions: 1 });
++  });
+ });
