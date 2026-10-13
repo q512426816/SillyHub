@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-scroll-layout-storm",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "17abec741527b36896c20525f431558a43fa893a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "合帧唯一性（FR-01 场景 Then「requestAnimationFrame 排程至多一次」）未被测试断言锁定，实际由代码审查覆盖但绑定作答未显式声明该缺口",
+      "evidence": "测试用 scrollTop 写入计数观测，apply 幂等（|scrollTop-target|<=2 无写，session-panel-page.tsx:2064）使同帧 5 次排程与 1 次排程的写入增量相同，writes>before 无法区分排程次数；代码判重守卫 session-panel-page.tsx:1995 真实存在故无行为风险，且绑定行用例名如实写「事件内零同步 scrollTop 写入、下一帧才执行」未虚报——缺口仅在 FR-01 场景字面 Then 的后半段未如 FR-02/FR-03 那样显式声明「由审查覆盖」",
+      "location": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx:417-426"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——rAF 合帧对事件顺序不敏感，回调读 anchorPinRef 现值，迟到 scroll 下一帧再排，代码证实）",
+    "并发": "ok（边界已裁决：可接受——单线程事件模型无共享可变状态，句柄 null 判重 session-panel-page.tsx:1995 与 apply 身份校验 cur!==anchor session-panel-page.tsx:2053 均真实存在）",
+    "切换": "ok（边界已裁决：可接受——钉回延迟至多一帧有 watch interval 300ms+锚窗 2.5s 兜底（session-panel-page.tsx:2073-2079）；三处清理实在：isTrusted 取消 1987-1990、effect cleanup 取消 2027-2030、回调读现值 no-op 1998）",
+    "作用域": "ok（边界已裁决：可接受——改动仅滚动处理执行时机，anchorPinRafRef 为组件局部 ref，无跨工作区/跨实例数据读写面）"
+  },
+  "reviewedAt": "2026-10-13T10:53:21+08:00"
+}

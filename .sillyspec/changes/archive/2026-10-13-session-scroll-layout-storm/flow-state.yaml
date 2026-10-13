@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页连续滚动（触顶自动加载 / 回到开头后快速滚到底）在系统 Chrome 上 100% 单页崩溃白屏（renderer 被杀），webview 无法复现。根因方向：scroll 事件处理链上存在同步强制布局（layout
+  thrashing）——触顶翻页 handleLoadEarlier 内滚动锚捕获循环对全部 [data-turn-key] 行同步 getBoundingClientRect；onScroll 程序性滚动分支同步调 anchorPin
+  apply（读 offsetTop 写 scrollTop）再触发 scroll 事件形成反馈环。Chrome 真实滚轮高频事件下每秒数百次全文档强制布局，主线程长打满被 Chrome 判挂杀 tab；webview
+  无挂起查杀故复现不了。
+
+
+  成功标准：
+
+  - scroll 事件处理器（onScroll 及其同步调用链 handleLoadEarlier 的锚捕获段）内不再有同步强制布局：锚点重申与锚捕获的 DOM 遍历/几何读取全部改 rAF 合帧执行
+
+  - 行为零回归：触顶翻页仍按 scrollTop<=48 触发、prepend 后视口钉回语义不变、用户真实滚动（isTrusted）弃锚逻辑不变
+
+  - anchorPin rAF 句柄有清理（卸载/锚失效不泄漏 rAF 回调）
+
+  - 相关既有测试（session-panel 触顶加载/锚定/跳转用例）全绿
+
+  - 单页 4 份 useDaemonMachines 轮询合并不在本变更范围（另立变更），本变更不动轮询
+autopilot: true
+baseline_commit: 83cc32aee19e55f97bd0a7f949d5aac1bc2dca74
+updatedAt: '2026-10-13T02:58:23.291Z'
+baseline_sha256: 8d968b308f6a8c203145a57566ec8b3ed56fea481e707bb0177278f5d1e844c2
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（21.7s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261013025355\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 22 个
+

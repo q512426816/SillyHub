@@ -99,7 +99,10 @@ describe("scroll-up history integration", () => {
   it("3 consecutive scroll-to-top = 1 initial + 3 before calls, cursor monotonically decreases", async () => {
     const beforeCursors: string[] = [];
     sessionApi.getAgentSessionLogs.mockImplementation(
-      async (_sid: string, opts?: { before?: string }) => {
+      async (_sid: string, opts?: { before?: string; limit?: number }) => {
+        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+        //（轮边界对齐）——非翻页本体，空响应（页顶轮完整）不进游标记账。
+        if (opts?.before && opts.limit === 1) return [];
         if (opts?.before) {
           beforeCursors.push(opts.before);
           // 每页比上一页早 1 小时（简单固定递减，不做 epoch 换算）
@@ -170,7 +173,10 @@ describe("scroll-up history integration", () => {
     const older2 = sameTsPage("o2", 4800);
     const beforeIds: string[] = [];
     sessionApi.getAgentSessionLogs.mockImplementation(
-      async (_sid: string, opts?: { before?: string; beforeId?: string }) => {
+      async (_sid: string, opts?: { before?: string; beforeId?: string; limit?: number }) => {
+        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+        //（轮边界对齐）——非翻页本体，空响应不进 beforeId 记账。
+        if (opts?.before && opts.limit === 1) return [];
         if (!opts?.before) return initPage;
         beforeIds.push(opts.beforeId ?? "");
         return beforeIds.length === 1 ? older1 : older2;
@@ -360,6 +366,73 @@ describe("scroll-up history integration", () => {
     });
     const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
     expect(el.style.overflowAnchor).toBe("none");
+  });
+
+  // ── 2026-10-13-session-scroll-layout-storm：钉回重申 rAF 合帧 ──
+  // 修复前 onScroll 程序性滚动分支同步调 anchorPin apply（读 offsetTop 写
+  // scrollTop 均强制布局），scroll→apply→scrollTop 写→再派发 scroll 成反馈
+  // 环，Chrome 真实滚轮高频事件下布局风暴打满主线程被判挂杀 tab（单页白屏
+  // 崩溃）；修复后 rAF 合帧，同帧多次程序性 scroll 只排程一个钉回回调。
+  function stubRowRects() {
+    // jsdom 全 0 rect：锚捕获需 r.bottom > containerTop + 4——桩 rect（同上
+    // 方 anchor period 用例先例）。
+    document.querySelectorAll("[data-turn-key]").forEach((row) => {
+      row.getBoundingClientRect = () =>
+        ({ top: 10, bottom: 50, left: 0, right: 100, width: 100, height: 40, x: 0, y: 10, toJSON: () => ({}) }) as DOMRect;
+    });
+  }
+
+  it("程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）", async () => {
+    // before 按调用序返回两页满页（hasEarlier 保持 true，锚每轮重捕）。
+    let beforeCalls = 0;
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { before?: string }) => {
+        if (opts?.before) {
+          beforeCalls += 1;
+          return makePage(beforeCalls === 1 ? "older" : "older2", PAGE_SIZE, 0);
+        }
+        return makePage("init", PAGE_SIZE, 13 * 3600);
+      },
+    );
+    render(<Host sessionId="s-storm" />);
+    await waitFor(() => expect(screen.getAllByText(/init-msg/).length).toBeGreaterThan(0));
+    stubRowRects();
+    await scrollTimelineToTop();
+    await waitFor(() => expect(screen.getAllByText(/older-msg/).length).toBeGreaterThan(0));
+    // 第一轮锚可能已过 2.5s 存活窗（400 行渲染耗时）——第二轮加载即重捕新锚，
+    // 到达后立即断言（新锚窗口内），时序可控。
+    await scrollTimelineToTop();
+    const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
+    await waitFor(() => expect(screen.getAllByText(/older2-msg/).length).toBeGreaterThan(0));
+    // 桩 scrollTop setter：apply 的钉回写入可观测（写时机 = 布局语义时机）。
+    // 预置偏移值 100：钉回 target（jsdom offsetTop=0 - offset 10 = -10）与当前
+    // 差 110 > 2，下一帧钉回必产生一次写（幂等已到位时无写，无法观测时机）。
+    let writes = 0;
+    let scrollTopVal = 100;
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => scrollTopVal,
+      set: (v: number) => {
+        scrollTopVal = v;
+        writes += 1;
+      },
+    });
+    try {
+      const before = writes;
+      // 同帧连发 5 个程序性 scroll（jsdom Event isTrusted=false → else 分支）。
+      for (let i = 0; i < 5; i++) el.dispatchEvent(new Event("scroll"));
+      // 修复核心语义：scroll 事件处理器内零同步钉回（同步 apply 读 offsetTop
+      // 写 scrollTop = 强制布局，修复前风暴源）。
+      expect(writes).toBe(before);
+      // 真实 rAF 下一帧（jsdom 原生 16ms tick）：钉回执行（50ms 窗口 <
+      // watch interval 300ms 与锚 2.5s 存活窗，写入只可能来自钉回链路）。
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      expect(writes).toBeGreaterThan(before);
+    } finally {
+      delete (el as { scrollTop?: number }).scrollTop;
+    }
   });
 });
 

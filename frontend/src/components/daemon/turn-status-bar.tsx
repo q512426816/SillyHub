@@ -231,7 +231,11 @@ function collectSubagents(
         segmentId: s.id,
         name: s.subagentType ?? "子代理",
         subagentType: s.subagentType,
-        status: "running",
+        // 2026-10-13-slim-subagent-false-running / FR-04：历史孤儿 stub（orphaned，
+        // 派发行缺失/不可解析）不可能再合并——目录/状态条同显中性 stopped 灰态，
+        // 不再假「运行中」（评审 P1：主块灰态须同源传导到目录面）。实时暂态
+        // stub 不带标记仍 running，行为零变化。
+        status: s.orphaned ? "stopped" : "running",
         startedAt: null,
         endedAt: null,
         latestActivity: latestActivityWithin(s.children),

@@ -473,6 +473,81 @@ class TestSessionLogsRunIdAndSlim:
         assert slim_rows[2]["content_redacted"] == long_stdout
         assert slim_rows[2]["content_truncated"] is None
 
+    async def test_slim_truncated_row_returns_tool_use_id(
+        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
+    ) -> None:
+        """2026-10-13-slim-subagent-false-running / FR-01：slim 截断行从完整原文
+        抢救 tool_use_id 回传（截残 JSON 前端解析不出配对键，子代理归属断裂）；
+        非 JSON 超长行容错 None；未截断行 / 非 slim 路径恒 None（零变化）。"""
+        import json as _json
+
+        admin = await _admin_id(db_session)
+        sid = await _seed_session(db_session, owner_id=admin)
+        base = datetime.now(UTC) - timedelta(minutes=10)
+        run1 = _run(sid, created_at=base)
+        db_session.add(run1)
+        await db_session.commit()
+
+        # 会话 f231ca18 实证形态：超长 Agent 派发 JSON（tool_use_id 在尾部，截断必失）。
+        big_dispatch = _json.dumps(
+            {
+                "tool": "Agent",
+                "args": {"description": "独立设计审查", "prompt": "长指令。" * 800},
+                "tool_use_id": "call_d7dc",
+                "success": True,
+            },
+            ensure_ascii=False,
+        )
+        assert len(big_dispatch) > 2000
+        non_json_tool = "人类可读工具摘要。".ljust(3000, "摘")
+        logs = [
+            AgentRunLog(
+                run_id=run1.id,
+                timestamp=base,
+                channel="tool_call",
+                content_redacted=big_dispatch,
+            ),
+            AgentRunLog(
+                run_id=run1.id,
+                timestamp=base + timedelta(seconds=1),
+                channel="tool_call",
+                content_redacted=non_json_tool,
+            ),
+            AgentRunLog(
+                run_id=run1.id,
+                timestamp=base + timedelta(seconds=2),
+                channel="tool_call",
+                content_redacted='{"tool": "Glob", "tool_use_id": "call_small"}',
+            ),
+        ]
+        db_session.add_all(logs)
+        await db_session.commit()
+
+        slim_resp = await client.get(
+            f"/api/daemon/sessions/{sid}/logs",
+            headers=auth_headers,
+            params={"slim": "true"},
+        )
+        assert slim_resp.status_code == 200, slim_resp.text
+        rows = slim_resp.json()
+        assert [e["channel"] for e in rows] == ["tool_call", "tool_call", "tool_call"]
+        # 超长 JSON 行：截断照旧 + 配对键抢救回传。
+        assert rows[0]["content_truncated"] is True
+        assert len(rows[0]["content_redacted"]) == 2000
+        assert rows[0]["tool_use_id"] == "call_d7dc"
+        # 非 JSON 超长行：截断照旧，配对键容错 None（不阻断）。
+        assert rows[1]["content_truncated"] is True
+        assert rows[1]["tool_use_id"] is None
+        # 未截断行：不解析不回传（恒 None）。
+        assert rows[2]["content_truncated"] is None
+        assert rows[2]["tool_use_id"] is None
+
+        # 非 slim 路径零变化：全文 + 恒 None。
+        plain = await client.get(f"/api/daemon/sessions/{sid}/logs", headers=auth_headers)
+        plain_rows = plain.json()
+        assert plain_rows[0]["content_redacted"] == big_dispatch
+        assert all(e["tool_use_id"] is None for e in plain_rows)
+
 
 # ── task-02 / FR-02：单条日志全文端点 ────────────────────────────────────────
 

@@ -484,6 +484,13 @@ export interface AssemblerLogInput {
    * 单条全文（getAgentSessionLogFull）；实时 SSE / 非 slim 历史恒 null/undefined。
    */
   contentTruncated?: boolean | null;
+  /**
+   * 2026-10-13-slim-subagent-false-running / FR-02：slim 截断行回传的配对键——
+   * 截残 JSON 解析不出 tool_use_id 时（parseToolUseRaw 失败），tool_use 段 id /
+   * stub 合并键回退采用本字段（后端截断前从完整原文抢救，仅截断行非空）。
+   * 实时 SSE / 非 slim 历史恒 null/undefined（行内解析恒成功，零回退）。
+   */
+  toolUseId?: string | null;
 }
 
 /** 结构化段模型（渲染与派生统计的唯一数据源，design §7）。 */
@@ -565,6 +572,13 @@ export type TurnSegment =
       id: string;
       subagentType: string | null;
       children: TurnSegment[];
+      /**
+       * 2026-10-13-slim-subagent-false-running / FR-04：历史批量装配收尾标记——
+       * logsToSegments 全部日志消费完后仍残留的 stub = 派发行缺失 / 不可解析的
+       * 数据病理（不可能再有 tool_use 到达合并），渲染层据此显示中性灰态而非
+       * 恒「运行中」。仅历史批量路径标记；实时暂态 stub（等待合并）不标记。
+       */
+      orphaned?: boolean;
     }
   | { kind: "stderr"; id: string; text: string; ts: number | null }
   | {
@@ -1395,11 +1409,20 @@ export function applyLogToSegments(
 
   // 1. tool_use 兜底合并（§9.5）：同 tool_use_id 的 subagent_stub 已存在（子消息先
   //    到）→ 摘除 stub，其 children / subagentType 随迁到即将创建的 tool 段。
+  //    2026-10-13-slim-subagent-false-running / FR-02：slim 截残行解析不出
+  //    tool_use_id 时回退采用回传 toolUseId（合并键与段 id 必须同源，否则拆两段）。
   const parsedTool = seg.kind === "tool_use" ? parseToolUseRaw(seg.text) : null;
+  // 回退键收窄到 tool_use 段型（评审 P3 加固）：后端仅对截断 tool_call 行置
+  // toolUseId，非 tool_use 输入携带该字段属异常形态——若放行会在步骤 1 摘走
+  // stub 而 children 无处回挂（拆两段丢归属）。
+  const resolvedToolUseId =
+    seg.kind === "tool_use"
+      ? (parsedTool?.toolUseId ?? nonEmptyString(input.toolUseId))
+      : null;
   let adoptedChildren: TurnSegment[] = [];
   let adoptedSubagentType: string | null = null;
-  if (parsedTool && parsedTool.toolUseId) {
-    const extracted = extractStubById(segments, parsedTool.toolUseId);
+  if (resolvedToolUseId) {
+    const extracted = extractStubById(segments, resolvedToolUseId);
     if (extracted.stub) {
       segments = extracted.segments;
       adoptedChildren = extracted.stub.children;
@@ -1484,10 +1507,12 @@ export function applyLogToSegments(
       }
       break;
     case "tool_use": {
+      // 段 id = tool_use_id（result 配对 + 子代理路由 key）；行内解析失败回退
+      // slim 回传 toolUseId（2026-10-13-slim-subagent-false-running），仍缺才用
+      // logId 兜底（toolName=null 原样显示 raw，R-07）。
       const toolSegId =
-        (parsedTool && parsedTool.toolUseId) ||
-        makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
-      if (parsedTool && parsedTool.toolUseId) ids().add(parsedTool.toolUseId);
+        resolvedToolUseId ?? makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
+      if (resolvedToolUseId) ids().add(resolvedToolUseId);
       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
         ...children,
         {
@@ -1999,7 +2024,41 @@ export function logsToSegments(
     }
     turn = applyLogToSegments(turn, log);
   }
-  return turn.segments;
+  // 2026-10-13-slim-subagent-false-running / FR-04：历史批量收尾孤儿标记——全部
+  // 日志消费完后仍残留的 stub = 派发行缺失/不可解析（含 slim 旧数据），不可能
+  // 再有 tool_use 到达合并，标记 orphaned 供渲染层显示中性灰态（不恒「运行中」）。
+  // 实时增量路径（applyLogToSegments 逐条）不经过此处，暂态 stub 语义零变化。
+  return markOrphanedStubs(turn.segments);
+}
+
+/** FR-04：树内残留 stub 标 orphaned（path-copy：无 stub 或已全标记时原引用返回）。 */
+function markOrphanedStubs(segments: TurnSegment[]): TurnSegment[] {
+  let changed = false;
+  const walk = (list: TurnSegment[]): TurnSegment[] => {
+    let listChanged = false;
+    const out: TurnSegment[] = [];
+    for (const s of list) {
+      if (s.kind === "subagent_stub" && !s.orphaned) {
+        changed = true;
+        listChanged = true;
+        out.push({ ...s, orphaned: true });
+        continue;
+      }
+      if (s.kind === "tool" && s.children.length > 0) {
+        const nextChildren = walk(s.children);
+        if (nextChildren !== s.children) {
+          changed = true;
+          listChanged = true;
+          out.push({ ...s, children: nextChildren });
+          continue;
+        }
+      }
+      out.push(s);
+    }
+    return listChanged ? out : list;
+  };
+  const next = walk(segments);
+  return changed ? next : segments;
 }
 
 /**

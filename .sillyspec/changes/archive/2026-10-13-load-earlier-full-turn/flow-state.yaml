@@ -1,0 +1,47 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400
+  行分页，页边界会把一轮（run）切成两半——触顶加载后顶部那轮只有后半段（提问在更早未加载区）；回到会话开头拉到头后跨页同轮分裂成多个轮块显示，用户感知「加载不满一轮」。
+
+
+  成功标准：
+
+  - 触顶加载一页后，若页顶边界切在轮中间，该轮被完整加载（拉全整轮行并合并装配成一个轮块，含提问）
+
+  - 回到会话开头到头后，顶部第一轮完整（跨页/跨窗口边界的轮合并为单块显示）
+
+  - 跨「已加载窗口与翻页页」边界的轮同样合并，不再出现同轮分裂双块
+
+  - 直达请求失败时静默降级为现状行为（照常 prepend 当页），不报错不卡死
+
+  - 运行中的轮（当前 currentRunId）不做合并重建，保持现状路径
+
+  - 既有翻页/跳转/回到开头相关测试全部保持通过
+autopilot: false
+baseline_commit: 3f1f02f496152800fa5133ef44192739dabd04bc
+updatedAt: '2026-10-13T11:11:20.646Z'
+baseline_sha256: 7990d7a8f0a071271763ac10cc49c15ee9622973fc171ff57bbb2e56564cfa52
+spec_approved: true
+spec_approved_at: '2026-10-13T10:47:42.227Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-2BN7FDC
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(jsx19)+fr(17)（74.6s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261013105147\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 5 个
+

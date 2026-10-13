@@ -98,6 +98,9 @@ export interface AgentRunLogEntry {
   // content_redacted 超 2000 字符截到 2000 并置 true；旧路径不置恒
   // null/undefined（零回归）。截断条目需全文走 GET /sessions/{id}/logs/{log_id}。
   content_truncated?: boolean | null;
+  // 2026-10-13-slim-subagent-false-running / FR-01：slim 截断行回传的 tool_use_id
+  // 配对键（后端截断前从完整原文解析；非 slim / 未截断行恒 null/undefined）。
+  tool_use_id?: string | null;
 }
 
 export interface CreateAgentRunInput {

@@ -198,6 +198,11 @@ class AgentRunLogEntry(BaseModel):
     # GET /sessions/{id}/logs/{log_id}。旧路径（不传 slim）不置（恒 None），
     # 旧调用方 / openapi 零变化。
     content_truncated: bool | None = None
+    # 2026-10-13-slim-subagent-false-running / FR-01：slim 截断行的配对键抢救——
+    # tool_call JSON 被截残后前端解析不出 tool_use_id，子代理日志路由不进派发
+    # tool 段（跌落 stub 恒「运行中」）。仅 slim 截断发生时由截断点从完整原文
+    # 解析回填（router 内存赋值，DB 无此列）；非 slim / 未截断行恒 None。
+    tool_use_id: str | None = None
     model_config = {"from_attributes": True}
 
 

@@ -326,9 +326,18 @@ const TOOL_STATUS_META: Record<
  * 子代理块状态：tool 段取自身 status；stub 段无状态字段——它是 tool_use 段
  * 尚未到达（或永不到达）的临时容器，子消息仍在流入，视为 running（后续合并
  * 迁入 tool 段后由其 status 接管，design §9.5）。
+ * 2026-10-13-slim-subagent-false-running / FR-04：历史批量装配收尾仍残留的
+ * 孤儿 stub（orphaned，派发行缺失/不可解析的数据病理）不可能再合并——显示
+ * 中性 stopped 灰态（灰点无脉冲无「运行中」），不再恒假「运行中」。实时
+ * 暂态 stub 不带标记，仍 running 等待合并，行为零变化。
  */
-function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "deny" {
-  return segment.kind === "subagent_stub" ? "running" : segment.status;
+function subagentStatus(
+  segment: SubagentContainerSegment,
+): "running" | "ok" | "deny" | "stopped" {
+  if (segment.kind === "subagent_stub") {
+    return segment.orphaned ? "stopped" : "running";
+  }
+  return segment.status;
 }
 
 /* ───────── task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）───────── */

@@ -1,0 +1,343 @@
+diff --git a/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/flow-state.yaml b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/flow-state.yaml
+new file mode 100644
+index 000000000..b01306651
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/flow-state.yaml
+@@ -0,0 +1,27 @@
++tier: thin
++legacy_fallback: false
++substeps: {}
++born_face: thin
++with_tasks: false
++review_force: null
++input: >-
++  工作区会话页空门户「继续最近会话」跨工作区串档：recentSession 派生自全局最近 100 条会话未按页面 scope 过滤，A 工作区页显示并继续 B 工作区最近会话，selectedWorkspaceId
++  快照与文件树跟随串档。
++
++
++  成功标准：
++
++  - workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
++
++  - 全局 /sessions（无 scope）行为不变，仍取全局最近会话
++
++  - 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
++
++  - resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
++
++  - 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
++autopilot: true
++baseline_commit: 71b382cfb0eb2e04a7bcb7c20bea0b5db2f0def8
++updatedAt: '2026-10-12T07:28:11.169Z'
++baseline_sha256: 9c66524d8c8e478e740884ce6413bb3c1266d427d1f196335430fc4ed0d3be28
++
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index aca1c5a49..cd2a6cc66 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -992,6 +992,88 @@ describe("SessionsPortal 三 scope 渲染", () => {
+     expect(screen.getByTestId("sessions-left-files-toggle")).toBeEnabled();
+   });
+ 
++  // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口共用
++  // 同一过滤分支（三入口左侧列表同为工作区树），it.each 逐一锁契约。
++  it.each([
++    ["workspace", WORKSPACE_SCOPE],
++    ["change", CHANGE_SCOPE],
++    ["quicklog", QUICKLOG_SCOPE],
++  ])(
++    "2026-10-12-ws-scoped-recent-session %s 入口最近会话属其他工作区时按本工作区取",
++    async (_kind: string, scope: SessionListScope) => {
++      // 全局最近是 B 工作区会话（last_active_at 更新），本工作区（ws-1）会话较旧。
++      mocks.machinesHook.mockReturnValue({
++        items: [],
++        sharedToMe: [],
++        machineCandidates: [],
++        total: 0,
++        sessions: [
++          makeSession({
++            id: "s-ws-b",
++            title: "B 工作区的最新会话",
++            workspace_id: "ws-b",
++            last_active_at: "2026-08-15T10:00:00Z",
++          }),
++          makeSession({
++            id: "s-ws-1",
++            title: "本工作区的会话",
++            workspace_id: "ws-1",
++            last_active_at: "2026-08-15T09:00:00Z",
++          }),
++        ],
++        isLoading: false,
++        isFetching: false,
++        isError: false,
++        error: null,
++        refetch: vi.fn(),
++      });
++      renderPortal(scope);
++
++      // 按钮取本工作区会话（全局取最近则显示 B 工作区标题，断言即失败）。
++      const resumeBtn = await screen.findByRole("button", {
++        name: /继续最近会话/,
++      });
++      expect(resumeBtn).toHaveTextContent("本工作区的会话");
++      expect(resumeBtn).not.toHaveTextContent("B 工作区的最新会话");
++      // 直达选中：真会话面板挂载的是本工作区会话。
++      fireEvent.click(resumeBtn);
++      await waitFor(() => {
++        expect(mocks.lastSessionPanelProps?.sessionId).toBe("s-ws-1");
++      });
++    },
++  );
++
++  it("2026-10-12-ws-scoped-recent-session scope 入口本工作区无会话时不渲染继续最近会话入口", async () => {
++    // 全局仅有 B 工作区会话——修复前空门户会显示并继续 B 的会话（串档 bug
++    // 原样），修复后过滤为空 → recentSession=null → 入口不渲染（null 契约）。
++    mocks.machinesHook.mockReturnValue({
++      items: [],
++      sharedToMe: [],
++      machineCandidates: [],
++      total: 0,
++      sessions: [
++        makeSession({
++          id: "s-ws-b",
++          title: "B 工作区的最新会话",
++          workspace_id: "ws-b",
++        }),
++      ],
++      isLoading: false,
++      isFetching: false,
++      isError: false,
++      error: null,
++      refetch: vi.fn(),
++    });
++    renderPortal(WORKSPACE_SCOPE);
++
++    expect(screen.getByLabelText("门户空态")).toBeTruthy();
++    // 等 machinesHook 消费到位（recentSession 派生源）再断言入口不存在。
++    await waitFor(() => expect(mocks.machinesHook).toHaveBeenCalled());
++    expect(
++      screen.queryByRole("button", { name: /继续最近会话/ }),
++    ).toBeNull();
++  });
++
+   it("workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」，空门户态 + defaultExpandedWorkspaceId 预展开传参（FR-06）", async () => {
+     renderPortal(WORKSPACE_SCOPE);
+ 
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index e6caea216..8d79bae25 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -364,16 +364,28 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+ 
+   // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
+   // created_at；无会话返回 null 不渲染入口。
++  // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口
++  // （workspace/change/quicklog，列表同为工作区树）先按 workspace_id 过滤——
++  // 原全局取最近会 A 工作区页显示并继续 B 工作区会话（selectedWorkspaceId
++  // 快照与 📁 文件树跟随串档）；本工作区未进全局前 100 → 过滤后空 → 沿用
++  // null 不渲染契约（少显示而非错显示）。全局门户无 scope 不过滤；runtime
++  // scope 仅悬浮窗使用，不经空门户此入口。
+   const recentSession = useMemo(() => {
+-    if (sessions.length === 0) return null;
++    const scopedSessions =
++      scope?.kind === "workspace" ||
++      scope?.kind === "change" ||
++      scope?.kind === "quicklog"
++        ? sessions.filter((s) => s.workspace_id === scope.workspaceId)
++        : sessions;
++    if (scopedSessions.length === 0) return null;
+     return (
+-      [...sessions].sort(
++      [...scopedSessions].sort(
+         (a, b) =>
+           parseTs(b.last_active_at ?? b.created_at) -
+           parseTs(a.last_active_at ?? a.created_at),
+       )[0] ?? null
+     );
+-  }, [sessions]);
++  }, [sessions, scope]);
+ 
+   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
+   // quick（ql-20260916-006）：裸 listProviders() 调用统一 basic 键——与
+diff --git a/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/design.md b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/design.md
+new file mode 100644
+index 000000000..1178b1d2d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/design.md
+@@ -0,0 +1,50 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T07:27:53.013Z
++---
++# 设计记录（Design Record）— 2026-10-12-ws-scoped-recent-session
++
++## 做法概述
++
++本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
++
++`sessions-portal.tsx` 的空门户快捷动作「继续最近会话」派生 `recentSession` 时消费的是 `useDaemonMachines` 旁路的全局最近 100 条未归档会话，未按页面 scope 过滤——A 工作区会话页会显示并继续 B 工作区的最近会话（点击后 `selectedWorkspaceId` 快照与 📁 文件树跟随串档）。
++
++修复取纯前端过滤方案（探索阶段方案 B）：在 `recentSession` 的 useMemo 内，scope 携带 workspaceId 的三种入口（workspace/change/quicklog——三者左侧列表同为工作区树，语义一致）先按 `s.workspace_id === scope.workspaceId` 过滤再排序取最近；无 scope 的全局门户不过滤，行为不变。选择过滤而非砍入口：数据已带 `workspace_id`（门户选中快照本就在消费），一行过滤零新请求，保留快捷续聊功能。放弃「工作区入口直接隐藏按钮」方案：丢功能且治标不治本；放弃「后端按工作区查询最近会话」方案：旁路数据已在手，新端点属过度设计。
++
++runtime scope（悬浮窗锁定机器场景）不经空门户该入口（唯一消费方 floating-session-host 恒 runtime 锁定态），本变更不为其加过滤分支，保持判别联合中最小改动。
++
++## 接口契约
++
++动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
++
++无。`SessionsPortal` props、`resolveDefaultMachineId` 导出签名、URL ?session= 协议均不变；变化仅限组件内部 `recentSession` 派生逻辑（scope 入口下按钮候选集收窄为本工作区会话）。后端零改动。
++
++## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
++
++1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
++   答：成立。sessions 来自 react-query 缓存（15s 轮询 + SSE invalidate 去抖刷新），`recentSession` 在 useMemo 中对快照数组同步过滤+排序，无跨帧时序假设；`last_active_at` 并列时排序结果与现状一致（同 key 稳定序）。
++
++2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
++   答：不适用：纯前端派生计算，无共享可变状态、无服务端写。过滤在 useMemo 内完成，react-query 缓存本身由其单写者模型保证一致性。
++
++3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
++   答：安全。scope 是 prop，切换入口时 useMemo 依赖 [sessions, scope] 重算，旧工作区最近会话不残留；按钮点击后的选中/快照/URL 写入链路（setSelectedWorkspaceId / syncSessionParam）不变，且快照源与过滤源同为 scope.workspaceId，天然同源不串档。
++
++4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
++   答：本变更正是修作用域串台：scope 入口按 workspace_id 过滤后按钮恒为本工作区会话；全局门户不过滤是设计意图（全局视角）。已知可接受降级：本工作区会话未进全局前 100 条时按钮静默不渲染（少显示而非错显示，FR-03 契约）。`resolveDefaultMachineId` 故意保持全局 sessions（用户机器偏好语义，FR-04）。
++
++## 风险与死路
++
++本方案最大的风险是什么？试过但放弃的方案及放弃理由？
++
++最大风险：过滤依赖 `AgentSessionRead.workspace_id` 字段可靠性——后端该字段自 2026-08-22 起即为列表稳定字段（深链选中快照同源消费，sessions-portal.tsx:1072），风险低；测试以跨工作区固件直接锁定。次要风险：三入口共分支若未来新增 scope 种类（如 runtime 空门户化）需显式决策过滤维度，本变更注释已留判别说明。
++
++试过但放弃的方案：① 工作区入口直接取消「继续最近会话」——丢功能，本工作区有历史会话时快捷续聊路径消失；② 后端新增按工作区查最近会话端点——旁路数据已在手，属过度设计；③ 顺带把 resolveDefaultMachineId 也按 scope 过滤——机器是用户偏好非工作区内容，在 A 工作区默认选用户最近用过的机器是合理语义，改动反成回归。
++
++## 文件变更清单
++
++| 操作 | 路径 | 说明 |
++| --- | --- | --- |
++| 修改 | frontend/src/components/sessions/sessions-portal.tsx | recentSession useMemo：scope 携带 workspaceId 的三入口先按 workspace_id 过滤再排序；无 scope 不过滤 |
++| 修改 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | 新增两用例：三 scope 入口跨工作区取本工作区最近（点击直达选中）；本工作区无会话不渲染按钮 |
+diff --git a/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/proposal.md b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/proposal.md
+new file mode 100644
+index 000000000..0f84cdc3f
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/proposal.md
+@@ -0,0 +1,33 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T07:27:53.013Z
++---
++# 提案书（Proposal）— 2026-10-12-ws-scoped-recent-session
++
++## 动机
++
++任务原话转写：工作区会话页空门户「继续最近会话」跨工作区串档：recentSession 派生自全局最近 100 条会话未按页面 scope 过滤，A 工作区页显示并继续 B 工作区最近会话，selectedWorkspaceId 快照与文件树跟随串档。
++
++成功标准：
++- workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
++- 全局 /sessions（无 scope）行为不变，仍取全局最近会话
++- 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
++- resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
++- 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
++
++## 变更范围
++
++按成功标准机械推导，共 5 条验收面：
++1. workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
++2. 全局 /sessions（无 scope）行为不变，仍取全局最近会话
++3. 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
++4. resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
++5. 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
++
++## 成功标准（可验证）
++
++1. workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
++2. 全局 /sessions（无 scope）行为不变，仍取全局最近会话
++3. 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
++4. resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
++5. 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
+diff --git a/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/requirements.md b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/requirements.md
+new file mode 100644
+index 000000000..5405d339d
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/requirements.md
+@@ -0,0 +1,65 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T07:27:53.013Z
++---
++# 需求规格（Requirements）— 2026-10-12-ws-scoped-recent-session
++
++## 功能需求
++
++### FR-01: workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
++
++- workspace/change/quicklog 三种 scope 入口下，空门户「继续最近会话」必须只从 workspace_id 等于 scope.workspaceId 的会话中按 last_active_at（缺省回退 created_at）降序取第一条；禁止展示或选中其他工作区的会话。
++
++#### 场景：跨工作区取最近
++
++- Given：门户 sessions（useDaemonMachines 旁路，全局最近 100 条未归档）同时含 B 工作区最近会话（last_active_at 更新）与 A 工作区会话；
++- When：以 workspace scope（workspaceId=A）渲染空门户；
++- Then：「继续最近会话」按钮显示 A 的会话标题，点击直达选中 A 会话（selectedWorkspaceId 快照=A）。
++
++### FR-02: 全局 /sessions（无 scope）行为不变，仍取全局最近会话
++
++- 不传 scope 的全局门户必须保持现状：从全部 sessions 按同一排序取全局最近一条（含任意工作区/非工作区会话），禁止因本变更引入过滤。
++
++#### 场景：全局门户不受影响
++
++- Given：sessions 含跨工作区多条会话，全局最近一条属 B 工作区；
++- When：无 scope 渲染 /sessions 空门户；
++- Then：「继续最近会话」仍取 B 的最近会话（既有 ql-20260910-002 用例锁定）。
++
++### FR-03: 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
++
++- scope 入口下本工作区过滤后无会话时，recentSession 必须为 null，空门户禁止渲染「继续最近会话」按钮——沿用既有「无会话不渲染入口」契约（少显示而非错显示）。
++
++#### 场景：本工作区无会话
++
++- Given：sessions 仅含 B 工作区会话（或本工作区会话未进全局前 100）；
++- When：以 workspace scope（workspaceId=A）渲染；
++- Then：门户空态正常渲染但「继续最近会话」按钮不出现。
++
++### FR-04: resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
++
++- ?new=1 直达新建的默认机器三级回退（resolveDefaultMachineId）必须继续消费未过滤的全局 sessions——默认机器是「用户最近所用机器」的用户偏好语义，机器不隶属工作区，禁止随本变更为其引入 scope 过滤。
++
++#### 场景：默认机器解析不变
++
++- Given：门户带 includeSessions 拉取全局 sessions；
++- When：?new=1 直达新建触发默认机器解析；
++- Then：三级回退（localStorage 上次选择 → 全局最近会话所在在线机器 → 最新心跳在线机器）行为与本变更前一致（既有 resolveDefaultMachineId 用例锁定）。
++
++### FR-05: 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
++
++- 必须新增测试用例锁定：scope 入口全局最近会话属其他工作区时按钮取本工作区最近会话（含点击直达选中）；本工作区无会话时按钮不渲染；全局门户行为由既有 ql-20260910-002 用例继续锁定。
++
++#### 场景：主路径
++
++- Given：sessions-portal.test.tsx 既有 mock 基建（machinesHook 可控 sessions）；
++- When：新增用例以 WORKSPACE_SCOPE 渲染并覆写 sessions；
++- Then：断言按钮文案取本工作区会话 / 按钮不存在，且既有全局用例不回归。
++
++## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
++
++FR-01: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
++FR-02: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
++FR-03: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
++FR-04: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
++FR-05: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」+「scope 入口本工作区无会话时不渲染继续最近会话入口」
+diff --git a/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/tasks.md b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/tasks.md
+new file mode 100644
+index 000000000..64aeb40dc
+--- /dev/null
++++ b/.sillyspec/changes/2026-10-12-ws-scoped-recent-session/tasks.md
+@@ -0,0 +1,9 @@
++---
++author: flow-machine-draft
++created_at: 2026-10-12T07:27:53.013Z
++---
++# 任务注册表（Tasks）— 2026-10-12-ws-scoped-recent-session
++
++- [x] task-01: sessions-portal.tsx recentSession useMemo 加 scope 过滤——workspace/change/quicklog 三入口先按 `s.workspace_id === scope.workspaceId` 过滤再排序，无 scope 不过滤（resolveDefaultMachineId 消费点不动）——验证：tsc 无新错
++- [x] task-02: sessions-portal.test.tsx 新增两用例——① 三 scope 入口全局最近会话属 B 工作区时按钮取本工作区（ws-1）会话且点击直达选中；② 本工作区无会话时按钮不渲染——验证：vitest 新用例绿
++- [x] task-03: 跑 sessions-portal.test.tsx 全文件回归——既有 ql-20260910-002 全局直达用例与 resolveDefaultMachineId 三级回退用例保持绿——验证：全文件绿

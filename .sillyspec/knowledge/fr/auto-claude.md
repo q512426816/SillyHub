@@ -212,3 +212,169 @@ created_at: 2026-10-08T17:53:22.647Z
   confirmed_at: null
   source_change: 2026-10-12-ws-ref-ws-name
   status: active
+
+## FR-auto-claude-013 workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：跨工作区取最近
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-01
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-01
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-014 全局 /sessions（无 scope）行为不变，仍取全局最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：全局门户不受影响
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-02
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-02
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-015 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：本工作区无会话
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-03
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-03
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-016 resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：默认机器解析不变
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-04
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-04
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-017 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-05
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-05
+  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-018 scroll 事件处理器（onScroll 及其同步调用链 handleLoadEarlier 的锚捕获段）内不再有同步强制布局：锚点重申与锚捕获的 DOM 遍历/几何读取全部改 rAF 合帧执行
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：程序性 scroll 高频风暴合帧
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-01
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-019 行为零回归：触顶翻页仍按 scrollTop<=48 触发、prepend 后视口钉回语义不变、用户真实滚动（isTrusted）弃锚逻辑不变
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：用户接管弃锚
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-02
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-020 anchorPin rAF 句柄有清理（卸载/锚失效不泄漏 rAF 回调）
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-03
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+## FR-auto-claude-021 相关既有测试（session-panel 触顶加载/锚定/跳转用例）全绿
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-04
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-022 单页 4 份 useDaemonMachines 轮询合并不在本变更范围（另立变更），本变更不动轮询
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-05
+最近确认：17abec741527b36896c20525f431558a43fa893a

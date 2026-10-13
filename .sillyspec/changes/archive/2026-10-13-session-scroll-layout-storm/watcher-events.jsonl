@@ -1,0 +1,17 @@
+{"ts":1791858873095,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791858873095,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791858873095,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791859004373,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791859036073,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791859066024,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791859172017,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791859539455,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791859764678,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/session-panel/session-panel-page.tsx.tmp.21028.4682b0c5afbb——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791859895536,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/session-panel/session-panel-page.tsx.tmp.21028.ed29b17cf17d——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791859968878,"kind":"commit","stage":null,"detail":"f3f323d45","provisional":true}
+{"ts":1791859985361,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791859985361,"kind":"task-done","stage":"tasks","detail":"checked 0→3","provisional":true}
+{"ts":1791860001234,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791860001234,"kind":"task-done","stage":"tasks","detail":"checked 3→5","provisional":true}
+{"ts":1791860004960,"kind":"commit","stage":null,"detail":"17abec741","provisional":true}
+{"ts":1791860038913,"kind":"gate-run","stage":"verify","detail":"门实测 passed（21.7s） · 20261013025355","provisional":true}

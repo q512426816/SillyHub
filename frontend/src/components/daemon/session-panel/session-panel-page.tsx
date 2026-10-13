@@ -343,6 +343,40 @@ function steeredTurnIndexOf(turns: SessionTurnView[], runId: string): number {
   return turns.findIndex((t) => t.runId === runId || t.realRunId === runId);
 }
 
+/* ── 2026-10-13-load-earlier-full-turn：「加载更早」轮边界对齐纯函数 ──────────
+ * 背景：(ts,id) 复合游标按 400 行翻页，页边界 / 已加载窗口边界都会把一轮（run）
+ * 切成两半——触顶加载后顶部那轮只有后半段（提问在更早未加载区）；「回到会话
+ * 开头」拉到头后跨页同轮分裂成多个轮块（每页独立 logsToTurns 装配）。对齐手段：
+ * 判出跨界轮后 run_id 直达拉整轮行，替换当页该轮行装配 + 摘窗口内同轮旧块，
+ * 一轮一个完整块（直达先例：handleJumpToTurn 单轮直达）。 */
+
+/** 剥 prepend 轮块的 #e 游标页键后缀（`realRunId#e<pageKey>` → realRunId；
+ *  非变体块原样返回——SSE 新建块 runId 即真实 id）。 */
+function stripPageKeySuffix(runId: string): string {
+  const at = runId.indexOf("#e");
+  return at === -1 ? runId : runId.slice(0, at);
+}
+
+/**
+ * 窗口侧跨界轮收集：翻页页轮集合 ∩ 已加载窗口轮集合——命中的轮横跨「窗口最旧
+ * 行」边界（提问段在窗口、更早段在页内或未加载区），显示分裂为窗口块 + 页内块。
+ * 只收终态块（运行中实时轮不参与合并重建——摘块会打断 SSE 增量链路，保持现状
+ * 分裂属可接受降级）；attach 伪 id 块的 runId 非真实 id，仅 realRunId 有值才匹配。
+ */
+function collectCrossBoundaryRuns(
+  pageLogs: AgentRunLogEntry[],
+  turns: SessionTurnView[],
+): Set<string> {
+  const pageRunIds = new Set(pageLogs.map((l) => l.run_id));
+  const cross = new Set<string>();
+  for (const t of turns) {
+    if (!TERMINAL_TURN_STATUSES.has(t.status)) continue;
+    const key = t.realRunId ?? (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
+    if (key != null && pageRunIds.has(key)) cross.add(key);
+  }
+  return cross;
+}
+
 /**
  * steered=true 响应 → 引导段以「引导中」（steering）态追加进目标活跃轮段尾
  * （UserMsgSegmentView 渲染 brand 虚线气泡+脉冲；多条并发各占一段）。turn.segments
@@ -1607,8 +1641,11 @@ export function SessionPanelPage({
 
   // ── quick（2026-09-02 群聊体验）：加载更早消息（before 游标 prepend）─────
   // 装配层为 turn 形态（logsToTurns run 分组）——更老日志独立装配成 turns 后
-  // 头部拼接；realRunId 已在当前 turns 的轮跳过（长 run 跨游标边界时防双条，
-  // 该轮更早段丢弃属可接受降级，正常轮不跨游标）。resync/增量路径零改动。
+  // 头部拼接；同 run 跨页展示为多个轮块（时间序正确，#e 游标后缀防 React key
+  // 撞；SSE 增量按 realRunId 取最末块不受影响）。
+  // 2026-10-13-load-earlier-full-turn：轮边界对齐——页边界 / 窗口边界切轮时
+  // run_id 直达拉整轮行，当页该轮行替换为整轮行装配 + 摘窗口内同轮终态旧块，
+  // 跨界轮收敛为单个完整块（提问 + 全部输出同块；详见模块级纯函数区注释）。
   // 触顶自动加载（quick 迭代）：原顶部按钮改滚动触发——滚动接线与 prepend
   // 滚动锚的 DOM 组装在 sessionBody 处（isToolReportBody 之后），经 ref 间接
   // 供本回调读取，避免块级声明顺序耦合。
@@ -1657,6 +1694,12 @@ export function SessionPanelPage({
   // quick（ql-20260916-017）：跳转抑制贴底跟随（TurnTimeline props）——跳转
   // 翻页/定位期间 true，定位 settle 后 1s 解除（smooth 滚动余量）。
   const [jumpFollowSuppress, setJumpFollowSuppress] = useState(false);
+  // 2026-10-13-session-scroll-layout-storm：钉回重申的 rAF 合帧句柄。onScroll
+  // 程序性滚动分支原同步调 apply（读 offsetTop + 写 scrollTop 均强制布局），
+  // 写 scrollTop 再派发 scroll 事件成反馈环；Chrome 真实滚轮高频事件下每秒
+  // 数百次全文档强制布局，主线程长打满被 Chrome 判挂杀 tab（单页白屏崩溃；
+  // webview 无挂起查杀故复现不了）。合帧后每帧至多一次重申。
+  const anchorPinRafRef = useRef<number | null>(null);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
     if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
@@ -1729,22 +1772,97 @@ export function SessionPanelPage({
         (m, l) => (l.timestamp < m.timestamp ? l : m),
         older[0]!,
       );
-      historyCursorRef.current = oldest.timestamp;
-      historyCursorIdRef.current = oldest.id;
+      // ── 2026-10-13-load-earlier-full-turn：轮边界对齐（至少完整加载一轮）──
+      // 窗口侧：页轮 ∩ 窗口终态轮（跨「窗口最旧行」边界的轮）。
+      let crossRuns = collectCrossBoundaryRuns(older, turnsRef.current);
+      // 页顶侧：满页（可能还有更早）时探查紧邻更早一行——同 run 即页顶轮被切
+      //（提问段在下一页之上未加载）。limit=1 时间维取游标前最新一条，与翻页同
+      // 游标语义零歧义。
+      if (older.length >= HISTORY_PAGE_SIZE) {
+        const probe = await getAgentSessionLogs(sessionId, {
+          before: oldest.timestamp,
+          beforeId: oldest.id,
+          limit: 1,
+          slim: true,
+          signal: abort.signal,
+        });
+        if (epochAtStart !== sessionEpochRef.current) return;
+        if (probe[0]?.run_id === oldest.run_id) crossRuns.add(oldest.run_id);
+      }
+      // 直达拉全轮行替换当页该轮行：单轮失败 / 空返回只降级该轮（当页行原样
+      // 装配，保持现状分裂显示），不影响其余跨界轮。
+      let pageLogs = older;
+      if (crossRuns.size > 0) {
+        const runIds = [...crossRuns];
+        const fulls = await Promise.all(
+          runIds.map(async (r) => {
+            try {
+              return {
+                run: r,
+                logs: await getAgentSessionLogs(sessionId, {
+                  runId: r,
+                  slim: true,
+                  signal: abort.signal,
+                }),
+              };
+            } catch {
+              return { run: r, logs: null as AgentRunLogEntry[] | null };
+            }
+          }),
+        );
+        if (epochAtStart !== sessionEpochRef.current) return;
+        // okRuns 采纳闸（评审 P2 修复）：直达端点 ASC + 上限截断丢的是该轮
+        // **最新段**（session_insights.py read_session_logs run_id 分支）——直达
+        // 行集未覆盖到当页该轮最新行（更覆盖不到更晚的窗口段）即判定截断，
+        // 该轮降级现状（当页行原样装配、不摘窗口块），防替换合并静默丢尾部
+        // 内容。判定不依赖上限魔法数：ASC 完整返回必含当页段与窗口段。
+        const pageMaxTsByRun = new Map<string, string>();
+        for (const l of older) {
+          const cur = pageMaxTsByRun.get(l.run_id);
+          if (cur === undefined || l.timestamp > cur) pageMaxTsByRun.set(l.run_id, l.timestamp);
+        }
+        const okRuns = new Set(
+          fulls
+            .filter((f) => {
+              if ((f.logs?.length ?? 0) === 0) return false;
+              const pageMax = pageMaxTsByRun.get(f.run);
+              if (pageMax === undefined) return true;
+              const directMax = f.logs!.reduce(
+                (m, l) => (l.timestamp > m ? l.timestamp : m),
+                f.logs![0]!.timestamp,
+              );
+              return directMax >= pageMax;
+            })
+            .map((f) => f.run),
+        );
+        if (okRuns.size > 0) {
+          const extra = fulls.filter((f) => okRuns.has(f.run)).flatMap((f) => f.logs!);
+          pageLogs = [...older.filter((l) => !okRuns.has(l.run_id)), ...extra];
+          crossRuns = okRuns;
+        } else {
+          crossRuns = new Set<string>();
+        }
+      }
+      const oldestPage = pageLogs.reduce(
+        (m, l) => (l.timestamp < m.timestamp ? l : m),
+        pageLogs[0]!,
+      );
+      historyCursorRef.current = oldestPage.timestamp;
+      historyCursorIdRef.current = oldestPage.id;
       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
       // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
       // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
       hasEarlierRef.current = older.length >= HISTORY_PAGE_SIZE;
       chainedMore = older.length >= HISTORY_PAGE_SIZE;
-      const olderTurns = logsToTurns(older);
+      const olderTurns = logsToTurns(pageLogs);
       // quick（ql-20260916-013）：空页（到头/全部被过滤）无 prepend——锚点作废
       // 清掉，防其滞留到后续无关的高度增长（异步内容撑高）时误补偿跳视口。
       if (olderTurns.length === 0) pendingAnchorRef.current = null;
       if (olderTurns.length > 0) {
         // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
-        // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
+        // 会因 React 延迟执行读到已再前进的游标；取 oldestPage.id 局部变量，
         // 与上方刚写入的 historyCursorIdRef 一致。
-        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${oldest.id.slice(0, 8)}`;
+        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${oldestPage.id.slice(0, 8)}`;
         // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
         // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
         // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
@@ -1756,6 +1874,19 @@ export function SessionPanelPage({
           runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
         }));
         setTurnState((prev) => {
+          // 2026-10-13-load-earlier-full-turn：摘窗口内跨界轮旧终态块——整轮行
+          // 已并入本页装配（直达含该轮全部行，窗口内行不缺），旧块不摘会同轮
+          // 双块（旧段 + 全轮段）双显。运行中块经 collectCrossBoundaryRuns
+          // 终态闸天然不在集合内，此处匹配仅历史块。
+          const survivors =
+            crossRuns.size > 0
+              ? prev.turns.filter((t) => {
+                  const key =
+                    t.realRunId ??
+                    (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
+                  return !(key != null && crossRuns.has(key));
+                })
+              : prev.turns;
           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
           // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
           // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
@@ -1764,10 +1895,8 @@ export function SessionPanelPage({
           // ts 全量数字串 + 本页首行 id 前 8 位，task-06）——纯 ts 数字串在
           // 「同 ts 满 100 行批跨页」时两页撞 key。realRunId 保持原值——SSE
           // 增量与孤儿 run 补建按 realRunId 匹配不受影响（upsertTurn 实时
-          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）；原整
-          // turn 丢弃对单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15
-          // 用户实证）。
-          return { ...prev, turns: [...decorated, ...prev.turns] };
+          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）。
+          return { ...prev, turns: [...decorated, ...survivors] };
         });
       }
     } catch {
@@ -1791,6 +1920,15 @@ export function SessionPanelPage({
   useEffect(() => {
     hasEarlierRef.current = hasEarlier;
   }, [hasEarlier]);
+  // 2026-10-13-load-earlier-full-turn：当前 turns 快照镜像——「加载更早」轮边界
+  // 对齐要判「翻页页轮 ∩ 已加载窗口轮」跨界集合，handleLoadEarlier 的 deps 刻意
+  // 不含 turnState（防每轮 SSE 增量重建回调击穿滚动监听引用），经 ref 读取发起时
+  // 快照（换会话由纪元校验兜底；同会话 SSE 增量只影响尾部实时轮，历史跨界轮
+  // 匹配不受陈旧快照拖累）。
+  const turnsRef = useRef<TurnState["turns"]>([]);
+  useEffect(() => {
+    turnsRef.current = turnState.turns;
+  }, [turnState.turns]);
 
   /** task-04：单页「加载更早」Promise 化复用（跳转循环每页 await 一次）。
    *  返回本次是否真实加载了一页——handleLoadEarlier 本体返回 void 且多路
@@ -2004,9 +2142,22 @@ export function SessionPanelPage({
         lastUserScrollTsRef.current = Date.now();
         pendingAnchorRef.current = null; // 用户接管：立即弃锚（新加载自会重捕）
         anchorPinRef.current = null;
+        // 挂起的钉回 rAF 一并取消（弃锚后迟到回调本会读 null no-op，取消是
+        // 省一次空调度 + 语义显式：用户接管后零程序性钉回）。
+        if (anchorPinRafRef.current !== null) {
+          cancelAnimationFrame(anchorPinRafRef.current);
+          anchorPinRafRef.current = null;
+        }
       } else {
-        // 程序性滚动（含未知写入者触底）：锚定期内立即钉回。
-        anchorPinRef.current?.();
+        // 程序性滚动（含未知写入者触底）：锚定期内钉回——rAF 合帧（见
+        // anchorPinRafRef 声明注释；同帧冗余 scroll 事件合并为一次 apply，
+        // 回调读 anchorPinRef 现值，锚已失效则自然 no-op）。
+        if (anchorPinRafRef.current === null) {
+          anchorPinRafRef.current = requestAnimationFrame(() => {
+            anchorPinRafRef.current = null;
+            anchorPinRef.current?.();
+          });
+        }
       }
       const el = e.target as HTMLElement | null;
       if (!el || el.getAttribute("data-testid") !== "turn-timeline-scroll") return;
@@ -2032,6 +2183,10 @@ export function SessionPanelPage({
       if (activeTurnRafRef.current !== null) {
         cancelAnimationFrame(activeTurnRafRef.current);
         activeTurnRafRef.current = null;
+      }
+      if (anchorPinRafRef.current !== null) {
+        cancelAnimationFrame(anchorPinRafRef.current);
+        anchorPinRafRef.current = null;
       }
     };
     // 挂载维度：会话主体骨架（早退渲染）先于时间线出现——经 callback ref 的

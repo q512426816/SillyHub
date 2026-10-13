@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-load-earlier-full-turn",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a20ae3e3dea00f945697455f3c920858fcf01da5",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "采纳闸残余窄带：截断切点落窗口段内（2000<N≤2400 且窗口持最新 m>N-2000 行）时 directMax≥pageMax 判据失效，窗口尾部仍可静默丢失",
+      "evidence": "后端直达 ASC+limit 2000 返回最旧 2000 行（session_insights.py:810-817），闸只比 directMax 与当页该轮 max ts（session-panel-page.tsx:1828-1834）；无截断时 directMax=全轮 max≥一切可见行✓、directMax<pageMax 判截断✓（原 P2 主区间已闭合），但当 N∈(2000,2400] 且该轮最新 m>N-2000 行恰在初始窗口（m≤400）时切点(第 2000 行)落在页段之后、窗口段之内：directMax≥pageMax 通过采纳，窗口块被 survivors 摘除而直达集不含位置>2000 的窗口行（如 N=2300/窗口 350 行/页 400 行：页段止于 1950≤2000 闸过，窗口 2001..2300 共 300 行丢失）。design.md:72 声称的「directMax≥pageMax⟺未截断」在此窄带不成立——正确判据应为 directMax≥该轮全部已加载行（含窗口块）max ts。触发集为原 P2（任意 N>2000）的严格子集，生产实证单轮最大 1324 行<2000，当前零暴露，不阻断；建议后续把闸的比较基准扩为「当页行∪窗口同轮块」max ts。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1828-1834"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "fixClosure": {
+    "P2-采纳闸": "已落地：闸代码 HEAD 真实存在（session-panel-page.tsx:1814-1836，pageMaxTsByRun Map :1819-1823 + okRuns filter :1825-1837）；降级路径完备（非采纳轮当页行保留——older.filter 只滤 okRuns 行 :1840，窗口块保留——crossRuns=okRuns 后 survivors 只摘采纳轮 :1883-1894）；单轮隔离（per-run filter+try/catch，不殃及同批）；完整直达零误伤（ASC 完整返回 directMax=全轮 max≥pageMax 恒过闸）；Map 构建 O(400) 无性能问题；pageMax===undefined 分支不可达（crossRuns 键⊆older 的 run_id——collect :366-378 与探查 add(oldest.run_id) :1791 两来源均在页内）属防御分支；回归用例「直达 ASC 上限截断丢最新段→采纳闸降级该轮」真实存在（session-panel-load-earlier-full-turn.test.tsx:331-352，run-A slice(0,101) 直达 directMax<a-397 必拒采、run-Z 完整照常合并、A-窗口尾部-398/399 单显断言窗口块未摘，断言与实现行为一致）。残余窄带缺口见 findings[0]（P3）。",
+    "P3-探查run块序假阴性": "已按裁决落地：design.md:76-78「已裁决边界」显式补记「limit=1 探查受后端 run 块序影响在交错 run 场景可能漏检页顶切轮（假阴性，仅保持现状分裂显示，无内容丢失，可接受）」——与代码事实一致（探查经 read_model 块序，后果仅降级现状）。",
+    "P3-FR06留档矛盾": "已落地：requirements.md:79 更新为「47/47——基线存量失败…随本变更补齐修复，独立提交 4b969b5a5」；该提交真实存在于链上（HEAD~1，page.test.tsx:1539 emoji 断言对齐【📎 截图.png】），留档口径与交付物一致。",
+    "P3-FR02无端到端夹具": "维持裁决：handleJumpToHead→loadEarlierOnce→handleLoadEarlier 同链路复用（session-panel-page.tsx 同一函数零分叉），jump-head 两用例经 limit=1 探查 mock 适配（session-history-scroll.test.tsx:99-104/173-186）仍覆盖链路，代码事实支持论证，场景级夹具缺口按前轮裁决接受。"
+  },
+  "frVerdicts": {
+    "FR-01": "兑现：满页才探查（:1781）、probe 同 run 判定（:1791）、整轮替换装配、到头零探查（用例 4 断言 limit=1 调用数为 0）",
+    "FR-02": "兑现（同链路复用维持）：翻页/探查/直达均在 handleLoadEarlier 单点，jump-head 循环无分叉路径",
+    "FR-03": "兑现：页轮∩窗口终态轮合并+摘块（:366-378/:1883-1894），用例 1 A-窗口尾部单显断言锚定",
+    "FR-04": "兑现且语义扩展一致：reject（logs=null）与空返回均被闸拒（(f.logs?.length??0)===0→false :1826），当页原样 prepend+窗口块保留（用例 3/5 双证）",
+    "FR-05": "兑现：TERMINAL_TURN_STATUSES={completed,failed,killed}（turn-state.ts:121-125），collect 非终态 continue（:373），SSE 链路零改动",
+    "FR-06": "兑现：47/47 口径与提交链（4b969b5a5+a20ae3e3d）一致，4 处 mock 适配均为 limit=1 分流（形态适配非行为变更）"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "limit=1 探查受后端 run 块序影响在交错 run 场景漏检页顶切轮（假阴性）",
+      "verdict": "可接受",
+      "reason": "后果仅为保持现状分裂显示、零内容丢失，修复需动后端排序语义代价不成比例，design 已显式披露。"
+    },
+    {
+      "boundary": "「回到会话开头」请求量约增 1~2 倍（每满页 +1 探查、每跨界轮 +1 直达）",
+      "verdict": "可接受",
+      "reason": "显式重操作且 50 页上限封顶，limit=1/slim=true 载荷极小，远优于被放弃的续拉整页方案。"
+    },
+    {
+      "boundary": "采纳闸判定截断后该轮降级现状分裂显示（不合并）",
+      "verdict": "可接受（附 findings[0] 残余备注）",
+      "reason": "主区间（切点在页段之前/N>2400）判定正确、降级零丢失，内容完整性优先于显示完整性的取舍成立；残余窄带（2000<N≤2400 切点落窗口段内）属同族更低概率缺口（生产最大 1324 行零暴露），不阻断。"
+    }
+  ],
+  "artifactSync": "确认：diff 3f1f02f49..HEAD 仅触 4 个前端文件（session-panel-page.tsx + 3 测试），getAgentSessionLogs 既有签名已支持 runId/limit/slim/signal，无 api-types.ts/openapi.json/后端改动，纯前端内部逻辑无需生成物同步；冻结 change.patch 与 HEAD 状态一致（git apply --check --reverse 通过）。",
+  "reviewedAt": "2026-10-13T11:10:27Z"
+}

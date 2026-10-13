@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-slim-subagent-false-running",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-slim-subagent-false-running:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_fast_replay.py::TestSessionLogsRunIdAndSlim::test_slim_truncated_row_returns_tool_use_id「slim"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-slim-subagent-false-running"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-slim-subagent-false-running:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「regroup 回退登记跨 run 终态行」",
+        "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「slim 截断回退 toolUseId：子日志挂进派发段不产生 stub」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-slim-subagent-false-running"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-slim-subagent-false-running:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「恢复配对后 taskStatus 终态接管头部显示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-slim-subagent-false-running"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-slim-subagent-false-running:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「历史孤儿 stub 标记 orphaned」",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「孤儿 stub 灰点无脉冲不显示运行中、实时 stub 仍脉冲」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-slim-subagent-false-running"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-slim-subagent-false-running:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-log-assembler.test.ts「解析成功时零回归（行内值优先）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-slim-subagent-false-running"
+    }
+  ]
+}

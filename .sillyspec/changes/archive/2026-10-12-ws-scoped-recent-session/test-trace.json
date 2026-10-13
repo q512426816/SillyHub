@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-12-ws-scoped-recent-session",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-scoped-recent-session"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-scoped-recent-session"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-scoped-recent-session"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-scoped-recent-session"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-05",
+      "tests": [
+        "test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-12-ws-scoped-recent-session"
+    }
+  ]
+}

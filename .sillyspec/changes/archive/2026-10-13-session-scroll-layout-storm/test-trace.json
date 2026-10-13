@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-scroll-layout-storm",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-scroll-layout-storm"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-scroll-layout-storm"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-scroll-layout-storm"
+    }
+  ]
+}

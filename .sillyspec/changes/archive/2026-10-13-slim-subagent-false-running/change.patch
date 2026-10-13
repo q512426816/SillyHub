@@ -1,0 +1,605 @@
+diff --git a/backend/app/modules/agent/schema.py b/backend/app/modules/agent/schema.py
+index 4234fa327..a8e6d347f 100644
+--- a/backend/app/modules/agent/schema.py
++++ b/backend/app/modules/agent/schema.py
+@@ -198,6 +198,11 @@ class AgentRunLogEntry(BaseModel):
+     # GET /sessions/{id}/logs/{log_id}。旧路径（不传 slim）不置（恒 None），
+     # 旧调用方 / openapi 零变化。
+     content_truncated: bool | None = None
++    # 2026-10-13-slim-subagent-false-running / FR-01：slim 截断行的配对键抢救——
++    # tool_call JSON 被截残后前端解析不出 tool_use_id，子代理日志路由不进派发
++    # tool 段（跌落 stub 恒「运行中」）。仅 slim 截断发生时由截断点从完整原文
++    # 解析回填（router 内存赋值，DB 无此列）；非 slim / 未截断行恒 None。
++    tool_use_id: str | None = None
+     model_config = {"from_attributes": True}
+ 
+ 
+diff --git a/backend/app/modules/daemon/router/session_insights.py b/backend/app/modules/daemon/router/session_insights.py
+index d3de33de3..03ede08f2 100644
+--- a/backend/app/modules/daemon/router/session_insights.py
++++ b/backend/app/modules/daemon/router/session_insights.py
+@@ -645,6 +645,25 @@ _SLIM_TOOL_CHANNEL = "tool_call"
+ _SLIM_TOOL_CONTENT_MAX_CHARS = 2000
+ 
+ 
++def _extract_tool_use_id(content: str) -> str | None:
++    """2026-10-13-slim-subagent-false-running / FR-01：tool_call 完整原文的配对键解析。
++
++    slim 截断会把超长 tool_call JSON 截残，前端 parseToolUseRaw 解析失败拿不到
++    tool_use_id（子代理日志路由不进派发 tool 段、跌落 stub 恒「运行中」）——截断
++    前从完整原文抢救配对键随 DTO 回传。非 JSON / 非对象 / 缺字符串键 → None
++    （不阻断截断，防御 daemon 历史上的非 JSON tool_call 行形态）。
++    """
++    try:
++        obj = json.loads(content.strip())
++    except (TypeError, ValueError):
++        return None
++    if isinstance(obj, dict):
++        value = obj.get("tool_use_id")
++        if isinstance(value, str) and value:
++            return value
++    return None
++
++
+ @router.get(
+     "/sessions/{session_id}/logs",
+     response_model=list,  # response items are AgentRunLogEntry
+@@ -808,6 +827,9 @@ async def get_session_logs(
+     payload = [AgentRunLogEntry.model_validate(log) for log in logs]
+     # slim 截断：只动 tool 通道超长行（DTO 是 model_validate 产出的独立实例，
+     # 直接赋值不影响 ORM / 库数据）；其余通道与非超长行零触碰。
++    # 2026-10-13-slim-subagent-false-running / FR-01：截断行先从完整原文抢救
++    # tool_use_id 回传（截残后前端解析不出配对键，子代理归属断裂）；仅截断行
++    # 设置，非 slim / 未截断行恒 None。
+     if slim:
+         for item in payload:
+             if (
+@@ -815,6 +837,7 @@ async def get_session_logs(
+                 and item.content_redacted is not None
+                 and len(item.content_redacted) > _SLIM_TOOL_CONTENT_MAX_CHARS
+             ):
++                item.tool_use_id = _extract_tool_use_id(item.content_redacted)
+                 item.content_redacted = item.content_redacted[:_SLIM_TOOL_CONTENT_MAX_CHARS]
+                 item.content_truncated = True
+     # ql-20260909-012：json.dumps + gzip.compress 均为纯 CPU 同步调用——长会话
+diff --git a/backend/app/modules/daemon/tests/test_session_fast_replay.py b/backend/app/modules/daemon/tests/test_session_fast_replay.py
+index ce1dd6005..107998001 100644
+--- a/backend/app/modules/daemon/tests/test_session_fast_replay.py
++++ b/backend/app/modules/daemon/tests/test_session_fast_replay.py
+@@ -473,6 +473,81 @@ class TestSessionLogsRunIdAndSlim:
+         assert slim_rows[2]["content_redacted"] == long_stdout
+         assert slim_rows[2]["content_truncated"] is None
+ 
++    async def test_slim_truncated_row_returns_tool_use_id(
++        self, client: AsyncClient, auth_headers: dict[str, str], db_session: AsyncSession
++    ) -> None:
++        """2026-10-13-slim-subagent-false-running / FR-01：slim 截断行从完整原文
++        抢救 tool_use_id 回传（截残 JSON 前端解析不出配对键，子代理归属断裂）；
++        非 JSON 超长行容错 None；未截断行 / 非 slim 路径恒 None（零变化）。"""
++        import json as _json
++
++        admin = await _admin_id(db_session)
++        sid = await _seed_session(db_session, owner_id=admin)
++        base = datetime.now(UTC) - timedelta(minutes=10)
++        run1 = _run(sid, created_at=base)
++        db_session.add(run1)
++        await db_session.commit()
++
++        # 会话 f231ca18 实证形态：超长 Agent 派发 JSON（tool_use_id 在尾部，截断必失）。
++        big_dispatch = _json.dumps(
++            {
++                "tool": "Agent",
++                "args": {"description": "独立设计审查", "prompt": "长指令。" * 800},
++                "tool_use_id": "call_d7dc",
++                "success": True,
++            },
++            ensure_ascii=False,
++        )
++        assert len(big_dispatch) > 2000
++        non_json_tool = "人类可读工具摘要。".ljust(3000, "摘")
++        logs = [
++            AgentRunLog(
++                run_id=run1.id,
++                timestamp=base,
++                channel="tool_call",
++                content_redacted=big_dispatch,
++            ),
++            AgentRunLog(
++                run_id=run1.id,
++                timestamp=base + timedelta(seconds=1),
++                channel="tool_call",
++                content_redacted=non_json_tool,
++            ),
++            AgentRunLog(
++                run_id=run1.id,
++                timestamp=base + timedelta(seconds=2),
++                channel="tool_call",
++                content_redacted='{"tool": "Glob", "tool_use_id": "call_small"}',
++            ),
++        ]
++        db_session.add_all(logs)
++        await db_session.commit()
++
++        slim_resp = await client.get(
++            f"/api/daemon/sessions/{sid}/logs",
++            headers=auth_headers,
++            params={"slim": "true"},
++        )
++        assert slim_resp.status_code == 200, slim_resp.text
++        rows = slim_resp.json()
++        assert [e["channel"] for e in rows] == ["tool_call", "tool_call", "tool_call"]
++        # 超长 JSON 行：截断照旧 + 配对键抢救回传。
++        assert rows[0]["content_truncated"] is True
++        assert len(rows[0]["content_redacted"]) == 2000
++        assert rows[0]["tool_use_id"] == "call_d7dc"
++        # 非 JSON 超长行：截断照旧，配对键容错 None（不阻断）。
++        assert rows[1]["content_truncated"] is True
++        assert rows[1]["tool_use_id"] is None
++        # 未截断行：不解析不回传（恒 None）。
++        assert rows[2]["content_truncated"] is None
++        assert rows[2]["tool_use_id"] is None
++
++        # 非 slim 路径零变化：全文 + 恒 None。
++        plain = await client.get(f"/api/daemon/sessions/{sid}/logs", headers=auth_headers)
++        plain_rows = plain.json()
++        assert plain_rows[0]["content_redacted"] == big_dispatch
++        assert all(e["tool_use_id"] is None for e in plain_rows)
++
+ 
+ # ── task-02 / FR-02：单条日志全文端点 ────────────────────────────────────────
+ 
+diff --git a/backend/openapi.json b/backend/openapi.json
+index e733a6761..f91ae1188 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -37691,6 +37691,17 @@
+               }
+             ],
+             "title": "Content Truncated"
++          },
++          "tool_use_id": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Tool Use Id"
+           }
+         },
+         "type": "object",
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 24db651a4..2ac9e5524 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -522,6 +522,27 @@ describe("logsToTurns 父归属跨 run 重挂（2026-09-15-subagent-three-pane-d
+     ).toBe(true);
+   });
+ 
++  it("截残派发行回退 tool_use_id 登记：跨 run 终态行仍重挂（2026-10-13-slim-subagent-false-running / FR-02）", () => {
++    // slim 截断形态：派发 JSON 被截残（toolUseIdOfContent 解析失败），后端回传
++    // tool_use_id 字段——登记须回退消费，否则跨 run 终态行不重挂、派发段恒 running。
++    const logs = base();
++    const dispatch = logs[1]!;
++    const truncated = {
++      ...dispatch,
++      content_redacted:
++        '{"tool": "Task", "args": {"description": "后台调研", "prompt": "你是调研员（长指令截断处…',
++      tool_use_id: "toolu_A1",
++    } as AgentRunLogEntry;
++    const turns = toSegmentTurns([logs[0]!, truncated, ...logs.slice(2)]);
++    const dispatchTurn = turns.find((t) => t.realRunId === runA);
++    const laterTurn = turns.find((t) => t.realRunId === runB);
++    const tool = findToolSeg(dispatchTurn?.segments, "toolu_A1");
++    expect(tool).toMatchObject({ kind: "tool", taskStatus: "completed", taskElapsedMs: 1200 });
++    expect(
++      (laterTurn?.segments ?? []).some((s) => s.kind === "subagent_stub"),
++    ).toBe(false);
++  });
++
+   it("无跨 run 散落时零位移（同 run 归属行为与既有完全一致）", () => {
+     const logs = base().map((l) => ({ ...l, run_id: runA }) as AgentRunLogEntry);
+     const turns = toSegmentTurns(logs);
+diff --git a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+index c761eac82..a47632943 100644
+--- a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
++++ b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+@@ -1550,3 +1550,119 @@ describe("压缩摘要与压缩状态协议行（ql-20260917-006）", () => {
+     expect(batch.map((s) => s.kind)).toEqual(live.segments.map((s) => s.kind));
+   });
+ });
++
++/* ───────── 2026-10-13-slim-subagent-false-running：slim 截断配对键回退 + 孤儿 stub ───────── */
++
++describe("slim 截断行回退 toolUseId（2026-10-13-slim-subagent-false-running / FR-02）", () => {
++  /** 会话 f231ca18 实证形态：超长 Agent 派发 tool_call JSON 被 slim 截残（解析失败）。 */
++  const truncatedDispatch =
++    '{"tool": "Agent", "args": {"description": "独立设计审查", "prompt": "你是独立设计审查员（长指令被截断处…';
++
++  it("截残派发行回退回传 toolUseId：子代理日志挂进派发 tool 段，不再产生 stub", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
++      makeLog("l2", "stdout", "[THINKING] 子代理思考", {
++        parentToolUseId: "call_x",
++        subagentType: "general-purpose",
++      }),
++      makeLog("l3", "stdout", "子代理结论", {
++        parentToolUseId: "call_x",
++        subagentType: "general-purpose",
++      }),
++    ]);
++    // 无 stub：子日志全部路由进恢复配对键的 tool 段 children。
++    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
++    const tool = toolById(segments, "call_x");
++    expect(tool.raw).toBe(truncatedDispatch);
++    expect(tool.subagentType).toBe("general-purpose");
++    expect(tool.children.map((c) => c.kind)).toEqual(["thinking", "text"]);
++  });
++
++  it("子消息先到 + 截残派发行后到：stub 以恢复键合并迁入（键源同源不拆两段）", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "stdout", "子消息先到", { parentToolUseId: "call_x", subagentType: "Explore" }),
++      makeLog("l2", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
++    ]);
++    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
++    const tool = toolById(segments, "call_x");
++    expect(tool.subagentType).toBe("Explore");
++    expect(tool.children.map((c) => c.kind)).toEqual(["text"]);
++  });
++
++  it("恢复配对后 [TASK_*] 元数据路由命中：taskStatus 终态接管（FR-03）", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
++      makeLog("l2", "stdout", '[TASK_STARTED] {"task_id":"t1","tool_use_id":"call_x","async":true}', {
++        parentToolUseId: "call_x",
++      }),
++      makeLog("l3", "stdout", '[TASK_NOTIFICATION] {"task_id":"t1","status":"completed","elapsed_ms":233683}', {
++        parentToolUseId: "call_x",
++      }),
++    ]);
++    const tool = toolById(segments, "call_x");
++    expect(tool.taskStatus).toBe("completed");
++    expect(tool.taskElapsedMs).toBe(233683);
++    expect(tool.taskAsync).toBe(true);
++  });
++
++  it("result 位置配对兜底截残段状态：非 running（FR-03 result 接管）", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "tool_call", truncatedDispatch, { toolUseId: "call_x", contentTruncated: true }),
++      makeLog("l2", "stdout", "[TOOL_RESULT] 设计审查完成，PASS"),
++    ]);
++    const tool = toolById(segments, "call_x");
++    expect(tool.status).toBe("ok");
++  });
++
++  it("行内解析成功时零回归：JSON 内 tool_use_id 优先，不消费回退字段（FR-05）", () => {
++    const full = '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"call_real","success":true}';
++    const segments = logsToSegments([
++      makeLog("l1", "tool_call", full, { toolUseId: "call_fallback" }),
++    ]);
++    expect(toolById(segments, "call_real").status).toBe("ok");
++    expect(segments.some((s) => s.kind === "tool" && (s as ToolTurnSegment).id === "call_fallback")).toBe(false);
++  });
++
++  it("实时增量路径（applyLogToSegments）零变化：无回退字段时截残行行为与改前一致（FR-05）", () => {
++    const turn = applyAll([
++      makeLog("l1", "tool_call", truncatedDispatch),
++      makeLog("l2", "stdout", "子消息", { parentToolUseId: "call_x" }),
++    ]);
++    // 派发行 id 走 logId 兜底（改前行为），子消息跌落 stub（实时暂态，无 orphaned 标记）。
++    expect(turn.segments.map((s) => s.kind)).toEqual(["tool", "subagent_stub"]);
++    const stub = findSeg(turn.segments, (s) => s.kind === "subagent_stub");
++    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBeUndefined();
++  });
++});
++
++describe("历史批量孤儿 stub 标记（2026-10-13-slim-subagent-false-running / FR-04）", () => {
++  it("logsToSegments 收尾仍残留的 stub 标记 orphaned=true", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "stdout", "孤儿子消息", { parentToolUseId: "call_gone", subagentType: "Explore" }),
++    ]);
++    const stub = findSeg(segments, (s) => s.kind === "subagent_stub");
++    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBe(true);
++  });
++
++  it("批量路径全部合并成功时无孤儿标记（无 stub 残留）", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "stdout", "子消息", { parentToolUseId: "call_ok", subagentType: "Explore" }),
++      makeLog("l2", "tool_call", '{"tool":"Task","args":{},"tool_use_id":"call_ok","success":true}'),
++    ]);
++    expect(segments.some((s) => s.kind === "subagent_stub")).toBe(false);
++  });
++});
++
++describe("回退键收窄 tool_use 段型（2026-10-13-slim-subagent-false-running 评审 P3 加固）", () => {
++  it("非 tool_use 行携带 toolUseId 不消费：不触发 stub 摘除（children 无处回挂的丢失路径封死）", () => {
++    const segments = logsToSegments([
++      makeLog("l1", "stdout", "子消息先到", { parentToolUseId: "call_x", subagentType: "Explore" }),
++      makeLog("l2", "stderr", "一条 stderr", { toolUseId: "call_x" }),
++    ]);
++    // stub 原样保留（被 orphaned 标记），children 未被摘走。
++    const stub = findSeg(segments, (s) => s.kind === "subagent_stub");
++    expect(stub && stub.kind === "subagent_stub" ? stub.orphaned : undefined).toBe(true);
++    const inner = stub && stub.kind === "subagent_stub" ? stub.children : [];
++    expect(inner.map((c) => c.kind)).toEqual(["text"]);
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx b/frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx
+index 90eac3e4c..f4986cb23 100644
+--- a/frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx
++++ b/frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx
+@@ -188,6 +188,26 @@ describe("collectSubagents 元数据驱动分叉（task-13 / FR-07）", () => {
+       ["sa_fg_done", "done"], // 原推导：result 配对即 done
+     ]);
+   });
++
++  it("孤儿 stub（orphaned）目录面同显 stopped 灰态；实时暂态 stub 仍 running（2026-10-13-slim-subagent-false-running / FR-04 评审 P1）", () => {
++    const orphaned: TurnSegment = {
++      kind: "subagent_stub",
++      id: "tu_orphan",
++      subagentType: "Explore",
++      children: [makeTextSeg("text:orphan")],
++      orphaned: true,
++    };
++    const sa = deriveTurnActivity([orphaned]).subagents[0];
++    expect(sa?.status).toBe("stopped"); // 目录/状态条不再假「运行中」
++
++    const live: TurnSegment = {
++      kind: "subagent_stub",
++      id: "tu_live",
++      subagentType: "Explore",
++      children: [makeTextSeg("text:live")],
++    };
++    expect(deriveTurnActivity([live]).subagents[0]?.status).toBe("running"); // 零变化
++  });
+ });
+ 
+ /* ───────── 2. SubagentCatalog 行渲染口径（走秒 / 终态时长） ───────── */
+diff --git a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+index 4bfeaf188..f28f5dd26 100644
+--- a/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
++++ b/frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+@@ -794,6 +794,32 @@ describe("SegmentView 统一分发器", () => {
+     expect(screen.getByText("子代理")).toBeInTheDocument();
+   });
+ 
++  it("orphaned stub（历史孤儿，2026-10-13-slim-subagent-false-running / FR-04）：灰点无脉冲、不显示「运行中」、默认折叠", () => {
++    render(
++      <SegmentView
++        segment={makeStubSeg({
++          orphaned: true,
++          children: [makeTextSeg({ id: "text:orphan", text: "孤儿内部文本" })],
++        })}
++      />,
++    );
++    expect(screen.queryByText("运行中")).not.toBeInTheDocument();
++    expect(document.querySelector(".animate-pulse")).toBeNull();
++    expect(document.querySelector(".bg-brand-600")).toBeNull();
++    expect(document.querySelector(".bg-muted-foreground")).not.toBeNull(); // 中性灰点
++    // 非 running → 默认折叠（点击仍可展开看子内容，数据不丢）。
++    expect(screen.queryByText("孤儿内部文本")).not.toBeInTheDocument();
++    fireEvent.click(screen.getAllByText("Explore")[0]!);
++    expect(screen.getByText("孤儿内部文本")).toBeInTheDocument();
++  });
++
++  it("实时暂态 stub（未标记 orphaned）仍 running 脉冲——孤儿兜底不误伤实时路径（FR-05）", () => {
++    render(<SegmentView segment={makeStubSeg()} />);
++    expect(screen.getByText("运行中")).toBeInTheDocument();
++    expect(document.querySelector(".animate-pulse")).not.toBeNull();
++    expect(document.querySelector(".bg-brand-600")).not.toBeNull();
++  });
++
+   it("file 段 → FileMessageCard 接线：「agent 上传了文件」标注 + 五字段透传（task-08）", () => {
+     render(<SegmentView segment={makeFileSeg()} />);
+     expect(screen.getByText("agent 上传了文件")).toBeInTheDocument();
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 786ddc0fe..939788850 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -218,6 +218,9 @@ function toAssemblerInput(entry: AgentRunLogEntry): AssemblerLogInput {
+     editPatch: entry.edit_patch ?? null,
+     // 2026-09-27-session-fast-replay FR-07：slim 截断标记透传（tool 段全文回填键）。
+     contentTruncated: entry.content_truncated ?? null,
++    // 2026-10-13-slim-subagent-false-running FR-02：slim 截断行回传的配对键
++    // （截残 JSON 解析不出 tool_use_id 时装配器回退采用）。
++    toolUseId: entry.tool_use_id ?? null,
+   };
+ }
+ 
+@@ -308,7 +311,10 @@ function regroupSubagentLogsByParent(map: Map<string, AgentRunLogEntry[]>): void
+         (moved.get(runId) ?? moved.set(runId, []).get(runId)!).push(entry);
+       }
+       if (entry.channel === "tool_call") {
+-        const toolUseId = toolUseIdOfContent(entry.content_redacted);
++        // 2026-10-13-slim-subagent-false-running / FR-02：截残行解析失败时回退
++        // 后端回传的 tool_use_id（否则派发键登记失败，跨 run 终态行不重挂）。
++        const toolUseId =
++          toolUseIdOfContent(entry.content_redacted) ?? (entry.tool_use_id ?? null);
+         if (toolUseId) ownerOf.set(toolUseId, target);
+       }
+     }
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index de6dd2ca1..17a58ce75 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -473,6 +473,13 @@ export interface AssemblerLogInput {
+    * 单条全文（getAgentSessionLogFull）；实时 SSE / 非 slim 历史恒 null/undefined。
+    */
+   contentTruncated?: boolean | null;
++  /**
++   * 2026-10-13-slim-subagent-false-running / FR-02：slim 截断行回传的配对键——
++   * 截残 JSON 解析不出 tool_use_id 时（parseToolUseRaw 失败），tool_use 段 id /
++   * stub 合并键回退采用本字段（后端截断前从完整原文抢救，仅截断行非空）。
++   * 实时 SSE / 非 slim 历史恒 null/undefined（行内解析恒成功，零回退）。
++   */
++  toolUseId?: string | null;
+ }
+ 
+ /** 结构化段模型（渲染与派生统计的唯一数据源，design §7）。 */
+@@ -547,6 +554,13 @@ export type TurnSegment =
+       id: string;
+       subagentType: string | null;
+       children: TurnSegment[];
++      /**
++       * 2026-10-13-slim-subagent-false-running / FR-04：历史批量装配收尾标记——
++       * logsToSegments 全部日志消费完后仍残留的 stub = 派发行缺失 / 不可解析的
++       * 数据病理（不可能再有 tool_use 到达合并），渲染层据此显示中性灰态而非
++       * 恒「运行中」。仅历史批量路径标记；实时暂态 stub（等待合并）不标记。
++       */
++      orphaned?: boolean;
+     }
+   | { kind: "stderr"; id: string; text: string; ts: number | null }
+   | {
+@@ -1338,11 +1352,20 @@ export function applyLogToSegments(
+ 
+   // 1. tool_use 兜底合并（§9.5）：同 tool_use_id 的 subagent_stub 已存在（子消息先
+   //    到）→ 摘除 stub，其 children / subagentType 随迁到即将创建的 tool 段。
++  //    2026-10-13-slim-subagent-false-running / FR-02：slim 截残行解析不出
++  //    tool_use_id 时回退采用回传 toolUseId（合并键与段 id 必须同源，否则拆两段）。
+   const parsedTool = seg.kind === "tool_use" ? parseToolUseRaw(seg.text) : null;
++  // 回退键收窄到 tool_use 段型（评审 P3 加固）：后端仅对截断 tool_call 行置
++  // toolUseId，非 tool_use 输入携带该字段属异常形态——若放行会在步骤 1 摘走
++  // stub 而 children 无处回挂（拆两段丢归属）。
++  const resolvedToolUseId =
++    seg.kind === "tool_use"
++      ? (parsedTool?.toolUseId ?? nonEmptyString(input.toolUseId))
++      : null;
+   let adoptedChildren: TurnSegment[] = [];
+   let adoptedSubagentType: string | null = null;
+-  if (parsedTool && parsedTool.toolUseId) {
+-    const extracted = extractStubById(segments, parsedTool.toolUseId);
++  if (resolvedToolUseId) {
++    const extracted = extractStubById(segments, resolvedToolUseId);
+     if (extracted.stub) {
+       segments = extracted.segments;
+       adoptedChildren = extracted.stub.children;
+@@ -1427,10 +1450,12 @@ export function applyLogToSegments(
+       }
+       break;
+     case "tool_use": {
++      // 段 id = tool_use_id（result 配对 + 子代理路由 key）；行内解析失败回退
++      // slim 回传 toolUseId（2026-10-13-slim-subagent-false-running），仍缺才用
++      // logId 兜底（toolName=null 原样显示 raw，R-07）。
+       const toolSegId =
+-        (parsedTool && parsedTool.toolUseId) ||
+-        makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
+-      if (parsedTool && parsedTool.toolUseId) ids().add(parsedTool.toolUseId);
++        resolvedToolUseId ?? makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
++      if (resolvedToolUseId) ids().add(resolvedToolUseId);
+       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+         ...children,
+         {
+@@ -1942,7 +1967,41 @@ export function logsToSegments(
+     }
+     turn = applyLogToSegments(turn, log);
+   }
+-  return turn.segments;
++  // 2026-10-13-slim-subagent-false-running / FR-04：历史批量收尾孤儿标记——全部
++  // 日志消费完后仍残留的 stub = 派发行缺失/不可解析（含 slim 旧数据），不可能
++  // 再有 tool_use 到达合并，标记 orphaned 供渲染层显示中性灰态（不恒「运行中」）。
++  // 实时增量路径（applyLogToSegments 逐条）不经过此处，暂态 stub 语义零变化。
++  return markOrphanedStubs(turn.segments);
++}
++
++/** FR-04：树内残留 stub 标 orphaned（path-copy：无 stub 或已全标记时原引用返回）。 */
++function markOrphanedStubs(segments: TurnSegment[]): TurnSegment[] {
++  let changed = false;
++  const walk = (list: TurnSegment[]): TurnSegment[] => {
++    let listChanged = false;
++    const out: TurnSegment[] = [];
++    for (const s of list) {
++      if (s.kind === "subagent_stub" && !s.orphaned) {
++        changed = true;
++        listChanged = true;
++        out.push({ ...s, orphaned: true });
++        continue;
++      }
++      if (s.kind === "tool" && s.children.length > 0) {
++        const nextChildren = walk(s.children);
++        if (nextChildren !== s.children) {
++          changed = true;
++          listChanged = true;
++          out.push({ ...s, children: nextChildren });
++          continue;
++        }
++      }
++      out.push(s);
++    }
++    return listChanged ? out : list;
++  };
++  const next = walk(segments);
++  return changed ? next : segments;
+ }
+ 
+ /**
+diff --git a/frontend/src/components/daemon/turn-segment-views.tsx b/frontend/src/components/daemon/turn-segment-views.tsx
+index 2d0f660b3..41ac645d1 100644
+--- a/frontend/src/components/daemon/turn-segment-views.tsx
++++ b/frontend/src/components/daemon/turn-segment-views.tsx
+@@ -277,9 +277,18 @@ const TOOL_STATUS_META: Record<
+  * 子代理块状态：tool 段取自身 status；stub 段无状态字段——它是 tool_use 段
+  * 尚未到达（或永不到达）的临时容器，子消息仍在流入，视为 running（后续合并
+  * 迁入 tool 段后由其 status 接管，design §9.5）。
++ * 2026-10-13-slim-subagent-false-running / FR-04：历史批量装配收尾仍残留的
++ * 孤儿 stub（orphaned，派发行缺失/不可解析的数据病理）不可能再合并——显示
++ * 中性 stopped 灰态（灰点无脉冲无「运行中」），不再恒假「运行中」。实时
++ * 暂态 stub 不带标记，仍 running 等待合并，行为零变化。
+  */
+-function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "deny" {
+-  return segment.kind === "subagent_stub" ? "running" : segment.status;
++function subagentStatus(
++  segment: SubagentContainerSegment,
++): "running" | "ok" | "deny" | "stopped" {
++  if (segment.kind === "subagent_stub") {
++    return segment.orphaned ? "stopped" : "running";
++  }
++  return segment.status;
+ }
+ 
+ /* ───────── task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）───────── */
+diff --git a/frontend/src/components/daemon/turn-status-bar.tsx b/frontend/src/components/daemon/turn-status-bar.tsx
+index 724878477..752b7c79d 100644
+--- a/frontend/src/components/daemon/turn-status-bar.tsx
++++ b/frontend/src/components/daemon/turn-status-bar.tsx
+@@ -225,7 +225,11 @@ function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): voi
+         segmentId: s.id,
+         name: s.subagentType ?? "子代理",
+         subagentType: s.subagentType,
+-        status: "running",
++        // 2026-10-13-slim-subagent-false-running / FR-04：历史孤儿 stub（orphaned，
++        // 派发行缺失/不可解析）不可能再合并——目录/状态条同显中性 stopped 灰态，
++        // 不再假「运行中」（评审 P1：主块灰态须同源传导到目录面）。实时暂态
++        // stub 不带标记仍 running，行为零变化。
++        status: s.orphaned ? "stopped" : "running",
+         startedAt: null,
+         endedAt: null,
+         latestActivity: latestActivityWithin(s.children),
+diff --git a/frontend/src/lib/agent.ts b/frontend/src/lib/agent.ts
+index 957ee8a1c..bfe0cddd5 100644
+--- a/frontend/src/lib/agent.ts
++++ b/frontend/src/lib/agent.ts
+@@ -97,6 +97,9 @@ export interface AgentRunLogEntry {
+   // content_redacted 超 2000 字符截到 2000 并置 true；旧路径不置恒
+   // null/undefined（零回归）。截断条目需全文走 GET /sessions/{id}/logs/{log_id}。
+   content_truncated?: boolean | null;
++  // 2026-10-13-slim-subagent-false-running / FR-01：slim 截断行回传的 tool_use_id
++  // 配对键（后端截断前从完整原文解析；非 slim / 未截断行恒 null/undefined）。
++  tool_use_id?: string | null;
+ }
+ 
+ export interface CreateAgentRunInput {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 184b7f13a..1fdb63cb6 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -12978,6 +12978,8 @@ export interface components {
+             } | null;
+             /** Content Truncated */
+             content_truncated?: boolean | null;
++            /** Tool Use Id */
++            tool_use_id?: string | null;
+         };
+         /** AgentRunResponse */
+         AgentRunResponse: {
