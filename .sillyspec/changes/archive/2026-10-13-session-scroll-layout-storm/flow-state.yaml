@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,6 +32,11 @@ input: >-
   - 单页 4 份 useDaemonMachines 轮询合并不在本变更范围（另立变更），本变更不动轮询
 autopilot: true
 baseline_commit: 83cc32aee19e55f97bd0a7f949d5aac1bc2dca74
-updatedAt: '2026-10-13T02:35:02.161Z'
+updatedAt: '2026-10-13T02:58:23.291Z'
 baseline_sha256: 8d968b308f6a8c203145a57566ec8b3ed56fea481e707bb0177278f5d1e844c2
+allow_batch_tick: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（21.7s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261013025355\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 22 个
 

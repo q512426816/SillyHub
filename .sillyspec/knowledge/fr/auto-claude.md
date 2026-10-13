@@ -307,3 +307,74 @@ created_at: 2026-10-08T17:53:22.647Z
   confirmed_at: null
   source_change: 2026-10-12-ws-scoped-recent-session
   status: active
+
+## FR-auto-claude-018 scroll 事件处理器（onScroll 及其同步调用链 handleLoadEarlier 的锚捕获段）内不再有同步强制布局：锚点重申与锚捕获的 DOM 遍历/几何读取全部改 rAF 合帧执行
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：程序性 scroll 高频风暴合帧
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-01
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-019 行为零回归：触顶翻页仍按 scrollTop<=48 触发、prepend 后视口钉回语义不变、用户真实滚动（isTrusted）弃锚逻辑不变
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：用户接管弃锚
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-02
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-020 anchorPin rAF 句柄有清理（卸载/锚失效不泄漏 rAF 回调）
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-03
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+## FR-auto-claude-021 相关既有测试（session-panel 触顶加载/锚定/跳转用例）全绿
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-04
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-022 单页 4 份 useDaemonMachines 轮询合并不在本变更范围（另立变更），本变更不动轮询
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-05
+最近确认：17abec741527b36896c20525f431558a43fa893a
