@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-agentlog-write-diff",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "d3682fe53d3cdc5ef0cd710e03f3ecdb07461356",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "types.ts editPatch 注释与实现不一致：Edit 预览并不消费该字段",
+      "evidence": "types.ts 注释称「Edit/Write 预览渲染红删绿增 DiffView」，但 agent-log 的 EditToolPreview 不接收 editPatch（ToolCallPreview 分派处未透传），仍走 args 红绿两块；editPatch 实际仅 WriteToolPreview 消费，design.md 自己也写明 EditToolPreview 零改动——注释夸大（CLAUDE.md 规则18）。",
+      "location": "frontend/src/components/agent-log/types.ts:124"
+    },
+    {
+      "severity": "P3",
+      "title": "lib/agent.ts edit_patch 注释陈旧：仍称「仅 Edit tool_result 行有值」",
+      "evidence": "本变更实证 Write 覆盖写亦携带 edit_patch（normalize.ts:655-659 AgentEvent 注释已改为「不限工具名」），但 AgentRunLogEntry.edit_patch 的字段注释未同步，消费面扩大后该「仅 Edit」表述成为误导（CLAUDE.md 规则18）。该文件不在本变更清单内，属顺手未扫的相邻陈旧注释。",
+      "location": "frontend/src/lib/agent.ts:87"
+    },
+    {
+      "severity": "P3",
+      "title": "冻结件 change.patch 混入相邻变更交付面（归属泄漏）",
+      "evidence": "change.patch 含 subagent-stub-reconcile 变更的 subagent-task-reconcile.test.ts 整文件（168 行）与两个 changelog 各 1 行（该行由 021ac9af7 归档提交写入，早于本变更提交）；本变更 4 提交纯 diff（bc95c9449..d3682fe53）实为 8 个交付文件。「可归属交付面」冻结口径存在归属泄漏，但 8 个交付文件齐全且与 d3682fe53 逐字一致（tool-diff.tsx blob 哈希 10f4492f5 相同），不影响 FR 判定。",
+      "location": ".sillyspec/changes/2026-10-13-agentlog-write-diff/change.patch"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T03:50:12Z",
+  "checklist": {
+    "frImplTestAlignment": "PASS：FR-01 实现=normalize.ts mergeToolResult 增第4参拾取（首条语义+工具卡守卫+editPatch ?? sourceLog.edit_patch 双源）+ fromAgentEvent 两处传 ev.edit_patch（normalize.ts:913/917），绑定四用例实存且断言一一对应（精确配对/邻近退化/v2 事件字段/无patch undefined）；FR-02 实现=WriteToolPreview patchRows→DiffView「变更对比（覆盖写入 +N −M）」+复制完整原文、无patch/非法JSON回退全文，绑定三用例断言红删绿增类名/标题/复制按钮/回退形态；FR-03 绑定套件实测全绿（冻结面 260/260；评审时并行会话推进入库后干净树复跑 266/266 同样全绿），typecheck 零错误声明在 d3682fe53 时点成立（当时 buildSubagentTaskLookup 返回 Map，评审中一度见到的 4 个 TS2339 为并行 turn-live-visibility 提交中间态，非本变更）。",
+    "blindDimensionTruthfulness": "PASS：乱序——拾取在配对时点、首条语义、孤儿 result 落 parsedToolResult 仅丢 patch 不污染卡片，与 design 一致；并发——「不适用」为真：normalize 纯单遍函数无共享可变状态，代码证实；切换——为真：viewer 以 useMemo 全量重建（agent-log-viewer.tsx:763），ProcessedLog 无跨渲染持久态，重放幂等；作用域——为真：editPatch 随单卡片生命周期，无全局注册表，agent-log-card 未接线无串台面。",
+    "disclosedBoundaries": "三条声明边界全部裁决：①agent-log-card 会话化对话视图不接线=可接受（FR 范围即 agent-log 视图，daemon messages 是另一数据链，design 显式留后续）；②Write 无 patch 保持全文预览而非照搬会话面板全绿=可接受（FR-02 明文承诺零回归全文回退，行为一致性属后续 UX 打磨，agent-log 有「原始数据」兜底）；③共享模块迁移以 re-export 保兼容=可接受（tool-args-detail.tsx:104-108 re-export 实测既有 daemon 测试经原导入面零改动通过，tool-diff.tsx 仅依赖 lib/utils，依赖方向保持 daemon→agent-log 单向无环）。",
+    "protectionClaims": "四项防护全部实存且生效：parseStructuredPatch 非法 JSON/hunk 形状不符→null 回退全文预览（tool-diff.tsx try/catch+形状校验，测试第三例覆盖）；editPatch 首条语义只写一次（normalize.ts:224 target.editPatch === undefined 守卫）；mergeToolResult 工具卡守卫（normalize.ts:225 channel==='tool_call'||parsedStdoutTool!=null，非工具卡不写）；daemon re-export 兼容（tool-args-detail.test.tsx 经 ../tool-args-detail 导入 DiffView/parseStructuredPatch 全绿）。",
+    "generatedArtifacts": "无 OpenAPI/api-types 生成面，确认。字段链一致：AgentRunLogEntry.edit_patch（lib/agent.ts:89）与 SSE 行 edit_patch（lib/agent.ts:237）均 string|null，AgentEvent.edit_patch（normalize.ts:660）string 可选，ProcessedLog.editPatch（types.ts:128）string 可选，mergeToolResult 参数 string|null 兼容两源。"
+  },
+  "notes": "评审期间并行会话（2026-10-13-turn-live-visibility）将 HEAD 由 d3682fe53 推进至 90abe82eb；经逐文件比对，本变更 8 个交付文件在两 HEAD 间零变化，全部实物证据对 d3682fe53 有效。评审中一次 typecheck 报 4 错、一次 vitest 报 4 失败均为并行提交中间态的工作区搅动，稳定树复跑全部通过。"
+}

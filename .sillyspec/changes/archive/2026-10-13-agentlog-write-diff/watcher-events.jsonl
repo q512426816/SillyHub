@@ -1,0 +1,41 @@
+{"ts":1791861639571,"kind":"commit","stage":null,"detail":"3ef6f60b6","provisional":true}
+{"ts":1791861829258,"kind":"commit","stage":null,"detail":"d8473ae21","provisional":true}
+{"ts":1791861904830,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791862017523,"kind":"commit","stage":null,"detail":"021ac9af7","provisional":true}
+{"ts":1791862054059,"kind":"commit","stage":null,"detail":"64224d004","provisional":true}
+{"ts":1791862130662,"kind":"commit","stage":null,"detail":"d6c9a1a8d","provisional":true}
+{"ts":1791862366519,"kind":"commit","stage":null,"detail":"40479b983","provisional":true}
+{"ts":1791862456846,"kind":"commit","stage":null,"detail":"a7ddb393f","provisional":true}
+{"ts":1791862490040,"kind":"commit","stage":null,"detail":"bc95c9449","provisional":true}
+{"ts":1791862496764,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791862496764,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1791862530442,"kind":"commit","stage":null,"detail":"f17efab4a","provisional":true}
+{"ts":1791862560425,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791862560425,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1791862574095,"kind":"commit","stage":null,"detail":"d42e7924d","provisional":true}
+{"ts":1791862584107,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791862584107,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1791862594487,"kind":"commit","stage":null,"detail":"77eccc9a9","provisional":true}
+{"ts":1791862601198,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791862601198,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true}
+{"ts":1791862608122,"kind":"commit","stage":null,"detail":"d3682fe53","provisional":true}
+{"ts":1791862648304,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791862691681,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791862718443,"kind":"gate-run","stage":"verify","detail":"门实测 passed（12.9s） · 20261013033836","provisional":true}
+{"ts":1791862985726,"kind":"commit","stage":null,"detail":"46557a617","provisional":true}
+{"ts":1791863035635,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/hooks/use-session-tasks.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863049222,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/turn-segment-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863082701,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/subagent-detail-panel.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863116051,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863159306,"kind":"commit","stage":null,"detail":"90abe82eb","provisional":true}
+{"ts":1791863183074,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/turn-segment-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863330163,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/__tests__/turn-segment-views.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863363500,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863369963,"kind":"commit","stage":null,"detail":"b5f6bb6d5","provisional":true}
+{"ts":1791863443611,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/turn-status-bar.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863501585,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/lib/agent.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863512492,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/daemon/turn-status-bar.tsx、rontend/src/components/agent-log/types.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863599737,"kind":"commit","stage":null,"detail":"e6cbde3e6","provisional":true}
+{"ts":1791863600582,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/turn-segment-views.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863604940,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：rontend/src/components/daemon/subagent-detail-panel.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791863628368,"kind":"archived","stage":"archive","detail":"change 目录已移入 archive","provisional":true}

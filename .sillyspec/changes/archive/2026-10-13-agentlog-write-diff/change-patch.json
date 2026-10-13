@@ -1,0 +1,157 @@
+{
+  "change": "2026-10-13-agentlog-write-diff",
+  "baseline": "5e2c3f2f4a0ab0b3c6cb99974e81bff1a45129c9",
+  "head": "d3682fe53d3cdc5ef0cd710e03f3ecdb07461356",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "frontend/src/components/agent-log-viewer.tsx",
+    "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+    "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx",
+    "frontend/src/components/agent-log/normalize.ts",
+    "frontend/src/components/agent-log/tool-diff.tsx",
+    "frontend/src/components/agent-log/tool-renderers.tsx",
+    "frontend/src/components/agent-log/types.ts",
+    "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts",
+    "frontend/src/components/daemon/tool-args-detail.tsx"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 497,
+    "deletions": 124
+  },
+  "savedAt": "2026-10-13T03:38:45.959Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 9,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "5e2c3f2f4a0ab0b3c6cb99974e81bff1a45129c9",
+    "totals": {
+      "files": 11,
+      "additions": 497,
+      "deletions": 124
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/agent-log-viewer.tsx",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/normalize.test.ts",
+        "additions": 70,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx",
+        "additions": 65,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/normalize.ts",
+        "additions": 23,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-diff.tsx",
+        "additions": 123,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/tool-renderers.tsx",
+        "additions": 28,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/agent-log/types.ts",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts",
+        "additions": 168,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/tool-args-detail.tsx",
+        "additions": 8,
+        "deletions": 109,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "dbb875ad05f787c5c4652fc5551a8ce9338dbfe5e17d71c8071f59c18620bd87",
+  "patchStatus": "ok"
+}

@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更运行日志视图（agent-log）的 Write 工具卡仍只显示全文预览，与会话面板已上线的 Write diff 展示不一致；打通 normalize.ts 的 edit_patch 数据链并让 WriteToolPreview
+  复用 DiffView
+
+  成功标准：
+
+  - normalize 数据链把 tool_result 行/事件的 edit_patch 配对写入对应 tool_call entry
+
+  - agent-log 视图 Write 工具卡有 editPatch 时渲染红删绿增 DiffView，无 patch 保持现有全文预览
+
+  - 相关前端测试通过，不改动 Edit 预览与会话面板现有行为
+autopilot: false
+baseline_commit: 5e2c3f2f4a0ab0b3c6cb99974e81bff1a45129c9
+updatedAt: '2026-10-13T03:53:53.260Z'
+baseline_sha256: 45dcf994301140465c900443f3424b813d51909a8c9be2bd90c35e9581ec8820
+spec_approved: true
+spec_approved_at: '2026-10-13T03:36:48.574Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx4)+fr(3)（12.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013033836\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013033836\test-result.json｜门文件
+  10 个
+

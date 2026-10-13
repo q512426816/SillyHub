@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-agentlog-write-diff",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-agentlog-write-diff:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/normalize.test.ts「2026-10-13-agentlog-write-diff: edit_patch 配对到工具卡」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-agentlog-write-diff"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-agentlog-write-diff:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx「WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-agentlog-write-diff"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-agentlog-write-diff:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/agent-log/__tests__/normalize-dual-path.test.ts",
+        "frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-agentlog-write-diff"
+    }
+  ]
+}

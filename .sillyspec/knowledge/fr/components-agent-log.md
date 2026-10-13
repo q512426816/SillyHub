@@ -224,3 +224,68 @@ created_at: 2026-10-12T11:08:58.569Z
 摘要：验收
 全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-05
 最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
+
+## FR-components-agent-log-013 normalize 数据链把 tool_result 行/事件的 edit_patch 配对写入对应 tool_call entry
+变更：2026-10-13-agentlog-write-diff
+状态：active
+摘要：旧轨行列拾取；v2 轨事件字段拾取
+场景正文：
+- 场景：旧轨行列拾取 — Given tool_call JSON 行（带 tool_use_id）+ 后续 stdout [TOOL_RESULT] 行携带 edit_patch 列；When normalizeLogs 归一化；Then 结果行按 parent_tool_use_id（或邻近退化）合并进卡片，卡片 editPatch 等于该 JSON 串
+- 场景：v2 轨事件字段拾取 — Given AgentEvent v2 的 tool_result 事件带 edit_patch 字段（行 edit_patch 列缺省）；When fromAgentEvent 按 call_id 配对工具卡；Then 卡片 editPatch 取事件字段值，mergedToolResult 照常回填
+全文：.sillyspec/changes/archive/2026-10-13-agentlog-write-diff/requirements.md#FR-01
+最近确认：e6cbde3e612c38d298b7c60ea5bcd22ff6b4a821
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-agentlog-write-diff:flow:测试绑定FR-01
+  tests: frontend/src/components/agent-log/__tests__/normalize.test.ts「2026-10-13-agentlog-write-diff: edit_patch 配对到工具卡」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-agentlog-write-diff
+  status: active
+
+## FR-components-agent-log-014 agent-log 视图 Write 工具卡有 editPatch 时渲染红删绿增 DiffView，无 patch 保持现有全文预览
+变更：2026-10-13-agentlog-write-diff
+状态：active
+摘要：覆盖写红删绿增；无 patch 零回归
+场景正文：
+- 场景：覆盖写红删绿增 — Given Write 工具卡配对了 structuredPatch JSON；When 渲染该卡片；Then 删除行红底、新增行绿底（真实文件行号），diff 区提供复制完整新文件内容按钮
+- 场景：无 patch 零回归 — Given 无 editPatch（或非法 JSON）的 Write 工具卡；When 渲染该卡片；Then 保持既有「内容预览 (N 行)」全文 pre + 复制按钮，不出现变更对比区
+全文：.sillyspec/changes/archive/2026-10-13-agentlog-write-diff/requirements.md#FR-02
+最近确认：e6cbde3e612c38d298b7c60ea5bcd22ff6b4a821
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-agentlog-write-diff:flow:测试绑定FR-02
+  tests: frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx「WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-agentlog-write-diff
+  status: active
+
+## FR-components-agent-log-015 相关前端测试通过，不改动 Edit 预览与会话面板现有行为
+变更：2026-10-13-agentlog-write-diff
+状态：active
+摘要：既有行为回归
+场景正文：
+- 场景：既有行为回归 — Given normalize / normalize-dual-path / tool-args-detail / turn-segment-views 既有套件；When 跑全部用例；Then 全绿——Edit 预览与会话面板用例零改动通过，`pnpm typecheck` 零错误
+全文：.sillyspec/changes/archive/2026-10-13-agentlog-write-diff/requirements.md#FR-03
+最近确认：e6cbde3e612c38d298b7c60ea5bcd22ff6b4a821
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-agentlog-write-diff:flow:测试绑定FR-03
+  tests: frontend/src/components/agent-log/__tests__/normalize-dual-path.test.ts | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-agentlog-write-diff
+  status: active

@@ -1,0 +1,815 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 686d1be00..3ecf5b7cf 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -33,3 +33,4 @@ created_at: 2026-08-30 22:23:33
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+ - 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
++- 2026-10-13-subagent-stub-reconcile | 动机:历史会话时间线里子代理容器(分页窗口截断致派发行缺失时落成 stub 段)永久显示「运行中」且名字回落类型名 ge
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 96e9354c8..fb2bc7010 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -66,3 +66,4 @@
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+ - 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
++- 2026-10-13-subagent-stub-reconcile | 动机:历史会话时间线里子代理容器(分页窗口截断致派发行缺失时落成 stub 段)永久显示「运行中」且名字回落类型名 ge
+diff --git a/frontend/src/components/agent-log-viewer.tsx b/frontend/src/components/agent-log-viewer.tsx
+index c1d6af9a0..c7395f769 100644
+--- a/frontend/src/components/agent-log-viewer.tsx
++++ b/frontend/src/components/agent-log-viewer.tsx
+@@ -427,6 +427,7 @@ export function AgentLogRow({
+               entry={toolCall}
+               mergedResult={processedLog.mergedToolResult}
+               durationMs={toolDurationMs}
++              editPatch={processedLog.editPatch}
+             />
+           </div>
+         ) : processedLog.parsedStdoutTool ? (
+@@ -436,6 +437,7 @@ export function AgentLogRow({
+               entry={processedLog.parsedStdoutTool}
+               mergedResult={processedLog.mergedToolResult}
+               durationMs={toolDurationMs}
++              editPatch={processedLog.editPatch}
+             />
+           </div>
+         ) : processedLog.parsedToolResult ? (
+diff --git a/frontend/src/components/agent-log/__tests__/normalize.test.ts b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+index 1fbf69236..b456f7ddb 100644
+--- a/frontend/src/components/agent-log/__tests__/normalize.test.ts
++++ b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+@@ -554,6 +554,75 @@ describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-
+   });
+ });
+ 
++// ── 2026-10-13-agentlog-write-diff：tool_result 行/事件 edit_patch → 卡片 editPatch ──
++
++const WRITE_PATCH = JSON.stringify([
++  { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old", "+new-1", "+new-2"] },
++]);
++
++describe("2026-10-13-agentlog-write-diff: edit_patch 配对到工具卡", () => {
++  it("旧轨：stdout [TOOL_RESULT] 行 edit_patch 列 → 精确配对写入 tool_call 卡片 editPatch", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog(
++        "tool_call",
++        JSON.stringify({ tool: "Write", tool_use_id: "call_w1", args: { file_path: "a.ts", content: "x" } }),
++        "tcw1",
++      ),
++      {
++        ...makeLog("stdout", "[TOOL_RESULT] The file a.ts has been updated", "trw1"),
++        parent_tool_use_id: "call_w1",
++        edit_patch: WRITE_PATCH,
++      },
++    ];
++    const result = normalizeLogs(logs);
++    const card = result.find((p) => p.log.id === "tcw1");
++    expect(card?.editPatch).toBe(WRITE_PATCH);
++    expect(card?.mergedToolResult).toBeTruthy();
++  });
++
++  it("旧轨退化配对（无 id 邻近）：edit_patch 同样拾取", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog("tool_call", JSON.stringify({ tool: "Write", args: { file_path: "a.ts", content: "x" } }), "tcw2"),
++      { ...makeLog("stdout", "[TOOL_RESULT] ok", "trw2"), edit_patch: WRITE_PATCH },
++    ];
++    const result = normalizeLogs(logs);
++    expect(result.find((p) => p.log.id === "tcw2")?.editPatch).toBe(WRITE_PATCH);
++  });
++
++  it("v2 轨：tool_result 事件 ev.edit_patch → call_id 配对卡片 editPatch（行列缺省时）", () => {
++    const useEvent = {
++      type: "tool_use",
++      tool_name: "Write",
++      call_id: "toolu_wp",
++      metadata: { tool_input: { file_path: "a.ts", content: "x" } },
++    };
++    const tcJson = JSON.stringify({
++      tool: "Write", args: { file_path: "a.ts", content: "x" },
++      timestamp: "2026-06-17T13:54:38.000Z",
++      status: "allowed", success: true, tool_use_id: "toolu_wp",
++    });
++    const ev = normalizeLogs([
++      { ...makeLog("tool_call", tcJson, "tcw3"), agent_event: useEvent },
++      {
++        ...makeLog("stdout", "[TOOL_RESULT] updated", "trw3"),
++        agent_event: { type: "tool_result", call_id: "toolu_wp", content: "updated", edit_patch: WRITE_PATCH },
++      },
++    ]);
++    const card = ev.find((p) => p.log.id === "tcw3");
++    expect(card?.editPatch).toBe(WRITE_PATCH);
++    expect(card?.mergedToolResult).toBe("updated");
++  });
++
++  it("无 edit_patch 的 result 行 → 卡片 editPatch 保持 undefined（零回归）", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog("tool_call", JSON.stringify({ tool: "Bash", tool_use_id: "call_b1", args: { command: "ls" } }), "tcb1"),
++      { ...makeLog("stdout", "[TOOL_RESULT] out", "trb1"), parent_tool_use_id: "call_b1" },
++    ];
++    const result = normalizeLogs(logs);
++    expect(result.find((p) => p.log.id === "tcb1")?.editPatch).toBeUndefined();
++  });
++});
++
+ // task-08 / FR-03 / D-002@v1（2026-07-29-model-error-visibility）：模型调用错误可见性。
+ // daemon 把模型失败记为 [ASSISTANT] API Error 文本（design §1 原缺陷：被当助手回复）；
+ // 本组覆盖 buildErrorLogItem 安全提取 + :352 误判修正 + brownfield 兜底 + R-02 不进 NOISE。
+@@ -930,6 +999,7 @@ function renderModelOf(p: ReturnType<typeof normalizeLogs>[number] | undefined)
+     parsedToolResult: p?.parsedToolResult,
+     toolUseId: p?.toolUseId,
+     toolDurationMs: p?.toolDurationMs,
++    editPatch: p?.editPatch,
+     semanticCategory: p?.semanticCategory,
+   };
+ }
+diff --git a/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+new file mode 100644
+index 000000000..ea85a101c
+--- /dev/null
++++ b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+@@ -0,0 +1,65 @@
++/**
++ * 2026-10-13-agentlog-write-diff：agent-log 视图 Write 工具卡 diff 渲染单测。
++ *
++ * 经导出入口 ToolCallPreview（tool=Write 分派到 WriteToolPreview）断言：
++ * - 有 editPatch（structuredPatch JSON）→ 红删绿增 DiffView + 变更对比标题 + 复制完整原文
++ * - 无 editPatch → 保持既有「内容预览」全文形态（零回归）
++ */
++import { describe, it, expect } from "vitest";
++import { render, screen, cleanup } from "@testing-library/react";
++
++import { ToolCallPreview } from "../tool-renderers";
++import type { ToolCallEntry } from "../types";
++
++function writeEntry(content: string): ToolCallEntry {
++  return {
++    timestamp: "2026-10-13T10:00:00.000Z",
++    tool: "Write",
++    args: JSON.stringify({ file_path: "src/a.ts", content }),
++    status: "allowed",
++    success: true,
++    rawArgs: { file_path: "src/a.ts", content },
++  };
++}
++
++describe("WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）", () => {
++  it("有 editPatch：structuredPatch 红删绿增渲染，标题「变更对比（覆盖写入 +2 −1）」，复制完整原文", () => {
++    const patch = JSON.stringify([
++      { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old-line", "+new-A", "+new-B"] },
++    ]);
++    render(
++      <ToolCallPreview
++        entry={writeEntry("new-A\nnew-B")}
++        mergedResult="The file src/a.ts has been updated."
++        editPatch={patch}
++      />,
++    );
++    const delRow = screen.getByText("old-line").closest("div.flex");
++    const addRow = screen.getByText("new-A").closest("div.flex");
++    expect(delRow?.className).toContain("bg-red-500/10");
++    expect(addRow?.className).toContain("bg-emerald-500/10");
++    expect(screen.getByText(/变更对比（覆盖写入 \+2 −1）/)).toBeTruthy();
++    // 复制按钮复制完整新文件内容（不随 diff 截断）
++    expect(screen.getByTitle("复制内容")).toBeTruthy();
++    cleanup();
++  });
++
++  it("无 editPatch：保持既有「内容预览」全文形态（零回归）", () => {
++    render(
++      <ToolCallPreview
++        entry={writeEntry("line-1\nline-2")}
++        mergedResult="File created successfully at: src/a.ts"
++      />,
++    );
++    expect(screen.getByText(/内容预览 \(2 行\)/)).toBeTruthy();
++    expect(screen.queryByText(/变更对比/)).toBeNull();
++    cleanup();
++  });
++
++  it("editPatch 非法 JSON → 回退既有全文预览（不崩）", () => {
++    render(<ToolCallPreview entry={writeEntry("line-1")} editPatch="not json" />);
++    expect(screen.getByText(/内容预览 \(1 行\)/)).toBeTruthy();
++    expect(screen.queryByText(/变更对比/)).toBeNull();
++    cleanup();
++  });
++});
+diff --git a/frontend/src/components/agent-log/normalize.ts b/frontend/src/components/agent-log/normalize.ts
+index 201234b55..551a2db57 100644
+--- a/frontend/src/components/agent-log/normalize.ts
++++ b/frontend/src/components/agent-log/normalize.ts
+@@ -193,7 +193,7 @@ function diffLogMs(startLog: AgentRunLogEntry, endLog: AgentRunLogEntry): number
+ }
+ 
+ /**
+- * 合并 [TOOL_RESULT] body 到 tool 卡片，并预算 toolDurationMs。
++ * 合并 [TOOL_RESULT] body 到 tool 卡片，并预算 toolDurationMs / editPatch。
+  *
+  * ql-20260622-003 / P1-2：耗时计算从 render 期（AgentLogRow.computeToolDurationMs 回查
+  * allLogs，N×M）迁移至此。tool_use_id / tool 名 + 窗口配对已由主循环完成，sourceLog 是
+@@ -202,14 +202,31 @@ function diffLogMs(startLog: AgentRunLogEntry, endLog: AgentRunLogEntry): number
+  *   与原「找后续 result」行为一致）
+  * - 首次设置（同卡多 result 取首条，对齐原「首条 result」语义）
+  * - 仅 tool 卡片（channel=tool_call 或 parsedStdoutTool）
++ *
++ * 2026-10-13-agentlog-write-diff：editPatch 拾取——v2 轨显式传 ev.edit_patch
++ * （AgentEvent 一等字段），旧轨不传回落 sourceLog.edit_patch 行列（backend
++ * submit_steps SSE 透传同名列）；二者皆 tool_use_result.structuredPatch 的
++ * JSON 串。首条语义（同卡多 result 取首条 patch），非工具卡不写。
+  */
+-function mergeToolResult(target: ProcessedLog, body: string, sourceLog?: AgentRunLogEntry) {
++function mergeToolResult(
++  target: ProcessedLog,
++  body: string,
++  sourceLog?: AgentRunLogEntry,
++  editPatch?: string | null,
++) {
+   if (!body) return;
+   if (target.mergedToolResult) {
+     target.mergedToolResult += "\n" + body;
+   } else {
+     target.mergedToolResult = body;
+   }
++  if (
++    target.editPatch === undefined &&
++    (target.log.channel === "tool_call" || target.parsedStdoutTool != null)
++  ) {
++    const patch = editPatch ?? sourceLog?.edit_patch;
++    if (typeof patch === "string" && patch) target.editPatch = patch;
++  }
+   if (
+     sourceLog &&
+     sourceLog !== target.log &&
+@@ -638,7 +655,8 @@ export interface AgentEvent {
+   is_partial?: boolean;
+   /** true = 替换同 segment_id 已落库 partial（[ASSISTANT_OVERRIDE] 等价语义）。 */
+   override?: boolean;
+-  /** Edit 工具 structuredPatch JSON 文本（行 edit_patch 列承载，渲染器直读）。 */
++  /** structuredPatch JSON 文本（tool_use_result 透传；抓取链不限工具名——Edit
++   *  与 Write 覆盖写均携带，2026-10-13-write-tool-diff 实证）。 */
+   edit_patch?: string;
+   /** provider 长尾元数据（model/tool_input/tool_kind/...）。 */
+   metadata?: Record<string, unknown>;
+@@ -892,11 +910,11 @@ export function fromAgentEvent(
+         if (candidate !== undefined) matchedIdx = candidate;
+       }
+       if (matchedIdx >= 0 && ctx.result[matchedIdx]) {
+-        mergeToolResult(ctx.result[matchedIdx]!, content, target.log);
++        mergeToolResult(ctx.result[matchedIdx]!, content, target.log, ev.edit_patch);
+         target.hidden = true;
+       } else if (ctx.lastToolSourceIdx >= 0) {
+         const tc = ctx.result[ctx.lastToolSourceIdx];
+-        if (tc) mergeToolResult(tc, content, target.log);
++        if (tc) mergeToolResult(tc, content, target.log, ev.edit_patch);
+         target.hidden = true;
+       } else {
+         target.parsedToolResult = content;
+diff --git a/frontend/src/components/agent-log/tool-diff.tsx b/frontend/src/components/agent-log/tool-diff.tsx
+new file mode 100644
+index 000000000..10f4492f5
+--- /dev/null
++++ b/frontend/src/components/agent-log/tool-diff.tsx
+@@ -0,0 +1,123 @@
++"use client";
++
++/**
++ * 2026-10-13-agentlog-write-diff：行级 diff 渲染原语（自 daemon/tool-args-detail
++ * 迁出共享——agent-log 与 daemon 两侧工具卡复用同一 DiffView；依赖方向维持
++ * daemon → agent-log 单向，同 CopyButton 先例）。
++ *
++ * - parseStructuredPatch：SDK structuredPatch（backend edit_patch 列透传，hunks
++ *   带 oldStart/newStart 文件内真实行号，1 起始）→ DiffRow[]；'\' 为 "\ No
++ *   newline at end of file" 标记行不占行号跳过；多 hunk 间插双侧空行号「…」
++ *   分隔行。JSON 非法 / hunk 形状不符 → null（调用方回退自身既有展示）。
++ * - DiffView：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）；
++ *   超 DIFF_MAX_ROWS 截断展示（复制按钮由调用方提供完整原文兜底）。
++ */
++
++import { cn } from "@/lib/utils";
++
++/** diff 行：ctx=上下文（双侧行号）/ del=删除（旧侧行号）/ add=新增（新侧行号）。 */
++export interface DiffRow {
++  type: "ctx" | "del" | "add";
++  oldNo: number | null;
++  newNo: number | null;
++  text: string;
++}
++
++/**
++ * SDK structuredPatch hunks → DiffRow[]。行元素前缀 ' '/'-'/'+'（'\' 标记行跳
++ * 过）；JSON 非法 / hunk 形状不符 → null。
++ */
++export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
++  let hunks: unknown;
++  try {
++    hunks = JSON.parse(patchJson);
++  } catch {
++    return null;
++  }
++  if (!Array.isArray(hunks) || hunks.length === 0) return null;
++  const rows: DiffRow[] = [];
++  for (let h = 0; h < hunks.length; h += 1) {
++    const hunk = hunks[h] as {
++      oldStart?: unknown;
++      newStart?: unknown;
++      lines?: unknown;
++    } | null;
++    if (!hunk || typeof hunk !== "object") return null;
++    if (typeof hunk.oldStart !== "number" || typeof hunk.newStart !== "number") {
++      return null;
++    }
++    if (!Array.isArray(hunk.lines)) return null;
++    let oldNo = hunk.oldStart;
++    let newNo = hunk.newStart;
++    if (h > 0) rows.push({ type: "ctx", oldNo: null, newNo: null, text: "…" });
++    for (const line of hunk.lines) {
++      if (typeof line !== "string" || line.length === 0) return null;
++      const prefix = line[0];
++      const text = line.slice(1);
++      if (prefix === " ") {
++        rows.push({ type: "ctx", oldNo, newNo, text });
++        oldNo += 1;
++        newNo += 1;
++      } else if (prefix === "-") {
++        rows.push({ type: "del", oldNo, newNo: null, text });
++        oldNo += 1;
++      } else if (prefix === "+") {
++        rows.push({ type: "add", oldNo: null, newNo, text });
++        newNo += 1;
++      } else if (prefix === "\\") {
++        continue;
++      } else {
++        return null;
++      }
++    }
++  }
++  return rows;
++}
++
++/** diff 渲染行数上限（超长 diff 截断展示，完整原文由调用方复制按钮兜底）。 */
++export const DIFF_MAX_ROWS = 2000;
++
++/** diff 视图：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）。 */
++export function DiffView({ rows }: { rows: DiffRow[] }) {
++  const capped = rows.length > DIFF_MAX_ROWS;
++  const shown = capped ? rows.slice(0, DIFF_MAX_ROWS) : rows;
++  return (
++    <div className="overflow-hidden rounded-md border border-border bg-background font-mono text-[10.5px] leading-5">
++      {shown.map((r, idx) => (
++        <div
++          key={idx}
++          className={cn(
++            "flex items-start",
++            r.type === "del" && "bg-red-500/10",
++            r.type === "add" && "bg-emerald-500/10",
++          )}
++        >
++          <span className="w-7 shrink-0 select-none pr-1 text-right text-muted-foreground">
++            {r.oldNo ?? ""}
++          </span>
++          <span className="w-7 shrink-0 select-not select-none pr-1 text-right text-muted-foreground">
++            {r.newNo ?? ""}
++          </span>
++          <span
++            className={cn(
++              "w-3 shrink-0 select-none text-center font-bold",
++              r.type === "del" && "text-red-600",
++              r.type === "add" && "text-emerald-600",
++              r.type === "ctx" && "text-muted-foreground/50",
++            )}
++          >
++            {r.type === "del" ? "-" : r.type === "add" ? "+" : " "}
++          </span>
++          <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-foreground">
++            {r.text}
++          </span>
++        </div>
++      ))}
++      {capped && (
++        <div className="border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
++          …diff 超过 {DIFF_MAX_ROWS} 行已截断，完整内容用「复制」按钮
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/agent-log/tool-renderers.tsx b/frontend/src/components/agent-log/tool-renderers.tsx
+index 4dffeafbf..c6bb5cbcc 100644
+--- a/frontend/src/components/agent-log/tool-renderers.tsx
++++ b/frontend/src/components/agent-log/tool-renderers.tsx
+@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
+ import type { ToolCallEntry } from "./types";
+ 
+ import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
++import { DiffView, parseStructuredPatch } from "./tool-diff";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+ 
+ /**
+@@ -144,24 +145,32 @@ const CODE_CLS =
+ /**
+  * task-15 / FR-10：tool 卡片预览 props。
+  * durationMs 新增：tool_use→tool_result 时间戳差，由 AgentLogRow 计算后透传。
++ * editPatch 新增（2026-10-13-agentlog-write-diff）：tool_result structuredPatch
++ * JSON（normalize 配对到卡片），Write 预览渲染红删绿增 DiffView。
+  */
+ interface ToolPreviewProps {
+   entry: ToolCallEntry;
+   mergedResult?: string;
+   durationMs?: number;
++  editPatch?: string;
+ }
+ 
+ /* ------------------------------------------------------------------ */
+ /*  Write                                                              */
+ /* ------------------------------------------------------------------ */
+ 
+-function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
++function WriteToolPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
+   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
+   const filePath = String(rawArgs?.file_path ?? "");
+   const content = typeof rawArgs?.content === "string" ? rawArgs.content : "";
+   const fileName = filePath.split("/").pop() ?? filePath;
+   const contentLines = content.split("\n");
+   const lineCount = contentLines.length;
++  // 2026-10-13-agentlog-write-diff：覆盖写 structuredPatch → 红删绿增 DiffView
++  // （与会话面板 WriteArgsDetail 同管线）；无 patch / 解析失败回退全文预览（零回归）。
++  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
++  const addCount = patchRows?.filter((r) => r.type === "add").length ?? 0;
++  const delCount = patchRows?.filter((r) => r.type === "del").length ?? 0;
+   // ql-20260620：超大 content（如 agent Write 巨型文件）做 TextEncoder().encode 会 OOM
+   // 导致标签页崩溃（表现为 client-side exception）。超阈值时退化为按字符长度估算。
+   const byteSize = content.length > 200_000
+@@ -199,16 +208,25 @@ function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
+       {mergedResult && (
+         <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
+       )}
+-      <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
+-        <div className="relative">
+-          <pre className={CODE_CLS}>
+-            {content.length > 50000 ? content.slice(0, 50000) + "\n... (截断)" : content}
+-          </pre>
++      {patchRows ? (
++        <CollapsibleSection title={`变更对比（覆盖写入 +${addCount} −${delCount}）`}>
++          <DiffView rows={patchRows} />
+           <div className="mt-1">
+             <CopyButton text={content} label="复制内容" />
+           </div>
+-        </div>
+-      </CollapsibleSection>
++        </CollapsibleSection>
++      ) : (
++        <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
++          <div className="relative">
++            <pre className={CODE_CLS}>
++              {content.length > 50000 ? content.slice(0, 50000) + "\n... (截断)" : content}
++            </pre>
++            <div className="mt-1">
++              <CopyButton text={content} label="复制内容" />
++            </div>
++          </div>
++        </CollapsibleSection>
++      )}
+       <CollapsibleSection title="原始数据">
+         <pre className={CODE_CLS}>{entry.args}</pre>
+       </CollapsibleSection>
+@@ -527,11 +545,11 @@ function GenericToolPreview({ entry, durationMs }: ToolPreviewProps) {
+ /*  Router                                                             */
+ /* ------------------------------------------------------------------ */
+ 
+-export function ToolCallPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
++export function ToolCallPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
+   const tool = entry.tool.toLowerCase();
+   switch (tool) {
+     case "write":
+-      return <WriteToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
++      return <WriteToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} editPatch={editPatch} />;
+     case "agent":
+       return <AgentToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
+     case "bash":
+diff --git a/frontend/src/components/agent-log/types.ts b/frontend/src/components/agent-log/types.ts
+index a193b6b7b..489099df0 100644
+--- a/frontend/src/components/agent-log/types.ts
++++ b/frontend/src/components/agent-log/types.ts
+@@ -118,4 +118,12 @@ export interface ProcessedLog {
+    * 缺失时 viewer 兜底为 "log"。
+    */
+   semanticCategory?: SemanticCategory;
++  /**
++   * 2026-10-13-agentlog-write-diff：tool_result 行/事件的 structuredPatch JSON
++   * （backend edit_patch 列 / AgentEvent.edit_patch 透传，hunks 含真实文件行号）。
++   * mergeToolResult 配对时随结果写入工具卡（首条语义，同 toolDurationMs）；
++   * Edit/Write 预览渲染红删绿增 DiffView。undefined=无 patch（Bash/Read 等
++   * 零变化行，或旧数据）。
++   */
++  editPatch?: string;
+ }
+diff --git a/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+new file mode 100644
+index 000000000..035eb916f
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+@@ -0,0 +1,168 @@
++/**
++ * 2026-10-13-subagent-stub-reconcile 回归测试：
++ *   - buildSubagentTaskLookup（FR-01）：tool_use_id 索引、终态优先序、同优先序
++ *     取 updated_at 最新、无 toolUseId 行跳过；
++ *   - subagentHeaderOf 第三参对账（FR-01/02）：stub 命中终态收敛名称/徽标/时长、
++ *     未命中维持现状、tool 段三级优先（元数据 > 对账 > 段三态）、已配对结果
++ *     段不被覆盖（FR-03）。
++ *
++ * 纪律对齐既有套件：纯函数直测 + 真实段结构构造，不 mock 被测函数。
++ */
++
++import { describe, it, expect } from "vitest";
++
++import {
++  buildSubagentTaskLookup,
++  type AgentSessionTaskView,
++} from "@/hooks/use-session-tasks";
++import {
++  subagentHeaderOf,
++  type SubagentContainerSegment,
++  type SubagentReconciledTask,
++} from "../turn-segment-views";
++import type { ToolTurnSegment } from "../session-log-assembler";
++
++/* ───────── 夹具 ───────── */
++
++function row(over: Partial<AgentSessionTaskView> & { taskId: string }): AgentSessionTaskView {
++  return {
++    taskName: "默认任务名",
++    status: "running",
++    progress: null,
++    message: null,
++    isAsync: true,
++    lastToolName: null,
++    summary: null,
++    elapsedMs: null,
++    elapsedSyncedAt: null,
++    startedAt: null,
++    lastActivityAt: null,
++    terminalAt: null,
++    totalTokens: null,
++    toolUses: null,
++    ...over,
++  } as AgentSessionTaskView;
++}
++
++const stubSeg: SubagentContainerSegment = {
++  kind: "subagent_stub",
++  id: "call_a",
++  subagentType: "general-purpose",
++  children: [],
++};
++
++function toolSeg(over: Partial<ToolTurnSegment>): SubagentContainerSegment {
++  return {
++    kind: "tool",
++    id: "call_t",
++    raw: '{"tool":"Task"}',
++    status: "running",
++    toolName: "Task",
++    primary: null,
++    startedAt: null,
++    endedAt: null,
++    children: [],
++    subagentType: "general-purpose",
++    ...over,
++  };
++}
++
++const reconciledCompleted: SubagentReconciledTask = {
++  taskName: "独立评审单位弹窗重排",
++  status: "completed",
++  elapsedMs: 169_000,
++};
++
++/* ── FR-01：buildSubagentTaskLookup ─────────────────────────────── */
++
++describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => {
++  it("终态优先序：completed 压过同名 tool_use_id 的 running/stopped 行", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_a", status: "running", taskName: "在途" }),
++      row({ taskId: "k2", toolUseId: "call_a", status: "stopped", taskName: "清扫影" }),
++      row({ taskId: "k3", toolUseId: "call_a", status: "completed", taskName: "真终态", elapsedMs: 1000 }),
++    ]);
++    expect(lookup.get("call_a")).toEqual({
++      taskName: "真终态",
++      status: "completed",
++      elapsedMs: 1000,
++    });
++  });
++
++  it("同优先序取 updated_at 最新；failed > stopped", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_b", status: "failed", taskName: "旧失败", updatedAt: "2026-10-13T01:00:00Z" }),
++      row({ taskId: "k2", toolUseId: "call_b", status: "failed", taskName: "新失败", updatedAt: "2026-10-13T02:00:00Z" }),
++      row({ taskId: "k3", toolUseId: "call_c", status: "stopped", taskName: "停" }),
++      row({ taskId: "k4", toolUseId: "call_c", status: "failed", taskName: "败" }),
++    ]);
++    expect(lookup.get("call_b")?.taskName).toBe("新失败");
++    expect(lookup.get("call_c")?.status).toBe("failed");
++  });
++
++  it("无 toolUseId 的行跳过（无关联键不参账）", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: null, status: "completed", taskName: "x" }),
++      row({ taskId: "k2", status: "completed", taskName: "y" }),
++    ]);
++    expect(lookup.size).toBe(0);
++  });
++});
++
++/* ── FR-01/02：subagentHeaderOf 对账 ────────────────────────────── */
++
++describe("subagentHeaderOf 对账（FR-01：stub 命中终态收敛）", () => {
++  it("stub 命中 completed → 名称=快照 task_name、徽标「已完成」、权威时长、非 running", () => {
++    const h = subagentHeaderOf(stubSeg, 0, reconciledCompleted);
++    expect(h.name).toBe("独立评审单位弹窗重排");
++    expect(h.status).toBe("completed");
++    expect(h.running).toBe(false);
++    expect(h.badge?.label).toBe("已完成");
++    expect(h.durationText).toBe("02:49"); // 169000ms → mm:ss 权威时长
++    expect(h.dotCls).not.toContain("animate-pulse");
++  });
++
++  it("stub 未命中 → 维持现状（名称=subagentType、durationText=运行中）", () => {
++    const h = subagentHeaderOf(stubSeg, 0, null);
++    expect(h.name).toBe("general-purpose");
++    expect(h.status).toBe("running");
++    expect(h.durationText).toBe("运行中");
++    expect(h.badge).toBeNull();
++  });
++
++  it("stub 命中 failed / stopped → 徽标与状态点随行", () => {
++    const failed = subagentHeaderOf(stubSeg, 0, { taskName: "x", status: "failed", elapsedMs: null });
++    expect(failed.status).toBe("failed");
++    expect(failed.badge?.label).toBe("失败");
++    expect(failed.dotCls).toContain("bg-destructive");
++    expect(failed.durationText).toBeNull(); // 无 elapsed 不伪造
++    const stopped = subagentHeaderOf(stubSeg, 0, { taskName: "y", status: "stopped", elapsedMs: 60_000 });
++    expect(stopped.badge?.label).toBe("已停止");
++    expect(stopped.durationText).toBe("01:00");
++  });
++
++  it("FR-03：带 [TASK_*] 元数据的 tool 段元数据优先，对账不覆盖", () => {
++    const seg = toolSeg({ id: "call_a", taskStatus: "running", taskAsync: true, startedAt: 1000 });
++    const h = subagentHeaderOf(seg, 5000, reconciledCompleted);
++    expect(h.metaStatus).toBe("running");
++    expect(h.status).toBe("running"); // 元数据权威——对账 completed 不抢
++    expect(h.badge?.label).toBe("后台运行中");
++  });
++
++  it("FR-01：无元数据且 running 的 tool 段对账收敛（窗口截断形态）", () => {
++    const seg = toolSeg({ id: "call_t", primary: null });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("completed");
++    expect(h.name).toBe("独立评审单位弹窗重排"); // primary 空 → 快照名
++    expect(h.badge?.label).toBe("已完成");
++  });
++
++  it("FR-03：已配对结果段（ok）不被对账覆盖，徽标不渲染", () => {
++    const seg = toolSeg({ id: "call_a", status: "ok", startedAt: 0, endedAt: 8000, primary: "已有结果" });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("ok");
++    expect(h.badge).toBeNull(); // 段三态胜出——metaStatus/reconciledStatus 均空
++    expect(h.name).toBe("已有结果"); // primary 优先
++    expect(h.durationText).toBe("00:08"); // 原起止时长路径（mm:ss 格式）
++  });
++});
+diff --git a/frontend/src/components/daemon/tool-args-detail.tsx b/frontend/src/components/daemon/tool-args-detail.tsx
+index c0a23b30c..d0204ce68 100644
+--- a/frontend/src/components/daemon/tool-args-detail.tsx
++++ b/frontend/src/components/daemon/tool-args-detail.tsx
+@@ -98,13 +98,14 @@ function numArg(args: Record<string, unknown> | null, key: string): number {
+ 
+ /* ───────────── Edit 行级 diff（LCS + 双侧行号 + 红/绿高亮） ───────────── */
+ 
+-/** diff 行：ctx=上下文（双侧行号）/ del=删除（旧侧行号）/ add=新增（新侧行号）。 */
+-export interface DiffRow {
+-  type: "ctx" | "del" | "add";
+-  oldNo: number | null;
+-  newNo: number | null;
+-  text: string;
+-}
++// 2026-10-13-agentlog-write-diff：DiffRow / parseStructuredPatch / DiffView 迁至
++// agent-log/tool-diff 共享（agent-log WriteToolPreview 同用）；此处 re-export
++// 保持既有导入面（本文件测试与 computeLineDiff 消费方）零改动。
++export { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
++export type { DiffRow } from "@/components/agent-log/tool-diff";
++
++import { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
++import type { DiffRow } from "@/components/agent-log/tool-diff";
+ 
+ /** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
+ const DIFF_MAX_CELLS = 1_000_000;
+@@ -184,108 +185,6 @@ export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | nul
+   return rows;
+ }
+ 
+-/**
+- * ql-20260824-020：SDK structuredPatch（Edit tool_use_result，backend edit_patch
+- * 列透传）→ DiffRow[]。hunks 带 oldStart/newStart 文件内真实行号（1 起始），
+- * lines 元素前缀 ' '/'-'/'+'（'\' 为 "\ No newline at end of file" 标记行，
+- * 不占行号跳过）；多 hunk 间插双侧空行号的「…」分隔行。JSON 非法 / hunk 形状
+- * 不符 → null（调用方回退 LCS 自算，行号退化为片段相对）。
+- */
+-export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
+-  let hunks: unknown;
+-  try {
+-    hunks = JSON.parse(patchJson);
+-  } catch {
+-    return null;
+-  }
+-  if (!Array.isArray(hunks) || hunks.length === 0) return null;
+-  const rows: DiffRow[] = [];
+-  for (let h = 0; h < hunks.length; h += 1) {
+-    const hunk = hunks[h] as {
+-      oldStart?: unknown;
+-      newStart?: unknown;
+-      lines?: unknown;
+-    } | null;
+-    if (!hunk || typeof hunk !== "object") return null;
+-    if (typeof hunk.oldStart !== "number" || typeof hunk.newStart !== "number") {
+-      return null;
+-    }
+-    if (!Array.isArray(hunk.lines)) return null;
+-    let oldNo = hunk.oldStart;
+-    let newNo = hunk.newStart;
+-    if (h > 0) rows.push({ type: "ctx", oldNo: null, newNo: null, text: "…" });
+-    for (const line of hunk.lines) {
+-      if (typeof line !== "string" || line.length === 0) return null;
+-      const prefix = line[0];
+-      const text = line.slice(1);
+-      if (prefix === " ") {
+-        rows.push({ type: "ctx", oldNo, newNo, text });
+-        oldNo += 1;
+-        newNo += 1;
+-      } else if (prefix === "-") {
+-        rows.push({ type: "del", oldNo, newNo: null, text });
+-        oldNo += 1;
+-      } else if (prefix === "+") {
+-        rows.push({ type: "add", oldNo: null, newNo, text });
+-        newNo += 1;
+-      } else if (prefix === "\\") {
+-        continue;
+-      } else {
+-        return null;
+-      }
+-    }
+-  }
+-  return rows;
+-}
+-
+-/** diff 渲染行数上限（超长 diff 截断展示，取全量走「复制新文本」）。 */
+-const DIFF_MAX_ROWS = 2000;
+-
+-/** diff 视图：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）。 */
+-export function DiffView({ rows }: { rows: DiffRow[] }) {
+-  const capped = rows.length > DIFF_MAX_ROWS;
+-  const shown = capped ? rows.slice(0, DIFF_MAX_ROWS) : rows;
+-  return (
+-    <div className="overflow-hidden rounded-md border border-border bg-background font-mono text-[10.5px] leading-5">
+-      {shown.map((r, idx) => (
+-        <div
+-          key={idx}
+-          className={cn(
+-            "flex items-start",
+-            r.type === "del" && "bg-red-500/10",
+-            r.type === "add" && "bg-emerald-500/10",
+-          )}
+-        >
+-          <span className="w-7 shrink-0 select-none pr-1 text-right text-muted-foreground">
+-            {r.oldNo ?? ""}
+-          </span>
+-          <span className="w-7 shrink-0 select-not select-none pr-1 text-right text-muted-foreground">
+-            {r.newNo ?? ""}
+-          </span>
+-          <span
+-            className={cn(
+-              "w-3 shrink-0 select-none text-center font-bold",
+-              r.type === "del" && "text-red-600",
+-              r.type === "add" && "text-emerald-600",
+-              r.type === "ctx" && "text-muted-foreground/50",
+-            )}
+-          >
+-            {r.type === "del" ? "-" : r.type === "add" ? "+" : " "}
+-          </span>
+-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-foreground">
+-            {r.text}
+-          </span>
+-        </div>
+-      ))}
+-      {capped && (
+-        <div className="border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
+-          …diff 超过 {DIFF_MAX_ROWS} 行已截断，完整内容用「复制」按钮
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+ /* ───────────── 各工具参数详情（展开区上半部） ───────────── */
+ 
+ /** Write：内容预览（规则平移 WriteToolPreview / ql-20260709-002）。 */

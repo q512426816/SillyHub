@@ -2658,3 +2658,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
 理由：最大风险是误伤用户手打的同前缀文本——该前缀由后端 TASK_WAKEUP 注入专属，用户消息不会以此开头，且既有 extract/strip 已按前缀特判多轮（2026-09-03 刷屏修复），风险口径与改前一致，不扩大。次要风险是共享文件混提交：session-log-assembler.ts / session-panel-page.tsx 工作区带有另一活跃变更（2026-10-13-subagent-stub-reconcile）的未提交 hunk，本次提交必须选择性暂存（仅暂存本变更 hunk），禁止整文件 add 裹挟。 试过但放弃的方案：①渲染侧过滤（turn-timeline / segment-view 对该前缀 return null）——需在每个渲染分支重复谓词、右栏详情面板易漏，且段数组仍被通知撑大，放弃；②后端不回传 TASK_WAKEUP user_input 日志——动协议面且丢失会话审计信息，超出小修复范围，放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-agentlog-write-diff
+锚点：未记录
+最近确认：e6cbde3e612c38d298b7c60ea5bcd22ff6b4a821
+理由：最大风险：共享模块迁移（daemon/tool-args-detail → agent-log/tool-diff）破坏既有导入面。缓解：daemon 侧保留同名 re-export，既有测试（tool-args-detail.test.tsx 直接 import DiffView/parseStructuredPatch）零改动通过即证明。 放弃的方案：(a) agent-log 直接 import daemon/tool-args-detail 的 DiffView——会形成 tool-renderers ↔ tool-args-detail 循环依赖（后者已 import 前者的 CopyButton），放弃；(b) 同步接线 agent-log-card 会话化对话视图——其数据源是 daemon read_agent_log_messages（另一条链，daemon 侧需动 messages 解析），超出薄跑道范围，留后续变更；(c) Write 无 patch 时也整文件全绿（照搬会话面板行为）——本变更成功标准承诺零回归保持全文预览，且 agent-log 面已提供「原始数据」折叠兜底，不做双面不一致的行为扩散。
