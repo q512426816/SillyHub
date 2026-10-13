@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ToolCallEntry } from "./types";
 
 import { COMMAND_COLLAPSE_CHARS, COMMAND_COLLAPSE_LINES } from "./normalize";
+import { DiffView, parseStructuredPatch } from "./tool-diff";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -144,24 +145,32 @@ const CODE_CLS =
 /**
  * task-15 / FR-10：tool 卡片预览 props。
  * durationMs 新增：tool_use→tool_result 时间戳差，由 AgentLogRow 计算后透传。
+ * editPatch 新增（2026-10-13-agentlog-write-diff）：tool_result structuredPatch
+ * JSON（normalize 配对到卡片），Write 预览渲染红删绿增 DiffView。
  */
 interface ToolPreviewProps {
   entry: ToolCallEntry;
   mergedResult?: string;
   durationMs?: number;
+  editPatch?: string;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Write                                                              */
 /* ------------------------------------------------------------------ */
 
-function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
+function WriteToolPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
   const rawArgs = entry.rawArgs as Record<string, unknown> | null;
   const filePath = String(rawArgs?.file_path ?? "");
   const content = typeof rawArgs?.content === "string" ? rawArgs.content : "";
   const fileName = filePath.split("/").pop() ?? filePath;
   const contentLines = content.split("\n");
   const lineCount = contentLines.length;
+  // 2026-10-13-agentlog-write-diff：覆盖写 structuredPatch → 红删绿增 DiffView
+  // （与会话面板 WriteArgsDetail 同管线）；无 patch / 解析失败回退全文预览（零回归）。
+  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
+  const addCount = patchRows?.filter((r) => r.type === "add").length ?? 0;
+  const delCount = patchRows?.filter((r) => r.type === "del").length ?? 0;
   // ql-20260620：超大 content（如 agent Write 巨型文件）做 TextEncoder().encode 会 OOM
   // 导致标签页崩溃（表现为 client-side exception）。超阈值时退化为按字符长度估算。
   const byteSize = content.length > 200_000
@@ -199,16 +208,25 @@ function WriteToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps)
       {mergedResult && (
         <div className="text-[11px] font-medium text-emerald-700">{mergedResult.slice(0, 200)}</div>
       )}
-      <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
-        <div className="relative">
-          <pre className={CODE_CLS}>
-            {content.length > 50000 ? content.slice(0, 50000) + "\n... (截断)" : content}
-          </pre>
+      {patchRows ? (
+        <CollapsibleSection title={`变更对比（覆盖写入 +${addCount} −${delCount}）`}>
+          <DiffView rows={patchRows} />
           <div className="mt-1">
             <CopyButton text={content} label="复制内容" />
           </div>
-        </div>
-      </CollapsibleSection>
+        </CollapsibleSection>
+      ) : (
+        <CollapsibleSection title={`内容预览 (${lineCount} 行)`}>
+          <div className="relative">
+            <pre className={CODE_CLS}>
+              {content.length > 50000 ? content.slice(0, 50000) + "\n... (截断)" : content}
+            </pre>
+            <div className="mt-1">
+              <CopyButton text={content} label="复制内容" />
+            </div>
+          </div>
+        </CollapsibleSection>
+      )}
       <CollapsibleSection title="原始数据">
         <pre className={CODE_CLS}>{entry.args}</pre>
       </CollapsibleSection>
@@ -527,11 +545,11 @@ function GenericToolPreview({ entry, durationMs }: ToolPreviewProps) {
 /*  Router                                                             */
 /* ------------------------------------------------------------------ */
 
-export function ToolCallPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) {
+export function ToolCallPreview({ entry, mergedResult, durationMs, editPatch }: ToolPreviewProps) {
   const tool = entry.tool.toLowerCase();
   switch (tool) {
     case "write":
-      return <WriteToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
+      return <WriteToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} editPatch={editPatch} />;
     case "agent":
       return <AgentToolPreview entry={entry} mergedResult={mergedResult} durationMs={durationMs} />;
     case "bash":

@@ -98,13 +98,14 @@ function numArg(args: Record<string, unknown> | null, key: string): number {
 
 /* ───────────── Edit 行级 diff（LCS + 双侧行号 + 红/绿高亮） ───────────── */
 
-/** diff 行：ctx=上下文（双侧行号）/ del=删除（旧侧行号）/ add=新增（新侧行号）。 */
-export interface DiffRow {
-  type: "ctx" | "del" | "add";
-  oldNo: number | null;
-  newNo: number | null;
-  text: string;
-}
+// 2026-10-13-agentlog-write-diff：DiffRow / parseStructuredPatch / DiffView 迁至
+// agent-log/tool-diff 共享（agent-log WriteToolPreview 同用）；此处 re-export
+// 保持既有导入面（本文件测试与 computeLineDiff 消费方）零改动。
+export { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
+export type { DiffRow } from "@/components/agent-log/tool-diff";
+
+import { parseStructuredPatch, DiffView, DIFF_MAX_ROWS } from "@/components/agent-log/tool-diff";
+import type { DiffRow } from "@/components/agent-log/tool-diff";
 
 /** LCS 单元格上限（(n+1)*(m+1) dp 表内存/耗时护栏，1000×1000 行内可算）。 */
 const DIFF_MAX_CELLS = 1_000_000;
@@ -182,108 +183,6 @@ export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | nul
     j += 1;
   }
   return rows;
-}
-
-/**
- * ql-20260824-020：SDK structuredPatch（Edit tool_use_result，backend edit_patch
- * 列透传）→ DiffRow[]。hunks 带 oldStart/newStart 文件内真实行号（1 起始），
- * lines 元素前缀 ' '/'-'/'+'（'\' 为 "\ No newline at end of file" 标记行，
- * 不占行号跳过）；多 hunk 间插双侧空行号的「…」分隔行。JSON 非法 / hunk 形状
- * 不符 → null（调用方回退 LCS 自算，行号退化为片段相对）。
- */
-export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
-  let hunks: unknown;
-  try {
-    hunks = JSON.parse(patchJson);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(hunks) || hunks.length === 0) return null;
-  const rows: DiffRow[] = [];
-  for (let h = 0; h < hunks.length; h += 1) {
-    const hunk = hunks[h] as {
-      oldStart?: unknown;
-      newStart?: unknown;
-      lines?: unknown;
-    } | null;
-    if (!hunk || typeof hunk !== "object") return null;
-    if (typeof hunk.oldStart !== "number" || typeof hunk.newStart !== "number") {
-      return null;
-    }
-    if (!Array.isArray(hunk.lines)) return null;
-    let oldNo = hunk.oldStart;
-    let newNo = hunk.newStart;
-    if (h > 0) rows.push({ type: "ctx", oldNo: null, newNo: null, text: "…" });
-    for (const line of hunk.lines) {
-      if (typeof line !== "string" || line.length === 0) return null;
-      const prefix = line[0];
-      const text = line.slice(1);
-      if (prefix === " ") {
-        rows.push({ type: "ctx", oldNo, newNo, text });
-        oldNo += 1;
-        newNo += 1;
-      } else if (prefix === "-") {
-        rows.push({ type: "del", oldNo, newNo: null, text });
-        oldNo += 1;
-      } else if (prefix === "+") {
-        rows.push({ type: "add", oldNo: null, newNo, text });
-        newNo += 1;
-      } else if (prefix === "\\") {
-        continue;
-      } else {
-        return null;
-      }
-    }
-  }
-  return rows;
-}
-
-/** diff 渲染行数上限（超长 diff 截断展示，取全量走「复制新文本」）。 */
-const DIFF_MAX_ROWS = 2000;
-
-/** diff 视图：双侧行号列 + -/+ 标记 + 红删绿增行底（透明度色双主题安全）。 */
-export function DiffView({ rows }: { rows: DiffRow[] }) {
-  const capped = rows.length > DIFF_MAX_ROWS;
-  const shown = capped ? rows.slice(0, DIFF_MAX_ROWS) : rows;
-  return (
-    <div className="overflow-hidden rounded-md border border-border bg-background font-mono text-[10.5px] leading-5">
-      {shown.map((r, idx) => (
-        <div
-          key={idx}
-          className={cn(
-            "flex items-start",
-            r.type === "del" && "bg-red-500/10",
-            r.type === "add" && "bg-emerald-500/10",
-          )}
-        >
-          <span className="w-7 shrink-0 select-none pr-1 text-right text-muted-foreground">
-            {r.oldNo ?? ""}
-          </span>
-          <span className="w-7 shrink-0 select-not select-none pr-1 text-right text-muted-foreground">
-            {r.newNo ?? ""}
-          </span>
-          <span
-            className={cn(
-              "w-3 shrink-0 select-none text-center font-bold",
-              r.type === "del" && "text-red-600",
-              r.type === "add" && "text-emerald-600",
-              r.type === "ctx" && "text-muted-foreground/50",
-            )}
-          >
-            {r.type === "del" ? "-" : r.type === "add" ? "+" : " "}
-          </span>
-          <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2 text-foreground">
-            {r.text}
-          </span>
-        </div>
-      ))}
-      {capped && (
-        <div className="border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
-          …diff 超过 {DIFF_MAX_ROWS} 行已截断，完整内容用「复制」按钮
-        </div>
-      )}
-    </div>
-  );
 }
 
 /* ───────────── 各工具参数详情（展开区上半部） ───────────── */
