@@ -134,10 +134,13 @@ describe('完整消息展开（full-message-mixed）', () => {
         type: 'status',
         subtype: 'agent_task_status',
         content: '',
+        // 2026-10-13-agent-task-stuck-running FR-01：派生信号必带 tool_use_id
+        //（=call id）——backend 幽灵收口依赖该键归并冒名行。
         metadata: {
           task_id: 'toolu_task01',
           task_name: 'Compute 17 times 23',
           status: 'running',
+          tool_use_id: 'toolu_task01',
         },
       },
       {
@@ -641,6 +644,33 @@ describe('status 会话信号（session-init-status）', () => {
         },
       },
     ]);
+    norm.dispose();
+  });
+
+  it('2026-10-13-agent-task-stuck-running FR-01：Task/Agent tool_use 派生 agent_task_status 必带 tool_use_id（=call id）', () => {
+    // 派生路径 task_id 入参缺失回落 call id（冒名 id）；backend 幽灵收口依赖
+    // 事件携带 tool_use_id 且异于 task_id——不带则冒名行永卡 running
+    // （生产 47e2ff1a 实证 21 组成对行）。
+    const norm = makeNormalizer([]);
+    const events = norm.normalizeMessage({
+      type: 'assistant',
+      message: {
+        id: 'm-task-signal',
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'toolu_t9', name: 'Task', input: {} },
+        ],
+      },
+      parent_tool_use_id: null,
+    } as unknown as SDKMessage);
+    const signal = events.find((e) => e.subtype === 'agent_task_status');
+    expect(signal).toBeDefined();
+    expect(signal!.metadata).toEqual({
+      task_id: 'toolu_t9',
+      task_name: 'Task',
+      status: 'running',
+      tool_use_id: 'toolu_t9',
+    });
     norm.dispose();
   });
 

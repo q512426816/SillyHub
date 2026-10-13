@@ -844,3 +844,77 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
     }
   });
 });
+
+// ── 2026-10-13-agent-task-stuck-running FR-01：别名条目注销/补发 + 三无 WARN ──
+
+describe('task_notification 别名条目与无归属兜底（2026-10-13-agent-task-stuck-running）', () => {
+  it('FR-01：task_started 丢失（仅 tool_use 派生别名条目）→ 真终态通知为别名补发终态 emit + [TASK_NOTIFICATION] 行，主 task_id 照常 emit', async () => {
+    const h = await createHarness('sess-alias', 'run-alias');
+    // tool_use 派生懒注册：task_id=call id（冒名 id），toolUseId 同值。
+    await h.emitMessage(msgTaskStarted({ taskId: 'toolu_T', toolUseId: 'toolu_T', description: 'general-purpose 子代理' }));
+    // turn 收尾（currentRunId 清空）——通知跨轮到达，别名条目注册时捕获的
+    // 派发 runId 是唯一归属证据（兜底链末位生效）。
+    await h.emitResult(msgResultSuccess());
+    await h.emitMessage(msgTaskNotification({ taskId: 'bgtask-K', status: 'completed', toolUseId: 'toolu_T', summary: '算完了', durationMs: 120000 }));
+    // 主 emit（bgtask-K）+ 别名补发（toolu_T）各一条 completed 终态事件。
+    const completedTasks = taskEventCalls(h)
+      .filter(([, , e]) => (e as { status?: string }).status === 'completed')
+      .map(([, , e]) => (e as { task_id?: string }).task_id);
+    expect(completedTasks.sort()).toEqual(['bgtask-K', 'toolu_T']);
+    // 落行：主 + 别名两条 [TASK_NOTIFICATION]，别名行 parent_tool_use_id=toolu_T。
+    const notifLines = taskLineCalls(h).filter(([, , m]) =>
+      String((m as { content?: string }).content).startsWith('[TASK_NOTIFICATION]'),
+    );
+    expect(notifLines).toHaveLength(2);
+    const aliasParsed = notifLines
+      .map(parseTaskLine)
+      .find((p) => p.json.task_id === 'toolu_T');
+    expect(aliasParsed).toBeDefined();
+    expect(aliasParsed!.json.status).toBe('completed');
+    expect(aliasParsed!.flat.parent_tool_use_id).toBe('toolu_T');
+  });
+
+  it('FR-01：主条目存在（task_started 已注册真条目）→ 别名仅静默注销，不产生重复终态', async () => {
+    const h = await createHarness('sess-both', 'run-both');
+    await h.emitMessage(msgTaskStarted({ taskId: 'toolu_T', toolUseId: 'toolu_T', description: '同名A' }));
+    await h.emitMessage(msgTaskStarted({ taskId: 'bgtask-K', toolUseId: 'toolu_T', description: '同名A' }));
+    await h.emitMessage(msgTaskNotification({ taskId: 'bgtask-K', status: 'completed', toolUseId: 'toolu_T', durationMs: 120000 }));
+    // 终态事件只有主 task_id 一条。
+    const completedTasks = taskEventCalls(h)
+      .filter(([, , e]) => (e as { status?: string }).status === 'completed')
+      .map(([, , e]) => (e as { task_id?: string }).task_id);
+    expect(completedTasks).toEqual(['bgtask-K']);
+    // [TASK_NOTIFICATION] 行只有主 task_id 一条。
+    const notifLines = taskLineCalls(h).filter(([, , m]) =>
+      String((m as { content?: string }).content).startsWith('[TASK_NOTIFICATION]'),
+    );
+    expect(notifLines).toHaveLength(1);
+    // 别名条目已注销：后续同 task_id progress 走懒注册（新 [TASK_STARTED] 行）。
+    await h.emitMessage(msgTaskProgress({ taskId: 'toolu_T' }));
+    const startedLines = taskLineCalls(h).filter(([, , m]) =>
+      String((m as { content?: string }).content).startsWith('[TASK_STARTED]'),
+    );
+    expect(startedLines).toHaveLength(3);
+  });
+
+  it('FR-01：三无孤儿终态（注册表空且无在跑 runId）→ WARN 日志可查，不 emit 不落行', async () => {
+    const h = await createHarness('sess-orphan', 'run-orphan');
+    await h.emitResult(msgResultSuccess()); // currentRunId 清空
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await h.emitMessage(msgTaskNotification({ taskId: 'bgtask-X', status: 'completed', summary: '孤儿终态' }));
+      const droppedWarn = warnSpy.mock.calls.find((c) =>
+        String(c[0]).includes('task_notification dropped'),
+      );
+      expect(droppedWarn).toBeDefined();
+      const detail = droppedWarn![1] as { sessionId?: string; taskId?: string; status?: string };
+      expect(detail.sessionId).toBe('sess-orphan');
+      expect(detail.taskId).toBe('bgtask-X');
+      expect(detail.status).toBe('completed');
+      expect(taskEventCalls(h)).toHaveLength(0);
+      expect(taskLineCalls(h)).toHaveLength(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});

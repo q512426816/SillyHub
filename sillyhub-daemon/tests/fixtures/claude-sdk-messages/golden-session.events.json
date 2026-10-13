@@ -172,7 +172,8 @@
           "metadata": {
             "task_id": "toolu_task01",
             "task_name": "Compute 17 times 23",
-            "status": "running"
+            "status": "running",
+            "tool_use_id": "toolu_task01"
           }
         },
         {
@@ -446,7 +447,8 @@
           "metadata": {
             "task_id": "toolu_task02",
             "task_name": "Verify the edit",
-            "status": "running"
+            "status": "running",
+            "tool_use_id": "toolu_task02"
           }
         },
         {
@@ -478,7 +480,8 @@
           "metadata": {
             "task_id": "toolu_task03",
             "task_name": "Check tar entry names",
-            "status": "running"
+            "status": "running",
+            "tool_use_id": "toolu_task03"
           }
         },
         {

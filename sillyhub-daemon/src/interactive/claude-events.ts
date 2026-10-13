@@ -899,7 +899,18 @@ export class ClaudeEventNormalizer {
           type: 'status',
           subtype: 'agent_task_status',
           content: '',
-          metadata: { task_id: taskId, task_name: taskName, status: 'running' },
+          // tool_use_id 必带（2026-10-13-agent-task-stuck-running FR-01）：
+          // task_id 入参缺失时回落 call id（冒名 id），backend 写侧幽灵收口
+          //（agent_task_store._resolve_row_with_ghost_reconciliation）依赖
+          // 「事件携带 tool_use_id 且异于 task_id」把冒名行转正/吸收——不带
+          // 则冒名行永卡 running（生产 47e2ff1a 实证 21 组成对行）。注册表
+          // 条目亦由此获得 toolUseId，[TASK_STARTED] 行才有 parent 可挂。
+          metadata: {
+            task_id: taskId,
+            task_name: taskName,
+            status: 'running',
+            tool_use_id: tId,
+          },
         });
       }
     }

@@ -218,6 +218,23 @@ export async function handleTaskNotificationEvent(
   // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同
   // task_id 的迟到 progress 会走懒注册兜底而非挂死条目）。
   tasks.delete(taskId);
+  // 2026-10-13-agent-task-stuck-running（FR-01）：tool_use 派生懒注册的别名
+  // 条目（task_id=call id，toolUseId 同值）与真条目（SDK 帧 harness task_id）
+  // 双 id 并存——真终态只到主 task_id，别名条目永卡 running。注销主条目后
+  // 按 toolUseId 扫描一并注销别名；主条目从未注册（task_started 帧丢失）时
+  // 尾部为别名补发终态。扫描在锚点判定之前，保证「注册表清空 → 清锚点」
+  // 口径不被别名残留干扰。
+  const metaToolUseId = strOf(meta?.['tool_use_id']) || undefined;
+  const effectiveToolUseId = info?.toolUseId ?? metaToolUseId;
+  const aliases: Array<[string, BackgroundTaskInfo]> = [];
+  if (effectiveToolUseId) {
+    for (const [aliasId, aliasInfo] of tasks) {
+      if (aliasId !== taskId && aliasInfo.toolUseId === effectiveToolUseId) {
+        aliases.push([aliasId, aliasInfo]);
+        tasks.delete(aliasId);
+      }
+    }
+  }
   // 2026-09-15-background-task-permission-lockout（FR-01）：末任务终态注销后若
   // 注册表清空，清掉后台锚点（onResult 因注册表非空保留的 currentRunId）——守卫
   // 放行条件 hasBackgroundTaskGrace 随注册表空自动失效，恢复 fail-closed。仅
@@ -235,20 +252,31 @@ export async function handleTaskNotificationEvent(
     // 已注销，不再 emit/落行。
     return;
   }
-  const toolUseId = strOf(meta?.['tool_use_id']) || undefined;
+  const toolUseId = metaToolUseId;
   const taskName =
     info?.taskName ??
+    aliases[0]?.[1].taskName ??
     (toolUseId
       ? mgr._agentToolUseMeta.get(toolUseId)?.taskName
       : undefined) ??
     '后台任务';
-  const runId = info?.runId ?? state.currentRunId;
+  // runId 兜底链末位加别名条目（FR-01）：task_started 丢失时主条目不存在，
+  // 别名条目注册时捕获的派发 runId 是唯一归属证据——用它既救主 emit 也救
+  // 别名补发（否则三无 return 会先于补发短路）。
+  const runId = info?.runId ?? state.currentRunId ?? aliases[0]?.[1].runId;
   if (!runId) {
-    // 注册表缺失且无在跑 turn（如 daemon 重启后孤儿终态）：无处可归，
-    // 跳过（会话 end 收敛兜底）。
+    // 注册表缺失且无在跑 turn（如 daemon 重启后孤儿终态）：无处可归——
+    // 2026-10-13-agent-task-stuck-running（FR-01）起不再静默丢弃：留 WARN
+    // 日志可事后排查（重启窗口 SDK 子进程已亡，通常不会再有后续信号），
+    // 会话 end 收敛兜底不变。
+    console.warn('[session-manager] task_notification dropped: no run attribution', {
+      sessionId: state.sessionId,
+      taskId,
+      status: rawStatus,
+      ...(summary ? { summary: summary.slice(0, 200) } : {}),
+    });
     return;
   }
-  const effectiveToolUseId = info?.toolUseId ?? toolUseId;
   mgr._emitSessionEvent(state.sessionId, runId, {
     kind: 'agent_task_status',
     task_id: taskId,
@@ -265,6 +293,34 @@ export async function handleTaskNotificationEvent(
     ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
     ...(summary ? { summary } : {}),
   }, effectiveToolUseId);
+
+  // 2026-10-13-agent-task-stuck-running（FR-01）：主条目从未注册（task_started
+  // 帧丢失，注册表仅有 tool_use 派生懒注册的别名条目）时，为别名补发同状态
+  // 终态事件 + 落行——别名侧的前端 SSE 卡片与时间线段元数据才收敛。主条目
+  // 存在时别名补发只会产生重复行（backend 幽灵收口 agent_task_store
+  // _resolve_row_with_ghost_reconciliation 已管冒名行归并），此处静默——注销
+  // 已在函数头完成。放唤醒判定之前：唤醒的短任务门槛 return 不得跳过补发。
+  if (!info) {
+    for (const [aliasId, aliasInfo] of aliases) {
+      const aliasRunId = aliasInfo.runId ?? runId;
+      if (!aliasRunId) continue;
+      mgr._emitSessionEvent(state.sessionId, aliasRunId, {
+        kind: 'agent_task_status',
+        task_id: aliasId,
+        task_name: aliasInfo.taskName,
+        status: rawStatus,
+        ...(aliasInfo.toolUseId ? { tool_use_id: aliasInfo.toolUseId } : {}),
+        ...(summary ? { summary } : {}),
+        ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      });
+      await writeTaskLine(mgr, state.sessionId, aliasRunId, '[TASK_NOTIFICATION]', {
+        task_id: aliasId,
+        status: rawStatus,
+        ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+        ...(summary ? { summary } : {}),
+      }, aliasInfo.toolUseId);
+    }
+  }
 
   // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
   // 停止，结果无需汇报，不唤醒防噪）。
