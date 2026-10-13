@@ -1,0 +1,1255 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/change.md b/.sillyspec/docs/SillyHub/modules/change.md
+index 18f5a9efa..76e7e7b33 100644
+--- a/.sillyspec/docs/SillyHub/modules/change.md
++++ b/.sillyspec/docs/SillyHub/modules/change.md
+@@ -35,7 +35,7 @@ created_at: 2026-08-18 01:45:00
+   - service `_project_current_stage`——列表/详情读时批量 join `platform_change_progress` 取权威 current_stage/completed_stages/latest_progress（复合 IN 防 N+1），读时投影覆盖落库值。
+ - **解析器**（parser.py）：目录 → ParsedChange/ParsedDoc/ParseWarning；`_infer_change_type` 与 `_infer_affected_components` 读 `_module-map.yaml` 把变更涉及文件路径反查回模块 id。
+ - **quicklog**：quicklog_parser 解析 QUICKLOG 文件 + quicklog_service 与平台同步条目（platform_sync 上行）合并的查询视图（列表/单条）。
+-- **会话绑定**：`_bind_change_to_session`（ChangeSessionLink）+ `_maybe_notify_session`/`_notify_bound_session`——阶段/审核事件回推绑定会话。
++- **会话绑定**：ChangeSessionLink 绑定只由命令解析通道（binding.py，会话内实际执行 `sillyspec run/flow --change`）与会话创建显式携带/@ 联想写入——reparse 建行自动绑定已移除（2026-10-13-change-reparse-autobind-remove）+ `_maybe_notify_session`/`_notify_bound_session`——阶段/审核事件回推绑定会话。
+ - **数据**：Change / ChangeDocument / ChangeSessionLink / ChangeEventORM（归属事件链）；StageEnum + `can_transition` FSM。
+ 
+ ## 关键逻辑
+diff --git a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+index 705bf43f8..9a8049ef2 100644
+--- a/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/daemon.changelog.md
+@@ -37,3 +37,4 @@ created_at: 2026-08-27 14:32:24
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
+ - 2026-10-13-daemon-turn-anchor-snapshot | daemon 轮锚快照最小闭环(轮次文件变化追踪 Route B 真相源,已评审路线图第②步):agent 每轮结束时刻
+ - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
++- 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index b5ec72a20..5ad438e6f 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -12,3 +12,4 @@ created_at: 2026-09-03 14:49:48
+ - ql-20260903-012-7c69 | 组织管理页 /admin/organizations 全 antd 重构——按 FRONTEND_PAGE_STYLE 规范从手搓 div 抽屉/弹窗/Toast + shadcn Button 改为 PageContainer+PageHeader+SectionCard+DataTable 树表（antd Table treeData 承载组织层级，子组织默认展开、关键词/状态客户端过滤保留祖先链）；新建/编辑统一 antd Modal+Form vertical（父组织 TreeSelect 防环禁选自身后代、edit 模式 code 只读）；删除确认 antd Modal + toast 走 useNotify（AntApp message）；新增页测试 5 用例
+ - 2026-10-13-sessions-portal-header-remove | 智能体会话页面（/sessions 及 workspace/change/quicklog 三 scoped 入口）页头
+ - 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切
++- 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 97d06d2a2..1ea1a4985 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -49,3 +49,4 @@ created_at: 2026-08-30 22:23:33
+ - 2026-10-13-session-scroll-layout-storm | 会话页连续滚动（触顶自动加载 / 回到开头后快速滚到底）在系统 Chrome 上 100% 单页崩溃白屏（rendere
+ - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
+ | 2026-10-13 | 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切 |
++| 2026-10-13 | 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026- |
+diff --git a/.sillyspec/docs/backend/modules/_module-map.yaml b/.sillyspec/docs/backend/modules/_module-map.yaml
+index 5ffbe1797..f4c7c3e6b 100644
+--- a/.sillyspec/docs/backend/modules/_module-map.yaml
++++ b/.sillyspec/docs/backend/modules/_module-map.yaml
+@@ -309,7 +309,7 @@ modules:
+       - /api/workspaces/{workspace_id}/changes
+     main_symbols:
+       - ChangeService
+-      - ChangeService.reparse  # scope 参数——scoped 零 delete + created 自动绑定最近活跃会话
++      - ChangeService.reparse  # scope 参数——scoped 零 delete；created 不产生会话绑定（D-007 已移除）
+       - ChangeService._project_current_stage  # read-only join platform_change_progress 投影 current_stage
+       - SillySpecStageDispatchService  # dispatch.py（形态A 按需触发）
+       - StageProjectionService  # projection.py compute_pending_review
+diff --git a/.sillyspec/docs/backend/modules/change.changelog.md b/.sillyspec/docs/backend/modules/change.changelog.md
+index 3ab8c28c3..e95e855c1 100644
+--- a/.sillyspec/docs/backend/modules/change.changelog.md
++++ b/.sillyspec/docs/backend/modules/change.changelog.md
+@@ -18,3 +18,4 @@ created_at: 2026-08-29 22:56:30
+ - assets.py 读侧回退补镜像缺口（docs/sillyspec/finished/thin-flow-done-no-scope-audit-snapshot.md）：`_read_patch_meta` 缺 change-patch.json 时回退读 scope-audit.json（totals/patchStatus/savedAt 同构直取，file_list 从 rows[].path 投影）——厚流程归档「归档留档」patch 块不再整块缺失；`_read_patch_file_diff` 缺 change.patch 回退切 scope-audit.patch（note 指名实际留档）。两份并存 change-patch.json 优先，thin 形态零变化；DTO/前端零改动。测试：test_assets 28 绿（新增 4：快照回退投影/切片回退/双缺 fail-open/并存优先级）。
+ - 2026-10-12-backfill-run-change-context | 动机：轮级打锚（2026-10-12-run-level-change-attribution）只对新会话生效，存量会话
+ - 2026-10-13-anchor-mismatch-fix | 动机：轮级打锚的「轮归开始时上下文」语义在「整个变更的生命周期发生在单轮内」时产生错配——该轮全部 sillyspec 
++- 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-
+diff --git a/.sillyspec/docs/backend/modules/change.md b/.sillyspec/docs/backend/modules/change.md
+index 8bbbf4d47..eb273356d 100644
+--- a/.sillyspec/docs/backend/modules/change.md
++++ b/.sillyspec/docs/backend/modules/change.md
+@@ -12,7 +12,8 @@ created_at: 2026-08-18 01:45:00
+ SillySpec 变更中枢：从工作区目录解析变更文档、维护变更/文档/会话绑定/事件记录、驱动阶段
+ （stage）流转与四节点人工评审，并做读时进度投影。三大现行形态叠加：
+ ①按需触发（2026-08-08 起）——stage 完成停「待触发」，砍自动连轴；
+-②会话驱动化（2026-08-14 起）——审批只落记录不派发 agent，新变更自动绑定最近活跃会话；
++②会话驱动化（2026-08-14 起）——审批只落记录不派发 agent，会话绑定只由命令解析
++通道写入（reparse 建行自动绑定最近活跃会话已移除，2026-10-13-change-reparse-autobind-remove）；
+ ③进度投影（read-only join platform_change_progress，CLI 上行权威 current_stage 覆盖
+ parser 猜值）。
+ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模块。
+@@ -80,7 +81,7 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模
+     R-08 声明）；summarize_changes 增 workspace 锚参。
+   - `ChangeService`：list/get/update_progress/approve/reject/
+     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
+-    complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /
++    complete_stage + review 四方法 + `_project_current_stage` /
+     `enrich_summaries`（批量 IN 投影）/ `enrich_with_workspace_ids` /
+     `_upsert_projection_progress` / `_record_stage_rework` / `_maybe_notify_session`。
+   - `SillySpecStageDispatchService`（dispatch.py）：`dispatch`（single/team 分流派发）、
+@@ -113,8 +114,8 @@ advance-stage → transition_with_dispatch → dispatch:
+ reparse(scope):
+   scope=None 全量(delete + _detect_renames 重命名检测)
+   scope=[keys] 零 delete: 只对命中 key create/update, 范围内磁盘消失也不删
+-  created 新变更 → _bind_change_to_session(coalesce(last_active_at,
+-    created_at) desc 最近活跃会话, 跨成员) → 写 change_session_links
++  created 新变更不产生会话绑定(D-007 自动绑定已移除; 绑定唯一自动来源=
++    命令解析通道 change/binding.py, 会话内实际执行 sillyspec run/flow --change)
+ 
+ review 四方法(通过/打回):
+   通过 → transition(不派发) + _upsert_projection_progress(upsert
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index 35e5c3fd4..9d43789d0 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -38,3 +38,4 @@
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
+ - change 2026-10-13-daemon-log-config-view | 机器诊断只读端点 GET /api/daemon/machines/{instance_id}/logs?tail= 与 /config?reveal=（RuntimeAdminUser + _get_owned_instance 归属校验；ws_hub.send_rpc timeout=30 转发 daemon_log_tail/daemon_config_get；错误映射：离线/超时原样透传 504、method_not_found→422 HTTP_422_DAEMON_DIAG_UNSUPPORTED、其余→502）；schema.py 增 DaemonLogTailResponse/DaemonConfigResponse（字段与 daemon result 键逐字一致）；_ENDPOINT_ORDER 同步两行。pytest 11 用例（转发成功+参数透传+四类错误映射+admin 放行+非 admin 403+openapi 可见）；openapi.json/api-types.ts 产物同步。
+ - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
++- 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 38408a4c9..cafba68a3 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -82,3 +82,4 @@
+ - 2026-10-13-session-scroll-layout-storm | 会话页连续滚动（触顶自动加载 / 回到开头后快速滚到底）在系统 Chrome 上 100% 单页崩溃白屏（rendere
+ - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
+ | 2026-10-13 | 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切 |
++| 2026-10-13 | 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026- |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+index 01a6cb913..3c8824199 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+@@ -158,6 +158,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
+ - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
+ - 2026-10-13-daemon-turn-anchor-snapshot | daemon 轮锚快照最小闭环(轮次文件变化追踪 Route B 真相源,已评审路线图第②步):agent 每轮结束时刻
++- 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho
+ 
+ ## 文件结构更新（2026-09-07-arch-large-file-split）
+ 
+diff --git a/backend/app/modules/change/binding.py b/backend/app/modules/change/binding.py
+index b112bf74f..566d11803 100644
+--- a/backend/app/modules/change/binding.py
++++ b/backend/app/modules/change/binding.py
+@@ -12,8 +12,9 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
+   start|done|amend-draft --change <名>`` 同样产出变更绑定——thin 派发会话的
+   变更绑定**唯一**依靠本命令解析通道（派发链全程不写 change_session_links）。
+ - bind 事务口径：**不自行 commit**（跟随调用方事务），savepoint
+-  （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（对齐
+-  ``change/service.py:_bind_change_to_session`` 的 best-effort 风格）。
++  （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（best-effort
++  风格；reparse 建行时的自动绑定已移除，2026-10-13-change-reparse-autobind-remove，
++  本模块命令解析通道是变更-会话绑定的唯一自动来源）。
+ """
+ 
+ from __future__ import annotations
+diff --git a/backend/app/modules/change/model.py b/backend/app/modules/change/model.py
+index 71b0af803..91fab3488 100644
+--- a/backend/app/modules/change/model.py
++++ b/backend/app/modules/change/model.py
+@@ -267,10 +267,12 @@ class ChangeDocument(BaseModel, table=True):
+ class ChangeSessionLink(BaseModel, table=True):
+     """变更-会话绑定（change 2026-08-14-change-center-conversation-driven / D-007）。
+ 
+-    reparse 发现新变更（created）时自动绑定该 workspace 最近活跃会话
+-    （design §8 绑定查询，跨成员、不限 status）。多对多：一会话可承载多变更、
+-    一变更可绑定多会话，``unique(change_id, session_id)`` 防同对重复行。
+-    审批/详情页取该 change 最新一条 link 的 session（design §8）。
++    绑定只由命令解析通道写入（会话内实际执行 ``sillyspec run/flow --change``
++    命令，``change/binding.py``；及会话创建请求显式携带 change_id、@ 联想两类
++    显式入口）——reparse 建行时「自动绑定最近活跃会话」已移除
++    （2026-10-13-change-reparse-autobind-remove，误伤闲聊会话）。多对多：一会话
++    可承载多变更、一变更可绑定多会话，``unique(change_id, session_id)`` 防同对
++    重复行。审批/详情页取该 change 最新一条 link 的 session（design §8）。
+     """
+ 
+     __tablename__ = "change_session_links"
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index ea202c8f7..d4a88d279 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -32,7 +32,6 @@ from app.core.errors import (
+     PermissionDenied,
+ )
+ from app.core.logging import get_logger
+-from app.modules.agent.model import AgentSession
+ from app.modules.auth.model import User
+ from app.modules.change.dispatch import STAGE_ORDER
+ from app.modules.change.model import (
+@@ -1416,8 +1415,9 @@ class ChangeService:
+           锚点时**降级为置软删**（不物理删、不联动删 progress），防
+           change_documents/session_links/events 被 CASCADE 抹掉（R-09 审计保护）。
+         - ``_progress_reported_active_keys`` 占位保护（7 天窗）两模式同样生效。
+-        - reparse 发现新变更（created）时按 design §8 绑定查询自动绑定该 workspace
+-          最近活跃会话（change_session_links 行，best-effort 失败不阻断 reparse）。
++        - created 不产生会话绑定（2026-10-13-change-reparse-autobind-remove：D-007
++          自动绑定最近活跃会话已移除——绑定唯一来源为命令解析通道
++          ``change/binding.py``，会话内实际执行 ``sillyspec run/flow --change``）。
+         """
+         workspace = await self._workspace_service.get(workspace_id)
+         # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
+@@ -1512,7 +1512,15 @@ class ChangeService:
+                 else:
+                     stats["updated"] += 1
+             else:
+-                row = self._build_change(parsed, workspace_id=workspace_id)
++                # 2026-10-13-change-owner-backfill：新建行负责人兜底取工作区所有者
++                # （workspace.created_by，reparse 无用户身份；仅建行快照，update
++                # 分支 _apply_parsed 不触碰 owner_id）。created_by 为 None 时兜底
++                # 链落前端展示层（列表兜底显示工作区所有者名）。
++                row = self._build_change(
++                    parsed,
++                    workspace_id=workspace_id,
++                    owner_id=workspace.created_by,
++                )
+                 # D-004@v1（2026-08-01-proxy-create-race-fix）：极端并发撞
+                 # ux_changes_workspace_key（占坑 commit 与 reparse created 几乎同时）
+                 # 的兜底——用 savepoint 包 add+flush 即时检测唯一键冲突，撞键则回滚
+@@ -1538,9 +1546,6 @@ class ChangeService:
+                     stats["updated"] += 1
+                 else:
+                     stats["created"] += 1
+-                    # D-007（design §5 P1 / §8）：新变更自动绑定最近活跃会话。
+-                    # best-effort：绑定失败不阻断 reparse 主流程。
+-                    await self._bind_change_to_session(workspace_id, row.id)
+ 
+             # Sync documents for this change
+             _existing = existing_by_key.get(parsed.change_key, row)
+@@ -1838,56 +1843,6 @@ class ChangeService:
+                 error=str(exc),
+             )
+ 
+-    async def _bind_change_to_session(
+-        self,
+-        workspace_id: uuid.UUID,
+-        change_id: uuid.UUID,
+-    ) -> None:
+-        """新变更自动绑定最近活跃会话（D-007 / design §8 绑定查询）。
+-
+-        绑定查询语义固定（§8 SQL）：``deleted_at IS NULL``、``coalesce(last_active_at,
+-        created_at) DESC``、跨成员（变更属 workspace 不属个人）、不限 status（已结束
+-        会话也可绑，注入时按非 active 降级）。无会话命中不写 link。用 ORM
+-        ``select(AgentSession.id)`` 表达该 SQL——UUID 列类型转换 SQLite/PG 统一
+-        （raw text 绑定 uuid 在 SQLite 不可用，且 str(uuid) 带横线与 CHAR(32)
+-        十六进制存储不匹配）。
+-
+-        best-effort：写入失败仅告警（savepoint 内，只回滚 link，不丢 change 行，
+-        不阻断 reparse 主流程）。
+-        """
+-        try:
+-            async with self._session.begin_nested():
+-                stmt = (
+-                    select(AgentSession.id)
+-                    .where(AgentSession.workspace_id == workspace_id)
+-                    .where(AgentSession.deleted_at.is_(None))
+-                    .order_by(
+-                        func.coalesce(
+-                            AgentSession.last_active_at,
+-                            AgentSession.created_at,
+-                        ).desc()
+-                    )
+-                    .limit(1)
+-                )
+-                session_id = (await self._session.execute(stmt)).scalar()
+-                if session_id is None:
+-                    return
+-                self._session.add(
+-                    ChangeSessionLink(
+-                        id=uuid.uuid4(),
+-                        change_id=change_id,
+-                        session_id=session_id,
+-                    )
+-                )
+-                await self._session.flush()
+-        except Exception as exc:
+-            log.warning(
+-                "change.session_bind_failed",
+-                change_id=str(change_id),
+-                workspace_id=str(workspace_id),
+-                error=str(exc),
+-            )
+-
+     @staticmethod
+     def _detect_renames(
+         existing_by_key: dict[str, Change],
+@@ -2829,6 +2784,10 @@ class ChangeService:
+         parsed: ParsedChange,
+         *,
+         workspace_id: uuid.UUID,
++        # 2026-10-13-change-owner-backfill：建行负责人兜底（reparse 传工作区
++        # 所有者 created_by）。默认 None 保持既有调用兼容；_apply_parsed 不触碰
++        # owner_id（R-05 守卫），已有行永不覆盖、存量空行不回填。
++        owner_id: uuid.UUID | None = None,
+     ) -> Change:
+         # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读
+         # sillyspec.db 时覆盖）。新建行也必须存，否则 manual_dispatch 读
+@@ -2849,7 +2808,7 @@ class ChangeService:
+             # or now fallback：空目录（last_modified_at=None）显式传 None 会绕过
+             # default_factory 直接写 None 违反 NOT NULL，必须 fallback。
+             updated_at=parsed.last_modified_at or datetime.now(UTC),
+-            owner_id=None,
++            owner_id=owner_id,
+         )
+ 
+     @staticmethod
+diff --git a/backend/app/modules/change/tests/test_change_session_binding.py b/backend/app/modules/change/tests/test_change_session_binding.py
+index 3bc7b7417..721c05ca7 100644
+--- a/backend/app/modules/change/tests/test_change_session_binding.py
++++ b/backend/app/modules/change/tests/test_change_session_binding.py
+@@ -1,20 +1,16 @@
+-"""变更-会话绑定测试（task-02 / design §8 D-007）。
++"""变更-会话绑定测试（reparse 不自动绑定）。
+ 
+-Change 2026-08-14-change-center-conversation-driven task-02：reparse 发现新变更
+-（created）时按 §8 绑定查询写 ``change_session_links``：
++2026-08-14-change-center-conversation-driven task-02 曾引入 D-007：reparse 发现
++新变更（created）时自动绑定该 workspace 最近活跃会话。2026-10-13-change-
++reparse-autobind-remove 将其整体移除——绑定唯一自动来源为命令解析通道
++（``change/binding.py``，会话内实际执行 ``sillyspec run/flow --change``），
++起因：阿里云实测归档目录镜像同步触发建行，自动绑上「你好」闲聊会话。
+ 
+-.. code-block:: sql
+-
+-    SELECT s.id FROM agent_sessions s
+-    WHERE s.workspace_id = :wid AND s.deleted_at IS NULL
+-    ORDER BY coalesce(s.last_active_at, s.created_at) DESC
+-    LIMIT 1
+-
+-覆盖：最近活跃会话绑定 / coalesce 兜底 / 软删会话跳过 / 跨 workspace 隔离 /
+-更新不重复建 link / 绑定失败不阻断 reparse / scoped reparse 同样绑定。
++本文件断言新行为：工作区存在最近活跃会话时，全量 reparse created / 重复
++reparse（updated）/ scoped reparse created 均零 link；并守卫已删方法不复活。
+ 
+ author: qinyi
+-created_at: 2026-08-14
++created_at: 2026-10-13
+ """
+ 
+ from __future__ import annotations
+@@ -121,39 +117,13 @@ async def _fetch_links(db_session, change_id: uuid.UUID) -> list[ChangeSessionLi
+     )
+ 
+ 
+-async def test_reparse_created_binds_most_recent_session(db_session, tmp_path):
+-    """created 新变更绑定最近活跃会话（last_active_at desc）。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-foo", "Foo")
+-    user = await _make_user(db_session)
+-
+-    old = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-    )
+-    new = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+-    )
+-    assert new.last_active_at > old.last_active_at
+-
+-    stats, _ = await ChangeService(db_session).reparse(ws.id)
+-    assert stats["created"] == 1
+-
++async def _get_change(db_session, ws_id: uuid.UUID, key: str) -> Change:
+     change = (
+         (
+             await db_session.execute(
+                 select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-foo",
++                    Change.workspace_id == ws_id,
++                    Change.change_key == key,
+                 )
+             )
+         )
+@@ -161,171 +131,48 @@ async def test_reparse_created_binds_most_recent_session(db_session, tmp_path):
+         .first()
+     )
+     assert change is not None
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == new.id
++    return change
+ 
+ 
+-async def test_binding_coalesces_last_active_at_null_to_created_at(db_session, tmp_path):
+-    """last_active_at 为 NULL → 按 created_at 兜底（coalesce 语义）。"""
++async def test_reparse_created_writes_no_session_link(db_session, tmp_path):
++    """FR-01：workspace 存在最近活跃会话，reparse created 仍零 link（D-007 已移除）。"""
+     ws = await _make_ws(db_session)
+     spec_root = tmp_path / "spec-root"
+     await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-bar", "Bar")
++    _seed_change(spec_root, "2026-10-13-foo", "Foo")
+     user = await _make_user(db_session)
+ 
+-    # 旧会话有 last_active_at；新会话 last_active_at=None 但 created_at 更晚
++    # 最近活跃会话（含更旧的次新会话，制造「有明确唯一最新」的旧断言语境）
+     await _make_session(
+         db_session,
+         workspace_id=ws.id,
+         user_id=user.id,
+         created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-    newer_no_active = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 3, 10, 0, tzinfo=UTC),
+-        last_active_at=None,
+-    )
+-
+-    await ChangeService(db_session).reparse(ws.id)
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-bar",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
++        last_active_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+     )
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == newer_no_active.id
+-
+-
+-async def test_binding_skips_deleted_session(db_session, tmp_path):
+-    """deleted_at 非空的会话跳过（软删不可绑），回退到最近活跃非删会话。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-baz", "Baz")
+-    user = await _make_user(db_session)
+-
+     await _make_session(
+         db_session,
+         workspace_id=ws.id,
+         user_id=user.id,
+         created_at=datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 2, 11, 0, tzinfo=UTC),
+-        deleted_at=datetime(2026, 8, 2, 12, 0, tzinfo=UTC),  # 已软删（最新）
+-    )
+-    active_old = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-
+-    await ChangeService(db_session).reparse(ws.id)
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-baz",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == active_old.id
+-
+-
+-async def test_binding_skips_other_workspace_sessions(db_session, tmp_path):
+-    """绑定查询跨成员但按 workspace 隔离：其它 workspace 的更新会话不参与。"""
+-    ws = await _make_ws(db_session)
+-    other_ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-qux", "Qux")
+-    user = await _make_user(db_session)
+-
+-    # 其它 workspace 的会话更新（不应被绑）
+-    await _make_session(
+-        db_session,
+-        workspace_id=other_ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 5, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 5, 11, 0, tzinfo=UTC),
+-    )
+-    # 本 workspace 的会话（较旧，应被绑）
+-    mine = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-
+-    await ChangeService(db_session).reparse(ws.id)
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-qux",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
++        last_active_at=datetime(2026, 8, 2, 10, 0, tzinfo=UTC),
+     )
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == mine.id
+-
+-
+-async def test_no_session_hit_writes_no_link(db_session, tmp_path):
+-    """无任何会话 → 不写 link 行（reparse 正常完成）。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-solo", "Solo")
+ 
+     stats, _ = await ChangeService(db_session).reparse(ws.id)
+     assert stats["created"] == 1
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-solo",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
++
++    change = await _get_change(db_session, ws.id, "2026-10-13-foo")
+     assert await _fetch_links(db_session, change.id) == []
+ 
+ 
+-async def test_reparse_updated_does_not_create_second_link(db_session, tmp_path):
+-    """重复 reparse：首次 created 写 link，二次 updated 不重复写（unique 兜底）。"""
++async def test_reparse_repeat_and_scoped_still_no_link(db_session, tmp_path):
++    """FR-05：重复 reparse（updated）与 scoped reparse created 同样零 link。"""
+     ws = await _make_ws(db_session)
+     spec_root = tmp_path / "spec-root"
+     await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-twice", "Twice")
++    _seed_change(spec_root, "2026-10-13-bar", "Bar")
+     user = await _make_user(db_session)
+-    s = await _make_session(
++    await _make_session(
+         db_session,
+         workspace_id=ws.id,
+         user_id=user.id,
+@@ -336,141 +183,25 @@ async def test_reparse_updated_does_not_create_second_link(db_session, tmp_path)
+     service = ChangeService(db_session)
+     stats, _ = await service.reparse(ws.id)
+     assert stats["created"] == 1
++    change = await _get_change(db_session, ws.id, "2026-10-13-bar")
++    assert await _fetch_links(db_session, change.id) == []
+ 
+-    # 二次 reparse：updated 不绑新 link
++    # 二次全量 reparse：updated 不产生 link
+     stats, _ = await service.reparse(ws.id)
+     assert stats["updated"] == 1
+-
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-twice",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == s.id
+-
+-
+-async def test_scoped_reparse_created_binds_session(db_session, tmp_path):
+-    """scoped reparse 创建新变更同样触发绑定（scope 不跳过绑定逻辑）。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-scope", "Scope")
+-    user = await _make_user(db_session)
+-    s = await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-
+-    stats, _ = await ChangeService(db_session).reparse(ws.id, scope=["2026-08-14-scope"])
+-    assert stats["created"] == 1
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-scope",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
+-    links = await _fetch_links(db_session, change.id)
+-    assert len(links) == 1
+-    assert links[0].session_id == s.id
+-
+-
+-# ===========================================================================
+-# 绑定失败不阻断 reparse（best-effort）
+-# ===========================================================================
+-
+-
+-async def test_binding_failure_does_not_block_reparse(db_session, tmp_path, monkeypatch):
+-    """ChangeSessionLink 实例化失败 → 绑定失败仅告警，reparse 主流程完成、变更仍落行。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-fail", "Fail")
+-    user = await _make_user(db_session)
+-    await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-
+-    def _boom(*_a, **_k):
+-        raise RuntimeError("link insert failed")
+-
+-    monkeypatch.setattr("app.modules.change.service.ChangeSessionLink", _boom)
+-
+-    stats, _ = await ChangeService(db_session).reparse(ws.id)
+-    assert stats["created"] == 1  # reparse 不阻断
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-fail",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
+-    assert change is not None
+     assert await _fetch_links(db_session, change.id) == []
+ 
++    # scoped reparse 首建新变更：同样零 link
++    _seed_change(spec_root, "2026-10-13-scoped", "Scoped")
++    stats, _ = await service.reparse(ws.id, scope=["2026-10-13-scoped"])
++    assert stats["created"] == 1
++    scoped_change = await _get_change(db_session, ws.id, "2026-10-13-scoped")
++    assert await _fetch_links(db_session, scoped_change.id) == []
+ 
+-async def test_bind_change_to_session_duplicate_link_is_rolled_back(db_session, tmp_path) -> None:
+-    """_bind_change_to_session 幂等兜底：重复插入同对 (change_id, session_id) →
+-    unique 冲突在 savepoint 内回滚，方法不抛、仅保留一行（防御唯一约束）。"""
+-    ws = await _make_ws(db_session)
+-    spec_root = tmp_path / "spec-root"
+-    await _make_spec_ws(db_session, ws, spec_root)
+-    _seed_change(spec_root, "2026-08-14-dedup", "Dedup")
+-    user = await _make_user(db_session)
+-    await _make_session(
+-        db_session,
+-        workspace_id=ws.id,
+-        user_id=user.id,
+-        created_at=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+-        last_active_at=datetime(2026, 8, 1, 11, 0, tzinfo=UTC),
+-    )
+-
+-    # 第一次 created reparse 建行 + 绑 link
+-    await ChangeService(db_session).reparse(ws.id)
+-    change = (
+-        (
+-            await db_session.execute(
+-                select(Change).where(
+-                    Change.workspace_id == ws.id,
+-                    Change.change_key == "2026-08-14-dedup",
+-                )
+-            )
+-        )
+-        .scalars()
+-        .first()
+-    )
+-    assert len(await _fetch_links(db_session, change.id)) == 1
+ 
+-    # 直接再调一次绑定 → 唯一冲突回滚，不抛异常、link 数不变
+-    service = ChangeService(db_session)
+-    await service._bind_change_to_session(ws.id, change.id)
+-    assert len(await _fetch_links(db_session, change.id)) == 1
++async def test_bind_change_to_session_removed() -> None:
++    """FR-02：已删方法防复活守卫——ChangeService 不得再拥有 _bind_change_to_session。"""
++    assert not hasattr(ChangeService, "_bind_change_to_session")
+ 
+ 
+ # Suppress unused-import warning for pytest fixture discovery.
+diff --git a/backend/app/modules/change/tests/test_reparse_owner_backfill.py b/backend/app/modules/change/tests/test_reparse_owner_backfill.py
+new file mode 100644
+index 000000000..9feb36e3c
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_reparse_owner_backfill.py
+@@ -0,0 +1,154 @@
++"""2026-10-13-change-owner-backfill FR-01/FR-04：reparse 建行负责人兜底三分支。
++
++背景：主力路径「agent 本地 CLI 写变更目录 + 平台 reparse 扫描登记」建行此前恒
++owner_id=None（库中 300/342 无负责人）。本变更新建行兜底取工作区所有者
++（workspace.created_by）；update 分支 _apply_parsed 不触碰 owner_id——已有 owner
++不覆盖、存量空行不回填（存量可见性由前端展示层兜底，不改写数据）。
++
++三分支 + 边界（created_by 为 None）走真实 reparse（sync）路径断言落库值。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++
++from sqlalchemy import select
++
++from app.modules.change.model import Change
++from app.modules.change.service import ChangeService
++from app.modules.spec_workspace.model import SpecWorkspace
++from app.modules.workspace.model import Workspace
++
++
++async def _make_ws_with_creator(db_session, tmp_path, *, created_by) -> Workspace:
++    """建工作区（created_by 可 None）+ 指向 tmp_path 的 spec_root 镜像行。"""
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="owner-backfill ws",
++        slug=f"ob-{uuid.uuid4().hex[:8]}",
++        root_path=str(tmp_path / "root"),
++        status="active",
++        component_key="comp",
++        created_by=created_by,
++        last_scanned_at=datetime.now(UTC),
++    )
++    db_session.add(ws)
++    spec_root = tmp_path / "spec-root" / "changes"
++    spec_root.mkdir(parents=True, exist_ok=True)
++    db_session.add(
++        SpecWorkspace(
++            workspace_id=ws.id,
++            spec_root=str(spec_root.parent),
++            strategy="platform-managed",
++            sync_status="clean",
++        )
++    )
++    await db_session.commit()
++    await db_session.refresh(ws)
++    return ws
++
++
++def _write_change_dir(tmp_path, key: str) -> None:
++    d = tmp_path / "spec-root" / "changes" / key
++    d.mkdir(parents=True, exist_ok=True)
++    (d / "proposal.md").write_text(f"# {key}\n\n动机：测试。\n", encoding="utf-8")
++
++
++async def _get_change(db_session, ws_id, key) -> Change | None:
++    return (
++        (
++            await db_session.execute(
++                select(Change).where(Change.workspace_id == ws_id, Change.change_key == key)
++            )
++        )
++        .scalars()
++        .first()
++    )
++
++
++async def test_reparse_created_backfills_owner_from_workspace_created_by(db_session, tmp_path):
++    """FR-01 场景 1：新建行兜底填 workspace.created_by 为 owner。"""
++    creator = uuid.uuid4()
++    ws = await _make_ws_with_creator(db_session, tmp_path, created_by=creator)
++    _write_change_dir(tmp_path, "2026-10-13-new-owner-demo")
++
++    stats, _ = await ChangeService(db_session).reparse(ws.id)
++
++    assert stats["created"] == 1
++    row = await _get_change(db_session, ws.id, "2026-10-13-new-owner-demo")
++    assert row is not None
++    assert row.owner_id == creator
++
++
++async def test_reparse_update_does_not_overwrite_existing_owner(db_session, tmp_path):
++    """FR-01 场景 2：已有 owner（change_writer 代理路径落的值）reparse 更新不被覆盖。"""
++    creator = uuid.uuid4()
++    real_owner = uuid.uuid4()  # 与工作区所有者不同，证明没走兜底串写
++    ws = await _make_ws_with_creator(db_session, tmp_path, created_by=creator)
++    _write_change_dir(tmp_path, "2026-10-13-keep-owner")
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            change_key="2026-10-13-keep-owner",
++            title="2026-10-13-keep-owner",
++            status="active",
++            location="active",
++            path="changes/2026-10-13-keep-owner",
++            affected_components=[],
++            current_stage="brainstorm",
++            owner_id=real_owner,
++        )
++    )
++    await db_session.commit()
++
++    stats, _ = await ChangeService(db_session).reparse(ws.id)
++
++    assert stats["updated"] == 1
++    assert stats["created"] == 0
++    row = await _get_change(db_session, ws.id, "2026-10-13-keep-owner")
++    assert row is not None
++    assert row.owner_id == real_owner
++
++
++async def test_reparse_update_does_not_backfill_null_owner(db_session, tmp_path):
++    """FR-01 场景 3：存量空 owner 行 reparse 更新不回填（数据保持诚实，展示层兜底）。"""
++    creator = uuid.uuid4()
++    ws = await _make_ws_with_creator(db_session, tmp_path, created_by=creator)
++    _write_change_dir(tmp_path, "2026-10-13-null-owner")
++    db_session.add(
++        Change(
++            id=uuid.uuid4(),
++            workspace_id=ws.id,
++            change_key="2026-10-13-null-owner",
++            title="2026-10-13-null-owner",
++            status="active",
++            location="active",
++            path="changes/2026-10-13-null-owner",
++            affected_components=[],
++            current_stage="brainstorm",
++            owner_id=None,
++        )
++    )
++    await db_session.commit()
++
++    stats, _ = await ChangeService(db_session).reparse(ws.id)
++
++    assert stats["updated"] == 1
++    row = await _get_change(db_session, ws.id, "2026-10-13-null-owner")
++    assert row is not None
++    assert row.owner_id is None
++
++
++async def test_reparse_created_owner_none_when_workspace_has_no_creator(db_session, tmp_path):
++    """FR-01 场景 4（边界）：workspace.created_by 为 None → 新行 owner_id 为 None 不报错。"""
++    ws = await _make_ws_with_creator(db_session, tmp_path, created_by=None)
++    _write_change_dir(tmp_path, "2026-10-13-no-creator")
++
++    stats, _ = await ChangeService(db_session).reparse(ws.id)
++
++    assert stats["created"] == 1
++    row = await _get_change(db_session, ws.id, "2026-10-13-no-creator")
++    assert row is not None
++    assert row.owner_id is None
+diff --git a/backend/app/modules/change/tests/test_spec_binding.py b/backend/app/modules/change/tests/test_spec_binding.py
+index 78c8fbea4..b6e692d3c 100644
+--- a/backend/app/modules/change/tests/test_spec_binding.py
++++ b/backend/app/modules/change/tests/test_spec_binding.py
+@@ -278,7 +278,7 @@ async def test_bind_change_reuses_existing_row_and_is_idempotent(db_session):
+ 
+ 
+ async def test_bind_change_failure_is_best_effort_no_raise(db_session, monkeypatch):
+-    """best-effort：内部异常仅告警不抛（对齐 _bind_change_to_session 风格）。"""
++    """best-effort：内部异常仅告警不抛（savepoint + log.warning 自吞，不阻断调用方事务）。"""
+     user = await _make_user(db_session)
+     ws = await _make_ws(db_session)
+     s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index 6ac9170f0..a0e4ee906 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -196,9 +196,10 @@ function renderPage() {
+   return { ...utils, client, invalidateSpy };
+ }
+ 
+-/** render + 等 workspace 名出现在副标题（确保主 load 已 resolve）。 */
+-async function renderAndWait() {
+-  mocks.getWorkspace.mockResolvedValue(makeWorkspace());
++/** render + 等 workspace 名出现在副标题（确保主 load 已 resolve）。
++ * ws 可选：传自定义 workspace（如无 owner / 指定 display_name 的兜底用例）。 */
++async function renderAndWait(ws?: Workspace) {
++  mocks.getWorkspace.mockResolvedValue(ws ?? makeWorkspace());
+   const utils = renderPage();
+   // 等 workspace 名出现在副标题（避免与徽标/owner 列的 "—" 撞）。
+   await waitFor(() =>
+@@ -494,7 +495,9 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     expect(screen.queryByText("待提案审核")).not.toBeInTheDocument();
+     expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
+     // owner_id 降级渲染（UUID 前 8 位 mono）仍在
+-    expect(screen.getByText("O").getAttribute("title")).toBe("负责人 owner123");
++    expect(screen.getByText("owner123").getAttribute("title")).toBe(
++      "负责人 owner1234",
++    );
+   });
+ 
+   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
+@@ -573,9 +576,10 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     );
+   });
+ 
+-  // ── 6. 负责人列（task-05 / FR-04 三态：owner_name 优先 / UUID 前 8 位 / —）──
++  // ── 6. 负责人列（task-05 / FR-04 四态：owner_name 文本 / UUID 前 8 位 /
++  //        兜底工作区所有者 / —；2026-10-13-change-owner-backfill 改版）──
+ 
+-  it("owner_name 有值 → 优先显示用户名（2026-08-16-change-owner-from-token task-05）", async () => {
++  it("owner_name 有值 → 首字头像 + 名字文本（title 携带完整名）", async () => {
+     setupListChanges({
+       items: [
+         makeChange({
+@@ -587,11 +591,15 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+     });
+     await renderAndWait();
+     // 用户名优先（owner_id 存在也不走 UUID 短标识）
+-    // 头像渲染 owner_name 首字符，title 携带完整名
+-    expect(screen.getByText("Q").getAttribute("title")).toBe("负责人 qinyi");
++    // 头像渲染 owner_name 首字符；title 在外层容器（2026-10-13 改版后携带完整名）
++    expect(
++      screen.getByText("Q").closest("[title]")?.getAttribute("title"),
++    ).toBe("负责人 qinyi");
++    // 2026-10-13-change-owner-backfill：名字文本直显（不再只显示首字小圆）
++    expect(screen.getByText("qinyi")).toBeInTheDocument();
+   });
+ 
+-  it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono）", async () => {
++  it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono，title 完整 ID）", async () => {
+     setupListChanges({
+       items: [
+         makeChange({
+@@ -602,16 +610,35 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+       ],
+     });
+     await renderAndWait();
+-    expect(screen.getByText("A").getAttribute("title")).toBe("负责人 abcdef12");
++    expect(screen.getByText("abcdef12").getAttribute("title")).toBe(
++      "负责人 abcdef1234567890abcd",
++    );
+   });
+ 
+-  it("owner_name / owner_id 双空 → 占位 —（pending_review 设值避免徽标双源 —）", async () => {
++  it("双空 → 兜底显示工作区所有者名字（title 标注兜底语义）", async () => {
+     setupListChanges({
+       items: [
+         makeChange({ owner_id: null, owner_name: null, pending_review: "proposal_review" }),
+       ],
+     });
+-    await renderAndWait();
++    // display_name 用多字名（"O" 单字会让头像与文本撞 getByText）
++    await renderAndWait({
++      ...makeWorkspace(),
++      owner: { user_id: "u1", email: "o@t.com", display_name: "系统管理员" },
++    });
++    expect(screen.getByText("系统管理员")).toBeInTheDocument();
++    expect(
++      screen.getByText("系统管理员").closest("[title]")?.getAttribute("title"),
++    ).toBe("负责人未指派，默认工作区所有者 系统管理员");
++  });
++
++  it("双空 + 工作区无所有者 → 占位 —", async () => {
++    setupListChanges({
++      items: [
++        makeChange({ owner_id: null, owner_name: null, pending_review: "proposal_review" }),
++      ],
++    });
++    await renderAndWait({ ...makeWorkspace(), owner: null });
+     expect(screen.getByText("—")).toBeInTheDocument();
+   });
+ 
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index 2a5da1dda..db6f54a16 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -482,28 +482,53 @@ export default function ChangesPage({ params }: Props) {
+     return "open";
+   };
+ 
+-  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）三态语义保留：
+-  // owner 头像（原型 issue-side 20px 圆形首字符）：owner_name → 首字符；owner_id → 前 1 位 mono；双空 → "—"。
+-  const renderOwnerAvatar = (c: ChangeSummary): ReactNode => {
++  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token →
++  // 2026-10-13-change-owner-backfill）四态语义：
++  // owner_name → 首字头像 + 名字文本（此前只显首字小圆，不悬浮认不出是谁）；
++  // owner_id → ID 前 8 位 mono 文本；双空 → 兜底工作区所有者名字（reparse 主力
++  // 路径建行 owner 恒空是历史大面积缺口的根因，新建行后端已兜底，存量行走此
++  // 展示层兜底，title 标注兜底语义）；全链无值 → "—"。
++  const renderOwner = (c: ChangeSummary): ReactNode => {
+     if (c.owner_name) {
+       return (
+         <span
+           title={`负责人 ${c.owner_name}`}
+-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
+-          style={{ backgroundColor: "var(--color-brand-50)" }}
++          className="flex items-center gap-1 whitespace-nowrap"
+         >
+-          {c.owner_name.slice(0, 1).toUpperCase()}
++          <span
++            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
++            style={{ backgroundColor: "var(--color-brand-50)" }}
++          >
++            {c.owner_name.slice(0, 1).toUpperCase()}
++          </span>
++          <span className="text-xs text-foreground">{c.owner_name}</span>
+         </span>
+       );
+     }
+     if (c.owner_id) {
+       return (
+         <span
+-          title={`负责人 ${c.owner_id.slice(0, 8)}`}
+-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] text-primary"
+-          style={{ backgroundColor: "var(--color-brand-50)" }}
++          title={`负责人 ${c.owner_id}`}
++          className="whitespace-nowrap font-mono text-xs text-muted-foreground"
++        >
++          {c.owner_id.slice(0, 8)}
++        </span>
++      );
++    }
++    const fallbackName = workspace?.owner?.display_name;
++    if (fallbackName) {
++      return (
++        <span
++          title={`负责人未指派，默认工作区所有者 ${fallbackName}`}
++          className="flex items-center gap-1 whitespace-nowrap"
+         >
+-          {c.owner_id.slice(0, 1).toUpperCase()}
++          <span
++            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
++            style={{ backgroundColor: "var(--color-brand-50)" }}
++          >
++            {fallbackName.slice(0, 1).toUpperCase()}
++          </span>
++          <span className="text-xs text-muted-foreground">{fallbackName}</span>
+         </span>
+       );
+     }
+@@ -583,7 +608,7 @@ export default function ChangesPage({ params }: Props) {
+             stage={c.current_stage ?? "scan"}
+             stepProgress={c.step_progress ?? null}
+           />
+-          {renderOwnerAvatar(c)}
++          {renderOwner(c)}
+           <span
+             style={{ minWidth: 112 }}
+             className="whitespace-nowrap text-right font-mono text-xs text-muted-foreground"
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index 72a6235bc..5241ff647 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -1291,6 +1291,8 @@ export default function MobileChangesPage() {
+                 renderCard={(c) => (
+                   <MobileChangeCard
+                     change={c}
++                    // 2026-10-13-change-owner-backfill：负责人双空兜底工作区所有者
++                    fallbackOwnerName={workspace?.owner?.display_name ?? null}
+                     onClick={() =>
+                       router.push(
+                         `/m/workspaces/${workspaceId}/changes/${c.id}`,
+diff --git a/frontend/src/components/mobile/mobile-change-card.test.tsx b/frontend/src/components/mobile/mobile-change-card.test.tsx
+index 63de4054a..d090ceed6 100644
+--- a/frontend/src/components/mobile/mobile-change-card.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.test.tsx
+@@ -8,7 +8,8 @@
+  *    否则空占位 —（槽位内断言，与新增负责人/用量「—」占位区分）；
+  *  - 活动徽标（task-02；task-08 补停滞态）：ChangeActivityBadge 真组件挂载
+  *    （空闲/进行中/停滞三态真值表，FR-02）；
+- *  - 元信息行（task-02）：负责人三态（owner_name / owner_id 前 8 位 mono / 「—」）+
++ *  - 元信息行（task-02）：负责人四态（owner_name / owner_id 前 8 位 mono /
++ *    兜底工作区所有者（2026-10-13-change-owner-backfill）/ 「—」）+
+  *    影响组件（join 展示 / 空数组整段省略）；
+  *  - 执行用量行（task-02）：usage 两档判空（undefined 整行不渲染 / null 「—」）+
+  *    有值（耗时 + token·次）+ 进行中 pill（started_at 有且 finished_at 缺）；
+@@ -157,7 +158,7 @@ describe("MobileChangeCard 活动徽标（task-02 · ChangeActivityBadge 真组
+   });
+ });
+ 
+-describe("MobileChangeCard 元信息行（task-02 · 负责人三态 + 影响组件）", () => {
++describe("MobileChangeCard 元信息行（task-02 · 负责人四态 + 影响组件）", () => {
+   const metaRow = () => screen.getByTestId("mobile-change-meta-row");
+ 
+   it("owner_name 非空 → 用户名（前景色，非 mono）", () => {
+@@ -189,7 +190,22 @@ describe("MobileChangeCard 元信息行（task-02 · 负责人三态 + 影响组
+     ).not.toBeInTheDocument();
+   });
+ 
+-  it("owner_name / owner_id 双空 → 元信息行内「—」占位", () => {
++  it("双空 + fallbackOwnerName → 兜底工作区所有者名（弱化色，2026-10-13-change-owner-backfill）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange()}
++        onClick={vi.fn()}
++        fallbackOwnerName="系统管理员"
++      />,
++    );
++    const owner = within(metaRow()).getByText("系统管理员");
++    expect(owner).toBeInTheDocument();
++    // 兜底语义弱化色（与真 owner 的前景色区分）
++    expect(owner.className).toContain("text-muted-foreground");
++    expect(within(metaRow()).queryByText("—")).not.toBeInTheDocument();
++  });
++
++  it("owner_name / owner_id 双空且无兜底 → 元信息行内「—」占位", () => {
+     render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
+     expect(within(metaRow()).getByText("—")).toBeInTheDocument();
+     expect(metaRow().textContent).toContain("负责人");
+diff --git a/frontend/src/components/mobile/mobile-change-card.tsx b/frontend/src/components/mobile/mobile-change-card.tsx
+index b3154f805..3bf92f401 100644
+--- a/frontend/src/components/mobile/mobile-change-card.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.tsx
+@@ -17,8 +17,9 @@
+  * task-02（2026-09-16-mobile-changes-parity / FR-02，D-003 ②）补齐桌面列表同源信息：
+  * - 徽标行追加活动徽标 ChangeActivityBadge（与桌面「待办状态」列同源：
+  *   currentStepStatus=step_progress.current_step_status、lastPushedAt=last_pushed_at）；
+- * - 元信息行：负责人三态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
+- *   mono → 「—」）+ 影响组件（join(", ")，空数组整段省略 + truncate 单行）；
++ * - 元信息行：负责人四态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
++ *   mono → 兜底工作区所有者（2026-10-13-change-owner-backfill）→ 「—」）+ 影响组件
++ *   （join(", ")，空数组整段省略 + truncate 单行）；
+  * - 执行用量行（UsageExecCell 移动化）：usage undefined → 整行不渲染 / null →
+  *   「—」/ 有值 → 耗时 + 进行中 pill（started_at 有且 finished_at 缺）+ token·次；
+  *   起止时间不展示（移动无 hover，详情页用量卡兜底）。
+@@ -63,6 +64,9 @@ export interface MobileChangeCardProps {
+   change: ChangeSummary;
+   /** 整卡点击（列表页 → 变更详情钻取路由）。 */
+   onClick: () => void;
++  /** 2026-10-13-change-owner-backfill：负责人双空时的兜底名（工作区所有者
++   * display_name，列表页传值）。可选——未传时双空保持「—」（存量调用兼容）。 */
++  fallbackOwnerName?: string | null;
+ }
+ 
+ /** 状态图标容器语义（quick-a4939946）：图标 + 语义色阶（text-<语义> + bg/border 同源）。 */
+@@ -111,11 +115,14 @@ function renderTodoBadge(c: ChangeSummary) {
+ }
+ 
+ /**
+- * 负责人三态（task-02 / FR-02，语义逐字对齐桌面 renderOwner）：owner_name 非空 →
+- * 用户名（前景色，弱化行内可读）；owner_name 空且 owner_id 有值 → UUID 前 8 位
+- * 短标识降级（mono）；双空 → 「—」（从未上行过 owner 的存量变更）。
++ * 负责人四态（task-02 / FR-02 三态 + 2026-10-13-change-owner-backfill 兜底态，
++ * 语义对齐桌面 renderOwner）：owner_name 非空 → 用户名（前景色，弱化行内可读）；
++ * owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono）；双空 →
++ * fallbackOwnerName（工作区所有者）弱化色文本；全链无值 → 「—」（从未上行过
++ * owner 的存量变更且工作区无所有者）。移动无 hover，兜底语义经弱化色与前景区分，
++ * 不做 title。
+  */
+-function renderOwner(c: ChangeSummary) {
++function renderOwner(c: ChangeSummary, fallbackOwnerName?: string | null) {
+   if (c.owner_name) {
+     return <span className="text-foreground">{c.owner_name}</span>;
+   }
+@@ -124,6 +131,9 @@ function renderOwner(c: ChangeSummary) {
+       <span className="font-mono text-primary">{c.owner_id.slice(0, 8)}</span>
+     );
+   }
++  if (fallbackOwnerName) {
++    return <span className="text-muted-foreground">{fallbackOwnerName}</span>;
++  }
+   return <span>—</span>;
+ }
+ 
+@@ -174,7 +184,11 @@ function renderUsageRow(usage: ChangeSummary["usage"]) {
+   );
+ }
+ 
+-export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
++export function MobileChangeCard({
++  change,
++  onClick,
++  fallbackOwnerName,
++}: MobileChangeCardProps) {
+   // 变更名：title 优先（人类可读），缺省降级 change_key；title 存在时 change_key
+   // 作 mono 副行保留唯一标识（对齐桌面列表标题列 change_key/title 两行信息结构）。
+   const displayName = change.title || change.change_key;
+@@ -245,13 +259,13 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
+             lastPushedAt={change.last_pushed_at ?? null}
+           />
+         </span>
+-        {/* 元信息行（task-02）：负责人三态 + 影响组件（空数组整段省略） */}
++        {/* 元信息行（task-02）：负责人四态 + 影响组件（空数组整段省略） */}
+         <span
+           data-testid="mobile-change-meta-row"
+           className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground"
+         >
+           <span className="whitespace-nowrap">
+-            负责人 {renderOwner(change)}
++            负责人 {renderOwner(change, fallbackOwnerName)}
+           </span>
+           {change.affected_components.length > 0 && (
+             <span
+diff --git a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+index 791b40a64..7b27ca08d 100644
+--- a/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
++++ b/sillyhub-daemon/tests/daemon-heartbeat-sillyspec.test.ts
+@@ -141,6 +141,9 @@ function makeFakeManager(controls: FakeManagerControls) {
+     // ql-20260902-003：WS 手动指令改走版本门前置入口。
+     requestManualUpgrade: vi.fn(async () => undefined),
+     checkAndUpgrade: vi.fn(async () => undefined),
++    // 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探入口
++    //（心跳每拍触发；旧形态缺该方法的守卫用例在 describe 内 delete 模拟）。
++    retryProbeLocalIfUnknown: vi.fn(async () => undefined),
+     getStatusSnapshot: vi.fn(() =>
+       controls.statusSnapshot === undefined ? undefined : controls.statusSnapshot,
+     ),
+@@ -546,6 +549,39 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 sillyspec 快照', () => {
+     expect(call[3]).toBeUndefined();
+     expect(call[4]).toBeUndefined();
+   });
++
++  // ── 2026-10-13-sillyspec-version-probe-fast-retry：version 未知限频重探接线 ──
++
++  it('version 未知 → 心跳触发限频重探（void 不阻塞心跳发送）', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    // 探测替换为永不 resolve 的 pending——心跳仍须完成（fire-and-forget 铁证：
++    // 若实现误 await，本断言超时失败）。
++    (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown = vi.fn(
++      () => new Promise<void>(() => {}),
++    );
++    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
++    expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
++    expect(
++      (h.manager as { retryProbeLocalIfUnknown: { mock: { calls: unknown[] } } })
++        .retryProbeLocalIfUnknown.mock.calls,
++    ).toHaveLength(1);
++  });
++
++  it('旧假 manager 缺 retryProbeLocalIfUnknown → 心跳不崩按旧语义组包（duck-type 守卫）', async () => {
++    const h = makeHeartbeatHarness({
++      snapshot: { version: null, latest_version: null },
++      probeLocalResult: null,
++      probeLatestResult: null,
++    });
++    delete (h.manager as Record<string, unknown>).retryProbeLocalIfUnknown;
++    await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
++    const call = h.heartbeatMock.mock.calls[0]!;
++    expect(call[4]).toBeUndefined(); // 三键全无 → 第 5 参 undefined（旧语义不变）
++  });
+ });
+ 
+ // ── Daemon._registerDaemon 注册前探测 + 携带（design §1 启动衔接）────────────

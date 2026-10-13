@@ -2882,3 +2882,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：d0093bf059dd39691b718ed81ea371dc14263eab
 理由：最大风险：totals 与 files 不一致（存量漂移）——缓解：toFlowDiffShape 不信任存量 totals、始终从 files 重算（落盘 totals 只是消费方便利，真相在 files）；新落盘记录两者同源同算。次风险：rows 无 state 字段被消费方误当 flow diff 完整契约——JSDoc 明示维度差异。试过放弃的方案：①在 JSONL 行内再加 rows 别名数组——同一数据双字段冗余存 JSONL，膨胀且易漂移；②在 sillyspec flow diff 侧加轮粒度模式——CLI 不应知道 daemon 的会话轮概念，职责倒置。均否。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-change-owner-backfill
+锚点：未记录
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+理由：最大风险：语义软化——兜底「工作区所有者」在多人协作工作区里未必是真责任人（agent 干的活记到创建工作区的人头上）。缓解：前端 title 明示「负责人未指派，默认工作区所有者」兜底语义；数据侧不改写存量，真实 owner（change_writer 路径）永远优先显示。若未来需要精确归属，可在会话立项联动时把会话用户写入（本次范围外，留作后续演进）。 试过但放弃的方案： - 「reparse 对存量空行也回填 workspace.created_by」——放弃理由：300 条历史行一次性改写、不可逆，且多数为 agent 产出，把「未知」写成「猜测」弱化数据可信度；展示层兜底达到同等可见效果。 - 「从 git log 提交者推断负责人」——放弃理由：agent 提交的 git author 不可靠（多为统一 agent 身份/机器账号），且 reparse 在平台侧执行需要额外仓库访问，成本高收益低。

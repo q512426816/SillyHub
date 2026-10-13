@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-change-owner-backfill",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "9c5f38e39ca52feb5586d0c4728021f0c37eafbb",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结件 change.patch 混入并行变更无关 hunk，超出 design 披露范围",
+      "evidence": "冻结 patch 除本变更 7 个文件外还含 2026-10-13-change-reparse-autobind-remove（binding.py/model.py/test_change_session_binding.py/test_spec_binding.py/service.py 删绑定）与 2026-10-13-sillyspec-version-probe-fast-retry（daemon-heartbeat-sillyspec.test.ts）及 turn-anchor-flowdiff-shape 文档行；design 文件清单仅披露 service.py 一处被并行提交携带。本变更自身承诺项经 git log/show 与工作区实态全部兑现（3cab26f0d 确含 owner_id=workspace.created_by），无数据正确性影响，仅冻结面不纯净。",
+      "location": ".sillyspec/changes/2026-10-13-change-owner-backfill/change.patch:127"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements 测试绑定为概括性用例名，非逐字测试标题",
+      "evidence": "FR-02 绑定「负责人列显示 owner_name 文本与 owner_id mono」无同名用例，实际由两个 it 覆盖（page.test.tsx:582 owner_name 文本 / :602 owner_id mono）；FR-03/FR-05 绑定同为近似概括。测试真实存在且断言对应行为（含 title 语义与四态），实质覆盖成立，仅绑定文案不逐字。",
+      "location": ".sillyspec/changes/2026-10-13-change-owner-backfill/requirements.md:94"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——建行快照取 workspace.created_by、update 分支 _apply_parsed 函数体 service.py:2815-2866 核实零 owner_id 赋值，两路径任意顺序真实 owner 恒不覆盖；快照不追随 created_by 后续变化为声明边界，与 title/description 落库时点值同口径）",
+    "并发": "ok（边界已裁决：可接受——撞 ux_changes_workspace_key 时 savepoint 回滚兜底行、转 _apply_parsed update 分支不写 owner（service.py:1531-1546），兜底值丢失但不写脏，安全方向失败；撞键占位行来自 proxy 路径本就携带真实 owner）",
+    "切换": "ok（owner 兜底为纯内存构造随 reparse 既有事务原子落库，中断回滚则整行不存在无半行状态；前端兜底纯 props 渲染无本地状态）",
+    "作用域": "ok（边界已裁决：可接受——兜底源 workspace 由 reparse 内 self._workspace_service.get(workspace_id)（service.py:1422）按目标工作区取得，created_by 天然按区隔离；前端 workspace.owner 来自同工作区查询，无跨区引用）"
+  },
+  "reviewedAt": "2026-10-13T16:20:35Z"
+}

@@ -159,6 +159,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
 - 2026-10-13-daemon-turn-anchor-snapshot | daemon 轮锚快照最小闭环(轮次文件变化追踪 Route B 真相源,已评审路线图第②步):agent 每轮结束时刻
 - 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho
+- 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

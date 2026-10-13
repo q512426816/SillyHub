@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-change-owner-backfill",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_reparse_owner_backfill.py「reparse 新建行兜底填 workspace.created_by 为 owner」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_reparse_owner_backfill.py「reparse 更新不覆盖已有 owner_id」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_reparse_owner_backfill.py「reparse 存量空 owner 行不回填」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-02",
+      "tests": [
+        "changes/__tests__/page.test.tsx「负责人列显示 owner_name 文本与 owner_id mono」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-03",
+      "tests": [
+        "changes/__tests__/page.test.tsx「无 owner 行兜底显示工作区所有者名字」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-card.test.tsx「双空 + fallbackOwnerName 兜底工作区所有者名（移动端同口径）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_reparse_owner_backfill.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-05",
+      "tests": [
+        "changes/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-13-change-owner-backfill:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/mobile/mobile-change-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-owner-backfill"
+    }
+  ]
+}

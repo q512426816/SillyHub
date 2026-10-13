@@ -6,6 +6,8 @@ created_at: 2026-10-13T15:09:03.043Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 问题根因（排查实证）：变更负责人仅在 change_writer 代理写路径落库（2026-08-16-change-owner-from-token），主力路径「agent 本地 CLI 写变更目录 + 平台 reparse 扫描登记」建行恒 `owner_id=None`（service.py `_build_change`），库里 342 条变更 300 条无负责人，变更中心大面积显示「—」。
 
 方案两条腿：
@@ -15,6 +17,8 @@ created_at: 2026-10-13T15:09:03.043Z
 选这个组合而非「reparse 回填全部存量空行」：回填会把 300 条历史行的负责人批量改写为工作区所有者（多数是 agent 干的活，所有者只是「最可能的责任人」），数据断言变弱且不可逆；展示层兜底达到同样的可见效果，数据保持诚实。
 
 ## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 - `backend/app/modules/change/service.py`：`ChangeService._build_change(parsed, *, workspace_id, owner_id=None)` 新增关键字参数（默认 None，全仓唯一调用点在 reparse 建行处），reparse sync 主循环建行调用改为传 `owner_id=workspace.created_by`。
 - 后端 HTTP API / DTO / OpenAPI schema：无变化（owner_id/owner_name 本就在 ChangeSummary 投影，只是建行填充逻辑变化）——不需要 `pnpm gen:types`。
@@ -35,6 +39,8 @@ created_at: 2026-10-13T15:09:03.043Z
    答：不会。owner_id 兜底源是 `self._workspace_service.get(workspace_id)` 按 reparse 目标工作区取的行，created_by 天然按工作区隔离；前端兜底显示的 workspace.owner 来自同一工作区查询（queryKey 含 workspaceId），不跨区引用。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：语义软化——兜底「工作区所有者」在多人协作工作区里未必是真责任人（agent 干的活记到创建工作区的人头上）。缓解：前端 title 明示「负责人未指派，默认工作区所有者」兜底语义；数据侧不改写存量，真实 owner（change_writer 路径）永远优先显示。若未来需要精确归属，可在会话立项联动时把会话用户写入（本次范围外，留作后续演进）。
 

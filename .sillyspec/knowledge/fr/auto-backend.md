@@ -1620,3 +1620,98 @@ created_at: 2026-10-08T01:35:36.843Z
   confirmed_at: null
   source_change: 2026-10-13-change-reparse-autobind-remove
   status: active
+
+## FR-auto-backend-214 reparse 新建无主变更行时，负责人兜底取工作区所有者（只填新行，不覆盖已有 owner_id 的行）
+变更：2026-10-13-change-owner-backfill
+状态：active
+摘要：新建行兜底填充；已有 owner 的行不被覆盖；存量空行不回填；工作区无所有者
+全文：.sillyspec/changes/archive/2026-10-13-change-owner-backfill/requirements.md#FR-01
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-owner-backfill:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_reparse_owner_backfill.py「reparse 存量空 owner 行不回填」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-owner-backfill
+  status: active
+
+## FR-auto-backend-215 变更列表负责人列直接显示 owner_name 文本（不再只显示首字小圆）
+变更：2026-10-13-change-owner-backfill
+状态：active
+摘要：有 owner_name；仅有 owner_id
+全文：.sillyspec/changes/archive/2026-10-13-change-owner-backfill/requirements.md#FR-02
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-owner-backfill:flow:测试绑定FR-02
+  tests: changes/__tests__/page.test.tsx「负责人列显示 owner_name 文本与 owner_id mono」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-owner-backfill
+  status: active
+
+## FR-auto-backend-216 无 owner 的行负责人列兜底显示工作区所有者名字而非「—」
+变更：2026-10-13-change-owner-backfill
+状态：active
+摘要：双空 + 工作区有所有者；双空 + 工作区无所有者
+全文：.sillyspec/changes/archive/2026-10-13-change-owner-backfill/requirements.md#FR-03
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-owner-backfill:flow:测试绑定FR-03
+  tests: frontend/src/components/mobile/mobile-change-card.test.tsx「双空 + fallbackOwnerName 兜底工作区所有者名（移动端同口径）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-owner-backfill
+  status: active
+
+## FR-auto-backend-217 后端 reparse owner 兜底有单测覆盖（新建行兜底填充 / 已有 owner 不覆盖）
+变更：2026-10-13-change-owner-backfill
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-owner-backfill/requirements.md#FR-04
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-owner-backfill:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_reparse_owner_backfill.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-owner-backfill
+  status: active
+
+## FR-auto-backend-218 前端负责人渲染相关测试通过
+变更：2026-10-13-change-owner-backfill
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-change-owner-backfill/requirements.md#FR-05
+最近确认：9c5f38e39ca52feb5586d0c4728021f0c37eafbb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-owner-backfill:flow:测试绑定FR-05
+  tests: frontend/src/components/mobile/mobile-change-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-owner-backfill
+  status: active
