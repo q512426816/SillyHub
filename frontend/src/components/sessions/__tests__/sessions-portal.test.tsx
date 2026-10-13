@@ -335,9 +335,12 @@ vi.mock("@/lib/workspace-members", () => ({
 
 // task-07（D-106）：session-panel 上下文行变更名解析数据源；
 // task-10（X-009）：SessionListPanel「关联」下拉变更选项数据源。
+// useSessionChanges（2026-10-13-session-change-files-hover）：session-change-files-hover
+// 组件消费的新 hook——组件内 data ?? [] 兜底，mock 返回 undefined data 即安全渲染空态。
 vi.mock("@/lib/changes", () => ({
   getChange: (...args: unknown[]) => mocks.getChange(...args),
   listChanges: (...args: unknown[]) => mocks.listChanges(...args),
+  useSessionChanges: () => ({ data: undefined }),
 }));
 
 // task-10：SessionListPanel「关联」下拉快速修复选项数据源；task-11 起
