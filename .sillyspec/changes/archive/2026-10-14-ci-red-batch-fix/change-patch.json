@@ -1,0 +1,135 @@
+{
+  "change": "2026-10-14-ci-red-batch-fix",
+  "baseline": "3cbba1795d8ed1b9925ff52a853277ca29220848",
+  "head": "ae2b08bd91813dbb3a7ede84d07b006e68ee85f6",
+  "files": [
+    "backend/app/modules/agent/tests/test_mission_session_id.py",
+    "backend/app/modules/daemon/tests/test_run_sync_session_gate_failover.py",
+    "backend/app/modules/daemon/tests/test_session_events_cross.py",
+    "frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 275,
+    "deletions": 7
+  },
+  "savedAt": "2026-10-13T16:35:35.849Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 2,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "3cbba1795d8ed1b9925ff52a853277ca29220848",
+    "totals": {
+      "files": 5,
+      "additions": 275,
+      "deletions": 7
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/tests/test_mission_session_id.py",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_run_sync_session_gate_failover.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_session_events_cross.py",
+        "additions": 19,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 240,
+        "deletions": 5,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "d18e6577b717ee10a2108d33fa061777da05760970cd17734575b9aa5a998b8a",
+  "patchStatus": "ok"
+}

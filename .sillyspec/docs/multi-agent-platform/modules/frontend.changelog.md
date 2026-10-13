@@ -84,3 +84,4 @@
 | 2026-10-13 | 2026-10-13-load-earlier-full-turn | 动机：智能体会话页触顶加载与「回到会话开头」按 (ts,id) 复合游标固定 400 行分页，页边界会把一轮（run）切 |
 | 2026-10-13 | 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026- |
 | 2026-10-13 | 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）： |
+| 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |

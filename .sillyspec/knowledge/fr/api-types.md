@@ -172,3 +172,55 @@ created_at: 2026-10-08T17:55:09.787Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-11-ci-red-batch-fix/requirements.md#FR-05
 最近确认：8a1eb8fe3a033bfe20461f3e1c2f595c4e5d643f
+
+## FR-api-types-015 backend 字段钉子与 daemon 测试 seed 对齐既有契约后，三个 CI 失败用例必须本地全部转绿
+变更：2026-10-14-ci-red-batch-fix
+状态：active
+摘要：字段钉子同步；单轮任务形态按新契约收口
+全文：.sillyspec/changes/archive/2026-10-14-ci-red-batch-fix/requirements.md#FR-01
+最近确认：ae2b08bd91813dbb3a7ede84d07b006e68ee85f6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-red-batch-fix:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_session_events_cross.py「test_close_interactive_run_terminal_flip_publishes_status_changed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-red-batch-fix
+  status: active
+
+## FR-api-types-016 sillyhub-daemon 的 api-types.ts 必须与后端 OpenAPI 重新对齐
+变更：2026-10-14-ci-red-batch-fix
+状态：active
+摘要：类型重生成后检查门通过
+全文：.sillyspec/changes/archive/2026-10-14-ci-red-batch-fix/requirements.md#FR-02
+最近确认：ae2b08bd91813dbb3a7ede84d07b006e68ee85f6
+
+## FR-api-types-017 frontend agent-replay-body 首用例必须等异步数据渲染完成后断言
+变更：2026-10-14-ci-red-batch-fix
+状态：active
+摘要：CI 慢机时序下断言不早于渲染
+全文：.sillyspec/changes/archive/2026-10-14-ci-red-batch-fix/requirements.md#FR-03
+最近确认：ae2b08bd91813dbb3a7ede84d07b006e68ee85f6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-red-batch-fix:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx「主日志为正文：说明行 + 真人用户气泡 + 回复正文 + 视图切换；系统事件中性行仅「全部」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-red-batch-fix
+  status: active
+
+## FR-api-types-018 本变更禁止改动任何生产代码
+变更：2026-10-14-ci-red-batch-fix
+状态：active
+摘要：交付面审查
+全文：.sillyspec/changes/archive/2026-10-14-ci-red-batch-fix/requirements.md#FR-04
+最近确认：ae2b08bd91813dbb3a7ede84d07b006e68ee85f6

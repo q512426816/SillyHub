@@ -46,3 +46,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-13-multiturn-changeid-misjudge | 动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.c
 ||||||| C:/Users/12532/AppData/Local/Temp/d.base
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
+| 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |

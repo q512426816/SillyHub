@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-ci-red-batch-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ae2b08bd91813dbb3a7ede84d07b006e68ee85f6",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受——FR-03 渲染锚 waitFor 真实存在于 agent-replay-body.test.tsx:267，位于 mock 调用等待之后、内容断言之前；turn-timeline-scroll 为 TurnTimeline 根滚动容器 testid（turn-timeline.tsx:1233），同文件第二用例（:310）与 page.test.tsx（:1812/:2054）均以该 testid 作数据就绪锚，用法一致；pytest 侧 seed 为测试内构造，无生产乱序面）",
+    "并发": "ok（边界已裁决：可接受——三处测试文件改动互不相交；api-types.ts 为 gen 脚本单写者单次重生成，工作区与 HEAD 零差异；无并发写面）",
+    "切换": "ok（边界已裁决：可接受——生命周期覆盖不缩：gate_failover 其余 6 个调用点（:214/:256/:281/:302/:328/:350）均缺省 change_id=None 走多轮 keep-active 路径，cross 文件第二调用点（:208）缺省 session_change_id=None；实现 _apply_session_terminal_status（helpers.py:119-171）未在本变更触碰（不在 HEAD 提交文件清单），多轮/单轮判定路径与 2fe772561 契约一致）",
+    "作用域": "ok（边界已裁决：可接受——api-types.ts 重生成仅限 sillyhub-daemon 仓；frontend/src/lib/api-types.ts 未改动（git diff HEAD 为空）；seed 改动限定单会话单 run 形态，无跨工作区数据）"
+  },
+  "reviewedAt": "2026-10-14T00:38:12+08:00"
+}

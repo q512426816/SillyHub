@@ -39,3 +39,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
 - 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho
 - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
+- 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend-

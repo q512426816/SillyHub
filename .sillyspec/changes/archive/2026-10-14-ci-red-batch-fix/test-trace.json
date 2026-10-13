@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-ci-red-batch-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-red-batch-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/agent/tests/test_mission_session_id.py「test_agent_sessions_model_fields_unchanged」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-red-batch-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-red-batch-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_run_sync_session_gate_failover.py「test_gate_shape_single_turn_completed_marks_ended」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-red-batch-fix"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-red-batch-fix:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_events_cross.py「test_close_interactive_run_terminal_flip_publishes_status_changed」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-red-batch-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-ci-red-batch-fix:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/agent-replay-body.test.tsx「主日志为正文：说明行 + 真人用户气泡 + 回复正文 + 视图切换；系统事件中性行仅「全部」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-red-batch-fix"
+    }
+  ]
+}
