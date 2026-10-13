@@ -395,38 +395,3 @@ created_at: 2026-10-08T01:03:54.861Z
   confirmed_at: null
   source_change: 2026-10-11-linked-repos-path-guard
   status: active
-
-## FR-auto-sillyspec-074 sillyhub-daemon 项目模块图（.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml）task-runner 模块 paths 补齐目录前缀登记：src/task-runner 包目录 + tests/task-runner 测试目录（前缀匹配制，非 glob）
-变更：2026-10-13-daemon-module-map
-状态：active
-摘要：目录前缀登记
-全文：.sillyspec/changes/archive/2026-10-13-daemon-module-map/requirements.md#FR-01
-最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
-
-## FR-auto-sillyspec-075 用 sillyspec 源码 matchedModuleIds 实测：sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts 与 sillyhub-daemon/src/task-runner/spawn-stream.ts 均命中 task-runner 模块（未来变更自动落真域）
-变更：2026-10-13-daemon-module-map
-状态：active
-摘要：路由实测
-全文：.sillyspec/changes/archive/2026-10-13-daemon-module-map/requirements.md#FR-02
-最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
-
-## FR-auto-sillyspec-076 fr/auto-sillyhub-daemon.md 的 FR-auto-sillyhub-daemon-034~038 五条目整体迁出，fr/task-runner.md 以 FR-task-runner-016~020 接续编号原样承接（变更/状态/摘要/全文/最近确认/测试绑定逐字段保持）
-变更：2026-10-13-daemon-module-map
-状态：active
-摘要：原样承接
-全文：.sillyspec/changes/archive/2026-10-13-daemon-module-map/requirements.md#FR-03
-最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
-
-## FR-auto-sillyspec-077 sillyspec knowledge validate 通过、knowledge digest 伪域信号卡中 auto-sillyhub-daemon 待迁计数相应下降
-变更：2026-10-13-daemon-module-map
-状态：active
-摘要：工具自检
-全文：.sillyspec/changes/archive/2026-10-13-daemon-module-map/requirements.md#FR-04
-最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
-
-## FR-auto-sillyspec-078 不改任何 src 代码与归档件；sillyhub-daemon/backend 不需要跑测试（纯知识面变更）
-变更：2026-10-13-daemon-module-map
-状态：active
-摘要：变更面约束
-全文：.sillyspec/changes/archive/2026-10-13-daemon-module-map/requirements.md#FR-05
-最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
