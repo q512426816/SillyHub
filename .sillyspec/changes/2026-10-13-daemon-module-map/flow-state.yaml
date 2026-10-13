@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  2026-10-13-spawn-flush-e2e-test 收口时 5 条 FR 落伪域 fr/auto-sillyhub-daemon.md（工具建议域 daemon 实为项目级粗启发；真路由按模块卡前缀匹配、模块 id
+  即域名，task-runner 模块卡与真域 fr/task-runner.md 均在场）。本变更补模块卡登记并把 5 条 FR 迁回真域 task-runner。
+
+  成功标准：
+
+  - sillyhub-daemon 项目模块图（.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml）task-runner 模块 paths
+  补齐目录前缀登记：src/task-runner 包目录 + tests/task-runner 测试目录（前缀匹配制，非 glob）
+
+  - 用 sillyspec 源码 matchedModuleIds 实测：sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts 与
+  sillyhub-daemon/src/task-runner/spawn-stream.ts 均命中 task-runner 模块（未来变更自动落真域）
+
+  - fr/auto-sillyhub-daemon.md 的 FR-auto-sillyhub-daemon-034~038 五条目整体迁出，fr/task-runner.md 以 FR-task-runner-016~020
+  接续编号原样承接（变更/状态/摘要/全文/最近确认/测试绑定逐字段保持）
+
+  - sillyspec knowledge validate 通过、knowledge digest 伪域信号卡中 auto-sillyhub-daemon 待迁计数相应下降
+
+  - 不改任何 src 代码与归档件；sillyhub-daemon/backend 不需要跑测试（纯知识面变更）
+autopilot: false
+baseline_commit: b2461c6b4fc0d2510eb26a4dfdf91ccc68fb7210
+updatedAt: '2026-10-12T23:58:12.489Z'
+baseline_sha256: a75505037c7a860e176afbddb0c7f2208f9928719c6d7e8ac916f5d803eecace
+spec_approved: true
+spec_approved_at: '2026-10-12T23:58:12.489Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

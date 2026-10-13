@@ -136,3 +136,89 @@
 - 场景：默认场景 — Given codex 会话以宿主凭证起步（env 无 CODEX_HOME）且已有 thread（agentSessionId 非空）；When 用户首次切到平台供应商
 全文：.sillyspec/changes/archive/2026-09-11-session-provider-switch-codex-pi/requirements.md#FR-05
 最近确认：225dd771d
+
+<!-- 2026-10-13-daemon-module-map：以下五条目自伪域 fr/auto-sillyhub-daemon.md（原 FR-auto-sillyhub-daemon-034~038）
+     整体迁入，字段逐字保持、仅段头 id 换域接续编号；源变更 2026-10-13-spawn-flush-e2e-test。 -->
+
+## FR-task-runner-016 新测试文件直调 spawnAndStream（mock node:child_process.spawn 返回 FakeChild 驱动真实 readline 链），不绕过收尾序列
+变更：2026-10-13-spawn-flush-e2e-test
+状态：active
+摘要：执行级驱动
+全文：.sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/requirements.md#FR-01
+最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「直调 spawnAndStream 驱动真实收尾序列（文件级 mock spawn + FakeChild）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-spawn-flush-e2e-test
+  status: active
+
+## FR-task-runner-017 取消（AbortSignal abort）break 路径：流式 delta 残留缓冲在收尾被冲刷并经 client.submitMessages 单行转发（内容拼接、带 timestamp），result status=cancelled
+变更：2026-10-13-spawn-flush-e2e-test
+状态：active
+摘要：取消 break 残留冲刷
+全文：.sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/requirements.md#FR-02
+最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「取消（AbortSignal）break → 残留缓冲收尾冲刷转发 + status=cancelled」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-spawn-flush-e2e-test
+  status: active
+
+## FR-task-runner-018 超时（看门狗触发）break 路径：同上残留冲刷转发，result status=timeout
+变更：2026-10-13-spawn-flush-e2e-test
+状态：active
+摘要：看门狗超时残留冲刷
+全文：.sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/requirements.md#FR-03
+最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「超时（看门狗）break → 残留缓冲收尾冲刷转发 + status=timeout」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-spawn-flush-e2e-test
+  status: active
+
+## FR-task-runner-019 正常流关闭（消息无完结行）路径：残留冲刷转发，result status=completed
+变更：2026-10-13-spawn-flush-e2e-test
+状态：active
+摘要：正常关闭残留冲刷
+全文：.sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/requirements.md#FR-04
+最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/task-runner/spawn-flush-e2e.test.ts「正常流关闭 → 残留缓冲收尾冲刷转发 + status=completed」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-spawn-flush-e2e-test
+  status: active
+
+## FR-task-runner-020 新用例与相关既有测试全绿 + pnpm typecheck 通过，不跑全量
+变更：2026-10-13-spawn-flush-e2e-test
+状态：active
+摘要：定向验收
+全文：.sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/requirements.md#FR-05
+最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
