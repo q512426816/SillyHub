@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-ci-flaky-render-anchor-sweep",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "26bd59982827d1622c7b52e30f0c7ff7fa5a431c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 盲维1 将 6 处修复点误记为「5 处」",
+      "evidence": "design.md 盲维1 作答写「waitFor 默认 1s 超时对 5 处均远大于渲染延迟」，而 FR-01 与 change.patch 实修 6 处（涉 5 文件）；纯文档计数笔误，waitFor 重试机理结论不受影响，无数据正确性风险。",
+      "location": ".sillyspec/changes/2026-10-14-ci-flaky-render-anchor-sweep/design.md:33"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T05:44:05+08:00"
+}

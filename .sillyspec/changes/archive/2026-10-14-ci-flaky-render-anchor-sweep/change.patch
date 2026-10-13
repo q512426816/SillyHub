@@ -1,0 +1,102 @@
+diff --git a/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+index 8a45d55a6..0b9d70304 100644
+--- a/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx
+@@ -115,7 +115,11 @@ describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {
+     await waitFor(() => {
+       expect(execCommand).toHaveBeenCalledWith("copy");
+     });
+-    expect(screen.getByText("已复制")).toBeInTheDocument();
++    // 渲染锚：execCommand 被调 ≠ setCopiedId 续体已提交渲染，慢机单拍断言即挂
++    //（口径同下方用例 143-144 的 waitFor 渲染写法）。
++    await waitFor(() => {
++      expect(screen.getByText("已复制")).toBeInTheDocument();
++    });
+   });
+ 
+   it("活跃可恢复行点「复制密钥」→ 明文写入剪贴板并回显已复制", async () => {
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx b/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
+index ecec76ed6..e7bd6ecb4 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx
+@@ -279,9 +279,13 @@ describe("m/workspaces/[id]/changes/[cid] 变更详情移动钻取页", () => {
+     await waitFor(() => {
+       expect(writeText).toHaveBeenCalledWith("工作区移动端页面");
+     });
+-    expect(screen.getByTestId("m-change-action-feedback").textContent).toContain(
+-      "复制",
+-    );
++    // 渲染锚：writeText 被调 ≠ setActionMsg 续体已提交渲染，feedback 仍可能
++    // 停留上一动作的「重新解析」文案（口径同上方 268-272 正确写法）。
++    await waitFor(() => {
++      expect(screen.getByTestId("m-change-action-feedback").textContent).toContain(
++        "复制",
++      );
++    });
+   });
+ 
+   // ── 删除入口（task-07 / FR-07 / D-004）────────────────────────────────────
+diff --git a/frontend/src/components/ask-user-dialog-card.test.tsx b/frontend/src/components/ask-user-dialog-card.test.tsx
+index fff3a8002..e7abbb00f 100644
+--- a/frontend/src/components/ask-user-dialog-card.test.tsx
++++ b/frontend/src/components/ask-user-dialog-card.test.tsx
+@@ -738,8 +738,11 @@ describe("AskUserDialogCard", () => {
+       expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", "u-member-1");
+     });
+     expect(onResolved).not.toHaveBeenCalled();
+-    // 立即翻已答关闭态（本地兜底，无英文名）。
+-    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
++    // 立即翻已答关闭态（本地兜底，无英文名）。渲染锚：setState 已发起但 React
++    // 提交可能滞后一拍（CI 慢机单拍断言即挂）。
++    await waitFor(() => {
++      expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
++    });
+     // 不直出后端英文报错。
+     expect(screen.queryByText(/was already answered/)).toBeNull();
+     fetchMock.mockRestore();
+@@ -769,6 +772,9 @@ describe("AskUserDialogCard", () => {
+     await waitFor(() => {
+       expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", null);
+     });
+-    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
++    // 渲染锚（同上方用例）：setState 已发起但 React 提交可能滞后一拍。
++    await waitFor(() => {
++      expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
++    });
+     fetchMock.mockRestore();
+   });
+diff --git a/frontend/src/components/daemon/__tests__/team-task-block.test.tsx b/frontend/src/components/daemon/__tests__/team-task-block.test.tsx
+index 2bade44b7..e7cf7f8cc 100644
+--- a/frontend/src/components/daemon/__tests__/team-task-block.test.tsx
++++ b/frontend/src/components/daemon/__tests__/team-task-block.test.tsx
+@@ -229,7 +229,10 @@ describe("TeamTaskBlock 取消", () => {
+     fireEvent.click(screen.getByRole("button", { name: "确认取消" }));
+ 
+     await waitFor(() => expect(cancelMock).toHaveBeenCalledTimes(1));
+-    expect(screen.getByText("取消团队任务失败")).toBeInTheDocument();
++    // 渲染锚：cancel 被调 ≠ reject 续体的 set 错误文案已提交渲染（CI 慢机单拍即挂）。
++    await waitFor(() =>
++      expect(screen.getByText("取消团队任务失败")).toBeInTheDocument(),
++    );
+     expect(onRefresh).not.toHaveBeenCalled();
+   });
+ 
+diff --git a/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+index c13a2458a..d66647851 100644
+--- a/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/governance-cards.test.tsx
+@@ -155,7 +155,13 @@ it("rot：分域查看链接 + 复制 AI 指令（含分布与计数）成功反
+   await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
+   expect(writeTextMock.mock.calls[0]![0]).toContain("共 364 条");
+   expect(writeTextMock.mock.calls[0]![0]).toContain("lib-api 64");
+-  expect(screen.getByTestId("copy-ai-prompt-result").textContent).toContain("已复制");
++  // 渲染锚：writeText 被调 ≠ copied 续体已提交渲染，该 testid 元素仅 copied==="ok" 时存在
++  //（CI 慢机单拍断言即挂）。
++  await waitFor(() =>
++    expect(screen.getByTestId("copy-ai-prompt-result").textContent).toContain(
++      "已复制",
++    ),
++  );
+ });
+ 
+ it("inbox：查看明细深链 uncategorized.md + 复制 AI 指令；clipboard 失败内联降级", async () => {

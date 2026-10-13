@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-ci-flaky-render-anchor-sweep",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「复制密钥成功反馈（已复制）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/m/workspaces/[id]/changes/[cid]/__tests__/page.m-change-detail.test.tsx「复制变更名反馈」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/team-task-block.test.tsx「取消团队任务失败提示」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/governance-cards.test.tsx「复制 AI 提示词结果」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/ask-user-dialog-card.test.tsx「409 已回答关闭提示两变体」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「全文件」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-ci-flaky-render-anchor-sweep"
+    }
+  ]
+}

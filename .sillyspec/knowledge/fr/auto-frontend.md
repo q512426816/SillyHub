@@ -2416,3 +2416,48 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：交付面审查
 全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-probe-mock/requirements.md#FR-03
 最近确认：0756c886494656426818263e03a6520f548b4185
+
+## FR-auto-frontend-218 6 处确认脆弱点全部改为渲染锚等待：同步 getByXxx/textContent 断言包进 await waitFor（或等价 findByXxx），断言不再早于渲染提交
+变更：2026-10-14-ci-flaky-render-anchor-sweep
+状态：active
+摘要：mock 调用早于渲染提交的慢机形态
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-render-anchor-sweep/requirements.md#FR-01
+最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-01
+  tests: frontend/src/components/ask-user-dialog-card.test.tsx「409 已回答关闭提示两变体」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-flaky-render-anchor-sweep
+  status: active
+
+## FR-auto-frontend-219 涉及 5 个测试文件本地全量转绿
+变更：2026-10-14-ci-flaky-render-anchor-sweep
+状态：active
+摘要：定向回归
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-render-anchor-sweep/requirements.md#FR-02
+最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-ci-flaky-render-anchor-sweep:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/settings/api-keys/__tests__/page.test.tsx「全文件」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-ci-flaky-render-anchor-sweep
+  status: active
+
+## FR-auto-frontend-220 零生产代码改动：仅测试文件时序加固
+变更：2026-10-14-ci-flaky-render-anchor-sweep
+状态：active
+摘要：交付面审查
+全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-render-anchor-sweep/requirements.md#FR-03
+最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
