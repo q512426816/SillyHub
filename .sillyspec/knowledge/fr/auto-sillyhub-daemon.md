@@ -527,3 +527,77 @@ created_at: 2026-10-08T15:19:22.662Z
   confirmed_at: null
   source_change: 2026-10-13-turn-anchor-flowdiff-shape
   status: active
+
+## FR-auto-sillyhub-daemon-050 会话级缓存清理函数导出与 terminateSession 接线
+变更：2026-10-14-turn-anchor-cache-eviction
+状态：active
+摘要：主路径；在飞锚链竞态
+场景正文：
+- 场景：主路径 — Given 一个已打锚的活跃会话 / When terminateSession 以 manual 或 driver_error 终结该会话 / Then `clearTu
+- 场景：在飞锚链竞态 — Given 末轮锚链尚未收尾（fire-and-forget `void recordTurnAnchor` 在飞）/ When terminateSession 触发清理
+全文：.sillyspec/changes/archive/2026-10-14-turn-anchor-cache-eviction/requirements.md#FR-01
+最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「在飞锚链竞态：清理挂链收尾后执行，链与后续锚行为正确」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-turn-anchor-cache-eviction
+  status: active
+
+## FR-auto-sillyhub-daemon-051 清理后功能无回归（JSONL 尾行兜底恢复 prev 锚）
+变更：2026-10-14-turn-anchor-cache-eviction
+状态：active
+摘要：主路径；零变化去重恢复
+场景正文：
+- 场景：主路径 — Given 会话已落两锚（第二锚含文件变化）/ When clearTurnAnchorCache 后再打第三锚（新增文件变化）/ Then 第三锚 prevTreeSha
+- 场景：零变化去重恢复 — Given 会话已落一锚后清理 / When 再打一次零变化锚 / Then deduped===true 且不追加 JSONL（判重不因清理失效）。
+全文：.sillyspec/changes/archive/2026-10-14-turn-anchor-cache-eviction/requirements.md#FR-02
+最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-02
+  tests: test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「清理后续锚：prev 经 JSONL 尾行兜底恢复，diff 基线链与去重判定无回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-turn-anchor-cache-eviction
+  status: active
+
+## FR-auto-sillyhub-daemon-052 未知 sessionId 幂等安全
+变更：2026-10-14-turn-anchor-cache-eviction
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 内存缓存无该 session 条目 / When 调用 clearTurnAnchorCache(该 id) / Then 正常返回 void，不抛任何异常。
+全文：.sillyspec/changes/archive/2026-10-14-turn-anchor-cache-eviction/requirements.md#FR-03
+最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-03
+  tests: test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「未知 sessionId 调用清理：无操作不抛（幂等）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-turn-anchor-cache-eviction
+  status: active
+
+## FR-auto-sillyhub-daemon-053 单测覆盖且相关测试全绿
+变更：2026-10-14-turn-anchor-cache-eviction
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 新增用例与实现落地 / When 运行 sillyhub-daemon 的 turn-anchor 与 lifecycle 接线相关测试 / Then 全部通过
+全文：.sillyspec/changes/archive/2026-10-14-turn-anchor-cache-eviction/requirements.md#FR-04
+最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca

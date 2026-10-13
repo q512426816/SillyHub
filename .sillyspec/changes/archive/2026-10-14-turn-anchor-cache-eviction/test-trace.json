@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-turn-anchor-cache-eviction",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts「terminateSession 调用 clearTurnAnchorCache 恰一次（4c 接线）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-turn-anchor-cache-eviction"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-01",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「在飞锚链竞态：清理挂链收尾后执行，链与后续锚行为正确」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-turn-anchor-cache-eviction"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-02",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「清理后续锚：prev 经 JSONL 尾行兜底恢复，diff 基线链与去重判定无回归」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-turn-anchor-cache-eviction"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-turn-anchor-cache-eviction:flow:测试绑定FR-03",
+      "tests": [
+        "test/sillyhub-daemon/tests/interactive/turn-anchor.test.ts「未知 sessionId 调用清理：无操作不抛（幂等）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-turn-anchor-cache-eviction"
+    }
+  ]
+}

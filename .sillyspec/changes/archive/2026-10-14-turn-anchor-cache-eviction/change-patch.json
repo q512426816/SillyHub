@@ -1,0 +1,95 @@
+{
+  "change": "2026-10-14-turn-anchor-cache-eviction",
+  "baseline": "d61c840c940580fe104b0388bb84a44723d3b92f",
+  "head": "a10414d957f39eef0c06c1727618ac47e5f55ef3",
+  "files": [
+    "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+    "sillyhub-daemon/src/interactive/turn-anchor.ts",
+    "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+    "sillyhub-daemon/tests/interactive/turn-anchor.test.ts"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 207,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-13T21:42:03.992Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "sillyhub-daemon",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 5,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "d61c840c940580fe104b0388bb84a44723d3b92f",
+    "totals": {
+      "files": 4,
+      "additions": 207,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/lifecycle.ts",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/turn-anchor.ts",
+        "additions": 24,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts",
+        "additions": 103,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/turn-anchor.test.ts",
+        "additions": 73,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "cbd1c1fd91161aed2ec66d7b0debccf6949aecd730201397e9c808267637463c",
+  "patchStatus": "ok"
+}

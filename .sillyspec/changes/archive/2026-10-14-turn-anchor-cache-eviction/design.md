@@ -6,6 +6,8 @@ created_at: 2026-10-13T21:31:25.418Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 turn-anchor.ts 的模块级 prev 锚内存缓存 `_lastTreeBySession` 只在 doRecord 尾部
 `.set()`、全仓无 delete 路径，会话终结也不清理（对照同文件 `_chainBySession` 链
 收尾有 finally 自清理）——长驻 daemon 每会话残留一条 `sessionId→treeSha`（百字节
@@ -24,6 +26,8 @@ terminateSession 可能在末轮锚链在飞时执行；doRecord 尾部会回写
 
 ## 接口契约
 
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
 - 新增导出 `clearTurnAnchorCache(sessionId: string): void`（sillyhub-daemon/src/
   interactive/turn-anchor.ts）：幂等，未存在 sessionId 无操作不抛；在飞锚链存在时
   延迟到链收尾后执行。返回 void、同步签名、永不 reject。
@@ -33,6 +37,14 @@ terminateSession 可能在末轮锚链在飞时执行；doRecord 尾部会回写
   字段）、`_chainBySession` 自清理逻辑。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
 1. 乱序/迟到到达：终态后到达的迟到轮锚事件（SDK 进程已 kill，理论窗口）会在
    clear 之后新起链并回写一条缓存条目——有界（该会话此后不再有轮，最多回写一
@@ -47,6 +59,8 @@ terminateSession 可能在末轮锚链在飞时执行；doRecord 尾部会回写
    session 条目，不触碰其他会话缓存与 JSONL 文件。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：清理后同会话被复用（同 id 再打锚）时 prev 恢复依赖 JSONL 尾行读取，
 多一次文件读——仅理论场景（终态会话不再有新轮），且与既有重启兜底同路径、已被

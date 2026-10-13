@@ -1,0 +1,270 @@
+diff --git a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+index 124ff6b78..ff76b5066 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/lifecycle.ts
+@@ -14,6 +14,8 @@
+ import type { SessionState } from '../types.js';
+ import type { InteractiveDriverHandle } from '../driver.js';
+ import type { SessionManagerCore } from './types.js';
++// 2026-10-14-turn-anchor-cache-eviction：会话终结清轮锚 prev 内存缓存（4c 步）。
++import { clearTurnAnchorCache } from '../turn-anchor.js';
+ 
+ /** 终态条目延迟清理时长（ms）：给终态对账 / 立即查询留 10 分钟窗口。 */
+ const TERMINAL_CLEANUP_DELAY_MS = 10 * 60 * 1000;
+@@ -228,6 +230,11 @@ export async function terminateSession(
+   //     消亡，task_* 不会再到达；防 Map 泄漏）。
+   mgr._clearBackgroundTasks(state.sessionId);
+ 
++  // 4c. 2026-10-14-turn-anchor-cache-eviction：清轮锚 prev 内存缓存（会话终态
++  //     不再有新轮，条目滞留 = Map 慢性增长；JSONL 落盘不动，同会话重启续锚走
++  //     readLastRecord 尾行兜底）。在飞锚链由清理函数自行挂链收尾后执行。
++  clearTurnAnchorCache(state.sessionId);
++
+   // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
+   //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
+   mgr._destroyUsageLedger(state.sessionId);
+diff --git a/sillyhub-daemon/src/interactive/turn-anchor.ts b/sillyhub-daemon/src/interactive/turn-anchor.ts
+index 4c28e7b76..65e332d1b 100644
+--- a/sillyhub-daemon/src/interactive/turn-anchor.ts
++++ b/sillyhub-daemon/src/interactive/turn-anchor.ts
+@@ -23,6 +23,8 @@
+  * 失败安全（观测面不抛穿）：非 git 目录 / git 不可用 / 任何 git 错误 → 返回 null；
+  * 接线方 fire-and-forget，不阻塞轮结果链路。同会话并发轮经 per-session promise 链
+  * 串行化（prev 锚读写无竞态）；prev 锚优先内存、miss（daemon 重启）时读 JSONL 尾行。
++ * 会话终结经 clearTurnAnchorCache 清内存缓存（2026-10-14-turn-anchor-cache-eviction，
++ * terminateSession 第 4c 步调用；JSONL 不动，续锚走尾行兜底）。
+  *
+  * Windows：execFile 直跑 `git`（daemon 已假定 git 在 PATH，host-fs-handler 同款），
+  * 临时 index 落 os.tmpdir() 绝对路径；中文路径经 `-c core.quotePath=false` 原样
+@@ -286,3 +288,25 @@ export async function recordTurnAnchor(opts: {
+     }
+   }
+ }
++
++/**
++ * 会话级缓存清理（2026-10-14-turn-anchor-cache-eviction）：会话终结
++ * （terminateSession 第 4c 步）调用——删除该会话的 prev 锚内存缓存条目，防
++ * `_lastTreeBySession` 只 set 不 delete 的慢性增长（对照 `_chainBySession` 链
++ * 收尾有自清理，本缓存此前无删除路径）。
++ *
++ * 在飞锚链存在时（fire-and-forget 锚未收尾）挂到链收尾后执行——doRecord 尾部
++ * 会回写缓存，先清会被在飞链回写；无链立即删除。JSONL 落盘记录不受影响：同
++ * 会话若再打锚，prev 经 readLastRecord 尾行兜底恢复（与 daemon 重启续锚同构）。
++ * 未存在 sessionId 幂等无操作，永不抛错。
++ */
++export function clearTurnAnchorCache(sessionId: string): void {
++  const chain = _chainBySession.get(sessionId);
++  if (chain) {
++    void chain
++      .catch(() => undefined) // 链本身已收口为 null，防御性兜底
++      .then(() => _lastTreeBySession.delete(sessionId));
++    return;
++  }
++  _lastTreeBySession.delete(sessionId);
++}
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts b/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
+new file mode 100644
+index 000000000..30e0430e9
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/session-manager-lifecycle-turn-anchor-eviction.test.ts
+@@ -0,0 +1,103 @@
++/**
++ * session-manager/lifecycle terminateSession 接线测试（2026-10-14-turn-anchor-
++ * cache-eviction FR-01）。
++ *
++ * 断言 terminateSession 在会话级清理簇（4b _clearBackgroundTasks 与 5
++ * _destroyUsageLedger 之间的第 4c 步）调用 turn-anchor 的
++ * clearTurnAnchorCache(sessionId) 恰一次——防 Map 慢性增长的会话终结收口。
++ *
++ * 手法：vi.mock turn-anchor 模块（importOriginal 保留其余导出真身，仅替换
++ * clearTurnAnchorCache 为 spy）+ 最小伪造 SessionManagerCore（terminateSession
++ * 触及的成员逐个提供）。clearTurnAnchorCache 的行为面（幂等/兜底/竞态）在
++ * turn-anchor.test.ts 真 git 仓用例覆盖，此处只验接线。
++ */
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++
++vi.mock('../../src/interactive/turn-anchor.js', async (importOriginal) => ({
++  ...(await importOriginal<typeof import('../../src/interactive/turn-anchor.js')>()),
++  clearTurnAnchorCache: vi.fn(),
++}));
++
++import { clearTurnAnchorCache } from '../../src/interactive/turn-anchor.js';
++import { terminateSession } from '../../src/interactive/session-manager/lifecycle.js';
++import type { SessionState } from '../../src/interactive/types.js';
++import type { SessionManagerCore } from '../../src/interactive/session-manager/types.js';
++
++const anchorMock = vi.mocked(clearTurnAnchorCache);
++
++interface FakeMgrExtras {
++  abortPermissionResolver: ReturnType<typeof vi.fn>;
++  clearBorrowSandbox: ReturnType<typeof vi.fn>;
++  clearBackgroundTasks: ReturnType<typeof vi.fn>;
++  destroyUsageLedger: ReturnType<typeof vi.fn>;
++  onSessionEnd: ReturnType<typeof vi.fn>;
++}
++
++/** 最小伪造 mgr：只提供 terminateSession 实际触及的成员（10 分钟延迟清理
++ *  timer 真实 setTimeout + unref，不阻塞 vitest 退出）。 */
++function makeFakeMgr(): { mgr: SessionManagerCore; extras: FakeMgrExtras } {
++  const extras: FakeMgrExtras = {
++    abortPermissionResolver: vi.fn(),
++    clearBorrowSandbox: vi.fn(),
++    clearBackgroundTasks: vi.fn(),
++    destroyUsageLedger: vi.fn(),
++    onSessionEnd: vi.fn(async () => {}),
++  };
++  const mgr = {
++    _pendingFirstPrompt: new Map(),
++    _abortPermissionResolver: extras.abortPermissionResolver,
++    _clearBorrowSandbox: extras.clearBorrowSandbox,
++    _clearBackgroundTasks: extras.clearBackgroundTasks,
++    _destroyUsageLedger: extras.destroyUsageLedger,
++    _runNotifyChain: vi.fn(async (_sid: string, fn: () => Promise<void>) => {
++      await fn();
++    }),
++    deps: { onSessionEnd: extras.onSessionEnd },
++    _scheduleFlush: vi.fn(),
++    _terminalCleanupTimers: new Map(),
++    _store: new Map(),
++    _pendingInjectCount: new Map(),
++  } as unknown as SessionManagerCore;
++  return { mgr, extras };
++}
++
++function makeState(sessionId: string): SessionState {
++  return {
++    sessionId,
++    status: 'running',
++    provider: 'claude',
++    query: { close: vi.fn() },
++    inputQueue: { close: vi.fn() },
++  } as unknown as SessionState;
++}
++
++beforeEach(() => {
++  anchorMock.mockReset();
++});
++
++describe('terminateSession × turn-anchor 缓存清理接线', () => {
++  it('manual 终结：clearTurnAnchorCache 恰调一次且入参为 sessionId（4c 接线）', async () => {
++    const { mgr } = makeFakeMgr();
++    const state = makeState('sess-evict-manual');
++    await terminateSession(mgr, state, 'manual');
++    expect(anchorMock).toHaveBeenCalledTimes(1);
++    expect(anchorMock).toHaveBeenCalledWith('sess-evict-manual');
++  });
++
++  it('driver_error 终结同样调用（end/fail 双路径收口）', async () => {
++    const { mgr } = makeFakeMgr();
++    const state = makeState('sess-evict-fail');
++    await terminateSession(mgr, state, 'driver_error');
++    expect(anchorMock).toHaveBeenCalledTimes(1);
++    expect(anchorMock).toHaveBeenCalledWith('sess-evict-fail');
++  });
++
++  it('调用位置在 4b _clearBackgroundTasks 之后、5 _destroyUsageLedger 之前（清理簇同点惯例）', async () => {
++    const { mgr, extras } = makeFakeMgr();
++    const state = makeState('sess-evict-order');
++    await terminateSession(mgr, state, 'manual');
++    const anchorOrder = anchorMock.mock.invocationCallOrder[0]!;
++    expect(anchorOrder).toBeGreaterThan(extras.clearBackgroundTasks.mock.invocationCallOrder[0]!);
++    expect(anchorOrder).toBeLessThan(extras.destroyUsageLedger.mock.invocationCallOrder[0]!);
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/turn-anchor.test.ts b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+index 5878f9e6b..39007ea85 100644
+--- a/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
++++ b/sillyhub-daemon/tests/interactive/turn-anchor.test.ts
+@@ -13,7 +13,10 @@
+  *   4. 二进制文件 additions/deletions 记 null（numstat '-' 列）；
+  *   5. 非 git 目录返回 null 永不抛（失败安全）；
+  *   6. 「重启续锚」：模块状态清空后从 JSONL 尾行恢复 prev 锚（daemon 重启场景）；
+- *   7. 中文文件名不转义（core.quotePath=false，numstat 原样 UTF-8 路径）。
++ *   7. 中文文件名不转义（core.quotePath=false，numstat 原样 UTF-8 路径）；
++ *   8. 会话级缓存清理（2026-10-14-turn-anchor-cache-eviction）：未知 id 幂等 /
++ *      清理后 prev 经 JSONL 尾行兜底恢复（去重与 diff 链无回归）/ 在飞链竞态
++ *      清理挂链收尾后执行。
+  *
+  * 模块级状态（per-session 串行链 + prev 锚内存）隔离手法：每个用例独立
+  * sessionId + 关键用例 vi.resetModules 后动态重导入（等价 daemon 重启）。
+@@ -82,6 +85,8 @@ interface AnchorModule {
+     deduped: boolean;
+     files: Array<{ path: string; additions: number | null; deletions: number | null }>;
+   } | null>;
++  /** 2026-10-14-turn-anchor-cache-eviction：会话级缓存清理（实现见 src 同名导出）。 */
++  clearTurnAnchorCache(sessionId: string): void;
+ }
+ 
+ /** 动态导入被测模块（vi.resetModules 后调用 = 模块级状态清零，模拟 daemon 重启）。 */
+@@ -270,4 +275,71 @@ describe('interactive/turn-anchor 轮锚点快照', () => {
+     expect(shape.rows).toEqual(legacyRecord.files);
+     expect(shape.totals).toEqual({ files: 2, additions: 3, deletions: 1 });
+   });
++
++  // ── 2026-10-14-turn-anchor-cache-eviction：会话级缓存清理 ──
++  it('未知 sessionId 调用清理：无操作不抛（幂等）', async () => {
++    const mod = await loadModule();
++    expect(() =>
++      mod.clearTurnAnchorCache(`s-never-${randomUUID().slice(0, 8)}`),
++    ).not.toThrow();
++  });
++
++  it('清理后续锚：prev 经 JSONL 尾行兜底恢复，diff 基线链与去重判定无回归', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-evict-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
++      const first = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++
++      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
++      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(second!.prevTreeSha).toBe(first!.treeSha);
++
++      // 会话终结清理：prev 锚内存条目删除——此后同会话再打锚，prev 只能来自
++      // JSONL 尾行兜底（与「重启续锚」同构路径）。
++      mod.clearTurnAnchorCache(sid);
++
++      await writeFile(join(repo, 'turn3.txt'), 'c\n', 'utf-8');
++      const third = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(third!.prevTreeSha).toBe(second!.treeSha);
++      expect(third!.files).toEqual([{ path: 'turn3.txt', additions: 1, deletions: 0 }]);
++
++      // 零变化轮去重恢复：清理不使判重失效（同 treeSha → deduped 且不落盘）。
++      const dup = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(dup!.deduped).toBe(true);
++
++      const records = await readRecords(anchors, sid);
++      expect(records).toHaveLength(3); // 三条变化锚；去重轮不落盘
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
++
++  it('在飞锚链竞态：清理挂链收尾后执行，在飞锚与后续锚行为正确', async () => {
++    const mod = await loadModule();
++    const repo = await makeRepo();
++    const anchors = await makeAnchorsDir();
++    const sid = `s-race-${randomUUID().slice(0, 8)}`;
++    try {
++      await writeFile(join(repo, 'turn1.txt'), 'a\n', 'utf-8');
++      // 不 await：锚链在飞（真 git 子进程未收尾）时同步触发清理——实现必须把
++      // 删除挂到链收尾之后（doRecord 尾部会回写缓存，先清会被在飞链回写）。
++      const pending = mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      mod.clearTurnAnchorCache(sid);
++      const first = await pending;
++      expect(first).not.toBeNull();
++
++      // 清理不破坏在飞锚的落盘与后续锚的基线链（prev 经尾行兜底恢复）。
++      await writeFile(join(repo, 'turn2.txt'), 'b\n', 'utf-8');
++      const second = await mod.recordTurnAnchor({ cwd: repo, sessionId: sid, anchorsDir: anchors });
++      expect(second!.prevTreeSha).toBe(first!.treeSha);
++      expect(second!.files).toEqual([{ path: 'turn2.txt', additions: 1, deletions: 0 }]);
++    } finally {
++      await rm(repo, { recursive: true, force: true });
++      await rm(anchors, { recursive: true, force: true });
++    }
++  });
+ });

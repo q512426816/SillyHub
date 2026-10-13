@@ -40,3 +40,4 @@ created_at: 2026-08-27 14:32:24
 - 2026-10-13-turn-anchor-flowdiff-shape | 动机：daemon 轮锚 JSONL 与 sillyspec flow diff 的消费契约未对齐（turn-ancho
 - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
 - 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend-
+- 2026-10-14-turn-anchor-cache-eviction | 动机：轮锚快照内存缓存 _lastTreeBySession 只 set 不 delete，会话终结无清理（对照同文件 
