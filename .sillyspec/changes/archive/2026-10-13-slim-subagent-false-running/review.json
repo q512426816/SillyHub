@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-slim-subagent-false-running",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "e2f9ac59f5559975780f65378a7e491fd40307ec",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "已闭环：上一轮 P1（孤儿 stub 灰态传导）与 P3（回退键收窄）修复经复审确认真实落地且无回归",
+      "evidence": "P1：collectSubagents 对 subagent_stub 改 status: s.orphaned ? \"stopped\" : \"running\"（turn-status-bar.tsx:232），消费方自然生效——subagent-catalog.tsx runningCount 过滤 status==='running'（:136-140）故灰点（STATUS_DOT_CLS.stopped=bg-muted-foreground 无脉冲，:87-92）、按钮脉冲点（:184）、aria「N 个运行中」（:175）、头部「N 运行中」徽标（:208）全部不再触发，徽标回退显总数（:189）、行时长走 subagentDuration 非运行分支显「—」（:114-116，startedAt/endedAt 恒 null 不走秒）；TurnStatusBar 自身 runningSubagents 同过滤（:355-358）「子代理 N 运行中」消失。stopped 本就是 SubagentActivity 联合类型既有成员且 taskStatusToActivity 已产出该值（task-13 路径），无新增状态形状；deriveTurnActivity 其余字段（toolCount/currentActivity）不读该 status，零影响；实时暂态 stub 无 orphaned 标记仍 running（ternary else 分支），实时链路零变化。P3：resolvedToolUseId 收窄为 seg.kind==='tool_use' 时才取 parsedTool?.toolUseId ?? input.toolUseId、否则 null（session-log-assembler.ts:1361-1364），extractStubById 摘除块（:1367-1374）被 null 封死；全仓仅 4 处引用，:1457-1458（段 id 赋值/ids 注册）只在 case \"tool_use\" 分支可达，非 tool_use 段行为不受收窄影响，tool_use 路径表达式与改前逐字相同（FR-02/FR-05 原有用例口径不变）。回归用例真实断言：subagent-async-derive.test.tsx:192-210 经 deriveTurnActivity（即目录消费的同一导出函数）断言 orphaned→stopped、无标记 stub→running；session-log-assembler.test.ts:1656-1668 构造 stderr 行携 toolUseId 攻击面，改前会摘走 stub 丢 children（无 subagent_stub 段），改后断言 stub 原样保留且 orphaned=true、children 仍为 [\"text\"]——orphaned 断言传递性证明 stub 未被摘除。修复提交对两个测试文件均为纯追加（hunk 无删改行），未弱化任何既有断言。",
+      "location": "frontend/src/components/daemon/turn-status-bar.tsx:232; frontend/src/components/sessions/subagent-catalog.tsx:87-92,136-140,184,208; frontend/src/components/daemon/session-log-assembler.ts:1361-1374,1457-1458; frontend/src/components/daemon/__tests__/subagent-async-derive.test.tsx:192-210; frontend/src/components/daemon/__tests__/session-log-assembler.test.ts:1656-1668"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受（沿用上一轮）——「回退键仅当行内解析失败时采用、不存在二义」核实为真，行内值恒优先且两键同源；子消息先到/截残派发行后到的回退合并在代码与测试双确认。复审补充：收窄后回退键仅 tool_use 段型可消费，FR-05「call_real 优先不产生 call_fallback」断言口径不变（工具段恒 tool_use 段型）。",
+    "并发": "ok（沿用上一轮）——后端 slim 赋值在独立 DTO 实例上不触 ORM；前端装配纯函数 path-copy。markOrphanedStubs 仅 logsToSegments 收尾一处调用，实时增量路径不经过，结构性隔离成立；复审确认实时路径 stub 无 orphaned 标记仍 running（turn-status-bar.tsx:232 else 分支 + session-log-assembler.test.ts:1626-1635 既有断言未变）。",
+    "切换": "边界已裁决：可接受——「翻页窗口边界不跨页回填合并、孤儿 stub 灰态是诚实降级」与代码一致。上一轮本维补充指出的目录面假运行中（P1）已由修复闭环并复审确认：批量路径孤儿 stub 在目录/状态条均显 stopped 灰态、不进 runningCount、无脉冲徽标，见 findings 已闭环记录。",
+    "作用域": "ok（沿用上一轮）——tool_use_id 仅经既有会话归属闸门端点回传，无跨会话/跨工作区新暴露；复审补充：收窄使非 tool_use 输入的 toolUseId 完全不被装配器消费，接口层异常形态的攻击面进一步缩小，无新暴露。"
+  },
+  "reviewedAt": "2026-10-13T07:04:35Z"
+}

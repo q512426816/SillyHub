@@ -77,3 +77,6 @@
 - 2026-10-13-turn-nav-initial-scroll | 会话页轮次导航窄轨首挂载不滚向当前轮:P3 留债(归档件 2026-10-13-turn-nav-rail-overfl
 - 2026-10-13-change-files-view-polish | 变更文件预览的人读优化：timeline.md 裸 markdown 不像时间线、change.patch 整片红绿摊开
 - 2026-10-13-session-changefiles-select-fix | 会话页悬浮变更文件弹窗的变更切换下拉项选择不了（用户实测反馈）：radix Dialog modal 遮罩对 body 
+||||||| C:/Users/12532/AppData/Local/Temp/d.base
+- 2026-10-13-session-scroll-layout-storm | 会话页连续滚动（触顶自动加载 / 回到开头后快速滚到底）在系统 Chrome 上 100% 单页崩溃白屏（rendere
+- 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
