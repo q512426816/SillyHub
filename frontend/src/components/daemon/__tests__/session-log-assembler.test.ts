@@ -28,6 +28,7 @@ import {
   createEmptyAssembledTurn,
   extractPreambleText,
   finishTurn,
+  isTaskWakeupInjection,
   logsToSegments,
   segmentsToLegacy,
 } from "../session-log-assembler";
@@ -1240,6 +1241,17 @@ describe("extractPreambleText", () => {
     expect(
       extractPreambleText("【团队任务简报】\n- 目标：x\n\n---\n\n开工"),
     ).toBe("【团队任务简报】\n- 目标：x");
+  });
+});
+
+// ── 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入判定（单一谓词源）──
+describe("isTaskWakeupInjection（2026-10-13-session-taskwakeup-hide）", () => {
+  it("[后台任务通知] 前缀（含前导空白）→ true；普通消息与真实前导 → false", () => {
+    expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台子代理任务已全部结束")).toBe(true);
+    expect(isTaskWakeupInjection("  [后台任务通知] 空白容忍")).toBe(true);
+    expect(isTaskWakeupInjection("帮我修下登录页")).toBe(false);
+    // 真实上下文前导不是 TASK_WAKEUP 注入，谓词不得误伤（preamble 卡保留）。
+    expect(isTaskWakeupInjection("【页面上下文】\n- 页面：详情\n\n---\n\n你好")).toBe(false);
   });
 });
 

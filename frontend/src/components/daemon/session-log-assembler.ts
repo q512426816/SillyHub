@@ -2075,6 +2075,19 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
  * 输入的原文，不算前导）。
  */
 const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报", "【群聊上下文】", "【影子直聊】"];
+
+/**
+ * TASK_WAKEUP 系统注入前缀：与 backend/app/modules/daemon/session/service.py
+ * 的 TASK_WAKEUP_PROMPT_PREFIX 同值——跨语言无法共享 import，改前缀需两侧同步。
+ * 前端持有点收敛为这一处（message-queue-bar.tsx / 两条 preamble 装配路径均引此）。
+ */
+export const TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]";
+
+/** 判定 user_input 是否为 TASK_WAKEUP 系统注入（纯系统通知，无用户正文）。 */
+export function isTaskWakeupInjection(content: string): boolean {
+  return content.trim().startsWith(TASK_WAKEUP_PROMPT_PREFIX);
+}
+
 export function extractPreambleText(content: string): string | null {
   const trimmed = content.trim();
   // quick（2026-09-03 系统注入刷屏修复）：[GROUP_CHAIN ...] 首行标记是排队
@@ -2087,7 +2100,7 @@ export function extractPreambleText(content: string): string | null {
   }
   // [后台任务通知] 类注入：整条都是系统通知（无用户正文），整体进 preamble
   // 折叠——对话视图不再被任务唤醒通知刷屏（无分隔符，特判整条）。
-  if (trimmed.startsWith("[后台任务通知]")) return trimmed;
+  if (isTaskWakeupInjection(trimmed)) return trimmed;
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return null;
@@ -2110,7 +2123,7 @@ export function stripPreambleText(content: string): string {
     if (nl < 0) return "";
     return stripPreambleText(trimmed.slice(nl + 1));
   }
-  if (trimmed.startsWith("[后台任务通知]")) return "";
+  if (isTaskWakeupInjection(trimmed)) return "";
   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
   const sep = trimmed.indexOf("\n\n---\n\n");
   if (sep <= 0) return content;
