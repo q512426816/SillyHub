@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-changefiles-select-fix",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "bc898a68c4dac4dd9fba71daa57cb317429efc50",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a——核实为同步 UI 修复：getPopupContainer 为渲染期 prop 回调（无异步输入面），stageLabel 为纯函数；design 作答属实",
+    "并发": "n/a——核实无共享可变状态、无并发写面（提交仅动组件与其测试两个文件）",
+    "切换": "ok——边界已裁决：可接受。弹窗关闭时 Select 随 DialogContent 卸载、下拉 DOM 一并移除无残留；每个下拉独立触发 getPopupContainer 重新解析，无跨实例悬挂引用（实测 8/8 用例通过佐证）",
+    "作用域": "ok——边界已裁决：可接受。closest 从各 Select 自身 trigger 向上解析，多实例/多弹窗互不串台；兜底回落 body 为需求 FR-01 显式允许（不劣化）"
+  },
+  "风险裁决": {
+    "风险：closest('[role=\"dialog\"]') 依赖 radix role 语义，未来实现变更会静默回落 body 退回旧 bug": "可接受——测试 selectAntdOption 内 option.closest('[role=\"dialog\"]') 守护断言真实存在（test 第 100 行）且当前通过；若实现回退/回落，该断言即转红，非静默",
+    "放弃方案①改 shadcn ui/dropdown-menu 替代 antd Select": "可接受——违背 FRONTEND_PAGE_STYLE「控件类继续 antd」约定且交互重写面大，放弃理由成立",
+    "放弃方案②radix Dialog 改 modal={false}": "可接受——牺牲遮罩/焦点管理语义，影响面远超本 bug，放弃理由成立",
+    "放弃方案③下拉挂 Select parentElement（DialogHeader）": "可接受——头部容器裁剪/层级风险高于 DialogContent（radix 明确的可交互子树），放弃理由成立"
+  },
+  "实测回执": {
+    "vitest": "pnpm vitest run src/components/daemon/__tests__/session-change-files-hover.test.tsx：8/8 passed（含挂载位置守护断言与「干活中」用例）",
+    "tsc": "pnpm exec tsc --noEmit：exit 0",
+    "workspaceVsHead": "git diff HEAD 为空，两文件与 bc898a68c 一致；提交仅含 session-change-files-hover.tsx + 其测试，无 backend/openapi.json、api-types.ts 等生成物被动"
+  },
+  "reviewedAt": "2026-10-13T15:37:24+08:00"
+}

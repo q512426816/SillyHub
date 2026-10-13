@@ -2750,3 +2750,10 @@ supersedes：D-008@v1
 理由：新增 POST 同步端点，前端刷新按钮先 POST 等同步完成再 GET 文件树。
 否决理由：GET 保持纯读语义最干净，但三端改动最大；页面自动刷新（非按钮触发）场景覆盖不到；用户诉求是「这个刷新没意义」——期望刷新动作本身带同步，而非新增独立动作。
 复潮条件：若同步副作用被证明污染 GET 缓存语义（CDN/网关层缓存 GET），可重新评估显式端点。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-session-changefiles-select-fix
+锚点：未记录
+最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
+理由：最大风险：`closest('[role="dialog"]')` 依赖 radix DialogContent 的 `role="dialog"` 语义稳定——若未来 shadcn Dialog 实现变更（role 改名/自定义 DialogContent 包裹层），兜底回落 body 会静默退回旧 bug。缓解：既有 vitest 用例已加「下拉 DOM 必须在 `[role="dialog"]` 内」守护断言（`selectAntdOption` 内），实现变更会测试转红而非静默。试过但放弃的方案：①改用 shadcn `ui/dropdown-menu`（radix Dropdown）替代 antd Select——违背 FRONTEND_PAGE_STYLE「控件类继续 antd」且交互重写面大；②radix Dialog 改 `modal={false}`——牺牲遮罩/焦点管理语义，影响面远超本 bug；③把下拉挂到 Select 的 `parentElement`（DialogHeader）——头部容器层级/裁剪风险高于 `closest(role=dialog)`（DialogContent 是 radix 明确标记的可交互子树）。

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-changefiles-select-fix",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「弹窗头部 Select 切换变更：ChangeFileTree key 重挂载换 changeId」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-select-fix"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「弹窗头部 Select 切换变更：ChangeFileTree key 重挂载换 changeId」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-select-fix"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「轻量变更进行中（current_stage=thin）阶段标签为「干活中」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-select-fix"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-04",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-select-fix"
+    }
+  ]
+}

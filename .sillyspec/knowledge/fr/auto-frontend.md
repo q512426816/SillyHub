@@ -2051,3 +2051,87 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-turn-nav-initial-scroll
   status: active
+
+## FR-auto-frontend-204 antd Select 下拉 DOM 挂进宫 DialogContent 内（getPopupContainer=closest role=dialog），真实浏览器中选项可点击切换变更
+变更：2026-10-13-session-changefiles-select-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 悬浮面板弹窗已打开（radix Dialog modal 模式，body pointer-events:none）；When 用户点开头部变更切换下拉；Then 下拉项 DOM 位于 `[role="dialog"]` 内（可点击、不触发弹窗 outside-close）
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-select-fix/requirements.md#FR-01
+最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「弹窗头部 Select 切换变更：ChangeFileTree key 重挂载换 changeId」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-select-fix
+  status: active
+
+## FR-auto-frontend-205 下拉选择后 ChangeFileTree 以新 changeId 重挂载（既有切换用例保持全绿并加挂载位置断言）
+变更：2026-10-13-session-changefiles-select-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 弹窗内当前展示变更 A 的文件树；When 通过下拉选中变更 B；Then ChangeFileTree 重挂载为 changeId=B（autoRefreshMs=15000 不变），选项元素经断言确认在弹窗 DOM 内
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-select-fix/requirements.md#FR-02
+最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「弹窗头部 Select 切换变更：ChangeFileTree key 重挂载换 changeId」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-select-fix
+  status: active
+
+## FR-auto-frontend-206 轻量变更（is_thin 且 current_stage=thin）的阶段标签显示「干活中」不再「轻量·轻量变更」重复
+变更：2026-10-13-session-changefiles-select-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 关联变更为轻量变更进行中（is_thin=true 且 current_stage=thin）；When 悬浮下拉渲染该项；Then 阶段 pill 文本为「干活中」，页面无「轻量变更」文本
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-select-fix/requirements.md#FR-03
+最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「轻量变更进行中（current_stage=thin）阶段标签为「干活中」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-select-fix
+  status: active
+
+## FR-auto-frontend-207 前端聚焦测试全绿 + tsc 0 错
+变更：2026-10-13-session-changefiles-select-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 修复代码与测试就位；When 跑悬浮组件测试文件 + tsc；Then 用例全绿（含新增「干活中」用例与下拉挂载位置断言），tsc 零错误
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-select-fix/requirements.md#FR-04
+最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-select-fix:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-select-fix
+  status: active
