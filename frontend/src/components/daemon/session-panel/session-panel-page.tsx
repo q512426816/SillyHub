@@ -1657,6 +1657,12 @@ export function SessionPanelPage({
   // quick（ql-20260916-017）：跳转抑制贴底跟随（TurnTimeline props）——跳转
   // 翻页/定位期间 true，定位 settle 后 1s 解除（smooth 滚动余量）。
   const [jumpFollowSuppress, setJumpFollowSuppress] = useState(false);
+  // 2026-10-13-session-scroll-layout-storm：钉回重申的 rAF 合帧句柄。onScroll
+  // 程序性滚动分支原同步调 apply（读 offsetTop + 写 scrollTop 均强制布局），
+  // 写 scrollTop 再派发 scroll 事件成反馈环；Chrome 真实滚轮高频事件下每秒
+  // 数百次全文档强制布局，主线程长打满被 Chrome 判挂杀 tab（单页白屏崩溃；
+  // webview 无挂起查杀故复现不了）。合帧后每帧至多一次重申。
+  const anchorPinRafRef = useRef<number | null>(null);
   const handleLoadEarlierRef = useRef<() => Promise<void>>(async () => {});
   const handleLoadEarlier = useCallback(async () => {
     if (!sessionId || historyLoadingRef.current || !hasEarlier) return;
@@ -2004,9 +2010,22 @@ export function SessionPanelPage({
         lastUserScrollTsRef.current = Date.now();
         pendingAnchorRef.current = null; // 用户接管：立即弃锚（新加载自会重捕）
         anchorPinRef.current = null;
+        // 挂起的钉回 rAF 一并取消（弃锚后迟到回调本会读 null no-op，取消是
+        // 省一次空调度 + 语义显式：用户接管后零程序性钉回）。
+        if (anchorPinRafRef.current !== null) {
+          cancelAnimationFrame(anchorPinRafRef.current);
+          anchorPinRafRef.current = null;
+        }
       } else {
-        // 程序性滚动（含未知写入者触底）：锚定期内立即钉回。
-        anchorPinRef.current?.();
+        // 程序性滚动（含未知写入者触底）：锚定期内钉回——rAF 合帧（见
+        // anchorPinRafRef 声明注释；同帧冗余 scroll 事件合并为一次 apply，
+        // 回调读 anchorPinRef 现值，锚已失效则自然 no-op）。
+        if (anchorPinRafRef.current === null) {
+          anchorPinRafRef.current = requestAnimationFrame(() => {
+            anchorPinRafRef.current = null;
+            anchorPinRef.current?.();
+          });
+        }
       }
       const el = e.target as HTMLElement | null;
       if (!el || el.getAttribute("data-testid") !== "turn-timeline-scroll") return;
@@ -2032,6 +2051,10 @@ export function SessionPanelPage({
       if (activeTurnRafRef.current !== null) {
         cancelAnimationFrame(activeTurnRafRef.current);
         activeTurnRafRef.current = null;
+      }
+      if (anchorPinRafRef.current !== null) {
+        cancelAnimationFrame(anchorPinRafRef.current);
+        anchorPinRafRef.current = null;
       }
     };
     // 挂载维度：会话主体骨架（早退渲染）先于时间线出现——经 callback ref 的
