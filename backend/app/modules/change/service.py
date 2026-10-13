@@ -32,7 +32,6 @@ from app.core.errors import (
     PermissionDenied,
 )
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentSession
 from app.modules.auth.model import User
 from app.modules.change.dispatch import STAGE_ORDER
 from app.modules.change.model import (
