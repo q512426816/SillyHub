@@ -64,8 +64,8 @@ created_at: 2026-10-13T04:04:16.999Z
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态 onTaskWakeupInject 零调用（含 2s debounce 推进与孤儿终态）」
+FR-01: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」注入（含 2s debounce 推进与孤儿终态）」
 FR-02: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变」
 FR-03: 不适用：代码移除面由 FR-01/FR-05 的测试与 typecheck 承载（接口/字段删除的编译面由 pnpm typecheck 全量覆盖，grep 清零属评审检查面）。
 FR-04: 不适用：零改动面（diff 即证明，backend/frontend 无测试需跑）。
-FR-05: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task wakeup inject（终态自动唤醒主代理）」改写后的整组 + sillyhub-daemon 全测试目录回归
+FR-05: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态不注入唤醒（2026-10-13-task-wakeup-remove）」改写后的整组 + sillyhub-daemon 全测试目录回归
