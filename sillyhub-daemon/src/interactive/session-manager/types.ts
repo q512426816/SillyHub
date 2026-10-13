@@ -516,10 +516,6 @@ export interface SessionManagerCore {
     | undefined;
   readonly _borrowSandboxRoots: Map<string, string>;
   readonly _backgroundTasks: Map<string, Map<string, BackgroundTaskInfo>>;
-  readonly _taskWakeupPending: Map<
-    string,
-    { timer: NodeJS.Timeout; lines: string[] }
-  >;
   readonly _agentToolUseMeta: Map<
     string,
     { sessionId: string; taskName: string; subagentType?: string }
@@ -728,17 +724,6 @@ export interface SessionManagerCore {
   _handleAgentTaskStatusEvent(state: SessionState, ev: AgentEvent): Promise<void>;
   /** background-tasks.ts */
   _handleTaskNotificationEvent(state: SessionState, ev: AgentEvent): Promise<void>;
-  /** background-tasks.ts */
-  _scheduleTaskWakeup(
-    sessionId: string,
-    info: {
-      taskId: string;
-      taskName: string;
-      status: string;
-      elapsedMs?: number;
-      summary?: string;
-    },
-  ): void;
   /** background-tasks.ts */
   _registerAsyncReceiptTask(
     state: SessionState,

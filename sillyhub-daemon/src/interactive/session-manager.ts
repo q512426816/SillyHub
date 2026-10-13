@@ -241,7 +241,6 @@ import {
   handleAgentTaskStatusEvent,
   handleTaskNotificationEvent,
   registerAsyncReceiptTask,
-  scheduleTaskWakeup,
   writeTaskLine,
 } from './session-manager/background-tasks.js';
 
@@ -452,16 +451,6 @@ export class SessionManager {
   private readonly _backgroundTasks = new Map<
     string,
     Map<string, BackgroundTaskInfo>
-  >();
-
-  /**
-   * ql-20260827-007：后台任务终态唤醒的 debounce 合并队列。同 session 短窗口
-   * （2s）内多条 task_notification 合并为一次 inject——并行后台任务（如 A/B
-   * 同时完成）只唤醒一个 turn，避免连环 turn。fire 后整 entry 移除。
-   */
-  private readonly _taskWakeupPending = new Map<
-    string,
-    { timer: NodeJS.Timeout; lines: string[] }
   >();
 
   /**
@@ -1516,19 +1505,6 @@ export class SessionManager {
     ev: AgentEvent,
   ): Promise<void> {
     return handleTaskNotificationEvent(this._core(), state, ev);
-  }
-
-  private _scheduleTaskWakeup(
-    sessionId: string,
-    info: {
-      taskId: string;
-      taskName: string;
-      status: string;
-      elapsedMs?: number;
-      summary?: string;
-    },
-  ): void {
-    return scheduleTaskWakeup(this._core(), sessionId, info);
   }
 
   private async _registerAsyncReceiptTask(

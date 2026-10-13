@@ -1,13 +1,18 @@
 /**
  * interactive/session-manager/background-tasks.ts —— 后台任务状态簇
- * （task-03 后台任务注册表 + task-08 事件化消费 + 终态唤醒 debounce）。
+ * （task-03 后台任务注册表 + task-08 事件化消费）。
  *
  * task-02（2026-09-07-arch-large-file-split）：原 SessionManager 的
  * _handleAgentTaskStatusEvent / _handleTaskNotificationEvent /
- * _scheduleTaskWakeup / _registerAsyncReceiptTask / _writeTaskLine /
+ * _registerAsyncReceiptTask / _writeTaskLine /
  * _getOrCreateTaskMap / _clearBackgroundTasks 方法体原样下沉（仅 ``this`` →
  * ``mgr`` 改显式传参，行为零变化；类静态 TASK_PROGRESS_LINE_THROTTLE_MS
  * 随方法体落位为本模块常量）。
+ *
+ * 2026-10-13-task-wakeup-remove：终态唤醒链（_scheduleTaskWakeup 2s debounce
+ * 合并 + onTaskWakeupInject 注入「[后台任务通知]」）整体移除——用户裁定终态
+ * 自动汇报轮没必要；任务终态只留 emit/[TASK_NOTIFICATION] 落行/注销侧信道，
+ * 主代理靠用户下一条消息继续（可 TaskOutput block=false 自取结果）。
  *
  * @module interactive/session-manager/background-tasks
  */
@@ -23,16 +28,6 @@ import type { BackgroundTaskInfo, SessionManagerCore } from './types.js';
  * 仅作用于落行；SSE emit 不节流（实时精度优先）。
  */
 const TASK_PROGRESS_LINE_THROTTLE_MS = 2000;
-
-/**
- * 2026-10-10-task-wakeup-quiet-threshold（FR-01）：后台任务终态唤醒的最短实际
- * 运行时长（ms）——不足该值的 completed/failed 不注入唤醒（生产实证：13 分钟
- * 会话被 17 条秒级孙任务通知灌满，而真长任务 770s；60s 在两者间留一个数量级
- * 安全带）。仅拦唤醒注入；终态 emit/[TASK_NOTIFICATION] 落行/注销不受影响，
- * 主代理可 TaskOutput 自取短任务结果。时长判定：elapsed_ms（服务端权威）优先，
- * 缺失用注册条目 startedAt 差值兜底，两者都缺 fail-open 照常唤醒。
- */
-const TASK_WAKEUP_MIN_DURATION_MS = 60_000;
 
 /**
  * task-08（对账表 #8）：status/agent_task_status 统一处理器。
@@ -198,9 +193,11 @@ export async function handleAgentTaskStatusEvent(
 
 /**
  * task-08（对账表 #8）：status/task_notification 消费——emit 终态 +
- * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销 + 完成/失败触发主代理
- * 唤醒（对齐旧 _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
+ * 落 [TASK_NOTIFICATION] 行（不节流）+ 任务表注销（对齐旧
+ * _handleTaskNotification，elapsed_ms 服务端权威值经归一化器
  * 从 usage.duration_ms 提升 metadata；缺失时不发，前端本地走秒兜底）。
+ * 2026-10-13-task-wakeup-remove：完成/失败触发主代理唤醒的分支随唤醒链整体
+ * 移除（原 _scheduleTaskWakeup 2s debounce 合并注入「[后台任务通知]」）。
  */
 export async function handleTaskNotificationEvent(
   mgr: SessionManagerCore,
@@ -299,7 +296,8 @@ export async function handleTaskNotificationEvent(
   // 终态事件 + 落行——别名侧的前端 SSE 卡片与时间线段元数据才收敛。主条目
   // 存在时别名补发只会产生重复行（backend 幽灵收口 agent_task_store
   // _resolve_row_with_ghost_reconciliation 已管冒名行归并），此处静默——注销
-  // 已在函数头完成。放唤醒判定之前：唤醒的短任务门槛 return 不得跳过补发。
+  // 已在函数头完成。（原「放唤醒判定之前」的顺序约束随唤醒链移除而消——
+  // 2026-10-13-task-wakeup-remove。）
   if (!info) {
     for (const [aliasId, aliasInfo] of aliases) {
       const aliasRunId = aliasInfo.runId ?? runId;
@@ -317,94 +315,9 @@ export async function handleTaskNotificationEvent(
         task_id: aliasId,
         status: rawStatus,
         ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
-        ...(summary ? { summary } : {}),
+        ...(summary ? { summary: summary } : ''),
       }, aliasInfo.toolUseId);
     }
-  }
-
-  // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
-  // 停止，结果无需汇报，不唤醒防噪）。
-  if (rawStatus === 'completed' || rawStatus === 'failed') {
-    // 门槛判定（FR-01）：info 已从注册表注销但局部引用仍在，startedAt 可读；
-    // 双缺失（重启窗口孤儿终态）durationMs=undefined → fail-open 放行唤醒。
-    const durationMs =
-      elapsedMs !== undefined
-        ? elapsedMs
-        : info?.startedAt !== undefined
-          ? Date.now() - info.startedAt
-          : undefined;
-    if (durationMs !== undefined && durationMs < TASK_WAKEUP_MIN_DURATION_MS) {
-      return;
-    }
-    scheduleTaskWakeup(mgr, state.sessionId, {
-      taskId,
-      taskName,
-      status: rawStatus,
-      elapsedMs,
-      summary,
-    });
-  }
-}
-
-/**
- * ql-20260827-007：后台任务终态唤醒调度——2s debounce 合并同会话多条通知后，
- * 经 deps.onTaskWakeupInject 注入一条「后台任务通知」user 消息（backend inject
- * 创建新 turn 唤醒主代理汇报；忙态由 queue_when_busy 排队）。未注入回调
- * （测试/旧构造点）时静默跳过。防环：prompt 明示「汇报后结束本轮、勿重执行」；
- * 每次唤醒都由真实终态触发，无自持循环。
- */
-export function scheduleTaskWakeup(
-  mgr: SessionManagerCore,
-  sessionId: string,
-  info: {
-    taskId: string;
-    taskName: string;
-    status: string;
-    elapsedMs?: number;
-    summary?: string;
-  },
-): void {
-  const cb = mgr.deps.onTaskWakeupInject;
-  if (!cb) return;
-  const mm = Math.floor((info.elapsedMs ?? 0) / 60000);
-  const ss = Math.floor(((info.elapsedMs ?? 0) % 60000) / 1000);
-  const dur = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
-  const summaryClip = (info.summary ?? '').slice(0, 300);
-  const line =
-    `- 任务「${info.taskName}」已${info.status === 'completed' ? '完成' : '失败'}`
-    + `（用时 ${dur}）`
-    + (summaryClip ? `。结果摘要：${summaryClip}` : '')
-    + `（task_id: ${info.taskId}，如需完整输出可调用 TaskOutput 查询，block=false）`;
-  let entry = mgr._taskWakeupPending.get(sessionId);
-  if (!entry) {
-    const timer = setTimeout(() => {
-      const e = mgr._taskWakeupPending.get(sessionId);
-      mgr._taskWakeupPending.delete(sessionId);
-      if (!e || e.lines.length === 0) return;
-      // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
-      // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
-      const prompt =
-        `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
-        '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
-        e.lines.join('\n') +
-        `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
-        '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
-      void (async () => {
-        try {
-          await cb(sessionId, prompt);
-        } catch (err) {
-          console.error('[session-manager] task wakeup inject failed', {
-            sessionId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      })();
-    }, 2000);
-    timer.unref?.();
-    entry = { timer, lines: [line] };
-    mgr._taskWakeupPending.set(sessionId, entry);
-  } else {
-    entry.lines.push(line);
   }
 }
 

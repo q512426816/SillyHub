@@ -228,13 +228,6 @@ export async function terminateSession(
   //     消亡，task_* 不会再到达；防 Map 泄漏）。
   mgr._clearBackgroundTasks(state.sessionId);
 
-  // ql-20260827-007：取消未 fire 的唤醒 debounce（会话已终态，注入无处可去）。
-  const pendingWakeup = mgr._taskWakeupPending.get(state.sessionId);
-  if (pendingWakeup) {
-    clearTimeout(pendingWakeup.timer);
-    mgr._taskWakeupPending.delete(state.sessionId);
-  }
-
   // 5. task-08：销毁会话级 usage 台账 + budget 软切断登记（旧 _destroyPartialBuffer
   //    的清理职责收口；partial 定时器已随缓冲链下沉归一化器，由 driver.dispose 兜底）。
   mgr._destroyUsageLedger(state.sessionId);
