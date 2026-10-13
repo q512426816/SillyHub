@@ -93,7 +93,7 @@ created_at: 2026-10-13T03:30:35.880Z
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
 FR-01: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「TaskOutput 等待行：任务名人话摘要与走秒/快照未命中回退/终态回归」
-FR-02: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「快照终态收敛：running 元数据按快照收敛徽标与计数、终态不回退」
+FR-02: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx「deriveTurnActivity 快照终态收敛（计数/兜底/零回归/终态不回退）」+ frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts「subagentHeaderOf 单向收敛与终态不回退（徽标）」
 FR-03: 不适用：轮完成对账接线位于 session-panel-page 集成层，无既有组件测试面；收敛数据链（快照→卡片）由 use-session-tasks 既有 refreshSignal 机制承载，FR-02 已覆盖快照对账判定逻辑，接线手验
 FR-04: sillyhub-daemon/tests/stream-json.test.ts「usage_update 双门限节流：时间门限兜底/零增量不推/真值覆盖后基线同步与超调回落校正」
 FR-05: frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx 既有用例回归全绿

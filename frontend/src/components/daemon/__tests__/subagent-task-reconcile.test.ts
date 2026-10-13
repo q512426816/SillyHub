@@ -17,8 +17,10 @@ import {
 } from "@/hooks/use-session-tasks";
 import {
   subagentHeaderOf,
+  taskSnapshotOfSegment,
   type SubagentContainerSegment,
   type SubagentReconciledTask,
+  type SubagentTaskLookup,
 } from "../turn-segment-views";
 import type { ToolTurnSegment } from "../session-log-assembler";
 
@@ -195,5 +197,38 @@ describe("subagentHeaderOf 对账（FR-01：stub 命中终态收敛）", () => {
     expect(h.badge).toBeNull(); // 段三态胜出——metaStatus/reconciledStatus 均空
     expect(h.name).toBe("已有结果"); // primary 优先
     expect(h.durationText).toBe("00:08"); // 原起止时长路径（mm:ss 格式）
+  });
+});
+
+/* ── 2026-10-13-turn-live-visibility FR-02（评审 P2 修复）：taskTaskId 兜底 ── */
+
+describe("taskSnapshotOfSegment（FR-02·评审 P2：块头对账 task_id 兜底）", () => {
+  const snap: SubagentReconciledTask = { taskName: "兜底任务", status: "failed", elapsedMs: 9_000 };
+  const lookup: SubagentTaskLookup = {
+    byToolUseId: new Map(), // 快照行 tool_use_id 缺失（列可空）
+    byTaskId: new Map([["bm77", snap]]),
+  };
+
+  it("tool_use_id 未命中 + 段带 taskTaskId → 按 task_id 兜底命中（块头终态收敛不留残留）", () => {
+    const seg = toolSeg({ id: "call_zz", taskTaskId: "bm77", taskStatus: "running", taskAsync: true });
+    expect(taskSnapshotOfSegment(lookup, seg)).toEqual(snap);
+    // 端到端：块头按兜底快照收敛（running 元数据 + 快照 failed → 失败徽标）
+    const h = subagentHeaderOf(seg, 0, taskSnapshotOfSegment(lookup, seg));
+    expect(h.status).toBe("failed");
+    expect(h.badge?.label).toBe("失败");
+  });
+
+  it("两键均未命中 / 无 lookup / 段无 taskTaskId → null（回退既有推导）", () => {
+    expect(taskSnapshotOfSegment(lookup, toolSeg({ id: "call_none" }))).toBeNull();
+    expect(taskSnapshotOfSegment(null, toolSeg({ id: "call_none", taskTaskId: "bm77" }))).toBeNull();
+    expect(taskSnapshotOfSegment(lookup, { id: "call_x" })).toBeNull();
+  });
+
+  it("tool_use_id 直查优先（精确键命中不落兜底）", () => {
+    const both: SubagentTaskLookup = {
+      byToolUseId: new Map([["call_zz", { taskName: "精确键", status: "completed", elapsedMs: null }]]),
+      byTaskId: new Map([["bm77", snap]]),
+    };
+    expect(taskSnapshotOfSegment(both, toolSeg({ id: "call_zz", taskTaskId: "bm77" }))?.taskName).toBe("精确键");
   });
 });

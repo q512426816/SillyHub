@@ -1612,17 +1612,17 @@ describe("ToolRowView TaskOutput 等待行（turn-live-visibility FR-01）", () 
 });
 
 describe("parseTaskOutputWait（turn-live-visibility FR-01）", () => {
-  it("解析 task_id 与 block", () => {
+  it("解析 task_id（阻塞/快速查询统一等待行形态，block 不再单列）", () => {
     expect(
       parseTaskOutputWait(
         JSON.stringify({ tool: "TaskOutput", args: { task_id: "bm1", block: true } }),
       ),
-    ).toEqual({ taskId: "bm1", block: true });
+    ).toEqual({ taskId: "bm1" });
     expect(
       parseTaskOutputWait(
         JSON.stringify({ tool: "TaskOutput", args: { task_id: "bm2", block: false } }),
       ),
-    ).toEqual({ taskId: "bm2", block: false });
+    ).toEqual({ taskId: "bm2" });
   });
 
   it("非 JSON / 缺 task_id / 非 object → null（历史截断不崩）", () => {

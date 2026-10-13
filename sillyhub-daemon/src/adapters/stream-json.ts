@@ -161,7 +161,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    *
    * token 门限在低速生成时（如 ~10 tok/s 需 ~2s 才攒满 20）前端数字跳动过慢，
    * 叠加时间门限：距上次 emit ≥ 500ms 且有增量即推（字符/时间双门限，
-   * THINKING_FLUSH_MS 同款先例；最坏 2 条/s/call，落库+publish 批量管线可承受）。
+   * THINKING_FLUSH_MS 同款先例；低速兜底上界 ~2 条/s/call，落库+publish 批量管线可承受；高速时 token 门限主导，频率与改前持平）。
    * 零增量到期不空推。与 _lastEmittedOutputTokens 同点位清零/同步。
    */
   private _lastUsageEmitAt = Date.now();

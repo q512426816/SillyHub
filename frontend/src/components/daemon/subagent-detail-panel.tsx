@@ -24,7 +24,7 @@
 
 import { memo, useContext, useEffect, useState } from "react";
 import { X } from "lucide-react";
-import { SubagentTaskLookupContext } from "./turn-segment-views";
+import { SubagentTaskLookupContext, taskSnapshotOfSegment } from "./turn-segment-views";
 import { Button } from "antd";
 
 import { SegmentView, subagentHeaderOf } from "@/components/daemon/turn-segment-views";
@@ -64,7 +64,7 @@ export const SubagentDetailPanel = memo(function SubagentDetailPanel({
   // 2026-10-13-turn-live-visibility（FR-02）：同 SubagentBlockView 放开「running
   // 元数据 + 快照终态」单向收敛面（终态事件丢失治理，裁决在 subagentHeaderOf）。
   const taskLookup = useContext(SubagentTaskLookupContext);
-  const reconciledRaw = taskLookup?.byToolUseId.get(segment.id) ?? null;
+  const reconciledRaw = taskSnapshotOfSegment(taskLookup, segment);
   const metaStatus =
     segment.kind === "tool"
       ? segment.taskStatus === undefined && segment.taskAsync === undefined

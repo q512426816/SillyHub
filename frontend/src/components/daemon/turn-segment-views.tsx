@@ -205,6 +205,24 @@ export interface SubagentTaskLookup {
 export const SubagentTaskLookupContext = createContext<
   SubagentTaskLookup | null
 >(null);
+
+/**
+ * 2026-10-13-turn-live-visibility（FR-02·评审 P2 修复）：段的任务快照查找——
+ * tool_use_id 直查（精确键优先），段带 taskTaskId（[TASK_*] 行写入）时按
+ * task_id 兜底；快照行 tool_use_id 可空缺失时块头也能对账终态，与
+ * turn-status-bar collectSubagents 的双键口径一致。未命中 null。
+ */
+export function taskSnapshotOfSegment(
+  lookup: SubagentTaskLookup | null,
+  segment: { id: string; taskTaskId?: string },
+): SubagentReconciledTask | null {
+  const direct = lookup?.byToolUseId.get(segment.id);
+  if (direct) return direct;
+  if (segment.taskTaskId && lookup) {
+    return lookup.byTaskId.get(segment.taskTaskId) ?? null;
+  }
+  return null;
+}
 export interface StderrRowViewProps {
   segment: StderrTurnSegment;
 }
@@ -347,13 +365,12 @@ function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus
 /** TaskOutput 工具调用解析产物（parseTaskOutputWait）。 */
 export interface TaskOutputWaitInfo {
   taskId: string;
-  /** 是否阻塞等待（block=true 长等后台任务；false 为快速查询）。 */
-  block: boolean;
 }
 
 /**
- * 解析 TaskOutput 段 raw JSON 的等待参数（task_id / block）。tool_call 原文形如
- * {"tool":"TaskOutput","args":{"task_id":"bm…","block":true,"timeout":…}}；
+ * 解析 TaskOutput 段 raw JSON 的等待参数（task_id）。tool_call 原文形如
+ * {"tool":"TaskOutput","args":{"task_id":"bm…","block":true,"timeout":…}}——
+ * 阻塞等待与快速查询统一显示等待行（快速查询瞬时终态回归，无形态差）；
  * 历史截断（slim）或形态变化解析失败 → null（消费方回退既有渲染，不崩）。
  */
 export function parseTaskOutputWait(raw: string): TaskOutputWaitInfo | null {
@@ -368,8 +385,7 @@ export function parseTaskOutputWait(raw: string): TaskOutputWaitInfo | null {
   if (typeof args !== "object" || args === null) return null;
   const taskId = (args as { task_id?: unknown }).task_id;
   if (typeof taskId !== "string" || !taskId) return null;
-  const block = (args as { block?: unknown }).block;
-  return { taskId, block: block === true };
+  return { taskId };
 }
 
 /* ───────────── task-03（2026-09-15-subagent-three-pane-display / FR-02 / design §5.E）───────── */
@@ -867,7 +883,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 仅在「无元数据且段三态 running」时生效（与 subagentHeaderOf 同一优先级
   // 契约），历史窗口截断 stub 按快照收敛名称/徽标/时长。
   const taskLookup = useContext(SubagentTaskLookupContext);
-  const reconciledRaw = taskLookup?.byToolUseId.get(segment.id) ?? null;
+  const reconciledRaw = taskSnapshotOfSegment(taskLookup, segment);
   const metaStatus = taskMetaStatusOf(segment);
   // 2026-10-13-turn-live-visibility（FR-02）：对账传递放开两态——原「无元数据且
   // 段三态 running」（stub-reconcile 面，段三态限制由纯函数双保险裁决）与新增
