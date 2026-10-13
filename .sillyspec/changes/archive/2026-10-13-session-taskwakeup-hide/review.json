@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-taskwakeup-hide",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "f17efab4a13ff38e3a9b43ebbcaf181048cf0493",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "边界已裁决：可接受"
+  },
+  "reviewedAt": "2026-10-13T03:41:44Z"
+}

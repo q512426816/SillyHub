@@ -1,0 +1,687 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 686d1be00..3ecf5b7cf 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -33,3 +33,4 @@ created_at: 2026-08-30 22:23:33
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+ - 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
++- 2026-10-13-subagent-stub-reconcile | 动机:历史会话时间线里子代理容器(分页窗口截断致派发行缺失时落成 stub 段)永久显示「运行中」且名字回落类型名 ge
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 96e9354c8..fb2bc7010 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -66,3 +66,4 @@
+ - 2026-10-12-stale-run-askwait-fix | 动机：生产实证（阿里云会话 47e2ff1a）：交互轮 AskUserQuestion 等待用户回答期间日志静默，后端重
+ - 2026-10-13-agent-task-stuck-running | 动机:general-purpose 子代理已完成但 UI 永久显示「运行中」——完成通知在 daemon 失忆时被静默
+ - 2026-10-13-write-tool-diff | 会话面板 Write 工具展开区不显示 diff（Edit 有「变更对比」而 Write 只显示全文），前端补上 Wri
++- 2026-10-13-subagent-stub-reconcile | 动机:历史会话时间线里子代理容器(分页窗口截断致派发行缺失时落成 stub 段)永久显示「运行中」且名字回落类型名 ge
+diff --git a/frontend/src/components/agent-log/__tests__/normalize.test.ts b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+index 1fbf69236..b456f7ddb 100644
+--- a/frontend/src/components/agent-log/__tests__/normalize.test.ts
++++ b/frontend/src/components/agent-log/__tests__/normalize.test.ts
+@@ -554,6 +554,75 @@ describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-
+   });
+ });
+ 
++// ── 2026-10-13-agentlog-write-diff：tool_result 行/事件 edit_patch → 卡片 editPatch ──
++
++const WRITE_PATCH = JSON.stringify([
++  { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old", "+new-1", "+new-2"] },
++]);
++
++describe("2026-10-13-agentlog-write-diff: edit_patch 配对到工具卡", () => {
++  it("旧轨：stdout [TOOL_RESULT] 行 edit_patch 列 → 精确配对写入 tool_call 卡片 editPatch", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog(
++        "tool_call",
++        JSON.stringify({ tool: "Write", tool_use_id: "call_w1", args: { file_path: "a.ts", content: "x" } }),
++        "tcw1",
++      ),
++      {
++        ...makeLog("stdout", "[TOOL_RESULT] The file a.ts has been updated", "trw1"),
++        parent_tool_use_id: "call_w1",
++        edit_patch: WRITE_PATCH,
++      },
++    ];
++    const result = normalizeLogs(logs);
++    const card = result.find((p) => p.log.id === "tcw1");
++    expect(card?.editPatch).toBe(WRITE_PATCH);
++    expect(card?.mergedToolResult).toBeTruthy();
++  });
++
++  it("旧轨退化配对（无 id 邻近）：edit_patch 同样拾取", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog("tool_call", JSON.stringify({ tool: "Write", args: { file_path: "a.ts", content: "x" } }), "tcw2"),
++      { ...makeLog("stdout", "[TOOL_RESULT] ok", "trw2"), edit_patch: WRITE_PATCH },
++    ];
++    const result = normalizeLogs(logs);
++    expect(result.find((p) => p.log.id === "tcw2")?.editPatch).toBe(WRITE_PATCH);
++  });
++
++  it("v2 轨：tool_result 事件 ev.edit_patch → call_id 配对卡片 editPatch（行列缺省时）", () => {
++    const useEvent = {
++      type: "tool_use",
++      tool_name: "Write",
++      call_id: "toolu_wp",
++      metadata: { tool_input: { file_path: "a.ts", content: "x" } },
++    };
++    const tcJson = JSON.stringify({
++      tool: "Write", args: { file_path: "a.ts", content: "x" },
++      timestamp: "2026-06-17T13:54:38.000Z",
++      status: "allowed", success: true, tool_use_id: "toolu_wp",
++    });
++    const ev = normalizeLogs([
++      { ...makeLog("tool_call", tcJson, "tcw3"), agent_event: useEvent },
++      {
++        ...makeLog("stdout", "[TOOL_RESULT] updated", "trw3"),
++        agent_event: { type: "tool_result", call_id: "toolu_wp", content: "updated", edit_patch: WRITE_PATCH },
++      },
++    ]);
++    const card = ev.find((p) => p.log.id === "tcw3");
++    expect(card?.editPatch).toBe(WRITE_PATCH);
++    expect(card?.mergedToolResult).toBe("updated");
++  });
++
++  it("无 edit_patch 的 result 行 → 卡片 editPatch 保持 undefined（零回归）", () => {
++    const logs: AgentRunLogEntry[] = [
++      makeLog("tool_call", JSON.stringify({ tool: "Bash", tool_use_id: "call_b1", args: { command: "ls" } }), "tcb1"),
++      { ...makeLog("stdout", "[TOOL_RESULT] out", "trb1"), parent_tool_use_id: "call_b1" },
++    ];
++    const result = normalizeLogs(logs);
++    expect(result.find((p) => p.log.id === "tcb1")?.editPatch).toBeUndefined();
++  });
++});
++
+ // task-08 / FR-03 / D-002@v1（2026-07-29-model-error-visibility）：模型调用错误可见性。
+ // daemon 把模型失败记为 [ASSISTANT] API Error 文本（design §1 原缺陷：被当助手回复）；
+ // 本组覆盖 buildErrorLogItem 安全提取 + :352 误判修正 + brownfield 兜底 + R-02 不进 NOISE。
+@@ -930,6 +999,7 @@ function renderModelOf(p: ReturnType<typeof normalizeLogs>[number] | undefined)
+     parsedToolResult: p?.parsedToolResult,
+     toolUseId: p?.toolUseId,
+     toolDurationMs: p?.toolDurationMs,
++    editPatch: p?.editPatch,
+     semanticCategory: p?.semanticCategory,
+   };
+ }
+diff --git a/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+new file mode 100644
+index 000000000..ea85a101c
+--- /dev/null
++++ b/frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx
+@@ -0,0 +1,65 @@
++/**
++ * 2026-10-13-agentlog-write-diff：agent-log 视图 Write 工具卡 diff 渲染单测。
++ *
++ * 经导出入口 ToolCallPreview（tool=Write 分派到 WriteToolPreview）断言：
++ * - 有 editPatch（structuredPatch JSON）→ 红删绿增 DiffView + 变更对比标题 + 复制完整原文
++ * - 无 editPatch → 保持既有「内容预览」全文形态（零回归）
++ */
++import { describe, it, expect } from "vitest";
++import { render, screen, cleanup } from "@testing-library/react";
++
++import { ToolCallPreview } from "../tool-renderers";
++import type { ToolCallEntry } from "../types";
++
++function writeEntry(content: string): ToolCallEntry {
++  return {
++    timestamp: "2026-10-13T10:00:00.000Z",
++    tool: "Write",
++    args: JSON.stringify({ file_path: "src/a.ts", content }),
++    status: "allowed",
++    success: true,
++    rawArgs: { file_path: "src/a.ts", content },
++  };
++}
++
++describe("WriteToolPreview diff 渲染（2026-10-13-agentlog-write-diff）", () => {
++  it("有 editPatch：structuredPatch 红删绿增渲染，标题「变更对比（覆盖写入 +2 −1）」，复制完整原文", () => {
++    const patch = JSON.stringify([
++      { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old-line", "+new-A", "+new-B"] },
++    ]);
++    render(
++      <ToolCallPreview
++        entry={writeEntry("new-A\nnew-B")}
++        mergedResult="The file src/a.ts has been updated."
++        editPatch={patch}
++      />,
++    );
++    const delRow = screen.getByText("old-line").closest("div.flex");
++    const addRow = screen.getByText("new-A").closest("div.flex");
++    expect(delRow?.className).toContain("bg-red-500/10");
++    expect(addRow?.className).toContain("bg-emerald-500/10");
++    expect(screen.getByText(/变更对比（覆盖写入 \+2 −1）/)).toBeTruthy();
++    // 复制按钮复制完整新文件内容（不随 diff 截断）
++    expect(screen.getByTitle("复制内容")).toBeTruthy();
++    cleanup();
++  });
++
++  it("无 editPatch：保持既有「内容预览」全文形态（零回归）", () => {
++    render(
++      <ToolCallPreview
++        entry={writeEntry("line-1\nline-2")}
++        mergedResult="File created successfully at: src/a.ts"
++      />,
++    );
++    expect(screen.getByText(/内容预览 \(2 行\)/)).toBeTruthy();
++    expect(screen.queryByText(/变更对比/)).toBeNull();
++    cleanup();
++  });
++
++  it("editPatch 非法 JSON → 回退既有全文预览（不崩）", () => {
++    render(<ToolCallPreview entry={writeEntry("line-1")} editPatch="not json" />);
++    expect(screen.getByText(/内容预览 \(1 行\)/)).toBeTruthy();
++    expect(screen.queryByText(/变更对比/)).toBeNull();
++    cleanup();
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+index 9925e8ecd..89413694c 100644
+--- a/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
++++ b/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx
+@@ -541,6 +541,31 @@ describe("MessageQueueBar 队列三操作（task-10 / FR-04 FR-05 FR-06）", ()
+     expect(screen.getByText(/失败条目保存后转为等待中并尝试派发/)).toBeTruthy();
+   });
+ 
++  it("TASK_WAKEUP 条目 chip 摘要与展开正文不显示 [后台任务通知] 前缀", () => {
++    // 2026-10-13-session-taskwakeup-hide FR-03：系统通知条目在队列条上只显示
++    // 通知正文——前缀原文（含其截断形态）不得再出现在 chip 摘要与展开正文。
++    render(
++      <MessageQueueBar
++        entries={[
++          makeEntry({
++            id: "mq-wake",
++            prompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
++            displayPrompt: "[后台任务通知] 以下 1 个后台子代理任务已全部结束",
++          }),
++        ]}
++        onRemove={vi.fn()}
++        onRetry={vi.fn()}
++      />,
++    );
++    // 折叠摘要：正文原样（<40 字不截断），无前缀。
++    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
++    expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
++    // 展开正文：同样无前缀（点击 chip 主体切换展开态）。
++    fireEvent.click(screen.getByRole("button", { name: /^等待中，/ }));
++    expect(screen.getByText("以下 1 个后台子代理任务已全部结束")).toBeTruthy();
++    expect(screen.queryByText(/\[后台任务通知\]/)).toBeNull();
++  });
++
+   it("未传三回调（可选门控显式断言）：不渲染 ⇅ 手柄/⚡/✎，chip 不可拖", () => {
+     const { container } = render(
+       <MessageQueueBar
+diff --git a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+index 24db651a4..777ba0c67 100644
+--- a/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
++++ b/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx
+@@ -675,6 +675,19 @@ describe("logsToTurns 系统通知开轮占位槽（2026-10-10-system-opened-tur
+     expect((turn.segments ?? []).some((s) => s.kind === "user_msg")).toBe(false);
+   });
+ 
++  it("系统通知注入不产出 preamble 段（进度视图无上下文注入卡）", () => {
++    // 2026-10-13-session-taskwakeup-hide FR-01：TASK_WAKEUP 纯系统通知不再进
++    // 段模型——进度视图不显示「上下文注入（N 字，已随消息发送）」卡（该文案
++    // 对纯系统通知本就不符）；真实前导（【影子直聊】等）仍照旧建段（上方用例）。
++    const turns = logsToTurns([
++      makeLog("n1", "run-1", "user_input", "[后台任务通知] 以下 1 个后台子代理任务已全部结束", { timestamp: TS(0) }),
++      makeLog("o1", "run-1", "stdout", "正文", { timestamp: TS(30) }),
++    ]);
++    const turn = turns[0]!;
++    expect(turn.prompt).toBe("");
++    expect((turn.segments ?? []).some((s) => s.kind === "preamble")).toBe(false);
++  });
++
+   it("正常轮不受影响：真实开轮 prompt 保持，第二条消息仍转 user_msg；中途系统行不占槽", () => {
+     const turns = logsToTurns([
+       makeLog("u1", "run-1", "user_input", "第一句", { timestamp: TS(0) }),
+diff --git a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+index c761eac82..cbc8b70d3 100644
+--- a/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
++++ b/frontend/src/components/daemon/__tests__/session-log-assembler.test.ts
+@@ -28,6 +28,7 @@ import {
+   createEmptyAssembledTurn,
+   extractPreambleText,
+   finishTurn,
++  isTaskWakeupInjection,
+   logsToSegments,
+   segmentsToLegacy,
+ } from "../session-log-assembler";
+@@ -1243,6 +1244,17 @@ describe("extractPreambleText", () => {
+   });
+ });
+ 
++// ── 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入判定（单一谓词源）──
++describe("isTaskWakeupInjection（2026-10-13-session-taskwakeup-hide）", () => {
++  it("[后台任务通知] 前缀（含前导空白）→ true；普通消息与真实前导 → false", () => {
++    expect(isTaskWakeupInjection("[后台任务通知] 以下 1 个后台子代理任务已全部结束")).toBe(true);
++    expect(isTaskWakeupInjection("  [后台任务通知] 空白容忍")).toBe(true);
++    expect(isTaskWakeupInjection("帮我修下登录页")).toBe(false);
++    // 真实上下文前导不是 TASK_WAKEUP 注入，谓词不得误伤（preamble 卡保留）。
++    expect(isTaskWakeupInjection("【页面上下文】\n- 页面：详情\n\n---\n\n你好")).toBe(false);
++  });
++});
++
+ // ── 用户反馈⑥：会话重复显示（partial+全文双气泡防御）────────────────────
+ describe("重复显示防御（用户反馈⑥）", () => {
+   it("完整回复行到达时移除同文本前缀的直播 partial 段（override 丢失场景）", () => {
+diff --git a/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+new file mode 100644
+index 000000000..035eb916f
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/subagent-task-reconcile.test.ts
+@@ -0,0 +1,168 @@
++/**
++ * 2026-10-13-subagent-stub-reconcile 回归测试：
++ *   - buildSubagentTaskLookup（FR-01）：tool_use_id 索引、终态优先序、同优先序
++ *     取 updated_at 最新、无 toolUseId 行跳过；
++ *   - subagentHeaderOf 第三参对账（FR-01/02）：stub 命中终态收敛名称/徽标/时长、
++ *     未命中维持现状、tool 段三级优先（元数据 > 对账 > 段三态）、已配对结果
++ *     段不被覆盖（FR-03）。
++ *
++ * 纪律对齐既有套件：纯函数直测 + 真实段结构构造，不 mock 被测函数。
++ */
++
++import { describe, it, expect } from "vitest";
++
++import {
++  buildSubagentTaskLookup,
++  type AgentSessionTaskView,
++} from "@/hooks/use-session-tasks";
++import {
++  subagentHeaderOf,
++  type SubagentContainerSegment,
++  type SubagentReconciledTask,
++} from "../turn-segment-views";
++import type { ToolTurnSegment } from "../session-log-assembler";
++
++/* ───────── 夹具 ───────── */
++
++function row(over: Partial<AgentSessionTaskView> & { taskId: string }): AgentSessionTaskView {
++  return {
++    taskName: "默认任务名",
++    status: "running",
++    progress: null,
++    message: null,
++    isAsync: true,
++    lastToolName: null,
++    summary: null,
++    elapsedMs: null,
++    elapsedSyncedAt: null,
++    startedAt: null,
++    lastActivityAt: null,
++    terminalAt: null,
++    totalTokens: null,
++    toolUses: null,
++    ...over,
++  } as AgentSessionTaskView;
++}
++
++const stubSeg: SubagentContainerSegment = {
++  kind: "subagent_stub",
++  id: "call_a",
++  subagentType: "general-purpose",
++  children: [],
++};
++
++function toolSeg(over: Partial<ToolTurnSegment>): SubagentContainerSegment {
++  return {
++    kind: "tool",
++    id: "call_t",
++    raw: '{"tool":"Task"}',
++    status: "running",
++    toolName: "Task",
++    primary: null,
++    startedAt: null,
++    endedAt: null,
++    children: [],
++    subagentType: "general-purpose",
++    ...over,
++  };
++}
++
++const reconciledCompleted: SubagentReconciledTask = {
++  taskName: "独立评审单位弹窗重排",
++  status: "completed",
++  elapsedMs: 169_000,
++};
++
++/* ── FR-01：buildSubagentTaskLookup ─────────────────────────────── */
++
++describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => {
++  it("终态优先序：completed 压过同名 tool_use_id 的 running/stopped 行", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_a", status: "running", taskName: "在途" }),
++      row({ taskId: "k2", toolUseId: "call_a", status: "stopped", taskName: "清扫影" }),
++      row({ taskId: "k3", toolUseId: "call_a", status: "completed", taskName: "真终态", elapsedMs: 1000 }),
++    ]);
++    expect(lookup.get("call_a")).toEqual({
++      taskName: "真终态",
++      status: "completed",
++      elapsedMs: 1000,
++    });
++  });
++
++  it("同优先序取 updated_at 最新；failed > stopped", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: "call_b", status: "failed", taskName: "旧失败", updatedAt: "2026-10-13T01:00:00Z" }),
++      row({ taskId: "k2", toolUseId: "call_b", status: "failed", taskName: "新失败", updatedAt: "2026-10-13T02:00:00Z" }),
++      row({ taskId: "k3", toolUseId: "call_c", status: "stopped", taskName: "停" }),
++      row({ taskId: "k4", toolUseId: "call_c", status: "failed", taskName: "败" }),
++    ]);
++    expect(lookup.get("call_b")?.taskName).toBe("新失败");
++    expect(lookup.get("call_c")?.status).toBe("failed");
++  });
++
++  it("无 toolUseId 的行跳过（无关联键不参账）", () => {
++    const lookup = buildSubagentTaskLookup([
++      row({ taskId: "k1", toolUseId: null, status: "completed", taskName: "x" }),
++      row({ taskId: "k2", status: "completed", taskName: "y" }),
++    ]);
++    expect(lookup.size).toBe(0);
++  });
++});
++
++/* ── FR-01/02：subagentHeaderOf 对账 ────────────────────────────── */
++
++describe("subagentHeaderOf 对账（FR-01：stub 命中终态收敛）", () => {
++  it("stub 命中 completed → 名称=快照 task_name、徽标「已完成」、权威时长、非 running", () => {
++    const h = subagentHeaderOf(stubSeg, 0, reconciledCompleted);
++    expect(h.name).toBe("独立评审单位弹窗重排");
++    expect(h.status).toBe("completed");
++    expect(h.running).toBe(false);
++    expect(h.badge?.label).toBe("已完成");
++    expect(h.durationText).toBe("02:49"); // 169000ms → mm:ss 权威时长
++    expect(h.dotCls).not.toContain("animate-pulse");
++  });
++
++  it("stub 未命中 → 维持现状（名称=subagentType、durationText=运行中）", () => {
++    const h = subagentHeaderOf(stubSeg, 0, null);
++    expect(h.name).toBe("general-purpose");
++    expect(h.status).toBe("running");
++    expect(h.durationText).toBe("运行中");
++    expect(h.badge).toBeNull();
++  });
++
++  it("stub 命中 failed / stopped → 徽标与状态点随行", () => {
++    const failed = subagentHeaderOf(stubSeg, 0, { taskName: "x", status: "failed", elapsedMs: null });
++    expect(failed.status).toBe("failed");
++    expect(failed.badge?.label).toBe("失败");
++    expect(failed.dotCls).toContain("bg-destructive");
++    expect(failed.durationText).toBeNull(); // 无 elapsed 不伪造
++    const stopped = subagentHeaderOf(stubSeg, 0, { taskName: "y", status: "stopped", elapsedMs: 60_000 });
++    expect(stopped.badge?.label).toBe("已停止");
++    expect(stopped.durationText).toBe("01:00");
++  });
++
++  it("FR-03：带 [TASK_*] 元数据的 tool 段元数据优先，对账不覆盖", () => {
++    const seg = toolSeg({ id: "call_a", taskStatus: "running", taskAsync: true, startedAt: 1000 });
++    const h = subagentHeaderOf(seg, 5000, reconciledCompleted);
++    expect(h.metaStatus).toBe("running");
++    expect(h.status).toBe("running"); // 元数据权威——对账 completed 不抢
++    expect(h.badge?.label).toBe("后台运行中");
++  });
++
++  it("FR-01：无元数据且 running 的 tool 段对账收敛（窗口截断形态）", () => {
++    const seg = toolSeg({ id: "call_t", primary: null });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("completed");
++    expect(h.name).toBe("独立评审单位弹窗重排"); // primary 空 → 快照名
++    expect(h.badge?.label).toBe("已完成");
++  });
++
++  it("FR-03：已配对结果段（ok）不被对账覆盖，徽标不渲染", () => {
++    const seg = toolSeg({ id: "call_a", status: "ok", startedAt: 0, endedAt: 8000, primary: "已有结果" });
++    const h = subagentHeaderOf(seg, 0, reconciledCompleted);
++    expect(h.status).toBe("ok");
++    expect(h.badge).toBeNull(); // 段三态胜出——metaStatus/reconciledStatus 均空
++    expect(h.name).toBe("已有结果"); // primary 优先
++    expect(h.durationText).toBe("00:08"); // 原起止时长路径（mm:ss 格式）
++  });
++});
+diff --git a/frontend/src/components/daemon/message-queue-bar.tsx b/frontend/src/components/daemon/message-queue-bar.tsx
+index 40011a01a..2dbd67c3e 100644
+--- a/frontend/src/components/daemon/message-queue-bar.tsx
++++ b/frontend/src/components/daemon/message-queue-bar.tsx
+@@ -28,7 +28,8 @@
+  *   - ✎ 重新编辑（FR-06）：队列行下方展开单条 inline 编辑浮层（说明行 + textarea
+  *     + 取消/保存；trim 非空才可保存，后端 422 双保险）；failed 条目浮层说明
+  *     「保存后转为等待中并尝试派发」；TASK_WAKEUP 前缀（[后台任务通知]）系统通知
+- *     条目不渲染 ✎（D-009，后端 409 双保险）；展开查看态与编辑态互斥（开编辑收起展开）；
++ *     条目不渲染 ✎（D-009，后端 409 双保险），chip 摘要与展开正文不显示前缀
++ *     原文（2026-10-13-session-taskwakeup-hide）；展开查看态与编辑态互斥（开编辑收起展开）；
+  *   - failed 条目红色语义边框（border/text-destructive）+ ↻ 重试/✕ 删除按钮
+  *     （D-003 失败留队头，不自动重试，重试仅由用户点击触发）；
+  *   - pending 条目提供 ✕ 删除；sending 条目转 spinner 不提供操作；
+@@ -60,18 +61,14 @@ import { Button, Input, Tag, Tooltip } from "antd";
+ import { cn } from "@/lib/utils";
+ import type { QueueEntry } from "@/hooks/use-message-queue";
+ import { getProviderCaps } from "@/lib/provider-caps";
++import {
++  isTaskWakeupInjection,
++  TASK_WAKEUP_PROMPT_PREFIX,
++} from "@/components/daemon/session-log-assembler";
+ 
+ /** 摘要截断长度（design §3.2：prompt 前 40 字）。 */
+ const SUMMARY_LIMIT = 40;
+ 
+-/**
+- * TASK_WAKEUP 系统通知条目 prompt 前缀（D-009）：该前缀条目由后端任务唤醒自动
+- * 并入，不开放 ✎ 编辑（后端 409 双保险）。与
+- * backend/app/modules/daemon/session/service.py 的 TASK_WAKEUP_PROMPT_PREFIX 同值
+- * ——跨语言无法共享 import，改前缀需两侧同步。
+- */
+-const TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]";
+-
+ /** 各投递状态的视觉元数据（chip 边框/底色 + 状态图标 + 中文文案）。 */
+ const STATUS_META: Record<
+   QueueEntry["status"],
+@@ -286,10 +283,18 @@ export function MessageQueueBar({
+           const meta = STATUS_META[entry.status];
+           const StatusIcon = meta.icon;
+           const expanded = expandedId === entry.id;
++          // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 系统通知条目不显示
++          // 「[后台任务通知]」前缀原文——chip 摘要与展开正文只显示通知正文
++          //（正文剥空时兜底「系统通知」，不渲染空 chip）。
++          const wakeupBody = entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX)
++            ? entry.prompt.slice(TASK_WAKEUP_PROMPT_PREFIX.length).trim() ||
++              "系统通知"
++            : null;
++          const summarySource = wakeupBody ?? entry.prompt;
+           const summary =
+-            entry.prompt.length > SUMMARY_LIMIT
+-              ? `${entry.prompt.slice(0, SUMMARY_LIMIT)}…`
+-              : entry.prompt;
++            summarySource.length > SUMMARY_LIMIT
++              ? `${summarySource.slice(0, SUMMARY_LIMIT)}…`
++              : summarySource;
+           // ⇅ 拖拽仅对可操作条目开放（sending 投递中不参与，D-003 既有不变式）。
+           const canDrag = Boolean(onReorder) && entry.status !== "sending";
+           const isDragging = dragId === entry.id;
+@@ -299,7 +304,7 @@ export function MessageQueueBar({
+           const canEdit =
+             Boolean(onEdit) &&
+             entry.status !== "sending" &&
+-            !entry.prompt.startsWith(TASK_WAKEUP_PROMPT_PREFIX);
++            !isTaskWakeupInjection(entry.prompt);
+ 
+           return (
+             <div
+@@ -361,7 +366,7 @@ export function MessageQueueBar({
+                         : "max-w-[280px] truncate",
+                     )}
+                   >
+-                    {expanded ? entry.displayPrompt : summary}
++                    {expanded ? (wakeupBody ?? entry.displayPrompt) : summary}
+                   </span>
+                   {/* 附件数（D-004：折叠态显示；展开态 displayPrompt 已含附件标记行）。 */}
+                   {!expanded && entry.attachmentIds.length > 0 && (
+diff --git a/frontend/src/components/daemon/runtime-session-helpers.tsx b/frontend/src/components/daemon/runtime-session-helpers.tsx
+index 786ddc0fe..e049ba4bf 100644
+--- a/frontend/src/components/daemon/runtime-session-helpers.tsx
++++ b/frontend/src/components/daemon/runtime-session-helpers.tsx
+@@ -12,6 +12,7 @@ import type { SessionTurnView } from "@/components/daemon/turn-timeline";
+ import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
+ import {
+   extractPreambleText,
++  isTaskWakeupInjection,
+   logsToSegments,
+   segmentsToLegacy,
+   stripPreambleText,
+@@ -448,7 +449,10 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
+         // user_input 含完整 dispatch_prompt——提取前导块为 preamble 段（对话视图
+         // 不渲染，「全部」视图显示注入来源）；其余照原逻辑收 prompt。
+         const preambleText = extractPreambleText(seg.text);
+-        if (preambleText) {
++        // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统通知，
++        // 不落 preamble 段（进度视图不再显示「上下文注入」卡）；开轮占位槽
++        // 逻辑不受影响——promptSource 仍走 strip 剥空 → 占位空组照旧。
++        if (preambleText && !isTaskWakeupInjection(seg.text)) {
+           preambleSegments.push({
+             kind: "preamble",
+             id: `preamble:${entry.id ?? `idx${turnIndex}`}`,
+diff --git a/frontend/src/components/daemon/session-log-assembler.ts b/frontend/src/components/daemon/session-log-assembler.ts
+index 6c58af0c4..87965dcd2 100644
+--- a/frontend/src/components/daemon/session-log-assembler.ts
++++ b/frontend/src/components/daemon/session-log-assembler.ts
+@@ -2075,6 +2075,19 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
+  * 输入的原文，不算前导）。
+  */
+ const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报", "【群聊上下文】", "【影子直聊】"];
++
++/**
++ * TASK_WAKEUP 系统注入前缀：与 backend/app/modules/daemon/session/service.py
++ * 的 TASK_WAKEUP_PROMPT_PREFIX 同值——跨语言无法共享 import，改前缀需两侧同步。
++ * 前端持有点收敛为这一处（message-queue-bar.tsx / 两条 preamble 装配路径均引此）。
++ */
++export const TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]";
++
++/** 判定 user_input 是否为 TASK_WAKEUP 系统注入（纯系统通知，无用户正文）。 */
++export function isTaskWakeupInjection(content: string): boolean {
++  return content.trim().startsWith(TASK_WAKEUP_PROMPT_PREFIX);
++}
++
+ export function extractPreambleText(content: string): string | null {
+   const trimmed = content.trim();
+   // quick（2026-09-03 系统注入刷屏修复）：[GROUP_CHAIN ...] 首行标记是排队
+@@ -2087,7 +2100,7 @@ export function extractPreambleText(content: string): string | null {
+   }
+   // [后台任务通知] 类注入：整条都是系统通知（无用户正文），整体进 preamble
+   // 折叠——对话视图不再被任务唤醒通知刷屏（无分隔符，特判整条）。
+-  if (trimmed.startsWith("[后台任务通知]")) return trimmed;
++  if (isTaskWakeupInjection(trimmed)) return trimmed;
+   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
+   const sep = trimmed.indexOf("\n\n---\n\n");
+   if (sep <= 0) return null;
+@@ -2110,7 +2123,7 @@ export function stripPreambleText(content: string): string {
+     if (nl < 0) return "";
+     return stripPreambleText(trimmed.slice(nl + 1));
+   }
+-  if (trimmed.startsWith("[后台任务通知]")) return "";
++  if (isTaskWakeupInjection(trimmed)) return "";
+   if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
+   const sep = trimmed.indexOf("\n\n---\n\n");
+   if (sep <= 0) return content;
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 343ce51de..7ee07b8f7 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -12,7 +12,7 @@ import {
+ import { Badge, Button, Drawer, Input, Spin } from "antd";
+ import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
+ import {
+-  extractPreambleText, finishTurn, stripPreambleText, type UserMsgTurnSegment,
++  extractPreambleText, finishTurn, isTaskWakeupInjection, stripPreambleText, type UserMsgTurnSegment,
+ } from "@/components/daemon/session-log-assembler";
+ import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
+ import type { AutoResumeEntry, TurnForkEntryWiring } from "@/components/daemon/turn-timeline";
+@@ -125,6 +125,9 @@ import {
+ import { useStreamConnectionGuard } from "./use-stream-connection-guard";
+ import { StreamConnectionBanner, TurnStalledWatchdogBanner } from "./connection-banners";
+ import { applyAgentTaskStatusEvent } from "../agent-task-store";
++// 2026-10-13-subagent-stub-reconcile：任务快照对账（时间线子代理容器头收敛）。
++import { buildSubagentTaskLookup, useSessionTasks } from "@/hooks/use-session-tasks";
++import { SubagentTaskLookupContext } from "../turn-segment-views";
+ import {
+   deriveMachineMeta, derivePreMachineLabels, derivePreSessionChrome,
+   deriveSessionPlaceholder, deriveSessionStatusFlags, deriveStatusBadge,
+@@ -762,6 +765,16 @@ export function SessionPanelPage({
+   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
+   const [usageRefresh, setUsageRefresh] = useState(0);
++  // 2026-10-13-subagent-stub-reconcile（FR-01/02）：页面级任务快照对账实例——
++  // 与 TaskExecutionPanel 内部实例相互独立（本实例不消费 SSE 事件，只供时间线
++  // 子代理容器头按 tool_use_id 对账；usageRefresh 同信号，SSE 重连/轮终态重拉）。
++  const subagentReconcileSource = useSessionTasks(session?.id ?? "", {
++    refreshSignal: usageRefresh,
++  });
++  const subagentTaskLookup = useMemo(
++    () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
++    [subagentReconcileSource.tasks],
++  );
+   // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
+   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
+   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
+@@ -1260,8 +1273,12 @@ export function SessionPanelPage({
+                   env,
+                   (turn) => {
+                     let next = turn;
++                    // 2026-10-13-session-taskwakeup-hide：TASK_WAKEUP 注入是纯系统
++                    // 通知，不落 preamble 段（与回放路径同口径——进度视图无「上下文
++                    // 注入」卡）；prompt 补写仍走 strip 剥空不写，开轮槽语义不变。
+                     if (
+                       preambleText &&
++                      !isTaskWakeupInjection(env.content ?? "") &&
+                       !next.segments?.some((s) => s.kind === "preamble")
+                     ) {
+                       next = {
+@@ -4190,6 +4207,7 @@ export function SessionPanelPage({
+         jumpHeadLoading,
+         onJumpToHead: handleJumpToHead,
+       })}
++      <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
+       <TurnTimeline
+         suppressFollowBottom={jumpFollowSuppress}
+         turns={dialogTurns}
+@@ -4233,6 +4251,7 @@ export function SessionPanelPage({
+           schedHints.length > 0 ? <ScheduledSysHints hints={schedHints} /> : null
+         }
+       />
++      </SubagentTaskLookupContext.Provider>
+     </>
+   );
+ 
+@@ -5385,10 +5404,12 @@ export function SessionPanelPage({
+         data-testid="subagent-panel-column"
+       >
+         {subagentPanelOpen ? (
+-          <SubagentDetailPanel
+-            segment={openSubagentSegment}
+-            onClose={handleSubagentPanelClose}
+-          />
++          <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
++            <SubagentDetailPanel
++              segment={openSubagentSegment}
++              onClose={handleSubagentPanelClose}
++            />
++          </SubagentTaskLookupContext.Provider>
+         ) : (
+           detailColumn
+         )}
+@@ -5421,10 +5442,12 @@ export function SessionPanelPage({
+         rootClassName="session-subagent-drawer-root"
+         styles={{ body: { padding: 8, display: "flex", flexDirection: "column" } }}
+       >
+-        <SubagentDetailPanel
+-          segment={openSubagentSegment}
+-          onClose={closeSubagentSlot}
+-        />
++        <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
++          <SubagentDetailPanel
++            segment={openSubagentSegment}
++            onClose={closeSubagentSlot}
++          />
++        </SubagentTaskLookupContext.Provider>
+       </Drawer>
+     ) : null;
+   return withSlimLogFull(

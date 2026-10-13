@@ -1,0 +1,46 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话面板中 [后台任务通知] 系统注入对用户是纯噪音：进度视图每条通知落一张「上下文注入（N 字，已随消息发送）」卡（文案对纯系统通知也不符），消息队列条 chip 直接显示 [后台任务通知] 原文前缀——要求会话面板不再出现
+  [后台任务通知] 字样。
+
+  成功标准：
+
+  - 回放（logsToTurns）与实时 SSE 两路径：[后台任务通知] 开头的 user_input 不再生成 preamble 段，进度视图无对应「上下文注入」卡
+
+  - 开轮占位槽语义不变：系统通知开轮的轮 prompt 保持空、中途真实消息仍转 user_msg 段按 ts 插入
+
+  - 消息队列条 TASK_WAKEUP 条目 chip 摘要与展开正文均不再显示「[后台任务通知]」前缀，仅显示通知正文
+
+  - 【变更上下文】等真实上下文前导的 preamble 卡与既有队列条行为不变
+
+  - 相关单测更新/新增并跑通
+autopilot: false
+baseline_commit: 5e2c3f2f4a0ab0b3c6cb99974e81bff1a45129c9
+updatedAt: '2026-10-13T03:42:28.044Z'
+baseline_sha256: da21c0170677d38f29aac23889984483bc7ef8677d2239cee44aca4a26f97e95
+spec_approved: true
+spec_approved_at: '2026-10-13T03:24:26.005Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx7)+fr(3)（15.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013033529\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013033529\test-result.json｜门文件
+  17 个
+

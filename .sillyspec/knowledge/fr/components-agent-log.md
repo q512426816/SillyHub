@@ -141,3 +141,86 @@ created_at: 2026-10-12T11:08:58.569Z
   confirmed_at: null
   source_change: 2026-10-12-stale-run-askwait-fix
   status: active
+
+## FR-components-agent-log-008 回放（logsToTurns）与实时 SSE 两路径：[后台任务通知] 开头的 user_input 不再生成 preamble 段，进度视图无对应「上下文注入」卡
+变更：2026-10-13-session-taskwakeup-hide
+状态：active
+摘要：回放路径；实时路径
+全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-01
+最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知注入不产出 preamble 段（进度视图无上下文注入卡）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-taskwakeup-hide
+  status: active
+
+## FR-components-agent-log-009 开轮占位槽语义不变：系统通知开轮的轮 prompt 保持空、中途真实消息仍转 user_msg 段按 ts 插入
+变更：2026-10-13-session-taskwakeup-hide
+状态：active
+摘要：回归守卫
+全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-02
+最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-taskwakeup-hide
+  status: active
+
+## FR-components-agent-log-010 消息队列条 TASK_WAKEUP 条目 chip 摘要与展开正文均不再显示「[后台任务通知]」前缀，仅显示通知正文
+变更：2026-10-13-session-taskwakeup-hide
+状态：active
+摘要：chip 摘要与展开态
+全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-03
+最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「TASK_WAKEUP 条目 chip 摘要与展开正文不显示 [后台任务通知] 前缀」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-taskwakeup-hide
+  status: active
+
+## FR-components-agent-log-011 【变更上下文】等真实上下文前导的 preamble 卡与既有队列条行为不变
+变更：2026-10-13-session-taskwakeup-hide
+状态：active
+摘要：真实前导不误伤
+全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-04
+最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「前导条 + 干净条双写（常规形态）→ 剩余正文与干净条同主体归并，prompt 不双显」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-taskwakeup-hide
+  status: active
+
+## FR-components-agent-log-012 相关单测更新/新增并跑通
+变更：2026-10-13-session-taskwakeup-hide
+状态：active
+摘要：验收
+全文：.sillyspec/changes/archive/2026-10-13-session-taskwakeup-hide/requirements.md#FR-05
+最近确认：d3682fe53d3cdc5ef0cd710e03f3ecdb07461356
