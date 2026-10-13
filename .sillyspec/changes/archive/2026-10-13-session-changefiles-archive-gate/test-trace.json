@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-changefiles-archive-gate",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-01",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「status=archived 而 location=active 的变更归入已归档组（用户实测：平台已归档但仍显示进行中）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-archive-gate"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-02",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「双条件口径：status=archived 而 location=active（status 侧先到）也归归档组」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-archive-gate"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-03",
+      "tests": [
+        "test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-session-changefiles-archive-gate"
+    }
+  ]
+}

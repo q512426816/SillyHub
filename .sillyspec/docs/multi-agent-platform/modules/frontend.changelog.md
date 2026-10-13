@@ -77,3 +77,4 @@
 - 2026-10-13-turn-nav-initial-scroll | 会话页轮次导航窄轨首挂载不滚向当前轮:P3 留债(归档件 2026-10-13-turn-nav-rail-overfl
 - 2026-10-13-change-files-view-polish | 变更文件预览的人读优化：timeline.md 裸 markdown 不像时间线、change.patch 整片红绿摊开
 - 2026-10-13-session-changefiles-select-fix | 会话页悬浮变更文件弹窗的变更切换下拉项选择不了（用户实测反馈）：radix Dialog modal 遮罩对 body 
+- 2026-10-13-session-changefiles-archive-gate | 会话页悬浮变更面板的归档判定口径与变更中心不一致：面板只认 location==='archive' 单信号，而平台既有

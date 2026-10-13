@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页悬浮变更面板的归档判定口径与变更中心不一致：面板只认 location==='archive' 单信号，而平台既有终态口径是 status==='archived' || location==='archive'
+  双条件（changes/page.tsx isTerminalChange 注释同源）——归档信号只到 status 侧（progress 上行落库/投影）而 location 未收敛时面板误报「进行中」，用户实测反馈
+  fire-unitadd 变更归档后仍显示进行中
+
+  成功标准：
+
+  - splitByArchive 与 stageLabel 的归档判定对齐平台双条件口径（status==='archived' 或 location==='archive' 任一命中即归已归档/显示已归档）
+
+  - 新增用例：status=archived 且 location=active 的变更归入已归档组、不计数进行中徽标、阶段标签显示「已归档」
+
+  - 既有 8 用例保持全绿 + tsc 0 错
+autopilot: false
+baseline_commit: 049ff456e928f73dea17b8b589929c367fa180e5
+updatedAt: '2026-10-13T08:09:54.699Z'
+baseline_sha256: ea887cf186528c36bc60f16ec9fb7f205350226ae1af059bd76e2a1fec7d6078
+spec_approved: true
+spec_approved_at: '2026-10-13T08:03:36.965Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)+fr(1)（15.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013080418\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（25.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013080418\test-result.json｜门文件
+  2 个
+

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-session-changefiles-archive-gate",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "12c4cb4c9f30ce86631ca5388bd79f74ea20fe52",
+  "findings": [],
+  "reviewerNotes": "首轮 info（F-01：renderItem「轻量/全量」徽标守卫 c.location !== \"archive\" 单信号）已于 12c4cb4c9 修复：守卫改为 !isArchivedChange(c)，归档组内项（status 侧 / location 侧归档）统一不显示轻量/全量徽标；f028996d→12c4cb4c9 实测仅此 1 行改动（测试文件未动、工作区与 HEAD 一致），既有断言不受影响。本次为增量复核，其余结论沿用首轮。",
+  "dimensionNotes": {
+    "乱序": "边界已裁决：可接受——双条件 OR 取并集、无短路副作用，两信号任一到即正确归组；两套都未到时显示进行中与变更中心口径一致（changes/page.tsx:226 与 [cid]/page.tsx:68 实测同款表达式，mobile-change-detail.tsx:499 同源 inline），属服务端同步面缺失（需项目侧补推 progress / reparse 收敛），非前端判定缺陷；15s 轮询自动收敛迟到信号。",
+    "并发": "n/a——纯渲染期判定纯函数，无共享状态/写入面。",
+    "切换": "n/a——每次渲染即时计算，无缓存/订阅，轮询刷新自动反映后到信号。",
+    "作用域": "n/a——仅消费单行 summary 字段，无跨工作区/实例数据面。",
+    "口径演进": "边界已裁决：可接受——双条件依赖平台终态定义演进（如引入第四态）时需同步 helper；缓解=注释锚定三处同源文件（已逐处核实行号属实：changes/page.tsx:226、[cid]/page.tsx:68、mobile-change-detail.tsx:499），grep isTerminalChange 可发现；且在 changes 表当前仅 active/archived 两值下演进必为显式 schema+UI 级变更；否决后端 computed 字段方案（成本不成比例）理由成立。"
+  },
+  "reviewedAt": "2026-10-13T16:09:19+08:00"
+}

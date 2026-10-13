@@ -2135,3 +2135,66 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-session-changefiles-select-fix
   status: active
+
+## FR-auto-frontend-208 splitByArchive 与 stageLabel 的归档判定对齐平台双条件口径（status==='archived' 或 location==='archive' 任一命中即归已归档/显示已归档）
+变更：2026-10-13-session-changefiles-archive-gate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 关联变更的 status='archived' 而 location 仍为 'active'（平台 status 侧信号先到、reparse 未收敛）；When 打开悬浮下拉；Then 该变更归入「已归档」组（默认折叠可展开），阶段标签显示「已归档」而非「干活中」
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-archive-gate/requirements.md#FR-01
+最近确认：12c4cb4c9f30ce86631ca5388bd79f74ea20fe52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「status=archived 而 location=active 的变更归入已归档组（用户实测：平台已归档但仍显示进行中）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-archive-gate
+  status: active
+
+## FR-auto-frontend-209 新增用例：status=archived 且 location=active 的变更归入已归档组、不计数进行中徽标、阶段标签显示「已归档」
+变更：2026-10-13-session-changefiles-archive-gate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 测试数据含 status=archived 且 location=active 的变更；When 渲染面板并展开归档组；Then 进行中计数为 0、归档组含该项、标签「已归档」、页面无「干活中」文本
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-archive-gate/requirements.md#FR-02
+最近确认：12c4cb4c9f30ce86631ca5388bd79f74ea20fe52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「双条件口径：status=archived 而 location=active（status 侧先到）也归归档组」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-archive-gate
+  status: active
+
+## FR-auto-frontend-210 既有 8 用例保持全绿 + tsc 0 错
+变更：2026-10-13-session-changefiles-archive-gate
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 修复与新增用例就位；When 跑组件测试文件 + tsc；Then 10/10 全绿、tsc 0 错
+全文：.sillyspec/changes/archive/2026-10-13-session-changefiles-archive-gate/requirements.md#FR-03
+最近确认：12c4cb4c9f30ce86631ca5388bd79f74ea20fe52
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-changefiles-archive-gate:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-changefiles-archive-gate
+  status: active

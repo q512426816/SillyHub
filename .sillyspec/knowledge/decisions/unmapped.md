@@ -2757,3 +2757,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：bc898a68c4dac4dd9fba71daa57cb317429efc50
 理由：最大风险：`closest('[role="dialog"]')` 依赖 radix DialogContent 的 `role="dialog"` 语义稳定——若未来 shadcn Dialog 实现变更（role 改名/自定义 DialogContent 包裹层），兜底回落 body 会静默退回旧 bug。缓解：既有 vitest 用例已加「下拉 DOM 必须在 `[role="dialog"]` 内」守护断言（`selectAntdOption` 内），实现变更会测试转红而非静默。试过但放弃的方案：①改用 shadcn `ui/dropdown-menu`（radix Dropdown）替代 antd Select——违背 FRONTEND_PAGE_STYLE「控件类继续 antd」且交互重写面大；②radix Dialog 改 `modal={false}`——牺牲遮罩/焦点管理语义，影响面远超本 bug；③把下拉挂到 Select 的 `parentElement`（DialogHeader）——头部容器层级/裁剪风险高于 `closest(role=dialog)`（DialogContent 是 radix 明确标记的可交互子树）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-session-changefiles-archive-gate
+锚点：未记录
+最近确认：12c4cb4c9f30ce86631ca5388bd79f74ea20fe52
+理由：最大风险：双条件口径若未来平台终态定义演进（如引入第四态），本 helper 需同步——缓解：helper 注释锚定三处同源文件（page.tsx/[cid]/page.tsx/mobile-change-detail.tsx），平台口径变更时 grep 可见。试过但放弃的方案：把判定改为依赖后端新增 computed 字段（如 `is_archived`）——需后端 schema 变更+gen:types，收益与前端两字段并集等价，成本不成比例（YAGNI）。已知边界：两套信号都未到平台时仍显示进行中——此为服务端同步面问题（需项目侧补推 progress 或平台 reparse 收敛），非本判定可解，已在用户反馈处置中说明。
