@@ -1,0 +1,40 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更文件预览的人读优化：timeline.md 裸 markdown 不像时间线、change.patch 整片红绿摊开、plan.md/delta.md 等固定产物无中文名。
+
+  成功标准：
+
+  - timeline.md 预览渲染为按时间排序的竖向时间线（时刻列+节点+事件文本，任务面/统计脚注分区呈现），解析失败回落原 markdown 渲染
+
+  - change.patch 预览按文件折叠展示（每文件一行：路径+增删统计，默认收起，展开看该文件红绿 diff），无 diff --git 头回落整片 DiffView
+
+  - plan.md/delta.md/module-impact.md/symbol-impact.md/apply-manifest.json/verify-facts.json/scope-audit.json
+  在文件树与内容标题显示中文名+原名对照，与既有固定产物一致
+
+  - 内联预览与全屏预览（previewers）共用同一套新视图，不做两套渲染
+
+  - 聚焦测试通过（structured-views/change-file-tree/相关 previewer），不跑全量
+autopilot: false
+baseline_commit: f2d9879bb9fabc0a2be06cf05fc36dfb19d51a38
+updatedAt: '2026-10-13T06:34:28.792Z'
+baseline_sha256: 8331cc5c8c18ef0d1d42b60f2faa0333112b9c00bb26aa20834e9823020a0615
+spec_approved: true
+spec_approved_at: '2026-10-13T06:17:08.453Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py2+jsx10)+fr(7)（27.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013063420\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013063420\test-result.json｜门文件
+  17 个
+
