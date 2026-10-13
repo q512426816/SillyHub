@@ -309,7 +309,7 @@ modules:
       - /api/workspaces/{workspace_id}/changes
     main_symbols:
       - ChangeService
-      - ChangeService.reparse  # scope 参数——scoped 零 delete + created 自动绑定最近活跃会话
+      - ChangeService.reparse  # scope 参数——scoped 零 delete；created 不产生会话绑定（D-007 已移除）
       - ChangeService._project_current_stage  # read-only join platform_change_progress 投影 current_stage
       - SillySpecStageDispatchService  # dispatch.py（形态A 按需触发）
       - StageProjectionService  # projection.py compute_pending_review

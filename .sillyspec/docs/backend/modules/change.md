@@ -12,7 +12,8 @@ created_at: 2026-08-18 01:45:00
 SillySpec 变更中枢：从工作区目录解析变更文档、维护变更/文档/会话绑定/事件记录、驱动阶段
 （stage）流转与四节点人工评审，并做读时进度投影。三大现行形态叠加：
 ①按需触发（2026-08-08 起）——stage 完成停「待触发」，砍自动连轴；
-②会话驱动化（2026-08-14 起）——审批只落记录不派发 agent，新变更自动绑定最近活跃会话；
+②会话驱动化（2026-08-14 起）——审批只落记录不派发 agent，会话绑定只由命令解析
+通道写入（reparse 建行自动绑定最近活跃会话已移除，2026-10-13-change-reparse-autobind-remove）；
 ③进度投影（read-only join platform_change_progress，CLI 上行权威 current_stage 覆盖
 parser 猜值）。
 quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模块。
@@ -113,8 +114,8 @@ advance-stage → transition_with_dispatch → dispatch:
 reparse(scope):
   scope=None 全量(delete + _detect_renames 重命名检测)
   scope=[keys] 零 delete: 只对命中 key create/update, 范围内磁盘消失也不删
-  created 新变更 → _bind_change_to_session(coalesce(last_active_at,
-    created_at) desc 最近活跃会话, 跨成员) → 写 change_session_links
+  created 新变更不产生会话绑定(D-007 自动绑定已移除; 绑定唯一自动来源=
+    命令解析通道 change/binding.py, 会话内实际执行 sillyspec run/flow --change)
 
 review 四方法(通过/打回):
   通过 → transition(不派发) + _upsert_projection_progress(upsert
