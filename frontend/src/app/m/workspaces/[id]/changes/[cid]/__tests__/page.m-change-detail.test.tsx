@@ -279,9 +279,13 @@ describe("m/workspaces/[id]/changes/[cid] 变更详情移动钻取页", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("工作区移动端页面");
     });
-    expect(screen.getByTestId("m-change-action-feedback").textContent).toContain(
-      "复制",
-    );
+    // 渲染锚：writeText 被调 ≠ setActionMsg 续体已提交渲染，feedback 仍可能
+    // 停留上一动作的「重新解析」文案（口径同上方 268-272 正确写法）。
+    await waitFor(() => {
+      expect(screen.getByTestId("m-change-action-feedback").textContent).toContain(
+        "复制",
+      );
+    });
   });
 
   // ── 删除入口（task-07 / FR-07 / D-004）────────────────────────────────────

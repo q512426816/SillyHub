@@ -738,8 +738,11 @@ describe("AskUserDialogCard", () => {
       expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", "u-member-1");
     });
     expect(onResolved).not.toHaveBeenCalled();
-    // 立即翻已答关闭态（本地兜底，无英文名）。
-    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    // 立即翻已答关闭态（本地兜底，无英文名）。渲染锚：setState 已发起但 React
+    // 提交可能滞后一拍（CI 慢机单拍断言即挂）。
+    await waitFor(() => {
+      expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    });
     // 不直出后端英文报错。
     expect(screen.queryByText(/was already answered/)).toBeNull();
     fetchMock.mockRestore();
@@ -769,6 +772,9 @@ describe("AskUserDialogCard", () => {
     await waitFor(() => {
       expect(onAlreadyResolved).toHaveBeenCalledWith("req-1", null);
     });
-    expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    // 渲染锚（同上方用例）：setState 已发起但 React 提交可能滞后一拍。
+    await waitFor(() => {
+      expect(screen.getByText("已回答，本题已关闭")).toBeInTheDocument();
+    });
     fetchMock.mockRestore();
   });

@@ -1,0 +1,31 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、session-history-scroll 已修），全量甄别（只读子代理 47 次取证）确认 frontend 尚有 6
+  处同机理渲染竞速、涉及 5 文件：api-keys page.test 115-118、m-change-detail test 279-284、team-task-block test 232-233、governance-cards
+  test 155-158、ask-user-dialog-card test 737-742 与 769-772；计数竞速零新增。各文件内均有正确写法先例可对齐（渲染断言包进 waitFor 命中终态）。
+
+  成功标准：
+
+  - 6 处确认脆弱点全部改为渲染锚等待：同步 getByXxx/textContent 断言包进 await waitFor（或等价 findByXxx），断言不再早于渲染提交
+
+  - 涉及 5 个测试文件本地全量转绿（vitest 定向跑该 5 文件）
+
+  - 零生产代码改动：仅测试文件时序加固
+autopilot: false
+prestage_ack: true
+baseline_commit: 7773e7ea81eaaa73b95e5c53e40ab4dbfd0babb7
+updatedAt: '2026-10-13T21:41:13.421Z'
+cross_baselines:
+  sillyspec: 64efda719421c3714600bff08d1a64d146b529d3
+baseline_sha256: 4ad1306689a06f2c3d739cf1048bd159844a176ef0b770b3579892489c01b2be
+spec_approved: true
+spec_approved_at: '2026-10-13T21:41:13.421Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

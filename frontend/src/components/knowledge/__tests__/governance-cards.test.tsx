@@ -155,7 +155,13 @@ it("rot：分域查看链接 + 复制 AI 指令（含分布与计数）成功反
   await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
   expect(writeTextMock.mock.calls[0]![0]).toContain("共 364 条");
   expect(writeTextMock.mock.calls[0]![0]).toContain("lib-api 64");
-  expect(screen.getByTestId("copy-ai-prompt-result").textContent).toContain("已复制");
+  // 渲染锚：writeText 被调 ≠ copied 续体已提交渲染，该 testid 元素仅 copied==="ok" 时存在
+  //（CI 慢机单拍断言即挂）。
+  await waitFor(() =>
+    expect(screen.getByTestId("copy-ai-prompt-result").textContent).toContain(
+      "已复制",
+    ),
+  );
 });
 
 it("inbox：查看明细深链 uncategorized.md + 复制 AI 指令；clipboard 失败内联降级", async () => {

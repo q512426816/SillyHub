@@ -229,7 +229,10 @@ describe("TeamTaskBlock 取消", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认取消" }));
 
     await waitFor(() => expect(cancelMock).toHaveBeenCalledTimes(1));
-    expect(screen.getByText("取消团队任务失败")).toBeInTheDocument();
+    // 渲染锚：cancel 被调 ≠ reject 续体的 set 错误文案已提交渲染（CI 慢机单拍即挂）。
+    await waitFor(() =>
+      expect(screen.getByText("取消团队任务失败")).toBeInTheDocument(),
+    );
     expect(onRefresh).not.toHaveBeenCalled();
   });
 

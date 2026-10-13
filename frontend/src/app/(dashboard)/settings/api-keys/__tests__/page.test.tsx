@@ -115,7 +115,11 @@ describe("API 密钥设置页 · 复制密钥（FR-02/FR-05）", () => {
     await waitFor(() => {
       expect(execCommand).toHaveBeenCalledWith("copy");
     });
-    expect(screen.getByText("已复制")).toBeInTheDocument();
+    // 渲染锚：execCommand 被调 ≠ setCopiedId 续体已提交渲染，慢机单拍断言即挂
+    //（口径同下方用例 143-144 的 waitFor 渲染写法）。
+    await waitFor(() => {
+      expect(screen.getByText("已复制")).toBeInTheDocument();
+    });
   });
 
   it("活跃可恢复行点「复制密钥」→ 明文写入剪贴板并回显已复制", async () => {
