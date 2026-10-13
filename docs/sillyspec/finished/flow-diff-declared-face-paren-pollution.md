@@ -1,6 +1,6 @@
 # flow diff 冻结件 declared-face 路径被括号后缀污染（sillyspec 工具缺陷,2026-10-13）
 
-状态：活跃坑（待工具修复）
+状态：已处理（sillyspec 仓 2026-10-13-declared-paren-strip 三层剥除修复归档；2026-10-13-daemon-turn-anchor-snapshot 以带括号清单收口 dogfood：冻结件 3 路径全干净全 planned 零 dup，端到端实证。存量旧归档件按冻结原则不回填，读旧件仍见脏行属预期）
 
 ## 现象
 
