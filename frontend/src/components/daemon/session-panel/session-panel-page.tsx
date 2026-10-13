@@ -765,11 +765,18 @@ export function SessionPanelPage({
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
   //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
   const [usageRefresh, setUsageRefresh] = useState(0);
+  // 2026-10-13-turn-live-visibility（FR-03）：任务快照重连对账信号上移至此（原在
+  // task-08 接线区），与轮终态信号合流——两个对账点（轮终态 usageRefresh / SSE
+  // 重连恢复 tasksRefresh）任一触发，任务快照重拉链全覆盖（时间线 lookup 与
+  // 任务面板卡片同源消费，治理终态事件丢失的「后台任务运行中」残留）。
+  const [tasksRefresh, setTasksRefresh] = useState(0);
+  const taskReconcileSignal = usageRefresh + tasksRefresh;
   // 2026-10-13-subagent-stub-reconcile（FR-01/02）：页面级任务快照对账实例——
   // 与 TaskExecutionPanel 内部实例相互独立（本实例不消费 SSE 事件，只供时间线
-  // 子代理容器头按 tool_use_id 对账；usageRefresh 同信号，SSE 重连/轮终态重拉）。
+  // 子代理容器头按 tool_use_id 对账；taskReconcileSignal 合流信号，SSE 重连/
+  // 轮终态两点重拉——turn-live-visibility FR-03 补齐重连点）。
   const subagentReconcileSource = useSessionTasks(session?.id ?? "", {
-    refreshSignal: usageRefresh,
+    refreshSignal: taskReconcileSignal,
   });
   const subagentTaskLookup = useMemo(
     () => buildSubagentTaskLookup(subagentReconcileSource.tasks),
@@ -1018,9 +1025,10 @@ export function SessionPanelPage({
   // ref）经 ref 注入实时事件（queueRefreshRef 先例语义，避开 use-before-define；
   // 不重建 SSE、不新建第二条任务数据链路）。
   const taskPanelRef = useRef<TaskExecutionPanelHandle | null>(null);
-  // 任务清单快照重拉信号：SSE 重连恢复（connStatus → reconnected）后递增一次，
-  // 对账断线期间落库的任务行（TaskExecutionPanel 内 useSessionTasks 自取数）。
-  const [tasksRefresh, setTasksRefresh] = useState(0);
+  // 任务清单快照重拉信号（state 已上移 usageRefresh 旁）：SSE 重连恢复
+  //（connStatus → reconnected）后递增一次，对账断线期间落库的任务行
+  //（TaskExecutionPanel 内 useSessionTasks 自取数；经 taskReconcileSignal
+  // 合流后轮终态点同样触发——turn-live-visibility FR-03）。
   useEffect(() => {
     if (connGuard.connStatus === "reconnected") {
       setTasksRefresh((n) => n + 1);
@@ -4392,7 +4400,7 @@ export function SessionPanelPage({
                 planObjective={planPending?.summary.objective ?? null}
                 planTasks={planPending?.summary.tasks ?? null}
                 runsRefreshSignal={usageRefresh}
-                tasksRefreshSignal={tasksRefresh}
+                tasksRefreshSignal={taskReconcileSignal}
               />
             </MetaPanelSection>
           </MetaPanel>
@@ -4909,7 +4917,7 @@ export function SessionPanelPage({
           planObjective={planPending?.summary.objective ?? null}
           planTasks={planPending?.summary.tasks ?? null}
           runsRefreshSignal={usageRefresh}
-          tasksRefreshSignal={tasksRefresh}
+          tasksRefreshSignal={taskReconcileSignal}
         />
       )}
 
