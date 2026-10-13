@@ -39,6 +39,8 @@ import {
   SubagentBlockView,
   StderrRowView,
   TeamWorkerBlockView,
+  SubagentTaskLookupContext,
+  parseTaskOutputWait,
 } from "../turn-segment-views";
 import type {
   TextTurnSegment,
@@ -46,6 +48,7 @@ import type {
   StderrTurnSegment,
   FileTurnSegment,
   SubagentContainerSegment,
+  SubagentTaskLookup,
 } from "../turn-segment-views";
 import { SubagentPanelContext } from "../subagent-panel-context";
 import type { SubagentPanelContextValue } from "../subagent-panel-context";
@@ -1526,5 +1529,106 @@ describe("CompactSegmentView / CompactStatusRowView / CompactNoticeChip（ql-202
     render(<CompactNoticeChip />);
     expect(screen.getByText("上下文已重新压缩")).toBeInTheDocument();
     expect(screen.queryByText(SUMMARY_TEXT)).not.toBeInTheDocument();
+  });
+});
+
+/* ── 2026-10-13-turn-live-visibility FR-01：TaskOutput 等待行 ─────────────── */
+
+describe("ToolRowView TaskOutput 等待行（turn-live-visibility FR-01）", () => {
+  const RAW = JSON.stringify({
+    tool: "TaskOutput",
+    args: { task_id: "bm104h8nc", block: true, timeout: 600000 },
+    tool_use_id: "call_to",
+  });
+  function makeTaskOutputSeg(
+    overrides: Partial<ToolTurnSegment> = {},
+  ): ToolTurnSegment {
+    return makeToolSeg({
+      id: "call_to",
+      raw: RAW,
+      result: undefined,
+      status: "running",
+      toolName: "TaskOutput",
+      primary: null,
+      ...overrides,
+    });
+  }
+  const lookup: SubagentTaskLookup = {
+    byToolUseId: new Map(),
+    byTaskId: new Map([
+      ["bm104h8nc", { taskName: "重跑生产构建", status: "running", elapsedMs: null }],
+    ]),
+  };
+
+  it("快照命中：主参数人话任务名 + 已等走秒（每秒递增）", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(20_000); // startedAt=1000 → 已等 19s
+    render(
+      <SubagentTaskLookupContext.Provider value={lookup}>
+        <ToolRowView segment={makeTaskOutputSeg({ startedAt: 1_000, endedAt: null })} />
+      </SubagentTaskLookupContext.Provider>,
+    );
+    expect(screen.getByText("等待后台任务：重跑生产构建")).toBeInTheDocument();
+    expect(screen.getByText("00:19")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(screen.getByText("00:20")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("快照未命中（无 Provider）：回退通用文案，主参数位不显示内部编号/原始 JSON，走秒按段锚点继续", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(30_000);
+    render(
+      <ToolRowView segment={makeTaskOutputSeg({ startedAt: 1_000, endedAt: null })} />,
+    );
+    expect(screen.getByText("等待后台任务输出")).toBeInTheDocument();
+    // 主参数位不得出现任务内部编号 / 原始 JSON 形态
+    expect(screen.queryByText(/bm104h8nc/)).toBeNull();
+    expect(screen.queryByText(/\{"tool":"TaskOutput"/)).toBeNull();
+    expect(screen.getByText("00:29")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("终态回归：result 配对后不再显示等待文案与走秒（原工具行形态）", () => {
+    render(
+      <ToolRowView
+        segment={makeTaskOutputSeg({ status: "ok", result: "任务输出内容", endedAt: 9_000 })}
+      />,
+    );
+    expect(screen.queryByText(/等待后台任务/)).toBeNull();
+  });
+
+  it("startedAt 缺失：不显示走秒（不伪造锚点）", () => {
+    render(
+      <SubagentTaskLookupContext.Provider value={lookup}>
+        <ToolRowView segment={makeTaskOutputSeg({ startedAt: null, endedAt: null })} />
+      </SubagentTaskLookupContext.Provider>,
+    );
+    expect(screen.getByText("等待后台任务：重跑生产构建")).toBeInTheDocument();
+    expect(screen.queryByText(/^\d{2}:\d{2}$/)).toBeNull();
+  });
+});
+
+describe("parseTaskOutputWait（turn-live-visibility FR-01）", () => {
+  it("解析 task_id 与 block", () => {
+    expect(
+      parseTaskOutputWait(
+        JSON.stringify({ tool: "TaskOutput", args: { task_id: "bm1", block: true } }),
+      ),
+    ).toEqual({ taskId: "bm1", block: true });
+    expect(
+      parseTaskOutputWait(
+        JSON.stringify({ tool: "TaskOutput", args: { task_id: "bm2", block: false } }),
+      ),
+    ).toEqual({ taskId: "bm2", block: false });
+  });
+
+  it("非 JSON / 缺 task_id / 非 object → null（历史截断不崩）", () => {
+    expect(parseTaskOutputWait('{"tool":"TaskOutput","ar')).toBeNull();
+    expect(parseTaskOutputWait(JSON.stringify({ tool: "TaskOutput", args: {} }))).toBeNull();
+    expect(parseTaskOutputWait("")).toBeNull();
+    expect(parseTaskOutputWait(JSON.stringify({ tool: "Bash", args: { command: "ls" } }))).toBeNull();
   });
 });

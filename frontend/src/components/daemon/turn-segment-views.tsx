@@ -62,7 +62,7 @@
  *      .seg-text-body，子代理文本天然无框，覆盖规则随之删除，不再是偏差。）
  */
 
-import { Children, createContext, memo, useContext, useEffect, useRef, useState } from "react";
+import { Children, createContext, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
@@ -340,6 +340,36 @@ function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus
   if (segment.kind !== "tool") return null;
   if (segment.taskStatus === undefined && segment.taskAsync === undefined) return null;
   return segment.taskStatus ?? "running";
+}
+
+/* ───────── 2026-10-13-turn-live-visibility（FR-01：TaskOutput 等待行）───────── */
+
+/** TaskOutput 工具调用解析产物（parseTaskOutputWait）。 */
+export interface TaskOutputWaitInfo {
+  taskId: string;
+  /** 是否阻塞等待（block=true 长等后台任务；false 为快速查询）。 */
+  block: boolean;
+}
+
+/**
+ * 解析 TaskOutput 段 raw JSON 的等待参数（task_id / block）。tool_call 原文形如
+ * {"tool":"TaskOutput","args":{"task_id":"bm…","block":true,"timeout":…}}；
+ * 历史截断（slim）或形态变化解析失败 → null（消费方回退既有渲染，不崩）。
+ */
+export function parseTaskOutputWait(raw: string): TaskOutputWaitInfo | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const args = (parsed as { args?: unknown }).args;
+  if (typeof args !== "object" || args === null) return null;
+  const taskId = (args as { task_id?: unknown }).task_id;
+  if (typeof taskId !== "string" || !taskId) return null;
+  const block = (args as { block?: unknown }).block;
+  return { taskId, block: block === true };
 }
 
 /* ───────────── task-03（2026-09-15-subagent-three-pane-display / FR-02 / design §5.E）───────── */
@@ -653,7 +683,39 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
   const copyText = toolCopyText(segment.raw, segment.toolName);
   const teamTool = teamMcpToolName(segment.toolName);
   const teamSummary = teamTool ? teamToolSummaryOf(teamTool, segment.raw) : null;
-  const desc = teamSummary ?? segment.primary ?? (segment.raw || null);
+  // 2026-10-13-turn-live-visibility（FR-01）：TaskOutput 运行中 = 阻塞等待后台
+  // 任务——主参数不再显示 raw JSON，改人话等待摘要（任务名经快照 byTaskId 对账，
+  // 未命中回退通用文案）；行尾已等时长每秒跳动（数字在走 = 连接活着）。终态
+  // （result 配对）waitInfo 即空，自然回归既有渲染。
+  const taskLookup = useContext(SubagentTaskLookupContext);
+  const waitInfo = useMemo(
+    () =>
+      running && segment.toolName === "TaskOutput"
+        ? parseTaskOutputWait(segment.raw)
+        : null,
+    [running, segment.toolName, segment.raw],
+  );
+  const waitedTaskName = waitInfo
+    ? taskLookup?.byTaskId.get(waitInfo.taskId)?.taskName ?? null
+    : null;
+  // 局部走秒（仅等待形态启动，SubagentBlockView FR-06 同款渲染经济性纪律）；
+  // 锚点 = 段 startedAt（TaskOutput 调用时刻），缺失不显示走秒（不伪造）。
+  const [now, setNow] = useState<number>(() => Date.now());
+  const waiting = waitInfo != null;
+  useEffect(() => {
+    if (!waiting) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [waiting]);
+  const waitElapsed =
+    waitInfo && segment.startedAt != null
+      ? formatClockDuration(Math.max(0, now - segment.startedAt))
+      : null;
+  const desc = waitInfo
+    ? waitedTaskName
+      ? `等待后台任务：${waitedTaskName}`
+      : "等待后台任务输出"
+    : (teamSummary ?? segment.primary ?? (segment.raw || null));
   return (
     <div className="w-full">
       <div
@@ -704,6 +766,14 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         >
           {badge.icon}
         </span>
+        {waitElapsed && (
+          <span
+            className="shrink-0 font-mono text-[10.5px] text-brand-600"
+            title="等待后台任务已进行时长（每秒更新）"
+          >
+            {waitElapsed}
+          </span>
+        )}
         {duration && (
           <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
             {duration}
