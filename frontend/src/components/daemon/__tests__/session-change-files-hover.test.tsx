@@ -116,6 +116,18 @@ describe("splitByArchive（纯函数）", () => {
     expect(active.map((c) => c.id)).toEqual(["c-1", "c-2"]);
     expect(archived.map((c) => c.id)).toEqual(["c-3"]);
   });
+
+  it("双条件口径：status=archived 而 location=active（status 侧先到）也归归档组", () => {
+    const statusArchived = change({
+      id: "c-sa",
+      change_key: "status-archived-only",
+      status: "archived",
+      location: "active",
+    });
+    const { active, archived } = splitByArchive([statusArchived, activeThin]);
+    expect(archived.map((c) => c.id)).toEqual(["c-sa"]);
+    expect(active.map((c) => c.id)).toEqual(["c-1"]);
+  });
 });
 
 describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-04）", () => {
@@ -145,6 +157,32 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     // 归档项默认收起
     expect(screen.queryByTestId("session-change-item-2026-10-12-old-change")).toBeNull();
     expect(screen.getByTestId("session-change-archive-toggle").textContent).toContain("已归档（1）");
+  });
+
+  it("status=archived 而 location=active 的变更归入已归档组（用户实测：平台已归档但仍显示进行中）", async () => {
+    // 2026-10-13-session-changefiles-archive-gate：平台侧 status 归档信号先到、
+    // location 待 reparse 收敛时，面板必须与变更中心「终态可测试定义」双条件一致。
+    const statusArchived = change({
+      id: "c-sa",
+      change_key: "2026-10-13-fire-unitadd-form-import",
+      status: "archived",
+      location: "active",
+      is_thin: true,
+      current_stage: "thin",
+    });
+    mockData([statusArchived]);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+
+    // 进行中计数 0（不把已归档算进徽标）
+    expect(screen.getByTestId("session-change-count").textContent).toBe("0");
+    await openPopover();
+    expect(screen.getByText("进行中（0）")).toBeTruthy();
+    expect(screen.getByTestId("session-change-archive-toggle").textContent).toContain("已归档（1）");
+    // 展开归档组：项可见且阶段标签为「已归档」（而非「干活中」）
+    fireEvent.click(screen.getByTestId("session-change-archive-toggle"));
+    expect(screen.getByTestId("session-change-item-2026-10-13-fire-unitadd-form-import")).toBeTruthy();
+    expect(screen.getByText("已归档")).toBeTruthy();
+    expect(screen.queryByText("干活中")).toBeNull();
   });
 
   it("轻量变更进行中（current_stage=thin）阶段标签为「干活中」——不拼出「轻量·轻量变更」重复", async () => {

@@ -37,6 +37,21 @@ export interface SessionChangeFilesHoverProps {
   running?: boolean;
 }
 
+/**
+ * 归档终态判定——对齐平台既有「终态可测试定义」双条件口径（changes/page.tsx:226
+ * isTerminalChange、[cid]/page.tsx:68、mobile-change-detail.tsx:499 同源）。
+ *
+ * 平台侧「已归档」是两套独立信号（2026-10-13-session-changefiles-archive-gate
+ * 用户实测反馈修正）：
+ * - `status==='archived'`：CLI 归档进度上行 → ingest 落库 / 读时投影（设计明确
+ *   「不动 location」——平台侧先到）；
+ * - `location==='archive'`：reparse 扫描文件系统目录位置收敛（后到）。
+ * 只认 location 单信号会把「status 已归档、location 未收敛」的变更误判进行中。
+ */
+export function isArchivedChange(c: Pick<ChangeSummary, "status" | "location">): boolean {
+  return c.status === "archived" || c.location === "archive";
+}
+
 /** 进行中/归档分组（纯函数，测试导出；后端已按未归档优先+created_at desc 排序）。 */
 export function splitByArchive(changes: ChangeSummary[]): {
   active: ChangeSummary[];
@@ -45,14 +60,14 @@ export function splitByArchive(changes: ChangeSummary[]): {
   const active: ChangeSummary[] = [];
   const archived: ChangeSummary[] = [];
   for (const c of changes) {
-    if (c.location === "archive") archived.push(c);
+    if (isArchivedChange(c)) archived.push(c);
     else active.push(c);
   }
   return { active, archived };
 }
 
 function stageLabel(c: ChangeSummary): string {
-  if (c.location === "archive") return "已归档";
+  if (isArchivedChange(c)) return "已归档";
   if (!c.current_stage) return "未开始";
   // 轻量变更进行中（flow start 后 current_stage='thin'）：原型口径「干活中」
   // ——WORKFLOW_STAGE_LABELS.thin 是「轻量变更」，直接映射会与 is_thin 徽标
@@ -108,7 +123,7 @@ export function SessionChangeFilesHover({
     >
       <div className="flex items-center gap-1.5">
         <span className="truncate text-xs font-medium">{c.change_key}</span>
-        {c.location !== "archive" && (
+        {!isArchivedChange(c) && (
           <span
             className={`shrink-0 rounded px-1 py-px text-[10px] font-semibold ${
               c.is_thin
@@ -157,10 +172,9 @@ export function SessionChangeFilesHover({
 
   const selectOptions = data.map((c) => ({
     value: c.id,
-    label:
-      c.location === "archive"
-        ? `${c.change_key}（已归档）`
-        : `${c.change_key}（${c.is_thin ? "轻量" : "全量"}·${stageLabel(c)}）`,
+    label: isArchivedChange(c)
+      ? `${c.change_key}（已归档）`
+      : `${c.change_key}（${c.is_thin ? "轻量" : "全量"}·${stageLabel(c)}）`,
   }));
 
   return (
