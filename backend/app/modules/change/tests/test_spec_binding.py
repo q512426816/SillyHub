@@ -278,7 +278,7 @@ async def test_bind_change_reuses_existing_row_and_is_idempotent(db_session):
 
 
 async def test_bind_change_failure_is_best_effort_no_raise(db_session, monkeypatch):
-    """best-effort：内部异常仅告警不抛（对齐 _bind_change_to_session 风格）。"""
+    """best-effort：内部异常仅告警不抛（savepoint + log.warning 自吞，不阻断调用方事务）。"""
     user = await _make_user(db_session)
     ws = await _make_ws(db_session)
     s = await _make_session(db_session, workspace_id=ws.id, user_id=user.id)

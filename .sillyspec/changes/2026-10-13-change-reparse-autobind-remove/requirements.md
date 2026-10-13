@@ -24,7 +24,7 @@ created_at: 2026-10-13T15:10:14.439Z
 
 - Given：本变更合并后的代码库
 - When：全仓检索 `_bind_change_to_session`
-- Then：backend/app 源码（含测试）零命中，仅历史归档文档允许留存
+- Then：backend/app 源码除防复活守卫用例（hasattr 字符串引用，见 FR-05）外零命中，仅历史归档文档允许留存
 
 ### FR-03: reparse docstring 与 .sillyspec/docs/backend/modules/change.md、_module-map.yaml 中「自动绑定最近活跃会话」描述同步更新
 
