@@ -1,0 +1,712 @@
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 7e9f0cfbc..37e9a5ea0 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -1536,7 +1536,9 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
+     const ta = screen.getByPlaceholderText(
+       /继续追问|消息将排队/,
+     ) as HTMLTextAreaElement;
+-    await waitFor(() => expect(ta.value).toContain("【截图.png】"));
++    // 3ef41b910（2026-10-12-ws-ref-emoji-inline）：emoji 内嵌 token——附件类
++    // 编辑态格式为【📎 name】（此处补齐断言同步债，置换协议不变）。
++    await waitFor(() => expect(ta.value).toContain("【📎 截图.png】"));
+ 
+     mocks.injectSession.mockResolvedValueOnce({
+       session_id: "s-1",
+@@ -2201,10 +2203,15 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+   });
+ 
+-  /** 「加载更早」before 请求计数（初始历史拉取不带 before，不计入）。 */
++  /** 「加载更早」before 请求计数（初始历史拉取不带 before，不计入；
++   *  2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
++   *  （轮边界对齐）非翻页本体，排除不计）。 */
+   const beforeCallCount = () =>
+     mocks.getAgentSessionLogs.mock.calls.filter(
+-      (c) => c[1] && "before" in (c[1] as Record<string, unknown>),
++      (c) =>
++        c[1] &&
++        "before" in (c[1] as Record<string, unknown>) &&
++        (c[1] as { limit?: number }).limit !== 1,
+     ).length;
+ 
+   /** jump 定位断言：scrollIntoView 收到 smooth + block:start。 */
+@@ -2508,20 +2515,27 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+ 
+   it("desktop 未加载轮循环翻页：连续 loadEarlier 到命中即停（两页即止、不误报兜底 toast）", async () => {
+     mockThreeRuns();
+-    mocks.getAgentSessionLogs
+-      .mockResolvedValueOnce(
+-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-      )
+-      // 翻页第 1 页：满页中间轮（hasEarlier 保持 true），仍无目标轮。
+-      .mockResolvedValueOnce(
+-        fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"),
+-      )
+-      // 翻页第 2 页：目标轮出现（不满页 → 到头）。
+-      .mockResolvedValueOnce([
+-        navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
+-        navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
+-      ])
+-      .mockResolvedValue([]); // 兜底（命中即停，理论不达）
++    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
++    // 分流返回空（页顶轮完整，不触发直达），不占翻页响应序号。
++    let pageSeq = 0;
++    mocks.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; limit?: number }) => {
++        if (opts?.before && opts.limit === 1) return [];
++        if (!opts?.before) {
++          return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
++        }
++        pageSeq += 1;
++        // 翻页第 1 页：满页中间轮（hasEarlier 保持 true），仍无目标轮。
++        if (pageSeq === 1) {
++          return fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z");
++        }
++        // 翻页第 2 页：目标轮出现（不满页 → 到头）。
++        return [
++          navLog("o-1", "r-old", "user_input", "最早轮提问", "2026-08-15T06:30:00Z"),
++          navLog("o-2", "r-old", "stdout", "最早轮答复", "2026-08-15T06:30:10Z"),
++        ];
++      },
++    );
+     renderPage();
+     await selectDefaultSession();
+     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+@@ -2559,8 +2573,10 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+       )
+       // 翻页恒满页（hasEarlier 恒 true）且永不出现 r-old → 跳转循环 50 页达
+       // 上限（JUMP_LOAD_EARLIER_MAX_PAGES）；每页时间戳随序号递减（跨页 pageKey
+-      // 唯一防 React 撞 key）。
+-      .mockImplementation(() => {
++      // 唯一防 React 撞 key）。2026-10-13-load-earlier-full-turn：满页后的
++      // limit=1 页顶探查分流空响应（不触发直达、不占填充页序号）。
++      .mockImplementation((_sid: string, opts?: { before?: string; limit?: number }) => {
++        if (opts?.before && opts.limit === 1) return [];
+         fillerSeq += 1;
+         return fullPage(
+           `r-filler-${fillerSeq}`,
+@@ -2595,13 +2611,22 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+       resolvePage2 = r;
+     });
+     mockThreeRuns();
+-    mocks.getAgentSessionLogs
+-      .mockResolvedValueOnce(
+-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-      )
+-      .mockReturnValueOnce(page1)
+-      .mockReturnValueOnce(page2)
+-      .mockResolvedValue([]);
++    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
++    // 分流空响应（不触发直达）；翻页响应用受控 promise（原 Once 队列会被
++    // 探查请求消耗错位，改序号分流保时序可控）。
++    let pageSeq = 0;
++    mocks.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { before?: string; limit?: number }) => {
++        if (opts?.before && opts.limit === 1) return [];
++        if (!opts?.before) {
++          return fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z");
++        }
++        pageSeq += 1;
++        if (pageSeq === 1) return page1;
++        if (pageSeq === 2) return page2;
++        return []; // 正向对照第 3 页：空页到头。
++      },
++    );
+     renderPage();
+     await selectDefaultSession();
+     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+@@ -2639,13 +2664,24 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+       releasePage1 = r;
+     });
+     mockThreeRuns();
+-    mocks.getAgentSessionLogs
+-      .mockResolvedValueOnce(
+-        fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
+-      )
+-      .mockReturnValueOnce(page1)
+-      // 守卫失效时的对照分支：满页填充页会驱动循环继续翻第 3 页（断言不达）。
+-      .mockImplementation(() => fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"));
++    // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查——
++    // 分流空响应；第 1 页受控 promise，其后守卫失效对照走填充页。
++    let released = false;
++    mocks.getAgentSessionLogs.mockImplementation(
++      (_sid: string, opts?: { before?: string; limit?: number }) => {
++        if (opts?.before && opts.limit === 1) return [];
++        if (!opts?.before) {
++          return Promise.resolve(
++            fullPage("r-cur", "当前窗口提问", "2026-08-15T08:00:00Z"),
++          );
++        }
++        if (!released) return page1;
++        // 守卫失效时的对照分支：满页填充页会驱动循环继续翻第 3 页（断言不达）。
++        return Promise.resolve(
++          fullPage("r-filler", "填充页提问", "2026-08-15T07:00:00Z"),
++        );
++      },
++    );
+     const view = renderPage();
+     await selectDefaultSession();
+     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+@@ -2657,6 +2693,7 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     // 不执行——守卫必须靠组件级 mountedRef）。
+     await waitFor(() => expect(beforeCallCount()).toBe(1));
+     view.unmount();
++    released = true;
+     releasePage1(fullPage("r-mid", "中间轮提问", "2026-08-15T07:30:00Z"));
+     await new Promise((r) => setTimeout(r, 150));
+     // 卸载后循环即停：无第 2 个翻页请求、无幽灵 toast。
+diff --git a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+index c078709c6..b0108cbd6 100644
+--- a/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+@@ -99,7 +99,10 @@ describe("scroll-up history integration", () => {
+   it("3 consecutive scroll-to-top = 1 initial + 3 before calls, cursor monotonically decreases", async () => {
+     const beforeCursors: string[] = [];
+     sessionApi.getAgentSessionLogs.mockImplementation(
+-      async (_sid: string, opts?: { before?: string }) => {
++      async (_sid: string, opts?: { before?: string; limit?: number }) => {
++        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
++        //（轮边界对齐）——非翻页本体，空响应（页顶轮完整）不进游标记账。
++        if (opts?.before && opts.limit === 1) return [];
+         if (opts?.before) {
+           beforeCursors.push(opts.before);
+           // 每页比上一页早 1 小时（简单固定递减，不做 epoch 换算）
+@@ -170,7 +173,10 @@ describe("scroll-up history integration", () => {
+     const older2 = sameTsPage("o2", 4800);
+     const beforeIds: string[] = [];
+     sessionApi.getAgentSessionLogs.mockImplementation(
+-      async (_sid: string, opts?: { before?: string; beforeId?: string }) => {
++      async (_sid: string, opts?: { before?: string; beforeId?: string; limit?: number }) => {
++        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
++        //（轮边界对齐）——非翻页本体，空响应不进 beforeId 记账。
++        if (opts?.before && opts.limit === 1) return [];
+         if (!opts?.before) return initPage;
+         beforeIds.push(opts.beforeId ?? "");
+         return beforeIds.length === 1 ? older1 : older2;
+diff --git a/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx b/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
+new file mode 100644
+index 000000000..ba37e6613
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
+@@ -0,0 +1,330 @@
++// 2026-10-13-load-earlier-full-turn：「加载更早」轮边界对齐回归——(ts,id)
++// 复合游标按 400 行翻页，页边界 / 已加载窗口边界会把一轮（run）切成两半：
++// 触顶加载后顶部那轮只有后半段（提问在更早未加载区）；「回到会话开头」复用
++// 同一翻页链路（handleJumpToHead → loadEarlierOnce → handleLoadEarlier），
++// 到头后跨页同轮分裂成多个轮块。对齐手段：跨界轮 run_id 直达拉整轮行，
++// 当页该轮行替换为整轮行装配 + 摘窗口内同轮终态旧块，一轮一个完整块。
++//
++// mock 网络层模板同 session-panel-history-race.test.tsx（getAgentSessionLogs
++// 按 opts 分流：runId=直达 / before+limit=1=探查 / before=翻页 / 其余=初始窗口）。
++//
++// 覆盖：
++//   1. 窗口跨界 + 页顶跨界双命中：整轮直达合并单块（提问出现、旧行单显不双条、
++//      窗口内同轮旧块被摘）；
++//   2. 探查行属不同 run（页顶轮完整）→ 不发直达，当页照常 prepend；
++//   3. 直达失败 → 静默降级现状行为（当页原样 prepend，无报错无卡死）；
++//   4. 不满页（到头）→ 不发探查请求。
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { render, screen, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import type { ReactNode } from "react";
++
++import { SessionPanel } from "../session-panel";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  injectSession: vi.fn(),
++  interruptSession: vi.fn(),
++  endSession: vi.fn(),
++  streamSession: vi.fn(),
++  getAgentSession: vi.fn(),
++  getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn().mockResolvedValue({ session_id: "s-1", total_turns: 0, items: [] }),
++  fetchPendingDialogs: vi.fn(),
++  fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(),
++  listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(),
++  fetchSessionQueue: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return {
++    ...actual,
++    getSessionUsage: sessionApi.getSessionUsage,
++    injectSession: sessionApi.injectSession,
++    interruptSession: sessionApi.interruptSession,
++    endSession: sessionApi.endSession,
++    streamSession: sessionApi.streamSession,
++    getAgentSession: sessionApi.getAgentSession,
++    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
++    fetchSessionTurnOutline: sessionApi.fetchSessionTurnOutline,
++    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
++    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
++    listSessionRuns: sessionApi.listSessionRuns,
++    listSessionTasks: sessionApi.listSessionTasks,
++    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
++    fetchSessionQueue: sessionApi.fetchSessionQueue,
++  };
++});
++
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return { ...actual, listWorkspaces: vi.fn().mockResolvedValue({ items: [] }) };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({
++  useDaemonMachines: () => ({ items: [] }),
++}));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
++    "@/lib/agent-profiles",
++  );
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
++    "@/lib/api/llm-providers",
++  );
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++/* ----- fixture：时间维 run-Z（最早）→ run-A（跨窗口边界）→ run-B（窗口内） -----
++ * 行数与源常量对齐（HISTORY_PAGE_SIZE=400）：初始窗口 400 行满页 / 翻页页
++ * 400 行满页，两个边界（窗口最旧行 / 页顶最旧行）各切一轮。 */
++
++/** 秒级严格递增时间戳（i 秒偏移；跨分钟进位由格式化保证唯一）。 */
++function tsAt(base: string, i: number): string {
++  const t = new Date(`2026-08-26T${base}Z`).getTime() + i * 1000;
++  return new Date(t).toISOString().replace(/\.000Z$/, "Z");
++}
++
++function log(id: string, runId: string, timestamp: string, channel: string, text: string) {
++  return { id, run_id: runId, timestamp, channel, content_redacted: text };
++}
++
++/** run-Z（会话最早轮）：提问 + 4 行输出（09:00:00–09:00:04）。 */
++function runZFull() {
++  return [
++    log("z-0", "run-Z", tsAt("09:00:00", 0), "user_input", "Z 完整提问"),
++    log("z-1", "run-Z", tsAt("09:00:00", 1), "stdout", "Z-输出-1"),
++    log("z-2", "run-Z", tsAt("09:00:00", 2), "stdout", "Z-输出-2"),
++    log("z-3", "run-Z", tsAt("09:00:00", 3), "stdout", "Z-输出-3"),
++    log("z-4", "run-Z", tsAt("09:00:00", 4), "stdout", "Z-输出-4"),
++  ];
++}
++
++/** run-A（跨窗口边界轮）：提问 + 399 行输出（09:30:00 起 400 行整轮）。 */
++function runAFull() {
++  const rows = [
++    log("a-0", "run-A", tsAt("09:30:00", 0), "user_input", "A 完整提问"),
++  ];
++  for (let i = 1; i < 400; i += 1) {
++    // 末 2 行（i=398/399）带「窗口尾部」标记——窗口侧旧块摘除断言锚点。
++    const text = i >= 398 ? `A-窗口尾部-${i}` : `A-输出-${i}`;
++    rows.push(log(`a-${i}`, "run-A", tsAt("09:30:00", i), "stdout", text));
++  }
++  return rows;
++}
++
++/** run-B（窗口内完整轮）：提问 + 397 行输出（10:00:00 起 398 行）。 */
++function runBFull() {
++  const rows = [
++    log("b-0", "run-B", tsAt("10:00:00", 0), "user_input", "B 窗口提问"),
++  ];
++  for (let i = 1; i < 398; i += 1) {
++    rows.push(log(`b-${i}`, "run-B", tsAt("10:00:00", i), "stdout", `B-输出-${i}`));
++  }
++  return rows;
++}
++
++/** 初始窗口 400 行 = run-A 末 2 行 + run-B 全 398 行（升序）。 */
++function initialWindow() {
++  const a = runAFull();
++  return [...a.slice(398), ...runBFull()];
++}
++
++/** 翻页页 400 行（满页）= run-A 前 398 行 + run-Z 最新 2 行（升序）。 */
++function olderPageFull() {
++  const a = runAFull();
++  const z = runZFull();
++  return [...a.slice(0, 398), ...z.slice(3)];
++}
++
++function makeDetail(id: string) {
++  return {
++    id,
++    runtime_id: null,
++    lease_id: null,
++    provider: "claude",
++    status: "active",
++    agent_session_id: `ag-${id}`,
++    config: null,
++    turn_count: 3,
++    created_at: "t",
++    last_active_at: null,
++    ended_at: null,
++    current_run_id: null,
++    workspace_id: "ws-1",
++    llm_provider_id: null,
++    agent_profile_id: null,
++    title: `会话${id}`,
++    config_snapshot: null,
++  };
++}
++
++function Host({ sessionId }: { sessionId: string; children?: ReactNode }) {
++  return (
++    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
++      <SessionPanel mode="page" sessionId={sessionId} machines={[]} llmProviders={[]} />
++    </QueryClientProvider>
++  );
++}
++
++/** mock 分流配置（每测试按需覆写）。 */
++let olderPage: unknown[] = [];
++let probePage: unknown[] = [];
++/** run_id 直达响应表；值 null = 该轮请求 reject（失败降级用例）。 */
++let directRunLogs: Record<string, unknown[] | null> = {};
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  olderPage = [];
++  probePage = [];
++  directRunLogs = {};
++  sessionApi.getAgentSession.mockImplementation(async (sid: string) => makeDetail(sid));
++  sessionApi.getAgentSessionLogs.mockImplementation(
++    async (_sid: string, opts?: { runId?: string; before?: string; limit?: number }) => {
++      if (opts?.runId) {
++        const hit = directRunLogs[opts.runId];
++        if (hit === null) return Promise.reject(new Error("直达失败"));
++        return hit ?? [];
++      }
++      if (opts?.before && opts?.limit === 1) return probePage;
++      if (opts?.before) return olderPage;
++      return initialWindow();
++    },
++  );
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.streamSession.mockImplementation(() => ({
++    close: vi.fn(),
++    getLastEventId: () => null,
++  }));
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++});
++
++/** 等初始历史渲染 + 触顶滚动（capture 监听挂 bodyWrap，jsdom 手动派发）。 */
++async function scrollTimelineToTop() {
++  await waitFor(() => {
++    const el = document.querySelector('[data-testid="turn-timeline-scroll"]');
++    expect(el).toBeTruthy();
++    expect(screen.getAllByText(/A-窗口尾部-398/).length).toBeGreaterThan(0);
++  });
++  const el = document.querySelector('[data-testid="turn-timeline-scroll"]') as HTMLElement;
++  el.scrollTop = 0;
++  el.dispatchEvent(new Event("scroll"));
++}
++
++function callsWith(fn: ReturnType<typeof vi.fn>, pred: (_opts: unknown) => unknown) {
++  return fn.mock.calls.filter((c) => Boolean(pred(c[1])));
++}
++
++/** 包含指定文本的 markdown 渲染元素列表——连续 stdout 行在装配层合并成单段
++ *  （reply delta 直接 concat），行级 getByText 精确匹配失效；单显/双显判定
++ *  改数「包含该文本的元素数」（合并段与独立段各算 1，摘块失败即 2）。 */
++function markdownElsContaining(text: string) {
++  return screen
++    .getAllByTestId("markdown-text")
++    .filter((el) => (el.textContent ?? "").includes(text));
++}
++
++describe("「加载更早」轮边界对齐（2026-10-13-load-earlier-full-turn）", () => {
++  it("窗口跨界 + 页顶跨界轮直达整轮合并：提问出现、旧行单显、窗口同轮旧块被摘", async () => {
++    olderPage = olderPageFull();
++    // 探查（页顶最旧行 run-Z 之下的紧邻更早行）：同 run-Z → 页顶轮被切。
++    probePage = [log("z-2", "run-Z", tsAt("09:00:00", 2), "stdout", "Z-输出-2")];
++    directRunLogs = { "run-A": runAFull(), "run-Z": runZFull() };
++
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    await waitFor(() =>
++      expect(callsWith(sessionApi.getAgentSessionLogs, (o) => (o as { runId?: string })?.runId).length)
++        .toBeGreaterThanOrEqual(2),
++    );
++    // 整轮提问出现（修复前：提问段在更早页之上未加载，永不可见）。
++    await waitFor(() => expect(screen.getByText("A 完整提问")).toBeTruthy());
++    expect(screen.getByText("Z 完整提问")).toBeTruthy();
++    // 窗口内 run-A 旧块已摘：直达整轮含末 2 行，文本单显不双条（摘块失败会 2 次）。
++    expect(markdownElsContaining("A-窗口尾部-398").length).toBe(1);
++    expect(markdownElsContaining("A-窗口尾部-399").length).toBe(1);
++    // 翻页页内 run-A 行（已被整轮行替换）与 run-Z 页内行同样单显。
++    expect(markdownElsContaining("A-输出-1").length).toBe(1);
++    expect(markdownElsContaining("Z-输出-4").length).toBe(1);
++    // run-B（窗口完整轮）不受影响。
++    expect(screen.getByText("B 窗口提问")).toBeTruthy();
++  });
++
++  it("探查行属不同 run（页顶轮完整）→ 页顶不触发直达（仅窗口跨界轮直达）", async () => {
++    olderPage = olderPageFull();
++    // 探查返回不同 run（更早的独立轮）→ oldest 所在 run-Z 轮在页内完整。
++    probePage = [log("x-0", "run-X", tsAt("08:00:00", 0), "stdout", "X-更早")];
++    // 只配置窗口跨界轮 run-A 的直达响应——run-Z 若被误判页顶切轮会发
++    // runId=run-Z 请求并拿空表，断言 runId 调用集合可抓到。
++    directRunLogs = { "run-A": runAFull() };
++
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    // 页内内容照常渲染（run-Z 页内行 + run-A 整轮合并行）。
++    await waitFor(() =>
++      expect(markdownElsContaining("Z-输出-4").length).toBeGreaterThan(0),
++    );
++    await waitFor(() => expect(screen.getByText("A 完整提问")).toBeTruthy());
++    // 直达只发给窗口跨界轮 run-A——页顶轮 run-Z 完整，不发 run-Z 直达。
++    const directRuns = callsWith(
++      sessionApi.getAgentSessionLogs,
++      (o) => (o as { runId?: string })?.runId,
++    ).map((c) => (c[1] as { runId: string }).runId);
++    expect(directRuns).toEqual(["run-A"]);
++  });
++
++  it("直达失败 → 静默降级：当页原样 prepend，不报错不卡死", async () => {
++    olderPage = olderPageFull();
++    probePage = [log("z-2", "run-Z", tsAt("09:00:00", 2), "stdout", "Z-输出-2")];
++    // 全部直达 reject → crossRuns 降级为空，当页行原样装配 prepend。
++    directRunLogs = { "run-A": null, "run-Z": null };
++
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    await waitFor(() =>
++      expect(callsWith(sessionApi.getAgentSessionLogs, (o) => (o as { runId?: string })?.runId).length)
++        .toBeGreaterThanOrEqual(2),
++    );
++    // 当页内容照常渲染（现状分裂行为，内容不缺失）。
++    await waitFor(() =>
++      expect(markdownElsContaining("A-输出-1").length).toBeGreaterThan(0),
++    );
++    expect(markdownElsContaining("Z-输出-4").length).toBeGreaterThan(0);
++    // 窗口内 run-A 旧块保留（未摘——直达失败不产生整轮替换）。
++    expect(markdownElsContaining("A-窗口尾部-398").length).toBe(1);
++  });
++
++  it("不满页（到头）→ 不发探查请求，当页照常 prepend", async () => {
++    // 只返回 2 行（< 400）：页顶轮必然完整（无更早行），不应有 limit=1 探查。
++    olderPage = runZFull().slice(0, 2);
++
++    render(<Host sessionId="sess-A" />);
++    await scrollTimelineToTop();
++
++    await waitFor(() => expect(screen.getByText("Z-输出-1")).toBeTruthy());
++    expect(
++      callsWith(
++        sessionApi.getAgentSessionLogs,
++        (o) => (o as { before?: string; limit?: number })?.limit === 1,
++      ).length,
++    ).toBe(0);
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index f926e45c0..5eb4593f8 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -343,6 +343,40 @@ function steeredTurnIndexOf(turns: SessionTurnView[], runId: string): number {
+   return turns.findIndex((t) => t.runId === runId || t.realRunId === runId);
+ }
+ 
++/* ── 2026-10-13-load-earlier-full-turn：「加载更早」轮边界对齐纯函数 ──────────
++ * 背景：(ts,id) 复合游标按 400 行翻页，页边界 / 已加载窗口边界都会把一轮（run）
++ * 切成两半——触顶加载后顶部那轮只有后半段（提问在更早未加载区）；「回到会话
++ * 开头」拉到头后跨页同轮分裂成多个轮块（每页独立 logsToTurns 装配）。对齐手段：
++ * 判出跨界轮后 run_id 直达拉整轮行，替换当页该轮行装配 + 摘窗口内同轮旧块，
++ * 一轮一个完整块（直达先例：handleJumpToTurn 单轮直达）。 */
++
++/** 剥 prepend 轮块的 #e 游标页键后缀（`realRunId#e<pageKey>` → realRunId；
++ *  非变体块原样返回——SSE 新建块 runId 即真实 id）。 */
++function stripPageKeySuffix(runId: string): string {
++  const at = runId.indexOf("#e");
++  return at === -1 ? runId : runId.slice(0, at);
++}
++
++/**
++ * 窗口侧跨界轮收集：翻页页轮集合 ∩ 已加载窗口轮集合——命中的轮横跨「窗口最旧
++ * 行」边界（提问段在窗口、更早段在页内或未加载区），显示分裂为窗口块 + 页内块。
++ * 只收终态块（运行中实时轮不参与合并重建——摘块会打断 SSE 增量链路，保持现状
++ * 分裂属可接受降级）；attach 伪 id 块的 runId 非真实 id，仅 realRunId 有值才匹配。
++ */
++function collectCrossBoundaryRuns(
++  pageLogs: AgentRunLogEntry[],
++  turns: SessionTurnView[],
++): Set<string> {
++  const pageRunIds = new Set(pageLogs.map((l) => l.run_id));
++  const cross = new Set<string>();
++  for (const t of turns) {
++    if (!TERMINAL_TURN_STATUSES.has(t.status)) continue;
++    const key = t.realRunId ?? (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
++    if (key != null && pageRunIds.has(key)) cross.add(key);
++  }
++  return cross;
++}
++
+ /**
+  * steered=true 响应 → 引导段以「引导中」（steering）态追加进目标活跃轮段尾
+  * （UserMsgSegmentView 渲染 brand 虚线气泡+脉冲；多条并发各占一段）。turn.segments
+@@ -1607,8 +1641,11 @@ export function SessionPanelPage({
+ 
+   // ── quick（2026-09-02 群聊体验）：加载更早消息（before 游标 prepend）─────
+   // 装配层为 turn 形态（logsToTurns run 分组）——更老日志独立装配成 turns 后
+-  // 头部拼接；realRunId 已在当前 turns 的轮跳过（长 run 跨游标边界时防双条，
+-  // 该轮更早段丢弃属可接受降级，正常轮不跨游标）。resync/增量路径零改动。
++  // 头部拼接；同 run 跨页展示为多个轮块（时间序正确，#e 游标后缀防 React key
++  // 撞；SSE 增量按 realRunId 取最末块不受影响）。
++  // 2026-10-13-load-earlier-full-turn：轮边界对齐——页边界 / 窗口边界切轮时
++  // run_id 直达拉整轮行，当页该轮行替换为整轮行装配 + 摘窗口内同轮终态旧块，
++  // 跨界轮收敛为单个完整块（提问 + 全部输出同块；详见模块级纯函数区注释）。
+   // 触顶自动加载（quick 迭代）：原顶部按钮改滚动触发——滚动接线与 prepend
+   // 滚动锚的 DOM 组装在 sessionBody 处（isToolReportBody 之后），经 ref 间接
+   // 供本回调读取，避免块级声明顺序耦合。
+@@ -1735,22 +1772,76 @@ export function SessionPanelPage({
+         (m, l) => (l.timestamp < m.timestamp ? l : m),
+         older[0]!,
+       );
+-      historyCursorRef.current = oldest.timestamp;
+-      historyCursorIdRef.current = oldest.id;
++      // ── 2026-10-13-load-earlier-full-turn：轮边界对齐（至少完整加载一轮）──
++      // 窗口侧：页轮 ∩ 窗口终态轮（跨「窗口最旧行」边界的轮）。
++      let crossRuns = collectCrossBoundaryRuns(older, turnsRef.current);
++      // 页顶侧：满页（可能还有更早）时探查紧邻更早一行——同 run 即页顶轮被切
++      //（提问段在下一页之上未加载）。limit=1 时间维取游标前最新一条，与翻页同
++      // 游标语义零歧义。
++      if (older.length >= HISTORY_PAGE_SIZE) {
++        const probe = await getAgentSessionLogs(sessionId, {
++          before: oldest.timestamp,
++          beforeId: oldest.id,
++          limit: 1,
++          slim: true,
++          signal: abort.signal,
++        });
++        if (epochAtStart !== sessionEpochRef.current) return;
++        if (probe[0]?.run_id === oldest.run_id) crossRuns.add(oldest.run_id);
++      }
++      // 直达拉全轮行替换当页该轮行：单轮失败 / 空返回只降级该轮（当页行原样
++      // 装配，保持现状分裂显示），不影响其余跨界轮。
++      let pageLogs = older;
++      if (crossRuns.size > 0) {
++        const runIds = [...crossRuns];
++        const fulls = await Promise.all(
++          runIds.map(async (r) => {
++            try {
++              return {
++                run: r,
++                logs: await getAgentSessionLogs(sessionId, {
++                  runId: r,
++                  slim: true,
++                  signal: abort.signal,
++                }),
++              };
++            } catch {
++              return { run: r, logs: null as AgentRunLogEntry[] | null };
++            }
++          }),
++        );
++        if (epochAtStart !== sessionEpochRef.current) return;
++        const okRuns = new Set(
++          fulls.filter((f) => (f.logs?.length ?? 0) > 0).map((f) => f.run),
++        );
++        if (okRuns.size > 0) {
++          const extra = fulls.filter((f) => okRuns.has(f.run)).flatMap((f) => f.logs!);
++          pageLogs = [...older.filter((l) => !okRuns.has(l.run_id)), ...extra];
++          crossRuns = okRuns;
++        } else {
++          crossRuns = new Set<string>();
++        }
++      }
++      const oldestPage = pageLogs.reduce(
++        (m, l) => (l.timestamp < m.timestamp ? l : m),
++        pageLogs[0]!,
++      );
++      historyCursorRef.current = oldestPage.timestamp;
++      historyCursorIdRef.current = oldestPage.id;
+       setHasEarlier(older.length >= HISTORY_PAGE_SIZE);
+       // task-04：hasEarlierRef 同步刷新（跳转循环 await 间隙读它判档位；
+       // passive effect 提交晚于循环续延，仅靠 effect 镜像会读到过期值）。
+       hasEarlierRef.current = older.length >= HISTORY_PAGE_SIZE;
+       chainedMore = older.length >= HISTORY_PAGE_SIZE;
+-      const olderTurns = logsToTurns(older);
++      const olderTurns = logsToTurns(pageLogs);
+       // quick（ql-20260916-013）：空页（到头/全部被过滤）无 prepend——锚点作废
+       // 清掉，防其滞留到后续无关的高度增长（异步内容撑高）时误补偿跳视口。
+       if (olderTurns.length === 0) pendingAnchorRef.current = null;
+       if (olderTurns.length > 0) {
+         // pageKey 在 updater 外派生（task-06）：updater 须保持纯函数，内读 ref
+-        // 会因 React 延迟执行读到已再前进的游标；取 older[0]?.id 局部变量，
++        // 会因 React 延迟执行读到已再前进的游标；取 oldestPage.id 局部变量，
+         // 与上方刚写入的 historyCursorIdRef 一致。
+-        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${oldest.id.slice(0, 8)}`;
++        const pageKey = `${cursor.replace(/[^0-9]/g, "")}-${oldestPage.id.slice(0, 8)}`;
+         // quick（ql-20260916-009）：runId 改真实 runId——原样保留 #e 伪 id 时
+         // 装配块不被 enrichDisplayTurns 快照认领（realRunId ?? runId 双 miss），
+         // 同 run 快照被当孤儿补建成「只有配置行的空壳占位块」（历史翻页只显示
+@@ -1762,6 +1853,19 @@ export function SessionPanelPage({
+           runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
+         }));
+         setTurnState((prev) => {
++          // 2026-10-13-load-earlier-full-turn：摘窗口内跨界轮旧终态块——整轮行
++          // 已并入本页装配（直达含该轮全部行，窗口内行不缺），旧块不摘会同轮
++          // 双块（旧段 + 全轮段）双显。运行中块经 collectCrossBoundaryRuns
++          // 终态闸天然不在集合内，此处匹配仅历史块。
++          const survivors =
++            crossRuns.size > 0
++              ? prev.turns.filter((t) => {
++                  const key =
++                    t.realRunId ??
++                    (t.runId.startsWith("__") ? null : stripPageKeySuffix(t.runId));
++                  return !(key != null && crossRuns.has(key));
++                })
++              : prev.turns;
+           // 每页伪 runId 统一加游标后缀（ql-20260903-002）：logsToTurns 每次调用
+           // 的 __attach_history_N__ 都从 1 重新编号——此前只给「realRunId 已在
+           // 当前窗口」的轮（同 run 跨游标）加后缀，多 run 会话更早页的**不同
+@@ -1770,10 +1874,8 @@ export function SessionPanelPage({
+           // ts 全量数字串 + 本页首行 id 前 8 位，task-06）——纯 ts 数字串在
+           // 「同 ts 满 100 行批跨页」时两页撞 key。realRunId 保持原值——SSE
+           // 增量与孤儿 run 补建按 realRunId 匹配不受影响（upsertTurn 实时
+-          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）；原整
+-          // turn 丢弃对单 run 会话 = 永远丢弃，按钮点了没反应（ee24ba15
+-          // 用户实证）。
+-          return { ...prev, turns: [...decorated, ...prev.turns] };
++          // 增量取最末块）。同一 run 跨页展示为多个轮块（时间序正确）。
++          return { ...prev, turns: [...decorated, ...survivors] };
+         });
+       }
+     } catch {
+@@ -1797,6 +1899,15 @@ export function SessionPanelPage({
+   useEffect(() => {
+     hasEarlierRef.current = hasEarlier;
+   }, [hasEarlier]);
++  // 2026-10-13-load-earlier-full-turn：当前 turns 快照镜像——「加载更早」轮边界
++  // 对齐要判「翻页页轮 ∩ 已加载窗口轮」跨界集合，handleLoadEarlier 的 deps 刻意
++  // 不含 turnState（防每轮 SSE 增量重建回调击穿滚动监听引用），经 ref 读取发起时
++  // 快照（换会话由纪元校验兜底；同会话 SSE 增量只影响尾部实时轮，历史跨界轮
++  // 匹配不受陈旧快照拖累）。
++  const turnsRef = useRef<TurnState["turns"]>([]);
++  useEffect(() => {
++    turnsRef.current = turnState.turns;
++  }, [turnState.turns]);
+ 
+   /** task-04：单页「加载更早」Promise 化复用（跳转循环每页 await 一次）。
+    *  返回本次是否真实加载了一页——handleLoadEarlier 本体返回 void 且多路

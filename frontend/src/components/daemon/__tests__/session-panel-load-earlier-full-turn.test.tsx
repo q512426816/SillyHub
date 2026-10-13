@@ -327,4 +327,26 @@ describe("「加载更早」轮边界对齐（2026-10-13-load-earlier-full-turn�
       ).length,
     ).toBe(0);
   });
+
+  it("直达 ASC 上限截断丢最新段 → 采纳闸降级该轮：窗口块保留不摘、内容零丢失（评审 P2）", async () => {
+    olderPage = olderPageFull();
+    probePage = [log("z-2", "run-Z", tsAt("09:00:00", 2), "stdout", "Z-输出-2")];
+    // run-A 直达模拟后端 ASC+上限截断：只回最旧 101 行（max ts 远早于当页
+    // 该轮最新行 a-397）——采纳闸须判截断降级；run-Z 直达完整照常合并。
+    directRunLogs = { "run-A": runAFull().slice(0, 101), "run-Z": runZFull() };
+
+    render(<Host sessionId="sess-A" />);
+    await scrollTimelineToTop();
+
+    // run-Z（直达完整）正常合并：整轮提问出现。
+    await waitFor(() => expect(screen.getByText("Z 完整提问")).toBeTruthy());
+    // run-A 降级现状：当页 398 行原样装配（含 a-0 提问行）+ 窗口旧块保留——
+    // 采纳闸缺失时窗口块被摘而截断直达又不含末 2 行，「A-窗口尾部-398」
+    // 会静默消失（P2 场景）；保留即降级生效。
+    await waitFor(() =>
+      expect(markdownElsContaining("A-输出-1").length).toBeGreaterThan(0),
+    );
+    expect(markdownElsContaining("A-窗口尾部-398").length).toBe(1);
+    expect(markdownElsContaining("A-窗口尾部-399").length).toBe(1);
+  });
 });

@@ -1811,8 +1811,29 @@ export function SessionPanelPage({
           }),
         );
         if (epochAtStart !== sessionEpochRef.current) return;
+        // okRuns 采纳闸（评审 P2 修复）：直达端点 ASC + 上限截断丢的是该轮
+        // **最新段**（session_insights.py read_session_logs run_id 分支）——直达
+        // 行集未覆盖到当页该轮最新行（更覆盖不到更晚的窗口段）即判定截断，
+        // 该轮降级现状（当页行原样装配、不摘窗口块），防替换合并静默丢尾部
+        // 内容。判定不依赖上限魔法数：ASC 完整返回必含当页段与窗口段。
+        const pageMaxTsByRun = new Map<string, string>();
+        for (const l of older) {
+          const cur = pageMaxTsByRun.get(l.run_id);
+          if (cur === undefined || l.timestamp > cur) pageMaxTsByRun.set(l.run_id, l.timestamp);
+        }
         const okRuns = new Set(
-          fulls.filter((f) => (f.logs?.length ?? 0) > 0).map((f) => f.run),
+          fulls
+            .filter((f) => {
+              if ((f.logs?.length ?? 0) === 0) return false;
+              const pageMax = pageMaxTsByRun.get(f.run);
+              if (pageMax === undefined) return true;
+              const directMax = f.logs!.reduce(
+                (m, l) => (l.timestamp > m ? l.timestamp : m),
+                f.logs![0]!.timestamp,
+              );
+              return directMax >= pageMax;
+            })
+            .map((f) => f.run),
         );
         if (okRuns.size > 0) {
           const extra = fulls.filter((f) => okRuns.has(f.run)).flatMap((f) => f.logs!);

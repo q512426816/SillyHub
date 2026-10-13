@@ -76,4 +76,4 @@ FR-02: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx�
 FR-03: frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx「窗口跨界 + 页顶跨界轮直达整轮合并：提问出现、旧行单显、窗口同轮旧块被摘」（A-窗口尾部单显断言）
 FR-04: frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx「直达失败 → 静默降级：当页原样 prepend，不报错不卡死」
 FR-05: 实现层终态闸由代码审查覆盖（collectCrossBoundaryRuns 的 TERMINAL_TURN_STATUSES 判定），无独立 GUI 用例——不适用：jsdom 模拟运行中轮跨窗口边界的 SSE 竞态夹具复杂度高，终态闸为纯函数一行判定，由 FR-01/03 用例间接覆盖装配链路
-FR-06: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（11 用例）+ session-panel-history-race.test.tsx（3 用例）+ session-panel-variant.test.tsx / turn-timeline-scroll.test.tsx（21 用例）+ src/app/(dashboard)/sessions/__tests__/page.test.tsx（46/47，1 存量失败与基线一致）
+FR-06: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx（11 用例）+ session-panel-history-race.test.tsx（3 用例）+ session-panel-variant.test.tsx / turn-timeline-scroll.test.tsx（21 用例）+ src/app/(dashboard)/sessions/__tests__/page.test.tsx（47/47——基线存量失败「右击插入引用后发送」为 emoji 内嵌格式断言同步债，随本变更补齐修复，独立提交 4b969b5a5）

@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-load-earlier-full-turn",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "4b969b5a5514a11b0a7e1f458019b014be31d016",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "超 2000 行跨界轮合并时静默丢失原已可见的轮尾部内容，design「行为不劣于现状」声明不成立",
+      "evidence": "后端 run_id 直达为 timestamp ASC + limit 2000（_SESSION_RUN_LOGS_MAX=2000，session_insights.py:812-817），即返回该轮最旧 2000 行；前端合并无条件摘窗口同轮块（survivors 过滤）并从 pageLogs 滤掉当页该轮行（session-panel-page.tsx:1819、1860-1868），当轮 >2000 行时直达集不含窗口/页内持有的最新段，被摘掉的尾部行无处补回（重载页面才可恢复）。游标压到轮首继续推进半句成立，但现状是分裂双块内容完整，新行为丢内容，故「不劣于现状」为误判；缺「直达命中 2000 上限即放弃合并回退现状」守卫。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1819 (另见 backend/app/modules/daemon/router/session_insights.py:816)"
+    },
+    {
+      "severity": "P3",
+      "title": "limit=1 探查的「紧邻更早行」实为 run 块序首行而非纯时间序紧邻行，交错 run 场景页顶切轮漏检",
+      "evidence": "翻页/探查共用 read_model 的 ORDER BY anchor_ts.desc,timestamp.desc,id.desc + limit（read_model.py:446-457，块序与时间序不对齐为既有已接受局限），limit=1 取的是「锚最新 run 的最大 ts 行」；长 run 与后起 run 时间交错时探查可返回他 run 行 → 同 run 判定假阴性，页顶切轮不被检测。后果仅为降级现状分裂显示（无内容丢失）；前端注释「limit=1 时间维取游标前最新一条…零歧义」（session-panel-page.tsx:1778-1780）口径过强。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:1782-1790"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-06 绑定记载与交付 patch 自相矛盾（存量失败已在本次修复）",
+      "evidence": "requirements.md FR-06 绑定写 page.test.tsx「46/47，1 存量失败与基线一致」，而 change.patch 恰含该存量失败的修复（emoji 断言对齐【📎 截图.png】，对应 HEAD 4b969b5a5 专属提交）；修复本体属本变更范围外（ws-ref-emoji-inline 遗债），为过实测门必需且 commit 有记录，但绑定留痕口径与交付物不一致。",
+      "location": ".sillyspec/changes/2026-10-13-load-earlier-full-turn/requirements.md:79 (对应 frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx:1539)"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 主场景（跨多页轮 + 回到开头到头后顶部第一轮完整）无端到端测试夹具",
+      "evidence": "两个「回到会话开头」用例（session-history-scroll.test.tsx:445/482）均无跨页切轮夹具，合并单块断言只存在于 FR-01 的单页触顶场景；覆盖依赖「handleJumpToHead→loadEarlierOnce→handleLoadEarlier 同链路复用」论证——代码事实支持（同一函数零分叉），但 FR-02 场景级回归缺口客观存在。",
+      "location": "frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx:444-514"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "dimensionEvidence": {
+    "乱序": "upsertTurn realRunId 命中取最末块（turn-state.ts:174-183）零改动；decorated 块 realRunId 保持原值、#e 后缀仅在 runId key 上（session-panel-page.tsx:1851-1854）；迟到增量落入合并后单块，不双块。",
+    "并发": "historyLoadingRef 同步锁防重入（:1705）；探查与直达响应后均有纪元校验（:1789、:1813）；updater 纯函数——仅依赖 prev/外层已定型 crossRuns/decorated，不读 ref（:1855-1879）。",
+    "切换": "换会话 effect 纪元 +1 并 abort 在途（historyAbortRef，:1098-1102），探查/直达均带 abort.signal（:1787、:1805），AbortError 由 catch 静默（:1881）；turnState/游标整体重置（:1103-1128）。",
+    "作用域": "跨界判定与摘块仅基于当前会话 turns 快照（turnsRef 镜像，:1907-1910）与页行集合；后端 run_id 直达带归属闸门 404（session_insights.py:798-811），无跨会话/跨工作区数据面。"
+  },
+  "protectionClaims": {
+    "collectCrossBoundaryRuns 终态闸": "已确认：session-panel-page.tsx:373 `if (!TERMINAL_TURN_STATUSES.has(t.status)) continue;`，TERMINAL_TURN_STATUSES={completed,failed,killed}（turn-state.ts:121-125），running/steering 不进集合",
+    "摘块匹配键 realRunId ?? stripPageKeySuffix": "已确认：survivors 过滤（:1860-1868）与收集侧（:374）同键同口径，`__` 伪 id 块 key=null 永不匹配",
+    "updater 纯函数不读 ref": "已确认：setTurnState updater 体内仅用 prev/decorated/crossRuns/pageKey（外层局部量，:1844-1879）",
+    "epoch 校验在探查/直达响应后": "已确认：:1789（探查后）、:1813（直达 Promise.all 后）；页响应后纪元校验为既有（:1728）"
+  },
+  "frVerdicts": {
+    "FR-01": "兑现：满页才发探查（:1781）、probe 同 run 判定（:1790）、整轮替换装配、到头不发探查；测试 1（双跨界合并）与测试 4（不满页零探查）断言真实存在",
+    "FR-02": "兑现（经同链路复用）：jump-head 两用例存在且经探查后仍绿（mock 序列碰巧自洽）；主场景无直接夹具 → findings[3]",
+    "FR-03": "兑现：页轮∩窗口终态轮交集合并 + 窗口旧块摘除；测试 1 的 A-窗口尾部-398/399 单显断言即 FR-03 锚点",
+    "FR-04": "兑现：单轮 try/catch + okRuns 过滤逐轮降级、全败 crossRuns 清空（:1799-1823）；测试 3 断言当页原样 prepend 且窗口旧块保留",
+    "FR-05": "兑现：终态闸见 protectionClaims；SSE 链路（turn-state.ts）零改动；绑定声明以代码审查替代 GUI 用例，理由成立",
+    "FR-06": "兑现：11/3/11+10 用例数与绑定一致；4 处 mock 适配均为 limit=1 分流（形态适配非行为变更）；存量失败已修复但绑定留痕矛盾 → findings[2]"
+  },
+  "boundaryAdjudications": [
+    {
+      "boundary": "超长轮 >2000 行直达截断仍不完整但游标推进、行为不劣于现状（design 风险节）",
+      "verdict": "不可接受（按所声明口径）",
+      "reason": "截断事实不可避免（后端上限），游标推进成立；但「不劣于现状」不成立——窗口/页内原可见最新段被无条件摘除且直达集（最旧 2000 行）不覆盖之，属静默内容丢失（findings[0]，P2），应加「直达命中上限即放弃合并」守卫或修正披露。生产实证单轮最大 1324 行（turn-state.ts:112）低于 2000，触发概率低，故不阻断。"
+    },
+    {
+      "boundary": "运行中轮（currentRunId 所在）保持现状分裂，不参与合并（design/FR-05）",
+      "verdict": "可接受",
+      "reason": "摘块会打断 upsertTurn 按 realRunId 取最末块的 SSE 实时链路，终态闸一行判定即隔离风险，现状分裂仅为显示瑕疵。"
+    },
+    {
+      "boundary": "直达失败静默降级为现状分裂显示（design/FR-04）",
+      "verdict": "可接受",
+      "reason": "逐轮 try/catch + okRuns 过滤实现真正的单轮降级，不抛错不中断翻页，且有 FR-04 用例实证。"
+    },
+    {
+      "boundary": "回到开头/触顶请求量增加（每满页 +1 次 limit=1 探查、每跨界轮 +1 次直达，design 接口契约）",
+      "verdict": "可接受",
+      "reason": "循环有 50 页上限封顶，limit=1/slim=true 载荷极小，远优于被放弃的「续拉整页直到轮边界」方案（请求翻倍且仍分裂）。"
+    }
+  ],
+  "artifactSync": "确认：patch 仅含 4 个前端文件（session-panel-page.tsx + 3 个测试），无 api-types.ts / openapi.json / 后端改动；getAgentSessionLogs 既有签名已支持 runId/limit/slim/signal（sessions.ts:662-689 本变更未触碰），无需生成物同步。",
+  "reviewedAt": "2026-10-13T11:02:00Z"
+}
