@@ -2718,3 +2718,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：79968f77eb4ed6dc337f3c7fd2bd0bec5045acda
 理由：最大风险：jsdom 无法断真实 flex 布局，契约测试只能断 className（若未来有人改回 shrink-0 而同时改 testid/类名结构，断言可能失守）——已用 `data-testid="turn-nav-rail"` 命中容器并把「无 shrink-0 + min-h-0」写成显式用例降低静默回归概率；真实视觉验收（50+ 轮会话）留人工确认项记入 visual-evidence.md。 放弃的方案：① 沿用 turn-catalog 结构把 nav 直接提为行的 stretch 子项——需重排把手/浮层 DOM 层级，改动面大于收益；② 提高密集阈值或按容器高度自适应刻度尺寸——只缓解不治本（溢出仍在），且引入测量逻辑复杂度；③ root 加 overflow-hidden 裁切——会连把手/浮层一起裁，且不可滚动更差。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-turn-nav-initial-scroll
+锚点：未记录
+最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
+理由：最大风险：首挂载滚动在 flex 布局完成前执行的时序疑虑——useEffect 运行于 DOM commit 后，读取滚动几何会强制同步布局，且窄轨刻度高度固定（h-2.5/h-1.5）不受 markdown 异步撑高等影响，位置首挂载即最终位置，无竞态；jsdom 层以 scrollIntoView stub 断言调用事实（真实滚动行为由浏览器 block:"nearest" 标准语义担保）。 放弃的方案：① 首挂载改用 requestAnimationFrame 延帧滚动——刻度位置无异步依赖，延帧只增加闪跳窗口，无收益；② 在父层（session-panel-page）打开会话时显式触发滚轨——把组件内视觉态外泄到挂载方，破坏「受控纯组件、props 进回调出」契约（turn-catalog 先例约束）；③ 保留 mountedRef 但首渲用 useLayoutEffect 单独滚——双路径冗余，与既有 effect 维护同一语义却分两处，后续改联动易漏同步。

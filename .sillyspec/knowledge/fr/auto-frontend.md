@@ -1967,3 +1967,87 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-turn-nav-rail-overflow-fix
   status: active
+
+## FR-auto-frontend-200 首挂载带 activeTurnKey 时窄轨刻度立即 scrollIntoView(block:nearest) 对齐当前轮
+变更：2026-10-13-turn-nav-initial-scroll
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 53 轮长会话、activeTurnKey=最新轮 / When 打开会话页桌面面板（窄轨首挂载） / Then 当前轮刻度被滚入轨内可视区（scrollInt
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-initial-scroll/requirements.md#FR-01
+最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-initial-scroll:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「activeTurnKey 命中刻度/行 aria-current=true；首挂载即滚对齐当前轮，变化时轨内 scrollIntoView（block:nearest）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-initial-scroll
+  status: active
+
+## FR-auto-frontend-201 activeTurnKey 为 null(无活跃轮)首挂载不滚
+变更：2026-10-13-turn-nav-initial-scroll
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 3 轮短会话、activeTurnKey=null / When 组件首挂载 / Then scrollIntoView 零调用。
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-initial-scroll/requirements.md#FR-02
+最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-initial-scroll:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「首挂载 activeTurnKey=null 不滚（无活跃轮无对齐目标）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-initial-scroll
+  status: active
+
+## FR-auto-frontend-202 active 变化/hover 指向/浮层展开的既有滚动联动语义不变
+变更：2026-10-13-turn-nav-initial-scroll
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 指向第 3 轮刻度触发展开浮层 / When 指向行与 active 行切换 / Then 刻度与浮层行两元素均按指向优先/回落 active 语义滚入（与 2
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-initial-scroll/requirements.md#FR-03
+最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-initial-scroll:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx「指向行滚入可视区（指向优先 scrollIntoView block:nearest）；指向清除后回落 active 联动」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-initial-scroll
+  status: active
+
+## FR-auto-frontend-203 既有「首渲不滚」测试断言按新行为更新(行为有意变更,非为绿改测试),turn-nav-list 全绿
+变更：2026-10-13-turn-nav-initial-scroll
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 更新后的实现与测试 / When 运行 `pnpm vitest run src/components/sessions/__tests__/turn-nav-
+全文：.sillyspec/changes/archive/2026-10-13-turn-nav-initial-scroll/requirements.md#FR-04
+最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-turn-nav-initial-scroll:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-turn-nav-initial-scroll
+  status: active
