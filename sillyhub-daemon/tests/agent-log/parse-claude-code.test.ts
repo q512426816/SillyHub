@@ -326,6 +326,32 @@ describe('parseClaudeCodeJsonlLog — user 行归一（C4 / D-003@v1 / R-06）',
     expect(tr?.edit_patch).toBeUndefined();
   });
 
+  it('上限按 UTF-8 字节计（2026-10-13-editpatch-p3-cleanup）：CJK patch 字符数低于 64000 但字节超限 → 不附着；字节不超限 → 附着', async () => {
+    // 30_000 个 CJK 字符 = 90_000 UTF-8 字节（> 64_000）但仅 30_000 字符（< 64_000）
+    // ——按字符计会误附着，按字节计必须丢弃。
+    const cjkLine = '删'.repeat(30_000);
+    const overPatch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${cjkLine}`] }];
+    // 10_000 个 CJK 字符 = 30_000 UTF-8 字节（≤ 64_000）→ 正常附着。
+    const okLine = '删'.repeat(10_000);
+    const okPatch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${okLine}`] }];
+    const content = jsonl(
+      asstLine([{ type: 'tool_use', id: 'tu_cjk1', name: 'Write', input: {} }]),
+      userLineWithToolUseResult(
+        [{ tool_use_id: 'tu_cjk1', type: 'tool_result', content: 'ok' }],
+        { type: 'update', structuredPatch: overPatch },
+      ),
+      userLineWithToolUseResult(
+        [{ tool_use_id: 'tu_cjk1', type: 'tool_result', content: 'ok' }],
+        { type: 'update', structuredPatch: okPatch },
+      ),
+    );
+    const result = await parseClaudeCodeJsonlLog(content);
+    const toolResults = ofKind(result.messages, 'tool_result');
+    expect(toolResults).toHaveLength(2);
+    expect(toolResults[0]?.edit_patch).toBeUndefined();
+    expect(toolResults[1]?.edit_patch).toBe(JSON.stringify(okPatch));
+  });
+
   it('user 数组含 text 块 → user_input 段（text 原文 + sender 归一），不因数组形状丢弃', async () => {
     const content = jsonl(
       userLine([{ type: 'text', text: '数组携带的真人输入' }], { isMeta: false }),

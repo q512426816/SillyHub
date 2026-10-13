@@ -69,9 +69,11 @@ const TOOL_RESULT_MAX_CHARS = 4096;
 
 /**
  * edit_patch（structuredPatch 序列化）附着上限：超 64KB 整体不附着——残缺 JSON
- * 对前端 parseStructuredPatch 无消费价值，all-or-nothing（2026-10-13-editpatch-fullchain）。
+ * 对前端 parseStructuredPatch 无消费价值，all-or-nothing
+ * （2026-10-13-editpatch-fullchain；按 UTF-8 字节计——Buffer.byteLength，
+ * 2026-10-13-editpatch-p3-cleanup 收编评审 P3：字符计对 CJK 会低估体积）。
  */
-const EDIT_PATCH_MAX_CHARS = 64_000;
+const EDIT_PATCH_MAX_BYTES = 64_000;
 
 /**
  * R-06 注入前缀白名单：文本以任一前缀开头 → sender='system_event'。
@@ -383,8 +385,8 @@ function makeSegment(
 /**
  * 抽取载体行顶层 toolUseResult.structuredPatch（claude-code 把 Edit/Write 覆盖写
  * 的 hunks 放在行顶层，实证 2026-10-13-write-tool-diff 抽样）→ JSON 串；非记录 /
- * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化超 EDIT_PATCH_MAX_CHARS
- * → undefined（all-or-nothing，残缺 JSON 无消费价值）。
+ * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化 UTF-8 字节数超
+ * EDIT_PATCH_MAX_BYTES → undefined（all-or-nothing，残缺 JSON 无消费价值）。
  */
 function extractEditPatch(line: Record<string, unknown>): string | undefined {
   const tur = line.toolUseResult;
@@ -393,7 +395,8 @@ function extractEditPatch(line: Record<string, unknown>): string | undefined {
   if (!Array.isArray(patch) || patch.length === 0) return undefined;
   try {
     const json = JSON.stringify(patch);
-    if (json === undefined || json.length > EDIT_PATCH_MAX_CHARS) return undefined;
+    if (json === undefined) return undefined;
+    if (Buffer.byteLength(json, 'utf8') > EDIT_PATCH_MAX_BYTES) return undefined;
     return json;
   } catch {
     return undefined;
