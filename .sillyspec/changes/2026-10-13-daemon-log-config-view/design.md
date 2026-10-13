@@ -124,10 +124,10 @@ daemon 侧错误：正常路径全部结构化返回（`exists:false` / 掩码�
 
 ### backend REST
 
-```
-GET /api/daemon/machines/{instance_id}/logs?tail=500   → 200 DaemonLogTailResponse
-GET /api/daemon/machines/{instance_id}/config?reveal=false → 200 DaemonConfigResponse
-```
+| 端点 | query | 成功响应 |
+|---|---|---|
+| GET /api/daemon/machines/{instance_id}/logs | tail=500 | 200 DaemonLogTailResponse |
+| GET /api/daemon/machines/{instance_id}/config | reveal=false | 200 DaemonConfigResponse |
 
 ```py
 class DaemonLogTailResponse(BaseModel):

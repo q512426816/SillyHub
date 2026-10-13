@@ -40,4 +40,4 @@
 | `modules/app-pages.md` | runtimes 页新增诊断弹窗接线（一行级） | done（changelog sidecar 登记） |
 | `modules/daemon.md` | daemon 侧新增 diag RPC（handler 注册 + diag-rpc.ts） | done（changelog sidecar 登记） |
 | `modules/lib-api.md` | api-types 产物新增两 schema 类型 | done（changelog sidecar 登记） |
-| `_module-map.yaml` | 未匹配文件均为索引粒度问题（新文件不在 paths 枚举），建议下次 scan/modules rebuild 刷新 | pending（留给 scan 周期，本次不手改索引） |
+| `_module-map.yaml` | 未匹配文件均为索引粒度问题（新文件不在 paths 枚举），不在本变更手改索引——留待下次 scan/modules rebuild 周期刷新 | skipped（避免手改索引与 scan 基线漂移；归属判定已在上节逐文件写明） |

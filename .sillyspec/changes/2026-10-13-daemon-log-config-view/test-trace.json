@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-daemon-log-config-view",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-01:acc-0-eeeeb013",
+      "tests": [
+        "sillyhub-daemon/tests/diag-rpc.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-01:acc-1-05db5eb0",
+      "tests": [
+        "sillyhub-daemon/tests/diag-rpc.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-01:acc-2-4a3d0203",
+      "tests": [
+        "sillyhub-daemon/tests/diag-rpc.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-02:acc-0-3181745b",
+      "tests": [
+        "backend/tests/modules/daemon/test_daemon_machine_diag.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-02:acc-1-47e4ef11",
+      "tests": [
+        "backend/tests/modules/daemon/test_daemon_machine_diag.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-02:acc-2-fe6949ec",
+      "tests": [
+        "backend/tests/modules/daemon/test_daemon_machine_diag.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-03:acc-0-21e140a0",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+        "frontend/src/components/daemon/__tests__/machine-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-03:acc-1-9e938628",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+        "frontend/src/components/daemon/__tests__/machine-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-daemon-log-config-view:task-03:acc-2-11c8d1ea",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/daemon-diagnostic-dialog.test.tsx",
+        "frontend/src/components/daemon/__tests__/machine-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-daemon-log-config-view"
+    }
+  ]
+}

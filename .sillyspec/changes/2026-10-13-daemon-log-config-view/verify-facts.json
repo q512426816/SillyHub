@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-13-daemon-log-config-view",
+  "generatedAt": "2026-10-13T12:35:58.418Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 0,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "tasks": 3,
+        "hasTest": 3
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "backendEndpoints": 2386,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-13-daemon-log-config-view",
+      "metrics": {
+        "checkedFiles": 4,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "backend daemon 域 164 用例全绿（含新端点 11 用例：转发成功/参数透传/四类错误映射/鉴权）",
+      "command": "cd backend && uv run pytest tests/modules/daemon -q --no-cov",
+      "exitCode": 0,
+      "logPath": "/tmp/s8-backend.log（164 passed, 2026-10-13 20:0x）"
+    },
+    {
+      "claim": "frontend daemon 组件域+lib+runtimes 页 1339 用例全绿（含新弹窗 8 用例与既有 machine-card/runtimes 页零回归）",
+      "command": "cd frontend && pnpm exec vitest run src/components/daemon src/lib/daemon \"src/app/(dashboard)/runtimes\"",
+      "exitCode": 0,
+      "logPath": "/tmp/s8-frontend.log（94 files / 1339 passed）"
+    },
+    {
+      "claim": "daemon 诊断 RPC 相关 64 用例全绿 + typecheck 零错误（diag-rpc 12 用例含字节上限/UTF-8 边界/掩码六档）",
+      "command": "cd sillyhub-daemon && pnpm exec vitest run tests/diag-rpc.test.ts tests/daemon-kind-dispatch.test.ts tests/cli.test.ts && pnpm typecheck",
+      "exitCode": 0,
+      "logPath": "/tmp/s8-daemon.log（64 passed / 8 skipped）+ /tmp/s8-daemon-tsc.log（exit 0）"
+    },
+    {
+      "claim": "跨进程数据契约三跳逐字一致（daemon result 键 ↔ backend DTO ↔ api-types ↔ 前端消费），由 execute QA 独立审查核验（11 次调用预算）",
+      "command": "sillyspec register-stage-review --stage execute（review.json adopted，reviewType=acceptance，specVerdict/qualityVerdict=pass）",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/stage-reviews/execute-review-2026-10-13-201447/review.json"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "跨进程集成冒烟：/runtimes 机器卡 →「日志」弹窗（行数切换/刷新/下载/truncated 提示）→「配置」弹窗（掩码展示/明文切换/恒脱敏下载）；边界态至少各验一条（老 daemon 422 / daemon.log 不存在 / 机器离线按钮禁用）",
+        "condition": "本机起 daemon（新版，需重新构建分发）+ backend + frontend 三服务在线后按 proposal.md 成功标准逐条走查；daemon 侧新 RPC 需 daemon 重新构建后生效",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "探针 5 前缀口径噪音（3 missing + 6 unused）——endpoints.json 提取为 router 相对路径（`/machines`），前端调用为全路径（`/api/daemon/machines`），两侧口径错配",
+        "condition": "建议工具侧修复 sillyspec endpoints extract 拼 router prefix（记录到 docs/sillyspec/ 观察项可选）；本变更不阻断",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/daemon/machines/{instance_id}/logs",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/daemon/machines/{instance_id}/config",
+        "rowIdx": 2
+      },
+      {
+        "method": "GET",
+        "path": "/api/daemon/machines/{instance_id}/logs",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/daemon/machines/{instance_id}/config",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/diag-rpc.test.ts",
+      "backend/tests/modules/daemon/test_daemon_machine_diag.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
