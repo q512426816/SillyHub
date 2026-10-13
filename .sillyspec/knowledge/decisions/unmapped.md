@@ -2609,3 +2609,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：771c8ad8e9e4a1dcbc16ce27c64700ae0865c4b5
 理由：答：最大风险：时序脆弱——若固定 tick 不足以让 readline 消费推送行（慢 CI），「零直发」断言可能偶发红。对冲：tick 取 25ms（既有测试同量级）且断言面宽松（只断言批次数与内容，不依赖帧级时序）；看门狗用例等待窗 3 倍于触发时间。次风险：`vi.mock('node:child_process')` 文件级替换影响同文件后续 import——同 tests/task-runner.test.ts 先例，本文件独立无其它 spawn 依赖。 试过但放弃的方案：① 经 `runner.runLease` 全链驱动（含 lease claim/心跳编排，时序面大、断言噪声多，且 runLease 已有专属测试，放弃）；② 给 spawnAndStream 加依赖注入 seam 以便绕过 spawn（为测改产线签名，违背「纯测试新增」边界，放弃）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-daemon-module-map
+锚点：未记录
+最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
+理由：答：最大风险：手改 fr 文件违反文件头「机械解析契约勿手改」告示的字面——但迁移本身是工具 advisory 明示的 sanctioned 动作（「确认后可迁移」），且字段逐字保持 + FR-04 validate/digest 自检兜底；若未来 fr-index 重提炼按归档重放覆写，条目会以新域重新落位（我们已把域修对），重放与迁移结果一致。次风险：根图与项目图双处登记造成 paths 并集冗余——只在项目图登记避免（task-runner 模块本体在项目图）。 试过但放弃的方案：① 按告警字面把 5 条 FR 迁 fr/daemon.md（daemon 模块=daemon.ts WS 核心，测试目录登记进该模块语义错位；且登记若进 task-runner 模块则未来变更落 task-runner 域、与存量 daemon 域分裂，放弃）；② 在根图 docs/multi-agent-platform/modules/_module-map.yaml 登记（根图头部自述细粒度模块归各自项目图，task-runner 模块本体在项目图，跨图重复登记徒增并集冗余，放弃）；③ 给 tests 目录另铸新模块卡（如 task-runner-tests，新造伪模块 id 无对应域文件与语义，过度工程，放弃）。

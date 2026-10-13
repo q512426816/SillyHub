@@ -1,0 +1,14 @@
+{"ts":1791849483395,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791849483395,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791849526695,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791849658545,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791849658840,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791849659134,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791849659426,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791849659705,"kind":"task-done","stage":"tasks","detail":"checked 4→5","provisional":true,"source":"task-tick"}
+{"ts":1791849661393,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791849661393,"kind":"task-done","stage":"tasks","detail":"checked 0→5","provisional":true}
+{"ts":1791849671508,"kind":"commit","stage":null,"detail":"cba0f714b","provisional":true}
+{"ts":1791849716837,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791849723544,"kind":"commit","stage":null,"detail":"44ce2cf6b","provisional":true}
+{"ts":1791849727356,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-13-daemon-module-map/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}

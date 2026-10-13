@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -24,11 +32,12 @@ input: >-
   - 不改任何 src 代码与归档件；sillyhub-daemon/backend 不需要跑测试（纯知识面变更）
 autopilot: false
 baseline_commit: b2461c6b4fc0d2510eb26a4dfdf91ccc68fb7210
-updatedAt: '2026-10-12T23:58:12.489Z'
+updatedAt: '2026-10-13T00:15:08.122Z'
 baseline_sha256: a75505037c7a860e176afbddb0c7f2208f9928719c6d7e8ac916f5d803eecace
 spec_approved: true
 spec_approved_at: '2026-10-12T23:58:12.489Z'
 spec_approved_by: anon@DESKTOP-HJ0AM09
 spec_approved_channel: user-confirmed
 spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
 

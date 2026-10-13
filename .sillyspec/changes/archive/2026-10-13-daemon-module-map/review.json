@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-daemon-module-map",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "盲维三声称「knowledge validate 可检出」中断残留（两文件重复/双缺），超出 validate 实际检测面",
+      "evidence": "design.md:33 将中断态检出归给 validate，但 sillyspec src/stages/knowledge.js:208-333 的 cmdValidate 仅查 INDEX.md 引用/锚漂移/未注册文件/空文件，无跨 fr 文件的重复 id 或条目缺失检测，两种残留它都检不出；实际防线是单 commit 原子性（已实证 cba0f714b 单提交含全部三文件）与 digest 伪域计数，安全性结论本身成立，属措辞与工具能力不符，无数据正确性风险。",
+      "location": ".sillyspec/changes/2026-10-13-daemon-module-map/design.md:33"
+    },
+    {
+      "severity": "P3",
+      "title": "存在专用机器迁移命令 tests --redomain（身份铁律「迁域不换号」）未被 design 披露，与本次「接续重编号」策略相反",
+      "evidence": "design.md:43 风险段仅以 advisory「确认后可迁移」（sillyspec src/fr-index.js:597）论证手改合法，未披露 sillyspec src/index.js:3381-3390 另有伪域条目机器迁移命令 tests --redomain 且注释明示「身份铁律：迁域不换号（绑定/supersede 链靠 ID 寻址）」；本次按用户指示与 FR-03 换号重编号（034~038→016~020），实测活性面（knowledge/ 全树 + 活跃 changes/，排除冻结归档）旧全局 id 零引用、绑定 row_id 与全文锚均域无关，重编号未断任何活性链，数据正确性无虞，属披露完整性瑕疵而非实现错误。",
+      "location": ".sillyspec/changes/2026-10-13-daemon-module-map/design.md:43"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-05 声明的「test-trace.json 内旧 id 引用成孤儿」实际不存在——冻结件只含局部锚",
+      "evidence": "requirements.md:51 声称归档件 test-trace.json 内旧 id 引用属预期孤儿，但实测 .sillyspec/changes/archive/2026-10-13-spawn-flush-e2e-test/test-trace.json 仅含局部锚（FR-01..FR-05）与 change 域 row_id（2026-10-13-spawn-flush-e2e-test:flow:测试绑定FR-NN），不含任何 FR-auto-sillyhub-daemon-03x 全局 id；全归档树 grep 全局 id 亦零命中——边界声明描述了不存在的对象，方向上是过度保守（把不需要豁免的东西豁免了），无害。",
+      "location": ".sillyspec/changes/2026-10-13-daemon-module-map/requirements.md:51"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T00:13:29Z"
+}

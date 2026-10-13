@@ -1,0 +1,52 @@
+{
+  "change": "2026-10-13-daemon-module-map",
+  "baseline": "b2461c6b4fc0d2510eb26a4dfdf91ccc68fb7210",
+  "head": "44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451",
+  "files": [
+    ".sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 9,
+    "deletions": 1
+  },
+  "savedAt": "2026-10-13T00:02:05.248Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b2461c6b4fc0d2510eb26a4dfdf91ccc68fb7210",
+    "totals": {
+      "files": 1,
+      "additions": 9,
+      "deletions": 1
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "07ecd6d7398e8dff10b77f4eb9606b32c2bea26b8e5fb221c9011c070df26796",
+  "patchStatus": "ok"
+}

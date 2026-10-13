@@ -1,0 +1,21 @@
+diff --git a/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml b/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
+index 857fc24d5..a57e03773 100644
+--- a/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
++++ b/.sillyspec/docs/sillyhub-daemon/modules/_module-map.yaml
+@@ -182,7 +182,15 @@ modules:
+   task-runner:
+     status: active
+     doc: modules/task-runner.md
+-    paths: ["sillyhub-daemon/src/task-runner.ts"]
++    # 2026-10-13-daemon-module-map：目录前缀补齐（fr-index matchedModuleIds 精确或目录
++    # 前缀匹配制，非 glob）——src/task-runner 包目录（2026-09-07-arch-large-file-split
++    # 拆包后一直无登记）+ tests/task-runner 测试目录（2026-10-13-spawn-flush-e2e-test
++    # 五条 FR 落伪域根因）。登记后两目录交付路径命中本模块（域=模块 id），
++    # 未来变更自动落真域 fr/task-runner.md。
++    paths:
++      - sillyhub-daemon/src/task-runner.ts
++      - sillyhub-daemon/src/task-runner
++      - sillyhub-daemon/tests/task-runner
+     tags: [task, execution, 租约执行, 任务]
+     aliases: [runner]
+     entrypoints: []
