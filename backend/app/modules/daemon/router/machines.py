@@ -678,7 +678,10 @@ async def get_machine_daemon_logs(
     行数上限 5000 与 daemon 侧字节上限 262144B 先到先截（truncated 标识）；
     文件不存在（前台运行不落盘）由 daemon 结构化返回 exists=false。
     """
-    return await _send_diag_rpc(instance_id, session, user, "daemon_log_tail", {"tail_lines": tail})
+    result = await _send_diag_rpc(
+        instance_id, session, user, "daemon_log_tail", {"tail_lines": tail}
+    )
+    return DaemonLogTailResponse(**result)
 
 
 @router.get(
@@ -695,7 +698,10 @@ async def get_machine_daemon_config(
 
     reveal=true 返回明文（供前端「显示明文」按需二次拉取，默认路径不传明文）。
     """
-    return await _send_diag_rpc(instance_id, session, user, "daemon_config_get", {"reveal": reveal})
+    result = await _send_diag_rpc(
+        instance_id, session, user, "daemon_config_get", {"reveal": reveal}
+    )
+    return DaemonConfigResponse(**result)
 
 
 async def _send_diag_rpc(
