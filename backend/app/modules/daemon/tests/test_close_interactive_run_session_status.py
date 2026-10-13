@@ -1,11 +1,13 @@
 """task-03 单测：close_interactive_run 接入 session 终态回写（D-001 / D-009 / D-005）。
 
 钉死 :929 commit 之前对 AgentSession 的终态回写：
-- 单轮任务（change_id 非空 或 spec_strategy 非 interactive+None）run completed
+- 单轮任务（会话级 change 绑定 或 spec_strategy 非 interactive+None）run completed
   → session.status='ended' + ended_at 非空
 - 单轮任务 run failed → session.status='failed' + ended_at 非空
-- 多轮对话（spec_strategy=='interactive' AND change_id is None）run completed
-  → session 保持 active + last_active_at 刷新（ended_at 仍为 None）
+- 多轮对话（spec_strategy=='interactive' AND session 级 change_id is None）run
+  completed → session 保持 active + last_active_at 刷新（ended_at 仍为 None）
+- 2026-10-13-multiturn-changeid-misjudge：聊天轮带轮级归因 run.change_id（会话级
+  无绑定）completed → 仍保持 active（锚换 session 级，端到端回归用例在文件尾）
 - 幂等：session 已 ended/failed → 不被覆盖（D-005，由 _apply_session_terminal_status 守卫）
 
 参照 test_interactive_lifecycle_patch.py 的 _seed_active_interactive_session + DaemonService
@@ -84,6 +86,7 @@ async def _seed_session_and_run(
     *,
     spec_strategy: str | None = "interactive",
     change_id: uuid.UUID | None = None,
+    session_change_id: uuid.UUID | None = None,
     run_status: str = "running",
     session_status: str = "active",
 ) -> tuple[uuid.UUID, uuid.UUID, str, uuid.UUID]:
@@ -91,6 +94,10 @@ async def _seed_session_and_run(
 
     用 RunPlacementService.prepare_interactive_dispatch 建带 claim_token 的真实 lease，
     再补 session + run 行（最小集，create_session 会写更多但本测试不需要）。
+
+    session_change_id 是会话级 AgentSession.change_id（stage 派发绑定，判定锚，
+    2026-10-13-multiturn-changeid-misjudge），与 run 级 change_id（轮级归因锚）
+    正交——聊天轮归因场景=change_id 非空 + session_change_id 为 None。
     """
     uid = await _create_user(db_session)
     rt = await _create_runtime(db_session, uid)
@@ -116,6 +123,7 @@ async def _seed_session_and_run(
         lease_id=dispatch.lease_id,
         last_active_at=datetime.now(UTC),
         created_at=datetime.now(UTC),
+        change_id=session_change_id,
     )
     run = AgentRun(
         id=run_id,
@@ -138,12 +146,13 @@ async def _seed_session_and_run(
 async def test_single_turn_completed_marks_session_ended(
     db_session: AsyncSession, mocked_redis
 ) -> None:
-    """单轮任务（change_id 非空）run completed → session ended + ended_at。"""
+    """单轮任务（stage 会话级 change 绑定）run completed → session ended + ended_at。"""
     change_id = uuid.uuid4()
     lease_id, run_id, token, session_id = await _seed_session_and_run(
         db_session,
         spec_strategy="interactive",
         change_id=change_id,
+        session_change_id=change_id,
     )
     svc = DaemonService(db_session)
     run = await svc.close_interactive_run(
@@ -312,6 +321,7 @@ async def test_single_turn_terminal_flip_sends_session_end(
         db_session,
         spec_strategy="interactive",
         change_id=change_id,
+        session_change_id=change_id,
     )
     svc = DaemonService(db_session)
     await svc.close_interactive_run(
@@ -369,4 +379,53 @@ async def test_multi_turn_active_flip_sends_no_session_end(
     refreshed = await db_session.get(AgentSession, session_id, populate_existing=True)
     assert refreshed is not None
     assert refreshed.status == "active"
+    assert sent == []
+
+
+# ── 2026-10-13-multiturn-changeid-misjudge：聊天轮归因不收口（端到端） --------
+
+
+@pytest.mark.asyncio
+async def test_chat_turn_with_run_attribution_keeps_session_active(
+    db_session: AsyncSession, mocked_redis, monkeypatch
+) -> None:
+    """聊天轮带轮级归因 change_id（session 级无绑定）completed → 会话保持 active。
+
+    生产回归（会话 47e2ff1a，2026-10-13）：轮级变更归因给聊天轮 run.change_id
+    打锚后，旧判定误把聊天会话当单轮任务，每轮完成即置 ended——用户每轮都要
+    手动「重新开启」。修复后多轮锚为 session.change_id，本端到端用例经
+    close_interactive_run 全链路锁定：不翻终态、不写 ended_at、不发 SESSION_END。
+    """
+    from app.modules.daemon import ws_hub
+
+    sent: list[tuple[object, str, dict]] = []
+
+    async def fake_send(daemon_id, msg_type, payload):
+        sent.append((daemon_id, msg_type, payload))
+        return True
+
+    hub = ws_hub.get_daemon_ws_hub()
+    monkeypatch.setattr(hub, "send_session_control", fake_send)
+
+    lease_id, run_id, token, session_id = await _seed_session_and_run(
+        db_session,
+        spec_strategy="interactive",
+        change_id=uuid.uuid4(),  # 轮级归因锚（聊天轮被打了 change_id）
+        session_change_id=None,  # 会话级无 change 绑定（真聊天会话）
+    )
+    svc = DaemonService(db_session)
+    run = await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        subtype="success",
+    )
+    assert run.status == "completed"
+
+    refreshed = await db_session.get(AgentSession, session_id, populate_existing=True)
+    assert refreshed is not None
+    assert refreshed.status == "active"
+    assert refreshed.ended_at is None
     assert sent == []

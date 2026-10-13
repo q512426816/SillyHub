@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：轮级变更归因（2026-10-12-run-level-change-attribution）给聊天轮 run.change_id 打锚后，_apply_session_terminal_status
+  的多轮判定（spec_strategy==interactive 且 run.change_id is None）被击穿——生产实证会话 47e2ff1a 今天每轮完成后会话被误置 ended，用户每轮都要手动重新开启。
+
+
+  成功标准：
+
+  - 聊天会话（session.change_id 为 NULL）的 interactive 轮无论 completed/failed 均保持 active，不再被 run.change_id 误收口
+
+  - stage 等真绑定会话（session.change_id 非空）维持既有语义：completed→ended、失败→failed，D-006 可恢复失败豁免不变
+
+  - quick-chat / platform-managed / sillyspec / None 策略等单轮收口语义零回归
+
+  - D-005 幂等守卫零回归（session 已终态返回 None）
+autopilot: false
+baseline_commit: 3eac3e09d0bb502518e6e08960c5c6cdb06b4bec
+updatedAt: '2026-10-13T01:18:36.462Z'
+baseline_sha256: 6124cacd2b46ae61860ae2acf60bbb046af0a5fb851db18e666a13a5a01640f1
+spec_approved: true
+spec_approved_at: '2026-10-13T01:15:24.566Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+autopilot_ticked: 2
+

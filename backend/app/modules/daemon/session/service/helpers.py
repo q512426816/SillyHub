@@ -119,18 +119,26 @@ def _merge_task_wakeup_prompt(old: str, new: str) -> str:
 def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str | None:
     """按 run 终态 + 任务类型计算 session 终态（D-002@v2 反向判定 + D-005 幂等）。
 
-    多轮对话（``spec_strategy == "interactive"`` 且 ``change_id is None``）保持
-    ``active``，等待下一个 AgentRun 接管；其余所有单轮任务（stage / scan /
-    mission worker / quick-chat / oneshot）按 ``run.status`` 收口：
+    多轮对话（``spec_strategy == "interactive"`` 且 **会话级** ``session.change_id
+    is None``）保持 ``active``，等待下一个 AgentRun；其余所有单轮任务（stage /
+    scan / mission worker / quick-chat / oneshot）按 ``run.status`` 收口：
     ``completed → "ended"``，其余（failed/killed/...）→ ``"failed"``。
+
+    2026-10-13-multiturn-changeid-misjudge：锚从 ``run.change_id`` 换到
+    ``session.change_id``——轮级变更归因（2026-10-12-run-level-change-attribution，
+    ``AgentSession.current_change_id`` 列注释）给聊天轮 run.change_id 打锚后，
+    旧 run 级锚把聊天会话误判成单轮任务，每轮 completed 即误置 ended，用户每轮
+    都要手动「重新开启」（生产实证会话 47e2ff1a 当日三次）。会话级 change_id
+    语义是"会话本身为 change 而建"（model.py AgentSession.change_id 列注释，
+    stage 派发创建时写入），不受轮级归因污染。
 
     幂等（D-005）：session 已处于终态（``ended`` / ``failed``，即不在
     :data:`ACTIVE_SESSION_STATUSES` 中）时直接返回 ``None``，由调用方判定是否跳过
     落库，避免覆盖已被其它路径（如 cancel_lease）写入的终态。
 
     Args:
-        run: 刚结束的 AgentRun（取 ``status`` / ``spec_strategy`` / ``change_id``）。
-        session: 该 run 所属的 AgentSession（取当前 ``status``）。
+        run: 刚结束的 AgentRun（取 ``status`` / ``spec_strategy``）。
+        session: 该 run 所属的 AgentSession（取当前 ``status`` / ``change_id``）。
 
     Returns:
         计算出的新 session 状态（``"active"`` / ``"ended"`` / ``"failed"``），
@@ -144,15 +152,15 @@ def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str 
     """
     if session.status not in _svc.ACTIVE_SESSION_STATUSES:
         return None  # D-005 幂等：已 ended/failed，不覆盖
-    is_multi_turn = run.spec_strategy == "interactive" and run.change_id is None
+    is_multi_turn = run.spec_strategy == "interactive" and session.change_id is None
     if is_multi_turn:
         return "active"  # 多轮对话保持 active，等下一个 AgentRun
     # D-006（2026-10-12-session-defects task-09）：会话级可恢复失败豁免。
-    # 生产实证（会话 47e2ff1a run 30）：轮级变更归因（run-level-change-
-    # attribution）让聊天轮携带 change_id → is_multi_turn 判定失效 → 429
-    # 失败轮把整个 interactive 会话终态化 failed，用户被锁死无法续发。
-    # 会话型轮（spec_strategy=interactive）遭遇可自动恢复失败
-    # （quota_exceeded / context_overflow）时保持 active——自动恢复编排
+    # 起源（会话 47e2ff1a run 30）：轮级变更归因曾使 429 失败轮把 interactive
+    # 会话终态化 failed，用户被锁死无法续发。2026-10-13-multiturn-changeid-
+    # misjudge 之后聊天会话在上方多轮分支已先行返回 active，本豁免的适用面收敛
+    # 为「会话级绑定 change 的 interactive 任务会话」（stage 派发）：遭遇可自动
+    # 恢复失败（quota_exceeded / context_overflow）时保持 active——自动恢复编排
     # （auto_resume 钩子：quota 定时续跑 / context_overflow 原生压缩续跑）
     # 与用户手动续发都需要 active 门；自动恢复预算耗尽后用户仍可手动重试，
     # 会话不再被单次可恢复失败锁死。闸拒绝覆写（close_run_steps
