@@ -35,8 +35,16 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `frontend.changelog.md` | 追加本变更索引行（前端四文件 + 新组件 + 挂载 + 测试摘要） | done |
-| `backend.changelog.md` | 追加本变更索引行（端点 + service 方法 + 测试摘要） | done |
-| `_module-map.yaml` | 未匹配文件均属顶层 backend/frontend 模块既有前缀范围（CLI 匹配走了子项目 map 的粒度缺口），非索引过期，无需 rebuild | skipped |
+| `frontend.changelog.md` | 追加本变更索引行（前端四文件 + 新组件 + 挂载 + 测试摘要），已随主仓 f2d9879bb 提交（归档 diff 核对时点已不在工作区 diff 内属预期） | done |
+| `backend.changelog.md` | 追加本变更索引行（端点 + service 方法 + 测试摘要），已随主仓 f2d9879bb 提交（同上） | done |
+| `_module-map.yaml` | 未匹配文件均属顶层 backend/frontend 模块既有前缀范围（CLI 匹配走了子项目 map 的粒度缺口），非索引过期，无需 rebuild；backend entrypoints 的 /api/* routers 清单已含 change 域无需逐端点增行 | skipped |
+
+## 归档核对裁决（三重核对不一致项）
+
+- diff 有而矩阵未列（10）逐项裁决：
+  - `backend/openapi.json` — 属 backend 模块生成物（gen:types 数据源随端点刷新），本已在「未匹配文件」节登记，矩阵未单列属粒度选择，补记于此。
+  - `.sillyspec/knowledge/decisions/unmapped.md`、`.sillyspec/knowledge/fr/lib-api.md` — 归档 step1 决策蒸馏/FR 索引的 CLI 自动产物，非本变更手写面，不进矩阵。
+  - `.claude/skills/sillyspec-explore/SKILL.md`、`.claude/skills/sillyspec-flow/SKILL.md`、`backend/app/modules/change/tests/test_files_refresh_sync.py`、`sillyhub-daemon/tests/sillyspec-sync-change-rpc.test.ts`、`docs/sillyspec/thin-upgrade-stale-stage-window.md`、（另含并行会话工作区改动）— 均为他变更/并行会话（2026-10-13-change-files-refresh-sync 等）产物，不属本变更（verify 对账已剔除并行声明文件）。
+- module-impact 列而 diff 无（3）：changelog×2 + _module-map.yaml — 三者均已随 f2d9879bb 提交进主仓历史，工作区 diff 不再含属预期，更新结果表保持 done/skipped 不变。
 
 规则：execute/verify 完成文档同步后把对应行回填 done；确定不同步的行改 skipped 并在操作列写明原因。

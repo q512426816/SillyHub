@@ -2693,3 +2693,21 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
 理由：最大风险是共享文件混提交：turn-segment-views.tsx / session-panel-page.tsx 工作区带有进行中变更（2026-10-13-subagent-stub-reconcile、2026-10-13-session-taskwakeup-hide）的未提交 hunk，本变更提交必须选择性暂存（git add -p 仅取本变更 hunk），禁止整文件 add 裹挟。次要风险：①「running→终态对账提权」与 stub-reconcile 的「元数据>对账>段三态」优先级契约交叉——本变更只放宽 running 态方向（终态快照可收敛 running 元数据），契约在 subagentHeaderOf/reconcileTaskStatusForDisplay 注释双向写明；若其收口验证发现冲突，以并集语义（终态优先）收口。②daemon 提频的后端容量——最坏 2 条/s/call 的 usage_update 走既有落库+publish 批量管线，THINKING_FLUSH（字符/时间双节流）已是同量级先例；若后端观测到压力，时间门限 500ms→1000ms 单点可调。③dialog 旧宿主无 Provider——lookup null 路径全部回退既有推导（测试守卫）。 试过但放弃的方案：①前端按 tok/s 假插值补齐刷新（无真实增量的伪造数字，放弃）；②等待提示并入 TurnStatusBar 全局横幅（丢失时间线位置语义、与工具行信息重复，放弃）；③daemon 补发 [TASK_*] 终态行协议修复残留（动 daemon 协议面且 stub-reconcile 的快照对账已在同方向覆盖，放弃）；④段数据层收敛（turn-state reducer 把快照终态写回 segment.taskStatus）——侵入归并状态机、与装配器 [TASK_*] 路由双写打架，渲染层对账已覆盖全部消费面，放弃。
+
+## D-002@v1 落选方案 B（详情列内嵌区块）— rejected
+状态：rejected
+变更：2026-10-13-session-change-files-hover
+锚点：未记录
+最近确认：f2d9879bb
+理由：方案 B：在右侧「会话详情」列 TaskExecutionPanel 下方内嵌「关联变更」区块，点变更名开弹窗看文件树。
+否决理由：详情列仅约 320px 宽，塞变更列表+文件入口拥挤；`detailColumnVisible = !mobile && (subagentPanelOpen || detailOpen)`，详情列与子代理面板互斥且可被用户折叠，入口可见性不稳定；与用户「悬浮展示」的原始诉求不符。
+复潮条件：若未来产品决策砍掉悬浮元素、且详情列拓宽并常驻（不再与子代理面板互斥），可重新评估。
+
+## D-003@v1 落选方案 C（纯前端拼凑）— rejected
+状态：rejected
+变更：2026-10-13-session-change-files-hover
+锚点：未记录
+最近确认：f2d9879bb
+理由：方案 C：不改后端，前端用 `AgentSessionRead.change_id` + `current_change_id` 两个字段逐个 `getChange` 拼变更列表。
+否决理由：两个字段最多覆盖 2 个变更（创建绑定 + 当前绑定），`change_session_links` M:N 表才是一个会话全部关联变更的唯一真相；历史执行过的其它变更全部丢失，不满足「一个会话内多个变更、归档可展开」的核心需求；且逐个串行请求无排序/归档分组信息（还要逐条补 ChangeSummary）。
+复潮条件：若后端把关联变更全量内嵌进会话详情 DTO（目前评估为 DTO 膨胀、实时性差而否决），纯前端方案的自然上限才会解除。

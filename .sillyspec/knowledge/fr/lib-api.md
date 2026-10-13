@@ -2828,3 +2828,214 @@
   confirmed_at: null
   source_change: 2026-10-13-editpatch-fullchain
   status: active
+
+## FR-lib-api-136 会话关联变更列表端点
+变更：2026-10-13-session-change-files-hover
+状态：active
+摘要：默认场景；会话不存在或不属于该工作空间；无关联变更
+场景正文：
+- 场景：默认场景 — Given 工作空间内存在一个会话，且 `change_session_links` 表中记录了它与若干变更的关联（轻量或全量出身均可）；When 成员请求 `GET /api/workspaces/{wid}/changes/-/by-session/{session_id}`；Then 返回该会话关联的全部变更摘要 `list[ChangeSummary]`（含 `is_thin`/`current_stage`/`last_pushed_at
+- 场景：会话不存在或不属于该工作空间 — Given 请求路径中的 session_id 不存在，或会话不属于路径中的 workspace_id；When 成员请求该端点；Then 返回 404，detail MUST 为中文文案（l10n 守护测试把关）
+- 场景：无关联变更 — Given 会话存在但没有任何关联变更；When 成员请求该端点；Then 返回 200 空列表 `[]`（MUST NOT 404）
+全文：.sillyspec/changes/archive/2026-10-13-session-change-files-hover/requirements.md#FR-01
+最近确认：f2d9879bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-change-files-hover:task-01:acc-0-bc16f91c
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-01:acc-1-054d4452
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-01:acc-2-5530c027
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-01:acc-3-168ff57a
+  tests: backend/app/modules/change/tests/test_session_changes_endpoint.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-03:acc-0-21df490f
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-03:acc-1-f86dcbbd
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-03:acc-2-8d9031c4
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+
+## FR-lib-api-137 悬浮胶囊入口与显隐
+变更：2026-10-13-session-change-files-hover
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话页面已选中一个会话；When 该会话存在关联变更（含已归档） 该会话没有任何关联变更
+全文：.sillyspec/changes/archive/2026-10-13-session-change-files-hover/requirements.md#FR-02
+最近确认：f2d9879bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-change-files-hover:task-04:acc-0-0e39a03c
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-04:acc-1-193de68b
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-04:acc-2-cd498573
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-04:acc-3-5988c0bc
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-05:acc-0-978278a2
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-05:acc-1-b8d5e86b
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-05:acc-2-68930472
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+
+## FR-lib-api-138 hover 下拉分组列表
+变更：2026-10-13-session-change-files-hover
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 胶囊入口已渲染；When 用户鼠标悬浮入口（或触屏点击入口）
+全文：.sillyspec/changes/archive/2026-10-13-session-change-files-hover/requirements.md#FR-03
+最近确认：f2d9879bb
+
+## FR-lib-api-139 点项开大弹窗复用展示组件
+变更：2026-10-13-session-change-files-hover
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 下拉列表已展开；When 用户点击某个变更项；Then MUST 打开大弹窗（对齐 ChangeFilesCard 规格 `h-[85vh] max-w-6xl`，shadcn Dialog 惰性 mount），内嵌
+全文：.sillyspec/changes/archive/2026-10-13-session-change-files-hover/requirements.md#FR-04
+最近确认：f2d9879bb
+
+## FR-lib-api-140 文件树与列表实时刷新
+变更：2026-10-13-session-change-files-hover
+状态：active
+摘要：默认场景；autoRefreshMs 默认行为不变
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 弹窗已打开 悬浮下拉或弹窗打开；Then 弹窗内 `ChangeFileTree` MUST 以 15s 周期自动刷新文件树（新 prop `autoRefreshMs`，复用组件内 refreshTr
+- 场景：autoRefreshMs 默认行为不变 — Given 既有消费方（ChangeFilesCard、移动端变更详情）渲染 ChangeFileTree 且不传 autoRefreshMs；When 组件挂载；Then MUST 与现状行为一致（无新增定时器、无额外请求）
+全文：.sillyspec/changes/archive/2026-10-13-session-change-files-hover/requirements.md#FR-05
+最近确认：f2d9879bb
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-change-files-hover:task-02:acc-0-50ea6c7d
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-02:acc-1-c2e7fb87
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active
+- row: 2026-10-13-session-change-files-hover:task-02:acc-2-31d7ec10
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-change-files-hover
+  status: active

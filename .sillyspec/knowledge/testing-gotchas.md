@@ -117,3 +117,8 @@ sillyhub-daemon 的 vitest.config.ts include 仅 `tests/**/*.test.ts`——src �
 - ⑧ **协议 MSG 常量增删**（sillyhub-daemon/src/protocol.ts MSG 表）→ MSG 总数钉 N→N+1 并补键值回归用例（`tests/protocol-session-contract.test.ts`；0b09d1555 加 SILLYSPEC_TOMBSTONE_CLEANUP 24→25 漏跟、2026-10-11 CI 清偿实证）。
 - 通用口径：契约源码处已加一行「同步提醒」注释指向钉子测试（①在测试内自载、②~⑧在源码），本条目作总索引；新出现的共享断言面按同款登记（条目+源码注释+闸门规则三处同步）。**机制化闸门（2026-10-11-assertion-surface-guard）**：pre-commit hook `assertion-surfaces`（backend/.pre-commit-config.yaml）跑 `scripts/check-assertion-surfaces.py`——契约源被触碰而配对钉子测试不在同一提交时 fail-closed（迁移为文件级触发，其余为 diff 内容锚触发防注释级误拦）；规则清单与脚本 RULES 两处同步登记。
 - 来源：2026-10-08-shared-assertion-surfaces（2026-10-07-ci-failures-sweep / 2026-10-08-ci-sweep-2 两轮复盘收敛）；⑦⑧ 与机制化闸门：2026-10-11-assertion-surface-guard（本周 CI 清偿 4 处漏跟复盘）
+
+## 前端：fake timers 下 testing-library waitFor 不推进——挂载微任务用 advanceTimersByTimeAsync(0) 排干
+
+vi.useFakeTimers() 后用 waitFor 等「挂载 effect 的异步链已发出请求」会挂满 testTimeout：fake timers 冻结了 waitFor 轮询依赖的计时器（vitest waitFor 走 setInterval），微任务队列又不随真实时间推进。修法：挂载后直接 await vi.advanceTimersByTimeAsync(0)（零毫秒但排干微任务队列，初始请求落地）再断言 mock 已调用；后续周期断言用 advanceTimersByTimeAsync(ms) 同步推进（fake timers 与 fake microtasks 需同源推进，advanceTimersByTimeAsync 两者都排）。实证：2026-10-13-session-change-files-hover task-02 change-file-tree-autorefresh.test.tsx 首跑 3 用例 45s 全超时挂，改后 3/3 绿 125ms。
+- 来源：2026-10-13-session-change-files-hover（task-02 测试调通实证）

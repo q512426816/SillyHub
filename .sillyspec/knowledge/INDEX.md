@@ -123,6 +123,7 @@
 - daemon|测试目录|双目录|app/modules/daemon/tests|tests/modules/daemon → [后端：daemon 模块测试双目录惯例（app/modules/daemon/tests/ 为主）](testing-gotchas.md#后端daemon-模块测试双目录惯例appmodulesdaemontests-为主)
 - jsdom|avatar|avatarimage|window.image|objecturl|stub → [前端：jsdom 下 shadcn/Radix Avatar 的 AvatarImage 永不渲染，需 stub window.Image](testing-gotchas.md#前端jsdom-下-shadcnradix-avatar-的-avatarimage-永不渲染需-stub-windowimage)
 - git bash|e2e|/tmp|curl|json|sqlite|dev 后端 → [Git Bash 本地 e2e 验收环境坑：/tmp 路径分叉、curl 多行 JSON 传参、无 PG 起 dev 后端](testing-gotchas.md#git-bash-本地-e2e-验收环境坑tmp-路径分叉curl-多行-json-传参无-pg-起-dev-后端)
+- vitest|fake timers|waitFor|advanceTimersByTimeAsync|useFakeTimers|微任务 → [fake timers 下 waitFor 不推进](testing-gotchas.md#前端fake-timers-下-testing-library-waitfor-不-推进挂载微任务用-advancetimersbytimeasync0-排干)
 
 ## Uncategorized（暂存区，未加索引）
 
