@@ -2679,3 +2679,17 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：7b08406b35298e9620bb41056530a531114d5c60
 理由：最大风险：响应体积——structuredPatch 大文件可达数十 KB，messages 窗口多条 patch 叠加膨胀。缓解：daemon 侧 64KB all-or-nothing 上限（残缺 JSON 无消费价值）+ 既有 200 段窗口/20MB 预算守门；超限走无 patch 回退不炸。 放弃的方案：(a) backend 用 extra="allow" 泛化透传 daemon 全部新字段——放宽契约面，字段漂移不可见，违背逐字对齐纪律，放弃（仍显式声明）；(b) edit_patch 附着到 tool_use 段——源数据在载体行（tool_result 侧），放 use 段要跨段回填，放弃；(c) 超限截断 JSON 而非整体丢弃——残缺 JSON 必然 parse 失败等价于丢弃但携带幻觉风险，放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-editpatch-p3-cleanup
+锚点：未记录
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+理由：风险极低：判定收紧只会让更多超大 patch 走既有的无 patch 回退（前端 parseStructuredPatch 遇非法/超大本就回退全文/两块展示），不存在数据正确性风险；Buffer 在 daemon Node 运行时可用（同文件 20MB 预算先例）。 放弃的方案：(a) 把上限常量同步调大（如 256KB）——评审 P3 指向的是计量口径错误而非阈值大小，64KB 是上变更刚定的披露边界，无新证据不改阈值；(b) 用 TextEncoder 手算字节数——Buffer.byteLength 是同文件既有口径且更直接，放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-turn-live-visibility
+锚点：未记录
+最近确认：0263cbbc50af7e9d078a5a325417a09e1af4c128
+理由：最大风险是共享文件混提交：turn-segment-views.tsx / session-panel-page.tsx 工作区带有进行中变更（2026-10-13-subagent-stub-reconcile、2026-10-13-session-taskwakeup-hide）的未提交 hunk，本变更提交必须选择性暂存（git add -p 仅取本变更 hunk），禁止整文件 add 裹挟。次要风险：①「running→终态对账提权」与 stub-reconcile 的「元数据>对账>段三态」优先级契约交叉——本变更只放宽 running 态方向（终态快照可收敛 running 元数据），契约在 subagentHeaderOf/reconcileTaskStatusForDisplay 注释双向写明；若其收口验证发现冲突，以并集语义（终态优先）收口。②daemon 提频的后端容量——最坏 2 条/s/call 的 usage_update 走既有落库+publish 批量管线，THINKING_FLUSH（字符/时间双节流）已是同量级先例；若后端观测到压力，时间门限 500ms→1000ms 单点可调。③dialog 旧宿主无 Provider——lookup null 路径全部回退既有推导（测试守卫）。 试过但放弃的方案：①前端按 tok/s 假插值补齐刷新（无真实增量的伪造数字，放弃）；②等待提示并入 TurnStatusBar 全局横幅（丢失时间线位置语义、与工具行信息重复，放弃）；③daemon 补发 [TASK_*] 终态行协议修复残留（动 daemon 协议面且 stub-reconcile 的快照对账已在同方向覆盖，放弃）；④段数据层收敛（turn-state reducer 把快照终态写回 segment.taskStatus）——侵入归并状态机、与装配器 [TASK_*] 路由双写打架，渲染层对账已覆盖全部消费面，放弃。

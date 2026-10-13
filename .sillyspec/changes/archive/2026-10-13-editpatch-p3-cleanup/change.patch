@@ -1,0 +1,146 @@
+diff --git a/frontend/src/components/daemon/__tests__/agent-log-card.test.tsx b/frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
+index 9f75879bc..afb048ef0 100644
+--- a/frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
++++ b/frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
+@@ -633,6 +633,65 @@ describe("查看内容 · 对话化渲染（status=parsed）", () => {
+     // 禁止「执行中 ⏳」假运行语义（含 ToolCallPreview 待审批 pending 态文案）。
+     expect(screen.queryByText(/执行中|待审批/)).not.toBeInTheDocument();
+   });
++
++  // 2026-10-13-editpatch-p3-cleanup：result.edit_patch → segment.editPatch →
++  // ToolCallPreview 直连断言（真实渲染路径，patch 被 Write/Edit 预览消费出
++  // 变更对比区即证明全链通）。
++  it("edit_patch 直连：tool_result 段携带 structuredPatch 时 Write/Edit 卡渲染变更对比 diff", async () => {
++    const patch = JSON.stringify([
++      { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old-line", "+new-A", "+new-B"] },
++    ]);
++    agentLogsApi.listAgentLogs.mockResolvedValue({ items: [makeItem()] });
++    agentLogsApi.readAgentLogMessages.mockResolvedValue(
++      parsedMessagesResponse([
++        makeMsg({
++          seq: 1,
++          kind: "tool_use",
++          tool_name: "Write",
++          tool_use_id: "tu-w-1",
++          tool_input: JSON.stringify({ file_path: "src/a.ts", content: "new-A\nnew-B" }),
++        }),
++        makeMsg({
++          seq: 2,
++          kind: "tool_result",
++          tool_use_id: "tu-w-1",
++          tool_result: "updated",
++          is_error: false,
++          edit_patch: patch,
++        }),
++        makeMsg({
++          seq: 3,
++          kind: "tool_use",
++          tool_name: "Edit",
++          tool_use_id: "tu-e-2",
++          tool_input: JSON.stringify({
++            file_path: "src/a.ts",
++            old_string: "old-line",
++            new_string: "new-A",
++          }),
++        }),
++        makeMsg({
++          seq: 4,
++          kind: "tool_result",
++          tool_use_id: "tu-e-2",
++          tool_result: "updated",
++          is_error: false,
++          edit_patch: patch,
++        }),
++      ]),
++    );
++    setupCard();
++    await openEntries();
++
++    fireEvent.click(screen.getByTestId("agent-log-content-toggle"));
++    await screen.findByTestId("agent-log-conversation-stream");
++
++    // Write 卡：diff 行红删绿增 + 覆盖写入标题（edit_patch 已穿透到预览；
++    // Edit 卡同 patch 也渲染 old-line，取首个 del 行断言行底）。
++    const delRow = screen.getAllByText("old-line")[0]?.closest("div.flex");
++    expect(delRow?.className).toContain("bg-red-500/10");
++    expect(screen.getByText(/变更对比（覆盖写入 \+2 −1）/)).toBeInTheDocument();
++  });
+ });
+ 
+ /* ───────── 6b. 查看内容 · 静默回落四通道（task-05 新增） ───────── */
+diff --git a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+index d9138e70d..8bd621dca 100644
+--- a/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
++++ b/sillyhub-daemon/src/agent-log/parse-claude-code-jsonl.ts
+@@ -69,9 +69,11 @@ const TOOL_RESULT_MAX_CHARS = 4096;
+ 
+ /**
+  * edit_patch（structuredPatch 序列化）附着上限：超 64KB 整体不附着——残缺 JSON
+- * 对前端 parseStructuredPatch 无消费价值，all-or-nothing（2026-10-13-editpatch-fullchain）。
++ * 对前端 parseStructuredPatch 无消费价值，all-or-nothing
++ * （2026-10-13-editpatch-fullchain；按 UTF-8 字节计——Buffer.byteLength，
++ * 2026-10-13-editpatch-p3-cleanup 收编评审 P3：字符计对 CJK 会低估体积）。
+  */
+-const EDIT_PATCH_MAX_CHARS = 64_000;
++const EDIT_PATCH_MAX_BYTES = 64_000;
+ 
+ /**
+  * R-06 注入前缀白名单：文本以任一前缀开头 → sender='system_event'。
+@@ -383,8 +385,8 @@ function makeSegment(
+ /**
+  * 抽取载体行顶层 toolUseResult.structuredPatch（claude-code 把 Edit/Write 覆盖写
+  * 的 hunks 放在行顶层，实证 2026-10-13-write-tool-diff 抽样）→ JSON 串；非记录 /
+- * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化超 EDIT_PATCH_MAX_CHARS
+- * → undefined（all-or-nothing，残缺 JSON 无消费价值）。
++ * 无 structuredPatch / 空数组 / 非数组 → undefined；序列化 UTF-8 字节数超
++ * EDIT_PATCH_MAX_BYTES → undefined（all-or-nothing，残缺 JSON 无消费价值）。
+  */
+ function extractEditPatch(line: Record<string, unknown>): string | undefined {
+   const tur = line.toolUseResult;
+@@ -393,7 +395,8 @@ function extractEditPatch(line: Record<string, unknown>): string | undefined {
+   if (!Array.isArray(patch) || patch.length === 0) return undefined;
+   try {
+     const json = JSON.stringify(patch);
+-    if (json === undefined || json.length > EDIT_PATCH_MAX_CHARS) return undefined;
++    if (json === undefined) return undefined;
++    if (Buffer.byteLength(json, 'utf8') > EDIT_PATCH_MAX_BYTES) return undefined;
+     return json;
+   } catch {
+     return undefined;
+diff --git a/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts b/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+index eaf6570d9..24060756b 100644
+--- a/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
++++ b/sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+@@ -326,6 +326,32 @@ describe('parseClaudeCodeJsonlLog — user 行归一（C4 / D-003@v1 / R-06）',
+     expect(tr?.edit_patch).toBeUndefined();
+   });
+ 
++  it('上限按 UTF-8 字节计（2026-10-13-editpatch-p3-cleanup）：CJK patch 字符数低于 64000 但字节超限 → 不附着；字节不超限 → 附着', async () => {
++    // 30_000 个 CJK 字符 = 90_000 UTF-8 字节（> 64_000）但仅 30_000 字符（< 64_000）
++    // ——按字符计会误附着，按字节计必须丢弃。
++    const cjkLine = '删'.repeat(30_000);
++    const overPatch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${cjkLine}`] }];
++    // 10_000 个 CJK 字符 = 30_000 UTF-8 字节（≤ 64_000）→ 正常附着。
++    const okLine = '删'.repeat(10_000);
++    const okPatch = [{ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: [`.${okLine}`] }];
++    const content = jsonl(
++      asstLine([{ type: 'tool_use', id: 'tu_cjk1', name: 'Write', input: {} }]),
++      userLineWithToolUseResult(
++        [{ tool_use_id: 'tu_cjk1', type: 'tool_result', content: 'ok' }],
++        { type: 'update', structuredPatch: overPatch },
++      ),
++      userLineWithToolUseResult(
++        [{ tool_use_id: 'tu_cjk1', type: 'tool_result', content: 'ok' }],
++        { type: 'update', structuredPatch: okPatch },
++      ),
++    );
++    const result = await parseClaudeCodeJsonlLog(content);
++    const toolResults = ofKind(result.messages, 'tool_result');
++    expect(toolResults).toHaveLength(2);
++    expect(toolResults[0]?.edit_patch).toBeUndefined();
++    expect(toolResults[1]?.edit_patch).toBe(JSON.stringify(okPatch));
++  });
++
+   it('user 数组含 text 块 → user_input 段（text 原文 + sender 归一），不因数组形状丢弃', async () => {
+     const content = jsonl(
+       userLine([{ type: 'text', text: '数组携带的真人输入' }], { isMeta: false }),

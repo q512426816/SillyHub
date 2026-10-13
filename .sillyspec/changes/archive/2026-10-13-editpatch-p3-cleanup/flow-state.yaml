@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 UTF-16 字符计（64_000），CJK patch 字节数可超 64KB 仍附着——改按 UTF-8
+  字节计（Buffer.byteLength）；②agent-log-card 的 result.edit_patch → segment.editPatch → ToolCallPreview 接线无直接断言——补装配直连用例
+
+  成功标准：
+
+  - daemon edit_patch 上限按 UTF-8 字节判定，CJK 大 patch 超限不附着（新用例覆盖）
+
+  - agent-log-card 装配测试断言 edit_patch 直连透传到 ToolCallPreview（新用例覆盖）
+
+  - 相关 daemon/frontend 测试通过，既有行为零回归
+autopilot: false
+baseline_commit: ba141f9d954fa1f91a728fa00b67ee03988440e2
+updatedAt: '2026-10-13T04:48:31.615Z'
+baseline_sha256: 379c1a0471d56cba7cefdab0edf182bafe6a59388f8af2290c6bfdd55117a4a3
+spec_approved: true
+spec_approved_at: '2026-10-13T04:43:54.769Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(jsx2)（8.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013044433\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（9.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261013044433\test-result.json｜门文件
+  3 个
+

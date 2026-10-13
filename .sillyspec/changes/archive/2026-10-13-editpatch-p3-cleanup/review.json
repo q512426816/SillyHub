@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-editpatch-p3-cleanup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "0263cbbc50af7e9d078a5a325417a09e1af4c128",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 接口契约「附着结果本就是残缺/超限内容」中「残缺」表述沿袭旧注释、不精确",
+      "evidence": "旧字符计口径下附着的 CJK 超限 patch 是完整可解析 JSON（extractEditPatch 一直是 all-or-nothing 整体拒绝，从不产出残缺 JSON 附着），准确表述应为「超限内容」；表述瑕疵不影响行为正确性，且该措辞沿袭自上一变更注释非本次引入",
+      "location": ".sillyspec/changes/2026-10-13-editpatch-p3-cleanup/design.md:19"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-13T12:48:04+08:00"
+}
