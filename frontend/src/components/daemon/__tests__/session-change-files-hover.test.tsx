@@ -78,7 +78,10 @@ async function openPopover() {
   await screen.findByTestId("session-change-popover");
 }
 
-/** 触发 antd v6 Select 选某选项（mousedown 打开 portal 下拉 + click 选项）。 */
+/** 触发 antd v6 Select 选某选项（mousedown 打开下拉 + click 选项）。
+ * 2026-10-13-session-changefiles-select-fix：断言下拉挂进 DialogContent
+ * （getPopupContainer=closest role=dialog）——radix modal 下 body 层
+ * pointer-events:none，挂 body 的选项在真实浏览器点不动且触发 outside-close。 */
 async function selectAntdOption(optionText: string) {
   const zone = document.querySelector(".ant-select") as HTMLElement;
   expect(zone).toBeTruthy();
@@ -93,6 +96,8 @@ async function selectAntdOption(optionText: string) {
     },
     { timeout: 3000 },
   );
+  // 挂载位置守护：下拉 DOM 必须位于弹窗（role=dialog）内
+  expect(option.closest('[role="dialog"]')).not.toBeNull();
   fireEvent.mouseDown(option);
   fireEvent.click(option);
 }
@@ -140,6 +145,23 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     // 归档项默认收起
     expect(screen.queryByTestId("session-change-item-2026-10-12-old-change")).toBeNull();
     expect(screen.getByTestId("session-change-archive-toggle").textContent).toContain("已归档（1）");
+  });
+
+  it("轻量变更进行中（current_stage=thin）阶段标签为「干活中」——不拼出「轻量·轻量变更」重复", async () => {
+    // 2026-10-13 用户实测反馈：is_thin 徽标「轻量」+ thin 阶段映射「轻量变更」
+    // 拼成「轻量·轻量变更」。修复口径=原型「干活中」。
+    const thinRunning = change({
+      id: "c-thin",
+      change_key: "2026-10-13-fire-unitadd-form-import",
+      current_stage: "thin",
+      is_thin: true,
+    });
+    mockData([thinRunning]);
+    render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    await openPopover();
+
+    expect(screen.getByText("干活中")).toBeTruthy();
+    expect(screen.queryByText("轻量变更")).toBeNull();
   });
 
   it("已归档组点击展开/再收起", async () => {

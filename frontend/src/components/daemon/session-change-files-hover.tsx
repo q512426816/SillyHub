@@ -54,6 +54,10 @@ export function splitByArchive(changes: ChangeSummary[]): {
 function stageLabel(c: ChangeSummary): string {
   if (c.location === "archive") return "已归档";
   if (!c.current_stage) return "未开始";
+  // 轻量变更进行中（flow start 后 current_stage='thin'）：原型口径「干活中」
+  // ——WORKFLOW_STAGE_LABELS.thin 是「轻量变更」，直接映射会与 is_thin 徽标
+  // 「轻量」拼出「轻量·轻量变更」重复（2026-10-13 用户实测反馈）。
+  if (c.current_stage === "thin") return "干活中";
   return WORKFLOW_STAGE_LABELS[c.current_stage] ?? c.current_stage;
 }
 
@@ -205,6 +209,15 @@ export function SessionChangeFilesHover({
                 options={selectOptions}
                 className="min-w-0 max-w-[360px] flex-1"
                 data-testid="session-change-select"
+                // 2026-10-13 用户实测「下拉项选择不了」修复：radix Dialog modal 对
+                // body 设 pointer-events:none（仅 DialogContent 内恢复），antd 下拉
+                // 默认 portal 到 body → 选项点不动且点按触发弹窗 outside-close。
+                // 挂进 DialogContent（role=dialog）内：pointer-events 恢复、层级随
+                // 弹窗、radix 不计 outside（下拉交互不再误关弹窗）。
+                getPopupContainer={(trigger) =>
+                  (trigger.closest('[role="dialog"]') as HTMLElement | null) ??
+                  document.body
+                }
               />
               <DialogDescription className="shrink-0 text-[11px]">
                 与变更文件页同组件 · 15 秒自动刷新
