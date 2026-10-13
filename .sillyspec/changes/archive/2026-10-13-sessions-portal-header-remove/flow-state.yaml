@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,7 +28,7 @@ input: >-
   - 相关单测更新并通过（sessions-portal / sessions page 冒烟），不破坏其它会话功能断言。
 autopilot: true
 baseline_commit: 13c7d29c9768627aeb07b04ed248c0661d052f8a
-updatedAt: '2026-10-13T09:11:50.022Z'
+updatedAt: '2026-10-13T09:18:37.605Z'
 baseline_sha256: bf30886943d3cfc617e873b78ac0d970d6f45dd3bee616364e6501d57b3ddff4
 gate_summary: >-
   test: passed ← module[]+deps(jsx10)+fr(9)（36.9s）

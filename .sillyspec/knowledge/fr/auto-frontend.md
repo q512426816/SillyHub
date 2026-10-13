@@ -2198,3 +2198,88 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-13-session-changefiles-archive-gate
   status: active
+
+## FR-auto-frontend-211 四个入口页面不再渲染可见的标题/副标题文字块（DOM 中不再出现该副标题文案，标题仅保留无障碍隐藏语义）。
+变更：2026-10-13-sessions-portal-header-remove
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 任意用户打开 /sessions（或三 scoped 入口任一，不区分登录后数据多少） / When 页面渲染完成 / Then 视口顶部不存在「智能体会话…」
+全文：.sillyspec/changes/archive/2026-10-13-sessions-portal-header-remove/requirements.md#FR-01
+最近确认：c7a48c2e1a9d161b1f79bdff052013cdc77fb317
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「无选中：左会话列表 + 右空门户态 + 页标题语义（sr-only，页头块 2026-10-13 移除）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sessions-portal-header-remove
+  status: active
+
+## FR-auto-frontend-212 标题块移除后，下方左列表＋右面板分栏容器向上占满可用视口高度，无标题占位留下的空白。
+变更：2026-10-13-sessions-portal-header-remove
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 1440×900 视口打开 /sessions（全局 scope；workspace scope 同判定，其分栏顶边在紧凑 Git 条行之下——FR-03 优先
+全文：.sillyspec/changes/archive/2026-10-13-sessions-portal-header-remove/requirements.md#FR-02
+最近确认：c7a48c2e1a9d161b1f79bdff052013cdc77fb317
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「页头标题块移除（2026-10-13-sessions-portal-header-remove）：副标题文案不再渲染、标题降级 sr-only、分栏 flex-1 占满视口高度」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sessions-portal-header-remove
+  status: active
+
+## FR-auto-frontend-213 workspace scope 的紧凑 Git 状态条功能不回归（仍渲染且可查询到）。
+变更：2026-10-13-sessions-portal-header-remove
+状态：active
+摘要：主路径；边界
+场景正文：
+- 场景：主路径 — Given workspace scope 门户（干净工作区固件） / When 页面渲染 / Then `git-status-bar` 存在且 `data-varian
+- 场景：边界 — Given 本机无 backend / daemon 的真页渲染取证（route mock） / When 打开 /workspaces/ws-1/sessions / T
+全文：.sillyspec/changes/archive/2026-10-13-sessions-portal-header-remove/requirements.md#FR-03
+最近确认：c7a48c2e1a9d161b1f79bdff052013cdc77fb317
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sessions-portal-header-remove
+  status: active
+
+## FR-auto-frontend-214 相关单测更新并通过（sessions-portal / sessions page 冒烟），不破坏其它会话功能断言。
+变更：2026-10-13-sessions-portal-header-remove
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 改动后的工作区 / When `pnpm -C frontend exec vitest run src/components/sessions/__tests
+全文：.sillyspec/changes/archive/2026-10-13-sessions-portal-header-remove/requirements.md#FR-04
+最近确认：c7a48c2e1a9d161b1f79bdff052013cdc77fb317
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-sessions-portal-header-remove
+  status: active

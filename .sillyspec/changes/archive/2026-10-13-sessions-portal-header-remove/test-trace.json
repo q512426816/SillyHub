@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-sessions-portal-header-remove",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「页头标题块移除（2026-10-13-sessions-portal-header-remove）：副标题文案不再渲染、标题降级 sr-only、分栏 flex-1 占满视口高度」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sessions-portal-header-remove"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「无选中：左会话列表 + 右空门户态 + 页标题语义（sr-only，页头块 2026-10-13 移除）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sessions-portal-header-remove"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「页头标题块移除（2026-10-13-sessions-portal-header-remove）：副标题文案不再渲染、标题降级 sr-only、分栏 flex-1 占满视口高度」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sessions-portal-header-remove"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sessions-portal-header-remove"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-sessions-portal-header-remove:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-sessions-portal-header-remove"
+    }
+  ]
+}
