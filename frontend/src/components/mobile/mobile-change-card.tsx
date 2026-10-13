@@ -17,8 +17,9 @@
  * task-02（2026-09-16-mobile-changes-parity / FR-02，D-003 ②）补齐桌面列表同源信息：
  * - 徽标行追加活动徽标 ChangeActivityBadge（与桌面「待办状态」列同源：
  *   currentStepStatus=step_progress.current_step_status、lastPushedAt=last_pushed_at）；
- * - 元信息行：负责人三态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
- *   mono → 「—」）+ 影响组件（join(", ")，空数组整段省略 + truncate 单行）；
+ * - 元信息行：负责人四态（对齐桌面 renderOwner：owner_name → owner_id 前 8 位
+ *   mono → 兜底工作区所有者（2026-10-13-change-owner-backfill）→ 「—」）+ 影响组件
+ *   （join(", ")，空数组整段省略 + truncate 单行）；
  * - 执行用量行（UsageExecCell 移动化）：usage undefined → 整行不渲染 / null →
  *   「—」/ 有值 → 耗时 + 进行中 pill（started_at 有且 finished_at 缺）+ token·次；
  *   起止时间不展示（移动无 hover，详情页用量卡兜底）。
@@ -63,6 +64,9 @@ export interface MobileChangeCardProps {
   change: ChangeSummary;
   /** 整卡点击（列表页 → 变更详情钻取路由）。 */
   onClick: () => void;
+  /** 2026-10-13-change-owner-backfill：负责人双空时的兜底名（工作区所有者
+   * display_name，列表页传值）。可选——未传时双空保持「—」（存量调用兼容）。 */
+  fallbackOwnerName?: string | null;
 }
 
 /** 状态图标容器语义（quick-a4939946）：图标 + 语义色阶（text-<语义> + bg/border 同源）。 */
@@ -111,11 +115,14 @@ function renderTodoBadge(c: ChangeSummary) {
 }
 
 /**
- * 负责人三态（task-02 / FR-02，语义逐字对齐桌面 renderOwner）：owner_name 非空 →
- * 用户名（前景色，弱化行内可读）；owner_name 空且 owner_id 有值 → UUID 前 8 位
- * 短标识降级（mono）；双空 → 「—」（从未上行过 owner 的存量变更）。
+ * 负责人四态（task-02 / FR-02 三态 + 2026-10-13-change-owner-backfill 兜底态，
+ * 语义对齐桌面 renderOwner）：owner_name 非空 → 用户名（前景色，弱化行内可读）；
+ * owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono）；双空 →
+ * fallbackOwnerName（工作区所有者）弱化色文本；全链无值 → 「—」（从未上行过
+ * owner 的存量变更且工作区无所有者）。移动无 hover，兜底语义经弱化色与前景区分，
+ * 不做 title。
  */
-function renderOwner(c: ChangeSummary) {
+function renderOwner(c: ChangeSummary, fallbackOwnerName?: string | null) {
   if (c.owner_name) {
     return <span className="text-foreground">{c.owner_name}</span>;
   }
@@ -123,6 +130,9 @@ function renderOwner(c: ChangeSummary) {
     return (
       <span className="font-mono text-primary">{c.owner_id.slice(0, 8)}</span>
     );
+  }
+  if (fallbackOwnerName) {
+    return <span className="text-muted-foreground">{fallbackOwnerName}</span>;
   }
   return <span>—</span>;
 }
@@ -174,7 +184,11 @@ function renderUsageRow(usage: ChangeSummary["usage"]) {
   );
 }
 
-export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
+export function MobileChangeCard({
+  change,
+  onClick,
+  fallbackOwnerName,
+}: MobileChangeCardProps) {
   // 变更名：title 优先（人类可读），缺省降级 change_key；title 存在时 change_key
   // 作 mono 副行保留唯一标识（对齐桌面列表标题列 change_key/title 两行信息结构）。
   const displayName = change.title || change.change_key;
@@ -245,13 +259,13 @@ export function MobileChangeCard({ change, onClick }: MobileChangeCardProps) {
             lastPushedAt={change.last_pushed_at ?? null}
           />
         </span>
-        {/* 元信息行（task-02）：负责人三态 + 影响组件（空数组整段省略） */}
+        {/* 元信息行（task-02）：负责人四态 + 影响组件（空数组整段省略） */}
         <span
           data-testid="mobile-change-meta-row"
           className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground"
         >
           <span className="whitespace-nowrap">
-            负责人 {renderOwner(change)}
+            负责人 {renderOwner(change, fallbackOwnerName)}
           </span>
           {change.affected_components.length > 0 && (
             <span

@@ -8,7 +8,8 @@
  *    否则空占位 —（槽位内断言，与新增负责人/用量「—」占位区分）；
  *  - 活动徽标（task-02；task-08 补停滞态）：ChangeActivityBadge 真组件挂载
  *    （空闲/进行中/停滞三态真值表，FR-02）；
- *  - 元信息行（task-02）：负责人三态（owner_name / owner_id 前 8 位 mono / 「—」）+
+ *  - 元信息行（task-02）：负责人四态（owner_name / owner_id 前 8 位 mono /
+ *    兜底工作区所有者（2026-10-13-change-owner-backfill）/ 「—」）+
  *    影响组件（join 展示 / 空数组整段省略）；
  *  - 执行用量行（task-02）：usage 两档判空（undefined 整行不渲染 / null 「—」）+
  *    有值（耗时 + token·次）+ 进行中 pill（started_at 有且 finished_at 缺）；
@@ -157,7 +158,7 @@ describe("MobileChangeCard 活动徽标（task-02 · ChangeActivityBadge 真组�
   });
 });
 
-describe("MobileChangeCard 元信息行（task-02 · 负责人三态 + 影响组件）", () => {
+describe("MobileChangeCard 元信息行（task-02 · 负责人四态 + 影响组件）", () => {
   const metaRow = () => screen.getByTestId("mobile-change-meta-row");
 
   it("owner_name 非空 → 用户名（前景色，非 mono）", () => {
@@ -189,7 +190,22 @@ describe("MobileChangeCard 元信息行（task-02 · 负责人三态 + 影响组
     ).not.toBeInTheDocument();
   });
 
-  it("owner_name / owner_id 双空 → 元信息行内「—」占位", () => {
+  it("双空 + fallbackOwnerName → 兜底工作区所有者名（弱化色，2026-10-13-change-owner-backfill）", () => {
+    render(
+      <MobileChangeCard
+        change={makeChange()}
+        onClick={vi.fn()}
+        fallbackOwnerName="系统管理员"
+      />,
+    );
+    const owner = within(metaRow()).getByText("系统管理员");
+    expect(owner).toBeInTheDocument();
+    // 兜底语义弱化色（与真 owner 的前景色区分）
+    expect(owner.className).toContain("text-muted-foreground");
+    expect(within(metaRow()).queryByText("—")).not.toBeInTheDocument();
+  });
+
+  it("owner_name / owner_id 双空且无兜底 → 元信息行内「—」占位", () => {
     render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
     expect(within(metaRow()).getByText("—")).toBeInTheDocument();
     expect(metaRow().textContent).toContain("负责人");

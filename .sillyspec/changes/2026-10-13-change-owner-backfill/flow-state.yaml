@@ -1,0 +1,33 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：主力路径 agent 本地 CLI 写变更目录 + 平台 reparse 扫描登记，建行恒
+  owner_id=None（service.py:2852），用户在变更中心看不到责任人；列表有 owner 时也只显示首字小圆不直观。需要 reparse 建行兜底工作区所有者 + 前端显示名字文本。
+
+  成功标准：
+
+  - reparse 新建无主变更行时，负责人兜底取工作区所有者（只填新行，不覆盖已有 owner_id 的行）
+
+  - 变更列表负责人列直接显示 owner_name 文本（不再只显示首字小圆）
+
+  - 无 owner 的行负责人列兜底显示工作区所有者名字而非「—」
+
+  - 后端 reparse owner 兜底有单测覆盖（新建行兜底填充 / 已有 owner 不覆盖）
+
+  - 前端负责人渲染相关测试通过
+autopilot: false
+baseline_commit: da11a50fb3142c56280fa7283642cdf347a093a8
+updatedAt: '2026-10-13T15:13:17.785Z'
+cross_baselines:
+  sillyspec: 4f72da41af8fadc6dbe4e66570682ff3b10eb0e6
+baseline_sha256: c244e748c74ea37f373d737ff203667768935ed39658d42d4d30cfc4285469fd
+spec_approved: true
+spec_approved_at: '2026-10-13T15:13:17.785Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

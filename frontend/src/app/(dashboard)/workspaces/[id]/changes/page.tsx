@@ -482,28 +482,53 @@ export default function ChangesPage({ params }: Props) {
     return "open";
   };
 
-  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token）三态语义保留：
-  // owner 头像（原型 issue-side 20px 圆形首字符）：owner_name → 首字符；owner_id → 前 1 位 mono；双空 → "—"。
-  const renderOwnerAvatar = (c: ChangeSummary): ReactNode => {
+  // 负责人渲染（task-05 / FR-04，2026-08-16-change-owner-from-token →
+  // 2026-10-13-change-owner-backfill）四态语义：
+  // owner_name → 首字头像 + 名字文本（此前只显首字小圆，不悬浮认不出是谁）；
+  // owner_id → ID 前 8 位 mono 文本；双空 → 兜底工作区所有者名字（reparse 主力
+  // 路径建行 owner 恒空是历史大面积缺口的根因，新建行后端已兜底，存量行走此
+  // 展示层兜底，title 标注兜底语义）；全链无值 → "—"。
+  const renderOwner = (c: ChangeSummary): ReactNode => {
     if (c.owner_name) {
       return (
         <span
           title={`负责人 ${c.owner_name}`}
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
-          style={{ backgroundColor: "var(--color-brand-50)" }}
+          className="flex items-center gap-1 whitespace-nowrap"
         >
-          {c.owner_name.slice(0, 1).toUpperCase()}
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
+            style={{ backgroundColor: "var(--color-brand-50)" }}
+          >
+            {c.owner_name.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="text-xs text-foreground">{c.owner_name}</span>
         </span>
       );
     }
     if (c.owner_id) {
       return (
         <span
-          title={`负责人 ${c.owner_id.slice(0, 8)}`}
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] text-primary"
-          style={{ backgroundColor: "var(--color-brand-50)" }}
+          title={`负责人 ${c.owner_id}`}
+          className="whitespace-nowrap font-mono text-xs text-muted-foreground"
         >
-          {c.owner_id.slice(0, 1).toUpperCase()}
+          {c.owner_id.slice(0, 8)}
+        </span>
+      );
+    }
+    const fallbackName = workspace?.owner?.display_name;
+    if (fallbackName) {
+      return (
+        <span
+          title={`负责人未指派，默认工作区所有者 ${fallbackName}`}
+          className="flex items-center gap-1 whitespace-nowrap"
+        >
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-primary"
+            style={{ backgroundColor: "var(--color-brand-50)" }}
+          >
+            {fallbackName.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="text-xs text-muted-foreground">{fallbackName}</span>
         </span>
       );
     }
@@ -583,7 +608,7 @@ export default function ChangesPage({ params }: Props) {
             stage={c.current_stage ?? "scan"}
             stepProgress={c.step_progress ?? null}
           />
-          {renderOwnerAvatar(c)}
+          {renderOwner(c)}
           <span
             style={{ minWidth: 112 }}
             className="whitespace-nowrap text-right font-mono text-xs text-muted-foreground"

@@ -196,9 +196,10 @@ function renderPage() {
   return { ...utils, client, invalidateSpy };
 }
 
-/** render + 等 workspace 名出现在副标题（确保主 load 已 resolve）。 */
-async function renderAndWait() {
-  mocks.getWorkspace.mockResolvedValue(makeWorkspace());
+/** render + 等 workspace 名出现在副标题（确保主 load 已 resolve）。
+ * ws 可选：传自定义 workspace（如无 owner / 指定 display_name 的兜底用例）。 */
+async function renderAndWait(ws?: Workspace) {
+  mocks.getWorkspace.mockResolvedValue(ws ?? makeWorkspace());
   const utils = renderPage();
   // 等 workspace 名出现在副标题（避免与徽标/owner 列的 "—" 撞）。
   await waitFor(() =>
@@ -494,7 +495,9 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.queryByText("待提案审核")).not.toBeInTheDocument();
     expect(screen.queryByText("阻塞中")).not.toBeInTheDocument();
     // owner_id 降级渲染（UUID 前 8 位 mono）仍在
-    expect(screen.getByText("O").getAttribute("title")).toBe("负责人 owner123");
+    expect(screen.getByText("owner123").getAttribute("title")).toBe(
+      "负责人 owner1234",
+    );
   });
 
   // ── 4. 空状态引导（task-09 / FR-04a：去表单，引导会话页）──────────────
@@ -573,9 +576,10 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     );
   });
 
-  // ── 6. 负责人列（task-05 / FR-04 三态：owner_name 优先 / UUID 前 8 位 / —）──
+  // ── 6. 负责人列（task-05 / FR-04 四态：owner_name 文本 / UUID 前 8 位 /
+  //        兜底工作区所有者 / —；2026-10-13-change-owner-backfill 改版）──
 
-  it("owner_name 有值 → 优先显示用户名（2026-08-16-change-owner-from-token task-05）", async () => {
+  it("owner_name 有值 → 首字头像 + 名字文本（title 携带完整名）", async () => {
     setupListChanges({
       items: [
         makeChange({
@@ -587,11 +591,15 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     });
     await renderAndWait();
     // 用户名优先（owner_id 存在也不走 UUID 短标识）
-    // 头像渲染 owner_name 首字符，title 携带完整名
-    expect(screen.getByText("Q").getAttribute("title")).toBe("负责人 qinyi");
+    // 头像渲染 owner_name 首字符；title 在外层容器（2026-10-13 改版后携带完整名）
+    expect(
+      screen.getByText("Q").closest("[title]")?.getAttribute("title"),
+    ).toBe("负责人 qinyi");
+    // 2026-10-13-change-owner-backfill：名字文本直显（不再只显示首字小圆）
+    expect(screen.getByText("qinyi")).toBeInTheDocument();
   });
 
-  it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono）", async () => {
+  it("owner_name 空 + owner_id 有值 → 降级 UUID 前 8 位短标识（mono，title 完整 ID）", async () => {
     setupListChanges({
       items: [
         makeChange({
@@ -602,16 +610,35 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       ],
     });
     await renderAndWait();
-    expect(screen.getByText("A").getAttribute("title")).toBe("负责人 abcdef12");
+    expect(screen.getByText("abcdef12").getAttribute("title")).toBe(
+      "负责人 abcdef1234567890abcd",
+    );
   });
 
-  it("owner_name / owner_id 双空 → 占位 —（pending_review 设值避免徽标双源 —）", async () => {
+  it("双空 → 兜底显示工作区所有者名字（title 标注兜底语义）", async () => {
     setupListChanges({
       items: [
         makeChange({ owner_id: null, owner_name: null, pending_review: "proposal_review" }),
       ],
     });
-    await renderAndWait();
+    // display_name 用多字名（"O" 单字会让头像与文本撞 getByText）
+    await renderAndWait({
+      ...makeWorkspace(),
+      owner: { user_id: "u1", email: "o@t.com", display_name: "系统管理员" },
+    });
+    expect(screen.getByText("系统管理员")).toBeInTheDocument();
+    expect(
+      screen.getByText("系统管理员").closest("[title]")?.getAttribute("title"),
+    ).toBe("负责人未指派，默认工作区所有者 系统管理员");
+  });
+
+  it("双空 + 工作区无所有者 → 占位 —", async () => {
+    setupListChanges({
+      items: [
+        makeChange({ owner_id: null, owner_name: null, pending_review: "proposal_review" }),
+      ],
+    });
+    await renderAndWait({ ...makeWorkspace(), owner: null });
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 

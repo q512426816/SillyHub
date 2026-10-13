@@ -1291,6 +1291,8 @@ export default function MobileChangesPage() {
                 renderCard={(c) => (
                   <MobileChangeCard
                     change={c}
+                    // 2026-10-13-change-owner-backfill：负责人双空兜底工作区所有者
+                    fallbackOwnerName={workspace?.owner?.display_name ?? null}
                     onClick={() =>
                       router.push(
                         `/m/workspaces/${workspaceId}/changes/${c.id}`,
