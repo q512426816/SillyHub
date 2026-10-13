@@ -512,6 +512,30 @@ describe("tryParseTimeline", () => {
     expect(tryParseTimeline("# 普通文档\n\n正文而已")).toBeNull();
     expect(tryParseTimeline("")).toBeNull();
   });
+
+  it("真实归档任务行形态：未勾（无时刻）排尾部，无提交锚⚠️/— 尾标剥离不进描述", () => {
+    // 形态取自归档 2026-09-28-drop-observation-card（未勾+—）与
+    // 2026-09-23-md-card-render（无提交锚⚠️），评审 P2 修正
+    const data = tryParseTimeline(
+      [
+        "── 事件时间轴 ──",
+        "05:00:00  🁢 变更诞生",
+        "",
+        "── 任务面（勾选时刻 ≈ 顺序推断）──",
+        "task-02  未勾          第二条未勾任务            —",
+        "task-01  ≈06:05:57   先做的任务描述…  无提交锚⚠️",
+        "task-03  未勾          第三条未勾任务            —",
+      ].join("\n"),
+    )!;
+    expect(data).not.toBeNull();
+    expect(data.tasks).toEqual([
+      { id: "task-01", time: "≈06:05:57", desc: "先做的任务描述…", commit: null },
+      { id: "task-02", time: "未勾", desc: "第二条未勾任务", commit: null },
+      { id: "task-03", time: "未勾", desc: "第三条未勾任务", commit: null },
+    ]);
+    // 任务行不落脚注
+    expect(data.footnotes).toEqual([]);
+  });
 });
 
 describe("TimelineView", () => {

@@ -842,10 +842,12 @@ export type TimelineData = {
 const TIMELINE_SECTION_RE = /^──\s*(.+?)\s*──$/;
 /** 事件行：`HH:MM[:SS]  事件文本`（秒段可缺，间隔一个以上空白）。 */
 const TIMELINE_EVENT_RE = /^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/;
-/** 任务行：`task-NN  ≈HH:MM:SS  描述  提交短哈希`（≈ 与哈希均可缺）。 */
-const TIMELINE_TASK_RE = /^(task-\S+)\s+(≈?\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/;
+/** 任务行：`task-NN  ≈HH:MM:SS  描述  提交短哈希`（未勾任务时刻为「未勾」字样）。 */
+const TIMELINE_TASK_RE = /^(task-\S+)\s+(≈?\d{1,2}:\d{2}(?::\d{2})?|未勾)\s+(.+)$/;
 /** 任务描述尾部的 git 提交短哈希（7-12 位十六进制）。 */
 const TIMELINE_COMMIT_TAIL_RE = /\s+([0-9a-f]{7,12})$/;
+/** 任务描述尾部的「无提交锚」标记（⚠️ 含变体选择符，用 \S* 容错）或占位破折号。 */
+const TIMELINE_NO_ANCHOR_TAIL_RE = /\s+(?:无提交锚\S*|—)\s*$/;
 
 /**
  * 解析 timeline.md 正文。命中「── 事件时间轴 ──」区块才返回数据（否则 null
@@ -902,6 +904,9 @@ export function tryParseTimeline(text: string): TimelineData | null {
         if (cm !== null) {
           commit = cm[1] ?? null;
           desc = desc.slice(0, cm.index).trim();
+        } else if (TIMELINE_NO_ANCHOR_TAIL_RE.test(desc)) {
+          // 尾标「无提交锚⚠️ / —」不是描述正文，剥离且不当作提交锚
+          desc = desc.replace(TIMELINE_NO_ANCHOR_TAIL_RE, "").trimEnd();
         }
         data.tasks.push({ id: m[1] ?? "", time: m[2] ?? "", desc, commit });
       } else {
@@ -912,9 +917,14 @@ export function tryParseTimeline(text: string): TimelineData | null {
     }
   }
   if (!sawEvents) return null;
+  // 按时刻升序（同日 HH:MM:SS 字典序即时间序）；「未勾」无时刻，恒排尾部
   const plain = (t: string) => t.replace("≈", "");
   data.events.sort((a, b) => a.time.localeCompare(b.time));
-  data.tasks.sort((a, b) => plain(a.time).localeCompare(plain(b.time)));
+  data.tasks.sort((a, b) => {
+    if (a.time === "未勾" && b.time !== "未勾") return 1;
+    if (b.time === "未勾" && a.time !== "未勾") return -1;
+    return plain(a.time).localeCompare(plain(b.time));
+  });
   return data;
 }
 
