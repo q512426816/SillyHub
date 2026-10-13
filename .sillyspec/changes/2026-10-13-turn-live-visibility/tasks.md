@@ -9,4 +9,4 @@ created_at: 2026-10-13T03:30:35.880Z
 - [x] task-03: FR-02 终态收敛：reconcileTaskStatusForDisplay 单向收敛纯函数 + subagentHeaderOf 接入 + deriveTurnActivity/collectSubagents 可选 lookup 参数与 TurnStatusBar 接 context（计数收敛）。验证：turn-segment-views.test.tsx 新增收敛两场景用例绿 + 既有用例回归
 - [x] task-04: FR-03 轮边界对账接线：session-panel-page 的 turn_completed 对账点追加任务快照 refreshSignal 递增（失败静默）。验证：pnpm typecheck 过 + 接线手验说明记入 progress
 - [x] task-05: FR-04 daemon 双门限：stream-json.ts 加 _lastUsageEmitAt、text_delta 双门限（≥20 token 或 ≥500ms、零增量不推）、取消真 usage 后 text_delta 拦截、message_start/message_delta emit 基线同步。验证：sillyhub-daemon tests/adapters/stream-json.test.ts 新增用例绿（含真值覆盖后基线同步）
-- [ ] task-06: 回归收口：frontend 相关测试文件全绿 + pnpm typecheck + daemon 侧 tsc/vitest 相关文件绿；确认未裹挟共享文件里其他活跃变更的 hunk（选择性暂存纪律）
+- [x] task-06: 回归收口：frontend 相关测试文件全绿 + pnpm typecheck + daemon 侧 tsc/vitest 相关文件绿；确认未裹挟共享文件里其他活跃变更的 hunk（选择性暂存纪律）

@@ -1,0 +1,34 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默可达十分钟；后台任务完成后「后台运行中」徽标/任务卡片偶发残留不消失；轮 token 统计（↑↓数字）刷新频次低。
+
+  成功标准：
+
+  - TaskOutput（block=true）运行中时，时间线该工具行显示人话摘要「等待后台任务：<任务名>」+
+  每秒跳动的已等时长（mm:ss），任务名/最后活跃时间经任务快照（agent_session_task）对账获得，查不到时优雅回退不崩
+
+  - 后台任务派发段（含子代理容器段）的 running 任务元数据在任务快照为终态时收敛为终态徽标，治理 [TASK_*] 终态事件丢失导致的永久「后台运行中」残留
+
+  - 任务面板清单在轮完成对账点（schedulePostTurnReconcile）同步重拉任务快照，终态残留卡片收敛
+
+  - daemon usage_update 估算推送从「累计 ≥20 token」改为「≥20 token 或距上次推送 ≥500ms」双门限，低速生成时 token 数字约每 0.5 秒一跳；真 usage 到达后 API call
+  进行中估算继续推送（仍被 message_delta 真值覆盖校正）
+
+  - 既有工具行/子代理块/任务卡片其余渲染与既有测试不回归
+
+  - 相关单测新增/更新并跑通
+autopilot: false
+baseline_commit: d6c9a1a8dcacb382da6683d32c552c7daaa78bbd
+updatedAt: '2026-10-13T03:41:33.913Z'
+baseline_sha256: c8116116d076b8103f4dcb104b7c66a89d02d44acbe7b207bd6ca2bcb4a7a55a
+spec_approved: true
+spec_approved_at: '2026-10-13T03:41:33.912Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
