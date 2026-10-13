@@ -85,13 +85,24 @@ scope-drift 警告仅点名 flow-state.yaml 佐证）。两条路都断了：
 
 ## 期望修复
 
+0. **thin 通道指引缺失（2026-10-13 复核补充）**：跨仓段头契约的指引目前
+   只存在于**厚流程**——brainstorm design 模板「跨仓变更写法」必读段
+   （stages/brainstorm.js：按仓分段、段头固定 `## <repo-key> 仓变更`、段内
+   仓根相对路径、禁仓名前缀/绝对路径）+ plan-postcheck 按段头对账并点名
+   段头格式错误。**thin flow start 横幅（flow.js）通篇零个「跨仓/仓变更」
+   字样**，只教了「## 文件变更清单」节+表格的通用格式——CLI 在 start 时
+   明明读得到 local.yaml 注册仓清单（loadRegisteredRepoKeys 在 done 才读），
+   却不在注册仓非空时提示跨仓写法。本工作区全部代码在跨仓、全部 UI 变更
+   走 thin，等于契约对这个形态完全不可见；
 1. **声明面自证提到空/非空共享位置**：空冻结面且 design 声明清单非空
    （剔除 `.sillyspec/` 前缀后）→ 至少 advisory 点名「声明了 N 个交付文件
    但冻结面为空」，建议升格为阻断（三选一：先提交后重跑 / 确认纯文档
    变更后 `--accept-empty-face` 显式签收留痕 / 清单裁剪同步 design）；
 2. **跨仓声明防呆的覆盖面**：现有 advisory 只在「声明路径首段 token 命中
    注册仓 key/basename」时触发（`sub-grid-security/src/...` 形态）；裸仓根
-   相对路径（`src/routes/.../LedgerForm.js`，首段 `src` 不命中）完全无告警。
+   相对路径（`src/routes/.../LedgerForm.js`，首段 `src` 不命中）与绝对路径
+   形态完全无告警——而段头规范恰恰要求段内写仓根相对路径，合规路径本身
+   就落在这个盲区里（本变更大概率即此形态，advisory 与跨仓冻结双双缺席）。
    空面 + 声明文件在主仓不存在（无论首段是否命中注册仓）就应点名，并可
    对所有 local.yaml 注册仓做一次存在性探测提示；
 3. 顺带可评估：共享主仓路径是否也补一个轻量的「窗口外同名文件交付」探测
