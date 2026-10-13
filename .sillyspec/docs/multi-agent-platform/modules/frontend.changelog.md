@@ -75,3 +75,4 @@
 - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
 - 2026-10-13-turn-nav-rail-overflow-fix | 会话页轮次导航窄轨在轮次很多时溢出面板错乱:turn-nav-rail 容器 shrink-0 导致刻度轨不随面板高度收
 - 2026-10-13-turn-nav-initial-scroll | 会话页轮次导航窄轨首挂载不滚向当前轮:P3 留债(归档件 2026-10-13-turn-nav-rail-overfl
+- 2026-10-13-change-files-view-polish | 变更文件预览的人读优化：timeline.md 裸 markdown 不像时间线、change.patch 整片红绿摊开

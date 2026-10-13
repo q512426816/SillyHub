@@ -2725,3 +2725,10 @@ supersedes：D-008@v1
 锚点：未记录
 最近确认：ca86e918a7762cc0b88ec32abe61616ea3ed56dd
 理由：最大风险：首挂载滚动在 flex 布局完成前执行的时序疑虑——useEffect 运行于 DOM commit 后，读取滚动几何会强制同步布局，且窄轨刻度高度固定（h-2.5/h-1.5）不受 markdown 异步撑高等影响，位置首挂载即最终位置，无竞态；jsdom 层以 scrollIntoView stub 断言调用事实（真实滚动行为由浏览器 block:"nearest" 标准语义担保）。 放弃的方案：① 首挂载改用 requestAnimationFrame 延帧滚动——刻度位置无异步依赖，延帧只增加闪跳窗口，无收益；② 在父层（session-panel-page）打开会话时显式触发滚轨——把组件内视觉态外泄到挂载方，破坏「受控纯组件、props 进回调出」契约（turn-catalog 先例约束）；③ 保留 mountedRef 但首渲用 useLayoutEffect 单独滚——双路径冗余，与既有 effect 维护同一语义却分两处，后续改联动易漏同步。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-13-change-files-view-polish
+锚点：未记录
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+理由：最大风险：timeline.md/change.patch 是 sillyspec CLI 生成的固定格式，未来格式漂移导致解析不命中——两边都以「不命中回落既有渲染」兜底，漂移只降级不炸（与 knownJsonView 结构特征校验同一范式）。 试过但放弃的方案：按 emoji 前缀（🁢📄🔀⚠️📝✅）枚举给时间线节点逐类着色——emoji 集与 CLI 版本耦合，漂移即漏色；改为只识别「时刻开头行」的通用正则，emoji 随事件文本原样透传，节点统一品牌色圆点，不依赖枚举。

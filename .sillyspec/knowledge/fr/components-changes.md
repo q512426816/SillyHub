@@ -150,3 +150,98 @@ created_at: 2026-09-29T09:40:28.972Z
   confirmed_at: null
   source_change: 2026-09-30-change-file-cn-align
   status: active
+
+## FR-components-changes-008 timeline.md 预览渲染为按时间排序的竖向时间线（时刻列+节点+事件文本，任务面/统计脚注分区呈现），解析失败回落原 markdown 渲染
+变更：2026-10-13-change-files-view-polish
+状态：active
+摘要：主路径；格式漂移回落
+场景正文：
+- 场景：主路径 — Given 变更目录含 sillyspec 生成的 timeline.md（含事件时间轴/任务面/脚注三段）；When 用户在变更文件树选中该文件；Then 内联预览渲染竖
+- 场景：格式漂移回落 — Given timeline.md 缺「── 事件时间轴 ──」区块（CLI 未来格式漂移）；When 选中预览；Then 按普通 markdown 渲染，不报错。
+全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-01
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-files-view-polish:flow:测试绑定FR-01
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「TimelineView：渲染时间线/任务面/脚注」 | frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseTimeline：无事件时间轴区块返回 null」 | frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseTimeline：解析事件/任务/脚注与排序」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-files-view-polish
+  status: active
+
+## FR-components-changes-009 change.patch 预览按文件折叠展示（每文件一行：路径+增删统计，默认收起，展开看该文件红绿 diff），无 diff --git 头回落整片 DiffView
+变更：2026-10-13-change-files-view-polish
+状态：active
+摘要：主路径；单文件/无头回落
+场景正文：
+- 场景：主路径 — Given change.patch 含多个文件的 unified diff；When 选中预览；Then 文件清单默认收起，点击某文件行展开仅该文件的红绿 diff。
+- 场景：单文件/无头回落 — Given patch 内容无 `diff --git` 头（或非 diff 格式）；When 选中预览；Then 渲染整片 DiffView（其内部回落纯文本），行为与现
+全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-02
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-files-view-polish:flow:测试绑定FR-02
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「PatchTreeView：默认收起、点击展开该文件 diff」 | frontend/src/components/files/__tests__/structured-views.test.tsx「tryParsePatchFiles：按 diff --git 切分文件段」 | frontend/src/components/files/__tests__/structured-views.test.tsx「tryParsePatchFiles：无 diff --git 头返回 null」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-files-view-polish
+  status: active
+
+## FR-components-changes-010 plan.md/delta.md/module-impact.md/symbol-impact.md/apply-manifest.json/verify-facts.json/scope-audit.json 在文件树与内容标题显示中文名+原名对照，与既有固定产物一致
+变更：2026-10-13-change-files-view-polish
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 变更目录含 plan.md 等固定产物；When 文件树渲染；Then 节点主显「实现计划」等中文名，原名以 muted 小字对照。
+全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-03
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-files-view-polish:flow:测试绑定FR-03
+  tests: frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-files-view-polish
+  status: active
+
+## FR-components-changes-011 内联预览与全屏预览（previewers）共用同一套新视图，不做两套渲染
+变更：2026-10-13-change-files-view-polish
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 用户在内联预览点击「全屏预览」打开 timeline.md/change.patch；Then 全屏弹窗渲染与内联同一视图组件，两处呈现一致。
+全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-04
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-change-files-view-polish:flow:测试绑定FR-04
+  tests: frontend/src/components/files/__tests__/structured-views.test.tsx「TimelineView/PatchTreeView 为共享导出，内联与全屏同源」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-change-files-view-polish
+  status: active
+
+## FR-components-changes-012 聚焦测试通过（structured-views/change-file-tree/相关 previewer），不跑全量
+变更：2026-10-13-change-files-view-polish
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 新增 TimelineView/PatchTreeView 与中文名映射；When 运行聚焦测试文件；Then 全部通过且既有用例无回归。
+全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-05
+最近确认：b6df42cbc8653f688b25f861a5c203e191486d50

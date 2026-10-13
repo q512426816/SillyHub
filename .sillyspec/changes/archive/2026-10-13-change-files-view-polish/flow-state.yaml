@@ -3,6 +3,12 @@ legacy_fallback: false
 substeps:
   artifacts: done
   ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -23,7 +29,7 @@ input: >-
   - 聚焦测试通过（structured-views/change-file-tree/相关 previewer），不跑全量
 autopilot: false
 baseline_commit: f2d9879bb9fabc0a2be06cf05fc36dfb19d51a38
-updatedAt: '2026-10-13T06:34:28.792Z'
+updatedAt: '2026-10-13T06:52:58.396Z'
 baseline_sha256: 8331cc5c8c18ef0d1d42b60f2faa0333112b9c00bb26aa20834e9823020a0615
 spec_approved: true
 spec_approved_at: '2026-10-13T06:17:08.453Z'

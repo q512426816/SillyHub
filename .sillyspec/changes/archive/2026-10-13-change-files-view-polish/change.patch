@@ -1,0 +1,1143 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index aa7b0e23e..2d6af0a59 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -40,3 +40,5 @@ created_at: 2026-08-30 22:23:33
+ - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
+ - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
++- 2026-10-13-turn-nav-rail-overflow-fix | 会话页轮次导航窄轨在轮次很多时溢出面板错乱:turn-nav-rail 容器 shrink-0 导致刻度轨不随面板高度收
++- 2026-10-13-turn-nav-initial-scroll | 会话页轮次导航窄轨首挂载不滚向当前轮:P3 留债(归档件 2026-10-13-turn-nav-rail-overfl
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 62483dde6..75e6d5144 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -73,3 +73,5 @@
+ - 2026-10-13-editpatch-fullchain | agent-log 视图 Edit 卡与会话化对话视图（agent-log-card）的 Write/Edit 卡仍无行
+ - 2026-10-13-editpatch-p3-cleanup | 收编 editpatch-fullchain 评审 P3：①daemon EDIT_PATCH_MAX_CHARS 按 
+ - 2026-10-13-turn-live-visibility | 会话运行中用户感知不到 agent 真实状态：TaskOutput 阻塞等待后台任务时时间线只显示原始 JSON 且静默
++- 2026-10-13-turn-nav-rail-overflow-fix | 会话页轮次导航窄轨在轮次很多时溢出面板错乱:turn-nav-rail 容器 shrink-0 导致刻度轨不随面板高度收
++- 2026-10-13-turn-nav-initial-scroll | 会话页轮次导航窄轨首挂载不滚向当前轮:P3 留债(归档件 2026-10-13-turn-nav-rail-overfl
+diff --git a/frontend/src/components/__tests__/change-file-tree.test.tsx b/frontend/src/components/__tests__/change-file-tree.test.tsx
+index bf39f5f3d..2597640bb 100644
+--- a/frontend/src/components/__tests__/change-file-tree.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree.test.tsx
+@@ -16,6 +16,17 @@ vi.mock("@/lib/change-files", () => ({
+     const table: Record<string, string> = {
+       "proposal.md": "变更提案",
+       "watcher-events.jsonl": "观测事件流",
++      // 2026-10-13-change-files-view-polish：新增 7 名（与 lib 真实表同步）
++      // + timeline/change.patch 两名（分发测试用，真实表本就有）
++      "timeline.md": "时间线记录",
++      "change.patch": "代码补丁",
++      "plan.md": "实现计划",
++      "delta.md": "变更增量",
++      "module-impact.md": "模块影响分析",
++      "symbol-impact.md": "符号影响面",
++      "apply-manifest.json": "应用清单",
++      "verify-facts.json": "验证事实",
++      "scope-audit.json": "范围审计",
+     };
+     return table[name.split("/").pop() ?? name] ?? null;
+   },
+@@ -400,6 +411,37 @@ describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
+     expect(modalProps.at(-1)!.target?.meta.name).toBe("proposal.md");
+   });
+ 
++  // 2026-10-13-change-files-view-polish：thin/full 常态产物中文名补齐
++  it("新增 7 个固定产物中文名主显 + 原名对照（plan/delta/两 impact/两 json）", async () => {
++    const names = [
++      ["plan.md", "实现计划"],
++      ["delta.md", "变更增量"],
++      ["module-impact.md", "模块影响分析"],
++      ["symbol-impact.md", "符号影响面"],
++      ["apply-manifest.json", "应用清单"],
++      ["verify-facts.json", "验证事实"],
++      ["scope-audit.json", "范围审计"],
++    ] as const;
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: names.map(([path]) => ({
++        path,
++        name: path,
++        size: 10,
++        last_modified_at: null,
++        is_text: true,
++      })),
++    });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("实现计划")).toBeInTheDocument());
++    for (const [, cn] of names) {
++      expect(screen.getByText(cn)).toBeInTheDocument();
++    }
++    // 原名以小字对照同场
++    expect(screen.getByText("plan.md")).toBeInTheDocument();
++    expect(screen.getByText("verify-facts.json")).toBeInTheDocument();
++  });
++
+   it("watcher-events.jsonl 内联预览：专用表格视图渲染（时刻/类型/详情）", async () => {
+     mockedListChangeFiles.mockResolvedValue({
+       change_id: "c1",
+@@ -447,3 +489,113 @@ describe("ChangeFileTree 固定产物中文名与 jsonl 预览", () => {
+     expect(document.querySelector('[data-testid="jsonl-view"]')).toBeNull();
+   });
+ });
++
++// ── 2026-10-13-change-files-view-polish：timeline.md / change.patch 内联专用视图 ──
++describe("ChangeFileTree timeline.md 与 change.patch 内联预览分发", () => {
++  const timelineContent = [
++    "# 合成时间线快照 — demo",
++    "",
++    "── 事件时间轴 ──",
++    "05:39:32  🁢 变更诞生（工件 frontmatter created_at）",
++    "06:05:57  📝 tasks.md 内容变更",
++    "",
++    "── 任务面（勾选时刻 ≈ 顺序推断）──",
++    "task-01  ≈06:05:57   先做的任务描述…  66ba4df44",
++    "",
++    "墙钟：26min｜事件 2 条｜任务 1/1 勾选",
++  ].join("\n");
++
++  const multiFilePatch = [
++    "diff --git a/src/a.ts b/src/a.ts",
++    "index 123..456 100644",
++    "--- a/src/a.ts",
++    "+++ b/src/a.ts",
++    "@@ -1,2 +1,2 @@",
++    "-old",
++    "+new",
++    "diff --git a/src/b.ts b/src/b.ts",
++    "index 789..abc 100644",
++    "--- a/src/b.ts",
++    "+++ b/src/b.ts",
++    "@@ -1 +1 @@",
++    "-x",
++    "+y",
++  ].join("\n");
++
++  it("timeline.md 结构命中 → 竖向时间线视图（时刻升序 + 任务面）", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "timeline.md", name: "timeline.md", size: 300, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({ path: "timeline.md", content: timelineContent, exists: true });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("时间线记录")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("时间线记录"));
++    await waitFor(() =>
++      expect(document.querySelector('[data-testid="timeline-view"]')).not.toBeNull(),
++    );
++    const view = document.querySelector('[data-testid="timeline-view"]')!;
++    expect(view.textContent).toContain("变更诞生");
++    expect(view.textContent).toContain("66ba4df44");
++    expect(view.textContent).toContain("墙钟：26min");
++  });
++
++  it("timeline.md 格式漂移 → 回落 markdown 渲染", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "timeline.md", name: "timeline.md", size: 50, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({ path: "timeline.md", content: "# 漂移格式\n\n正文", exists: true });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("时间线记录")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("时间线记录"));
++    await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
++    expect(document.querySelector('[data-testid="timeline-view"]')).toBeNull();
++  });
++
++  it("change.patch 多文件 → 按文件折叠树，默认收起、展开见 diff", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "change.patch", name: "change.patch", size: 300, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({ path: "change.patch", content: multiFilePatch, exists: true });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("代码补丁")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("代码补丁"));
++    await waitFor(() =>
++      expect(document.querySelector('[data-testid="patch-tree-view"]')).not.toBeNull(),
++    );
++    const view = document.querySelector('[data-testid="patch-tree-view"]')!;
++    expect(view.textContent).toContain("2 个文件");
++    expect(view.textContent).toContain("src/a.ts");
++    // 收起态无 diff 行；展开后该文件 diff 在场
++    expect(document.querySelector('[data-testid="diff-view"]')).toBeNull();
++    fireEvent.click(view.querySelector('[data-testid="patch-file-row"]')!);
++    await waitFor(() =>
++      expect(document.querySelector('[data-testid="diff-view"]')).not.toBeNull(),
++    );
++  });
++
++  it("其他 patch 文件（scope-audit.patch）→ 整片 DiffView 行为不变", async () => {
++    mockedListChangeFiles.mockResolvedValue({
++      change_id: "c1",
++      items: [
++        { path: "scope-audit.patch", name: "scope-audit.patch", size: 300, last_modified_at: null, is_text: true },
++      ],
++    });
++    mockedGetContent.mockResolvedValue({ path: "scope-audit.patch", content: multiFilePatch, exists: true });
++    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
++    await waitFor(() => expect(screen.getByText("scope-audit.patch")).toBeInTheDocument());
++    fireEvent.click(screen.getByText("scope-audit.patch"));
++    await waitFor(() =>
++      expect(document.querySelector('[data-testid="diff-view"]')).not.toBeNull(),
++    );
++    expect(document.querySelector('[data-testid="patch-tree-view"]')).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/change-file-tree.tsx b/frontend/src/components/change-file-tree.tsx
+index 8d49cfab4..3be91b251 100644
+--- a/frontend/src/components/change-file-tree.tsx
++++ b/frontend/src/components/change-file-tree.tsx
+@@ -19,7 +19,21 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
+ import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+ import { useObjectUrl } from "@/components/files/use-object-url";
+ // ql-20260917-004/010：固定结构产物可视化视图（json 表格/折叠树 + diff 红绿懒加载）
+-import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl } from "@/components/files/structured-views";
++// 2026-10-13-change-files-view-polish：timeline.md 竖向时间线 + change.patch
++// 按文件折叠树两视图同源此处，全屏 previewers 共用（FR-04 不做两套）
++import {
++  DiffView,
++  JsonView,
++  JsonlView,
++  knownJsonView,
++  knownJsonlView,
++  PatchTreeView,
++  TimelineView,
++  tryParseJson,
++  tryParseJsonl,
++  tryParsePatchFiles,
++  tryParseTimeline,
++} from "@/components/files/structured-views";
+ import { ApiError } from "@/lib/api";
+ // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
+ // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
+@@ -87,7 +101,20 @@ function FilePreview({
+   content: string;
+   remarkPlugins?: ComponentProps<typeof MarkdownText>["remarkPlugins"];
+ }) {
++  const basename = path.split("/").pop() ?? path;
++  // timeline.md（2026-10-13-change-files-view-polish）：固定时间线格式优先专用
++  // 视图（与全屏 markdown-previewer 同源），结构不命中回落下方 markdown 分支
+   if (path.endsWith(".md")) {
++    if (basename === "timeline.md") {
++      const timeline = tryParseTimeline(content);
++      if (timeline !== null) {
++        return (
++          <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-2">
++            <TimelineView data={timeline} />
++          </div>
++        );
++      }
++    }
+     return (
+       // reading 尺寸自带 p-2/text-sm/leading-7，容器仅留 muted 底与圆角滚动
+       <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
+@@ -125,8 +152,13 @@ function FilePreview({
+     }
+   }
+   // .patch/.diff 红绿视图（scope-audit.patch 等）；非 diff 格式由 DiffView
+-  // 内部回落纯文本
++  // 内部回落纯文本。change.patch（2026-10-13-change-files-view-polish）优先
++  // 按文件折叠树（默认收起，展开看该文件 diff），无 diff --git 头回落整片
+   if (fileExt(path) === "patch" || fileExt(path) === "diff") {
++    if (basename === "change.patch") {
++      const sections = tryParsePatchFiles(content);
++      if (sections !== null) return <PatchTreeView sections={sections} />;
++    }
+     return <DiffView content={content} />;
+   }
+   // jsonl 逐行视图（2026-09-29-change-detail-timeline-files-polish）：
+diff --git a/frontend/src/components/files/__tests__/markdown-previewer.test.tsx b/frontend/src/components/files/__tests__/markdown-previewer.test.tsx
+index e888cc19d..0e9c4339a 100644
+--- a/frontend/src/components/files/__tests__/markdown-previewer.test.tsx
++++ b/frontend/src/components/files/__tests__/markdown-previewer.test.tsx
+@@ -66,4 +66,45 @@ describe("MarkdownPreviewer", () => {
+       expect(screen.getByRole("button", { name: /下载文件/ })).toBeInTheDocument();
+     });
+   });
++
++  // ── 2026-10-13-change-files-view-polish：timeline.md 全屏转发时间线视图 ──
++  describe("timeline.md 分发", () => {
++    const timelineContent = [
++      "# 合成时间线快照 — demo",
++      "",
++      "── 事件时间轴 ──",
++      "05:39:32  🁢 变更诞生",
++      "06:05:57  📝 tasks.md 内容变更",
++      "",
++      "墙钟：26min｜事件 2 条",
++    ].join("\n");
++
++    it("timeline.md 且结构命中 → TimelineView（与内联同源视图）", async () => {
++      render(
++        <MarkdownPreviewer
++          blob={new Blob([timelineContent], { type: "text/markdown" })}
++          url="blob:mock"
++          meta={{ name: "timeline.md", mime: "text/markdown", size: 100 }}
++        />,
++      );
++      await waitFor(() => {
++        expect(document.querySelector('[data-testid="timeline-view"]')).not.toBeNull();
++      });
++      expect(screen.queryByTestId("markdown-text")).toBeNull();
++    });
++
++    it("timeline.md 但格式漂移（无事件时间轴区块）→ 回落 MarkdownText", async () => {
++      render(
++        <MarkdownPreviewer
++          blob={new Blob(["# 普通文档\n\n正文"], { type: "text/markdown" })}
++          url="blob:mock"
++          meta={{ name: "timeline.md", mime: "text/markdown", size: 100 }}
++        />,
++      );
++      await waitFor(() => {
++        expect(screen.getByTestId("markdown-text")).toBeInTheDocument();
++      });
++      expect(document.querySelector('[data-testid="timeline-view"]')).toBeNull();
++    });
++  });
+ });
+diff --git a/frontend/src/components/files/__tests__/patch-previewer.test.tsx b/frontend/src/components/files/__tests__/patch-previewer.test.tsx
+new file mode 100644
+index 000000000..84decb2ce
+--- /dev/null
++++ b/frontend/src/components/files/__tests__/patch-previewer.test.tsx
+@@ -0,0 +1,94 @@
++/**
++ * patch-previewer 测试（2026-10-13-change-files-view-polish）：change.patch
++ * 全屏按文件折叠树分发 + 回落整片 DiffView。
++ */
++
++import { render, waitFor } from "@testing-library/react";
++import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
++
++// jsdom Blob 缺 text()，补 polyfill（同 markdown-previewer.test.tsx 既有范式）
++if (typeof Blob !== "undefined" && !Blob.prototype.text) {
++  Blob.prototype.text = function () {
++    return new Promise((resolve, reject) => {
++      const reader = new FileReader();
++      reader.onload = () => resolve(reader.result as string);
++      reader.onerror = reject;
++      reader.readAsText(this);
++    });
++  };
++}
++
++import { PatchPreviewer } from "../previewers/patch-previewer";
++
++const multiFilePatch = [
++  "diff --git a/src/a.ts b/src/a.ts",
++  "index 123..456 100644",
++  "--- a/src/a.ts",
++  "+++ b/src/a.ts",
++  "@@ -1,2 +1,2 @@",
++  "-old",
++  "+new",
++  "diff --git a/src/b.ts b/src/b.ts",
++  "index 789..abc 100644",
++  "--- a/src/b.ts",
++  "+++ b/src/b.ts",
++  "@@ -1 +1 @@",
++  "-x",
++  "+y",
++].join("\n");
++
++beforeEach(() => {
++  Object.assign(URL, {
++    createObjectURL: vi.fn(() => "blob:mock"),
++    revokeObjectURL: vi.fn(),
++  });
++});
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++describe("PatchPreviewer change.patch 分发", () => {
++  it("change.patch 多文件 → PatchTreeView（与内联同源），默认收起", async () => {
++    const { container } = render(
++      <PatchPreviewer
++        blob={new Blob([multiFilePatch], { type: "text/x-diff" })}
++        url="blob:mock"
++        meta={{ name: "change.patch", mime: "text/x-diff", size: 200 }}
++      />,
++    );
++    await waitFor(() => {
++      expect(container.querySelector('[data-testid="patch-tree-view"]')).not.toBeNull();
++    });
++    expect(container.querySelector('[data-testid="diff-view"]')).toBeNull();
++    expect(container.textContent).toContain("2 个文件");
++  });
++
++  it("其他 patch 文件（scope-audit.patch 等）→ 整片 DiffView 不变", async () => {
++    const { container } = render(
++      <PatchPreviewer
++        blob={new Blob([multiFilePatch], { type: "text/x-diff" })}
++        url="blob:mock"
++        meta={{ name: "scope-audit.patch", mime: "text/x-diff", size: 200 }}
++      />,
++    );
++    await waitFor(() => {
++      expect(container.querySelector('[data-testid="diff-view"]')).not.toBeNull();
++    });
++    expect(container.querySelector('[data-testid="patch-tree-view"]')).toBeNull();
++  });
++
++  it("change.patch 无 diff --git 头 → 回落整片 DiffView（其内部回落纯文本）", async () => {
++    const { container } = render(
++      <PatchPreviewer
++        blob={new Blob(["不是 diff 格式的文本"], { type: "text/x-diff" })}
++        url="blob:mock"
++        meta={{ name: "change.patch", mime: "text/x-diff", size: 20 }}
++      />,
++    );
++    await waitFor(() => {
++      expect(container.querySelector('[data-testid="diff-view-raw"]')).not.toBeNull();
++    });
++    expect(container.querySelector('[data-testid="patch-tree-view"]')).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/files/__tests__/structured-views.test.tsx b/frontend/src/components/files/__tests__/structured-views.test.tsx
+index 5407d1e2a..e4dc9e178 100644
+--- a/frontend/src/components/files/__tests__/structured-views.test.tsx
++++ b/frontend/src/components/files/__tests__/structured-views.test.tsx
+@@ -5,7 +5,20 @@
+ import { fireEvent, render, screen } from "@testing-library/react";
+ import { describe, expect, it } from "vitest";
+ 
+-import { DiffView, JsonView, JsonlView, knownJsonView, knownJsonlView, tryParseJson, tryParseJsonl, type JsonValue } from "../structured-views";
++import {
++  DiffView,
++  JsonView,
++  JsonlView,
++  knownJsonView,
++  knownJsonlView,
++  PatchTreeView,
++  TimelineView,
++  tryParseJson,
++  tryParseJsonl,
++  tryParsePatchFiles,
++  tryParseTimeline,
++  type JsonValue,
++} from "../structured-views";
+ 
+ describe("tryParseJson", () => {
+   it("合法 json → 解析值", () => {
+@@ -453,3 +466,164 @@ describe("JsonlView（通用逐行树）", () => {
+     expect(container.querySelectorAll('[data-testid="json-view"]').length).toBe(2);
+   });
+ });
++
++// ── 2026-10-13-change-files-view-polish：timeline.md 时间线 + change.patch 文件树 ──
++
++const timelineSample = [
++  "# 合成时间线快照 — demo-change",
++  "",
++  "> 烤制于归档链（2026-10-13T00:00:00.000Z）：事件流机本位。",
++  "> 末尾事件可能晚于烤制未入快照。",
++  "📅 demo-change — 合成时间线（thin｜事件流 × tasks.md × git 提交锚）",
++  "",
++  "── 事件时间轴 ──",
++  "06:05:57  📝 tasks.md 内容变更",
++  "05:39:32  🁢 变更诞生（工件 frontmatter created_at）",
++  "05:40:08  🔀 66393f432  fix(daemon): 示例提交标题",
++  "",
++  "── 任务面（勾选时刻 ≈ 顺序推断）──",
++  "task-02  ≈06:10:00   后做的任务描述…  aabba1111",
++  "task-01  ≈06:05:57   先做的任务描述…  66ba4df44",
++  "",
++  "墙钟：30min｜事件 3 条｜提交 1｜任务 2/2 勾选",
++].join("\n");
++
++describe("tryParseTimeline", () => {
++  it("解析事件/任务/脚注：事件任务按时刻升序，提交锚剥离，≈ 保留", () => {
++    const data = tryParseTimeline(timelineSample);
++    expect(data).not.toBeNull();
++    expect(data!.title).toBe("合成时间线快照 — demo-change");
++    expect(data!.intro).toHaveLength(2);
++    expect(data!.meta).toContain("demo-change");
++    expect(data!.events.map((e) => e.text)).toEqual([
++      "🁢 变更诞生（工件 frontmatter created_at）",
++      "🔀 66393f432  fix(daemon): 示例提交标题",
++      "📝 tasks.md 内容变更",
++    ]);
++    // 任务按 ≈时刻升序（task-01 在前），提交哈希独立成字段
++    expect(data!.tasks).toEqual([
++      { id: "task-01", time: "≈06:05:57", desc: "先做的任务描述…", commit: "66ba4df44" },
++      { id: "task-02", time: "≈06:10:00", desc: "后做的任务描述…", commit: "aabba1111" },
++    ]);
++    expect(data!.footnotes.join("\n")).toContain("墙钟：30min");
++  });
++
++  it("无「── 事件时间轴 ──」区块（格式漂移）→ null（调用方回落 markdown）", () => {
++    expect(tryParseTimeline("# 普通文档\n\n正文而已")).toBeNull();
++    expect(tryParseTimeline("")).toBeNull();
++  });
++
++  it("真实归档任务行形态：未勾（无时刻）排尾部，无提交锚⚠️/— 尾标剥离不进描述", () => {
++    // 形态取自归档 2026-09-28-drop-observation-card（未勾+—）与
++    // 2026-09-23-md-card-render（无提交锚⚠️），评审 P2 修正
++    const data = tryParseTimeline(
++      [
++        "── 事件时间轴 ──",
++        "05:00:00  🁢 变更诞生",
++        "",
++        "── 任务面（勾选时刻 ≈ 顺序推断）──",
++        "task-02  未勾          第二条未勾任务            —",
++        "task-01  ≈06:05:57   先做的任务描述…  无提交锚⚠️",
++        "task-03  未勾          第三条未勾任务            —",
++      ].join("\n"),
++    )!;
++    expect(data).not.toBeNull();
++    expect(data.tasks).toEqual([
++      { id: "task-01", time: "≈06:05:57", desc: "先做的任务描述…", commit: null },
++      { id: "task-02", time: "未勾", desc: "第二条未勾任务", commit: null },
++      { id: "task-03", time: "未勾", desc: "第三条未勾任务", commit: null },
++    ]);
++    // 任务行不落脚注
++    expect(data.footnotes).toEqual([]);
++  });
++});
++
++describe("TimelineView", () => {
++  it("渲染竖向时间线：时刻+事件文本按升序、任务面、脚注分区", () => {
++    const data = tryParseTimeline(timelineSample)!;
++    const { container } = render(<TimelineView data={data} />);
++    const el = container.querySelector('[data-testid="timeline-view"]')!;
++    expect(el).not.toBeNull();
++    expect(el.textContent).toContain("合成时间线快照 — demo-change");
++    const events = Array.from(el.querySelectorAll('[data-testid="timeline-event"]'));
++    expect(events).toHaveLength(3);
++    // 升序：首行是 05:39:32 的变更诞生
++    expect(events[0]!.textContent).toContain("05:39:32");
++    expect(events[0]!.textContent).toContain("变更诞生");
++    // 任务面 + 提交锚 + 脚注
++    expect(el.querySelectorAll('[data-testid="timeline-task"]').length).toBe(2);
++    expect(el.textContent).toContain("66ba4df44");
++    expect(el.textContent).toContain("勾选时刻 ≈ 顺序推断");
++    expect(el.textContent).toContain("墙钟：30min");
++  });
++
++  it("无任务面/脚注时省略对应分区，不渲染空壳", () => {
++    const data = tryParseTimeline("── 事件时间轴 ──\n05:00:00  唯一事件")!;
++    const { container } = render(<TimelineView data={data} />);
++    expect(container.querySelector('[data-testid="timeline-event"]')).not.toBeNull();
++    expect(container.querySelector('[data-testid="timeline-task"]')).toBeNull();
++  });
++});
++
++const patchSample = [
++  "diff --git a/src/a.ts b/src/a.ts",
++  "index 123..456 100644",
++  "--- a/src/a.ts",
++  "+++ b/src/a.ts",
++  "@@ -1,3 +1,4 @@",
++  " context",
++  "-removed",
++  "+added",
++  "+added2",
++  "diff --git a/src/gone.py b/src/gone.py",
++  "deleted file mode 100644",
++  "index 789..abc 100644",
++  "--- a/src/gone.py",
++  "+++ /dev/null",
++  "@@ -1,2 +0,0 @@",
++  "-old line 1",
++  "-old line 2",
++].join("\n");
++
++describe("tryParsePatchFiles", () => {
++  it("按 diff --git 切分文件段：路径/增删计数正确，删除文件回退旧路径", () => {
++    const sections = tryParsePatchFiles(patchSample);
++    expect(sections).not.toBeNull();
++    expect(sections).toHaveLength(2);
++    expect(sections![0]!.path).toBe("src/a.ts");
++    expect(sections![0]!.adds).toBe(2);
++    expect(sections![0]!.dels).toBe(1);
++    // +++ /dev/null → 路径回退 --- a/ 侧
++    expect(sections![1]!.path).toBe("src/gone.py");
++    expect(sections![1]!.adds).toBe(0);
++    expect(sections![1]!.dels).toBe(2);
++    // 段文本含完整 diff 头（喂给 DiffView 解析）
++    expect(sections![0]!.text).toContain("diff --git a/src/a.ts");
++  });
++
++  it("无 diff --git 头（单文件 diff / 非 diff）→ null（调用方回落整片 DiffView）", () => {
++    expect(tryParsePatchFiles("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b")).toBeNull();
++    expect(tryParsePatchFiles("")).toBeNull();
++    expect(tryParsePatchFiles("纯文本内容")).toBeNull();
++  });
++});
++
++describe("PatchTreeView", () => {
++  it("默认全收起，点击文件行展开该文件 diff", () => {
++    const sections = tryParsePatchFiles(patchSample)!;
++    const { container } = render(<PatchTreeView sections={sections} />);
++    const el = container.querySelector('[data-testid="patch-tree-view"]')!;
++    expect(el).not.toBeNull();
++    expect(el.textContent).toContain("2 个文件");
++    expect(el.textContent).toContain("src/a.ts");
++    expect(el.textContent).toContain("src/gone.py");
++    // 收起态：hunk 头与 diff 行不渲染
++    expect(el.textContent).not.toContain("@@ -1,3 +1,4 @@");
++    expect(container.querySelector('[data-testid="diff-view"]')).toBeNull();
++    // 展开第一个文件行 → 该文件 diff 在场
++    const rows = Array.from(el.querySelectorAll('[data-testid="patch-file-row"]'));
++    fireEvent.click(rows[0]!);
++    expect(container.querySelector('[data-testid="diff-view"]')).not.toBeNull();
++    expect(container.querySelector('[data-testid="diff-view"]')!.textContent).toContain("added2");
++  });
++});
+diff --git a/frontend/src/components/files/previewers/markdown-previewer.tsx b/frontend/src/components/files/previewers/markdown-previewer.tsx
+index a3007c91b..a95ea4cc0 100644
+--- a/frontend/src/components/files/previewers/markdown-previewer.tsx
++++ b/frontend/src/components/files/previewers/markdown-previewer.tsx
+@@ -7,6 +7,10 @@
+  * + MARKDOWN_SANITIZE_SCHEMA + ssr:false），禁止裸用 @uiw/react-markdown-preview
+  * 直出不可信内容（存储型 XSS 防线）。
+  *
++ * timeline.md（2026-10-13-change-files-view-polish）：全屏转发竖向时间线视图
++ * （TimelineView 与内联 change-file-tree 同源，FR-04 不做两套）；结构不命中
++ * 回落下方 MarkdownText。
++ *
+  * 统一消费 PreviewerProps。
+  */
+ 
+@@ -14,6 +18,7 @@ import { useEffect, useState } from "react";
+ import { DownloadOutlined } from "@ant-design/icons";
+ 
+ import { MarkdownText } from "@/components/ui/markdown-text";
++import { TimelineView, tryParseTimeline } from "@/components/files/structured-views";
+ import { formatFileSize } from "@/lib/file/utils";
+ import type { PreviewerProps } from "./index";
+ 
+@@ -74,6 +79,19 @@ export function MarkdownPreviewer({ blob, meta, onDownload, fill }: PreviewerPro
+     );
+   }
+ 
++  // timeline.md 全屏走时间线视图（与内联同源）；结构不命中回落 MarkdownText
++  const timeline =
++    (meta.name.split("/").pop() ?? meta.name) === "timeline.md" && content !== null
++      ? tryParseTimeline(content)
++      : null;
++  if (timeline !== null) {
++    return (
++      <div className={fill ? "h-full min-h-[420px] w-full p-6" : "min-h-[420px] w-full p-6"}>
++        <TimelineView data={timeline} />
++      </div>
++    );
++  }
++
+   // fill 态加 h-full 撑满全屏 body（超长内容由全屏 body 的 overflow-auto 滚动）
+   return (
+     <div className={fill ? "h-full min-h-[420px] w-full p-6" : "min-h-[420px] w-full p-6"}>
+diff --git a/frontend/src/components/files/previewers/patch-previewer.tsx b/frontend/src/components/files/previewers/patch-previewer.tsx
+index 9b7022193..71f909c0d 100644
+--- a/frontend/src/components/files/previewers/patch-previewer.tsx
++++ b/frontend/src/components/files/previewers/patch-previewer.tsx
+@@ -5,15 +5,17 @@
+  *
+  * scope-audit.patch / quicklog patches 等统一 diff 文本：DiffView 共享
+  * 红绿渲染（parseUnifiedDiff + 行号）；非 diff 格式由 DiffView 内部回落
+- * 纯文本。统一消费 PreviewerProps。
++ * 纯文本。change.patch（2026-10-13-change-files-view-polish）全屏转发
++ * 按文件折叠树（PatchTreeView 与内联 change-file-tree 同源，FR-04 不做
++ * 两套）；无 diff --git 头回落 DiffView。统一消费 PreviewerProps。
+  */
+ 
+ import { useEffect, useState } from "react";
+ 
+-import { DiffView } from "@/components/files/structured-views";
++import { DiffView, PatchTreeView, tryParsePatchFiles } from "@/components/files/structured-views";
+ import type { PreviewerProps } from "./index";
+ 
+-export function PatchPreviewer({ blob, fill }: PreviewerProps) {
++export function PatchPreviewer({ blob, meta, fill }: PreviewerProps) {
+   const [text, setText] = useState<string | null>(null);
+   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+   const [error, setError] = useState<string | null>(null);
+@@ -59,6 +61,18 @@ export function PatchPreviewer({ blob, fill }: PreviewerProps) {
+   }
+ 
+   const wrap = fill ? "flex h-full min-h-[420px] w-full flex-col p-4" : "flex max-h-[60vh] w-full flex-col p-4";
++  // change.patch 全屏走按文件折叠树（与内联同源）；无 diff --git 头回落 DiffView
++  const sections =
++    (meta.name.split("/").pop() ?? meta.name) === "change.patch" && text !== null
++      ? tryParsePatchFiles(text)
++      : null;
++  if (sections !== null) {
++    return (
++      <div className={wrap}>
++        <PatchTreeView sections={sections} />
++      </div>
++    );
++  }
+   return (
+     <div className={wrap}>
+       <DiffView content={text ?? ""} />
+diff --git a/frontend/src/components/files/structured-views.tsx b/frontend/src/components/files/structured-views.tsx
+index f27a31d7e..c047c378a 100644
+--- a/frontend/src/components/files/structured-views.tsx
++++ b/frontend/src/components/files/structured-views.tsx
+@@ -816,3 +816,289 @@ export function knownJsonlView(name: string, lines: JsonValue[]): ReactNode | nu
+   }
+   return null;
+ }
++
++// ── timeline.md 时间线视图（2026-10-13-change-files-view-polish）────────
++//
++// timeline.md 是 sillyspec CLI 生成的固定格式合成时间线（标题/引言 +「── 事件
++// 时间轴 ──」时刻行 +「── 任务面 ──」task 行 + 墙钟脚注），裸 markdown 渲染
++// 不像时间线。解析为结构化数据后渲染竖向时间线（时刻列+节点+事件文本，按时刻
++// 升序），任务面与脚注各自分区；结构不命中（无事件时间轴区块=格式漂移）返回
++// null 由调用方回落 markdown 渲染（与 knownJsonView 同一降级范式）。
++
++export type TimelineEvent = { time: string; text: string };
++export type TimelineTask = { id: string; time: string; desc: string; commit: string | null };
++
++export type TimelineData = {
++  title: string | null;
++  intro: string[];
++  meta: string | null;
++  events: TimelineEvent[];
++  taskSectionTitle: string | null;
++  tasks: TimelineTask[];
++  footnotes: string[];
++};
++
++/** 区块头：`── 事件时间轴 ──` / `── 任务面（…）──`。 */
++const TIMELINE_SECTION_RE = /^──\s*(.+?)\s*──$/;
++/** 事件行：`HH:MM[:SS]  事件文本`（秒段可缺，间隔一个以上空白）。 */
++const TIMELINE_EVENT_RE = /^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)$/;
++/** 任务行：`task-NN  ≈HH:MM:SS  描述  提交短哈希`（未勾任务时刻为「未勾」字样）。 */
++const TIMELINE_TASK_RE = /^(task-\S+)\s+(≈?\d{1,2}:\d{2}(?::\d{2})?|未勾)\s+(.+)$/;
++/** 任务描述尾部的 git 提交短哈希（7-12 位十六进制）。 */
++const TIMELINE_COMMIT_TAIL_RE = /\s+([0-9a-f]{7,12})$/;
++/** 任务描述尾部的「无提交锚」标记（⚠️ 含变体选择符，用 \S* 容错）或占位破折号。 */
++const TIMELINE_NO_ANCHOR_TAIL_RE = /\s+(?:无提交锚\S*|—)\s*$/;
++
++/**
++ * 解析 timeline.md 正文。命中「── 事件时间轴 ──」区块才返回数据（否则 null
++ * 回落 markdown）；事件与任务均按时刻升序排序（同日 HH:MM:SS 字典序即时间
++ * 序，乱序输入渲染仍有序）；区块外未识别的非空行收进脚注（墙钟统计等）。
++ */
++export function tryParseTimeline(text: string): TimelineData | null {
++  const data: TimelineData = {
++    title: null,
++    intro: [],
++    meta: null,
++    events: [],
++    taskSectionTitle: null,
++    tasks: [],
++    footnotes: [],
++  };
++  let section: "head" | "events" | "tasks" | "tail" = "head";
++  let sawEvents = false;
++  for (const raw of text.split(/\r?\n/)) {
++    const line = raw.trimEnd();
++    const sec = TIMELINE_SECTION_RE.exec(line);
++    if (sec !== null) {
++      const name = sec[1] ?? "";
++      if (name.startsWith("事件时间轴")) {
++        section = "events";
++        sawEvents = true;
++      } else if (name.startsWith("任务面")) {
++        section = "tasks";
++        data.taskSectionTitle = name;
++      } else {
++        section = "tail";
++      }
++      continue;
++    }
++    if (section === "head") {
++      // 头区只收标题/引言/📅 元信息，其余行（frontmatter 等）不进时间线
++      if (!line) continue;
++      if (line.startsWith("# ") && data.title === null) data.title = line.slice(2).trim();
++      else if (line.startsWith("> ")) data.intro.push(line.slice(2).trim());
++      else if (line.startsWith("📅")) data.meta = line.trim();
++      continue;
++    }
++    if (!line) continue;
++    if (section === "events") {
++      const m = TIMELINE_EVENT_RE.exec(line);
++      if (m !== null) data.events.push({ time: m[1] ?? "", text: (m[2] ?? "").trim() });
++      else data.footnotes.push(line);
++    } else if (section === "tasks") {
++      const m = TIMELINE_TASK_RE.exec(line);
++      if (m !== null) {
++        let desc = (m[3] ?? "").trim();
++        let commit: string | null = null;
++        const cm = TIMELINE_COMMIT_TAIL_RE.exec(desc);
++        if (cm !== null) {
++          commit = cm[1] ?? null;
++          desc = desc.slice(0, cm.index).trim();
++        } else if (TIMELINE_NO_ANCHOR_TAIL_RE.test(desc)) {
++          // 尾标「无提交锚⚠️ / —」不是描述正文，剥离且不当作提交锚
++          desc = desc.replace(TIMELINE_NO_ANCHOR_TAIL_RE, "").trimEnd();
++        }
++        data.tasks.push({ id: m[1] ?? "", time: m[2] ?? "", desc, commit });
++      } else {
++        data.footnotes.push(line);
++      }
++    } else {
++      data.footnotes.push(line);
++    }
++  }
++  if (!sawEvents) return null;
++  // 按时刻升序（同日 HH:MM:SS 字典序即时间序）；「未勾」无时刻，恒排尾部
++  const plain = (t: string) => t.replace("≈", "");
++  data.events.sort((a, b) => a.time.localeCompare(b.time));
++  data.tasks.sort((a, b) => {
++    if (a.time === "未勾" && b.time !== "未勾") return 1;
++    if (b.time === "未勾" && a.time !== "未勾") return -1;
++    return plain(a.time).localeCompare(plain(b.time));
++  });
++  return data;
++}
++
++/**
++ * timeline.md 专用视图：竖向时间线（时刻列 + 品牌色节点 + 事件文本）+
++ * 任务面（task 徽标/≈时刻/描述/提交锚）+ 脚注（墙钟统计），标题引言置顶。
++ */
++export function TimelineView({ data }: { data: TimelineData }) {
++  return (
++    <div data-testid="timeline-view" className="flex min-w-0 flex-col gap-3 p-1">
++      {(data.title !== null || data.meta !== null || data.intro.length > 0) && (
++        <div className="flex flex-col gap-1">
++          {data.title !== null && <h3 className="text-sm font-semibold text-foreground">{data.title}</h3>}
++          {data.meta !== null && <p className="text-[11px] leading-relaxed text-muted-foreground">{data.meta}</p>}
++          {data.intro.map((l, i) => (
++            <p key={i} className="text-[11px] leading-relaxed text-muted-foreground/80">
++              {l}
++            </p>
++          ))}
++        </div>
++      )}
++      <div className="flex flex-col">
++        {data.events.map((e, i) => (
++          <div key={`${e.time}-${i}`} data-testid="timeline-event" className="flex items-start gap-2">
++            <span className="w-16 shrink-0 pt-1 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
++              {e.time}
++            </span>
++            <div className="relative flex w-3 shrink-0 justify-center self-stretch">
++              <span className="absolute inset-y-0 w-px bg-border" aria-hidden />
++              <span className="relative z-10 mt-1.5 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-card" aria-hidden />
++            </div>
++            <p className="min-w-0 flex-1 pb-3 text-xs leading-relaxed text-foreground">{e.text}</p>
++          </div>
++        ))}
++      </div>
++      {data.tasks.length > 0 && (
++        <div className="flex flex-col gap-1.5">
++          <SectionTitle>{data.taskSectionTitle ?? "任务面"}</SectionTitle>
++          {data.tasks.map((t) => (
++            <div key={t.id} data-testid="timeline-task" className="flex min-w-0 items-baseline gap-2 text-xs">
++              <span className="shrink-0 rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground">{t.id}</span>
++              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">{t.time}</span>
++              <span className="min-w-0 flex-1 truncate text-foreground" title={t.desc}>
++                {t.desc}
++              </span>
++              {t.commit !== null && (
++                <span className="shrink-0 rounded bg-brand-50 px-1.5 py-px font-mono text-[10px] text-brand-700" title={t.commit}>
++                  {t.commit}
++                </span>
++              )}
++            </div>
++          ))}
++        </div>
++      )}
++      {data.footnotes.length > 0 && (
++        <div className="flex flex-col gap-0.5 border-t border-border pt-2">
++          {data.footnotes.map((l, i) => (
++            <p key={i} className="text-[10px] leading-relaxed text-muted-foreground/80">
++              {l}
++            </p>
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
++
++// ── change.patch 按文件折叠视图（2026-10-13-change-files-view-polish）────
++//
++// change.patch 是多文件 unified diff，整片红绿摊开对人不友好。按 `diff --git`
++// 文件头切分为文件段（路径取 `+++ b/…` 行、删除文件回退 `--- a/…`；增删数按
++// +/- 行计数排除 +++/---），渲染逐文件折叠清单——默认全收起，展开单文件复用
++// DiffView（parseUnifiedDiff 本就跳过文件头行，逐段可直接喂）。无 `diff --git`
++// 头返回 null 由调用方回落整片 DiffView。
++
++export type PatchFileSection = { path: string; adds: number; dels: number; text: string };
++
++/**
++ * 切分多文件 patch。返回文件段数组；无 `diff --git` 头（单文件 diff / 非 diff
++ * 格式）返回 null（调用方回落整片 DiffView）。
++ */
++export function tryParsePatchFiles(content: string): PatchFileSection[] | null {
++  const lines = content.split(/\r?\n/);
++  const starts: number[] = [];
++  for (let i = 0; i < lines.length; i++) {
++    if (/^diff --git /.test(lines[i] ?? "")) starts.push(i);
++  }
++  if (starts.length === 0) return null;
++  const sections: PatchFileSection[] = [];
++  for (let s = 0; s < starts.length; s++) {
++    const from = starts[s] ?? 0;
++    const to = s + 1 < starts.length ? (starts[s + 1] ?? lines.length) : lines.length;
++    const body = lines.slice(from, to);
++    let newPath: string | null = null;
++    let oldPath: string | null = null;
++    let adds = 0;
++    let dels = 0;
++    for (const l of body) {
++      if (l.startsWith("+++ ")) {
++        const p = l.slice(4).replace(/^b\//, "").trim();
++        if (p !== "/dev/null" && p !== "") newPath = p;
++      } else if (l.startsWith("--- ")) {
++        const p = l.slice(4).replace(/^a\//, "").trim();
++        if (p !== "/dev/null" && p !== "") oldPath = p;
++      } else if (l.startsWith("+")) {
++        adds += 1;
++      } else if (l.startsWith("-")) {
++        dels += 1;
++      }
++    }
++    // 删除文件（+++ /dev/null）用旧路径；仍缺则从 diff --git 头 b 侧兜底
++    let path = newPath ?? oldPath;
++    if (path === null) {
++      const gm = /^diff --git a\/(.*) b\/(.*)$/.exec(body[0] ?? "");
++      path = (gm?.[2] ?? gm?.[1] ?? "").trim() || `文件 ${s + 1}`;
++    }
++    sections.push({ path, adds, dels, text: body.join("\n") });
++  }
++  return sections;
++}
++
++/** 单文件折叠行：路径 + 增删计数，展开渲染该文件 DiffView。 */
++function PatchFileRow({ section }: { section: PatchFileSection }) {
++  const [open, setOpen] = useState(false);
++  return (
++    <div className="rounded-md border border-border">
++      <button
++        type="button"
++        data-testid="patch-file-row"
++        aria-expanded={open}
++        onClick={() => setOpen((o) => !o)}
++        className="flex min-w-0 w-full items-baseline gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50"
++      >
++        <ChevronRight
++          className={cn("h-3 w-3 shrink-0 self-center text-muted-foreground transition-transform", open && "rotate-90")}
++          aria-hidden
++        />
++        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground" title={section.path}>
++          {section.path}
++        </span>
++        <span className="shrink-0 font-mono text-[11px] tabular-nums">
++          <span className="text-success">+{section.adds}</span> <span className="text-error">−{section.dels}</span>
++        </span>
++      </button>
++      {open && (
++        <div className="border-t border-border p-2">
++          <DiffView content={section.text} />
++        </div>
++      )}
++    </div>
++  );
++}
++
++/**
++ * change.patch 专用视图：顶部汇总条（文件数 + 总增删）+ 逐文件折叠清单
++ * （默认全收起，点击展开该文件红绿 diff）。
++ */
++export function PatchTreeView({ sections }: { sections: PatchFileSection[] }) {
++  const totalAdds = sections.reduce((sum, s) => sum + s.adds, 0);
++  const totalDels = sections.reduce((sum, s) => sum + s.dels, 0);
++  return (
++    <div data-testid="patch-tree-view" className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
++      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs">
++        <span className="font-medium text-foreground">{sections.length} 个文件</span>
++        <span className="font-mono tabular-nums">
++          <span className="text-success">+{totalAdds}</span> / <span className="text-error">−{totalDels}</span>
++        </span>
++        <span className="text-[11px] text-muted-foreground">点击文件行展开 / 收起改动</span>
++      </div>
++      <div className="flex min-h-0 flex-col gap-1.5 overflow-auto">
++        {sections.map((s, i) => (
++          <PatchFileRow key={`${s.path}-${i}`} section={s} />
++        ))}
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+index d251f0954..2abde7b76 100644
+--- a/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
++++ b/frontend/src/components/sessions/__tests__/turn-nav-list.test.tsx
+@@ -302,7 +302,7 @@ describe("TurnNavList 交互与联动", () => {
+     expect(within(b.container).getByTestId("turn-nav-flyout")).toBeTruthy();
+   });
+ 
+-  it("activeTurnKey 命中刻度/行 aria-current=true；变化时轨内 scrollIntoView（block:nearest，首渲不滚）", () => {
++  it("activeTurnKey 命中刻度/行 aria-current=true；首挂载即滚对齐当前轮，变化时轨内 scrollIntoView（block:nearest）", () => {
+     const onJump = vi.fn();
+     const scrollSpy = Element.prototype.scrollIntoView as Mock;
+     const view = render(
+@@ -311,16 +311,24 @@ describe("TurnNavList 交互与联动", () => {
+     const ticks = getTicks(view.container);
+     expect(ticks[1]).toHaveAttribute("aria-current", "true");
+     expect(ticks[0]).not.toHaveAttribute("aria-current");
+-    // ref 守卫：首次渲染（含初始 active）不滚动。
+-    expect(scrollSpy).not.toHaveBeenCalled();
++    // 2026-10-13-turn-nav-initial-scroll：首挂载即滚（P3 留债修复——轨内滚动生效后
++    // 长会话轨道停顶部、当前轮刻度在可视区外）。浮层未展开，仅窄轨刻度命中 1 次。
++    expect(scrollSpy).toHaveBeenCalledTimes(1);
++    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
++    expect(scrollSpy.mock.instances[0]).toBe(ticks[1]);
+ 
+     // active 变化 → 命中刻度 scrollIntoView({ block: "nearest" })。
+     view.rerender(
+       <TurnNavList entries={FIXTURES} activeTurnKey="run-1" onJump={onJump} />,
+     );
+-    expect(scrollSpy).toHaveBeenCalledTimes(1);
+-    expect(scrollSpy).toHaveBeenCalledWith({ block: "nearest" });
+-    expect(scrollSpy.mock.instances[0]).toBe(ticks[0]);
++    expect(scrollSpy).toHaveBeenCalledTimes(2);
++    expect(scrollSpy.mock.instances[1]).toBe(ticks[0]);
++  });
++
++  it("首挂载 activeTurnKey=null 不滚（无活跃轮无对齐目标）", () => {
++    const scrollSpy = Element.prototype.scrollIntoView as Mock;
++    renderNav(FIXTURES);
++    expect(scrollSpy).not.toHaveBeenCalled();
+   });
+ 
+   it("loadingEarlier → 轨标注 aria-busy（跳转加载进行中）", () => {
+@@ -475,3 +483,50 @@ describe("TurnNavList 浮层指向标记", () => {
+     }
+   });
+ });
++
++// ── 6. 窄轨溢出修复（2026-10-13-turn-nav-rail-overflow-fix） ──────────────
++// 线上实证 53 轮会话：turn-nav-rail 带 shrink-0 时轨道被内容撑高溢出面板，
++// 刻度叠到输入区/底部配置条上，nav 的 overflow-y-auto 永不生效。jsdom 无真实
++// flex 布局，断布局契约 className（先例：本文件 h-[44px]/ring-inset 断言）。
++
++describe("TurnNavList 窄轨溢出修复", () => {
++  it("turn-nav-rail 不带 shrink-0（长会话轨道可随面板高度收缩，不溢出叠到输入区）", () => {
++    const { container } = renderNav(FIXTURES);
++    const rail = within(container).getByTestId("turn-nav-rail");
++    expect(rail.className).not.toContain("shrink-0");
++    // min-h-0 保留：flex-col 内允许收缩是 nav 获得高度钳制的前提。
++    expect(rail.className).toContain("min-h-0");
++  });
++
++  it("turn-nav-rail-ticks 轨内滚动且隐藏滚动条（与 turn-catalog 同款）", () => {
++    const { container } = renderNav(FIXTURES);
++    const ticks = within(container).getByTestId("turn-nav-rail-ticks");
++    expect(ticks.className).toContain("overflow-y-auto");
++    expect(ticks.className).toContain("scrollbar-width:none");
++    expect(ticks.className).toContain("[&::-webkit-scrollbar]:hidden");
++  });
++
++  it("密集刻度契约：>60 轮刻度 mini（h-1.5），≤60 轮常规（h-2.5）", () => {
++    function makeDense(n: number): TurnNavEntry[] {
++      return Array.from({ length: n }, (_, i) => ({
++        key: `dense-${i}`,
++        turnNo: i + 1,
++        startedAt: AT_0925,
++        status: "completed" as const,
++        senderName: null,
++        promptSummary: `第 ${i + 1} 轮摘要`,
++        answerSummary: undefined,
++        loaded: true,
++      }));
++    }
++    const normal = renderNav(FIXTURES);
++    const normalTick = getTicks(normal.container)[0]!;
++    expect(normalTick.className).toContain("h-2.5");
++    normal.unmount();
++
++    const dense = renderNav(makeDense(61));
++    const denseTick = getTicks(dense.container)[0]!;
++    expect(denseTick.className).toContain("h-1.5");
++    expect(denseTick.className).not.toContain("h-2.5");
++  });
++});
+diff --git a/frontend/src/components/sessions/turn-nav-list.tsx b/frontend/src/components/sessions/turn-nav-list.tsx
+index f5d49eb27..26ee75f17 100644
+--- a/frontend/src/components/sessions/turn-nav-list.tsx
++++ b/frontend/src/components/sessions/turn-nav-list.tsx
+@@ -238,13 +238,13 @@ export default function TurnNavList({
+     entries.find((e) => e.key === activeTurnKey)?.turnNo ?? null;
+ 
+   // active 行变化时滚入可视区（窄轨刻度与浮层行共用 [data-turn-key] 命中，TurnCatalog
+-  // R-10 同款）；ref 守卫首次渲染不滚。jsdom 无 scrollIntoView 需 typeof 守卫。
+-  const mountedRef = useRef(false);
++  // R-10 同款）。jsdom 无 scrollIntoView 需 typeof 守卫。
++  // 2026-10-13-turn-nav-initial-scroll：首挂载也滚——2026-10-13-turn-nav-rail-overflow-fix
++  // 让轨内滚动真正生效后，长会话首屏轨道停顶部、当前轮（最新）刻度在可视区外（归档件
++  // P3 finding）；「首渲不滚」是 TurnCatalog 居中形态时代（design §5）的决策，窄轨+轨内
++  // 滚动形态下语义反转——首挂载对齐 active，打开长会话即见当前轮高亮。activeTurnKey
++  // 为 null（无活跃轮）无对齐目标不滚。原 mountedRef 守卫删除。
+   useEffect(() => {
+-    if (!mountedRef.current) {
+-      mountedRef.current = true;
+-      return;
+-    }
+     const root = rootRef.current;
+     // 2026-10-08-turn-nav-hover-mark：指向优先——hoverTurnKey 存在时滚指向行
+     //（刻度 hover 触发展开后指向行滚入浮层可视区），清除后回落既有 active 联动。
+@@ -278,8 +278,14 @@ export default function TurnNavList({
+       onMouseLeave={handleLeave}
+     >
+       {/* ── 窄轨（常驻 44px）：把手 + 垂直刻度 ── */}
++      {/* 2026-10-13-turn-nav-rail-overflow-fix：不带 shrink-0——轮次很多时
++          轨道随面板高度收缩（root 交叉轴 stretch 高度=行高），nav 的
++          flex-1+overflow-y-auto 才有高度钳制，超出轮次轨内滚动；带上
++          shrink-0 时轨道被内容撑高直接溢出面板，刻度叠到输入区/底部配置
++          条上（线上 53 轮截图实证）。少量轮次 flex-basis auto 高度=内容高，
++          形态零变化。 */}
+       <div
+-        className="flex min-h-0 shrink-0 flex-col border-r border-border/60 bg-card/40"
++        className="flex min-h-0 flex-col border-r border-border/60 bg-card/40"
+         style={{ width: `${RAIL_WIDTH}px` }}
+         data-testid="turn-nav-rail"
+       >
+@@ -307,7 +313,7 @@ export default function TurnNavList({
+           role="navigation"
+           aria-label="轮次导航"
+           aria-busy={loadingEarlier || undefined}
+-          className="flex min-h-0 flex-1 flex-col items-center gap-px overflow-y-auto py-1.5"
++          className="flex min-h-0 flex-1 flex-col items-center gap-px overflow-y-auto py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+           data-testid="turn-nav-rail-ticks"
+         >
+           {entries.map((entry) => {
+diff --git a/frontend/src/lib/change-files.ts b/frontend/src/lib/change-files.ts
+index 983fc4abd..fdc2723f8 100644
+--- a/frontend/src/lib/change-files.ts
++++ b/frontend/src/lib/change-files.ts
+@@ -194,6 +194,16 @@ const CHANGE_FILE_CN: Record<string, string> = {
+   "visual-evidence.md": "视觉证据",
+   "watcher-events.jsonl": "观测事件流",
+   "timeline.md": "时间线记录",
++  // 2026-10-13-change-files-view-polish：thin/full 常态产物与归档件补齐——
++  // plan/delta/module-impact/symbol-impact（文档面）、apply-manifest/
++  // verify-facts/scope-audit（报告件，结构化视图早已有、中文名漏配）
++  "plan.md": "实现计划",
++  "delta.md": "变更增量",
++  "module-impact.md": "模块影响分析",
++  "symbol-impact.md": "符号影响面",
++  "apply-manifest.json": "应用清单",
++  "verify-facts.json": "验证事实",
++  "scope-audit.json": "范围审计",
+ };
+ 
+ /** 文件名（或含路径）→ 中文名；非固定产物返回 null。 */

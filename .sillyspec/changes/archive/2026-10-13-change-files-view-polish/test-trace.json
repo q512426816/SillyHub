@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-13-change-files-view-polish",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-13-change-files-view-polish:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「TimelineView：渲染时间线/任务面/脚注」",
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseTimeline：无事件时间轴区块返回 null」",
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「tryParseTimeline：解析事件/任务/脚注与排序」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-files-view-polish"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-13-change-files-view-polish:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「PatchTreeView：默认收起、点击展开该文件 diff」",
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「tryParsePatchFiles：按 diff --git 切分文件段」",
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「tryParsePatchFiles：无 diff --git 头返回 null」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-files-view-polish"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-13-change-files-view-polish:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree.test.tsx「固定产物树节点主显中文名 + 原名对照」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-files-view-polish"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-13-change-files-view-polish:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/files/__tests__/structured-views.test.tsx「TimelineView/PatchTreeView 为共享导出，内联与全屏同源」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-13-change-files-view-polish"
+    }
+  ]
+}
