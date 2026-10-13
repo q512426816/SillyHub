@@ -554,6 +554,75 @@ describe("tool_result 按 parent_tool_use_id 精确配对 (2026-07-09-agent-log-
   });
 });
 
+// ── 2026-10-13-agentlog-write-diff：tool_result 行/事件 edit_patch → 卡片 editPatch ──
+
+const WRITE_PATCH = JSON.stringify([
+  { oldStart: 1, newStart: 1, oldLines: 1, newLines: 2, lines: ["-old", "+new-1", "+new-2"] },
+]);
+
+describe("2026-10-13-agentlog-write-diff: edit_patch 配对到工具卡", () => {
+  it("旧轨：stdout [TOOL_RESULT] 行 edit_patch 列 → 精确配对写入 tool_call 卡片 editPatch", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog(
+        "tool_call",
+        JSON.stringify({ tool: "Write", tool_use_id: "call_w1", args: { file_path: "a.ts", content: "x" } }),
+        "tcw1",
+      ),
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] The file a.ts has been updated", "trw1"),
+        parent_tool_use_id: "call_w1",
+        edit_patch: WRITE_PATCH,
+      },
+    ];
+    const result = normalizeLogs(logs);
+    const card = result.find((p) => p.log.id === "tcw1");
+    expect(card?.editPatch).toBe(WRITE_PATCH);
+    expect(card?.mergedToolResult).toBeTruthy();
+  });
+
+  it("旧轨退化配对（无 id 邻近）：edit_patch 同样拾取", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("tool_call", JSON.stringify({ tool: "Write", args: { file_path: "a.ts", content: "x" } }), "tcw2"),
+      { ...makeLog("stdout", "[TOOL_RESULT] ok", "trw2"), edit_patch: WRITE_PATCH },
+    ];
+    const result = normalizeLogs(logs);
+    expect(result.find((p) => p.log.id === "tcw2")?.editPatch).toBe(WRITE_PATCH);
+  });
+
+  it("v2 轨：tool_result 事件 ev.edit_patch → call_id 配对卡片 editPatch（行列缺省时）", () => {
+    const useEvent = {
+      type: "tool_use",
+      tool_name: "Write",
+      call_id: "toolu_wp",
+      metadata: { tool_input: { file_path: "a.ts", content: "x" } },
+    };
+    const tcJson = JSON.stringify({
+      tool: "Write", args: { file_path: "a.ts", content: "x" },
+      timestamp: "2026-06-17T13:54:38.000Z",
+      status: "allowed", success: true, tool_use_id: "toolu_wp",
+    });
+    const ev = normalizeLogs([
+      { ...makeLog("tool_call", tcJson, "tcw3"), agent_event: useEvent },
+      {
+        ...makeLog("stdout", "[TOOL_RESULT] updated", "trw3"),
+        agent_event: { type: "tool_result", call_id: "toolu_wp", content: "updated", edit_patch: WRITE_PATCH },
+      },
+    ]);
+    const card = ev.find((p) => p.log.id === "tcw3");
+    expect(card?.editPatch).toBe(WRITE_PATCH);
+    expect(card?.mergedToolResult).toBe("updated");
+  });
+
+  it("无 edit_patch 的 result 行 → 卡片 editPatch 保持 undefined（零回归）", () => {
+    const logs: AgentRunLogEntry[] = [
+      makeLog("tool_call", JSON.stringify({ tool: "Bash", tool_use_id: "call_b1", args: { command: "ls" } }), "tcb1"),
+      { ...makeLog("stdout", "[TOOL_RESULT] out", "trb1"), parent_tool_use_id: "call_b1" },
+    ];
+    const result = normalizeLogs(logs);
+    expect(result.find((p) => p.log.id === "tcb1")?.editPatch).toBeUndefined();
+  });
+});
+
 // task-08 / FR-03 / D-002@v1（2026-07-29-model-error-visibility）：模型调用错误可见性。
 // daemon 把模型失败记为 [ASSISTANT] API Error 文本（design §1 原缺陷：被当助手回复）；
 // 本组覆盖 buildErrorLogItem 安全提取 + :352 误判修正 + brownfield 兜底 + R-02 不进 NOISE。
@@ -930,6 +999,7 @@ function renderModelOf(p: ReturnType<typeof normalizeLogs>[number] | undefined) 
     parsedToolResult: p?.parsedToolResult,
     toolUseId: p?.toolUseId,
     toolDurationMs: p?.toolDurationMs,
+    editPatch: p?.editPatch,
     semanticCategory: p?.semanticCategory,
   };
 }
