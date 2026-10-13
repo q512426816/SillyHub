@@ -1416,8 +1416,9 @@ class ChangeService:
           锚点时**降级为置软删**（不物理删、不联动删 progress），防
           change_documents/session_links/events 被 CASCADE 抹掉（R-09 审计保护）。
         - ``_progress_reported_active_keys`` 占位保护（7 天窗）两模式同样生效。
-        - reparse 发现新变更（created）时按 design §8 绑定查询自动绑定该 workspace
-          最近活跃会话（change_session_links 行，best-effort 失败不阻断 reparse）。
+        - created 不产生会话绑定（2026-10-13-change-reparse-autobind-remove：D-007
+          自动绑定最近活跃会话已移除——绑定唯一来源为命令解析通道
+          ``change/binding.py``，会话内实际执行 ``sillyspec run/flow --change``）。
         """
         workspace = await self._workspace_service.get(workspace_id)
         # 平台 specRoot 有镜像数据就读（任意 strategy：platform-managed/repo-native/repo-mirrored）。
@@ -1512,7 +1513,15 @@ class ChangeService:
                 else:
                     stats["updated"] += 1
             else:
-                row = self._build_change(parsed, workspace_id=workspace_id)
+                # 2026-10-13-change-owner-backfill：新建行负责人兜底取工作区所有者
+                # （workspace.created_by，reparse 无用户身份；仅建行快照，update
+                # 分支 _apply_parsed 不触碰 owner_id）。created_by 为 None 时兜底
+                # 链落前端展示层（列表兜底显示工作区所有者名）。
+                row = self._build_change(
+                    parsed,
+                    workspace_id=workspace_id,
+                    owner_id=workspace.created_by,
+                )
                 # D-004@v1（2026-08-01-proxy-create-race-fix）：极端并发撞
                 # ux_changes_workspace_key（占坑 commit 与 reparse created 几乎同时）
                 # 的兜底——用 savepoint 包 add+flush 即时检测唯一键冲突，撞键则回滚
@@ -1538,9 +1547,6 @@ class ChangeService:
                     stats["updated"] += 1
                 else:
                     stats["created"] += 1
-                    # D-007（design §5 P1 / §8）：新变更自动绑定最近活跃会话。
-                    # best-effort：绑定失败不阻断 reparse 主流程。
-                    await self._bind_change_to_session(workspace_id, row.id)
 
             # Sync documents for this change
             _existing = existing_by_key.get(parsed.change_key, row)
@@ -1835,56 +1841,6 @@ class ChangeService:
                 "change.reparse_progress_rename_failed",
                 workspace_id=str(workspace_id),
                 rename_pairs=rename_pairs,
-                error=str(exc),
-            )
-
-    async def _bind_change_to_session(
-        self,
-        workspace_id: uuid.UUID,
-        change_id: uuid.UUID,
-    ) -> None:
-        """新变更自动绑定最近活跃会话（D-007 / design §8 绑定查询）。
-
-        绑定查询语义固定（§8 SQL）：``deleted_at IS NULL``、``coalesce(last_active_at,
-        created_at) DESC``、跨成员（变更属 workspace 不属个人）、不限 status（已结束
-        会话也可绑，注入时按非 active 降级）。无会话命中不写 link。用 ORM
-        ``select(AgentSession.id)`` 表达该 SQL——UUID 列类型转换 SQLite/PG 统一
-        （raw text 绑定 uuid 在 SQLite 不可用，且 str(uuid) 带横线与 CHAR(32)
-        十六进制存储不匹配）。
-
-        best-effort：写入失败仅告警（savepoint 内，只回滚 link，不丢 change 行，
-        不阻断 reparse 主流程）。
-        """
-        try:
-            async with self._session.begin_nested():
-                stmt = (
-                    select(AgentSession.id)
-                    .where(AgentSession.workspace_id == workspace_id)
-                    .where(AgentSession.deleted_at.is_(None))
-                    .order_by(
-                        func.coalesce(
-                            AgentSession.last_active_at,
-                            AgentSession.created_at,
-                        ).desc()
-                    )
-                    .limit(1)
-                )
-                session_id = (await self._session.execute(stmt)).scalar()
-                if session_id is None:
-                    return
-                self._session.add(
-                    ChangeSessionLink(
-                        id=uuid.uuid4(),
-                        change_id=change_id,
-                        session_id=session_id,
-                    )
-                )
-                await self._session.flush()
-        except Exception as exc:
-            log.warning(
-                "change.session_bind_failed",
-                change_id=str(change_id),
-                workspace_id=str(workspace_id),
                 error=str(exc),
             )
 
@@ -2829,6 +2785,10 @@ class ChangeService:
         parsed: ParsedChange,
         *,
         workspace_id: uuid.UUID,
+        # 2026-10-13-change-owner-backfill：建行负责人兜底（reparse 传工作区
+        # 所有者 created_by）。默认 None 保持既有调用兼容；_apply_parsed 不触碰
+        # owner_id（R-05 守卫），已有行永不覆盖、存量空行不回填。
+        owner_id: uuid.UUID | None = None,
     ) -> Change:
         # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读
         # sillyspec.db 时覆盖）。新建行也必须存，否则 manual_dispatch 读
@@ -2849,7 +2809,7 @@ class ChangeService:
             # or now fallback：空目录（last_modified_at=None）显式传 None 会绕过
             # default_factory 直接写 None 违反 NOT NULL，必须 fallback。
             updated_at=parsed.last_modified_at or datetime.now(UTC),
-            owner_id=None,
+            owner_id=owner_id,
         )
 
     @staticmethod

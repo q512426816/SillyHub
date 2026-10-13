@@ -12,8 +12,9 @@ bind 函数，供 W2 检测写入口（run_sync 命令解析 / platform_sync age
   start|done|amend-draft --change <名>`` 同样产出变更绑定——thin 派发会话的
   变更绑定**唯一**依靠本命令解析通道（派发链全程不写 change_session_links）。
 - bind 事务口径：**不自行 commit**（跟随调用方事务），savepoint
-  （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（对齐
-  ``change/service.py:_bind_change_to_session`` 的 best-effort 风格）。
+  （``begin_nested``）+ flush 落行，失败仅 ``log.warning`` 不抛（best-effort
+  风格；reparse 建行时的自动绑定已移除，2026-10-13-change-reparse-autobind-remove，
+  本模块命令解析通道是变更-会话绑定的唯一自动来源）。
 """
 
 from __future__ import annotations

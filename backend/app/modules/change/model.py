@@ -267,10 +267,12 @@ class ChangeDocument(BaseModel, table=True):
 class ChangeSessionLink(BaseModel, table=True):
     """变更-会话绑定（change 2026-08-14-change-center-conversation-driven / D-007）。
 
-    reparse 发现新变更（created）时自动绑定该 workspace 最近活跃会话
-    （design §8 绑定查询，跨成员、不限 status）。多对多：一会话可承载多变更、
-    一变更可绑定多会话，``unique(change_id, session_id)`` 防同对重复行。
-    审批/详情页取该 change 最新一条 link 的 session（design §8）。
+    绑定只由命令解析通道写入（会话内实际执行 ``sillyspec run/flow --change``
+    命令，``change/binding.py``；及会话创建请求显式携带 change_id、@ 联想两类
+    显式入口）——reparse 建行时「自动绑定最近活跃会话」已移除
+    （2026-10-13-change-reparse-autobind-remove，误伤闲聊会话）。多对多：一会话
+    可承载多变更、一变更可绑定多会话，``unique(change_id, session_id)`` 防同对
+    重复行。审批/详情页取该 change 最新一条 link 的 session（design §8）。
     """
 
     __tablename__ = "change_session_links"
