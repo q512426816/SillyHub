@@ -171,29 +171,32 @@ const RECONCILE_TERMINAL_PRIORITY: Record<string, number> = {
   stopped: 1,
 };
 
-/**
- * 按 tool_use_id 构建子代理容器头对账索引（纯函数）。
- *
- * 同 tool_use_id 多行取舍：终态优先序高者胜；同优先序（含全 running）取
- * updated_at 最新（缺 updatedAt 视为最旧）。无 toolUseId 的行跳过（无关联键，
- * 历史重试重生成实例不参账）。
- */
-export function buildSubagentTaskLookup(
+/** 对账索引双键形态（2026-10-13-turn-live-visibility 扩展）：byToolUseId 供子代理
+ *  容器头对账（stub-reconcile 既有面），byTaskId 供 TaskOutput 等待行与派发段
+ *  taskTaskId 终态收敛（本变更新增面）。两个索引同源行、同款择优。 */
+export interface SubagentTaskLookupIndex {
+  byToolUseId: Map<string, SubagentTaskSnapshotInfo>;
+  byTaskId: Map<string, SubagentTaskSnapshotInfo>;
+}
+
+/** 单键域择优构建（终态优先序高者胜；同优先序取 updated_at 最新）。 */
+function buildBestIndex(
   rows: AgentSessionTaskView[],
+  keyOf: (row: AgentSessionTaskView) => string | null | undefined,
 ): Map<string, SubagentTaskSnapshotInfo> {
   const best = new Map<
     string,
     { info: SubagentTaskSnapshotInfo; priority: number; updatedAt: string | null }
   >();
   for (const row of rows) {
-    const toolUseId = row.toolUseId;
-    if (!toolUseId) continue;
+    const key = keyOf(row);
+    if (!key) continue;
     const priority = RECONCILE_TERMINAL_PRIORITY[row.status] ?? 0;
-    const incumbent = best.get(toolUseId);
+    const incumbent = best.get(key);
     const newer =
       (row.updatedAt ?? "") > (incumbent?.updatedAt ?? "") || !incumbent;
     if (!incumbent || priority > incumbent.priority || (priority === incumbent.priority && newer)) {
-      best.set(toolUseId, {
+      best.set(key, {
         info: {
           taskName: row.taskName,
           status: row.status,
@@ -205,8 +208,24 @@ export function buildSubagentTaskLookup(
     }
   }
   const out = new Map<string, SubagentTaskSnapshotInfo>();
-  for (const [toolUseId, v] of best) out.set(toolUseId, v.info);
+  for (const [key, v] of best) out.set(key, v.info);
   return out;
+}
+
+/**
+ * 构建任务快照对账双索引（纯函数）。
+ *
+ * 同键多行取舍：终态优先序高者胜；同优先序（含全 running）取 updated_at 最新
+ * （缺 updatedAt 视为最旧）。byToolUseId 域无 toolUseId 的行跳过（无关联键，
+ * 历史重试重生成实例不参账）；byTaskId 域 taskId 必有（任务行天然主键）。
+ */
+export function buildSubagentTaskLookup(
+  rows: AgentSessionTaskView[],
+): SubagentTaskLookupIndex {
+  return {
+    byToolUseId: buildBestIndex(rows, (row) => row.toolUseId),
+    byTaskId: buildBestIndex(rows, (row) => row.taskId),
+  };
 }
 
 export interface UseSessionTasksOptions {

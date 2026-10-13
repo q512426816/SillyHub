@@ -82,7 +82,7 @@ describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => 
       row({ taskId: "k2", toolUseId: "call_a", status: "stopped", taskName: "清扫影" }),
       row({ taskId: "k3", toolUseId: "call_a", status: "completed", taskName: "真终态", elapsedMs: 1000 }),
     ]);
-    expect(lookup.get("call_a")).toEqual({
+    expect(lookup.byToolUseId.get("call_a")).toEqual({
       taskName: "真终态",
       status: "completed",
       elapsedMs: 1000,
@@ -96,8 +96,8 @@ describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => 
       row({ taskId: "k3", toolUseId: "call_c", status: "stopped", taskName: "停" }),
       row({ taskId: "k4", toolUseId: "call_c", status: "failed", taskName: "败" }),
     ]);
-    expect(lookup.get("call_b")?.taskName).toBe("新失败");
-    expect(lookup.get("call_c")?.status).toBe("failed");
+    expect(lookup.byToolUseId.get("call_b")?.taskName).toBe("新失败");
+    expect(lookup.byToolUseId.get("call_c")?.status).toBe("failed");
   });
 
   it("无 toolUseId 的行跳过（无关联键不参账）", () => {
@@ -105,7 +105,18 @@ describe("buildSubagentTaskLookup（FR-01：tool_use_id 对账索引）", () => 
       row({ taskId: "k1", toolUseId: null, status: "completed", taskName: "x" }),
       row({ taskId: "k2", status: "completed", taskName: "y" }),
     ]);
-    expect(lookup.size).toBe(0);
+    expect(lookup.byToolUseId.size).toBe(0);
+    // byTaskId 域 taskId 必有——两行都进索引（2026-10-13-turn-live-visibility）。
+    expect(lookup.byTaskId.size).toBe(2);
+  });
+
+  it("byTaskId 索引（turn-live-visibility）：终态优先 + 同键覆盖取最新终态", () => {
+    const lookup = buildSubagentTaskLookup([
+      row({ taskId: "bm1", toolUseId: "call_x", status: "running", taskName: "重跑生产构建" }),
+      row({ taskId: "bm1", toolUseId: "call_x", status: "completed", taskName: "重跑生产构建", elapsedMs: 620_000 }),
+    ]);
+    expect(lookup.byTaskId.get("bm1")?.status).toBe("completed");
+    expect(lookup.byTaskId.get("bm1")?.elapsedMs).toBe(620_000);
   });
 });
 

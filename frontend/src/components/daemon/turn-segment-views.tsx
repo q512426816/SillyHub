@@ -192,9 +192,18 @@ export interface SubagentReconciledTask {
  * 2026-10-13-subagent-stub-reconcile：子代理容器头对账索引（tool_use_id →
  * 快照行）。Provider 在 session-panel-page 页面级（同时覆盖时间线与右栏详情
  * 面板）；null（dialog 弹窗等旧宿主）= 不对账，行为与修复前一致。
+ *
+ * 2026-10-13-turn-live-visibility：值扩为双索引——byToolUseId 供容器头对账
+ * （原面不变），byTaskId 供 TaskOutput 等待行任务名与派发段终态收敛（本变更
+ * 新增面）。结构兼容 use-session-tasks 的 SubagentTaskLookupIndex（防环不
+ * import hooks 文件，字段同构）。
  */
+export interface SubagentTaskLookup {
+  byToolUseId: Map<string, SubagentReconciledTask>;
+  byTaskId: Map<string, SubagentReconciledTask>;
+}
 export const SubagentTaskLookupContext = createContext<
-  Map<string, SubagentReconciledTask> | null
+  SubagentTaskLookup | null
 >(null);
 export interface StderrRowViewProps {
   segment: StderrTurnSegment;
@@ -766,7 +775,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   // 仅在「无元数据且段三态 running」时生效（与 subagentHeaderOf 同一优先级
   // 契约），历史窗口截断 stub 按快照收敛名称/徽标/时长。
   const taskLookup = useContext(SubagentTaskLookupContext);
-  const reconciledRaw = taskLookup?.get(segment.id) ?? null;
+  const reconciledRaw = taskLookup?.byToolUseId.get(segment.id) ?? null;
   const reconciled: SubagentReconciledTask | null =
     reconciledRaw && taskMetaStatusOf(segment) == null && (segment.kind === "subagent_stub" || segment.status === "running")
       ? reconciledRaw
