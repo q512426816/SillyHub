@@ -449,7 +449,12 @@ describe("回到会话开头（2026-10-10-single-turn-nav-and-jump-head）", () 
     const older2 = makePage("o2", 100, 9 * 3600);
     const beforeCursors: string[] = [];
     sessionApi.getAgentSessionLogs.mockImplementation(
-      async (_sid: string, opts?: { before?: string }) => {
+      async (_sid: string, opts?: { before?: string; limit?: number }) => {
+        // 2026-10-13-load-earlier-full-turn：满页翻页后新增 limit=1 页顶探查
+        //（轮边界对齐）——非翻页本体，空响应（页顶轮完整）不进游标记账。
+        // 口径同上例；否则探查 push 会让计数断言依赖微任务级竞速窗口
+        //（本地快机偶绿、CI 慢机必挂 expected 3 to be 2）。
+        if (opts?.before && opts.limit === 1) return [];
         if (!opts?.before) return initPage;
         beforeCursors.push(opts.before);
         return beforeCursors.length === 1 ? older1 : older2;
