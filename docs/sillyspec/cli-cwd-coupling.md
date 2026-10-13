@@ -37,3 +37,16 @@ CLI 的 spec root 定位策略是「取进程 cwd 向上找 `.sillyspec`」：
 CLI 从 `SILLYSPEC_SESSION_ID` / 环境变量 / `.sillyspec/.runtime` 锚点自动定位主仓
 根（类似 endpoints baseline 的「自动把扫描根锚定主仓」行为），对 worktree cwd
 给出警告而非静默分裂。
+
+## 处置记录（2026-10-13）——部分在位，主体延后
+
+**现有防线核实**（部分缓解已非坑文所述裸奔态）：CLI 入口已有 `detectCwdInsideWorktree`
+硬守卫（`src/index.js:380` 起全命令面消费——worktree 内跑命令会被拦/警告而非静默分裂，
+坑 register-stage-review-cwd 深根修复轮同款机制）；`readPlatformConfig` 凭据链有向上
+7 级回退；CLAUDE.md 规则 22 是行为守则面。坑文的「进度库双写分裂」在现代版本已被入口
+守卫大幅收窄。
+
+**延后**：坑期望的「自动锚定主仓根（session/env/runtime 锚点）+ 对 worktree cwd 警告
+而非拦截」是入口行为语义变更（拦→导），涉及全命令面与平台 worktree 模式（daemon 机
+specRoot 异位形态）的根定位策略重构——设计级另立变更，现有守卫 + 规则 22 + bash cwd
+持久性提示（坑内绕过节已述）构成可用防线。本文件保持活跃跟踪。

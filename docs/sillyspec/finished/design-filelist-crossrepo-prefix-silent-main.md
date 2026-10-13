@@ -55,3 +55,13 @@ cross-repo: 前缀标注，已按主仓路径对账为『计划未动』」）�
 ```
 
 或单表格内：`| 修改 | cross-repo:subgrid:src/common/router.js | ... |`
+
+## 处置记录（2026-10-13）
+
+**防呆 advisory 已修**（sillyspec 仓工作树，坑期望的「非语义变更」方向）：flow done 解析
+design 清单后——声明路径在主仓不存在、且首段 token 命中注册仓的 key **或注册路径
+basename**（本例 `sub-grid-security` → key `subgrid`）→ 一条点名 warning + 三种正确语法
+指引（段头/子段/cross-repo: 前缀，key 以 local.yaml 注册为准）。已带跨仓标注（e.repo）
+与主仓存在的路径不查；best-effort 不阻断收口。坑现场形态功能验证 PASS（basename 别名
+命中）+ flow-protocol / change-list / plan-postcheck / design-facts 回归 34/34 绿。
+平台侧「关联仓卡展示注册 key」的配套文案属平台 UI 面小改，随需要另行处理。归档。

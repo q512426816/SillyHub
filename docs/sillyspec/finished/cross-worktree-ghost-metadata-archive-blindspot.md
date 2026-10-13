@@ -62,3 +62,22 @@ grep -o '清理 partial[^"]*\|prune 失败[^"]*\|已清理跨仓[^"]*' a0a5cc81-
 
 - 报 `already used by worktree` 且报错路径已不存在 → 到**分支所属仓**（不是 daemon 目录）跑 `git worktree prune -v`，即愈，无数据风险（git 只清指向不存在位置的注册）。
 - `sillyspec/<change>` 分支是有意保留的 review 锚点，prune 不动分支；确认无需回溯后 `git branch -D` 清理。
+
+## 处置记录（2026-10-13）
+
+**三缺口全部已修**（并行会话 `2026-10-12-cross-worktree-toolchain` 系列落地，本日逐项
+核实验证）：
+
+1. **缺口①（清理链双清契约）✅** `59a87eeb`：`cleanupCrossWorktrees` remove/prune 后以
+   `git worktree list` 复核注册已消失，复核不过 → partial + residual（locked 条目附
+   unlock 指引不自动解除）；顺带修正未交付检测把自家 meta.json 误计为交付致 force=false
+   恒误报的既有 bug。
+2. **缺口②（归档链跨仓兜底）✅** 同提交：`archiveWorktreeCleanup` 主仓清理后追加跨仓
+   兜底（force=false 幂等 fail-open，有未 apply 交付保留并警告）。
+3. **缺口③（doctor 跨仓扫描）✅** `e70468c4`：`detectCrossWorktreeHealth` 维度——
+   local.yaml repos 各仓 worktree list 对照实体目录，失效注册列 finding + WARNING；
+   `doctor --prune-cross-worktrees`（默认 dry-run，--confirm 执行 + 复扫断言）。
+
+**测试**：`cross-worktree-ghost-registration.test.mjs` 8/8 本日复跑绿。坑内「一步定案法」
+（grep daemon 机会话日志判假设 A/B）随三缺口修复失去必要性——根因处置已不依赖当时路径
+判定。用户侧缓解（prune -v 即愈）继续有效作兜底口径。归档。

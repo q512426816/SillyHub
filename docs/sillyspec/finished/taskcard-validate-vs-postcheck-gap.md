@@ -13,3 +13,14 @@ taskcard --validate 增加 provides/expects_from 结构校验（或至少 warnin
 
 ## 绕过方案（已验证）
 主代理统一钉死契约块的 YAML 映射式模板给填卡子代理逐字抄；发现散文式后用 Edit 批量改结构。
+
+## 处置记录（2026-10-13）
+
+**已修**（sillyspec 仓工作树）：`validateTaskcardsCli` 新增 provides/expects_from 结构
+校验——字符串元素（散文行 `- contract Foo fields [a, b]` 是合法 YAML 字符串数组但被
+契约解析器静默过滤）/ 缺 contract 键 / fields·needs 非数组 → 报错并给映射式模板
+（`- contract: <名>` + `fields: [a, b]`）。格式错误在填卡自检轮（taskcard --validate）
+暴露，不再拖到 plan --done 的「provider 未声明」阻断。三态单测（散文式报错/映射式过/
+expects_from 散文报错）PASS。
+
+**测试**：plan-postcheck-acceptance-grep + taskcard/validate 族回归 16/16 绿。归档。

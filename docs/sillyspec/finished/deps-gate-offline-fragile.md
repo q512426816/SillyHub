@@ -42,3 +42,21 @@ depsStatus 改成 `linked`** 才放行——对平台内部状态文件做手术
 2. 提供 CLI 命令显式重供/覆写 depsStatus（如 `sillyspec worktree deps --set linked
    --reason "..."`），留审计痕，杜绝手改 JSON；
 3. install 探测按生态分派（maven 仓不跑 npm/mvn test，改用轻量存在性检查）。
+
+## 处置记录（2026-10-13）
+
+**分项处置**（坑内三建议）：
+
+- **③ maven 误判 ✅ 已修**（`5d09e057` 2026-10-10-cross-worktree-toolchain）：JVM 生态
+  供给判 n/a（旧默认 `mvn -o test` 把跑测试当供给的病灶已除，源码注释实证）。
+- **② CLI 覆写通道 ✅ 本轮修**（sillyspec 工作树）：`sillyspec worktree deps --change <名>
+  --set <n/a|linked|installed|failed> --reason "<事实依据>"`——合法值收敛认知集、
+  --reason 强制留痕（meta.json 落 depsOverrideNote 含前值 + depsOverrideAt）、
+  verify/archive 对账以覆写注为审计锚；缺 reason/非法值 exit 2、跨仓 meta 缺失给
+  --spec-dir 指引。测试 `worktree-deps-override.test.mjs` 3/3 + 回归 24 绿。
+- **① 离线降级链（npm ping → 链接容忍）**：**延后**——探测顺序重构触及供给引擎决策主链
+  （provisionDeps 快路径/兜底语义），离线判定本身有误判面（npm ping 不通≠装不上缓存包），
+  设计级另立变更；②的覆写通道已把「手改 JSON」的未定义行为收口为留痕通道，绕过风险
+  面收敛。
+
+归档（①留设计 backlog）。

@@ -30,3 +30,20 @@ redomain.js D-001：**迁域不换号**——条目 ID（FR-<旧域>-NNN）保�
 ## 绕过方案（当前可靠）
 
 条目级选择性迁移走手工条目段手术（Read 定位 → 整段搬移 → validate + digest 自检），并保持条目 id 原样不重编号（对齐 D-001）；域级整体迁移直接用 `--redomain`。
+
+## 处置记录（2026-10-13）
+
+**三向全部落地**（sillyspec 仓工作树）：
+
+1. **告警接专用命令 ✅**：flow done 伪域告警文案新增两行——域级迁移命令（含干跑提示）
+   与 `--by-change` 条目级过滤指引，并按告警列出的伪域文件名给出可照抄示例
+   （`--from auto-x --to <建议域> --by-change <本变更名> --write`）。
+2. **条目级过滤 ✅（已在场，advisory 接线收口）**：`--by-change <变更名>` 自坑
+   fr-domain-suggest 处置轮已落（redomain.js entrySourceChange 过滤 + 干跑/落盘同口径
+   + 未命中报错），本坑的「只迁某变更条目」机器通道即它——告警未指引是接线缺口，
+   已由①补上；`--entries FR-id` 形态不再另做（by-change 覆盖场景 + id 列表易抄错）。
+3. **D-001 铁律明示 ✅**：告警新增「迁域不换号——条目 ID 保持原样，手工搬移勿按目标域
+   接续重编号」警示行（坑内 2026-10-13-daemon-module-map 手术按序重编号属碰巧安全）。
+
+**测试**：fr-index ×2 + fr-domain-guard（含 by-change 干跑/落盘/未命中）+ redomain 回归
+13/13 绿。归档。
