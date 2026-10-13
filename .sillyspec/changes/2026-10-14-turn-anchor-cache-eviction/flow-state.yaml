@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：轮锚快照内存缓存 _lastTreeBySession 只 set 不 delete，会话终结无清理（对照同文件 _chainBySession 有 finally 自清理），长驻 daemon
+  每会话残留约百字节条目，慢性增长（2026-10-14 24h 风险审查唯一实质发现，低危）。
+
+  成功标准：
+
+  - turn-anchor.ts 导出会话级缓存清理函数，terminateSession 会话终结时调用，对齐 _clearBackgroundTasks/_destroyUsageLedger 同点惯例
+
+  - 清理后同会话再打锚，prev 锚经 JSONL 尾行兜底恢复，去重与 diff 链无功能回归
+
+  - 未存在 sessionId 调用清理不抛错
+
+  - 新增单测覆盖以上三条，turn-anchor 相关测试全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: d61c840c940580fe104b0388bb84a44723d3b92f
+updatedAt: '2026-10-13T21:34:23.098Z'
+cross_baselines:
+  sillyspec: 64efda719421c3714600bff08d1a64d146b529d3
+baseline_sha256: 865bb88d285adab3c98cf446123eb76bcd3522c072d6851ceb49d3b7176d030c
+spec_approved: true
+spec_approved_at: '2026-10-13T21:34:23.097Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
