@@ -80,8 +80,17 @@ const STAGE_OPTIONS = [
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
   { value: "archive", label: "归档" },
-  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与 quick 不可筛不同，
-  // thin 是主力辅助流，新 quick 类型变更全部分流至此）。
+  // 2026-10-14-change-center-lineage-tag-and-filter：「轻量变更」（thin）选项
+  // 移除——出身分类查询职责迁移至下方「分类」下拉（lineage 参数三分支精确口径，
+  // 归档 thin 行 stage 翻 archived 后旧 current_stage=thin 精确匹配筛不出）。
+] as const;
+
+// 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（lineage 参数）。
+// 空值 = 全部分类不过滤；thin/full 与后端 _is_thin_lineage 三分支投影口径一致
+// （筛「轻量变更」在已归档 tab 同样能命中归档兜底行）。
+const LINEAGE_OPTIONS = [
+  { value: "", label: "全部分类" },
+  { value: "full", label: "完整变更" },
   { value: "thin", label: "轻量变更" },
 ] as const;
 
@@ -270,6 +279,8 @@ export default function ChangesPage({ params }: Props) {
   // 2026-09-28-change-ux-detail-batch：平台同步处理区抽屉开关（常驻卡收进按钮）
   const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
   const [stageFilter, setStageFilter] = useState("");
+  // 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（"" = 全部分类）
+  const [lineageFilter, setLineageFilter] = useState("");
   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -299,6 +310,7 @@ export default function ChangesPage({ params }: Props) {
         location: tab,
         search,
         currentStage: stageFilter,
+        lineage: lineageFilter,
         sort: sortDir,
         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
         pendingReviewOnly: tab === "active" && focusMine,
@@ -312,6 +324,7 @@ export default function ChangesPage({ params }: Props) {
           location: tab,
           search: search || undefined,
           currentStage: stageFilter || undefined,
+          lineage: lineageFilter || undefined,
           sort: sortDir,
           pendingReviewOnly: tab === "active" && focusMine,
           page,
@@ -415,6 +428,8 @@ export default function ChangesPage({ params }: Props) {
     setSearchInput("");
     setSearch("");
     setStageFilter("");
+    // 2026-10-14-change-center-lineage-tag-and-filter：分类筛选一并回默认
+    setLineageFilter("");
     // ql-20260818-004：聚焦下放查询条件后，重置一并回默认（不勾选）
     setFocusMine(false);
     setPage(1);
@@ -559,9 +574,14 @@ export default function ChangesPage({ params }: Props) {
             {c.title || c.change_key}
           </Link>
           {/* 2026-09-27-change-list-is-thin：轻量出身徽章（后端 is_thin 投影）——
-              归档轻量行「轻量」与状态图标并存（对齐详情页双徽章口径）。 */}
-          {c.is_thin === true && (
+              归档轻量行「轻量」与状态图标并存（对齐详情页双徽章口径）。
+              2026-10-14-change-center-lineage-tag-and-filter：成对补「完整」中性
+              徽章（!is_thin）——完整流程变更此前无标签，两类出身一眼可辨；
+              is_thin 为后端投影必带 bool（缺省 False），undefined 防御归入完整。 */}
+          {c.is_thin === true ? (
             <StateLabel variant="attention">轻量</StateLabel>
+          ) : (
+            <StateLabel variant="neutral">完整</StateLabel>
           )}
           {renderTodoBadge(c)}
           {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
@@ -692,7 +712,7 @@ export default function ChangesPage({ params }: Props) {
   const renderEmpty = (): ReactNode => {
     if (items.length > 0) return null;
     // 有 filter 无匹配 → 简短文案（不显示 CTA，避免误导）
-    if (search || stageFilter) {
+    if (search || stageFilter || lineageFilter) {
       return (
         <div className="py-10 text-center text-xs text-muted-foreground">
           没有匹配的变更。
@@ -821,11 +841,29 @@ export default function ChangesPage({ params }: Props) {
             className="w-64"
           />
           <Select
+            aria-label="筛选阶段"
             value={stageFilter}
             onChange={(v) => setStageFilter(v ?? "")}
             className="w-36"
           >
             {STAGE_OPTIONS.map((opt) => (
+              <Select.Option key={opt.value} value={opt.value}>
+                {opt.label}
+              </Select.Option>
+            ))}
+          </Select>
+          {/* 2026-10-14-change-center-lineage-tag-and-filter：出身分类下拉
+              （完整/轻量，lineage 参数三分支口径） */}
+          <Select
+            aria-label="筛选分类"
+            value={lineageFilter}
+            onChange={(v) => {
+              setLineageFilter(v ?? "");
+              setPage(1);
+            }}
+            className="w-32"
+          >
+            {LINEAGE_OPTIONS.map((opt) => (
               <Select.Option key={opt.value} value={opt.value}>
                 {opt.label}
               </Select.Option>
