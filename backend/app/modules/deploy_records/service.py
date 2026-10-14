@@ -241,8 +241,12 @@ class DeployRecordService:
                 continue
             try:
                 text = entry.read_text(encoding="utf-8")
-            except OSError:
-                # 读失败（权限/编码等）按 invalid 容错，不炸扫描（FR-04 同口径）
+            except (OSError, UnicodeDecodeError):
+                # 读失败（权限等 IO 错）与解码失败（非 UTF-8 字节，如 Windows 侧
+                # GBK 手写文件）都按 invalid 容错，不炸扫描（FR-04 同口径）。
+                # UnicodeDecodeError 是 ValueError 子类而非 OSError，须显式列捕
+                # （2026-10-15-deploy-records-unicode-tolerance：原 except OSError
+                # 漏接致单个坏编码文件把整个列表打成 500）。
                 parsed_list.append(
                     _ParsedRecord(
                         file_name=entry.name,
