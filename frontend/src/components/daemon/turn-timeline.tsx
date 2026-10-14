@@ -1382,6 +1382,45 @@ export function TurnTimeline({
     pendingRequests.length > 0 &&
     sessionStatus !== "ended" &&
     sessionStatus !== "failed";
+
+  // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
+  // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
+  // 真实化只改 scrollHeight——不触发 scroll 事件（scrollTop 未变）、无 turns 提交，
+  // 2.5s 高度重申窗（BOTTOM_REASSERT_WINDOW_MS）过期后彻底无修正源（实测注入
+  // 2000px → delta=2000 永久停住，用户「有时候没完全滚到底」的最后一类根因）。
+  // 通解：ResizeObserver 观察滚动容器的**内容子元素**（容器自身 borderBox 由
+  // flex 固定不变化）——任何来源的内容增高且用户在底部（isNearBottomRef）时
+  // rAF 合帧 scrollTo 底。rAF 合帧：高频回调（流式/markdown 逐块撑开）去重为
+  // 一帧一滚（2026-10-13 layout-storm 教训——滚动类处理器禁同步布局写）。
+  // 用户上滚接管由 isNearBottomRef 守卫（handleScroll 置 false 后回调恒 no-op）；
+  // 降级：无 ResizeObserver（jsdom/极旧浏览器）不挂观测，行为回到重申窗兜底。
+  const bottomFollowRafRef = useRef<number | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const obs = new ResizeObserver(() => {
+      if (!isNearBottomRef.current) return;
+      if (bottomFollowRafRef.current !== null) return; // 合帧去重
+      bottomFollowRafRef.current = requestAnimationFrame(() => {
+        bottomFollowRafRef.current = null;
+        const target = scrollRef.current;
+        if (!target || !target.isConnected || !isNearBottomRef.current) return;
+        target.scrollTo(0, target.scrollHeight);
+      });
+    });
+    // 观察既有直接子（内容包装/错误条/pending 卡容器）——挂载后新增子（如
+    // streamFooter）不在列，由其自身渲染引起的兄弟高度变化仍被既有子捕获。
+    for (const child of Array.from(el.children)) obs.observe(child);
+    return () => {
+      obs.disconnect();
+      if (bottomFollowRafRef.current !== null) {
+        cancelAnimationFrame(bottomFollowRafRef.current);
+        bottomFollowRafRef.current = null;
+      }
+    };
+  }, []);
+  // rAF 句柄声明在此 effect 外（cleanup 与合帧去重共用）。
+
   const minimizedPending = showPending
     ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
     : [];
