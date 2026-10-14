@@ -59,3 +59,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-14 | 2026-10-14-session-preview-defect-fixes | 用户实测 2026-10-14-session-turn-preview-cards 上线后发现两缺陷：①额度耗尽失败轮 |
 | 2026-10-14 | 2026-10-14-session-bottom-follow-insert | 用户实测：打开会话加载后有时没滚到底——导航 active 显示最后一轮，但消息流视口停在倒数第几轮。根因：初始日志窗口 |
 | 2026-10-14 | 2026-10-14-session-bottom-passive-grow | 上轮修复（bottom-follow-insert）实测 3 次冷加载 2 次仍停距底 9092px：大纲后到中段插入预 |
+| 2026-10-14 | 2026-10-14-session-bottom-switch-remount | 用户实测仍偶发不落底——复现路径为「列表点击切换会话」（SPA 内切换，TurnTimeline 不重挂载）：滚动 re |

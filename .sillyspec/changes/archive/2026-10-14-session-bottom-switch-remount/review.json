@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-bottom-switch-remount",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "930a777fd9b7",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "同类残留风险：page 4563 AgentReplayBody 挂载未 key 化，tool_report→tool_report 会话切换时其内部 TurnTimeline 仍不重挂载",
+      "evidence": "grep 全前端生产挂载点仅 3 处 <TurnTimeline>（agent-replay-body.tsx:657、session-panel-dialog.tsx:2033、session-panel-page.tsx:4595），后两处本提交已 key 化。但 session-panel-page.tsx:4563 的 <AgentReplayBody sessionId={session.id} /> 无 key：isToolReportBody 分支在两个纯日志（tool_report）会话间切换时元素类型/位置不变，React 原地复用，agent-replay-body.tsx:657 内层 TurnTimeline 复用 isNearBottomRef（turn-timeline.tsx:1144）等滚动判定 refs——『单会话回放组件』的论断在组件层面成立，但该组件实例被 SPA 多会话页面复用。用户在日志会话 A' 上滚后切到日志会话 B'，同类不落底问题理论上可在该窄路径复现。非本提交回归（该路径改动前后行为一致），作为后续跟进项建议对 AgentReplayBody 同样 key=sessionId 或在其内部监听 sessionId 变化复位 refs。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:4563"
+    },
+    {
+      "severity": "P3",
+      "title": "key 化副作用：内部 minimizedIds（提问卡最小化集合）等 UI state 随会话切换清零",
+      "evidence": "turn-timeline.tsx:1349 const [minimizedIds, setMinimizedIds] = useState<Set<string>> 为组件内部 state，key 变更重挂载即清空。语义可接受：最小化是会话视图内的瞬态手势，ID 属上一会话轮次，带入新会话反而错误；代价仅 A→B→A 往返后 A 中已最小化卡重新展开。父级持有的 dialogHistory（ask-user 对话，见 turn-timeline.tsx:468 注释）不受 key 影响、不丢失。nearBottom/bottomAnchor state 同步归零正是本修复目的。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1349"
+    },
+    {
+      "severity": "P3",
+      "title": "dialog key 表达式在 view 清空过渡期可能引发一次额外瞬态重挂载",
+      "evidence": "key={view.sessionId ?? attachSessionId ?? \"pre\"}：若切换会话时 view.sessionId 短暂置空，key 先落 attachSessionId/\"pre\" 再落新 id，产生一次空态中间挂载。行为正确（空 turns 时间线本就该显示过渡态），仅多一次挂载开销，无功能影响。",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:2037"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T08:06:30Z"
+}

@@ -2814,3 +2814,55 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-05
 最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+
+## FR-auto-frontend-240 TurnTimeline 挂载点带 key=会话标识——切换会话时组件重挂载，全部滚动判定/基线/状态归零（初始贴底语义恢复）
+变更：2026-10-14-session-bottom-switch-remount
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-switch-remount/requirements.md#FR-01
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+
+## FR-auto-frontend-241 整页加载路径行为不变（重挂载对冷加载无差异）
+变更：2026-10-14-session-bottom-switch-remount
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-switch-remount/requirements.md#FR-02
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-switch-remount:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-switch-remount
+  status: active
+
+## FR-auto-frontend-242 切换会话后落底：上滚会话 A → 切换到长会话 → 落底（真浏览器实测 3/3）
+变更：2026-10-14-session-bottom-switch-remount
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-switch-remount/requirements.md#FR-03
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+
+## FR-auto-frontend-243 既有测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-switch-remount
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-switch-remount/requirements.md#FR-04
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-switch-remount:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-switch-remount
+  status: active

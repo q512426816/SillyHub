@@ -2956,3 +2956,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
 理由：最大风险：阈 50px/容差 4px 经验值——过大误吞用户小步上滚（距底仍 <80px 无影响），过小 markdown 抖动穿透（回退到上轮形态）。放弃方案：CSS overflow-anchor（浏览器原生锚定，但对 content-visibility 估算高度不稳定且不可控）；在 [turns] effect 内直接跟随不设守卫（上滚读历史被拉底，ql-20260822-010 既有回归）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-switch-remount
+锚点：未记录
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+理由：最大风险：重挂载一次性成本（切会话时全量行重建）——切会话本就全量重渲 turns，增量成本可忽略。放弃方案：①TurnTimeline 内加 sessionId prop + effect 手动重置各 refs——枚举 refs 易漏（本轮正是漏了 scrollBaselineRef 才升级到 key），新增 ref 又要记得加；②只重置 isNearBottomRef——治标，其余残留（lastSigRef/firstTurnKeyRef/baseline）仍有竞态面。
