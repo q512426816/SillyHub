@@ -111,7 +111,37 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
   curl -s http://127.0.0.1:8001/daemon/latest.json; echo'
 ```
 
-### 回滚
+## 发布记录（每次部署必做，成功失败都写）
+
+部署收尾前两步：**写记录 + 同步服务器**。平台「发布记录」菜单（/deploy-records）的数据源
+是服务器上的只读镜像目录，漏同步 = 服务器页面看不到本次部署。
+
+### 1. 写记录 md（契约与 sillyhub-docker-deploy skill 的「发布记录」节完全一致）
+
+取锚点：`GET https://<域名>/api/deploy-records`（需登录 token）拿最近一条 `commit_to` 与
+`seq`；或本地锚定（`docs/releases/` 目录最大 seq+1，目录空=001）。提交范围
+`git log <from>..HEAD`，按 🆕新增/🔧修复/⚡优化 分组规整成中文总结，写
+`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（frontmatter 8 字段 + 正文；失败部署
+也写 status: failed）。模板照 sillyhub-docker-deploy SKILL.md，记录随代码一起 commit 推送。
+
+### 2. 同步到服务器镜像目录（本 skill 专属步骤）
+
+服务器平台经 `/tmp`→`/host-projects` 挂载读记录，镜像目录固定为
+`/tmp/sillyhub-repos/multi-agent-platform/docs/releases/`（workspace
+「multi-agent-platform-镜像」指向它）：
+
+```bash
+ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
+  'mkdir -p /tmp/sillyhub-repos/multi-agent-platform/docs/releases'
+scp -i ~/.ssh/aliyun_deploy docs/releases/*.md \
+  root@47.113.145.252:/tmp/sillyhub-repos/multi-agent-platform/docs/releases/
+```
+
+> /tmp 服务器重启可能被清——无所谓：每次部署本节都会全量重传，目录自愈。
+> 平台上另有 workspace 记录的是本机路径（读不到），「multi-agent-platform-镜像」才是服务器
+> 侧发布记录数据源；其它仓库要用同款能力时照抄：mkdir + scp + 建一条指向该目录的 workspace。
+
+## 回滚
 
 ```bash
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
