@@ -33,6 +33,7 @@ import { useAvatarSrc } from "@/components/chat/use-avatar-src";
 import { changePassword, logout, updateMyAvatar } from "@/lib/auth";
 import { errMessage } from "@/lib/errors";
 import { getFileDownloadUrl, uploadFile, tryReclaimOrphanAvatarFile } from "@/lib/file/api";
+import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
 import { useSession } from "@/stores/session";
 
 export default function MobileAccountPage() {
@@ -62,6 +63,9 @@ export default function MobileAccountPage() {
       await logout();
     } finally {
       setLoading(false);
+      // 2026-10-14-logout-localstorage-user-data-cleanup：清 localStorage 用户域键
+      // （会话/群聊草稿、未读锚点、活性状态等），设备级偏好保留。
+      clearUserScopedLocalStorage();
       // token 已清。必须整页跳转（对齐桌面端与 lib/api.ts 401 分支先例，
       // 2026-10-14-logout-full-reload-clear-cache）——SPA 内跳转让 React Query
       // 缓存与内存 store 存活，换账号后残留上一用户数据。

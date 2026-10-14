@@ -50,6 +50,13 @@ vi.mock("@/lib/use-workspace-context", () => ({
 vi.mock("@/components/top-bar", () => ({
   TopBar: () => <div data-testid="top-bar" />,
 }));
+
+// 登出清理 mock（2026-10-14-logout-localstorage-user-data-cleanup）：断言登出
+// 跳转前统一清 localStorage 用户域键的钩子被调（键面行为由其自身单测覆盖）。
+const logoutStorage = vi.hoisted(() => ({ clear: vi.fn() }));
+vi.mock("@/lib/logout-storage", () => ({
+  clearUserScopedLocalStorage: logoutStorage.clear,
+}));
 // 弹窗 mock 成「直接透出 onConfirm 的按钮」：本文件聚焦 app-shell 自己的
 // performLogout 跳转方式断言，弹窗本体交互由 logout-confirm-dialog.test.tsx 覆盖。
 vi.mock("@/components/logout-confirm-dialog", () => ({
@@ -227,5 +234,7 @@ describe("退出登录 — 整页跳转清缓存（2026-10-14-logout-full-reload
 
     await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/login"));
     expect(nav.replace).not.toHaveBeenCalled();
+    // 2026-10-14-logout-localstorage-user-data-cleanup：跳转前清 localStorage 用户域键
+    expect(logoutStorage.clear).toHaveBeenCalledTimes(1);
   });
 });

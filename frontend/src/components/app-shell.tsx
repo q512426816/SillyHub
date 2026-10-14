@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
 import { CircuitBreakerBanner } from "@/components/circuit-banner";
 import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { TopBar } from "@/components/top-bar";
+import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
 import {
   MENU_SECTION_LABEL as SECTION_LABEL,
   MENU_SECTION_ORDER as SECTION_ORDER,
@@ -313,6 +314,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
     } finally {
       clear();
+      // 2026-10-14-logout-localstorage-user-data-cleanup：清 localStorage 用户域键
+      // （会话/群聊草稿、未读锚点、活性状态等），设备级偏好保留——清单见 lib/logout-storage.ts。
+      clearUserScopedLocalStorage();
       // 2026-10-14-logout-full-reload-clear-cache：必须整页跳转（对齐 lib/api.ts
       // 401 被动登出先例）——SPA 内跳转会让 React Query 缓存与内存 zustand store
       // （工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。

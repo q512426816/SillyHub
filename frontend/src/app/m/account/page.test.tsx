@@ -14,6 +14,13 @@ vi.mock("@/lib/auth", () => ({
   updateMyAvatar: vi.fn(),
 }));
 
+// 登出清理 mock（2026-10-14-logout-localstorage-user-data-cleanup）：断言登出
+// 跳转前统一清 localStorage 用户域键的钩子被调（键面行为由其自身单测覆盖）。
+const logoutStorage = vi.hoisted(() => ({ clear: vi.fn() }));
+vi.mock("@/lib/logout-storage", () => ({
+  clearUserScopedLocalStorage: logoutStorage.clear,
+}));
+
 // 头像上传管线 mock（对齐桌面 (dashboard)/account/page.test 惯例）：
 // uploadFile 供选图断言、getFileDownloadUrl 保持 /api/file/{id} 形态、
 // fetchFileBlob 供头像渲染链路（useAvatarSrc）静默回 Blob；
@@ -46,6 +53,7 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
   beforeEach(() => {
     nav.push.mockClear();
     nav.replace.mockClear();
+    logoutStorage.clear.mockClear();
     mockedChangePassword.mockReset();
     mockedLogout.mockReset();
     mockedUpdateMyAvatar.mockReset();
@@ -143,6 +151,8 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
 
     await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/m/login"));
     expect(nav.replace).not.toHaveBeenCalled();
+    // 2026-10-14-logout-localstorage-user-data-cleanup：跳转前清 localStorage 用户域键
+    expect(logoutStorage.clear).toHaveBeenCalledTimes(1);
 
     if (originalLocationDesc) {
       Object.defineProperty(window, "location", originalLocationDesc);
