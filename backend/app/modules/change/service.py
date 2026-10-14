@@ -287,11 +287,12 @@ class ChangeService:
         if pending_keys is not None:
             base = base.where(col(Change.change_key).in_(pending_keys))
         # 2026-10-14-change-center-lineage-tag-and-filter：出身过滤（change_key 在
-        # workspace 内唯一，集合按 workspace 收集不串台）。
+        # workspace 内唯一，集合按 workspace 收集不串台）。thin 空集已上方短路；
+        # full 空集显式跳过 where（NOT IN 空集恒真，免依赖方言空集展开行为）。
         if thin_keys is not None:
             if lineage_norm == "thin":
                 base = base.where(col(Change.change_key).in_(thin_keys))
-            else:
+            elif thin_keys:
                 base = base.where(col(Change.change_key).notin_(thin_keys))
 
         # Count total
@@ -2576,8 +2577,10 @@ class ChangeService:
           ``latest_progress.changes[0].status == 'archived'`` 时终态覆盖 stage=
           'archived'（归档 thin 翻 archived 后仍靠 steps 兜底命中的关键路径）；
           未命中处 fallback row 现值（D-003）。
-        - deleted 行不进投影 join（task-06 防复活口径同源）：row 现值 + 无
-          latest_progress 判分支①②（archive 三源并集兜底行照常参与分类）。
+        - deleted 行不进集合（与 enrich_summaries 口径一致：deleted 行在 is_thin
+          赋值前 ``continue``，投影恒 schema 缺省 False → 渲染「完整」标签）——
+          归档 tab 三源并集③兜底行（location='deleted'+stage archived）参与
+          full 分类而非 thin，标签与筛选结果不分裂。
         """
         stmt = select(
             Change.change_key,
@@ -2595,15 +2598,14 @@ class ChangeService:
         thin: set[str] = set()
         for r in rows:
             if r.location == "deleted":
+                continue
+            info = projected.get((workspace_id, r.change_key))
+            if info is None:
                 stage, latest_progress = r.current_stage, None
             else:
-                info = projected.get((workspace_id, r.change_key))
-                if info is None:
-                    stage, latest_progress = r.current_stage, None
-                else:
-                    stage, latest_progress = info[0], info[2]
-                    if self._extract_change_status(latest_progress) == "archived":
-                        stage = "archived"
+                stage, latest_progress = info[0], info[2]
+                if self._extract_change_status(latest_progress) == "archived":
+                    stage = "archived"
             if self._is_thin_lineage(
                 current_stage=stage,
                 change_type=r.change_type,

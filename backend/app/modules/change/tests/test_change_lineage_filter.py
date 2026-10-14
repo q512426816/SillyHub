@@ -247,3 +247,40 @@ async def test_lineage_unknown_value_ignored_and_full_with_empty_set(
     full_items, full_total = await service.list_(ws.id, lineage="full")
     assert {c.change_key for c in full_items} == {"c-a", "c-b"}
     assert full_total == 2
+
+
+@pytest.mark.asyncio
+async def test_lineage_deleted_rows_never_thin_matches_is_thin_projection(
+    db_session: AsyncSession,
+) -> None:
+    """deleted 行不进 thin 集合——与 is_thin 投影口径一致（评审 P1 修复回归）。
+
+    enrich_summaries 对 deleted 行在 is_thin 赋值前 continue（投影恒 schema
+    缺省 False → 渲染「完整」标签）；归档 tab 三源并集③行（location='deleted'
+    + stage archived，评审指出的 change_type='quick' 分裂形态）必须落 full
+    分类而非 thin，否则出现「lineage=thin 返回但渲染完整标签」的自相矛盾。
+    """
+    ws = await _make_workspace(db_session)
+    service = ChangeService(db_session)
+    # 归档 tab 三源并集③形态：location='deleted' + current_stage='archived'，
+    # 且 change_type='quick'（row 现值判分支②会误命中 thin 的分裂形态）
+    await _make_change(
+        db_session,
+        ws.id,
+        "c-tombstone-quick",
+        stage="archived",
+        change_type="quick",
+        location="deleted",
+        status="archived",
+    )
+
+    thin_items, thin_total = await service.list_(ws.id, location="archive", lineage="thin")
+    full_items, full_total = await service.list_(ws.id, location="archive", lineage="full")
+    assert thin_items == [] and thin_total == 0
+    assert {c.change_key for c in full_items} == {"c-tombstone-quick"}
+    assert full_total == 1
+    # 行本身仍在归档 tab 可见（三源并集③不过滤 location 维度），且 is_thin
+    # 投影为 False——full 分类与「完整」标签一致
+    rows, _ = await service.list_(ws.id, location="archive")
+    enriched = await service.enrich_summaries(rows)
+    assert [(s.change_key, s.is_thin) for s in enriched] == [("c-tombstone-quick", False)]

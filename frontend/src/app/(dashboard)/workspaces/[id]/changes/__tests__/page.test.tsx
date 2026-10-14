@@ -937,12 +937,16 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       total: 2,
     });
     await renderAndWait();
-    // 完整出身：neutral 胶囊（无琥珀闪电语义类）；轻量出身：attention 琥珀胶囊。
-    // 两个标签都挂在各自行的标题容器内（StateLabel 渲染文本即断言点）。
-    expect(screen.getByText("完整")).toBeInTheDocument();
-    expect(screen.getByText("轻量")).toBeInTheDocument();
-    // 可区分：轻量=warning 语义底色，完整=neutral 语义底色（variant 不同 → 配色不同）
-    expect(screen.getByText("轻量")).not.toEqual(screen.getByText("完整"));
+    // 完整出身：neutral 胶囊（muted-foreground 语义色）；轻量出身：attention
+    // 琥珀胶囊（warning 语义色）——StateLabel 内联 style，直接断言配色可区分
+    // （评审 P3：仅断言不同文本节点恒真，不足以锁「样式可区分」承诺）。
+    const fullBadge = screen.getByText("完整");
+    const thinBadge = screen.getByText("轻量");
+    expect(fullBadge).toBeInTheDocument();
+    expect(thinBadge).toBeInTheDocument();
+    expect(fullBadge.style.color).toContain("var(--muted-foreground)");
+    expect(thinBadge.style.color).toContain("var(--warning)");
+    expect(fullBadge.style.color).not.toBe(thinBadge.style.color);
   });
 
   it("分类下拉选择「轻量变更」→ listChanges 收到 lineage=thin；重置后清除", async () => {
