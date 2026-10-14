@@ -1,0 +1,26 @@
+{
+  "change": "2026-10-14-agent-profile-express-preset",
+  "baseline": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+  "head": "534cef161623ee81046dd08d697300c005071294",
+  "files": [
+    "backend/app/main.py",
+    "backend/app/modules/agent/profile/seed.py",
+    "backend/app/modules/agent/tests/test_profile_seed.py"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 216,
+    "deletions": 3
+  },
+  "savedAt": "2026-10-14T10:58:00.000Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）。⚠️ 本件为归档后按 git 忠实重建：首次冻结件在 flow done 重入（评审 P3 增量修复后补删）被幂等跳过未再生（verify-result.md 如实记录「无冻结件」）；重建命令 git diff f17f301acc..534cef1616 -- <交付三文件>，范围含 P3 修复提交 534cef1616，与 verify-result 收口 HEAD 一致。",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ]
+}

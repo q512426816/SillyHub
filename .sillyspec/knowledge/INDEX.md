@@ -207,3 +207,4 @@
 - policy|FR|需求|承接 → [fr/policy.md](fr/policy.md)
 ||||||| C:/Users/12532/AppData/Local/Temp/d.base
 - lib-agent|FR|需求|承接 → [fr/lib-agent.md](fr/lib-agent.md)
+- agent|FR|需求|承接 → [fr/agent.md](fr/agent.md)

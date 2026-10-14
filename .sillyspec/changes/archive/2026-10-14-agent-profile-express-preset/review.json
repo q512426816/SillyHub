@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-agent-profile-express-preset",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "45d484f7dc224059ce472af779b82b03aa0a9b56",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "seed.py 确定性 id 注释的字面派生式与代码实际两级 uuid5 派生不一致",
+      "evidence": "注释写 uuid5(NAMESPACE_OID, \"sillyhub.agent.presets:sillyspec-express-change\")（单级、拼接 name），代码实际是 uuid5(uuid5(NAMESPACE_OID,\"sillyhub.agent.presets\"), \"sillyspec-express-change\") 两级派生——两者 SHA-1 值不同，属注释与实现不一致（CLAUDE.md 规则 18）；无行为风险：确定性成立、与角色模板机制同构、测试 test_express_preset_id_is_deterministic_uuid5 按实现断言，requirements 的三参数记法本身非合法 Python 签名只能理解为意图描述",
+      "location": "backend/app/modules/agent/profile/seed.py:100-101"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T10:48:00+08:00"
+}
