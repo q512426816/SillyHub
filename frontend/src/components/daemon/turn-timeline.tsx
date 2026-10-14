@@ -1187,9 +1187,29 @@ export function TurnTimeline({
     return Math.max(0, turns.length - bottomAnchor.count);
   })();
 
+  // 2026-10-14-session-bottom-passive-grow：滚动基线镜像——区分「被动增高」与
+  // 「用户上滚」。大纲后到中段插入预览卡时列表高度骤增，浏览器对视口未动也
+  // 派发 scroll 事件（距底从 <80px 瞬变数千 px）——旧 handleScroll 直接按距离
+  // 清 isNearBottomRef，贴底跟随被关，上轮 length 分量修复被此守卫拦下（实测
+  // 3 次冷加载 2 次停距底 9092px）。被动增高判定：scrollHeight 增长且
+  // scrollTop 未减少（容差 4px 布局抖动；50px 为显著增高阈，忽略 markdown 撑
+  // 开的微小抖动）→ 不改变贴底判定、不设新消息计数锚（用户没离开底部），
+  // 仅更新基线。
+  const scrollBaselineRef = useRef<{ top: number; height: number } | null>(null);
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    const prev = scrollBaselineRef.current;
+    scrollBaselineRef.current = { top: el.scrollTop, height: el.scrollHeight };
+    if (
+      prev &&
+      el.scrollHeight > prev.height + 50 &&
+      el.scrollTop >= prev.top - 4
+    ) {
+      // 被动增高（中段插入/内容撑开）：视口未上移——保持贴底判定原值。
+      return;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     isNearBottomRef.current = near;
     setNearBottom((prev) => (prev === near ? prev : near));

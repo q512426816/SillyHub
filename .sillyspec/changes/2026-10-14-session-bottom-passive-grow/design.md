@@ -1,0 +1,24 @@
+---
+author: flow-machine-draft
+created_at: 2026-10-14T07:14:18.840Z
+---
+# 设计记录（Design Record）— 2026-10-14-session-bottom-passive-grow
+
+## 做法概述
+
+上轮 length 分量修复被 handleScroll 拦下：大纲后到插入使 scrollHeight 骤增，浏览器对视口未动也派发 scroll（距底瞬变数千 px），旧处理器按距离清 isNearBottomRef → 贴底跟随关闭。修法：handleScroll 头部加被动增高识别（scrollHeight 较基线增长 ≥50px 且 scrollTop 未减 >4px → 直接 return，保持贴底判定与计数锚原值，仅更新基线镜像）。阈 50px 忽略 markdown 微撑开、容差 4px 吸收布局抖动。真实上滚 scrollTop 必减 → 不命中被动分支 → 既有语义原样。
+
+## 接口契约
+
+无接口/导出变化；行为变化仅 handleScroll 内部分支（组件内部滚动语义），对消费方透明。
+
+## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+1. 乱序/迟到：多条 scroll 事件（增高→再增高）基线逐步推进每次判增；增高与用户上滚同刻（ scrollTop 减）→ 用户优先（不命中被动分支），宁可少跟随不误拉底。
+2. 并发写：scroll 事件浏览器串行派发，基线镜像单 ref 无并发面。
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+4. 作用域：滚动基线组件内局部，无跨会话/跨仓面。
+
+## 风险与死路
+
+最大风险：阈 50px/容差 4px 经验值——过大误吞用户小步上滚（距底仍 <80px 无影响），过小 markdown 抖动穿透（回退到上轮形态）。放弃方案：CSS overflow-anchor（浏览器原生锚定，但对 content-visibility 估算高度不稳定且不可控）；在 [turns] effect 内直接跟随不设守卫（上滚读历史被拉底，ql-20260822-010 既有回归）。

@@ -1,0 +1,28 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  上轮修复（bottom-follow-insert）实测 3 次冷加载 2 次仍停距底 9092px：大纲后到中段插入预览卡 → 列表高度骤增 → 浏览器对视口未动也派发 scroll 事件（scrollHeight 增长使距底从
+  <80px 变 9092px）→ handleScroll 误判「用户上滚离开底部」清 isNearBottomRef → 贴底跟随被关 → length 分量触发时守卫已 false。第二层根因：被动增高与用户主动上滚未区分。
+
+
+  成功标准：
+
+  - 被动增高（scrollHeight 增长且 scrollTop 未减少）不改变贴底判定——handleScroll 跳过 near 清零与新消息计数锚设置，仅更新基线
+
+  - 用户真实上滚（scrollTop 减少）照常清贴底判定（读历史不被拉底，既有行为不变）
+
+  - 真实上滚后的内容增长（读历史时后台预取插入）不恢复贴底（near 保持 false）
+
+  - 连续 3 次冷加载全部落底（导航 active=末轮=视口末轮），真浏览器实测
+
+  - 贴底/翻页/跳转/preview 测试面复跑绿 + tsc 0
+autopilot: false
+prestage_ack: true
+baseline_commit: fcff76a9ca8a552a0deb3f478185738a0729ff61
+updatedAt: '2026-10-14T07:14:18.932Z'
+baseline_sha256: dfc07a5ca14cf135085ebf91bf33e2a37f407d78205ddd2af182047555bc77b8
+
