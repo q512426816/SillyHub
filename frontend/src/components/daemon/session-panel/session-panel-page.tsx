@@ -4560,7 +4560,9 @@ export function SessionPanelPage({
   // 原日志条目流主体组件已退役删除（承接者见 agent-replay-body.tsx）。
   // 保持单行分支挂载（git revert 可整体回退）。
   const sessionBody = isToolReportBody ? (
-    <AgentReplayBody sessionId={session.id} />
+    // 2026-10-14-session-bottom-switch-remount（审查 P2 补口）：回放体内 TurnTimeline
+    // 同样 key 化——tool_report→tool_report 切换时滚动判定 refs 不跨会话残留。
+    <AgentReplayBody key={session.id} sessionId={session.id} />
   ) : (
     <>
       {/* task-08（2026-09-22-session-fork-continuation / FR-05）：分叉会话
