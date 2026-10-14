@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-assets-knowledge-popup-preview",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-assets-knowledge-popup-preview"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达：整文件 chip 与锚点条目行点击弹窗打开（chip 文件级无定位）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-assets-knowledge-popup-preview"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-assets-knowledge-popup-preview"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「测试绑定行：锚点标注「变更内」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-assets-knowledge-popup-preview"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-assets-knowledge-popup-preview"
+    }
+  ]
+}

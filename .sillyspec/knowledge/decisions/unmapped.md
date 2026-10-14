@@ -3000,3 +3000,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：c0d30b157200e183168da8c8872fdab1772b8097
 理由：- **最大风险**：镜像目录在 /tmp（服务器重启可能被清）→ 页面短暂空窗。接受：每次部署全量重传自愈；若清空窗口期需要看历史，scp 本地 docs/releases 即恢复。 - **放弃方案 A（API 上报+落库）**：需写端点+鉴权链+数据库表，实现面大；D-004 大变更时用户已裁决「写文件+只读」路线，本变更仅补数据源物理可达性，不推翻既有裁决。 - **放弃方案 B（服务器放完整 git 仓库）**：服务器 /opt/sillyhub 仓库存在但不在挂载面（/tmp），且引入服务器侧 git 拉取/凭证维护成本；镜像目录只需 scp 一个目录，最小面。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-assets-knowledge-popup-preview
+锚点：未记录
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+理由：- 最大风险：测试环境债——EntryCardList 的正文渲染链 CardMarkdown → MarkdownText 用 next/dynamic，jsdom 同步渲染为 null（entry-card-list.test 先例），组件测试必须 stub MarkdownText；jsdom 无 scrollIntoView，弹窗定位 effect 会抛未捕获错误拖挂测试（knowledge-page.test 先例），测试文件需按同款 beforeAll 打桩。 - 弃案 A：组件直接 `import { normalizeKnowledgeFileParam } from "@/app/.../knowledge/page"`——省一次迁移但把知识页整图（antd Tree 等）拖进变更详情页打包图，且组件反向依赖页面是反模式，弃。 - 弃案 B：弹窗内只渲染单条条目（自写解析器抽单卡）——EntryCardList 的条目解析是双端同域契约（slugifyAnchor 与 backend parser 对齐），单条抽取等于另起一套解析器，漂移风险大于收益；整文件渲染 + 锚点滚动与知识库页行为完全一致，弃。

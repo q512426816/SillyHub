@@ -1,0 +1,714 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index 6567ea6e1..fded8cdd1 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -149,15 +149,16 @@ vi.mock("next/navigation", () => ({
+   useSearchParams: () => navState.searchParams,
+ }));
+ 
+-import KnowledgePage, {
+-  normalizeKnowledgeFileParam,
+-} from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
++import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+ import { WorkspaceTabs } from "@/components/workspace-tabs";
+ import {
+   getKnowledge,
+   getKnowledgeStats,
+   listDistillTasks,
+   listKnowledge,
++  // 2026-10-14-assets-knowledge-popup-preview：归一函数迁 lib 单一源，import 随迁
++  // （vi.mock 的 importOriginal 透传真实实现，行为断言不变）。
++  normalizeKnowledgeFileParam,
+   previewMergeKnowledge,
+   rejectKnowledge,
+ } from "@/lib/knowledge";
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 02abb4fd9..14f834bf8 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -71,6 +71,9 @@ import {
+   getKnowledge,
+   getKnowledgeStats,
+   listKnowledge,
++  // 深链 file 参数归一（2026-10-14-assets-knowledge-popup-preview 迁 lib 单一源：
++  // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
++  normalizeKnowledgeFileParam,
+   rejectKnowledge,
+   type KnowledgeEntry,
+ } from "@/lib/knowledge";
+@@ -264,20 +267,6 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
+   });
+ }
+ 
+-/**
+- * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
+- * FR-01/02）。调用方给的是 spec 树相对路径（``knowledge/fr/x.md``），知识库 API 的
+- * 键是剥掉 ``knowledge/`` 后的相对路径（``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、
+- * 反斜杠与 ``./`` 写法——四种常见形态落到同一文件，其余原样返回（查不到即静默落
+- * 文件级，不报错）。
+- */
+-export function normalizeKnowledgeFileParam(raw: string): string {
+-  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+-  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
+-  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
+-  return v;
+-}
+-
+ export default function KnowledgePage({ params }: Props) {
+   const workspaceId = params.id;
+   const searchParams = useSearchParams();
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index a51c73e76..f4c3596b6 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -3,16 +3,22 @@
+ // 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
+ // 失败静默隐藏（isError → 整卡 null）。
+ //
+-// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：FR/决策行 href 带
+-// file+anchor 深链、测试绑定行点开测试文件预览弹窗（FilePreview 收到仓库路径）、
+-// 归档留档文件清单渲染与点开单文件 diff 弹窗（命中/note 两态）。
+-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
++// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：测试绑定行点开测试
++// 文件预览弹窗（FilePreview 收到仓库路径）、归档留档文件清单渲染与点开单文件
++// diff 弹窗（命中/note 两态）。
++//
++// 2026-10-14-assets-knowledge-popup-preview（FR-01~03/05）改写：FR 索引/决策
++// 蒸馏/知识触达三组从整页跳知识库深链改为点击打开条目内容预览弹窗（getKnowledge
++// 取数 + EntryCardList 条目卡 + 锚点定位），弹窗头部「在知识库中打开」深链沿用
++// 原 file+anchor 格式。
++import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+-import { beforeEach, describe, expect, it, vi } from "vitest";
++import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+ import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+ import { fetchSearch } from "@/lib/explorer";
++import { getKnowledge } from "@/lib/knowledge";
+ 
+ vi.mock("@/lib/changes", () => ({
+   getChangeAssets: vi.fn(),
+@@ -26,6 +32,32 @@ vi.mock("@/lib/explorer", () => ({
+   fetchSearch: vi.fn(),
+ }));
+ 
++// 知识条目预览弹窗（2026-10-14-assets-knowledge-popup-preview）取数端点 mock；
++// normalizeKnowledgeFileParam 为纯函数，importOriginal 透传真实实现。
++vi.mock("@/lib/knowledge", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/knowledge")>();
++  return { ...actual, getKnowledge: vi.fn() };
++});
++
++// EntryCardList 正文渲染链 CardMarkdown → MarkdownText 用 next/dynamic
++// （ssr:false），jsdom 同步渲染 null（entry-card-list.test 先例）——stub 直接
++// 回显 content，正文文本断言照常命中。
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="md-stub">{content}</div>
++  ),
++}));
++
++// jsdom 未实现 scrollIntoView（弹窗锚点定位 effect 调用）——knowledge-page.test
++// 同款先例：文件级打桩防 Uncaught TypeError 拖挂整跑。
++const scrollIntoViewSpy = vi.fn();
++beforeAll(() => {
++  Element.prototype.scrollIntoView = scrollIntoViewSpy;
++});
++afterAll(() => {
++  delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
++});
++
+ // FilePreview 走 explorer 取数（仓库文件），本卡只验证「弹窗打开且把路径交给它」——
+ // 取数与渲染由 explorer 自己的用例覆盖，这里用替身把路径回显出来。
+ vi.mock("@/components/explorer/file-preview", () => ({
+@@ -37,6 +69,7 @@ vi.mock("@/components/explorer/file-preview", () => ({
+ const mockGet = vi.mocked(getChangeAssets);
+ const mockPatch = vi.mocked(getChangePatchFile);
+ const mockSearch = vi.mocked(fetchSearch);
++const mockGetKnowledge = vi.mocked(getKnowledge);
+ 
+ /** 单命中 matches 便捷构造（type 恒 file——本卡只消费 path）。 */
+ function matchesOf(paths: string[]) {
+@@ -50,6 +83,17 @@ function matchesOf(paths: string[]) {
+   };
+ }
+ 
++/** 知识条目取数响应便捷构造（zone/filename/content 为弹窗渲染三要素）。 */
++function knowledgeOf(filename: string, zone: string, content: string) {
++  return {
++    zone,
++    filename,
++    path: `.sillyspec/knowledge/${filename}`,
++    title: filename,
++    content,
++  };
++}
++
+ function renderCard() {
+   const client = new QueryClient({
+     defaultOptions: { queries: { retry: false } },
+@@ -193,23 +237,75 @@ describe("ChangeAssetsCard", () => {
+     expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
+   });
+ 
+-  it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
++  it("FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链（FR-01/03）", async () => {
+     mockGet.mockResolvedValue(FULL);
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf(
++        "fr/x.md",
++        "fr",
++        "## FR-auto-x-001 条目一\n状态：active\n理由：条目正文理由。\n",
++      ),
++    );
+     renderCard();
+-    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
++    await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+-    const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
+-    expect(frLink).toHaveAttribute(
++    // FR 行不再是整页跳转的 <a>，点击打开预览弹窗
++    const frRow = await screen.findByText("FR-auto-x-001");
++    expect(frRow.closest("a")).toBeNull();
++    fireEvent.click(frRow);
++    // 取数按归一后文件名发起（file=knowledge/fr/x.md → fr/x.md）
++    await waitFor(() =>
++      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/x.md"),
++    );
++    // 弹窗内条目卡渲染 + 锚点定位目标卡存在
++    const dialog = await screen.findByRole("dialog");
++    expect(
++      dialog.querySelector('[data-entry-anchor="fr/x.md#FR-auto-x-001"]'),
++    ).not.toBeNull();
++    // 弹窗头部知识库深链：href 与改造前深链逐字同构
++    const jump = within(dialog).getByText("在知识库中打开").closest("a");
++    expect(jump).toHaveAttribute(
+       "href",
+       "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=FR-auto-x-001",
+     );
+-    const decLink = screen.getByText("D-001@v1").closest("a");
+-    expect(decLink).toHaveAttribute(
++
++    // 关闭后点决策行：同一弹窗通道，决策文件深链同理
++    fireEvent.click(within(dialog).getByText("关闭"));
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf(
++        "decisions/x.md",
++        "decisions",
++        "## D-001@v1 : 决策一\n状态：implemented\n理由：决策理由文本。\n",
++      ),
++    );
++    fireEvent.click(screen.getByText("D-001@v1"));
++    await waitFor(() =>
++      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "decisions/x.md"),
++    );
++    const dialog2 = await screen.findByRole("dialog");
++    expect(
++      dialog2.querySelector('[data-entry-anchor="decisions/x.md#D-001@v1"]'),
++    ).not.toBeNull();
++    expect(
++      within(dialog2).getByText("在知识库中打开").closest("a"),
++    ).toHaveAttribute(
+       "href",
+       "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=D-001%40v1",
+     );
+   });
+ 
++  it("知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见（FR-05）", async () => {
++    mockGet.mockResolvedValue(FULL);
++    mockGetKnowledge.mockRejectedValue(new Error("知识库不可用"));
++    renderCard();
++    await screen.findByRole("button", { name: /沉淀资产/ });
++
++    fireEvent.click(await screen.findByText("FR-auto-x-001"));
++    const dialog = await screen.findByRole("dialog");
++    expect(await within(dialog).findByText(/知识库不可用/)).toBeInTheDocument();
++    expect(within(dialog).getByText("在知识库中打开")).toBeInTheDocument();
++  });
++
+   it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     renderCard();
+@@ -512,9 +608,10 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
+   });
+ 
+-  it("知识触达组：统一文案（在途/归档同口径）并带知识库 file+anchor 深链 href", async () => {
++  it("知识触达：锚点条目行点击弹窗打开，弹窗深链沿用 file+anchor（不整页跳转）", async () => {
+     // 2026-10-09-knowledge-touch-marker-sunset：标题不再分裂归档/实时双口径，
+     // 悬停说明注入命中留痕口径；禁止「待复核」「以标记为准」字样。
++    // 2026-10-14-assets-knowledge-popup-preview：行点击改弹窗预览，不再整页跳转。
+     mockGet.mockResolvedValue({
+       ...FULL,
+       knowledge_touch: [
+@@ -525,8 +622,15 @@ describe("ChangeAssetsCard 资产透明面", () => {
+         },
+       ],
+     });
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf(
++        "fr/auto-backend.md",
++        "fr",
++        "## FR-auto-backend-015 THIN 辅助阶段与派发配置\n状态：active\n",
++      ),
++    );
+     renderCard();
+-    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
++    await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+     expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
+@@ -537,13 +641,22 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     // id≠title 的锚点条目：双栏各显示一份，挂在文件组头下。
+     expect(group).toHaveTextContent("FR-auto-backend-015");
+     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
+-    const link = group.querySelector(
+-      '[data-testid="change-assets-touch-group-knowledge/fr/auto-backend.md"] a[href*="anchor="]',
+-    );
+-    expect(link).not.toBeNull();
+-    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+-      "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
++
++    // 条目行点击 → 弹窗（行不再是 <a>），取数按归一文件名，深链带 file+anchor。
++    // 组头也是 button（文件级打开），用行文本定位锚点条目行。
++    const row = within(group).getByText("THIN 辅助阶段与派发配置").closest("button");
++    expect(row).not.toBeNull();
++    expect(row!.closest("a")).toBeNull();
++    fireEvent.click(row!);
++    await waitFor(() =>
++      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/auto-backend.md"),
+     );
++    const dialog = await screen.findByRole("dialog");
++    expect(
++      decodeURIComponent(
++        within(dialog).getByText("在知识库中打开").closest("a")!.getAttribute("href") ?? "",
++      ),
++    ).toContain("file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015");
+   });
+ 
+   it("在途变更知识触达：同 slug 只显示一份（id==title 不连排两遍）", async () => {
+@@ -556,6 +669,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
+         { id: "-audit_hooks-只在测试", title: "-audit_hooks-只在测试", file: "known-issues.md" },
+       ],
+     });
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf("known-issues.md", "top", "## -audit_hooks 只在测试 lifespan 注册\n正文\n"),
++    );
+     renderCard();
+     await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+@@ -564,18 +680,20 @@ describe("ChangeAssetsCard 资产透明面", () => {
+     expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
+     // slug 恰好出现一次（改前 id+title 双栏连排两遍）。
+     expect((group.textContent?.match(/-audit_hooks-只在测试/g) ?? []).length).toBe(1);
+-    // 锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
+-    const link = group.querySelector(
+-      '[data-testid="change-assets-touch-group-known-issues.md"] a[href*="anchor="]',
+-    );
+-    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
+-      "file=known-issues.md&anchor=-audit_hooks-",
+-    );
++    // 条目行（非组头）点击弹窗打开；裸知识文件深链（file 不带 knowledge/ 前缀）。
++    const row = within(group).getByText("-audit_hooks-只在测试").closest("button");
++    fireEvent.click(row!);
++    const dialog = await screen.findByRole("dialog");
++    expect(
++      decodeURIComponent(
++        within(dialog).getByText("在知识库中打开").closest("a")!.getAttribute("href") ?? "",
++      ),
++    ).toContain("file=known-issues.md&anchor=-audit_hooks-只在测试");
+     // 在途引导空态不出现（已有触达数据）
+     expect(screen.queryByTestId("change-assets-inflight")).toBeNull();
+   });
+ 
+-  it("知识触达分组：整文件路由收拢 chip（链接无 anchor），锚点条目按文件分组", async () => {
++  it("知识触达分组：整文件路由收拢 chip（点击弹窗文件级打开），锚点条目按文件分组", async () => {
+     mockGet.mockResolvedValue({
+       ...FULL,
+       knowledge_touch: [
+@@ -585,17 +703,25 @@ describe("ChangeAssetsCard 资产透明面", () => {
+         { id: "slug-c", title: "slug-c", file: "patterns.md" },
+       ],
+     });
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf("fr/daemon.md", "fr", "## FR-daemon-001 守护进程规则\n状态：active\n"),
++    );
+     renderCard();
+     await screen.findByRole("button", { name: /沉淀资产/ });
+ 
+     const group = await screen.findByTestId("change-assets-knowledge-touch");
+     expect(group).toHaveTextContent("整文件");
+-    // 整文件 chip：href 只带 file 不带 anchor（jsdom 选择器引擎不吃 %2F 编码值，
+-    // 按 title 锚定元素再验 href）。
+-    const chip = group.querySelector("a[title*='整文件路由注入']");
++    // 整文件 chip：点击弹窗文件级打开（无 anchor 定位），不再整页跳转。
++    const chip = group.querySelector("button[title*='整文件路由注入']");
+     expect(chip).not.toBeNull();
+-    expect(chip!.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
+-    expect(chip!.getAttribute("href")).not.toContain("anchor=");
++    fireEvent.click(chip!);
++    await waitFor(() =>
++      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/daemon.md"),
++    );
++    const dialog = await screen.findByRole("dialog");
++    const chipJump = within(dialog).getByText("在知识库中打开").closest("a")!;
++    expect(chipJump.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
++    expect(chipJump.getAttribute("href")).not.toContain("anchor=");
+     // 锚点条目按文件分组：组头计数 + 组内 slug。
+     const g1 = screen.getByTestId("change-assets-touch-group-conventions.md");
+     expect(g1).toHaveTextContent("conventions.md（2）");
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 83156d011..1b644bee1 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -1,11 +1,12 @@
+ "use client";
+ 
+-import { useState } from "react";
++import { useEffect, useState } from "react";
+ import Link from "next/link";
+ import { useQuery } from "@tanstack/react-query";
+ 
+ import { FilePreview } from "@/components/explorer/file-preview";
+ import { DiffView } from "@/components/files/structured-views";
++import { EntryCardList } from "@/components/knowledge/entry-card-list";
+ import {
+   Dialog,
+   DialogContent,
+@@ -15,12 +16,19 @@ import {
+ } from "@/components/ui/dialog";
+ import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
+ import { fetchSearch } from "@/lib/explorer";
++import { getKnowledge, normalizeKnowledgeFileParam } from "@/lib/knowledge";
+ 
+ interface ChangeAssetsCardProps {
+   workspaceId: string;
+   changeId: string;
+ }
+ 
++/** 知识条目预览目标：file=spec 树相对路径（深链原样），anchor=条目 id（可选）。 */
++interface KnowledgePreviewTarget {
++  file: string;
++  anchor?: string;
++}
++
+ // ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
+ // test-trace 记录的测试文件路径可能是短路径（缺仓库内目录前缀，如
+ // ``tests/x.py`` 实为 ``backend/app/modules/<m>/tests/x.py``）或反斜杠/``./``
+@@ -113,8 +121,6 @@ export function resolveTestFilePath(
+  *
+  * 可用性修复（2026-09-25-change-detail-assets-usability / FR-01~04）——三处
+  * 「点了看不到东西」各自补齐落点：
+- * - FR/决策索引行：href 带 `?file=&anchor=`（file 为 spec 树相对路径，知识库页
+- *   做前缀归一后选中文件并滚动到该条目卡）；
+  * - 测试绑定行：测试文件路径可点，弹窗内走 explorer 的 FilePreview 读仓库内
+  *   文件本体（测试文件在仓库里、不在 spec 镜像里，变更文件树读不到）；行首锚点
+  *   标注「变更内」——它是该变更 requirements.md 的 FR 编号，与知识库 FR 索引
+@@ -122,6 +128,11 @@ export function resolveTestFilePath(
+  * - 归档留档：除统计外列出 change-patch.json 的文件清单，点某文件看它在
+  *   change.patch 中的红绿 diff 切片（后端切片，冻结在收尾时点——与范围对账的
+  *   实时窗口锚不同源，故不复用范围对账的单文件比对弹窗）。
++ *
++ * 知识类条目弹窗预览（2026-10-14-assets-knowledge-popup-preview / FR-01~03）：
++ * FR 索引 / 决策蒸馏 / 知识触达三组行点击不再整页跳知识库，改为弹窗展示条目
++ * 具体内容（KnowledgePreviewBody：getKnowledge + EntryCardList + 锚点定位），
++ * 弹窗头部「在知识库中打开」保留原 file+anchor 深链跳转能力。
+  */
+ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProps) {
+   const query = useQuery({
+@@ -140,6 +151,11 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+   const [patchPath, setPatchPath] = useState<string | null>(null);
+   /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
+   const [moduleDoc, setModuleDoc] = useState<string | null>(null);
++  // 知识条目预览目标（2026-10-14-assets-knowledge-popup-preview）：FR 索引 /
++  // 决策蒸馏 / 知识触达三组行点击在此弹出内容预览（不再整页跳知识库），弹窗头
++  // 部保留原深链跳转。null = 关。
++  const [knowledgeTarget, setKnowledgeTarget] =
++    useState<KnowledgePreviewTarget | null>(null);
+ 
+   const patchQ = useQuery({
+     queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
+@@ -231,13 +247,12 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+               </div>
+               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {data?.fr_entries?.map((e) => (
+-                <Link
++                <button
+                   key={e.id}
+-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+-                    e.file,
+-                  )}&anchor=${encodeURIComponent(e.id)}`}
+-                  title={`打开知识库并定位到 ${e.id}`}
+-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
++                  type="button"
++                  onClick={() => setKnowledgeTarget({ file: e.file, anchor: e.id })}
++                  title={`查看 ${e.id} 条目内容（弹窗内可再跳知识库）`}
++                  className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
+                 >
+                   <span className="font-mono text-[10px] text-brand-700">{e.id}</span>
+                   <span className="min-w-0 flex-1 truncate">{e.title}</span>
+@@ -246,7 +261,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                       {e.status}
+                     </span>
+                   ) : null}
+-                </Link>
++                </button>
+               ))}
+               </div>
+             </div>
+@@ -262,13 +277,12 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+               </div>
+               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+               {data?.decisions?.map((d) => (
+-                <Link
++                <button
+                   key={d.id}
+-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+-                    d.file,
+-                  )}&anchor=${encodeURIComponent(d.id)}`}
+-                  title={`打开知识库并定位到 ${d.id}`}
+-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
++                  type="button"
++                  onClick={() => setKnowledgeTarget({ file: d.file, anchor: d.id })}
++                  title={`查看 ${d.id} 条目内容（弹窗内可再跳知识库）`}
++                  className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
+                 >
+                   <span className="font-mono text-[10px] text-cyan-700">{d.id}</span>
+                   <span className="min-w-0 flex-1 truncate">{d.title}</span>
+@@ -277,7 +291,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                       {d.status}
+                     </span>
+                   ) : null}
+-                </Link>
++                </button>
+               ))}
+               </div>
+             </div>
+@@ -287,7 +301,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+               knowledge-touch-marker-sunset 口径统一）：本变更执行期 CLI 知识注入
+               命中的知识库条目（knowledge_hits inject 遥测），在途/归档同源同文案
+               （在途随执行增长、归档后定格）。整文件路由收拢 chip 行、锚点条目按
+-              文件分组；行点击跳知识库深链。 */}
++              文件分组；行点击弹窗预览条目内容（2026-10-14-assets-knowledge-popup-
++              preview），弹窗内可再跳知识库。 */}
+           {touchList.length > 0 ? (
+             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
+@@ -303,16 +318,15 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                   <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
+                     <span className="text-[10px] text-muted-foreground/70">整文件</span>
+                     {touchFileChips.map((e) => (
+-                      <Link
++                      <button
+                         key={`chip-${e.file}`}
+-                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+-                          e.file ?? "",
+-                        )}`}
+-                        title={`打开知识库文件 ${e.file}（整文件路由注入）`}
++                        type="button"
++                        onClick={() => setKnowledgeTarget({ file: e.file ?? "" })}
++                        title={`查看文件 ${e.file}（整文件路由注入）`}
+                         className="rounded-full border border-border/60 bg-muted/40 px-1.5 py-px font-mono text-[10px] hover:border-brand-300 hover:bg-brand-50/60"
+                       >
+                         {e.file}
+-                      </Link>
++                      </button>
+                     ))}
+                   </div>
+                 ) : null}
+@@ -322,24 +336,26 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                     data-testid={`change-assets-touch-group-${file}`}
+                     className="border-b border-dashed py-1 last:border-b-0"
+                   >
+-                    <Link
+-                      href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(file)}`}
+-                      title={`打开知识库文件 ${file}`}
++                    <button
++                      type="button"
++                      onClick={() => setKnowledgeTarget({ file })}
++                      title={`查看文件 ${file}`}
+                       className="font-mono text-[10px] text-muted-foreground hover:underline"
+                     >
+                       {file}
+                       <span className="ml-1 font-sans text-[9px] text-muted-foreground/70">
+                         （{entries.length}）
+                       </span>
+-                    </Link>
++                    </button>
+                     {entries.map((e) => (
+-                      <Link
++                      <button
+                         key={`${e.file}#${e.id}`}
+-                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+-                          e.file ?? "",
+-                        )}&anchor=${encodeURIComponent(e.id ?? "")}`}
+-                        title={`打开知识库并定位到 ${e.id}`}
+-                        className="flex items-baseline gap-2 py-0.5 pl-2 text-xs hover:underline"
++                        type="button"
++                        onClick={() =>
++                          setKnowledgeTarget({ file: e.file ?? "", anchor: e.id || undefined })
++                        }
++                        title={`查看 ${e.id} 条目内容（弹窗内可再跳知识库）`}
++                        className="flex w-full items-baseline gap-2 py-0.5 pl-2 text-left text-xs hover:underline"
+                       >
+                         {/* 同 slug 只显示一份（2026-10-09：live 行 id==title，双栏连排两遍是噪声） */}
+                         {e.id === e.title ? (
+@@ -350,7 +366,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+                             <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                           </>
+                         )}
+-                      </Link>
++                      </button>
+                     ))}
+                   </div>
+                 ))}
+@@ -597,10 +613,122 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
+           </div>
+         </DialogContent>
+       </Dialog>
++      {/* 知识条目预览弹窗（2026-10-14-assets-knowledge-popup-preview / FR-01~03）：
++          FR 索引 / 决策蒸馏 / 知识触达三组行点击在此展示条目具体内容——getKnowledge
++          取全文 + EntryCardList 条目卡渲染 + 锚点定位，与知识库页卡片视图同源同
++          渲染器；头部「在知识库中打开」保留原 file+anchor 深链（弹窗内可跳转）。 */}
++      <Dialog
++        open={knowledgeTarget !== null}
++        onOpenChange={(v) => !v && setKnowledgeTarget(null)}
++      >
++        <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
++          <DialogHeader className="border-b px-4 py-3">
++            <div className="flex items-center justify-between gap-3 pr-6">
++              <DialogTitle className="text-sm">知识条目</DialogTitle>
++              {knowledgeTarget !== null ? (
++                <Link
++                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
++                    knowledgeTarget.file,
++                  )}${
++                    knowledgeTarget.anchor
++                      ? `&anchor=${encodeURIComponent(knowledgeTarget.anchor)}`
++                      : ""
++                  }`}
++                  title="在知识库页打开并定位到该条目"
++                  className="shrink-0 text-[11px] text-brand-600 hover:underline"
++                >
++                  在知识库中打开
++                </Link>
++              ) : null}
++            </div>
++            <DialogDescription className="truncate font-mono text-[11px]">
++              {knowledgeTarget?.file}
++              {knowledgeTarget?.anchor ? `#${knowledgeTarget.anchor}` : ""}
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++            {knowledgeTarget !== null ? (
++              <KnowledgePreviewBody
++                workspaceId={workspaceId}
++                file={knowledgeTarget.file}
++                anchor={knowledgeTarget.anchor}
++                onJumpToEntry={(jumpFile, jumpAnchor) =>
++                  setKnowledgeTarget({ file: jumpFile, anchor: jumpAnchor })
++                }
++              />
++            ) : null}
++          </div>
++        </DialogContent>
++      </Dialog>
+     </section>
+   );
+ }
+ 
++/**
++ * 知识条目预览弹窗主体（2026-10-14-assets-knowledge-popup-preview / FR-01~02）——
++ * file 先经 normalizeKnowledgeFileParam 归一（lib 单一源，与知识库页深链落位同
++ * 一套前缀容错），再 getKnowledge 取全文交 EntryCardList 渲染（zone 取自响应，
++ * 缺省 top）；带锚点时内容落定后按 data-entry-anchor 滚到目标条目卡，查无该卡
++ * 静默落文件级顶部（降级兼容旧锚/改名小节，同知识库页深链口径）。取数失败就
++ * 近展示错误文案（不吞），弹窗头部深链不受影响。onJumpToEntry 承接条目卡互跳
++ * （依据决策 / INDEX 路由行），由调用方切换预览目标。
++ */
++function KnowledgePreviewBody({
++  workspaceId,
++  file,
++  anchor,
++  onJumpToEntry,
++}: {
++  workspaceId: string;
++  file: string;
++  anchor?: string;
++  onJumpToEntry?: (filename: string, anchor?: string) => void;
++}) {
++  const filename = normalizeKnowledgeFileParam(file);
++  const q = useQuery({
++    queryKey: ["changeAssetsKnowledgePreview", workspaceId, filename],
++    queryFn: () => getKnowledge(workspaceId, filename),
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
++
++  // 锚点条目卡定位：effect 在内容渲染提交后执行，DOM 已就绪，单次查询即可
++  // （无需知识库页深链的有界 rAF 重试——那是外部入口跨提交时序的防抖）。
++  useEffect(() => {
++    if (!q.isSuccess || !anchor) return;
++    const el = document.querySelector(
++      `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`,
++    );
++    el?.scrollIntoView({ behavior: "smooth", block: "center" });
++  }, [q.isSuccess, anchor, filename]);
++
++  if (q.isPending) {
++    return (
++      <p className="py-6 text-center text-xs text-muted-foreground">
++        正在加载知识条目…
++      </p>
++    );
++  }
++  if (q.isError) {
++    return (
++      <p className="py-6 text-center text-xs text-destructive">
++        {q.error instanceof Error ? q.error.message : "加载失败"}
++      </p>
++    );
++  }
++  return (
++    <EntryCardList
++      filename={filename}
++      zone={q.data.zone || "top"}
++      content={q.data.content ?? ""}
++      // 弹窗内条目卡互跳（依据决策 / INDEX 路由行）：经回调切换预览目标，
++      // 不留空操作死链。
++      onJumpToEntry={onJumpToEntry}
++      className="max-h-full overflow-y-auto pr-1"
++    />
++  );
++}
++
+ /**
+  * 测试文件弹窗主体（2026-09-26-assets-testfile-path-resolve / FR-01~02）——
+  * 按文件名调 explorer search 取同名命中集，resolveTestFilePath 决策后渲染：
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index 3146fcce7..ee5df8198 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -88,6 +88,21 @@ export async function listKnowledge(
+   );
+ }
+ 
++/**
++ * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
++ * FR-01/02；2026-10-14-assets-knowledge-popup-preview 自知识库页迁入——沉淀资产卡
++ * 条目预览弹窗取数前归一同款使用，单一源防漂移）。调用方给的是 spec 树相对路径
++ * （``knowledge/fr/x.md``），知识库 API 的键是剥掉 ``knowledge/`` 后的相对路径
++ * （``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、反斜杠与 ``./`` 写法——四种常见
++ * 形态落到同一文件，其余原样返回（查不到即静默落文件级，不报错）。
++ */
++export function normalizeKnowledgeFileParam(raw: string): string {
++  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
++  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
++  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
++  return v;
++}
++
+ export async function getKnowledge(
+   workspaceId: string,
+   filename: string,
