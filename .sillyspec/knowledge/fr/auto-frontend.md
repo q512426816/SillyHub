@@ -2461,3 +2461,111 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：交付面审查
 全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-render-anchor-sweep/requirements.md#FR-03
 最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
+
+## FR-auto-frontend-221 未加载轮次消息流预览卡
+变更：2026-10-14-session-turn-preview-cards
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given 用户打开含未加载轮次的长会话（消息流窗口外存在历史轮，且 turn-outline 大纲可用）；When 消息流渲染；Then 每个未加载轮按大纲轮序原位渲染预览卡，卡内含轮号、状态标识、时间、提问摘要（最多 2 行）与答复摘要（有则显示，最多 2 行）；已加载轮渲染完整内容不变；预览卡
+全文：.sillyspec/changes/archive/2026-10-14-session-turn-preview-cards/requirements.md#FR-01
+最近确认：e785e71f9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-turn-preview-cards:task-01:acc-0-d8f6e9b2
+  tests: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+- row: 2026-10-14-session-turn-preview-cards:task-01:acc-1-b3fdab95
+  tests: frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+- row: 2026-10-14-session-turn-preview-cards:task-02:acc-0-abd7a6f3
+  tests: frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+- row: 2026-10-14-session-turn-preview-cards:task-02:acc-1-6852ae89
+  tests: frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+- row: 2026-10-14-session-turn-preview-cards:task-02:acc-2-efae3213
+  tests: frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+
+## FR-auto-frontend-222 预览卡点击原地展开
+变更：2026-10-14-session-turn-preview-cards
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-003@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given 消息流中存在预览卡；When 用户点击某预览卡（或其「展开完整对话」入口）；Then 系统按该轮 run_id 拉取整轮日志并原地替换预览卡为完整轮块（替换后同轮不得出现双块），随后 2.2 秒 ring 高亮反馈自清；展开过程不触发滚动定位；该
+全文：.sillyspec/changes/archive/2026-10-14-session-turn-preview-cards/requirements.md#FR-02
+最近确认：e785e71f9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-turn-preview-cards:task-04:acc-0-f07e93f9
+  tests: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+- row: 2026-10-14-session-turn-preview-cards:task-04:acc-1-ddf1f4f0
+  tests: frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx | frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-turn-preview-cards
+  status: active
+
+## FR-auto-frontend-223 跳转附近预取
+变更：2026-10-14-session-turn-preview-cards
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 用户通过左侧导航跳转到某个未加载轮次；When 该轮单轮直达加载成功；Then 系统按大纲序取其前后各 1 个未加载轮（若存在）后台异步拉取并原位补入消息流，不阻塞目标轮显示、不打扰当前视口滚动；预取遵循三重防重（已加载判重、在飞去重、零正
+全文：.sillyspec/changes/archive/2026-10-14-session-turn-preview-cards/requirements.md#FR-03
+最近确认：e785e71f9
+
+## FR-auto-frontend-224 大纲缺失降级
+变更：2026-10-14-session-turn-preview-cards
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given turn-outline 大纲不可用（拉取失败 / 旧 daemon / 空会话）；When 消息流渲染；Then 页面降级为现状形态（仅显示已加载轮内容），不报错、不空白、不渲染残缺预览卡。
+全文：.sillyspec/changes/archive/2026-10-14-session-turn-preview-cards/requirements.md#FR-04
+最近确认：e785e71f9
