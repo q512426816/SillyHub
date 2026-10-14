@@ -1914,10 +1914,12 @@ export interface paths {
          * List Change Files
          * @description 变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
          *
-         *     2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
+         *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
+         *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
+         *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
          *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
-         *     任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
-         *     ``service.list_files`` 纯读语义零改动。
+         *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
+         *     ``service.list_files`` 本体纯读语义零改动。
          */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
         put?: never;
@@ -32656,7 +32658,10 @@ export interface operations {
     };
     list_change_files_api_workspaces__workspace_id__changes__change_id__files_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description true=触发绑定 daemon 定向上行同步后再返回（仅前端「刷新」按钮点击使用） */
+                sync?: boolean;
+            };
             header?: never;
             path: {
                 workspace_id: string;
