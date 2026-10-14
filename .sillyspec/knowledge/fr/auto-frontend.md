@@ -2866,3 +2866,57 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-14-session-bottom-switch-remount
   status: active
+
+## FR-auto-frontend-244 ResizeObserver 观察滚动容器内容高度：任何来源的高度变化（图片/视图/懒渲染/注入）且用户在底部（isNearBottomRef=true）→ rAF 合帧 scrollTo 底，delta 保持 0
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-01
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+## FR-auto-frontend-245 用户上滚读历史时高度变化不拉底（isNearBottomRef=false 守卫）
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-02
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-resize-observer:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-resize-observer
+  status: active
+
+## FR-auto-frontend-246 注入复现脚本在修复后 delta 保持 0（部署前后对照取证）
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-03
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+## FR-auto-frontend-247 rAF 合帧防布局风暴（2026-10-13 layout-storm 教训：高频回调去重为一帧一滚）
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-04
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+## FR-auto-frontend-248 兼容无 ResizeObserver 环境（jsdom/旧浏览器优雅降级不挂观测）
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-05
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+## FR-auto-frontend-249 既有测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-resize-observer
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-06
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2

@@ -2963,3 +2963,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
 理由：最大风险：重挂载一次性成本（切会话时全量行重建）——切会话本就全量重渲 turns，增量成本可忽略。放弃方案：①TurnTimeline 内加 sessionId prop + effect 手动重置各 refs——枚举 refs 易漏（本轮正是漏了 scrollBaselineRef 才升级到 key），新增 ref 又要记得加；②只重置 isNearBottomRef——治标，其余残留（lastSigRef/firstTurnKeyRef/baseline）仍有竞态面。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-resize-observer
+锚点：未记录
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+理由：最大风险：RO 高频回调性能（流式期间每 delta 触发）——rAF 合帧后每帧至多一次 scrollTo（与既有流式贴底同频，无增量）；MarkdownText memo 使未变行不重排，实际回调频率远低于帧率。放弃方案：①延长重申窗——时序赌注，图片加载时长无上界；②监听 img load 事件——只覆盖图片一类，markdown 迟渲染/注入仍漏；③MutationObserver——语义错位（观察结构不观察尺寸，且更贵）。
