@@ -394,7 +394,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "deploy_record:read", name: "发布记录查看" }],
   },
 
-  // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
+  // ── system 系统管理（6 条：用户/组织/角色/设置/菜单/服务器信息）─────
   {
     section: "system",
     menuKey: "users",
@@ -460,6 +460,23 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     absolute: true,
     matchPattern: "/admin/menus",
     permissions: [{ key: "menu:admin", name: "菜单管理" }],
+  },
+  {
+    // 2026-10-14-admin-server-status 新增（D-003@v1/D-005@v1）：服务器信息页
+    // /admin/server-status——恢复 2026-07-24 死代码清理删除的服务器运行状态
+    // 看板，落位 system 组末尾（组内既有锚定索引 users=18/org=19/roles=20
+    // 不动，ppm 组声明序整体 +1，admin/menus 测试锚同提交重算）。
+    // system_status:read 门控（后端 GET /api/system-status 同权限收紧，
+    // D-001@v2 关闭审计 BS-6；platform:admin 直通，其它角色可在角色管理页
+    // 按需勾选——权限展示名「服务器状态查看」钉于 design 接口定义）。
+    section: "system",
+    menuKey: "server-status",
+    menuLabel: "服务器信息",
+    icon: "🖥️",
+    href: "/admin/server-status",
+    absolute: true,
+    matchPattern: "/admin/server-status",
+    permissions: [{ key: "system_status:read", name: "服务器状态查看" }],
   },
 
   // ── ppm（14 条，平台级项目与问题管理）──────────────────────

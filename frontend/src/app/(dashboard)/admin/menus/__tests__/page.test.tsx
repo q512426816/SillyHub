@@ -158,18 +158,20 @@ afterEach(() => {
 });
 
 describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
-  it("页面骨架：标题 + 说明条 + 按 section 分组平铺（system 组 5 行）", async () => {
+  it("页面骨架：标题 + 说明条 + 按 section 分组平铺（system 组 6 行）", async () => {
     renderPage();
 
     // PageHeader 标题与副标题（菜单管理自身的 menuLabel 也叫「菜单管理」，用副标题锚定页头）
     expect(
       await screen.findByText("调整菜单显示名、组内排序与全局隐藏（全局生效，改动即时保存）"),
     ).toBeInTheDocument();
-    // 分组标题行：系统管理（task-08 新增 menus 后 system 组 5 条）
+    // 分组标题行：系统管理（2026-10-14-admin-server-status 增 server-status
+    // 后 system 组 6 条：用户/组织/角色/设置/菜单管理/服务器信息。计数文本
+    // 「6 个菜单」与 workspace 组撞车不再唯一，改用组内路由锚定行数）
     expect(await screen.findByText("系统管理")).toBeInTheDocument();
-    expect(await screen.findByText("5 个菜单")).toBeInTheDocument();
-    // 菜单行：users 行（默认名 + 路由小字）
+    // 菜单行：users 行 + 新增 server-status 行（默认名 + 路由小字）
     expect(await screen.findByText("/admin/users")).toBeInTheDocument();
+    expect(await screen.findByText("/admin/server-status")).toBeInTheDocument();
   });
 
   it("行内改名：点击显示名 → 输入新名回车 → PUT 全量三字段（label 新值 + 其余维度当前值）", async () => {
@@ -223,7 +225,9 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
 
     // system 组声明序：users=18 / organizations=19 / roles=20（未覆盖 → 生效值=
     // 声明序索引；2026-10-14-deploy-release-notes 增 deploy-records（governance
-    // 组第 4 条），system 组全体后移 1）
+    // 组第 4 条），system 组全体后移 1；2026-10-14-admin-server-status 增
+    // server-status 于 system 组末尾（组内第 6 条=23），system 组锚定索引不动、
+    // 仅 ppm 组全体再 +1）
     const rolesRow = menuRow("/admin/roles");
     fireEvent.click(within(rolesRow).getByTitle("上移"));
 

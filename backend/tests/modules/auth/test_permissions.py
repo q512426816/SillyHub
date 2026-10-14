@@ -41,14 +41,15 @@ def test_permission_group_has_six_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_59() -> None:
+def test_permission_count_is_60() -> None:
     """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
     14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
     platform:audit:read / platform:billing / component:read / change:update，
     AUDIT 组随 platform:audit:read 移除）→ 58；
-    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59。
+    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59；
+    2026-10-14-admin-server-status task-01 新增 system_status:read → 60。
     """
-    assert len(list(Permission)) == 59
+    assert len(list(Permission)) == 60
 
 
 @pytest.mark.parametrize(

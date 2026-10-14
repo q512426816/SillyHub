@@ -3039,3 +3039,190 @@
   confirmed_at: null
   source_change: 2026-10-13-session-change-files-hover
   status: active
+
+## FR-lib-api-141 接口鉴权收紧
+变更：2026-10-14-admin-server-status
+状态：active
+摘要：默认场景
+依据决策：D-001@v2
+场景正文：
+- 场景：默认场景 — Given GET /api/system-status 现为完全公开；When 本次变更后分别以未登录 / 无权限登录 / 持 system_status:read 或 platform:admin 登录调用；Then 依次必须返回 401 / 403 / 200，且 200 响应体结构与现状必须完全一致（SystemStatusResponse 零变化）
+全文：.sillyspec/changes/archive/2026-10-14-admin-server-status/requirements.md#FR-01
+最近确认：73e881ba5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-admin-server-status:task-01:acc-0-2a77ef5c
+  tests: backend/tests/modules/auth/test_permissions.py | backend/tests/test_health.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-01:acc-1-299e760a
+  tests: backend/tests/modules/auth/test_permissions.py | backend/tests/test_health.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-01:acc-2-cae4fb01
+  tests: backend/tests/modules/auth/test_permissions.py | backend/tests/test_health.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-01:acc-3-5e0f7d5d
+  tests: backend/tests/modules/auth/test_permissions.py | backend/tests/test_health.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+
+## FR-lib-api-142 服务器信息页面
+变更：2026-10-14-admin-server-status
+状态：active
+摘要：默认场景
+依据决策：D-002@v2、D-005@v1
+场景正文：
+- 场景：默认场景 — Given 管理员登录并进入 /admin/server-status；When 页面加载及此后每 5 秒 接口请求失败（403/网络错误/超时；401 由全局拦截单飞刷新或跳登录，见 frontend/src/lib/api.ts:250-；Then 必须渲染三组卡片——服务器性能（CPU/内存/磁盘进度条，含已用/总量与百分比，阈值着色 <80% 主题紫 / 80–90% 琥珀 / >90% 红）、业务统计
+全文：.sillyspec/changes/archive/2026-10-14-admin-server-status/requirements.md#FR-02
+最近确认：73e881ba5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-admin-server-status:task-02:acc-0-174ec337
+  tests: frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-02:acc-1-eb225c24
+  tests: frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-02:acc-2-2014083d
+  tests: frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-02:acc-3-6a7d0aa6
+  tests: frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+
+## FR-lib-api-143 权限可分配
+变更：2026-10-14-admin-server-status
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given Permission 枚举新增 SYSTEM_STATUS_READ="system_status:read"（group=PLATFORM 默认分支）；When 管理员打开角色管理页权限勾选器；Then 「服务器信息」菜单卡必须出现且可勾选 system_status:read（展示名「服务器状态查看」）；存量角色与用户权限必须零变化（无种子迁移，platfor
+全文：.sillyspec/changes/archive/2026-10-14-admin-server-status/requirements.md#FR-03
+最近确认：73e881ba5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-admin-server-status:task-03:acc-0-4ccbb428
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | backend/tests/test_check_assertion_surfaces.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/m/account/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/app-shell.test.tsx | frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/logout-storage.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/permission.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/__tests__/token-refresh.test.ts | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-03:acc-1-b954f963
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | backend/tests/test_check_assertion_surfaces.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/m/account/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/app-shell.test.tsx | frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/logout-storage.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/permission.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/__tests__/token-refresh.test.ts | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-03:acc-2-76deb99c
+  tests: backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_ppm_session.py | backend/app/modules/daemon/tests/test_scheduled_messages_crud.py | backend/app/modules/daemon/tests/test_scheduled_send_sweeper.py | backend/app/modules/daemon/tests/test_session_pin_rename.py | backend/app/modules/daemon/tests/test_session_queue.py | backend/app/modules/daemon/tests/test_session_queue_actions.py | backend/app/modules/daemon/tests/test_session_runs_endpoint.py | backend/app/modules/daemon/tests/test_session_service.py | backend/app/modules/knowledge/tests/test_distill.py | backend/app/modules/knowledge/tests/test_hits.py | backend/app/modules/knowledge/tests/test_writer.py | backend/app/modules/llm_provider/tests/test_agent_kinds_multi.py | backend/app/modules/platform_sync/tests/test_agent_log_messages.py | backend/app/modules/platform_sync/tests/test_change_events.py | backend/app/modules/platform_sync/tests/test_owner_sync.py | backend/app/modules/spec_workspace/tests/test_full_sync_convergence.py | backend/app/modules/workspace/linked_repos/tests/test_linked_repos.py | backend/app/modules/workspace/tests/test_daemon_client_scan.py | backend/tests/modules/agent/test_scan_interactive_dispatch.py | backend/tests/modules/auth/test_permissions.py | backend/tests/modules/change/test_archive_gate.py | backend/tests/test_check_assertion_surfaces.py | frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx | frontend/src/app/m/account/page.test.tsx | frontend/src/app/page.test.tsx | frontend/src/components/__tests__/app-shell.test.tsx | frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx | frontend/src/components/__tests__/change-file-tree.test.tsx | frontend/src/components/agent-log/__tests__/tool-renderers-write-diff.test.tsx | frontend/src/components/changes/__tests__/scope-audit-command-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx | frontend/src/components/changes/detail/__tests__/change-timeline-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | frontend/src/components/daemon/__tests__/agent-log-card.test.tsx | frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx | frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx | frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx | frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx | frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | frontend/src/components/explorer/__tests__/file-preview.test.tsx | frontend/src/components/files/__tests__/file-preview-modal.test.tsx | frontend/src/components/files/__tests__/preview-registry.test.ts | frontend/src/components/files/__tests__/structured-views.test.tsx | frontend/src/components/floating/floating-session-host.test.tsx | frontend/src/components/knowledge/__tests__/ops-dashboard.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-apiformat.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form-fetch-config.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx | frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx | frontend/src/components/mobile/mobile-change-detail.test.tsx | frontend/src/components/sessions/__tests__/ctx-usage-bar.test.tsx | frontend/src/components/sessions/__tests__/session-config-bar.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/components/workspace-config-card.test.tsx | frontend/src/lib/__tests__/agent-log-turns.test.ts | frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts | frontend/src/lib/__tests__/logout-storage.test.ts | frontend/src/lib/__tests__/menu-overrides.test.ts | frontend/src/lib/__tests__/menu-permissions.test.ts | frontend/src/lib/__tests__/permission.test.ts | frontend/src/lib/__tests__/session-mention-sources.test.tsx | frontend/src/lib/__tests__/token-refresh.test.ts | frontend/src/lib/api/__tests__/llm-providers.test.ts | sillyhub-daemon/tests/agent-log/parse-claude-code.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+
+## FR-lib-api-144 菜单注册与导航
+变更：2026-10-14-admin-server-status
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-005@v1
+场景正文：
+- 场景：默认场景 — Given menu-permissions.ts system 组现有 5 条；When 新增第 6 条 menuKey=server-status（label=服务器信息，href=/admin/server-status，absolute，per；Then 系统管理组必须显示 6 项菜单，持权限者可进入；admin/menus 测试断言与声明序锚必须同步重算（system 组既有锚定索引 users=18/org=
+全文：.sillyspec/changes/archive/2026-10-14-admin-server-status/requirements.md#FR-04
+最近确认：73e881ba5
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-admin-server-status:task-04:acc-0-1720a5a0
+  tests: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-04:acc-1-58f3dff1
+  tests: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-04:acc-2-62b9b1df
+  tests: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active
+- row: 2026-10-14-admin-server-status:task-04:acc-3-35785ae5
+  tests: frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-admin-server-status
+  status: active

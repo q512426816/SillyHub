@@ -36,6 +36,7 @@ import {
   PlugZap,
   Puzzle,
   ScrollText,
+  Server,
   Settings,
   ShieldCheck,
   Siren,
@@ -92,6 +93,10 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // 2026-09-18-web-menu-management task-10：菜单管理入口 /admin/menus。图标
   // ListTree（层级列表，语义=菜单目录树；未被占用，避开 roles 的 KeyRound）。
   "/admin/menus": ListTree,
+  // 2026-10-14-admin-server-status：服务器信息入口 /admin/server-status（system
+  // 组）。图标 Server（服务器硬件语义，本 map 内未占用；daemon 机器卡的跨文件
+  // 同名复用不构成冲突）。
+  "/admin/server-status": Server,
   "/runtimes": Activity,
   "/settings": Settings,
   "/workspaces": Home,

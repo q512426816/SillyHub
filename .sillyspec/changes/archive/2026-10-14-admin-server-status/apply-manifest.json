@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-admin-server-status",
+  "appliedAt": "2026-10-14T17:27:11.848Z",
+  "baseHash": "73e881ba50376b5e2d279b720dca332b3630d285",
+  "files": [
+    {
+      "path": "backend/app/modules/auth/permissions.py",
+      "sha256": "ff412df8d15ad7856e0adf3a94ac497f0d916316fc2364737af630c39d900d46"
+    },
+    {
+      "path": "backend/app/modules/health/router.py",
+      "sha256": "d853643f96fd5b32475acc549c3417ee8c7fe4519f40fe5ecafabf536dfde5c6"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "d022c8702b10a11117cdf5c2b83f8d244222bdae3a6a4d6d50122a26a471e9cd"
+    },
+    {
+      "path": "backend/tests/modules/auth/test_permissions.py",
+      "sha256": "ccc8964c6aab9ae5539f2ac1423dacf3a1ed775144b5781cbda4738a46b1fda1"
+    },
+    {
+      "path": "backend/tests/test_health.py",
+      "sha256": "db834eb92ead91d636249adfb3e77a75d66664846518741198017fec67cc006d"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+      "sha256": "c6e5e535fd9bac7ca21943321a0daf6124b17f356346368fc739974fb9777453"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+      "sha256": "9b927c99fb4350190457515dadbbb07829c10df3e0fef9283644c51aaf468570"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+      "sha256": "9d606b51fb4ff290253eea04b31ed304f59d440564cd5b8bded570a5be75204f"
+    },
+    {
+      "path": "frontend/src/components/app-shell.tsx",
+      "sha256": "515879ab719cb2da76530b492c03357f90c429b3ebc9b73191d6022bb47d221d"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "0300d2cf5ada1a315d1c5e6c65b0a9af54b86ac125783796487c7b4b344d3bc3"
+    },
+    {
+      "path": "frontend/src/lib/health.ts",
+      "sha256": "82951d95f3152791d55161f400658b457b9d81982fb536191d7330bb187babc7"
+    },
+    {
+      "path": "frontend/src/lib/menu-permissions.ts",
+      "sha256": "847468f126d0292258b0d87d939370323c43e0b5b5ca6608c356bf7e0d6a96c4"
+    }
+  ]
+}

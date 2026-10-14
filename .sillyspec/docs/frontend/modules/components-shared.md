@@ -20,7 +20,7 @@ created_at: 2026-08-18 01:45:00
 ## 契约摘要
 全局骨架：
 - `AntdProviders`：全局 antd Provider——`ConfigProvider locale={zhCN}` + 定制 theme + `<AntApp>`（message/modal/notification 静态方法）+ `dayjs.locale('zh-cn')`；RootLayout 唯一子节点。
-- `AppShell`：dashboard 业务区外壳——侧边栏（菜单按权限渲染，折叠状态持久化 `localStorage['sidebar-collapsed']`）+ TopBar + 退出确认；`usePathname()` 高亮当前菜单。
+- `AppShell`：dashboard 业务区外壳——侧边栏（菜单按权限渲染，折叠状态持久化 `localStorage['sidebar-collapsed']`）+ TopBar + 退出确认；`usePathname()` 高亮当前菜单。侧边栏图标经 `MENU_ICON_MAP` 按 href 解析（2026-10-14-admin-server-status 增 `"/admin/server-status": Server`，lucide）。
 - `TopBar`：props `{ displayName, onLogout }`；导出 `resolvePlatformSwitch(pathname)` 解析平台切换项。
 - `ErrorBoundary`：class 组件，`getDerivedStateFromError` + `componentDidCatch`（带 tag 上报 console），兜底子树渲染异常防整页白屏。
 工作区相关：

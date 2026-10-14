@@ -53,7 +53,7 @@
           "health"
         ],
         "summary": "System Status",
-        "description": "服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。\n\n公开端点(同 /health),不要求登录,首页看板用。",
+        "description": "服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。\n\nchange 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +\nsystem_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，\n服务器信息页仅持权限者可见）。",
         "operationId": "system_status_api_system_status_get",
         "responses": {
           "200": {
@@ -56930,6 +56930,7 @@
           "api_key:admin",
           "runtime:admin",
           "git_identity:admin",
+          "system_status:read",
           "llm_provider:read",
           "workspace:read",
           "workspace:write",
