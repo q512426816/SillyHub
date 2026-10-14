@@ -26,3 +26,15 @@ sillyspec CLI 的 `serializeForSync`（2026-10-13-thin-sync-stage 起）对 tier
 
 - 修复变更：sillyspec 仓 `2026-10-13-thin-sync-stage`（已归档，review P3-2 留档）。
 - 平台侧消费：`backend/app/modules/change/service.py` `_is_thin_lineage`（分支① stage=thin）。
+
+## 处置记录（2026-10-14）
+
+**已修（方向②）**（sillyspec 仓工作树，未提交）：新增 `resetThinStageRowOnUpgrade`
+helper（node:sqlite 直写，零依赖 ProgressManager）并在两个升厚写点接线——verify 实测
+失败自动升厚 + distill 异态升厚。行 current_stage='thin' → 'brainstorm'（厚档起点，
+与 run 阶段机首写同值）；非 thin 行值不动（不越权重置）；best-effort 不阻断升厚链。
+方向①（import() 回写白名单收口）不采纳——往返透传是既有设计语义，动它影响面大。
+
+**测试**：`test/thin-upgrade-stage-reset.test.mjs` 2/2——① e2e（模拟 pull 往返写入
+'thin' → lint 门 FAIL 升厚 → 行值重置 + 日志在场）；② resume 路径不碰行值（重置只在
+升厚写点）。flow 族回归 33/33 绿。归档。
