@@ -149,15 +149,16 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => navState.searchParams,
 }));
 
-import KnowledgePage, {
-  normalizeKnowledgeFileParam,
-} from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
 import { WorkspaceTabs } from "@/components/workspace-tabs";
 import {
   getKnowledge,
   getKnowledgeStats,
   listDistillTasks,
   listKnowledge,
+  // 2026-10-14-assets-knowledge-popup-preview：归一函数迁 lib 单一源，import 随迁
+  // （vi.mock 的 importOriginal 透传真实实现，行为断言不变）。
+  normalizeKnowledgeFileParam,
   previewMergeKnowledge,
   rejectKnowledge,
 } from "@/lib/knowledge";

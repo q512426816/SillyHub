@@ -71,6 +71,9 @@ import {
   getKnowledge,
   getKnowledgeStats,
   listKnowledge,
+  // 深链 file 参数归一（2026-10-14-assets-knowledge-popup-preview 迁 lib 单一源：
+  // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
+  normalizeKnowledgeFileParam,
   rejectKnowledge,
   type KnowledgeEntry,
 } from "@/lib/knowledge";
@@ -262,20 +265,6 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
       children: toAntdNodes(n.children),
     };
   });
-}
-
-/**
- * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
- * FR-01/02）。调用方给的是 spec 树相对路径（``knowledge/fr/x.md``），知识库 API 的
- * 键是剥掉 ``knowledge/`` 后的相对路径（``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、
- * 反斜杠与 ``./`` 写法——四种常见形态落到同一文件，其余原样返回（查不到即静默落
- * 文件级，不报错）。
- */
-export function normalizeKnowledgeFileParam(raw: string): string {
-  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
-  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
-  return v;
 }
 
 export default function KnowledgePage({ params }: Props) {

@@ -88,6 +88,21 @@ export async function listKnowledge(
   );
 }
 
+/**
+ * 外部深链 file 参数 → 知识库相对文件名（2026-09-25-change-detail-assets-usability /
+ * FR-01/02；2026-10-14-assets-knowledge-popup-preview 自知识库页迁入——沉淀资产卡
+ * 条目预览弹窗取数前归一同款使用，单一源防漂移）。调用方给的是 spec 树相对路径
+ * （``knowledge/fr/x.md``），知识库 API 的键是剥掉 ``knowledge/`` 后的相对路径
+ * （``fr/x.md``）；再容错 ``.sillyspec/`` 前缀、反斜杠与 ``./`` 写法——四种常见
+ * 形态落到同一文件，其余原样返回（查不到即静默落文件级，不报错）。
+ */
+export function normalizeKnowledgeFileParam(raw: string): string {
+  let v = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  while (v.startsWith(".sillyspec/")) v = v.slice(".sillyspec/".length);
+  if (v.startsWith("knowledge/")) v = v.slice("knowledge/".length);
+  return v;
+}
+
 export async function getKnowledge(
   workspaceId: string,
   filename: string,
