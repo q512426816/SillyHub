@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-logout-full-reload-clear-cache",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "45d484f7dc224059ce472af779b82b03aa0a9b56",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "design 作用域作答枚举不完整：整页跳转后 localStorage 还保留按 sessionId/groupId 索引的草稿、未读锚点与活性状态，非仅声明的设备级 UI 偏好",
+      "evidence": "整页跳转只机制性清内存态；localStorage 中 sessionDraftLsKey(sessionId)/groupDraftLsKey(groupId)（未发送草稿）、groupLastOpenKey（未读锚点）、use-session-liveness 状态键随设备跨账号留存，同设备换账号且新账号可访问相同会话/群 id 时草稿可被继承。非本次引入（401 先例 api.ts:251 与改动前 SPA 登出同样不清该面），服务端数据有后端权限校验兜底，故降为 P3 边界披露缺口而非 P1。",
+      "location": "frontend/src/components/daemon/session-panel/turn-state.ts:407"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-10-14T10:49:25+08:00"
+}

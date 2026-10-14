@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-logout-full-reload-clear-cache",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/__tests__/app-shell.test.tsx「确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/app-shell.test.tsx「确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/auth.test.ts「logout 清空 session（不回归基线）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/__tests__/app-shell.test.tsx「侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-full-reload-clear-cache"
+    }
+  ]
+}

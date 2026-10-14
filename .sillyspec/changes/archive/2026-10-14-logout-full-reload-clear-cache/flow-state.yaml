@@ -1,0 +1,42 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，React Query 缓存与内存 zustand store 未随页面销毁（401 被动登出走整页跳转无此问题）。
+  成功标准：
+  - 桌面端确认退出后整页跳转 /login，内存缓存（QueryClient/zustand/模块级）随页面重置，不再 SPA 内跳
+  - 移动端退出后整页跳转 /m/login，同上
+  - 补登出跳转方式测试：两处断言 window.location.assign 被调用且不再走 router.replace
+  - 现有相关测试（app-shell / m-account / auth）不回归
+autopilot: false
+prestage_ack: false
+baseline_commit: f17f301acca3aca2f40df9dbf575a81530fc9fa5
+updatedAt: '2026-10-14T02:50:06.280Z'
+cross_baselines:
+  sillyspec: 29364c3bedd608464137dd2234f609fb916e0745
+baseline_sha256: 32dc9500293c4c925a07370d2b0b1178417a1ca517a0312db6e23061bda06f45
+spec_approved: true
+spec_approved_at: '2026-10-14T02:35:45.621Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py20)（146.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014024659\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014024659\test-result.json｜门文件
+  5 个
+

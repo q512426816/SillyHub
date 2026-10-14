@@ -828,3 +828,79 @@
   confirmed_at: null
   source_change: 2026-10-10-ws-init-dialog-close-guard
   status: active
+
+## FR-components-shared-054 桌面端确认退出后整页跳转 /login，内存缓存（QueryClient/zustand/模块级）随页面重置，不再 SPA 内跳
+变更：2026-10-14-logout-full-reload-clear-cache
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-full-reload-clear-cache/requirements.md#FR-01
+最近确认：534cef161623ee81046dd08d697300c005071294
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-01
+  tests: frontend/src/components/__tests__/app-shell.test.tsx「确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-full-reload-clear-cache
+  status: active
+
+## FR-components-shared-055 移动端退出后整页跳转 /m/login，同上
+变更：2026-10-14-logout-full-reload-clear-cache
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-full-reload-clear-cache/requirements.md#FR-02
+最近确认：534cef161623ee81046dd08d697300c005071294
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-02
+  tests: frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-full-reload-clear-cache
+  status: active
+
+## FR-components-shared-056 补登出跳转方式测试：两处断言 window.location.assign 被调用且不再走 router.replace
+变更：2026-10-14-logout-full-reload-clear-cache
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-full-reload-clear-cache/requirements.md#FR-03
+最近确认：534cef161623ee81046dd08d697300c005071294
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-03
+  tests: frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-full-reload-clear-cache
+  status: active
+
+## FR-components-shared-057 现有相关测试（app-shell / m-account / auth）不回归
+变更：2026-10-14-logout-full-reload-clear-cache
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-full-reload-clear-cache/requirements.md#FR-04
+最近确认：534cef161623ee81046dd08d697300c005071294
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-full-reload-clear-cache:flow:测试绑定FR-04
+  tests: frontend/src/components/__tests__/app-shell.test.tsx「侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-full-reload-clear-cache
+  status: active
