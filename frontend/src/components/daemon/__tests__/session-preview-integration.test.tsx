@@ -173,22 +173,30 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
   });
 
   it("defect-fixes：额度失败轮（仅 user_input 无答复）点导航原位展开用户消息，且重复点击不重复请求", async () => {
-    // 两轮大纲：run-x 失败轮（seq 1，日志只有 user_input——额度耗尽形态）；
-    // run-c 完整轮（seq 2，初始窗口内已加载）。
+    // 两轮大纲：run-x 失败轮（seq 1）——真实形态：user_input 是「[后台任务通知]」
+    // 系统注入（logsToTurns 剥空 → prompt 恒空）+ 429 错误行；失败卡内容由 runs
+    // 快照 error_detail 注入。run-c 完整轮（seq 2，初始窗口内已加载）。
     sessionApi.fetchSessionTurnOutline.mockResolvedValue({
       session_id: "s1",
       total_turns: 2,
       items: [
-        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", prompt_summary: "失败轮提问" },
+        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", error_code: "provider_quota_exceeded", prompt_summary: "[后台任务通知] 以下 2 个后台子代理任务已全部结束" },
         { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
       ],
     });
+    // runs 快照带 error_detail（失败卡数据源——enrichDisplayTurns 注入 RunErrorItem）。
+    sessionApi.listSessionRuns.mockResolvedValue([
+      { id: "run-x", status: "failed", error_code: "provider_quota_exceeded", error_detail: { message: "已达到 5 小时的使用上限", type: "quota_exceeded" }, started_at: "2026-08-26T10:00:00.0Z", created_at: "2026-08-26T10:00:00.0Z", finished_at: "2026-08-26T10:01:00.0Z", user_id: null, sender_name: null, input_tokens: null, output_tokens: null, ctx_tokens: null, duration_api_ms: null, llm_provider_id: null, agent_profile_snapshot: null, metadata: null, engine_anchor: null, failure_summary: null, run_kind: null, cwd: null, config_snapshot: null },
+    ] as never);
     sessionApi.getAgentSessionLogs.mockImplementation(
       async (_sid: string, opts?: { runId?: string; before?: string }) => {
         if (opts?.runId === "run-x") {
-          // 额度耗尽失败轮：只有 user_input，无任何答复行（旧口径被判零正文 → 点击无反应）。
+          // 额度耗尽失败轮真实形态：系统通知开轮（剥空）+ 429 stderr 行——
+          // logsToTurns 产出 prompt/segments/output 三空（旧口径被判零正文 →
+          // 点击无反应；新口径 outline failed 放行 → 空块 + 失败卡）。
           return [
-            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "失败轮的提问内容，等待额度恢复" },
+            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "[后台任务通知] 以下 2 个后台子代理任务已全部结束（列表中的每一个都已终止）" },
+            { id: "log-run-x-e", run_id: "run-x", timestamp: "2026-08-26T10:01:00.0Z", channel: "stderr", content_redacted: "[ASSISTANT] API Error: Request rejected (429) · 已达到 5 小时的使用上限" },
           ];
         }
         if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
@@ -202,12 +210,18 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
       .getAllByTestId("turn-nav-tick")
       .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
     fireEvent.click(tickX!);
-    // 直达真实发起且块被放进来：用户消息上屏、预览卡消失（无双块）。
+    // 直达真实发起且空块被放进来（outline failed 放行）：该轮 data-turn-key 出现
+    // 非 preview 行、预览卡消失（无双块）、runs 快照注入的失败卡正文可见。
+    await waitFor(() => {
+      const row = document.querySelector(
+        '[data-testid="turn-timeline-scroll"] [data-turn-key="run-x"]:not([data-turn-preview])',
+      );
+      expect(row).toBeTruthy();
+    });
     await waitFor(() =>
-      expect(screen.getAllByText(/失败轮的提问内容/).length).toBeGreaterThan(0),
+      expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument(),
     );
-    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
-    // 已加载判定含 prompt：再次点击导航不重复发起直达。
+    // 已加载判定含 #e 装饰后缀：再次点击导航不重复发起直达。
     const callsAfterFirst = runIdCalls().filter((r) => r === "run-x").length;
     fireEvent.click(tickX!);
     await new Promise((r) => setTimeout(r, 300));
