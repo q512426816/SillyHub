@@ -1,0 +1,350 @@
+diff --git a/docs/sillyspec/tests-redomain-from-prefix-doubling.md b/docs/sillyspec/tests-redomain-from-prefix-doubling.md
+new file mode 100644
+index 000000000..ed58bff93
+--- /dev/null
++++ b/docs/sillyspec/tests-redomain-from-prefix-doubling.md
+@@ -0,0 +1,36 @@
++# tests --redomain --from 域名含路径前缀时自拼出 fr/fr/ 双前缀（2026-10-14）
++
++## 现象
++
++`flow done` 收口输出 FR 域路由降级时给出的迁移命令示例为：
++
++```
++sillyspec tests --redomain --from fr/auto-backend --to agent --by-change <本变更名> --write
++```
++
++照抄执行报错：
++
++```
++❌ 域迁移被拒：源域文件不存在：fr/fr/auto-backend.md
++```
++
++工具把 `--from` 值再拼一层 `fr/` 前缀（`fr/` + `fr/auto-backend.md`），与它自己提示的命令形态自相矛盾。
++
++## 影响
++
++- 照抄工具输出命令必失败（误导）；无数据损坏（fail-fast 拒绝，不写盘）。
++- 正确用法是 `--from` 只给域名不带 `fr/` 前缀：
++
++```
++sillyspec tests --redomain --from auto-backend --to agent --by-change <本变更名> --write
++```
++
++（2026-10-14-agent-profile-express-preset 实测成功：5 条 FR 迁入 `fr/agent.md`，ID 不变，INDEX 路由行已补。）
++
++## 建议
++
++工具二选一修复：要么 `--from` 规范化为纯域名（容忍带 `fr/` 前缀的输入，剥掉再拼），要么修正 `flow done` 输出的示例命令去掉前缀。
++
++## 状态
++
++活跃坑（sillyspec 3.32.0 实测）。
+diff --git a/frontend/src/app/m/account/page.test.tsx b/frontend/src/app/m/account/page.test.tsx
+index e5dc69e4e..b75aa2e58 100644
+--- a/frontend/src/app/m/account/page.test.tsx
++++ b/frontend/src/app/m/account/page.test.tsx
+@@ -14,6 +14,13 @@ vi.mock("@/lib/auth", () => ({
+   updateMyAvatar: vi.fn(),
+ }));
+ 
++// 登出清理 mock（2026-10-14-logout-localstorage-user-data-cleanup）：断言登出
++// 跳转前统一清 localStorage 用户域键的钩子被调（键面行为由其自身单测覆盖）。
++const logoutStorage = vi.hoisted(() => ({ clear: vi.fn() }));
++vi.mock("@/lib/logout-storage", () => ({
++  clearUserScopedLocalStorage: logoutStorage.clear,
++}));
++
+ // 头像上传管线 mock（对齐桌面 (dashboard)/account/page.test 惯例）：
+ // uploadFile 供选图断言、getFileDownloadUrl 保持 /api/file/{id} 形态、
+ // fetchFileBlob 供头像渲染链路（useAvatarSrc）静默回 Blob；
+@@ -46,6 +53,7 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
+   beforeEach(() => {
+     nav.push.mockClear();
+     nav.replace.mockClear();
++    logoutStorage.clear.mockClear();
+     mockedChangePassword.mockReset();
+     mockedLogout.mockReset();
+     mockedUpdateMyAvatar.mockReset();
+@@ -143,6 +151,8 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
+ 
+     await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/m/login"));
+     expect(nav.replace).not.toHaveBeenCalled();
++    // 2026-10-14-logout-localstorage-user-data-cleanup：跳转前清 localStorage 用户域键
++    expect(logoutStorage.clear).toHaveBeenCalledTimes(1);
+ 
+     if (originalLocationDesc) {
+       Object.defineProperty(window, "location", originalLocationDesc);
+diff --git a/frontend/src/app/m/account/page.tsx b/frontend/src/app/m/account/page.tsx
+index 729f85c68..c9b7a10c4 100644
+--- a/frontend/src/app/m/account/page.tsx
++++ b/frontend/src/app/m/account/page.tsx
+@@ -33,6 +33,7 @@ import { useAvatarSrc } from "@/components/chat/use-avatar-src";
+ import { changePassword, logout, updateMyAvatar } from "@/lib/auth";
+ import { errMessage } from "@/lib/errors";
+ import { getFileDownloadUrl, uploadFile, tryReclaimOrphanAvatarFile } from "@/lib/file/api";
++import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
+ import { useSession } from "@/stores/session";
+ 
+ export default function MobileAccountPage() {
+@@ -62,6 +63,9 @@ export default function MobileAccountPage() {
+       await logout();
+     } finally {
+       setLoading(false);
++      // 2026-10-14-logout-localstorage-user-data-cleanup：清 localStorage 用户域键
++      // （会话/群聊草稿、未读锚点、活性状态等），设备级偏好保留。
++      clearUserScopedLocalStorage();
+       // token 已清。必须整页跳转（对齐桌面端与 lib/api.ts 401 分支先例，
+       // 2026-10-14-logout-full-reload-clear-cache）——SPA 内跳转让 React Query
+       // 缓存与内存 store 存活，换账号后残留上一用户数据。
+diff --git a/frontend/src/components/__tests__/app-shell.test.tsx b/frontend/src/components/__tests__/app-shell.test.tsx
+index 7d53d14ec..cfc6e5b90 100644
+--- a/frontend/src/components/__tests__/app-shell.test.tsx
++++ b/frontend/src/components/__tests__/app-shell.test.tsx
+@@ -50,6 +50,13 @@ vi.mock("@/lib/use-workspace-context", () => ({
+ vi.mock("@/components/top-bar", () => ({
+   TopBar: () => <div data-testid="top-bar" />,
+ }));
++
++// 登出清理 mock（2026-10-14-logout-localstorage-user-data-cleanup）：断言登出
++// 跳转前统一清 localStorage 用户域键的钩子被调（键面行为由其自身单测覆盖）。
++const logoutStorage = vi.hoisted(() => ({ clear: vi.fn() }));
++vi.mock("@/lib/logout-storage", () => ({
++  clearUserScopedLocalStorage: logoutStorage.clear,
++}));
+ // 弹窗 mock 成「直接透出 onConfirm 的按钮」：本文件聚焦 app-shell 自己的
+ // performLogout 跳转方式断言，弹窗本体交互由 logout-confirm-dialog.test.tsx 覆盖。
+ vi.mock("@/components/logout-confirm-dialog", () => ({
+@@ -227,5 +234,7 @@ describe("退出登录 — 整页跳转清缓存（2026-10-14-logout-full-reload
+ 
+     await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/login"));
+     expect(nav.replace).not.toHaveBeenCalled();
++    // 2026-10-14-logout-localstorage-user-data-cleanup：跳转前清 localStorage 用户域键
++    expect(logoutStorage.clear).toHaveBeenCalledTimes(1);
+   });
+ });
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 4693a2964..597ee2b9b 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -48,6 +48,7 @@ import { Button } from "@/components/ui/button";
+ import { CircuitBreakerBanner } from "@/components/circuit-banner";
+ import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
+ import { TopBar } from "@/components/top-bar";
++import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
+ import {
+   MENU_SECTION_LABEL as SECTION_LABEL,
+   MENU_SECTION_ORDER as SECTION_ORDER,
+@@ -313,6 +314,9 @@ export function AppShell({ children }: { children: ReactNode }) {
+       }
+     } finally {
+       clear();
++      // 2026-10-14-logout-localstorage-user-data-cleanup：清 localStorage 用户域键
++      // （会话/群聊草稿、未读锚点、活性状态等），设备级偏好保留——清单见 lib/logout-storage.ts。
++      clearUserScopedLocalStorage();
+       // 2026-10-14-logout-full-reload-clear-cache：必须整页跳转（对齐 lib/api.ts
+       // 401 被动登出先例）——SPA 内跳转会让 React Query 缓存与内存 zustand store
+       // （工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
+diff --git a/frontend/src/lib/__tests__/logout-storage.test.ts b/frontend/src/lib/__tests__/logout-storage.test.ts
+new file mode 100644
+index 000000000..9803c3352
+--- /dev/null
++++ b/frontend/src/lib/__tests__/logout-storage.test.ts
+@@ -0,0 +1,110 @@
++/**
++ * 2026-10-14-logout-localstorage-user-data-cleanup：登出清理 localStorage 用户域键。
++ *
++ * 契约：clearUserScopedLocalStorage 删光 USER_SCOPED_LS_PREFIXES 命中的键
++ * （含预会话草稿变体），设备级键（主题/记住登录名/输入框高度/新建会话默认
++ * 机器等）一律保留；前缀带尾分隔符精确匹配（`sillyhub.sessions.new.machineId`
++ * 同命名空间但非用户域，不得误删）；单键删除失败不阻断其余键清理。
++ */
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import {
++  USER_SCOPED_LS_PREFIXES,
++  clearUserScopedLocalStorage,
++} from "@/lib/logout-storage";
++
++/** 设备级键样本（与 design.md 保留面对应，挑代表断言保留）。 */
++const DEVICE_KEYS = [
++  "sillyhub-theme",
++  "multi-agent-platform.session",
++  "sillyhub.remember-account",
++  "sillyhub.platform",
++  "sillyhub.sessions.new.machineId", // 同 sillyhub.sessions.* 命名空间的设备级键
++  "sillyhub:session-input-height",
++];
++
++/** 用户域键样本（6 前缀全覆盖 + 预会话草稿变体 + 多会话多键）。 */
++const USER_KEYS = [
++  "sillyhub.sessions.draft.sid-1",
++  "sillyhub.sessions.draft.__pre__",
++  "sillyhub.sessions.draft.__pre__:runtime-9",
++  "sillyhub.sessions.viewMode.sid-1",
++  "sillyhub.groupchats.draft.gid-1",
++  "sillyhub-group-last-open-gid-1",
++  "sillyhub:liveness-state:sid-1",
++  "sillyhub:liveness-unread:sid-1",
++];
++
++beforeEach(() => {
++  window.localStorage.clear();
++  for (const key of [...DEVICE_KEYS, ...USER_KEYS]) {
++    window.localStorage.setItem(key, "x");
++  }
++});
++
++afterEach(() => {
++  window.localStorage.clear();
++  vi.restoreAllMocks();
++});
++
++describe("clearUserScopedLocalStorage（2026-10-14-logout-localstorage-user-data-cleanup）", () => {
++  it("6 类用户域前缀全清、设备级键保留、前缀精确匹配", () => {
++    clearUserScopedLocalStorage();
++
++    for (const key of USER_KEYS) {
++      expect(window.localStorage.getItem(key), key).toBeNull();
++    }
++    for (const key of DEVICE_KEYS) {
++      expect(window.localStorage.getItem(key), key).toBe("x");
++    }
++  });
++
++  it("注册表前缀全部带尾分隔符（同命名空间近邻键不被宽匹配误删）", () => {
++    for (const prefix of USER_SCOPED_LS_PREFIXES) {
++      expect(prefix.endsWith(".") || prefix.endsWith("-") || prefix.endsWith(":")).toBe(
++        true,
++      );
++    }
++  });
++
++  it("removeItem 抛错时容错继续清理其余键（不阻断登出）", () => {
++    // jsdom 的 Storage 方法 unforgeable（vi.spyOn 拦不住，探针实证 calls 为空仍删键）——
++    // 与 app-shell 测试的 window.location 同款：defineProperty 整体替换，finally 还原。
++    const originalLsDesc = Object.getOwnPropertyDescriptor(window, "localStorage");
++    const realLs = window.localStorage;
++    const throwingLs: Storage = {
++      get length() {
++        return realLs.length;
++      },
++      key: (index: number) => realLs.key(index),
++      getItem: (key: string) => realLs.getItem(key),
++      setItem: (key: string, value: string) => realLs.setItem(key, value),
++      removeItem: (key: string) => {
++        if (key === "sillyhub.sessions.draft.sid-1") throw new Error("quota");
++        realLs.removeItem(key);
++      },
++      clear: () => realLs.clear(),
++    };
++    Object.defineProperty(window, "localStorage", {
++      value: throwingLs,
++      configurable: true,
++    });
++    try {
++      expect(() => clearUserScopedLocalStorage()).not.toThrow();
++      // 抛错键残留（容错面），其余用户域键仍被清
++      expect(realLs.getItem("sillyhub.sessions.draft.sid-1")).toBe("x");
++      expect(realLs.getItem("sillyhub.groupchats.draft.gid-1")).toBeNull();
++      // 设备级键不受影响
++      expect(realLs.getItem("sillyhub-theme")).toBe("x");
++    } finally {
++      if (originalLsDesc) {
++        Object.defineProperty(window, "localStorage", originalLsDesc);
++      }
++    }
++  });
++
++  it("空 localStorage / 无匹配键时安全空转", () => {
++    window.localStorage.clear();
++    expect(() => clearUserScopedLocalStorage()).not.toThrow();
++  });
++});
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index c0232035e..1602b5300 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -6,6 +6,7 @@
+  */
+ import { useSession } from "@/stores/session";
+ import { ensureFreshAccessToken } from "@/lib/token-refresh";
++import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
+ // ql-20260917-011：全局熔断——部署窗口 5xx/网络错误风暴下短路请求，护住
+ // 浏览器连接池（此前风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废）
+ import { isCircuitOpen, reportApiFailure, reportApiSuccess } from "@/lib/api-circuit";
+@@ -247,6 +248,9 @@ export async function apiFetch<T = unknown>(
+       }
+       // 单飞失败(未登录 / refresh 失败 / 未 hydrate):清 session + 跳 login,行为与原实现一致。
+       useSession.getState().clear();
++      // 2026-10-14-logout-localstorage-user-data-cleanup：会话终结，localStorage
++      // 用户域键（草稿/未读/活性）同清——与两处主动登出同口径（设备级偏好保留）。
++      clearUserScopedLocalStorage();
+       if (typeof window !== "undefined") {
+         window.location.href = "/login";
+       }
+diff --git a/frontend/src/lib/logout-storage.ts b/frontend/src/lib/logout-storage.ts
+new file mode 100644
+index 000000000..41f5ad69e
+--- /dev/null
++++ b/frontend/src/lib/logout-storage.ts
+@@ -0,0 +1,59 @@
++/**
++ * 登出时统一清理 localStorage 用户域键（2026-10-14-logout-localstorage-user-data-cleanup）。
++ *
++ * 背景（archive/2026-10-14-logout-full-reload-clear-cache review.json P3）：登出整页跳转
++ * 清掉了内存缓存，但 localStorage 持久层跨登录残留——按 sessionId/groupId 索引的键
++ * （会话草稿含用户输入内容、群聊草稿、视图模式、群打开锚点、活性状态、未读标记）
++ * 换账号后原样留存，B 用户可见 A 用户的草稿、未读徽标错乱。
++ *
++ * 本文件是用户域键清单的**唯一注册表**：新增按动态资源 id 索引/承载用户内容的
++ * localStorage 键时，必须把前缀登记进 USER_SCOPED_LS_PREFIXES（带尾分隔符）——
++ * 登出清理自动覆盖，禁止在调用点散落键名。设备级偏好（主题/记住登录名/侧边栏
++ * 折叠/输入框高度/浮球/宠物/面板宽度/新建会话默认机器等）不进注册表即保留，
++ * 完整二分清单见变更 design.md。
++ */
++/** 用户域键前缀（全部带尾分隔符，精确到命名空间段，防同命名空间近邻键误删）。 */
++export const USER_SCOPED_LS_PREFIXES: readonly string[] = [
++  // 单聊会话草稿（含 __pre__ 预会话变体）— turn-state.ts sessionDraftLsKey
++  "sillyhub.sessions.draft.",
++  // 会话视图模式（对话/进度）— turn-state.ts viewModeLsKey
++  "sillyhub.sessions.viewMode.",
++  // 群聊草稿 — group-chat-panel.tsx groupDraftLsKey
++  "sillyhub.groupchats.draft.",
++  // 群「上次打开」锚点（未读计算基准）— lib/group-unread.ts groupLastOpenKey
++  "sillyhub-group-last-open-",
++  // 会话活性状态机 prevState — hooks/use-session-liveness.ts STATE_KEY_PREFIX
++  "sillyhub:liveness-state:",
++  // 会话未读标记 — hooks/use-session-liveness.ts UNREAD_KEY_PREFIX
++  "sillyhub:liveness-unread:",
++];
++
++/**
++ * 遍历 localStorage 删除全部用户域前缀键。
++ *
++ * 全程 try/catch 容错：任一键删除失败（隐私模式/配额异常）不阻断登出跳转，
++ * 继续清剩余键——最坏残留与改前等价，不劣化。仅操作 localStorage；session
++ * persist 键由 stores/session.ts 的 clear() 负责（双份清理引入歧义，不碰）。
++ */
++export function clearUserScopedLocalStorage(): void {
++  if (typeof window === "undefined") return;
++  try {
++    const keys: string[] = [];
++    for (let i = 0; i < window.localStorage.length; i += 1) {
++      const key = window.localStorage.key(i);
++      if (key === null) continue;
++      if (USER_SCOPED_LS_PREFIXES.some((prefix) => key.startsWith(prefix))) {
++        keys.push(key);
++      }
++    }
++    for (const key of keys) {
++      try {
++        window.localStorage.removeItem(key);
++      } catch {
++        /* 单键失败静默，继续清其余 */
++      }
++    }
++  } catch {
++    /* localStorage 整体不可用（如被禁用）：静默，不阻断登出 */
++  }
++}

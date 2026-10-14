@@ -904,3 +904,86 @@
   confirmed_at: null
   source_change: 2026-10-14-logout-full-reload-clear-cache
   status: active
+
+## FR-components-shared-058 全仓清查 localStorage 键并区分用户域（按 sessionId/groupId/会话内容索引）与设备级偏好（主题/输入框高度/浮球位置等），清单落 design
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-localstorage-user-data-cleanup/requirements.md#FR-01
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+
+## FR-components-shared-059 主动登出（桌面+移动）与 401 被动登出在整页跳转前统一清理全部用户域键，设备级偏好保留
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+状态：active
+摘要：主路径；storage 异常容错
+全文：.sillyspec/changes/archive/2026-10-14-logout-localstorage-user-data-cleanup/requirements.md#FR-02
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-02
+  tests: frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-localstorage-user-data-cleanup
+  status: active
+
+## FR-components-shared-060 清理逻辑集中一处注册表实现，新增用户域键只改注册表不散落
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-localstorage-user-data-cleanup/requirements.md#FR-03
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/logout-storage.test.ts「removeItem 抛错时容错继续清理其余键（不阻断登出）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-localstorage-user-data-cleanup
+  status: active
+
+## FR-components-shared-061 补清理行为测试：登出后用户域键被清、设备级键保留
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-localstorage-user-data-cleanup/requirements.md#FR-04
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-04
+  tests: frontend/src/lib/__tests__/logout-storage.test.ts「6 类用户域前缀全清、设备级键保留、前缀精确匹配」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-localstorage-user-data-cleanup
+  status: active
+
+## FR-components-shared-062 现有相关测试不回归
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-logout-localstorage-user-data-cleanup/requirements.md#FR-05
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-05
+  tests: frontend/src/lib/__tests__/token-refresh.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-logout-localstorage-user-data-cleanup
+  status: active
