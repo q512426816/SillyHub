@@ -52,9 +52,18 @@ export type ChangeFileTreeNode = {
 
 // ── API 封装 ──────────────────────────────────────────────────────────
 
-export function listChangeFiles(workspaceId: string, changeId: string) {
+// sync=true（2026-10-14-files-refresh-explicit-sync）：仅「刷新」按钮等用户主动
+// 点击使用——触发绑定 daemon 定向上行同步后再返回（backend 等待预算 3s，超时
+// 降级返回现有镜像数据）；默认不传=纯读，直接返回平台镜像数据（悬浮面板轮询/
+// 初始加载零同步开销）。
+export function listChangeFiles(
+  workspaceId: string,
+  changeId: string,
+  options?: { sync?: boolean },
+) {
+  const suffix = options?.sync ? "?sync=1" : "";
   return apiFetch<ChangeFileList>(
-    `/api/workspaces/${workspaceId}/changes/${changeId}/files`,
+    `/api/workspaces/${workspaceId}/changes/${changeId}/files${suffix}`,
   );
 }
 
