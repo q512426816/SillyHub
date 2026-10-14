@@ -1,4 +1,5 @@
-"""启动 idempotent 补种平台默认 AgentProfile（D-015 / design §11）与角色模板。
+"""启动 idempotent 补种平台默认 AgentProfile（D-015 / design §11）、角色模板回收
+与平台预置「SillySpec 极速变更」档案。
 
 Change ``2026-08-02-agent-profile-layer`` task-11。迁移 task-01 已在新环境首次
 seed 两默认档案；本模块挂在 ``main.lifespan`` startup，负责**重启补种**——若默认
@@ -9,11 +10,17 @@ seed 两默认档案；本模块挂在 ``main.lifespan`` startup，负责**重�
 见 ql-20260814-001），现仅按 :data:`_DEPRECATED_ROLE_TEMPLATE_IDS` 回收 DB 中
 曾补种的废弃模板（GLM×5 + CC×5），不再补种。
 
+``ensure_sillyspec_express_profile``（2026-10-14-agent-profile-express-preset）：
+按确定性 uuid5 id 补种平台预置「SillySpec 极速变更」档案——platform 可见 +
+``is_system_default=False``，只进档案选择列表（用户主动选用），不进 dispatch
+兜底链；同样仅补缺失、不覆盖用户改动。
+
 铁律（对齐 plan task-11 constraints）：
 * **idempotent**——重复调用不产生重复行（系统默认按 ``is_system_default`` + ``provider``
-  去重；角色模板按确定性 ``id`` 去重）。
+  去重；角色模板按确定性 ``id`` 去重；极速预置档案按确定性 ``id`` 查缺）。
 * **仅补缺失**——不覆盖、不重置已存在档案的任何字段。
-* **不存密钥**（design §10 红线）——默认档案与模板均仅含人格/角色描述，无凭证。
+* **不存密钥**（design §10 红线）——默认档案、模板与预置档案均仅含人格/纪律描述，
+  无凭证。
 """
 
 from __future__ import annotations
@@ -76,6 +83,93 @@ async def ensure_system_default_profiles(session: AsyncSession) -> int:
     if inserted:
         await session.commit()
     return inserted
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 平台预置「SillySpec 极速变更」档案（2026-10-14-agent-profile-express-preset）。
+#
+# 单条通用执行纪律档案：platform 可见 + ``is_system_default=False``——只进档案
+# 选择列表（用户在会话/任务里**主动选用**），不进 dispatch 兜底链第三档
+# （``resolve_profile`` 只按 is_system_default 命中），未选档案的会话/任务行为
+# 零变化。身份用确定性 uuid5（同角色模板机制）：跨环境稳定，误删后重启按同 id
+# 补回；管理员改过字段（name/system_prompt 等）一律跳过不回写。
+# ────────────────────────────────────────────────────────────────────────────
+
+_PRESET_NAMESPACE: uuid.UUID = uuid.uuid5(uuid.NAMESPACE_OID, "sillyhub.agent.presets")
+
+# 确定性身份键：uuid5(NAMESPACE_OID, "sillyhub.agent.presets:sillyspec-express-change")。
+EXPRESS_PRESET_PROFILE_ID: uuid.UUID = uuid.uuid5(_PRESET_NAMESPACE, "sillyspec-express-change")
+
+_EXPRESS_PRESET_SYSTEM_PROMPT: str = (
+    "你是 SillyHub 平台的「SillySpec 极速变更」执行档案：一个通用执行者，纪律是"
+    "所有代码修改必须走目标仓库的 SillySpec 轻量变更（极速）通道——先立项、再动手、"
+    "完成即收口，绝不裸改代码。\n"
+    "\n"
+    "收到代码修改请求后按以下协议执行：\n"
+    "\n"
+    "一、定级\n"
+    "- 小修复/小调整（目标明确、改动局部、成功标准能逐条说清）：走下方极速通道。\n"
+    "- 新功能/大改动/架构性改动：禁止降级进极速通道，明确告知用户应改走完整流程"
+    "（brainstorm → plan → execute → verify），等用户确认后再动手。\n"
+    "\n"
+    "二、极速通道（sillyspec 轻量变更，两调用协议）\n"
+    "1. 立项（在仓库根目录执行）：\n"
+    'sillyspec flow start --change <变更名> --input "<动机与背景一行>\n'
+    "\n"
+    "成功标准：\n"
+    '- <可验证标准，一行一条>"\n'
+    "   变更名带当天日期前缀（如 2026-10-14-fix-login-redirect），与已有活跃变更"
+    "不重名（不确定先跑 sillyspec progress show 查看）。成功标准必须逐行一条"
+    "「- 」，禁止单行内联（清晰度门会拒绝）。\n"
+    "2. 干活：按 文档依据 → 读现有代码 → 写测试 → 写实现 → 跑相关测试 的顺序执行；"
+    "只跑与本次改动相关的测试，禁止跑全量测试（全量留给 CI）。\n"
+    "3. 收口：sillyspec flow done --change <变更名>；exit 1（空槽拒收/实测失败"
+    "自动升厚）属正常中间态，按输出修复后重跑同一命令断点续。\n"
+    "4. 提交：Conventional Commits（中文 subject），只提交本变更相关文件，"
+    "不提交半成品；提交被 hook 拦截时修复问题后重试，禁止 --no-verify 绕过。\n"
+    "\n"
+    "三、纪律\n"
+    "- sillyspec 命令一律在仓库根目录执行，禁止 cd 进子目录或 worktree（读代码用"
+    "绝对路径）。\n"
+    "- 多个活跃变更并存：所有 sillyspec 命令显式 --change <变更名> 隔离，永不重置"
+    "/清零别人的 change。\n"
+    "- 预段同意门被拦（提示 route-hindsight）：确信需求已含决策加 --no-prestage "
+    "放行；不清晰则先 sillyspec run brainstorm --change <变更名>，完成后回来重新 "
+    "flow start 收编。\n"
+    "- 目标仓库没有 .sillyspec 或 CLAUDE.md 未启用 SillySpec：向用户说明情况，"
+    "按该仓库自身规范直接干活，不强行套用本协议。"
+)
+
+
+async def ensure_sillyspec_express_profile(session: AsyncSession) -> int:
+    """补种平台预置「SillySpec 极速变更」档案，返回本次补种数量（0/1）。
+
+    按确定性 id（:data:`EXPRESS_PRESET_PROFILE_ID`）查缺：行缺失才落库；已存在
+    （含管理员改过任意字段）一律跳过，不回写不覆盖。platform 可见 +
+    ``is_system_default=False``——只进档案选择列表（用户主动选用），不进
+    dispatch 兜底链（``resolve_profile`` 第三档只按 is_system_default 命中）。
+
+    本函数在有插入时内部 ``commit``，调用方无需再 commit。幂等：重复调用返回
+    ``0`` 且无副作用，适合挂在每次启动的 lifespan startup seed 序列上。
+    """
+    existing = await session.get(AgentProfile, EXPRESS_PRESET_PROFILE_ID)
+    if existing is not None:
+        return 0
+    session.add(
+        AgentProfile(
+            id=EXPRESS_PRESET_PROFILE_ID,
+            name="SillySpec 极速变更",
+            provider="claude",
+            visibility=AgentProfileVisibility.PLATFORM,
+            is_system_default=False,
+            version=1,
+            owner_user_id=None,
+            workspace_id=None,
+            system_prompt=_EXPRESS_PRESET_SYSTEM_PROMPT,
+        )
+    )
+    await session.commit()
+    return 1
 
 
 # ────────────────────────────────────────────────────────────────────────────
