@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-release-notes-server-sync",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "c0d30b157200e183168da8c8872fdab1772b8097",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 绑定作答「test_service.py 既有 9 用例」数字与实态不符（文件级实为 6，模块级 9=test_service 6+test_router 3）",
+      "evidence": "grep 计数 backend/app/modules/deploy_records/tests/test_service.py 仅 6 个 ^async def test_（test_list_aggregates_and_sorts_desc/test_list_skips_workspace_without_dir/test_invalid_variants_tolerated/test_get_record_returns_content/test_get_record_invalid_file_still_readable/test_get_record_not_found_variants）；test_router.py 另有 3 个。实质承载成立：6 用例确实断言解析/聚合倒序/invalid 容错/404 行为，且 19500f287 确认本变零后端代码（仅 SKILL.md + 记录 #002 两个文件）。属数字口径笔误，非承诺被违反。",
+      "location": ".sillyspec/changes/2026-10-14-release-notes-server-sync/requirements.md:64"
+    },
+    {
+      "severity": "P3",
+      "title": "证据提交 c0d30b157 为空提交（0 diff），FR-01/02/04 的服务器侧实测证据仅存于提交信息自述，仓库内不可复核",
+      "evidence": "git show c0d30b157 --stat 输出 0 行 diff——镜像目录就位、workspace「multi-agent-platform-镜像」指向 /tmp/sillyhub-repos/multi-agent-platform、list_records 返回 seq1(11 commits)+seq2(2 commits) 均为运行时/服务器侧状态，仓库内仅能验证机制链（_rewrite_path /tmp→/host-projects、compose 挂载、记录 #002 文件本体）而非实测结果。对运维态 thin 变更可接受，但证据强度止于自述。",
+      "location": "commit c0d30b157200e183168da8c8872fdab1772b8097"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——design 称排序由后端按 deployed_at 倒序、与上传顺序无关，与 service.py list_records 实现一致（valid 段 (deployed_at,file_name) 倒序 + invalid 段殿后，backend/app/modules/deploy_records/service.py:182-189）",
+    "并发": "ok——design 称 scp 半截文件最坏读到坏 yaml 走既有 invalid 容错，实证存在：_parse_frontmatter 对围栏缺失/围栏未闭合/YAML 语法错/非 mapping/必填缺失/类型错/非法 status 全部降级 invalid（service.py:63-134），_iter_files 对读失败 OSError 同口径（service.py:243-255），test_invalid_variants_tolerated 等 3 用例断言该行为",
+    "切换": "ok——design 称 /tmp 重启清空靠每次部署全量重传自愈，SKILL.md「发布记录」节明示：mkdir -p 建目录 + scp docs/releases/*.md 全量重传 + 注释「/tmp 服务器重启可能被清——无所谓：每次部署本节都会全量重传，目录自愈」（.zcode/skills/deploy-to-server/SKILL.md:134-140）",
+    "作用域": "ok——design 称独立 workspace 行独占子目录、多仓按 sillyhub-repos/<repo>/ 扩展不串台；实现侧 record_id 带 workspace_id 前缀防跨工作区同名冲突（service.py:144/154，test_get_record_not_found_variants 断言跨 workspace 不串），SKILL.md:142 给出多仓照抄范式（mkdir+scp+建 workspace）"
+  },
+  "reviewedAt": "2026-10-14T15:47:28+08:00"
+}
