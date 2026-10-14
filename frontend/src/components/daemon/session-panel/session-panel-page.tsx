@@ -4586,7 +4586,14 @@ export function SessionPanelPage({
         onJumpToHead: handleJumpToHead,
       })}
       <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
+      {/* 2026-10-14-session-bottom-switch-remount：key=会话标识——SPA 列表点击
+          切换会话时组件不重挂载，滚动判定 refs（isNearBottomRef/scrollBaselineRef/
+          lastSigRef 等）残留上一会话状态（上滚读历史后 isNearBottomRef=false），
+          新会话贴底跟随被守卫拦下（实测：会话 A 上滚 → 切长会话 → 停距底 3963px，
+          用户「有时候没滚到底」的切换路径根因；前两轮修复只覆盖整页加载路径）。
+          key 强制重挂载：全部滚动状态归零，恢复初始贴底语义。 */}
       <TurnTimeline
+        key={sessionId ?? "pre"}
         suppressFollowBottom={jumpFollowSuppress}
         turns={dialogTurns}
         viewMode={viewMode}

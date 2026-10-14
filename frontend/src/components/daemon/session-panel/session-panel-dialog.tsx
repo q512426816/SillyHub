@@ -2031,6 +2031,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
           task-08（session-fork）例外注记：forkAnchors 的 /runs 拉取是分叉入口
           门控的专属数据源（上方 effect，非 whoLine 派生链复用），不破 R7 语义。 */}
       <TurnTimeline
+        // 2026-10-14-session-bottom-switch-remount：key=会话标识——弹窗内切换/
+        // 重挂会话时滚动判定 refs 归零（同 page 模式，见 session-panel-page 挂载
+        // 点注释；attachSessionId 为弹窗承载会话 id）。
+        key={view.sessionId ?? attachSessionId ?? "pre"}
         autoResumeEntries={autoResumeEntries}
         turns={view.turns}
         // task-08（session-fork / FR-01 / FR-04）：轮级「⑂ 从此分叉」入口——
