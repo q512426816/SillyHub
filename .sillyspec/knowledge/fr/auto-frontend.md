@@ -2755,3 +2755,62 @@ created_at: 2026-10-08T03:33:17.438Z
 - 场景：主路径 — Given 用户上拉触发「加载更早」翻页（列表长度+1、首轮身份变化）；When prepend 落地后任意 turns 提交；Then 不发生贴底滚动（上拉读历史不被弹回最新轮，既有行为保持）
 全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-05
 最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+
+## FR-auto-frontend-235 被动增高（scrollHeight 增长且 scrollTop 未减少）不改变贴底判定——handleScroll 跳过 near 清零与新消息计数锚设置，仅更新基线
+变更：2026-10-14-session-bottom-passive-grow
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-01
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+
+## FR-auto-frontend-236 用户真实上滚（scrollTop 减少）照常清贴底判定（读历史不被拉底，既有行为不变）
+变更：2026-10-14-session-bottom-passive-grow
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-02
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-passive-grow:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-passive-grow
+  status: active
+
+## FR-auto-frontend-237 真实上滚后的内容增长（读历史时后台预取插入）不恢复贴底（near 保持 false）
+变更：2026-10-14-session-bottom-passive-grow
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-03
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-passive-grow:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-passive-grow
+  status: active
+
+## FR-auto-frontend-238 连续 3 次冷加载全部落底（导航 active=末轮=视口末轮），真浏览器实测
+变更：2026-10-14-session-bottom-passive-grow
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-04
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+
+## FR-auto-frontend-239 贴底/翻页/跳转/preview 测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-passive-grow
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-passive-grow/requirements.md#FR-05
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652

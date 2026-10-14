@@ -2949,3 +2949,10 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
 理由：最大风险：既有测试若显式断言「末轮不变长度变不滚动」会回归——已跑贴底/翻页/竞态/跳转 6 文件 77 例 + preview 三件套 27 例全绿，证实无此断言面。放弃方案：①延长/重启重申窗口至大纲到达——治标且时序敏感（大纲无到达信号）；②page 层 outline effect 主动滚底——绕开 TurnTimeline 守卫链（prepend 静默窗不知情），有上拉弹回回归风险。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-passive-grow
+锚点：未记录
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+理由：最大风险：阈 50px/容差 4px 经验值——过大误吞用户小步上滚（距底仍 <80px 无影响），过小 markdown 抖动穿透（回退到上轮形态）。放弃方案：CSS overflow-anchor（浏览器原生锚定，但对 content-visibility 估算高度不稳定且不可控）；在 [turns] effect 内直接跟随不设守卫（上滚读历史被拉底，ql-20260822-010 既有回归）。
