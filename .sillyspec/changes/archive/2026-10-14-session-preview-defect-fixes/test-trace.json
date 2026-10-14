@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-preview-defect-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-preview-defect-fixes:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「defect-fixes：额度失败轮（仅 user_input 无答复）点导航原位展开用户消息，且重复点击不重复请求」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-preview-defect-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-session-preview-defect-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx「defect-fixes：真零正文轮（无 user_input 无答复）幂等语义不变——不展开不重复请求」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-preview-defect-fixes"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-session-preview-defect-fixes:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「已加载块轮号与大纲 seq 不一致时盖章为 seq（logsToTurns 批次局部编号对齐权威轮序）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-preview-defect-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-session-preview-defect-fixes:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts「盖章引用稳定：同输入重复派生保持同引用（不击穿 TurnRow memo）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-preview-defect-fixes"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-session-preview-defect-fixes:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx「task-01/02（2026-09-29-jump-empty-turn-dup）零正文轮二次点击不重复单轮直达 prepend（口径修正后复绿）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-preview-defect-fixes"
+    }
+  ]
+}

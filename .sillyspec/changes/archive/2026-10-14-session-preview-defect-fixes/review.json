@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-preview-defect-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "88de2e76e1d0c8b890b0d8812b4ec9057acfac48",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "prompt 放行口径对噪音 user_input 轮的误判面（设计已声明的可接受边界）",
+      "evidence": "5 处判定以非空 prompt 为可渲染正文，若某轮日志含非空 user_input 但属系统注入/前导噪音，将被判有内容而 prepend 空壳气泡而非幂等短路；design.md 风险节已声明此边界并依赖既有归一口径消化，测试仅锁定空串不放行",
+      "location": "frontend/src/components/daemon/session-panel/session-panel-page.tsx:2314"
+    },
+    {
+      "severity": "P3",
+      "title": "盖章缓存值按原引用快照展开，隐含依赖 turn 对象不可变性",
+      "evidence": "stampOutlineSeq 缓存产物在盖章时快照字段，若上游未来出现原地 mutate turn 的路径，同引用缓存会返回陈旧副本；当前 enrich/装配链均新建对象，且 stamped.turn 不等于 seq 的守卫可在 seq 变更时重盖章，无现役 bug",
+      "location": "frontend/src/components/daemon/session-panel/preview-merge.ts:127"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T06:44:24Z"}

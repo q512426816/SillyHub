@@ -1,0 +1,327 @@
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index 76006efe6..e9e8b050d 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -3001,9 +3001,11 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
+ 
+     /** run_id 单轮请求计数（防重复直达的核心回归锚）。 */
++    // defect-fixes 口径修正：按目标轮过滤——FR-03 附近预取会为邻轮合法追加 run_id
++    // 请求（2026-09-29 写此断言时预取尚不存在）；「同轮不重复直达」回归意图保留。
+     const runIdCallCount = () =>
+       mocks.getAgentSessionLogs.mock.calls.filter(
+-        (c) => c[1] && "runId" in (c[1] as Record<string, unknown>),
++        (c) => c[1] && (c[1] as Record<string, unknown>).runId === "r-ancient",
+       ).length;
+     /** 时间线内 r-ancient 行数（修复前重复 prepend 会造同装饰键重复行）。 */
+     const ancientRowCount = () =>
+diff --git a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+index ca672f712..0b60a95d7 100644
+--- a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+@@ -85,11 +85,11 @@ function Host({ sessionId }: { sessionId: string }) {
+   );
+ }
+ 
+-async function attachSession(sessionId: string) {
++async function attachSession(sessionId: string, loadedMarker = /第3轮提问内容/) {
+   render(<Host sessionId={sessionId} />);
+-  // attach 完成：初始窗口（run-c 轮）已装配进消息流。
++  // attach 完成：初始窗口（run-c 轮）已装配进消息流（marker 随用例内 turnLogs seq 变化）。
+   await waitFor(() =>
+-    expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0),
++    expect(screen.getAllByText(loadedMarker).length).toBeGreaterThan(0),
+   );
+ }
+ 
+@@ -171,4 +171,83 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
+     expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
+     expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0);
+   });
++
++  it("defect-fixes：额度失败轮（仅 user_input 无答复）点导航原位展开用户消息，且重复点击不重复请求", async () => {
++    // 两轮大纲：run-x 失败轮（seq 1，日志只有 user_input——额度耗尽形态）；
++    // run-c 完整轮（seq 2，初始窗口内已加载）。
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", prompt_summary: "失败轮提问" },
++        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++      ],
++    });
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-x") {
++          // 额度耗尽失败轮：只有 user_input，无任何答复行（旧口径被判零正文 → 点击无反应）。
++          return [
++            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "失败轮的提问内容，等待额度恢复" },
++          ];
++        }
++        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
++        if (opts?.before) return [];
++        return turnLogs("run-c", 2, 10);
++      },
++    );
++    await attachSession("s1", /第2轮提问内容/);
++    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
++    const tickX = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
++    fireEvent.click(tickX!);
++    // 直达真实发起且块被放进来：用户消息上屏、预览卡消失（无双块）。
++    await waitFor(() =>
++      expect(screen.getAllByText(/失败轮的提问内容/).length).toBeGreaterThan(0),
++    );
++    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
++    // 已加载判定含 prompt：再次点击导航不重复发起直达。
++    const callsAfterFirst = runIdCalls().filter((r) => r === "run-x").length;
++    fireEvent.click(tickX!);
++    await new Promise((r) => setTimeout(r, 300));
++    expect(runIdCalls().filter((r) => r === "run-x").length).toBe(callsAfterFirst);
++  });
++
++  it("defect-fixes：真零正文轮（无 user_input 无答复）幂等语义不变——不展开不重复请求", async () => {
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1",
++      total_turns: 2,
++      items: [
++        { run_id: "run-e", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: null },
++        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++      ],
++    });
++    sessionApi.getAgentSessionLogs.mockImplementation(
++      async (_sid: string, opts?: { runId?: string; before?: string }) => {
++        if (opts?.runId === "run-e") {
++          // 群聊空 user_input 形态：一条无关紧要的系统行，装配无 prompt 无 output。
++          return [
++            { id: "log-run-e-s", run_id: "run-e", timestamp: "2026-08-26T10:00:30.0Z", channel: "system", content_redacted: "" },
++          ];
++        }
++        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
++        if (opts?.before) return [];
++        return turnLogs("run-c", 2, 10);
++      },
++    );
++    await attachSession("s1", /第2轮提问内容/);
++    const tickE = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
++    fireEvent.click(tickE!);
++    await waitFor(() => expect(runIdCalls()).toContain("run-e"));
++    await new Promise((r) => setTimeout(r, 300));
++    // 零正文：预览卡保持（无内容可展开），重复点击不重复请求（2026-09-29 语义）。
++    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
++    const callsAfterFirst = runIdCalls().filter((r) => r === "run-e").length;
++    fireEvent.click(tickE!);
++    await new Promise((r) => setTimeout(r, 300));
++    expect(runIdCalls().filter((r) => r === "run-e").length).toBe(callsAfterFirst);
++  });
+ });
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+index 5229d3915..3c0a291d0 100644
+--- a/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
++++ b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+@@ -68,14 +68,16 @@ describe("mergePreviewIntoDisplayTurns 轮序与预览条目", () => {
+     expect(merged[1]!.output).toBe("");
+   });
+ 
+-  it("已加载真实轮透传原引用并落在大纲 seq 位置", () => {
++  it("已加载真实轮落在大纲 seq 位置（轮号盖章 defect-fixes：null→seq 产生新引用）", () => {
+     const loaded = turn({ runId: "a", prompt: "用户消息", output: "agent 答复" });
+     const ol = outline([
+       outlineItem({ run_id: "a", seq: 1, prompt_summary: "大纲摘要（应被真实轮取代）" }),
+       outlineItem({ run_id: "b", seq: 2 }),
+     ]);
+     const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
+-    expect(merged[0]).toBe(loaded);
++    // turn: null → 盖章为 seq 1（新引用）；同 seq 重复派生保持同引用（盖章缓存）。
++    expect(merged[0]!.turn).toBe(1);
++    expect(mergePreviewIntoDisplayTurns(ol, [loaded])[0]).toBe(merged[0]);
+     expect(merged[1]!.preview).toBeDefined();
+   });
+ });
+@@ -119,14 +121,17 @@ describe("mergePreviewIntoDisplayTurns 原位替换与孤儿", () => {
+ });
+ 
+ describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
+-  it("活跃轮（running 无内容）透传保留，不被预览卡取代", () => {
++  it("活跃轮（running 无内容）保留，不被预览卡取代（盖章对齐 seq）", () => {
+     const running = turn({ runId: "a", status: "running" });
+     const ol = outline([outlineItem({ run_id: "a", seq: 1 })]);
+     const merged = mergePreviewIntoDisplayTurns(ol, [running]);
+-    expect(merged[0]).toBe(running);
++    // defect-fixes：轮号盖章后非原引用（null→1），但「保留不替换」语义以内容判定。
++    expect(merged[0]!.status).toBe("running");
++    expect(merged[0]!.preview).toBeUndefined();
++    expect(merged[0]!.turn).toBe(1);
+   });
+ 
+-  it("失败轮（errorDetail 非空无 output）透传保留", () => {
++  it("失败轮（errorDetail 非空无 output）保留（盖章对齐 seq）", () => {
+     const failed = turn({
+       runId: "a",
+       status: "failed",
+@@ -134,7 +139,9 @@ describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
+     });
+     const ol = outline([outlineItem({ run_id: "a", seq: 1, status: "failed" })]);
+     const merged = mergePreviewIntoDisplayTurns(ol, [failed]);
+-    expect(merged[0]).toBe(failed);
++    expect(merged[0]!.errorDetail).toBeTruthy();
++    expect(merged[0]!.preview).toBeUndefined();
++    expect(merged[0]!.turn).toBe(1);
+   });
+ 
+   it("重入安全：已带 preview 的条目继续按大纲对齐不重复包皮", () => {
+@@ -151,6 +158,31 @@ describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
+   });
+ });
+ 
++describe("mergePreviewIntoDisplayTurns 轮号盖章（2026-10-14-session-preview-defect-fixes）", () => {
++  it("已加载块轮号与大纲 seq 不一致时盖章为 seq（logsToTurns 批次局部编号对齐权威轮序）", () => {
++    // 初始窗口末块批次局部编号 12，大纲权威 seq 3 → 盖成 3（RoundDivider 轮号修复）。
++    const loaded = turn({ runId: "a", turn: 12, prompt: "用户消息", output: "答复" });
++    const ol = outline([outlineItem({ run_id: "a", seq: 3 })]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
++    expect(merged[0]!.turn).toBe(3);
++    expect(merged[0]).not.toBe(loaded); // 盖章产生新引用
++  });
++
++  it("盖章引用稳定：同输入重复派生保持同引用（不击穿 TurnRow memo）", () => {
++    const loaded = turn({ runId: "a", turn: 1, prompt: "用户消息", output: "答复" });
++    const ol = outline([outlineItem({ run_id: "a", seq: 7 })]);
++    const m1 = mergePreviewIntoDisplayTurns(ol, [loaded]);
++    const m2 = mergePreviewIntoDisplayTurns(ol, [loaded]);
++    expect(m2[0]).toBe(m1[0]);
++  });
++
++  it("轮号已一致时透传原引用（零克隆）", () => {
++    const ok = turn({ runId: "z", turn: 5, prompt: "x", output: "y" });
++    const ol = outline([outlineItem({ run_id: "z", seq: 5 })]);
++    expect(mergePreviewIntoDisplayTurns(ol, [ok])[0]).toBe(ok);
++  });
++});
++
+ describe("previewTurnStatusOf", () => {
+   it("词表映射：completed/finished→completed，failed→failed，运行族→running，中止族→killed，未知→pending", () => {
+     expect(previewTurnStatusOf("completed")).toBe("completed");
+diff --git a/frontend/src/components/daemon/session-panel/preview-merge.ts b/frontend/src/components/daemon/session-panel/preview-merge.ts
+index 3fa0572ee..b01f6c828 100644
+--- a/frontend/src/components/daemon/session-panel/preview-merge.ts
++++ b/frontend/src/components/daemon/session-panel/preview-merge.ts
+@@ -115,10 +115,29 @@ function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
+   };
+ }
+ 
++/**
++ * 轮号盖章缓存（2026-10-14-session-preview-defect-fixes）：logsToTurns 按批次
++ * 局部编号（初始窗口末块 N / 单轮直达恒 1 / 翻页批次各起 1），与大纲权威 seq
++ * 错位——已加载块经本缓存盖成 seq（RoundDivider/导航/预览卡三处轮号同源）。
++ * WeakMap 按原 turn 引用缓存盖章产物：同输入重复派生保持同引用，不击穿
++ * TurnRow memo（流式期间每 delta 重派生 displayTurns，无缓存会全量克隆）。
++ */
++const seqStampCache = new WeakMap<SessionTurnView, SessionTurnView>();
++
++function stampOutlineSeq(hit: SessionTurnView, seq: number): SessionTurnView {
++  if (hit.turn === seq) return hit;
++  let stamped = seqStampCache.get(hit);
++  if (!stamped || stamped.turn !== seq) {
++    stamped = { ...hit, turn: seq };
++    seqStampCache.set(hit, stamped);
++  }
++  return stamped;
++}
++
+ /**
+  * 归并纯函数（displayTurns 派生链末端接线，见 session-panel-page displayTurns）。
+  * 输入 enrichDisplayTurns 产物（无 preview 字段），输出统一列表；不修改任何输入
+- * 对象（真实轮原引用透传，预览条目新建）。
++ * 对象（真实轮原引用透传——轮号不一致时透传盖章产物，预览条目新建）。
+  */
+ export function mergePreviewIntoDisplayTurns(
+   outline: SessionTurnOutlineRead | null,
+@@ -137,7 +156,7 @@ export function mergePreviewIntoDisplayTurns(
+     seen.add(item.run_id);
+     const hit = byKey.get(item.run_id);
+     if (hit && hasRenderableBody(hit)) {
+-      out.push(hit);
++      out.push(stampOutlineSeq(hit, item.seq));
+       continue;
+     }
+     out.push(buildPreviewTurn(item));
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 0994244f8..0695c56e4 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -2306,8 +2306,16 @@ export function SessionPanelPage({
+           historyCursorIdRef.current = oldestJump.id;
+         }
+         const newTurns = logsToTurns(turnLogs);
++        // defect-fixes：可渲染正文 = prompt（用户消息气泡）∨ segments ∨ output。
++        // 旧口径漏 prompt——额度耗尽失败轮（有 user_input 无答复）被判零正文进
++        // 幂等黑名单，点击永远无反应；而其失败详情卡由 runs 快照 error_detail
++        // 经 enrichDisplayTurns 注入，块只要进来就能渲染。真零正文（群聊空
++        // user_input，prompt/output 双空）仍走幂等不 prepend（2026-09-29 语义）。
+         const anyBody = newTurns.some(
+-          (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
++          (t) =>
++            !!(t.prompt ?? "").trim() ||
++            (t.segments?.length ?? 0) > 0 ||
++            !!(t.output ?? "").trim(),
+         );
+         if (newTurns.length > 0 && anyBody) {
+           const pageKey = `pv-${oldestJump.id.slice(0, 8)}`;
+@@ -2337,8 +2345,12 @@ export function SessionPanelPage({
+     (runKey: string) => {
+       if (!sessionId) return;
+       const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === runKey);
++      // defect-fixes：同 fetchAndAttachTurn anyBody 口径——含 prompt（用户消息
++      // 气泡也是已加载内容，防失败轮被误判未加载重复发起）。
+       const hasBody =
+-        (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
++        !!(hit?.prompt ?? "").trim() ||
++        (hit?.segments?.length ?? 0) > 0 ||
++        !!(hit?.output ?? "").trim();
+       if (hit && hasBody) return; // 已加载完成（归并层替换在途，防御双击）
+       if (jumpEmptyJumpedRunIdsRef.current.has(runKey)) return; // 零正文幂等
+       if (previewInflightRef.current.has(runKey)) return; // 在飞去重
+@@ -2379,8 +2391,11 @@ export function SessionPanelPage({
+         if (!item) continue;
+         const key = item.run_id;
+         const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
++        // defect-fixes：同 anyBody 口径含 prompt。
+         const hasBody =
+-          (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
++          !!(hit?.prompt ?? "").trim() ||
++          (hit?.segments?.length ?? 0) > 0 ||
++          !!(hit?.output ?? "").trim();
+         if (hit && hasBody) continue;
+         if (jumpEmptyJumpedRunIdsRef.current.has(key)) continue;
+         if (previewInflightRef.current.has(key)) continue;
+@@ -2515,7 +2530,10 @@ export function SessionPanelPage({
+         const loadedTurn = turnState.turns.find(
+           (t) => (t.realRunId ?? t.runId) === entry.key,
+         );
++        // defect-fixes：同 anyBody 口径含 prompt——失败轮（有用户消息无答复）加载
++        // 后再点导航按已加载直跳定位，不再重复直达 prepend 重复块。
+         const loadedHasBody =
++          !!(loadedTurn?.prompt ?? "").trim() ||
+           (loadedTurn?.segments?.length ?? 0) > 0 ||
+           !!(loadedTurn?.output ?? "").trim();
+         if (loadedTurn && loadedHasBody) {
+@@ -2564,8 +2582,14 @@ export function SessionPanelPage({
+             // 2026-09-29-jump-empty-turn-dup：零可渲染正文（或装配无产出）不
+             // prepend——run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会
+             // 造出装饰键相同的重复空块。改记幂等标记，该轮后续点击走上方短路。
++            // defect-fixes：可渲染正文含 prompt（用户消息气泡）——额度失败轮
++            // （有 user_input 无答复）能展开：用户气泡 + 失败详情卡（runs 快照
++            // error_detail 经 enrich 注入）；真零正文（prompt/output 双空）仍幂等。
+             const anyBody = newTurns.some(
+-              (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
++              (t) =>
++                !!(t.prompt ?? "").trim() ||
++                (t.segments?.length ?? 0) > 0 ||
++                !!(t.output ?? "").trim(),
+             );
+             if (newTurns.length > 0 && anyBody) {
+               const pageKey = `jump-${oldestJump.id.slice(0, 8)}`;

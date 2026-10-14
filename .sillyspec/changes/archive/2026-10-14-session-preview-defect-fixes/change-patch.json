@@ -1,0 +1,100 @@
+{
+  "change": "2026-10-14-session-preview-defect-fixes",
+  "baseline": "35cff31e5be7b8baff21801d19a5d599ed2243e1",
+  "head": "88de2e76e1d0c8b890b0d8812b4ec9057acfac48",
+  "files": [
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+    "frontend/src/components/daemon/session-panel/preview-merge.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 172,
+    "deletions": 16
+  },
+  "savedAt": "2026-10-14T06:40:28.925Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "35cff31e5be7b8baff21801d19a5d599ed2243e1",
+    "totals": {
+      "files": 5,
+      "additions": 172,
+      "deletions": 16
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "additions": 82,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+        "additions": 38,
+        "deletions": 6,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/preview-merge.ts",
+        "additions": 21,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 28,
+        "deletions": 4,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "435c20cb1a35b4c4aa3640ca8bd2df37d8694ac2a5cede064010ccdc133c8d33",
+  "patchStatus": "ok"
+}
