@@ -9,4 +9,4 @@ created_at: 2026-10-14T12:28:03.940Z
 - [x] task-03: 注入复现脚本在修复后 delta 保持 0（部署前后对照取证）
 - [x] task-04: rAF 合帧防布局风暴（2026-10-13 layout-storm 教训：高频回调去重为一帧一滚）
 - [x] task-05: 兼容无 ResizeObserver 环境（jsdom/旧浏览器优雅降级不挂观测）
-- [x] task-06: 既有测试面复跑绿 + tsc 0
+- [x] task-06: 既有测试面复跑绿 + tsc 0（P2 补口实现：turn-timeline.tsx hasTurns 翻转重快照；冷加载注入取证 delta=0）
