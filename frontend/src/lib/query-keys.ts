@@ -200,6 +200,8 @@ export function deployRecordsListQueryKey() {
   return ["deployRecords", "list"] as const;
 }
 
-export function deployRecordDetailQueryKey(recordId: string) {
+export function deployRecordDetailQueryKey(recordId: string | null) {
+  // recordId 允许 null（页面首渲染列表未回时派生选中态为 null，enabled 已挡请求；
+  // null 进 key 合法——影响结果的变量进 key 本文件头规则）
   return ["deployRecords", "detail", recordId] as const;
 }
