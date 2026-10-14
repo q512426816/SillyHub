@@ -32460,6 +32460,7 @@ export interface operations {
                 owner?: string | null;
                 search?: string | null;
                 current_stage?: string | null;
+                lineage?: string | null;
                 sort?: string;
                 pending_review_only?: boolean;
                 page?: number;

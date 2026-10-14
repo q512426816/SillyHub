@@ -186,6 +186,7 @@ class ChangeService:
         owner: str | None = None,
         search: str | None = None,
         current_stage: str | None = None,
+        lineage: str | None = None,
         sort: str = "updated_at_desc",
         pending_review_only: bool = False,
         page: int = 1,
@@ -207,6 +208,13 @@ class ChangeService:
         （非本页过滤后数）。pending_review 是计算字段（latest_progress + _map），
         SQL 无法直接 WHERE，故走「复用 _map 算集合 → SQL IN」两阶段（跨库稳定，
         不翻译 _map 到 JSON 展开语法）。
+
+        ``lineage``（2026-10-14-change-center-lineage-tag-and-filter）：出身分类筛选，
+        ``"thin"`` 只返回轻量出身行、``"full"`` 只返回非轻量出身行、缺省/未知值
+        不过滤（对齐 sort 白名单 fallback 风格）。出身是 ``_is_thin_lineage`` 三分支
+        投影（分支③需解析 progress JSON 的 steps，SQL 无法直译）→ 复用
+        pending_review_only 的「全局集合 → SQL IN / NOT IN」两阶段，集合与
+        ``ChangeSummary.is_thin`` 同源同函数（逐行一致，含归档兜底行）。
         """
         await self._workspace_service.get(workspace_id)
 
@@ -216,6 +224,16 @@ class ChangeService:
         if pending_review_only:
             pending_keys = await self._resolve_pending_change_keys(workspace_id, location)
             if not pending_keys:
+                return [], 0
+
+        # 2026-10-14-change-center-lineage-tag-and-filter：出身集合先算（同 pending
+        # 先例）；thin 空集合直接短路（无轻量出身行）；full 空集合无需过滤（NOT IN
+        # 空集恒真，跳过 where 避免方言差异）。
+        lineage_norm = (lineage or "").strip().lower()
+        thin_keys: set[str] | None = None
+        if lineage_norm in ("thin", "full"):
+            thin_keys = await self._resolve_thin_lineage_keys(workspace_id)
+            if lineage_norm == "thin" and not thin_keys:
                 return [], 0
 
         # Base: changes whose primary workspace matches（D-005@V1，M:N 投影表已废，
@@ -268,6 +286,13 @@ class ChangeService:
             )
         if pending_keys is not None:
             base = base.where(col(Change.change_key).in_(pending_keys))
+        # 2026-10-14-change-center-lineage-tag-and-filter：出身过滤（change_key 在
+        # workspace 内唯一，集合按 workspace 收集不串台）。
+        if thin_keys is not None:
+            if lineage_norm == "thin":
+                base = base.where(col(Change.change_key).in_(thin_keys))
+            else:
+                base = base.where(col(Change.change_key).notin_(thin_keys))
 
         # Count total
         count_stmt = select(func.count()).select_from(base.subquery())
@@ -2538,6 +2563,55 @@ class ChangeService:
         # bump 的新 epoch 盖到旧集合上（中毒缓存直至 TTL）。
         await set_cached_pending_keys(workspace_id, location, pending, epoch=cached_epoch)
         return pending
+
+    async def _resolve_thin_lineage_keys(self, workspace_id: uuid.UUID) -> set[str]:
+        """算轻量出身（``_is_thin_lineage`` 投影为 True）的 change_key 集合。
+
+        2026-10-14-change-center-lineage-tag-and-filter：``list_(lineage=...)`` 的
+        集合计算面（模式对齐 ``_resolve_pending_change_keys`` 先例；无缓存 v1，
+        量级对齐 pending 全 workspace 拉取）。判定口径必须与 ``enrich_summaries``
+        逐行一致——同一 ``_is_thin_lineage`` 函数 + 同一投影覆盖顺序：
+
+        - 非 deleted 行先 ``_project_current_stage`` 批量投影；命中处用投影 stage，
+          ``latest_progress.changes[0].status == 'archived'`` 时终态覆盖 stage=
+          'archived'（归档 thin 翻 archived 后仍靠 steps 兜底命中的关键路径）；
+          未命中处 fallback row 现值（D-003）。
+        - deleted 行不进投影 join（task-06 防复活口径同源）：row 现值 + 无
+          latest_progress 判分支①②（archive 三源并集兜底行照常参与分类）。
+        """
+        stmt = select(
+            Change.change_key,
+            Change.change_type,
+            Change.created_at,
+            Change.current_stage,
+            Change.location,
+        ).where(col(Change.workspace_id) == workspace_id)
+        rows = (await self._session.execute(stmt)).all()
+        if not rows:
+            return set()
+        projected = await self._project_current_stage(
+            [(workspace_id, r.change_key) for r in rows if r.location != "deleted"]
+        )
+        thin: set[str] = set()
+        for r in rows:
+            if r.location == "deleted":
+                stage, latest_progress = r.current_stage, None
+            else:
+                info = projected.get((workspace_id, r.change_key))
+                if info is None:
+                    stage, latest_progress = r.current_stage, None
+                else:
+                    stage, latest_progress = info[0], info[2]
+                    if self._extract_change_status(latest_progress) == "archived":
+                        stage = "archived"
+            if self._is_thin_lineage(
+                current_stage=stage,
+                change_type=r.change_type,
+                created_at=r.created_at,
+                latest_progress=latest_progress,
+            ):
+                thin.add(r.change_key)
+        return thin
 
     async def _project_current_stage(
         self, pairs: list[tuple[uuid.UUID, str]]
