@@ -209,6 +209,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             try:
                 from app.modules.agent.profile.seed import (
                     ensure_role_template_profiles,
+                    ensure_sillyspec_express_profile,
                     ensure_system_default_profiles,
                 )
 
@@ -223,6 +224,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     log.warning("agent.profile.role_template_reseeded", count=role_seeded)
                 if role_pruned:
                     log.warning("agent.profile.role_template_pruned", count=role_pruned)
+
+                # 2026-10-14-agent-profile-express-preset：平台预置「SillySpec 极速
+                # 变更」档案——platform 可见 + 非 system_default（只进档案选择列表，
+                # 不进 dispatch 兜底链）。确定性 id 查缺补种：误删重启补回，管理员
+                # 改过字段不回写。异常不阻断启动（同上）。
+                express_seeded = await ensure_sillyspec_express_profile(session)
+                if express_seeded:
+                    log.warning("agent.profile.express_preset_reseeded", count=express_seeded)
             except Exception:
                 log.exception("agent.profile.seed_failed")
         # 平台文件中心：初始化对象存储单例（minio 等 S3 兼容）。异常不阻断启动——
