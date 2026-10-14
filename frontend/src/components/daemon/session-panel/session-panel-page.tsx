@@ -2306,8 +2306,16 @@ export function SessionPanelPage({
           historyCursorIdRef.current = oldestJump.id;
         }
         const newTurns = logsToTurns(turnLogs);
+        // defect-fixes：可渲染正文 = prompt（用户消息气泡）∨ segments ∨ output。
+        // 旧口径漏 prompt——额度耗尽失败轮（有 user_input 无答复）被判零正文进
+        // 幂等黑名单，点击永远无反应；而其失败详情卡由 runs 快照 error_detail
+        // 经 enrichDisplayTurns 注入，块只要进来就能渲染。真零正文（群聊空
+        // user_input，prompt/output 双空）仍走幂等不 prepend（2026-09-29 语义）。
         const anyBody = newTurns.some(
-          (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
+          (t) =>
+            !!(t.prompt ?? "").trim() ||
+            (t.segments?.length ?? 0) > 0 ||
+            !!(t.output ?? "").trim(),
         );
         if (newTurns.length > 0 && anyBody) {
           const pageKey = `pv-${oldestJump.id.slice(0, 8)}`;
@@ -2337,8 +2345,12 @@ export function SessionPanelPage({
     (runKey: string) => {
       if (!sessionId) return;
       const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === runKey);
+      // defect-fixes：同 fetchAndAttachTurn anyBody 口径——含 prompt（用户消息
+      // 气泡也是已加载内容，防失败轮被误判未加载重复发起）。
       const hasBody =
-        (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
+        !!(hit?.prompt ?? "").trim() ||
+        (hit?.segments?.length ?? 0) > 0 ||
+        !!(hit?.output ?? "").trim();
       if (hit && hasBody) return; // 已加载完成（归并层替换在途，防御双击）
       if (jumpEmptyJumpedRunIdsRef.current.has(runKey)) return; // 零正文幂等
       if (previewInflightRef.current.has(runKey)) return; // 在飞去重
@@ -2379,8 +2391,11 @@ export function SessionPanelPage({
         if (!item) continue;
         const key = item.run_id;
         const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
+        // defect-fixes：同 anyBody 口径含 prompt。
         const hasBody =
-          (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
+          !!(hit?.prompt ?? "").trim() ||
+          (hit?.segments?.length ?? 0) > 0 ||
+          !!(hit?.output ?? "").trim();
         if (hit && hasBody) continue;
         if (jumpEmptyJumpedRunIdsRef.current.has(key)) continue;
         if (previewInflightRef.current.has(key)) continue;
@@ -2515,7 +2530,10 @@ export function SessionPanelPage({
         const loadedTurn = turnState.turns.find(
           (t) => (t.realRunId ?? t.runId) === entry.key,
         );
+        // defect-fixes：同 anyBody 口径含 prompt——失败轮（有用户消息无答复）加载
+        // 后再点导航按已加载直跳定位，不再重复直达 prepend 重复块。
         const loadedHasBody =
+          !!(loadedTurn?.prompt ?? "").trim() ||
           (loadedTurn?.segments?.length ?? 0) > 0 ||
           !!(loadedTurn?.output ?? "").trim();
         if (loadedTurn && loadedHasBody) {
@@ -2564,8 +2582,14 @@ export function SessionPanelPage({
             // 2026-09-29-jump-empty-turn-dup：零可渲染正文（或装配无产出）不
             // prepend——run_id 直达与已装配状态同日志源，重拉必同形，prepend 只会
             // 造出装饰键相同的重复空块。改记幂等标记，该轮后续点击走上方短路。
+            // defect-fixes：可渲染正文含 prompt（用户消息气泡）——额度失败轮
+            // （有 user_input 无答复）能展开：用户气泡 + 失败详情卡（runs 快照
+            // error_detail 经 enrich 注入）；真零正文（prompt/output 双空）仍幂等。
             const anyBody = newTurns.some(
-              (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
+              (t) =>
+                !!(t.prompt ?? "").trim() ||
+                (t.segments?.length ?? 0) > 0 ||
+                !!(t.output ?? "").trim(),
             );
             if (newTurns.length > 0 && anyBody) {
               const pageKey = `jump-${oldestJump.id.slice(0, 8)}`;

@@ -116,9 +116,28 @@ function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
 }
 
 /**
+ * 轮号盖章缓存（2026-10-14-session-preview-defect-fixes）：logsToTurns 按批次
+ * 局部编号（初始窗口末块 N / 单轮直达恒 1 / 翻页批次各起 1），与大纲权威 seq
+ * 错位——已加载块经本缓存盖成 seq（RoundDivider/导航/预览卡三处轮号同源）。
+ * WeakMap 按原 turn 引用缓存盖章产物：同输入重复派生保持同引用，不击穿
+ * TurnRow memo（流式期间每 delta 重派生 displayTurns，无缓存会全量克隆）。
+ */
+const seqStampCache = new WeakMap<SessionTurnView, SessionTurnView>();
+
+function stampOutlineSeq(hit: SessionTurnView, seq: number): SessionTurnView {
+  if (hit.turn === seq) return hit;
+  let stamped = seqStampCache.get(hit);
+  if (!stamped || stamped.turn !== seq) {
+    stamped = { ...hit, turn: seq };
+    seqStampCache.set(hit, stamped);
+  }
+  return stamped;
+}
+
+/**
  * 归并纯函数（displayTurns 派生链末端接线，见 session-panel-page displayTurns）。
  * 输入 enrichDisplayTurns 产物（无 preview 字段），输出统一列表；不修改任何输入
- * 对象（真实轮原引用透传，预览条目新建）。
+ * 对象（真实轮原引用透传——轮号不一致时透传盖章产物，预览条目新建）。
  */
 export function mergePreviewIntoDisplayTurns(
   outline: SessionTurnOutlineRead | null,
@@ -137,7 +156,7 @@ export function mergePreviewIntoDisplayTurns(
     seen.add(item.run_id);
     const hit = byKey.get(item.run_id);
     if (hit && hasRenderableBody(hit)) {
-      out.push(hit);
+      out.push(stampOutlineSeq(hit, item.seq));
       continue;
     }
     out.push(buildPreviewTurn(item));

@@ -68,14 +68,16 @@ describe("mergePreviewIntoDisplayTurns 轮序与预览条目", () => {
     expect(merged[1]!.output).toBe("");
   });
 
-  it("已加载真实轮透传原引用并落在大纲 seq 位置", () => {
+  it("已加载真实轮落在大纲 seq 位置（轮号盖章 defect-fixes：null→seq 产生新引用）", () => {
     const loaded = turn({ runId: "a", prompt: "用户消息", output: "agent 答复" });
     const ol = outline([
       outlineItem({ run_id: "a", seq: 1, prompt_summary: "大纲摘要（应被真实轮取代）" }),
       outlineItem({ run_id: "b", seq: 2 }),
     ]);
     const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
-    expect(merged[0]).toBe(loaded);
+    // turn: null → 盖章为 seq 1（新引用）；同 seq 重复派生保持同引用（盖章缓存）。
+    expect(merged[0]!.turn).toBe(1);
+    expect(mergePreviewIntoDisplayTurns(ol, [loaded])[0]).toBe(merged[0]);
     expect(merged[1]!.preview).toBeDefined();
   });
 });
@@ -119,14 +121,17 @@ describe("mergePreviewIntoDisplayTurns 原位替换与孤儿", () => {
 });
 
 describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
-  it("活跃轮（running 无内容）透传保留，不被预览卡取代", () => {
+  it("活跃轮（running 无内容）保留，不被预览卡取代（盖章对齐 seq）", () => {
     const running = turn({ runId: "a", status: "running" });
     const ol = outline([outlineItem({ run_id: "a", seq: 1 })]);
     const merged = mergePreviewIntoDisplayTurns(ol, [running]);
-    expect(merged[0]).toBe(running);
+    // defect-fixes：轮号盖章后非原引用（null→1），但「保留不替换」语义以内容判定。
+    expect(merged[0]!.status).toBe("running");
+    expect(merged[0]!.preview).toBeUndefined();
+    expect(merged[0]!.turn).toBe(1);
   });
 
-  it("失败轮（errorDetail 非空无 output）透传保留", () => {
+  it("失败轮（errorDetail 非空无 output）保留（盖章对齐 seq）", () => {
     const failed = turn({
       runId: "a",
       status: "failed",
@@ -134,7 +139,9 @@ describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
     });
     const ol = outline([outlineItem({ run_id: "a", seq: 1, status: "failed" })]);
     const merged = mergePreviewIntoDisplayTurns(ol, [failed]);
-    expect(merged[0]).toBe(failed);
+    expect(merged[0]!.errorDetail).toBeTruthy();
+    expect(merged[0]!.preview).toBeUndefined();
+    expect(merged[0]!.turn).toBe(1);
   });
 
   it("重入安全：已带 preview 的条目继续按大纲对齐不重复包皮", () => {
@@ -148,6 +155,31 @@ describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
     );
     expect(merged).toHaveLength(1);
     expect(merged[0]!.preview?.promptSummary).toBe("s");
+  });
+});
+
+describe("mergePreviewIntoDisplayTurns 轮号盖章（2026-10-14-session-preview-defect-fixes）", () => {
+  it("已加载块轮号与大纲 seq 不一致时盖章为 seq（logsToTurns 批次局部编号对齐权威轮序）", () => {
+    // 初始窗口末块批次局部编号 12，大纲权威 seq 3 → 盖成 3（RoundDivider 轮号修复）。
+    const loaded = turn({ runId: "a", turn: 12, prompt: "用户消息", output: "答复" });
+    const ol = outline([outlineItem({ run_id: "a", seq: 3 })]);
+    const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
+    expect(merged[0]!.turn).toBe(3);
+    expect(merged[0]).not.toBe(loaded); // 盖章产生新引用
+  });
+
+  it("盖章引用稳定：同输入重复派生保持同引用（不击穿 TurnRow memo）", () => {
+    const loaded = turn({ runId: "a", turn: 1, prompt: "用户消息", output: "答复" });
+    const ol = outline([outlineItem({ run_id: "a", seq: 7 })]);
+    const m1 = mergePreviewIntoDisplayTurns(ol, [loaded]);
+    const m2 = mergePreviewIntoDisplayTurns(ol, [loaded]);
+    expect(m2[0]).toBe(m1[0]);
+  });
+
+  it("轮号已一致时透传原引用（零克隆）", () => {
+    const ok = turn({ runId: "z", turn: 5, prompt: "x", output: "y" });
+    const ol = outline([outlineItem({ run_id: "z", seq: 5 })]);
+    expect(mergePreviewIntoDisplayTurns(ol, [ok])[0]).toBe(ok);
   });
 });
 

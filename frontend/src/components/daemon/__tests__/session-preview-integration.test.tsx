@@ -85,11 +85,11 @@ function Host({ sessionId }: { sessionId: string }) {
   );
 }
 
-async function attachSession(sessionId: string) {
+async function attachSession(sessionId: string, loadedMarker = /第3轮提问内容/) {
   render(<Host sessionId={sessionId} />);
-  // attach 完成：初始窗口（run-c 轮）已装配进消息流。
+  // attach 完成：初始窗口（run-c 轮）已装配进消息流（marker 随用例内 turnLogs seq 变化）。
   await waitFor(() =>
-    expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0),
+    expect(screen.getAllByText(loadedMarker).length).toBeGreaterThan(0),
   );
 }
 
@@ -170,5 +170,84 @@ describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
     await attachSession("s1");
     expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
     expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0);
+  });
+
+  it("defect-fixes：额度失败轮（仅 user_input 无答复）点导航原位展开用户消息，且重复点击不重复请求", async () => {
+    // 两轮大纲：run-x 失败轮（seq 1，日志只有 user_input——额度耗尽形态）；
+    // run-c 完整轮（seq 2，初始窗口内已加载）。
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-x", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "failed", prompt_summary: "失败轮提问" },
+        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+      ],
+    });
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-x") {
+          // 额度耗尽失败轮：只有 user_input，无任何答复行（旧口径被判零正文 → 点击无反应）。
+          return [
+            { id: "log-run-x-u", run_id: "run-x", timestamp: "2026-08-26T10:00:30.0Z", channel: "user_input", content_redacted: "失败轮的提问内容，等待额度恢复" },
+          ];
+        }
+        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
+        if (opts?.before) return [];
+        return turnLogs("run-c", 2, 10);
+      },
+    );
+    await attachSession("s1", /第2轮提问内容/);
+    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
+    const tickX = screen
+      .getAllByTestId("turn-nav-tick")
+      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
+    fireEvent.click(tickX!);
+    // 直达真实发起且块被放进来：用户消息上屏、预览卡消失（无双块）。
+    await waitFor(() =>
+      expect(screen.getAllByText(/失败轮的提问内容/).length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
+    // 已加载判定含 prompt：再次点击导航不重复发起直达。
+    const callsAfterFirst = runIdCalls().filter((r) => r === "run-x").length;
+    fireEvent.click(tickX!);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runIdCalls().filter((r) => r === "run-x").length).toBe(callsAfterFirst);
+  });
+
+  it("defect-fixes：真零正文轮（无 user_input 无答复）幂等语义不变——不展开不重复请求", async () => {
+    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
+      session_id: "s1",
+      total_turns: 2,
+      items: [
+        { run_id: "run-e", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: null },
+        { run_id: "run-c", seq: 2, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
+      ],
+    });
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      async (_sid: string, opts?: { runId?: string; before?: string }) => {
+        if (opts?.runId === "run-e") {
+          // 群聊空 user_input 形态：一条无关紧要的系统行，装配无 prompt 无 output。
+          return [
+            { id: "log-run-e-s", run_id: "run-e", timestamp: "2026-08-26T10:00:30.0Z", channel: "system", content_redacted: "" },
+          ];
+        }
+        if (opts?.runId === "run-c") return turnLogs("run-c", 2, 10);
+        if (opts?.before) return [];
+        return turnLogs("run-c", 2, 10);
+      },
+    );
+    await attachSession("s1", /第2轮提问内容/);
+    const tickE = screen
+      .getAllByTestId("turn-nav-tick")
+      .find((el) => el.getAttribute("aria-label")?.startsWith("第1轮"));
+    fireEvent.click(tickE!);
+    await waitFor(() => expect(runIdCalls()).toContain("run-e"));
+    await new Promise((r) => setTimeout(r, 300));
+    // 零正文：预览卡保持（无内容可展开），重复点击不重复请求（2026-09-29 语义）。
+    expect(screen.getAllByTestId("turn-preview-card")).toHaveLength(1);
+    const callsAfterFirst = runIdCalls().filter((r) => r === "run-e").length;
+    fireEvent.click(tickE!);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(runIdCalls().filter((r) => r === "run-e").length).toBe(callsAfterFirst);
   });
 });
