@@ -1,24 +1,26 @@
 ---
-author: flow-machine-draft
-created_at: 2026-10-14T07:02:14.045Z
+author: WhaleFall
+created_at: 2026-10-14 07:02:14
 ---
 # 设计记录（Design Record）— 2026-10-14-session-bottom-follow-insert
 
 ## 做法概述
 
-undefined
+根因：会话初始加载有两个异步源——日志窗口（贴底完成）与全量大纲（turn-outline）。大纲后到时归并层把 N 张预览卡插进列表中段：末轮不变、列表长度剧增；贴底跟随触发签名 lastSig（runId:outputLen:status）不含长度 → 不触发滚动，且 2.5s 高度重申窗口已过 → 视口绝对位置不动、内容被推下，停在倒数第几轮（时序依赖故偶发）。
+
+修法（单行签名扩展）：turn-timeline.tsx [turns] effect 的 lastSig 补 turns.length 分量——中段/尾部插入（预览卡、孤儿补建、预取装配）与末轮变化同权触发贴底（仅当用户在底部）。为什么不选「outline 到达主动滚」：滚动收敛在 TurnTimeline 单点（prepend 锚定/重申窗/守卫链都在这里），page 层再起一条滚动路径会双写竞态。三道既有守卫（isPrepend 早退+3s 静默窗 / isNearBottomRef / suppressFollowBottom）原样保留，翻页与跳转行为不变。
 
 ## 接口契约
 
-undefined
+无接口/导出签名变化；行为变化仅一处：TurnTimeline 贴底跟随的触发条件在「末轮变化」之外增加「列表长度变化且用户贴底」——对消费方透明（组件内部滚动行为）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
-undefined
-undefined
-undefined
-undefined
+1. 乱序/迟到到达：大纲先于日志到达——末轮首现（lastSig null→值）照常触发贴底（既有路径）；大纲后到——本修复的 length 分量触发；两者均在 2.5s 重申窗内到达——重申循环兜底。三时序全覆盖。
+2. 并发写：滚动仍收敛单 effect（React 提交序），无并发滚动路径；预取多块同刻落地=多次 turns 提交，各次独立判定（幂等 scrollTo 到底，多次无害）。
+3. 切换/生命周期：换会话时 lastSigRef/firstTurnKeyRef 既有重置链随组件状态自然重建（refs 组件级）；贴底滚动无持久副作用。
+4. 作用域：签名与滚动均为组件内局部状态，无跨会话/跨仓面。
 
 ## 风险与死路
 
-undefined
+最大风险：既有测试若显式断言「末轮不变长度变不滚动」会回归——已跑贴底/翻页/竞态/跳转 6 文件 77 例 + preview 三件套 27 例全绿，证实无此断言面。放弃方案：①延长/重启重申窗口至大纲到达——治标且时序敏感（大纲无到达信号）；②page 层 outline effect 主动滚底——绕开 TurnTimeline 守卫链（prepend 静默窗不知情），有上拉弹回回归风险。
