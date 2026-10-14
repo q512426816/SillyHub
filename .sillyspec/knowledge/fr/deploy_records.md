@@ -1,13 +1,13 @@
 ---
 author: sillyspec-fr-index
-created_at: 2026-10-14T22:52:28.436Z
+created_at: 2026-10-14T22:53:03.772Z
 ---
 
-# FR 索引 — auto-backend
+# FR 索引 — deploy_records
 
 > fr-index 从归档变更 requirements.md 幂等提炼（「最近确认」= 归档时 HEAD）。条目字段行为机械解析契约，勿手改。
 > superseded 条目保留供取代链回溯；brainstorm 注入默认只给 active。
-> 伪域（auto- 前缀）：由文件路径段投票派生，无模块卡——为该域补模块卡后，新变更将自动落回真域
+> 模块卡：modules/deploy_records.md（域=模块 id 同构；行为条目↔模块契约互跳）
 
 ## FR-auto-backend-224 _iter_files 读文件容错扩为捕获 (OSError, UnicodeDecodeError)，坏编码文件降级为 invalid 条目（parse_error 与读失败同口径）
 变更：2026-10-15-deploy-records-unicode-tolerance
