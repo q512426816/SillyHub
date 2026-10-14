@@ -207,6 +207,46 @@ async def test_invalid_variants_tolerated(db_session, tmp_path) -> None:
     assert [i.file_name for i in items] == sorted([i.file_name for i in items], reverse=True)
 
 
+async def test_non_utf8_file_degrades_to_invalid(db_session, tmp_path) -> None:
+    """非 UTF-8（GBK）文件 → invalid 容错条目，不炸整表/详情（FR-04 编码缺口）。
+
+    change 2026-10-15-deploy-records-unicode-tolerance：UnicodeDecodeError 是
+    ValueError 子类、不被 except OSError 捕获——修复前本用例因解码异常穿透
+    _iter_files 使 list_records 抛错而失败（先红后绿）。
+    """
+    root = _make_ws_dir(tmp_path, "ws_gbk", {"2026-10-15-001-ok.md": VALID_MD})
+    # GBK 字节 + 显式非法 UTF-8 序列：双保险保证 read_text("utf-8") 必抛 UnicodeDecodeError
+    (root / "docs" / "releases" / "2026-10-15-002-gbk.md").write_bytes(
+        "中文发布记录".encode("gbk") + b"\xff\xfe"
+    )
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="ws-gbk",
+        slug=f"ws-gbk-{uuid.uuid4().hex[:6]}",
+        root_path=str(root),
+        type="other",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    svc = DeployRecordService(db_session)
+
+    # 列表：GBK 条目降级 invalid，合法条目不受影响（修复前此处抛 UnicodeDecodeError）
+    items = await svc.list_records()
+    assert len(items) == 2
+    gbk = next(i for i in items if i.file_name == "2026-10-15-002-gbk.md")
+    assert gbk.status == "invalid"
+    assert gbk.deployed_at is None
+    assert gbk.summary  # 固定「记录文件格式异常…」文案非空
+    ok = next(i for i in items if i.file_name == "2026-10-15-001-ok.md")
+    assert ok.status == "success"
+    assert ok.seq == 2
+
+    # 详情：invalid 可读不抛错（content 为空串）
+    detail = await svc.get_record(f"{ws.id}/2026-10-15-002-gbk")
+    assert detail.status == "invalid"
+    assert detail.content == ""
+
+
 # ── get_record ───────────────────────────────────────────────────────
 
 
