@@ -1,0 +1,156 @@
+{
+  "change": "2026-10-14-files-refresh-explicit-sync",
+  "baseline": "c6f6bc50bf3ea5e171ef1c58b43d08d6699141c3",
+  "head": "ad6092e1d840f53234c244e563561146d5a86627",
+  "files": [
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/tests/test_files_refresh_sync.py",
+    "backend/openapi.json",
+    "docs/sillyspec/finished/flow-done-design-question-line-injection.md",
+    "docs/sillyspec/finished/flow-dynamic-subset-root-scripts-path.md",
+    "docs/sillyspec/finished/thin-upgrade-stale-stage-window.md",
+    "frontend/src/components/change-file-tree.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/change-files.ts"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 124,
+    "deletions": 34
+  },
+  "savedAt": "2026-10-14T00:57:43.773Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "c6f6bc50bf3ea5e171ef1c58b43d08d6699141c3",
+    "totals": {
+      "files": 9,
+      "additions": 124,
+      "deletions": 34
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/change/router.py",
+        "additions": 16,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "additions": 29,
+        "deletions": 14,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 13,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/flow-done-design-question-line-injection.md",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/flow-dynamic-subset-root-scripts-path.md",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/thin-upgrade-stale-stage-window.md",
+        "additions": 12,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/change-file-tree.tsx",
+        "additions": 7,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 9,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/change-files.ts",
+        "additions": 11,
+        "deletions": 2,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "ff9abb4998689fc383e5f8cb4ab9f2bd08418dea3c989879f10fbb91caa2f6de",
+  "patchStatus": "ok"
+}
