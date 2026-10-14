@@ -1,0 +1,212 @@
+{
+  "change": "2026-10-14-change-center-lineage-tag-and-filter",
+  "baseline": "504996fabb069a57836d558c7314fe9a4cc2416f",
+  "head": "56e0e5c338e5c327a8683802f90b38dc925ee9f4",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/frontend_app.changelog.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/service.py",
+    "backend/app/modules/change/tests/test_change_lineage_filter.py",
+    "backend/openapi.json",
+    "docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+    "frontend/src/components/mobile/mobile-change-card.test.tsx",
+    "frontend/src/components/mobile/mobile-change-card.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/changes.ts"
+  ],
+  "totals": {
+    "files": 16,
+    "additions": 630,
+    "deletions": 12
+  },
+  "savedAt": "2026-10-14T03:18:20.037Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 3,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 8,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "504996fabb069a57836d558c7314fe9a4cc2416f",
+    "totals": {
+      "files": 16,
+      "additions": 630,
+      "deletions": 12
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_app.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/router.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/service.py",
+        "additions": 76,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_change_lineage_filter.py",
+        "additions": 286,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md",
+        "additions": 6,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "additions": 66,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx",
+        "additions": 43,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx",
+        "additions": 32,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/changes/page.tsx",
+        "additions": 50,
+        "deletions": 4,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-card.test.tsx",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/mobile/mobile-change-card.tsx",
+        "additions": 17,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/lib/changes.ts",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fa072c9de02594fe4e2d5e4675b4f5c8f93e2d376f199a6c7d456ee0ddd4b97f",
+  "patchStatus": "ok"
+}

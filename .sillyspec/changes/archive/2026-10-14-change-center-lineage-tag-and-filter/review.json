@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-change-center-lineage-tag-and-filter",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "56e0e5c338e5c327a8683802f90b38dc925ee9f4",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——沿前轮结论：集合每请求现算无缓存，progress 迟到只影响后续请求；修复 diff 未触碰该面",
+    "并发": "ok——沿前轮结论：纯只读路径，同 session 先后执行；修复 diff 未触碰该面",
+    "切换": "ok——design.md 切换问作答已更新为「deleted 行不进 thin 集合（对齐 enrich continue 语义，投影恒 False 渲染完整标签），归档三源并集兜底行参与 full 分类」（56e0e5c33），与修复后实现（service.py _resolve_thin_lineage_keys deleted 行 continue）及新回归测试断言完全一致",
+    "作用域": "ok——沿前轮结论：thin 集合按 workspace_id 收集、change_key 工作区内唯一；修复 diff 未触碰该面"
+  },
+  "boundaryRulings": {
+    "无缓存 v1 量级对齐 pending 先例": "可接受（沿前轮，无新证据）",
+    "deleted 行不进 thin 集合（对齐 enrich continue 语义，修复后新边界）": "可接受——修复后两口径一致：enrich 对 deleted 行 is_thin 恒 False，集合计算不再判定 deleted 行，归档三源并集③行落 full 且渲染「完整」，标签与筛选不分裂，新测试三方锁定",
+    "缺省/未知值不过滤（对齐 sort fallback）": "可接受（沿前轮）",
+    "前端 is_thin!==true 防御归入完整": "可接受（沿前轮）",
+    "移动端 LINEAGE_OPTIONS 桌面同值副本、模块私有内联": "可接受（沿前轮）",
+    "FR-07 生成产物无独立测试面（执行时验证）": "可接受（沿前轮；修复提交未动 router/schema/openapi/api-types，无漂移）"
+  },
+  "reviewedAt": "2026-10-14T11:19:30+08:00",
+  "reReview": {
+    "priorFindings": [
+      {
+        "priorSeverity": "P1",
+        "title": "deleted 行 lineage 判定与 is_thin 投影口径分裂",
+        "fixed": true,
+        "verification": "service.py _resolve_thin_lineage_keys deleted 行改为 continue 不进集合（新文件约 :2600-2601，docstring 同步改写），与 enrich_summaries 的 continue-before-is_thin 语义逐行对齐；新回归测试 test_change_lineage_filter.py「test_lineage_deleted_rows_never_thin_matches_is_thin_projection」以 deleted+archived+change_type=quick 墓碑行做三方断言：location=archive 下 lineage=thin 空集（total 0）、lineage=full 含该行（total 1）、无过滤时行经三源并集③可见且 enrich 投影 is_thin=False。独立核对实现：三源并集③（service.py:254-263，未改动）保证该行归档 tab 可见性，continue 使其落 full、渲染「完整」标签——分类与标签一致，无回归",
+        "location": "backend/app/modules/change/service.py:2598-2614 + backend/app/modules/change/tests/test_change_lineage_filter.py:251-286"
+      },
+      {
+        "priorSeverity": "P3",
+        "title": "list_ 注释与实现不一致（full 空集合「跳过 where」未实现）",
+        "fixed": true,
+        "verification": "full 分支改 `elif thin_keys:` 显式空集跳过，注释同步为「thin 空集已上方短路；full 空集显式跳过 where（NOT IN 空集恒真，免依赖方言空集展开行为）」——注释与实现一致；行为等价（空集 NOT IN 恒真），原覆盖测试 test_lineage_unknown_value_ignored_and_full_with_empty_set 未动仍有效",
+        "location": "backend/app/modules/change/service.py:289-297"
+      },
+      {
+        "priorSeverity": "P3",
+        "title": "桌面标签测试「可区分」断言恒真",
+        "fixed": true,
+        "verification": "page.test.tsx 改为断言 fullBadge.style.color 含 var(--muted-foreground)、thinBadge.style.color 含 var(--warning)、二者不等；独立核对 StateLabel VARIANT_STYLE：attention fg=hsl(var(--warning))（state-label.tsx:53-57）、neutral fg=hsl(var(--muted-foreground))（state-label.tsx:68-71）——断言 token 与组件实现吻合，无误绿路径（token 不符只会红）",
+        "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx:940-948"
+      }
+    ],
+    "newRiskScan": "修复 diff（3364130..56e0e5c33，扣除无关提交 cb3caa798）仅触碰 service.py 两处、lineage 测试文件、page.test.tsx、design.md：deleted 行 continue 与 enrich 恒 False 全域一致（deleted 行 thin/full/无过滤三向均与标签一致）；elif 空集跳过与 NOT IN 空集恒真行为等价——无新增 P1/P2 风险面",
+    "artifactSync": "修复提交不含 router/schema/openapi.json/api-types.ts（git diff --stat 证实），生成物无漂移，无需再生成"
+  }
+}
