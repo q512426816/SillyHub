@@ -87,3 +87,4 @@
 | 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |
 | 2026-10-13 | 2026-10-14-ci-flaky-probe-mock | 动机：frontend-ci 在 d850b45fe 仍红——session-history-scroll「连续 bef |
 | 2026-10-13 | 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess |
+| 2026-10-14 | 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主 |

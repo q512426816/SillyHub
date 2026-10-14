@@ -245,3 +245,88 @@ created_at: 2026-09-29T09:40:28.972Z
 - 场景：主路径 — Given 新增 TimelineView/PatchTreeView 与中文名映射；When 运行聚焦测试文件；Then 全部通过且既有用例无回归。
 全文：.sillyspec/changes/archive/2026-10-13-change-files-view-polish/requirements.md#FR-05
 最近确认：b6df42cbc8653f688b25f861a5c203e191486d50
+
+## FR-components-changes-013 GET files 默认（不带 sync 参数）为纯读：不触发 daemon 同步、直接返回平台镜像数据，响应语义与现状一致
+变更：2026-10-14-files-refresh-explicit-sync
+状态：active
+摘要：默认纯读零同步
+场景正文：
+- 场景：默认纯读零同步 — Given 当前用户工作区已绑定 daemon 且在线；When 请求 GET files（不带 sync 参数）；Then daemon RPC 通道零调用，响应 200 且 items 为平台镜像现有内容
+全文：.sillyspec/changes/archive/2026-10-14-files-refresh-explicit-sync/requirements.md#FR-01
+最近确认：42704a75aad01b355dbe090f0562ddc95090d094
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-01
+  tests: backend/app/modules/change/tests/test_files_refresh_sync.py「test_default_read_only_skips_sync」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-files-refresh-explicit-sync
+  status: active
+
+## FR-components-changes-014 显式 sync=1（前端刷新按钮点击、错误重试）才触发 daemon 定向上行同步，等待预算从 15s 降到 3s，超时静默降级返回现有镜像数据
+变更：2026-10-14-files-refresh-explicit-sync
+状态：active
+摘要：点击刷新触发同步；超时降级
+场景正文：
+- 场景：点击刷新触发同步 — Given 绑定 daemon 在线；When 请求 GET files?sync=1；Then 先向该 daemon 发送 sillyspec_sync_change RPC（timeout=3.0），同步完成后返回新鲜清单
+- 场景：超时降级 — Given 绑定 daemon 在线但同步超过 3s 预算；When 请求 GET files?sync=1；Then RPC 超时被静默消化，响应 200 返回现有镜像数据（CLI 后台跑完，daemon 防抖 15s 内再点秒回新数据）
+全文：.sillyspec/changes/archive/2026-10-14-files-refresh-explicit-sync/requirements.md#FR-02
+最近确认：42704a75aad01b355dbe090f0562ddc95090d094
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-02
+  tests: backend/app/modules/change/tests/test_files_refresh_sync.py「test_binding_without_daemon_id_skips_sync」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_daemon_offline_skips_sync」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_no_binding_skips_sync」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_online_triggers_sync_before_list」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_rpc_remote_error_degrades_old_daemon」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_rpc_timeout_degrades」 | backend/app/modules/change/tests/test_files_refresh_sync.py「test_runtime_offline_degrades」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-files-refresh-explicit-sync
+  status: active
+
+## FR-components-changes-015 悬浮面板 autoRefreshMs 轮询、初始挂载加载、保存后刷新均不带 sync（不触发同步）
+变更：2026-10-14-files-refresh-explicit-sync
+状态：active
+摘要：轮询零同步
+场景正文：
+- 场景：轮询零同步 — Given 悬浮面板开着（autoRefreshMs=15000 轮询中）；When 定时器触发 refreshTree；Then 发出的 GET files 不带 sync 参数（纯读，零 daemon 开销）
+全文：.sillyspec/changes/archive/2026-10-14-files-refresh-explicit-sync/requirements.md#FR-03
+最近确认：42704a75aad01b355dbe090f0562ddc95090d094
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-03
+  tests: frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「初始挂载与 autoRefresh 轮询：listChangeFiles 无 sync 选项（纯读，零 daemon 开销）」 | frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击「刷新」 | frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-files-refresh-explicit-sync
+  status: active
+
+## FR-components-changes-016 backend/daemon typecheck + 聚焦测试全绿，api-types 经 gen:types 再生成
+变更：2026-10-14-files-refresh-explicit-sync
+状态：active
+摘要：静态与测试门
+场景正文：
+- 场景：静态与测试门 — Given 全部代码改动落盘；When 跑 lint/typecheck/聚焦测试与 gen:types
+全文：.sillyspec/changes/archive/2026-10-14-files-refresh-explicit-sync/requirements.md#FR-04
+最近确认：42704a75aad01b355dbe090f0562ddc95090d094
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-04
+  tests: backend/app/modules/change/tests/test_files_router.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-files-refresh-explicit-sync
+  status: active

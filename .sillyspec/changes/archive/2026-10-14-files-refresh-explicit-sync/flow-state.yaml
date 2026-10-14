@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主动读取也周期性触发 daemon CLI
+  同步并阻塞请求，用户感知为页面一直慢；用户明确要求只有页面上点击「刷新」按钮才触发 CLI 同步，其它一切读取直接秒回平台现有镜像数据。
+
+  成功标准：
+
+  - GET files 默认（不带 sync 参数）为纯读：不触发 daemon 同步、直接返回平台镜像数据，响应语义与现状一致
+
+  - 显式 sync=1（前端刷新按钮点击、错误重试）才触发 daemon 定向上行同步，等待预算从 15s 降到 3s，超时静默降级返回现有镜像数据
+
+  - 悬浮面板 autoRefreshMs 轮询、初始挂载加载、保存后刷新均不带 sync（不触发同步）
+
+  - backend/daemon typecheck + 聚焦测试全绿，api-types 经 gen:types 再生成
+autopilot: false
+prestage_ack: true
+baseline_commit: c6f6bc50bf3ea5e171ef1c58b43d08d6699141c3
+updatedAt: '2026-10-14T01:08:36.983Z'
+cross_baselines:
+  sillyspec: 90ad45f222f0cfc20a0a9b015013d24a45825cf9
+baseline_sha256: 73571c01ad5de0b27bb2ac77d167472f4e7a824b68b532663a4b62d37b2ab2ce
+spec_approved: true
+spec_approved_at: '2026-10-14T00:50:49.510Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py33+jsx43)+fr(75)（286.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014005714\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（27.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014005714\test-result.json｜门文件
+  9 个
+

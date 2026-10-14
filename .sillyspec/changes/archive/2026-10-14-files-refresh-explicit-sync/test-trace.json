@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-files-refresh-explicit-sync",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_default_read_only_skips_sync」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-files-refresh-explicit-sync"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_binding_without_daemon_id_skips_sync」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_daemon_offline_skips_sync」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_no_binding_skips_sync」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_online_triggers_sync_before_list」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_rpc_remote_error_degrades_old_daemon」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_rpc_timeout_degrades」",
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_runtime_offline_degrades」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-files-refresh-explicit-sync"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「初始挂载与 autoRefresh 轮询：listChangeFiles 无 sync 选项（纯读，零 daemon 开销）」",
+        "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx「点击「刷新」",
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-files-refresh-explicit-sync"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-files-refresh-explicit-sync:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_router.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-files-refresh-explicit-sync"
+    }
+  ]
+}

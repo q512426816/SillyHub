@@ -20,3 +20,4 @@ created_at: 2026-08-29 22:56:30
 - 2026-10-13-anchor-mismatch-fix | 动机：轮级打锚的「轮归开始时上下文」语义在「整个变更的生命周期发生在单轮内」时产生错配——该轮全部 sillyspec 
 - 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-
 - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
+- 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主
