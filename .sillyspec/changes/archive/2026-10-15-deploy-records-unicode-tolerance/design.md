@@ -6,9 +6,13 @@ created_at: 2026-10-14T22:44:58.994Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 把 `backend/app/modules/deploy_records/service.py` `_iter_files` 读文件的 `except OSError` 扩为 `except (OSError, UnicodeDecodeError)`。依据：Python 异常层级中 `UnicodeDecodeError` 继承 `ValueError` 而非 `OSError`，`read_text(encoding="utf-8")` 解码失败时现状穿透 except 直接把 `GET /api/deploy-records` 打成 500，而该行注释声称「权限/编码等按 invalid 容错」——注释与实现不一致（2026-10-15 24h 风险审查发现）。扩异常元组是最小改动：降级产物复用既有 invalid 分支（`parse_error="file read error"`），解析器、排序、schema、路由零改动。不选 `read_bytes` + 手动 try decode——双份解码逻辑复杂度不值；也不只在 skill 写入侧强制 utf-8——治不了存量坏文件与人工手写文件，服务端容错是 FR-04 的兜底承诺。
 
 ## 接口契约
+
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
 无对外签名 / 端点 / 文件格式变化。行为变化仅一处：`DeployRecordService.list_records` / `get_record` 对含非 UTF-8 字节的 docs/releases/*.md 从抛未捕获异常（HTTP 500，整页不可用）降级为 `status=invalid`、`summary=记录文件格式异常（frontmatter 缺失或不合规）`、`deployed_at=None` 的条目，详情 `content=""`。schema / 路由 / 迁移零改动。
 
@@ -24,6 +28,8 @@ created_at: 2026-10-14T22:44:58.994Z
    答：影响面限于各 workspace 自身 docs/releases/*.md 的读取容错；invalid 条目仍归属原 workspace（record_id 前缀 = workspace_id 不变），聚合排序口径不变，不串台。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
 

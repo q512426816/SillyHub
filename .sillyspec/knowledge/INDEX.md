@@ -204,3 +204,4 @@
 ||||||| C:/Users/12532/AppData/Local/Temp/d.base
 - lib-agent|FR|需求|承接 → [fr/lib-agent.md](fr/lib-agent.md)
 - agent|FR|需求|承接 → [fr/agent.md](fr/agent.md)
+- auto-backend|backend|FR|需求|承接 → [fr/auto-backend.md](fr/auto-backend.md)

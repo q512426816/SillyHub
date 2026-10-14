@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-deploy-records-unicode-tolerance",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "0be62452fe632468de914f08c87d58d829b47765",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "change.patch 冻结面混入 4 个本变更范围外的前端文档 hunk",
+      "evidence": "change.patch 前 85 行为 .sillyspec/docs/frontend/modules/ 下 components-shared/lib-api/lib-health/lib-menu-permissions 的 diff，内容均属 2026-10-14-admin-server-status（已随 0be62452f 入库），而 design.md 文件变更清单只声明 service.py + test_service.py 两处——冻结件生成基线落后于评审 HEAD；代码事实已按工作区实态与 git（c1b59fd40 先红测试 + 67d06cd77 修复，均为 0be62452f 祖先）核对无误，无数据正确性风险。",
+      "location": ".sillyspec/changes/2026-10-15-deploy-records-unicode-tolerance/change.patch:1-85"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-15T06:52:04+08:00"
+}

@@ -1,0 +1,105 @@
+{
+  "change": "2026-10-15-deploy-records-unicode-tolerance",
+  "baseline": "73e881ba50376b5e2d279b720dca332b3630d285",
+  "head": "0be62452fe632468de914f08c87d58d829b47765",
+  "files": [
+    ".sillyspec/docs/frontend/modules/components-shared.md",
+    ".sillyspec/docs/frontend/modules/lib-api.md",
+    ".sillyspec/docs/frontend/modules/lib-health.md",
+    ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+    "backend/app/modules/deploy_records/service.py",
+    "backend/app/modules/deploy_records/tests/test_service.py"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 62,
+    "deletions": 18
+  },
+  "savedAt": "2026-10-14T22:49:47.866Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "backend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "73e881ba50376b5e2d279b720dca332b3630d285",
+    "totals": {
+      "files": 6,
+      "additions": 62,
+      "deletions": 18
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/frontend/modules/components-shared.md",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/lib-api.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/lib-health.md",
+        "additions": 13,
+        "deletions": 14,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/frontend/modules/lib-menu-permissions.md",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/service.py",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/tests/test_service.py",
+        "additions": 40,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "b075530e4192f9a8423f2e792a26cc226c9cba765d84e64f3bf3a0244ad5d1da",
+  "patchStatus": "ok"
+}
