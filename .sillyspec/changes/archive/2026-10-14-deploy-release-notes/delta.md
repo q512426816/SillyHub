@@ -1,5 +1,5 @@
 ---
-generated_at: 2026-10-14T06:01:53.894Z
+generated_at: 2026-10-14T06:08:05.565Z
 sources_reconcile: 命中（ran_at=2026-10-14T05:52:15.865Z，verify-runs 按 change 过滤取最新）
 sources_verify_facts: 命中
 sources_module_map: 命中

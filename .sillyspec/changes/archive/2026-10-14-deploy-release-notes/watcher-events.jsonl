@@ -1,0 +1,64 @@
+{"ts":1791948309340,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1791949212113,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1791949618830,"kind":"gate-run","stage":"verify","detail":"门实测 passed（319.6s） · 20261014034658","provisional":true}
+{"ts":1791949636383,"kind":"verify","stage":"verify","detail":"质量扫描记录出现","provisional":true}
+{"ts":1791949990193,"kind":"gate-run","stage":"verify","detail":"门实测 passed（297.2s） · 20261014035309","provisional":true}
+{"ts":1791950000645,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791950021222,"kind":"commit","stage":null,"detail":"6b049c023","provisional":true}
+{"ts":1791950158865,"kind":"commit","stage":null,"detail":"ade4a7e3f","provisional":true}
+{"ts":1791950329648,"kind":"gate-run","stage":"verify","detail":"门实测 passed（309.4s） · 20261014035846","provisional":true}
+{"ts":1791950348589,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791950725409,"kind":"gate-run","stage":"verify","detail":"门实测 passed（344.3s） · 20261014040524","provisional":true}
+{"ts":1791950736012,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791950947820,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/docker-compose.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791950957991,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/docker-compose.dev.yml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791950961476,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：deploy/litellm-config.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791951014814,"kind":"commit","stage":null,"detail":"6c490325f","provisional":true}
+{"ts":1791951051397,"kind":"commit","stage":null,"detail":"ab87d6adb","provisional":true}
+{"ts":1791951058207,"kind":"gate-run","stage":"verify","detail":"门实测 passed（285.3s） · 20261014041057","provisional":true}
+{"ts":1791951068425,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1791951088979,"kind":"file","stage":"verify","detail":"verify-result.md 出现","provisional":true}
+{"ts":1791951300054,"kind":"commit","stage":null,"detail":"01c45807a","provisional":true}
+{"ts":1791951441448,"kind":"gate-run","stage":"verify","detail":"门实测 passed（269.4s） · 20261014041719","provisional":true}
+{"ts":1791951464970,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791951519171,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791951786835,"kind":"gate-run","stage":"verify","detail":"门实测 passed（265.0s） · 20261014042305","provisional":true}
+{"ts":1791952108535,"kind":"gate-run","stage":"verify","detail":"门实测 passed（264.2s） · 20261014042826","provisional":true}
+{"ts":1791952132094,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791952415978,"kind":"gate-run","stage":"verify","detail":"门实测 passed（263.3s） · 20261014043334","provisional":true}
+{"ts":1791952452947,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791952463108,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791952757899,"kind":"gate-run","stage":"verify","detail":"门实测 passed（276.9s） · 20261014043918","provisional":true}
+{"ts":1791952788325,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791952904878,"kind":"file-update","stage":"tasks","detail":"tasks/task-01.md 内容变更","provisional":true}
+{"ts":1791952904878,"kind":"file-update","stage":"tasks","detail":"tasks/task-02.md 内容变更","provisional":true}
+{"ts":1791952934543,"kind":"file-update","stage":"tasks","detail":"tasks/task-05.md 内容变更","provisional":true}
+{"ts":1791953096215,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791953157441,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791953181186,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791953468105,"kind":"gate-run","stage":"verify","detail":"门实测 passed（279.9s） · 20261014045107","provisional":true}
+{"ts":1791953498671,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791953778839,"kind":"gate-run","stage":"verify","detail":"门实测 passed（276.7s） · 20261014045618","provisional":true}
+{"ts":1791953805740,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791954194434,"kind":"gate-run","stage":"verify","detail":"门实测 passed（387.8s） · 20261014050314","provisional":true}
+{"ts":1791954241883,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791954558083,"kind":"gate-run","stage":"verify","detail":"门实测 passed（310.0s） · 20261014050915","provisional":true}
+{"ts":1791954603223,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791954968227,"kind":"gate-run","stage":"verify","detail":"门实测 passed（354.3s） · 20261014051605","provisional":true}
+{"ts":1791955361439,"kind":"gate-run","stage":"verify","detail":"门实测 passed（336.3s） · 20261014052241","provisional":true}
+{"ts":1791955391713,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791955666878,"kind":"gate-run","stage":"verify","detail":"门实测 passed（266.0s） · 20261014052744","provisional":true}
+{"ts":1791955730425,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791956013027,"kind":"gate-run","stage":"verify","detail":"门实测 passed（281.2s） · 20261014053332","provisional":true}
+{"ts":1791956060162,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791956351815,"kind":"gate-run","stage":"verify","detail":"门实测 passed（282.0s） · 20261014053910","provisional":true}
+{"ts":1791956415449,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1791956947084,"kind":"gate-run","stage":"verify","detail":"门实测 passed（527.3s） · 20261014054905","provisional":true}
+{"ts":1791957449670,"kind":"gate-run","stage":"verify","detail":"门实测 passed（299.6s） · 20261014055728","provisional":true}
+{"ts":1791957524678,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1791957654062,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1791957654840,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/docs/multi-agent-platform/modules/_module-map.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791957737525,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791957804138,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/deploy_records/tests/__init__.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1791957905214,"kind":"commit","stage":null,"detail":"26a6ea023","provisional":true}
+{"ts":1791957940102,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：ackend/openapi.json——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
