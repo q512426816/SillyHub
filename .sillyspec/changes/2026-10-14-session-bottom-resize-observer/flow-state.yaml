@@ -1,6 +1,7 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -25,7 +26,7 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: 9b3a27df4a7c801749bed0325bba41525d6f017a
-updatedAt: '2026-10-14T12:49:12.928Z'
+updatedAt: '2026-10-14T12:49:37.057Z'
 baseline_sha256: 4ec83cae35c87259880f43d380cf7e794cf18908423e67cfb803855e4710e6ef
 spec_approved: true
 spec_approved_at: '2026-10-14T12:49:12.928Z'

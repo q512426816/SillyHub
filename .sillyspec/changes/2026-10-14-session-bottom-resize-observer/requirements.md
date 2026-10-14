@@ -48,7 +48,7 @@ created_at: 2026-10-14T12:28:03.940Z
 
 ### FR-06: 既有测试面复跑绿 + tsc 0
 
-- （待撰写：把本条成功标准改写为一句可判定的行为规定并标约束强度——必须/禁止/SHOULD/可以）
+- 必须：审查 P2 补口——turns 空态（length=0）→非空翻转时 ResizeObserver 观察集合重快照（冷加载首挂空态 div 被内容容器替换后新容器必须落入观察，禁止死观测盲区）。
 
 #### 场景：主路径
 
@@ -61,4 +61,4 @@ FR-02: frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx（
 FR-03: 代码走查（rAF 合帧句柄去重 + cleanup 取消；turn-timeline.tsx ResizeObserver effect 段）
 FR-04: vitest 全套在 jsdom（无 ResizeObserver）跑通即降级路径实证（96 例绿无抛错）
 FR-05: vitest 定向 6 文件 96 例全绿 + tsc 0（/tmp/vitest-ro.log）+ 真浏览器注入对照
-FR-06: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-06: 真浏览器冷加载注入取证（部署后：settled delta=0 + 注入 2000px 后 delta=0）；effect deps [hasTurns] 代码锚 turn-timeline.tsx ResizeObserver effect 段
