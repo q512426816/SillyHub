@@ -18,7 +18,7 @@ vi.mock("@/components/files/file-preview-modal", () => ({
   FilePreviewModal: () => null,
 }));
 
-import { render } from "@testing-library/react";
+import { render, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { ChangeFileTree } from "@/components/change-file-tree";
@@ -114,5 +114,45 @@ describe("ChangeFileTree autoRefreshMs（2026-10-13-session-change-files-hover t
     const atUnmount = mockedList.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(mockedList.mock.calls.length).toBe(atUnmount);
+  });
+});
+
+// 2026-10-14-files-refresh-explicit-sync：sync 触发面收窄——初始挂载/autoRefresh
+// 轮询必须无参调用 listChangeFiles（纯读，URL 不带 sync）；按钮点击路径
+// refreshTree(true)→"?sync=1" 用 fireEvent 点「刷新」按钮断言。
+describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync）", () => {
+  it("初始挂载与 autoRefresh 轮询：listChangeFiles 无 sync 选项（纯读，零 daemon 开销）", async () => {
+    vi.useFakeTimers();
+    mockedList.mockResolvedValue(fileResp());
+    mockedPending.mockResolvedValue({ items: [] });
+
+    renderTree(<ChangeFileTree workspaceId="ws-1" changeId="chg-1" autoRefreshMs={15000} />);
+    await flushInitialLoad();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const calls = mockedList.mock.calls;
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // 每一次调用（挂载 + 轮询）第三参 options 都不得带 sync
+    for (const call of calls) {
+      const options = call[2] as { sync?: boolean } | undefined;
+      expect(options?.sync).toBeFalsy();
+    }
+  });
+
+  it("点击「刷新」按钮：listChangeFiles 以 sync:true 调用（触发 daemon 同步）", async () => {
+    vi.useFakeTimers();
+    mockedList.mockResolvedValue(fileResp());
+    mockedPending.mockResolvedValue({ items: [] });
+
+    const { getByText } = renderTree(
+      <ChangeFileTree workspaceId="ws-1" changeId="chg-1" />,
+    );
+    await flushInitialLoad();
+    mockedList.mockClear();
+
+    fireEvent.click(getByText("刷新"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockedList).toHaveBeenCalledTimes(1);
+    expect(mockedList.mock.calls[0][2]).toMatchObject({ sync: true });
   });
 });
