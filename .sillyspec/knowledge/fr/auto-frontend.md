@@ -2674,3 +2674,84 @@ created_at: 2026-10-08T03:33:17.438Z
   confirmed_at: null
   source_change: 2026-10-14-session-preview-defect-fixes
   status: active
+
+## FR-auto-frontend-230 大纲后到（中段插入预览卡/孤儿补建尾部追加）且用户贴底时，视口跟随滚到底（保持所见内容不变）
+变更：2026-10-14-session-bottom-follow-insert
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 会话初始日志窗口已贴底、用户位于底部；When 全量大纲后到使归并层在中段插入预览条目（末轮不变、列表长度+1）；Then 视口自动滚到底部（导航 active 与消息流末轮一致），高度重申窗口重启
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-01
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+
+## FR-auto-frontend-231 触顶翻页 prepend 不被误触发贴底（isPrepend 早退 + 3s 静默窗既有守卫不变）
+变更：2026-10-14-session-bottom-follow-insert
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 用户上拉触发「加载更早」翻页（列表长度+1、首轮身份变化）；When prepend 落地后任意 turns 提交；Then 不发生贴底滚动（上拉读历史不被弹回最新轮，既有行为保持）
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-02
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-follow-insert:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-follow-insert
+  status: active
+
+## FR-auto-frontend-232 用户上滚读历史时中段插入不强拉底部（isNearBottomRef 守卫不变）
+变更：2026-10-14-session-bottom-follow-insert
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 用户上拉触发「加载更早」翻页（列表长度+1、首轮身份变化）；When prepend 落地后任意 turns 提交；Then 不发生贴底滚动（上拉读历史不被弹回最新轮，既有行为保持）
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-03
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-follow-insert:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-panel-history-race.test.tsx | frontend/src/components/daemon/__tests__/session-panel-load-earlier-full-turn.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-follow-insert
+  status: active
+
+## FR-auto-frontend-233 跳转期间不贴底（suppressFollowBottom 语义不变）
+变更：2026-10-14-session-bottom-follow-insert
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 用户上拉触发「加载更早」翻页（列表长度+1、首轮身份变化）；When prepend 落地后任意 turns 提交；Then 不发生贴底滚动（上拉读历史不被弹回最新轮，既有行为保持）
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-04
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-follow-insert:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-follow-insert
+  status: active
+
+## FR-auto-frontend-234 既有贴底/翻页/跳转相关测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-follow-insert
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 用户上拉触发「加载更早」翻页（列表长度+1、首轮身份变化）；When prepend 落地后任意 turns 提交；Then 不发生贴底滚动（上拉读历史不被弹回最新轮，既有行为保持）
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-follow-insert/requirements.md#FR-05
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
