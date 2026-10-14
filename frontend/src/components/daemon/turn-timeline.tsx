@@ -1300,7 +1300,16 @@ export function TurnTimeline({
     // + prepend 静默窗组合守卫，实测仍被穿透：触顶加载突发落地瞬间视口被钳到
     // 新底 → near 误真 → 后续任意 turns 提交拉底。本不变量与滚动位置无关，
     // 彻底消除「上拉读历史被弹回最新轮」）。
-    const lastSig = last ? `${last.runId}:${(last.output ?? "").length}:${last.status}` : null;
+    // 2026-10-14-session-bottom-follow-insert：lastSig 补 length 分量——初始
+    // 日志窗口贴底完成后全量大纲**后到**（归并层把预览卡插进中段：末轮不变、
+    // 列表高度剧增），旧签名不触发滚动而 2.5s 高度重申窗口已过 → 视口绝对位
+    // 置不动、内容被推下 → 停在倒数第几轮（用户实测「有时候没滚到底」根因）。
+    // 中段/尾部插入（预览卡、孤儿补建、预取装配）同跟随；prepend 路径已被
+    // 上方 isPrepend 早退 + 3s 静默窗守卫，上滚读历史由 isNearBottomRef 守卫，
+    // 跳转由 suppressFollowBottom 守卫——三道既有守卫不动。
+    const lastSig = last
+      ? `${last.runId}:${(last.output ?? "").length}:${last.status}:${turns.length}`
+      : null;
     const lastChanged = lastSigRef.current !== lastSig;
     lastSigRef.current = lastSig;
     if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
