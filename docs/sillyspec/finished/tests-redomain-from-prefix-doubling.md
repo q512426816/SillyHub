@@ -33,4 +33,9 @@ sillyspec tests --redomain --from auto-backend --to agent --by-change <本变更
 
 ## 状态
 
-活跃坑（sillyspec 3.32.0 实测）。
+✅ **已修复（2026-10-14）**——sillyspec 仓轻量变更 `2026-10-14-redomain-domain-arg-normalize`（证据提交 sillyspec@309184f5）：
+- `src/redomain.js` 新增导出 `normalizeDomainArg`（trim + 剥前导 `fr/`（大小写不敏感）+ 剥尾随 `.md`，幂等），`redomainFrEntries`/`planRedomain` 入参防御性归一，剥空拒绝不落盘；
+- CLI `tests --redomain` 同源归一，回显/报错统一裸域名，用法行补形态说明；flow done 提示语的 `fr/` 前缀形态自此合法，照抄不再失败；
+- 测试：`test/redomain.test.mjs` 新增 ⑥⑦ 用例 7/7 绿；全量 `npm test` 779 文件 EXIT=0、`npm run lint` 970 文件 EXIT=0；
+- 真实仓实测：`--from fr/agent` 形态干跑/落盘均正常（本仓 `fr/agent.md` 迁移已用裸名形态完成，属同口径）。
+
