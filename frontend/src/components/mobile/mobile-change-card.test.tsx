@@ -392,3 +392,28 @@ describe("MobileChangeCard 点击", () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("MobileChangeCard 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）", () => {
+  it("is_thin=true → 「轻量」warning 徽标（对齐桌面琥珀语义）", () => {
+    render(
+      <MobileChangeCard
+        change={makeChange({ is_thin: true, current_stage: "thin" })}
+        onClick={vi.fn()}
+      />,
+    );
+    // antd Badge：warning 圆点 + 「轻量」文本
+    expect(
+      screen.getByText("轻量").closest(".ant-badge"),
+    ).not.toBeNull();
+    expect(
+      screen.getByText("轻量").closest(".ant-badge")?.querySelector(".ant-badge-status-warning"),
+    ).not.toBeNull();
+  });
+
+  it("is_thin=false → 「完整」neutral 徽标（成对可辨）", () => {
+    render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
+    expect(
+      screen.getByText("完整").closest(".ant-badge")?.querySelector(".ant-badge-status-default"),
+    ).not.toBeNull();
+  });
+});

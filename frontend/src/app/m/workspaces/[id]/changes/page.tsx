@@ -127,8 +127,19 @@ const STAGE_OPTIONS = [
   { value: "execute", label: "执行" },
   { value: "verify", label: "验证" },
   { value: "archive", label: "归档" },
-  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与桌面副本同步，
-  // 模块私有就地内联不 export 的既有规则不变）。
+  // 2026-10-14-change-center-lineage-tag-and-filter：「轻量变更」（thin）选项
+  // 移除——出身分类查询职责迁移至下方分类 chips（与桌面同步，lineage 三分支
+  // 精确口径，归档 thin 行 stage 翻 archived 后旧精确匹配筛不出）。
+] as const;
+
+/**
+ * 出身分类筛选项（2026-10-14-change-center-lineage-tag-and-filter）：桌面
+ * LINEAGE_OPTIONS 同值副本（模块私有就地内联不 export 惯例）。lineage 参数
+ * 三分支口径与行内出身标签一致。
+ */
+const LINEAGE_OPTIONS = [
+  { value: "", label: "全部分类" },
+  { value: "full", label: "完整变更" },
   { value: "thin", label: "轻量变更" },
 ] as const;
 
@@ -478,6 +489,8 @@ export default function MobileChangesPage() {
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [search, setSearch] = useState(initialSearch);
   const [stageFilter, setStageFilter] = useState("");
+  // 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（"" = 全部分类）
+  const [lineageFilter, setLineageFilter] = useState("");
   const [focusMine, setFocusMine] = useState(false);
   // task-04（FR-03 / D-003@v1 清单项 3）：排序方向从固定常量升为 state，进主列表
   // key sort 槽位与 listChanges sort 参数；移动切换入口仅在筛选抽屉（桌面是表头
@@ -489,6 +502,8 @@ export default function MobileChangesPage() {
   // 筛选抽屉草稿态：打开时从生效值拷贝，「确定」才落到查询 state
   const [filterOpen, setFilterOpen] = useState(false);
   const [draftStage, setDraftStage] = useState("");
+  // 2026-10-14-change-center-lineage-tag-and-filter：分类草稿态（draftStage 范式）
+  const [draftLineage, setDraftLineage] = useState("");
   const [draftFocusMine, setDraftFocusMine] = useState(false);
   // task-04：排序草稿态（沿用 draftStage 范式——取消不点确定不污染生效排序）
   const [draftSort, setDraftSort] = useState<SortDir>(DEFAULT_SORT);
@@ -529,6 +544,7 @@ export default function MobileChangesPage() {
         location: tab,
         search,
         currentStage: stageFilter,
+        lineage: lineageFilter,
         sort: sortDir,
         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
         pendingReviewOnly: tab === "active" && focusMine,
@@ -553,6 +569,7 @@ export default function MobileChangesPage() {
               location: tab,
               search: search || undefined,
               currentStage: stageFilter || undefined,
+              lineage: lineageFilter || undefined,
               sort: sortDir,
               pendingReviewOnly: tab === "active" && focusMine,
               page,
@@ -677,7 +694,7 @@ export default function MobileChangesPage() {
   // 内 setPage(1) 的语义）。
   useEffect(() => {
     setPagesLoaded(1);
-  }, [tab, search, stageFilter, focusMine, sortDir]);
+  }, [tab, search, stageFilter, lineageFilter, focusMine, sortDir]);
 
   const handleTabChange = (newTab: ChangesTab) => {
     if (newTab === tab) return;
@@ -701,6 +718,7 @@ export default function MobileChangesPage() {
     if (open) {
       // 打开时从生效值拷贝草稿，取消（不点确定）不污染生效筛选
       setDraftStage(stageFilter);
+      setDraftLineage(lineageFilter);
       setDraftFocusMine(focusMine);
       setDraftSort(sortDir);
     }
@@ -709,6 +727,7 @@ export default function MobileChangesPage() {
   // 「确定」：草稿落生效 state → key 变化自动重取（聚焦仅进行中视图语义生效）
   const handleFilterApply = () => {
     setStageFilter(draftStage);
+    setLineageFilter(draftLineage);
     if (tab === "active") setFocusMine(draftFocusMine);
     setSortDir(draftSort);
   };
@@ -720,8 +739,10 @@ export default function MobileChangesPage() {
     setSearchInput("");
     setSearch("");
     setStageFilter("");
+    setLineageFilter("");
     setFocusMine(false);
     setDraftStage("");
+    setDraftLineage("");
     setDraftFocusMine(false);
     setSortDir(DEFAULT_SORT);
     setDraftSort(DEFAULT_SORT);
@@ -816,7 +837,7 @@ export default function MobileChangesPage() {
 
   // 空态分场景（对齐桌面 renderEmpty：有筛选无匹配短文案 / active 聚焦 / active / archive）
   const renderEmpty = (): ReactNode => {
-    if (search || stageFilter) {
+    if (search || stageFilter || lineageFilter) {
       return (
         <p className="py-10 text-center text-[14px] text-muted-foreground">
           没有匹配的变更。
@@ -1188,6 +1209,31 @@ export default function MobileChangesPage() {
                       aria-pressed={active}
                       data-testid={`m-changes-stage-chip-${opt.value || "all"}`}
                       onClick={() => setDraftStage(opt.value)}
+                      className={cn(
+                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
+                        active
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* 出身分类（2026-10-14-change-center-lineage-tag-and-filter）：
+                  完整/轻量单选 chips，与桌面「分类」下拉同维度（lineage 参数） */}
+              <p className="mb-2 text-xs text-muted-foreground">分类</p>
+              <div className="mb-4 flex flex-wrap gap-2">
+                {LINEAGE_OPTIONS.map((opt) => {
+                  const active = draftLineage === opt.value;
+                  return (
+                    <button
+                      key={opt.value || "all"}
+                      type="button"
+                      aria-pressed={active}
+                      data-testid={`m-changes-lineage-chip-${opt.value || "all"}`}
+                      onClick={() => setDraftLineage(opt.value)}
                       className={cn(
                         "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
                         active
