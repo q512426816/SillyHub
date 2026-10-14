@@ -1395,6 +1395,11 @@ export function TurnTimeline({
   // 用户上滚接管由 isNearBottomRef 守卫（handleScroll 置 false 后回调恒 no-op）；
   // 降级：无 ResizeObserver（jsdom/极旧浏览器）不挂观测，行为回到重申窗兜底。
   const bottomFollowRafRef = useRef<number | null>(null);
+  // 审查 P2 补口：deps 含「turns 空态」布尔——冷加载首 commit turns=[] 渲染空态
+  // div（观察快照只有它），历史到达后空态卸载、.space-y-5 内容容器挂载但不在
+  // 快照（死观测盲区，恰好是「点击会话直开」主路径）。布尔翻转（false→true）
+  // 时 effect 重跑：重新快照 children（此时内容容器已在）；此后恒 true 不再重跑。
+  const hasTurns = turns.length > 0;
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -1408,8 +1413,9 @@ export function TurnTimeline({
         target.scrollTo(0, target.scrollHeight);
       });
     });
-    // 观察既有直接子（内容包装/错误条/pending 卡容器）——挂载后新增子（如
-    // streamFooter）不在列，由其自身渲染引起的兄弟高度变化仍被既有子捕获。
+    // 观察直接子（错误条/pending 卡层/内容容器）——turns 空态翻转时经上方 deps
+    // 重跑重快照（冷加载空态 div → 内容容器替换的补口）；streamFooter 是内容
+    // 容器内部节点，其渲染引起的容器高度变化由容器观察覆盖（审查 P3 注释修正）。
     for (const child of Array.from(el.children)) obs.observe(child);
     return () => {
       obs.disconnect();
@@ -1418,7 +1424,7 @@ export function TurnTimeline({
         bottomFollowRafRef.current = null;
       }
     };
-  }, []);
+  }, [hasTurns]);
   // rAF 句柄声明在此 effect 外（cleanup 与合帧去重共用）。
 
   const minimizedPending = showPending
