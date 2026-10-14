@@ -104,6 +104,13 @@ class Permission(StrEnum):
     DEPLOY_STAGING = "deploy:staging"
     DEPLOY_PRODUCTION = "deploy:production"
     DEPLOY_ROLLBACK = "deploy:rollback"
+    # change 2026-10-14-deploy-release-notes task-01：发布记录页（/deploy-records
+    # 平台级聚合视图）可见性门控。存量角色播种走迁移
+    # 20261014110000_add_deploy_record_read_permission（workspace_owner 幂等补授；
+    # platform_admin 由启动期 seed_platform_admin_role 绑全部枚举自动覆盖），
+    # 字面量与迁移的一致性由 tests/modules/auth/test_permissions.py 断言对齐。
+    # deploy_record 前缀归 AGENT 组（deploy 域同口径）。
+    DEPLOY_RECORD_READ = "deploy_record:read"
 
     # ── Admin (user / organization / role management) ───────
     # Mirrors design §8.4 — added in change 2026-06-16-admin-org-role-center.
@@ -204,7 +211,7 @@ class Permission(StrEnum):
             return PermissionGroup.WORKSPACE
         if prefix == "change":
             return PermissionGroup.CHANGE
-        if prefix in ("task", "code", "tool", "deploy", "daemon"):
+        if prefix in ("task", "code", "tool", "deploy", "deploy_record", "daemon"):
             return PermissionGroup.AGENT
         # change 2026-09-18-web-menu-management task-01 / FR-01：
         # 4 个常显菜单独立读权限（skill/mcp/agent_profile/agent_session 前缀）

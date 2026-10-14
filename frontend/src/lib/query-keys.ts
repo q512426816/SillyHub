@@ -190,3 +190,16 @@ export function knowledgeGraphNodesQueryKey(
 export function knowledgeGraphDumpQueryKey(workspaceId: string) {
   return ["knowledgeGraph", "dump", workspaceId] as const;
 }
+
+/**
+ * 发布记录缓存键（2026-10-14-deploy-release-notes task-04；平台级聚合页
+ * /deploy-records 数据源）。列表无参数；详情 recordId 进键——record_id 含
+ * 斜杠与 workspace 前缀，天然唯一（影响结果的变量进 key 本文件头规则）。
+ */
+export function deployRecordsListQueryKey() {
+  return ["deployRecords", "list"] as const;
+}
+
+export function deployRecordDetailQueryKey(recordId: string) {
+  return ["deployRecords", "detail", recordId] as const;
+}

@@ -100,6 +100,8 @@ const BACKEND_PERMISSION_KEYS = [
   "agent_profile:read",
   "agent_session:read",
   "menu:admin",
+  // 2026-10-14-deploy-release-notes task-01：发布记录页读权限
+  "deploy_record:read",
 ] as const;
 
 /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
@@ -123,6 +125,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "approvals",
   "audit",
   "incidents",
+  // 2026-10-14-deploy-release-notes 新增（governance 组发布记录聚合页）
+  "deploy-records",
   "users",
   "organizations",
   "roles",
@@ -157,8 +161,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 36（2026-10-11-retire-components-page 下线 components/topology 两项）", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(36);
+  it("MENU_PERMISSION_GROUPS 长度 === 37（2026-10-14-deploy-release-notes 增 deploy-records）", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -173,7 +177,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 6 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（components/topology 下线）", () => {
+  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 5 / ppm 14（2026-10-14 增 deploy-records）", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -188,7 +192,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.workspace).toBe(6); // 2026-10-11 下线 components/topology
     expect(counter.agent).toBe(4);
     expect(counter.config).toBe(4);
-    expect(counter.governance).toBe(3);
+    expect(counter.governance).toBe(4); // 2026-10-14-deploy-release-notes 增 deploy-records
     expect(counter.system).toBe(5);
     expect(counter.ppm).toBe(14);
   });
@@ -238,8 +242,8 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
     // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
     // platform:audit:read / platform:billing / component:read / change:update) = 58
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(58);
-    expect(valid.size).toBe(58);
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(59); // 2026-10-14 增 deploy_record:read
+    expect(valid.size).toBe(59); // 2026-10-14 增 deploy_record:read
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {

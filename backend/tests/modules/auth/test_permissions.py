@@ -41,13 +41,14 @@ def test_permission_group_has_six_members() -> None:
     assert set(members) == expected
 
 
-def test_permission_count_is_58() -> None:
+def test_permission_count_is_59() -> None:
     """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
     14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
     platform:audit:read / platform:billing / component:read / change:update，
-    AUDIT 组随 platform:audit:read 移除）→ 58。
+    AUDIT 组随 platform:audit:read 移除）→ 58；
+    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59。
     """
-    assert len(list(Permission)) == 58
+    assert len(list(Permission)) == 59
 
 
 @pytest.mark.parametrize(
@@ -86,6 +87,9 @@ def test_permission_count_is_58() -> None:
         # Agent (task/deploy；2026-10-08 清理删 code:*/tool:* 死键)
         (Permission.TASK_READ, PermissionGroup.AGENT),
         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
+        # 2026-10-14-deploy-release-notes task-01：发布记录页读权限，deploy_record
+        # 前缀落 deploy 域同款 AGENT 分支。
+        (Permission.DEPLOY_RECORD_READ, PermissionGroup.AGENT),
         # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
         # task-01: llm_provider 前缀无特判分支，落默认 PLATFORM 组
@@ -434,3 +438,131 @@ def test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants() -> No
         with Operations.context(ctx):
             mod.downgrade()
         assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-14-deploy-release-notes task-01：DEPLOY_RECORD_READ 角色-权限
+# 播种迁移（20261014110000）。范式沿用上方 knowledge_write 迁移测试：
+# MigrationContext + Operations 在 SQLite 内存库上回放真实 upgrade()/
+# downgrade()。
+# ---------------------------------------------------------------------------
+
+DEPLOY_RECORD_REVISION_ID = "20261014110000"
+DEPLOY_RECORD_DOWN_REVISION_ID = "20261012123000"
+
+
+def _load_deploy_record_migration():
+    """按 revision ID 在文件名里匹配导入迁移模块（borrow-shared 测试范式）。"""
+    backend_root = Path(__file__).resolve().parent.parent.parent.parent
+    versions_dir = backend_root / "migrations" / "versions"
+    for f in os.listdir(str(versions_dir)):
+        if f.endswith(".py") and DEPLOY_RECORD_REVISION_ID in f and f != "__init__.py":
+            return importlib.import_module(f"migrations.versions.{f[:-3]}")
+    raise ImportError(f"No migration found for revision {DEPLOY_RECORD_REVISION_ID}")
+
+
+def test_deploy_record_read_permission_value() -> None:
+    """DEPLOY_RECORD_READ 字符串值必须与迁移 20261014110000 播种的
+    ``deploy_record:read`` 完全一致（迁移内为字面量复写，两处以本断言对齐）。"""
+    assert Permission.DEPLOY_RECORD_READ.value == "deploy_record:read"
+
+
+def test_deploy_record_migration_metadata() -> None:
+    """revision 链接正确（down 接实测单头 20261012123000）、模块可导入；
+    platform_admin 免迁移行（启动期 seed 绑全部枚举）。"""
+    mod = _load_deploy_record_migration()
+    assert mod.revision == DEPLOY_RECORD_REVISION_ID
+    assert mod.down_revision == DEPLOY_RECORD_DOWN_REVISION_ID
+    assert mod.branch_labels is None
+    assert mod.depends_on is None
+    assert callable(mod.upgrade)
+    assert callable(mod.downgrade)
+    assert mod.DEPLOY_RECORD_READ_PERMISSION == "deploy_record:read"
+    assert set(mod.TARGET_ROLE_KEYS) == {"workspace_owner"}
+
+
+def test_deploy_record_migration_upgrade_seeds_and_is_idempotent() -> None:
+    """upgrade 按 roles.key 授 workspace_owner deploy_record:read：+1 行、
+    其它角色与既有权限零变化；重跑不重复插（幂等）；角色缺失安全跳过。"""
+    mod = _load_deploy_record_migration()
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        _bootstrap_roles_tables_sqlite(conn)
+        owner_id = _seed_role(conn, "workspace_owner", ["workspace:read", "workspace:write"])
+        # 对照组：未被授予的角色既有权限集合必须零变化
+        viewer_id = _seed_role(conn, "viewer", ["workspace:read", "change:read"])
+
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+            # 二次 upgrade：幂等（重跑不重复插）
+            mod.upgrade()
+
+        def perms_of(rid) -> set[str]:
+            return {
+                r[0]
+                for r in conn.execute(
+                    sa.text(
+                        "SELECT permission FROM role_permissions WHERE role_id = :rid"
+                    ).bindparams(rid=rid)
+                )
+            }
+
+        assert perms_of(owner_id) == {
+            "workspace:read",
+            "workspace:write",
+            "deploy_record:read",
+        }
+        assert perms_of(viewer_id) == {"workspace:read", "change:read"}
+        # 幂等：workspace_owner 上 deploy_record:read 恰好 1 行
+        count = conn.execute(
+            sa.text(
+                "SELECT COUNT(*) FROM role_permissions "
+                "WHERE role_id = :rid AND permission = 'deploy_record:read'"
+            ).bindparams(rid=owner_id)
+        ).scalar()
+        assert count == 1
+
+        # 角色本体缺失（空库）时 upgrade 安全跳过：不抛、不留残
+        conn.execute(sa.text("DELETE FROM role_permissions"))
+        conn.execute(sa.text("DELETE FROM roles"))
+        with Operations.context(ctx):
+            mod.upgrade()
+        assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
+
+
+def test_deploy_record_migration_downgrade_deletes_rows_keeps_roles() -> None:
+    """downgrade 显式 DELETE 授权行：roles 本体与其它权限不动。"""
+    mod = _load_deploy_record_migration()
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        _bootstrap_roles_tables_sqlite(conn)
+        owner_id = _seed_role(conn, "workspace_owner", ["workspace:read"])
+
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            mod.upgrade()
+            mod.downgrade()
+
+        assert (
+            conn.execute(
+                sa.text(
+                    "SELECT COUNT(*) FROM role_permissions WHERE permission = 'deploy_record:read'"
+                )
+            ).scalar()
+            == 0
+        )
+        role_keys = {r[0] for r in conn.execute(sa.text("SELECT key FROM roles"))}
+        assert role_keys == {"workspace_owner"}
+
+        def perms_of(rid) -> set[str]:
+            return {
+                r[0]
+                for r in conn.execute(
+                    sa.text(
+                        "SELECT permission FROM role_permissions WHERE role_id = :rid"
+                    ).bindparams(rid=rid)
+                )
+            }
+
+        assert perms_of(owner_id) == {"workspace:read"}

@@ -105,8 +105,9 @@ class TestMigrationStructure:
         # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
         # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）→
         # 20261012123000（agent_sessions.current_change_id，
-        # 2026-10-12-run-level-change-attribution）。
-        assert heads[0] == "20261012123000"  # 当前上下文列迁移成为新 head
+        # 2026-10-12-run-level-change-attribution）→ 20261014110000
+        # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）。
+        assert heads[0] == "20261014110000"  # 发布记录权限种子迁移成为新 head
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

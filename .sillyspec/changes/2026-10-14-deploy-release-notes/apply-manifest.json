@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-deploy-release-notes",
+  "appliedAt": "2026-10-14T06:03:25.161Z",
+  "baseHash": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+  "files": [
+    {
+      "path": "backend/app/modules/auth/permissions.py",
+      "sha256": "786b3a368e58d17615ebbd5c55b94c41284291b3ed775f7d6dc52cf9184f6948"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/__init__.py",
+      "sha256": "d06521e2e2ad786176da97782d8ebfb8dc58c707e2fc5f6eddb7692af1f0b103"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/router.py",
+      "sha256": "ed31c0abefc57f34c27708fdb61c4b831b21f6379662385b2f195cdaa62c6216"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/schema.py",
+      "sha256": "8079ba4afcd594bb96b263a962b76088ab39ef517e9dcdc607a954a38a3405e1"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/service.py",
+      "sha256": "f58e3f4dbb51c3a44a396ca4ba173d65a97ba84e61c3b9e597a1ed8a89ad551b"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/tests/__init__.py",
+      "sha256": "fee73c8017e588d1a95cc18145c75f65cf13efa0f15f72f614eb78f89ce7d956"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/tests/test_router.py",
+      "sha256": "58a14359481e3336278ef97957322cee15b0e884a5b024da65d71a7e55eb2fcc"
+    },
+    {
+      "path": "backend/app/modules/deploy_records/tests/test_service.py",
+      "sha256": "ac84c3b40b945d4dcab7e478d0e9b7ad5fca68298bd1d3b5d09b0a81cde12e9a"
+    },
+    {
+      "path": "backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py",
+      "sha256": "0046d9617dbd164ffed4d8ebdb5e4af0de0860a235083ab3af9f8d40e1e8176d"
+    },
+    {
+      "path": "backend/pyproject.toml",
+      "sha256": "cf43d751c3d26eff1b673267f5c6445461562f36b433baf721b3ede5c4985bfd"
+    },
+    {
+      "path": "backend/tests/modules/auth/test_permissions.py",
+      "sha256": "79a4a100e1a7563f5f758885f4e9e8823c9478cf22f40093106523d6048a57c0"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "sha256": "0ed993f5304c6521602ef7c8deb6e0d7043eeb1df0e9ea4034864e8b25058b77"
+    },
+    {
+      "path": "backend/uv.lock",
+      "sha256": "df446e8d8ea9064c131e6d734032ec77819ee3ed4efb94abeb1bf82e622827a6"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+      "sha256": "b86b893c61818c61ae7f9db9bca7933be08d60d96934496f5d9c9d69b649b1fb"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx",
+      "sha256": "aa3d1260bab048de9a924a1759fe8db45785f27633208106c14c7f0e30a0fb0e"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/deploy-records/page.tsx",
+      "sha256": "f5418ff08a4902c8c7c40fb2ef63295fb67f94b9a3c33aae7b4e5b9344141fbb"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+      "sha256": "8bc4a718143d9ea59b0fd65e391c58625a5502792b5a49a39955f14a9aa65aad"
+    },
+    {
+      "path": "frontend/src/lib/deploy-records.ts",
+      "sha256": "f23c5e82b75f7f2d24762d7ab1cc6213f1939bb9acc7b080346a11de4aec192e"
+    },
+    {
+      "path": "frontend/src/lib/menu-permissions.ts",
+      "sha256": "feaebb3464bb915a8155e0d2e7f72f65ceb760c2aa5be31265319191144b629e"
+    },
+    {
+      "path": "frontend/src/lib/query-keys.ts",
+      "sha256": "0fd2e96cf09459b271e5a50b91aae23d4016646d67093c744866b54e083e0523"
+    },
+    {
+      "path": "backend/app/main.py",
+      "sha256": "83ccc3a8b34394d090c0b036f9910bd936f18a20c7d8cc1dcdb75838354fdddd"
+    },
+    {
+      "path": "frontend/src/components/app-shell.tsx",
+      "sha256": "40eb9348e795783bb97b579af3e3322ee1299fa320a0996ba4f9479e50391d37"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "e74c80fa492fcea31dd77d83e08bd805c50ef0595139245350d27906291388ed"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "122a4350dd1fa3bfe01956a55de7564cb6a0d8682d2e940ec9c8e39588c163dd"
+    }
+  ]
+}

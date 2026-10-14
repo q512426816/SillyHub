@@ -8531,6 +8531,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/deploy-records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deploy Records
+         * @description 全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。
+         */
+        get: operations["list_deploy_records_api_deploy_records_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/deploy-records/{record_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Deploy Record
+         * @description 单条发布记录详情（元数据 + md 正文原文）。
+         *
+         *     ``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用
+         *     ``:path`` 形态整段接收——R-06 定型）。
+         */
+        get: operations["get_deploy_record_api_deploy_records__record_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notifications": {
         parameters: {
             query?: never;
@@ -16050,6 +16093,78 @@ export interface components {
             per_task_avg: number;
         };
         /**
+         * DeployRecordDetail
+         * @description 单条记录详情：元数据 + md 正文原文（前端渲染用）。
+         */
+        DeployRecordDetail: {
+            /** Record Id */
+            record_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Workspace Name */
+            workspace_name: string;
+            /** File Name */
+            file_name: string;
+            /** Seq */
+            seq?: number | null;
+            /** Status */
+            status: string;
+            /** Deployed At */
+            deployed_at?: string | null;
+            /** Summary */
+            summary: string;
+            /** Commit From */
+            commit_from?: string | null;
+            /** Commit To */
+            commit_to?: string | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Agent */
+            agent?: string | null;
+            /** Content */
+            content: string;
+        };
+        /**
+         * DeployRecordSummary
+         * @description 一条部署发布记录的列表项（frontmatter 元数据投影）。
+         *
+         *     ``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定
+         *     ``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串
+         *     字典序，同格式下与时间序一致（design 接口定义写死规则）。
+         */
+        DeployRecordSummary: {
+            /** Record Id */
+            record_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Workspace Name */
+            workspace_name: string;
+            /** File Name */
+            file_name: string;
+            /** Seq */
+            seq?: number | null;
+            /** Status */
+            status: string;
+            /** Deployed At */
+            deployed_at?: string | null;
+            /** Summary */
+            summary: string;
+            /** Commit From */
+            commit_from?: string | null;
+            /** Commit To */
+            commit_to?: string | null;
+            /** Commits Count */
+            commits_count?: number | null;
+            /** Agent */
+            agent?: string | null;
+        };
+        /**
          * DirEntry
          * @description A single directory entry returned by the daemon list_dir RPC.
          */
@@ -21093,7 +21208,7 @@ export interface components {
          * Permission
          * @enum {string}
          */
-        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "deploy_record:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
         /**
          * PermissionResponseRead
          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
@@ -43291,6 +43406,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReleaseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deploy_records_api_deploy_records_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployRecordSummary"][];
+                };
+            };
+        };
+    };
+    get_deploy_record_api_deploy_records__record_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                record_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployRecordDetail"];
                 };
             };
             /** @description Validation Error */

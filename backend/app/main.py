@@ -36,6 +36,10 @@ from app.modules.change_writer.router import router as change_writer_router
 from app.modules.daemon.dist_router import router as daemon_dist_router
 from app.modules.daemon.router import close_llm_proxy_client
 from app.modules.daemon.router import router as daemon_router
+
+# 2026-10-14-deploy-release-notes task-02：部署发布记录只读端点（扫各
+# workspace docs/releases/*.md，零表零写端点）。
+from app.modules.deploy_records.router import router as deploy_records_router
 from app.modules.explorer.router import router as explorer_router
 from app.modules.git_gateway.router import router as git_gateway_router
 from app.modules.git_identity import git_identity_router
@@ -955,6 +959,7 @@ def create_app() -> FastAPI:
     app.include_router(incident_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
+    app.include_router(deploy_records_router, prefix="/api")
     app.include_router(notification_router, prefix="/api")
     # ppm 子域:平台级,统一前缀 /api/ppm (design §7)
     # 五个 router 自身均不带 prefix,由 main 统一挂载到 /api/ppm

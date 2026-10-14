@@ -22,6 +22,7 @@ import {
   Flag,
   Folder,
   GitBranch,
+  History,
   Home,
   KeyRound,
   LayoutDashboard,
@@ -107,6 +108,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // 2026-08-14-sessions-portal task-10：智能体会话总入口 /sessions。图标
   // MessageSquare（对话气泡，语义=会话；避开与 config 组重复图标）。
   "/sessions": MessageSquare,
+  // 2026-10-14-deploy-release-notes D-002@v1：发布记录平台级聚合页（协作治理组）。
+  // 图标 History（部署历史时间线语义；Package 已被工作区「发布」菜单占用）。
+  "/deploy-records": History,
   // ppm（absolute href /ppm/*）
   // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
   // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts

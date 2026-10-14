@@ -330,7 +330,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     permissions: [{ key: "runtime:admin", name: "守护进程运行时管理" }],
   },
 
-  // ── governance 协作治理（3 条）────────────────────────────────
+  // ── governance 协作治理（4 条，2026-10-14 增 deploy-records）────
   {
     section: "governance",
     menuKey: "approvals",
@@ -379,6 +379,19 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
       { key: "incident:read", name: "事件查看" },
       { key: "deploy:staging", name: "事件上报" },
     ],
+  },
+  {
+    // 2026-10-14-deploy-release-notes D-002@v1 新增：发布记录平台级聚合页
+    // （/deploy-records，协作治理组）——agent 部署后写 docs/releases/*.md，
+    // 后端只读扫描（D-004@v1）。可见性挂 deploy_record:read（任一命中即可见）。
+    section: "governance",
+    menuKey: "deploy-records",
+    menuLabel: "发布记录",
+    icon: "\u{1F4E6}",
+    href: "/deploy-records",
+    absolute: true,
+    matchPattern: "/deploy-records",
+    permissions: [{ key: "deploy_record:read", name: "发布记录查看" }],
   },
 
   // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
