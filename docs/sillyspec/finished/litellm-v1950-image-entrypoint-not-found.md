@@ -194,3 +194,19 @@ base_url / auth_field / model 全部平台字段，残留即毒**。旧会话的
 - **换机口径**：其它机器若报同款「SSL 证书主机名不匹配」= 该机 DNS 同样被污染，
   同样 hosts 钉真地址即可（可用 DNSPod 119.29.29.29 查询当前真地址，Cloudflare
   anycast 段稳定但以查询结果为准）；不再依赖任何机器开 Clash。
+
+## 处置记录（2026-10-14）——退役闭坑（用户拍板：彻底退役）
+
+- **拍板**：分叉悬置 12 天后用户裁决「彻底退役」（②方向落地形态=不再自研适配、直接下线服务）。
+- **事实核查补充**：本机 plain `v1.95.0` 容器 2026-10-10 起 healthy 运行 3 天（ghcr 同名 tag 内容
+  漂移 hazard 的活体——各机 pull 时点不同层内容不同），提示上游可能已修复构建，但未经 docker 侧
+  gap-A 复测，拍板时已披露并选择退役（不再等上游/复测）。
+- **本仓清理**（change 2026-10-14-litellm-retire）：两个 compose 删 `litellm` / `litellm-db` 服务块、
+  `litellm-db-data` 卷定义、dev 侧死外部网络声明；`deploy/litellm-config.yaml` 随删；本机四容器
+  stop+rm，两个 `litellm-db-data` 命名卷**数据保留可回滚**。backend 代码面（openai 供应商 admin
+  API 注册 / provider_config 的 litellm_* 字段语义）不动——未来重引转换网关再立新变更。
+- **遗留（下次部署窗口）**：阿里云服务器 `/opt/sillyhub/deploy/deploy/` compose 仍是旧版（含
+  litellm 定义、服务 stop 态）——部署窗口 scp 同步 compose（deploy-to-server skill 清单已含）+
+  `config --services` 打印核对，服务器残留容器/卷按需手动清理。
+- **回滚路径**：revert 本变更提交 + `docker compose up -d litellm litellm-db`（卷数据在位，
+  LITELLM_DB_PASSWORD 仍在 .env）。
