@@ -97,7 +97,8 @@ async def ensure_system_default_profiles(session: AsyncSession) -> int:
 
 _PRESET_NAMESPACE: uuid.UUID = uuid.uuid5(uuid.NAMESPACE_OID, "sillyhub.agent.presets")
 
-# 确定性身份键：uuid5(NAMESPACE_OID, "sillyhub.agent.presets:sillyspec-express-change")。
+# 确定性身份键：两级派生 uuid5(uuid5(NAMESPACE_OID, "sillyhub.agent.presets"),
+# "sillyspec-express-change")，与角色模板 _ROLE_TEMPLATE_NAMESPACE 同构。
 EXPRESS_PRESET_PROFILE_ID: uuid.UUID = uuid.uuid5(_PRESET_NAMESPACE, "sillyspec-express-change")
 
 _EXPRESS_PRESET_SYSTEM_PROMPT: str = (
