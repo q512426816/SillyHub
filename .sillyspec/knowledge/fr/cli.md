@@ -428,7 +428,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-01
-  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态一律不注入唤醒——completed/failed/stopped 全形态零「[后台任务通知]」
   reason: spec
   state: candidate
   discovery: machine
@@ -447,7 +447,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-02
-  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变」
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「终态侧信道照常——emit/[TASK_NOTIFICATION] 落行/注销不因移除唤醒而变」
   reason: spec
   state: candidate
   discovery: machine
@@ -480,7 +480,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-task-wakeup-remove:flow:测试绑定FR-05
-  tests: test/sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态不注入唤醒（2026-10-13-task-wakeup-remove）」
+  tests: sillyhub-daemon/tests/interactive/task-lifecycle.test.ts「task 终态不注入唤醒（2026-10-13-task-wakeup-remove）」
   reason: spec
   state: candidate
   discovery: machine

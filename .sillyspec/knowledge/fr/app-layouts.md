@@ -133,7 +133,7 @@ created_at: 2026-09-25T23:00:56.833Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-retire-components-page:flow:测试绑定FR-01
-  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 长度 === 36」 | page.test.tsx「统计三数字按 mock 数据渲染」
+  tests: frontend/src/app/page.test.tsx「统计三数字按 mock 数据渲染」 | frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 长度 === 36」
   reason: spec
   state: candidate
   discovery: machine

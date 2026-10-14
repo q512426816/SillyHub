@@ -1715,3 +1715,45 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-backend-image-slim-no-claude/requirements.md#FR-04
 最近确认：55ea8ab01ec9a279e1210a8b4423eec60a50a642
+
+## FR-build-121 prod compose 退役三块
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-01
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+
+## FR-build-122 dev compose 同款退役
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-02
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+
+## FR-build-123 死配置文件清理
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-03
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+
+## FR-build-124 本机容器下电、卷数据保留
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-04
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+
+## FR-build-125 坑记录闭坑归档
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-05
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+
+## FR-build-126 全量门禁
+变更：2026-10-14-litellm-retire
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-litellm-retire/requirements.md#FR-06
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c

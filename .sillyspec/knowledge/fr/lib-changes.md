@@ -732,7 +732,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-01
-  tests: changes/__tests__/page.test.tsx「完整出身行显示完整标签、轻量出身行显示轻量标签」
+  tests: frontend/src/app/page.test.tsx「完整出身行显示完整标签、轻量出身行显示轻量标签」
   reason: spec
   state: candidate
   discovery: machine
@@ -751,7 +751,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-02
-  tests: changes/__tests__/page.test.tsx「分类下拉选择轻量变更仅显示轻量出身行」
+  tests: frontend/src/app/page.test.tsx「分类下拉选择轻量变更仅显示轻量出身行」
   reason: spec
   state: candidate
   discovery: machine
@@ -789,7 +789,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-04
-  tests: changes/__tests__/page.test.tsx「阶段下拉不含轻量变更选项」
+  tests: frontend/src/app/page.test.tsx「阶段下拉不含轻量变更选项」
   reason: spec
   state: candidate
   discovery: machine

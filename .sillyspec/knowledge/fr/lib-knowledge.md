@@ -268,7 +268,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-02
-  tests: test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
   reason: spec
   state: candidate
   discovery: machine
@@ -287,7 +287,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-03
-  tests: test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
+  tests: frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
   reason: spec
   state: candidate
   discovery: machine
@@ -306,7 +306,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-04
-  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
   reason: spec
   state: candidate
   discovery: machine

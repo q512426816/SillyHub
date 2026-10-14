@@ -1,0 +1,93 @@
+{
+  "change": "2026-10-14-litellm-retire",
+  "baseline": "ade4a7e3fdd75dc91ab78c53f18c347bb7629576",
+  "head": "ab87d6adbc3a0509d743970552e97813f0f7881c",
+  "files": [
+    "deploy/docker-compose.dev.yml",
+    "deploy/docker-compose.yml",
+    "deploy/litellm-config.yaml",
+    "docs/sillyspec/finished/litellm-v1950-image-entrypoint-not-found.md"
+  ],
+  "totals": {
+    "files": 4,
+    "additions": 16,
+    "deletions": 189
+  },
+  "savedAt": "2026-10-14T04:10:52.753Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "deploy",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/deploy.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "build",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/build.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "ade4a7e3fdd75dc91ab78c53f18c347bb7629576",
+    "totals": {
+      "files": 4,
+      "additions": 16,
+      "deletions": 189
+    },
+    "rows": [
+      {
+        "path": "deploy/docker-compose.dev.yml",
+        "additions": 0,
+        "deletions": 56,
+        "kind": "modified"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 0,
+        "deletions": 108,
+        "kind": "modified"
+      },
+      {
+        "path": "deploy/litellm-config.yaml",
+        "additions": 0,
+        "deletions": 25,
+        "kind": "deleted"
+      },
+      {
+        "path": "docs/sillyspec/finished/litellm-v1950-image-entrypoint-not-found.md",
+        "additions": 16,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "34a2cfb09fe5472c7872ed351a8abafde9a001f46f6274f498db200be001ce9d",
+  "patchStatus": "ok"
+}

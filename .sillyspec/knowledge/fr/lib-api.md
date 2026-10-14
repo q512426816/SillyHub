@@ -2641,7 +2641,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-01
-  tests: test/app/modules/daemon/tests/test_session_queue.py「test_spoofed_prefix_message_consumes_user_quota_and_rejected」
+  tests: backend/app/modules/daemon/tests/test_session_queue.py「test_spoofed_prefix_message_consumes_user_quota_and_rejected」
   reason: spec
   state: candidate
   discovery: machine
@@ -2660,7 +2660,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-02
-  tests: test/app/modules/daemon/tests/test_session_queue.py「test_wakeup_entries_merge_by_origin」
+  tests: backend/app/modules/daemon/tests/test_session_queue.py「test_wakeup_entries_merge_by_origin」
   reason: spec
   state: candidate
   discovery: machine
@@ -2679,7 +2679,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-03
-  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_bearer_with_origin_field_403」
+  tests: backend/app/modules/daemon/tests/test_inject_origin_guard.py「test_bearer_with_origin_field_403」
   reason: spec
   state: candidate
   discovery: machine
@@ -2698,7 +2698,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-04
-  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_origin_literal_validation_422」
+  tests: backend/app/modules/daemon/tests/test_inject_origin_guard.py「test_origin_literal_validation_422」
   reason: spec
   state: candidate
   discovery: machine
@@ -2717,7 +2717,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-05
-  tests: test/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_spoofed_prefix_user_entry_allowed」
+  tests: backend/app/modules/daemon/tests/test_session_queue_actions.py「test_edit_spoofed_prefix_user_entry_allowed」
   reason: spec
   state: candidate
   discovery: machine
@@ -2736,7 +2736,7 @@
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-queue-wakeup-origin-guard:flow:测试绑定FR-06
-  tests: test/app/modules/daemon/tests/test_inject_origin_guard.py「test_api_key_origin_inject_marks_queue_row」
+  tests: backend/app/modules/daemon/tests/test_inject_origin_guard.py「test_api_key_origin_inject_marks_queue_row」
   reason: spec
   state: candidate
   discovery: machine

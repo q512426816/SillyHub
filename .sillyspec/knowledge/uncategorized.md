@@ -33,3 +33,11 @@ daemon 侧 stdio MCP server（mcp-server.js）从 env 读 backend URL：键名�
 SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` 会 expire 会话内全部 ORM 对象——异常处理路径里再访问 `obj.attr`（哪怕记日志 `str(agent_run.id)`）会触发同步 lazy load → `MissingGreenlet: greenlet_spawn has not been called`，且该异常常发生在 except 块自身，把原异常吞成误导性的 greenlet 报错（2026-10-12-session-defects task-08 实证：auto_resume 压缩失败分支 rollback 后记日志访问 agent_run.id 连环爆）。修法：进入可能 rollback 的 try 前把异常路径需要的标量先捕获（`co_run_id = str(agent_run.id)`），rollback 后需要对象时经 `await session.get(Model, pk)` 异步重载再操作。来源：task-08（commit 954cb88f 修正过程）。
 
 （fake timers waitFor 条目已确认，迁出至 testing-gotchas.md——2026-10-13-session-change-files-hover 归档）
+
+## 【待确认】require_permission 隐式 Path(workspace_id) 依赖：平台级（无 ws 前缀）端点直接 422
+
+`auth_deps.require_permission(Permission.X)` 的 checker 签名含 `workspace_id: Annotated[uuid.UUID, Path(...)]`——路由路径里没有 `{workspace_id}` 时 FastAPI 请求校验直接 422（`loc=["path","workspace_id"]`，报错像路由冲突极具迷惑性；本变更新端点 GET /api/deploy-records 实测踩中，路由匹配调试零收获）。平台级端点（聚合多 workspace / 无 ws 前缀）应使用 `require_permission_any`（auth_deps.py 注释口径「used by APIs without ws_id」）。判别信号：422 details 里 loc 指向 path 参数名而非业务字段。来源：2026-10-14-deploy-release-notes task-02（router.py 注释留痕）。
+
+## 【待确认】.zcode 部分 skill 文件在 main 是已跟踪文件：git rm --cached 会把分支做成「删除态」
+
+`.zcode` 整体在 .gitignore，但 sillyhub-docker-deploy 等 skill 文件历史上已入库跟踪（gitignore 对已跟踪文件无效；`git ls-tree main -- <path>` 可判）。worktree 里改这类文件后 `git add` 被拒（按 ignore 规则报错，需 -f）；若误跑 `git rm --cached` 再 amend，分支相对 main 变成 375 行全删——merge 会把 skill 文件从 main 抹掉。正确姿势：确认 tracked 后 `git add -f`，diff main..HEAD --stat 应显示 +N 修改而非 N deletions。来源：2026-10-14-deploy-release-notes task-06 收口提交实操。
