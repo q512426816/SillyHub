@@ -102,11 +102,12 @@ def _get_user_role(user: User) -> str:
     return "business_user"
 
 
-# GET files 刷新前置同步预算（2026-10-13-change-files-refresh-sync / D-002@v1）：
-# backend 等 daemon 串行两条 sillyspec CLI 的 RPC 硬预算；daemon 侧单条 CLI 120s
-# 超时、防抖 15s（窗口错位语义见 design R-05——超时后 CLI 后台跑完，下次刷新
-# 见新数据）。超预算/任何失败一律降级返回现有镜像数据（D-003@v1）。
-_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 15.0
+# GET files 显式同步预算（2026-10-14-files-refresh-explicit-sync / 承 2026-10-13
+# change-files-refresh-sync D-002@v1）：仅 sync=1（用户点「刷新」按钮）触发，
+# 等 daemon 串行两条 sillyspec CLI 的 RPC 硬预算从 15s 收窄到 3s——点击刷新多数
+# 情况在预算内拿到同步后数据，超时静默降级返回现有镜像数据（daemon 防抖 15s
+# 内再点秒回新数据），任何一次点击都不会长时间卡住。默认（不带 sync）纯读零同步。
+_FILES_REFRESH_SYNC_RPC_TIMEOUT_S = 3.0
 
 
 async def _sync_change_via_daemon(
@@ -441,17 +442,23 @@ async def list_change_files(
     change_id: uuid.UUID,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    sync: bool = Query(
+        False, description="true=触发绑定 daemon 定向上行同步后再返回（仅前端「刷新」按钮点击使用）"
+    ),
 ) -> ChangeFileList:
     """变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
 
-    2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
+    2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
+    直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
+    仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
-    任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
-    ``service.list_files`` 纯读语义零改动。
+    任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
+    ``service.list_files`` 本体纯读语义零改动。
     """
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
-    await _sync_change_via_daemon(session, workspace_id, change, user.id)
+    if sync:
+        await _sync_change_via_daemon(session, workspace_id, change, user.id)
     items = await service.list_files(workspace_id, change_id)
     return ChangeFileList(
         change_id=change_id,
