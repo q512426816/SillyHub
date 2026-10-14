@@ -1,0 +1,153 @@
+/**
+ * task-01（2026-10-14-session-turn-preview-cards / FR-01 / FR-04 / D-004@v1）：
+ * 消息流归并层——turn-outline 大纲条目与已加载真实轮归并为单一列表（合并式单一
+ * 数据源，方案 A），未加载轮合成带 preview 摘要的预览条目，由 turn-timeline 渲染
+ * 为 TurnPreviewCard（task-02）。
+ *
+ * 归并规则：
+ *   - outline（seq 升序全量权威轮序）为骨架逐位落子：命中 turns 且「有实质内容或
+ *     活跃」→ 透传真实轮原引用（下游 memo 命中）；命中但是空壳块（enrich 孤儿
+ *     补建的静默配置行等）→ 预览条目原位替代（配置行墙由预览卡统一收敛，用户
+ *     痛点）；未命中 → 预览条目。
+ *   - turns 中大纲外轮（实时新轮 SSE 先到 / 大纲滞后）：原样尾部追加，顺序保持
+ *     （enrich 孤儿窗口规则 ql-20260916-016 的既有语义不归本函数管，保守不吞）。
+ *   - outline 缺失 / 空（拉取失败、旧 daemon、空会话）→ 原样返回输入引用（FR-04
+ *     降级：页面回到现状形态，不崩不空）。
+ */
+
+import { createEmptyAssembledTurn } from "@/components/daemon/session-log-assembler";
+import type { SessionTurnView, TurnUiStatus } from "@/components/daemon/turn-timeline";
+import type {
+  SessionTurnOutlineItem,
+  SessionTurnOutlineRead,
+} from "@/lib/daemon";
+
+/** 预览条目摘要（SessionTurnView.preview；可选字段缺省零回归惯例）。 */
+export interface TurnPreviewInfo {
+  /** 大纲提问摘要（后端截 60 字；null → undefined 不渲染该行）。 */
+  promptSummary?: string;
+  /** 大纲答复摘要（null → undefined 不渲染该行）。 */
+  answerSummary?: string;
+  /** 轮起始时间（started_at 兜底 created_at；卡片时间显示源）。 */
+  startedAt?: string | null;
+}
+
+/**
+ * 预览条目轮状态映射（词表对齐 session-panel-page.tsx mapRunStatus / 后端 run
+ * 状态；终点档落 TurnUiStatus 六档——mapRunStatus 的导航五档「stopped」在本域
+ * 投影为 killed「已中止」，与 turn-state.ts deriveTurnTerminalStatus 的打断分流
+ * 口径一致）。
+ */
+export function previewTurnStatusOf(
+  status: string | null | undefined,
+  errorCode?: string | null,
+): TurnUiStatus {
+  switch (status) {
+    case "completed":
+    case "finished":
+      return "completed";
+    case "failed":
+    case "error":
+      return errorCode === "interactive_interrupted" ? "killed" : "failed";
+    // 活跃词表（pending_approval = team 审批轮）；interrupting 前端展示态。
+    case "running":
+    case "active":
+    case "pending":
+    case "pending_approval":
+    case "interrupting":
+      return "running";
+    case "killed":
+    case "stopped":
+    case "interrupted":
+    case "cancelled":
+      return "killed";
+    default:
+      return "pending";
+  }
+}
+
+/**
+ * 「有实质内容或活跃」判定—— true 的轮透传真实块，false 的空壳块由大纲预览
+ * 条目原位替代：
+ *   - 活跃轮（pending/running/interrupting）恒 true（实时流与发送占位不能被
+ *     归并层掐断；SSE 内容到达前保留既有思考占位形态）；
+ *   - 失败轮（errorDetail 非空）恒 true（RunErrorItem 失败卡是真实内容）；
+ *   - 终态轮看正文：prompt / output 任一非空即 true；
+ *   - preview 已存在的条目（重入防御）恒 false——继续按大纲对齐，不重复包皮。
+ */
+function hasRenderableBody(t: SessionTurnView): boolean {
+  if (t.preview != null) return false;
+  if (
+    t.status === "pending" ||
+    t.status === "running" ||
+    t.status === "interrupting"
+  ) {
+    return true;
+  }
+  if (t.errorDetail) return true;
+  return t.prompt.trim().length > 0 || t.output.trim().length > 0;
+}
+
+/** 大纲条目 → 预览条目（SessionTurnView 全形状；segments/processItems 空产物，
+ *  渲染层预览分支最前置不消费段模型）。 */
+function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
+  const empty = createEmptyAssembledTurn();
+  return {
+    runId: item.run_id,
+    turn: item.seq,
+    prompt: "",
+    output: "",
+    status: previewTurnStatusOf(item.status, item.error_code),
+    seenLogIds: empty.seenLogIds,
+    inputTokens: null,
+    outputTokens: null,
+    ctxTokens: null,
+    errorDetail: null,
+    processItems: empty.processItems,
+    segments: empty.segments,
+    turnStartedAt: null,
+    realRunId: item.run_id,
+    preview: {
+      promptSummary: item.prompt_summary ?? undefined,
+      answerSummary: item.answer_summary ?? undefined,
+      startedAt: item.started_at ?? item.created_at,
+    },
+  };
+}
+
+/**
+ * 归并纯函数（displayTurns 派生链末端接线，见 session-panel-page displayTurns）。
+ * 输入 enrichDisplayTurns 产物（无 preview 字段），输出统一列表；不修改任何输入
+ * 对象（真实轮原引用透传，预览条目新建）。
+ */
+export function mergePreviewIntoDisplayTurns(
+  outline: SessionTurnOutlineRead | null,
+  turns: SessionTurnView[],
+): SessionTurnView[] {
+  if (!outline || outline.items.length === 0) return turns;
+  const byKey = new Map(
+    turns.map((t) => [t.realRunId ?? t.runId, t] as const),
+  );
+  const seen = new Set<string>();
+  const out: SessionTurnView[] = [];
+  // 后端保证 seq 升序（sessions.ts turn-outline 契约），客户端按 seq 稳定排序
+  // 兜底——对输入顺序鲁棒（seq 同值保持数组原序，成本 O(n log n) 一次性）。
+  const ordered = [...outline.items].sort((x, y) => x.seq - y.seq);
+  for (const item of ordered) {
+    seen.add(item.run_id);
+    const hit = byKey.get(item.run_id);
+    if (hit && hasRenderableBody(hit)) {
+      out.push(hit);
+      continue;
+    }
+    out.push(buildPreviewTurn(item));
+  }
+  // 大纲外轮尾部追加（实时新轮 / 大纲滞后孤儿）——引用与顺序原样保留。
+  for (const t of turns) {
+    const key = t.realRunId ?? t.runId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}

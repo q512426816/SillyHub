@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-turn-preview-cards",
+  "appliedAt": "2026-10-14T05:48:31.826Z",
+  "baseHash": "10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca",
+  "files": [
+    {
+      "path": "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+      "sha256": "3758221fe8a47971b3b377a3a9738744349e706a34633d74bc53b154db94e974"
+    },
+    {
+      "path": "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+      "sha256": "5758bdb48421918eadf1a2b766ae117fc3ebd8c83b45d15167ae5036d1ac64b0"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+      "sha256": "1b882a35a29753904019d365ce33cc82d79f00e84323d1dfeeab2da7849895a7"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/preview-merge.ts",
+      "sha256": "7f879c5de13bc9efa842ca8b41b18147be10ce942a9f973190d1d760a8f4500c"
+    },
+    {
+      "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+      "sha256": "a726d602aa2bc011f0a87c12fa20de3c50cc93b9c109289abf7689dce71fdfbc"
+    },
+    {
+      "path": "frontend/src/components/daemon/turn-timeline.tsx",
+      "sha256": "344a5d0245539ebae5e7019d77d5b196a188d580d5f1e259656c4f7b66cee8f7"
+    }
+  ]
+}

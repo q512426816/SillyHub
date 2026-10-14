@@ -1,0 +1,88 @@
+{
+  "change": "2026-10-14-session-turn-preview-cards",
+  "baseline": "10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca",
+  "head": "10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca",
+  "files": [
+    "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+    "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+    "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+    "frontend/src/components/daemon/session-panel/preview-merge.ts",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 6,
+    "additions": 1016,
+    "deletions": 71
+  },
+  "savedAt": "2026-10-14T03:28:57.731Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca",
+    "totals": {
+      "files": 6,
+      "additions": 1016,
+      "deletions": 71
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "additions": 174,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx",
+        "additions": 142,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts",
+        "additions": 167,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/preview-merge.ts",
+        "additions": 153,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 181,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 199,
+        "deletions": 61,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "6bc1a3ac58cb040b12e4d231297dac7d2237981fdaea72f74c7b944b01452003",
+  "patchStatus": "ok"
+}

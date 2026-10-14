@@ -46,7 +46,7 @@
  */
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
+import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -176,7 +176,7 @@ import {
 } from "@/components/permissions/minimized-dialog-capsule";
 import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -235,6 +235,20 @@ export interface SessionToolEvent {
   status: "running" | "ok" | "deny";
 }
 
+/**
+ * task-01（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览摘要
+ * （preview-merge.ts 归并产物，TurnRow 前置分支渲染 TurnPreviewCard）。可选
+ * 字段缺省零回归——真实轮不带此字段，渲染行为不变。
+ */
+export interface TurnPreviewInfo {
+  /** 大纲提问摘要（后端截 60 字；缺省不渲染该行）。 */
+  promptSummary?: string;
+  /** 大纲答复摘要（缺省不渲染该行）。 */
+  answerSummary?: string;
+  /** 轮起始时间 ISO（started_at 兜底 created_at；卡片时间显示源）。 */
+  startedAt?: string | null;
+}
+
 export interface SessionTurnView {
   runId: string;
   turn: number | null;
@@ -242,6 +256,12 @@ export interface SessionTurnView {
   output: string;
   status: TurnUiStatus;
   seenLogIds: Set<string>;
+  /**
+   * task-01（2026-10-14-session-turn-preview-cards）：非空即预览条目（mergePreviewIntoDisplayTurns
+   * 产物；prompt/output 恒空串），TurnRow 渲染 TurnPreviewCard 取代完整轮块。
+   * 真实轮不带（undefined），既有渲染路径零影响。
+   */
+  preview?: TurnPreviewInfo;
   /**
    * ql-20260621：实时累积 token。由 SSE `tokens` 事件（执行中）与
    * `turn_completed` 事件（终态）写入；null 表示尚未收到。
@@ -418,6 +438,14 @@ export interface TurnTimelineProps {
    * per-row 基元派生（isHighlighted 同法，R-07 防字符串/map 直传击穿行 memo）。
    */
   forkEntry?: TurnForkEntryWiring | null;
+  /**
+   * task-02（2026-10-14-session-turn-preview-cards / FR-02）：未加载轮预览卡展开
+   * 回调（runKey 上抛；挂载方走单轮直达原地加载）。缺省（dialog / /runtimes 等
+   * 旧消费方）预览分支整体不渲染——TurnRow 收到无 preview 的轮照旧；带 preview
+   * 但未接线时也回落既有分支（类型收窄守卫），零回归。父级 useCallback 保证
+   * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
+   */
+  expandPreview?: (_runKey: string) => void;
 }
 
 /**
@@ -476,6 +504,102 @@ function HugeOutputBlock({ text }: { text: string }) {
   );
 }
 
+/**
+ * task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡——
+ * 大纲摘要卡（虚线边框 + brand 浅底，与已加载实心气泡明确区分；视觉基准
+ * prototype-turn-preview-cards.html）。整卡 button 可点（onExpand 上抛 runKey，
+ * 挂载方走单轮直达原地加载）。纯展示零请求；屏外 content-visibility 跳过渲染
+ * （数百轮会话卡量防御，先例同文件完整轮块分支）。
+ */
+function TurnPreviewCard({
+  turn,
+  isHighlighted,
+  onExpand,
+}: {
+  turn: SessionTurnView;
+  isHighlighted: boolean;
+  onExpand: (_runKey: string) => void;
+}) {
+  const preview = turn.preview!;
+  const runKey = turn.realRunId ?? turn.runId;
+  // 状态点色（词表对齐 sessions/turn-catalog statusDotCls：running→warning 脉冲
+  // / failed→destructive / 其余含 completed/killed→中性 muted）。
+  const statusDot =
+    turn.status === "running"
+      ? "bg-warning animate-pulse"
+      : turn.status === "failed"
+        ? "bg-destructive/75"
+        : "bg-muted-foreground/45";
+  const statusLabel =
+    turn.status === "running"
+      ? "运行中"
+      : turn.status === "failed"
+        ? "失败"
+        : turn.status === "killed"
+          ? "已中止"
+          : turn.status === "pending"
+            ? "等待中"
+            : "完成";
+  const time = preview.startedAt ? formatTurnTime(preview.startedAt) : "";
+  const ariaParts = [
+    turn.turn != null ? `第${turn.turn}轮` : "轮次",
+    statusLabel,
+    preview.promptSummary ?? "（无内容记录）",
+  ];
+  return (
+    <button
+      type="button"
+      key={turn.runId}
+      data-turn-key={runKey}
+      data-testid="turn-preview-card"
+      // task-03（preview-cards）：预览卡标记——跳转链 hit() 的 60 字内容门据此
+      // 显式排除（卡内大纲摘要可能超阈值，防被误判「已加载」跳过直达）。
+      data-turn-preview="true"
+      aria-label={`展开${ariaParts.join(" · ")}`}
+      title={ariaParts.join(" · ")}
+      onClick={() => onExpand(runKey)}
+      className={cn(
+        "group flex w-full cursor-pointer flex-col gap-1 rounded-xl border border-dashed border-brand-300/70 bg-brand-50 px-3.5 py-2.5 text-left transition-all outline-none",
+        "hover:border-brand-300 hover:bg-brand-100 hover:shadow-md",
+        "focus-visible:ring-2 focus-visible:ring-brand-400",
+        // quick（ql-20260916-015）同款屏外跳过渲染（数百轮预览卡量防御）。
+        "[content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        isHighlighted && "ring-2 ring-brand-200",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 font-mono text-[10.5px] font-semibold text-brand-700">
+          {turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
+        </span>
+        <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDot)} />
+        <span className="shrink-0 rounded-full border border-brand-300 bg-card px-1.5 py-px text-[9.5px] leading-[1.4] text-brand-700">
+          未加载 · 点击展开
+        </span>
+        {time && (
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{time}</span>
+        )}
+      </span>
+      {preview.promptSummary && (
+        <span className="line-clamp-2 text-[12.5px] font-medium leading-[1.55] text-foreground">
+          {preview.promptSummary}
+        </span>
+      )}
+      {preview.answerSummary && (
+        <span className="line-clamp-2 text-[11.5px] leading-[1.55] text-muted-foreground">
+          {preview.answerSummary}
+        </span>
+      )}
+      <span className="mt-0.5 flex items-center gap-1 text-[10.5px] font-medium text-brand-600">
+        展开完整对话
+        <ArrowRight
+          aria-hidden
+          className="h-3 w-3 transition-transform group-hover:translate-x-0.5"
+        />
+      </span>
+    </button>
+  );
+}
+
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
@@ -490,6 +614,7 @@ const TurnRow = memo(function TurnRow({
   forkAnchor,
   forkSeq,
   onForkTurn,
+  onExpandPreview,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -512,6 +637,11 @@ const TurnRow = memo(function TurnRow({
   forkSeq?: number;
   /** task-08：分叉入口点击（runKey+seq 上抛挂载方；稳定 ref 由挂载方 useCallback 保证）。 */
   onForkTurn?: (_runKey: string, _seq: number) => void;
+  /** task-02（2026-10-14-session-turn-preview-cards / FR-01 FR-02）：预览卡展开回调
+   *  （runKey 上抛挂载方走单轮直达原地加载；缺省=旧消费方未接线，预览分支不渲染，
+   *  dialog / /runtimes 弹窗零回归。函数引用由父级 useCallback 保证稳定，同
+   *  onResend 先例）。 */
+  onExpandPreview?: (_runKey: string) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -527,8 +657,14 @@ const TurnRow = memo(function TurnRow({
         data-turn-key（值 = realRunId ?? runId，与刻度轨条目 key 同源）——两分支的
         根 DOM 元素均挂（fragment 上放 data-* 无效），供跳转方
         querySelector([data-turn-key]) 精确命中（design §7）。 */}
-    {/* ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。 */}
-    {!turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
+    {/* task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡
+        分支最前置——preview 条目（mergePreviewIntoDisplayTurns 产物，正文恒空）
+        渲染 TurnPreviewCard 取代完整轮块；expandPreview 缺省（旧消费方）不渲染
+        该分支，行为回落到下方既有两分支（零回归）。data-turn-key 照挂（与加载后
+        的真实块同源，原地替换后定位键不变）。 */}
+    {turn.preview && !turn.prompt && !turn.output && onExpandPreview ? (
+      <TurnPreviewCard turn={turn} isHighlighted={isHighlighted} onExpand={onExpandPreview} />
+    ) : !turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
               <div
                 key={turn.runId}
                 data-turn-key={turn.realRunId ?? turn.runId}
@@ -997,6 +1133,7 @@ export function TurnTimeline({
   highlightTurnKey,
   suppressFollowBottom = false,
   forkEntry,
+  expandPreview,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1319,6 +1456,7 @@ export function TurnTimeline({
               }
               forkSeq={turn.turn ?? idx + 1}
               onForkTurn={forkEntry?.onForkTurn}
+              onExpandPreview={expandPreview}
             />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——

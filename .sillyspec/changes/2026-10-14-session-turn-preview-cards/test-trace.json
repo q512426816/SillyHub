@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-turn-preview-cards",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-01:acc-0-d8f6e9b2",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-01:acc-1-b3fdab95",
+      "tests": [
+        "frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-02:acc-0-abd7a6f3",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-02:acc-1-6852ae89",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-02:acc-2-efae3213",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-04:acc-0-f07e93f9",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-session-turn-preview-cards:task-04:acc-1-ddf1f4f0",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-session-turn-preview-cards"
+    }
+  ]
+}

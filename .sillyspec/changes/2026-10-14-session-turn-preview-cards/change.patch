@@ -1,0 +1,1602 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+new file mode 100644
+index 000000000..ca672f712
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-preview-integration.test.tsx
+@@ -0,0 +1,174 @@
++/**
++ * task-03 / task-04（2026-10-14-session-turn-preview-cards / FR-01 / FR-03 /
++ * FR-04 / D-001@v1）：消息流预览卡整页集成测试——
++ *   1. FR-01：attach 后消息流按大纲呈现未加载轮预览卡（已加载轮不渲染卡）；
++ *   2. FR-03：点击未加载导航刻度 → 目标轮单轮直达 + 前后各 1 个未加载轮后台
++ *      预取（已加载邻居跳过）；预览卡命中不误判（hit 内容门排除 data-turn-preview，
++ *      D-005@v1）；
++ *   3. FR-04：大纲缺失（空 items）消息流无预览卡（降级现状形态）。
++ *
++ * mock 风格照抄 session-history-scroll.test.tsx（page 模式 QueryClientProvider +
++ * 仅 mock 网络层；MarkdownText jsdom 同步渲染 mock）。
++ */
++import { describe, it, expect, beforeEach, vi } from "vitest";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { SessionPanel } from "../session-panel";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++const sessionApi = vi.hoisted(() => ({
++  getSessionUsage: vi.fn().mockResolvedValue(null),
++  injectSession: vi.fn(), interruptSession: vi.fn(), endSession: vi.fn(),
++  streamSession: vi.fn(), getAgentSession: vi.fn(), getAgentSessionLogs: vi.fn(),
++  fetchSessionTurnOutline: vi.fn(),
++  fetchPendingDialogs: vi.fn(), fetchSessionDialogHistory: vi.fn(),
++  listSessionRuns: vi.fn(), listSessionTasks: vi.fn().mockResolvedValue([]),
++  listSessionTeamMissions: vi.fn(), fetchSessionQueue: vi.fn(),
++}));
++
++vi.mock("@/lib/daemon", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
++  return { ...actual, ...Object.fromEntries(Object.entries(sessionApi).map(([k, v]) => [k, v])) };
++});
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>("@/lib/workspaces");
++  return { ...actual, listWorkspaces: vi.fn().mockResolvedValue({ items: [] }) };
++});
++vi.mock("@/lib/use-daemon-machines", () => ({ useDaemonMachines: () => ({ items: [] }) }));
++vi.mock("@/lib/agent-profiles", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>("@/lib/agent-profiles");
++  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
++});
++vi.mock("@/lib/api/llm-providers", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>("@/lib/api/llm-providers");
++  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
++});
++
++function makeDetail(id: string) {
++  return { id, runtime_id: null, lease_id: null, provider: "claude", status: "active",
++    agent_session_id: `ag-${id}`, config: null, turn_count: 3, created_at: "t",
++    last_active_at: null, ended_at: null, current_run_id: null, workspace_id: "ws-1",
++    llm_provider_id: null, agent_profile_id: null, title: `S${id}`, config_snapshot: null };
++}
++
++/** 单轮最小日志集（user_input + stdout 各 1，让 logsToTurns 装配出有正文轮）。 */
++function turnLogs(runId: string, seq: number, minute: number) {
++  const ts = (sec: number) =>
++    `2026-08-26T10:${String(minute).padStart(2, "0")}:${String(sec).padStart(2, "0")}.0Z`;
++  return [
++    { id: `log-${runId}-u`, run_id: runId, timestamp: ts(0), channel: "user_input", content_redacted: `第${seq}轮提问内容，用于装配用户消息正文` },
++    { id: `log-${runId}-a`, run_id: runId, timestamp: ts(5), channel: "stdout", content_redacted: `第${seq}轮答复内容，装配 agent 答复正文使用` },
++  ];
++}
++
++/** 三轮大纲：run-a（第1轮，未加载）/ run-b（第2轮，未加载）/ run-c（第3轮，初始窗口内已加载）。 */
++const OUTLINE = {
++  session_id: "s1",
++  total_turns: 3,
++  items: [
++    { run_id: "run-a", seq: 1, created_at: "2026-08-26T10:00:00.0Z", started_at: "2026-08-26T10:00:00.0Z", status: "completed", prompt_summary: "第一轮提问摘要", answer_summary: "第一轮答复摘要" },
++    { run_id: "run-b", seq: 2, created_at: "2026-08-26T10:05:00.0Z", started_at: "2026-08-26T10:05:00.0Z", status: "completed", prompt_summary: "第二轮提问摘要" },
++    { run_id: "run-c", seq: 3, created_at: "2026-08-26T10:10:00.0Z", started_at: "2026-08-26T10:10:00.0Z", status: "completed", prompt_summary: "第三轮提问摘要" },
++  ],
++};
++
++function Host({ sessionId }: { sessionId: string }) {
++  return (
++    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
++      <SessionPanel mode="page" sessionId={sessionId} machines={[]} llmProviders={[]} />
++    </QueryClientProvider>
++  );
++}
++
++async function attachSession(sessionId: string) {
++  render(<Host sessionId={sessionId} />);
++  // attach 完成：初始窗口（run-c 轮）已装配进消息流。
++  await waitFor(() =>
++    expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0),
++  );
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  sessionApi.getAgentSession.mockImplementation(async (sid: string) => makeDetail(sid));
++  sessionApi.listSessionRuns.mockResolvedValue([]);
++  sessionApi.streamSession.mockImplementation(() => ({ close: vi.fn(), getLastEventId: () => null }));
++  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
++  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
++  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
++  sessionApi.fetchSessionQueue.mockResolvedValue([]);
++  sessionApi.fetchSessionTurnOutline.mockResolvedValue(OUTLINE);
++  // 初始窗口只回 run-c 日志（无 before 游标）；run_id 直达按参数分派。
++  sessionApi.getAgentSessionLogs.mockImplementation(
++    async (_sid: string, opts?: { runId?: string; before?: string }) => {
++      if (opts?.runId === "run-a") return turnLogs("run-a", 1, 0);
++      if (opts?.runId === "run-b") return turnLogs("run-b", 2, 5);
++      if (opts?.runId === "run-c") return turnLogs("run-c", 3, 10);
++      if (opts?.before) return [];
++      return turnLogs("run-c", 3, 10);
++    },
++  );
++});
++
++const runIdCalls = () =>
++  sessionApi.getAgentSessionLogs.mock.calls
++    .filter((c) => c[1]?.runId)
++    .map((c) => c[1]!.runId);
++
++describe("消息流预览卡集成（FR-01 / FR-03 / FR-04）", () => {
++  it("FR-01：attach 后未加载轮渲染预览卡（已加载轮不渲染）", async () => {
++    await attachSession("s1");
++    const cards = screen.getAllByTestId("turn-preview-card");
++    // run-a / run-b 未加载 → 2 张预览卡；run-c 已加载 → 不在卡列（其内容行在）。
++    expect(cards).toHaveLength(2);
++    expect(cards[0]!.getAttribute("data-turn-key")).toBe("run-a");
++    expect(cards[1]!.getAttribute("data-turn-key")).toBe("run-b");
++    expect(cards[0]).toHaveTextContent("第一轮提问摘要");
++  });
++
++  it("FR-03：点击未加载刻度 → 目标轮直达 + 前向未加载邻居预取（已加载邻居跳过）", async () => {
++    await attachSession("s1");
++    // 点击第 2 轮（run-b）导航刻度。
++    const tickB = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第2轮"));
++    expect(tickB).toBeTruthy();
++    fireEvent.click(tickB!);
++    // 目标轮直达 + 前邻居 run-a 预取（后邻居 run-c 已加载，跳过）。
++    await waitFor(() => {
++      const calls = runIdCalls();
++      expect(calls).toContain("run-b");
++      expect(calls).toContain("run-a");
++    });
++    // 已加载判重生效：run-c 不因预取被重复 run_id 拉取。
++    expect(runIdCalls().filter((r) => r === "run-c")).toHaveLength(0);
++    // 目标轮内容装配上屏（直达成功）。
++    await waitFor(() =>
++      expect(screen.getAllByText(/第2轮提问内容/).length).toBeGreaterThan(0),
++    );
++  });
++
++  it("FR-03/D-005：预览卡不被 hit() 60 字内容门误判——直达真实发起（回归锚）", async () => {
++    await attachSession("s1");
++    const tickB = screen
++      .getAllByTestId("turn-nav-tick")
++      .find((el) => el.getAttribute("aria-label")?.startsWith("第2轮"));
++    fireEvent.click(tickB!);
++    // 若 hit() 误判预览卡为已加载，直达请求不会发起——本断言即回归门。
++    await waitFor(() => expect(runIdCalls()).toContain("run-b"));
++  });
++
++  it("FR-04：大纲缺失（空 items）降级现状形态——无预览卡不报错", async () => {
++    sessionApi.fetchSessionTurnOutline.mockResolvedValue({
++      session_id: "s1", total_turns: 0, items: [],
++    });
++    await attachSession("s1");
++    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
++    expect(screen.getAllByText(/第3轮提问内容/).length).toBeGreaterThan(0);
++  });
++});
+diff --git a/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx b/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+new file mode 100644
+index 000000000..5573e704c
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/turn-preview-card.test.tsx
+@@ -0,0 +1,142 @@
++/**
++ * task-02 / task-04（2026-10-14-session-turn-preview-cards）：TurnPreviewCard
++ * 渲染与交互测试——预览卡内容（轮号/状态/时间/摘要）/点击展开回调/未接线零回归
++ * （task-02），预取判重与大纲缺失降级在 task-03 接线后由 task-04 追加（本文件
++ * target_files 双卡共享）。
++ *
++ * 测试纪律同 turn-time-display.test.tsx：mock MarkdownText（next/dynamic ssr:false
++ * 在 jsdom 同步渲染为 null）。
++ */
++import { describe, it, expect, vi } from "vitest";
++import { render, screen, fireEvent } from "@testing-library/react";
++
++import { TurnTimeline } from "../turn-timeline";
++import type { SessionTurnView } from "../turn-timeline";
++
++vi.mock("@/components/ui/markdown-text", () => ({
++  MarkdownText: ({ content }: { content: string }) => (
++    <div data-testid="markdown-text">{content}</div>
++  ),
++}));
++
++function previewTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
++  return {
++    runId: "run-prev-1",
++    turn: 3,
++    prompt: "",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    errorDetail: null,
++    realRunId: "run-prev-1",
++    preview: {
++      promptSummary: "CardMarkdown 薄壳组件是怎么实现的？",
++      answerSummary: "CardMarkdown 是一个只负责渲染的展示组件…",
++      startedAt: "2026-09-23T04:13:00Z",
++    },
++    ...overrides,
++  };
++}
++
++function renderProps(turns: SessionTurnView[], expandPreview?: (_runKey: string) => void) {
++  return {
++    turns,
++    viewMode: "conversation" as const,
++    errorMsg: null,
++    sessionStatus: "active" as const,
++    pendingRequests: [],
++    dialogHistory: [],
++    onDialogResolved: () => {},
++    onResend: () => {},
++    onSwitchProvider: () => {},
++    hasOnlineProvider: true,
++    emptyProviderLabel: "Claude Code",
++    expandPreview,
++  };
++}
++
++describe("TurnPreviewCard 渲染（task-02 / FR-01）", () => {
++  it("渲染轮号/未加载标记/提问摘要/答复摘要/展开入口", () => {
++    render(<TurnTimeline {...renderProps([previewTurn()], vi.fn())} />);
++    const card = screen.getByTestId("turn-preview-card");
++    expect(card).toBeInTheDocument();
++    expect(card).toHaveTextContent("第 3 轮");
++    expect(card).toHaveTextContent("未加载 · 点击展开");
++    expect(card).toHaveTextContent("CardMarkdown 薄壳组件是怎么实现的？");
++    expect(card).toHaveTextContent("CardMarkdown 是一个只负责渲染的展示组件…");
++    expect(card).toHaveTextContent("展开完整对话");
++  });
++
++  it("data-turn-key 锚点 = realRunId（与加载后真实块同源）", () => {
++    render(
++      <TurnTimeline
++        {...renderProps([previewTurn({ runId: "pseudo-1", realRunId: "real-1" })], vi.fn())}
++      />,
++    );
++    expect(screen.getByTestId("turn-preview-card")).toHaveAttribute(
++      "data-turn-key",
++      "real-1",
++    );
++  });
++
++  it("无摘要轮 aria-label 兜底「（无内容记录）」（对齐 turn-nav EMPTY_HINT 口径）", () => {
++    render(
++      <TurnTimeline
++        {...renderProps([
++          previewTurn({ preview: { startedAt: "2026-09-23T04:13:00Z" } }),
++        ], vi.fn())}
++      />,
++    );
++    expect(screen.getByTestId("turn-preview-card").getAttribute("aria-label")).toContain(
++      "（无内容记录）",
++    );
++  });
++
++  it("运行中预览轮状态点语义与 aria 状态文案（running → 运行中）", () => {
++    render(
++      <TurnTimeline {...renderProps([previewTurn({ status: "running" as const })], vi.fn())} />,
++    );
++    expect(screen.getByTestId("turn-preview-card").getAttribute("aria-label")).toContain(
++      "运行中",
++    );
++  });
++});
++
++describe("TurnPreviewCard 交互（task-02 / FR-02）", () => {
++  it("点击卡片上抛 onExpandPreview 且实参 = runKey", () => {
++    const onExpand = vi.fn();
++    render(<TurnTimeline {...renderProps([previewTurn()], onExpand)} />);
++    fireEvent.click(screen.getByTestId("turn-preview-card"));
++    expect(onExpand).toHaveBeenCalledTimes(1);
++    expect(onExpand).toHaveBeenCalledWith("run-prev-1");
++  });
++
++  it("未接线（expandPreview 缺省）预览轮回落既有分支：不渲染预览卡也不崩", () => {
++    const props = renderProps([previewTurn()]);
++    delete (props as { expandPreview?: unknown }).expandPreview;
++    render(<TurnTimeline {...props} />);
++    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
++  });
++
++  it("真实轮（无 preview 字段）不受 expandPreview 接线影响照常渲染", () => {
++    render(
++      <TurnTimeline
++        {...renderProps(
++          [
++            previewTurn({
++              runId: "real-run",
++              prompt: "真实用户消息",
++              output: "真实答复",
++              preview: undefined,
++            }),
++          ],
++          vi.fn(),
++        )}
++      />,
++    );
++    expect(screen.queryByTestId("turn-preview-card")).not.toBeInTheDocument();
++    expect(screen.getByText("真实用户消息")).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+new file mode 100644
+index 000000000..5229d3915
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/__tests__/preview-merge.test.ts
+@@ -0,0 +1,167 @@
++/**
++ * task-01（2026-10-14-session-turn-preview-cards / FR-01 / FR-04 / D-004@v1）：
++ * mergePreviewIntoDisplayTurns 归并纯函数单测——轮序 / 原位替换无双块 / 孤儿 /
++ * 降级 / preview 缺省五组语义。
++ */
++import { describe, expect, it } from "vitest";
++
++import type { SessionTurnView } from "@/components/daemon/turn-timeline";
++import {
++  mergePreviewIntoDisplayTurns,
++  previewTurnStatusOf,
++} from "@/components/daemon/session-panel/preview-merge";
++import type { SessionTurnOutlineItem, SessionTurnOutlineRead } from "@/lib/daemon";
++
++function outlineItem(over: Partial<SessionTurnOutlineItem> & { run_id: string; seq: number }): SessionTurnOutlineItem {
++  return {
++    created_at: "2026-10-08T10:00:00Z",
++    status: "completed",
++    ...over,
++  } as SessionTurnOutlineItem;
++}
++
++function outline(items: SessionTurnOutlineItem[]): SessionTurnOutlineRead {
++  return { session_id: "s1", total_turns: items.length, items } as SessionTurnOutlineRead;
++}
++
++function turn(over: Partial<SessionTurnView> & { runId: string }): SessionTurnView {
++  return {
++    turn: null,
++    prompt: "",
++    output: "",
++    status: "completed",
++    seenLogIds: new Set<string>(),
++    inputTokens: null,
++    outputTokens: null,
++    errorDetail: null,
++    ...over,
++  };
++}
++
++describe("mergePreviewIntoDisplayTurns 降级", () => {
++  it("outline 为 null 原样返回同一引用", () => {
++    const turns = [turn({ runId: "a", prompt: "hi" })];
++    expect(mergePreviewIntoDisplayTurns(null, turns)).toBe(turns);
++  });
++
++  it("outline items 为空原样返回同一引用", () => {
++    const turns = [turn({ runId: "a", prompt: "hi" })];
++    expect(mergePreviewIntoDisplayTurns(outline([]), turns)).toBe(turns);
++  });
++});
++
++describe("mergePreviewIntoDisplayTurns 轮序与预览条目", () => {
++  it("全部未加载：条目数=大纲轮数，按 seq 定序，预览条目带摘要且正文为空", () => {
++    const ol = outline([
++      outlineItem({ run_id: "b", seq: 2, prompt_summary: "第二条提问", answer_summary: "第二条答复" }),
++      outlineItem({ run_id: "a", seq: 1, prompt_summary: "第一条提问" }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, []);
++    expect(merged).toHaveLength(2);
++    expect(merged[0]!.runId).toBe("a");
++    expect(merged[0]!.turn).toBe(1);
++    expect(merged[0]!.preview?.promptSummary).toBe("第一条提问");
++    expect(merged[0]!.preview?.answerSummary).toBeUndefined();
++    expect(merged[1]!.runId).toBe("b");
++    expect(merged[1]!.preview?.answerSummary).toBe("第二条答复");
++    expect(merged[1]!.prompt).toBe("");
++    expect(merged[1]!.output).toBe("");
++  });
++
++  it("已加载真实轮透传原引用并落在大纲 seq 位置", () => {
++    const loaded = turn({ runId: "a", prompt: "用户消息", output: "agent 答复" });
++    const ol = outline([
++      outlineItem({ run_id: "a", seq: 1, prompt_summary: "大纲摘要（应被真实轮取代）" }),
++      outlineItem({ run_id: "b", seq: 2 }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [loaded]);
++    expect(merged[0]).toBe(loaded);
++    expect(merged[1]!.preview).toBeDefined();
++  });
++});
++
++describe("mergePreviewIntoDisplayTurns 原位替换与孤儿", () => {
++  it("孤儿空块（静默配置行）命中大纲 → 被预览条目原位替换，无双块", () => {
++    const orphan = turn({
++      runId: "__attach_history_7__",
++      realRunId: "a",
++      whoLine: { profileName: null, agentName: "X", providerName: null },
++      replyAt: "2026-10-08T10:00:00Z",
++    });
++    const ol = outline([
++      outlineItem({ run_id: "a", seq: 1, prompt_summary: "摘要" }),
++    ]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [orphan]);
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.preview).toBeDefined();
++    expect(merged[0]!.realRunId).toBe("a");
++  });
++
++  it("大纲外有内容轮尾部追加（实时新轮）", () => {
++    const live = turn({ runId: "live", prompt: "新消息", status: "running" });
++    const ol = outline([outlineItem({ run_id: "a", seq: 1 })]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [live]);
++    expect(merged).toHaveLength(2);
++    expect(merged[0]!.preview).toBeDefined();
++    expect(merged[1]).toBe(live);
++  });
++
++  it("大纲外孤儿空块原样保留（降级保守，不吞 enrich 窗口语义）", () => {
++    const orphan = turn({
++      runId: "orphan-x",
++      whoLine: { profileName: null, agentName: "X", providerName: null },
++    });
++    const ol = outline([outlineItem({ run_id: "a", seq: 1 })]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [orphan]);
++    expect(merged).toHaveLength(2);
++    expect(merged[1]).toBe(orphan);
++  });
++});
++
++describe("mergePreviewIntoDisplayTurns 实质内容判定", () => {
++  it("活跃轮（running 无内容）透传保留，不被预览卡取代", () => {
++    const running = turn({ runId: "a", status: "running" });
++    const ol = outline([outlineItem({ run_id: "a", seq: 1 })]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [running]);
++    expect(merged[0]).toBe(running);
++  });
++
++  it("失败轮（errorDetail 非空无 output）透传保留", () => {
++    const failed = turn({
++      runId: "a",
++      status: "failed",
++      errorDetail: { type: "unknown", code: null, message: "x", retryable: false, hint: null, raw: null },
++    });
++    const ol = outline([outlineItem({ run_id: "a", seq: 1, status: "failed" })]);
++    const merged = mergePreviewIntoDisplayTurns(ol, [failed]);
++    expect(merged[0]).toBe(failed);
++  });
++
++  it("重入安全：已带 preview 的条目继续按大纲对齐不重复包皮", () => {
++    const prev = mergePreviewIntoDisplayTurns(
++      outline([outlineItem({ run_id: "a", seq: 1, prompt_summary: "s" })]),
++      [],
++    );
++    const merged = mergePreviewIntoDisplayTurns(
++      outline([outlineItem({ run_id: "a", seq: 1, prompt_summary: "s" })]),
++      prev,
++    );
++    expect(merged).toHaveLength(1);
++    expect(merged[0]!.preview?.promptSummary).toBe("s");
++  });
++});
++
++describe("previewTurnStatusOf", () => {
++  it("词表映射：completed/finished→completed，failed→failed，运行族→running，中止族→killed，未知→pending", () => {
++    expect(previewTurnStatusOf("completed")).toBe("completed");
++    expect(previewTurnStatusOf("finished")).toBe("completed");
++    expect(previewTurnStatusOf("failed")).toBe("failed");
++    expect(previewTurnStatusOf("running")).toBe("running");
++    expect(previewTurnStatusOf("pending_approval")).toBe("running");
++    expect(previewTurnStatusOf("killed")).toBe("killed");
++    expect(previewTurnStatusOf("stopped")).toBe("killed");
++    expect(previewTurnStatusOf("cancelled")).toBe("killed");
++    expect(previewTurnStatusOf(null)).toBe("pending");
++    expect(previewTurnStatusOf("whatever")).toBe("pending");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-panel/preview-merge.ts b/frontend/src/components/daemon/session-panel/preview-merge.ts
+new file mode 100644
+index 000000000..3fa0572ee
+--- /dev/null
++++ b/frontend/src/components/daemon/session-panel/preview-merge.ts
+@@ -0,0 +1,153 @@
++/**
++ * task-01（2026-10-14-session-turn-preview-cards / FR-01 / FR-04 / D-004@v1）：
++ * 消息流归并层——turn-outline 大纲条目与已加载真实轮归并为单一列表（合并式单一
++ * 数据源，方案 A），未加载轮合成带 preview 摘要的预览条目，由 turn-timeline 渲染
++ * 为 TurnPreviewCard（task-02）。
++ *
++ * 归并规则：
++ *   - outline（seq 升序全量权威轮序）为骨架逐位落子：命中 turns 且「有实质内容或
++ *     活跃」→ 透传真实轮原引用（下游 memo 命中）；命中但是空壳块（enrich 孤儿
++ *     补建的静默配置行等）→ 预览条目原位替代（配置行墙由预览卡统一收敛，用户
++ *     痛点）；未命中 → 预览条目。
++ *   - turns 中大纲外轮（实时新轮 SSE 先到 / 大纲滞后）：原样尾部追加，顺序保持
++ *     （enrich 孤儿窗口规则 ql-20260916-016 的既有语义不归本函数管，保守不吞）。
++ *   - outline 缺失 / 空（拉取失败、旧 daemon、空会话）→ 原样返回输入引用（FR-04
++ *     降级：页面回到现状形态，不崩不空）。
++ */
++
++import { createEmptyAssembledTurn } from "@/components/daemon/session-log-assembler";
++import type { SessionTurnView, TurnUiStatus } from "@/components/daemon/turn-timeline";
++import type {
++  SessionTurnOutlineItem,
++  SessionTurnOutlineRead,
++} from "@/lib/daemon";
++
++/** 预览条目摘要（SessionTurnView.preview；可选字段缺省零回归惯例）。 */
++export interface TurnPreviewInfo {
++  /** 大纲提问摘要（后端截 60 字；null → undefined 不渲染该行）。 */
++  promptSummary?: string;
++  /** 大纲答复摘要（null → undefined 不渲染该行）。 */
++  answerSummary?: string;
++  /** 轮起始时间（started_at 兜底 created_at；卡片时间显示源）。 */
++  startedAt?: string | null;
++}
++
++/**
++ * 预览条目轮状态映射（词表对齐 session-panel-page.tsx mapRunStatus / 后端 run
++ * 状态；终点档落 TurnUiStatus 六档——mapRunStatus 的导航五档「stopped」在本域
++ * 投影为 killed「已中止」，与 turn-state.ts deriveTurnTerminalStatus 的打断分流
++ * 口径一致）。
++ */
++export function previewTurnStatusOf(
++  status: string | null | undefined,
++  errorCode?: string | null,
++): TurnUiStatus {
++  switch (status) {
++    case "completed":
++    case "finished":
++      return "completed";
++    case "failed":
++    case "error":
++      return errorCode === "interactive_interrupted" ? "killed" : "failed";
++    // 活跃词表（pending_approval = team 审批轮）；interrupting 前端展示态。
++    case "running":
++    case "active":
++    case "pending":
++    case "pending_approval":
++    case "interrupting":
++      return "running";
++    case "killed":
++    case "stopped":
++    case "interrupted":
++    case "cancelled":
++      return "killed";
++    default:
++      return "pending";
++  }
++}
++
++/**
++ * 「有实质内容或活跃」判定—— true 的轮透传真实块，false 的空壳块由大纲预览
++ * 条目原位替代：
++ *   - 活跃轮（pending/running/interrupting）恒 true（实时流与发送占位不能被
++ *     归并层掐断；SSE 内容到达前保留既有思考占位形态）；
++ *   - 失败轮（errorDetail 非空）恒 true（RunErrorItem 失败卡是真实内容）；
++ *   - 终态轮看正文：prompt / output 任一非空即 true；
++ *   - preview 已存在的条目（重入防御）恒 false——继续按大纲对齐，不重复包皮。
++ */
++function hasRenderableBody(t: SessionTurnView): boolean {
++  if (t.preview != null) return false;
++  if (
++    t.status === "pending" ||
++    t.status === "running" ||
++    t.status === "interrupting"
++  ) {
++    return true;
++  }
++  if (t.errorDetail) return true;
++  return t.prompt.trim().length > 0 || t.output.trim().length > 0;
++}
++
++/** 大纲条目 → 预览条目（SessionTurnView 全形状；segments/processItems 空产物，
++ *  渲染层预览分支最前置不消费段模型）。 */
++function buildPreviewTurn(item: SessionTurnOutlineItem): SessionTurnView {
++  const empty = createEmptyAssembledTurn();
++  return {
++    runId: item.run_id,
++    turn: item.seq,
++    prompt: "",
++    output: "",
++    status: previewTurnStatusOf(item.status, item.error_code),
++    seenLogIds: empty.seenLogIds,
++    inputTokens: null,
++    outputTokens: null,
++    ctxTokens: null,
++    errorDetail: null,
++    processItems: empty.processItems,
++    segments: empty.segments,
++    turnStartedAt: null,
++    realRunId: item.run_id,
++    preview: {
++      promptSummary: item.prompt_summary ?? undefined,
++      answerSummary: item.answer_summary ?? undefined,
++      startedAt: item.started_at ?? item.created_at,
++    },
++  };
++}
++
++/**
++ * 归并纯函数（displayTurns 派生链末端接线，见 session-panel-page displayTurns）。
++ * 输入 enrichDisplayTurns 产物（无 preview 字段），输出统一列表；不修改任何输入
++ * 对象（真实轮原引用透传，预览条目新建）。
++ */
++export function mergePreviewIntoDisplayTurns(
++  outline: SessionTurnOutlineRead | null,
++  turns: SessionTurnView[],
++): SessionTurnView[] {
++  if (!outline || outline.items.length === 0) return turns;
++  const byKey = new Map(
++    turns.map((t) => [t.realRunId ?? t.runId, t] as const),
++  );
++  const seen = new Set<string>();
++  const out: SessionTurnView[] = [];
++  // 后端保证 seq 升序（sessions.ts turn-outline 契约），客户端按 seq 稳定排序
++  // 兜底——对输入顺序鲁棒（seq 同值保持数组原序，成本 O(n log n) 一次性）。
++  const ordered = [...outline.items].sort((x, y) => x.seq - y.seq);
++  for (const item of ordered) {
++    seen.add(item.run_id);
++    const hit = byKey.get(item.run_id);
++    if (hit && hasRenderableBody(hit)) {
++      out.push(hit);
++      continue;
++    }
++    out.push(buildPreviewTurn(item));
++  }
++  // 大纲外轮尾部追加（实时新轮 / 大纲滞后孤儿）——引用与顺序原样保留。
++  for (const t of turns) {
++    const key = t.realRunId ?? t.runId;
++    if (seen.has(key)) continue;
++    seen.add(key);
++    out.push(t);
++  }
++  return out;
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index b1a4a6cc9..0994244f8 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -119,6 +119,9 @@ import {
+   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
+ } from "./turn-state";
+ import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
++// task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
++// 未加载轮合成预览条目，D-004 方案 A）。
++import { mergePreviewIntoDisplayTurns } from "./preview-merge";
+ import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
+ import { TeamTriggerRow } from "./team-trigger-row";
+ import { WorkerSessionOverlay } from "./worker-session-overlay";
+@@ -797,6 +800,11 @@ export function SessionPanelPage({
+   // handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），
+   // ref 读取不受闭包陈旧影响。
+   const jumpEmptyJumpedRunIdsRef = useRef<Set<string>>(new Set());
++  // task-03（2026-10-14-session-turn-preview-cards / FR-03）：预取/展开在飞去重
++  // 集合（run_id 集合，会话切换清空见上方重置区；同 jumpEmptyJumpedRunIdsRef 的
++  // ref 而非 state 理由——回调 deps 刻意不含 turnState 防每帧重建，ref 读取不受
++  // 闭包陈旧影响）。
++  const previewInflightRef = useRef<Set<string>>(new Set());
+   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
+   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+@@ -1113,6 +1121,9 @@ export function SessionPanelPage({
+     // 2026-09-29-jump-empty-turn-dup：零正文直达幂等标记随会话切换重置（新会话
+     // 同名 run 的日志形态可能不同，不跨会话继承）。
+     jumpEmptyJumpedRunIdsRef.current = new Set();
++    // task-03（2026-10-14-session-turn-preview-cards）：预取在飞去重集合随会话
++    // 切换清空（在飞响应由纪元守卫丢弃，集合不跨会话继承）。
++    previewInflightRef.current = new Set();
+     fetchedErrorRunIdsRef.current.clear();
+     completedSideEffectRunIdsRef.current.clear();
+     currentRunIdRef.current = null;
+@@ -2255,6 +2266,133 @@ export function SessionPanelPage({
+     };
+   }, [turnState, timelineScrollEl]);
+ 
++  // ── task-03（2026-10-14-session-turn-preview-cards / FR-02 / FR-03 / D-001@v1
++  //    / D-003@v1）：预览卡原地展开 + 跳转附近预取 ─────────────────────────────
++  // 三重判重共享：已加载判（turnsRef 发起时快照 hasBody）+ 零正文幂等
++  // （jumpEmptyJumpedRunIdsRef）+ 在飞去重（previewInflightRef，声明见 :802 区，
++  // 会话切换清空）。deps 刻意不含 turnState（同 handleJumpToTurn 惯例——防每帧
++  // SSE 增量重建回调），已加载判定经 turnsRef 读发起时快照。
++
++  /**
++   * run_id 单轮拉取 + 游标压低 + prepend 装配（语义与 handleJumpToTurn 直达分支
++   * :2386-2433 同源收敛复用：纪元/卸载守卫、复合游标压到该轮最旧行防翻页重复、
++   * logsToTurns 装配 + #e 页键装饰前插、零正文记幂等不 prepend）。页键前缀
++   * `pv-` 与跳转链 `jump-` 区分（同轮两路装配的装饰键不撞；已加载判挡住同轮
++   * 重复拉取，归并/导航匹配按 realRunId 不受装饰后缀影响）。返回 loaded/empty/
++   * failed 供调用方分派反馈（预取静默 / 展开提示）。
++   */
++  const fetchAndAttachTurn = useCallback(
++    async (runKey: string): Promise<"loaded" | "empty" | "failed"> => {
++      if (!sessionId) return "failed";
++      const epochAtStart = sessionEpochRef.current;
++      try {
++        const turnLogs = await getAgentSessionLogs(sessionId, { runId: runKey });
++        if (epochAtStart !== sessionEpochRef.current || !mountedRef.current) {
++          return "failed";
++        }
++        if (turnLogs.length === 0) {
++          jumpEmptyJumpedRunIdsRef.current.add(runKey);
++          return "empty";
++        }
++        // 游标压低（复合游标 ts+id 同步写）：目标轮比当前游标更早时把「加载更早」
++        // 起点压到该轮最旧行，后续触顶翻页不整轮重复拉回（:2401 同款注释）。
++        const oldestJump = turnLogs.reduce(
++          (m, l) => (l.timestamp < m.timestamp ? l : m),
++          turnLogs[0]!,
++        );
++        const cursorBefore = historyCursorRef.current;
++        if (cursorBefore == null || oldestJump.timestamp < cursorBefore) {
++          historyCursorRef.current = oldestJump.timestamp;
++          historyCursorIdRef.current = oldestJump.id;
++        }
++        const newTurns = logsToTurns(turnLogs);
++        const anyBody = newTurns.some(
++          (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
++        );
++        if (newTurns.length > 0 && anyBody) {
++          const pageKey = `pv-${oldestJump.id.slice(0, 8)}`;
++          const decorated = newTurns.map((t) => ({
++            ...t,
++            runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
++          }));
++          setTurnState((prev) => ({ ...prev, turns: [...decorated, ...prev.turns] }));
++          return "loaded";
++        }
++        jumpEmptyJumpedRunIdsRef.current.add(runKey);
++        return "empty";
++      } catch {
++        return "failed";
++      }
++    },
++    [sessionId],
++  );
++
++  /**
++   * 预览卡点击（FR-02 / D-003@v1）：原地展开——不 scrollIntoView（卡片本在视口
++   * 内，与导航跳转的定位语义区分）；加载成功后受控 ring 高亮 2.2s 自清（复用
++   * highlightTurnKey / highlightTimerRef 既有机制）；置 activeTurnKey 联动导航
++   * 刻度高亮。加载完成即保持完整轮块不缩回（D-003）。
++   */
++  const handleExpandPreview = useCallback(
++    (runKey: string) => {
++      if (!sessionId) return;
++      const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === runKey);
++      const hasBody =
++        (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
++      if (hit && hasBody) return; // 已加载完成（归并层替换在途，防御双击）
++      if (jumpEmptyJumpedRunIdsRef.current.has(runKey)) return; // 零正文幂等
++      if (previewInflightRef.current.has(runKey)) return; // 在飞去重
++      previewInflightRef.current.add(runKey);
++      void fetchAndAttachTurn(runKey).then((result) => {
++        previewInflightRef.current.delete(runKey);
++        if (result === "loaded") {
++          setActiveTurnKey(runKey);
++          setHighlightTurnKey(runKey);
++          if (highlightTimerRef.current !== null) {
++            clearTimeout(highlightTimerRef.current);
++          }
++          highlightTimerRef.current = window.setTimeout(() => {
++            highlightTimerRef.current = null;
++            setHighlightTurnKey(null);
++          }, HIGHLIGHT_TURN_CLEAR_MS);
++        } else if (result === "failed") {
++          notify.error("该轮加载失败，请稍后重试");
++        }
++        // empty：幂等标记已记，卡片保持（下次点击短路）——零正文轮无内容可展开。
++      });
++    },
++    [sessionId, notify, fetchAndAttachTurn],
++  );
++
++  /**
++   * 跳转附近预取（FR-03）：目标轮直达成功后 fire-and-forget 串行预取大纲序前后
++   * 各 1 个未加载轮（同一 fetchAndAttachTurn 装配链），读上下文不打扰当前视口
++   * （无滚动/无高亮）。失败静默（下次跳转再触发）；不引入轮询/定时器。
++   */
++  const prefetchNearbyTurns = useCallback(
++    (targetRunKey: string) => {
++      if (!sessionId || !turnOutline) return;
++      const idx = turnOutline.items.findIndex((i) => i.run_id === targetRunKey);
++      if (idx === -1) return;
++      const neighbors = [turnOutline.items[idx - 1], turnOutline.items[idx + 1]];
++      for (const item of neighbors) {
++        if (!item) continue;
++        const key = item.run_id;
++        const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
++        const hasBody =
++          (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
++        if (hit && hasBody) continue;
++        if (jumpEmptyJumpedRunIdsRef.current.has(key)) continue;
++        if (previewInflightRef.current.has(key)) continue;
++        previewInflightRef.current.add(key);
++        void fetchAndAttachTurn(key).finally(() => {
++          previewInflightRef.current.delete(key);
++        });
++      }
++    },
++    [sessionId, turnOutline, fetchAndAttachTurn],
++  );
++
+   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
+   //    导航列行点击跳转链路（TurnNavList onJump 消费）。已加载轮直跳定位高亮；
+   //    未加载轮优先单轮直达（task-04 2026-09-27-session-fast-replay / FR-05——
+@@ -2281,6 +2419,10 @@ export function SessionPanelPage({
+           `[data-turn-key="${CSS.escape(entry.key)}"]`,
+         );
+         if (!row) return null;
++        // task-03（2026-10-14-session-turn-preview-cards）：预览卡视同未命中——
++        // 卡内大纲摘要（后端截 60 字 + 标签文案）可能过 60 字内容门，命中会让
++        // 「点击未加载轮」被误判已加载而跳过直达/翻页（D-005@v1 执行期裁决）。
++        if (row.hasAttribute("data-turn-preview")) return null;
+         return (row.textContent ?? "").trim().length > 60 ? row : null;
+       };
+       /** 定位高亮共用尾段（已加载直跳 / 单轮直达 prepend 提交后共用，行为与
+@@ -2301,7 +2443,11 @@ export function SessionPanelPage({
+               container?.querySelector<HTMLElement>(
+                 `[data-turn-key="${CSS.escape(entry.key)}"]`,
+               );
+-            row?.scrollIntoView({ behavior: "smooth", block: "start" });
++            // task-04（preview-cards 测试暴露）：typeof 守卫（jsdom 无
++            // scrollIntoView；先例 turn-catalog.tsx:194 / turn-nav-list.tsx:261）。
++            if (row && typeof row.scrollIntoView === "function") {
++              row.scrollIntoView({ behavior: "smooth", block: "start" });
++            }
+             settleFollow();
+             setHighlightTurnKey(entry.key);
+             if (highlightTimerRef.current !== null) {
+@@ -2432,6 +2578,9 @@ export function SessionPanelPage({
+               jumpEmptyJumpedRunIdsRef.current.add(entry.key);
+             }
+             locateAndHighlight();
++            // task-03（FR-03）：目标轮直达成功 → 后台预取大纲序前后各 1 个未加载轮
++            // （fire-and-forget，不阻塞定位高亮；三重判重在 prefetch 内）。
++            prefetchNearbyTurns(entry.key);
+             jumpSuppressLoadEarlierRef.current = false;
+             return;
+           } catch {
+@@ -2448,9 +2597,10 @@ export function SessionPanelPage({
+       // 命中：直跳定位高亮（原路径）。
+       locateAndHighlight();
+     },
+-    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline],
++    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline, prefetchNearbyTurns],
+   );
+ 
++
+   /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
+   const handleSessionSearch = useCallback(async () => {
+     const q = searchTerm.trim();
+@@ -2649,16 +2799,25 @@ export function SessionPanelPage({
+   // 按 run 快照补 whoLine / 历史 usage（派生体外提 page-helpers.enrichDisplayTurns，
+   // 依赖数组逐项保留）：只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 /
+   // 占位 turn）原样返回——whoLine 不渲染（零回归）。
++  // task-01/03（2026-10-14-session-turn-preview-cards / FR-01 / D-004@v1）：派生链
++  // 末端串联消息流归并层——turn-outline 大纲条目为骨架，未加载轮合成预览条目
++  // （TurnPreviewCard），空壳块（enrich 孤儿补建的静默配置行）被大纲条目原位
++  // 替代；outline 缺失原样透传（FR-04 降级）。归并消费 turnsRef 同源数据，顺序
++  // 以大纲 seq 权威定序。依赖数组增补 turnOutline（outline 仅会话切换拉取一次，
++  // 重派生成本可接受）。
+   const displayTurns = useMemo(
+     () =>
+-      enrichDisplayTurns(
+-        turnState.turns,
+-        runsMeta,
+-        llmProviders,
+-        agentDisplayName,
+-        session?.user_id,
++      mergePreviewIntoDisplayTurns(
++        turnOutline,
++        enrichDisplayTurns(
++          turnState.turns,
++          runsMeta,
++          llmProviders,
++          agentDisplayName,
++          session?.user_id,
++        ),
+       ),
+-    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
++    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, turnOutline],
+   );
+ 
+   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
+@@ -2837,8 +2996,13 @@ export function SessionPanelPage({
+     }
+     // 命中覆盖：displayTurns 按 realRunId ?? runId（与聊天区 data-turn-key 同源）
+     // 建索引，命中 run 的条目用本地 prompt / 首个 text 段摘要覆盖，loaded=true。
++    // task-04（2026-10-14-session-turn-preview-cards）：预览条目（preview 非空，
++    // 正文恒空）不进已加载索引——否则导航空心刻度消失、摘要被空条目覆盖成
++    // 「无内容记录」（代码审查发现的导航语义回归，集成面单测未覆盖的派生消费方）。
+     const loadedByKey = new Map(
+-      displayTurns.map((t) => [t.realRunId ?? t.runId, t] as const),
++      displayTurns
++        .filter((t) => !t.preview)
++        .map((t) => [t.realRunId ?? t.runId, t] as const),
+     );
+     const entries = orderedRuns.map((run, i) =>
+       buildEntry(
+@@ -2856,6 +3020,9 @@ export function SessionPanelPage({
+     const seenKeys = new Set(orderedRuns.map((run) => run.id));
+     let orphanNo = entries.length;
+     for (const t of displayTurns) {
++      // task-04（preview-cards）：预览条目不进孤儿兜底——其轮次信息由大纲骨架
++      // 承载；runsMeta 滞后瞬态下宁可暂缺（runs 到位自愈），不显示假已加载空摘要。
++      if (t.preview) continue;
+       const key = t.realRunId ?? t.runId;
+       if (seenKeys.has(key)) continue;
+       seenKeys.add(key);
+@@ -4400,6 +4567,10 @@ export function SessionPanelPage({
+         // task-04：目录跳转命中受控高亮（~2.2s 自清；TurnTimeline 内逐行派生
+         // isHighlighted 进 memo 行，R-07）。
+         highlightTurnKey={highlightTurnKey}
++        // task-03（2026-10-14-session-turn-preview-cards / FR-02）：预览卡原地展开
++        // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
++        // TurnTimeline 内守卫承担，本挂载恒接线）。
++        expandPreview={handleExpandPreview}
+         sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
+         pendingRequests={pendingRequests}
+         dialogHistory={dialogHistory}
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 4caac2027..f5869de52 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1,5 +1,5 @@
+ "use client";
+-
++
+ /**
+  * task-13（2026-08-14-sessions-portal / FR-05 / D-002@v1）：会话消息流共享子组件。
+  *
+@@ -44,11 +44,11 @@
+  * 视图挂轮尾 RoundDivider 行、全部视图挂状态徽章行（行容器带 group 供 hover
+  * 浮出）。缺省不渲染（未接线消费方零回归）。
+  */
+-
++
+ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+-import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
++import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
+ import { Badge } from "antd";
+-
++
+ import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
+ // task-07（2026-09-09-askuser-pi-cursor / FR-03）：cursor marker 型提问卡 +
+ // 标记解析器（文本段命中处原位渲染卡并隐藏标记原文）。
+@@ -78,7 +78,7 @@ import { InlineAttRefTextWithPreview } from "@/components/daemon/attachment-ref-
+ // task-10（2026-09-10-account-avatar-upload / FR-05）：自己（sender.me）的气泡
+ // 头像取 useSession user.avatar（选择器订阅仅 avatar 切片）。
+ import { useSession } from "@/stores/session";
+-
++
+ /* ── ql-20260903-025：prompt 附件标记解析缓存——流式期间每次渲染对每一轮
+  *    prompt 逐行正则拆分重复计算，按内容字符串缓存（FIFO 上限防泄漏）。 ── */
+ const PARSED_MARKER_CACHE = new Map<
+@@ -86,7 +86,7 @@ const PARSED_MARKER_CACHE = new Map<
+   ReturnType<typeof parseAttachmentMarkers>
+ >();
+ const PARSED_MARKER_CACHE_MAX = 500;
+-
++
+ function parseAttachmentMarkersCached(prompt: string) {
+   let hit = PARSED_MARKER_CACHE.get(prompt);
+   if (!hit) {
+@@ -101,7 +101,7 @@ function parseAttachmentMarkersCached(prompt: string) {
+ }
+ import { AttachmentChips } from "@/components/daemon/attachment-chips";
+ import { CopyButton } from "@/components/daemon/copy-button";
+-
++
+ /* ── task-07（2026-09-09-askuser-pi-cursor）：askuser 标记解析缓存——同上方
+  *    附件标记缓存哲学（ql-20260903-025），流式期间每次渲染对 output/text 段
+  *    重复尾部 8KB 窗口扫描 + JSON.parse，按内容字符串缓存（FIFO 上限防泄漏）。
+@@ -112,7 +112,7 @@ const ASKUSER_MARKER_CACHE = new Map<
+   ReturnType<typeof parseAskUserMarker>
+ >();
+ const ASKUSER_MARKER_CACHE_MAX = 500;
+-
++
+ function parseAskUserMarkerCached(text: string) {
+   let hit: ReturnType<typeof parseAskUserMarker>;
+   if (ASKUSER_MARKER_CACHE.has(text)) {
+@@ -127,7 +127,7 @@ function parseAskUserMarkerCached(text: string) {
+   ASKUSER_MARKER_CACHE.set(text, hit);
+   return hit;
+ }
+-
++
+ /** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
+ function formatTurnTime(iso: string): string {
+   const d = new Date(iso);
+@@ -141,7 +141,7 @@ function formatTurnTime(iso: string): string {
+     d.getDate() === now.getDate();
+   return sameDay ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+ }
+-
++
+ /**
+  * quick-3c85b05e（2026-09-15 轮次时间三段显示）：带秒时刻格式化——今天
+  * HH:MM:SS，跨天 MM-DD HH:MM:SS（开始/结束时间精度到秒，与 formatTurnTime 的
+@@ -159,7 +159,7 @@ function formatTurnTimeSec(iso: string): string {
+     d.getDate() === now.getDate();
+   return sameDay ? hms : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hms}`;
+ }
+-
++
+ /** quick-3c85b05e：轮次持续时间 mm:ss（分钟可 >59，格式同子代理块时长）。 */
+ function formatTurnDuration(ms: number): string {
+   const total = Math.max(0, Math.round(ms / 1000));
+@@ -176,9 +176,9 @@ import {
+ } from "@/components/permissions/minimized-dialog-capsule";
+ import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
+ import { cn } from "@/lib/utils";
+-import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+-import { copyTextToClipboard } from "@/lib/clipboard";
+-
++import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
++import { copyTextToClipboard } from "@/lib/clipboard";
++
+ /**
+  * ql-20260730-003：一个回合内按真实到达顺序排列的过程项。
+  * 思考/工具/stderr 混在同一有序序列，渲染时连续 thinking 合并成一整段（被工具/stderr
+@@ -196,7 +196,7 @@ export interface AutoResumeEntry {
+   /** 定时面计划时间（queued 为 null/undefined）。 */
+   dispatchAt?: string | null;
+ }
+-
++
+ export type SessionProcessItem =
+   | { kind: "thinking"; text: string; ts?: number }
+   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
+@@ -219,10 +219,10 @@ export type SessionProcessItem =
+    * 居中虚线中性行，与 thinking 同待遇——「对话」视图不渲染过程项。
+    */
+   | { kind: "system_event"; text: string; ts?: number };
+-
++
+ export type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
+ export type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
+-
++
+ /**
+  * ql-20260730-001：agent 回合内的工具调用事件（折叠卡片用）。
+  * - raw：[TOOL_USE] 内容（命令/args，已剥前缀；空串=孤儿 result 无配对 use）
+@@ -234,7 +234,21 @@ export interface SessionToolEvent {
+   result?: string;
+   status: "running" | "ok" | "deny";
+ }
+-
++
++/**
++ * task-01（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览摘要
++ * （preview-merge.ts 归并产物，TurnRow 前置分支渲染 TurnPreviewCard）。可选
++ * 字段缺省零回归——真实轮不带此字段，渲染行为不变。
++ */
++export interface TurnPreviewInfo {
++  /** 大纲提问摘要（后端截 60 字；缺省不渲染该行）。 */
++  promptSummary?: string;
++  /** 大纲答复摘要（缺省不渲染该行）。 */
++  answerSummary?: string;
++  /** 轮起始时间 ISO（started_at 兜底 created_at；卡片时间显示源）。 */
++  startedAt?: string | null;
++}
++
+ export interface SessionTurnView {
+   runId: string;
+   turn: number | null;
+@@ -242,6 +256,12 @@ export interface SessionTurnView {
+   output: string;
+   status: TurnUiStatus;
+   seenLogIds: Set<string>;
++  /**
++   * task-01（2026-10-14-session-turn-preview-cards）：非空即预览条目（mergePreviewIntoDisplayTurns
++   * 产物；prompt/output 恒空串），TurnRow 渲染 TurnPreviewCard 取代完整轮块。
++   * 真实轮不带（undefined），既有渲染路径零影响。
++   */
++  preview?: TurnPreviewInfo;
+   /**
+    * ql-20260621：实时累积 token。由 SSE `tokens` 事件（执行中）与
+    * `turn_completed` 事件（终态）写入；null 表示尚未收到。
+@@ -272,7 +292,7 @@ export interface SessionTurnView {
+    * 可选：外部 logsToTurns 构造的历史 turn 不带此字段（只读 import，不改其构造）。
+    */
+   errorDetail?: ErrorLogItem | null;
+-
++
+   /** （timeline 内部用）轮终结构化错误（含 reset_at 扩展）。 */
+   /**
+    * 2026-09-10-auto-resume-interrupted-turn：自动续跑轮标记（源 run id，取
+@@ -345,11 +365,11 @@ export interface SessionTurnView {
+    */
+   turnStartedAt?: number | null;
+ }
+-
++
+ /** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
+  * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。 */
+ export type SessionViewMode = "conversation" | "all";
+-
++
+ export interface TurnTimelineProps {
+   turns: SessionTurnView[];
+   viewMode: SessionViewMode;
+@@ -418,8 +438,16 @@ export interface TurnTimelineProps {
+    * per-row 基元派生（isHighlighted 同法，R-07 防字符串/map 直传击穿行 memo）。
+    */
+   forkEntry?: TurnForkEntryWiring | null;
++  /**
++   * task-02（2026-10-14-session-turn-preview-cards / FR-02）：未加载轮预览卡展开
++   * 回调（runKey 上抛；挂载方走单轮直达原地加载）。缺省（dialog / /runtimes 等
++   * 旧消费方）预览分支整体不渲染——TurnRow 收到无 preview 的轮照旧；带 preview
++   * 但未接线时也回落既有分支（类型收窄守卫），零回归。父级 useCallback 保证
++   * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
++   */
++  expandPreview?: (_runKey: string) => void;
+ }
+-
++
+ /**
+  * task-08（session-fork / FR-01）：TurnForkEntry 的挂载方接线契约（TurnTimeline
+  * 消费，page/dialog 双模式同构传入）。provider 走 caps 单源（none 档入口不渲染）。
+@@ -432,7 +460,7 @@ export interface TurnForkEntryWiring {
+   /** 轮入口点击（置灰态组件内已拦截）——挂载方开分叉确认弹层。 */
+   onForkTurn: (_runKey: string, _seq: number) => void;
+ }
+-
++
+ /** ql-20260903-026：单轮行 memo 组件——配合 session-panel displayTurns 的引用
+  *  稳定守卫（ql-20260903-025），流式 delta 只重渲染变化行；未变化行连同其
+  *  段级/markdown 子树整体跳过（行 JSX 自 map 原文逐字搬入，分支 key 保留
+@@ -452,7 +480,7 @@ export interface TurnForkEntryWiring {
+  * 首屏渲染量恒定，展开是用户显式动作（此时可承受一次 parse）。
+  */
+ const HUGE_OUTPUT_THRESHOLD = 30_000;
+-
++
+ /** 折叠态超长输出渲染：前 N 字符 + 截断提示 + 展开按钮。 */
+ function HugeOutputBlock({ text }: { text: string }) {
+   const [expanded, setExpanded] = useState(false);
+@@ -475,7 +503,103 @@ function HugeOutputBlock({ text }: { text: string }) {
+     </div>
+   );
+ }
+-
++
++/**
++ * task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡——
++ * 大纲摘要卡（虚线边框 + brand 浅底，与已加载实心气泡明确区分；视觉基准
++ * prototype-turn-preview-cards.html）。整卡 button 可点（onExpand 上抛 runKey，
++ * 挂载方走单轮直达原地加载）。纯展示零请求；屏外 content-visibility 跳过渲染
++ * （数百轮会话卡量防御，先例同文件完整轮块分支）。
++ */
++function TurnPreviewCard({
++  turn,
++  isHighlighted,
++  onExpand,
++}: {
++  turn: SessionTurnView;
++  isHighlighted: boolean;
++  onExpand: (_runKey: string) => void;
++}) {
++  const preview = turn.preview!;
++  const runKey = turn.realRunId ?? turn.runId;
++  // 状态点色（词表对齐 sessions/turn-catalog statusDotCls：running→warning 脉冲
++  // / failed→destructive / 其余含 completed/killed→中性 muted）。
++  const statusDot =
++    turn.status === "running"
++      ? "bg-warning animate-pulse"
++      : turn.status === "failed"
++        ? "bg-destructive/75"
++        : "bg-muted-foreground/45";
++  const statusLabel =
++    turn.status === "running"
++      ? "运行中"
++      : turn.status === "failed"
++        ? "失败"
++        : turn.status === "killed"
++          ? "已中止"
++          : turn.status === "pending"
++            ? "等待中"
++            : "完成";
++  const time = preview.startedAt ? formatTurnTime(preview.startedAt) : "";
++  const ariaParts = [
++    turn.turn != null ? `第${turn.turn}轮` : "轮次",
++    statusLabel,
++    preview.promptSummary ?? "（无内容记录）",
++  ];
++  return (
++    <button
++      type="button"
++      key={turn.runId}
++      data-turn-key={runKey}
++      data-testid="turn-preview-card"
++      // task-03（preview-cards）：预览卡标记——跳转链 hit() 的 60 字内容门据此
++      // 显式排除（卡内大纲摘要可能超阈值，防被误判「已加载」跳过直达）。
++      data-turn-preview="true"
++      aria-label={`展开${ariaParts.join(" · ")}`}
++      title={ariaParts.join(" · ")}
++      onClick={() => onExpand(runKey)}
++      className={cn(
++        "group flex w-full cursor-pointer flex-col gap-1 rounded-xl border border-dashed border-brand-300/70 bg-brand-50 px-3.5 py-2.5 text-left transition-all outline-none",
++        "hover:border-brand-300 hover:bg-brand-100 hover:shadow-md",
++        "focus-visible:ring-2 focus-visible:ring-brand-400",
++        // quick（ql-20260916-015）同款屏外跳过渲染（数百轮预览卡量防御）。
++        "[content-visibility:auto] [contain-intrinsic-size:auto_96px]",
++        isHighlighted && "ring-2 ring-brand-200",
++      )}
++    >
++      <span className="flex min-w-0 items-center gap-1.5">
++        <span className="shrink-0 font-mono text-[10.5px] font-semibold text-brand-700">
++          {turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
++        </span>
++        <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDot)} />
++        <span className="shrink-0 rounded-full border border-brand-300 bg-card px-1.5 py-px text-[9.5px] leading-[1.4] text-brand-700">
++          未加载 · 点击展开
++        </span>
++        {time && (
++          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{time}</span>
++        )}
++      </span>
++      {preview.promptSummary && (
++        <span className="line-clamp-2 text-[12.5px] font-medium leading-[1.55] text-foreground">
++          {preview.promptSummary}
++        </span>
++      )}
++      {preview.answerSummary && (
++        <span className="line-clamp-2 text-[11.5px] leading-[1.55] text-muted-foreground">
++          {preview.answerSummary}
++        </span>
++      )}
++      <span className="mt-0.5 flex items-center gap-1 text-[10.5px] font-medium text-brand-600">
++        展开完整对话
++        <ArrowRight
++          aria-hidden
++          className="h-3 w-3 transition-transform group-hover:translate-x-0.5"
++        />
++      </span>
++    </button>
++  );
++}
++
+ const TurnRow = memo(function TurnRow({
+   turn,
+   viewMode,
+@@ -490,6 +614,7 @@ const TurnRow = memo(function TurnRow({
+   forkAnchor,
+   forkSeq,
+   onForkTurn,
++  onExpandPreview,
+ }: {
+   turn: SessionTurnView;
+   viewMode: SessionViewMode;
+@@ -512,6 +637,11 @@ const TurnRow = memo(function TurnRow({
+   forkSeq?: number;
+   /** task-08：分叉入口点击（runKey+seq 上抛挂载方；稳定 ref 由挂载方 useCallback 保证）。 */
+   onForkTurn?: (_runKey: string, _seq: number) => void;
++  /** task-02（2026-10-14-session-turn-preview-cards / FR-01 FR-02）：预览卡展开回调
++   *  （runKey 上抛挂载方走单轮直达原地加载；缺省=旧消费方未接线，预览分支不渲染，
++   *  dialog / /runtimes 弹窗零回归。函数引用由父级 useCallback 保证稳定，同
++   *  onResend 先例）。 */
++  onExpandPreview?: (_runKey: string) => void;
+ }) {
+   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
+   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
+@@ -527,8 +657,14 @@ const TurnRow = memo(function TurnRow({
+         data-turn-key（值 = realRunId ?? runId，与刻度轨条目 key 同源）——两分支的
+         根 DOM 元素均挂（fragment 上放 data-* 无效），供跳转方
+         querySelector([data-turn-key]) 精确命中（design §7）。 */}
+-    {/* ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。 */}
+-    {!turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
++    {/* task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡
++        分支最前置——preview 条目（mergePreviewIntoDisplayTurns 产物，正文恒空）
++        渲染 TurnPreviewCard 取代完整轮块；expandPreview 缺省（旧消费方）不渲染
++        该分支，行为回落到下方既有两分支（零回归）。data-turn-key 照挂（与加载后
++        的真实块同源，原地替换后定位键不变）。 */}
++    {turn.preview && !turn.prompt && !turn.output && onExpandPreview ? (
++      <TurnPreviewCard turn={turn} isHighlighted={isHighlighted} onExpand={onExpandPreview} />
++    ) : !turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
+               <div
+                 key={turn.runId}
+                 data-turn-key={turn.realRunId ?? turn.runId}
+@@ -934,7 +1070,7 @@ const TurnRow = memo(function TurnRow({
+     </>
+   );
+ });
+-
++
+ /**
+  * 2026-09-12-chat-turn-auto-recovery / FR-5.1 / D-009@v2：失败卡自动恢复提示
+  * 双信号推导——error_detail 类型（第一信号）+ 会话存在同源 pending 恢复条目
+@@ -971,14 +1107,14 @@ export function autoRecoverHintForTurn(
+   }
+   return undefined;
+ }
+-
++
+ /** quick（ql-20260921-003-42be）：贴底重申窗口时长（ms）——对齐 session-panel
+  *  prepend 锚点（pendingAnchorRef until=2500）惯例。贴底 scrollTo 读的是执行
+  *  瞬间的 scrollHeight，而初始加载期高度未稳定（content-visibility 屏外行按
+  *  估算占位、markdown 异步撑开、面板布局压缩，实测 314→2069→973→1136 抖动），
+  *  窗口期内每帧核对高度并重申贴底。 */
+ const BOTTOM_REASSERT_WINDOW_MS = 2500;
+-
++
+ export function TurnTimeline({
+   turns,
+   viewMode,
+@@ -997,9 +1133,10 @@ export function TurnTimeline({
+   highlightTurnKey,
+   suppressFollowBottom = false,
+   forkEntry,
++  expandPreview,
+ }: TurnTimelineProps) {
+   const scrollRef = useRef<HTMLDivElement>(null);
+-
++
+   // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
+   // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
+   // 阈值」ref，仅贴底时跟随新内容滚底；新增 pending 轮（用户刚发送/入队
+@@ -1013,7 +1150,7 @@ export function TurnTimeline({
+   // quick（ql-20260916-019）：最后一轮签名镜像（runId+输出长度+状态）——贴底
+   // 跟随的「末轮变化」判据（见 [turns] effect 注释）。
+   const lastSigRef = useRef<string | null>(null);
+-
++
+   // ── 回到底部悬浮按钮 + 新消息计数（ql-20260903-023，照群聊 group-chat-panel
+   //    同款移植）：离开底部后按钮出现；离开期间新增轮数显示「N 条新消息」。
+   //    锚定守卫：末轮身份未变（仅触顶翻页 prepend 历史页）不计入——否则向上
+@@ -1024,7 +1161,7 @@ export function TurnTimeline({
+     count: number;
+     lastIdentity: string | null;
+   } | null>(null);
+-
++
+   // ── task-07（2026-09-09-askuser-pi-cursor / FR-03 / design §Wave B.3）：
+   //    marker 提问卡已答态 best-effort 判定——该轮之后已存在用户消息（后续 turn
+   //    有 prompt；displayTurns 本地数据，无后端状态；启发式不区分「回答」与
+@@ -1039,7 +1176,7 @@ export function TurnTimeline({
+     }
+     return flags;
+   }, [turns]);
+-
++
+   const lastTurnIdentity = (() => {
+     const last = turns[turns.length - 1];
+     return last ? `${last.runId}:${last.turn ?? "-"}` : null;
+@@ -1049,7 +1186,7 @@ export function TurnTimeline({
+     if (lastTurnIdentity === bottomAnchor.lastIdentity) return 0;
+     return Math.max(0, turns.length - bottomAnchor.count);
+   })();
+-
++
+   const handleScroll = () => {
+     const el = scrollRef.current;
+     if (!el) return;
+@@ -1065,7 +1202,7 @@ export function TurnTimeline({
+       );
+     }
+   };
+-
++
+   /** 点击悬浮按钮平滑回底（滚底 onScroll 触发后锚点自然清零）。 */
+   const jumpToBottom = useCallback(() => {
+     const el = scrollRef.current;
+@@ -1075,7 +1212,7 @@ export function TurnTimeline({
+     setNearBottom(true);
+     setBottomAnchor(null);
+   }, []);
+-
++
+   // quick（ql-20260921-003-42be）：贴底重申循环——组件级自管理，刻意不挂 effect
+   // cleanup：establish 后 SSE 对账等任何二次 turns 提交都会重跑 [turns] effect，
+   // cleanup 会误杀仍在窗口期内的循环（新 effect 因末轮签名不变不再启动，视口
+@@ -1119,7 +1256,7 @@ export function TurnTimeline({
+     state.rafId = requestAnimationFrame(tick);
+     bottomReassertRef.current = state;
+   }, []);
+-
++
+   useEffect(() => {
+     const el = scrollRef.current;
+     if (!el || typeof el.scrollTo !== "function") return;
+@@ -1175,13 +1312,13 @@ export function TurnTimeline({
+       startOrRenewBottomReassert(el);
+     }
+   }, [turns, suppressFollowBottom, startOrRenewBottomReassert]);
+-
++
+   // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
+   // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
+   // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
+   // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
+   const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
+-
++
+   const handleMinimize = useCallback((requestId: string) => {
+     setMinimizedIds((prev) => {
+       if (prev.has(requestId)) return prev;
+@@ -1190,7 +1327,7 @@ export function TurnTimeline({
+       return next;
+     });
+   }, []);
+-
++
+   const handleRestore = useCallback((requestId: string) => {
+     setMinimizedIds((prev) => {
+       if (!prev.has(requestId)) return prev;
+@@ -1199,7 +1336,7 @@ export function TurnTimeline({
+       return next;
+     });
+   }, []);
+-
++
+   // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
+   // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
+   useEffect(() => {
+@@ -1210,7 +1347,7 @@ export function TurnTimeline({
+       return next.size === prev.size ? prev : next;
+     });
+   }, [pendingRequests]);
+-
++
+   // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
+   const showPending =
+     pendingRequests.length > 0 &&
+@@ -1221,7 +1358,7 @@ export function TurnTimeline({
+     : [];
+   // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
+   const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+-
++
+   return (
+     <>
+     {/* ql-20260903-023：relative 包装容器承载「回到底部」悬浮按钮的定位
+@@ -1319,6 +1456,7 @@ export function TurnTimeline({
+               }
+               forkSeq={turn.turn ?? idx + 1}
+               onForkTurn={forkEntry?.onForkTurn}
++              onExpandPreview={expandPreview}
+             />
+           ))}
+           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
+@@ -1360,16 +1498,16 @@ export function TurnTimeline({
+     </>
+   );
+ }
+-
++
+ /* ---------- helpers ---------- */
+-
++
+ /* ═════════ v2 段模型渲染（task-06 / 2026-08-19-session-stream-ux） ═════════ */
+-
++
+ /** task-06：轮处于运行中三态（状态条 / 思考占位的渲染门控）。 */
+ function isLiveTurn(status: TurnUiStatus): boolean {
+   return status === "running" || status === "pending" || status === "interrupting";
+ }
+-
++
+ /**
+  * 运行中尚无答复/文本段的思考占位（三点脉冲 + 文案）——markup 自旧内联渲染抽出
+  * （task-06 双路径共用：旧路径 output 空时、v2 路径无 text 段时）。全部视图文案
+@@ -1397,7 +1535,7 @@ function ThinkingPlaceholder({ viewMode }: { viewMode: SessionViewMode }) {
+     </div>
+   );
+ }
+-
++
+ /** 段时间戳（AskUser 穿插排序用）：text/tool 用 startedAt、thinking/stderr 用 ts；
+  *  subagent_stub 是临时容器无自身时刻 → null（排序视为 0，同旧路径缺 ts 语义）。 */
+ function segmentTsOf(seg: TurnSegment): number | null {
+@@ -1430,12 +1568,12 @@ function segmentTsOf(seg: TurnSegment): number | null {
+       return seg.ts;
+   }
+ }
+-
++
+ /** 「全部（进度）」视图合并时间线项：段 或 AskUser 提问记录（按 ts 与段穿插）。 */
+ type SegmentTimelineItem =
+   | { kind: "segment"; segment: TurnSegment; ts: number | null }
+   | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null };
+-
++
+ /**
+  * task-02（2026-09-15-subagent-three-pane-display / FR-04 / D-002@v1 ①）：对话
+  * 视图段过滤谓词——在 text/file 基础上放宽纳入子代理容器段（tool 段带 children
+@@ -1465,7 +1603,7 @@ function isConversationSegment(seg: TurnSegment): boolean {
+     (seg.toolName ?? "").split("__").pop() !== "dispatch_worker"
+   );
+ }
+-
++
+ /**
+  * task-06（FR-01 / FR-02 / FR-06）：v2 段模型轮渲染主体（segments 非 undefined 的
+  * turn 专用，双视图分支 + 内置轮级状态条）：
+@@ -1516,7 +1654,7 @@ function DialogQaBlock({ dialog }: { dialog: SessionDialogRead }) {
+     </div>
+   );
+ }
+-
++
+ function SegmentedTurnBody({
+   segments,
+   turnStatus,
+@@ -1574,7 +1712,7 @@ function SegmentedTurnBody({
+     );
+     return items;
+   }, [viewMode, segments, turnDialogs]);
+-
++
+   // 2026-10-10-dialog-qa-inplace：对话流合并穿插——❓ 提问记录卡（turnDialogs，
+   //  ts=created_at）与对话段（textSegments，ts=段时刻）合并稳定排序，提问落在
+   //  真实发生的时间位置（两段之间的提问渲染在两段之间），不再整组前置轮头部。
+@@ -1609,7 +1747,7 @@ function SegmentedTurnBody({
+     );
+     return items;
+   }, [viewMode, textSegments, turnDialogs]);
+-
++
+   return (
+     <>
+       {/* 轮级状态条（FR-02）：运行中三态 + 计时锚点有值才挂载（终态消失；锚点缺失
+@@ -1713,7 +1851,7 @@ function SegmentedTurnBody({
+     </>
+   );
+ }
+-
++
+ /**
+  * ql-20260729-005：「全部」视图的过程项列表，按真实到达顺序渲染。
+  * 缩进对齐答复气泡（ml-9 ≈ 助手图标宽度），左侧竖线表示"执行过程"语义。
+@@ -1845,7 +1983,7 @@ function TurnDetailsList({
+     </div>
+   );
+ }
+-
++
+ /**
+  * ql-20260730-003：单个配对工具事件卡片。
+  * 解析 raw（tool_use JSON）为工具名 + 命令 + 复制文本（parseToolRaw，解析失败原样显示），
+@@ -1902,7 +2040,7 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
+     </div>
+   );
+ }
+-
++
+ /**
+  * ql-20260802-002/003：「全部」视图把 AskUser 提问渲染成工具调用卡片（和 Write/Bash 一致），
+  * 让 AskUser 在工具区可见。AskUser 不走 tool_use 日志（走 onUserDialog 对话协议，
+@@ -1963,7 +2101,7 @@ function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
+     </div>
+   );
+ }
+-
++
+ /**
+  * ql-20260730-003：会话气泡内的折叠卡片（灰底思考 / 蓝底工具）。
+  * 带摘要的单行折叠条，点击展开内容。替代 agent-log 的 CollapsibleSection
+@@ -2010,7 +2148,7 @@ function SessionCollapsible({
+     </div>
+   );
+ }
+-
++
+ /**
+  * ql-20260730-002：解析 tool_use raw（JSON 字符串）为工具名 + 主要参数 + 复制文本。
+  * 解析失败（非 JSON）返回 null，渲染时原样显示 raw。
+@@ -2045,7 +2183,7 @@ function parseToolRaw(
+     return null;
+   }
+ }
+-
++
+ function TurnStatusBadge({
+   status,
+   turn,

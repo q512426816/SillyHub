@@ -119,6 +119,9 @@ import {
   readSessionDraft, replacePlaceholderTurn, subagentBlockNameOf, upsertTurn, writePersistedViewMode, writeSessionDraft,
 } from "./turn-state";
 import { highlightSearchHit, searchResultLabel, searchResultText } from "./search";
+// task-01（2026-10-14-session-turn-preview-cards）：消息流归并层（单一数据源，
+// 未加载轮合成预览条目，D-004 方案 A）。
+import { mergePreviewIntoDisplayTurns } from "./preview-merge";
 import { ScheduledSendModal, ScheduledSysHints } from "./scheduled-send";
 import { TeamTriggerRow } from "./team-trigger-row";
 import { WorkerSessionOverlay } from "./worker-session-overlay";
@@ -797,6 +800,11 @@ export function SessionPanelPage({
   // handleJumpToTurn 的 deps 刻意不含 turnState（防每帧重建击穿导航列 memo），
   // ref 读取不受闭包陈旧影响。
   const jumpEmptyJumpedRunIdsRef = useRef<Set<string>>(new Set());
+  // task-03（2026-10-14-session-turn-preview-cards / FR-03）：预取/展开在飞去重
+  // 集合（run_id 集合，会话切换清空见上方重置区；同 jumpEmptyJumpedRunIdsRef 的
+  // ref 而非 state 理由——回调 deps 刻意不含 turnState 防每帧重建，ref 读取不受
+  // 闭包陈旧影响）。
+  const previewInflightRef = useRef<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
   // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
@@ -1113,6 +1121,9 @@ export function SessionPanelPage({
     // 2026-09-29-jump-empty-turn-dup：零正文直达幂等标记随会话切换重置（新会话
     // 同名 run 的日志形态可能不同，不跨会话继承）。
     jumpEmptyJumpedRunIdsRef.current = new Set();
+    // task-03（2026-10-14-session-turn-preview-cards）：预取在飞去重集合随会话
+    // 切换清空（在飞响应由纪元守卫丢弃，集合不跨会话继承）。
+    previewInflightRef.current = new Set();
     fetchedErrorRunIdsRef.current.clear();
     completedSideEffectRunIdsRef.current.clear();
     currentRunIdRef.current = null;
@@ -2255,6 +2266,133 @@ export function SessionPanelPage({
     };
   }, [turnState, timelineScrollEl]);
 
+  // ── task-03（2026-10-14-session-turn-preview-cards / FR-02 / FR-03 / D-001@v1
+  //    / D-003@v1）：预览卡原地展开 + 跳转附近预取 ─────────────────────────────
+  // 三重判重共享：已加载判（turnsRef 发起时快照 hasBody）+ 零正文幂等
+  // （jumpEmptyJumpedRunIdsRef）+ 在飞去重（previewInflightRef，声明见 :802 区，
+  // 会话切换清空）。deps 刻意不含 turnState（同 handleJumpToTurn 惯例——防每帧
+  // SSE 增量重建回调），已加载判定经 turnsRef 读发起时快照。
+
+  /**
+   * run_id 单轮拉取 + 游标压低 + prepend 装配（语义与 handleJumpToTurn 直达分支
+   * :2386-2433 同源收敛复用：纪元/卸载守卫、复合游标压到该轮最旧行防翻页重复、
+   * logsToTurns 装配 + #e 页键装饰前插、零正文记幂等不 prepend）。页键前缀
+   * `pv-` 与跳转链 `jump-` 区分（同轮两路装配的装饰键不撞；已加载判挡住同轮
+   * 重复拉取，归并/导航匹配按 realRunId 不受装饰后缀影响）。返回 loaded/empty/
+   * failed 供调用方分派反馈（预取静默 / 展开提示）。
+   */
+  const fetchAndAttachTurn = useCallback(
+    async (runKey: string): Promise<"loaded" | "empty" | "failed"> => {
+      if (!sessionId) return "failed";
+      const epochAtStart = sessionEpochRef.current;
+      try {
+        const turnLogs = await getAgentSessionLogs(sessionId, { runId: runKey });
+        if (epochAtStart !== sessionEpochRef.current || !mountedRef.current) {
+          return "failed";
+        }
+        if (turnLogs.length === 0) {
+          jumpEmptyJumpedRunIdsRef.current.add(runKey);
+          return "empty";
+        }
+        // 游标压低（复合游标 ts+id 同步写）：目标轮比当前游标更早时把「加载更早」
+        // 起点压到该轮最旧行，后续触顶翻页不整轮重复拉回（:2401 同款注释）。
+        const oldestJump = turnLogs.reduce(
+          (m, l) => (l.timestamp < m.timestamp ? l : m),
+          turnLogs[0]!,
+        );
+        const cursorBefore = historyCursorRef.current;
+        if (cursorBefore == null || oldestJump.timestamp < cursorBefore) {
+          historyCursorRef.current = oldestJump.timestamp;
+          historyCursorIdRef.current = oldestJump.id;
+        }
+        const newTurns = logsToTurns(turnLogs);
+        const anyBody = newTurns.some(
+          (t) => (t.segments?.length ?? 0) > 0 || !!(t.output ?? "").trim(),
+        );
+        if (newTurns.length > 0 && anyBody) {
+          const pageKey = `pv-${oldestJump.id.slice(0, 8)}`;
+          const decorated = newTurns.map((t) => ({
+            ...t,
+            runId: `${t.realRunId ?? t.runId}#e${pageKey}`,
+          }));
+          setTurnState((prev) => ({ ...prev, turns: [...decorated, ...prev.turns] }));
+          return "loaded";
+        }
+        jumpEmptyJumpedRunIdsRef.current.add(runKey);
+        return "empty";
+      } catch {
+        return "failed";
+      }
+    },
+    [sessionId],
+  );
+
+  /**
+   * 预览卡点击（FR-02 / D-003@v1）：原地展开——不 scrollIntoView（卡片本在视口
+   * 内，与导航跳转的定位语义区分）；加载成功后受控 ring 高亮 2.2s 自清（复用
+   * highlightTurnKey / highlightTimerRef 既有机制）；置 activeTurnKey 联动导航
+   * 刻度高亮。加载完成即保持完整轮块不缩回（D-003）。
+   */
+  const handleExpandPreview = useCallback(
+    (runKey: string) => {
+      if (!sessionId) return;
+      const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === runKey);
+      const hasBody =
+        (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
+      if (hit && hasBody) return; // 已加载完成（归并层替换在途，防御双击）
+      if (jumpEmptyJumpedRunIdsRef.current.has(runKey)) return; // 零正文幂等
+      if (previewInflightRef.current.has(runKey)) return; // 在飞去重
+      previewInflightRef.current.add(runKey);
+      void fetchAndAttachTurn(runKey).then((result) => {
+        previewInflightRef.current.delete(runKey);
+        if (result === "loaded") {
+          setActiveTurnKey(runKey);
+          setHighlightTurnKey(runKey);
+          if (highlightTimerRef.current !== null) {
+            clearTimeout(highlightTimerRef.current);
+          }
+          highlightTimerRef.current = window.setTimeout(() => {
+            highlightTimerRef.current = null;
+            setHighlightTurnKey(null);
+          }, HIGHLIGHT_TURN_CLEAR_MS);
+        } else if (result === "failed") {
+          notify.error("该轮加载失败，请稍后重试");
+        }
+        // empty：幂等标记已记，卡片保持（下次点击短路）——零正文轮无内容可展开。
+      });
+    },
+    [sessionId, notify, fetchAndAttachTurn],
+  );
+
+  /**
+   * 跳转附近预取（FR-03）：目标轮直达成功后 fire-and-forget 串行预取大纲序前后
+   * 各 1 个未加载轮（同一 fetchAndAttachTurn 装配链），读上下文不打扰当前视口
+   * （无滚动/无高亮）。失败静默（下次跳转再触发）；不引入轮询/定时器。
+   */
+  const prefetchNearbyTurns = useCallback(
+    (targetRunKey: string) => {
+      if (!sessionId || !turnOutline) return;
+      const idx = turnOutline.items.findIndex((i) => i.run_id === targetRunKey);
+      if (idx === -1) return;
+      const neighbors = [turnOutline.items[idx - 1], turnOutline.items[idx + 1]];
+      for (const item of neighbors) {
+        if (!item) continue;
+        const key = item.run_id;
+        const hit = turnsRef.current.find((t) => (t.realRunId ?? t.runId) === key);
+        const hasBody =
+          (hit?.segments?.length ?? 0) > 0 || !!(hit?.output ?? "").trim();
+        if (hit && hasBody) continue;
+        if (jumpEmptyJumpedRunIdsRef.current.has(key)) continue;
+        if (previewInflightRef.current.has(key)) continue;
+        previewInflightRef.current.add(key);
+        void fetchAndAttachTurn(key).finally(() => {
+          previewInflightRef.current.delete(key);
+        });
+      }
+    },
+    [sessionId, turnOutline, fetchAndAttachTurn],
+  );
+
   // ── task-04（2026-09-08-session-turn-nav / FR-04 FR-05 / D-002@v1 D-005@v1）：
   //    导航列行点击跳转链路（TurnNavList onJump 消费）。已加载轮直跳定位高亮；
   //    未加载轮优先单轮直达（task-04 2026-09-27-session-fast-replay / FR-05——
@@ -2281,6 +2419,10 @@ export function SessionPanelPage({
           `[data-turn-key="${CSS.escape(entry.key)}"]`,
         );
         if (!row) return null;
+        // task-03（2026-10-14-session-turn-preview-cards）：预览卡视同未命中——
+        // 卡内大纲摘要（后端截 60 字 + 标签文案）可能过 60 字内容门，命中会让
+        // 「点击未加载轮」被误判已加载而跳过直达/翻页（D-005@v1 执行期裁决）。
+        if (row.hasAttribute("data-turn-preview")) return null;
         return (row.textContent ?? "").trim().length > 60 ? row : null;
       };
       /** 定位高亮共用尾段（已加载直跳 / 单轮直达 prepend 提交后共用，行为与
@@ -2301,7 +2443,11 @@ export function SessionPanelPage({
               container?.querySelector<HTMLElement>(
                 `[data-turn-key="${CSS.escape(entry.key)}"]`,
               );
-            row?.scrollIntoView({ behavior: "smooth", block: "start" });
+            // task-04（preview-cards 测试暴露）：typeof 守卫（jsdom 无
+            // scrollIntoView；先例 turn-catalog.tsx:194 / turn-nav-list.tsx:261）。
+            if (row && typeof row.scrollIntoView === "function") {
+              row.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
             settleFollow();
             setHighlightTurnKey(entry.key);
             if (highlightTimerRef.current !== null) {
@@ -2432,6 +2578,9 @@ export function SessionPanelPage({
               jumpEmptyJumpedRunIdsRef.current.add(entry.key);
             }
             locateAndHighlight();
+            // task-03（FR-03）：目标轮直达成功 → 后台预取大纲序前后各 1 个未加载轮
+            // （fire-and-forget，不阻塞定位高亮；三重判重在 prefetch 内）。
+            prefetchNearbyTurns(entry.key);
             jumpSuppressLoadEarlierRef.current = false;
             return;
           } catch {
@@ -2448,8 +2597,9 @@ export function SessionPanelPage({
       // 命中：直跳定位高亮（原路径）。
       locateAndHighlight();
     },
-    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline],
+    [timelineScrollEl, loadEarlierOnce, notify, sessionId, turnOutline, prefetchNearbyTurns],
   );
+
 
   /** quick 会话内搜索：q 全量查询（limit=100），结果浮层展示。 */
   const handleSessionSearch = useCallback(async () => {
@@ -2649,16 +2799,25 @@ export function SessionPanelPage({
   // 按 run 快照补 whoLine / 历史 usage（派生体外提 page-helpers.enrichDisplayTurns，
   // 依赖数组逐项保留）：只补缺（?? 链），实时 SSE 值优先；run 快照缺失（拉取失败 /
   // 占位 turn）原样返回——whoLine 不渲染（零回归）。
+  // task-01/03（2026-10-14-session-turn-preview-cards / FR-01 / D-004@v1）：派生链
+  // 末端串联消息流归并层——turn-outline 大纲条目为骨架，未加载轮合成预览条目
+  // （TurnPreviewCard），空壳块（enrich 孤儿补建的静默配置行）被大纲条目原位
+  // 替代；outline 缺失原样透传（FR-04 降级）。归并消费 turnsRef 同源数据，顺序
+  // 以大纲 seq 权威定序。依赖数组增补 turnOutline（outline 仅会话切换拉取一次，
+  // 重派生成本可接受）。
   const displayTurns = useMemo(
     () =>
-      enrichDisplayTurns(
-        turnState.turns,
-        runsMeta,
-        llmProviders,
-        agentDisplayName,
-        session?.user_id,
+      mergePreviewIntoDisplayTurns(
+        turnOutline,
+        enrichDisplayTurns(
+          turnState.turns,
+          runsMeta,
+          llmProviders,
+          agentDisplayName,
+          session?.user_id,
+        ),
       ),
-    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id],
+    [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id, turnOutline],
   );
 
   // ── task-03（2026-09-15-subagent-three-pane-display / FR-03 / FR-05 / design
@@ -2837,8 +2996,13 @@ export function SessionPanelPage({
     }
     // 命中覆盖：displayTurns 按 realRunId ?? runId（与聊天区 data-turn-key 同源）
     // 建索引，命中 run 的条目用本地 prompt / 首个 text 段摘要覆盖，loaded=true。
+    // task-04（2026-10-14-session-turn-preview-cards）：预览条目（preview 非空，
+    // 正文恒空）不进已加载索引——否则导航空心刻度消失、摘要被空条目覆盖成
+    // 「无内容记录」（代码审查发现的导航语义回归，集成面单测未覆盖的派生消费方）。
     const loadedByKey = new Map(
-      displayTurns.map((t) => [t.realRunId ?? t.runId, t] as const),
+      displayTurns
+        .filter((t) => !t.preview)
+        .map((t) => [t.realRunId ?? t.runId, t] as const),
     );
     const entries = orderedRuns.map((run, i) =>
       buildEntry(
@@ -2856,6 +3020,9 @@ export function SessionPanelPage({
     const seenKeys = new Set(orderedRuns.map((run) => run.id));
     let orphanNo = entries.length;
     for (const t of displayTurns) {
+      // task-04（preview-cards）：预览条目不进孤儿兜底——其轮次信息由大纲骨架
+      // 承载；runsMeta 滞后瞬态下宁可暂缺（runs 到位自愈），不显示假已加载空摘要。
+      if (t.preview) continue;
       const key = t.realRunId ?? t.runId;
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
@@ -4400,6 +4567,10 @@ export function SessionPanelPage({
         // task-04：目录跳转命中受控高亮（~2.2s 自清；TurnTimeline 内逐行派生
         // isHighlighted 进 memo 行，R-07）。
         highlightTurnKey={highlightTurnKey}
+        // task-03（2026-10-14-session-turn-preview-cards / FR-02）：预览卡原地展开
+        // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
+        // TurnTimeline 内守卫承担，本挂载恒接线）。
+        expandPreview={handleExpandPreview}
         sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
         pendingRequests={pendingRequests}
         dialogHistory={dialogHistory}

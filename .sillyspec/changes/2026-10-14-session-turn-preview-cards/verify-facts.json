@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-14-session-turn-preview-cards",
+  "generatedAt": "2026-10-14T05:32:47.016Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 3,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "backendEndpoints": 1084,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-14-session-turn-preview-cards",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS",
+  "runtimeEvidence": [
+    {
+      "claim": "worktree 前端起本地 dev 服务，真实长会话打开呈现全量 35 轮（23 预览卡+12 内容行），点卡原地展开、跳转后前向轮自动预取入流",
+      "command": "cd .sillyspec/.runtime/worktrees/2026-10-14-session-turn-preview-cards/frontend && pnpm dev --port 3100（浏览器打开 /sessions?session=f231ca18-0a5b-403d-a594-edf105827f1c）",
+      "exitCode": 0,
+      "logPath": "C:\\Users\\12532\\.zcode\\cli\\exec\\sess_84536fe0-1a91-4c99-ba63-ada7da29ffa2\\call_9e0d5b25a18e4ba386486a8d-stdout.log（✓ Ready in 24.9s，200 13.3s）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "other",
+        "item": "P3 体验改进：零正文轮点预览卡无反馈（幂等静默，符合 2026-09-29-jump-empty-turn-dup 语义）——可加「该轮无对话正文」轻提示",
+        "condition": "后续体验迭代变更顺带；非阻塞",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "mergePreviewIntoDisplayTurns 随 SSE 增量每帧重算（O(n log n) sort），数百轮内无感知",
+        "condition": "超长会话（数百轮）出现卡顿反馈时再优化（大纲索引 memo 化）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "dev server :3100 保留存活供用户自查（未登记 verify 进程回收表）",
+        "condition": "用户手动关闭，或 `sillyspec worktree cleanup` 时随 worktree 终止",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 1,
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "consumerHints": {},
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(jsx24)+fr(24)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-14T05:40:39.840Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}
