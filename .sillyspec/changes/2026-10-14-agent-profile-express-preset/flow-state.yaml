@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  平台需要内置一个通用的智能体档案（平台预置），让用户在任何会话里可主动选用该档案，会话内所有代码修改都按 SillySpec 轻量变更极速通道（flow start 立项 → 干活 → flow done
+  收口）执行，杜绝裸改代码；采用启动幂等补种机制（同 agent-profile-layer task-11 范式），平台级可见、默认不进 dispatch 兜底链。
+
+
+  成功标准：
+
+  - seed.py 新增确定性 uuid5 平台预置档案（名字：SillySpec
+  极速变更），visibility=platform、is_system_default=False、provider=claude，system_prompt 完整编码极速通道协议
+
+  - 空库调用 ensure 补种 1 条；重复调用返回 0 且无重复行（幂等）
+
+  - 管理员改过该档案（如 system_prompt）后重复调用不覆盖、不回写
+
+  - main.py lifespan 启动序列挂载新 ensure 函数，异常不阻断启动
+
+  - test_profile_seed.py 新增用例覆盖以上契约，既有用例全部通过
+autopilot: false
+prestage_ack: false
+baseline_commit: f17f301acca3aca2f40df9dbf575a81530fc9fa5
+updatedAt: '2026-10-14T02:39:58.964Z'
+cross_baselines:
+  sillyspec: 64c69bae7b189b3bfdce318668b1061f46ffe217
+baseline_sha256: dc6074ba28bd86d35ddd0f9faa3572f912929039c22a67f53f89b946581e52d6
+spec_approved: true
+spec_approved_at: '2026-10-14T02:39:58.964Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
