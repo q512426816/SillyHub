@@ -62,8 +62,10 @@ export default function MobileAccountPage() {
       await logout();
     } finally {
       setLoading(false);
-      // token 已清，主动回移动登录页（route-guard 也会拦截，这里即时跳转更顺滑）
-      router.replace("/m/login");
+      // token 已清。必须整页跳转（对齐桌面端与 lib/api.ts 401 分支先例，
+      // 2026-10-14-logout-full-reload-clear-cache）——SPA 内跳转让 React Query
+      // 缓存与内存 store 存活，换账号后残留上一用户数据。
+      window.location.assign("/m/login");
     }
   }
 

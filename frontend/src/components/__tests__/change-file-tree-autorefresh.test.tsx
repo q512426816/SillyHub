@@ -153,6 +153,8 @@ describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync
     fireEvent.click(getByText("刷新"));
     await vi.advanceTimersByTimeAsync(0);
     expect(mockedList).toHaveBeenCalledTimes(1);
-    expect(mockedList.mock.calls[0][2]).toMatchObject({ sync: true });
+    // 前一行已断言 calls.length=1，? 收窄满足 strict 的 noUncheckedIndexedAccess 面
+    // （2026-10-14-logout-full-reload-clear-cache 顺手修复的既有 TS 债，与登出改动无关）。
+    expect(mockedList.mock.calls[0]?.[2]).toMatchObject({ sync: true });
   });
 });

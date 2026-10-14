@@ -120,4 +120,32 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
     expect(mockedUploadFile).not.toHaveBeenCalled();
     expect(mockedUpdateMyAvatar).not.toHaveBeenCalled();
   });
+
+  // 退出登录 → 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）：
+  // SPA 内 router.replace 会让 React Query 缓存与内存 store 跨登录会话存活，
+  // 换账号后残留上一用户数据。契约：必须 window.location.assign("/m/login")
+  // 整页跳转（对齐桌面端与 lib/api.ts 401 被动登出先例），登出路径禁止
+  // router.replace。jsdom 的 window.location 是 accessor 属性且 assign 为
+  // not-implemented 占位，vi.spyOn 拦不住——defineProperty 整体替换再还原。
+  it("退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）", async () => {
+    const originalLocationDesc = Object.getOwnPropertyDescriptor(window, "location");
+    const assignMock = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, assign: assignMock },
+      configurable: true,
+    });
+    mockedLogout.mockResolvedValue(undefined);
+    render(<MobileAccountPage />);
+
+    // antd Button 的 LogoutOutlined 图标自带 aria-label "logout"，
+    // accessible name 为 "logout 退出登录"，用正则只锚定文字部分。
+    fireEvent.click(screen.getByRole("button", { name: /退出登录/ }));
+
+    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/m/login"));
+    expect(nav.replace).not.toHaveBeenCalled();
+
+    if (originalLocationDesc) {
+      Object.defineProperty(window, "location", originalLocationDesc);
+    }
+  });
 });

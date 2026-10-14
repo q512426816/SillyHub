@@ -5,7 +5,6 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -137,7 +136,6 @@ function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
 const COLLAPSED_KEY = "sidebar-collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
   // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
   // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01）。
@@ -315,7 +313,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
     } finally {
       clear();
-      router.replace("/login");
+      // 2026-10-14-logout-full-reload-clear-cache：必须整页跳转（对齐 lib/api.ts
+      // 401 被动登出先例）——SPA 内跳转会让 React Query 缓存与内存 zustand store
+      // （工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
+      window.location.assign("/login");
     }
   };
 
