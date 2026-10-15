@@ -47,6 +47,7 @@ import { Input, Select } from "antd";
 import { PageContainer, PageHeader } from "@/components/layout";
 import {
   GraphCanvas,
+  NODE_TYPE_LABELS,
   NODE_TYPE_ORDER,
   edgeDash,
   graphEdgeKey,
@@ -140,19 +141,8 @@ const EDGE_STRENGTH_LABEL: Readonly<Record<"strong" | "medium" | "weak", string>
   weak: "弱",
 };
 
-/** 节点 10 类型中文标签（原型 NT.l 逐项一致；未知类型回退原值）。 */
-const NODE_TYPE_LABELS: Readonly<Record<string, string>> = {
-  project: "项目",
-  module: "模块",
-  file: "代码文件",
-  test: "测试文件",
-  decision: "决策 D-xxx",
-  fr: "需求 FR",
-  change: "变更",
-  entry: "手册条目",
-  doc: "文档",
-  ql: "quicklog",
-};
+// 节点 10 类型中文标签已迁至 graph-canvas.tsx 具名导出 NODE_TYPE_LABELS
+//（2026-10-15-change-assets-graph：变更详情页内嵌图谱分区共用单一源）。
 
 /**
  * 预置演示六胶囊（原型 presets 直译；锚点换本仓真实样例——当前变更名 /

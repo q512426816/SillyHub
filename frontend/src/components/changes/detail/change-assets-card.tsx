@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { FilePreview } from "@/components/explorer/file-preview";
 import { DiffView } from "@/components/files/structured-views";
 import { EntryCardList } from "@/components/knowledge/entry-card-list";
+import { ChangeAssetsGraph } from "@/components/changes/detail/change-assets-graph";
 import {
   Dialog,
   DialogContent,
@@ -235,6 +236,15 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
            固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
            窄列的纵向长堆叠。空态段跨满两列。 */
         <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
+          {/* 知识图谱分区（2026-10-15-change-assets-graph / FR-01）：本变更一跳
+              邻域切片 + 右侧节点详情栏，跨满两列；fail-open——图不可用/失败/空
+              时整区自隐藏（组件内收敛），changeKey 缺省（理论不发生）不挂载。 */}
+          {changeKey ? (
+            <div className="md:col-span-2">
+              <ChangeAssetsGraph workspaceId={workspaceId} changeKey={changeKey} />
+            </div>
+          ) : null}
+
           {data && !data.archived && total === 0 ? (
             <p
               data-testid="change-assets-inflight"

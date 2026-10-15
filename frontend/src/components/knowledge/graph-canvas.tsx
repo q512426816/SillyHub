@@ -108,6 +108,24 @@ const NODE_RADIUS: Record<string, number> = {
   ql: 5,
 };
 
+/**
+ * 节点 10 类型中文标签（原型 NT.l 逐项一致；未知类型回退原值）。
+ * 2026-10-15-change-assets-graph 自图谱页 page.tsx 迁入——图谱页与变更详情页
+ * 内嵌图谱分区（ChangeAssetsGraph）共用单一源。
+ */
+export const NODE_TYPE_LABELS: Readonly<Record<string, string>> = {
+  project: "项目",
+  module: "模块",
+  file: "代码文件",
+  test: "测试文件",
+  decision: "决策 D-xxx",
+  fr: "需求 FR",
+  change: "变更",
+  entry: "手册条目",
+  doc: "文档",
+  ql: "quicklog",
+};
+
 export function nodeRadius(type: string): number {
   return NODE_RADIUS[type] ?? 6;
 }
