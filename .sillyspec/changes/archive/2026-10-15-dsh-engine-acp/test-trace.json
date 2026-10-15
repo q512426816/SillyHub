@@ -1,0 +1,339 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-dsh-engine-acp",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-dsh-engine-acp:task-01:acc-0-e9d6d24e",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-dsh-engine-acp:task-01:acc-1-9f4bef8c",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-dsh-engine-acp:task-01:acc-2-21ac8e25",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-02:acc-0-8f05ac37",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-02:acc-1-8e98d7ba",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-02:acc-2-d831c29f",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-03:acc-0-3c21c497",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-03:acc-1-5cc0cb70",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-03:acc-2-0352b650",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-03:acc-3-a4b5bb73",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-dsh-engine-acp:task-04:acc-0-6102300d",
+      "tests": [
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/provider-adapter-registry.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-dsh-engine-acp:task-04:acc-1-11fa8a5f",
+      "tests": [
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/provider-adapter-registry.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-dsh-engine-acp:task-04:acc-2-6281b493",
+      "tests": [
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/provider-adapter-registry.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-dsh-engine-acp:task-05:acc-0-0e3ab8bd",
+      "tests": [
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py",
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+        "backend/app/modules/daemon/tests/test_change_session.py",
+        "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+        "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+        "backend/app/modules/daemon/tests/test_group_logs_pagination.py",
+        "backend/app/modules/daemon/tests/test_group_mention_pipeline.py",
+        "backend/app/modules/daemon/tests/test_inject_origin_guard.py",
+        "backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py",
+        "backend/app/modules/daemon/tests/test_linked_repos_sync.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-dsh-engine-acp:task-06:acc-0-abb8664d",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "backend/app/modules/daemon/tests/test_group_p2.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-dsh-engine-acp:task-06:acc-1-7dea5b9e",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "backend/app/modules/daemon/tests/test_group_p2.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-15-dsh-engine-acp:task-07:acc-0-1d874fde",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-08",
+      "row_id": "2026-10-15-dsh-engine-acp:task-07:acc-1-040e8ae5",
+      "tests": [
+        "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-dsh-engine-acp:task-08:acc-0-6ee58d57",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-dsh-engine-acp:task-08:acc-1-39caa6ab",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "775d8601138487ea46b736d4d83d8f4bf29314fe",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-dsh-engine-acp"
+    }
+  ]
+}

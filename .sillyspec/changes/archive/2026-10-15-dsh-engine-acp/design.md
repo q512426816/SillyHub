@@ -68,6 +68,11 @@ scale: large  # 规模评估（Step 8 精判）：用户显式要求完整五阶
 | 生成 | sillyhub-daemon/src/api-types.ts | pnpm -C sillyhub-daemon gen:types 再生成（规则 21 双义务） |
 | 生成 | backend/app/modules/agent/provider_caps.py | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
 | 生成 | frontend/src/lib/provider-caps.ts | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
+| 修改 | sillyhub-daemon/scripts/gen-provider-caps.mjs | ENGINES 五引擎（dsh 增补后解析守卫同步） |
+| 修改 | sillyhub-daemon/src/interactive/session-manager/driver-factory.ts | sessionPermission 注入条件加 dsh（6 行接线——D-006 执行期边界裁决补录） |
+| 修改 | backend/app/modules/daemon/group/service/helpers.py | group_attachment_gate_denied 共享判定助手（task-06 两处门控同源，plan 审查 gap 修正补录） |
+| 修改 | frontend/src/lib/daemon/runtimes.ts | SESSION_SUPPORTED_PROVIDERS/PROVIDER_META 加 dsh（真单一源——D-007 执行期边界修正补录） |
+| 修改 | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | provider-caps 形状钉子闸连带（dsh 十六键前置事实钉） |
 
 ## 接口定义
 

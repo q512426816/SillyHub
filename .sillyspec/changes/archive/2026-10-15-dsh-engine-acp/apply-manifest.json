@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-dsh-engine-acp",
+  "appliedAt": "2026-10-15T08:29:10.688Z",
+  "baseHash": "f4fc50fda06f2ab235aff47128059b77e2631bc9",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/provider_caps.py",
+      "sha256": "f7f2ae04a0edd3744b781f96e0e0255b818aa27eaf90d24cd803f41112d357c5"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+      "sha256": "87b78ba21b68416f17666137910885a45fb5d1f817dfd6ba61aea257f878efcc"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/messages.py",
+      "sha256": "1203d5dfb613b6d0bef7e932871b23f96c2f3d60d7c4d9e02937e555740e7ece"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/shadow.py",
+      "sha256": "13f7dad396b30e931a779bbd059f7f4c112daa04bb9a0355e60b8697f4b2cca5"
+    },
+    {
+      "path": "backend/app/modules/daemon/schema.py",
+      "sha256": "a37aea9a33fbe74ff406988e1953a8cbea304e692a2bd9f28318f34491528230"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+      "sha256": "53362f43b9bce5c1a447933df5ef40faf0e52405ba5f38b2baad0b1dffbdf6cd"
+    },
+    {
+      "path": "frontend/src/lib/daemon/runtimes.ts",
+      "sha256": "5298e7a56eb743270c4f0e964e0af0ed25f66286d3deda935abe310e673e8dd3"
+    },
+    {
+      "path": "frontend/src/lib/provider-caps.ts",
+      "sha256": "31fa14f8ecc45026c199c77231596a854a7c469119441759755cf6ef7bc52627"
+    },
+    {
+      "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+      "sha256": "8c174cdbfe027c68e59b52137392db8063e4f8231d57a23754d1be8fe09e0397"
+    },
+    {
+      "path": "sillyhub-daemon/src/agent-detector.ts",
+      "sha256": "eb4e1b4ccdbc9c3461370408366abbd22846ef175c4555b2d7723210d0591735"
+    },
+    {
+      "path": "sillyhub-daemon/src/dsh-settings.ts",
+      "sha256": "33cb6b17c05bee5c471d06950116fec8e4eb2e19288295b99e079cdf7e5eea58"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+      "sha256": "6fb5ea93c54baf78fae27f9f4ea37f1a36f727a42e4326c38884cc8675627f1d"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/dsh-acp-events.ts",
+      "sha256": "84ab039770d5c437fabcf848da69369380df7676542ea679bbc6ababc851cb73"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/providers.ts",
+      "sha256": "e35cde1108cefda49cff366e0b2b6ea8e9e8d41d665b15919ffaac9de26849c1"
+    },
+    {
+      "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+      "sha256": "0dbc8211fa62cfcbd8a94e4398237713d339e77316cac1ebb4bf97471b0fc5bd"
+    },
+    {
+      "path": "sillyhub-daemon/src/version.ts",
+      "sha256": "c32ed8c64ce195462cc2ff8778711f7eef3be82be87a71012cd80e9d66a02a6e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/agent-detector.test.ts",
+      "sha256": "cd8d34a68572d69c3792ae3e05e998df823e16e2f72868dc18f3cc2f28d8dca1"
+    },
+    {
+      "path": "sillyhub-daemon/tests/dsh-settings.test.ts",
+      "sha256": "12246f51d2fc794fe85b27ce152e1285164735450363ad0540325ed00328412e"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+      "sha256": "c7bf30c4a20de67023a4640dfdca7551698a02e98249c6168253b9304c08ca22"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+      "sha256": "b0bccf9c0f1200095a2033b9ae71bb77c7b9705e9f9819f9b0184c6ff0e5fa8b"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts",
+      "sha256": "36be06c5c4cc8016e9542cc1c53c9d27656c79675fdd45c9058ba1b501d65f4a"
+    },
+    {
+      "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+      "sha256": "7f811d0ddcbb8c9ff92f311d7c71fad825f52a2222227adf97edfe82be200ee5"
+    },
+    {
+      "path": "sillyhub-daemon/tests/version.test.ts",
+      "sha256": "e005a38b261bb1cd3bc2b57536e7f415842d2ff683f65999000c662597b35132"
+    },
+    {
+      "path": "frontend/src/components/sessions/session-list-panel.tsx",
+      "sha256": "7a30487d16491d20132a94e1ce5aecaf7b1ac7eeb4659bd6321a5431309b62e5"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+      "sha256": "1328c98298e7c82f26ac0f33e813bdd34d74eb138c47beab982cc42ac698451f"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "f04d61a68127ca9950d92a16b4bd58ac5b8b19185d404ad8e43b08d4d3445fc7"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "f04d61a68127ca9950d92a16b4bd58ac5b8b19185d404ad8e43b08d4d3445fc7"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/helpers.py",
+      "sha256": "24d5d5500d91197486ad2653660c64d7b918ebac544dd81ab4af572aa5934acb"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+      "sha256": "afc35a5b0b938b6f4d3610b9d2478552af427d1a4ab9427a0eba2abc5b6bc5e3"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "37a915ff321beac68bf33400fcae1e632c9594faa7aa0d81a60cea6425cc3f51"
+    }
+  ]
+}

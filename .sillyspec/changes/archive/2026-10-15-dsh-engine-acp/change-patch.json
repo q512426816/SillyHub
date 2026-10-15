@@ -1,0 +1,304 @@
+{
+  "change": "2026-10-15-dsh-engine-acp",
+  "baseline": "f4fc50fda06f2ab235aff47128059b77e2631bc9",
+  "head": "837149377fb4219899bd6487fc4b879a9e78ef18",
+  "files": [
+    "backend/app/modules/agent/provider_caps.py",
+    "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+    "backend/app/modules/daemon/group/service/helpers.py",
+    "backend/app/modules/daemon/group/service/messages.py",
+    "backend/app/modules/daemon/group/service/shadow.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/runtimes.ts",
+    "frontend/src/lib/provider-caps.ts",
+    "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+    "sillyhub-daemon/src/agent-detector.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/dsh-settings.ts",
+    "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+    "sillyhub-daemon/src/interactive/dsh-acp-events.ts",
+    "sillyhub-daemon/src/interactive/providers.ts",
+    "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+    "sillyhub-daemon/src/version.ts",
+    "sillyhub-daemon/tests/agent-detector.test.ts",
+    "sillyhub-daemon/tests/dsh-settings.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts",
+    "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+    "sillyhub-daemon/tests/version.test.ts"
+  ],
+  "totals": {
+    "files": 30,
+    "additions": 2436,
+    "deletions": 51
+  },
+  "savedAt": "2026-10-15T06:32:15.283Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f4fc50fda06f2ab235aff47128059b77e2631bc9",
+    "totals": {
+      "files": 30,
+      "additions": 2436,
+      "deletions": 51
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/provider_caps.py",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/helpers.py",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/messages.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/shadow.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 136,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 101,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/runtimes.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/provider-caps.ts",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-detector.ts",
+        "additions": 21,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 101,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/dsh-settings.ts",
+        "additions": 120,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+        "additions": 532,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-events.ts",
+        "additions": 170,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/providers.ts",
+        "additions": 67,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/version.ts",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-detector.test.ts",
+        "additions": 54,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "additions": 118,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+        "additions": 452,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+        "additions": 190,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts",
+        "additions": 139,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "additions": 18,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/version.test.ts",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "093435439edc5d39210dbf0f3212ff818fef9b9b88d20d4f275d2072f29e4424",
+  "patchStatus": "ok"
+}

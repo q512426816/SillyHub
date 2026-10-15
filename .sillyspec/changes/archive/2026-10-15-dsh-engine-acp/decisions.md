@@ -87,3 +87,15 @@ change: 2026-10-15-dsh-engine-acp
 - evidence: sillyhub-daemon/src/interactive/providers.ts:772（InteractiveProvider = keyof typeof INTERACTIVE_PROVIDERS 推导）；typecheck 实测错误 TS2430/TS2416/TS2322
 - 故障面: 两任务文件在中间态（驱动已写、注册未写）typecheck 红——已通过合并执行消除中间态
 - 退役判据: 若未来 InteractiveProvider 改为独立字面量联合（不随注册表推导），可解除合并恢复独立收口
+
+## D-007@v1: 执行期任务边界修正——task-07 单一源实为 runtimes.ts
+- type: architecture
+- priority: P1
+- status: accepted
+- source: code
+- question: task-07 任务卡 allowed_paths 点名 session-list-panel.tsx，但 SESSION_ENGINE_OPTIONS 是导入方——真单一源是 frontend/src/lib/daemon/runtimes.ts 的 SESSION_SUPPORTED_PROVIDERS + PROVIDER_META（连带 pre-session-picker.test.tsx 的 mock PROVIDER_META）
+- answer: 边界修正为 runtimes.ts（+page.test.tsx 断言 + session-list-panel.tsx 仅头注释同步）——D-006 同款执行期裁决先例，commit a8f8b228/21f94d01 留痕；评审员建议补记本条目（execute-review note 级）。
+- normalized_requirement: SESSION_SUPPORTED_PROVIDERS 含 dsh 且群聊 GROUP_SUPPORTED_PROVIDERS 不含（page.test 源级钉断言双向锁定）
+- impacts: [task-07]
+- evidence: frontend/src/lib/daemon/runtimes.ts:175-199（定义）；frontend/src/components/sessions/session-list-panel.tsx:158（导入方）；execute-review-2026-10-15-142448 note 3
+- 退役判据: 引擎选项单一源若迁址，条目随迁

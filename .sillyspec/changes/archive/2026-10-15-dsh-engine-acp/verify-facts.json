@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-dsh-engine-acp",
+  "generatedAt": "2026-10-15T06:44:40.737Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 0,
+        "worktreeHits": 7,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "backendEndpoints": 1743,
+        "frontendCalls": 6
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-dsh-engine-acp",
+      "metrics": {
+        "checkedFiles": 9,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "env-blocked",
+        "item": "dsh ≥0.2.1 实机端到端冒烟（创建会话/一轮对话/打断/代答/路由 model）",
+        "condition": "装有 dsh ≥0.2.1 的机器上 `SILLYHUB_DSH_SMOKE=1 pnpm -C sillyhub-daemon exec vitest run tests/interactive/dsh-acp-smoke.test.ts`；本机 0.1.0-rc.6 低于版本门（skip 分支已实测留痕）",
+        "severity": "blocking"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "群附件门控 pi/cursor 放行的行为变化（R-03）用户体验确认",
+        "condition": "群聊带附件 @ pi/cursor 成员触发一次，确认附件落盘链路（单聊口径一致）；caps 口径已由 test_group_attachment_gate 逐引擎钉死",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+      "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+      "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+      "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "cd backend && uv run pytest -q --no-cov -n auto && cd ../frontend && pnpm test && cd ../sillyhub-daemon && pnpm test",
+    "exitCode": 4,
+    "strategy": "full",
+    "failedRemaining": [],
+    "passedAt": "2026-10-15T08:21:34.807Z"
+  }
+}
