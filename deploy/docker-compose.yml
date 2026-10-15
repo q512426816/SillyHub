@@ -104,6 +104,11 @@ services:
       # see spec documents written by the backend. Override host path via
       # SPEC_DATA_HOST_DIR in .env (see deploy/.env.example).
       - "${SPEC_DATA_HOST_DIR:-C:/data/spec-workspaces}:/data/spec-workspaces"
+      # 知识搜索语义模型缓存（2026-10-15-knowledge-search-pgvector 部署实证）：
+      # 服务器无外网拉不到 HuggingFace 模型（fastembed 首用即下载 → 网络不可达）——宿主机
+      # 预放模型目录挂入容器默认缓存路径，免下载直载；目录缺失时容器内自下载（本地开发无害）。
+      # 预置：scp 本地 fastembed_cache（bge-small-zh-v1.5 ~91MB）→ deploy/models/fastembed_cache。
+      - "./models/fastembed_cache:/tmp/fastembed_cache"
       # 2026-10-08-backend-image-slim-no-claude：claude-data 卷挂载退役——容器内已无
       # claude（server-local 遗物，agent 执行在宿主 daemon）；named volume 数据仍在
       # 宿主磁盘，仅不再挂入。
@@ -156,7 +161,10 @@ services:
       # 默认 16MiB 上限会被 >12MB 的 spec 目录撑爆（WS close 1009 致 import 必断）。
       # 治本在 daemon 端 gzip 压缩，这里是防御性兜底。
       - "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws-max-size 104857600"
-    mem_limit: 800m
+    # 2026-10-15 生产实证：知识搜索嵌入（fastembed bge-small）在 800m 限额下与
+    # 服务本体合计超限被 cgroup OOM（预建进程 247M 时容器总量触顶）——提至 1100m；
+    # 服务器 1.6G：backend 1100 + 其他实际 ~270 + 系统 ~150 仍在总量内。
+    mem_limit: 1100m
 
   frontend:
     image: multi-agent-platform-frontend:latest
