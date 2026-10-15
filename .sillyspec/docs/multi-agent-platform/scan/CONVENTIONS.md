@@ -111,6 +111,25 @@ Conventional Commits，`<type>(<scope>): <subject>`，subject 中文为主：
 - `sillyhub-daemon/`：Node ESM daemon（`src/` 编译到 `dist/`）。
 - `deploy/`：docker-compose（`docker-compose.yml` 生产、`docker-compose.dev.yml` 开发）。`module_paths.deploy = "deploy/"`。
 
+## 前端原型管线（prototype-as-code）
+
+> 2026-10-16-proto-pipeline-discoverability 落档：本图 UI 变更的定稿原型必须走本节管线。
+> 背景：2026-09-27 管线收编（`c2b3a9d8d`）后 `.sillyspec/changes/archive/` 中的历史手绘原型
+> 均为收编前旧物，**不构成惯例依据**——knowledge-search/server-logs 两变更曾据旧物误判
+> "项目无 React 原型管线"产手绘稿（2026-10-15 三会话对照实证）。
+
+- **入口**：`cd frontend && pnpm prototype:build`（`frontend/scripts/prototype-build.mjs`）→
+  产物 `frontend/prototype-dist/<名>.html`（自包含离线双击、三主题可切；产物是编译结果，**禁止手改**，
+  源码改动必须重编译）。
+- **源目录**：`frontend/src/components/prototype/<名>-view.tsx`——import 生产 primer 组件
+  （`frontend/src/components/primer/`）+ Tailwind + `themes.ts` token（零硬编码色），fixture 假数据。
+- **规约与铁律**（分型/工作流/批准冻结/接线）：`.sillyspec/docs/SillyHub/scan/PROTOTYPE.md`；
+  样式基准：`.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（两份在本仓 SillyHub 项目图下，
+  本图 agent 从这里直达）。
+- **本仓登记**：`local.yaml` 顶层 `ui_prototype: { form: real-code }`（sillyspec
+  2026-10-15-ui-proto-form-config 契约——UI 须知注入「真码契约」态；查无管线场景的
+  「单开轻量变更搭最小入口」在本仓不适用，管线已在场）。
+
 ## 已知陷阱
 
 - **复合 git 命令绕过 claude 层 hook**：claude 层按前缀匹配 `Bash(git commit*)`，`git add ... && git commit ...` 以 `git add` 开头会绕过 claude 层 mypy/frontend 检查，仅触发 git 层 ruff。要跑全量检查须单独执行 `git commit`。
