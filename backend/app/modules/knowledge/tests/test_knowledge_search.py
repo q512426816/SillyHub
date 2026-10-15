@@ -418,44 +418,27 @@ async def test_orm_tables_create_all_on_sqlite(db_engine) -> None:
     assert KnowledgeSearchState.__tablename__ == "knowledge_search_state"
 
 
-async def test_chunk_row_roundtrip_and_uq(db_session) -> None:
-    """chunk 行读写往返 + uq(workspace_id, spec_path, anchor, title) 约束拒绝重复。"""
-    import uuid
-
-    from sqlalchemy.exc import IntegrityError
+async def test_chunk_rows_duplicate_anchor_title_coexist(db_session) -> None:
+    """重号条目共存（生产实测语义）：同 (spec_path, anchor, title) 不同 start_line
+    的两条目均可落库（(anchor,title) 组合不唯一——不再有 DB uq 约束）。"""
+    import uuid as _uuid
 
     from app.modules.knowledge.search import KnowledgeSearchChunk
 
-    ws = uuid.uuid4()
-    row = KnowledgeSearchChunk(
+    ws = _uuid.uuid4()
+    cols = dict(
         workspace_id=ws,
-        spec_path="knowledge/decisions/demo.md",
+        spec_path="knowledge/decisions/agent.md",
         kind="decision",
-        title="缓存索引策略",
+        title="风险与死路（design 槽4 收割）",
         anchor="D-001@v1",
-        start_line=5,
-        text="D-001@v1 缓存索引策略\n正文",
-        content_hash="a" * 64,
-        embedding=[0.1, 0.2, 0.3],
-    )
-    db_session.add(row)
-    await db_session.commit()
-
-    dup = KnowledgeSearchChunk(
-        workspace_id=ws,
-        spec_path="knowledge/decisions/demo.md",
-        kind="decision",
-        title="缓存索引策略",
-        anchor="D-001@v1",
-        start_line=6,
-        text="不同正文",
+        text="同名同号不同变更的第二条",
         content_hash="b" * 64,
         embedding=[0.4],
     )
-    db_session.add(dup)
-    with pytest.raises(IntegrityError):
-        await db_session.commit()
-    await db_session.rollback()
+    db_session.add(KnowledgeSearchChunk(start_line=112, **{**cols, "content_hash": "a" * 64}))
+    db_session.add(KnowledgeSearchChunk(start_line=140, **cols))
+    await db_session.commit()  # 不抛 = 重号共存成立
 
 
 async def test_migration_dialect_guard() -> None:

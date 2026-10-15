@@ -109,8 +109,10 @@ class TestMigrationStructure:
         # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）→
         # 20261015120000（agent_group_chats.cross_mention_mode，
         # 2026-10-15-group-cross-mention-visibility）→ 20261015200000
-        # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）。
-        assert heads[0] == "20261015200000"  # 知识搜索持久化迁移成为新 head（注释链续写）
+        # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）→
+        # 20261016010000（drop uq_kssc_workspace_path_anchor_title——生产语料
+        # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
+        assert heads[0] == "20261016010000"  # 知识搜索去 uq 迁移成为新 head（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()
