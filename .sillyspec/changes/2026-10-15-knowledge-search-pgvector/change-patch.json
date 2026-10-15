@@ -1,0 +1,131 @@
+{
+  "change": "2026-10-15-knowledge-search-pgvector",
+  "baseline": "bf237862108836c5a915d3117d07b57b604814f4",
+  "head": "07355c2a0105569903b451450ab23b12174b02e1",
+  "files": [
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/search.py",
+    "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+    "backend/migrations/versions/20261015200000_knowledge_search_pgvector.py",
+    "backend/pyproject.toml",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "backend/uv.lock",
+    "deploy/docker-compose.dev.yml",
+    "deploy/docker-compose.yml"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 794,
+    "deletions": 76
+  },
+  "savedAt": "2026-10-15T13:42:28.257Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "bf237862108836c5a915d3117d07b57b604814f4",
+    "totals": {
+      "files": 11,
+      "additions": 794,
+      "deletions": 76
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/knowledge/router.py",
+        "additions": 6,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/search.py",
+        "additions": 451,
+        "deletions": 46,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+        "additions": 232,
+        "deletions": 20,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261015200000_knowledge_search_pgvector.py",
+        "additions": 86,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/pyproject.toml",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/uv.lock",
+        "additions": 11,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "deploy/docker-compose.dev.yml",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "deploy/docker-compose.yml",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_router.py",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/knowledge.md",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "ac0a7de0d006a59d18cccecef1144ce5b9352363220c6e0171ecee7b59c1ac58",
+  "patchStatus": "ok"
+}

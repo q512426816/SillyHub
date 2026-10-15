@@ -1,0 +1,1156 @@
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index 956561f72..7d1e208bc 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -472,16 +472,15 @@ async def search_knowledge(
+ ) -> KnowledgeSearchOut:
+     """知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
+ 
+-    - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
+-      vector_router.py 同款）；
++    - 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await
++      原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；
+     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
+     """
+-    from fastapi.concurrency import run_in_threadpool
+-
+     from app.core.config import get_settings
++    from app.core.db import get_session_factory
+     from app.modules.auth.rbac import has_permission
+     from app.modules.knowledge.search import search_sync
+     from app.modules.knowledge.vector_search import get_embedder
+@@ -501,8 +500,8 @@ async def search_knowledge(
+         permission=Permission.SCAN_DOCS_READ,
+         workspace_id=workspace_id,
+     )
+-    out = await run_in_threadpool(
+-        search_sync,
++    # async 编排（D-005@v2）：DB await 原生执行，CPU/IO 由 search_sync 内部 to_thread 卸载。
++    out = await search_sync(
+         spec_root,
+         str(workspace_id),
+         query,
+@@ -510,6 +509,7 @@ async def search_knowledge(
+         embedder,
+         settings.knowledge_embedding_model,
+         embedder_error=embedder_error,
++        session_factory=get_session_factory(),
+     )
+     filtered = [
+         KnowledgeSearchResultItem(**item)
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+index 5c606d5de..b29a35a45 100644
+--- a/backend/app/modules/knowledge/search.py
++++ b/backend/app/modules/knowledge/search.py
+@@ -24,13 +24,120 @@
+ 
+ from __future__ import annotations
+ 
++import asyncio
+ import re
+ import threading
++import uuid
+ from dataclasses import dataclass
++from datetime import UTC, datetime
+ from pathlib import Path
+ 
++from sqlalchemy import (
++    JSON,
++    Column,
++    DateTime,
++    ForeignKey,
++    Index,
++    Text,
++    UniqueConstraint,
++    delete,
++    or_,
++    select,
++)
++from sqlalchemy.ext.asyncio import AsyncSession
++from sqlalchemy.types import Integer, String, Uuid
++from sqlmodel import Field
++
++from app.models.base import BaseModel
+ from app.modules.knowledge.parser import slugify_anchor
+ 
++# ── 持久化 ORM（change 2026-10-15-knowledge-search-pgvector / D-002@v1）──────────
++#
++# 向量与 chunk 元数据落 PG pgvector（embedding vector(512)），重启零重建；测试引擎为
++# SQLite（backend/conftest.py aiosqlite 内存库）——embedding 列经 with_variant 双方言：
++# PG = pgvector.sqlalchemy.Vector(512)，SQLite = JSON 文本（查询层方言分叉消费，
++# D-004@v1）。ORM 形态先例对齐 hits.py:79 的 KnowledgeHit（模块内定义进同一 metadata）。
++
++_EMBEDDING_DIM = 512  # bge-small-zh-v1.5 维度（settings 默认模型；跨维度换型走显式迁移 R-03）
++
++
++def _embedding_column() -> Column:
++    """embedding 列：PG=vector(512) / SQLite=JSON（with_variant，create_all 双方言可建）。"""
++    from pgvector.sqlalchemy import Vector  # 延迟导入：依赖缺席时仅检索持久化面不可用
++
++    return Column(JSON().with_variant(Vector(_EMBEDDING_DIM), "postgresql"), nullable=False)
++
++
++class KnowledgeSearchChunk(BaseModel, table=True):
++    """一个可检索块的持久化行（spec 扫描产物 + 向量）。"""
++
++    __tablename__ = "knowledge_search_chunks"
++    __table_args__ = (
++        UniqueConstraint(
++            "workspace_id",
++            "spec_path",
++            "anchor",
++            "title",
++            name="uq_kssc_workspace_path_anchor_title",
++        ),
++        Index("ix_kssc_workspace", "workspace_id"),
++    )
++
++    id: uuid.UUID = Field(
++        default_factory=uuid.uuid4,
++        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
++    )
++    workspace_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("workspaces.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++    )
++    spec_path: str = Field(sa_column=Column(String(1024), nullable=False))
++    kind: str = Field(sa_column=Column(String(32), nullable=False))
++    title: str = Field(sa_column=Column(String(512), nullable=False))
++    anchor: str | None = Field(default=None, sa_column=Column(String(256), nullable=True))
++    start_line: int = Field(sa_column=Column(Integer, nullable=False))
++    text: str = Field(sa_column=Column(Text, nullable=False))
++    #: sha256(text)——差量比对键（mtime 指纹漂移被本层吸收：内容未变不重嵌，D-003@v1）。
++    content_hash: str = Field(sa_column=Column(String(64), nullable=False))
++    #: PG=vector(512) / SQLite=JSON 文本（with_variant；写入侧统一 list[float]，pgvector
++    #: 绑定互转由方言驱动；SQLite 存 JSON 供查询层拉回 Python 余弦）。
++    embedding: object = Field(default=None, sa_column=_embedding_column())
++    created_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++
++
++class KnowledgeSearchState(BaseModel, table=True):
++    """workspace 级同步状态：语料指纹 + 向量模型版本（懒同步判定面，D-003/D-007@v1）。"""
++
++    __tablename__ = "knowledge_search_state"
++    __table_args__ = (UniqueConstraint("workspace_id", name="uq_kss_workspace"),)
++
++    id: uuid.UUID = Field(
++        default_factory=uuid.uuid4,
++        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
++    )
++    workspace_id: uuid.UUID = Field(
++        sa_column=Column(
++            Uuid(as_uuid=True),
++            ForeignKey("workspaces.id", ondelete="CASCADE"),
++            nullable=False,
++        ),
++    )
++    #: (path, mtime_ns, size) 元组列表序列化（与 corpus_fingerprint() 返回值同源；
++    #: 比较前双方 list(map(list, ...)) 归一——JSON 读回为 list，避免 tuple!=list 恒真）。
++    corpus_fingerprint: list = Field(sa_column=Column(JSON, nullable=False))
++    model_version: str = Field(sa_column=Column(String(128), nullable=False))
++    updated_at: datetime = Field(
++        default_factory=lambda: datetime.now(UTC),
++        sa_column=Column(DateTime(timezone=True), nullable=False),
++    )
++
++
+ # ── 切块常量（D-003@v1：阈值 1500 / 窗 1000 / 重叠 150——与 design.md Phase 1 同源）──
+ 
+ _CHUNK_MAX = 1500
+@@ -242,30 +349,266 @@ def corpus_fingerprint(spec_root: Path) -> tuple | None:
+     return tuple(sorted(parts))
+ 
+ 
+-# ── 索引（懒构建 + 指纹失效；与 vector_search.py 的 CLI 索引完全独立）──────────
++# ── 持久化同步与查询（change 2026-10-15-knowledge-search-pgvector / D-003/D-011）──
++#
++# 内存索引已被 PG pgvector 两表取代（重启零重建）：查询时懒同步——指纹一致直查库；
++# 失配差量（新键插入 / hash 变重嵌 / 消失删除 / mtime 漂移被 hash 层吸收）；
++# model_version 变更全量重算。进程内 asyncio.Lock（键 = workspace_key）single-flight
++# 挡同进程并发首查；跨进程由 DB uq + ON CONFLICT/REPLACE 幂等兜底（R-04）。
++# DB 异常 → 词面内存直查降级（scan_corpus + _word_score，搜索永不 5xx，design 降级链）。
++
++_sync_locks: dict[str, asyncio.Lock] = {}
++_sync_locks_guard = threading.Lock()  # 双检创建锁的守卫（asyncio.Lock 创建本身线程安全）
++
++_DB_DEGRADED_PREFIX = "knowledge_search_db_degraded: "
++
++_LEGACY_INDEXES: dict[tuple[str, str], dict] = {}  # 兼容留位（旧内存路径已由 DB 取代）
++
++
++def _get_sync_lock(workspace_key: str) -> asyncio.Lock:
++    """per-workspace asyncio.Lock（async 协程跨 await 持有安全——Grill 增量复审残留①）。"""
++    with _sync_locks_guard:
++        lock = _sync_locks.get(workspace_key)
++        if lock is None:
++            lock = asyncio.Lock()
++            _sync_locks[workspace_key] = lock
++        return lock
+ 
+-_index_lock = threading.Lock()
+-_indexes: dict[tuple[str, str], dict] = {}  # (workspace_key, model_name) → 缓存条目
+ 
++def _content_hash(text: str) -> str:
++    import hashlib
+ 
+-def _build_index_locked(spec_root: Path, key: tuple[str, str], embedder: object | None) -> dict:
+-    """锁内构建索引（调用方持 ``_index_lock``）。
++    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+ 
+-    指纹在 scan **之前**计算并作为存储值——构建期间的文件变更会让外回复算不等，
+-    触发重建（防陈旧索引自愈的保守方向）。
++
++def _norm_fingerprint(fp: tuple | list | None) -> list | None:
++    """指纹归一化：tuple[tuple,...] / JSON list[list] 统一为 list[list]（Grill 修订——
++    否则 tuple != list 恒真、快路径恒失效，每次查询多付全语料读取）。"""
++    if fp is None:
++        return None
++    return [list(item) for item in fp]
++
++
++async def _db_session(session_factory):
++    """短会话上下文（async with）；factory 缺省取全局（测试面经 conftest 重定向）。"""
++    if session_factory is None:
++        from app.core.db import get_session_factory
++
++        session_factory = get_session_factory()
++    return session_factory()
++
++
++async def _ensure_synced(
++    session: AsyncSession,
++    spec_root: Path,
++    workspace_id: uuid.UUID,
++    workspace_key: str,
++    fp_now: tuple | None,
++    model_name: str,
++    embedder: object | None,
++) -> None:
++    """懒同步主体（调用方持 per-workspace 锁；DB 异常向上抛给降级链）。
++
++    三分支：state 缺失或 model_version 不符 → 全量；指纹失配（归一化后比较）→ 差量；
++    一致 → 直查。embedder None 时仍可同步（写入零向量占位——词面路可查；向量路本就禁用，模型恢复且语料未变时零向量滞留至下次变更重嵌，D-007@v1 的实现口径）。
+     """
+-    fp = corpus_fingerprint(spec_root)
+-    chunks = scan_corpus(spec_root)
+-    vectors = embedder.embed([c.text for c in chunks]) if (embedder is not None and chunks) else []
+-    entry = {"fingerprint": fp, "chunks": chunks, "vectors": vectors}
+-    _indexes[key] = entry
+-    return entry
++    state = (
++        await session.execute(
++            select(KnowledgeSearchState).where(KnowledgeSearchState.workspace_id == workspace_id)
++        )
++    ).scalar_one_or_none()
++    fp_norm = _norm_fingerprint(fp_now)
++    if (
++        state is not None
++        and state.model_version == model_name
++        and _norm_fingerprint(state.corpus_fingerprint) == fp_norm
++    ):
++        return  # 快路径：指纹一致零嵌入调用
++    if state is None or state.model_version != model_name:
++        await _sync_full(session, spec_root, workspace_id, fp_now, model_name, embedder)
++    else:
++        await _sync_delta(session, spec_root, workspace_id, fp_now, model_name, embedder)
++    if state is None:
++        state = KnowledgeSearchState(
++            workspace_id=workspace_id,
++            corpus_fingerprint=fp_norm or [],
++            model_version=model_name,
++        )
++        session.add(state)
++    else:
++        state.corpus_fingerprint = fp_norm or []
++        state.model_version = model_name
++    await session.commit()
++
++
++async def _rows_by_key(
++    session: AsyncSession, workspace_id: uuid.UUID
++) -> dict[tuple[str, str | None, str], KnowledgeSearchChunk]:
++    """库行键集 {(spec_path, anchor, title): row}（差量比对基线，一次 SELECT）。"""
++    rows = (
++        (
++            await session.execute(
++                select(KnowledgeSearchChunk).where(
++                    KnowledgeSearchChunk.workspace_id == workspace_id
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    return {(r.spec_path, r.anchor, r.title): r for r in rows}
++
++
++def _chunk_row(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> KnowledgeSearchChunk:
++    return KnowledgeSearchChunk(
++        workspace_id=workspace_id,
++        spec_path=c.spec_path,
++        kind=c.kind,
++        title=c.title,
++        anchor=c.anchor,
++        start_line=c.start_line,
++        text=c.text,
++        content_hash=_content_hash(c.text),
++        embedding=embedding,
++    )
++
++
++async def _sync_full(
++    session: AsyncSession,
++    spec_root: Path,
++    workspace_id: uuid.UUID,
++    fp_now: tuple | None,
++    model_name: str,
++    embedder: object | None,
++) -> None:
++    """全量重算：清 chunks → 逐 chunk 嵌入批量插入（嵌入批量经 to_thread 卸载）。"""
++    await session.execute(
++        delete(KnowledgeSearchChunk).where(KnowledgeSearchChunk.workspace_id == workspace_id)
++    )
++    chunks = await asyncio.to_thread(scan_corpus, spec_root)
++    if not chunks:
++        return
++    if embedder is None:
++        # 词面降级态也要可查：仅存元数据（embedding 置零向量，向量路本就禁用）
++        vectors: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in chunks]
++    else:
++        vectors = await asyncio.to_thread(embedder.embed, [c.text for c in chunks])
++    session.add_all([_chunk_row(workspace_id, c, vectors[i]) for i, c in enumerate(chunks)])
++    await session.commit()
++
++
++async def _sync_delta(
++    session: AsyncSession,
++    spec_root: Path,
++    workspace_id: uuid.UUID,
++    fp_now: tuple | None,
++    model_name: str,
++    embedder: object | None,
++) -> None:
++    """差量四态：新键 INSERT（嵌入）/ hash 变 UPDATE 重嵌 / 消失 DELETE / 同跳过。"""
++    existing = await _rows_by_key(session, workspace_id)
++    chunks = await asyncio.to_thread(scan_corpus, spec_root)
++    fresh_keys = set()
++    to_embed: list[tuple[KnowledgeSearchChunk | None, Chunk]] = []  # (库行|None, 新 chunk)
++    for c in chunks:
++        key = (c.spec_path, c.anchor, c.title)
++        fresh_keys.add(key)
++        h = _content_hash(c.text)
++        row = existing.get(key)
++        if row is None or row.content_hash != h:
++            to_embed.append((row, c))
++    # 嵌入批量一次（to_thread 卸载；embedder None 时词面降级写零向量占位）
++    if to_embed:
++        if embedder is None:
++            vecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in to_embed]
++        else:
++            vecs = await asyncio.to_thread(embedder.embed, [c.text for _, c in to_embed])
++        for (row, c), vec in zip(to_embed, vecs, strict=True):
++            if row is None:
++                session.add(_chunk_row(workspace_id, c, vec))
++            else:
++                row.text = c.text
++                row.start_line = c.start_line
++                row.kind = c.kind
++                row.content_hash = _content_hash(c.text)
++                row.embedding = vec
++    for key in existing.keys() - fresh_keys:
++        await session.delete(existing[key])
++    await session.commit()
++
++
++async def _query_vector_candidates(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    q_vec: list[float],
++    k: int,
++) -> list[tuple[KnowledgeSearchChunk, float]]:
++    """向量路 top-k 候选：PG = pgvector KNN（<=> 余弦距离）；SQLite = 拉回 Python 余弦。"""
++    dialect = session.bind.dialect.name if session.bind is not None else "sqlite"
++    if dialect == "postgresql":
++        rows = (
++            await session.execute(
++                select(KnowledgeSearchChunk, KnowledgeSearchChunk.embedding.cosine_distance(q_vec))
++                .where(KnowledgeSearchChunk.workspace_id == workspace_id)
++                .order_by(KnowledgeSearchChunk.embedding.cosine_distance(q_vec))
++                .limit(k)
++            )
++        ).all()
++        return [(chunk, 1.0 - float(dist)) for chunk, dist in rows]
++    # SQLite（测试）：拉回全量 embedding JSON → Python 余弦（D-004@v1 方言分叉）
++    rows = (
++        (
++            await session.execute(
++                select(KnowledgeSearchChunk).where(
++                    KnowledgeSearchChunk.workspace_id == workspace_id
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    chunks: list[KnowledgeSearchChunk] = list(rows)
++    scored: list[tuple[KnowledgeSearchChunk, float]] = [
++        (row, _cosine(q_vec, list(row.embedding or []))) for row in chunks
++    ]
++    scored.sort(key=lambda pair: -pair[1])
++    return scored[:k]
++
++
++async def _query_word_candidates(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    q: str,
++    cap: int = 500,
++) -> list[KnowledgeSearchChunk]:
++    """词面路候选：SQL ILIKE（escape 口径对齐 scan_docs/service.py:158-169）+ LIMIT 上限。"""
++    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
++    pat = f"%{escaped}%"
++    rows = (
++        (
++            await session.execute(
++                select(KnowledgeSearchChunk)
++                .where(KnowledgeSearchChunk.workspace_id == workspace_id)
++                .where(
++                    or_(
++                        KnowledgeSearchChunk.title.ilike(pat, escape="\\"),
++                        KnowledgeSearchChunk.spec_path.ilike(pat, escape="\\"),
++                        KnowledgeSearchChunk.text.ilike(pat, escape="\\"),
++                    )
++                )
++                .limit(cap)
++            )
++        )
++        .scalars()
++        .all()
++    )
++    return list(rows)
+ 
+ 
+ def reset_index_for_tests() -> None:
+-    """测试隔离：清空索引缓存（生产勿调）。"""
+-    with _index_lock:
+-        _indexes.clear()
++    """测试隔离：清空进程内同步锁（生产勿调）。"""
++    with _sync_locks_guard:
++        _sync_locks.clear()
+ 
+ 
+ # ── 打分与片段 ───────────────────────────────────────────────────────────────
+@@ -319,10 +662,10 @@ def _make_snippet(text: str, query: str) -> str:
+     return core + "…" if len(text) > 240 else core
+ 
+ 
+-# ── 检索主体（路由侧经 run_in_threadpool 调用；embedder 参数供测试注入 fake）────
++# ── 检索主体（async 编排：DB await 原生执行 + CPU/IO 经 to_thread 卸载；D-005@v2）──
+ 
+ 
+-def search_sync(
++async def search_sync(
+     spec_root: Path,
+     workspace_key: str,
+     query: str,
+@@ -331,52 +674,66 @@ def search_sync(
+     model_name: str,
+     *,
+     embedder_error: str | None = None,
++    session_factory: object | None = None,
+ ) -> dict:
+-    """同步检索：返回 ``{results, model_ready, reason}``。
++    """检索：返回 ``{results, model_ready, reason}``（形态与上变更内存版逐字段一致）。
+ 
+-    ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（按融合分降序；
+-    同文件同 anchor 去重取最高分）。embedder None（不可用）→ 纯词面结果 + ``model_ready=False``。
++    ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（融合分降序；
++    去重取最高分）。embedder None → 纯词面 + ``model_ready=False``；DB 异常 →
++    词面内存直查降级（reason 带 ``knowledge_search_db_degraded:`` 前缀，搜索永不 5xx）。
+     """
+     q = str(query or "").strip()
+     model_ready = embedder is not None
+     reason = None if model_ready else (embedder_error or "embedder unavailable")
+     if not q:
+         return {"results": [], "model_ready": model_ready, "reason": reason}
+-    if corpus_fingerprint(spec_root) is None:
++    fp_now = await asyncio.to_thread(corpus_fingerprint, spec_root)
++    if fp_now is None:
++        return {"results": [], "model_ready": model_ready, "reason": reason}
++    try:
++        ws_id = uuid.UUID(workspace_key)
++    except (ValueError, AttributeError):
+         return {"results": [], "model_ready": model_ready, "reason": reason}
+ 
+-    key = (workspace_key, model_name)
+-    with _index_lock:
+-        fp = corpus_fingerprint(spec_root)
+-        cached = _indexes.get(key)
+-        if cached is None or cached["fingerprint"] != fp:
+-            cached = _build_index_locked(spec_root, key, embedder)
+-            # 构建后复算：构建期间文件变更 → 立即重建（最多 2 轮，防持续写入死循环）
+-            for _ in range(2):
+-                if corpus_fingerprint(spec_root) == cached["fingerprint"]:
+-                    break
+-                cached = _build_index_locked(spec_root, key, embedder)
+-        chunks: list[Chunk] = cached["chunks"]
+-        vectors: list[list[float]] = cached["vectors"]
+-
+-    q_vec = embedder.embed([q])[0] if embedder is not None else None
++    try:
++        async with await _db_session(session_factory) as session:
++            lock = _get_sync_lock(workspace_key)
++            async with lock:
++                await _ensure_synced(
++                    session, spec_root, ws_id, workspace_key, fp_now, model_name, embedder
++                )
++            # 查询双路（同步完成后读——不读半态）
++            q_vec = None
++            if embedder is not None:
++                q_vec = (await asyncio.to_thread(embedder.embed, [q]))[0]
++            vec_rows: list[tuple[KnowledgeSearchChunk, float]] = []
++            if q_vec is not None:
++                vec_rows = await _query_vector_candidates(session, ws_id, q_vec, limit * 3)
++            word_rows = await _query_word_candidates(session, ws_id, q)
++    except Exception as exc:  # DB 异常 → 词面内存直查降级（fail-soft，搜索永不 5xx）
++        return await _fallback_word_scan(
++            spec_root, q, limit, model_ready, f"{_DB_DEGRADED_PREFIX}{type(exc).__name__}: {exc}"
++        )
++
++    # Python 侧融合打分（口径不变：0.6*vec + 0.4*word + 保底 0.9 + 零信号过滤 + 去重）
+     q_lower = q.lower()
+-    best: dict[tuple[str, str | None, str], tuple[float, Chunk]] = {}
+-    for i, chunk in enumerate(chunks):
+-        word, exact = _word_score(q_lower, chunk)
+-        if q_vec is not None and i < len(vectors):
+-            score = 0.6 * _cosine(q_vec, vectors[i]) + 0.4 * word
++    best: dict[tuple[str, str | None, str], tuple[float, KnowledgeSearchChunk]] = {}
++    vec_score_by_id = {row.id: sim for row, sim in vec_rows}
++    for row in word_rows + [r for r, _ in vec_rows]:
++        word, exact = _word_score_row(q_lower, row)
++        sim = vec_score_by_id.get(row.id)
++        if sim is not None:
++            score = 0.6 * sim + 0.4 * word
+             if exact:
+                 score = max(score, 0.9)
+         else:
+             score = word
+-        dedup_key = (chunk.spec_path, chunk.anchor, chunk.title)
++        dedup_key = (row.spec_path, row.anchor, row.title)
+         cur = best.get(dedup_key)
+         if cur is None or score > cur[0]:
+-            best[dedup_key] = (score, chunk)
++            best[dedup_key] = (score, row)
+ 
+-    # 零信号块过滤：融合分为 0（既无词面命中、向量零相似）不返回——「搜不到」空态
+-    # 可达。更严的相关性阈值需真实语料标定（见 design R-03），本期只砍零信号。
++    # 零信号块过滤：融合分 0 不返回（「搜不到」空态可达；design R-03 只砍零信号）
+     ranked = sorted(
+         (pair for pair in best.values() if pair[0] > 0),
+         key=lambda pair: (-pair[0], pair[1].spec_path, pair[1].start_line),
+@@ -393,3 +750,51 @@ def search_sync(
+         for score, c in ranked[: max(1, int(limit))]
+     ]
+     return {"results": results, "model_ready": model_ready, "reason": reason}
++
++
++def _word_score_row(query_lower: str, row: KnowledgeSearchChunk) -> tuple[float, bool]:
++    """词面打分（库行版；口径与 _word_score 逐字段一致——title/anchor 0.6、path 0.25、
++    正文次数 ≤0.15，anchor∨title∨path 命中 = 精确命中）。"""
++    anchor_hit = bool(row.anchor) and query_lower in (row.anchor or "").lower()
++    title_hit = bool(row.title) and query_lower in row.title.lower()
++    path_hit = query_lower in row.spec_path.lower()
++    score = 0.0
++    if anchor_hit or title_hit:
++        score += 0.6
++    if path_hit:
++        score += 0.25
++    hits = row.text.lower().count(query_lower)
++    if hits:
++        score += min(0.15, 0.05 * hits)
++    return min(score, 1.0), (anchor_hit or title_hit or path_hit)
++
++
++async def _fallback_word_scan(
++    spec_root: Path, q: str, limit: int, model_ready: bool, reason: str
++) -> dict:
++    """DB 异常降级：scan_corpus + _word_score 内存直查（上变更内存实现的无向量版）。"""
++    chunks = await asyncio.to_thread(scan_corpus, spec_root)
++    q_lower = q.lower()
++    best: dict[tuple[str, str | None, str], tuple[float, Chunk]] = {}
++    for chunk in chunks:
++        word, _exact = _word_score(q_lower, chunk)
++        dedup_key = (chunk.spec_path, chunk.anchor, chunk.title)
++        cur = best.get(dedup_key)
++        if cur is None or word > cur[0]:
++            best[dedup_key] = (word, chunk)
++    ranked = sorted(
++        (pair for pair in best.values() if pair[0] > 0),
++        key=lambda pair: (-pair[0], pair[1].spec_path, pair[1].start_line),
++    )
++    results = [
++        {
++            "spec_path": c.spec_path,
++            "kind": c.kind,
++            "title": c.title,
++            "anchor": c.anchor,
++            "snippet": _make_snippet(c.text, q),
++            "score": round(word, 6),
++        }
++        for word, c in ranked[: max(1, int(limit))]
++    ]
++    return {"results": results, "model_ready": model_ready, "reason": reason}
+diff --git a/backend/app/modules/knowledge/tests/test_knowledge_search.py b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+index 607c1fde0..303943a9f 100644
+--- a/backend/app/modules/knowledge/tests/test_knowledge_search.py
++++ b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+@@ -15,10 +15,12 @@
+ from __future__ import annotations
+ 
+ import itertools
++import uuid
+ from collections.abc import Iterator
+ from pathlib import Path
+ 
+ import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
+ 
+ from app.modules.knowledge.search import (
+     Chunk,
+@@ -49,12 +51,35 @@ class FakeEmbedder:
+ 
+ @pytest.fixture(autouse=True)
+ def _reset_search_index() -> Iterator[None]:
+-    """测试隔离：每个用例前后清空进程内索引缓存。"""
++    """测试隔离：每个用例前后清空进程内同步锁。"""
+     reset_index_for_tests()
+     yield
+     reset_index_for_tests()
+ 
+ 
++@pytest.fixture()
++async def search_env(db_engine, db_session, tmp_path: Path):
++    """检索持久化测试环境：真实 workspace 行 + 测试引擎会话工厂。
++
++    返回 ``(workspace_key, session_factory)``——search_sync 的 DB 面经 SQLite
++    测试引擎（with_variant JSON 路径），workspace 行满足两表 FK 约束。
++    """
++    from sqlalchemy.ext.asyncio import async_sessionmaker
++
++    from app.modules.workspace.model import Workspace
++
++    ws = Workspace(
++        name=f"ks-test-{uuid.uuid4().hex[:8]}",
++        slug=f"ks-test-{uuid.uuid4().hex[:8]}",
++        root_path=str(tmp_path),
++        status="active",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    factory = async_sessionmaker(bind=db_engine, class_=AsyncSession, expire_on_commit=False)
++    return str(ws.id), factory
++
++
+ # ── 语料构造 helpers ─────────────────────────────────────────────────────────
+ 
+ 
+@@ -232,29 +257,37 @@ def test_corpus_fingerprint_none_when_dirs_absent(tmp_path: Path) -> None:
+     assert corpus_fingerprint(tmp_path) is None
+ 
+ 
+-def test_search_reuses_index_until_files_change(tmp_path: Path) -> None:
++async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env) -> None:
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    out1 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
++    out1 = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     assert out1["model_ready"] is True
+     calls_after_first = fake.embed_calls
+     assert calls_after_first >= 2  # 语料构建 1 次 + query 1 次
+-    out2 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
++    out2 = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     assert fake.embed_calls == calls_after_first + 1, "文件未变仅 query embed，不重建索引"
+     assert out2["results"]
+     # 语料变更 → 重建（再多一次全量 embed）
+     _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
+-    search_sync(tmp_path, "ws-1", "状态点", 5, fake, "fake-model")
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     assert fake.embed_calls >= calls_after_first + 3, "文件变更后应重建索引"
+ 
+ 
+ # ── 融合检索 ─────────────────────────────────────────────────────────────────
+ 
+ 
+-def test_search_exact_decision_id_ranks_first(tmp_path: Path) -> None:
++async def test_search_exact_decision_id_ranks_first(tmp_path: Path, search_env) -> None:
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    out = search_sync(tmp_path, "ws-x", "D-002@v1", 5, fake, "fake-model")
++    out = await search_sync(
++        tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     results = out["results"]
+     assert results, "精确编号应命中"
+     top = results[0]
+@@ -271,7 +304,7 @@ def test_search_exact_decision_id_ranks_first(tmp_path: Path) -> None:
+     } <= set(top.keys())
+ 
+ 
+-def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path) -> None:
++async def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path, search_env) -> None:
+     _write(
+         tmp_path,
+         "knowledge/manual.md",
+@@ -284,23 +317,28 @@ def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path) -> None:
+     )
+     fake = FakeEmbedder()
+     # 「会话状态」在语料中无连续子串（「会话过程」/「状态点」分离）→ 纯语义路召回
+-    out = search_sync(tmp_path, "ws-sem", "会话状态", 5, fake, "fake-model")
++    out = await search_sync(
++        tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     results = out["results"]
+     assert results, "纯语义应可召回"
+     assert results[0]["spec_path"] == "knowledge/manual.md"
+     assert results[0]["title"] == "会话过程"
+ 
+ 
+-def test_search_degraded_word_only_when_embedder_unavailable(tmp_path: Path) -> None:
++async def test_search_degraded_word_only_when_embedder_unavailable(
++    tmp_path: Path, search_env
++) -> None:
+     _mini_corpus(tmp_path)
+-    out = search_sync(
++    out = await search_sync(
+         tmp_path,
+-        "ws-deg",
++        search_env[0],
+         "会话状态点",
+         5,
+         None,
+         "fake-model",
+         embedder_error="ImportError: fastembed",
++        session_factory=search_env[1],
+     )
+     assert out["model_ready"] is False
+     assert out["reason"] == "ImportError: fastembed"
+@@ -310,21 +348,25 @@ def test_search_degraded_word_only_when_embedder_unavailable(tmp_path: Path) ->
+     assert any("会话状态点" in r["snippet"] for r in out["results"])
+ 
+ 
+-def test_search_empty_query_returns_empty(tmp_path: Path) -> None:
++async def test_search_empty_query_returns_empty(tmp_path: Path, search_env) -> None:
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    out = search_sync(tmp_path, "ws-eq", "   ", 5, fake, "fake-model")
++    out = await search_sync(
++        tmp_path, search_env[0], "   ", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     assert out["results"] == []
+     assert out["model_ready"] is True
+     assert out["reason"] is None
+ 
+ 
+-def test_search_snippet_window_around_match(tmp_path: Path) -> None:
++async def test_search_snippet_window_around_match(tmp_path: Path, search_env) -> None:
+     filler = "填充" * 200
+     doc = f"## 目标小节\n\n{filler}会话状态点{filler}\n"
+     _write(tmp_path, "knowledge/snip.md", doc)
+     fake = FakeEmbedder()
+-    out = search_sync(tmp_path, "ws-snip", "会话状态点", 3, fake, "fake-model")
++    out = await search_sync(
++        tmp_path, search_env[0], "会话状态点", 3, fake, "fake-model", session_factory=search_env[1]
++    )
+     results = out["results"]
+     assert results
+     snippet = results[0]["snippet"]
+@@ -333,16 +375,186 @@ def test_search_snippet_window_around_match(tmp_path: Path) -> None:
+     assert len(snippet) < 400
+ 
+ 
+-def test_search_missing_corpus_returns_empty(tmp_path: Path) -> None:
++async def test_search_missing_corpus_returns_empty(tmp_path: Path, search_env) -> None:
+     fake = FakeEmbedder()
+-    out = search_sync(tmp_path, "ws-none", "任意", 5, fake, "fake-model")
++    out = await search_sync(
++        tmp_path, search_env[0], "任意", 5, fake, "fake-model", session_factory=search_env[1]
++    )
+     assert out["results"] == []
+     assert out["model_ready"] is True
+ 
+ 
+-def test_search_unrelated_query_returns_empty_state(tmp_path: Path) -> None:
++async def test_search_unrelated_query_returns_empty_state(tmp_path: Path, search_env) -> None:
+     """零信号块过滤：无关查询（无词面命中 + 向量零相似）→ 空态可达，不返回 0 分噪声。"""
+     _mini_corpus(tmp_path)
+     fake = FakeEmbedder()
+-    out = search_sync(tmp_path, "ws-zero", "量子力学哈密顿算子", 5, fake, "fake-model")
++    out = await search_sync(
++        tmp_path,
++        search_env[0],
++        "量子力学哈密顿算子",
++        5,
++        fake,
++        "fake-model",
++        session_factory=search_env[1],
++    )
+     assert out["results"] == [], "无信号查询应返回空（前端空态）"
++
++
++# ── 持久化 ORM 面（change 2026-10-15-knowledge-search-pgvector / task-01）────────
++
++
++async def test_orm_tables_create_all_on_sqlite(db_engine) -> None:
++    """with_variant 双方言：SQLite 内存引擎建表命中 JSON 变体（无 vector 类型依赖）。"""
++    from sqlalchemy import inspect
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
++
++    async with db_engine.connect() as conn:
++        tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
++    assert "knowledge_search_chunks" in tables
++    assert "knowledge_search_state" in tables
++    # embedding 列在 SQLite 下可写可读（JSON 文本形态）——直接落一行验证
++    assert KnowledgeSearchChunk.__tablename__ == "knowledge_search_chunks"
++    assert KnowledgeSearchState.__tablename__ == "knowledge_search_state"
++
++
++async def test_chunk_row_roundtrip_and_uq(db_session) -> None:
++    """chunk 行读写往返 + uq(workspace_id, spec_path, anchor, title) 约束拒绝重复。"""
++    import uuid
++
++    from sqlalchemy.exc import IntegrityError
++
++    from app.modules.knowledge.search import KnowledgeSearchChunk
++
++    ws = uuid.uuid4()
++    row = KnowledgeSearchChunk(
++        workspace_id=ws,
++        spec_path="knowledge/decisions/demo.md",
++        kind="decision",
++        title="缓存索引策略",
++        anchor="D-001@v1",
++        start_line=5,
++        text="D-001@v1 缓存索引策略\n正文",
++        content_hash="a" * 64,
++        embedding=[0.1, 0.2, 0.3],
++    )
++    db_session.add(row)
++    await db_session.commit()
++
++    dup = KnowledgeSearchChunk(
++        workspace_id=ws,
++        spec_path="knowledge/decisions/demo.md",
++        kind="decision",
++        title="缓存索引策略",
++        anchor="D-001@v1",
++        start_line=6,
++        text="不同正文",
++        content_hash="b" * 64,
++        embedding=[0.4],
++    )
++    db_session.add(dup)
++    with pytest.raises(IntegrityError):
++        await db_session.commit()
++    await db_session.rollback()
++
++
++async def test_migration_dialect_guard() -> None:
++    """迁移方言守卫：非 PG bind 上 upgrade() 静默返回（不建表不炸；fail-closed 文案钉住）。"""
++    import importlib.util
++    import pathlib
++
++    from alembic.migration import MigrationContext
++    from alembic.operations import Operations
++    from sqlalchemy import create_engine, inspect
++
++    # tests 文件 = backend/app/modules/knowledge/tests/ → parents[4] = backend/
++    mig_path = (
++        pathlib.Path(__file__).resolve().parents[4]
++        / "migrations"
++        / "versions"
++        / "20261015200000_knowledge_search_pgvector.py"
++    )
++    spec = importlib.util.spec_from_file_location("ks_migration", mig_path)
++    mod = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(mod)
++
++    engine = create_engine("sqlite://")
++    with engine.begin() as conn:
++        mc = MigrationContext.configure(conn)
++        with Operations.context(mc):
++            mod.upgrade()  # 非 PG → 首行 return，无任何 DDL
++        assert "knowledge_search_chunks" not in inspect(conn).get_table_names()
++
++    text = mig_path.read_text(encoding="utf-8")
++    assert 'dialect.name != "postgresql"' in text
++    assert "pgvector/pgvector:pg16" in text  # fail-closed 修复指引文案（R-06）
++
++
++# ── 持久化行为面（2026-10-15-knowledge-search-pgvector / task-02）──────────────
++
++
++async def test_search_model_version_change_triggers_full_rebuild(
++    tmp_path: Path, search_env
++) -> None:
++    """model_version 变更 → 全量重嵌一次（D-007@v1：嵌入计数 = 语料 chunk 数）。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "model-a", session_factory=search_env[1]
++    )
++    embedded_a = fake.embedded_texts
++    assert embedded_a > 0
++    # 换模型名 → 全量重算（再嵌入全部 chunk）+ 1 次 query 嵌入
++    out = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
++    )
++    assert fake.embedded_texts == embedded_a * 2  # 全量(chunks) + query，与首次同构
++    assert out["results"]
++
++
++async def test_search_db_error_falls_back_to_word_scan(tmp_path: Path, search_env) -> None:
++    """DB 异常 → 词面内存直查降级：200 语义（不抛）+ reason 带 db_degraded 前缀。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++
++    class _BoomFactory:
++        def __call__(self):
++            raise RuntimeError("connection refused")
++
++    out = await search_sync(
++        tmp_path,
++        search_env[0],
++        "会话状态点",
++        5,
++        fake,
++        "fake-model",
++        session_factory=_BoomFactory(),
++    )
++    assert out["model_ready"] is True  # embedder 在场（降级只降 DB 面）
++    assert out["reason"] is not None and "knowledge_search_db_degraded" in out["reason"]
++    assert out["results"], "降级仍应返回词面结果"
++    top = out["results"][0]
++    assert (
++        top["score"] >= 0.6 and "会话状态点" in top["title"]
++    )  # 词面 title 命中排前（与内存版同构）
++
++
++async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_env) -> None:
++    """差量四态：单文件内容变更 → 仅该文件 chunk 重嵌（嵌入计数精确递增）。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    baseline = fake.embedded_texts
++    # 改单文件（known-issues.md 新增一段）
++    p = tmp_path / "knowledge" / "known-issues.md"
++    p.write_text(
++        p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
++    )
++    out = await search_sync(
++        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
++    )
++    # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
++    assert fake.embedded_texts == baseline + 2
++    assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"
+diff --git a/backend/migrations/versions/20261015200000_knowledge_search_pgvector.py b/backend/migrations/versions/20261015200000_knowledge_search_pgvector.py
+new file mode 100644
+index 000000000..c43011b57
+--- /dev/null
++++ b/backend/migrations/versions/20261015200000_knowledge_search_pgvector.py
+@@ -0,0 +1,86 @@
++"""knowledge_search pgvector 持久化（change 2026-10-15-knowledge-search-pgvector）。
++
++两新表（design.md 数据模型）：
++- knowledge_search_chunks：chunk 行 + embedding vector(512)（uq(workspace_id,
++  spec_path, anchor, title) 差量比对键）；
++- knowledge_search_state：workspace 级语料指纹 + 模型版本（懒同步判定面）。
++
++方言守卫（先例 20260825150000 pg_trgm）：非 PG 方言（测试 SQLite）直接 return——
++表由 BaseModel.metadata.create_all 在测试引擎建（with_variant 双方言）。
++
++fail-closed（R-06）：PG 方言下 vector 扩展不可用（镜像未换 pgvector/pgvector:pg16）
++即 raise——文案含修复指引，防「只跑迁移没换镜像」的半态表。
++"""
++
++from collections.abc import Sequence
++
++from alembic import op
++from sqlalchemy import text as sa_text
++
++revision: str = "20261015200000"
++down_revision: str | Sequence[str] | None = "20261015120000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    bind = op.get_bind()
++    if bind.dialect.name != "postgresql":
++        return  # 测试 SQLite：表由 metadata.create_all 建（with_variant JSON 变体）
++
++    available = bind.execute(
++        # pg_available_extensions 行存在 = 二进制带扩展（pgvector 镜像或已手动安装）
++        sa_text("SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'")
++    ).scalar_one()
++    if not available:
++        raise RuntimeError(
++            "PG vector 扩展不可用：知识搜索持久化迁移中止（fail-closed，防半态表）。"
++            "修复：把 postgres 镜像换为 pgvector/pgvector:pg16（deploy/docker-compose.yml "
++            "与 dev.yml，数据卷不丢）后重启 PG 再重跑 alembic upgrade head；"
++            "升级顺序详见变更 2026-10-15-knowledge-search-pgvector design.md Phase 4。"
++        )
++    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
++
++    op.execute(
++        """
++        CREATE TABLE IF NOT EXISTS knowledge_search_chunks (
++            id UUID PRIMARY KEY,
++            workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++            spec_path VARCHAR(1024) NOT NULL,
++            kind VARCHAR(32) NOT NULL,
++            title VARCHAR(512) NOT NULL,
++            anchor VARCHAR(256),
++            start_line INTEGER NOT NULL,
++            text TEXT NOT NULL,
++            content_hash VARCHAR(64) NOT NULL,
++            embedding vector(512) NOT NULL,
++            created_at TIMESTAMPTZ NOT NULL,
++            CONSTRAINT uq_kssc_workspace_path_anchor_title
++                UNIQUE (workspace_id, spec_path, anchor, title)
++        )
++        """
++    )
++    op.execute(
++        "CREATE INDEX IF NOT EXISTS ix_kssc_workspace ON knowledge_search_chunks (workspace_id)"
++    )
++    op.execute(
++        """
++        CREATE TABLE IF NOT EXISTS knowledge_search_state (
++            id UUID PRIMARY KEY,
++            workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++            corpus_fingerprint JSON NOT NULL,
++            model_version VARCHAR(128) NOT NULL,
++            updated_at TIMESTAMPTZ NOT NULL,
++            CONSTRAINT uq_kss_workspace UNIQUE (workspace_id)
++        )
++        """
++    )
++
++
++def downgrade() -> None:
++    bind = op.get_bind()
++    if bind.dialect.name != "postgresql":
++        return
++    # 只删本变更的表；不卸 vector 扩展（共享扩展，pg_trgm downgrade 同款先例）。
++    op.execute("DROP TABLE IF EXISTS knowledge_search_state")
++    op.execute("DROP TABLE IF EXISTS knowledge_search_chunks")
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index 4e035e3e1..88f78b1a9 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -13,6 +13,9 @@ dependencies = [
+   "sqlalchemy[asyncio]>=2.0",
+   "asyncpg>=0.29",
+   "alembic>=1.13",
++  # 知识搜索向量入库（2026-10-15-knowledge-search-pgvector）：PG vector 扩展的
++  # SQLAlchemy 列类型与绑定互转（Vector(512)/with_variant）。
++  "pgvector>=0.3",
+   # zoneinfo 的 IANA 时区数据库：CLI naive 时间戳按 Asia/Shanghai 解释需要
+   # （ql-20260822-006）。Windows venv 无系统 tz 库必须装；Linux 优先用系统
+   # 数据，此包作兜底，无害。
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index e8afd0029..ee8d5f043 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -108,8 +108,9 @@ class TestMigrationStructure:
+         # 2026-10-12-run-level-change-attribution）→ 20261014110000
+         # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）→
+         # 20261015120000（agent_group_chats.cross_mention_mode，
+-        # 2026-10-15-group-cross-mention-visibility）。
+-        assert heads[0] == "20261015120000"  # 互@模式列迁移成为新 head
++        # 2026-10-15-group-cross-mention-visibility）→ 20261015200000
++        # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）。
++        assert heads[0] == "20261015200000"  # 知识搜索持久化迁移成为新 head（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/backend/uv.lock b/backend/uv.lock
+index 0793a021b..d17efdf1d 100644
+--- a/backend/uv.lock
++++ b/backend/uv.lock
+@@ -1502,6 +1502,7 @@ dependencies = [
+     { name = "mcp" },
+     { name = "openpyxl" },
+     { name = "passlib", extra = ["bcrypt"] },
++    { name = "pgvector" },
+     { name = "pillow" },
+     { name = "psutil" },
+     { name = "pydantic" },
+@@ -1555,6 +1556,7 @@ requires-dist = [
+     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+     { name = "openpyxl", specifier = ">=3.1" },
+     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7" },
++    { name = "pgvector", specifier = ">=0.3" },
+     { name = "pillow", specifier = ">=10" },
+     { name = "psutil", specifier = ">=5.9" },
+     { name = "pydantic", specifier = ">=2.8" },
+@@ -1898,6 +1900,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
+ ]
+ 
++[[package]]
++name = "pgvector"
++version = "0.5.1"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/f8/23/96aa38899fbf8e103766db608d6e42acac269a96e08f3003fe9da3396fed/pgvector-0.5.1.tar.gz", hash = "sha256:94998a54b801b1075d623b8fa677fcb8210a7977b88f8e2203ab115c155af2e4", size = 35714, upload-time = "2026-10-09T01:50:22.779Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/a2/8d/a9c2a531da0ebb54b4a7174450e8534a39db112a141ae3a437de28420111/pgvector-0.5.1-py3-none-any.whl", hash = "sha256:ec5bcd5ffaefe6ecb2dcc9564ca921d284564b969183bc837a144604773af8ea", size = 31056, upload-time = "2026-10-09T01:50:21.614Z" },
++]
++
+ [[package]]
+ name = "pillow"
+ version = "12.3.0"
+diff --git a/deploy/docker-compose.dev.yml b/deploy/docker-compose.dev.yml
+index 45c633407..3e0c18bad 100644
+--- a/deploy/docker-compose.dev.yml
++++ b/deploy/docker-compose.dev.yml
+@@ -4,7 +4,7 @@ name: multi-agent-platform-dev
+ 
+ services:
+   postgres:
+-    image: postgres:16-alpine
++    image: pgvector/pgvector:pg16
+     restart: unless-stopped
+     environment:
+       POSTGRES_DB: ${POSTGRES_DB:-platform}
+diff --git a/deploy/docker-compose.yml b/deploy/docker-compose.yml
+index b4f0d19de..c94f34509 100644
+--- a/deploy/docker-compose.yml
++++ b/deploy/docker-compose.yml
+@@ -4,7 +4,7 @@ name: multi-agent-platform
+ 
+ services:
+   postgres:
+-    image: postgres:16-alpine
++    image: pgvector/pgvector:pg16
+     restart: unless-stopped
+     environment:
+       POSTGRES_DB: ${POSTGRES_DB:-platform}

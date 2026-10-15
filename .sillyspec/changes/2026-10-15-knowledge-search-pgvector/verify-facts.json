@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-knowledge-search-pgvector",
+  "generatedAt": "2026-10-15T13:42:54.704Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "backendEndpoints": 2406,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-knowledge-search-pgvector",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "后端 knowledge 模块全量回归（含迁移钉子）205 passed；前端两页 46 passed（零源码改动纯回归）",
+      "command": "cd backend && uv run pytest app/modules/knowledge/tests -q --no-cov",
+      "exitCode": 0,
+      "logPath": "C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/.runtime/logs/pgv-task05-backend.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "生产 PG 面实测（本地全链为 SQLite 方言；KNN SQL/embedding 绑定/首查耗时的 PG 实测）",
+        "condition": "部署升级后：搜索一次建库（记录耗时）→ 重启服务 → 立即搜索应秒级；对照 design R-01 已回填的 SQLite 口径",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "部署升级动作（换镜像→迁移→重启，D-008 升级顺序）",
+        "condition": "按设计 Phase 4 执行单：先跑生产验证 SQL 确认扩展可用性；迁移 fail-closed 会拦镜像未换场景",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "not-ran",
+  "matrixPartialRows": 3,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+      "backend/app/modules/knowledge/tests/test_router.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-knowledge-search-pgvector",
+  "appliedAt": "2026-10-15T14:34:00.790Z",
+  "baseHash": "bf237862108836c5a915d3117d07b57b604814f4",
+  "files": [
+    {
+      "path": "backend/app/modules/knowledge/router.py",
+      "sha256": "1d1ac55551c8056a438a5a88c6806e0f48ebea0442a222c0b73872f5851a2d8d"
+    },
+    {
+      "path": "backend/app/modules/knowledge/search.py",
+      "sha256": "9d4fd2dace3f902f0ef82b71cd94242952ee323900bced103fc0891994bfdda5"
+    },
+    {
+      "path": "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+      "sha256": "6e002b3ac9f9222e33eece17e86a6874a4f71bca7ea94d68e28b421877c5b821"
+    },
+    {
+      "path": "backend/migrations/versions/20261015200000_knowledge_search_pgvector.py",
+      "sha256": "9be8868bba9fb1fb2f648ade9fa5c3b8a053d37f45dba66dac21803f07481574"
+    },
+    {
+      "path": "backend/pyproject.toml",
+      "sha256": "902f6ace99589354e1be2f53817682b4284550072c770c3a41338a53bb644d6c"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "sha256": "bed2cb2bf55b2858744435e6131d77d1b88b84ef317be9391d99dcb392ed7def"
+    },
+    {
+      "path": "backend/uv.lock",
+      "sha256": "5ae9773c54e52423846564ac0611d0826e6eb3d002743c3460842d9cc49d9512"
+    },
+    {
+      "path": "deploy/docker-compose.dev.yml",
+      "sha256": "9a805e48f02997b1bad597c3e913aab1725c2fecf044bf71f567fb7cd3ca6da7"
+    },
+    {
+      "path": "deploy/docker-compose.yml",
+      "sha256": "612ff5eafc31286eb801e7426453d82bbbf18069c3898901447f5aefc6bf56fc"
+    }
+  ]
+}

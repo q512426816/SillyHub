@@ -108,8 +108,9 @@ class TestMigrationStructure:
         # 2026-10-12-run-level-change-attribution）→ 20261014110000
         # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）→
         # 20261015120000（agent_group_chats.cross_mention_mode，
-        # 2026-10-15-group-cross-mention-visibility）。
-        assert heads[0] == "20261015120000"  # 互@模式列迁移成为新 head
+        # 2026-10-15-group-cross-mention-visibility）→ 20261015200000
+        # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）。
+        assert heads[0] == "20261015200000"  # 知识搜索持久化迁移成为新 head（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

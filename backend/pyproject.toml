@@ -13,6 +13,9 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0",
   "asyncpg>=0.29",
   "alembic>=1.13",
+  # 知识搜索向量入库（2026-10-15-knowledge-search-pgvector）：PG vector 扩展的
+  # SQLAlchemy 列类型与绑定互转（Vector(512)/with_variant）。
+  "pgvector>=0.3",
   # zoneinfo 的 IANA 时区数据库：CLI naive 时间戳按 Asia/Shanghai 解释需要
   # （ql-20260822-006）。Windows venv 无系统 tz 库必须装；Linux 优先用系统
   # 数据，此包作兜底，无害。

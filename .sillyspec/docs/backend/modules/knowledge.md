@@ -44,6 +44,16 @@ get: 全量 parse 后内存按 filename 精确匹配（filename 含子目录段�
 写侧: writer/distill 构造 FileOp → spec_workspace.apply_ops 落盘（单写者语义见 spec_workspace 卡）
 ```
 
+## 持久化检索层（2026-10-15-knowledge-search-pgvector）
+
+- **存储形态**：向量索引已从进程内存迁至 PG pgvector——两表 `knowledge_search_chunks`（chunk 行 + embedding vector(512) + content_hash 差量键，uq(workspace_id,spec_path,anchor,title)）与 `knowledge_search_state`（workspace 级语料指纹 + model_version）；迁移 `20261015200000`（CREATE EXTENSION vector + 方言守卫 + 镜像未换 fail-closed）；ORM 在 search.py 内定义（embedding 列 with_variant：PG=Vector(512)/SQLite=JSON，测试引擎可建）。
+- **执行模型**：`search_sync` 为 **async 协程**（D-005@v2）——DB await 在请求事件循环原生执行（池/loop 同源）；CPU/IO（嵌入批量/文件扫描）经 `asyncio.to_thread` 卸载；端点直接 await（run_in_threadpool 退役）。
+- **懒同步**：查询时指纹比对（`list(map(list))` 归一化）→ 一致直查 / 失配差量四态（新键插入/hash 变重嵌/消失删除/mtime 漂移被 hash 吸收）/model_version 变更全量重算；`asyncio.Lock`（per-workspace）single-flight + DB uq 幂等。重启零重建（实测 0.003s 仅嵌 query）。
+- **查询双路方言分叉**：PG = pgvector KNN（`embedding <=> :qvec` cosine_distance，1-dist 转相似度）；SQLite（测试）= 拉回 embedding Python 余弦；词面路 = SQL ILIKE 候选（LIMIT 500）+ Python 打分（口径与内存版逐字段一致）。
+- **降级链**：DB 异常 → `scan_corpus` + `_word_score` 词面内存直查（reason 带 `knowledge_search_db_degraded:` 前缀，搜索永不 5xx）；embedder 缺席 → 纯词面（原语义）。
+- **部署**：PG 镜像 `pgvector/pgvector:pg16`（生产+dev compose）；升级顺序 = 换镜像 → 迁移 → 重启 backend → 首查建库（~5 分钟一次）。
+- CLI 向量端点（vector_search.py/vector_router.py）维持内存实现零改动（D-001 边界）。
+
 ## 注意事项
 - 与 platform_sync 的 `QuicklogEntryORM` 是**两个数据面**：本模块读仓库文件（CLI 落盘的 QUICKLOG md），platform_sync 存 CLI 主动上行的条目快照（DB 行），互不替代；前端消费点不同。
 - `_spec_content_root` 的兜底分支只服务 spec_workspace 无数据的过渡场景；单一 daemon-client 架构下正常路径恒是 platform-managed 扁平布局的 `spec_root`（knowledge/ 直接在其下）。

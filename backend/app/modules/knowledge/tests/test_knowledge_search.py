@@ -15,10 +15,12 @@
 from __future__ import annotations
 
 import itertools
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.knowledge.search import (
     Chunk,
@@ -49,10 +51,33 @@ class FakeEmbedder:
 
 @pytest.fixture(autouse=True)
 def _reset_search_index() -> Iterator[None]:
-    """测试隔离：每个用例前后清空进程内索引缓存。"""
+    """测试隔离：每个用例前后清空进程内同步锁。"""
     reset_index_for_tests()
     yield
     reset_index_for_tests()
+
+
+@pytest.fixture()
+async def search_env(db_engine, db_session, tmp_path: Path):
+    """检索持久化测试环境：真实 workspace 行 + 测试引擎会话工厂。
+
+    返回 ``(workspace_key, session_factory)``——search_sync 的 DB 面经 SQLite
+    测试引擎（with_variant JSON 路径），workspace 行满足两表 FK 约束。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        name=f"ks-test-{uuid.uuid4().hex[:8]}",
+        slug=f"ks-test-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path),
+        status="active",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    factory = async_sessionmaker(bind=db_engine, class_=AsyncSession, expire_on_commit=False)
+    return str(ws.id), factory
 
 
 # ── 语料构造 helpers ─────────────────────────────────────────────────────────
@@ -232,29 +257,37 @@ def test_corpus_fingerprint_none_when_dirs_absent(tmp_path: Path) -> None:
     assert corpus_fingerprint(tmp_path) is None
 
 
-def test_search_reuses_index_until_files_change(tmp_path: Path) -> None:
+async def test_search_reuses_index_until_files_change(tmp_path: Path, search_env) -> None:
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    out1 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
+    out1 = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     assert out1["model_ready"] is True
     calls_after_first = fake.embed_calls
     assert calls_after_first >= 2  # 语料构建 1 次 + query 1 次
-    out2 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
+    out2 = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     assert fake.embed_calls == calls_after_first + 1, "文件未变仅 query embed，不重建索引"
     assert out2["results"]
     # 语料变更 → 重建（再多一次全量 embed）
     _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
-    search_sync(tmp_path, "ws-1", "状态点", 5, fake, "fake-model")
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     assert fake.embed_calls >= calls_after_first + 3, "文件变更后应重建索引"
 
 
 # ── 融合检索 ─────────────────────────────────────────────────────────────────
 
 
-def test_search_exact_decision_id_ranks_first(tmp_path: Path) -> None:
+async def test_search_exact_decision_id_ranks_first(tmp_path: Path, search_env) -> None:
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    out = search_sync(tmp_path, "ws-x", "D-002@v1", 5, fake, "fake-model")
+    out = await search_sync(
+        tmp_path, search_env[0], "D-002@v1", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     results = out["results"]
     assert results, "精确编号应命中"
     top = results[0]
@@ -271,7 +304,7 @@ def test_search_exact_decision_id_ranks_first(tmp_path: Path) -> None:
     } <= set(top.keys())
 
 
-def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path) -> None:
+async def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path, search_env) -> None:
     _write(
         tmp_path,
         "knowledge/manual.md",
@@ -284,23 +317,28 @@ def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path) -> None:
     )
     fake = FakeEmbedder()
     # 「会话状态」在语料中无连续子串（「会话过程」/「状态点」分离）→ 纯语义路召回
-    out = search_sync(tmp_path, "ws-sem", "会话状态", 5, fake, "fake-model")
+    out = await search_sync(
+        tmp_path, search_env[0], "会话状态", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     results = out["results"]
     assert results, "纯语义应可召回"
     assert results[0]["spec_path"] == "knowledge/manual.md"
     assert results[0]["title"] == "会话过程"
 
 
-def test_search_degraded_word_only_when_embedder_unavailable(tmp_path: Path) -> None:
+async def test_search_degraded_word_only_when_embedder_unavailable(
+    tmp_path: Path, search_env
+) -> None:
     _mini_corpus(tmp_path)
-    out = search_sync(
+    out = await search_sync(
         tmp_path,
-        "ws-deg",
+        search_env[0],
         "会话状态点",
         5,
         None,
         "fake-model",
         embedder_error="ImportError: fastembed",
+        session_factory=search_env[1],
     )
     assert out["model_ready"] is False
     assert out["reason"] == "ImportError: fastembed"
@@ -310,21 +348,25 @@ def test_search_degraded_word_only_when_embedder_unavailable(tmp_path: Path) -> 
     assert any("会话状态点" in r["snippet"] for r in out["results"])
 
 
-def test_search_empty_query_returns_empty(tmp_path: Path) -> None:
+async def test_search_empty_query_returns_empty(tmp_path: Path, search_env) -> None:
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    out = search_sync(tmp_path, "ws-eq", "   ", 5, fake, "fake-model")
+    out = await search_sync(
+        tmp_path, search_env[0], "   ", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     assert out["results"] == []
     assert out["model_ready"] is True
     assert out["reason"] is None
 
 
-def test_search_snippet_window_around_match(tmp_path: Path) -> None:
+async def test_search_snippet_window_around_match(tmp_path: Path, search_env) -> None:
     filler = "填充" * 200
     doc = f"## 目标小节\n\n{filler}会话状态点{filler}\n"
     _write(tmp_path, "knowledge/snip.md", doc)
     fake = FakeEmbedder()
-    out = search_sync(tmp_path, "ws-snip", "会话状态点", 3, fake, "fake-model")
+    out = await search_sync(
+        tmp_path, search_env[0], "会话状态点", 3, fake, "fake-model", session_factory=search_env[1]
+    )
     results = out["results"]
     assert results
     snippet = results[0]["snippet"]
@@ -333,16 +375,186 @@ def test_search_snippet_window_around_match(tmp_path: Path) -> None:
     assert len(snippet) < 400
 
 
-def test_search_missing_corpus_returns_empty(tmp_path: Path) -> None:
+async def test_search_missing_corpus_returns_empty(tmp_path: Path, search_env) -> None:
     fake = FakeEmbedder()
-    out = search_sync(tmp_path, "ws-none", "任意", 5, fake, "fake-model")
+    out = await search_sync(
+        tmp_path, search_env[0], "任意", 5, fake, "fake-model", session_factory=search_env[1]
+    )
     assert out["results"] == []
     assert out["model_ready"] is True
 
 
-def test_search_unrelated_query_returns_empty_state(tmp_path: Path) -> None:
+async def test_search_unrelated_query_returns_empty_state(tmp_path: Path, search_env) -> None:
     """零信号块过滤：无关查询（无词面命中 + 向量零相似）→ 空态可达，不返回 0 分噪声。"""
     _mini_corpus(tmp_path)
     fake = FakeEmbedder()
-    out = search_sync(tmp_path, "ws-zero", "量子力学哈密顿算子", 5, fake, "fake-model")
+    out = await search_sync(
+        tmp_path,
+        search_env[0],
+        "量子力学哈密顿算子",
+        5,
+        fake,
+        "fake-model",
+        session_factory=search_env[1],
+    )
     assert out["results"] == [], "无信号查询应返回空（前端空态）"
+
+
+# ── 持久化 ORM 面（change 2026-10-15-knowledge-search-pgvector / task-01）────────
+
+
+async def test_orm_tables_create_all_on_sqlite(db_engine) -> None:
+    """with_variant 双方言：SQLite 内存引擎建表命中 JSON 变体（无 vector 类型依赖）。"""
+    from sqlalchemy import inspect
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk, KnowledgeSearchState
+
+    async with db_engine.connect() as conn:
+        tables = await conn.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+    assert "knowledge_search_chunks" in tables
+    assert "knowledge_search_state" in tables
+    # embedding 列在 SQLite 下可写可读（JSON 文本形态）——直接落一行验证
+    assert KnowledgeSearchChunk.__tablename__ == "knowledge_search_chunks"
+    assert KnowledgeSearchState.__tablename__ == "knowledge_search_state"
+
+
+async def test_chunk_row_roundtrip_and_uq(db_session) -> None:
+    """chunk 行读写往返 + uq(workspace_id, spec_path, anchor, title) 约束拒绝重复。"""
+    import uuid
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.knowledge.search import KnowledgeSearchChunk
+
+    ws = uuid.uuid4()
+    row = KnowledgeSearchChunk(
+        workspace_id=ws,
+        spec_path="knowledge/decisions/demo.md",
+        kind="decision",
+        title="缓存索引策略",
+        anchor="D-001@v1",
+        start_line=5,
+        text="D-001@v1 缓存索引策略\n正文",
+        content_hash="a" * 64,
+        embedding=[0.1, 0.2, 0.3],
+    )
+    db_session.add(row)
+    await db_session.commit()
+
+    dup = KnowledgeSearchChunk(
+        workspace_id=ws,
+        spec_path="knowledge/decisions/demo.md",
+        kind="decision",
+        title="缓存索引策略",
+        anchor="D-001@v1",
+        start_line=6,
+        text="不同正文",
+        content_hash="b" * 64,
+        embedding=[0.4],
+    )
+    db_session.add(dup)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+async def test_migration_dialect_guard() -> None:
+    """迁移方言守卫：非 PG bind 上 upgrade() 静默返回（不建表不炸；fail-closed 文案钉住）。"""
+    import importlib.util
+    import pathlib
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect
+
+    # tests 文件 = backend/app/modules/knowledge/tests/ → parents[4] = backend/
+    mig_path = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / "migrations"
+        / "versions"
+        / "20261015200000_knowledge_search_pgvector.py"
+    )
+    spec = importlib.util.spec_from_file_location("ks_migration", mig_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        mc = MigrationContext.configure(conn)
+        with Operations.context(mc):
+            mod.upgrade()  # 非 PG → 首行 return，无任何 DDL
+        assert "knowledge_search_chunks" not in inspect(conn).get_table_names()
+
+    text = mig_path.read_text(encoding="utf-8")
+    assert 'dialect.name != "postgresql"' in text
+    assert "pgvector/pgvector:pg16" in text  # fail-closed 修复指引文案（R-06）
+
+
+# ── 持久化行为面（2026-10-15-knowledge-search-pgvector / task-02）──────────────
+
+
+async def test_search_model_version_change_triggers_full_rebuild(
+    tmp_path: Path, search_env
+) -> None:
+    """model_version 变更 → 全量重嵌一次（D-007@v1：嵌入计数 = 语料 chunk 数）。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "model-a", session_factory=search_env[1]
+    )
+    embedded_a = fake.embedded_texts
+    assert embedded_a > 0
+    # 换模型名 → 全量重算（再嵌入全部 chunk）+ 1 次 query 嵌入
+    out = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "model-b", session_factory=search_env[1]
+    )
+    assert fake.embedded_texts == embedded_a * 2  # 全量(chunks) + query，与首次同构
+    assert out["results"]
+
+
+async def test_search_db_error_falls_back_to_word_scan(tmp_path: Path, search_env) -> None:
+    """DB 异常 → 词面内存直查降级：200 语义（不抛）+ reason 带 db_degraded 前缀。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+
+    class _BoomFactory:
+        def __call__(self):
+            raise RuntimeError("connection refused")
+
+    out = await search_sync(
+        tmp_path,
+        search_env[0],
+        "会话状态点",
+        5,
+        fake,
+        "fake-model",
+        session_factory=_BoomFactory(),
+    )
+    assert out["model_ready"] is True  # embedder 在场（降级只降 DB 面）
+    assert out["reason"] is not None and "knowledge_search_db_degraded" in out["reason"]
+    assert out["results"], "降级仍应返回词面结果"
+    top = out["results"][0]
+    assert (
+        top["score"] >= 0.6 and "会话状态点" in top["title"]
+    )  # 词面 title 命中排前（与内存版同构）
+
+
+async def test_search_delta_reembeds_only_changed_file(tmp_path: Path, search_env) -> None:
+    """差量四态：单文件内容变更 → 仅该文件 chunk 重嵌（嵌入计数精确递增）。"""
+    _mini_corpus(tmp_path)
+    fake = FakeEmbedder()
+    await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    baseline = fake.embedded_texts
+    # 改单文件（known-issues.md 新增一段）
+    p = tmp_path / "knowledge" / "known-issues.md"
+    p.write_text(
+        p.read_text(encoding="utf-8") + "\n## 新增小节\n\n状态点补充内容。\n", encoding="utf-8"
+    )
+    out = await search_sync(
+        tmp_path, search_env[0], "状态点", 5, fake, "m", session_factory=search_env[1]
+    )
+    # known-issues.md 原 1 块 + 新增 1 块 = 重嵌 2 块 + query 1 次
+    assert fake.embedded_texts == baseline + 2
+    assert any(r["title"] == "新增小节" for r in out["results"]), "新内容应可搜到"

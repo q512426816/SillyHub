@@ -472,16 +472,15 @@ async def search_knowledge(
 ) -> KnowledgeSearchOut:
     """知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
 
-    - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
-      vector_router.py 同款）；
+    - 检索主体为 async 编排（2026-10-15-knowledge-search-pgvector / D-005@v2）：DB await
+      原生执行，CPU/IO（嵌入/扫描）由 search_sync 内部 asyncio.to_thread 分段卸载；
     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
     """
-    from fastapi.concurrency import run_in_threadpool
-
     from app.core.config import get_settings
+    from app.core.db import get_session_factory
     from app.modules.auth.rbac import has_permission
     from app.modules.knowledge.search import search_sync
     from app.modules.knowledge.vector_search import get_embedder
@@ -501,8 +500,8 @@ async def search_knowledge(
         permission=Permission.SCAN_DOCS_READ,
         workspace_id=workspace_id,
     )
-    out = await run_in_threadpool(
-        search_sync,
+    # async 编排（D-005@v2）：DB await 原生执行，CPU/IO 由 search_sync 内部 to_thread 卸载。
+    out = await search_sync(
         spec_root,
         str(workspace_id),
         query,
@@ -510,6 +509,7 @@ async def search_knowledge(
         embedder,
         settings.knowledge_embedding_model,
         embedder_error=embedder_error,
+        session_factory=get_session_factory(),
     )
     filtered = [
         KnowledgeSearchResultItem(**item)
