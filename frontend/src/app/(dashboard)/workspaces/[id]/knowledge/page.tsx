@@ -389,10 +389,24 @@ export default function KnowledgePage({ params }: Props) {
           // DOM 就绪（URL 深链是外部入口，落空代价是「跳了但没定位」）；改为逐帧
           // 重试至多 12 帧，命中即滚动，耗尽仍静默降级文件级。
           if (anchor) {
-            const selector = `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`;
+            // 复合锚优选（2026-10-14-decision-anchor-change-qualified / FR-03）：
+            // anchor 带「变更号#决策号」前缀（沉淀资产卡 FR/决策深链）时先按
+            // 复合属性精确匹配——聚合决策文件同 id 跨变更重复，裸锚首卡误命中；
+            // 查无退裸锚（旧深链/老构建无复合属性时的降级路径）。
+            const key = `${filename}#${anchor}`;
+            const selectors = anchor.includes("#")
+              ? [
+                  `[data-entry-anchor-qualified="${CSS.escape(key)}"]`,
+                  `[data-entry-anchor="${CSS.escape(key)}"]`,
+                ]
+              : [`[data-entry-anchor="${CSS.escape(key)}"]`];
             let tries = 0;
             const tick = () => {
-              const el = document.querySelector(selector);
+              let el: Element | null = null;
+              for (const selector of selectors) {
+                el = document.querySelector(selector);
+                if (el) break;
+              }
               if (el) {
                 el.scrollIntoView({ behavior: "smooth", block: "center" });
                 return;
