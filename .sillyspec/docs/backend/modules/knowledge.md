@@ -46,12 +46,12 @@ get: 全量 parse 后内存按 filename 精确匹配（filename 含子目录段�
 
 ## 持久化检索层（2026-10-15-knowledge-search-pgvector）
 
-- **存储形态**：向量索引已从进程内存迁至 PG pgvector——两表 `knowledge_search_chunks`（chunk 行 + embedding vector(512) + content_hash 差量键，uq(workspace_id,spec_path,anchor,title)）与 `knowledge_search_state`（workspace 级语料指纹 + model_version）；迁移 `20261015200000`（CREATE EXTENSION vector + 方言守卫 + 镜像未换 fail-closed）；ORM 在 search.py 内定义（embedding 列 with_variant：PG=Vector(512)/SQLite=JSON，测试引擎可建）。
+- **存储形态**：向量索引已从进程内存迁至 PG pgvector——两表 `knowledge_search_chunks`（chunk 行 + embedding vector(512) + content_hash 差量键；uq(workspace_id,spec_path,anchor,title) 建后又 drop——生产语料重号条目撞约束实证（迁移 `20261016010000`），差量/去重键改行号坐标 (spec_path, start_line)）与 `knowledge_search_state`（workspace 级语料指纹 + model_version）；迁移 `20261015200000`（CREATE EXTENSION vector + 方言守卫 + 镜像未换 fail-closed）；ORM 在 search.py 内定义（embedding 列 with_variant：PG=Vector(512)/SQLite=JSON，测试引擎可建）。
 - **执行模型**：`search_sync` 为 **async 协程**（D-005@v2）——DB await 在请求事件循环原生执行（池/loop 同源）；CPU/IO（嵌入批量/文件扫描）经 `asyncio.to_thread` 卸载；端点直接 await（run_in_threadpool 退役）。
-- **懒同步**：查询时指纹比对（`list(map(list))` 归一化）→ 一致直查 / 失配差量四态（新键插入/hash 变重嵌/消失删除/mtime 漂移被 hash 吸收）/model_version 变更全量重算；`asyncio.Lock`（per-workspace）single-flight + DB uq 幂等。重启零重建（实测 0.003s 仅嵌 query）。
-- **查询双路方言分叉**：PG = pgvector KNN（`embedding <=> :qvec` cosine_distance，1-dist 转相似度）；SQLite（测试）= 拉回 embedding Python 余弦；词面路 = SQL ILIKE 候选（LIMIT 500）+ Python 打分（口径与内存版逐字段一致）。
+- **懒同步**：查询时指纹比对（`list(map(list))` 归一化）→ 一致直查 / 失配差量四态（新键插入/hash 变重嵌/消失删除/mtime 漂移被 hash 吸收）/model_version 变更全量重算；`asyncio.Lock`（per-workspace）single-flight + DB 幂等（uq 已 drop；并发兜底 = 进程锁 + 全量清空重建语义）。重启零重建（实测 0.003s 仅嵌 query）。
+- **查询双路方言分叉**：PG = pgvector KNN（原生 SQL `embedding <=> CAST(:qv AS vector)` cosine_distance，1-dist 转相似度；with_variant 列取不到 ORM `cosine_distance` 方法故走 text SQL + `_HitRow` 统一候选视图）；SQLite（测试）= 拉回 embedding Python 余弦；词面路 = SQL ILIKE 候选（LIMIT 500）+ Python 打分（口径与内存版逐字段一致）。
 - **降级链**：DB 异常 → `scan_corpus` + `_word_score` 词面内存直查（reason 带 `knowledge_search_db_degraded:` 前缀，搜索永不 5xx）；embedder 缺席 → 纯词面（原语义）。
-- **部署**：PG 镜像 `pgvector/pgvector:pg16`（生产+dev compose）；升级顺序 = 换镜像 → 迁移 → 重启 backend → 首查建库（~5 分钟一次）。
+- **部署**：PG 镜像 `pgvector/pgvector:pg16`（生产+dev compose）；升级顺序 = 换镜像 → 迁移 → 重启 backend → 首查建库。生产实证（2026-10-15 部署）：服务器无外网须预置 fastembed 模型缓存挂载 + mem_limit 1100m；全量建库改本机 20 核经 `ssh -L` 隧道直写生产库（228.7s/6712 chunks，容器内跑必 OOM）；生产首查 3.3s（改造前同场景 304s）、二次 0.72s。
 - CLI 向量端点（vector_search.py/vector_router.py）维持内存实现零改动（D-001 边界）。
 
 ## 注意事项

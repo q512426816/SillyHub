@@ -282,3 +282,155 @@ created_at: 2026-10-15T11:52:52.897Z
 - 场景：默认场景 — Given 索引已构建且 spec 语料文件发生增/删/改；When 下一次搜索请求到达；Then 文件集指纹（path/mtime_ns/size）比对失配时索引 MUST 自动重建，MUST NOT 要求重启进程；进程重启后首次查询 MUST 按需重建（缓
 全文：.sillyspec/changes/archive/2026-10-15-platform-knowledge-search/requirements.md#FR-06
 最近确认：7af8e0e32
+
+## FR-knowledge-007 向量持久化与重启零重建
+变更：2026-10-15-knowledge-search-pgvector
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given 知识搜索已建库（chunks/state 表有该 workspace 数据）；When 服务重启后用户首次搜索；Then 结果 MUST 秒级返回（不再全量重嵌入）；向量与 chunk 元数据 MUST 持久化在 PG pgvector 表（embedding vector(512
+全文：.sillyspec/changes/archive/2026-10-15-knowledge-search-pgvector/requirements.md#FR-01
+最近确认：898bb901c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-knowledge-search-pgvector:task-01:acc-0-7d72b71b
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-01:acc-1-32f76d08
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-01:acc-2-18b956f0
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-02:acc-0-bb728faf
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-02:acc-1-5e299d25
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-02:acc-2-fabde006
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+- row: 2026-10-15-knowledge-search-pgvector:task-02:acc-3-4eab82a5
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+
+## FR-knowledge-008 查询结果与现实现逐字段一致
+变更：2026-10-15-knowledge-search-pgvector
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-005@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 相同语料与查询；When 分别用内存实现（升级前）与 DB 实现（升级后）搜索；Then 返回的 results 条目（spec_path/kind/title/anchor/snippet/score）MUST 语义一致（融合 0.6/0.4、an
+全文：.sillyspec/changes/archive/2026-10-15-knowledge-search-pgvector/requirements.md#FR-02
+最近确认：898bb901c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-knowledge-search-pgvector:task-05:acc-0-745e6b26
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_agent_session_tasks.py | backend/app/modules/daemon/tests/test_attachment_pipeline.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/app/modules/daemon/tests/test_group_p2.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+
+## FR-knowledge-009 自动增量同步
+变更：2026-10-15-knowledge-search-pgvector
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-007@v1、D-011@v1
+场景正文：
+- 场景：默认场景 — Given 库已建且语料文件发生增/删/改；When 下一次搜索请求到达；Then 指纹失配 MUST 触发差量同步（新增插入/变更重嵌/消失删除；mtime 漂移但内容未变 MUST 被 content_hash 层吸收不重嵌）；同步 MUS
+全文：.sillyspec/changes/archive/2026-10-15-knowledge-search-pgvector/requirements.md#FR-03
+最近确认：898bb901c
+
+## FR-knowledge-010 对外契约零变化
+变更：2026-10-15-knowledge-search-pgvector
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given 本变更部署后；When 回归上变更全部测试；Then knowledge 模块 199 + 前端 46 MUST 全绿（仅 fake 注入点适配）；openapi.json/api-types MUST 零 dif
+全文：.sillyspec/changes/archive/2026-10-15-knowledge-search-pgvector/requirements.md#FR-04
+最近确认：898bb901c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-knowledge-search-pgvector:task-03:acc-0-8935abe3
+  tests: backend/app/modules/knowledge/tests/test_router.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active
+
+## FR-knowledge-011 部署与降级安全
+变更：2026-10-15-knowledge-search-pgvector
+状态：active
+摘要：默认场景
+依据决策：D-008@v1
+场景正文：
+- 场景：默认场景 — Given 生产环境升级（换镜像 → 迁移 → 重启）；When 迁移在未换镜像的 PG 上执行；Then 迁移 MUST fail-closed（报含修复指引的错误，不留半态表）；升级后搜索 MUST 可用（首查建库一次 304s 级可接受，loading 文案已有
+全文：.sillyspec/changes/archive/2026-10-15-knowledge-search-pgvector/requirements.md#FR-05
+最近确认：898bb901c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-knowledge-search-pgvector:task-04:acc-0-767bc8e9
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_agent_session_tasks.py | backend/app/modules/daemon/tests/test_attachment_pipeline.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/app/modules/daemon/tests/test_group_p2.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
+  source_change: 2026-10-15-knowledge-search-pgvector
+  status: active

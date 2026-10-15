@@ -29,3 +29,13 @@
 锚点：未记录
 最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
 理由：最大风险：未来新增 openai_like 供应商（无原生 anthropic 端点的上游）时转换链路缺失——当前零供应商依赖 litellm，且重引路径已文档化（本坑记录 + spike-litellm-routing 历史可考古）；接受。次风险：本机 plain v1.95.0 healthy 3 天提示上游构建可能已修复，退役放弃了「零成本复测复活」机会——拍板时已向用户披露并选择退役（不再等上游）。死路：尝试「只删 prod 留 dev」——两处定义漂移正是 10-06 compose 同步教训的反面，不留双态。
+
+## D-backend-019@v1 部署变更 = 镜像换 pgvector/pgvector:pg16 + 迁移内装扩展；升级步骤单列
+状态：implemented
+变更：2026-10-15-knowledge-search-pgvector
+原编号：D-008@v1
+锚点：未记录
+最近确认：898bb901c
+理由：①docker-compose 的 postgres 镜像 postgres:16-alpine → pgvector/pgvector:pg16（数据卷不丢，官方同源镜像+vector 扩展）；②扩展安装放 alembic 迁移内（CREATE EXTENSION IF NOT EXISTS vector + 方言守卫——pgcrypto/pg_trgm 同款）；③升级顺序：换镜像重启 PG → 跑迁移 → 重启 backend；④升级前生产库跑验证 SQL（SELECT name FROM pg_available_extensions WHERE name='vector'）确认扩展可用（用户可能手动装过——核实过代码无痕迹，但手工操作查不到）。dev compose 同步换。
+故障面：迁移先于镜像替换执行 → 方言守卫内检查 extension 可用性，缺失时报错中止（信息含修复指引），不留半态表。
+退役判据：无。
