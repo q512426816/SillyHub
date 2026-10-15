@@ -47,6 +47,9 @@ from sqlalchemy import (
 from sqlalchemy import (
     insert as sa_insert,
 )
+from sqlalchemy import (
+    text as sa_text,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Integer, String, Uuid
 from sqlmodel import Field
@@ -75,16 +78,7 @@ class KnowledgeSearchChunk(BaseModel, table=True):
     """一个可检索块的持久化行（spec 扫描产物 + 向量）。"""
 
     __tablename__ = "knowledge_search_chunks"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "spec_path",
-            "anchor",
-            "title",
-            name="uq_kssc_workspace_path_anchor_title",
-        ),
-        Index("ix_kssc_workspace", "workspace_id"),
-    )
+    __table_args__ = (Index("ix_kssc_workspace", "workspace_id"),)
 
     id: uuid.UUID = Field(
         default_factory=uuid.uuid4,
@@ -451,8 +445,9 @@ async def _ensure_synced(
 
 async def _rows_by_key(
     session: AsyncSession, workspace_id: uuid.UUID
-) -> dict[tuple[str, str | None, str], KnowledgeSearchChunk]:
-    """库行键集 {(spec_path, anchor, title): row}（差量比对基线，一次 SELECT）。"""
+) -> dict[tuple[str, int], KnowledgeSearchChunk]:
+    """库行键集 {(spec_path, start_line): row}（差量比对基线，一次 SELECT——行号坐标：
+    决策/FR 库跨变更重号且模板化同标题条目大量存在，(anchor, title) 不唯一（生产实测）。"""
     rows = (
         (
             await session.execute(
@@ -464,7 +459,7 @@ async def _rows_by_key(
         .scalars()
         .all()
     )
-    return {(r.spec_path, r.anchor, r.title): r for r in rows}
+    return {(r.spec_path, r.start_line): r for r in rows}
 
 
 def _chunk_dict(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> dict:
@@ -482,37 +477,6 @@ def _chunk_dict(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> di
         "embedding": embedding,
         "created_at": datetime.now(UTC),
     }
-
-
-def _chunk_dict(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> dict:
-    """Core 批量 insert 行 dict（不经 ORM identity map——OOM 三修 + 逐条 INSERT 慢实证）。"""
-    return {
-        "id": uuid.uuid4(),
-        "workspace_id": workspace_id,
-        "spec_path": c.spec_path,
-        "kind": c.kind,
-        "title": c.title,
-        "anchor": c.anchor,
-        "start_line": c.start_line,
-        "text": c.text,
-        "content_hash": _content_hash(c.text),
-        "embedding": embedding,
-        "created_at": datetime.now(UTC),
-    }
-
-
-def _chunk_row(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> KnowledgeSearchChunk:
-    return KnowledgeSearchChunk(
-        workspace_id=workspace_id,
-        spec_path=c.spec_path,
-        kind=c.kind,
-        title=c.title,
-        anchor=c.anchor,
-        start_line=c.start_line,
-        text=c.text,
-        content_hash=_content_hash(c.text),
-        embedding=embedding,
-    )
 
 
 async def _sync_full(
@@ -563,7 +527,7 @@ async def _sync_delta(
     fresh_keys = set()
     to_embed: list[tuple[KnowledgeSearchChunk | None, Chunk]] = []  # (库行|None, 新 chunk)
     for c in chunks:
-        key = (c.spec_path, c.anchor, c.title)
+        key = (c.spec_path, c.start_line)
         fresh_keys.add(key)
         h = _content_hash(c.text)
         row = existing.get(key)
@@ -594,24 +558,60 @@ async def _sync_delta(
     await session.commit()
 
 
+@dataclass(frozen=True, slots=True)
+class _HitRow:
+    """检索候选统一视图（两方言同构——ORM 行 / 原生 SQL mappings 均映射为此）。"""
+
+    id: uuid.UUID
+    spec_path: str
+    kind: str
+    title: str
+    anchor: str | None
+    start_line: int
+    text: str
+
+
 async def _query_vector_candidates(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     q_vec: list[float],
     k: int,
-) -> list[tuple[KnowledgeSearchChunk, float]]:
-    """向量路 top-k 候选：PG = pgvector KNN（<=> 余弦距离）；SQLite = 拉回 Python 余弦。"""
+) -> list[tuple[_HitRow, float]]:
+    """向量路 top-k 候选：PG = pgvector KNN（原生 SQL，<=> 余弦距离）；
+    SQLite = 拉回 Python 余弦。
+
+    PG 走原生 SQL 而非 ORM 列方法：embedding 列是 with_variant（JSON 基类型 +
+    Vector 方言变体），InstrumentedAttribute 上取不到 cosine_distance（生产实证）。
+    """
     dialect = session.bind.dialect.name if session.bind is not None else "sqlite"
     if dialect == "postgresql":
+        qv = "[" + ",".join(f"{x:.7g}" for x in q_vec) + "]"
+        sql = sa_text(
+            "SELECT id, spec_path, kind, title, anchor, start_line, text, "
+            "1 - (embedding <=> CAST(:qv AS vector)) AS sim "
+            "FROM knowledge_search_chunks WHERE workspace_id = :ws "
+            "ORDER BY embedding <=> CAST(:qv AS vector) LIMIT :k"
+        )
         rows = (
-            await session.execute(
-                select(KnowledgeSearchChunk, KnowledgeSearchChunk.embedding.cosine_distance(q_vec))
-                .where(KnowledgeSearchChunk.workspace_id == workspace_id)
-                .order_by(KnowledgeSearchChunk.embedding.cosine_distance(q_vec))
-                .limit(k)
+            (await session.execute(sql, {"qv": qv, "ws": str(workspace_id), "k": k}))
+            .mappings()
+            .all()
+        )
+        return [
+            (
+                _HitRow(
+                    id=r["id"],
+                    spec_path=r["spec_path"],
+                    kind=r["kind"],
+                    title=r["title"],
+                    anchor=r["anchor"],
+                    start_line=r["start_line"],
+                    text=r["text"],
+                ),
+                float(r["sim"]),
             )
-        ).all()
-        return [(chunk, 1.0 - float(dist)) for chunk, dist in rows]
+            for r in rows
+        ]
     # SQLite（测试）：拉回全量 embedding JSON → Python 余弦（D-004@v1 方言分叉）
     rows = (
         (
@@ -624,9 +624,20 @@ async def _query_vector_candidates(
         .scalars()
         .all()
     )
-    chunks: list[KnowledgeSearchChunk] = list(rows)
-    scored: list[tuple[KnowledgeSearchChunk, float]] = [
-        (row, _cosine(q_vec, list(row.embedding or []))) for row in chunks
+    scored: list[tuple[_HitRow, float]] = [
+        (
+            _HitRow(
+                id=row.id,
+                spec_path=row.spec_path,
+                kind=row.kind,
+                title=row.title,
+                anchor=row.anchor,
+                start_line=row.start_line,
+                text=row.text,
+            ),
+            _cosine(q_vec, list(row.embedding or [])),
+        )
+        for row in rows
     ]
     scored.sort(key=lambda pair: -pair[1])
     return scored[:k]
@@ -637,7 +648,7 @@ async def _query_word_candidates(
     workspace_id: uuid.UUID,
     q: str,
     cap: int = 500,
-) -> list[KnowledgeSearchChunk]:
+) -> list[_HitRow]:
     """词面路候选：SQL ILIKE（escape 口径对齐 scan_docs/service.py:158-169）+ LIMIT 上限。"""
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pat = f"%{escaped}%"
@@ -659,7 +670,18 @@ async def _query_word_candidates(
         .scalars()
         .all()
     )
-    return list(rows)
+    return [
+        _HitRow(
+            id=row.id,
+            spec_path=row.spec_path,
+            kind=row.kind,
+            title=row.title,
+            anchor=row.anchor,
+            start_line=row.start_line,
+            text=row.text,
+        )
+        for row in rows
+    ]
 
 
 def reset_index_for_tests() -> None:
@@ -763,7 +785,7 @@ async def search_sync(
             q_vec = None
             if embedder is not None:
                 q_vec = (await asyncio.to_thread(embedder.embed, [q]))[0]
-            vec_rows: list[tuple[KnowledgeSearchChunk, float]] = []
+            vec_rows: list[tuple[_HitRow, float]] = []
             if q_vec is not None:
                 vec_rows = await _query_vector_candidates(session, ws_id, q_vec, limit * 3)
             word_rows = await _query_word_candidates(session, ws_id, q)
@@ -774,7 +796,7 @@ async def search_sync(
 
     # Python 侧融合打分（口径不变：0.6*vec + 0.4*word + 保底 0.9 + 零信号过滤 + 去重）
     q_lower = q.lower()
-    best: dict[tuple[str, str | None, str], tuple[float, KnowledgeSearchChunk]] = {}
+    best: dict[tuple[str, int], tuple[float, _HitRow]] = {}
     vec_score_by_id = {row.id: sim for row, sim in vec_rows}
     for row in word_rows + [r for r, _ in vec_rows]:
         word, exact = _word_score_row(q_lower, row)
@@ -785,7 +807,7 @@ async def search_sync(
                 score = max(score, 0.9)
         else:
             score = word
-        dedup_key = (row.spec_path, row.anchor, row.title)
+        dedup_key = (row.spec_path, row.start_line)
         cur = best.get(dedup_key)
         if cur is None or score > cur[0]:
             best[dedup_key] = (score, row)
@@ -809,7 +831,7 @@ async def search_sync(
     return {"results": results, "model_ready": model_ready, "reason": reason}
 
 
-def _word_score_row(query_lower: str, row: KnowledgeSearchChunk) -> tuple[float, bool]:
+def _word_score_row(query_lower: str, row: _HitRow) -> tuple[float, bool]:
     """词面打分（库行版；口径与 _word_score 逐字段一致——title/anchor 0.6、path 0.25、
     正文次数 ≤0.15，anchor∨title∨path 命中 = 精确命中）。"""
     anchor_hit = bool(row.anchor) and query_lower in (row.anchor or "").lower()
