@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-session-status-dot-semantics",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "205ec5afb2097446b431f91cccd00ee00744e0ec",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——sessionStatusIndicator 判定序把 status 终态（failed/ended）置于活性信号之前，活性 map 与会话列表两数据源到达顺序不定时陈旧活性不会覆盖终态展示（frontend/src/components/sessions/session-list-panel.tsx sessionStatusIndicator 函数）",
+    "并发": "ok——完成通知/活性未读均为按 sessionId 隔离的 localStorage 存在性键，多标签并发 mark/clear 仅产生角标亮灭展示差异，无累积态无数据损坏面",
+    "切换": "ok——完成通知检测基线 prevStatusRef 挂载首快照即基线（历史终态不误报）；通知标记落盘跨重挂/刷新保留至 selected 边沿清除（SessionRow useEffect 覆盖点击/Enter/深链三路）",
+    "作用域": "ok——通知键以 sessionId 为粒度全局唯一，跨 workspace/change/quicklog/runtime 四 scope 共享同一落盘不串台（与活性未读同策略）"
+  },
+  "checklist": {
+    "frImplTest一致": "FR-01~06 全部在 session-list-panel.tsx 兑现且绑定测试真实存在：语义矩阵 11 例、未读迁移 3 例、悬停卡 2 例、完成通知 5 例、批量勾选框既有用例组，session-list-panel.test.tsx 110/110 过；门户页+hook 126/126 过；ESLint 零告警",
+    "盲维四问真实性": "design 四问均非「不适用」且与 diff 相符：判定序/存在性键/内存基线+落盘/全局唯一键均有代码锚点",
+    "披露边界裁决": "边界已裁决：可接受——①页面关闭期间完成不补报（轻量提醒非数据义务，活性未读同边界先例）；②无活性数据非终态行留白（fail-open 退化为留白非错误标识）；③多标签并发写仅展示差异（存在性键无累积态）",
+    "防护声明": "localStorage 读写全 try/catch 降级真实存在（SSR 下 ReferenceError 亦被 catch 兜住返回 false，与 use-session-liveness isUnread 同款容错）；终态权威判定序真实存在",
+    "生成物同步": "无 OpenAPI/schema 改动，无 gen:types 义务；data-testid 契约迁移（liveness-dot→session-status-indicator）已在测试同步"
+  },
+  "reviewedAt": "2026-10-15T06:40:37Z"
+}

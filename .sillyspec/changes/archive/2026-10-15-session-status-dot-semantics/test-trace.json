@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-session-status-dot-semantics",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「行首状态槽语义（2026-10-15-session-status-dot-semantics）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「failed → 红点（异常失败）；活性 working 不覆盖（终态权威）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「活性未读红角标（原行尾小灯迁入行首槽）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+        "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "frontend/src/hooks/__tests__/use-session-liveness.test.ts",
+        "sessions/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-15-session-status-dot-semantics:flow:测试绑定FR-06",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「执行完成通知（2026-10-15 用户补充…）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-session-status-dot-semantics"
+    }
+  ]
+}

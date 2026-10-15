@@ -1,0 +1,1247 @@
+diff --git a/docs/releases/2026-10-15-002-b28df6881.md b/docs/releases/2026-10-15-002-b28df6881.md
+new file mode 100644
+index 000000000..3ce6a73dc
+--- /dev/null
++++ b/docs/releases/2026-10-15-002-b28df6881.md
+@@ -0,0 +1,212 @@
++---
++seq: 2
++deployed_at: "2026-10-15 14:22:00"
++status: success
++commit_from: b4f6bc35d
++commit_to: b28df6881
++summary: 平台向量检索端点+资产卡知识图谱分区+会话贴底跟随系列加固
++agent: zcode-agent
++commits:
++  - sha: b28df6881
++    message: "chore(types): 双端 gen:types 清偿"
++    author: qinyi
++  - sha: 463a80d02
++    message: "chore(archive): 2026-10-15-assets-graph-narrow-typecheck 归档留档"
++    author: qinyi
++  - sha: 521896de3
++    message: "fix(knowledge): 评审 P3 清偿"
++    author: qinyi
++  - sha: 62305bf90
++    message: "docs(sillyspec): 2026-10-15-assets-graph-narrow-typecheck 流程件（requirements FR×3+design 四问+tasks 3/3 勾）(task-01/02/03)"
++    author: qinyi
++  - sha: 213afbe55
++    message: "fix(knowledge): 资产卡图谱收窄清偿"
++    author: qinyi
++  - sha: 27c4176d6
++    message: "feat: 2026-10-15-dsh-engine-acp 完成 task ×2"
++    author: qinyi
++  - sha: 4b78076e8
++    message: "chore(archive): 2026-10-15-platform-vector-search 归档留档（含归档蒸馏产物）"
++    author: qinyi
++  - sha: e57201274
++    message: "docs(design): 文件变更清单自声明补齐"
++    author: qinyi
++  - sha: 435631cad
++    message: "fix(knowledge): mypy 清偿"
++    author: qinyi
++  - sha: cafcf1cfd
++    message: "feat(knowledge): 平台向量检索端点"
++    author: qinyi
++  - sha: 614d8c915
++    message: "chore(archive): 2026-10-15-change-assets-graph 归档留档"
++    author: qinyi
++  - sha: 249bb1fd7
++    message: "chore(sillyspec): 2026-10-15-change-assets-graph task-05 回归收尾"
++    author: qinyi
++  - sha: 14f21422b
++    message: "feat(change): 移除「当前无可审批事项」占位卡 task-04"
++    author: qinyi
++  - sha: af1fbc5fb
++    message: "feat(change): 变更详情主栏动线重排+步骤时间线默认收起 task-02/03"
++    author: qinyi
++  - sha: 4c1f9242a
++    message: "feat(change): 变更详情沉淀资产卡内嵌知识图谱分区 task-01"
++    author: qinyi
++  - sha: 2cfe4760e
++    message: "chore(archive): 2026-10-15-graph-type-cluster 归档留档"
++    author: qinyi
++  - sha: 2fc268009
++    message: "chore(sillyspec): 2026-10-15-graph-type-cluster task-04 回归收尾"
++    author: qinyi
++  - sha: e8d89b91a
++    message: "feat(knowledge): 图谱切片文案同步同类型聚簇语义 task-03"
++    author: qinyi
++  - sha: 5859899be
++    message: "feat(knowledge): 图谱切片力场同类型聚簇 task-01/02"
++    author: qinyi
++  - sha: 937bf5723
++    message: "chore(archive): 2026-10-14-session-bottom-grace-window 归档留档"
++    author: qinyi
++  - sha: 82b966f8f
++    message: "chore(archive): 2026-10-14-session-bottom-grace-window 归档留档"
++    author: qinyi
++  - sha: 3658ef811
++    message: "fix(sessions): 贴底记忆宽限窗（第六层加固）"
++    author: qinyi
++  - sha: 7875e2a9a
++    message: "chore(archive): 2026-10-14-session-bottom-no-restore 归档收口（DB 注销对齐）"
++    author: qinyi
++  - sha: 812678ebe
++    message: "chore(archive): 2026-10-14-session-bottom-no-restore 归档留档"
++    author: qinyi
++  - sha: b83ced449
++    message: "fix(sessions): 禁浏览器刷新滚动恢复（第五层）"
++    author: qinyi
++  - sha: 102be1587
++    message: "chore(archive): 2026-10-15-ci-recurrence-guard 归档留档"
++    author: qinyi
++  - sha: 2c669d90e
++    message: "chore(archive): 2026-10-14-decision-anchor-change-qualified 归档留档"
++    author: qinyi
++  - sha: 0ef23e479
++    message: "docs(archive): 决策蒸馏定位复合锚"
++    author: qinyi
++  - sha: 9d97e68dd
++    message: "chore(sillyspec): 2026-10-15-ci-recurrence-guard 工件与实现归因（task-01/02/03/04/05）"
++    author: qinyi
++  - sha: 1b0163159
++    message: "fix(frontend): 决策蒸馏定位复合锚 task-07"
++    author: qinyi
++  - sha: 9eeae525e
++    message: "fix(frontend): 决策蒸馏定位复合锚 task-05/06"
++    author: qinyi
++  - sha: 3dec18339
++    message: "fix(frontend): 决策蒸馏定位复合锚 task-03/04"
++    author: qinyi
++  - sha: a71219a59
++    message: "fix(frontend): 决策蒸馏定位复合锚 task-01/02"
++    author: qinyi
++  - sha: 79997b0d2
++    message: "chore(archive): 2026-10-15-fix-ci-red 归档留档"
++    author: qinyi
++  - sha: cdaae4dca
++    message: "chore(sillyspec): 2026-10-15-fix-ci-red 变更工件与 task-03 验收"
++    author: qinyi
++  - sha: 082f3414d
++    message: "fix(daemon): event-wire 一致性用例抹平助手补全（2026-10-15-fix-ci-red task-04）"
++    author: qinyi
++  - sha: 2fb19fe42
++    message: "fix(ci): main 红灯灭火（2026-10-15-fix-ci-red task-01/task-02）"
++    author: qinyi
++  - sha: 1e1616548
++    message: "docs(release): 发布记录 #001"
++    author: qinyi
++  - sha: f05e322b5
++    message: "chore(archive): 2026-10-14-session-bottom-resize-observer 归档留档"
++    author: qinyi
++  - sha: b615f2f92
++    message: "docs(sillyspec): task-06 对账注（审查 P2 补口 hasTurns 翻转重快照，冷加载注入取证 delta=0）(2026-10-14-session-bottom-resize-observer) task-06"
++    author: qinyi
++  - sha: 237d146ec
++    message: "chore(archive): 2026-10-14-session-bottom-resize-observer 归档留档"
++    author: qinyi
++  - sha: 7e251af45
++    message: "chore(archive): 2026-10-14-session-bottom-resize-observer 归档留档"
++    author: qinyi
++  - sha: 1bb3ff912
++    message: "fix(sessions): 审查 P2 补口"
++    author: qinyi
++  - sha: d47cc86dc
++    message: "fix(sessions): 贴底跟随 ResizeObserver 通解"
++    author: qinyi
++  - sha: 9b3a27df4
++    message: "chore(archive): 2026-10-14-session-bottom-switch-remount 归档留档"
++    author: qinyi
++  - sha: d3ece657c
++    message: "fix(sessions): 审查 P2 补口"
++    author: qinyi
++  - sha: 930a777fd
++    message: "fix(sessions): TurnTimeline 挂载点 key=会话标识"
++    author: qinyi
++  - sha: 1d5bf421d
++    message: "chore(archive): 2026-10-14-session-bottom-passive-grow 归档留档"
++    author: qinyi
++  - sha: 97ac87634
++    message: "fix(sessions): 贴底跟随被动增高识别"
++    author: qinyi
++  - sha: fcff76a9c
++    message: "chore(archive): 2026-10-14-session-bottom-follow-insert 归档留档"
++    author: qinyi
++  - sha: b9f3550f3
++    message: "docs(sillyspec): 2026-10-14-session-bottom-follow-insert 流程件补齐（design 四节/requirements 行为句+测试绑定，首版 node 模板串被 bash 反引号吞产生 undefined 已重写）(2026-10-14-s…"
++    author: qinyi
++  - sha: 356638635
++    message: "fix(sessions): 贴底跟随签名补列表长度分量"
++    author: qinyi
++  - sha: b4d688f34
++    message: "fix(sessions): 额度失败轮真实形态放行"
++    author: qinyi
++  - sha: c761f76bc
++    message: "chore(archive): 2026-10-14-session-preview-defect-fixes 归档留档"
++    author: qinyi
++  - sha: 88de2e76e
++    message: "fix(sessions): 预览卡上线两缺陷修复 (2026-10-14-session-preview-defect-fixes) task-01 task-02 task-03 task-04 task-05"
++    author: qinyi
++  - sha: 35cff31e5
++    message: "chore(archive): 2026-10-14-session-turn-preview-cards 归档留档（会话未加载轮预览卡+跳转附近预取，四阶段闭环+verify PASS+真浏览器实测）"
++    author: qinyi
++  - sha: e785e71f9
++    message: "feat(sessions): 会话页未加载轮消息流预览卡 + 跳转附近预取（2026-10-14-session-turn-preview-cards）"
++    author: qinyi
++---
++
++## 🆕 新增
++
++- **平台向量检索端点**：`POST /api/spec/knowledge/vector-search`——fastembed 本地小模型 BAAI/bge-small-zh-v1.5（512 维、零 API key），decisions 语料指纹懒构建索引 + 纯 Python 余弦；fail-soft 空结果不 5xx 不阻塞启动；shpsync token 单通道（非 shpsync 凭据 403）（2026-10-15-platform-vector-search）。
++- **变更详情沉淀资产卡内嵌知识图谱分区**：ChangeAssetsGraph 一跳邻域切片画布 + 右侧节点详情栏（类型中文标签/出入邻居行点击跳选）；失败/空数据 fail-open 整区隐藏（2026-10-15-change-assets-graph）。
++- **变更详情主栏动线重排**：沉淀资产卡上移至步骤时间线上面；步骤时间线默认收起、点阶段节点联动展开；移除「当前无可审批事项」占位卡。
++- **知识图谱切片力场同类型聚簇**：类型内聚力 TYPE_COHESION_PULL=0.02，同类节点聚簇分块、跨类型关联呈桥接边（2026-10-15-graph-type-cluster）。
++- **会话页未加载轮消息流预览卡**：长会话中间未加载轮次原位预览卡 + 点击原地展开（2.2s ring）+ 跳转附近预取（2026-10-14-session-turn-preview-cards）。
++
++## 🔧 修复
++
++- **会话贴底跟随系列加固（六层）**：贴底跟随签名补列表长度分量、被动增高识别、ResizeObserver 内容迟到跟随、切换会话重挂载 key 化、禁浏览器刷新滚动恢复、贴底宽限窗自愈（2026-10-14-session-bottom-* 系列，远端合并进本次部署）。
++- **额度失败轮点击无反应 + 轮号错乱**：失败轮原位展开用户气泡+失败详情卡；logsToTurns 归并层按大纲权威 seq 盖章（2026-10-14-session-preview-defect-fixes）。
++- **决策蒸馏定位复合锚**：FR/决策行深链带变更号#决策号复合锚，同 id 跨变更精确定位；含评审 P1 兜底死选择器修复（2026-10-14-decision-anchor-change-qualified）。
++- **资产卡图谱类型收窄 TS2339 清偿**：isGraphNeighborsData 类型谓词守卫替换裸 in 收窄（pre-push 闸门拦下的潜伏编译错）（2026-10-15-assets-graph-narrow-typecheck）。
++- **main CI 红灯灭火**：daemon api-types 对齐 openapi、前端菜单数量锚跟进、event-wire 时间戳抖动抹平（2026-10-15-fix-ci-red）。
++- mypy 排序键显式注记清偿；评审 P3 注释错别字清偿。
++
++## ⚡ 优化
++
++- 双端 gen:types 生成物同步：vector-search 端点补进 openapi.json + 前端/daemon 两份 api-types.ts（规则 21 双端义务）。
++- CI 红灯防复发三重闸：pre-push ci-fast-gate（typecheck×2 + api-types 漂移×2）+ docs-gate 收编 + CLAUDE.md daemon 义务（2026-10-15-ci-recurrence-guard）。
++
++## 📝 部署验证
++
++- 本地打包：`PROD_API_URL=https://crrcdt.ppdmq.top` 覆盖前端 build-arg；COMMIT_SHA=b28df6881 焙入镜像；sillyspec 3.32.10；daemon bundle 重打（src 生成类型变更）后随镜像进 backend。
++- 传输与上线：scp 299M images.tar.gz → 服务器备份旧镜像 `backup-20261015-1413`（可回滚）→ docker load + compose up（backend/frontend Recreated）。
++- 5 容器全 healthy（backend / frontend / postgres / redis / minio）；health 回显 `commit_sha=b28df6881`、db/redis ok；backend 日志 `Application startup complete`，无 alembic 报错（本次无新迁移）。
++- 容器内校验：vector_router 含 vector_search_endpoint 标记；fastembed 0.9.0 可导入。
++- daemon 分发端点一致性：公网经 nginx 与后端直出 latest.json 均为 `b28df688-20261015140624`。
++- 本记录已同步服务器镜像目录（`/tmp/sillyhub-repos/multi-agent-platform/docs/releases/` 全量重传）。
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 706f0bb38..64ea2bb9c 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -348,7 +348,9 @@ function clearLivenessStorage() {
+   for (const key of Object.keys(window.localStorage)) {
+     if (
+       key.startsWith("sillyhub:liveness-state:") ||
+-      key.startsWith("sillyhub:liveness-unread:")
++      key.startsWith("sillyhub:liveness-unread:") ||
++      // 2026-10-15-session-status-dot-semantics：执行完成通知标记同清。
++      key.startsWith("sillyhub:session-completed-unread:")
+     ) {
+       window.localStorage.removeItem(key);
+     }
+@@ -624,7 +626,10 @@ describe("SessionListPanel 树条目 chips", () => {
+     expect(row.textContent).toContain("Kimi");
+     expect(row.textContent).toContain("12 轮");
+     expect(row.textContent).toContain("5 分钟前");
+-    expect(row.querySelector('[aria-label="状态 active"]')).toBeTruthy();
++    // 2026-10-15-session-status-dot-semantics：active 空闲（无活性数据）→
++    // 行首留白——不再渲染「状态 active」灰点。
++    expect(row.querySelector('[aria-label="异常失败"]')).toBeNull();
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
+     // 树形态：工作区/机器信息由组头与小节承载，chips 不再重复
+     expect(row.textContent).not.toContain("📂");
+     expect(row.textContent).not.toContain("🖥");
+@@ -3132,233 +3137,161 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
+   });
+ });
+ 
+-// ── 14. 单聊行置顶/重命名（task-07 / 2026-09-07-session-pin-rename-scheduled-send
+-//        / FR-01 FR-02 FR-03 / D-002@v1 分组内置顶语义） ─────────────────────
++// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics） ──
+ //
+-// 断言口径（constraints）：置顶基于 pinned_at 二态与分组内置顶语义（不做跨分组
+-// 全局排序断言——置顶行排分组内最前靠服务端 pinned_at IS NULL 前置键，前端
+-// byWs 桶保序不重排）；语义查询（aria-label）锚定，不碰 brand 色值。徽标为
+-// 纯图标（无文本），经 title 前缀「已置顶（」锚定（已归档徽标先例同款 title
+-// 口径）；置顶/取消置顶是轻量可逆开关，实现直连不弹确认（对照归档 confirm）。
+-describe("SessionListPanel 单聊行置顶与重命名（task-07）", () => {
+-  /** 一未置顶（s-1/会话A）+ 一已置顶（s-2/会话B，pinned_at 非空）标准固件。 */
+-  function pinFixture() {
++// 语义矩阵（用户确认，参考 deepseek-harness StateDot 五态）：failed→红点 /
++// ended→绿点 / 活性 working→动态转圈 / 活性 blocked→琥珀点 / reconnecting→
++// 动态转圈 / 其余（active 空闲/pending/suspended/活性 idle/unknown/无活性）
++// →留白（槽占位零可见标识）；终态权威优先于活性。行尾活性小灯退役：悬停卡/
++// 未读红角标平移至行首槽。执行完成通知：非终态→ended 且当前不在该会话上 →
++// 绿色角标，点击进入（selected 边沿）后消失。
++
++describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot-semantics）", () => {
++  /**
++   * 标准单会话固件（ws-1 组内一条 s-a；status / 活性 state 可覆写，
++   * livenessState 缺省 = 无活性数据（日志列表返回空）。
++   */
++  function slotFixture(
++    sessionOverrides: Partial<AgentSessionRead> = {},
++    livenessState?: AgentLogListItem["state"],
++  ) {
++    setMachines({ items: twoMachines() });
+     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+     mocks.listAgentSessions.mockResolvedValue(
+       listResponse([
+-        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+         makeSession({
+-          id: "s-2",
++          id: "s-a",
+           workspace_id: "ws-1",
+-          title: "会话B",
+-          pinned_at: "2026-09-06T08:00:00Z",
++          title: "核对变更",
++          ...sessionOverrides,
+         }),
+       ]),
+     );
++    mocks.listWorkspaceAgentLogs.mockResolvedValue({
++      items: livenessState
++        ? [makeLivenessEntry({ agent_session_id: "s-a", state: livenessState })]
++        : [],
++    });
+   }
+ 
+-  it("置顶按钮按 pinned_at 二选一：未置顶行「置顶 …」在/「取消置顶 …」缺席；点击 → onPinSessions([id]) 且不触发行选中（stopPropagation）", async () => {
+-    pinFixture();
+-    const onPinSessions = vi.fn().mockResolvedValue(0);
+-    const onUnpinSessions = vi.fn().mockResolvedValue(0);
+-    const onSelect = vi.fn();
+-    renderPanel(
+-      <SessionListPanel
+-        onPinSessions={onPinSessions}
+-        onUnpinSessions={onUnpinSessions}
+-        onSelect={onSelect}
+-      />,
+-    );
++  /** 渲染并展开组，返回目标行。 */
++  async function renderRow() {
++    renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
++    return screen.findByRole("button", { name: "会话 核对变更" });
++  }
+ 
+-    // 二选一显隐（对齐归档按钮 archived_at 先例）：未置顶行只有「置顶」。
+-    expect(
+-      screen.getByRole("button", { name: "置顶 会话A" }),
+-    ).toBeInTheDocument();
+-    expect(
+-      screen.queryByRole("button", { name: "取消置顶 会话A" }),
+-    ).not.toBeInTheDocument();
+-
+-    // 点击：回调携带行 id（批量口径单条数组）；stopPropagation 不冒泡行选中。
+-    fireEvent.click(screen.getByRole("button", { name: "置顶 会话A" }));
+-    await waitFor(() => expect(onPinSessions).toHaveBeenCalledWith(["s-1"]));
+-    expect(onPinSessions).toHaveBeenCalledTimes(1);
+-    expect(onSelect).not.toHaveBeenCalled();
++  it("failed → 红点（异常失败）；活性 working 不覆盖（终态权威）", async () => {
++    slotFixture({ status: "failed" }, "working");
++    const row = await renderRow();
++    expect(row.querySelector('[aria-label="异常失败"]')).toBeTruthy();
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
+   });
+ 
+-  it("已置顶行：「取消置顶 …」在/「置顶 …」缺席；点击 → onUnpinSessions([id])", async () => {
+-    pinFixture();
+-    const onPinSessions = vi.fn().mockResolvedValue(0);
+-    const onUnpinSessions = vi.fn().mockResolvedValue(0);
+-    renderPanel(
+-      <SessionListPanel
+-        onPinSessions={onPinSessions}
+-        onUnpinSessions={onUnpinSessions}
+-        onSelect={vi.fn()}
+-      />,
+-    );
+-    await openGroup("SillyHub");
+-
+-    expect(
+-      screen.getByRole("button", { name: "取消置顶 会话B" }),
+-    ).toBeInTheDocument();
+-    expect(
+-      screen.queryByRole("button", { name: "置顶 会话B" }),
+-    ).not.toBeInTheDocument();
+-
+-    fireEvent.click(screen.getByRole("button", { name: "取消置顶 会话B" }));
+-    await waitFor(() => expect(onUnpinSessions).toHaveBeenCalledWith(["s-2"]));
+-    expect(onPinSessions).not.toHaveBeenCalled();
++  it("ended → 绿点（执行完成）；活性数据不改变终态展示", async () => {
++    slotFixture({ status: "ended" }, "working");
++    const row = await renderRow();
++    expect(row.querySelector('[aria-label="执行完成"]')).toBeTruthy();
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
+   });
+ 
+-  it("置顶徽标（FR-03）：pinned_at 非空行标题前渲染（title 含置顶时间）；未置顶行无", async () => {
+-    pinFixture();
+-    renderPanel(
+-      <SessionListPanel
+-        onPinSessions={vi.fn().mockResolvedValue(0)}
+-        onUnpinSessions={vi.fn().mockResolvedValue(0)}
+-      />,
+-    );
+-    await openGroup("SillyHub");
+-
+-    const rowA = await screen.findByRole("button", { name: "会话 会话A" });
+-    const rowB = screen.getByRole("button", { name: "会话 会话B" });
+-    // 已置顶行：徽标在标题前（title 相对时间；纯图标无文本，title 锚定）。
+-    const badge = rowB.querySelector('span[title^="已置顶（"]');
+-    expect(badge).not.toBeNull();
+-    // 徽标在标题文本之前（D-002 分组内置顶标识位——取叶子文本 span 锚定：
+-    // 徽标纯图标，其外层容器 textContent 同为「会话B」不算标题位）。
+-    const titleSpan = [...rowB.querySelectorAll("span")].find(
+-      (el) => el.textContent === "会话B" && el.children.length === 0,
+-    );
+-    expect(titleSpan).toBeTruthy();
+-    expect(badge!.compareDocumentPosition(titleSpan!)).toBe(
+-      Node.DOCUMENT_POSITION_FOLLOWING,
+-    );
+-    // 未置顶行：零徽标。
+-    expect(rowA.querySelector('span[title^="已置顶（"]')).toBeNull();
++  it("active + 活性 working → 动态转圈（正在执行）——本平台 active 只表示会话开着，进行中以活性为准", async () => {
++    slotFixture({ status: "active" }, "working");
++    const row = await renderRow();
++    expect(screen.getByLabelText("正在执行")).toBeTruthy();
++    expect(row.querySelector('[aria-label="执行完成"]')).toBeNull();
++    expect(row.querySelector('[aria-label="异常失败"]')).toBeNull();
+   });
+ 
+-  it("行内重命名（FR-02）：Pencil → 输入框预填当前标题；Enter 提交 onRenameSession(id, strip 后新标题) 且退出编辑态", async () => {
+-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    mocks.listAgentSessions.mockResolvedValue(
+-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+-    );
+-    const onRenameSession = vi.fn().mockResolvedValue(0);
+-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+-    await openGroup("SillyHub");
+-
+-    // 进入编辑态：标题位变输入框，预填当前标题。
+-    fireEvent.click(
+-      await screen.findByRole("button", { name: "重命名 会话A" }),
+-    );
+-    const input = screen.getByLabelText("重命名会话 会话A");
+-    expect((input as HTMLInputElement).value).toBe("会话A");
++  it("active + 活性 blocked → 琥珀点（在等你）", async () => {
++    slotFixture({ status: "active" }, "blocked");
++    const row = await renderRow();
++    expect(row.querySelector('[aria-label="在等你"]')).toBeTruthy();
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
++  });
+ 
+-    // 带空白输入 → strip 后提交；Enter 收口（卸载不触发二次 blur 提交）。
+-    fireEvent.change(input, { target: { value: "  新标题  " } });
+-    fireEvent.keyDown(input, { key: "Enter" });
+-    await waitFor(() =>
+-      expect(onRenameSession).toHaveBeenCalledWith("s-1", "新标题"),
+-    );
+-    expect(onRenameSession).toHaveBeenCalledTimes(1);
+-    // 退出编辑态：输入框消失，标题位恢复（仍为服务端旧值——收敛靠调用方 invalidate）。
+-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
+-    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
++  it("reconnecting → 动态转圈（恢复中）", async () => {
++    slotFixture({ status: "reconnecting" });
++    await renderRow();
++    expect(screen.getByLabelText("恢复中")).toBeTruthy();
+   });
+ 
+-  it("Esc 取消：退出编辑态不回调，行标题保持原值", async () => {
+-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    mocks.listAgentSessions.mockResolvedValue(
+-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+-    );
+-    const onRenameSession = vi.fn().mockResolvedValue(0);
+-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
+-    await openGroup("SillyHub");
++  it("active 空闲（无活性数据）→ 留白：槽占位但零可见标识", async () => {
++    slotFixture({ status: "active" });
++    const row = await renderRow();
++    const slot = row.querySelector('[data-testid="session-status-indicator"]');
++    expect(slot).toBeTruthy();
++    expect(slot?.textContent).toBe("");
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
++    expect(screen.queryByLabelText("执行完成")).toBeNull();
++    expect(screen.queryByLabelText("在等你")).toBeNull();
++  });
+ 
+-    fireEvent.click(
+-      await screen.findByRole("button", { name: "重命名 会话A" }),
+-    );
+-    const input = screen.getByLabelText("重命名会话 会话A");
+-    fireEvent.change(input, { target: { value: "改了一半的草稿" } });
+-    fireEvent.keyDown(input, { key: "Escape" });
++  it("pending（排队未开跑）→ 留白", async () => {
++    slotFixture({ status: "pending" });
++    const row = await renderRow();
++    expect(
++      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
++    ).toBe("");
++  });
+ 
+-    expect(onRenameSession).not.toHaveBeenCalled();
+-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
+-    // 行标题不被草稿污染（Esc 丢弃编辑值）。
+-    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
++  it("suspended（后端词表超集，前端类型外运行时值）→ 留白", async () => {
++    slotFixture({
++      status: "suspended",
++    } as unknown as Partial<AgentSessionRead>);
++    const row = await renderRow();
++    expect(
++      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
++    ).toBe("");
+   });
+ 
+-  it("空值不提交：清空输入 + Enter → 静默退出编辑态零回调", async () => {
+-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    mocks.listAgentSessions.mockResolvedValue(
+-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+-    );
+-    const onRenameSession = vi.fn().mockResolvedValue(0);
+-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
++  it("活性命中：整槽包 Popover，悬停出组合悬停卡（状态名/静默时长/证据摘要/推导时间四行）", async () => {
++    slotFixture({ status: "active" }, "working");
++    renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+-
+-    fireEvent.click(
+-      await screen.findByRole("button", { name: "重命名 会话A" }),
++    const slot = await screen.findByTestId("session-status-indicator");
++    // antd Popover trigger=hover（默认 mouseEnterDelay 0.1s → waitFor 收敛，
++    // 同 scheduled-messages-bar 悬停先例；content portal 到 body 不被行裁剪）。
++    fireEvent.mouseEnter(slot);
++    await waitFor(() =>
++      expect(screen.getByText("在干活（working）")).toBeInTheDocument(),
+     );
+-    const input = screen.getByLabelText("重命名会话 会话A");
+-    fireEvent.change(input, { target: { value: "   " } });
+-    fireEvent.keyDown(input, { key: "Enter" });
+-
+-    expect(onRenameSession).not.toHaveBeenCalled();
+-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
++    expect(screen.getByText(/^静默时长：/)).toBeInTheDocument();
++    expect(screen.getByText(/证据摘要：tool_use 未配对 ×2/)).toBeInTheDocument();
++    expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
+   });
+ 
+-  it("blur 提交：失焦等效 Enter（移动端/外点场景收口）", async () => {
+-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    mocks.listAgentSessions.mockResolvedValue(
+-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+-    );
+-    const onRenameSession = vi.fn().mockResolvedValue(0);
+-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
++  it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
++    slotFixture({ status: "active" }, "idle");
++    renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+-
+-    fireEvent.click(
+-      await screen.findByRole("button", { name: "重命名 会话A" }),
+-    );
+-    const input = screen.getByLabelText("重命名会话 会话A");
+-    fireEvent.change(input, { target: { value: "失焦提交" } });
+-    fireEvent.blur(input);
+-
++    const slot = await screen.findByTestId("session-status-indicator");
++    expect(slot.textContent).toBe("");
++    fireEvent.mouseEnter(slot);
+     await waitFor(() =>
+-      expect(onRenameSession).toHaveBeenCalledWith("s-1", "失焦提交"),
++      expect(screen.getByText("空闲（idle）")).toBeInTheDocument(),
+     );
+   });
+ 
+-  it("三回调 props 缺省（悬浮助手 runtime 抽屉等消费点）→ 零置顶/重命名按钮，徽标照常渲染", async () => {
+-    pinFixture();
++  it("行首槽位置：第一行首槽位、18px flex-none；标题 flex-1 不被挤成列", async () => {
++    slotFixture({ status: "active" }, "working");
+     renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+-
+-    await screen.findByRole("button", { name: "会话 会话A" });
+-    expect(screen.queryByRole("button", { name: "置顶 会话A" })).toBeNull();
+-    expect(screen.queryByRole("button", { name: "取消置顶 会话B" })).toBeNull();
+-    expect(screen.queryByRole("button", { name: "重命名 会话A" })).toBeNull();
+-    // 徽标是展示态（非操作）：不随回调缺省隐藏。
+-    const rowB = screen.getByRole("button", { name: "会话 会话B" });
+-    expect(rowB.querySelector('span[title^="已置顶（"]')).not.toBeNull();
++    const slot = await screen.findByTestId("session-status-indicator");
++    const firstLine = slot.parentElement;
++    expect(firstLine).not.toBeNull();
++    expect(firstLine?.className).toContain("flex");
++    expect(firstLine?.className).toContain("items-center");
++    expect(slot).toHaveClass("flex-none");
++    expect(slot).toHaveClass("h-[18px]");
++    expect(slot).toHaveClass("w-[18px]");
++    const slots = Array.from(firstLine?.children ?? []);
++    expect(slots.indexOf(slot)).toBe(0);
++    expect(slots[1]?.className).toContain("flex-1");
+   });
+ });
+ 
+-// ── 14. 行尾活性小灯与未读红点（2026-09-08-session-list-liveness-dot task-03） ──
+-
+-describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+-  /** 标准单会话固件（ws-1 组内一条 s-a）。 */
+-  function livenessFixture() {
+-    setMachines({ items: twoMachines() });
+-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+-    mocks.listAgentSessions.mockResolvedValue(
+-      listResponse([
+-        makeSession({ id: "s-a", workspace_id: "ws-1", title: "核对变更" }),
+-      ]),
+-    );
+-  }
+-
++describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首槽）", () => {
+   /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟 30s 轮询到点）。 */
+   function renderPanelWithClient(ui: React.ReactElement) {
+     const client = new QueryClient({
+@@ -3373,46 +3306,25 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+     return { ...view, client };
+   }
+ 
+-  it("map 命中渲染行尾小灯；悬停弹组合渲染悬停卡（状态名/静默时长/证据摘要/推导时间四行）", async () => {
+-    livenessFixture();
+-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+-      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
+-    });
+-    renderPanel(<SessionListPanel />);
+-    await openGroup("SillyHub");
+-    const dot = await screen.findByTestId("liveness-dot");
+-    expect(dot).toBeInTheDocument();
+-
+-    // antd Popover trigger=hover（默认 mouseEnterDelay 0.1s → waitFor 收敛，
+-    // 同 scheduled-messages-bar 悬停先例；content portal 到 body 不被行裁剪）。
+-    fireEvent.mouseEnter(dot);
+-    await waitFor(() =>
+-      expect(screen.getByText("在干活（working）")).toBeInTheDocument(),
++  /** working 活性单会话固件（ws-1 组内 s-a）。 */
++  function livenessFixture() {
++    setMachines({ items: twoMachines() });
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({ id: "s-a", workspace_id: "ws-1", title: "核对变更" }),
++      ]),
+     );
+-    expect(screen.getByText(/^静默时长：/)).toBeInTheDocument();
+-    expect(screen.getByText(/证据摘要：tool_use 未配对 ×2/)).toBeInTheDocument();
+-    expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
+-  });
+-
+-  it("map 未命中（无关联日志的会话）不渲染小灯——行为与现状一致（fail-open）", async () => {
+-    livenessFixture();
+     mocks.listWorkspaceAgentLogs.mockResolvedValue({
+-      items: [makeLivenessEntry({ agent_session_id: "s-other" })],
++      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
+     });
+-    renderPanel(<SessionListPanel />);
+-    await openGroup("SillyHub");
+-    await screen.findByRole("button", { name: "会话 核对变更" });
+-    expect(screen.queryByTestId("liveness-dot")).toBeNull();
+-  });
++  }
+ 
+   it("红点出现：prevState=working → current=idle 转移标记未读", async () => {
+     livenessFixture();
+-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+-      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
+-    });
+     const { client } = renderPanelWithClient(<SessionListPanel />);
+     await openGroup("SillyHub");
+-    await screen.findByTestId("liveness-dot");
++    await screen.findByTestId("session-status-indicator");
+     // 首轮 working：state 键落盘（首见不触发未读，无红点）
+     await waitFor(() =>
+       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
+@@ -3436,12 +3348,9 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+ 
+   it("红点随 selected 置真消失（点击/Enter/深链三路入口共用的 selected 边沿）", async () => {
+     livenessFixture();
+-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+-      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
+-    });
+     const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
+     await openGroup("SillyHub");
+-    await screen.findByTestId("liveness-dot");
++    await screen.findByTestId("session-status-indicator");
+     mocks.listWorkspaceAgentLogs.mockResolvedValue({
+       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
+     });
+@@ -3464,18 +3373,19 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+     expect(
+       window.localStorage.getItem("sillyhub:liveness-unread:s-a"),
+     ).toBeNull();
+-    // 小灯本体保留（清除只影响红点）
+-    expect(screen.getByTestId("liveness-dot")).toBeInTheDocument();
++    // 状态槽本体保留（清除只影响红角标）
++    expect(screen.getByTestId("session-status-indicator")).toBeInTheDocument();
+   });
+ 
+   it("首见不亮：无 prevState（localStorage 无 state 键）直接 idle 不标未读", async () => {
+     livenessFixture();
++    // 首轮直接 idle（首见无 prevState）
+     mocks.listWorkspaceAgentLogs.mockResolvedValue({
+       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
+     });
+     renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+-    await screen.findByTestId("liveness-dot");
++    await screen.findByTestId("session-status-indicator");
+     // state 键首见落盘为 idle，未读键不写
+     await waitFor(() =>
+       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
+@@ -3485,36 +3395,167 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
+     expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).toBeNull();
+     expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
+   });
++});
+ 
+-  it("布局零变化：小灯是第一行行内 flex 尾部 flex-none 18px 节点（不新增列）", async () => {
+-    livenessFixture();
+-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+-      items: [makeLivenessEntry({ agent_session_id: "s-a" })],
++describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终态→ended 且不在该会话上）", () => {
++  /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟列表轮询到点）。 */
++  function renderPanelWithClient(ui: React.ReactElement) {
++    const client = new QueryClient({
++      defaultOptions: {
++        queries: { retry: false, gcTime: 0, refetchInterval: false },
++        mutations: { retry: false },
++      },
++    });
++    const view = render(
++      <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
++    );
++    return { ...view, client };
++  }
++
++  /** 单会话固件（ws-1 组内 s-a，status 可覆写；无活性数据）。 */
++  function completedFixture(status: AgentSessionRead["status"]) {
++    setMachines({ items: twoMachines() });
++    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status,
++        }),
++      ]),
++    );
++    mocks.listWorkspaceAgentLogs.mockResolvedValue({ items: [] });
++  }
++
++  it("active → ended 转移（非选中）→ 绿色完成角标出现并落盘", async () => {
++    completedFixture("active");
++    const { client } = renderPanelWithClient(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await screen.findByRole("button", { name: "会话 核对变更" });
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++
++    // 列表轮询到点：会话完成
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "ended",
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
+     });
++    await screen.findByLabelText("此会话已执行完成");
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).not.toBeNull();
++  });
++
++  it("点击进入（selected 置真）→ 角标消失、落盘清除，绿点本体保留", async () => {
++    completedFixture("active");
++    const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await screen.findByRole("button", { name: "会话 核对变更" });
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "ended",
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await screen.findByLabelText("此会话已执行完成");
++
++    rerender(
++      <QueryClientProvider client={client}>
++        <SessionListPanel selectedSessionId="s-a" />
++      </QueryClientProvider>,
++    );
++    await waitFor(() =>
++      expect(screen.queryByLabelText("此会话已执行完成")).toBeNull(),
++    );
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++    // 完成态绿点本体保留（通知消失，状态标识仍在）
++    expect(screen.getByLabelText("执行完成")).toBeTruthy();
++  });
++
++  it("完成时正选中该会话（用户就在其上）→ 不标记不亮角标", async () => {
++    completedFixture("active");
++    const { client } = renderPanelWithClient(
++      <SessionListPanel selectedSessionId="s-a" />,
++    );
++    // 选中会话所在组豁免默认折叠（ql-20260824-001）——无需点击展开，
++    // openGroup 的点击反而会把它折叠。
++    await screen.findByRole("button", { name: "会话 核对变更" });
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "ended",
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await waitFor(() =>
++      expect(screen.getByLabelText("执行完成")).toBeTruthy(),
++    );
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++  });
++
++  it("首载即 ended（历史会话，无转移基线）→ 不误报", async () => {
++    completedFixture("ended");
+     renderPanel(<SessionListPanel />);
+     await openGroup("SillyHub");
+-    const dot = await screen.findByTestId("liveness-dot");
++    await screen.findByRole("button", { name: "会话 核对变更" });
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++  });
+ 
+-    // 第一行 flex 容器：状态点 / 标题(flex-1) / 相对时间 / 小灯 / hover 按钮
+-    // ——仍是单行行内槽位，无新增列、无换行容器（R-01）。
+-    const firstLine = dot.parentElement;
+-    expect(firstLine).not.toBeNull();
+-    expect(firstLine?.className).toContain("flex");
+-    expect(firstLine?.className).toContain("items-center");
+-    expect(dot).toHaveClass("flex-none");
+-    expect(dot).toHaveClass("h-[18px]");
+-    expect(dot).toHaveClass("w-[18px]");
+-    // 插点位置：相对时间之后、hover 按钮区之前（倒数第二槽位）
+-    const slots = Array.from(firstLine?.children ?? []);
+-    expect(slots.indexOf(dot)).toBe(slots.length - 2);
+-    const lastSlot = slots[slots.length - 1];
+-    const titleSlot = slots[1];
+-    expect(lastSlot?.className).toContain("group-hover:flex");
+-    // 标题位仍 flex-1 占满（小灯不挤占成列）
+-    expect(titleSlot?.className).toContain("flex-1");
++  it("active → failed 不出完成角标（异常走红点语义）", async () => {
++    completedFixture("active");
++    const { client } = renderPanelWithClient(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await screen.findByRole("button", { name: "会话 核对变更" });
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "failed",
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await waitFor(() =>
++      expect(screen.getByLabelText("异常失败")).toBeTruthy(),
++    );
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+   });
+ });
+-
+ // ── 15. 导出入口（2026-09-14-session-export task-07 / FR-01 / FR-06） ──────
+ // task-06 双入口 UI 契约回归锁：批量栏「导出选中（N）」Dropdown + 行 hover
+ // 下载图标（aria-label「导出 {title}」）两入口共享两档菜单（items 单一源
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 86a2703ca..6614cb742 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -105,6 +105,14 @@
+  * 历史（2026-08-14-sessions-portal task-11 / 2026-08-22-workspace-sessions-portal
+  * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
+  * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
++ *
++ * 2026-10-15-session-status-dot-semantics：行首状态点语义重定义（用户确认，
++ * 参考 deepseek-harness StateDot 五态）——绿点=执行完成(ended)、动态转圈=
++ * 正在执行(活性 working)/恢复中(reconnecting)、红点=异常(failed)、琥珀点=
++ * 在等你(活性 blocked)，空闲/排队/挂起/未知一律留白（本平台 active 仅表示
++ * 「会话开着」非「正在跑」，故进行中以活性推导为准）；行尾活性小灯退役，
++ * 悬停卡/未读红角标并入行首槽（SessionStatusSlot 单一标识位）；新增执行
++ * 完成通知（非终态→ended 且不在该会话上 → 绿角标，点击进入后消失）。
+  */
+ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+ import { useQuery } from "@tanstack/react-query";
+@@ -164,7 +172,9 @@ import {
+   type PpmItemKind,
+ } from "@/lib/daemon";
+ import type { AgentLogListItem } from "@/lib/agent-logs";
+-import { LIVENESS_META, LivenessDot } from "@/components/agent-log/liveness-badge";
++// 2026-10-15-session-status-dot-semantics：LivenessDot 随行尾小灯退役，仅存
++// LIVENESS_META（悬停卡 SessionLivenessPopoverContent 仍消费五态色/文案）。
++import { LIVENESS_META } from "@/components/agent-log/liveness-badge";
+ import {
+   clearUnread,
+   isUnread,
+@@ -567,13 +577,39 @@ function engineValueOf(s: AgentSessionRead): string | null {
+   return s.config_snapshot?.engine ?? s.provider;
+ }
+ 
+-/** 状态点颜色（原型 .dot 语义；pending/reconnecting 视作活跃态）。 */
+-function statusDotClass(status: AgentSessionStatus): string {
+-  if (status === "failed") return "bg-destructive";
+-  if (status === "ended") return "bg-success";
+-  // 进行中 = info 青 + 光环（D-003 info 档统一 accent 青，2026-08-23 原型 .st.active）。
+-  if (status === "active") return "bg-info ring-2 ring-info/20";
+-  return "bg-muted-foreground/50";
++/**
++ * 行首状态标识形态（2026-10-15-session-status-dot-semantics 语义重定义，
++ * 参考 deepseek-harness StateDot 五态：done 绿 / ongoing 转圈 / error 红 /
++ * warning 琥珀 / idle 弱化）：
++ *   - failed        → 红点（异常）
++ *   - ended         → 绿点（执行完成）
++ *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
++ *                     哪怕空闲，故「进行中」以活性推导 working 为准）
++ *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
++ *   - reconnecting  → 动态转圈（断线恢复中，动态过程）
++ *   - 其余（active 空闲 / pending 排队 / suspended 挂起 / 活性 idle/unknown /
++ *     无活性数据）→ null：行首槽零可见内容，视觉留白。
++ * 判定序即优先级：终态（failed/ended）权威优先，不被陈旧活性数据覆盖。
++ */
++type SessionStatusIndicator =
++  | { kind: "dot"; cls: string; label: string }
++  | { kind: "spinner"; label: string }
++  | null;
++
++/** 行首状态标识单一源（status × 活性 state → 形态；纯函数便于单测）。 */
++function sessionStatusIndicator(
++  status: AgentSessionStatus,
++  livenessState?: AgentLogListItem["state"] | null,
++): SessionStatusIndicator {
++  if (status === "failed")
++    return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
++  if (status === "ended")
++    return { kind: "dot", cls: "bg-success", label: "执行完成" };
++  if (livenessState === "working") return { kind: "spinner", label: "正在执行" };
++  if (livenessState === "blocked")
++    return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
++  if (status === "reconnecting") return { kind: "spinner", label: "恢复中" };
++  return null;
+ }
+ 
+ /**
+@@ -657,6 +693,50 @@ interface GroupSection {
+   sessions: AgentSessionRead[];
+ }
+ 
++/* ────────── 执行完成通知（2026-10-15-session-status-dot-semantics 用户补充） ────────── */
++
++/**
++ * 会话执行完成通知：非终态 → ended 且当前不在该会话上 → 行首槽亮绿色通知
++ * 角标（「此会话已执行完成」），点击进入（selected 边沿）后消失——与活性
++ * 未读（use-session-liveness isUnread/clearUnread）同款通知语义。
++ * 键名风格对齐 `sillyhub:liveness-unread:` 前缀惯例；全 try/catch 降级
++ * （存储不可用不误亮不崩溃）。
++ */
++const COMPLETED_UNREAD_KEY_PREFIX = "sillyhub:session-completed-unread:";
++
++/** 完成通知角标判定（渲染期直读存储；不可用恒 false——fail-open 不误亮）。 */
++function isCompletedUnread(sessionId: string): boolean {
++  try {
++    return (
++      window.localStorage.getItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId) !==
++      null
++    );
++  } catch {
++    return false;
++  }
++}
++
++/** 写完成通知标记（值为发现完成的时刻，仅存在性语义）。 */
++function markCompletedUnread(sessionId: string): void {
++  try {
++    window.localStorage.setItem(
++      COMPLETED_UNREAD_KEY_PREFIX + sessionId,
++      String(Date.now()),
++    );
++  } catch {
++    // 存储不可用：通知不亮，不崩。
++  }
++}
++
++/** 清除完成通知标记（selected 置真时由 SessionRow 调，覆盖点击/Enter/深链）。 */
++function clearCompletedUnread(sessionId: string): void {
++  try {
++    window.localStorage.removeItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId);
++  } catch {
++    // 同上降级。
++  }
++}
++
+ /* ────────────────────── 组件 ────────────────────── */
+ 
+ export function SessionListPanel(props: SessionListPanelProps) {
+@@ -996,6 +1076,36 @@ function WorkspaceTreeList({
+     enabled: hasActiveSessionsForLiveness,
+   });
+ 
++  // ── 执行完成通知检测（2026-10-15-session-status-dot-semantics 用户补充）──
++  // 会话由非终态翻 ended 且当前不选中该会话（用户不在其上）→ 落盘完成通知
++  // 标记 + 自增 epoch 强制行重读（isCompletedUnread 渲染期直读存储，与活性
++  // 未读 unreadEpoch 同款机制）。selected 边沿清除归 SessionRow（点击/Enter/
++  // 深链三路入口）。检测基线 prevStatusRef 在内存：挂载后首个快照为基线——
++  // 历史已终态会话不误报；页面关闭期间完成的会话不补报（挂载期轮询检测）。
++  const prevStatusRef = useRef<Map<string, AgentSessionStatus>>(new Map());
++  const [, setCompletedUnreadEpoch] = useState(0);
++  useEffect(() => {
++    const prev = prevStatusRef.current;
++    const next = new Map<string, AgentSessionStatus>();
++    let marked = false;
++    for (const s of sessions) {
++      next.set(s.id, s.status);
++      const before = prev.get(s.id);
++      if (
++        before &&
++        before !== "ended" &&
++        before !== "failed" &&
++        s.status === "ended" &&
++        s.id !== selectedSessionId
++      ) {
++        markCompletedUnread(s.id);
++        marked = true;
++      }
++    }
++    prevStatusRef.current = next;
++    if (marked) setCompletedUnreadEpoch((n) => n + 1);
++  }, [sessions, selectedSessionId]);
++
+   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
+   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
+   // 只走 GET /api/daemon/group-chats）；onSelectGroup 传入才启用（悬浮助手
+@@ -2869,6 +2979,7 @@ function WorkspaceGroupNode({
+                           onSelect={onSelect}
+                           liveness={liveness}
+                           livenessUnread={liveness ? isUnread(s.id) : undefined}
++                          completedUnread={isCompletedUnread(s.id)}
+                           batchMode={batchActive}
+                           checked={checkedIds.has(s.id)}
+                           onToggleCheck={() => onToggleChecked(s.id)}
+@@ -2940,6 +3051,7 @@ function WorkspaceGroupNode({
+                                       ? isUnread(c.id)
+                                       : undefined
+                                   }
++                                  completedUnread={isCompletedUnread(c.id)}
+                                   batchMode={batchActive}
+                                   checked={checkedIds.has(c.id)}
+                                   onToggleCheck={() => onToggleChecked(c.id)}
+@@ -3015,6 +3127,7 @@ function WorkspaceGroupNode({
+                                       ? isUnread(c.id)
+                                       : undefined
+                                   }
++                                  completedUnread={isCompletedUnread(c.id)}
+                                   batchMode={batchActive}
+                                   checked={checkedIds.has(c.id)}
+                                   onToggleCheck={() => onToggleChecked(c.id)}
+@@ -3110,6 +3223,11 @@ interface SessionRowProps {
+   liveness?: AgentLogListItem;
+   /** working/blocked→idle 新转移未读（isUnread 命中才传；selected 置真清除）。 */
+   livenessUnread?: boolean;
++  /**
++   * 执行完成通知（2026-10-15 用户补充）：会话翻 ended 时不在本会话上 → 绿色
++   * 通知角标，点击进入（selected 边沿）后消失——isCompletedUnread 渲染期取值。
++   */
++  completedUnread?: boolean;
+ }
+ 
+ /** 悬停卡证据摘要截断上限（超出加省略号；title 悬浮看全文）。 */
+@@ -3160,6 +3278,72 @@ function SessionLivenessPopoverContent({ entry }: { entry: AgentLogListItem }) {
+   );
+ }
+ 
++/**
++ * 行首状态槽（2026-10-15-session-status-dot-semantics）：原 6px 状态点与行尾
++ * 活性灯合并后的单一标识位——18px flex-none 槽恒渲染（留白行透明占位，保各
++ * 行标题对齐），槽内按 indicator 形态渲染：
++ *   - dot：8px 语义色圆点（红=异常 / 绿=完成 / 琥珀=在等你）
++ *   - spinner：Loader2 12px 动态转圈（正在执行 / 断线恢复中）
++ *   - null：零可见内容（空闲/排队/挂起/未知——「没有动态的留白」）
++ * 角标两枚（absolute 右上，互斥场景不叠加）：活性未读红角标（原行尾灯位迁
++ * 入）+ 执行完成通知绿角标（点击进入后消失）。活性条目命中时整槽包 Popover
++ * （原行尾灯悬停卡平移，portal 渲染防行根 overflow-hidden 裁剪——Grill BL-02）。
++ */
++function SessionStatusSlot({
++  indicator,
++  liveness,
++  unread,
++  completedUnread,
++}: {
++  indicator: SessionStatusIndicator;
++  liveness?: AgentLogListItem;
++  unread?: boolean;
++  completedUnread?: boolean;
++}) {
++  const slot = (
++    <span
++      data-testid="session-status-indicator"
++      className="relative inline-flex h-[18px] w-[18px] flex-none items-center justify-center"
++    >
++      {indicator?.kind === "dot" && (
++        <span
++          aria-label={indicator.label}
++          className={cn("h-2 w-2 shrink-0 rounded-full", indicator.cls)}
++        />
++      )}
++      {indicator?.kind === "spinner" && (
++        <Loader2
++          aria-label={indicator.label}
++          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
++        />
++      )}
++      {unread && (
++        <span
++          aria-label="有新的空闲状态未读"
++          className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
++        />
++      )}
++      {completedUnread && (
++        <span
++          aria-label="此会话已执行完成"
++          title="此会话已执行完成（点击进入后不再提示）"
++          className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-success"
++        />
++      )}
++    </span>
++  );
++  if (!liveness) return slot;
++  return (
++    <Popover
++      trigger="hover"
++      placement="bottomRight"
++      content={<SessionLivenessPopoverContent entry={liveness} />}
++    >
++      {slot}
++    </Popover>
++  );
++}
++
+ function SessionRow({
+   variant,
+   session,
+@@ -3184,6 +3368,7 @@ function SessionRow({
+   hideEngineChip,
+   liveness,
+   livenessUnread,
++  completedUnread,
+ }: SessionRowProps) {
+   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
+   // 重命名编辑态（标题位 ↔ 输入框，本地管理）：Enter/blur 提交、Esc 取消；
+@@ -3203,10 +3388,21 @@ function SessionRow({
+   useEffect(() => {
+     setUnreadVisible(Boolean(livenessUnread));
+   }, [livenessUnread]);
++  // 完成通知角标本地显示态（与 unreadVisible 同款模式：真源 localStorage，
++  // selected 边沿清除后本地即时置 false，防等下轮渲染残影）。
++  const [completedUnreadVisible, setCompletedUnreadVisible] = useState(
++    Boolean(completedUnread),
++  );
++  useEffect(() => {
++    setCompletedUnreadVisible(Boolean(completedUnread));
++  }, [completedUnread]);
+   useEffect(() => {
+     if (selected && !wasSelectedRef.current) {
+       clearUnread(session.id);
+       setUnreadVisible(false);
++      // 完成通知同边沿清除（点击/Enter/深链三路入口共用）。
++      clearCompletedUnread(session.id);
++      setCompletedUnreadVisible(false);
+     }
+     wasSelectedRef.current = selected;
+   }, [selected, session.id]);
+@@ -3294,7 +3490,7 @@ function SessionRow({
+             ),
+       )}
+     >
+-      {/* 第一行：状态点 + 标题截断 + 相对时间 + 删除按钮（hover） */}
++      {/* 第一行：状态标识 + 标题截断 + 相对时间 + 删除按钮（hover） */}
+       <div className="group flex items-center gap-1.5">
+         {/* 批量模式 → 勾选框替代点击选会话 */}
+         {batchMode ? (
+@@ -3306,9 +3502,14 @@ function SessionRow({
+             className="h-3.5 w-3.5 shrink-0 accent-brand-600"
+           />
+         ) : (
+-          <span
+-            className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(session.status)}`}
+-            aria-label={`状态 ${session.status}`}
++          /* 2026-10-15-session-status-dot-semantics：行首状态槽（原 6px 状态点
++             + 行尾活性灯合并——两套点并存语义打架，单一源 sessionStatusIndicator
++             四分类+琥珀；无标识时槽透明留白，仅占位对齐不渲染任何可见点）。 */
++          <SessionStatusSlot
++            indicator={sessionStatusIndicator(session.status, liveness?.state)}
++            liveness={liveness}
++            unread={unreadVisible}
++            completedUnread={completedUnreadVisible}
+           />
+         )}
+         {/* task-07：tool_report 标题旁 FileText「本地 Agent」徽标（原型
+@@ -3396,32 +3597,9 @@ function SessionRow({
+         <span className="shrink-0 text-[10.5px] text-muted-foreground/85 tabular-nums">
+           {formatRelativeTime(session.last_active_at ?? session.created_at)}
+         </span>
+-        {/* 2026-09-08-session-list-liveness-dot task-02 / FR-01~03：行尾活性
+-            小灯（相对时间之后、hover 操作按钮之前；liveness map 命中才渲染，
+-            行内 flex 尾部 flex-none 18px 节点，不新增列——R-01 布局零变化）。
+-            antd Popover trigger hover 默认 portal 渲染到 body，防行根节点
+-            overflow-hidden 裁剪（Grill BL-02）；悬停卡内容组合渲染见
+-            SessionLivenessPopoverContent。 */}
+-        {liveness && (
+-          <Popover
+-            trigger="hover"
+-            placement="bottomRight"
+-            content={<SessionLivenessPopoverContent entry={liveness} />}
+-          >
+-            <span
+-              data-testid="liveness-dot"
+-              className="relative inline-flex h-[18px] w-[18px] flex-none items-center justify-center"
+-            >
+-              <LivenessDot state={liveness.state} />
+-              {unreadVisible && (
+-                <span
+-                  aria-label="有新的空闲状态未读"
+-                  className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
+-                />
+-              )}
+-            </span>
+-          </Popover>
+-        )}
++        {/* 2026-10-15-session-status-dot-semantics：原行尾活性小灯块已删除——
++            悬停卡/未读角标/活性标识全部并入行首状态槽（SessionStatusSlot），
++            一行只一个标识位，两套点并存语义打架就此清偿。 */}
+         {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
+         {!batchMode && (
+           <span className="ml-1 flex hidden items-center group-hover:flex">
