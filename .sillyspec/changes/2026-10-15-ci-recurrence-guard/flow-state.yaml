@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  CI 红灯防复发：把 2026-10-15-fix-ci-red 灭火中发现的三类漏拦（daemon api-types 漂移/菜单测试数量锚/推送前类型检查）机制化到本地闸门。
+
+  成功标准：
+
+  - check-assertion-surfaces.py 规则⑦ requires 补 menu-permissions.test.ts 与 permission.test.ts，新增规则⑨ openapi.json→双
+  api-types.ts 同提交，单测覆盖并通过
+
+  - knowledge/testing-gotchas.md 共享断言面清单两处同步登记（脚本 docstring 要求）
+
+  - CLAUDE.md 第 21 条明示 sillyhub-daemon 的 gen:types 同步义务
+
+  - backend/.pre-commit-config.yaml 增 pre-push 快检钩子（frontend+daemon typecheck、双 gen:types:check），本机安装 pre-push
+  钩子类型并实测拦截/放行各一次
+
+  - 「菜单数量锚改推导」评估结论留痕（预期 rejected：钉子锚是有意契约，复发根因是本地缺拦截面）
+autopilot: false
+prestage_ack: true
+baseline_commit: 3dec183393a4ad53f6b445a8e6ea7c90b61f53e0
+updatedAt: '2026-10-15T00:49:32.932Z'
+cross_baselines:
+  sillyspec: 9b0519c3047a86512bb0000ba5b4c65aa890ace6
+baseline_sha256: 701d8e6eb3c85cf8d06da7c77cdc2382fbbb1f6588223eef2cecf3626b045965
+
