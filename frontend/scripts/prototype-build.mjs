@@ -21,6 +21,7 @@ const SRC_DIR = "src/components/prototype";
 const VIEWS = [
   { file: "change-center-view", title: "变更中心列表", desc: "面包屑/页头/工具条/UnderlineNav/IssueRow 列表/x-y 脚注" },
   { file: "change-detail-view", title: "变更详情", desc: "阶段 checks 横条/时间线主线/MetaPanel 六组右栏" },
+  { file: "change-detail-v2-view", title: "变更详情 v2（重设计）", desc: "四 tab 分区（概览/产出/过程/文件与对账）+ 在途·归档状态自适应 + 统一时间线" },
   { file: "workspace-list-view", title: "工作区列表", desc: "Repositories 行式列表/守护徽标/Counter/规范分页" },
   { file: "workspace-overview-view", title: "工作区概览", desc: "Repo 式页头/守护横幅/统计四格/两栏+About" },
   { file: "session-portal-view", title: "会话门户", desc: "三栏：会话列表/消息流/信息面板" },
@@ -93,6 +94,44 @@ Array.prototype.forEach.call(document.querySelectorAll("[data-theme-btn]"), func
     else document.documentElement.dataset.theme = t;
   });
 });
+
+/* 详情页原型：tab 切换（真实 UnderlineNav 的 [role=tab] 与 [data-detail-panel] 按序配对） */
+Array.prototype.forEach.call(document.querySelectorAll("[data-detail-tabs]"), function (wrap) {
+  var btns = Array.prototype.slice.call(wrap.querySelectorAll('[role="tab"]'));
+  var panels = Array.prototype.slice.call(wrap.querySelectorAll("[data-detail-panel]"));
+  if (!btns.length || !panels.length) return;
+  var setDT = function (i) {
+    btns.forEach(function (b, j) {
+      var on = j === i;
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.style.color = on ? "hsl(var(--foreground))" : "hsl(var(--muted-foreground))";
+      b.style.borderBottom = on ? "2px solid var(--color-brand-600)" : "2px solid transparent";
+      b.style.fontWeight = on ? "600" : "500";
+    });
+    panels.forEach(function (p, j) { p.style.display = j === i ? "" : "none"; });
+  };
+  btns.forEach(function (b, i) { b.addEventListener("click", function () { setDT(i); }); });
+  setDT(0);
+});
+
+/* 详情页原型 chrome：在途/归档两态切换（真实页面按变更状态自动分叉渲染，无此开关） */
+var stateBtns = Array.prototype.slice.call(document.querySelectorAll("[data-state-btn]"));
+if (stateBtns.length) {
+  var statePanels = Array.prototype.slice.call(document.querySelectorAll("[data-state-panel]"));
+  var setState = function (k) {
+    stateBtns.forEach(function (b) {
+      var on = b.dataset.stateBtn === k;
+      b.style.borderBottom = on ? "2px solid var(--color-brand-600)" : "2px solid transparent";
+      b.style.color = on ? "var(--color-brand-600)" : "";
+      b.style.fontWeight = on ? "600" : "";
+    });
+    statePanels.forEach(function (p) {
+      p.style.display = p.dataset.statePanel === k ? "" : "none";
+    });
+  };
+  stateBtns.forEach(function (b) { b.addEventListener("click", function () { setState(b.dataset.stateBtn); }); });
+  setState("active");
+}
 `;
 
 function page(title, body) {

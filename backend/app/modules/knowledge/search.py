@@ -44,6 +44,9 @@ from sqlalchemy import (
     or_,
     select,
 )
+from sqlalchemy import (
+    insert as sa_insert,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Integer, String, Uuid
 from sqlmodel import Field
@@ -464,6 +467,40 @@ async def _rows_by_key(
     return {(r.spec_path, r.anchor, r.title): r for r in rows}
 
 
+def _chunk_dict(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> dict:
+    """Core 批量 insert 行 dict（不经 ORM identity map——OOM 三修 + 逐条 INSERT 慢实证）。"""
+    return {
+        "id": uuid.uuid4(),
+        "workspace_id": workspace_id,
+        "spec_path": c.spec_path,
+        "kind": c.kind,
+        "title": c.title,
+        "anchor": c.anchor,
+        "start_line": c.start_line,
+        "text": c.text,
+        "content_hash": _content_hash(c.text),
+        "embedding": embedding,
+        "created_at": datetime.now(UTC),
+    }
+
+
+def _chunk_dict(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> dict:
+    """Core 批量 insert 行 dict（不经 ORM identity map——OOM 三修 + 逐条 INSERT 慢实证）。"""
+    return {
+        "id": uuid.uuid4(),
+        "workspace_id": workspace_id,
+        "spec_path": c.spec_path,
+        "kind": c.kind,
+        "title": c.title,
+        "anchor": c.anchor,
+        "start_line": c.start_line,
+        "text": c.text,
+        "content_hash": _content_hash(c.text),
+        "embedding": embedding,
+        "created_at": datetime.now(UTC),
+    }
+
+
 def _chunk_row(workspace_id: uuid.UUID, c: Chunk, embedding: list[float]) -> KnowledgeSearchChunk:
     return KnowledgeSearchChunk(
         workspace_id=workspace_id,
@@ -503,9 +540,12 @@ async def _sync_full(
             vecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in batch]
         else:
             vecs = await asyncio.to_thread(embedder.embed, [c.text for c in batch])
-        session.add_all([_chunk_row(workspace_id, c, vecs[j]) for j, c in enumerate(batch)])
-        await session.flush()
-        session.expunge_all()  # 释放 identity map 峰值（DB 层变更仍在事务内）
+        # Core 批量 insert（executemany → PG 多值 VALUES 单往返；逐条 ORM INSERT 在 2 核
+        # 服务器实测 2.2s/条 slow query，6586 条需 2h+——批量后分钟级）
+        await session.execute(
+            sa_insert(KnowledgeSearchChunk),
+            [_chunk_dict(workspace_id, c, vecs[j]) for j, c in enumerate(batch)],
+        )
     await session.commit()
 
 
@@ -536,17 +576,19 @@ async def _sync_delta(
             bvecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in batch]
         else:
             bvecs = await asyncio.to_thread(embedder.embed, [c.text for _, c in batch])
+        new_rows = []
         for (row, c), vec in zip(batch, bvecs, strict=True):
             if row is None:
-                session.add(_chunk_row(workspace_id, c, vec))
+                new_rows.append(_chunk_dict(workspace_id, c, vec))
             else:
                 row.text = c.text
                 row.start_line = c.start_line
                 row.kind = c.kind
                 row.content_hash = _content_hash(c.text)
                 row.embedding = vec
+        if new_rows:
+            await session.execute(sa_insert(KnowledgeSearchChunk), new_rows)
         await session.flush()
-        session.expunge_all()
     for key in existing.keys() - fresh_keys:
         await session.delete(existing[key])
     await session.commit()
