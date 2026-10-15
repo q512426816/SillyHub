@@ -14,7 +14,7 @@ allowed_paths:
   - sillyhub-daemon/src/zcode-settings.ts
   - sillyhub-daemon/src/interactive/providers.ts
   - sillyhub-daemon/tests/zcode-settings.test.ts
-  -   - sillyhub-daemon/tests/interactive/provider-registry.test.ts
+  - sillyhub-daemon/tests/interactive/provider-registry.test.ts
   - backend/app/modules/agent/tests/test_provider_caps_alignment.py
   - backend/app/modules/agent/tests/test_provider_caps_alignment.py
   - frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx

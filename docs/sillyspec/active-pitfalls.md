@@ -1,4 +1,5 @@
 <!-- 活跃坑索引：处置完成的条目移入 finished/（单坑单文件） -->
+<!-- worktree-apply-rollback-ghost-bindings-manifest.md：apply 回滚残段+幽灵绑定+双横线解析三连环（2026-10-15，工具三补丁已实施未提交） -->
 <!-- verify-jsx-batch-cmd-too-long.md：verify jsx 批 137 文件单命令超 Windows cmd 上限恒败+增量账本自我循环（2026-10-15，工具分块补丁已实施未提交） -->
 <!-- 活跃坑索引：处置完成的条目移入 finished/（单坑单文件） -->
 <!-- wt-commit-auto-tick-unimplemented-tasks.md：wt-commit/platform sync 后未实现 task 被自动勾 [x]（2026-10-15，2026-10-14-admin-server-status 双次实证） -->
