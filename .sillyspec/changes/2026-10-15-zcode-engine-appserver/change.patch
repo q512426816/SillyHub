@@ -1,0 +1,3673 @@
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index 6fcb566d6..cae6edc5e 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -98,6 +98,24 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "steering": False,
+         "sessionFork": "none",
+     },
++    "zcode": {
++        "resume": True,
++        "mcp": False,
++        "multimodal": False,
++        "attachments": False,
++        "thinking": True,
++        "subagent": False,
++        "permission_dialog": True,
++        "dialog": "native",
++        "edit_patch": False,
++        "model_select": True,
++        "provider_switch": True,
++        "ctx_usage": True,
++        "compact": True,
++        "thinking_level": True,
++        "steering": False,
++        "sessionFork": "none",
++    },
+ }
+ 
+ # 键序取自镜像表首条目（claude）；16 键齐全与三端一致性由守护测试保证。
+diff --git a/backend/app/modules/agent/tests/test_provider_caps_alignment.py b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+index c698859a6..eaca5c19b 100644
+--- a/backend/app/modules/agent/tests/test_provider_caps_alignment.py
++++ b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+@@ -75,7 +75,8 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
+ # 契约 provider（现状交互式 driver 全集；新 provider 接入时三端同加。
+ # pi 由 2026-09-04-provider-pi-onboarding task-04 接入；
+ # cursor 由 2026-09-08-cursor-interactive-session task-07 接入）。
+-EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi"})
++# 2026-10-15-zcode-engine-appserver task-05：加 zcode（第 5 交互引擎；三端 caps 镜像同源刷新）。
++EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi", "zcode"})
+ 
+ # TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
+ # 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index f4d1f47db..e93de98a5 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -126,7 +126,8 @@ class AgentSessionListResponse(BaseModel):
+ # 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
+ # 2026-09-04-provider-pi-onboarding 冒烟 F-1：加 pi（第三处引擎白名单，档B 第 10 步已补文档）。
+ # 2026-09-08-cursor-interactive-session task-07：加 cursor（防显式 provider 路径 422）。
+-InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi"]
++# 2026-10-15-zcode-engine-appserver task-06：加 zcode（第 5 交互引擎，单聊阶段 1）。
++InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi", "zcode"]
+ 
+ # ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
+ # §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 8e3a42aed..8013f0f15 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -69120,7 +69120,8 @@
+                   "claude",
+                   "codex",
+                   "cursor",
+-                  "pi"
++                  "pi",
++                  "zcode"
+                 ]
+               },
+               {
+diff --git a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+index a296356ef..c5c7a2457 100644
+--- a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
++++ b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+@@ -689,4 +689,29 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+   it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
+     expect(PROVIDER_META.cursor?.label).toBe("Cursor");
+   });
++
++  // 2026-10-15-zcode-engine-appserver task-05（连带测试同款，断言面闸门同提交）：
++  // zcode 条目随 @generated 产物加入——本全对象 toEqual 钉 zcode 十六键与
++  // daemon 单源（providers.ts PROVIDER_CAPS.zcode）逐键同步；cursor 与未知
++  // 回退断言不受影响（上方两条已锁，本变更零触碰）。
++  it("zcode 十六键与 daemon 单源一致（task-05 接入连带同步）", () => {
++    expect(getProviderCaps("zcode")).toEqual({
++      resume: true,
++      mcp: false,
++      multimodal: false,
++      attachments: false,
++      thinking: true,
++      subagent: false,
++      permission_dialog: true,
++      dialog: "native",
++      edit_patch: false,
++      model_select: true,
++      provider_switch: true,
++      ctx_usage: true,
++      compact: true,
++      thinking_level: true,
++      steering: false,
++      sessionFork: "none",
++    });
++  });
+ });
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 3abd90db7..64d31824b 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -24979,7 +24979,7 @@ export interface components {
+             /** Runtime Id */
+             runtime_id?: string | null;
+             /** Provider */
+-            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
++            provider?: ("claude" | "codex" | "cursor" | "pi" | "zcode") | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+diff --git a/frontend/src/lib/daemon/__tests__/runtimes.test.ts b/frontend/src/lib/daemon/__tests__/runtimes.test.ts
+new file mode 100644
+index 000000000..06ab36ca3
+--- /dev/null
++++ b/frontend/src/lib/daemon/__tests__/runtimes.test.ts
+@@ -0,0 +1,44 @@
++// src/lib/daemon/__tests__/runtimes.test.ts
++// 2026-10-15-zcode-engine-appserver task-07：引擎白名单单一源直测（不 mock 本模块）。
++// 现有 sessions-portal / session-list-panel 测试均 mock @/lib/daemon/runtimes，
++// 真实模块的白名单演进没有守护面——本文件补齐（真实 > mock）。
++
++import { describe, it, expect } from "vitest";
++import {
++  SESSION_SUPPORTED_PROVIDERS,
++  SESSION_ENGINE_OPTIONS,
++  PROVIDER_META,
++} from "../runtimes";
++
++describe("SESSION_SUPPORTED_PROVIDERS（zcode 接入后）", () => {
++  it("含五引擎：claude/codex/pi/cursor/zcode（有序）", () => {
++    expect(SESSION_SUPPORTED_PROVIDERS).toEqual([
++      "claude",
++      "codex",
++      "pi",
++      "cursor",
++      "zcode",
++    ]);
++  });
++
++  it("SESSION_ENGINE_OPTIONS 派生含 zcode 且 label 取 PROVIDER_META", () => {
++    const zcode = SESSION_ENGINE_OPTIONS.find((o) => o.value === "zcode");
++    expect(zcode).toBeDefined();
++    expect(zcode?.label).toBe(PROVIDER_META["zcode"]?.label);
++    expect(zcode?.label).toBe("ZCode");
++  });
++
++  it("PROVIDER_META zcode 条目三字段齐（label/icon/color）", () => {
++    expect(PROVIDER_META["zcode"]).toEqual({
++      label: "ZCode",
++      icon: "🟤",
++      color: "bg-stone-100 text-stone-800",
++    });
++  });
++
++  it("白名单内每个 provider 均有 PROVIDER_META 条目（防 label 回退裸 key）", () => {
++    for (const p of SESSION_SUPPORTED_PROVIDERS) {
++      expect(PROVIDER_META[p], `PROVIDER_META 缺 ${p}`).toBeDefined();
++    }
++  });
++});
+diff --git a/frontend/src/lib/daemon/runtimes.ts b/frontend/src/lib/daemon/runtimes.ts
+index 88431bed7..2a349b84b 100644
+--- a/frontend/src/lib/daemon/runtimes.ts
++++ b/frontend/src/lib/daemon/runtimes.ts
+@@ -170,13 +170,17 @@ export async function triggerDaemonSelfUpdate(
+  * 收敛（ql-20260908-007）。与后端 InteractiveProviderLiteral / daemon
+  * VALID_PROVIDERS 同值；新增引擎时四处一起改（此处 + 两端白名单）。
+  * 2026-09-04-provider-pi-onboarding task-05：加 pi；
+- * 2026-09-08-cursor-interactive-session task-08：加 cursor。
++ * 2026-09-08-cursor-interactive-session task-08：加 cursor；
++ * 2026-10-15-zcode-engine-appserver task-07：加 zcode（第 5 交互引擎，单聊阶段 1；
++ * 可见性由 runtime 探测门控——无 zcode runtime 注册的机器经 page-helpers 的
++ * rt.provider 过滤不可见）。
+  */
+ export const SESSION_SUPPORTED_PROVIDERS = [
+   "claude",
+   "codex",
+   "pi",
+   "cursor",
++  "zcode",
+ ] as const;
+ 
+ /** Provider display name, icon emoji, and Tailwind color classes. */
+@@ -193,6 +197,7 @@ export const PROVIDER_META: Record<
+   gemini: { label: "Gemini", icon: "💎", color: "bg-cyan-100 text-cyan-800" },
+   pi: { label: "Pi", icon: "🩷", color: "bg-pink-100 text-pink-800" },
+   cursor: { label: "Cursor", icon: "🟡", color: "bg-amber-100 text-amber-800" },
++  zcode: { label: "ZCode", icon: "🟤", color: "bg-stone-100 text-stone-800" },
+   kimi: { label: "Kimi", icon: "🔴", color: "bg-red-100 text-red-800" },
+   kiro: { label: "Kiro", icon: "🟩", color: "bg-emerald-100 text-emerald-800" },
+   antigravity: { label: "Antigravity", icon: "⚫", color: "bg-slate-100 text-slate-800" },
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index aa850b531..0942913fe 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -176,6 +176,24 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     steering: false,
+     sessionFork: 'none',
+   },
++  zcode: {
++    resume: true,
++    mcp: false,
++    multimodal: false,
++    attachments: false,
++    thinking: true,
++    subagent: false,
++    permission_dialog: true,
++    dialog: 'native',
++    edit_patch: false,
++    model_select: true,
++    provider_switch: true,
++    ctx_usage: true,
++    compact: true,
++    thinking_level: true,
++    steering: false,
++    sessionFork: 'none',
++  },
+ };
+ 
+ /**
+diff --git a/sillyhub-daemon/scripts/gen-provider-caps.mjs b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+index 940641f3a..1a3c93fd8 100644
+--- a/sillyhub-daemon/scripts/gen-provider-caps.mjs
++++ b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+@@ -56,7 +56,7 @@ const backendOutPath = resolve(
+ 
+ // 契约常量（与 daemon 单源 ProviderCaps 接口一致；新引擎/新键接入时同步这里，
+ // 守卫会强制单源与本清单一致，不同步即响亮失败）。
+-const ENGINES = ["claude", "codex", "pi", "cursor"];
++const ENGINES = ["claude", "codex", "pi", "cursor", "zcode"];
+ const CAPS_KEYS = [
+   "resume",
+   "mcp",
+diff --git a/sillyhub-daemon/src/adapters/zcode-envelope.ts b/sillyhub-daemon/src/adapters/zcode-envelope.ts
+new file mode 100644
+index 000000000..cd8910310
+--- /dev/null
++++ b/sillyhub-daemon/src/adapters/zcode-envelope.ts
+@@ -0,0 +1,300 @@
++/**
++ * ZcodeEnvelope —— ZCode 私有协议（app-server）NDJSON 信封层（纯编解码，无进程 IO）。
++ *
++ * 2026-10-15-zcode-engine-appserver task-02（D-005/D-007）。
++ *
++ * 协议事实（2026-10-15 实测钉板，decisions.md D-005 evidence）：
++ *   - 信封 strict 四分支 union（服务端 zod strict 校验，多余键直接拒——实测
++ *     jsonrpc / requestId 键均被拒）：
++ *       1. 请求      {id, method, params?, trace?}   —— daemon→server 出站（id 数字自增）
++ *       2. 通知      {method, params?, trace?}       —— 双向
++ *       3. 响应      {id, result}                    —— 双向（id 随发起方）
++ *       4. 错误帧    {id, error:{code,message,data?}} —— 双向
++ *   - 服务端主动请求（requestRuntimePreferences / requestPermission 等）的 id 为
++ *     字符串（"server-N"），客户端必须以 {id, result} 回应答；
++ *   - 无 initialize 握手；出站帧不得携带 jsonrpc 等多余键。
++ *
++ * 与 adapters/json-rpc.ts 的关系（D-007 红线）：完全独立，不改后者（codex 在用）。
++ * 本层只做帧编解码 + 关联 + 分发；进程 spawn/stdio 管线由
++ * interactive/zcode-app-server-driver.ts 持有。
++ *
++ * 服务端请求超时语义（实测）：create/send 触发的 session/requestRuntimePreferences
++ * 15s 无应答则方法调用失败——本层对未注册 handler 的服务端请求立即回空 result
++ * 兜底，防挂死；注册了 handler 但 handler 异步拖延的超时由调用方（驱动）负责。
++ */
++
++/** 客户端→服务端请求帧。 */
++export interface ZcodeOutboundRequest {
++  readonly id: number;
++  readonly method: string;
++  readonly params?: unknown;
++}
++
++/** 双向通知帧。 */
++export interface ZcodeNotification {
++  readonly method: string;
++  readonly params?: unknown;
++}
++
++/** 服务端→客户端主动请求（id 为字符串，如 "server-1"）。 */
++export interface ZcodeServerRequest {
++  readonly id: string;
++  readonly method: string;
++  readonly params?: unknown;
++}
++
++/** 服务端→客户端响应（id 对应客户端请求的数字 id）。 */
++export interface ZcodeServerResponse {
++  readonly id: number;
++  readonly result: unknown;
++}
++
++/** 错误帧（双向；id 随发起方，本层只消费入站错误）。 */
++export interface ZcodeErrorFrame {
++  readonly id: number | string;
++  readonly error: { code: number; message: string; data?: unknown };
++}
++
++/** 结构化协议错误（请求 reject / 协议解析错误共用形状）。 */
++export class ZcodeProtocolError extends Error {
++  constructor(
++    message: string,
++    readonly code?: number,
++    readonly data?: unknown,
++    readonly timedOut = false,
++  ) {
++    super(message);
++    this.name = 'ZcodeProtocolError';
++  }
++}
++
++/** 应答服务端请求的回写通道（驱动注入 stdin write）。 */
++export interface ZcodeWriteSink {
++  write(line: string): void;
++}
++
++type ServerRequestHandler = (
++  params: unknown,
++  reply: (result: unknown) => void,
++) => void;
++
++interface PendingEntry {
++  resolve: (value: unknown) => void;
++  reject: (err: ZcodeProtocolError) => void;
++  timer: ReturnType<typeof setTimeout> | undefined;
++}
++
++/**
++ * ZCode 私有协议信封编解码器（每会话一个实例）。
++ *
++ * 用法（驱动层装配）：
++ *   const env = new ZcodeEnvelope();
++ *   env.onNotification(n => ...归一化...);
++ *   env.registerServerRequestHandler('session/requestRuntimePreferences', (p, reply) => reply({...}));
++ *   child.stdout.on('data', chunk => env.feed(chunk, { write: l => child.stdin.write(l) }));
++ *   await env.request('session/create', {...}, l => child.stdin.write(l));
++ */
++export class ZcodeEnvelope {
++  private nextId = 1;
++  private readonly pending = new Map<number, PendingEntry>();
++  private readonly serverHandlers = new Map<string, ServerRequestHandler>();
++  private notificationHandler: ((n: ZcodeNotification) => void) | undefined;
++  private protocolErrorHandler: ((err: ZcodeProtocolError) => void) | undefined;
++  private buffer = '';
++
++  /** 注册服务端主动请求的分发处理器（按 method 覆盖注册）。 */
++  registerServerRequestHandler(method: string, handler: ServerRequestHandler): void {
++    this.serverHandlers.set(method, handler);
++  }
++
++  /** 注册通知回调（事件流入口，归一化器消费）。 */
++  onNotification(handler: (n: ZcodeNotification) => void): void {
++    this.notificationHandler = handler;
++  }
++
++  /** 注册协议错误回调（非法 JSON / 未知形状帧；不抛出，fail-soft 记录）。 */
++  onProtocolError(handler: (err: ZcodeProtocolError) => void): void {
++    this.protocolErrorHandler = handler;
++  }
++
++  /**
++   * 发送请求并等待响应。timeoutMs 默认 30s；超时 reject（timedOut=true）并清理
++   * pending（迟到的响应按未知 id 丢弃，不误 resolve）。
++   */
++  request(
++    method: string,
++    params: unknown,
++    write: (line: string) => void,
++    opts: { timeoutMs?: number } = {},
++  ): Promise<unknown> {
++    const id = this.nextId++;
++    const frame: ZcodeOutboundRequest =
++      params === undefined ? { id, method } : { id, method, params };
++    const timeoutMs = opts.timeoutMs ?? 30_000;
++    return new Promise((resolve, reject) => {
++      const timer =
++        timeoutMs > 0
++          ? setTimeout(() => {
++              this.pending.delete(id);
++              reject(
++                new ZcodeProtocolError(
++                  `zcode 请求超时未响应：${method}（${timeoutMs}ms）`,
++                  undefined,
++                  undefined,
++                  true,
++                ),
++              );
++            }, timeoutMs)
++          : undefined;
++      this.pending.set(id, { resolve, reject, timer });
++      write(encodeFrame(frame));
++    });
++  }
++
++  /** 发送单向通知。 */
++  sendNotification(method: string, params: unknown, write: (line: string) => void): void {
++    const frame: ZcodeNotification =
++      params === undefined ? { method } : { method, params };
++    write(encodeFrame(frame));
++  }
++
++  /**
++   * 喂入 stdout 原始字节（NDJSON 分帧：按 \n 切行，残行留缓冲拼接）。
++   * 每完整行走 handleLine 四分支解复用。
++   */
++  feed(chunk: string, sink: ZcodeWriteSink): void {
++    this.buffer += chunk;
++    let idx: number;
++    while ((idx = this.buffer.indexOf('\n')) !== -1) {
++      const line = this.buffer.slice(0, idx);
++      this.buffer = this.buffer.slice(idx + 1);
++      this.handleLine(line, sink);
++    }
++  }
++
++  /**
++   * 处理单行入站帧（四分支解复用：响应 → pending / 错误 → pending reject /
++   * 服务端请求 → 分发器 / 通知 → onNotification）。
++   */
++  handleLine(line: string, sink: ZcodeWriteSink): void {
++    const trimmed = line.trim();
++    if (!trimmed) return;
++    let parsed: unknown;
++    try {
++      parsed = JSON.parse(trimmed);
++    } catch {
++      this.protocolErrorHandler?.(
++        new ZcodeProtocolError(`zcode 协议帧 JSON 解析失败：${trimmed.slice(0, 200)}`),
++      );
++      return;
++    }
++    if (!isRecord(parsed)) {
++      this.protocolErrorHandler?.(
++        new ZcodeProtocolError(`zcode 协议帧非对象：${trimmed.slice(0, 200)}`),
++      );
++      return;
++    }
++
++    // 分支 1/2：响应（id + result）——id 为数字，对应客户端请求。
++    if (hasProp(parsed, 'id') && hasProp(parsed, 'result') && typeof parsed.id === 'number') {
++      const entry = this.pending.get(parsed.id);
++      if (entry) {
++        this.pending.delete(parsed.id);
++        if (entry.timer !== undefined) clearTimeout(entry.timer);
++        entry.resolve(parsed.result);
++      }
++      // 未知 id（超时后迟到）→ 静默丢弃。
++      return;
++    }
++
++    // 分支 3：错误帧（id + error）。
++    if (hasProp(parsed, 'id') && hasProp(parsed, 'error')) {
++      const errObj = parsed.error;
++      if (isRecord(errObj) && typeof errObj.code === 'number' && typeof errObj.message === 'string') {
++        if (typeof parsed.id === 'number') {
++          const entry = this.pending.get(parsed.id);
++          if (entry) {
++            this.pending.delete(parsed.id);
++            if (entry.timer !== undefined) clearTimeout(entry.timer);
++            entry.reject(
++              new ZcodeProtocolError(errObj.message, errObj.code, errObj.data),
++            );
++          }
++          return;
++        }
++        // id 为字符串的错误帧（服务端主动请求的应答被拒形态）→ 协议错误记录。
++        this.protocolErrorHandler?.(
++          new ZcodeProtocolError(errObj.message, errObj.code, errObj.data),
++        );
++        return;
++      }
++      this.protocolErrorHandler?.(
++        new ZcodeProtocolError(`zcode 错误帧形状非法：${trimmed.slice(0, 200)}`),
++      );
++      return;
++    }
++
++    // 分支 4：服务端主动请求（id 字符串 + method）。
++    if (hasProp(parsed, 'method') && hasProp(parsed, 'id') && typeof parsed.id === 'string') {
++      const method = String(parsed.method);
++      const handler = this.serverHandlers.get(method);
++      const reply = (result: unknown): void => {
++        sink.write(encodeFrame({ id: parsed.id, result }));
++      };
++      if (handler) {
++        try {
++          handler(parsed.params, reply);
++        } catch (err) {
++          // handler 同步抛错 → 回空 result 兜底 + 协议错误记录（不挂死对端）。
++          this.protocolErrorHandler?.(
++            new ZcodeProtocolError(
++              `zcode 服务端请求 handler 异常：${method}（${String(err)}）`,
++            ),
++          );
++          sink.write(encodeFrame({ id: parsed.id, result: {} }));
++        }
++      } else {
++        // 未注册方法 → 回空 result（防 15s 超时挂死会话创建，实测语义）。
++        sink.write(encodeFrame({ id: parsed.id, result: {} }));
++      }
++      return;
++    }
++
++    // 分支 5：通知（method 无 id）。
++    if (hasProp(parsed, 'method') && !hasProp(parsed, 'id')) {
++      this.notificationHandler?.({
++        method: String(parsed.method),
++        params: parsed.params,
++      });
++      return;
++    }
++
++    this.protocolErrorHandler?.(
++      new ZcodeProtocolError(`zcode 协议帧形状未识别：${trimmed.slice(0, 200)}`),
++    );
++  }
++
++  /** 关闭：清理全部 pending 计时器并 reject（进程退出时调用）。 */
++  dispose(): void {
++    for (const [, entry] of this.pending) {
++      if (entry.timer !== undefined) clearTimeout(entry.timer);
++      entry.reject(
++        new ZcodeProtocolError('zcode 信封层已销毁（连接关闭）', undefined, undefined, true),
++      );
++    }
++    this.pending.clear();
++  }
++}
++
++/** 出站帧编码：JSON + 换行（strict——只序列化显式字段，undefined 键自动省略）。 */
++function encodeFrame(frame: object): string {
++  return `${JSON.stringify(frame)}\n`;
++}
++
++function isRecord(v: unknown): v is Record<string, unknown> {
++  return typeof v === 'object' && v !== null && !Array.isArray(v);
++}
++
++function hasProp(obj: Record<string, unknown>, key: string): boolean {
++  return Object.prototype.hasOwnProperty.call(obj, key);
++}
+diff --git a/sillyhub-daemon/src/agent-detector.ts b/sillyhub-daemon/src/agent-detector.ts
+index 9f06920ad..5ac54e2ce 100644
+--- a/sillyhub-daemon/src/agent-detector.ts
++++ b/sillyhub-daemon/src/agent-detector.ts
+@@ -62,6 +62,19 @@ export interface AgentProviderSpec {
+   readonly protocol: AgentProtocol;
+   /** 最低版本要求字符串（如 '2.0.0'）；undefined 表示该 provider 无版本要求。 */
+   readonly minVersion?: string;
++  /**
++   * env 与 PATH 均未命中后的固定安装路径回退列表（2026-10-15-zcode-engine-appserver
++   * task-01，D-001 三段式第三段）。支持平台变量展开：%VAR%（Windows 形态）与
++   * $VAR / ${VAR}（POSIX 形态），未定义变量保持原样（existsSync miss 即跳过）。
++   * 用于 Desktop 内嵌引擎等不在 PATH 上的安装形态（如 zcode.cjs）。
++   */
++  readonly fallbackPaths?: readonly string[];
++  /**
++   * 目标是 Node 脚本（.cjs/.js）而非原生可执行文件：版本探测与后续 spawn 经
++   * process.execPath 执行（如 `node <zcode.cjs> --version`）。zcode Desktop 内嵌
++   * 引擎形态（D-001）。
++   */
++  readonly execNode?: boolean;
+ }
+ 
+ /**
+@@ -181,9 +194,23 @@ export const PROVIDER_SPECS = {
+     versionPattern: /(\d+\.\d+\.\d+)/,
+     protocol: 'text' as const,
+   },
++  // 2026-10-15-zcode-engine-appserver task-01（D-001/D-004）：ZCode Desktop 内嵌引擎。
++  // 三段式发现：SILLYHUB_ZCODE_PATH env 覆盖 → PATH 上的 zcode（官方独立 CLI 未来
++  // 发布时自动命中）→ fallbackPaths Desktop 固定安装路径（Windows 实证；macOS/Linux
++  // 安装路径未实证前依赖 env/PATH）。.cjs 目标经 process.execPath 执行（execNode）。
++  // 版本门 0.16.9 警告不硬拒（D-004，私有协议基线）。
++  zcode: {
++    bin: 'zcode',
++    envPath: 'SILLYHUB_ZCODE_PATH',
++    versionPattern: /(\d+\.\d+\.\d+)/,
++    protocol: 'ndjson' as const,
++    minVersion: '0.16.9',
++    fallbackPaths: ['%LOCALAPPDATA%/Programs/ZCode/resources/glm/zcode.cjs'],
++    execNode: true,
++  },
+ } as const;
+ 
+-/** provider 名联合类型（'claude' | 'codex' | ... 共 12 个字面量）。 */
++/** provider 名联合类型（'claude' | 'codex' | ... 共 13 个字面量）。 */
+ export type ProviderName = keyof typeof PROVIDER_SPECS;
+ 
+ /**
+@@ -214,6 +241,18 @@ export function normalizeProvider(raw: string | undefined | null): string {
+ // AgentDetector
+ // ---------------------------------------------------------------------------
+ 
++/**
++ * 展开路径中的平台环境变量：%VAR%（Windows 形态）与 $VAR / ${VAR}（POSIX 形态）。
++ * 未定义变量保持原样（后续 existsSync miss 即跳过该候选）。纯字符串处理，
++ * 2026-10-15-zcode-engine-appserver task-01（D-001 fallbackPaths 支撑）。
++ */
++function expandPathVars(raw: string): string {
++  return raw
++    .replace(/%(\w+)%/g, (whole, name: string) => process.env[name] ?? whole)
++    .replace(/\$\{(\w+)\}/g, (whole, name: string) => process.env[name] ?? whole)
++    .replace(/\$(\w+)/g, (whole, name: string) => process.env[name] ?? whole);
++}
++
+ /**
+  * Windows 上 PATH 查找尝试追加的可执行后缀。
+  *
+@@ -227,17 +266,17 @@ export function normalizeProvider(raw: string | undefined | null): string {
+ const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.ps1'];
+ 
+ /**
+- * 探测本机 12 种 coding agent CLI。
++ * 探测本机 13 种 coding agent CLI。
+  *
+  * 单实例无状态（Python 版同样每次 daemon 启动 new 一个）。
+  * 子进程执行 / PATH 查找 / env 读取都在实例方法内，便于单测 mock（覆写 protected 方法）。
+  */
+ export class AgentDetector {
+   /**
+-   * 探测全部 12 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
++   * 探测全部 13 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
+    *
+    * 串行执行（对齐 Python detect_all，agent_detector.py:180-185）——非 Promise.all 并发，
+-   * 避免瞬时 12 个子进程 + 与 Python 行为偏离。
++   * 避免瞬时 13 个子进程 + 与 Python 行为偏离。
+    */
+   async detectAgents(): Promise<DetectedAgent[]> {
+     const results: DetectedAgent[] = [];
+@@ -283,8 +322,10 @@ export class AgentDetector {
+   // -------------------------------------------------------------------------
+ 
+   /**
+-   * 解析二进制路径。优先级：env 覆盖（file exists）→ PATH 查找 → null。
+-   * 对齐 Python _resolve_bin_path，agent_detector.py:224-243。
++   * 解析二进制路径。优先级：env 覆盖（file exists）→ PATH 查找 → fallbackPaths
++   * 固定路径回退（平台变量展开）→ null。对齐 Python _resolve_bin_path，
++   * agent_detector.py:224-243；第三段为 2026-10-15-zcode-engine-appserver task-01
++   * 扩展（D-001 三段式，Desktop 内嵌引擎形态）。
+    */
+   protected resolveBinPath(spec: AgentProviderSpec): string | null {
+     const envVal = process.env[spec.envPath];
+@@ -294,7 +335,23 @@ export class AgentDetector {
+       }
+       // env 指向不存在路径 → 降级到 PATH 查找（对齐 Python：fallback to which）。
+     }
+-    return this.findOnPath(spec.bin);
++    const onPath = this.findOnPath(spec.bin);
++    if (onPath !== null) {
++      return onPath;
++    }
++    if (spec.fallbackPaths) {
++      for (const raw of spec.fallbackPaths) {
++        const expanded = expandPathVars(raw);
++        try {
++          if (existsSync(expanded)) {
++            return expanded;
++          }
++        } catch {
++          // existsSync 抛错（权限等）→ 跳过该候选路径。
++        }
++      }
++    }
++    return null;
+   }
+ 
+   /**
+@@ -361,7 +418,16 @@ export class AgentDetector {
+ 
+       const isWindowsCmdWrapper =
+         process.platform === 'win32' && /\.(cmd|bat)$/i.test(binPath);
+-      if (isWindowsCmdWrapper) {
++      if (spec.execNode) {
++        // 2026-10-15-zcode-engine-appserver task-01（D-001）：目标是 Node 脚本
++        // （.cjs），直接经 process.execPath 执行，不走原生 exec/shim 分支。
++        execFile(
++          process.execPath,
++          [binPath, '--version'],
++          { timeout: 10_000, windowsHide: true },
++          onResult,
++        );
++      } else if (isWindowsCmdWrapper) {
+         // DA-15（2026-08-20 审计）：原 exec(`"${binPath}" --version`) 拼命令行——
+         // 路径含 & ^ " 等字符即错切/注入（binPath 源自 PATH 搜索与配置，仓里已踩过
+         // 同类坑）。改走 cmd-shim 解析出真实 exe 后 spawn 直调（.cmd 覆盖），
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 3abd90db7..64d31824b 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -24979,7 +24979,7 @@ export interface components {
+             /** Runtime Id */
+             runtime_id?: string | null;
+             /** Provider */
+-            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
++            provider?: ("claude" | "codex" | "cursor" | "pi" | "zcode") | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 50fae3926..fe6afca9e 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -62,6 +62,8 @@ import { PiRpcDriver } from './pi-rpc-driver.js';
+ import { ClaudeCredentialInjector, PiCredentialInjector } from '../credential-injector.js';
+ import { isCodexFormSufficient, writeCodexHome } from '../codex-settings.js';
+ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
++import { isZcodeFormSufficient, writeZcodeProviderConfig } from '../zcode-settings.js';
++import { ZcodeAppServerDriver } from './zcode-app-server-driver.js';
+ 
+ // ── import 环纪律（2026-09-11-provider-adapter-registry task-01）──────────────
+ //
+@@ -461,6 +463,27 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     // sessionFork='none'：CLI 无分叉通道（D-008 定值）。
+     sessionFork: 'none',
+   },
++  // 2026-10-15-zcode-engine-appserver task-05（D-005/D-006 无 ACP 事实）：ZCode
++  // 私有协议引擎，十六键按 design 接口定义定值——取值依据 = 2026-10-15 协议实测
++  //（decisions.md D-005 evidence）。
++  zcode: {
++    resume: true, // session/resume 方法面实测存在（阶段 1 未接 resume 管线，如实申报）
++    mcp: false, // session/create 的 mcpServers 注入面未验证（自有插件 MCP 体系另轨）
++    multimodal: false, // 协议图片内联面未验证
++    attachments: false, // 附件链路未开通（同 codex 现状）
++    thinking: true, // session/event model.streaming channel=reasoning_delta→thought 实测
++    subagent: false, // 平台分身/team 管线不对接
++    permission_dialog: true, // interaction/requestPermission 代答桥（task-04 交付）
++    dialog: 'native', // 权限代答桥即平台 dialog 管道通道本体（permission_dialog=true 三引擎现值先例）
++    edit_patch: false, // structuredPatch 未验证
++    model_select: true, // session/setModel + state.updated 模型目录实测
++    provider_switch: true, // per-session provider_config.json 重写（task-05 交付）
++    ctx_usage: true, // turn.completed usage 实测（task-03 归一化）
++    compact: true, // session/compact 方法面实测（task-04 交付）
++    thinking_level: true, // session/setThoughtLevel 方法面实测（task-04 交付）
++    steering: false, // 运行中注入未验证（协议消息队列串行）
++    sessionFork: 'none', // session/fork 存在但平台锚点语义未对接（阶段 2）
++  },
+ };
+ 
+ /**
+@@ -587,7 +610,7 @@ export interface ProviderDescriptor {
+  */
+ export interface ProviderFileSettingsWriter {
+   /** per-session 目录段名（join(daemonStateDir(), dirName, sessionKey)）。 */
+-  dirName: 'codex' | 'pi';
++  dirName: 'codex' | 'pi' | 'zcode';
+   /** 注入 env 键名（CODEX_HOME / PI_CODING_AGENT_DIR）。 */
+   envKey: string;
+   /** 门槛判定（与写盘器同判据；provider 缺必需字段 → false，调用方 warn 跳过）。 */
+@@ -622,7 +645,7 @@ export interface ProviderAdapter extends ProviderDescriptor {
+    * reload 门控的统一数据源）；claude / cursor 无 per-session provider file
+    * dirs → 显式 none（claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路）。
+    */
+-  perSessionDir: 'codex' | 'pi' | { kind: 'none' };
++  perSessionDir: 'codex' | 'pi' | 'zcode' | { kind: 'none' };
+   /** 冒烟套件文件名（守护测试校验真实存在且覆盖全部支持格式，Wave 4 消费）。 */
+   smokeSuite: string;
+   /** 会话级供应商切换支持（与 caps.provider_switch 单源一致，测试锁定）。 */
+@@ -759,6 +782,35 @@ export const INTERACTIVE_PROVIDERS = {
+     smokeSuite: 'tests/provider-injection-smoke.integ.test.ts',
+     switchable: true,
+   },
++  // zcode：family='ndjson' 与 AgentProtocol 枚举同值（agent-detector PROVIDER_SPECS.zcode）
++  //；displayName='ZCode'；密钥走 per-session provider_config.json 文件层（D-003——
++  // ZCode 个人 Provider 体系，非 env 形态），envInjector 显式 none；envKey=ZCODE_DATA_BASE_DIR
++  // 由 ZcodeAppServerDriver spawn env 透传（配置面隔离，D-002）。
++  zcode: {
++    provider: 'zcode',
++    family: 'ndjson',
++    displayName: 'ZCode',
++    createDriver: (): InteractiveDriver => new ZcodeAppServerDriver(),
++    caps: capsOf('zcode'),
++    // 密钥落文件不走 env（与 dsh apiKeyEnv 形态不同——D-003）。
++    envInjector: {
++      kind: 'none',
++      reason: 'zcode 密钥走 per-session provider_config.json 文件层（D-003 个人 Provider 体系）',
++    },
++    // 写盘器薄适配：wrap writeZcodeProviderConfig / isZcodeFormSufficient；zcode 无
++    // 官方端点形态（skipsOfficialEndpoint 恒 false）。
++    fileSettings: {
++      dirName: 'zcode',
++      envKey: 'ZCODE_DATA_BASE_DIR',
++      isSufficient: isZcodeFormSufficient,
++      write: ({ dir, provider, daemonApiKey }) =>
++        writeZcodeProviderConfig({ zcodeDir: dir, provider, daemonApiKey }),
++      skipsOfficialEndpoint: () => false,
++    },
++    perSessionDir: 'zcode',
++    smokeSuite: 'tests/interactive/zcode-app-server-driver.test.ts',
++    switchable: true,
++  },
+ } satisfies Record<string, ProviderAdapter>;
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/thinking-levels.ts b/sillyhub-daemon/src/interactive/thinking-levels.ts
+index 8df6c00f8..a28b5d08e 100644
+--- a/sillyhub-daemon/src/interactive/thinking-levels.ts
++++ b/sillyhub-daemon/src/interactive/thinking-levels.ts
+@@ -112,6 +112,19 @@ const ENGINE_LEVEL_MATRIX: Record<string, Record<ThinkingLevel, string | undefin
+     xhigh: undefined,
+     max: undefined,
+   },
++  zcode: {
++    // 2026-10-15-zcode-engine-appserver task-04：session/setThoughtLevel 通道
++    //（state.updated reasoning levels 实测档位 low/high 形态）。off=不设（引擎默认，
++    // 非真关——与 claude/codex 同语义）；minimal 降级 low；xhigh/max 降级 high
++    //（引擎侧档位表以会话快照为准，getThinkingLevels 动态回报）。
++    off: undefined,
++    minimal: 'low',
++    low: 'low',
++    medium: 'medium',
++    high: 'high',
++    xhigh: 'high',
++    max: 'high',
++  },
+ };
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+new file mode 100644
+index 000000000..a7932504b
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+@@ -0,0 +1,685 @@
++/**
++ * zcode-app-server-driver.ts —— ZCode 引擎驱动（InteractiveDriver 实现）。
++ *
++ * 2026-10-15-zcode-engine-appserver task-04（D-005/D-007）。
++ *
++ * 进程模型（D-007 方案 A）：每平台会话 spawn 一个 `node <zcode.cjs> app-server
++ * --cwd <dir>` 子进程（.exe/.cmd 形态回退直调/shim 解析，为未来官方独立 CLI
++ * 留通道）；ZCODE_DATA_BASE_DIR 由 spawn env 注入（per-session 配置面隔离，
++ * D-002——providers.ts fileSettings 层产出目录，驱动只透传 env）。
++ *
++ * 启动序列（2026-10-15 实测钉板）：
++ *   1. spawn → startup/storageState 通知（phase=ready 就绪门，~1.5s 含 DB 检查）；
++ *   2. session/create {workspace:{workspacePath, workspaceKey}}——期间服务端发
++ *      session/requestRuntimePreferences（必须 15s 内应答，否则 create 失败）；
++ *   3. session/subscribe {sessionId, deliveryKind:'desktop-continuous'}——
++ *      **内容流前提**：session/event 通知（model.streaming delta / turn 边界）
++ *      只在订阅后推送；
++ *   4. 按配置 session/setModel / session/setThoughtLevel；
++ *   5. 每轮 session/send {sessionId, content}，turn_result 事件收敛。
++ *
++ * 服务端主动请求分发（信封层分发器注册）：
++ *   - session/requestRuntimePreferences → 固定偏好（实测兼容回退默认值）；
++ *   - interaction/requestOfficialMcpAuthHeaders → 空（无官方 MCP 凭据面）；
++ *   - interaction/requestUserInput → {cancelled:true}（阶段 1，R-06 已知限制）；
++ *   - interaction/requestPermission → 审批代答桥（见 _handlePermissionBridge）。
++ *
++ * 审批代答回程形状（执行期工程决策）：请求 params 自带 options[]（每项含
++ * optionId/kind/decision——引擎包 y9() 构造逻辑实证）；应答从请求内选项中
++ * 选 optionId（allow→首个 allow 类选项；deny/超时/fail-closed→首个 deny 类
++ * 选项，无 deny 选项回 {outcome:{outcome:'cancelled'}}）。不硬编码 optionId
++ * 字面量（选项 id 随版本可变），e2e 冒烟（task-08）对真引擎验证。
++ *
++ * 对照先例：codex-app-server-driver.ts（清理阶梯/审批策略三态/turn 收敛
++ * reportResult 幂等/consume finalized 防双触发——本驱动同款语义，行数收敛）。
++ */
++
++import { spawn, type ChildProcess } from 'node:child_process';
++import { resolveWindowsCmdShim } from '../cmd-shim.js';
++import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
++import {
++  normalizeZcodeNotification,
++  type ZcodeModelCatalogEntry,
++  type ZcodeStateSnapshot,
++} from './zcode-events.js';
++import { mapPlatformLevelToEngine } from './thinking-levels.js';
++import type {
++  InteractiveDriver,
++  InteractiveDriverHandle,
++  InteractiveDriverResult,
++  InteractiveDriverCallbacks,
++  InteractiveDriverStartOptions,
++  UserTurnInput,
++  CompactResult,
++  ThinkingLevels,
++  ThinkingLevelResult,
++} from './driver.js';
++
++/** spawn 后等 startup/storageState phase=ready 上限（实测 ~1.5s，余量 30s）。 */
++const DEFAULT_READY_TIMEOUT_MS = 30_000;
++/** session/create / subscribe / setModel 等控制面 response 超时。 */
++const DEFAULT_CONTROL_TIMEOUT_MS = 30_000;
++/** compact / setThoughtLevel response 超时。 */
++const DEFAULT_COMPACT_TIMEOUT_MS = 30_000;
++/** close 时 stdin.end 后 SIGTERM 升级宽限（对齐 codex KILL_GRACE_MS=2000）。 */
++const KILL_GRACE_MS = 2_000;
++
++/** zcode 驱动专用启动选项（InteractiveDriverStartOptions 的 zcode 视图）。 */
++export interface ZcodeStartOptions extends InteractiveDriverStartOptions {
++  /** zcode 可执行文件路径（_agentPaths.get('zcode')，.cjs/.exe/.cmd 均可）。 */
++  pathToAgentExecutable: string;
++  /** 会话级审批 hook（SessionManager 注入；缺省走 fail-closed）。 */
++  sessionPermission?: ZcodeSessionPermissionHooks;
++  /** 平台会话 ID（诊断日志用）。 */
++  sessionId?: string;
++}
++
++/** 审批 hook（对齐 codex CodexSessionPermissionHooks 形状）。 */
++export interface ZcodeSessionPermissionHooks {
++  requestPermission(input: {
++    toolName: string;
++    toolInput: unknown;
++  }): Promise<{ behavior: 'allow' | 'deny' | string }>;
++}
++
++/** zcode 会话句柄（驱动内部视图，公共面即 InteractiveDriverHandle）。 */
++export interface ZcodeHandle extends InteractiveDriverHandle {
++  readonly provider: 'zcode';
++  readonly child: ChildProcess;
++  readonly envelope: ZcodeEnvelope;
++  /** 引擎侧会话 ID（session/create 回填；null = 尚未创建）。 */
++  zcodeSessionId: string | null;
++  /** close 已发起（幂等守卫）。 */
++  closing: boolean;
++  /** state.updated 缓存快照（模型目录/当前模型/reasoning levels）。 */
++  stateSnapshot: ZcodeStateSnapshot | undefined;
++  /** 当前是否有 in-flight 轮（interrupt 路由用）。 */
++  turnInFlight: boolean;
++  close(): Promise<void>;
++}
++
++/** 引擎可执行缺失（对齐 CodexExecutableNotFoundError 语义）。 */
++export class ZcodeExecutableNotFoundError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'ZcodeExecutableNotFoundError';
++  }
++}
++
++export class ZcodeAppServerDriver implements InteractiveDriver {
++  readonly provider = 'zcode' as const;
++
++  private readonly readyTimeoutMs: number;
++  private readonly controlTimeoutMs: number;
++  private readonly compactTimeoutMs: number;
++
++  constructor(
++    opts: {
++      readyTimeoutMs?: number;
++      controlTimeoutMs?: number;
++      compactTimeoutMs?: number;
++    } = {},
++  ) {
++    this.readyTimeoutMs = opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS;
++    this.controlTimeoutMs = opts.controlTimeoutMs ?? DEFAULT_CONTROL_TIMEOUT_MS;
++    this.compactTimeoutMs = opts.compactTimeoutMs ?? DEFAULT_COMPACT_TIMEOUT_MS;
++  }
++
++  async start(
++    input: AsyncIterable<UserTurnInput>,
++    opts: ZcodeStartOptions,
++  ): Promise<ZcodeHandle> {
++    if (!opts.pathToAgentExecutable || opts.pathToAgentExecutable.trim() === '') {
++      throw new ZcodeExecutableNotFoundError('empty pathToAgentExecutable');
++    }
++
++    const env = (opts.env ?? { ...process.env }) as NodeJS.ProcessEnv;
++
++    // spawn 形态三分（D-001）：.cjs/.js 内嵌引擎 → node 直调；Windows .cmd →
++    // shim 解析（为未来独立 CLI 留通道）；其余（.exe/POSIX bin）直调。
++    const exe = opts.pathToAgentExecutable;
++    const args = ['app-server', '--cwd', opts.cwd];
++    let spawnCmd: string;
++    let spawnArgs: string[];
++    if (/\.(c|m)?js$/i.test(exe)) {
++      spawnCmd = process.execPath;
++      spawnArgs = [exe, ...args];
++    } else if (process.platform === 'win32' && /\.cmd$/i.test(exe)) {
++      const resolved = resolveWindowsCmdShim(exe);
++      if (resolved) {
++        spawnCmd = resolved.exe;
++        spawnArgs = [...resolved.prependArgs, ...args];
++      } else {
++        spawnCmd = exe;
++        spawnArgs = args;
++      }
++    } else {
++      spawnCmd = exe;
++      spawnArgs = args;
++    }
++
++    const child = spawn(spawnCmd, spawnArgs, {
++      cwd: opts.cwd,
++      env,
++      stdio: ['pipe', 'pipe', 'pipe'],
++      windowsHide: true,
++    });
++
++    const handle: ZcodeHandle = {
++      provider: 'zcode',
++      processId: child.pid,
++      child,
++      envelope: new ZcodeEnvelope(),
++      zcodeSessionId: null,
++      closing: false,
++      stateSnapshot: undefined,
++      turnInFlight: false,
++      close: (): Promise<void> => this._close(handle),
++    };
++    (handle as unknown as { _ctx: unknown })._ctx = {
++      input,
++      opts,
++    };
++    return handle;
++  }
++
++  async consume(
++    handle: InteractiveDriverHandle,
++    callbacks: InteractiveDriverCallbacks,
++  ): Promise<void> {
++    const h = handle as ZcodeHandle;
++    const ctx = (h as unknown as {
++      _ctx: { input: AsyncIterable<UserTurnInput>; opts: ZcodeStartOptions };
++    })._ctx;
++    const child = h.child;
++    const onMessage = callbacks.onTurnMessage;
++    const onResult = callbacks.onTurnResult;
++    const onError = callbacks.onTurnError;
++
++    let finalized = false;
++    let turnReported = false;
++    let pendingTurnError: string | null = null;
++    let currentTurnResolve: ((outcome: TurnOutcome) => void) | null = null;
++
++    type TurnOutcome = {
++      kind: 'success' | 'failed' | 'cancelled';
++      usage?: InteractiveDriverResult['usage'];
++      response?: string;
++    };
++
++    let currentTurnPromise: Promise<TurnOutcome> | null = null;
++    const beginTurn = (): void => {
++      pendingTurnError = null;
++      turnReported = false;
++      h.turnInFlight = true;
++      // resolver 先于 session/send 注册：turn_result 早到（send 响应前）也不丢轮
++      currentTurnPromise = new Promise<TurnOutcome>((resolve) => {
++        currentTurnResolve = resolve;
++      });
++    };
++
++    const finishTurn = (outcome: TurnOutcome): void => {
++      if (!currentTurnResolve) return;
++      const r = currentTurnResolve;
++      currentTurnResolve = null;
++      h.turnInFlight = false;
++      r(outcome);
++    };
++
++    const reportResult = (r: InteractiveDriverResult): void => {
++      // 幂等守卫 = turnReported；finalize 路径（finalizeWithError）也要能上报终态
++      // （首个 result 即收敛），故不把 finalized 计入——它只守 consume 主循环。
++      if (turnReported) return;
++      turnReported = true;
++      Promise.resolve(onResult(r)).catch((err: unknown) => {
++        // eslint-disable-next-line no-console
++        console.error('[zcode-driver] onTurnResult callback failed', err);
++      });
++    };
++
++    const finalizeWithError = (message: string): void => {
++      if (finalized) return;
++      finalized = true;
++      finishTurn({ kind: 'cancelled' });
++      reportResult({
++        subtype: 'error_during_execution',
++        is_error: true,
++        result: message,
++        session_id: h.zcodeSessionId ?? undefined,
++      });
++      onError?.(new ZcodeProtocolError(message));
++    };
++
++    // ── 通知分发：ready 门 + 事件归一化 + turn 收敛 ──────────────────────────
++    let readyResolve: (() => void) | null = null;
++    const readyPromise = new Promise<void>((resolve) => {
++      readyResolve = resolve;
++    });
++    let readySettled = false;
++
++    h.envelope.onNotification((n) => {
++      if (finalized) return;
++      if (n.method === 'startup/storageState') {
++        const phase = (n.params as { phase?: string } | undefined)?.phase;
++        if (phase === 'ready' && !readySettled) {
++          readySettled = true;
++          readyResolve?.();
++        }
++        return;
++      }
++      const stateCarrier: { snapshot?: ZcodeStateSnapshot } = {};
++      const events = normalizeZcodeNotification(n, stateCarrier);
++      if (stateCarrier.snapshot) h.stateSnapshot = stateCarrier.snapshot;
++      if (events.length === 0) return;
++      for (const ev of events) {
++        if (ev.type === 'error') {
++          pendingTurnError = ev.content || pendingTurnError;
++        }
++        if (ev.type === 'turn_result') {
++          const outcome: TurnOutcome = {
++            kind:
++              ev.metadata?.turn_status === 'failed'
++                ? 'failed'
++                : 'success',
++            usage: ev.usage,
++            response:
++              typeof ev.metadata?.response === 'string'
++                ? ev.metadata.response
++                : undefined,
++          };
++          finishTurn(outcome);
++        }
++      }
++      Promise.resolve(onMessage?.({ events })).catch((err: unknown) => {
++        // eslint-disable-next-line no-console
++        console.error('[zcode-driver] onTurnMessage callback failed', err);
++      });
++    });
++
++    h.envelope.onProtocolError((err) => {
++      // 协议帧级错误：记日志不终止（fail-soft——单帧非法不杀会话；
++      // 结构化失败由控制面 request reject 路径承载）。
++      // eslint-disable-next-line no-console
++      console.warn('[zcode-driver] protocol frame error:', err.message);
++    });
++
++    // ── 服务端主动请求分发（信封层） ────────────────────────────────────────
++    const sink = { write: (line: string) => child.stdin?.write(line) };
++    h.envelope.registerServerRequestHandler(
++      'session/requestRuntimePreferences',
++      (_params, reply) => {
++        reply({
++          askUserQuestionAutoResolutionEnabled: true,
++          memoryEnabled: false,
++          modelContextBudgetStrategy: 'preflight-v1',
++          nativeSearchEnhancementsEnabled: true,
++        });
++      },
++    );
++    h.envelope.registerServerRequestHandler(
++      'interaction/requestOfficialMcpAuthHeaders',
++      (_params, reply) => reply({}),
++    );
++    h.envelope.registerServerRequestHandler(
++      'interaction/requestUserInput',
++      (_params, reply) => reply({ cancelled: true }),
++    );
++    h.envelope.registerServerRequestHandler(
++      'interaction/requestPermission',
++      (params, reply) => {
++        void this._handlePermissionBridge(h, ctx.opts, params, reply, (ev) => {
++          Promise.resolve(onMessage?.({ events: [ev] })).catch(() => {});
++        });
++      },
++    );
++
++    if (!child.stdout) {
++      throw new ZcodeProtocolError('zcode 子进程缺 stdout 管道（spawn 配置异常）');
++    }
++    child.stdout.on('data', (chunk: Buffer) => {
++      h.envelope.feed(chunk.toString('utf8'), sink);
++    });
++    child.stderr?.on('data', (chunk: Buffer) => {
++      // stderr 诊断噪声不进事件流（引擎日志面）
++      const text = chunk.toString('utf8').trim();
++      if (text) {
++        // eslint-disable-next-line no-console
++        console.warn('[zcode-driver] stderr:', text.slice(0, 300));
++      }
++    });
++    child.on('error', (err) => finalizeWithError(`zcode 进程启动失败：${err.message}`));
++    child.on('exit', (code, signal) => {
++      if (h.closing || finalized) return;
++      finalizeWithError(
++        `zcode 进程异常退出（code=${code ?? 'null'} signal=${signal ?? 'null'}）`,
++      );
++    });
++
++    try {
++      // 1. 就绪门
++      await withTimeout(readyPromise, this.readyTimeoutMs, 'startup ready 超时');
++      // 2. 建会话
++      const created = (await h.envelope.request(
++        'session/create',
++        { workspace: { workspacePath: ctx.opts.cwd, workspaceKey: ctx.opts.cwd } },
++        sink.write,
++        { timeoutMs: this.controlTimeoutMs },
++      )) as { sessionId?: string; session?: { sessionId?: string } };
++      // 实测回包形状：sessionId 在 result.session.sessionId（2026-10-15 探测钉板）；
++      // 兼容顶层直挂形态（变体）双读。
++      const createdSessionId = created?.sessionId ?? created?.session?.sessionId;
++      if (typeof createdSessionId !== 'string' || createdSessionId === '') {
++        throw new ZcodeProtocolError('session/create 未返回 sessionId');
++      }
++      h.zcodeSessionId = createdSessionId;
++      // 会话指针上报（resume 消费面；对齐 codex thread_started 口径）
++      Promise.resolve(
++        onMessage?.({
++          events: [
++            {
++              type: 'status',
++              subtype: 'session_started',
++              content: '',
++              session_id: createdSessionId,
++            },
++          ],
++        }),
++      ).catch(() => {});
++      // 3. 订阅内容流（desktop-continuous——session/event 推送前提，实测钉板）
++      await h.envelope.request(
++        'session/subscribe',
++        { sessionId: createdSessionId, deliveryKind: 'desktop-continuous' },
++        sink.write,
++        { timeoutMs: this.controlTimeoutMs },
++      );
++      // 4. 初始模型/思考档位
++      if (ctx.opts.model) {
++        await this._applyModel(h, ctx.opts.model);
++      }
++      if (ctx.opts.thinkingLevel) {
++        await this.setThinkingLevel(h, ctx.opts.thinkingLevel);
++      }
++
++      // 5. 轮循环：逐输入 → send → 等收敛
++      for await (const item of ctx.input) {
++        if (h.closing || finalized) break;
++        if (item.type !== 'user' || item.text.trim() === '') continue;
++        beginTurn();
++        try {
++          await h.envelope.request(
++            'session/send',
++            { sessionId: h.zcodeSessionId, content: item.text },
++            sink.write,
++            { timeoutMs: 0 }, // 轮内不设请求超时——收敛以 turn_result 为准
++          );
++        } catch (err) {
++          // send 失败 = 结构化失败（D-004：不重试不降级）
++          const message =
++            err instanceof ZcodeProtocolError
++              ? err.message
++              : `session/send 失败：${String(err)}`;
++          reportResult({
++            subtype: 'error_during_execution',
++            is_error: true,
++            result: message,
++            session_id: h.zcodeSessionId ?? undefined,
++          });
++          continue;
++        }
++        // beginTurn 已在 session/send 前赋值（resolver 先于 send 注册），此处非 null
++        const outcome = await currentTurnPromise!;
++        reportResult({
++          subtype:
++            outcome.kind === 'success'
++              ? 'success'
++              : outcome.kind === 'failed'
++                ? 'error_during_execution'
++                : 'cancelled_by_user',
++          is_error: outcome.kind === 'failed',
++          result: outcome.response ?? (outcome.kind === 'failed' ? pendingTurnError : ''),
++          usage: outcome.usage,
++          session_id: h.zcodeSessionId ?? undefined,
++        });
++      }
++    } catch (err) {
++      finalizeWithError(
++        err instanceof Error ? err.message : `zcode consume 失败：${String(err)}`,
++      );
++    } finally {
++      finalized = true;
++      h.envelope.dispose();
++    }
++  }
++
++  async interrupt(handle: InteractiveDriverHandle | null): Promise<boolean> {
++    if (!handle) return false;
++    const h = handle as ZcodeHandle;
++    if (h.closing || !h.zcodeSessionId || !h.turnInFlight) return false;
++    try {
++      await h.envelope.request(
++        'session/stop',
++        { sessionId: h.zcodeSessionId },
++        (line) => h.child.stdin?.write(line),
++        { timeoutMs: this.compactTimeoutMs },
++      );
++      return true;
++    } catch {
++      // E3：打断 no-op 不冒泡
++      return false;
++    }
++  }
++
++  async compact(handle: InteractiveDriverHandle): Promise<CompactResult> {
++    const h = handle as ZcodeHandle;
++    if (!h.zcodeSessionId) return { ok: false, error: '会话未创建' };
++    try {
++      await h.envelope.request(
++        'session/compact',
++        { sessionId: h.zcodeSessionId },
++        (line) => h.child.stdin?.write(line),
++        { timeoutMs: this.compactTimeoutMs },
++      );
++      return { ok: true };
++    } catch (err) {
++      return {
++        ok: false,
++        error: err instanceof Error ? err.message : String(err),
++      };
++    }
++  }
++
++  async getThinkingLevels(
++    handle: InteractiveDriverHandle,
++    _model?: string,
++  ): Promise<ThinkingLevels> {
++    const h = handle as ZcodeHandle;
++    const catalog: readonly ZcodeModelCatalogEntry[] =
++      h.stateSnapshot?.modelCatalog ?? [];
++    const levels = new Set<string>();
++    for (const entry of catalog) {
++      for (const l of entry.reasoningLevels ?? []) levels.add(l);
++    }
++    // 快照缺 levels 时回退常见三档（低配默认，不抛错）
++    return { levels: levels.size > 0 ? [...levels] : ['low', 'medium', 'high'] };
++  }
++
++  async setThinkingLevel(
++    handle: InteractiveDriverHandle,
++    level: string,
++  ): Promise<ThinkingLevelResult> {
++    const h = handle as ZcodeHandle;
++    if (!h.zcodeSessionId) return { ok: false, error: '会话未创建' };
++    const engineLevel = mapPlatformLevelToEngine('zcode', level);
++    if (engineLevel === undefined) {
++      return { ok: false, error: `不支持的思考档位：${level}` };
++    }
++    try {
++      await h.envelope.request(
++        'session/setThoughtLevel',
++        { sessionId: h.zcodeSessionId, level: engineLevel },
++        (line) => h.child.stdin?.write(line),
++        { timeoutMs: this.compactTimeoutMs },
++      );
++      return { ok: true };
++    } catch (err) {
++      return {
++        ok: false,
++        error: err instanceof Error ? err.message : String(err),
++      };
++    }
++  }
++
++  /** 初始/热切换模型（providers.ts provider_config_changed 路径复用）。 */
++  private async _applyModel(h: ZcodeHandle, model: string): Promise<void> {
++    await h.envelope.request(
++      'session/setModel',
++      { sessionId: h.zcodeSessionId, model },
++      (line) => h.child.stdin?.write(line),
++      { timeoutMs: this.controlTimeoutMs },
++    );
++  }
++
++  /**
++   * 审批代答桥（三态，对齐 codex _handleApproval 语义）：
++   *   - allow-through：!manualApproval || askUserOnly → 首个 allow 类选项；
++   *   - full-review：manualApproval 且注入 sessionPermission → 用户决定；
++   *   - fail-closed：deny / 无注入 / 异常 → 首个 deny 类选项，无则 cancelled。
++   */
++  private async _handlePermissionBridge(
++    h: ZcodeHandle,
++    opts: ZcodeStartOptions,
++    params: unknown,
++    reply: (result: unknown) => void,
++    log: (ev: { type: 'tool_use'; content: string; metadata: Record<string, unknown> }) => void,
++  ): Promise<void> {
++    const options = extractPermissionOptions(params);
++    const pick = (wantAllow: boolean): unknown => {
++      const hit = options.find((o) =>
++        wantAllow ? o.isAllow : o.isDeny,
++      );
++      if (hit) return { outcome: { outcome: 'selected', optionId: hit.optionId } };
++      return { outcome: { outcome: 'cancelled' } };
++    };
++
++    if (!opts.manualApproval || opts.askUserOnly) {
++      reply(pick(true));
++      log({
++        type: 'tool_use',
++        content: '',
++        metadata: { kind: 'approval', auto_accept: true, provider: 'zcode' },
++      });
++      return;
++    }
++    if (!opts.sessionPermission) {
++      reply(pick(false));
++      log({
++        type: 'tool_use',
++        content: '',
++        metadata: {
++          kind: 'approval',
++          auto_accept: false,
++          fail_closed: true,
++          provider: 'zcode',
++          reason: 'no sessionPermission injected',
++        },
++      });
++      return;
++    }
++    try {
++      const decision = await opts.sessionPermission.requestPermission({
++        toolName: 'zcode_permission',
++        toolInput: params,
++      });
++      reply(decision.behavior === 'allow' ? pick(true) : pick(false));
++    } catch {
++      reply(pick(false));
++    }
++    void h; // 句柄仅存续性引用（未来挂 approvalInteractionId 用）
++  }
++
++  /** close 三级阶梯（对齐 codex：stdin.end 优雅 → SIGTERM → SIGKILL）。 */
++  private async _close(handle: ZcodeHandle): Promise<void> {
++    const h = handle;
++    if (h.closing) return;
++    h.closing = true;
++    try {
++      if (h.zcodeSessionId && h.child.stdin) {
++        await h.envelope
++          .request(
++            'session/close',
++            { sessionId: h.zcodeSessionId },
++            (line) => h.child.stdin?.write(line),
++            { timeoutMs: 3_000 },
++          )
++          .catch(() => {});
++      }
++    } finally {
++      h.child.stdin?.end();
++      const killTimer = setTimeout(() => {
++        if (h.child.exitCode === null && !h.child.killed) {
++          h.child.kill('SIGTERM');
++          setTimeout(() => {
++            if (h.child.exitCode === null && !h.child.killed) {
++              h.child.kill('SIGKILL');
++            }
++          }, KILL_GRACE_MS).unref?.();
++        }
++      }, KILL_GRACE_MS).unref?.();
++      void killTimer;
++      h.envelope.dispose();
++    }
++  }
++}
++
++// ---------------------------------------------------------------------------
++// 内部 helper
++// ---------------------------------------------------------------------------
++
++function withTimeout<T>(
++  p: Promise<T>,
++  ms: number,
++  label: string,
++): Promise<T> {
++  return new Promise<T>((resolve, reject) => {
++    const timer = setTimeout(
++      () => reject(new ZcodeProtocolError(`${label}（${ms}ms）`, undefined, undefined, true)),
++      ms,
++    );
++    p.then(
++      (v) => {
++        clearTimeout(timer);
++        resolve(v);
++      },
++      (err) => {
++        clearTimeout(timer);
++        reject(err);
++      },
++    );
++  });
++}
++
++/** 从请求 params 提取选项表（optionId/kind 形态宽松判定 allow/deny 类）。 */
++function extractPermissionOptions(
++  params: unknown,
++): Array<{ optionId: string; isAllow: boolean; isDeny: boolean }> {
++  if (typeof params !== 'object' || params === null) return [];
++  const raw = (params as Record<string, unknown>)['options'];
++  if (!Array.isArray(raw)) return [];
++  const out: Array<{ optionId: string; isAllow: boolean; isDeny: boolean }> = [];
++  for (const o of raw) {
++    if (typeof o !== 'object' || o === null) continue;
++    const rec = o as Record<string, unknown>;
++    const optionId = typeof rec.optionId === 'string' ? rec.optionId : '';
++    if (!optionId) continue;
++    const kind = String(rec.kind ?? '');
++    const response = rec.response as Record<string, unknown> | undefined;
++    const decision =
++      typeof response?.decision === 'string' ? response.decision : '';
++    out.push({
++      optionId,
++      isAllow: /allow/i.test(kind) || decision === 'allow',
++      isDeny: /deny/i.test(kind) || decision === 'deny',
++    });
++  }
++  return out;
++}
+diff --git a/sillyhub-daemon/src/interactive/zcode-events.ts b/sillyhub-daemon/src/interactive/zcode-events.ts
+new file mode 100644
+index 000000000..26635c09e
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/zcode-events.ts
+@@ -0,0 +1,272 @@
++/**
++ * zcode-events.ts —— ZCode app-server 通知 → AgentEvent 归一化器（纯函数，无 IO）。
++ *
++ * 2026-10-15-zcode-engine-appserver task-03（D-005）。
++ *
++ * 内容通道事实（2026-10-15 实测钉板：session/subscribe deliveryKind=
++ * 'desktop-continuous' 后服务端推送 `session/event` 通知）：
++ *   - 顶层 `type` ∈ {session.titleUpdated, turn.started, session.updated,
++ *     model.streaming, turn.completed}；
++ *   - **文本内容流在 `session/event` 的 `model.streaming`**：payload
++ *     {assistantMessageId, delta, done, kind ∈ {text_delta, reasoning_delta}}——
++ *     text_delta → text 增量 / reasoning_delta → thinking 增量；
++ *   - `v4/telemetry/event` 的 stream.chunk 仅携带 chunkLength（遥测），不含文本
++ *     ——内容不从这里取（实测排除）；
++ *   - `turn.completed` 携带 usage {inputTokens, outputTokens, cacheReadTokens,
++ *     cacheWriteTokens, totalTokens} + duration(ms) + response（整段最终文本）；
++ *   - `state.updated`（独立通知）携带模型目录 {model.available[].ref.
++ *     {providerId,modelId}, contextWindow, reasoning.levels}——驱动缓存为
++ *     getThinkingLevels/setModel 数据源。
++ *
++ * 归一化语义对照先例：
++ *   - 流式 delta 直通不合并、无 is_partial（pi-events.ts 同款：逐 delta 直接
++ *     产 text 事件，SessionManager 轮内拼接）；
++ *   - 轮收尾产单个 `turn_result` 事件（交互式链路统一用 turn_result，types.ts
++ *     AgentEventType 注释；codex complete 别名的语义等价物），usage 走一等
++ *     字段（session-manager/usage.ts:102 直接消费 ev.usage）；response 整段
++ *     文本进 metadata.response 作流式丢块兜底（不 override，防双投递）；
++ *   - 未知 type/kind 安全忽略（fail-soft，不抛错不丢后续事件）。
++ */
++
++import type { AgentEvent, AgentEventUsage } from '../types.js';
++import type { ZcodeNotification } from '../adapters/zcode-envelope.js';
++
++/** session/event 通知的载荷面（实测形状，宽松收窄——未知字段忽略）。 */
++export interface ZcodeSessionEventParams {
++  readonly sessionId?: string;
++  readonly turnId?: string;
++  readonly seq?: number;
++  readonly type?: string;
++  readonly payload?: Record<string, unknown>;
++}
++
++/** state.updated 提取出的模型目录条目（getThinkingLevels/setModel 数据源）。 */
++export interface ZcodeModelCatalogEntry {
++  readonly providerId: string;
++  readonly modelId: string;
++  readonly label?: string;
++  readonly contextWindow?: number;
++  readonly maxOutputTokens?: number;
++  readonly reasoningLevels?: readonly string[];
++}
++
++/** state.updated 提取出的会话快照（驱动缓存消费）。 */
++export interface ZcodeStateSnapshot {
++  /** 会话状态补丁（state.updated patch.status）。 */
++  status?: string;
++  modelCatalog?: readonly ZcodeModelCatalogEntry[];
++  currentModel?: { providerId?: string; modelId?: string } | null;
++}
++
++/**
++ * 归一化 session/event / state.updated 通知为 AgentEvent[]。
++ *
++ * @param notification 信封层解出的通知（method + params）
++ * @param stateOut 可选出参：state.updated 提取的模型目录/状态写回此处（驱动缓存）
++ * @returns 0..N 个 AgentEvent（观察面通知产出 0 个）
++ */
++export function normalizeZcodeNotification(
++  notification: ZcodeNotification,
++  stateOut?: { snapshot?: ZcodeStateSnapshot },
++): AgentEvent[] {
++  const params = (notification.params ?? {}) as Record<string, unknown>;
++
++  if (notification.method === 'session/event') {
++    return normalizeSessionEvent(params as ZcodeSessionEventParams);
++  }
++  if (notification.method === 'state.updated') {
++    const snapshot = extractStateSnapshot(params);
++    if (stateOut) stateOut.snapshot = snapshot;
++    return []; // 状态快照不产出消息事件（观察面）
++  }
++  // v4/telemetry / computer-use / process/* 等遥测通道：内容不在其中（实测），
++  // turn 边界以 session/event 的 turn.completed 为权威——全部忽略。
++  return [];
++}
++
++// ---------------------------------------------------------------------------
++// session/event 归一化
++// ---------------------------------------------------------------------------
++
++function normalizeSessionEvent(params: ZcodeSessionEventParams): AgentEvent[] {
++  const type = params.type ?? '';
++  const payload = params.payload ?? {};
++  const base = {
++    session_id: params.sessionId,
++    metadata: {
++      zcodeTurnId: params.turnId,
++      zcodeSeq: params.seq,
++    } as Record<string, unknown>,
++  };
++
++  switch (type) {
++    case 'model.streaming': {
++      const kind = String(payload.kind ?? '');
++      const delta = typeof payload.delta === 'string' ? payload.delta : '';
++      if (delta === '') return [];
++      const meta: Record<string, unknown> = {
++        ...base.metadata,
++        source: 'model_streaming',
++        streaming: true,
++      };
++      if (typeof payload.assistantMessageId === 'string') {
++        meta.assistantMessageId = payload.assistantMessageId;
++      }
++      if (kind === 'reasoning_delta') {
++        return [{ ...base, type: 'thinking' as const, content: delta, metadata: meta }];
++      }
++      // text_delta（含未知 kind 的文本面——宽松直通 text 通道）
++      return [{ ...base, type: 'text' as const, content: delta, metadata: meta }];
++    }
++
++    case 'turn.completed': {
++      const usage = extractUsage(payload.usage, payload.duration);
++      const meta: Record<string, unknown> = { ...base.metadata, source: 'turn_completed' };
++      if (typeof payload.response === 'string' && payload.response !== '') {
++        meta.response = payload.response;
++      }
++      if (typeof payload.resultType === 'string') {
++        meta.turn_status = payload.resultType;
++      }
++      // 单事件收尾：turn_result + 一等 usage（response 进 metadata 作兜底，
++      // 不 override——流式 delta 已投递，双投递由消费侧按 metadata.response 对账）
++      return [{ ...base, type: 'turn_result' as const, content: '', usage, metadata: meta }];
++    }
++
++    case 'turn.failed': {
++      // 2026-10-15 实测（provider 业务错误如 429 额度用尽）：session/event
++      // type='turn.failed' 携带 payload.error{type, code, message, attribution
++      // {source, reason, retryable, errorPhase...}}——轮必须收敛，否则驱动
++      // 永久挂起（e2e 冒烟 120s 超时实证：无此映射时该 type 落入 default 被
++      // 忽略，turn 永不收敛）。产出：error 事件（message 供驱动 pendingTurnError
++      // 兜底）+ turn_result 失败收尾（驱动 finishTurn 收敛路径）。
++      const errObj = (payload.error ?? {}) as Record<string, unknown>;
++      const message =
++        typeof errObj.message === 'string' && errObj.message !== ''
++          ? errObj.message
++          : 'zcode 轮失败（引擎未附 message）';
++      const errMeta: Record<string, unknown> = { ...base.metadata, source: 'turn_failed' };
++      if (typeof errObj.code === 'string' || typeof errObj.code === 'number') {
++        errMeta.error_code = errObj.code;
++      }
++      if (typeof errObj.type === 'string') errMeta.error_type = errObj.type;
++      if (typeof errObj.attribution === 'object' && errObj.attribution !== null) {
++        errMeta.attribution = errObj.attribution;
++      }
++      return [
++        { ...base, type: 'error' as const, content: message, metadata: errMeta },
++        {
++          ...base,
++          type: 'turn_result' as const,
++          content: '',
++          metadata: { ...base.metadata, source: 'turn_failed', turn_status: 'failed' },
++        },
++      ];
++    }
++
++    case 'turn.started':
++    case 'session.updated':
++    case 'session.titleUpdated':
++    default:
++      // 观察面（轮开始/标题/会话统计）：turn 生命周期由驱动 consume 循环管理，
++      // 不产出消息事件。
++      return [];
++  }
++}
++
++// ---------------------------------------------------------------------------
++// usage 提取（turn.completed 载荷 → AgentEventUsage）
++// ---------------------------------------------------------------------------
++
++function extractUsage(
++  raw: unknown,
++  durationMs: unknown,
++): AgentEventUsage | undefined {
++  if (typeof raw !== 'object' || raw === null) return undefined;
++  const u = raw as Record<string, unknown>;
++  const usage: AgentEventUsage = {};
++  let any = false;
++  if (typeof u.inputTokens === 'number') {
++    usage.input_tokens = u.inputTokens;
++    any = true;
++  }
++  if (typeof u.outputTokens === 'number') {
++    usage.output_tokens = u.outputTokens;
++    any = true;
++  }
++  if (typeof u.cacheReadTokens === 'number') {
++    usage.cache_read_tokens = u.cacheReadTokens;
++    any = true;
++  }
++  if (typeof u.cacheWriteTokens === 'number') {
++    usage.cache_creation_tokens = u.cacheWriteTokens;
++    any = true;
++  }
++  if (typeof u.totalTokens === 'number') {
++    // ctx 环分子（types.ts AgentEventUsage.ctx_tokens 契约：input+cache 量和）
++    usage.ctx_tokens = u.totalTokens;
++    any = true;
++  }
++  if (typeof durationMs === 'number') {
++    usage.api_duration_ms = durationMs;
++    any = true;
++  }
++  return any ? usage : undefined;
++}
++
++// ---------------------------------------------------------------------------
++// state.updated 快照提取
++// ---------------------------------------------------------------------------
++
++/**
++ * reasoning levels 双形态提取（实测抓包为 {value:"low"} 对象数组；兼容纯字符串
++ * 数组形态）——getThinkingLevels 档位表数据源。
++ */
++function extractReasoningLevels(raw: unknown): readonly string[] | undefined {
++  if (!Array.isArray(raw)) return undefined;
++  const out: string[] = [];
++  for (const l of raw) {
++    if (typeof l === 'string') {
++      out.push(l);
++    } else if (typeof l === 'object' && l !== null) {
++      const v = (l as Record<string, unknown>)['value'];
++      if (typeof v === 'string') out.push(v);
++    }
++  }
++  return out;
++}
++
++function extractStateSnapshot(params: Record<string, unknown>): ZcodeStateSnapshot {  const patch = (params.patch ?? {}) as Record<string, unknown>;
++  const snapshot: ZcodeStateSnapshot = {};
++  if (typeof patch.status === 'string') snapshot.status = patch.status;
++
++  const model = (patch.model ?? {}) as Record<string, unknown>;
++  if (Array.isArray(model.available)) {
++    const catalog: ZcodeModelCatalogEntry[] = [];
++    for (const entry of model.available) {
++      if (typeof entry !== 'object' || entry === null) continue;
++      const e = entry as Record<string, unknown>;
++      const ref = (e.ref ?? {}) as Record<string, unknown>;
++      if (typeof ref.providerId !== 'string' || typeof ref.modelId !== 'string') continue;
++      const reasoning = (e.reasoning ?? {}) as Record<string, unknown>;
++      catalog.push({
++        providerId: ref.providerId,
++        modelId: ref.modelId,
++        label: typeof e.label === 'string' ? e.label : undefined,
++        contextWindow: typeof e.contextWindow === 'number' ? e.contextWindow : undefined,
++        maxOutputTokens:
++          typeof e.maxOutputTokens === 'number' ? e.maxOutputTokens : undefined,
++        reasoningLevels: extractReasoningLevels(reasoning.levels),
++      });
++    }
++    snapshot.modelCatalog = catalog;
++  }
++  const current = (model.current ?? null) as Record<string, unknown> | null;
++  if (current && typeof current === 'object') {
++    snapshot.currentModel = {
++      providerId: typeof current.providerId === 'string' ? current.providerId : undefined,
++      modelId: typeof current.modelId === 'string' ? current.modelId : undefined,
++    };
++  }
++  return snapshot;
++}
+diff --git a/sillyhub-daemon/src/version.ts b/sillyhub-daemon/src/version.ts
+index 5820888c7..8111ad3ef 100644
+--- a/sillyhub-daemon/src/version.ts
++++ b/sillyhub-daemon/src/version.ts
+@@ -46,6 +46,9 @@ export const MIN_VERSIONS: Readonly<Record<string, SemVerTuple>> = {
+   codex: [0, 100, 0],
+   copilot: [1, 0, 0],
+   pi: [0, 81, 0],
++  // 2026-10-15-zcode-engine-appserver task-01（D-004）：ZCode 私有协议基线
++  // （信封/方法面/事件流以 0.16.9 实测钉板），低于警告不硬拒——与四引擎语义一致。
++  zcode: [0, 16, 9],
+ };
+ 
+ /**
+diff --git a/sillyhub-daemon/src/zcode-settings.ts b/sillyhub-daemon/src/zcode-settings.ts
+new file mode 100644
+index 000000000..ccdc057c6
+--- /dev/null
++++ b/sillyhub-daemon/src/zcode-settings.ts
+@@ -0,0 +1,181 @@
++/**
++ * zcode-settings —— 写 per-session `<ZCODE_DATA_BASE_DIR>/.zcode/v2/provider_config.json`。
++ *
++ * 2026-10-15-zcode-engine-appserver task-05（D-002 / D-003）。风格对齐 codex-settings /
++ * pi-settings（纯函数 + 显式路径入参；写盘器不自建根目录，调用方 spawn 前创建）。
++ *
++ * 背景（2026-10-15 实测钉板，decisions.md D-003 evidence）：
++ *   - ZCODE_DATA_BASE_DIR 重定向 ZCode 配置面根（实测：value=T 时引擎读 T/.zcode/v2/
++ *     下 provider_config.json / credentials.json / setting.json 等）；
++ *   - 个人 Provider 体系形状（本机实证实例）：{schemaVersion:1, config:{providerOrder,
++ *     providerConfigRules:[{providerId, providerName, config:{group, access:{type:'api-key',
++ *     apiKey}, api:{type:'anthropic-messages'|'openai-chat-completions', baseUrl},
++ *     personalModelIds, modelOrder}}]}}——注入该文件后模型轮真实跑在注入 Provider 上（实测）；
++ *   - 会话数据库（~/.zcode/cli/db）不受 ZCODE_DATA_BASE_DIR 重定向（机器级共享，D-002
++ *     接受），本写盘器只负责配置面。
++ *
++ * 门槛与失败语义（对齐 codex/pi 写盘器定式——失败语义唯一化，宁可不写不写坏形状）：
++ *   - 所需字段（有效 baseUrl / 有效密钥 / 裸 model id）缺任一 → 记 warn 跳过写盘、
++ *     正常返回不抛（调用方不注入 ZCODE_DATA_BASE_DIR，引擎回落机器默认配置/登录态，
++ *     与 codex/pi 无配置先例一致）；
++ *   - 写 IO 失败 → 记 error 后 throw（reject）；调用方捕获后跳过 env 注入仍 spawn；
++ *   - `.zcode/v2` 子目录由本写盘器 mkdir（根目录由调用方建；实测引擎布局 = 根 + /.zcode/v2）。
++ *
++ * 安全：apiKey 明文只进文件不进任何日志（对齐 pi-settings）。
++ *
++ * @module zcode-settings
++ */
++
++import { mkdir } from 'node:fs/promises';
++import { join } from 'node:path';
++
++import { writeFileAtomic } from './atomic-write.js';
++import type { ProviderConfig } from './types.js';
++
++/** 写盘器入参（风格对齐 codex-settings / pi-settings）。 */
++export interface ZcodeDirWriteInput {
++  /** per-session 隔离目录（= ZCODE_DATA_BASE_DIR；调用方 spawn 前创建、随会话清理）。 */
++  zcodeDir: string;
++  /** lease 下发 provider_config（agent_kind='zcode'）。 */
++  provider: ProviderConfig;
++  /** daemon 自身 API key（openai_chat + litellm_proxy 形态的代理凭据；其余形态不消费）。 */
++  daemonApiKey?: string | null;
++}
++
++/** 配置面相对路径（实测布局：ZCODE_DATA_BASE_DIR 下 `.zcode/v2/`）。 */
++const CONFIG_REL_DIR = join('.zcode', 'v2');
++const CONFIG_FILENAME = 'provider_config.json';
++
++/** 托管 provider 键名（provider_config.json 内 providerId，展示名 SillyHub）。 */
++const PROVIDER_ID = 'sillyhub';
++const PROVIDER_DISPLAY_NAME = 'SillyHub';
++
++/** 空串 / null / undefined 一律视为未设置（对齐 types.ts 空串=未配置语义）。 */
++function nonEmpty(v: string | null | undefined): string | undefined {
++  return typeof v === 'string' && v.length > 0 ? v : undefined;
++}
++
++/**
++ * 有效 baseUrl：openai_chat 形态走 LiteLLM/hub 代理地址；否则直连 base_url。
++ */
++function effectiveBaseUrl(provider: ProviderConfig): string | undefined {
++  if (provider.api_format === 'openai_chat') {
++    return nonEmpty(provider.litellm_base_url);
++  }
++  return nonEmpty(provider.base_url);
++}
++
++/**
++ * 有效密钥：openai_chat + litellm_proxy 形态用 daemon 自身 key（hub 代理凭据）；
++ * 其余形态用 provider.api_key。
++ */
++function effectiveApiKey(
++  provider: ProviderConfig,
++  daemonApiKey: string | null | undefined,
++): string | undefined {
++  if (provider.api_format === 'openai_chat' && provider.litellm_proxy === true) {
++    return nonEmpty(daemonApiKey);
++  }
++  return nonEmpty(provider.api_key);
++}
++
++/**
++ * 裸 model id（对齐 codex/pi 先例 / D-010 取值链）：
++ * default_fallback_model ?? model ?? litellm_model_name。
++ */
++function effectiveModel(provider: ProviderConfig): string | undefined {
++  return (
++    nonEmpty(provider.default_fallback_model) ??
++    nonEmpty(provider.model) ??
++    nonEmpty(provider.litellm_model_name)
++  );
++}
++
++/** api.type 映射：openai_chat → 'openai-chat-completions'；anthropic/缺省 → 'anthropic-messages'。 */
++function zcodeApiType(provider: ProviderConfig): 'anthropic-messages' | 'openai-chat-completions' {
++  return provider.api_format === 'openai_chat'
++    ? 'openai-chat-completions'
++    : 'anthropic-messages';
++}
++
++/**
++ * 门槛判定（provider-file-settings 分派层调用，单参——对齐 codex/pi 写盘器接口）：
++ * 有效 baseUrl + 裸 model id 齐备，且（非 litellm_proxy 形态时）api_key 齐备。
++ * litellm_proxy 形态的密钥来自 daemon 进程注入（write 路径 daemonApiKey 入参），
++ * 门槛不预判其存在（缺失时写盘抛错走分派层 error 路径）。
++ */
++export function isZcodeFormSufficient(provider: ProviderConfig): boolean {
++  const baseUrlOk = effectiveBaseUrl(provider) !== undefined;
++  const modelOk = effectiveModel(provider) !== undefined;
++  const keyOk =
++    provider.api_format === 'openai_chat' && provider.litellm_proxy === true
++      ? true
++      : nonEmpty(provider.api_key) !== undefined;
++  return baseUrlOk && modelOk && keyOk;
++}
++
++/**
++ * 生成 provider_config.json 内容对象（导出供单测钉形状；写入主路径见
++ * writeZcodeProviderConfig）。
++ *
++ * @throws {Error} 所需字段缺失（调用方应先过 isZcodeFormSufficient 门槛）
++ */
++export function buildZcodeProviderConfig(
++  input: ZcodeDirWriteInput,
++): Record<string, unknown> {
++  const { provider, daemonApiKey } = input;
++  const baseUrl = effectiveBaseUrl(provider);
++  const apiKey = effectiveApiKey(provider, daemonApiKey);
++  const model = effectiveModel(provider);
++  if (baseUrl === undefined || apiKey === undefined || model === undefined) {
++    throw new Error(
++      'zcode provider_config 所需字段缺失（baseUrl/apiKey/model 三项齐备才可写盘）',
++    );
++  }
++  return {
++    schemaVersion: 1,
++    config: {
++      providerOrder: [PROVIDER_ID],
++      providerConfigRules: [
++        {
++          providerId: PROVIDER_ID,
++          providerName: PROVIDER_DISPLAY_NAME,
++          config: {
++            group: 'standard-personal',
++            access: { type: 'api-key', apiKey },
++            api: { type: zcodeApiType(provider), baseUrl },
++            personalModelIds: [model],
++            modelOrder: [model],
++          },
++        },
++      ],
++    },
++  };
++}
++
++/**
++ * 写 per-session provider_config.json（含 `.zcode/v2` 子目录 mkdir）。
++ *
++ * @throws {Error} 字段缺失（防御性，调用方应前置门槛）或 IO 失败
++ */
++export async function writeZcodeProviderConfig(
++  input: ZcodeDirWriteInput,
++): Promise<void> {
++  const content = buildZcodeProviderConfig(input);
++  const configDir = join(input.zcodeDir, CONFIG_REL_DIR);
++  try {
++    await mkdir(configDir, { recursive: true });
++    await writeFileAtomic(
++      join(configDir, CONFIG_FILENAME),
++      JSON.stringify(content, null, 2) + '\n',
++    );
++  } catch (e) {
++    // 写盘器本体记 error 后抛出；调用方（provider-file-settings 分派层）捕获后
++    // 跳过 ZCODE_DATA_BASE_DIR 注入仍 spawn（半写目录被 CLI 读到 ≠ 按宿主现状运行）。
++    console.error('zcode_settings_write_failed', {
++      dir: input.zcodeDir,
++      error: (e as Error)?.message ?? String(e),
++    });
++    throw e;
++  }
++}
+diff --git a/sillyhub-daemon/tests/agent-detector.test.ts b/sillyhub-daemon/tests/agent-detector.test.ts
+index 85bfbcee9..824f958c8 100644
+--- a/sillyhub-daemon/tests/agent-detector.test.ts
++++ b/sillyhub-daemon/tests/agent-detector.test.ts
+@@ -88,11 +88,11 @@ function clearAllSillyhubEnv(): void {
+ // ---------------------------------------------------------------------------
+ 
+ describe('PROVIDER_SPECS', () => {
+-  it('恰好 12 个 entry（对齐 Python AGENT_DEFS）', () => {
+-    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(12);
++  it('恰好 13 个 entry（对齐 Python AGENT_DEFS + zcode 增补）', () => {
++    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(13);
+   });
+ 
+-  it('12 个 provider 的 protocol 字段与期望表一致', () => {
++  it('13 个 provider 的 protocol 字段与期望表一致', () => {
+     const expected: Record<string, string> = {
+       claude: 'stream_json',
+       codex: 'json_rpc',
+@@ -114,7 +114,7 @@ describe('PROVIDER_SPECS', () => {
+     }
+   });
+ 
+-  it('12 个 provider 顺序与 Python AGENT_DEFS 一致', () => {
++  it('13 个 provider 顺序（Python AGENT_DEFS + zcode 追加）', () => {
+     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
+     expect(Object.keys(PROVIDER_SPECS)).toEqual([
+       'claude',
+@@ -129,6 +129,7 @@ describe('PROVIDER_SPECS', () => {
+       'kimi',
+       'kiro',
+       'antigravity',
++      'zcode',
+     ]);
+   });
+ 
+@@ -340,11 +341,14 @@ describe('AgentDetector.detectAgents', () => {
+   beforeEach(() => clearAllSillyhubEnv());
+   afterEach(() => clearAllSillyhubEnv());
+ 
+-  it('全部不可用 → 12 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
++  it('全部不可用 → 13 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = () => null;
++    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
++    const __prevLad = process.env.LOCALAPPDATA;
++    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+     expect(results.every((r) => r.status === 'unavailable')).toBe(true);
+     expect(results.every((r) => r.path === '')).toBe(true);
+     expect(results.every((r) => r.version === undefined)).toBe(true);
+@@ -358,9 +362,12 @@ describe('AgentDetector.detectAgents', () => {
+   it('claude 可用 + 版本达标 → status="available" + version + protocol', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = (bin) => (bin === 'claude' ? '/usr/bin/claude' : null);
++    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
++    const __prevLad = process.env.LOCALAPPDATA;
++    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+     d.fakeExecResult = { stdout: 'Claude Code 2.1.5\n', stderr: '' };
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+     const claude = results.find((r) => r.provider === 'claude');
+     expect(claude).toBeDefined();
+     expect(claude?.status).toBe('available');
+@@ -368,8 +375,8 @@ describe('AgentDetector.detectAgents', () => {
+     expect(claude?.version).toBe('2.1.5');
+     expect(claude?.protocol).toBe('stream_json');
+     expect(claude?.versionWarning).toBeNull();
+-    // 其余 11 个仍 unavailable。
+-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(11);
++    // 其余 12 个仍 unavailable。
++    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(12);
+   });
+ 
+   it('串行探测：12 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
+@@ -771,8 +778,11 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
+       codex: { stdout: 'codex 0.131.0\n', stderr: '' },
+       gemini: { stdout: 'gemini 1.0.0\n', stderr: '' },
+     };
++    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
++    const __prevLad = process.env.LOCALAPPDATA;
++    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+ 
+     const claude = results.find((r) => r.provider === 'claude');
+     const codex = results.find((r) => r.provider === 'codex');
+@@ -791,8 +801,8 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
+     expect(gemini?.version).toBe('1.0.0');
+     expect(gemini?.protocol).toBe('stream_json');
+ 
+-    // 其余 9 个 unavailable
+-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(9);
++    // 其余 10 个 unavailable
++    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(10);
+   });
+ 
+   // 补漏 2：isAvailable 公开方法（对齐 Python is_available）
+@@ -866,3 +876,84 @@ describe('normalizeProvider', () => {
+     expect(normalizeProvider('some_new_adapter')).toBe('some_new_adapter');
+   });
+ });
++
++// ---------------------------------------------------------------------------
++// zcode 三段式探测（2026-10-15-zcode-engine-appserver task-01，D-001/D-004）
++// ---------------------------------------------------------------------------
++
++describe('zcode 探测（三段式 + execNode + 版本门）', () => {
++  beforeEach(() => clearAllSillyhubEnv());
++  afterEach(() => clearAllSillyhubEnv());
++
++  it('env 覆盖指向 .cjs → 命中且 execNode 版本探测经 process.execPath 真实执行', async () => {
++    // 真 AgentDetector（不覆写 detectVersion）：临时 .cjs 输出 zcode <semver>，
++    // 验证 execNode 分支的命令形态是 [process.execPath, binPath, '--version']。
++    const tmp = mkdtempSync(join(tmpdir(), 'zcode-detector-'));
++    const fakeCjs = join(tmp, 'zcode.cjs');
++    writeFileSync(fakeCjs, "console.log('zcode 9.9.9');");
++    process.env.SILLYHUB_ZCODE_PATH = fakeCjs;
++    const d = new AgentDetector();
++    const result = await d.detectOne('zcode');
++    expect(result).not.toBeNull();
++    expect(result?.status).toBe('available');
++    expect(result?.path).toBe(fakeCjs);
++    expect(result?.version).toBe('9.9.9');
++    expect(result?.protocol).toBe('ndjson');
++    // 9.9.9 ≥ 0.16.9 → 无警告
++    expect(result?.versionWarning).toBeNull();
++    rmSync(tmp, { recursive: true, force: true });
++  }, 20_000);
++
++  it('env/PATH 全 miss + fallbackPaths（%LOCALAPPDATA% 展开后存在）→ 命中', async () => {
++    const tmp = mkdtempSync(join(tmpdir(), 'zcode-fallback-'));
++    const desktopLike = join(tmp, 'Programs', 'ZCode', 'resources', 'glm');
++    mkdirSync(desktopLike, { recursive: true });
++    const fakeCjs = join(desktopLike, 'zcode.cjs');
++    writeFileSync(fakeCjs, '');
++    const prevLocalAppData = process.env.LOCALAPPDATA;
++    process.env.LOCALAPPDATA = tmp;
++    try {
++      const d = new FakeDetector();
++      d.fakeFindOnPath = () => null;
++      d.fakeExecByProvider = { zcode: { stdout: 'zcode 0.16.9\n', stderr: '' } };
++      const result = await d.detectOne('zcode');
++      expect(result?.status).toBe('available');
++      // 展开产物 = LOCALAPPDATA（含平台原生分隔符）+ spec 内的正斜杠后缀（existsSync 兼容混合分隔符）
++      expect(result?.path).toBe(tmp + '/Programs/ZCode/resources/glm/zcode.cjs');
++      expect(result?.version).toBe('0.16.9');
++      expect(result?.versionWarning).toBeNull();
++    } finally {
++      if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
++      else process.env.LOCALAPPDATA = prevLocalAppData;
++      rmSync(tmp, { recursive: true, force: true });
++    }
++  });
++
++  it('三段全 miss（LOCALAPPDATA 指向空目录）→ zcode unavailable/not-found', async () => {
++    const tmp = mkdtempSync(join(tmpdir(), 'zcode-miss-'));
++    const prevLocalAppData = process.env.LOCALAPPDATA;
++    process.env.LOCALAPPDATA = tmp;
++    try {
++      const d = new FakeDetector();
++      d.fakeFindOnPath = () => null;
++      const result = await d.detectOne('zcode');
++      expect(result?.status).toBe('unavailable');
++      expect(result?.reason).toBe('not-found');
++      expect(result?.path).toBe('');
++    } finally {
++      if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
++      else process.env.LOCALAPPDATA = prevLocalAppData;
++      rmSync(tmp, { recursive: true, force: true });
++    }
++  });
++
++  it('版本低于 0.16.9 → versionWarning 非空（警告不硬拒，status 仍 available）', async () => {
++    const d = new FakeDetector();
++    d.fakeFindOnPath = (bin) => (bin === 'zcode' ? '/opt/zcode' : null);
++    d.fakeExecByProvider = { zcode: { stdout: 'zcode 0.15.0\n', stderr: '' } };
++    const result = await d.detectOne('zcode');
++    expect(result?.status).toBe('available');
++    expect(result?.version).toBe('0.15.0');
++    expect(result?.versionWarning).toContain('0.16.9');
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/provider-registry.test.ts b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+index 7bd7d0b03..61bd6e663 100644
+--- a/sillyhub-daemon/tests/interactive/provider-registry.test.ts
++++ b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+@@ -67,6 +67,7 @@ const _compileTimeKeySet: Record<InteractiveProvider, true> = {
+   codex: true,
+   cursor: true,
+   pi: true,
++  zcode: true, // 2026-10-15-zcode-engine-appserver task-05
+ };
+ void _compileTimeKeySet;
+ 
+@@ -100,8 +101,8 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
+ }
+ 
+ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
+-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi）', () => {
+-    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'cursor', 'pi']);
++  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi/zcode）', () => {
++    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'cursor', 'pi', 'zcode']);
+     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
+     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
+       Object.keys(INTERACTIVE_PROVIDERS).sort(),
+@@ -131,7 +132,12 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）',
+       // 合法性：family 必须落在 6 协议联合内。
+       expect(sixProtocols).toContain(d.family);
+       // 一致性：与批量层反查表同源（interactive 注册表不得另立映射）。
+-      expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
++      // 例外口径（2026-10-15-zcode-engine-appserver task-05）：批量层未收录的
++      // 纯交互式引擎（zcode——批量层 PROVIDER_TO_PROTOCOL 按 design 非目标不动）
++      // 不做同源比对；批量层收录者（claude/codex/cursor/pi）照旧硬比。
++      if (PROVIDER_TO_PROTOCOL[d.provider] !== undefined) {
++        expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
++      }
+     }
+     // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc、
+     // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
+diff --git a/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+new file mode 100644
+index 000000000..5250fed48
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+@@ -0,0 +1,586 @@
++// tests/interactive/zcode-app-server-driver.test.ts
++// 2026-10-15-zcode-engine-appserver task-04：驱动单测。
++// 策略：vi.mock spawn → FakeChild；FakeZcodeServer 按脚本驱动就绪门/create/
++// subscribe/send/权限请求/turn 通知（帧形状 = 2026-10-15 实测钉板）。
++
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++
++vi.mock('node:child_process', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:child_process')>();
++  return { ...actual, spawn: vi.fn() };
++});
++vi.mock('../../src/cmd-shim.js', () => ({
++  resolveWindowsCmdShim: vi.fn().mockReturnValue(null),
++}));
++
++import { spawn } from 'node:child_process';
++import {
++  ZcodeAppServerDriver,
++  ZcodeExecutableNotFoundError,
++  type ZcodeHandle,
++  type ZcodeStartOptions,
++  type ZcodeSessionPermissionHooks,
++} from '../../src/interactive/zcode-app-server-driver.js';
++import type {
++  InteractiveDriverCallbacks,
++  UserTurnInput,
++} from '../../src/interactive/driver.js';
++import { createFakeChild, readStdin, type FakeChild } from '../helpers/fake-child.js';
++import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
++
++// ── 测试工具 ────────────────────────────────────────────────────────────────
++
++function makeInputQueue(): {
++  queue: AsyncIterable<UserTurnInput>;
++  push: (text: string) => void;
++  close: () => void;
++} {
++  const pending: UserTurnInput[] = [];
++  let closed = false;
++  const queue: AsyncIterable<UserTurnInput> = {
++    [Symbol.asyncIterator]() {
++      return {
++        async next(): Promise<IteratorResult<UserTurnInput>> {
++          // 队列空且未关闭 → 持续等待（真实 InputQueue 语义：close 前 next 挂起）
++          while (pending.length === 0 && !closed) {
++            await new Promise<void>((r) => setTimeout(r, 5));
++          }
++          if (pending.length > 0) return { value: pending.shift()!, done: false };
++          return { value: undefined, done: true };
++        },
++      };
++    },
++  };
++  return {
++    queue,
++    push: (text: string) => pending.push({ type: 'user', text }),
++    close: () => {
++      closed = true;
++    },
++  };
++}
++
++function makeOpts(overrides: Partial<ZcodeStartOptions> = {}): ZcodeStartOptions {
++  return {
++    cwd: 'C:/tmp/zcode-ws',
++    pathToAgentExecutable: 'C:/Users/x/AppData/Local/Programs/ZCode/resources/glm/zcode.cjs',
++    ...overrides,
++  };
++}
++
++function makeCallbacks(): {
++  cb: InteractiveDriverCallbacks;
++  envelopes: Array<{ events: unknown[] }>;
++  results: unknown[];
++  errors: unknown[];
++} {
++  const envelopes: Array<{ events: unknown[] }> = [];
++  const results: unknown[] = [];
++  const errors: unknown[] = [];
++  return {
++    cb: {
++      onTurnMessage: (env) => {
++        envelopes.push(env as { events: unknown[] });
++      },
++      onTurnResult: (r) => {
++        results.push(r);
++      },
++      onTurnError: (e) => {
++        errors.push(e);
++      },
++    },
++    envelopes,
++    results,
++    errors,
++  };
++}
++
++const WS = 'C:/tmp/zcode-ws';
++const ZSID = 'sess_test-zcode-0001';
++
++/**
++ * Fake ZCode app-server：watch stdin 请求行，按路由脚本回响应 + 主动通知。
++ * 脚本钩子（onSend 等）可定制每方法行为。
++ */
++class FakeZcodeServer {
++  private serverReqId = 0;
++  readonly lines: string[] = [];
++  /** 轮询游标（FakeChild stdin 是 Writable，不发 'data' 事件——按累积内容增量解析）。 */
++  private consumedChars = 0;
++  constructor(
++    readonly child: FakeChild,
++    private readonly hooks: {
++      /** manual = 不回 send 应答/不回放轮（测试自行接管）；缺省 auto 全回放 */
++      sendMode?: 'auto' | 'manual';
++      permissionMode?: 'ask' | 'none';
++    } = {},
++  ) {
++    const timer = setInterval(() => this.poll(), 5);
++    timer.unref?.();
++    child.on('exit', () => clearInterval(timer));
++  }
++
++  private poll(): void {
++    const all = readStdin(this.child);
++    if (all.length <= this.consumedChars) return;
++    const fresh = all.slice(this.consumedChars);
++    this.consumedChars = all.length;
++    for (const line of fresh.split('\n')) {
++      if (!line.trim()) continue;
++      this.lines.push(line);
++      let frame: Record<string, unknown>;
++      try {
++        frame = JSON.parse(line) as Record<string, unknown>;
++      } catch {
++        continue; /* 半行（等后续增量）*/
++      }
++      // 服务端请求的应答帧：{id:"server-N", result} → 触发 onReply（权限流回放链）
++      if (typeof frame.id === 'string' && frame.id.startsWith('server-') && 'result' in frame) {
++        const cb = this.serverReplies.get(frame.id);
++        this.serverReplies.delete(frame.id);
++        cb?.();
++        continue;
++      }
++      this.route(frame);
++    }
++  }
++
++  /** 取已发出的指定方法请求（客户端→服务端）。 */
++  requestsOf(method: string): Array<Record<string, unknown>> {
++    return this.lines
++      .map((l) => JSON.parse(l) as Record<string, unknown>)
++      .filter((f) => f.method === method);
++  }
++
++  private route(frame: Record<string, unknown>): void {
++    if (typeof frame.method === 'string' && frame.id !== undefined) {
++      this.handleClientRequest(frame as { id: number; method: string; params?: unknown });
++    }
++    // 通知/应答帧不需要路由
++  }
++
++  private handleClientRequest(req: { id: number; method: string; params?: unknown }): void {
++    switch (req.method) {
++      case 'session/create':
++        // create 前先发一道 runtimePreferences 服务端请求（实测语义）
++        this.emitServerRequest('session/requestRuntimePreferences', {
++          sessionId: ZSID,
++          scope: 'runtime-materialization',
++        });
++        // 真实回包形状（2026-10-15 实测钉板）：sessionId 只在 result.session.sessionId，
++        // 无顶层直挂——驱动必须读嵌套路径（e2e 冒烟抓出的形状偏差回归钉）
++        this.reply(req.id, {
++          session: { sessionId: ZSID, status: 'idle' },
++          messages: [],
++          settings: {},
++        });
++        return;
++      case 'session/subscribe':
++        this.reply(req.id, {});
++        return;
++      case 'session/setModel':
++        this.reply(req.id, {});
++        return;
++      case 'session/setThoughtLevel':
++        this.reply(req.id, {});
++        return;
++      case 'session/compact':
++        this.reply(req.id, {});
++        return;
++      case 'session/stop':
++        this.reply(req.id, {});
++        return;
++      case 'session/close':
++        this.reply(req.id, { closed: true });
++        return;
++      case 'session/send': {
++        const content = String((req.params as { content?: string })?.content ?? '');
++        if (this.hooks.sendMode === 'manual') return; // 测试自行回帧
++        this.reply(req.id, { accepted: true, sessionId: ZSID });
++        // 默认回放一轮：turn.started → text delta → turn.completed
++        this.emitNotification('session/event', {
++          sessionId: ZSID,
++          turnId: 'turn_t1',
++          seq: 1,
++          type: 'turn.started',
++          payload: { input: content },
++        });
++        this.emitNotification('session/event', {
++          sessionId: ZSID,
++          turnId: 'turn_t1',
++          seq: 2,
++          type: 'model.streaming',
++          payload: { assistantMessageId: 'msg_a1', delta: '乒乓', done: false, kind: 'text_delta' },
++        });
++        if (this.hooks.permissionMode === 'ask') {
++          // 发权限请求并等待应答（应答回来后在 onServerReply 继续）
++          this.emitServerRequest(
++            'interaction/requestPermission',
++            {
++              sessionId: ZSID,
++              toolCallId: 'tc_1',
++              toolName: 'Bash',
++              options: [
++                { optionId: 'allow_once', kind: 'allowOnce', response: { decision: 'allow' } },
++                { optionId: 'deny', kind: 'deny', response: { decision: 'deny' } },
++              ],
++            },
++            () => {
++              this.finishTurn();
++            },
++          );
++          return;
++        }
++        this.finishTurn();
++        return;
++      }
++      default:
++        this.reply(req.id, {});
++    }
++  }
++
++  private turnFinished = false;
++  private finishTurn(): void {
++    if (this.turnFinished) return;
++    this.turnFinished = true;
++    this.emitNotification('session/event', {
++      sessionId: ZSID,
++      turnId: 'turn_t1',
++      seq: 99,
++      type: 'turn.completed',
++      payload: {
++        response: '乒乓',
++        usage: { inputTokens: 100, outputTokens: 5, totalTokens: 105, cacheReadTokens: 95, cacheWriteTokens: 0 },
++        duration: 800,
++        resultType: 'success',
++      },
++    });
++  }
++
++  /** 发 startup 就绪序列（测试在 spawn 后调用）。 */
++  startReady(): void {
++    this.child._emitLines([
++      JSON.stringify({ method: 'startup/storageState', params: { phase: 'checking', sequence: 1 } }),
++      JSON.stringify({ method: 'startup/storageState', params: { phase: 'ready', sequence: 2 } }),
++    ]);
++  }
++
++  emitNotification(method: string, params: unknown): void {
++    this.child._emitLines([JSON.stringify({ method, params })]);
++  }
++
++  private serverReplies = new Map<string, () => void>();
++  emitServerRequest(method: string, params: unknown, onReply?: () => void): void {
++    this.serverReqId += 1;
++    const id = `server-${this.serverReqId}`;
++    if (onReply) this.serverReplies.set(id, onReply);
++    this.child._emitLines([JSON.stringify({ id, method, params })]);
++  }
++
++  private reply(id: number, result: unknown): void {
++    this.child._emitLines([JSON.stringify({ id, result })]);
++  }
++}
++
++/** 等待条件真或超时（轮询 10ms）。 */
++async function until(cond: () => boolean, ms = 3000): Promise<void> {
++  const deadline = Date.now() + ms;
++  while (!cond()) {
++    if (Date.now() > deadline) throw new Error('until 超时');
++    await new Promise((r) => setTimeout(r, 10));
++  }
++}
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  vi.mocked(resolveWindowsCmdShim).mockReturnValue(null);
++});
++
++// ── 用例 ────────────────────────────────────────────────────────────────────
++
++describe('start 边界', () => {
++  it('executable 缺失 → ZcodeExecutableNotFoundError', async () => {
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    await expect(
++      driver.start(iq.queue, makeOpts({ pathToAgentExecutable: '' })),
++    ).rejects.toBeInstanceOf(ZcodeExecutableNotFoundError);
++  });
++
++  it('.cjs 目标 → spawn(process.execPath, [zcode.cjs, app-server, --cwd, dir])', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    await driver.start(iq.queue, makeOpts());
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    expect(spawn).toHaveBeenCalledWith(
++      process.execPath,
++      [makeOpts().pathToAgentExecutable, 'app-server', '--cwd', WS],
++      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }),
++    );
++  });
++});
++
++describe('consume 全链路（ready → create/subscribe → send → 流式 → 收敛）', () => {
++  it('一轮对话：session_started 上报 + text 流事件 + turn_result usage 收敛 + 控制面帧形状', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = (await driver.start(iq.queue, makeOpts({ model: 'GLM-5.3' }))) as ZcodeHandle;
++    const { cb, envelopes, results, errors } = makeCallbacks();
++
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    // 等会话建立 + 订阅 + setModel 全部完成
++    await until(() => server.requestsOf('session/subscribe').length > 0 && server.requestsOf('session/setModel').length > 0);
++
++    // create 期间的 runtimePreferences 服务端请求被自动应答（空偏好帧已回写 stdin）
++    await until(() =>
++      readStdin(child).includes('"askUserQuestionAutoResolutionEnabled"'),
++    );
++
++    iq.push('只回复两个字：乒乓');
++    await until(() => results.length > 0);
++    iq.close();
++    await consumePromise;
++
++    // 控制面帧形状钉板
++    const send = server.requestsOf('session/send');
++    expect(send).toHaveLength(1);
++    expect(send[0]?.params).toEqual({ sessionId: ZSID, content: '只回复两个字：乒乓' });
++    expect(server.requestsOf('session/subscribe')[0]?.params).toEqual({
++      sessionId: ZSID,
++      deliveryKind: 'desktop-continuous',
++    });
++
++    // 事件流：session_started + text delta
++    const allEvents = envelopes.flatMap((e) => e.events as Array<Record<string, unknown>>);
++    const sessionStarted = allEvents.find((e) => e.type === 'status' && e.subtype === 'session_started');
++    expect(sessionStarted?.session_id).toBe(ZSID);
++    const textEv = allEvents.find((e) => e.type === 'text');
++    expect(textEv?.content).toBe('乒乓');
++
++    // turn 结果
++    expect(results).toHaveLength(1);
++    const result = results[0] as Record<string, unknown>;
++    expect(result.subtype).toBe('success');
++    expect(result.is_error).toBeFalsy();
++    expect(result.session_id).toBe(ZSID);
++    expect(result.usage).toEqual({
++      input_tokens: 100,
++      output_tokens: 5,
++      cache_read_tokens: 95,
++      cache_creation_tokens: 0,
++      ctx_tokens: 105,
++      api_duration_ms: 800,
++    });
++    expect(errors).toHaveLength(0);
++  }, 15_000);
++
++  it('ready 门超时 → 结构化 error result（failed）', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const driver = new ZcodeAppServerDriver({ readyTimeoutMs: 80 });
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb, results, errors } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    // 不发 startup ready → 超时
++    await consumePromise;
++    expect(results).toHaveLength(1);
++    const result = results[0] as Record<string, unknown>;
++    expect(result.is_error).toBe(true);
++    expect(String(result.result)).toContain('ready');
++    expect(errors).toHaveLength(1);
++  }, 10_000);
++
++  it('session/send 结构化拒绝 → 该轮 error result，不重试', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child, {
++      sendMode: 'manual',
++    });
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb, results } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++    iq.push('x');
++    await until(() => server.requestsOf('session/send').length > 0);
++    const req = server.requestsOf('session/send')[0] as { id: number };
++    child._emitLines([
++      JSON.stringify({ id: req.id, error: { code: -32602, message: 'Invalid params' } }),
++    ]);
++    await until(() => results.length > 0);
++    iq.close();
++    await consumePromise;
++    const result = results[0] as Record<string, unknown>;
++    expect(result.is_error).toBe(true);
++    expect(String(result.result)).toContain('Invalid params');
++    // 不重试：send 帧只出现一次
++    expect(server.requestsOf('session/send')).toHaveLength(1);
++  }, 15_000);
++});
++
++describe('审批代答桥三态', () => {
++  function setup(hooks: ConstructorParameters<typeof FakeZcodeServer>[1]) {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child, hooks);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    return { child, server, driver, iq };
++  }
++
++  async function runToPermission(
++    opts: Partial<ZcodeStartOptions>,
++  ): Promise<{ child: FakeChild; server: FakeZcodeServer; results: unknown[]; envelopes: Array<{ events: unknown[] }> }> {
++    const { child, server, driver, iq } = setup({ permissionMode: 'ask' });
++    const handle = await driver.start(iq.queue, makeOpts(opts));
++    const { cb, envelopes, results } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++    iq.push('do it');
++    // 等权限请求的应答已回写 stdin（桥完成）
++    await until(() => /server-\d/.test(readStdin(child)) && readStdin(child).includes('outcome'));
++    await until(() => results.length > 0);
++    iq.close();
++    await consumePromise;
++    return { child, server, results, envelopes };
++  }
++
++  it('manualApproval=false → 自动放行（选 allow_once）', async () => {
++    const { child } = await runToPermission({ manualApproval: false });
++    const stdin = readStdin(child);
++    const reply = JSON.parse(
++      stdin.slice(stdin.lastIndexOf('{"id":"server-')).split('\n').find((l) => l.startsWith('{"id":"server-'))!,
++    ) as { id: string; result: { outcome: { outcome: string; optionId: string } } };
++    expect(reply.result.outcome).toEqual({ outcome: 'selected', optionId: 'allow_once' });
++  }, 15_000);
++
++  it('manualApproval=true 无 sessionPermission → fail-closed（选 deny）', async () => {
++    const { child } = await runToPermission({ manualApproval: true });
++    const stdin = readStdin(child);
++    const reply = JSON.parse(
++      stdin.slice(stdin.lastIndexOf('{"id":"server-')).split('\n').find((l) => l.startsWith('{"id":"server-'))!,
++    ) as { result: { outcome: { optionId: string } } };
++    expect(reply.result.outcome.optionId).toBe('deny');
++  }, 15_000);
++
++  it('manualApproval=true + 用户 allow → allow_once；deny → deny', async () => {
++    const allow: ZcodeSessionPermissionHooks = {
++      requestPermission: async () => ({ behavior: 'allow' }),
++    };
++    const { child } = await runToPermission({ manualApproval: true, sessionPermission: allow });
++    const stdin = readStdin(child);
++    const reply = JSON.parse(
++      stdin.slice(stdin.lastIndexOf('{"id":"server-')).split('\n').find((l) => l.startsWith('{"id":"server-'))!,
++    ) as { result: { outcome: { optionId: string } } };
++    expect(reply.result.outcome.optionId).toBe('allow_once');
++
++    const deny: ZcodeSessionPermissionHooks = {
++      requestPermission: async () => ({ behavior: 'deny' }),
++    };
++    const r2 = await runToPermission({ manualApproval: true, sessionPermission: deny });
++    const stdin2 = readStdin(r2.child);
++    const reply2 = JSON.parse(
++      stdin2.slice(stdin2.lastIndexOf('{"id":"server-')).split('\n').find((l) => l.startsWith('{"id":"server-'))!,
++    ) as { result: { outcome: { optionId: string } } };
++    expect(reply2.result.outcome.optionId).toBe('deny');
++  }, 25_000);
++});
++
++describe('interrupt / compact / setThinkingLevel', () => {
++  it('无 active turn → false；有轮 → session/stop 帧发出', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child, {
++      sendMode: 'manual', // 不回放 turn——保持 in-flight
++    });
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++
++    // 未发轮：interrupt false
++    expect(await driver.interrupt(handle)).toBe(false);
++
++    // in-flight 轮：interrupt true + stop 帧形状
++    iq.push('long task');
++    await until(() => server.requestsOf('session/send').length > 0);
++    expect(await driver.interrupt(handle)).toBe(true);
++    const stop = server.requestsOf('session/stop');
++    expect(stop).toHaveLength(1);
++    expect(stop[0]?.params).toEqual({ sessionId: ZSID });
++
++    iq.close();
++    handle.close();
++    await consumePromise.catch(() => {});
++  }, 15_000);
++
++  it('compact → session/compact 帧 + ok:true', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++    const r = await driver.compact(handle);
++    expect(r.ok).toBe(true);
++    expect(server.requestsOf('session/compact')).toHaveLength(1);
++    iq.close();
++    await consumePromise;
++  }, 15_000);
++
++  it('setThinkingLevel：平台档 → 引擎档映射 + 帧；非法档拒绝', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++
++    const ok = await driver.setThinkingLevel(handle, 'high');
++    expect(ok.ok).toBe(true);
++    expect(server.requestsOf('session/setThoughtLevel')[0]?.params).toEqual({
++      sessionId: ZSID,
++      level: 'high',
++    });
++    // xhigh 降级 high（矩阵）
++    const ok2 = await driver.setThinkingLevel(handle, 'xhigh');
++    expect(ok2.ok).toBe(true);
++    expect(server.requestsOf('session/setThoughtLevel')[1]?.params).toEqual({
++      sessionId: ZSID,
++      level: 'high',
++    });
++    // off = 不携带 → 驱动拒绝（undefined 映射）
++    const off = await driver.setThinkingLevel(handle, 'off');
++    expect(off.ok).toBe(false);
++    iq.close();
++    await consumePromise;
++  }, 15_000);
++});
+diff --git a/sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts b/sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts
+new file mode 100644
+index 000000000..f476cff35
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts
+@@ -0,0 +1,203 @@
++// tests/interactive/zcode-e2e.smoke.test.ts
++// 2026-10-15-zcode-engine-appserver task-08：ZCode 引擎端到端冒烟（真实 CLI）。
++//
++// 覆盖（成功标准收口）：
++//   1. 全链路一轮对话：真实 spawn → 就绪门 → create/subscribe → session/send →
++//      text/thinking 事件流 → turn_result usage（真实模型轮，本地已登录账号）；
++//   2. per-session 配置面隔离：ZCODE_DATA_BASE_DIR 指向临时隔离目录，引擎在
++//      隔离目录写 telemetry-state.json（实证配置面读取自隔离目录，D-002）；
++//   3. stdin EOF 行为记录（R-05）：close 后观察子进程退出方式与耗时，事实留痕。
++//
++// CLI 缺席容错（照 provider-injection-smoke.integ.test.ts 惯例）：引擎二进制
++// 或本机登录凭据（~/.zcode/v2/credentials.json）缺失 → console.warn 后 return
++// 跳过（CI 无 Desktop 环境）；不用 it.skip（动态条件）。
++//
++// 凭据纪律：复制到临时隔离目录的 credentials.json / provider_config.json 在
++// afterEach 整体删除；测试不读取、不打印任何凭据内容。
++
++import { describe, it, expect, beforeEach, afterEach } from 'vitest';
++import { existsSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
++import { homedir, tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++import { ZcodeAppServerDriver } from '../../src/interactive/zcode-app-server-driver.js';
++import type { InteractiveDriverCallbacks, UserTurnInput } from '../../src/interactive/driver.js';
++
++/** 引擎路径解析（与 agent-detector PROVER_SPECS.zcode 三段式同口径的测试内联版）。 */
++function resolveZcodeEngine(): string | null {
++  const envPath = process.env['SILLYHUB_ZCODE_PATH'];
++  if (envPath && existsSync(envPath)) return envPath;
++  const localAppData = process.env['LOCALAPPDATA'];
++  if (localAppData) {
++    const p = join(localAppData, 'Programs', 'ZCode', 'resources', 'glm', 'zcode.cjs');
++    if (existsSync(p)) return p;
++  }
++  return null;
++}
++
++/** 本机 ZCode 登录/配置面（复制进隔离目录用；缺失 = 本机未登录 → 跳过）。 */
++const HOST_V2_DIR = join(homedir(), '.zcode', 'v2');
++const HOST_CREDENTIALS = join(HOST_V2_DIR, 'credentials.json');
++const CONFIG_FILES = [
++  'credentials.json',
++  'provider_config.json',
++  'setting.json',
++  'bot-config.json',
++  'bot-config.v3.json',
++];
++
++/** 真实模型轮上限（秒级完成；60s 富余，vitest testTimeout 120s 兜底）。 */
++const TURN_TIMEOUT_MS = 60_000;
++
++const enginePath = resolveZcodeEngine();
++const hostReady = existsSync(HOST_CREDENTIALS);
++
++const skipReason = !enginePath
++  ? 'ZCode 引擎未探测到（SILLYHUB_ZCODE_PATH / Desktop fallback 均 miss）'
++  : !hostReady
++    ? '本机 ZCode 登录凭据缺失（~/.zcode/v2/credentials.json）'
++    : null;
++
++/** 隔离目录 + 复制配置面。 */
++let isoDir: string;
++beforeEach(() => {
++  isoDir = mkdtempSync(join(tmpdir(), 'zcode-e2e-'));
++  if (skipReason === null) {
++    mkdirSync(join(isoDir, '.zcode', 'v2'), { recursive: true });
++    for (const f of CONFIG_FILES) {
++      const src = join(HOST_V2_DIR, f);
++      if (existsSync(src)) {
++        copyFileSync(src, join(isoDir, '.zcode', 'v2', f));
++      }
++    }
++  }
++});
++afterEach(() => {
++  rmSync(isoDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
++});
++
++/** 简易输入队列（单订阅语义，照驱动测试 helper 简化版）。 */
++function makeInputQueue(): {
++  queue: AsyncIterable<UserTurnInput>;
++  push: (text: string) => void;
++  close: () => void;
++} {
++  const pending: UserTurnInput[] = [];
++  let closed = false;
++  const queue: AsyncIterable<UserTurnInput> = {
++    [Symbol.asyncIterator]() {
++      return {
++        async next(): Promise<IteratorResult<UserTurnInput>> {
++          while (pending.length === 0 && !closed) {
++            await new Promise<void>((r) => setTimeout(r, 20));
++          }
++          if (pending.length > 0) return { value: pending.shift()!, done: false };
++          return { value: undefined, done: true };
++        },
++      };
++    },
++  };
++  return {
++    queue,
++    push: (text: string) => pending.push({ type: 'user', text }),
++    close: () => {
++      closed = true;
++    },
++  };
++}
++
++describe('zcode 端到端冒烟（真实引擎）', () => {
++  it('一轮对话全链路：事件流 text/thinking + turn_result usage + 隔离目录落盘', async () => {
++    if (skipReason !== null) {
++      console.warn(`[zcode-e2e] skipped: ${skipReason}`);
++      return;
++    }
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, {
++      cwd: isoDir,
++      pathToAgentExecutable: enginePath!,
++      env: { ...process.env, ZCODE_DATA_BASE_DIR: isoDir },
++    });
++
++    const events: Array<Record<string, unknown>> = [];
++    const results: Array<Record<string, unknown>> = [];
++    const errors: unknown[] = [];
++    const cb: InteractiveDriverCallbacks = {
++      onTurnMessage: (env) => {
++        for (const e of env.events) events.push(e as Record<string, unknown>);
++      },
++      onTurnResult: (r) => {
++        results.push(r as Record<string, unknown>);
++      },
++      onTurnError: (e) => {
++        errors.push(e);
++      },
++    };
++    const consumePromise = driver.consume(handle, cb);
++
++    iq.push('只回复两个字：乒乓');
++    const deadline = Date.now() + TURN_TIMEOUT_MS;
++    while (results.length === 0 && Date.now() < deadline) {
++      await new Promise<void>((r) => setTimeout(r, 200));
++    }
++    iq.close();
++    await consumePromise;
++
++    let eofElapsedMs = -1;
++    try {
++      // 会话建立是硬断言（协议链正确性），与模型轮结果无关。
++      const sessionStarted = events.find(
++        (e) => e['type'] === 'status' && e['subtype'] === 'session_started',
++      );
++      expect(sessionStarted?.['session_id']).toMatch(/^sess_/);
++      expect(results).toHaveLength(1);
++      const result = results[0]!;
++      expect(String(result['session_id'])).toMatch(/^sess_/);
++
++      // 模型轮双路径（本机真实额度状态决定走哪条；两条都是协议链正确性证据）：
++      //   A 成功：subtype=success + usage 有量 + 文本流含「乒乓」
++      //   B 额度/供应商业务错误：is_error=true + 结构化错误 message（D-004 兜底面，
++      //     轮必须收敛不挂——turn.failed 归一化映射的回归面）
++      if (result['is_error'] === true) {
++        const msg = String(result['result']);
++        console.log(`[zcode-e2e] 模型轮走 B 路径（供应商错误收敛）：${msg.slice(0, 160)}`);
++        expect(msg.length).toBeGreaterThan(0);
++        // 结构化错误事件已入流（attribution/error_code 元数据）
++        const errEvent = events.find((e) => e['type'] === 'error');
++        expect(errEvent).toBeDefined();
++        expect(String(errEvent?.['content']).length).toBeGreaterThan(0);
++      } else {
++        expect(result['subtype']).toBe('success');
++        const usage = result['usage'] as Record<string, number> | undefined;
++        expect(usage?.['input_tokens'] ?? 0).toBeGreaterThan(0);
++        expect(usage?.['output_tokens'] ?? 0).toBeGreaterThan(0);
++        const text = events
++          .filter((e) => e['type'] === 'text')
++          .map((e) => String(e['content']))
++          .join('');
++        expect(text).toContain('乒乓');
++        console.log('[zcode-e2e] 模型轮走 A 路径（成功，usage + 文本流断言通过）');
++      }
++
++      // 隔离目录落盘（配置面读取自隔离目录的实证钩子：引擎写 telemetry-state.json）
++      expect(existsSync(join(isoDir, '.zcode', 'v2', 'telemetry-state.json'))).toBe(true);
++    } finally {
++      // R-05：stdin EOF 退出行为——close 后观察子进程退出方式与耗时（事实留痕）。
++      // finally 兜底：断言失败也要 close 杀子进程（防 Windows 目录句柄锁）。
++      const t0 = Date.now();
++      await handle.close();
++      const child = (handle as unknown as { child: { exitCode: number | null } }).child;
++      const exitDeadline = Date.now() + 15_000;
++      while (child.exitCode === null && Date.now() < exitDeadline) {
++        await new Promise<void>((r) => setTimeout(r, 100));
++      }
++      eofElapsedMs = Date.now() - t0;
++      console.log(
++        `[zcode-e2e] R-05 stdin EOF 行为：exitCode=${String(child.exitCode)}，` +
++          `close 后 ${eofElapsedMs}ms 退出`,
++      );
++    }
++    expect(eofElapsedMs).toBeLessThan(15_000);
++  }, 120_000);
++});
+diff --git a/sillyhub-daemon/tests/interactive/zcode-envelope.test.ts b/sillyhub-daemon/tests/interactive/zcode-envelope.test.ts
+new file mode 100644
+index 000000000..7022eb387
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/zcode-envelope.test.ts
+@@ -0,0 +1,163 @@
++// tests/interactive/zcode-envelope.test.ts
++// 2026-10-15-zcode-engine-appserver task-02：ZCode 私有协议信封层单测。
++// 协议事实锚（2026-10-15 实测，decisions.md D-005 evidence）：
++//   - 信封 strict 四分支 union：请求 {id,method,params?} / 通知 {method,params?} /
++//     响应 {id,result} / 错误 {id,error:{code,message,data?}}——多余键（jsonrpc/
++//     requestId）服务端 zod 直接拒（实测镜像）；
++//   - 客户端请求 id 数字自增；服务端主动请求 id 为字符串（"server-N"）；
++//   - 无 initialize 握手，入站按 union 四分支解复用。
++
++import { describe, it, expect, vi, beforeEach } from 'vitest';
++import { ZcodeEnvelope } from '../../src/adapters/zcode-envelope.js';
++
++/** 收集写出的帧（模拟 stdin write sink）。 */
++class Sink {
++  lines: string[] = [];
++  write(line: string): void {
++    this.lines.push(line);
++  }
++  last(): unknown {
++    return JSON.parse(this.lines[this.lines.length - 1] ?? 'null');
++  }
++  parsed(): unknown[] {
++    return this.lines.map((l) => JSON.parse(l));
++  }
++}
++
++describe('ZcodeEnvelope 编解码', () => {
++  it('出站请求帧：恰好 {id,method,params} 三键，id 数字自增，无 jsonrpc/requestId 键', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    void env.request('session/list', {}, sink.write.bind(sink));
++    void env.request('session/send', { content: 'hi' }, sink.write.bind(sink));
++    const frames = sink.parsed() as Array<Record<string, unknown>>;
++    expect(frames).toHaveLength(2);
++    expect(frames[0]).toEqual({ id: 1, method: 'session/list', params: {} });
++    expect(frames[1]).toEqual({ id: 2, method: 'session/send', params: { content: 'hi' } });
++    expect('jsonrpc' in frames[0]).toBe(false);
++    expect('requestId' in frames[0]).toBe(false);
++    // 帧以换行结尾（NDJSON）
++    expect(sink.lines[0].endsWith('\n')).toBe(true);
++  });
++
++  it('params undefined 时帧省略 params 键（strict 镜像：不发多余键）', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    void env.request('session/stop', undefined, sink.write.bind(sink));
++    expect(sink.last()).toEqual({ id: 1, method: 'session/stop' });
++  });
++
++  it('出站通知帧：{method,params} 无 id', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    env.sendNotification('notifications/cancelled', { x: 1 }, sink.write.bind(sink));
++    expect(sink.last()).toEqual({ method: 'notifications/cancelled', params: { x: 1 } });
++  });
++
++  it('服务端请求应答帧：{id:"server-N", result} 字符串 id 原样回带', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    env.handleLine('{"id":"server-1","method":"session/requestRuntimePreferences","params":{"scope":"runtime-materialization"}}', {
++      write: sink.write.bind(sink),
++    });
++    // 未注册 handler → 自动回空 result（防 15s 超时挂死）
++    expect(sink.last()).toEqual({ id: 'server-1', result: {} });
++  });
++
++  it('编码往返：encode → JSON.parse 逐字段无损', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    env.sendNotification('state.updated', { a: { b: [1, 2, 3] } }, sink.write.bind(sink));
++    expect(sink.last()).toEqual({
++      method: 'state.updated',
++      params: { a: { b: [1, 2, 3] } },
++    });
++  });
++});
++
++describe('ZcodeEnvelope 入站四分支解复用', () => {
++  it('通知（无 id 有 method）→ onNotification 回调', () => {
++    const env = new ZcodeEnvelope();
++    const seen: unknown[] = [];
++    env.onNotification((n) => seen.push(n));
++    env.handleLine('{"method":"state.updated","params":{"patch":{"status":"running"}}}', { write: () => {} });
++    expect(seen).toEqual([{ method: 'state.updated', params: { patch: { status: 'running' } } }]);
++  });
++
++  it('响应（id 数字 + result）→ pending resolve', async () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    const p = env.request('session/list', {}, sink.write.bind(sink));
++    env.handleLine('{"id":1,"result":{"sessions":[]}}', { write: () => {} });
++    await expect(p).resolves.toEqual({ sessions: [] });
++  });
++
++  it('错误帧（id + error）→ pending reject（结构化 error 对象）', async () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    const p = env.request('session/create', {}, sink.write.bind(sink));
++    env.handleLine('{"id":1,"error":{"code":-32602,"message":"Invalid params"}}', { write: () => {} });
++    await expect(p).rejects.toMatchObject({
++      code: -32602,
++      message: 'Invalid params',
++    });
++  });
++
++  it('两个 in-flight 请求乱序响应 → 各自正确 resolve', async () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    const p1 = env.request('a', {}, sink.write.bind(sink));
++    const p2 = env.request('b', {}, sink.write.bind(sink));
++    env.handleLine('{"id":2,"result":"second"}', { write: () => {} });
++    env.handleLine('{"id":1,"result":"first"}', { write: () => {} });
++    expect(await p1).toBe('first');
++    expect(await p2).toBe('second');
++  });
++
++  it('已注册服务端请求 → handler 收到 params 并可自定义应答', () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    env.registerServerRequestHandler('interaction/requestPermission', (params, reply) => {
++      expect(params).toEqual({ options: [] });
++      reply({ outcome: 'deny' });
++    });
++    env.handleLine('{"id":"server-7","method":"interaction/requestPermission","params":{"options":[]}}', {
++      write: sink.write.bind(sink),
++    });
++    expect(sink.last()).toEqual({ id: 'server-7', result: { outcome: 'deny' } });
++  });
++
++  it('空行/空白行安全忽略；非法 JSON → onProtocolError 不抛', () => {
++    const env = new ZcodeEnvelope();
++    const errors: unknown[] = [];
++    env.onProtocolError((e) => errors.push(e));
++    expect(() => {
++      env.handleLine('', { write: () => {} });
++      env.handleLine('   ', { write: () => {} });
++      env.handleLine('not-json', { write: () => {} });
++    }).not.toThrow();
++    expect(errors).toHaveLength(1);
++  });
++
++  it('未知形状帧（如 {foo:1}）→ onProtocolError 记录且不误分发', () => {
++    const env = new ZcodeEnvelope();
++    const errors: unknown[] = [];
++    const seen: unknown[] = [];
++    env.onProtocolError((e) => errors.push(e));
++    env.onNotification((n) => seen.push(n));
++    env.handleLine('{"foo":1}', { write: () => {} });
++    expect(errors).toHaveLength(1);
++    expect(seen).toHaveLength(0);
++  });
++});
++
++describe('ZcodeEnvelope 请求超时', () => {
++  beforeEach(() => vi.useRealTimers());
++
++  it('超时未响应 → reject 且 pending 清理', async () => {
++    const env = new ZcodeEnvelope();
++    const sink = new Sink();
++    const p = env.request('slow', {}, sink.write.bind(sink), { timeoutMs: 30 });
++    await expect(p).rejects.toMatchObject({ timedOut: true });
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/zcode-events.test.ts b/sillyhub-daemon/tests/interactive/zcode-events.test.ts
+new file mode 100644
+index 000000000..8d7483067
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/zcode-events.test.ts
+@@ -0,0 +1,297 @@
++// tests/interactive/zcode-events.test.ts
++// 2026-10-15-zcode-engine-appserver task-03：通知 → AgentEvent 归一化器单测。
++// fixtures = 2026-10-15 实测抓包序列（subscribe deliveryKind='desktop-continuous'
++// 后 session/event 推流 + state.updated 模型目录），逐条钉映射。
++
++import { describe, it, expect } from 'vitest';
++import {
++  normalizeZcodeNotification,
++  type ZcodeStateSnapshot,
++} from '../../src/interactive/zcode-events.js';
++
++const SID = 'sess_78bf90e1-fe5c-4df2-a4df-be536f93f2b0';
++const TURN = 'turn_47b8d224-2a70-4e22-aa36-a132c87496b6';
++const AMID = 'msg_mv95rwm4_e5171a92-d5be-4686-98da-f18f894ef7b5';
++
++/** 实测 session/event 帧骨架（seq/type/payload 逐字段来自抓包）。 */
++function sev(seq: number, type: string, payload: Record<string, unknown>) {
++  return {
++    method: 'session/event',
++    params: { sessionId: SID, turnId: TURN, seq, type, payload },
++  };
++}
++
++describe('normalizeZcodeNotification：model.streaming 双通道', () => {
++  it('text_delta → text 事件（delta 直通 + streaming 元数据 + assistantMessageId）', () => {
++    const out = normalizeZcodeNotification(
++      sev(8, 'model.streaming', {
++        assistantMessageId: AMID,
++        delta: '乒乓',
++        done: false,
++        kind: 'text_delta',
++      }),
++    );
++    expect(out).toEqual([
++      {
++        type: 'text',
++        content: '乒乓',
++        session_id: SID,
++        metadata: {
++          zcodeTurnId: TURN,
++          zcodeSeq: 8,
++          source: 'model_streaming',
++          streaming: true,
++          assistantMessageId: AMID,
++        },
++      },
++    ]);
++  });
++
++  it('reasoning_delta → thinking 事件（思考流通道）', () => {
++    const out = normalizeZcodeNotification(
++      sev(5, 'model.streaming', {
++        assistantMessageId: AMID,
++        delta: 'The',
++        done: false,
++        kind: 'reasoning_delta',
++      }),
++    );
++    expect(out).toHaveLength(1);
++    expect(out[0]?.type).toBe('thinking');
++    expect(out[0]?.content).toBe('The');
++  });
++
++  it('空 delta → 零事件（不产空文本）', () => {
++    expect(
++      normalizeZcodeNotification(
++        sev(9, 'model.streaming', { delta: '', done: false, kind: 'text_delta' }),
++      ),
++    ).toEqual([]);
++  });
++
++  it('未知 kind（如未来新增）→ 宽松直通 text 通道', () => {
++    const out = normalizeZcodeNotification(
++      sev(10, 'model.streaming', { delta: 'x', done: false, kind: 'future_kind' }),
++    );
++    expect(out[0]?.type).toBe('text');
++  });
++});
++
++describe('normalizeZcodeNotification：turn.completed 收尾', () => {
++  it('完整 usage 载荷 → 单个 turn_result 事件（一等 usage 字段全量映射）', () => {
++    const out = normalizeZcodeNotification(
++      sev(11, 'turn.completed', {
++        response: '乒乓',
++        tokenCount: 30249,
++        usage: {
++          source: 'provider',
++          modelRequestCount: 1,
++          inputTokens: 30224,
++          outputTokens: 25,
++          totalTokens: 30249,
++          cacheReadTokens: 30208,
++          cacheWriteTokens: 0,
++          reasoningTokens: 0,
++        },
++        toolCallCount: 0,
++        historyRoundCount: 1,
++        duration: 2783,
++        resultType: 'success',
++      }),
++    );
++    expect(out).toHaveLength(1);
++    const ev = out[0]!;
++    expect(ev.type).toBe('turn_result');
++    expect(ev.content).toBe('');
++    expect(ev.usage).toEqual({
++      input_tokens: 30224,
++      output_tokens: 25,
++      cache_read_tokens: 30208,
++      cache_creation_tokens: 0,
++      ctx_tokens: 30249,
++      api_duration_ms: 2783,
++    });
++    expect(ev.metadata?.response).toBe('乒乓');
++    expect(ev.metadata?.turn_status).toBe('success');
++  });
++
++  it('无 usage 载荷 → turn_result 仍产出（usage undefined，轮收敛不依赖 usage）', () => {
++    const out = normalizeZcodeNotification(sev(12, 'turn.completed', {}));
++    expect(out).toHaveLength(1);
++    expect(out[0]?.type).toBe('turn_result');
++    expect(out[0]?.usage).toBeUndefined();
++  });
++
++  it('turn.failed（provider 业务错误实测形状）→ error + turn_result(failed) 双事件收敛', () => {
++    // 2026-10-15 实测抓包（429 额度用尽：session/event type=turn.failed）
++    const out = normalizeZcodeNotification(
++      sev(20, 'turn.failed', {
++        error: {
++          type: 'unknown_error',
++          attribution: {
++            source: 'provider',
++            reason: 'rate_limited',
++            errorPhase: 'stream',
++            exceptionKind: 'provider_business',
++            providerId: 'bigmodel-api',
++            modelId: 'GLM-5.3',
++            providerKind: 'anthropic',
++            transport: 'sse',
++            statusCode: 429,
++            providerErrorCode: '1308',
++            retryable: false,
++          },
++          code: '1308',
++          message: '[1308][已达到 5 小时的使用上限。您的限额将在 2026-10-15 18:19:50 重置。]',
++        },
++      }),
++    );
++    expect(out).toHaveLength(2);
++    expect(out[0]?.type).toBe('error');
++    expect(out[0]?.content).toContain('使用上限');
++    expect(out[0]?.metadata?.error_code).toBe('1308');
++    expect(out[0]?.metadata?.error_type).toBe('unknown_error');
++    expect((out[0]?.metadata?.attribution as Record<string, unknown>)?.reason).toBe('rate_limited');
++    // turn_result 失败收尾（驱动收敛判据）
++    expect(out[1]?.type).toBe('turn_result');
++    expect(out[1]?.metadata?.turn_status).toBe('failed');
++    expect(out[1]?.metadata?.source).toBe('turn_failed');
++  });
++
++  it('turn.failed 无 message → 兜底文案不空', () => {
++    const out = normalizeZcodeNotification(sev(21, 'turn.failed', {}));
++    expect(out[0]?.content).toBe('zcode 轮失败（引擎未附 message）');
++    expect(out[1]?.metadata?.turn_status).toBe('failed');
++  });
++});
++
++describe('normalizeZcodeNotification：观察面与 fail-soft', () => {
++  it('turn.started / session.updated / session.titleUpdated → 零事件', () => {
++    expect(normalizeZcodeNotification(sev(1, 'session.titleUpdated', { title: 'x' }))).toEqual([]);
++    expect(normalizeZcodeNotification(sev(2, 'turn.started', { input: 'y' }))).toEqual([]);
++    expect(normalizeZcodeNotification(sev(3, 'session.updated', { messageCount: 6 }))).toEqual([]);
++  });
++
++  it('未知顶层 type → 零事件不抛错', () => {
++    expect(normalizeZcodeNotification(sev(99, 'session.futureThing', {}))).toEqual([]);
++  });
++
++  it('遥测通道通知（v4/telemetry / computer-use / process/*）→ 零事件（内容不在其中）', () => {
++    expect(
++      normalizeZcodeNotification({
++        method: 'v4/telemetry/event',
++        params: { kind: 'stream.chunk', channel: 'text', chunkLength: 2 },
++      }),
++    ).toEqual([]);
++    expect(
++      normalizeZcodeNotification({
++        method: 'computer-use/operation-event',
++        params: { kind: 'turn-completed', turnId: TURN },
++      }),
++    ).toEqual([]);
++    expect(normalizeZcodeNotification({ method: 'process/mcpTelemetry', params: {} })).toEqual([]);
++  });
++});
++
++describe('normalizeZcodeNotification：state.updated 快照', () => {
++  it('实测形状 → 模型目录 + reasoning levels + 当前模型写回 stateOut', () => {
++    const state: { snapshot?: ZcodeStateSnapshot } = {};
++    const out = normalizeZcodeNotification(
++      {
++        method: 'state.updated',
++        params: {
++          sessionId: SID,
++          scope: 'session',
++          reason: 'model_list_refreshed',
++          patch: {
++            status: 'idle',
++            model: {
++              current: { providerId: 'bigmodel-api', modelId: 'GLM-5.3' },
++              available: [
++                {
++                  ref: { providerId: 'bigmodel-api', modelId: 'GLM-5.3' },
++                  label: 'GLM-5.3',
++                  providerLabel: 'bigmodel-api',
++                  contextWindow: 200000,
++                  maxOutputTokens: 128000,
++                  reasoning: { levels: [{ value: 'low' }, { value: 'high' }] },
++                },
++                {
++                  ref: { providerId: 'kimi', modelId: 'k3' },
++                  label: 'k3',
++                  reasoning: { levels: [] },
++                },
++                { ref: { providerId: 'bad' }, label: '缺 modelId 条目应被跳过' },
++              ],
++            },
++          },
++        },
++      },
++      state,
++    );
++    expect(out).toEqual([]); // 快照不产出消息事件
++    const snap = state.snapshot!;
++    expect(snap.status).toBe('idle');
++    expect(snap.currentModel).toEqual({ providerId: 'bigmodel-api', modelId: 'GLM-5.3' });
++    expect(snap.modelCatalog).toHaveLength(2); // 非法条目（缺 modelId）被跳过
++    expect(snap.modelCatalog?.[0]).toEqual({
++      providerId: 'bigmodel-api',
++      modelId: 'GLM-5.3',
++      label: 'GLM-5.3',
++      contextWindow: 200000,
++      maxOutputTokens: 128000,
++      reasoningLevels: ['low', 'high'], // {value} 对象数组取 value
++    });
++  });
++
++  it('state.updated 非 {value} 形态 levels（纯字符串数组）同样提取', () => {
++    const state: { snapshot?: ZcodeStateSnapshot } = {};
++    normalizeZcodeNotification(
++      {
++        method: 'state.updated',
++        params: { patch: { model: { available: [{ ref: { providerId: 'p', modelId: 'm' }, reasoning: { levels: ['low', 'medium', 'high'] } }] } } },
++      },
++      state,
++    );
++    expect(state.snapshot?.modelCatalog?.[0]?.reasoningLevels).toEqual(['low', 'medium', 'high']);
++  });
++});
++
++describe('normalizeZcodeNotification：实测全序列（fixtures 钉映射）', () => {
++  it('一轮「乒乓」对话的完整事件序列归一化对账', () => {
++    // 抓包序列：titleUpdated → turn.started → session.updated → 3×reasoning_delta
++    // → 1×text_delta → turn.completed（seq 与 kind 逐字段来自 2026-10-15 实测）
++    const frames = [
++      sev(1, 'session.titleUpdated', { previousTitle: '', source: 'first_input', title: '只回复两个字：乒乓' }),
++      sev(2, 'turn.started', { input: '只回复两个字：乒乓', turnNumber: 0 }),
++      sev(3, 'session.updated', { messageCount: 6, providerId: 'bigmodel-api', modelId: 'GLM-5.3' }),
++      sev(5, 'model.streaming', { assistantMessageId: AMID, delta: 'The', done: false, kind: 'reasoning_delta' }),
++      sev(6, 'model.streaming', { assistantMessageId: AMID, delta: ' user just wants me to reply with exactly', done: false, kind: 'reasoning_delta' }),
++      sev(7, 'model.streaming', { assistantMessageId: AMID, delta: ' two characters: "乒乓" (ping pong). Simple instruction.', done: false, kind: 'reasoning_delta' }),
++      sev(8, 'model.streaming', { assistantMessageId: AMID, delta: '乒乓', done: false, kind: 'text_delta' }),
++      sev(11, 'turn.completed', {
++        response: '乒乓',
++        usage: { inputTokens: 30224, outputTokens: 25, totalTokens: 30249, cacheReadTokens: 30208, cacheWriteTokens: 0 },
++        duration: 2783,
++        resultType: 'success',
++      }),
++    ];
++    const all = frames.flatMap((f) => normalizeZcodeNotification(f));
++    // 产出：3 thinking + 1 text + 1 turn_result
++    expect(all.map((e) => e.type)).toEqual([
++      'thinking',
++      'thinking',
++      'thinking',
++      'text',
++      'turn_result',
++    ]);
++    // 文本通道拼接 = 最终回复
++    expect(all.filter((e) => e.type === 'text').map((e) => e.content).join('')).toBe('乒乓');
++    // 思考通道拼接完整
++    expect(all.filter((e) => e.type === 'thinking').map((e) => e.content).join('')).toContain('ping pong');
++    // 收尾 usage
++    const final = all[all.length - 1]!;
++    expect(final.usage?.ctx_tokens).toBe(30249);
++    expect(final.metadata?.response).toBe('乒乓');
++  });
++});
+diff --git a/sillyhub-daemon/tests/version.test.ts b/sillyhub-daemon/tests/version.test.ts
+index 53ad0b3a0..666477679 100644
+--- a/sillyhub-daemon/tests/version.test.ts
++++ b/sillyhub-daemon/tests/version.test.ts
+@@ -115,8 +115,8 @@ describe('formatSemver', () => {
+ 
+ describe('MIN_VERSIONS', () => {
+   // test_version.py:67-71 test_has_three_providers
+-  it('恰好 4 个 provider，含 claude / codex / copilot / pi', () => {
+-    expect(Object.keys(MIN_VERSIONS)).toHaveLength(4);
++  it('恰好 5 个 provider，含 claude / codex / copilot / pi / zcode', () => {
++    expect(Object.keys(MIN_VERSIONS)).toHaveLength(5);
+     expect(MIN_VERSIONS.claude).toEqual([2, 0, 0]);
+     expect(MIN_VERSIONS.codex).toEqual([0, 100, 0]);
+     expect(MIN_VERSIONS.copilot).toEqual([1, 0, 0]);
+diff --git a/sillyhub-daemon/tests/zcode-settings.test.ts b/sillyhub-daemon/tests/zcode-settings.test.ts
+new file mode 100644
+index 000000000..72a647c8e
+--- /dev/null
++++ b/sillyhub-daemon/tests/zcode-settings.test.ts
+@@ -0,0 +1,161 @@
++// tests/zcode-settings.test.ts
++// 2026-10-15-zcode-engine-appserver task-05：per-session provider_config.json 写入器单测。
++// 形状钉板 = 本机实测 provider_config.json 实例（decisions.md D-003 evidence）。
++
++import { describe, it, expect, beforeEach, afterEach } from 'vitest';
++import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++
++import {
++  buildZcodeProviderConfig,
++  isZcodeFormSufficient,
++  writeZcodeProviderConfig,
++} from '../src/zcode-settings.js';
++import type { ProviderConfig } from '../src/types.js';
++
++function baseProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
++  return {
++    agent_kind: 'zcode',
++    base_url: 'https://open.bigmodel.cn/api/anthropic',
++    api_key: 'sk-test-key',
++    model: 'GLM-5.3',
++    ...overrides,
++  };
++}
++
++let dir: string;
++beforeEach(() => {
++  dir = mkdtempSync(join(tmpdir(), 'zcode-settings-'));
++});
++afterEach(() => {
++  rmSync(dir, { recursive: true, force: true });
++});
++
++describe('buildZcodeProviderConfig 形状（anthropic-messages 形态）', () => {
++  it('schemaVersion=1 + providerOrder + 单条个人 Provider 规则（逐字段对齐实测实例）', () => {
++    const cfg = buildZcodeProviderConfig({ zcodeDir: dir, provider: baseProvider() });
++    expect(cfg).toEqual({
++      schemaVersion: 1,
++      config: {
++        providerOrder: ['sillyhub'],
++        providerConfigRules: [
++          {
++            providerId: 'sillyhub',
++            providerName: 'SillyHub',
++            config: {
++              group: 'standard-personal',
++              access: { type: 'api-key', apiKey: 'sk-test-key' },
++              api: { type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
++              personalModelIds: ['GLM-5.3'],
++              modelOrder: ['GLM-5.3'],
++            },
++          },
++        ],
++      },
++    });
++  });
++
++  it('api_format=openai_chat → api.type=openai-chat-completions + litellm_base_url', () => {
++    const cfg = buildZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({
++        api_format: 'openai_chat',
++        litellm_base_url: 'http://127.0.0.1:15721',
++        litellm_model_name: 'usr-1-2',
++        model: undefined,
++        default_fallback_model: undefined,
++      }),
++      daemonApiKey: 'daemon-key',
++      });
++    const rule = (cfg as { config: { providerConfigRules: Array<{ config: Record<string, unknown> }> } })
++      .config.providerConfigRules[0]!;
++    expect((rule.config['api'] as Record<string, unknown>)).toEqual({
++      type: 'openai-chat-completions',
++      baseUrl: 'http://127.0.0.1:15721',
++    });
++    // 裸 model id 取值链 default_fallback_model ?? model ?? litellm_model_name
++    expect(rule.config['personalModelIds']).toEqual(['usr-1-2']);
++  });
++
++  it('litellm_proxy=true → apiKey 取 daemonApiKey（hub 代理凭据）', () => {
++    const cfg = buildZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({ api_format: 'openai_chat', litellm_base_url: 'http://hub/proxy', litellm_proxy: true }),
++      daemonApiKey: 'daemon-key',
++    });
++    const rule = (cfg as { config: { providerConfigRules: Array<{ config: { access: Record<string, unknown> } }> } })
++      .config.providerConfigRules[0]!;
++    expect(rule.config.access['apiKey']).toBe('daemon-key');
++  });
++
++  it('default_fallback_model 优先于 model（D-010 取值链）', () => {
++    const cfg = buildZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({ model: 'low', default_fallback_model: 'high' }),
++    });
++    const rule = (cfg as { config: { providerConfigRules: Array<{ config: { modelOrder: string[] } }> } })
++      .config.providerConfigRules[0]!;
++    expect(rule.config.modelOrder).toEqual(['high']);
++  });
++
++  it('字段缺失 → build 抛错（防御性；调用方应前置门槛）', () => {
++    expect(() =>
++      buildZcodeProviderConfig({ zcodeDir: dir, provider: baseProvider({ api_key: undefined }) }),
++    ).toThrow(/所需字段缺失/);
++  });
++});
++
++describe('isZcodeFormSufficient 门槛', () => {
++  it('baseUrl + key + model 齐 → true；缺一 → false', () => {
++    expect(isZcodeFormSufficient(baseProvider())).toBe(true);
++    expect(isZcodeFormSufficient(baseProvider({ base_url: '' }))).toBe(false);
++    expect(isZcodeFormSufficient(baseProvider({ api_key: '' }))).toBe(false);
++    expect(isZcodeFormSufficient(baseProvider({ model: undefined }))).toBe(false);
++  });
++
++  it('litellm_proxy 形态不预判密钥（daemon 注入面）', () => {
++    expect(
++      isZcodeFormSufficient(
++        baseProvider({
++          api_format: 'openai_chat',
++          litellm_base_url: 'http://hub/proxy',
++          litellm_proxy: true,
++          api_key: undefined,
++        }),
++      ),
++    ).toBe(true);
++  });
++
++  it('openai_chat 非 proxy 形态仍要求 api_key', () => {
++    expect(
++      isZcodeFormSufficient(
++        baseProvider({ api_format: 'openai_chat', litellm_base_url: 'http://x', api_key: undefined }),
++      ),
++    ).toBe(false);
++  });
++});
++
++describe('writeZcodeProviderConfig 落盘', () => {
++  it('写入 <dir>/.zcode/v2/provider_config.json（子目录自建）且内容可解', async () => {
++    await writeZcodeProviderConfig({ zcodeDir: dir, provider: baseProvider() });
++    const file = join(dir, '.zcode', 'v2', 'provider_config.json');
++    expect(existsSync(file)).toBe(true);
++    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
++    expect(parsed['schemaVersion']).toBe(1);
++    // 末行换行（对齐写盘器定式）
++    expect(readFileSync(file, 'utf-8').endsWith('\n')).toBe(true);
++  });
++
++  it('二次写入（热切换重写）→ 内容整体替换为最新 provider', async () => {
++    await writeZcodeProviderConfig({ zcodeDir: dir, provider: baseProvider({ model: 'few' }) });
++    await writeZcodeProviderConfig({
++      zcodeDir: dir,
++      provider: baseProvider({ model: 'GLM-5.3-FlashX' }),
++    });
++    const parsed = JSON.parse(
++      readFileSync(join(dir, '.zcode', 'v2', 'provider_config.json'), 'utf-8'),
++    ) as { config: { providerConfigRules: Array<{ config: { modelOrder: string[] } }> } };
++    expect(parsed.config.providerConfigRules[0]!.config.modelOrder).toEqual(['GLM-5.3-FlashX']);
++  });
++});

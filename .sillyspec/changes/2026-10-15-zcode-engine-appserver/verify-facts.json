@@ -1,0 +1,127 @@
+{
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "schemaVersion": 2,
+  "change": "2026-10-15-zcode-engine-appserver",
+  "generatedAt": "2026-10-15T08:14:19.165Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "matches": 3,
+        "skippedFiles": 0,
+        "worktreeHits": 7,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 8
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "backendEndpoints": 1090,
+        "frontendCalls": 6
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-zcode-engine-appserver",
+      "metrics": {
+        "checkedFiles": 9,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "ZCode 引擎真机端到端冒烟（会话建立硬断言 + 模型轮 A/B 双路径 + 隔离目录落盘 + R-05 stdin EOF 实测）通过",
+      "command": "cd sillyhub-daemon && pnpm vitest run tests/interactive/zcode-e2e.smoke.test.ts",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/task08-test.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "macOS/Linux 的 Desktop 内嵌引擎 fallbackPaths 仅 Windows 实证（`%LOCALAPPDATA%/Programs/ZCode/resources/glm/zcode.cjs`）",
+        "condition": "在 macOS/Linux 机器上用 `SILLYHUB_ZCODE_PATH` 显式指路径验证探测+驱动全链路（或补实证后扩 fallbackPaths 表）",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "e2e 冒烟 B 路径（供应商额度错误）已实证结构化收敛；A 路径（真实模型轮成功 + usage + 文本流）因本机 GLM 5 小时额度用尽未在本次跑到",
+        "condition": "GLM 额度于 2026-10-15 18:19:50 重置后复跑 `pnpm vitest run tests/interactive/zcode-e2e.smoke.test.ts`，断言日志出现 `模型轮走 A 路径`",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "sillyhub-daemon/tests/interactive/zcode-envelope.test.ts",
+      "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+      "sillyhub-daemon/tests/interactive/zcode-events.test.ts"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py75+nontest-skip1+jsx100+jsx31+jsx-e2e-skip1)+fr(208)",
+    "exitCode": 1,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-15T09:15:47.290Z"
+  }
+}

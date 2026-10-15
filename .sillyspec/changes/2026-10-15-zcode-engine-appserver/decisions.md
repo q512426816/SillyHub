@@ -99,3 +99,16 @@ change: 2026-10-15-zcode-engine-appserver
 - evidence: sillyhub-daemon/src/adapters/json-rpc.ts:258-307（jsonrpc:"2.0" 硬编码出站帧，扩展需动 codex 生产路径）；实测 2026-10-15（信封 strict 拒多余键、服务端主动请求 id 形如 "server-N" 字符串、startup storageState 就绪门 ~1.5s）；dsh D-003 同型先例
 - 故障面: 信封代码与 json-rpc.ts 小幅重复（~百行，私有协议隔离收益大于复用收益）
 - 退役判据: daemon 出现第 2 个 ZCode 信封同型引擎（同款 strict 无版本信封）时提炼共享
+
+## D-008@v1: 执行期三类协议形状修正（实测驱动，task-08 冒烟抓出）
+- type: consistency
+- priority: P0
+- status: accepted
+- source: assistant
+- question: e2e 冒烟与真实引擎交互暴露的协议形状偏差（执行期发现，source 为实测事实非用户选择）
+- answer: 三项修正落驱动/归一化层（源代码注释均留实证锚）：①session/create 回包 sessionId 在 `result.session.sessionId` 嵌套路径（顶层无直挂——调研期探测已见该形状，驱动首版误按顶层读取，e2e 首跑即挂「session/create 未返回 sessionId」；修正为双读兼容）；②`session/event` type=`turn.failed` 归一化映射（provider 业务错误如 429 额度用尽：payload.error{type,code,message,attribution{...}} → error 事件 + turn_result(failed) 收敛——首版未映射致轮永久挂起，e2e 120s 超时实证；修正后 B 路径 6s 内结构化收敛）；③fake server 同步为真实形状（防测试与真实协议再次漂移）。
+- normalized_requirement: 驱动 create 读 `sessionId ?? session.sessionId` 双路径；归一化器 turn.failed → [error(message+metadata{error_code,error_type,attribution}), turn_result{metadata.turn_status:'failed'}]；相关 fixtures 单测钉真实抓包形状。
+- impacts: [FR-02, FR-04, task-03, task-04, task-08]
+- evidence: .sillyspec/.runtime/logs/task08-test.log（B 路径收敛 + R-05 实测行）；sillyhub-daemon/src/interactive/zcode-app-server-driver.ts（create 双读注释）；sillyhub-daemon/src/interactive/zcode-events.ts（turn.failed 映射注释）；tests/interactive/zcode-events.test.ts（实测 fixtures）
+- 故障面: provider 业务错误轮若不收敛 → 会话软锁死（AgentRun 永挂 running）；本修正闭合该类
+- 退役判据: 协议演进致回包/turn.failed 形状再变时按新实测重钉

@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-zcode-engine-appserver",
+  "anchors": [
+    "FR-01",
+    "FR-02",
+    "FR-04",
+    "FR-03",
+    "FR-08",
+    "FR-05",
+    "FR-06",
+    "FR-07"
+  ],
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-01:acc-0-5f7aae75",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-01:acc-1-02c2839e",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-01:acc-2-b0b68fa1",
+      "tests": [
+        "sillyhub-daemon/tests/agent-detector.test.ts",
+        "sillyhub-daemon/tests/version.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-02:acc-0-2a9286db",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-envelope.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-02:acc-1-11b1a6e7",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-envelope.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-03:acc-0-c809ae83",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-events.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-03:acc-1-cc8241ab",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-events.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-04:acc-0-f04ad0ac",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-04:acc-1-afc4b560",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-05:acc-0-35889f68",
+      "tests": [
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/zcode-settings.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-05:acc-1-769899ea",
+      "tests": [
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "sillyhub-daemon/tests/zcode-settings.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-06:acc-0-834eeeca",
+      "tests": [
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py",
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+        "backend/app/modules/daemon/tests/test_change_session.py",
+        "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+        "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+        "backend/app/modules/daemon/tests/test_group_logs_pagination.py",
+        "backend/app/modules/daemon/tests/test_group_mention_pipeline.py",
+        "backend/app/modules/daemon/tests/test_group_p2.py",
+        "backend/app/modules/daemon/tests/test_inject_origin_guard.py"
+      ]
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-06:acc-1-ff78fd21",
+      "tests": [
+        "backend/app/modules/agent/tests/test_group_chat_models.py",
+        "backend/app/modules/agent/tests/test_mcp_tools.py",
+        "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "backend/app/modules/change/tests/test_assets.py",
+        "backend/app/modules/change/tests/test_files_router.py",
+        "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+        "backend/app/modules/change/tests/test_step_progress.py",
+        "backend/app/modules/change/tests/test_timeline.py",
+        "backend/app/modules/change/tests/test_title_normalization.py",
+        "backend/app/modules/change/tests/test_usage_stats.py",
+        "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+        "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+        "backend/app/modules/daemon/tests/test_change_session.py",
+        "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+        "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+        "backend/app/modules/daemon/tests/test_group_logs_pagination.py",
+        "backend/app/modules/daemon/tests/test_group_mention_pipeline.py",
+        "backend/app/modules/daemon/tests/test_group_p2.py",
+        "backend/app/modules/daemon/tests/test_inject_origin_guard.py"
+      ]
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-07:acc-0-82d7b7e3",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/runtimes.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-07:acc-1-65ce11bd",
+      "tests": [
+        "frontend/src/lib/daemon/__tests__/runtimes.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-08:acc-0-7d2a4cdd",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts"
+      ]
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-zcode-engine-appserver:task-08:acc-1-85728f33",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts"
+      ]
+    }
+  ],
+  "traceFiles": [
+    "backend/app/modules/agent/tests/test_group_chat_models.py",
+    "backend/app/modules/agent/tests/test_mcp_tools.py",
+    "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+    "backend/app/modules/change/tests/test_assets.py",
+    "backend/app/modules/change/tests/test_files_router.py",
+    "backend/app/modules/change/tests/test_session_changes_endpoint.py",
+    "backend/app/modules/change/tests/test_step_progress.py",
+    "backend/app/modules/change/tests/test_timeline.py",
+    "backend/app/modules/change/tests/test_title_normalization.py",
+    "backend/app/modules/change/tests/test_usage_stats.py",
+    "backend/app/modules/daemon/tests/test_agent_session_tasks.py",
+    "backend/app/modules/daemon/tests/test_attachment_pipeline.py",
+    "backend/app/modules/daemon/tests/test_change_session.py",
+    "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+    "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+    "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+    "backend/app/modules/daemon/tests/test_group_logs_pagination.py",
+    "backend/app/modules/daemon/tests/test_group_mention_pipeline.py",
+    "backend/app/modules/daemon/tests/test_group_p2.py",
+    "backend/app/modules/daemon/tests/test_inject_origin_guard.py",
+    "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+    "frontend/src/lib/daemon/__tests__/runtimes.test.ts",
+    "sillyhub-daemon/tests/agent-detector.test.ts",
+    "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-envelope.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+    "sillyhub-daemon/tests/version.test.ts",
+    "sillyhub-daemon/tests/zcode-settings.test.ts"
+  ],
+  "provableSource": "dynamic-subset",
+  "residualFiles": [
+    "frontend/src/lib/daemon/__tests__/runtimes.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-envelope.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-events.test.ts",
+    "sillyhub-daemon/tests/zcode-settings.test.ts"
+  ],
+  "action": "dynamic-subset",
+  "ranAt": "2026-10-15T10:15:16.948Z"
+}

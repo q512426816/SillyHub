@@ -70,6 +70,7 @@ Then 驱动经 session/compact / session/setThoughtLevel 执行（caps.compact=t
 | D-005@v1 | FR-02, FR-03, FR-04 | 自研私有协议驱动（信封层 + 方法面 + 服务端请求分发器） |
 | D-006@v1 | （rejected 登记） | 等待官方 ACP/SDK 落选——无 FR 覆盖需求 |
 | D-007@v1 | FR-02 | 独立驱动 + 独立信封层 + 每会话一进程（方案 A，用户确认） |
+| D-008@v1 | FR-02, FR-04 | 执行期三类协议形状修正（create 嵌套 sessionId / turn.failed 收敛映射 / fake 同形）——实测驱动（task-08 冒烟抓出） |
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 

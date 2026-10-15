@@ -11,7 +11,7 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 
 平台现有交互式引擎三家（claude / codex / pi，外加批量层 cursor），用户希望在平台上像调用 claude code 一样调用 ZCode 进行单聊会话。ZCode 无 ACP profile、无官方集成 SDK（D-006 实证），但其 Desktop 内嵌引擎暴露 `app-server` 子命令——ZCode 私有协议的 stdio 服务端（NDJSON，信封 `{id, method, params}` strict 校验），与平台"spawn CLI 子进程当引擎"的既有模式同构（codex app-server 同为 stdio 自定义 JSON 协议）。接入模式照 codex app-server 自研驱动先例（D-005/D-007），不照 dsh 的 ACP 标准协议路径。
 
-**协议事实（2026-10-15 实测，全部有据）**：无 initialize 握手，启动门为 `startup/storageState` 通知（phase=ready，~1.5s 含 DB 就绪）；`session/create` 与 `session/send` 各触发一道服务端→客户端请求 `session/requestRuntimePreferences`（15s 超时不应答则方法调用失败）；事件面含 token 级流式（`v4/telemetry/event` kind=stream.chunk，channel ∈ {text, thought}——thought 即思考流）、工具生命周期（tool_call / tool.lifecycle / tool_input_delta）、上下文用量（usage.delta）、turn 边界（turn.started / turn.terminal）；`state.updated` 通知携带完整模型目录（providerId/modelId/contextWindow/maxOutputTokens/reasoning levels）。本变更为 zcode 引擎接入的**阶段 1（仅单聊）**。
+**协议事实（2026-10-15 实测，全部有据）**：无 initialize 握手，启动门为 `startup/storageState` 通知（phase=ready，~1.5s 含 DB 就绪）；`session/create` 与 `session/send` 各触发一道服务端→客户端请求 `session/requestRuntimePreferences`（15s 超时不应答则方法调用失败）；事件面（subscribe deliveryKind=desktop-continuous 后推送 `session/event`）：**token 级流式在 type=model.streaming**（channel/kind ∈ {text_delta, reasoning_delta} 带 delta 文本——reasoning 即思考流；`v4/telemetry/event` 的 stream.chunk 仅长度无文本，实测排除）、turn 边界（turn.started / turn.completed / **turn.failed**（供应商业务错误，如 429——task-08 实测补入））；`state.updated` 通知携带完整模型目录（providerId/modelId/contextWindow/maxOutputTokens/reasoning levels）。本变更为 zcode 引擎接入的**阶段 1（仅单聊）**。
 
 ## 设计目标
 
@@ -63,7 +63,7 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 | 修改 | sillyhub-daemon/src/agent-detector.ts | 新增探测项：bin=zcode / SILLYHUB_ZCODE_PATH / fallbackPaths（Desktop 固定路径）/ execNode（.cjs 经 node 执行）（D-001）；AgentProviderSpec 扩展可选 fallbackPaths + execNode 字段 |
 | 修改 | sillyhub-daemon/src/version.ts | MIN_VERSIONS 加 `zcode: (0,16,9)`（D-004 警告不硬拒） |
 | 修改 | backend/app/modules/daemon/schema.py | InteractiveProviderLiteral 加 `"zcode"`。数据流：producer=backend Literal → FastAPI 校验/openapi → `pnpm gen:types` 重生成 frontend/src/lib/api-types.ts + `pnpm -C sillyhub-daemon gen:types` 重生成 sillyhub-daemon/src/api-types.ts（规则 21 双义务）→ consumer=会话创建表单 / daemon payload 校验 |
-| 修改 | frontend/src/components/sessions/session-list-panel.tsx | SESSION_ENGINE_OPTIONS 加 zcode 选项（图标/标签） |
+| 修改 | frontend/src/lib/daemon/runtimes.ts | SESSION_SUPPORTED_PROVIDERS 加 zcode + PROVIDER_META 条目（execute 期事实修正：单一源在此，panel 仅消费派生值；task-07 卡同注） |
 | 生成 | backend/app/modules/agent/provider_caps.py | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
 | 生成 | frontend/src/lib/provider-caps.ts | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
 
@@ -122,14 +122,14 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 | R-02 | 会话库机器共享：多进程并发写 + Desktop 会话列表互通可见 | P1 | D-002 有意决策：Desktop+CLI 多进程共存为 ZCode 设计内行为（WAL）；共享语义写入本设计兼容策略与用户文档口径 |
 | R-03 | Desktop 自动更新改变内嵌引擎路径/版本 | P1 | 探测每次 daemon 启动重扫（无路径缓存承诺）+ fallbackPaths 支持多版本路径并列 + 版本门警告 |
 | R-04 | apiKey 明文落 per-session provider_config.json | P2 | 与 codex auth.json 同级安全姿势；per-session 目录随会话清理管线销毁；目录权限沿用现有 per-session 管线 |
-| R-05 | stdin EOF 优雅退出行为未实测（ZCode app-server 对 stdin 关闭的反应） | P2 | 清理阶梯照 codex 先例兜底（EOF 宽限 → SIGTERM → SIGKILL）；verify 用例实测补充记录 |
+| R-05 | ~~stdin EOF 优雅退出行为未实测~~ **已实测关闭（2026-10-15，task-08 冒烟）**：session/close 应答 + stdin EOF → 子进程 exitCode=0 优雅退出（673ms），清理阶梯仅在异常场景兜底 | P2→已关闭 | 实测证据见 .sillyspec/.runtime/logs/task08-test.log【R-05 stdin EOF 行为】行 |
 | R-06 | requestUserInput 自动取消应答可能降低 agent 行为质量（AskUser 类工具收到 cancelled） | P2 | 阶段 1 已知限制（权限对话框不受影响，dialog='native' 仅指权限代答通道）；阶段 2 升级为 AskUser 提问桥 |
 | R-07 | provider_config.json schema 随 ZCode 版本演进变化 | P2 | 写入器 schema 钉 schemaVersion=1 + 冒烟校验（smokeSuite 含配置生效断言）；失败结构化报错 |
 | 无 UI 原型 | 原型分级=跳过：纯后端/daemon 逻辑 + 前端仅引擎下拉枚举追加（无布局/结构/流程变化，同 dsh 判例） | P2 | 用户已在 Step5 确认跳过 |
 
 ## 非功能生命周期
 
-引入长驻子进程：zcode app-server 进程（每 zcode 会话一个）。自灭条件：①会话 end/interrupt 路径 driver close → stdin EOF（R-05 未实测，按设计预期优雅退出）；②清理阶梯：EOF 后宽限 → SIGTERM → SIGKILL（照 codex driver 清理先例）；③daemon 自身崩溃 → 子进程 stdin 管道断裂自动 EOF。per-session 配置面目录（zcode-home/<sessionId>）随现有 per-session 目录清理管线销毁；zcode 会话库（~/.zcode/cli/db）机器共享不随平台清理（D-002）。
+引入长驻子进程：zcode app-server 进程（每 zcode 会话一个）。自灭条件：①会话 end/interrupt 路径 driver close → stdin EOF → **实测优雅退出（exitCode=0，673ms，R-05 已关闭）**；②清理阶梯：EOF 后宽限 → SIGTERM → SIGKILL（照 codex driver 清理先例）；③daemon 自身崩溃 → 子进程 stdin 管道断裂自动 EOF。per-session 配置面目录（zcode-home/<sessionId>）随现有 per-session 目录清理管线销毁；zcode 会话库（~/.zcode/cli/db）机器共享不随平台清理（D-002）。
 
 ## 决策追踪
 
