@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-workspace-session-agent-only",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "35dc9fc05afe1785552c7217cac0b4ef58915d30",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02 测试绑定行引用了不存在的用例名（?new=1 + 绑定机器离线）——行为经等价分支覆盖，非功能缺口",
+      "evidence": "requirements.md:111 声称 sessions-portal.test.tsx 有「?new=1 绑定机器离线 → 弹绑定模式浮层（离线空态）」；实测该文件无 new=1+离线 组合用例，最接近的是 L3088「绑定机器离线 → 浮层离线空态」（组＋入口）与 L3119「?new=1…仅 pi 在线 → 弹绑定模式浮层」。二者与离线场景在代码上走同一分支：autoNew 的 runtime=null → setPickerOpen(true) 绑定模式浮层（sessions-portal.tsx:588-593）+ picker 离线空态（pre-session-picker.tsx:211-218），故覆盖等价、仅绑定行失真。",
+      "location": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx:3088"
+    },
+    {
+      "severity": "P3",
+      "title": "绑定读取失败等价「无绑定」：scoped ?new=1 会静默落 D-005 直进（可能落非绑定机器）",
+      "evidence": "fetchMyBindings 内部 catch 降级 []（workspace-binding.ts:37-45），API 读失败与「确无绑定」在数据层不可区分；sessions-portal.tsx:581 的在途门只覆盖 isLoading（重试耗尽后 isLoading=false）→ L587 targetMachine 回退 machines.find(resolveDefaultMachineId(...))，命中即 L590 enterPreSession 直进，全程无提示。需求 FR-03/FR-05 对「无 binding→原流程」留白，故属有界降级而非承诺违反；组＋入口同场景仍弹浮层（用户可见），仅 ?new=1 自动路径静默。",
+      "location": "frontend/src/lib/workspace-binding.ts:37"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）——绑定在途守卫真实且生效：sessions-portal.tsx:581（?new=1）/657（组＋）、floating-session-host.tsx:262（工作区页新建）/329（组＋），四处均以 isLoading 门回避空 bindings 误判；迟到数据使浮层自愈转绑定模式。读取失败=无绑定为有界降级（见 P3 第 2 条），非声明被证伪",
+    "并发": "ok（边界已裁决：可接受）——本变更确实无写路径：diff 仅新增只读查询（my-bindings 复用/单条）与渲染分支，后端两文件仅为 mypy 债注释与 isinstance 断言收窄（运行时等价）；binding 缓存 staleTime 60s 内读到旧绑定的最坏结果=会话落旧绑定机器（改前本就允许任选机器），聚焦/重挂载收敛",
+    "切换": "ok（边界已裁决：可接受）——浮层受控且绑定模式不依赖第一步选中态（pre-session-picker.tsx:181 由 prop 直接求值，machineId 重置效应不参与）；pickerWorkspaceId 与 boundMachineId 同帧同源注入（sessions-portal.tsx:1197、floating-session-host.tsx:670），切组/取消重开无机器步残留（用例已核实）",
+    "作用域": "ok（边界已裁决：可接受）——boundMachineIdFor 按 workspace_id 精确查表（pre-session-picker.tsx:93-101），三宿主各自以本帧 workspaceId 解析不串台；机器查找走含共享候选的列表（门户 pickerMachines、悬浮 machineOptions、移动 machineCandidates），借用共享 daemon 的绑定同样可命中"
+  },
+  "reviewedAt": "2026-10-15T16:30:16+08:00"
+}

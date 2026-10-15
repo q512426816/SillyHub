@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 服务器信息（含日志卡）— SillyHub</title>
+<style>
+  :root {
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe;
+    --brand-500: #8b5cf6; --brand-600: #7c3aed; --brand-700: #6d28d9;
+    --accent: #0891b2; --accent-soft: #cffafe;
+    --bg: #fafafc; --card: #ffffff; --border: #e7e5ee;
+    --fg: #1c1b22; --muted: #71717a;
+    --ok: #16a34a; --ok-soft: #dcfce7;
+    --warn: #d97706; --warn-soft: #fef3c7;
+    --err: #dc2626; --err-soft: #fee2e2;
+    --debug: #64748b; --debug-soft: #f1f5f9;
+    --shadow: 0 1px 3px rgba(28,27,34,.06), 0 4px 14px rgba(124,58,237,.05);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; }
+  a { color: inherit; text-decoration: none; }
+
+  .topbar { position: sticky; top: 0; z-index: 30; height: 64px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 0 20px; }
+  .topbar .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+  .brand-dot { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, var(--brand-600), var(--accent)); }
+  .topbar .crumb { color: var(--muted); font-size: 13px; }
+
+  .shell { display: flex; min-height: calc(100vh - 64px); }
+  .sidebar { width: 216px; border-right: 1px solid var(--border); background: var(--card); padding: 14px 10px; flex-shrink: 0; }
+  .nav-group { margin-bottom: 14px; }
+  .nav-title { font-size: 11px; color: var(--muted); letter-spacing: .06em; padding: 4px 10px 6px; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; color: var(--fg); margin-bottom: 2px; }
+  .nav-item.active { background: var(--brand-100); color: var(--brand-700); font-weight: 600; }
+  .nav-item .ico { width: 16px; text-align: center; }
+
+  .main { flex: 1; padding: 24px 28px; max-width: 1200px; }
+  .page-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+  .page-head h1 { font-size: 20px; font-weight: 700; }
+  .page-head .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .head-right { display: flex; align-items: center; gap: 10px; }
+  .live-dot { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .live-dot .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .btn { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--fg); }
+  .btn.primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); padding: 16px 18px; }
+  .card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+  .card h3 .hint { font-weight: 400; font-size: 11px; color: var(--muted); }
+
+  .perf-row { margin-bottom: 14px; }
+  .perf-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; }
+  .bar { height: 8px; border-radius: 4px; background: var(--brand-50); overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 4px; background: var(--brand-500); }
+
+  .kv { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--brand-50); font-size: 13px; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+
+  /* ── 日志卡 ── */
+  .log-card { grid-column: 1 / -1; }
+  .log-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .log-toolbar .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .log-toolbar .seg button { border: none; background: var(--card); padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--muted); }
+  .log-toolbar .seg button.on { background: var(--brand-100); color: var(--brand-700); font-weight: 600; }
+  .log-toolbar .spacer { flex: 1; }
+  .log-toolbar select { border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px; font-size: 12px; background: var(--card); color: var(--fg); }
+  .log-note { font-size: 11px; color: var(--warn); margin-bottom: 8px; }
+
+  .log-stream { max-height: 380px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: #fbfbfd; }
+  .log-line { display: grid; grid-template-columns: 148px 56px 1fr; gap: 8px; padding: 5px 10px; border-bottom: 1px solid #f1f0f6; font-size: 12px; align-items: baseline; }
+  .log-line:last-child { border-bottom: none; }
+  .log-line .t { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .log-line .lv { font-size: 10px; font-weight: 700; border-radius: 5px; padding: 1px 6px; text-align: center; }
+  .lv.info { background: var(--accent-soft); color: var(--accent); }
+  .lv.warn { background: var(--warn-soft); color: var(--warn); }
+  .lv.error { background: var(--err-soft); color: var(--err); }
+  .lv.debug { background: var(--debug-soft); color: var(--debug); }
+  .log-line .ev { min-width: 0; }
+  .log-line .ev .name { font-weight: 600; }
+  .log-line .ev .detail { color: var(--muted); font-size: 11px; margin-left: 6px; }
+  .log-line .raw { display: none; grid-column: 1 / -1; background: var(--brand-50); border-radius: 6px; padding: 6px 8px; font-family: Consolas, monospace; font-size: 11px; color: var(--fg); margin-top: 4px; overflow-x: auto; white-space: pre; }
+  .log-line.open .raw { display: block; }
+  .log-foot { margin-top: 8px; font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span>SillyHub</div>
+    <span class="crumb">系统管理 / 服务器信息</span>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="nav-group">
+        <div class="nav-title">系统管理</div>
+        <a class="nav-item"><span class="ico">👤</span>用户</a>
+        <a class="nav-item"><span class="ico">🏢</span>组织</a>
+        <a class="nav-item"><span class="ico">🔑</span>角色</a>
+        <a class="nav-item"><span class="ico">⚙️</span>设置</a>
+        <a class="nav-item"><span class="ico">📑</span>菜单管理</a>
+        <a class="nav-item active"><span class="ico">🖥️</span>服务器信息</a>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="page-head">
+        <div>
+          <h1>服务器信息</h1>
+          <div class="sub">服务器性能、依赖状态与运行日志，每 5 秒自动刷新</div>
+        </div>
+        <div class="head-right">
+          <span class="live-dot"><span class="dot"></span>自动刷新 · 上次更新 16:42:10</span>
+          <button class="btn primary">立即刷新</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <h3>服务器性能<span class="hint">GET /api/system-status</span></h3>
+          <div class="perf-row">
+            <div class="perf-head"><span>CPU 使用率</span><span>62%</span></div>
+            <div class="bar"><i style="width: 62%"></i></div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-head"><span>内存</span><span>7.6 GB / 16 GB · 87%</span></div>
+            <div class="bar"><i style="width: 87%; background: var(--warn)"></i></div>
+          </div>
+          <div class="perf-row">
+            <div class="perf-head"><span>磁盘（/）</span><span>156 GB / 220 GB · 71%</span></div>
+            <div class="bar"><i style="width: 71%"></i></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h3>依赖与版本<span class="hint">GET /api/health</span></h3>
+          <div class="kv"><span class="k">PostgreSQL</span><span class="badge ok">● 已连接 · v0.9.2</span></div>
+          <div class="kv"><span class="k">Redis</span><span class="badge ok">● 已连接</span></div>
+          <div class="kv"><span class="k">后端版本</span><span>0.9.2（a1b2c3d）</span></div>
+          <div class="kv"><span class="k">运行环境</span><span>production</span></div>
+          <div class="kv"><span class="k">服务器时间（UTC）</span><span>2026-10-15 08:42:10</span></div>
+        </section>
+
+        <!-- 业务统计卡已删除（2026-10-15-server-logs-panel D-007@v1） -->
+
+        <section class="card log-card">
+          <h3>服务器日志<span class="hint">data/logs/backend.log · 5MB×3 轮转</span></h3>
+          <div class="log-toolbar">
+            <div class="seg">
+              <button>100 行</button><button class="on">200 行</button><button>500 行</button><button>1000 行</button>
+            </div>
+            <span class="spacer"></span>
+            <select>
+              <option>backend.log（当前）</option>
+              <option>backend.log.1</option>
+              <option>backend.log.2</option>
+              <option>backend.log.3</option>
+            </select>
+            <button class="btn">下载</button>
+          </div>
+          <div class="log-note">⚠ 日志含运行路径与账号信息，请勿外传</div>
+          <div class="log-stream">
+            <div class="log-line"><span class="t">2026-10-15 08:42:09</span><span class="lv info">INFO</span><span class="ev"><span class="name">health.checked</span><span class="detail">db=ok redis=ok</span></span></div>
+            <div class="log-line"><span class="t">2026-10-15 08:42:07</span><span class="lv info">INFO</span><span class="ev"><span class="name">workspace.linked_repos_sync</span><span class="detail">ws=3f9a… repos=2 elapsed_ms=842</span></span></div>
+            <div class="log-line"><span class="t">2026-10-15 08:42:03</span><span class="lv warn">WARN</span><span class="ev"><span class="name">health.redis.down</span><span class="detail">retry in 1.2s（示意：非 JSON 行时原文展示）</span></span></div>
+            <div class="log-line open">
+              <span class="t">2026-10-15 08:41:58</span><span class="lv error">ERROR</span><span class="ev"><span class="name">agent.run.failed</span><span class="detail">run_id=ab12… exit_code=1（点行展开原始 JSON）</span></span>
+              <span class="raw">{"event": "agent.run.failed", "level": "error", "timestamp": "2026-10-15T08:41:58.123Z", "run_id": "ab12…", "exit_code": 1, "workspace_id": "3f9a…"}</span>
+            </div>
+            <div class="log-line"><span class="t">2026-10-15 08:41:55</span><span class="lv debug">DEBUG</span><span class="ev"><span class="name">db.pool.checkout</span><span class="detail">conn=7 idle=3</span></span></div>
+            <div class="log-line"><span class="t">2026-10-15 08:41:50</span><span class="lv info">INFO</span><span class="ev"><span class="name">session.message.received</span><span class="detail">session=7c21… chars=412</span></span></div>
+          </div>
+          <div class="log-foot"><span>显示最近 200 行（文件共 12,438 行，仅展示尾部）</span><span>每 5 秒自动刷新</span></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

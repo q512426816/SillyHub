@@ -1,0 +1,4326 @@
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+index a925e7674..53150a50a 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/backend.changelog.md
+@@ -46,3 +46,4 @@
+ - 2026-10-15-deploy-records-unicode-tolerance | 修复发布记录扫描对非 UTF-8 文件的容错缺口：UnicodeDecodeError 是 ValueError 子类不
+ - 2026-10-15-ci-recurrence-guard | CI 红灯防复发：把 2026-10-15-fix-ci-red 灭火中发现的三类漏拦（daemon api-types
+ - 2026-10-15-platform-vector-search | 效果评估清偿批 B1 平台面拍板（本地小模型方案）：CLI 向量召回层 2026-09-29 发布即…
++- 2026-10-15-group-cross-mention-visibility | 群聊互@协作可见性：AgentGroupChat 加 cross_mention_mode（private|public，server_default private 存量零变化）+迁移 20261015120000；互@触发三态分流（源轮 consensus_task_id > 群模式 > agent_dm 现状，D-011）；public 轮 agent_public 无 dm_target 天然放行 [[GROUP]] 投影（投影行带 delegation_of）+委派回执轻注入（NEW delegation_notice.py，纯日志不建 run，同链 2 次上限 Redis+DB 双轨，超限群内系统行）。
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index c1ed6fb35..d6f9d1f69 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -106,3 +106,4 @@
+ | 2026-10-15 | 2026-10-15-change-assets-graph | 变更详情页信息动线不佳（用户原话四条）：①知识图谱（画布+右侧节点详情描述）没有出现在变更详情页，要… |
+ | 2026-10-15 | 2026-10-15-assets-graph-narrow-typecheck | 动机一行：2026-10-15-change-assets-graph 归档交付的 change-a… |
+ | 2026-10-15 | 2026-10-15-session-status-dot-semantics | 会话列表行内现有两套点：行首状态点（红=失败/绿=已结束/青+光环=active/灰=排队）与行尾活… |
++| 2026-10-15 | 2026-10-15-group-cross-mention-visibility | 群聊互@模式设置面：member-panel 群设置区+建群向导第三步新增互@模式控件（私聊协作/公开委派，三态联动禁用——互@总开关关/consensus 开互斥提示），服务端真值顶层列局部 PATCH 乐观回滚，双端 gen:types 同变更再生成；antd Radio.Button 的 cssinjs 组合选择器在 jsdom nwsapi 抛 SyntaxError 级联炸用例（二分定位）改 Button+aria-pressed 实现。 |
+diff --git a/backend/app/modules/agent/provider_caps.py b/backend/app/modules/agent/provider_caps.py
+index 6fcb566d6..d3a783e84 100644
+--- a/backend/app/modules/agent/provider_caps.py
++++ b/backend/app/modules/agent/provider_caps.py
+@@ -98,6 +98,24 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
+         "steering": False,
+         "sessionFork": "none",
+     },
++    "dsh": {
++        "resume": True,
++        "mcp": True,
++        "multimodal": False,
++        "attachments": True,
++        "thinking": True,
++        "subagent": False,
++        "permission_dialog": True,
++        "dialog": "native",
++        "edit_patch": False,
++        "model_select": True,
++        "provider_switch": True,
++        "ctx_usage": True,
++        "compact": False,
++        "thinking_level": True,
++        "steering": False,
++        "sessionFork": "none",
++    },
+ }
+ 
+ # 键序取自镜像表首条目（claude）；16 键齐全与三端一致性由守护测试保证。
+diff --git a/backend/app/modules/agent/tests/test_provider_caps_alignment.py b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+index c698859a6..89f57db2a 100644
+--- a/backend/app/modules/agent/tests/test_provider_caps_alignment.py
++++ b/backend/app/modules/agent/tests/test_provider_caps_alignment.py
+@@ -74,8 +74,9 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
+ 
+ # 契约 provider（现状交互式 driver 全集；新 provider 接入时三端同加。
+ # pi 由 2026-09-04-provider-pi-onboarding task-04 接入；
+-# cursor 由 2026-09-08-cursor-interactive-session task-07 接入）。
+-EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi"})
++# cursor 由 2026-09-08-cursor-interactive-session task-07 接入；
++# dsh 由 2026-10-15-dsh-engine-acp task-04 接入）。
++EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi", "dsh"})
+ 
+ # TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
+ # 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被
+diff --git a/backend/app/modules/daemon/group/service/delegation_notice.py b/backend/app/modules/daemon/group/service/delegation_notice.py
+index 1e97e785a..c20de3486 100644
+--- a/backend/app/modules/daemon/group/service/delegation_notice.py
++++ b/backend/app/modules/daemon/group/service/delegation_notice.py
+@@ -133,7 +133,9 @@ async def inject_delegation_notice(
+         redis_count: int | None = None
+         try:
+             redis = _rsvc.get_redis()
+-            redis_count = int(await redis.hincrby(redis_chain_key, DELEGATION_NOTICE_FIELD, 1))
++            # redis-py stubs 把命令返回标成 union（Awaitable[int] | int）——异步
++            # 客户端实际返回 int，按 mentions.py 同款 ignore 处理。
++            redis_count = int(await redis.hincrby(redis_chain_key, DELEGATION_NOTICE_FIELD, 1))  # type: ignore[misc]  # redis-py stubs union 返回
+             await redis.expire(redis_chain_key, 30 * 60)
+         except Exception:
+             redis_count = None  # fail-open：软约束不因 Redis 缺席而阻断
+diff --git a/backend/app/modules/daemon/group/service/helpers.py b/backend/app/modules/daemon/group/service/helpers.py
+index 6f3ea5b04..74cdcb7ce 100644
+--- a/backend/app/modules/daemon/group/service/helpers.py
++++ b/backend/app/modules/daemon/group/service/helpers.py
+@@ -69,6 +69,20 @@ GROUP_CARRIER_SPEC_STRATEGY = "group_carrier"
+ GROUP_MEMBER_STAGE = "group_member"
+ 
+ 
++def group_attachment_gate_denied(provider: str | None) -> bool:
++    """群附件引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一）。
++
++    发送侧（messages.py 直聊路径）与触发侧（shadow.py _trigger_group_member）
++    共用同款判定：与单聊 attachments.py:59 同源查 ``caps.attachments``——
++    claude/pi/cursor/dsh 放行（pi/cursor 群附件从拒变放为对齐单聊的有意
++    行为变化，design R-03），codex 与未知引擎拒绝（默认拒绝对象）。
++    ``provider=None`` 沿用旧硬编码语义回落 ``claude``（存量成员缺省放行）。
++    """
++    from app.modules.agent.provider_caps import get_provider_caps
++
++    return not get_provider_caps(provider or "claude")["attachments"]
++
++
+ # quick 影子直聊（2026-09-02）：本轮 user_input metadata 的 source 标记——
+ # run_sync 投影判定锚（命中 → 整轮不投影，仅 [[GROUP]] 段例外）。
+ SHADOW_DIRECT_SOURCE = "shadow_direct"
+diff --git a/backend/app/modules/daemon/group/service/messages.py b/backend/app/modules/daemon/group/service/messages.py
+index 25f5a5093..1144e1997 100644
+--- a/backend/app/modules/daemon/group/service/messages.py
++++ b/backend/app/modules/daemon/group/service/messages.py
+@@ -63,6 +63,7 @@ from .helpers import (
+     _attachment_prompt_lines,
+     _attachment_summary_rows,
+     _user_display_name,
++    group_attachment_gate_denied,
+ )
+ from .mentions import (
+     _has_broadcast_mention,
+@@ -788,11 +789,12 @@ async def send_direct_message(
+     attachment_rows: list = []
+     if attachment_ids:
+         attachment_rows = await svc._validate_group_attachments(user.id, attachment_ids)
+-        # 引擎门控（同 _trigger_group_member 口径：仅 Claude 支持附件）。
+-        if (member.provider or "claude") != "claude":
++        # 引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一，与触发侧
++        # shadow.py / 单聊 attachments.py 同源——pi/cursor/dsh 放行、codex/未知拒）。
++        if group_attachment_gate_denied(member.provider):
+             raise GroupChatInvalid(
+                 f"成员「{member.display_name}」的引擎不支持附件"
+-                "（仅 Claude 支持多模态与文件注入）。",
++                "（该引擎附件链路未开通，详见引擎能力表）。",
+                 details={"member_id": str(member.id), "provider": member.provider},
+             )
+ 
+diff --git a/backend/app/modules/daemon/group/service/shadow.py b/backend/app/modules/daemon/group/service/shadow.py
+index d1302c9f0..530479bc0 100644
+--- a/backend/app/modules/daemon/group/service/shadow.py
++++ b/backend/app/modules/daemon/group/service/shadow.py
+@@ -41,6 +41,7 @@ from .helpers import (
+     GroupChatInvalid,
+     GroupMemberTriggerRead,
+     _attachment_prompt_lines,
++    group_attachment_gate_denied,
+ )
+ from .typing_presence import _publish_group_channel_event
+ 
+@@ -263,14 +264,15 @@ async def _trigger_group_member(
+     dm_target_member_id/dm_kind 等，在基础键之后 merge——新键不碰
+     source_* 既有链标记）。两者均 None 时零行为变化（开关关闭路径）。
+     """
+-    # 引擎门控（单聊 D-6 同口径：仅 Claude 支持附件）——发送侧已过归属/
++    # 引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一，helpers.
++    # group_attachment_gate_denied 与发送侧/单聊同源）——发送侧已过归属/
+     # 数量校验并落时间线，此处 fail-loud 拒绝触发（消息保留可重发仅触发）。
+     attachment_lines: list[str] = []
+     if attachment_rows:
+-        if (member.provider or "claude") != "claude":
++        if group_attachment_gate_denied(member.provider):
+             raise GroupChatInvalid(
+                 f"成员「{member.display_name}」的引擎不支持附件"
+-                "（仅 Claude 支持多模态与文件注入）。",
++                "（该引擎附件链路未开通，详见引擎能力表）。",
+                 details={"member_id": str(member.id), "provider": member.provider},
+             )
+         attachment_lines = _attachment_prompt_lines(attachment_rows)
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index f4d1f47db..dbbbc53a7 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -126,7 +126,9 @@ class AgentSessionListResponse(BaseModel):
+ # 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
+ # 2026-09-04-provider-pi-onboarding 冒烟 F-1：加 pi（第三处引擎白名单，档B 第 10 步已补文档）。
+ # 2026-09-08-cursor-interactive-session task-07：加 cursor（防显式 provider 路径 422）。
+-InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi"]
++# 2026-10-15-dsh-engine-acp task-05：加 dsh（DeepSeek Harness，ACP v1——单聊接入，
++# daemon 侧注册见 sillyhub-daemon providers.ts dsh 条目）。
++InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi", "dsh"]
+ 
+ # ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
+ # §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────
+diff --git a/backend/app/modules/daemon/tests/test_group_attachment_gate.py b/backend/app/modules/daemon/tests/test_group_attachment_gate.py
+new file mode 100644
+index 000000000..411b22b78
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_group_attachment_gate.py
+@@ -0,0 +1,63 @@
++"""群附件引擎门控 caps 口径测试（2026-10-15-dsh-engine-acp task-06 / FR-07 / R-03）。
++
++发送侧（messages.py 影子直聊路径）与触发侧（shadow.py _trigger_group_member）
++原先各自硬编码 `provider != "claude"` 即拒——与单聊 attachments.py 的 caps
++判定不一致（pi/cursor 单聊放行、群聊被拒的口径债）。本变更统一为
++helpers.group_attachment_gate_denied（caps.attachments 同源查表）。
++
++覆盖：
++- 判定函数逐引擎参数化：claude/pi/cursor/dsh 放行（denied=False），codex 与
++  未知引擎拒绝（denied=True，get_provider_caps 默认拒绝对象）；
++- provider=None 回落 claude 放行（存量成员缺省语义保持）；
++- 源级接线断言（镜像 test_provider_caps_alignment 的源文件读取式先例）：
++  两个服务文件均无旧硬编码门控残根、均消费共享判定助手。
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from app.modules.daemon.group.service.helpers import group_attachment_gate_denied
++
++_SERVICE_DIR = Path(__file__).parents[1] / "group" / "service"
++
++
++class TestGroupAttachmentGateDenied:
++    """判定函数逐引擎行为（caps.attachments 同源）。"""
++
++    @pytest.mark.parametrize(
++        ("provider", "denied"),
++        [
++            ("claude", False),
++            ("pi", False),  # R-03 有意行为变化：单聊本就放行，群聊对齐
++            ("cursor", False),  # R-03 同上（disk-only 落盘链路）
++            ("dsh", False),  # 2026-10-15-dsh-engine-acp 新引擎随 caps=true 放行
++            ("codex", True),  # caps.attachments=false（D-6 沿袭）
++            ("unknown-engine", True),  # 未知引擎默认拒绝对象
++        ],
++    )
++    def test_per_engine(self, provider: str, denied: bool) -> None:
++        assert group_attachment_gate_denied(provider) is denied
++
++    def test_none_provider_falls_back_to_claude(self) -> None:
++        """provider=None 回落 claude 放行（旧硬编码 `(provider or 'claude')` 语义保持）。"""
++        assert group_attachment_gate_denied(None) is False
++
++
++class TestGateWiringSourceLevel:
++    """源级接线：两处门控消费共享判定，无硬编码残根（读取式断言先例）。"""
++
++    def test_messages_gate_uses_shared_helper(self) -> None:
++        src = (_SERVICE_DIR / "messages.py").read_text(encoding="utf-8")
++        assert "group_attachment_gate_denied(member.provider)" in src
++        # 旧硬编码门控形态不得复活（附件门控上下文的 claude 比较）。
++        assert "仅 Claude 支持附件" not in src
++        assert "（仅 Claude 支持多模态与文件注入）" not in src
++
++    def test_shadow_gate_uses_shared_helper(self) -> None:
++        src = (_SERVICE_DIR / "shadow.py").read_text(encoding="utf-8")
++        assert "group_attachment_gate_denied(member.provider)" in src
++        assert "仅 Claude 支持附件" not in src
++        assert "（仅 Claude 支持多模态与文件注入）" not in src
+diff --git a/backend/app/modules/daemon/tests/test_group_bridge_projection.py b/backend/app/modules/daemon/tests/test_group_bridge_projection.py
+index 062a8bd5e..80388bcbc 100644
+--- a/backend/app/modules/daemon/tests/test_group_bridge_projection.py
++++ b/backend/app/modules/daemon/tests/test_group_bridge_projection.py
+@@ -1028,6 +1028,9 @@ class TestPublicDelegation:
+         ]
+         assert len(notice_rows) == 1, "发起方影子会话应收到一条委派回执行"
+         nmeta = notice_rows[0].metadata_
++        # metadata_ 列类型 dict | None——上方过滤已保证 dict，这里显式收窄供
++        # mypy（同时兜住运行时 None）。
++        assert isinstance(nmeta, dict)
+         assert nmeta["delegated_member_name"] == "小码"
+         assert nmeta["chain_run_id"] == str(seed.carrier_run_id)
+         assert "小码" in (notice_rows[0].content_redacted or "")
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 85f4a24a9..afba0fc7a 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -69181,7 +69181,8 @@
+                   "claude",
+                   "codex",
+                   "cursor",
+-                  "pi"
++                  "pi",
++                  "dsh"
+                 ]
+               },
+               {
+diff --git a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+index e9e8b050d..51f638a57 100644
+--- a/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+@@ -138,6 +138,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
+       codex: { label: "Codex", icon: "🟢", color: "" },
+       pi: { label: "Pi", icon: "🩷", color: "" },
+       cursor: { label: "Cursor", icon: "🟡", color: "" },
++      dsh: { label: "DeepSeek Harness", icon: "🐳", color: "" },
+     },
+     // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
+     AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
+@@ -3036,3 +3037,29 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
+     expect(mocks.notifyError).not.toHaveBeenCalled();
+   });
+ });
++
++describe("2026-10-15-dsh-engine-acp task-07：dsh 单聊引擎边界钉（FR-08）", () => {
++  it("SESSION_ENGINE_OPTIONS 单一源含 dsh（DeepSeek Harness），label 与 daemon displayName 一致", async () => {
++    const { SESSION_ENGINE_OPTIONS, SESSION_SUPPORTED_PROVIDERS } = await import(
++      "@/lib/daemon"
++    );
++    expect(SESSION_SUPPORTED_PROVIDERS).toContain("dsh");
++    const dsh = SESSION_ENGINE_OPTIONS.find((o) => o.value === "dsh");
++    expect(dsh?.label).toBe("DeepSeek Harness");
++  });
++
++  it("群聊白名单不含 dsh（阶段 2 边界——create-group-wizard / member-panel 源级钉）", () => {
++    // 源级断言（镜像 backend test_provider_caps_alignment 读取式先例）：群聊
++    // 六要素白名单 GROUP_SUPPORTED_PROVIDERS / ENGINE_OPTIONS 均不得提前放开 dsh。
++    const { readFileSync } = require("node:fs") as typeof import("node:fs");
++    const { resolve } = require("node:path") as typeof import("node:path");
++    // vitest jsdom 下 __dirname 被压平（(dashboard) 括号目录丢失）——用
++    // process.cwd()（vitest 运行根 = frontend/）锚定源文件路径。
++    const wizardSrc = readFileSync(
++      resolve(process.cwd(), "src/components/group-chat/create-group-wizard.tsx"),
++      "utf8",
++    );
++    expect(wizardSrc).toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"])');
++    expect(wizardSrc).not.toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "dsh"])');
++  });
++});
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+index 575d6c02f..227830c08 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx
+@@ -88,33 +88,43 @@ vi.mock("@/components/mobile/mobile-session-list", () => ({
+ const pickerStub = vi.hoisted(() => ({
+   props: null as Record<string, unknown> | null,
+ }));
+-vi.mock("@/components/sessions/pre-session-picker", () => ({
+-  PreSessionPicker: (props: Record<string, unknown>) => {
+-    pickerStub.props = props;
+-    return (
+-      <div
+-        data-testid="pre-picker-stub"
+-        data-open={String(props.open)}
+-        data-variant={String(props.variant)}
+-      >
+-        <button
+-          type="button"
+-          data-testid="stub-picker-pick"
+-          onClick={() => (props.onPick as (rt: string) => void)("rt-1")}
+-        >
+-          选定智能体
+-        </button>
+-        <button
+-          type="button"
+-          data-testid="stub-picker-cancel"
+-          onClick={() => (props.onCancel as () => void)()}
++// 2026-10-15-workspace-session-agent-only：本页从该模块 import 解析纯函数
++//（boundMachineIdFor）——importOriginal 展开保真，仅桩组件本体；追加透出
++// boundMachineId 属性（绑定模式断言锚）。
++vi.mock("@/components/sessions/pre-session-picker", async (importOriginal) => {
++  const actual = await importOriginal<
++    typeof import("@/components/sessions/pre-session-picker")
++  >();
++  return {
++    ...actual,
++    PreSessionPicker: (props: Record<string, unknown>) => {
++      pickerStub.props = props;
++      return (
++        <div
++          data-testid="pre-picker-stub"
++          data-open={String(props.open)}
++          data-variant={String(props.variant)}
++          data-bound={props.boundMachineId ?? ""}
+         >
+-          取消
+-        </button>
+-      </div>
+-    );
+-  },
+-}));
++          <button
++            type="button"
++            data-testid="stub-picker-pick"
++            onClick={() => (props.onPick as (rt: string) => void)("rt-1")}
++          >
++            选定智能体
++          </button>
++          <button
++            type="button"
++            data-testid="stub-picker-cancel"
++            onClick={() => (props.onCancel as () => void)()}
++          >
++            取消
++          </button>
++        </div>
++      );
++    },
++  };
++});
+ 
+ const panelStub = vi.hoisted(() => ({
+   props: null as Record<string, unknown> | null,
+@@ -214,6 +224,13 @@ vi.mock("@/lib/api/llm-providers", async () => {
+   return { ...actual, listProviders: providersApi.listProviders };
+ });
+ 
++// 2026-10-15-workspace-session-agent-only：本页取当前用户对工作区的绑定
++//（fetchMyBinding 单条查询）——绑定机器经 boundMachineId 注入 Picker。
++const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
++vi.mock("@/lib/workspace-binding", () => ({
++  fetchMyBinding: (...args: unknown[]) => bindingApi.fetchMyBinding(...args),
++}));
++
+ import MobileSessionsPage from "@/app/m/workspaces/[id]/sessions/page";
+ import { MobileWorkspaceContext } from "@/app/m/workspaces/[id]/layout";
+ import type { Workspace } from "@/lib/workspaces";
+@@ -278,6 +295,9 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
+       refetch: vi.fn(),
+     });
+     providersApi.listProviders.mockResolvedValue([makeProvider()]);
++    // 默认无绑定（原两步流程零回归）；绑定用例内覆写。
++    bindingApi.fetchMyBinding.mockReset();
++    bindingApi.fetchMyBinding.mockResolvedValue(null);
+     nav.push.mockReset();
+     nav.replace.mockReset();
+     nav.params = { id: "ws-1" };
+@@ -356,6 +376,51 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
+     expect(pickerStub.props?.open).toBe(true);
+   });
+ 
++  // ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（跳过机器步） ──
++  // 移动端天然全在工作区上下文：有绑定 → Picker 绑定模式（直接智能体步）；
++  // 无绑定 → 原两步（零回归）。
++
++  it("FAB（有绑定 ws-1→m-1）→ 贴底抽屉绑定模式：boundMachineId 透出（不弹机器步）", async () => {
++    bindingApi.fetchMyBinding.mockResolvedValue({
++      workspace_id: "ws-1",
++      user_id: "u-1",
++      daemon_id: "m-1",
++      runtime_id: null,
++      root_path: "C:/proj",
++      path_source: "manual",
++      shared: false,
++      synced_at: null,
++      last_scan_at: null,
++      init_synced_at: null,
++      init_synced_spec_version: null,
++    });
++    renderPage();
++    await waitFor(() => {
++      expect(bindingApi.fetchMyBinding).toHaveBeenCalledWith("ws-1");
++    });
++    fireEvent.click(screen.getByTestId("m-sessions-fab"));
++    expect(pickerStub.props?.open).toBe(true);
++    expect(pickerStub.props?.variant).toBe("bottomSheet");
++    // 绑定数据落定后 boundMachineId 透出（绑定模式：Picker 内部跳过机器步）。
++    await waitFor(() => {
++      expect(pickerStub.props?.boundMachineId).toBe("m-1");
++    });
++    // 列表空态 onNew 入口同源（同一 Picker 实例 props）。
++    fireEvent.click(screen.getByTestId("stub-picker-cancel"));
++    fireEvent.click(screen.getByTestId("stub-session-new"));
++    expect(pickerStub.props?.boundMachineId).toBe("m-1");
++  });
++
++  it("零回归：无绑定（fetchMyBinding null）→ boundMachineId 为 null（原两步流程）", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(bindingApi.fetchMyBinding).toHaveBeenCalledWith("ws-1");
++    });
++    fireEvent.click(screen.getByTestId("m-sessions-fab"));
++    expect(pickerStub.props?.open).toBe(true);
++    expect(pickerStub.props?.boundMachineId ?? null).toBeNull();
++  });
++
+   it("providers 同 key 同源：[llmProviders, floating-session] 落缓存 + staleTime 30s", async () => {
+     renderPage();
+     await waitFor(() => {
+diff --git a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+index f5151f7f8..621c54a93 100644
+--- a/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/sessions/page.tsx
+@@ -46,7 +46,10 @@ import {
+ } from "@/components/daemon/session-panel";
+ import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+ import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
+-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
++import {
++  PreSessionPicker,
++  boundMachineIdFor,
++} from "@/components/sessions/pre-session-picker";
+ import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
+ import {
+   type GroupChatListItemRead,
+@@ -54,6 +57,9 @@ import {
+   type SessionCreateResponse,
+ } from "@/lib/daemon";
+ import { useDaemonMachines } from "@/lib/use-daemon-machines";
++// 2026-10-15-workspace-session-agent-only：当前用户对工作区的绑定（绑定机器
++// 解析数据源——单条轻查询，与桌面门户的批量 bindings 各取所需）。
++import { fetchMyBinding } from "@/lib/workspace-binding";
+ 
+ export default function MobileWorkspaceSessionsPage() {
+   const params = useParams<{ id: string }>();
+@@ -77,6 +83,19 @@ export default function MobileWorkspaceSessionsPage() {
+     [providersQ.data],
+   );
+ 
++  // 2026-10-15-workspace-session-agent-only：本页天然全在工作区上下文——当前
++  // 用户对该工作区的绑定（fetchMyBinding 内部已 catch 降级 null）解析绑定机器，
++  // 命中则新建浮层转「绑定模式」（跳过机器步直接选智能体）；无绑定回落原两步。
++  const bindingQ = useQuery({
++    queryKey: ["my-workspace-binding", workspaceId],
++    queryFn: () => fetchMyBinding(workspaceId),
++    staleTime: 60_000,
++  });
++  const boundMachineId = boundMachineIdFor(
++    bindingQ.data ? [bindingQ.data] : [],
++    workspaceId,
++  );
++
+   // ── 新建两步浮层 + 页内预会话态（见文件头；约束：不新增 /sessions/new 路由）──
+   const [pickerOpen, setPickerOpen] = useState(false);
+   const [preContext, setPreContext] = useState<SessionPreContext | null>(null);
+@@ -274,11 +293,14 @@ export default function MobileWorkspaceSessionsPage() {
+         <Plus className="h-6 w-6" aria-hidden />
+       </button>
+ 
+-      {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉） */}
++      {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉）。
++          2026-10-15-workspace-session-agent-only：有绑定机器时转绑定模式
++          （不择机器，直接选智能体）。 */}
+       <PreSessionPicker
+         variant="bottomSheet"
+         open={pickerOpen}
+         machines={machines}
++        boundMachineId={boundMachineId}
+         onCancel={() => setPickerOpen(false)}
+         onPick={handlePickerPick}
+       />
+diff --git a/frontend/src/components/floating/floating-session-host.test.tsx b/frontend/src/components/floating/floating-session-host.test.tsx
+index 9bb99c775..576ab7ca1 100644
+--- a/frontend/src/components/floating/floating-session-host.test.tsx
++++ b/frontend/src/components/floating/floating-session-host.test.tsx
+@@ -68,41 +68,53 @@ vi.mock("@/components/daemon/session-panel", async () => {
+ // 断言锚点（本文件不测 picker 内部渲染，那是 pre-session-picker 自身职责）。
+ // P2-3（QA 边界修复）：透出 onPick/onCancel 触发器——两步浮层兜底分支的
+ // PPM 绑定意图消费/取消路径需从测试侧驱动。
+-vi.mock("@/components/sessions/pre-session-picker", () => ({
+-  PreSessionPicker: ({
+-    open,
+-    machines,
+-    onPick,
+-    onCancel,
+-  }: {
+-    open: boolean;
+-    machines?: { id: string }[];
+-    onPick?: (_runtimeId: string) => void;
+-    onCancel?: () => void;
+-  }) =>
+-    open ? (
+-      <div
+-        data-testid="mock-picker"
+-        data-machines={JSON.stringify((machines ?? []).map((m) => m.id))}
+-      >
+-        picker
+-        <button
+-          type="button"
+-          data-testid="mock-picker-pick"
+-          onClick={() => onPick?.("rt-pick")}
+-        >
+-          pick
+-        </button>
+-        <button
+-          type="button"
+-          data-testid="mock-picker-cancel"
+-          onClick={() => onCancel?.()}
++// 2026-10-15-workspace-session-agent-only：宿主还从本模块 import 三个解析纯函数
++//（boundMachineIdFor 等）——mock 工厂经 importActual 展开保真，仅桩掉组件本体；
++// 追加透出 boundMachineId（绑定模式断言锚）。
++vi.mock("@/components/sessions/pre-session-picker", async () => {
++  const actual = await vi.importActual<
++    typeof import("@/components/sessions/pre-session-picker")
++  >("@/components/sessions/pre-session-picker");
++  return {
++    ...actual,
++    PreSessionPicker: ({
++      open,
++      machines,
++      boundMachineId,
++      onPick,
++      onCancel,
++    }: {
++      open: boolean;
++      machines?: { id: string }[];
++      boundMachineId?: string | null;
++      onPick?: (_runtimeId: string) => void;
++      onCancel?: () => void;
++    }) =>
++      open ? (
++        <div
++          data-testid="mock-picker"
++          data-machines={JSON.stringify((machines ?? []).map((m) => m.id))}
++          data-bound={boundMachineId ?? ""}
+         >
+-          cancel
+-        </button>
+-      </div>
+-    ) : null,
+-}));
++          picker
++          <button
++            type="button"
++            data-testid="mock-picker-pick"
++            onClick={() => onPick?.("rt-pick")}
++          >
++            pick
++          </button>
++          <button
++            type="button"
++            data-testid="mock-picker-cancel"
++            onClick={() => onCancel?.()}
++          >
++            cancel
++          </button>
++        </div>
++      ) : null,
++  };
++});
+ 
+ // FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
+ // 群聊接线（2026-09-02 quick）：透出 selectedGroupId / onSelectGroup /
+@@ -113,7 +125,10 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
+     onSelect?: (s: { id: string }) => void;
+     scope?: { kind: string; runtimeId?: string };
+     // 用户反馈⑤回归锚：四个操作回调必须接线（缺任一则抽屉失去新建/删除/归档）。
+-    onNewInGroup?: unknown;
++    onNewInGroup?: (
++      _workspaceId: string | null,
++      _filter?: { machineId: string; agent: string },
++    ) => void;
+     onDeleteSessions?: unknown;
+     onArchiveSessions?: unknown;
+     onUnarchiveSessions?: unknown;
+@@ -138,6 +153,31 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
+       }
+     >
+       session-list-panel
++      {/* 2026-10-15-workspace-session-agent-only：组头「＋」触发器（真面板
++          WorkspaceGroupNode 经 onNewInGroup 透出 workspaceId+筛选态快照）。 */}
++      <button
++        type="button"
++        data-testid="mock-new-in-group"
++        onClick={() => props.onNewInGroup?.("ws-1", { machineId: "", agent: "" })}
++      >
++        new-in-group
++      </button>
++      <button
++        type="button"
++        data-testid="mock-new-in-group-agent"
++        onClick={() =>
++          props.onNewInGroup?.("ws-1", { machineId: "m-2", agent: "codex" })
++        }
++      >
++        new-in-group-agent
++      </button>
++      <button
++        type="button"
++        data-testid="mock-new-in-group-nows"
++        onClick={() => props.onNewInGroup?.(null, { machineId: "", agent: "" })}
++      >
++        new-in-group-nows
++      </button>
+       <button
+         type="button"
+         data-testid="mock-select-group"
+@@ -233,6 +273,35 @@ vi.mock("@/lib/use-daemon-machines", () => ({
+ 
+ vi.mock("@/lib/daemon", () => ({
+   listAgentSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
++  // 2026-10-15-workspace-session-agent-only：pre-session-picker 经 importActual
++  // 展开（宿主从该模块 import 解析纯函数，仅桩组件本体）——模块顶层建
++  // SESSION_SUPPORTED_PROVIDERS 白名单 Set，mock 缺该导出会在导入期抛错；
++  // PROVIDER_META 同补（引擎标签查表，防漏导出）。
++  SESSION_SUPPORTED_PROVIDERS: ["claude", "codex", "pi", "cursor"],
++  PROVIDER_META: {
++    claude: { label: "Claude Code" },
++    codex: { label: "Codex" },
++    pi: { label: "Pi" },
++    cursor: { label: "Cursor" },
++  },
++}));
++
++// 2026-10-15-workspace-session-agent-only：宿主经 ["workspace-switcher-list"]
++// 查询（listWorkspaces + fetchMyBindings）取工作区绑定机器——两数据源 mock，
++// binding 按用例覆写（默认空集=无绑定，走原链路零回归）。
++vi.mock("@/lib/workspaces", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
++    "@/lib/workspaces",
++  );
++  return {
++    ...actual,
++    listWorkspaces: vi.fn().mockResolvedValue({ items: [], total: 0 }),
++  };
++});
++
++const bindingApi = vi.hoisted(() => ({ fetchMyBindings: vi.fn() }));
++vi.mock("@/lib/workspace-binding", () => ({
++  fetchMyBindings: (...args: unknown[]) => bindingApi.fetchMyBindings(...args),
+ }));
+ 
+ vi.mock("@/lib/api/llm-providers", () => ({
+@@ -303,6 +372,9 @@ describe("FloatingSessionHost", () => {
+     window.localStorage.clear();
+     workspaceApi.listProjectWorkspaces.mockReset();
+     workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
++    // 2026-10-15-workspace-session-agent-only：默认无绑定（原链路零回归）。
++    bindingApi.fetchMyBindings.mockReset();
++    bindingApi.fetchMyBindings.mockResolvedValue([]);
+   });
+ 
+   it("非门户路由渲染悬浮球；全关无会话时抽屉主体不挂载（门控）", () => {
+@@ -950,3 +1022,129 @@ describe("FloatingSessionHost / 群聊接线", () => {
+     });
+   });
+ });
++
++// ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（跳过机器步） ──
++// 覆盖：工作区组「＋」绑定模式浮层（boundMachineId 透出）/ 筛选 agent 直带取
++// 绑定机器 / 工作区页「＋ 新会话」绑定机器优先于 D-005 / 无绑定零回归。
++describe("FloatingSessionHost / 工作区绑定机器（跳过机器步）", () => {
++  /** 绑定固件（组件仅消费 workspace_id/daemon_id）。 */
++  type BindingFixture = { workspace_id: string; daemon_id: string | null };
++
++  /**
++   * 预置绑定到查询缓存后渲染——模拟真实时序（["workspace-switcher-list"]
++   * 由顶栏 switcher 先加载，宿主命中共享缓存；未预置=数据在途的兜底路径见
++   * 「零回归」用例）。
++   */
++  function renderWithBindings(bindings: BindingFixture[]) {
++    const qc = new QueryClient({
++      defaultOptions: { queries: { retry: false } },
++    });
++    qc.setQueryData(["workspace-switcher-list"], { items: [], bindings });
++    return render(
++      <QueryClientProvider client={qc}>
++        <FloatingSessionHost />
++      </QueryClientProvider>,
++    );
++  }
++
++  beforeEach(() => {
++    resetStore();
++    pathnameRef.current = "/ppm/projects";
++    bindingApi.fetchMyBindings.mockReset();
++    bindingApi.fetchMyBindings.mockResolvedValue([]);
++    machinesRef.current = [
++      {
++        id: "m-1",
++        status: "online",
++        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
++      },
++    ] as never[];
++    machineCandidatesRef.current = null;
++    window.localStorage.clear();
++  });
++
++  it("工作区组「＋」（有绑定 ws-1→m-1）→ 浮层绑定模式（boundMachineId 透出，不弹机器步）", async () => {
++    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-1" }]);
++    act(() => {
++      useFloatingSessionStore.getState().openDrawer();
++    });
++    fireEvent.click(await screen.findByTestId("mock-new-in-group"));
++
++    const picker = await screen.findByTestId("mock-picker");
++    expect(picker.dataset.bound).toBe("m-1");
++    expect(useFloatingSessionStore.getState().preContext).toBeNull();
++  });
++
++  it("组「＋」筛选 codex + 绑定机器该引擎在线 → 直带预会话（runtime 取绑定机器，不弹浮层）", async () => {
++    machinesRef.current = [
++      {
++        id: "m-1",
++        status: "online",
++        runtimes: [{ id: "rt-cx", status: "online", provider: "codex" }],
++      },
++      {
++        id: "m-2",
++        status: "online",
++        runtimes: [{ id: "rt-2", status: "online", provider: "codex" }],
++      },
++    ] as never[];
++    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-1" }]);
++    act(() => {
++      useFloatingSessionStore.getState().openDrawer();
++    });
++    fireEvent.click(await screen.findByTestId("mock-new-in-group-agent"));
++
++    await waitFor(() =>
++      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe(
++        "rt-cx",
++      ),
++    );
++    expect(screen.queryByTestId("mock-picker")).not.toBeInTheDocument();
++    // 组工作区上下文随直带走（机器维度取绑定机器 m-1，筛选机器 m-2 不参与）。
++    expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe(
++      "ws-1",
++    );
++  });
++
++  it("工作区页「＋ 新会话」+ 绑定命中 → 绑定机器默认 runtime 优先于 D-005（mock 固定 m-1）", async () => {
++    machinesRef.current = [
++      {
++        id: "m-1",
++        status: "online",
++        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
++      },
++      {
++        id: "m-2",
++        status: "online",
++        runtimes: [{ id: "rt-2", status: "online", provider: "claude" }],
++      },
++    ] as never[];
++    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-2" }]);
++    act(() => {
++      useFloatingSessionStore.getState().requestNewSession({
++        page_key: "workspace",
++        workspace_id: "ws-1",
++      });
++    });
++
++    // D-005 mock 恒返回 m-1（rt-1）——绑定机器 m-2 必须优先（rt-2）。
++    await waitFor(() =>
++      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe(
++        "rt-2",
++      ),
++    );
++    expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe(
++      "ws-1",
++    );
++  });
++
++  it("零回归：工作区组「＋」无绑定（bindings 空集）→ 浮层不带 boundMachineId（原两步）", async () => {
++    render(wrap(<FloatingSessionHost />));
++    act(() => {
++      useFloatingSessionStore.getState().openDrawer();
++    });
++    fireEvent.click(await screen.findByTestId("mock-new-in-group"));
++    const picker = await screen.findByTestId("mock-picker");
++    expect(picker.dataset.bound).toBe("");
++  });
++});
+diff --git a/frontend/src/components/floating/floating-session-host.tsx b/frontend/src/components/floating/floating-session-host.tsx
+index b6b904791..205ea6d59 100644
+--- a/frontend/src/components/floating/floating-session-host.tsx
++++ b/frontend/src/components/floating/floating-session-host.tsx
+@@ -40,7 +40,12 @@ import {
+ import { SessionPanel } from "@/components/daemon/session-panel";
+ import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+ import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
+-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
++import {
++  PreSessionPicker,
++  boundMachineIdFor,
++  pickDefaultRuntimeOnMachine,
++  pickRuntimeByProvider,
++} from "@/components/sessions/pre-session-picker";
+ // FR-02/FR-03：抽屉左栏由紧凑列表换成 /sessions 同款工作区树。
+ import { SessionListPanel } from "@/components/sessions/session-list-panel";
+ import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
+@@ -55,6 +60,10 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
+ // task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
+ // 入口的工作区解析（listProjectWorkspaces，按 workspace_id 升序取第一个）。
+ import { listProjectWorkspaces } from "@/lib/workspace";
++// 2026-10-15-workspace-session-agent-only：工作区绑定机器解析数据源
++//（["workspace-switcher-list"] 共享查询，与顶栏 switcher/门户同 key）。
++import { listWorkspaces } from "@/lib/workspaces";
++import { fetchMyBindings } from "@/lib/workspace-binding";
+ import { usePageSessionContext } from "@/hooks/use-page-session-context";
+ import {
+   FloatingMascot,
+@@ -113,6 +122,25 @@ function FloatingDrawerBody({
+   // 解析（handleNewSession）仍用自有 machines——D-004@v2 用户显式选择，共享
+   // 机器不做任何自动回退/默认选中。
+   const machineOptions = machineCandidates ?? machines;
++  // 2026-10-15-workspace-session-agent-only：当前用户在各工作区的绑定
++  //（binding.daemon_id = 工作区绑定机器）。同 key 同 queryFn 与顶栏
++  // WorkspaceSwitcher / 会话门户共享缓存（staleTime 60s）——通常零新增请求；
++  // 失败/缺数据降级空集（回退原链路，不阻塞新建）。
++  const bindingsQ = useQuery({
++    queryKey: ["workspace-switcher-list"] as const,
++    queryFn: async () => {
++      const [{ items }, bindings] = await Promise.all([
++        listWorkspaces({ limit: 100 }),
++        fetchMyBindings(),
++      ]);
++      return { items, bindings };
++    },
++    staleTime: 60_000,
++  });
++  const myBindings = useMemo(
++    () => bindingsQ.data?.bindings ?? [],
++    [bindingsQ.data],
++  );
+   const providersQ = useQuery({
+     queryKey: ["llmProviders", "floating-session"],
+     queryFn: listProviders,
+@@ -207,15 +235,39 @@ function FloatingDrawerBody({
+       openPreSession(lockedRuntime.id, ppm);
+       return;
+     }
++    // 2026-10-15-workspace-session-agent-only：工作区页上下文（page_key=
++    // workspace）机器=该工作区绑定机器——工作区已绑定过不再走 D-005 任选；
++    // 绑定机器离线/无可用引擎 → 绑定模式浮层兜底（直接智能体步/空态）。
++    // PPM 绑定意图存在时不改解析（工作区由项目推导，绑定机器语义不适用，
++    // 见 design 边界：PPM 入口不在本次范围，零回归）。
++    const pageWsId =
++      effectivePageCtx?.page_key === "workspace"
++        ? effectivePageCtx.workspace_id
++        : null;
++    const boundMachineId = ppm ? null : boundMachineIdFor(myBindings, pageWsId);
++    if (boundMachineId) {
++      const boundRuntime = pickDefaultRuntimeOnMachine(
++        machineOptions.find((m) => m.id === boundMachineId),
++      );
++      if (boundRuntime) {
++        openPreSession(boundRuntime.id, ppm);
++        return;
++      }
++      setPickerWorkspaceId(pageWsId);
++      setPickerOpen(true);
++      return;
++    }
++    // 工作区页且绑定数据仍在途：不落 D-005（可能选到非绑定机器）→ 浮层兜底
++    //（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
++    if (pageWsId && bindingsQ.isLoading) {
++      setPickerWorkspaceId(pageWsId);
++      setPickerOpen(true);
++      return;
++    }
+     const machineId = resolveDefaultMachineId(machines, sessions);
+-    const runtimes = (
+-      machines.find((m) => m.id === machineId)?.runtimes ?? []
+-    ).filter(
+-      (r) =>
+-        r.status === "online" &&
+-        (r.provider === "claude" || r.provider === "codex"),
++    const runtime = pickDefaultRuntimeOnMachine(
++      machines.find((m) => m.id === machineId),
+     );
+-    const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
+     if (runtime) {
+       openPreSession(runtime.id, ppm);
+     } else {
+@@ -223,7 +275,16 @@ function FloatingDrawerBody({
+       // onCancel 取消清（浮层全屏遮罩期间其它新建入口不可达）。
+       setPickerOpen(true);
+     }
+-  }, [lockedRuntime, machines, sessions, openPreSession]);
++  }, [
++    lockedRuntime,
++    machines,
++    sessions,
++    openPreSession,
++    myBindings,
++    machineOptions,
++    effectivePageCtx,
++    bindingsQ.isLoading,
++  ]);
+ 
+   const handlePreSessionCreated = useCallback(
+     (resp: SessionCreateResponse) => {
+@@ -246,6 +307,30 @@ function FloatingDrawerBody({
+       // 清 store+ref，防历史挂起意图经本入口（直连或兜底浮层）泄漏。
+       clearPendingPpmItem();
+       ppmPendingRef.current = null;
++      // 2026-10-15-workspace-session-agent-only：工作区组机器=该工作区绑定机器
++      //（同门户；含共享候选查找）；筛选直带要求「智能体层已选 + 绑定机器该
++      // 引擎在线」，筛选机器不参与。无绑定/非工作区保持原链路（零回归）。
++      const boundMachineId = boundMachineIdFor(myBindings, workspaceId);
++      if (boundMachineId) {
++        const boundMachine = machineOptions.find((m) => m.id === boundMachineId);
++        if (filter?.agent) {
++          const runtime = pickRuntimeByProvider(boundMachine, filter.agent);
++          if (runtime) {
++            startPreSession({ workspaceId, runtimeId: runtime.id }, effectivePageCtx);
++            return;
++          }
++        }
++        setPickerWorkspaceId(workspaceId);
++        setPickerOpen(true);
++        return;
++      }
++      // 工作区组且绑定数据仍在途：不落旧筛选直带（筛选机器可能非绑定机器）→
++      // 浮层兜底（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
++      if (workspaceId && bindingsQ.isLoading) {
++        setPickerWorkspaceId(workspaceId);
++        setPickerOpen(true);
++        return;
++      }
+       if (filter?.machineId && filter.agent) {
+         const machine = machines.find((m) => m.id === filter.machineId);
+         const runtime = machine?.runtimes?.find(
+@@ -259,7 +344,16 @@ function FloatingDrawerBody({
+       setPickerWorkspaceId(workspaceId);
+       setPickerOpen(true);
+     },
+-    [lockedRuntime, machines, startPreSession, effectivePageCtx, clearPendingPpmItem],
++    [
++      lockedRuntime,
++      machines,
++      myBindings,
++      machineOptions,
++      startPreSession,
++      effectivePageCtx,
++      clearPendingPpmItem,
++      bindingsQ.isLoading,
++    ],
+   );
+ 
+   /** 批量删除/归档/取消归档（门户同款：逐条调用 + invalidate + 选中被删则清）。 */
+@@ -567,10 +661,13 @@ function FloatingDrawerBody({
+ 
+       {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受）。
+           task-10：候选含共享机器（共享条目显示名带「共享 + 共享人」标注，
+-          PreSessionPicker 复用组件不改其渲染；在线过滤沿用其自身白名单）。 */}
++          PreSessionPicker 复用组件不改其渲染；在线过滤沿用其自身白名单）。
++          2026-10-15-workspace-session-agent-only：发起组属工作区且当前用户有
++          绑定机器时，浮层转「绑定模式」（跳过机器步，直接智能体步）。 */}
+       <PreSessionPicker
+         open={pickerOpen}
+         machines={machineOptions}
++        boundMachineId={boundMachineIdFor(myBindings, pickerWorkspaceId)}
+         onCancel={() => {
+           // P2-3：取消兜底清——保活的 PPM 绑定意图（store+ref）不得残留到
+           // 后续手动新建（✕ 与遮罩点击均走此处，取消契约单一）。
+diff --git a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+index a296356ef..3704875d0 100644
+--- a/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
++++ b/frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx
+@@ -26,7 +26,12 @@
+ import { describe, it, expect, vi } from "vitest";
+ import { render, screen, fireEvent } from "@testing-library/react";
+ 
+-import { PreSessionPicker } from "../pre-session-picker";
++import {
++  PreSessionPicker,
++  boundMachineIdFor,
++  pickDefaultRuntimeOnMachine,
++  pickRuntimeByProvider,
++} from "../pre-session-picker";
+ // task-05 对话框路径白名单被测组件（B-02 第二处：InteractiveSessionChatSection
+ // 的 onlineProviders 过滤）。import 链含 next/navigation，mock 防 jsdom 解析异常
+ //（同 daemon/__tests__/runtime-session-helpers.test.tsx 惯例）。
+@@ -686,7 +691,265 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
+     });
+   });
+ 
++  it("dsh 十六键与 daemon 单源一致（2026-10-15-dsh-engine-acp task-04：caps 镜像连带钉）", () => {
++    // dsh（DeepSeek Harness，ACP v1）表值前置事实：permission_dialog=true /
++    // dialog='native'（request_permission 代答桥与 codex 同构）；multimodal=false
++    //（dsh ACP 图片依赖 attachment store + exact route，附件走 disk 落盘——
++    // attachments=true 为 cursor 同形态）；compact/steering=false（ACP 无通道）。
++    expect(getProviderCaps("dsh")).toEqual({
++      resume: true,
++      mcp: true,
++      multimodal: false,
++      attachments: true,
++      thinking: true,
++      subagent: false,
++      permission_dialog: true,
++      dialog: "native",
++      edit_patch: false,
++      model_select: true,
++      provider_switch: true,
++      ctx_usage: true,
++      compact: false,
++      thinking_level: true,
++      steering: false,
++      sessionFork: "none",
++    });
++  });
++
+   it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
+     expect(PROVIDER_META.cursor?.label).toBe("Cursor");
+   });
+ });
++
++/* ───────── 10. 工作区绑定机器模式（2026-10-15-workspace-session-agent-only） ───────── */
++//
++// 绑定模式=工作区已按 per-member binding（MemberBindingView.daemon_id）钉定机器，
++// 浮层跳过「① 机器」步直接列该机器智能体；无绑定/「非工作区」由宿主不传
++// boundMachineId 回退原两步（见上方既有用例零修改）。
++
++/** 绑定模式渲染助手（boundMachineId 缺省="m-1"；显式传 null 即回退两步断言用）。 */
++function renderBoundPicker(
++  props: {
++    boundMachineId?: string | null;
++    machines?: DaemonMachineRead[];
++    open?: boolean;
++    variant?: "center" | "bottomSheet";
++  } = {},
++) {
++  const onPick = vi.fn();
++  const onCancel = vi.fn();
++  const machines = props.machines ?? [makeMachine()];
++  const hasBoundOverride = Object.prototype.hasOwnProperty.call(
++    props,
++    "boundMachineId",
++  );
++  const view = (open: boolean) => (
++    <PreSessionPicker
++      open={open}
++      machines={machines}
++      boundMachineId={hasBoundOverride ? props.boundMachineId : "m-1"}
++      onCancel={onCancel}
++      onPick={onPick}
++      variant={props.variant}
++    />
++  );
++  const result = render(view(props.open ?? true));
++  return {
++    ...result,
++    onPick,
++    onCancel,
++    rerenderOpen: (open: boolean) => result.rerender(view(open)),
++  };
++}
++
++describe("PreSessionPicker 工作区绑定机器模式（绑定=跳过机器步）", () => {
++  it("绑定机器在线：无「① 机器」步与机器列表，直接列绑定机器智能体；点选即 onPick(runtimeId)", () => {
++    const { onPick } = renderBoundPicker({
++      machines: [
++        makeMachine(),
++        // 另一台在线机器：其智能体不得混入（getByRole 唯一性即断言——两机都有
++        // Codex，若错列会触发 multiple elements）。
++        makeMachine({
++          id: "m-2",
++          hostname: "DESKTOP-2",
++          display_alias: "机器二",
++          runtimes: [makeRuntime("rt-2", "codex")],
++        }),
++      ],
++    });
++
++    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /选择机器/ }),
++    ).not.toBeInTheDocument();
++    // 绑定机器上下文 pill（机器名 + 工作区绑定标注）+ 智能体列表（copilot 白名单外）。
++    expect(
++      screen.getByText(/智能体 · 机器一（工作区绑定机器）/),
++    ).toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /Copilot/ }),
++    ).not.toBeInTheDocument();
++
++    fireEvent.click(screen.getByRole("button", { name: /选择智能体 Claude Code/ }));
++    expect(onPick).toHaveBeenCalledTimes(1);
++    expect(onPick).toHaveBeenCalledWith("rt-claude");
++  });
++
++  it("默认 Claude Code 高亮语义不变（aria-pressed + 「默认」Tag 仍唯一）", () => {
++    renderBoundPicker();
++    const claude = screen.getByRole("button", {
++      name: /选择智能体 Claude Code/,
++    }) as HTMLButtonElement;
++    expect(claude.getAttribute("aria-pressed")).toBe("true");
++    expect(screen.getAllByText("默认")).toHaveLength(1);
++  });
++
++  it("绑定机器离线：离线空态文案，不落机器列表也不列智能体", () => {
++    renderBoundPicker({
++      machines: [makeMachine({ status: "offline", online_runtime_count: 0 })],
++    });
++    expect(
++      screen.getByText(/工作区绑定的机器「机器一」当前离线，请启动 daemon/),
++    ).toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /选择机器/ }),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /选择智能体/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("绑定机器不在候选中（已删/共享撤销）：不可用空态，不落机器列表", () => {
++    renderBoundPicker({ boundMachineId: "m-gone" });
++    expect(
++      screen.getByText(/工作区绑定的机器当前不可用，请到工作区页面重新绑定机器/),
++    ).toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /选择机器/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("绑定机器在线但白名单引擎全离线：沿用第二步空态文案", () => {
++    renderBoundPicker({
++      machines: [
++        makeMachine({
++          runtimes: [
++            makeRuntime("rt-copilot", "copilot"),
++            makeRuntime("rt-codex-off", "codex", { status: "offline" }),
++          ],
++        }),
++      ],
++    });
++    expect(
++      screen.getByText(/该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）/),
++    ).toBeInTheDocument();
++    expect(
++      screen.queryByRole("button", { name: /选择智能体/ }),
++    ).not.toBeInTheDocument();
++  });
++
++  it("boundMachineId=null：保持原两步流程（缺省不传由既有用例守护）", () => {
++    renderBoundPicker({ boundMachineId: null });
++    expect(screen.getByText("① 机器（仅在线）")).toBeInTheDocument();
++    expect(screen.queryByText(/工作区绑定机器/)).not.toBeInTheDocument();
++    expect(
++      screen.getByRole("button", { name: /选择机器 机器一/ }),
++    ).toBeInTheDocument();
++  });
++
++  it('boundMachineId="" 空串按未绑定处理（防宿主空值误入绑定模式）', () => {
++    renderBoundPicker({ boundMachineId: "" });
++    expect(screen.getByText("① 机器（仅在线）")).toBeInTheDocument();
++  });
++
++  it("bottomSheet 绑定模式：直接智能体步 + 选项行 ≥44px 热区；遮罩/✕ 仍仅 onCancel", () => {
++    const { onPick, onCancel } = renderBoundPicker({
++      variant: "bottomSheet",
++    });
++    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
++    const claude = screen.getByRole("button", {
++      name: /选择智能体 Claude Code/,
++    });
++    expect(claude).toHaveClass("min-h-[44px]");
++    fireEvent.click(claude);
++    expect(onPick).toHaveBeenCalledWith("rt-claude");
++
++    fireEvent.click(screen.getByTestId("pre-session-picker-mask"));
++    fireEvent.click(screen.getByLabelText("关闭"));
++    expect(onCancel).toHaveBeenCalledTimes(2);
++    expect(onPick).toHaveBeenCalledTimes(1);
++  });
++
++  it("取消后重开：绑定模式仍直接智能体步（无机器步残留）", () => {
++    const { rerenderOpen } = renderBoundPicker();
++    expect(
++      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
++    ).toBeInTheDocument();
++    rerenderOpen(false);
++    expect(screen.queryByTestId("pre-session-picker-mask")).not.toBeInTheDocument();
++    rerenderOpen(true);
++    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
++    expect(
++      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
++    ).toBeInTheDocument();
++  });
++});
++
++/* ───────── 11. 新建选点纯函数（三宿主共用解析面） ───────── */
++
++describe("新建选点纯函数（绑定机器解析，门户/悬浮宿主/移动页共用）", () => {
++  it("boundMachineIdFor：命中 workspace 取 daemon_id；无 binding/daemon_id 空/workspaceId 空 → null", () => {
++    const bindings = [
++      { workspace_id: "ws-1", daemon_id: "m-1" },
++      { workspace_id: "ws-2", daemon_id: null },
++    ];
++    expect(boundMachineIdFor(bindings, "ws-1")).toBe("m-1");
++    expect(boundMachineIdFor(bindings, "ws-2")).toBeNull();
++    expect(boundMachineIdFor(bindings, "ws-3")).toBeNull();
++    expect(boundMachineIdFor(bindings, null)).toBeNull();
++    expect(boundMachineIdFor(undefined, "ws-1")).toBeNull();
++  });
++
++  it("pickDefaultRuntimeOnMachine：在线 claude 优先→codex；pi/cursor/离线不参与；机器 null → null", () => {
++    expect(pickDefaultRuntimeOnMachine(makeMachine())?.id).toBe("rt-claude");
++    expect(
++      pickDefaultRuntimeOnMachine(
++        makeMachine({
++          runtimes: [makeRuntime("rt-codex", "codex"), makeRuntime("rt-pi", "pi")],
++        }),
++      )?.id,
++    ).toBe("rt-codex");
++    expect(
++      pickDefaultRuntimeOnMachine(
++        makeMachine({
++          runtimes: [
++            makeRuntime("rt-claude-off", "claude", { status: "offline" }),
++            makeRuntime("rt-codex", "codex"),
++          ],
++        }),
++      )?.id,
++    ).toBe("rt-codex");
++    expect(
++      pickDefaultRuntimeOnMachine(
++        makeMachine({
++          runtimes: [makeRuntime("rt-pi", "pi"), makeRuntime("rt-cursor", "cursor")],
++        }),
++      ),
++    ).toBeNull();
++    expect(pickDefaultRuntimeOnMachine(null)).toBeNull();
++  });
++
++  it("pickRuntimeByProvider：在线精确匹配才返回；离线/机器 null → null", () => {
++    expect(pickRuntimeByProvider(makeMachine(), "codex")?.id).toBe("rt-codex");
++    expect(pickRuntimeByProvider(makeMachine(), "cursor")).toBeNull();
++    expect(
++      pickRuntimeByProvider(
++        makeMachine({
++          runtimes: [makeRuntime("rt-codex-off", "codex", { status: "offline" })],
++        }),
++        "codex",
++      ),
++    ).toBeNull();
++    expect(pickRuntimeByProvider(null, "codex")).toBeNull();
++  });
++});
+diff --git a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+index bab907a14..4457b5683 100644
+--- a/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
++++ b/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+@@ -2976,3 +2976,214 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
+   // 空门户态组合不可达——toast 为防御性兜底（design R-08 声明触达面小），
+   // 不构造 UI 驱动用例（宁缺毋滥）。
+ });
++
++/* ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（不选机器直选智能体） ── */
++
++/** 绑定视图固件（组件仅消费 workspace_id/daemon_id；其余字段对齐 MemberBindingView）。 */
++function makeBinding(workspaceId: string, daemonId: string | null) {
++  return {
++    workspace_id: workspaceId,
++    user_id: "u-me",
++    daemon_id: daemonId,
++    runtime_id: null,
++    root_path: `C:/codes/${workspaceId}`,
++    path_source: "manual",
++    shared: false,
++    synced_at: null,
++    last_scan_at: null,
++    init_synced_at: null,
++    init_synced_spec_version: null,
++  };
++}
++
++/** 机器层覆写（items 与 machineCandidates 同源注入，照 beforeEach 默认口径）。 */
++function setMachines(machines: DaemonMachineRead[]) {
++  mocks.machinesHook.mockReturnValue({
++    items: machines,
++    sharedToMe: [],
++    machineCandidates: machines,
++    total: machines.length,
++    sessions: [],
++    isLoading: false,
++    isFetching: false,
++    isError: false,
++    error: null,
++    refetch: vi.fn(),
++  });
++}
++
++describe("SessionsPortal 工作区绑定机器（跳过机器步，2026-10-15-workspace-session-agent-only）", () => {
++  it("workspace 组「＋」（有绑定）→ 浮层直接智能体步（无「① 机器」）→ 选完预会话=绑定机器 runtime", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    renderPortal(WORKSPACE_SCOPE);
++    fireEvent.click(
++      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
++    );
++
++    // 绑定模式：无机器步、无机器列表，直接列绑定机器智能体。
++    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
++    expect(screen.queryByText("① 机器（仅在线）")).toBeNull();
++    expect(screen.queryByRole("button", { name: /选择机器/ })).toBeNull();
++    fireEvent.click(
++      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
++    );
++
++    await waitFor(() =>
++      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
++    );
++    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
++    const ctx = screen.getByTestId("pre-session-context");
++    expect(ctx.textContent).toContain("machine-1");
++    expect(ctx.textContent).toContain("Claude Code");
++    // 未发首句零服务端实体。
++    expect(mocks.createSession).not.toHaveBeenCalled();
++  });
++
++  it("筛选 agent=Codex（机器筛的是另一台）+ 绑定机器该引擎在线 → 直带：runtime 取绑定机器（不取筛选机器）", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    setMachines([
++      makeMachine({
++        runtimes: [
++          makeRuntime(),
++          makeRuntime({ id: "rt-cx-m1", provider: "codex" }),
++        ],
++      }),
++      makeMachine({
++        id: "m-2",
++        hostname: "machine-2",
++        runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
++      }),
++    ]);
++    renderPortal(WORKSPACE_SCOPE);
++    await chooseAntdOptionByText("slp-machine", "machine-2");
++    await chooseAntdOptionByText("slp-agent", "Codex");
++    fireEvent.click(
++      screen.getByRole("button", { name: "在 当前工作区 新建会话" }),
++    );
++
++    // 直带不弹浮层；上下文行机器=绑定机器 machine-1（不是筛选的 machine-2）。
++    await waitFor(() =>
++      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
++    );
++    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
++    const ctx = screen.getByTestId("pre-session-context");
++    expect(ctx.textContent).toContain("machine-1");
++    expect(ctx.textContent).not.toContain("machine-2");
++
++    const input = screen.getByPlaceholderText(
++      /发送第一句话开始对话/,
++    ) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "开个 codex 会话" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
++    expect(mocks.createSession).toHaveBeenCalledWith(
++      expect.objectContaining({
++        runtime_id: "rt-cx-m1",
++        prompt: "开个 codex 会话",
++        workspace_id: "ws-1",
++      }),
++    );
++  });
++
++  it("绑定机器离线 → 浮层离线空态（不落全机器列表，不弹机器步）", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    setMachines([makeMachine({ status: "offline", online_runtime_count: 0 })]);
++    renderPortal(WORKSPACE_SCOPE);
++    fireEvent.click(
++      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
++    );
++
++    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
++    expect(
++      screen.getByText(/工作区绑定的机器「machine-1」当前离线/),
++    ).toBeTruthy();
++    expect(screen.queryByRole("button", { name: /选择机器/ })).toBeNull();
++  });
++
++  it("?new=1（workspace scope）+ 绑定命中 → 绑定优先于 D-005（localStorage 指向另一台仍直进绑定机器）", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    // D-005 第一级故意指向 m-2：绑定机器必须优先。
++    window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-2");
++    mocks.searchParams = new URLSearchParams("new=1");
++    renderPortal(WORKSPACE_SCOPE);
++
++    await waitFor(() =>
++      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
++    );
++    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
++    const ctx = screen.getByTestId("pre-session-context");
++    expect(ctx.textContent).toContain("machine-1");
++    expect(ctx.textContent).not.toContain("machine-2");
++  });
++
++  it("?new=1（workspace scope）+ 绑定机器仅 pi 在线 → 弹绑定模式浮层（直接智能体步，pi 可选）", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    setMachines([
++      makeMachine({ runtimes: [makeRuntime({ id: "rt-pi", provider: "pi" })] }),
++    ]);
++    mocks.searchParams = new URLSearchParams("new=1");
++    renderPortal(WORKSPACE_SCOPE);
++
++    await waitFor(() =>
++      expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy(),
++    );
++    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
++    expect(screen.queryByText("① 机器（仅在线）")).toBeNull();
++    expect(screen.getByRole("button", { name: /选择智能体 Pi/ })).toBeTruthy();
++  });
++
++  it("零回归：无绑定（bindings 空集）时 workspace 组「＋」仍走原两步机器步", async () => {
++    renderPortal(WORKSPACE_SCOPE);
++    fireEvent.click(
++      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
++    );
++    expect(screen.getByText("① 机器（仅在线）")).toBeTruthy();
++    expect(
++      screen.getByRole("button", { name: /选择机器 machine-1/ }),
++    ).toBeTruthy();
++  });
++
++  it("change scope + 绑定命中 + 筛选 codex → 直带双传（change_id+workspace_id，runtime 取绑定机器）", async () => {
++    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
++    setMachines([
++      makeMachine({
++        runtimes: [
++          makeRuntime(),
++          makeRuntime({ id: "rt-cx-m1", provider: "codex" }),
++        ],
++      }),
++      makeMachine({
++        id: "m-2",
++        hostname: "machine-2",
++        runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
++      }),
++    ]);
++    renderPortal(CHANGE_SCOPE);
++    await chooseAntdOptionByText("slp-machine", "machine-2");
++    await chooseAntdOptionByText("slp-agent", "Codex");
++    fireEvent.click(
++      screen.getByRole("button", { name: "在 当前工作区 新建会话" }),
++    );
++
++    // 直带不弹浮层（scope 双传语义经 enterPreSession 保留）。
++    await waitFor(() =>
++      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
++    );
++    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
++
++    const input = screen.getByPlaceholderText(
++      /发送第一句话开始对话/,
++    ) as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "变更下开个 codex 会话" } });
++    fireEvent.click(screen.getByTitle("发送"));
++    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
++    expect(mocks.createSession).toHaveBeenCalledWith(
++      expect.objectContaining({
++        runtime_id: "rt-cx-m1",
++        prompt: "变更下开个 codex 会话",
++        workspace_id: "ws-1",
++        change_id: "chg-1",
++      }),
++    );
++  });
++});
+diff --git a/frontend/src/components/sessions/pre-session-picker.tsx b/frontend/src/components/sessions/pre-session-picker.tsx
+index 6f2d7c1e8..073a52d7d 100644
+--- a/frontend/src/components/sessions/pre-session-picker.tsx
++++ b/frontend/src/components/sessions/pre-session-picker.tsx
+@@ -27,6 +27,14 @@
+  *     仅容器定位/外观类差异，两步选择逻辑零分叉。
+  *
+  * 门户接线（何时打开/上下文合成 onPick → preContext）归 task-06。
++ *
++ * 工作区绑定机器模式（2026-10-15-workspace-session-agent-only）：新增可选 prop
++ * boundMachineId——非空即「绑定模式」，跳过「① 机器」步直接列该机器智能体
++ * （机器已由工作区对本人的 per-member binding 钉定，无需也不允许再选机器；
++ * 绑定机器离线/不可见时给专门空态，不落回全机器列表）。缺省/null/空串 =
++ * 原两步流程，零回归。三宿主（门户/悬浮宿主/移动页）共用的解析纯函数
++ * （boundMachineIdFor / pickDefaultRuntimeOnMachine / pickRuntimeByProvider）
++ * 同文件导出，避免三处重复实现。
+  */
+ 
+ import { useEffect, useMemo, useState } from "react";
+@@ -39,6 +47,7 @@ import {
+   type DaemonMachineRead,
+   type DaemonRuntimeRead,
+ } from "@/lib/daemon";
++import type { MemberBindingView } from "@/lib/workspace-binding";
+ import { cn } from "@/lib/utils";
+ 
+ /**
+@@ -61,12 +70,64 @@ export interface PreSessionPickerProps {
+   open: boolean;
+   /** 机器列表（父层注入，本组件零数据请求）。 */
+   machines: DaemonMachineRead[];
++  /**
++   * 工作区绑定机器 id（2026-10-15-workspace-session-agent-only）：非空 =
++   * 绑定模式——跳过「① 机器」步，直接列该机器智能体（机器离线/不可见时给
++   * 专门空态，不落回全机器列表）；缺省/null/空串 = 原两步流程（零回归）。
++   * 由宿主经 boundMachineIdFor(bindings, workspaceId) 解析注入。
++   */
++  boundMachineId?: string | null;
+   /** 取消回调（✕ / 遮罩点击）。 */
+   onCancel: () => void;
+   /** 选定智能体（runtimeId）立即回调并关闭（无确认按钮）。 */
+   onPick: (_runtimeId: string) => void;
+ }
+ 
++/* ────────────────────── 新建选点解析纯函数（三宿主共用） ────────────────────── */
++
++/**
++ * 工作区绑定机器 id（2026-10-15-workspace-session-agent-only）：当前用户对该
++ * 工作区的 per-member binding（MemberBindingView.daemon_id）→ 机器 id。
++ * 无 workspaceId / 无 binding / daemon_id 空 → null（调用方回退原两步流程）。
++ */
++export function boundMachineIdFor(
++  bindings:
++    | Array<Pick<MemberBindingView, "workspace_id" | "daemon_id">>
++    | null
++    | undefined,
++  workspaceId: string | null | undefined,
++): string | null {
++  if (!workspaceId) return null;
++  const hit = (bindings ?? []).find((b) => b.workspace_id === workspaceId);
++  return hit?.daemon_id ?? null;
++}
++
++/**
++ * 机器上的默认直带 runtime：在线且 provider∈{claude, codex}，claude 优先。
++ * 与既有 ?new=1 / 悬浮宿主默认解析同语义（单一实现）；pi/cursor 不参与
++ * 自动默认（可经浮层显式选择），无命中返回 null。
++ */
++export function pickDefaultRuntimeOnMachine(
++  machine: DaemonMachineRead | null | undefined,
++): DaemonRuntimeRead | null {
++  const runtimes = (machine?.runtimes ?? []).filter(
++    (r) => r.status === "online" && (r.provider === "claude" || r.provider === "codex"),
++  );
++  return runtimes.find((r) => r.provider === "claude") ?? runtimes[0] ?? null;
++}
++
++/** 机器上指定引擎的在线 runtime（列表筛选直带用）；无命中返回 null。 */
++export function pickRuntimeByProvider(
++  machine: DaemonMachineRead | null | undefined,
++  provider: string,
++): DaemonRuntimeRead | null {
++  return (
++    (machine?.runtimes ?? []).find(
++      (r) => r.status === "online" && r.provider === provider,
++    ) ?? null
++  );
++}
++
+ /* ────────────────────── 纯辅助（new-session-form 同款语义） ────────────────────── */
+ 
+ /** 机器展示名：别名优先，回退 hostname。 */
+@@ -104,6 +165,7 @@ export function PreSessionPicker({
+   variant = "center",
+   open,
+   machines,
++  boundMachineId,
+   onCancel,
+   onPick,
+ }: PreSessionPickerProps) {
+@@ -114,14 +176,23 @@ export function PreSessionPicker({
+     if (open) setMachineId(null);
+   }, [open]);
+ 
++  // 绑定模式（2026-10-15-workspace-session-agent-only）：非空 id 即跳过机器步
++  // （空串按未绑定——防宿主以空值误入绑定模式）。
++  const boundMode = typeof boundMachineId === "string" && boundMachineId.length > 0;
++
+   // ① 仅在线机器（D-107：第一步机器白名单 = status online）。
+   const onlineMachines = useMemo(
+     () => machines.filter((m) => m.status === "online"),
+     [machines],
+   );
++  // 当前机器：绑定模式=绑定机器原样（含离线/不可见，供专门空态展示）；非绑定
++  // =第一步选中（在线白名单内）。
+   const machine = useMemo(
+-    () => onlineMachines.find((m) => m.id === machineId) ?? null,
+-    [onlineMachines, machineId],
++    () =>
++      boundMode
++        ? (machines.find((m) => m.id === boundMachineId) ?? null)
++        : (onlineMachines.find((m) => m.id === machineId) ?? null),
++    [boundMode, boundMachineId, machines, onlineMachines, machineId],
+   );
+ 
+   // ② 该机器可会话智能体：provider∈SESSION_SUPPORTED_PROVIDERS 且在线。
+@@ -135,6 +206,18 @@ export function PreSessionPicker({
+     [machine],
+   );
+ 
++  // 绑定模式空态（优先级：机器不可见 > 机器离线 > 在线但无白名单引擎在线）；
++  // 不落回全机器列表（选到与工作区无关的机器＝cwd 语义错，需求明确禁选）。
++  const boundEmptyText = useMemo(() => {
++    if (!boundMode) return null;
++    if (!machine) return "工作区绑定的机器当前不可用，请到工作区页面重新绑定机器";
++    if (machine.status !== "online")
++      return `工作区绑定的机器「${machineLabel(machine)}」当前离线，请启动 daemon 后再新建会话`;
++    if (supportedRuntimes.length === 0)
++      return "该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）";
++    return null;
++  }, [boundMode, machine, supportedRuntimes]);
++
+   if (!open) return null;
+ 
+   // 容器双形态（task-13）：仅定位/外观类差异——center 原类逐字不动（桌面零回归）；
+@@ -149,6 +232,42 @@ export function PreSessionPicker({
+     : "w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg";
+   // 移动触摸热区（FR-08 ≥44px 抽检锚）：bottomSheet 下两步选项行补 min-h，外观类不改逻辑。
+   const touchCls = isSheet ? "min-h-[44px]" : "";
++  // 绑定模式无机器步，标题不再提「运行位置」（机器已由工作区绑定钉定）。
++  const dialogTitle = boundMode ? "新建会话 · 选择智能体" : "新建会话 · 选择运行位置";
++
++  // 智能体选项列表（绑定模式与非绑定第二步共用，同一渲染路径）。
++  const runtimeList = (
++    <div className="mt-2 flex flex-col gap-2" aria-label="智能体列表">
++      {supportedRuntimes.map((r) => {
++        // 默认 Claude Code 高亮（new-session-form ② 区同款主色语义）。
++        const isDefault = r.provider === "claude";
++        return (
++          <button
++            key={r.id}
++            type="button"
++            aria-label={`选择智能体 ${runtimeLabel(r)}`}
++            aria-pressed={isDefault}
++            onClick={() => onPick(r.id)}
++            className={cn(
++              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
++              touchCls,
++              isDefault
++                ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
++                : "border-border bg-card text-foreground hover:border-brand-300",
++            )}
++          >
++            <span aria-hidden>{engineIcon(r.provider)}</span>
++            <span>{runtimeLabel(r)}</span>
++            {isDefault && (
++              <Tag className="mr-0 rounded-full border-brand-300 bg-brand-100 text-brand-700">
++                默认
++              </Tag>
++            )}
++          </button>
++        );
++      })}
++    </div>
++  );
+ 
+   return (
+     <div
+@@ -163,7 +282,7 @@ export function PreSessionPicker({
+       <div
+         role="dialog"
+         aria-modal="true"
+-        aria-label="新建会话 · 选择运行位置"
++        aria-label={dialogTitle}
+         className={cardCls}
+       >
+         <div className="flex items-start justify-between gap-2">
+@@ -176,7 +295,7 @@ export function PreSessionPicker({
+               <Plus className="h-4 w-4" />
+             </span>
+             <h3 className="text-sm font-semibold text-foreground">
+-              新建会话 · 选择运行位置
++              {dialogTitle}
+             </h3>
+           </div>
+           <button
+@@ -189,7 +308,24 @@ export function PreSessionPicker({
+           </button>
+         </div>
+ 
+-        {!machine ? (
++        {boundMode ? (
++          <>
++            {/* 绑定模式（2026-10-15-workspace-session-agent-only）：无机器步，
++                直接智能体步；pill 标注机器来源=工作区绑定。 */}
++            <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
++              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand-600" />
++              智能体 · {machine ? machineLabel(machine) : "工作区绑定机器"}
++              （工作区绑定机器）
++            </p>
++            {boundEmptyText ? (
++              <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
++                {boundEmptyText}
++              </p>
++            ) : (
++              runtimeList
++            )}
++          </>
++        ) : !machine ? (
+           <>
+             {/* ① 机器（仅在线）——原型 .picker #pickStep1/#pickMachines。 */}
+             <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+@@ -248,36 +384,7 @@ export function PreSessionPicker({
+                 该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）
+               </p>
+             ) : (
+-              <div className="mt-2 flex flex-col gap-2" aria-label="智能体列表">
+-                {supportedRuntimes.map((r) => {
+-                  // 默认 Claude Code 高亮（new-session-form ② 区同款主色语义）。
+-                  const isDefault = r.provider === "claude";
+-                  return (
+-                    <button
+-                      key={r.id}
+-                      type="button"
+-                      aria-label={`选择智能体 ${runtimeLabel(r)}`}
+-                      aria-pressed={isDefault}
+-                      onClick={() => onPick(r.id)}
+-                      className={cn(
+-                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
+-                        touchCls,
+-                        isDefault
+-                          ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
+-                          : "border-border bg-card text-foreground hover:border-brand-300",
+-                      )}
+-                    >
+-                      <span aria-hidden>{engineIcon(r.provider)}</span>
+-                      <span>{runtimeLabel(r)}</span>
+-                      {isDefault && (
+-                        <Tag className="mr-0 rounded-full border-brand-300 bg-brand-100 text-brand-700">
+-                          默认
+-                        </Tag>
+-                      )}
+-                    </button>
+-                  );
+-                })}
+-              </div>
++              runtimeList
+             )}
+           </>
+         )}
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 6614cb742..483478031 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -64,7 +64,8 @@
+  *     - 两层筛选下拉（FR-02 / D-107；ql-20260908-005 胶囊 tab → 下拉，机器
+  *       多时胶囊换行撑爆左栏）：第一层机器（含「全部机器」清空，可搜索），
+  *       选中后出第二层智能体（SESSION_ENGINE_OPTIONS 单一源全量引擎
+- *       claude/codex/pi/cursor，ql-20260908-007 补齐，含「全部智能体」）；
++ *       claude/codex/pi/cursor/dsh，ql-20260908-007 补齐、dsh 为
++ *       2026-10-15-dsh-engine-acp 增补，含「全部智能体」）；
+  *       纯视图过滤不进数据层；筛选态隐藏机器小节标题；筛选变化重置展开态
+  *       除当前组（R-05）；筛选值 localStorage 记忆（刷新恢复用户选择），
+  *       陈旧机器 id 待机器列表到位后兜底重置
+@@ -237,8 +238,9 @@ const STATUS_OPTIONS = [
+ 
+ /**
+  * 第二层智能体下拉选项（D-107）。ql-20260908-007：选项从单一源
+- * SESSION_ENGINE_OPTIONS 派生（claude/codex/pi/cursor 全量支持引擎，
+- * label 取 PROVIDER_META）——原硬编码两档漏 pi/cursor，与实际可选引擎不符。
++ * SESSION_ENGINE_OPTIONS 派生（claude/codex/pi/cursor/dsh 全量支持引擎
++ * ——dsh 为 2026-10-15-dsh-engine-acp 增补，label 取 PROVIDER_META）——
++ * 原硬编码两档漏 pi/cursor，与实际可选引擎不符。
+  */
+ const AGENT_TABS = SESSION_ENGINE_OPTIONS.map((o) => ({ ...o }));
+ 
+diff --git a/frontend/src/components/sessions/sessions-portal.tsx b/frontend/src/components/sessions/sessions-portal.tsx
+index 8f0e6656b..a6ada2bdb 100644
+--- a/frontend/src/components/sessions/sessions-portal.tsx
++++ b/frontend/src/components/sessions/sessions-portal.tsx
+@@ -130,7 +130,7 @@ import {
+ } from "@/components/daemon/session-panel";
+ import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
+ import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
+-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
++import { PreSessionPicker, boundMachineIdFor, pickDefaultRuntimeOnMachine, pickRuntimeByProvider } from "@/components/sessions/pre-session-picker";
+ import {
+   PortalFilePreviewPanel,
+   PortalFileTreePanel,
+@@ -369,6 +369,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+   // picker + 两处 SessionPanel；候选含共享机器的 runtimes，离线判定覆盖共享会话）。
+   const pickerMachines = machineCandidates ?? machines;
+ 
++  // 2026-10-15-workspace-session-agent-only：当前用户在各工作区的绑定
++  //（per-member binding.daemon_id = 工作区绑定机器）。与工作区名同查询
++  //（wsNameQuery 的 Promise.all 已含 fetchMyBindings）——零新增请求。
++  const myBindings = useMemo(
++    () => wsNameQuery.data?.bindings ?? [],
++    [wsNameQuery.data],
++  );
++
+   // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
+   // created_at；无会话返回 null 不渲染入口。
+   // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口
+@@ -551,11 +559,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+ 
+   // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
+   // 不让用户再手动点组头「＋」新建）：?new=1 直达新建。挂载解析一次；?session=
+-  // 深链优先（同传时只恢复选中，不自动新建）；机器数据就绪后按 D-005 三级回退
+-  // 解析默认机器（resolveDefaultMachineId——导出注释即指明门户为消费点），取其
++  // 深链优先（同传时只恢复选中，不自动新建）；机器数据就绪后解析默认机器，取其
+   // 在线 claude/codex runtime（默认 Claude，与浮层第二步「默认」高亮一致）直接
+   // 进预会话态（首句 createSession，FR-03 零残留不变）；未命中自动弹两步浮层
+   // 兜底（无在线机器等场景由浮层空态引导承接）。
++  // 2026-10-15-workspace-session-agent-only：带 scope 工作区（workspace/change/
++  // quicklog）时解析链改为「绑定机器优先」——binding.daemon_id 命中则在绑定机器
++  // 上取默认 runtime（不再走 D-005）；未命中绑定才回退 D-005，且绑定解析需
++  // bindings 就绪（未就绪不解析，空集会被误判「无绑定」落错分支）。
+   const autoNewDoneRef = useRef(false);
+   useEffect(() => {
+     if (autoNewDoneRef.current) return;
+@@ -566,20 +577,19 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+       return;
+     }
+     if (machinesLoading) return; // 机器数据未就绪不解析（空数组会误判无在线机器）
++    const scopedWsId = scopedPickerWorkspaceId();
++    if (scopedWsId && wsNameQuery.isLoading) return; // 绑定数据未就绪不解析
+     autoNewDoneRef.current = true;
+-    const machineId = resolveDefaultMachineId(machines, sessions);
+-    const runtimes = (
+-      machines.find((m) => m.id === machineId)?.runtimes ?? []
+-    ).filter(
+-      (r) =>
+-        r.status === "online" &&
+-        (r.provider === "claude" || r.provider === "codex"),
+-    );
+-    const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
++    const boundMachineId = boundMachineIdFor(myBindings, scopedWsId);
++    const targetMachine = boundMachineId
++      ? // 绑定机器（含共享候选——借用绑定同样命中）；离线/不可见 → null 落浮层。
++        (pickerMachines.find((m) => m.id === boundMachineId) ?? null)
++      : machines.find((m) => m.id === resolveDefaultMachineId(machines, sessions));
++    const runtime = pickDefaultRuntimeOnMachine(targetMachine);
+     if (runtime) {
+-      enterPreSession(runtime.id, scopedPickerWorkspaceId());
++      enterPreSession(runtime.id, scopedWsId);
+     } else {
+-      setPickerWorkspaceId(scopedPickerWorkspaceId());
++      setPickerWorkspaceId(scopedWsId);
+       setPickerOpen(true);
+     }
+   }, [
+@@ -587,6 +597,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+     machinesLoading,
+     machines,
+     sessions,
++    myBindings,
++    pickerMachines,
++    wsNameQuery.isLoading,
+     enterPreSession,
+     scopedPickerWorkspaceId,
+   ]);
+@@ -615,9 +628,37 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+    * 组头「＋」（FR-04 / D-107 优先级链第一段，ql-20260823-001 补齐）：两层筛选
+    * tab 已选具体机器+智能体时**直接带上下文进预会话**（用户已在具体机器和智能体
+    * 上，不再弹浮层重复选择）；缺任一层或该引擎无在线 runtime 时回退两步浮层。
++   *
++   * 2026-10-15-workspace-session-agent-only：工作区上下文（组带 workspaceId 且
++   * 当前用户对该工作区有绑定机器）机器改取**绑定机器**——该维度已由工作区绑定
++   * 钉定不再让用户选（浮层直接智能体步）；筛选直带退化为「智能体层已选 + 绑定
++   * 机器上该引擎在线」（筛选机器不参与，即使筛的是另一台）。无绑定/非工作区组
++   * 保持原链路（两步浮层 + machineId&agent 双备齐直带，零回归）。
+    */
+   const handleNewInGroup = useCallback(
+     (workspaceId: string | null, filter?: { machineId: string; agent: string }) => {
++      const boundMachineId = boundMachineIdFor(myBindings, workspaceId);
++      if (boundMachineId) {
++        const machine = pickerMachines.find((m) => m.id === boundMachineId);
++        if (filter?.agent) {
++          const runtime = pickRuntimeByProvider(machine, filter.agent);
++          if (runtime) {
++            // 直带进预会话（enterPreSession 统一 scope 双传 + 选中态/URL 清理）。
++            enterPreSession(runtime.id, workspaceId);
++            return;
++          }
++        }
++        setPickerWorkspaceId(workspaceId);
++        setPickerOpen(true);
++        return;
++      }
++      // 工作区组且绑定数据仍在途：不落旧筛选直带（筛选机器可能非绑定机器）→
++      // 浮层兜底（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
++      if (workspaceId && wsNameQuery.isLoading) {
++        setPickerWorkspaceId(workspaceId);
++        setPickerOpen(true);
++        return;
++      }
+       if (filter?.machineId && filter.agent) {
+         const machine = machines.find((m) => m.id === filter.machineId);
+         const runtime = machine?.runtimes?.find(
+@@ -646,7 +687,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+       setPickerWorkspaceId(workspaceId);
+       setPickerOpen(true);
+     },
+-    [machines, scope, syncSessionParam],
++    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, wsNameQuery.isLoading],
+   );
+ 
+   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
+@@ -1147,10 +1188,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
+         )}
+       </div>
+       {/* task-06（FR-04/D-107）：组头「＋」两步浮层（①在线机器 ②智能体，默认
+-          Claude 高亮）；onPick 合成 preContext，取消仅关闭零影响。 */}
++          Claude 高亮）；onPick 合成 preContext，取消仅关闭零影响。
++          2026-10-15-workspace-session-agent-only：发起组属工作区且当前用户有
++          绑定机器时，浮层转「绑定模式」（跳过机器步，直接智能体步）。 */}
+       <PreSessionPicker
+         open={pickerOpen}
+         machines={pickerMachines}
++        boundMachineId={boundMachineIdFor(myBindings, pickerWorkspaceId)}
+         onCancel={() => setPickerOpen(false)}
+         onPick={handlePickerPick}
+       />
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 297b11fea..47b419816 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -25012,7 +25012,7 @@ export interface components {
+             /** Runtime Id */
+             runtime_id?: string | null;
+             /** Provider */
+-            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
++            provider?: ("claude" | "codex" | "cursor" | "pi" | "dsh") | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+diff --git a/frontend/src/lib/daemon/runtimes.ts b/frontend/src/lib/daemon/runtimes.ts
+index 88431bed7..a6e193fa1 100644
+--- a/frontend/src/lib/daemon/runtimes.ts
++++ b/frontend/src/lib/daemon/runtimes.ts
+@@ -170,13 +170,16 @@ export async function triggerDaemonSelfUpdate(
+  * 收敛（ql-20260908-007）。与后端 InteractiveProviderLiteral / daemon
+  * VALID_PROVIDERS 同值；新增引擎时四处一起改（此处 + 两端白名单）。
+  * 2026-09-04-provider-pi-onboarding task-05：加 pi；
+- * 2026-09-08-cursor-interactive-session task-08：加 cursor。
++ * 2026-09-08-cursor-interactive-session task-08：加 cursor；
++ * 2026-10-15-dsh-engine-acp task-07：加 dsh（DeepSeek Harness，单聊接入；
++ * 群聊白名单 create-group-wizard GROUP_SUPPORTED_PROVIDERS 不动——阶段 2）。
+  */
+ export const SESSION_SUPPORTED_PROVIDERS = [
+   "claude",
+   "codex",
+   "pi",
+   "cursor",
++  "dsh",
+ ] as const;
+ 
+ /** Provider display name, icon emoji, and Tailwind color classes. */
+@@ -196,6 +199,11 @@ export const PROVIDER_META: Record<
+   kimi: { label: "Kimi", icon: "🔴", color: "bg-red-100 text-red-800" },
+   kiro: { label: "Kiro", icon: "🟩", color: "bg-emerald-100 text-emerald-800" },
+   antigravity: { label: "Antigravity", icon: "⚫", color: "bg-slate-100 text-slate-800" },
++  dsh: {
++    label: "DeepSeek Harness",
++    icon: "🐳",
++    color: "bg-blue-100 text-blue-800",
++  },
+ };
+ 
+ /** 会话引擎下拉选项（value+label，label 取 PROVIDER_META 单源）。 */
+diff --git a/frontend/src/lib/provider-caps.ts b/frontend/src/lib/provider-caps.ts
+index aa850b531..cbd307b8a 100644
+--- a/frontend/src/lib/provider-caps.ts
++++ b/frontend/src/lib/provider-caps.ts
+@@ -176,6 +176,24 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     steering: false,
+     sessionFork: 'none',
+   },
++  dsh: {
++    resume: true,
++    mcp: true,
++    multimodal: false,
++    attachments: true,
++    thinking: true,
++    subagent: false,
++    permission_dialog: true,
++    dialog: 'native',
++    edit_patch: false,
++    model_select: true,
++    provider_switch: true,
++    ctx_usage: true,
++    compact: false,
++    thinking_level: true,
++    steering: false,
++    sessionFork: 'none',
++  },
+ };
+ 
+ /**
+diff --git a/sillyhub-daemon/scripts/gen-provider-caps.mjs b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+index 940641f3a..079408f5f 100644
+--- a/sillyhub-daemon/scripts/gen-provider-caps.mjs
++++ b/sillyhub-daemon/scripts/gen-provider-caps.mjs
+@@ -16,7 +16,8 @@
+ // dialog 三值 'native'/'marker'/'none'、sessionFork 三值
+ // 'native'/'seed'/'none'——2026-09-22-session-fork-continuation task-03）。
+ //
+-// 响亮失败守卫（R-02）：解析结果必须恰含四引擎（claude/codex/pi/cursor）且
++// 响亮失败守卫（R-02）：解析结果必须恰含五引擎（claude/codex/pi/cursor/dsh——
++// dsh 为 2026-10-15-dsh-engine-acp task-04 增补）且
+ // 每键恰 16 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
+ // 产物**（值形态写错——如裸 true 误写成字符串——同样以「缺少 caps 键」暴露）。
+ //
+@@ -56,7 +57,7 @@ const backendOutPath = resolve(
+ 
+ // 契约常量（与 daemon 单源 ProviderCaps 接口一致；新引擎/新键接入时同步这里，
+ // 守卫会强制单源与本清单一致，不同步即响亮失败）。
+-const ENGINES = ["claude", "codex", "pi", "cursor"];
++const ENGINES = ["claude", "codex", "pi", "cursor", "dsh"];
+ const CAPS_KEYS = [
+   "resume",
+   "mcp",
+@@ -144,7 +145,7 @@ function parseCapsTable(body) {
+   return table;
+ }
+ 
+-// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 16 caps 键 ────────────────────────
++// ── 响亮失败守卫（R-02）：恰五引擎 × 每键恰 16 caps 键 ────────────────────────
+ 
+ function guardTable(table) {
+   const errors = [];
+diff --git a/sillyhub-daemon/src/agent-detector.ts b/sillyhub-daemon/src/agent-detector.ts
+index 9f06920ad..3a5812a37 100644
+--- a/sillyhub-daemon/src/agent-detector.ts
++++ b/sillyhub-daemon/src/agent-detector.ts
+@@ -1,16 +1,17 @@
+ /**
+- * agent-detector.ts —— 12 provider CLI 探测（Python agent_detector.py 的 1:1 Node 迁移）。
++ * agent-detector.ts —— 13 provider CLI 探测（Python agent_detector.py 的 1:1 Node 迁移，
++ * 2026-10-15-dsh-engine-acp task-01 增补 dsh 后 12→13）。
+  *
+  * 职责：
+- *   启动时探测本机 12 种 coding agent CLI（claude/codex/copilot/opencode/openclaw/hermes/
+- *   gemini/pi/cursor/kimi/kiro/antigravity）。按优先级 `env 覆盖 → PATH which → 不可用`
++ *   启动时探测本机 13 种 coding agent CLI（claude/codex/copilot/opencode/openclaw/hermes/
++ *   gemini/pi/cursor/kimi/kiro/antigravity/dsh）。按优先级 `env 覆盖 → PATH which → 不可用`
+  *   解析每个 provider 的二进制路径，执行 `<bin_path> --version` 取版本，调用 task-14 的
+  *   checkMinVersion 校验最低版本。为 daemon（task-20）注册阶段提供可用 agent 列表。
+  *
+  * Python 源对照：
+  *   sillyhub_daemon/agent_detector.py:37-46   AgentDef dataclass
+  *   sillyhub_daemon/agent_detector.py:48-58   DetectedAgent dataclass
+- *   sillyhub_daemon/agent_detector.py:98-174  AGENT_DEFS（12 provider）
++ *   sillyhub_daemon/agent_detector.py:98-174  AGENT_DEFS（迁移时 12 provider；dsh 为 Node 侧增补）
+  *   sillyhub_daemon/agent_detector.py:180-185 detect_all（串行）
+  *   sillyhub_daemon/agent_detector.py:187-195 detect_one
+  *   sillyhub_daemon/agent_detector.py:197-207 is_available
+@@ -22,7 +23,7 @@
+  *   - G-05 零依赖：仅用 Node 内置 child_process / fs / path，不引 which 库。
+  *   - G-01 功能等价：与 Python 版行为 1:1（探测优先级、--version 解析、版本校验）。
+  *
+- * @see design.md §6（agent-detector.ts 文件清单）/ FR-07（12 provider 探测）
++ * @see design.md §6（agent-detector.ts 文件清单）/ FR-07（provider 探测）
+  */
+ 
+ import { execFile } from 'node:child_process';
+@@ -92,7 +93,7 @@ export interface DetectedAgent {
+ }
+ 
+ // ---------------------------------------------------------------------------
+-// 12 provider 探测表（对齐 Python AGENT_DEFS，agent_detector.py:98-174）
++// 13 provider 探测表（Python AGENT_DEFS 迁移 + dsh 增补）
+ // ---------------------------------------------------------------------------
+ 
+ /**
+@@ -181,9 +182,19 @@ export const PROVIDER_SPECS = {
+     versionPattern: /(\d+\.\d+\.\d+)/,
+     protocol: 'text' as const,
+   },
++  // 2026-10-15-dsh-engine-acp task-01（D-001）：dsh（DeepSeek Harness）作为交互式
++  // 引擎接入的第 4 家（spawn `dsh --profile acp`，见 interactive/dsh-acp-driver.ts）。
++  // 版本门 0.2.1：MIN_VERSIONS 同值条目，低于仅警告不硬拒（D-002，与四引擎同语义）。
++  dsh: {
++    bin: 'dsh',
++    envPath: 'SILLYHUB_DSH_PATH',
++    versionPattern: /(\d+\.\d+\.\d+)/,
++    protocol: 'json_rpc' as const,
++    minVersion: '0.2.1',
++  },
+ } as const;
+ 
+-/** provider 名联合类型（'claude' | 'codex' | ... 共 12 个字面量）。 */
++/** provider 名联合类型（'claude' | 'codex' | ... 共 13 个字面量）。 */
+ export type ProviderName = keyof typeof PROVIDER_SPECS;
+ 
+ /**
+@@ -227,17 +238,17 @@ export function normalizeProvider(raw: string | undefined | null): string {
+ const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.ps1'];
+ 
+ /**
+- * 探测本机 12 种 coding agent CLI。
++ * 探测本机 13 种 coding agent CLI。
+  *
+  * 单实例无状态（Python 版同样每次 daemon 启动 new 一个）。
+  * 子进程执行 / PATH 查找 / env 读取都在实例方法内，便于单测 mock（覆写 protected 方法）。
+  */
+ export class AgentDetector {
+   /**
+-   * 探测全部 12 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
++   * 探测全部 13 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
+    *
+    * 串行执行（对齐 Python detect_all，agent_detector.py:180-185）——非 Promise.all 并发，
+-   * 避免瞬时 12 个子进程 + 与 Python 行为偏离。
++   * 避免瞬时 13 个子进程 + 与 Python 行为偏离。
+    */
+   async detectAgents(): Promise<DetectedAgent[]> {
+     const results: DetectedAgent[] = [];
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 297b11fea..47b419816 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -25012,7 +25012,7 @@ export interface components {
+             /** Runtime Id */
+             runtime_id?: string | null;
+             /** Provider */
+-            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
++            provider?: ("claude" | "codex" | "cursor" | "pi" | "dsh") | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+diff --git a/sillyhub-daemon/src/dsh-settings.ts b/sillyhub-daemon/src/dsh-settings.ts
+new file mode 100644
+index 000000000..b293e35a5
+--- /dev/null
++++ b/sillyhub-daemon/src/dsh-settings.ts
+@@ -0,0 +1,120 @@
++/**
++ * dsh-settings.ts —— per-session DSH_HOME 配置写盘器 + 密钥 env 注入器。
++ *
++ * 2026-10-15-dsh-engine-acp task-04（FR-05 模型路由）。照 codex-settings.ts /
++ * pi-settings.ts 先例（provider-file-settings.ts 薄适配消费）；实现体放本文件
++ * 而非 credential-injector.ts（allowed_paths 边界 + 注册表 envInjector 契约只
++ * 要求返回 CredentialInjector 接口实例，实现位置自由——type-only import 无环）。
++ *
++ * 模型路由形态：per-session DSH_HOME 下写 profiles/acp/cordis.patch.yml 的
++ * llm-pi-ai 自定义路由（api 按 base_url 形态判 anthropic-messages /
++ * openai-completions；apiKeyEnv 指向 SILLYHUB_DSH_API_KEY——密钥本体经
++ * DshCredentialInjector 注入子进程 env，patch 只存变量名不落密钥明文之外的字段）。
++ * 依据：dsh packages/llm/llm-pi-ai README（providers.<route>.{api,baseURL,
++ * apiKeyEnv,models}）；会话/轮级模型选择经 ACP session/set_config_option 的
++ * model 值（= 本路由 models 键），驱动侧 task-03 已实现。
++ *
++ * 无 provider_config / 配置不充分（缺 base_url/api_key/model 或 openai_chat
++ * 代理形态）→ 不写盘不注入（dsh 用其本机默认模型，与 codex/pi 无配置先例一致；
++ * 建/切会话 warnings 提示管线已覆盖）。
++ */
++
++import { mkdir, writeFile } from 'node:fs/promises';
++import { join } from 'node:path';
++import type { CredentialInjector } from './credential-injector.js';
++import type { ProviderConfig } from './types.js';
++
++/** 密钥 env 变量名（patch 的 apiKeyEnv 引用它；注入器写它）。 */
++export const DSH_API_KEY_ENV = 'SILLYHUB_DSH_API_KEY';
++
++/** patch 相对路径（DSH_HOME 下的 acp profile 覆盖层，dsh HMR 下次请求生效）。 */
++const PATCH_REL_PATH = join('profiles', 'acp', 'cordis.patch.yml');
++
++/** openai_chat 代理形态不写盘（对齐 pi isPiFormSufficient 同款排除）。 */
++function isProxyForm(provider: ProviderConfig): boolean {
++  return provider.api_format === 'openai_chat';
++}
++
++function nonEmpty(value: unknown): string | undefined {
++  return typeof value === 'string' && value.length > 0 ? value : undefined;
++}
++
++/**
++ * 写盘门槛：base_url + api_key + model 三者齐且非代理形态（对齐 pi
++ * isPiFormSufficient 判据族；官方端点形态 base_url 空 → false → 调用方 warn 跳过）。
++ */
++export function isDshFormSufficient(provider: ProviderConfig): boolean {
++  return (
++    !isProxyForm(provider) &&
++    nonEmpty(provider.base_url) !== undefined &&
++    nonEmpty(provider.api_key) !== undefined &&
++    (nonEmpty(provider.default_fallback_model) ?? nonEmpty(provider.model)) !== undefined
++  );
++}
++
++/**
++ * base_url 形态 → llm-pi-ai api 协议值：含 'anthropic' → anthropic-messages，
++ * 其余 → openai-completions（openai-responses 为 dsh 特定路由，平台 LlmProvider
++ * 无该形态标注，不猜测）。
++ */
++function apiFormFor(baseUrl: string): 'anthropic-messages' | 'openai-completions' {
++  return baseUrl.toLowerCase().includes('anthropic')
++    ? 'anthropic-messages'
++    : 'openai-completions';
++}
++
++/**
++ * 写 per-session DSH_HOME 的 acp profile 覆盖层。
++ *
++ * @param dshHome per-session DSH_HOME 目录（provider-file-settings 已建）。
++ * @param provider 平台 ProviderConfig（已过 isDshFormSufficient 门槛）。
++ */
++export async function writeDshHome({
++  dshHome,
++  provider,
++}: {
++  dshHome: string;
++  provider: ProviderConfig;
++}): Promise<void> {
++  const baseUrl = nonEmpty(provider.base_url)!;
++  const model = nonEmpty(provider.default_fallback_model) ?? nonEmpty(provider.model)!;
++  const patchDir = join(dshHome, 'profiles', 'acp');
++  await mkdir(patchDir, { recursive: true });
++  // 手写 YAML（零依赖纪律，G-05 同款）：单条 llm-pi-ai 路由覆盖层。
++  const yaml = [
++    '# Generated by sillyhub-daemon (per-session DSH_HOME, engine route) - do not edit',
++    '- id: llm-pi-ai',
++    "  name: '@deepseek-ai/dsh-llm-pi-ai'",
++    '  config:',
++    '    providers:',
++    '      sillyhub:',
++    `        api: ${apiFormFor(baseUrl)}`,
++    `        baseURL: ${baseUrl}`,
++    `        apiKeyEnv: ${DSH_API_KEY_ENV}`,
++    '        models:',
++    `          ${model}: {}`,
++    '',
++  ].join('\n');
++  await writeFile(join(dshHome, PATCH_REL_PATH), yaml, 'utf8');
++}
++
++/**
++ * dsh env 层注入器：api_key → SILLYHUB_DSH_API_KEY（patch 的 apiKeyEnv 引用），
++ * extra_env 透传。纯函数（R-02 不泄漏：返回值仅内存 env 用）。
++ */
++export class DshCredentialInjector implements CredentialInjector {
++  readonly agentKind = 'dsh';
++
++  toEnv(c: ProviderConfig): Record<string, string> {
++    const env: Record<string, string> = {};
++    if (c.api_key) {
++      env[DSH_API_KEY_ENV] = c.api_key;
++    }
++    for (const [k, v] of Object.entries(c.extra_env ?? {})) {
++      if (typeof v === 'string' && v.length > 0) {
++        env[k] = v;
++      }
++    }
++    return env;
++  }
++}
+diff --git a/sillyhub-daemon/src/interactive/dsh-acp-driver.ts b/sillyhub-daemon/src/interactive/dsh-acp-driver.ts
+new file mode 100644
+index 000000000..a6b6caa5f
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/dsh-acp-driver.ts
+@@ -0,0 +1,532 @@
++/**
++ * dsh-acp-driver.ts —— DeepSeek Harness（dsh）ACP v1 交互式驱动。
++ *
++ * 2026-10-15-dsh-engine-acp task-03（D-003 方案 A：自研驱动，零新 npm 依赖）。
++ * spawn `dsh --profile acp`（stdio NDJSON JSON-RPC，Zed 同款 Agent Client Protocol
++ * v1），协议形状事实源 = dsh 仓库 packages/acp/acp/src（index.ts initialize/
++ * requestPermission / session.ts prompt 收敛 / updates.ts 通知族）。
++ *
++ * 与 codex interactive driver 同构（结构先例 codex-app-server-driver.ts）：
++ * 自带最小 NDJSON JSON-RPC 客户端（adapters/json-rpc.ts 是批量层 codex/hermes/
++ * kimi/kiro 专用协议适配器，非交互驱动可复用的通用分帧件——codex 交互驱动同样
++ * 协议层自持，此处照同款先例）。Windows .cmd shim 复用 resolveWindowsCmdShim
++ * （ql-20260624-002 R-exe 先例）。
++ *
++ * 能力边界（caps 如实申报，见 providers.ts dsh 条目）：
++ * - steering=false：ACP 每会话一次一个 in-flight prompt，无忙轮注入通道；
++ * - compact 不实现：ACP 无对应方法（dsh 内部自管上下文）；
++ * - 审批代答：session/request_permission 桥 sessionPermission.requestPermission
++ *   （manual_approval 语义；!manualApproval || askUserOnly 自动 allow——对齐 codex
++ *   _handleApproval；deny/无注入 fail-closed reject）；
++ * - thinking 三档本地映射（off→不携带；minimal/low→low；medium→medium；
++ *   high/xhigh/max→high）——ACP reasoning_effort 为模型条件性三档
++ *   （"when the exact model declares one"），不进共享 ENGINE_LEVEL_MATRIX
++ *   （thinking-levels.ts 非本任务允许面；矩阵先行例是共享七档引擎）。
++ *
++ * 生命周期：start() = spawn + 握手（initialize → session/new | resume →
++ * set_config_option[ model / reasoning_effort ]）；consume() = 逐 turn
++ * session/prompt，session/update 通知经 dsh-acp-events.normalizeAcpUpdate 归一化
++ * 产出事件批次，prompt 响应（stopReason）收敛 turn_result；interrupt() =
++ * session/cancel；握手/协议失败 → 结构化 error（D-002 兜底：不重试不降级）。
++ */
++
++import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
++import { resolveWindowsCmdShim } from '../cmd-shim.js';
++import { LfLineFramer } from './pi-rpc-driver.js';
++import type {
++  AgentEvent,
++} from '../types.js';
++import type {
++  InteractiveDriver,
++  InteractiveDriverCallbacks,
++  InteractiveDriverHandle,
++  InteractiveDriverStartOptions,
++  InteractiveDriverResult,
++  InteractiveProvider,
++  ThinkingLevelResult,
++  ThinkingLevels,
++  TurnMessageEnvelope,
++  UserTurnInput,
++} from './driver.js';
++import { normalizeAcpUpdate, type AcpSessionUpdate } from './dsh-acp-events.js';
++
++/** ACP 协议版本（dsh 服务端单版本，见 index.ts initialize 实现）。 */
++const ACP_PROTOCOL_VERSION = 1;
++/** 握手/方法请求超时（ms）——握手失败按 D-002 显式报错，不重试。 */
++const REQUEST_TIMEOUT_MS = 30_000;
++
++/**
++ * driver 拿到的审批入口（鸭子类型，对齐 codex CodexSessionPermissionHooks 先例：
++ * 只依赖 behavior 字段，便于测试 mock；生产由 driver-factory 从 SessionManager
++ * 闭包注入）。内部已含 askUserOnly allow-through / fail-closed deny 语义。
++ */
++export interface DshAcpPermissionHooks {
++  requestPermission(input: {
++    toolName: string;
++    toolInput: Record<string, unknown>;
++    toolUseId?: string;
++    isUserInputKind?: boolean;
++  }): Promise<{ behavior: 'allow' | 'deny' }>;
++}
++
++/** dsh 驱动启动选项（extends provider-neutral 公共字段）。 */
++export interface DshAcpStartOptions extends InteractiveDriverStartOptions {
++  /** dsh 可执行路径（agent-detector _agentPaths 注入；缺省 start 抛错）。 */
++  pathToAgentExecutable: string;
++  /** 审批入口（未注入时 full-review fail-closed reject，照 codex 先例）。 */
++  sessionPermission?: DshAcpPermissionHooks;
++  /** 诊断日志用 sessionId。 */
++  sessionId?: string;
++}
++
++/** ACP prompt 收敛响应（session.ts：settlement 后回 { stopReason }）。 */
++interface AcpPromptResponse {
++  stopReason?: string;
++}
++
++/** dsh 会话句柄（不可序列化，禁止落盘——driver.ts E7）。 */
++export interface DshAcpHandle extends InteractiveDriverHandle {
++  readonly provider: 'dsh';
++  /** ACP 会话 ID（resume 指针 / prompt·cancel 参数）。 */
++  readonly acpSessionId?: string;
++}
++
++/**
++ * dsh ACP 交互驱动。实现 InteractiveDriver 契约（start/consume/interrupt 必选 +
++ * getThinkingLevels/setThinkingLevel 可选；compact 不实现）。
++ */
++export class DshAcpDriver implements InteractiveDriver {
++  readonly provider: InteractiveProvider = 'dsh';
++
++  async start(
++    input: AsyncIterable<UserTurnInput>,
++    opts: DshAcpStartOptions,
++  ): Promise<DshAcpHandle> {
++    if (!opts.pathToAgentExecutable) {
++      throw new DshExecutableNotFoundError('dsh executable path is empty (agent-detector 未注册或探测不到 dsh)');
++    }
++
++    const args = ['--profile', 'acp'];
++    let spawnCmdPath = opts.pathToAgentExecutable;
++    let spawnArgs = args;
++    let useShell = false;
++    if (process.platform === 'win32' && /\.cmd$/i.test(opts.pathToAgentExecutable)) {
++      const resolved = resolveWindowsCmdShim(opts.pathToAgentExecutable);
++      if (resolved) {
++        spawnCmdPath = resolved.exe;
++        spawnArgs = [...resolved.prependArgs, ...args];
++      } else {
++        useShell = true;
++      }
++    }
++
++    const child = spawn(spawnCmdPath, spawnArgs, {
++      cwd: opts.cwd,
++      env: opts.env ?? process.env,
++      stdio: ['pipe', 'pipe', 'pipe'],
++      shell: useShell,
++      windowsHide: true,
++    }) as ChildProcessWithoutNullStreams;
++
++    const conn = new AcpJsonRpcConnection(child);
++    const ctx = {
++      conn,
++      child,
++      input,
++      opts,
++      acpSessionId: undefined as string | undefined,
++      activePrompt: false,
++      closed: false,
++    };
++    (child.stdin as { once: (ev: string, fn: () => void) => void }).once('error', () => {
++      /* stdin EOF 关闭竞态：close 路径统一处理 */
++    });
++
++    const handle: DshAcpHandle = {
++      provider: 'dsh',
++      processId: child.pid,
++      get acpSessionId() {
++        return ctx.acpSessionId;
++      },
++      close: () => {
++        if (ctx.closed) return;
++        ctx.closed = true;
++        conn.dispose();
++        // 清理阶梯：stdin EOF 优雅退出（ACP profile 语义）→ 不退则强杀。
++        if (!child.killed) {
++          child.stdin.end();
++          const killer = setTimeout(() => child.kill('SIGKILL'), 5_000);
++          child.once('exit', () => clearTimeout(killer));
++        }
++      },
++    };
++    // @ts-expect-error 内部 ctx 挂载位（consume/interrupt 读；不进公共契约）。
++    handle.__dsh = ctx;
++    return handle;
++  }
++
++  async consume(
++    handle: DshAcpHandle,
++    callbacks: InteractiveDriverCallbacks,
++  ): Promise<void> {
++    const ctx = internalCtx(handle);
++    const { conn, child, opts } = ctx;
++    const permission = opts.sessionPermission;
++
++    // 服务端请求：session/request_permission 代答桥（对齐 codex _handleApproval 语义）。
++    conn.onServerRequest(async (method, params, respond) => {
++      if (method !== 'session/request_permission') {
++        // 未知服务端请求 fail-closed 拒绝（不让 dsh 悬空等待）。
++        await respond({ error: { code: -32601, message: `unsupported server request: ${method}` } });
++        return;
++      }
++      const p = params as {
++        sessionId?: string;
++        toolCall?: { toolCallId?: string };
++        options?: Array<{ optionId: string; kind: string }>;
++      };
++      const allowOption = p.options?.find((o) => o.kind === 'allow_once');
++      const reject = () => respond({ outcome: { outcome: 'cancelled' } });
++      const allow = () =>
++        respond({
++          outcome: {
++            outcome: 'selected',
++            optionId: allowOption?.optionId ?? 'allow-once',
++          },
++        });
++      // allow-through：manualApproval=false 或 askUserOnly=true（普通审批不弹卡）。
++      if (!opts.manualApproval || opts.askUserOnly) {
++        await allow();
++        return;
++      }
++      if (!permission) {
++        // fail-closed：未注入审批入口（codex 同款，绝不 accept）。
++        await reject();
++        return;
++      }
++      try {
++        const decision = await permission.requestPermission({
++          toolName: 'acp_permission',
++          toolInput: params as Record<string, unknown>,
++          toolUseId: p.toolCall?.toolCallId,
++        });
++        if (decision.behavior === 'allow') await allow();
++        else await reject();
++      } catch {
++        await reject();
++      }
++    });
++
++    try {
++      // ── 握手（失败 → 结构化 error，D-002 兜底：不重试不降级）──
++      await conn.request('initialize', {
++        protocolVersion: ACP_PROTOCOL_VERSION,
++        clientCapabilities: {},
++      });
++      const newOrResume: Record<string, unknown> = { cwd: opts.cwd };
++      if (opts.resume) newOrResume.sessionId = opts.resume;
++      const sessionResp = (await conn.request(
++        opts.resume ? 'session/resume' : 'session/new',
++        newOrResume,
++      )) as { sessionId?: string };
++      ctx.acpSessionId = sessionResp.sessionId;
++      // 模型/思考档位（provider_config 路由的 model + 平台档位本地三档映射）。
++      if (opts.model) {
++        await conn.request('session/set_config_option', {
++          sessionId: ctx.acpSessionId,
++          option: { optionId: 'model', value: opts.model },
++        });
++      }
++      const effort = mapThinkingLevel(opts.thinkingLevel);
++      if (effort !== undefined) {
++        await conn.request('session/set_config_option', {
++          sessionId: ctx.acpSessionId,
++          option: { optionId: 'reasoning_effort', value: effort },
++        });
++      }
++
++      // ── 逐 turn 循环 ──
++      for await (const turn of ctx.input) {
++        if (ctx.closed) break;
++        if (turn.text.length === 0) continue; // 空文本入队允许，driver 跳过（E1 语义）
++        ctx.activePrompt = true;
++        let turnError: string | undefined;
++        const unregister = conn.onNotification((params) => {
++          const events = normalizeAcpUpdate(params as AcpSessionUpdate);
++          if (events.length > 0) {
++            void callbacks.onTurnMessage?.(envelope(events));
++          }
++        });
++        try {
++          const resp = (await conn.request('session/prompt', {
++            sessionId: ctx.acpSessionId,
++            prompt: [{ type: 'text', text: turn.text }],
++          })) as AcpPromptResponse;
++          const stopReason = resp.stopReason ?? 'end_turn';
++          const isError = stopReason !== 'end_turn';
++          callbacks.onTurnResult({
++            subtype: isError ? `acp_${stopReason}` : 'success',
++            is_error: isError,
++            result: isError ? `stopReason=${stopReason}` : undefined,
++            session_id: ctx.acpSessionId,
++          });
++        } catch (err) {
++          turnError = err instanceof Error ? err.message : String(err);
++        } finally {
++          unregister();
++          ctx.activePrompt = false;
++        }
++        if (turnError !== undefined) throw new Error(turnError);
++      }
++    } catch (err) {
++      callbacks.onTurnError?.(err);
++      callbacks.onTurnResult({
++        subtype: 'error_during_execution',
++        is_error: true,
++        result: err instanceof Error ? err.message : String(err),
++        session_id: ctx.acpSessionId,
++      });
++      return;
++    }
++
++    // 输入流自然结束（session end 路径）：等子进程退出由 close 负责，此处收敛。
++    child.once('exit', () => {
++      conn.dispose();
++    });
++  }
++
++  async interrupt(handle: DshAcpHandle | null): Promise<boolean> {
++    if (!handle) return false;
++    const ctx = internalCtx(handle);
++    if (!ctx.activePrompt || !ctx.acpSessionId || ctx.closed) return false;
++    try {
++      await ctx.conn.request('session/cancel', { sessionId: ctx.acpSessionId });
++      return true;
++    } catch {
++      return false; // no-op 不冒泡（E3）
++    }
++  }
++
++  async getThinkingLevels(_handle: DshAcpHandle): Promise<ThinkingLevels> {
++    // ACP reasoning_effort 为模型条件性三档，静态档表（运行时真值以模型为准）。
++    return { levels: ['low', 'medium', 'high'] };
++  }
++
++  async setThinkingLevel(
++    handle: DshAcpHandle,
++    level: string,
++  ): Promise<ThinkingLevelResult> {
++    const ctx = internalCtx(handle);
++    const effort = mapThinkingLevel(level);
++    if (effort === undefined) return { ok: false, error: `未知平台档位: ${level}` };
++    try {
++      await ctx.conn.request('session/set_config_option', {
++        sessionId: ctx.acpSessionId,
++        option: { optionId: 'reasoning_effort', value: effort },
++      });
++      return { ok: true };
++    } catch (err) {
++      return {
++        ok: false,
++        error: err instanceof Error ? err.message : String(err),
++      };
++    }
++  }
++}
++
++/** dsh 可执行缺失（agent-detector 未注册/探测不到）。 */
++export class DshExecutableNotFoundError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'DshExecutableNotFoundError';
++  }
++}
++
++// ---------------------------------------------------------------------------
++// 内部：NDJSON JSON-RPC 连接（最小实现；id 关联 + 超时 + 通知/服务端请求分发）
++// ---------------------------------------------------------------------------
++
++interface JsonRpcMessage {
++  jsonrpc?: string;
++  id?: number | string | null;
++  method?: string;
++  params?: unknown;
++  result?: unknown;
++  error?: { code?: number; message?: string };
++}
++
++type ServerResponder = (result: unknown) => Promise<void>;
++
++class AcpJsonRpcConnection {
++  private _nextId = 1;
++  private readonly _pending = new Map<
++    number,
++    { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
++  >();
++  private _notifyHandler:
++    | ((params: unknown) => void)
++    | undefined;
++  private _serverRequestHandler:
++    | ((
++        method: string,
++        params: unknown,
++        respond: ServerResponder,
++      ) => Promise<void>)
++    | undefined;
++  private _disposed = false;
++  /**
++   * 早到响应暂存（id → 原始 result/error）：同一 data chunk 内多行被同步解析时，
++   * 后一行的响应可能先于对应 request 的微任务发出（2026-10-15 task-03 实测）；
++   * 暂存并在 request() 建立后核对，防丢。上限 32 防垃圾 id 无界增长。
++   */
++  private readonly _early = new Map<number, JsonRpcMessage>();
++
++  constructor(private readonly child: ChildProcessWithoutNullStreams) {
++    // LF 严格分帧：复用 pi 驱动 LfLineFramer（仓内先例禁 Node readline 做 JSON
++    // 行分帧——U+2028/U+2029 在 JSON 字符串合法而 readline 会当行分隔切行）。
++    const framer = new LfLineFramer((line) => this._onLine(line));
++    child.stdout.on('data', (chunk: Buffer) => framer.push(chunk));
++    child.stdout.on('end', () => framer.end());
++    child.stderr.setEncoding('utf8');
++  }
++
++  onNotification(fn: (params: unknown) => void): () => void {
++    this._notifyHandler = fn;
++    return () => {
++      if (this._notifyHandler === fn) this._notifyHandler = undefined;
++    };
++  }
++
++  onServerRequest(
++    fn: (method: string, params: unknown, respond: ServerResponder) => Promise<void>,
++  ): void {
++    this._serverRequestHandler = fn;
++  }
++
++  request(method: string, params: unknown): Promise<unknown> {
++    if (this._disposed) return Promise.reject(new Error('dsh acp connection disposed'));
++    const id = this._nextId++;
++    return new Promise((resolve, reject) => {
++      const timer = setTimeout(() => {
++        this._pending.delete(id);
++        reject(new Error(`dsh acp request timeout: ${method}`));
++      }, REQUEST_TIMEOUT_MS);
++      this._pending.set(id, { resolve, reject, timer });
++      this._send({ jsonrpc: '2.0', id, method, params });
++      const early = this._early.get(id);
++      if (early !== undefined) {
++        this._early.delete(id);
++        clearTimeout(timer);
++        this._pending.delete(id);
++        if (early.error !== undefined) {
++          reject(new Error(early.error.message ?? `dsh acp error ${early.error.code ?? ''}`));
++        } else {
++          resolve(early.result);
++        }
++      }
++    });
++  }
++
++  /** 服务端请求应答（result 形态直接透传；错误用 JSON-RPC error 对象）。 */
++  private async _respond(id: number | string, result: unknown): Promise<void> {
++    this._send({ jsonrpc: '2.0', id, result });
++  }
++
++  private _send(msg: JsonRpcMessage): void {
++    this.child.stdin.write(`${JSON.stringify(msg)}\n`);
++  }
++
++  private _onLine(line: string): void {
++    if (this._disposed || line.trim().length === 0) return;
++    let msg: JsonRpcMessage;
++    try {
++      msg = JSON.parse(line) as JsonRpcMessage;
++    } catch {
++      return; // 坏 JSON 不崩（诊断靠 stderr 通道）
++    }
++    if (msg.id !== undefined && msg.id !== null && msg.method !== undefined) {
++      // 服务端请求
++      const respond = (result: unknown) => this._respond(msg.id as number, result);
++      void this._serverRequestHandler?.(msg.method, msg.params, respond);
++      return;
++    }
++    if (msg.id !== undefined && msg.id !== null) {
++      // 响应（关联 id）
++      const pending = this._pending.get(msg.id as number);
++      if (!pending) {
++        if (this._early.size < 32) this._early.set(msg.id as number, msg);
++        return;
++      }
++      clearTimeout(pending.timer);
++      this._pending.delete(msg.id as number);
++      if (msg.error !== undefined) {
++        pending.reject(new Error(msg.error.message ?? `dsh acp error ${msg.error.code ?? ''}`));
++      } else {
++        pending.resolve(msg.result);
++      }
++      return;
++    }
++    // 通知
++    this._notifyHandler?.(msg.params);
++  }
++
++  dispose(): void {
++    if (this._disposed) return;
++    this._disposed = true;
++    for (const [, p] of this._pending) {
++      clearTimeout(p.timer);
++      p.reject(new Error('dsh acp connection disposed'));
++    }
++    this._pending.clear();
++    this._early.clear();
++  }
++}
++
++// ---------------------------------------------------------------------------
++// 内部工具
++// ---------------------------------------------------------------------------
++
++/** 句柄 → 内部 ctx（start 时挂载）。 */
++function internalCtx(handle: DshAcpHandle): {
++  conn: AcpJsonRpcConnection;
++  child: ChildProcessWithoutNullStreams;
++  input: AsyncIterable<UserTurnInput>;
++  opts: DshAcpStartOptions;
++  acpSessionId?: string;
++  activePrompt: boolean;
++  closed: boolean;
++} {
++  const ctx = (handle as { __dsh?: unknown }).__dsh;
++  if (ctx === undefined) throw new Error('invalid dsh handle');
++  return ctx as ReturnType<typeof internalCtx>;
++}
++
++/** envelope 组装（raw 仅调试开关携带，D-002@v1）。 */
++function envelope(events: AgentEvent[]): TurnMessageEnvelope {
++  const raw =
++    process.env.SILLYHUB_DEBUG_RAW_EVENTS === '1' ? { source: 'dsh-acp' } : undefined;
++  return raw === undefined ? { events } : { events, raw };
++}
++
++/**
++ * 平台思考档位 → ACP reasoning_effort 三档本地映射。
++ * off → undefined（不携带=引擎默认，claude 矩阵同语义）；ACP 无 minimal/xhigh/max。
++ */
++export function mapThinkingLevel(platformLevel: string | undefined): string | undefined {
++  switch (platformLevel) {
++    case undefined:
++    case 'off':
++      return undefined;
++    case 'minimal':
++    case 'low':
++      return 'low';
++    case 'medium':
++      return 'medium';
++    case 'high':
++    case 'xhigh':
++    case 'max':
++      return 'high';
++    default:
++      return undefined;
++  }
++}
+diff --git a/sillyhub-daemon/src/interactive/dsh-acp-events.ts b/sillyhub-daemon/src/interactive/dsh-acp-events.ts
+new file mode 100644
+index 000000000..76fbffaa7
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/dsh-acp-events.ts
+@@ -0,0 +1,170 @@
++/**
++ * dsh-acp-events.ts —— ACP session/update 通知 → AgentEvent 归一化器。
++ *
++ * 2026-10-15-dsh-engine-acp task-02（D-003 方案 A：自研 ACP 驱动，协议帧走
++ * adapters/json-rpc.ts；本文件只做纯映射，spawn/握手/轮次归 dsh-acp-driver.ts）。
++ *
++ * 线格式事实源：dsh 仓库 packages/acp/acp/src/updates.ts（服务端实际产出的
++ * SessionUpdate 结构）——
++ *   agent_thought_chunk { messageId, content: {type:'text', text} }
++ *   agent_message_chunk { messageId, content: {type:'text'|'image'|'resource_link', …} }
++ *   tool_call           { toolCallId, title, kind, status:'in_progress', rawInput }
++ *   tool_call_update    { toolCallId, status:'completed'|'failed', content:[{type:'content', content}] }
++ *   usage_update        { used, size }
++ * plans / modes / elicitation 为 ACP 明示 unsupported，不在此列；config_option_update
++ * 等非本轮语义类型按未知类型安全忽略（dsh alpha 前向演进不炸）。
++ *
++ * 映射要点：
++ * - image 块不产出事件——caps.multimodal=false（dsh ACP 图片依赖 durable
++ *   attachment store + exact route，design R-08 保守降级），图片本就不进 dsh 会话；
++ * - resource_link 保持 dsh 侧模型可见形态（方括号引用行）落 text；
++ * - usage_update 用「usage-only 空事件」载体（type=text + content=''）——pi
++ *   buildUsageEvent / codex usage_update 同款（session-manager _liftSessionUsage
++ *   识别该形态）；ACP 只报上下文占用（used/size），映射 ctx_tokens=used，
++ *   input/output 拆分 ACP 不提供，不编造。
++ */
++
++import type { AgentEvent } from '../types.js';
++
++/** ACP session/update 通知的最小结构视图（宽容形状：未知键透传忽略）。 */
++export interface AcpSessionUpdate {
++  /** update 变体名（sessionUpdate 字段）。 */
++  sessionUpdate: string;
++  /** agent_message_chunk / agent_thought_chunk 的消息锚。 */
++  messageId?: string;
++  /** 消息/思考的内容块。 */
++  content?: {
++    type: string;
++    text?: string;
++    name?: string;
++    uri?: string;
++    [key: string]: unknown;
++  };
++  /** 工具生命周期 ID（tool_call / tool_call_update 配对键）。 */
++  toolCallId?: string;
++  /** 工具显示名（tool_call.title）。 */
++  title?: string;
++  kind?: string;
++  status?: string;
++  /** 工具入参（JSON 值或模型坏输出的原文）。 */
++  rawInput?: unknown;
++  /** usage_update：上下文占用分子。 */
++  used?: number;
++  /** usage_update：上下文窗口分母。 */
++  size?: number;
++  [key: string]: unknown;
++}
++
++/**
++ * 归一化单条 session/update 通知为 0..n 条 AgentEvent。
++ *
++ * 纯函数：无 IO、无状态、不抛错——未知 sessionUpdate 类型返回 []（调用方
++ * 继续消费后续通知流），畸形字段按缺省值处理（tool_result 无 content 产出
++ * 空文本，保证 call_id 配对不悬空）。
++ */
++export function normalizeAcpUpdate(update: AcpSessionUpdate): AgentEvent[] {
++  switch (update.sessionUpdate) {
++    case 'agent_message_chunk':
++      return agentMessageChunk(update);
++    case 'agent_thought_chunk':
++      return agentThoughtChunk(update);
++    case 'tool_call':
++      return toolCall(update);
++    case 'tool_call_update':
++      return toolCallUpdate(update);
++    case 'usage_update':
++      return usageUpdate(update);
++    default:
++      // 未知类型安全忽略（config_option_update / plan / current_mode_update /
++      // dsh 未来新增变体）——前向兼容 alpha 演进。
++      return [];
++  }
++}
++
++function agentMessageChunk(update: AcpSessionUpdate): AgentEvent[] {
++  const block = update.content;
++  if (block === undefined) return [];
++  if (block.type === 'text') {
++    return [
++      {
++        type: 'text',
++        content: block.text ?? '',
++        metadata: { message_id: update.messageId },
++      },
++    ];
++  }
++  if (block.type === 'resource_link') {
++    return [
++      {
++        type: 'text',
++        content: `[resource_link] ${block.name ?? ''} ${block.uri ?? ''}`.trimEnd(),
++        metadata: { message_id: update.messageId },
++      },
++    ];
++  }
++  // image 等非文本块：multimodal=false 口径下不产出（见文件头注释）。
++  return [];
++}
++
++function agentThoughtChunk(update: AcpSessionUpdate): AgentEvent[] {
++  const text = update.content?.text ?? '';
++  // dsh 侧空文本 thought 不发（updates.ts:25-29），此处防御同语义。
++  if (text.length === 0) return [];
++  return [
++    {
++      type: 'thinking',
++      content: text,
++      metadata: { message_id: update.messageId },
++    },
++  ];
++}
++
++function toolCall(update: AcpSessionUpdate): AgentEvent[] {
++  const rawInput = update.rawInput;
++  // rawInput 可能是 JSON 值（对象/数组/原始类型）或模型坏输出的原文
++  // （dsh parseToolArguments 的 opaque 保留分支）——原文非 JSON 时直接用字符串。
++  const content =
++    typeof rawInput === 'string' ? rawInput : JSON.stringify(rawInput ?? {});
++  return [
++    {
++      type: 'tool_use',
++      content,
++      tool_name: update.title ?? '',
++      call_id: update.toolCallId ?? '',
++    },
++  ];
++}
++
++function toolCallUpdate(update: AcpSessionUpdate): AgentEvent[] {
++  const blocks = Array.isArray(update.content) ? update.content : [];
++  const text = blocks
++    .map((entry) => {
++      const inner = (entry as { content?: { text?: string } }).content;
++      return inner?.text ?? '';
++    })
++    .join('');
++  const failed = update.status === 'failed';
++  return [
++    {
++      type: 'tool_result',
++      content: text,
++      call_id: update.toolCallId ?? '',
++      ...(failed ? { metadata: { tool_status: 'failed' } } : {}),
++    },
++  ];
++}
++
++function usageUpdate(update: AcpSessionUpdate): AgentEvent[] {
++  const used = typeof update.used === 'number' ? update.used : 0;
++  // usage-only 空事件载体（pi buildUsageEvent / codex usage_update 同款）；
++  // ctx_tokens = ACP used（上下文占用快照），窗口分母 size 进元数据备查。
++  const usage = { ctx_tokens: used };
++  return [
++    {
++      type: 'text',
++      content: '',
++      usage,
++      metadata: { status: 'usage_update', usage, context_size: update.size },
++    },
++  ];
++}
+diff --git a/sillyhub-daemon/src/interactive/providers.ts b/sillyhub-daemon/src/interactive/providers.ts
+index 50fae3926..6ddf9082e 100644
+--- a/sillyhub-daemon/src/interactive/providers.ts
++++ b/sillyhub-daemon/src/interactive/providers.ts
+@@ -59,9 +59,17 @@ import { ClaudeSdkDriver } from './claude-sdk-driver.js';
+ import { CodexAppServerDriver } from './codex-app-server-driver.js';
+ import { CursorDriver } from './cursor-driver.js';
+ import { PiRpcDriver } from './pi-rpc-driver.js';
++import { DshAcpDriver } from './dsh-acp-driver.js';
+ import { ClaudeCredentialInjector, PiCredentialInjector } from '../credential-injector.js';
+ import { isCodexFormSufficient, writeCodexHome } from '../codex-settings.js';
+ import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
++// 2026-10-15-dsh-engine-acp task-04：dsh 写盘器/注入器实现体在 dsh-settings.ts
++//（实现位置自由、type-only 反向引用无环——见该文件头注释）。
++import {
++  DshCredentialInjector,
++  isDshFormSufficient,
++  writeDshHome,
++} from '../dsh-settings.js';
+ 
+ // ── import 环纪律（2026-09-11-provider-adapter-registry task-01）──────────────
+ //
+@@ -461,6 +469,35 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
+     // sessionFork='none'：CLI 无分叉通道（D-008 定值）。
+     sessionFork: 'none',
+   },
++  // 2026-10-15-dsh-engine-acp task-04（D-003 方案 A + Grill 修正口径）：dsh
++  //（DeepSeek Harness，ACP v1 stdio）第 5 个交互引擎。caps 取值依据：
++  // - permission_dialog=true / dialog='native'：request_permission 代答桥机制
++  //   与 codex 同构（providers.ts dialog 键定义即 permission_dialog 桥）；
++  // - multimodal=false：dsh ACP 图片输入依赖 durable attachment store + exact
++  //   route（dsh packages/acp/acp/README.md），保守降级走 disk 落盘链路
++  //   （attachments=true，cursor 同形态；R-08 复升条件见 design）；
++  // - compact=false：ACP 无对应方法（dsh 内部自管上下文，backend 409 拒绝）；
++  // - steering=false：ACP 每会话单 in-flight prompt，无忙轮注入通道（排队语义）；
++  // - thinking_level=true：set_config_option reasoning_effort 三档（driver 本地映射）。
++  dsh: {
++    resume: true,
++    mcp: true,
++    multimodal: false,
++    attachments: true,
++    thinking: true,
++    subagent: false,
++    permission_dialog: true,
++    dialog: 'native',
++    edit_patch: false,
++    model_select: true,
++    provider_switch: true,
++    ctx_usage: true,
++    compact: false,
++    thinking_level: true,
++    steering: false,
++    // sessionFork='none'：ACP 无会话分叉方法（load/fork 均 unsupported）。
++    sessionFork: 'none',
++  },
+ };
+ 
+ /**
+@@ -587,7 +624,7 @@ export interface ProviderDescriptor {
+  */
+ export interface ProviderFileSettingsWriter {
+   /** per-session 目录段名（join(daemonStateDir(), dirName, sessionKey)）。 */
+-  dirName: 'codex' | 'pi';
++  dirName: 'codex' | 'pi' | 'dsh';
+   /** 注入 env 键名（CODEX_HOME / PI_CODING_AGENT_DIR）。 */
+   envKey: string;
+   /** 门槛判定（与写盘器同判据；provider 缺必需字段 → false，调用方 warn 跳过）。 */
+@@ -622,7 +659,7 @@ export interface ProviderAdapter extends ProviderDescriptor {
+    * reload 门控的统一数据源）；claude / cursor 无 per-session provider file
+    * dirs → 显式 none（claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路）。
+    */
+-  perSessionDir: 'codex' | 'pi' | { kind: 'none' };
++  perSessionDir: 'codex' | 'pi' | 'dsh' | { kind: 'none' };
+   /** 冒烟套件文件名（守护测试校验真实存在且覆盖全部支持格式，Wave 4 消费）。 */
+   smokeSuite: string;
+   /** 会话级供应商切换支持（与 caps.provider_switch 单源一致，测试锁定）。 */
+@@ -759,6 +796,34 @@ export const INTERACTIVE_PROVIDERS = {
+     smokeSuite: 'tests/provider-injection-smoke.integ.test.ts',
+     switchable: true,
+   },
++  // 2026-10-15-dsh-engine-acp task-04：dsh（DeepSeek Harness）——family='json_rpc'
++  //（ACP v1 即 stdio NDJSON JSON-RPC；dsh 不在批量层 PROVIDER_TO_PROTOCOL 表——
++  // 批处理接入为非目标，守护测试对该表的断言不含 dsh）；displayName 对齐前端
++  // label 约定；返回类型显式标注 InteractiveDriver 切断类型推理环（同 claude
++  // 条目先例）。密钥经 DshCredentialInjector 注 env（patch 的 apiKeyEnv 引用），
++  // 路由经 DSH_HOME patch 写盘器（官方端点形态 base_url 空 → skip 走 env 层）。
++  dsh: {
++    provider: 'dsh',
++    family: 'json_rpc',
++    displayName: 'DeepSeek Harness',
++    createDriver: (): InteractiveDriver => new DshAcpDriver(),
++    caps: capsOf('dsh'),
++    // ── 聚合契约五成员 ──
++    envInjector: () => new DshCredentialInjector(),
++    fileSettings: {
++      dirName: 'dsh',
++      envKey: 'DSH_HOME',
++      isSufficient: isDshFormSufficient,
++      write: ({ dir, provider }) => writeDshHome({ dshHome: dir, provider }),
++      skipsOfficialEndpoint: (provider) =>
++        typeof provider.base_url !== 'string' || provider.base_url.length === 0,
++    },
++    perSessionDir: 'dsh',
++    // 写盘器锚点（FR-05 冒烟词表守护：dsh-settings.test.ts 覆盖 anthropic 与
++    // openai_chat 全部 api_format 形态）。
++    smokeSuite: 'tests/dsh-settings.test.ts',
++    switchable: true,
++  },
+ } satisfies Record<string, ProviderAdapter>;
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+index 5f3999442..a339c54e0 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+@@ -330,7 +330,14 @@ export function buildDriverOptions(
+     // extension_ui_request dialog 桥接（task-01）打开注入通道；桥接本体归 task-01，
+     // 未消费前 extension_ui_request 维持自动 cancelled（fail-closed）。claude 仍走
+     // canUseTool/onUserDialog 不变；cursor 无对话/审批通道不注入。
+-    if (state.provider === 'codex' || state.provider === 'pi') {
++    // 2026-10-15-dsh-engine-acp task-04（D-006 边界合并）：dsh 共用本注入块——
++    // ACP request_permission 代答桥经 DshAcpStartOptions.sessionPermission 拿同一
++    // 对闭包引用（对齐 codex/pi 形态）。
++    if (
++      state.provider === 'codex' ||
++      state.provider === 'pi' ||
++      state.provider === 'dsh'
++    ) {
+       // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
+       // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
+       driverOpts.sessionPermission = {
+diff --git a/sillyhub-daemon/src/version.ts b/sillyhub-daemon/src/version.ts
+index 5820888c7..08eb08f51 100644
+--- a/sillyhub-daemon/src/version.ts
++++ b/sillyhub-daemon/src/version.ts
+@@ -40,12 +40,17 @@ export type SemVerTuple = readonly [number, number, number];
+  * ql-20260905-001：补 pi 条目——PROVIDER_SPECS.pi.minVersion 声明 0.81.0 但本表
+  * 此前缺条目，checkMinVersion('pi', v) 恒 null，版本门禁从未生效（旧版 pi 静默
+  * 注册为 available）。与 agent-detector.ts PROVIDER_SPECS.pi.minVersion 保持同值。
++ *
++ * 2026-10-15-dsh-engine-acp task-01（D-002）：补 dsh 条目 0.2.1——低于仅警告不硬拒
++ * （dsh 处于 0.2.x alpha，破坏性变更由 ACP 驱动握手失败结构化错误兜底）。
++ * 与 agent-detector.ts PROVIDER_SPECS.dsh.minVersion 保持同值。
+  */
+ export const MIN_VERSIONS: Readonly<Record<string, SemVerTuple>> = {
+   claude: [2, 0, 0],
+   codex: [0, 100, 0],
+   copilot: [1, 0, 0],
+   pi: [0, 81, 0],
++  dsh: [0, 2, 1],
+ };
+ 
+ /**
+diff --git a/sillyhub-daemon/tests/agent-detector.test.ts b/sillyhub-daemon/tests/agent-detector.test.ts
+index 85bfbcee9..62098cbb6 100644
+--- a/sillyhub-daemon/tests/agent-detector.test.ts
++++ b/sillyhub-daemon/tests/agent-detector.test.ts
+@@ -88,11 +88,11 @@ function clearAllSillyhubEnv(): void {
+ // ---------------------------------------------------------------------------
+ 
+ describe('PROVIDER_SPECS', () => {
+-  it('恰好 12 个 entry（对齐 Python AGENT_DEFS）', () => {
+-    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(12);
++  it('恰好 13 个 entry（Python AGENT_DEFS 12 + dsh 增补）', () => {
++    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(13);
+   });
+ 
+-  it('12 个 provider 的 protocol 字段与期望表一致', () => {
++  it('13 个 provider 的 protocol 字段与期望表一致', () => {
+     const expected: Record<string, string> = {
+       claude: 'stream_json',
+       codex: 'json_rpc',
+@@ -106,6 +106,7 @@ describe('PROVIDER_SPECS', () => {
+       kimi: 'json_rpc',
+       kiro: 'json_rpc',
+       antigravity: 'text',
++      dsh: 'json_rpc',
+     };
+     for (const [name, proto] of Object.entries(expected)) {
+       expect(
+@@ -114,7 +115,7 @@ describe('PROVIDER_SPECS', () => {
+     }
+   });
+ 
+-  it('12 个 provider 顺序与 Python AGENT_DEFS 一致', () => {
++  it('13 个 provider 顺序：Python AGENT_DEFS 12 个在前，dsh 增补在末位', () => {
+     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
+     expect(Object.keys(PROVIDER_SPECS)).toEqual([
+       'claude',
+@@ -129,6 +130,7 @@ describe('PROVIDER_SPECS', () => {
+       'kimi',
+       'kiro',
+       'antigravity',
++      'dsh',
+     ]);
+   });
+ 
+@@ -150,6 +152,14 @@ describe('PROVIDER_SPECS', () => {
+     expect(PROVIDER_SPECS.pi.minVersion).toBe('0.81.0');
+   });
+ 
++  // 2026-10-15-dsh-engine-acp task-01（D-001/D-002）：dsh（DeepSeek Harness）探测项，
++  // env 覆盖变量 SILLYHUB_DSH_PATH，版本门 0.2.1（低于警告不硬拒）。
++  it('dsh minVersion === "0.2.1" 且 envPath === "SILLYHUB_DSH_PATH"', () => {
++    expect(PROVIDER_SPECS.dsh.minVersion).toBe('0.2.1');
++    expect(PROVIDER_SPECS.dsh.envPath).toBe('SILLYHUB_DSH_PATH');
++    expect(PROVIDER_SPECS.dsh.bin).toBe('dsh');
++  });
++
+   it('8 个无版本要求的 provider minVersion === undefined', () => {
+     const noMin = [
+       'opencode',
+@@ -340,11 +350,11 @@ describe('AgentDetector.detectAgents', () => {
+   beforeEach(() => clearAllSillyhubEnv());
+   afterEach(() => clearAllSillyhubEnv());
+ 
+-  it('全部不可用 → 12 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
++  it('全部不可用 → 13 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = () => null;
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+     expect(results.every((r) => r.status === 'unavailable')).toBe(true);
+     expect(results.every((r) => r.path === '')).toBe(true);
+     expect(results.every((r) => r.version === undefined)).toBe(true);
+@@ -360,7 +370,7 @@ describe('AgentDetector.detectAgents', () => {
+     d.fakeFindOnPath = (bin) => (bin === 'claude' ? '/usr/bin/claude' : null);
+     d.fakeExecResult = { stdout: 'Claude Code 2.1.5\n', stderr: '' };
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+     const claude = results.find((r) => r.provider === 'claude');
+     expect(claude).toBeDefined();
+     expect(claude?.status).toBe('available');
+@@ -368,11 +378,11 @@ describe('AgentDetector.detectAgents', () => {
+     expect(claude?.version).toBe('2.1.5');
+     expect(claude?.protocol).toBe('stream_json');
+     expect(claude?.versionWarning).toBeNull();
+-    // 其余 11 个仍 unavailable。
+-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(11);
++    // 其余 12 个仍 unavailable。
++    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(12);
+   });
+ 
+-  it('串行探测：12 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
++  it('串行探测：13 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = () => null;
+     const results = await d.detectAgents();
+@@ -556,6 +566,38 @@ describe('AgentDetector versionWarning', () => {
+     expect(opencode?.versionWarning).toBeNull();
+   });
+ 
++  // 2026-10-15-dsh-engine-acp task-01（D-002）：dsh 版本门三态——低于警告不硬拒、
++  // 达标/边界无警告（0.2.x alpha 的破坏性变更由驱动层握手失败兜底，探测层只警告）。
++  it('dsh 低于最低（0.2.0 < 0.2.1）→ warning 含 "0.2.1"，status 仍 available', async () => {
++    const d = new FakeDetector();
++    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
++    d.fakeExecResult = { stdout: 'dsh 0.2.0\n', stderr: '' };
++    const results = await d.detectAgents();
++    const dsh = results.find((r) => r.provider === 'dsh');
++    expect(dsh).toBeDefined();
++    expect(dsh?.versionWarning).not.toBeNull();
++    expect(dsh?.versionWarning).toContain('0.2.1');
++    expect(dsh?.status).toBe('available');
++  });
++
++  it('dsh 达标（0.3.0 ≥ 0.2.1）→ versionWarning === null', async () => {
++    const d = new FakeDetector();
++    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
++    d.fakeExecResult = { stdout: 'dsh 0.3.0\n', stderr: '' };
++    const results = await d.detectAgents();
++    const dsh = results.find((r) => r.provider === 'dsh');
++    expect(dsh?.versionWarning).toBeNull();
++  });
++
++  it('dsh 恰好等于最低（0.2.1，prerelease 后缀忽略）→ versionWarning === null（>= 视为达标）', async () => {
++    const d = new FakeDetector();
++    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
++    d.fakeExecResult = { stdout: 'dsh 0.2.1-alpha.2\n', stderr: '' };
++    const results = await d.detectAgents();
++    const dsh = results.find((r) => r.provider === 'dsh');
++    expect(dsh?.versionWarning).toBeNull();
++  });
++
+   it('codex 低于最低（0.1.0 < 0.100.0）→ warning 含 "0.100.0"', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = (bin) => (bin === 'codex' ? '/usr/bin/codex' : null);
+@@ -772,7 +814,7 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
+       gemini: { stdout: 'gemini 1.0.0\n', stderr: '' },
+     };
+     const results = await d.detectAgents();
+-    expect(results).toHaveLength(12);
++    expect(results).toHaveLength(13);
+ 
+     const claude = results.find((r) => r.provider === 'claude');
+     const codex = results.find((r) => r.provider === 'codex');
+@@ -792,7 +834,7 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
+     expect(gemini?.protocol).toBe('stream_json');
+ 
+     // 其余 9 个 unavailable
+-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(9);
++    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(10);
+   });
+ 
+   // 补漏 2：isAvailable 公开方法（对齐 Python is_available）
+diff --git a/sillyhub-daemon/tests/dsh-settings.test.ts b/sillyhub-daemon/tests/dsh-settings.test.ts
+new file mode 100644
+index 000000000..dd2f580c3
+--- /dev/null
++++ b/sillyhub-daemon/tests/dsh-settings.test.ts
+@@ -0,0 +1,118 @@
++// tests/dsh-settings.test.ts
++// 2026-10-15-dsh-engine-acp task-04：dsh-settings 写盘器 / 门槛判定 / env 注入器。
++// 同时承担注册表 smokeSuite 词表守护（api_format 全形态字面量：anthropic /
++// openai_chat——provider-adapter-registry 守护③静态扫描本文件）。
++
++import { describe, it, expect } from 'vitest';
++import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  DSH_API_KEY_ENV,
++  DshCredentialInjector,
++  isDshFormSufficient,
++  writeDshHome,
++} from '../src/dsh-settings.js';
++import type { ProviderConfig } from '../src/types.js';
++
++function makeProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
++  return {
++    agent_kind: 'dsh',
++    base_url: 'https://api.example.com/anthropic',
++    api_key: 'sk-test',
++    model: 'deepseek-v4',
++    ...overrides,
++  } as ProviderConfig;
++}
++
++describe('isDshFormSufficient（写盘门槛）', () => {
++  it('anthropic 形态三字段齐 → true', () => {
++    expect(isDshFormSufficient(makeProvider())).toBe(true);
++  });
++
++  it('openai_chat 代理形态 → false（不写盘，对齐 pi 判据族）', () => {
++    expect(isDshFormSufficient(makeProvider({ api_format: 'openai_chat' }))).toBe(false);
++  });
++
++  it('缺 base_url / api_key / model 任一 → false（官方端点形态 skip 走 env 层）', () => {
++    expect(isDshFormSufficient(makeProvider({ base_url: '' }))).toBe(false);
++    expect(isDshFormSufficient(makeProvider({ api_key: '' }))).toBe(false);
++    expect(isDshFormSufficient(makeProvider({ model: '' }))).toBe(false);
++  });
++
++  it('default_fallback_model 可替代 model（对齐 pi 判据）', () => {
++    expect(
++      isDshFormSufficient(makeProvider({ model: '', default_fallback_model: 'm-x' })),
++    ).toBe(true);
++  });
++});
++
++describe('writeDshHome（per-session 路由写盘）', () => {
++  it('anthropic base_url → llm-pi-ai 路由 anthropic-messages + apiKeyEnv 引用 + models 键', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
++    try {
++      await writeDshHome({ dshHome: dir, provider: makeProvider() });
++      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
++      expect(yaml).toContain('- id: llm-pi-ai');
++      expect(yaml).toContain('api: anthropic-messages');
++      expect(yaml).toContain('baseURL: https://api.example.com/anthropic');
++      expect(yaml).toContain(`apiKeyEnv: ${DSH_API_KEY_ENV}`);
++      expect(yaml).toContain('deepseek-v4: {}');
++      // 密钥明文不落盘（R-02：patch 只存变量名）
++      expect(yaml).not.toContain('sk-test');
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  it('非 anthropic base_url → openai-completions 形态', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
++    try {
++      await writeDshHome({
++        dshHome: dir,
++        provider: makeProvider({
++          base_url: 'https://api.example.com/v1',
++          api_format: 'anthropic',
++        }),
++      });
++      const yaml = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
++      expect(yaml).toContain('api: openai-completions');
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++
++  it('幂等重写（同配置二次写内容一致）', async () => {
++    const dir = mkdtempSync(join(tmpdir(), 'dsh-home-'));
++    try {
++      await writeDshHome({ dshHome: dir, provider: makeProvider() });
++      const first = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
++      await writeDshHome({ dshHome: dir, provider: makeProvider() });
++      const second = readFileSync(join(dir, 'profiles', 'acp', 'cordis.patch.yml'), 'utf8');
++      expect(second).toBe(first);
++    } finally {
++      rmSync(dir, { recursive: true, force: true });
++    }
++  });
++});
++
++describe('DshCredentialInjector（env 层注入器）', () => {
++  it('api_key → SILLYHUB_DSH_API_KEY；extra_env 透传（空串跳过）；agentKind=dsh', () => {
++    const injector = new DshCredentialInjector();
++    expect(injector.agentKind).toBe('dsh');
++    const env = injector.toEnv(
++      makeProvider({ extra_env: { EXTRA_FLAG: '1', EMPTY_SKIP: '' } } as Partial<ProviderConfig>),
++    );
++    expect(env[DSH_API_KEY_ENV]).toBe('sk-test');
++    expect(env.EXTRA_FLAG).toBe('1');
++    expect(env.EMPTY_SKIP).toBeUndefined();
++  });
++
++  it('无 api_key → 不注入键（空对象 + extra_env 仍透传）', () => {
++    const env = new DshCredentialInjector().toEnv(
++      makeProvider({ api_key: '', extra_env: { A: 'b' } } as Partial<ProviderConfig>),
++    );
++    expect(env[DSH_API_KEY_ENV]).toBeUndefined();
++    expect(env.A).toBe('b');
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts b/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+new file mode 100644
+index 000000000..3f43b6f09
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+@@ -0,0 +1,452 @@
++// tests/interactive/dsh-acp-driver.test.ts
++// 2026-10-15-dsh-engine-acp task-03：DshAcpDriver 生命周期 / 握手 / turn 收敛 /
++// 打断 / 审批代答三态 / 握手失败结构化错误。spawn 用 tests/helpers/fake-child.ts
++// 驱动（codex driver test 同款机制），不依赖真实 dsh。
++//
++// 驱动内 JSON-RPC id 顺序（_nextId 递增）：1=initialize、2=session/new|resume、
++// 3=set_config_option(model)、4=set_config_option(reasoning_effort)、5+=session/prompt
++// / session/cancel。用例必须喂齐驱动会 await 的全部响应（缺一个 → 30s 请求超时
++// 挂起，2026-10-15 实测教训）；断言一律走 waitFor 条件等待（固定 sleep 有竞态）。
++
++import { describe, it, expect, beforeEach, vi } from 'vitest';
++
++vi.mock('node:child_process', async (importOriginal) => {
++  const actual = await importOriginal<typeof import('node:child_process')>();
++  return {
++    ...actual,
++    spawn: vi.fn(() => null as unknown),
++  };
++});
++vi.mock('../../src/cmd-shim.js', () => ({
++  resolveWindowsCmdShim: vi.fn(() => null),
++}));
++
++import { spawn } from 'node:child_process';
++import {
++  DshAcpDriver,
++  DshExecutableNotFoundError,
++  mapThinkingLevel,
++  type DshAcpHandle,
++  type DshAcpStartOptions,
++} from '../../src/interactive/dsh-acp-driver.js';
++import type {
++  InteractiveDriverCallbacks,
++  UserTurnInput,
++} from '../../src/interactive/driver.js';
++import { createFakeChild, readStdin, type FakeChild } from '../helpers/fake-child.js';
++
++// ── 工具 ────────────────────────────────────────────────────────────────────
++
++let fake: FakeChild;
++
++beforeEach(() => {
++  fake = createFakeChild();
++  vi.mocked(spawn).mockReturnValue(fake as unknown as ReturnType<typeof spawn>);
++});
++
++/** 条件等待：轮询断言函数直到为真（默认 2s 上限），消除固定 sleep 竞态。 */
++async function waitFor(cond: () => boolean, timeoutMs = 2_000): Promise<void> {
++  const start = Date.now();
++  while (!cond()) {
++    if (Date.now() - start > timeoutMs) {
++      throw new Error(`waitFor 超时：条件在 ${timeoutMs}ms 内未满足`);
++    }
++    await new Promise((r) => setTimeout(r, 10));
++  }
++}
++
++function makeOpts(overrides: Partial<DshAcpStartOptions> = {}): DshAcpStartOptions {
++  return {
++    cwd: '/tmp/dsh-ws',
++    pathToAgentExecutable: '/usr/local/bin/dsh',
++    ...overrides,
++  };
++}
++
++function makeCallbacks(): {
++  cb: InteractiveDriverCallbacks;
++  messages: Record<string, unknown>[];
++  results: Record<string, unknown>[];
++  errors: unknown[];
++} {
++  const messages: Record<string, unknown>[] = [];
++  const results: Record<string, unknown>[] = [];
++  const errors: unknown[] = [];
++  return {
++    cb: {
++      onTurnMessage: (envelope) => {
++        for (const ev of envelope.events) {
++          messages.push(ev as unknown as Record<string, unknown>);
++        }
++      },
++      onTurnResult: (r) => results.push(r as unknown as Record<string, unknown>),
++      onTurnError: (e) => errors.push(e),
++    },
++    messages,
++    results,
++    errors,
++  };
++}
++
++/** 可控输入队列（push/close；对齐真实 InputQueue 单订阅语义）。 */
++function makeInputQueue(): {
++  queue: AsyncIterable<UserTurnInput>;
++  push: (text: string) => void;
++  close: () => void;
++} {
++  const pending: UserTurnInput[] = [];
++  let closed = false;
++  let waiter: (() => void) | null = null;
++  const queue: AsyncIterable<UserTurnInput> = {
++    [Symbol.asyncIterator]() {
++      return {
++        async next(): Promise<IteratorResult<UserTurnInput>> {
++          for (;;) {
++            if (pending.length > 0) return { value: pending.shift()!, done: false };
++            if (closed) return { value: undefined, done: true };
++            await new Promise<void>((resolve) => {
++              waiter = resolve;
++            });
++            waiter = null;
++          }
++        },
++      };
++    },
++  };
++  return {
++    queue,
++    push(text: string) {
++      pending.push({ type: 'user', text });
++      if (waiter) waiter();
++    },
++    close() {
++      closed = true;
++      if (waiter) waiter();
++    },
++  };
++}
++
++/** JSON-RPC 响应行（喂回 fake stdout）。 */
++function resp(id: number, result: unknown): string {
++  return JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n';
++}
++
++/** session/update 通知行。 */
++function updateLine(update: Record<string, unknown>): string {
++  return JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: update }) + '\n';
++}
++
++/** 服务端权限请求行（id 由服务端分配，此处用 100+）。 */
++function permissionRequestLine(
++  id: number,
++  options: Array<{ optionId: string; kind: string }>,
++): string {
++  return (
++    JSON.stringify({
++      jsonrpc: '2.0',
++      id,
++      method: 'session/request_permission',
++      params: { sessionId: 'acp-s1', toolCall: { toolCallId: 'tc-1' }, options },
++    }) + '\n'
++  );
++}
++
++/**
++ * 喂完整握手（initialize=1 / session/new=2）；waitEach 后驱动就绪进入 turn 循环。
++ * useModel 时额外喂 set_config_option(model)=3。
++ */
++async function feedHandshake(useModel = false): Promise<void> {
++  fake.stdout.push(resp(1, { protocolVersion: 1, agentInfo: { name: 'x' } }));
++  fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
++  if (useModel) {
++    fake.stdout.push(resp(3, {}));
++    await waitFor(() => readStdin(fake).includes('"optionId":"model"'));
++  }
++  await waitFor(() => readStdin(fake).includes('"method":"session/new"'));
++}
++
++// ── 用例 ────────────────────────────────────────────────────────────────────
++
++describe('DshAcpDriver：启动与握手', () => {
++  it('pathToAgentExecutable 缺失 → DshExecutableNotFoundError', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    q.close();
++    await expect(
++      driver.start(q.queue, makeOpts({ pathToAgentExecutable: '' })),
++    ).rejects.toBeInstanceOf(DshExecutableNotFoundError);
++  });
++
++  it('spawn 参数 = dsh --profile acp + cwd + windowsHide；握手 initialize → session/new（cwd）→ acpSessionId 回传', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
++    const [cmd, args, spawnOpts] = vi.mocked(spawn).mock.calls[0] as unknown as [
++      string,
++      string[],
++      { cwd: string; windowsHide: boolean },
++    ];
++    expect(cmd).toBe('/usr/local/bin/dsh');
++    expect(args).toEqual(['--profile', 'acp']);
++    expect(spawnOpts.cwd).toBe('/tmp/dsh-ws');
++    expect(spawnOpts.windowsHide).toBe(true);
++    await feedHandshake();
++    q.close();
++    await consuming;
++    expect((handle as DshAcpHandle).acpSessionId).toBe('acp-s1');
++  });
++
++  it('resume 选项 → session/resume（带 sessionId），不调 session/new', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts({ resume: 'acp-old' }));
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
++    fake.stdout.push(resp(1, { protocolVersion: 1 }));
++    fake.stdout.push(resp(2, { sessionId: 'acp-old' }));
++    await waitFor(() => readStdin(fake).includes('"method":"session/resume"'));
++    const stdinText = readStdin(fake);
++    expect(stdinText).toContain('"sessionId":"acp-old"');
++    expect(stdinText).not.toContain('"method":"session/new"');
++    q.close();
++    await consuming;
++  });
++
++  it('model + thinkingLevel=medium → set_config_option(model / reasoning_effort=medium)；off → 不发档位', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(
++      q.queue,
++      makeOpts({ model: 'deepseek-v4', thinkingLevel: 'medium' }),
++    );
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
++    fake.stdout.push(resp(1, { protocolVersion: 1 }));
++    fake.stdout.push(resp(2, { sessionId: 'acp-s1' }));
++    fake.stdout.push(resp(3, {})); // model
++    fake.stdout.push(resp(4, {})); // reasoning_effort
++    await waitFor(() => readStdin(fake).includes('"optionId":"reasoning_effort"'));
++    const stdinText = readStdin(fake);
++    expect(stdinText).toContain('"optionId":"model"');
++    expect(stdinText).toContain('"value":"deepseek-v4"');
++    expect(stdinText).toContain('"value":"medium"');
++    q.close();
++    await consuming;
++  });
++});
++
++describe('DshAcpDriver：turn 循环与打断', () => {
++  it('一轮对话：prompt → session/update 事件批次 → stopReason=end_turn → onTurnResult(success)', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb, messages, results } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    q.push('你好');
++    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
++    fake.stdout.push(
++      updateLine({
++        sessionUpdate: 'agent_thought_chunk',
++        messageId: 'm1',
++        content: { type: 'text', text: '想' },
++      }),
++    );
++    fake.stdout.push(
++      updateLine({
++        sessionUpdate: 'agent_message_chunk',
++        messageId: 'm1',
++        content: { type: 'text', text: '答' },
++      }),
++    );
++    fake.stdout.push(resp(3, { stopReason: 'end_turn' }));
++    await waitFor(() => results.length === 1);
++    expect(messages.map((m) => m.type)).toEqual(['thinking', 'text']);
++    expect(results[0]).toMatchObject({
++      subtype: 'success',
++      is_error: false,
++      session_id: 'acp-s1',
++    });
++    q.close();
++    await consuming;
++  });
++
++  it('空文本 turn 跳过（不发 session/prompt），后续正常轮继续', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb, results } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    q.push('');
++    await new Promise((r) => setTimeout(r, 80));
++    expect(readStdin(fake)).not.toContain('"method":"session/prompt"');
++    // 正常轮收尾（喂齐响应避免挂起）
++    q.push('第二轮');
++    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
++    fake.stdout.push(resp(3, { stopReason: 'end_turn' }));
++    await waitFor(() => results.length === 1);
++    q.close();
++    await consuming;
++    expect(results).toHaveLength(1);
++  });
++
++  it('stopReason=cancelled → is_error=true 且 subtype=acp_cancelled', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb, results } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    q.push('干活');
++    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
++    fake.stdout.push(resp(3, { stopReason: 'cancelled' }));
++    await waitFor(() => results.length === 1);
++    expect(results[0]).toMatchObject({ subtype: 'acp_cancelled', is_error: true });
++    q.close();
++    await consuming;
++  });
++
++  it('interrupt：active prompt 时发 session/cancel → true；空闲 → false', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb, results } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    // 空闲（无 prompt 在飞）→ false
++    await expect(driver.interrupt(handle)).resolves.toBe(false);
++    q.push('长任务');
++    await waitFor(() => readStdin(fake).includes('"method":"session/prompt"'));
++    // id 分配：prompt=3、cancel=4（interrupt 在 prompt 之后请求）
++    const ok = driver.interrupt(handle);
++    await waitFor(() => readStdin(fake).includes('"method":"session/cancel"'));
++    // 先喂响应（cancel=4 / prompt=3 以 cancelled 收敛）再断言——ok 依赖 resp(4)
++    fake.stdout.push(resp(4, {})); // cancel 响应
++    fake.stdout.push(resp(3, { stopReason: 'cancelled' })); // prompt 收敛
++    await expect(ok).resolves.toBe(true);
++    await waitFor(() => results.length === 1);
++    expect(results[0]).toMatchObject({ subtype: 'acp_cancelled', is_error: true });
++    q.close();
++    await consuming;
++  });
++});
++
++describe('DshAcpDriver：审批代答三态（FR-04）', () => {
++  const OPTIONS = [
++    { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
++    { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
++  ];
++
++  /** 跑一个权限用例并取服务端请求的应答行。 */
++  async function runPermissionCase(opts: {
++    manualApproval?: boolean;
++    askUserOnly?: boolean;
++    hooks?: { requestPermission: () => Promise<{ behavior: string }> };
++  }): Promise<string> {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(
++      q.queue,
++      makeOpts({
++        manualApproval: opts.manualApproval,
++        askUserOnly: opts.askUserOnly,
++        sessionPermission: opts.hooks as never,
++      }),
++    );
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    fake.stdout.push(permissionRequestLine(100, OPTIONS));
++    await waitFor(() =>
++      readStdin(fake).split('\n').some((l) => l.includes('"id":100')),
++    );
++    q.close();
++    await consuming;
++    const lines = readStdin(fake)
++      .split('\n')
++      .filter((l) => l.includes('"id":100'));
++    return lines[lines.length - 1] ?? '';
++  }
++
++  it('manualApproval=false → 自动 allow（selected allow-once，不弹卡）', async () => {
++    const respLine = await runPermissionCase({ manualApproval: false });
++    expect(respLine).toContain('"outcome":"selected"');
++    expect(respLine).toContain('"optionId":"allow-once"');
++  });
++
++  it('manualApproval=true + hooks=allow → selected allow-once', async () => {
++    const respLine = await runPermissionCase({
++      manualApproval: true,
++      hooks: { requestPermission: async () => ({ behavior: 'allow' }) },
++    });
++    expect(respLine).toContain('"optionId":"allow-once"');
++  });
++
++  it('manualApproval=true + hooks=deny / 无 hooks → cancelled（fail-closed）', async () => {
++    const deny = await runPermissionCase({
++      manualApproval: true,
++      hooks: { requestPermission: async () => ({ behavior: 'deny' }) },
++    });
++    expect(deny).toContain('"outcome":"cancelled"');
++    const noHooks = await runPermissionCase({ manualApproval: true });
++    expect(noHooks).toContain('"outcome":"cancelled"');
++  });
++});
++
++describe('DshAcpDriver：失败与清理', () => {
++  it('握手失败（initialize 返回 error）→ onTurnError + 结构化 is_error turn_result（不重试）', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb, results, errors } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
++    fake.stdout.push(
++      JSON.stringify({
++        jsonrpc: '2.0',
++        id: 1,
++        error: { code: -32000, message: 'version mismatch' },
++      }) + '\n',
++    );
++    await waitFor(() => results.length === 1);
++    expect(errors).toHaveLength(1);
++    expect(results[0]).toMatchObject({ subtype: 'error_during_execution', is_error: true });
++    expect(String((results[0] as { result?: unknown }).result)).toContain('version mismatch');
++    // consume 已自行收敛（不重试）——await 不挂
++    await consuming;
++  });
++
++  it('close 幂等（二次调用不重复杀）且优雅窗口内不强杀', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await feedHandshake();
++    await handle.close?.();
++    await handle.close?.(); // 幂等
++    expect(fake.killed).toBe(false); // 优雅退出窗口（stdin.end）内不强杀
++    q.close();
++    await consuming;
++  });
++});
++
++describe('mapThinkingLevel（ACP 三档本地映射）', () => {
++  it('off/undefined → 不携带；minimal/low→low；medium→medium；high/xhigh/max→high；未知 → undefined', () => {
++    expect(mapThinkingLevel(undefined)).toBeUndefined();
++    expect(mapThinkingLevel('off')).toBeUndefined();
++    expect(mapThinkingLevel('minimal')).toBe('low');
++    expect(mapThinkingLevel('low')).toBe('low');
++    expect(mapThinkingLevel('medium')).toBe('medium');
++    expect(mapThinkingLevel('high')).toBe('high');
++    expect(mapThinkingLevel('xhigh')).toBe('high');
++    expect(mapThinkingLevel('max')).toBe('high');
++    expect(mapThinkingLevel('turbo')).toBeUndefined();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts b/sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+new file mode 100644
+index 000000000..192401007
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+@@ -0,0 +1,190 @@
++// tests/interactive/dsh-acp-events.test.ts
++// 2026-10-15-dsh-engine-acp task-02：ACP session/update 通知 → AgentEvent 归一化器。
++// 样例事件形状对照 dsh 仓库 packages/acp/acp/src/updates.ts（assistantUpdates /
++// toolCallUpdate / toolResultUpdate / usageUpdate 的实际产出结构）：
++//   agent_thought_chunk {messageId, content:{type:'text',text}}
++//   agent_message_chunk {messageId, content:{type:'text'|'image'|'resource_link',...}}
++//   tool_call           {toolCallId, title, kind, status:'in_progress', rawInput}
++//   tool_call_update    {toolCallId, status:'completed'|'failed', content:[{type:'content',content}]}
++//   usage_update        {used, size}
++// 未知 sessionUpdate（config_option_update / plan / current_mode_update 等）安全忽略。
++
++import { describe, it, expect } from 'vitest';
++import {
++  normalizeAcpUpdate,
++  type AcpSessionUpdate,
++} from '../../src/interactive/dsh-acp-events.js';
++
++describe('normalizeAcpUpdate：文本与思考', () => {
++  it('agent_message_chunk text 块 → text 事件（带 messageId 元数据）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'agent_message_chunk',
++      messageId: 'm-1',
++      content: { type: 'text', text: '你好，世界' },
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({
++      type: 'text',
++      content: '你好，世界',
++      metadata: { message_id: 'm-1' },
++    });
++  });
++
++  it('agent_thought_chunk → thinking 事件', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'agent_thought_chunk',
++      messageId: 'm-1',
++      content: { type: 'text', text: '先想一下' },
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({ type: 'thinking', content: '先想一下' });
++  });
++
++  it('agent_message_chunk image 块 → 忽略（multimodal=false 已知限制，不产出事件）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'agent_message_chunk',
++      messageId: 'm-2',
++      content: { type: 'image', data: '...', mimeType: 'image/png' },
++    } as AcpSessionUpdate);
++    expect(out).toHaveLength(0);
++  });
++
++  it('agent_message_chunk resource_link 块 → 文本引用行（模型可见形态保持一致）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'agent_message_chunk',
++      messageId: 'm-3',
++      content: { type: 'resource_link', name: '设计文档', uri: 'file:///tmp/design.md' },
++    } as AcpSessionUpdate);
++    expect(out).toHaveLength(1);
++    expect(out[0].type).toBe('text');
++    expect(out[0].content).toContain('设计文档');
++    expect(out[0].content).toContain('file:///tmp/design.md');
++  });
++
++  it('空文本 thought（dsh updates.ts 长度 0 跳过分支的客户端侧防御）→ 不产出', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'agent_thought_chunk',
++      messageId: 'm-4',
++      content: { type: 'text', text: '' },
++    });
++    expect(out).toHaveLength(0);
++  });
++});
++
++describe('normalizeAcpUpdate：工具生命周期', () => {
++  it('tool_call in_progress → tool_use 事件（tool_name=title / call_id=toolCallId / 入参 JSON）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'tool_call',
++      toolCallId: 'tc-1',
++      title: 'read_file',
++      kind: 'other',
++      status: 'in_progress',
++      rawInput: { path: '/tmp/a.txt' },
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({
++      type: 'tool_use',
++      tool_name: 'read_file',
++      call_id: 'tc-1',
++    });
++    expect(JSON.parse(out[0].content)).toEqual({ path: '/tmp/a.txt' });
++  });
++
++  it('tool_call rawInput 为非 JSON 字符串（模型坏输出保留原文）→ content 原文', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'tool_call',
++      toolCallId: 'tc-2',
++      title: 'bash',
++      kind: 'other',
++      status: 'in_progress',
++      rawInput: 'not-json{',
++    } as AcpSessionUpdate);
++    expect(out).toHaveLength(1);
++    expect(out[0].type).toBe('tool_use');
++    expect(out[0].content).toBe('not-json{');
++  });
++
++  it('tool_call_update completed → tool_result（content 块文本拼接）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'tool_call_update',
++      toolCallId: 'tc-1',
++      status: 'completed',
++      content: [
++        { type: 'content', content: { type: 'text', text: '第一行\n' } },
++        { type: 'content', content: { type: 'text', text: '第二行' } },
++      ],
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({ type: 'tool_result', call_id: 'tc-1' });
++    expect(out[0].content).toBe('第一行\n第二行');
++  });
++
++  it('tool_call_update failed → tool_result 带 metadata.status=failed（错误可见不丢）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'tool_call_update',
++      toolCallId: 'tc-3',
++      status: 'failed',
++      content: [{ type: 'content', content: { type: 'text', text: 'boom' } }],
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({
++      type: 'tool_result',
++      call_id: 'tc-3',
++      metadata: { tool_status: 'failed' },
++    });
++    expect(out[0].content).toBe('boom');
++  });
++
++  it('tool_call_update 无 content（部分失败形态）→ 空文本 tool_result 仍产出（call_id 配对不悬空）', () => {
++    const out = normalizeAcpUpdate({
++      sessionUpdate: 'tool_call_update',
++      toolCallId: 'tc-4',
++      status: 'completed',
++    });
++    expect(out).toHaveLength(1);
++    expect(out[0]).toMatchObject({ type: 'tool_result', call_id: 'tc-4', content: '' });
++  });
++});
++
++describe('normalizeAcpUpdate：上下文用量与未知类型', () => {
++  it('usage_update → usage-only 空事件（type=text/content=""，ctx_tokens=used，pi/codex 同款载体）', () => {
++    const out = normalizeAcpUpdate({ sessionUpdate: 'usage_update', used: 12345, size: 200000 });
++    expect(out).toHaveLength(1);
++    const ev = out[0];
++    expect(ev.type).toBe('text');
++    expect(ev.content).toBe('');
++    expect(ev.usage).toEqual({ ctx_tokens: 12345 });
++    expect(ev.metadata).toMatchObject({ status: 'usage_update' });
++  });
++
++  it('未知 sessionUpdate（config_option_update / plan / current_mode_update / 未来新增）→ 安全忽略返回 []', () => {
++    for (const sessionUpdate of ['config_option_update', 'plan', 'current_mode_update', 'user_message_chunk', 'some_future_kind']) {
++      expect(normalizeAcpUpdate({ sessionUpdate } as AcpSessionUpdate)).toEqual([]);
++    }
++  });
++
++  it('整轮样例序列（dsh updates.ts 产出顺序）：thought → message → tool_call → tool_call_update → usage → 逐字段对齐', () => {
++    const seq: AcpSessionUpdate[] = [
++      { sessionUpdate: 'agent_thought_chunk', messageId: 'm-9', content: { type: 'text', text: '思考中' } },
++      { sessionUpdate: 'agent_message_chunk', messageId: 'm-9', content: { type: 'text', text: '我去读文件' } },
++      { sessionUpdate: 'tool_call', toolCallId: 'tc-9', title: 'read_file', kind: 'other', status: 'in_progress', rawInput: { path: 'x' } },
++      { sessionUpdate: 'tool_call_update', toolCallId: 'tc-9', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: '内容' } }] },
++      { sessionUpdate: 'agent_message_chunk', messageId: 'm-10', content: { type: 'text', text: '结论' } },
++      { sessionUpdate: 'usage_update', used: 500, size: 1000 },
++    ];
++    const events = seq.flatMap(normalizeAcpUpdate);
++    expect(events.map((e) => e.type)).toEqual([
++      'thinking',
++      'text',
++      'tool_use',
++      'tool_result',
++      'text',
++      'text',
++    ]);
++    // 配对完整性：tool_use 与 tool_result 的 call_id 一致
++    expect(events[2].call_id).toBe('tc-9');
++    expect(events[3].call_id).toBe('tc-9');
++    // usage-only 事件内容为空
++    expect(events[5].content).toBe('');
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts b/sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts
+new file mode 100644
+index 000000000..0a2397176
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts
+@@ -0,0 +1,139 @@
++// tests/interactive/dsh-acp-smoke.test.ts
++// 2026-10-15-dsh-engine-acp task-08：端到端冒烟（真实 dsh 子进程）。
++//
++// 守卫：本机无 dsh 或版本 < 0.2.1（acp profile 为 dsh 0.2.x 能力）→ describe.skipIf
++// 显式跳过并在输出留痕（探测结果 + 版本），CI 日志可辨「未装/低版本故跳过」而非
++// 静默假绿；装有 ≥0.2.1 的机器上跑通 initialize → session/new → 一轮 prompt 事件
++// 收敛（经真实 dsh --profile acp 子进程）。
++//
++// 本机实测留痕（2026-10-15，Windows）：本机 dsh=0.1.0-rc.6 < 0.2.1 → skip 分支
++// 生效即本变更的版本门语义验证（MIN_VERSIONS dsh [0,2,1] 警告不硬拒同口径）。
++
++import { describe, it, expect, beforeAll } from 'vitest';
++import { execFile } from 'node:child_process';
++import { promisify } from 'node:util';
++import { DshAcpDriver, type DshAcpStartOptions } from '../../src/interactive/dsh-acp-driver.js';
++import type { InteractiveDriverCallbacks, UserTurnInput } from '../../src/interactive/driver.js';
++import { PROVIDER_SPECS } from '../../src/agent-detector.js';
++import { checkMinVersion, parseSemver } from '../../src/version.js';
++
++const execFileAsync = promisify(execFile);
++
++/** 探测本机 dsh：{ok, version, warning}（复用 agent-detector 的探测定义）。 */
++async function probeDsh(): Promise<{
++  ok: boolean;
++  version: string | null;
++  belowGate: boolean;
++}> {
++  const spec = PROVIDER_SPECS.dsh;
++  // Windows：dsh 为 npm cmd-shim（dsh.cmd），execFile 无 shell 跑不了 .cmd——
++  // win32 加 shell 回退（探测专用；驱动本体走 resolveWindowsCmdShim 先例）。
++  const isWin = process.platform === 'win32';
++  try {
++    const { stdout, stderr } = await execFileAsync(spec.bin, ['--version'], {
++      timeout: 10_000,
++      ...(isWin ? { shell: true } : {}),
++    });
++    const m = `${stdout}\n${stderr}`.match(spec.versionPattern);
++    const version = m?.[1] ?? null;
++    if (version === null) return { ok: true, version: null, belowGate: true };
++    const belowGate = checkMinVersion('dsh', version) !== null;
++    // eslint-disable-next-line no-console
++    console.log(
++      `[dsh-smoke] 探测到 dsh=${version}${belowGate ? '（低于 0.2.1 版本门 → 跳过冒烟，D-002 警告不硬拒同口径）' : ''}`,
++    );
++    return { ok: true, version, belowGate };
++  } catch {
++    // eslint-disable-next-line no-console
++    console.log('[dsh-smoke] 本机未装 dsh（PATH 无二进制）→ 跳过冒烟（显式留痕非静默假绿）');
++    return { ok: false, version: null, belowGate: true };
++  }
++}
++
++let probe: Awaited<ReturnType<typeof probeDsh>>;
++
++beforeAll(async () => {
++  probe = await probeDsh();
++});
++
++function makeQueue(): {
++  queue: AsyncIterable<UserTurnInput>;
++  push: (t: string) => void;
++  close: () => void;
++} {
++  const pending: UserTurnInput[] = [];
++  let closed = false;
++  let waiter: (() => void) | null = null;
++  return {
++    queue: {
++      [Symbol.asyncIterator]() {
++        return {
++          async next() {
++            for (;;) {
++              if (pending.length > 0) return { value: pending.shift()!, done: false };
++              if (closed) return { value: undefined, done: true };
++              await new Promise<void>((r) => (waiter = r));
++              waiter = null;
++            }
++          },
++        };
++      },
++    },
++    push(t: string) {
++      pending.push({ type: 'user', text: t });
++      if (waiter) waiter();
++    },
++    close() {
++      closed = true;
++      if (waiter) waiter();
++    },
++  };
++}
++
++// 显式 opt-in：SILLYHUB_DSH_SMOKE=1 才跑真实子进程冒烟（版本门在用例内再断言
++// ——skipIf 在收集期求值，探测晚于收集，故用环境开关 + 用例内双重守卫）。
++describe.skipIf(process.env.SILLYHUB_DSH_SMOKE !== '1')(
++  'dsh ACP 端到端冒烟（需 SILLYHUB_DSH_SMOKE=1 且本机 dsh ≥0.2.1；默认跳过）',
++  () => {
++    it('真实子进程：initialize → session/new → 一轮 prompt 事件收敛', async () => {
++      expect(probe.ok, '本机须装有 dsh 才能跑本冒烟').toBe(true);
++      expect(probe.belowGate, `dsh=${probe.version} 低于 0.2.1 版本门`).toBe(false);
++      const driver = new DshAcpDriver();
++      const q = makeQueue();
++      const exe = process.env.SILLYHUB_DSH_PATH ?? 'dsh';
++      const handle = await driver.start(q.queue, {
++        cwd: process.cwd(),
++        pathToAgentExecutable: exe,
++      } as DshAcpStartOptions);
++      const messages: unknown[] = [];
++      const results: unknown[] = [];
++      const cb: InteractiveDriverCallbacks = {
++        onTurnMessage: (envelope) => messages.push(...envelope.events),
++        onTurnResult: (r) => results.push(r),
++        onTurnError: (e) => results.push({ subtype: 'smoke_error', error: String(e) }),
++      };
++      const consuming = driver.consume(handle, cb);
++      await new Promise((r) => setTimeout(r, 500));
++      q.push('回复一个字：好');
++      const deadline = Date.now() + 120_000;
++      while (results.length === 0 && Date.now() < deadline) {
++        await new Promise((r) => setTimeout(r, 500));
++      }
++      q.close();
++      await handle.close?.();
++      await consuming;
++      expect(results).toHaveLength(1);
++      expect(messages.length).toBeGreaterThan(0);
++    }, 150_000);
++  },
++);
++
++// 版本门单侧钉（不依赖本机是否装 dsh——探测不到时 probeDsh 的 catch 分支覆盖）：
++// parseSemver 对 prerelease 后缀的忽略语义与 MIN_VERSIONS dsh 门槛一致性。
++describe('dsh 冒烟守卫口径', () => {
++  it('0.1.0-rc.6 解析为 (0,1,0) 且低于 [0,2,1] 门槛（本机实测版本的解析钉）', () => {
++    expect(parseSemver('0.1.0-rc.6')).toEqual([0, 1, 0]);
++    expect(checkMinVersion('dsh', '0.1.0-rc.6')).not.toBeNull();
++    expect(checkMinVersion('dsh', '0.2.1')).toBeNull();
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/provider-registry.test.ts b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+index 7bd7d0b03..c36fc7c6a 100644
+--- a/sillyhub-daemon/tests/interactive/provider-registry.test.ts
++++ b/sillyhub-daemon/tests/interactive/provider-registry.test.ts
+@@ -67,6 +67,7 @@ const _compileTimeKeySet: Record<InteractiveProvider, true> = {
+   codex: true,
+   cursor: true,
+   pi: true,
++  dsh: true,
+ };
+ void _compileTimeKeySet;
+ 
+@@ -100,8 +101,14 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
+ }
+ 
+ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
+-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi）', () => {
+-    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'cursor', 'pi']);
++  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi/dsh）', () => {
++    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual([
++      'claude',
++      'codex',
++      'cursor',
++      'dsh',
++      'pi',
++    ]);
+     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
+     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
+       Object.keys(INTERACTIVE_PROVIDERS).sort(),
+@@ -131,14 +138,21 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）',
+       // 合法性：family 必须落在 6 协议联合内。
+       expect(sixProtocols).toContain(d.family);
+       // 一致性：与批量层反查表同源（interactive 注册表不得另立映射）。
+-      expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
++      // 2026-10-15-dsh-engine-acp：dsh 为交互层专属引擎（批处理接入非目标），
++      // 反查表无条目（undefined）——豁免一致性比对，锚点见下方现值断言。
++      if (PROVIDER_TO_PROTOCOL[d.provider] !== undefined) {
++        expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
++      }
+     }
+     // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc、
+-    // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
++    // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）；
++    // dsh∈json_rpc（ACP v1 即 stdio NDJSON JSON-RPC；交互层专属，反查表无条目）。
+     expect(INTERACTIVE_PROVIDERS.claude?.family).toBe('stream_json');
+     expect(INTERACTIVE_PROVIDERS.codex?.family).toBe('json_rpc');
+     expect(INTERACTIVE_PROVIDERS.cursor?.family).toBe('stream_json');
+     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
++    expect(INTERACTIVE_PROVIDERS.dsh?.family).toBe('json_rpc');
++    expect(PROVIDER_TO_PROTOCOL['dsh']).toBeUndefined();
+   });
+ 
+   it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、16 契约键齐全', () => {
+diff --git a/sillyhub-daemon/tests/version.test.ts b/sillyhub-daemon/tests/version.test.ts
+index 53ad0b3a0..71e6eae63 100644
+--- a/sillyhub-daemon/tests/version.test.ts
++++ b/sillyhub-daemon/tests/version.test.ts
+@@ -114,15 +114,17 @@ describe('formatSemver', () => {
+ // ── MIN_VERSIONS（对照 test_version.py:66-71 TestMinVersions，1 用例）──
+ 
+ describe('MIN_VERSIONS', () => {
+-  // test_version.py:67-71 test_has_three_providers
+-  it('恰好 4 个 provider，含 claude / codex / copilot / pi', () => {
+-    expect(Object.keys(MIN_VERSIONS)).toHaveLength(4);
++  // test_version.py:67-71 test_has_three_providers；2026-10-15-dsh-engine-acp task-01 增 dsh 后 5 条目
++  it('恰好 5 个 provider，含 claude / codex / copilot / pi / dsh', () => {
++    expect(Object.keys(MIN_VERSIONS)).toHaveLength(5);
+     expect(MIN_VERSIONS.claude).toEqual([2, 0, 0]);
+     expect(MIN_VERSIONS.codex).toEqual([0, 100, 0]);
+     expect(MIN_VERSIONS.copilot).toEqual([1, 0, 0]);
+     // ql-20260905-001：pi 门禁实装——PROVIDER_SPECS.pi.minVersion 声明 0.81.0
+     // 但此前本表缺条目，checkMinVersion('pi', v) 恒 null，门禁从未生效。
+     expect(MIN_VERSIONS.pi).toEqual([0, 81, 0]);
++    // 2026-10-15-dsh-engine-acp（D-002）：dsh 0.2.1 最低版本门，低于警告不硬拒。
++    expect(MIN_VERSIONS.dsh).toEqual([0, 2, 1]);
+   });
+ 
+   it('PROVIDER_SPECS 声明 minVersion 的 provider 必有同值 MIN_VERSIONS 条目（防门禁空转再犯）', async () => {

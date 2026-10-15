@@ -1147,4 +1147,25 @@ describe("FloatingSessionHost / 工作区绑定机器（跳过机器步）", () 
     const picker = await screen.findByTestId("mock-picker");
     expect(picker.dataset.bound).toBe("");
   });
+
+  it("复审修复：组「＋」取消后经普通入口兜底开浮层——pickerWorkspaceId 复位，不残留旧组绑定模式", async () => {
+    // 无可直带 runtime → 普通入口（空态「＋ 新会话」）必落浮层兜底。
+    machinesRef.current = [
+      { id: "m-1", status: "online", runtimes: [] },
+    ] as never[];
+    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-1" }]);
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    // 工作区组「＋」→ 绑定模式浮层 → 取消（pickerWorkspaceId 留 ws-1）。
+    fireEvent.click(await screen.findByTestId("mock-new-in-group"));
+    const boundPicker = await screen.findByTestId("mock-picker");
+    expect(boundPicker.dataset.bound).toBe("m-1");
+    fireEvent.click(screen.getByTestId("mock-picker-cancel"));
+
+    // 普通入口（无页面工作区上下文）→ 浮层必须复位为两步，不得复用旧组绑定。
+    fireEvent.click(await screen.findByRole("button", { name: /新会话/ }));
+    const picker = await screen.findByTestId("mock-picker");
+    expect(picker.dataset.bound).toBe("");
+  });
 });

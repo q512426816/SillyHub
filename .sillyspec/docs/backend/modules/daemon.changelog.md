@@ -47,3 +47,4 @@ created_at: 2026-08-29 22:56:30
 ||||||| C:/Users/12532/AppData/Local/Temp/d.base
 - 2026-10-13-slim-subagent-false-running | 动机：历史会话里已结束的子代理（Explore/general-purpose 等）永远显示「运行中」——2026-09
 | 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |
+| 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |

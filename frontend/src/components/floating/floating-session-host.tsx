@@ -273,6 +273,11 @@ function FloatingDrawerBody({
     } else {
       // P2-3：两步浮层兜底——ppmPendingRef 保活绑定意图，onPick 消费 /
       // onCancel 取消清（浮层全屏遮罩期间其它新建入口不可达）。
+      // 2026-10-15-workspace-session-agent-only（复审 P3）：复位 pickerWorkspaceId
+      // 到页面上下文——防上一轮工作区组「＋」/锁定入口残留的 workspaceId 让浮层
+      // 误入绑定模式（静默跳过机器步）；PPM 意图时置 null（工作区由项目推导，
+      // 绑定机器语义不适用，见 design 边界）。
+      setPickerWorkspaceId(ppm ? null : pageWsId);
       setPickerOpen(true);
     }
   }, [

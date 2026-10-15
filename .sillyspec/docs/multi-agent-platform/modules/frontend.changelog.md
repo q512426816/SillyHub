@@ -107,3 +107,4 @@
 | 2026-10-15 | 2026-10-15-assets-graph-narrow-typecheck | 动机一行：2026-10-15-change-assets-graph 归档交付的 change-a… |
 | 2026-10-15 | 2026-10-15-session-status-dot-semantics | 会话列表行内现有两套点：行首状态点（红=失败/绿=已结束/青+光环=active/灰=排队）与行尾活… |
 | 2026-10-15 | 2026-10-15-group-cross-mention-visibility | 群聊互@模式设置面：member-panel 群设置区+建群向导第三步新增互@模式控件（私聊协作/公开委派，三态联动禁用——互@总开关关/consensus 开互斥提示），服务端真值顶层列局部 PATCH 乐观回滚，双端 gen:types 同变更再生成；antd Radio.Button 的 cssinjs 组合选择器在 jsdom nwsapi 抛 SyntaxError 级联炸用例（二分定位）改 Button+aria-pressed 实现。 |
+| 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |

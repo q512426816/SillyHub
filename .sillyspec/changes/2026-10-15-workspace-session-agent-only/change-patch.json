@@ -1,0 +1,483 @@
+{
+  "change": "2026-10-15-workspace-session-agent-only",
+  "baseline": "b0215bd0052d720141f9cbca73fbbed276d8d907",
+  "head": "609f2de5b6dd6d1f31b4f5e05ed220a4bb4e77b0",
+  "files": [
+    ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+    ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+    "backend/app/modules/agent/provider_caps.py",
+    "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+    "backend/app/modules/daemon/group/service/delegation_notice.py",
+    "backend/app/modules/daemon/group/service/helpers.py",
+    "backend/app/modules/daemon/group/service/messages.py",
+    "backend/app/modules/daemon/group/service/shadow.py",
+    "backend/app/modules/daemon/schema.py",
+    "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+    "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+    "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+    "frontend/src/components/floating/floating-session-host.test.tsx",
+    "frontend/src/components/floating/floating-session-host.tsx",
+    "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+    "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+    "frontend/src/components/sessions/pre-session-picker.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx",
+    "frontend/src/components/sessions/sessions-portal.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/daemon/runtimes.ts",
+    "frontend/src/lib/provider-caps.ts",
+    "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+    "sillyhub-daemon/src/agent-detector.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "sillyhub-daemon/src/dsh-settings.ts",
+    "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+    "sillyhub-daemon/src/interactive/dsh-acp-events.ts",
+    "sillyhub-daemon/src/interactive/providers.ts",
+    "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+    "sillyhub-daemon/src/version.ts",
+    "sillyhub-daemon/tests/agent-detector.test.ts",
+    "sillyhub-daemon/tests/dsh-settings.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts",
+    "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+    "sillyhub-daemon/tests/version.test.ts"
+  ],
+  "totals": {
+    "files": 41,
+    "additions": 3218,
+    "deletions": 178
+  },
+  "savedAt": "2026-10-15T08:32:16.615Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/backend/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 10,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 13,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 16,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 23,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "b0215bd0052d720141f9cbca73fbbed276d8d907",
+    "totals": {
+      "files": 41,
+      "additions": 3218,
+      "deletions": 178
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/backend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/provider_caps.py",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/agent/tests/test_provider_caps_alignment.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/delegation_notice.py",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/helpers.py",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/messages.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/group/service/shadow.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/schema.py",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_group_attachment_gate.py",
+        "additions": 63,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx",
+        "additions": 91,
+        "deletions": 26,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/m/workspaces/[id]/sessions/page.tsx",
+        "additions": 24,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/floating/floating-session-host.test.tsx",
+        "additions": 233,
+        "deletions": 35,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/floating/floating-session-host.tsx",
+        "additions": 108,
+        "deletions": 11,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx",
+        "additions": 264,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+        "additions": 211,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/pre-session-picker.tsx",
+        "additions": 142,
+        "deletions": 35,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/sessions-portal.tsx",
+        "additions": 60,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/daemon/runtimes.ts",
+        "additions": 9,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/provider-caps.ts",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/scripts/gen-provider-caps.mjs",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/agent-detector.ts",
+        "additions": 21,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/dsh-settings.ts",
+        "additions": 120,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+        "additions": 532,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-events.ts",
+        "additions": 170,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/providers.ts",
+        "additions": 67,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/src/version.ts",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-detector.test.ts",
+        "additions": 54,
+        "deletions": 12,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/dsh-settings.test.ts",
+        "additions": 118,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+        "additions": 452,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts",
+        "additions": 190,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts",
+        "additions": 139,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/provider-registry.test.ts",
+        "additions": 18,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/version.test.ts",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e709c2cd9338b5e97da255ea6f621dea538117e5446af254540202bef484d84d",
+  "patchStatus": "ok"
+}

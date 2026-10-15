@@ -74,3 +74,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-15 | 2026-10-15-change-assets-graph | 变更详情页信息动线不佳（用户原话四条）：①知识图谱（画布+右侧节点详情描述）没有出现在变更详情页，要… |
 | 2026-10-15 | 2026-10-15-assets-graph-narrow-typecheck | 动机一行：2026-10-15-change-assets-graph 归档交付的 change-a… |
 | 2026-10-15 | 2026-10-15-session-status-dot-semantics | 会话列表行内现有两套点：行首状态点（红=失败/绿=已结束/青+光环=active/灰=排队）与行尾活… |
+| 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |
