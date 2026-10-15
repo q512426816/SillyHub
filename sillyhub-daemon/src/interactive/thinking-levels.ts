@@ -112,6 +112,19 @@ const ENGINE_LEVEL_MATRIX: Record<string, Record<ThinkingLevel, string | undefin
     xhigh: undefined,
     max: undefined,
   },
+  zcode: {
+    // 2026-10-15-zcode-engine-appserver task-04：session/setThoughtLevel 通道
+    //（state.updated reasoning levels 实测档位 low/high 形态）。off=不设（引擎默认，
+    // 非真关——与 claude/codex 同语义）；minimal 降级 low；xhigh/max 降级 high
+    //（引擎侧档位表以会话快照为准，getThinkingLevels 动态回报）。
+    off: undefined,
+    minimal: 'low',
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    xhigh: 'high',
+    max: 'high',
+  },
 };
 
 /**
