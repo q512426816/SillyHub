@@ -102,6 +102,9 @@ const BACKEND_PERMISSION_KEYS = [
   "menu:admin",
   // 2026-10-14-deploy-release-notes task-01：发布记录页读权限
   "deploy_record:read",
+  // 2026-10-14-admin-server-status 新增：服务器信息页读权限（后端 Permission 枚举
+  // 59→60，镜像曾漏补）
+  "system_status:read",
 ] as const;
 
 /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
@@ -134,6 +137,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "settings",
   // 2026-09-18-web-menu-management task-08 新增（system 组菜单管理页入口）
   "menus",
+  // 2026-10-14-admin-server-status 新增（system 组服务器信息页）
+  "server-status",
   // PPM 14 条
   "ppm-workbench",
   "ppm-projects",
@@ -161,8 +166,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 37（2026-10-14-deploy-release-notes 增 deploy-records）", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
+  it("MENU_PERMISSION_GROUPS 长度 === 38（2026-10-14-admin-server-status 增 server-status）", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -177,7 +182,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 5 / ppm 14（2026-10-14 增 deploy-records）", () => {
+  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 6 / ppm 14（2026-10-14 增 server-status）", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -193,7 +198,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     expect(counter.agent).toBe(4);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(4); // 2026-10-14-deploy-release-notes 增 deploy-records
-    expect(counter.system).toBe(5);
+    expect(counter.system).toBe(6); // 2026-10-14-admin-server-status 增 server-status
     expect(counter.ppm).toBe(14);
   });
 
@@ -236,14 +241,16 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58", () => {
+  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 60", () => {
     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
     // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
     // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
     // platform:audit:read / platform:billing / component:read / change:update) = 58
-    expect(BACKEND_PERMISSION_KEYS.length).toBe(59); // 2026-10-14 增 deploy_record:read
-    expect(valid.size).toBe(59); // 2026-10-14 增 deploy_record:read
+    // → 59 (2026-10-14-deploy-release-notes 增 deploy_record:read)
+    // → 60 (2026-10-14-admin-server-status 增 system_status:read)
+    expect(BACKEND_PERMISSION_KEYS.length).toBe(60);
+    expect(valid.size).toBe(60);
 
     MENU_PERMISSION_GROUPS.forEach((g) => {
       g.permissions.forEach((p) => {
