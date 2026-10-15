@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户实测刷新落位随机（19 轮复现 1 次，复现态特征锁定：scrollTop=602=布局早期瞬态假底、clientHeight=299 被压扁、RO/贴底链全死 near=false
+  无自愈）。凶手路径无法从推理与审计定位（多轮写入审计在绿轮无异常），改加固式修复：贴底记忆宽限窗——成功贴底后 10s
+  内、且用户无真实滚动输入（wheel/touchstart/pointerdown）时，内容任何高度变化强制钉底；用户真实输入立即让权。不管凶手是谁，加载期被误杀的贴底在宽限窗内自动复活。
+
+
+  成功标准：
+
+  - RO 钉底条件扩为 isNearBottomRef ||（距最近贴底 <10s 且无用户输入）——加载期 near 被误清后宽限窗内自动钉底
+
+  - 用户真实滚动（滚轮/触摸/拖动）立即恢复既有让权语义（near=false 后不强拉）
+
+  - 挂载即视为在窗内（初始加载全程受保护），超过 10s 或用户输入后回到既有语义
+
+  - 既有测试面复跑绿 + tsc 0
+autopilot: false
+prestage_ack: true
+baseline_commit: 7875e2a9a5288a708e3f42ad3a524afc3eeb9530
+updatedAt: '2026-10-15T02:08:56.732Z'
+baseline_sha256: eaa889febdb37976d16ae455c0c9f44ef277eb3e5756c3dcfd4be98b7998b269
+

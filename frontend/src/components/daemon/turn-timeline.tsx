@@ -1212,6 +1212,8 @@ export function TurnTimeline({
     }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     isNearBottomRef.current = near;
+    // grace-window：每次真实贴底刷新记忆时间戳（宽限窗锚点）。
+    if (near) lastBottomAnchoredAtRef.current = Date.now();
     setNearBottom((prev) => (prev === near ? prev : near));
     if (near) {
       // 回到底部（含点击悬浮按钮后的滚底触发）→ 计数锚清零。
@@ -1332,7 +1334,10 @@ export function TurnTimeline({
       : null;
     const lastChanged = lastSigRef.current !== lastSig;
     lastSigRef.current = lastSig;
-    if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
+    if (
+      isNewPendingTurn ||
+      ((isNearBottomRef.current || inBottomGraceWindow()) && lastChanged)
+    ) {
       el.scrollTo(0, el.scrollHeight);
       // quick（ql-20260921-003-42be）：贴底重申窗口——单次 scrollTo 撞上「高度=
       // 视口高」的未稳定窗口时滚动量为 0，或滚到中途后高度再涨/视口再压缩，
@@ -1394,6 +1399,39 @@ export function TurnTimeline({
   // 一帧一滚（2026-10-13 layout-storm 教训——滚动类处理器禁同步布局写）。
   // 用户上滚接管由 isNearBottomRef 守卫（handleScroll 置 false 后回调恒 no-op）；
   // 降级：无 ResizeObserver（jsdom/极旧浏览器）不挂观测，行为回到重申窗兜底。
+  // ── 2026-10-14-session-bottom-grace-window：贴底记忆宽限窗（第六层加固）──
+  // 用户实测刷新落位随机（19 轮复现 1 次；复现态：scrollTop=602=布局早期瞬态
+  // 假底，贴底判定 near 在加载期被某事件误清后再无自愈路径，RO 随之死寂）。
+  // 凶手路径无法稳定定位（低频竞态）——改加固式修复：不追凶手，让系统自愈。
+  // 宽限窗：距最近一次贴底 <10s 且用户无真实滚动输入（wheel/touchstart/
+  // pointerdown，程序滚动不产生这些事件）期间，内容任何高度变化都强制钉底；
+  // 用户真实输入立即让权（回既有语义），超窗亦然。初始挂载视为在窗内（冷加载
+  // 全程受保护——「打开即落底」是产品语义，scrollRestoration=manual 后无浏览器
+  // 恢复与之竞争）。
+  const lastBottomAnchoredAtRef = useRef<number>(Date.now());
+  const userScrollTookOverRef = useRef(false);
+  useEffect(() => {
+    const markUser = () => {
+      userScrollTookOverRef.current = true;
+    };
+    // capture：任何子元素上的真实输入都算接管；程序性 scrollTo 不触发这四类
+    // （键盘 PgUp/↑/Home/Space 滚动无 wheel，需 keydown 覆盖）。
+    window.addEventListener("wheel", markUser, { capture: true, passive: true });
+    window.addEventListener("touchstart", markUser, { capture: true, passive: true });
+    window.addEventListener("pointerdown", markUser, { capture: true, passive: true });
+    window.addEventListener("keydown", markUser, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("wheel", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("touchstart", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("pointerdown", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("keydown", markUser, { capture: true } as AddEventListenerOptions);
+    };
+  }, []);
+  /** 宽限窗内（最近贴底 <10s 且无用户输入）——RO 钉底的放行判据。 */
+  const inBottomGraceWindow = () =>
+    !userScrollTookOverRef.current &&
+    Date.now() - lastBottomAnchoredAtRef.current < 10_000;
+
   const bottomFollowRafRef = useRef<number | null>(null);
   // 2026-10-14-session-bottom-no-restore（第五层）：禁浏览器刷新滚动恢复——
   // Chrome reload 时恢复上次容器滚动位置，恢复晚到（内容装配后）会覆盖初始
@@ -1421,13 +1459,16 @@ export function TurnTimeline({
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const obs = new ResizeObserver(() => {
-      if (!isNearBottomRef.current) return;
+      // grace-window：贴底判定 OR 宽限窗（加载期 near 被误清时自动复活钉底）。
+      if (!isNearBottomRef.current && !inBottomGraceWindow()) return;
       if (bottomFollowRafRef.current !== null) return; // 合帧去重
       bottomFollowRafRef.current = requestAnimationFrame(() => {
         bottomFollowRafRef.current = null;
         const target = scrollRef.current;
-        if (!target || !target.isConnected || !isNearBottomRef.current) return;
+        if (!target || !target.isConnected) return;
+        if (!isNearBottomRef.current && !inBottomGraceWindow()) return;
         target.scrollTo(0, target.scrollHeight);
+        lastBottomAnchoredAtRef.current = Date.now();
       });
     });
     // 观察直接子（错误条/pending 卡层/内容容器）——turns 空态翻转时经上方 deps
