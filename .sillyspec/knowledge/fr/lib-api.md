@@ -3226,3 +3226,206 @@
   confirmed_at: null
   source_change: 2026-10-14-admin-server-status
   status: active
+
+## FR-lib-api-145 互 @ 模式设置
+变更：2026-10-15-group-cross-mention-visibility
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1、D-005@v1
+场景正文：
+- 场景：默认场景 — Given 一个已存在的群（`agent_cross_mention=true`）；When 群主在群设置（或建群向导第三步）选择互 @ 模式（私聊化/公开委派）；Then `AgentGroupChat.cross_mention_mode` MUST 持久化为所选值（默认与存量值 MUST 为 `'private'`）；总开关关
+全文：.sillyspec/changes/archive/2026-10-15-group-cross-mention-visibility/requirements.md#FR-01
+最近确认：eaa3e314b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-group-cross-mention-visibility:task-01:acc-0-3d212ba0
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/tests/test_align_platform_change_events_migration.py | frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-01:acc-1-02724185
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/tests/test_align_platform_change_events_migration.py | frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-01:acc-2-3a43ec4f
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/tests/test_align_platform_change_events_migration.py | frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-01:acc-3-d1be83c9
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/tests/test_align_platform_change_events_migration.py | frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-04:acc-0-728bd407
+  tests: frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-04:acc-1-41cdf48d
+  tests: frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-04:acc-2-6ac9dec7
+  tests: frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-04:acc-3-96ea9ed1
+  tests: frontend/src/components/group-chat/__tests__/member-panel.test.tsx | frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+
+## FR-lib-api-146 公开委派触发三态分流
+变更：2026-10-15-group-cross-mention-visibility
+状态：active
+摘要：默认场景
+依据决策：D-006@v1、D-011@v1
+场景正文：
+- 场景：默认场景 — Given 群内一 agent 成员回复中 @ 另一 agent 成员，护栏（链深≤群设置、同链同成员 2 次、6 次/60s、Redis 可用）全部放行；When 互 @ 触发执行（分流判定 MUST 位于护栏判定之后）；Then 分流 MUST 按三态优先级执行：①源轮 `consensus_task_id` 非空 → consensus 协作轮型（现状，带 dm_target，优先级最
+全文：.sillyspec/changes/archive/2026-10-15-group-cross-mention-visibility/requirements.md#FR-02
+最近确认：eaa3e314b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-group-cross-mention-visibility:task-02:acc-0-70fd44d9
+  tests: backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-02:acc-1-57a4e478
+  tests: backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-02:acc-2-0a3e3b7a
+  tests: backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-02:acc-3-9f041a15
+  tests: backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+
+## FR-lib-api-147 公开委派投影
+变更：2026-10-15-group-cross-mention-visibility
+状态：active
+摘要：默认场景
+依据决策：D-003@v1、D-006@v1
+场景正文：
+- 场景：默认场景 — Given 被委派成员轮（`dm_kind='agent_public'`）收口且 run status=completed；When 投影管线执行；Then 其回复的 [[GROUP]] 段 MUST 投影为群时间线行（metadata 含 member 身份与 `delegation_of`=发起方成员名）；整轮无
+全文：.sillyspec/changes/archive/2026-10-15-group-cross-mention-visibility/requirements.md#FR-03
+最近确认：eaa3e314b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-group-cross-mention-visibility:task-03:acc-0-24cac61a
+  tests: backend/app/modules/daemon/tests/test_group_bridge_projection.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-03:acc-1-6449f2c8
+  tests: backend/app/modules/daemon/tests/test_group_bridge_projection.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-03:acc-2-0e4e683e
+  tests: backend/app/modules/daemon/tests/test_group_bridge_projection.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+- row: 2026-10-15-group-cross-mention-visibility:task-03:acc-3-9f041a15
+  tests: backend/app/modules/daemon/tests/test_group_bridge_projection.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b28df6881ff0c87cceda483b21e56b9cffdb39a3
+  source_change: 2026-10-15-group-cross-mention-visibility
+  status: active
+
+## FR-lib-api-148 结果轻通知回流
+变更：2026-10-15-group-cross-mention-visibility
+状态：active
+摘要：默认场景
+依据决策：D-004@v2、D-007@v1
+场景正文：
+- 场景：默认场景 — Given 公开委派投影行落库完成；When 收口钩子执行回流（`_inject_delegation_notice`）；Then 发起方影子会话 MUST 追加一条 `delegation_notice` 注入行（含被委派成员名与结果摘要首段），MUST NOT 创建 run、MUST N
+全文：.sillyspec/changes/archive/2026-10-15-group-cross-mention-visibility/requirements.md#FR-04
+最近确认：eaa3e314b
+
+## FR-lib-api-149 零回归与护栏同源
+变更：2026-10-15-group-cross-mention-visibility
+状态：active
+摘要：默认场景
+依据决策：D-002@v1
+场景正文：
+- 场景：默认场景 — Given 任意 private 群（含全部存量群）；When 任意互 @ 链推进、护栏计数（链深/同成员次数/限频）被读写
+全文：.sillyspec/changes/archive/2026-10-15-group-cross-mention-visibility/requirements.md#FR-05
+最近确认：eaa3e314b

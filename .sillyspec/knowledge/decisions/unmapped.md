@@ -3202,3 +3202,110 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
 理由：最大风险：转圈信号取活性 working 依赖 agent 日志上报链路（无日志/未上报的会话活性缺失 → 非终态行留白，用户可能觉得「跑着的会话没转圈」）。缓解：活性链路是既有成熟机制（工作台总览卡同源），且终态红/绿点不依赖活性，最坏退化为留白而非错误标识。放弃的方案：a) status=active 即转圈——会让所有未结束聊天会话永久转圈（用户确认否掉）；b) 保留行尾灯只改行首点——两套点并存，语义打架的根源不除（用户确认移除并入）；c) 把完成通知做进 use-session-liveness hook——完成是会话 status 转移不是日志 state 转移，数据源不同，硬塞进 hook 会让 hook 依赖会话列表数据，耦合更差，故检测放面板层。
+
+## D-unmapped-015@v1 互@模式建模——主开关布尔保留 + 新增模式枚举
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-001@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：`AgentGroupChat` 保留现有布尔 `agent_cross_mention` 作为互@总开关，新增 `cross_mention_mode` 枚举（`'private'` | `'public'`，server default `'private'`）；模式仅在总开关开启时生效，总开关关闭=严格 openclaw 模式语义不变。项目未上线、数据可清空，迁移直接加列。
+故障面：布尔与枚举双字段可能出现「开关关、模式 public」的悬挂态——读取侧必须以开关优先，设置界面在开关关闭时禁用模式选择器。
+退役判据：若后续互@语义简化为单一公开/关闭两态（私聊模式被淘汰），可并回布尔字段并删除枚举。
+
+## D-unmapped-016@v1 默认值——存量群与新群均默认私聊化（可否决）
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-002@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：沿用 2026-09-10 群级开关变更 D-002「存量群零变化」惯例：存量群行为不变（等价 private），新建群默认 private；公开委派作为建群向导第三步与群设置里的可选项呈现。用户提问未及作答，AI 保守裁定。
+
+## D-unmapped-017@v1 公开委派 v1 投影口径——只投影最终结果（可否决）
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-003@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：v1 只投影被委派成员的**最终回复**（复用 [[GROUP]] 标记抽取），干活过程留在影子会话不刷群；进度播报（DS Bot 式阶段性播报+短句合流）留作后续独立增量。理由：D-005 当初互@私聊化的动机是「分歧讨论污染群时间线」，最小口径（只进结果）直接化解该动机，先把「群里看得到协作结果」的核心价值验证掉。
+故障面：委派耗时长的场景群里长时间无动静——缓解：发起方触发时群内系统行「已把任务转给 X」即时可见（依托现有 typing/系统行通道，不新增投影）。
+
+## D-unmapped-018@v2 轻注入原语修正——新增纯日志 helper，不复用 send_direct_message
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-004@v2
+锚点：未记录
+最近确认：eaa3e314b
+理由：不成立。评审 UB-1 实证：send_direct_message（backend/app/modules/daemon/group/service/messages.py:732）为触发语义（:806-818 新建群载体 run、:848-849 busy_strategy=inject 注入活跃轮），无「只插日志行不触发」的可抽取对应物；且「载体 run」术语与代码冲突（载体 run 恒挂群会话）。修正为：新增 _inject_delegation_notice 纯写日志 helper（NEW:backend/app/modules/daemon/group/service/delegation_notice.py），直接向发起方影子会话最近 run 追加 AgentRunLog(user_input, delegation_notice metadata)，不建 run/不入队/不派发，失败静默降级记 warning。轻注入不触发的行为语义（v1 核心）不变。
+supersedes：D-004@v1
+故障面：注入行与影子会话日志读取口径不符（成员会话视图异常行）——单测断言可渲染（R-03）。
+退役判据：若后续改为自动触发发起方接话（D-010 复潮），轻通知 helper 可被触发路径复用或删除。
+
+## D-unmapped-019@v1 consensus 互斥——汇总模式开启时公开模式不接管
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-005@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：`consensus_mode=true` 的群，协作轮走 consensus 自有语义（私下转交+coordinator 收口），互@模式不改变其行为；两者是互斥的协作策略，consensus 优先。仅当 consensus_mode=false 且互@模式=public 时走公开委派。
+
+## D-unmapped-020@v1 投影谓词改造——新增公开委派轮型，私聊轮拦截不变
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-006@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：互@触发时按群模式分流：public 群的被@成员轮 turn metadata 记 `dm_kind='agent_public'`（不含 dm_target），role_prompt 用公开委派指令（要求 [[GROUP]] 标记给群结论 + 注明「结果将直接进群」）；projection_blocked 谓词仅拦 `dm_kind='agent_dm'`（私聊）与 consensus 协作轮，agent_public 轮放行走 [[GROUP]] 投影。护栏（链深≤群设置、同链同成员 2 次、限频滑窗、Redis fail-closed）三层原样沿用，公开模式不放宽。
+故障面：轮型标记错误会导致该进群的没进/不该进的进了——单测双断言钉死两种轮型的投影矩阵。
+退役判据：若投影口径统一为按 [[GROUP]] 标记单一判定（轮型无关），dm_kind 分支可收敛。
+
+## D-unmapped-021@v2 打断语义修正——零注入成立，流式已投影不撤回
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-007@v2
+锚点：未记录
+最近确认：eaa3e314b
+理由：v1 的「零投影」承诺过强——[[GROUP]] 段投影发生在 submit_messages 流式双写（与 run 终态无关，普通 @ 轮同款现状语义），打断前已投影的内容不可能也不应撤回。修正为：**零注入**（轻通知挂接点仅在 completed，成立）；**流式已投影内容不撤回**（现状一致）。实测证据：test_interrupted_round_no_notice 初版断言「零投影」失败（submit 时投影行已落载体）。
+supersedes：D-007@v1
+故障面：无（收紧承诺到现状可兑现语义）。
+退役判据：若未来引入投影撤回机制（override DELETE 扩展到打断轮），可恢复「零投影」承诺。
+
+## D-unmapped-022@v1 实现方案选定——方案 A（结果单投 + 轻注入）
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-008@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：选方案 A：互@触发按群模式分流轮型，public 群被@成员轮记 dm_kind='agent_public'（无 dm_target）+ 公开委派 role_prompt，投影谓词放行该轮 [[GROUP]] 投影，收口时向发起方影子会话纯注入轻通知（不触发运行）；护栏三层原样沿用。理由：改动面最小且集中（mentions/group_bridge/模型加列/设置 UI）、私聊路径零回归（轮型分流互不干扰）、零新增运行成本；B/C 的增量（双写/进度播报/自动接话）均可在 A 之上独立叠加，演进路径开放。【AskUserQuestion 未及作答，AI 按推荐裁定，待用户否决——否决则本条 supersede】
+故障面：轮型分流漏判会导致公开群互@仍走私聊——触发分流单测钉死 public/private 两群型的 dm_kind 断言。
+退役判据：若方案 C（进度播报+自动接话）复潮并取代最小口径，本条随 D-003/D-010 复议一并 supersede。
+
+## D-unmapped-023@v1 落选——方案 B（结果双投：群投影 + 发起方 DM 注入）
+状态：rejected
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-009@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：落选。
+否决理由：同一回复 token 双份消耗（群投影+DM 注入各自进入模型上下文），且对群的回复注入私聊会话语境错位，与轻通知语义重叠需后续拆除，违反 D-004。
+复潮条件：用户明确要求发起方在下次触发前就拥有委派结果全文（而非摘要通知），且可接受双份 token 成本时重议。
+
+## D-unmapped-024@v1 落选——方案 C（完整 DS Bot 语义：进度播报 + 自动接话）
+状态：rejected
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-010@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：落选（v1 范围）。
+否决理由：流式分段投影+合流窗口状态防刷屏改动面最大，每次委派多一轮运行成本且 A↔B 乒乓风险上升，v1 未验证核心价值前风险收益比最差，违反 D-003/D-004。
+复潮条件：方案 A 上线后用户反馈「委派过程黑盒/结果无人接话」成为高频诉求，且护栏实测足以约束乒乓时，作为独立增量变更重议。
+
+## D-unmapped-025@v1 互@分流三态优先级——源轮 consensus_task_id 优先于群模式
+状态：implemented
+变更：2026-10-15-group-cross-mention-visibility
+原编号：D-011@v1
+锚点：未记录
+最近确认：eaa3e314b
+理由：会（若无优先级）。修正：互@触发分流按三态优先级执行——①源轮 consensus_task_id 非空 → consensus 协作轮型（现状，带 dm_target、投影拦截）；②群 cross_mention_mode='public' → agent_public；③其余 → agent_dm 现路径。现路径本就按源轮 consensus_task_id 优先记 dm_kind='consensus'（mentions.py:460-469），本决策把该优先级显式化并钉进单测。
+故障面：无（纯优先级显式化，收紧泄漏窗口）。
+退役判据：若 consensus 与互@模式未来统一为单一协作策略引擎，三态判定收敛进该引擎。

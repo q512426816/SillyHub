@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-group-cross-mention-visibility",
+  "appliedAt": "2026-10-15T07:47:28.188Z",
+  "baseHash": "57e6825343ad227c060bc389086c5721040eb561",
+  "files": [
+    {
+      "path": "backend/app/modules/agent/model.py",
+      "sha256": "f1ec4a34dd6336115d4a3a42393fb2d531c2818a4e3835c60501301f293d6f7a"
+    },
+    {
+      "path": "backend/app/modules/agent/schema.py",
+      "sha256": "63e1f806f75a2d2d8481576b50156a6a5131422ae6fb5f22e0e678199c364d3f"
+    },
+    {
+      "path": "backend/app/modules/agent/tests/test_group_chat_models.py",
+      "sha256": "d932217c020c455c0764613faac66a73fcd5688a061886b4297b43223f852e0b"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/crud.py",
+      "sha256": "c3a67dbc10e4df7bbee215e7176c7fdae0db80aabb483341fd055506f343be10"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/delegation_notice.py",
+      "sha256": "e8340207e48d98bd1489ef8c5849c6418bf1981f2e349128ce21bf1123b86739"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/helpers.py",
+      "sha256": "f6c4463df2b850fae971deecb290e1e86c44164a51c50d80e656b95d540b3831"
+    },
+    {
+      "path": "backend/app/modules/daemon/group/service/mentions.py",
+      "sha256": "18e04fa44dfa9e90a8049d7c7225d9b0e7a093df16997f56bc5c7372f1907612"
+    },
+    {
+      "path": "backend/app/modules/daemon/run_sync/service/group_bridge.py",
+      "sha256": "9ba317c4ebd116ebd303383911bfbb4a0e6e4d02a118318622fd26d4257a19af"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_bridge_projection.py",
+      "sha256": "33db0ee4ae57f2db809873648289c50028cf35f504c252a0473a4cdceb8ef71a"
+    },
+    {
+      "path": "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+      "sha256": "e041118ef7e5a7d5abae603167118814bcca00901d531c4db01e3bb3ffc03156"
+    },
+    {
+      "path": "backend/migrations/versions/20261015120000_add_group_cross_mention_mode.py",
+      "sha256": "5d16bf5277a33b83a786e6ec72b8cabece519237dfcd6d47336a300ede7e3203"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "sha256": "2a6cbf523350fc335bc68ebf552c96499568bb33bd9cfc481283b4281cbb5c8c"
+    },
+    {
+      "path": "frontend/src/components/group-chat/__tests__/member-panel.test.tsx",
+      "sha256": "697fae4cd3f4777977d564f105ccd0f4d88af3ce3591f13ca970828e66e1df63"
+    },
+    {
+      "path": "frontend/src/components/group-chat/create-group-wizard.tsx",
+      "sha256": "a0770cc430a75a532d22d1d2fddca963001ca64ab1eeb18ee81c0344cc59e802"
+    },
+    {
+      "path": "frontend/src/components/group-chat/member-panel.tsx",
+      "sha256": "152b3c4c557773370fcd7802a2ec4493a307c13dde3582e605d3578f2d673ffc"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/create-group-wizard.test.tsx",
+      "sha256": "447473e4bc1302c7265fa21b95352b4aa2aa4288a25a0c5426aef063f4d3cb66"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/sessions-portal.test.tsx",
+      "sha256": "cec343a74cf77df2a3e0566ff92a780a2f675cf7c04192f8b836034931c73295"
+    },
+    {
+      "path": "frontend/src/lib/api-types.ts",
+      "sha256": "9b95f0c528bfbc5417e39c6d4f8d2500adf8c9979aa5c571da8ab7f93c47741f"
+    },
+    {
+      "path": "backend/openapi.json",
+      "sha256": "f36fc4db8d37c8c9ad92ceaa42e9b5595bc4acb43220c4c17349d5568bbdcbae"
+    },
+    {
+      "path": "sillyhub-daemon/src/api-types.ts",
+      "sha256": "9b95f0c528bfbc5417e39c6d4f8d2500adf8c9979aa5c571da8ab7f93c47741f"
+    },
+    {
+      "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+      "sha256": "df58a6e8f6833d2bf1fba964dda29b77980f7f0d50675d85f6d51e793205be09"
+    }
+  ]
+}
