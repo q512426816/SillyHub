@@ -60,8 +60,8 @@ export interface ChangeUsageCardProps {
   refKey: string;
 }
 
-/** 紧凑时间 MM-DD HH:mm（本地时区，同 session-list-layout formatTime 口径）。 */
-function formatCompactTime(iso: string): string {
+/** 紧凑时间 MM-DD HH:mm（本地时区，同 session-list-layout formatTime 口径）。导出供信息栏复用。 */
+export function formatCompactTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -76,7 +76,7 @@ function formatCompactTime(iso: string): string {
  * >= 1 小时 →「X.X 小时」（小时一位小数）；1 分钟~1 小时 →「N 分钟」（取整分钟）；
  * < 1 分钟 →「N 秒」。进行中时照常显示已累计值（「进行中」标记另渲染）。
  */
-function formatDurationZh(ms: number): string {
+export function formatDurationZh(ms: number): string {
   if (!Number.isFinite(ms)) return "0 秒";
   if (ms < 60_000) return `${Math.max(0, Math.round(ms / 1_000))} 秒`;
   if (ms < 3_600_000) return `${Math.floor(ms / 60_000)} 分钟`;
@@ -105,7 +105,7 @@ function formatCount(n: number): string {
  * 同公式：cache_read / (cache_read + input)；汇总级与模型行级同式）。分母 <= 0
  * （无输入/无缓存读取）→ null，展示层显示「—」。
  */
-function cacheHitRate(
+export function cacheHitRate(
   item: Pick<ChangeUsageRead["by_model"][number], "input_tokens" | "cache_read_tokens">,
 ): number | null {
   const denominator = item.cache_read_tokens + item.input_tokens;
@@ -114,13 +114,13 @@ function cacheHitRate(
 }
 
 /** 命中率百分比（一位小数）；null →「—」。 */
-function formatHitRate(rate: number | null): string {
+export function formatHitRate(rate: number | null): string {
   if (rate === null) return "—";
   return `${(rate * 100).toFixed(1)}%`;
 }
 
 /** 无执行判定：时间三元组全 None + totals 全 0（后端空集合聚合的诚实值形态）。 */
-function hasNoExecution(usage: ChangeUsageRead): boolean {
+export function hasNoExecution(usage: ChangeUsageRead): boolean {
   const t = usage.totals;
   return (
     usage.started_at == null &&
@@ -167,19 +167,31 @@ function UsageItem({
   );
 }
 
-export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardProps) {
-  const [expanded, setExpanded] = useState(false);
-
-  // D-007@v1：useQuery 自取数（queryKey 三要素 kind+workspaceId+refKey，结构对齐
-  // change-sessions-card 先例 [域, 组件, 参数…]）；queryFn 按 kind 分派两 lib 封装
-  // （task-06 契约）；失败态在渲染层静默降级，不抛给全局错误处理。
-  const usageQ = useQuery({
+/**
+ * 执行用量取数（**单一实现**，2026-10-15-change-detail-redesign / D-016@v1 Q-4）：
+ * 卡片与「概览右侧信息栏」共用本 hook——queryKey 三要素 kind+workspaceId+refKey
+ * （结构对齐 change-sessions-card 先例 [域, 组件, 参数…]），同 key 命中 react-query
+ * 缓存即零额外请求；MUST NOT 在别处另写一份取数（双实现漂移红线）。
+ */
+export function useChangeUsage(
+  kind: ChangeUsageCardProps["kind"],
+  workspaceId: string,
+  refKey: string,
+) {
+  return useQuery({
     queryKey: ["changeUsage", "changeUsageCard", kind, workspaceId, refKey],
     queryFn: () =>
       kind === "change"
         ? getChangeUsage(workspaceId, refKey)
         : getQuicklogUsage(workspaceId, refKey),
   });
+}
+
+export function ChangeUsageCard({ kind, workspaceId, refKey }: ChangeUsageCardProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  // D-007@v1：useQuery 自取数；失败态在渲染层静默降级，不抛给全局错误处理。
+  const usageQ = useChangeUsage(kind, workspaceId, refKey);
 
   // 加载骨架（简单一行占位）。
   if (usageQ.isPending) {

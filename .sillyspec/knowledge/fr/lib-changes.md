@@ -516,12 +516,14 @@
 
 ## FR-lib-changes-030 范围对账降级态显式展示、不再误显三态
 变更：2026-09-25-change-detail-assets-usability
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-007
+取代链：FR-lib-changes-030 ← FR-app-workspace-pages-007（2026-10-15-change-detail-redesign 承接）
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given scope-audit 返回 ok=true 且 degraded_reason 非空（计划侧不可用，降级为「实际侧 only 视图」，行内无三态字段）；；When 变更详情页渲染范围对账卡；；Then 不再渲染三态 chip 的 0/0/0，改为显式展示降级原因 + 口径说明（该视图无三态列、文件面为实时窗口），明细弹窗同样带降级横幅；
 全文：.sillyspec/changes/archive/2026-09-25-change-detail-assets-usability/requirements.md#FR-05
-最近确认：39f2eb4fe0cd00568c6bb63bc7248c2430b11182
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -533,7 +535,7 @@
   confirmed_by: agent
   confirmed_at: 06925e312424f70d94189f93fb6b76db59a2e95e
   source_change: 2026-09-25-change-detail-assets-usability
-  status: active
+  status: superseded
 
 ## FR-lib-changes-031 相关测试与静态检查全绿
 变更：2026-09-25-change-detail-assets-usability

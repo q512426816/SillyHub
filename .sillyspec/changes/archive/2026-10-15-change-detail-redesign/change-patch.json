@@ -1,0 +1,363 @@
+{
+  "change": "2026-10-15-change-detail-redesign",
+  "baseline": "f4e335d56ce460a98465f7762848a35399825925",
+  "head": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+  "files": [
+    "frontend/prototype-dist/change-center.html",
+    "frontend/prototype-dist/change-detail-v2.html",
+    "frontend/prototype-dist/change-detail.html",
+    "frontend/prototype-dist/index.html",
+    "frontend/prototype-dist/session-portal.html",
+    "frontend/prototype-dist/sillyspec-flow.html",
+    "frontend/prototype-dist/workspace-list.html",
+    "frontend/prototype-dist/workspace-overview.html",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-overview-panel.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-task-checklist.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-unified-timeline.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/merge-change-timeline.test.ts",
+    "frontend/src/components/changes/detail/change-assets-card.tsx",
+    "frontend/src/components/changes/detail/change-assets-graph.tsx",
+    "frontend/src/components/changes/detail/change-files-panel.tsx",
+    "frontend/src/components/changes/detail/change-overview-panel.tsx",
+    "frontend/src/components/changes/detail/change-overview-side.tsx",
+    "frontend/src/components/changes/detail/change-tabs.tsx",
+    "frontend/src/components/changes/detail/change-task-checklist.tsx",
+    "frontend/src/components/changes/detail/change-unified-timeline.tsx",
+    "frontend/src/components/changes/detail/change-usage-card.tsx",
+    "frontend/src/components/changes/detail/merge-change-timeline.ts"
+  ],
+  "totals": {
+    "files": 33,
+    "additions": 3260,
+    "deletions": 857
+  },
+  "savedAt": "2026-10-15T17:49:51.874Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f4e335d56ce460a98465f7762848a35399825925",
+    "totals": {
+      "files": 37,
+      "additions": 3260,
+      "deletions": 857
+    },
+    "rows": [
+      {
+        "path": "frontend/prototype-dist/change-center.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail-v2.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/change-detail.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/index.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/session-portal.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/sillyspec-flow.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-list.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/prototype-dist/workspace-overview.html",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "additions": 164,
+        "deletions": 355,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx",
+        "additions": 169,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "additions": 78,
+        "deletions": 110,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+        "additions": 310,
+        "deletions": 309,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "additions": 6,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx",
+        "additions": 157,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx",
+        "additions": 13,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx",
+        "additions": 85,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-overview-panel.test.tsx",
+        "additions": 192,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+        "additions": 169,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx",
+        "additions": 83,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-task-checklist.test.tsx",
+        "additions": 103,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-unified-timeline.test.tsx",
+        "additions": 110,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/merge-change-timeline.test.ts",
+        "additions": 211,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-assets-card.tsx",
+        "additions": 142,
+        "deletions": 31,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-assets-graph.tsx",
+        "additions": 56,
+        "deletions": 9,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-files-panel.tsx",
+        "additions": 58,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-overview-panel.tsx",
+        "additions": 254,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-overview-side.tsx",
+        "additions": 240,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-tabs.tsx",
+        "additions": 65,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-task-checklist.tsx",
+        "additions": 88,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-unified-timeline.tsx",
+        "additions": 161,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-usage-card.tsx",
+        "additions": 25,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/merge-change-timeline.ts",
+        "additions": 295,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-stage-actions.tsx",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/prototype/change-detail-v2-view.tsx",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/scripts/prototype-build.mjs",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "88decb51caab37152b190138a00a6017ede3ada044652fadf71e378d51134b2e",
+  "patchStatus": "ok"
+}

@@ -7,7 +7,6 @@ import { useQuery } from "@tanstack/react-query";
 import { FilePreview } from "@/components/explorer/file-preview";
 import { DiffView } from "@/components/files/structured-views";
 import { EntryCardList } from "@/components/knowledge/entry-card-list";
-import { ChangeAssetsGraph } from "@/components/changes/detail/change-assets-graph";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +28,14 @@ interface ChangeAssetsCardProps {
    * 2026-10-14-decision-anchor-change-qualified）。缺省退化为裸 id 旧路径。
    */
   changeKey?: string;
+  /**
+   * 变更是否已归档（页面层传 `isTerminalChange(change)`）。
+   * 2026-10-15-change-detail-redesign / D-001@v1 + D-016@v1：两态互斥与「归档态
+   * 归档留档保底渲染」需要归档判定在**首帧取数失败时同样可用**（失败时无
+   * `query.data`，无法从响应推导）——缺省回退读响应的 `archived` 字段，兼容
+   * 既有调用点与测试。
+   */
+  archived?: boolean;
 }
 
 /** 知识条目预览目标：file=spec 树相对路径（深链原样），anchor=条目 id（可选）。 */
@@ -142,7 +149,40 @@ export function resolveTestFilePath(
  * 具体内容（KnowledgePreviewBody：getKnowledge + EntryCardList + 锚点定位），
  * 弹窗头部「在知识库中打开」保留原 file+anchor 深链跳转能力。
  */
-export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAssetsCardProps) {
+/** 每组默认直接显示的行数上限（超出折叠，见 GroupToggle）。 */
+const GROUP_VISIBLE_LIMIT = 5;
+
+/** 分组折叠开关：超出上限时给「展开全部 N 条」，展开后给「收起」。 */
+function GroupToggle({
+  total,
+  expanded,
+  onToggle,
+  unit = "条",
+}: {
+  total: number;
+  expanded: boolean;
+  onToggle: () => void;
+  unit?: string;
+}) {
+  if (total <= GROUP_VISIBLE_LIMIT && !expanded) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      data-testid="change-assets-group-toggle"
+      className="mt-1 shrink-0 self-start text-[10px] text-muted-foreground hover:underline"
+    >
+      {expanded ? "收起" : `展开全部 ${total} ${unit} ▾`}
+    </button>
+  );
+}
+
+export function ChangeAssetsCard({
+  workspaceId,
+  changeId,
+  changeKey,
+  archived: archivedProp,
+}: ChangeAssetsCardProps) {
   const query = useQuery({
     queryKey: ["changeAssets", workspaceId, changeId],
     queryFn: () => getChangeAssets(workspaceId, changeId),
@@ -153,6 +193,20 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
   // 2026-09-28-change-ux-detail-batch：默认展开（用户裁决）——卡随本变更移入
   // 详情页主栏宽列，折叠态默认值不再是侧栏窄列的防噪手段。
   const [open, setOpen] = useState(true);
+  // 归档判定：显式 prop 优先（首帧失败也可判定），否则回退响应字段（兼容既有调用点）。
+  const isArchived = archivedProp ?? query.data?.archived === true;
+
+  // 2026-10-15-change-detail-redesign / FR-06 / D-001@v1：分组由「固定高度 + 组内
+  // 滚动」改为「自然高度 + 每组最多直接显示 5 行 + 展开全部」——多个内滚小窗是原卡片
+  // 「乱」的主要来源（每个分组自带滚动条，扫读要逐个滚）。
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  const isExpanded = (key: string) => expandedGroups[key] === true;
+  const cap = <T,>(list: T[] | undefined, key: string): T[] => {
+    const items = list ?? [];
+    return isExpanded(key) ? items : items.slice(0, GROUP_VISIBLE_LIMIT);
+  };
   /** 测试文件预览目标（null = 关）。 */
   const [testPath, setTestPath] = useState<string | null>(null);
   /** 归档留档 diff 目标（null = 关）。 */
@@ -177,8 +231,44 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
     refetchOnWindowFocus: false,
   });
 
-  // 失败静默：区块隐藏（不影响详情主内容）。
-  if (query.isError) return null;
+  // 2026-10-15-change-detail-redesign / D-016@v1（Grill B-3）：主查询失败不再整卡
+  // `return null`（那会让归档态的降级路径「产出 → 归档留档」无解释地断掉），改为
+  // **卡头保留 + 分区级错误说明**；归档态额外渲染「归档留档」分区壳与重试入口。
+  // 说明：归档留档的 patch 摘要与文件清单与主查询同源（同一端点），失败时无法凭空
+  // 呈现数据；故保底语义落为「分区在场 + 明示不可用 + 可重试」，不留静默空白。
+  if (query.isError) {
+    return (
+      <section data-testid="change-assets-card" className="rounded-md border bg-card">
+        <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+          <h2 className="text-xs font-medium">📦 沉淀资产</h2>
+        </div>
+        <div className="flex flex-col gap-2 px-3 py-2">
+          <p data-testid="change-assets-error" className="text-[11px] text-destructive">
+            沉淀资产暂不可用。
+            <button
+              type="button"
+              onClick={() => void query.refetch()}
+              className="ml-2 text-[11px] text-primary hover:underline"
+            >
+              重试
+            </button>
+          </p>
+          {isArchived ? (
+            <div
+              data-testid="change-assets-audit-fallback"
+              className="rounded border border-border/60 p-2 text-[11px] text-muted-foreground"
+            >
+              <div className="text-[11px] font-medium">归档留档</div>
+              <p className="mt-1">
+                改动面数据暂不可用（与沉淀资产同一数据源）；点上方「重试」重新拉取，
+                或到「变更文件」查看改动文件树。
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    );
+  }
 
   const data = query.data;
   const frCount = data?.fr_entries?.length ?? 0;
@@ -236,14 +326,8 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
            固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
            窄列的纵向长堆叠。空态段跨满两列。 */
         <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
-          {/* 知识图谱分区（2026-10-15-change-assets-graph / FR-01）：本变更一跳
-              邻域切片 + 右侧节点详情栏，跨满两列；fail-open——图不可用/失败/空
-              时整区自隐藏（组件内收敛），changeKey 缺省（理论不发生）不挂载。 */}
-          {changeKey ? (
-            <div className="md:col-span-2">
-              <ChangeAssetsGraph workspaceId={workspaceId} changeKey={changeKey} />
-            </div>
-          ) : null}
+          {/* 知识图谱已改由「产出」面板独立挂载（2026-10-15-change-detail-redesign /
+              D-003@v1：图谱脱离资产卡内嵌，画布高度不再受卡内网格挤压）。 */}
 
           {data && !data.archived && total === 0 ? (
             <p
@@ -261,13 +345,13 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
           ) : null}
 
           {frCount > 0 ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-fr">
+            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-fr">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>需求规则（FR 索引）</span>
                 <span className="text-[10px] text-muted-foreground/70">knowledge/fr</span>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
-              {data?.fr_entries?.map((e) => (
+              <div className="mt-1">
+              {cap(data?.fr_entries, "fr").map((e) => (
                 <button
                   key={e.id}
                   type="button"
@@ -286,20 +370,25 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                   ) : null}
                 </button>
               ))}
+              <GroupToggle
+                total={frCount}
+                expanded={isExpanded("fr")}
+                onToggle={() => toggleGroup("fr")}
+              />
               </div>
             </div>
           ) : null}
 
           {decCount > 0 ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-decisions">
+            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-decisions">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>决策蒸馏</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   knowledge/decisions
                 </span>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
-              {data?.decisions?.map((d) => (
+              <div className="mt-1">
+              {cap(data?.decisions, "decisions").map((d) => (
                 <button
                   key={d.id}
                   type="button"
@@ -318,6 +407,11 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                   ) : null}
                 </button>
               ))}
+              <GroupToggle
+                total={decCount}
+                expanded={isExpanded("decisions")}
+                onToggle={() => toggleGroup("decisions")}
+              />
               </div>
             </div>
           ) : null}
@@ -329,7 +423,7 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
               文件分组；行点击弹窗预览条目内容（2026-10-14-assets-knowledge-popup-
               preview），弹窗内可再跳知识库。 */}
           {touchList.length > 0 ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
+            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span title="本变更执行期 CLI 知识注入的命中留痕：在途变更随执行增长，归档后定格（唯一口径——注入命中即留痕，不另设标记复核面）">
                   知识触达（本变更注入命中的知识）
@@ -338,7 +432,7 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                   {touchList.length} 条
                 </span>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+              <div className="mt-1">
                 {touchFileChips.length > 0 ? (
                   <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
                     <span className="text-[10px] text-muted-foreground/70">整文件</span>
@@ -355,7 +449,7 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                     ))}
                   </div>
                 ) : null}
-                {touchGroups.map(([file, entries]) => (
+                {cap(touchGroups, "touch").map(([file, entries]) => (
                   <div
                     key={file}
                     data-testid={`change-assets-touch-group-${file}`}
@@ -395,18 +489,24 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                     ))}
                   </div>
                 ))}
+              <GroupToggle
+                total={touchGroups.length}
+                expanded={isExpanded("touch")}
+                onToggle={() => toggleGroup("touch")}
+                unit="个文件分组"
+              />
               </div>
             </div>
           ) : null}
 
           {rowCount > 0 ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-tests">
+            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-tests">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>测试绑定</span>
                 <span className="text-[10px] text-muted-foreground/70">test-trace</span>
               </div>
-              <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
-              {data?.test_rows?.map((r) => (
+              <div className="mt-1">
+              {cap(data?.test_rows, "tests").map((r) => (
                 <div
                   key={r.row_id}
                   className="border-b border-dashed py-1 text-xs last:border-b-0"
@@ -459,6 +559,11 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                   ) : null}
                 </div>
               ))}
+              <GroupToggle
+                total={rowCount}
+                expanded={isExpanded("tests")}
+                onToggle={() => toggleGroup("tests")}
+              />
               </div>
             </div>
           ) : null}
@@ -466,15 +571,15 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
           {/* 模块触达（FR-02）：交付文件清单 × 镜像模块图匹配的模块；chip 点击
               打开模块文档预览（explorer 读仓库文件，路径确定不走搜索解析）。 */}
           {moduleList.length > 0 ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
+            <div className="flex flex-col rounded border border-border/60 p-2" data-testid="change-assets-touched-modules">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
                 <span>模块触达</span>
                 <span className="text-[10px] text-muted-foreground/70">
                   {moduleList.length} 个模块
                 </span>
               </div>
-              <div className="mt-1 flex min-h-0 flex-1 flex-wrap content-start gap-1.5 overflow-y-auto">
-                {moduleList.map((m) => (
+              <div className="mt-1 flex flex-wrap content-start gap-1.5">
+                {cap(moduleList, "modules").map((m) => (
                   <button
                     key={`${m.project}/${m.id}`}
                     type="button"
@@ -489,12 +594,18 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                     </span>
                   </button>
                 ))}
+              <GroupToggle
+                total={moduleList.length}
+                expanded={isExpanded("modules")}
+                onToggle={() => toggleGroup("modules")}
+                unit="个模块"
+              />
               </div>
             </div>
           ) : null}
 
-          {hasAudit && data ? (
-            <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
+          {hasAudit && data && isArchived ? (
+            <div className="flex flex-col rounded border border-border/60 p-2 text-[11px] text-muted-foreground" data-testid="change-assets-audit">
               <div className="shrink-0 text-[11px] font-medium">归档留档</div>
               <div className="mt-1 flex shrink-0 flex-wrap gap-x-3 gap-y-1">
                 {data.patch ? (
@@ -526,9 +637,9 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
                   </div>
                   <ul
                     data-testid="change-assets-patch-files"
-                    className="min-h-0 flex-1 overflow-y-auto"
+                    className="mt-1"
                   >
-                    {patchFileList.map((p) => (
+                    {cap(patchFileList, "audit").map((p) => (
                       <li key={p} className="border-b border-dashed last:border-b-0">
                         <button
                           type="button"

@@ -1,0 +1,637 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-change-detail-redesign",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-01:acc-0-b6b4ce06",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-01:acc-1-f557746f",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-01:acc-2-09f25571",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-01:acc-3-5264118b",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-0-a895b71a",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-1-cdcce484",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-2-c0f70af2",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-3-3a5205cb",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-4-e94f6cb6",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-15-change-detail-redesign:task-02:acc-5-d2eb2fc3",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-change-detail-redesign:task-03:acc-0-811d996b",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-change-detail-redesign:task-03:acc-1-fd744e6e",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-change-detail-redesign:task-03:acc-2-fae494e7",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-change-detail-redesign:task-03:acc-3-80e64ec0",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-15-change-detail-redesign:task-03:acc-4-b4cfb05b",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-change-detail-redesign:task-04:acc-0-5822db16",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-change-detail-redesign:task-04:acc-1-91178521",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-change-detail-redesign:task-04:acc-2-6406de70",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-15-change-detail-redesign:task-04:acc-3-785d1180",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-15-change-detail-redesign:task-05:acc-0-7333d032",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-15-change-detail-redesign:task-05:acc-1-9957aa56",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-15-change-detail-redesign:task-05:acc-2-babefae3",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-10",
+      "row_id": "2026-10-15-change-detail-redesign:task-05:acc-3-70f307c8",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-06:acc-0-70457341",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-06:acc-1-25b15f6b",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-06:acc-2-e8ee64c5",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-06:acc-3-cedde892",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-06:acc-4-13c7a8cf",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-07:acc-0-953d5728",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-07:acc-1-afea81e4",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-07:acc-2-cda72b87",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-07:acc-3-c89b40fc",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-detail-redesign:task-07:acc-4-949c8ca1",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-08:acc-0-6efe121b",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-08:acc-1-5469922a",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-08:acc-2-51633d55",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "fe8a71ed4ce84edf41c8bc4a6d553c4360681f9b",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-detail-redesign:task-08:acc-3-1dc3e6e7",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-detail-redesign"
+    }
+  ]
+}

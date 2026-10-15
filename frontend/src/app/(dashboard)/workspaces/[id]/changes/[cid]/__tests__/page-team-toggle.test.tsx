@@ -18,6 +18,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
+  within,
   fireEvent,
   render,
   screen,
@@ -29,6 +30,23 @@ import { ApiError } from "@/lib/api";
 import ChangeDetailPage, {
   isTerminalChange,
 } from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
+// 2026-10-15-change-detail-redesign / task-07：页面改为 tab 容器后直接消费 next/navigation
+// （useRouter 做 ?tab= 钳制、useSearchParams 读唯一源）——注入 app-router 上下文，
+// 范式对齐同层列表页 page.test.tsx。
+const navMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navMocks.push, replace: navMocks.replace }),
+  useSearchParams: () => navMocks.searchParams,
+}));
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
 import type { ChangeRead, DispatchResponse } from "@/lib/changes";
 import type { AgentSessionListItem } from "@/lib/daemon";
 
@@ -45,9 +63,14 @@ vi.mock("@/lib/changes", () => ({
   getChange: mocks.getChange,
   getAgentStatus: mocks.getAgentStatus,
   submitStageReview: mocks.submitStageReview,
-  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
-  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
+  // 合成时间线：steps 空的 fixture 走合成时间线分支（默认 reject → 统一时间线空态，
+  // 不涉网点断言面）。
   getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
+  // 2026-10-15-change-detail-redesign / task-07：概览面板与信息栏复用这两个端点
+  // （assets/usage）与对账端点，页面级测试一律 reject → 面板走降级态，不干扰断言面。
+  getChangeAssets: vi.fn().mockRejectedValue(new Error("no-assets-in-page-tests")),
+  getChangeUsage: vi.fn().mockRejectedValue(new Error("no-usage-in-page-tests")),
+  getScopeAudit: vi.fn().mockRejectedValue(new Error("no-audit-in-page-tests")),
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -59,23 +82,22 @@ vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: mocks.listQuicklogEntries,
 }));
 
-// 只读卡片 stub：聚焦详情页退化 + 审批卡，不测这些组件内部
-vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
-  ChangeAgentRunLog: () => <div data-testid="change-agent-run-log" />,
+// 2026-10-15-change-detail-redesign / task-07：页面改为 tab 容器后，「变更文件」由
+// 「文件与对账」面板内嵌（复用 ChangeFileTree，不再以「打开」按钮 + Dialog 为唯一入口），
+// 「会话」由概览右信息栏承接——旧只读卡 stub 随之退役；此处 stub 文件树与对账卡，
+// 关联快速任务卡保持真实（其页面级断言在本文件内重指向 files tab）。
+vi.mock("@/components/change-file-tree", () => ({
+  ChangeFileTree: (props: { workspaceId: string; changeId: string }) => (
+    <div data-testid="change-file-tree" data-ws={props.workspaceId} data-cid={props.changeId} />
+  ),
 }));
-vi.mock("@/components/changes/detail/change-files-card", () => ({
-  ChangeFilesCard: () => <div data-testid="change-files-card" />,
-}));
-vi.mock("@/components/changes/detail/change-sessions-card", () => ({
-  ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
-}));
-// 步骤时间线只读卡片 stub（task-07 范式同上；空态降级语义在组件自身测试覆盖，
-// 此处只验页面挂载/降级门控）
-vi.mock("@/components/changes/detail/change-step-timeline", () => ({
-  ChangeStepTimeline: ({ steps }: { steps: unknown[] | null }) =>
-    steps && steps.length > 0 ? (
-      <div data-testid="change-step-timeline" />
-    ) : null,
+vi.mock("@/components/changes/scope-audit-command-card", () => ({
+  ScopeAuditCommandCard: ({ archived }: { archived?: boolean; target?: unknown }) => (
+    <div
+      data-testid="scope-audit-command-card"
+      data-archived={archived === undefined ? "unset" : String(archived)}
+    />
+  ),
 }));
 
 vi.mock("next/link", () => ({
@@ -153,6 +175,8 @@ function setup(opts: {
   change?: ChangeRead;
   notify?: { notified_session: boolean; notify_error: string | null };
 } = {}) {
+  // 每个用例重置 tab 参数（模块级 mock 对象跨用例残留会串台）。
+  navMocks.searchParams = new URLSearchParams();
   const change = opts.change ?? makeChange();
   mocks.getChange.mockResolvedValue(change);
   mocks.getAgentStatus.mockResolvedValue({
@@ -196,21 +220,24 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     cleanup();
   });
 
-  it("保留只读展示区：阶段步骤条 / 文件卡 / 会话卡（执行日志卡已移除）", async () => {
+  it("页面结构（task-07 起）：阶段条常驻 + tab 栏 + 概览面板；旧只读卡挂载点退役", async () => {
     setup();
     await renderPage();
-    // 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决：
-    // thin 变更「当前阶段未配置智能体」常驻属噪音，组件保留供移动端）
+    // 智能体运行状态卡不挂载（2026-09-28-change-ux-detail-batch 用户裁决：组件保留供移动端）
     expect(screen.queryByTestId("change-agent-run-log")).toBeNull();
-    expect(screen.getByTestId("change-files-card")).toBeInTheDocument();
-    expect(screen.getByTestId("change-sessions-card")).toBeInTheDocument();
-    // 阶段步骤条（主线宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
+    // 阶段条（宏观进度，ChangeStageHeader 真实渲染；页头徽标同文案 → 用 getAllByText）
     expect(screen.getAllByText("需求分析").length).toBeGreaterThan(0);
+    // tab 栏（UnderlineNav role=tablist）+ 默认「概览」面板
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
+    // 旧侧栏卡挂载点退役：文件卡/会话卡不再由页面直接挂载（改由面板与信息栏承接）
+    expect(screen.queryByTestId("change-files-card")).toBeNull();
+    expect(screen.queryByTestId("change-sessions-card")).toBeNull();
   });
 
   // ── task-10（FR-07）：关联的快速任务反向区块 ─────────────────────────
 
-  it("关联快速任务区块：命中条目列出 + linked_change 参数 + 点击跳快速修复 tab", async () => {
+  it("关联快速任务区块（task-07 起归属「文件与对账」tab）：命中条目列出 + linked_change 参数", async () => {
     setup();
     mocks.listQuicklogEntries.mockResolvedValue({
       items: [
@@ -231,6 +258,7 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
       ],
       total: 1,
     });
+    navMocks.searchParams = new URLSearchParams("tab=files");
     await renderPage();
 
     const card = await screen.findByTestId("quicklog-linked-card");
@@ -253,6 +281,7 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
 
   it("关联快速任务区块：无关联时整卡不渲染（2026-09-28-change-ux-detail-batch）", async () => {
     setup();
+    navMocks.searchParams = new URLSearchParams("tab=files");
     await renderPage();
     // 空列表静默隐藏（有数据才渲染）——等取数落定后再断缺席
     await waitFor(() =>
@@ -273,9 +302,12 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
   it("审批卡「通过并通知绑定会话」→ submitStageReview(action, notify_session=true)", async () => {
     setup();
     await renderPage();
-    expect(screen.getByText("四件套已生成，请确认")).toBeInTheDocument();
+    const panel = within(await screen.findByTestId("change-overview-panel"));
+    expect(panel.getByText("四件套已生成，请确认")).toBeInTheDocument();
     // 绑定会话只读展示（工作区最近活跃会话）
-    expect(screen.getByText(/帮我推进一下这个变更/)).toBeInTheDocument();
+    expect(panel.getByText("绑定会话（审批结果将通知此会话）")).toBeInTheDocument();
+    // 会话标题在审批卡与右信息栏「会话」组各出现一次（信息栏为最近会话列表）→ 用 getAllByText
+    expect(panel.getAllByText(/帮我推进一下这个变更/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByText("通过并通知绑定会话"));
     await waitFor(() =>
@@ -331,101 +363,37 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
   });
 });
 
-describe("详情页步骤时间线挂载（task-07，D-005@v1）", () => {
+describe("详情页过程面（task-07 起：统一时间线取代两张旧卡）", () => {
   afterEach(() => {
     vi.clearAllMocks();
     cleanup();
   });
 
-  it("change.steps 有明细 → 默认收起（组件体不渲染），点卡头展开后渲染 ChangeStepTimeline 区块（2026-10-15-change-assets-graph FR-03）", async () => {
+  it("steps 有明细 → 「过程」tab 挂载统一时间线（两旧卡 MUST NOT 挂载）", async () => {
+    setup({ change: makeChange({ steps: makeSteps() }) });
+    navMocks.searchParams = new URLSearchParams("tab=process");
+    await renderPage();
+    expect(await screen.findByTestId("change-process-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("change-unified-timeline")).toBeInTheDocument();
+    // D-005@v1 / D-014@v1：旧「步骤时间线卡」与「真实留痕时间线卡」不再挂载
+    // （文件与导出保留供移动端；挂载点退役由本断言反钉）。
+    expect(screen.queryByTestId("change-step-timeline-card")).toBeNull();
+    expect(screen.queryByTestId("change-timeline-card")).toBeNull();
+  });
+
+  it("steps 缺失（旧变更未上行）→ 统一时间线走空态而不塌陷（面板仍在场）", async () => {
+    setup({ change: makeChange({ steps: [] }) });
+    navMocks.searchParams = new URLSearchParams("tab=process");
+    await renderPage();
+    expect(await screen.findByTestId("change-process-panel")).toBeInTheDocument();
+    expect(screen.getByText("暂无过程记录。")).toBeInTheDocument();
+  });
+
+  it("概览 tab 懒挂载：不挂过程面（切 tab 才取数与渲染）", async () => {
     setup({ change: makeChange({ steps: makeSteps() }) });
     await renderPage();
-    // 卡片常在（收起态只剩卡头），组件体默认不渲染
-    expect(
-      screen.getByTestId("change-step-timeline-card"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("change-step-timeline"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("change-step-timeline-toggle"),
-    ).toHaveAttribute("aria-expanded", "false");
-    // 点卡头展开 → 组件体挂载；再点收起 → 卸载
-    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
-    expect(screen.getByTestId("change-step-timeline")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("change-step-timeline-toggle"),
-    ).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
-    expect(
-      screen.queryByTestId("change-step-timeline"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("steps 缺失（旧变更未上行）→ 降级不渲染时间线区块（D-003@v1，视觉与现状一致）", async () => {
-    setup({ change: makeChange({ steps: null }) });
-    await renderPage();
-    expect(
-      screen.queryByTestId("change-step-timeline-card"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("change-step-timeline")).not.toBeInTheDocument();
-  });
-
-  it("steps 为空数组 → 同样降级不渲染", async () => {
-    setup({ change: makeChange({ steps: [] }) });
-    await renderPage();
-    expect(
-      screen.queryByTestId("change-step-timeline-card"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("终态判定 isTerminalChange（停轮谓词，design §5 Phase 2.4 可测试定义）", () => {
-    expect(isTerminalChange({ status: "archived", location: "active" })).toBe(
-      true,
-    );
-    expect(isTerminalChange({ status: "in_progress", location: "archive" })).toBe(
-      true,
-    );
-    // 非终态：两者都不满足 → 继续轮询
-    expect(isTerminalChange({ status: "in_progress", location: "active" })).toBe(
-      false,
-    );
-    // 数据未就绪（useQuery 首拉）按非终态处理
-    expect(isTerminalChange(null)).toBe(false);
-    expect(isTerminalChange(undefined)).toBe(false);
-  });
-
-  it("详情查询 error 且无数据（变更被删/404）→ 停轮不无限轮询（ql-20260816-001）", async () => {
-    // getChange 首次 404（ApiError）且后续若被轮询会返回成功数据（可区分）；
-    // refetchInterval 内联判定 error&&!data → false，等过原 10s 间隔后仍只调一次。
-    mocks.getChange.mockRejectedValueOnce(
-      new ApiError(404, {
-        code: "HTTP_404_CHANGE_NOT_FOUND",
-        message: "变更不存在",
-        request_id: null,
-        details: null,
-      }),
-    );
-    mocks.getChange.mockResolvedValueOnce(makeChange());
-    const client = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: 0 },
-        mutations: { retry: false },
-      },
-    });
-    const { unmount } = render(
-      <QueryClientProvider client={client}>
-        <ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />
-      </QueryClientProvider>,
-    );
-    try {
-      await waitFor(() => {
-        expect(screen.getByText("变更不存在")).toBeInTheDocument();
-      });
-      await new Promise((r) => setTimeout(r, 12_000));
-      expect(mocks.getChange).toHaveBeenCalledTimes(1);
-    } finally {
-      unmount();
-    }
+    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-process-panel")).toBeNull();
+    expect(screen.queryByTestId("change-unified-timeline")).toBeNull();
   });
 });

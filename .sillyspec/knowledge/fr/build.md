@@ -1982,10 +1982,12 @@
 
 ## FR-build-133 沉淀资产卡内新增知识图谱分区：本变更一跳邻域切片（neighbors 锚点=change_key）+ 右侧节点详情栏（类型/ID/出入邻居分组，行点击跳选，默认选中变更锚点节点）；图不可用/请求失败/无数据时整区静默隐藏（fail-open 与资产卡逐组同口径）；
 变更：2026-10-15-change-assets-graph
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-005
+取代链：FR-build-133 ← FR-app-workspace-pages-005（2026-10-15-change-detail-redesign 承接）
 摘要：主路径；降级隐藏
 全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-01
-最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -1997,14 +1999,16 @@
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-15-change-assets-graph
-  status: active
+  status: superseded
 
 ## FR-build-134 详情页主栏顺序变为：审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线；
 变更：2026-10-15-change-assets-graph
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-009
+取代链：FR-build-134 ← FR-app-workspace-pages-009（2026-10-15-change-detail-redesign 承接）
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-02
-最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -2016,7 +2020,7 @@
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-15-change-assets-graph
-  status: active
+  status: superseded
 
 ## FR-build-135 步骤时间线卡头有展开/收起切换，默认收起；上方阶段步骤条节点点击联动时自动展开；thin 出身整卡隐藏语义不变；
 变更：2026-10-15-change-assets-graph

@@ -1,7 +1,7 @@
 // 2026-09-25-change-precipitated-assets（FR-03/04）：沉淀资产卡组件测试。
 // 覆盖：四组渲染（fr/决策/测试绑定/归档留档逐组有数据才出现）+ 计数徽标、
 // 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
-// 失败静默隐藏（isError → 整卡 null）。
+// 失败降级（isError → 卡头保留 + 分区级错误说明；2026-10-15-change-detail-redesign / D-016@v1）。
 //
 // 2026-09-25-change-detail-assets-usability（FR-01~04）追加：测试绑定行点开测试
 // 文件预览弹窗（FilePreview 收到仓库路径）、归档留档文件清单渲染与点开单文件
@@ -236,12 +236,12 @@ describe("ChangeAssetsCard", () => {
     expect(await screen.findByText("本变更暂无沉淀资产记录。")).toBeInTheDocument();
   });
 
-  it("失败静默：isError → 整卡不渲染", async () => {
+  it("失败降级：isError → 卡头保留 + 分区级错误说明（不再整卡消失）", async () => {
     mockGet.mockRejectedValue(new Error("boom"));
-    const { container } = renderCard();
-    // 等 query 落定（retry:false 单次即败）后断言空渲染。
-    await new Promise((r) => setTimeout(r, 100));
-    expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
+    renderCard();
+    expect(await screen.findByTestId("change-assets-error")).toBeInTheDocument();
+    expect(screen.getByTestId("change-assets-card")).toBeInTheDocument();
+    expect(screen.getByText(/沉淀资产暂不可用/)).toBeInTheDocument();
   });
 
   it("FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链（FR-01/03）", async () => {

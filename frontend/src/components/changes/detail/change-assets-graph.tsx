@@ -1,8 +1,10 @@
 "use client";
 
 /**
- * ChangeAssetsGraph —— 沉淀资产卡内嵌知识图谱分区
- * （2026-10-15-change-assets-graph / FR-01，用户需求：图谱+右侧描述放进沉淀资产卡）。
+ * ChangeAssetsGraph —— 知识图谱邻域分区（可独立挂载）
+ * （2026-10-15-change-assets-graph / FR-01；2026-10-15-change-detail-redesign /
+ * D-003@v1 由「资产卡内嵌」改为「产出」面板内的独立分区——画布高度不再受卡内网格
+ * 挤压，默认高度见 `DEFAULT_CANVAS_HEIGHT`）。
  *
  * 本变更邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
  * { anchor: changeKey, depth })（与图谱页 neighbors 切片同端点，data 联合经
@@ -14,9 +16,11 @@
  * depth 进 query key 缓存按深度隔离（回切零延迟）；placeholderData: keepPrevious
  * Data 切换保持上一份渲染不闪空；新深度选中节点不在切片时既有兜底链自然回退锚点。
  *
- * fail-open（与资产卡逐组「有数据才渲染」同口径）：信封 available=false /
- * 请求失败（retry:false 不轰炸）/ 节点集为空 / 非 neighbors 分型（node_not_found
- * 降级等）→ 整区静默隐藏，不显示错误卡，不影响资产卡其余分组。
+ * 降级语义（2026-10-15-change-detail-redesign / D-016@v1 起改口径）：三态由「整区静默
+ * 隐藏」改为**分区级显式空态**——①请求失败（retry:false 不轰炸）→「图谱数据不可用」+
+ * 重试入口；②信封 available=false →「图谱数据暂不可用，稍后自动重试」；③节点集为空 /
+ * 非 neighbors 分型（node_not_found 降级等）→「本变更暂无图谱邻域」。MUST NOT 整区
+ * 消失（独立分区后空白会造成无解释的空洞）。
  *
  * 选中态：初始由锚点节点兜底（selectedId ?? data.anchor）——用户点击画布节点
  * 或邻居行后切换；点画布空白保持当前选中（受控面板恒有内容，不设计空态）。
@@ -35,8 +39,13 @@ import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
 import { getKnowledgeGraphQuery, isGraphNeighborsData } from "@/lib/knowledge";
 import { useThemeStore } from "@/stores/theme";
 
+/** 画布默认高度（px）：独立分区后由原内嵌 280px 上调，容纳节点标签与右侧详情栏。 */
+export const DEFAULT_CANVAS_HEIGHT = 420;
+
 interface ChangeAssetsGraphProps {
   workspaceId: string;
+  /** 画布高度覆盖（px）；缺省 `DEFAULT_CANVAS_HEIGHT`。 */
+  canvasHeight?: number;
   /** 变更 key（neighbors 锚点；缺省不渲染——无锚点无切片）。 */
   changeKey: string;
 }
@@ -45,7 +54,11 @@ function asArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
 }
 
-export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphProps) {
+export function ChangeAssetsGraph({
+  workspaceId,
+  changeKey,
+  canvasHeight,
+}: ChangeAssetsGraphProps) {
   const theme = useThemeStore((s) => s.theme);
   const palette = useMemo(() => nodePalette(theme), [theme]);
   /** 用户显式选中（null = 未操作，详情栏回退锚点节点）。 */
@@ -113,7 +126,36 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
       </p>
     );
   }
-  if (q.isError || !q.data?.available || nodes.length === 0) return null;
+  // 三态分区级空态（D-016@v1）：容器保留 + 明确文案，不再整区消失。
+  if (q.isError || !q.data?.available || nodes.length === 0) {
+    const degraded = q.isError
+      ? { testId: "change-assets-graph-error", text: "图谱数据不可用。", retry: true }
+      : !q.data?.available
+        ? { testId: "change-assets-graph-unavailable", text: "图谱数据暂不可用，稍后自动重试。", retry: false }
+        : { testId: "change-assets-graph-empty", text: "本变更暂无图谱邻域。", retry: false };
+    return (
+      <div
+        data-testid="change-assets-graph"
+        className="flex flex-col gap-1.5 rounded border border-border/60 px-2 py-3"
+      >
+        <span className="text-[11px] font-medium text-muted-foreground">
+          🕸 知识图谱（本变更邻域）
+        </span>
+        <p data-testid={degraded.testId} className="text-[11px] text-muted-foreground">
+          {degraded.text}
+          {degraded.retry ? (
+            <button
+              type="button"
+              onClick={() => void q.refetch()}
+              className="ml-2 text-primary hover:underline"
+            >
+              重试
+            </button>
+          ) : null}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -153,7 +195,11 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
         </span>
       </div>
       <div className="flex flex-col gap-2 p-2 md:flex-row">
-        <div className="relative h-[280px] min-w-0 flex-1 overflow-hidden rounded border border-border/40 bg-muted/20">
+        <div
+          data-testid="change-assets-graph-canvas"
+          style={{ height: canvasHeight ?? DEFAULT_CANVAS_HEIGHT }}
+          className="relative min-w-0 flex-1 overflow-hidden rounded border border-border/40 bg-muted/20"
+        >
           <GraphCanvas
             className="absolute inset-0"
             nodes={nodes}
@@ -165,7 +211,8 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
         </div>
         <div
           data-testid="change-assets-graph-detail"
-          className="w-full shrink-0 overflow-y-auto md:max-h-[280px] md:w-[250px]"
+          style={{ maxHeight: canvasHeight ?? DEFAULT_CANVAS_HEIGHT }}
+          className="w-full shrink-0 overflow-y-auto md:w-[250px]"
         >
           {selectedNode ? (
             <div className="text-xs">

@@ -91,7 +91,7 @@ afterEach(() => {
   cleanup();
 });
 
-describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () => {
+describe("ChangeAssetsGraph（知识图谱邻域分区，可独立挂载）", () => {
   it("可用信封：渲染分区，画布收到切片节点，详情栏默认选中锚点变更节点（类型标签+ID+分组邻居行）", async () => {
     mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope());
     renderCard();
@@ -135,33 +135,30 @@ describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () =>
     );
   });
 
-  it("fail-open：available=false（upgrade_required）→ 整区不渲染", async () => {
+  it("降级：available=false → 分区保留 +「暂不可用」文案（D-016 起不再整区消失）", async () => {
     mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope({ available: false }));
     renderCard();
-    await waitFor(() =>
-      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("change-assets-graph-unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/图谱数据暂不可用，稍后自动重试/)).toBeInTheDocument();
+    expect(screen.getByTestId("change-assets-graph")).toBeInTheDocument(); // 分区容器仍在场
+    expect(screen.queryByTestId("change-assets-graph-canvas")).not.toBeInTheDocument();
   });
 
-  it("fail-open：请求失败 → 整区不渲染（retry:false 不轰炸）", async () => {
+  it("降级：请求失败 → 分区保留 +「不可用」文案 + 重试入口（retry:false 不轰炸）", async () => {
     mocks.getKnowledgeGraphQuery.mockRejectedValue(new Error("rpc down"));
     renderCard();
-    await waitFor(() =>
-      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("change-assets-graph-error")).toBeInTheDocument();
+    expect(screen.getByText(/图谱数据不可用/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 
-  it("fail-open：节点集为空 → 整区不渲染（锚点未命中降级形态）", async () => {
+  it("降级：节点集为空 → 分区保留 +「暂无图谱邻域」文案（锚点未命中形态）", async () => {
     mocks.getKnowledgeGraphQuery.mockResolvedValue(
       makeEnvelope({ nodes: [], edges: [] }),
     );
     renderCard();
-    await waitFor(() =>
-      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
-    );
-    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("change-assets-graph-empty")).toBeInTheDocument();
+    expect(screen.getByText(/本变更暂无图谱邻域/)).toBeInTheDocument();
   });
 
   it("加载中：轻提示占位（不渲染分区主体）", () => {

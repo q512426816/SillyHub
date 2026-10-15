@@ -399,12 +399,14 @@ superseded_by：FR-styles-011
 
 ## FR-auto-frontend-021 范围对账卡恢复 archived 降级指路
 变更：2026-09-26-change-detail-restore-assets
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-007
+取代链：FR-auto-frontend-021 ← FR-app-workspace-pages-007（2026-10-15-change-detail-redesign 承接）
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 已归档变更（status=archived 或 location=archive）的范围对账降级态，；When `ScopeAuditCommandCard` 渲染降级横幅，；Then 重新收到 `archived={isTerminalChange(change)}` 传参，横幅追加「真实改动面见沉淀资产 · 归档留档」指路（组件侧逻辑 9c
 全文：.sillyspec/changes/archive/2026-09-26-change-detail-restore-assets/requirements.md#FR-03
-最近确认：83bde5d52c29cd07960e1d300d9541bf6a44a5ec
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -416,7 +418,7 @@ superseded_by：FR-styles-011
   confirmed_by: agent
   confirmed_at: b9f40ac174b1f01efb0e1b73a5d00cac47efe383
   source_change: 2026-09-26-change-detail-restore-assets
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-022 聚焦测试与类型门禁全绿
 变更：2026-09-26-change-detail-restore-assets
@@ -719,13 +721,15 @@ superseded_by：FR-styles-011
 
 ## FR-auto-frontend-038 变更详情右侧为单块 MetaPanel 分组（负责人/消耗/变更文件/关联会话/快速任务/观测事件）
 变更：2026-09-27-visual-align-2
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-008
+取代链：FR-auto-frontend-038 ← FR-app-workspace-pages-008（2026-10-15-change-detail-redesign 承接）
 骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 变更详情右侧为单块 MetaPanel 分组（负责人/消耗/变更文件/关联会话/快速任务/观测事件），时间线为竖线节点形态；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-visual-align-2/requirements.md#FR-03
-最近确认：05218185395f1b6b94a0557de0af22ab7fae78d7
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -737,7 +741,7 @@ superseded_by：FR-styles-011
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-09-27-visual-align-2
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-039 概览右栏为 About 侧栏（路径/技术栈/关联项目/成员/创建时间）
 变更：2026-09-27-visual-align-2
@@ -970,13 +974,15 @@ superseded_by：FR-styles-011
 
 ## FR-auto-frontend-056 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默
 变更：2026-09-27-timeline-coexist
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-009
+取代链：FR-auto-frontend-056 ← FR-app-workspace-pages-009（2026-10-15-change-detail-redesign 承接）
 骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 组件 相关模块就绪；When 变更详情页步骤时间线卡与真实留痕时间线卡共存：steps 非空时合成时间线卡也渲染（组件自身空态静默隐藏兜底不变）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-27-timeline-coexist/requirements.md#FR-01
-最近确认：d3ee2bbd7cc53faf6cabdfc312554ef032dcddb3
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -988,7 +994,7 @@ superseded_by：FR-styles-011
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-09-27-timeline-coexist
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-057 thin 在途（steps 恒空）行为不变：合成卡独立承担叙事
 变更：2026-09-27-timeline-coexist
@@ -1471,13 +1477,15 @@ superseded_by：FR-styles-011
 
 ## FR-auto-frontend-087 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐
 变更：2026-09-28-change-ux-detail-batch
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-006
+取代链：FR-auto-frontend-087 ← FR-app-workspace-pages-006（2026-10-15-change-detail-redesign 承接）
 骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 沉淀资产卡默认展开、移入主栏，各分组卡片固定高度（超出滚动）网格对齐；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-07
-最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -1489,7 +1497,7 @@ superseded_by：FR-styles-011
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-09-28-change-ux-detail-batch
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-088 智能体运行状态卡自桌面详情页移除（组件与移动端用法保留）
 变更：2026-09-28-change-ux-detail-batch
@@ -1537,13 +1545,15 @@ superseded_by：FR-styles-011
 
 ## FR-auto-frontend-090 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）
 变更：2026-09-28-change-ux-detail-batch
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-007
+取代链：FR-auto-frontend-090 ← FR-app-workspace-pages-007（2026-10-15-change-detail-redesign 承接）
 骨架：thin
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 系统就绪；When 范围对账卡去头部说明副标题与降级双段说明，压缩为单行降级提示（归档指路保留）；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-change-ux-detail-batch/requirements.md#FR-10
-最近确认：cde844492f904c089f4a044415a56b755f9e6bb5
+最近确认：fe8a71ed4
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -1555,7 +1565,7 @@ superseded_by：FR-styles-011
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-09-28-change-ux-detail-batch
-  status: active
+  status: superseded
 
 ## FR-auto-frontend-091 相关前端测试更新通过，tsc/eslint 0 错
 变更：2026-09-28-change-ux-detail-batch
@@ -2727,13 +2737,15 @@ superseded_by：FR-styles-011
 
 ## FR-unmapped-497 左主右辅布局
 变更：2026-08-11-change-detail-layout-rework
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-002
+取代链：FR-unmapped-497 ← FR-app-workspace-pages-002（2026-10-15-change-detail-redesign 承接）
 摘要：默认场景
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given 用户打开任一变更详情页（桌面宽屏 ≥1024px） 视口宽度 <1024px；When 页面渲染完成 页面渲染；Then 主体为两栏：左侧主线区（当前阶段操作 + 智能体执行日志），右侧 320px 次线侧栏（变更文件/会话调试/审核历史/任务看板） 退化为单列：主线在上，次线卡片
 全文：.sillyspec/changes/archive/2026-08-11-change-detail-layout-rework/requirements.md#FR-01
-最近确认：12ea22a84
+最近确认：fe8a71ed4
 
 ## FR-unmapped-498 会话与执行日志分离
 变更：2026-08-11-change-detail-layout-rework

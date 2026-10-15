@@ -1,41 +1,62 @@
 "use client";
 
+/**
+ * 变更详情页（桌面）—— tab 容器（2026-10-15-change-detail-redesign / D-002@v1 / D-013@v1）。
+ *
+ * 结构：primer `PageHead`（面包屑 + 标题 + 状态胶囊 + 元信息 + 操作）→ 阶段条（常驻；
+ * 点阶段切到「过程」tab 并置筛选）→ `ChangeTabs`（`?tab=` 为唯一源）→ 当前 tab 的面板。
+ *
+ * 四 tab（在途）/ 三 tab（归档，隐藏「文件与对账」，D-007@v1）由 `visibleTabs` 单布尔驱动，
+ * thin 不特判（D-015@v1）。面板**懒挂载**：只挂当前 tab（首屏不做多余取数）；`?tab=` 缺省 /
+ * 非法 / 不在可见集（含归档态 `files`、切换变更残留值）一律 `router.replace` 钳回 `overview`。
+ *
+ * 旧版能力全部保留、只换挂载位置：10s 轮询与终态停轮、删除入口与权限启发式、审批唯一入口
+ * `submitStageReview`（含通知降级文案）、绑定会话近似口径、最后信号派生、范围对账与四个弹窗
+ * （后两者随组件移入相应 tab）。
+ *
+ * ⚠️ 契约：本文件具名导出 `isTerminalChange` 是**移动端消费面**
+ * （frontend/src/components/mobile/mobile-change-detail.tsx:66-67），MUST 原地保留且语义不变
+ * （D-011@v1 / D-016@v1）。`change-step-timeline.tsx` / `change-usage-card.tsx` 等旧组件文件
+ * MUST NOT 删除（移动端与既有测试仍引用）。
+ */
+
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { PageContainer, PageHeader } from "@/components/layout";
-import { Badge } from "@/components/ui/badge";
+import { PageContainer } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import {
   DeleteChangeConfirm,
   canDeleteChange,
   useChangeDeleteAccess,
 } from "@/components/delete-change-confirm";
-import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
-import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
-import { ChangeSessionsCard } from "@/components/changes/detail/change-sessions-card";
-import { ChangeStageActions } from "@/components/changes/detail/change-stage-actions";
-import { StateIcon, StateLabel } from "@/components/primer";
+import { PageHead, StatGrid, StateLabel, type StateLabelVariant } from "@/components/primer";
 import { isThinLineageChange } from "@/lib/thin-lineage";
 import {
   ChangeStageHeader,
   WORKFLOW_STAGE_LABELS,
 } from "@/components/changes/detail/change-stage-header";
-import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
-import { ChangeTimelineCard } from "@/components/changes/detail/change-timeline-card";
+import { ChangeTabs, visibleTabs, type DetailTab } from "@/components/changes/detail/change-tabs";
+import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
+import { ChangeAssetsGraph } from "@/components/changes/detail/change-assets-graph";
+import { ChangeFilesPanel } from "@/components/changes/detail/change-files-panel";
+import { ChangeOverviewPanel } from "@/components/changes/detail/change-overview-panel";
+import { ChangeTaskChecklist } from "@/components/changes/detail/change-task-checklist";
+import { ChangeUnifiedTimeline } from "@/components/changes/detail/change-unified-timeline";
 import {
-  ChangeLastSignal,
-  lastSignalFromSteps,
-} from "@/components/changes/change-activity-badge";
-import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
-import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
-import { ScopeAuditCommandCard } from "@/components/changes/scope-audit-command-card";
+  inferTaskTimeStatus,
+  mergeChangeTimeline,
+  type TimelineEvent,
+  type TimelineTask,
+  type UnifiedRow,
+} from "@/components/changes/detail/merge-change-timeline";
 import { ApiError } from "@/lib/api";
 import {
   deleteChange,
   getChange,
+  getChangeTimeline,
   submitStageReview,
   type ChangeRead,
 } from "@/lib/changes";
@@ -49,17 +70,23 @@ interface Props {
   params: { id: string; cid: string };
 }
 
-/** 变更详情查询 key（task-07 / D-004@v1：react-query 缓存定位与审批后失效重取） */
+/** 变更详情查询 key（react-query 缓存定位与审批后失效重取）。 */
 const CHANGE_QUERY_KEY = (workspaceId: string, changeId: string) =>
   ["change", workspaceId, changeId] as const;
 
-/** 非终态轮询间隔（design §5 Phase 2.3：详情页 10s） */
+/** 合成时间线查询 key（与旧「真实留痕时间线卡」同 key——缓存复用，不新增请求源）。 */
+const TIMELINE_QUERY_KEY = (workspaceId: string, changeId: string) =>
+  ["changeTimeline", workspaceId, changeId] as const;
+
+/** 非终态轮询间隔（design：详情页 10s）。 */
 const DETAIL_REFETCH_MS = 10_000;
 
 /**
- * 变更终态判定（design §5 Phase 2.4 可测试定义）：status 为 archived 或
- * location 为 archive 即终态——changes 表仅 active/archived 两值，无 failed
- * （失败语义在 steps 层由 7 值枚举承载）。data 未就绪按非终态处理（继续拉取）。
+ * 变更终态判定（可测试定义）：status 为 archived 或 location 为 archive 即终态——
+ * changes 表仅 active/archived 两值（失败语义在 steps 层）。data 未就绪按非终态处理。
+ *
+ * ⚠️ 移动端消费面（mobile-change-detail.tsx 直接 import 本符号）：语义与位置均属契约，
+ * 重构 MUST NOT 迁走或改写（D-011@v1 / D-016@v1）。
  */
 export function isTerminalChange(
   change: Pick<ChangeRead, "status" | "location"> | null | undefined,
@@ -68,29 +95,67 @@ export function isTerminalChange(
   return change.status === "archived" || change.location === "archive";
 }
 
-// quick/thin/blocked/archived 四态 status 徽标（非线性节点，独立呈现）
-// 2026-09-25-change-center-thin-flow task-07：补 thin=轻量变更（防标题裸显英文 "thin"）；
-// quick 补存量口径。
-const STATUS_BADGE: Record<
+/** 页头状态胶囊（沿用既有四态文案；quick/thin/blocked 为非线性节点）。 */
+const STATUS_PILL: Record<
   string,
-  { label: string; variant: "success" | "outline" | "destructive" | "default" }
+  { label: string; variant: StateLabelVariant; iconName?: "zap" | "clock" }
 > = {
-  quick: { label: "快速任务（存量）", variant: "default" },
-  thin: { label: "轻量变更", variant: "default" },
-  blocked: { label: "已阻塞", variant: "destructive" },
-  archived: { label: "已归档", variant: "success" },
+  quick: { label: "快速任务（存量）", variant: "neutral" },
+  thin: { label: "轻量变更", variant: "attention", iconName: "zap" },
+  blocked: { label: "已阻塞", variant: "error" },
 };
+
+/** 归档态补充：轻量出身标识随徽章存活（change_type=quick 且创建于 thin 分流点之后）。 */
+function thinOriginBadge(change: ChangeRead): boolean {
+  return (
+    change.change_type === "quick" &&
+    new Date(change.created_at ?? 0) >= new Date("2026-09-25T00:00:00+08:00")
+  );
+}
+
+/**
+ * 阶段跨度：每阶段条目数 + 首末时刻跨度（观测留痕推算；不足两点标「单点记录」）。
+ * 说明：这是「过程」tab 的统计补充，不是执行耗时（后者在概览信息栏的「已用时长」）。
+ */
+function stageSpans(rows: UnifiedRow[]): Array<{ label: string; value: string }> {
+  const byStage = new Map<string, number[]>();
+  for (const row of rows) {
+    if (!row.stage) continue;
+    const ms = row.at ? Date.parse(row.at) : Number.NaN;
+    if (Number.isNaN(ms)) continue;
+    const bucket = byStage.get(row.stage) ?? [];
+    bucket.push(ms);
+    byStage.set(row.stage, bucket);
+  }
+  const items = [...byStage.entries()].map(([stage, times]) => {
+    const sorted = [...times].sort((a, b) => a - b);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    const spanMs = sorted.length >= 2 && first != null && last != null ? last - first : 0;
+    const spanText =
+      spanMs <= 0
+        ? "单点记录"
+        : spanMs >= 3_600_000
+          ? `${(spanMs / 3_600_000).toFixed(1)} 小时`
+          : spanMs >= 60_000
+            ? `${Math.round(spanMs / 60_000)} 分钟`
+            : `${Math.round(spanMs / 1000)} 秒`;
+    return {
+      label: WORKFLOW_STAGE_LABELS[stage] ?? stage,
+      value: `${times.length} 条 · ${spanText}`,
+    };
+  });
+  return items.length > 0 ? items : [{ label: "阶段跨度", value: "暂无带时间戳的记录" }];
+}
 
 export default function ChangeDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const changeId = params.cid;
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  // ── 变更详情（task-07 / D-004@v1：react-query 智能轮询替换原裸 useEffect）──
-  // 非终态 10s 周期刷新、终态停轮（isTerminalChange）；refetchIntervalInBackground
-  // 默认 false = 页面不可见暂停；structuralSharing 默认开启 = 内容未变跳过
-  // re-render（不乱跳），queryFn 保持原 getChange 请求参数。
-  // ql-20260816-001：请求已出错且无数据（变更被删/硬 404）→ 停轮，防无限空轮。
+  // ── 变更详情（非终态 10s 轮询、终态停轮；请求已出错且无数据即停轮防无限空轮）──
   const changeQuery = useQuery({
     queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
     queryFn: () => getChange(workspaceId, changeId),
@@ -101,8 +166,6 @@ export default function ChangeDetailPage({ params }: Props) {
   });
   const change = changeQuery.data ?? null;
   const changeError = changeQuery.error;
-  // loading / loadError 语义对齐原裸 load：仅初次加载（尚无数据）进入加载屏 /
-  // 错误屏；轮询或审批后刷新失败不打断已渲染内容（react-query 按策略自动重试）。
   const loading = changeQuery.isPending;
   const loadError =
     changeQuery.isError && !changeQuery.data
@@ -111,65 +174,103 @@ export default function ChangeDetailPage({ params }: Props) {
         : "加载变更详情失败"
       : null;
 
+  const archived = isTerminalChange(change);
+
+  // ── tab 状态：`?tab=` 为唯一源（D-013@v1）；非法/收窄值（归档态 files、切换残留）钳回概览 ──
+  const rawTab = searchParams?.get("tab") ?? null;
+  const tabs = visibleTabs(archived);
+  const activeTab: DetailTab = (tabs as string[]).includes(rawTab ?? "")
+    ? (rawTab as DetailTab)
+    : "overview";
+  const [focusStage, setFocusStage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (rawTab !== null && rawTab !== activeTab) {
+      router.replace(`/workspaces/${workspaceId}/changes/${changeId}?tab=${activeTab}`);
+    }
+  }, [rawTab, activeTab, router, workspaceId, changeId]);
+
+  const handleTabChange = useCallback(
+    (next: DetailTab) => {
+      router.replace(`/workspaces/${workspaceId}/changes/${changeId}?tab=${next}`);
+    },
+    [router, workspaceId, changeId],
+  );
+
+  // 阶段条联动（ql-20260821-017 语义承接）：点阶段 → 切「过程」tab + 置筛选。
+  const handleStageClick = useCallback(
+    (stage: string) => {
+      setFocusStage((prev) => (prev === stage ? null : stage));
+      if (activeTab !== "process") handleTabChange("process");
+    },
+    [activeTab, handleTabChange],
+  );
+
   const [pageError, setPageError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
-  // PageHeader 右侧独立危险按钮（不混入审批卡）。可见性启发式（owner/平台
-  // 管理员/工作区所有者）仅控显隐，后端 DELETE 组合权限为权威；动作本体
-  // （useRouter + mutation + 弹层）在 DetailDeleteAction 子组件内，仅权限
-  // 可见者挂载——未挂载即不触碰 router（无 app-router 上下文的环境不触发
-  // next/navigation invariant）。
+  // ── 删除入口（PageHead 右侧危险按钮；可见性启发式，后端组合权限为权威）──
   const deleteAccess = useChangeDeleteAccess(workspaceId);
 
-  // ── 审批卡（唯一操作区）state ───────────────────────────────────────
+  // ── 审批卡（唯一操作区）state ───────────────────────────────────────────
   const [transitioning, setTransitioning] = useState(false);
   const [gateComment, setGateComment] = useState("");
   const [notifyResult, setNotifyResult] = useState<{
     notified_session: boolean;
     notify_error: string | null;
   } | null>(null);
-  // 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，D-007）
-  const [boundSession, setBoundSession] = useState<AgentSessionListItem | null>(
-    null,
-  );
+  /** 工作区最近活跃会话（近似口径；概览信息栏显示最近 3 条）。 */
+  const [sessions, setSessions] = useState<AgentSessionListItem[]>([]);
 
-  // ── 阶段-步骤联动（ql-20260821-017）：点击阶段步骤条节点筛选步骤时间线 ──
-  // stepStages = steps 中实际有条目的阶段集合（决定哪些节点可点）；再次点击
-  // 同一阶段取消筛选；current_stage 非线性（quick 等）时步骤条不渲染，联动
-  // 入口自然缺席，focusStage 恒为 null 无副作用。
-  const [focusStage, setFocusStage] = useState<string | null>(null);
-  /** 步骤时间线展开态（2026-10-15-change-assets-graph / FR-03）：默认收起——
-   *  过程明细让位主线信息动线（沉淀资产/图谱优先）；卡头切换 + 阶段节点联动
-   *  自动展开。 */
-  const [stepsOpen, setStepsOpen] = useState(false);
-
-  // 收起态点阶段节点 → 自动展开时间线（联动入口在上方阶段步骤条，若保持收起
-  // 则「点了看不到东西」——联动语义要求展开）。
-  useEffect(() => {
-    if (focusStage) setStepsOpen(true);
-  }, [focusStage]);
-
-  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询（agent 状态链随
-  //     智能体运行状态卡移除一并退役，2026-09-28-change-ux-detail-batch）──
+  // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询 ──────────────────
   useEffect(() => {
     let cancelled = false;
     setPageError(null);
     const loadSide = async () => {
-      const sessions = await listWorkspaceAgentSessions(workspaceId, {
+      const list = await listWorkspaceAgentSessions(workspaceId, {
         include_ended: true,
       }).catch(() => []);
       if (cancelled) return;
-      // §8 绑定查询语义 = 工作区最近活跃会话（coalesce(last_active_at, created_at) desc）
-      setBoundSession(sessions?.[0] ?? null);
+      setSessions(list ?? []);
     };
     void loadSide();
     return () => {
       cancelled = true;
     };
   }, [workspaceId, changeId]);
+  const boundSession = sessions[0] ?? null;
 
-  // ── 审批唯一入口 submitStageReview（task-10：notify_session 透传，注入移后端 best-effort）──
+  // ── 合成时间线（步骤 + 事件轴两源）→ 统一行（合并纯函数，零取数）──────────
+  const timelineQuery = useQuery({
+    queryKey: TIMELINE_QUERY_KEY(workspaceId, changeId),
+    queryFn: () => getChangeTimeline(workspaceId, changeId),
+    refetchInterval: archived ? false : DETAIL_REFETCH_MS,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  // 派生数组用 useMemo 固定引用（否则每次渲染的新数组会击穿下方 useMemo 的依赖比较）。
+  const timelineData = timelineQuery.data;
+  const timelineEvents = useMemo<TimelineEvent[]>(
+    () => timelineData?.events ?? [],
+    [timelineData],
+  );
+  const tasks = useMemo<TimelineTask[]>(() => timelineData?.tasks ?? [], [timelineData]);
+  const unifiedRows: UnifiedRow[] = useMemo(
+    () =>
+      mergeChangeTimeline({
+        steps: change?.steps ?? [],
+        events: timelineEvents,
+        bornAt: timelineQuery.data?.born_at ?? null,
+      }),
+    [change?.steps, timelineEvents, timelineQuery.data?.born_at],
+  );
+  const taskSummary = useMemo(
+    () => ({ checked: tasks.filter((t) => t.checked).length, total: tasks.length }),
+    [tasks],
+  );
+  const timeStatus = useMemo(() => inferTaskTimeStatus(tasks, timelineEvents), [tasks, timelineEvents]);
+
+  // ── 审批唯一入口 submitStageReview（notify_session 透传，注入移后端 best-effort）──
   const handleGateAction = useCallback(
     async (action: string) => {
       if (transitioning) return;
@@ -181,7 +282,7 @@ export default function ChangeDetailPage({ params }: Props) {
           changeId,
           action,
           gateComment || undefined,
-          true, // notify_session
+          true,
         );
         setGateComment("");
         setNotifyResult({
@@ -192,11 +293,8 @@ export default function ChangeDetailPage({ params }: Props) {
           setSuccessMsg("✅ 审批已生效，已通知绑定会话");
           setTimeout(() => setSuccessMsg(null), 3000);
         }
-        // 审批后刷新（task-07）：变更详情改 query 失效重取
         await queryClient
-          .invalidateQueries({
-            queryKey: CHANGE_QUERY_KEY(workspaceId, changeId),
-          })
+          .invalidateQueries({ queryKey: CHANGE_QUERY_KEY(workspaceId, changeId) })
           .catch(() => undefined);
       } catch (err) {
         setPageError(err instanceof ApiError ? err.message : "操作失败");
@@ -231,69 +329,41 @@ export default function ChangeDetailPage({ params }: Props) {
     );
   }
 
-  // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，
-  // 但步骤条只渲染 5 大阶段节点，非 WORKFLOW_STAGES 值仅参与 includes 判断）
   const stepStages =
     change.steps && change.steps.length > 0
       ? Array.from(new Set(change.steps.map((e) => e.stage)))
       : [];
 
+  const stage = change.current_stage ?? "draft";
+  const pill = archived
+    ? { label: "已归档", variant: "merged" as StateLabelVariant, iconName: undefined }
+    : (STATUS_PILL[stage] ?? {
+        label: WORKFLOW_STAGE_LABELS[stage] ?? stage ?? "未知",
+        variant: "open" as StateLabelVariant,
+        iconName: undefined,
+      });
+
   return (
-    <PageContainer size="full" className="gap-5">
-      <p className="text-[11px] text-muted-foreground">
-        <Link
-          href={`/workspaces/${workspaceId}/changes`}
-          className="hover:underline"
-        >
-          ← 变更列表
-        </Link>
-      </p>
-      <PageHeader
-        title={
-          <span className="flex items-center gap-2">
-            {/* 2026-09-28-change-detail-header-overflow：flex 行内 truncate 项
-                补 min-w-0——同为 flex 项 min-width:auto 陷阱，超长标题否则无法
-                收缩截断（列表行同款修复先例 cde844492 ①）。 */}
-            <span className="min-w-0 truncate">{change.title ?? change.change_key}</span>
-            {(() => {
-              const stage = change.current_stage ?? "draft";
-              // 轻量出身标识在归档后存活（2026-09-26-thin-badge-survives-archive
-              // / FR-01）：thin-flow「归档时自动翻转」让 stage 变 archived，出身
-              // 随徽章消失——归档态（isTerminalChange 双条件：status=archived 或
-              // location=archive，评审 P1 收窄补齐）若为轻量出身（thin 写入分流
-              // 2026-09-25 上线，此后新 quick 类型变更全部分流 thin，change_type
-              // 保留 "quick"），在「已归档」旁并排补「轻量变更」徽章。
-              const thinBadge = STATUS_BADGE.thin;
-              const thinOrigin =
-                Boolean(thinBadge) &&
-                isTerminalChange(change) &&
-                change.change_type === "quick" &&
-                new Date(change.created_at ?? 0) >=
-                  new Date("2026-09-25T00:00:00+08:00");
-              if (isTerminalChange(change)) {
-                return (
-                  <>
-                    {thinOrigin && thinBadge ? (
-                      <Badge variant={thinBadge.variant}>
-                        {thinBadge.label}
-                      </Badge>
-                    ) : null}
-                    <Badge variant="success">已归档</Badge>
-                  </>
-                );
-              }
-              const statusBadge = STATUS_BADGE[stage];
-              if (statusBadge) {
-                return (
-                  <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-                );
-              }
-              return (
-                <Badge variant="outline">
-                  {WORKFLOW_STAGE_LABELS[stage] ?? stage ?? "未知"}
-                </Badge>
-              );
-            })()}
+    <PageContainer size="full" className="gap-4">
+      <PageHead
+        breadcrumb={
+          <span className="flex items-center gap-1.5">
+            <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
+              变更列表
+            </Link>
+            <span className="text-muted-foreground/60">/</span>
+            <span className="text-foreground">{change.change_key}</span>
+          </span>
+        }
+        title={change.title ?? change.change_key}
+        titleExtra={
+          <span className="flex flex-wrap items-center gap-2">
+            {archived && thinOriginBadge(change) ? (
+              <StateLabel variant="attention" iconName="zap">
+                轻量变更
+              </StateLabel>
+            ) : null}
+            <StateLabel variant={pill.variant}>{pill.label}</StateLabel>
           </span>
         }
         subtitle={
@@ -306,9 +376,6 @@ export default function ChangeDetailPage({ params }: Props) {
             {change.affected_components.length > 0 && (
               <span>影响: {change.affected_components.join(", ")}</span>
             )}
-            {/* 2026-09-28-change-ux-detail-batch：详情页头部补变更描述（列表行同源
-                proposal 动机段）——w-full 独占 flex-wrap 一行 + truncate 单行截断，
-                悬浮看全文；无描述零占位。 */}
             {change.description && (
               <span
                 title={change.description}
@@ -319,47 +386,38 @@ export default function ChangeDetailPage({ params }: Props) {
             )}
           </span>
         }
-        // task-07：PageHeader actions 危险按钮（仅权限可见者挂载 DetailDeleteAction，
-        // 危险悬停色走 destructive 主题 token；确认弹层独立于下方审批卡）
         actions={
-          canDeleteChange(change, deleteAccess) ? (
-            <DetailDeleteAction
-              workspaceId={workspaceId}
-              changeId={changeId}
-              changeKey={change.change_key}
-              ownerName={change.owner_name}
-            />
-          ) : undefined
+          <span className="flex items-center gap-2">
+            {canDeleteChange(change, deleteAccess) ? (
+              <DetailDeleteAction
+                workspaceId={workspaceId}
+                changeId={changeId}
+                changeKey={change.change_key}
+                ownerName={change.owner_name}
+              />
+            ) : null}
+            {/* 归档态不出「继续执行」（D-016@v1 Q-1：三处差异以批准稿为准）。 */}
+            {archived ? null : (
+              <Button size="sm" data-testid="change-continue-entry">
+                继续执行
+              </Button>
+            )}
+          </span>
         }
       />
 
-      {/* 阶段步骤条（主线宏观进度；节点可点击筛选下方步骤时间线，ql-20260821-017） */}
+      {/* 阶段条常驻（thin 出身维持轻量流程条，既有语义） */}
       {isThinLineageChange(change) ? (
-        /* 2026-09-27-thin-display-fix：thin 出身不渲染六阶段 checks（flow 未走
-           主管线），改轻量流程条——对照原型轻量语义（StateLabel zap）。 */
         <div className="flex flex-wrap items-center gap-3 rounded-md border bg-card px-3 py-2.5">
           <StateLabel variant="attention" size="md">
             轻量变更
           </StateLabel>
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <StateIcon name="check" size={14} className="text-success" />
-              flow start
-            </span>
+            <span>flow start</span>
             <span aria-hidden="true">→</span>
-            <span className="flex items-center gap-1">
-              <StateIcon name="check" size={14} className="text-success" />
-              干活（改代码 + 填槽）
-            </span>
+            <span>干活（改代码 + 填槽）</span>
             <span aria-hidden="true">→</span>
-            <span className="flex items-center gap-1">
-              {isTerminalChange(change) ? (
-                <StateIcon name="check" size={14} className="text-success" />
-              ) : (
-                <StateIcon name="openCircle" size={14} className="text-primary" />
-              )}
-              {isTerminalChange(change) ? "flow done 收口归档" : "flow done 收口（进行中）"}
-            </span>
+            <span>{archived ? "flow done 收口归档" : "flow done 收口（进行中）"}</span>
           </span>
         </div>
       ) : (
@@ -369,26 +427,11 @@ export default function ChangeDetailPage({ params }: Props) {
           updatedAt={change.updated_at ?? null}
           stepStages={stepStages}
           focusStage={focusStage}
-          onStageClick={(stage) =>
-            setFocusStage((prev) => (prev === stage ? null : stage))
-          }
+          onStageClick={handleStageClick}
         />
       )}
 
-      {/* task-12（design §8.1）：头部「最后信号」——数据源 = steps 明细最大
-          completed_at（每步 --done 推送时点）纯前端派生：ChangeRead 无
-          last_pushed_at（task-11 只落列表 ChangeSummary），且本页禁新增网络
-          请求（复用既有 10s 详情轮询）；无信号（steps 缺失/无 completed_at）
-          整行不渲染，畸形串回退原文（组件内防御）。 */}
-      <ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)} />
-
-      {/* task-09（2026-08-30-change-center-usage-stats / FR-05 / D-004@v1）：
-          变更执行用量卡（kind=change），组件 useQuery 自取数（D-007@v1），接线层
-          零取数逻辑——对齐同页 ChangeSessionsCard 直接传参挂载惯例，不加门控。
-          裁定：上方「本页禁新增网络请求（复用既有 10s 详情轮询）」注释仅约束
-          last-signal（须纯前端派生、复用详情轮询），不约束自取数辅助卡（本页
-          sessions 卡已同先例自开 useQuery）。 */}
-      <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
+      <ChangeTabs archived={archived} value={activeTab} onChange={handleTabChange} />
 
       {pageError ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -396,143 +439,104 @@ export default function ChangeDetailPage({ params }: Props) {
         </div>
       ) : null}
       {successMsg ? (
-        <div style={{ borderColor: "hsl(var(--success))", backgroundColor: "var(--semantic-success-soft)" }} className="rounded border px-3 py-2 text-xs text-success">
+        <div
+          style={{
+            borderColor: "hsl(var(--success))",
+            backgroundColor: "var(--semantic-success-soft)",
+          }}
+          className="rounded border px-3 py-2 text-xs text-success"
+        >
           {successMsg}
         </div>
       ) : null}
 
-      {/* 左主右辅两栏（移动端 <lg 单列：次线堆叠在主线下方） */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_296px]">
-        {/* 主线：审批卡 + 步骤时间线 + 智能体执行日志（只读） */}
-        <main className="space-y-3">
-          <ChangeStageActions
-            change={change}
-            boundSession={boundSession}
-            gateComment={gateComment}
-            onGateCommentChange={setGateComment}
-            onGateAction={(action) => void handleGateAction(action)}
-            transitioning={transitioning}
-            notifyResult={notifyResult}
-          />
+      {activeTab === "overview" ? (
+        <ChangeOverviewPanel
+          change={change}
+          workspaceId={workspaceId}
+          changeId={changeId}
+          archived={archived}
+          recentRows={unifiedRows}
+          taskSummary={taskSummary}
+          sessions={sessions}
+          boundSession={boundSession}
+          gateComment={gateComment}
+          onGateCommentChange={setGateComment}
+          onGateAction={(action) => void handleGateAction(action)}
+          transitioning={transitioning}
+          notifyResult={notifyResult}
+        />
+      ) : null}
 
-          {/* 沉淀资产（2026-10-15-change-assets-graph / FR-02：上移至步骤时间线
-              上面——详情页主信息（FR/决策/图谱/留档）优先于过程明细；自 aside 移
-              主栏 + 默认展开 + 分组固定高度滚动网格语义不变（2026-09-28 批次），
-              内嵌知识图谱分区见组件内注释。changeKey 透传（2026-10-14-decision-
-              anchor-change-qualified）：FR/决策深链 anchor 拼「变更号#决策号」
-              复合形态。 */}
+      {activeTab === "assets" ? (
+        <div className="flex flex-col gap-3" data-testid="change-assets-panel">
+          {change.change_key ? (
+            <ChangeAssetsGraph workspaceId={workspaceId} changeKey={change.change_key} />
+          ) : null}
           <ChangeAssetsCard
             workspaceId={workspaceId}
             changeId={changeId}
-            changeKey={change?.change_key}
-          />
-
-          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps；steps
-              缺失降级不渲染，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
-              2026-10-15-change-assets-graph / FR-03：默认收起 + 卡头切换按钮，
-              收起态点阶段节点自动展开（effect 联动）——过程明细让位主线。
-              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）语义不变。 */}
-          {!isThinLineageChange(change) && change.steps && change.steps.length > 0 ? (
-            <section
-              data-testid="change-step-timeline-card"
-              className="rounded-md border bg-card"
-            >
-              <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                <button
-                  type="button"
-                  data-testid="change-step-timeline-toggle"
-                  aria-expanded={stepsOpen}
-                  onClick={() => setStepsOpen((v) => !v)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                >
-                  <h2 className="text-xs font-medium">
-                    步骤时间线 ({change.steps.length})
-                  </h2>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {stepsOpen ? "收起 ▲" : "展开 ▼"}
-                  </span>
-                </button>
-                {focusStage ? (
-                  <button
-                    type="button"
-                    onClick={() => setFocusStage(null)}
-                    aria-label="清除阶段筛选"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-500/10 px-2 py-px text-[11px] text-brand-600 transition-colors hover:bg-brand-500/20"
-                  >
-                    {WORKFLOW_STAGE_LABELS[focusStage] ?? focusStage} ✕
-                  </button>
-                ) : null}
-              </div>
-              {stepsOpen ? (
-                <div className="px-3 py-2.5">
-                  <ChangeStepTimeline
-                    steps={change.steps}
-                    focusStage={focusStage}
-                  />
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          {/* 真实留痕时间线（2026-09-26-change-real-timeline / FR-03；2026-09-27-
-              timeline-coexist 共存化）：原与步骤时间线互斥（steps 空才挂载）——归档时
-              CLI unregisterChange 终态一致化补种 steps（3 行同一时间戳）会把本卡顶掉，
-              归档后真实数据（事件轴 × 任务面 × 墙钟）不可见。改恒挂载：组件自身
-              events/tasks/born 全空时静默隐藏，无观测数据零占位（厚变更不受扰）。
-              key=changeId（2026-09-29-change-detail-timeline-files-polish 评审 P3）：
-              路由参数切换不重挂载，折叠展开态会跨变更残留——key 化随切换重挂归零。 */}
-          <ChangeTimelineCard key={changeId} workspaceId={workspaceId} changeId={changeId} />
-
-          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
-              thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行
-              观测走会话页。组件保留（mobile-change-detail 仍在用）。 */}
-        </main>
-
-        {/* 次线（2026-09-27 visual-align-2：对齐原型 MetaPanel 观感——外层统一
-            圆角边框容器，子卡去边框去阴影，六卡视觉融合为单块侧栏面板；各卡
-            自取数/折叠/头部功能零改动）：变更文件 / 关联快速任务 / 观测事件 /
-            会话 / 范围对账 / 沉淀资产 */}
-        <aside
-          className="flex flex-col gap-0 overflow-hidden rounded-lg border bg-card [&>*]:!rounded-none [&>*]:!border-x-0 [&>*]:!border-t-0 [&>*]:!shadow-none [&>*:not(:last-child)]:!border-b [&>*:last-child]:!border-b-0"
-        >
-          <ChangeFilesCard workspaceId={workspaceId} changeId={changeId} />
-          <QuicklogLinkedCard
-            workspaceId={workspaceId}
             changeKey={change.change_key}
+            archived={archived}
           />
-          {/* 2026-09-28-drop-observation-card：原「观测事件」折叠卡移除——与主栏
-              真实留痕时间线卡同表同数据双显（r18-full FR-07/08 与 change-real-timeline
-              重叠），产品裁决事件流水由主栏时间线卡独家承担；后端
-              GET /changes/{name}/events 端点保留（CLI 推送/调试面）。 */}
-          <ChangeSessionsCard workspaceId={workspaceId} changeId={changeId} />
-          {/* ql-20260910-014-6c29：scope-audit 范围对账结果卡（ql-20260911-001-c0be
-              升级：本机跑对账出三态计数+锚点合计+明细弹窗行联动单文件 diff，本地命令折叠为兜底；identifier=
-              change_key）。archived 传入（2026-09-25-change-detail-assets-usability /
-              FR-05）：已归档变更降级时指路「沉淀资产 · 归档留档」。 */}
-          <ScopeAuditCommandCard
-            target={{
-              kind: "change",
-              workspaceId,
-              changeKey: change.change_key,
-            }}
-            archived={isTerminalChange(change)}
-          />
-          {/* 2026-09-25-change-precipitated-assets 卡已移主栏（2026-09-28-
-              change-ux-detail-batch）。 */}
-          {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch）。 */}
-        </aside>
-      </div>
+        </div>
+      ) : null}
+
+      {activeTab === "process" ? (
+        <div className="flex flex-col gap-3" data-testid="change-process-panel">
+          <section className="rounded-md border bg-card" data-testid="change-process-timeline">
+            <div className="flex items-center justify-between gap-2 border-b px-3.5 py-2.5">
+              <h2 className="text-xs font-medium">统一过程时间线</h2>
+              <span className="text-[11px] text-muted-foreground">
+                步骤 + 事件两源合流 · {unifiedRows.length} 条
+              </span>
+            </div>
+            <div className="px-3.5 py-3">
+              {unifiedRows.length === 0 ? (
+                <p className="py-3 text-center text-[11px] text-muted-foreground">
+                  暂无过程记录。
+                </p>
+              ) : (
+                <ChangeUnifiedTimeline
+                  rows={unifiedRows}
+                  activeStage={focusStage}
+                  onStageChange={setFocusStage}
+                />
+              )}
+            </div>
+          </section>
+
+          <ChangeTaskChecklist tasks={tasks} timeStatus={timeStatus} />
+
+          <section className="rounded-md border bg-card" data-testid="change-process-stagecost">
+            <div className="flex items-center justify-between gap-2 border-b px-3.5 py-2.5">
+              <h2 className="text-xs font-medium">阶段跨度</h2>
+              <span className="text-[11px] text-muted-foreground">
+                各阶段条目数与首末时刻跨度（观测留痕推算）
+              </span>
+            </div>
+            <div className="px-3.5 py-3">
+              <StatGrid items={stageSpans(unifiedRows)} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {activeTab === "files" && !archived ? (
+        <ChangeFilesPanel
+          workspaceId={workspaceId}
+          changeId={changeId}
+          changeKey={change.change_key}
+          archived={archived}
+        />
+      ) : null}
     </PageContainer>
   );
 }
 
 /**
- * 详情页删除动作（task-07 / design §6.3 / FR-05d）——危险按钮 + 受控弹层。
- *
- * 独立子组件（PageHeader actions slot 挂载）：承载 useRouter + useMutation，
- * 仅权限可见者由父组件挂载（canDeleteChange 三判启发式，后端权威）。删除
- * 成功 → toast + ["changes", wsId] 前缀失效 + 跳回变更列表；403/404/409
- * 失败 → 中文 toast 留在本页（errMessage 取 ApiError.message，不白屏）。
+ * 详情页删除动作——危险按钮 + 受控弹层（PageHead actions slot 挂载；仅权限可见者挂载
+ * 该子组件，未挂载即不触碰 router —— 无 app-router 上下文的环境不触发 invariant）。
  */
 function DetailDeleteAction({
   workspaceId,
@@ -553,10 +557,7 @@ function DetailDeleteAction({
     mutationFn: () => deleteChange(workspaceId, changeId),
     onSuccess: async () => {
       notify.success(`变更 ${changeKey} 已删除`);
-      // 列表前缀失效（行从 tab 消失）+ 详情页跳回列表
-      await queryClient.invalidateQueries({
-        queryKey: ["changes", workspaceId],
-      });
+      await queryClient.invalidateQueries({ queryKey: ["changes", workspaceId] });
       router.push(`/workspaces/${workspaceId}/changes`);
     },
     onError: (err) => {
@@ -574,8 +575,8 @@ function DetailDeleteAction({
       >
         删除
       </Button>
-      {/* 受控弹层（照 admin/users DeleteConfirm 范式）：确认先关弹层再删，
-          失败路径走 onError toast 不重开弹层 */}
+      {/* 受控弹层（照 admin/users DeleteConfirm 范式）：确认先关弹层再删，失败路径走
+          onError toast 不重开弹层 */}
       {open && (
         <DeleteChangeConfirm
           target={{ change_key: changeKey, owner_name: ownerName }}

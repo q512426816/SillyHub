@@ -198,13 +198,15 @@ superseded_by：FR-styles-009
 
 ## FR-styles-011 变更详情页重排
 变更：2026-09-26-core-pages-visual-redesign
-状态：active
+状态：superseded
+superseded_by：FR-app-workspace-pages-002
+取代链：FR-styles-011 ← FR-app-workspace-pages-002（2026-10-15-change-detail-redesign 承接）
 摘要：默认场景
 依据决策：D-001@v1
 场景正文：
 - 场景：默认场景 — Given 用户进入某变更详情页；When 页面渲染；Then MUST 呈现六阶段 checks 横条（当前阶段高亮、可点筛选，阶段-时间线联动语义承接）+ 左主列 Timeline（事件流+Agent 执行日志内嵌可折叠
 全文：.sillyspec/changes/archive/2026-09-26-core-pages-visual-redesign/requirements.md#FR-04
-最近确认：f41468b59
+最近确认：fe8a71ed4
 
 ## FR-styles-012 工作区列表页重排
 变更：2026-09-26-core-pages-visual-redesign

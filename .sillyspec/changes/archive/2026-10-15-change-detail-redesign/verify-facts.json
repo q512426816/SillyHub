@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-change-detail-redesign",
+  "generatedAt": "2026-10-15T17:56:33.449Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 15,
+        "globEntries": 5
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "tasks": 8,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "backendEndpoints": 1094,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-change-detail-redesign",
+      "metrics": {
+        "checkedFiles": 9,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 4,
+    "items": [
+      {
+        "type": "other",
+        "item": "verify lint 硬门含他者未格式化文件（`backend/app/modules/knowledge/search.py`，属并行变更 2026-10-15-knowledge-search-pgvector 的主仓在途改动；本变更 backend 文件命中数=0）",
+        "condition": "该会话跑 `cd backend && uv run ruff format app/modules/knowledge/search.py` 后提交；或由用户确认后按 CLI 提示设 `SILLYSPEC_VERIFY_LINT_GATE=advisory` 复跑 `sillyspec run verify --done`",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "真机体验验收（tab 切换/归档态收窄/深链回放/产出与过程分区）",
+        "condition": "起前端后打开 `http://127.0.0.1:3000/workspaces/<wid>/changes/<cid>`：①切四 tab 看信息分区是否直观；②归档变更看是否只剩三 tab；③地址栏 `?tab=assets` 刷新是否停在产出；④在概览与过程之间找「最近动态/全量时间线」是否顺手（R-03 发现性探针）",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "worktree 内残留名为「batch：」的异常条目（他者工作混入，verify 禁删）",
+        "condition": "归档前由用户在 worktree/apply 阶段清理；跑 `sillyspec scope-audit --change 2026-10-15-change-detail-redesign` 可见其不在计划面",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "全量测试套件（frontend/backend/daemon 全量）未跑",
+        "condition": "按仓库规则 0 留 CI；本变更已实测 39 文件 430 用例 + CLI 模块域实测（py3+jsx22）退出码 0",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 3,
+  "consumerHints": {
+    "script": [
+      "frontend/scripts/prototype-build.mjs"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py3+jsx22)+fr(25)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-15T18:05:50.779Z"
+  }
+}

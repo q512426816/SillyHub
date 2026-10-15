@@ -1,0 +1,169 @@
+// 2026-10-15-change-detail-redesign / task-06（FR-08 / D-006@v1 / D-016@v1）：
+// 概览右侧信息栏测试——五组渲染（基本信息/执行用量/会话/范围对账/产出速览）、
+// 用量取数复用（同一 hook 与 queryKey）、归档态用量形态（标题「执行用量（合计）」+
+// MUST NOT 提供按模型明细入口）、范围对账入口在两态下的指向（归档不留死链）。
+import { render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ChangeOverviewSide } from "@/components/changes/detail/change-overview-side";
+import { getChangeAssets, getChangeUsage, getScopeAudit } from "@/lib/changes";
+import type { ChangeRead } from "@/lib/changes";
+import type { AgentSessionListItem } from "@/lib/daemon";
+
+vi.mock("@/lib/changes", () => ({
+  getChangeAssets: vi.fn(),
+  getChangeUsage: vi.fn(),
+  getScopeAudit: vi.fn(),
+}));
+
+const mockAssets = vi.mocked(getChangeAssets);
+const mockUsage = vi.mocked(getChangeUsage);
+const mockAudit = vi.mocked(getScopeAudit);
+
+const CHANGE = {
+  id: "c-1",
+  workspace_id: "ws-1",
+  change_key: "2026-10-15-demo",
+  change_type: "full",
+  created_at: "2026-10-15T12:00:00Z",
+  owner_name: "qinyi",
+} as ChangeRead;
+
+const SESSIONS: AgentSessionListItem[] = [
+  { id: "sess-ff095390-aaaa", title: null, status: "active" } as AgentSessionListItem,
+  { id: "sess-2", title: "第二个会话", status: "ended" } as AgentSessionListItem,
+];
+
+function renderSide(archived = false) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <ChangeOverviewSide
+        change={CHANGE}
+        workspaceId="ws-1"
+        changeId="c-1"
+        archived={archived}
+        sessions={SESSIONS}
+      />
+    </QueryClientProvider>,
+  );
+}
+
+describe("ChangeOverviewSide", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUsage.mockResolvedValue({
+      started_at: "2026-10-16T00:00:00Z",
+      finished_at: "2026-10-16T05:00:00Z",
+      duration_ms: 18_000_000,
+      totals: {
+        input_tokens: 1284,
+        output_tokens: 96,
+        cache_read_tokens: 9120,
+        cache_creation_tokens: 0,
+        api_requests: 412,
+        num_turns: 38,
+      },
+      by_model: [],
+    } as never);
+    mockAudit.mockResolvedValue({
+      ok: true,
+      mode: "full-flow",
+      rows: [],
+      repos: [
+        { repo: "main", anchor: "a1b2c3d", totals: { planned: 10, unplanned: 1, untouched: 1 } },
+        { repo: "docs", anchor: "7f8e9a0", totals: { planned: 2, unplanned: 0, untouched: 1 } },
+      ],
+    } as never);
+    mockAssets.mockResolvedValue({
+      change_key: "2026-10-15-demo",
+      archived: true,
+      fr_entries: [{ id: "FR-01", title: "t", status: "active", file: "f.md" }],
+      decisions: [
+        { id: "D-001@v1", title: "d", status: "implemented", file: "d.md" },
+      ],
+      test_rows: [],
+      patch: {
+        files: 26,
+        additions: 1,
+        deletions: 2,
+        patch_status: "ok",
+        saved_at: null,
+        file_list: [],
+        files_truncated: false,
+      },
+      delta: null,
+      knowledge_touch: [
+        { id: "k1", title: "t", file: "f1.md" },
+        { id: "k2", title: "t", file: "f2.md" },
+      ],
+      touched_modules: [],
+    } as never);
+  });
+
+  it("五组渲染：基本信息 / 执行用量 / 会话 / 范围对账 / 产出速览", async () => {
+    renderSide();
+    expect(screen.getByTestId("change-overview-side")).toBeInTheDocument();
+    for (const title of ["基本信息", "执行用量", "会话", "范围对账", "产出速览"]) {
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
+    expect(screen.getByText("2026-10-15-demo")).toBeInTheDocument();
+    expect(screen.getByText("qinyi")).toBeInTheDocument();
+  });
+
+  it("用量七项压缩行与用量卡同源（耗时/轮次/输入/输出/缓存读取/请求次数/命中率）", async () => {
+    renderSide();
+    expect(await screen.findByText("耗时")).toBeInTheDocument();
+    for (const label of ["轮次", "输入", "输出", "缓存读取", "请求次数", "缓存命中率"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.getByText("5.0 小时")).toBeInTheDocument();
+    expect(screen.getByText("38")).toBeInTheDocument();
+  });
+
+  it("会话组：最近 2 条（title 优先，缺省回退 id 前 8）+ 工作台入口", () => {
+    renderSide();
+    expect(screen.getByText("第二个会话")).toBeInTheDocument();
+    expect(screen.getByText("sess-ff0")).toBeInTheDocument();
+    expect(screen.getByText("打开会话工作台 →")).toBeInTheDocument();
+  });
+
+  it("范围对账计数取信封 repos[].totals 合计（单一源）", async () => {
+    renderSide();
+    expect(await screen.findByText("计划内")).toBeInTheDocument();
+    const labeled = (label: string) =>
+      screen.getByText(label).parentElement?.textContent ?? "";
+    expect(labeled("计划内")).toContain("12"); // 10 + 2
+    expect(labeled("计划外")).toContain("1"); // 1 + 0
+    expect(labeled("计划未动")).toContain("2"); // 1 + 1
+  });
+
+  it("产出速览计数与资产卡同源（FR/决策/知识触达/改动文件）", async () => {
+    renderSide();
+    expect(await screen.findByText("需求规则")).toBeInTheDocument();
+    expect(screen.getByText("决策蒸馏")).toBeInTheDocument();
+    expect(screen.getByText("知识触达")).toBeInTheDocument();
+    expect(
+      await screen.findByText("改动文件", { selector: "span" }),
+    ).toBeInTheDocument();
+    const filesRow = screen.getByText("改动文件").parentElement?.textContent ?? "";
+    expect(filesRow).toContain("26");
+  });
+
+  it("在途态：提供「按模型明细」入口 + 对账入口指向「文件与对账」", async () => {
+    renderSide(false);
+    expect(await screen.findByText("按模型明细 →")).toBeInTheDocument();
+    expect(screen.getByText("明细见「文件与对账」")).toBeInTheDocument();
+    expect(screen.queryByText(/执行用量（合计）/)).not.toBeInTheDocument();
+  });
+
+  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口改指产出·归档留档（不留死链）", async () => {
+    renderSide(true);
+    expect(screen.getByText("执行用量（合计）")).toBeInTheDocument();
+    expect(await screen.findByText("耗时")).toBeInTheDocument(); // 等用量数据落定再断言入口缺席
+    expect(screen.queryByText("按模型明细 →")).not.toBeInTheDocument();
+    expect(screen.getByText(/真实改动面见「产出 · 归档留档」/)).toBeInTheDocument();
+    expect(screen.queryByText("明细见「文件与对账」")).not.toBeInTheDocument();
+  });
+});

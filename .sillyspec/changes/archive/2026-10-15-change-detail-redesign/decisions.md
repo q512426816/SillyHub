@@ -255,3 +255,31 @@ change: 2026-10-15-change-detail-redesign
 - 故障面: 若「保底渲染归档留档」在资产主查询失败时仍依赖同一失败查询，则保底无效——实现 MUST 让归档留档走其自身的 patch 摘要取数路径。
 - 退役判据: 无。
 - 模块域: frontend
+
+## D-017@v1: 执行期裁决——「归档留档保底渲染」的实现口径收窄 + 资产卡新增 archived prop
+- type: architecture
+- priority: P1
+- status: accepted
+- source: code
+- question: design「归档态下资产主查询失败时，MUST 仍渲染『归档留档』并以其自身取数（`assets/patch-file` 与 patch 摘要）呈现可用部分」在 0 端点约束下如何落地？
+- answer: 我的判断（执行期非破坏性裁决）——原文的口径在实现层不可直接成立：归档留档的 patch 摘要与文件清单与资产主查询**同源**（同一端点 `GET /changes/{cid}/assets`），失败时无法凭空呈现数据；且首帧失败时 `query.data` 缺失，连「是否归档」都无法从响应判定。故收窄为三条可验证承诺：①资产卡新增可选 `archived` prop（页面层传 `isTerminalChange(change)`），归档判定在首帧失败时同样可用（缺省回退读响应字段，兼容既有调用点）；②失败时渲染「卡头 + 分区级错误说明（含重试）」；③归档态额外渲染「归档留档」分区壳，明示「改动面数据暂不可用（与沉淀资产同一数据源）」并指路「变更文件」。语义由「呈现可用部分」收窄为「分区在场 + 明示不可用 + 可重试 + 有替代路径」，不新增端点、不静默留白。
+- normalized_requirement: 资产卡 MUST 接收 `archived` prop 并以其为归档判定第一源；主查询失败 MUST NOT 整卡消失（卡头 + 错误说明 + 重试）；归档态失败 MUST 渲染归档留档分区壳与不可用说明；在途态 MUST NOT 渲染该壳。
+- impacts: [FR-05, FR-07, task-03, task-07, task-08]
+- evidence: 裁决落点 frontend/src/components/changes/detail/change-assets-card.tsx（props/错误分支/归档组条件三处 + 注释说明）；断言 frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx（7 例含归档态壳在场与在途态壳缺席）；design.md 的「产出空态与错误分支契约」段为该裁决的上位依据（其 B-3 修订目标即「不留静默空白」）。
+- 故障面: 页面层若忘记传 `archived`，归档态在**首帧失败**时会退化为在途形态（无归档留档壳）——task-07 接线时 MUST 显式传参（已列入其实现要点）；正常路径（取数成功）不受影响。
+- 退役判据: 若后端提供独立的 patch 摘要端点（不依赖 assets 主查询），可恢复「以自身取数呈现可用部分」的原文口径。
+- 模块域: frontend
+
+## D-018@v1: 执行期裁决——归档概览的「归档留档」渲染为统计摘要 + 指路，不重复文件清单
+- type: architecture
+- priority: P2
+- status: accepted
+- source: code
+- question: design 的 Phase 2 概览要求「归档态额外插『归档留档』卡」，而「产出」tab 的归档留档组已经承载 patch/delta 统计 + 改动文件清单 + 单文件 diff 入口——两处若全量渲染，即回到本次改造要消除的「同一信息两处出现」问题。
+- answer: 我的判断（执行期非破坏性裁决）——归档概览的「归档留档」渲染为**统计摘要**（patch 的 文件数/增删行 + delta 的 Before/Delta 行）并附一行「改动文件清单与单文件 diff 见『产出 · 归档留档』」；**文件清单与「看 diff」入口只在「产出」tab 出现一次**（MUST NOT 重复渲染同一清单）。数据取同一 queryKey（`["changeAssets", …]`），零额外请求。
+- normalized_requirement: 归档概览 MUST 呈现 patch/delta 统计摘要与指路文案；MUST NOT 渲染改动文件清单或单文件 diff 入口（那属「产出 · 归档留档」独有）。
+- impacts: [FR-01, task-06, task-08]
+- evidence: 实现 frontend/src/components/changes/detail/change-overview-panel.tsx 的 `change-overview-ledger` 分区（仅统计行 + 指路句）；断言 frontend/src/components/changes/detail/__tests__/change-overview-panel.test.tsx 的归档首屏用例（断言统计值在场且不含「看 diff」入口）；上位依据 design.md「Phase 2 概览」行 + 本次改造的核心目标「同一动作只出现一次」。
+- 故障面: 若后续在概览补回完整清单，会与产出 tab 双重维护并复现「两处看同一件事」的原始问题——恢复前需先复核本裁决。
+- 退役判据: 若「产出」tab 被取消（归档态只留概览），清单可回归概览。
+- 模块域: frontend

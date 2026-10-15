@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-change-detail-redesign",
+  "appliedAt": "2026-10-15T18:10:04.477Z",
+  "baseHash": "f4e335d56ce460a98465f7762848a35399825925",
+  "files": [
+    {
+      "path": "frontend/prototype-dist/change-center.html",
+      "sha256": "51413e75675ee5672dc75edbe3e3e5cb358dd094d15c4e499f0a691f11325fb7"
+    },
+    {
+      "path": "frontend/prototype-dist/change-detail-v2.html",
+      "sha256": "cdc579efb911b5660e0305dffb14ed282ef98d48f1baed28cc4f7ca13a1f61c8"
+    },
+    {
+      "path": "frontend/prototype-dist/change-detail.html",
+      "sha256": "6eba1167a82f3ab4da7e2e561a4c89fdda88f11db46dead2fd73acfb5d69ea81"
+    },
+    {
+      "path": "frontend/prototype-dist/index.html",
+      "sha256": "012edb7fa23ee522d21d025d074cfeb3d24e02a92274a3c92cfaa56cb38ff594"
+    },
+    {
+      "path": "frontend/prototype-dist/session-portal.html",
+      "sha256": "e4e557478e0ea63e697ee26dfc9c3e20c021728c43b53cb2a77549d2b250831e"
+    },
+    {
+      "path": "frontend/prototype-dist/sillyspec-flow.html",
+      "sha256": "68139da2bc4a47874a5ed3f7b78a4c38456eac057ec6b201996c52716f21af86"
+    },
+    {
+      "path": "frontend/prototype-dist/workspace-list.html",
+      "sha256": "5c1c0af4e0c0d04c6b1485239462802449615fc00b12b51362b5f7da563c0700"
+    },
+    {
+      "path": "frontend/prototype-dist/workspace-overview.html",
+      "sha256": "07774b369f83d2ef86c038af7f3eadc77b0f6c5bc286c041e46f4a4a44be3796"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx",
+      "sha256": "86936adc72727bf93137a26c46e753c908ac33d0990a9d075c7ac7733297e27a"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+      "sha256": "0ec6936f0530dd5cca31c2c85785c405074438c1afec0a81121d771af998c6f5"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx",
+      "sha256": "c1af49840996b52ada4fc0331320c9d44f10e0cce32c9fa5ed4b7b8c642784e2"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx",
+      "sha256": "d3e20e162471ff41cea8ea3707a7f04601680045dacd6eb032138bf0191f80ee"
+    },
+    {
+      "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+      "sha256": "cb852e3f79b71bab0504e9b4fa368f9dcbcc9108e0452841c9ae225d4711761a"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+      "sha256": "9ada2eb4fc45860a192e332d915c2d9235d7dffc78c696a3d4a4e1aef74cbe84"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx",
+      "sha256": "636e1dc3f2d6abec332593482175d6fb7bc934ea9af9832c7e9af6e90d9544a3"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx",
+      "sha256": "eca3e937640b67390b86ab0f35fa5a4dfc48469f5614a4b24c4b5e19efd2f395"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx",
+      "sha256": "3be211d4079218f8e46b47e825dbc084642cd44e3532cec66545641bd83fefcd"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-overview-panel.test.tsx",
+      "sha256": "3e786b76233553c4c7847b8fcde7f1987ee2eeb3ebb7ec4059b804fb8bfee074"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+      "sha256": "1ab6ed9189fe8044e6d445827205451df5cf8eeff06f949207f54898f37f9435"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx",
+      "sha256": "b492e09870a509ee6fb3f4f08fcd9ec95c605ef45cc57eafea1e74c61d001468"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-task-checklist.test.tsx",
+      "sha256": "400d352d7158d718bb9505f937af32c22e283167d0c34a86a1740b50490f85cc"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/change-unified-timeline.test.tsx",
+      "sha256": "b7718351796237902704363a1cb8b90b616b1cc4fb846eea6a9940b8d8cb60fe"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/__tests__/merge-change-timeline.test.ts",
+      "sha256": "501b240d07d1b4fcd95da409b497b2b5e321bc26f8ec0b688f90fb4a97eddac4"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-assets-card.tsx",
+      "sha256": "24650f1598d9592ccf41eaf0b2789403939d456c2fee277e55beb137015c52fc"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-assets-graph.tsx",
+      "sha256": "618c1421faa2dc0390bbf597ddf53a793340c9840ca6926013a79ca70d20c2c8"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-files-panel.tsx",
+      "sha256": "e9485f358b8f0c4725f31af96a2055ee5230a7923c0ddb9bfa8014ab35c23d49"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-overview-panel.tsx",
+      "sha256": "c7188b8149f90ebb3997dbec3a7fc87102275eee1b2ed09545671272299b4175"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-overview-side.tsx",
+      "sha256": "324ccc1b75578cd7bde23715b4d2e5632ed0807ef141554cd1eb2cc5cb758ca7"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-tabs.tsx",
+      "sha256": "21b513c2e21aa8933e325739bbce6f76c19dccf6be3ee9bf522d8bf1c2a16e47"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-task-checklist.tsx",
+      "sha256": "ab5edcda6b9ddb79fb321150a6e9593706d5767f0a151df0b64999e59f78933f"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-unified-timeline.tsx",
+      "sha256": "67373e4d57426189db8a478c7bbe18e7b88e92c514f9ce2eb5080955e6759ac2"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/change-usage-card.tsx",
+      "sha256": "b0edbc1a5244e5e85cb6766ea9fa34bc6ceb70a607ab1149a16e5bf07cef6b83"
+    },
+    {
+      "path": "frontend/src/components/changes/detail/merge-change-timeline.ts",
+      "sha256": "9fefb6963bcc19a7c67094aed792af528dd5c299e1dc7ec5e4fa055ebe9c99ab"
+    }
+  ]
+}

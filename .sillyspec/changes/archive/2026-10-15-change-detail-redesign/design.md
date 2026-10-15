@@ -68,13 +68,13 @@ scale: large
 | **产出** | `ChangeAssetsGraph` 提升为独立分区（全宽，画布高度默认 **420px**（`DEFAULT_CANVAS_HEIGHT` 具名常量，替代原内嵌 280px；批准稿 300px 为示意值，生产取 420px 以容纳节点标签与详情栏），右侧节点详情栏保留）→ 六组资产 2 列网格（需求规则 / 决策蒸馏 / 知识触达 / 测试绑定 / 模块触达 / 归档留档）：**自然高度 + 每组最多 5 行 + 「展开全部 N 条」**（取代固定 `h-64` + 组内滚动）；在途态**不渲染归档留档组**（D-001）；四个弹窗（测试文件 / 模块文档 / patch 单文件 diff / 知识条目）机制原样保留 |
 
 | **过程** | `ChangeUnifiedTimeline`（Phase 3）+ `ChangeTaskChecklist`（tasks[] 勾选清单：☑/☐ + task id + 描述 + ≈推断时刻 + 提交锚 + 勾选比）+ 阶段耗时 `StatGrid`。**不再挂载** `ChangeStepTimeline` 与 `ChangeTimelineCard` |
-| **文件与对账** | 变更文件：文件树**在 tab 内直接内嵌**（左树 + 右预览/diff，D-012），不再以 Dialog 为唯一入口 → 范围对账（`ScopeAuditCommandCard` 复用，含三态 chips / 分仓明细 / 明细弹窗 / 折叠本地命令）→ 关联的快速任务（`QuicklogLinkedCard` 复用，空/失败仍静默隐藏） |
+| **文件与对账** | 变更文件：文件树**在 tab 内直接内嵌**（左树 + 右预览/diff，D-012）——复用路径 = 直接挂载 `frontend/src/components/change-file-tree.tsx` 的 `ChangeFileTree`（自持取数、无 Dialog 依赖；`change-files-card.tsx` 不改不删），不再以 Dialog 为唯一入口 → 范围对账（`ScopeAuditCommandCard` 复用，含三态 chips / 分仓明细 / 明细弹窗 / 折叠本地命令）→ 关联的快速任务（`QuicklogLinkedCard` 复用，空/失败仍静默隐藏） |
 
 **产出的空态与错误分支契约（Grill B-3 + 定义层①② 修订）**：
 
 - **分区级空态（图谱）**：触发条件 = 查询 `isError` / `available=false` / `nodes` 为空三态之一；呈现 = 分区容器保留（标题 + 「层级」chips 禁用态 + 一行说明文案，文案区分三态：「图谱数据不可用」「图谱数据暂不可用，稍后自动重试」「本变更暂无图谱邻域」），MUST NOT 整区消失。`retry:false` 口径不变（不轰炸）。
 - **资产卡整卡错误分支改造（B-3）**：`change-assets-card.tsx:181` 现为「主查询 isError → 整卡 `return null`」。改造后 MUST 改为**分区级错误说明**（卡头保留 + 一行「沉淀资产暂不可用」），理由：归档态的降级路径正是「产出 → 归档留档」（D-007），整卡静默消失会让该路径无解释地断掉。
-- **归档留档保底渲染（Q-3 定）**：归档态下，若资产主查询失败，MUST 仍渲染「归档留档」分区并以其自身取数（`assets/patch-file` 与 patch 摘要）呈现可用部分；MUST NOT 因主查询失败而整体缺失归档改动面。
+- **归档留档保底渲染（Q-3 定）**：归档态下，若资产主查询失败，MUST 仍渲染「归档留档」分区并以其自身取数（`assets/patch-file` 与 patch 摘要）呈现可用部分；MUST NOT 因主查询失败而整体缺失归档改动面。**归属：本 Phase（产出面板 = task-03）实现并配断言**——Phase 4 的归档收窄只做复验，避免「断言在 W1 卡、实现在 W4 卡」的承接错位。
 - **MUST NOT 出现**：整 tab 白屏、无解释的大面积空白、把失败伪装成「无数据」。
 
 ### Phase 3 · 合并时间线（纯函数 + 组件）
@@ -146,15 +146,37 @@ function mergeChangeTimeline(input: MergeInput): UnifiedRow[];
 | 修改 | frontend/src/components/changes/detail/change-stage-actions.tsx | 仅接线层调整（概览面板内挂载；不涉语义）——如无需改动则不列此行，实施时以实际 diff 为准 |
 | 修改 | frontend/src/components/prototype/change-detail-v2-view.tsx | 批准稿原型的后续维护（若接线期发现原型与最终结构不一致需同步重编译） |
 | 修改 | frontend/scripts/prototype-build.mjs | 已扩：新增 v2 视图条目 + 通用 tab/状态切换注入脚本（本变更内已提交） |
+| 修改 | frontend/prototype-dist/change-center.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 修改 | frontend/prototype-dist/change-detail.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 新增 | NEW:frontend/prototype-dist/change-detail-v2.html | 原型编译产物（批准稿自包含单文件；`pnpm prototype:build` 生成，禁止手改） |
+| 修改 | frontend/prototype-dist/index.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 修改 | frontend/prototype-dist/session-portal.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 修改 | frontend/prototype-dist/sillyspec-flow.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 修改 | frontend/prototype-dist/workspace-list.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
+| 修改 | frontend/prototype-dist/workspace-overview.html | 原型编译产物重编译（管线注入脚本扩展所致，非手改） |
 | 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx | tab 集随归档收窄 / `?tab=` 缺省与非法值回落 / 切换回调 |
-| 新增 | NEW:frontend/src/components/changes/detail/__tests__/merge-change-timeline.test.ts | 合并口径单测：源内去重 / task-done 折叠（tasks 域与非 tasks 域）/ 排序 / 无时间戳置底 / 字段不丢 |
+| 新增 | NEW:frontend/src/components/changes/detail/__tests__/merge-change-timeline.test.ts | 合并口径单测：源内去重 / task-done 折叠（tasks 域与非 tasks 域）/ 排序 / 无时间戳置底 / 字段不丢 / **B-2 三输入类（非 ISO `completed_at` 置底、事件同键碰撞取舍、推断断裂标注）** |
 | 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-unified-timeline.test.tsx | 统一时间线渲染（来源标签 / 展开输出 / 提交锚 / 空态） |
 | 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-task-checklist.test.tsx | 任务清单渲染（勾选态 / 推断时刻 ≈ / 提交锚 / 勾选比） |
 | 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-overview-panel.test.tsx | 概览面板（在途 vs 归档首屏 / 待办卡显隐 / 最近动态倒序且不含筛选器） |
 | 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx | 文件与对账面板（文件树内嵌渲染 / 对账卡挂载 / 快速任务空态隐藏） |
 | 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx | 断言面改造：两时间线共存断言（原 FR-auto-frontend-056 钉子）改为「统一时间线挂载 + 步骤/留痕两卡不再挂载」 |
+| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-last-signal.test.tsx | 适配挂载位置（最后信号移入概览面板/信息栏，断言路径更新） |
+| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx | 适配挂载位置（团队开关随阶段操作区进入概览面板，断言路径更新） |
+| 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx | 右信息栏五组渲染 / 归档态用量形态 / 入口指向 |
+| 修改 | frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | 既有 33 例适配新形态（分组长/展开全部/在途不渲染归档留档组/错误分支分区级说明） |
+| 修改 | frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx | 既有 8 例适配独立挂载与三态空态文案 |
+| 修改 | frontend/src/components/changes/detail/__tests__/change-usage-card.test.tsx | 适配取数抽取（共享 hook/纯函数）后的断言（导出与行为不变的前置） |
 | 新增 | NEW:frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx | 页面级：`?tab=` 驱动 / 归档收窄 / `?tab=files` 在归档态的钳制 / 面板切换不重取数 / **页模块导出 `isTerminalChange` 仍在场且语义不变（B-1 验收面）** |
-| 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx | Grill B-2/B-3 边界：非 ISO `completed_at` 排序置底 / 事件同键碰撞去重取舍 / task-done 推断断裂显示「时刻不可推断」/ 资产卡错误分支分区级说明 / 归档态归档留档保底渲染 |
+| 新增 | NEW:frontend/src/components/changes/detail/__tests__/change-assets-fallback.test.tsx | Grill B-3 边界：资产卡主查询失败的分区级错误说明 / 归档态归档留档保底渲染（B-2 的三个合并输入类用例归 `merge-change-timeline.test.ts`，见该行） |
+
+
+### 复用不修改文件（不属变更面，MUST NOT 修改）
+
+| 文件路径 | 复用方式与不改原因 |
+|---|---|
+| frontend/src/components/changes/detail/change-stage-header.tsx | **组件本体不改**（其已有 `onStageClick`/`stepStages` 联动 props，见该文件 props 定义），阶段条联动由页面层（Phase 1）传参接线——故不列本清单为「修改」项 |
+| frontend/src/components/change-file-tree.tsx | **组件本体不改**：FR-11 的「tab 内直接内嵌文件树」= 在文件与对账面板里直接挂载该组件（自渲染左树 + 右预览，无 Dialog 依赖），**不改也不删** `change-files-card.tsx`（其 Dialog 形态属既有消费面） |
 
 ## 接口定义
 
@@ -199,7 +221,7 @@ export interface ChangeTaskChecklistProps { tasks: TimelineTask[]; }
   | `frontend/src/components/changes/change-activity-badge.tsx` | `ChangeLastSignal`, `lastSignalFromSteps` | 不改 |
   | `frontend/src/components/changes/change-step-badge.tsx` | `STAGE_LABELS` | 不改 |
   | `frontend/src/components/changes/detail/change-agent-run-log.tsx` | `ChangeAgentRunLog` | 不改（桌面本就未挂载，见 Phase 4 声明） |
-  | `frontend/src/components/changes/detail/change-stage-header.tsx` | `WORKFLOW_STAGES` | 改（阶段条接线），导出 MUST 保留 |
+  | `frontend/src/components/changes/detail/change-stage-header.tsx` | `WORKFLOW_STAGES` | 复用不修改（组件本体不改；阶段条联动由页面层传参接线），导出 MUST 保留 |
   | `frontend/src/components/changes/detail/change-step-timeline.tsx` | `ChangeStepTimeline` | 仅桌面卸载，文件与导出 MUST 保留 |
   | `frontend/src/components/changes/detail/change-usage-card.tsx` | `ChangeUsageCard` | 改（抽共享取数供侧栏复用），导出与行为 MUST 保留 |
   | `frontend/src/components/changes/scope-audit-command-card.tsx` | `ScopeAuditCommandCard` | 改（换挂载点），导出与行为 MUST 保留 |
@@ -220,7 +242,7 @@ export interface ChangeTaskChecklistProps { tasks: TimelineTask[]; }
 | R-01 | 移动端因桌面组件被改而静默损坏（历史上有「组件契约被迁移破坏」先例） | P0 | 保留被复用组件的文件与导出签名；改造后跑移动端测试（`frontend/src/components/mobile/__tests__/mobile-change-detail.test.tsx`）与页面级测试；`ChangeStepTimeline` 仅卸载不重构 |
 | R-02 | 合并时间线口径在真实数据上表现与 fixture 不符（字段缺失、极端条数如 500+ 文件事件） | P1 | 纯函数以真实端点字段为准（`StepTimelineEntry`/`TimelineEvent`/`TimelineTask` 类型已核实）；补边界单测（空 steps / 空 events / 全无时间戳 / 非 tasks 域 checked 事件）；过程 tab 内时间线容器限高 + 超量折叠 |
 | R-03 | tab 隐藏内容导致发现性下降（用户找不到原来一屏能看到的东西） | P1 | 概览右信息栏提供产出/用量/会话/对账四组入口 + 计数；概览「最近动态」带「查看全部 →」；实施后请用户在真页面上做一次找东西验证 |
-| R-04 | 页面级既有测试大面积失败（3 个页面级文件 + 约 126 个 detail 用例中与挂载位置强相关的部分） | P1 | 断言面改造属本变更计划内工作（文件清单已列 `page-restore-assets.test.tsx` 改造 + 新增 `page-tabs.test.tsx`）；禁止为过测试而弱化语义断言（规则 9） |
+| R-04 | 页面级既有测试大面积失败（页面级 4 文件 + 约 126 个 detail 用例中与挂载位置强相关的部分） | P1 | 断言面改造属本变更计划内工作（文件清单已列页面级 4 文件：新增 `page-tabs.test.tsx`，改造 `page-restore-assets` / `page-last-signal` / `page-team-toggle`；detail 侧另有 3 个既有套件适配）；禁止为过测试而弱化语义断言（规则 9） |
 | R-05 | 原型与最终实现结构漂移（接线期静默降级） | P1 | 按 `PROTOTYPE.md`「批准后怎么接线」执行：结构对不齐处停机带截图裁决；原型改动后必须重编译并复核（`git diff` 对账门） |
 | R-06 | 取代 6 条活需求的记录不全 → 旧约束复潮（下次改动被知识注入按 active 约束拉回旧版式） | P1 | 按 D-009 逐条落 supersede 记录并在 requirements.md 建立承接表；交付后核对知识库索引状态 |
 | R-07 | 一次性交付面大（页面重写 + 新组件族 + 算法 + 测试 + 原型），中途风险集中 | P1 | Phase 分批执行、每 Phase 测试绿门控；Phase 2 四面板并行前先冻结 Phase 1 契约 |

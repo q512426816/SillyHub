@@ -229,3 +229,4 @@
 - knowledge|FR|需求|承接 → [fr/knowledge.md](fr/knowledge.md)
 - core|FR|需求|承接 → [fr/core.md](fr/core.md)
 - docs|FR|需求|承接 → [fr/docs.md](fr/docs.md)
+- app-workspace-pages|FR|需求|承接 → [fr/app-workspace-pages.md](fr/app-workspace-pages.md)

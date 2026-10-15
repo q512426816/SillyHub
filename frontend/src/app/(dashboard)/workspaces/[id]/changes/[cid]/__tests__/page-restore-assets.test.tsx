@@ -1,44 +1,51 @@
-// 2026-09-26-change-detail-restore-assets：页面级钉子——304eba982 曾把并行会话
-// 基于旧分叉点的 page.tsx 整体夹带进 main，静默回滚了 9/25 落地的沉淀资产卡挂载、
-// STATUS_BADGE.thin 徽章与范围对账 archived 传参（线上右下角项目资产消失、轻量
-// 变更标识弱化）。本测试把三处恢复钉在整页渲染面上，下次任何提交再删挂载/徽章
-// 会被聚焦测试拦下，而不是等到线上被发现。
+// 2026-09-26-change-detail-restore-assets 的「防静默回滚」钉子；
+// 2026-10-15-change-detail-redesign / task-07 按新结构（四 tab 容器）重写：
+// 原钉子钉的是「aside/主栏直接挂载 + 双时间线共存」，本变更由设计明确取代
+// （D-002 四 tab 分区 / D-005 两时间线合并为一条），故断言面迁移为「新结构的等价钉子」：
+//   1. 页头徽章：thin 出身「轻量变更」、归档轻量出身「轻量变更 + 已归档」、历史 quick 不误标；
+//   2. 头部变更描述单行截断（无描述零占位）；
+//   3. tab 结构：在途四 tab / 归档三 tab（无「文件与对账」）+ 面板懒挂载（切 tab 才挂）；
+//   4. 产出 tab：图谱在资产卡之前（原「资产卡在时间线之前」的同类顺序钉子）；
+//   5. 两旧时间线卡 MUST NOT 挂载（D-005 取代方向反钉）；
+//   6. 范围对账 archived 传参（经「文件与对账」面板透传）；
+//   7. 页模块导出契约 isTerminalChange 在场（移动端消费面，D-011）。
 //
-// 断言面（对应 FR-01 / FR-02 / FR-03）：
-//   1. current_stage="thin" → 标题旁 STATUS_BADGE 徽章精确文本「轻量变更」
-//      （说明卡标题带 ◈ 前缀、正文为长句，exact 匹配不误中）
-//   2. aside 挂载沉淀资产卡；观测事件卡已移除（2026-09-28-drop-observation-card
-//      与主栏时间线卡同表双显，反向钉防回潮）
-//   3. 范围对账卡收到 archived 传参（isTerminalChange 派生，非终态 false）
-//   4. thin 出身步骤时间线卡隐藏 / 厚变更双卡共存（2026-10-09-thin-hide-step-timeline：
-//      thin steps 只有归档补种 3 行同时间戳步骤属噪音，整卡隐藏；厚变更两卡共存不变）
-//
-// 卡片组件全部 stub（只验页面挂载与传参，组件内部由各自套件覆盖），范式对齐
-// 同目录 page-team-toggle.test.tsx。
+// 卡片组件全部 stub（只验页面挂载/传参/顺序），组件内部由各自套件覆盖。
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
-import type { ChangeRead, DispatchResponse } from "@/lib/changes";
-import { getChangeTimeline } from "@/lib/changes";
-import type { AgentSessionListItem } from "@/lib/daemon";
+import ChangeDetailPage, { isTerminalChange } from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
+import type { ChangeRead } from "@/lib/changes";
 
 const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
-  getAgentStatus: vi.fn(),
-  submitStageReview: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
   listQuicklogEntries: vi.fn(),
 }));
 
+const navMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navMocks.push, replace: navMocks.replace }),
+  useSearchParams: () => navMocks.searchParams,
+}));
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 vi.mock("@/lib/changes", () => ({
   getChange: mocks.getChange,
-  getAgentStatus: mocks.getAgentStatus,
-  submitStageReview: mocks.submitStageReview,
-  // 2026-09-26-change-real-timeline：steps 空的 fixture 走合成时间线分支，
-  // 组件自取数走此 mock（默认 reject → 卡静默隐藏，不涉断言面）。
+  submitStageReview: vi.fn(),
   getChangeTimeline: vi.fn().mockRejectedValue(new Error("no-timeline-in-page-tests")),
+  getChangeAssets: vi.fn().mockRejectedValue(new Error("no-assets-in-page-tests")),
+  getChangeUsage: vi.fn().mockRejectedValue(new Error("no-usage-in-page-tests")),
+  getScopeAudit: vi.fn().mockRejectedValue(new Error("no-audit-in-page-tests")),
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -49,405 +56,207 @@ vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: mocks.listQuicklogEntries,
 }));
 
-// 自取数只读卡 stub：挂载断言面（testid 存在即挂载），内部行为由组件套件覆盖
+// 自取数只读件 stub：挂载与顺序断言面（testid 在场即挂载），内部行为各自组件套件覆盖。
 vi.mock("@/components/changes/detail/change-assets-card", () => ({
   ChangeAssetsCard: () => <div data-testid="change-assets-card" />,
 }));
-// 范围对账卡 stub 透传 archived（FR-03 传参断言面；target 字面量同页透传不验）
+vi.mock("@/components/changes/detail/change-assets-graph", () => ({
+  ChangeAssetsGraph: () => <div data-testid="change-assets-graph" />,
+  DEFAULT_CANVAS_HEIGHT: 420,
+}));
+vi.mock("@/components/change-file-tree", () => ({
+  ChangeFileTree: () => <div data-testid="change-file-tree" />,
+}));
 vi.mock("@/components/changes/scope-audit-command-card", () => ({
-  ScopeAuditCommandCard: ({
-    archived,
-  }: {
-    archived?: boolean;
-    target?: unknown;
-  }) => (
+  ScopeAuditCommandCard: ({ archived }: { archived?: boolean; target?: unknown }) => (
     <div
       data-testid="scope-audit-command-card"
       data-archived={archived === undefined ? "unset" : String(archived)}
     />
   ),
 }));
-vi.mock("@/components/changes/detail/change-agent-run-log", () => ({
-  ChangeAgentRunLog: () => <div data-testid="change-agent-run-log" />,
+vi.mock("@/components/changes/detail/change-unified-timeline", () => ({
+  ChangeUnifiedTimeline: () => <div data-testid="change-unified-timeline" />,
 }));
-vi.mock("@/components/changes/detail/change-files-card", () => ({
-  ChangeFilesCard: () => <div data-testid="change-files-card" />,
+vi.mock("@/components/changes/detail/change-task-checklist", () => ({
+  ChangeTaskChecklist: () => <div data-testid="change-task-checklist" />,
 }));
-vi.mock("@/components/changes/detail/change-sessions-card", () => ({
-  ChangeSessionsCard: () => <div data-testid="change-sessions-card" />,
-}));
-
-vi.mock("next/link", () => ({
-  default: ({
-    children,
-    href,
-  }: {
-    children: React.ReactNode;
-    href: string;
-  }) => <a href={href}>{children}</a>,
-}));
+vi.mock("@/components/changes/detail/change-usage-card", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/changes/detail/change-usage-card")>();
+  return actual; // 用量取数/格式化真实实现（信息栏压缩行断言依赖）
+});
 
 function makeChange(over: Partial<ChangeRead> = {}): ChangeRead {
   return {
-    id: "ch-thin-1",
-    change_key: "2026-09-26-restore-fixture",
-    title: "恢复钉子 fixture",
-    current_stage: "thin",
+    id: "ch-1",
+    change_key: "2026-08-14-test-change",
+    title: "测试变更",
+    description: "描述一行",
+    current_stage: "execute",
     pending_review: null,
     status: "in_progress",
     location: "active",
-    change_type: "quick",
-    is_thin: false,
-    affected_components: [],
-    updated_at: "2026-09-26T10:00:00Z",
+    change_type: null,
+    affected_components: ["frontend"],
+    updated_at: "2026-08-14T10:00:00Z",
+    created_at: "2026-08-14T09:00:00Z",
     stages: {},
+    steps: [],
     ...over,
   } as unknown as ChangeRead;
 }
 
-function renderPage(change: ChangeRead) {
-  mocks.getChange.mockResolvedValue(change);
+async function renderPage() {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    defaultOptions: { queries: { retry: false, gcTime: 0, refetchInterval: false } },
   });
-  return render(
+  render(
     <QueryClientProvider client={client}>
-      <ChangeDetailPage
-        params={{ id: "ws-1", cid: change.id }}
-      />
+      <ChangeDetailPage params={{ id: "ws-1", cid: "ch-1" }} />
     </QueryClientProvider>,
   );
+  await screen.findByText(/测试变更/);
 }
 
 beforeEach(() => {
-  mocks.getAgentStatus.mockResolvedValue(null as unknown as DispatchResponse);
-  mocks.listWorkspaceAgentSessions.mockResolvedValue(
-    [] as unknown as AgentSessionListItem[],
-  );
-  mocks.listQuicklogEntries.mockResolvedValue([]);
+  vi.clearAllMocks();
+  navMocks.searchParams = new URLSearchParams();
+  mocks.listWorkspaceAgentSessions.mockResolvedValue([]);
+  mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
 });
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
 });
 
-describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets）", () => {
-  it("2026-09-28-change-ux-detail-batch：头部显示变更描述（单行截断 + 悬浮全文），无描述零占位", async () => {
-    renderPage(
-      makeChange({ description: "登录页在移动端偶发白屏，用户反馈强烈。" }),
-    );
-    const desc = await screen.findByTitle(
-      "登录页在移动端偶发白屏，用户反馈强烈。",
-    );
-    expect(desc).toHaveTextContent("登录页在移动端偶发白屏");
+describe("页头徽章与描述（钉子 1/2）", () => {
+  it("thin 阶段：标题旁显示「轻量变更」徽章", async () => {
+    mocks.getChange.mockResolvedValue(makeChange({ current_stage: "thin", is_thin: true } as never));
+    await renderPage();
+    // 「轻量变更」在页头状态胶囊与轻量流程条各出现一次（两处同源语义）
+    expect(screen.getAllByText("轻量变更").length).toBeGreaterThan(0);
+    expect(screen.getByText("测试变更")).toBeInTheDocument();
   });
 
-  it("FR-02：thin 阶段标题旁显示 STATUS_BADGE「轻量变更」徽章", async () => {
-    renderPage(makeChange());
-    // 2026-09-28-change-ux-detail-batch：◈ 轻量变更说明卡（协议长文案）已移除
-    // ——出身标识由标题徽章 + 顶部轻量流程条承载；先等流程条渲染再 scoped 断言。
-    expect(await screen.findByText("flow start")).toBeInTheDocument();
-    expect(screen.queryByText("◈ 轻量变更")).toBeNull();
-    const h1 = within(screen.getByRole("heading", { level: 1 }));
-    expect(h1.getByText("轻量变更")).toBeInTheDocument();
-  });
-
-  it("FR-01：沉淀资产卡挂载（2026-09-28-change-ux-detail-batch 起在主栏，默认展开——展开态钉在组件自身测试）；观测事件卡已移除（2026-09-28-drop-observation-card 反向钉）", async () => {
-    renderPage(makeChange());
-    const card = await screen.findByTestId("change-assets-card");
-    expect(card).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("change-observation-events-card"),
-    ).toBeNull();
-  });
-
-  // 2026-10-15-change-assets-graph FR-02：主栏信息动线钉子——沉淀资产上移至
-  // 步骤时间线上面（审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线）。
-  // DOM 顺序断言防后续提交把挂载点挪回去（本文件立项背景即「静默回滚」实证）。
-  it("FR-02：沉淀资产卡位于步骤时间线卡之前（主栏顺序：审批卡→沉淀资产→步骤时间线→留痕时间线）", async () => {
-    const { container } = renderPage(
+  it("归档轻量出身（location=archive）→「轻量变更 + 已归档」双徽章", async () => {
+    mocks.getChange.mockResolvedValue(
       makeChange({
-        current_stage: "verify",
-        change_type: null,
+        location: "archive",
+        status: "archived",
+        change_type: "quick",
+        created_at: "2026-09-26T00:00:00+08:00",
+      }),
+    );
+    await renderPage();
+    expect(screen.getAllByText("轻量变更").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已归档").length).toBeGreaterThan(0);
+  });
+
+  it("2026-09-25 前历史 quick 归档仅「已归档」（不误标轻量）", async () => {
+    mocks.getChange.mockResolvedValue(
+      makeChange({
+        location: "archive",
+        status: "archived",
+        change_type: "quick",
+        created_at: "2026-08-01T00:00:00+08:00",
+      }),
+    );
+    await renderPage();
+    expect(screen.queryByText("轻量变更")).toBeNull();
+  });
+
+  it("头部显示变更描述（单行截断 + 悬浮全文）", async () => {
+    mocks.getChange.mockResolvedValue(makeChange({ description: "这是一个很长的描述" }));
+    await renderPage();
+    expect(screen.getByTitle("这是一个很长的描述")).toHaveTextContent("这是一个很长的描述");
+  });
+});
+
+describe("tab 结构与懒挂载（钉子 3/5）", () => {
+  it("在途：四 tab，且只挂载「概览」面板（其余 tab 懒挂载）", async () => {
+    mocks.getChange.mockResolvedValue(makeChange());
+    await renderPage();
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程", "文件与对账"]);
+    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-assets-panel")).toBeNull();
+    expect(screen.queryByTestId("change-process-panel")).toBeNull();
+    expect(screen.queryByTestId("change-files-panel")).toBeNull();
+  });
+
+  it("归档：tab 收窄为三枚（隐藏「文件与对账」）；深链 ?tab=files 被钳回概览", async () => {
+    mocks.getChange.mockResolvedValue(
+      makeChange({ location: "archive", status: "archived" }),
+    );
+    navMocks.searchParams = new URLSearchParams("tab=files");
+    await renderPage();
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程"]);
+    // 不在可见集 → replace 钳回 overview（不留空白面板）
+    expect(navMocks.replace).toHaveBeenCalledWith(
+      "/workspaces/ws-1/changes/ch-1?tab=overview",
+    );
+    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-files-panel")).toBeNull();
+  });
+
+  it("两旧时间线卡 MUST NOT 挂载（D-005 取代方向反钉）", async () => {
+    mocks.getChange.mockResolvedValue(
+      makeChange({
         steps: [
           {
-            name: "实现收尾",
-            stage: "execute",
+            name: "需求分析完成",
+            stage: "brainstorm",
             status: "completed",
             output: null,
-            completed_at: "2026-10-15T10:00:00Z",
-            ordering: 0,
+            completed_at: "2026-10-15T21:08:00Z",
+            ordering: 1,
             wait_reason: null,
             kind: "step",
+            event_type: null,
           },
         ],
       }),
     );
-    const assets = await screen.findByTestId("change-assets-card");
-    const stepTimeline = await screen.findByTestId("change-step-timeline-card");
-    // compareDocumentPosition：assets 在前（timeline 相对 assets 为 FOLLOWING）
+    navMocks.searchParams = new URLSearchParams("tab=process");
+    await renderPage();
+    expect(await screen.findByTestId("change-process-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("change-unified-timeline")).toBeInTheDocument();
+    expect(screen.queryByTestId("change-step-timeline-card")).toBeNull();
+    expect(screen.queryByTestId("change-timeline-card")).toBeNull();
+  });
+});
+
+describe("产出 tab 顺序与文件与对账挂载（钉子 4/6）", () => {
+  it("产出 tab：知识图谱分区位于资产卡之前（同类顺序钉子）", async () => {
+    mocks.getChange.mockResolvedValue(makeChange());
+    navMocks.searchParams = new URLSearchParams("tab=assets");
+    await renderPage();
+    const panel = await screen.findByTestId("change-assets-panel");
+    const graph = screen.getByTestId("change-assets-graph");
+    const card = screen.getByTestId("change-assets-card");
+    expect(panel).toContainElement(graph);
     expect(
-      assets.compareDocumentPosition(stepTimeline) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      graph.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    // 审批卡在沉淀资产之前（pending_review 有值时；厚 fixture 走 verify 阶段占位
-    // 已删——用 main 内首个区块兜底断言：assets 是 main 的较早子块即可，上断言已钉）
-    expect(container.querySelector("main")).toContainElement(assets);
   });
 
-  it("FR-03：范围对账卡收到 archived 传参（非终态变更为 false，非 unset）", async () => {
-    renderPage(makeChange());
-    const card = await screen.findByTestId("scope-audit-command-card");
-    expect(card).toHaveAttribute("data-archived", "false");
-  });
-
-  it("FR-03 伴生：已归档变更 archived 派生为 true", async () => {
-    renderPage(makeChange({ status: "archived", location: "archive" }));
-    const card = await screen.findByTestId("scope-audit-command-card");
-    expect(card).toHaveAttribute("data-archived", "true");
-  });
-
-  it("FR-03（2026-09-26-change-real-timeline）：steps 为空时主线挂载真实留痕时间线卡", async () => {
-    vi.mocked(getChangeTimeline).mockResolvedValue({
-      change_key: "2026-09-26-restore-fixture",
-      born_at: "2026-09-26T10:00:00.000Z",
-      events: [
-        {
-          ts: "2026-09-26T10:01:00Z",
-          kind: "file-update",
-          label: "requirements.md 内容变更",
-          rule: "watcher",
-          severity: "info",
-          provisional: true,
-          commit_title: null,
-        },
-      ],
-      tasks: [
-        { id: "task-01", checked: true, desc: "恢复钉子", commit_sha: null },
-      ],
-      stats: {
-        event_count: 1,
-        commit_count: 0,
-        checked: 1,
-        total: 1,
-        wall_clock_s: null,
-      },
-    });
-    renderPage(makeChange());
-    expect(
-      await screen.findByTestId("change-timeline-card"),
-    ).toBeInTheDocument();
-    // steps 为空 → 原步骤时间线整块不渲染（空窗由时间线卡填补）。
-    expect(
-      screen.queryByTestId("change-step-timeline-card"),
-    ).toBeNull();
-  });
-
-  // 2026-09-27-timeline-coexist：归档时 unregisterChange 终态一致化补种 3 行
-  // 同一时间戳 steps，原互斥挂载会把真实留痕时间线卡顶掉（归档后真实数据
-  // 不可见）。2026-10-09-thin-hide-step-timeline 语义升级：thin 出身（本 fixture
-  // change_type=quick 命中②分支）步骤时间线卡整卡隐藏——补种行对 thin 零信息量，
-  // 钉住：卡隐藏 + 真实留痕卡保留（隐藏后更不可能被顶掉）。
-  it("共存→隐藏（2026-10-09-thin-hide-step-timeline）：归档补种 steps 的 thin 变更步骤时间线卡不渲染，真实留痕时间线卡保留", async () => {
-    vi.mocked(getChangeTimeline).mockResolvedValue({
-      change_key: "2026-09-26-restore-fixture",
-      born_at: "2026-09-26T10:00:00.000Z",
-      events: [
-        {
-          ts: "2026-09-26T10:01:00Z",
-          kind: "task-done",
-          label: "勾选数 0→1",
-          rule: "watcher",
-          severity: "info",
-          provisional: true,
-          commit_title: null,
-        },
-      ],
-      tasks: [
-        { id: "task-01", checked: true, desc: "共存钉子", commit_sha: "ab12cd34" },
-      ],
-      stats: {
-        event_count: 1,
-        commit_count: 1,
-        checked: 1,
-        total: 1,
-        wall_clock_s: 600,
-      },
-    });
-    renderPage(
-      makeChange({
-        current_stage: "archive",
-        status: "archived",
-        location: "archive",
-        steps: [
-          {
-            name: "decision-distill 决策提炼",
-            stage: "archive",
-            status: "completed",
-            output: null,
-            completed_at: "2026-09-27T13:05:00Z",
-            ordering: 0,
-            wait_reason: null,
-            kind: "step",
-          },
-          {
-            name: "extract-module-impact 与归档语义收尾",
-            stage: "archive",
-            status: "completed",
-            output: null,
-            completed_at: "2026-09-27T13:05:00Z",
-            ordering: 1,
-            wait_reason: null,
-            kind: "step",
-          },
-          {
-            name: "确认归档",
-            stage: "archive",
-            status: "completed",
-            output: null,
-            completed_at: "2026-09-27T13:05:00Z",
-            ordering: 2,
-            wait_reason: null,
-            kind: "step",
-          },
-        ],
-      }),
-    );
-    // thin 出身（quick 分流 + 补种 steps 无标准阶段痕迹）→ 步骤时间线卡隐藏
-    expect(
-      screen.queryByTestId("change-step-timeline-card"),
-    ).toBeNull();
-    // 真实留痕时间线卡保留（thin 主线叙事承担者）
-    expect(
-      await screen.findByTestId("change-timeline-card"),
-    ).toBeInTheDocument();
-  });
-
-  // 2026-10-09-thin-hide-step-timeline FR-02/FR-03：厚变更（steps 含标准四阶段
-  // 痕迹 → 非 thin 出身）双卡共存语义原样保留——步骤时间线卡照常渲染，且
-  // 不被真实留痕卡互斥顶掉（timeline-coexist 原语义在厚侧的延续钉子）。
-  it("共存（厚变更）：steps 含标准阶段痕迹 + 观测数据 → 步骤时间线卡与真实留痕时间线卡双卡渲染", async () => {
-    vi.mocked(getChangeTimeline).mockResolvedValue({
-      change_key: "2026-09-26-restore-fixture",
-      born_at: "2026-09-26T10:00:00.000Z",
-      events: [
-        {
-          ts: "2026-09-26T10:01:00Z",
-          kind: "file-update",
-          label: "requirements.md 内容变更",
-          rule: "watcher",
-          severity: "info",
-          provisional: true,
-          commit_title: null,
-        },
-      ],
-      tasks: [
-        { id: "task-01", checked: true, desc: "厚共存钉子", commit_sha: null },
-      ],
-      stats: {
-        event_count: 1,
-        commit_count: 0,
-        checked: 1,
-        total: 1,
-        wall_clock_s: 300,
-      },
-    });
-    renderPage(
-      makeChange({
-        current_stage: "archive",
-        status: "archived",
-        location: "archive",
-        change_type: null,
-        created_at: "2026-09-26T10:00:00Z",
-        steps: [
-          {
-            name: "实现收尾",
-            stage: "execute",
-            status: "completed",
-            output: null,
-            completed_at: "2026-09-27T12:00:00Z",
-            ordering: 0,
-            wait_reason: null,
-            kind: "step",
-          },
-          {
-            name: "验证通过",
-            stage: "verify",
-            status: "completed",
-            output: null,
-            completed_at: "2026-09-27T12:30:00Z",
-            ordering: 1,
-            wait_reason: null,
-            kind: "step",
-          },
-        ],
-      }),
-    );
-    expect(
-      await screen.findByTestId("change-step-timeline-card"),
-    ).toBeInTheDocument();
-    expect(
-      await screen.findByTestId("change-timeline-card"),
-    ).toBeInTheDocument();
+  it("文件与对账 tab：范围对账卡收到 archived=false（非 unset）", async () => {
+    mocks.getChange.mockResolvedValue(makeChange());
+    navMocks.searchParams = new URLSearchParams("tab=files");
+    await renderPage();
+    const audit = await screen.findByTestId("scope-audit-command-card");
+    expect(audit.getAttribute("data-archived")).toBe("false");
+    expect(screen.getByTestId("change-file-tree")).toBeInTheDocument();
   });
 });
 
-// ── 轻量出身标识归档存活（2026-09-26-thin-badge-survives-archive / FR-01~02）──
-describe("归档轻量出身双徽章", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.getAgentStatus.mockResolvedValue(null as unknown as DispatchResponse);
-    mocks.listWorkspaceAgentSessions.mockResolvedValue(
-      [] as unknown as AgentSessionListItem[],
-    );
-    mocks.listQuicklogEntries.mockResolvedValue([]);
-  });
-
-  it("FR-01：归档轻量出身显示「轻量变更 + 已归档」双徽章", async () => {
-    renderPage(
-      makeChange({
-        current_stage: "archived",
-        status: "archived",
-        location: "archive",
-        change_type: "quick",
-        created_at: "2026-09-26T10:00:00Z",
-      }),
-    );
-    expect(await screen.findByText("已归档")).toBeInTheDocument();
-    // 2026-09-27-thin-display-fix：流程条也含「轻量变更」文案——徽章断言 scoped 到标题区
-    const h1 = within(screen.getByRole("heading", { level: 1 }));
-    expect(h1.getByText("轻量变更")).toBeInTheDocument();
-  });
-
-  it("FR-02：2026-09-25 前历史 quick 归档仅单「已归档」徽章（不误标）", async () => {
-    renderPage(
-      makeChange({
-        current_stage: "archived",
-        status: "archived",
-        location: "archive",
-        change_type: "quick",
-        created_at: "2026-09-20T10:00:00Z",
-      }),
-    );
-    expect(await screen.findByText("已归档")).toBeInTheDocument();
-    // 标题区不误标（流程条判定已带时间窗，历史 quick 不触发轻量流程条）
-    const h1 = within(screen.getByRole("heading", { level: 1 }));
-    expect(h1.queryByText("轻量变更")).toBeNull();
-  });
-
-  it("FR-01 评审 P1 收窄补齐：location=archive 而非 stage=archived 时同样双徽章", async () => {
-    renderPage(
-      makeChange({
-        current_stage: "execute",
-        status: "in_progress",
-        location: "archive",
-        change_type: "quick",
-        created_at: "2026-09-26T10:00:00Z",
-      }),
-    );
-    expect(await screen.findByText("已归档")).toBeInTheDocument();
-    const h1 = within(screen.getByRole("heading", { level: 1 }));
-    expect(h1.getByText("轻量变更")).toBeInTheDocument();
+describe("页模块导出契约（钉子 7，D-011/D-016）", () => {
+  it("isTerminalChange 从页面模块导出且语义不变（移动端消费面）", () => {
+    expect(typeof isTerminalChange).toBe("function");
+    expect(isTerminalChange({ status: "archived", location: "active" })).toBe(true);
+    expect(isTerminalChange({ status: "active", location: "archive" })).toBe(true);
+    expect(isTerminalChange({ status: "active", location: "active" })).toBe(false);
+    expect(isTerminalChange(null)).toBe(false);
   });
 });

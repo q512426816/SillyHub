@@ -19,6 +19,24 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ChangeDetailPage from "@/app/(dashboard)/workspaces/[id]/changes/[cid]/page";
+// 2026-10-15-change-detail-redesign / task-07：页面改为 tab 容器后，页面本体直接消费
+// next/navigation（useRouter 做 ?tab= 钳制、useSearchParams 读唯一源）——测试需注入
+// app-router 上下文，范式对齐同层列表页 page.test.tsx（useRouter/useSearchParams mock）。
+const navMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navMocks.push, replace: navMocks.replace }),
+  useSearchParams: () => navMocks.searchParams,
+}));
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 import type { ChangeRead, DispatchResponse } from "@/lib/changes";
 import type { AgentSessionListItem } from "@/lib/daemon";
 
