@@ -114,15 +114,17 @@ describe('formatSemver', () => {
 // ── MIN_VERSIONS（对照 test_version.py:66-71 TestMinVersions，1 用例）──
 
 describe('MIN_VERSIONS', () => {
-  // test_version.py:67-71 test_has_three_providers；2026-10-15-dsh-engine-acp task-01 增 dsh 后 5 条目
-  it('恰好 5 个 provider，含 claude / codex / copilot / pi / dsh', () => {
-    expect(Object.keys(MIN_VERSIONS)).toHaveLength(5);
+  // test_version.py:67-71 test_has_three_providers
+  it('恰好 6 个 provider，含 claude / codex / copilot / pi / dsh / zcode', () => {
+    expect(Object.keys(MIN_VERSIONS)).toHaveLength(6);
     expect(MIN_VERSIONS.claude).toEqual([2, 0, 0]);
     expect(MIN_VERSIONS.codex).toEqual([0, 100, 0]);
     expect(MIN_VERSIONS.copilot).toEqual([1, 0, 0]);
     // ql-20260905-001：pi 门禁实装——PROVIDER_SPECS.pi.minVersion 声明 0.81.0
     // 但此前本表缺条目，checkMinVersion('pi', v) 恒 null，门禁从未生效。
     expect(MIN_VERSIONS.pi).toEqual([0, 81, 0]);
+    // dsh-engine-acp task-01：DeepSeek Harness 版本门。
+    expect(MIN_VERSIONS.dsh).toEqual([0, 2, 1]);
     // 2026-10-15-dsh-engine-acp（D-002）：dsh 0.2.1 最低版本门，低于警告不硬拒。
     expect(MIN_VERSIONS.dsh).toEqual([0, 2, 1]);
   });
