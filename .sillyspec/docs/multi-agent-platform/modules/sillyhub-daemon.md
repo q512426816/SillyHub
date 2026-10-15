@@ -162,6 +162,7 @@ pm；posix: ../lib/node_modules]，ql-20260904-M4 补标准安装器布局）、
 - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
 - 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend-
 - 2026-10-14-turn-anchor-cache-eviction | 动机：轮锚快照内存缓存 _lastTreeBySession 只 set 不 delete，会话终结无清理（对照同文件 
+- 2026-10-15-fix-ci-red | main 分支 CI 红灯灭火：daemon api-types 漂移 + 前端菜单测试数量锚过期，纯对齐修复无行为变更
 
 ## 文件结构更新（2026-09-07-arch-large-file-split）
 

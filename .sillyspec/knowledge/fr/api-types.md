@@ -224,3 +224,36 @@ created_at: 2026-10-08T17:55:09.787Z
 摘要：交付面审查
 全文：.sillyspec/changes/archive/2026-10-14-ci-red-batch-fix/requirements.md#FR-04
 最近确认：ae2b08bd91813dbb3a7ede84d07b006e68ee85f6
+
+## FR-api-types-019 sillyhub-daemon/src/api-types.ts 与 backend/openapi.json 重新生成对齐，pnpm gen:types:check 本地通过
+变更：2026-10-15-fix-ci-red
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-fix-ci-red/requirements.md#FR-01
+最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
+
+## FR-api-types-020 menu-permissions.test.ts 与 permission.test.ts 数量锚按源码现值更新（组长度/system 区条数/权限镜像长度/FR-02 清单），仅这两个测试文件全绿
+变更：2026-10-15-fix-ci-red
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-fix-ci-red/requirements.md#FR-02
+最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-fix-ci-red:flow:测试绑定FR-02
+  tests: frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 数据完整性」 | frontend/src/lib/__tests__/permission.test.ts「FR-06 #3: platform admin sees all 6 entries in 'system' section」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-fix-ci-red
+  status: active
+
+## FR-api-types-021 提交推送后 main 上 daemon-ci 与 frontend-ci 变绿
+变更：2026-10-15-fix-ci-red
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-fix-ci-red/requirements.md#FR-03
+最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6

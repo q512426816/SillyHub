@@ -3064,3 +3064,11 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：95d37f93be47e223ffc6a1f405535b13f7de5d20
 理由：最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
+
+## D-unmapped-007@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-15-fix-ci-red
+原编号：D-001@v1
+锚点：未记录
+最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
+理由：最大风险：CI 的 daemon 测试/构建消费新类型暴露未知类型错——已本地跑 `pnpm -C sillyhub-daemon typecheck` 零错兜住。试过但放弃：无（未尝试其它方案，直接对齐是既定成功标准）。

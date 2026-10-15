@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-fix-ci-red",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-fix-ci-red:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/__tests__/menu-permissions.test.ts「MENU_PERMISSION_GROUPS 数据完整性」",
+        "frontend/src/lib/__tests__/permission.test.ts「FR-06 #3: platform admin sees all 6 entries in 'system' section」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-fix-ci-red"
+    }
+  ]
+}
