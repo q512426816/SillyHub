@@ -4,6 +4,11 @@ substeps:
   artifacts: done
   ledger: done
   patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -34,7 +39,7 @@ input: >-
 autopilot: false
 prestage_ack: false
 baseline_commit: b0215bd0052d720141f9cbca73fbbed276d8d907
-updatedAt: '2026-10-15T08:32:16.618Z'
+updatedAt: '2026-10-15T08:54:06.051Z'
 cross_baselines:
   sillyspec: 059c8ccfbee0578220365b1686c4602891c55e64
 baseline_sha256: 70a0e3dfb44b4fbc772137667a5cdf11bf39113c8b15676de8ba8f0fd76629d5

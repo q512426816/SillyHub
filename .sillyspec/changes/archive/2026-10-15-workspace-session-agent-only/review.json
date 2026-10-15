@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-workspace-session-agent-only",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "add1712b21ebc572ce84ff4e2436ed07500aba54",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（维持前轮裁决：可接受；本轮无代码改动，四处绑定在途守卫与浮层按渲染时 bindings 重算未变）",
+    "并发": "ok（维持前轮裁决：可接受；本变更无写路径，staleTime 60s 旧绑定窗口为有界降级）",
+    "切换": "ok（前轮修复的 pickerWorkspaceId 兜底复位未再改动；本轮唯一提交为 docs-only）",
+    "作用域": "ok（维持前轮裁决：可接受；绑定读取失败=无绑定降级、绑定离线/不可见不换机器不落全机器列表、PPM 不纳入、非工作区旧 machineId+agent 双备齐均不变）"
+  },
+  "reviewedAt": "2026-10-15T16:52:11+08:00"
+}

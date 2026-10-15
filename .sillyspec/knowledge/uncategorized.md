@@ -41,3 +41,6 @@ SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` �
 ## 【待确认】.zcode 部分 skill 文件在 main 是已跟踪文件：git rm --cached 会把分支做成「删除态」
 
 `.zcode` 整体在 .gitignore，但 sillyhub-docker-deploy 等 skill 文件历史上已入库跟踪（gitignore 对已跟踪文件无效；`git ls-tree main -- <path>` 可判）。worktree 里改这类文件后 `git add` 被拒（按 ignore 规则报错，需 -f）；若误跑 `git rm --cached` 再 amend，分支相对 main 变成 375 行全删——merge 会把 skill 文件从 main 抹掉。正确姿势：确认 tracked 后 `git add -f`，diff main..HEAD --stat 应显示 +N 修改而非 N deletions。来源：2026-10-14-deploy-release-notes task-06 收口提交实操。
+
+## monkeypatch has_permission 必须双 patch（auth_deps 导入时绑定 + rbac 模块属性）
+`backend/app/core/auth_deps.py:40` 是 `from app.modules.auth.rbac import has_permission`（导入时绑定）——只 patch `app.modules.auth.rbac.has_permission` 不会影响 `require_permission` 门控依赖（改的是 rbac 模块属性，auth_deps 里的名字仍指向原函数，403 用例会被放行成 200）；只 patch `auth_deps.has_permission` 又管不到端点函数内联 `from app.modules.auth.rbac import has_permission` 的取值源。写权限相关端点测试（mock 放行/拒绝）时两处都要 patch（来源 task-02，2026-10-15-platform-knowledge-search；实证：test_knowledge_search_requires_knowledge_read 首轮 200 未 403）。
