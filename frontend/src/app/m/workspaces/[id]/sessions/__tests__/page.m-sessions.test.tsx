@@ -88,33 +88,43 @@ vi.mock("@/components/mobile/mobile-session-list", () => ({
 const pickerStub = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
 }));
-vi.mock("@/components/sessions/pre-session-picker", () => ({
-  PreSessionPicker: (props: Record<string, unknown>) => {
-    pickerStub.props = props;
-    return (
-      <div
-        data-testid="pre-picker-stub"
-        data-open={String(props.open)}
-        data-variant={String(props.variant)}
-      >
-        <button
-          type="button"
-          data-testid="stub-picker-pick"
-          onClick={() => (props.onPick as (rt: string) => void)("rt-1")}
+// 2026-10-15-workspace-session-agent-only：本页从该模块 import 解析纯函数
+//（boundMachineIdFor）——importOriginal 展开保真，仅桩组件本体；追加透出
+// boundMachineId 属性（绑定模式断言锚）。
+vi.mock("@/components/sessions/pre-session-picker", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/components/sessions/pre-session-picker")
+  >();
+  return {
+    ...actual,
+    PreSessionPicker: (props: Record<string, unknown>) => {
+      pickerStub.props = props;
+      return (
+        <div
+          data-testid="pre-picker-stub"
+          data-open={String(props.open)}
+          data-variant={String(props.variant)}
+          data-bound={props.boundMachineId ?? ""}
         >
-          选定智能体
-        </button>
-        <button
-          type="button"
-          data-testid="stub-picker-cancel"
-          onClick={() => (props.onCancel as () => void)()}
-        >
-          取消
-        </button>
-      </div>
-    );
-  },
-}));
+          <button
+            type="button"
+            data-testid="stub-picker-pick"
+            onClick={() => (props.onPick as (rt: string) => void)("rt-1")}
+          >
+            选定智能体
+          </button>
+          <button
+            type="button"
+            data-testid="stub-picker-cancel"
+            onClick={() => (props.onCancel as () => void)()}
+          >
+            取消
+          </button>
+        </div>
+      );
+    },
+  };
+});
 
 const panelStub = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
@@ -214,6 +224,13 @@ vi.mock("@/lib/api/llm-providers", async () => {
   return { ...actual, listProviders: providersApi.listProviders };
 });
 
+// 2026-10-15-workspace-session-agent-only：本页取当前用户对工作区的绑定
+//（fetchMyBinding 单条查询）——绑定机器经 boundMachineId 注入 Picker。
+const bindingApi = vi.hoisted(() => ({ fetchMyBinding: vi.fn() }));
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBinding: (...args: unknown[]) => bindingApi.fetchMyBinding(...args),
+}));
+
 import MobileSessionsPage from "@/app/m/workspaces/[id]/sessions/page";
 import { MobileWorkspaceContext } from "@/app/m/workspaces/[id]/layout";
 import type { Workspace } from "@/lib/workspaces";
@@ -278,6 +295,9 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
       refetch: vi.fn(),
     });
     providersApi.listProviders.mockResolvedValue([makeProvider()]);
+    // 默认无绑定（原两步流程零回归）；绑定用例内覆写。
+    bindingApi.fetchMyBinding.mockReset();
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
     nav.push.mockReset();
     nav.replace.mockReset();
     nav.params = { id: "ws-1" };
@@ -354,6 +374,51 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
     // 列表空态 onNew 接线（MobileSessionList 契约入口）→ 同样打开
     fireEvent.click(screen.getByTestId("stub-session-new"));
     expect(pickerStub.props?.open).toBe(true);
+  });
+
+  // ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（跳过机器步） ──
+  // 移动端天然全在工作区上下文：有绑定 → Picker 绑定模式（直接智能体步）；
+  // 无绑定 → 原两步（零回归）。
+
+  it("FAB（有绑定 ws-1→m-1）→ 贴底抽屉绑定模式：boundMachineId 透出（不弹机器步）", async () => {
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "u-1",
+      daemon_id: "m-1",
+      runtime_id: null,
+      root_path: "C:/proj",
+      path_source: "manual",
+      shared: false,
+      synced_at: null,
+      last_scan_at: null,
+      init_synced_at: null,
+      init_synced_spec_version: null,
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(bindingApi.fetchMyBinding).toHaveBeenCalledWith("ws-1");
+    });
+    fireEvent.click(screen.getByTestId("m-sessions-fab"));
+    expect(pickerStub.props?.open).toBe(true);
+    expect(pickerStub.props?.variant).toBe("bottomSheet");
+    // 绑定数据落定后 boundMachineId 透出（绑定模式：Picker 内部跳过机器步）。
+    await waitFor(() => {
+      expect(pickerStub.props?.boundMachineId).toBe("m-1");
+    });
+    // 列表空态 onNew 入口同源（同一 Picker 实例 props）。
+    fireEvent.click(screen.getByTestId("stub-picker-cancel"));
+    fireEvent.click(screen.getByTestId("stub-session-new"));
+    expect(pickerStub.props?.boundMachineId).toBe("m-1");
+  });
+
+  it("零回归：无绑定（fetchMyBinding null）→ boundMachineId 为 null（原两步流程）", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(bindingApi.fetchMyBinding).toHaveBeenCalledWith("ws-1");
+    });
+    fireEvent.click(screen.getByTestId("m-sessions-fab"));
+    expect(pickerStub.props?.open).toBe(true);
+    expect(pickerStub.props?.boundMachineId ?? null).toBeNull();
   });
 
   it("providers 同 key 同源：[llmProviders, floating-session] 落缓存 + staleTime 30s", async () => {

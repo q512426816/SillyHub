@@ -46,7 +46,10 @@ import {
 } from "@/components/daemon/session-panel";
 import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
 import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
+import {
+  PreSessionPicker,
+  boundMachineIdFor,
+} from "@/components/sessions/pre-session-picker";
 import { listProviders, type LlmProviderRead } from "@/lib/api/llm-providers";
 import {
   type GroupChatListItemRead,
@@ -54,6 +57,9 @@ import {
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+// 2026-10-15-workspace-session-agent-only：当前用户对工作区的绑定（绑定机器
+// 解析数据源——单条轻查询，与桌面门户的批量 bindings 各取所需）。
+import { fetchMyBinding } from "@/lib/workspace-binding";
 
 export default function MobileWorkspaceSessionsPage() {
   const params = useParams<{ id: string }>();
@@ -75,6 +81,19 @@ export default function MobileWorkspaceSessionsPage() {
   const providers: LlmProviderRead[] = useMemo(
     () => providersQ.data ?? [],
     [providersQ.data],
+  );
+
+  // 2026-10-15-workspace-session-agent-only：本页天然全在工作区上下文——当前
+  // 用户对该工作区的绑定（fetchMyBinding 内部已 catch 降级 null）解析绑定机器，
+  // 命中则新建浮层转「绑定模式」（跳过机器步直接选智能体）；无绑定回落原两步。
+  const bindingQ = useQuery({
+    queryKey: ["my-workspace-binding", workspaceId],
+    queryFn: () => fetchMyBinding(workspaceId),
+    staleTime: 60_000,
+  });
+  const boundMachineId = boundMachineIdFor(
+    bindingQ.data ? [bindingQ.data] : [],
+    workspaceId,
   );
 
   // ── 新建两步浮层 + 页内预会话态（见文件头；约束：不新增 /sessions/new 路由）──
@@ -274,11 +293,14 @@ export default function MobileWorkspaceSessionsPage() {
         <Plus className="h-6 w-6" aria-hidden />
       </button>
 
-      {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉） */}
+      {/* 新建两步浮层（贴底抽屉形态；machines 同源注入，两步逻辑零分叉）。
+          2026-10-15-workspace-session-agent-only：有绑定机器时转绑定模式
+          （不择机器，直接选智能体）。 */}
       <PreSessionPicker
         variant="bottomSheet"
         open={pickerOpen}
         machines={machines}
+        boundMachineId={boundMachineId}
         onCancel={() => setPickerOpen(false)}
         onPick={handlePickerPick}
       />
