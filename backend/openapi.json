@@ -69,6 +69,92 @@
         }
       }
     },
+    "/api/server-logs": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Server Logs",
+        "description": "服务器日志尾部读取（结构化解析 + 文件清单）。",
+        "operationId": "server_logs_api_server_logs_get",
+        "parameters": [
+          {
+            "name": "lines",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "title": "Lines"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerLogsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/server-logs/download": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Download Server Log",
+        "description": "下载白名单内的日志文件（当前+轮转归档）。",
+        "operationId": "download_server_log_api_server_logs_download_get",
+        "parameters": [
+          {
+            "name": "file",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "File"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/daemon/install.sh": {
       "get": {
         "tags": [
@@ -21763,6 +21849,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GovernanceActionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/knowledge/search": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Search Knowledge",
+        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，\n  vector_router.py 同款）；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。",
+        "operationId": "search_knowledge_api_workspaces__workspace_id__knowledge_search_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearchIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSearchOut"
                 }
               }
             }
@@ -52064,6 +52204,108 @@
         "title": "KnowledgeProposeIn",
         "description": "POST /knowledge/propose 请求体（手工录入候选）。"
       },
+      "KnowledgeSearchIn": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "KnowledgeSearchIn",
+        "description": "检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。"
+      },
+      "KnowledgeSearchOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSearchResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "model_ready": {
+            "type": "boolean",
+            "title": "Model Ready",
+            "default": true
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "KnowledgeSearchOut",
+        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"
+      },
+      "KnowledgeSearchResultItem": {
+        "properties": {
+          "spec_path": {
+            "type": "string",
+            "title": "Spec Path"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "anchor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor"
+          },
+          "snippet": {
+            "type": "string",
+            "title": "Snippet"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "spec_path",
+          "kind",
+          "title",
+          "snippet",
+          "score"
+        ],
+        "title": "KnowledgeSearchResultItem",
+        "description": "单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。"
+      },
       "KnowledgeStatsOut": {
         "properties": {
           "coverage": {
@@ -53521,6 +53763,91 @@
         ],
         "title": "LocalSnapshotResponse",
         "description": "本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。"
+      },
+      "LogEntry": {
+        "properties": {
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event"
+          },
+          "fields": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Fields",
+            "default": {}
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          },
+          "parse_error": {
+            "type": "boolean",
+            "title": "Parse Error",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "LogEntry",
+        "description": "单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。"
+      },
+      "LogFileInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "mtime": {
+            "type": "number",
+            "title": "Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "size",
+          "mtime"
+        ],
+        "title": "LogFileInfo"
       },
       "LoginRequest": {
         "properties": {
@@ -69015,6 +69342,60 @@
         ],
         "title": "ScopeWorkspaceStatus",
         "description": "scope 工作区状态条目（design §7 逐字）。\n\n组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——\n``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，\nUB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测\n三态。"
+      },
+      "ServerLogsResponse": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LogEntry"
+            },
+            "type": "array",
+            "title": "Entries",
+            "default": []
+          },
+          "total_lines": {
+            "type": "integer",
+            "title": "Total Lines",
+            "default": 0
+          },
+          "returned": {
+            "type": "integer",
+            "title": "Returned",
+            "default": 0
+          },
+          "available_files": {
+            "items": {
+              "$ref": "#/components/schemas/LogFileInfo"
+            },
+            "type": "array",
+            "title": "Available Files",
+            "default": []
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint"
+          }
+        },
+        "type": "object",
+        "title": "ServerLogsResponse"
       },
       "SessionAutoResumeUpdateRequest": {
         "properties": {

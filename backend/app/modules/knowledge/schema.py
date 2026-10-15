@@ -610,3 +610,36 @@ class VectorSearchOut(BaseModel):
     results: list[VectorSearchResultItem]
     model_ready: bool = True
     reason: str | None = None
+
+
+# ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────
+# 契约见 design.md「接口定义」：results 条目为可展示的召回 {spec_path, kind, title,
+# anchor, snippet, score}；docs/ 类结果已按 SCAN_DOCS_READ 服务端过滤（D-005@v1）；
+# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因）。
+
+
+class KnowledgeSearchIn(BaseModel):
+    """检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。"""
+
+    query: str
+    limit: int = 20
+
+
+class KnowledgeSearchResultItem(BaseModel):
+    """单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。"""
+
+    spec_path: str
+    kind: str
+    title: str
+    anchor: str | None = None
+    snippet: str
+    score: float
+
+
+class KnowledgeSearchOut(BaseModel):
+    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"""
+
+    ok: bool = True
+    results: list[KnowledgeSearchResultItem]
+    model_ready: bool = True
+    reason: str | None = None

@@ -21,6 +21,15 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.health.log_reader import (
+    DEFAULT_LOG_LINES,
+    LOG_FILE_WHITELIST,
+    ServerLogsResponse,
+    list_log_files,
+    normalize_lines,
+    parse_log_lines,
+    read_log_tail,
+)
 from app.modules.health.schema import (
     DependencyStatus,
     HealthResponse,
@@ -131,3 +140,55 @@ async def system_status(
         milestones=milestones,
         users=users,
     )
+
+
+# ── 服务器日志展示/下载（2026-10-15-server-logs-panel task-02 / D-003@v1）──────
+# 复用 system_status:read（D-004@v1）；文件路径经 get_log_file_path() 单一源；
+# 文件名白名单硬校验（防目录遍历）。
+
+
+@router.get("/server-logs", response_model=ServerLogsResponse)
+async def server_logs(
+    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
+    lines: int = DEFAULT_LOG_LINES,
+) -> ServerLogsResponse:
+    """服务器日志尾部读取（结构化解析 + 文件清单）。"""
+    from app.core.logging import get_log_file_path
+
+    n = normalize_lines(lines)
+    path = get_log_file_path()
+    raw_lines, total = read_log_tail(path, n)
+    entries = parse_log_lines(raw_lines)
+    exists = path.exists()
+    return ServerLogsResponse(
+        file=path.name if exists else None,
+        entries=entries,
+        total_lines=total,
+        returned=len(entries),
+        available_files=list_log_files(path.parent),
+        hint=None if exists else "日志文件尚未生成（产生首条日志后可见）",
+    )
+
+
+@router.get("/server-logs/download")
+async def download_server_log(
+    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
+    file: str = "",
+):
+    """下载白名单内的日志文件（当前+轮转归档）。"""
+    from fastapi.responses import FileResponse, JSONResponse
+
+    from app.core.logging import get_log_file_path
+
+    if file not in LOG_FILE_WHITELIST:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "非法的日志文件名（仅支持 backend.log 与轮转归档）。"},
+        )
+    path = get_log_file_path().parent / file
+    if not path.exists() or not path.is_file():
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "日志文件不存在。"},
+        )
+    return FileResponse(path, media_type="text/plain", filename=file)

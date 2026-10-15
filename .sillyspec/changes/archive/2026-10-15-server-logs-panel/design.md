@@ -33,7 +33,7 @@ scale: "large"  # 依据=用户显式要求完整流程（CLAUDE.md 规则 3：�
 **Wave 1（可并行两簇）**
 
 簇 A · 后端日志落盘（task-01）：
-- backend/app/core/logging.py：模块级常量 `LOG_FILE_NAME="backend.log"`、`LOG_MAX_BYTES=5_000_000`、`LOG_BACKUP_COUNT=3`；新增 `FileWriter` processor **复用同一 JSONRenderer 实例**渲染行文本（`self._renderer = JSONRenderer()`，调用 `self._renderer(logger, method, event_dict)` 取字符串写文件——不自行 json.dumps，保证与 stderr 输出逐字一致，含中文/回溯等）；插在 processor 链 JSONRenderer **之前**（D-006@v1）；超限轮转 rename 链；写失败捕获降级。`get_log_file_path()` 导出当前文件绝对路径（health 侧单一源消费）。
+- backend/app/core/logging.py：模块级常量 `LOG_FILE_NAME="backend.log"`、`LOG_MAX_BYTES=5_000_000`、`LOG_BACKUP_COUNT=3`；新增 `FileWriter` processor **复用同一 JSONRenderer 实例**渲染行文本（`self._renderer = JSONRenderer()`，调用 `self._renderer(logger, method, event_dict)` 取字符串写文件——不自行 json.dumps，保证与 stderr 输出逐字一致，含回溯等；注意 JSONRenderer 默认 ensure_ascii=True，中文以转义形态落盘/输出，解析后无损——与既有 stderr 行为一致）；插在 processor 链 JSONRenderer **之前**（D-006@v1）；超限轮转 rename 链；写失败捕获降级。`get_log_file_path()` 导出当前文件绝对路径（health 侧单一源消费）。
 - **文件句柄策略（审查修正②）**：per-write `open(path, "a", encoding="utf-8")` 即开即关——常驻句柄在 Windows 会阻断 rename 导致轮转永久失败（永不轮转），即开即关是跨平台正确性要件（CLAUDE.md 规则 13）。
 - 文件目录：backend/app/core/config.py 增 `log_dir: str = ""`；**解析走 paths.py 惯例（审查修正⑤）**——paths.py 增 `resolve_log_dir(raw)`（空=默认 `<repo_root()/data/logs` 绝对路径，非空相对值对 repo_root 解析，绝对路径原样），对齐 resolve_spec_data_root 模式；configure_logging 调 resolve_log_dir + mkdir(parents=True, exist_ok=True)，建目录失败降级 stderr-only（D-001@v1 故障面）。
 - 轮转实现：`size + len(line) > max_bytes` 时 `.2→.3`、`.1→.2`、`log→.1`、新写 log；超 backup_count 的最旧已随 rename 链删除；rename 失败捕获（继续写当前文件，下一轮再试）。
@@ -63,11 +63,16 @@ scale: "large"  # 依据=用户显式要求完整流程（CLAUDE.md 规则 3：�
 |---|---|---|
 | 修改 | backend/app/core/logging.py | FileWriter processor + 常量 + get_log_file_path（producer：文件路径单点；consumer：health/log_reader） |
 | 修改 | backend/app/core/config.py | log_dir 配置项（默认空=repo_root()/data/logs） |
+| 修改 | backend/app/core/paths.py | resolve_log_dir(raw) 解析器（路径惯例，审查修正⑤） |
 | 新增 | NEW:backend/app/modules/health/log_reader.py | tail 读取/JSON 解析/文件白名单 |
 | 修改 | backend/app/modules/health/router.py | GET /api/server-logs + GET /api/server-logs/download |
+| 修改 | backend/openapi.json | gen:types 契约导出（两新端点 schema 入生成物，规则 21） |
+| 修改 | frontend/src/lib/api-types.ts | gen:types 再生成（ServerLogsResponse 类型，规则 21 禁手写） |
+| 修改 | sillyhub-daemon/src/api-types.ts | gen:types daemon 端契约钉子（闸门⑨双端同提交，plan 审查 gap1 落实） |
+| 修改 | .gitignore | 增 data/logs/ 忽略（日志运行产物不入版本控制，task-01 落盘配套） |
 | 新增 | NEW:backend/tests/test_server_log_filer.py | 落盘/轮转/降级测试 |
 | 新增 | NEW:backend/tests/test_server_logs_api.py | 端点测试（tail/解析/白名单/三态） |
-| 修改 | frontend/src/lib/health.ts | getServerLogs/downloadLogFile 数据层 |
+| 修改 | frontend/src/lib/health.ts | getServerLogs/downloadLogFile 数据层（类型引用 api-types 生成物） |
 | 新增 | NEW:frontend/src/components/server-log-panel.tsx | 日志卡组件 |
 | 新增 | NEW:frontend/src/components/__tests__/server-log-panel.test.tsx | 组件测试 |
 | 修改 | frontend/src/app/(dashboard)/admin/server-status/page.tsx | 删统计卡+集成本组件 |

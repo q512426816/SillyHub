@@ -36,6 +36,9 @@ from app.modules.knowledge.schema import (
     KnowledgeMergeIn,
     KnowledgeMergeResult,
     KnowledgeProposeIn,
+    KnowledgeSearchIn,
+    KnowledgeSearchOut,
+    KnowledgeSearchResultItem,
     KnowledgeStatsOut,
     KnowledgeUpdateIn,
     MergePreviewOut,
@@ -449,6 +452,76 @@ async def post_knowledge_governance_action(
         {"from": payload.from_domain, "to": payload.to_domain},
     )
     return GovernanceActionOut(**result)
+
+
+# ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）──────
+# 声明序铁律：本字面量路由必须在下方 GET /knowledge/{filename:path} 通配之前
+# 注册（本端点方法为 POST、通配为 GET，Starlette 按方法判全量匹配——声明序对
+# POST 非必需，但沿用既有保守口径零成本，防未来加 GET 变体被吞）。
+
+_QUERY_MAX_CHARS = 4000  # 与 CLI 向量端点同款截断（vector_router.py）
+_SEARCH_LIMIT_MIN, _SEARCH_LIMIT_MAX, _SEARCH_LIMIT_DEFAULT = 1, 50, 20
+
+
+@router.post("/knowledge/search", response_model=KnowledgeSearchOut)
+async def search_knowledge(
+    workspace_id: uuid.UUID,
+    payload: KnowledgeSearchIn,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
+) -> KnowledgeSearchOut:
+    """知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
+
+    - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
+      vector_router.py 同款）；
+    - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+      权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+      3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
+    """
+    from fastapi.concurrency import run_in_threadpool
+
+    from app.core.config import get_settings
+    from app.modules.auth.rbac import has_permission
+    from app.modules.knowledge.search import search_sync
+    from app.modules.knowledge.vector_search import get_embedder
+    from app.modules.workspace.service import WorkspaceService
+
+    query = payload.query.strip()[:_QUERY_MAX_CHARS]
+    limit = max(
+        _SEARCH_LIMIT_MIN, min(_SEARCH_LIMIT_MAX, int(payload.limit or _SEARCH_LIMIT_DEFAULT))
+    )
+    workspace = await WorkspaceService(session).get(workspace_id)  # 未知 → 404
+    spec_root = await KnowledgeService(session)._spec_content_root(workspace)
+    settings = get_settings()
+    embedder, embedder_error = get_embedder(settings.knowledge_embedding_model)
+    can_read_docs = await has_permission(
+        session,
+        user=user,
+        permission=Permission.SCAN_DOCS_READ,
+        workspace_id=workspace_id,
+    )
+    out = await run_in_threadpool(
+        search_sync,
+        spec_root,
+        str(workspace_id),
+        query,
+        limit * 3,
+        embedder,
+        settings.knowledge_embedding_model,
+        embedder_error=embedder_error,
+    )
+    filtered = [
+        KnowledgeSearchResultItem(**item)
+        for item in out["results"]
+        if can_read_docs or not str(item["spec_path"]).startswith("docs/")
+    ]
+    return KnowledgeSearchOut(
+        ok=True,
+        results=filtered[:limit],
+        model_ready=out["model_ready"],
+        reason=out["reason"],
+    )
 
 
 @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)

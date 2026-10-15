@@ -426,3 +426,113 @@ supersedes：D-005@v1
 锚点：未记录
 最近确认：95d37f93be47e223ffc6a1f405535b13f7de5d20
 理由：最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
+
+## D-backend-001@v1 检索端点新建（平台用户侧），不复用 CLI 的 shpsync_ 端点
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-001@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：现有端点（2026-10-15-platform-vector-search 落地）只接受 shpsync_ workspace token（CLI 契约固化，非 shpsync_ 一律 403），且语料只索引 knowledge/decisions——消费方是 sillyspec CLI，前端 JWT 无法调用。平台用户侧必须新建独立端点；CLI 端点契约零改动（同号消歧/降级纪律是 CLI 侧语义）。
+故障面：双端点并存可能造成语料/索引重复建设——通过共享 embedder 单例与解析工具函数收敛（见 D-007）。
+退役判据：若 CLI 侧日后改用用户会话调用平台（CLI 本地零凭据约束解除），可评估收敛为单端点。
+
+## D-backend-002@v1 语料范围 = knowledge/ 全域 + docs/ 全域，不含 changes/ 归档
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-002@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户列举四类映射到 spec 树：知识=knowledge/ 顶层手册（conventions/patterns/known-issues 等）、需求规格=knowledge/fr/、决策=knowledge/decisions/、（另有 proposed/generated 两个 zone 一并纳入）；模块文档=docs/<project>/modules/，随行纳入 docs/<project>/{scan,flows,glossary.md} 等全部 md。changes/（本仓 7550 个 md，归档历史持续增长）不纳入——噪音大、非「理解知识内容」的主场，且与知识库页现有导航面不匹配。
+故障面：docs/ 大文件（本仓 frontend.md 120KB、fr/backend.md 350KB）整文件 embed 会爆索引时间与召回精度——由切块策略消化（D-003）。
+退役判据：若用户明确要求搜归档变更文档，再评估纳入 changes/ 的独立 scope（分面开关）。
+
+## D-backend-003@v1 切块策略——条目锚点优先（D-xxx@vN / FR-xxx-NNN）+ 标题切块 + 超长滑窗
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-003@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：三档策略：① decisions/*.md 按 `## D-xxx@vN 标题` 条目切（复用现有 parse_decision_entries 口径扩展）；② fr/*.md 按 `## FR-xxx-NNN 标题` 条目切；③ 其余 md（模块文档/scan/flows/knowledge 顶层）按 `##`/`###` 标题切块，单块超 1500 字符再按段落滑窗细分（窗 ~1000 字符 / 重叠 ~150 字符）。每块携带 (文件路径, 锚点/标题, 片段起点) 供前端跳转定位。frontmatter 不入 embedding。
+故障面：切块粒度不齐会让融合打分跨档不可比——按块文本长度做归一化惩罚（设计细化）。
+退役判据：若引入第三方切块库（unstructured 等）且验证更优，可整体替换本策略。
+
+## D-backend-004@v1 检索算法 = 词面 + 向量融合，向量不可用 fail-soft 纯词面
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-004@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：双路融合：词面路子串/大小写不敏感匹配（文件名、标题、正文——scan-docs 已有 LIKE 先例；中文短词精确命中向量不敏感场景必须词面兜底）+ 向量路 fastembed bge-small-zh-v1.5 语义召回（复用平台既有 embedding 基建）。两路分数归一化后加权融合。fastembed 缺席/模型加载失败时（容器无模型、显存不足）端点 fail-soft 返回纯词面结果 + model_ready=false 标注，前端降级展示提示。
+故障面：权重失当会让语义噪声压过精确词面命中（如搜文件名被近似文本挤掉）——文件名/标题命中给固定高权重保底（设计细化）。
+退役判据：若纯向量在真实语料上人工评测优于融合，可简化为单路。
+
+## D-backend-005@v1 鉴权 = JWT 铸造 + KNOWLEDGE_READ 门控，docs/ 结果按 SCAN_DOCS_READ 过滤
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-005@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：端点门控 require_permission(KNOWLEDGE_READ)（搜索入口在知识库页，与页内其它读接口同权限）；docs/ 类结果额外检查调用者是否持有 SCAN_DOCS_READ——无则该类结果从响应中过滤（不是 403，知识结果照常返回）。管理员经 is_platform_admin 短路天然全量。
+故障面：权限过滤若发生在召回后置阶段，可能把 top-k 挤空导致结果稀薄——取 3×limit 候选再过滤截断（设计细化）。
+退役判据：若平台引入统一「知识域」权限（合并 knowledge/scan-docs 读），过滤逻辑随之删除。
+
+## D-backend-006@v1 交互形态 = 知识库页内嵌搜索 + 结果面板 + 双落点跳转
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-006@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：知识库页（/workspaces/[id]/knowledge）顶部内嵌搜索框（用户原话场景：方便在知识库里检索数据和理解知识内容）；结果面板展示 来源徽章/文件路径/条目或标题/片段高亮/匹配度。点击落点分两类：knowledge/ 结果 → 既有深链 ?file=&anchor=（page.tsx deepLinkDoneRef 机制现成）；docs/ 结果 → scan-docs 页新增 ?path= 深链（该页现无 URL 参数定位，需补选中逻辑）。片段文本随结果直接展示，不点开也能看到匹配上下文。
+故障面：scan-docs 深链若只按 path 精确匹配而 workspace 尚未同步该文件，会静默落空——落空时保持空白态静默（不报错、不提示、不重试请求）；消费时机对策：ref 只在命中并选中后置位，命中前每次列表刷新（含 reparse 静默刷新）重试匹配，目标出现即自动选中（design.md Phase 4，评审 X5 修订）。
+退役判据：若日后引入全局 ⌘K 命令面板聚合搜索，页内搜索框可降级为入口之一。
+
+## D-backend-007@v1 索引生命周期 = 懒构建 + 全语料指纹失效，独立于 decisions 向量索引
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-007@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：沿用 vector_search.py 已验证的「查询时懒构建 + 文件集指纹 (name, mtime_ns, size) 失效自愈」模式，但**独立索引实例**——现有 _indexes 键是 (workspace_key, model_name) 且条目形态是 DecisionEntry，直接复用会被新语料污染 CLI 召回结果；新建模块（如 search_index.py）自带索引缓存与指纹。首查构建耗时用前端 loading 文案消化；若实测构建 >5s 则在端点内保留可选的启动后台预热钩子（execute 阶段实测拍板）。
+故障面：全语料指纹 mtime 轮询在 Windows bind mount 上有 stat 性能断崖（known-issues 有先例）——指纹只 stat 文件不读内容，且构建结果缓存，风险可控；实现时对单次 stat 失败 fail-soft 跳过。
+退役判据：若 daemon 上行时能顺带维护持久化索引，可退役进程内懒构建（届时索引落 DB）。
+
+## D-backend-008@v1 实现方案选定——方案 A（新用户侧端点 + 文件系统直读 + 词面/向量融合）
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-008@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：（autonomous 会话代拍板——用户未在线，AI 按仓库既有约束与 D-001~D-007 权衡代选方案 A，待用户复核）方案 A：新建独立搜索服务与用户侧端点，spec 根直读文件、结构切块、词面与向量双路融合、进程内懒索引。理由：①唯一不破坏 CLI 契约（B 的问题）又能复用平台 embedding 基建的路径；②文件直读与 vector_search.py 已验证的懒构建同构，故障面最小；③切块/权限/降级全可控。
+故障面：前端需同时接两个后端查询面（知识搜索 + scan-docs 列表）做跳转；若 scan-docs 深链不同步做，docs 结果不可直达（风险已记 D-006）。
+退役判据：若 B/C 的否决条件消失（见 D-009/D-010 复潮条件），可重议。
+
+## D-backend-009@v1 落选——方案 B（扩展 CLI 向量端点至全语料 + 放开 JWT）
+状态：rejected
+变更：2026-10-15-platform-knowledge-search
+原编号：D-009@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：（autonomous 会话代拍板落选，待用户复核）不选 B。
+否决理由：破坏 CLI 契约——CLI 向量层结果按决策条目 anchor 语义消费（同号消歧/策略面本地解析），混入非决策条目即破坏召回语义；shpsync_ 通道与 JWT 用户会话鉴权模型冲突，强行放开需重造鉴权分支。
+复潮条件：CLI 侧检索契约弃用 anchor 语义（或 CLI 全量改用用户会话调用平台）且平台侧统一鉴权通道时，可重议单端点收敛。
+
+## D-backend-010@v1 落选——方案 C（基于 DB 表混合检索：ScanDocument + 新增 knowledge 入库链路）
+状态：rejected
+变更：2026-10-15-platform-knowledge-search
+原编号：D-010@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：（autonomous 会话代拍板落选，待用户复核）不选 C。
+否决理由：knowledge 侧无 DB 表，需新增同步链路（daemon 挂点或轮询），命中既有防复潮死路④；且 D-unmapped-012 死路③（pgvector/DB 往返）同域否决；延迟同步与索引维护复杂度都高于文件直读。
+复潮条件：出现跨 workspace 聚合检索需求（单 workspace 文件直读不满足）或语料量级远超万条致文件直读不可行时，可重议持久化索引方案。
+
+## D-backend-011@v1 词面精确命中判定纳入 anchor 面（执行期裁决）
+状态：implemented
+变更：2026-10-15-platform-knowledge-search
+原编号：D-011@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：task-01 实现将「标题面」精确命中扩展为 anchor ∨ title（anchor 命中与 title 同级 0.6 权重），exact 判定同步纳入 anchor；单测 test_search_exact_decision_id_ranks_first 钉住（rank=1 + score ≥0.9）。
+故障面：anchor 命中给 0.6 权重后，短编号前缀查询（如 "D-001"）可能跨文件多条同分——由 tie-break（spec_path, start_line 排序）与 change 字段前端展示消歧，不额外加权。
+退役判据：若未来切块改为把编号并入 title 文本（标题行整体作 title），本裁决自然退役。

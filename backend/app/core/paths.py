@@ -62,3 +62,17 @@ def resolve_spec_data_root(raw: str) -> str:
     if raw.startswith("/") and not p.is_absolute():
         return str(p.resolve())
     return str(REPO_ROOT / p)
+
+
+def resolve_log_dir(raw: str) -> str:
+    """Resolve the backend log directory (2026-10-15-server-logs-panel).
+
+    * **Empty/blank** — default ``<repo_root>/data/logs`` (absolute).
+    * **Absolute / relative** — same semantics as
+      :func:`resolve_spec_data_root` (relative resolves against repo root).
+
+    Pure (no I/O) so it can be consumed by logging setup and endpoints alike.
+    """
+    if not raw or not raw.strip():
+        return str(REPO_ROOT / "data" / "logs")
+    return resolve_spec_data_root(raw)

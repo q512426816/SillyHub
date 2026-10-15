@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-server-logs-panel",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-server-logs-panel:task-01:acc-0-38ffaedf",
+      "tests": [
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-server-logs-panel:task-01:acc-1-4e186dc8",
+      "tests": [
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-server-logs-panel:task-01:acc-2-797d32a3",
+      "tests": [
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-server-logs-panel:task-01:acc-3-39f950e5",
+      "tests": [
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-server-logs-panel:task-01:acc-4-ad6585bf",
+      "tests": [
+        "backend/tests/test_server_log_filer.py",
+        "backend/tests/test_server_logs_api.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-02:acc-0-d0944973",
+      "tests": [
+        "backend/tests/test_server_logs_api.py",
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-02:acc-1-baab6997",
+      "tests": [
+        "backend/tests/test_server_logs_api.py",
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-02:acc-2-c92d7888",
+      "tests": [
+        "backend/tests/test_server_logs_api.py",
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-02:acc-3-3c2570d1",
+      "tests": [
+        "backend/tests/test_server_logs_api.py",
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-02:acc-4-13e08884",
+      "tests": [
+        "backend/tests/test_server_logs_api.py",
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-03:acc-0-684fdc75",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-03:acc-1-6d018a67",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-server-logs-panel:task-03:acc-2-5f864f77",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "frontend/src/components/__tests__/server-log-panel.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-server-logs-panel:task-04:acc-0-c5581cb4",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-server-logs-panel:task-04:acc-1-7614d9ae",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-server-logs-panel:task-04:acc-2-e2b500e0",
+      "tests": [
+        "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "7af8e0e32720f2cdad8183f10b8853ba08ac70ab",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-server-logs-panel"
+    }
+  ]
+}

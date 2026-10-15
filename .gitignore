@@ -94,3 +94,6 @@ deploy/*.tar.gz
 # 平台文件中心内容寻址上传物（64 位十六进制哈希命名，运行时数据不入库；
 # 历史已跟踪的附件不受影响）
 attachments/[0-9a-f]*
+
+# 2026-10-15-server-logs-panel：后端轮转日志运行产物（data/logs/backend.log 等）
+data/logs/

@@ -44,10 +44,10 @@
  */
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Popconfirm, Tree, type TreeProps } from "antd";
+import { Input, Popconfirm, Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import type { ReactNode } from "react";
 
@@ -75,7 +75,9 @@ import {
   // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
   normalizeKnowledgeFileParam,
   rejectKnowledge,
+  searchKnowledge,
   type KnowledgeEntry,
+  type KnowledgeSearchResultItem,
 } from "@/lib/knowledge";
 import { useSession } from "@/stores/session";
 import "@uiw/react-markdown-preview/markdown.css";
@@ -90,6 +92,62 @@ const TREE_PANEL_DEFAULT_W = 280;
 const TREE_PANEL_MIN_W = 200;
 const TREE_PANEL_MAX_W = 480;
 const TREE_PANEL_WIDTH_KEY = "sillyhub-knowledge-tree-width";
+
+// ── 知识搜索（change 2026-10-15-platform-knowledge-search / FR-01~FR-05）────────
+// 状态优先级说明：搜索词非空时结果列表替换树视图（同一列表位两种视图）；点击
+// knowledge/ 类结果经 URL 深链（?file=&anchor=）走既有深链通路就地定位，docs/
+// 类结果跳模块文档页 ?path= 深链。
+
+/** 搜索框输入 debounce（对齐 scan-docs 页同款节流）。 */
+const SEARCH_DEBOUNCE_MS = 300;
+
+/** kind（后端由 spec_path 派生）→ 中文徽章文案。 */
+const SEARCH_KIND_LABELS: Record<string, string> = {
+  decision: "决策",
+  fr: "需求",
+  proposed: "待审核",
+  generated: "自动生成",
+  knowledge: "知识",
+  module: "模块文档",
+  scan: "扫描",
+  flow: "流程",
+  glossary: "术语",
+};
+
+/** kind → 徽章配色（brand 阶随主题换肤；module/scan/flow 等文档类走信息青）。 */
+function searchKindClass(kind: string): string {
+  switch (kind) {
+    case "decision":
+      return "bg-brand-100 text-brand-700";
+    case "fr":
+      return "bg-info/10 text-info";
+    case "proposed":
+      return "bg-destructive/10 text-destructive";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+/**
+ * 片段渲染：query 词面子串以 ``<mark>`` 高亮（brand 阶）。
+ *
+ * 用 React 文本节点拼接（禁止 dangerouslySetInnerHTML——片段源自仓库文件不
+ * 可信，且后端 snippet 已是纯文本）。
+ */
+function renderSearchSnippet(snippet: string, query: string): ReactNode {
+  if (!query) return snippet;
+  const idx = snippet.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return snippet;
+  return (
+    <>
+      {snippet.slice(0, idx)}
+      <mark className="rounded bg-brand-100 px-0.5 font-semibold text-brand-700">
+        {snippet.slice(idx, idx + query.length)}
+      </mark>
+      {snippet.slice(idx + query.length)}
+    </>
+  );
+}
 
 // ── 知识条目 → zone 分组目录树 ──────────────────────────────────────────────
 
@@ -270,6 +328,7 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
 export default function KnowledgePage({ params }: Props) {
   const workspaceId = params.id;
   const searchParams = useSearchParams();
+  const router = useRouter();
   /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
   const deepLinkFile = searchParams.get("file");
   const deepLinkAnchor = searchParams.get("anchor");
@@ -293,6 +352,16 @@ export default function KnowledgePage({ params }: Props) {
    * 重试入口；新一次选择即清除。
    */
   const [entryError, setEntryError] = useState<string | null>(null);
+  // ── 知识搜索态（task-03 / 2026-10-15-platform-knowledge-search / D-006@v1）──
+  /** 搜索框原始输入与 debounce 后的查询词（非空 = 结果列表替换树视图）。 */
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<KnowledgeSearchResultItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  /** 语义模型可用性（null=未查询；false=降级态——展示提示条，结果为纯词面）。 */
+  const [searchModelReady, setSearchModelReady] = useState<boolean | null>(null);
+  const [searchDegradedReason, setSearchDegradedReason] = useState<string | null>(null);
   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
   const [precipitateOpen, setPrecipitateOpen] = useState(false);
   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
@@ -451,6 +520,89 @@ export default function KnowledgePage({ params }: Props) {
     if (hit) selectEntry(hit.filename, deepLinkAnchor ?? undefined);
   }, [deepLinkFile, deepLinkAnchor, loading, knowledgeItems, selectEntry]);
 
+  // ── 知识搜索：debounce 输入 → 结果列表；点击经 URL 深链/模块文档页跳转 ──────
+  /**
+   * 搜索请求（seq 守卫同 selectEntry 口径：快速改词时只接受最新响应；清空查询
+   * 由下方 effect 直接复位、不发起请求）。
+   */
+  const searchSeqRef = useRef(0);
+  const runSearch = useCallback(
+    (q: string) => {
+      const seq = ++searchSeqRef.current;
+      setSearching(true);
+      setSearchError(null);
+      searchKnowledge(workspaceId, { query: q })
+        .then((resp) => {
+          if (seq !== searchSeqRef.current) return;
+          setSearchResults(resp.results);
+          setSearchModelReady(resp.model_ready);
+          setSearchDegradedReason(resp.reason ?? null);
+        })
+        .catch((err) => {
+          if (seq !== searchSeqRef.current) return;
+          setSearchResults(null);
+          setSearchError(errMessage(err, "搜索失败"));
+        })
+        .finally(() => {
+          if (seq === searchSeqRef.current) setSearching(false);
+        });
+    },
+    [workspaceId],
+  );
+
+  /** 输入 debounce 300ms → debouncedQuery（对齐 scan-docs 页同款节流）。 */
+  useEffect(() => {
+    if (!searchInput.trim()) {
+      setDebouncedQuery("");
+      return;
+    }
+    const timer = setTimeout(() => setDebouncedQuery(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    if (!debouncedQuery) {
+      searchSeqRef.current += 1; // 作废在途响应
+      setSearchResults(null);
+      setSearching(false);
+      setSearchError(null);
+      setSearchModelReady(null);
+      setSearchDegradedReason(null);
+      return;
+    }
+    runSearch(debouncedQuery);
+  }, [debouncedQuery, runSearch]);
+
+  /**
+   * 结果点击跳转（设计口径 = URL 深链驱动，D-006@v1）：
+   * - knowledge/ 类：router.push('?file=&anchor=')——复用既有深链通路就地定位
+   *   （可分享、刷新保持）；**同 key 重选边界**：URL 与目标已等值时 push 不产生
+   *   searchParams 变化（深链 effect 不触发），改为直调 selectEntry 兜底；
+   * - docs/ 类：跳模块文档页 ?path= 深链选定（task-04 落地消费端）。
+   */
+  const onSearchResultClick = useCallback(
+    (item: KnowledgeSearchResultItem) => {
+      if (item.spec_path.startsWith("knowledge/")) {
+        const relative = item.spec_path.slice("knowledge/".length);
+        const anchor = item.anchor ?? "";
+        const curFile = searchParams.get("file") ?? "";
+        const curAnchor = searchParams.get("anchor") ?? "";
+        if (normalizeKnowledgeFileParam(curFile) === relative && curAnchor === anchor) {
+          selectEntry(relative, anchor || undefined);
+          return;
+        }
+        const qs = new URLSearchParams({ file: relative });
+        if (anchor) qs.set("anchor", anchor);
+        router.push(`/workspaces/${workspaceId}/knowledge?${qs.toString()}`);
+      } else {
+        router.push(
+          `/workspaces/${workspaceId}/scan-docs?path=${encodeURIComponent(item.spec_path)}`,
+        );
+      }
+    },
+    [router, workspaceId, searchParams, selectEntry],
+  );
+
   /**
    * 条目级计数映射（task-05 / FR-06）：与 OpsDashboard 同 key 复用同一 stats
    * 查询缓存（零额外请求），从 usage_board（anchor→total）派生——手册=`文件#slug`
@@ -579,18 +731,109 @@ export default function KnowledgePage({ params }: Props) {
             style={{ "--tree-w": `${treeWidth}px` } as React.CSSProperties}
           >
             <SectionCard bodyPadding="p-2">
-              <TreeBox className="max-h-[calc(100vh-260px)]">
-                <Tree
-                  treeData={treeData}
-                  expandAction="click"
-                  expandedKeys={expandedKeys}
-                  onExpand={(keys) => setExpandedKeys([...keys])}
-                  selectedKeys={selectedFilename ? [selectedFilename] : []}
-                  onSelect={onSelectTree}
-                  showIcon
-                  blockNode
+              {/* 知识搜索框（task-03 / 2026-10-15-platform-knowledge-search / FR-01）：
+                  debounce 输入；有查询词时下方结果列表替换文件树（同一列表位两视图）。 */}
+              <div className="mb-2 px-1">
+                <Input
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="搜索知识、需求、决策、模块文档…"
+                  allowClear
+                  aria-label="搜索知识库"
+                  data-testid="knowledge-search-input"
                 />
-              </TreeBox>
+              </div>
+              {debouncedQuery && searchModelReady === false ? (
+                <div
+                  data-testid="knowledge-search-degraded"
+                  title={searchDegradedReason ?? undefined}
+                  className="mx-1 mb-2 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning"
+                >
+                  语义模型暂不可用，当前为关键词匹配结果
+                </div>
+              ) : null}
+              {debouncedQuery ? (
+                <div
+                  data-testid="knowledge-search-results"
+                  className="overflow-y-auto"
+                  style={{ maxHeight: "calc(100vh - 260px)" }}
+                >
+                  {searching && searchResults === null ? (
+                    <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
+                      搜索中…首次搜索需建立索引，可能较慢
+                    </p>
+                  ) : searchError ? (
+                    <div
+                      data-testid="knowledge-search-error"
+                      className="flex flex-col items-center gap-2 py-6 text-center"
+                    >
+                      <div className="text-xs text-destructive">{searchError}</div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => runSearch(debouncedQuery)}
+                      >
+                        重试
+                      </Button>
+                    </div>
+                  ) : (searchResults ?? []).length === 0 ? (
+                    <div
+                      data-testid="knowledge-search-empty"
+                      className="py-6 text-center text-xs leading-relaxed text-muted-foreground"
+                    >
+                      没有找到匹配内容。
+                      <br />
+                      换个说法试试，或检查关键词是否属于本工作区。
+                    </div>
+                  ) : (
+                    <ul aria-label="搜索结果">
+                      {(searchResults ?? []).map((r, i) => (
+                        <li key={`${r.spec_path}#${r.anchor ?? ""}#${i}`}>
+                          <button
+                            type="button"
+                            data-testid={`knowledge-search-result-${i}`}
+                            onClick={() => onSearchResultClick(r)}
+                            className="w-full rounded-md px-2 py-2 text-left transition-colors hover:bg-muted/60"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-4 ${searchKindClass(r.kind)}`}
+                              >
+                                {SEARCH_KIND_LABELS[r.kind] ?? r.kind}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                                {r.title}
+                              </span>
+                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                                {r.score.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                              {r.spec_path}
+                            </div>
+                            <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                              {renderSearchSnippet(r.snippet, debouncedQuery)}
+                            </div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <TreeBox className="max-h-[calc(100vh-260px)]">
+                  <Tree
+                    treeData={treeData}
+                    expandAction="click"
+                    expandedKeys={expandedKeys}
+                    onExpand={(keys) => setExpandedKeys([...keys])}
+                    selectedKeys={selectedFilename ? [selectedFilename] : []}
+                    onSelect={onSelectTree}
+                    showIcon
+                    blockNode
+                  />
+                </TreeBox>
+              )}
             </SectionCard>
           </div>
           {/* 拖拽把手：仅桌面分栏时展示（flex 拉伸使把手沿整列可抓） */}

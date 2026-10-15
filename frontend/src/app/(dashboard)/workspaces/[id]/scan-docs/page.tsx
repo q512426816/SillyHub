@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
@@ -233,6 +234,18 @@ export default function ScanDocsPage({ params }: Props) {
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
   const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
 
+  // ── 外部深链（task-04 / 2026-10-15-platform-knowledge-search / FR-05）────────
+  /** 知识搜索的 docs/ 类结果经 ?path= 进入本页自动选中该文档。 */
+  const searchParams = useSearchParams();
+  const deepLinkPath = searchParams.get("path");
+  /**
+   * 深链消费标记：只在「命中并选中」后置位（requestDoc 内统一置位——手动点选
+   * 同算消费，防后续列表刷新自动抢跳）；命中前每次列表刷新（含进页 reparse 的
+   * 静默刷新）重试匹配，目标出现即自动选中；查无静默留在列表态（不报错、不
+   * 提示、不发起额外请求）。
+   */
+  const deepLinkDoneRef = useRef(false);
+
   // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
   // silent=true 时不翻 loading（后台同步完成后的静默刷新，避免树区闪一下加载态）。
   const fetchDocs = useCallback(async (q?: string, opts?: { silent?: boolean }) => {
@@ -337,6 +350,7 @@ export default function ScanDocsPage({ params }: Props) {
   /** 树点击拉详情（fetch 上提到主组件统一守卫；子组件只报 docId）。 */
   const requestDoc = useCallback(
     (docId: string) => {
+      deepLinkDoneRef.current = true; // 深链消费标记（见上方注释）
       const seq = ++docSeqRef.current;
       void getScanDoc(workspaceId, docId)
         .then((doc) => {
@@ -347,6 +361,20 @@ export default function ScanDocsPage({ params }: Props) {
     },
     [workspaceId, selectDoc],
   );
+
+  /**
+   * 深链落位（task-04）：?path= 与列表就绪后匹配（两侧经 stripPathPrefix 归一——
+   * DB path 可能是 docs/<项目>/... 或 .sillyspec/docs/<项目>/... 两种布局），
+   * 命中走既有 requestDoc 链路选中。
+   */
+  useEffect(() => {
+    if (!deepLinkPath || deepLinkDoneRef.current) return;
+    if (loading || docs.length === 0) return;
+    const target = stripPathPrefix(deepLinkPath);
+    const hit = docs.find((d) => stripPathPrefix(d.path) === target);
+    if (!hit) return; // 目标尚未同步：静默待命，下次列表刷新重试
+    requestDoc(hit.id);
+  }, [deepLinkPath, loading, docs, requestDoc]);
 
   /** 卡片视图跳转（INDEX 路由行）：在当前文档列表里解析目标文件，命中则拉详情
    *  选中并滚到锚点小节卡（锚点选择器与知识库 EntryCardList 同域）；查无静默

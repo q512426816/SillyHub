@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-server-logs-panel",
+  "flag": "--skip-apply",
+  "skippedAt": "2026-10-15T12:00:30.019Z",
+  "deliverableCount": 16,
+  "deliverableFiles": [
+    ".gitignore",
+    "backend/app/core/config.py",
+    "backend/app/core/logging.py",
+    "backend/app/core/paths.py",
+    "backend/app/modules/health/log_reader.py",
+    "backend/app/modules/health/router.py",
+    "backend/openapi.json",
+    "backend/tests/test_server_log_filer.py",
+    "backend/tests/test_server_logs_api.py",
+    "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+    "frontend/src/components/__tests__/server-log-panel.test.tsx",
+    "frontend/src/components/server-log-panel.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/health.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "note": "归档时显式跳过未 apply 交付面检查（--skip-apply）：交付物未确认进主仓，本记录随归档包留存供审计"
+}

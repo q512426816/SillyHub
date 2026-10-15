@@ -226,3 +226,5 @@
 - deploy|FR|需求|承接 → [fr/deploy.md](fr/deploy.md)
 - ci|FR|需求|承接 → [fr/ci.md](fr/ci.md)
 - components-daemon|FR|需求|承接 → [fr/components-daemon.md](fr/components-daemon.md)
+- knowledge|FR|需求|承接 → [fr/knowledge.md](fr/knowledge.md)
+- core|FR|需求|承接 → [fr/core.md](fr/core.md)

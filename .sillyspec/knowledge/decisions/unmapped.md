@@ -6,7 +6,7 @@
 状态：implemented
 变更：2026-10-15-dsh-engine-acp
 原编号：D-001@v1
-锚点：未记录
+锚点：sillyhub-daemon/src/agent-detector.ts
 最近确认：775d86011
 理由：A：在 sillyhub-daemon/src/agent-detector.ts 注册第 13 个探测项——`env 覆盖（SILLYHUB_DSH_PATH）→ PATH which → 不可用`，用户自行安装 dsh（`npm i -g @deepseek-ai/dsh` 或任意方式），平台只负责发现、`--version` 探测与提示；不做平台托管自动安装，不做仅显式配置。
 故障面：用户机器装了 dsh 但不在 daemon 进程 PATH（如 GUI 启动继承环境不全）→ 误报不可用；缓解：SILLYHUB_DSH_PATH 显式覆盖 + 探测结果提示
@@ -94,3 +94,63 @@
 锚点：未记录
 最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
 理由：- 风险一：深度 2-3 切片节点数可能超 FORCE_NODE_LIMIT=200——GraphCanvas 既有 >200 静态分环降级自动兜住（2026-10-15-graph-type-cluster 语义），组件无需新增护栏；可达性上 depth 3 大仓可能秒级耗时，keepPreviousData 已保证切换期间有内容可看。 - 风险二：keepPreviousData 期间 counts 文案显示旧切片计数——数据到达即原位刷新，短暂陈旧可接受（与 changes 列表页同语义）。 - 试过放弃：①Select 下拉选深度——卡头横向空间紧张，三档 chips 一眼可达（图谱页用 Select 是因为表单还有 sub/edges 多控件，此处只有 depth 一维）；②把 depth 做成资产卡 props 传下来——深度是图谱分区内部交互态，与资产卡取数无关，上提徒增传参链。
+
+## D-unmapped-036@v1 日志源=应用侧落文件+轮转（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-001@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「落文件+轮转」——logging 配置同时保留 stderr（现状不动，容器日志聚合不受影响）+ 新增轮转文件（5MB×3 备份，RotatingFileHandler 自动清理）；本地开发/Windows/macOS/Docker 行为一致，有历史可查可下载。
+故障面：文件 handler 写失败（磁盘满/权限）不得拖垮进程——emit 异常由 logging 模块内部兜底，启动期建目录失败降级回 stderr-only。
+退役判据：若未来引入集中日志聚合（Loki/ELK），页面日志卡改为查询聚合后端时本机制可退役。
+
+## D-unmapped-037@v1 展示形式=结构化+自动刷新（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-002@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「结构化+自动刷新」——默认最近 200 行，随页面 5s 轮询自动刷新；JSON 日志行解析为「时间/级别/事件/详情」结构化展示，点行展开原始 JSON；行数可切 100/500/1000。
+
+## D-unmapped-038@v1 下载范围=单文件可选历史（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-003@v1
+锚点：backend.log.1/.2/.3
+最近确认：7af8e0e32
+理由：用户亲选「单文件可选历史」——下载区提供当前日志文件与轮转归档（backend.log.1/.2/.3）的选择，逐文件下载（不打包 zip）。
+
+## D-unmapped-039@v1 权限=复用 system_status:read（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-004@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「复用 system_status:read」——日志比性能数字更敏感，但页面本就在系统管理区、受众相同；不新增权限枚举，持 system_status:read 或 platform:admin 即可（端点同挂 require_permission_any）。
+
+## D-unmapped-040@v1 日志落盘实现=单点插入文件写入（用户亲选，方案 A）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-006@v1
+锚点：backend/app/core/logging.py
+最近确认：7af8e0e32
+理由：用户亲选方案 A——在 structlog processor 链 JSONRenderer 之前插入自定义 FileWriter processor（event_dict 先 json.dumps 写轮转文件、再透传 JSONRenderer 输出 stderr）；改动局限 backend/app/core/logging.py 单文件，stderr 输出链路零扰动。
+故障面：轮转瞬间的并发写（单进程单线程 event loop 下 logging 同步调用，无并发面）；文件被外部 truncate 时 write 继续追加。
+退役判据：同 D-001@v1（引入集中日志聚合后退役）。
+
+## D-unmapped-041@v1 页面布局=日志卡满宽居底（用户亲选）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-007@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：用户亲选「满宽居底」——删除业务统计卡后页面剩三卡：服务器性能（左半）、依赖与版本（右半或满宽调整）、服务器日志（满宽，页面最下方）。
+
+## D-unmapped-042@v1 日志条数参数与轮转参数的可配口径（AI 定案，可否决）
+状态：implemented
+变更：2026-10-15-server-logs-panel
+原编号：D-008@v1
+锚点：未记录
+最近确认：7af8e0e32
+理由：lines 白名单 {100,200,500,1000}（非白名单值回退默认 200，不报错）；轮转 maxBytes=5MB/backupCount=3 常量于 logging.py 模块级（非 settings 项——避免配置面膨胀，需要时再升 settings）。

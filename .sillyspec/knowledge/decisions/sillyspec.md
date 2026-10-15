@@ -140,7 +140,7 @@
 ## D-001@v1 风险与死路（design 槽4 收割）
 状态：implemented
 变更：2026-09-27-change-list-is-thin
-锚点：未记录
+锚点：lib/thin-lineage.ts
 最近确认：4d340be72fb09d9a120c2f65a6416da45f4f293e
 理由：最大风险：判定口径与前端 lib/thin-lineage.ts 双实现漂移——注释互指+同口径测试锚定（后端 6 用例对齐前端 6 用例矩阵）；已放弃：ChangeRead 详情也加 is_thin——详情前端已有本地判定且正确，最小面原则不加。
 
@@ -720,7 +720,7 @@
 ## D-001@v1 风险与死路（design 槽4 收割）
 状态：implemented
 变更：2026-10-13-daemon-module-map
-锚点：未记录
+锚点：docs/multi-agent-platform/modules/_module-map.yaml
 最近确认：44ce2cf6bc6bfec9d2a2ade49c3f92272b6f7451
 理由：答：最大风险：手改 fr 文件违反文件头「机械解析契约勿手改」告示的字面——但迁移本身是工具 advisory 明示的 sanctioned 动作（「确认后可迁移」），且字段逐字保持 + FR-04 validate/digest 自检兜底；若未来 fr-index 重提炼按归档重放覆写，条目会以新域重新落位（我们已把域修对），重放与迁移结果一致。次风险：根图与项目图双处登记造成 paths 并集冗余——只在项目图登记避免（task-runner 模块本体在项目图）。 试过但放弃的方案：① 按告警字面把 5 条 FR 迁 fr/daemon.md（daemon 模块=daemon.ts WS 核心，测试目录登记进该模块语义错位；且登记若进 task-runner 模块则未来变更落 task-runner 域、与存量 daemon 域分裂，放弃）；② 在根图 docs/multi-agent-platform/modules/_module-map.yaml 登记（根图头部自述细粒度模块归各自项目图，task-runner 模块本体在项目图，跨图重复登记徒增并集冗余，放弃）；③ 给 tests 目录另铸新模块卡（如 task-runner-tests，新造伪模块 id 无对应域文件与语义，过度工程，放弃）。
 

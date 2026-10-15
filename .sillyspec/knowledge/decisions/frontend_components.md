@@ -447,7 +447,7 @@ supersedes：D-006@v2
 ## D-001@v1 预会话草稿键细分，消除跨入口串台
 状态：implemented
 变更：2026-09-13-session-group-ux-fixes
-锚点：未记录
+锚点：frontend/src/components/daemon/session-panel/turn-state.ts:304
 最近确认：39d3d8c5c
 理由：代码查证：真会话草稿按 sessionId 隔离（sillyhub.sessions.draft.<sid>）且所有 7 个 SessionPanel 宿主均有 key={sessionId} 强制重挂载，rAF 门闩（draftHydratedRef）时序推演在重挂载/非重挂载两路径均正确；唯预会话（sessionId=null）草稿用固定键 __pre__（frontend/src/components/daemon/session-panel/turn-state.ts:304），跨工作区/跨机器入口共享——用户在不同入口开新会话时上一入口未发送内容必然带入，与用户「a 会话内容带到 b 会话」实测吻合。修复：预会话草稿键按 workspaceId+runtimeId 细分（__pre__:<ws>:<runtime>），真会话逻辑不动仅补测试覆盖。
 
@@ -572,7 +572,7 @@ supersedes：D-002@v1
 ## D-014@v1 执行期裁决——W4 双卡裁决汇总（pi 预 fork 方案/路径漂移//runs DTO 增列归属）
 状态：implemented
 变更：2026-09-22-session-fork-continuation
-锚点：未记录
+锚点：interactive/types.ts
 最近确认：1d33bda33
 理由：①pi fork 采用「短命 RPC 预 fork」替代卡面「源会话活 RPC」——实证 pi fork/clone 会劫持 RPC 进程自身活跃会话（teardownCurrent+apply），活 RPC 方案须 switch_session 切回且违反 D-005 零侵扰；短命方案（临时 pi --mode rpc --session <源> → fork/clone → get_state 读新分支 → 杀 temp → B 以分支文件 spawn）附带支持源会话已结束场景，失败原样上抛不降级。②pi entryId 不在 message 事件（仅 SessionEntry 落盘后存在）→ message_end(role=user) 回查 get_fork_messages 取轮首锚，失败仅 warn=锚缺失入口灰。③task-07 发现 /runs SessionRunRead 未透出 AgentRun.engine_anchor（native 档门控无数据源）→ session_insights.py 一行增列+gen:types 归 task-08，engineAnchor prop 由 /runs 数据接线。另：task-06 路径漂移两处（建会话真身在 session-manager.ts 非 index.ts facade；CreateSessionInput 在 interactive/types.ts）=代码现实修正。
 
@@ -816,7 +816,7 @@ supersedes：D-008@v1
 ## D-009@v1 实现架构=扩展附件引用库（方案 A）
 状态：implemented
 变更：2026-10-10-workspace-ref-intake
-锚点：未记录
+锚点：frontend/src/lib/attachment-refs.ts
 最近确认：38bb5b21e
 理由：用户选 A（2026-10-10 方案选择轮）：扩展 frontend/src/lib/attachment-refs.ts 纯函数库 + 复用 InputRefOverlay——附件与工作区引用共用同一 token 机制/退格/角标；序号池合并（D-005）在同库自然落地；原型即此方案已实测。
 故障面：函数签名需同时容纳 uuid 锚（附件）与 wid+path 锚（工作区），泛化不当会复杂化既有附件路径（设计时统一为「引用描述符」结构化解耦）
@@ -879,7 +879,7 @@ supersedes：D-008@v1
 ## D-001@v1 风险与死路（design 槽4 收割）
 状态：implemented
 变更：2026-10-12-nullable-email-dto-fix
-锚点：未记录
+锚点：lib/admin.ts
 最近确认：9e1023756c326d287faf5c93b00676f41b34fb11
 理由：最大风险：前端既有代码把 `email` 当非空用的隐藏点位漏改，tsc 抓不全的 （如模板里直接插值）运行时渲染出空白。缓解：渲染点逐一回退处理 + workspace-member-row 补 null 用例 + tsc --noEmit 全量类型检查； `localeCompare` 调用点仅角色页聚合排序一处（已全局搜索确认）。 实际执行中 tsc 全量扫出 3 处（members/page 两处 + shared-daemon-manager 一处）， 另在 task-05 人工排查出 lib/admin.ts 手写 DTO 漏同步（tsc 因本地类型未改而放行）。 试过/考虑过但放弃的方案： - service 层兜底 `email=user.email or ""`：契约撒谎（空串≠无邮箱），且 前端无法区分"无邮箱"与"空邮箱"，弃。 - 只改 RoleUserRead 不动 workspace 两处：同类 500 隐患原地保留 （成员列表/搜索遇纯用户名账号必炸），修一半等于没修，弃。 - 邀请搜索补 `username ILIKE` 匹配：属于搜索行为增强，与本 500 无关， 留作后续独立小变更，避免本次 diff 膨胀。
 
@@ -952,7 +952,7 @@ supersedes：D-001@v1
 ## D-005@v1 方案 A（零 daemon 改动，backend 拼 allowed_roots 路径 + host_fs.read_file）被否决
 状态：rejected
 变更：2026-10-13-daemon-log-config-view
-锚点：未记录
+锚点：sillyhub-daemon/src/host-fs-handler.ts:871
 最近确认：255a46d66
 理由：否决。两个硬伤：① backend 拼不出 daemon 机器上 ~/.sillyhub/daemon/daemon.log 的绝对路径——host_fs.read_file 需绝对路径（sillyhub-daemon/src/host-fs-handler.ts:871 pathResolve），backend 不知道 daemon 侧 home 目录，且 SILLYHUB_DAEMON_DIR 环境变量可整体重定向状态目录（sillyhub-daemon/src/config.ts:57-62），重定向后 backend 拼的路径静默失效；② read_file 为全量读取（readFile utf8 无 tail 参数），daemon.log 无轮转纯追加，大文件全量传输有 RPC 超时/内存风险；③ 脱敏逻辑放 backend 会与 daemon 配置结构演进脱钩
 否决理由：路径不可靠（重定向即失效）+ 全量读大文件超时风险 + 脱敏逻辑远离数据源易漂移
@@ -961,7 +961,7 @@ supersedes：D-001@v1
 ## D-006@v1 方案 C（心跳携带日志/配置快照入库）被否决
 状态：rejected
 变更：2026-10-13-daemon-log-config-view
-锚点：未记录
+锚点：sillyhub-daemon/src/config.ts
 最近确认：255a46d66
 理由：否决。心跳每 15s 一次（sillyhub-daemon/src/config.ts 默认 heartbeat_interval=15），携带日志尾部会让心跳 payload 持续膨胀；日志时效性锁定在最后一次心跳时刻，排障场景价值低；为低频排障需求引入持续存储开销与配置变更检测复杂度，收益成本倒挂
 否决理由：心跳 payload 持续膨胀 + 日志时效性锁死于最后一次心跳 + 为低频排障引入持续存储开销
@@ -978,7 +978,7 @@ supersedes：D-001@v1
 ## D-008@v1 测试文件路径对齐 tests/modules/daemon/ 目录结构
 状态：implemented
 变更：2026-10-13-daemon-log-config-view
-锚点：未记录
+锚点：backend/tests/modules/daemon/test_daemon_machine_diag.py
 最近确认：255a46d66
 理由：路径校正为 backend/tests/modules/daemon/test_daemon_machine_diag.py；design.md 文件清单与 task-02 allowed_paths/target_files 已同步
 故障面：无（纯路径校正，语义不变）

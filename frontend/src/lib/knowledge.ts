@@ -26,6 +26,11 @@ export type DistillQuickEntryList = components["schemas"]["DistillQuickEntryList
 // 运营指标 DTO（task-04 / 2026-09-20-knowledge-effect-panel 消费，task-01 交付
 // 的生成类型）。
 export type KnowledgeStatsOut = components["schemas"]["KnowledgeStatsOut"];
+// 平台知识搜索 DTO（change 2026-10-15-platform-knowledge-search / task-03 消费，
+// task-02 后端 schema 为真相源；搜索框 + 结果面板数据链）。
+export type KnowledgeSearchIn = components["schemas"]["KnowledgeSearchIn"];
+export type KnowledgeSearchResultItem = components["schemas"]["KnowledgeSearchResultItem"];
+export type KnowledgeSearchOut = components["schemas"]["KnowledgeSearchOut"];
 
 // ── 知识图谱 DTO（task-05 / 2026-10-08-platform-knowledge-graph；后端三端点
 // schema.py 为真相源，本组全部取自生成类型零手写）──────────────────────────────
@@ -109,6 +114,27 @@ export async function getKnowledge(
 ): Promise<KnowledgeEntry> {
   return apiFetch<KnowledgeEntry>(
     `/api/workspaces/${workspaceId}/knowledge/${encodeKnowledgeFilename(filename)}`,
+  );
+}
+
+/**
+ * 平台知识搜索（change 2026-10-15-platform-knowledge-search / FR-01，task-03）：
+ * POST /knowledge/search——knowledge/ + docs/ 语料词面 + 向量融合召回；docs/ 类
+ * 结果由后端按 scan-docs:read 过滤（前端不做权限隐藏）；model_ready=false 时
+ * results 为纯词面降级结果（页面展示降级提示条）。
+ *
+ * 显式放宽超时：首查含服务端索引构建（对齐 lib/knowledge.ts 的 graph 端点显式
+ * timeoutMs 先例——apiFetch POST 无缺省超时纪律，长时间构建易被误判网络错误）。
+ */
+export async function searchKnowledge(
+  workspaceId: string,
+  input: { query: string; limit?: number },
+): Promise<KnowledgeSearchOut> {
+  // limit 在后端有默认值（20），但生成类型按 default 标注为必填——调用侧补齐
+  // （对齐 KnowledgeProposeIn.category 的既有消费形态）。
+  return apiFetch<KnowledgeSearchOut>(
+    `/api/workspaces/${workspaceId}/knowledge/search`,
+    { method: "POST", json: { limit: 20, ...input }, timeoutMs: 120_000 },
   );
 }
 

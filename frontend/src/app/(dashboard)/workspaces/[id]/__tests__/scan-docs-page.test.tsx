@@ -270,3 +270,91 @@ describe("运营指标面板挂载（task-03 / 2026-09-21-scan-docs-ops-panel）
     await waitFor(() => expect(mockStats).toHaveBeenCalledWith(WS));
   });
 });
+
+
+// ── task-04（2026-10-15-platform-knowledge-search）：?path= 深链 ─────────────
+//
+// 覆盖：?path=（docs/ 前缀形态）归一匹配后自动选中；目标未同步静默待命、
+// 列表刷新出现后自动选中；用户手动点选后刷新不再抢跳（消费标记）；无参数零副作用。
+
+const navState = vi.hoisted(() => ({
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => navState.searchParams,
+}));
+
+describe("scan-docs ?path= 深链（task-04）", () => {
+  it("?path=（docs/ 前缀形态）命中列表目标：归一匹配后自动选中并展示详情", async () => {
+    navState.searchParams = new URLSearchParams({ path: "docs/backend/ARCHITECTURE.md" });
+    mockGetDoc.mockResolvedValue(
+      summary({
+        id: "id-arch",
+        path: "backend/ARCHITECTURE.md",
+        title: "架构文档",
+        content: "# hello",
+      }),
+    );
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
+    await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
+  });
+
+  it("目标未同步：静默待命（不报错不发详情请求），列表刷新出现后自动选中", async () => {
+    navState.searchParams = new URLSearchParams({ path: "backend/NEW.md" });
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    expect(mockGetDoc).not.toHaveBeenCalled();
+
+    // 列表刷新（点「重新扫描」触发 fetchDocs）后目标出现 → 自动选中
+    mockList.mockResolvedValue({
+      items: [
+        summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", doc_type: "scan" }),
+        summary({ id: "id-readme", path: "README.md", source_member_id: "member-12345678" }),
+        summary({ id: "id-new", path: "backend/NEW.md" }),
+      ],
+    });
+    mockGetDoc.mockResolvedValue(
+      summary({ id: "id-new", path: "backend/NEW.md", title: "新文档", content: "" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "重新扫描" }));
+    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-new"));
+  });
+
+  it("用户手动点选后列表刷新不再自动跳转（消费标记）", async () => {
+    navState.searchParams = new URLSearchParams({ path: "backend/NEW.md" });
+    mockGetDoc.mockResolvedValue(
+      summary({
+        id: "id-arch",
+        path: "backend/ARCHITECTURE.md",
+        title: "架构文档",
+        content: "# hello",
+      }),
+    );
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    fireEvent.click(
+      screen.getByText("ARCHITECTURE.md").closest(".ant-tree-node-content-wrapper")!,
+    );
+    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
+
+    // 列表刷新出现 NEW.md——已消费（手动点选），不再自动抢跳
+    mockList.mockResolvedValue({
+      items: [
+        summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", doc_type: "scan" }),
+        summary({ id: "id-readme", path: "README.md", source_member_id: "member-12345678" }),
+        summary({ id: "id-new", path: "backend/NEW.md" }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重新扫描" }));
+    await waitForTree(["NEW.md"]);
+    expect(mockGetDoc).not.toHaveBeenCalledWith(WS, "id-new");
+  });
+
+  it("无 ?path= 参数：零副作用（不因深链拉详情）", async () => {
+    renderPage();
+    await waitForTree(["backend", "ARCHITECTURE.md"]);
+    expect(mockGetDoc).not.toHaveBeenCalled();
+  });
+});

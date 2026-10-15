@@ -79,6 +79,9 @@ vi.mock("@/lib/knowledge", async (importOriginal) => {
     // task-04（2026-09-20-knowledge-effect-panel）：顶部运营仪表盘消费的
     // stats 端点（真实请求会打 jsdom 缺失的 fetch；缺省零值指标 = 空态）。
     getKnowledgeStats: vi.fn(),
+    // task-03（2026-10-15-platform-knowledge-search）：搜索端点（页面输入触发
+    // 真实请求会打 jsdom 缺失的 fetch；用例按需 mockResolvedValue 驱动结果态）。
+    searchKnowledge: vi.fn(),
   };
 });
 
@@ -147,13 +150,23 @@ vi.mock("@uiw/react-markdown-preview", () => ({
 // WorkspaceTabs 的 usePathname 需要 app router 上下文，jsdom 下 mock 掉
 // （知识库页本身用 params prop，不受影响）。useSearchParams（2026-09-25-change-
 // detail-assets-usability / FR-01/02 外部深链入口）走 navState 可覆写——用例内
-// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。
+// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。useRouter.push（task-03
+// 搜索结果跳转）同为 navState.push 记录断言。
 const navState = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
+  push: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/workspaces/ws-1/knowledge",
   useSearchParams: () => navState.searchParams,
+  useRouter: () => ({
+    push: navState.push,
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  }),
 }));
 
 import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
@@ -168,6 +181,7 @@ import {
   normalizeKnowledgeFileParam,
   previewMergeKnowledge,
   rejectKnowledge,
+  searchKnowledge,
 } from "@/lib/knowledge";
 import { closestAntdTreeRow, queryAntdTreeIcon, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
 
@@ -968,5 +982,199 @@ describe("WorkspaceTabs「知识库」tab（ql-20260821-015）", () => {  it("�
     const knowledgeIdx = labels.indexOf("知识库");
     expect(knowledgeIdx).toBeGreaterThan(fileIdx);
     expect(links[knowledgeIdx]).toHaveAttribute("href", "/workspaces/ws-1/knowledge");
+  });
+});
+
+
+// ── task-03（2026-10-15-platform-knowledge-search）：知识搜索交互 ─────────────
+//
+// 覆盖：输入 debounce → 结果列表替换树（徽章/片段高亮/匹配度）；清空还原树；
+// 点击知识类结果 → router.push URL 深链；URL 已等值 → 直调 selectEntry（同 key
+// 重选边界）；点击 docs 类结果 → scan-docs ?path= 跳转；降级提示条；失败错误态 +
+// 重试。
+
+const mockSearch = searchKnowledge as unknown as ReturnType<typeof vi.fn>;
+
+function searchItem(partial: Partial<Record<string, unknown>> = {}) {
+  return {
+    spec_path: "knowledge/decisions/demo.md",
+    kind: "decision",
+    title: "会话状态点语义",
+    anchor: "D-012@v1",
+    snippet: "会话状态点的五态定义：失败红点、完成绿点。",
+    score: 0.91,
+    ...partial,
+  };
+}
+
+async function typeSearch(value: string) {
+  fireEvent.change(screen.getByTestId("knowledge-search-input"), {
+    target: { value },
+  });
+}
+
+describe("知识搜索（task-03）", () => {
+  it("输入关键词后结果列表替换文件树：徽章/匹配度/片段高亮齐全", async () => {
+    mockSearch.mockResolvedValue({
+      ok: true,
+      results: [
+        searchItem(),
+        searchItem({
+          spec_path: "docs/demo/modules/frontend.md",
+          kind: "module",
+          title: "前端控制台",
+          anchor: null,
+          snippet: "会话列表面板说明。",
+          score: 0.7,
+        }),
+      ],
+      model_ready: true,
+      reason: null,
+    });
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话状态点");
+    await waitFor(() => expect(mockSearch).toHaveBeenCalledWith(WS, { query: "会话状态点" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-results")).toBeInTheDocument(),
+    );
+
+    // 树被替换：树里的文件名不再渲染
+    expect(screen.queryByText("conventions.md")).not.toBeInTheDocument();
+    // 徽章（kind 中文化）与匹配度
+    expect(screen.getByText("决策")).toBeInTheDocument();
+    expect(screen.getByText("模块文档")).toBeInTheDocument();
+    expect(screen.getByText("0.91")).toBeInTheDocument();
+    // 片段中查询词被 <mark> 高亮
+    const marks = document.querySelectorAll("mark");
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks[0]?.textContent).toBe("会话状态点");
+  });
+
+  it("清除搜索词后还原文件树", async () => {
+    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-results")).toBeInTheDocument(),
+    );
+    await typeSearch("");
+    await waitFor(() => expect(screen.getByText("conventions.md")).toBeInTheDocument());
+    expect(screen.queryByTestId("knowledge-search-results")).not.toBeInTheDocument();
+  });
+
+  it("点击知识类结果 → router.push URL 深链（file+anchor，可分享）", async () => {
+    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
+    expect(navState.push).toHaveBeenCalledWith(
+      `/workspaces/${WS}/knowledge?file=${encodeURIComponent("decisions/demo.md")}&anchor=${encodeURIComponent("D-012@v1")}`,
+    );
+  });
+
+  it("URL 与目标已等值时点击同结果直调 selectEntry（同 key 重选边界）", async () => {
+    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
+    // 当前 URL 已指向该文件与锚点（深链已消费态）
+    navState.searchParams = new URLSearchParams({
+      file: "decisions/demo.md",
+      anchor: "D-012@v1",
+    });
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "decisions/demo.md",
+        path: ".sillyspec/knowledge/decisions/demo.md",
+        zone: "decisions",
+        content: "# 决策\n\n内容",
+      }),
+    );
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
+    );
+    mockGet.mockClear();
+    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
+    // push 不再发生（URL 等值），直调 selectEntry → getKnowledge 被调
+    expect(navState.push).not.toHaveBeenCalled();
+    expect(mockGet).toHaveBeenCalledWith(WS, "decisions/demo.md");
+  });
+
+  it("点击 docs 类结果 → 跳转模块文档页 ?path= 深链", async () => {
+    mockSearch.mockResolvedValue({
+      ok: true,
+      results: [
+        searchItem({
+          spec_path: "docs/demo/modules/frontend.md",
+          kind: "module",
+          title: "前端控制台",
+          anchor: null,
+        }),
+      ],
+      model_ready: true,
+      reason: null,
+    });
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("前端");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
+    expect(navState.push).toHaveBeenCalledWith(
+      `/workspaces/${WS}/scan-docs?path=${encodeURIComponent("docs/demo/modules/frontend.md")}`,
+    );
+  });
+
+  it("语义模型不可用 → 展示降级提示条（结果仍渲染）", async () => {
+    mockSearch.mockResolvedValue({
+      ok: true,
+      results: [searchItem()],
+      model_ready: false,
+      reason: "ImportError: fastembed",
+    });
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-degraded")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("knowledge-search-degraded").textContent).toContain(
+      "语义模型暂不可用",
+    );
+    expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument();
+  });
+
+  it("搜索失败 → 错误态 + 重试再发请求", async () => {
+    mockSearch.mockRejectedValueOnce(new Error("boom"));
+    renderPage();
+    await waitForTree(["conventions.md"]);
+
+    await typeSearch("会话");
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-error")).toBeInTheDocument(),
+    );
+    mockSearch.mockResolvedValueOnce({
+      ok: true,
+      results: [searchItem()],
+      model_ready: true,
+      reason: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
+    );
   });
 });

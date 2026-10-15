@@ -1,0 +1,178 @@
+{
+  "change": "2026-10-15-server-logs-panel",
+  "baseline": "82cbdc1f7cd04f0c25e370990e61f9134f75b5a4",
+  "head": "ce7f1c3f0543e6371b6ea0725097e54c60434c98",
+  "files": [
+    "backend/app/core/config.py",
+    "backend/app/core/logging.py",
+    "backend/app/core/paths.py",
+    "backend/app/modules/health/log_reader.py",
+    "backend/app/modules/health/router.py",
+    "backend/openapi.json",
+    "backend/tests/test_server_log_filer.py",
+    "backend/tests/test_server_logs_api.py",
+    "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+    "frontend/src/components/__tests__/server-log-panel.test.tsx",
+    "frontend/src/components/server-log-panel.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/health.ts",
+    "sillyhub-daemon/src/api-types.ts",
+    "data/logs/backend.log"
+  ],
+  "totals": {
+    "files": 16,
+    "additions": 1728,
+    "deletions": 58
+  },
+  "savedAt": "2026-10-15T09:07:06.797Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "82cbdc1f7cd04f0c25e370990e61f9134f75b5a4",
+    "totals": {
+      "files": 16,
+      "additions": 1728,
+      "deletions": 58
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/core/logging.py",
+        "additions": 100,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/core/paths.py",
+        "additions": 14,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/health/log_reader.py",
+        "additions": 112,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/health/router.py",
+        "additions": 61,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 226,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_server_log_filer.py",
+        "additions": 138,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_server_logs_api.py",
+        "additions": 180,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "additions": 42,
+        "deletions": 15,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+        "additions": 14,
+        "deletions": 34,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/server-log-panel.test.tsx",
+        "additions": 193,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/server-log-panel.tsx",
+        "additions": 253,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 165,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/health.ts",
+        "additions": 54,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 164,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "data/logs/backend.log",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "ba8140fbb164a35dcc5df8b83de92b4d84d8492b992baf97425961c2323d2f2a",
+  "patchStatus": "ok"
+}

@@ -1,30 +1,33 @@
 "use client";
 
 /**
- * 服务器信息页 /admin/server-status（2026-10-14-admin-server-status task-02）。
+ * 服务器信息页 /admin/server-status（2026-10-14-admin-server-status task-02；
+ * 2026-10-15-server-logs-panel task-04 改造）。
  *
  * 恢复 2026-07-24 死代码清理删除的服务器运行状态看板（原首页 ServerStatusCard +
  * HealthCard），落位系统管理组（D-005@v1 方案 A，用户亲选）。
  *
  * 设计依据：
- * - requirements FR-02 / D-002@v2（用户亲选内容口径）——三组卡片：
+ * - requirements FR-02/FR-04——三组卡片（2026-10-15 起业务统计卡已删，D-007@v1
+ *   用户亲选）：
  *   ①服务器性能（CPU/内存/磁盘 antd Progress，阈值着色 <80 主题默认 /
- *     80–90 warning / ≥90 exception，色阶走 antd status 语义零手写 hex）
- *   ②业务统计（任务/项目/里程碑/用户四格）
- *   ③依赖与版本（/api/health 的 PostgreSQL/Redis 连接徽标 + 版本/环境/服务器时间）
+ *     80–90 warning / ≥90 exception，色阶走 useToken 语义零手写 hex）
+ *   ②依赖与版本（/api/health 的 PostgreSQL/Redis 连接徽标 + 版本/环境/服务器时间）
+ *   ③服务器日志（ServerLogPanel 满宽置底，卡内独立 5s 轮询）
  * - 5s 轮询自动刷新（useEffect setInterval，卸载 clearInterval）+ 立即刷新按钮；
  * - 失败降级（FR-02）：403/网络/超时渲染 Alert 错误条（§9 语义语义），保留既有
  *   数据不清空、5s 后自动重试；401 由全局拦截跳登录（frontend/src/lib/api.ts:250-256），
  *   非页内承接面；
  * - 样式遵守 FRONTEND_PAGE_STYLE.md §1 骨架（PageContainer/PageHeader/SectionCard）
  *   + §0.5 多主题铁律（antd 色经 status 语义/ConfigProvider token，tailwind 布局）；
- * - 原型：.sillyspec/changes/2026-10-14-admin-server-status/prototype-admin-server-status.html。
+ * - 原型：.sillyspec/changes/2026-10-15-server-logs-panel/prototype-server-logs.html。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Badge, Button, Progress, theme } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import ServerLogPanel from "@/components/server-log-panel";
 import {
   getHealth,
   getSystemStatus,
@@ -71,17 +74,6 @@ function PerfRow({
         strokeColor={strokeColor}
         size="small"
       />
-    </div>
-  );
-}
-
-/* ---------- 统计格 ---------- */
-
-function StatCell({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="rounded-lg border bg-gradient-to-b from-brand-50 to-transparent p-3 text-center">
-      <div className="text-2xl font-bold tabular-nums text-brand-700">{value}</div>
-      <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -143,7 +135,7 @@ export default function ServerStatusPage() {
     <PageContainer>
       <PageHeader
         title="服务器信息"
-        subtitle="服务器性能、业务统计与依赖状态，每 5 秒自动刷新"
+        subtitle="服务器性能、依赖状态与运行日志，每 5 秒自动刷新"
         actions={
           <div className="flex items-center gap-3">
             <span className="text-xs text-muted-foreground">
@@ -197,22 +189,7 @@ export default function ServerStatusPage() {
           )}
         </SectionCard>
 
-        <SectionCard title="业务统计">
-          {status ? (
-            <div className="grid grid-cols-4 gap-2.5">
-              <StatCell value={status.tasks} label="任务" />
-              <StatCell value={status.projects} label="项目" />
-              <StatCell value={status.milestones} label="里程碑" />
-              <StatCell value={status.users} label="用户" />
-            </div>
-          ) : (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {error ? "暂无统计数据" : "加载中…"}
-            </p>
-          )}
-        </SectionCard>
-
-        <SectionCard title="依赖与版本" className="lg:col-span-2">
+        <SectionCard title="依赖与版本">
           {health ? (
             <div>
               <KvRow label="PostgreSQL">
@@ -243,6 +220,9 @@ export default function ServerStatusPage() {
             </p>
           )}
         </SectionCard>
+
+        {/* 服务器日志卡（2026-10-15-server-logs-panel D-007@v1：满宽置底，卡内独立 5s 轮询） */}
+        <ServerLogPanel />
       </div>
     </PageContainer>
   );

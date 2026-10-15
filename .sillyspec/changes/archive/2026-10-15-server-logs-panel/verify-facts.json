@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-server-logs-panel",
+  "generatedAt": "2026-10-15T09:07:52.093Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 5,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "backendEndpoints": 3057,
+        "frontendCalls": 3
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-server-logs-panel",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/server-logs",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/server-logs/download",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "handover": {
+    "count": 1,
+    "items": [
+      {
+        "type": "other",
+        "item": "CLI 集成实测（commands.test 全量对账）",
+        "condition": "verify 收口门禁自动执行（本报告填写时点尚未到实测步）；实测失败则结论降级 FAIL 并回 execute 修复",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/tests/test_server_log_filer.py",
+      "backend/tests/test_server_logs_api.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py73+nontest-skip1+jsx100+jsx30+jsx-e2e-skip1)+fr(205)",
+    "exitCode": 1,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-15T10:01:45.515Z"
+  }
+}

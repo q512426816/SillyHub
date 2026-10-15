@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -67,7 +68,8 @@ async def workspace_with_knowledge(
     spec_ws.spec_root = str(root)
     await db_session.commit()
 
-    return {"ws_id": ws_id}
+    # root 透出供知识搜索用例写补充语料（向后兼容：既有用例只取 ws_id）。
+    return {"ws_id": ws_id, "root": root}
 
 
 async def test_list_knowledge(
@@ -1209,3 +1211,221 @@ async def test_list_knowledge_includes_fr_zone(
     assert resp.status_code == 200, resp.text
     items = resp.json()["items"]
     assert [(i["filename"], i["zone"]) for i in items] == [("fr/host-fs-handler.md", "fr")]
+
+
+# ── 平台知识搜索端点（change 2026-10-15-platform-knowledge-search / task-02）────
+#
+# embedder 全 fake 注入（get_embedder monkeypatch）——真模型初始化属部署面，测试不触。
+# has_permission 在权限过滤用例中 monkeypatch（构造「无 SCAN_DOCS_READ」/「无任何
+# 权限」两类主体；auth_headers 是 admin 主体，短路全量）。
+
+
+class _FakeSearchEmbedder:
+    """字符桶计数向量（端到端契约不需要真语义，形态对齐 test_knowledge_search.py）。"""
+
+    _BUCKETS = ["缓", "存", "索", "引", "会", "话", "状", "态"]
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[float(t.count(ch)) for ch in self._BUCKETS] for t in texts]
+
+
+@pytest.fixture(autouse=True)
+def _clean_search_index() -> Iterator[None]:
+    """知识搜索索引缓存用例前后清空（键含 workspace_id，仍求确定性干净）。"""
+    from app.modules.knowledge.search import reset_index_for_tests
+
+    reset_index_for_tests()
+    yield
+    reset_index_for_tests()
+
+
+def _write_docs_corpus(root: Path) -> None:
+    """补一份 docs/ 语料（fixture 只铺 knowledge/，docs 过滤用例需要两类都在场）。"""
+    d = root / "docs" / "demo" / "modules"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "frontend.md").write_text(
+        "---\nschema_version: 1\n---\n# 前端控制台（frontend）\n\n"
+        "## 会话状态点\n\n五态定义与转圈推导。\n",
+        encoding="utf-8",
+    )
+
+
+async def test_knowledge_search_happy_path_contract(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """契约：200 + {ok, results[{spec_path,kind,title,anchor,snippet,score}], model_ready, reason}。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "uncategorized"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["model_ready"] is True
+    assert body["reason"] is None
+    assert body["results"], "词面命中应有结果"
+    item = body["results"][0]
+    assert {"spec_path", "kind", "title", "anchor", "snippet", "score"} <= set(item.keys())
+    assert item["spec_path"] == "knowledge/uncategorized.md"
+    assert item["kind"] == "knowledge"
+    assert item["score"] >= 0.9  # title 词面命中保底
+
+
+async def test_knowledge_search_requires_knowledge_read(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """无 KNOWLEDGE_READ → 403（权限依赖同走 has_permission 权威函数）。"""
+    from app.core import auth_deps
+    from app.modules.auth import rbac
+
+    async def _deny_all(session, *, user, permission, workspace_id):
+        return False
+
+    # 双 patch：auth_deps 是导入时绑定（require_permission 门控依赖），rbac 模块属性
+    # 是端点函数内 ``from app.modules.auth.rbac import has_permission`` 的取值源。
+    monkeypatch.setattr(auth_deps, "has_permission", _deny_all)
+    monkeypatch.setattr(rbac, "has_permission", _deny_all)
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "x"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 403, resp.text
+
+
+async def test_knowledge_search_unknown_workspace_404(
+    client, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """未知 workspace → 404（WorkspaceService.get 口径）。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    resp = await client.post(
+        f"/api/workspaces/{uuid.uuid4()}/knowledge/search",
+        json={"query": "x"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+async def test_knowledge_search_filters_docs_without_scan_docs_permission(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """无 SCAN_DOCS_READ：docs/ 项被服务端过滤，知识类结果照常返回（非 403）。"""
+    from app.core import auth_deps
+    from app.modules.auth import rbac
+    from app.modules.auth.permissions import Permission
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    _write_docs_corpus(workspace_with_knowledge["root"])
+
+    async def _deny_scan_docs(session, *, user, permission, workspace_id):
+        return permission is not Permission.SCAN_DOCS_READ
+
+    # 双 patch（同 403 用例注释）：门控 KNOWLEDGE_READ 放行、docs 判定面拒绝。
+    monkeypatch.setattr(auth_deps, "has_permission", _deny_scan_docs)
+    monkeypatch.setattr(rbac, "has_permission", _deny_scan_docs)
+    ws_id = workspace_with_knowledge["ws_id"]
+    # 同一 query 同时命中知识（uncategorized）与 docs（会话状态点）两类语料
+    resp_kn = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "uncategorized"},
+        headers=auth_headers,
+    )
+    assert resp_kn.status_code == 200, resp_kn.text
+    assert resp_kn.json()["results"], "知识类结果应照常返回"
+    assert all(not r["spec_path"].startswith("docs/") for r in resp_kn.json()["results"])
+    resp_docs = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "会话状态点"},
+        headers=auth_headers,
+    )
+    assert resp_docs.status_code == 200, resp_docs.text
+    assert all(not r["spec_path"].startswith("docs/") for r in resp_docs.json()["results"]), (
+        "docs 命中被过滤后不应残留"
+    )
+
+
+async def test_knowledge_search_admin_sees_docs_results(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """admin（is_platform_admin 短路）→ docs 结果全量可见。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    _write_docs_corpus(workspace_with_knowledge["root"])
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "会话状态点"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    results = resp.json()["results"]
+    assert results
+    assert any(r["spec_path"].startswith("docs/") for r in results)
+    docs_item = next(r for r in results if r["spec_path"].startswith("docs/"))
+    assert docs_item["kind"] == "module"
+
+
+async def test_knowledge_search_degraded_model_not_ready(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """embedder 不可用 → fail-soft：200 + model_ready=False + reason + 纯词面结果非空。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(
+        vector_search, "get_embedder", lambda name: (None, "ImportError: fastembed")
+    )
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "uncategorized"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["model_ready"] is False
+    assert body["reason"] == "ImportError: fastembed"
+    assert body["results"], "降级仍应返回纯词面结果"
+
+
+async def test_knowledge_search_blank_query_returns_empty(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """空白 query → 200 空结果（不报错）。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "   "},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["results"] == []
+
+
+async def test_knowledge_search_limit_clamped(
+    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
+) -> None:
+    """limit 超界被钳到 1..50（999 → 不报错且结果数 ≤50）。"""
+    from app.modules.knowledge import vector_search
+
+    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
+    ws_id = workspace_with_knowledge["ws_id"]
+    resp = await client.post(
+        f"/api/workspaces/{ws_id}/knowledge/search",
+        json={"query": "uncategorized", "limit": 999},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["results"]) <= 50

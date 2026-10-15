@@ -1,0 +1,2157 @@
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 735a43725..13133c890 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -99,6 +99,9 @@ class Settings(BaseSettings):
+     redis_url: str = Field("redis://localhost:6379/0")
+     secret_key: str = Field(..., min_length=16)
+     log_level: str = Field("INFO")
++    # 2026-10-15-server-logs-panel：日志轮转文件目录（空=默认 <repo_root>/data/logs，
++    # 经 paths.resolve_log_dir 解析；轮转大小/备份数为 logging.py 模块级常量）。
++    log_dir: str = Field("")
+     environment: Literal["dev", "test", "prod"] = "dev"
+     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
+         default_factory=lambda: ["http://localhost:3000"],
+diff --git a/backend/app/core/logging.py b/backend/app/core/logging.py
+index 20f9ffc07..4ea6be748 100644
+--- a/backend/app/core/logging.py
++++ b/backend/app/core/logging.py
+@@ -2,19 +2,102 @@
+ 
+ Logs are emitted as JSON on stderr by default, so they can be picked up by any
+ container log aggregator without further configuration.
++
++2026-10-15-server-logs-panel（D-001@v1 / D-006@v1 / D-008@v1）起，日志同时写入
++轮转文件（页面「服务器日志」卡展示与下载的单一来源）：FileWriter processor 插在
++JSONRenderer 之前，用同一 JSONRenderer 实例渲染行文本，保证文件与 stderr 逐字
++一致；per-write 即开即关句柄（常驻句柄在 Windows 会阻断 rename 轮转）。
+ """
+ 
+ from __future__ import annotations
+ 
+ import logging
+ import sys
++from pathlib import Path
+ from typing import Any
+ 
+ import structlog
+ 
++from app.core.paths import resolve_log_dir
++
++# 轮转参数（模块级常量，非 settings——D-008@v1；需要时再升级为配置项）。
++LOG_FILE_NAME = "backend.log"
++LOG_MAX_BYTES = 5_000_000
++LOG_BACKUP_COUNT = 3
++
++
++def get_log_file_path(log_dir: str | None = None) -> Path:
++    """当前日志文件绝对路径（单一源：写入侧与两个日志端点共用）。
++
++    ``log_dir`` 缺省从 settings 读取（经 :func:`resolve_log_dir` 解析；
++    空值 → ``<repo_root>/data/logs``）。
++    """
++    if log_dir is None:
++        from app.core.config import get_settings
++
++        log_dir = get_settings().log_dir
++    return Path(resolve_log_dir(log_dir)) / LOG_FILE_NAME
++
++
++class FileWriter:
++    """structlog processor：把渲染后的日志行写入轮转文件。
++
++    - 复用同一 ``JSONRenderer`` 实例渲染（与 stderr 输出逐字一致，含中文）；
++    - per-write ``open(..., "a")`` 即开即关（跨平台 rename 轮转前提，CLAUDE.md 规则 13）；
++    - 写/轮转任何异常均捕获降级（日志绝不拖垮业务进程）；
++    - 返回 ``event_dict`` 原样透传给链上后续 processor（stderr 链路零扰动）。
++    """
++
++    def __init__(
++        self,
++        path: Path,
++        max_bytes: int = LOG_MAX_BYTES,
++        backup_count: int = LOG_BACKUP_COUNT,
++    ) -> None:
++        self._path = Path(path)
++        self._max_bytes = max_bytes
++        self._backup_count = backup_count
++        self._renderer = structlog.processors.JSONRenderer()
++
++    def __call__(self, logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
++        try:
++            line = self._renderer(logger, method_name, event_dict)
++            self._write(str(line))
++        except Exception:
++            pass
++        return event_dict
++
++    def _write(self, line: str) -> None:
++        try:
++            size = self._path.stat().st_size if self._path.exists() else 0
++            if size and size + len(line.encode("utf-8")) > self._max_bytes:
++                self._rotate()
++        except OSError:
++            pass  # stat 失败按不轮转处理，写路径自身另有兜底
++        with self._path.open("a", encoding="utf-8") as f:
++            f.write(line + "\n")
++
++    def _rotate(self) -> None:
++        """rename 链：.2→.3、.1→.2、log→.1（超 backup_count 的最旧随 unlink 删除）。"""
++        try:
++            for i in range(self._backup_count, 0, -1):
++                src = self._path if i == 1 else self._path.with_name(f"{self._path.name}.{i - 1}")
++                dst = self._path.with_name(f"{self._path.name}.{i}")
++                if not src.exists():
++                    continue
++                if dst.exists():
++                    dst.unlink()
++                src.rename(dst)
++        except OSError:
++            pass  # rename/占用失败——继续写当前文件，下一轮再试
++
+ 
+ def configure_logging(level: str = "INFO") -> None:
+-    """Configure stdlib logging + structlog. Idempotent."""
++    """Configure stdlib logging + structlog. Idempotent.
++
++    附加轮转文件写入（FileWriter）；日志目录创建失败时降级 stderr-only
++    （D-001@v1 故障面——建目录/IO 异常不影响进程启动）。
++    """
+     log_level = getattr(logging, level.upper(), logging.INFO)
+     logging.basicConfig(
+         format="%(message)s",
+@@ -30,11 +113,23 @@ def configure_logging(level: str = "INFO") -> None:
+         structlog.processors.format_exc_info,
+     ]
+ 
++    file_writer: FileWriter | None = None
++    try:
++        log_path = get_log_file_path()
++        log_path.parent.mkdir(parents=True, exist_ok=True)
++        file_writer = FileWriter(log_path)
++    except OSError:
++        file_writer = None
++
++    # FileWriter 插在 JSONRenderer 之前：先写文件（自渲染）、再透传由
++    # JSONRenderer 渲染输出 stderr——两份 JSON 同源同构。
++    processors: list[Any] = [*shared_processors]
++    if file_writer is not None:
++        processors.append(file_writer)
++    processors.append(structlog.processors.JSONRenderer())
++
+     structlog.configure(
+-        processors=[
+-            *shared_processors,
+-            structlog.processors.JSONRenderer(),
+-        ],
++        processors=processors,
+         wrapper_class=structlog.make_filtering_bound_logger(log_level),
+         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+         cache_logger_on_first_use=True,
+diff --git a/backend/app/core/paths.py b/backend/app/core/paths.py
+index 638d9c7b6..e5a780f90 100644
+--- a/backend/app/core/paths.py
++++ b/backend/app/core/paths.py
+@@ -62,3 +62,17 @@ def resolve_spec_data_root(raw: str) -> str:
+     if raw.startswith("/") and not p.is_absolute():
+         return str(p.resolve())
+     return str(REPO_ROOT / p)
++
++
++def resolve_log_dir(raw: str) -> str:
++    """Resolve the backend log directory (2026-10-15-server-logs-panel).
++
++    * **Empty/blank** — default ``<repo_root>/data/logs`` (absolute).
++    * **Absolute / relative** — same semantics as
++      :func:`resolve_spec_data_root` (relative resolves against repo root).
++
++    Pure (no I/O) so it can be consumed by logging setup and endpoints alike.
++    """
++    if not raw or not raw.strip():
++        return str(REPO_ROOT / "data" / "logs")
++    return resolve_spec_data_root(raw)
+diff --git a/backend/app/modules/health/log_reader.py b/backend/app/modules/health/log_reader.py
+new file mode 100644
+index 000000000..366805cfa
+--- /dev/null
++++ b/backend/app/modules/health/log_reader.py
+@@ -0,0 +1,112 @@
++"""服务器日志读取与解析（2026-10-15-server-logs-panel task-02 / D-002@v1 / D-008@v1）。
++
++- 读取面：``read_log_tail(path, n)`` 全文按块读入 splitlines 得 total_lines、取尾 n 行
++  （单文件受 5MB 轮转上限天然封顶，轮询面毫秒级）；
++- 解析面：JSON 行 → {time, level, event, fields}；非 JSON 行原文降级（raw + parse_error，
++  不丢行）；
++- 白名单：文件名（防目录遍历）与 lines 取值口径（D-008@v1：非白名单回退 200）。
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Any
++
++from pydantic import BaseModel
++
++# 下载文件名白名单（防目录遍历——任何拼接用户输入的路径形态都不构造）。
++LOG_FILE_WHITELIST: tuple[str, ...] = (
++    "backend.log",
++    "backend.log.1",
++    "backend.log.2",
++    "backend.log.3",
++)
++# 行数白名单（D-008@v1；非白名单值回退 DEFAULT_LOG_LINES）。
++LOG_LINES_WHITELIST: tuple[int, ...] = (100, 200, 500, 1000)
++DEFAULT_LOG_LINES = 200
++
++
++class LogEntry(BaseModel):
++    """单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。"""
++
++    time: str | None = None
++    level: str | None = None
++    event: str | None = None
++    fields: dict[str, Any] = {}
++    raw: str | None = None
++    parse_error: bool = False
++
++
++class LogFileInfo(BaseModel):
++    name: str
++    size: int
++    mtime: float
++
++
++class ServerLogsResponse(BaseModel):
++    file: str | None = None
++    entries: list[LogEntry] = []
++    total_lines: int = 0
++    returned: int = 0
++    available_files: list[LogFileInfo] = []
++    hint: str | None = None
++
++
++def normalize_lines(value: int | None) -> int:
++    """lines 口径（D-008@v1）：白名单内原样，否则回退默认 200。"""
++    return value if value in LOG_LINES_WHITELIST else DEFAULT_LOG_LINES
++
++
++def read_log_tail(path: Path, n: int) -> tuple[list[str], int]:
++    """读取文件尾部 n 行原文，返回 (尾部行, 文件总行数)。
++
++    文件缺失/读失败 → ([], 0)（空态——不抛，页面显示提示）。
++    """
++    if not path.exists() or not path.is_file():
++        return [], 0
++    try:
++        with path.open("r", encoding="utf-8", errors="replace") as f:
++            lines = f.read().splitlines()
++    except OSError:
++        return [], 0
++    total = len(lines)
++    return (lines[-n:] if n > 0 else []), total
++
++
++def parse_log_lines(raw_lines: list[str]) -> list[LogEntry]:
++    """JSON 行解析；非 JSON 行按原文降级展示（不丢行）。"""
++    entries: list[LogEntry] = []
++    for raw in raw_lines:
++        stripped = raw.strip()
++        if not stripped:
++            continue
++        try:
++            data = json.loads(stripped)
++            if not isinstance(data, dict):
++                raise ValueError("log line JSON is not an object")
++        except (ValueError, TypeError):
++            entries.append(LogEntry(raw=raw, parse_error=True))
++            continue
++        entries.append(
++            LogEntry(
++                time=str(data.get("timestamp", "")) or None,
++                level=str(data.get("level", "")) or None,
++                event=str(data.get("event", "")) or None,
++                fields={k: v for k, v in data.items() if k not in ("timestamp", "level", "event")},
++            )
++        )
++    return entries
++
++
++def list_log_files(log_dir: Path) -> list[LogFileInfo]:
++    """白名单中实际存在的文件清单（下载下拉与页脚数据源）。"""
++    out: list[LogFileInfo] = []
++    for name in LOG_FILE_WHITELIST:
++        p = log_dir / name
++        try:
++            st = p.stat()
++        except OSError:
++            continue
++        out.append(LogFileInfo(name=name, size=st.st_size, mtime=st.st_mtime))
++    return out
+diff --git a/backend/app/modules/health/router.py b/backend/app/modules/health/router.py
+index ed799cd5e..1e155da12 100644
+--- a/backend/app/modules/health/router.py
++++ b/backend/app/modules/health/router.py
+@@ -21,6 +21,15 @@ from app.core.logging import get_logger
+ from app.core.redis import get_redis
+ from app.modules.auth.model import User
+ from app.modules.auth.permissions import Permission
++from app.modules.health.log_reader import (
++    DEFAULT_LOG_LINES,
++    LOG_FILE_WHITELIST,
++    ServerLogsResponse,
++    list_log_files,
++    normalize_lines,
++    parse_log_lines,
++    read_log_tail,
++)
+ from app.modules.health.schema import (
+     DependencyStatus,
+     HealthResponse,
+@@ -131,3 +140,55 @@ async def system_status(
+         milestones=milestones,
+         users=users,
+     )
++
++
++# ── 服务器日志展示/下载（2026-10-15-server-logs-panel task-02 / D-003@v1）──────
++# 复用 system_status:read（D-004@v1）；文件路径经 get_log_file_path() 单一源；
++# 文件名白名单硬校验（防目录遍历）。
++
++
++@router.get("/server-logs", response_model=ServerLogsResponse)
++async def server_logs(
++    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
++    lines: int = DEFAULT_LOG_LINES,
++) -> ServerLogsResponse:
++    """服务器日志尾部读取（结构化解析 + 文件清单）。"""
++    from app.core.logging import get_log_file_path
++
++    n = normalize_lines(lines)
++    path = get_log_file_path()
++    raw_lines, total = read_log_tail(path, n)
++    entries = parse_log_lines(raw_lines)
++    exists = path.exists()
++    return ServerLogsResponse(
++        file=path.name if exists else None,
++        entries=entries,
++        total_lines=total,
++        returned=len(entries),
++        available_files=list_log_files(path.parent),
++        hint=None if exists else "日志文件尚未生成（产生首条日志后可见）",
++    )
++
++
++@router.get("/server-logs/download")
++async def download_server_log(
++    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
++    file: str = "",
++):
++    """下载白名单内的日志文件（当前+轮转归档）。"""
++    from fastapi.responses import FileResponse, JSONResponse
++
++    from app.core.logging import get_log_file_path
++
++    if file not in LOG_FILE_WHITELIST:
++        return JSONResponse(
++            status_code=400,
++            content={"detail": "非法的日志文件名（仅支持 backend.log 与轮转归档）。"},
++        )
++    path = get_log_file_path().parent / file
++    if not path.exists() or not path.is_file():
++        return JSONResponse(
++            status_code=404,
++            content={"detail": "日志文件不存在。"},
++        )
++    return FileResponse(path, media_type="text/plain", filename=file)
+diff --git a/backend/openapi.json b/backend/openapi.json
+index afba0fc7a..6a572fc70 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -69,6 +69,92 @@
+         }
+       }
+     },
++    "/api/server-logs": {
++      "get": {
++        "tags": [
++          "health"
++        ],
++        "summary": "Server Logs",
++        "description": "服务器日志尾部读取（结构化解析 + 文件清单）。",
++        "operationId": "server_logs_api_server_logs_get",
++        "parameters": [
++          {
++            "name": "lines",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "integer",
++              "default": 200,
++              "title": "Lines"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/ServerLogsResponse"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
++    "/api/server-logs/download": {
++      "get": {
++        "tags": [
++          "health"
++        ],
++        "summary": "Download Server Log",
++        "description": "下载白名单内的日志文件（当前+轮转归档）。",
++        "operationId": "download_server_log_api_server_logs_download_get",
++        "parameters": [
++          {
++            "name": "file",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "type": "string",
++              "default": "",
++              "title": "File"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {}
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/daemon/install.sh": {
+       "get": {
+         "tags": [
+@@ -53522,6 +53608,91 @@
+         "title": "LocalSnapshotResponse",
+         "description": "本机现状快照（手动现拉即弃，D-003/D-005；四态降级，Gap B）。"
+       },
++      "LogEntry": {
++        "properties": {
++          "time": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Time"
++          },
++          "level": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Level"
++          },
++          "event": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Event"
++          },
++          "fields": {
++            "additionalProperties": true,
++            "type": "object",
++            "title": "Fields",
++            "default": {}
++          },
++          "raw": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Raw"
++          },
++          "parse_error": {
++            "type": "boolean",
++            "title": "Parse Error",
++            "default": false
++          }
++        },
++        "type": "object",
++        "title": "LogEntry",
++        "description": "单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。"
++      },
++      "LogFileInfo": {
++        "properties": {
++          "name": {
++            "type": "string",
++            "title": "Name"
++          },
++          "size": {
++            "type": "integer",
++            "title": "Size"
++          },
++          "mtime": {
++            "type": "number",
++            "title": "Mtime"
++          }
++        },
++        "type": "object",
++        "required": [
++          "name",
++          "size",
++          "mtime"
++        ],
++        "title": "LogFileInfo"
++      },
+       "LoginRequest": {
+         "properties": {
+           "account": {
+@@ -69016,6 +69187,60 @@
+         "title": "ScopeWorkspaceStatus",
+         "description": "scope 工作区状态条目（design §7 逐字）。\n\n组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——\n``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，\nUB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测\n三态。"
+       },
++      "ServerLogsResponse": {
++        "properties": {
++          "file": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "File"
++          },
++          "entries": {
++            "items": {
++              "$ref": "#/components/schemas/LogEntry"
++            },
++            "type": "array",
++            "title": "Entries",
++            "default": []
++          },
++          "total_lines": {
++            "type": "integer",
++            "title": "Total Lines",
++            "default": 0
++          },
++          "returned": {
++            "type": "integer",
++            "title": "Returned",
++            "default": 0
++          },
++          "available_files": {
++            "items": {
++              "$ref": "#/components/schemas/LogFileInfo"
++            },
++            "type": "array",
++            "title": "Available Files",
++            "default": []
++          },
++          "hint": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Hint"
++          }
++        },
++        "type": "object",
++        "title": "ServerLogsResponse"
++      },
+       "SessionAutoResumeUpdateRequest": {
+         "properties": {
+           "enabled": {
+@@ -69181,8 +69406,7 @@
+                   "claude",
+                   "codex",
+                   "cursor",
+-                  "pi",
+-                  "dsh"
++                  "pi"
+                 ]
+               },
+               {
+diff --git a/backend/tests/test_server_log_filer.py b/backend/tests/test_server_log_filer.py
+new file mode 100644
+index 000000000..54b42824b
+--- /dev/null
++++ b/backend/tests/test_server_log_filer.py
+@@ -0,0 +1,138 @@
++"""日志轮转落盘测试（2026-10-15-server-logs-panel task-01 / D-001@v1 / D-006@v1）。
++
++覆盖：
++1. 轮转 rename 链（.1/.2/.3 与最旧删除，小 max_bytes 注入触发）；
++2. 双写逐字一致（FileWriter 与 JSONRenderer 同一渲染语义，含中文 event）；
++3. 写失败不抛（目录不存在 / 非法路径）；
++4. configure_logging 幂等 + get_log_file_path 派生；
++5. 轮转后文件句柄无残留（写后立即可 rename——Windows 语义）。
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import structlog
++
++from app.core.logging import (
++    LOG_BACKUP_COUNT,
++    LOG_FILE_NAME,
++    FileWriter,
++    configure_logging,
++    get_log_file_path,
++)
++from app.core.paths import resolve_log_dir
++
++
++def _event(i: int, *, text: str = "ok") -> dict[str, object]:
++    return {
++        "event": f"test.event.{i}",
++        "level": "info",
++        "message": text,
++        "idx": i,
++    }
++
++
++def _lines(path: Path) -> list[str]:
++    return path.read_text(encoding="utf-8").splitlines()
++
++
++# ── 轮转 ────────────────────────────────────────────────────────────────
++
++
++def test_rotation_rename_chain_and_oldest_dropped(tmp_path: Path) -> None:
++    """小 max_bytes 注入：多次写触发轮转，.1/.2/.3 链式后移、最旧删除。"""
++    log_path = tmp_path / LOG_FILE_NAME
++    writer = FileWriter(log_path, max_bytes=300, backup_count=3)
++
++    for i in range(20):
++        writer(None, "info", _event(i))
++
++    assert log_path.exists(), "当前日志文件必须在"
++    assert (tmp_path / f"{LOG_FILE_NAME}.1").exists(), "首次轮转须产生 .1"
++    assert (tmp_path / f"{LOG_FILE_NAME}.2").exists(), "第二次轮转须产生 .2"
++    assert (tmp_path / f"{LOG_FILE_NAME}.3").exists(), "第三次轮转须产生 .3"
++    assert not (tmp_path / f"{LOG_FILE_NAME}.4").exists(), (
++        "超 backup_count 的层级不得存在（最旧随 unlink 删除）"
++    )
++    # .1 为倒数第二个文件（比当前文件旧、比 .2 新）：行可解析且非空
++    for name in (LOG_FILE_NAME, f"{LOG_FILE_NAME}.1", f"{LOG_FILE_NAME}.2"):
++        assert _lines(tmp_path / name), f"{name} 不应为空"
++
++
++def test_rotation_no_handle_residue(tmp_path: Path) -> None:
++    """轮转后句柄无残留：写完后当前文件可被立即重命名（Windows 语义回归）。"""
++    log_path = tmp_path / LOG_FILE_NAME
++    writer = FileWriter(log_path, max_bytes=200, backup_count=2)
++    for i in range(10):
++        writer(None, "info", _event(i))
++
++    renamed = tmp_path / "renamed.log"
++    log_path.rename(renamed)  # 常驻句柄会在此处 Windows 失败
++    assert renamed.exists()
++
++
++# ── 双写一致性 ──────────────────────────────────────────────────────────
++
++
++def test_file_line_matches_json_renderer_verbatim(tmp_path: Path) -> None:
++    """文件行 == 同一 JSONRenderer 语义渲染（含中文 event 逐字一致）。"""
++    log_path = tmp_path / LOG_FILE_NAME
++    writer = FileWriter(log_path, max_bytes=10_000_000, backup_count=1)
++    event: dict[str, object] = {
++        "event": "中文事件.测试",
++        "level": "warning",
++        "detail": "内存使用率 87%",
++        "idx": 1,
++    }
++    writer(None, "warning", dict(event))
++
++    rendered = structlog.processors.JSONRenderer()(None, "warning", dict(event))
++    assert _lines(log_path) == [str(rendered)]
++    # JSONRenderer 默认 ensure_ascii=True（中文转义）——与 stderr 全等即一致性目标；
++    # 解析后值必须与原始中文一致（转义无损）
++    assert json.loads(_lines(log_path)[0])["event"] == "中文事件.测试"
++    assert json.loads(_lines(log_path)[0])["detail"] == "内存使用率 87%"
++
++
++# ── 失败降级 ────────────────────────────────────────────────────────────
++
++
++def test_write_failure_does_not_raise(tmp_path: Path) -> None:
++    """目标目录不存在（写失败）→ 不抛出，event_dict 原样透传。"""
++    writer = FileWriter(tmp_path / "no-such-dir" / LOG_FILE_NAME)
++    event = _event(1)
++    out = writer(None, "info", dict(event))
++    assert out == event, "processor 必须原样返回 event_dict 供后续输出"
++
++
++def test_configure_idempotent_and_path_derivation(tmp_path: Path) -> None:
++    """configure_logging 幂等；get_log_file_path 空值走默认派生、显式值尊重。"""
++    configure_logging("INFO")
++    configure_logging("INFO")  # 二次调用不抛
++
++    assert get_log_file_path(str(tmp_path)) == tmp_path / LOG_FILE_NAME
++    default_path = get_log_file_path("")
++    assert default_path.name == LOG_FILE_NAME
++    assert default_path.parent == Path(resolve_log_dir(""))
++    assert str(default_path.parent).endswith(str(Path("data") / "logs"))
++
++
++def test_resolve_log_dir_semantics() -> None:
++    """resolve_log_dir：空=默认 repo_root/data/logs；绝对原样；相对对 repo_root。"""
++    from app.core.paths import repo_root
++
++    assert Path(resolve_log_dir("")) == repo_root() / "data" / "logs"
++    assert Path(resolve_log_dir("   ")) == repo_root() / "data" / "logs"
++    abs_dir = str((repo_root() / "custom-logs").resolve())
++    assert resolve_log_dir(abs_dir) == abs_dir
++    assert Path(resolve_log_dir("rel/logs")) == repo_root() / "rel" / "logs"
++
++
++def test_backup_count_constant_default() -> None:
++    """模块级轮转常量（D-008@v1 口径）：5MB×3。"""
++    from app.core.logging import LOG_MAX_BYTES
++
++    assert LOG_MAX_BYTES == 5_000_000
++    assert LOG_BACKUP_COUNT == 3
+diff --git a/backend/tests/test_server_logs_api.py b/backend/tests/test_server_logs_api.py
+new file mode 100644
+index 000000000..8e1e123f7
+--- /dev/null
++++ b/backend/tests/test_server_logs_api.py
+@@ -0,0 +1,180 @@
++"""服务器日志端点测试（2026-10-15-server-logs-panel task-02）。
++
++覆盖：tail 读取/JSON 解析降级/lines 白名单回退/空态/下载白名单防遍历/三态鉴权。
++日志文件位置经 monkeypatch get_log_file_path 指向 tmp_path（不触碰真实日志目录）。
++"""
++
++from __future__ import annotations
++
++import json
++import uuid
++from pathlib import Path
++from typing import Any
++
++import pytest
++from httpx import AsyncClient
++
++LOGS_PATH = "/api/server-logs"
++DOWNLOAD_PATH = "/api/server-logs/download"
++
++
++def _json_line(event: str, level: str = "info", **extra: Any) -> str:
++    return json.dumps(
++        {"event": event, "level": level, "timestamp": "2026-10-15T08:00:00Z", **extra},
++        ensure_ascii=False,
++    )
++
++
++@pytest.fixture()
++def log_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
++    """把 get_log_file_path 指向 tmp_path/backend.log（返回该路径）。"""
++    path = tmp_path / "backend.log"
++    monkeypatch.setattr("app.core.logging.get_log_file_path", lambda log_dir=None: path)
++    return path
++
++
++async def _make_user_token(db_session: Any, *, admin: bool) -> str:
++    """建用户并签 token（模式同 tests/test_health.py / test_mcp_settings.py）。"""
++    from app.core.config import get_settings
++    from app.core.security import create_access_token, password_hasher
++    from app.modules.auth.model import User
++
++    user = User(
++        id=uuid.uuid4(),
++        email=f"user-{uuid.uuid4().hex[:6]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++        is_platform_admin=admin,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return token
++
++
++def _headers(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++# ── 三态鉴权 ────────────────────────────────────────────────────────────
++
++
++async def test_server_logs_requires_login(client: AsyncClient, log_file: Path) -> None:
++    resp = await client.get(LOGS_PATH)
++    assert resp.status_code == 401, resp.text
++
++
++async def test_server_logs_forbidden_without_permission(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    token = await _make_user_token(db_session, admin=False)
++    resp = await client.get(LOGS_PATH, headers=_headers(token))
++    assert resp.status_code == 403, resp.text
++
++
++# ── 读取与解析 ──────────────────────────────────────────────────────────
++
++
++async def test_list_parses_json_and_degrades_raw_lines(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    log_file.write_text(
++        "\n".join(
++            [
++                _json_line("app.started", environment="dev"),
++                "this-is-not-json",
++                _json_line("health.checked", db="ok", redis="ok"),
++            ]
++        )
++        + "\n",
++        encoding="utf-8",
++    )
++    token = await _make_user_token(db_session, admin=True)
++    resp = await client.get(LOGS_PATH, headers=_headers(token))
++    assert resp.status_code == 200, resp.text
++    payload = resp.json()
++
++    assert payload["total_lines"] == 3
++    assert payload["returned"] == 3
++    assert payload["file"] == "backend.log"
++    assert payload["hint"] is None
++    entries = payload["entries"]
++    assert entries[0]["event"] == "app.started"
++    assert entries[0]["level"] == "info"
++    assert entries[0]["fields"]["environment"] == "dev"
++    assert entries[1]["parse_error"] is True
++    assert entries[1]["raw"] == "this-is-not-json"
++    assert entries[2]["event"] == "health.checked"
++    # 文件清单（下载下拉数据源）
++    names = [f["name"] for f in payload["available_files"]]
++    assert "backend.log" in names
++
++
++async def test_list_lines_whitelist_fallback_and_tail(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    """lines=999 非白名单 → 回退 200；250 行文件返回尾部 200 行（total 仍 250）。"""
++    log_file.write_text(
++        "\n".join(_json_line(f"evt.{i}") for i in range(250)) + "\n",
++        encoding="utf-8",
++    )
++    token = await _make_user_token(db_session, admin=True)
++    resp = await client.get(LOGS_PATH, params={"lines": 999}, headers=_headers(token))
++    payload = resp.json()
++    assert payload["total_lines"] == 250
++    assert payload["returned"] == 200
++    assert payload["entries"][-1]["event"] == "evt.249"
++    assert payload["entries"][0]["event"] == "evt.50"
++
++
++async def test_list_missing_file_empty_state(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    token = await _make_user_token(db_session, admin=True)
++    resp = await client.get(LOGS_PATH, headers=_headers(token))
++    assert resp.status_code == 200, resp.text
++    payload = resp.json()
++    assert payload["file"] is None
++    assert payload["entries"] == []
++    assert payload["total_lines"] == 0
++    assert payload["hint"], "空态必须给出中文提示"
++
++
++# ── 下载与白名单防遍历 ──────────────────────────────────────────────────
++
++
++async def test_download_rejects_non_whitelist(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    log_file.write_text(_json_line("x") + "\n", encoding="utf-8")
++    token = await _make_user_token(db_session, admin=True)
++    for bad in ("../secret", "backend.log.x", "..\\windows\\win.ini", "/etc/passwd", ""):
++        resp = await client.get(DOWNLOAD_PATH, params={"file": bad}, headers=_headers(token))
++        assert resp.status_code == 400, f"{bad!r} must be rejected, got {resp.status_code}"
++
++
++async def test_download_ok_and_missing_404(
++    client: AsyncClient, db_session: Any, log_file: Path
++) -> None:
++    log_file.write_text(_json_line("download.me") + "\n", encoding="utf-8")
++    token = await _make_user_token(db_session, admin=True)
++
++    resp = await client.get(DOWNLOAD_PATH, params={"file": "backend.log"}, headers=_headers(token))
++    assert resp.status_code == 200, resp.text
++    assert "download.me" in resp.text
++    assert "attachment" in resp.headers.get("content-disposition", "")
++
++    resp = await client.get(
++        DOWNLOAD_PATH, params={"file": "backend.log.1"}, headers=_headers(token)
++    )
++    assert resp.status_code == 404, resp.text
++
++
++async def test_download_requires_login(client: AsyncClient, log_file: Path) -> None:
++    resp = await client.get(DOWNLOAD_PATH, params={"file": "backend.log"})
++    assert resp.status_code == 401, resp.text
+diff --git a/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+index c5659d058..9c8c9f37c 100644
+--- a/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+@@ -1,30 +1,33 @@
+ /**
+- * 服务器信息页组件测试（2026-10-14-admin-server-status task-02）。
++ * 服务器信息页组件测试（2026-10-14-admin-server-status task-02；
++ * 2026-10-15-server-logs-panel task-04：删业务统计卡断言、日志卡在场）。
+  *
+- * 覆盖 FR-02 三态（对照 TaskCard acceptance）：
+- * 1. 正常态：三组卡片渲染——性能百分数、四项业务统计、依赖徽标（DB/Redis）；
++ * 覆盖 FR-02/FR-04 三态（对照 TaskCard acceptance）：
++ * 1. 正常态：卡片渲染——性能百分数、依赖徽标（DB/Redis）、日志卡在场（无业务统计卡）；
+  * 2. 轮询：初始 1 次，fake timers 推进 5s 后再次拉取；
+  * 3. unmount 清理定时器，之后不再拉取；
+  * 4. 失败降级：mock 拒绝后渲染错误条，且既有数据不清空。
+  *
+  * 401 不在页内承接（全局拦截跳登录，frontend/src/lib/api.ts:250-256），
+- * 非本页测试面（FR-02 注记）。
++ * 非本页测试面（FR-02 注记）。日志卡自身交互归 server-log-panel.test.tsx。
+  */
+ import { act, cleanup, render, screen } from "@testing-library/react";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ import ServerStatusPage from "@/app/(dashboard)/admin/server-status/page";
+-import type { HealthResponse, SystemStatusResponse } from "@/lib/health";
++import type { HealthResponse, ServerLogsResponse, SystemStatusResponse } from "@/lib/health";
+ 
+-// ── mock @/lib/health：数据层双接口可编程返回 ──────────────────────────────
++// ── mock @/lib/health：数据层三接口可编程返回（含日志卡消费的 getServerLogs）──
+ const getSystemStatusMock = vi.hoisted(() => vi.fn());
+ const getHealthMock = vi.hoisted(() => vi.fn());
++const getServerLogsMock = vi.hoisted(() => vi.fn());
+ vi.mock("@/lib/health", async () => {
+   const actual = await vi.importActual<typeof import("@/lib/health")>("@/lib/health");
+   return {
+     ...actual,
+     getSystemStatus: getSystemStatusMock,
+     getHealth: getHealthMock,
++    getServerLogs: getServerLogsMock,
+   };
+ });
+ 
+@@ -37,6 +40,7 @@ const STATUS_FIXTURE: SystemStatusResponse = {
+   disk_percent: 71.0,
+   disk_used_gb: 156.3,
+   disk_total_gb: 220.4,
++  // 字段因响应类型约束保留（页面不再消费——业务统计卡已删，D-007@v1）
+   tasks: 128,
+   projects: 12,
+   milestones: 45,
+@@ -53,9 +57,28 @@ const HEALTH_FIXTURE: HealthResponse = {
+   environment: "test",
+ };
+ 
++const LOGS_FIXTURE: ServerLogsResponse = {
++  file: "backend.log",
++  entries: [
++    {
++      time: "2026-10-15T08:00:00Z",
++      level: "info",
++      event: "app.started",
++      fields: {},
++      raw: null,
++      parse_error: false,
++    },
++  ],
++  total_lines: 42,
++  returned: 1,
++  available_files: [{ name: "backend.log", size: 128, mtime: 1760515200 }],
++  hint: null,
++};
++
+ function mockAllOk() {
+   getSystemStatusMock.mockResolvedValue({ ...STATUS_FIXTURE });
+   getHealthMock.mockResolvedValue({ ...HEALTH_FIXTURE });
++  getServerLogsMock.mockResolvedValue(structuredClone(LOGS_FIXTURE));
+ }
+ 
+ /** render 后 flush 初始 refresh 的微任务（fake timers 下不用 waitFor）。 */
+@@ -65,11 +88,12 @@ async function renderAndFlush() {
+   return view;
+ }
+ 
+-describe("/admin/server-status 服务器信息页（task-02）", () => {
++describe("/admin/server-status 服务器信息页（task-02 / task-04 改造）", () => {
+   beforeEach(() => {
+     vi.useFakeTimers();
+     getSystemStatusMock.mockReset();
+     getHealthMock.mockReset();
++    getServerLogsMock.mockReset();
+     mockAllOk();
+   });
+   afterEach(() => {
+@@ -77,7 +101,7 @@ describe("/admin/server-status 服务器信息页（task-02）", () => {
+     vi.useRealTimers();
+   });
+ 
+-  it("正常态：三组卡片渲染——性能百分数、四项业务统计、依赖徽标", async () => {
++  it("正常态：性能/依赖/日志卡渲染，无业务统计卡", async () => {
+     await renderAndFlush();
+ 
+     // 性能卡：三行百分数（CPU 62 / 内存 87 / 磁盘 71，取整展示）
+@@ -87,17 +111,20 @@ describe("/admin/server-status 服务器信息页（task-02）", () => {
+     // 数值明细
+     expect(screen.getByText(/7800\.1 MB \/ 16000\.2 MB/)).toBeInTheDocument();
+ 
+-    // 统计卡：四格数值
+-    expect(screen.getByText("128")).toBeInTheDocument();
+-    expect(screen.getByText("12")).toBeInTheDocument();
+-    expect(screen.getByText("45")).toBeInTheDocument();
+-    expect(screen.getByText("8")).toBeInTheDocument();
++    // 业务统计卡已删（D-007@v1）：四格数值与卡标题不得在场
++    expect(screen.queryByText("业务统计")).not.toBeInTheDocument();
++    expect(screen.queryByText("128")).not.toBeInTheDocument();
+ 
+     // 依赖卡：DB/Redis 徽标文本与元信息
+     expect(screen.getByText("已连接 · v0.9.2")).toBeInTheDocument();
+     expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
+     expect(screen.getByText("0.9.2（a1b2c3d）")).toBeInTheDocument();
+     expect(screen.getByText("test")).toBeInTheDocument();
++
++    // 日志卡在场（满宽置底）：标题 + 安全提示 + 日志行
++    expect(screen.getByText("服务器日志")).toBeInTheDocument();
++    expect(screen.getByText(/日志含运行路径与账号信息/)).toBeInTheDocument();
++    expect(screen.getByText("app.started")).toBeInTheDocument();
+   });
+ 
+   it("轮询：初始 1 次，5 秒后再次拉取", async () => {
+@@ -123,7 +150,7 @@ describe("/admin/server-status 服务器信息页（task-02）", () => {
+ 
+   it("失败降级：错误条出现且既有数据不清空", async () => {
+     await renderAndFlush();
+-    expect(screen.getByText("128")).toBeInTheDocument();
++    expect(screen.getByText(/7800\.1 MB \/ 16000\.2 MB/)).toBeInTheDocument();
+ 
+     // 下一轮拉取失败（ApiError 语义：message 文本）
+     getSystemStatusMock.mockRejectedValueOnce(new Error("403 无权执行此操作"));
+@@ -133,7 +160,7 @@ describe("/admin/server-status 服务器信息页（task-02）", () => {
+ 
+     expect(screen.getByText("服务器状态获取失败")).toBeInTheDocument();
+     // 既有数据保留（不清空）
+-    expect(screen.getByText("128")).toBeInTheDocument();
+     expect(screen.getByText(/7800\.1 MB \/ 16000\.2 MB/)).toBeInTheDocument();
++    expect(screen.getByText("app.started")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/app/(dashboard)/admin/server-status/page.tsx b/frontend/src/app/(dashboard)/admin/server-status/page.tsx
+index 17458000e..d0f6bb50b 100644
+--- a/frontend/src/app/(dashboard)/admin/server-status/page.tsx
++++ b/frontend/src/app/(dashboard)/admin/server-status/page.tsx
+@@ -1,30 +1,33 @@
+ "use client";
+ 
+ /**
+- * 服务器信息页 /admin/server-status（2026-10-14-admin-server-status task-02）。
++ * 服务器信息页 /admin/server-status（2026-10-14-admin-server-status task-02；
++ * 2026-10-15-server-logs-panel task-04 改造）。
+  *
+  * 恢复 2026-07-24 死代码清理删除的服务器运行状态看板（原首页 ServerStatusCard +
+  * HealthCard），落位系统管理组（D-005@v1 方案 A，用户亲选）。
+  *
+  * 设计依据：
+- * - requirements FR-02 / D-002@v2（用户亲选内容口径）——三组卡片：
++ * - requirements FR-02/FR-04——三组卡片（2026-10-15 起业务统计卡已删，D-007@v1
++ *   用户亲选）：
+  *   ①服务器性能（CPU/内存/磁盘 antd Progress，阈值着色 <80 主题默认 /
+- *     80–90 warning / ≥90 exception，色阶走 antd status 语义零手写 hex）
+- *   ②业务统计（任务/项目/里程碑/用户四格）
+- *   ③依赖与版本（/api/health 的 PostgreSQL/Redis 连接徽标 + 版本/环境/服务器时间）
++ *     80–90 warning / ≥90 exception，色阶走 useToken 语义零手写 hex）
++ *   ②依赖与版本（/api/health 的 PostgreSQL/Redis 连接徽标 + 版本/环境/服务器时间）
++ *   ③服务器日志（ServerLogPanel 满宽置底，卡内独立 5s 轮询）
+  * - 5s 轮询自动刷新（useEffect setInterval，卸载 clearInterval）+ 立即刷新按钮；
+  * - 失败降级（FR-02）：403/网络/超时渲染 Alert 错误条（§9 语义语义），保留既有
+  *   数据不清空、5s 后自动重试；401 由全局拦截跳登录（frontend/src/lib/api.ts:250-256），
+  *   非页内承接面；
+  * - 样式遵守 FRONTEND_PAGE_STYLE.md §1 骨架（PageContainer/PageHeader/SectionCard）
+  *   + §0.5 多主题铁律（antd 色经 status 语义/ConfigProvider token，tailwind 布局）；
+- * - 原型：.sillyspec/changes/2026-10-14-admin-server-status/prototype-admin-server-status.html。
++ * - 原型：.sillyspec/changes/2026-10-15-server-logs-panel/prototype-server-logs.html。
+  */
+ import { useCallback, useEffect, useRef, useState } from "react";
+ import { Alert, Badge, Button, Progress, theme } from "antd";
+ import { ReloadOutlined } from "@ant-design/icons";
+ 
+ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
++import ServerLogPanel from "@/components/server-log-panel";
+ import {
+   getHealth,
+   getSystemStatus,
+@@ -75,17 +78,6 @@ function PerfRow({
+   );
+ }
+ 
+-/* ---------- 统计格 ---------- */
+-
+-function StatCell({ value, label }: { value: number; label: string }) {
+-  return (
+-    <div className="rounded-lg border bg-gradient-to-b from-brand-50 to-transparent p-3 text-center">
+-      <div className="text-2xl font-bold tabular-nums text-brand-700">{value}</div>
+-      <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
+-    </div>
+-  );
+-}
+-
+ /* ---------- 依赖/元信息行 ---------- */
+ 
+ function KvRow({ label, children }: { label: string; children: React.ReactNode }) {
+@@ -143,7 +135,7 @@ export default function ServerStatusPage() {
+     <PageContainer>
+       <PageHeader
+         title="服务器信息"
+-        subtitle="服务器性能、业务统计与依赖状态，每 5 秒自动刷新"
++        subtitle="服务器性能、依赖状态与运行日志，每 5 秒自动刷新"
+         actions={
+           <div className="flex items-center gap-3">
+             <span className="text-xs text-muted-foreground">
+@@ -197,22 +189,7 @@ export default function ServerStatusPage() {
+           )}
+         </SectionCard>
+ 
+-        <SectionCard title="业务统计">
+-          {status ? (
+-            <div className="grid grid-cols-4 gap-2.5">
+-              <StatCell value={status.tasks} label="任务" />
+-              <StatCell value={status.projects} label="项目" />
+-              <StatCell value={status.milestones} label="里程碑" />
+-              <StatCell value={status.users} label="用户" />
+-            </div>
+-          ) : (
+-            <p className="py-8 text-center text-xs text-muted-foreground">
+-              {error ? "暂无统计数据" : "加载中…"}
+-            </p>
+-          )}
+-        </SectionCard>
+-
+-        <SectionCard title="依赖与版本" className="lg:col-span-2">
++        <SectionCard title="依赖与版本">
+           {health ? (
+             <div>
+               <KvRow label="PostgreSQL">
+@@ -243,6 +220,9 @@ export default function ServerStatusPage() {
+             </p>
+           )}
+         </SectionCard>
++
++        {/* 服务器日志卡（2026-10-15-server-logs-panel D-007@v1：满宽置底，卡内独立 5s 轮询） */}
++        <ServerLogPanel />
+       </div>
+     </PageContainer>
+   );
+diff --git a/frontend/src/components/__tests__/server-log-panel.test.tsx b/frontend/src/components/__tests__/server-log-panel.test.tsx
+new file mode 100644
+index 000000000..5bf5814be
+--- /dev/null
++++ b/frontend/src/components/__tests__/server-log-panel.test.tsx
+@@ -0,0 +1,193 @@
++/**
++ * 服务器日志卡测试（2026-10-15-server-logs-panel task-03）。
++ *
++ * 覆盖（对照 TaskCard acceptance）：
++ * 1. 结构化行渲染（INFO/WARN/ERROR 与 time/event/fields 摘要）；
++ * 2. 非 JSON 行 raw 降级展示（RAW 徽标 + 原文）；
++ * 3. 行数切换触发新请求（lines=500）并重置展开态；
++ * 4. 点日志行展开原始内容（再点收起）；
++ * 5. 下载走真实 downloadLogFile 链路（fetch 带 Bearer → objectURL → a[download] → revoke）；
++ * 6. 卡内 5s 轮询二次拉取；卸载清理定时器；
++ * 7. 失败态卡内错误条且既有数据不清空。
++ */
++import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import ServerLogPanel from "@/components/server-log-panel";
++import type { ServerLogsResponse } from "@/lib/health";
++
++// ── mock @/lib/health：仅接管 getServerLogs；downloadLogFile 保真走真实链路 ──
++const getServerLogsMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/health", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/health")>("@/lib/health");
++  return { ...actual, getServerLogs: getServerLogsMock };
++});
++
++// token-refresh：真实模块会尝试读 session/网络；测试里 401 分支单独给返回值
++const ensureFreshMock = vi.hoisted(() => vi.fn().mockResolvedValue("fresh-token"));
++vi.mock("@/lib/token-refresh", () => ({
++  ensureFreshAccessToken: ensureFreshMock,
++}));
++
++const STATUS_FIXTURE: ServerLogsResponse = {
++  file: "backend.log",
++  entries: [
++    {
++      time: "2026-10-15T08:00:00Z",
++      level: "info",
++      event: "app.started",
++      fields: { environment: "dev" },
++      raw: null,
++      parse_error: false,
++    },
++    {
++      time: null,
++      level: null,
++      event: null,
++      fields: {},
++      raw: "this-is-not-json",
++      parse_error: true,
++    },
++    {
++      time: "2026-10-15T08:00:05Z",
++      level: "warning",
++      event: "health.redis.down",
++      fields: { retry: "1.2s" },
++      raw: null,
++      parse_error: false,
++    },
++    {
++      time: "2026-10-15T08:00:09Z",
++      level: "error",
++      event: "agent.run.failed",
++      fields: { exit_code: 1 },
++      raw: null,
++      parse_error: false,
++    },
++  ],
++  total_lines: 12345,
++  returned: 4,
++  available_files: [
++    { name: "backend.log", size: 2048, mtime: 1760515200 },
++    { name: "backend.log.1", size: 1024, mtime: 1760511600 },
++  ],
++  hint: null,
++};
++
++async function renderAndFlush() {
++  const view = render(<ServerLogPanel />);
++  await act(async () => {});
++  return view;
++}
++
++describe("ServerLogPanel（task-03）", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++    getServerLogsMock.mockReset();
++    getServerLogsMock.mockResolvedValue(structuredClone(STATUS_FIXTURE));
++    ensureFreshMock.mockClear();
++    // 真实下载链路依赖
++    vi.stubGlobal("fetch", vi.fn());
++    vi.stubGlobal("URL", {
++      ...URL,
++      createObjectURL: vi.fn(() => "blob:mock-url"),
++      revokeObjectURL: vi.fn(),
++    });
++  });
++  afterEach(() => {
++    cleanup();
++    vi.useRealTimers();
++    vi.unstubAllGlobals();
++  });
++
++  it("结构化行渲染：时间/级别/事件/fields 摘要 + 页脚行数", async () => {
++    await renderAndFlush();
++    expect(screen.getByText("app.started")).toBeInTheDocument();
++    expect(screen.getByText(/environment=dev/)).toBeInTheDocument();
++    // 徽标视觉大写由 CSS uppercase 呈现，DOM 文本为原始小写
++    expect(screen.getByText("info")).toBeInTheDocument();
++    expect(screen.getByText("warning")).toBeInTheDocument();
++    expect(screen.getByText("error")).toBeInTheDocument();
++    expect(screen.getByText(/显示最近 4 行（文件共 12345 行）/)).toBeInTheDocument();
++  });
++
++  it("非 JSON 行 raw 降级展示（RAW 徽标 + 原文）", async () => {
++    await renderAndFlush();
++    expect(screen.getByText("RAW")).toBeInTheDocument();
++    expect(screen.getByText("this-is-not-json")).toBeInTheDocument();
++  });
++
++  it("行数切换触发新请求", async () => {
++    await renderAndFlush();
++    expect(getServerLogsMock).toHaveBeenCalledWith(200);
++
++    fireEvent.click(screen.getByText("500 行"));
++    await act(async () => {});
++    expect(getServerLogsMock).toHaveBeenCalledWith(500);
++  });
++
++  it("点日志行展开原始内容，再点收起", async () => {
++    await renderAndFlush();
++    fireEvent.click(screen.getByText("app.started"));
++    expect(screen.getByText(/"event": "app.started"/)).toBeInTheDocument();
++
++    fireEvent.click(screen.getByText("app.started"));
++    expect(screen.queryByText(/"event": "app.started"/)).not.toBeInTheDocument();
++  });
++
++  it("下载走真实链路：fetch 带 Bearer → objectURL → revoke", async () => {
++    const fetchMock = vi.fn().mockResolvedValue({
++      ok: true,
++      status: 200,
++      blob: async () => new Blob(["log-content"], { type: "text/plain" }),
++    });
++    vi.stubGlobal("fetch", fetchMock);
++    const clickSpy = vi
++      .spyOn(HTMLAnchorElement.prototype, "click")
++      .mockImplementation(() => undefined);
++
++    await renderAndFlush();
++    fireEvent.click(screen.getByText("下载"));
++    await act(async () => {});
++
++    expect(fetchMock).toHaveBeenCalledTimes(1);
++    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
++      "/api/server-logs/download?file=backend.log",
++    );
++    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
++    expect(clickSpy).toHaveBeenCalledTimes(1);
++    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
++    clickSpy.mockRestore();
++  });
++
++  it("5s 轮询二次拉取；卸载清理定时器", async () => {
++    const view = await renderAndFlush();
++    expect(getServerLogsMock).toHaveBeenCalledTimes(1);
++
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(5000);
++    });
++    expect(getServerLogsMock).toHaveBeenCalledTimes(2);
++
++    view.unmount();
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(15000);
++    });
++    expect(getServerLogsMock).toHaveBeenCalledTimes(2);
++  });
++
++  it("失败态：卡内错误条且既有数据不清空", async () => {
++    await renderAndFlush();
++    expect(screen.getByText("app.started")).toBeInTheDocument();
++
++    getServerLogsMock.mockRejectedValueOnce(new Error("403 无权执行此操作"));
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(5000);
++    });
++
++    expect(screen.getByText("日志获取失败")).toBeInTheDocument();
++    // 既有数据保留
++    expect(screen.getByText("app.started")).toBeInTheDocument();
++    expect(screen.getByText(/显示最近 4 行（文件共 12345 行）/)).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/server-log-panel.tsx b/frontend/src/components/server-log-panel.tsx
+new file mode 100644
+index 000000000..2fa578ab5
+--- /dev/null
++++ b/frontend/src/components/server-log-panel.tsx
+@@ -0,0 +1,253 @@
++"use client";
++
++/**
++ * 服务器日志卡（2026-10-15-server-logs-panel task-03 / D-002@v1 / D-005@v1）。
++ *
++ * 挂在服务器信息页（/admin/server-status）满宽置底：
++ * - 卡内独立 5s 轮询 getServerLogs（与页面既有 system-status 轮询并行，端点不同无竞态）；
++ * - 行数切换 {100,200,500,1000}（默认 200，切换立即拉取）；
++ * - 日志行级别着色（info 青 / warn 琥珀 / error 红 / debug 灰——语义色阶，
++ *   对齐 agent-log-viewer 既有惯例）；点行展开原始 JSON；
++ * - 下载区：文件下拉（数据源响应 available_files）+ 下载按钮（fetch Blob 经鉴权）；
++ * - 失败降级：卡内独立错误条，保留上一帧数据不清空；D-005@v1 固定安全提示。
++ */
++import { useCallback, useEffect, useRef, useState } from "react";
++import { Alert, Button, Segmented, Select } from "antd";
++import { DownloadOutlined } from "@ant-design/icons";
++
++import { SectionCard } from "@/components/layout";
++import { downloadLogFile, getServerLogs, type LogEntry, type ServerLogsResponse } from "@/lib/health";
++
++const REFRESH_INTERVAL_MS = 5000;
++const LINE_OPTIONS = [100, 200, 500, 1000] as const;
++const DEFAULT_LINES = 200;
++
++/** 级别 → 行样式（语义色阶，对齐 agent-log-viewer.semanticLineClass 惯例）。 */
++function levelClass(level: string | null | undefined): string {
++  switch ((level ?? "").toLowerCase()) {
++    case "error":
++      return "bg-red-50 text-red-700";
++    case "warning":
++    case "warn":
++      return "bg-amber-50 text-amber-700";
++    case "debug":
++      return "bg-zinc-100 text-zinc-500";
++    default:
++      return "bg-sky-50 text-sky-700";
++  }
++}
++
++/** fields 摘要（k=v 逗号拼接，超 120 字符截断）。 */
++function fieldsSummary(fields: Record<string, unknown> | undefined): string {
++  if (!fields) return "";
++  const parts = Object.entries(fields).map(([k, v]) => `${k}=${String(v)}`);
++  const text = parts.join(" ");
++  return text.length > 120 ? text.slice(0, 120) + "…" : text;
++}
++
++function displayTime(iso: string | null | undefined): string {
++  if (!iso) return "—";
++  const d = new Date(iso);
++  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("zh-CN", { hour12: false });
++}
++
++/** 原始行（展开视图）：parse_error 行显示原文，解析成功行重组 JSON。 */
++function rawText(entry: LogEntry): string {
++  if (entry.raw) return entry.raw;
++  return JSON.stringify(
++    {
++      event: entry.event,
++      level: entry.level,
++      timestamp: entry.time,
++      ...(entry.fields ?? {}),
++    },
++    null,
++    2,
++  );
++}
++
++function LogRow({
++  entry,
++  expanded,
++  onToggle,
++}: {
++  entry: LogEntry;
++  expanded: boolean;
++  onToggle: () => void;
++}) {
++  return (
++    <div
++      role="button"
++      tabIndex={0}
++      onClick={onToggle}
++      onKeyDown={(e) => {
++        if (e.key === "Enter" || e.key === " ") onToggle();
++      }}
++      className="cursor-pointer border-b px-2.5 py-1 text-xs last:border-b-0 hover:bg-brand-50"
++    >
++      <div className="grid grid-cols-[150px_58px_1fr] items-baseline gap-2">
++        <span className="text-muted-foreground tabular-nums">
++          {displayTime(entry.time)}
++        </span>
++        <span
++          className={`rounded px-1.5 py-px text-center text-[10px] font-bold uppercase ${levelClass(entry.level)}`}
++        >
++          {entry.parse_error ? "RAW" : (entry.level ?? "—")}
++        </span>
++        <span className="min-w-0">
++          <span className="font-semibold">
++            {entry.parse_error ? entry.raw : entry.event}
++          </span>
++          {!entry.parse_error && entry.fields && Object.keys(entry.fields).length > 0 && (
++            <span className="ml-1.5 text-[11px] text-muted-foreground">
++              {fieldsSummary(entry.fields)}
++            </span>
++          )}
++        </span>
++      </div>
++      {expanded && (
++        <pre className="mt-1 overflow-x-auto rounded bg-brand-50 p-2 font-mono text-[11px] whitespace-pre">
++          {rawText(entry)}
++        </pre>
++      )}
++    </div>
++  );
++}
++
++export default function ServerLogPanel() {
++  const [lines, setLines] = useState<number>(DEFAULT_LINES);
++  const [data, setData] = useState<ServerLogsResponse | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
++  const [file, setFile] = useState<string>("backend.log");
++  const [downloading, setDownloading] = useState(false);
++  const [downloadError, setDownloadError] = useState<string | null>(null);
++  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
++
++  const refresh = useCallback(
++    async (n: number) => {
++      try {
++        const next = await getServerLogs(n);
++        setData(next);
++        setError(null);
++      } catch (err) {
++        // 失败保留上一帧数据（不清空），卡内提示
++        setError(err instanceof Error ? err.message : "日志获取失败");
++      }
++    },
++    [],
++  );
++
++  useEffect(() => {
++    void refresh(lines);
++    timerRef.current = setInterval(() => void refresh(lines), REFRESH_INTERVAL_MS);
++    return () => {
++      if (timerRef.current) clearInterval(timerRef.current);
++    };
++  }, [lines, refresh]);
++
++  const handleDownload = async () => {
++    setDownloading(true);
++    setDownloadError(null);
++    try {
++      await downloadLogFile(file);
++    } catch (err) {
++      setDownloadError(err instanceof Error ? err.message : "日志下载失败");
++    } finally {
++      setDownloading(false);
++    }
++  };
++
++  const files = data?.available_files ?? [];
++  const fileOptions = files.length
++    ? files.map((f) => ({ value: f.name, label: f.name }))
++    : [{ value: "backend.log", label: "backend.log" }];
++
++  return (
++    <SectionCard
++      title="服务器日志"
++      className="lg:col-span-2"
++      extra={
++        <span className="text-[11px] text-muted-foreground">
++          {data?.file ? `${data.file} · ` : ""}每 5 秒自动刷新
++        </span>
++      }
++    >
++      <div className="flex flex-wrap items-center gap-2">
++        <Segmented
++          size="small"
++          value={lines}
++          options={LINE_OPTIONS.map((n) => ({ value: n, label: `${n} 行` }))}
++          onChange={(v) => {
++            setLines(Number(v));
++            setExpandedIndex(null);
++          }}
++        />
++        <span className="flex-1" />
++        <Select
++          size="small"
++          value={file}
++          onChange={(v) => setFile(v)}
++          options={fileOptions}
++          style={{ minWidth: 150 }}
++        />
++        <Button
++          size="small"
++          icon={<DownloadOutlined />}
++          loading={downloading}
++          onClick={() => void handleDownload()}
++        >
++          下载
++        </Button>
++      </div>
++
++      <p className="mt-2 text-[11px] text-amber-700">
++        ⚠ 日志含运行路径与账号信息，请勿外传
++      </p>
++      {error && (
++        <Alert
++          type="error"
++          showIcon
++          title="日志获取失败"
++          description={`${error}——将自动重试`}
++          className="mt-2"
++        />
++      )}
++      {downloadError && (
++        <Alert
++          type="error"
++          showIcon
++          title="日志下载失败"
++          description={downloadError}
++          className="mt-2"
++        />
++      )}
++
++      <div className="mt-2 max-h-[380px] overflow-y-auto rounded-lg border bg-card">
++        {data && data.entries.length > 0 ? (
++          data.entries.map((entry, i) => (
++            <LogRow
++              key={`${i}-${entry.time ?? ""}-${entry.event ?? entry.raw ?? ""}`}
++              entry={entry}
++              expanded={expandedIndex === i}
++              onToggle={() => setExpandedIndex((cur) => (cur === i ? null : i))}
++            />
++          ))
++        ) : (
++          <p className="py-8 text-center text-xs text-muted-foreground">
++            {error ? "暂无日志数据" : (data?.hint ?? "加载中…")}
++          </p>
++        )}
++      </div>
++
++      <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
++        <span>
++          {data
++            ? `显示最近 ${data.returned} 行（文件共 ${data.total_lines} 行）`
++            : "加载中…"}
++        </span>
++        <span>点日志行可展开原始内容</span>
++      </div>
++    </SectionCard>
++  );
++}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 47b419816..2df19fa59 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -62,6 +62,46 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/server-logs": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Server Logs
++         * @description 服务器日志尾部读取（结构化解析 + 文件清单）。
++         */
++        get: operations["server_logs_api_server_logs_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/server-logs/download": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Download Server Log
++         * @description 下载白名单内的日志文件（当前+轮转归档）。
++         */
++        get: operations["download_server_log_api_server_logs_download_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/daemon/install.sh": {
+         parameters: {
+             query?: never;
+@@ -19588,6 +19628,41 @@ export interface components {
+             /** Platform Only Names */
+             platform_only_names?: string[];
+         };
++        /**
++         * LogEntry
++         * @description 单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。
++         */
++        LogEntry: {
++            /** Time */
++            time?: string | null;
++            /** Level */
++            level?: string | null;
++            /** Event */
++            event?: string | null;
++            /**
++             * Fields
++             * @default {}
++             */
++            fields: {
++                [key: string]: unknown;
++            };
++            /** Raw */
++            raw?: string | null;
++            /**
++             * Parse Error
++             * @default false
++             */
++            parse_error: boolean;
++        };
++        /** LogFileInfo */
++        LogFileInfo: {
++            /** Name */
++            name: string;
++            /** Size */
++            size: number;
++            /** Mtime */
++            mtime: number;
++        };
+         /** LoginRequest */
+         LoginRequest: {
+             /** Account */
+@@ -24921,6 +24996,33 @@ export interface components {
+             /** Git Mode */
+             git_mode: string;
+         };
++        /** ServerLogsResponse */
++        ServerLogsResponse: {
++            /** File */
++            file?: string | null;
++            /**
++             * Entries
++             * @default []
++             */
++            entries: components["schemas"]["LogEntry"][];
++            /**
++             * Total Lines
++             * @default 0
++             */
++            total_lines: number;
++            /**
++             * Returned
++             * @default 0
++             */
++            returned: number;
++            /**
++             * Available Files
++             * @default []
++             */
++            available_files: components["schemas"]["LogFileInfo"][];
++            /** Hint */
++            hint?: string | null;
++        };
+         /**
+          * SessionAutoResumeUpdateRequest
+          * @description PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
+@@ -25012,7 +25114,7 @@ export interface components {
+             /** Runtime Id */
+             runtime_id?: string | null;
+             /** Provider */
+-            provider?: ("claude" | "codex" | "cursor" | "pi" | "dsh") | null;
++            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
+             /** Agent Profile Id */
+             agent_profile_id?: string | null;
+             /** Llm Provider Id */
+@@ -29856,6 +29958,68 @@ export interface operations {
+             };
+         };
+     };
++    server_logs_api_server_logs_get: {
++        parameters: {
++            query?: {
++                lines?: number;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ServerLogsResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    download_server_log_api_server_logs_download_get: {
++        parameters: {
++            query?: {
++                file?: string;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": unknown;
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_install_script_daemon_install_sh_get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/health.ts b/frontend/src/lib/health.ts
+index cc7cd4801..29668967b 100644
+--- a/frontend/src/lib/health.ts
++++ b/frontend/src/lib/health.ts
+@@ -1,5 +1,7 @@
+-import { apiFetch } from "@/lib/api";
++import { ApiError, apiFetch, safeUUID } from "@/lib/api";
+ import type { components } from "@/lib/api-types";
++import { ensureFreshAccessToken } from "@/lib/token-refresh";
++import { useSession } from "@/stores/session";
+ 
+ // 类型从 OpenAPI 自动生成（@/lib/api-types，由 scripts/gen-api-types.mjs 产出），
+ // 消除手写类型漂移。后端 schema 来源：backend/app/modules/health/schema.py。
+@@ -10,6 +12,11 @@ export type HealthResponse = components["schemas"]["HealthResponse"];
+ // system_status:read——apiFetch 自动携带 Bearer，403 抛 ApiError、401 走全局拦截。
+ export type SystemStatusResponse = components["schemas"]["SystemStatusResponse"];
+ 
++// 2026-10-15-server-logs-panel task-03 / D-002@v1：服务器日志数据层
++// （类型经 gen:types 生成物引用，规则 21 禁手写）。
++export type ServerLogsResponse = components["schemas"]["ServerLogsResponse"];
++export type LogEntry = components["schemas"]["LogEntry"];
++
+ export async function getHealth(): Promise<HealthResponse> {
+   return apiFetch<HealthResponse>("/api/health");
+ }
+@@ -17,3 +24,49 @@ export async function getHealth(): Promise<HealthResponse> {
+ export async function getSystemStatus(): Promise<SystemStatusResponse> {
+   return apiFetch<SystemStatusResponse>("/api/system-status");
+ }
++
++export async function getServerLogs(lines = 200): Promise<ServerLogsResponse> {
++  return apiFetch<ServerLogsResponse>("/api/server-logs", { query: { lines } });
++}
++
++/**
++ * 下载日志文件（当前 + 轮转归档）——裸 fetch 带 Bearer 取 Blob，
++ * 401 单飞刷新重试一次，返回后转 objectURL 触发浏览器下载。
++ * 链路与 frontend/src/lib/explorer.ts 的 fetchDownload 同型（JWT 裸 URL 会 401）。
++ */
++export async function downloadLogFile(name: string): Promise<void> {
++  const url = `/api/server-logs/download?file=${encodeURIComponent(name)}`;
++  const doFetch = (token: string | null) =>
++    fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
++
++  let token = useSession.getState().accessToken ?? null;
++  let resp = await doFetch(token);
++  if (resp.status === 401) {
++    // 单飞刷新（并发 401 由 token-refresh 模块级 inflight 保证只发一次）。
++    const fresh = await ensureFreshAccessToken();
++    if (fresh) {
++      token = fresh;
++      resp = await doFetch(token);
++    }
++  }
++  if (!resp.ok) {
++    throw new ApiError(resp.status, {
++      code: "log_download_failed",
++      message: `日志下载失败（HTTP ${resp.status}）`,
++      request_id: safeUUID(),
++      details: null,
++    });
++  }
++  const blob = await resp.blob();
++  const objectUrl = URL.createObjectURL(blob);
++  try {
++    const a = document.createElement("a");
++    a.href = objectUrl;
++    a.download = name;
++    document.body.appendChild(a);
++    a.click();
++    a.remove();
++  } finally {
++    URL.revokeObjectURL(objectUrl);
++  }
++}
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 297b11fea..2df19fa59 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -62,6 +62,46 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/server-logs": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Server Logs
++         * @description 服务器日志尾部读取（结构化解析 + 文件清单）。
++         */
++        get: operations["server_logs_api_server_logs_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/server-logs/download": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Download Server Log
++         * @description 下载白名单内的日志文件（当前+轮转归档）。
++         */
++        get: operations["download_server_log_api_server_logs_download_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/daemon/install.sh": {
+         parameters: {
+             query?: never;
+@@ -19588,6 +19628,41 @@ export interface components {
+             /** Platform Only Names */
+             platform_only_names?: string[];
+         };
++        /**
++         * LogEntry
++         * @description 单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。
++         */
++        LogEntry: {
++            /** Time */
++            time?: string | null;
++            /** Level */
++            level?: string | null;
++            /** Event */
++            event?: string | null;
++            /**
++             * Fields
++             * @default {}
++             */
++            fields: {
++                [key: string]: unknown;
++            };
++            /** Raw */
++            raw?: string | null;
++            /**
++             * Parse Error
++             * @default false
++             */
++            parse_error: boolean;
++        };
++        /** LogFileInfo */
++        LogFileInfo: {
++            /** Name */
++            name: string;
++            /** Size */
++            size: number;
++            /** Mtime */
++            mtime: number;
++        };
+         /** LoginRequest */
+         LoginRequest: {
+             /** Account */
+@@ -24921,6 +24996,33 @@ export interface components {
+             /** Git Mode */
+             git_mode: string;
+         };
++        /** ServerLogsResponse */
++        ServerLogsResponse: {
++            /** File */
++            file?: string | null;
++            /**
++             * Entries
++             * @default []
++             */
++            entries: components["schemas"]["LogEntry"][];
++            /**
++             * Total Lines
++             * @default 0
++             */
++            total_lines: number;
++            /**
++             * Returned
++             * @default 0
++             */
++            returned: number;
++            /**
++             * Available Files
++             * @default []
++             */
++            available_files: components["schemas"]["LogFileInfo"][];
++            /** Hint */
++            hint?: string | null;
++        };
+         /**
+          * SessionAutoResumeUpdateRequest
+          * @description PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
+@@ -29856,6 +29958,68 @@ export interface operations {
+             };
+         };
+     };
++    server_logs_api_server_logs_get: {
++        parameters: {
++            query?: {
++                lines?: number;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["ServerLogsResponse"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
++    download_server_log_api_server_logs_download_get: {
++        parameters: {
++            query?: {
++                file?: string;
++            };
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": unknown;
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_install_script_daemon_install_sh_get: {
+         parameters: {
+             query?: never;
+diff --git a/data/logs/backend.log b/data/logs/backend.log
+new file mode 100644
+--- /dev/null
++++ b/data/logs/backend.log
+@@ -0,0 +1,9 @@
++{"code": "HTTP_401_AUTH_TOKEN_MISSING", "request_id": "a70016f4-a332-4bcc-a2d5-b500d1309620", "message": "\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:35:35.787923Z"}
++{"code": "HTTP_403_PERMISSION_DENIED", "request_id": "b9af6fc6-c8ff-4333-9fce-5a4e2b6f9732", "message": "\u65e0\u6743\u6267\u884c\u6b64\u64cd\u4f5c\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:35:36.320954Z"}
++{"code": "HTTP_401_AUTH_TOKEN_MISSING", "request_id": "9fe04c7f-b22a-44ca-8feb-1a37bb167d9d", "message": "\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:36:26.137239Z"}
++{"code": "HTTP_403_PERMISSION_DENIED", "request_id": "dae8398c-4447-4fe3-b7c1-8e77668d7b41", "message": "\u65e0\u6743\u6267\u884c\u6b64\u64cd\u4f5c\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:36:26.643986Z"}
++{"code": "HTTP_401_AUTH_TOKEN_MISSING", "request_id": "b64c217d-8cb2-4c48-8c3e-ff54dbfc822a", "message": "\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:59:20.025758Z"}
++{"code": "HTTP_403_PERMISSION_DENIED", "request_id": "b16118ff-5aeb-4371-b1d0-53cca9f4b780", "message": "\u65e0\u6743\u6267\u884c\u6b64\u64cd\u4f5c\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:59:20.487830Z"}
++{"code": "HTTP_401_AUTH_TOKEN_MISSING", "request_id": "64710b1f-104a-4c7c-bb2b-8142b8e495a6", "message": "\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:59:23.267602Z"}
++{"code": "HTTP_401_AUTH_TOKEN_MISSING", "request_id": "f95b6ec9-766f-47af-a2b6-ebc4afda36e6", "message": "\u767b\u5f55\u72b6\u6001\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:59:24.912462Z"}
++{"code": "HTTP_403_PERMISSION_DENIED", "request_id": "6f878f1b-7168-4bce-960b-67c5f775cb11", "message": "\u65e0\u6743\u6267\u884c\u6b64\u64cd\u4f5c\u3002", "event": "app_error", "level": "warning", "timestamp": "2026-10-15T08:59:25.425895Z"}

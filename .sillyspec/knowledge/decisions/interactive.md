@@ -61,7 +61,7 @@
 ## D-004@v1 caps 守护测试 EXPECTED_PROVIDERS 同步必改（Grill B-01）
 状态：implemented
 变更：2026-09-08-cursor-interactive-session
-锚点：未记录
+锚点：backend/app/modules/agent/tests/test_provider_caps_alignment.py:52
 最近确认：35f3d6528
 理由：否。`backend/app/modules/agent/tests/test_provider_caps_alignment.py:52` EXPECTED_PROVIDERS 为硬编码 `{"claude","codex","pi"}`，test_provider_sets_identical 对三端表断言集合相等——三端表加 cursor 后守护测试必失败。必须同 commit 同步 EXPECTED_PROVIDERS 加 'cursor'（pi 接入 commit 7c4dd4efd 同款先例）。设计文件清单已补该文件
 

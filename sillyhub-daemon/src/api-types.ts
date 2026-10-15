@@ -62,6 +62,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/server-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server Logs
+         * @description 服务器日志尾部读取（结构化解析 + 文件清单）。
+         */
+        get: operations["server_logs_api_server_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server-logs/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Server Log
+         * @description 下载白名单内的日志文件（当前+轮转归档）。
+         */
+        get: operations["download_server_log_api_server_logs_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daemon/install.sh": {
         parameters: {
             query?: never;
@@ -8366,6 +8406,33 @@ export interface paths {
          *     由 runtime 侧错误族映射（502/404/504）。
          */
         post: operations["post_knowledge_governance_action_api_workspaces__workspace_id__knowledge_governance_actions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Search Knowledge
+         * @description 知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
+         *
+         *     - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
+         *       vector_router.py 同款）；
+         *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
+         *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
+         *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
+         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
+         */
+        post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -19010,6 +19077,57 @@ export interface components {
             tags?: string[];
         };
         /**
+         * KnowledgeSearchIn
+         * @description 检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。
+         */
+        KnowledgeSearchIn: {
+            /** Query */
+            query: string;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /**
+         * KnowledgeSearchOut
+         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
+         */
+        KnowledgeSearchOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Results */
+            results: components["schemas"]["KnowledgeSearchResultItem"][];
+            /**
+             * Model Ready
+             * @default true
+             */
+            model_ready: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * KnowledgeSearchResultItem
+         * @description 单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。
+         */
+        KnowledgeSearchResultItem: {
+            /** Spec Path */
+            spec_path: string;
+            /** Kind */
+            kind: string;
+            /** Title */
+            title: string;
+            /** Anchor */
+            anchor?: string | null;
+            /** Snippet */
+            snippet: string;
+            /** Score */
+            score: number;
+        };
+        /**
          * KnowledgeStatsOut
          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
          *
@@ -19587,6 +19705,41 @@ export interface components {
             entries?: components["schemas"]["LocalSnapshotEntry"][];
             /** Platform Only Names */
             platform_only_names?: string[];
+        };
+        /**
+         * LogEntry
+         * @description 单条日志（双形态：解析成功=time/level/event/fields；失败=raw+parse_error）。
+         */
+        LogEntry: {
+            /** Time */
+            time?: string | null;
+            /** Level */
+            level?: string | null;
+            /** Event */
+            event?: string | null;
+            /**
+             * Fields
+             * @default {}
+             */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Raw */
+            raw?: string | null;
+            /**
+             * Parse Error
+             * @default false
+             */
+            parse_error: boolean;
+        };
+        /** LogFileInfo */
+        LogFileInfo: {
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: number;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -24921,6 +25074,33 @@ export interface components {
             /** Git Mode */
             git_mode: string;
         };
+        /** ServerLogsResponse */
+        ServerLogsResponse: {
+            /** File */
+            file?: string | null;
+            /**
+             * Entries
+             * @default []
+             */
+            entries: components["schemas"]["LogEntry"][];
+            /**
+             * Total Lines
+             * @default 0
+             */
+            total_lines: number;
+            /**
+             * Returned
+             * @default 0
+             */
+            returned: number;
+            /**
+             * Available Files
+             * @default []
+             */
+            available_files: components["schemas"]["LogFileInfo"][];
+            /** Hint */
+            hint?: string | null;
+        };
         /**
          * SessionAutoResumeUpdateRequest
          * @description PATCH /api/daemon/sessions/{id}/auto-resume 请求体（2026-09-10-auto-resume-interrupted-turn / FR-06 / D-010@v2）。
@@ -29852,6 +30032,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemStatusResponse"];
+                };
+            };
+        };
+    };
+    server_logs_api_server_logs_get: {
+        parameters: {
+            query?: {
+                lines?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerLogsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_server_log_api_server_logs_download_get: {
+        parameters: {
+            query?: {
+                file?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -43186,6 +43428,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GovernanceActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_knowledge_api_workspaces__workspace_id__knowledge_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSearchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSearchOut"];
                 };
             };
             /** @description Validation Error */

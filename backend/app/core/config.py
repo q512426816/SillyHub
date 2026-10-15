@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     redis_url: str = Field("redis://localhost:6379/0")
     secret_key: str = Field(..., min_length=16)
     log_level: str = Field("INFO")
+    # 2026-10-15-server-logs-panel：日志轮转文件目录（空=默认 <repo_root>/data/logs，
+    # 经 paths.resolve_log_dir 解析；轮转大小/备份数为 logging.py 模块级常量）。
+    log_dir: str = Field("")
     environment: Literal["dev", "test", "prod"] = "dev"
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"],
