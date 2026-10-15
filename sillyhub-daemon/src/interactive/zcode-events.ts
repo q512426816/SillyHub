@@ -133,6 +133,37 @@ function normalizeSessionEvent(params: ZcodeSessionEventParams): AgentEvent[] {
       return [{ ...base, type: 'turn_result' as const, content: '', usage, metadata: meta }];
     }
 
+    case 'turn.failed': {
+      // 2026-10-15 实测（provider 业务错误如 429 额度用尽）：session/event
+      // type='turn.failed' 携带 payload.error{type, code, message, attribution
+      // {source, reason, retryable, errorPhase...}}——轮必须收敛，否则驱动
+      // 永久挂起（e2e 冒烟 120s 超时实证：无此映射时该 type 落入 default 被
+      // 忽略，turn 永不收敛）。产出：error 事件（message 供驱动 pendingTurnError
+      // 兜底）+ turn_result 失败收尾（驱动 finishTurn 收敛路径）。
+      const errObj = (payload.error ?? {}) as Record<string, unknown>;
+      const message =
+        typeof errObj.message === 'string' && errObj.message !== ''
+          ? errObj.message
+          : 'zcode 轮失败（引擎未附 message）';
+      const errMeta: Record<string, unknown> = { ...base.metadata, source: 'turn_failed' };
+      if (typeof errObj.code === 'string' || typeof errObj.code === 'number') {
+        errMeta.error_code = errObj.code;
+      }
+      if (typeof errObj.type === 'string') errMeta.error_type = errObj.type;
+      if (typeof errObj.attribution === 'object' && errObj.attribution !== null) {
+        errMeta.attribution = errObj.attribution;
+      }
+      return [
+        { ...base, type: 'error' as const, content: message, metadata: errMeta },
+        {
+          ...base,
+          type: 'turn_result' as const,
+          content: '',
+          metadata: { ...base.metadata, source: 'turn_failed', turn_status: 'failed' },
+        },
+      ];
+    }
+
     case 'turn.started':
     case 'session.updated':
     case 'session.titleUpdated':

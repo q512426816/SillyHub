@@ -364,11 +364,14 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         { workspace: { workspacePath: ctx.opts.cwd, workspaceKey: ctx.opts.cwd } },
         sink.write,
         { timeoutMs: this.controlTimeoutMs },
-      )) as { sessionId?: string };
-      if (!created || typeof created.sessionId !== 'string') {
+      )) as { sessionId?: string; session?: { sessionId?: string } };
+      // 实测回包形状：sessionId 在 result.session.sessionId（2026-10-15 探测钉板）；
+      // 兼容顶层直挂形态（变体）双读。
+      const createdSessionId = created?.sessionId ?? created?.session?.sessionId;
+      if (typeof createdSessionId !== 'string' || createdSessionId === '') {
         throw new ZcodeProtocolError('session/create 未返回 sessionId');
       }
-      h.zcodeSessionId = created.sessionId;
+      h.zcodeSessionId = createdSessionId;
       // 会话指针上报（resume 消费面；对齐 codex thread_started 口径）
       Promise.resolve(
         onMessage?.({
@@ -377,7 +380,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
               type: 'status',
               subtype: 'session_started',
               content: '',
-              session_id: created.sessionId,
+              session_id: createdSessionId,
             },
           ],
         }),
@@ -385,7 +388,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       // 3. 订阅内容流（desktop-continuous——session/event 推送前提，实测钉板）
       await h.envelope.request(
         'session/subscribe',
-        { sessionId: created.sessionId, deliveryKind: 'desktop-continuous' },
+        { sessionId: createdSessionId, deliveryKind: 'desktop-continuous' },
         sink.write,
         { timeoutMs: this.controlTimeoutMs },
       );

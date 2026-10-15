@@ -121,6 +121,48 @@ describe('normalizeZcodeNotification：turn.completed 收尾', () => {
     expect(out[0]?.type).toBe('turn_result');
     expect(out[0]?.usage).toBeUndefined();
   });
+
+  it('turn.failed（provider 业务错误实测形状）→ error + turn_result(failed) 双事件收敛', () => {
+    // 2026-10-15 实测抓包（429 额度用尽：session/event type=turn.failed）
+    const out = normalizeZcodeNotification(
+      sev(20, 'turn.failed', {
+        error: {
+          type: 'unknown_error',
+          attribution: {
+            source: 'provider',
+            reason: 'rate_limited',
+            errorPhase: 'stream',
+            exceptionKind: 'provider_business',
+            providerId: 'bigmodel-api',
+            modelId: 'GLM-5.3',
+            providerKind: 'anthropic',
+            transport: 'sse',
+            statusCode: 429,
+            providerErrorCode: '1308',
+            retryable: false,
+          },
+          code: '1308',
+          message: '[1308][已达到 5 小时的使用上限。您的限额将在 2026-10-15 18:19:50 重置。]',
+        },
+      }),
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]?.type).toBe('error');
+    expect(out[0]?.content).toContain('使用上限');
+    expect(out[0]?.metadata?.error_code).toBe('1308');
+    expect(out[0]?.metadata?.error_type).toBe('unknown_error');
+    expect((out[0]?.metadata?.attribution as Record<string, unknown>)?.reason).toBe('rate_limited');
+    // turn_result 失败收尾（驱动收敛判据）
+    expect(out[1]?.type).toBe('turn_result');
+    expect(out[1]?.metadata?.turn_status).toBe('failed');
+    expect(out[1]?.metadata?.source).toBe('turn_failed');
+  });
+
+  it('turn.failed 无 message → 兜底文案不空', () => {
+    const out = normalizeZcodeNotification(sev(21, 'turn.failed', {}));
+    expect(out[0]?.content).toBe('zcode 轮失败（引擎未附 message）');
+    expect(out[1]?.metadata?.turn_status).toBe('failed');
+  });
 });
 
 describe('normalizeZcodeNotification：观察面与 fail-soft', () => {

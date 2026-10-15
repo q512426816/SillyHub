@@ -167,10 +167,12 @@ class FakeZcodeServer {
           sessionId: ZSID,
           scope: 'runtime-materialization',
         });
+        // 真实回包形状（2026-10-15 实测钉板）：sessionId 只在 result.session.sessionId，
+        // 无顶层直挂——驱动必须读嵌套路径（e2e 冒烟抓出的形状偏差回归钉）
         this.reply(req.id, {
-          sessionId: ZSID,
           session: { sessionId: ZSID, status: 'idle' },
           messages: [],
+          settings: {},
         });
         return;
       case 'session/subscribe':
