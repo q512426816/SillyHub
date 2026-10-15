@@ -365,7 +365,7 @@ _DB_DEGRADED_PREFIX = "knowledge_search_db_degraded: "
 #: 单批嵌入条数——2026-10-15 生产部署实证：容器 800MB 内存限额下整批嵌入
 #: （6586 chunks）峰值 689MB+ 被 cgroup OOM kill（服务器总内存 1.6G）；
 #: 分批把峰值压到单批模型输入规模（64 条），批间让出事件循环。
-_EMBED_BATCH = 64
+_EMBED_BATCH = 32
 
 _LEGACY_INDEXES: dict[tuple[str, str], dict] = {}  # 兼容留位（旧内存路径已由 DB 取代）
 
@@ -378,15 +378,6 @@ def _get_sync_lock(workspace_key: str) -> asyncio.Lock:
             lock = asyncio.Lock()
             _sync_locks[workspace_key] = lock
         return lock
-
-
-async def _embed_chunks(embedder: object, texts: list[str]) -> list[list[float]]:
-    """分批嵌入（每批 to_thread 卸载；批次规模 _EMBED_BATCH——生产 OOM 实证修复）。"""
-    out: list[list[float]] = []
-    for i in range(0, len(texts), _EMBED_BATCH):
-        batch = await asyncio.to_thread(embedder.embed, texts[i : i + _EMBED_BATCH])
-        out.extend(batch)
-    return out
 
 
 def _content_hash(text: str) -> str:
@@ -502,12 +493,19 @@ async def _sync_full(
     chunks = await asyncio.to_thread(scan_corpus, spec_root)
     if not chunks:
         return
-    if embedder is None:
-        # 词面降级态也要可查：仅存元数据（embedding 置零向量，向量路本就禁用）
-        vectors: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in chunks]
-    else:
-        vectors = await _embed_chunks(embedder, [c.text for c in chunks])
-    session.add_all([_chunk_row(workspace_id, c, vectors[i]) for i, c in enumerate(chunks)])
+    # 低内存写入路径（2026-10-15 生产 OOM 实证二修）：整批嵌入 + 全量 add_all 的对象图
+    # 峰值（ORM identity map + 参数序列化缓冲）在 800MB 容器限额下仍触顶——逐批嵌入 →
+    # add_all → flush → expunge（释放跟踪对象），峰值压到单批规模。
+    for i in range(0, len(chunks), _EMBED_BATCH):
+        batch = chunks[i : i + _EMBED_BATCH]
+        if embedder is None:
+            # 词面降级态也要可查：仅存元数据（embedding 置零向量，向量路本就禁用）
+            vecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in batch]
+        else:
+            vecs = await asyncio.to_thread(embedder.embed, [c.text for c in batch])
+        session.add_all([_chunk_row(workspace_id, c, vecs[j]) for j, c in enumerate(batch)])
+        await session.flush()
+        session.expunge_all()  # 释放 identity map 峰值（DB 层变更仍在事务内）
     await session.commit()
 
 
@@ -532,12 +530,13 @@ async def _sync_delta(
         if row is None or row.content_hash != h:
             to_embed.append((row, c))
     # 嵌入批量一次（to_thread 卸载；embedder None 时词面降级写零向量占位）
-    if to_embed:
+    for i in range(0, len(to_embed), _EMBED_BATCH):
+        batch = to_embed[i : i + _EMBED_BATCH]
         if embedder is None:
-            vecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in to_embed]
+            bvecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in batch]
         else:
-            vecs = await _embed_chunks(embedder, [c.text for _, c in to_embed])
-        for (row, c), vec in zip(to_embed, vecs, strict=True):
+            bvecs = await asyncio.to_thread(embedder.embed, [c.text for _, c in batch])
+        for (row, c), vec in zip(batch, bvecs, strict=True):
             if row is None:
                 session.add(_chunk_row(workspace_id, c, vec))
             else:
@@ -546,6 +545,8 @@ async def _sync_delta(
                 row.kind = c.kind
                 row.content_hash = _content_hash(c.text)
                 row.embedding = vec
+        await session.flush()
+        session.expunge_all()
     for key in existing.keys() - fresh_keys:
         await session.delete(existing[key])
     await session.commit()
