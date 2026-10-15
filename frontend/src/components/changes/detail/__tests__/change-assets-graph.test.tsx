@@ -101,7 +101,7 @@ describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () =>
     expect(mocks.getKnowledgeGraphQuery).toHaveBeenCalledWith(
       "ws-1",
       "neighbors",
-      { anchor: ANCHOR },
+      { anchor: ANCHOR, depth: 1 },
     );
     // 画布 stub 收到三节点切片（testid = canvas-node-<完整节点 id>）
     expect(
@@ -169,5 +169,68 @@ describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () =>
     renderCard();
     expect(screen.getByTestId("change-assets-graph-loading")).toBeInTheDocument();
     expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
+  });
+
+  // ── 层级选择器（2026-10-15-assets-graph-depth / FR-01~02）──────────────────
+
+  it("层级选择器：默认 1 跳激活，点击 2跳/3跳 按所选深度重新发起 neighbors 查询（depth 进 query key）", async () => {
+    mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope());
+    renderCard();
+
+    await screen.findByTestId("change-assets-graph");
+    // 默认激活 1 跳（aria-pressed），且首查 depth=1
+    expect(screen.getByTestId("assets-graph-depth-1")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    // 切 2跳 → 以 depth=2 重新发起并激活；再切 3跳 同理
+    fireEvent.click(screen.getByTestId("assets-graph-depth-2"));
+    await waitFor(() =>
+      expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
+        "ws-1",
+        "neighbors",
+        { anchor: ANCHOR, depth: 2 },
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    fireEvent.click(screen.getByTestId("assets-graph-depth-3"));
+    await waitFor(() =>
+      expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
+        "ws-1",
+        "neighbors",
+        { anchor: ANCHOR, depth: 3 },
+      ),
+    );
+  });
+
+  it("层级切换不闪空：新深度查询在途时分区保持渲染上一份切片（keepPreviousData，无 loading 整区替换）", async () => {
+    // 首查立即返回；第二查（depth=2）挂起不返回——切档后分区应仍渲染旧数据
+    mocks.getKnowledgeGraphQuery.mockResolvedValueOnce(makeEnvelope());
+    mocks.getKnowledgeGraphQuery.mockReturnValue(new Promise(() => {}));
+    renderCard();
+
+    await screen.findByTestId("change-assets-graph");
+    fireEvent.click(screen.getByTestId("assets-graph-depth-2"));
+    // 查询在途：分区主体保持（上一份切片渲染），loading 占位不出现
+    await waitFor(() =>
+      expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(screen.getByTestId("change-assets-graph")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("change-assets-graph-loading"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("演示变更")).toBeInTheDocument();
   });
 });
