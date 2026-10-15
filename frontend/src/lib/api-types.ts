@@ -8430,6 +8430,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/spec/knowledge/vector-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Vector Search Endpoint
+         * @description 向量检索：token 派生 workspace 语料内语义召回（契约与 fail-soft 见模块 docstring）。
+         */
+        post: operations["vector_search_endpoint_api_spec_knowledge_vector_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/releases": {
         parameters: {
             query?: never;
@@ -28372,6 +28392,53 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /**
+         * VectorSearchIn
+         * @description 检索入参：query 截断 4000 字符（CLI 同款上限）、limit 钳 1-50。
+         */
+        VectorSearchIn: {
+            /** Query */
+            query: string;
+            /**
+             * Limit
+             * @default 10
+             */
+            limit: number;
+        };
+        /**
+         * VectorSearchOut
+         * @description 检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。
+         */
+        VectorSearchOut: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Results */
+            results: components["schemas"]["VectorSearchResultItem"][];
+            /**
+             * Model Ready
+             * @default true
+             */
+            model_ready: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * VectorSearchResultItem
+         * @description 单条召回：spec_path 固定 knowledge/decisions/* 前缀（CLI 消费过滤面）。
+         */
+        VectorSearchResultItem: {
+            /** Spec Path */
+            spec_path: string;
+            /** Anchor */
+            anchor: string;
+            /** Change */
+            change?: string | null;
+            /** Score */
+            score: number;
+        };
+        /**
          * VerifyGateResponse
          * @description POST /changes/{id}/run-verify-gate 的返回类型（task-11，design §6.3）。
          *
@@ -43181,6 +43248,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    vector_search_endpoint_api_spec_knowledge_vector_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VectorSearchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VectorSearchOut"];
                 };
             };
             /** @description Validation Error */
