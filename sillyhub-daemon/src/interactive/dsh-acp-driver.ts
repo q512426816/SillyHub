@@ -387,7 +387,16 @@ class AcpJsonRpcConnection {
     const framer = new LfLineFramer((line) => this._onLine(line));
     child.stdout.on('data', (chunk: Buffer) => framer.push(chunk));
     child.stdout.on('end', () => framer.end());
-    child.stderr.setEncoding('utf8');
+    // stderr 消费（2026-10-16-driver-audit-fixes）：旧实现仅 setEncoding 不注册
+    // data 监听——流不进入 flowing 模式，管道缓冲写满会反向阻塞子进程 stderr
+    // 写入，且诊断信息完全丢失（codex/zcode 驱动均消费 stderr）。
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8').trim();
+      if (text) {
+        // eslint-disable-next-line no-console
+        console.warn('[dsh-driver] stderr:', text.slice(0, 300));
+      }
+    });
   }
 
   onNotification(fn: (params: unknown) => void): () => void {

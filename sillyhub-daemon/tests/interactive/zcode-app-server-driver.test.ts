@@ -584,3 +584,130 @@ describe('interrupt / compact / setThinkingLevel', () => {
     await consumePromise;
   }, 15_000);
 });
+
+// ── 审计修复回归（2026-10-16-driver-audit-fixes）────────────────────────────
+// 对照先例：codex-app-server-driver ql-20260906-004 审计 #9（close 释放轮次）、
+// pi-rpc-driver ql-20260915-005（跨 chunk 多字节 UTF-8）。
+
+describe('审计修复：close 释放轮次 / UTF-8 跨 chunk / kill 升级 / stdin error 兜底', () => {
+  it('轮次进行中 close → consume 收敛返回，不上报幽灵 result（旧实现永挂）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child, { sendMode: 'manual' });
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = await driver.start(iq.queue, makeOpts());
+    const { cb, results } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/subscribe').length > 0);
+    iq.push('long task');
+    await until(() => server.requestsOf('session/send').length > 0);
+    // 轮 in-flight（sendMode=manual 不回 turn_result）时 close：exit handler 因
+    // closing 早退且无人释放 currentTurnPromise → 旧实现 await 永挂（测试超时即红）
+    const closePromise = handle.close();
+    await expect(consumePromise).resolves.toBeUndefined();
+    // cancelled 终态归 close 链收敛，不报幽灵 result（对齐 codex closing 守卫）
+    expect(results).toHaveLength(0);
+    iq.close();
+    await closePromise;
+  }, 15_000);
+
+  it('stdout 跨 chunk 多字节 UTF-8：中文字符不再被切烂成 U+FFFD', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = await driver.start(iq.queue, makeOpts());
+    const { cb, envelopes } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/subscribe').length > 0);
+
+    // 手工构造跨 chunk 帧：从首个多字节字符的引导字节后切开（真实管道 chunk
+    // 边界任意，旧实现逐 chunk toString 会把跨边界序列变 U+FFFD）
+    const frame = JSON.stringify({
+      method: 'session/event',
+      params: {
+        sessionId: ZSID,
+        turnId: 'turn_utf8',
+        seq: 1,
+        type: 'model.streaming',
+        payload: {
+          assistantMessageId: 'msg_u1',
+          delta: '知识库审计修复',
+          done: false,
+          kind: 'text_delta',
+        },
+      },
+    });
+    const bytes = Buffer.from(frame, 'utf8');
+    let cut = -1;
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i]! >= 0x80) {
+        cut = i + 1; // 引导字节与其延续字节之间
+        break;
+      }
+    }
+    expect(cut).toBeGreaterThan(0);
+    child.stdout.push(bytes.subarray(0, cut));
+    child.stdout.push(bytes.subarray(cut));
+    child.stdout.push(Buffer.from('\n', 'utf8'));
+
+    await until(() =>
+      envelopes
+        .flatMap((e) => e.events as Array<Record<string, unknown>>)
+        .some((e) => e.type === 'text'),
+    );
+    const textEv = envelopes
+      .flatMap((e) => e.events as Array<Record<string, unknown>>)
+      .find((e) => e.type === 'text');
+    expect(textEv?.content).toBe('知识库审计修复');
+    expect((textEv?.content as string).includes('\uFFFD')).toBe(false);
+    iq.close();
+    await consumePromise;
+  }, 15_000);
+
+  it('close 阶梯：SIGTERM 后到期无条件升级 SIGKILL（killed 置位不再短路）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = await driver.start(iq.queue, makeOpts());
+    const { cb } = makeCallbacks();
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/subscribe').length > 0);
+    iq.close();
+    await consumePromise;
+    await handle.close();
+    // ~2s SIGTERM；FakeChild.kill 置 killed=true（真实 Node 语义：信号发出即置位，
+    // 不代表进程已终止）——旧实现此后 !killed 恒 false，SIGKILL 永不可达
+    const lastSignal = () =>
+      (child as unknown as { _lastKillSignal?: string })._lastKillSignal;
+    await until(() => lastSignal() === 'SIGTERM', 4_000);
+    await until(() => lastSignal() === 'SIGKILL', 4_000);
+    expect(child.exitCode).toBeNull();
+    expect(child.killed).toBe(true);
+  }, 20_000);
+
+  it('stdin 常驻 error 监听：destroy 后迟到写入不炸 uncaughtException', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    await driver.start(iq.queue, makeOpts());
+    // 引擎退出后 stdin 被 destroy，审批桥应答/close 迟到写入会触发 'error'；
+    // 无监听 → uncaughtException（vitest worker 直接判红），有监听 → 吞掉
+    expect(child.stdin.listenerCount('error')).toBeGreaterThan(0);
+    child.stdin.destroy(new Error('EPIPE simulate'));
+    await new Promise((r) => setImmediate(r));
+    child.stdin.write('{"late":1}\n');
+    await new Promise((r) => setImmediate(r));
+  });
+});

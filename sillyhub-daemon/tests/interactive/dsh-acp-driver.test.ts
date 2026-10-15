@@ -450,3 +450,30 @@ describe('mapThinkingLevel（ACP 三档本地映射）', () => {
     expect(mapThinkingLevel('turbo')).toBeUndefined();
   });
 });
+
+describe('stderr 消费（2026-10-16-driver-audit-fixes）', () => {
+  it('引擎 stderr 诊断行进 console.warn（流被消费，管道不再可被子进程写满阻塞）', async () => {
+    const driver = new DshAcpDriver();
+    const q = makeInputQueue();
+    const handle = await driver.start(q.queue, makeOpts());
+    const { cb } = makeCallbacks();
+    const consuming = driver.consume(handle, cb);
+    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      fake._emitStderr('dsh bootstrap diagnostic line');
+      await waitFor(() =>
+        warnSpy.mock.calls.some((c) => String(c[0]).includes('[dsh-driver] stderr')),
+      );
+      const line = warnSpy.mock.calls.find((c) =>
+        String(c[0]).includes('[dsh-driver] stderr'),
+      ) as unknown as [string, string];
+      expect(line[1]).toContain('dsh bootstrap diagnostic line');
+    } finally {
+      warnSpy.mockRestore();
+    }
+    await feedHandshake();
+    q.close();
+    await consuming;
+  }, 10_000);
+});
