@@ -63,6 +63,19 @@ export interface AgentProviderSpec {
   readonly protocol: AgentProtocol;
   /** 最低版本要求字符串（如 '2.0.0'）；undefined 表示该 provider 无版本要求。 */
   readonly minVersion?: string;
+  /**
+   * env 与 PATH 均未命中后的固定安装路径回退列表（2026-10-15-zcode-engine-appserver
+   * task-01，D-001 三段式第三段）。支持平台变量展开：%VAR%（Windows 形态）与
+   * $VAR / ${VAR}（POSIX 形态），未定义变量保持原样（existsSync miss 即跳过）。
+   * 用于 Desktop 内嵌引擎等不在 PATH 上的安装形态（如 zcode.cjs）。
+   */
+  readonly fallbackPaths?: readonly string[];
+  /**
+   * 目标是 Node 脚本（.cjs/.js）而非原生可执行文件：版本探测与后续 spawn 经
+   * process.execPath 执行（如 `node <zcode.cjs> --version`）。zcode Desktop 内嵌
+   * 引擎形态（D-001）。
+   */
+  readonly execNode?: boolean;
 }
 
 /**
@@ -93,7 +106,7 @@ export interface DetectedAgent {
 }
 
 // ---------------------------------------------------------------------------
-// 13 provider 探测表（Python AGENT_DEFS 迁移 + dsh 增补）
+// 14 provider 探测表（Python AGENT_DEFS 迁移 + dsh 增补）
 // ---------------------------------------------------------------------------
 
 /**
@@ -182,6 +195,7 @@ export const PROVIDER_SPECS = {
     versionPattern: /(\d+\.\d+\.\d+)/,
     protocol: 'text' as const,
   },
+
   // 2026-10-15-dsh-engine-acp task-01（D-001）：dsh（DeepSeek Harness）作为交互式
   // 引擎接入的第 4 家（spawn `dsh --profile acp`，见 interactive/dsh-acp-driver.ts）。
   // 版本门 0.2.1：MIN_VERSIONS 同值条目，低于仅警告不硬拒（D-002，与四引擎同语义）。
@@ -192,9 +206,25 @@ export const PROVIDER_SPECS = {
     protocol: 'json_rpc' as const,
     minVersion: '0.2.1',
   },
+
+  // 2026-10-15-zcode-engine-appserver task-01（D-001/D-004）：ZCode Desktop 内嵌引擎。
+  // 三段式发现：SILLYHUB_ZCODE_PATH env 覆盖 → PATH 上的 zcode（官方独立 CLI 未来
+  // 发布时自动命中）→ fallbackPaths Desktop 固定安装路径（Windows 实证；macOS/Linux
+  // 安装路径未实证前依赖 env/PATH）。.cjs 目标经 process.execPath 执行（execNode）。
+  // 版本门 0.16.9 警告不硬拒（D-004，私有协议基线）。
+  zcode: {
+    bin: 'zcode',
+    envPath: 'SILLYHUB_ZCODE_PATH',
+    versionPattern: /(\d+\.\d+\.\d+)/,
+    protocol: 'ndjson' as const,
+    minVersion: '0.16.9',
+    fallbackPaths: ['%LOCALAPPDATA%/Programs/ZCode/resources/glm/zcode.cjs'],
+    execNode: true,
+
+  },
 } as const;
 
-/** provider 名联合类型（'claude' | 'codex' | ... 共 13 个字面量）。 */
+/** provider 名联合类型（'claude' | 'codex' | ... 共 14 个字面量）。 */
 export type ProviderName = keyof typeof PROVIDER_SPECS;
 
 /**
@@ -226,6 +256,18 @@ export function normalizeProvider(raw: string | undefined | null): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * 展开路径中的平台环境变量：%VAR%（Windows 形态）与 $VAR / ${VAR}（POSIX 形态）。
+ * 未定义变量保持原样（后续 existsSync miss 即跳过该候选）。纯字符串处理，
+ * 2026-10-15-zcode-engine-appserver task-01（D-001 fallbackPaths 支撑）。
+ */
+function expandPathVars(raw: string): string {
+  return raw
+    .replace(/%(\w+)%/g, (whole, name: string) => process.env[name] ?? whole)
+    .replace(/\$\{(\w+)\}/g, (whole, name: string) => process.env[name] ?? whole)
+    .replace(/\$(\w+)/g, (whole, name: string) => process.env[name] ?? whole);
+}
+
+/**
  * Windows 上 PATH 查找尝试追加的可执行后缀。
  *
  * ql-20260616-001 修复：移除空扩展名 ''。之前为了兼容纯 git-bash 环境保留了 '',
@@ -238,17 +280,17 @@ export function normalizeProvider(raw: string | undefined | null): string {
 const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.ps1'];
 
 /**
- * 探测本机 13 种 coding agent CLI。
+ * 探测本机 14 种 coding agent CLI。
  *
  * 单实例无状态（Python 版同样每次 daemon 启动 new 一个）。
  * 子进程执行 / PATH 查找 / env 读取都在实例方法内，便于单测 mock（覆写 protected 方法）。
  */
 export class AgentDetector {
   /**
-   * 探测全部 13 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
+   * 探测全部 14 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
    *
    * 串行执行（对齐 Python detect_all，agent_detector.py:180-185）——非 Promise.all 并发，
-   * 避免瞬时 13 个子进程 + 与 Python 行为偏离。
+   * 避免瞬时 14 个子进程 + 与 Python 行为偏离。
    */
   async detectAgents(): Promise<DetectedAgent[]> {
     const results: DetectedAgent[] = [];
@@ -294,8 +336,10 @@ export class AgentDetector {
   // -------------------------------------------------------------------------
 
   /**
-   * 解析二进制路径。优先级：env 覆盖（file exists）→ PATH 查找 → null。
-   * 对齐 Python _resolve_bin_path，agent_detector.py:224-243。
+   * 解析二进制路径。优先级：env 覆盖（file exists）→ PATH 查找 → fallbackPaths
+   * 固定路径回退（平台变量展开）→ null。对齐 Python _resolve_bin_path，
+   * agent_detector.py:224-243；第三段为 2026-10-15-zcode-engine-appserver task-01
+   * 扩展（D-001 三段式，Desktop 内嵌引擎形态）。
    */
   protected resolveBinPath(spec: AgentProviderSpec): string | null {
     const envVal = process.env[spec.envPath];
@@ -305,7 +349,23 @@ export class AgentDetector {
       }
       // env 指向不存在路径 → 降级到 PATH 查找（对齐 Python：fallback to which）。
     }
-    return this.findOnPath(spec.bin);
+    const onPath = this.findOnPath(spec.bin);
+    if (onPath !== null) {
+      return onPath;
+    }
+    if (spec.fallbackPaths) {
+      for (const raw of spec.fallbackPaths) {
+        const expanded = expandPathVars(raw);
+        try {
+          if (existsSync(expanded)) {
+            return expanded;
+          }
+        } catch {
+          // existsSync 抛错（权限等）→ 跳过该候选路径。
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -372,7 +432,16 @@ export class AgentDetector {
 
       const isWindowsCmdWrapper =
         process.platform === 'win32' && /\.(cmd|bat)$/i.test(binPath);
-      if (isWindowsCmdWrapper) {
+      if (spec.execNode) {
+        // 2026-10-15-zcode-engine-appserver task-01（D-001）：目标是 Node 脚本
+        // （.cjs），直接经 process.execPath 执行，不走原生 exec/shim 分支。
+        execFile(
+          process.execPath,
+          [binPath, '--version'],
+          { timeout: 10_000, windowsHide: true },
+          onResult,
+        );
+      } else if (isWindowsCmdWrapper) {
         // DA-15（2026-08-20 审计）：原 exec(`"${binPath}" --version`) 拼命令行——
         // 路径含 & ^ " 等字符即错切/注入（binPath 源自 PATH 搜索与配置，仓里已踩过
         // 同类坑）。改走 cmd-shim 解析出真实 exe 后 spawn 直调（.cmd 覆盖），

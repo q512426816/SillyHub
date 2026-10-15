@@ -57,7 +57,7 @@ const backendOutPath = resolve(
 
 // 契约常量（与 daemon 单源 ProviderCaps 接口一致；新引擎/新键接入时同步这里，
 // 守卫会强制单源与本清单一致，不同步即响亮失败）。
-const ENGINES = ["claude", "codex", "pi", "cursor", "dsh"];
+const ENGINES = ["claude", "codex", "pi", "cursor", "dsh", "zcode"];
 const CAPS_KEYS = [
   "resume",
   "mcp",

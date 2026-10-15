@@ -194,6 +194,24 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     steering: false,
     sessionFork: 'none',
   },
+  zcode: {
+    resume: true,
+    mcp: false,
+    multimodal: false,
+    attachments: false,
+    thinking: true,
+    subagent: false,
+    permission_dialog: true,
+    dialog: 'native',
+    edit_patch: false,
+    model_select: true,
+    provider_switch: true,
+    ctx_usage: true,
+    compact: true,
+    thinking_level: true,
+    steering: false,
+    sessionFork: 'none',
+  },
 };
 
 /**

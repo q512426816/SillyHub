@@ -89,10 +89,11 @@ function clearAllSillyhubEnv(): void {
 
 describe('PROVIDER_SPECS', () => {
   it('恰好 13 个 entry（Python AGENT_DEFS 12 + dsh 增补）', () => {
-    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(13);
+  it('恰好 14 个 entry（对齐 Python AGENT_DEFS + dsh/zcode 增补）', () => {
+    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(14);
   });
 
-  it('13 个 provider 的 protocol 字段与期望表一致', () => {
+  it('14 个 provider 的 protocol 字段与期望表一致', () => {
     const expected: Record<string, string> = {
       claude: 'stream_json',
       codex: 'json_rpc',
@@ -116,6 +117,7 @@ describe('PROVIDER_SPECS', () => {
   });
 
   it('13 个 provider 顺序：Python AGENT_DEFS 12 个在前，dsh 增补在末位', () => {
+  it('14 个 provider 顺序（Python AGENT_DEFS + dsh/zcode 追加）', () => {
     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
     expect(Object.keys(PROVIDER_SPECS)).toEqual([
       'claude',
@@ -130,7 +132,7 @@ describe('PROVIDER_SPECS', () => {
       'kimi',
       'kiro',
       'antigravity',
-      'dsh',
+      'zcode',
     ]);
   });
 
@@ -350,11 +352,15 @@ describe('AgentDetector.detectAgents', () => {
   beforeEach(() => clearAllSillyhubEnv());
   afterEach(() => clearAllSillyhubEnv());
 
-  it('全部不可用 → 13 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
+  it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
+  it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
     const d = new FakeDetector();
     d.fakeFindOnPath = () => null;
+    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
+    const __prevLad = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
     const results = await d.detectAgents();
-    expect(results).toHaveLength(13);
+    expect(results).toHaveLength(14);
     expect(results.every((r) => r.status === 'unavailable')).toBe(true);
     expect(results.every((r) => r.path === '')).toBe(true);
     expect(results.every((r) => r.version === undefined)).toBe(true);
@@ -368,9 +374,12 @@ describe('AgentDetector.detectAgents', () => {
   it('claude 可用 + 版本达标 → status="available" + version + protocol', async () => {
     const d = new FakeDetector();
     d.fakeFindOnPath = (bin) => (bin === 'claude' ? '/usr/bin/claude' : null);
+    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
+    const __prevLad = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
     d.fakeExecResult = { stdout: 'Claude Code 2.1.5\n', stderr: '' };
     const results = await d.detectAgents();
-    expect(results).toHaveLength(13);
+    expect(results).toHaveLength(14);
     const claude = results.find((r) => r.provider === 'claude');
     expect(claude).toBeDefined();
     expect(claude?.status).toBe('available');
@@ -378,8 +387,8 @@ describe('AgentDetector.detectAgents', () => {
     expect(claude?.version).toBe('2.1.5');
     expect(claude?.protocol).toBe('stream_json');
     expect(claude?.versionWarning).toBeNull();
-    // 其余 12 个仍 unavailable。
-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(12);
+    // 其余 13 个仍 unavailable。
+    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(13);
   });
 
   it('串行探测：13 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
@@ -813,8 +822,11 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
       codex: { stdout: 'codex 0.131.0\n', stderr: '' },
       gemini: { stdout: 'gemini 1.0.0\n', stderr: '' },
     };
+    // 中和 LOCALAPPDATA：防本机真实 ZCode Desktop 安装经 fallbackPaths 段泄漏进探测结果
+    const __prevLad = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = join(tmpdir(), 'zcode-neutral-' + Date.now() + '-' + Math.random().toString(36).slice(2));
     const results = await d.detectAgents();
-    expect(results).toHaveLength(13);
+    expect(results).toHaveLength(14);
 
     const claude = results.find((r) => r.provider === 'claude');
     const codex = results.find((r) => r.provider === 'codex');
@@ -834,7 +846,8 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
     expect(gemini?.protocol).toBe('stream_json');
 
     // 其余 9 个 unavailable
-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(10);
+    // 其余 11 个 unavailable
+    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(11);
   });
 
   // 补漏 2：isAvailable 公开方法（对齐 Python is_available）
@@ -906,5 +919,86 @@ describe('normalizeProvider', () => {
   });
   it('未知 adapter id 原样返回（_agentPaths.get 兜底，命中失败走 daemon.ts:2355 早返回+回传）', () => {
     expect(normalizeProvider('some_new_adapter')).toBe('some_new_adapter');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// zcode 三段式探测（2026-10-15-zcode-engine-appserver task-01，D-001/D-004）
+// ---------------------------------------------------------------------------
+
+describe('zcode 探测（三段式 + execNode + 版本门）', () => {
+  beforeEach(() => clearAllSillyhubEnv());
+  afterEach(() => clearAllSillyhubEnv());
+
+  it('env 覆盖指向 .cjs → 命中且 execNode 版本探测经 process.execPath 真实执行', async () => {
+    // 真 AgentDetector（不覆写 detectVersion）：临时 .cjs 输出 zcode <semver>，
+    // 验证 execNode 分支的命令形态是 [process.execPath, binPath, '--version']。
+    const tmp = mkdtempSync(join(tmpdir(), 'zcode-detector-'));
+    const fakeCjs = join(tmp, 'zcode.cjs');
+    writeFileSync(fakeCjs, "console.log('zcode 9.9.9');");
+    process.env.SILLYHUB_ZCODE_PATH = fakeCjs;
+    const d = new AgentDetector();
+    const result = await d.detectOne('zcode');
+    expect(result).not.toBeNull();
+    expect(result?.status).toBe('available');
+    expect(result?.path).toBe(fakeCjs);
+    expect(result?.version).toBe('9.9.9');
+    expect(result?.protocol).toBe('ndjson');
+    // 9.9.9 ≥ 0.16.9 → 无警告
+    expect(result?.versionWarning).toBeNull();
+    rmSync(tmp, { recursive: true, force: true });
+  }, 20_000);
+
+  it('env/PATH 全 miss + fallbackPaths（%LOCALAPPDATA% 展开后存在）→ 命中', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'zcode-fallback-'));
+    const desktopLike = join(tmp, 'Programs', 'ZCode', 'resources', 'glm');
+    mkdirSync(desktopLike, { recursive: true });
+    const fakeCjs = join(desktopLike, 'zcode.cjs');
+    writeFileSync(fakeCjs, '');
+    const prevLocalAppData = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = tmp;
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = () => null;
+      d.fakeExecByProvider = { zcode: { stdout: 'zcode 0.16.9\n', stderr: '' } };
+      const result = await d.detectOne('zcode');
+      expect(result?.status).toBe('available');
+      // 展开产物 = LOCALAPPDATA（含平台原生分隔符）+ spec 内的正斜杠后缀（existsSync 兼容混合分隔符）
+      expect(result?.path).toBe(tmp + '/Programs/ZCode/resources/glm/zcode.cjs');
+      expect(result?.version).toBe('0.16.9');
+      expect(result?.versionWarning).toBeNull();
+    } finally {
+      if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = prevLocalAppData;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('三段全 miss（LOCALAPPDATA 指向空目录）→ zcode unavailable/not-found', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'zcode-miss-'));
+    const prevLocalAppData = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = tmp;
+    try {
+      const d = new FakeDetector();
+      d.fakeFindOnPath = () => null;
+      const result = await d.detectOne('zcode');
+      expect(result?.status).toBe('unavailable');
+      expect(result?.reason).toBe('not-found');
+      expect(result?.path).toBe('');
+    } finally {
+      if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = prevLocalAppData;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('版本低于 0.16.9 → versionWarning 非空（警告不硬拒，status 仍 available）', async () => {
+    const d = new FakeDetector();
+    d.fakeFindOnPath = (bin) => (bin === 'zcode' ? '/opt/zcode' : null);
+    d.fakeExecByProvider = { zcode: { stdout: 'zcode 0.15.0\n', stderr: '' } };
+    const result = await d.detectOne('zcode');
+    expect(result?.status).toBe('available');
+    expect(result?.version).toBe('0.15.0');
+    expect(result?.versionWarning).toContain('0.16.9');
   });
 });

@@ -51,6 +51,9 @@ export const MIN_VERSIONS: Readonly<Record<string, SemVerTuple>> = {
   copilot: [1, 0, 0],
   pi: [0, 81, 0],
   dsh: [0, 2, 1],
+  // 2026-10-15-zcode-engine-appserver task-01（D-004）：ZCode 私有协议基线
+  // （信封/方法面/事件流以 0.16.9 实测钉板），低于警告不硬拒——与四引擎语义一致。
+  zcode: [0, 16, 9],
 };
 
 /**

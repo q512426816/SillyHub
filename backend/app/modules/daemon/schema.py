@@ -128,7 +128,8 @@ class AgentSessionListResponse(BaseModel):
 # 2026-09-08-cursor-interactive-session task-07：加 cursor（防显式 provider 路径 422）。
 # 2026-10-15-dsh-engine-acp task-05：加 dsh（DeepSeek Harness，ACP v1——单聊接入，
 # daemon 侧注册见 sillyhub-daemon providers.ts dsh 条目）。
-InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi", "dsh"]
+# 2026-10-15-zcode-engine-appserver task-06：加 zcode（第 5 交互引擎，单聊阶段 1）。
+InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi", "dsh", "zcode"]
 
 # ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
 # §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────

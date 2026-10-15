@@ -173,6 +173,9 @@ export async function triggerDaemonSelfUpdate(
  * 2026-09-08-cursor-interactive-session task-08：加 cursor；
  * 2026-10-15-dsh-engine-acp task-07：加 dsh（DeepSeek Harness，单聊接入；
  * 群聊白名单 create-group-wizard GROUP_SUPPORTED_PROVIDERS 不动——阶段 2）。
+ * 2026-10-15-zcode-engine-appserver task-07：加 zcode（第 5 交互引擎，单聊阶段 1；
+ * 可见性由 runtime 探测门控——无 zcode runtime 注册的机器经 page-helpers 的
+ * rt.provider 过滤不可见）。
  */
 export const SESSION_SUPPORTED_PROVIDERS = [
   "claude",
@@ -180,6 +183,7 @@ export const SESSION_SUPPORTED_PROVIDERS = [
   "pi",
   "cursor",
   "dsh",
+  "zcode",
 ] as const;
 
 /** Provider display name, icon emoji, and Tailwind color classes. */
@@ -196,6 +200,7 @@ export const PROVIDER_META: Record<
   gemini: { label: "Gemini", icon: "💎", color: "bg-cyan-100 text-cyan-800" },
   pi: { label: "Pi", icon: "🩷", color: "bg-pink-100 text-pink-800" },
   cursor: { label: "Cursor", icon: "🟡", color: "bg-amber-100 text-amber-800" },
+  zcode: { label: "ZCode", icon: "🟤", color: "bg-stone-100 text-stone-800" },
   kimi: { label: "Kimi", icon: "🔴", color: "bg-red-100 text-red-800" },
   kiro: { label: "Kiro", icon: "🟩", color: "bg-emerald-100 text-emerald-800" },
   antigravity: { label: "Antigravity", icon: "⚫", color: "bg-slate-100 text-slate-800" },

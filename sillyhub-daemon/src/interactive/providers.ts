@@ -70,6 +70,8 @@ import {
   isDshFormSufficient,
   writeDshHome,
 } from '../dsh-settings.js';
+import { isZcodeFormSufficient, writeZcodeProviderConfig } from '../zcode-settings.js';
+import { ZcodeAppServerDriver } from './zcode-app-server-driver.js';
 
 // ── import 环纪律（2026-09-11-provider-adapter-registry task-01）──────────────
 //
@@ -498,6 +500,27 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     // sessionFork='none'：ACP 无会话分叉方法（load/fork 均 unsupported）。
     sessionFork: 'none',
   },
+  // 2026-10-15-zcode-engine-appserver task-05（D-005/D-006 无 ACP 事实）：ZCode
+  // 私有协议引擎，十六键按 design 接口定义定值——取值依据 = 2026-10-15 协议实测
+  //（decisions.md D-005 evidence）。
+  zcode: {
+    resume: true, // session/resume 方法面实测存在（阶段 1 未接 resume 管线，如实申报）
+    mcp: false, // session/create 的 mcpServers 注入面未验证（自有插件 MCP 体系另轨）
+    multimodal: false, // 协议图片内联面未验证
+    attachments: false, // 附件链路未开通（同 codex 现状）
+    thinking: true, // session/event model.streaming channel=reasoning_delta→thought 实测
+    subagent: false, // 平台分身/team 管线不对接
+    permission_dialog: true, // interaction/requestPermission 代答桥（task-04 交付）
+    dialog: 'native', // 权限代答桥即平台 dialog 管道通道本体（permission_dialog=true 三引擎现值先例）
+    edit_patch: false, // structuredPatch 未验证
+    model_select: true, // session/setModel + state.updated 模型目录实测
+    provider_switch: true, // per-session provider_config.json 重写（task-05 交付）
+    ctx_usage: true, // turn.completed usage 实测（task-03 归一化）
+    compact: true, // session/compact 方法面实测（task-04 交付）
+    thinking_level: true, // session/setThoughtLevel 方法面实测（task-04 交付）
+    steering: false, // 运行中注入未验证（协议消息队列串行）
+    sessionFork: 'none', // session/fork 存在但平台锚点语义未对接（阶段 2）
+  },
 };
 
 /**
@@ -624,7 +647,7 @@ export interface ProviderDescriptor {
  */
 export interface ProviderFileSettingsWriter {
   /** per-session 目录段名（join(daemonStateDir(), dirName, sessionKey)）。 */
-  dirName: 'codex' | 'pi' | 'dsh';
+  dirName: 'codex' | 'pi' | 'dsh' | 'zcode';
   /** 注入 env 键名（CODEX_HOME / PI_CODING_AGENT_DIR）。 */
   envKey: string;
   /** 门槛判定（与写盘器同判据；provider 缺必需字段 → false，调用方 warn 跳过）。 */
@@ -659,7 +682,7 @@ export interface ProviderAdapter extends ProviderDescriptor {
    * reload 门控的统一数据源）；claude / cursor 无 per-session provider file
    * dirs → 显式 none（claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路）。
    */
-  perSessionDir: 'codex' | 'pi' | 'dsh' | { kind: 'none' };
+  perSessionDir: 'codex' | 'pi' | 'dsh' | 'zcode' | { kind: 'none' };
   /** 冒烟套件文件名（守护测试校验真实存在且覆盖全部支持格式，Wave 4 消费）。 */
   smokeSuite: string;
   /** 会话级供应商切换支持（与 caps.provider_switch 单源一致，测试锁定）。 */
@@ -822,6 +845,35 @@ export const INTERACTIVE_PROVIDERS = {
     // 写盘器锚点（FR-05 冒烟词表守护：dsh-settings.test.ts 覆盖 anthropic 与
     // openai_chat 全部 api_format 形态）。
     smokeSuite: 'tests/dsh-settings.test.ts',
+    switchable: true,
+  },
+  // zcode：family='ndjson' 与 AgentProtocol 枚举同值（agent-detector PROVIDER_SPECS.zcode）
+  //；displayName='ZCode'；密钥走 per-session provider_config.json 文件层（D-003——
+  // ZCode 个人 Provider 体系，非 env 形态），envInjector 显式 none；envKey=ZCODE_DATA_BASE_DIR
+  // 由 ZcodeAppServerDriver spawn env 透传（配置面隔离，D-002）。
+  zcode: {
+    provider: 'zcode',
+    family: 'ndjson',
+    displayName: 'ZCode',
+    createDriver: (): InteractiveDriver => new ZcodeAppServerDriver(),
+    caps: capsOf('zcode'),
+    // 密钥落文件不走 env（与 dsh apiKeyEnv 形态不同——D-003）。
+    envInjector: {
+      kind: 'none',
+      reason: 'zcode 密钥走 per-session provider_config.json 文件层（D-003 个人 Provider 体系）',
+    },
+    // 写盘器薄适配：wrap writeZcodeProviderConfig / isZcodeFormSufficient；zcode 无
+    // 官方端点形态（skipsOfficialEndpoint 恒 false）。
+    fileSettings: {
+      dirName: 'zcode',
+      envKey: 'ZCODE_DATA_BASE_DIR',
+      isSufficient: isZcodeFormSufficient,
+      write: ({ dir, provider, daemonApiKey }) =>
+        writeZcodeProviderConfig({ zcodeDir: dir, provider, daemonApiKey }),
+      skipsOfficialEndpoint: () => false,
+    },
+    perSessionDir: 'zcode',
+    smokeSuite: 'tests/interactive/zcode-app-server-driver.test.ts',
     switchable: true,
   },
 } satisfies Record<string, ProviderAdapter>;

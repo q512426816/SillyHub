@@ -116,6 +116,24 @@ PROVIDER_CAPS: dict[str, dict[str, bool | str]] = {
         "steering": False,
         "sessionFork": "none",
     },
+    "zcode": {
+        "resume": True,
+        "mcp": False,
+        "multimodal": False,
+        "attachments": False,
+        "thinking": True,
+        "subagent": False,
+        "permission_dialog": True,
+        "dialog": "native",
+        "edit_patch": False,
+        "model_select": True,
+        "provider_switch": True,
+        "ctx_usage": True,
+        "compact": True,
+        "thinking_level": True,
+        "steering": False,
+        "sessionFork": "none",
+    },
 }
 
 # 键序取自镜像表首条目（claude）；16 键齐全与三端一致性由守护测试保证。
