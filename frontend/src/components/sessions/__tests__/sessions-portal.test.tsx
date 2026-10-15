@@ -3142,4 +3142,48 @@ describe("SessionsPortal 工作区绑定机器（跳过机器步，2026-10-15-wo
       screen.getByRole("button", { name: /选择机器 machine-1/ }),
     ).toBeTruthy();
   });
+
+  it("change scope + 绑定命中 + 筛选 codex → 直带双传（change_id+workspace_id，runtime 取绑定机器）", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    setMachines([
+      makeMachine({
+        runtimes: [
+          makeRuntime(),
+          makeRuntime({ id: "rt-cx-m1", provider: "codex" }),
+        ],
+      }),
+      makeMachine({
+        id: "m-2",
+        hostname: "machine-2",
+        runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
+      }),
+    ]);
+    renderPortal(CHANGE_SCOPE);
+    await chooseAntdOptionByText("slp-machine", "machine-2");
+    await chooseAntdOptionByText("slp-agent", "Codex");
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+
+    // 直带不弹浮层（scope 双传语义经 enterPreSession 保留）。
+    await waitFor(() =>
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "变更下开个 codex 会话" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-cx-m1",
+        prompt: "变更下开个 codex 会话",
+        workspace_id: "ws-1",
+        change_id: "chg-1",
+      }),
+    );
+  });
 });
