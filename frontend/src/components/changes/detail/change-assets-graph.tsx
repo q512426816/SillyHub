@@ -5,8 +5,8 @@
  * （2026-10-15-change-assets-graph / FR-01，用户需求：图谱+右侧描述放进沉淀资产卡）。
  *
  * 本变更一跳邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
- * { anchor: changeKey })（与图谱页 neighbors 切片同端点同型收窄——data 联合按
- * `"anchor" in data` 分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
+ * { anchor: changeKey })（与图谱页 neighbors 切片同端点，data 联合经
+ * isGraphNeighborsData 守卫分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
  * （图谱页 detail tab 的紧凑直译：类型中文标签 + 色点 + ID + 按边型分组的
  * 出入邻居行，行点击跳选）。
  *
@@ -28,7 +28,7 @@ import {
   nodeTypeIndex,
 } from "@/components/knowledge/graph-canvas";
 import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
-import { getKnowledgeGraphQuery } from "@/lib/knowledge";
+import { getKnowledgeGraphQuery, isGraphNeighborsData } from "@/lib/knowledge";
 import { useThemeStore } from "@/stores/theme";
 
 interface ChangeAssetsGraphProps {
@@ -56,9 +56,11 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
   });
 
   const data = q.data?.available ? q.data.data ?? null : null;
-  // neighbors 分型收窄（node_not_found 等降级形态缺 anchor 字段 → 隐藏）。
-  const nodes = data && "anchor" in data ? asArray<GraphNodeRef>(data.nodes) : [];
-  const edges = data && "anchor" in data ? asArray<GraphEdge>(data.edges) : [];
+  // neighbors 分型收窄（node_not_found 等降级形态缺 anchor 字段 → 隐藏）。用
+  // 类型谓词守卫而非裸 `"anchor" in data`：后者对经 `?? null` 推断链产生的联合
+  // 不收窄（TS2339 实证，见 isGraphNeighborsData 注释）。
+  const nodes = isGraphNeighborsData(data) ? asArray<GraphNodeRef>(data.nodes) : [];
+  const edges = isGraphNeighborsData(data) ? asArray<GraphEdge>(data.edges) : [];
 
   const nodeMap = useMemo(
     () => new Map(nodes.map((n) => [n.id, n] as const)),

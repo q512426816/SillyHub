@@ -427,6 +427,23 @@ export async function getKnowledgeGraphQuery(
 }
 
 /**
+ * neighbors 分型守卫（2026-10-15-assets-graph-narrow-typecheck）：信封 data 收窄
+ * 到 GraphNeighborsData 的单一判定面。
+ *
+ * 为什么不用调用方裸 `"anchor" in data` 收窄：TS 5.5.4 实证（探针钉死），当 data
+ * 的类型经 `env?.available ? env.data ?? null : null` 推断链产生时，`in` 收窄失效
+ * ——非 neighbors 成员被保留在真值分支并交叉 `Record<"anchor", unknown>`，后续
+ * `.nodes`/`.edges` 访问报 TS2339；类型谓词守显式声明判定结果，不依赖 `in` 语义，
+ * 行为不随编译器收窄策略漂移。判定与图谱页「缺 anchor 字段即非 neighbors 分型」
+ * 同口径（node_not_found 等降级形态无 anchor 字段）。
+ */
+export function isGraphNeighborsData(
+  d: GraphQueryOut["data"],
+): d is GraphNeighborsData {
+  return !!d && "anchor" in d;
+}
+
+/**
  * 知识图总览（task-05 / D-008@v2）：GET /knowledge/graph/overview。
  *
  * 后端内部按序发 summary→orphans→dangling 三 RPC 逐条容错：summary 子块失败
