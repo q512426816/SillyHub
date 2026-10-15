@@ -710,14 +710,19 @@ function KnowledgePreviewBody({
   // 锚点条目卡定位：effect 在内容渲染提交后执行，DOM 已就绪，单次查询即可
   // （无需知识库页深链的有界 rAF 重试——那是外部入口跨提交时序的防抖）。
   // anchor 带「变更号#决策号」复合形态（FR/决策行）时优先按复合属性精确匹配
-  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无或裸形态退裸锚。
+  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无退裸锚——兜底键必须
+  // 剥掉变更号前缀（裸属性值域恒为 文件#id，带前缀查等于死选择器，评审 P1 实证
+  // 2026-10-14-decision-anchor-change-qualified）。
   useEffect(() => {
     if (!q.isSuccess || !anchor) return;
     const key = `${filename}#${anchor}`;
+    const bareKey = anchor.includes("#")
+      ? `${filename}#${anchor.split("#").slice(1).join("#")}`
+      : key;
     const el =
       (anchor.includes("#")
         ? document.querySelector(`[data-entry-anchor-qualified="${CSS.escape(key)}"]`)
-        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(key)}"]`);
+        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(bareKey)}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [q.isSuccess, anchor, filename]);
 

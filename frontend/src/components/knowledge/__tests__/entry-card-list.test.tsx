@@ -552,6 +552,19 @@ describe("决策形态渲染（zone=decisions）", () => {
     expect(card).not.toHaveAttribute("data-entry-anchor-qualified");
   });
 
+  // 负例补钉（评审 P3①，2026-10-14-decision-anchor-change-qualified）：有 id 但
+  // 缺「变更：」字段——裸锚照常输出，复合锚禁止输出。
+  it("有 id 但缺「变更：」字段：裸锚输出，复合锚不输出", () => {
+    renderList({
+      filename: "decisions/novar.md",
+      zone: "decisions",
+      content: "## D-007@v1 : 无归属行条目\n状态：active\n",
+    });
+    const card = screen.getByTestId("decision-entry-card");
+    expect(card).toHaveAttribute("data-entry-anchor", "decisions/novar.md#D-007@v1");
+    expect(card).not.toHaveAttribute("data-entry-anchor-qualified");
+  });
+
   it("superseded 折叠置灰：字段隐藏 + 可展开；取代链条带恒可见", () => {
     renderList({
       filename: "decisions/demo.md",

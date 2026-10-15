@@ -10,3 +10,4 @@ created_at: 2026-10-15T00:42:33.492Z
 - [x] task-04: change-assets-card.tsx 加 changeKey prop + FR/决策行深链前缀 + 弹窗定位复合锚优选；详情页透传 changeKey（验证：task-03 转绿）
 - [x] task-05: knowledge-page.test.tsx 加「anchor 含变更号前缀先试复合锚」用例；knowledge/page.tsx 深链滚动双选择器（验证：转绿）
 - [x] task-06: 回归三文件 vitest + 知识触达/手册既有锚点用例不回退 + tsc + eslint 全绿
+- [x] task-07: 评审 P1/P3 修复——弹窗与知识页裸锚兜底剥变更号前缀（死选择器）+ 有id缺变更字段负例 + 兜底路径回归钉 + FR-03 绑定名对齐（验证：三文件 vitest 全绿）

@@ -13,8 +13,9 @@ CI 清偿再见迁移锚 / TABS 数 / 菜单声明序 / 协议 MSG 计数四处�
   ④ provider caps 形状变更 → 全对象 toEqual 钉
   ⑤ previewers 桶导出增删 → 枚举式 vi.mock 两文件
   ⑥ backend 词表/字段形态（agent_kinds）→ daemon 对账正则
-  ⑦ 菜单注册表增删项 → 声明序索引钉（本周实证新登记）
+  ⑦ 菜单注册表增删项 → 声明序索引钉 + 数量锚三件套
   ⑧ 协议 MSG 常量增删 → MSG 总数钉（本周实证新登记）
+  ⑨ openapi.json 契约变更 → 前端+daemon 双 api-types 生成物同提交
 
 触发模式：
   file 模式——staged 面出现 glob 匹配文件即触发（迁移：加文件本身就是事件）；
@@ -121,8 +122,14 @@ RULES: tuple[SurfaceRule, ...] = (
         glob="frontend/src/lib/menu-permissions.ts",
         mode="diff",
         diff_pattern="menuKey:",
-        requires=("frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",),
-        hint="组内上移/下移用例声明序锚重算（8a928588f 删两项全体前移实证）",
+        requires=(
+            "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+            "frontend/src/lib/__tests__/menu-permissions.test.ts",
+            "frontend/src/lib/__tests__/permission.test.ts",
+        ),
+        hint="admin/menus 组内序锚重算 + menu-permissions.test.ts 数量锚"
+        "（组长度/区分布/FR-02 清单/权限镜像）+ permission.test.ts 分区条目"
+        "（0be62452f 只重算序钉漏数量锚，main 三连红实证）",
     ),
     SurfaceRule(
         no="⑧",
@@ -132,6 +139,20 @@ RULES: tuple[SurfaceRule, ...] = (
         diff_pattern=r"^\s*[A-Z_]+:\s*'daemon:",
         requires=("sillyhub-daemon/tests/protocol-session-contract.test.ts",),
         hint="MSG 总数钉 N→N+1 并补键值回归用例（0b09d1555 漏跟实证）",
+    ),
+    SurfaceRule(
+        no="⑨",
+        source="backend/openapi.json（API 契约源）",
+        glob="backend/openapi.json",
+        mode="file",
+        diff_pattern="",
+        requires=(
+            "frontend/src/lib/api-types.ts",
+            "sillyhub-daemon/src/api-types.ts",
+        ),
+        hint="契约变更后两处生成物同提交：pnpm -C frontend gen:types && "
+        "pnpm -C sillyhub-daemon gen:types（2026-10-15-fix-ci-red：daemon 侧"
+        "漏生成致 daemon-ci 三连红实证）",
     ),
 )
 

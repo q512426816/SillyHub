@@ -352,6 +352,34 @@ describe("ChangeAssetsCard", () => {
     );
   });
 
+  it("FR 行兜底：条目无「变更：」字段时复合锚查无退裸锚（评审 P1 回归钉）", async () => {
+    // FR 文件条目缺「变更：」行（老数据容差形态）：qualified 属性不存在，
+    // 兜底键必须剥掉变更号前缀按裸锚命中——否则静默不滚（改动前可定位，构成回退）。
+    mockGet.mockResolvedValue(FULL);
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "fr/x.md",
+        "fr",
+        "## FR-auto-x-001 条目一\n状态：active\n理由：条目正文理由。\n",
+      ),
+    );
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    fireEvent.click(await screen.findByText("FR-auto-x-001"));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(
+        dialog.querySelector('[data-entry-anchor="fr/x.md#FR-auto-x-001"]'),
+      ).not.toBeNull(),
+    );
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
+    // 滚动目标 = 裸锚卡（无复合属性可命中——兜底生效而非静默不滚）。
+    expect(target.getAttribute("data-entry-anchor")).toBe("fr/x.md#FR-auto-x-001");
+    expect(target.hasAttribute("data-entry-anchor-qualified")).toBe(false);
+  });
+
   it("知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见（FR-05）", async () => {
     mockGet.mockResolvedValue(FULL);
     mockGetKnowledge.mockRejectedValue(new Error("知识库不可用"));

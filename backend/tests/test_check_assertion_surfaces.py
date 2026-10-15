@@ -133,6 +133,33 @@ class TestEvaluate:
         )
         assert violations == [rule]
 
+    def test_rule7_requires_all_three_pins(self) -> None:
+        """⑦ 数量锚三件套（2026-10-15-fix-ci-red：只带序钉漏数量钉 → main 三连红）。"""
+        rule = rule_by_no("⑦")
+        menukey_diff = '+    menuKey: "newMenu",\n'
+        # 只带 admin/menus 序钉（历史事故形态）→ 仍拦
+        staged_partial = [
+            "frontend/src/lib/menu-permissions.ts",
+            "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+        ]
+        assert cas.evaluate([rule], staged_partial, lambda _g: menukey_diff) == [rule]
+        # 三钉齐 → 过
+        staged_all = ["frontend/src/lib/menu-permissions.ts", *rule.requires]
+        assert cas.evaluate([rule], staged_all, lambda _g: menukey_diff) == []
+
+    def test_openapi_change_without_both_generated_files_is_violation(self) -> None:
+        """⑨ openapi 契约源 → 双 api-types 同提交（daemon 漏生成三连红实证）。"""
+        rule = rule_by_no("⑨")
+        # 只带前端生成物（deploy-release-notes 事故形态）→ 拦
+        staged_partial = [
+            "backend/openapi.json",
+            "frontend/src/lib/api-types.ts",
+        ]
+        assert cas.evaluate([rule], staged_partial, self._fetch_no_diff) == [rule]
+        # 双生成物齐 → 过
+        staged_all = ["backend/openapi.json", *rule.requires]
+        assert cas.evaluate([rule], staged_all, self._fetch_no_diff) == []
+
     def test_heartbeat_marker_triggers_rule2_and_requires_all_four(self) -> None:
         rule = rule_by_no("②")
         staged = [

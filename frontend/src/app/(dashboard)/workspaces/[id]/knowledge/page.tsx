@@ -392,12 +392,16 @@ export default function KnowledgePage({ params }: Props) {
             // 复合锚优选（2026-10-14-decision-anchor-change-qualified / FR-03）：
             // anchor 带「变更号#决策号」前缀（沉淀资产卡 FR/决策深链）时先按
             // 复合属性精确匹配——聚合决策文件同 id 跨变更重复，裸锚首卡误命中；
-            // 查无退裸锚（旧深链/老构建无复合属性时的降级路径）。
+            // 查无退裸锚——兜底键剥掉变更号前缀（裸属性值域恒为 文件#id，带前缀
+            // 查等于死选择器，评审 P1 实证）。
             const key = `${filename}#${anchor}`;
+            const bareKey = anchor.includes("#")
+              ? `${filename}#${anchor.split("#").slice(1).join("#")}`
+              : key;
             const selectors = anchor.includes("#")
               ? [
                   `[data-entry-anchor-qualified="${CSS.escape(key)}"]`,
-                  `[data-entry-anchor="${CSS.escape(key)}"]`,
+                  `[data-entry-anchor="${CSS.escape(bareKey)}"]`,
                 ]
               : [`[data-entry-anchor="${CSS.escape(key)}"]`];
             let tries = 0;
