@@ -416,3 +416,48 @@ created_at: 2026-09-27T10:13:08.181Z
   confirmed_at: null
   source_change: 2026-10-14-assets-knowledge-popup-preview
   status: active
+
+## FR-lib-knowledge-027 前端 pnpm exec tsc --noEmit 0 错（ci-fast-gate typecheck 可过）
+变更：2026-10-15-assets-graph-narrow-typecheck
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-narrow-typecheck/requirements.md#FR-01
+最近确认：521896de37666e5ddf6af4a00875769d02917025
+
+## FR-lib-knowledge-028 change-assets-graph 组件既有用例全绿，收窄语义（非 neighbors 分型/空数据隐藏分区）不变
+变更：2026-10-15-assets-graph-narrow-typecheck
+状态：active
+摘要：非 neighbors 分型降级；neighbors 正常切片
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-narrow-typecheck/requirements.md#FR-02
+最近确认：521896de37666e5ddf6af4a00875769d02917025
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-narrow-typecheck:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「全文件既有用例回归」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-narrow-typecheck
+  status: active
+
+## FR-lib-knowledge-029 守卫落在 knowledge.ts 紧邻 getKnowledgeGraphQuery，带中文注释说明为何不用裸 in 收窄
+变更：2026-10-15-assets-graph-narrow-typecheck
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-narrow-typecheck/requirements.md#FR-03
+最近确认：521896de37666e5ddf6af4a00875769d02917025
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-narrow-typecheck:flow:测试绑定FR-03
+  tests: frontend/src/lib/__tests__/knowledge-graph-guard.test.ts「守卫三分型：neighbors 通过/缺 anchor 降级形态拒绝/null 拒绝」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-narrow-typecheck
+  status: active

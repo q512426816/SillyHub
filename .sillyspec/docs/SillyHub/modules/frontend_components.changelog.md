@@ -72,3 +72,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-15 | 2026-10-15-ci-recurrence-guard | CI 红灯防复发：把 2026-10-15-fix-ci-red 灭火中发现的三类漏拦（daemon api-types |
 | 2026-10-15 | 2026-10-15-graph-type-cluster | 动机：知识图谱查询切片（neighbors/impact 等）的力场布局只有斥力/弹簧/向心，不同类型节点混成一坨视觉杂 |
 | 2026-10-15 | 2026-10-15-change-assets-graph | 变更详情页信息动线不佳（用户原话四条）：①知识图谱（画布+右侧节点详情描述）没有出现在变更详情页，要… |
+| 2026-10-15 | 2026-10-15-assets-graph-narrow-typecheck | 动机一行：2026-10-15-change-assets-graph 归档交付的 change-a… |

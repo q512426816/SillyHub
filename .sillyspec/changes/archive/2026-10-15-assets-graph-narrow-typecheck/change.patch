@@ -1,0 +1,117 @@
+diff --git a/frontend/src/components/changes/detail/change-assets-graph.tsx b/frontend/src/components/changes/detail/change-assets-graph.tsx
+index 112cc5acd..fb4ee7b4d 100644
+--- a/frontend/src/components/changes/detail/change-assets-graph.tsx
++++ b/frontend/src/components/changes/detail/change-assets-graph.tsx
+@@ -5,8 +5,8 @@
+  * （2026-10-15-change-assets-graph / FR-01，用户需求：图谱+右侧描述放进沉淀资产卡）。
+  *
+  * 本变更一跳邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
+- * { anchor: changeKey })（与图谱页 neighbors 切片同端点同型收窄——data 联合按
+- * `"anchor" in data` 分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
++ * { anchor: changeKey })（与图谱页 neighbors 切片同端点，data 联合经
++ * isGraphNeighborsData 守卫分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
+  * （图谱页 detail tab 的紧凑直译：类型中文标签 + 色点 + ID + 按边型分组的
+  * 出入邻居行，行点击跳选）。
+  *
+@@ -28,7 +28,7 @@ import {
+   nodeTypeIndex,
+ } from "@/components/knowledge/graph-canvas";
+ import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
+-import { getKnowledgeGraphQuery } from "@/lib/knowledge";
++import { getKnowledgeGraphQuery, isGraphNeighborsData } from "@/lib/knowledge";
+ import { useThemeStore } from "@/stores/theme";
+ 
+ interface ChangeAssetsGraphProps {
+@@ -56,9 +56,11 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
+   });
+ 
+   const data = q.data?.available ? q.data.data ?? null : null;
+-  // neighbors 分型收窄（node_not_found 等降级形态缺 anchor 字段 → 隐藏）。
+-  const nodes = data && "anchor" in data ? asArray<GraphNodeRef>(data.nodes) : [];
+-  const edges = data && "anchor" in data ? asArray<GraphEdge>(data.edges) : [];
++  // neighbors 分型收窄（node_not_found 等降级形态缺 anchor 字段 → 隐藏）。用
++  // 类型谓词守卫而非裸 `"anchor" in data`：后者对经 `?? null` 推断链产生的联合
++  // 不收窄（TS2339 实证，见 isGraphNeighborsData 注释）。
++  const nodes = isGraphNeighborsData(data) ? asArray<GraphNodeRef>(data.nodes) : [];
++  const edges = isGraphNeighborsData(data) ? asArray<GraphEdge>(data.edges) : [];
+ 
+   const nodeMap = useMemo(
+     () => new Map(nodes.map((n) => [n.id, n] as const)),
+diff --git a/frontend/src/lib/__tests__/knowledge-graph-guard.test.ts b/frontend/src/lib/__tests__/knowledge-graph-guard.test.ts
+new file mode 100644
+index 000000000..bfe6cc297
+--- /dev/null
++++ b/frontend/src/lib/__tests__/knowledge-graph-guard.test.ts
+@@ -0,0 +1,44 @@
++/**
++ * isGraphNeighborsData 类型守卫（2026-10-15-assets-graph-narrow-typecheck）。
++ *
++ * 背景：change-assets-graph 组件对信封 data 裸 `"anchor" in` 收窄时 TS2339
++ * （`?? null` 推断链联合的 in 收窄失效，见 knowledge.ts 守卫注释）。本文件钉
++ * 守卫判定面：neighbors 形态放行、缺 anchor 的降级形态与空值拒绝——组件的
++ * 「非 neighbors 分型整区隐藏」语义以此为判定源。
++ */
++
++import { describe, expect, it } from "vitest";
++
++import { isGraphNeighborsData } from "@/lib/knowledge";
++
++describe("isGraphNeighborsData 守卫三分型", () => {
++  it("neighbors 形态（anchor/nodes/edges）→ 放行", () => {
++    expect(
++      isGraphNeighborsData({
++        anchor: "conventions.md",
++        nodes: [{ id: "conventions.md", type: "doc", label: "conventions" }],
++        edges: [{ s: "conventions.md", t: "arch.md", type: "relates", strength: "" }],
++      }),
++    ).toBe(true);
++  });
++
++  it("缺 anchor 的分型（path 形态等非 neighbors 成员）→ 拒绝", () => {
++    // 真实 GraphPathData 形态（生成类型同形，字段见 api-types.ts）：
++    // 有数据但无 anchor 字段，组件按非 neighbors 分型整区隐藏。
++    expect(
++      isGraphNeighborsData({
++        from: "conventions.md",
++        to: "arch.md",
++        found: false,
++        reason: "node_not_found",
++        hop_count: 0,
++        hops: [],
++      }),
++    ).toBe(false);
++  });
++
++  it("空值（null/undefined）→ 拒绝", () => {
++    expect(isGraphNeighborsData(null)).toBe(false);
++    expect(isGraphNeighborsData(undefined)).toBe(false);
++  });
++});
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index ee5df8198..168b636fd 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -426,6 +426,23 @@ export async function getKnowledgeGraphQuery(
+   );
+ }
+ 
++/**
++ * neighbors 分型守卫（2026-10-15-assets-graph-narrow-typecheck）：信封 data 收窄
++ * 到 GraphNeighborsData 的单一判定面。
++ *
++ * 为什么不用调用方裸 `"anchor" in data` 收窄：TS 5.5.4 实证（探针钉死），当 data
++ * 的类型经 `env?.available ? env.data ?? null : null` 推断链产生时，`in` 收窄失效
++ * ——非 neighbors 成员被保留在真值分支并交叉 `Record<"anchor", unknown>`，后续
++ * `.nodes`/`.edges` 访问报 TS2339；类型谓词守卫显式声明判定结果，不依赖 `in` 语义，
++ * 行为不随编译器收窄策略漂移。判定与图谱页「缺 anchor 字段即非 neighbors 分型」
++ * 同口径（node_not_found 等降级形态无 anchor 字段）。
++ */
++export function isGraphNeighborsData(
++  d: GraphQueryOut["data"],
++): d is GraphNeighborsData {
++  return !!d && "anchor" in d;
++}
++
+ /**
+  * 知识图总览（task-05 / D-008@v2）：GET /knowledge/graph/overview。
+  *

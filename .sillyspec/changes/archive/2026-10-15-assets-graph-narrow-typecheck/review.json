@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-assets-graph-narrow-typecheck",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "521896de37666e5ddf6af4a00875769d02917025",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-15T05:56:59Z"
+}

@@ -1,0 +1,92 @@
+{
+  "change": "2026-10-15-assets-graph-narrow-typecheck",
+  "baseline": "db44537f2531a5a96a923367a93902297e43808e",
+  "head": "521896de37666e5ddf6af4a00875769d02917025",
+  "files": [
+    "frontend/src/components/changes/detail/change-assets-graph.tsx",
+    "frontend/src/lib/__tests__/knowledge-graph-guard.test.ts",
+    "frontend/src/lib/knowledge.ts"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 69,
+    "deletions": 6
+  },
+  "savedAt": "2026-10-15T05:56:21.699Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 3,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "db44537f2531a5a96a923367a93902297e43808e",
+    "totals": {
+      "files": 3,
+      "additions": 69,
+      "deletions": 6
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/changes/detail/change-assets-graph.tsx",
+        "additions": 8,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/knowledge-graph-guard.test.ts",
+        "additions": 44,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/knowledge.ts",
+        "additions": 17,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "79175bfff41b3b489bdb8e3311b9a135837acd3bf87a4faa5b26e61326e52f79",
+  "patchStatus": "ok"
+}
