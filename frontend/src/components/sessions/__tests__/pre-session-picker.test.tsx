@@ -721,6 +721,8 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
   });
 
   // 2026-10-15-zcode-engine-appserver task-05（连带测试同款，断言面闸门同提交）：
+  // 2026-10-15 变基并集补记：dsh/zcode 双引擎并存（dsh 钉由 dsh-engine-acp 会话维护），
+  // 本钉保持 zcode 十六键与 daemon 单源逐键同步不变。
   // zcode 条目随 @generated 产物加入——本全对象 toEqual 钉 zcode 十六键与
   // daemon 单源（providers.ts PROVIDER_CAPS.zcode）逐键同步；cursor 与未知
   // 回退断言不受影响（上方两条已锁，本变更零触碰）。

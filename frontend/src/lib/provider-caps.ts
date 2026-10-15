@@ -176,19 +176,11 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     steering: false,
     sessionFork: 'none',
   },
-<<<<<<< HEAD
   dsh: {
     resume: true,
     mcp: true,
     multimodal: false,
     attachments: true,
-=======
-  zcode: {
-    resume: true,
-    mcp: false,
-    multimodal: false,
-    attachments: false,
->>>>>>> 09d1f97ff (feat(daemon): zcode 注册与模型路由——zcode-settings.ts per-session provider_config.json 写入器（anthropic-messages/openai-chat-completions 双形态 + litellm proxy 凭据链 + 裸 model id 取值链）；providers.ts caps 十六键如实 + 注册条目（envInjector none 密钥走文件层、envKey=ZCODE_DATA_BASE_DIR）+ 联合加宽；gen-provider-caps 刷新三端镜像；守护断言认领（registry 键集/canary/family 例外、backend EXPECTED_PROVIDERS、frontend 钉子测试 zcode 钉板）；daemon 154 + backend 5 + frontend 32 用例绿 + typecheck 清 (task-05) (D-002) (D-003))
     thinking: true,
     subagent: false,
     permission_dialog: true,
@@ -197,11 +189,25 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     model_select: true,
     provider_switch: true,
     ctx_usage: true,
-<<<<<<< HEAD
     compact: false,
-=======
+    thinking_level: true,
+    steering: false,
+    sessionFork: 'none',
+  },
+  zcode: {
+    resume: true,
+    mcp: false,
+    multimodal: false,
+    attachments: false,
+    thinking: true,
+    subagent: false,
+    permission_dialog: true,
+    dialog: 'native',
+    edit_patch: false,
+    model_select: true,
+    provider_switch: true,
+    ctx_usage: true,
     compact: true,
->>>>>>> 09d1f97ff (feat(daemon): zcode 注册与模型路由——zcode-settings.ts per-session provider_config.json 写入器（anthropic-messages/openai-chat-completions 双形态 + litellm proxy 凭据链 + 裸 model id 取值链）；providers.ts caps 十六键如实 + 注册条目（envInjector none 密钥走文件层、envKey=ZCODE_DATA_BASE_DIR）+ 联合加宽；gen-provider-caps 刷新三端镜像；守护断言认领（registry 键集/canary/family 例外、backend EXPECTED_PROVIDERS、frontend 钉子测试 zcode 钉板）；daemon 154 + backend 5 + frontend 32 用例绿 + typecheck 清 (task-05) (D-002) (D-003))
     thinking_level: true,
     steering: false,
     sessionFork: 'none',
