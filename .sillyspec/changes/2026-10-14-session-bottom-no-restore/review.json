@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-bottom-no-restore",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "b83ced449f217daa2a5df0a8fab6876a26fea5ec",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02（刷新后落底 delta=0）仅有修复前取证，修复后真浏览器实测留档缺失但 task-02 已勾完",
+      "evidence": "requirements.md FR-02 测试绑定原文为「真浏览器程序性滚顶/滚中后 reload 实测（部署后取证）」；变更目录仅 design/flow-state/proposal/requirements/tasks 五件无任何 verify/取证产物；tasks.md task-02 已标 [x]。commit message 仅主张 75 例绿 + tsc 0（jsdom 层面）。修复前取证充分（auto 下程序性滚顶/滚 85% 后 reload 均恢复停 scrollTop=602）且 manual 为标准疗法、机制上双重覆盖（卸载前 entry 模式已 manual + 新文档挂载早期重设），风险低——建议归档前补部署后 reload 取证闭环。",
+      "location": ".sillyspec/changes/2026-10-14-session-bottom-no-restore/requirements.md:FR-02 测试绑定; .sillyspec/changes/2026-10-14-session-bottom-no-restore/tasks.md:task-02"
+    },
+    {
+      "severity": "P3",
+      "title": "prev 快照还原非「最后卸载者」感知——page/dialog 双 TurnTimeline 极端共存时序下恢复通道可提前重开或 manual 滞留",
+      "evidence": "effect cleanup 还原各自挂载前快照（turn-timeline.tsx:1409-1413）。生产挂载点三处：session-panel-page.tsx:4597（page）、session-panel-dialog.tsx:2033（dialog）、agent-replay-body.tsx:657（回放体，与会话页正常视图互换取序安全：同 commit 内旧 cleanup 先于新 effect，终态恒 manual）。若 floating-session-host 悬浮会话（dialog 级）与会话页（page 级）共存且页级先卸载：页级还原 auto 而 dialog 级仍挂载（刷新恢复通道重开，原故障窗口重现）；反向卸载序则 manual 滞留至标签页级后续导航。design 断言「page/dialog 不共存」——建议要么核实 floating host 生命周期确实不与 page 级共存，要么改引用计数/最后卸载守卫。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1402-1414; frontend/src/components/daemon/session-panel/session-panel-page.tsx:4597; frontend/src/components/daemon/session-panel/session-panel-dialog.tsx:2033; frontend/src/components/floating/floating-session-host.tsx"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——恢复通道双向斩断：reload 时旧文档 entry 模式已 manual（组件挂载期间触发 reload），新文档挂载早期（hydration effect，先于内容装配后的晚到恢复）重设 manual；通道关闭后无迟到写入者，前四层贴底链时序不变",
+    "并发": "ok——next@14.2.5 dist/client 全量 grep 零 scrollRestoration 写入（无 Next 覆盖/冲突，社区「App Router 自设 manual」说法在本版本不成立）；frontend/src 全仓唯一写入者即本 effect；赋值幂等；reactStrictMode=true 下双跑 mount/cleanup 终态 manual 无害；jsdom 两态（无 API/有 API）guard 不抛错",
+    "切换": "ok——key 重挂载（会话切换）effect 重跑幂等；正常↔回放视图互换取序安全；SPA 离开会话页卸载还原挂载前值（Next 不写该属性，故为 auto），其它页面刷新体验不受影响",
+    "作用域": "finding——P3：prev 快照还原在 page/dialog 双挂载极端共存时序下非最后卸载感知（见 findings[1]）；单挂载所有已核实路径（page/dialog/回放互换/key 重挂载/StrictMode）均正确"
+  },
+  "reviewedAt": "2026-10-15T09:42:22+08:00"
+}

@@ -1,6 +1,7 @@
-tier: thin
+tier: thick
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,6 +23,13 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: f05e322b5efecf3d01505a0d95d2b0618ce5f404
-updatedAt: '2026-10-15T01:27:32.773Z'
+updatedAt: '2026-10-15T01:44:40.651Z'
 baseline_sha256: 8b6e148c1c44fd3dd082405309f6ec1d1e090dca17d95e6de9cddc69e400daab
+spec_approved: true
+spec_approved_at: '2026-10-15T01:43:46.877Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-2BN7FDC
+batch_ticked: true
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
 
