@@ -47,6 +47,7 @@ import {
   shouldAutoRefit,
   staticLayout,
   stepForceLayout,
+  TYPE_COHESION_PULL,
   type CanvasNodeInput,
   type LiteClusterInput,
   type SimEdge,
@@ -135,6 +136,91 @@ describe("stepForceLayout（velocity Verlet 力场单步）", () => {
     stepForceLayout([a], [], 0, { width: 800, height: 600 });
     expect(a.x).toBe(10);
     expect(a.y).toBe(10);
+  });
+});
+
+// ── stepForceLayout 类型内聚力（2026-10-15-graph-type-cluster）──────────────
+
+describe("stepForceLayout 类型内聚力（同类型聚簇、异类分块）", () => {
+  /** 交错网格：18 节点 3 类型（各 6）铺满 800×600、无边——类型充分混排的初始态。 */
+  function interleavedGrid(): SimNode[] {
+    const types = ["file", "decision", "fr"];
+    return Array.from({ length: 18 }, (_, i) => {
+      const c = i % 6;
+      const r = Math.floor(i / 6);
+      return simNode({
+        id: `n${String(i).padStart(2, "0")}`,
+        type: types[i % types.length]!,
+        x: 40 + c * 144,
+        y: 60 + r * 240,
+      });
+    });
+  }
+
+  it("增益常量具名导出：弱牵引量级（0 < pull < 0.1）", () => {
+    expect(TYPE_COHESION_PULL).toBeGreaterThan(0);
+    expect(TYPE_COHESION_PULL).toBeLessThan(0.1);
+  });
+
+  it("聚簇双断言：交错网格快进 4000 步后类内紧（<150）+ 类间分（>150 且 > 类内径），且收敛截止判定为静止", () => {
+    const nodes = interleavedGrid();
+    stepForceLayout(nodes, [], 4000, { width: 800, height: 600 });
+    const byType = new Map<string, SimNode[]>();
+    for (const n of nodes) {
+      const g = byType.get(n.type) ?? [];
+      g.push(n);
+      byType.set(n.type, g);
+    }
+    const cents = new Map<string, { x: number; y: number }>();
+    let maxSpread = 0;
+    for (const [t, g] of byType) {
+      const cx = g.reduce((s, n) => s + n.x, 0) / g.length;
+      const cy = g.reduce((s, n) => s + n.y, 0) / g.length;
+      cents.set(t, { x: cx, y: cy });
+      for (const n of g) {
+        maxSpread = Math.max(maxSpread, Math.hypot(n.x - cx, n.y - cy));
+      }
+    }
+    expect(maxSpread).toBeLessThan(150); // 类内紧
+    const typeNames = [...cents.keys()];
+    let minCentDist = Infinity;
+    for (let i = 0; i < typeNames.length; i++) {
+      for (let j = i + 1; j < typeNames.length; j++) {
+        const a = cents.get(typeNames[i]!)!;
+        const b = cents.get(typeNames[j]!)!;
+        minCentDist = Math.min(minCentDist, Math.hypot(a.x - b.x, a.y - b.y));
+      }
+    }
+    expect(minCentDist).toBeGreaterThan(150); // 类间分
+    expect(minCentDist).toBeGreaterThan(maxSpread); // 簇可辨：间距压过类内径
+    // 内聚力不破坏收敛截止（forceSettled 判静止——rAF 停步进语义保持）。
+    expect(forceSettled(nodes)).toBe(true);
+  });
+
+  it("内聚生效正控制：同类型两节点一步内相互靠拢（内聚压过斥力+向心）", () => {
+    const a = simNode({ id: "a", type: "file", x: 300, y: 300 });
+    const b = simNode({ id: "b", type: "file", x: 500, y: 300 });
+    stepForceLayout([a, b], [], 1, { width: 800, height: 600 });
+    expect(a.x).toBeGreaterThan(300);
+    expect(b.x).toBeLessThan(500);
+  });
+
+  it("豁免：单成员类型只受向心力（闭式解钉死），NaN 坐标不入质心、自愈口径不变", () => {
+    const a = simNode({ id: "a", type: "module", x: 400, y: 100 });
+    const b = simNode({ id: "b", type: "project", x: 400, y: 500 });
+    const bad = simNode({ id: "bad", type: "file", x: 400, y: 300 });
+    bad.x = Number.NaN;
+    bad.y = Number.NaN;
+    bad.px = Number.NaN;
+    bad.py = Number.NaN;
+    stepForceLayout([a, b, bad], [], 1, { width: 800, height: 600 });
+    // 闭式解：单成员类型内聚力为零，仅向心 vy = 0.004×200×0.85 = 0.68。
+    expect(a.x).toBe(400);
+    expect(b.x).toBe(400);
+    expect(a.y).toBeCloseTo(100.68, 10);
+    expect(b.y).toBeCloseTo(499.32, 10);
+    // NaN 节点自愈到中心 160 圆环（既有口径；file 组有限成员=0 不产生内聚力）。
+    expect(Math.hypot(bad.x - 400, bad.y - 300)).toBeCloseTo(160, 6);
   });
 });
 

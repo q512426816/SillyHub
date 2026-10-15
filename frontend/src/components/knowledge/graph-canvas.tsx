@@ -7,7 +7,9 @@
  *
  * 依据：
  *   - 归档原型 prototype-knowledge-graph.html 的 step()/draw()/交互段生产直译：
- *     velocity Verlet 力场（斥力/弹簧/向心/阻尼/速度夹/NaN 自愈逐项一致）、
+ *     velocity Verlet 力场（斥力/弹簧/向心/阻尼/速度夹/NaN 自愈逐项一致；
+ *     2026-10-15-graph-type-cluster 增补同类型内聚力——同类聚簇异类分块，
+ *     系原型之后唯一的力组成增补）、
  *     拾取最近者胜、滚轮缩放光标锚点、空白拖拽平移、节点拖拽钉位、hover/选中环、
  *     标签分级（缩放阈值/选中/hover/高亮内，26 字符截断，字号随缩放补偿）、
  *     边三档虚实（strong 实线 / medium 长虚 / weak 点虚）；
@@ -58,6 +60,13 @@ const SPRING_K = 0.02;
 const SPRING_D_MAX = 600;
 /** 向心牵引系数。 */
 const CENTER_PULL = 0.004;
+/**
+ * 同类型内聚增益（2026-10-15-graph-type-cluster）：每步朝本类型质心的弱牵引
+ * ——同类聚簇、异类靠对称斥力分块（>200 静态分环布局同语义的力场对齐）。
+ * 量级与 CENTER_PULL 同数量级略强：实测 18 节点 3 类型交错网格收敛后类内
+ * 半径 ≈48px、类间质心距 ≈163px（聚簇可辨且不破坏弹簧自然长）。
+ */
+export const TYPE_COHESION_PULL = 0.02;
 /** 阻尼与速度夹（|v| ≤ 9）。 */
 const DAMPING = 0.85;
 const VELOCITY_CLAMP = 9;
@@ -188,11 +197,12 @@ function clampVelocity(v: number): number {
 }
 
 /**
- * velocity Verlet 力场单步（原型 step() 直译，参数逐项一致）：
+ * velocity Verlet 力场单步（原型 step() 直译 + 类型内聚增补，其余参数逐项一致）：
  * 斥力（成对、距离 >320 跳过、力幅夹 0.5）→ 边弹簧（自然长=强弱档基数×半径
- * 和/14、长度夹 600）→ 向心 0.004 → 拖拽钉位 → 阻尼 0.85 + 速度夹 ±9 →
- * NaN 自愈（重置到中心半径 160 圆环）。dt 为本次推进的步数（rAF 传 1，测试
- * 可传 N 确定性快进）；view 提供向心/自愈中心（画布中心）。
+ * 和/14、长度夹 600）→ 类型内聚（朝本类型质心弱牵引，单成员/NaN 豁免，
+ * 2026-10-15-graph-type-cluster）→ 向心 0.004 → 拖拽钉位 → 阻尼 0.85 +
+ * 速度夹 ±9 → NaN 自愈（重置到中心半径 160 圆环）。dt 为本次推进的步数
+ * （rAF 传 1，测试可传 N 确定性快进）；view 提供向心/自愈中心（画布中心）。
  */
 export function stepForceLayout(
   nodes: SimNode[],
@@ -258,6 +268,29 @@ export function stepForceLayout(
       a.py -= fy;
       b.px += fx;
       b.py += fy;
+    }
+    // 类型内聚（2026-10-15-graph-type-cluster）：先统计各类型有限坐标质心，
+    // 再对成员数 >1 的类型施加朝质心弱牵引——同类聚簇、异类靠对称斥力分块。
+    // 单成员类型质心=自身零受力；NaN 坐标不入质心（防毒）也不受力。质心每步
+    // 重算无跨帧状态；拖拽钉位节点照常累加（积分段整体覆盖，与斥力/弹簧同帧
+    // 同语义）。
+    const typeSum = new Map<string, { x: number; y: number; n: number }>();
+    for (const n of nodes) {
+      if (!isFinite(n.x) || !isFinite(n.y)) continue;
+      const g = typeSum.get(n.type);
+      if (g) {
+        g.x += n.x;
+        g.y += n.y;
+        g.n += 1;
+      } else {
+        typeSum.set(n.type, { x: n.x, y: n.y, n: 1 });
+      }
+    }
+    for (const n of nodes) {
+      const g = typeSum.get(n.type);
+      if (!g || g.n <= 1) continue;
+      n.px -= (g.x / g.n - n.x) * TYPE_COHESION_PULL;
+      n.py -= (g.y / g.n - n.y) * TYPE_COHESION_PULL;
     }
     // 向心 + 拖拽钉位 + 阻尼积分 + NaN 自愈
     for (const n of nodes) {
