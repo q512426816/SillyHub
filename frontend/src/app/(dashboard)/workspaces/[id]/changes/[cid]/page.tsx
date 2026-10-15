@@ -139,6 +139,16 @@ export default function ChangeDetailPage({ params }: Props) {
   // 同一阶段取消筛选；current_stage 非线性（quick 等）时步骤条不渲染，联动
   // 入口自然缺席，focusStage 恒为 null 无副作用。
   const [focusStage, setFocusStage] = useState<string | null>(null);
+  /** 步骤时间线展开态（2026-10-15-change-assets-graph / FR-03）：默认收起——
+   *  过程明细让位主线信息动线（沉淀资产/图谱优先）；卡头切换 + 阶段节点联动
+   *  自动展开。 */
+  const [stepsOpen, setStepsOpen] = useState(false);
+
+  // 收起态点阶段节点 → 自动展开时间线（联动入口在上方阶段步骤条，若保持收起
+  // 则「点了看不到东西」——联动语义要求展开）。
+  useEffect(() => {
+    if (focusStage) setStepsOpen(true);
+  }, [focusStage]);
 
   // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询（agent 状态链随
   //     智能体运行状态卡移除一并退役，2026-09-28-change-ux-detail-batch）──
@@ -405,22 +415,43 @@ export default function ChangeDetailPage({ params }: Props) {
             notifyResult={notifyResult}
           />
 
-          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
-              SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
-              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
-              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）：thin 流程子步
-              不落库，steps 里只有归档时 unregisterChange 终态一致化补种的 3 行同
-              时间戳步骤，零过程信息量；主线叙事由顶部轻量流程条 + 真实留痕时间线
-              卡承担（谓词与流程条同源 isThinLineageChange）。 */}
+          {/* 沉淀资产（2026-10-15-change-assets-graph / FR-02：上移至步骤时间线
+              上面——详情页主信息（FR/决策/图谱/留档）优先于过程明细；自 aside 移
+              主栏 + 默认展开 + 分组固定高度滚动网格语义不变（2026-09-28 批次），
+              内嵌知识图谱分区见组件内注释。changeKey 透传（2026-10-14-decision-
+              anchor-change-qualified）：FR/决策深链 anchor 拼「变更号#决策号」
+              复合形态。 */}
+          <ChangeAssetsCard
+            workspaceId={workspaceId}
+            changeId={changeId}
+            changeKey={change?.change_key}
+          />
+
+          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps；steps
+              缺失降级不渲染，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
+              2026-10-15-change-assets-graph / FR-03：默认收起 + 卡头切换按钮，
+              收起态点阶段节点自动展开（effect 联动）——过程明细让位主线。
+              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）语义不变。 */}
           {!isThinLineageChange(change) && change.steps && change.steps.length > 0 ? (
             <section
               data-testid="change-step-timeline-card"
               className="rounded-md border bg-card"
             >
               <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-                <h2 className="text-xs font-medium">
-                  步骤时间线 ({change.steps.length})
-                </h2>
+                <button
+                  type="button"
+                  data-testid="change-step-timeline-toggle"
+                  aria-expanded={stepsOpen}
+                  onClick={() => setStepsOpen((v) => !v)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  <h2 className="text-xs font-medium">
+                    步骤时间线 ({change.steps.length})
+                  </h2>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {stepsOpen ? "收起 ▲" : "展开 ▼"}
+                  </span>
+                </button>
                 {focusStage ? (
                   <button
                     type="button"
@@ -432,12 +463,14 @@ export default function ChangeDetailPage({ params }: Props) {
                   </button>
                 ) : null}
               </div>
-              <div className="px-3 py-2.5">
-                <ChangeStepTimeline
-                  steps={change.steps}
-                  focusStage={focusStage}
-                />
-              </div>
+              {stepsOpen ? (
+                <div className="px-3 py-2.5">
+                  <ChangeStepTimeline
+                    steps={change.steps}
+                    focusStage={focusStage}
+                  />
+                </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -449,18 +482,6 @@ export default function ChangeDetailPage({ params }: Props) {
               key=changeId（2026-09-29-change-detail-timeline-files-polish 评审 P3）：
               路由参数切换不重挂载，折叠展开态会跨变更残留——key 化随切换重挂归零。 */}
           <ChangeTimelineCard key={changeId} workspaceId={workspaceId} changeId={changeId} />
-
-          {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
-              + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，
-              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。
-              changeKey 透传（2026-10-14-decision-anchor-change-qualified）：FR/决策
-              深链 anchor 拼「变更号#决策号」复合形态——聚合决策文件同 id 跨变更
-              重复，裸 id 首卡误命中。 */}
-          <ChangeAssetsCard
-            workspaceId={workspaceId}
-            changeId={changeId}
-            changeKey={change?.change_key}
-          />
 
           {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
               thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行

@@ -162,6 +162,40 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets�
     ).toBeNull();
   });
 
+  // 2026-10-15-change-assets-graph FR-02：主栏信息动线钉子——沉淀资产上移至
+  // 步骤时间线上面（审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线）。
+  // DOM 顺序断言防后续提交把挂载点挪回去（本文件立项背景即「静默回滚」实证）。
+  it("FR-02：沉淀资产卡位于步骤时间线卡之前（主栏顺序：审批卡→沉淀资产→步骤时间线→留痕时间线）", async () => {
+    const { container } = renderPage(
+      makeChange({
+        current_stage: "verify",
+        change_type: null,
+        steps: [
+          {
+            name: "实现收尾",
+            stage: "execute",
+            status: "completed",
+            output: null,
+            completed_at: "2026-10-15T10:00:00Z",
+            ordering: 0,
+            wait_reason: null,
+            kind: "step",
+          },
+        ],
+      }),
+    );
+    const assets = await screen.findByTestId("change-assets-card");
+    const stepTimeline = await screen.findByTestId("change-step-timeline-card");
+    // compareDocumentPosition：assets 在前（timeline 相对 assets 为 FOLLOWING）
+    expect(
+      assets.compareDocumentPosition(stepTimeline) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // 审批卡在沉淀资产之前（pending_review 有值时；厚 fixture 走 verify 阶段占位
+    // 已删——用 main 内首个区块兜底断言：assets 是 main 的较早子块即可，上断言已钉）
+    expect(container.querySelector("main")).toContainElement(assets);
+  });
+
   it("FR-03：范围对账卡收到 archived 传参（非终态变更为 false，非 unset）", async () => {
     renderPage(makeChange());
     const card = await screen.findByTestId("scope-audit-command-card");

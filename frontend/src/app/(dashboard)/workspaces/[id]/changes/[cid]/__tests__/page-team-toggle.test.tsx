@@ -337,13 +337,29 @@ describe("详情页步骤时间线挂载（task-07，D-005@v1）", () => {
     cleanup();
   });
 
-  it("change.steps 有明细 → 渲染 ChangeStepTimeline 区块（时间线卡片 + 组件挂载）", async () => {
+  it("change.steps 有明细 → 默认收起（组件体不渲染），点卡头展开后渲染 ChangeStepTimeline 区块（2026-10-15-change-assets-graph FR-03）", async () => {
     setup({ change: makeChange({ steps: makeSteps() }) });
     await renderPage();
+    // 卡片常在（收起态只剩卡头），组件体默认不渲染
     expect(
       screen.getByTestId("change-step-timeline-card"),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("change-step-timeline"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("change-step-timeline-toggle"),
+    ).toHaveAttribute("aria-expanded", "false");
+    // 点卡头展开 → 组件体挂载；再点收起 → 卸载
+    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
     expect(screen.getByTestId("change-step-timeline")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("change-step-timeline-toggle"),
+    ).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
+    expect(
+      screen.queryByTestId("change-step-timeline"),
+    ).not.toBeInTheDocument();
   });
 
   it("steps 缺失（旧变更未上行）→ 降级不渲染时间线区块（D-003@v1，视觉与现状一致）", async () => {
