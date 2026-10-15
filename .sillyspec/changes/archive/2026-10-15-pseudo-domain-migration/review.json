@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-pseudo-domain-migration",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "609f2de5b6dd6d1f31b4f5e05ed220a4bb4e77b0",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a——一次性批处理迁移",
+    "并发": "ok——提交面 51 文件显式 pathspec 与并行会话语隔离（git show 实证仅本变更面）",
+    "切换": "ok——迁移幂等（工具重跑收敛/空壳删后拒）；中断可重入",
+    "作用域": "ok——知识库本仓；平台镜像随 sync 上行（旧 file 深链失效为预期已留痕）"
+  },
+  "notes": {
+    "承诺对照": "FR-01 digest 伪域 0 实测（fr 面 100 条=92 auto-*+8 unmapped 全迁）；FR-02 fr/ 零 auto-* 残留+INDEX grep 0；FR-03 validate ok:true 实测；FR-04 决策 442 段全额清偿（436 迁出+空壳删+INDEX 失效行 0）",
+    "声明边界裁决": "①横断变更主域机械裁决=可接受（与触达路由同源，多域命中无唯一解，人工改判 2 处留痕）；②6 条无变更条目主题判域 daemon=人工留痕；③旧深链失效=预期（随平台重建）。无未裁决边界",
+    "防护声明核实": "数据修复（坏段/重复段/残迹）经归档真相源核验+validate ok+提交留痕；迁移工具冲突双键/幂等有 sillyspec 仓测试 3 组锁定",
+    "生成物同步": "无代码面——n/a；INDEX 路由由 syncIndexRoutingLines 机械同步",
+    "项目探针": {
+      "cli-copy-selfsufficient": "n/a——无 CLI 文案变更（消费侧数据）",
+      "config-absent-zero-regression": "n/a——零配置键",
+      "crossrepo-path-compat": "pass——CRLF 文件实测（残迹修复 EOL 保真 CRLF；工具 split 侧归一既有契约）"
+    }
+  },
+  "reviewedAt": "2026-10-15T09:05:00.000Z"
+}

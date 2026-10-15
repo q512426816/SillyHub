@@ -6,6 +6,8 @@ created_at: 2026-10-15T08:07:59.959Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 用户指令「迁真域」的存量清偿面：sillyspec 仓 2026-10-15-module-path-glob-match 修复了模块路径 glob 匹配（扫描卡 146 条 glob paths 在全部归属判定点恒不命中——FR 铸伪域/决策落 unmapped 的根因），修复止增量；本变更清偿平台仓存量。
 
 **判定链**（三条源依次兜底）：来源变更归档 design.md 交付表 → change-patch.json files → git log --grep 变更名 name-only 文件集（sillyspec 仓 frCoverageFiles 第三源同口径）→ 文件集经 modulePathMatches 对平台仓真实模块图（182 模块）求域 → 主域裁决规则（排除 test-utils 与一级聚合 frontend/backend/daemon/sillyhub-daemon → 具体域优先 → 命中文件数降序 → 名称长度降序；无具体域取聚合域）。人工改判两处留痕：deploy-script-version-echo-msys → deploy（机械误判 sillyspec，交付核心是 deploy/scripts；sillyspec(4) 为 .claude/skills 杂项误吸）；release-notes-server-sync → deploy_records（机械给 docs，跟随平台仓既有先例 auto-backend→deploy_records 迁发布记录条目）。
@@ -16,10 +18,20 @@ created_at: 2026-10-15T08:07:59.959Z
 
 ## 接口契约
 
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
 - 纯知识数据变更（.sillyspec/knowledge/**），无代码面。迁移工具契约见 sillyspec 仓 src/redomain.js（FR 面）/ src/decision-redomain.js（决策面）——迁域不换号、段字节保真。
 - 消费面变化：FR/决策按域落位后，知识注入（触达域路由）命中恢复；图节点 id（decision:<file>#…）随 file 变化为预期（引用形态「变更名#D-xxx@vN」不含 file）。
 
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
 1. 乱序/迟到到达：不适用——迁移为一次性批处理，批间由工具幂等收敛。
 2. 并发写：平台仓多会话并行（提交面已显式 pathspec 隔离）；知识文件本变更单点写。
@@ -27,5 +39,7 @@ created_at: 2026-10-15T08:07:59.959Z
 4. 作用域：知识库本仓；平台侧 spec 镜像随 sync 上行（决策深链 spec_path 随重建刷新——旧 file 路径深链失效为预期，用户可见面）。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：主域机械裁决的错分（如 ci-recurrence-guard 横断变更落 frontend_components 而非 CI 语义域）——接受：规则与触达路由同源（判定集含 frontend_components 时注入必达），横断变更多域命中下无唯一正确解；人工改判两处已在案。次风险：6 条无变更条目主题判域 daemon 属人工判断——留痕可复议。第三风险：坏段/重复段修复属数据手术——归档真相源核验+段字节级操作+validate ok+git 留痕四重保护。放弃方案：①按条目语义逐条人工判域（436 条不可行）；②保持 unmapped 只设基线消音（用户明示迁真域）；③重蒸馏迁移（归档源改不动）。
