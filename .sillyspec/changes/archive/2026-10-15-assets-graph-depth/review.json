@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-assets-graph-depth",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2d3c285319fdf676ddfe02309fe7b19e69e1e48b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-02「选中态回退锚点」子行为无专属新测试（信息性）",
+      "evidence": "FR-02 正文承诺 selectedId 查不到→锚点兜底→首节点，但测试绑定节仅绑「不闪空」用例；兜底链（change-assets-graph.tsx:81-85）为上一变更既有代码，本变更 diff 未触碰，默认锚点选中已有既有首用例覆盖，无悬空引用风险，故仅信息性留痕",
+      "location": ".sillyspec/changes/2026-10-15-assets-graph-depth/requirements.md:19"
+    },
+    {
+      "severity": "P3",
+      "title": "「不闪空」用例第二查挂起永不 resolve，未断言「新数据到达后原位更新」后半段（信息性）",
+      "evidence": "测试用 new Promise(()=>{}) 挂起 depth=2 查询后只断言旧切片持续渲染与无 loading 替换（keepPreviousData 真实生效），「新数据到达后原位更新」由「层级选择器」用例隐式覆盖（depth 2/3 用 mockResolvedValue 且断言通过即完成重渲染周期），但未显式校验新切片内容上屏",
+      "location": "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx:215-235"
+    },
+    {
+      "severity": "P3",
+      "title": "chips 在途不节流：快速连点三档会同时产生最多 3 个在途查询（信息性）",
+      "evidence": "onClick 仅 setDepth 无 inFlight 守卫（change-assets-graph.tsx:139），连点产生多个缓存槽并行查询；纯只读幂等 GET、各槽 key 隔离互不污染，仅多耗网络与后端算力，无正确性影响，且与 design 声明的「isFetching 不禁用 chips」取舍一致",
+      "location": "frontend/src/components/changes/detail/change-assets-graph.tsx:139"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——depth 进 queryKey（change-assets-graph.tsx:59）缓存按深度隔离，慢的旧深度响应只写自己的槽，不会覆盖新深度数据，design 四问答答与代码事实一致",
+    "并发": "边界已裁决：可接受——「q.isFetching 不禁用 chips」：查询为只读幂等 GET，无写路径，连点仅多产生隔离缓存槽查询，渲染连续性由 keepPreviousData 保证（对应 P3 信息性留痕）",
+    "切换": "边界已裁决：可接受——①「counts 短暂陈旧」：切换期间卡头计数显示旧切片值，数据到达即原位刷新，与 changes 列表页同语义；②「回切已看过的深度零延迟（缓存复用）」：react-query 缓存槽命中即时渲染，陈旧度与首载同口径；③「不闪空」：placeholderData: keepPreviousData（:64）真实在位，测试以挂起第二查实证分区不替换",
+    "作用域": "边界已裁决：可接受——queryKey 含 workspaceId+changeKey+depth 三键隔离（:59）无串台面；「depth 2-3 超 200 节点不加护栏」：GraphCanvas 既有 FORCE_NODE_LIMIT=200 确定性静态分环降级已在 graph-canvas.tsx:44/812 落地，depth 参数后端钳 1-3（knowledge.ts:408），组件层重复护栏无增益，慢查询由 90s 超时+retry:false 兜住"
+  },
+  "reviewedAt": "2026-10-15T17:31:23+08:00"
+}

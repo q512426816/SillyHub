@@ -3,6 +3,7 @@
 > 自动生成。正文历史已迁出，详见 frontend.md。
 > author: qinyi
 > created_at: 2026-08-26 10:20:00
+- change 2026-10-15-server-logs-panel | 服务器信息页去业务统计卡+服务器日志卡：NEW components/server-log-panel.tsx（卡内独立 5s 轮询 getServerLogs/行数 Segmented {100,200,500,1000}/级别语义色阶行/点行展开原始 JSON/文件下拉+下载/安全提示/失败 Alert 保留数据）；lib/health.ts 增 getServerLogs（类型 api-types 生成物引用）与 downloadLogFile（fetch Blob+401 单飞刷新+objectURL，JWT 裸 URL 401 先例）；page.tsx 删 StatCell 与业务统计卡（D-007@v1）+ServerLogPanel 满宽置底（lg:col-span-2）+副标题更新；page.test.tsx 全用例扫描改写断言。测试：server-log-panel 7 + admin 域 24 用例全绿；tsc/eslint 零错。
 
 - change 2026-09-25-change-center-thin-flow | 变更中心 thin 视觉全家桶：STAGE_KIND.thin 品牌紫阶（本地 brand kind）/STAGE_LABELS/STATUS_BADGE/WORKFLOW_STAGE_LABELS/双份 STAGE_OPTIONS 筛选项/BYPASS_BADGES+两处旁路判断；thin 两段式说明卡（桌面+移动）+ quick 卡退役文案；quick 存量标注五处（tab 徽标「存量 · N」/副标题/统计卡/quicklog 空态与表头）。tsc 0 错 + quicklog-table 16 + change-step-badge 13 + change-stage-actions/mobile-change-detail 30 用例绿。
 - ql-20260918-012-ac1b | 工作区 Git 地址展示（列表卡 + 详情基本信息，自动识别不手填）：lib/workspaces.ts 新增 probeWorkspaces client（Schemas["WorkspaceProbeItem"] 生成类型，gen:types 同步）；列表页加载后补一发批量 probe（对齐关联项目异步补数模式，403/失败 catch 静默）→ 卡片 repoUrl prop（probe 实时值优先、DB repo_url 兜底）；详情页 mount 单工作区 probe 同款 + GET DB 值兜底；WorkspacePathFields 增「Git 地址」行（http(s) 渲染可点外链且 click 不冒泡整卡点击，scp/ssh 形态纯文本；空值不渲染行）——列表卡与详情基本信息共用。移动端 m/workspaces 未接入（简化选择器无路径信息区）。测试：workspace-card/workspace-drag-grid/team-trigger-popover 67 passed；tsc 0；eslint 0 error（8 warning 全存量，stash 对照确认非本次引入）。
@@ -109,3 +110,4 @@
 | 2026-10-15 | 2026-10-15-group-cross-mention-visibility | 群聊互@模式设置面：member-panel 群设置区+建群向导第三步新增互@模式控件（私聊协作/公开委派，三态联动禁用——互@总开关关/consensus 开互斥提示），服务端真值顶层列局部 PATCH 乐观回滚，双端 gen:types 同变更再生成；antd Radio.Button 的 cssinjs 组合选择器在 jsdom nwsapi 抛 SyntaxError 级联炸用例（二分定位）改 Button+aria-pressed 实现。 |
 | 2026-10-15 | 2026-10-15-pseudo-domain-migration | 用户指令：把平台仓存量伪域迁真域。背景：sillyspec 仓 2026-10-15-module-… |
 | 2026-10-15 | 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型 |
+| 2026-10-15 | 2026-10-15-assets-graph-depth | 变更详情页沉淀资产卡的内嵌知识图谱分区（2026-10-15-change-assets-graph… |

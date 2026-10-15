@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 后台管理页面（app-admin-pages）
 
 ## 定位
-后台管理页面集合，挂在 `/admin/*` 路由组下（layout + 3 页：users / roles / organizations），负责平台级用户、角色、组织管理。所有页面共享 `frontend/admin/layout.tsx` 管理员准入校验，写操作与下钻视图多经 components-admin 的抽屉/选择器承载，数据走 lib-admin。
+后台管理页面集合，挂在 `/admin/*` 路由组下（layout + 5 页：users / roles / organizations / menus / server-status），负责平台级用户、角色、组织、菜单覆盖与服务器运行视图管理。所有页面共享 `frontend/admin/layout.tsx` 管理员准入校验，写操作与下钻视图多经 components-admin 的抽屉/选择器承载，数据走 lib-admin（menus 走 lib-menu-overrides、server-status 走 lib-health）。
 
 ## 契约摘要
 - `AdminLayout`（`/admin`，31 行）：hydrate 后无 token → `replace("/login")`；`hasAdminPermission(user)` 不过 → `setDenied(true)` + `replace("/")`；渲染层 denied / 无权限一律 `return null`。
@@ -18,6 +18,8 @@ created_at: 2026-08-18 01:45:00
   - 抽屉 state：`drawer`（AdminUserDrawer，mode=create|edit）、`sessionsDrawer`（用户会话）、`auditDrawer`（用户审计）、`confirmDelete`、`resetTarget`（重置密码）五类。
 - `AdminRolesPage`（`/admin/roles`）：角色列表 + 菜单权限点勾选（`AdminRolePermissionPicker`），权限分组定义在 lib-menu-permissions（MENU_PERMISSION_GROUPS）。
 - `AdminOrganizationsPage`（`/admin/organizations`）：组织树/列表管理（`AdminOrganizationTree` / `AdminOrgTree` 两代树组件），含启停/删除组织。
+- `AdminMenusPage`（`/admin/menus`，2026-09-18-web-menu-management）：菜单覆盖管理（改名/组内排序/全局隐藏），只读消费 lib-menu-permissions/lib-menu-overrides。
+- `ServerStatusPage`（`/admin/server-status`，2026-10-14-admin-server-status；2026-10-15-server-logs-panel 改造）：服务器信息页——性能卡（antd Progress 阈值着色）+依赖与版本卡+`ServerLogPanel` 日志卡（满宽置底，卡内独立 5s 轮询）；页面级 5s 轮询 system-status+health，失败 Alert 降级不清数据；2026-10-15 业务统计卡（StatCell 四格）已删（D-007@v1 用户亲选）。
 
 ## 关键逻辑
 ```

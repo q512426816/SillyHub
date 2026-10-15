@@ -1,0 +1,2 @@
+# app-workspace-pages 变更索引
+- change 2026-10-15-platform-knowledge-search | ①KnowledgePage 左栏知识搜索：搜索框（antd Input，debounce 300ms）→ 结果列表替换文件树（kind 中文徽章/标题/spec_path/片段 `<mark>` 高亮/匹配度），点击 knowledge 类结果经 URL 深链 `?file=&anchor=`（router.push；URL 等值直调 selectEntry——同 key 重选边界），docs 类结果跳 scan-docs `?path=`；model_ready=false 降级提示条；失败错误态 + 重试。②ScanDocsPage `?path=` 深链：useSearchParams 读参 → 列表就绪后 stripPathPrefix 归一匹配 → 既有 requestDoc 链路选中；命中前每次列表刷新重试匹配、命中/手动点选后置位消费标记（防抢跳）；查无静默。测试：knowledge-page +7 例（35 绿）、scan-docs-page +4 例（11 绿）；tsc/lint 0 错。

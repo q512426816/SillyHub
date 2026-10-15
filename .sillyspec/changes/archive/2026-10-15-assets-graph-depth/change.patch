@@ -1,0 +1,178 @@
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+index 98a24b20e..9e617b65c 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+@@ -101,7 +101,7 @@ describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () =>
+     expect(mocks.getKnowledgeGraphQuery).toHaveBeenCalledWith(
+       "ws-1",
+       "neighbors",
+-      { anchor: ANCHOR },
++      { anchor: ANCHOR, depth: 1 },
+     );
+     // 画布 stub 收到三节点切片（testid = canvas-node-<完整节点 id>）
+     expect(
+@@ -170,4 +170,67 @@ describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () =>
+     expect(screen.getByTestId("change-assets-graph-loading")).toBeInTheDocument();
+     expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
+   });
++
++  // ── 层级选择器（2026-10-15-assets-graph-depth / FR-01~02）──────────────────
++
++  it("层级选择器：默认 1 跳激活，点击 2跳/3跳 按所选深度重新发起 neighbors 查询（depth 进 query key）", async () => {
++    mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope());
++    renderCard();
++
++    await screen.findByTestId("change-assets-graph");
++    // 默认激活 1 跳（aria-pressed），且首查 depth=1
++    expect(screen.getByTestId("assets-graph-depth-1")).toHaveAttribute(
++      "aria-pressed",
++      "true",
++    );
++    expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
++      "aria-pressed",
++      "false",
++    );
++    // 切 2跳 → 以 depth=2 重新发起并激活；再切 3跳 同理
++    fireEvent.click(screen.getByTestId("assets-graph-depth-2"));
++    await waitFor(() =>
++      expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
++        "ws-1",
++        "neighbors",
++        { anchor: ANCHOR, depth: 2 },
++      ),
++    );
++    await waitFor(() =>
++      expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
++        "aria-pressed",
++        "true",
++      ),
++    );
++    fireEvent.click(screen.getByTestId("assets-graph-depth-3"));
++    await waitFor(() =>
++      expect(mocks.getKnowledgeGraphQuery).toHaveBeenLastCalledWith(
++        "ws-1",
++        "neighbors",
++        { anchor: ANCHOR, depth: 3 },
++      ),
++    );
++  });
++
++  it("层级切换不闪空：新深度查询在途时分区保持渲染上一份切片（keepPreviousData，无 loading 整区替换）", async () => {
++    // 首查立即返回；第二查（depth=2）挂起不返回——切档后分区应仍渲染旧数据
++    mocks.getKnowledgeGraphQuery.mockResolvedValueOnce(makeEnvelope());
++    mocks.getKnowledgeGraphQuery.mockReturnValue(new Promise(() => {}));
++    renderCard();
++
++    await screen.findByTestId("change-assets-graph");
++    fireEvent.click(screen.getByTestId("assets-graph-depth-2"));
++    // 查询在途：分区主体保持（上一份切片渲染），loading 占位不出现
++    await waitFor(() =>
++      expect(screen.getByTestId("assets-graph-depth-2")).toHaveAttribute(
++        "aria-pressed",
++        "true",
++      ),
++    );
++    expect(screen.getByTestId("change-assets-graph")).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("change-assets-graph-loading"),
++    ).not.toBeInTheDocument();
++    expect(screen.getByText("演示变更")).toBeInTheDocument();
++  });
+ });
+diff --git a/frontend/src/components/changes/detail/change-assets-graph.tsx b/frontend/src/components/changes/detail/change-assets-graph.tsx
+index fb4ee7b4d..9b05e6122 100644
+--- a/frontend/src/components/changes/detail/change-assets-graph.tsx
++++ b/frontend/src/components/changes/detail/change-assets-graph.tsx
+@@ -4,22 +4,26 @@
+  * ChangeAssetsGraph —— 沉淀资产卡内嵌知识图谱分区
+  * （2026-10-15-change-assets-graph / FR-01，用户需求：图谱+右侧描述放进沉淀资产卡）。
+  *
+- * 本变更一跳邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
+- * { anchor: changeKey })（与图谱页 neighbors 切片同端点，data 联合经
++ * 本变更邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
++ * { anchor: changeKey, depth })（与图谱页 neighbors 切片同端点，data 联合经
+  * isGraphNeighborsData 守卫分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
+  * （图谱页 detail tab 的紧凑直译：类型中文标签 + 色点 + ID + 按边型分组的
+  * 出入邻居行，行点击跳选）。
+  *
++ * 层级 1-3 可切（2026-10-15-assets-graph-depth / FR-01~02，卡头 chips 默认 1 跳）：
++ * depth 进 query key 缓存按深度隔离（回切零延迟）；placeholderData: keepPrevious
++ * Data 切换保持上一份渲染不闪空；新深度选中节点不在切片时既有兜底链自然回退锚点。
++ *
+  * fail-open（与资产卡逐组「有数据才渲染」同口径）：信封 available=false /
+  * 请求失败（retry:false 不轰炸）/ 节点集为空 / 非 neighbors 分型（node_not_found
+  * 降级等）→ 整区静默隐藏，不显示错误卡，不影响资产卡其余分组。
+  *
+  * 选中态：初始由锚点节点兜底（selectedId ?? data.anchor）——用户点击画布节点
+- * 或邻居行后切换；点画布空白回退锚点（受控面板恒有内容，不设计空态）。
++ * 或邻居行后切换；点画布空白保持当前选中（受控面板恒有内容，不设计空态）。
+  */
+ 
+ import { useMemo, useState } from "react";
+-import { useQuery } from "@tanstack/react-query";
++import { keepPreviousData, useQuery } from "@tanstack/react-query";
+ 
+ import {
+   GraphCanvas,
+@@ -46,11 +50,18 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
+   const palette = useMemo(() => nodePalette(theme), [theme]);
+   /** 用户显式选中（null = 未操作，详情栏回退锚点节点）。 */
+   const [selectedId, setSelectedId] = useState<string | null>(null);
++  /** 邻域遍历深度（2026-10-15-assets-graph-depth / FR-01：卡头 1-3 跳可切，默认 1）。 */
++  const [depth, setDepth] = useState<1 | 2 | 3>(1);
+ 
+   const q = useQuery({
+-    queryKey: ["changeAssetsGraph", workspaceId, changeKey],
++    // depth 进 key：缓存按深度隔离（回切已看过的深度零延迟），乱序响应按 key
++    // 匹配互不覆盖。
++    queryKey: ["changeAssetsGraph", workspaceId, changeKey, depth],
+     queryFn: () =>
+-      getKnowledgeGraphQuery(workspaceId, "neighbors", { anchor: changeKey }),
++      getKnowledgeGraphQuery(workspaceId, "neighbors", { anchor: changeKey, depth }),
++    // 切深度保持上一份切片渲染不闪空（changes 列表页同款先例）；新深度失败/
++    // 空结果仍走下方 fail-open 隐藏。
++    placeholderData: keepPreviousData,
+     retry: false,
+     refetchOnWindowFocus: false,
+   });
+@@ -109,12 +120,36 @@ export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphP
+       data-testid="change-assets-graph"
+       className="overflow-hidden rounded border border-border/60"
+     >
+-      <div className="flex items-center justify-between gap-2 border-b border-dashed px-2 py-1.5">
++      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-dashed px-2 py-1.5">
+         <span className="text-[11px] font-medium text-muted-foreground">
+-          🕸 知识图谱（本变更一跳邻域）
++          🕸 知识图谱（本变更邻域）
+         </span>
+-        <span className="shrink-0 text-[10px] text-muted-foreground/70">
+-          {nodes.length} 节点 · {edges.length} 边 · 点击节点看详情
++        <span className="flex shrink-0 items-center gap-2">
++          {/* 层级 1-3 可切（2026-10-15-assets-graph-depth / FR-01）：chip 范式同
++              图例胶囊；q.isFetching 时点其它档照常切换（key 隔离 + keepPrevious
++              保证不闪），无需禁用。 */}
++          <span className="flex items-center gap-1" role="group" aria-label="邻域层级">
++            <span className="text-[10px] text-muted-foreground/70">层级</span>
++            {([1, 2, 3] as const).map((d) => (
++              <button
++                key={d}
++                type="button"
++                data-testid={`assets-graph-depth-${d}`}
++                aria-pressed={depth === d}
++                onClick={() => setDepth(d)}
++                className={
++                  depth === d
++                    ? "rounded-full border border-brand-400 bg-brand-50 px-2 py-px text-[10px] font-semibold text-brand-700"
++                    : "rounded-full border border-border px-2 py-px text-[10px] text-muted-foreground transition-colors hover:border-brand-300 hover:text-brand-700"
++                }
++              >
++                {d}跳
++              </button>
++            ))}
++          </span>
++          <span className="text-[10px] text-muted-foreground/70">
++            {nodes.length} 节点 · {edges.length} 边 · 点击节点看详情
++          </span>
+         </span>
+       </div>
+       <div className="flex flex-col gap-2 p-2 md:flex-row">

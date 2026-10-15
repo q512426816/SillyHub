@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-assets-graph-depth",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-assets-graph-depth:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「层级选择器：默认 1 跳，点击 2跳/3跳 按所选深度重新发起 neighbors 查询」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-assets-graph-depth"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-assets-graph-depth:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「层级切换不闪空：keepPreviousData 保持上一份渲染」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-assets-graph-depth"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-assets-graph-depth:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-assets-graph-depth"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-assets-graph-depth:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-assets-graph-depth"
+    }
+  ]
+}

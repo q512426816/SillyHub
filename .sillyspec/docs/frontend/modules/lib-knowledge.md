@@ -18,8 +18,9 @@ created_at: 2026-08-18 01:45:00
 | `getKnowledge(workspaceId, filename)` | 单个知识文档正文 | GET `/api/workspaces/{ws}/knowledge/{filename}` |
 | `listQuicklog(workspaceId)` | QUICKLOG 文档摘要列表 | GET `/api/workspaces/{ws}/quicklog` |
 | `getQuicklog(workspaceId, filename)` | 单条 QUICKLOG 正文 | GET `/api/workspaces/{ws}/quicklog/{filename}` |
+| `searchKnowledge(workspaceId, {query, limit?})` | 平台知识搜索（knowledge/+docs/ 语料，词面+向量融合；docs 结果按权限过滤） | POST `/api/workspaces/{ws}/knowledge/search`（timeoutMs 120s） |
 
-类型再导出（生成版）：`KnowledgeEntry` / `KnowledgeList` / `QuicklogEntry` / `QuicklogList`。
+类型再导出（生成版）：`KnowledgeEntry` / `KnowledgeList` / `QuicklogEntry` / `QuicklogList` / `KnowledgeSearchIn` / `KnowledgeSearchResultItem` / `KnowledgeSearchOut`（2026-10-15-platform-knowledge-search）。
 
 ## 关键逻辑
 ```

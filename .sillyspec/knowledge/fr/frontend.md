@@ -6579,3 +6579,79 @@ superseded_by：FR-styles-011
 摘要：交付面审查
 全文：.sillyspec/changes/archive/2026-10-14-ci-flaky-render-anchor-sweep/requirements.md#FR-03
 最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
+
+## FR-frontend-001 图谱分区卡头新增层级选择器（1跳/2跳/3跳 三档 chips），默认 1 跳；点击切换按所选深度重新发起 neighbors 查询（depth 参数进 query key，getKnowledgeGraphQuery 既有 depth 参数直通，零后端改动）；
+变更：2026-10-15-assets-graph-depth
+状态：active
+摘要：切换深度重查询
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-depth/requirements.md#FR-01
+最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-depth:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「层级选择器：默认 1 跳，点击 2跳/3跳 按所选深度重新发起 neighbors 查询」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-depth
+  status: active
+
+## FR-frontend-002 切换层级时用 keepPreviousData 保持上一份图渲染不闪空（仓内 changes 列表页先例）；深度切换后选中态回退锚点节点（原选中节点不在新切片时自然兜底，无悬空引用）；
+变更：2026-10-15-assets-graph-depth
+状态：active
+摘要：切换不闪空
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-depth/requirements.md#FR-02
+最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-depth:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「层级切换不闪空：keepPreviousData 保持上一份渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-depth
+  status: active
+
+## FR-frontend-003 fail-open 语义随深度保持：新深度查询失败/空结果 → 整区隐藏（与既有口径一致）；
+变更：2026-10-15-assets-graph-depth
+状态：active
+摘要：新深度失败隐藏
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-depth/requirements.md#FR-03
+最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-depth:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-depth
+  status: active
+
+## FR-frontend-004 仅跑本改动相关测试（change-assets-graph + change-assets-card），全量留给 CI。
+变更：2026-10-15-assets-graph-depth
+状态：active
+摘要：相关面全绿
+全文：.sillyspec/changes/archive/2026-10-15-assets-graph-depth/requirements.md#FR-04
+最近确认：2d3c285319fdf676ddfe02309fe7b19e69e1e48b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-assets-graph-depth:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx | frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-assets-graph-depth
+  status: active
