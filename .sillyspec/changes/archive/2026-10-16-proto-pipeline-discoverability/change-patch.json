@@ -1,0 +1,51 @@
+{
+  "change": "2026-10-16-proto-pipeline-discoverability",
+  "baseline": "fde592951c1bdcb8b49e1b2dfd6c7765fc361051",
+  "head": "0e5d3f3b0b49be367746945232dc5ac7a0cb70c3",
+  "files": [
+    ".sillyspec/docs/multi-agent-platform/scan/CONVENTIONS.md"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 19,
+    "deletions": 0
+  },
+  "savedAt": "2026-10-15T16:11:55.827Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 9,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "fde592951c1bdcb8b49e1b2dfd6c7765fc361051",
+    "totals": {
+      "files": 1,
+      "additions": 19,
+      "deletions": 0
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/scan/CONVENTIONS.md",
+        "additions": 19,
+        "deletions": 0,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "a1e2fab63eb34d1ec7747e9a9e33548f57ed5d3c2a489edaf04407b322b3b15e",
+  "patchStatus": "ok"
+}

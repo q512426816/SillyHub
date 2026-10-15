@@ -1,0 +1,44 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  可发现性缺口：PROTOTYPE.md 与 FRONTEND_PAGE_STYLE.md 只在 SillyHub 项目图 scan 面，multi-agent-platform 图 scan
+  面无原型管线指向，knowledge-search/server-logs 两会话据此误判项目无管线产手绘稿（用户裁决的两点堵法）。
+
+
+  成功标准：
+
+  - CONVENTIONS.md 新增「前端原型管线」节：pnpm prototype:build 入口、frontend/src/components/prototype/ 源目录、frontend/prototype-dist/
+  产物目录、SillyHub 图 PROTOTYPE.md/FRONTEND_PAGE_STYLE.md 相对路径指引、frontend 触达的 UI 变更定稿原型必须走此管线（历史手绘原型是管线收编前旧物不构成惯例）
+
+  - local.yaml 顶层新增 ui_prototype: { form: real-code } 含管线位置注释
+
+  - sillyspec readUiPrototypeForm 实测解析该登记为 registered real-code
+
+  - 纯文档+配置零代码面
+autopilot: false
+prestage_ack: true
+baseline_commit: fde592951c1bdcb8b49e1b2dfd6c7765fc361051
+updatedAt: '2026-10-15T16:16:16.399Z'
+cross_baselines:
+  sillyspec: 6b4708ab37a8d4de6e1520624baf8ac618f223cd
+baseline_sha256: 3a8bc10431d92f3e86bfa7f8802984c34d009cc67adfd31201794bfa0c3f06c9
+spec_approved: true
+spec_approved_at: '2026-10-15T16:09:17.684Z'
+spec_approved_by: zcode-proto-discover
+spec_approved_channel: user-confirmed
+spec_attested_by: zcode-proto-discover
+batch_ticked: true
+gate_summary: 'test: —｜lint: —｜门文件 9 个'
+

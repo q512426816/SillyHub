@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-proto-pipeline-discoverability",
+  "reviewer": "general-purpose 子代理（harness Agent 派发，独立于主会话）",
+  "verdict": "PASS",
+  "reviewedAgainst": "0e5d3f3b0b49be367746945232dc5ac7a0cb70c3",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-15T16:15:02.395Z",
+  "checklistEvidence": {
+    "检查单1_FR三方一致": {
+      "FR-01五要素": "全在场（CONVENTIONS.md 114-131 行新节）：①入口 cd frontend && pnpm prototype:build（frontend/scripts/prototype-build.mjs）121 行；②源目录 frontend/src/components/prototype/<名>-view.tsx import 生产 primer 组件 124-125 行；③产物目录 frontend/prototype-dist/<名>.html 自包含离线禁手改 121-123 行；④两份规约相对路径 .sillyspec/docs/SillyHub/scan/PROTOTYPE.md + FRONTEND_PAGE_STYLE.md 126-128 行；⑤「本图 UI 变更的定稿原型必须走本节管线」+ 历史手绘为 2026-09-27 收编前旧物不构成惯例依据 116-119 行",
+      "FR-02": "本机 .sillyspec/local.yaml 尾部实测在场：ui_prototype: form: real-code + 管线位置注释（入口 pnpm prototype:build / 源 frontend/src/components/prototype/ / 规约 SillyHub 图 PROTOTYPE.md，FR-02 要求的三项全在）",
+      "FR-03实测": "node file:// import C:/Users/qinyi/IdeaProjects/sillyspec/src/ui-visual.js 后：readUiPrototypeForm('C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec') = {registered:true, form:'real-code'}；buildUiGuidanceLines(同 specBase) 14 行含「🔒 真码契约（real-code）：定稿原型必须与实现同方言真码…」行；git show 0e5d3f3b0 --stat 实测 1 文件纯 docs 零代码面"
+    },
+    "检查单2_盲维四问真实性": {
+      "乱序": "成立——两文件独立落盘，readUiPrototypeForm 每调用即时读 local.yaml 无缓存假设，实测注册态直读生效",
+      "并发": "成立——交付提交实测仅含本变更 1 文件（local.yaml gitignored 不入库），显式 pathspec 未夹带并行会话 2026-10-15-change-detail-redesign 的暂存/脏面（其 frontend/prototype-dist/* 等非交付面未进提交）",
+      "切换": "成立——local.yaml 为机器本地位不在 scan 写入面（scan 只写 docs/<proj>/scan/）持久不丢；CONVENTIONS.md 重扫丢失风险在 design 风险1 显式声明且降级通道（frontend 惯例位 + knowledge 检索 + 未登记强提醒）在场",
+      "作用域": "成立——指针全用仓内相对路径；readUiPrototypeForm 接受 C:/ 正斜杠形态实测通过，跨平台路径形态无关"
+    },
+    "检查单3_披露边界裁决": {
+      "①重扫丢失风险接受": "可接受——design.md 风险1 显式声明（重扫人触发低频、local.yaml 是持久底座）；实测 local.yaml 不在 scan 输出面，机器本地登记永不丢失；降级三层兜底在场",
+      "②指针不选副本": "可接受——design.md 死路段显式声明（PROTOTYPE.md 是活文档，副本双源必漂移）；两份规约 existsSync 实测在场，指针可直达",
+      "③local.yaml机器本地": "可接受——提交消息显式标注「gitignore 机器本地配置」；共享通道 CONVENTIONS.md 指针节（入库跨机可见）自带「本仓登记：local.yaml 顶层 ui_prototype」指令行，他机 agent 照此补登记；缺席态实测降级为「⚠️ 未登记原型形态…强提醒不阻断」，无错误行为"
+    },
+    "检查单4_防护声明核实": {
+      "existsSync五路径": "全 true：frontend/scripts/prototype-build.mjs、frontend/src/components/prototype/、frontend/prototype-dist/、.sillyspec/docs/SillyHub/scan/PROTOTYPE.md、.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md",
+      "pnpm命令真实": "frontend/package.json scripts['prototype:build'] = 'node scripts/prototype-build.mjs' 实测在场",
+      "文案自洽": "「自包含离线」与 build 脚本「单文件 HTML（CSS 内联 + vanilla JS）」、「三主题可切」与 data-theme-btn 切换及产物页脚「各页内可切三主题」逐项一致"
+    },
+    "检查单5_生成物同步": "无派生文档面（提交仅 1 文件纯 scan 手写节 + 本机 local.yaml 配置）；CONVENTIONS.md frontmatter（source_commit: ba87eec 等）未动，diff 单 hunk 位于 111 行后",
+    "探针_cli-copy-selfsufficient": "ok——指针节命令/路径/主题/自包含声明与实际管线实况逐项一致",
+    "探针_config-absent-zero-regression": "ok——ui_prototype 段缺席与 local.yaml 整缺两态 readUiPrototypeForm 均 registered=false 无异常、buildUiGuidanceLines 降级为未登记强提醒无异常（他仓不受影响）；js-yaml 整体 load 本仓 local.yaml 15 个顶层键全部解析完好，追加位在 platform: 段后顶层零缩进不破坏既有段",
+    "探针_crossrepo-path-compat": "ok——指针全用仓内相对路径（.sillyspec/docs/SillyHub/scan/...）；local.yaml 追加在文件尾顶层键，缩进完好（js-yaml load 实证）"
+  }
+}

@@ -44,3 +44,6 @@ SQLAlchemy async（expire_on_commit 语义）下，`await session.rollback()` �
 
 ## monkeypatch has_permission 必须双 patch（auth_deps 导入时绑定 + rbac 模块属性）
 `backend/app/core/auth_deps.py:40` 是 `from app.modules.auth.rbac import has_permission`（导入时绑定）——只 patch `app.modules.auth.rbac.has_permission` 不会影响 `require_permission` 门控依赖（改的是 rbac 模块属性，auth_deps 里的名字仍指向原函数，403 用例会被放行成 200）；只 patch `auth_deps.has_permission` 又管不到端点函数内联 `from app.modules.auth.rbac import has_permission` 的取值源。写权限相关端点测试（mock 放行/拒绝）时两处都要 patch（来源 task-02，2026-10-15-platform-knowledge-search；实证：test_knowledge_search_requires_knowledge_read 首轮 200 未 403）。
+
+## 并行会话删主仓 frontend/node_modules 顶层链接——worktree 与主仓前端全瘫（vitest not found）
+现场：worktree frontend 的 node_modules 是指向主仓的 junction；主仓 node_modules 顶层目录从数百个被删到 26 个（.bin 消失、顶层包链接消失，仅 .pnpm store 完好）。症状链：worktree `pnpm exec vitest` 报 vitest not found；绕 .pnpm 直连 `node vitest.mjs` 报 Cannot find module 'vitest/config'（模块解析链断，绕不过）。修复：worktree frontend 内 `pnpm install --force`（经 junction 重建主仓顶层链接；普通 install 可能命中缓存不修——规则 21 既有口径）后再 `pnpm install` 补全；修完主仓与 worktree 均恢复。判断根因是并行会话的 install/清理动作打到共享 node_modules——多会话共用主仓 node_modules 时这是结构性竞态，建议会话内避免任何 node_modules 级清理（来源 task-05，2026-10-15-knowledge-search-pgvector 实证）。
