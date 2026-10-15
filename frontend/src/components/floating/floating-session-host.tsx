@@ -40,7 +40,12 @@ import {
 import { SessionPanel } from "@/components/daemon/session-panel";
 import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
 import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
+import {
+  PreSessionPicker,
+  boundMachineIdFor,
+  pickDefaultRuntimeOnMachine,
+  pickRuntimeByProvider,
+} from "@/components/sessions/pre-session-picker";
 // FR-02/FR-03：抽屉左栏由紧凑列表换成 /sessions 同款工作区树。
 import { SessionListPanel } from "@/components/sessions/session-list-panel";
 import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
@@ -55,6 +60,10 @@ import { useDaemonMachines } from "@/lib/use-daemon-machines";
 // task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
 // 入口的工作区解析（listProjectWorkspaces，按 workspace_id 升序取第一个）。
 import { listProjectWorkspaces } from "@/lib/workspace";
+// 2026-10-15-workspace-session-agent-only：工作区绑定机器解析数据源
+//（["workspace-switcher-list"] 共享查询，与顶栏 switcher/门户同 key）。
+import { listWorkspaces } from "@/lib/workspaces";
+import { fetchMyBindings } from "@/lib/workspace-binding";
 import { usePageSessionContext } from "@/hooks/use-page-session-context";
 import {
   FloatingMascot,
@@ -113,6 +122,25 @@ function FloatingDrawerBody({
   // 解析（handleNewSession）仍用自有 machines——D-004@v2 用户显式选择，共享
   // 机器不做任何自动回退/默认选中。
   const machineOptions = machineCandidates ?? machines;
+  // 2026-10-15-workspace-session-agent-only：当前用户在各工作区的绑定
+  //（binding.daemon_id = 工作区绑定机器）。同 key 同 queryFn 与顶栏
+  // WorkspaceSwitcher / 会话门户共享缓存（staleTime 60s）——通常零新增请求；
+  // 失败/缺数据降级空集（回退原链路，不阻塞新建）。
+  const bindingsQ = useQuery({
+    queryKey: ["workspace-switcher-list"] as const,
+    queryFn: async () => {
+      const [{ items }, bindings] = await Promise.all([
+        listWorkspaces({ limit: 100 }),
+        fetchMyBindings(),
+      ]);
+      return { items, bindings };
+    },
+    staleTime: 60_000,
+  });
+  const myBindings = useMemo(
+    () => bindingsQ.data?.bindings ?? [],
+    [bindingsQ.data],
+  );
   const providersQ = useQuery({
     queryKey: ["llmProviders", "floating-session"],
     queryFn: listProviders,
@@ -207,15 +235,39 @@ function FloatingDrawerBody({
       openPreSession(lockedRuntime.id, ppm);
       return;
     }
+    // 2026-10-15-workspace-session-agent-only：工作区页上下文（page_key=
+    // workspace）机器=该工作区绑定机器——工作区已绑定过不再走 D-005 任选；
+    // 绑定机器离线/无可用引擎 → 绑定模式浮层兜底（直接智能体步/空态）。
+    // PPM 绑定意图存在时不改解析（工作区由项目推导，绑定机器语义不适用，
+    // 见 design 边界：PPM 入口不在本次范围，零回归）。
+    const pageWsId =
+      effectivePageCtx?.page_key === "workspace"
+        ? effectivePageCtx.workspace_id
+        : null;
+    const boundMachineId = ppm ? null : boundMachineIdFor(myBindings, pageWsId);
+    if (boundMachineId) {
+      const boundRuntime = pickDefaultRuntimeOnMachine(
+        machineOptions.find((m) => m.id === boundMachineId),
+      );
+      if (boundRuntime) {
+        openPreSession(boundRuntime.id, ppm);
+        return;
+      }
+      setPickerWorkspaceId(pageWsId);
+      setPickerOpen(true);
+      return;
+    }
+    // 工作区页且绑定数据仍在途：不落 D-005（可能选到非绑定机器）→ 浮层兜底
+    //（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
+    if (pageWsId && bindingsQ.isLoading) {
+      setPickerWorkspaceId(pageWsId);
+      setPickerOpen(true);
+      return;
+    }
     const machineId = resolveDefaultMachineId(machines, sessions);
-    const runtimes = (
-      machines.find((m) => m.id === machineId)?.runtimes ?? []
-    ).filter(
-      (r) =>
-        r.status === "online" &&
-        (r.provider === "claude" || r.provider === "codex"),
+    const runtime = pickDefaultRuntimeOnMachine(
+      machines.find((m) => m.id === machineId),
     );
-    const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
     if (runtime) {
       openPreSession(runtime.id, ppm);
     } else {
@@ -223,7 +275,16 @@ function FloatingDrawerBody({
       // onCancel 取消清（浮层全屏遮罩期间其它新建入口不可达）。
       setPickerOpen(true);
     }
-  }, [lockedRuntime, machines, sessions, openPreSession]);
+  }, [
+    lockedRuntime,
+    machines,
+    sessions,
+    openPreSession,
+    myBindings,
+    machineOptions,
+    effectivePageCtx,
+    bindingsQ.isLoading,
+  ]);
 
   const handlePreSessionCreated = useCallback(
     (resp: SessionCreateResponse) => {
@@ -246,6 +307,30 @@ function FloatingDrawerBody({
       // 清 store+ref，防历史挂起意图经本入口（直连或兜底浮层）泄漏。
       clearPendingPpmItem();
       ppmPendingRef.current = null;
+      // 2026-10-15-workspace-session-agent-only：工作区组机器=该工作区绑定机器
+      //（同门户；含共享候选查找）；筛选直带要求「智能体层已选 + 绑定机器该
+      // 引擎在线」，筛选机器不参与。无绑定/非工作区保持原链路（零回归）。
+      const boundMachineId = boundMachineIdFor(myBindings, workspaceId);
+      if (boundMachineId) {
+        const boundMachine = machineOptions.find((m) => m.id === boundMachineId);
+        if (filter?.agent) {
+          const runtime = pickRuntimeByProvider(boundMachine, filter.agent);
+          if (runtime) {
+            startPreSession({ workspaceId, runtimeId: runtime.id }, effectivePageCtx);
+            return;
+          }
+        }
+        setPickerWorkspaceId(workspaceId);
+        setPickerOpen(true);
+        return;
+      }
+      // 工作区组且绑定数据仍在途：不落旧筛选直带（筛选机器可能非绑定机器）→
+      // 浮层兜底（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
+      if (workspaceId && bindingsQ.isLoading) {
+        setPickerWorkspaceId(workspaceId);
+        setPickerOpen(true);
+        return;
+      }
       if (filter?.machineId && filter.agent) {
         const machine = machines.find((m) => m.id === filter.machineId);
         const runtime = machine?.runtimes?.find(
@@ -259,7 +344,16 @@ function FloatingDrawerBody({
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [lockedRuntime, machines, startPreSession, effectivePageCtx, clearPendingPpmItem],
+    [
+      lockedRuntime,
+      machines,
+      myBindings,
+      machineOptions,
+      startPreSession,
+      effectivePageCtx,
+      clearPendingPpmItem,
+      bindingsQ.isLoading,
+    ],
   );
 
   /** 批量删除/归档/取消归档（门户同款：逐条调用 + invalidate + 选中被删则清）。 */
@@ -567,10 +661,13 @@ function FloatingDrawerBody({
 
       {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受）。
           task-10：候选含共享机器（共享条目显示名带「共享 + 共享人」标注，
-          PreSessionPicker 复用组件不改其渲染；在线过滤沿用其自身白名单）。 */}
+          PreSessionPicker 复用组件不改其渲染；在线过滤沿用其自身白名单）。
+          2026-10-15-workspace-session-agent-only：发起组属工作区且当前用户有
+          绑定机器时，浮层转「绑定模式」（跳过机器步，直接智能体步）。 */}
       <PreSessionPicker
         open={pickerOpen}
         machines={machineOptions}
+        boundMachineId={boundMachineIdFor(myBindings, pickerWorkspaceId)}
         onCancel={() => {
           // P2-3：取消兜底清——保活的 PPM 绑定意图（store+ref）不得残留到
           // 后续手动新建（✕ 与遮罩点击均走此处，取消契约单一）。

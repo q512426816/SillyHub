@@ -652,6 +652,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         setPickerOpen(true);
         return;
       }
+      // 工作区组且绑定数据仍在途：不落旧筛选直带（筛选机器可能非绑定机器）→
+      // 浮层兜底（bindings 到达后自动切绑定模式；确无绑定则回落两步，自愈）。
+      if (workspaceId && wsNameQuery.isLoading) {
+        setPickerWorkspaceId(workspaceId);
+        setPickerOpen(true);
+        return;
+      }
       if (filter?.machineId && filter.agent) {
         const machine = machines.find((m) => m.id === filter.machineId);
         const runtime = machine?.runtimes?.find(
@@ -680,7 +687,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession],
+    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession, wsNameQuery.isLoading],
   );
 
   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传

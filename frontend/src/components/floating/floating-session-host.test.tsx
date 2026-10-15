@@ -68,41 +68,53 @@ vi.mock("@/components/daemon/session-panel", async () => {
 // 断言锚点（本文件不测 picker 内部渲染，那是 pre-session-picker 自身职责）。
 // P2-3（QA 边界修复）：透出 onPick/onCancel 触发器——两步浮层兜底分支的
 // PPM 绑定意图消费/取消路径需从测试侧驱动。
-vi.mock("@/components/sessions/pre-session-picker", () => ({
-  PreSessionPicker: ({
-    open,
-    machines,
-    onPick,
-    onCancel,
-  }: {
-    open: boolean;
-    machines?: { id: string }[];
-    onPick?: (_runtimeId: string) => void;
-    onCancel?: () => void;
-  }) =>
-    open ? (
-      <div
-        data-testid="mock-picker"
-        data-machines={JSON.stringify((machines ?? []).map((m) => m.id))}
-      >
-        picker
-        <button
-          type="button"
-          data-testid="mock-picker-pick"
-          onClick={() => onPick?.("rt-pick")}
+// 2026-10-15-workspace-session-agent-only：宿主还从本模块 import 三个解析纯函数
+//（boundMachineIdFor 等）——mock 工厂经 importActual 展开保真，仅桩掉组件本体；
+// 追加透出 boundMachineId（绑定模式断言锚）。
+vi.mock("@/components/sessions/pre-session-picker", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/sessions/pre-session-picker")
+  >("@/components/sessions/pre-session-picker");
+  return {
+    ...actual,
+    PreSessionPicker: ({
+      open,
+      machines,
+      boundMachineId,
+      onPick,
+      onCancel,
+    }: {
+      open: boolean;
+      machines?: { id: string }[];
+      boundMachineId?: string | null;
+      onPick?: (_runtimeId: string) => void;
+      onCancel?: () => void;
+    }) =>
+      open ? (
+        <div
+          data-testid="mock-picker"
+          data-machines={JSON.stringify((machines ?? []).map((m) => m.id))}
+          data-bound={boundMachineId ?? ""}
         >
-          pick
-        </button>
-        <button
-          type="button"
-          data-testid="mock-picker-cancel"
-          onClick={() => onCancel?.()}
-        >
-          cancel
-        </button>
-      </div>
-    ) : null,
-}));
+          picker
+          <button
+            type="button"
+            data-testid="mock-picker-pick"
+            onClick={() => onPick?.("rt-pick")}
+          >
+            pick
+          </button>
+          <button
+            type="button"
+            data-testid="mock-picker-cancel"
+            onClick={() => onCancel?.()}
+          >
+            cancel
+          </button>
+        </div>
+      ) : null,
+  };
+});
 
 // FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
 // 群聊接线（2026-09-02 quick）：透出 selectedGroupId / onSelectGroup /
@@ -113,7 +125,10 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
     onSelect?: (s: { id: string }) => void;
     scope?: { kind: string; runtimeId?: string };
     // 用户反馈⑤回归锚：四个操作回调必须接线（缺任一则抽屉失去新建/删除/归档）。
-    onNewInGroup?: unknown;
+    onNewInGroup?: (
+      _workspaceId: string | null,
+      _filter?: { machineId: string; agent: string },
+    ) => void;
     onDeleteSessions?: unknown;
     onArchiveSessions?: unknown;
     onUnarchiveSessions?: unknown;
@@ -138,6 +153,31 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
       }
     >
       session-list-panel
+      {/* 2026-10-15-workspace-session-agent-only：组头「＋」触发器（真面板
+          WorkspaceGroupNode 经 onNewInGroup 透出 workspaceId+筛选态快照）。 */}
+      <button
+        type="button"
+        data-testid="mock-new-in-group"
+        onClick={() => props.onNewInGroup?.("ws-1", { machineId: "", agent: "" })}
+      >
+        new-in-group
+      </button>
+      <button
+        type="button"
+        data-testid="mock-new-in-group-agent"
+        onClick={() =>
+          props.onNewInGroup?.("ws-1", { machineId: "m-2", agent: "codex" })
+        }
+      >
+        new-in-group-agent
+      </button>
+      <button
+        type="button"
+        data-testid="mock-new-in-group-nows"
+        onClick={() => props.onNewInGroup?.(null, { machineId: "", agent: "" })}
+      >
+        new-in-group-nows
+      </button>
       <button
         type="button"
         data-testid="mock-select-group"
@@ -233,6 +273,35 @@ vi.mock("@/lib/use-daemon-machines", () => ({
 
 vi.mock("@/lib/daemon", () => ({
   listAgentSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  // 2026-10-15-workspace-session-agent-only：pre-session-picker 经 importActual
+  // 展开（宿主从该模块 import 解析纯函数，仅桩组件本体）——模块顶层建
+  // SESSION_SUPPORTED_PROVIDERS 白名单 Set，mock 缺该导出会在导入期抛错；
+  // PROVIDER_META 同补（引擎标签查表，防漏导出）。
+  SESSION_SUPPORTED_PROVIDERS: ["claude", "codex", "pi", "cursor"],
+  PROVIDER_META: {
+    claude: { label: "Claude Code" },
+    codex: { label: "Codex" },
+    pi: { label: "Pi" },
+    cursor: { label: "Cursor" },
+  },
+}));
+
+// 2026-10-15-workspace-session-agent-only：宿主经 ["workspace-switcher-list"]
+// 查询（listWorkspaces + fetchMyBindings）取工作区绑定机器——两数据源 mock，
+// binding 按用例覆写（默认空集=无绑定，走原链路零回归）。
+vi.mock("@/lib/workspaces", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
+    "@/lib/workspaces",
+  );
+  return {
+    ...actual,
+    listWorkspaces: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+  };
+});
+
+const bindingApi = vi.hoisted(() => ({ fetchMyBindings: vi.fn() }));
+vi.mock("@/lib/workspace-binding", () => ({
+  fetchMyBindings: (...args: unknown[]) => bindingApi.fetchMyBindings(...args),
 }));
 
 vi.mock("@/lib/api/llm-providers", () => ({
@@ -303,6 +372,9 @@ describe("FloatingSessionHost", () => {
     window.localStorage.clear();
     workspaceApi.listProjectWorkspaces.mockReset();
     workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+    // 2026-10-15-workspace-session-agent-only：默认无绑定（原链路零回归）。
+    bindingApi.fetchMyBindings.mockReset();
+    bindingApi.fetchMyBindings.mockResolvedValue([]);
   });
 
   it("非门户路由渲染悬浮球；全关无会话时抽屉主体不挂载（门控）", () => {
@@ -948,5 +1020,131 @@ describe("FloatingSessionHost / 群聊接线", () => {
         queryKey: ["groupChats"],
       });
     });
+  });
+});
+
+// ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（跳过机器步） ──
+// 覆盖：工作区组「＋」绑定模式浮层（boundMachineId 透出）/ 筛选 agent 直带取
+// 绑定机器 / 工作区页「＋ 新会话」绑定机器优先于 D-005 / 无绑定零回归。
+describe("FloatingSessionHost / 工作区绑定机器（跳过机器步）", () => {
+  /** 绑定固件（组件仅消费 workspace_id/daemon_id）。 */
+  type BindingFixture = { workspace_id: string; daemon_id: string | null };
+
+  /**
+   * 预置绑定到查询缓存后渲染——模拟真实时序（["workspace-switcher-list"]
+   * 由顶栏 switcher 先加载，宿主命中共享缓存；未预置=数据在途的兜底路径见
+   * 「零回归」用例）。
+   */
+  function renderWithBindings(bindings: BindingFixture[]) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    qc.setQueryData(["workspace-switcher-list"], { items: [], bindings });
+    return render(
+      <QueryClientProvider client={qc}>
+        <FloatingSessionHost />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    resetStore();
+    pathnameRef.current = "/ppm/projects";
+    bindingApi.fetchMyBindings.mockReset();
+    bindingApi.fetchMyBindings.mockResolvedValue([]);
+    machinesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+    ] as never[];
+    machineCandidatesRef.current = null;
+    window.localStorage.clear();
+  });
+
+  it("工作区组「＋」（有绑定 ws-1→m-1）→ 浮层绑定模式（boundMachineId 透出，不弹机器步）", async () => {
+    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-1" }]);
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(await screen.findByTestId("mock-new-in-group"));
+
+    const picker = await screen.findByTestId("mock-picker");
+    expect(picker.dataset.bound).toBe("m-1");
+    expect(useFloatingSessionStore.getState().preContext).toBeNull();
+  });
+
+  it("组「＋」筛选 codex + 绑定机器该引擎在线 → 直带预会话（runtime 取绑定机器，不弹浮层）", async () => {
+    machinesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-cx", status: "online", provider: "codex" }],
+      },
+      {
+        id: "m-2",
+        status: "online",
+        runtimes: [{ id: "rt-2", status: "online", provider: "codex" }],
+      },
+    ] as never[];
+    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-1" }]);
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(await screen.findByTestId("mock-new-in-group-agent"));
+
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe(
+        "rt-cx",
+      ),
+    );
+    expect(screen.queryByTestId("mock-picker")).not.toBeInTheDocument();
+    // 组工作区上下文随直带走（机器维度取绑定机器 m-1，筛选机器 m-2 不参与）。
+    expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe(
+      "ws-1",
+    );
+  });
+
+  it("工作区页「＋ 新会话」+ 绑定命中 → 绑定机器默认 runtime 优先于 D-005（mock 固定 m-1）", async () => {
+    machinesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+      {
+        id: "m-2",
+        status: "online",
+        runtimes: [{ id: "rt-2", status: "online", provider: "claude" }],
+      },
+    ] as never[];
+    renderWithBindings([{ workspace_id: "ws-1", daemon_id: "m-2" }]);
+    act(() => {
+      useFloatingSessionStore.getState().requestNewSession({
+        page_key: "workspace",
+        workspace_id: "ws-1",
+      });
+    });
+
+    // D-005 mock 恒返回 m-1（rt-1）——绑定机器 m-2 必须优先（rt-2）。
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe(
+        "rt-2",
+      ),
+    );
+    expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe(
+      "ws-1",
+    );
+  });
+
+  it("零回归：工作区组「＋」无绑定（bindings 空集）→ 浮层不带 boundMachineId（原两步）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    fireEvent.click(await screen.findByTestId("mock-new-in-group"));
+    const picker = await screen.findByTestId("mock-picker");
+    expect(picker.dataset.bound).toBe("");
   });
 });
