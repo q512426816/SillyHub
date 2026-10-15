@@ -362,6 +362,11 @@ _sync_locks_guard = threading.Lock()  # 双检创建锁的守卫（asyncio.Lock 
 
 _DB_DEGRADED_PREFIX = "knowledge_search_db_degraded: "
 
+#: 单批嵌入条数——2026-10-15 生产部署实证：容器 800MB 内存限额下整批嵌入
+#: （6586 chunks）峰值 689MB+ 被 cgroup OOM kill（服务器总内存 1.6G）；
+#: 分批把峰值压到单批模型输入规模（64 条），批间让出事件循环。
+_EMBED_BATCH = 64
+
 _LEGACY_INDEXES: dict[tuple[str, str], dict] = {}  # 兼容留位（旧内存路径已由 DB 取代）
 
 
@@ -373,6 +378,15 @@ def _get_sync_lock(workspace_key: str) -> asyncio.Lock:
             lock = asyncio.Lock()
             _sync_locks[workspace_key] = lock
         return lock
+
+
+async def _embed_chunks(embedder: object, texts: list[str]) -> list[list[float]]:
+    """分批嵌入（每批 to_thread 卸载；批次规模 _EMBED_BATCH——生产 OOM 实证修复）。"""
+    out: list[list[float]] = []
+    for i in range(0, len(texts), _EMBED_BATCH):
+        batch = await asyncio.to_thread(embedder.embed, texts[i : i + _EMBED_BATCH])
+        out.extend(batch)
+    return out
 
 
 def _content_hash(text: str) -> str:
@@ -492,7 +506,7 @@ async def _sync_full(
         # 词面降级态也要可查：仅存元数据（embedding 置零向量，向量路本就禁用）
         vectors: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in chunks]
     else:
-        vectors = await asyncio.to_thread(embedder.embed, [c.text for c in chunks])
+        vectors = await _embed_chunks(embedder, [c.text for c in chunks])
     session.add_all([_chunk_row(workspace_id, c, vectors[i]) for i, c in enumerate(chunks)])
     await session.commit()
 
@@ -522,7 +536,7 @@ async def _sync_delta(
         if embedder is None:
             vecs: list[list[float]] = [[0.0] * _EMBEDDING_DIM for _ in to_embed]
         else:
-            vecs = await asyncio.to_thread(embedder.embed, [c.text for _, c in to_embed])
+            vecs = await _embed_chunks(embedder, [c.text for _, c in to_embed])
         for (row, c), vec in zip(to_embed, vecs, strict=True):
             if row is None:
                 session.add(_chunk_row(workspace_id, c, vec))
