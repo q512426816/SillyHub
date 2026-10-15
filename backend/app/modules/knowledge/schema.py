@@ -579,3 +579,34 @@ GraphQueryOut = GraphEnvelope[GraphQueryData]
 GraphOverviewOut = GraphEnvelope[GraphOverviewData]
 GraphNodesOut = GraphEnvelope[GraphNodesData]
 GraphDumpOut = GraphEnvelope[GraphDumpData]
+
+
+# ── 向量检索（change 2026-10-15-platform-vector-search）────────────────────────
+# 契约对齐 sillyspec src/knowledge-vector.js（文件头 = 实现规格）：Body {query, limit}、
+# results 条目 {spec_path, anchor, change, score}；model_ready/reason 为附加可观测键
+# （CLI 侧忽略未知键，fail-soft 消费空 results 即降级）。
+
+
+class VectorSearchIn(BaseModel):
+    """检索入参：query 截断 4000 字符（CLI 同款上限）、limit 钳 1-50。"""
+
+    query: str
+    limit: int = 10
+
+
+class VectorSearchResultItem(BaseModel):
+    """单条召回：spec_path 固定 knowledge/decisions/* 前缀（CLI 消费过滤面）。"""
+
+    spec_path: str
+    anchor: str
+    change: str | None = None
+    score: float
+
+
+class VectorSearchOut(BaseModel):
+    """检索出参：model_ready=False 时 results 恒空 + reason 带因（CLI 静默降级本地层）。"""
+
+    ok: bool = True
+    results: list[VectorSearchResultItem]
+    model_ready: bool = True
+    reason: str | None = None

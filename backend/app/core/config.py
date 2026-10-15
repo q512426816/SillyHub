@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     # the backend image; override to a tmp_path in tests.
     daemon_dist_dir: Path = Path("/app/daemon-dist")
 
+    # 2026-10-15-platform-vector-search：向量检索 embedding 模型（fastembed 本地 ONNX，
+    # 零 key 零 API；默认中文小模型 bge-small-zh-v1.5，首次使用自动下载 ~90MB，生产
+    # 可预烤镜像）。fastembed 缺席/初始化失败 → 端点 fail-soft 空结果（CLI 降级本地层）。
+    knowledge_embedding_model: str = Field(
+        "BAAI/bge-small-zh-v1.5",
+        description="fastembed model name for /api/spec/knowledge/vector-search (env KNOWLEDGE_EMBEDDING_MODEL).",
+    )
+
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。
     # 2026-10-08-backend-image-slim-no-claude：历史上不放 /app/.claude/skills/ 是因

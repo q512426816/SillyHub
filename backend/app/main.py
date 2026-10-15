@@ -47,6 +47,10 @@ from app.modules.git_log.router import router as git_log_router
 from app.modules.health import health_router
 from app.modules.incident.router import router as incident_router
 from app.modules.knowledge.router import router as knowledge_router
+
+# 2026-10-15-platform-vector-search：向量检索端点（独立 router——路径 /spec/* 命名空间，
+# 不入 /workspaces/{id}/knowledge/* 族，shpsync token 鉴权单通道）。
+from app.modules.knowledge.vector_router import router as knowledge_vector_router
 from app.modules.llm_provider.router import router as llm_provider_router
 from app.modules.mcp_gateway.router import router as mcp_gateway_router
 
@@ -958,6 +962,7 @@ def create_app() -> FastAPI:
     app.include_router(workflow_router, prefix="/api")
     app.include_router(incident_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
+    app.include_router(knowledge_vector_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
     app.include_router(deploy_records_router, prefix="/api")
     app.include_router(notification_router, prefix="/api")
