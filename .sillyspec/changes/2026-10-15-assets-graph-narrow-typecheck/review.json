@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-assets-graph-narrow-typecheck",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "62305bf90698080245b21f20b39b1c7594e2ee14",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "knowledge.ts 守卫注释错别字：「类型谓词守显式」应为「类型谓词守卫显式」",
+      "evidence": "本次新增的守卫 doc 注释中「守显式」漏字，纯文案瑕疵，不影响语义与编译",
+      "location": "frontend/src/lib/knowledge.ts:436"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-15T05:55:43Z"
+}

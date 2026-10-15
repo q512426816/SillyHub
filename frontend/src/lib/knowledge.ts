@@ -433,7 +433,7 @@ export async function getKnowledgeGraphQuery(
  * 为什么不用调用方裸 `"anchor" in data` 收窄：TS 5.5.4 实证（探针钉死），当 data
  * 的类型经 `env?.available ? env.data ?? null : null` 推断链产生时，`in` 收窄失效
  * ——非 neighbors 成员被保留在真值分支并交叉 `Record<"anchor", unknown>`，后续
- * `.nodes`/`.edges` 访问报 TS2339；类型谓词守显式声明判定结果，不依赖 `in` 语义，
+ * `.nodes`/`.edges` 访问报 TS2339；类型谓词守卫显式声明判定结果，不依赖 `in` 语义，
  * 行为不随编译器收窄策略漂移。判定与图谱页「缺 anchor 字段即非 neighbors 分型」
  * 同口径（node_not_found 等降级形态无 anchor 字段）。
  */
