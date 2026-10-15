@@ -62,3 +62,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-14 | 2026-10-14-session-bottom-switch-remount | 用户实测仍偶发不落底——复现路径为「列表点击切换会话」（SPA 内切换，TurnTimeline 不重挂载）：滚动 re |
 | 2026-10-14 | 2026-10-14-session-bottom-resize-observer | 第四层根因（真浏览器注入复现取证：重申窗过期后向滚动容器注入 2000px 占位 → delta=2000 永久停住，无 |
 | 2026-10-15 | 2026-10-14-session-bottom-no-restore | 第五层根因（滚动写入审计+对照实验锁定）：刷新（reload）时 Chrome 恢复上次滚动位置，恢复晚到（内容装配后） |
+| 2026-10-15 | 2026-10-14-session-bottom-grace-window | 用户实测刷新落位随机（19 轮复现 1 次，复现态特征锁定：scrollTop=602=布局早期瞬态假底、clientH |

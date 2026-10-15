@@ -2960,3 +2960,55 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-14-session-bottom-no-restore/requirements.md#FR-04
 最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c
+
+## FR-auto-frontend-254 RO 钉底条件扩为 isNearBottomRef ||（距最近贴底 <10s 且无用户输入）——加载期 near 被误清后宽限窗内自动钉底
+变更：2026-10-14-session-bottom-grace-window
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-grace-window/requirements.md#FR-01
+最近确认：82b966f8f85f16b2318e56541359a0c067783802
+
+## FR-auto-frontend-255 用户真实滚动（滚轮/触摸/拖动）立即恢复既有让权语义（near=false 后不强拉）
+变更：2026-10-14-session-bottom-grace-window
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-grace-window/requirements.md#FR-02
+最近确认：82b966f8f85f16b2318e56541359a0c067783802
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-grace-window:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx「用户上滚读历史后，流式更新不再强制拉回底部」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-grace-window
+  status: active
+
+## FR-auto-frontend-256 挂载即视为在窗内（初始加载全程受保护），超过 10s 或用户输入后回到既有语义
+变更：2026-10-14-session-bottom-grace-window
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-grace-window/requirements.md#FR-03
+最近确认：82b966f8f85f16b2318e56541359a0c067783802
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-grace-window:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-grace-window
+  status: active
+
+## FR-auto-frontend-257 既有测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-grace-window
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-grace-window/requirements.md#FR-04
+最近确认：82b966f8f85f16b2318e56541359a0c067783802
