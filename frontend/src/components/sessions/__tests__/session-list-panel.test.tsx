@@ -348,7 +348,9 @@ function clearLivenessStorage() {
   for (const key of Object.keys(window.localStorage)) {
     if (
       key.startsWith("sillyhub:liveness-state:") ||
-      key.startsWith("sillyhub:liveness-unread:")
+      key.startsWith("sillyhub:liveness-unread:") ||
+      // 2026-10-15-session-status-dot-semantics：执行完成通知标记同清。
+      key.startsWith("sillyhub:session-completed-unread:")
     ) {
       window.localStorage.removeItem(key);
     }
@@ -624,7 +626,10 @@ describe("SessionListPanel 树条目 chips", () => {
     expect(row.textContent).toContain("Kimi");
     expect(row.textContent).toContain("12 轮");
     expect(row.textContent).toContain("5 分钟前");
-    expect(row.querySelector('[aria-label="状态 active"]')).toBeTruthy();
+    // 2026-10-15-session-status-dot-semantics：active 空闲（无活性数据）→
+    // 行首留白——不再渲染「状态 active」灰点。
+    expect(row.querySelector('[aria-label="异常失败"]')).toBeNull();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
     // 树形态：工作区/机器信息由组头与小节承载，chips 不再重复
     expect(row.textContent).not.toContain("📂");
     expect(row.textContent).not.toContain("🖥");
@@ -3132,233 +3137,161 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
   });
 });
 
-// ── 14. 单聊行置顶/重命名（task-07 / 2026-09-07-session-pin-rename-scheduled-send
-//        / FR-01 FR-02 FR-03 / D-002@v1 分组内置顶语义） ─────────────────────
+// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics） ──
 //
-// 断言口径（constraints）：置顶基于 pinned_at 二态与分组内置顶语义（不做跨分组
-// 全局排序断言——置顶行排分组内最前靠服务端 pinned_at IS NULL 前置键，前端
-// byWs 桶保序不重排）；语义查询（aria-label）锚定，不碰 brand 色值。徽标为
-// 纯图标（无文本），经 title 前缀「已置顶（」锚定（已归档徽标先例同款 title
-// 口径）；置顶/取消置顶是轻量可逆开关，实现直连不弹确认（对照归档 confirm）。
-describe("SessionListPanel 单聊行置顶与重命名（task-07）", () => {
-  /** 一未置顶（s-1/会话A）+ 一已置顶（s-2/会话B，pinned_at 非空）标准固件。 */
-  function pinFixture() {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([
-        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
-        makeSession({
-          id: "s-2",
-          workspace_id: "ws-1",
-          title: "会话B",
-          pinned_at: "2026-09-06T08:00:00Z",
-        }),
-      ]),
-    );
-  }
+// 语义矩阵（用户确认，参考 deepseek-harness StateDot 五态）：failed→红点 /
+// ended→绿点 / 活性 working→动态转圈 / 活性 blocked→琥珀点 / reconnecting→
+// 动态转圈 / 其余（active 空闲/pending/suspended/活性 idle/unknown/无活性）
+// →留白（槽占位零可见标识）；终态权威优先于活性。行尾活性小灯退役：悬停卡/
+// 未读红角标平移至行首槽。执行完成通知：非终态→ended 且当前不在该会话上 →
+// 绿色角标，点击进入（selected 边沿）后消失。
 
-  it("置顶按钮按 pinned_at 二选一：未置顶行「置顶 …」在/「取消置顶 …」缺席；点击 → onPinSessions([id]) 且不触发行选中（stopPropagation）", async () => {
-    pinFixture();
-    const onPinSessions = vi.fn().mockResolvedValue(0);
-    const onUnpinSessions = vi.fn().mockResolvedValue(0);
-    const onSelect = vi.fn();
-    renderPanel(
-      <SessionListPanel
-        onPinSessions={onPinSessions}
-        onUnpinSessions={onUnpinSessions}
-        onSelect={onSelect}
-      />,
-    );
-    await openGroup("SillyHub");
-
-    // 二选一显隐（对齐归档按钮 archived_at 先例）：未置顶行只有「置顶」。
-    expect(
-      screen.getByRole("button", { name: "置顶 会话A" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "取消置顶 会话A" }),
-    ).not.toBeInTheDocument();
-
-    // 点击：回调携带行 id（批量口径单条数组）；stopPropagation 不冒泡行选中。
-    fireEvent.click(screen.getByRole("button", { name: "置顶 会话A" }));
-    await waitFor(() => expect(onPinSessions).toHaveBeenCalledWith(["s-1"]));
-    expect(onPinSessions).toHaveBeenCalledTimes(1);
-    expect(onSelect).not.toHaveBeenCalled();
-  });
-
-  it("已置顶行：「取消置顶 …」在/「置顶 …」缺席；点击 → onUnpinSessions([id])", async () => {
-    pinFixture();
-    const onPinSessions = vi.fn().mockResolvedValue(0);
-    const onUnpinSessions = vi.fn().mockResolvedValue(0);
-    renderPanel(
-      <SessionListPanel
-        onPinSessions={onPinSessions}
-        onUnpinSessions={onUnpinSessions}
-        onSelect={vi.fn()}
-      />,
-    );
-    await openGroup("SillyHub");
-
-    expect(
-      screen.getByRole("button", { name: "取消置顶 会话B" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "置顶 会话B" }),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "取消置顶 会话B" }));
-    await waitFor(() => expect(onUnpinSessions).toHaveBeenCalledWith(["s-2"]));
-    expect(onPinSessions).not.toHaveBeenCalled();
-  });
-
-  it("置顶徽标（FR-03）：pinned_at 非空行标题前渲染（title 含置顶时间）；未置顶行无", async () => {
-    pinFixture();
-    renderPanel(
-      <SessionListPanel
-        onPinSessions={vi.fn().mockResolvedValue(0)}
-        onUnpinSessions={vi.fn().mockResolvedValue(0)}
-      />,
-    );
-    await openGroup("SillyHub");
-
-    const rowA = await screen.findByRole("button", { name: "会话 会话A" });
-    const rowB = screen.getByRole("button", { name: "会话 会话B" });
-    // 已置顶行：徽标在标题前（title 相对时间；纯图标无文本，title 锚定）。
-    const badge = rowB.querySelector('span[title^="已置顶（"]');
-    expect(badge).not.toBeNull();
-    // 徽标在标题文本之前（D-002 分组内置顶标识位——取叶子文本 span 锚定：
-    // 徽标纯图标，其外层容器 textContent 同为「会话B」不算标题位）。
-    const titleSpan = [...rowB.querySelectorAll("span")].find(
-      (el) => el.textContent === "会话B" && el.children.length === 0,
-    );
-    expect(titleSpan).toBeTruthy();
-    expect(badge!.compareDocumentPosition(titleSpan!)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    // 未置顶行：零徽标。
-    expect(rowA.querySelector('span[title^="已置顶（"]')).toBeNull();
-  });
-
-  it("行内重命名（FR-02）：Pencil → 输入框预填当前标题；Enter 提交 onRenameSession(id, strip 后新标题) 且退出编辑态", async () => {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
-    );
-    const onRenameSession = vi.fn().mockResolvedValue(0);
-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
-    await openGroup("SillyHub");
-
-    // 进入编辑态：标题位变输入框，预填当前标题。
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重命名 会话A" }),
-    );
-    const input = screen.getByLabelText("重命名会话 会话A");
-    expect((input as HTMLInputElement).value).toBe("会话A");
-
-    // 带空白输入 → strip 后提交；Enter 收口（卸载不触发二次 blur 提交）。
-    fireEvent.change(input, { target: { value: "  新标题  " } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() =>
-      expect(onRenameSession).toHaveBeenCalledWith("s-1", "新标题"),
-    );
-    expect(onRenameSession).toHaveBeenCalledTimes(1);
-    // 退出编辑态：输入框消失，标题位恢复（仍为服务端旧值——收敛靠调用方 invalidate）。
-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
-  });
-
-  it("Esc 取消：退出编辑态不回调，行标题保持原值", async () => {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
-    );
-    const onRenameSession = vi.fn().mockResolvedValue(0);
-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
-    await openGroup("SillyHub");
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重命名 会话A" }),
-    );
-    const input = screen.getByLabelText("重命名会话 会话A");
-    fireEvent.change(input, { target: { value: "改了一半的草稿" } });
-    fireEvent.keyDown(input, { key: "Escape" });
-
-    expect(onRenameSession).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
-    // 行标题不被草稿污染（Esc 丢弃编辑值）。
-    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
-  });
-
-  it("空值不提交：清空输入 + Enter → 静默退出编辑态零回调", async () => {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
-    );
-    const onRenameSession = vi.fn().mockResolvedValue(0);
-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
-    await openGroup("SillyHub");
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重命名 会话A" }),
-    );
-    const input = screen.getByLabelText("重命名会话 会话A");
-    fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
-
-    expect(onRenameSession).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("重命名会话 会话A")).not.toBeInTheDocument();
-  });
-
-  it("blur 提交：失焦等效 Enter（移动端/外点场景收口）", async () => {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
-    );
-    const onRenameSession = vi.fn().mockResolvedValue(0);
-    renderPanel(<SessionListPanel onRenameSession={onRenameSession} />);
-    await openGroup("SillyHub");
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重命名 会话A" }),
-    );
-    const input = screen.getByLabelText("重命名会话 会话A");
-    fireEvent.change(input, { target: { value: "失焦提交" } });
-    fireEvent.blur(input);
-
-    await waitFor(() =>
-      expect(onRenameSession).toHaveBeenCalledWith("s-1", "失焦提交"),
-    );
-  });
-
-  it("三回调 props 缺省（悬浮助手 runtime 抽屉等消费点）→ 零置顶/重命名按钮，徽标照常渲染", async () => {
-    pinFixture();
-    renderPanel(<SessionListPanel />);
-    await openGroup("SillyHub");
-
-    await screen.findByRole("button", { name: "会话 会话A" });
-    expect(screen.queryByRole("button", { name: "置顶 会话A" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "取消置顶 会话B" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "重命名 会话A" })).toBeNull();
-    // 徽标是展示态（非操作）：不随回调缺省隐藏。
-    const rowB = screen.getByRole("button", { name: "会话 会话B" });
-    expect(rowB.querySelector('span[title^="已置顶（"]')).not.toBeNull();
-  });
-});
-
-// ── 14. 行尾活性小灯与未读红点（2026-09-08-session-list-liveness-dot task-03） ──
-
-describe("SessionListPanel 行尾活性小灯与未读红点", () => {
-  /** 标准单会话固件（ws-1 组内一条 s-a）。 */
-  function livenessFixture() {
+describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot-semantics）", () => {
+  /**
+   * 标准单会话固件（ws-1 组内一条 s-a；status / 活性 state 可覆写，
+   * livenessState 缺省 = 无活性数据（日志列表返回空）。
+   */
+  function slotFixture(
+    sessionOverrides: Partial<AgentSessionRead> = {},
+    livenessState?: AgentLogListItem["state"],
+  ) {
     setMachines({ items: twoMachines() });
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
-        makeSession({ id: "s-a", workspace_id: "ws-1", title: "核对变更" }),
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          ...sessionOverrides,
+        }),
       ]),
     );
+    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+      items: livenessState
+        ? [makeLivenessEntry({ agent_session_id: "s-a", state: livenessState })]
+        : [],
+    });
   }
 
+  /** 渲染并展开组，返回目标行。 */
+  async function renderRow() {
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    return screen.findByRole("button", { name: "会话 核对变更" });
+  }
+
+  it("failed → 红点（异常失败）；活性 working 不覆盖（终态权威）", async () => {
+    slotFixture({ status: "failed" }, "working");
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="异常失败"]')).toBeTruthy();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+  });
+
+  it("ended → 绿点（执行完成）；活性数据不改变终态展示", async () => {
+    slotFixture({ status: "ended" }, "working");
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="执行完成"]')).toBeTruthy();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+  });
+
+  it("active + 活性 working → 动态转圈（正在执行）——本平台 active 只表示会话开着，进行中以活性为准", async () => {
+    slotFixture({ status: "active" }, "working");
+    const row = await renderRow();
+    expect(screen.getByLabelText("正在执行")).toBeTruthy();
+    expect(row.querySelector('[aria-label="执行完成"]')).toBeNull();
+    expect(row.querySelector('[aria-label="异常失败"]')).toBeNull();
+  });
+
+  it("active + 活性 blocked → 琥珀点（在等你）", async () => {
+    slotFixture({ status: "active" }, "blocked");
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="在等你"]')).toBeTruthy();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+  });
+
+  it("reconnecting → 动态转圈（恢复中）", async () => {
+    slotFixture({ status: "reconnecting" });
+    await renderRow();
+    expect(screen.getByLabelText("恢复中")).toBeTruthy();
+  });
+
+  it("active 空闲（无活性数据）→ 留白：槽占位但零可见标识", async () => {
+    slotFixture({ status: "active" });
+    const row = await renderRow();
+    const slot = row.querySelector('[data-testid="session-status-indicator"]');
+    expect(slot).toBeTruthy();
+    expect(slot?.textContent).toBe("");
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+    expect(screen.queryByLabelText("执行完成")).toBeNull();
+    expect(screen.queryByLabelText("在等你")).toBeNull();
+  });
+
+  it("pending（排队未开跑）→ 留白", async () => {
+    slotFixture({ status: "pending" });
+    const row = await renderRow();
+    expect(
+      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
+    ).toBe("");
+  });
+
+  it("suspended（后端词表超集，前端类型外运行时值）→ 留白", async () => {
+    slotFixture({
+      status: "suspended",
+    } as unknown as Partial<AgentSessionRead>);
+    const row = await renderRow();
+    expect(
+      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
+    ).toBe("");
+  });
+
+  it("活性命中：整槽包 Popover，悬停出组合悬停卡（状态名/静默时长/证据摘要/推导时间四行）", async () => {
+    slotFixture({ status: "active" }, "working");
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    const slot = await screen.findByTestId("session-status-indicator");
+    // antd Popover trigger=hover（默认 mouseEnterDelay 0.1s → waitFor 收敛，
+    // 同 scheduled-messages-bar 悬停先例；content portal 到 body 不被行裁剪）。
+    fireEvent.mouseEnter(slot);
+    await waitFor(() =>
+      expect(screen.getByText("在干活（working）")).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/^静默时长：/)).toBeInTheDocument();
+    expect(screen.getByText(/证据摘要：tool_use 未配对 ×2/)).toBeInTheDocument();
+    expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
+  });
+
+  it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
+    slotFixture({ status: "active" }, "idle");
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    const slot = await screen.findByTestId("session-status-indicator");
+    expect(slot.textContent).toBe("");
+    fireEvent.mouseEnter(slot);
+    await waitFor(() =>
+      expect(screen.getByText("空闲（idle）")).toBeInTheDocument(),
+    );
+  });
+
+  it("行首槽位置：第一行首槽位、18px flex-none；标题 flex-1 不被挤成列", async () => {
+    slotFixture({ status: "active" }, "working");
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    const slot = await screen.findByTestId("session-status-indicator");
+    const firstLine = slot.parentElement;
+    expect(firstLine).not.toBeNull();
+    expect(firstLine?.className).toContain("flex");
+    expect(firstLine?.className).toContain("items-center");
+    expect(slot).toHaveClass("flex-none");
+    expect(slot).toHaveClass("h-[18px]");
+    expect(slot).toHaveClass("w-[18px]");
+    const slots = Array.from(firstLine?.children ?? []);
+    expect(slots.indexOf(slot)).toBe(0);
+    expect(slots[1]?.className).toContain("flex-1");
+  });
+});
+
+describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首槽）", () => {
   /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟 30s 轮询到点）。 */
   function renderPanelWithClient(ui: React.ReactElement) {
     const client = new QueryClient({
@@ -3373,46 +3306,25 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
     return { ...view, client };
   }
 
-  it("map 命中渲染行尾小灯；悬停弹组合渲染悬停卡（状态名/静默时长/证据摘要/推导时间四行）", async () => {
-    livenessFixture();
+  /** working 活性单会话固件（ws-1 组内 s-a）。 */
+  function livenessFixture() {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-a", workspace_id: "ws-1", title: "核对变更" }),
+      ]),
+    );
     mocks.listWorkspaceAgentLogs.mockResolvedValue({
       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
     });
-    renderPanel(<SessionListPanel />);
-    await openGroup("SillyHub");
-    const dot = await screen.findByTestId("liveness-dot");
-    expect(dot).toBeInTheDocument();
-
-    // antd Popover trigger=hover（默认 mouseEnterDelay 0.1s → waitFor 收敛，
-    // 同 scheduled-messages-bar 悬停先例；content portal 到 body 不被行裁剪）。
-    fireEvent.mouseEnter(dot);
-    await waitFor(() =>
-      expect(screen.getByText("在干活（working）")).toBeInTheDocument(),
-    );
-    expect(screen.getByText(/^静默时长：/)).toBeInTheDocument();
-    expect(screen.getByText(/证据摘要：tool_use 未配对 ×2/)).toBeInTheDocument();
-    expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
-  });
-
-  it("map 未命中（无关联日志的会话）不渲染小灯——行为与现状一致（fail-open）", async () => {
-    livenessFixture();
-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
-      items: [makeLivenessEntry({ agent_session_id: "s-other" })],
-    });
-    renderPanel(<SessionListPanel />);
-    await openGroup("SillyHub");
-    await screen.findByRole("button", { name: "会话 核对变更" });
-    expect(screen.queryByTestId("liveness-dot")).toBeNull();
-  });
+  }
 
   it("红点出现：prevState=working → current=idle 转移标记未读", async () => {
     livenessFixture();
-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
-      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
-    });
     const { client } = renderPanelWithClient(<SessionListPanel />);
     await openGroup("SillyHub");
-    await screen.findByTestId("liveness-dot");
+    await screen.findByTestId("session-status-indicator");
     // 首轮 working：state 键落盘（首见不触发未读，无红点）
     await waitFor(() =>
       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
@@ -3436,12 +3348,9 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
 
   it("红点随 selected 置真消失（点击/Enter/深链三路入口共用的 selected 边沿）", async () => {
     livenessFixture();
-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
-      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "working" })],
-    });
     const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
     await openGroup("SillyHub");
-    await screen.findByTestId("liveness-dot");
+    await screen.findByTestId("session-status-indicator");
     mocks.listWorkspaceAgentLogs.mockResolvedValue({
       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
     });
@@ -3464,18 +3373,19 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
     expect(
       window.localStorage.getItem("sillyhub:liveness-unread:s-a"),
     ).toBeNull();
-    // 小灯本体保留（清除只影响红点）
-    expect(screen.getByTestId("liveness-dot")).toBeInTheDocument();
+    // 状态槽本体保留（清除只影响红角标）
+    expect(screen.getByTestId("session-status-indicator")).toBeInTheDocument();
   });
 
   it("首见不亮：无 prevState（localStorage 无 state 键）直接 idle 不标未读", async () => {
     livenessFixture();
+    // 首轮直接 idle（首见无 prevState）
     mocks.listWorkspaceAgentLogs.mockResolvedValue({
       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
     });
     renderPanel(<SessionListPanel />);
     await openGroup("SillyHub");
-    await screen.findByTestId("liveness-dot");
+    await screen.findByTestId("session-status-indicator");
     // state 键首见落盘为 idle，未读键不写
     await waitFor(() =>
       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
@@ -3485,36 +3395,167 @@ describe("SessionListPanel 行尾活性小灯与未读红点", () => {
     expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).toBeNull();
     expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
   });
-
-  it("布局零变化：小灯是第一行行内 flex 尾部 flex-none 18px 节点（不新增列）", async () => {
-    livenessFixture();
-    mocks.listWorkspaceAgentLogs.mockResolvedValue({
-      items: [makeLivenessEntry({ agent_session_id: "s-a" })],
-    });
-    renderPanel(<SessionListPanel />);
-    await openGroup("SillyHub");
-    const dot = await screen.findByTestId("liveness-dot");
-
-    // 第一行 flex 容器：状态点 / 标题(flex-1) / 相对时间 / 小灯 / hover 按钮
-    // ——仍是单行行内槽位，无新增列、无换行容器（R-01）。
-    const firstLine = dot.parentElement;
-    expect(firstLine).not.toBeNull();
-    expect(firstLine?.className).toContain("flex");
-    expect(firstLine?.className).toContain("items-center");
-    expect(dot).toHaveClass("flex-none");
-    expect(dot).toHaveClass("h-[18px]");
-    expect(dot).toHaveClass("w-[18px]");
-    // 插点位置：相对时间之后、hover 按钮区之前（倒数第二槽位）
-    const slots = Array.from(firstLine?.children ?? []);
-    expect(slots.indexOf(dot)).toBe(slots.length - 2);
-    const lastSlot = slots[slots.length - 1];
-    const titleSlot = slots[1];
-    expect(lastSlot?.className).toContain("group-hover:flex");
-    // 标题位仍 flex-1 占满（小灯不挤占成列）
-    expect(titleSlot?.className).toContain("flex-1");
-  });
 });
 
+describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终态→ended 且不在该会话上）", () => {
+  /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟列表轮询到点）。 */
+  function renderPanelWithClient(ui: React.ReactElement) {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, refetchInterval: false },
+        mutations: { retry: false },
+      },
+    });
+    const view = render(
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    );
+    return { ...view, client };
+  }
+
+  /** 单会话固件（ws-1 组内 s-a，status 可覆写；无活性数据）。 */
+  function completedFixture(status: AgentSessionRead["status"]) {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status,
+        }),
+      ]),
+    );
+    mocks.listWorkspaceAgentLogs.mockResolvedValue({ items: [] });
+  }
+
+  it("active → ended 转移（非选中）→ 绿色完成角标出现并落盘", async () => {
+    completedFixture("active");
+    const { client } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+
+    // 列表轮询到点：会话完成
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "ended",
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await screen.findByLabelText("此会话已执行完成");
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).not.toBeNull();
+  });
+
+  it("点击进入（selected 置真）→ 角标消失、落盘清除，绿点本体保留", async () => {
+    completedFixture("active");
+    const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "ended",
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await screen.findByLabelText("此会话已执行完成");
+
+    rerender(
+      <QueryClientProvider client={client}>
+        <SessionListPanel selectedSessionId="s-a" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.queryByLabelText("此会话已执行完成")).toBeNull(),
+    );
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+    // 完成态绿点本体保留（通知消失，状态标识仍在）
+    expect(screen.getByLabelText("执行完成")).toBeTruthy();
+  });
+
+  it("完成时正选中该会话（用户就在其上）→ 不标记不亮角标", async () => {
+    completedFixture("active");
+    const { client } = renderPanelWithClient(
+      <SessionListPanel selectedSessionId="s-a" />,
+    );
+    // 选中会话所在组豁免默认折叠（ql-20260824-001）——无需点击展开，
+    // openGroup 的点击反而会把它折叠。
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "ended",
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("执行完成")).toBeTruthy(),
+    );
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+  });
+
+  it("首载即 ended（历史会话，无转移基线）→ 不误报", async () => {
+    completedFixture("ended");
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+  });
+
+  it("active → failed 不出完成角标（异常走红点语义）", async () => {
+    completedFixture("active");
+    const { client } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "failed",
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("异常失败")).toBeTruthy(),
+    );
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+  });
+});
 // ── 15. 导出入口（2026-09-14-session-export task-07 / FR-01 / FR-06） ──────
 // task-06 双入口 UI 契约回归锁：批量栏「导出选中（N）」Dropdown + 行 hover
 // 下载图标（aria-label「导出 {title}」）两入口共享两档菜单（items 单一源

@@ -33,6 +33,7 @@ FR-01~FR-05 全部由聚焦测试锁定（后端 154 + 前端 51+150+204 全绿�
   command: cd backend && uv run pytest -q app/modules/agent/tests/test_group_chat_models.py app/modules/daemon/tests/test_group_cross_mention.py app/modules/daemon/tests/test_group_bridge_projection.py app/modules/daemon/tests/test_group_chat_management.py app/modules/daemon/tests/test_group_consensus.py app/modules/daemon/tests/test_group_direct.py --no-cov
   exit: 0
   log: execute 验收评审实测 154 passed（stage-reviews/execute-review-2026-10-15-130540）
+<!-- smoke 机器段缺态：not-configured（commands.smoke 未配置——配置 local.yaml 后下次 verify 亲跑并自动注入机器段）source: cli-noai-smoke -->
 
 ## 任务完成度 [层：人工判断]
 4/4 全部完成（勾选由 execute 写入，本步只读复核）：

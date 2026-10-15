@@ -18,7 +18,7 @@ generated_by: sillyspec-fourpiece-init
 ### FR-01: zcode 引擎注册与探测
 Given daemon 所在机器安装了 ZCode Desktop（内嵌引擎版本 ≥0.16.9）
 When daemon 启动执行 agent 探测
-Then 探测项命中（SILLYHUB_ZCODE_PATH env 覆盖 → PATH which zcode → Desktop 固定安装路径回退 fallbackPaths，含平台变量展开；.cjs 目标经 process.execPath 执行版本探测），`--version` 解析入 MIN_VERSIONS 校验（低于 0.16.9 输出与四引擎同格式警告，不硬拒），路径经 _agentPaths 可被驱动取用（D-001/D-004）
+Then 探测项命中（SILLYHUB_ZCODE_PATH env 覆盖 → PATH which zcode → Desktop 固定安装路径回退 fallbackPaths，含平台变量展开；.cjs 目标经 process.execPath 执行版本探测；protocol='ndjson'），`--version` 解析入 MIN_VERSIONS 校验（低于 0.16.9 输出与四引擎同格式警告，不硬拒），路径经 _agentPaths 可被驱动取用（D-001/D-004）
 
 ### FR-02: zcode 单聊会话全链路
 Given 探测到 zcode 且用户在单聊创建表单选择 zcode 引擎
@@ -42,7 +42,7 @@ Then per-session 配置面（ZCODE_DATA_BASE_DIR 重定向的 v2 目录）写 pr
 
 ### FR-06: caps 如实申报与三端镜像
 Given zcode 引擎注册
-Then PROVIDER_CAPS zcode 条目 16 键如实（mcp=false/multimodal=false/attachments=false/subagent=false/dialog='none'/edit_patch=false/steering=false/sessionFork='none'，其余 true——取值依据为协议实测，详见 design 接口定义），gen-provider-caps.mjs 刷新 backend/frontend 镜像；compact/thinking_level/ctx_usage 走 caps 现有通道
+Then PROVIDER_CAPS zcode 条目 16 键如实（mcp=false/multimodal=false/attachments=false/subagent=false/dialog='native'（权限代答桥即平台 dialog 管道通道本体，三引擎现值先例）/edit_patch=false/steering=false/sessionFork='none'，其余 true——取值依据为协议实测，详见 design 接口定义），gen-provider-caps.mjs 刷新 backend/frontend 镜像；compact/thinking_level/ctx_usage 走 caps 现有通道
 
 ### FR-07: 前端单聊引擎选项
 Given zcode 在该 runtime 探测可用
@@ -70,3 +70,14 @@ Then 驱动经 session/compact / session/setThoughtLevel 执行（caps.compact=t
 | D-005@v1 | FR-02, FR-03, FR-04 | 自研私有协议驱动（信封层 + 方法面 + 服务端请求分发器） |
 | D-006@v1 | （rejected 登记） | 等待官方 ACP/SDK 落选——无 FR 覆盖需求 |
 | D-007@v1 | FR-02 | 独立驱动 + 独立信封层 + 每会话一进程（方案 A，用户确认） |
+
+## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
+
+FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-06: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-07: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-08: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）

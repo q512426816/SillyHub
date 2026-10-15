@@ -64,9 +64,63 @@
   },
   "apiFace": {
     "endpoints": [],
-    "declared": null,
-    "sectionHint": [
-      "接口定义"
+    "declared": 0,
+    "writeEndpoints": []
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "本变更无新端点/无 daemon 协议变更（risk=unit-sufficient），集成面由既有管线复用 + 聚焦测试组装实测承接",
+      "command": "cd backend && uv run pytest -q app/modules/agent/tests/test_group_chat_models.py app/modules/daemon/tests/test_group_cross_mention.py app/modules/daemon/tests/test_group_bridge_projection.py app/modules/daemon/tests/test_group_chat_management.py app/modules/daemon/tests/test_group_consensus.py app/modules/daemon/tests/test_group_direct.py --no-cov",
+      "exitCode": 0,
+      "logPath": "execute 验收评审实测 154 passed（stage-reviews/execute-review-2026-10-15-130540）"
+    }
+  ],
+  "handover": {
+    "count": 3,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "UI 视觉证据（visual-evidence.md 缺——设置控件未做渲染对照截图）",
+        "condition": "启动前端 dev 后打开任一群详情面板：互@模式控件三态外观（可切/总开关关禁用/consensus 开禁用）与双主题（blue/ai-native）下品牌色正常即验收通过",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "公开委派端到端人工冒烟（需真实 daemon+模型运行）",
+        "condition": "建群选公开委派 → agent 回复 @ 另一 agent → 群时间线出现被委派成员结论气泡、发起方成员会话出现「委派回执」行、private 群行为与升级前一致",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "delegation_of「受 X 委派」气泡副标签未渲染（design Phase 4 明示可选增强不阻塞）",
+        "condition": "后续 UI 增量变更消费投影行 metadata.delegation_of 渲染；数据已在场",
+        "severity": "advisory"
+      }
     ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/agent/tests/test_group_chat_models.py",
+      "backend/app/modules/daemon/tests/test_group_cross_mention.py",
+      "backend/app/modules/daemon/tests/test_group_bridge_projection.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
   }
 }

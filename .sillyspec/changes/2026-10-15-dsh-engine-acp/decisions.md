@@ -74,3 +74,16 @@ change: 2026-10-15-dsh-engine-acp
 - evidence: 用户 AskUserQuestion 轮次 2026-10-15 Step4（三选一落选）
 - 否决理由: 不满足会话交互核心需求
 - 复潮条件: 出现批处理/CI 型 dsh 任务接入需求时，可作为独立变更另行立项（与本变更不冲突）
+
+## D-006@v1: 执行期任务边界合并——task-03 驱动与 task-04 注册的类型依赖
+- type: architecture
+- priority: P1
+- status: accepted
+- source: code
+- question: task-03 驱动单独收口时 typecheck 必挂——InteractiveProvider 联合类型由 providers.ts 的 INTERACTIVE_PROVIDERS 注册表推导（keyof typeof），'dsh' 不入注册表则 DshAcpDriver 的 provider: 'dsh' 类型不合法（TS2430/2416 实测 2026-10-15）
+- answer: task-03 与 task-04 的 providers.ts 注册面合并执行（驱动 + 注册表条目同批落地后才可能 typecheck 全绿）；测试仍按各自 verify 命令分开跑，wt-commit 按 task 文件集合分开提交。非破坏性局部裁决（不推翻 D-xxx、allowed_paths 并集仅限本两任务边界）。
+- normalized_requirement: sillyhub-daemon typecheck 在 task-04 注册条目落地后全绿；dsh-acp-driver.test.ts（14 用例）与 task-04 的 registry/settings 测试各自独立通过
+- impacts: [task-03, task-04]
+- evidence: sillyhub-daemon/src/interactive/providers.ts:772（InteractiveProvider = keyof typeof INTERACTIVE_PROVIDERS 推导）；typecheck 实测错误 TS2430/TS2416/TS2322
+- 故障面: 两任务文件在中间态（驱动已写、注册未写）typecheck 红——已通过合并执行消除中间态
+- 退役判据: 若未来 InteractiveProvider 改为独立字面量联合（不随注册表推导），可解除合并恢复独立收口

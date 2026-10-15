@@ -19,7 +19,6 @@ target_files:
   - backend/app/modules/daemon/group/service/helpers.py
   - backend/app/modules/daemon/group/service/mentions.py
   - backend/app/modules/daemon/tests/test_group_cross_mention.py
-  - backend/app/modules/daemon/tests/test_group_mention_pipeline.py
 expects_from:
   task-01:
     - contract: AgentGroupChat.cross_mention_mode
@@ -31,7 +30,7 @@ implementation:
   - backend/app/modules/daemon/group/service/mentions.py:460-486 触发参数构造处加三态判定：源轮 consensus_task_id 非空走现状 consensus 分支；群 cross_mention_mode=public 走新分支 turn_overrides 记 dm_kind=agent_public 与 asked_by_member_id 不带 dm_target_member_id、role_prompt 用公开指令；其余走现状 agent_dm 路径逐比特不变
   - 护栏判定（mentions.py:403-453 链深/同成员/限频/Redis fail-closed）保持在分流之前，两模式共用计数，本卡不改护栏逻辑
   - test_group_cross_mention.py 新增断言：public 群触发轮 turn metadata 含 dm_kind=agent_public 与 asked_by_member_id 且无 dm_target_member_id；private 群与现状断言一致；consensus 源轮优先于 public 模式（D-011 泄漏窗口钉死）；护栏计数两模式同源（同链同成员 2 次口径跨模式累计）
-  - test_group_mention_pipeline.py 补 public 分支的 pipeline 断言
+  - （execute 期考察：test_group_mention_pipeline.py 测 @ 解析纯函数与上下文行组装，无轮型分流断言面——public 分流断言已归属 test_group_cross_mention.py 的 TestCrossMentionModeRouting，本文件零改动，target_files 相应移除）
 acceptance:
   - public 群互@轮型为 agent_public 且无 dm_target；private 群触发参数与变更前逐比特一致（既有断言零改动全绿）
   - consensus 任务进行中切 public 的群，互@仍走 consensus 轮型（三态优先级）

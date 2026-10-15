@@ -28,7 +28,7 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 - 附件链路（caps.attachments=false，同 codex 现状；协议图片内联面未验证）；
 - steering 忙轮注入（caps.steering=false——运行中注入行为未验证，协议消息队列串行，排队语义生效）；
 - 会话分叉（caps.sessionFork='none'——协议有 session/fork 但平台锚点语义未对接）；
-- askuser 对话框桥（caps.dialog='none'——`interaction/requestUserInput` 阶段 1 自动取消应答，阶段 2 升级）；
+- askuser 提问桥（`interaction/requestUserInput` 阶段 1 自动取消应答，R-06 已知限制；权限对话框不受影响，走 native 管道 dialog='native'）；
 - token 级流式之外的多模态块（caps.multimodal=false）；
 - daemon 自动安装 ZCode Desktop（用户自装，D-001）；
 - 批处理层接入（PROVIDER_TO_PROTOCOL 表不动）；
@@ -40,11 +40,11 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 
 ## 总体方案
 
-**Phase 1（daemon 探测与版本门）**：`agent-detector.ts` 注册新探测项（bin=zcode、envPath=SILLYHUB_ZCODE_PATH、versionPattern 匹配 `zcode <semver>`、minVersion=0.16.9）。探测 spec 扩展两个可选字段支撑 zcode 形态：`fallbackPaths: string[]`（env 与 PATH 均 miss 后的固定路径回退，含平台变量展开——Windows `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`，macOS/Linux 按安装约定补充）与 `execNode: boolean`（目标是 .cjs 脚本时版本探测与 spawn 经 `process.execPath`）。`version.ts` MIN_VERSIONS 加 `zcode: (0,16,9)`（低于警告不硬拒，D-004）。二进制路径经现有 `_agentPaths` 流入驱动。
+**Phase 1（daemon 探测与版本门）**：`agent-detector.ts` 注册新探测项（bin=zcode、envPath=SILLYHUB_ZCODE_PATH、protocol='ndjson'（AgentProtocol 现有枚举值，agent-detector.ts:42-46/adapters/index.ts:40，ZCode NDJSON 信封同型）、versionPattern 匹配 `zcode <semver>`、minVersion=0.16.9）。探测 spec 扩展两个可选字段支撑 zcode 形态：`fallbackPaths: string[]`（env 与 PATH 均 miss 后的固定路径回退，含平台变量展开——Windows `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`，macOS/Linux 按安装约定补充）与 `execNode: boolean`（目标是 .cjs 脚本时版本探测与 spawn 经 `process.execPath`）。批量层 PROVIDER_TO_PROTOCOL 表不动（zcode 仅交互式接入）；探测项 protocol 与批量注册表的一致性守护测试口径（若有缺席引擎例外断言）plan 阶段核对。`version.ts` MIN_VERSIONS 加 `zcode: (0,16,9)`（低于警告不硬拒，D-004）。二进制路径经现有 `_agentPaths` 流入驱动。
 
 **Phase 2（信封层与驱动）**：新文件 `adapters/zcode-envelope.ts`——ZCode 私有协议 NDJSON 编解码器：出站请求 `{id, method, params?}` / 应答 `{id, result}` / 错误 `{id, error:{code,message,data?}}`（strict，多余键拒绝——实测 jsonrpc/requestId 键均被服务端拒）；自增数字 id 关联；服务端→客户端请求分发器（服务端请求 id 为字符串如 "server-1"，按 method 分派处理器，未注册方法回空 result）；入站按 union 四分支解复用（请求/通知/响应/错误）。新文件 `interactive/zcode-app-server-driver.ts` 实现 `InteractiveDriver` 契约：start（spawn `node <exePath> app-server --cwd <dir>`，env 注入 `ZCODE_DATA_BASE_DIR=<per-session>`，等 startup/storageState phase=ready，`session/create {workspace:{workspacePath, workspaceKey}}` 期间自动应答 `session/requestRuntimePreferences`（两道，默认值 askUserQuestionAutoResolutionEnabled=true / memoryEnabled=false / modelContextBudgetStrategy="preflight-v1" / nativeSearchEnhancementsEnabled=true）与 `interaction/requestOfficialMcpAuthHeaders`（回空））；consume（每轮 `session/send {sessionId, content}`，消费通知流经 zcode-events 归一化产出）；interrupt（`session/stop {sessionId}`）；可选 compact（`session/compact`）与 setThinkingLevel（`session/setThoughtLevel`）。`interaction/requestPermission` 桥接现有 `sessionPermission.requestPermission` 闭包：manual_approval 时走 PERMISSION_REQUEST 管线（allow → 回对应选项；deny/无注入/超时 → fail-closed reject），`!manualApproval` 时自动放行（对齐 codex `_handleApproval` 语义）；`interaction/requestUserInput` 回 cancelled（阶段 1）。握手/协议失败 → 结构化 error 事件 + 会话 failed（不重试不降级，D-004 兜底）。
 
-**Phase 3（事件归一化与注册）**：新文件 `interactive/zcode-events.ts`——通知 → AgentEvent 归一化器：`v4/telemetry/event` kind=stream.chunk（channel=text → text 增量 / channel=thought → thinking 增量）、tool_call / tool.lifecycle（→ tool_use / tool_result 生命周期）、usage.delta（→ ctx_tokens 用量）、turn.started / turn.terminal（→ turn 边界与状态）；`computer-use/operation-event`（turn 边界校验源）；`state.updated`（模型目录缓存，供 setModel/前端模型选择）。`providers.ts` PROVIDER_CAPS 加 zcode 条目（十六键如实，见接口定义）；`INTERACTIVE_PROVIDERS` 加 ProviderAdapter：createDriver 工厂、fileSettings（per-session 配置面写入器 `zcode-settings.ts`）、perSessionDir（`zcode-home/<sessionId>`）、smokeSuite、switchable=true。模型路由：`zcode-settings.ts` 按 ProviderConfig 生成 `<per-session>/.zcode/v2/provider_config.json`（schemaVersion=1 + providerOrder + providerConfigRules 单条个人 Provider：api.type 按 base_url 形态判 anthropic-messages / openai-chat-completions、api.baseUrl、access.type="api-key"、access.apiKey、personalModelIds/modelOrder 含所选 model；密钥落文件不走 env 注入——D-003）；会话创建后 `session/setModel`，热切换（provider_config_changed）重写配置 + 重设 model。跑 `scripts/gen-provider-caps.mjs` 刷新三端镜像。
+**Phase 3（事件归一化与注册）**：新文件 `interactive/zcode-events.ts`——通知 → AgentEvent 归一化器：`v4/telemetry/event` kind=stream.chunk（channel=text → text 增量 / channel=thought → thinking 增量）、tool_call / tool.lifecycle（→ tool_use / tool_result 生命周期）、usage.delta（→ ctx_tokens 用量）、turn.started / turn.terminal（→ turn 边界与状态）；`computer-use/operation-event`（turn 边界校验源）；`state.updated`（模型目录缓存，供 setModel/getThinkingLevels/前端模型选择）。`providers.ts` PROVIDER_CAPS 加 zcode 条目（十六键如实，见接口定义）；`INTERACTIVE_PROVIDERS` 加 ProviderAdapter（family='ndjson'，ProtocolType 现有枚举值 adapters/index.ts:40）：createDriver 工厂、fileSettings（per-session 配置面写入器 `zcode-settings.ts`；fileSettings.dirName 联合 `'codex' | 'pi'` 加宽含 'zcode'——providers.ts:590，dsh 变更同改同一类型定义，联合加宽可并）、perSessionDir（`'codex' | 'pi' | {kind:'none'}` 联合加宽含 'zcode'——providers.ts:625，同前可并；运行时值 `zcode-home/<sessionId>`）、smokeSuite、switchable=true。模型路由：`zcode-settings.ts` 按 ProviderConfig 生成 `<per-session>/.zcode/v2/provider_config.json`（schemaVersion=1 + providerOrder + providerConfigRules 单条个人 Provider：api.type 按 base_url 形态判 anthropic-messages / openai-chat-completions、api.baseUrl、access.type="api-key"、access.apiKey、personalModelIds/modelOrder 含所选 model；密钥落文件不走 env 注入——D-003）；会话创建后 `session/setModel`，热切换（provider_config_changed）重写配置 + 重设 model。跑 `scripts/gen-provider-caps.mjs` 刷新三端镜像。
 
 **Phase 4（backend 与前端）**：`schema.py` `InteractiveProviderLiteral` 加 `"zcode"`（schema 变更同变更内跑 `pnpm gen:types` + `pnpm -C sillyhub-daemon gen:types` 双义务，CLAUDE.md 规则 21）；前端 `session-list-panel.tsx` SESSION_ENGINE_OPTIONS 加 zcode 选项（群聊 ENGINE_OPTIONS 不动）。**不碰 `messages.py` 群附件门控**（dsh task-06 交付 caps 口径统一；zcode 阶段 1 无群聊，门控行为对 zcode 无影响）。
 
@@ -72,13 +72,13 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 本变更 HTTP 接口面：0 端点（无接口变更，provider 枚举扩展经现有端点透传）。
 
 **PROVIDER_CAPS zcode 条目**（16 键，全量如实申报，取值依据为 2026-10-15 协议实测）：
-`resume=true`（session/resume）、`mcp=false`（注入面未验证，阶段 1 不开通）、`multimodal=false`（图片内联面未验证）、`attachments=false`（附件链路未开通，同 codex）、`thinking=true`（stream.chunk channel=thought）、`subagent=false`（平台分身管线不对接）、`permission_dialog=true`（interaction/requestPermission 桥）、`dialog='none'`（requestUserInput 阶段 1 自动取消）、`edit_patch=false`（structuredPatch 未验证）、`model_select=true`（setModel + state.updated 目录）、`provider_switch=true`（per-session provider_config 重写，switchable=true 单源）、`ctx_usage=true`（usage.delta）、`compact=true`（session/compact）、`thinking_level=true`（session/setThoughtLevel）、`steering=false`（运行中注入未验证）、`sessionFork='none'`（锚点语义未对接）
+`resume=true`（session/resume）、`mcp=false`（注入面未验证，阶段 1 不开通）、`multimodal=false`（图片内联面未验证）、`attachments=false`（附件链路未开通，同 codex）、`thinking=true`（stream.chunk channel=thought）、`subagent=false`（平台分身管线不对接）、`permission_dialog=true`（interaction/requestPermission 桥）、`dialog='native'`（requestPermission 代答桥即平台 dialog 管道通道本体，对齐 permission_dialog=true 的 claude/codex/pi 三引擎现值先例；requestUserInput 的 AskUser 类提问阶段 1 自动取消，见 R-06）、`edit_patch=false`（structuredPatch 未验证）、`model_select=true`（setModel + state.updated 目录）、`provider_switch=true`（per-session provider_config 重写，switchable=true 单源）、`ctx_usage=true`（usage.delta）、`compact=true`（session/compact）、`thinking_level=true`（session/setThoughtLevel，getThinkingLevels 由 state.updated reasoning levels 实测数据填充——driver.ts:438-441 可选方法）、`steering=false`（运行中注入未验证）、`sessionFork='none'`（锚点语义未对接）
 
 **驱动接口**（实现 `sillyhub-daemon/src/interactive/driver.ts:388-457` InteractiveDriver 契约）：
 - `start(opts)`——spawn（`[process.execPath, exePath, 'app-server', '--cwd', cwd]`，exePath 来自 `_agentPaths.get('zcode')`；env `ZCODE_DATA_BASE_DIR` 指向 per-session 配置面）→ 等 `startup/storageState` phase=ready → `session/create {workspace:{workspacePath, workspaceKey}}`（期间分发器自动应答 runtimePreferences/McpAuthHeaders）→ 存 zcode sessionId → 按 provider_config `session/setModel`；
 - `consume(input)`——每轮 `session/send {sessionId, content}`，通知流经 zcode-events 归一化产出 TurnMessageEnvelope；steering 不支持（caps.steering=false，排队语义上层处理）；
 - `interrupt()`——`session/stop {sessionId}`；
-- 可选 `compact()`——`session/compact {sessionId}`；`setThinkingLevel(level)`——`session/setThoughtLevel {sessionId, ...}`。
+- 可选 `compact()`——`session/compact {sessionId}`；`setThinkingLevel(level)`——`session/setThoughtLevel {sessionId, ...}`；`getThinkingLevels()`——档位表由 state.updated 模型目录 reasoning levels 填充（driver.ts:438-441 可选方法，实测数据源在）。
 
 **ZCode 私有协议面**（2026-10-15 实测钉板）：
 - 信封（strict zod，多余键拒绝）：请求 `{id, method, params?, trace?}` / 通知 `{method, params?, trace?}` / 响应 `{id, result}` / 错误 `{id, error:{code, message, data?}}`；客户端 id 数字自增，服务端请求 id 字符串（"server-N"）；
@@ -111,7 +111,8 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 - **Desktop 自动更新**：内嵌引擎路径/版本可能变化 → daemon 启动重扫 + 版本门警告（D-004）+ 协议失败结构化报错兜底；
 - **与 dsh 变更共存**：共同修改文件（providers.ts / agent-detector.ts / version.ts / schema.py / session-list-panel.tsx / caps 镜像）均为各自增量条目，先后合入顺序适配；本变更不碰 messages.py（群附件门控统一归 dsh task-06）；
 - **不改变的 API / 表结构**：无新端点、无迁移；现有引擎的驱动/注册条目零改动；
-- **回退路径**：探测项/注册条目/枚举值均为增量，回退 = 删除注册（caps 镜像重生成即可恢复原状）。
+- **回退路径**：探测项/注册条目/枚举值均为增量，回退 = 删除注册（caps 镜像重生成即可恢复原状）；
+- **backend reopen 白名单观察（P2，不阻断）**：caps.resume=true 但 backend 会话恢复（reopen）存在引擎白名单硬编码 `{"claude","codex"}` 的先例差异（pi 已有同差，未扩白名单不影响单聊创建/对话主线）——本变更不扩 reopen 白名单，阶段 2 视需求另立变更。
 
 ## 风险登记
 
@@ -122,7 +123,7 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 | R-03 | Desktop 自动更新改变内嵌引擎路径/版本 | P1 | 探测每次 daemon 启动重扫（无路径缓存承诺）+ fallbackPaths 支持多版本路径并列 + 版本门警告 |
 | R-04 | apiKey 明文落 per-session provider_config.json | P2 | 与 codex auth.json 同级安全姿势；per-session 目录随会话清理管线销毁；目录权限沿用现有 per-session 管线 |
 | R-05 | stdin EOF 优雅退出行为未实测（ZCode app-server 对 stdin 关闭的反应） | P2 | 清理阶梯照 codex 先例兜底（EOF 宽限 → SIGTERM → SIGKILL）；verify 用例实测补充记录 |
-| R-06 | requestUserInput 自动取消应答可能降低 agent 行为质量（AskUser 类工具收到 cancelled） | P2 | 阶段 1 已知限制记入非目标（dialog='none'）；阶段 2 升级为 dialog 桥 |
+| R-06 | requestUserInput 自动取消应答可能降低 agent 行为质量（AskUser 类工具收到 cancelled） | P2 | 阶段 1 已知限制（权限对话框不受影响，dialog='native' 仅指权限代答通道）；阶段 2 升级为 AskUser 提问桥 |
 | R-07 | provider_config.json schema 随 ZCode 版本演进变化 | P2 | 写入器 schema 钉 schemaVersion=1 + 冒烟校验（smokeSuite 含配置生效断言）；失败结构化报错 |
 | 无 UI 原型 | 原型分级=跳过：纯后端/daemon 逻辑 + 前端仅引擎下拉枚举追加（无布局/结构/流程变化，同 dsh 判例） | P2 | 用户已在 Step5 确认跳过 |
 
