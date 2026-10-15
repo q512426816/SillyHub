@@ -2976,3 +2976,170 @@ describe("SessionsPortal 工作区引用插入槽位（workspace-ref-intake task
   // 空门户态组合不可达——toast 为防御性兜底（design R-08 声明触达面小），
   // 不构造 UI 驱动用例（宁缺毋滥）。
 });
+
+/* ── 2026-10-15-workspace-session-agent-only：工作区绑定机器（不选机器直选智能体） ── */
+
+/** 绑定视图固件（组件仅消费 workspace_id/daemon_id；其余字段对齐 MemberBindingView）。 */
+function makeBinding(workspaceId: string, daemonId: string | null) {
+  return {
+    workspace_id: workspaceId,
+    user_id: "u-me",
+    daemon_id: daemonId,
+    runtime_id: null,
+    root_path: `C:/codes/${workspaceId}`,
+    path_source: "manual",
+    shared: false,
+    synced_at: null,
+    last_scan_at: null,
+    init_synced_at: null,
+    init_synced_spec_version: null,
+  };
+}
+
+/** 机器层覆写（items 与 machineCandidates 同源注入，照 beforeEach 默认口径）。 */
+function setMachines(machines: DaemonMachineRead[]) {
+  mocks.machinesHook.mockReturnValue({
+    items: machines,
+    sharedToMe: [],
+    machineCandidates: machines,
+    total: machines.length,
+    sessions: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+}
+
+describe("SessionsPortal 工作区绑定机器（跳过机器步，2026-10-15-workspace-session-agent-only）", () => {
+  it("workspace 组「＋」（有绑定）→ 浮层直接智能体步（无「① 机器」）→ 选完预会话=绑定机器 runtime", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    renderPortal(WORKSPACE_SCOPE);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+
+    // 绑定模式：无机器步、无机器列表，直接列绑定机器智能体。
+    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
+    expect(screen.queryByText("① 机器（仅在线）")).toBeNull();
+    expect(screen.queryByRole("button", { name: /选择机器/ })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("machine-1");
+    expect(ctx.textContent).toContain("Claude Code");
+    // 未发首句零服务端实体。
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("筛选 agent=Codex（机器筛的是另一台）+ 绑定机器该引擎在线 → 直带：runtime 取绑定机器（不取筛选机器）", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    setMachines([
+      makeMachine({
+        runtimes: [
+          makeRuntime(),
+          makeRuntime({ id: "rt-cx-m1", provider: "codex" }),
+        ],
+      }),
+      makeMachine({
+        id: "m-2",
+        hostname: "machine-2",
+        runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
+      }),
+    ]);
+    renderPortal(WORKSPACE_SCOPE);
+    await chooseAntdOptionByText("slp-machine", "machine-2");
+    await chooseAntdOptionByText("slp-agent", "Codex");
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+
+    // 直带不弹浮层；上下文行机器=绑定机器 machine-1（不是筛选的 machine-2）。
+    await waitFor(() =>
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("machine-1");
+    expect(ctx.textContent).not.toContain("machine-2");
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "开个 codex 会话" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-cx-m1",
+        prompt: "开个 codex 会话",
+        workspace_id: "ws-1",
+      }),
+    );
+  });
+
+  it("绑定机器离线 → 浮层离线空态（不落全机器列表，不弹机器步）", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    setMachines([makeMachine({ status: "offline", online_runtime_count: 0 })]);
+    renderPortal(WORKSPACE_SCOPE);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+
+    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
+    expect(
+      screen.getByText(/工作区绑定的机器「machine-1」当前离线/),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /选择机器/ })).toBeNull();
+  });
+
+  it("?new=1（workspace scope）+ 绑定命中 → 绑定优先于 D-005（localStorage 指向另一台仍直进绑定机器）", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    // D-005 第一级故意指向 m-2：绑定机器必须优先。
+    window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-2");
+    mocks.searchParams = new URLSearchParams("new=1");
+    renderPortal(WORKSPACE_SCOPE);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("machine-1");
+    expect(ctx.textContent).not.toContain("machine-2");
+  });
+
+  it("?new=1（workspace scope）+ 绑定机器仅 pi 在线 → 弹绑定模式浮层（直接智能体步，pi 可选）", async () => {
+    mocks.fetchMyBindings.mockResolvedValue([makeBinding("ws-1", "m-1")]);
+    setMachines([
+      makeMachine({ runtimes: [makeRuntime({ id: "rt-pi", provider: "pi" })] }),
+    ]);
+    mocks.searchParams = new URLSearchParams("new=1");
+    renderPortal(WORKSPACE_SCOPE);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
+    expect(screen.queryByText("① 机器（仅在线）")).toBeNull();
+    expect(screen.getByRole("button", { name: /选择智能体 Pi/ })).toBeTruthy();
+  });
+
+  it("零回归：无绑定（bindings 空集）时 workspace 组「＋」仍走原两步机器步", async () => {
+    renderPortal(WORKSPACE_SCOPE);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+    expect(screen.getByText("① 机器（仅在线）")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /选择机器 machine-1/ }),
+    ).toBeTruthy();
+  });
+});

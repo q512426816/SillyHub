@@ -130,7 +130,7 @@ import {
 } from "@/components/daemon/session-panel";
 import { CreateGroupWizard } from "@/components/group-chat/create-group-wizard";
 import { GroupChatPanel } from "@/components/group-chat/group-chat-panel";
-import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
+import { PreSessionPicker, boundMachineIdFor, pickDefaultRuntimeOnMachine, pickRuntimeByProvider } from "@/components/sessions/pre-session-picker";
 import {
   PortalFilePreviewPanel,
   PortalFileTreePanel,
@@ -369,6 +369,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   // picker + 两处 SessionPanel；候选含共享机器的 runtimes，离线判定覆盖共享会话）。
   const pickerMachines = machineCandidates ?? machines;
 
+  // 2026-10-15-workspace-session-agent-only：当前用户在各工作区的绑定
+  //（per-member binding.daemon_id = 工作区绑定机器）。与工作区名同查询
+  //（wsNameQuery 的 Promise.all 已含 fetchMyBindings）——零新增请求。
+  const myBindings = useMemo(
+    () => wsNameQuery.data?.bindings ?? [],
+    [wsNameQuery.data],
+  );
+
   // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
   // created_at；无会话返回 null 不渲染入口。
   // 2026-10-12-ws-scoped-recent-session：scope 携带 workspaceId 的三入口
@@ -551,11 +559,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
 
   // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
   // 不让用户再手动点组头「＋」新建）：?new=1 直达新建。挂载解析一次；?session=
-  // 深链优先（同传时只恢复选中，不自动新建）；机器数据就绪后按 D-005 三级回退
-  // 解析默认机器（resolveDefaultMachineId——导出注释即指明门户为消费点），取其
+  // 深链优先（同传时只恢复选中，不自动新建）；机器数据就绪后解析默认机器，取其
   // 在线 claude/codex runtime（默认 Claude，与浮层第二步「默认」高亮一致）直接
   // 进预会话态（首句 createSession，FR-03 零残留不变）；未命中自动弹两步浮层
   // 兜底（无在线机器等场景由浮层空态引导承接）。
+  // 2026-10-15-workspace-session-agent-only：带 scope 工作区（workspace/change/
+  // quicklog）时解析链改为「绑定机器优先」——binding.daemon_id 命中则在绑定机器
+  // 上取默认 runtime（不再走 D-005）；未命中绑定才回退 D-005，且绑定解析需
+  // bindings 就绪（未就绪不解析，空集会被误判「无绑定」落错分支）。
   const autoNewDoneRef = useRef(false);
   useEffect(() => {
     if (autoNewDoneRef.current) return;
@@ -566,20 +577,19 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       return;
     }
     if (machinesLoading) return; // 机器数据未就绪不解析（空数组会误判无在线机器）
+    const scopedWsId = scopedPickerWorkspaceId();
+    if (scopedWsId && wsNameQuery.isLoading) return; // 绑定数据未就绪不解析
     autoNewDoneRef.current = true;
-    const machineId = resolveDefaultMachineId(machines, sessions);
-    const runtimes = (
-      machines.find((m) => m.id === machineId)?.runtimes ?? []
-    ).filter(
-      (r) =>
-        r.status === "online" &&
-        (r.provider === "claude" || r.provider === "codex"),
-    );
-    const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
+    const boundMachineId = boundMachineIdFor(myBindings, scopedWsId);
+    const targetMachine = boundMachineId
+      ? // 绑定机器（含共享候选——借用绑定同样命中）；离线/不可见 → null 落浮层。
+        (pickerMachines.find((m) => m.id === boundMachineId) ?? null)
+      : machines.find((m) => m.id === resolveDefaultMachineId(machines, sessions));
+    const runtime = pickDefaultRuntimeOnMachine(targetMachine);
     if (runtime) {
-      enterPreSession(runtime.id, scopedPickerWorkspaceId());
+      enterPreSession(runtime.id, scopedWsId);
     } else {
-      setPickerWorkspaceId(scopedPickerWorkspaceId());
+      setPickerWorkspaceId(scopedWsId);
       setPickerOpen(true);
     }
   }, [
@@ -587,6 +597,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     machinesLoading,
     machines,
     sessions,
+    myBindings,
+    pickerMachines,
+    wsNameQuery.isLoading,
     enterPreSession,
     scopedPickerWorkspaceId,
   ]);
@@ -615,9 +628,30 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
    * 组头「＋」（FR-04 / D-107 优先级链第一段，ql-20260823-001 补齐）：两层筛选
    * tab 已选具体机器+智能体时**直接带上下文进预会话**（用户已在具体机器和智能体
    * 上，不再弹浮层重复选择）；缺任一层或该引擎无在线 runtime 时回退两步浮层。
+   *
+   * 2026-10-15-workspace-session-agent-only：工作区上下文（组带 workspaceId 且
+   * 当前用户对该工作区有绑定机器）机器改取**绑定机器**——该维度已由工作区绑定
+   * 钉定不再让用户选（浮层直接智能体步）；筛选直带退化为「智能体层已选 + 绑定
+   * 机器上该引擎在线」（筛选机器不参与，即使筛的是另一台）。无绑定/非工作区组
+   * 保持原链路（两步浮层 + machineId&agent 双备齐直带，零回归）。
    */
   const handleNewInGroup = useCallback(
     (workspaceId: string | null, filter?: { machineId: string; agent: string }) => {
+      const boundMachineId = boundMachineIdFor(myBindings, workspaceId);
+      if (boundMachineId) {
+        const machine = pickerMachines.find((m) => m.id === boundMachineId);
+        if (filter?.agent) {
+          const runtime = pickRuntimeByProvider(machine, filter.agent);
+          if (runtime) {
+            // 直带进预会话（enterPreSession 统一 scope 双传 + 选中态/URL 清理）。
+            enterPreSession(runtime.id, workspaceId);
+            return;
+          }
+        }
+        setPickerWorkspaceId(workspaceId);
+        setPickerOpen(true);
+        return;
+      }
       if (filter?.machineId && filter.agent) {
         const machine = machines.find((m) => m.id === filter.machineId);
         const runtime = machine?.runtimes?.find(
@@ -646,7 +680,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [machines, scope, syncSessionParam],
+    [machines, myBindings, pickerMachines, scope, syncSessionParam, enterPreSession],
   );
 
   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
@@ -1147,10 +1181,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
         )}
       </div>
       {/* task-06（FR-04/D-107）：组头「＋」两步浮层（①在线机器 ②智能体，默认
-          Claude 高亮）；onPick 合成 preContext，取消仅关闭零影响。 */}
+          Claude 高亮）；onPick 合成 preContext，取消仅关闭零影响。
+          2026-10-15-workspace-session-agent-only：发起组属工作区且当前用户有
+          绑定机器时，浮层转「绑定模式」（跳过机器步，直接智能体步）。 */}
       <PreSessionPicker
         open={pickerOpen}
         machines={pickerMachines}
+        boundMachineId={boundMachineIdFor(myBindings, pickerWorkspaceId)}
         onCancel={() => setPickerOpen(false)}
         onPick={handlePickerPick}
       />
