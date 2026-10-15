@@ -170,13 +170,16 @@ export async function triggerDaemonSelfUpdate(
  * 收敛（ql-20260908-007）。与后端 InteractiveProviderLiteral / daemon
  * VALID_PROVIDERS 同值；新增引擎时四处一起改（此处 + 两端白名单）。
  * 2026-09-04-provider-pi-onboarding task-05：加 pi；
- * 2026-09-08-cursor-interactive-session task-08：加 cursor。
+ * 2026-09-08-cursor-interactive-session task-08：加 cursor；
+ * 2026-10-15-dsh-engine-acp task-07：加 dsh（DeepSeek Harness，单聊接入；
+ * 群聊白名单 create-group-wizard GROUP_SUPPORTED_PROVIDERS 不动——阶段 2）。
  */
 export const SESSION_SUPPORTED_PROVIDERS = [
   "claude",
   "codex",
   "pi",
   "cursor",
+  "dsh",
 ] as const;
 
 /** Provider display name, icon emoji, and Tailwind color classes. */
@@ -196,6 +199,11 @@ export const PROVIDER_META: Record<
   kimi: { label: "Kimi", icon: "🔴", color: "bg-red-100 text-red-800" },
   kiro: { label: "Kiro", icon: "🟩", color: "bg-emerald-100 text-emerald-800" },
   antigravity: { label: "Antigravity", icon: "⚫", color: "bg-slate-100 text-slate-800" },
+  dsh: {
+    label: "DeepSeek Harness",
+    icon: "🐳",
+    color: "bg-blue-100 text-blue-800",
+  },
 };
 
 /** 会话引擎下拉选项（value+label，label 取 PROVIDER_META 单源）。 */

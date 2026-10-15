@@ -691,6 +691,31 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
     });
   });
 
+  it("dsh 十六键与 daemon 单源一致（2026-10-15-dsh-engine-acp task-04：caps 镜像连带钉）", () => {
+    // dsh（DeepSeek Harness，ACP v1）表值前置事实：permission_dialog=true /
+    // dialog='native'（request_permission 代答桥与 codex 同构）；multimodal=false
+    //（dsh ACP 图片依赖 attachment store + exact route，附件走 disk 落盘——
+    // attachments=true 为 cursor 同形态）；compact/steering=false（ACP 无通道）。
+    expect(getProviderCaps("dsh")).toEqual({
+      resume: true,
+      mcp: true,
+      multimodal: false,
+      attachments: true,
+      thinking: true,
+      subagent: false,
+      permission_dialog: true,
+      dialog: "native",
+      edit_patch: false,
+      model_select: true,
+      provider_switch: true,
+      ctx_usage: true,
+      compact: false,
+      thinking_level: true,
+      steering: false,
+      sessionFork: "none",
+    });
+  });
+
   it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
     expect(PROVIDER_META.cursor?.label).toBe("Cursor");
   });

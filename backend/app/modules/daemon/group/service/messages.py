@@ -63,6 +63,7 @@ from .helpers import (
     _attachment_prompt_lines,
     _attachment_summary_rows,
     _user_display_name,
+    group_attachment_gate_denied,
 )
 from .mentions import (
     _has_broadcast_mention,
@@ -788,11 +789,12 @@ async def send_direct_message(
     attachment_rows: list = []
     if attachment_ids:
         attachment_rows = await svc._validate_group_attachments(user.id, attachment_ids)
-        # 引擎门控（同 _trigger_group_member 口径：仅 Claude 支持附件）。
-        if (member.provider or "claude") != "claude":
+        # 引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一，与触发侧
+        # shadow.py / 单聊 attachments.py 同源——pi/cursor/dsh 放行、codex/未知拒）。
+        if group_attachment_gate_denied(member.provider):
             raise GroupChatInvalid(
                 f"成员「{member.display_name}」的引擎不支持附件"
-                "（仅 Claude 支持多模态与文件注入）。",
+                "（该引擎附件链路未开通，详见引擎能力表）。",
                 details={"member_id": str(member.id), "provider": member.provider},
             )
 

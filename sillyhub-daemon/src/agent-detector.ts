@@ -1,16 +1,17 @@
 /**
- * agent-detector.ts —— 12 provider CLI 探测（Python agent_detector.py 的 1:1 Node 迁移）。
+ * agent-detector.ts —— 13 provider CLI 探测（Python agent_detector.py 的 1:1 Node 迁移，
+ * 2026-10-15-dsh-engine-acp task-01 增补 dsh 后 12→13）。
  *
  * 职责：
- *   启动时探测本机 12 种 coding agent CLI（claude/codex/copilot/opencode/openclaw/hermes/
- *   gemini/pi/cursor/kimi/kiro/antigravity）。按优先级 `env 覆盖 → PATH which → 不可用`
+ *   启动时探测本机 13 种 coding agent CLI（claude/codex/copilot/opencode/openclaw/hermes/
+ *   gemini/pi/cursor/kimi/kiro/antigravity/dsh）。按优先级 `env 覆盖 → PATH which → 不可用`
  *   解析每个 provider 的二进制路径，执行 `<bin_path> --version` 取版本，调用 task-14 的
  *   checkMinVersion 校验最低版本。为 daemon（task-20）注册阶段提供可用 agent 列表。
  *
  * Python 源对照：
  *   sillyhub_daemon/agent_detector.py:37-46   AgentDef dataclass
  *   sillyhub_daemon/agent_detector.py:48-58   DetectedAgent dataclass
- *   sillyhub_daemon/agent_detector.py:98-174  AGENT_DEFS（12 provider）
+ *   sillyhub_daemon/agent_detector.py:98-174  AGENT_DEFS（迁移时 12 provider；dsh 为 Node 侧增补）
  *   sillyhub_daemon/agent_detector.py:180-185 detect_all（串行）
  *   sillyhub_daemon/agent_detector.py:187-195 detect_one
  *   sillyhub_daemon/agent_detector.py:197-207 is_available
@@ -22,7 +23,7 @@
  *   - G-05 零依赖：仅用 Node 内置 child_process / fs / path，不引 which 库。
  *   - G-01 功能等价：与 Python 版行为 1:1（探测优先级、--version 解析、版本校验）。
  *
- * @see design.md §6（agent-detector.ts 文件清单）/ FR-07（12 provider 探测）
+ * @see design.md §6（agent-detector.ts 文件清单）/ FR-07（provider 探测）
  */
 
 import { execFile } from 'node:child_process';
@@ -92,7 +93,7 @@ export interface DetectedAgent {
 }
 
 // ---------------------------------------------------------------------------
-// 12 provider 探测表（对齐 Python AGENT_DEFS，agent_detector.py:98-174）
+// 13 provider 探测表（Python AGENT_DEFS 迁移 + dsh 增补）
 // ---------------------------------------------------------------------------
 
 /**
@@ -181,9 +182,19 @@ export const PROVIDER_SPECS = {
     versionPattern: /(\d+\.\d+\.\d+)/,
     protocol: 'text' as const,
   },
+  // 2026-10-15-dsh-engine-acp task-01（D-001）：dsh（DeepSeek Harness）作为交互式
+  // 引擎接入的第 4 家（spawn `dsh --profile acp`，见 interactive/dsh-acp-driver.ts）。
+  // 版本门 0.2.1：MIN_VERSIONS 同值条目，低于仅警告不硬拒（D-002，与四引擎同语义）。
+  dsh: {
+    bin: 'dsh',
+    envPath: 'SILLYHUB_DSH_PATH',
+    versionPattern: /(\d+\.\d+\.\d+)/,
+    protocol: 'json_rpc' as const,
+    minVersion: '0.2.1',
+  },
 } as const;
 
-/** provider 名联合类型（'claude' | 'codex' | ... 共 12 个字面量）。 */
+/** provider 名联合类型（'claude' | 'codex' | ... 共 13 个字面量）。 */
 export type ProviderName = keyof typeof PROVIDER_SPECS;
 
 /**
@@ -227,17 +238,17 @@ export function normalizeProvider(raw: string | undefined | null): string {
 const WINDOWS_EXTS = ['.exe', '.cmd', '.bat', '.ps1'];
 
 /**
- * 探测本机 12 种 coding agent CLI。
+ * 探测本机 13 种 coding agent CLI。
  *
  * 单实例无状态（Python 版同样每次 daemon 启动 new 一个）。
  * 子进程执行 / PATH 查找 / env 读取都在实例方法内，便于单测 mock（覆写 protected 方法）。
  */
 export class AgentDetector {
   /**
-   * 探测全部 12 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
+   * 探测全部 13 个 provider，返回 DetectedAgent[]（顺序与 PROVIDER_SPECS 一致）。
    *
    * 串行执行（对齐 Python detect_all，agent_detector.py:180-185）——非 Promise.all 并发，
-   * 避免瞬时 12 个子进程 + 与 Python 行为偏离。
+   * 避免瞬时 13 个子进程 + 与 Python 行为偏离。
    */
   async detectAgents(): Promise<DetectedAgent[]> {
     const results: DetectedAgent[] = [];

@@ -16,7 +16,8 @@
 // dialog 三值 'native'/'marker'/'none'、sessionFork 三值
 // 'native'/'seed'/'none'——2026-09-22-session-fork-continuation task-03）。
 //
-// 响亮失败守卫（R-02）：解析结果必须恰含四引擎（claude/codex/pi/cursor）且
+// 响亮失败守卫（R-02）：解析结果必须恰含五引擎（claude/codex/pi/cursor/dsh——
+// dsh 为 2026-10-15-dsh-engine-acp task-04 增补）且
 // 每键恰 16 个 caps 键；任一不符即 stderr 打印差异明细并 exit 1，**不写任何
 // 产物**（值形态写错——如裸 true 误写成字符串——同样以「缺少 caps 键」暴露）。
 //
@@ -56,7 +57,7 @@ const backendOutPath = resolve(
 
 // 契约常量（与 daemon 单源 ProviderCaps 接口一致；新引擎/新键接入时同步这里，
 // 守卫会强制单源与本清单一致，不同步即响亮失败）。
-const ENGINES = ["claude", "codex", "pi", "cursor"];
+const ENGINES = ["claude", "codex", "pi", "cursor", "dsh"];
 const CAPS_KEYS = [
   "resume",
   "mcp",
@@ -144,7 +145,7 @@ function parseCapsTable(body) {
   return table;
 }
 
-// ── 响亮失败守卫（R-02）：恰四引擎 × 每键恰 16 caps 键 ────────────────────────
+// ── 响亮失败守卫（R-02）：恰五引擎 × 每键恰 16 caps 键 ────────────────────────
 
 function guardTable(table) {
   const errors = [];

@@ -59,9 +59,17 @@ import { ClaudeSdkDriver } from './claude-sdk-driver.js';
 import { CodexAppServerDriver } from './codex-app-server-driver.js';
 import { CursorDriver } from './cursor-driver.js';
 import { PiRpcDriver } from './pi-rpc-driver.js';
+import { DshAcpDriver } from './dsh-acp-driver.js';
 import { ClaudeCredentialInjector, PiCredentialInjector } from '../credential-injector.js';
 import { isCodexFormSufficient, writeCodexHome } from '../codex-settings.js';
 import { isPiFormSufficient, writePiDir } from '../pi-settings.js';
+// 2026-10-15-dsh-engine-acp task-04：dsh 写盘器/注入器实现体在 dsh-settings.ts
+//（实现位置自由、type-only 反向引用无环——见该文件头注释）。
+import {
+  DshCredentialInjector,
+  isDshFormSufficient,
+  writeDshHome,
+} from '../dsh-settings.js';
 
 // ── import 环纪律（2026-09-11-provider-adapter-registry task-01）──────────────
 //
@@ -461,6 +469,35 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     // sessionFork='none'：CLI 无分叉通道（D-008 定值）。
     sessionFork: 'none',
   },
+  // 2026-10-15-dsh-engine-acp task-04（D-003 方案 A + Grill 修正口径）：dsh
+  //（DeepSeek Harness，ACP v1 stdio）第 5 个交互引擎。caps 取值依据：
+  // - permission_dialog=true / dialog='native'：request_permission 代答桥机制
+  //   与 codex 同构（providers.ts dialog 键定义即 permission_dialog 桥）；
+  // - multimodal=false：dsh ACP 图片输入依赖 durable attachment store + exact
+  //   route（dsh packages/acp/acp/README.md），保守降级走 disk 落盘链路
+  //   （attachments=true，cursor 同形态；R-08 复升条件见 design）；
+  // - compact=false：ACP 无对应方法（dsh 内部自管上下文，backend 409 拒绝）；
+  // - steering=false：ACP 每会话单 in-flight prompt，无忙轮注入通道（排队语义）；
+  // - thinking_level=true：set_config_option reasoning_effort 三档（driver 本地映射）。
+  dsh: {
+    resume: true,
+    mcp: true,
+    multimodal: false,
+    attachments: true,
+    thinking: true,
+    subagent: false,
+    permission_dialog: true,
+    dialog: 'native',
+    edit_patch: false,
+    model_select: true,
+    provider_switch: true,
+    ctx_usage: true,
+    compact: false,
+    thinking_level: true,
+    steering: false,
+    // sessionFork='none'：ACP 无会话分叉方法（load/fork 均 unsupported）。
+    sessionFork: 'none',
+  },
 };
 
 /**
@@ -587,7 +624,7 @@ export interface ProviderDescriptor {
  */
 export interface ProviderFileSettingsWriter {
   /** per-session 目录段名（join(daemonStateDir(), dirName, sessionKey)）。 */
-  dirName: 'codex' | 'pi';
+  dirName: 'codex' | 'pi' | 'dsh';
   /** 注入 env 键名（CODEX_HOME / PI_CODING_AGENT_DIR）。 */
   envKey: string;
   /** 门槛判定（与写盘器同判据；provider 缺必需字段 → false，调用方 warn 跳过）。 */
@@ -622,7 +659,7 @@ export interface ProviderAdapter extends ProviderDescriptor {
    * reload 门控的统一数据源）；claude / cursor 无 per-session provider file
    * dirs → 显式 none（claude 会话目录走 CLAUDE_CONFIG_DIR 另一链路）。
    */
-  perSessionDir: 'codex' | 'pi' | { kind: 'none' };
+  perSessionDir: 'codex' | 'pi' | 'dsh' | { kind: 'none' };
   /** 冒烟套件文件名（守护测试校验真实存在且覆盖全部支持格式，Wave 4 消费）。 */
   smokeSuite: string;
   /** 会话级供应商切换支持（与 caps.provider_switch 单源一致，测试锁定）。 */
@@ -757,6 +794,34 @@ export const INTERACTIVE_PROVIDERS = {
     },
     perSessionDir: 'pi',
     smokeSuite: 'tests/provider-injection-smoke.integ.test.ts',
+    switchable: true,
+  },
+  // 2026-10-15-dsh-engine-acp task-04：dsh（DeepSeek Harness）——family='json_rpc'
+  //（ACP v1 即 stdio NDJSON JSON-RPC；dsh 不在批量层 PROVIDER_TO_PROTOCOL 表——
+  // 批处理接入为非目标，守护测试对该表的断言不含 dsh）；displayName 对齐前端
+  // label 约定；返回类型显式标注 InteractiveDriver 切断类型推理环（同 claude
+  // 条目先例）。密钥经 DshCredentialInjector 注 env（patch 的 apiKeyEnv 引用），
+  // 路由经 DSH_HOME patch 写盘器（官方端点形态 base_url 空 → skip 走 env 层）。
+  dsh: {
+    provider: 'dsh',
+    family: 'json_rpc',
+    displayName: 'DeepSeek Harness',
+    createDriver: (): InteractiveDriver => new DshAcpDriver(),
+    caps: capsOf('dsh'),
+    // ── 聚合契约五成员 ──
+    envInjector: () => new DshCredentialInjector(),
+    fileSettings: {
+      dirName: 'dsh',
+      envKey: 'DSH_HOME',
+      isSufficient: isDshFormSufficient,
+      write: ({ dir, provider }) => writeDshHome({ dshHome: dir, provider }),
+      skipsOfficialEndpoint: (provider) =>
+        typeof provider.base_url !== 'string' || provider.base_url.length === 0,
+    },
+    perSessionDir: 'dsh',
+    // 写盘器锚点（FR-05 冒烟词表守护：dsh-settings.test.ts 覆盖 anthropic 与
+    // openai_chat 全部 api_format 形态）。
+    smokeSuite: 'tests/dsh-settings.test.ts',
     switchable: true,
   },
 } satisfies Record<string, ProviderAdapter>;

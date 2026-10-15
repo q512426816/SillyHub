@@ -67,6 +67,7 @@ const _compileTimeKeySet: Record<InteractiveProvider, true> = {
   codex: true,
   cursor: true,
   pi: true,
+  dsh: true,
 };
 void _compileTimeKeySet;
 
@@ -100,8 +101,14 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
 }
 
 describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi）', () => {
-    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual(['claude', 'codex', 'cursor', 'pi']);
+  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi/dsh）', () => {
+    expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual([
+      'claude',
+      'codex',
+      'cursor',
+      'dsh',
+      'pi',
+    ]);
     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
       Object.keys(INTERACTIVE_PROVIDERS).sort(),
@@ -131,14 +138,21 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       // 合法性：family 必须落在 6 协议联合内。
       expect(sixProtocols).toContain(d.family);
       // 一致性：与批量层反查表同源（interactive 注册表不得另立映射）。
-      expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
+      // 2026-10-15-dsh-engine-acp：dsh 为交互层专属引擎（批处理接入非目标），
+      // 反查表无条目（undefined）——豁免一致性比对，锚点见下方现值断言。
+      if (PROVIDER_TO_PROTOCOL[d.provider] !== undefined) {
+        expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
+      }
     }
     // 现值锚点（漂移可见）：PROTOCOL_PROVIDERS 中 claude∈stream_json、codex∈json_rpc、
-    // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）。
+    // cursor∈stream_json、pi∈pi_json（task-04：pi 复用批量层 pi_json 适配器协议族，不另立映射）；
+    // dsh∈json_rpc（ACP v1 即 stdio NDJSON JSON-RPC；交互层专属，反查表无条目）。
     expect(INTERACTIVE_PROVIDERS.claude?.family).toBe('stream_json');
     expect(INTERACTIVE_PROVIDERS.codex?.family).toBe('json_rpc');
     expect(INTERACTIVE_PROVIDERS.cursor?.family).toBe('stream_json');
     expect(INTERACTIVE_PROVIDERS.pi?.family).toBe('pi_json');
+    expect(INTERACTIVE_PROVIDERS.dsh?.family).toBe('json_rpc');
+    expect(PROVIDER_TO_PROTOCOL['dsh']).toBeUndefined();
   });
 
   it('4. caps 与 PROVIDER_CAPS 单源：同引用（toBe）且逐值相等、16 契约键齐全', () => {

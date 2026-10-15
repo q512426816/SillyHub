@@ -138,6 +138,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
       codex: { label: "Codex", icon: "🟢", color: "" },
       pi: { label: "Pi", icon: "🩷", color: "" },
       cursor: { label: "Cursor", icon: "🟡", color: "" },
+      dsh: { label: "DeepSeek Harness", icon: "🐳", color: "" },
     },
     // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
     AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
@@ -3034,5 +3035,31 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     expect(ancientRowCount()).toBeLessThanOrEqual(1);
     expect(beforeCallCount()).toBe(0);
     expect(mocks.notifyError).not.toHaveBeenCalled();
+  });
+});
+
+describe("2026-10-15-dsh-engine-acp task-07：dsh 单聊引擎边界钉（FR-08）", () => {
+  it("SESSION_ENGINE_OPTIONS 单一源含 dsh（DeepSeek Harness），label 与 daemon displayName 一致", async () => {
+    const { SESSION_ENGINE_OPTIONS, SESSION_SUPPORTED_PROVIDERS } = await import(
+      "@/lib/daemon"
+    );
+    expect(SESSION_SUPPORTED_PROVIDERS).toContain("dsh");
+    const dsh = SESSION_ENGINE_OPTIONS.find((o) => o.value === "dsh");
+    expect(dsh?.label).toBe("DeepSeek Harness");
+  });
+
+  it("群聊白名单不含 dsh（阶段 2 边界——create-group-wizard / member-panel 源级钉）", () => {
+    // 源级断言（镜像 backend test_provider_caps_alignment 读取式先例）：群聊
+    // 六要素白名单 GROUP_SUPPORTED_PROVIDERS / ENGINE_OPTIONS 均不得提前放开 dsh。
+    const { readFileSync } = require("node:fs") as typeof import("node:fs");
+    const { resolve } = require("node:path") as typeof import("node:path");
+    // vitest jsdom 下 __dirname 被压平（(dashboard) 括号目录丢失）——用
+    // process.cwd()（vitest 运行根 = frontend/）锚定源文件路径。
+    const wizardSrc = readFileSync(
+      resolve(process.cwd(), "src/components/group-chat/create-group-wizard.tsx"),
+      "utf8",
+    );
+    expect(wizardSrc).toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi"])');
+    expect(wizardSrc).not.toContain('GROUP_SUPPORTED_PROVIDERS = new Set(["claude", "codex", "pi", "dsh"])');
   });
 });

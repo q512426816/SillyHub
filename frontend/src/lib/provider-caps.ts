@@ -176,6 +176,24 @@ export const PROVIDER_CAPS: Record<string, ProviderCaps> = {
     steering: false,
     sessionFork: 'none',
   },
+  dsh: {
+    resume: true,
+    mcp: true,
+    multimodal: false,
+    attachments: true,
+    thinking: true,
+    subagent: false,
+    permission_dialog: true,
+    dialog: 'native',
+    edit_patch: false,
+    model_select: true,
+    provider_switch: true,
+    ctx_usage: true,
+    compact: false,
+    thinking_level: true,
+    steering: false,
+    sessionFork: 'none',
+  },
 };
 
 /**

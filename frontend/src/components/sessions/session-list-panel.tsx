@@ -64,7 +64,8 @@
  *     - 两层筛选下拉（FR-02 / D-107；ql-20260908-005 胶囊 tab → 下拉，机器
  *       多时胶囊换行撑爆左栏）：第一层机器（含「全部机器」清空，可搜索），
  *       选中后出第二层智能体（SESSION_ENGINE_OPTIONS 单一源全量引擎
- *       claude/codex/pi/cursor，ql-20260908-007 补齐，含「全部智能体」）；
+ *       claude/codex/pi/cursor/dsh，ql-20260908-007 补齐、dsh 为
+ *       2026-10-15-dsh-engine-acp 增补，含「全部智能体」）；
  *       纯视图过滤不进数据层；筛选态隐藏机器小节标题；筛选变化重置展开态
  *       除当前组（R-05）；筛选值 localStorage 记忆（刷新恢复用户选择），
  *       陈旧机器 id 待机器列表到位后兜底重置
@@ -237,8 +238,9 @@ const STATUS_OPTIONS = [
 
 /**
  * 第二层智能体下拉选项（D-107）。ql-20260908-007：选项从单一源
- * SESSION_ENGINE_OPTIONS 派生（claude/codex/pi/cursor 全量支持引擎，
- * label 取 PROVIDER_META）——原硬编码两档漏 pi/cursor，与实际可选引擎不符。
+ * SESSION_ENGINE_OPTIONS 派生（claude/codex/pi/cursor/dsh 全量支持引擎
+ * ——dsh 为 2026-10-15-dsh-engine-acp 增补，label 取 PROVIDER_META）——
+ * 原硬编码两档漏 pi/cursor，与实际可选引擎不符。
  */
 const AGENT_TABS = SESSION_ENGINE_OPTIONS.map((o) => ({ ...o }));
 

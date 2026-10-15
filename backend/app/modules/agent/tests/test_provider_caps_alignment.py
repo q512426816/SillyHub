@@ -74,8 +74,9 @@ EXPECTED_CAPS_KEYS: frozenset[str] = frozenset(
 
 # 契约 provider（现状交互式 driver 全集；新 provider 接入时三端同加。
 # pi 由 2026-09-04-provider-pi-onboarding task-04 接入；
-# cursor 由 2026-09-08-cursor-interactive-session task-07 接入）。
-EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi"})
+# cursor 由 2026-09-08-cursor-interactive-session task-07 接入；
+# dsh 由 2026-10-15-dsh-engine-acp task-04 接入）。
+EXPECTED_PROVIDERS: frozenset[str] = frozenset({"claude", "codex", "cursor", "pi", "dsh"})
 
 # TS 表源解析：provider 条目块（`claude: { ... }`）与块内键值对。
 # 值形态两代（R-09：解析器扩展与 caps 键同任务交付，防止 string 枚举键被

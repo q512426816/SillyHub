@@ -69,6 +69,20 @@ GROUP_CARRIER_SPEC_STRATEGY = "group_carrier"
 GROUP_MEMBER_STAGE = "group_member"
 
 
+def group_attachment_gate_denied(provider: str | None) -> bool:
+    """群附件引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一）。
+
+    发送侧（messages.py 直聊路径）与触发侧（shadow.py _trigger_group_member）
+    共用同款判定：与单聊 attachments.py:59 同源查 ``caps.attachments``——
+    claude/pi/cursor/dsh 放行（pi/cursor 群附件从拒变放为对齐单聊的有意
+    行为变化，design R-03），codex 与未知引擎拒绝（默认拒绝对象）。
+    ``provider=None`` 沿用旧硬编码语义回落 ``claude``（存量成员缺省放行）。
+    """
+    from app.modules.agent.provider_caps import get_provider_caps
+
+    return not get_provider_caps(provider or "claude")["attachments"]
+
+
 # quick 影子直聊（2026-09-02）：本轮 user_input metadata 的 source 标记——
 # run_sync 投影判定锚（命中 → 整轮不投影，仅 [[GROUP]] 段例外）。
 SHADOW_DIRECT_SOURCE = "shadow_direct"

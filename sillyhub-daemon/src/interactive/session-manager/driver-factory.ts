@@ -330,7 +330,14 @@ export function buildDriverOptions(
     // extension_ui_request dialog 桥接（task-01）打开注入通道；桥接本体归 task-01，
     // 未消费前 extension_ui_request 维持自动 cancelled（fail-closed）。claude 仍走
     // canUseTool/onUserDialog 不变；cursor 无对话/审批通道不注入。
-    if (state.provider === 'codex' || state.provider === 'pi') {
+    // 2026-10-15-dsh-engine-acp task-04（D-006 边界合并）：dsh 共用本注入块——
+    // ACP request_permission 代答桥经 DshAcpStartOptions.sessionPermission 拿同一
+    // 对闭包引用（对齐 codex/pi 形态）。
+    if (
+      state.provider === 'codex' ||
+      state.provider === 'pi' ||
+      state.provider === 'dsh'
+    ) {
       // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
       // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
       driverOpts.sessionPermission = {

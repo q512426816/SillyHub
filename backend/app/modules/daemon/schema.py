@@ -126,7 +126,9 @@ class AgentSessionListResponse(BaseModel):
 # 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
 # 2026-09-04-provider-pi-onboarding 冒烟 F-1：加 pi（第三处引擎白名单，档B 第 10 步已补文档）。
 # 2026-09-08-cursor-interactive-session task-07：加 cursor（防显式 provider 路径 422）。
-InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi"]
+# 2026-10-15-dsh-engine-acp task-05：加 dsh（DeepSeek Harness，ACP v1——单聊接入，
+# daemon 侧注册见 sillyhub-daemon providers.ts dsh 条目）。
+InteractiveProviderLiteral = Literal["claude", "codex", "cursor", "pi", "dsh"]
 
 # ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
 # §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────

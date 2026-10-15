@@ -40,12 +40,17 @@ export type SemVerTuple = readonly [number, number, number];
  * ql-20260905-001：补 pi 条目——PROVIDER_SPECS.pi.minVersion 声明 0.81.0 但本表
  * 此前缺条目，checkMinVersion('pi', v) 恒 null，版本门禁从未生效（旧版 pi 静默
  * 注册为 available）。与 agent-detector.ts PROVIDER_SPECS.pi.minVersion 保持同值。
+ *
+ * 2026-10-15-dsh-engine-acp task-01（D-002）：补 dsh 条目 0.2.1——低于仅警告不硬拒
+ * （dsh 处于 0.2.x alpha，破坏性变更由 ACP 驱动握手失败结构化错误兜底）。
+ * 与 agent-detector.ts PROVIDER_SPECS.dsh.minVersion 保持同值。
  */
 export const MIN_VERSIONS: Readonly<Record<string, SemVerTuple>> = {
   claude: [2, 0, 0],
   codex: [0, 100, 0],
   copilot: [1, 0, 0],
   pi: [0, 81, 0],
+  dsh: [0, 2, 1],
 };
 
 /**

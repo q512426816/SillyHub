@@ -41,6 +41,7 @@ from .helpers import (
     GroupChatInvalid,
     GroupMemberTriggerRead,
     _attachment_prompt_lines,
+    group_attachment_gate_denied,
 )
 from .typing_presence import _publish_group_channel_event
 
@@ -263,14 +264,15 @@ async def _trigger_group_member(
     dm_target_member_id/dm_kind 等，在基础键之后 merge——新键不碰
     source_* 既有链标记）。两者均 None 时零行为变化（开关关闭路径）。
     """
-    # 引擎门控（单聊 D-6 同口径：仅 Claude 支持附件）——发送侧已过归属/
+    # 引擎门控（2026-10-15-dsh-engine-acp task-06：caps 口径统一，helpers.
+    # group_attachment_gate_denied 与发送侧/单聊同源）——发送侧已过归属/
     # 数量校验并落时间线，此处 fail-loud 拒绝触发（消息保留可重发仅触发）。
     attachment_lines: list[str] = []
     if attachment_rows:
-        if (member.provider or "claude") != "claude":
+        if group_attachment_gate_denied(member.provider):
             raise GroupChatInvalid(
                 f"成员「{member.display_name}」的引擎不支持附件"
-                "（仅 Claude 支持多模态与文件注入）。",
+                "（该引擎附件链路未开通，详见引擎能力表）。",
                 details={"member_id": str(member.id), "provider": member.provider},
             )
         attachment_lines = _attachment_prompt_lines(attachment_rows)

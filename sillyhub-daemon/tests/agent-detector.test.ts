@@ -88,11 +88,11 @@ function clearAllSillyhubEnv(): void {
 // ---------------------------------------------------------------------------
 
 describe('PROVIDER_SPECS', () => {
-  it('恰好 12 个 entry（对齐 Python AGENT_DEFS）', () => {
-    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(12);
+  it('恰好 13 个 entry（Python AGENT_DEFS 12 + dsh 增补）', () => {
+    expect(Object.keys(PROVIDER_SPECS)).toHaveLength(13);
   });
 
-  it('12 个 provider 的 protocol 字段与期望表一致', () => {
+  it('13 个 provider 的 protocol 字段与期望表一致', () => {
     const expected: Record<string, string> = {
       claude: 'stream_json',
       codex: 'json_rpc',
@@ -106,6 +106,7 @@ describe('PROVIDER_SPECS', () => {
       kimi: 'json_rpc',
       kiro: 'json_rpc',
       antigravity: 'text',
+      dsh: 'json_rpc',
     };
     for (const [name, proto] of Object.entries(expected)) {
       expect(
@@ -114,7 +115,7 @@ describe('PROVIDER_SPECS', () => {
     }
   });
 
-  it('12 个 provider 顺序与 Python AGENT_DEFS 一致', () => {
+  it('13 个 provider 顺序：Python AGENT_DEFS 12 个在前，dsh 增补在末位', () => {
     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
     expect(Object.keys(PROVIDER_SPECS)).toEqual([
       'claude',
@@ -129,6 +130,7 @@ describe('PROVIDER_SPECS', () => {
       'kimi',
       'kiro',
       'antigravity',
+      'dsh',
     ]);
   });
 
@@ -148,6 +150,14 @@ describe('PROVIDER_SPECS', () => {
   // 0.81.x rpc 词表为基线，pi 补 minVersion。
   it('pi minVersion === "0.81.0"', () => {
     expect(PROVIDER_SPECS.pi.minVersion).toBe('0.81.0');
+  });
+
+  // 2026-10-15-dsh-engine-acp task-01（D-001/D-002）：dsh（DeepSeek Harness）探测项，
+  // env 覆盖变量 SILLYHUB_DSH_PATH，版本门 0.2.1（低于警告不硬拒）。
+  it('dsh minVersion === "0.2.1" 且 envPath === "SILLYHUB_DSH_PATH"', () => {
+    expect(PROVIDER_SPECS.dsh.minVersion).toBe('0.2.1');
+    expect(PROVIDER_SPECS.dsh.envPath).toBe('SILLYHUB_DSH_PATH');
+    expect(PROVIDER_SPECS.dsh.bin).toBe('dsh');
   });
 
   it('8 个无版本要求的 provider minVersion === undefined', () => {
@@ -340,11 +350,11 @@ describe('AgentDetector.detectAgents', () => {
   beforeEach(() => clearAllSillyhubEnv());
   afterEach(() => clearAllSillyhubEnv());
 
-  it('全部不可用 → 12 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
+  it('全部不可用 → 13 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
     const d = new FakeDetector();
     d.fakeFindOnPath = () => null;
     const results = await d.detectAgents();
-    expect(results).toHaveLength(12);
+    expect(results).toHaveLength(13);
     expect(results.every((r) => r.status === 'unavailable')).toBe(true);
     expect(results.every((r) => r.path === '')).toBe(true);
     expect(results.every((r) => r.version === undefined)).toBe(true);
@@ -360,7 +370,7 @@ describe('AgentDetector.detectAgents', () => {
     d.fakeFindOnPath = (bin) => (bin === 'claude' ? '/usr/bin/claude' : null);
     d.fakeExecResult = { stdout: 'Claude Code 2.1.5\n', stderr: '' };
     const results = await d.detectAgents();
-    expect(results).toHaveLength(12);
+    expect(results).toHaveLength(13);
     const claude = results.find((r) => r.provider === 'claude');
     expect(claude).toBeDefined();
     expect(claude?.status).toBe('available');
@@ -368,11 +378,11 @@ describe('AgentDetector.detectAgents', () => {
     expect(claude?.version).toBe('2.1.5');
     expect(claude?.protocol).toBe('stream_json');
     expect(claude?.versionWarning).toBeNull();
-    // 其余 11 个仍 unavailable。
-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(11);
+    // 其余 12 个仍 unavailable。
+    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(12);
   });
 
-  it('串行探测：12 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
+  it('串行探测：13 个 provider 顺序与 PROVIDER_SPECS 一致', async () => {
     const d = new FakeDetector();
     d.fakeFindOnPath = () => null;
     const results = await d.detectAgents();
@@ -554,6 +564,38 @@ describe('AgentDetector versionWarning', () => {
     const results = await d.detectAgents();
     const opencode = results.find((r) => r.provider === 'opencode');
     expect(opencode?.versionWarning).toBeNull();
+  });
+
+  // 2026-10-15-dsh-engine-acp task-01（D-002）：dsh 版本门三态——低于警告不硬拒、
+  // 达标/边界无警告（0.2.x alpha 的破坏性变更由驱动层握手失败兜底，探测层只警告）。
+  it('dsh 低于最低（0.2.0 < 0.2.1）→ warning 含 "0.2.1"，status 仍 available', async () => {
+    const d = new FakeDetector();
+    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
+    d.fakeExecResult = { stdout: 'dsh 0.2.0\n', stderr: '' };
+    const results = await d.detectAgents();
+    const dsh = results.find((r) => r.provider === 'dsh');
+    expect(dsh).toBeDefined();
+    expect(dsh?.versionWarning).not.toBeNull();
+    expect(dsh?.versionWarning).toContain('0.2.1');
+    expect(dsh?.status).toBe('available');
+  });
+
+  it('dsh 达标（0.3.0 ≥ 0.2.1）→ versionWarning === null', async () => {
+    const d = new FakeDetector();
+    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
+    d.fakeExecResult = { stdout: 'dsh 0.3.0\n', stderr: '' };
+    const results = await d.detectAgents();
+    const dsh = results.find((r) => r.provider === 'dsh');
+    expect(dsh?.versionWarning).toBeNull();
+  });
+
+  it('dsh 恰好等于最低（0.2.1，prerelease 后缀忽略）→ versionWarning === null（>= 视为达标）', async () => {
+    const d = new FakeDetector();
+    d.fakeFindOnPath = (bin) => (bin === 'dsh' ? '/usr/bin/dsh' : null);
+    d.fakeExecResult = { stdout: 'dsh 0.2.1-alpha.2\n', stderr: '' };
+    const results = await d.detectAgents();
+    const dsh = results.find((r) => r.provider === 'dsh');
+    expect(dsh?.versionWarning).toBeNull();
   });
 
   it('codex 低于最低（0.1.0 < 0.100.0）→ warning 含 "0.100.0"', async () => {
@@ -772,7 +814,7 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
       gemini: { stdout: 'gemini 1.0.0\n', stderr: '' },
     };
     const results = await d.detectAgents();
-    expect(results).toHaveLength(12);
+    expect(results).toHaveLength(13);
 
     const claude = results.find((r) => r.provider === 'claude');
     const codex = results.find((r) => r.provider === 'codex');
@@ -792,7 +834,7 @@ describe('AgentDetector P0-B 补漏（多 provider / isAvailable / env 正向）
     expect(gemini?.protocol).toBe('stream_json');
 
     // 其余 9 个 unavailable
-    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(9);
+    expect(results.filter((r) => r.status === 'unavailable')).toHaveLength(10);
   });
 
   // 补漏 2：isAvailable 公开方法（对齐 Python is_available）
