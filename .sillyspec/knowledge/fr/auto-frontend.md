@@ -2920,3 +2920,43 @@ created_at: 2026-10-08T03:33:17.438Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-14-session-bottom-resize-observer/requirements.md#FR-06
 最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+
+## FR-auto-frontend-250 会话时间线挂载期间 history.scrollRestoration='manual'（禁浏览器恢复），卸载还原 'auto'——刷新后不恢复上次容器滚动位置，由贴底链统一落底
+变更：2026-10-14-session-bottom-no-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-no-restore/requirements.md#FR-01
+最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c
+
+## FR-auto-frontend-251 刷新（任意上次停留位置）后落底 delta=0（程序性滚顶/滚中后刷新均验证）
+变更：2026-10-14-session-bottom-no-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-no-restore/requirements.md#FR-02
+最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c
+
+## FR-auto-frontend-252 切换会话/上滚读历史/跳转/翻页既有行为不变
+变更：2026-10-14-session-bottom-no-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-no-restore/requirements.md#FR-03
+最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-session-bottom-no-restore:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx | frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-session-bottom-no-restore
+  status: active
+
+## FR-auto-frontend-253 既有测试面复跑绿 + tsc 0
+变更：2026-10-14-session-bottom-no-restore
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-session-bottom-no-restore/requirements.md#FR-04
+最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c

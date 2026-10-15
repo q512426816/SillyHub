@@ -1,0 +1,28 @@
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 1c8bcadfd..1f7b3ffc2 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -1395,6 +1395,23 @@ export function TurnTimeline({
+   // 用户上滚接管由 isNearBottomRef 守卫（handleScroll 置 false 后回调恒 no-op）；
+   // 降级：无 ResizeObserver（jsdom/极旧浏览器）不挂观测，行为回到重申窗兜底。
+   const bottomFollowRafRef = useRef<number | null>(null);
++  // 2026-10-14-session-bottom-no-restore（第五层）：禁浏览器刷新滚动恢复——
++  // Chrome reload 时恢复上次容器滚动位置，恢复晚到（内容装配后）会覆盖初始
++  // 贴底 scrollTo 并经 handleScroll 正常分支清 isNearBottomRef（恢复写入=
++  // scrollTop 骤减且 scrollHeight 稳定，不命中被动增高分支），贴底链全死 →
++  // 停在上次位置（用户实测刷新落位随机 35/31/3 轮的根因；切换会话路径审计
++  // 健康，故障为刷新专有）。刷新=重新打开会话，落底语义与切换一致；卸载还原
++  // auto 不影响其它页面刷新体验。
++  useEffect(() => {
++    if (typeof history === "undefined" || !("scrollRestoration" in history)) {
++      return;
++    }
++    const prev = history.scrollRestoration;
++    history.scrollRestoration = "manual";
++    return () => {
++      history.scrollRestoration = prev;
++    };
++  }, []);
+   // 审查 P2 补口：deps 含「turns 空态」布尔——冷加载首 commit turns=[] 渲染空态
+   // div（观察快照只有它），历史到达后空态卸载、.space-y-5 内容容器挂载但不在
+   // 快照（死观测盲区，恰好是「点击会话直开」主路径）。布尔翻转（false→true）
