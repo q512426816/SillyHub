@@ -1,0 +1,379 @@
+diff --git a/.claude/CLAUDE.md b/.claude/CLAUDE.md
+index 1fef6228d..087801ec2 100644
+--- a/.claude/CLAUDE.md
++++ b/.claude/CLAUDE.md
+@@ -36,6 +36,7 @@
+   * 多主题铁律：取值单一源 `frontend/src/styles/themes.ts`（blue/ai-native 双套）；品牌色类名用 `brand-*` 语义阶（随 html data-theme 换肤），`blue-*` 阶仅限真信息蓝/外部标识色；阴影走主题 token（shadow-* 已 var 化）；antd 组件色经 ConfigProvider token 不手写；旧参考 `archive/2026-06-21-2026-06-21-frontend-style-system/` 仅作历史背景，与冲突处以新系统为准。
+ 21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
+   * 后端 schema（DTO/请求/响应）有改动时，同一 quick/change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
++  * **daemon 同款义务（2026-10-15-ci-recurrence-guard ⑨）**：`sillyhub-daemon/src/api-types.ts` 同样从 `backend/openapi.json` 生成——后端 schema 有改动时，`pnpm -C sillyhub-daemon gen:types` 必须与前端 `gen:types` 在同一变更内跑并提交（断言面闸门⑨ fail-closed；历史上只写前端义务，daemon 漏生成致 daemon-ci 三连红）；
+   * **gen:types 前先确认前端 node_modules 健康**（`pnpm exec tsc --version` 能跑、`.bin` 有 shim）：node_modules 半坏会报一堆**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'`（根因是缺间接依赖 csstype 等），误判成代码问题。修复 `pnpm install --force`（普通 install 可能命中缓存不修）；
+   * 若 gen:types 暴露了与本次改动**无关**的旧测试债（如 mock 缺某字段），按惯例顺手补字段修好，而不是为躲报错改回手写。
+ 22. **SillySpec CLI 一律在主仓库根目录跑,永不 `cd` 进 worktree**（`cd` 会让 sillyspec 把当前目录当成独立项目实例,写出与主仓库分裂的进度库 / artifact / QUICKLOG）；需要在 worktree 或子目录读代码时用绝对路径或 `git -C <path>`，不切换工作目录。
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 7614e5fbb..e02e77bf9 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -19,3 +19,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草
+ - 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th
+ - 2026-10-14-assets-knowledge-popup-preview | 动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在
++- 2026-10-14-decision-anchor-change-qualified | 动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 4895d6a2e..ab39bacc5 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -59,3 +59,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-14 | 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草 |
+ | 2026-10-14 | 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th |
+ | 2026-10-14 | 2026-10-14-assets-knowledge-popup-preview | 动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在 |
++| 2026-10-15 | 2026-10-14-decision-anchor-change-qualified | 动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 93313458c..6fe39b07f 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -93,3 +93,4 @@
+ | 2026-10-14 | 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th |
+ | 2026-10-14 | 2026-10-14-assets-knowledge-popup-preview | 动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在 |
+ | 2026-10-15 | 2026-10-15-fix-ci-red | main 分支 CI 红灯灭火：daemon api-types 漂移 + 前端菜单测试数量锚过期，纯对齐修复无行为变更 |
++| 2026-10-15 | 2026-10-14-decision-anchor-change-qualified | 动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同 |
+diff --git a/backend/.pre-commit-config.yaml b/backend/.pre-commit-config.yaml
+index cf0fa0fdd..f6328dede 100644
+--- a/backend/.pre-commit-config.yaml
++++ b/backend/.pre-commit-config.yaml
+@@ -19,6 +19,7 @@ repos:
+         language: system
+         types: [python]
+         pass_filenames: true
++        stages: [pre-commit]
+ 
+       - id: ruff-check
+         name: ruff check
+@@ -27,6 +28,7 @@ repos:
+         language: system
+         types: [python]
+         pass_filenames: true
++        stages: [pre-commit]
+ 
+ # 2026-10-11-assertion-surface-guard：共享断言面同步闸门（check-only）——契约源
+ # （六面清单 + ⑦菜单注册表 ⑧协议 MSG）被触碰而配对钉子测试未同提交时 fail-closed。
+@@ -40,3 +42,29 @@ repos:
+         language: system
+         pass_filenames: false
+         always_run: true
++        stages: [pre-commit]
++
++# 2026-10-15-ci-recurrence-guard（fix-ci-red 灭火复盘）：CI 红灯三类根因
++# （tsc 严格错误 vitest 不查、api-types 双侧漂移 push 后才见）全部缺本地
++# 拦截面——pre-push 快检把 CI 同源四命令前移到推送时（约 1 分钟），fail-closed。
++# 需一次性安装：backend/.venv/Scripts/python.exe -m pre_commit install
++# --hook-type pre-push --config backend/.pre-commit-config.yaml
++      - id: ci-fast-gate
++        name: pre-push CI 快检（typecheck×2 + api-types 漂移×2）
++        entry: >-
++          bash -c 'pnpm -C frontend typecheck && pnpm -C sillyhub-daemon typecheck && pnpm -C frontend gen:types:check && pnpm -C sillyhub-daemon gen:types:check || { echo "  ↩ 推送前快检未过（与 CI 同源）：按上方报错修复后重推；api-types 漂移 → pnpm -C frontend gen:types && pnpm -C sillyhub-daemon gen:types 后连同生成物提交"; exit 1; }' --
++        language: system
++        pass_filenames: false
++        always_run: true
++        stages: [pre-push]
++
++# 2026-10-15-ci-recurrence-guard 收编：原 .git/hooks/pre-push（2026-08-18 部署的
++# 独立脚本，pre-commit install 时被改名 .legacy）迁入配置统一管理，语义零改动。
++      - id: docs-gate
++        name: sillyspec docs gate（文档失效引用只减不增棘轮）
++        entry: >-
++          bash -c 'sillyspec docs gate --against HEAD || { echo "  ↩ 文档失效 file:line 引用超基线；清偿后 sillyspec docs gate --init-baseline 下调"; exit 1; }' --
++        language: system
++        pass_filenames: false
++        always_run: true
++        stages: [pre-push]
+diff --git a/backend/tests/test_check_assertion_surfaces.py b/backend/tests/test_check_assertion_surfaces.py
+index f6b701eea..f21cf6d01 100644
+--- a/backend/tests/test_check_assertion_surfaces.py
++++ b/backend/tests/test_check_assertion_surfaces.py
+@@ -133,6 +133,33 @@ class TestEvaluate:
+         )
+         assert violations == [rule]
+ 
++    def test_rule7_requires_all_three_pins(self) -> None:
++        """⑦ 数量锚三件套（2026-10-15-fix-ci-red：只带序钉漏数量钉 → main 三连红）。"""
++        rule = rule_by_no("⑦")
++        menukey_diff = '+    menuKey: "newMenu",\n'
++        # 只带 admin/menus 序钉（历史事故形态）→ 仍拦
++        staged_partial = [
++            "frontend/src/lib/menu-permissions.ts",
++            "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
++        ]
++        assert cas.evaluate([rule], staged_partial, lambda _g: menukey_diff) == [rule]
++        # 三钉齐 → 过
++        staged_all = ["frontend/src/lib/menu-permissions.ts", *rule.requires]
++        assert cas.evaluate([rule], staged_all, lambda _g: menukey_diff) == []
++
++    def test_openapi_change_without_both_generated_files_is_violation(self) -> None:
++        """⑨ openapi 契约源 → 双 api-types 同提交（daemon 漏生成三连红实证）。"""
++        rule = rule_by_no("⑨")
++        # 只带前端生成物（deploy-release-notes 事故形态）→ 拦
++        staged_partial = [
++            "backend/openapi.json",
++            "frontend/src/lib/api-types.ts",
++        ]
++        assert cas.evaluate([rule], staged_partial, self._fetch_no_diff) == [rule]
++        # 双生成物齐 → 过
++        staged_all = ["backend/openapi.json", *rule.requires]
++        assert cas.evaluate([rule], staged_all, self._fetch_no_diff) == []
++
+     def test_heartbeat_marker_triggers_rule2_and_requires_all_four(self) -> None:
+         rule = rule_by_no("②")
+         staged = [
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index fded8cdd1..a63f43e45 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -38,7 +38,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi }
+ // （sessions/page.test 同款先例）。
+ const scrollIntoViewSpy = vi.fn();
+ beforeAll(() => {
+-  Element.prototype.scrollIntoView = scrollIntoViewSpy;
++  // scrollIntoView 的滚动目标是 this 而非首参——包装一层把元素记为 spy 首参
++  // （复合锚用例要断言「滚到了哪张卡」，2026-10-14-decision-anchor-change-qualified）。
++  Element.prototype.scrollIntoView = function (
++    this: Element,
++    ...args: Parameters<typeof Element.prototype.scrollIntoView>
++  ) {
++    scrollIntoViewSpy(this, ...args);
++  } as typeof Element.prototype.scrollIntoView;
+ });
+ afterAll(() => {
+   delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+@@ -863,6 +870,56 @@ describe("外部深链落位（2026-09-25-change-detail-assets-usability / FR-01
+     ).not.toBeNull();
+   });
+ 
++  // 复合锚（2026-10-14-decision-anchor-change-qualified / FR-03）：anchor 带
++  // 「变更号#决策号」前缀时先按复合属性精确匹配——聚合决策文件同 id 跨变更
++  // 重复（decisions/unmapped.md 实证 D-003@v1 ×3），裸锚首卡误命中。
++  it("anchor 含变更号前缀（变更号#决策号）：先试复合锚精确落卡", async () => {
++    const dupContent = [
++      "---",
++      "author: q",
++      "---",
++      "",
++      "# 决策",
++      "",
++      "## D-003@v1 : 别变更的三波交付决策",
++      "状态：active",
++      "变更：2026-08-29-other",
++      "",
++      "## D-003@v1 : 本变更的磁盘旁路决策",
++      "状态：active",
++      "变更：k-2026-mine",
++      "",
++    ].join("\n");
++    navState.searchParams = new URLSearchParams({
++      file: "knowledge/decisions/daemon.md",
++      anchor: "k-2026-mine#D-003@v1",
++    });
++    mockGet.mockResolvedValue(
++      entry({
++        filename: "decisions/daemon.md",
++        path: ".sillyspec/knowledge/decisions/daemon.md",
++        zone: "decisions",
++        title: "决策",
++        content: dupContent,
++      }),
++    );
++    renderPage();
++    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "decisions/daemon.md"));
++    await screen.findByTestId("entry-card-list");
++
++    // 两张同裸锚卡都在；滚动目标锁定 k-2026-mine 的复合锚卡（非文件序首卡）。
++    await waitFor(() =>
++      expect(
++        document.querySelectorAll('[data-entry-anchor="decisions/daemon.md#D-003@v1"]'),
++      ).toHaveLength(2),
++    );
++    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
++    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
++    expect(target.getAttribute("data-entry-anchor-qualified")).toBe(
++      "decisions/daemon.md#k-2026-mine#D-003@v1",
++    );
++  });
++
+   it("前缀容错：.sillyspec/knowledge/ 与 .sillyspec/ 写法落到同一文件", async () => {
+     await renderWithDeepLink({
+       file: ".sillyspec/knowledge/fr/host-fs-handler.md",
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 14f834bf8..7888f0817 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -389,10 +389,28 @@ export default function KnowledgePage({ params }: Props) {
+           // DOM 就绪（URL 深链是外部入口，落空代价是「跳了但没定位」）；改为逐帧
+           // 重试至多 12 帧，命中即滚动，耗尽仍静默降级文件级。
+           if (anchor) {
+-            const selector = `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`;
++            // 复合锚优选（2026-10-14-decision-anchor-change-qualified / FR-03）：
++            // anchor 带「变更号#决策号」前缀（沉淀资产卡 FR/决策深链）时先按
++            // 复合属性精确匹配——聚合决策文件同 id 跨变更重复，裸锚首卡误命中；
++            // 查无退裸锚——兜底键剥掉变更号前缀（裸属性值域恒为 文件#id，带前缀
++            // 查等于死选择器，评审 P1 实证）。
++            const key = `${filename}#${anchor}`;
++            const bareKey = anchor.includes("#")
++              ? `${filename}#${anchor.split("#").slice(1).join("#")}`
++              : key;
++            const selectors = anchor.includes("#")
++              ? [
++                  `[data-entry-anchor-qualified="${CSS.escape(key)}"]`,
++                  `[data-entry-anchor="${CSS.escape(bareKey)}"]`,
++                ]
++              : [`[data-entry-anchor="${CSS.escape(key)}"]`];
+             let tries = 0;
+             const tick = () => {
+-              const el = document.querySelector(selector);
++              let el: Element | null = null;
++              for (const selector of selectors) {
++                el = document.querySelector(selector);
++                if (el) break;
++              }
+               if (el) {
+                 el.scrollIntoView({ behavior: "smooth", block: "center" });
+                 return;
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+index 9307fb557..73c140923 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx
+@@ -352,6 +352,34 @@ describe("ChangeAssetsCard", () => {
+     );
+   });
+ 
++  it("FR 行兜底：条目无「变更：」字段时复合锚查无退裸锚（评审 P1 回归钉）", async () => {
++    // FR 文件条目缺「变更：」行（老数据容差形态）：qualified 属性不存在，
++    // 兜底键必须剥掉变更号前缀按裸锚命中——否则静默不滚（改动前可定位，构成回退）。
++    mockGet.mockResolvedValue(FULL);
++    mockGetKnowledge.mockResolvedValue(
++      knowledgeOf(
++        "fr/x.md",
++        "fr",
++        "## FR-auto-x-001 条目一\n状态：active\n理由：条目正文理由。\n",
++      ),
++    );
++    renderCard();
++    await screen.findByRole("button", { name: /沉淀资产/ });
++
++    fireEvent.click(await screen.findByText("FR-auto-x-001"));
++    const dialog = await screen.findByRole("dialog");
++    await waitFor(() =>
++      expect(
++        dialog.querySelector('[data-entry-anchor="fr/x.md#FR-auto-x-001"]'),
++      ).not.toBeNull(),
++    );
++    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
++    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
++    // 滚动目标 = 裸锚卡（无复合属性可命中——兜底生效而非静默不滚）。
++    expect(target.getAttribute("data-entry-anchor")).toBe("fr/x.md#FR-auto-x-001");
++    expect(target.hasAttribute("data-entry-anchor-qualified")).toBe(false);
++  });
++
+   it("知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见（FR-05）", async () => {
+     mockGet.mockResolvedValue(FULL);
+     mockGetKnowledge.mockRejectedValue(new Error("知识库不可用"));
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 5203b0a34..538ff457a 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -710,14 +710,19 @@ function KnowledgePreviewBody({
+   // 锚点条目卡定位：effect 在内容渲染提交后执行，DOM 已就绪，单次查询即可
+   // （无需知识库页深链的有界 rAF 重试——那是外部入口跨提交时序的防抖）。
+   // anchor 带「变更号#决策号」复合形态（FR/决策行）时优先按复合属性精确匹配
+-  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无或裸形态退裸锚。
++  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无退裸锚——兜底键必须
++  // 剥掉变更号前缀（裸属性值域恒为 文件#id，带前缀查等于死选择器，评审 P1 实证
++  // 2026-10-14-decision-anchor-change-qualified）。
+   useEffect(() => {
+     if (!q.isSuccess || !anchor) return;
+     const key = `${filename}#${anchor}`;
++    const bareKey = anchor.includes("#")
++      ? `${filename}#${anchor.split("#").slice(1).join("#")}`
++      : key;
+     const el =
+       (anchor.includes("#")
+         ? document.querySelector(`[data-entry-anchor-qualified="${CSS.escape(key)}"]`)
+-        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(key)}"]`);
++        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(bareKey)}"]`);
+     el?.scrollIntoView({ behavior: "smooth", block: "center" });
+   }, [q.isSuccess, anchor, filename]);
+ 
+diff --git a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+index 80816beb6..eb87fd1ad 100644
+--- a/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
++++ b/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx
+@@ -552,6 +552,19 @@ describe("决策形态渲染（zone=decisions）", () => {
+     expect(card).not.toHaveAttribute("data-entry-anchor-qualified");
+   });
+ 
++  // 负例补钉（评审 P3①，2026-10-14-decision-anchor-change-qualified）：有 id 但
++  // 缺「变更：」字段——裸锚照常输出，复合锚禁止输出。
++  it("有 id 但缺「变更：」字段：裸锚输出，复合锚不输出", () => {
++    renderList({
++      filename: "decisions/novar.md",
++      zone: "decisions",
++      content: "## D-007@v1 : 无归属行条目\n状态：active\n",
++    });
++    const card = screen.getByTestId("decision-entry-card");
++    expect(card).toHaveAttribute("data-entry-anchor", "decisions/novar.md#D-007@v1");
++    expect(card).not.toHaveAttribute("data-entry-anchor-qualified");
++  });
++
+   it("superseded 折叠置灰：字段隐藏 + 可展开；取代链条带恒可见", () => {
+     renderList({
+       filename: "decisions/demo.md",
+diff --git a/scripts/check-assertion-surfaces.py b/scripts/check-assertion-surfaces.py
+index 9faa8c94e..42f48ab5c 100644
+--- a/scripts/check-assertion-surfaces.py
++++ b/scripts/check-assertion-surfaces.py
+@@ -13,8 +13,9 @@ CI 清偿再见迁移锚 / TABS 数 / 菜单声明序 / 协议 MSG 计数四处
+   ④ provider caps 形状变更 → 全对象 toEqual 钉
+   ⑤ previewers 桶导出增删 → 枚举式 vi.mock 两文件
+   ⑥ backend 词表/字段形态（agent_kinds）→ daemon 对账正则
+-  ⑦ 菜单注册表增删项 → 声明序索引钉（本周实证新登记）
++  ⑦ 菜单注册表增删项 → 声明序索引钉 + 数量锚三件套
+   ⑧ 协议 MSG 常量增删 → MSG 总数钉（本周实证新登记）
++  ⑨ openapi.json 契约变更 → 前端+daemon 双 api-types 生成物同提交
+ 
+ 触发模式：
+   file 模式——staged 面出现 glob 匹配文件即触发（迁移：加文件本身就是事件）；
+@@ -121,8 +122,14 @@ RULES: tuple[SurfaceRule, ...] = (
+         glob="frontend/src/lib/menu-permissions.ts",
+         mode="diff",
+         diff_pattern="menuKey:",
+-        requires=("frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",),
+-        hint="组内上移/下移用例声明序锚重算（8a928588f 删两项全体前移实证）",
++        requires=(
++            "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
++            "frontend/src/lib/__tests__/menu-permissions.test.ts",
++            "frontend/src/lib/__tests__/permission.test.ts",
++        ),
++        hint="admin/menus 组内序锚重算 + menu-permissions.test.ts 数量锚"
++        "（组长度/区分布/FR-02 清单/权限镜像）+ permission.test.ts 分区条目"
++        "（0be62452f 只重算序钉漏数量锚，main 三连红实证）",
+     ),
+     SurfaceRule(
+         no="⑧",
+@@ -133,6 +140,20 @@ RULES: tuple[SurfaceRule, ...] = (
+         requires=("sillyhub-daemon/tests/protocol-session-contract.test.ts",),
+         hint="MSG 总数钉 N→N+1 并补键值回归用例（0b09d1555 漏跟实证）",
+     ),
++    SurfaceRule(
++        no="⑨",
++        source="backend/openapi.json（API 契约源）",
++        glob="backend/openapi.json",
++        mode="file",
++        diff_pattern="",
++        requires=(
++            "frontend/src/lib/api-types.ts",
++            "sillyhub-daemon/src/api-types.ts",
++        ),
++        hint="契约变更后两处生成物同提交：pnpm -C frontend gen:types && "
++        "pnpm -C sillyhub-daemon gen:types（2026-10-15-fix-ci-red：daemon 侧"
++        "漏生成致 daemon-ci 三连红实证）",
++    ),
+ )

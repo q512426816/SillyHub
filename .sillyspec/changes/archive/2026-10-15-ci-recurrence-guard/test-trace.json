@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-ci-recurrence-guard",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-ci-recurrence-guard:flow:测试绑定FR-01",
+      "tests": [
+        "backend/tests/test_check_assertion_surfaces.py「test_openapi_change_without_both_generated_files_is_violation」",
+        "backend/tests/test_check_assertion_surfaces.py「test_rule7_requires_all_three_pins」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-ci-recurrence-guard"
+    }
+  ]
+}

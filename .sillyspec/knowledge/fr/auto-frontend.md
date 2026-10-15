@@ -103,3 +103,50 @@ created_at: 2026-10-15T00:59:46.351Z
   confirmed_at: null
   source_change: 2026-10-14-decision-anchor-change-qualified
   status: active
+
+## FR-auto-frontend-226 check-assertion-surfaces.py 规则⑦ requires 补 menu-permissions.test.ts 与 permission.test.ts，新增规则⑨ openapi.json→双 api-types.ts 同提交，单测覆盖并通过
+变更：2026-10-15-ci-recurrence-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/requirements.md#FR-01
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-ci-recurrence-guard:flow:测试绑定FR-01
+  tests: backend/tests/test_check_assertion_surfaces.py「test_openapi_change_without_both_generated_files_is_violation」 | backend/tests/test_check_assertion_surfaces.py「test_rule7_requires_all_three_pins」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-ci-recurrence-guard
+  status: active
+
+## FR-auto-frontend-227 knowledge/testing-gotchas.md 共享断言面清单两处同步登记（脚本 docstring 要求）
+变更：2026-10-15-ci-recurrence-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/requirements.md#FR-02
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+
+## FR-auto-frontend-228 CLAUDE.md 第 21 条明示 sillyhub-daemon 的 gen:types 同步义务
+变更：2026-10-15-ci-recurrence-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/requirements.md#FR-03
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+
+## FR-auto-frontend-229 backend/.pre-commit-config.yaml 增 pre-push 快检钩子（frontend+daemon typecheck、双 gen:types:check），本机安装 pre-push 钩子类型并实测拦截/放行各一次
+变更：2026-10-15-ci-recurrence-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/requirements.md#FR-04
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+
+## FR-auto-frontend-230 「菜单数量锚改推导」评估结论留痕（预期 rejected：钉子锚是有意契约，复发根因是本地缺拦截面）
+变更：2026-10-15-ci-recurrence-guard
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-ci-recurrence-guard/requirements.md#FR-05
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9

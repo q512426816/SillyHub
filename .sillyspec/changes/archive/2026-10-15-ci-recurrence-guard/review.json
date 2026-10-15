@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-ci-recurrence-guard",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2c669d90e1853c52f575c56980410ab75fe55ee9",
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "P3",
+      "title": "FR-01 三方一致并实测通过",
+      "detail": "cd backend && uv run pytest tests/test_check_assertion_surfaces.py -q → 14 passed；点名跑 test_rule7_requires_all_three_pins 与 test_openapi_change_without_both_generated_files_is_violation → 2 passed。1b0163159 diff 证实 RULES ⑦ requires 1→3（admin/menus page.test.tsx + menu-permissions.test.ts + permission.test.ts）、新增规则⑨（backend/openapi.json，file 模式 → frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts），且 evaluate()/changed_diff_lines() 零改（纯数据变更，与 design 接口契约声明一致）。"
+    },
+    {
+      "id": "F2",
+      "severity": "P3",
+      "title": "FR-02/03/05 文本在场且一致",
+      "detail": "FR-02：.sillyspec/knowledge/testing-gotchas.md 第 116 行⑦改写为三件套口径（序锚+数量锚+分区条目）、第 118 行⑨新条目（双生成物同提交）、第 120 行来源行含 2026-10-15-ci-recurrence-guard，与脚本 RULES 行为一致。FR-03：.claude/CLAUDE.md 第 21 条含 daemon 同款义务 bullet（+1 行 diff，指向闸门⑨）。FR-05：design.md「风险与死路」含数量锚推导 rejected 留痕及理由（推导锚与被测同源失去钉子契约语义）。"
+    },
+    {
+      "id": "F3",
+      "severity": "P3",
+      "title": "FR-04 双钩子 pre-push 实测 Passed",
+      "detail": "backend/.venv/Scripts/python.exe -m pre_commit run ci-fast-gate --hook-stage pre-push --config backend/.pre-commit-config.yaml → Passed（frontend typecheck + daemon typecheck + 双 gen:types:check 四命令全过）；docs-gate 同法 → Passed。fail-closed 接线（|| { echo ...; exit 1; }）经检查确认。"
+    },
+    {
+      "id": "F4",
+      "severity": "P3",
+      "title": "防护声明之一：stages:[pre-commit] 防双跑真实成立",
+      "detail": "1b0163159 diff 证实三个既有钩子（ruff-format/ruff-check/assertion-surfaces）各新增一行 stages: [pre-commit]。配置无顶层 default_stages，未声明 stages 的钩子会在所有已安装钩子阶段运行——若不加，安装 pre-push 钩子类型后推送时三钩会双跑。声明成立。"
+    },
+    {
+      "id": "F5",
+      "severity": "P3",
+      "title": "防护声明之二：docs-gate 收编语义等效（字节级不可比，如实标注）",
+      "detail": ".git/hooks/pre-push.legacy 从未被 git 跟踪（存活于 .git 内），删除后无法字节级比对。旁证链：①当前 .git/hooks/pre-push 为 pre-commit 生成 shim（INSTALL_PYTHON 指向 backend/.venv，--hook-type=pre-push，--config=backend/.pre-commit-config.yaml），证实安装与收编发生；②历史留痕（.sillyspec/quicklog/QUICKLOG-qinyi-2026-09-18.md『gate --against HEAD 复跑 339=339 放行』、docs/sillyspec/finished/docs-gate-shared-worktree-parallel-block.md『本平台仓 .git/hooks/pre-push 更新为 --against HEAD』）证实原独立脚本工作命令即 sillyspec docs gate --against HEAD，与 docs-gate 条目命令完全一致；③失败路径新增 echo 修复指引为附加 UX，不改闸门语义。结论：语义零改动声明获旁证支持，标注为『等效佐证，非字节比对』。"
+    },
+    {
+      "id": "F6",
+      "severity": "P3",
+      "title": "生成物同步：无漂移",
+      "detail": "pnpm -C sillyhub-daemon gen:types 重生成后 git diff --stat sillyhub-daemon/src/api-types.ts 为空；frontend 侧由 ci-fast-gate 内 gen:types:check 通过隐式证明，另 git diff frontend/src/lib/api-types.ts 内容为空（exit 0）。backend/openapi.json 与双 api-types.ts 三者同步。"
+    },
+    {
+      "id": "F7",
+      "severity": "P3",
+      "title": "观察：gen:types 重写 LF 行尾在 autocrlf=true 下留内容为空的 modified 标记",
+      "detail": "ci-fast-gate 放行后 frontend/src/lib/api-types.ts 在 git status 显示 modified（git diff 内容为空、仅『LF will be replaced by CRLF』警告）——生成器以 LF 重写文件而工作副本原为 CRLF，归一化后内容相同，故钩子内 git diff --exit-code 通过但 status 留脏标记。design 盲维2 预告了『生成物留工作树』（针对漂移场景），零漂移时的行尾字节态差异同样发生。属既有生成器行为非本变更缺陷，评审中已 git checkout -- 还原两个 api-types.ts 至 HEAD 字节态，工作树恢复评审前状态（仅存 sillyspec 流程文件的原有改动）。建议知悉即可。"
+    },
+    {
+      "id": "F8",
+      "severity": "P3",
+      "title": "拦截实测与脚本级 exit 1 演示属记录性证据，本次以检查代替复现",
+      "detail": "tasks.md task-04 勾选声称『实测拦截/放行各一次』、requirements FR-01 绑定声称『脚本级拦截演示 menuKey/openapi 各一次 exit 1 实测』——复现需暂存文件或造临街类型错误文件，与本次只读纪律冲突，故以代码检查替代：main()→evaluate()→violations→return 1 接线完整，evaluate 违例判定已被单测覆盖，钩子 entry 均为 fail-closed。放行路径已由本次实测覆盖。"
+    },
+    {
+      "id": "F9",
+      "severity": "P3",
+      "title": "共享暂存区竞态归因核验无损",
+      "detail": "五文件实现面（scripts/check-assertion-surfaces.py、backend/tests/test_check_assertion_surfaces.py、.sillyspec/knowledge/testing-gotchas.md、.claude/CLAUDE.md、backend/.pre-commit-config.yaml）确在并行会话提交 1b0163159 内且内容完整（+27/-3、+27、+3/-2、+1、+28 分别核对）；工件提交 9d97e68dd 落 design/requirements/tasks/proposal/flow-state 五文件。归因信息与实际一致。"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "design『不适用』作答与 diff 面相符：变更为纯配置（yaml）、纯数据（RULES 元组）、测试与文档，闸门按 staged 快照瞬时判定、无事件序依赖；1b0163159 diff 证实无运行态逻辑引入。裁可接受。",
+    "并发": "design 两点声明均经实证：①pre-commit stash/restore 防护在本机两次钩子运行中正常（unstaged sillyspec 文件被 stash 后完整 restore）；②gen:types:check 重写生成物留工作树——本次实测发现零漂移时也发生（F7，LF/CRLF 字节态差异、内容 diff 为空），design 的『属预期可提交产物非脏状态』表述基本准确但行尾细节未展开，量级为化妆性问题。另共享工作树并行会话竞态已实际发生一次（实现面被卷入 1b0163159），已在 9d97e68dd 显式归因披露。裁可接受。",
+    "切换": "typecheck/gen:types:check 均为只读或幂等重写，钩子 fail-closed 无半态承诺与实现相符（重生成幂等，被拦后重跑+提交即闭环）。design 自述『gen:types:check 会写生成物文件』诚实准确（package.json 证实 check 即重生成+git diff --exit-code）。裁可接受。",
+    "作用域": ".git/hooks 机器本地安装、配置入库、安装命令留痕于 yaml 注释（backend/.venv/Scripts/python.exe -m pre_commit install --hook-type pre-push --config backend/.pre-commit-config.yaml）——与实际 .git/hooks/pre-push shim 内容吻合；其它机器/CI 不自动获得 pre-push 钩子的局限已在 design 显式披露，且四命令与 CI 同源（CI 仍是兜底），闸门⑦⑨经入库的 pre-commit 配置层对安装了 pre-commit 的机器生效。裁可接受。"
+  },
+  "reviewedAt": "2026-10-15T09:08:25+08:00"
+}

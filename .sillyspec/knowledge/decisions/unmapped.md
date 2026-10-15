@@ -3080,3 +3080,11 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：0ef23e479d8a39229486671e590a4d19864849d5
 理由：- 最大风险：复合属性是新增 DOM 契约，若未来其它消费方按 `[data-entry-anchor=…]` 全量枚举做统计会少算复合锚——已核查现网消费方（知识库页 selectEntry、沉淀资产卡弹窗、测试断言）均为「按值查单个」，无枚举面。 - 弃案 A：改裸 `data-entry-anchor` 的值为复合形态——会破坏旧深链与潜在收藏链接，且 INDEX/触达等裸锚消费方需同步迁移，改动面大收益零，弃。 - 弃案 B：后端 assets 响应给 decisions 条目加变更号字段（前端免传 changeKey）——需改 OpenAPI schema + gen:types + 前端类型同步，而 changeKey 在详情页现成可得，后端改动纯属多余，弃。
+
+## D-unmapped-009@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-15-ci-recurrence-guard
+原编号：D-001@v1
+锚点：未记录
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+理由：最大风险：⑦ 三件套过度触发（如 ppm 区加菜单不改 permission.test.ts 的分区条目）——按既有口径走「确认不触及钉子断言则纳入评审说明」逃生门，fail-closed 优于 CI 补红。试过但放弃：把菜单数量锚改为从源常量推导（task-05 rejected）——推导锚等于断言与被测同源，钉子失去「源码长大必须显式跟」的契约语义，复发根因是本地缺拦截面而非锚形式，闸门⑦补齐已治本；另考虑过 pre-commit 阶段跑 typecheck（放弃：每次提交 1 分钟不可接受）。
