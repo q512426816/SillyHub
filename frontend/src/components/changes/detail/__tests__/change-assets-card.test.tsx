@@ -49,10 +49,17 @@ vi.mock("@/components/ui/markdown-text", () => ({
 }));
 
 // jsdom 未实现 scrollIntoView（弹窗锚点定位 effect 调用）——knowledge-page.test
-// 同款先例：文件级打桩防 Uncaught TypeError 拖挂整跑。
+// 同款先例：文件级打桩防 Uncaught TypeError 拖挂整跑。本文件的复合锚用例还要
+// 断言「滚到了哪张卡」——scrollIntoView 的目标是 this 而非首参，包装一层把
+// 元素记为 spy 首参。
 const scrollIntoViewSpy = vi.fn();
 beforeAll(() => {
-  Element.prototype.scrollIntoView = scrollIntoViewSpy;
+  Element.prototype.scrollIntoView = function (
+    this: Element,
+    ...args: Parameters<typeof Element.prototype.scrollIntoView>
+  ) {
+    scrollIntoViewSpy(this, ...args);
+  } as typeof Element.prototype.scrollIntoView;
 });
 afterAll(() => {
   delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
@@ -100,7 +107,7 @@ function renderCard() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <ChangeAssetsCard workspaceId="ws-1" changeId="c-1" />
+      <ChangeAssetsCard workspaceId="ws-1" changeId="c-1" changeKey="k-demo" />
     </QueryClientProvider>,
   );
 }
@@ -243,7 +250,7 @@ describe("ChangeAssetsCard", () => {
       knowledgeOf(
         "fr/x.md",
         "fr",
-        "## FR-auto-x-001 条目一\n状态：active\n理由：条目正文理由。\n",
+        "## FR-auto-x-001 条目一\n状态：active\n变更：k-demo\n理由：条目正文理由。\n",
       ),
     );
     renderCard();
@@ -257,16 +264,16 @@ describe("ChangeAssetsCard", () => {
     await waitFor(() =>
       expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/x.md"),
     );
-    // 弹窗内条目卡渲染 + 锚点定位目标卡存在
+    // 弹窗内条目卡渲染 + 锚点定位目标卡存在（复合锚：变更号+决策号）
     const dialog = await screen.findByRole("dialog");
     expect(
-      dialog.querySelector('[data-entry-anchor="fr/x.md#FR-auto-x-001"]'),
+      dialog.querySelector('[data-entry-anchor-qualified="fr/x.md#k-demo#FR-auto-x-001"]'),
     ).not.toBeNull();
-    // 弹窗头部知识库深链：href 与改造前深链逐字同构
+    // 弹窗头部知识库深链：anchor 带变更号前缀（复合锚跨页同样精确）
     const jump = within(dialog).getByText("在知识库中打开").closest("a");
     expect(jump).toHaveAttribute(
       "href",
-      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=FR-auto-x-001",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=k-demo%23FR-auto-x-001",
     );
 
     // 关闭后点决策行：同一弹窗通道，决策文件深链同理
@@ -275,7 +282,7 @@ describe("ChangeAssetsCard", () => {
       knowledgeOf(
         "decisions/x.md",
         "decisions",
-        "## D-001@v1 : 决策一\n状态：implemented\n理由：决策理由文本。\n",
+        "## D-001@v1 : 决策一\n状态：implemented\n变更：k-demo\n理由：决策理由文本。\n",
       ),
     );
     fireEvent.click(screen.getByText("D-001@v1"));
@@ -284,13 +291,64 @@ describe("ChangeAssetsCard", () => {
     );
     const dialog2 = await screen.findByRole("dialog");
     expect(
-      dialog2.querySelector('[data-entry-anchor="decisions/x.md#D-001@v1"]'),
+      dialog2.querySelector('[data-entry-anchor-qualified="decisions/x.md#k-demo#D-001@v1"]'),
     ).not.toBeNull();
     expect(
       within(dialog2).getByText("在知识库中打开").closest("a"),
     ).toHaveAttribute(
       "href",
-      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=D-001%40v1",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=k-demo%23D-001%40v1",
+    );
+  });
+
+  it("决策行弹窗定位：同 id 跨变更按变更号+决策号复合锚精确命中（FR-02）", async () => {
+    // 生产实证形态（decisions/unmapped.md）：多个变更各有同名决策号，裸锚
+    // 「文件#id」首卡误命中——滚动目标必须锁定 changeKey 的复合锚卡。
+    mockGet.mockResolvedValue({
+      ...FULL,
+      decisions: [
+        {
+          id: "D-003@v1",
+          title: "本变更的磁盘旁路决策",
+          status: "active",
+          file: "knowledge/decisions/dup.md",
+        },
+      ],
+    });
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "decisions/dup.md",
+        "decisions",
+        [
+          "## D-003@v1 : 别变更的三波交付决策",
+          "状态：active",
+          "变更：2026-08-29-other",
+          "",
+          "## D-003@v1 : 本变更的磁盘旁路决策",
+          "状态：active",
+          "变更：k-demo",
+          "",
+        ].join("\n"),
+      ),
+    );
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    fireEvent.click(await screen.findByText("D-003@v1"));
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "decisions/dup.md"),
+    );
+    const dialog = await screen.findByRole("dialog");
+    // 文件里两个同 id 卡都在（裸锚同值）；滚动目标必须是 k-demo 的复合锚卡。
+    await waitFor(() =>
+      expect(
+        dialog.querySelectorAll('[data-entry-anchor="decisions/dup.md#D-003@v1"]'),
+      ).toHaveLength(2),
+    );
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
+    expect(target.getAttribute("data-entry-anchor-qualified")).toBe(
+      "decisions/dup.md#k-demo#D-003@v1",
     );
   });
 

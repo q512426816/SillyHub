@@ -452,8 +452,15 @@ export default function ChangeDetailPage({ params }: Props) {
 
           {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
               + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，
-              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。 */}
-          <ChangeAssetsCard workspaceId={workspaceId} changeId={changeId} />
+              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。
+              changeKey 透传（2026-10-14-decision-anchor-change-qualified）：FR/决策
+              深链 anchor 拼「变更号#决策号」复合形态——聚合决策文件同 id 跨变更
+              重复，裸 id 首卡误命中。 */}
+          <ChangeAssetsCard
+            workspaceId={workspaceId}
+            changeId={changeId}
+            changeKey={change?.change_key}
+          />
 
           {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
               thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行

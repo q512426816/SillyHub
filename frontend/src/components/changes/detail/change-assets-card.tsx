@@ -21,6 +21,13 @@ import { getKnowledge, normalizeKnowledgeFileParam } from "@/lib/knowledge";
 interface ChangeAssetsCardProps {
   workspaceId: string;
   changeId: string;
+  /**
+   * 变更 key（``2026-10-14-xxx`` 形态，详情页从 ChangeRead 透传）。FR/决策行的
+   * 深链 anchor 用它拼「变更号#决策号」复合形态——聚合决策文件里多个变更各有
+   * 同名决策号（decisions/unmapped.md 实证），裸 id 首卡误命中（
+   * 2026-10-14-decision-anchor-change-qualified）。缺省退化为裸 id 旧路径。
+   */
+  changeKey?: string;
 }
 
 /** 知识条目预览目标：file=spec 树相对路径（深链原样），anchor=条目 id（可选）。 */
@@ -134,7 +141,7 @@ export function resolveTestFilePath(
  * 具体内容（KnowledgePreviewBody：getKnowledge + EntryCardList + 锚点定位），
  * 弹窗头部「在知识库中打开」保留原 file+anchor 深链跳转能力。
  */
-export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProps) {
+export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAssetsCardProps) {
   const query = useQuery({
     queryKey: ["changeAssets", workspaceId, changeId],
     queryFn: () => getChangeAssets(workspaceId, changeId),
@@ -156,6 +163,10 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
   // 部保留原深链跳转。null = 关。
   const [knowledgeTarget, setKnowledgeTarget] =
     useState<KnowledgePreviewTarget | null>(null);
+  // FR/决策行深链 anchor：变更号#决策号 复合形态（changeKey 缺省退裸 id）——
+  // 聚合决策文件里同 id 跨变更重复，裸 id 首卡误命中
+  // （2026-10-14-decision-anchor-change-qualified）。
+  const qualifiedAnchor = (id: string) => (changeKey ? `${changeKey}#${id}` : id);
 
   const patchQ = useQuery({
     queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
@@ -250,7 +261,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                 <button
                   key={e.id}
                   type="button"
-                  onClick={() => setKnowledgeTarget({ file: e.file, anchor: e.id })}
+                  onClick={() =>
+                    setKnowledgeTarget({ file: e.file, anchor: qualifiedAnchor(e.id) })
+                  }
                   title={`查看 ${e.id} 条目内容（弹窗内可再跳知识库）`}
                   className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
                 >
@@ -280,7 +293,9 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                 <button
                   key={d.id}
                   type="button"
-                  onClick={() => setKnowledgeTarget({ file: d.file, anchor: d.id })}
+                  onClick={() =>
+                    setKnowledgeTarget({ file: d.file, anchor: qualifiedAnchor(d.id) })
+                  }
                   title={`查看 ${d.id} 条目内容（弹窗内可再跳知识库）`}
                   className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
                 >
@@ -694,11 +709,15 @@ function KnowledgePreviewBody({
 
   // 锚点条目卡定位：effect 在内容渲染提交后执行，DOM 已就绪，单次查询即可
   // （无需知识库页深链的有界 rAF 重试——那是外部入口跨提交时序的防抖）。
+  // anchor 带「变更号#决策号」复合形态（FR/决策行）时优先按复合属性精确匹配
+  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无或裸形态退裸锚。
   useEffect(() => {
     if (!q.isSuccess || !anchor) return;
-    const el = document.querySelector(
-      `[data-entry-anchor="${CSS.escape(`${filename}#${anchor}`)}"]`,
-    );
+    const key = `${filename}#${anchor}`;
+    const el =
+      (anchor.includes("#")
+        ? document.querySelector(`[data-entry-anchor-qualified="${CSS.escape(key)}"]`)
+        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(key)}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [q.isSuccess, anchor, filename]);
 
