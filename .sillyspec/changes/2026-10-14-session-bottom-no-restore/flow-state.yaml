@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  第五层根因（滚动写入审计+对照实验锁定）：刷新（reload）时 Chrome 恢复上次滚动位置，恢复晚到（内容装配后）会覆盖初始贴底 scrollTo 并把 isNearBottomRef 清 false（恢复写入=scrollTop
+  骤减+scrollHeight 稳定→正常分支），贴底链全死→停在上次位置（用户实测刷新落位随机：第35/31/3 轮随上次停留位置）。切换会话路径审计健康（渐进贴底序列 387→13594 delta=0），故障为刷新专有——浏览器
+  scroll restoration 与初始贴底竞态。
+
+
+  成功标准：
+
+  - 会话时间线挂载期间 history.scrollRestoration='manual'（禁浏览器恢复），卸载还原 'auto'——刷新后不恢复上次容器滚动位置，由贴底链统一落底
+
+  - 刷新（任意上次停留位置）后落底 delta=0（程序性滚顶/滚中后刷新均验证）
+
+  - 切换会话/上滚读历史/跳转/翻页既有行为不变
+
+  - 既有测试面复跑绿 + tsc 0
+autopilot: false
+prestage_ack: true
+baseline_commit: f05e322b5efecf3d01505a0d95d2b0618ce5f404
+updatedAt: '2026-10-15T01:27:32.773Z'
+baseline_sha256: 8b6e148c1c44fd3dd082405309f6ec1d1e090dca17d95e6de9cddc69e400daab
+
