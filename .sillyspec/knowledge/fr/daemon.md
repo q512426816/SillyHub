@@ -4747,3 +4747,245 @@
   confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
   source_change: 2026-10-15-dsh-engine-acp
   status: active
+
+## FR-daemon-132 zcode 引擎注册与探测
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-004@v1
+场景正文：
+- 场景：默认场景 — Given daemon 所在机器安装了 ZCode Desktop（内嵌引擎版本 ≥0.16.9）；When daemon 启动执行 agent 探测；Then 探测项命中（SILLYHUB_ZCODE_PATH env 覆盖 → PATH which zcode → Desktop 固定安装路径回退 fallbackP
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-01
+最近确认：9e8ba08fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-zcode-engine-appserver:task-01:acc-0-5f7aae75
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-01:acc-1-02c2839e
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-01:acc-2-b0b68fa1
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-08:acc-0-7d2a4cdd
+  tests: sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-08:acc-1-85728f33
+  tests: sillyhub-daemon/tests/interactive/zcode-e2e.smoke.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+
+## FR-daemon-133 zcode 单聊会话全链路
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+依据决策：D-004@v1、D-005@v1、D-007@v1、D-008@v1
+场景正文：
+- 场景：默认场景 — Given 探测到 zcode 且用户在单聊创建表单选择 zcode 引擎；When 提交创建（provider='zcode' 经 backend InteractiveProviderLiteral 校验通过）；Then daemon spawn `node <zcode.cjs> app-server --cwd <dir>`（env ZCODE_DATA_BASE_DIR 指
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-02
+最近确认：9e8ba08fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-zcode-engine-appserver:task-02:acc-0-2a9286db
+  tests: sillyhub-daemon/tests/interactive/zcode-envelope.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-02:acc-1-11b1a6e7
+  tests: sillyhub-daemon/tests/interactive/zcode-envelope.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-03:acc-0-c809ae83
+  tests: sillyhub-daemon/tests/interactive/zcode-events.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-03:acc-1-cc8241ab
+  tests: sillyhub-daemon/tests/interactive/zcode-events.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-04:acc-0-f04ad0ac
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-04:acc-1-afc4b560
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-06:acc-0-834eeeca
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_agent_session_tasks.py | backend/app/modules/daemon/tests/test_attachment_pipeline.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/app/modules/daemon/tests/test_group_p2.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-06:acc-1-ff78fd21
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_agent_session_tasks.py | backend/app/modules/daemon/tests/test_attachment_pipeline.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/app/modules/daemon/tests/test_group_p2.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+
+## FR-daemon-134 打断
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+依据决策：D-005@v1
+场景正文：
+- 场景：默认场景 — Given zcode 会话有 in-flight 轮；When 用户打断；Then 驱动发 session/stop，turn 终止落库，子进程保持可续用
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-03
+最近确认：9e8ba08fe
+
+## FR-daemon-135 权限代答与服务端请求分发
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+依据决策：D-005@v1、D-008@v1
+场景正文：
+- 场景：默认场景 — Given zcode 会话收到服务端主动请求；When 请求到达；Then 分发器按方法处理：session/requestRuntimePreferences（create/send 各一道）回默认偏好（15s 超时窗口内）；inte
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-04
+最近确认：9e8ba08fe
+
+## FR-daemon-136 模型路由（平台接管）
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 会话绑定了 LlmProvider（base_url/api_key/model）；When daemon 创建 zcode 会话；Then per-session 配置面（ZCODE_DATA_BASE_DIR 重定向的 v2 目录）写 provider_config.json（api.type 按
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-05
+最近确认：9e8ba08fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-zcode-engine-appserver:task-05:acc-0-35889f68
+  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-05:acc-1-769899ea
+  tests: - sillyhub-daemon/tests/interactive/provider-registry.test.ts | backend/app/modules/agent/tests/test_provider_caps_alignment.py | frontend/src/components/sessions/__tests__/pre-session-picker.test.tsx | sillyhub-daemon/tests/zcode-settings.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+
+## FR-daemon-137 caps 如实申报与三端镜像
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given zcode 引擎注册；Then PROVIDER_CAPS zcode 条目 16 键如实（mcp=false/multimodal=false/attachments=false/subag
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-06
+最近确认：9e8ba08fe
+
+## FR-daemon-138 前端单聊引擎选项
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given zcode 在该 runtime 探测可用；When 用户打开单聊创建入口；Then SESSION_ENGINE_OPTIONS 含 zcode（图标/标签）；群聊 ENGINE_OPTIONS 不变
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-07
+最近确认：9e8ba08fe
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-zcode-engine-appserver:task-07:acc-0-82d7b7e3
+  tests: frontend/src/lib/daemon/__tests__/runtimes.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+- row: 2026-10-15-zcode-engine-appserver:task-07:acc-1-65ce11bd
+  tests: frontend/src/lib/daemon/__tests__/runtimes.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: b6166e4f0a8eaaf65cf28c9c8bfc11fa180b9dc2
+  source_change: 2026-10-15-zcode-engine-appserver
+  status: active
+
+## FR-daemon-139 compact 与思考档位通道（可选实现）
+变更：2026-10-15-zcode-engine-appserver
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given zcode 会话开启；When 用户触发上下文压缩或切换思考档位；Then 驱动经 session/compact / session/setThoughtLevel 执行（caps.compact=true / thinking_le
+全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-08
+最近确认：9e8ba08fe

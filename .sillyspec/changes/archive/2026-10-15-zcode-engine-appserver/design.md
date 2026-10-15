@@ -64,6 +64,8 @@ scale: "large"  # 规模评估（Step 8 落值）：真并行任务簇存在—�
 | 修改 | sillyhub-daemon/src/version.ts | MIN_VERSIONS 加 `zcode: (0,16,9)`（D-004 警告不硬拒） |
 | 修改 | backend/app/modules/daemon/schema.py | InteractiveProviderLiteral 加 `"zcode"`。数据流：producer=backend Literal → FastAPI 校验/openapi → `pnpm gen:types` 重生成 frontend/src/lib/api-types.ts + `pnpm -C sillyhub-daemon gen:types` 重生成 sillyhub-daemon/src/api-types.ts（规则 21 双义务）→ consumer=会话创建表单 / daemon payload 校验 |
 | 修改 | frontend/src/lib/daemon/runtimes.ts | SESSION_SUPPORTED_PROVIDERS 加 zcode + PROVIDER_META 条目（execute 期事实修正：单一源在此，panel 仅消费派生值；task-07 卡同注） |
+| 修改 | sillyhub-daemon/scripts/gen-provider-caps.mjs | ENGINES 表加 zcode（镜像生成器单源，execute 期 task-05 交付） |
+| 修改 | sillyhub-daemon/tests/interactive/provider-registry.test.ts | 注册表守护断言同步（键集/canary 加 zcode + family 同源比对批量缺席例外口径，execute 期 task-05 认领） |
 | 生成 | backend/app/modules/agent/provider_caps.py | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
 | 生成 | frontend/src/lib/provider-caps.ts | gen-provider-caps.mjs 镜像刷新（生成物，随脚本产出） |
 

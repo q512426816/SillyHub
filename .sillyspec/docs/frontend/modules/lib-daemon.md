@@ -106,3 +106,7 @@ conn.onmessage = (raw) => {
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 增量（2026-10-15-zcode-engine-appserver：单聊引擎白名单加 zcode）
+
+- `lib/daemon/runtimes.ts`：`SESSION_SUPPORTED_PROVIDERS` 加 `"zcode"`（第 5 交互引擎；可见性由 runtime 探测门控——无 zcode runtime 注册的机器经 page-helpers rt.provider 过滤不可见）+ `PROVIDER_META.zcode`（label ZCode/🟤/stone 色系）。三消费方（session-list-panel 筛选/pre-session-picker/runtime-session-helpers 白名单）自动生效；群聊白名单（create-group-wizard ENGINE_OPTIONS/GROUP_SUPPORTED_PROVIDERS）独立硬编码不含 zcode。直测 `lib/daemon/__tests__/runtimes.test.ts`（真实模块不 mock，4 例：五引擎有序/派生 label/META 三字段/防裸 key 回退）。

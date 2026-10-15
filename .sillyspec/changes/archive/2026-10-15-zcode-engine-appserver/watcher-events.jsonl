@@ -1,0 +1,59 @@
+{"ts":1792054486813,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792054486813,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792054486813,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792054486813,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792054490948,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792054490948,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792054490948,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792054490948,"kind":"task-done","stage":"tasks","detail":"checked 0→8","provisional":true}
+{"ts":1792054490948,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792054490948,"kind":"commit","stage":null,"detail":"98ab44dde","provisional":true}
+{"ts":1792054727580,"kind":"gate-run","stage":"verify","detail":"门实测 failed（505.9s） · 20261015085845","provisional":true}
+{"ts":1792054741239,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792054984980,"kind":"commit","stage":null,"detail":"ce7f1c3f0","provisional":true}
+{"ts":1792055175453,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（366.9s） · 20261015090612","provisional":true}
+{"ts":1792055190570,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792055194462,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1792055748323,"kind":"gate-run","stage":"verify","detail":"门实测 failed（489.4s） · 20261015091547","provisional":true}
+{"ts":1792056237441,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792056283240,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：frontend/src/components/changes/detail/change-assets-graph.tsx——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792056358631,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792056358631,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792056358631,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792056358631,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792056364179,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792056364179,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792056364179,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792056364179,"kind":"task-done","stage":"tasks","detail":"checked 0→8","provisional":true}
+{"ts":1792056364179,"kind":"file-update","stage":"proposal","detail":"decisions.md 内容变更","provisional":true}
+{"ts":1792056364179,"kind":"commit","stage":null,"detail":"2d3c28531","provisional":true}
+{"ts":1792056530271,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（454.5s） · 20261015092848","provisional":true}
+{"ts":1792056729935,"kind":"commit","stage":null,"detail":"b6166e4f0","provisional":true}
+{"ts":1792056962798,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：gitignore——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792057271031,"kind":"file-update","stage":"tasks","detail":"tasks/task-05.md 内容变更","provisional":true}
+{"ts":1792057874468,"kind":"gate-run","stage":"verify","detail":"门实测 failed（496.5s） · 20261015095111","provisional":true}
+{"ts":1792057884754,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792058179511,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（233.7s） · 20261015095617","provisional":true}
+{"ts":1792058186403,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792058950000,"kind":"gate-run","stage":"verify","detail":"门实测 failed（426.9s） · 20261015100909","provisional":true}
+{"ts":1792058960257,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792059319952,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（269.9s） · 20261015101516","provisional":true}
+{"ts":1792059333495,"kind":"verify","stage":"verify","detail":"质量扫描记录更新","provisional":true}
+{"ts":1792059839753,"kind":"gate-run","stage":"verify","detail":"门实测 skipped（447.4s） · 20261015102358","provisional":true}
+{"ts":1792060090756,"kind":"file-update","stage":"verify","detail":"verify-result.md 内容变更","provisional":true}
+{"ts":1792060122112,"kind":"commit","stage":null,"detail":"332516169","provisional":true}
+{"ts":1792060542583,"kind":"commit","stage":null,"detail":"7af8e0e32","provisional":true}
+{"ts":1792061445924,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1792061726039,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/core/config.py、backend/app/core/logging.py、backend/app/core/paths.py、backend/app/modules/health/log_reader.py、backend/app/modules/health/router.py、backend/tests/test_server_log_filer.py——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792061729636,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：.gitignore、backend/tests/test_server_logs_api.py、frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx、frontend/src/app/(dashboard)/admin/server-status/page.tsx、frontend/src/components/__tests__/server-log-panel.test.tsx、frontend/src/components/server-log-panel.tsx、frontend/src/lib/health.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792061794040,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：backend/app/modules/knowledge/router.py、backend/app/modules/knowledge/schema.py、backend/app/modules/knowledge/search.py、backend/app/modules/knowledge/tests/test_knowledge_search.py、backend/app/modules/knowledge/tests/test_router.py、frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx、frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx、frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx、frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx、frontend/src/lib/knowledge.ts——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792065730784,"kind":"commit","stage":null,"detail":"9e8ba08fe","provisional":true}
+{"ts":1792066492348,"kind":"commit","stage":null,"detail":"766e8174e","provisional":true}
+{"ts":1792066613032,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1792066653320,"kind":"file-update","stage":"verify","detail":"module-impact.md 内容变更","provisional":true}
+{"ts":1792066653320,"kind":"commit","stage":null,"detail":"6fb4b538e","provisional":true}
+{"ts":1792066824260,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792067725912,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1792067832926,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792067832926,"kind":"commit","stage":null,"detail":"3be5ca877","provisional":true}
+{"ts":1792067866487,"kind":"commit","stage":null,"detail":"e6a6b3172","provisional":true}
