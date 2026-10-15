@@ -10,7 +10,7 @@
 1. 禁止绕过本文件规则和 SillySpec 流程。
 2. 修改代码前，必须先说明依据的文档路径或现有代码依据。
 3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → （人工确认再执行）archive`。
-4. 小修复 / 小调整走 SillySpec 轻量变更（thin，2 调用协议）：`sillyspec flow start --change <名> --input "<多行需求：动机一行 + 独立节头行「成功标准：」+ 每行一条 - <标准>>"` → 干活（改代码写测试）→ `sillyspec flow done --change <名>`。注意：`--input` 的成功标准禁止单行内联（会被清晰度门 exit 2 拒）；`flow done` 中间态 exit 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同命令断点续。（旧的 `sillyspec run quick` 已退役，仅存量收尾。）
+4. 小修复 / 小调整走 SillySpec 轻量变更（thin，2 调用协议）：`sillyspec flow start --change <名> --input "<多行需求：动机一行 + 独立节头行「成功标准：」+ 每行一条 - <标准>>"` → 干活（改代码写测试）→ `sillyspec flow done --change <名>`。注意：`--input` 的成功标准禁止单行内联（会被清晰度门 exit 2 拒）；`flow done` 中间态 exit 1 属正常（空槽拒收/实测失败自动升厚），修复后重跑同命令断点续。（`sillyspec run quick` 已删除——无该通道；历史文档中 ql-YYYYMMDD-NNN 条目与 QUICKLOG 引用仅作档案回读。）
 5. 执行顺序：文档 → 读代码 → 写测试 → 写实现 → 跑测试 → 验收 → 更新文档。 
 6. 中途停下用 `sillyspec status` / `sillyspec resume` 存进度，不直接 commit 半成品。
 7. 禁止无依据改代码，禁止先随意实现再补文档。 
@@ -27,7 +27,7 @@
 18. 注释和实现不一致是万恶之源，遇到不一致的要及时修正
 19. SillySpec 任务记录是隔离的
     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
-    - quick(存量通道,退役中):同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。旧的 `sillyspec run quick` 已退役——仅存量变更继续走该通道收尾;新的小修复一律走轻量变更(规则 4)。
+    - quick(已删除):`sillyspec run quick` 通道已整体删除——QUICKLOG 不再追加、无存量收尾通道;历史 QUICKLOG 文件与 ql-ID 条目仅作档案（模块文档中 ql-YYYYMMDD-NNN 引用仍可回读）;新的小修复一律走轻量变更(规则 4)。
 20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
 21. 
   * `.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
@@ -35,7 +35,7 @@
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个；§0.5 主题系统为多主题必读）
   * 多主题铁律：取值单一源 `frontend/src/styles/themes.ts`（blue/ai-native 双套）；品牌色类名用 `brand-*` 语义阶（随 html data-theme 换肤），`blue-*` 阶仅限真信息蓝/外部标识色；阴影走主题 token（shadow-* 已 var 化）；antd 组件色经 ConfigProvider token 不手写；旧参考 `archive/2026-06-21-2026-06-21-frontend-style-system/` 仅作历史背景，与冲突处以新系统为准。
 21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
-  * 后端 schema（DTO/请求/响应）有改动时，同一 quick/change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
+  * 后端 schema（DTO/请求/响应）有改动时，同一 change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
   * **daemon 同款义务（2026-10-15-ci-recurrence-guard ⑨）**：`sillyhub-daemon/src/api-types.ts` 同样从 `backend/openapi.json` 生成——后端 schema 有改动时，`pnpm -C sillyhub-daemon gen:types` 必须与前端 `gen:types` 在同一变更内跑并提交（断言面闸门⑨ fail-closed；历史上只写前端义务，daemon 漏生成致 daemon-ci 三连红）；
   * **gen:types 前先确认前端 node_modules 健康**（`pnpm exec tsc --version` 能跑、`.bin` 有 shim）：node_modules 半坏会报一堆**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'`（根因是缺间接依赖 csstype 等），误判成代码问题。修复 `pnpm install --force`（普通 install 可能命中缓存不修）；
   * 若 gen:types 暴露了与本次改动**无关**的旧测试债（如 mock 缺某字段），按惯例顺手补字段修好，而不是为躲报错改回手写。
