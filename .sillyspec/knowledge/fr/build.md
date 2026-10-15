@@ -1979,3 +1979,79 @@
   confirmed_at: null
   source_change: 2026-10-14-deploy-release-notes
   status: active
+
+## FR-build-133 沉淀资产卡内新增知识图谱分区：本变更一跳邻域切片（neighbors 锚点=change_key）+ 右侧节点详情栏（类型/ID/出入邻居分组，行点击跳选，默认选中变更锚点节点）；图不可用/请求失败/无数据时整区静默隐藏（fail-open 与资产卡逐组同口径）；
+变更：2026-10-15-change-assets-graph
+状态：active
+摘要：主路径；降级隐藏
+全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-01
+最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-change-assets-graph:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「不可用时整区隐藏」 | frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「渲染一跳切片并默认选中锚点」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-change-assets-graph
+  status: active
+
+## FR-build-134 详情页主栏顺序变为：审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线；
+变更：2026-10-15-change-assets-graph
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-02
+最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-change-assets-graph:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「FR-02：沉淀资产卡上移——主栏顺序钉死（审批卡→沉淀资产→步骤时间线→留痕时间线）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-change-assets-graph
+  status: active
+
+## FR-build-135 步骤时间线卡头有展开/收起切换，默认收起；上方阶段步骤条节点点击联动时自动展开；thin 出身整卡隐藏语义不变；
+变更：2026-10-15-change-assets-graph
+状态：active
+摘要：默认收起与联动展开
+全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-03
+最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-change-assets-graph:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx「change.steps 有明细 → 默认收起，点开展开渲染 ChangeStepTimeline 区块」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-change-assets-graph
+  status: active
+
+## FR-build-136 ChangeStageActions 无待审事项（pending_review 空）时不渲染任何占位卡；有待审面板/quick 存量说明/thin 拦截三类既有分支行为不变。
+变更：2026-10-15-change-assets-graph
+状态：active
+摘要：无待审不渲染
+全文：.sillyspec/changes/archive/2026-10-15-change-assets-graph/requirements.md#FR-04
+最近确认：249bb1fd79725b47073e1b16827848f61df6503c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-change-assets-graph:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx「无待审阶段：不渲染占位卡（返回 null）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-change-assets-graph
+  status: active

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-change-assets-graph",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-change-assets-graph:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「不可用时整区隐藏」",
+        "frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx「渲染一跳切片并默认选中锚点」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-assets-graph"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-change-assets-graph:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx「FR-02：沉淀资产卡上移——主栏顺序钉死（审批卡→沉淀资产→步骤时间线→留痕时间线）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-assets-graph"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-change-assets-graph:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx「change.steps 有明细 → 默认收起，点开展开渲染 ChangeStepTimeline 区块」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-assets-graph"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-change-assets-graph:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx「无待审阶段：不渲染占位卡（返回 null）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-change-assets-graph"
+    }
+  ]
+}

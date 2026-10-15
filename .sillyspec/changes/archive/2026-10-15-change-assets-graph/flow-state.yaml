@@ -1,0 +1,48 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：变更详情页信息动线不佳（用户原话四条）：①知识图谱（画布+右侧节点详情描述）没有出现在变更详情页，要嵌进沉淀资产卡片；②沉淀资产卡要上移到步骤时间线上面；③步骤时间线太长，加展开/收起按钮并默认收起；④「当前无可审批事项，阶段推进由智能体在会话中驱动」占位卡无信息量，去掉。
+
+  成功标准：
+
+  - 沉淀资产卡内新增知识图谱分区：本变更一跳邻域切片（neighbors 锚点=change_key）+
+  右侧节点详情栏（类型/ID/出入邻居分组，行点击跳选，默认选中变更锚点节点）；图不可用/请求失败/无数据时整区静默隐藏（fail-open 与资产卡逐组同口径）；
+
+  - 详情页主栏顺序变为：审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线；
+
+  - 步骤时间线卡头有展开/收起切换，默认收起；上方阶段步骤条节点点击联动时自动展开；thin 出身整卡隐藏语义不变；
+
+  - ChangeStageActions 无待审事项（pending_review 空）时不渲染任何占位卡；有待审面板/quick 存量说明/thin 拦截三类既有分支行为不变。
+autopilot: false
+prestage_ack: true
+baseline_commit: 2cfe4760e30e4fb7c8c9122a7c3d40f52ab6142f
+updatedAt: '2026-10-15T03:40:09.372Z'
+cross_baselines:
+  sillyspec: c72ac21404f8804bf3d9f84ef7033a952e8a63a6
+baseline_sha256: 80bc1a0d91ba0d9b5a2e2762492a4831c8bd53e5a4719be8c02202fd351930e5
+spec_approved: true
+spec_approved_at: '2026-10-15T03:12:57.270Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx6)+fr(2)（20.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015032737\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.5s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015032737\test-result.json｜门文件
+  23 个
+

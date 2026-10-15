@@ -1,0 +1,1251 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 4a2c877c8..79bbe5c3a 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -162,6 +162,40 @@ describe("变更详情页恢复钉子（2026-09-26-change-detail-restore-assets
+     ).toBeNull();
+   });
+ 
++  // 2026-10-15-change-assets-graph FR-02：主栏信息动线钉子——沉淀资产上移至
++  // 步骤时间线上面（审批卡 → 沉淀资产 → 步骤时间线 → 真实留痕时间线）。
++  // DOM 顺序断言防后续提交把挂载点挪回去（本文件立项背景即「静默回滚」实证）。
++  it("FR-02：沉淀资产卡位于步骤时间线卡之前（主栏顺序：审批卡→沉淀资产→步骤时间线→留痕时间线）", async () => {
++    const { container } = renderPage(
++      makeChange({
++        current_stage: "verify",
++        change_type: null,
++        steps: [
++          {
++            name: "实现收尾",
++            stage: "execute",
++            status: "completed",
++            output: null,
++            completed_at: "2026-10-15T10:00:00Z",
++            ordering: 0,
++            wait_reason: null,
++            kind: "step",
++          },
++        ],
++      }),
++    );
++    const assets = await screen.findByTestId("change-assets-card");
++    const stepTimeline = await screen.findByTestId("change-step-timeline-card");
++    // compareDocumentPosition：assets 在前（timeline 相对 assets 为 FOLLOWING）
++    expect(
++      assets.compareDocumentPosition(stepTimeline) &
++        Node.DOCUMENT_POSITION_FOLLOWING,
++    ).toBeTruthy();
++    // 审批卡在沉淀资产之前（pending_review 有值时；厚 fixture 走 verify 阶段占位
++    // 已删——用 main 内首个区块兜底断言：assets 是 main 的较早子块即可，上断言已钉）
++    expect(container.querySelector("main")).toContainElement(assets);
++  });
++
+   it("FR-03：范围对账卡收到 archived 传参（非终态变更为 false，非 unset）", async () => {
+     renderPage(makeChange());
+     const card = await screen.findByTestId("scope-audit-command-card");
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+index 156d3d913..d8fb84f2d 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+@@ -337,13 +337,29 @@ describe("详情页步骤时间线挂载（task-07，D-005@v1）", () => {
+     cleanup();
+   });
+ 
+-  it("change.steps 有明细 → 渲染 ChangeStepTimeline 区块（时间线卡片 + 组件挂载）", async () => {
++  it("change.steps 有明细 → 默认收起（组件体不渲染），点卡头展开后渲染 ChangeStepTimeline 区块（2026-10-15-change-assets-graph FR-03）", async () => {
+     setup({ change: makeChange({ steps: makeSteps() }) });
+     await renderPage();
++    // 卡片常在（收起态只剩卡头），组件体默认不渲染
+     expect(
+       screen.getByTestId("change-step-timeline-card"),
+     ).toBeInTheDocument();
++    expect(
++      screen.queryByTestId("change-step-timeline"),
++    ).not.toBeInTheDocument();
++    expect(
++      screen.getByTestId("change-step-timeline-toggle"),
++    ).toHaveAttribute("aria-expanded", "false");
++    // 点卡头展开 → 组件体挂载；再点收起 → 卸载
++    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
+     expect(screen.getByTestId("change-step-timeline")).toBeInTheDocument();
++    expect(
++      screen.getByTestId("change-step-timeline-toggle"),
++    ).toHaveAttribute("aria-expanded", "true");
++    fireEvent.click(screen.getByTestId("change-step-timeline-toggle"));
++    expect(
++      screen.queryByTestId("change-step-timeline"),
++    ).not.toBeInTheDocument();
+   });
+ 
+   it("steps 缺失（旧变更未上行）→ 降级不渲染时间线区块（D-003@v1，视觉与现状一致）", async () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index c48327f07..f53684e4a 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -139,6 +139,16 @@ export default function ChangeDetailPage({ params }: Props) {
+   // 同一阶段取消筛选；current_stage 非线性（quick 等）时步骤条不渲染，联动
+   // 入口自然缺席，focusStage 恒为 null 无副作用。
+   const [focusStage, setFocusStage] = useState<string | null>(null);
++  /** 步骤时间线展开态（2026-10-15-change-assets-graph / FR-03）：默认收起——
++   *  过程明细让位主线信息动线（沉淀资产/图谱优先）；卡头切换 + 阶段节点联动
++   *  自动展开。 */
++  const [stepsOpen, setStepsOpen] = useState(false);
++
++  // 收起态点阶段节点 → 自动展开时间线（联动入口在上方阶段步骤条，若保持收起
++  // 则「点了看不到东西」——联动语义要求展开）。
++  useEffect(() => {
++    if (focusStage) setStepsOpen(true);
++  }, [focusStage]);
+ 
+   // ── 辅助数据（绑定会话近似）：一次性加载，不随详情轮询（agent 状态链随
+   //     智能体运行状态卡移除一并退役，2026-09-28-change-ux-detail-batch）──
+@@ -405,22 +415,43 @@ export default function ChangeDetailPage({ params }: Props) {
+             notifyResult={notifyResult}
+           />
+ 
+-          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
+-              SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
+-              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
+-              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）：thin 流程子步
+-              不落库，steps 里只有归档时 unregisterChange 终态一致化补种的 3 行同
+-              时间戳步骤，零过程信息量；主线叙事由顶部轻量流程条 + 真实留痕时间线
+-              卡承担（谓词与流程条同源 isThinLineageChange）。 */}
++          {/* 沉淀资产（2026-10-15-change-assets-graph / FR-02：上移至步骤时间线
++              上面——详情页主信息（FR/决策/图谱/留档）优先于过程明细；自 aside 移
++              主栏 + 默认展开 + 分组固定高度滚动网格语义不变（2026-09-28 批次），
++              内嵌知识图谱分区见组件内注释。changeKey 透传（2026-10-14-decision-
++              anchor-change-qualified）：FR/决策深链 anchor 拼「变更号#决策号」
++              复合形态。 */}
++          <ChangeAssetsCard
++            workspaceId={workspaceId}
++            changeId={changeId}
++            changeKey={change?.change_key}
++          />
++
++          {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps；steps
++              缺失降级不渲染，D-003；focusStage 与上方阶段节点联动 ql-20260821-017）。
++              2026-10-15-change-assets-graph / FR-03：默认收起 + 卡头切换按钮，
++              收起态点阶段节点自动展开（effect 联动）——过程明细让位主线。
++              thin 出身整卡隐藏（2026-10-09-thin-hide-step-timeline）语义不变。 */}
+           {!isThinLineageChange(change) && change.steps && change.steps.length > 0 ? (
+             <section
+               data-testid="change-step-timeline-card"
+               className="rounded-md border bg-card"
+             >
+               <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+-                <h2 className="text-xs font-medium">
+-                  步骤时间线 ({change.steps.length})
+-                </h2>
++                <button
++                  type="button"
++                  data-testid="change-step-timeline-toggle"
++                  aria-expanded={stepsOpen}
++                  onClick={() => setStepsOpen((v) => !v)}
++                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
++                >
++                  <h2 className="text-xs font-medium">
++                    步骤时间线 ({change.steps.length})
++                  </h2>
++                  <span className="shrink-0 text-[10px] text-muted-foreground">
++                    {stepsOpen ? "收起 ▲" : "展开 ▼"}
++                  </span>
++                </button>
+                 {focusStage ? (
+                   <button
+                     type="button"
+@@ -432,12 +463,14 @@ export default function ChangeDetailPage({ params }: Props) {
+                   </button>
+                 ) : null}
+               </div>
+-              <div className="px-3 py-2.5">
+-                <ChangeStepTimeline
+-                  steps={change.steps}
+-                  focusStage={focusStage}
+-                />
+-              </div>
++              {stepsOpen ? (
++                <div className="px-3 py-2.5">
++                  <ChangeStepTimeline
++                    steps={change.steps}
++                    focusStage={focusStage}
++                  />
++                </div>
++              ) : null}
+             </section>
+           ) : null}
+ 
+@@ -450,18 +483,6 @@ export default function ChangeDetailPage({ params }: Props) {
+               路由参数切换不重挂载，折叠展开态会跨变更残留——key 化随切换重挂归零。 */}
+           <ChangeTimelineCard key={changeId} workspaceId={workspaceId} changeId={changeId} />
+ 
+-          {/* 沉淀资产（2026-09-28-change-ux-detail-batch：自 aside 移主栏 + 默认展开
+-              + 分组固定高度滚动网格——侧栏 296px 窄列里折叠卡「点了看不到东西」，
+-              归档资产是详情页主信息之一，宽列网格展开才是可用形态）。
+-              changeKey 透传（2026-10-14-decision-anchor-change-qualified）：FR/决策
+-              深链 anchor 拼「变更号#决策号」复合形态——聚合决策文件同 id 跨变更
+-              重复，裸 id 首卡误命中。 */}
+-          <ChangeAssetsCard
+-            workspaceId={workspaceId}
+-            changeId={changeId}
+-            changeKey={change?.change_key}
+-          />
+-
+           {/* 智能体运行状态卡已移除（2026-09-28-change-ux-detail-batch 用户裁决）：
+               thin 变更无派发，「当前阶段未配置智能体」常驻属噪音；完整流程的执行
+               观测走会话页。组件保留（mobile-change-detail 仍在用）。 */}
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+index 0c4ec0bd6..abed4836c 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+@@ -47,6 +47,7 @@ import { Input, Select } from "antd";
+ import { PageContainer, PageHeader } from "@/components/layout";
+ import {
+   GraphCanvas,
++  NODE_TYPE_LABELS,
+   NODE_TYPE_ORDER,
+   edgeDash,
+   graphEdgeKey,
+@@ -140,19 +141,8 @@ const EDGE_STRENGTH_LABEL: Readonly<Record<"strong" | "medium" | "weak", string>
+   weak: "弱",
+ };
+ 
+-/** 节点 10 类型中文标签（原型 NT.l 逐项一致；未知类型回退原值）。 */
+-const NODE_TYPE_LABELS: Readonly<Record<string, string>> = {
+-  project: "项目",
+-  module: "模块",
+-  file: "代码文件",
+-  test: "测试文件",
+-  decision: "决策 D-xxx",
+-  fr: "需求 FR",
+-  change: "变更",
+-  entry: "手册条目",
+-  doc: "文档",
+-  ql: "quicklog",
+-};
++// 节点 10 类型中文标签已迁至 graph-canvas.tsx 具名导出 NODE_TYPE_LABELS
++//（2026-10-15-change-assets-graph：变更详情页内嵌图谱分区共用单一源）。
+ 
+ /**
+  * 预置演示六胶囊（原型 presets 直译；锚点换本仓真实样例——当前变更名 /
+diff --git a/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx b/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+new file mode 100644
+index 000000000..98a24b20e
+--- /dev/null
++++ b/frontend/src/components/changes/detail/__tests__/change-assets-graph.test.tsx
+@@ -0,0 +1,173 @@
++/**
++ * ChangeAssetsGraph 组件测试（2026-10-15-change-assets-graph / FR-01）。
++ *
++ * 覆盖：
++ *   - 可用信封：渲染图谱分区（画布 stub 收到切片节点）+ 详情栏默认选中锚点
++ *     变更节点（类型中文标签 + ID + 按边型分组出入邻居行）；
++ *   - 交互：邻居行点击跳选（详情栏切到目标节点）+ 画布节点点击选中；
++ *   - fail-open 三态：available=false / 请求失败 / 节点集为空 → 整区不渲染；
++ *   - 加载中：轻提示占位。
++ *
++ * GraphCanvas 替身沿用 knowledge-graph-page.test.tsx 范式（jsdom 无 canvas 2D）：
++ * 节点点击经代理按钮走 onSelect；纯函数导出保持原模块真身。
++ */
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import { ChangeAssetsGraph } from "@/components/changes/detail/change-assets-graph";
++
++const mocks = vi.hoisted(() => ({
++  getKnowledgeGraphQuery: vi.fn(),
++}));
++
++vi.mock("@/lib/knowledge", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@/lib/knowledge")>();
++  return { ...actual, getKnowledgeGraphQuery: mocks.getKnowledgeGraphQuery };
++});
++
++vi.mock("@/components/knowledge/graph-canvas", async (importOriginal) => {
++  const original =
++    await importOriginal<typeof import("@/components/knowledge/graph-canvas")>();
++  const GraphCanvasStub = (props: {
++    nodes: ReadonlyArray<{ id: string }>;
++    mode?: string;
++    selectedId?: string | null;
++    onSelect?: (id: string | null) => void;
++  }) => (
++    <div data-testid="graph-canvas" data-mode={props.mode ?? "slice"} data-selected={props.selectedId ?? ""}>
++      {props.nodes.map((n) => (
++        <button
++          key={n.id}
++          type="button"
++          data-testid={`canvas-node-${n.id}`}
++          onClick={() => props.onSelect?.(n.id)}
++        />
++      ))}
++    </div>
++  );
++  return { ...original, GraphCanvas: GraphCanvasStub };
++});
++
++const ANCHOR = "2026-10-15-assets-demo";
++
++function makeEnvelope(over?: {
++  available?: boolean;
++  nodes?: Array<{ id: string; type?: string; label?: string }>;
++  edges?: Array<{ s: string; t: string; type: string; strength: string }>;
++}) {
++  const nodes = over?.nodes ?? [
++    { id: ANCHOR, type: "change", label: "演示变更" },
++    { id: "frontend/src/app/page.tsx", type: "file", label: "page.tsx" },
++    { id: "decision:d.md#D-001@v1", type: "decision", label: "D-001@v1" },
++  ];
++  const edges = over?.edges ?? [
++    { s: ANCHOR, t: "frontend/src/app/page.tsx", type: "deliverables", strength: "strong" },
++    { s: "decision:d.md#D-001@v1", t: ANCHOR, type: "from-change", strength: "strong" },
++  ];
++  return {
++    available: over?.available ?? true,
++    reason: over?.available === false ? "upgrade_required" : null,
++    data: over?.available === false ? null : { anchor: ANCHOR, nodes, edges },
++  };
++}
++
++function renderCard() {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <ChangeAssetsGraph workspaceId="ws-1" changeKey={ANCHOR} />
++    </QueryClientProvider>,
++  );
++}
++
++beforeEach(() => {
++  mocks.getKnowledgeGraphQuery.mockReset();
++});
++
++afterEach(() => {
++  cleanup();
++});
++
++describe("ChangeAssetsGraph（沉淀资产卡内嵌知识图谱分区）", () => {
++  it("可用信封：渲染分区，画布收到切片节点，详情栏默认选中锚点变更节点（类型标签+ID+分组邻居行）", async () => {
++    mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope());
++    renderCard();
++
++    const section = await screen.findByTestId("change-assets-graph");
++    expect(section).toBeInTheDocument();
++    expect(mocks.getKnowledgeGraphQuery).toHaveBeenCalledWith(
++      "ws-1",
++      "neighbors",
++      { anchor: ANCHOR },
++    );
++    // 画布 stub 收到三节点切片（testid = canvas-node-<完整节点 id>）
++    expect(
++      screen.getByTestId("canvas-node-frontend/src/app/page.tsx"),
++    ).toBeInTheDocument();
++    // 详情栏默认锚点：label + 类型中文标签 + 邻居行（出 1 入 1，按边型分组）
++    expect(screen.getByText("演示变更")).toBeInTheDocument();
++    expect(screen.getByText("变更")).toBeInTheDocument();
++    expect(screen.getByText("deliverables")).toBeInTheDocument();
++    expect(screen.getByText("from-change")).toBeInTheDocument();
++  });
++
++  it("邻居行点击跳选：详情栏切到目标节点（画布点击同效）", async () => {
++    mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope());
++    renderCard();
++
++    // 邻居行（page.tsx，出方向）点击 → 详情栏切到该节点
++    await screen.findByText("演示变更");
++    fireEvent.click(screen.getByText("page.tsx"));
++    await waitFor(() =>
++      expect(screen.getByTestId("change-assets-graph-detail")).toHaveTextContent(
++        "代码文件",
++      ),
++    );
++    // 画布节点点击（decision 节点）→ 选中环同步 + 详情栏切到决策
++    fireEvent.click(screen.getByTestId("canvas-node-decision:d.md#D-001@v1"));
++    await waitFor(() =>
++      expect(screen.getByTestId("change-assets-graph-detail")).toHaveTextContent(
++        "D-001@v1",
++      ),
++    );
++  });
++
++  it("fail-open：available=false（upgrade_required）→ 整区不渲染", async () => {
++    mocks.getKnowledgeGraphQuery.mockResolvedValue(makeEnvelope({ available: false }));
++    renderCard();
++    await waitFor(() =>
++      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
++    );
++    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
++  });
++
++  it("fail-open：请求失败 → 整区不渲染（retry:false 不轰炸）", async () => {
++    mocks.getKnowledgeGraphQuery.mockRejectedValue(new Error("rpc down"));
++    renderCard();
++    await waitFor(() =>
++      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
++    );
++    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
++  });
++
++  it("fail-open：节点集为空 → 整区不渲染（锚点未命中降级形态）", async () => {
++    mocks.getKnowledgeGraphQuery.mockResolvedValue(
++      makeEnvelope({ nodes: [], edges: [] }),
++    );
++    renderCard();
++    await waitFor(() =>
++      expect(screen.queryByTestId("change-assets-graph-loading")).not.toBeInTheDocument(),
++    );
++    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
++  });
++
++  it("加载中：轻提示占位（不渲染分区主体）", () => {
++    mocks.getKnowledgeGraphQuery.mockReturnValue(new Promise(() => {}));
++    renderCard();
++    expect(screen.getByTestId("change-assets-graph-loading")).toBeInTheDocument();
++    expect(screen.queryByTestId("change-assets-graph")).not.toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+index 97a34dda8..67b1b38f3 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-stage-actions.test.tsx
+@@ -8,7 +8,7 @@
+ //   - 意见输入 textarea 调 onGateCommentChange
+ //   - 绑定会话只读展示（含空态）
+ //   - quick 阶段只读说明（无执行控制）
+-//   - 无待审阶段占位说明（无执行控制）
++//   - 无待审阶段不渲染占位卡（返回 null，2026-10-15-change-assets-graph FR-04）
+ //   - 三类降级提示（turn_conflict / session_inactive / 其它）+ 文案可复制
+ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+@@ -174,14 +174,16 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
+     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+   });
+ 
+-  it("无待审阶段：占位说明，无执行控制按钮", () => {
++  it("无待审阶段：不渲染占位卡（返回 null——2026-10-15-change-assets-graph FR-04 用户裁决去噪音）", () => {
+     const props = makeProps({
+       change: makeChange({ current_stage: "execute", pending_review: null }),
+     });
+-    render(<ChangeStageActions {...props} />);
++    const { container } = render(<ChangeStageActions {...props} />);
++    // 「当前无可审批事项」占位卡移除：整组件不渲染
+     expect(
+-      screen.getByText(/当前无可审批事项，阶段推进由智能体在会话中驱动/),
+-    ).toBeInTheDocument();
++      screen.queryByText(/当前无可审批事项，阶段推进由智能体在会话中驱动/),
++    ).not.toBeInTheDocument();
++    expect(container.firstChild).toBeNull();
+     expect(screen.queryByText(/触发智能体/)).not.toBeInTheDocument();
+     expect(screen.queryByText(/推进到/)).not.toBeInTheDocument();
+     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+diff --git a/frontend/src/components/changes/detail/change-assets-card.tsx b/frontend/src/components/changes/detail/change-assets-card.tsx
+index 538ff457a..1f9ced406 100644
+--- a/frontend/src/components/changes/detail/change-assets-card.tsx
++++ b/frontend/src/components/changes/detail/change-assets-card.tsx
+@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
+ import { FilePreview } from "@/components/explorer/file-preview";
+ import { DiffView } from "@/components/files/structured-views";
+ import { EntryCardList } from "@/components/knowledge/entry-card-list";
++import { ChangeAssetsGraph } from "@/components/changes/detail/change-assets-graph";
+ import {
+   Dialog,
+   DialogContent,
+@@ -235,6 +236,15 @@ export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAss
+            固定高度 h-64（超出组内滚动）——主栏宽列下的可扫读形态，替代侧栏
+            窄列的纵向长堆叠。空态段跨满两列。 */
+         <div className="grid grid-cols-1 gap-2 px-3 py-2 md:grid-cols-2">
++          {/* 知识图谱分区（2026-10-15-change-assets-graph / FR-01）：本变更一跳
++              邻域切片 + 右侧节点详情栏，跨满两列；fail-open——图不可用/失败/空
++              时整区自隐藏（组件内收敛），changeKey 缺省（理论不发生）不挂载。 */}
++          {changeKey ? (
++            <div className="md:col-span-2">
++              <ChangeAssetsGraph workspaceId={workspaceId} changeKey={changeKey} />
++            </div>
++          ) : null}
++
+           {data && !data.archived && total === 0 ? (
+             <p
+               data-testid="change-assets-inflight"
+diff --git a/frontend/src/components/changes/detail/change-assets-graph.tsx b/frontend/src/components/changes/detail/change-assets-graph.tsx
+new file mode 100644
+index 000000000..112cc5acd
+--- /dev/null
++++ b/frontend/src/components/changes/detail/change-assets-graph.tsx
+@@ -0,0 +1,210 @@
++"use client";
++
++/**
++ * ChangeAssetsGraph —— 沉淀资产卡内嵌知识图谱分区
++ * （2026-10-15-change-assets-graph / FR-01，用户需求：图谱+右侧描述放进沉淀资产卡）。
++ *
++ * 本变更一跳邻域切片：getKnowledgeGraphQuery(workspaceId, "neighbors",
++ * { anchor: changeKey })（与图谱页 neighbors 切片同端点同型收窄——data 联合按
++ * `"anchor" in data` 分型）+ GraphCanvas slice 模式画布 + 右侧节点详情栏
++ * （图谱页 detail tab 的紧凑直译：类型中文标签 + 色点 + ID + 按边型分组的
++ * 出入邻居行，行点击跳选）。
++ *
++ * fail-open（与资产卡逐组「有数据才渲染」同口径）：信封 available=false /
++ * 请求失败（retry:false 不轰炸）/ 节点集为空 / 非 neighbors 分型（node_not_found
++ * 降级等）→ 整区静默隐藏，不显示错误卡，不影响资产卡其余分组。
++ *
++ * 选中态：初始由锚点节点兜底（selectedId ?? data.anchor）——用户点击画布节点
++ * 或邻居行后切换；点画布空白回退锚点（受控面板恒有内容，不设计空态）。
++ */
++
++import { useMemo, useState } from "react";
++import { useQuery } from "@tanstack/react-query";
++
++import {
++  GraphCanvas,
++  NODE_TYPE_LABELS,
++  nodePalette,
++  nodeTypeIndex,
++} from "@/components/knowledge/graph-canvas";
++import type { GraphEdge, GraphNodeRef } from "@/lib/knowledge";
++import { getKnowledgeGraphQuery } from "@/lib/knowledge";
++import { useThemeStore } from "@/stores/theme";
++
++interface ChangeAssetsGraphProps {
++  workspaceId: string;
++  /** 变更 key（neighbors 锚点；缺省不渲染——无锚点无切片）。 */
++  changeKey: string;
++}
++
++function asArray<T>(v: unknown): T[] {
++  return Array.isArray(v) ? (v as T[]) : [];
++}
++
++export function ChangeAssetsGraph({ workspaceId, changeKey }: ChangeAssetsGraphProps) {
++  const theme = useThemeStore((s) => s.theme);
++  const palette = useMemo(() => nodePalette(theme), [theme]);
++  /** 用户显式选中（null = 未操作，详情栏回退锚点节点）。 */
++  const [selectedId, setSelectedId] = useState<string | null>(null);
++
++  const q = useQuery({
++    queryKey: ["changeAssetsGraph", workspaceId, changeKey],
++    queryFn: () =>
++      getKnowledgeGraphQuery(workspaceId, "neighbors", { anchor: changeKey }),
++    retry: false,
++    refetchOnWindowFocus: false,
++  });
++
++  const data = q.data?.available ? q.data.data ?? null : null;
++  // neighbors 分型收窄（node_not_found 等降级形态缺 anchor 字段 → 隐藏）。
++  const nodes = data && "anchor" in data ? asArray<GraphNodeRef>(data.nodes) : [];
++  const edges = data && "anchor" in data ? asArray<GraphEdge>(data.edges) : [];
++
++  const nodeMap = useMemo(
++    () => new Map(nodes.map((n) => [n.id, n] as const)),
++    [nodes],
++  );
++  // 受控选中：显式选择优先，未操作时锚点兜底（锚点缺失（理论不发生）回退首节点）。
++  const selectedNode =
++    (selectedId ? nodeMap.get(selectedId) : undefined) ??
++    nodeMap.get(changeKey) ??
++    nodes[0] ??
++    null;
++
++  // 选中节点出入邻居（按边型分组；s→t 定方向，与图谱页 detail tab 同口径）。
++  const neighborGroups = useMemo(() => {
++    if (!selectedNode) return [];
++    const groups = new Map<
++      string,
++      { type: string; rows: { other: string; dir: "出" | "入" }[] }
++    >();
++    for (const e of edges) {
++      if (e.s === selectedNode.id || e.t === selectedNode.id) {
++        const g = groups.get(e.type) ?? { type: e.type, rows: [] };
++        if (e.s === selectedNode.id) g.rows.push({ other: e.t, dir: "出" });
++        if (e.t === selectedNode.id) g.rows.push({ other: e.s, dir: "入" });
++        groups.set(e.type, g);
++      }
++    }
++    return [...groups.values()];
++  }, [selectedNode, edges]);
++
++  // fail-open：加载中给轻提示（信封不可用/失败/空 → 整区隐藏）。
++  if (q.isPending) {
++    return (
++      <p
++        data-testid="change-assets-graph-loading"
++        className="rounded border border-border/60 px-2 py-2 text-center text-[11px] text-muted-foreground"
++      >
++        知识图谱加载中…
++      </p>
++    );
++  }
++  if (q.isError || !q.data?.available || nodes.length === 0) return null;
++
++  return (
++    <div
++      data-testid="change-assets-graph"
++      className="overflow-hidden rounded border border-border/60"
++    >
++      <div className="flex items-center justify-between gap-2 border-b border-dashed px-2 py-1.5">
++        <span className="text-[11px] font-medium text-muted-foreground">
++          🕸 知识图谱（本变更一跳邻域）
++        </span>
++        <span className="shrink-0 text-[10px] text-muted-foreground/70">
++          {nodes.length} 节点 · {edges.length} 边 · 点击节点看详情
++        </span>
++      </div>
++      <div className="flex flex-col gap-2 p-2 md:flex-row">
++        <div className="relative h-[280px] min-w-0 flex-1 overflow-hidden rounded border border-border/40 bg-muted/20">
++          <GraphCanvas
++            className="absolute inset-0"
++            nodes={nodes}
++            edges={edges}
++            mode="slice"
++            selectedId={selectedNode?.id ?? null}
++            onSelect={setSelectedId}
++          />
++        </div>
++        <div
++          data-testid="change-assets-graph-detail"
++          className="w-full shrink-0 overflow-y-auto md:max-h-[280px] md:w-[250px]"
++        >
++          {selectedNode ? (
++            <div className="text-xs">
++              <div className="flex items-center gap-2">
++                <span
++                  aria-hidden
++                  className="h-3 w-3 shrink-0 rounded-full"
++                  style={{ backgroundColor: palette[nodeTypeIndex(selectedNode.type)] }}
++                />
++                <span className="min-w-0 break-all text-[12px] font-semibold">
++                  {selectedNode.label || selectedNode.id}
++                </span>
++              </div>
++              <div className="mt-1.5 flex items-baseline gap-2">
++                <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-px text-[10px] font-bold text-brand-700">
++                  {NODE_TYPE_LABELS[selectedNode.type] ?? (selectedNode.type || "未知")}
++                </span>
++                <span
++                  className="min-w-0 break-all font-mono text-[10px] text-muted-foreground"
++                  title={selectedNode.id}
++                >
++                  {selectedNode.id}
++                </span>
++              </div>
++              {neighborGroups.length > 0 ? (
++                <div className="mt-2 space-y-1.5">
++                  {neighborGroups.map((g) => (
++                    <div key={g.type}>
++                      <div className="font-mono text-[10px] font-medium text-muted-foreground">
++                        {g.type}
++                      </div>
++                      <div className="mt-0.5 space-y-0.5">
++                        {g.rows.map((row, i) => {
++                          const other = nodeMap.get(row.other);
++                          return (
++                            <button
++                              key={`${row.other}:${row.dir}:${i}`}
++                              type="button"
++                              data-testid="change-assets-graph-neighbor"
++                              disabled={!other}
++                              onClick={() => other && setSelectedId(other.id)}
++                              className="flex w-full items-center gap-1.5 rounded-sm border border-border/50 px-1.5 py-0.5 text-left text-[11px] transition-colors hover:border-brand-300 hover:bg-brand-50/50 disabled:cursor-default disabled:opacity-60"
++                            >
++                              <span
++                                aria-hidden
++                                className="h-2 w-2 shrink-0 rounded-full"
++                                style={{
++                                  backgroundColor: palette[nodeTypeIndex(other?.type ?? "")],
++                                }}
++                              />
++                              <span className="min-w-0 flex-1 truncate" title={row.other}>
++                                {other ? other.label || other.id : row.other}
++                              </span>
++                              <span className="shrink-0 text-[9.5px] text-muted-foreground">
++                                {row.dir}
++                              </span>
++                            </button>
++                          );
++                        })}
++                      </div>
++                    </div>
++                  ))}
++                </div>
++              ) : (
++                <p className="mt-2 text-[10.5px] text-muted-foreground">
++                  该节点在本切片内无邻接边。
++                </p>
++              )}
++            </div>
++          ) : (
++            <p className="py-6 text-center text-[11px] text-muted-foreground">
++              点击画布节点查看详情
++            </p>
++          )}
++        </div>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/changes/detail/change-stage-actions.tsx b/frontend/src/components/changes/detail/change-stage-actions.tsx
+index 5db534629..446f81b64 100644
+--- a/frontend/src/components/changes/detail/change-stage-actions.tsx
++++ b/frontend/src/components/changes/detail/change-stage-actions.tsx
+@@ -1,268 +1,264 @@
+-"use client";
+-
+-import { isThinLineageChange } from "@/lib/thin-lineage";
+-import { useState } from "react";
+-
+-import { Button } from "@/components/ui/button";
+-import type { ChangeRead } from "@/lib/changes";
+-import type { AgentSessionListItem } from "@/lib/daemon";
++"use client";
++
++import { isThinLineageChange } from "@/lib/thin-lineage";
++import { useState } from "react";
++
++import { Button } from "@/components/ui/button";
++import type { ChangeRead } from "@/lib/changes";
++import type { AgentSessionListItem } from "@/lib/daemon";
+ import { copyTextToClipboard } from "@/lib/clipboard";
+-
+-/**
+- * 审批卡（2026-08-14-change-center-conversation-driven task-10 / D-003@v1 / D-006@v2）。
+- *
+- * 变更详情页**唯一操作区**：意见输入 + 绑定会话只读展示 + 「通过/打回并通知绑定会话」。
+- * 执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，含 quick 分支）已全部删除——
+- * 变更由 agent 在会话里经 sillyspec 驱动，平台只做展示板 + 人工审批（D-003@v1）。
+- * quick/thin 类变更均由 agent 在会话中驱动（quick 已退役转存量收尾；
+- * 2026-09-25-change-center-thin-flow 起 quick 类型新变更分流至 thin 轻量变更，
+- * 两分支均为只读说明卡，无平台按钮）。
+- *
+- * 审批走单端点调用（submitStageReview 透传 notify_session），注入由后端以服务身份
+- * best-effort 完成；据响应 notified_session / notify_error 展示三类降级提示
+- * （turn_conflict / session_inactive / 其它），审批记录与状态不受注入失败影响。
+- *
+- * 纯受控展示组件：不调任何 lib API、不自带数据请求，state/handler 由 page.tsx 注入。
+- */
+-
+-// 审批卡按钮 → action 映射（plan.md 前置钉死，对齐 lib/changes.ts submitStageReview 分发）。
+-// 通过/打回各一主项；archive_confirm 无打回（仅 comment 透传）。
+-const APPROVAL_PANELS: Record<
+-  string,
+-  {
+-    title: string;
+-    description: string;
+-    pass: { label: string; action: string };
+-    reject: { label: string; action: string } | null;
+-  }
+-> = {
+-  proposal_review: {
+-    title: "四件套已生成，请确认",
+-    description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
+-    pass: { label: "通过并通知绑定会话", action: "proposal_approve" },
+-    reject: { label: "打回并通知绑定会话", action: "proposal_revise" },
+-  },
+-  plan_review: {
+-    title: "执行计划已生成，请确认",
+-    description: "智能体 已生成执行计划，请审阅后决定",
+-    pass: { label: "通过并通知绑定会话", action: "plan_approve" },
+-    reject: { label: "打回并通知绑定会话", action: "plan_replan" },
+-  },
+-  human_test: {
+-    title: "自动验证通过，请人工测试",
+-    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG 即返工反馈）",
+-    pass: { label: "通过并通知绑定会话", action: "test_pass" },
+-    reject: { label: "打回并通知绑定会话", action: "test_bug" },
+-  },
+-  archive_confirm: {
+-    title: "归档确认",
+-    description: "所有验证已通过，确认归档此变更",
+-    pass: { label: "归档并通知绑定会话", action: "archive_confirm" },
+-    reject: null,
+-  },
+-};
+-
+-/** 会话状态中文标签（只读展示用）。 */
+-const SESSION_STATUS_LABELS: Record<string, string> = {
+-  pending: "等待中",
+-  active: "进行中",
+-  reconnecting: "重连中",
+-  ended: "已结束",
+-  failed: "已失败",
+-};
+-
+-/** 审批注入结果（D-006@v2：notified_session=false 时 notify_error 语义化）。 */
+-export type NotifyResult = {
+-  notified_session: boolean;
+-  notify_error: string | null;
+-};
+-
+-export interface ChangeStageActionsProps {
+-  change: ChangeRead;
+-  /** 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，可空）。 */
+-  boundSession: AgentSessionListItem | null;
+-  gateComment: string;
+-  onGateCommentChange: (_v: string) => void;
+-  /** 审批动作（action 词表，comment 由卡片内意见输入携带）。 */
+-  onGateAction: (_action: string) => void;
+-  transitioning: boolean;
+-  /** 最近一次审批的注入结果（用于降级提示；null=尚未审批）。 */
+-  notifyResult: NotifyResult | null;
+-}
+-
+-/** 降级提示语义化：返回 { title, copyable }；注入成功时返回 null。 */
+-function degradeMessage(
+-  notify: NotifyResult,
+-  change: ChangeRead,
+-): { title: string; copyable: string } | null {
+-  if (notify.notified_session) return null;
+-  const key = change.change_key ?? change.id;
+-  switch (notify.notify_error) {
+-    case "turn_conflict":
+-      return {
+-        title: "审批已生效，agent 忙，请稍后在会话中告知继续",
+-        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
+-      };
+-    case "session_inactive":
+-      return {
+-        title: "绑定会话已结束，审批已生效，请去会话页开启新会话",
+-        copyable: `变更 ${key} 的审批已生效，请开启新会话后继续推进。`,
+-      };
+-    default:
+-      return {
+-        title: "审批已生效，但通知绑定会话失败（审批记录与状态不受影响）",
+-        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
+-      };
+-  }
+-}
+-
+-export function ChangeStageActions({
+-  change,
+-  boundSession,
+-  gateComment,
+-  onGateCommentChange,
+-  onGateAction,
+-  transitioning,
+-  notifyResult,
+-}: ChangeStageActionsProps) {
+-  const [copied, setCopied] = useState(false);
+-  const currentStage = change.current_stage ?? "draft";
+-  const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
+-
+-  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡。
+-  // 2026-09-28-change-ux-detail-batch（用户裁决）：两段式协议长文案不再渲染——
+-  // 协议说明属 CLI/会话面知识，详情页顶部轻量流程条（flow start → 干活 →
+-  // flow done）已承载形态认知，长文卡对浏览者是噪音。出身判定（归档 thin /
+-  // quick 分流）仅用于拦截进通用「无可审批」分支。
+-  if (isThinLineageChange(change)) {
+-    return null;
+-  }
+-
+-  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
+-  if (currentStage === "quick") {
+-    return (
+-      <section className="space-y-2 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
+-        <div className="flex items-center gap-2">
+-          <span className="text-sm font-semibold">⚡ 快速修复（存量）</span>
+-          <span className="text-xs text-muted-foreground">
+-            已退役 · 存量收尾通道
+-          </span>
+-        </div>
+-        <p className="text-[11px] text-muted-foreground">
+-          旧的 quick 通道已退役，仅存量变更继续在会话中收尾；完成态经同步链路回写。
+-          新的小修复请在变更列表创建「轻量变更」。
+-        </p>
+-      </section>
+-    );
+-  }
+-
+-  // 无待审阶段：无操作区（只读展示区由其它卡片承载）。
+-  if (!gatePanel) {
+-    return (
+-      <section className="rounded-md border border-muted bg-card px-4 py-3">
+-        <p className="text-xs text-muted-foreground">
+-          当前无可审批事项，阶段推进由智能体在会话中驱动。
+-        </p>
+-      </section>
+-    );
+-  }
+-
+-  const degrade = notifyResult ? degradeMessage(notifyResult, change) : null;
+-
+-  const handleCopy = async () => {
+-    if (!degrade) return;
+-    try {
+-      await copyTextToClipboard(degrade.copyable);
+-      setCopied(true);
+-      setTimeout(() => setCopied(false), 2000);
+-    } catch {
+-      /* clipboard 写入被拒时静默 */
+-    }
+-  };
+-
+-  return (
+-    <section className="space-y-2.5 rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3">
+-      <div>
+-        <p className="text-sm font-semibold">{gatePanel.title}</p>
+-        <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
+-      </div>
+-
+-      {/* 绑定会话只读展示（change_session_links 最新；前端取工作区最近活跃会话近似） */}
+-      {boundSession ? (
+-        <div className="rounded border bg-background px-3 py-2">
+-          <p className="text-[11px] text-muted-foreground">
+-            绑定会话（审批结果将通知此会话）
+-          </p>
+-          <p className="truncate text-xs font-medium">
+-            {boundSession.title ?? `会话 ${boundSession.id.slice(0, 8)}`}
+-          </p>
+-          <p className="text-[11px] text-muted-foreground">
+-            {boundSession.provider} ·{" "}
+-            {SESSION_STATUS_LABELS[boundSession.status] ?? boundSession.status}
+-            {boundSession.last_active_at
+-              ? ` · 最近活跃 ${new Date(boundSession.last_active_at).toLocaleString("zh-CN")}`
+-              : ""}
+-          </p>
+-        </div>
+-      ) : (
+-        <div className="rounded border border-dashed bg-background px-3 py-2">
+-          <p className="text-[11px] text-muted-foreground">
+-            暂无可通知的绑定会话，审批结果仅落库展示
+-          </p>
+-        </div>
+-      )}
+-
+-      <textarea
+-        className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
+-        rows={2}
+-        placeholder="审核意见（可选）"
+-        value={gateComment}
+-        onChange={(e) => onGateCommentChange(e.target.value)}
+-      />
+-
+-      {/* 通过/打回并通知绑定会话（archive_confirm 无打回） */}
+-      <div className="flex flex-wrap gap-2">
+-        <Button
+-          size="sm"
+-          onClick={() => onGateAction(gatePanel.pass.action)}
+-          disabled={transitioning}
+-        >
+-          {gatePanel.pass.label}
+-        </Button>
+-        {gatePanel.reject ? (
+-          <Button
+-            variant="destructive"
+-            size="sm"
+-            onClick={() => onGateAction(gatePanel.reject!.action)}
+-            disabled={transitioning}
+-          >
+-            {gatePanel.reject.label}
+-          </Button>
+-        ) : null}
+-      </div>
+-
+-      {/* 注入降级提示（三类，R-03：审批已落库，注入失败不回滚） */}
+-      {degrade ? (
+-        <div
+-          className="space-y-1.5 rounded border border-amber-500/40 bg-amber-50/60 px-3 py-2"
+-          data-testid="approval-notify-degrade"
+-        >
+-          <p className="text-xs font-medium text-amber-800">{degrade.title}</p>
+-          <div className="flex flex-wrap items-center gap-2">
+-            <code className="min-w-0 flex-1 rounded bg-background px-2 py-1 text-[11px] text-foreground">
+-              {degrade.copyable}
+-            </code>
+-            <Button
+-              variant="outline"
+-              size="sm"
+-              onClick={() => void handleCopy()}
+-              disabled={copied}
+-            >
+-              {copied ? "已复制" : "复制文案"}
+-            </Button>
+-          </div>
+-        </div>
+-      ) : null}
+-    </section>
+-  );
+-}
++
++/**
++ * 审批卡（2026-08-14-change-center-conversation-driven task-10 / D-003@v1 / D-006@v2）。
++ *
++ * 变更详情页**唯一操作区**：意见输入 + 绑定会话只读展示 + 「通过/打回并通知绑定会话」。
++ * 执行控制（推进 / 重新派发 / 验证门禁 / 选档案 / 团队配置，含 quick 分支）已全部删除——
++ * 变更由 agent 在会话里经 sillyspec 驱动，平台只做展示板 + 人工审批（D-003@v1）。
++ * quick/thin 类变更均由 agent 在会话中驱动（quick 已退役转存量收尾；
++ * 2026-09-25-change-center-thin-flow 起 quick 类型新变更分流至 thin 轻量变更，
++ * 两分支均为只读说明卡，无平台按钮）。
++ *
++ * 审批走单端点调用（submitStageReview 透传 notify_session），注入由后端以服务身份
++ * best-effort 完成；据响应 notified_session / notify_error 展示三类降级提示
++ * （turn_conflict / session_inactive / 其它），审批记录与状态不受注入失败影响。
++ *
++ * 纯受控展示组件：不调任何 lib API、不自带数据请求，state/handler 由 page.tsx 注入。
++ */
++
++// 审批卡按钮 → action 映射（plan.md 前置钉死，对齐 lib/changes.ts submitStageReview 分发）。
++// 通过/打回各一主项；archive_confirm 无打回（仅 comment 透传）。
++const APPROVAL_PANELS: Record<
++  string,
++  {
++    title: string;
++    description: string;
++    pass: { label: string; action: string };
++    reject: { label: string; action: string } | null;
++  }
++> = {
++  proposal_review: {
++    title: "四件套已生成，请确认",
++    description: "智能体 已生成 proposal / requirements / design / tasks，请审阅后决定",
++    pass: { label: "通过并通知绑定会话", action: "proposal_approve" },
++    reject: { label: "打回并通知绑定会话", action: "proposal_revise" },
++  },
++  plan_review: {
++    title: "执行计划已生成，请确认",
++    description: "智能体 已生成执行计划，请审阅后决定",
++    pass: { label: "通过并通知绑定会话", action: "plan_approve" },
++    reject: { label: "打回并通知绑定会话", action: "plan_replan" },
++  },
++  human_test: {
++    title: "自动验证通过，请人工测试",
++    description: "智能体 已完成自动验证，请进行人工测试（发现 BUG 即返工反馈）",
++    pass: { label: "通过并通知绑定会话", action: "test_pass" },
++    reject: { label: "打回并通知绑定会话", action: "test_bug" },
++  },
++  archive_confirm: {
++    title: "归档确认",
++    description: "所有验证已通过，确认归档此变更",
++    pass: { label: "归档并通知绑定会话", action: "archive_confirm" },
++    reject: null,
++  },
++};
++
++/** 会话状态中文标签（只读展示用）。 */
++const SESSION_STATUS_LABELS: Record<string, string> = {
++  pending: "等待中",
++  active: "进行中",
++  reconnecting: "重连中",
++  ended: "已结束",
++  failed: "已失败",
++};
++
++/** 审批注入结果（D-006@v2：notified_session=false 时 notify_error 语义化）。 */
++export type NotifyResult = {
++  notified_session: boolean;
++  notify_error: string | null;
++};
++
++export interface ChangeStageActionsProps {
++  change: ChangeRead;
++  /** 绑定会话（change_session_links 最新；前端取工作区最近活跃会话近似展示，可空）。 */
++  boundSession: AgentSessionListItem | null;
++  gateComment: string;
++  onGateCommentChange: (_v: string) => void;
++  /** 审批动作（action 词表，comment 由卡片内意见输入携带）。 */
++  onGateAction: (_action: string) => void;
++  transitioning: boolean;
++  /** 最近一次审批的注入结果（用于降级提示；null=尚未审批）。 */
++  notifyResult: NotifyResult | null;
++}
++
++/** 降级提示语义化：返回 { title, copyable }；注入成功时返回 null。 */
++function degradeMessage(
++  notify: NotifyResult,
++  change: ChangeRead,
++): { title: string; copyable: string } | null {
++  if (notify.notified_session) return null;
++  const key = change.change_key ?? change.id;
++  switch (notify.notify_error) {
++    case "turn_conflict":
++      return {
++        title: "审批已生效，agent 忙，请稍后在会话中告知继续",
++        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
++      };
++    case "session_inactive":
++      return {
++        title: "绑定会话已结束，审批已生效，请去会话页开启新会话",
++        copyable: `变更 ${key} 的审批已生效，请开启新会话后继续推进。`,
++      };
++    default:
++      return {
++        title: "审批已生效，但通知绑定会话失败（审批记录与状态不受影响）",
++        copyable: `变更 ${key} 的审批已生效，请继续推进。`,
++      };
++  }
++}
++
++export function ChangeStageActions({
++  change,
++  boundSession,
++  gateComment,
++  onGateCommentChange,
++  onGateAction,
++  transitioning,
++  notifyResult,
++}: ChangeStageActionsProps) {
++  const [copied, setCopied] = useState(false);
++  const currentStage = change.current_stage ?? "draft";
++  const gatePanel = APPROVAL_PANELS[change.pending_review ?? ""];
++
++  // thin 辅助阶段（2026-09-25-change-center-thin-flow task-08）：轻量变更只读说明卡。
++  // 2026-09-28-change-ux-detail-batch（用户裁决）：两段式协议长文案不再渲染——
++  // 协议说明属 CLI/会话面知识，详情页顶部轻量流程条（flow start → 干活 →
++  // flow done）已承载形态认知，长文卡对浏览者是噪音。出身判定（归档 thin /
++  // quick 分流）仅用于拦截进通用「无可审批」分支。
++  if (isThinLineageChange(change)) {
++    return null;
++  }
++
++  // quick 独立阶段（D-003）：无平台执行控制，仅只读说明（存量通道，已退役）。
++  if (currentStage === "quick") {
++    return (
++      <section className="space-y-2 rounded-md border border-amber-500/40 bg-amber-50/40 px-4 py-3">
++        <div className="flex items-center gap-2">
++          <span className="text-sm font-semibold">⚡ 快速修复（存量）</span>
++          <span className="text-xs text-muted-foreground">
++            已退役 · 存量收尾通道
++          </span>
++        </div>
++        <p className="text-[11px] text-muted-foreground">
++          旧的 quick 通道已退役，仅存量变更继续在会话中收尾；完成态经同步链路回写。
++          新的小修复请在变更列表创建「轻量变更」。
++        </p>
++      </section>
++    );
++  }
++
++  // 无待审阶段（2026-10-15-change-assets-graph / FR-04 用户裁决）：不渲染任何
++  // 占位卡——「当前无可审批事项，阶段推进由智能体在会话中驱动」对无操作可做的
++  // 浏览者是零信息量噪音；只读展示由其它卡片承载，待审面板出现时本卡才挂载。
++  if (!gatePanel) {
++    return null;
++  }
++
++  const degrade = notifyResult ? degradeMessage(notifyResult, change) : null;
++
++  const handleCopy = async () => {
++    if (!degrade) return;
++    try {
++      await copyTextToClipboard(degrade.copyable);
++      setCopied(true);
++      setTimeout(() => setCopied(false), 2000);
++    } catch {
++      /* clipboard 写入被拒时静默 */
++    }
++  };
++
++  return (
++    <section className="space-y-2.5 rounded-md border-2 border-primary/20 bg-primary/5 px-4 py-3">
++      <div>
++        <p className="text-sm font-semibold">{gatePanel.title}</p>
++        <p className="text-xs text-muted-foreground">{gatePanel.description}</p>
++      </div>
++
++      {/* 绑定会话只读展示（change_session_links 最新；前端取工作区最近活跃会话近似） */}
++      {boundSession ? (
++        <div className="rounded border bg-background px-3 py-2">
++          <p className="text-[11px] text-muted-foreground">
++            绑定会话（审批结果将通知此会话）
++          </p>
++          <p className="truncate text-xs font-medium">
++            {boundSession.title ?? `会话 ${boundSession.id.slice(0, 8)}`}
++          </p>
++          <p className="text-[11px] text-muted-foreground">
++            {boundSession.provider} ·{" "}
++            {SESSION_STATUS_LABELS[boundSession.status] ?? boundSession.status}
++            {boundSession.last_active_at
++              ? ` · 最近活跃 ${new Date(boundSession.last_active_at).toLocaleString("zh-CN")}`
++              : ""}
++          </p>
++        </div>
++      ) : (
++        <div className="rounded border border-dashed bg-background px-3 py-2">
++          <p className="text-[11px] text-muted-foreground">
++            暂无可通知的绑定会话，审批结果仅落库展示
++          </p>
++        </div>
++      )}
++
++      <textarea
++        className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-xs focus:border-ring focus:outline-none"
++        rows={2}
++        placeholder="审核意见（可选）"
++        value={gateComment}
++        onChange={(e) => onGateCommentChange(e.target.value)}
++      />
++
++      {/* 通过/打回并通知绑定会话（archive_confirm 无打回） */}
++      <div className="flex flex-wrap gap-2">
++        <Button
++          size="sm"
++          onClick={() => onGateAction(gatePanel.pass.action)}
++          disabled={transitioning}
++        >
++          {gatePanel.pass.label}
++        </Button>
++        {gatePanel.reject ? (
++          <Button
++            variant="destructive"
++            size="sm"
++            onClick={() => onGateAction(gatePanel.reject!.action)}
++            disabled={transitioning}
++          >
++            {gatePanel.reject.label}
++          </Button>
++        ) : null}
++      </div>
++
++      {/* 注入降级提示（三类，R-03：审批已落库，注入失败不回滚） */}
++      {degrade ? (
++        <div
++          className="space-y-1.5 rounded border border-amber-500/40 bg-amber-50/60 px-3 py-2"
++          data-testid="approval-notify-degrade"
++        >
++          <p className="text-xs font-medium text-amber-800">{degrade.title}</p>
++          <div className="flex flex-wrap items-center gap-2">
++            <code className="min-w-0 flex-1 rounded bg-background px-2 py-1 text-[11px] text-foreground">
++              {degrade.copyable}
++            </code>
++            <Button
++              variant="outline"
++              size="sm"
++              onClick={() => void handleCopy()}
++              disabled={copied}
++            >
++              {copied ? "已复制" : "复制文案"}
++            </Button>
++          </div>
++        </div>
++      ) : null}
++    </section>
++  );
++}
+diff --git a/frontend/src/components/knowledge/graph-canvas.tsx b/frontend/src/components/knowledge/graph-canvas.tsx
+index c7500647e..da01471ec 100644
+--- a/frontend/src/components/knowledge/graph-canvas.tsx
++++ b/frontend/src/components/knowledge/graph-canvas.tsx
+@@ -108,6 +108,24 @@ const NODE_RADIUS: Record<string, number> = {
+   ql: 5,
+ };
+ 
++/**
++ * 节点 10 类型中文标签（原型 NT.l 逐项一致；未知类型回退原值）。
++ * 2026-10-15-change-assets-graph 自图谱页 page.tsx 迁入——图谱页与变更详情页
++ * 内嵌图谱分区（ChangeAssetsGraph）共用单一源。
++ */
++export const NODE_TYPE_LABELS: Readonly<Record<string, string>> = {
++  project: "项目",
++  module: "模块",
++  file: "代码文件",
++  test: "测试文件",
++  decision: "决策 D-xxx",
++  fr: "需求 FR",
++  change: "变更",
++  entry: "手册条目",
++  doc: "文档",
++  ql: "quicklog",
++};
++
+ export function nodeRadius(type: string): number {
+   return NODE_RADIUS[type] ?? 6;
+ }

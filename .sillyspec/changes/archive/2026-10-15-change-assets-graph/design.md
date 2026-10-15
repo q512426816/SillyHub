@@ -6,7 +6,8 @@ created_at: 2026-10-15T03:09:55.835Z
 
 ## 做法概述
 
-本变更怎么解决问题？改哪里、为什么选这个方案（一两段）？
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 
 用户四条诉求全在展示层：①新建 `change-assets-graph.tsx` 组件嵌进 ChangeAssetsCard 展开态顶部——数据复用 `getKnowledgeGraphQuery(workspaceId,"neighbors",{anchor:changeKey})`（与图谱页 neighbors 切片同一端点同型收窄），画布复用 `GraphCanvas`（slice 模式），右侧详情栏是图谱页 detail tab 的紧凑直译（类型中文标签+色点+ID+按边型分组出入邻居行）。选独立子组件而非内联：资产卡已 850 行，图谱分区自带取数/选中态，独立文件可单测（GraphCanvas stub 范式同图谱页测试）。②page.tsx 主栏把 ChangeAssetsCard 挂载点上移到步骤时间线 section 之前。③步骤时间线 section 加 stepsOpen state（默认 false），卡头改切换按钮，focusStage 联动 useEffect 自动展开。④change-stage-actions.tsx 的 `!gatePanel` 分支由渲染占位卡改为 return null。
 

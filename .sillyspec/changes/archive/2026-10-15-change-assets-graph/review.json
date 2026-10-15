@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-change-assets-graph",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "249bb1fd79725b47073e1b16827848f61df6503c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-03 场景「点阶段节点（focusStage）自动展开」无测试覆盖",
+      "evidence": "page.tsx:149-151 的 useEffect(focusStage→setStepsOpen(true)) 已实现，但 page-team-toggle.test.tsx 仅钉「默认收起→卡头展开→再收起」三态，整个 __tests__ 目录无收起态联动展开断言（grep focusStage/stepsOpen/自动展开零命中页面级用例）",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx:149"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-02 DOM 顺序钉子只钉半边：「审批卡→沉淀资产」未钉",
+      "evidence": "fixture pending_review=null（page-restore-assets.test.tsx:96）导致审批卡不渲染，compareDocumentPosition 仅断言 assets→stepTimeline（:189-192），:194 注释自认用「assets 在 main 内」兜底——FR-02 声明的四段顺序前半段（审批卡在沉淀资产之前）可被静默回滚而不红",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx:191"
+    },
+    {
+      "severity": "P3",
+      "title": "「点画布空白回退锚点选中」注释/设计与实现不符",
+      "evidence": "change-assets-graph.tsx:18 注释称点空白回退锚点，但 GraphCanvas 仅在命中节点时回传 onSelect(hit.id)（graph-canvas.tsx:1049），从不回传 null——空白点击保持当前选中；「受控面板恒有内容」目的达成，机制描述失实（CLAUDE.md 规则18：注释与实现不一致）",
+      "location": "frontend/src/components/changes/detail/change-assets-graph.tsx:18"
+    },
+    {
+      "severity": "P3",
+      "title": "design 盲维问3「stepsOpen 切换后仍收起」推理失实",
+      "evidence": "详情页不随 cid 重挂载（page.tsx:484 ChangeTimelineCard key={changeId} 注释自证「路由参数切换不重挂载」），A 变更展开时间线后切 B 仍保持展开——与 focusStage 残留同款机制；无功能危害（最坏为展开态残留）但与 design.md:36 声明不符",
+      "location": ".sillyspec/changes/2026-10-15-change-assets-graph/design.md:36"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok；边界已裁决：可接受——fail-open 静默隐藏不显错误卡（isError/available=false/空节点三态收敛 return null，有 3 条测试钉死）、在途变更锚点未命中隐藏（双态同分支，有测试）；「点画布空白回退锚点」边界目的（面板恒有内容）可接受但机制描述失实见 P3#3",
+    "并发": "n/a；边界已裁决：可接受——纯展示组件无写路径，与代码事实一致",
+    "切换": "finding；边界已裁决：可接受——focusStage 残留为既有行为本次不改（diff 确未触碰）、change-stage-actions 行尾归一化搭车提交（--ignore-cr-at-eol 核实语义改动仅 +5/-9 且即 FR-04 本体）；stepsOpen 残留推理失实见 P3#4",
+    "作用域": "ok；边界已裁决：可接受——queryKey [\"changeAssetsGraph\", workspaceId, changeKey] 双键隔离已核实，GraphCanvas 受控无内部状态外泄"
+  },
+  "reviewedAt": "2026-10-15T11:37:24+08:00"
+}
