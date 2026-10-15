@@ -25192,7 +25192,7 @@ export interface components {
             /** Runtime Id */
             runtime_id?: string | null;
             /** Provider */
-            provider?: ("claude" | "codex" | "cursor" | "pi") | null;
+            provider?: ("claude" | "codex" | "cursor" | "pi" | "zcode") | null;
             /** Agent Profile Id */
             agent_profile_id?: string | null;
             /** Llm Provider Id */

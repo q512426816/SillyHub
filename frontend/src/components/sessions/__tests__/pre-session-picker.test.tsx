@@ -719,6 +719,31 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
   it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
     expect(PROVIDER_META.cursor?.label).toBe("Cursor");
   });
+
+  // 2026-10-15-zcode-engine-appserver task-05（连带测试同款，断言面闸门同提交）：
+  // zcode 条目随 @generated 产物加入——本全对象 toEqual 钉 zcode 十六键与
+  // daemon 单源（providers.ts PROVIDER_CAPS.zcode）逐键同步；cursor 与未知
+  // 回退断言不受影响（上方两条已锁，本变更零触碰）。
+  it("zcode 十六键与 daemon 单源一致（task-05 接入连带同步）", () => {
+    expect(getProviderCaps("zcode")).toEqual({
+      resume: true,
+      mcp: false,
+      multimodal: false,
+      attachments: false,
+      thinking: true,
+      subagent: false,
+      permission_dialog: true,
+      dialog: "native",
+      edit_patch: false,
+      model_select: true,
+      provider_switch: true,
+      ctx_usage: true,
+      compact: true,
+      thinking_level: true,
+      steering: false,
+      sessionFork: "none",
+    });
+  });
 });
 
 /* ───────── 10. 工作区绑定机器模式（2026-10-15-workspace-session-agent-only） ───────── */
