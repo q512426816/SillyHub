@@ -133,7 +133,9 @@ async def inject_delegation_notice(
         redis_count: int | None = None
         try:
             redis = _rsvc.get_redis()
-            redis_count = int(await redis.hincrby(redis_chain_key, DELEGATION_NOTICE_FIELD, 1))
+            # redis-py stubs 把命令返回标成 union（Awaitable[int] | int）——异步
+            # 客户端实际返回 int，按 mentions.py 同款 ignore 处理。
+            redis_count = int(await redis.hincrby(redis_chain_key, DELEGATION_NOTICE_FIELD, 1))  # type: ignore[misc]  # redis-py stubs union 返回
             await redis.expire(redis_chain_key, 30 * 60)
         except Exception:
             redis_count = None  # fail-open：软约束不因 Redis 缺席而阻断

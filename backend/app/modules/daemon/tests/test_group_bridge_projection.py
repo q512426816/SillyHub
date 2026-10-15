@@ -1028,6 +1028,9 @@ class TestPublicDelegation:
         ]
         assert len(notice_rows) == 1, "发起方影子会话应收到一条委派回执行"
         nmeta = notice_rows[0].metadata_
+        # metadata_ 列类型 dict | None——上方过滤已保证 dict，这里显式收窄供
+        # mypy（同时兜住运行时 None）。
+        assert isinstance(nmeta, dict)
         assert nmeta["delegated_member_name"] == "小码"
         assert nmeta["chain_run_id"] == str(seed.carrier_run_id)
         assert "小码" in (notice_rows[0].content_redacted or "")
