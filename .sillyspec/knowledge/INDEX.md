@@ -205,3 +205,4 @@
 - lib-agent|FR|需求|承接 → [fr/lib-agent.md](fr/lib-agent.md)
 - agent|FR|需求|承接 → [fr/agent.md](fr/agent.md)
 - deploy_records|FR|需求|承接 → [fr/deploy_records.md](fr/deploy_records.md)
+- auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)

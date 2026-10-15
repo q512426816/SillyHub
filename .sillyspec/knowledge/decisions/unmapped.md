@@ -3072,3 +3072,11 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
 理由：最大风险：CI 的 daemon 测试/构建消费新类型暴露未知类型错——已本地跑 `pnpm -C sillyhub-daemon typecheck` 零错兜住。试过但放弃：无（未尝试其它方案，直接对齐是既定成功标准）。
+
+## D-unmapped-008@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-decision-anchor-change-qualified
+原编号：D-001@v1
+锚点：未记录
+最近确认：0ef23e479d8a39229486671e590a4d19864849d5
+理由：- 最大风险：复合属性是新增 DOM 契约，若未来其它消费方按 `[data-entry-anchor=…]` 全量枚举做统计会少算复合锚——已核查现网消费方（知识库页 selectEntry、沉淀资产卡弹窗、测试断言）均为「按值查单个」，无枚举面。 - 弃案 A：改裸 `data-entry-anchor` 的值为复合形态——会破坏旧深链与潜在收藏链接，且 INDEX/触达等裸锚消费方需同步迁移，改动面大收益零，弃。 - 弃案 B：后端 assets 响应给 decisions 条目加变更号字段（前端免传 changeKey）——需改 OpenAPI schema + gen:types + 前端类型同步，而 changeKey 在详情页现成可得，后端改动纯属多余，弃。

@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-decision-anchor-change-qualified",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-decision-anchor-change-qualified:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「结构化卡：带变更字段输出复合锚属性，裸锚保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-decision-anchor-change-qualified"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-decision-anchor-change-qualified:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「决策行弹窗定位：同 id 跨变更按变更号+决策号复合锚精确命中」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-decision-anchor-change-qualified"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-decision-anchor-change-qualified:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx「anchor 含变更号前缀（变更号#决策号）：先试复合锚精确落卡」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-decision-anchor-change-qualified"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-decision-anchor-change-qualified:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达：锚点条目行点击弹窗打开，弹窗深链沿用 file+anchor（不整页跳转）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-decision-anchor-change-qualified"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-decision-anchor-change-qualified:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「结构化卡：带变更字段输出复合锚属性，裸锚保留」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-decision-anchor-change-qualified"
+    }
+  ]
+}

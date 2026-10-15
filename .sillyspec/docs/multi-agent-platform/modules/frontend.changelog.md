@@ -93,3 +93,4 @@
 | 2026-10-14 | 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th |
 | 2026-10-14 | 2026-10-14-assets-knowledge-popup-preview | 动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在 |
 | 2026-10-15 | 2026-10-15-fix-ci-red | main 分支 CI 红灯灭火：daemon api-types 漂移 + 前端菜单测试数量锚过期，纯对齐修复无行为变更 |
+| 2026-10-15 | 2026-10-14-decision-anchor-change-qualified | 动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同 |

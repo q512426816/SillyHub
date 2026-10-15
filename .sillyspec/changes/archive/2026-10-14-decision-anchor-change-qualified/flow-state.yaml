@@ -1,0 +1,49 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同名决策号（如三个变更各有
+  D-003@v1），单靠「文件#决策号」锚会命中文件里第一个同号卡片；定位锚必须用「变更号+决策号」复合形态才能唯一匹配。
+
+  成功标准：
+
+  - 决策/FR 结构化条目卡在带「变更：」字段时输出 data-entry-anchor-qualified=文件#变更号#决策号（既有 data-entry-anchor 裸锚保留不破坏旧深链）
+
+  - 沉淀资产卡弹窗定位优先按复合锚精确匹配，查无再退裸锚（FR/决策/触达/手册各形态均不回退）
+
+  - 沉淀资产卡 FR/决策行的知识库深链 anchor 参数带变更号前缀，知识库页深链滚动对含 # 的 anchor 先试复合锚再退裸锚
+
+  - 知识触达行与手册/INDEX 锚点行为不变
+
+  - 相关组件测试同步更新并通过（entry-card-list / change-assets-card / knowledge-page）
+autopilot: false
+prestage_ack: false
+baseline_commit: cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
+updatedAt: '2026-10-15T00:59:47.316Z'
+cross_baselines:
+  sillyspec: 9b0519c3047a86512bb0000ba5b4c65aa890ace6
+baseline_sha256: 6f4ca4faee87e215f2c33e75cbf092e048fda804e7b7520a48afae48f150a8d9
+spec_approved: true
+spec_approved_at: '2026-10-15T00:43:40.257Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx3)（29.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015005152\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（19.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015005152\test-result.json｜门文件
+  10 个
+
