@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-bottom-passive-grow",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "fcff76a9ca8a",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "提交归属偏差：fcff76a9ca8a 是上轮变更归档提交，被动增高代码实际在 97ac87634",
+      "evidence": "git show fcff76a9ca8a --stat 仅含 .sillyspec 归档/知识文件（17 文件 853 行），不含 turn-timeline.tsx；git diff fcff76a9ca8a -- turn-timeline.tsx 的 +20 行 hunk（scrollBaselineRef + handleScroll 被动分支）由后置提交 97ac87634 引入（该提交 stat：turn-timeline.tsx +20）。HEAD=97ac87634，工作区该文件与 HEAD 一致，审查对象代码内容与描述完全相符，仅 commit 指称有误。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1190-1224"
+    },
+    {
+      "severity": "P3",
+      "title": "scrollBaselineRef 跨会话切换不重置，首个 scroll 事件对旧会话 {top,height} 求值",
+      "evidence": "scrollBaselineRef 仅在 handleScroll 内读写（全文件唯一出现 1198/1203/1204），sessionId/turns 首轮变化无重置点。切换后首个 scroll 事件若同时满足 新 height > 旧 height+50 且新 top >= 旧 top-4（需新列表更高且视口落点不低于旧顶），被动分支会把旧会话的 near 原值带入新会话。实际切换路径下 scrollTop 通常骤降（回顶/钳制）→ 不满足 top 条件走正常路径；且组件重挂载时 ref 自然重建。理论面窄、无实测复现，仅记录。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1198"
+    },
+    {
+      "severity": "P3",
+      "title": "50px/4px 经验阈的误判面评估：窄且后果良性",
+      "evidence": "(a) 真实上滚必使 scrollTop 减 >4px（1208 条件 el.scrollTop >= prev.top - 4 失效）→ 正常路径，跟随被正确取消；(b) 增高 <50px 不命中被动分支，回退旧行为，但贴底用户距底增 <50px 仍处 <80px near 带 → 判定不变；(c) 用户上滚 ≤4px 恰逢 ≥50px 增高误判为被动 → 保持 near=true，但该用户本贴底、距底仍 <80px，语义无差。已离底后的 ≥50px 增高（视口未动）→ 保持 near=false，不误恢复贴底 ✓；jumpToBottom 平滑滚动期间 scrollHeight 不变 → 不增 50px 不命中被动分支 → 正常路径末端 near=true 清锚 ✓；重申循环 scrollTo(0,h) 期间高度不变走正常路径 ✓，循环内高度变化触发的 scroll（top 增、height 增）命中被动分支保持 near=true 恰为循环所需 ✓；overflowAnchor:\"none\" 内联已设（1401），浏览器锚定不会自行改 scrollTop ✓。基线跨事件累积陈旧（多次小增高合并超 50px 判被动）语义仍正确——判据本质是『视口未上移』而非单次增量。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1205-1212,1401"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "finding",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T16:05:00+08:00"
+}

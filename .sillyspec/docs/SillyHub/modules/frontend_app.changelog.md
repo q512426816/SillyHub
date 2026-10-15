@@ -15,7 +15,7 @@ created_at: 2026-09-03 14:49:48
 - 2026-10-13-change-reparse-autobind-remove | 动机：reparse 首建变更行时自动绑定工作区最近活跃会话（D-007）误伤面大——闲聊/测试会话躺着中枪（2026-
 - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
 - 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess
-- 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re
+- 2026-10-14-session-preview-defect-fixes | 用户实测 2026-10-14-session-turn-preview-cards 上线后发现两缺陷：①额度耗尽失败轮
 - 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草
 - 2026-10-14-change-center-lineage-tag-and-filter | 变更中心列表只给轻量出身行显示「轻量」标签，完整流程变更没有任何标签，且筛选下拉里只有「轻量变更」（走 stage=th
 - 2026-10-14-assets-knowledge-popup-preview | 动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在

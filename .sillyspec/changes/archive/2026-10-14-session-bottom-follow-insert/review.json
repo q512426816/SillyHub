@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-session-bottom-follow-insert",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "356638635108",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "prepend 早退不更新 lastSigRef——静默期后首个任意 turns 提交 lastChanged 恒真（length 分量陈旧差值）",
+      "evidence": "isPrepend 在 L1279 return，跳过 L1310-1314 的 lastSig 回写；prepend 已使 turns.length 变化但 lastSigRef 仍持旧 length。3s 静默窗过后第一个非 prepend 提交（即使末轮 output/status 与当前 length 均无新变化）算出的 lastSig 因 length 分量与陈旧 ref 不同而 lastChanged=true，若 isNearBottomRef 恰为陈旧真（prepend 高度抖动钳底，L1274-1277 注释自认存在）会触发一次拉底。需『静默期后仍有提交 + near 误真』组合，且流式 output 增长本就触发同样行为（改动前已存在），属既有风险的边际扩宽，非主路径回归。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1279"
+    },
+    {
+      "severity": "P3",
+      "title": "空白行尾随空白清理混入功能提交——127 行 diff 中仅约 10 行为功能性/注释改动",
+      "evidence": "git diff 显示全文件约 60 处 blank-line 的 -/+ 成对改动（去尾随空白），无行为影响但放大 diff 噪音、干扰 blame 回溯；与声明范围『仅改一处 lastSig』体量不符。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1-2200"
+    },
+    {
+      "severity": "P3",
+      "title": "suppressFollowBottom/选中文字早退同样不回写 lastSigRef——抑制解除后首个提交必 lastChanged",
+      "evidence": "L1294/L1296 在 L1310-1314 之前 return，抑制期间的中段插入/末轮变化滞留为 sig 差值，解除后首个提交补滚一次。跳转后由 isNearBottomRef 门控（跳转目标非底部则不滚），多为期望的补偿语义且与改动前一致，仅记录。",
+      "location": "frontend/src/components/daemon/turn-timeline.tsx:1296"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "finding"
+  },
+  "reviewedAt": "2026-10-14T07:09:49Z"
+}

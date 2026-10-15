@@ -87,6 +87,13 @@
 | 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |
 | 2026-10-13 | 2026-10-14-ci-flaky-probe-mock | 动机：frontend-ci 在 d850b45fe 仍红——session-history-scroll「连续 bef |
 | 2026-10-13 | 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess |
+| 2026-10-14 | 2026-10-14-session-preview-defect-fixes | 用户实测 2026-10-14-session-turn-preview-cards 上线后发现两缺陷：①额度耗尽失败轮 |
+| 2026-10-14 | 2026-10-14-session-bottom-follow-insert | 用户实测：打开会话加载后有时没滚到底——导航 active 显示最后一轮，但消息流视口停在倒数第几轮。根因：初始日志窗口 |
+| 2026-10-14 | 2026-10-14-session-bottom-passive-grow | 上轮修复（bottom-follow-insert）实测 3 次冷加载 2 次仍停距底 9092px：大纲后到中段插入预 |
+| 2026-10-14 | 2026-10-14-session-bottom-switch-remount | 用户实测仍偶发不落底——复现路径为「列表点击切换会话」（SPA 内切换，TurnTimeline 不重挂载）：滚动 re |
+| 2026-10-14 | 2026-10-14-session-bottom-resize-observer | 第四层根因（真浏览器注入复现取证：重申窗过期后向滚动容器注入 2000px 占位 → delta=2000 永久停住，无 |
+| 2026-10-15 | 2026-10-14-session-bottom-no-restore | 第五层根因（滚动写入审计+对照实验锁定）：刷新（reload）时 Chrome 恢复上次滚动位置，恢复晚到（内容装配后） |
+| 2026-10-15 | 2026-10-14-session-bottom-grace-window | 用户实测刷新落位随机（19 轮复现 1 次，复现态特征锁定：scrollTop=602=布局早期瞬态假底、clientH |
 | 2026-10-14 | 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主 |
 | 2026-10-14 | 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re |
 | 2026-10-14 | 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草 |

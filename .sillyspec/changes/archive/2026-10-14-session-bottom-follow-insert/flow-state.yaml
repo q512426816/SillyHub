@@ -1,0 +1,47 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  用户实测：打开会话加载后有时没滚到底——导航 active 显示最后一轮，但消息流视口停在倒数第几轮。根因：初始日志窗口（贴底完成）与全量大纲异步竞态——大纲后到时归并层把 23 张预览卡插进列表中段，高度剧增但末轮不变，贴底跟随判据
+  lastSig（turn-timeline.tsx:1303 = runId:outputLen:status）不含列表长度 → 不触发滚动；2.5s 高度重申窗口已过 → 视口绝对位置不动内容被推下 →
+  停在倒数第几轮（时序依赖故「有时候」复现）。
+
+
+  成功标准：
+
+  - 大纲后到（中段插入预览卡/孤儿补建尾部追加）且用户贴底时，视口跟随滚到底（保持所见内容不变）
+
+  - 触顶翻页 prepend 不被误触发贴底（isPrepend 早退 + 3s 静默窗既有守卫不变）
+
+  - 用户上滚读历史时中段插入不强拉底部（isNearBottomRef 守卫不变）
+
+  - 跳转期间不贴底（suppressFollowBottom 语义不变）
+
+  - 既有贴底/翻页/跳转相关测试面复跑绿 + tsc 0
+autopilot: false
+prestage_ack: true
+baseline_commit: b4d688f34a287a8f10577a4a33bc60dbd314e7bc
+updatedAt: '2026-10-14T07:13:02.834Z'
+baseline_sha256: 78949c378eef511296663419a7dd576117b57e2677d749fee779ff6599f99e89
+spec_approved: true
+spec_approved_at: '2026-10-14T07:06:57.464Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-2BN7FDC
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx10)+fr(10)（28.6s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261014070727\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 2 个
+

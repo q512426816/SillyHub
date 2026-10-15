@@ -2911,6 +2911,79 @@ supersedes：D-001@v1
 最近确认：26bd59982827d1622c7b52e30f0c7ff7fa5a431c
 理由：最大风险：waitFor 包裹后把「本应立即失败的断言」变成等满 1s 超时才失败，掩盖真实回归。已核对 6 处断言均为**应当出现的终态内容**（甄别阶段逐一读过组件 setState 路径），正常路径必渲染，超时仅发生在真回归——与既有正确写法先例同语义。 试过但放弃的方案： - 只修 CI 已暴露的个案、不做全量甄别——否决：本轮实证「每轮 CI 只暴露一个」，逐轮返工成本高于一次定向清扫。 - 放宽为 findByXxx 一把梭替换所有同步断言——否决：静态渲染内容的同步断言语义更清晰，只修确认脆弱的 6 处，零误报纪律。 - 全局 fake timers 消除时序——否决：侵入面大且与组件真实 rAF/interval 行为冲突，超出测试加固范围。
 
+## D-001@v1 方案方向定为「消息流预览卡 + 跳转附近预取」
+状态：implemented
+变更：2026-10-14-session-turn-preview-cards
+锚点：未记录
+最近确认：e785e71f9
+理由：用户在探索阶段从 5 个候选方案（预览卡/附近预取/一键全载/静默回填/头尾折叠）中亲手选定组合「预览卡 + 附近预取」（AskUserQuestion 实选记录于 2026-10-14 会话）。
+故障面：预览卡渲染量大（数百轮会话）需依赖既有 content-visibility 屏外跳过；预取请求翻倍需已加载判重防重复 prepend。
+退役判据：若未来后端提供轮次分页 API（按轮批量取全文），预览卡+直达链路可整体替换为虚拟滚动方案。
+
+## D-002@v1 后端零改动，纯前端实现
+状态：implemented
+变更：2026-10-14-session-turn-preview-cards
+锚点：未记录
+最近确认：e785e71f9
+理由：不需要。turn-outline 接口（GET /api/daemon/sessions/{id}/turn-outline）已一次下发全量轮次摘要（prompt_summary 60 字/answer_summary/时间/状态/发送者），左侧导航正在消费；run_id 单轮直达（getAgentSessionLogs({run_id})）已支持整轮日志拉取；2026-10-13-load-earlier-full-turn 已铺轮边界合并机制。
+
+## D-004@v1 实现架构采用合并式单一数据源（方案 A）
+状态：implemented
+变更：2026-10-14-session-turn-preview-cards
+锚点：未记录
+最近确认：e785e71f9
+理由：用户选定方案 A 合并式：大纲条目在 displayTurns 派生层归并（已加载轮用真实 turn，未加载轮合成预览骨架条目），turn-timeline 对骨架条目渲染预览卡分支。方案 B 双源拼接因「两套数据对账竞态」历史高发（ql-20260903-002 同 run 双块 / 2026-09-29-jump-empty-turn-dup 重复直达 / ql-20260916-016 空壳墙）被否决。
+故障面：displayTurns 派生复杂度上升（归并逻辑需纯函数外提单测）；outline 刷新触发全量重派生（outline 仅会话切换拉取一次，成本可接受）。
+退役判据：若后端未来提供轮次分页全文 API，归并层可替换为服务端分页驱动。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-preview-defect-fixes
+锚点：未记录
+最近确认：88de2e76e1d0c8b890b0d8812b4ec9057acfac48
+理由：最大风险：把「有 prompt」放行后，某些只有噪音 user_input（如纯前导/系统注入行）的轮被误判有内容而展开空壳。已用真零正文集成用例锁定空串不放行；纯前导内容由 steerMatchKey 类既有归一口径消化，属可接受边界。放弃方案：在 logsToTurns 内全局改批次编号（跨批次状态维护复杂、动共享装配器影响 dialog/群聊全消费方，风险面大）——归并层盖章只影响 page 模式消息流，改面最小。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-follow-insert
+锚点：未记录
+最近确认：b9f3550f3e859a50537ab6745b5d7f2ec0b0ff06
+理由：最大风险：既有测试若显式断言「末轮不变长度变不滚动」会回归——已跑贴底/翻页/竞态/跳转 6 文件 77 例 + preview 三件套 27 例全绿，证实无此断言面。放弃方案：①延长/重启重申窗口至大纲到达——治标且时序敏感（大纲无到达信号）；②page 层 outline effect 主动滚底——绕开 TurnTimeline 守卫链（prepend 静默窗不知情），有上拉弹回回归风险。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-passive-grow
+锚点：未记录
+最近确认：97ac876340cce7dfb62e36a3a316d7da5a290652
+理由：最大风险：阈 50px/容差 4px 经验值——过大误吞用户小步上滚（距底仍 <80px 无影响），过小 markdown 抖动穿透（回退到上轮形态）。放弃方案：CSS overflow-anchor（浏览器原生锚定，但对 content-visibility 估算高度不稳定且不可控）；在 [turns] effect 内直接跟随不设守卫（上滚读历史被拉底，ql-20260822-010 既有回归）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-switch-remount
+锚点：未记录
+最近确认：d3ece657c9e2186a5fd27ffd727561afb4cda3ac
+理由：最大风险：重挂载一次性成本（切会话时全量行重建）——切会话本就全量重渲 turns，增量成本可忽略。放弃方案：①TurnTimeline 内加 sessionId prop + effect 手动重置各 refs——枚举 refs 易漏（本轮正是漏了 scrollBaselineRef 才升级到 key），新增 ref 又要记得加；②只重置 isNearBottomRef——治标，其余残留（lastSigRef/firstTurnKeyRef/baseline）仍有竞态面。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-resize-observer
+锚点：未记录
+最近确认：b615f2f92d33a1089b4b5ffffeb8ce6853fdd8b2
+理由：最大风险：RO 高频回调性能（流式期间每 delta 触发）——rAF 合帧后每帧至多一次 scrollTo（与既有流式贴底同频，无增量）；MarkdownText memo 使未变行不重排，实际回调频率远低于帧率。放弃方案：①延长重申窗——时序赌注，图片加载时长无上界；②监听 img load 事件——只覆盖图片一类，markdown 迟渲染/注入仍漏；③MutationObserver——语义错位（观察结构不观察尺寸，且更贵）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-no-restore
+锚点：未记录
+最近确认：812678ebe2b78513d1a1cd7c48511354eedff88c
+理由：最大风险：用户期望「刷新回到上次阅读位置」的语义被改（现改为落底）——与产品贴底跟随设计及用户本次诉求（刷新应落底）一致，且切换会话本就落底，语义统一。放弃方案：①识别恢复写入并重新贴底（恢复事件 isTrusted=true 无法与用户滚动区分，只能加时序启发式，脆弱）；②挂载后延时强贴底（时序赌注，恢复时机无上界）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-session-bottom-grace-window
+锚点：未记录
+最近确认：82b966f8f85f16b2318e56541359a0c067783802
+理由：最大风险：非输入型让权路径（如浏览器自动滚动/读屏器）在窗内被拉回一次——真实用户四类输入覆盖 99% 场景，10s 窗口短且只在内容变化时动作。放弃方案：①继续追凶（19 轮 1 复现，取证成本失控，用户在等）；②near 被清后无限复活（用户真滚后内容更新会被反复拉回，破坏让权语义）。
 ## D-001@v1 风险与死路（design 槽4 收割）
 状态：implemented
 变更：2026-10-14-turn-anchor-cache-eviction

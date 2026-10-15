@@ -80,8 +80,11 @@ function setup(turns: SessionTurnView[]) {
   return { el, scrollToMock, rerenderTurns, ...utils };
 }
 
-/** 模拟用户滚动到指定 scrollTop 并派发 scroll 事件。 */
+/** 模拟用户滚动到指定 scrollTop 并派发 scroll 事件。
+ *  grace-window（2026-10-14）：真实用户滚动必伴 wheel/keydown 输入（程序滚动
+ *  无）——补 fireEvent.wheel 还原让权信号，模拟保真（断言语义零改动）。 */
 function userScrollTo(el: HTMLElement, scrollTop: number) {
+  fireEvent.wheel(el, { deltaY: -1 });
   el.scrollTop = scrollTop;
   fireEvent.scroll(el);
 }

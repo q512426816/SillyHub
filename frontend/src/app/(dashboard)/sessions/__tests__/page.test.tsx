@@ -3001,9 +3001,11 @@ describe("SessionPanel 轮次导航集成（task-06：跳转链路 + mobile Draw
     expect(await findTimelineText("当前窗口提问")).toBeTruthy();
 
     /** run_id 单轮请求计数（防重复直达的核心回归锚）。 */
+    // defect-fixes 口径修正：按目标轮过滤——FR-03 附近预取会为邻轮合法追加 run_id
+    // 请求（2026-09-29 写此断言时预取尚不存在）；「同轮不重复直达」回归意图保留。
     const runIdCallCount = () =>
       mocks.getAgentSessionLogs.mock.calls.filter(
-        (c) => c[1] && "runId" in (c[1] as Record<string, unknown>),
+        (c) => c[1] && (c[1] as Record<string, unknown>).runId === "r-ancient",
       ).length;
     /** 时间线内 r-ancient 行数（修复前重复 prepend 会造同装饰键重复行）。 */
     const ancientRowCount = () =>

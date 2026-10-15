@@ -5,6 +5,8 @@ created_at: 2026-08-30 22:23:33
 
 # frontend_components 模块变更索引
 
+- 2026-10-14-session-turn-preview-cards | 会话页消息流未加载轮预览卡 + 跳转附近预取（长会话中间轮次隐身痛点）——①preview-merge.ts 归并层单一数据源（turn-outline 大纲 seq 定序 + 已加载轮透传 + 空壳配置行被预览条目替代 + 空大纲降级）；②turn-timeline.tsx TurnPreviewCard（虚线边框+brand-50 浅底+content-visibility+data-turn-preview 标记）+ expandPreview 可选 prop 缺省零回归；③session-panel-page displayTurns 串联归并 + handleExpandPreview 原地展开（不 scrollIntoView+2.2s ring）+ prefetchNearbyTurns 三重判重附近预取 + hit() 内容门排除预览卡（D-005）。测试：preview-merge 11 + turn-preview-card 7 + 整页集成 4 + 既有面 110 例全绿、tsc 0。
+
 - ql-20260922-001-5ae6 | 思考级别控件 antd Dropdown 化（session-config-bar）——用户反馈配置条上思考级别原生 select（带边框 bg-card 小方框）与旁边供应商胶囊按钮风格不统一；改 antd Dropdown + 胶囊按钮触发器（类名逐字同 ctrlButton：无边框 rounded-md px-2 py-1 text-xs + Brain 图标 brand 色 + 值截断 + ChevronDown，hover bg-muted、开态 bg-muted text-primary），菜单 placement=topLeft 向上弹对齐 ConfigDropdown bottom-full 方向、selectable+selectedKeys 高亮当前档、off 档 P2-11 跨引擎语义 tooltip 保留（label span title），两态（预会话七档镜像/会话态动态档）与禁用态 title/级联重置/乐观缓存契约零变化，data-testid=config-thinking-select 与 aria-label 保留。测试：config-bar 53 用例（第 7/8 节由 select.options/fireEvent.change 改 menuitem 点击+触发器文本直显断言，照 page.m-change-detail antd Dropdown 先例）全绿、tsc 0 错、eslint 8 warning 预存（测试 mock 区未触碰）；dev server（:3100 指向 Docker 后端）实机截图确认胶囊形态与供应商按钮一致（ended 会话禁用态，菜单开态交互由单测覆盖）
 - ql-20260921-001-8a4d | ⚡ dispatch_now 引导消息实时渲染兜底（session-panel-page/dialog 双挂载）——⚡「转为引导」链路发送点不建 steering 段（use-message-queue 不消费 dispatch 响应；inject 端点忙轮恒排队致 appendSteeredSegment 生产不可达），mid-turn 注入的 user_input 留痕 SSE 行到达时 markSteeredSegmentDelivered 无段可收敛、消息正文实时视图静默丢弃（刷新后 logsToTurns 才可见）。修复：SSE user_input 处理器新增 appendDeliveredUserMsgIfAbsent 兜底（page:265 起导出、dialog 复用）——口径与回放组2+ 一致：轮存在且 prompt 非空、主体（steerMatchKey，剥前导/附件标记行）与 prompt 互异、轮内无同主体 user_msg 段才追加 delivered 段；prompt 回显/daemon 双提交/纯前导不双画，steering 段刚收敛的 delivered 同键幂等。测试：sessions page 41（+1 ⚡ 场景：兜底 delivered 段+prompt 不覆盖+同主体重复幂等）绿、tsc 0
 - ql-20260920-007-c04d | 「客户端路径」行改按账号显示本人 binding 路径（workspace-path-fields，2026-09-20-workspace-member-visibility D-004 另开 quick）——旧口径两处渲染位（列表卡片 + 详情页信息区）均显示 workspaces.root_path 全局列（创建者本机路径），任何能看到该工作区的账号都看到别人的路径；新增 myRootPath prop 三态渲染（string=本人 member binding root_path；null=未绑定，显示「未绑定——进入工作区后在『我的接入』绑定后显示你的本地路径」引导文案；undefined=调用方未接线兼容回退全局路径，daemon/兜底两渲染分支统一抽 ClientPathRow）。数据接线：列表页 bindingsByWs 由 {daemon_id} 扩展为 {daemon_id, root_path}（fetchMyBindings 既有响应零后端改动）+ cardPropsOf 透传；详情页传 myBinding?.root_path ?? null；workspace-card 加透传 prop（WorkspaceCardSlotProps 经 ComponentProps Omit 自动含新 prop）。测试：workspaces 页面 182 + workspace-card 19 用例绿、tsc 0
@@ -54,6 +56,13 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-13 | 2026-10-14-ci-red-batch-fix | 动机：main 最新 push（4347239）后 backend-ci / daemon-ci / frontend- |
 | 2026-10-13 | 2026-10-14-ci-flaky-probe-mock | 动机：frontend-ci 在 d850b45fe 仍红——session-history-scroll「连续 bef |
 | 2026-10-13 | 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess |
+| 2026-10-14 | 2026-10-14-session-preview-defect-fixes | 用户实测 2026-10-14-session-turn-preview-cards 上线后发现两缺陷：①额度耗尽失败轮 |
+| 2026-10-14 | 2026-10-14-session-bottom-follow-insert | 用户实测：打开会话加载后有时没滚到底——导航 active 显示最后一轮，但消息流视口停在倒数第几轮。根因：初始日志窗口 |
+| 2026-10-14 | 2026-10-14-session-bottom-passive-grow | 上轮修复（bottom-follow-insert）实测 3 次冷加载 2 次仍停距底 9092px：大纲后到中段插入预 |
+| 2026-10-14 | 2026-10-14-session-bottom-switch-remount | 用户实测仍偶发不落底——复现路径为「列表点击切换会话」（SPA 内切换，TurnTimeline 不重挂载）：滚动 re |
+| 2026-10-14 | 2026-10-14-session-bottom-resize-observer | 第四层根因（真浏览器注入复现取证：重申窗过期后向滚动容器注入 2000px 占位 → delta=2000 永久停住，无 |
+| 2026-10-15 | 2026-10-14-session-bottom-no-restore | 第五层根因（滚动写入审计+对照实验锁定）：刷新（reload）时 Chrome 恢复上次滚动位置，恢复晚到（内容装配后） |
+| 2026-10-15 | 2026-10-14-session-bottom-grace-window | 用户实测刷新落位随机（19 轮复现 1 次，复现态特征锁定：scrollTop=602=布局早期瞬态假底、clientH |
 | 2026-10-14 | 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主 |
 | 2026-10-14 | 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re |
 | 2026-10-14 | 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草 |

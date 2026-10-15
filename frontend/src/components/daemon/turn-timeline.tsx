@@ -46,7 +46,7 @@
  */
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
+import { ArrowDown, ArrowRight, BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -176,7 +176,7 @@ import {
 } from "@/components/permissions/minimized-dialog-capsule";
 import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
+import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -235,6 +235,20 @@ export interface SessionToolEvent {
   status: "running" | "ok" | "deny";
 }
 
+/**
+ * task-01（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览摘要
+ * （preview-merge.ts 归并产物，TurnRow 前置分支渲染 TurnPreviewCard）。可选
+ * 字段缺省零回归——真实轮不带此字段，渲染行为不变。
+ */
+export interface TurnPreviewInfo {
+  /** 大纲提问摘要（后端截 60 字；缺省不渲染该行）。 */
+  promptSummary?: string;
+  /** 大纲答复摘要（缺省不渲染该行）。 */
+  answerSummary?: string;
+  /** 轮起始时间 ISO（started_at 兜底 created_at；卡片时间显示源）。 */
+  startedAt?: string | null;
+}
+
 export interface SessionTurnView {
   runId: string;
   turn: number | null;
@@ -242,6 +256,12 @@ export interface SessionTurnView {
   output: string;
   status: TurnUiStatus;
   seenLogIds: Set<string>;
+  /**
+   * task-01（2026-10-14-session-turn-preview-cards）：非空即预览条目（mergePreviewIntoDisplayTurns
+   * 产物；prompt/output 恒空串），TurnRow 渲染 TurnPreviewCard 取代完整轮块。
+   * 真实轮不带（undefined），既有渲染路径零影响。
+   */
+  preview?: TurnPreviewInfo;
   /**
    * ql-20260621：实时累积 token。由 SSE `tokens` 事件（执行中）与
    * `turn_completed` 事件（终态）写入；null 表示尚未收到。
@@ -418,6 +438,14 @@ export interface TurnTimelineProps {
    * per-row 基元派生（isHighlighted 同法，R-07 防字符串/map 直传击穿行 memo）。
    */
   forkEntry?: TurnForkEntryWiring | null;
+  /**
+   * task-02（2026-10-14-session-turn-preview-cards / FR-02）：未加载轮预览卡展开
+   * 回调（runKey 上抛；挂载方走单轮直达原地加载）。缺省（dialog / /runtimes 等
+   * 旧消费方）预览分支整体不渲染——TurnRow 收到无 preview 的轮照旧；带 preview
+   * 但未接线时也回落既有分支（类型收窄守卫），零回归。父级 useCallback 保证
+   * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
+   */
+  expandPreview?: (_runKey: string) => void;
 }
 
 /**
@@ -476,6 +504,102 @@ function HugeOutputBlock({ text }: { text: string }) {
   );
 }
 
+/**
+ * task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡——
+ * 大纲摘要卡（虚线边框 + brand 浅底，与已加载实心气泡明确区分；视觉基准
+ * prototype-turn-preview-cards.html）。整卡 button 可点（onExpand 上抛 runKey，
+ * 挂载方走单轮直达原地加载）。纯展示零请求；屏外 content-visibility 跳过渲染
+ * （数百轮会话卡量防御，先例同文件完整轮块分支）。
+ */
+function TurnPreviewCard({
+  turn,
+  isHighlighted,
+  onExpand,
+}: {
+  turn: SessionTurnView;
+  isHighlighted: boolean;
+  onExpand: (_runKey: string) => void;
+}) {
+  const preview = turn.preview!;
+  const runKey = turn.realRunId ?? turn.runId;
+  // 状态点色（词表对齐 sessions/turn-catalog statusDotCls：running→warning 脉冲
+  // / failed→destructive / 其余含 completed/killed→中性 muted）。
+  const statusDot =
+    turn.status === "running"
+      ? "bg-warning animate-pulse"
+      : turn.status === "failed"
+        ? "bg-destructive/75"
+        : "bg-muted-foreground/45";
+  const statusLabel =
+    turn.status === "running"
+      ? "运行中"
+      : turn.status === "failed"
+        ? "失败"
+        : turn.status === "killed"
+          ? "已中止"
+          : turn.status === "pending"
+            ? "等待中"
+            : "完成";
+  const time = preview.startedAt ? formatTurnTime(preview.startedAt) : "";
+  const ariaParts = [
+    turn.turn != null ? `第${turn.turn}轮` : "轮次",
+    statusLabel,
+    preview.promptSummary ?? "（无内容记录）",
+  ];
+  return (
+    <button
+      type="button"
+      key={turn.runId}
+      data-turn-key={runKey}
+      data-testid="turn-preview-card"
+      // task-03（preview-cards）：预览卡标记——跳转链 hit() 的 60 字内容门据此
+      // 显式排除（卡内大纲摘要可能超阈值，防被误判「已加载」跳过直达）。
+      data-turn-preview="true"
+      aria-label={`展开${ariaParts.join(" · ")}`}
+      title={ariaParts.join(" · ")}
+      onClick={() => onExpand(runKey)}
+      className={cn(
+        "group flex w-full cursor-pointer flex-col gap-1 rounded-xl border border-dashed border-brand-300/70 bg-brand-50 px-3.5 py-2.5 text-left transition-all outline-none",
+        "hover:border-brand-300 hover:bg-brand-100 hover:shadow-md",
+        "focus-visible:ring-2 focus-visible:ring-brand-400",
+        // quick（ql-20260916-015）同款屏外跳过渲染（数百轮预览卡量防御）。
+        "[content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        isHighlighted && "ring-2 ring-brand-200",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 font-mono text-[10.5px] font-semibold text-brand-700">
+          {turn.turn != null ? `第 ${turn.turn} 轮` : "轮次"}
+        </span>
+        <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDot)} />
+        <span className="shrink-0 rounded-full border border-brand-300 bg-card px-1.5 py-px text-[9.5px] leading-[1.4] text-brand-700">
+          未加载 · 点击展开
+        </span>
+        {time && (
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{time}</span>
+        )}
+      </span>
+      {preview.promptSummary && (
+        <span className="line-clamp-2 text-[12.5px] font-medium leading-[1.55] text-foreground">
+          {preview.promptSummary}
+        </span>
+      )}
+      {preview.answerSummary && (
+        <span className="line-clamp-2 text-[11.5px] leading-[1.55] text-muted-foreground">
+          {preview.answerSummary}
+        </span>
+      )}
+      <span className="mt-0.5 flex items-center gap-1 text-[10.5px] font-medium text-brand-600">
+        展开完整对话
+        <ArrowRight
+          aria-hidden
+          className="h-3 w-3 transition-transform group-hover:translate-x-0.5"
+        />
+      </span>
+    </button>
+  );
+}
+
 const TurnRow = memo(function TurnRow({
   turn,
   viewMode,
@@ -490,6 +614,7 @@ const TurnRow = memo(function TurnRow({
   forkAnchor,
   forkSeq,
   onForkTurn,
+  onExpandPreview,
 }: {
   turn: SessionTurnView;
   viewMode: SessionViewMode;
@@ -512,6 +637,11 @@ const TurnRow = memo(function TurnRow({
   forkSeq?: number;
   /** task-08：分叉入口点击（runKey+seq 上抛挂载方；稳定 ref 由挂载方 useCallback 保证）。 */
   onForkTurn?: (_runKey: string, _seq: number) => void;
+  /** task-02（2026-10-14-session-turn-preview-cards / FR-01 FR-02）：预览卡展开回调
+   *  （runKey 上抛挂载方走单轮直达原地加载；缺省=旧消费方未接线，预览分支不渲染，
+   *  dialog / /runtimes 弹窗零回归。函数引用由父级 useCallback 保证稳定，同
+   *  onResend 先例）。 */
+  onExpandPreview?: (_runKey: string) => void;
 }) {
   // task-07（FR-03 / D-003@v2）：旧路径 output 气泡 askuser 标记拦截——命中则
   // 气泡正文换 textBefore（标记原文不显示，提问卡随气泡原位渲染（下方 ml-9）；
@@ -527,8 +657,14 @@ const TurnRow = memo(function TurnRow({
         data-turn-key（值 = realRunId ?? runId，与刻度轨条目 key 同源）——两分支的
         根 DOM 元素均挂（fragment 上放 data-* 无效），供跳转方
         querySelector([data-turn-key]) 精确命中（design §7）。 */}
-    {/* ql-20260818-011：静默切换轮（无 prompt/output，有 whoLine，已 完成）→ 渲染为紧凑一行配置变更标记，不占轮次气泡。 */}
-    {!turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
+    {/* task-02（2026-10-14-session-turn-preview-cards / FR-01）：未加载轮预览卡
+        分支最前置——preview 条目（mergePreviewIntoDisplayTurns 产物，正文恒空）
+        渲染 TurnPreviewCard 取代完整轮块；expandPreview 缺省（旧消费方）不渲染
+        该分支，行为回落到下方既有两分支（零回归）。data-turn-key 照挂（与加载后
+        的真实块同源，原地替换后定位键不变）。 */}
+    {turn.preview && !turn.prompt && !turn.output && onExpandPreview ? (
+      <TurnPreviewCard turn={turn} isHighlighted={isHighlighted} onExpand={onExpandPreview} />
+    ) : !turn.prompt && !turn.output && !!turn.whoLine && turn.status === 'completed' ? (
               <div
                 key={turn.runId}
                 data-turn-key={turn.realRunId ?? turn.runId}
@@ -997,6 +1133,7 @@ export function TurnTimeline({
   highlightTurnKey,
   suppressFollowBottom = false,
   forkEntry,
+  expandPreview,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1050,11 +1187,33 @@ export function TurnTimeline({
     return Math.max(0, turns.length - bottomAnchor.count);
   })();
 
+  // 2026-10-14-session-bottom-passive-grow：滚动基线镜像——区分「被动增高」与
+  // 「用户上滚」。大纲后到中段插入预览卡时列表高度骤增，浏览器对视口未动也
+  // 派发 scroll 事件（距底从 <80px 瞬变数千 px）——旧 handleScroll 直接按距离
+  // 清 isNearBottomRef，贴底跟随被关，上轮 length 分量修复被此守卫拦下（实测
+  // 3 次冷加载 2 次停距底 9092px）。被动增高判定：scrollHeight 增长且
+  // scrollTop 未减少（容差 4px 布局抖动；50px 为显著增高阈，忽略 markdown 撑
+  // 开的微小抖动）→ 不改变贴底判定、不设新消息计数锚（用户没离开底部），
+  // 仅更新基线。
+  const scrollBaselineRef = useRef<{ top: number; height: number } | null>(null);
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    const prev = scrollBaselineRef.current;
+    scrollBaselineRef.current = { top: el.scrollTop, height: el.scrollHeight };
+    if (
+      prev &&
+      el.scrollHeight > prev.height + 50 &&
+      el.scrollTop >= prev.top - 4
+    ) {
+      // 被动增高（中段插入/内容撑开）：视口未上移——保持贴底判定原值。
+      return;
+    }
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     isNearBottomRef.current = near;
+    // grace-window：每次真实贴底刷新记忆时间戳（宽限窗锚点）。
+    if (near) lastBottomAnchoredAtRef.current = Date.now();
     setNearBottom((prev) => (prev === near ? prev : near));
     if (near) {
       // 回到底部（含点击悬浮按钮后的滚底触发）→ 计数锚清零。
@@ -1163,10 +1322,22 @@ export function TurnTimeline({
     // + prepend 静默窗组合守卫，实测仍被穿透：触顶加载突发落地瞬间视口被钳到
     // 新底 → near 误真 → 后续任意 turns 提交拉底。本不变量与滚动位置无关，
     // 彻底消除「上拉读历史被弹回最新轮」）。
-    const lastSig = last ? `${last.runId}:${(last.output ?? "").length}:${last.status}` : null;
+    // 2026-10-14-session-bottom-follow-insert：lastSig 补 length 分量——初始
+    // 日志窗口贴底完成后全量大纲**后到**（归并层把预览卡插进中段：末轮不变、
+    // 列表高度剧增），旧签名不触发滚动而 2.5s 高度重申窗口已过 → 视口绝对位
+    // 置不动、内容被推下 → 停在倒数第几轮（用户实测「有时候没滚到底」根因）。
+    // 中段/尾部插入（预览卡、孤儿补建、预取装配）同跟随；prepend 路径已被
+    // 上方 isPrepend 早退 + 3s 静默窗守卫，上滚读历史由 isNearBottomRef 守卫，
+    // 跳转由 suppressFollowBottom 守卫——三道既有守卫不动。
+    const lastSig = last
+      ? `${last.runId}:${(last.output ?? "").length}:${last.status}:${turns.length}`
+      : null;
     const lastChanged = lastSigRef.current !== lastSig;
     lastSigRef.current = lastSig;
-    if (isNewPendingTurn || (isNearBottomRef.current && lastChanged)) {
+    if (
+      isNewPendingTurn ||
+      ((isNearBottomRef.current || inBottomGraceWindow()) && lastChanged)
+    ) {
       el.scrollTo(0, el.scrollHeight);
       // quick（ql-20260921-003-42be）：贴底重申窗口——单次 scrollTo 撞上「高度=
       // 视口高」的未稳定窗口时滚动量为 0，或滚到中途后高度再涨/视口再压缩，
@@ -1216,6 +1387,104 @@ export function TurnTimeline({
     pendingRequests.length > 0 &&
     sessionStatus !== "ended" &&
     sessionStatus !== "failed";
+
+  // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
+  // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
+  // 真实化只改 scrollHeight——不触发 scroll 事件（scrollTop 未变）、无 turns 提交，
+  // 2.5s 高度重申窗（BOTTOM_REASSERT_WINDOW_MS）过期后彻底无修正源（实测注入
+  // 2000px → delta=2000 永久停住，用户「有时候没完全滚到底」的最后一类根因）。
+  // 通解：ResizeObserver 观察滚动容器的**内容子元素**（容器自身 borderBox 由
+  // flex 固定不变化）——任何来源的内容增高且用户在底部（isNearBottomRef）时
+  // rAF 合帧 scrollTo 底。rAF 合帧：高频回调（流式/markdown 逐块撑开）去重为
+  // 一帧一滚（2026-10-13 layout-storm 教训——滚动类处理器禁同步布局写）。
+  // 用户上滚接管由 isNearBottomRef 守卫（handleScroll 置 false 后回调恒 no-op）；
+  // 降级：无 ResizeObserver（jsdom/极旧浏览器）不挂观测，行为回到重申窗兜底。
+  // ── 2026-10-14-session-bottom-grace-window：贴底记忆宽限窗（第六层加固）──
+  // 用户实测刷新落位随机（19 轮复现 1 次；复现态：scrollTop=602=布局早期瞬态
+  // 假底，贴底判定 near 在加载期被某事件误清后再无自愈路径，RO 随之死寂）。
+  // 凶手路径无法稳定定位（低频竞态）——改加固式修复：不追凶手，让系统自愈。
+  // 宽限窗：距最近一次贴底 <10s 且用户无真实滚动输入（wheel/touchstart/
+  // pointerdown，程序滚动不产生这些事件）期间，内容任何高度变化都强制钉底；
+  // 用户真实输入立即让权（回既有语义），超窗亦然。初始挂载视为在窗内（冷加载
+  // 全程受保护——「打开即落底」是产品语义，scrollRestoration=manual 后无浏览器
+  // 恢复与之竞争）。
+  const lastBottomAnchoredAtRef = useRef<number>(Date.now());
+  const userScrollTookOverRef = useRef(false);
+  useEffect(() => {
+    const markUser = () => {
+      userScrollTookOverRef.current = true;
+    };
+    // capture：任何子元素上的真实输入都算接管；程序性 scrollTo 不触发这四类
+    // （键盘 PgUp/↑/Home/Space 滚动无 wheel，需 keydown 覆盖）。
+    window.addEventListener("wheel", markUser, { capture: true, passive: true });
+    window.addEventListener("touchstart", markUser, { capture: true, passive: true });
+    window.addEventListener("pointerdown", markUser, { capture: true, passive: true });
+    window.addEventListener("keydown", markUser, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("wheel", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("touchstart", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("pointerdown", markUser, { capture: true } as AddEventListenerOptions);
+      window.removeEventListener("keydown", markUser, { capture: true } as AddEventListenerOptions);
+    };
+  }, []);
+  /** 宽限窗内（最近贴底 <10s 且无用户输入）——RO 钉底的放行判据。 */
+  const inBottomGraceWindow = () =>
+    !userScrollTookOverRef.current &&
+    Date.now() - lastBottomAnchoredAtRef.current < 10_000;
+
+  const bottomFollowRafRef = useRef<number | null>(null);
+  // 2026-10-14-session-bottom-no-restore（第五层）：禁浏览器刷新滚动恢复——
+  // Chrome reload 时恢复上次容器滚动位置，恢复晚到（内容装配后）会覆盖初始
+  // 贴底 scrollTo 并经 handleScroll 正常分支清 isNearBottomRef（恢复写入=
+  // scrollTop 骤减且 scrollHeight 稳定，不命中被动增高分支），贴底链全死 →
+  // 停在上次位置（用户实测刷新落位随机 35/31/3 轮的根因；切换会话路径审计
+  // 健康，故障为刷新专有）。刷新=重新打开会话，落底语义与切换一致；卸载还原
+  // auto 不影响其它页面刷新体验。
+  useEffect(() => {
+    if (typeof history === "undefined" || !("scrollRestoration" in history)) {
+      return;
+    }
+    const prev = history.scrollRestoration;
+    history.scrollRestoration = "manual";
+    return () => {
+      history.scrollRestoration = prev;
+    };
+  }, []);
+  // 审查 P2 补口：deps 含「turns 空态」布尔——冷加载首 commit turns=[] 渲染空态
+  // div（观察快照只有它），历史到达后空态卸载、.space-y-5 内容容器挂载但不在
+  // 快照（死观测盲区，恰好是「点击会话直开」主路径）。布尔翻转（false→true）
+  // 时 effect 重跑：重新快照 children（此时内容容器已在）；此后恒 true 不再重跑。
+  const hasTurns = turns.length > 0;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const obs = new ResizeObserver(() => {
+      // grace-window：贴底判定 OR 宽限窗（加载期 near 被误清时自动复活钉底）。
+      if (!isNearBottomRef.current && !inBottomGraceWindow()) return;
+      if (bottomFollowRafRef.current !== null) return; // 合帧去重
+      bottomFollowRafRef.current = requestAnimationFrame(() => {
+        bottomFollowRafRef.current = null;
+        const target = scrollRef.current;
+        if (!target || !target.isConnected) return;
+        if (!isNearBottomRef.current && !inBottomGraceWindow()) return;
+        target.scrollTo(0, target.scrollHeight);
+        lastBottomAnchoredAtRef.current = Date.now();
+      });
+    });
+    // 观察直接子（错误条/pending 卡层/内容容器）——turns 空态翻转时经上方 deps
+    // 重跑重快照（冷加载空态 div → 内容容器替换的补口）；streamFooter 是内容
+    // 容器内部节点，其渲染引起的容器高度变化由容器观察覆盖（审查 P3 注释修正）。
+    for (const child of Array.from(el.children)) obs.observe(child);
+    return () => {
+      obs.disconnect();
+      if (bottomFollowRafRef.current !== null) {
+        cancelAnimationFrame(bottomFollowRafRef.current);
+        bottomFollowRafRef.current = null;
+      }
+    };
+  }, [hasTurns]);
+  // rAF 句柄声明在此 effect 外（cleanup 与合帧去重共用）。
+
   const minimizedPending = showPending
     ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
     : [];
@@ -1319,6 +1588,7 @@ export function TurnTimeline({
               }
               forkSeq={turn.turn ?? idx + 1}
               onForkTurn={forkEntry?.onForkTurn}
+              onExpandPreview={expandPreview}
             />
           ))}
           {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——

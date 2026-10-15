@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型：会话轮次预览卡 — 2026-10-14-session-turn-preview-cards</title>
+<style>
+  /* ── 主题 token（对齐 frontend/src/styles/themes.ts 双主题）── */
+  :root, [data-theme="ai-native"] {
+    --background: #0d1117;
+    --card: #161b22;
+    --card-40: rgba(22,27,34,.72);
+    --border: #2d333b;
+    --foreground: #e6edf3;
+    --muted-foreground: #8b949e;
+    --muted: #21262d;
+    --brand-50: rgba(124,58,237,.12);
+    --brand-100: rgba(124,58,237,.20);
+    --brand-300: #a78bfa;
+    --brand-600: #7c3aed;
+    --brand-700: #6d28d9;
+    --warning: #d29922;
+    --destructive: #f85149;
+    --shadow-md: 0 4px 12px rgba(0,0,0,.4);
+  }
+  [data-theme="blue"] {
+    --background: #f4f6fa;
+    --card: #ffffff;
+    --card-40: rgba(255,255,255,.78);
+    --border: #e2e6ee;
+    --foreground: #1a2233;
+    --muted-foreground: #64748b;
+    --muted: #eef1f6;
+    --brand-50: rgba(37,99,235,.08);
+    --brand-100: rgba(37,99,235,.15);
+    --brand-300: #93c5fd;
+    --brand-600: #2563eb;
+    --brand-700: #1d4ed8;
+    --warning: #b45309;
+    --destructive: #dc2626;
+    --shadow-md: 0 4px 12px rgba(15,23,42,.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--background); color: var(--foreground);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+  /* ── 顶栏 ── */
+  .topbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--card-40); backdrop-filter: blur(12px); flex-shrink: 0;
+  }
+  .topbar h1 { font-size: 13px; font-weight: 600; }
+  .topbar .sub { font-size: 11px; color: var(--muted-foreground); }
+  .theme-btn {
+    margin-left: auto; cursor: pointer; font-size: 11px;
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--muted); color: var(--foreground);
+  }
+  /* ── 主体三栏 ── */
+  .main { flex: 1; display: flex; min-height: 0; }
+  /* 窄轨导航（44px，对齐 TurnNavList） */
+  .rail {
+    width: 44px; flex-shrink: 0; border-right: 1px solid var(--border);
+    background: var(--card-40); display: flex; flex-direction: column; align-items: center;
+    padding: 6px 0; overflow-y: auto; scrollbar-width: none;
+  }
+  .rail::-webkit-scrollbar { display: none; }
+  .rail .handle {
+    font-size: 10px; font-weight: 600; color: var(--muted-foreground);
+    padding: 8px 0; border-bottom: 1px solid var(--border); width: 100%;
+    text-align: center; margin-bottom: 6px; font-family: ui-monospace, monospace;
+  }
+  .tick {
+    width: 100%; height: 10px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .tick i { display: block; height: 4px; width: 20px; border-radius: 999px; background: var(--muted-foreground); opacity: .45; transition: all .15s; }
+  .tick.unloaded i { background: transparent; border: 1px dashed var(--muted-foreground); opacity: .7; }
+  .tick:hover i, .tick.active i { width: 24px; background: var(--brand-600); opacity: 1; border: none; }
+  .tick.active i { opacity: 1; }
+
+  /* 消息流 */
+  .stream { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .row { display: flex; gap: 10px; }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 999px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600; color: #fff;
+  }
+  .avatar.user { background: var(--brand-600); }
+  .avatar.agent { background: linear-gradient(135deg, var(--brand-600), #0891b2); }
+  .bubble-user {
+    margin-left: auto; max-width: 72%; background: var(--brand-600); color: #fff;
+    border-radius: 16px 4px 16px 16px; padding: 9px 14px; font-size: 13px; line-height: 1.6;
+    box-shadow: 0 2px 6px rgba(124,58,237,.25);
+  }
+  .turn-block { display: flex; flex-direction: column; gap: 8px; }
+  .who-chip {
+    align-self: flex-start; display: inline-flex; gap: 4px; align-items: center;
+    font-size: 10.5px; color: var(--muted-foreground);
+    border: 1px dashed var(--border); border-radius: 999px; padding: 2px 9px; background: var(--card);
+  }
+  .reply { font-size: 13px; line-height: 1.7; max-width: 46rem; }
+  .reply .meta { font-size: 10px; color: var(--muted-foreground); margin-top: 4px; }
+  .divider {
+    display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--muted-foreground);
+    padding-left: 38px;
+  }
+  .divider::before, .divider::after { content: ""; height: 1px; flex: 1; background: var(--border); }
+  .divider .pill { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); }
+
+  /* ── 预览卡（本原型核心）── */
+  .preview-card {
+    border: 1px dashed var(--brand-300); border-radius: 12px;
+    background: var(--brand-50); padding: 12px 14px; cursor: pointer;
+    transition: all .18s; position: relative; overflow: hidden;
+  }
+  .preview-card:hover { border-style: solid; background: var(--brand-100); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .preview-card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .preview-card .no { font-size: 11px; font-weight: 700; color: var(--brand-600); font-family: ui-monospace, monospace; }
+  .preview-card .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--muted-foreground); opacity: .5; }
+  .preview-card .dot.ok { background: #22c55e; opacity: .8; }
+  .preview-card .dot.fail { background: var(--destructive); opacity: .8; }
+  .preview-card .time { margin-left: auto; font-size: 10px; color: var(--muted-foreground); }
+  .preview-card .q {
+    font-size: 12.5px; line-height: 1.55; font-weight: 500;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .preview-card .a {
+    margin-top: 5px; font-size: 11.5px; line-height: 1.55; color: var(--muted-foreground);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .preview-card .foot {
+    margin-top: 8px; display: flex; align-items: center; gap: 6px;
+    font-size: 10.5px; color: var(--brand-600); font-weight: 500;
+  }
+  .preview-card .foot svg { transition: transform .18s; }
+  .preview-card:hover .foot svg { transform: translateX(2px); }
+  .preview-card .tag {
+    font-size: 9.5px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--brand-300); color: var(--brand-600); background: var(--card);
+  }
+  /* 展开后的高亮反馈（模拟 2.2s ring 自清） */
+  @keyframes ringFade { 0% { box-shadow: 0 0 0 2px var(--brand-600); } 100% { box-shadow: 0 0 0 2px transparent; } }
+  .just-loaded { animation: ringFade 2.2s ease-out; border-radius: 12px; }
+
+  .hint {
+    text-align: center; font-size: 11px; color: var(--muted-foreground);
+    padding: 8px 0 2px; opacity: .8;
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>会话：知识库索引卡片化修复</h1>
+    <span class="sub">35 轮 · 已加载 3 轮 · 其余以预览卡呈现（点开即完整加载）</span>
+    <button class="theme-btn" onclick="toggleTheme()">切换主题</button>
+  </div>
+  <div class="main">
+    <nav class="rail">
+      <div class="handle">#6 ▶</div>
+      <div class="tick unloaded" title="第1轮 · 完成 · 未加载"></div>
+      <div class="tick unloaded" title="第2轮 · 完成 · 未加载"></div>
+      <div class="tick unloaded" title="第3轮 · 失败 · 未加载"></div>
+      <div class="tick unloaded" title="第4轮 · 失败 · 未加载"></div>
+      <div class="tick unloaded" title="第5轮 · 完成 · 未加载"></div>
+      <div class="tick active" title="第6轮 · 完成（当前）"></div>
+      <div class="tick" title="第7轮 · 完成 · 已加载"></div>
+      <div class="tick" title="第8轮 · 完成 · 已加载"></div>
+    </nav>
+
+    <div class="stream" id="stream">
+      <div class="hint">↑ 顶部：更早轮次以预览卡原位呈现，滚动即浏览全貌</div>
+
+      <!-- 预览卡：第 1 轮 -->
+      <div class="preview-card" data-turn="1" onclick="expandCard(this)">
+        <div class="head">
+          <span class="no">第 1 轮</span><span class="dot ok"></span>
+          <span class="tag">未加载 · 点击展开</span>
+          <span class="time">09-23 09:20</span>
+        </div>
+        <div class="q">【/workspaces/a8a0fde6-808e-48a… 执行 sillyspec run scan --standard --force-rescan 刷新扫描基线，然后对照 ARCHITECTURE.md 检查模块划分是否漂移】</div>
+        <div class="a">答：结构清楚。改造扫描入口聚合了三个来源：平台 manifest、本地 quicklog、变更目录推导…</div>
+        <div class="foot">展开完整对话 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+      </div>
+
+      <!-- 预览卡：第 5 轮 -->
+      <div class="preview-card" data-turn="5" onclick="expandCard(this)">
+        <div class="head">
+          <span class="no">第 5 轮</span><span class="dot ok"></span>
+          <span class="tag">未加载 · 点击展开</span>
+          <span class="time">09-23 10:23</span>
+        </div>
+        <div class="q">[系统续跑] 上游额度已重置，会话从中断处继续。请检查当前进度并继续未完成的工作。</div>
+        <div class="foot">展开完整对话 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+      </div>
+
+      <!-- 预览卡：第 6 轮（失败态示例） -->
+      <div class="preview-card" data-turn="6" onclick="expandCard(this)">
+        <div class="head">
+          <span class="no">第 6 轮</span><span class="dot fail"></span>
+          <span class="tag">未加载 · 点击展开</span>
+          <span class="time">09-23 12:13</span>
+        </div>
+        <div class="q">CardMarkdown 薄壳组件是怎么实现？用了什么技术方案，为什么列表滚动的时候不卡？</div>
+        <div class="a">答：CardMarkdown 是一个只负责渲染的展示组件……（该轮执行失败）</div>
+        <div class="foot">展开完整对话 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+      </div>
+
+      <div class="divider"><span class="pill">以下 3 轮已加载完整内容</span></div>
+
+      <!-- 已加载轮：第 7 轮 -->
+      <div class="turn-block">
+        <div class="row" style="justify-content:flex-end;">
+          <div class="bubble-user">我想用方案C</div>
+          <div class="avatar user">鲸</div>
+        </div>
+        <div class="row">
+          <div class="avatar agent">AI</div>
+          <div class="reply">
+            好的，按方案 C 实施：把索引卡片改为薄壳组件，滚动容器内只渲染可视区条目，其余用占位高度撑起。改动点集中在 IndexGrid 与虚拟滚动 hook…
+            <div class="meta">10-08 11:32 · ↑12,832 ↓3,204 · 87 tok/s</div>
+          </div>
+        </div>
+        <div class="divider"><span class="pill">第 7 轮</span></div>
+      </div>
+
+      <!-- 已加载轮：第 8 轮 -->
+      <div class="turn-block">
+        <div class="row" style="justify-content:flex-end;">
+          <div class="bubble-user">还是一样，没有变化'</div>
+          <div class="avatar user">鲸</div>
+        </div>
+        <div class="row">
+          <div class="avatar agent">AI</div>
+          <div class="reply">
+            我核对了构建产物时间戳，发现 dev server 没有热更新到最新提交。重启后验证：卡片现在点击展开正常，滚动定位准确。
+            <div class="meta">10-08 13:43 · ↑9,101 ↓1,884</div>
+          </div>
+        </div>
+        <div class="divider"><span class="pill">第 8 轮</span></div>
+      </div>
+
+      <div class="hint">↓ 底部 · 触顶自动加载更早（既有机制不变）</div>
+    </div>
+  </div>
+
+<script>
+  function toggleTheme() {
+    const html = document.documentElement;
+    html.dataset.theme = html.dataset.theme === "ai-native" ? "blue" : "ai-native";
+  }
+  /* 模拟：点击预览卡 → 原地替换为完整轮块 + 2.2s ring 高亮自清（对齐 design 交互） */
+  const REPLIES = {
+    1: { user: "【/workspaces/… 执行 sillyspec run scan --standard --force-rescan 刷新扫描基线，然后对照 ARCHITECTURE.md 检查模块划分是否漂移】",
+         reply: "结构清楚。改造扫描入口聚合了三个来源：平台 manifest、本地 quicklog、变更目录推导。基线已刷新至 5a00fc7，模块映射新增 frontend_app / frontend_components 两个分层模块…（此处为演示用示意全文，实际为完整轮块渲染）" },
+    5: { user: "[系统续跑] 上游额度已重置，会话从中断处继续。",
+         reply: "检测到中断点：scan 基线已刷新但模块文档未同步。继续执行模块文档增量更新…（示意全文）" },
+    6: { user: "CardMarkdown 薄壳组件是怎么实现？用了什么技术方案？",
+         reply: "（该轮执行失败：上游供应商连接超时，可点失败卡「重新发送」重试——失败态轮次的既有交互保持不变）" },
+  };
+  function expandCard(card) {
+    const no = card.dataset.turn;
+    const data = REPLIES[no];
+    const block = document.createElement("div");
+    block.className = "turn-block just-loaded";
+    block.innerHTML =
+      '<div class="row" style="justify-content:flex-end;"><div class="bubble-user">' + data.user + '</div><div class="avatar user">鲸</div></div>' +
+      '<div class="row"><div class="avatar agent">AI</div><div class="reply">' + data.reply +
+      '<div class="meta">刚加载 · 完整内容（真实实现中为整轮段模型渲染）</div></div></div>' +
+      '<div class="divider"><span class="pill">第 ' + no + ' 轮</span></div>';
+    card.replaceWith(block);
+    block.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+</script>
+</body>
+</html>

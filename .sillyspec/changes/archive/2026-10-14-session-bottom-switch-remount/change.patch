@@ -1,0 +1,45 @@
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+index 8f94553c5..178d37388 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-dialog.tsx
+@@ -2031,6 +2031,10 @@ export function SessionPanelDialog(props: SessionPanelProps) {
+           task-08（session-fork）例外注记：forkAnchors 的 /runs 拉取是分叉入口
+           门控的专属数据源（上方 effect，非 whoLine 派生链复用），不破 R7 语义。 */}
+       <TurnTimeline
++        // 2026-10-14-session-bottom-switch-remount：key=会话标识——弹窗内切换/
++        // 重挂会话时滚动判定 refs 归零（同 page 模式，见 session-panel-page 挂载
++        // 点注释；attachSessionId 为弹窗承载会话 id）。
++        key={view.sessionId ?? attachSessionId ?? "pre"}
+         autoResumeEntries={autoResumeEntries}
+         turns={view.turns}
+         // task-08（session-fork / FR-01 / FR-04）：轮级「⑂ 从此分叉」入口——
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index e234bd6cc..776d2d097 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -4560,7 +4560,9 @@ export function SessionPanelPage({
+   // 原日志条目流主体组件已退役删除（承接者见 agent-replay-body.tsx）。
+   // 保持单行分支挂载（git revert 可整体回退）。
+   const sessionBody = isToolReportBody ? (
+-    <AgentReplayBody sessionId={session.id} />
++    // 2026-10-14-session-bottom-switch-remount（审查 P2 补口）：回放体内 TurnTimeline
++    // 同样 key 化——tool_report→tool_report 切换时滚动判定 refs 不跨会话残留。
++    <AgentReplayBody key={session.id} sessionId={session.id} />
+   ) : (
+     <>
+       {/* task-08（2026-09-22-session-fork-continuation / FR-05）：分叉会话
+@@ -4586,7 +4588,14 @@ export function SessionPanelPage({
+         onJumpToHead: handleJumpToHead,
+       })}
+       <SubagentTaskLookupContext.Provider value={subagentTaskLookup}>
++      {/* 2026-10-14-session-bottom-switch-remount：key=会话标识——SPA 列表点击
++          切换会话时组件不重挂载，滚动判定 refs（isNearBottomRef/scrollBaselineRef/
++          lastSigRef 等）残留上一会话状态（上滚读历史后 isNearBottomRef=false），
++          新会话贴底跟随被守卫拦下（实测：会话 A 上滚 → 切长会话 → 停距底 3963px，
++          用户「有时候没滚到底」的切换路径根因；前两轮修复只覆盖整页加载路径）。
++          key 强制重挂载：全部滚动状态归零，恢复初始贴底语义。 */}
+       <TurnTimeline
++        key={sessionId ?? "pre"}
+         suppressFollowBottom={jumpFollowSuppress}
+         turns={dialogTurns}
+         viewMode={viewMode}

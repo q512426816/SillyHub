@@ -1,0 +1,72 @@
+{
+  "change": "2026-10-14-session-bottom-grace-window",
+  "baseline": "7875e2a9a5288a708e3f42ad3a524afc3eeb9530",
+  "head": "3658ef81193d64cbf332c53f31b1b02859c2813a",
+  "files": [
+    "frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx",
+    "frontend/src/components/daemon/turn-timeline.tsx"
+  ],
+  "totals": {
+    "files": 2,
+    "additions": 48,
+    "deletions": 4
+  },
+  "savedAt": "2026-10-15T02:20:36.865Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "7875e2a9a5288a708e3f42ad3a524afc3eeb9530",
+    "totals": {
+      "files": 2,
+      "additions": 48,
+      "deletions": 4
+    },
+    "rows": [
+      {
+        "path": "frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx",
+        "additions": 4,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/turn-timeline.tsx",
+        "additions": 44,
+        "deletions": 3,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "b1ef7c0e932b1a05b67eb6b187f743398b62c90b364a0499a7a78907f7c9ef1e",
+  "patchStatus": "ok"
+}
