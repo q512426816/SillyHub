@@ -1,13 +1,362 @@
 ---
 author: sillyspec-fr-index
-created_at: 2026-10-15T00:59:46.351Z
+created_at: 2026-10-15T08:08:24.452Z
 ---
 
-# FR 索引 — auto-frontend
+# FR 索引 — frontend_components
 
 > fr-index 从归档变更 requirements.md 幂等提炼（「最近确认」= 归档时 HEAD）。条目字段行为机械解析契约，勿手改。
 > superseded 条目保留供取代链回溯；brainstorm 注入默认只给 active。
-> 伪域（auto- 前缀）：由文件路径段投票派生，无模块卡——为该域补模块卡后，新变更将自动落回真域
+> 模块卡：modules/frontend_components.md（域=模块 id 同构；行为条目↔模块契约互跳）
+
+## FR-auto-claude-004 鼠标悬停底部区域标签时，浮层翻到鼠标上方显示，永远在视口内
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 输入框贴页面底缘、鼠标悬停标签（y≈720，视口高 768）/ When 浮层渲染 / Then top=662（鼠标上方）且在视口内。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-01
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
+
+## FR-auto-claude-005 常规位置（下方有空间）仍显示在鼠标下方 16px
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given y=200 / When 渲染 / Then top=216。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-02
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
+
+## FR-auto-claude-006 相关测试全绿
+变更：2026-10-12-ws-ref-hover-tip-flip
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given vitest run input-ref-overlay.test.tsx / Then 14/14 通过。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-flip/requirements.md#FR-03
+最近确认：1ec1af9dd914b8145359bc47258a258ae36335f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-flip
+  status: active
+
+## FR-auto-claude-007 浮层经 portal 挂 document.body，fixed 相对视口定位，坐标零偏移
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 悬停命中标签 / When 浮层渲染 / Then rect.top === 解析 style.top（视口坐标系）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-01
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active
+
+## FR-auto-claude-008 底部空间不足翻转逻辑在正确坐标系下生效
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-02
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active
+
+## FR-auto-claude-009 相关测试全绿（portal 断言同步）
+变更：2026-10-12-ws-ref-hover-tip-portal
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-hover-tip-portal/requirements.md#FR-03
+最近确认：f9406f124c645aa4092cefe74c91e05e6afd510f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-hover-tip-portal
+  status: active
+
+## FR-auto-claude-010 悬停浮层显示工作区中文名（别名优先），查不到回退 id
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 工作区列表已加载（名称 SillyHub）/ When 插入引用并悬停 / Then 浮层显示「（工作区 SillyHub）」。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-01
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active
+
+## FR-auto-claude-011 不新增网络请求
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 列表已拉取 / When 进文件模式插引用 / Then 无第二次 listWorkspaces 调用（缓存命中）。
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-02
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active
+
+## FR-auto-claude-012 发送置换/历史标记协议零变化；相关测试全绿
+变更：2026-10-12-ws-ref-ws-name
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-ref-ws-name/requirements.md#FR-03
+最近确认：40622e032cbece20e57db17154d582ce835e67b2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-03
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-ref-ws-name
+  status: active
+
+## FR-auto-claude-013 workspace/change/quicklog 三种 scope 入口的「继续最近会话」只取本工作区（workspace_id 过滤后 last_active_at 优先）的最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：跨工作区取最近
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-01
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-014 全局 /sessions（无 scope）行为不变，仍取全局最近会话
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：全局门户不受影响
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-02
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-015 本工作区无会话（或未进全局前 100）时按钮不渲染，沿用 null 不渲染契约
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：本工作区无会话
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-03
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-016 resolveDefaultMachineId 默认机器解析仍用全局 sessions，语义不变
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：默认机器解析不变
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-04
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-017 测试覆盖：scope 入口最近会话属其他工作区时取本工作区会话或隐藏按钮；全局门户不受影响
+变更：2026-10-12-ws-scoped-recent-session
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-12-ws-scoped-recent-session/requirements.md#FR-05
+最近确认：7b2c7634f9f61dab59ee167179fd3931feeffe07
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-12-ws-scoped-recent-session
+  status: active
+
+## FR-auto-claude-018 scroll 事件处理器（onScroll 及其同步调用链 handleLoadEarlier 的锚捕获段）内不再有同步强制布局：锚点重申与锚捕获的 DOM 遍历/几何读取全部改 rAF 合帧执行
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：程序性 scroll 高频风暴合帧
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-01
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-01
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-019 行为零回归：触顶翻页仍按 scrollTop<=48 触发、prepend 后视口钉回语义不变、用户真实滚动（isTrusted）弃锚逻辑不变
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：用户接管弃锚
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-02
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-02
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-020 anchorPin rAF 句柄有清理（卸载/锚失效不泄漏 rAF 回调）
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-03
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+## FR-auto-claude-021 相关既有测试（session-panel 触顶加载/锚定/跳转用例）全绿
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-04
+最近确认：17abec741527b36896c20525f431558a43fa893a
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-04
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-13-session-scroll-layout-storm
+  status: active
+
+## FR-auto-claude-022 单页 4 份 useDaemonMachines 轮询合并不在本变更范围（另立变更），本变更不动轮询
+变更：2026-10-13-session-scroll-layout-storm
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-13-session-scroll-layout-storm/requirements.md#FR-05
+最近确认：17abec741527b36896c20525f431558a43fa893a
 
 ## FR-auto-frontend-221 决策/FR 结构化条目卡在带「变更：」字段时输出 data-entry-anchor-qualified=文件#变更号#决策号（既有 data-entry-anchor 裸锚保留不破坏旧深链）
 变更：2026-10-14-decision-anchor-change-qualified
@@ -701,3 +1050,200 @@ created_at: 2026-10-15T00:59:46.351Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-14-session-bottom-grace-window/requirements.md#FR-04
 最近确认：82b966f8f85f16b2318e56541359a0c067783802
+
+## FR-auto-releases-001 行首状态点单一源判定：failed→红点；ended→绿点；活性 working→动态转圈；活性 blocked→琥珀点；reconnecting→动态转圈；其余（active 空闲/pending/suspended/活性 idle/unknown/无活性数据）→零渲染留白
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-01
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-01
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「行首状态槽语义（2026-10-15-session-status-dot-semantics）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-releases-002 终态权威：failed/ended 判定优先于活性信号，终态会话不因陈旧活性数据转圈或琥珀
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-02
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「failed → 红点（异常失败）；活性 working 不覆盖（终态权威）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-releases-003 行尾活性小灯移除，悬停详情卡（Popover）与未读红角标迁移到行首点（有活性数据才可悬停出卡，未读角标挂行首槽右上角）
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-03
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「活性未读红角标（原行尾小灯迁入行首槽）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-releases-004 批量多选模式行首槽仍为勾选框，状态点与悬停卡零渲染（与现状一致）
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-04
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-04
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-releases-005 相关测试更新并通过（session-list-panel 测试 + 门户页测试涉及点），lint 通过
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-05
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-05
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | frontend/src/hooks/__tests__/use-session-liveness.test.ts | sessions/page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-releases-006 执行完成通知（用户补充）：非终态→ended 且当前不在该会话上 → 绿色通知角标，点击进入后消失
+变更：2026-10-15-session-status-dot-semantics
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-session-status-dot-semantics/requirements.md#FR-06
+最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-session-status-dot-semantics:flow:测试绑定FR-06
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「执行完成通知（2026-10-15 用户补充…）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-session-status-dot-semantics
+  status: active
+
+## FR-auto-sillyspec-079 切片力场新增同类型内聚力——同类聚簇、异类分块
+变更：2026-10-15-graph-type-cluster
+状态：active
+摘要：交错网格收敛聚簇
+全文：.sillyspec/changes/archive/2026-10-15-graph-type-cluster/requirements.md#FR-01
+最近确认：2fc26800908a29fc957f059032fbaff1678b793b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-graph-type-cluster:flow:测试绑定FR-01
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：交错网格收敛后类内紧+类间分」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-graph-type-cluster
+  status: active
+
+## FR-auto-sillyspec-080 内聚力豁免面——单成员类型与 NaN 坐标零受力
+变更：2026-10-15-graph-type-cluster
+状态：active
+摘要：异类两节点与 NaN 自愈不受扰
+全文：.sillyspec/changes/archive/2026-10-15-graph-type-cluster/requirements.md#FR-02
+最近确认：2fc26800908a29fc957f059032fbaff1678b793b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-graph-type-cluster:flow:测试绑定FR-02
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：单成员类型与 NaN 坐标豁免（既有自愈口径不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-graph-type-cluster
+  status: active
+
+## FR-auto-sillyspec-081 既有交互与引擎语义不变
+变更：2026-10-15-graph-type-cluster
+状态：active
+摘要：回归面全绿
+全文：.sillyspec/changes/archive/2026-10-15-graph-type-cluster/requirements.md#FR-03
+最近确认：2fc26800908a29fc957f059032fbaff1678b793b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-graph-type-cluster:flow:测试绑定FR-03
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts | frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-graph-type-cluster
+  status: active
+
+## FR-auto-sillyspec-082 常量导出与聚簇断言单测
+变更：2026-10-15-graph-type-cluster
+状态：active
+摘要：单测钉死
+全文：.sillyspec/changes/archive/2026-10-15-graph-type-cluster/requirements.md#FR-04
+最近确认：2fc26800908a29fc957f059032fbaff1678b793b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-graph-type-cluster:flow:测试绑定FR-04
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：增益常量具名导出」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-graph-type-cluster
+  status: active
+
+## FR-unmapped-707 相关测试通过（不跑全量）
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：三侧绿
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-08
+最近确认：b15fafc3b

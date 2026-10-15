@@ -309,3 +309,40 @@ created_at: 2026-09-22T16:26:24.345Z
   confirmed_at: null
   source_change: 2026-10-12-session-defects
   status: active
+
+## FR-unmapped-703 usage 契约与 schema 同步
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：旧事件兼容
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-04
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-live-token-speed-daemon-timing:task-01:acc-0-f32728c9
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | sillyhub-daemon/tests/interactive/claude-events.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-01:acc-1-3494725c
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | sillyhub-daemon/tests/interactive/claude-events.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-01:acc-2-7ae30047
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py | frontend/src/components/daemon/__tests__/turn-speed.test.ts | frontend/src/components/daemon/__tests__/turn-timeline-token-speed.test.tsx | sillyhub-daemon/tests/interactive/claude-events.test.ts | sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts | sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active

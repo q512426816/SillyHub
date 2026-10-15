@@ -508,3 +508,105 @@
 - 场景：存量轮无锚点 — Given 迁移前已存在的轮（engine_anchor NULL）；When 用户尝试原生分叉该轮；Then 入口置灰（提示缺锚点）；种子档不受影响
 全文：.sillyspec/changes/archive/2026-09-22-session-fork-continuation/requirements.md#FR-07
 最近确认：1d33bda33
+
+## FR-unmapped-700 daemon claude 引擎逐调用计时
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：单调用轮
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-01
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-live-token-speed-daemon-timing:task-02:acc-0-6145b3a7
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-02:acc-1-aaf685f4
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-02:acc-2-29de5afe
+  tests: sillyhub-daemon/tests/interactive/claude-events.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+
+## FR-unmapped-701 daemon codex 引擎生成窗口计时
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：调用间夹工具
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-02
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-live-token-speed-daemon-timing:task-03:acc-0-4ac8d91b
+  tests: sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-03:acc-1-dba29b16
+  tests: sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-03:acc-2-bcdd0983
+  tests: sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+
+## FR-unmapped-702 daemon pi 引擎 message_end 折叠（含显式降级路径）
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：正常路径
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-03
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-live-token-speed-daemon-timing:task-04:acc-0-77afbadf
+  tests: sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-04:acc-1-6d39ea23
+  tests: sillyhub-daemon/tests/interactive/pi-rpc-driver.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active

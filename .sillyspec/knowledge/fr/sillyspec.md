@@ -1087,3 +1087,31 @@ created_at: 2026-09-28T13:29:24.005Z
   confirmed_at: null
   source_change: 2026-10-11-linked-repos-path-guard
   status: active
+
+## FR-auto-zcode-001 .claude/.codex/.opencode/.zcode 四镜像目录均有 21 个 sillyspec-* 技能（含 sillyspec-flow），内容与 npm sillyspec@3.32.0 包一致
+变更：2026-10-08-sync-sillyspec-skills-3320
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-01
+最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69
+
+## FR-auto-zcode-002 .zcode/skills/sillyspec-quick/SKILL.md 去掉本地手补的退役横幅段，还原为上游原版
+变更：2026-10-08-sync-sillyspec-skills-3320
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-02
+最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69
+
+## FR-auto-zcode-003 AGENTS.md 注入段版本号刷新为 v3.32.0
+变更：2026-10-08-sync-sillyspec-skills-3320
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-03
+最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69
+
+## FR-auto-zcode-004 docs/sillyspec/ 新增活跃坑：init 技能同步映射不含 zcode
+变更：2026-10-08-sync-sillyspec-skills-3320
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-04
+最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69

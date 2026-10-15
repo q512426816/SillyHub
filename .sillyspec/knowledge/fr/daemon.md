@@ -4423,3 +4423,327 @@
 - 场景：主路径 — Given 新增用例与实现落地 / When 运行 sillyhub-daemon 的 turn-anchor 与 lifecycle 接线相关测试 / Then 全部通过
 全文：.sillyspec/changes/archive/2026-10-14-turn-anchor-cache-eviction/requirements.md#FR-04
 最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
+
+## FR-unmapped-704 backend 提取与写回
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：乱序防御
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-05
+最近确认：b15fafc3b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-10-live-token-speed-daemon-timing:task-05:acc-0-cd45ab1f
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-05:acc-1-9d7b3d5c
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-05:acc-2-c4c134e7
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+- row: 2026-10-10-live-token-speed-daemon-timing:task-05:acc-3-5c300bde
+  tests: backend/app/modules/daemon/tests/test_run_sync_ctx_tokens.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-10-live-token-speed-daemon-timing
+  status: active
+
+## FR-unmapped-705 tokens SSE 事件与 summary 下发
+变更：2026-10-10-live-token-speed-daemon-timing
+状态：active
+摘要：旧 daemon 兼容
+全文：.sillyspec/changes/archive/2026-10-10-live-token-speed-daemon-timing/requirements.md#FR-06
+最近确认：b15fafc3b
+
+## FR-daemon-124 dsh 引擎注册与探测
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+依据决策：D-001@v1、D-002@v1
+场景正文：
+- 场景：默认场景 — Given daemon 所在机器安装了 dsh（版本 ≥0.2.1）；When daemon 启动执行 agent 探测；Then agent-detector 第 13 项命中（SILLYHUB_DSH_PATH env 覆盖 → PATH which），`--version` 解析入 M
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-01
+最近确认：775d86011
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-dsh-engine-acp:task-01:acc-0-e9d6d24e
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-01:acc-1-9f4bef8c
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-01:acc-2-21ac8e25
+  tests: sillyhub-daemon/tests/agent-detector.test.ts | sillyhub-daemon/tests/version.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-08:acc-0-6ee58d57
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-08:acc-1-39caa6ab
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-smoke.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+
+## FR-daemon-125 dsh 单聊会话全链路
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+依据决策：D-002@v1、D-003@v1
+场景正文：
+- 场景：默认场景 — Given 探测到 dsh 且用户在单聊创建表单选择 dsh 引擎；When 提交创建（provider='dsh' 经 backend InteractiveProviderLiteral 校验通过）；Then daemon spawn `dsh --profile acp`（Windows .cmd shim 解析），initialize 握手 + session/n
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-02
+最近确认：775d86011
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-dsh-engine-acp:task-02:acc-0-8f05ac37
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-02:acc-1-8e98d7ba
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-02:acc-2-d831c29f
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-events.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-03:acc-0-3c21c497
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-03:acc-1-5cc0cb70
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-03:acc-2-0352b650
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-03:acc-3-a4b5bb73
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-05:acc-0-0e3ab8bd
+  tests: backend/app/modules/agent/tests/test_group_chat_models.py | backend/app/modules/agent/tests/test_mcp_tools.py | backend/app/modules/agent/tests/test_provider_caps_alignment.py | backend/app/modules/change/tests/test_assets.py | backend/app/modules/change/tests/test_files_router.py | backend/app/modules/change/tests/test_session_changes_endpoint.py | backend/app/modules/change/tests/test_step_progress.py | backend/app/modules/change/tests/test_timeline.py | backend/app/modules/change/tests/test_title_normalization.py | backend/app/modules/change/tests/test_usage_stats.py | backend/app/modules/daemon/tests/test_agent_session_tasks.py | backend/app/modules/daemon/tests/test_attachment_pipeline.py | backend/app/modules/daemon/tests/test_change_session.py | backend/app/modules/daemon/tests/test_group_bridge_projection.py | backend/app/modules/daemon/tests/test_group_cross_mention.py | backend/app/modules/daemon/tests/test_group_logs_pagination.py | backend/app/modules/daemon/tests/test_group_mention_pipeline.py | backend/app/modules/daemon/tests/test_inject_origin_guard.py | backend/app/modules/daemon/tests/test_interactive_lifecycle_patch.py | backend/app/modules/daemon/tests/test_linked_repos_sync.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+
+## FR-daemon-126 打断
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given dsh 会话有 in-flight prompt；When 用户打断；Then 驱动发 session/cancel，turn 终止落库，子进程保持可续用
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-03
+最近确认：775d86011
+
+## FR-daemon-127 权限代答
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given dsh 会话 manual_approval=true 且收到 session/request_permission；When 服务端请求到达
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-04
+最近确认：775d86011
+
+## FR-daemon-128 模型路由（平台接管）
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 会话绑定了 LlmProvider（base_url/api_key/model）；When daemon 创建 dsh 会话；Then per-session DSH_HOME 写 profiles/acp/cordis.patch.yml（llm-pi-ai 自定义路由：api 按 base_
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-05
+最近确认：775d86011
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-dsh-engine-acp:task-04:acc-0-6102300d
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | sillyhub-daemon/tests/dsh-settings.test.ts | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/provider-adapter-registry.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-04:acc-1-11fa8a5f
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | sillyhub-daemon/tests/dsh-settings.test.ts | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/provider-adapter-registry.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-04:acc-2-6281b493
+  tests: backend/app/modules/agent/tests/test_provider_caps_alignment.py | sillyhub-daemon/tests/dsh-settings.test.ts | sillyhub-daemon/tests/interactive/provider-registry.test.ts | sillyhub-daemon/tests/provider-adapter-registry.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+
+## FR-daemon-129 caps 如实申报与三端镜像
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given dsh 引擎注册；Then PROVIDER_CAPS dsh 条目 16 键如实（Grill 修正后口径：compact=false/steering=false/dialog='nat
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-06
+最近确认：775d86011
+
+## FR-daemon-130 群附件门控口径统一
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 群消息带附件且目标成员引擎为 X；When 触发成员；Then 发送侧（messages.py:791-797）与触发侧（shadow.py:266-273）门控均按 get_provider_caps(X)["attach
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-07
+最近确认：775d86011
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-dsh-engine-acp:task-06:acc-0-abb8664d
+  tests: backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_p2.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-06:acc-1-7dea5b9e
+  tests: backend/app/modules/daemon/tests/test_group_attachment_gate.py | backend/app/modules/daemon/tests/test_group_p2.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+
+## FR-daemon-131 前端单聊引擎选项
+变更：2026-10-15-dsh-engine-acp
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given dsh 在该 runtime 探测可用；When 用户打开单聊创建入口；Then SESSION_ENGINE_OPTIONS 含 dsh（图标/标签）；群聊 ENGINE_OPTIONS 不变
+全文：.sillyspec/changes/archive/2026-10-15-dsh-engine-acp/requirements.md#FR-08
+最近确认：775d86011
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-dsh-engine-acp:task-07:acc-0-1d874fde
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
+- row: 2026-10-15-dsh-engine-acp:task-07:acc-1-040e8ae5
+  tests: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 775d8601138487ea46b736d4d83d8f4bf29314fe
+  source_change: 2026-10-15-dsh-engine-acp
+  status: active
