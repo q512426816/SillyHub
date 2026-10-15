@@ -55,3 +55,16 @@ gate 的"仅 docHash 失配自动机械重算放行"兜底（后者有效，救�
 - **--refresh-hash 修复**：目录解析走同一读侧归一，「marker 无对应 run」假报错消除。
 
 坑内建议②（gate echo 完整路径）此前已部分在场，读侧归一后期望路径恒规范可照抄。归档。
+
+## 补遗（2026-10-15 读侧归一修复后仍踩的一个次形态，2026-10-15-dsh-engine-acp brainstorm 实证）
+
+- 图谱：`register-stage-review` 先在**规范位**落 review.json 骨架（skeleton）→ 子代理按 marker
+  裸 runId 手推路径写入**错位目录**（`stage-reviews/` 下历史残留的裸目录
+  `review-2026-10-15-004424/` 诱导了该路径构造）→ gate 读规范位拿到骨架 →
+  报 `spec+quality=cannot_verify`（而非「缺件」）；读侧三态归一因「规范位有文件（骨架）」被遮蔽，
+  救不回错位目录里的实稿。
+- 手工收口：把子代理实稿 JSON 人工搬到规范位即过（docHash 由 gate 机械重算兜底）。
+- 建议：① register 骨架加 `"skeleton": true` 标记，读侧对「规范位=骨架 且 错位目录有实稿」
+  取实稿优先；② cannot_verify 且 checklist 空时，报错文案提示「检查错位目录 / 骨架态」；
+  ③ 清理 `stage-reviews/` 下历史裸 runId 残留目录（路径构造误导源）。
+- 教训（非工具面）：调用方不要按 marker 文件名手推路径——register / gate 的 echo 路径恒照抄。
