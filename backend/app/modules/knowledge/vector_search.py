@@ -180,20 +180,20 @@ def _cosine_top_k(
     query_vec: list[float], entries: list[DecisionEntry], vectors: list[list[float]], limit: int
 ) -> list[dict]:
     q = _normalize(query_vec)
-    scored = []
+    scored: list[tuple[float, DecisionEntry]] = []
     for entry, vec in zip(entries, vectors, strict=True):
         v = _normalize(vec)
         score = sum(a * b for a, b in zip(q, v, strict=False))
-        scored.append({"entry": entry, "score": score})
-    scored.sort(key=lambda s: s["score"], reverse=True)
+        scored.append((score, entry))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
     return [
         {
-            "spec_path": s["entry"].spec_path,
-            "anchor": s["entry"].anchor,
-            "change": s["entry"].change,
-            "score": round(s["score"], 6),
+            "spec_path": entry.spec_path,
+            "anchor": entry.anchor,
+            "change": entry.change,
+            "score": round(score, 6),
         }
-        for s in scored[:limit]
+        for score, entry in scored[:limit]
     ]
 
 
