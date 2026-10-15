@@ -68,6 +68,7 @@ const _compileTimeKeySet: Record<InteractiveProvider, true> = {
   cursor: true,
   pi: true,
   dsh: true,
+  zcode: true, // 2026-10-15-zcode-engine-appserver task-05
 };
 void _compileTimeKeySet;
 
@@ -101,13 +102,14 @@ function makeFakeDriver(provider: 'claude' | 'codex'): InteractiveDriver {
 }
 
 describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', () => {
-  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi/dsh）', () => {
+  it('1. 运行时键集合 = 编译层 InteractiveProvider 联合（claude/codex/cursor/pi/dsh/zcode）', () => {
     expect(Object.keys(INTERACTIVE_PROVIDERS).sort()).toEqual([
       'claude',
       'codex',
       'cursor',
       'dsh',
       'pi',
+      'zcode',
     ]);
     // 编译层 canary 字面量与运行时注册表键两视角对齐（同集）。
     expect(Object.keys(_compileTimeKeySet).sort()).toEqual(
@@ -140,6 +142,9 @@ describe('task-05 provider registry（INTERACTIVE_PROVIDERS / design §5.2）', 
       // 一致性：与批量层反查表同源（interactive 注册表不得另立映射）。
       // 2026-10-15-dsh-engine-acp：dsh 为交互层专属引擎（批处理接入非目标），
       // 反查表无条目（undefined）——豁免一致性比对，锚点见下方现值断言。
+      // 例外口径（2026-10-15-zcode-engine-appserver task-05）：批量层未收录的
+      // 纯交互式引擎（zcode——批量层 PROVIDER_TO_PROTOCOL 按 design 非目标不动）
+      // 不做同源比对；批量层收录者（claude/codex/cursor/pi）照旧硬比。
       if (PROVIDER_TO_PROTOCOL[d.provider] !== undefined) {
         expect(d.family).toBe(PROVIDER_TO_PROTOCOL[d.provider]);
       }

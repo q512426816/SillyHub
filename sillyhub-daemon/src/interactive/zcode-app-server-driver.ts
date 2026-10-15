@@ -36,14 +36,11 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
-import {
-  ZcodeEnvelope,
-  ZcodeProtocolError,
-  type ZcodeStateSnapshot,
-} from '../adapters/zcode-envelope.js';
+import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
 import {
   normalizeZcodeNotification,
   type ZcodeModelCatalogEntry,
+  type ZcodeStateSnapshot,
 } from './zcode-events.js';
 import { mapPlatformLevelToEngine } from './thinking-levels.js';
 import type {
@@ -307,7 +304,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     });
 
     // ── 服务端主动请求分发（信封层） ────────────────────────────────────────
-    const sink = { write: (line: string) => child.stdin.write(line) };
+    const sink = { write: (line: string) => child.stdin?.write(line) };
     h.envelope.registerServerRequestHandler(
       'session/requestRuntimePreferences',
       (_params, reply) => {
@@ -336,10 +333,13 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       },
     );
 
+    if (!child.stdout) {
+      throw new ZcodeProtocolError('zcode 子进程缺 stdout 管道（spawn 配置异常）');
+    }
     child.stdout.on('data', (chunk: Buffer) => {
       h.envelope.feed(chunk.toString('utf8'), sink);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       // stderr 诊断噪声不进事件流（引擎日志面）
       const text = chunk.toString('utf8').trim();
       if (text) {
@@ -423,7 +423,8 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
           });
           continue;
         }
-        const outcome = (await currentTurnPromise) as TurnOutcome;
+        // beginTurn 已在 session/send 前赋值（resolver 先于 send 注册），此处非 null
+        const outcome = await currentTurnPromise!;
         reportResult({
           subtype:
             outcome.kind === 'success'
@@ -455,7 +456,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       await h.envelope.request(
         'session/stop',
         { sessionId: h.zcodeSessionId },
-        (line) => h.child.stdin.write(line),
+        (line) => h.child.stdin?.write(line),
         { timeoutMs: this.compactTimeoutMs },
       );
       return true;
@@ -472,7 +473,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       await h.envelope.request(
         'session/compact',
         { sessionId: h.zcodeSessionId },
-        (line) => h.child.stdin.write(line),
+        (line) => h.child.stdin?.write(line),
         { timeoutMs: this.compactTimeoutMs },
       );
       return { ok: true };
@@ -513,7 +514,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       await h.envelope.request(
         'session/setThoughtLevel',
         { sessionId: h.zcodeSessionId, level: engineLevel },
-        (line) => h.child.stdin.write(line),
+        (line) => h.child.stdin?.write(line),
         { timeoutMs: this.compactTimeoutMs },
       );
       return { ok: true };
@@ -530,7 +531,7 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     await h.envelope.request(
       'session/setModel',
       { sessionId: h.zcodeSessionId, model },
-      (line) => h.child.stdin.write(line),
+      (line) => h.child.stdin?.write(line),
       { timeoutMs: this.controlTimeoutMs },
     );
   }
@@ -599,18 +600,18 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     if (h.closing) return;
     h.closing = true;
     try {
-      if (h.zcodeSessionId) {
+      if (h.zcodeSessionId && h.child.stdin) {
         await h.envelope
           .request(
             'session/close',
             { sessionId: h.zcodeSessionId },
-            (line) => h.child.stdin.write(line),
+            (line) => h.child.stdin?.write(line),
             { timeoutMs: 3_000 },
           )
           .catch(() => {});
       }
     } finally {
-      h.child.stdin.end();
+      h.child.stdin?.end();
       const killTimer = setTimeout(() => {
         if (h.child.exitCode === null && !h.child.killed) {
           h.child.kill('SIGTERM');

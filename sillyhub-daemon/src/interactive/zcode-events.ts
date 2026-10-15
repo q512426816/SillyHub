@@ -52,9 +52,10 @@ export interface ZcodeModelCatalogEntry {
 
 /** state.updated 提取出的会话快照（驱动缓存消费）。 */
 export interface ZcodeStateSnapshot {
-  readonly status?: string;
-  readonly modelCatalog?: readonly ZcodeModelCatalogEntry[];
-  readonly currentModel?: { providerId?: string; modelId?: string } | null;
+  /** 会话状态补丁（state.updated patch.status）。 */
+  status?: string;
+  modelCatalog?: readonly ZcodeModelCatalogEntry[];
+  currentModel?: { providerId?: string; modelId?: string } | null;
 }
 
 /**

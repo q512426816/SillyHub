@@ -57,7 +57,11 @@ const backendOutPath = resolve(
 
 // 契约常量（与 daemon 单源 ProviderCaps 接口一致；新引擎/新键接入时同步这里，
 // 守卫会强制单源与本清单一致，不同步即响亮失败）。
+<<<<<<< HEAD
 const ENGINES = ["claude", "codex", "pi", "cursor", "dsh"];
+=======
+const ENGINES = ["claude", "codex", "pi", "cursor", "zcode"];
+>>>>>>> 09d1f97ff (feat(daemon): zcode 注册与模型路由——zcode-settings.ts per-session provider_config.json 写入器（anthropic-messages/openai-chat-completions 双形态 + litellm proxy 凭据链 + 裸 model id 取值链）；providers.ts caps 十六键如实 + 注册条目（envInjector none 密钥走文件层、envKey=ZCODE_DATA_BASE_DIR）+ 联合加宽；gen-provider-caps 刷新三端镜像；守护断言认领（registry 键集/canary/family 例外、backend EXPECTED_PROVIDERS、frontend 钉子测试 zcode 钉板）；daemon 154 + backend 5 + frontend 32 用例绿 + typecheck 清 (task-05) (D-002) (D-003))
 const CAPS_KEYS = [
   "resume",
   "mcp",
