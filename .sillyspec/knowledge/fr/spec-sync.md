@@ -339,7 +339,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-01
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 symlink 失败降级 pull：数据留 backup + 双 warn 可达」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「半交换 symlink 失败降级 pull：数据留 backup + 双 warn 可达」
   reason: spec
   state: candidate
   discovery: machine
@@ -358,7 +358,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-02
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「半交换 mkdir 失败同降级」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「半交换 mkdir 失败同降级」
   reason: spec
   state: candidate
   discovery: machine
@@ -377,7 +377,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-03
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 残留备份交换（既有用例零改动回归）」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 残留备份交换（既有用例零改动回归）」
   reason: spec
   state: candidate
   discovery: machine
@@ -396,7 +396,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-04
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「源缺失不降级（既有用例零改动回归）」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「源缺失不降级（既有用例零改动回归）」
   reason: spec
   state: candidate
   discovery: machine
@@ -415,7 +415,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-05
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 成功路径清扫过期备份/保留期内不误删」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「repo-native 成功路径清扫过期备份/保留期内不误删」
   reason: spec
   state: candidate
   discovery: machine
@@ -434,7 +434,7 @@ created_at: 2026-09-22T17:27:13.449Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-11-junction-fallback-backup-sweep:flow:测试绑定FR-06
-  tests: test/sillyhub-daemon/tests/test_init_lease.test.ts「备份清扫：tmp/trash 10 分钟语义零回归」
+  tests: sillyhub-daemon/tests/test_init_lease.test.ts「备份清扫：tmp/trash 10 分钟语义零回归」
   reason: spec
   state: candidate
   discovery: machine

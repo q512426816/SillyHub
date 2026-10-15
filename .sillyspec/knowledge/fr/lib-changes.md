@@ -721,3 +721,124 @@
 - 场景：默认场景 — Given 系统就绪；When eslint 零新增，主题 token 零硬编码；Then 行为符合本条标准描述
 全文：.sillyspec/changes/archive/2026-09-28-turn-nav-hover-flyout/requirements.md#FR-07
 最近确认：37906d3396b9a0f21a7bed25d73ae609dd74ea2f
+
+## FR-lib-changes-043 变更中心列表行：非轻量出身（is_thin=false）的变更显示「完整」标签，轻量出身行仍显示「轻量」标签，两类标签样式可区分
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-01
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-01
+  tests: frontend/src/app/page.test.tsx「完整出身行显示完整标签、轻量出身行显示轻量标签」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-044 筛选区新增「分类」下拉（全部分类/完整变更/轻量变更），选择后列表按出身过滤，分页与总数正确
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-02
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-02
+  tests: frontend/src/app/page.test.tsx「分类下拉选择轻量变更仅显示轻量出身行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-045 已归档 tab 下分类筛选同样生效：归档的轻量出身行在「轻量变更」分类下可见
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-03
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-03
+  tests: backend/app/modules/change/tests/test_change_lineage_filter.py「lineage thin 命中归档 steps 兜底行」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-046 阶段下拉不再含「轻量变更」选项（分类查询职责迁移到分类下拉）
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-04
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-04
+  tests: frontend/src/app/page.test.tsx「阶段下拉不含轻量变更选项」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-047 后端 GET /changes 新增 lineage=thin|full 查询参数，筛选口径与 is_thin 投影三分支判定完全一致
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-05
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-05
+  tests: backend/app/modules/change/tests/test_change_lineage_filter.py「lineage thin/full 与 is_thin 投影三分支一致」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-048 移动端变更中心同步：筛选抽屉含分类维度，变更卡片显示出身标签
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-06
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-06
+  tests: changes/__tests__/page.m-changes.test.tsx「筛选抽屉分类维度」 | frontend/src/components/mobile/mobile-change-card.test.tsx「移动卡片出身标签」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-change-center-lineage-tag-and-filter
+  status: active
+
+## FR-lib-changes-049 前端 api-types.ts 与 backend/openapi.json 经 pnpm gen:types 同步提交
+变更：2026-10-14-change-center-lineage-tag-and-filter
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-change-center-lineage-tag-and-filter/requirements.md#FR-07
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4

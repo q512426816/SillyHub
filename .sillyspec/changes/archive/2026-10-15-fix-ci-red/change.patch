@@ -1,0 +1,375 @@
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index b7d972220..e5038779c 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -102,6 +102,9 @@ const BACKEND_PERMISSION_KEYS = [
+   "menu:admin",
+   // 2026-10-14-deploy-release-notes task-01：发布记录页读权限
+   "deploy_record:read",
++  // 2026-10-14-admin-server-status 新增：服务器信息页读权限（后端 Permission 枚举
++  // 59→60，镜像曾漏补）
++  "system_status:read",
+ ] as const;
+ 
+ /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
+@@ -134,6 +137,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
+   "settings",
+   // 2026-09-18-web-menu-management task-08 新增（system 组菜单管理页入口）
+   "menus",
++  // 2026-10-14-admin-server-status 新增（system 组服务器信息页）
++  "server-status",
+   // PPM 14 条
+   "ppm-workbench",
+   "ppm-projects",
+@@ -161,8 +166,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
+ ]);
+ 
+ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+-  it("MENU_PERMISSION_GROUPS 长度 === 37（2026-10-14-deploy-release-notes 增 deploy-records）", () => {
+-    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
++  it("MENU_PERMISSION_GROUPS 长度 === 38（2026-10-14-admin-server-status 增 server-status）", () => {
++    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
+   });
+ 
+   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
+@@ -177,7 +182,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 5 / ppm 14（2026-10-14 增 deploy-records）", () => {
++  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 6 / ppm 14（2026-10-14 增 server-status）", () => {
+     const counter: Record<MenuSection, number> = {
+       workspace: 0,
+       agent: 0,
+@@ -193,7 +198,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(counter.agent).toBe(4);
+     expect(counter.config).toBe(4);
+     expect(counter.governance).toBe(4); // 2026-10-14-deploy-release-notes 增 deploy-records
+-    expect(counter.system).toBe(5);
++    expect(counter.system).toBe(6); // 2026-10-14-admin-server-status 增 server-status
+     expect(counter.ppm).toBe(14);
+   });
+ 
+@@ -236,14 +241,16 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 58", () => {
++  it("所有 permission.key 命中 BACKEND_PERMISSION_KEYS，且镜像常量长度 === 60", () => {
+     const valid = new Set<string>(BACKEND_PERMISSION_KEYS);
+     // 镜像常量自身的完整性护栏：若被误删/重复，立即失败
+     // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
+     // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
+     // platform:audit:read / platform:billing / component:read / change:update) = 58
+-    expect(BACKEND_PERMISSION_KEYS.length).toBe(59); // 2026-10-14 增 deploy_record:read
+-    expect(valid.size).toBe(59); // 2026-10-14 增 deploy_record:read
++    // → 59 (2026-10-14-deploy-release-notes 增 deploy_record:read)
++    // → 60 (2026-10-14-admin-server-status 增 system_status:read)
++    expect(BACKEND_PERMISSION_KEYS.length).toBe(60);
++    expect(valid.size).toBe(60);
+ 
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+       g.permissions.forEach((p) => {
+diff --git a/frontend/src/lib/__tests__/permission.test.ts b/frontend/src/lib/__tests__/permission.test.ts
+index 93a272402..e5c9542fd 100644
+--- a/frontend/src/lib/__tests__/permission.test.ts
++++ b/frontend/src/lib/__tests__/permission.test.ts
+@@ -226,11 +226,12 @@ describe("visibleMenusBySection", () => {
+     expect(result).toEqual([]);
+   });
+ 
+-  it("FR-06 #3: platform admin sees all 5 entries in 'system' section", () => {
++  it("FR-06 #3: platform admin sees all 6 entries in 'system' section", () => {
+     // Given is_platform_admin = true
+     // When visibleMenusBySection(user, "system")
+-    // Then 全部 5 条（users / organizations / roles / settings / menus），顺序与数据源一致
+-    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5）
++    // Then 全部 6 条（users / organizations / roles / settings / menus / server-status），顺序与数据源一致
++    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5；
++    //  2026-10-14-admin-server-status：新增 server-status，5 → 6）
+     const user = mkUser({ is_platform_admin: true, permissions: [] });
+     const result = visibleMenusBySection(user, "system");
+     expect(result.map((g) => g.menuKey)).toEqual([
+@@ -239,6 +240,7 @@ describe("visibleMenusBySection", () => {
+       "roles",
+       "settings",
+       "menus",
++      "server-status",
+     ]);
+   });
+ 
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index dadcfc0a7..333db8209 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -47,9 +47,11 @@ export interface paths {
+         };
+         /**
+          * System Status
+-         * @description 服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。
++         * @description 服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。
+          *
+-         *     公开端点(同 /health),不要求登录,首页看板用。
++         *     change 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +
++         *     system_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，
++         *     服务器信息页仅持权限者可见）。
+          */
+         get: operations["system_status_api_system_status_get"];
+         put?: never;
+@@ -1914,10 +1916,12 @@ export interface paths {
+          * List Change Files
+          * @description 变更文件树清单（2026-07-02-change-detail-file-tree-editor）。
+          *
+-         *     2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次
++         *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
++         *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
++         *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
+          *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+-         *     任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体
+-         *     ``service.list_files`` 纯读语义零改动。
++         *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
++         *     ``service.list_files`` 本体纯读语义零改动。
+          */
+         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
+         put?: never;
+@@ -8529,6 +8533,49 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/deploy-records": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Deploy Records
++         * @description 全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。
++         */
++        get: operations["list_deploy_records_api_deploy_records_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/deploy-records/{record_id}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Deploy Record
++         * @description 单条发布记录详情（元数据 + md 正文原文）。
++         *
++         *     ``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用
++         *     ``:path`` 形态整段接收——R-06 定型）。
++         */
++        get: operations["get_deploy_record_api_deploy_records__record_id__get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/notifications": {
+         parameters: {
+             query?: never;
+@@ -16047,6 +16094,78 @@ export interface components {
+             /** Per Task Avg */
+             per_task_avg: number;
+         };
++        /**
++         * DeployRecordDetail
++         * @description 单条记录详情：元数据 + md 正文原文（前端渲染用）。
++         */
++        DeployRecordDetail: {
++            /** Record Id */
++            record_id: string;
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Workspace Name */
++            workspace_name: string;
++            /** File Name */
++            file_name: string;
++            /** Seq */
++            seq?: number | null;
++            /** Status */
++            status: string;
++            /** Deployed At */
++            deployed_at?: string | null;
++            /** Summary */
++            summary: string;
++            /** Commit From */
++            commit_from?: string | null;
++            /** Commit To */
++            commit_to?: string | null;
++            /** Commits Count */
++            commits_count?: number | null;
++            /** Agent */
++            agent?: string | null;
++            /** Content */
++            content: string;
++        };
++        /**
++         * DeployRecordSummary
++         * @description 一条部署发布记录的列表项（frontmatter 元数据投影）。
++         *
++         *     ``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定
++         *     ``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串
++         *     字典序，同格式下与时间序一致（design 接口定义写死规则）。
++         */
++        DeployRecordSummary: {
++            /** Record Id */
++            record_id: string;
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Workspace Name */
++            workspace_name: string;
++            /** File Name */
++            file_name: string;
++            /** Seq */
++            seq?: number | null;
++            /** Status */
++            status: string;
++            /** Deployed At */
++            deployed_at?: string | null;
++            /** Summary */
++            summary: string;
++            /** Commit From */
++            commit_from?: string | null;
++            /** Commit To */
++            commit_to?: string | null;
++            /** Commits Count */
++            commits_count?: number | null;
++            /** Agent */
++            agent?: string | null;
++        };
+         /**
+          * DirEntry
+          * @description A single directory entry returned by the daemon list_dir RPC.
+@@ -21091,7 +21210,7 @@ export interface components {
+          * Permission
+          * @enum {string}
+          */
+-        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
++        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "system_status:read" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "deploy_record:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+         /**
+          * PermissionResponseRead
+          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
+@@ -32458,6 +32577,7 @@ export interface operations {
+                 owner?: string | null;
+                 search?: string | null;
+                 current_stage?: string | null;
++                lineage?: string | null;
+                 sort?: string;
+                 pending_review_only?: boolean;
+                 page?: number;
+@@ -32656,7 +32776,10 @@ export interface operations {
+     };
+     list_change_files_api_workspaces__workspace_id__changes__change_id__files_get: {
+         parameters: {
+-            query?: never;
++            query?: {
++                /** @description true=触发绑定 daemon 定向上行同步后再返回（仅前端「刷新」按钮点击使用） */
++                sync?: boolean;
++            };
+             header?: never;
+             path: {
+                 workspace_id: string;
+@@ -43298,6 +43421,57 @@ export interface operations {
+             };
+         };
+     };
++    list_deploy_records_api_deploy_records_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DeployRecordSummary"][];
++                };
++            };
++        };
++    };
++    get_deploy_record_api_deploy_records__record_id__get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                record_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DeployRecordDetail"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_notifications_api_notifications_get: {
+         parameters: {
+             query?: {
+diff --git a/sillyhub-daemon/tests/event-wire.test.ts b/sillyhub-daemon/tests/event-wire.test.ts
+index 418ad6e40..da3ff9e19 100644
+--- a/sillyhub-daemon/tests/event-wire.test.ts
++++ b/sillyhub-daemon/tests/event-wire.test.ts
+@@ -321,15 +321,18 @@ describe('task-runner facade _eventToMessages 委托核心（收敛后一致性
+     })._eventToMessages(ev);
+   }
+ 
+-  /** tool_call JSON 内嵌 timestamp（new Date() 实时）→ 比较前抹平。 */
++  /** 消息级时间戳抹平：F2（2026-10-12-session-defects）起 wire 消息带顶层
++   *  timestamp（new Date() 实时，两条转换路径各生成、跨毫秒边界即不等），
++   *  加 tool_call JSON 内嵌 timestamp → 比较前统一抹平。 */
+   function stripTimestamp(msgs: Record<string, unknown>[] | null): unknown {
+     if (!msgs) return null;
+     return msgs.map((m) => {
++      const stripped = 'timestamp' in m ? { ...m, timestamp: '<TS>' } : m;
+       if (m['channel'] === 'tool_call') {
+         const parsed = JSON.parse(m['content'] as string) as Record<string, unknown>;
+-        return { ...m, content: { ...parsed, timestamp: '<TS>' } };
++        return { ...stripped, content: { ...parsed, timestamp: '<TS>' } };
+       }
+-      return m;
++      return stripped;
+     });
+   }

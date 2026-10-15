@@ -498,6 +498,11 @@ function DecisionCard({
     : [];
 
   const pill = STATUS_PILLS[entry.status];
+  // 复合锚（2026-10-14-decision-anchor-change-qualified / FR-01）：聚合决策文件里
+  // 多个变更各有同名决策号，「文件#id」裸锚不唯一、首卡误命中——带「变更：」
+  // 字段的条目卡额外输出「文件#变更号#id」复合锚（与仓库跨变更引用约定
+  // 变更名#D-xxx@vN 同构）；裸锚原样保留兼容旧深链。id/变更字段缺一不输出。
+  const changeRef = entry.fields.find((f) => f.key === "变更")?.value.trim() ?? null;
 
   return (
     <article
@@ -508,6 +513,9 @@ function DecisionCard({
       // （``文件#锚``），锚取条目 id（``FR-cli-entry-075`` / ``D-001@v1``）——与沉淀
       // 资产卡 href 的 anchor 参数同一取值。
       data-entry-anchor={entry.id ? `${filename}#${entry.id}` : undefined}
+      data-entry-anchor-qualified={
+        entry.id && changeRef ? `${filename}#${changeRef}#${entry.id}` : undefined
+      }
       // shrink-0 防限高 flex-col 压缩（同 manual 卡）；overflow-hidden 裁头部底色圆角。
       className={cn(
         "shrink-0 overflow-hidden rounded-md border border-border/60 border-l-[3px] border-l-brand-600 p-2.5 transition-colors hover:border-brand-400",

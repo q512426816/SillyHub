@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-logout-localstorage-user-data-cleanup",
+  "rows": [
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/lib/__tests__/logout-storage.test.ts「6 类用户域前缀全清、设备级键保留、前缀精确匹配」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/__tests__/app-shell.test.tsx「确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/m/account/page.test.tsx「退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/lib/__tests__/logout-storage.test.ts「removeItem 抛错时容错继续清理其余键（不阻断登出）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/lib/__tests__/logout-storage.test.ts「6 类用户域前缀全清、设备级键保留、前缀精确匹配」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/api.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-logout-localstorage-user-data-cleanup:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/token-refresh.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-logout-localstorage-user-data-cleanup"
+    }
+  ]
+}

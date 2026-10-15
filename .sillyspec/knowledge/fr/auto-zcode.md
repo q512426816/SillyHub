@@ -36,3 +36,31 @@ created_at: 2026-10-08T02:08:13.622Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-04
 最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69
+
+## FR-auto-zcode-005 服务器有固定目录承载 multi-agent-platform 的 docs/releases 镜像（容器可读，经 /tmp 挂载）
+变更：2026-10-14-release-notes-server-sync
+状态：active
+摘要：主路径；目录被清（/tmp 重启清空）
+全文：.sillyspec/changes/archive/2026-10-14-release-notes-server-sync/requirements.md#FR-01
+最近确认：c0d30b157200e183168da8c8872fdab1772b8097
+
+## FR-auto-zcode-006 workspace 行指向该目录且页面能列出记录（seq/状态/提交数/正文渲染数据齐）
+变更：2026-10-14-release-notes-server-sync
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-release-notes-server-sync/requirements.md#FR-02
+最近确认：c0d30b157200e183168da8c8872fdab1772b8097
+
+## FR-auto-zcode-007 deploy-to-server skill 增「发布记录（每次部署必做）」节：写记录（引用 sillyhub-docker-deploy 契约）+ 部署后同步命令
+变更：2026-10-14-release-notes-server-sync
+状态：active
+摘要：主路径；跳过同步
+全文：.sillyspec/changes/archive/2026-10-14-release-notes-server-sync/requirements.md#FR-03
+最近确认：c0d30b157200e183168da8c8872fdab1772b8097
+
+## FR-auto-zcode-008 本次热修部署（a176393cb）补写记录 #002 并同步到服务器验证全链
+变更：2026-10-14-release-notes-server-sync
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-release-notes-server-sync/requirements.md#FR-04
+最近确认：c0d30b157200e183168da8c8872fdab1772b8097

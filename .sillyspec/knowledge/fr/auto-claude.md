@@ -42,7 +42,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
   reason: spec
   state: candidate
   discovery: machine
@@ -63,7 +63,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-02
-  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -84,7 +84,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-flip:flow:测试绑定FR-03
-  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -105,7 +105,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 传入时渲染 fixed 元数据气泡；null 时零渲染」
   reason: spec
   state: candidate
   discovery: machine
@@ -124,7 +124,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-02
-  tests: test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx「hoverTip 底部空间不足翻到鼠标上方（输入框贴页面底缘场景，2026-10-12 修复）」
   reason: spec
   state: candidate
   discovery: machine
@@ -143,7 +143,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-hover-tip-portal:flow:测试绑定FR-03
-  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx
+  tests: frontend/src/components/daemon/__tests__/input-ref-overlay.test.tsx | frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -164,7 +164,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -185,7 +185,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-02
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -204,7 +204,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-ref-ws-name:flow:测试绑定FR-03
-  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+  tests: frontend/src/components/daemon/__tests__/session-input-bar-upload.test.tsx | frontend/src/components/group-chat/__tests__/group-chat-panel.test.tsx | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
   reason: spec
   state: candidate
   discovery: machine
@@ -223,7 +223,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-01
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
   reason: spec
   state: candidate
   discovery: machine
@@ -242,7 +242,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-02
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「ql-20260910-002 门户带 includeSessions 拉取 + 继续最近会话直达选中并落工作区快照」
   reason: spec
   state: candidate
   discovery: machine
@@ -261,7 +261,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-03
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口本工作区无会话时不渲染继续最近会话入口」
   reason: spec
   state: candidate
   discovery: machine
@@ -280,7 +280,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-04
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「resolveDefaultMachineId 三级回退既有用例（localStorage 命中/最近会话所在机器/最新心跳）——语义照旧回归锁定」
   reason: spec
   state: candidate
   discovery: machine
@@ -299,7 +299,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-12-ws-scoped-recent-session:flow:测试绑定FR-05
-  tests: test/frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
+  tests: frontend/src/components/sessions/__tests__/sessions-portal.test.tsx「scope 入口最近会话属其他工作区时按本工作区取（workspace/change/quicklog 三入口）」
   reason: spec
   state: candidate
   discovery: machine
@@ -318,7 +318,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「程序性 scroll 钉回改 rAF 合帧：事件内零同步 scrollTop 写入、下一帧才执行（2026-10-13-session-scroll-layout-storm）」
   reason: spec
   state: candidate
   discovery: machine
@@ -337,7 +337,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-02
-  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「scroll to top triggers loadEarlier with before cursor, older content prepends」
   reason: spec
   state: candidate
   discovery: machine
@@ -363,7 +363,7 @@ created_at: 2026-10-08T17:53:22.647Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-scroll-layout-storm:flow:测试绑定FR-04
-  tests: test/frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」
+  tests: frontend/src/components/daemon/__tests__/session-history-scroll.test.tsx「既有触顶翻页/游标推进/锚定期 interval 配对/回到会话开头全部用例（回归锁）」
   reason: spec
   state: candidate
   discovery: machine

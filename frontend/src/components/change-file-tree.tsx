@@ -438,9 +438,12 @@ export function ChangeFileTree({
 
   const pendingPaths = new Set(pending.map((p) => p.path));
 
-  const refreshTree = useCallback(async () => {
+  // sync（2026-10-14-files-refresh-explicit-sync）：仅用户主动点击（「刷新」按钮/
+  // 错误重试）传 true——触发绑定 daemon 定向上行同步（backend 等待预算 3s）；初始
+  // 挂载、autoRefreshMs 轮询、保存后刷新不传（纯读，直接秒回平台镜像数据）。
+  const refreshTree = useCallback(async (sync?: boolean) => {
     try {
-      const resp = await listChangeFiles(workspaceId, changeId);
+      const resp = await listChangeFiles(workspaceId, changeId, { sync });
       setTree(buildChangeFileTree(resp.items));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载文件树失败");
@@ -602,7 +605,7 @@ export function ChangeFileTree({
               镜像同步：{new Date(lastSyncedAt).toLocaleString("zh-CN")}
             </span>
           )}
-          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void refreshTree()}>
+          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-[11px]" onClick={() => void refreshTree(true)}>
             刷新
           </Button>
         </div>
@@ -616,7 +619,7 @@ export function ChangeFileTree({
 
       {error && (
         <div className="m-3">
-          <ErrorBanner message={error} onRetry={() => void refreshTree()} />
+          <ErrorBanner message={error} onRetry={() => void refreshTree(true)} />
         </div>
       )}
 

@@ -1,0 +1,45 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  修复发布记录扫描对非 UTF-8 文件的容错缺口：UnicodeDecodeError 是 ValueError 子类不被 except OSError 捕获，单个坏编码 md 文件会把 GET /api/deploy-records
+  整体打成 500，违背 FR-04「坏文件不炸整表」契约（2026-10-15 24h 风险审查发现，service.py:244 注释声称编码容错但实现漏接）。
+
+
+  成功标准：
+
+  - _iter_files 读文件容错扩为捕获 (OSError, UnicodeDecodeError)，坏编码文件降级为 invalid 条目（parse_error 与读失败同口径）
+
+  - test_service.py 新增 GBK 坏编码文件用例：列表正常返回且该条目 status=invalid，其余合法记录不受影响
+
+  - 既有 deploy_records 测试（test_service.py + test_router.py）全绿
+autopilot: false
+prestage_ack: true
+baseline_commit: 73e881ba50376b5e2d279b720dca332b3630d285
+updatedAt: '2026-10-14T22:52:29.193Z'
+cross_baselines:
+  sillyspec: 2dcbda201fddb31fd5458847c7f205577381bed8
+baseline_sha256: a03b441cc8ea2f28d9f844c6c53d594fbbf3950f4ca344474df801cba9ddf23c
+spec_approved: true
+spec_approved_at: '2026-10-14T22:47:07.860Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: >-
+  test: passed ← module[]+deps(py1)（6.0s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014224939\test-result.json｜lint:
+  skipped ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（7.0s） — 跳过原因：环境缺件：二进制「next」不存在（'next'
+  不是内部或外部命令，也不是可运行的程序）——非代码失败不拦门；在对应包目录补装依赖（pnpm/npm install、uv sync 等）后 lint 恢复实测。｜门文件 3 个
+

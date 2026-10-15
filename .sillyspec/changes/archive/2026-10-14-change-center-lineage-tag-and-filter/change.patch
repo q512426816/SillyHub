@@ -1,0 +1,998 @@
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+index 8a3699709..30d9bf5f8 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_app.changelog.md
+@@ -16,3 +16,4 @@ created_at: 2026-09-03 14:49:48
+ - 2026-10-13-change-owner-backfill | 变更中心负责人数据大面积缺失（342 条变更 300 条 owner_id 为空，2026-09-08 后新建全为空）：
+ - 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess
+ - 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re
++- 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草
+diff --git a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+index 9e662e99a..e4d3abe1b 100644
+--- a/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
++++ b/.sillyspec/docs/SillyHub/modules/frontend_components.changelog.md
+@@ -56,3 +56,4 @@ created_at: 2026-08-30 22:23:33
+ | 2026-10-13 | 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess |
+ | 2026-10-14 | 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主 |
+ | 2026-10-14 | 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re |
++| 2026-10-14 | 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草 |
+diff --git a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+index 1d8929ad2..4c0765551 100644
+--- a/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
++++ b/.sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md
+@@ -89,3 +89,4 @@
+ | 2026-10-13 | 2026-10-14-ci-flaky-render-anchor-sweep | 动机：CI 连续逐轮暴露「mock 调用等待后同步断言渲染」型时序脆弱用例（agent-replay-body、sess |
+ | 2026-10-14 | 2026-10-14-files-refresh-explicit-sync | 动机：文件树刷新前置同步的触发面挂在了 GET files 接口本体上——会话悬浮面板 15s 自动轮询、初始加载等非主 |
+ | 2026-10-14 | 2026-10-14-logout-full-reload-clear-cache | 动机：登出换账号后页面仍显示上一用户的工作区/会话等数据——主动登出走 router.replace SPA 跳转，Re |
++| 2026-10-14 | 2026-10-14-logout-localstorage-user-data-cleanup | 动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草 |
+diff --git a/backend/app/modules/change/router.py b/backend/app/modules/change/router.py
+index 85205c44b..1d55351e4 100644
+--- a/backend/app/modules/change/router.py
++++ b/backend/app/modules/change/router.py
+@@ -236,6 +236,10 @@ async def list_changes(
+     owner: str | None = Query(None),
+     search: str | None = Query(None),
+     current_stage: str | None = Query(None),
++    # 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（thin|full），
++    # 透传 service.list_（_is_thin_lineage 三分支投影口径，含归档兜底行）；
++    # 缺省/未知值不过滤（对齐 sort 白名单 fallback 风格）。
++    lineage: str | None = Query(None),
+     # task-02（2026-08-13-change-center-rework / D-004 / FR-02 / FR-04）：排序白名单
+     # 透传 service.list_（默认 updated_at desc，最近活动优先，R-05）。
+     sort: str = Query("updated_at_desc"),
+@@ -254,6 +258,7 @@ async def list_changes(
+         owner=owner,
+         search=search,
+         current_stage=current_stage,
++        lineage=lineage,
+         sort=sort,
+         pending_review_only=pending_review_only,
+         page=page,
+diff --git a/backend/app/modules/change/service.py b/backend/app/modules/change/service.py
+index d4a88d279..7812b81ad 100644
+--- a/backend/app/modules/change/service.py
++++ b/backend/app/modules/change/service.py
+@@ -186,6 +186,7 @@ class ChangeService:
+         owner: str | None = None,
+         search: str | None = None,
+         current_stage: str | None = None,
++        lineage: str | None = None,
+         sort: str = "updated_at_desc",
+         pending_review_only: bool = False,
+         page: int = 1,
+@@ -207,6 +208,13 @@ class ChangeService:
+         （非本页过滤后数）。pending_review 是计算字段（latest_progress + _map），
+         SQL 无法直接 WHERE，故走「复用 _map 算集合 → SQL IN」两阶段（跨库稳定，
+         不翻译 _map 到 JSON 展开语法）。
++
++        ``lineage``（2026-10-14-change-center-lineage-tag-and-filter）：出身分类筛选，
++        ``"thin"`` 只返回轻量出身行、``"full"`` 只返回非轻量出身行、缺省/未知值
++        不过滤（对齐 sort 白名单 fallback 风格）。出身是 ``_is_thin_lineage`` 三分支
++        投影（分支③需解析 progress JSON 的 steps，SQL 无法直译）→ 复用
++        pending_review_only 的「全局集合 → SQL IN / NOT IN」两阶段，集合与
++        ``ChangeSummary.is_thin`` 同源同函数（逐行一致，含归档兜底行）。
+         """
+         await self._workspace_service.get(workspace_id)
+ 
+@@ -218,6 +226,16 @@ class ChangeService:
+             if not pending_keys:
+                 return [], 0
+ 
++        # 2026-10-14-change-center-lineage-tag-and-filter：出身集合先算（同 pending
++        # 先例）；thin 空集合直接短路（无轻量出身行）；full 空集合无需过滤（NOT IN
++        # 空集恒真，跳过 where 避免方言差异）。
++        lineage_norm = (lineage or "").strip().lower()
++        thin_keys: set[str] | None = None
++        if lineage_norm in ("thin", "full"):
++            thin_keys = await self._resolve_thin_lineage_keys(workspace_id)
++            if lineage_norm == "thin" and not thin_keys:
++                return [], 0
++
+         # Base: changes whose primary workspace matches（D-005@V1，M:N 投影表已废，
+         # 一个变更只属单一项目组 workspace）。
+         base = select(Change).where(col(Change.workspace_id) == workspace_id)
+@@ -268,6 +286,14 @@ class ChangeService:
+             )
+         if pending_keys is not None:
+             base = base.where(col(Change.change_key).in_(pending_keys))
++        # 2026-10-14-change-center-lineage-tag-and-filter：出身过滤（change_key 在
++        # workspace 内唯一，集合按 workspace 收集不串台）。thin 空集已上方短路；
++        # full 空集显式跳过 where（NOT IN 空集恒真，免依赖方言空集展开行为）。
++        if thin_keys is not None:
++            if lineage_norm == "thin":
++                base = base.where(col(Change.change_key).in_(thin_keys))
++            elif thin_keys:
++                base = base.where(col(Change.change_key).notin_(thin_keys))
+ 
+         # Count total
+         count_stmt = select(func.count()).select_from(base.subquery())
+@@ -2539,6 +2565,56 @@ class ChangeService:
+         await set_cached_pending_keys(workspace_id, location, pending, epoch=cached_epoch)
+         return pending
+ 
++    async def _resolve_thin_lineage_keys(self, workspace_id: uuid.UUID) -> set[str]:
++        """算轻量出身（``_is_thin_lineage`` 投影为 True）的 change_key 集合。
++
++        2026-10-14-change-center-lineage-tag-and-filter：``list_(lineage=...)`` 的
++        集合计算面（模式对齐 ``_resolve_pending_change_keys`` 先例；无缓存 v1，
++        量级对齐 pending 全 workspace 拉取）。判定口径必须与 ``enrich_summaries``
++        逐行一致——同一 ``_is_thin_lineage`` 函数 + 同一投影覆盖顺序：
++
++        - 非 deleted 行先 ``_project_current_stage`` 批量投影；命中处用投影 stage，
++          ``latest_progress.changes[0].status == 'archived'`` 时终态覆盖 stage=
++          'archived'（归档 thin 翻 archived 后仍靠 steps 兜底命中的关键路径）；
++          未命中处 fallback row 现值（D-003）。
++        - deleted 行不进集合（与 enrich_summaries 口径一致：deleted 行在 is_thin
++          赋值前 ``continue``，投影恒 schema 缺省 False → 渲染「完整」标签）——
++          归档 tab 三源并集③兜底行（location='deleted'+stage archived）参与
++          full 分类而非 thin，标签与筛选结果不分裂。
++        """
++        stmt = select(
++            Change.change_key,
++            Change.change_type,
++            Change.created_at,
++            Change.current_stage,
++            Change.location,
++        ).where(col(Change.workspace_id) == workspace_id)
++        rows = (await self._session.execute(stmt)).all()
++        if not rows:
++            return set()
++        projected = await self._project_current_stage(
++            [(workspace_id, r.change_key) for r in rows if r.location != "deleted"]
++        )
++        thin: set[str] = set()
++        for r in rows:
++            if r.location == "deleted":
++                continue
++            info = projected.get((workspace_id, r.change_key))
++            if info is None:
++                stage, latest_progress = r.current_stage, None
++            else:
++                stage, latest_progress = info[0], info[2]
++                if self._extract_change_status(latest_progress) == "archived":
++                    stage = "archived"
++            if self._is_thin_lineage(
++                current_stage=stage,
++                change_type=r.change_type,
++                created_at=r.created_at,
++                latest_progress=latest_progress,
++            ):
++                thin.add(r.change_key)
++        return thin
++
+     async def _project_current_stage(
+         self, pairs: list[tuple[uuid.UUID, str]]
+     ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None, str | None]]:
+diff --git a/backend/app/modules/change/tests/test_change_lineage_filter.py b/backend/app/modules/change/tests/test_change_lineage_filter.py
+new file mode 100644
+index 000000000..1731f68fb
+--- /dev/null
++++ b/backend/app/modules/change/tests/test_change_lineage_filter.py
+@@ -0,0 +1,286 @@
++"""Tests for ChangeService.list_ lineage 出身分类筛选。
++
++Change 2026-10-14-change-center-lineage-tag-and-filter：
++- ``lineage="thin"`` / ``lineage="full"`` 的行集合必须与 ``enrich_summaries`` 逐行
++  ``ChangeSummary.is_thin`` 投影严格一致（同源 ``_is_thin_lineage`` 三分支 + 时间窗）；
++- 归档 steps 兜底行（FR-03）：归档后阶段翻 archived、仅靠「steps 全无标准四阶段」
++  识别的轻量出身行必须落 thin 集合；
++- ``total`` = 过滤后全局 N（分页正确）；thin 空集合短路；未知值不过滤。
++
++建行/建 progress 复用 test_enrich_projection.py 同款 helper（就地内联，模块私有
++不跨测试文件 import 的既有惯例）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime
++
++import pytest
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.change.model import Change
++from app.modules.change.service import ChangeService
++from app.modules.platform_sync.model import PlatformChangeProgressORM
++from app.modules.workspace.model import Workspace
++
++
++async def _make_workspace(session: AsyncSession) -> Workspace:
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name=f"ws-{uuid.uuid4().hex[:6]}",
++        slug=f"ws-{uuid.uuid4().hex[:6]}",
++        root_path=f"/tmp/ws-{uuid.uuid4().hex[:8]}",
++        status="active",
++    )
++    session.add(ws)
++    await session.commit()
++    await session.refresh(ws)
++    return ws
++
++
++async def _make_change(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    change_key: str,
++    *,
++    stage: str = "plan",
++    change_type: str | None = None,
++    location: str = "active",
++    status: str = "active",
++    created_at: datetime | None = None,
++) -> Change:
++    change = Change(
++        id=uuid.uuid4(),
++        workspace_id=workspace_id,
++        change_key=change_key,
++        title=change_key,
++        status=status,
++        location=location,
++        path=f"changes/{change_key}",
++        current_stage=stage,
++        owner_id=None,
++        change_type=change_type,
++        created_at=created_at or datetime.now(UTC),
++    )
++    session.add(change)
++    await session.commit()
++    await session.refresh(change)
++    return change
++
++
++async def _make_progress_row(
++    session: AsyncSession,
++    workspace_id: uuid.UUID,
++    change_name: str,
++    latest_progress: dict,
++) -> None:
++    session.add(
++        PlatformChangeProgressORM(
++            workspace_id=workspace_id,
++            change_name=change_name,
++            latest_progress=latest_progress,
++            last_pushed_at="2026-10-14T00:00:00Z",
++            last_pusher="agent",
++        )
++    )
++    await session.commit()
++
++
++def _progress(stage: str, status: str = "in_progress", steps: list | None = None) -> dict:
++    return {
++        "project": {"name": "demo"},
++        "changes": [{"name": "x", "current_stage": stage, "status": status}],
++        "stages": [],
++        "steps": steps if steps is not None else [],
++        "batch_progress": [],
++        "approvals": [],
++    }
++
++
++@pytest.mark.asyncio
++async def test_lineage_thin_full_partition_matches_is_thin_projection(
++    db_session: AsyncSession,
++) -> None:
++    """thin/full 两分类与逐行 is_thin 投影严格互斥且并集为全量（FR-05）。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    # 三分支各自一行 + 完整流程一行：
++    # ① stage=thin（active 期）；② change_type=quick（平台分流）；
++    # ③ 归档 steps 兜底（progress 终态覆盖 + 顶层 steps 无标准四阶段）；完整流程 plan。
++    await _make_change(db_session, ws.id, "c-thin-stage", stage="thin")
++    await _make_progress_row(db_session, ws.id, "c-thin-stage", _progress("thin"))
++    await _make_change(db_session, ws.id, "c-quick", stage="thin", change_type="quick")
++    await _make_change(
++        db_session,
++        ws.id,
++        "c-archived-thin",
++        stage="archived",
++        location="archive",
++        status="archived",
++    )
++    await _make_progress_row(
++        db_session,
++        ws.id,
++        "c-archived-thin",
++        _progress("archived", "archived", steps=[{"stage": "flow-impl"}]),
++    )
++    await _make_change(db_session, ws.id, "c-full", stage="plan")
++    await _make_progress_row(db_session, ws.id, "c-full", _progress("plan"))
++
++    rows, _total = await service.list_(ws.id)
++    enriched = await service.enrich_summaries(rows)
++    projected_thin = {s.change_key for s in enriched if s.is_thin}
++    assert projected_thin == {"c-thin-stage", "c-quick", "c-archived-thin"}
++
++    thin_items, thin_total = await service.list_(ws.id, lineage="thin")
++    full_items, full_total = await service.list_(ws.id, lineage="full")
++    thin_keys = {c.change_key for c in thin_items}
++    full_keys = {c.change_key for c in full_items}
++    assert thin_keys == projected_thin
++    assert thin_keys | full_keys == {c.change_key for c in rows}
++    assert not thin_keys & full_keys
++    # total = 过滤后全局 N（非本页数）
++    assert (thin_total, full_total) == (3, 1)
++
++
++@pytest.mark.asyncio
++async def test_lineage_thin_hits_archived_steps_fallback_in_archive_tab(
++    db_session: AsyncSession,
++) -> None:
++    """已归档 tab（location=archive）下归档 steps 兜底行落 thin 分类（FR-03）。
++
++    对照组：旧口径 current_stage=thin 精确匹配在该行筛不出（投影阶段已翻
++    archived）——新 lineage 口径修复此缺口。
++    """
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(
++        db_session,
++        ws.id,
++        "c-arch-thin",
++        stage="archived",
++        location="archive",
++        status="archived",
++    )
++    await _make_progress_row(
++        db_session,
++        ws.id,
++        "c-arch-thin",
++        _progress("archived", "archived", steps=[{"stage": "flow-verify-lite"}]),
++    )
++    await _make_change(
++        db_session,
++        ws.id,
++        "c-arch-full",
++        stage="archived",
++        location="archive",
++        status="archived",
++    )
++    await _make_progress_row(
++        db_session,
++        ws.id,
++        "c-arch-full",
++        _progress("archived", "archived", steps=[{"stage": "execute"}]),
++    )
++
++    thin_items, thin_total = await service.list_(ws.id, location="archive", lineage="thin")
++    full_items, full_total = await service.list_(ws.id, location="archive", lineage="full")
++    assert {c.change_key for c in thin_items} == {"c-arch-thin"}
++    assert thin_total == 1
++    assert {c.change_key for c in full_items} == {"c-arch-full"}
++    assert full_total == 1
++    # 旧 current_stage=thin 口径在归档 tab 筛不出任何行（缺口实证，防回退）
++    legacy_items, legacy_total = await service.list_(
++        ws.id, location="archive", current_stage="thin"
++    )
++    assert legacy_items == [] and legacy_total == 0
++
++
++@pytest.mark.asyncio
++async def test_lineage_window_before_cutoff_is_full(db_session: AsyncSession) -> None:
++    """时间窗外（created_at < 2026-09-25）一律非轻量出身 → 落 full 集合。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(
++        db_session,
++        ws.id,
++        "c-old-thin",
++        stage="thin",
++        created_at=datetime(2026, 9, 1, tzinfo=UTC),
++    )
++
++    thin_items, _ = await service.list_(ws.id, lineage="thin")
++    full_items, full_total = await service.list_(ws.id, lineage="full")
++    assert thin_items == []
++    assert {c.change_key for c in full_items} == {"c-old-thin"}
++    assert full_total == 1
++
++
++@pytest.mark.asyncio
++async def test_lineage_thin_empty_short_circuits(db_session: AsyncSession) -> None:
++    """workspace 无轻量出身行 → lineage=thin 直接空页（([], 0)），不走主查询。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(db_session, ws.id, "c-full", stage="plan")
++
++    items, total = await service.list_(ws.id, lineage="thin")
++    assert items == [] and total == 0
++
++
++@pytest.mark.asyncio
++async def test_lineage_unknown_value_ignored_and_full_with_empty_set(
++    db_session: AsyncSession,
++) -> None:
++    """未知 lineage 值不过滤（sort 白名单 fallback 风格）；全 full 工作区下
++    lineage=full 返回全量（NOT IN 空集路径，FR-02 边界）。"""
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    await _make_change(db_session, ws.id, "c-a", stage="plan")
++    await _make_change(db_session, ws.id, "c-b", stage="execute")
++
++    all_items, all_total = await service.list_(ws.id)
++    items, total = await service.list_(ws.id, lineage="bogus")
++    assert {c.change_key for c in items} == {c.change_key for c in all_items}
++    assert total == all_total == 2
++
++    full_items, full_total = await service.list_(ws.id, lineage="full")
++    assert {c.change_key for c in full_items} == {"c-a", "c-b"}
++    assert full_total == 2
++
++
++@pytest.mark.asyncio
++async def test_lineage_deleted_rows_never_thin_matches_is_thin_projection(
++    db_session: AsyncSession,
++) -> None:
++    """deleted 行不进 thin 集合——与 is_thin 投影口径一致（评审 P1 修复回归）。
++
++    enrich_summaries 对 deleted 行在 is_thin 赋值前 continue（投影恒 schema
++    缺省 False → 渲染「完整」标签）；归档 tab 三源并集③行（location='deleted'
++    + stage archived，评审指出的 change_type='quick' 分裂形态）必须落 full
++    分类而非 thin，否则出现「lineage=thin 返回但渲染完整标签」的自相矛盾。
++    """
++    ws = await _make_workspace(db_session)
++    service = ChangeService(db_session)
++    # 归档 tab 三源并集③形态：location='deleted' + current_stage='archived'，
++    # 且 change_type='quick'（row 现值判分支②会误命中 thin 的分裂形态）
++    await _make_change(
++        db_session,
++        ws.id,
++        "c-tombstone-quick",
++        stage="archived",
++        change_type="quick",
++        location="deleted",
++        status="archived",
++    )
++
++    thin_items, thin_total = await service.list_(ws.id, location="archive", lineage="thin")
++    full_items, full_total = await service.list_(ws.id, location="archive", lineage="full")
++    assert thin_items == [] and thin_total == 0
++    assert {c.change_key for c in full_items} == {"c-tombstone-quick"}
++    assert full_total == 1
++    # 行本身仍在归档 tab 可见（三源并集③不过滤 location 维度），且 is_thin
++    # 投影为 False——full 分类与「完整」标签一致
++    rows, _ = await service.list_(ws.id, location="archive")
++    enriched = await service.enrich_summaries(rows)
++    assert [(s.change_key, s.is_thin) for s in enriched] == [("c-tombstone-quick", False)]
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6b6062a34..c22f27308 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -4507,6 +4507,22 @@
+               "title": "Current Stage"
+             }
+           },
++          {
++            "name": "lineage",
++            "in": "query",
++            "required": false,
++            "schema": {
++              "anyOf": [
++                {
++                  "type": "string"
++                },
++                {
++                  "type": "null"
++                }
++              ],
++              "title": "Lineage"
++            }
++          },
+           {
+             "name": "sort",
+             "in": "query",
+diff --git a/docs/sillyspec/tests-redomain-from-prefix-doubling.md b/docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md
+similarity index 57%
+rename from docs/sillyspec/tests-redomain-from-prefix-doubling.md
+rename to docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md
+index ed58bff93..bdd348888 100644
+--- a/docs/sillyspec/tests-redomain-from-prefix-doubling.md
++++ b/docs/sillyspec/finished/tests-redomain-from-prefix-doubling.md
+@@ -33,4 +33,9 @@ sillyspec tests --redomain --from auto-backend --to agent --by-change <本变更
+ 
+ ## 状态
+ 
+-活跃坑（sillyspec 3.32.0 实测）。
++✅ **已修复（2026-10-14）**——sillyspec 仓轻量变更 `2026-10-14-redomain-domain-arg-normalize`（证据提交 sillyspec@309184f5）：
++- `src/redomain.js` 新增导出 `normalizeDomainArg`（trim + 剥前导 `fr/`（大小写不敏感）+ 剥尾随 `.md`，幂等），`redomainFrEntries`/`planRedomain` 入参防御性归一，剥空拒绝不落盘；
++- CLI `tests --redomain` 同源归一，回显/报错统一裸域名，用法行补形态说明；flow done 提示语的 `fr/` 前缀形态自此合法，照抄不再失败；
++- 测试：`test/redomain.test.mjs` 新增 ⑥⑦ 用例 7/7 绿；全量 `npm test` 779 文件 EXIT=0、`npm run lint` 970 文件 EXIT=0；
++- 真实仓实测：`--from fr/agent` 形态干跑/落盘均正常（本仓 `fr/agent.md` 迁移已用裸名形态完成，属同口径）。
++
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+index a0e4ee906..23b407fac 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -25,6 +25,7 @@ import {
+   render,
+   screen,
+   waitFor,
++  within,
+ } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+@@ -919,6 +920,71 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
+       expect(screen.getByText("后端解析失败啦")).toBeInTheDocument(),
+     );
+   });
++
++  // ── 2026-10-14-change-center-lineage-tag-and-filter：出身标签 + 分类筛选 ──
++
++  it("完整出身行显示「完整」标签、轻量出身行显示「轻量」标签（成对可辨）", async () => {
++    setupListChanges({
++      items: [
++        makeChange({ id: "ch-full", change_key: "full-change", is_thin: false }),
++        makeChange({
++          id: "ch-thin",
++          change_key: "thin-change",
++          is_thin: true,
++          current_stage: "thin",
++        }),
++      ],
++      total: 2,
++    });
++    await renderAndWait();
++    // 完整出身：neutral 胶囊（muted-foreground 语义色）；轻量出身：attention
++    // 琥珀胶囊（warning 语义色）——StateLabel 内联 style，直接断言配色可区分
++    // （评审 P3：仅断言不同文本节点恒真，不足以锁「样式可区分」承诺）。
++    const fullBadge = screen.getByText("完整");
++    const thinBadge = screen.getByText("轻量");
++    expect(fullBadge).toBeInTheDocument();
++    expect(thinBadge).toBeInTheDocument();
++    expect(fullBadge.style.color).toContain("var(--muted-foreground)");
++    expect(thinBadge.style.color).toContain("var(--warning)");
++    expect(fullBadge.style.color).not.toBe(thinBadge.style.color);
++  });
++
++  it("分类下拉选择「轻量变更」→ listChanges 收到 lineage=thin；重置后清除", async () => {
++    await renderAndWait();
++    expect(lastMainLoadParams()?.lineage).toBeUndefined();
++
++    // antd RTL 惯例 mouseDown 展开下拉 + 点选选项（portal 渲染）
++    fireEvent.mouseDown(screen.getByLabelText("筛选分类"));
++    fireEvent.click(await screen.findByText("轻量变更"));
++    await waitFor(() =>
++      expect(lastMainLoadParams()?.lineage).toBe("thin"),
++    );
++
++    await act(async () => {
++      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
++    });
++    await waitFor(() =>
++      expect(lastMainLoadParams()?.lineage).toBeUndefined(),
++    );
++  });
++
++  it("分类下拉选择「完整变更」→ lineage=full；阶段下拉不含「轻量变更」选项", async () => {
++    await renderAndWait();
++
++    fireEvent.mouseDown(screen.getByLabelText("筛选分类"));
++    fireEvent.click(await screen.findByText("完整变更"));
++    await waitFor(() =>
++      expect(lastMainLoadParams()?.lineage).toBe("full"),
++    );
++
++    // 阶段下拉不再有「轻量变更」选项（分类查询职责迁移到分类下拉，FR-04）
++    fireEvent.mouseDown(screen.getByLabelText("筛选阶段"));
++    const stageListbox = await screen.findAllByRole("listbox");
++    const stageOptions = within(stageListbox.at(-1)!).queryAllByText(
++      "轻量变更",
++    );
++    expect(stageOptions).toHaveLength(0);
++  });
+ });
+ 
+ describe("变更列表行内删除入口防劫持（2026-09-28-audit-risk-fixes）", () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+index db6f54a16..7bfbdf089 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx
+@@ -80,8 +80,17 @@ const STAGE_OPTIONS = [
+   { value: "execute", label: "执行" },
+   { value: "verify", label: "验证" },
+   { value: "archive", label: "归档" },
+-  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与 quick 不可筛不同，
+-  // thin 是主力辅助流，新 quick 类型变更全部分流至此）。
++  // 2026-10-14-change-center-lineage-tag-and-filter：「轻量变更」（thin）选项
++  // 移除——出身分类查询职责迁移至下方「分类」下拉（lineage 参数三分支精确口径，
++  // 归档 thin 行 stage 翻 archived 后旧 current_stage=thin 精确匹配筛不出）。
++] as const;
++
++// 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（lineage 参数）。
++// 空值 = 全部分类不过滤；thin/full 与后端 _is_thin_lineage 三分支投影口径一致
++// （筛「轻量变更」在已归档 tab 同样能命中归档兜底行）。
++const LINEAGE_OPTIONS = [
++  { value: "", label: "全部分类" },
++  { value: "full", label: "完整变更" },
+   { value: "thin", label: "轻量变更" },
+ ] as const;
+ 
+@@ -270,6 +279,8 @@ export default function ChangesPage({ params }: Props) {
+   // 2026-09-28-change-ux-detail-batch：平台同步处理区抽屉开关（常驻卡收进按钮）
+   const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
+   const [stageFilter, setStageFilter] = useState("");
++  // 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（"" = 全部分类）
++  const [lineageFilter, setLineageFilter] = useState("");
+   const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
+   const [page, setPage] = useState(1);
+   const [pageSize, setPageSize] = useState(20);
+@@ -299,6 +310,7 @@ export default function ChangesPage({ params }: Props) {
+         location: tab,
+         search,
+         currentStage: stageFilter,
++        lineage: lineageFilter,
+         sort: sortDir,
+         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
+         pendingReviewOnly: tab === "active" && focusMine,
+@@ -312,6 +324,7 @@ export default function ChangesPage({ params }: Props) {
+           location: tab,
+           search: search || undefined,
+           currentStage: stageFilter || undefined,
++          lineage: lineageFilter || undefined,
+           sort: sortDir,
+           pendingReviewOnly: tab === "active" && focusMine,
+           page,
+@@ -415,6 +428,8 @@ export default function ChangesPage({ params }: Props) {
+     setSearchInput("");
+     setSearch("");
+     setStageFilter("");
++    // 2026-10-14-change-center-lineage-tag-and-filter：分类筛选一并回默认
++    setLineageFilter("");
+     // ql-20260818-004：聚焦下放查询条件后，重置一并回默认（不勾选）
+     setFocusMine(false);
+     setPage(1);
+@@ -559,9 +574,14 @@ export default function ChangesPage({ params }: Props) {
+             {c.title || c.change_key}
+           </Link>
+           {/* 2026-09-27-change-list-is-thin：轻量出身徽章（后端 is_thin 投影）——
+-              归档轻量行「轻量」与状态图标并存（对齐详情页双徽章口径）。 */}
+-          {c.is_thin === true && (
++              归档轻量行「轻量」与状态图标并存（对齐详情页双徽章口径）。
++              2026-10-14-change-center-lineage-tag-and-filter：成对补「完整」中性
++              徽章（!is_thin）——完整流程变更此前无标签，两类出身一眼可辨；
++              is_thin 为后端投影必带 bool（缺省 False），undefined 防御归入完整。 */}
++          {c.is_thin === true ? (
+             <StateLabel variant="attention">轻量</StateLabel>
++          ) : (
++            <StateLabel variant="neutral">完整</StateLabel>
+           )}
+           {renderTodoBadge(c)}
+           {/* 2026-09-28-change-list-description：变更描述行（proposal 动机段提取，
+@@ -692,7 +712,7 @@ export default function ChangesPage({ params }: Props) {
+   const renderEmpty = (): ReactNode => {
+     if (items.length > 0) return null;
+     // 有 filter 无匹配 → 简短文案（不显示 CTA，避免误导）
+-    if (search || stageFilter) {
++    if (search || stageFilter || lineageFilter) {
+       return (
+         <div className="py-10 text-center text-xs text-muted-foreground">
+           没有匹配的变更。
+@@ -821,6 +841,7 @@ export default function ChangesPage({ params }: Props) {
+             className="w-64"
+           />
+           <Select
++            aria-label="筛选阶段"
+             value={stageFilter}
+             onChange={(v) => setStageFilter(v ?? "")}
+             className="w-36"
+@@ -831,6 +852,23 @@ export default function ChangesPage({ params }: Props) {
+               </Select.Option>
+             ))}
+           </Select>
++          {/* 2026-10-14-change-center-lineage-tag-and-filter：出身分类下拉
++              （完整/轻量，lineage 参数三分支口径） */}
++          <Select
++            aria-label="筛选分类"
++            value={lineageFilter}
++            onChange={(v) => {
++              setLineageFilter(v ?? "");
++              setPage(1);
++            }}
++            className="w-32"
++          >
++            {LINEAGE_OPTIONS.map((opt) => (
++              <Select.Option key={opt.value} value={opt.value}>
++                {opt.label}
++              </Select.Option>
++            ))}
++          </Select>
+           {tab === "active" && (
+             <Checkbox
+               checked={focusMine}
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+index d20c937c2..9d4d67a81 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/__tests__/page.test.tsx
+@@ -233,6 +233,8 @@ function mainKey(overrides: Record<string, unknown> = {}) {
+       location: "active",
+       search: "",
+       currentStage: "",
++      // 2026-10-14-change-center-lineage-tag-and-filter：出身分类槽位
++      lineage: "",
+       sort: "updated_at_desc",
+       pendingReviewOnly: false,
+       page: 1,
+@@ -419,6 +421,36 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
+     expect(screen.getByTestId("m-changes-search-input")).toHaveValue("");
+   });
+ 
++  it("筛选抽屉：分类 chip 应用 → lineage 进 key 与请求；阶段 chips 无「轻量变更」（2026-10-14-change-center-lineage-tag-and-filter）", async () => {
++    renderPage();
++    await waitFor(() => {
++      expect(screen.getByText("变更 c1")).toBeInTheDocument();
++    });
++    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
++    expect(await screen.findByTestId("mobile-filter-body")).toBeVisible();
++    // 阶段维度已无「轻量变更」chip（职责迁移到分类维度）
++    expect(
++      screen.queryByTestId("m-changes-stage-chip-thin"),
++    ).toBeNull();
++    // 分类维度 chips 齐全：全部/完整/轻量
++    expect(screen.getByTestId("m-changes-lineage-chip-all")).toBeInTheDocument();
++    expect(screen.getByTestId("m-changes-lineage-chip-full")).toBeInTheDocument();
++    // 选「轻量变更」→ 确定 → lineage=thin 进 key 与请求
++    fireEvent.click(screen.getByTestId("m-changes-lineage-chip-thin"));
++    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
++    await waitFor(() => {
++      expect(changesApi.listChanges).toHaveBeenCalledWith(
++        "ws-1",
++        expect.objectContaining({ lineage: "thin" }),
++      );
++    });
++    await waitFor(() => {
++      expect(
++        queryClient.getQueryData(mainKey({ lineage: "thin" })),
++      ).toBeTruthy();
++    });
++  });
++
+   it("只看待我处理：active 应用 → pendingReviewOnly=true 进 key；archive tab 不渲染聚焦开关", async () => {
+     renderPage();
+     await waitFor(() => {
+diff --git a/frontend/src/app/m/workspaces/[id]/changes/page.tsx b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+index 5241ff647..dc2d5ac0e 100644
+--- a/frontend/src/app/m/workspaces/[id]/changes/page.tsx
++++ b/frontend/src/app/m/workspaces/[id]/changes/page.tsx
+@@ -127,8 +127,19 @@ const STAGE_OPTIONS = [
+   { value: "execute", label: "执行" },
+   { value: "verify", label: "验证" },
+   { value: "archive", label: "归档" },
+-  // 2026-09-25-change-center-thin-flow task-07：thin 可筛（与桌面副本同步，
+-  // 模块私有就地内联不 export 的既有规则不变）。
++  // 2026-10-14-change-center-lineage-tag-and-filter：「轻量变更」（thin）选项
++  // 移除——出身分类查询职责迁移至下方分类 chips（与桌面同步，lineage 三分支
++  // 精确口径，归档 thin 行 stage 翻 archived 后旧精确匹配筛不出）。
++] as const;
++
++/**
++ * 出身分类筛选项（2026-10-14-change-center-lineage-tag-and-filter）：桌面
++ * LINEAGE_OPTIONS 同值副本（模块私有就地内联不 export 惯例）。lineage 参数
++ * 三分支口径与行内出身标签一致。
++ */
++const LINEAGE_OPTIONS = [
++  { value: "", label: "全部分类" },
++  { value: "full", label: "完整变更" },
+   { value: "thin", label: "轻量变更" },
+ ] as const;
+ 
+@@ -478,6 +489,8 @@ export default function MobileChangesPage() {
+   const [searchInput, setSearchInput] = useState(initialSearch);
+   const [search, setSearch] = useState(initialSearch);
+   const [stageFilter, setStageFilter] = useState("");
++  // 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（"" = 全部分类）
++  const [lineageFilter, setLineageFilter] = useState("");
+   const [focusMine, setFocusMine] = useState(false);
+   // task-04（FR-03 / D-003@v1 清单项 3）：排序方向从固定常量升为 state，进主列表
+   // key sort 槽位与 listChanges sort 参数；移动切换入口仅在筛选抽屉（桌面是表头
+@@ -489,6 +502,8 @@ export default function MobileChangesPage() {
+   // 筛选抽屉草稿态：打开时从生效值拷贝，「确定」才落到查询 state
+   const [filterOpen, setFilterOpen] = useState(false);
+   const [draftStage, setDraftStage] = useState("");
++  // 2026-10-14-change-center-lineage-tag-and-filter：分类草稿态（draftStage 范式）
++  const [draftLineage, setDraftLineage] = useState("");
+   const [draftFocusMine, setDraftFocusMine] = useState(false);
+   // task-04：排序草稿态（沿用 draftStage 范式——取消不点确定不污染生效排序）
+   const [draftSort, setDraftSort] = useState<SortDir>(DEFAULT_SORT);
+@@ -529,6 +544,7 @@ export default function MobileChangesPage() {
+         location: tab,
+         search,
+         currentStage: stageFilter,
++        lineage: lineageFilter,
+         sort: sortDir,
+         // D-007：进行中 + 聚焦 → 只看待我处理（pending_review 非空）
+         pendingReviewOnly: tab === "active" && focusMine,
+@@ -553,6 +569,7 @@ export default function MobileChangesPage() {
+               location: tab,
+               search: search || undefined,
+               currentStage: stageFilter || undefined,
++              lineage: lineageFilter || undefined,
+               sort: sortDir,
+               pendingReviewOnly: tab === "active" && focusMine,
+               page,
+@@ -677,7 +694,7 @@ export default function MobileChangesPage() {
+   // 内 setPage(1) 的语义）。
+   useEffect(() => {
+     setPagesLoaded(1);
+-  }, [tab, search, stageFilter, focusMine, sortDir]);
++  }, [tab, search, stageFilter, lineageFilter, focusMine, sortDir]);
+ 
+   const handleTabChange = (newTab: ChangesTab) => {
+     if (newTab === tab) return;
+@@ -701,6 +718,7 @@ export default function MobileChangesPage() {
+     if (open) {
+       // 打开时从生效值拷贝草稿，取消（不点确定）不污染生效筛选
+       setDraftStage(stageFilter);
++      setDraftLineage(lineageFilter);
+       setDraftFocusMine(focusMine);
+       setDraftSort(sortDir);
+     }
+@@ -709,6 +727,7 @@ export default function MobileChangesPage() {
+   // 「确定」：草稿落生效 state → key 变化自动重取（聚焦仅进行中视图语义生效）
+   const handleFilterApply = () => {
+     setStageFilter(draftStage);
++    setLineageFilter(draftLineage);
+     if (tab === "active") setFocusMine(draftFocusMine);
+     setSortDir(draftSort);
+   };
+@@ -720,8 +739,10 @@ export default function MobileChangesPage() {
+     setSearchInput("");
+     setSearch("");
+     setStageFilter("");
++    setLineageFilter("");
+     setFocusMine(false);
+     setDraftStage("");
++    setDraftLineage("");
+     setDraftFocusMine(false);
+     setSortDir(DEFAULT_SORT);
+     setDraftSort(DEFAULT_SORT);
+@@ -816,7 +837,7 @@ export default function MobileChangesPage() {
+ 
+   // 空态分场景（对齐桌面 renderEmpty：有筛选无匹配短文案 / active 聚焦 / active / archive）
+   const renderEmpty = (): ReactNode => {
+-    if (search || stageFilter) {
++    if (search || stageFilter || lineageFilter) {
+       return (
+         <p className="py-10 text-center text-[14px] text-muted-foreground">
+           没有匹配的变更。
+@@ -1200,6 +1221,31 @@ export default function MobileChangesPage() {
+                   );
+                 })}
+               </div>
++              {/* 出身分类（2026-10-14-change-center-lineage-tag-and-filter）：
++                  完整/轻量单选 chips，与桌面「分类」下拉同维度（lineage 参数） */}
++              <p className="mb-2 text-xs text-muted-foreground">分类</p>
++              <div className="mb-4 flex flex-wrap gap-2">
++                {LINEAGE_OPTIONS.map((opt) => {
++                  const active = draftLineage === opt.value;
++                  return (
++                    <button
++                      key={opt.value || "all"}
++                      type="button"
++                      aria-pressed={active}
++                      data-testid={`m-changes-lineage-chip-${opt.value || "all"}`}
++                      onClick={() => setDraftLineage(opt.value)}
++                      className={cn(
++                        "inline-flex min-h-[38px] items-center justify-center rounded-full border px-3.5 text-[13px] transition-colors",
++                        active
++                          ? "border-primary bg-primary/10 font-medium text-primary"
++                          : "border-border bg-card text-muted-foreground hover:text-foreground",
++                      )}
++                    >
++                      {opt.label}
++                    </button>
++                  );
++                })}
++              </div>
+               {/* 排序（更新时间）（task-04 / FR-03）：桌面表头 ↑↓ 切换的移动形态，
+                   单选 chips 对齐原型筛选抽屉屏（阶段 → 排序 → 其他 顺序） */}
+               <p className="mb-2 text-xs text-muted-foreground">
+diff --git a/frontend/src/components/mobile/mobile-change-card.test.tsx b/frontend/src/components/mobile/mobile-change-card.test.tsx
+index d090ceed6..bdc814931 100644
+--- a/frontend/src/components/mobile/mobile-change-card.test.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.test.tsx
+@@ -392,3 +392,28 @@ describe("MobileChangeCard 点击", () => {
+     expect(onClick).toHaveBeenCalledTimes(1);
+   });
+ });
++
++describe("MobileChangeCard 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）", () => {
++  it("is_thin=true → 「轻量」warning 徽标（对齐桌面琥珀语义）", () => {
++    render(
++      <MobileChangeCard
++        change={makeChange({ is_thin: true, current_stage: "thin" })}
++        onClick={vi.fn()}
++      />,
++    );
++    // antd Badge：warning 圆点 + 「轻量」文本
++    expect(
++      screen.getByText("轻量").closest(".ant-badge"),
++    ).not.toBeNull();
++    expect(
++      screen.getByText("轻量").closest(".ant-badge")?.querySelector(".ant-badge-status-warning"),
++    ).not.toBeNull();
++  });
++
++  it("is_thin=false → 「完整」neutral 徽标（成对可辨）", () => {
++    render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);
++    expect(
++      screen.getByText("完整").closest(".ant-badge")?.querySelector(".ant-badge-status-default"),
++    ).not.toBeNull();
++  });
++});
+diff --git a/frontend/src/components/mobile/mobile-change-card.tsx b/frontend/src/components/mobile/mobile-change-card.tsx
+index 3bf92f401..756afe1df 100644
+--- a/frontend/src/components/mobile/mobile-change-card.tsx
++++ b/frontend/src/components/mobile/mobile-change-card.tsx
+@@ -114,6 +114,19 @@ function renderTodoBadge(c: ChangeSummary) {
+   return <span className="text-xs text-muted-foreground">—</span>;
+ }
+ 
++/**
++ * 出身徽标（2026-10-14-change-center-lineage-tag-and-filter，语义对齐桌面
++ * renderChangeRow 成对标签）：is_thin=true →「轻量」warning（琥珀）；否则
++ * 「完整」neutral（is_thin 为投影必带 bool，undefined 防御归入完整）。
++ */
++function renderLineageBadge(c: ChangeSummary) {
++  return c.is_thin === true ? (
++    <StatusBadge kind="warning">轻量</StatusBadge>
++  ) : (
++    <StatusBadge kind="neutral">完整</StatusBadge>
++  );
++}
++
+ /**
+  * 负责人四态（task-02 / FR-02 三态 + 2026-10-13-change-owner-backfill 兜底态，
+  * 语义对齐桌面 renderOwner）：owner_name 非空 → 用户名（前景色，弱化行内可读）；
+@@ -241,12 +254,15 @@ export function MobileChangeCard({
+             {change.description}
+           </span>
+         )}
+-        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
++        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 出身徽标 +
++            待办徽标 + 活动徽标 */}
+         <span className="flex flex-wrap items-center gap-2">
+           <ChangeStepBadge
+             stage={change.current_stage ?? "scan"}
+             stepProgress={change.step_progress ?? null}
+           />
++          {/* 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）：完整/轻量 */}
++          {renderLineageBadge(change)}
+           {/* 待办徽标（testid 槽位便于与负责人/用量「—」占位区分断言） */}
+           <span data-testid="mobile-change-todo-badge">
+             {renderTodoBadge(change)}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 65f8812d9..a868ad763 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -32460,6 +32460,7 @@ export interface operations {
+                 owner?: string | null;
+                 search?: string | null;
+                 current_stage?: string | null;
++                lineage?: string | null;
+                 sort?: string;
+                 pending_review_only?: boolean;
+                 page?: number;
+diff --git a/frontend/src/lib/changes.ts b/frontend/src/lib/changes.ts
+index 9d87397cf..3420d49da 100644
+--- a/frontend/src/lib/changes.ts
++++ b/frontend/src/lib/changes.ts
+@@ -94,7 +94,9 @@ export type ArchiveGateResponse = components["schemas"]["ArchiveGateResponse"];
+ 
+ export function listChanges(
+   workspaceId: string,
+-  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
++  // 2026-10-14-change-center-lineage-tag-and-filter：lineage 出身分类筛选
++  // （thin|full，后端 _is_thin_lineage 三分支投影口径；缺省/未知值不过滤）。
++  params?: { location?: string; status?: string; owner?: string; search?: string; currentStage?: string; lineage?: string; sort?: string; pendingReviewOnly?: boolean; page?: number; pageSize?: number },
+ ) {
+   const searchParams = new URLSearchParams();
+   if (params?.location) searchParams.set("location", params.location);
+@@ -102,6 +104,7 @@ export function listChanges(
+   if (params?.owner) searchParams.set("owner", params.owner);
+   if (params?.search) searchParams.set("search", params.search);
+   if (params?.currentStage) searchParams.set("current_stage", params.currentStage);
++  if (params?.lineage) searchParams.set("lineage", params.lineage);
+   if (params?.sort) searchParams.set("sort", params.sort);
+   if (params?.pendingReviewOnly) searchParams.set("pending_review_only", "true");
+   if (params?.page) searchParams.set("page", String(params.page));

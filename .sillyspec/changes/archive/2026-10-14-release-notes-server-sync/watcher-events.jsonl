@@ -1,0 +1,21 @@
+{"ts":1791961881765,"kind":"file","stage":"proposal","detail":"proposal.md 出现","provisional":true}
+{"ts":1791961881765,"kind":"file","stage":"requirements","detail":"requirements.md 出现","provisional":true}
+{"ts":1791961881765,"kind":"file","stage":"design","detail":"design.md 出现","provisional":true}
+{"ts":1791961881765,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1791962023315,"kind":"commit","stage":null,"detail":"19500f287","provisional":true}
+{"ts":1791962070055,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791962090223,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791962991371,"kind":"warning","stage":null,"rule":"stall","severity":"warning","detail":"execute 期已 15 分钟无提交无事件——停滞嫌疑（区分在想/死了，人判）","provisional":true}
+{"ts":1791963713386,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791963736526,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1791963766376,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791963780568,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1791963819092,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true,"source":"task-tick"}
+{"ts":1791963819386,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true,"source":"task-tick"}
+{"ts":1791963819671,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true,"source":"task-tick"}
+{"ts":1791963819973,"kind":"task-done","stage":"tasks","detail":"checked 3→4","provisional":true,"source":"task-tick"}
+{"ts":1791963820335,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1791963820335,"kind":"task-done","stage":"tasks","detail":"checked 0→4","provisional":true}
+{"ts":1791963840295,"kind":"commit","stage":null,"detail":"7e3e620a8","provisional":true}
+{"ts":1791963860188,"kind":"commit","stage":null,"detail":"19500f287","provisional":true}
+{"ts":1791963883615,"kind":"commit","stage":null,"detail":"c0d30b157","provisional":true}

@@ -268,7 +268,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-02
-  tests: test/frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
+  tests: frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx「复制成功 → 成功提示按真实结果出现」
   reason: spec
   state: candidate
   discovery: machine
@@ -287,7 +287,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-03
-  tests: test/frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
+  tests: frontend/src/lib/__tests__/knowledge-graph-timeout.test.ts「query 显式 90s（单 RPC 60s + 余量）」
   reason: spec
   state: candidate
   discovery: machine
@@ -306,7 +306,7 @@ created_at: 2026-09-27T10:13:08.181Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-frontend-risk-fixes:flow:测试绑定FR-04
-  tests: test/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
+  tests: frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「用户交互置位（滚轮缩放/指针按下拖拽双源）后一律停跟随，refit 不再抢视口」
   reason: spec
   state: candidate
   discovery: machine
@@ -321,3 +321,98 @@ created_at: 2026-09-27T10:13:08.181Z
 摘要：相关面双绿
 全文：.sillyspec/changes/archive/2026-10-09-frontend-risk-fixes/requirements.md#FR-05
 最近确认：9f996f692b6c018f7db14109def4af2e137fb1e5
+
+## FR-lib-knowledge-022 FR 索引与决策蒸馏条目行点击不再整页跳转，打开条目内容预览弹窗（弹窗内以条目卡渲染所在文件内容并定位到该条目）
+变更：2026-10-14-assets-knowledge-popup-preview
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-assets-knowledge-popup-preview/requirements.md#FR-01
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-assets-knowledge-popup-preview
+  status: active
+
+## FR-lib-knowledge-023 知识触达的整文件 chip、文件组头与锚点条目行同样弹窗打开（无锚点时文件级展示）
+变更：2026-10-14-assets-knowledge-popup-preview
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-assets-knowledge-popup-preview/requirements.md#FR-02
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-02
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识触达：整文件 chip 与锚点条目行点击弹窗打开（chip 文件级无定位）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-assets-knowledge-popup-preview
+  status: active
+
+## FR-lib-knowledge-024 知识类弹窗内提供「在知识库中打开」链接，href 沿用原 file+anchor 深链
+变更：2026-10-14-assets-knowledge-popup-preview
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-assets-knowledge-popup-preview/requirements.md#FR-03
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-assets-knowledge-popup-preview
+  status: active
+
+## FR-lib-knowledge-025 测试绑定/模块触达/归档留档维持既有弹窗交互不回退
+变更：2026-10-14-assets-knowledge-popup-preview
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-assets-knowledge-popup-preview/requirements.md#FR-04
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「测试绑定行：锚点标注「变更内」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-assets-knowledge-popup-preview
+  status: active
+
+## FR-lib-knowledge-026 change-assets-card.test.tsx 同步更新并通过
+变更：2026-10-14-assets-knowledge-popup-preview
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-14-assets-knowledge-popup-preview/requirements.md#FR-05
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-14-assets-knowledge-popup-preview:flow:测试绑定FR-05
+  tests: frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx「知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-14-assets-knowledge-popup-preview
+  status: active

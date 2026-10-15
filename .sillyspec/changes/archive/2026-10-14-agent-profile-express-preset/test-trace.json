@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-agent-profile-express-preset",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-agent-profile-express-preset:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/agent/tests/test_profile_seed.py「test_express_preset_plants_platform_profile_with_identity_fields」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-agent-profile-express-preset"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-agent-profile-express-preset:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/agent/tests/test_profile_seed.py「test_express_preset_idempotent_on_repeat_calls」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-agent-profile-express-preset"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-agent-profile-express-preset:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/agent/tests/test_profile_seed.py「test_express_preset_does_not_overwrite_user_edits」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-agent-profile-express-preset"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-agent-profile-express-preset:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/agent/tests/test_profile_seed.py「test_express_preset_coexists_with_system_defaults」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-agent-profile-express-preset"
+    }
+  ]
+}

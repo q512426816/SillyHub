@@ -1,0 +1,43 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：变更详情沉淀资产卡的需求规则（FR 索引）、决策蒸馏、知识触达三组条目当前点击整页跳转知识库，打断浏览；期望点击在弹窗内直接展示条目具体内容，弹窗内保留跳知识库入口。
+  成功标准：
+  - FR 索引与决策蒸馏条目行点击不再整页跳转，打开条目内容预览弹窗（弹窗内以条目卡渲染所在文件内容并定位到该条目）
+  - 知识触达的整文件 chip、文件组头与锚点条目行同样弹窗打开（无锚点时文件级展示）
+  - 知识类弹窗内提供「在知识库中打开」链接，href 沿用原 file+anchor 深链
+  - 测试绑定/模块触达/归档留档维持既有弹窗交互不回退
+  - change-assets-card.test.tsx 同步更新并通过
+autopilot: false
+prestage_ack: false
+baseline_commit: f9d6220dbe671a5f481ef786086d483dd739ba2d
+updatedAt: '2026-10-14T08:09:11.844Z'
+cross_baselines:
+  sillyspec: 70998034678649cbdafbd9d353776ed4ad2ae747
+baseline_sha256: e23ff3af1bd80bbb1a5e7301eff656a27c62dc6aeb6f6f0196aa05ddf5d22583
+spec_approved: true
+spec_approved_at: '2026-10-14T07:57:32.832Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py1+jsx8)+fr(7)（23.2s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014080518\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（17.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014080518\test-result.json｜门文件
+  6 个
+

@@ -30,7 +30,7 @@ created_at: 2026-08-18 01:45:00
 - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
 - **governance**（3 项）：审批中心（change:approve / task:read / task:run_agent）、审计中心（change:read）、事件（incident:read / deploy:staging）。
   - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ）；事件补 deploy:staging（上报端点鉴权）。rbac-dead-permissions-cleanup：task:approve / platform:audit:read 死键删除，两卡收敛为页面真实所需。
-- **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
+- **system**（6 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）、服务器信息（/admin/server-status，system_status:read，2026-10-14-admin-server-status 新增——组末尾落位使既有锚定索引 18/19/20 不动、ppm 组声明序 +1，admin/menus 测试锚同提交重算；后端 GET /api/system-status 同权限收紧）。
 - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
   - 菜单权限为前端可见性语义；后端 plan 域仅认证不授权（get_current_principal + DataScope）。

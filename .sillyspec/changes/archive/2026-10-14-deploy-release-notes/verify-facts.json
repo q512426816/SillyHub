@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-14-deploy-release-notes",
+  "generatedAt": "2026-10-14T05:40:13.348Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 10,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "tasks": 6,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "backendEndpoints": 3045,
+        "frontendCalls": 2
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-14-deploy-release-notes",
+      "metrics": {
+        "checkedFiles": 7,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "聚焦测试全量绿（后端 174 + 前端 90）",
+      "command": "cd backend && uv run pytest app/modules/deploy_records/tests tests/modules/auth/test_permissions.py tests/test_align_platform_change_events_migration.py tests/core/test_error_message_l10n.py -q --no-cov && cd ../frontend && pnpm vitest run \"src/app/(dashboard)/deploy-records\" \"src/lib/__tests__/menu-permissions.test.ts\" \"src/lib/__tests__/permission.test.ts\" \"src/components/__tests__/admin-role-permission-picker-tree.test.tsx\" \"src/components/__tests__/top-bar.test.tsx\" \"src/app/(dashboard)/admin/menus\"",
+      "exitCode": 0,
+      "logPath": ".sillyspec/.runtime/logs/exec-backend.log、.sillyspec/.runtime/logs/exec-frontend.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "部署后浏览器冒烟：①协作治理组「发布记录」菜单可见可跳；②/deploy-records 列表/详情/md 渲染正常；③持 deploy_record:read 的非 admin 角色可见性（代码层已由前端 90 用例覆盖，此项为真实容器环境最终点验）",
+        "condition": "apply 合并回 main 并重部署平台后",
+        "severity": "advisory"
+      },
+      {
+        "type": "other",
+        "item": "并行会话推进 main（files-refresh/litellm-retire 等已归档提交）致对账 32 条③类误报；uv.lock 与 menu-permissions.test.ts 已在 task 卡 target_files 仍被 suspectTask 错误归因（引用不存在的 task-09/07）——归属 sillyspec 工具 reconcile 对账口径",
+        "condition": "工具修复对账基准或 archive 终审人工核对",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 0,
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/deploy-records",
+        "rowIdx": 1
+      },
+      {
+        "method": "GET",
+        "path": "/api/deploy-records/{record_id}",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": []
+  },
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/deploy_records/tests/test_service.py",
+      "backend/app/modules/deploy_records/tests/test_router.py",
+      "backend/tests/modules/auth/test_permissions.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "tests": {
+    "command": "module[]+deps(py45+jsx55)+fr(98)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-14T05:57:28.412Z"
+  },
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  }
+}

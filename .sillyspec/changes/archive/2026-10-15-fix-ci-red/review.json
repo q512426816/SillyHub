@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-fix-ci-red",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "082f3414d326153676fb9e90ceb68d1e64fb4a17",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "冻结 change.patch 与实际 git diff 尾部差一个空上下文行（内容级 hunk 完全一致）",
+      "evidence": "逐字节比对 git diff 1e1616548..082f3414（4 文件）与 change.patch，仅实际输出末尾多一个空上下文行（actual 尾字节 '}\\n \\n' vs 冻结件 '}\\n'），全部 hunk 语义与上下文一致，git apply 不受影响，属归档留痕的格式噪音",
+      "location": ".sillyspec/changes/2026-10-15-fix-ci-red/change.patch:375"
+    },
+    {
+      "severity": "P3",
+      "title": "数量锚硬编码债务三连跳（58→59→60、37→38），design 已显式披露另行立项，裁决为可接受留痕",
+      "evidence": "menu-permissions.test.ts 同一断言群一周内第三次跟随源码改数字（注释链 2026-10-14-deploy-release-notes→admin-server-status 可证），硬编码镜像 BACKEND_PERMISSION_KEYS 每次后端加权限都需手工同步；design「断言风格改造（硬编码数字改推导）属治本另行立项」的边界裁决成立，但该债务复发频率高，提醒后续立项勿长期搁置",
+      "location": "frontend/src/lib/__tests__/menu-permissions.test.ts:244-253"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "n/a",
+    "作用域": "n/a"
+  },
+  "reviewedAt": "2026-10-15T00:42:42Z"
+}

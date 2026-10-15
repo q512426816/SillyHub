@@ -1,0 +1,201 @@
+diff --git a/frontend/src/app/m/account/page.test.tsx b/frontend/src/app/m/account/page.test.tsx
+index 7fc1c043d..e5dc69e4e 100644
+--- a/frontend/src/app/m/account/page.test.tsx
++++ b/frontend/src/app/m/account/page.test.tsx
+@@ -120,4 +120,32 @@ describe("MobileAccountPage 头像上传（task-08）", () => {
+     expect(mockedUploadFile).not.toHaveBeenCalled();
+     expect(mockedUpdateMyAvatar).not.toHaveBeenCalled();
+   });
++
++  // 退出登录 → 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）：
++  // SPA 内 router.replace 会让 React Query 缓存与内存 store 跨登录会话存活，
++  // 换账号后残留上一用户数据。契约：必须 window.location.assign("/m/login")
++  // 整页跳转（对齐桌面端与 lib/api.ts 401 被动登出先例），登出路径禁止
++  // router.replace。jsdom 的 window.location 是 accessor 属性且 assign 为
++  // not-implemented 占位，vi.spyOn 拦不住——defineProperty 整体替换再还原。
++  it("退出登录 → window.location.assign 整页跳转 /m/login（不走 router.replace）", async () => {
++    const originalLocationDesc = Object.getOwnPropertyDescriptor(window, "location");
++    const assignMock = vi.fn();
++    Object.defineProperty(window, "location", {
++      value: { ...window.location, assign: assignMock },
++      configurable: true,
++    });
++    mockedLogout.mockResolvedValue(undefined);
++    render(<MobileAccountPage />);
++
++    // antd Button 的 LogoutOutlined 图标自带 aria-label "logout"，
++    // accessible name 为 "logout 退出登录"，用正则只锚定文字部分。
++    fireEvent.click(screen.getByRole("button", { name: /退出登录/ }));
++
++    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/m/login"));
++    expect(nav.replace).not.toHaveBeenCalled();
++
++    if (originalLocationDesc) {
++      Object.defineProperty(window, "location", originalLocationDesc);
++    }
++  });
+ });
+diff --git a/frontend/src/app/m/account/page.tsx b/frontend/src/app/m/account/page.tsx
+index f60214334..729f85c68 100644
+--- a/frontend/src/app/m/account/page.tsx
++++ b/frontend/src/app/m/account/page.tsx
+@@ -62,8 +62,10 @@ export default function MobileAccountPage() {
+       await logout();
+     } finally {
+       setLoading(false);
+-      // token 已清，主动回移动登录页（route-guard 也会拦截，这里即时跳转更顺滑）
+-      router.replace("/m/login");
++      // token 已清。必须整页跳转（对齐桌面端与 lib/api.ts 401 分支先例，
++      // 2026-10-14-logout-full-reload-clear-cache）——SPA 内跳转让 React Query
++      // 缓存与内存 store 存活，换账号后残留上一用户数据。
++      window.location.assign("/m/login");
+     }
+   }
+ 
+diff --git a/frontend/src/components/__tests__/app-shell.test.tsx b/frontend/src/components/__tests__/app-shell.test.tsx
+index 4ca8cffde..7d53d14ec 100644
+--- a/frontend/src/components/__tests__/app-shell.test.tsx
++++ b/frontend/src/components/__tests__/app-shell.test.tsx
+@@ -15,18 +15,25 @@
+  */
+ 
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+-import { render } from "@testing-library/react";
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+ 
+ import { AppShell } from "@/components/app-shell";
+ import { useSession, type SessionUser } from "@/stores/session";
+ 
+-// ── next/navigation mock：usePathname 用可变变量，每个 it 前改路径 ─────────────
+-const nav = vi.hoisted(() => ({ pathname: "/workspaces" }));
++// ── next/navigation mock：usePathname 用可变变量，每个 it 前改路径；useRouter
++//    用共享 hoisted 对象，登出用例可断言「不再走 router.replace」（2026-10-14-
++//    logout-full-reload-clear-cache）───────────────────────────────────────────
++const nav = vi.hoisted(() => ({
++  pathname: "/workspaces",
++  replace: vi.fn(),
++  push: vi.fn(),
++  refresh: vi.fn(),
++}));
+ 
+ vi.mock("next/navigation", () => ({
+   usePathname: () => nav.pathname,
+-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
++  useRouter: () => nav,
+ }));
+ 
+ // ── useWorkspaceContext mock：可变 workspaceId 供工作区相对菜单用例 ────────────
+@@ -43,8 +50,18 @@ vi.mock("@/lib/use-workspace-context", () => ({
+ vi.mock("@/components/top-bar", () => ({
+   TopBar: () => <div data-testid="top-bar" />,
+ }));
++// 弹窗 mock 成「直接透出 onConfirm 的按钮」：本文件聚焦 app-shell 自己的
++// performLogout 跳转方式断言，弹窗本体交互由 logout-confirm-dialog.test.tsx 覆盖。
+ vi.mock("@/components/logout-confirm-dialog", () => ({
+-  LogoutConfirmDialog: () => <div data-testid="logout-dialog" />,
++  LogoutConfirmDialog: ({
++    onConfirm,
++  }: {
++    onConfirm: () => void | Promise<void>;
++  }) => (
++    <button data-testid="logout-confirm" onClick={() => void onConfirm()}>
++      确认退出
++    </button>
++  ),
+ }));
+ vi.mock("next/image", () => ({
+   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
+@@ -168,3 +185,47 @@ describe("侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）
+     expect(activeLabels()).toEqual([]);
+   });
+ });
++
++// ── 退出登录 → 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）──────
++// 根因：登出曾走 router.replace 的 SPA 内跳转，React Query 缓存与内存 zustand
++// store（工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
++// 契约：确认退出后必须 window.location.assign("/login") 整页跳转（对齐 lib/api.ts
++// 401 被动登出先例），登出路径上禁止 router.replace。
++describe("退出登录 — 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）", () => {
++  // jsdom 的 window.location 是 accessor 属性且 assign 为 not-implemented 占位，
++  // vi.spyOn 拦不住——用 defineProperty 整体替换，afterEach 按原 descriptor 还原。
++  const originalLocationDesc = Object.getOwnPropertyDescriptor(window, "location");
++  let assignMock: ReturnType<typeof vi.fn>;
++
++  beforeEach(() => {
++    assignMock = vi.fn();
++    Object.defineProperty(window, "location", {
++      value: { ...window.location, assign: assignMock },
++      configurable: true,
++    });
++    // performLogout 的 logout POST：stub 成即刻成功，聚焦跳转断言。
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(undefined));
++    useSession.setState({
++      user: ADMIN,
++      accessToken: "tok",
++      refreshToken: "rt",
++      hydrated: true,
++    } as never);
++  });
++
++  afterEach(() => {
++    if (originalLocationDesc) {
++      Object.defineProperty(window, "location", originalLocationDesc);
++    }
++    vi.unstubAllGlobals();
++  });
++
++  it("确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）", async () => {
++    renderShell();
++
++    fireEvent.click(screen.getByTestId("logout-confirm"));
++
++    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/login"));
++    expect(nav.replace).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+index 405d643b1..f8bc9c8ca 100644
+--- a/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
++++ b/frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx
+@@ -153,6 +153,8 @@ describe("ChangeFileTree sync 触发面（2026-10-14-files-refresh-explicit-sync
+     fireEvent.click(getByText("刷新"));
+     await vi.advanceTimersByTimeAsync(0);
+     expect(mockedList).toHaveBeenCalledTimes(1);
+-    expect(mockedList.mock.calls[0][2]).toMatchObject({ sync: true });
++    // 前一行已断言 calls.length=1，? 收窄满足 strict 的 noUncheckedIndexedAccess 面
++    // （2026-10-14-logout-full-reload-clear-cache 顺手修复的既有 TS 债，与登出改动无关）。
++    expect(mockedList.mock.calls[0]?.[2]).toMatchObject({ sync: true });
+   });
+ });
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 3f6c235fd..4693a2964 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -5,7 +5,6 @@ import Image from "next/image";
+ import { usePathname } from "next/navigation";
+ import type { ReactNode } from "react";
+ import { Fragment, useEffect, useMemo, useState } from "react";
+-import { useRouter } from "next/navigation";
+ import {
+   Activity,
+   AlertTriangle,
+@@ -137,7 +136,6 @@ function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
+ const COLLAPSED_KEY = "sidebar-collapsed";
+ 
+ export function AppShell({ children }: { children: ReactNode }) {
+-  const router = useRouter();
+   const pathname = usePathname();
+   // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
+   // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01）。
+@@ -315,7 +313,10 @@ export function AppShell({ children }: { children: ReactNode }) {
+       }
+     } finally {
+       clear();
+-      router.replace("/login");
++      // 2026-10-14-logout-full-reload-clear-cache：必须整页跳转（对齐 lib/api.ts
++      // 401 被动登出先例）——SPA 内跳转会让 React Query 缓存与内存 zustand store
++      // （工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
++      window.location.assign("/login");
+     }
+   };

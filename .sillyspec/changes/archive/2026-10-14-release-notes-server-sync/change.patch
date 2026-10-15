@@ -1,0 +1,76 @@
+diff --git a/.zcode/skills/deploy-to-server/SKILL.md b/.zcode/skills/deploy-to-server/SKILL.md
+index b2991a607..2fe365313 100644
+--- a/.zcode/skills/deploy-to-server/SKILL.md
++++ b/.zcode/skills/deploy-to-server/SKILL.md
+@@ -111,7 +111,37 @@ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+   curl -s http://127.0.0.1:8001/daemon/latest.json; echo'
+ ```
+ 
+-### 回滚
++## 发布记录（每次部署必做，成功失败都写）
++
++部署收尾前两步：**写记录 + 同步服务器**。平台「发布记录」菜单（/deploy-records）的数据源
++是服务器上的只读镜像目录，漏同步 = 服务器页面看不到本次部署。
++
++### 1. 写记录 md（契约与 sillyhub-docker-deploy skill 的「发布记录」节完全一致）
++
++取锚点：`GET https://<域名>/api/deploy-records`（需登录 token）拿最近一条 `commit_to` 与
++`seq`；或本地锚定（`docs/releases/` 目录最大 seq+1，目录空=001）。提交范围
++`git log <from>..HEAD`，按 🆕新增/🔧修复/⚡优化 分组规整成中文总结，写
++`docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`（frontmatter 8 字段 + 正文；失败部署
++也写 status: failed）。模板照 sillyhub-docker-deploy SKILL.md，记录随代码一起 commit 推送。
++
++### 2. 同步到服务器镜像目录（本 skill 专属步骤）
++
++服务器平台经 `/tmp`→`/host-projects` 挂载读记录，镜像目录固定为
++`/tmp/sillyhub-repos/multi-agent-platform/docs/releases/`（workspace
++「multi-agent-platform-镜像」指向它）：
++
++```bash
++ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 \
++  'mkdir -p /tmp/sillyhub-repos/multi-agent-platform/docs/releases'
++scp -i ~/.ssh/aliyun_deploy docs/releases/*.md \
++  root@47.113.145.252:/tmp/sillyhub-repos/multi-agent-platform/docs/releases/
++```
++
++> /tmp 服务器重启可能被清——无所谓：每次部署本节都会全量重传，目录自愈。
++> 平台上另有 workspace 记录的是本机路径（读不到），「multi-agent-platform-镜像」才是服务器
++> 侧发布记录数据源；其它仓库要用同款能力时照抄：mkdir + scp + 建一条指向该目录的 workspace。
++
++## 回滚
+ 
+ ```bash
+ ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 'cd /opt/sillyhub/deploy/deploy && \
+diff --git a/docs/releases/2026-10-14-002-a176393cb.md b/docs/releases/2026-10-14-002-a176393cb.md
+new file mode 100644
+index 000000000..93f320078
+--- /dev/null
++++ b/docs/releases/2026-10-14-002-a176393cb.md
+@@ -0,0 +1,27 @@
++---
++seq: 2
++deployed_at: "2026-10-14 14:52:00"
++status: success
++commit_from: 2dba363c8
++commit_to: a176393cb
++summary: 发布页可达性热修——工作区守卫白名单补 /deploy-records
++agent: zcode-agent
++commits:
++  - sha: e6182b17d
++    message: "docs(release): 首条发布记录 #001——发布记录功能上线+litellm 退役"
++    author: qinyi
++  - sha: a176393cb
++    message: "fix(frontend): WORKSPACE_WHITELIST 补 /deploy-records——dashboard 布局守卫弹回修复"
++    author: qinyi
++---
++
++## 🔧 修复
++
++- **发布记录页打不开（访问被弹回 /workspaces）**：dashboard 布局的工作区守卫要求顶级路由在白名单内，「发布记录」菜单注册时漏加 `/deploy-records`（与 `/projects` 当年同款漏配）。一行白名单热修，仅重建前端镜像重新部署。
++- 首条发布记录 #001 正式入库（docs/releases/，30 提交统计版）。
++
++## 📝 部署验证
++
++- 前端镜像单独重建重传，服务器 load + up frontend
++- 公网 https://crrcdt.ppdmq.top/deploy-records 返回 200，不再重定向
++- 新 bundle 内确认含白名单项 `/deploy-records`

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-litellm-retire",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "ab87d6adbc3a0509d743970552e97813f0f7881c",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "README 的 make up 注释仍列 litellm/litellm-db 与其必设密钥（文档滞后）",
+      "evidence": "README:93 写「make up # postgres / redis / minio / litellm + litellm-db / backend / frontend」、:95 要求设置 LITELLM_MASTER_KEY/LITELLM_DB_PASSWORD，但 compose 已无这两服务且不再强制这两键；按 README 操作不会失败（键被忽略），仅误导。FR-03 承诺范围仅 litellm-config.yaml 引用，README 不在承诺内，不构成违约。",
+      "location": "README.md:93"
+    },
+    {
+      "severity": "P3",
+      "title": "deploy/.env.example 残留 LITELLM_MASTER_KEY/LITELLM_DB_PASSWORD/LITELLM_PORT 键与 LiteLLM 配置段（模板卫生）",
+      "evidence": ".env.example:31-41 仍保留整段 LiteLLM 键与注释；运行面零消费（LITELLM_DB_PASSWORD 在 compose/backend/daemon 非测试代码 grep 零命中；LITELLM_MASTER_KEY 仅 backend Optional 降级语义消费，属声明不动的代码面），功能无害。design 披露只声明「.env 残留无害」未覆盖 .env.example 模板；该模板会随 deploy-to-server skill 的 scp -r 清单同步服务器，或误导维护者。",
+      "location": "deploy/.env.example:31"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-14T12:13:37+08:00"
+}

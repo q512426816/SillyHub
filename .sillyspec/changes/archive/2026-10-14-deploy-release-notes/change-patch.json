@@ -1,0 +1,259 @@
+{
+  "change": "2026-10-14-deploy-release-notes",
+  "baseline": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+  "head": "c06918032ecf859a9f1385ba97e87129a8791cf2",
+  "files": [
+    ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+    "backend/app/main.py",
+    "backend/app/modules/auth/permissions.py",
+    "backend/app/modules/deploy_records/__init__.py",
+    "backend/app/modules/deploy_records/router.py",
+    "backend/app/modules/deploy_records/schema.py",
+    "backend/app/modules/deploy_records/service.py",
+    "backend/app/modules/deploy_records/tests/__init__.py",
+    "backend/app/modules/deploy_records/tests/test_router.py",
+    "backend/app/modules/deploy_records/tests/test_service.py",
+    "backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py",
+    "backend/openapi.json",
+    "backend/pyproject.toml",
+    "backend/tests/modules/auth/test_permissions.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "backend/uv.lock",
+    "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/deploy-records/page.tsx",
+    "frontend/src/components/app-shell.tsx",
+    "frontend/src/lib/__tests__/menu-permissions.test.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/deploy-records.ts",
+    "frontend/src/lib/menu-permissions.ts",
+    "frontend/src/lib/query-keys.ts"
+  ],
+  "totals": {
+    "files": 25,
+    "additions": 1997,
+    "deletions": 24
+  },
+  "savedAt": "2026-10-14T03:40:44.012Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+    "totals": {
+      "files": 25,
+      "additions": 1997,
+      "deletions": 24
+    },
+    "rows": [
+      {
+        "path": ".zcode/skills/sillyhub-docker-deploy/SKILL.md",
+        "additions": 72,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/main.py",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/permissions.py",
+        "additions": 8,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/__init__.py",
+        "additions": 7,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/router.py",
+        "additions": 56,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/schema.py",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/service.py",
+        "additions": 259,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/tests/__init__.py",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/tests/test_router.py",
+        "additions": 122,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/deploy_records/tests/test_service.py",
+        "additions": 249,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py",
+        "additions": 133,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 287,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/pyproject.toml",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_permissions.py",
+        "additions": 135,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "backend/uv.lock",
+        "additions": 2,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+        "additions": 10,
+        "deletions": 10,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx",
+        "additions": 144,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/deploy-records/page.tsx",
+        "additions": 211,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/app-shell.tsx",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/menu-permissions.test.ts",
+        "additions": 10,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 167,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/deploy-records.ts",
+        "additions": 46,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/menu-permissions.ts",
+        "additions": 14,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/query-keys.ts",
+        "additions": 13,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "b798e4916ad42cc1c2757b1d8bd21ca7eb8aeccea78dc7add2b435e804513012",
+  "patchStatus": "ok"
+}

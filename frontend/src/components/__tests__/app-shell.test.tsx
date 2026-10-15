@@ -15,18 +15,25 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { AppShell } from "@/components/app-shell";
 import { useSession, type SessionUser } from "@/stores/session";
 
-// ── next/navigation mock：usePathname 用可变变量，每个 it 前改路径 ─────────────
-const nav = vi.hoisted(() => ({ pathname: "/workspaces" }));
+// ── next/navigation mock：usePathname 用可变变量，每个 it 前改路径；useRouter
+//    用共享 hoisted 对象，登出用例可断言「不再走 router.replace」（2026-10-14-
+//    logout-full-reload-clear-cache）───────────────────────────────────────────
+const nav = vi.hoisted(() => ({
+  pathname: "/workspaces",
+  replace: vi.fn(),
+  push: vi.fn(),
+  refresh: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => nav.pathname,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => nav,
 }));
 
 // ── useWorkspaceContext mock：可变 workspaceId 供工作区相对菜单用例 ────────────
@@ -43,8 +50,25 @@ vi.mock("@/lib/use-workspace-context", () => ({
 vi.mock("@/components/top-bar", () => ({
   TopBar: () => <div data-testid="top-bar" />,
 }));
+
+// 登出清理 mock（2026-10-14-logout-localstorage-user-data-cleanup）：断言登出
+// 跳转前统一清 localStorage 用户域键的钩子被调（键面行为由其自身单测覆盖）。
+const logoutStorage = vi.hoisted(() => ({ clear: vi.fn() }));
+vi.mock("@/lib/logout-storage", () => ({
+  clearUserScopedLocalStorage: logoutStorage.clear,
+}));
+// 弹窗 mock 成「直接透出 onConfirm 的按钮」：本文件聚焦 app-shell 自己的
+// performLogout 跳转方式断言，弹窗本体交互由 logout-confirm-dialog.test.tsx 覆盖。
 vi.mock("@/components/logout-confirm-dialog", () => ({
-  LogoutConfirmDialog: () => <div data-testid="logout-dialog" />,
+  LogoutConfirmDialog: ({
+    onConfirm,
+  }: {
+    onConfirm: () => void | Promise<void>;
+  }) => (
+    <button data-testid="logout-confirm" onClick={() => void onConfirm()}>
+      确认退出
+    </button>
+  ),
 }));
 vi.mock("next/image", () => ({
   default: ({ src, alt }: { src: string; alt: string }) => <img src={src} alt={alt} />,
@@ -166,5 +190,51 @@ describe("侧边栏菜单高亮 — 最长匹配独占（ql-20260903-011-66a4）
     renderShell();
 
     expect(activeLabels()).toEqual([]);
+  });
+});
+
+// ── 退出登录 → 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）──────
+// 根因：登出曾走 router.replace 的 SPA 内跳转，React Query 缓存与内存 zustand
+// store（工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
+// 契约：确认退出后必须 window.location.assign("/login") 整页跳转（对齐 lib/api.ts
+// 401 被动登出先例），登出路径上禁止 router.replace。
+describe("退出登录 — 整页跳转清缓存（2026-10-14-logout-full-reload-clear-cache）", () => {
+  // jsdom 的 window.location 是 accessor 属性且 assign 为 not-implemented 占位，
+  // vi.spyOn 拦不住——用 defineProperty 整体替换，afterEach 按原 descriptor 还原。
+  const originalLocationDesc = Object.getOwnPropertyDescriptor(window, "location");
+  let assignMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    assignMock = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, assign: assignMock },
+      configurable: true,
+    });
+    // performLogout 的 logout POST：stub 成即刻成功，聚焦跳转断言。
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(undefined));
+    useSession.setState({
+      user: ADMIN,
+      accessToken: "tok",
+      refreshToken: "rt",
+      hydrated: true,
+    } as never);
+  });
+
+  afterEach(() => {
+    if (originalLocationDesc) {
+      Object.defineProperty(window, "location", originalLocationDesc);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  it("确认退出 → window.location.assign 整页跳转 /login（不走 router.replace）", async () => {
+    renderShell();
+
+    fireEvent.click(screen.getByTestId("logout-confirm"));
+
+    await waitFor(() => expect(assignMock).toHaveBeenCalledWith("/login"));
+    expect(nav.replace).not.toHaveBeenCalled();
+    // 2026-10-14-logout-localstorage-user-data-cleanup：跳转前清 localStorage 用户域键
+    expect(logoutStorage.clear).toHaveBeenCalledTimes(1);
   });
 });

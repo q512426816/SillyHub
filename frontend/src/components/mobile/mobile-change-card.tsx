@@ -115,6 +115,19 @@ function renderTodoBadge(c: ChangeSummary) {
 }
 
 /**
+ * 出身徽标（2026-10-14-change-center-lineage-tag-and-filter，语义对齐桌面
+ * renderChangeRow 成对标签）：is_thin=true →「轻量」warning（琥珀）；否则
+ * 「完整」neutral（is_thin 为投影必带 bool，undefined 防御归入完整）。
+ */
+function renderLineageBadge(c: ChangeSummary) {
+  return c.is_thin === true ? (
+    <StatusBadge kind="warning">轻量</StatusBadge>
+  ) : (
+    <StatusBadge kind="neutral">完整</StatusBadge>
+  );
+}
+
+/**
  * 负责人四态（task-02 / FR-02 三态 + 2026-10-13-change-owner-backfill 兜底态，
  * 语义对齐桌面 renderOwner）：owner_name 非空 → 用户名（前景色，弱化行内可读）；
  * owner_name 空且 owner_id 有值 → UUID 前 8 位短标识降级（mono）；双空 →
@@ -241,12 +254,15 @@ export function MobileChangeCard({
             {change.description}
           </span>
         )}
-        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 待办徽标 + 活动徽标 */}
+        {/* 阶段徽标（ChangeStepBadge：stage 主行 + step 摘要副行）+ 出身徽标 +
+            待办徽标 + 活动徽标 */}
         <span className="flex flex-wrap items-center gap-2">
           <ChangeStepBadge
             stage={change.current_stage ?? "scan"}
             stepProgress={change.step_progress ?? null}
           />
+          {/* 出身徽标（2026-10-14-change-center-lineage-tag-and-filter）：完整/轻量 */}
+          {renderLineageBadge(change)}
           {/* 待办徽标（testid 槽位便于与负责人/用量「—」占位区分断言） */}
           <span data-testid="mobile-change-todo-badge">
             {renderTodoBadge(change)}

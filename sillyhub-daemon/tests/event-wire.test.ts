@@ -321,15 +321,18 @@ describe('task-runner facade _eventToMessages 委托核心（收敛后一致性�
     })._eventToMessages(ev);
   }
 
-  /** tool_call JSON 内嵌 timestamp（new Date() 实时）→ 比较前抹平。 */
+  /** 消息级时间戳抹平：F2（2026-10-12-session-defects）起 wire 消息带顶层
+   *  timestamp（new Date() 实时，两条转换路径各生成、跨毫秒边界即不等），
+   *  加 tool_call JSON 内嵌 timestamp → 比较前统一抹平。 */
   function stripTimestamp(msgs: Record<string, unknown>[] | null): unknown {
     if (!msgs) return null;
     return msgs.map((m) => {
+      const stripped = 'timestamp' in m ? { ...m, timestamp: '<TS>' } : m;
       if (m['channel'] === 'tool_call') {
         const parsed = JSON.parse(m['content'] as string) as Record<string, unknown>;
-        return { ...m, content: { ...parsed, timestamp: '<TS>' } };
+        return { ...stripped, content: { ...parsed, timestamp: '<TS>' } };
       }
-      return m;
+      return stripped;
     });
   }
 

@@ -1,0 +1,155 @@
+diff --git a/.sillyspec/docs/frontend/modules/components-shared.md b/.sillyspec/docs/frontend/modules/components-shared.md
+index c71792442..5b7374435 100644
+--- a/.sillyspec/docs/frontend/modules/components-shared.md
++++ b/.sillyspec/docs/frontend/modules/components-shared.md
+@@ -20,7 +20,7 @@ created_at: 2026-08-18 01:45:00
+ ## 契约摘要
+ 全局骨架：
+ - `AntdProviders`：全局 antd Provider——`ConfigProvider locale={zhCN}` + 定制 theme + `<AntApp>`（message/modal/notification 静态方法）+ `dayjs.locale('zh-cn')`；RootLayout 唯一子节点。
+-- `AppShell`：dashboard 业务区外壳——侧边栏（菜单按权限渲染，折叠状态持久化 `localStorage['sidebar-collapsed']`）+ TopBar + 退出确认；`usePathname()` 高亮当前菜单。
++- `AppShell`：dashboard 业务区外壳——侧边栏（菜单按权限渲染，折叠状态持久化 `localStorage['sidebar-collapsed']`）+ TopBar + 退出确认；`usePathname()` 高亮当前菜单。侧边栏图标经 `MENU_ICON_MAP` 按 href 解析（2026-10-14-admin-server-status 增 `"/admin/server-status": Server`，lucide）。
+ - `TopBar`：props `{ displayName, onLogout }`；导出 `resolvePlatformSwitch(pathname)` 解析平台切换项。
+ - `ErrorBoundary`：class 组件，`getDerivedStateFromError` + `componentDidCatch`（带 tag 上报 console），兜底子树渲染异常防整页白屏。
+ 工作区相关：
+diff --git a/.sillyspec/docs/frontend/modules/lib-api.md b/.sillyspec/docs/frontend/modules/lib-api.md
+index 6ae20ffb7..cb0785714 100644
+--- a/.sillyspec/docs/frontend/modules/lib-api.md
++++ b/.sillyspec/docs/frontend/modules/lib-api.md
+@@ -46,6 +46,7 @@ apiFetch(path, opts):
+ - 错误体识别 `isApiErrorPayload` 只认 `{code:string, message}` 形状；非 JSON 响应体原样塞进 `details`，`message` 不再用英文 `statusText`——按状态码中文兜底（ql-20260903-012：502/503/504 专用文案，其余「请求失败（HTTP N）」；后端重启窗口网关返回 HTML 时用户不再看到 "Bad Gateway"）。
+ - `_module-map` main_symbols 中的 `getDirectApiBaseUrl` 已不存在于源码（历史符号），以本卡为准。
+ - **2026-10-06-provider-multi-agent-kind / 2026-10-06-provider-model-list**：`api-types.ts` 随两变更再生成——`LlmProvider*` 三 DTO 先切 `agent_kinds: ("claude"|"pi"|"codex")[]`，后切 `models: ProviderModelEntry[]`（`model` / `model_role_mappings` / 行级 `multimodal` / `default_fallback_model` 四旧字段键删除，0 新端点）；`openapi.json` + `api-types.ts` 同提交（规则 21 不留类型债）。
++- **2026-10-14-admin-server-status**：`api-types.ts` 再生成（+7/-4 行）——Permission 联合类型扩员 `system_status:read`（后端枚举 SYSTEM_STATUS_READ），menu-permissions 的 PermissionKey 编译期校验随动闭环；0 新端点（仅 /api/system-status 鉴权变更，schema 零变化）；`openapi.json` 同提交。
+ 
+ ## 人工备注
+ 
+diff --git a/.sillyspec/docs/frontend/modules/lib-health.md b/.sillyspec/docs/frontend/modules/lib-health.md
+index f5feea1d7..6a952575d 100644
+--- a/.sillyspec/docs/frontend/modules/lib-health.md
++++ b/.sillyspec/docs/frontend/modules/lib-health.md
+@@ -9,29 +9,28 @@ created_at: 2026-08-18 01:45:00
+ # 健康检查客户端（lib-health）
+ 
+ ## 定位
+-后端健康检查的前端 API 客户端，极薄（源文件 11 行）。单一函数封装 `GET /api/health`，类型从 OpenAPI 生成（`HealthResponse`，后端 `health/schema.py`，经 `pnpm gen:types` 产出）。消费方为 `/settings` 设置页（后端依赖存活与版本信息展示）。
++后端健康检查的前端 API 客户端，极薄。封装 `GET /api/health` 与 `GET /api/system-status` 两函数，类型从 OpenAPI 生成（`HealthResponse` / `SystemStatusResponse`，后端 `health/schema.py`，经 `pnpm gen:types` 产出）。消费方为 `/settings` 设置页（依赖存活与版本信息）与 `/admin/server-status` 服务器信息页（性能/统计/依赖三卡，2026-10-14-admin-server-status 起）。
+ 
+ ## 契约摘要
+-- `getHealth(): Promise<HealthResponse>` — 无参 GET `/api/health`，响应直接透传，无 query / 无 body。
+-- `HealthResponse` = `components["schemas"]["HealthResponse"]`（生成版再导出），字段：
+-  - `status: "ok" | "degraded"` — `ok` 当且仅当所有依赖报 ok；
+-  - `db: "ok" | "down"`、`redis: "ok" | "down"` — 依赖存活；
+-  - `version` / `commit_sha` — 后端构建标识；
+-  - `server_time`（ISO 时间）、`environment`（运行环境名）。
++- `getHealth(): Promise<HealthResponse>` — 无参 GET `/api/health`（公开端点），响应直接透传。
++- `getSystemStatus(): Promise<SystemStatusResponse>` — 无参 GET `/api/system-status`，**需登录且持 `system_status:read` 权限**（2026-10-14-admin-server-status D-001@v2 由公开收紧，platform:admin 直通）；403 抛 ApiError、401 走全局拦截。
++- `HealthResponse` 字段：`status` / `db` / `redis` / `version` / `commit_sha` / `server_time` / `environment`。
++- `SystemStatusResponse` 字段：`server_time` + `cpu_percent` / `memory_percent` / `memory_used_mb` / `memory_total_mb` / `disk_percent` / `disk_used_gb` / `disk_total_gb` + 业务计数 `tasks` / `projects` / `milestones` / `users`。
+ 
+ ## 关键逻辑
+ ```
+-getHealth() = apiFetch("/api/health")
+-// 无缓存、无轮询、无状态；刷新节奏完全由调用方组件控制
++getHealth() = apiFetch("/api/health")            // 公开，无需鉴权
++getSystemStatus() = apiFetch("/api/system-status") // Bearer 经 apiFetch 自动携带
++// 均无缓存、无轮询、无状态；刷新节奏完全由调用方组件控制
+ ```
+ 
+ ## 注意事项
+-- **旧卡描述的 `getSystemStatus()`（CPU/内存/业务计数，`/api/system-status`）已不存在**于本文件——按旧卡找函数会扑空；当前模块仅剩 `getHealth`。
+-- 类型已迁 OpenAPI 生成，勿手写 HealthResponse 结构；后端 health schema 改动经 `pnpm gen:types` 暴露漂移。
+-- 该端点用于登录后的设置页展示；未登录探活/部署验证不在此模块（backend 侧另有公开语义，前端不封装）。
++- `getSystemStatus()` 曾于 2026-07-24 死代码清理中被删（随首页看板），2026-10-14-admin-server-status task-02 随服务器信息页恢复——历史卡「已不存在」的描述作废。
++- 类型从 OpenAPI 生成，勿手写结构；后端 health schema 改动经 `pnpm gen:types` 暴露漂移。
++- `/api/health` 保持公开（负载均衡语义）；`/api/system-status` 已收紧——新消费方必须考虑 403 降级。
+ - 展示失败时走通用 `errMessage`（lib-errors），本模块不做错误翻译。
+-- `status="degraded"` 语义是「任一依赖 down」而非整站不可用（db/redis 明细字段区分单点故障）；UI 应区分总体状态与依赖明细，勿把 degraded 一律渲染成「后端挂了」。
+-- `version`/`commit_sha`/`environment` 可用于设置页核对实际部署的构建标识，与部署流程（COMMIT_SHA build arg）对账。
++- `status="degraded"` 语义是「任一依赖 down」而非整站不可用；UI 应区分总体状态与依赖明细。
++- `version`/`commit_sha`/`environment` 可用于核对实际部署的构建标识，与部署流程（COMMIT_SHA build arg）对账。
+ 
+ ## 人工备注
+ 
+diff --git a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+index 9df28f77a..9b618e8b9 100644
+--- a/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
++++ b/.sillyspec/docs/frontend/modules/lib-menu-permissions.md
+@@ -30,7 +30,7 @@ created_at: 2026-08-18 01:45:00
+ - **config**（4 项）：我的供应商（llm_provider:read，sidebar-menu-restructure 新增）、API 密钥（api_key:admin）、Git 身份（git_identity:admin）、守护进程运行时（runtime:admin，自 system 移入，D-006）。
+ - **governance**（3 项）：审批中心（change:approve / task:read / task:run_agent）、审计中心（change:read）、事件（incident:read / deploy:staging）。
+   - 2026-10-08-page-audit：审批中心补 task:read（agent-sessions / dialogs 列表端点）+ task:run_agent（会话权限面板 daemon 端点族）；审计中心补 change:read（工作区审计日志端点 CHANGE_READ）；事件补 deploy:staging（上报端点鉴权）。rbac-dead-permissions-cleanup：task:approve / platform:audit:read 死键删除，两卡收敛为页面真实所需。
+-- **system**（5 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）。
++- **system**（6 项）：用户、组织、角色（/admin/*）、设置（settings:admin）、菜单管理（/admin/menus，menu:admin，2026-09-18 新增）、服务器信息（/admin/server-status，system_status:read，2026-10-14-admin-server-status 新增——组末尾落位使既有锚定索引 18/19/20 不动、ppm 组声明序 +1，admin/menus 测试锚同提交重算；后端 GET /api/system-status 同权限收紧）。
+ - **ppm**（14 项）：全部 absolute 指向 /ppm/*，每菜单独立专属 key（ppm:workbench:view / ppm:project:read / ppm:kanban:view / ppm:weekly-plan:view 等）。
+   - 项目成员、里程碑明细带 navHidden（二级页面，由父页跳转进入）。
+   - 菜单权限为前端可见性语义；后端 plan 域仅认证不授权（get_current_principal + DataScope）。
+diff --git a/backend/app/modules/deploy_records/service.py b/backend/app/modules/deploy_records/service.py
+index 6e04dc8ac..14e6ee543 100644
+--- a/backend/app/modules/deploy_records/service.py
++++ b/backend/app/modules/deploy_records/service.py
+@@ -241,8 +241,12 @@ class DeployRecordService:
+                 continue
+             try:
+                 text = entry.read_text(encoding="utf-8")
+-            except OSError:
+-                # 读失败（权限/编码等）按 invalid 容错，不炸扫描（FR-04 同口径）
++            except (OSError, UnicodeDecodeError):
++                # 读失败（权限等 IO 错）与解码失败（非 UTF-8 字节，如 Windows 侧
++                # GBK 手写文件）都按 invalid 容错，不炸扫描（FR-04 同口径）。
++                # UnicodeDecodeError 是 ValueError 子类而非 OSError，须显式列捕
++                # （2026-10-15-deploy-records-unicode-tolerance：原 except OSError
++                # 漏接致单个坏编码文件把整个列表打成 500）。
+                 parsed_list.append(
+                     _ParsedRecord(
+                         file_name=entry.name,
+diff --git a/backend/app/modules/deploy_records/tests/test_service.py b/backend/app/modules/deploy_records/tests/test_service.py
+index 35c62f3f4..e6e0a0561 100644
+--- a/backend/app/modules/deploy_records/tests/test_service.py
++++ b/backend/app/modules/deploy_records/tests/test_service.py
+@@ -207,6 +207,46 @@ async def test_invalid_variants_tolerated(db_session, tmp_path) -> None:
+     assert [i.file_name for i in items] == sorted([i.file_name for i in items], reverse=True)
+ 
+ 
++async def test_non_utf8_file_degrades_to_invalid(db_session, tmp_path) -> None:
++    """非 UTF-8（GBK）文件 → invalid 容错条目，不炸整表/详情（FR-04 编码缺口）。
++
++    change 2026-10-15-deploy-records-unicode-tolerance：UnicodeDecodeError 是
++    ValueError 子类、不被 except OSError 捕获——修复前本用例因解码异常穿透
++    _iter_files 使 list_records 抛错而失败（先红后绿）。
++    """
++    root = _make_ws_dir(tmp_path, "ws_gbk", {"2026-10-15-001-ok.md": VALID_MD})
++    # GBK 字节 + 显式非法 UTF-8 序列：双保险保证 read_text("utf-8") 必抛 UnicodeDecodeError
++    (root / "docs" / "releases" / "2026-10-15-002-gbk.md").write_bytes(
++        "中文发布记录".encode("gbk") + b"\xff\xfe"
++    )
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="ws-gbk",
++        slug=f"ws-gbk-{uuid.uuid4().hex[:6]}",
++        root_path=str(root),
++        type="other",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    svc = DeployRecordService(db_session)
++
++    # 列表：GBK 条目降级 invalid，合法条目不受影响（修复前此处抛 UnicodeDecodeError）
++    items = await svc.list_records()
++    assert len(items) == 2
++    gbk = next(i for i in items if i.file_name == "2026-10-15-002-gbk.md")
++    assert gbk.status == "invalid"
++    assert gbk.deployed_at is None
++    assert gbk.summary  # 固定「记录文件格式异常…」文案非空
++    ok = next(i for i in items if i.file_name == "2026-10-15-001-ok.md")
++    assert ok.status == "success"
++    assert ok.seq == 2
++
++    # 详情：invalid 可读不抛错（content 为空串）
++    detail = await svc.get_record(f"{ws.id}/2026-10-15-002-gbk")
++    assert detail.status == "invalid"
++    assert detail.content == ""
++
++
+ # ── get_record ───────────────────────────────────────────────────────
+ 
+ 

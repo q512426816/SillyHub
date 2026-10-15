@@ -1,0 +1,100 @@
+{
+  "change": "2026-10-14-logout-full-reload-clear-cache",
+  "baseline": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+  "head": "45d484f7dc224059ce472af779b82b03aa0a9b56",
+  "files": [
+    "frontend/src/app/m/account/page.test.tsx",
+    "frontend/src/app/m/account/page.tsx",
+    "frontend/src/components/__tests__/app-shell.test.tsx",
+    "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+    "frontend/src/components/app-shell.tsx"
+  ],
+  "totals": {
+    "files": 5,
+    "additions": 105,
+    "deletions": 11
+  },
+  "savedAt": "2026-10-14T02:47:08.503Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 5,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "f17f301acca3aca2f40df9dbf575a81530fc9fa5",
+    "totals": {
+      "files": 5,
+      "additions": 105,
+      "deletions": 11
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/m/account/page.test.tsx",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/m/account/page.tsx",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/__tests__/app-shell.test.tsx",
+        "additions": 66,
+        "deletions": 5,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/__tests__/change-file-tree-autorefresh.test.tsx",
+        "additions": 3,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/app-shell.tsx",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "fd6355cc9a4a196dbc9b216873bffc17133dce178efca0ebda43121d7fad1e9d",
+  "patchStatus": "ok"
+}

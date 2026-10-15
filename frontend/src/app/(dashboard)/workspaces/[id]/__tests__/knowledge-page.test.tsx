@@ -38,7 +38,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // （sessions/page.test 同款先例）。
 const scrollIntoViewSpy = vi.fn();
 beforeAll(() => {
-  Element.prototype.scrollIntoView = scrollIntoViewSpy;
+  // scrollIntoView 的滚动目标是 this 而非首参——包装一层把元素记为 spy 首参
+  // （复合锚用例要断言「滚到了哪张卡」，2026-10-14-decision-anchor-change-qualified）。
+  Element.prototype.scrollIntoView = function (
+    this: Element,
+    ...args: Parameters<typeof Element.prototype.scrollIntoView>
+  ) {
+    scrollIntoViewSpy(this, ...args);
+  } as typeof Element.prototype.scrollIntoView;
 });
 afterAll(() => {
   delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
@@ -149,15 +156,16 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => navState.searchParams,
 }));
 
-import KnowledgePage, {
-  normalizeKnowledgeFileParam,
-} from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
 import { WorkspaceTabs } from "@/components/workspace-tabs";
 import {
   getKnowledge,
   getKnowledgeStats,
   listDistillTasks,
   listKnowledge,
+  // 2026-10-14-assets-knowledge-popup-preview：归一函数迁 lib 单一源，import 随迁
+  // （vi.mock 的 importOriginal 透传真实实现，行为断言不变）。
+  normalizeKnowledgeFileParam,
   previewMergeKnowledge,
   rejectKnowledge,
 } from "@/lib/knowledge";
@@ -860,6 +868,56 @@ describe("外部深链落位（2026-09-25-change-detail-assets-usability / FR-01
         '[data-entry-anchor="fr/host-fs-handler.md#FR-host-fs-handler-001"]',
       ),
     ).not.toBeNull();
+  });
+
+  // 复合锚（2026-10-14-decision-anchor-change-qualified / FR-03）：anchor 带
+  // 「变更号#决策号」前缀时先按复合属性精确匹配——聚合决策文件同 id 跨变更
+  // 重复（decisions/unmapped.md 实证 D-003@v1 ×3），裸锚首卡误命中。
+  it("anchor 含变更号前缀（变更号#决策号）：先试复合锚精确落卡", async () => {
+    const dupContent = [
+      "---",
+      "author: q",
+      "---",
+      "",
+      "# 决策",
+      "",
+      "## D-003@v1 : 别变更的三波交付决策",
+      "状态：active",
+      "变更：2026-08-29-other",
+      "",
+      "## D-003@v1 : 本变更的磁盘旁路决策",
+      "状态：active",
+      "变更：k-2026-mine",
+      "",
+    ].join("\n");
+    navState.searchParams = new URLSearchParams({
+      file: "knowledge/decisions/daemon.md",
+      anchor: "k-2026-mine#D-003@v1",
+    });
+    mockGet.mockResolvedValue(
+      entry({
+        filename: "decisions/daemon.md",
+        path: ".sillyspec/knowledge/decisions/daemon.md",
+        zone: "decisions",
+        title: "决策",
+        content: dupContent,
+      }),
+    );
+    renderPage();
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(WS, "decisions/daemon.md"));
+    await screen.findByTestId("entry-card-list");
+
+    // 两张同裸锚卡都在；滚动目标锁定 k-2026-mine 的复合锚卡（非文件序首卡）。
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll('[data-entry-anchor="decisions/daemon.md#D-003@v1"]'),
+      ).toHaveLength(2),
+    );
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
+    expect(target.getAttribute("data-entry-anchor-qualified")).toBe(
+      "decisions/daemon.md#k-2026-mine#D-003@v1",
+    );
   });
 
   it("前缀容错：.sillyspec/knowledge/ 与 .sillyspec/ 写法落到同一文件", async () => {

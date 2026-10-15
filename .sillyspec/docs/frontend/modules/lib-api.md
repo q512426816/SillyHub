@@ -46,6 +46,7 @@ apiFetch(path, opts):
 - 错误体识别 `isApiErrorPayload` 只认 `{code:string, message}` 形状；非 JSON 响应体原样塞进 `details`，`message` 不再用英文 `statusText`——按状态码中文兜底（ql-20260903-012：502/503/504 专用文案，其余「请求失败（HTTP N）」；后端重启窗口网关返回 HTML 时用户不再看到 "Bad Gateway"）。
 - `_module-map` main_symbols 中的 `getDirectApiBaseUrl` 已不存在于源码（历史符号），以本卡为准。
 - **2026-10-06-provider-multi-agent-kind / 2026-10-06-provider-model-list**：`api-types.ts` 随两变更再生成——`LlmProvider*` 三 DTO 先切 `agent_kinds: ("claude"|"pi"|"codex")[]`，后切 `models: ProviderModelEntry[]`（`model` / `model_role_mappings` / 行级 `multimodal` / `default_fallback_model` 四旧字段键删除，0 新端点）；`openapi.json` + `api-types.ts` 同提交（规则 21 不留类型债）。
+- **2026-10-14-admin-server-status**：`api-types.ts` 再生成（+7/-4 行）——Permission 联合类型扩员 `system_status:read`（后端枚举 SYSTEM_STATUS_READ），menu-permissions 的 PermissionKey 编译期校验随动闭环；0 新端点（仅 /api/system-status 鉴权变更，schema 零变化）；`openapi.json` 同提交。
 
 ## 人工备注
 

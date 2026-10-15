@@ -19,7 +19,9 @@ import { useSession } from "@/stores/session";
 // 2026-08-19-cross-workspace-team-mission task-15 补：加入 /projects（项目维度
 // 跨工作区团队会话 /projects/{id}/missions，不依赖工作区上下文；ppm/projects 页
 // 「Agent 团队」入口曾因漏配被守卫弹回 /workspaces，部署实测发现）。
-const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles", "/sessions", "/projects"];
+// /deploy-records：发布记录平台级聚合页（2026-10-14-deploy-release-notes；
+// 同款漏配——首次部署实测被弹回 /workspaces，热修补丁）。
+const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles", "/sessions", "/projects", "/deploy-records"];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();

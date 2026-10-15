@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 
 import { FilePreview } from "@/components/explorer/file-preview";
 import { DiffView } from "@/components/files/structured-views";
+import { EntryCardList } from "@/components/knowledge/entry-card-list";
 import {
   Dialog,
   DialogContent,
@@ -15,10 +16,24 @@ import {
 } from "@/components/ui/dialog";
 import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
 import { fetchSearch } from "@/lib/explorer";
+import { getKnowledge, normalizeKnowledgeFileParam } from "@/lib/knowledge";
 
 interface ChangeAssetsCardProps {
   workspaceId: string;
   changeId: string;
+  /**
+   * 变更 key（``2026-10-14-xxx`` 形态，详情页从 ChangeRead 透传）。FR/决策行的
+   * 深链 anchor 用它拼「变更号#决策号」复合形态——聚合决策文件里多个变更各有
+   * 同名决策号（decisions/unmapped.md 实证），裸 id 首卡误命中（
+   * 2026-10-14-decision-anchor-change-qualified）。缺省退化为裸 id 旧路径。
+   */
+  changeKey?: string;
+}
+
+/** 知识条目预览目标：file=spec 树相对路径（深链原样），anchor=条目 id（可选）。 */
+interface KnowledgePreviewTarget {
+  file: string;
+  anchor?: string;
 }
 
 // ── 测试文件路径解析（2026-09-26-assets-testfile-path-resolve / FR-01~02）────
@@ -113,8 +128,6 @@ export function resolveTestFilePath(
  *
  * 可用性修复（2026-09-25-change-detail-assets-usability / FR-01~04）——三处
  * 「点了看不到东西」各自补齐落点：
- * - FR/决策索引行：href 带 `?file=&anchor=`（file 为 spec 树相对路径，知识库页
- *   做前缀归一后选中文件并滚动到该条目卡）；
  * - 测试绑定行：测试文件路径可点，弹窗内走 explorer 的 FilePreview 读仓库内
  *   文件本体（测试文件在仓库里、不在 spec 镜像里，变更文件树读不到）；行首锚点
  *   标注「变更内」——它是该变更 requirements.md 的 FR 编号，与知识库 FR 索引
@@ -122,8 +135,13 @@ export function resolveTestFilePath(
  * - 归档留档：除统计外列出 change-patch.json 的文件清单，点某文件看它在
  *   change.patch 中的红绿 diff 切片（后端切片，冻结在收尾时点——与范围对账的
  *   实时窗口锚不同源，故不复用范围对账的单文件比对弹窗）。
+ *
+ * 知识类条目弹窗预览（2026-10-14-assets-knowledge-popup-preview / FR-01~03）：
+ * FR 索引 / 决策蒸馏 / 知识触达三组行点击不再整页跳知识库，改为弹窗展示条目
+ * 具体内容（KnowledgePreviewBody：getKnowledge + EntryCardList + 锚点定位），
+ * 弹窗头部「在知识库中打开」保留原 file+anchor 深链跳转能力。
  */
-export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProps) {
+export function ChangeAssetsCard({ workspaceId, changeId, changeKey }: ChangeAssetsCardProps) {
   const query = useQuery({
     queryKey: ["changeAssets", workspaceId, changeId],
     queryFn: () => getChangeAssets(workspaceId, changeId),
@@ -140,6 +158,15 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
   const [patchPath, setPatchPath] = useState<string | null>(null);
   /** 模块文档预览目标（镜像内相对路径，null = 关）。 */
   const [moduleDoc, setModuleDoc] = useState<string | null>(null);
+  // 知识条目预览目标（2026-10-14-assets-knowledge-popup-preview）：FR 索引 /
+  // 决策蒸馏 / 知识触达三组行点击在此弹出内容预览（不再整页跳知识库），弹窗头
+  // 部保留原深链跳转。null = 关。
+  const [knowledgeTarget, setKnowledgeTarget] =
+    useState<KnowledgePreviewTarget | null>(null);
+  // FR/决策行深链 anchor：变更号#决策号 复合形态（changeKey 缺省退裸 id）——
+  // 聚合决策文件里同 id 跨变更重复，裸 id 首卡误命中
+  // （2026-10-14-decision-anchor-change-qualified）。
+  const qualifiedAnchor = (id: string) => (changeKey ? `${changeKey}#${id}` : id);
 
   const patchQ = useQuery({
     queryKey: ["changePatchFile", workspaceId, changeId, patchPath],
@@ -231,13 +258,14 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               </div>
               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {data?.fr_entries?.map((e) => (
-                <Link
+                <button
                   key={e.id}
-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
-                    e.file,
-                  )}&anchor=${encodeURIComponent(e.id)}`}
-                  title={`打开知识库并定位到 ${e.id}`}
-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+                  type="button"
+                  onClick={() =>
+                    setKnowledgeTarget({ file: e.file, anchor: qualifiedAnchor(e.id) })
+                  }
+                  title={`查看 ${e.id} 条目内容（弹窗内可再跳知识库）`}
+                  className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
                 >
                   <span className="font-mono text-[10px] text-brand-700">{e.id}</span>
                   <span className="min-w-0 flex-1 truncate">{e.title}</span>
@@ -246,7 +274,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                       {e.status}
                     </span>
                   ) : null}
-                </Link>
+                </button>
               ))}
               </div>
             </div>
@@ -262,13 +290,14 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               </div>
               <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
               {data?.decisions?.map((d) => (
-                <Link
+                <button
                   key={d.id}
-                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
-                    d.file,
-                  )}&anchor=${encodeURIComponent(d.id)}`}
-                  title={`打开知识库并定位到 ${d.id}`}
-                  className="flex items-baseline gap-2 border-b border-dashed py-1 text-xs last:border-b-0 hover:underline"
+                  type="button"
+                  onClick={() =>
+                    setKnowledgeTarget({ file: d.file, anchor: qualifiedAnchor(d.id) })
+                  }
+                  title={`查看 ${d.id} 条目内容（弹窗内可再跳知识库）`}
+                  className="flex w-full items-baseline gap-2 border-b border-dashed py-1 text-left text-xs last:border-b-0 hover:underline"
                 >
                   <span className="font-mono text-[10px] text-cyan-700">{d.id}</span>
                   <span className="min-w-0 flex-1 truncate">{d.title}</span>
@@ -277,7 +306,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                       {d.status}
                     </span>
                   ) : null}
-                </Link>
+                </button>
               ))}
               </div>
             </div>
@@ -287,7 +316,8 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
               knowledge-touch-marker-sunset 口径统一）：本变更执行期 CLI 知识注入
               命中的知识库条目（knowledge_hits inject 遥测），在途/归档同源同文案
               （在途随执行增长、归档后定格）。整文件路由收拢 chip 行、锚点条目按
-              文件分组；行点击跳知识库深链。 */}
+              文件分组；行点击弹窗预览条目内容（2026-10-14-assets-knowledge-popup-
+              preview），弹窗内可再跳知识库。 */}
           {touchList.length > 0 ? (
             <div className="flex h-64 flex-col overflow-hidden rounded border border-border/60 p-2" data-testid="change-assets-knowledge-touch">
               <div className="flex shrink-0 items-center justify-between text-[11px] font-medium text-muted-foreground">
@@ -303,16 +333,15 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                   <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 border-b border-dashed pb-1.5">
                     <span className="text-[10px] text-muted-foreground/70">整文件</span>
                     {touchFileChips.map((e) => (
-                      <Link
+                      <button
                         key={`chip-${e.file}`}
-                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
-                          e.file ?? "",
-                        )}`}
-                        title={`打开知识库文件 ${e.file}（整文件路由注入）`}
+                        type="button"
+                        onClick={() => setKnowledgeTarget({ file: e.file ?? "" })}
+                        title={`查看文件 ${e.file}（整文件路由注入）`}
                         className="rounded-full border border-border/60 bg-muted/40 px-1.5 py-px font-mono text-[10px] hover:border-brand-300 hover:bg-brand-50/60"
                       >
                         {e.file}
-                      </Link>
+                      </button>
                     ))}
                   </div>
                 ) : null}
@@ -322,24 +351,26 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                     data-testid={`change-assets-touch-group-${file}`}
                     className="border-b border-dashed py-1 last:border-b-0"
                   >
-                    <Link
-                      href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(file)}`}
-                      title={`打开知识库文件 ${file}`}
+                    <button
+                      type="button"
+                      onClick={() => setKnowledgeTarget({ file })}
+                      title={`查看文件 ${file}`}
                       className="font-mono text-[10px] text-muted-foreground hover:underline"
                     >
                       {file}
                       <span className="ml-1 font-sans text-[9px] text-muted-foreground/70">
                         （{entries.length}）
                       </span>
-                    </Link>
+                    </button>
                     {entries.map((e) => (
-                      <Link
+                      <button
                         key={`${e.file}#${e.id}`}
-                        href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
-                          e.file ?? "",
-                        )}&anchor=${encodeURIComponent(e.id ?? "")}`}
-                        title={`打开知识库并定位到 ${e.id}`}
-                        className="flex items-baseline gap-2 py-0.5 pl-2 text-xs hover:underline"
+                        type="button"
+                        onClick={() =>
+                          setKnowledgeTarget({ file: e.file ?? "", anchor: e.id || undefined })
+                        }
+                        title={`查看 ${e.id} 条目内容（弹窗内可再跳知识库）`}
+                        className="flex w-full items-baseline gap-2 py-0.5 pl-2 text-left text-xs hover:underline"
                       >
                         {/* 同 slug 只显示一份（2026-10-09：live 行 id==title，双栏连排两遍是噪声） */}
                         {e.id === e.title ? (
@@ -350,7 +381,7 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
                             <span className="min-w-0 flex-1 truncate">{e.title}</span>
                           </>
                         )}
-                      </Link>
+                      </button>
                     ))}
                   </div>
                 ))}
@@ -597,7 +628,128 @@ export function ChangeAssetsCard({ workspaceId, changeId }: ChangeAssetsCardProp
           </div>
         </DialogContent>
       </Dialog>
+      {/* 知识条目预览弹窗（2026-10-14-assets-knowledge-popup-preview / FR-01~03）：
+          FR 索引 / 决策蒸馏 / 知识触达三组行点击在此展示条目具体内容——getKnowledge
+          取全文 + EntryCardList 条目卡渲染 + 锚点定位，与知识库页卡片视图同源同
+          渲染器；头部「在知识库中打开」保留原 file+anchor 深链（弹窗内可跳转）。 */}
+      <Dialog
+        open={knowledgeTarget !== null}
+        onOpenChange={(v) => !v && setKnowledgeTarget(null)}
+      >
+        <DialogContent className="flex h-[80vh] max-w-4xl flex-col gap-0 p-0">
+          <DialogHeader className="border-b px-4 py-3">
+            <div className="flex items-center justify-between gap-3 pr-6">
+              <DialogTitle className="text-sm">知识条目</DialogTitle>
+              {knowledgeTarget !== null ? (
+                <Link
+                  href={`/workspaces/${workspaceId}/knowledge?file=${encodeURIComponent(
+                    knowledgeTarget.file,
+                  )}${
+                    knowledgeTarget.anchor
+                      ? `&anchor=${encodeURIComponent(knowledgeTarget.anchor)}`
+                      : ""
+                  }`}
+                  title="在知识库页打开并定位到该条目"
+                  className="shrink-0 text-[11px] text-brand-600 hover:underline"
+                >
+                  在知识库中打开
+                </Link>
+              ) : null}
+            </div>
+            <DialogDescription className="truncate font-mono text-[11px]">
+              {knowledgeTarget?.file}
+              {knowledgeTarget?.anchor ? `#${knowledgeTarget.anchor}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+            {knowledgeTarget !== null ? (
+              <KnowledgePreviewBody
+                workspaceId={workspaceId}
+                file={knowledgeTarget.file}
+                anchor={knowledgeTarget.anchor}
+                onJumpToEntry={(jumpFile, jumpAnchor) =>
+                  setKnowledgeTarget({ file: jumpFile, anchor: jumpAnchor })
+                }
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
+  );
+}
+
+/**
+ * 知识条目预览弹窗主体（2026-10-14-assets-knowledge-popup-preview / FR-01~02）——
+ * file 先经 normalizeKnowledgeFileParam 归一（lib 单一源，与知识库页深链落位同
+ * 一套前缀容错），再 getKnowledge 取全文交 EntryCardList 渲染（zone 取自响应，
+ * 缺省 top）；带锚点时内容落定后按 data-entry-anchor 滚到目标条目卡，查无该卡
+ * 静默落文件级顶部（降级兼容旧锚/改名小节，同知识库页深链口径）。取数失败就
+ * 近展示错误文案（不吞），弹窗头部深链不受影响。onJumpToEntry 承接条目卡互跳
+ * （依据决策 / INDEX 路由行），由调用方切换预览目标。
+ */
+function KnowledgePreviewBody({
+  workspaceId,
+  file,
+  anchor,
+  onJumpToEntry,
+}: {
+  workspaceId: string;
+  file: string;
+  anchor?: string;
+  onJumpToEntry?: (filename: string, anchor?: string) => void;
+}) {
+  const filename = normalizeKnowledgeFileParam(file);
+  const q = useQuery({
+    queryKey: ["changeAssetsKnowledgePreview", workspaceId, filename],
+    queryFn: () => getKnowledge(workspaceId, filename),
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // 锚点条目卡定位：effect 在内容渲染提交后执行，DOM 已就绪，单次查询即可
+  // （无需知识库页深链的有界 rAF 重试——那是外部入口跨提交时序的防抖）。
+  // anchor 带「变更号#决策号」复合形态（FR/决策行）时优先按复合属性精确匹配
+  // （聚合决策文件同 id 跨变更重复，裸锚首卡误命中）；查无退裸锚——兜底键必须
+  // 剥掉变更号前缀（裸属性值域恒为 文件#id，带前缀查等于死选择器，评审 P1 实证
+  // 2026-10-14-decision-anchor-change-qualified）。
+  useEffect(() => {
+    if (!q.isSuccess || !anchor) return;
+    const key = `${filename}#${anchor}`;
+    const bareKey = anchor.includes("#")
+      ? `${filename}#${anchor.split("#").slice(1).join("#")}`
+      : key;
+    const el =
+      (anchor.includes("#")
+        ? document.querySelector(`[data-entry-anchor-qualified="${CSS.escape(key)}"]`)
+        : null) ?? document.querySelector(`[data-entry-anchor="${CSS.escape(bareKey)}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [q.isSuccess, anchor, filename]);
+
+  if (q.isPending) {
+    return (
+      <p className="py-6 text-center text-xs text-muted-foreground">
+        正在加载知识条目…
+      </p>
+    );
+  }
+  if (q.isError) {
+    return (
+      <p className="py-6 text-center text-xs text-destructive">
+        {q.error instanceof Error ? q.error.message : "加载失败"}
+      </p>
+    );
+  }
+  return (
+    <EntryCardList
+      filename={filename}
+      zone={q.data.zone || "top"}
+      content={q.data.content ?? ""}
+      // 弹窗内条目卡互跳（依据决策 / INDEX 路由行）：经回调切换预览目标，
+      // 不留空操作死链。
+      onJumpToEntry={onJumpToEntry}
+      className="max-h-full overflow-y-auto pr-1"
+    />
   );
 }
 

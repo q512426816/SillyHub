@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-change-center-lineage-tag-and-filter",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-01",
+      "tests": [
+        "changes/__tests__/page.test.tsx「完整出身行显示完整标签、轻量出身行显示轻量标签」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-02",
+      "tests": [
+        "changes/__tests__/page.test.tsx「分类下拉选择轻量变更仅显示轻量出身行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_lineage_filter.py「lineage thin 命中归档 steps 兜底行」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-04",
+      "tests": [
+        "changes/__tests__/page.test.tsx「阶段下拉不含轻量变更选项」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-05",
+      "tests": [
+        "backend/app/modules/change/tests/test_change_lineage_filter.py「lineage thin/full 与 is_thin 投影三分支一致」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-14-change-center-lineage-tag-and-filter:flow:测试绑定FR-06",
+      "tests": [
+        "changes/__tests__/page.m-changes.test.tsx「筛选抽屉分类维度」",
+        "frontend/src/components/mobile/mobile-change-card.test.tsx「移动卡片出身标签」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-14-change-center-lineage-tag-and-filter"
+    }
+  ]
+}

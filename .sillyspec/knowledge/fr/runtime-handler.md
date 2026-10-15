@@ -434,7 +434,7 @@ created_at: 2026-10-08T11:44:49.977Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-01
-  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 / 转义闭合引号吞旗标，先红后绿钉住）」
+  tests: sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b 反斜杠样本全拒（2026-10-09 审查加固：结尾 / 转义闭合引号吞旗标，先红后绿钉住）」
   reason: spec
   state: candidate
   discovery: machine
@@ -453,7 +453,7 @@ created_at: 2026-10-08T11:44:49.977Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-02
-  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b（旧黑名单形态下反斜杠样本放行即红——先红实证由字符集 diff 可推）」
+  tests: sillyhub-daemon/tests/knowledge-governance-handler.test.ts「②b（旧黑名单形态下反斜杠样本放行即红——先红实证由字符集 diff 可推）」
   reason: spec
   state: candidate
   discovery: machine
@@ -472,7 +472,7 @@ created_at: 2026-10-08T11:44:49.977Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-09-graph-text-backslash:flow:测试绑定FR-03
-  tests: test/sillyhub-daemon/tests/knowledge-governance-handler.test.ts「①/②/③ 既有用例 + ③ 正常节点 id 样本全放行；26 测绿 + tsc 0（已实测）」
+  tests: sillyhub-daemon/tests/knowledge-governance-handler.test.ts「①/②/③ 既有用例 + ③ 正常节点 id 样本全放行；26 测绿 + tsc 0（已实测）」
   reason: spec
   state: candidate
   discovery: machine

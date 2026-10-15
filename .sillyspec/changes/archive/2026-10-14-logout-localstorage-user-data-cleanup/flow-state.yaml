@@ -1,0 +1,50 @@
+tier: thick
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：登出换账号后 localStorage 里按 sessionId/groupId 索引的用户数据（会话草稿、群聊草稿、未读锚点、活性状态等）不清——A 用户的草稿/未读残留可被 B 用户看到（出处
+  archive/2026-10-14-logout-full-reload-clear-cache review.json P3）。
+
+  成功标准：
+
+  - 全仓清查 localStorage 键并区分用户域（按 sessionId/groupId/会话内容索引）与设备级偏好（主题/输入框高度/浮球位置等），清单落 design
+
+  - 主动登出（桌面+移动）在整页跳转前统一清理全部用户域键，设备级偏好保留
+
+  - 清理逻辑集中一处注册表实现，新增用户域键只改注册表不散落
+
+  - 补清理行为测试：登出后用户域键被清、设备级键保留
+
+  - 现有相关测试不回归
+autopilot: false
+prestage_ack: false
+baseline_commit: bb674c8aa0a9403ce6bb6acfcb1e8d048a429af2
+updatedAt: '2026-10-14T03:09:08.034Z'
+cross_baselines:
+  sillyspec: 64c69bae7b189b3bfdce318668b1061f46ffe217
+baseline_sha256: bc75ed3d8d1207916a59f5bf6b4ca931027ce90e217e651800978a0cad327752
+spec_approved: true
+spec_approved_at: '2026-10-14T02:54:17.086Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+upgrade_reason: verify 实测失败（实测失败：test（命令与输出尾部见上；修复后重跑 --done 不丢进度））——失败自动升厚
+gate_summary: >-
+  test: passed ← module[]+deps(py5+jsx46)+fr(13)（150.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014030530\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（18.3s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261014030530\test-result.json｜门文件
+  13 个
+

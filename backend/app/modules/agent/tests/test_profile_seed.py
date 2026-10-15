@@ -268,3 +268,112 @@ async def test_role_templates_prune_deprecated_glm_and_cc(db_session) -> None:
     # 剩余仅 1 条用户档案。
     assert len(rows) == 1
     assert rows[0].name == "我的私有 claude"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 平台预置「SillySpec 极速变更」档案（2026-10-14-agent-profile-express-preset）
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _express_seed():
+    from app.modules.agent.profile.seed import (
+        EXPRESS_PRESET_PROFILE_ID,
+        ensure_sillyspec_express_profile,
+    )
+
+    return EXPRESS_PRESET_PROFILE_ID, ensure_sillyspec_express_profile
+
+
+def test_express_preset_id_is_deterministic_uuid5() -> None:
+    """预置档案 id 是确定性 uuid5——跨版本/跨环境稳定，误删后重启按同 id 补回。"""
+    import uuid
+
+    express_id, _ = _express_seed()
+    # 两级派生（私有命名空间 + 条目键），与角色模板机制同构。
+    assert express_id == uuid.uuid5(
+        uuid.uuid5(uuid.NAMESPACE_OID, "sillyhub.agent.presets"),
+        "sillyspec-express-change",
+    )
+
+
+async def test_express_preset_plants_platform_profile_with_identity_fields(db_session) -> None:
+    """空库补种恰一条确定性 id 平台档案，身份字段与极速协议 system_prompt 逐项命中。"""
+    express_id, ensure_sillyspec_express_profile = _express_seed()
+
+    count = await ensure_sillyspec_express_profile(db_session)
+
+    assert count == 1
+    rows = await _all_profiles(db_session)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.id == express_id
+    assert row.name == "SillySpec 极速变更"
+    assert row.provider == "claude"
+    assert row.visibility == AgentProfileVisibility.PLATFORM
+    # 非 system_default：不进 dispatch 兜底链第三档（resolve_profile 只按
+    # is_system_default 命中）——未主动选档案的会话/任务行为零变化。
+    assert row.is_system_default is False
+    assert row.version == 1
+    assert row.owner_user_id is None
+    assert row.workspace_id is None
+    # 协议文案关键纪律齐备：立项/成功标准/收口/变更隔离/规模定级/豁免。
+    prompt = row.system_prompt or ""
+    for token in (
+        "flow start",
+        "成功标准",
+        "flow done",
+        "--change",
+        "新功能",
+        "完整流程",
+        ".sillyspec",
+    ):
+        assert token in prompt, f"system_prompt 缺少关键纪律片段：{token}"
+
+
+@pytest.mark.parametrize("repeat", [1, 2, 3])
+async def test_express_preset_idempotent_on_repeat_calls(db_session, repeat: int) -> None:
+    """已补齐后重复调用返回 0 且不产生重复行（核心 idempotent 契约）。"""
+    _, ensure_sillyspec_express_profile = _express_seed()
+
+    assert await ensure_sillyspec_express_profile(db_session) == 1
+    for _ in range(repeat):
+        assert await ensure_sillyspec_express_profile(db_session) == 0
+
+    rows = await _all_profiles(db_session)
+    assert len(rows) == 1
+    assert rows[0].name == "SillySpec 极速变更"
+
+
+async def test_express_preset_does_not_overwrite_user_edits(db_session) -> None:
+    """管理员改过该档案（name/system_prompt）后，补种不得覆盖、不回写。"""
+    _, ensure_sillyspec_express_profile = _express_seed()
+
+    await ensure_sillyspec_express_profile(db_session)
+    row = (await _all_profiles(db_session))[0]
+    row.name = "我的极速档案"
+    row.system_prompt = "管理员自定义文案"
+    await db_session.commit()
+
+    assert await ensure_sillyspec_express_profile(db_session) == 0
+    await db_session.refresh(row)
+    assert row.name == "我的极速档案"
+    assert row.system_prompt == "管理员自定义文案"
+    # 仍只一条，无重复补种。
+    assert len(await _all_profiles(db_session)) == 1
+
+
+async def test_express_preset_coexists_with_system_defaults(db_session) -> None:
+    """与既有平台默认档案（claude/codex）共存：互不干扰、不占用 is_system_default 名额。"""
+    from app.modules.agent.profile.seed import ensure_system_default_profiles
+
+    _, ensure_sillyspec_express_profile = _express_seed()
+
+    assert await ensure_system_default_profiles(db_session) == 2
+    assert await ensure_sillyspec_express_profile(db_session) == 1
+
+    rows = await _all_profiles(db_session)
+    assert len(rows) == 3
+    assert {r.provider for r in rows if r.is_system_default} == {"claude", "codex"}
+    preset = next(r for r in rows if not r.is_system_default)
+    assert preset.name == "SillySpec 极速变更"
+    assert preset.visibility == AgentProfileVisibility.PLATFORM

@@ -19,6 +19,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: true
+        stages: [pre-commit]
 
       - id: ruff-check
         name: ruff check
@@ -27,6 +28,7 @@ repos:
         language: system
         types: [python]
         pass_filenames: true
+        stages: [pre-commit]
 
 # 2026-10-11-assertion-surface-guard：共享断言面同步闸门（check-only）——契约源
 # （六面清单 + ⑦菜单注册表 ⑧协议 MSG）被触碰而配对钉子测试未同提交时 fail-closed。
@@ -40,3 +42,29 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
+
+# 2026-10-15-ci-recurrence-guard（fix-ci-red 灭火复盘）：CI 红灯三类根因
+# （tsc 严格错误 vitest 不查、api-types 双侧漂移 push 后才见）全部缺本地
+# 拦截面——pre-push 快检把 CI 同源四命令前移到推送时（约 1 分钟），fail-closed。
+# 需一次性安装：backend/.venv/Scripts/python.exe -m pre_commit install
+# --hook-type pre-push --config backend/.pre-commit-config.yaml
+      - id: ci-fast-gate
+        name: pre-push CI 快检（typecheck×2 + api-types 漂移×2）
+        entry: >-
+          bash -c 'pnpm -C frontend typecheck && pnpm -C sillyhub-daemon typecheck && pnpm -C frontend gen:types:check && pnpm -C sillyhub-daemon gen:types:check || { echo "  ↩ 推送前快检未过（与 CI 同源）：按上方报错修复后重推；api-types 漂移 → pnpm -C frontend gen:types && pnpm -C sillyhub-daemon gen:types 后连同生成物提交"; exit 1; }' --
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+# 2026-10-15-ci-recurrence-guard 收编：原 .git/hooks/pre-push（2026-08-18 部署的
+# 独立脚本，pre-commit install 时被改名 .legacy）迁入配置统一管理，语义零改动。
+      - id: docs-gate
+        name: sillyspec docs gate（文档失效引用只减不增棘轮）
+        entry: >-
+          bash -c 'sillyspec docs gate --against HEAD || { echo "  ↩ 文档失效 file:line 引用超基线；清偿后 sillyspec docs gate --init-baseline 下调"; exit 1; }' --
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

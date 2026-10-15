@@ -226,11 +226,12 @@ describe("visibleMenusBySection", () => {
     expect(result).toEqual([]);
   });
 
-  it("FR-06 #3: platform admin sees all 5 entries in 'system' section", () => {
+  it("FR-06 #3: platform admin sees all 6 entries in 'system' section", () => {
     // Given is_platform_admin = true
     // When visibleMenusBySection(user, "system")
-    // Then 全部 5 条（users / organizations / roles / settings / menus），顺序与数据源一致
-    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5）
+    // Then 全部 6 条（users / organizations / roles / settings / menus / server-status），顺序与数据源一致
+    // （2026-09-18-web-menu-management task-08：system 组新增 menus 菜单项，4 → 5；
+    //  2026-10-14-admin-server-status：新增 server-status，5 → 6）
     const user = mkUser({ is_platform_admin: true, permissions: [] });
     const result = visibleMenusBySection(user, "system");
     expect(result.map((g) => g.menuKey)).toEqual([
@@ -239,6 +240,7 @@ describe("visibleMenusBySection", () => {
       "roles",
       "settings",
       "menus",
+      "server-status",
     ]);
   });
 

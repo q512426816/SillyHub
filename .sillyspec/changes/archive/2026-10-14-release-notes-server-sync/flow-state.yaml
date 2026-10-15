@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  发布记录数据源上服务器：deploy-to-server 部署流程增发布记录同步步骤（服务器只读镜像目录 + workspace 指向 + skill 文档化），让服务器平台页面展示每次部署的发布记录
+
+  成功标准：
+  - 服务器有固定目录承载 multi-agent-platform 的 docs/releases 镜像（容器可读，经 /tmp 挂载）
+  - workspace 行指向该目录且页面能列出记录（seq/状态/提交数/正文渲染数据齐）
+  - deploy-to-server skill 增「发布记录（每次部署必做）」节：写记录（引用 sillyhub-docker-deploy 契约）+ 部署后同步命令
+  - 本次热修部署（a176393cb）补写记录 #002 并同步到服务器验证全链
+autopilot: false
+prestage_ack: false
+baseline_commit: a176393cb96576c8b6e73ef4faf1a1343f52d691
+updatedAt: '2026-10-14T07:48:00.083Z'
+cross_baselines:
+  sillyspec: 70998034678649cbdafbd9d353776ed4ad2ae747
+baseline_sha256: ac5029770f17d0a2c8a50a9b4c459c161b459d804176b16bbfdc92b99d5b625d
+spec_approved: true
+spec_approved_at: '2026-10-14T07:43:20.366Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+gate_summary: 'test: —｜lint: —｜门文件 2 个'
+

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-assets-knowledge-popup-preview",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "20290764ce262f0940bec9e02fed5338ea9c1b79",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok — 边界已裁决：可接受。design 声称 useQuery 按 [workspaceId, filename] 单键单请求、定位 effect 以 q.isSuccess 为闸——代码属实（change-assets-card.tsx KnowledgePreviewBody）；快速连点不同条目各键独立不串键，同文件换锚点时 effect 依赖 [anchor] 重跑定位，行为正确。声明的「不做有界 rAF 重试、依赖单次 commit」取舍核实成立：EntryCardList 卡片壳（含 data-entry-anchor）在数据落定后同一次渲染同步输出，定位目标是卡片壳元素而非异步正文，残余仅极端场景滚动偏差，非数据正确性风险。",
+    "并发": "ok — 边界已裁决：可接受。声明纯读无写路径属实：diff 全部为 GET（getKnowledge/getChangeAssets），无任何写端点调用。",
+    "切换": "ok — 边界已裁决：可接受。声明的边界（弹窗关闭仅清 knowledgeTarget、查询缓存留 QueryClient、深链路由跳转整页卸载、查无锚点静默落文件级顶部 el?.scrollIntoView）与代码一致；关闭 onOpenChange 置 null、Body 条件渲染卸载，重开命中缓存。降级路径（旧锚/改名静默文件级）与知识库页深链同口径。",
+    "作用域": "ok — 边界已裁决：可接受。queryKey 含 workspaceId（[\"changeAssetsKnowledgePreview\", workspaceId, filename]），getKnowledge 请求带 workspaceId 路径段，跨工作区不串台，声明属实。"
+  },
+  "notes": "FR↔实现↔测试三方一致：FR-01/02/03 实现（三组 Link→button + knowledgeTarget 状态 + KnowledgePreviewBody：normalizeKnowledgeFileParam 归一→getKnowledge→EntryCardList→data-entry-anchor 定位；弹窗头「在知识库中打开」深链逐字同构且无锚点省略 anchor）与五条绑定测试断言逐一对应，两个测试文件实跑 57 用例全绿（change-assets-card 30 + knowledge-page 27），tsc --noEmit 零错实跑确认。FR-04 的三组（测试绑定/模块触达/归档留档）在 diff 中零触碰，绑定测试原样保留且通过。FR-05 错误就近文案（isError 分支渲染 q.error.message）与失败场景用例对应。normalizeKnowledgeFileParam 迁移逐字一致、无残留旧路径导入（页面与组件均 import lib 版）；KnowledgeEntry 为 OpenAPI 生成类型（zone/content 齐备），无手写类型、无后端改动。防护声明（错误不吞、查无静默降级、scrollIntoView 测试打桩含 afterAll 清理、retry:false）均在代码中真实存在。声明边界共 6 条（整文件渲染+锚点滚动、查无静默落文件级、无 rAF 重试、a→button 视觉不变、测试环境 stub、归一函数逐字迁移）逐条裁决均为可接受，无 P1/P2/P3。",
+  "reviewedAt": "2026-10-14T16:08:32+08:00"
+}

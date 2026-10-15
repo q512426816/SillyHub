@@ -5,7 +5,6 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
@@ -23,6 +22,7 @@ import {
   Flag,
   Folder,
   GitBranch,
+  History,
   Home,
   KeyRound,
   LayoutDashboard,
@@ -36,6 +36,7 @@ import {
   PlugZap,
   Puzzle,
   ScrollText,
+  Server,
   Settings,
   ShieldCheck,
   Siren,
@@ -49,6 +50,7 @@ import { Button } from "@/components/ui/button";
 import { CircuitBreakerBanner } from "@/components/circuit-banner";
 import { LogoutConfirmDialog } from "@/components/logout-confirm-dialog";
 import { TopBar } from "@/components/top-bar";
+import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
 import {
   MENU_SECTION_LABEL as SECTION_LABEL,
   MENU_SECTION_ORDER as SECTION_ORDER,
@@ -91,6 +93,10 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // 2026-09-18-web-menu-management task-10：菜单管理入口 /admin/menus。图标
   // ListTree（层级列表，语义=菜单目录树；未被占用，避开 roles 的 KeyRound）。
   "/admin/menus": ListTree,
+  // 2026-10-14-admin-server-status：服务器信息入口 /admin/server-status（system
+  // 组）。图标 Server（服务器硬件语义，本 map 内未占用；daemon 机器卡的跨文件
+  // 同名复用不构成冲突）。
+  "/admin/server-status": Server,
   "/runtimes": Activity,
   "/settings": Settings,
   "/workspaces": Home,
@@ -107,6 +113,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
   // 2026-08-14-sessions-portal task-10：智能体会话总入口 /sessions。图标
   // MessageSquare（对话气泡，语义=会话；避开与 config 组重复图标）。
   "/sessions": MessageSquare,
+  // 2026-10-14-deploy-release-notes D-002@v1：发布记录平台级聚合页（协作治理组）。
+  // 图标 History（部署历史时间线语义；Package 已被工作区「发布」菜单占用）。
+  "/deploy-records": History,
   // ppm（absolute href /ppm/*）
   // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
   // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts
@@ -137,7 +146,6 @@ function resolveMenuIcon(menu: MenuPermissionGroup): LucideIcon {
 const COLLAPSED_KEY = "sidebar-collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
   // task-10：workspaceId 改由 useWorkspaceContext 提供（task-04）。
   // 进入工作区时 hook 内 effect 顺带写 workspace store 缓存（FR-01）。
@@ -315,7 +323,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       }
     } finally {
       clear();
-      router.replace("/login");
+      // 2026-10-14-logout-localstorage-user-data-cleanup：清 localStorage 用户域键
+      // （会话/群聊草稿、未读锚点、活性状态等），设备级偏好保留——清单见 lib/logout-storage.ts。
+      clearUserScopedLocalStorage();
+      // 2026-10-14-logout-full-reload-clear-cache：必须整页跳转（对齐 lib/api.ts
+      // 401 被动登出先例）——SPA 内跳转会让 React Query 缓存与内存 zustand store
+      // （工作区/看板/悬浮会话）跨登录会话存活，换账号后残留上一用户数据。
+      window.location.assign("/login");
     }
   };
 

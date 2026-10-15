@@ -1,0 +1,740 @@
+diff --git a/backend/app/modules/auth/permissions.py b/backend/app/modules/auth/permissions.py
+index ba6e050db..94a282a03 100644
+--- a/backend/app/modules/auth/permissions.py
++++ b/backend/app/modules/auth/permissions.py
+@@ -49,6 +49,12 @@ class Permission(StrEnum):
+     API_KEY_ADMIN = "api_key:admin"
+     RUNTIME_ADMIN = "runtime:admin"
+     GIT_IDENTITY_ADMIN = "git_identity:admin"
++    # change 2026-10-14-admin-server-status task-01 / D-001@v2 / D-004@v1。
++    # 服务器信息页（/admin/server-status）与 GET /api/system-status 的门控权限；
++    # 前缀无 group 特判分支，走默认 PermissionGroup.PLATFORM（同 menu:admin 模式）。
++    # 免种子迁移：新权限默认无人持有=收紧语义（管理员经 is_platform_admin 短路
++    # 与 PLATFORM_ADMIN 直通天然放行），其它角色可在角色管理页按需勾选。
++    SYSTEM_STATUS_READ = "system_status:read"
+     # change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1。
+     # 仅用于前端「我的供应商」菜单显隐 + 角色管理分配（design §5.3）；
+     # llm_provider router 本为 per-user 个人级，本权限不改任何接口鉴权。
+diff --git a/backend/app/modules/health/router.py b/backend/app/modules/health/router.py
+index 8b4dd2074..ed799cd5e 100644
+--- a/backend/app/modules/health/router.py
++++ b/backend/app/modules/health/router.py
+@@ -8,15 +8,19 @@ on ``status="degraded"``.
+ from __future__ import annotations
+ 
+ from datetime import UTC, datetime
++from typing import Annotated
+ 
+-from fastapi import APIRouter
++from fastapi import APIRouter, Depends
+ from sqlalchemy import text
+ 
+ from app import __version__
++from app.core.auth_deps import require_permission_any
+ from app.core.config import get_settings
+ from app.core.db import get_session_factory
+ from app.core.logging import get_logger
+ from app.core.redis import get_redis
++from app.modules.auth.model import User
++from app.modules.auth.permissions import Permission
+ from app.modules.health.schema import (
+     DependencyStatus,
+     HealthResponse,
+@@ -78,16 +82,19 @@ async def version() -> VersionResponse:
+ 
+ 
+ @router.get("/system-status", response_model=SystemStatusResponse)
+-async def system_status() -> SystemStatusResponse:
+-    """服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。
+-
+-    公开端点(同 /health),不要求登录,首页看板用。
++async def system_status(
++    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
++) -> SystemStatusResponse:
++    """服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。
++
++    change 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +
++    system_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，
++    服务器信息页仅持权限者可见）。
+     """
+     import anyio
+     import psutil
+     from sqlalchemy import func, select
+ 
+-    from app.modules.auth.model import User
+     from app.modules.ppm.plan.model import PsPlanNode
+     from app.modules.ppm.project.model import PpmProjectMaintenance
+     from app.modules.ppm.task.model import PlanTask
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 3544375c9..7b41cd568 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -53,7 +53,7 @@
+           "health"
+         ],
+         "summary": "System Status",
+-        "description": "服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。\n\n公开端点(同 /health),不要求登录,首页看板用。",
++        "description": "服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。\n\nchange 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +\nsystem_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，\n服务器信息页仅持权限者可见）。",
+         "operationId": "system_status_api_system_status_get",
+         "responses": {
+           "200": {
+@@ -56930,6 +56930,7 @@
+           "api_key:admin",
+           "runtime:admin",
+           "git_identity:admin",
++          "system_status:read",
+           "llm_provider:read",
+           "workspace:read",
+           "workspace:write",
+diff --git a/backend/tests/modules/auth/test_permissions.py b/backend/tests/modules/auth/test_permissions.py
+index efffbd485..d695b5f20 100644
+--- a/backend/tests/modules/auth/test_permissions.py
++++ b/backend/tests/modules/auth/test_permissions.py
+@@ -41,14 +41,15 @@ def test_permission_group_has_six_members() -> None:
+     assert set(members) == expected
+ 
+ 
+-def test_permission_count_is_59() -> None:
++def test_permission_count_is_60() -> None:
+     """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
+     14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
+     platform:audit:read / platform:billing / component:read / change:update，
+     AUDIT 组随 platform:audit:read 移除）→ 58；
+-    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59。
++    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59；
++    2026-10-14-admin-server-status task-01 新增 system_status:read → 60。
+     """
+-    assert len(list(Permission)) == 59
++    assert len(list(Permission)) == 60
+ 
+ 
+ @pytest.mark.parametrize(
+diff --git a/backend/tests/test_health.py b/backend/tests/test_health.py
+index 5db991495..26041b74f 100644
+--- a/backend/tests/test_health.py
++++ b/backend/tests/test_health.py
+@@ -6,6 +6,7 @@ or Redis to be reachable on the CI machine.
+ 
+ from __future__ import annotations
+ 
++import uuid
+ from typing import Any
+ 
+ import pytest
+@@ -73,3 +74,69 @@ async def test_request_id_round_trip(client: AsyncClient) -> None:
+     resp = await client.get("/api/version", headers={"x-request-id": "test-rid-123"})
+     assert resp.status_code == 200
+     assert resp.headers.get("x-request-id") == "test-rid-123"
++
++
++# ── system-status 鉴权三态（2026-10-14-admin-server-status task-01 / D-001@v2）──
++# 由公开收紧为登录 + SYSTEM_STATUS_READ（platform:admin 直通），关闭审计 BS-6。
++
++
++async def _make_user_token(db_session: Any, *, admin: bool) -> str:
++    """建用户并签 token（模式同 tests/modules/settings/test_mcp_settings.py）。"""
++    from app.core.config import get_settings
++    from app.core.security import create_access_token, password_hasher
++    from app.modules.auth.model import User
++
++    user = User(
++        id=uuid.uuid4(),
++        email=f"user-{uuid.uuid4().hex[:6]}@example.com",
++        password_hash=password_hasher.hash("x"),
++        status="active",
++        is_platform_admin=admin,
++    )
++    db_session.add(user)
++    await db_session.commit()
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=user.is_platform_admin,
++        settings=get_settings(),
++    )
++    return token
++
++
++async def test_system_status_requires_login(client: AsyncClient) -> None:
++    """未登录 401——匿名不再能读服务器性能（BS-6 收紧）。"""
++    resp = await client.get("/api/system-status")
++    assert resp.status_code == 401, resp.text
++
++
++async def test_system_status_forbidden_without_permission(
++    client: AsyncClient, db_session: Any
++) -> None:
++    """登录但无 system_status:read（非管理员、无角色授权）→ 403。"""
++    token = await _make_user_token(db_session, admin=False)
++    resp = await client.get("/api/system-status", headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 403, resp.text
++
++
++async def test_system_status_ok_for_platform_admin(client: AsyncClient, db_session: Any) -> None:
++    """platform:admin 直通 → 200，响应字段与既有 schema 一致。"""
++    token = await _make_user_token(db_session, admin=True)
++    resp = await client.get("/api/system-status", headers={"Authorization": f"Bearer {token}"})
++    assert resp.status_code == 200, resp.text
++    payload: dict[str, Any] = resp.json()
++    for key in (
++        "server_time",
++        "cpu_percent",
++        "memory_percent",
++        "memory_used_mb",
++        "memory_total_mb",
++        "disk_percent",
++        "disk_used_gb",
++        "disk_total_gb",
++        "tasks",
++        "projects",
++        "milestones",
++        "users",
++    ):
++        assert key in payload, f"missing field: {key}"
+diff --git a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+index 4f55f3182..02b3f7cdf 100644
+--- a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+@@ -158,18 +158,20 @@ afterEach(() => {
+ });
+ 
+ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+-  it("页面骨架：标题 + 说明条 + 按 section 分组平铺（system 组 5 行）", async () => {
++  it("页面骨架：标题 + 说明条 + 按 section 分组平铺（system 组 6 行）", async () => {
+     renderPage();
+ 
+     // PageHeader 标题与副标题（菜单管理自身的 menuLabel 也叫「菜单管理」，用副标题锚定页头）
+     expect(
+       await screen.findByText("调整菜单显示名、组内排序与全局隐藏（全局生效，改动即时保存）"),
+     ).toBeInTheDocument();
+-    // 分组标题行：系统管理（task-08 新增 menus 后 system 组 5 条）
++    // 分组标题行：系统管理（2026-10-14-admin-server-status 增 server-status
++    // 后 system 组 6 条：用户/组织/角色/设置/菜单管理/服务器信息。计数文本
++    // 「6 个菜单」与 workspace 组撞车不再唯一，改用组内路由锚定行数）
+     expect(await screen.findByText("系统管理")).toBeInTheDocument();
+-    expect(await screen.findByText("5 个菜单")).toBeInTheDocument();
+-    // 菜单行：users 行（默认名 + 路由小字）
++    // 菜单行：users 行 + 新增 server-status 行（默认名 + 路由小字）
+     expect(await screen.findByText("/admin/users")).toBeInTheDocument();
++    expect(await screen.findByText("/admin/server-status")).toBeInTheDocument();
+   });
+ 
+   it("行内改名：点击显示名 → 输入新名回车 → PUT 全量三字段（label 新值 + 其余维度当前值）", async () => {
+@@ -223,7 +225,9 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+ 
+     // system 组声明序：users=18 / organizations=19 / roles=20（未覆盖 → 生效值=
+     // 声明序索引；2026-10-14-deploy-release-notes 增 deploy-records（governance
+-    // 组第 4 条），system 组全体后移 1）
++    // 组第 4 条），system 组全体后移 1；2026-10-14-admin-server-status 增
++    // server-status 于 system 组末尾（组内第 6 条=23），system 组锚定索引不动、
++    // 仅 ppm 组全体再 +1）
+     const rolesRow = menuRow("/admin/roles");
+     fireEvent.click(within(rolesRow).getByTitle("上移"));
+ 
+diff --git a/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+new file mode 100644
+index 000000000..c5659d058
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx
+@@ -0,0 +1,139 @@
++/**
++ * 服务器信息页组件测试（2026-10-14-admin-server-status task-02）。
++ *
++ * 覆盖 FR-02 三态（对照 TaskCard acceptance）：
++ * 1. 正常态：三组卡片渲染——性能百分数、四项业务统计、依赖徽标（DB/Redis）；
++ * 2. 轮询：初始 1 次，fake timers 推进 5s 后再次拉取；
++ * 3. unmount 清理定时器，之后不再拉取；
++ * 4. 失败降级：mock 拒绝后渲染错误条，且既有数据不清空。
++ *
++ * 401 不在页内承接（全局拦截跳登录，frontend/src/lib/api.ts:250-256），
++ * 非本页测试面（FR-02 注记）。
++ */
++import { act, cleanup, render, screen } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++import ServerStatusPage from "@/app/(dashboard)/admin/server-status/page";
++import type { HealthResponse, SystemStatusResponse } from "@/lib/health";
++
++// ── mock @/lib/health：数据层双接口可编程返回 ──────────────────────────────
++const getSystemStatusMock = vi.hoisted(() => vi.fn());
++const getHealthMock = vi.hoisted(() => vi.fn());
++vi.mock("@/lib/health", async () => {
++  const actual = await vi.importActual<typeof import("@/lib/health")>("@/lib/health");
++  return {
++    ...actual,
++    getSystemStatus: getSystemStatusMock,
++    getHealth: getHealthMock,
++  };
++});
++
++const STATUS_FIXTURE: SystemStatusResponse = {
++  server_time: "2026-10-14T14:32:08.000Z",
++  cpu_percent: 62.4,
++  memory_percent: 87.2,
++  memory_used_mb: 7800.1,
++  memory_total_mb: 16000.2,
++  disk_percent: 71.0,
++  disk_used_gb: 156.3,
++  disk_total_gb: 220.4,
++  tasks: 128,
++  projects: 12,
++  milestones: 45,
++  users: 8,
++};
++
++const HEALTH_FIXTURE: HealthResponse = {
++  status: "ok",
++  db: "ok",
++  redis: "ok",
++  version: "0.9.2",
++  commit_sha: "a1b2c3d4e5f6",
++  server_time: "2026-10-14T14:32:08.000Z",
++  environment: "test",
++};
++
++function mockAllOk() {
++  getSystemStatusMock.mockResolvedValue({ ...STATUS_FIXTURE });
++  getHealthMock.mockResolvedValue({ ...HEALTH_FIXTURE });
++}
++
++/** render 后 flush 初始 refresh 的微任务（fake timers 下不用 waitFor）。 */
++async function renderAndFlush() {
++  const view = render(<ServerStatusPage />);
++  await act(async () => {});
++  return view;
++}
++
++describe("/admin/server-status 服务器信息页（task-02）", () => {
++  beforeEach(() => {
++    vi.useFakeTimers();
++    getSystemStatusMock.mockReset();
++    getHealthMock.mockReset();
++    mockAllOk();
++  });
++  afterEach(() => {
++    cleanup();
++    vi.useRealTimers();
++  });
++
++  it("正常态：三组卡片渲染——性能百分数、四项业务统计、依赖徽标", async () => {
++    await renderAndFlush();
++
++    // 性能卡：三行百分数（CPU 62 / 内存 87 / 磁盘 71，取整展示）
++    expect(screen.getAllByText("62%").length).toBeGreaterThan(0);
++    expect(screen.getAllByText("87%").length).toBeGreaterThan(0);
++    expect(screen.getAllByText("71%").length).toBeGreaterThan(0);
++    // 数值明细
++    expect(screen.getByText(/7800\.1 MB \/ 16000\.2 MB/)).toBeInTheDocument();
++
++    // 统计卡：四格数值
++    expect(screen.getByText("128")).toBeInTheDocument();
++    expect(screen.getByText("12")).toBeInTheDocument();
++    expect(screen.getByText("45")).toBeInTheDocument();
++    expect(screen.getByText("8")).toBeInTheDocument();
++
++    // 依赖卡：DB/Redis 徽标文本与元信息
++    expect(screen.getByText("已连接 · v0.9.2")).toBeInTheDocument();
++    expect(screen.getAllByText("已连接").length).toBeGreaterThan(0);
++    expect(screen.getByText("0.9.2（a1b2c3d）")).toBeInTheDocument();
++    expect(screen.getByText("test")).toBeInTheDocument();
++  });
++
++  it("轮询：初始 1 次，5 秒后再次拉取", async () => {
++    await renderAndFlush();
++    expect(getSystemStatusMock).toHaveBeenCalledTimes(1);
++
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(5000);
++    });
++    expect(getSystemStatusMock).toHaveBeenCalledTimes(2);
++    expect(getHealthMock).toHaveBeenCalledTimes(2);
++  });
++
++  it("unmount 清理定时器，之后不再拉取", async () => {
++    const view = await renderAndFlush();
++    expect(getSystemStatusMock).toHaveBeenCalledTimes(1);
++    view.unmount();
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(15000);
++    });
++    expect(getSystemStatusMock).toHaveBeenCalledTimes(1);
++  });
++
++  it("失败降级：错误条出现且既有数据不清空", async () => {
++    await renderAndFlush();
++    expect(screen.getByText("128")).toBeInTheDocument();
++
++    // 下一轮拉取失败（ApiError 语义：message 文本）
++    getSystemStatusMock.mockRejectedValueOnce(new Error("403 无权执行此操作"));
++    await act(async () => {
++      await vi.advanceTimersByTimeAsync(5000);
++    });
++
++    expect(screen.getByText("服务器状态获取失败")).toBeInTheDocument();
++    // 既有数据保留（不清空）
++    expect(screen.getByText("128")).toBeInTheDocument();
++    expect(screen.getByText(/7800\.1 MB \/ 16000\.2 MB/)).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/admin/server-status/page.tsx b/frontend/src/app/(dashboard)/admin/server-status/page.tsx
+new file mode 100644
+index 000000000..17458000e
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/admin/server-status/page.tsx
+@@ -0,0 +1,249 @@
++"use client";
++
++/**
++ * 服务器信息页 /admin/server-status（2026-10-14-admin-server-status task-02）。
++ *
++ * 恢复 2026-07-24 死代码清理删除的服务器运行状态看板（原首页 ServerStatusCard +
++ * HealthCard），落位系统管理组（D-005@v1 方案 A，用户亲选）。
++ *
++ * 设计依据：
++ * - requirements FR-02 / D-002@v2（用户亲选内容口径）——三组卡片：
++ *   ①服务器性能（CPU/内存/磁盘 antd Progress，阈值着色 <80 主题默认 /
++ *     80–90 warning / ≥90 exception，色阶走 antd status 语义零手写 hex）
++ *   ②业务统计（任务/项目/里程碑/用户四格）
++ *   ③依赖与版本（/api/health 的 PostgreSQL/Redis 连接徽标 + 版本/环境/服务器时间）
++ * - 5s 轮询自动刷新（useEffect setInterval，卸载 clearInterval）+ 立即刷新按钮；
++ * - 失败降级（FR-02）：403/网络/超时渲染 Alert 错误条（§9 语义语义），保留既有
++ *   数据不清空、5s 后自动重试；401 由全局拦截跳登录（frontend/src/lib/api.ts:250-256），
++ *   非页内承接面；
++ * - 样式遵守 FRONTEND_PAGE_STYLE.md §1 骨架（PageContainer/PageHeader/SectionCard）
++ *   + §0.5 多主题铁律（antd 色经 status 语义/ConfigProvider token，tailwind 布局）；
++ * - 原型：.sillyspec/changes/2026-10-14-admin-server-status/prototype-admin-server-status.html。
++ */
++import { useCallback, useEffect, useRef, useState } from "react";
++import { Alert, Badge, Button, Progress, theme } from "antd";
++import { ReloadOutlined } from "@ant-design/icons";
++
++import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
++import {
++  getHealth,
++  getSystemStatus,
++  type HealthResponse,
++  type SystemStatusResponse,
++} from "@/lib/health";
++
++const REFRESH_INTERVAL_MS = 5000;
++
++function formatClock(d: Date): string {
++  return d.toLocaleTimeString("zh-CN", { hour12: false });
++}
++
++/* ---------- 性能行 ---------- */
++
++function PerfRow({
++  label,
++  percent,
++  detail,
++}: {
++  label: string;
++  percent: number;
++  detail: string;
++}) {
++  const { token } = theme.useToken();
++  // 阈值着色：<80 主题 primary 默认；80–90 琥珀（warning token，运行时主题值
++  // 非硬编码 hex——antd Progress 无 warning status，经 useToken 取语义色）；
++  // ≥90 exception（antd 内置红）。
++  const status = percent >= 90 ? ("exception" as const) : ("normal" as const);
++  const strokeColor =
++    percent < 90 && percent >= 80 ? token.colorWarning : undefined;
++  return (
++    <div className="mb-4 last:mb-0">
++      <div className="mb-1 flex items-baseline justify-between text-xs">
++        <span className="font-medium">{label}</span>
++        <span className="text-muted-foreground tabular-nums">
++          {detail} · <span className="font-semibold text-foreground">{percent}%</span>
++        </span>
++      </div>
++      <Progress
++        percent={percent}
++        showInfo={false}
++        status={status}
++        strokeColor={strokeColor}
++        size="small"
++      />
++    </div>
++  );
++}
++
++/* ---------- 统计格 ---------- */
++
++function StatCell({ value, label }: { value: number; label: string }) {
++  return (
++    <div className="rounded-lg border bg-gradient-to-b from-brand-50 to-transparent p-3 text-center">
++      <div className="text-2xl font-bold tabular-nums text-brand-700">{value}</div>
++      <div className="mt-0.5 text-xs text-muted-foreground">{label}</div>
++    </div>
++  );
++}
++
++/* ---------- 依赖/元信息行 ---------- */
++
++function KvRow({ label, children }: { label: string; children: React.ReactNode }) {
++  return (
++    <div className="flex items-center justify-between border-b py-2 text-xs last:border-b-0">
++      <span className="text-muted-foreground">{label}</span>
++      <span className="tabular-nums">{children}</span>
++    </div>
++  );
++}
++
++function DepBadge({ ok, okText, downText }: { ok: boolean; okText: string; downText: string }) {
++  return <Badge status={ok ? "success" : "error"} text={ok ? okText : downText} />;
++}
++
++/* ---------- 页面 ---------- */
++
++export default function ServerStatusPage() {
++  const [status, setStatus] = useState<SystemStatusResponse | null>(null);
++  const [health, setHealth] = useState<HealthResponse | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
++  const [refreshing, setRefreshing] = useState(false);
++  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
++
++  const refresh = useCallback(async () => {
++    setRefreshing(true);
++    try {
++      const [nextStatus, nextHealth] = await Promise.all([
++        getSystemStatus(),
++        getHealth(),
++      ]);
++      setStatus(nextStatus);
++      setHealth(nextHealth);
++      setLastUpdated(new Date());
++      setError(null);
++    } catch (err) {
++      // 403/网络/超时降级：保留既有数据仅提示，下一轮自动重试；
++      // 401 由全局拦截处理（单飞刷新或跳登录），不落入本分支语义。
++      setError(err instanceof Error ? err.message : "服务器状态获取失败");
++    } finally {
++      setRefreshing(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    void refresh();
++    timerRef.current = setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
++    return () => {
++      if (timerRef.current) clearInterval(timerRef.current);
++    };
++  }, [refresh]);
++
++  return (
++    <PageContainer>
++      <PageHeader
++        title="服务器信息"
++        subtitle="服务器性能、业务统计与依赖状态，每 5 秒自动刷新"
++        actions={
++          <div className="flex items-center gap-3">
++            <span className="text-xs text-muted-foreground">
++              {lastUpdated ? `上次更新 ${formatClock(lastUpdated)}` : "加载中…"}
++            </span>
++            <Button
++              size="small"
++              icon={<ReloadOutlined spin={refreshing} />}
++              onClick={() => void refresh()}
++              disabled={refreshing}
++            >
++              立即刷新
++            </Button>
++          </div>
++        }
++      />
++
++      {error && (
++        <Alert
++          type="error"
++          showIcon
++          title="服务器状态获取失败"
++          description={`${error}——将自动重试；若持续失败请检查「服务器状态查看」权限分配。`}
++        />
++      )}
++
++      <div className="grid gap-4 lg:grid-cols-2">
++        <SectionCard title="服务器性能">
++          {status ? (
++            <div className="pt-1">
++              <PerfRow
++                label="CPU 使用率"
++                percent={Math.round(status.cpu_percent)}
++                detail=""
++              />
++              <PerfRow
++                label="内存"
++                percent={Math.round(status.memory_percent)}
++                detail={`${status.memory_used_mb} MB / ${status.memory_total_mb} MB`}
++              />
++              <PerfRow
++                label="磁盘（/）"
++                percent={Math.round(status.disk_percent)}
++                detail={`${status.disk_used_gb} GB / ${status.disk_total_gb} GB`}
++              />
++            </div>
++          ) : (
++            <p className="py-8 text-center text-xs text-muted-foreground">
++              {error ? "暂无性能数据" : "加载中…"}
++            </p>
++          )}
++        </SectionCard>
++
++        <SectionCard title="业务统计">
++          {status ? (
++            <div className="grid grid-cols-4 gap-2.5">
++              <StatCell value={status.tasks} label="任务" />
++              <StatCell value={status.projects} label="项目" />
++              <StatCell value={status.milestones} label="里程碑" />
++              <StatCell value={status.users} label="用户" />
++            </div>
++          ) : (
++            <p className="py-8 text-center text-xs text-muted-foreground">
++              {error ? "暂无统计数据" : "加载中…"}
++            </p>
++          )}
++        </SectionCard>
++
++        <SectionCard title="依赖与版本" className="lg:col-span-2">
++          {health ? (
++            <div>
++              <KvRow label="PostgreSQL">
++                <DepBadge
++                  ok={health.db === "ok"}
++                  okText={`已连接 · v${health.version}`}
++                  downText="未连接"
++                />
++              </KvRow>
++              <KvRow label="Redis">
++                <DepBadge
++                  ok={health.redis === "ok"}
++                  okText="已连接"
++                  downText="未连接"
++                />
++              </KvRow>
++              <KvRow label="后端版本">
++                {health.version}（{health.commit_sha.slice(0, 7)}）
++              </KvRow>
++              <KvRow label="运行环境">{health.environment}</KvRow>
++              <KvRow label="服务器时间（UTC）">
++                {status?.server_time ?? "—"}
++              </KvRow>
++            </div>
++          ) : (
++            <p className="py-8 text-center text-xs text-muted-foreground">
++              {error ? "暂无依赖信息" : "加载中…"}
++            </p>
++          )}
++        </SectionCard>
++      </div>
++    </PageContainer>
++  );
++}
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 6079157d8..3d6911118 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -36,6 +36,7 @@ import {
+   PlugZap,
+   Puzzle,
+   ScrollText,
++  Server,
+   Settings,
+   ShieldCheck,
+   Siren,
+@@ -92,6 +93,10 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
+   // 2026-09-18-web-menu-management task-10：菜单管理入口 /admin/menus。图标
+   // ListTree（层级列表，语义=菜单目录树；未被占用，避开 roles 的 KeyRound）。
+   "/admin/menus": ListTree,
++  // 2026-10-14-admin-server-status：服务器信息入口 /admin/server-status（system
++  // 组）。图标 Server（服务器硬件语义，本 map 内未占用；daemon 机器卡的跨文件
++  // 同名复用不构成冲突）。
++  "/admin/server-status": Server,
+   "/runtimes": Activity,
+   "/settings": Settings,
+   "/workspaces": Home,
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 1e72def82..333db8209 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -47,9 +47,11 @@ export interface paths {
+         };
+         /**
+          * System Status
+-         * @description 服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。
++         * @description 服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。
+          *
+-         *     公开端点(同 /health),不要求登录,首页看板用。
++         *     change 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +
++         *     system_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，
++         *     服务器信息页仅持权限者可见）。
+          */
+         get: operations["system_status_api_system_status_get"];
+         put?: never;
+@@ -21208,7 +21210,7 @@ export interface components {
+          * Permission
+          * @enum {string}
+          */
+-        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "deploy_record:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
++        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "system_status:read" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "deploy_record:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+         /**
+          * PermissionResponseRead
+          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
+diff --git a/frontend/src/lib/health.ts b/frontend/src/lib/health.ts
+index a21cb6e27..cc7cd4801 100644
+--- a/frontend/src/lib/health.ts
++++ b/frontend/src/lib/health.ts
+@@ -5,6 +5,15 @@ import type { components } from "@/lib/api-types";
+ // 消除手写类型漂移。后端 schema 来源：backend/app/modules/health/schema.py。
+ export type HealthResponse = components["schemas"]["HealthResponse"];
+ 
++// 2026-10-14-admin-server-status task-02：恢复被 2026-07-24 死代码清理删除的
++// getSystemStatus（展示层重建，接口自始在线）。鉴权由 D-001@v2 收紧为
++// system_status:read——apiFetch 自动携带 Bearer，403 抛 ApiError、401 走全局拦截。
++export type SystemStatusResponse = components["schemas"]["SystemStatusResponse"];
++
+ export async function getHealth(): Promise<HealthResponse> {
+   return apiFetch<HealthResponse>("/api/health");
+ }
++
++export async function getSystemStatus(): Promise<SystemStatusResponse> {
++  return apiFetch<SystemStatusResponse>("/api/system-status");
++}
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index 098551a1e..8d74095f2 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -394,7 +394,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     permissions: [{ key: "deploy_record:read", name: "发布记录查看" }],
+   },
+ 
+-  // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
++  // ── system 系统管理（6 条：用户/组织/角色/设置/菜单/服务器信息）─────
+   {
+     section: "system",
+     menuKey: "users",
+@@ -461,6 +461,23 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     matchPattern: "/admin/menus",
+     permissions: [{ key: "menu:admin", name: "菜单管理" }],
+   },
++  {
++    // 2026-10-14-admin-server-status 新增（D-003@v1/D-005@v1）：服务器信息页
++    // /admin/server-status——恢复 2026-07-24 死代码清理删除的服务器运行状态
++    // 看板，落位 system 组末尾（组内既有锚定索引 users=18/org=19/roles=20
++    // 不动，ppm 组声明序整体 +1，admin/menus 测试锚同提交重算）。
++    // system_status:read 门控（后端 GET /api/system-status 同权限收紧，
++    // D-001@v2 关闭审计 BS-6；platform:admin 直通，其它角色可在角色管理页
++    // 按需勾选——权限展示名「服务器状态查看」钉于 design 接口定义）。
++    section: "system",
++    menuKey: "server-status",
++    menuLabel: "服务器信息",
++    icon: "🖥️",
++    href: "/admin/server-status",
++    absolute: true,
++    matchPattern: "/admin/server-status",
++    permissions: [{ key: "system_status:read", name: "服务器状态查看" }],
++  },
+ 
+   // ── ppm（14 条，平台级项目与问题管理）──────────────────────
+   // change 2026-06-20-ppm-module-migration task-13：13 个 ppm 子域页面登记。

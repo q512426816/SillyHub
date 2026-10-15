@@ -53,7 +53,7 @@
           "health"
         ],
         "summary": "System Status",
-        "description": "服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。\n\n公开端点(同 /health),不要求登录,首页看板用。",
+        "description": "服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。\n\nchange 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +\nsystem_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，\n服务器信息页仅持权限者可见）。",
         "operationId": "system_status_api_system_status_get",
         "responses": {
           "200": {
@@ -4508,6 +4508,22 @@
             }
           },
           {
+            "name": "lineage",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lineage"
+            }
+          },
+          {
             "name": "sort",
             "in": "query",
             "required": false,
@@ -4846,7 +4862,7 @@
           "change"
         ],
         "summary": "List Change Files",
-        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-13-change-files-refresh-sync task-04：返回前经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``\n任何情况不抛），使刷新即见 daemon 本机最新文档；镜像扫描本体\n``service.list_files`` 纯读语义零改动。",
+        "description": "变更文件树清单（2026-07-02-change-detail-file-tree-editor）。\n\n2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，\n直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；\n仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次\n此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``\n任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。\n``service.list_files`` 本体纯读语义零改动。",
         "operationId": "list_change_files_api_workspaces__workspace_id__changes__change_id__files_get",
         "parameters": [
           {
@@ -4868,6 +4884,18 @@
               "format": "uuid",
               "title": "Change Id"
             }
+          },
+          {
+            "name": "sync",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "true=触发绑定 daemon 定向上行同步后再返回（仅前端「刷新」按钮点击使用）",
+              "default": false,
+              "title": "Sync"
+            },
+            "description": "true=触发绑定 daemon 定向上行同步后再返回（仅前端「刷新」按钮点击使用）"
           }
         ],
         "responses": {
@@ -22226,6 +22254,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReleaseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deploy-records": {
+      "get": {
+        "tags": [
+          "deploy-records"
+        ],
+        "summary": "List Deploy Records",
+        "description": "全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。",
+        "operationId": "list_deploy_records_api_deploy_records_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DeployRecordSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Deploy Records Api Deploy Records Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deploy-records/{record_id}": {
+      "get": {
+        "tags": [
+          "deploy-records"
+        ],
+        "summary": "Get Deploy Record",
+        "description": "单条发布记录详情（元数据 + md 正文原文）。\n\n``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用\n``:path`` 形态整段接收——R-06 定型）。",
+        "operationId": "get_deploy_record_api_deploy_records__record_id__get",
+        "parameters": [
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployRecordDetail"
                 }
               }
             }
@@ -45325,6 +45422,223 @@
         "title": "DensityTrendPoint",
         "description": "密度趋势单点：该周窗口内每任务注入锚点数。"
       },
+      "DeployRecordDetail": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "deployed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "commit_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit From"
+          },
+          "commit_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit To"
+          },
+          "commits_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commits Count"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "workspace_id",
+          "workspace_name",
+          "file_name",
+          "status",
+          "summary",
+          "content"
+        ],
+        "title": "DeployRecordDetail",
+        "description": "单条记录详情：元数据 + md 正文原文（前端渲染用）。"
+      },
+      "DeployRecordSummary": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "title": "Record Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "deployed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed At"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "commit_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit From"
+          },
+          "commit_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit To"
+          },
+          "commits_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commits Count"
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record_id",
+          "workspace_id",
+          "workspace_name",
+          "file_name",
+          "status",
+          "summary"
+        ],
+        "title": "DeployRecordSummary",
+        "description": "一条部署发布记录的列表项（frontmatter 元数据投影）。\n\n``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定\n``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串\n字典序，同格式下与时间序一致（design 接口定义写死规则）。"
+      },
       "DirEntry": {
         "properties": {
           "name": {
@@ -56616,6 +56930,7 @@
           "api_key:admin",
           "runtime:admin",
           "git_identity:admin",
+          "system_status:read",
           "llm_provider:read",
           "workspace:read",
           "workspace:write",
@@ -56639,6 +56954,7 @@
           "deploy:staging",
           "deploy:production",
           "deploy:rollback",
+          "deploy_record:read",
           "user:read",
           "user:write",
           "user:login:manage",

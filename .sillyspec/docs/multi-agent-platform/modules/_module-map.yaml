@@ -34,6 +34,7 @@ modules:
       - AgentLogUsage/totals+消息五字段 (backend/app/modules/platform_sync/schema.py+router.py, messages 响应扩展·内层 snake_case 零改名·唯一外层映射 totalUsage→totals·老 daemon 全 None, 2026-09-20-agent-log-session-replay)
       - append_events/list_events (backend/app/modules/platform_sync/service.py+router.py, POST/GET /changes/{name}/events 变更事件通道·watcher 批量上行幂等跳过+5000 修剪·since 增量正序·provisional 只展示不消费红线, 2026-09-23-change-events-channel)
       - WorkerLiveness 直查 (backend/app/modules/agent/mcp_tools.py, list_workers running worker 附 liveness{state,evidence,derived_at}, 2026-09-07-agent-liveness-states)
+      - deploy_records_router (backend/app/modules/deploy_records/, 只读两 GET：聚合各 workspace docs/releases/*.md 发布记录，deploy_record:read 门控，2026-10-14-deploy-release-notes)
       - workspace_router
       - linked_repos 子模块三表+六端点 (backend/app/modules/workspace/linked_repos/, 跨仓关联登记[共享字段+成员级路径]+CRUD+my-path+sync 触发, 跨工作区归属过滤 404+exclude_unset 清除语义, 2026-10-10-workspec-maintenance)
       - linked_repos_sync 编排 (backend/app/modules/daemon/linked_repos_sync.py, linked_repos_sync RPC[30s+15s/仓上限180s]+machines.py 回报端点[落库唯一通道]+best-effort 推送[逐成员 abs_path/引用池], 2026-10-10-workspec-maintenance)

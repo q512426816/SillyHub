@@ -2984,3 +2984,180 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：82b966f8f85f16b2318e56541359a0c067783802
 理由：最大风险：非输入型让权路径（如浏览器自动滚动/读屏器）在窗内被拉回一次——真实用户四类输入覆盖 99% 场景，10s 窗口短且只在内容变化时动作。放弃方案：①继续追凶（19 轮 1 复现，取证成本失控，用户在等）；②near 被清后无限复活（用户真滚后内容更新会被反复拉回，破坏让权语义）。
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-turn-anchor-cache-eviction
+锚点：未记录
+最近确认：10c669ae3fd9bb6b65ae290c3e0aa22c2f1722ca
+理由：最大风险：清理后同会话被复用（同 id 再打锚）时 prev 恢复依赖 JSONL 尾行读取， 多一次文件读——仅理论场景（终态会话不再有新轮），且与既有重启兜底同路径、已被 既有用例覆盖。试过但放弃：① LRU/条目上限淘汰——引入魔法数与淘汰策略复杂度， 会话终结点清理语义更准确；② clear 同时删 `_chainBySession`——链自身 finally 已 自清理，额外删除无收益反而在同 id 复用时破坏串行链衔接。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-files-refresh-explicit-sync
+锚点：未记录
+最近确认：42704a75aad01b355dbe090f0562ddc95090d094
+理由：最大风险：点击刷新在 3s 预算内同步未完成 → 本次返回旧数据（用户可能感知「点了没变化」）。缓解：daemon 防抖窗口内再点秒回且数据已新（两次点击内必见新数据）；后续若体验仍差可前端加「同步中」提示。试过但放弃：①异步触发+前端延时补拉（方案更优但改动面含前端联动逻辑，超 thin 边界——留作后续升级）；②只降超时不动触发面（悬浮面板轮询仍周期性打 CLI，不解决「一直慢」根因）。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-agent-profile-express-preset
+锚点：未记录
+最近确认：534cef161623ee81046dd08d697300c005071294
+理由：最大风险：协议文案把「新功能/大改动」也错误降级进极速通道——文案显式写入规模定级与拒绝降级条款（新功能提示改走完整 brainstorm 流程）。放弃方案 A（加为第三条 `is_system_default=True` 默认档案）：会进 `resolve_profile` 兜底链改变所有未选档案会话的默认人格（破坏零回归），且 seed 去重按 provider 与既有 claude 默认档冲突；放弃方案 B（仅用管理 API 在当前库建一条数据）：DB 重置即丢（规则 11 允许重置）、不可复现，不符合「平台预置」语义。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-logout-full-reload-clear-cache
+锚点：未记录
+最近确认：534cef161623ee81046dd08d697300c005071294
+理由：最大风险：整页跳转比 SPA 跳转多一次完整文档加载（HTML/JS 重取，浏览器缓存可摊薄），登出是低频操作且 401 被动登出长期就是这个行为，体验一致性与数据正确性优先，可接受。放弃方案 A：登出时 `queryClient.clear()` + 逐个 reset 内存 store——需要 app-shell 拿到 QueryClient 并枚举所有 store，覆盖面靠人工维护，未来新增 store 即漏（本次 bug 正是此类漏网），且组件内闭包/SSE 状态仍难穷尽；放弃方案 B：给全部 query key 加用户维度——改动面遍历全站 hook，且不解决非 QueryClient 的内存 store 串台，收益/成本倒挂。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-logout-localstorage-user-data-cleanup
+锚点：未记录
+最近确认：ccda8969cfb2db1ac3a0d30524b938011b5d04a3
+理由：最大风险：前缀注册表漏掉未来新增的用户域键（枚举式固有的漏网风险——与上变更放弃方案 A 同型）。缓解：键清单集中一处且有本测试钉住存量 6 前缀，新增键时注册表是唯一需要动的地方；已知取舍是接受「未来键需自觉登记」而非引入命名空间强约束（改造全部读写点收益/成本倒挂）。放弃方案 B：统一用户域键命名空间前缀（如 `sillyhub:user.*`）——需改 6 个文件的全部读写点+旧键迁移清理，收益只是「前缀扫描永不漏」，且改键会导致现有用户草稿/未读状态丢失，不值；放弃方案 C：在 logout-storage 里顺带清 session persist 键——session store 的 clear() 已负责（persist 落盘空值），双份清理引入「谁是真的清空者」歧义，不碰。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-change-center-lineage-tag-and-filter
+锚点：未记录
+最近确认：56e0e5c338e5c327a8683802f90b38dc925ee9f4
+理由：最大风险：`_resolve_thin_lineage_keys` 全 workspace 拉行 + outerjoin progress 肥 JSON，大 workspace 下列表请求变慢。评估：与现网 `pending_review_only` 聚焦路径同量级（后者已有 Redis read-through 缓存先例），v1 先现算不加缓存，超预期再按先例挂缓存，不阻塞本变更。死路①：把三分支直译 SQL（PG jsonb + SQLite json_each 跨方言 JSON 展开）——方言分裂、防御解析逻辑（畸形 steps 容忍）难复刻，放弃。死路②：changes 表物化 `is_thin` 列——出身是投影语义（依赖 progress JSON 与时间窗），同步成本高且易漂移（注释↔实现不一致是万恶之源），放弃。死路③：筛选沿用 `current_stage != 'thin'` 取反——漏归档兜底行、与行内标签口径分裂，放弃。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-litellm-retire
+锚点：未记录
+最近确认：ab87d6adbc3a0509d743970552e97813f0f7881c
+理由：最大风险：未来新增 openai_like 供应商（无原生 anthropic 端点的上游）时转换链路缺失——当前零供应商依赖 litellm，且重引路径已文档化（本坑记录 + spike-litellm-routing 历史可考古）；接受。次风险：本机 plain v1.95.0 healthy 3 天提示上游构建可能已修复，退役放弃了「零成本复测复活」机会——拍板时已向用户披露并选择退役（不再等上游）。死路：尝试「只删 prod 留 dev」——两处定义漂移正是 10-06 compose 同步教训的反面，不留双态。
+
+## D-001@v1 新建独立部署记录模块，不动现有发布审批流
+状态：implemented
+变更：2026-10-14-deploy-release-notes
+锚点：未记录
+最近确认：01c45807a
+理由：用户裁决：新建独立模块。现有 release 审批流是人工单据流（bundle change_ids、approve、deploy、rollback），与「agent 部署后自动生成部署变化记录」是两个概念；并存不合并
+故障面：侧边栏出现两个"发布"语义菜单（现有「发布」+ 新「部署记录」），需靠菜单命名区分（「发布记录」vs「发布」）
+退役判据：若现有 release 审批流确认废弃下线，可将两域合并
+
+## D-002@v1 顶层一级菜单，平台级聚合视图
+状态：implemented
+变更：2026-10-14-deploy-release-notes
+锚点：未记录
+最近确认：01c45807a
+理由：用户裁决：顶层一级菜单（像「智能体会话」/agent-profiles 那样 absolute href、不进工作区），统一看所有部署记录
+故障面：菜单注册表增删条目平移声明序索引，需同步重算 admin/menus 测试锚（共享断言面⑦，scripts/check-assertion-surfaces.py 门禁）
+退役判据：若未来要求按工作区隔离查看，再评估降级为工作区菜单
+
+## D-003@v1 基础版记录内容
+状态：implemented
+变更：2026-10-14-deploy-release-notes
+锚点：未记录
+最近确认：01c45807a
+理由：用户裁决：基础版——部署时间、序号/版本标识、commit 范围（上次部署→本次，含提交列表）、agent 规整的变化总结（md 渲染展示）、部署结果（成功/失败）。不含部署日志摘要/健康检查/回滚按钮
+
+## D-004@v1 方案D——agent 写 md 文件 + 平台读文件渲染（用户改提，取代 API 上报）
+状态：implemented
+变更：2026-10-14-deploy-release-notes
+锚点：未记录
+最近确认：01c45807a
+理由：用户裁决原话「skill步骤 加 agent 写 md 文件不行吗？平台直接读md，每次发布生成一个新 md」：skill 末尾 agent 在仓库 docs/releases/ 写一个新 md（frontmatter 放元数据 + 正文放变化总结）；平台后端只读扫描该目录，解析 frontmatter + 渲染正文，不建表、不做写端点
+故障面：① 依赖容器挂载能读到宿主仓库（平台与项目不在同一宿主机时读不到——当前本机部署场景成立）；② frontmatter 写坏（yaml 解析失败）需容错跳过或标记异常；③ 记录目录是约定，agent 忘写就缺记录（同方案A固有劣势）
+退役判据：若出现多机部署/平台与项目分离部署，读不到文件，届时升级为 API 上报 + 落库
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-release-notes-server-sync
+锚点：未记录
+最近确认：c0d30b157200e183168da8c8872fdab1772b8097
+理由：- **最大风险**：镜像目录在 /tmp（服务器重启可能被清）→ 页面短暂空窗。接受：每次部署全量重传自愈；若清空窗口期需要看历史，scp 本地 docs/releases 即恢复。 - **放弃方案 A（API 上报+落库）**：需写端点+鉴权链+数据库表，实现面大；D-004 大变更时用户已裁决「写文件+只读」路线，本变更仅补数据源物理可达性，不推翻既有裁决。 - **放弃方案 B（服务器放完整 git 仓库）**：服务器 /opt/sillyhub 仓库存在但不在挂载面（/tmp），且引入服务器侧 git 拉取/凭证维护成本；镜像目录只需 scp 一个目录，最小面。
+
+## D-001@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-assets-knowledge-popup-preview
+锚点：未记录
+最近确认：20290764ce262f0940bec9e02fed5338ea9c1b79
+理由：- 最大风险：测试环境债——EntryCardList 的正文渲染链 CardMarkdown → MarkdownText 用 next/dynamic，jsdom 同步渲染为 null（entry-card-list.test 先例），组件测试必须 stub MarkdownText；jsdom 无 scrollIntoView，弹窗定位 effect 会抛未捕获错误拖挂测试（knowledge-page.test 先例），测试文件需按同款 beforeAll 打桩。 - 弃案 A：组件直接 `import { normalizeKnowledgeFileParam } from "@/app/.../knowledge/page"`——省一次迁移但把知识页整图（antd Tree 等）拖进变更详情页打包图，且组件反向依赖页面是反模式，弃。 - 弃案 B：弹窗内只渲染单条条目（自写解析器抽单卡）——EntryCardList 的条目解析是双端同域契约（slugifyAnchor 与 backend parser 对齐），单条抽取等于另起一套解析器，漂移风险大于收益；整文件渲染 + 锚点滚动与知识库页行为完全一致，弃。
+
+## D-unmapped-001@v2 用户确认——页面内容=原看板全部+连接状态
+状态：implemented
+变更：2026-10-14-admin-server-status
+原编号：D-002@v2
+锚点：未记录
+最近确认：73e881ba5
+理由：用户选择「原看板全部+连接状态（推荐）」。决策内容同 v1，确认主体由 AI 推断改为用户亲选。
+supersedes：D-002@v1
+
+## D-unmapped-002@v1 页面落位系统管理组末尾，menuKey=server-status
+状态：implemented
+变更：2026-10-14-admin-server-status
+原编号：D-003@v1
+锚点：未记录
+最近确认：73e881ba5
+理由：用户原话"系统管理页面"→ system 组第 6 条（menus 之后、ppm 组之前），menuKey=server-status，label=服务器信息，href=/admin/server-status（absolute，对齐组内 /admin/* 惯例）。放组末尾使 system 组既有声明序索引（users=18/org=19/roles=20）不动，仅 ppm 组索引+1（无测试锚定 ppm 索引）。
+故障面：菜单覆盖表若已有同名 menu_key=server-status 的孤儿行会意外复活（核实过 menu_overrides 现存无此 key 才安全）。
+退役判据：服务器信息功能下线时同步删菜单条目并重算排序锚。
+
+## D-unmapped-003@v1 实现方案=独立页面（方案 A）
+状态：implemented
+变更：2026-10-14-admin-server-status
+原编号：D-005@v1
+锚点：未记录
+最近确认：73e881ba5
+理由：用户亲选方案 A：系统管理组新增第 6 项菜单「服务器信息」，独立页面 /admin/server-status 展示 CPU/内存/磁盘+四项业务统计+DB/Redis 连接状态，5s 自动刷新；接口同步收紧鉴权。
+故障面：菜单注册表新增条目平移 ppm 组声明序索引（共享断言面⑦），须同提交重算 admin/menus 测试锚。
+退役判据：页面下线时菜单条目+图标映射+测试锚同步回收。
+
+## D-unmapped-004@v1 落选——并入设置页 Tab（方案 B）
+状态：rejected
+变更：2026-10-14-admin-server-status
+原编号：D-006@v1
+锚点：未记录
+最近确认：73e881ba5
+理由：落选。劣势：设置页语义是平台配置，服务器运行状态混入入口不直观，不符用户"专门的页面"表述；设置页已有 4 个 Tab 再加拥挤。优势（改动面小、不碰菜单注册表）不足以抵消入口语义错位。
+否决理由：设置页语义为平台配置，运行状态混入入口不直观且 Tab 拥挤；改动面小的优势不足以抵消语义错位。
+复潮条件：若未来系统管理组菜单数量受限或用户改口接受设置页承载，可重议。
+
+## D-unmapped-005@v1 落选——工作区首页挂卡片（方案 C）
+状态：rejected
+变更：2026-10-14-admin-server-status
+原编号：D-007@v1
+锚点：未记录
+最近确认：73e881ba5
+理由：落选。劣势：与 D-001@v2 收紧权限直接冲突（首页全员可见 vs 管理员权限视图，无权限用户只能看降级卡片）；不落系统管理区，不符用户"系统管理页面"原话。
+否决理由：与收紧权限决策直接冲突（首页全员可见 vs 管理员视图），且入口不落系统管理区违背用户原话。
+复潮条件：若出现"全员可见的运行状态概览"需求（非管理员运维视图），可另立变更重议。
+
+## D-unmapped-006@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-15-deploy-records-unicode-tolerance
+原编号：D-001@v1
+锚点：未记录
+最近确认：95d37f93be47e223ffc6a1f405535b13f7de5d20
+理由：最大风险：捕获面过宽掩盖真实文件系统问题——不会：仅新增 `UnicodeDecodeError` 一类，OSError 分支语义不变，`parse_error` 仍留原因供排查。试过放弃的方案：① `read_bytes` + 手动 decode 再走解析——双份解码逻辑，容错分支翻倍不值；② 只修 skill 写入侧（强制 utf-8 落盘）——治不了存量坏文件与本机 Windows 手写文件，且 FR-04 已承诺服务端兜底，属治标不治本。
+
+## D-unmapped-007@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-15-fix-ci-red
+原编号：D-001@v1
+锚点：未记录
+最近确认：cdaae4dcadefb5c2ff6896f34021ff4c0d9504c6
+理由：最大风险：CI 的 daemon 测试/构建消费新类型暴露未知类型错——已本地跑 `pnpm -C sillyhub-daemon typecheck` 零错兜住。试过但放弃：无（未尝试其它方案，直接对齐是既定成功标准）。
+
+## D-unmapped-008@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-14-decision-anchor-change-qualified
+原编号：D-001@v1
+锚点：未记录
+最近确认：0ef23e479d8a39229486671e590a4d19864849d5
+理由：- 最大风险：复合属性是新增 DOM 契约，若未来其它消费方按 `[data-entry-anchor=…]` 全量枚举做统计会少算复合锚——已核查现网消费方（知识库页 selectEntry、沉淀资产卡弹窗、测试断言）均为「按值查单个」，无枚举面。 - 弃案 A：改裸 `data-entry-anchor` 的值为复合形态——会破坏旧深链与潜在收藏链接，且 INDEX/触达等裸锚消费方需同步迁移，改动面大收益零，弃。 - 弃案 B：后端 assets 响应给 decisions 条目加变更号字段（前端免传 changeKey）——需改 OpenAPI schema + gen:types + 前端类型同步，而 changeKey 在详情页现成可得，后端改动纯属多余，弃。
+
+## D-unmapped-009@v1 风险与死路（design 槽4 收割）
+状态：implemented
+变更：2026-10-15-ci-recurrence-guard
+原编号：D-001@v1
+锚点：未记录
+最近确认：2c669d90e1853c52f575c56980410ab75fe55ee9
+理由：最大风险：⑦ 三件套过度触发（如 ppm 区加菜单不改 permission.test.ts 的分区条目）——按既有口径走「确认不触及钉子断言则纳入评审说明」逃生门，fail-closed 优于 CI 补红。试过但放弃：把菜单数量锚改为从源常量推导（task-05 rejected）——推导锚等于断言与被测同源，钉子失去「源码长大必须显式跟」的契约语义，复发根因是本地缺拦截面而非锚形式，闸门⑦补齐已治本；另考虑过 pre-commit 阶段跑 typecheck（放弃：每次提交 1 分钟不可接受）。

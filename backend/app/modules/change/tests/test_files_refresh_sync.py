@@ -1,4 +1,4 @@
-"""GET files 刷新前置同步的降级链测试（2026-10-13-change-files-refresh-sync task-05）。
+"""GET files 显式同步（sync=1）与默认纯读的行为测试（2026-10-14-files-refresh-explicit-sync；承 2026-10-13-change-files-refresh-sync task-05）。
 
 覆盖 ``_sync_change_via_daemon`` 四路静默降级（D-003@v1：未绑定 / 离线 /
 DaemonRpcTimeout / DaemonRpcRemoteError / DaemonRuntimeOffline）与触发成功
@@ -122,12 +122,12 @@ def _install_sync_mocks(
 async def test_online_triggers_sync_before_list(
     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """绑定在线：send_rpc 被调且 method/change_key/workspace_id/timeout 透传正确，其后返回清单。"""
+    """sync=1 且绑定在线：send_rpc 被调且 method/change_key/workspace_id/timeout 透传正确，其后返回清单。"""
     hub = FakeHub()
     daemon_id = uuid.uuid4()
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(daemon_id), daemon_online=True)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -143,14 +143,29 @@ async def test_online_triggers_sync_before_list(
     assert any(it["path"].endswith(".md") for it in body["items"])
 
 
+async def test_default_read_only_skips_sync(
+    client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """默认（不带 sync）：纯读——绑定在线也不触发 send_rpc，直接返回平台镜像数据。"""
+    hub = FakeHub()
+    _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
+    resp = await client.get(
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert hub.calls == []
+    assert any(it["path"].endswith(".md") for it in resp.json()["items"])
+
+
 async def test_no_binding_skips_sync(
     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """未绑定 daemon（等效离线）：不触 send_rpc，正常返回现有镜像数据。"""
+    """sync=1 但未绑定 daemon（等效离线）：不触 send_rpc，正常返回现有镜像数据。"""
     hub = FakeHub()
     _install_sync_mocks(monkeypatch, hub, binding=None)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -160,11 +175,11 @@ async def test_no_binding_skips_sync(
 async def test_daemon_offline_skips_sync(
     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """绑定 daemon 离线：不触 send_rpc，正常返回。"""
+    """sync=1 但绑定 daemon 离线：不触 send_rpc，正常返回。"""
     hub = FakeHub()
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=False)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -174,12 +189,12 @@ async def test_daemon_offline_skips_sync(
 async def test_rpc_timeout_degrades(
     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """RPC 超时（15s 预算尽）：降级返回现有镜像数据，HTTP 恒 200。"""
+    """sync=1 且 RPC 超时（3s 预算尽）：降级返回现有镜像数据，HTTP 恒 200。"""
     hub = FakeHub()
-    hub.exc = DaemonRpcTimeout("timed out", details={"timeout_seconds": 15})
+    hub.exc = DaemonRpcTimeout("timed out", details={"timeout_seconds": 3})
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -195,7 +210,7 @@ async def test_rpc_remote_error_degrades_old_daemon(
     hub.exc = DaemonRpcRemoteError({"code": "method_not_found", "message": "unknown method"})
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -210,7 +225,7 @@ async def test_runtime_offline_degrades(
     hub.exc = DaemonRuntimeOffline("offline", details={})
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(uuid.uuid4()), daemon_online=True)
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -220,11 +235,11 @@ async def test_runtime_offline_degrades(
 async def test_binding_without_daemon_id_skips_sync(
     client, files_ws: dict, auth_headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """绑定行存在但 daemon_id 为空（旧行未迁移）：等效未绑定，不触 send_rpc。"""
+    """sync=1 但绑定行 daemon_id 为空（旧行未迁移）：等效未绑定，不触 send_rpc。"""
     hub = FakeHub()
     _install_sync_mocks(monkeypatch, hub, binding=FakeBinding(None))
     resp = await client.get(
-        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files",
+        f"/api/workspaces/{files_ws['ws_id']}/changes/{files_ws['change_id']}/files?sync=1",
         headers=auth_headers,
     )
     assert resp.status_code == 200, resp.text

@@ -25,6 +25,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -918,6 +919,71 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     await waitFor(() =>
       expect(screen.getByText("后端解析失败啦")).toBeInTheDocument(),
     );
+  });
+
+  // ── 2026-10-14-change-center-lineage-tag-and-filter：出身标签 + 分类筛选 ──
+
+  it("完整出身行显示「完整」标签、轻量出身行显示「轻量」标签（成对可辨）", async () => {
+    setupListChanges({
+      items: [
+        makeChange({ id: "ch-full", change_key: "full-change", is_thin: false }),
+        makeChange({
+          id: "ch-thin",
+          change_key: "thin-change",
+          is_thin: true,
+          current_stage: "thin",
+        }),
+      ],
+      total: 2,
+    });
+    await renderAndWait();
+    // 完整出身：neutral 胶囊（muted-foreground 语义色）；轻量出身：attention
+    // 琥珀胶囊（warning 语义色）——StateLabel 内联 style，直接断言配色可区分
+    // （评审 P3：仅断言不同文本节点恒真，不足以锁「样式可区分」承诺）。
+    const fullBadge = screen.getByText("完整");
+    const thinBadge = screen.getByText("轻量");
+    expect(fullBadge).toBeInTheDocument();
+    expect(thinBadge).toBeInTheDocument();
+    expect(fullBadge.style.color).toContain("var(--muted-foreground)");
+    expect(thinBadge.style.color).toContain("var(--warning)");
+    expect(fullBadge.style.color).not.toBe(thinBadge.style.color);
+  });
+
+  it("分类下拉选择「轻量变更」→ listChanges 收到 lineage=thin；重置后清除", async () => {
+    await renderAndWait();
+    expect(lastMainLoadParams()?.lineage).toBeUndefined();
+
+    // antd RTL 惯例 mouseDown 展开下拉 + 点选选项（portal 渲染）
+    fireEvent.mouseDown(screen.getByLabelText("筛选分类"));
+    fireEvent.click(await screen.findByText("轻量变更"));
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.lineage).toBe("thin"),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /重\s*置/ }));
+    });
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.lineage).toBeUndefined(),
+    );
+  });
+
+  it("分类下拉选择「完整变更」→ lineage=full；阶段下拉不含「轻量变更」选项", async () => {
+    await renderAndWait();
+
+    fireEvent.mouseDown(screen.getByLabelText("筛选分类"));
+    fireEvent.click(await screen.findByText("完整变更"));
+    await waitFor(() =>
+      expect(lastMainLoadParams()?.lineage).toBe("full"),
+    );
+
+    // 阶段下拉不再有「轻量变更」选项（分类查询职责迁移到分类下拉，FR-04）
+    fireEvent.mouseDown(screen.getByLabelText("筛选阶段"));
+    const stageListbox = await screen.findAllByRole("listbox");
+    const stageOptions = within(stageListbox.at(-1)!).queryAllByText(
+      "轻量变更",
+    );
+    expect(stageOptions).toHaveLength(0);
   });
 });
 

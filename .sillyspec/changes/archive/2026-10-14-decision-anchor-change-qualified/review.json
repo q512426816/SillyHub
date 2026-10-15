@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-decision-anchor-change-qualified",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "1b0163159312d20e321307d4e48d174b9cb2f1eb",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "原 P1（死兜底）已在 1b0163159 修复并钉回归：两处裸锚兜底键剥离变更号前缀",
+      "evidence": "knowledge/page.tsx 与 change-assets-card.tsx 均改为 bareKey = anchor.includes(\"#\") ? 文件#(anchor.split(\"#\").slice(1).join(\"#\")) : key——复合锚查无时退真裸锚（文件#id），slug 锚路径经 includes 三元守卫仍走原 key 不受影响；新增用例「FR 行兜底：条目无「变更：」字段时复合锚查无退裸锚（评审 P1 回归钉）」断言滚动目标为裸锚卡且 hasAttribute(data-entry-anchor-qualified)===false——旧死兜底代码下该用例必红（scrollIntoView 不被调用），钉死有效",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx:393-403; frontend/src/components/changes/detail/change-assets-card.tsx:716-724; frontend/src/components/changes/detail/__tests__/change-assets-card.test.tsx:355-382"
+    },
+    {
+      "severity": "P3",
+      "title": "原 P3×2 已在 1b0163159 修复：缺「变更：」字段负例补钉 + FR-03 绑定名对齐",
+      "evidence": "entry-card-list.test.tsx 新增「有 id 但缺「变更：」字段：裸锚输出，复合锚不输出」（D-007@v1 fixture 断言裸锚在、复合锚不在），补齐 FR-01 禁出分支断言；requirements FR-03 绑定名改为「anchor 含变更号前缀（变更号#决策号）：先试复合锚精确落卡」，与 knowledge-page.test.tsx 实际用例名逐字一致",
+      "location": "frontend/src/components/knowledge/__tests__/entry-card-list.test.tsx:555-567; .sillyspec/changes/2026-10-14-decision-anchor-change-qualified/requirements.md:62"
+    },
+    {
+      "severity": "P3",
+      "title": "design.md 盲维答3残余措辞未随 P1 修复同步：旧构建缓存配新深链「只会退化到旧的首卡命中」不成立",
+      "evidence": "旧 JS 对新复合深链构造「文件#变更号#id」裸选择器永不命中——实际退化为知识页 12 帧耗尽后文件级降级/弹窗不滚动，不存在「首卡命中」退化级；「退裸锚→退文件级顶部」主链经 1b0163159 修复后已真实成立，「不会报错、切换期安全」结论正确，仅该括注机理描述需更正（注释与实现不一致应及时修正）",
+      "location": ".sillyspec/changes/2026-10-14-decision-anchor-change-qualified/design.md:36"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（声明边界已裁决：可接受——弹窗 useQuery 按 [workspaceId, filename] 分键、定位 effect 以 q.isSuccess 为闸，知识库页 12 帧有界重试，均与代码核实一致）",
+    "并发": "n/a（声明边界已裁决：可接受——diff 全为渲染/查询/滚动纯读逻辑，无写路径，属实）",
+    "切换": "ok（声明边界已裁决：可接受——「退裸锚→退文件级顶部」逐级兜底经 1b0163159 剥前缀修复后真实存在且有回归钉；残余仅 design.md:36 括注的旧构建机理措辞，见 P3）",
+    "作用域": "ok（声明边界已裁决：可接受——复合锚取条目自身「变更：」字段字面值并按文件域解析，query 按 workspaceId 分键，无跨工作区串台面）"
+  },
+  "reviewedAt": "2026-10-15T08:58:52+08:00"
+}

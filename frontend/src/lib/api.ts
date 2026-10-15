@@ -6,6 +6,7 @@
  */
 import { useSession } from "@/stores/session";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
+import { clearUserScopedLocalStorage } from "@/lib/logout-storage";
 // ql-20260917-011：全局熔断——部署窗口 5xx/网络错误风暴下短路请求，护住
 // 浏览器连接池（此前风暴直到 ERR_INSUFFICIENT_RESOURCES 页签报废）
 import { isCircuitOpen, reportApiFailure, reportApiSuccess } from "@/lib/api-circuit";
@@ -247,6 +248,9 @@ export async function apiFetch<T = unknown>(
       }
       // 单飞失败(未登录 / refresh 失败 / 未 hydrate):清 session + 跳 login,行为与原实现一致。
       useSession.getState().clear();
+      // 2026-10-14-logout-localstorage-user-data-cleanup：会话终结，localStorage
+      // 用户域键（草稿/未读/活性）同清——与两处主动登出同口径（设备级偏好保留）。
+      clearUserScopedLocalStorage();
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }

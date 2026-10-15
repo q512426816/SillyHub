@@ -3,16 +3,22 @@
 // 逐组容错（仅 fr 有数据时其余组不渲染）、在途变更引导空态、归档全空态、
 // 失败静默隐藏（isError → 整卡 null）。
 //
-// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：FR/决策行 href 带
-// file+anchor 深链、测试绑定行点开测试文件预览弹窗（FilePreview 收到仓库路径）、
-// 归档留档文件清单渲染与点开单文件 diff 弹窗（命中/note 两态）。
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+// 2026-09-25-change-detail-assets-usability（FR-01~04）追加：测试绑定行点开测试
+// 文件预览弹窗（FilePreview 收到仓库路径）、归档留档文件清单渲染与点开单文件
+// diff 弹窗（命中/note 两态）。
+//
+// 2026-10-14-assets-knowledge-popup-preview（FR-01~03/05）改写：FR 索引/决策
+// 蒸馏/知识触达三组从整页跳知识库深链改为点击打开条目内容预览弹窗（getKnowledge
+// 取数 + EntryCardList 条目卡 + 锚点定位），弹窗头部「在知识库中打开」深链沿用
+// 原 file+anchor 格式。
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChangeAssetsCard } from "@/components/changes/detail/change-assets-card";
 import { getChangeAssets, getChangePatchFile } from "@/lib/changes";
 import { fetchSearch } from "@/lib/explorer";
+import { getKnowledge } from "@/lib/knowledge";
 
 vi.mock("@/lib/changes", () => ({
   getChangeAssets: vi.fn(),
@@ -26,6 +32,39 @@ vi.mock("@/lib/explorer", () => ({
   fetchSearch: vi.fn(),
 }));
 
+// 知识条目预览弹窗（2026-10-14-assets-knowledge-popup-preview）取数端点 mock；
+// normalizeKnowledgeFileParam 为纯函数，importOriginal 透传真实实现。
+vi.mock("@/lib/knowledge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/knowledge")>();
+  return { ...actual, getKnowledge: vi.fn() };
+});
+
+// EntryCardList 正文渲染链 CardMarkdown → MarkdownText 用 next/dynamic
+// （ssr:false），jsdom 同步渲染 null（entry-card-list.test 先例）——stub 直接
+// 回显 content，正文文本断言照常命中。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="md-stub">{content}</div>
+  ),
+}));
+
+// jsdom 未实现 scrollIntoView（弹窗锚点定位 effect 调用）——knowledge-page.test
+// 同款先例：文件级打桩防 Uncaught TypeError 拖挂整跑。本文件的复合锚用例还要
+// 断言「滚到了哪张卡」——scrollIntoView 的目标是 this 而非首参，包装一层把
+// 元素记为 spy 首参。
+const scrollIntoViewSpy = vi.fn();
+beforeAll(() => {
+  Element.prototype.scrollIntoView = function (
+    this: Element,
+    ...args: Parameters<typeof Element.prototype.scrollIntoView>
+  ) {
+    scrollIntoViewSpy(this, ...args);
+  } as typeof Element.prototype.scrollIntoView;
+});
+afterAll(() => {
+  delete (Element.prototype as unknown as Record<string, unknown>).scrollIntoView;
+});
+
 // FilePreview 走 explorer 取数（仓库文件），本卡只验证「弹窗打开且把路径交给它」——
 // 取数与渲染由 explorer 自己的用例覆盖，这里用替身把路径回显出来。
 vi.mock("@/components/explorer/file-preview", () => ({
@@ -37,6 +76,7 @@ vi.mock("@/components/explorer/file-preview", () => ({
 const mockGet = vi.mocked(getChangeAssets);
 const mockPatch = vi.mocked(getChangePatchFile);
 const mockSearch = vi.mocked(fetchSearch);
+const mockGetKnowledge = vi.mocked(getKnowledge);
 
 /** 单命中 matches 便捷构造（type 恒 file——本卡只消费 path）。 */
 function matchesOf(paths: string[]) {
@@ -50,13 +90,24 @@ function matchesOf(paths: string[]) {
   };
 }
 
+/** 知识条目取数响应便捷构造（zone/filename/content 为弹窗渲染三要素）。 */
+function knowledgeOf(filename: string, zone: string, content: string) {
+  return {
+    zone,
+    filename,
+    path: `.sillyspec/knowledge/${filename}`,
+    title: filename,
+    content,
+  };
+}
+
 function renderCard() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ChangeAssetsCard workspaceId="ws-1" changeId="c-1" />
+      <ChangeAssetsCard workspaceId="ws-1" changeId="c-1" changeKey="k-demo" />
     </QueryClientProvider>,
   );
 }
@@ -193,21 +244,152 @@ describe("ChangeAssetsCard", () => {
     expect(container.querySelector('[data-testid="change-assets-card"]')).toBeNull();
   });
 
-  it("FR/决策索引行：href 带 file+anchor 深链（FR-01/02）", async () => {
+  it("FR/决策索引行：点击弹窗预览条目内容并定位，弹窗内含知识库深链（FR-01/03）", async () => {
     mockGet.mockResolvedValue(FULL);
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "fr/x.md",
+        "fr",
+        "## FR-auto-x-001 条目一\n状态：active\n变更：k-demo\n理由：条目正文理由。\n",
+      ),
+    );
     renderCard();
-    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+    await screen.findByRole("button", { name: /沉淀资产/ });
 
-    const frLink = (await screen.findByText("FR-auto-x-001")).closest("a");
-    expect(frLink).toHaveAttribute(
-      "href",
-      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=FR-auto-x-001",
+    // FR 行不再是整页跳转的 <a>，点击打开预览弹窗
+    const frRow = await screen.findByText("FR-auto-x-001");
+    expect(frRow.closest("a")).toBeNull();
+    fireEvent.click(frRow);
+    // 取数按归一后文件名发起（file=knowledge/fr/x.md → fr/x.md）
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/x.md"),
     );
-    const decLink = screen.getByText("D-001@v1").closest("a");
-    expect(decLink).toHaveAttribute(
+    // 弹窗内条目卡渲染 + 锚点定位目标卡存在（复合锚：变更号+决策号）
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      dialog.querySelector('[data-entry-anchor-qualified="fr/x.md#k-demo#FR-auto-x-001"]'),
+    ).not.toBeNull();
+    // 弹窗头部知识库深链：anchor 带变更号前缀（复合锚跨页同样精确）
+    const jump = within(dialog).getByText("在知识库中打开").closest("a");
+    expect(jump).toHaveAttribute(
       "href",
-      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=D-001%40v1",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Ffr%2Fx.md&anchor=k-demo%23FR-auto-x-001",
     );
+
+    // 关闭后点决策行：同一弹窗通道，决策文件深链同理
+    fireEvent.click(within(dialog).getByText("关闭"));
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "decisions/x.md",
+        "decisions",
+        "## D-001@v1 : 决策一\n状态：implemented\n变更：k-demo\n理由：决策理由文本。\n",
+      ),
+    );
+    fireEvent.click(screen.getByText("D-001@v1"));
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "decisions/x.md"),
+    );
+    const dialog2 = await screen.findByRole("dialog");
+    expect(
+      dialog2.querySelector('[data-entry-anchor-qualified="decisions/x.md#k-demo#D-001@v1"]'),
+    ).not.toBeNull();
+    expect(
+      within(dialog2).getByText("在知识库中打开").closest("a"),
+    ).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/knowledge?file=knowledge%2Fdecisions%2Fx.md&anchor=k-demo%23D-001%40v1",
+    );
+  });
+
+  it("决策行弹窗定位：同 id 跨变更按变更号+决策号复合锚精确命中（FR-02）", async () => {
+    // 生产实证形态（decisions/unmapped.md）：多个变更各有同名决策号，裸锚
+    // 「文件#id」首卡误命中——滚动目标必须锁定 changeKey 的复合锚卡。
+    mockGet.mockResolvedValue({
+      ...FULL,
+      decisions: [
+        {
+          id: "D-003@v1",
+          title: "本变更的磁盘旁路决策",
+          status: "active",
+          file: "knowledge/decisions/dup.md",
+        },
+      ],
+    });
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "decisions/dup.md",
+        "decisions",
+        [
+          "## D-003@v1 : 别变更的三波交付决策",
+          "状态：active",
+          "变更：2026-08-29-other",
+          "",
+          "## D-003@v1 : 本变更的磁盘旁路决策",
+          "状态：active",
+          "变更：k-demo",
+          "",
+        ].join("\n"),
+      ),
+    );
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    fireEvent.click(await screen.findByText("D-003@v1"));
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "decisions/dup.md"),
+    );
+    const dialog = await screen.findByRole("dialog");
+    // 文件里两个同 id 卡都在（裸锚同值）；滚动目标必须是 k-demo 的复合锚卡。
+    await waitFor(() =>
+      expect(
+        dialog.querySelectorAll('[data-entry-anchor="decisions/dup.md#D-003@v1"]'),
+      ).toHaveLength(2),
+    );
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
+    expect(target.getAttribute("data-entry-anchor-qualified")).toBe(
+      "decisions/dup.md#k-demo#D-003@v1",
+    );
+  });
+
+  it("FR 行兜底：条目无「变更：」字段时复合锚查无退裸锚（评审 P1 回归钉）", async () => {
+    // FR 文件条目缺「变更：」行（老数据容差形态）：qualified 属性不存在，
+    // 兜底键必须剥掉变更号前缀按裸锚命中——否则静默不滚（改动前可定位，构成回退）。
+    mockGet.mockResolvedValue(FULL);
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "fr/x.md",
+        "fr",
+        "## FR-auto-x-001 条目一\n状态：active\n理由：条目正文理由。\n",
+      ),
+    );
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    fireEvent.click(await screen.findByText("FR-auto-x-001"));
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(
+        dialog.querySelector('[data-entry-anchor="fr/x.md#FR-auto-x-001"]'),
+      ).not.toBeNull(),
+    );
+    await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+    const target = scrollIntoViewSpy.mock.calls.at(-1)![0] as Element;
+    // 滚动目标 = 裸锚卡（无复合属性可命中——兜底生效而非静默不滚）。
+    expect(target.getAttribute("data-entry-anchor")).toBe("fr/x.md#FR-auto-x-001");
+    expect(target.hasAttribute("data-entry-anchor-qualified")).toBe(false);
+  });
+
+  it("知识条目预览弹窗：取数失败就近展示错误文案，深链仍可见（FR-05）", async () => {
+    mockGet.mockResolvedValue(FULL);
+    mockGetKnowledge.mockRejectedValue(new Error("知识库不可用"));
+    renderCard();
+    await screen.findByRole("button", { name: /沉淀资产/ });
+
+    fireEvent.click(await screen.findByText("FR-auto-x-001"));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/知识库不可用/)).toBeInTheDocument();
+    expect(within(dialog).getByText("在知识库中打开")).toBeInTheDocument();
   });
 
   it("测试绑定行：锚点标注「变更内」且测试文件可点开预览（FR-03）", async () => {
@@ -512,9 +694,10 @@ describe("ChangeAssetsCard 资产透明面", () => {
     mockSearch.mockResolvedValue(matchesOf(["backend/app/x.py"]));
   });
 
-  it("知识触达组：统一文案（在途/归档同口径）并带知识库 file+anchor 深链 href", async () => {
+  it("知识触达：锚点条目行点击弹窗打开，弹窗深链沿用 file+anchor（不整页跳转）", async () => {
     // 2026-10-09-knowledge-touch-marker-sunset：标题不再分裂归档/实时双口径，
     // 悬停说明注入命中留痕口径；禁止「待复核」「以标记为准」字样。
+    // 2026-10-14-assets-knowledge-popup-preview：行点击改弹窗预览，不再整页跳转。
     mockGet.mockResolvedValue({
       ...FULL,
       knowledge_touch: [
@@ -525,8 +708,15 @@ describe("ChangeAssetsCard 资产透明面", () => {
         },
       ],
     });
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf(
+        "fr/auto-backend.md",
+        "fr",
+        "## FR-auto-backend-015 THIN 辅助阶段与派发配置\n状态：active\n",
+      ),
+    );
     renderCard();
-    await screen.findByRole("button", { name: /沉淀资产/ }); // 默认展开（2026-09-28-change-ux-detail-batch），无需点击
+    await screen.findByRole("button", { name: /沉淀资产/ });
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
     expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
@@ -537,13 +727,22 @@ describe("ChangeAssetsCard 资产透明面", () => {
     // id≠title 的锚点条目：双栏各显示一份，挂在文件组头下。
     expect(group).toHaveTextContent("FR-auto-backend-015");
     expect(group).toHaveTextContent("THIN 辅助阶段与派发配置");
-    const link = group.querySelector(
-      '[data-testid="change-assets-touch-group-knowledge/fr/auto-backend.md"] a[href*="anchor="]',
+
+    // 条目行点击 → 弹窗（行不再是 <a>），取数按归一文件名，深链带 file+anchor。
+    // 组头也是 button（文件级打开），用行文本定位锚点条目行。
+    const row = within(group).getByText("THIN 辅助阶段与派发配置").closest("button");
+    expect(row).not.toBeNull();
+    expect(row!.closest("a")).toBeNull();
+    fireEvent.click(row!);
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/auto-backend.md"),
     );
-    expect(link).not.toBeNull();
-    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
-      "file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015",
-    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      decodeURIComponent(
+        within(dialog).getByText("在知识库中打开").closest("a")!.getAttribute("href") ?? "",
+      ),
+    ).toContain("file=knowledge/fr/auto-backend.md&anchor=FR-auto-backend-015");
   });
 
   it("在途变更知识触达：同 slug 只显示一份（id==title 不连排两遍）", async () => {
@@ -556,6 +755,9 @@ describe("ChangeAssetsCard 资产透明面", () => {
         { id: "-audit_hooks-只在测试", title: "-audit_hooks-只在测试", file: "known-issues.md" },
       ],
     });
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf("known-issues.md", "top", "## -audit_hooks 只在测试 lifespan 注册\n正文\n"),
+    );
     renderCard();
     await screen.findByRole("button", { name: /沉淀资产/ });
 
@@ -564,18 +766,20 @@ describe("ChangeAssetsCard 资产透明面", () => {
     expect(group).toHaveTextContent("知识触达（本变更注入命中的知识）");
     // slug 恰好出现一次（改前 id+title 双栏连排两遍）。
     expect((group.textContent?.match(/-audit_hooks-只在测试/g) ?? []).length).toBe(1);
-    // 锚点行深链：file=裸知识文件（不带 knowledge/ 前缀）
-    const link = group.querySelector(
-      '[data-testid="change-assets-touch-group-known-issues.md"] a[href*="anchor="]',
-    );
-    expect(decodeURIComponent(link!.getAttribute("href") ?? "")).toContain(
-      "file=known-issues.md&anchor=-audit_hooks-",
-    );
+    // 条目行（非组头）点击弹窗打开；裸知识文件深链（file 不带 knowledge/ 前缀）。
+    const row = within(group).getByText("-audit_hooks-只在测试").closest("button");
+    fireEvent.click(row!);
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      decodeURIComponent(
+        within(dialog).getByText("在知识库中打开").closest("a")!.getAttribute("href") ?? "",
+      ),
+    ).toContain("file=known-issues.md&anchor=-audit_hooks-只在测试");
     // 在途引导空态不出现（已有触达数据）
     expect(screen.queryByTestId("change-assets-inflight")).toBeNull();
   });
 
-  it("知识触达分组：整文件路由收拢 chip（链接无 anchor），锚点条目按文件分组", async () => {
+  it("知识触达分组：整文件路由收拢 chip（点击弹窗文件级打开），锚点条目按文件分组", async () => {
     mockGet.mockResolvedValue({
       ...FULL,
       knowledge_touch: [
@@ -585,17 +789,25 @@ describe("ChangeAssetsCard 资产透明面", () => {
         { id: "slug-c", title: "slug-c", file: "patterns.md" },
       ],
     });
+    mockGetKnowledge.mockResolvedValue(
+      knowledgeOf("fr/daemon.md", "fr", "## FR-daemon-001 守护进程规则\n状态：active\n"),
+    );
     renderCard();
     await screen.findByRole("button", { name: /沉淀资产/ });
 
     const group = await screen.findByTestId("change-assets-knowledge-touch");
     expect(group).toHaveTextContent("整文件");
-    // 整文件 chip：href 只带 file 不带 anchor（jsdom 选择器引擎不吃 %2F 编码值，
-    // 按 title 锚定元素再验 href）。
-    const chip = group.querySelector("a[title*='整文件路由注入']");
+    // 整文件 chip：点击弹窗文件级打开（无 anchor 定位），不再整页跳转。
+    const chip = group.querySelector("button[title*='整文件路由注入']");
     expect(chip).not.toBeNull();
-    expect(chip!.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
-    expect(chip!.getAttribute("href")).not.toContain("anchor=");
+    fireEvent.click(chip!);
+    await waitFor(() =>
+      expect(mockGetKnowledge).toHaveBeenCalledWith("ws-1", "fr/daemon.md"),
+    );
+    const dialog = await screen.findByRole("dialog");
+    const chipJump = within(dialog).getByText("在知识库中打开").closest("a")!;
+    expect(chipJump.getAttribute("href")).toContain("file=fr%2Fdaemon.md");
+    expect(chipJump.getAttribute("href")).not.toContain("anchor=");
     // 锚点条目按文件分组：组头计数 + 组内 slug。
     const g1 = screen.getByTestId("change-assets-touch-group-conventions.md");
     expect(g1).toHaveTextContent("conventions.md（2）");

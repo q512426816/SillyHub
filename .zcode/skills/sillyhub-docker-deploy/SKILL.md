@@ -332,6 +332,78 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
 # New-NetFirewallRule -DisplayName "SillyHub 8001" -Direction Inbound -Protocol TCP -LocalPort 8001 -Action Allow
 ```
 
+## 发布记录（每次部署必做，成功失败都写）
+
+部署动作收尾前，必须写一份发布记录 md 到本仓库 `docs/releases/` 目录——
+这是 SillyHub 平台「发布记录」菜单（`/deploy-records`）的数据源，漏写 =
+平台上看不到本次部署。**部署失败的也写**（status: failed，正文写失败原因），
+失败留痕同样是部署历史的一部分。
+
+### 步骤
+
+1. **取锚点**（部署成功后；复用「登录和 workspace」节的 TOKEN）：
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8001/api/deploy-records \
+     | jq '.[0] // empty'
+   ```
+
+   有记录 → `commit_from` 取返回的 `commit_to`，`seq` = 返回的 `seq + 1`。
+   平台不可达 / 无记录（首次）→ 回退本地锚定：`seq` = `ls docs/releases/ | grep -oP '^\d{4}-\d{2}-\d{2}-\K\d{3}' | sort -n | tail -1` 的结果 +1（目录空则 001），`commit_from` 写 null。
+
+2. **取提交列表**：
+
+   ```bash
+   git log <commit_from>..HEAD --pretty=format:'%h|%an|%s'
+   ```
+
+   `commit_from` 为 null 时（首条记录）取 `git log -20 --pretty=format:'%h|%an|%s'`（最近 20 条）。
+
+3. **规整变化总结**：把提交列表按 🆕新增 / 🔧修复 / ⚡优化 分组，用一句人话
+   总结每组干了什么（不是逐条抄 git log——平台菜单是给人看部署变化的）。
+   部署验证结果（compose ps healthy / /api/health ok / 容器内 grep 校验）
+   也写进正文 📝 部署验证 小节。
+
+4. **写文件** `docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`，模板：
+
+   ````markdown
+   ---
+   seq: 3
+   deployed_at: "2026-10-14 08:52:36"
+   status: success
+   commit_from: ebeb09af0
+   commit_to: ad6092e1d
+   summary: 文件树显式同步+刷新触发面收窄
+   agent: zcode-agent
+   commits:
+     - sha: ad6092e1d
+       message: "fix(change): GET files 触发面收窄"
+       author: qinyi
+   ---
+
+   ## 🆕 新增
+
+   - ...
+
+   ## 🔧 修复
+
+   - ...
+
+   ## 📝 部署验证
+
+   - `docker compose ps` 全部 healthy；`/api/health` 返回 ok
+   ````
+
+   字段规则（frontmatter 是平台解析契约，缺字段/语法错会被标记 invalid）：
+   - `seq`：三位序号 int；`deployed_at`：本地时间 `"YYYY-MM-DD HH:mm:ss"` 带引号；
+   - `status`：`success` 或 `failed`；失败时正文第一小节写 `## ❌ 失败原因`；
+   - `commits`：列表（无新提交的重部署写 `[]`）；message 含冒号/引号时整体加引号；
+   - `agent`：执行部署的 agent 标识（如 zcode-agent / claude-agent）。
+
+   不要把任何 token、密码、API key 写进记录。
+
+5. 记录文件随本次部署工作成果一起 commit（不单独推送）。
+
 ## 登录和 workspace
 
 默认管理员账号来自 `deploy/.env`：

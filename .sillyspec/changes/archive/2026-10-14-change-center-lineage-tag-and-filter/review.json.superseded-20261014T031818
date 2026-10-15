@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-change-center-lineage-tag-and-filter",
+  "reviewer": "subagent",
+  "verdict": "FAIL",
+  "reviewedAgainst": "33641301a3385cabdcf490e1cf67fd56601b8218",
+  "findings": [
+    {
+      "severity": "P1",
+      "title": "deleted 行的 lineage 集合判定与 is_thin 投影口径分裂，FR-05「逐行一致」承诺在 deleted 切片被违反",
+      "evidence": "enrich_summaries 对 location='deleted' 行在 is_thin 赋值前 continue（is_thin 恒为 schema 缺省 False，schema.py:127），而 _resolve_thin_lineage_keys 对 deleted 行用 row 现值判分支①②（stage=thin / change_type=quick 计入 thin 集合）。归档 tab 三源并集③行（location='deleted' + current_stage∈{archive,archived}，service.py:254-263）若 change_type='quick'：lineage=thin 返回该行但前端按 is_thin=false 渲染「完整」标签、lineage=full 反而剔除该行；API 直接 GET ?location=deleted&lineage=thin 同理返回 is_thin=false 行。design 盲问③「deleted 行集合口径复刻 enrich（现值判定）」的事实前提不成立——enrich 对 deleted 行根本不判定而非现值判定。FR-05 绑定测试与 FR-03 绑定测试均未造 deleted 行，缺口未被测试覆盖。",
+      "location": "backend/app/modules/change/service.py:2596-2598（对照 2188-2191、254-263、schema.py:127）"
+    },
+    {
+      "severity": "P3",
+      "title": "list_ 内注释与实现不一致：声称 full 空集合「跳过 where 避免方言差异」，实现仍无条件 notin_(空集)",
+      "evidence": "service.py:230-231 注释写「full 空集合无需过滤（NOT IN 空集恒真，跳过 where 避免方言差异）」，但 291-295 行对 lineage=full 不做空集判断、恒应用 notin_(thin_keys)。行为无碍（SQLAlchemy 空集 NOT IN 渲染恒真，test_lineage_unknown_value_ignored_and_full_with_empty_set 已覆盖），但注释描述的跳过分支不存在，违反仓库「注释和实现不一致是万恶之源」铁律。",
+      "location": "backend/app/modules/change/service.py:230-231 vs 291-295"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-01 桌面测试的「两类标签样式可区分」断言恒真，未断言实际样式差异",
+      "evidence": "page.test.tsx 用 expect(getByText(\"轻量\")).not.toEqual(getByText(\"完整\")) 断言可区分——两个不同文本节点的 DOM 元素本就不相等，断言恒真；桌面测试未像移动端测试（断言 .ant-badge-status-warning / -default）那样断言 StateLabel variant（attention vs neutral）或语义类。实现本身用不同 variant 无行为缺陷，仅测试强度不足，「样式可区分」实际靠实现自律而非测试锁定。",
+      "location": "frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx:484"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok——集合每次请求现算无缓存（service.py:235 每次调用 _resolve_thin_lineage_keys），progress 迟到上行只影响之后发起的请求，无脏缓存窗口；投影 join 不命中 fallback row 现值与 enrich 一致（代码证实）",
+    "并发": "ok——路径纯只读，集合计算与主查询同 session 先后执行，写入方 commit 后新请求自然可见，无锁无覆盖面",
+    "切换": "finding——lineage 无状态参数、queryKey 含 lineage（桌面 page.tsx queryKey 与移动 mainKey 均含 lineage 槽位，patch 证实）均成立；但 design 盲问③关于 deleted 行「复刻 enrich（现值判定）」的声明与代码事实不符（enrich 跳过判定恒 False），即 P1 finding",
+    "作用域": "ok——thin 集合按 workspace_id 精确收集（service.py:2588），主查询 base 同样限定 workspace_id，change_key 工作区内唯一，跨 workspace 不串台（代码证实）"
+  },
+  "boundaryRulings": {
+    "无缓存 v1 量级对齐 pending 先例": "可接受——全 workspace 拉行+批量投影与现网 pending 聚焦路径同量级，升级路径（按先例挂缓存）已写明，v1 取舍合理",
+    "deleted 行用 row 现值判定/复刻 enrich": "不可接受——声明的事实前提错误：enrich 对 deleted 行不做任何判定（is_thin 恒 False），并非「现值判定」；两口径在 deleted 切片分裂，构成 P1",
+    "缺省/未知值不过滤（对齐 sort fallback）": "可接受——实现与测试（test_lineage_unknown_value_ignored_and_full_with_empty_set）一致",
+    "前端 is_thin!==true 防御归入完整": "可接受——is_thin 为后端投影必带 bool（缺省 False），防御分支语义安全且与移动端口径一致",
+    "移动端 LINEAGE_OPTIONS 桌面同值副本、模块私有内联": "可接受——既有模块私有惯例，桌面/移动各有测试锁定",
+    "FR-07 生成产物无独立测试面（执行时验证）": "可接受——openapi.json 与 api-types.ts 的 lineage 字段已在交付面内且与 router 声明一致（anyOf string/null ↔ lineage?: string | null），属可静态核验事实"
+  },
+  "reviewedAt": "2026-10-14T11:15:57+08:00"
+}

@@ -1,0 +1,142 @@
+{
+  "change": "2026-10-14-admin-server-status",
+  "baseline": "73e881ba50376b5e2d279b720dca332b3630d285",
+  "head": "73e881ba50376b5e2d279b720dca332b3630d285",
+  "files": [
+    "backend/app/modules/auth/permissions.py",
+    "backend/app/modules/health/router.py",
+    "backend/openapi.json",
+    "backend/tests/modules/auth/test_permissions.py",
+    "backend/tests/test_health.py",
+    "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+    "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+    "frontend/src/components/app-shell.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/health.ts",
+    "frontend/src/lib/menu-permissions.ts"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 526,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-14T16:48:53.102Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "73e881ba50376b5e2d279b720dca332b3630d285",
+    "totals": {
+      "files": 12,
+      "additions": 526,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/auth/permissions.py",
+        "additions": 6,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/health/router.py",
+        "additions": 13,
+        "deletions": 6,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 2,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_permissions.py",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_health.py",
+        "additions": 67,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx",
+        "additions": 9,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/server-status/__tests__/page.test.tsx",
+        "additions": 139,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/admin/server-status/page.tsx",
+        "additions": 249,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/app-shell.tsx",
+        "additions": 5,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/health.ts",
+        "additions": 9,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/menu-permissions.ts",
+        "additions": 18,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "59a7991c81b69e1eb3893826bc0cf3c7726f02968a12657a91136b9925c07feb",
+  "patchStatus": "ok"
+}

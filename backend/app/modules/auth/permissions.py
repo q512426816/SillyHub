@@ -49,6 +49,12 @@ class Permission(StrEnum):
     API_KEY_ADMIN = "api_key:admin"
     RUNTIME_ADMIN = "runtime:admin"
     GIT_IDENTITY_ADMIN = "git_identity:admin"
+    # change 2026-10-14-admin-server-status task-01 / D-001@v2 / D-004@v1。
+    # 服务器信息页（/admin/server-status）与 GET /api/system-status 的门控权限；
+    # 前缀无 group 特判分支，走默认 PermissionGroup.PLATFORM（同 menu:admin 模式）。
+    # 免种子迁移：新权限默认无人持有=收紧语义（管理员经 is_platform_admin 短路
+    # 与 PLATFORM_ADMIN 直通天然放行），其它角色可在角色管理页按需勾选。
+    SYSTEM_STATUS_READ = "system_status:read"
     # change 2026-07-29-sidebar-menu-restructure task-01 / D-002@v1。
     # 仅用于前端「我的供应商」菜单显隐 + 角色管理分配（design §5.3）；
     # llm_provider router 本为 per-user 个人级，本权限不改任何接口鉴权。
@@ -104,6 +110,13 @@ class Permission(StrEnum):
     DEPLOY_STAGING = "deploy:staging"
     DEPLOY_PRODUCTION = "deploy:production"
     DEPLOY_ROLLBACK = "deploy:rollback"
+    # change 2026-10-14-deploy-release-notes task-01：发布记录页（/deploy-records
+    # 平台级聚合视图）可见性门控。存量角色播种走迁移
+    # 20261014110000_add_deploy_record_read_permission（workspace_owner 幂等补授；
+    # platform_admin 由启动期 seed_platform_admin_role 绑全部枚举自动覆盖），
+    # 字面量与迁移的一致性由 tests/modules/auth/test_permissions.py 断言对齐。
+    # deploy_record 前缀归 AGENT 组（deploy 域同口径）。
+    DEPLOY_RECORD_READ = "deploy_record:read"
 
     # ── Admin (user / organization / role management) ───────
     # Mirrors design §8.4 — added in change 2026-06-16-admin-org-role-center.
@@ -204,7 +217,7 @@ class Permission(StrEnum):
             return PermissionGroup.WORKSPACE
         if prefix == "change":
             return PermissionGroup.CHANGE
-        if prefix in ("task", "code", "tool", "deploy", "daemon"):
+        if prefix in ("task", "code", "tool", "deploy", "deploy_record", "daemon"):
             return PermissionGroup.AGENT
         # change 2026-09-18-web-menu-management task-01 / FR-01：
         # 4 个常显菜单独立读权限（skill/mcp/agent_profile/agent_session 前缀）

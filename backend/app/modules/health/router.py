@@ -8,15 +8,19 @@ on ``status="degraded"``.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
 from app import __version__
+from app.core.auth_deps import require_permission_any
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.modules.auth.model import User
+from app.modules.auth.permissions import Permission
 from app.modules.health.schema import (
     DependencyStatus,
     HealthResponse,
@@ -78,16 +82,19 @@ async def version() -> VersionResponse:
 
 
 @router.get("/system-status", response_model=SystemStatusResponse)
-async def system_status() -> SystemStatusResponse:
-    """服务器性能(psutil,丢线程池) + 业务统计(首页运行状态看板)。
+async def system_status(
+    user: Annotated[User, Depends(require_permission_any(Permission.SYSTEM_STATUS_READ))],
+) -> SystemStatusResponse:
+    """服务器性能(psutil,丢线程池) + 业务统计(系统管理「服务器信息」页看板)。
 
-    公开端点(同 /health),不要求登录,首页看板用。
+    change 2026-10-14-admin-server-status D-001@v2：由公开端点收紧为登录 +
+    system_status:read 权限（关闭审计 BS-6 匿名暴露；platform:admin 直通，
+    服务器信息页仅持权限者可见）。
     """
     import anyio
     import psutil
     from sqlalchemy import func, select
 
-    from app.modules.auth.model import User
     from app.modules.ppm.plan.model import PsPlanNode
     from app.modules.ppm.project.model import PpmProjectMaintenance
     from app.modules.ppm.task.model import PlanTask

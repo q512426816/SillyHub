@@ -1,0 +1,2387 @@
+diff --git a/.zcode/skills/sillyhub-docker-deploy/SKILL.md b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+index 5796fe995..49cc78594 100644
+--- a/.zcode/skills/sillyhub-docker-deploy/SKILL.md
++++ b/.zcode/skills/sillyhub-docker-deploy/SKILL.md
+@@ -332,6 +332,78 @@ Get-NetFirewallProfile | Select-Object Name,Enabled
+ # New-NetFirewallRule -DisplayName "SillyHub 8001" -Direction Inbound -Protocol TCP -LocalPort 8001 -Action Allow
+ ```
+ 
++## 发布记录（每次部署必做，成功失败都写）
++
++部署动作收尾前，必须写一份发布记录 md 到本仓库 `docs/releases/` 目录——
++这是 SillyHub 平台「发布记录」菜单（`/deploy-records`）的数据源，漏写 =
++平台上看不到本次部署。**部署失败的也写**（status: failed，正文写失败原因），
++失败留痕同样是部署历史的一部分。
++
++### 步骤
++
++1. **取锚点**（部署成功后；复用「登录和 workspace」节的 TOKEN）：
++
++   ```bash
++   curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8001/api/deploy-records \
++     | jq '.[0] // empty'
++   ```
++
++   有记录 → `commit_from` 取返回的 `commit_to`，`seq` = 返回的 `seq + 1`。
++   平台不可达 / 无记录（首次）→ 回退本地锚定：`seq` = `ls docs/releases/ | grep -oP '^\d{4}-\d{2}-\d{2}-\K\d{3}' | sort -n | tail -1` 的结果 +1（目录空则 001），`commit_from` 写 null。
++
++2. **取提交列表**：
++
++   ```bash
++   git log <commit_from>..HEAD --pretty=format:'%h|%an|%s'
++   ```
++
++   `commit_from` 为 null 时（首条记录）取 `git log -20 --pretty=format:'%h|%an|%s'`（最近 20 条）。
++
++3. **规整变化总结**：把提交列表按 🆕新增 / 🔧修复 / ⚡优化 分组，用一句人话
++   总结每组干了什么（不是逐条抄 git log——平台菜单是给人看部署变化的）。
++   部署验证结果（compose ps healthy / /api/health ok / 容器内 grep 校验）
++   也写进正文 📝 部署验证 小节。
++
++4. **写文件** `docs/releases/YYYY-MM-DD-<三位序号>-<HEAD短SHA>.md`，模板：
++
++   ````markdown
++   ---
++   seq: 3
++   deployed_at: "2026-10-14 08:52:36"
++   status: success
++   commit_from: ebeb09af0
++   commit_to: ad6092e1d
++   summary: 文件树显式同步+刷新触发面收窄
++   agent: zcode-agent
++   commits:
++     - sha: ad6092e1d
++       message: "fix(change): GET files 触发面收窄"
++       author: qinyi
++   ---
++
++   ## 🆕 新增
++
++   - ...
++
++   ## 🔧 修复
++
++   - ...
++
++   ## 📝 部署验证
++
++   - `docker compose ps` 全部 healthy；`/api/health` 返回 ok
++   ````
++
++   字段规则（frontmatter 是平台解析契约，缺字段/语法错会被标记 invalid）：
++   - `seq`：三位序号 int；`deployed_at`：本地时间 `"YYYY-MM-DD HH:mm:ss"` 带引号；
++   - `status`：`success` 或 `failed`；失败时正文第一小节写 `## ❌ 失败原因`；
++   - `commits`：列表（无新提交的重部署写 `[]`）；message 含冒号/引号时整体加引号；
++   - `agent`：执行部署的 agent 标识（如 zcode-agent / claude-agent）。
++
++   不要把任何 token、密码、API key 写进记录。
++
++5. 记录文件随本次部署工作成果一起 commit（不单独推送）。
++
+ ## 登录和 workspace
+ 
+ 默认管理员账号来自 `deploy/.env`：
+diff --git a/backend/app/main.py b/backend/app/main.py
+index cf456c497..7b0a546e3 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -36,6 +36,10 @@ from app.modules.change_writer.router import router as change_writer_router
+ from app.modules.daemon.dist_router import router as daemon_dist_router
+ from app.modules.daemon.router import close_llm_proxy_client
+ from app.modules.daemon.router import router as daemon_router
++
++# 2026-10-14-deploy-release-notes task-02：部署发布记录只读端点（扫各
++# workspace docs/releases/*.md，零表零写端点）。
++from app.modules.deploy_records.router import router as deploy_records_router
+ from app.modules.explorer.router import router as explorer_router
+ from app.modules.git_gateway.router import router as git_gateway_router
+ from app.modules.git_identity import git_identity_router
+@@ -946,6 +950,7 @@ def create_app() -> FastAPI:
+     app.include_router(incident_router, prefix="/api")
+     app.include_router(knowledge_router, prefix="/api")
+     app.include_router(release_router, prefix="/api")
++    app.include_router(deploy_records_router, prefix="/api")
+     app.include_router(notification_router, prefix="/api")
+     # ppm 子域:平台级,统一前缀 /api/ppm (design §7)
+     # 五个 router 自身均不带 prefix,由 main 统一挂载到 /api/ppm
+diff --git a/backend/app/modules/auth/permissions.py b/backend/app/modules/auth/permissions.py
+index 098ccec8b..ba6e050db 100644
+--- a/backend/app/modules/auth/permissions.py
++++ b/backend/app/modules/auth/permissions.py
+@@ -104,6 +104,13 @@ class Permission(StrEnum):
+     DEPLOY_STAGING = "deploy:staging"
+     DEPLOY_PRODUCTION = "deploy:production"
+     DEPLOY_ROLLBACK = "deploy:rollback"
++    # change 2026-10-14-deploy-release-notes task-01：发布记录页（/deploy-records
++    # 平台级聚合视图）可见性门控。存量角色播种走迁移
++    # 20261014110000_add_deploy_record_read_permission（workspace_owner 幂等补授；
++    # platform_admin 由启动期 seed_platform_admin_role 绑全部枚举自动覆盖），
++    # 字面量与迁移的一致性由 tests/modules/auth/test_permissions.py 断言对齐。
++    # deploy_record 前缀归 AGENT 组（deploy 域同口径）。
++    DEPLOY_RECORD_READ = "deploy_record:read"
+ 
+     # ── Admin (user / organization / role management) ───────
+     # Mirrors design §8.4 — added in change 2026-06-16-admin-org-role-center.
+@@ -204,7 +211,7 @@ class Permission(StrEnum):
+             return PermissionGroup.WORKSPACE
+         if prefix == "change":
+             return PermissionGroup.CHANGE
+-        if prefix in ("task", "code", "tool", "deploy", "daemon"):
++        if prefix in ("task", "code", "tool", "deploy", "deploy_record", "daemon"):
+             return PermissionGroup.AGENT
+         # change 2026-09-18-web-menu-management task-01 / FR-01：
+         # 4 个常显菜单独立读权限（skill/mcp/agent_profile/agent_session 前缀）
+diff --git a/backend/app/modules/deploy_records/__init__.py b/backend/app/modules/deploy_records/__init__.py
+new file mode 100644
+index 000000000..d8bfecd64
+--- /dev/null
++++ b/backend/app/modules/deploy_records/__init__.py
+@@ -0,0 +1,7 @@
++"""deploy_records — 部署发布记录只读模块。
++
++change 2026-10-14-deploy-release-notes（D-004@v1）：部署留痕的持久层不是
++数据库表，而是各 workspace 仓库内的 ``docs/releases/*.md`` 文件（agent 部署
++时经 sillyhub-docker-deploy skill 写入）。本模块只读扫描 + 解析 frontmatter
++聚合展示，零表、零写端点、零缓存。
++"""
+diff --git a/backend/app/modules/deploy_records/router.py b/backend/app/modules/deploy_records/router.py
+new file mode 100644
+index 000000000..5d71b7254
+--- /dev/null
++++ b/backend/app/modules/deploy_records/router.py
+@@ -0,0 +1,56 @@
++"""deploy_records API endpoints（只读，零写端点——D-004@v1）。
++
++change 2026-10-14-deploy-release-notes task-02 / FR-02/FR-03。
++平台级端点（无 workspace 路径前缀，聚合全部 workspace），鉴权走
++``require_permission_any``（无 ws_id 的 API 惯例，auth_deps.py 注释口径；
++``require_permission`` 隐式 ``Path workspace_id`` 依赖会 422）。
++"""
++
++from __future__ import annotations
++
++from typing import Annotated
++
++from fastapi import APIRouter, Depends
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.auth_deps import require_permission_any
++from app.core.db import get_session
++from app.modules.auth.model import User
++from app.modules.auth.permissions import Permission
++from app.modules.deploy_records.schema import DeployRecordDetail, DeployRecordSummary
++from app.modules.deploy_records.service import DeployRecordService
++
++router = APIRouter(tags=["deploy-records"])
++
++SessionDep = Annotated[AsyncSession, Depends(get_session)]
++
++
++@router.get(
++    "/deploy-records",
++    response_model=list[DeployRecordSummary],
++)
++async def list_deploy_records(
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission_any(Permission.DEPLOY_RECORD_READ))],
++) -> list[DeployRecordSummary]:
++    """全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。"""
++    svc = DeployRecordService(session)
++    return await svc.list_records()
++
++
++@router.get(
++    "/deploy-records/{record_id:path}",
++    response_model=DeployRecordDetail,
++)
++async def get_deploy_record(
++    record_id: str,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission_any(Permission.DEPLOY_RECORD_READ))],
++) -> DeployRecordDetail:
++    """单条发布记录详情（元数据 + md 正文原文）。
++
++    ``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用
++    ``:path`` 形态整段接收——R-06 定型）。
++    """
++    svc = DeployRecordService(session)
++    return await svc.get_record(record_id)
+diff --git a/backend/app/modules/deploy_records/schema.py b/backend/app/modules/deploy_records/schema.py
+new file mode 100644
+index 000000000..3433a6787
+--- /dev/null
++++ b/backend/app/modules/deploy_records/schema.py
+@@ -0,0 +1,35 @@
++"""deploy_records response schemas."""
++
++from __future__ import annotations
++
++import uuid
++
++from pydantic import BaseModel
++
++
++class DeployRecordSummary(BaseModel):
++    """一条部署发布记录的列表项（frontmatter 元数据投影）。
++
++    ``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定
++    ``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串
++    字典序，同格式下与时间序一致（design 接口定义写死规则）。
++    """
++
++    record_id: str
++    workspace_id: uuid.UUID
++    workspace_name: str
++    file_name: str
++    seq: int | None = None
++    status: str
++    deployed_at: str | None = None
++    summary: str
++    commit_from: str | None = None
++    commit_to: str | None = None
++    commits_count: int | None = None
++    agent: str | None = None
++
++
++class DeployRecordDetail(DeployRecordSummary):
++    """单条记录详情：元数据 + md 正文原文（前端渲染用）。"""
++
++    content: str
+diff --git a/backend/app/modules/deploy_records/service.py b/backend/app/modules/deploy_records/service.py
+new file mode 100644
+index 000000000..6e04dc8ac
+--- /dev/null
++++ b/backend/app/modules/deploy_records/service.py
+@@ -0,0 +1,259 @@
++"""deploy_records 只读扫描服务。
++
++change 2026-10-14-deploy-release-notes（D-004@v1 / FR-02/03/04）：
++遍历全部 workspace 的 root_path 下 ``docs/releases/*.md``，解析 YAML
++frontmatter 元数据 + md 正文，聚合为列表/详情。容器内读宿主文件经
++``workspace/service.py::_rewrite_path`` 的 host→container 路径改写
++（与 WorkspaceService.scan 同款机制）。
++
++frontmatter 契约（skill 侧写入，三端共同遵守，见 design.md）：
++必填 ``seq/deployed_at/status/summary/agent/commits``、可选
++``commit_from/commit_to``；解析失败或必填缺失 → ``status=invalid``
++容错条目（不炸列表）。
++"""
++
++from __future__ import annotations
++
++import uuid
++from dataclasses import dataclass, field
++from pathlib import Path
++
++import yaml
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.errors import AppError
++from app.modules.deploy_records.schema import DeployRecordDetail, DeployRecordSummary
++from app.modules.workspace.model import Workspace
++from app.modules.workspace.service import _rewrite_path
++
++# 发布记录 md 在仓库内的固定目录（相对 workspace root_path）。
++RELEASES_DIR = "docs/releases"
++
++# frontmatter status 合法值（invalid 为服务端容错态，不出现在文件契约里）。
++_VALID_STATUS = {"success", "failed"}
++
++# 必填字段（缺失任一 → invalid）。
++_REQUIRED_KEYS = ("seq", "deployed_at", "status", "summary", "agent", "commits")
++
++# invalid 条目的固定摘要（用户链路中文文案）。
++_INVALID_SUMMARY = "记录文件格式异常（frontmatter 缺失或不合规）"
++
++
++class DeployRecordNotFound(AppError):
++    """发布记录不存在（record_id 无匹配文件）。"""
++
++    code = "deploy_record_not_found"
++    http_status = 404
++
++
++@dataclass
++class _ParsedRecord:
++    """单个 md 文件的解析产物（valid 与 invalid 统一形态）。"""
++
++    file_name: str
++    meta: dict | None
++    content: str
++    invalid: bool = False
++    parse_error: str = ""
++    # 解析期顺手校验的字段错误说明（invalid 时给前端/日志一个原因）
++    notes: list[str] = field(default_factory=list)
++
++
++def _parse_frontmatter(text: str) -> _ParsedRecord:
++    """解析单个 md 文件：首个 ``---`` 对之间的 YAML 为元数据，其余为正文。
++
++    契约校验失败（yaml 语法错 / 必填缺失 / 类型不符 / status 非法值）
++    一律降级为 invalid——文件是 agent 手写的，坏文件不能炸整表（FR-04）。
++    """
++    lines = text.splitlines()
++    file_name = ""
++    # 由调用方补 file_name（dataclass 先建骨架）
++    if not lines or lines[0].strip() != "---":
++        return _ParsedRecord(
++            file_name=file_name,
++            meta=None,
++            content=text,
++            invalid=True,
++            parse_error="missing frontmatter fence",
++        )
++    end = None
++    for i in range(1, len(lines)):
++        if lines[i].strip() == "---":
++            end = i
++            break
++    if end is None:
++        return _ParsedRecord(
++            file_name=file_name,
++            meta=None,
++            content=text,
++            invalid=True,
++            parse_error="unterminated frontmatter fence",
++        )
++    raw_meta = "\n".join(lines[1:end])
++    content = "\n".join(lines[end + 1 :]).lstrip("\n")
++    try:
++        meta = yaml.safe_load(raw_meta)
++    except yaml.YAMLError as exc:
++        return _ParsedRecord(
++            file_name=file_name,
++            meta=None,
++            content=content,
++            invalid=True,
++            parse_error=f"yaml parse error: {exc.__class__.__name__}",
++        )
++    if not isinstance(meta, dict):
++        return _ParsedRecord(
++            file_name=file_name,
++            meta=None,
++            content=content,
++            invalid=True,
++            parse_error="frontmatter is not a mapping",
++        )
++    notes: list[str] = []
++    for key in _REQUIRED_KEYS:
++        if key not in meta:
++            notes.append(f"missing key: {key}")
++    if isinstance(meta.get("seq"), bool) or not isinstance(meta.get("seq"), int):
++        notes.append("seq is not int")
++    if meta.get("status") not in _VALID_STATUS:
++        notes.append("status not in {success, failed}")
++    if not isinstance(meta.get("commits"), list):
++        notes.append("commits is not a list")
++    for key in ("deployed_at", "summary", "agent"):
++        if not isinstance(meta.get(key), str):
++            notes.append(f"{key} is not str")
++    if notes:
++        return _ParsedRecord(
++            file_name=file_name,
++            meta=meta,
++            content=content,
++            invalid=True,
++            parse_error="; ".join(notes),
++        )
++    return _ParsedRecord(file_name=file_name, meta=meta, content=content)
++
++
++def _summary_from(
++    ws_id: uuid.UUID, ws_name: str, file_name: str, parsed: _ParsedRecord
++) -> DeployRecordSummary:
++    """_ParsedRecord → DeployRecordSummary（invalid 态字段降级）。"""
++    if parsed.invalid or parsed.meta is None:
++        return DeployRecordSummary(
++            record_id=f"{ws_id}/{Path(file_name).stem}",
++            workspace_id=ws_id,
++            workspace_name=ws_name,
++            file_name=file_name,
++            status="invalid",
++            summary=_INVALID_SUMMARY,
++        )
++    meta = parsed.meta
++    commits = meta.get("commits") or []
++    return DeployRecordSummary(
++        record_id=f"{ws_id}/{Path(file_name).stem}",
++        workspace_id=ws_id,
++        workspace_name=ws_name,
++        file_name=file_name,
++        seq=int(meta["seq"]),
++        status=str(meta["status"]),
++        deployed_at=str(meta["deployed_at"]),
++        summary=str(meta["summary"]),
++        commit_from=meta.get("commit_from"),
++        commit_to=meta.get("commit_to"),
++        commits_count=len(commits),
++        agent=str(meta["agent"]),
++    )
++
++
++class DeployRecordService:
++    """聚合全部 workspace 的部署发布记录（每次请求实时扫描，无缓存 v1）。"""
++
++    def __init__(self, session: AsyncSession) -> None:
++        self.session = session
++
++    async def list_records(self) -> list[DeployRecordSummary]:
++        """全部 workspace 的记录摘要，按 deployed_at 倒序；invalid 排最后。"""
++        rows = (
++            await self.session.execute(select(Workspace.id, Workspace.name, Workspace.root_path))
++        ).all()
++        summaries: list[DeployRecordSummary] = []
++        for ws_id, ws_name, root_path in rows:
++            summaries.extend(self._scan_workspace(ws_id, ws_name, root_path))
++        # 排序规则（design 写死）：deployed_at 字符串倒序；None（invalid）排最后，
++        # 组内按 file_name 倒序次级排序。reverse=True 会把 None 标志一起翻转，
++        # 故两段式：valid 段倒序在前、invalid 段按 file_name 倒序殿后。
++        valid = [s for s in summaries if s.deployed_at is not None]
++        invalid = [s for s in summaries if s.deployed_at is None]
++        valid.sort(key=lambda s: (s.deployed_at or "", s.file_name), reverse=True)
++        invalid.sort(key=lambda s: s.file_name, reverse=True)
++        return valid + invalid
++
++    async def get_record(self, record_id: str) -> DeployRecordDetail:
++        """单条记录详情（元数据 + md 正文原文）。
++
++        record_id 形如 ``<workspace_id>/<file_stem>``（workspace_id 保证跨
++        工作区同名文件不冲突）。invalid 记录同样可读（FR-04：返回原文供
++        人工排查，元数据字段降级）。
++        """
++        ws_id_str, _, file_stem = record_id.partition("/")
++        if not ws_id_str or not file_stem:
++            raise DeployRecordNotFound(f"未找到发布记录：{record_id}")
++        try:
++            ws_id = uuid.UUID(ws_id_str)
++        except ValueError as exc:
++            raise DeployRecordNotFound(f"未找到发布记录：{record_id}") from exc
++        row = (
++            await self.session.execute(
++                select(Workspace.id, Workspace.name, Workspace.root_path).where(
++                    Workspace.id == ws_id
++                )
++            )
++        ).first()
++        if row is None:
++            raise DeployRecordNotFound(f"未找到发布记录：{record_id}")
++        ws_id, ws_name, root_path = row
++        for parsed in self._iter_files(root_path):
++            if parsed.file_name == f"{file_stem}.md":
++                summary = _summary_from(ws_id, ws_name, parsed.file_name, parsed)
++                return DeployRecordDetail(**summary.model_dump(), content=parsed.content)
++        raise DeployRecordNotFound(f"未找到发布记录：{record_id}")
++
++    # ── 内部：文件系统扫描 ──────────────────────────────────────────
++
++    def _scan_workspace(
++        self, ws_id: uuid.UUID, ws_name: str, root_path: str
++    ) -> list[DeployRecordSummary]:
++        """单 workspace 扫描；目录不存在/为空 → 空列表（FR-02 静默降级）。"""
++        return [
++            _summary_from(ws_id, ws_name, parsed.file_name, parsed)
++            for parsed in self._iter_files(root_path)
++        ]
++
++    def _iter_files(self, root_path: str) -> list[_ParsedRecord]:
++        if not root_path:
++            return []
++        releases_dir = Path(_rewrite_path(root_path)) / RELEASES_DIR
++        if not releases_dir.is_dir():
++            return []
++        parsed_list: list[_ParsedRecord] = []
++        for entry in sorted(releases_dir.iterdir()):
++            if not entry.is_file() or entry.suffix.lower() != ".md":
++                continue
++            try:
++                text = entry.read_text(encoding="utf-8")
++            except OSError:
++                # 读失败（权限/编码等）按 invalid 容错，不炸扫描（FR-04 同口径）
++                parsed_list.append(
++                    _ParsedRecord(
++                        file_name=entry.name,
++                        meta=None,
++                        content="",
++                        invalid=True,
++                        parse_error="file read error",
++                    )
++                )
++                continue
++            parsed = _parse_frontmatter(text)
++            parsed.file_name = entry.name
++            parsed_list.append(parsed)
++        return parsed_list
+diff --git a/backend/app/modules/deploy_records/tests/__init__.py b/backend/app/modules/deploy_records/tests/__init__.py
+new file mode 100644
+index 000000000..c2ee5ee07
+--- /dev/null
++++ b/backend/app/modules/deploy_records/tests/__init__.py
+@@ -0,0 +1 @@
++"""deploy_records module tests."""
+diff --git a/backend/app/modules/deploy_records/tests/test_router.py b/backend/app/modules/deploy_records/tests/test_router.py
+new file mode 100644
+index 000000000..9163e606c
+--- /dev/null
++++ b/backend/app/modules/deploy_records/tests/test_router.py
+@@ -0,0 +1,122 @@
++"""deploy_records router HTTP 层测试。
++
++change 2026-10-14-deploy-release-notes task-02 / FR-02/FR-03/FR-06：
++鉴权（403）、列表/详情 200、404 中文文案。
++"""
++
++from __future__ import annotations
++
++import uuid
++from pathlib import Path
++
++import pytest_asyncio
++
++from app.modules.auth.model import User
++from app.modules.workspace.model import Workspace
++
++VALID_MD = """---
++seq: 1
++deployed_at: "2026-10-14 08:52:36"
++status: success
++commit_from: null
++commit_to: ad6092e1d
++summary: 文件树显式同步
++agent: zcode-agent
++commits:
++  - sha: ad6092e1d
++    message: "fix: sync"
++    author: qinyi
++---
++## 🔧 修复
++- 刷新触发面收窄
++"""
++
++
++def _make_ws(db_session_factory, tmp_path: Path) -> Workspace:
++    """同步造 workspace 行（不经 POST /workspaces 的 scanner 副作用）。"""
++    root = tmp_path / "router_ws"
++    (root / "docs" / "releases").mkdir(parents=True)
++    (root / "docs" / "releases" / "2026-10-14-001-ad6092e1d.md").write_text(
++        VALID_MD, encoding="utf-8"
++    )
++    return Workspace(
++        id=uuid.uuid4(),
++        name="router-ws",
++        slug=f"router-ws-{uuid.uuid4().hex[:6]}",
++        root_path=str(root),
++        type="other",
++    )
++
++
++def _token_for(user: User) -> str:
++    from app.core.config import get_settings
++    from app.core.security import create_access_token
++
++    token, _ = create_access_token(
++        user_id=user.id,
++        email=user.email,
++        is_admin=bool(user.is_platform_admin),
++        settings=get_settings(),
++    )
++    return token
++
++
++def _auth(token: str) -> dict[str, str]:
++    return {"Authorization": f"Bearer {token}"}
++
++
++@pytest_asyncio.fixture()
++async def seeded(db_session, tmp_path: Path) -> dict:
++    """admin 用户（持 deploy_record:read，platform:admin 自动通过）+ 带 1 条记录的 workspace。"""
++    import uuid as _uuid
++
++    from app.core.security import password_hasher
++
++    ws = _make_ws(db_session, tmp_path)
++    admin = User(
++        id=_uuid.uuid4(),
++        email="deploy-admin@example.com",
++        password_hash=password_hasher.hash("Admin123!@#"),
++        display_name="DeployAdmin",
++        status="active",
++        is_platform_admin=True,
++    )
++    db_session.add_all([ws, admin])
++    await db_session.commit()
++    return {"ws": ws, "admin_token": _token_for(admin)}
++
++
++async def test_list_requires_permission(client, tmp_path: Path) -> None:
++    """未登录 → 401/403（FastAPI 依赖层拒绝），不暴露数据。"""
++    resp = await client.get("/api/deploy-records")
++    assert resp.status_code in (401, 403)
++
++
++async def test_list_and_detail_roundtrip(client, seeded) -> None:
++    headers = _auth(seeded["admin_token"])
++
++    resp = await client.get("/api/deploy-records", headers=headers)
++    assert resp.status_code == 200, resp.text
++    items = resp.json()
++    assert len(items) == 1
++    item = items[0]
++    assert item["status"] == "success"
++    assert item["seq"] == 1
++    assert item["workspace_name"] == "router-ws"
++    assert item["commits_count"] == 1
++
++    # record_id 含 "/"——path 形态整段接收 + 前端约定整段编码
++    rid = item["record_id"]
++    assert "/" in rid
++    resp2 = await client.get(f"/api/deploy-records/{rid}", headers=headers)
++    assert resp2.status_code == 200, resp2.text
++    detail = resp2.json()
++    assert detail["record_id"] == rid
++    assert "刷新触发面收窄" in detail["content"]
++
++
++async def test_detail_404_chinese_message(client, seeded) -> None:
++    headers = _auth(seeded["admin_token"])
++    resp = await client.get(f"/api/deploy-records/{seeded['ws'].id}/nope-nothing", headers=headers)
++    assert resp.status_code == 404
++    assert "未找到发布记录" in resp.text
+diff --git a/backend/app/modules/deploy_records/tests/test_service.py b/backend/app/modules/deploy_records/tests/test_service.py
+new file mode 100644
+index 000000000..35c62f3f4
+--- /dev/null
++++ b/backend/app/modules/deploy_records/tests/test_service.py
+@@ -0,0 +1,249 @@
++"""deploy_records service 单测（纯文件解析/聚合，不走 HTTP）。
++
++change 2026-10-14-deploy-release-notes task-02 / FR-02/FR-04：
++tmp_path 造假 workspace 目录树，覆盖正常解析 / 多 workspace 聚合倒序 /
++invalid 容错（yaml 坏、必填缺失、status 非法）/ 目录缺失静默 / 详情 404。
++鉴权与 HTTP 层见 test_router.py。
++"""
++
++from __future__ import annotations
++
++import uuid
++from pathlib import Path
++
++import pytest
++import pytest_asyncio
++
++from app.modules.deploy_records.service import (
++    DeployRecordNotFound,
++    DeployRecordService,
++)
++from app.modules.workspace.model import Workspace
++
++# ── 造数 helper ──────────────────────────────────────────────────────
++
++VALID_MD = """---
++seq: 2
++deployed_at: "2026-10-13 21:30:00"
++status: success
++commit_from: 8a928588f
++commit_to: 8a928588f
++summary: 断言面守卫+菜单注册表防漂移
++agent: zcode-agent
++commits:
++  - sha: 8a928588f
++    message: "test: menus anchors"
++    author: qinyi
++---
++## 🆕 新增
++- 断言面守卫门禁
++"""
++
++FAILED_MD = """---
++seq: 1
++deployed_at: "2026-10-08 15:12:00"
++status: failed
++commit_from: null
++commit_to: c6f6bc50b
++summary: backend 镜像瘦身（失败：apt 层 cache-miss）
++agent: zcode-agent
++commits: []
++---
++构建失败：apt 层 cache-miss exit 100。
++"""
++
++BROKEN_YAML_MD = """---
++seq: [unclosed
++status: success
++---
++正文照读。
++"""
++
++MISSING_KEYS_MD = """---
++seq: 3
++status: success
++summary: 缺 deployed_at/agent/commits
++---
++内容不缺但元数据缺字段。
++"""
++
++BAD_STATUS_MD = """---
++seq: 4
++deployed_at: "2026-10-14 08:00:00"
++status: ok
++summary: status 非法值
++agent: zcode-agent
++commits: []
++---
++x
++"""
++
++NO_FRONTMATTER_MD = """没有 frontmatter 围栏的裸 md。
++"""
++
++
++def _make_ws_dir(base: Path, name: str, files: dict[str, str]) -> Path:
++    root = base / name
++    (root / "docs" / "releases").mkdir(parents=True)
++    for fname, content in files.items():
++        (root / "docs" / "releases" / fname).write_text(content, encoding="utf-8")
++    return root
++
++
++@pytest_asyncio.fixture()
++async def two_workspaces(db_session, tmp_path: Path) -> dict:
++    """两个 workspace：A 有 3 条记录（含 invalid），B 有 1 条最新记录。"""
++    root_a = _make_ws_dir(
++        tmp_path,
++        "ws_a",
++        {
++            "2026-10-13-002-8a928588f.md": VALID_MD,
++            "2026-10-08-001-c6f6bc50b.md": FAILED_MD,
++            "2026-10-13-003-broken.md": BROKEN_YAML_MD,
++        },
++    )
++    root_b = _make_ws_dir(
++        tmp_path,
++        "ws_b",
++        {
++            "2026-10-14-003-ad6092e1d.md": VALID_MD.replace("seq: 2", "seq: 3").replace(
++                '"2026-10-13 21:30:00"', '"2026-10-14 08:52:36"'
++            )
++        },
++    )
++    ws_a = Workspace(
++        id=uuid.uuid4(),
++        name="ws-a",
++        slug=f"ws-a-{uuid.uuid4().hex[:6]}",
++        root_path=str(root_a),
++        type="other",
++    )
++    ws_b = Workspace(
++        id=uuid.uuid4(),
++        name="ws-b",
++        slug=f"ws-b-{uuid.uuid4().hex[:6]}",
++        root_path=str(root_b),
++        type="other",
++    )
++    db_session.add_all([ws_a, ws_b])
++    await db_session.commit()
++    return {"ws_a": ws_a, "ws_b": ws_b}
++
++
++# ── list_records ─────────────────────────────────────────────────────
++
++
++async def test_list_aggregates_and_sorts_desc(db_session, two_workspaces) -> None:
++    """多 workspace 聚合；deployed_at 倒序；invalid 排最后。"""
++    svc = DeployRecordService(db_session)
++    items = await svc.list_records()
++    assert len(items) == 4
++    # 最新在前（ws_b 2026-10-14 08:52:36）
++    assert items[0].workspace_name == "ws-b"
++    assert items[0].seq == 3
++    assert items[0].commits_count == 1
++    # invalid 排最后
++    assert items[-1].status == "invalid"
++    assert items[-1].file_name == "2026-10-13-003-broken.md"
++    assert items[-1].summary  # 固定中文摘要非空
++    assert items[-1].deployed_at is None
++    # 中间两条按时间倒序
++    assert [i.status for i in items[:3]] == ["success", "success", "failed"]
++    assert items[2].seq == 1  # failed 那条
++    assert items[2].commit_from is None  # yaml null → None
++
++
++async def test_list_skips_workspace_without_dir(db_session, db_engine, tmp_path) -> None:
++    """目录不存在 / 目录为空 / 非 md 文件 → 静默空（FR-02）。"""
++    root_no_dir = tmp_path / "no_dir"
++    root_no_dir.mkdir()
++    root_empty = tmp_path / "empty_releases"
++    (root_empty / "docs" / "releases").mkdir(parents=True)
++    root_with_txt = tmp_path / "txt_only"
++    (root_with_txt / "docs" / "releases").mkdir(parents=True)
++    (root_with_txt / "docs" / "releases" / "notes.txt").write_text("x", encoding="utf-8")
++
++    for i, root in enumerate((root_no_dir, root_empty, root_with_txt)):
++        db_session.add(
++            Workspace(
++                id=uuid.uuid4(),
++                name=f"w{i}",
++                slug=f"w{i}-{uuid.uuid4().hex[:6]}",
++                root_path=str(root),
++                type="other",
++            )
++        )
++    await db_session.commit()
++    svc = DeployRecordService(db_session)
++    assert await svc.list_records() == []
++
++
++async def test_invalid_variants_tolerated(db_session, tmp_path) -> None:
++    """yaml 语法坏 / 必填缺失 / status 非法值 / 无围栏 → 全部 invalid 条目。"""
++    root = _make_ws_dir(
++        tmp_path,
++        "ws_bad",
++        {
++            "a-broken.md": BROKEN_YAML_MD,
++            "b-missing.md": MISSING_KEYS_MD,
++            "c-badstatus.md": BAD_STATUS_MD,
++            "d-nofence.md": NO_FRONTMATTER_MD,
++        },
++    )
++    ws = Workspace(
++        id=uuid.uuid4(),
++        name="ws-bad",
++        slug=f"ws-bad-{uuid.uuid4().hex[:6]}",
++        root_path=str(root),
++        type="other",
++    )
++    db_session.add(ws)
++    await db_session.commit()
++    svc = DeployRecordService(db_session)
++    items = await svc.list_records()
++    assert len(items) == 4
++    assert all(i.status == "invalid" for i in items)
++    # invalid 排序组内按 file_name 倒序
++    assert [i.file_name for i in items] == sorted([i.file_name for i in items], reverse=True)
++
++
++# ── get_record ───────────────────────────────────────────────────────
++
++
++async def test_get_record_returns_content(db_session, two_workspaces) -> None:
++    svc = DeployRecordService(db_session)
++    ws_a = two_workspaces["ws_a"]
++    rid = f"{ws_a.id}/2026-10-13-002-8a928588f"
++    detail = await svc.get_record(rid)
++    assert detail.record_id == rid
++    assert detail.seq == 2
++    assert "断言面守卫门禁" in detail.content
++    assert detail.content.startswith("## 🆕")
++
++
++async def test_get_record_invalid_file_still_readable(db_session, two_workspaces) -> None:
++    """invalid 记录详情可读：返回原文（元数据降级）——FR-04。"""
++    svc = DeployRecordService(db_session)
++    ws_a = two_workspaces["ws_a"]
++    detail = await svc.get_record(f"{ws_a.id}/2026-10-13-003-broken")
++    assert detail.status == "invalid"
++    assert "正文照读" in detail.content
++
++
++async def test_get_record_not_found_variants(db_session, two_workspaces) -> None:
++    svc = DeployRecordService(db_session)
++    ws_a = two_workspaces["ws_a"]
++    ws_b = two_workspaces["ws_b"]
++    with pytest.raises(DeployRecordNotFound):
++        await svc.get_record(f"{ws_a.id}/2026-10-13-999-nonexistent")
++    # 跨 workspace 文件名不串（ws_b 没有该文件）
++    with pytest.raises(DeployRecordNotFound):
++        await svc.get_record(f"{ws_b.id}/2026-10-13-002-8a928588f")
++    # 非法 record_id 形态（无斜杠 / 非法 UUID 前缀）
++    with pytest.raises(DeployRecordNotFound):
++        await svc.get_record("no-slash")
++    with pytest.raises(DeployRecordNotFound):
++        await svc.get_record("not-a-uuid/file.md")
++    # 不存在的 workspace
++    with pytest.raises(DeployRecordNotFound):
++        await svc.get_record(f"{uuid.uuid4()}/whatever")
+diff --git a/backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py b/backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py
+new file mode 100644
+index 000000000..1c3c3a9a9
+--- /dev/null
++++ b/backend/migrations/versions/20261014110000_add_deploy_record_read_permission.py
+@@ -0,0 +1,133 @@
++"""add deploy_record:read permission + role seeding
++
++Revision ID: 20261014110000
++Revises: 20261012123000
++Create Date: 2026-10-14 11:00:00.000000
++
++Change 2026-10-14-deploy-release-notes task-01 / FR-06 / D-002@v1：
++新增 ``deploy_record:read`` 权限点（``Permission.DEPLOY_RECORD_READ`` 枚举成员）
++对应的存量角色播种——给 ``workspace_owner`` 角色补授该权限，为 task-02 只读
++端点 ``require_permission(DEPLOY_RECORD_READ)`` 门控与 task-05 前端菜单可见性
++提供地基（R-06 同款：防权限播种遗漏致 403/菜单不可见）。
++
++**授予存量角色必须 SELECT**：写法逐条照 ``20260917104400_add_knowledge_write_
++permission`` 先例——按 ``roles.key`` SELECT 实际 id 再插 ``role_permissions``
++（typed sa.table 桩，SQLite/PG 行为一致）；数据依赖型 SELECT 意味着
++``alembic upgrade --sql`` 离线生成不可用，PG 上 online upgrade 为部署期动作。
++
++**platform_admin 免迁移行**：启动期 ``seed_platform_admin_role`` 绑全部
++Permission 枚举成员（先例注释同款双重背书），无需迁移补授。
++
++**幂等**：先 SELECT 判存再 INSERT（避开 PG/SQLite 方言差异，不用
++ON CONFLICT），重跑不重复插；``role_permissions`` 主键 (role_id,
++permission) 本身也是重复行兜底。
++
++**零回归**：只增授权不删改——workspace_owner 其它权限集合、roles 本体、
++其它角色全部不动（brownfield）。
++
++**权限字符串字面量复写**：不 import app.*（迁移须可在无应用代码时生成
++SQL，见 ``202605280900`` 注释）；与
++``app/modules/auth/permissions.py::DEPLOY_RECORD_READ`` 的一致性由
++``tests/modules/auth/test_permissions.py`` 断言对齐。
++
++**不调 Redis**：对齐 ``202607251600`` 范式说明——``perm:{user_id}:*``
++缓存按用户懒填，迁移是同步部署期动作，Redis 未就绪时调反致部署卡死。
++
++down_revision 接 ``20261012123000``（alembic heads 实测当前单 head），
++单 head 接续避免多 head 分叉（migration-chain-fragmentation-pattern）。
++"""
++
++from __future__ import annotations
++
++from typing import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "20261014110000"
++down_revision: str | None = "20261012123000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++# 权限字符串（与 Permission.DEPLOY_RECORD_READ 一一对应）。迁移内硬编码，
++# 不 import app.* —— 见模块 docstring 说明。
++DEPLOY_RECORD_READ_PERMISSION: str = "deploy_record:read"
++
++# 被授予本权限的存量系统角色（roles.key）：工作区所有者。
++# （platform_admin 走启动期 seed_platform_admin_role 绑全部枚举，不插迁移行。）
++TARGET_ROLE_KEYS: tuple[str, ...] = ("workspace_owner",)
++
++
++def upgrade() -> None:
++    """按 roles.key 给存量 workspace_owner 幂等补授 deploy_record:read。
++
++    全程用类型化 sa.table 桩（同 202607251600 / 20260917104400 范式）：
++    ``sa.select`` 走列的结果处理器，SQLite 上 ``sa.Uuid`` 列 SELECT 回填
++    ``uuid.UUID``（裸 ``sa.text`` SELECT 无类型信息，SQLite 会回 str 使
++    bulk_insert 绑定崩溃；PG 的 asyncpg 则天然回 UUID）——typed 桩两方言
++    行为一致。
++    """
++    roles_table = sa.table(
++        "roles",
++        sa.column("id", sa.Uuid),
++        sa.column("key", sa.String),
++    )
++    role_perms_table = sa.table(
++        "role_permissions",
++        sa.column("role_id", sa.Uuid),
++        sa.column("permission", sa.String),
++    )
++    bind = op.get_bind()
++
++    for key in TARGET_ROLE_KEYS:
++        role_id_row = bind.execute(
++            sa.select(roles_table.c.id).where(roles_table.c.key == key).limit(1)
++        ).fetchone()
++        if role_id_row is None:
++            # 角色尚未种子（迁移顺序异常）——启动期 seed 兜底（workspace_owner
++            # 走建库种子），跳过避免外键违约（同 202607041000 范式）。
++            continue
++        role_id = role_id_row[0]
++
++        existing = {
++            row[0]
++            for row in bind.execute(
++                sa.select(role_perms_table.c.permission).where(
++                    role_perms_table.c.role_id == role_id
++                )
++            )
++        }
++        if DEPLOY_RECORD_READ_PERMISSION not in existing:
++            op.bulk_insert(
++                role_perms_table,
++                [{"role_id": role_id, "permission": DEPLOY_RECORD_READ_PERMISSION}],
++            )
++
++
++def downgrade() -> None:
++    """显式 DELETE workspace_owner 上的 deploy_record:read 授权行。
++
++    不依赖 role_permissions.role_id → roles.id 的 ON DELETE CASCADE
++    （SQLite 测试建表 / 部分场景可能不带 FK），roles 本体与其它权限不动。
++    用类型化 sa.table 桩 + IN 子查询，DELETE 跨 online/offline 可移植
++    （同 20260917104400 downgrade 范式）。
++    """
++    roles_table = sa.table(
++        "roles",
++        sa.column("id", sa.Uuid),
++        sa.column("key", sa.String),
++    )
++    role_perms_table = sa.table(
++        "role_permissions",
++        sa.column("role_id", sa.Uuid),
++        sa.column("permission", sa.String),
++    )
++    op.execute(
++        role_perms_table.delete().where(
++            role_perms_table.c.role_id.in_(
++                sa.select(roles_table.c.id).where(roles_table.c.key.in_(list(TARGET_ROLE_KEYS)))
++            )
++            & (role_perms_table.c.permission == DEPLOY_RECORD_READ_PERMISSION)
++        )
++    )
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 6b6062a34..985290b14 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -22255,6 +22255,75 @@
+         }
+       }
+     },
++    "/api/deploy-records": {
++      "get": {
++        "tags": [
++          "deploy-records"
++        ],
++        "summary": "List Deploy Records",
++        "description": "全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。",
++        "operationId": "list_deploy_records_api_deploy_records_get",
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "items": {
++                    "$ref": "#/components/schemas/DeployRecordSummary"
++                  },
++                  "type": "array",
++                  "title": "Response List Deploy Records Api Deploy Records Get"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
++    "/api/deploy-records/{record_id}": {
++      "get": {
++        "tags": [
++          "deploy-records"
++        ],
++        "summary": "Get Deploy Record",
++        "description": "单条发布记录详情（元数据 + md 正文原文）。\n\n``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用\n``:path`` 形态整段接收——R-06 定型）。",
++        "operationId": "get_deploy_record_api_deploy_records__record_id__get",
++        "parameters": [
++          {
++            "name": "record_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "title": "Record Id"
++            }
++          }
++        ],
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/DeployRecordDetail"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/notifications": {
+       "get": {
+         "tags": [
+@@ -45337,6 +45406,223 @@
+         "title": "DensityTrendPoint",
+         "description": "密度趋势单点：该周窗口内每任务注入锚点数。"
+       },
++      "DeployRecordDetail": {
++        "properties": {
++          "record_id": {
++            "type": "string",
++            "title": "Record Id"
++          },
++          "workspace_id": {
++            "type": "string",
++            "format": "uuid",
++            "title": "Workspace Id"
++          },
++          "workspace_name": {
++            "type": "string",
++            "title": "Workspace Name"
++          },
++          "file_name": {
++            "type": "string",
++            "title": "File Name"
++          },
++          "seq": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Seq"
++          },
++          "status": {
++            "type": "string",
++            "title": "Status"
++          },
++          "deployed_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Deployed At"
++          },
++          "summary": {
++            "type": "string",
++            "title": "Summary"
++          },
++          "commit_from": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit From"
++          },
++          "commit_to": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit To"
++          },
++          "commits_count": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commits Count"
++          },
++          "agent": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Agent"
++          },
++          "content": {
++            "type": "string",
++            "title": "Content"
++          }
++        },
++        "type": "object",
++        "required": [
++          "record_id",
++          "workspace_id",
++          "workspace_name",
++          "file_name",
++          "status",
++          "summary",
++          "content"
++        ],
++        "title": "DeployRecordDetail",
++        "description": "单条记录详情：元数据 + md 正文原文（前端渲染用）。"
++      },
++      "DeployRecordSummary": {
++        "properties": {
++          "record_id": {
++            "type": "string",
++            "title": "Record Id"
++          },
++          "workspace_id": {
++            "type": "string",
++            "format": "uuid",
++            "title": "Workspace Id"
++          },
++          "workspace_name": {
++            "type": "string",
++            "title": "Workspace Name"
++          },
++          "file_name": {
++            "type": "string",
++            "title": "File Name"
++          },
++          "seq": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Seq"
++          },
++          "status": {
++            "type": "string",
++            "title": "Status"
++          },
++          "deployed_at": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Deployed At"
++          },
++          "summary": {
++            "type": "string",
++            "title": "Summary"
++          },
++          "commit_from": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit From"
++          },
++          "commit_to": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commit To"
++          },
++          "commits_count": {
++            "anyOf": [
++              {
++                "type": "integer"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Commits Count"
++          },
++          "agent": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Agent"
++          }
++        },
++        "type": "object",
++        "required": [
++          "record_id",
++          "workspace_id",
++          "workspace_name",
++          "file_name",
++          "status",
++          "summary"
++        ],
++        "title": "DeployRecordSummary",
++        "description": "一条部署发布记录的列表项（frontmatter 元数据投影）。\n\n``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定\n``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串\n字典序，同格式下与时间序一致（design 接口定义写死规则）。"
++      },
+       "DirEntry": {
+         "properties": {
+           "name": {
+@@ -56651,6 +56937,7 @@
+           "deploy:staging",
+           "deploy:production",
+           "deploy:rollback",
++          "deploy_record:read",
+           "user:read",
+           "user:write",
+           "user:login:manage",
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index 3fa277349..f3125810a 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -24,6 +24,10 @@ dependencies = [
+   "pynacl>=1.5",
+   "httpx>=0.27",
+   "python-frontmatter>=1.1",
++  # deploy_records 模块直接 import yaml 解析发布记录 frontmatter（此前为
++  # python-frontmatter/alembic 的传递依赖，显式声明防漂移——
++  # 2026-10-14-deploy-release-notes task-01）。
++  "pyyaml>=6",
+   "openpyxl>=3.1",
+   # openpyxl 图像读写必需（ws._images 读 + add_image 写），D-008 / grill B-001 P0。
+   "Pillow>=10",
+diff --git a/backend/tests/modules/auth/test_permissions.py b/backend/tests/modules/auth/test_permissions.py
+index e65275ab3..efffbd485 100644
+--- a/backend/tests/modules/auth/test_permissions.py
++++ b/backend/tests/modules/auth/test_permissions.py
+@@ -41,13 +41,14 @@ def test_permission_group_has_six_members() -> None:
+     assert set(members) == expected
+ 
+ 
+-def test_permission_count_is_58() -> None:
++def test_permission_count_is_59() -> None:
+     """72 历史 + 增量见前注；2026-10-08-rbac-dead-permissions-cleanup 删除
+     14 个零端点消费死权限（code:*×4 / tool:*×4 / task:cancel / task:approve /
+     platform:audit:read / platform:billing / component:read / change:update，
+-    AUDIT 组随 platform:audit:read 移除）→ 58。
++    AUDIT 组随 platform:audit:read 移除）→ 58；
++    2026-10-14-deploy-release-notes task-01 新增 deploy_record:read → 59。
+     """
+-    assert len(list(Permission)) == 58
++    assert len(list(Permission)) == 59
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -86,6 +87,9 @@ def test_permission_count_is_58() -> None:
+         # Agent (task/deploy；2026-10-08 清理删 code:*/tool:* 死键)
+         (Permission.TASK_READ, PermissionGroup.AGENT),
+         (Permission.DEPLOY_PRODUCTION, PermissionGroup.AGENT),
++        # 2026-10-14-deploy-release-notes task-01：发布记录页读权限，deploy_record
++        # 前缀落 deploy 域同款 AGENT 分支。
++        (Permission.DEPLOY_RECORD_READ, PermissionGroup.AGENT),
+         # task-03: daemon 前缀归 AGENT 组（业务借用回退授权）
+         (Permission.DAEMON_BORROW, PermissionGroup.AGENT),
+         # task-01: llm_provider 前缀无特判分支，落默认 PLATFORM 组
+@@ -434,3 +438,131 @@ def test_drop_dead_rbac_migration_upgrade_deletes_and_downgrade_replants() -> No
+         with Operations.context(ctx):
+             mod.downgrade()
+         assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
++
++
++# ---------------------------------------------------------------------------
++# 2026-10-14-deploy-release-notes task-01：DEPLOY_RECORD_READ 角色-权限
++# 播种迁移（20261014110000）。范式沿用上方 knowledge_write 迁移测试：
++# MigrationContext + Operations 在 SQLite 内存库上回放真实 upgrade()/
++# downgrade()。
++# ---------------------------------------------------------------------------
++
++DEPLOY_RECORD_REVISION_ID = "20261014110000"
++DEPLOY_RECORD_DOWN_REVISION_ID = "20261012123000"
++
++
++def _load_deploy_record_migration():
++    """按 revision ID 在文件名里匹配导入迁移模块（borrow-shared 测试范式）。"""
++    backend_root = Path(__file__).resolve().parent.parent.parent.parent
++    versions_dir = backend_root / "migrations" / "versions"
++    for f in os.listdir(str(versions_dir)):
++        if f.endswith(".py") and DEPLOY_RECORD_REVISION_ID in f and f != "__init__.py":
++            return importlib.import_module(f"migrations.versions.{f[:-3]}")
++    raise ImportError(f"No migration found for revision {DEPLOY_RECORD_REVISION_ID}")
++
++
++def test_deploy_record_read_permission_value() -> None:
++    """DEPLOY_RECORD_READ 字符串值必须与迁移 20261014110000 播种的
++    ``deploy_record:read`` 完全一致（迁移内为字面量复写，两处以本断言对齐）。"""
++    assert Permission.DEPLOY_RECORD_READ.value == "deploy_record:read"
++
++
++def test_deploy_record_migration_metadata() -> None:
++    """revision 链接正确（down 接实测单头 20261012123000）、模块可导入；
++    platform_admin 免迁移行（启动期 seed 绑全部枚举）。"""
++    mod = _load_deploy_record_migration()
++    assert mod.revision == DEPLOY_RECORD_REVISION_ID
++    assert mod.down_revision == DEPLOY_RECORD_DOWN_REVISION_ID
++    assert mod.branch_labels is None
++    assert mod.depends_on is None
++    assert callable(mod.upgrade)
++    assert callable(mod.downgrade)
++    assert mod.DEPLOY_RECORD_READ_PERMISSION == "deploy_record:read"
++    assert set(mod.TARGET_ROLE_KEYS) == {"workspace_owner"}
++
++
++def test_deploy_record_migration_upgrade_seeds_and_is_idempotent() -> None:
++    """upgrade 按 roles.key 授 workspace_owner deploy_record:read：+1 行、
++    其它角色与既有权限零变化；重跑不重复插（幂等）；角色缺失安全跳过。"""
++    mod = _load_deploy_record_migration()
++    engine = sa.create_engine("sqlite:///:memory:")
++    with engine.begin() as conn:
++        _bootstrap_roles_tables_sqlite(conn)
++        owner_id = _seed_role(conn, "workspace_owner", ["workspace:read", "workspace:write"])
++        # 对照组：未被授予的角色既有权限集合必须零变化
++        viewer_id = _seed_role(conn, "viewer", ["workspace:read", "change:read"])
++
++        ctx = MigrationContext.configure(conn)
++        with Operations.context(ctx):
++            mod.upgrade()
++            # 二次 upgrade：幂等（重跑不重复插）
++            mod.upgrade()
++
++        def perms_of(rid) -> set[str]:
++            return {
++                r[0]
++                for r in conn.execute(
++                    sa.text(
++                        "SELECT permission FROM role_permissions WHERE role_id = :rid"
++                    ).bindparams(rid=rid)
++                )
++            }
++
++        assert perms_of(owner_id) == {
++            "workspace:read",
++            "workspace:write",
++            "deploy_record:read",
++        }
++        assert perms_of(viewer_id) == {"workspace:read", "change:read"}
++        # 幂等：workspace_owner 上 deploy_record:read 恰好 1 行
++        count = conn.execute(
++            sa.text(
++                "SELECT COUNT(*) FROM role_permissions "
++                "WHERE role_id = :rid AND permission = 'deploy_record:read'"
++            ).bindparams(rid=owner_id)
++        ).scalar()
++        assert count == 1
++
++        # 角色本体缺失（空库）时 upgrade 安全跳过：不抛、不留残
++        conn.execute(sa.text("DELETE FROM role_permissions"))
++        conn.execute(sa.text("DELETE FROM roles"))
++        with Operations.context(ctx):
++            mod.upgrade()
++        assert conn.execute(sa.text("SELECT COUNT(*) FROM role_permissions")).scalar() == 0
++
++
++def test_deploy_record_migration_downgrade_deletes_rows_keeps_roles() -> None:
++    """downgrade 显式 DELETE 授权行：roles 本体与其它权限不动。"""
++    mod = _load_deploy_record_migration()
++    engine = sa.create_engine("sqlite:///:memory:")
++    with engine.begin() as conn:
++        _bootstrap_roles_tables_sqlite(conn)
++        owner_id = _seed_role(conn, "workspace_owner", ["workspace:read"])
++
++        ctx = MigrationContext.configure(conn)
++        with Operations.context(ctx):
++            mod.upgrade()
++            mod.downgrade()
++
++        assert (
++            conn.execute(
++                sa.text(
++                    "SELECT COUNT(*) FROM role_permissions WHERE permission = 'deploy_record:read'"
++                )
++            ).scalar()
++            == 0
++        )
++        role_keys = {r[0] for r in conn.execute(sa.text("SELECT key FROM roles"))}
++        assert role_keys == {"workspace_owner"}
++
++        def perms_of(rid) -> set[str]:
++            return {
++                r[0]
++                for r in conn.execute(
++                    sa.text(
++                        "SELECT permission FROM role_permissions WHERE role_id = :rid"
++                    ).bindparams(rid=rid)
++                )
++            }
++
++        assert perms_of(owner_id) == {"workspace:read"}
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 5596c96e3..f8178c661 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -105,8 +105,9 @@ class TestMigrationStructure:
+         # 拦截后顺手清偿）→ c515ffd62859（merge 并行双头 20261011020000 +
+         # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）→
+         # 20261012123000（agent_sessions.current_change_id，
+-        # 2026-10-12-run-level-change-attribution）。
+-        assert heads[0] == "20261012123000"  # 当前上下文列迁移成为新 head
++        # 2026-10-12-run-level-change-attribution）→ 20261014110000
++        # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）。
++        assert heads[0] == "20261014110000"  # 发布记录权限种子迁移成为新 head
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/backend/uv.lock b/backend/uv.lock
+index fa7ed3967..009541ec0 100644
+--- a/backend/uv.lock
++++ b/backend/uv.lock
+@@ -1153,6 +1153,7 @@ dependencies = [
+     { name = "python-frontmatter" },
+     { name = "python-jose", extra = ["cryptography"] },
+     { name = "python-multipart" },
++    { name = "pyyaml" },
+     { name = "redis" },
+     { name = "sqlalchemy", extra = ["asyncio"] },
+     { name = "sqlmodel" },
+@@ -1209,6 +1210,7 @@ requires-dist = [
+     { name = "python-frontmatter", specifier = ">=1.1" },
+     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3" },
+     { name = "python-multipart", specifier = ">=0.0.9" },
++    { name = "pyyaml", specifier = ">=6" },
+     { name = "redis", specifier = ">=5.0" },
+     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+diff --git a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+index ea5594e76..4f55f3182 100644
+--- a/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
++++ b/frontend/src/app/(dashboard)/admin/menus/__tests__/page.test.tsx
+@@ -221,24 +221,24 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+     renderPage();
+     await screen.findByText("/admin/roles");
+ 
+-    // system 组声明序：users=17 / organizations=18 / roles=19（未覆盖 → 生效值=
+-    // 声明序索引；2026-10-11-retire-components-page 删 components/topology 两项，
+-    // 旧锚 19/20/21 全体前移 2）
++    // system 组声明序：users=18 / organizations=19 / roles=20（未覆盖 → 生效值=
++    // 声明序索引；2026-10-14-deploy-release-notes 增 deploy-records（governance
++    // 组第 4 条），system 组全体后移 1）
+     const rolesRow = menuRow("/admin/roles");
+     fireEvent.click(within(rolesRow).getByTitle("上移"));
+ 
+-    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 18）
++    // 先 PUT 目标行（roles 取相邻行 organizations 的生效值 19）
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
+         method: "PUT",
+-        json: { label: null, sort_order: 18, hidden: false },
++        json: { label: null, sort_order: 19, hidden: false },
+       }),
+     );
+-    // 再 PUT 相邻行（organizations 取 roles 原生效值 19）
++    // 再 PUT 相邻行（organizations 取 roles 原生效值 20）
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
+         method: "PUT",
+-        json: { label: null, sort_order: 19, hidden: false },
++        json: { label: null, sort_order: 20, hidden: false },
+       }),
+     );
+   });
+@@ -247,20 +247,20 @@ describe("/admin/menus 菜单管理页（task-11 / task-12）", () => {
+     renderPage();
+     await screen.findByText("/admin/roles");
+ 
+-    // organizations(18) 下移 ↔ roles(19)（声明序见上移用例注释）
++    // organizations(19) 下移 ↔ roles(20)（声明序见上移用例注释）
+     const orgRow = menuRow("/admin/organizations");
+     fireEvent.click(within(orgRow).getByTitle("下移"));
+ 
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/organizations", {
+         method: "PUT",
+-        json: { label: null, sort_order: 19, hidden: false },
++        json: { label: null, sort_order: 20, hidden: false },
+       }),
+     );
+     await waitFor(() =>
+       expect(apiFetchMock).toHaveBeenCalledWith("/api/menu-overrides/roles", {
+         method: "PUT",
+-        json: { label: null, sort_order: 18, hidden: false },
++        json: { label: null, sort_order: 19, hidden: false },
+       }),
+     );
+   });
+diff --git a/frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx b/frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx
+new file mode 100644
+index 000000000..2014c065f
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/deploy-records/__tests__/page.test.tsx
+@@ -0,0 +1,144 @@
++/**
++ * 发布记录页测试（2026-10-14-deploy-release-notes task-04 / FR-05）。
++ *
++ * 覆盖：
++ * 1. 列表渲染：序号/摘要/工作区/短SHA/commits 数/状态徽标（成功绿/失败红/invalid 灰）
++ * 2. 首条默认选中 → 详情元数据行 + md 正文渲染
++ * 3. 点击其它记录切换详情
++ * 4. 空态 EmptyState
++ */
++
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++// hooks 与 fetch 函数必须同工厂重建：actual 的 hook 闭包绑原 fetch 实现，
++// 只 mock fetch 函数不生效（真实 apiFetch 在 jsdom 报错落入 error 态）。
++vi.mock("@/lib/deploy-records", async () => {
++  const { useQuery } = await import("@tanstack/react-query");
++  const listDeployRecords = vi.fn();
++  const getDeployRecord = vi.fn();
++  return {
++    listDeployRecords,
++    getDeployRecord,
++    useDeployRecordsList: () =>
++      useQuery({ queryKey: ["deployRecords", "list"], queryFn: listDeployRecords, retry: false }),
++    useDeployRecordDetail: (recordId: string | null) =>
++      useQuery({
++        queryKey: ["deployRecords", "detail", recordId],
++        queryFn: () => getDeployRecord(recordId as string),
++        enabled: recordId !== null,
++        retry: false,
++      }),
++  };
++});
++
++// MarkdownPreview 是 dynamic(ssr:false) 异步组件，静态替换避免测试环境异步挂载
++// （scan-docs-page.test 同款前置）。
++vi.mock("@uiw/react-markdown-preview", () => ({
++  default: ({ source }: { source?: string }) => <div data-testid="md-preview">{source}</div>,
++}));
++
++import DeployRecordsPage from "@/app/(dashboard)/deploy-records/page";
++import { getDeployRecord, listDeployRecords } from "@/lib/deploy-records";
++
++const mockList = listDeployRecords as unknown as ReturnType<typeof vi.fn>;
++const mockDetail = getDeployRecord as unknown as ReturnType<typeof vi.fn>;
++
++function summary(partial: Partial<Record<string, unknown>> & { record_id: string }) {
++  return {
++    workspace_id: "00000000-0000-0000-0000-000000000001",
++    workspace_name: "SillyHub",
++    file_name: "2026-10-14-003-ad6092e1d.md",
++    seq: 3,
++    status: "success",
++    deployed_at: "2026-10-14 08:52:36",
++    summary: "文件树显式同步",
++    commit_from: "ebeb09af0",
++    commit_to: "ad6092e1d",
++    commits_count: 4,
++    agent: "zcode-agent",
++    ...partial,
++  };
++}
++
++function detail(record_id: string, partial: Partial<Record<string, unknown>> = {}) {
++  return {
++    ...summary({ record_id }),
++    content: "## 🆕 新增\n\n- sync 参数",
++    ...partial,
++  };
++}
++
++function renderPage() {
++  const qc = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={qc}>
++      <DeployRecordsPage />
++    </QueryClientProvider>,
++  );
++}
++
++describe("DeployRecordsPage", () => {
++  beforeEach(() => {
++    vi.mocked(mockList).mockReset();
++    vi.mocked(mockDetail).mockReset();
++  });
++  afterEach(cleanup);
++
++  it("渲染列表：状态徽标 + 元数据 + 空值破折号", async () => {
++    mockList.mockResolvedValue([
++      summary({ record_id: "ws1/r3", status: "success" }),
++      summary({ record_id: "ws1/r2", seq: 2, status: "failed", commits_count: null }),
++      summary({ record_id: "ws1/r1", seq: 1, status: "invalid", deployed_at: null, seq_label: undefined, commit_to: null }),
++    ]);
++    mockDetail.mockResolvedValue(detail("ws1/r3"));
++    renderPage();
++
++    await waitFor(() => expect(screen.getByText("共 3 条")).toBeInTheDocument());
++    expect(screen.getAllByText("文件树显式同步").length).toBeGreaterThan(0);
++    expect(screen.getByText("成功")).toBeInTheDocument();
++    expect(screen.getByText("失败")).toBeInTheDocument();
++    expect(screen.getByText("格式异常")).toBeInTheDocument();
++    // invalid/空值统一破折号
++    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
++  });
++
++  it("首条默认选中：详情元数据 + md 正文渲染", async () => {
++    mockList.mockResolvedValue([summary({ record_id: "ws1/r3" })]);
++    mockDetail.mockResolvedValue(detail("ws1/r3"));
++    renderPage();
++
++    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
++    expect(screen.getByText(/sync 参数/)).toBeInTheDocument();
++    expect(screen.getAllByText("SillyHub").length).toBeGreaterThan(0);
++    expect(screen.getByText("ebeb09af0 → ad6092e1d")).toBeInTheDocument();
++    expect(mockDetail).toHaveBeenCalledWith("ws1/r3");
++  });
++
++  it("点击其它记录切换详情", async () => {
++    mockList.mockResolvedValue([
++      summary({ record_id: "ws1/r3" }),
++      summary({ record_id: "ws1/r2", seq: 2, summary: "断言面守卫" }),
++    ]);
++    mockDetail.mockResolvedValue(detail("ws1/r3"));
++    renderPage();
++    await waitFor(() => expect(screen.getByTestId("md-preview")).toBeInTheDocument());
++
++    mockDetail.mockResolvedValue(detail("ws1/r2", { summary: "断言面守卫", content: "## 🔧 修复\n- 锚重算" }));
++    fireEvent.click(screen.getByText("断言面守卫"));
++    await waitFor(() =>
++      expect(mockDetail).toHaveBeenLastCalledWith("ws1/r2"),
++    );
++    await waitFor(() => expect(screen.getByText(/锚重算/)).toBeInTheDocument());
++  });
++
++  it("空列表：EmptyState 引导文案", async () => {
++    mockList.mockResolvedValue([]);
++    renderPage();
++    await waitFor(() => expect(screen.getByText("暂无部署记录")).toBeInTheDocument());
++    expect(screen.getByText(/docs\/releases/)).toBeInTheDocument();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/deploy-records/page.tsx b/frontend/src/app/(dashboard)/deploy-records/page.tsx
+new file mode 100644
+index 000000000..f4990840f
+--- /dev/null
++++ b/frontend/src/app/(dashboard)/deploy-records/page.tsx
+@@ -0,0 +1,211 @@
++"use client";
++
++/**
++ * 发布记录页（2026-10-14-deploy-release-notes task-04 / FR-05 / D-002@v1）。
++ *
++ * 平台级聚合视图（顶层一级菜单，协作治理组）：左记录列表 + 右详情。
++ * - 数据源：各 workspace 仓库 docs/releases/*.md（agent 部署时经
++ *   sillyhub-docker-deploy skill 写入），后端只读扫描（D-004@v1 零表零写端点）
++ * - 布局对齐原型 .sillyspec/changes/2026-10-14-deploy-release-notes/
++ *   prototype-deploy-records.html；工作台式页面走 primer 组件库
++ *   （FRONTEND_PAGE_STYLE.md §13）：PageHead 页头 + IssueRow 列表行 +
++ *   StateLabel 状态徽标 + EmptyState 空态；md 正文走 MarkdownText（统一
++ *   sanitize，记录内容源自 agent 手写文件，按不可信处理）
++ * - 基础版字段（D-003@v1）：序号/状态/时间/工作区/短SHA/提交数/摘要；
++ *   无回滚按钮、无部署日志、无健康检查
++ */
++import { useState } from "react";
++import { FileClock, Package } from "lucide-react";
++
++import { MarkdownText } from "@/components/ui/markdown-text";
++import {
++  EmptyState,
++  IssueRow,
++  PageHead,
++  StateLabel,
++  type StateLabelVariant,
++} from "@/components/primer";
++import { cn } from "@/lib/utils";
++import {
++  useDeployRecordDetail,
++  useDeployRecordsList,
++  type DeployRecordSummary,
++} from "@/lib/deploy-records";
++
++/** status → StateLabel 变体（invalid 为后端 frontmatter 容错态）。 */
++function stateVariantOf(status: string): StateLabelVariant {
++  if (status === "success") return "done";
++  if (status === "failed") return "error";
++  return "neutral";
++}
++
++const STATUS_LABEL: Record<string, string> = {
++  success: "成功",
++  failed: "失败",
++  invalid: "格式异常",
++};
++
++/** 空值统一破折号（FRONTEND_PAGE_STYLE.md §4 单元格渲染规范）。 */
++function dash(value: string | number | null | undefined): string {
++  if (value === null || value === undefined || value === "") return "—";
++  return String(value);
++}
++
++function RecordRow({
++  record,
++  selected,
++  onSelect,
++}: {
++  record: DeployRecordSummary;
++  selected: boolean;
++  onSelect: () => void;
++}) {
++  return (
++    <IssueRow
++      state={stateVariantOf(record.status)}
++      onClick={onSelect}
++      className={cn(
++        "rounded-md px-2",
++        selected && "bg-brand-50 shadow-[inset_3px_0_0_var(--color-brand-600)]",
++      )}
++      title={
++        <span className="flex min-w-0 flex-wrap items-center gap-2">
++          <span className="font-mono text-xs font-semibold text-brand-700">
++            #{dash(record.seq !== null ? String(record.seq).padStart(3, "0") : null)}
++          </span>
++          <span className="truncate font-medium text-foreground">
++            {record.summary}
++          </span>
++        </span>
++      }
++      meta={
++        <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
++          <span className="font-medium text-accent-foreground">{record.workspace_name}</span>
++          <span className="font-mono">{dash(record.commit_to)}</span>
++          <span>{dash(record.commits_count)} commits</span>
++          <span>{dash(record.agent)}</span>
++        </span>
++      }
++      right={
++        <span className="flex flex-col items-end gap-1 whitespace-nowrap">
++          <StateLabel variant={stateVariantOf(record.status)}>
++            {STATUS_LABEL[record.status] ?? record.status}
++          </StateLabel>
++          <span className="text-xs text-muted-foreground">{dash(record.deployed_at)}</span>
++        </span>
++      }
++    />
++  );
++}
++
++export default function DeployRecordsPage() {
++  const [selectedId, setSelectedId] = useState<string | null>(null);
++  const listQuery = useDeployRecordsList();
++
++  const records = listQuery.data ?? [];
++  // 选中态跟随列表：首条默认选中；选中项不在列表（刷新后）时回落首条。
++  const effectiveSelectedId =
++    selectedId !== null && records.some((r) => r.record_id === selectedId)
++      ? selectedId
++      : (records[0]?.record_id ?? null);
++  const detailQuery = useDeployRecordDetail(effectiveSelectedId);
++
++  return (
++    <div className="flex min-h-[calc(100vh-4rem)] flex-col gap-4 p-6">
++      <PageHead
++        title="发布记录"
++        subtitle="每次 agent 部署后自动生成的版本变化记录（读取各项目仓库 docs/releases/ 目录）"
++      />
++
++      {listQuery.isError ? (
++        <EmptyState
++          title="发布记录加载失败"
++          description="请确认后端服务可用后重试；workspace 根目录未挂载进平台容器时也会读不到记录。"
++        >
++          <span className="text-xs text-muted-foreground">
++            {(listQuery.error as Error | null)?.message ?? ""}
++          </span>
++        </EmptyState>
++      ) : listQuery.isLoading ? (
++        <EmptyState title="加载中…" />
++      ) : records.length === 0 ? (
++        <EmptyState
++          icon={<FileClock className="h-8 w-8 text-muted-foreground" />}
++          title="暂无部署记录"
++          description="首次让 agent 部署后（sillyhub-docker-deploy skill 会在部署后写发布记录），这里会出现按时间倒序的部署历史。"
++        />
++      ) : (
++        <div className="grid flex-1 grid-cols-1 items-start gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
++          {/* 左：记录列表 */}
++          <div className="flex max-h-[calc(100vh-16rem)] flex-col overflow-y-auto rounded-lg border bg-card shadow-sm">
++            <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card px-4 py-3">
++              <span className="text-sm font-semibold">部署记录</span>
++              <span className="text-xs text-muted-foreground">共 {records.length} 条</span>
++            </div>
++            <div className="flex flex-col gap-1 p-2">
++              {records.map((record) => (
++                <RecordRow
++                  key={record.record_id}
++                  record={record}
++                  selected={record.record_id === effectiveSelectedId}
++                  onSelect={() => setSelectedId(record.record_id)}
++                />
++              ))}
++            </div>
++          </div>
++
++          {/* 右：详情 */}
++          <div className="rounded-lg border bg-card shadow-sm">
++            {detailQuery.isError ? (
++              <EmptyState title="详情加载失败" description={(detailQuery.error as Error)?.message ?? ""} />
++            ) : detailQuery.data ? (
++              <>
++                <div className="border-b px-5 py-4">
++                  <div className="flex flex-wrap items-center gap-2">
++                    <Package className="h-4 w-4 text-brand-600" />
++                    <h2 className="text-base font-bold">
++                      #{dash(
++                        detailQuery.data.seq !== null
++                          ? String(detailQuery.data.seq).padStart(3, "0")
++                          : null,
++                      )}{" "}
++                      {detailQuery.data.summary}
++                    </h2>
++                    <StateLabel variant={stateVariantOf(detailQuery.data.status)}>
++                      {STATUS_LABEL[detailQuery.data.status] ?? detailQuery.data.status}
++                    </StateLabel>
++                  </div>
++                  <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-4">
++                    {[
++                      ["部署时间", dash(detailQuery.data.deployed_at)],
++                      ["工作区", detailQuery.data.workspace_name],
++                      ["执行者", dash(detailQuery.data.agent)],
++                      [
++                        "提交范围",
++                        detailQuery.data.commit_from
++                          ? `${detailQuery.data.commit_from} → ${dash(detailQuery.data.commit_to)}`
++                          : dash(detailQuery.data.commit_to),
++                      ],
++                    ].map(([k, v]) => (
++                      <div key={k} className="min-w-0">
++                        <dt className="text-muted-foreground">{k}</dt>
++                        <dd className="truncate font-mono text-foreground" title={v}>
++                          {v}
++                        </dd>
++                      </div>
++                    ))}
++                  </dl>
++                </div>
++                <div className="px-6 py-4">
++                  <MarkdownText content={detailQuery.data.content || "（无正文）"} />
++                </div>
++              </>
++            ) : (
++              <EmptyState title="加载详情中…" />
++            )}
++          </div>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/frontend/src/components/app-shell.tsx b/frontend/src/components/app-shell.tsx
+index 3f6c235fd..6c2989fa8 100644
+--- a/frontend/src/components/app-shell.tsx
++++ b/frontend/src/components/app-shell.tsx
+@@ -23,6 +23,7 @@ import {
+   Flag,
+   Folder,
+   GitBranch,
++  History,
+   Home,
+   KeyRound,
+   LayoutDashboard,
+@@ -107,6 +108,9 @@ const MENU_ICON_MAP: Record<string, LucideIcon> = {
+   // 2026-08-14-sessions-portal task-10：智能体会话总入口 /sessions。图标
+   // MessageSquare（对话气泡，语义=会话；避开与 config 组重复图标）。
+   "/sessions": MessageSquare,
++  // 2026-10-14-deploy-release-notes D-002@v1：发布记录平台级聚合页（协作治理组）。
++  // 图标 History（部署历史时间线语义；Package 已被工作区「发布」菜单占用）。
++  "/deploy-records": History,
+   // ppm（absolute href /ppm/*）
+   // 「个人工作台」作 PPM 菜单首项(task-08 / D-001@v1);图标 LayoutDashboard。
+   // 注:菜单条目本身(menuKey/label/href/permissions)在 lib/menu-permissions.ts
+diff --git a/frontend/src/lib/__tests__/menu-permissions.test.ts b/frontend/src/lib/__tests__/menu-permissions.test.ts
+index 91c14790d..b7d972220 100644
+--- a/frontend/src/lib/__tests__/menu-permissions.test.ts
++++ b/frontend/src/lib/__tests__/menu-permissions.test.ts
+@@ -100,6 +100,8 @@ const BACKEND_PERMISSION_KEYS = [
+   "agent_profile:read",
+   "agent_session:read",
+   "menu:admin",
++  // 2026-10-14-deploy-release-notes task-01：发布记录页读权限
++  "deploy_record:read",
+ ] as const;
+ 
+ /** menuKey 期望集合（2026-09-18-web-menu-management task-08 system 组新增 menus） */
+@@ -123,6 +125,8 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
+   "approvals",
+   "audit",
+   "incidents",
++  // 2026-10-14-deploy-release-notes 新增（governance 组发布记录聚合页）
++  "deploy-records",
+   "users",
+   "organizations",
+   "roles",
+@@ -157,8 +161,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
+ ]);
+ 
+ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+-  it("MENU_PERMISSION_GROUPS 长度 === 36（2026-10-11-retire-components-page 下线 components/topology 两项）", () => {
+-    expect(MENU_PERMISSION_GROUPS).toHaveLength(36);
++  it("MENU_PERMISSION_GROUPS 长度 === 37（2026-10-14-deploy-release-notes 增 deploy-records）", () => {
++    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
+   });
+ 
+   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
+@@ -173,7 +177,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     });
+   });
+ 
+-  it("section 分布：workspace 6 / agent 4 / config 4 / governance 3 / system 5 / ppm 14（components/topology 下线）", () => {
++  it("section 分布：workspace 6 / agent 4 / config 4 / governance 4 / system 5 / ppm 14（2026-10-14 增 deploy-records）", () => {
+     const counter: Record<MenuSection, number> = {
+       workspace: 0,
+       agent: 0,
+@@ -188,7 +192,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     expect(counter.workspace).toBe(6); // 2026-10-11 下线 components/topology
+     expect(counter.agent).toBe(4);
+     expect(counter.config).toBe(4);
+-    expect(counter.governance).toBe(3);
++    expect(counter.governance).toBe(4); // 2026-10-14-deploy-release-notes 增 deploy-records
+     expect(counter.system).toBe(5);
+     expect(counter.ppm).toBe(14);
+   });
+@@ -238,8 +242,8 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
+     // 72 (峰值) - 14 (2026-10-08-rbac-dead-permissions-cleanup 删除零端点
+     // 消费死键：code:*×4 / tool:*×4 / task:cancel / task:approve /
+     // platform:audit:read / platform:billing / component:read / change:update) = 58
+-    expect(BACKEND_PERMISSION_KEYS.length).toBe(58);
+-    expect(valid.size).toBe(58);
++    expect(BACKEND_PERMISSION_KEYS.length).toBe(59); // 2026-10-14 增 deploy_record:read
++    expect(valid.size).toBe(59); // 2026-10-14 增 deploy_record:read
+ 
+     MENU_PERMISSION_GROUPS.forEach((g) => {
+       g.permissions.forEach((p) => {
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 65f8812d9..30b4d412f 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -8531,6 +8531,49 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/deploy-records": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * List Deploy Records
++         * @description 全部 workspace 的部署发布记录列表（按 deployed_at 倒序）。
++         */
++        get: operations["list_deploy_records_api_deploy_records_get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
++    "/api/deploy-records/{record_id}": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        /**
++         * Get Deploy Record
++         * @description 单条发布记录详情（元数据 + md 正文原文）。
++         *
++         *     ``record_id`` 形如 ``<workspace_id>/<file_stem>``（含 ``/``，路由用
++         *     ``:path`` 形态整段接收——R-06 定型）。
++         */
++        get: operations["get_deploy_record_api_deploy_records__record_id__get"];
++        put?: never;
++        post?: never;
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/notifications": {
+         parameters: {
+             query?: never;
+@@ -16049,6 +16092,78 @@ export interface components {
+             /** Per Task Avg */
+             per_task_avg: number;
+         };
++        /**
++         * DeployRecordDetail
++         * @description 单条记录详情：元数据 + md 正文原文（前端渲染用）。
++         */
++        DeployRecordDetail: {
++            /** Record Id */
++            record_id: string;
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Workspace Name */
++            workspace_name: string;
++            /** File Name */
++            file_name: string;
++            /** Seq */
++            seq?: number | null;
++            /** Status */
++            status: string;
++            /** Deployed At */
++            deployed_at?: string | null;
++            /** Summary */
++            summary: string;
++            /** Commit From */
++            commit_from?: string | null;
++            /** Commit To */
++            commit_to?: string | null;
++            /** Commits Count */
++            commits_count?: number | null;
++            /** Agent */
++            agent?: string | null;
++            /** Content */
++            content: string;
++        };
++        /**
++         * DeployRecordSummary
++         * @description 一条部署发布记录的列表项（frontmatter 元数据投影）。
++         *
++         *     ``deployed_at`` 为 skill 写入的 frontmatter 原文透传（约定
++         *     ``YYYY-MM-DD HH:mm:ss`` 本地时间字符串），后端零解析——排序按字符串
++         *     字典序，同格式下与时间序一致（design 接口定义写死规则）。
++         */
++        DeployRecordSummary: {
++            /** Record Id */
++            record_id: string;
++            /**
++             * Workspace Id
++             * Format: uuid
++             */
++            workspace_id: string;
++            /** Workspace Name */
++            workspace_name: string;
++            /** File Name */
++            file_name: string;
++            /** Seq */
++            seq?: number | null;
++            /** Status */
++            status: string;
++            /** Deployed At */
++            deployed_at?: string | null;
++            /** Summary */
++            summary: string;
++            /** Commit From */
++            commit_from?: string | null;
++            /** Commit To */
++            commit_to?: string | null;
++            /** Commits Count */
++            commits_count?: number | null;
++            /** Agent */
++            agent?: string | null;
++        };
+         /**
+          * DirEntry
+          * @description A single directory entry returned by the daemon list_dir RPC.
+@@ -21093,7 +21208,7 @@ export interface components {
+          * Permission
+          * @enum {string}
+          */
+-        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
++        Permission: "platform:admin" | "settings:admin" | "api_key:admin" | "runtime:admin" | "git_identity:admin" | "llm_provider:read" | "workspace:read" | "workspace:write" | "workspace:admin" | "workspace:member:manage" | "topology:read" | "scan-docs:read" | "runtime:read" | "knowledge:read" | "knowledge:write" | "incident:read" | "change:create" | "change:read" | "change:approve" | "change:archive" | "task:read" | "task:create" | "task:assign" | "task:run_agent" | "daemon:borrow" | "deploy:staging" | "deploy:production" | "deploy:rollback" | "deploy_record:read" | "user:read" | "user:write" | "user:login:manage" | "organization:read" | "organization:write" | "role:read" | "role:write" | "ppm:project:read" | "ppm:customer:read" | "ppm:plan:read" | "ppm:problem:read" | "ppm:task:read" | "ppm:work-hour:read" | "ppm:work-hour:stat" | "ppm:kanban:view" | "ppm:workbench:view" | "ppm:project-member:read" | "ppm:project-stakeholder:read" | "ppm:project-plan:read" | "ppm:plan-node:read" | "ppm:milestone-detail:read" | "ppm:problem-list:read" | "ppm:problem-change:read" | "ppm:task-plan:read" | "ppm:weekly-plan:view" | "skill:read" | "mcp:read" | "agent_profile:read" | "agent_session:read" | "menu:admin";
+         /**
+          * PermissionResponseRead
+          * @description REST response body for POST /sessions/{id}/permissions/{req}/response.
+@@ -43303,6 +43418,57 @@ export interface operations {
+             };
+         };
+     };
++    list_deploy_records_api_deploy_records_get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DeployRecordSummary"][];
++                };
++            };
++        };
++    };
++    get_deploy_record_api_deploy_records__record_id__get: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                record_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody?: never;
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["DeployRecordDetail"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     list_notifications_api_notifications_get: {
+         parameters: {
+             query?: {
+diff --git a/frontend/src/lib/deploy-records.ts b/frontend/src/lib/deploy-records.ts
+new file mode 100644
+index 000000000..cc552da6b
+--- /dev/null
++++ b/frontend/src/lib/deploy-records.ts
+@@ -0,0 +1,46 @@
++/**
++ * 发布记录数据层（2026-10-14-deploy-release-notes task-04 / FR-03）。
++ *
++ * 平台级聚合视图：GET /api/deploy-records 列表 + /api/deploy-records/{record_id}
++ * 详情。record_id 形如 "<workspace_id>/<file_stem>" 含斜杠——详情请求整段
++ * encodeURIComponent（后端路由 {record_id:path} 形态对应接收）。
++ * 类型一律从 api-types.ts 导入（gen:types 生成，禁手写同名接口）。
++ */
++import { useQuery } from "@tanstack/react-query";
++
++import { apiFetch } from "@/lib/api";
++import {
++  deployRecordDetailQueryKey,
++  deployRecordsListQueryKey,
++} from "@/lib/query-keys";
++import type { components } from "@/lib/api-types";
++
++export type DeployRecordSummary = components["schemas"]["DeployRecordSummary"];
++export type DeployRecordDetail = components["schemas"]["DeployRecordDetail"];
++
++/** 记录列表（deployed_at 倒序由后端排好，前端原样消费）。 */
++export async function listDeployRecords(): Promise<DeployRecordSummary[]> {
++  return apiFetch<DeployRecordSummary[]>("/api/deploy-records");
++}
++
++/** 单条记录详情（record_id 含斜杠，整段编码防被当路径层级拆开）。 */
++export async function getDeployRecord(recordId: string): Promise<DeployRecordDetail> {
++  return apiFetch<DeployRecordDetail>(
++    `/api/deploy-records/${encodeURIComponent(recordId)}`,
++  );
++}
++
++export function useDeployRecordsList() {
++  return useQuery({
++    queryKey: deployRecordsListQueryKey(),
++    queryFn: listDeployRecords,
++  });
++}
++
++export function useDeployRecordDetail(recordId: string | null) {
++  return useQuery({
++    queryKey: deployRecordDetailQueryKey(recordId),
++    queryFn: () => getDeployRecord(recordId as string),
++    enabled: recordId !== null,
++  });
++}
+diff --git a/frontend/src/lib/menu-permissions.ts b/frontend/src/lib/menu-permissions.ts
+index b61cfb572..098551a1e 100644
+--- a/frontend/src/lib/menu-permissions.ts
++++ b/frontend/src/lib/menu-permissions.ts
+@@ -330,7 +330,7 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+     permissions: [{ key: "runtime:admin", name: "守护进程运行时管理" }],
+   },
+ 
+-  // ── governance 协作治理（3 条）────────────────────────────────
++  // ── governance 协作治理（4 条，2026-10-14 增 deploy-records）────
+   {
+     section: "governance",
+     menuKey: "approvals",
+@@ -380,6 +380,19 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
+       { key: "deploy:staging", name: "事件上报" },
+     ],
+   },
++  {
++    // 2026-10-14-deploy-release-notes D-002@v1 新增：发布记录平台级聚合页
++    // （/deploy-records，协作治理组）——agent 部署后写 docs/releases/*.md，
++    // 后端只读扫描（D-004@v1）。可见性挂 deploy_record:read（任一命中即可见）。
++    section: "governance",
++    menuKey: "deploy-records",
++    menuLabel: "发布记录",
++    icon: "\u{1F4E6}",
++    href: "/deploy-records",
++    absolute: true,
++    matchPattern: "/deploy-records",
++    permissions: [{ key: "deploy_record:read", name: "发布记录查看" }],
++  },
+ 
+   // ── system 系统管理（5 条：用户/组织/角色/设置/菜单）──────────
+   {
+diff --git a/frontend/src/lib/query-keys.ts b/frontend/src/lib/query-keys.ts
+index 8302a8506..96ac4f946 100644
+--- a/frontend/src/lib/query-keys.ts
++++ b/frontend/src/lib/query-keys.ts
+@@ -190,3 +190,16 @@ export function knowledgeGraphNodesQueryKey(
+ export function knowledgeGraphDumpQueryKey(workspaceId: string) {
+   return ["knowledgeGraph", "dump", workspaceId] as const;
+ }
++
++/**
++ * 发布记录缓存键（2026-10-14-deploy-release-notes task-04；平台级聚合页
++ * /deploy-records 数据源）。列表无参数；详情 recordId 进键——record_id 含
++ * 斜杠与 workspace 前缀，天然唯一（影响结果的变量进 key 本文件头规则）。
++ */
++export function deployRecordsListQueryKey() {
++  return ["deployRecords", "list"] as const;
++}
++
++export function deployRecordDetailQueryKey(recordId: string) {
++  return ["deployRecords", "detail", recordId] as const;
++}

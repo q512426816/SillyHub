@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-14-turn-anchor-cache-eviction",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "a10414d957f39eef0c06c1727618ac47e5f55ef3",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "FR-01 两条测试绑定的用例名与实际 it() 标题为近义转写而非逐字一致",
+      "evidence": "requirements.md:51 引「terminateSession 调用 clearTurnAnchorCache 恰一次（4c 接线）」，实际用例名为「manual 终结：clearTurnAnchorCache 恰调一次且入参为 sessionId（4c 接线）」；requirements.md:52 引「…链与后续锚行为正确」，实际为「…在飞锚与后续锚行为正确」——所指行为断言均真实存在于对应文件且本评审复跑通过，仅标题措辞漂移，无承诺违反",
+      "location": ".sillyspec/changes/2026-10-14-turn-anchor-cache-eviction/requirements.md:51"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewNotes": {
+    "patchVsHead": "change.patch 与 git diff d61c840c9..a10414d95（sillyhub-daemon/ 范围）逐行一致（仅 index 行差异）；四个目标文件自 a10414d 至工作区零改动，冻结件忠实",
+    "fr1": "clearTurnAnchorCache 导出（turn-anchor.ts:303）；terminateSession 4c 步接线于 4b _clearBackgroundTasks（lifecycle.ts:231）与 5 _destroyUsageLedger（lifecycle.ts:240）之间（lifecycle.ts:236）；仅删 _lastTreeBySession 本 session 条目，只读 _chainBySession 不触碰其自清理，无任何 JSONL 文件操作；接线测试断言 manual/driver_error 双路径恰调一次、入参正确、顺序钉在清理簇内",
+    "fr2": "doRecord prev 内存 miss 时 readLastRecord JSONL 尾行兜底（turn-anchor.ts:203-205）为既有路径；用例断言第三锚 prevTreeSha===第二锚 treeSha、files 恰为第二→第三变化、零变化轮 deduped=true 且落盘恰 3 条",
+    "fr3": "未知 id 走无链分支 _lastTreeBySession.delete（Map.delete 缺键无操作不抛），用例 expect(...).not.toThrow() 覆盖",
+    "fr4": "本评审复跑两测试文件 15/15 通过（turn-anchor 12=既有 9+新增 3；接线 3），未跑全量（守仓库规则 0）",
+    "blindSpot4Q": "乱序：终态后迟到锚事件回写有界残留——机理属实（新锚新起链 doRecord 尾部 set，turn-anchor.ts:232），已声明接受；并发：在飞链场景 clear 把 delete 挂到 chain.catch().then()（turn-anchor.ts:306-308），而 doRecord 的 set 发生在 task resolve 之前，微任务序保证 delete 恒晚于该链最后一次 set；clear 后再入队的新链 prev 走尾行兜底正确（同乱序已声明边界）；JS 单线程无真并发写属实；切换：interruptInternal（turn-control.ts:481-499）仅调 driver.interrupt、全文件无 terminateSession 引用，lifecycle.ts:192-193 JSDoc 亦明示 interrupt 不调本方法——design 表述属实；persistence.ts:208 旧条目驱逐亦经 _terminateSession 故同样被清理（收口完整）；作用域：键为全局唯一 sessionId，清理不触他session",
+    "declaredBoundaries": "① 终态后迟到轮锚事件可回写一条有界残留、不做墓碑——可接受：终态会话 SDK 已 kill 不再有新轮，残留上限一条百字节级条目且 JSONL 数据不受影响，墓碑机制复杂度不成比例；② clear 后同 id 复用 prev 恢复多一次文件读——可接受：与 daemon 重启兜底同一路径（readLastRecord），既有「重启续锚」用例已覆盖该语义，且终态会话再打锚本身是理论场景；③ 放弃 LRU/上限淘汰——可接受：会话终结点清理语义准确、零配置，无魔法数；④ 放弃同时清 _chainBySession——可接受：链 finally 已自清理，额外删除反而在同 id 复用时破坏串行衔接",
+    "protections": "幂等不抛（未知 id Map.delete 无操作）、永不 reject（同步 void 签名；延迟分支 catch 前置且 Map.delete 不抛、外层 void 丢弃）、JSONL 不受影响（清理函数零 fs 操作）、不阻塞 terminate（同步立即返回）——四项防护均在代码中真实生效并有测试或代码路径支撑",
+    "artifacts": "无类型/契约生成物面：变更仅涉 daemon 内部 TS 源码与测试，无 proto/schema/生成文件需同步"
+  },
+  "reviewedAt": "2026-10-13T21:45:03Z"
+}

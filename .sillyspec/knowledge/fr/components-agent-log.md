@@ -152,7 +152,7 @@ created_at: 2026-10-12T11:08:58.569Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-01
-  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知注入不产出 preamble 段（进度视图无上下文注入卡）」
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知注入不产出 preamble 段（进度视图无上下文注入卡）」
   reason: spec
   state: candidate
   discovery: machine
@@ -171,7 +171,7 @@ created_at: 2026-10-12T11:08:58.569Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-02
-  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「系统通知开轮 + 中途消息：prompt 保持空，消息转 user_msg 段按 ts 插入输出之间」
   reason: spec
   state: candidate
   discovery: machine
@@ -190,7 +190,7 @@ created_at: 2026-10-12T11:08:58.569Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-03
-  tests: test/frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「TASK_WAKEUP 条目 chip 摘要与展开正文不显示 [后台任务通知] 前缀」
+  tests: frontend/src/components/daemon/__tests__/message-queue-bar.test.tsx「TASK_WAKEUP 条目 chip 摘要与展开正文不显示 [后台任务通知] 前缀」
   reason: spec
   state: candidate
   discovery: machine
@@ -209,7 +209,7 @@ created_at: 2026-10-12T11:08:58.569Z
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
 - row: 2026-10-13-session-taskwakeup-hide:flow:测试绑定FR-04
-  tests: test/frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「前导条 + 干净条双写（常规形态）→ 剩余正文与干净条同主体归并，prompt 不双显」
+  tests: frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx「前导条 + 干净条双写（常规形态）→ 剩余正文与干净条同主体归并，prompt 不双显」
   reason: spec
   state: candidate
   discovery: machine

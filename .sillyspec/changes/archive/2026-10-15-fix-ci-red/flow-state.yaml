@@ -1,0 +1,41 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  main 分支 CI 红灯灭火：daemon api-types 漂移 + 前端菜单测试数量锚过期，纯对齐修复无行为变更。
+  成功标准：
+  - sillyhub-daemon/src/api-types.ts 与 backend/openapi.json 重新生成对齐，pnpm gen:types:check 本地通过
+  - menu-permissions.test.ts 与 permission.test.ts 数量锚按源码现值更新（组长度/system 区条数/权限镜像长度/FR-02 清单），仅这两个测试文件全绿
+  - 提交推送后 main 上 daemon-ci 与 frontend-ci 变绿
+autopilot: false
+prestage_ack: true
+baseline_commit: 1e1616548446f4eb6908d1e6904e398acbb62074
+updatedAt: '2026-10-15T00:43:34.220Z'
+cross_baselines:
+  sillyspec: 2dcbda201fddb31fd5458847c7f205577381bed8
+baseline_sha256: c36e878db172332b779a00af856775cb782560316c2b300506c40dbe997cabec
+spec_approved: true
+spec_approved_at: '2026-10-15T00:11:34.064Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py3+jsx7)+fr(7)（53.6s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015003600\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（22.9s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015003600\test-result.json｜门文件
+  5 个
+

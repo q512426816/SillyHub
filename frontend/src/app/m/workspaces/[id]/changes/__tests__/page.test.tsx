@@ -233,6 +233,8 @@ function mainKey(overrides: Record<string, unknown> = {}) {
       location: "active",
       search: "",
       currentStage: "",
+      // 2026-10-14-change-center-lineage-tag-and-filter：出身分类槽位
+      lineage: "",
       sort: "updated_at_desc",
       pendingReviewOnly: false,
       page: 1,
@@ -417,6 +419,36 @@ describe("m/workspaces/[id]/changes 变更列表移动页", () => {
     });
     // 重置对齐桌面 handleResetClick：搜索词一并清空（草稿与生效值）
     expect(screen.getByTestId("m-changes-search-input")).toHaveValue("");
+  });
+
+  it("筛选抽屉：分类 chip 应用 → lineage 进 key 与请求；阶段 chips 无「轻量变更」（2026-10-14-change-center-lineage-tag-and-filter）", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("变更 c1")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("mobile-filter-trigger"));
+    expect(await screen.findByTestId("mobile-filter-body")).toBeVisible();
+    // 阶段维度已无「轻量变更」chip（职责迁移到分类维度）
+    expect(
+      screen.queryByTestId("m-changes-stage-chip-thin"),
+    ).toBeNull();
+    // 分类维度 chips 齐全：全部/完整/轻量
+    expect(screen.getByTestId("m-changes-lineage-chip-all")).toBeInTheDocument();
+    expect(screen.getByTestId("m-changes-lineage-chip-full")).toBeInTheDocument();
+    // 选「轻量变更」→ 确定 → lineage=thin 进 key 与请求
+    fireEvent.click(screen.getByTestId("m-changes-lineage-chip-thin"));
+    fireEvent.click(screen.getByTestId("mobile-filter-apply"));
+    await waitFor(() => {
+      expect(changesApi.listChanges).toHaveBeenCalledWith(
+        "ws-1",
+        expect.objectContaining({ lineage: "thin" }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        queryClient.getQueryData(mainKey({ lineage: "thin" })),
+      ).toBeTruthy();
+    });
   });
 
   it("只看待我处理：active 应用 → pendingReviewOnly=true 进 key；archive tab 不渲染聚焦开关", async () => {
