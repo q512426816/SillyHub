@@ -206,3 +206,4 @@
 - agent|FR|需求|承接 → [fr/agent.md](fr/agent.md)
 - deploy_records|FR|需求|承接 → [fr/deploy_records.md](fr/deploy_records.md)
 - auto-frontend|frontend|FR|需求|承接 → [fr/auto-frontend.md](fr/auto-frontend.md)
+- auto-sillyspec|sillyspec|FR|需求|承接 → [fr/auto-sillyspec.md](fr/auto-sillyspec.md)

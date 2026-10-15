@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：知识图谱查询切片（neighbors/impact 等）的力场布局只有斥力/弹簧/向心，不同类型节点混成一坨视觉杂乱（用户实测截图反馈）；需要同类型节点聚簇分块，布局更清晰（>200 静态降级已按类型分环，力场面对齐此语义）。
+  成功标准：
+  - 切片力场（stepForceLayout）新增同类型内聚力：朝本类型质心的弱牵引，收敛后同类型节点形成可辨聚簇、异类质心明显分开；
+  - 单节点类型与 NaN 坐标不施力（质心=自身力为零），既有单测口径（两节点异类弹簧收敛、NaN 自愈、收敛截止）全部保持绿；
+  - 既有交互不变：拖拽钉位、forceSettled 收敛截止、自动 re-fit、>200 静态降级、full 模式不跑力场；
+  - 新增内聚力常量导出与纯函数聚簇断言单测（类内紧+类间分双断言），仅跑本改动相关测试。
+autopilot: false
+prestage_ack: true
+baseline_commit: 102be15879fe74f2a88e336ae1d4b2705ff89299
+updatedAt: '2026-10-15T02:42:47.479Z'
+cross_baselines:
+  sillyspec: 9b0a91be4e62613d51d3dec7ac755ce1ee27d847
+baseline_sha256: 58ff86f0e87c066fb047d3a1d2fc896d4b483b078f93581ecd370d2261a46cf3
+spec_approved: true
+spec_approved_at: '2026-10-15T02:21:01.929Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（3.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015023428\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（8.8s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261015023428\test-result.json｜门文件
+  16 个
+

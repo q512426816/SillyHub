@@ -1,0 +1,205 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+index 4ce7c5736..0c4ec0bd6 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/graph/page.tsx
+@@ -861,7 +861,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
+             <p className="mt-2 text-[10.5px] leading-4 text-muted-foreground/80">
+               {full
+                 ? `全图 ${dumpStats ? `${dumpStats.nodes} 节点 · ${dumpStats.edges} 边` : ""}——CLI 预计算坐标静态星空，点击节点下钻 neighbors`
+-                : "切片查询驱动 · 力场上限 200 节点，超限确定性静态布局"}
++                : "切片查询驱动 · 同类型节点聚簇分块 · 力场上限 200 节点，超限确定性静态布局"}
+             </p>
+           </div>
+ 
+@@ -1299,8 +1299,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
+                   <p className="font-semibold text-foreground">数据面两模式</p>
+                   <p>
+                     「全图」＝dump 静态星空（CLI 预计算坐标不跑力场，点击节点下钻
+-                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片，
+-                    &gt;200 节点自动确定性静态布局。
++                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片
++                    （同类型节点自动聚簇分块，跨类型关联呈桥接边），&gt;200 节点自动
++                    确定性静态布局。
+                   </p>
+                 </div>
+                 <div>
+diff --git a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+index 52f93d9c7..1baf4dc52 100644
+--- a/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
++++ b/frontend/src/components/knowledge/__tests__/graph-canvas.test.ts
+@@ -47,6 +47,7 @@ import {
+   shouldAutoRefit,
+   staticLayout,
+   stepForceLayout,
++  TYPE_COHESION_PULL,
+   type CanvasNodeInput,
+   type LiteClusterInput,
+   type SimEdge,
+@@ -138,6 +139,91 @@ describe("stepForceLayout（velocity Verlet 力场单步）", () => {
+   });
+ });
+ 
++// ── stepForceLayout 类型内聚力（2026-10-15-graph-type-cluster）──────────────
++
++describe("stepForceLayout 类型内聚力（同类型聚簇、异类分块）", () => {
++  /** 交错网格：18 节点 3 类型（各 6）铺满 800×600、无边——类型充分混排的初始态。 */
++  function interleavedGrid(): SimNode[] {
++    const types = ["file", "decision", "fr"];
++    return Array.from({ length: 18 }, (_, i) => {
++      const c = i % 6;
++      const r = Math.floor(i / 6);
++      return simNode({
++        id: `n${String(i).padStart(2, "0")}`,
++        type: types[i % types.length]!,
++        x: 40 + c * 144,
++        y: 60 + r * 240,
++      });
++    });
++  }
++
++  it("增益常量具名导出：弱牵引量级（0 < pull < 0.1）", () => {
++    expect(TYPE_COHESION_PULL).toBeGreaterThan(0);
++    expect(TYPE_COHESION_PULL).toBeLessThan(0.1);
++  });
++
++  it("聚簇双断言：交错网格快进 4000 步后类内紧（<150）+ 类间分（>150 且 > 类内径），且收敛截止判定为静止", () => {
++    const nodes = interleavedGrid();
++    stepForceLayout(nodes, [], 4000, { width: 800, height: 600 });
++    const byType = new Map<string, SimNode[]>();
++    for (const n of nodes) {
++      const g = byType.get(n.type) ?? [];
++      g.push(n);
++      byType.set(n.type, g);
++    }
++    const cents = new Map<string, { x: number; y: number }>();
++    let maxSpread = 0;
++    for (const [t, g] of byType) {
++      const cx = g.reduce((s, n) => s + n.x, 0) / g.length;
++      const cy = g.reduce((s, n) => s + n.y, 0) / g.length;
++      cents.set(t, { x: cx, y: cy });
++      for (const n of g) {
++        maxSpread = Math.max(maxSpread, Math.hypot(n.x - cx, n.y - cy));
++      }
++    }
++    expect(maxSpread).toBeLessThan(150); // 类内紧
++    const typeNames = [...cents.keys()];
++    let minCentDist = Infinity;
++    for (let i = 0; i < typeNames.length; i++) {
++      for (let j = i + 1; j < typeNames.length; j++) {
++        const a = cents.get(typeNames[i]!)!;
++        const b = cents.get(typeNames[j]!)!;
++        minCentDist = Math.min(minCentDist, Math.hypot(a.x - b.x, a.y - b.y));
++      }
++    }
++    expect(minCentDist).toBeGreaterThan(150); // 类间分
++    expect(minCentDist).toBeGreaterThan(maxSpread); // 簇可辨：间距压过类内径
++    // 内聚力不破坏收敛截止（forceSettled 判静止——rAF 停步进语义保持）。
++    expect(forceSettled(nodes)).toBe(true);
++  });
++
++  it("内聚生效正控制：同类型两节点一步内相互靠拢（内聚压过斥力+向心）", () => {
++    const a = simNode({ id: "a", type: "file", x: 300, y: 300 });
++    const b = simNode({ id: "b", type: "file", x: 500, y: 300 });
++    stepForceLayout([a, b], [], 1, { width: 800, height: 600 });
++    expect(a.x).toBeGreaterThan(300);
++    expect(b.x).toBeLessThan(500);
++  });
++
++  it("豁免：单成员类型只受向心力（闭式解钉死），NaN 坐标不入质心、自愈口径不变", () => {
++    const a = simNode({ id: "a", type: "module", x: 400, y: 100 });
++    const b = simNode({ id: "b", type: "project", x: 400, y: 500 });
++    const bad = simNode({ id: "bad", type: "file", x: 400, y: 300 });
++    bad.x = Number.NaN;
++    bad.y = Number.NaN;
++    bad.px = Number.NaN;
++    bad.py = Number.NaN;
++    stepForceLayout([a, b, bad], [], 1, { width: 800, height: 600 });
++    // 闭式解：单成员类型内聚力为零，仅向心 vy = 0.004×200×0.85 = 0.68。
++    expect(a.x).toBe(400);
++    expect(b.x).toBe(400);
++    expect(a.y).toBeCloseTo(100.68, 10);
++    expect(b.y).toBeCloseTo(499.32, 10);
++    // NaN 节点自愈到中心 160 圆环（既有口径；file 组有限成员=0 不产生内聚力）。
++    expect(Math.hypot(bad.x - 400, bad.y - 300)).toBeCloseTo(160, 6);
++  });
++});
++
+ // ── pickNode：最近者胜 + 容差内外 ───────────────────────────────────────────
+ 
+ describe("pickNode（拾取最近者胜）", () => {
+diff --git a/frontend/src/components/knowledge/graph-canvas.tsx b/frontend/src/components/knowledge/graph-canvas.tsx
+index a8a298da1..c7500647e 100644
+--- a/frontend/src/components/knowledge/graph-canvas.tsx
++++ b/frontend/src/components/knowledge/graph-canvas.tsx
+@@ -7,7 +7,9 @@
+  *
+  * 依据：
+  *   - 归档原型 prototype-knowledge-graph.html 的 step()/draw()/交互段生产直译：
+- *     velocity Verlet 力场（斥力/弹簧/向心/阻尼/速度夹/NaN 自愈逐项一致）、
++ *     velocity Verlet 力场（斥力/弹簧/向心/阻尼/速度夹/NaN 自愈逐项一致；
++ *     2026-10-15-graph-type-cluster 增补同类型内聚力——同类聚簇异类分块，
++ *     系原型之后唯一的力组成增补）、
+  *     拾取最近者胜、滚轮缩放光标锚点、空白拖拽平移、节点拖拽钉位、hover/选中环、
+  *     标签分级（缩放阈值/选中/hover/高亮内，26 字符截断，字号随缩放补偿）、
+  *     边三档虚实（strong 实线 / medium 长虚 / weak 点虚）；
+@@ -58,6 +60,13 @@ const SPRING_K = 0.02;
+ const SPRING_D_MAX = 600;
+ /** 向心牵引系数。 */
+ const CENTER_PULL = 0.004;
++/**
++ * 同类型内聚增益（2026-10-15-graph-type-cluster）：每步朝本类型质心的弱牵引
++ * ——同类聚簇、异类靠对称斥力分块（>200 静态分环布局同语义的力场对齐）。
++ * 量级与 CENTER_PULL 同数量级略强：实测 18 节点 3 类型交错网格收敛后类内
++ * 半径 ≈48px、类间质心距 ≈163px（聚簇可辨且不破坏弹簧自然长）。
++ */
++export const TYPE_COHESION_PULL = 0.02;
+ /** 阻尼与速度夹（|v| ≤ 9）。 */
+ const DAMPING = 0.85;
+ const VELOCITY_CLAMP = 9;
+@@ -188,11 +197,12 @@ function clampVelocity(v: number): number {
+ }
+ 
+ /**
+- * velocity Verlet 力场单步（原型 step() 直译，参数逐项一致）：
++ * velocity Verlet 力场单步（原型 step() 直译 + 类型内聚增补，其余参数逐项一致）：
+  * 斥力（成对、距离 >320 跳过、力幅夹 0.5）→ 边弹簧（自然长=强弱档基数×半径
+- * 和/14、长度夹 600）→ 向心 0.004 → 拖拽钉位 → 阻尼 0.85 + 速度夹 ±9 →
+- * NaN 自愈（重置到中心半径 160 圆环）。dt 为本次推进的步数（rAF 传 1，测试
+- * 可传 N 确定性快进）；view 提供向心/自愈中心（画布中心）。
++ * 和/14、长度夹 600）→ 类型内聚（朝本类型质心弱牵引，单成员/NaN 豁免，
++ * 2026-10-15-graph-type-cluster）→ 向心 0.004 → 拖拽钉位 → 阻尼 0.85 +
++ * 速度夹 ±9 → NaN 自愈（重置到中心半径 160 圆环）。dt 为本次推进的步数
++ * （rAF 传 1，测试可传 N 确定性快进）；view 提供向心/自愈中心（画布中心）。
+  */
+ export function stepForceLayout(
+   nodes: SimNode[],
+@@ -259,6 +269,29 @@ export function stepForceLayout(
+       b.px += fx;
+       b.py += fy;
+     }
++    // 类型内聚（2026-10-15-graph-type-cluster）：先统计各类型有限坐标质心，
++    // 再对成员数 >1 的类型施加朝质心弱牵引——同类聚簇、异类靠对称斥力分块。
++    // 单成员类型质心=自身零受力；NaN 坐标不入质心（防毒）也不受力。质心每步
++    // 重算无跨帧状态；拖拽钉位节点照常累加（积分段整体覆盖，与斥力/弹簧同帧
++    // 同语义）。
++    const typeSum = new Map<string, { x: number; y: number; n: number }>();
++    for (const n of nodes) {
++      if (!isFinite(n.x) || !isFinite(n.y)) continue;
++      const g = typeSum.get(n.type);
++      if (g) {
++        g.x += n.x;
++        g.y += n.y;
++        g.n += 1;
++      } else {
++        typeSum.set(n.type, { x: n.x, y: n.y, n: 1 });
++      }
++    }
++    for (const n of nodes) {
++      const g = typeSum.get(n.type);
++      if (!g || g.n <= 1) continue;
++      n.px -= (g.x / g.n - n.x) * TYPE_COHESION_PULL;
++      n.py -= (g.y / g.n - n.y) * TYPE_COHESION_PULL;
++    }
+     // 向心 + 拖拽钉位 + 阻尼积分 + NaN 自愈
+     for (const n of nodes) {
+       n.px -= (cx - n.x) * CENTER_PULL;

@@ -95,3 +95,4 @@
 | 2026-10-15 | 2026-10-15-fix-ci-red | main 分支 CI 红灯灭火：daemon api-types 漂移 + 前端菜单测试数量锚过期，纯对齐修复无行为变更 |
 | 2026-10-15 | 2026-10-14-decision-anchor-change-qualified | 动机：变更详情沉淀资产卡的决策蒸馏弹窗定位不准——decisions/unmapped.md 等聚合文件里多个变更各有同 |
 | 2026-10-15 | 2026-10-15-ci-recurrence-guard | CI 红灯防复发：把 2026-10-15-fix-ci-red 灭火中发现的三类漏拦（daemon api-types |
+| 2026-10-15 | 2026-10-15-graph-type-cluster | 动机：知识图谱查询切片（neighbors/impact 等）的力场布局只有斥力/弹簧/向心，不同类型节点混成一坨视觉杂 |

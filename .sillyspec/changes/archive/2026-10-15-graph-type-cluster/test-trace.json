@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-graph-type-cluster",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-graph-type-cluster:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：交错网格收敛后类内紧+类间分」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-graph-type-cluster"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-graph-type-cluster:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：单成员类型与 NaN 坐标豁免（既有自愈口径不变）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-graph-type-cluster"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-graph-type-cluster:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts",
+        "frontend/src/components/knowledge/__tests__/knowledge-graph-page.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-graph-type-cluster"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-graph-type-cluster:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/knowledge/__tests__/graph-canvas.test.ts「类型内聚力：增益常量具名导出」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-graph-type-cluster"
+    }
+  ]
+}

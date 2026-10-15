@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-graph-type-cluster",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "2fc26800908a29fc957f059032fbaff1678b793b",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "NaN 坐标节点在内聚施力循环缺显式 isFinite 守卫，注释「也不受力」与机械行为有出入",
+      "evidence": "内聚第二循环仅判 !g || g.n<=1，不查节点坐标有限性：NaN 节点若其类型有 ≥2 个有限成员，其 px/py 会被写入 NaN（n.px -= (g.x/g.n - n.x)*pull 中 n.x 为 NaN），随后由积分段 NaN 自愈整体复位 x/y/px/py，无净位移风险且与既有向心段行为同构（向心段同样无守卫）——但代码注释声称「NaN 坐标……也不受力」，机械层面该节点确被内聚路径触碰，属注释与实现的措辞不一致（CLAUDE.md 规则 18 面）。建议第二循环补 !isFinite(n.x)||!isFinite(n.y) continue 或修正注释。",
+      "location": "frontend/src/components/knowledge/graph-canvas.tsx:289-294（对照注释 :274）"
+    },
+    {
+      "severity": "P3",
+      "title": "visual-evidence.md 引用失准：称校准数据「见 design.md 风险节」，实则在自身文件",
+      "evidence": "visual-evidence.md 第 13 行写「调 TYPE_COHESION_PULL（0.012～0.035 均为收敛稳定带，校准数据见 design.md 风险节）」，但 design.md 风险节（:49）只有「增益取小/双断言钉住/实测定值」定性描述，0.012～0.035 带宽与 47.8/163.3 校准数字实际在 visual-evidence.md 自身；跨文档引用指向错误，后续读者按图索骥会落空。",
+      "location": ".sillyspec/changes/2026-10-15-graph-type-cluster/visual-evidence.md:13"
+    },
+    {
+      "severity": "P3",
+      "title": "requirements 测试绑定的用例名与实际 it() 名字面不一致（FR-01/02/04 三处）",
+      "evidence": "requirements.md 绑定写作「类型内聚力：交错网格收敛后类内紧+类间分」「类型内聚力：单成员类型与 NaN 坐标豁免（既有自愈口径不变）」「类型内聚力：增益常量具名导出」，实际用例名为「聚簇双断言：交错网格快进 4000 步后类内紧（<150）+ 类间分（>150 且 > 类内径），且收敛截止判定为静止」「豁免：单成员类型只受向心力（闭式解钉死），NaN 坐标不入质心、自愈口径不变」「增益常量具名导出：弱牵引量级（0 < pull < 0.1）」——语义一一对应且文件内可唯一定位，但按字面精确匹配的绑定校验会失配；建议后续变更绑定名照抄最终 it() 名。",
+      "location": ".sillyspec/changes/2026-10-15-graph-type-cluster/requirements.md:51-54"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "boundaryRulings": [
+    {
+      "claim": "风险一：增益 TYPE_COHESION_PULL=0.02 为实测定值，以「类内紧+类间分」双断言钉住平衡带",
+      "ruling": "可接受",
+      "reason": "双断言在 graph-canvas.test.ts:165 真实存在且实测绿；校准余量类内 47.8（上限 150）、类间 163.3（下限 150）两侧均留有余量，确定性力场同输入同输出可复现。"
+    },
+    {
+      "claim": "风险二：neighbors 切片锚点节点被拉离画布中心可接受",
+      "ruling": "可接受",
+      "reason": "canvas 绘制与交互代码零改动，选中环/高亮语义不受影响；聚簇形态正是用户需求本身，取舍方向与动机一致。"
+    },
+    {
+      "claim": "visual-evidence：本增补为归档原型直译之后的唯一力组成偏离（非降级），头注释如实声明",
+      "ruling": "可接受",
+      "reason": "graph-canvas.tsx 头注释与 JSDoc 的增补标注与 diff 事实逐字相符，注释与实现一致性（规则 18）成立。"
+    },
+    {
+      "claim": "requirements FR-02：既有单测口径断言不得修改",
+      "ruling": "可接受（已兑现）",
+      "reason": "测试 diff 为纯增量（86 行全为新增、0 删除），既有用例（远距弹簧收敛带/NaN 自愈 160 圆环/空集 dt=0）断言原样，两文件 55 用例实测全绿。"
+    }
+  ]
+}
