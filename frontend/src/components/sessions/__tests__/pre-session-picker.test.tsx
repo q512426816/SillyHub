@@ -26,7 +26,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
-import { PreSessionPicker } from "../pre-session-picker";
+import {
+  PreSessionPicker,
+  boundMachineIdFor,
+  pickDefaultRuntimeOnMachine,
+  pickRuntimeByProvider,
+} from "../pre-session-picker";
 // task-05 对话框路径白名单被测组件（B-02 第二处：InteractiveSessionChatSection
 // 的 onlineProviders 过滤）。import 链含 next/navigation，mock 防 jsdom 解析异常
 //（同 daemon/__tests__/runtime-session-helpers.test.tsx 惯例）。
@@ -688,5 +693,238 @@ describe("cursor 态 caps 门控前置事实（getProviderCaps 查表值）", ()
 
   it("PROVIDER_META 含 cursor（选择器「选择智能体 Cursor」主显标签来源，零改动锚）", () => {
     expect(PROVIDER_META.cursor?.label).toBe("Cursor");
+  });
+});
+
+/* ───────── 10. 工作区绑定机器模式（2026-10-15-workspace-session-agent-only） ───────── */
+//
+// 绑定模式=工作区已按 per-member binding（MemberBindingView.daemon_id）钉定机器，
+// 浮层跳过「① 机器」步直接列该机器智能体；无绑定/「非工作区」由宿主不传
+// boundMachineId 回退原两步（见上方既有用例零修改）。
+
+/** 绑定模式渲染助手（boundMachineId 缺省="m-1"；显式传 null 即回退两步断言用）。 */
+function renderBoundPicker(
+  props: {
+    boundMachineId?: string | null;
+    machines?: DaemonMachineRead[];
+    open?: boolean;
+    variant?: "center" | "bottomSheet";
+  } = {},
+) {
+  const onPick = vi.fn();
+  const onCancel = vi.fn();
+  const machines = props.machines ?? [makeMachine()];
+  const hasBoundOverride = Object.prototype.hasOwnProperty.call(
+    props,
+    "boundMachineId",
+  );
+  const view = (open: boolean) => (
+    <PreSessionPicker
+      open={open}
+      machines={machines}
+      boundMachineId={hasBoundOverride ? props.boundMachineId : "m-1"}
+      onCancel={onCancel}
+      onPick={onPick}
+      variant={props.variant}
+    />
+  );
+  const result = render(view(props.open ?? true));
+  return {
+    ...result,
+    onPick,
+    onCancel,
+    rerenderOpen: (open: boolean) => result.rerender(view(open)),
+  };
+}
+
+describe("PreSessionPicker 工作区绑定机器模式（绑定=跳过机器步）", () => {
+  it("绑定机器在线：无「① 机器」步与机器列表，直接列绑定机器智能体；点选即 onPick(runtimeId)", () => {
+    const { onPick } = renderBoundPicker({
+      machines: [
+        makeMachine(),
+        // 另一台在线机器：其智能体不得混入（getByRole 唯一性即断言——两机都有
+        // Codex，若错列会触发 multiple elements）。
+        makeMachine({
+          id: "m-2",
+          hostname: "DESKTOP-2",
+          display_alias: "机器二",
+          runtimes: [makeRuntime("rt-2", "codex")],
+        }),
+      ],
+    });
+
+    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /选择机器/ }),
+    ).not.toBeInTheDocument();
+    // 绑定机器上下文 pill（机器名 + 工作区绑定标注）+ 智能体列表（copilot 白名单外）。
+    expect(
+      screen.getByText(/智能体 · 机器一（工作区绑定机器）/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Copilot/ }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /选择智能体 Claude Code/ }));
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith("rt-claude");
+  });
+
+  it("默认 Claude Code 高亮语义不变（aria-pressed + 「默认」Tag 仍唯一）", () => {
+    renderBoundPicker();
+    const claude = screen.getByRole("button", {
+      name: /选择智能体 Claude Code/,
+    }) as HTMLButtonElement;
+    expect(claude.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getAllByText("默认")).toHaveLength(1);
+  });
+
+  it("绑定机器离线：离线空态文案，不落机器列表也不列智能体", () => {
+    renderBoundPicker({
+      machines: [makeMachine({ status: "offline", online_runtime_count: 0 })],
+    });
+    expect(
+      screen.getByText(/工作区绑定的机器「机器一」当前离线，请启动 daemon/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /选择机器/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /选择智能体/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("绑定机器不在候选中（已删/共享撤销）：不可用空态，不落机器列表", () => {
+    renderBoundPicker({ boundMachineId: "m-gone" });
+    expect(
+      screen.getByText(/工作区绑定的机器当前不可用，请到工作区页面重新绑定机器/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /选择机器/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("绑定机器在线但白名单引擎全离线：沿用第二步空态文案", () => {
+    renderBoundPicker({
+      machines: [
+        makeMachine({
+          runtimes: [
+            makeRuntime("rt-copilot", "copilot"),
+            makeRuntime("rt-codex-off", "codex", { status: "offline" }),
+          ],
+        }),
+      ],
+    });
+    expect(
+      screen.getByText(/该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /选择智能体/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("boundMachineId=null：保持原两步流程（缺省不传由既有用例守护）", () => {
+    renderBoundPicker({ boundMachineId: null });
+    expect(screen.getByText("① 机器（仅在线）")).toBeInTheDocument();
+    expect(screen.queryByText(/工作区绑定机器/)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /选择机器 机器一/ }),
+    ).toBeInTheDocument();
+  });
+
+  it('boundMachineId="" 空串按未绑定处理（防宿主空值误入绑定模式）', () => {
+    renderBoundPicker({ boundMachineId: "" });
+    expect(screen.getByText("① 机器（仅在线）")).toBeInTheDocument();
+  });
+
+  it("bottomSheet 绑定模式：直接智能体步 + 选项行 ≥44px 热区；遮罩/✕ 仍仅 onCancel", () => {
+    const { onPick, onCancel } = renderBoundPicker({
+      variant: "bottomSheet",
+    });
+    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
+    const claude = screen.getByRole("button", {
+      name: /选择智能体 Claude Code/,
+    });
+    expect(claude).toHaveClass("min-h-[44px]");
+    fireEvent.click(claude);
+    expect(onPick).toHaveBeenCalledWith("rt-claude");
+
+    fireEvent.click(screen.getByTestId("pre-session-picker-mask"));
+    fireEvent.click(screen.getByLabelText("关闭"));
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("取消后重开：绑定模式仍直接智能体步（无机器步残留）", () => {
+    const { rerenderOpen } = renderBoundPicker();
+    expect(
+      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
+    ).toBeInTheDocument();
+    rerenderOpen(false);
+    expect(screen.queryByTestId("pre-session-picker-mask")).not.toBeInTheDocument();
+    rerenderOpen(true);
+    expect(screen.queryByText("① 机器（仅在线）")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /选择智能体 Claude Code/ }),
+    ).toBeInTheDocument();
+  });
+});
+
+/* ───────── 11. 新建选点纯函数（三宿主共用解析面） ───────── */
+
+describe("新建选点纯函数（绑定机器解析，门户/悬浮宿主/移动页共用）", () => {
+  it("boundMachineIdFor：命中 workspace 取 daemon_id；无 binding/daemon_id 空/workspaceId 空 → null", () => {
+    const bindings = [
+      { workspace_id: "ws-1", daemon_id: "m-1" },
+      { workspace_id: "ws-2", daemon_id: null },
+    ];
+    expect(boundMachineIdFor(bindings, "ws-1")).toBe("m-1");
+    expect(boundMachineIdFor(bindings, "ws-2")).toBeNull();
+    expect(boundMachineIdFor(bindings, "ws-3")).toBeNull();
+    expect(boundMachineIdFor(bindings, null)).toBeNull();
+    expect(boundMachineIdFor(undefined, "ws-1")).toBeNull();
+  });
+
+  it("pickDefaultRuntimeOnMachine：在线 claude 优先→codex；pi/cursor/离线不参与；机器 null → null", () => {
+    expect(pickDefaultRuntimeOnMachine(makeMachine())?.id).toBe("rt-claude");
+    expect(
+      pickDefaultRuntimeOnMachine(
+        makeMachine({
+          runtimes: [makeRuntime("rt-codex", "codex"), makeRuntime("rt-pi", "pi")],
+        }),
+      )?.id,
+    ).toBe("rt-codex");
+    expect(
+      pickDefaultRuntimeOnMachine(
+        makeMachine({
+          runtimes: [
+            makeRuntime("rt-claude-off", "claude", { status: "offline" }),
+            makeRuntime("rt-codex", "codex"),
+          ],
+        }),
+      )?.id,
+    ).toBe("rt-codex");
+    expect(
+      pickDefaultRuntimeOnMachine(
+        makeMachine({
+          runtimes: [makeRuntime("rt-pi", "pi"), makeRuntime("rt-cursor", "cursor")],
+        }),
+      ),
+    ).toBeNull();
+    expect(pickDefaultRuntimeOnMachine(null)).toBeNull();
+  });
+
+  it("pickRuntimeByProvider：在线精确匹配才返回；离线/机器 null → null", () => {
+    expect(pickRuntimeByProvider(makeMachine(), "codex")?.id).toBe("rt-codex");
+    expect(pickRuntimeByProvider(makeMachine(), "cursor")).toBeNull();
+    expect(
+      pickRuntimeByProvider(
+        makeMachine({
+          runtimes: [makeRuntime("rt-codex-off", "codex", { status: "offline" })],
+        }),
+        "codex",
+      ),
+    ).toBeNull();
+    expect(pickRuntimeByProvider(null, "codex")).toBeNull();
   });
 });

@@ -27,6 +27,14 @@
  *     仅容器定位/外观类差异，两步选择逻辑零分叉。
  *
  * 门户接线（何时打开/上下文合成 onPick → preContext）归 task-06。
+ *
+ * 工作区绑定机器模式（2026-10-15-workspace-session-agent-only）：新增可选 prop
+ * boundMachineId——非空即「绑定模式」，跳过「① 机器」步直接列该机器智能体
+ * （机器已由工作区对本人的 per-member binding 钉定，无需也不允许再选机器；
+ * 绑定机器离线/不可见时给专门空态，不落回全机器列表）。缺省/null/空串 =
+ * 原两步流程，零回归。三宿主（门户/悬浮宿主/移动页）共用的解析纯函数
+ * （boundMachineIdFor / pickDefaultRuntimeOnMachine / pickRuntimeByProvider）
+ * 同文件导出，避免三处重复实现。
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -39,6 +47,7 @@ import {
   type DaemonMachineRead,
   type DaemonRuntimeRead,
 } from "@/lib/daemon";
+import type { MemberBindingView } from "@/lib/workspace-binding";
 import { cn } from "@/lib/utils";
 
 /**
@@ -61,10 +70,62 @@ export interface PreSessionPickerProps {
   open: boolean;
   /** 机器列表（父层注入，本组件零数据请求）。 */
   machines: DaemonMachineRead[];
+  /**
+   * 工作区绑定机器 id（2026-10-15-workspace-session-agent-only）：非空 =
+   * 绑定模式——跳过「① 机器」步，直接列该机器智能体（机器离线/不可见时给
+   * 专门空态，不落回全机器列表）；缺省/null/空串 = 原两步流程（零回归）。
+   * 由宿主经 boundMachineIdFor(bindings, workspaceId) 解析注入。
+   */
+  boundMachineId?: string | null;
   /** 取消回调（✕ / 遮罩点击）。 */
   onCancel: () => void;
   /** 选定智能体（runtimeId）立即回调并关闭（无确认按钮）。 */
   onPick: (_runtimeId: string) => void;
+}
+
+/* ────────────────────── 新建选点解析纯函数（三宿主共用） ────────────────────── */
+
+/**
+ * 工作区绑定机器 id（2026-10-15-workspace-session-agent-only）：当前用户对该
+ * 工作区的 per-member binding（MemberBindingView.daemon_id）→ 机器 id。
+ * 无 workspaceId / 无 binding / daemon_id 空 → null（调用方回退原两步流程）。
+ */
+export function boundMachineIdFor(
+  bindings:
+    | Array<Pick<MemberBindingView, "workspace_id" | "daemon_id">>
+    | null
+    | undefined,
+  workspaceId: string | null | undefined,
+): string | null {
+  if (!workspaceId) return null;
+  const hit = (bindings ?? []).find((b) => b.workspace_id === workspaceId);
+  return hit?.daemon_id ?? null;
+}
+
+/**
+ * 机器上的默认直带 runtime：在线且 provider∈{claude, codex}，claude 优先。
+ * 与既有 ?new=1 / 悬浮宿主默认解析同语义（单一实现）；pi/cursor 不参与
+ * 自动默认（可经浮层显式选择），无命中返回 null。
+ */
+export function pickDefaultRuntimeOnMachine(
+  machine: DaemonMachineRead | null | undefined,
+): DaemonRuntimeRead | null {
+  const runtimes = (machine?.runtimes ?? []).filter(
+    (r) => r.status === "online" && (r.provider === "claude" || r.provider === "codex"),
+  );
+  return runtimes.find((r) => r.provider === "claude") ?? runtimes[0] ?? null;
+}
+
+/** 机器上指定引擎的在线 runtime（列表筛选直带用）；无命中返回 null。 */
+export function pickRuntimeByProvider(
+  machine: DaemonMachineRead | null | undefined,
+  provider: string,
+): DaemonRuntimeRead | null {
+  return (
+    (machine?.runtimes ?? []).find(
+      (r) => r.status === "online" && r.provider === provider,
+    ) ?? null
+  );
 }
 
 /* ────────────────────── 纯辅助（new-session-form 同款语义） ────────────────────── */
@@ -104,6 +165,7 @@ export function PreSessionPicker({
   variant = "center",
   open,
   machines,
+  boundMachineId,
   onCancel,
   onPick,
 }: PreSessionPickerProps) {
@@ -114,14 +176,23 @@ export function PreSessionPicker({
     if (open) setMachineId(null);
   }, [open]);
 
+  // 绑定模式（2026-10-15-workspace-session-agent-only）：非空 id 即跳过机器步
+  // （空串按未绑定——防宿主以空值误入绑定模式）。
+  const boundMode = typeof boundMachineId === "string" && boundMachineId.length > 0;
+
   // ① 仅在线机器（D-107：第一步机器白名单 = status online）。
   const onlineMachines = useMemo(
     () => machines.filter((m) => m.status === "online"),
     [machines],
   );
+  // 当前机器：绑定模式=绑定机器原样（含离线/不可见，供专门空态展示）；非绑定
+  // =第一步选中（在线白名单内）。
   const machine = useMemo(
-    () => onlineMachines.find((m) => m.id === machineId) ?? null,
-    [onlineMachines, machineId],
+    () =>
+      boundMode
+        ? (machines.find((m) => m.id === boundMachineId) ?? null)
+        : (onlineMachines.find((m) => m.id === machineId) ?? null),
+    [boundMode, boundMachineId, machines, onlineMachines, machineId],
   );
 
   // ② 该机器可会话智能体：provider∈SESSION_SUPPORTED_PROVIDERS 且在线。
@@ -134,6 +205,18 @@ export function PreSessionPicker({
       ),
     [machine],
   );
+
+  // 绑定模式空态（优先级：机器不可见 > 机器离线 > 在线但无白名单引擎在线）；
+  // 不落回全机器列表（选到与工作区无关的机器＝cwd 语义错，需求明确禁选）。
+  const boundEmptyText = useMemo(() => {
+    if (!boundMode) return null;
+    if (!machine) return "工作区绑定的机器当前不可用，请到工作区页面重新绑定机器";
+    if (machine.status !== "online")
+      return `工作区绑定的机器「${machineLabel(machine)}」当前离线，请启动 daemon 后再新建会话`;
+    if (supportedRuntimes.length === 0)
+      return "该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）";
+    return null;
+  }, [boundMode, machine, supportedRuntimes]);
 
   if (!open) return null;
 
@@ -149,6 +232,42 @@ export function PreSessionPicker({
     : "w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg";
   // 移动触摸热区（FR-08 ≥44px 抽检锚）：bottomSheet 下两步选项行补 min-h，外观类不改逻辑。
   const touchCls = isSheet ? "min-h-[44px]" : "";
+  // 绑定模式无机器步，标题不再提「运行位置」（机器已由工作区绑定钉定）。
+  const dialogTitle = boundMode ? "新建会话 · 选择智能体" : "新建会话 · 选择运行位置";
+
+  // 智能体选项列表（绑定模式与非绑定第二步共用，同一渲染路径）。
+  const runtimeList = (
+    <div className="mt-2 flex flex-col gap-2" aria-label="智能体列表">
+      {supportedRuntimes.map((r) => {
+        // 默认 Claude Code 高亮（new-session-form ② 区同款主色语义）。
+        const isDefault = r.provider === "claude";
+        return (
+          <button
+            key={r.id}
+            type="button"
+            aria-label={`选择智能体 ${runtimeLabel(r)}`}
+            aria-pressed={isDefault}
+            onClick={() => onPick(r.id)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
+              touchCls,
+              isDefault
+                ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
+                : "border-border bg-card text-foreground hover:border-brand-300",
+            )}
+          >
+            <span aria-hidden>{engineIcon(r.provider)}</span>
+            <span>{runtimeLabel(r)}</span>
+            {isDefault && (
+              <Tag className="mr-0 rounded-full border-brand-300 bg-brand-100 text-brand-700">
+                默认
+              </Tag>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div
@@ -163,7 +282,7 @@ export function PreSessionPicker({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="新建会话 · 选择运行位置"
+        aria-label={dialogTitle}
         className={cardCls}
       >
         <div className="flex items-start justify-between gap-2">
@@ -176,7 +295,7 @@ export function PreSessionPicker({
               <Plus className="h-4 w-4" />
             </span>
             <h3 className="text-sm font-semibold text-foreground">
-              新建会话 · 选择运行位置
+              {dialogTitle}
             </h3>
           </div>
           <button
@@ -189,7 +308,24 @@ export function PreSessionPicker({
           </button>
         </div>
 
-        {!machine ? (
+        {boundMode ? (
+          <>
+            {/* 绑定模式（2026-10-15-workspace-session-agent-only）：无机器步，
+                直接智能体步；pill 标注机器来源=工作区绑定。 */}
+            <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand-600" />
+              智能体 · {machine ? machineLabel(machine) : "工作区绑定机器"}
+              （工作区绑定机器）
+            </p>
+            {boundEmptyText ? (
+              <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {boundEmptyText}
+              </p>
+            ) : (
+              runtimeList
+            )}
+          </>
+        ) : !machine ? (
           <>
             {/* ① 机器（仅在线）——原型 .picker #pickStep1/#pickMachines。 */}
             <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
@@ -248,36 +384,7 @@ export function PreSessionPicker({
                 该机器暂无可会话智能体（需要 Claude Code、Codex 或 PI 在线）
               </p>
             ) : (
-              <div className="mt-2 flex flex-col gap-2" aria-label="智能体列表">
-                {supportedRuntimes.map((r) => {
-                  // 默认 Claude Code 高亮（new-session-form ② 区同款主色语义）。
-                  const isDefault = r.provider === "claude";
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      aria-label={`选择智能体 ${runtimeLabel(r)}`}
-                      aria-pressed={isDefault}
-                      onClick={() => onPick(r.id)}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
-                        touchCls,
-                        isDefault
-                          ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
-                          : "border-border bg-card text-foreground hover:border-brand-300",
-                      )}
-                    >
-                      <span aria-hidden>{engineIcon(r.provider)}</span>
-                      <span>{runtimeLabel(r)}</span>
-                      {isDefault && (
-                        <Tag className="mr-0 rounded-full border-brand-300 bg-brand-100 text-brand-700">
-                          默认
-                        </Tag>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              runtimeList
             )}
           </>
         )}
