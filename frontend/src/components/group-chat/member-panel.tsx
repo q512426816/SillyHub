@@ -410,6 +410,35 @@ export function MemberPanel({
     },
   });
 
+  /* ── 互@协作可见性模式（2026-10-15-group-cross-mention-visibility task-04，
+   *    FR-01/D-001）：private=互@回复注入发起方不进群（现状）；public=公开委派
+   *    （最终回复投影进群）。服务端真值 group.cross_mention_mode（D-001 server
+   *    _default private），照 consensus 先例乐观本地态 + 顶层列局部 PATCH。
+   *    三态联动（D-005/D-002）：agent_cross_mention 关 → 禁用（模式无行为效果）；
+   *    consensus_mode 开 → 禁用（consensus 接管，互斥）。 ── */
+  const [crossMentionMode, setCrossMentionMode] = useState(group.cross_mention_mode);
+  const crossMentionModeDisabled = !group.agent_cross_mention || group.consensus_mode;
+  const crossMentionModeHint = !group.agent_cross_mention
+    ? "需先开启 agent 互@开关，模式才会生效"
+    : group.consensus_mode
+      ? "汇总收口模式下由收口人统一发言，互@模式不生效"
+      : "公开委派：成员互@的最终结论经标记投影进群，讨论过程仅发起方可见";
+  const crossMentionModeMutation = useMutation({
+    mutationFn: (next: "private" | "public") =>
+      updateGroupChat(group.id, { cross_mention_mode: next }),
+    onMutate: (next) => {
+      setCrossMentionMode(next);
+    },
+    onError: (err, next) => {
+      setCrossMentionMode(next === "public" ? "private" : "public");
+      notify.error(err, "模式设置失败，请稍后重试");
+    },
+    onSuccess: (_res, next) => {
+      notify.success(next === "public" ? "已切换为公开委派" : "已切换为私聊协作");
+      onRefresh?.();
+    },
+  });
+
   /* ── 群聊体验对齐 quick：邀请用户（项目人员多选 → 逐个 POST members user 体；
    *    display_name 默认用户名——后端 GroupMemberUserCreate 同口径）。 ── */
   const inviteMutation = useMutation({
@@ -620,6 +649,52 @@ export function MemberPanel({
           <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
             开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
             超时（60~3600 秒）未收齐则按已到意见收口。
+          </p>
+        </div>
+      )}
+
+      {/* ── 互@协作可见性模式（2026-10-15-group-cross-mention-visibility task-04，
+          D-001/D-002/D-005）：Radio 二选一，三态联动禁用（互@总开关关/consensus
+          开）；服务端真值顶层列，照 consensus 先例局部 PATCH + 乐观回滚 ── */}
+      {isOwner && (
+        <div className="mx-3.5 my-2 rounded-lg border border-border bg-card p-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] font-medium text-foreground">互@模式</span>
+            <span
+              role="radiogroup"
+              aria-label="互@模式"
+              data-testid="group-cross-mention-mode-radio"
+            >
+              <Button
+                size="small"
+                type={crossMentionMode === "private" ? "primary" : "default"}
+                disabled={crossMentionModeDisabled}
+                onClick={() => {
+                  if (crossMentionMode !== "private")
+                    crossMentionModeMutation.mutate("private");
+                }}
+                aria-pressed={crossMentionMode === "private"}
+                data-testid="group-cross-mention-mode-private"
+              >
+                私聊协作
+              </Button>
+              <Button
+                size="small"
+                type={crossMentionMode === "public" ? "primary" : "default"}
+                disabled={crossMentionModeDisabled}
+                onClick={() => {
+                  if (crossMentionMode !== "public")
+                    crossMentionModeMutation.mutate("public");
+                }}
+                aria-pressed={crossMentionMode === "public"}
+                data-testid="group-cross-mention-mode-public"
+              >
+                公开委派
+              </Button>
+            </span>
+          </div>
+          <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+            {crossMentionModeHint}
           </p>
         </div>
       )}

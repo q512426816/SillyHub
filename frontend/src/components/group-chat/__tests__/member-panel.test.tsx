@@ -372,6 +372,9 @@ function makeGroup(overrides: Partial<GroupChatRead> = {}): GroupChatRead {
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    // 2026-10-15-group-cross-mention-visibility task-04：互@模式（默认 private
+    // 镜像后端 server_default；三态联动测试消费）。
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -1480,5 +1483,66 @@ describe("MemberPanel 群设置：汇总收口模式（task-10，D-002 群级开
   it("非群主：不渲染汇总收口设置区", () => {
     renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-lin" />);
     expect(screen.queryByTestId("group-consensus-mode-switch")).toBeNull();
+  });
+});
+
+
+// ── 互@协作可见性模式（2026-10-15-group-cross-mention-visibility task-04，FR-01）──
+
+describe("MemberPanel 群设置：互@模式三态联动（task-04，D-001/D-002/D-005）", () => {
+  it("默认 private 可切：点公开委派 → PATCH cross_mention_mode=public + 成功提示", async () => {
+    renderPanel(<MemberPanel group={makeGroup()} currentUserId="u-me" />);
+    // Button 对实现（antd Radio.Button 的 cssinjs 组合选择器在 jsdom nwsapi
+    // 下抛 SyntaxError 级联炸渲染——经二分定位后改用 antd Button + aria-pressed）。
+    const publicBtn = screen.getByTestId("group-cross-mention-mode-public");
+    expect(publicBtn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(publicBtn);
+    await waitFor(() => expect(mocks.apiFetch).toHaveBeenCalledTimes(1));
+    expect(mocks.apiFetch).toHaveBeenCalledWith(
+      "/api/daemon/group-chats/g-1",
+      { method: "PATCH", json: { cross_mention_mode: "public" } },
+    );
+    await waitFor(() =>
+      expect(mocks.notify.success).toHaveBeenCalledWith("已切换为公开委派"),
+    );
+    await waitFor(() =>
+      expect(publicBtn.getAttribute("aria-pressed")).toBe("true"),
+    );
+  });
+
+  it("互@总开关关：控件禁用 + 需先开启提示（模式无行为效果）", () => {
+    renderPanel(
+      <MemberPanel group={makeGroup({ agent_cross_mention: false })} currentUserId="u-me" />,
+    );
+    const publicBtn = screen.getByTestId("group-cross-mention-mode-public") as HTMLButtonElement;
+    expect(publicBtn.disabled).toBe(true);
+    expect(screen.getByText("需先开启 agent 互@开关，模式才会生效")).toBeTruthy();
+  });
+
+  it("consensus 开：控件禁用 + 互斥提示（D-005 consensus 接管）", () => {
+    renderPanel(
+      <MemberPanel group={makeGroup({ consensus_mode: true })} currentUserId="u-me" />,
+    );
+    const publicBtn = screen.getByTestId("group-cross-mention-mode-public") as HTMLButtonElement;
+    expect(publicBtn.disabled).toBe(true);
+    expect(
+      screen.getByText("汇总收口模式下由收口人统一发言，互@模式不生效"),
+    ).toBeTruthy();
+  });
+
+  it("已开 public 回显：选中态透传（群读体真值）", () => {
+    renderPanel(
+      <MemberPanel group={makeGroup({ cross_mention_mode: "public" })} currentUserId="u-me" />,
+    );
+    expect(
+      (screen.getByTestId("group-cross-mention-mode-public") as HTMLButtonElement).getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("true");
+    expect(
+      (screen.getByTestId("group-cross-mention-mode-private") as HTMLButtonElement).getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("false");
   });
 });

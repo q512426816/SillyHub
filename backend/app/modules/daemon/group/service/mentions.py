@@ -29,7 +29,12 @@ from app.modules.agent.model import (
     AgentRunLog,
 )
 
-from .helpers import ROLE_PROMPT_AGENT_DM, SHADOW_DIRECT_SOURCE, GroupMemberTriggerRead
+from .helpers import (
+    ROLE_PROMPT_AGENT_DM,
+    ROLE_PROMPT_AGENT_PUBLIC,
+    SHADOW_DIRECT_SOURCE,
+    GroupMemberTriggerRead,
+)
 from .settings import (
     GROUP_CHAIN_DEPTH_FIELD,
     GROUP_CHAIN_TTL_SECONDS,
@@ -457,17 +462,36 @@ async def run_cross_mention_detection(
         # role_prompt 私聊指令 + turn_overrides 带 dm_target（回复注入发起方
         # 会话不进群，D-007 投影谓词拦截）；源轮带 consensus 上下文时新轮
         # 同任务意见链（collaborator，意见终由收口钩子全量聚合）。
+        # 2026-10-15-group-cross-mention-visibility（D-011）：三态分流——
+        # ①源轮 consensus_task_id 非空 → consensus 协作轮（现状，优先级最高，
+        # 堵「consensus 进行中切 public」的泄漏窗口）；②群 cross_mention_mode=
+        # 'public' → agent_public 公开委派轮（无 dm_target，投影放行 [[GROUP]]）；
+        # ③其余 → agent_dm 私聊轮（现状逐比特不变）。
+        turn_is_consensus = isinstance(turn_consensus_task, str) and bool(turn_consensus_task)
+        group_mode = getattr(group, "cross_mention_mode", None) or "private"
+        if turn_is_consensus:
+            dm_kind = "consensus"
+        elif group_mode == "public":
+            dm_kind = "agent_public"
+        else:
+            dm_kind = "agent_dm"
         dm_overrides: dict = {
-            "dm_target_member_id": str(member_id),
-            "dm_kind": (
-                "consensus"
-                if isinstance(turn_consensus_task, str) and turn_consensus_task
-                else "agent_dm"
-            ),
+            "dm_kind": dm_kind,
         }
-        if isinstance(turn_consensus_task, str) and turn_consensus_task:
+        if dm_kind == "agent_public":
+            # 公开委派：不带 dm_target（投影谓词天然放行）；记发起方成员 id
+            # 供收口回流轻通知（task-03 _inject_delegation_notice 消费）。
+            dm_overrides["asked_by_member_id"] = str(member_id)
+        else:
+            dm_overrides["dm_target_member_id"] = str(member_id)
+        if turn_is_consensus:
             dm_overrides["consensus_task_id"] = turn_consensus_task
             dm_overrides["consensus_role"] = "collaborator"
+        role_prompt = (
+            ROLE_PROMPT_AGENT_PUBLIC.format(sender_name=member_name)
+            if dm_kind == "agent_public"
+            else ROLE_PROMPT_AGENT_DM.format(sender_name=member_name)
+        )
         try:
             trigger = await _gsvc.GroupChatService(db)._trigger_group_member(
                 group=group,
@@ -481,7 +505,7 @@ async def run_cross_mention_detection(
                 exclude_log_id=None,
                 source_member_name=member_name,
                 chain_depth=new_depth,
-                role_prompt=ROLE_PROMPT_AGENT_DM.format(sender_name=member_name),
+                role_prompt=role_prompt,
                 turn_overrides=dm_overrides,
             )
         except AppError as exc:

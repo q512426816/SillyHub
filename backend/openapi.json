@@ -48913,6 +48913,16 @@
             "description": "汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
             "default": 600
           },
+          "cross_mention_mode": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Cross Mention Mode",
+            "description": "互@协作可见性模式（private=回复注入发起方不进群；public=公开委派，最终回复投影进群）",
+            "default": "private"
+          },
           "user_members": {
             "items": {
               "$ref": "#/components/schemas/GroupMemberUserCreate"
@@ -49000,6 +49010,15 @@
           "consensus_timeout_seconds": {
             "type": "integer",
             "title": "Consensus Timeout Seconds"
+          },
+          "cross_mention_mode": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Cross Mention Mode",
+            "default": "private"
           },
           "created_at": {
             "type": "string",
@@ -49149,6 +49168,15 @@
           "consensus_timeout_seconds": {
             "type": "integer",
             "title": "Consensus Timeout Seconds"
+          },
+          "cross_mention_mode": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Cross Mention Mode",
+            "default": "private"
           },
           "created_at": {
             "type": "string",
@@ -49315,6 +49343,15 @@
           "consensus_timeout_seconds": {
             "type": "integer",
             "title": "Consensus Timeout Seconds"
+          },
+          "cross_mention_mode": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Cross Mention Mode",
+            "default": "private"
           },
           "created_at": {
             "type": "string",
@@ -49553,6 +49590,15 @@
             "type": "integer",
             "title": "Consensus Timeout Seconds"
           },
+          "cross_mention_mode": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public"
+            ],
+            "title": "Cross Mention Mode",
+            "default": "private"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -49705,6 +49751,21 @@
               }
             ],
             "title": "Consensus Timeout Seconds"
+          },
+          "cross_mention_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "private",
+                  "public"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cross Mention Mode"
           },
           "settings_json": {
             "anyOf": [

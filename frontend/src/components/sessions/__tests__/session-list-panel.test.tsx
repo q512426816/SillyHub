@@ -2483,6 +2483,7 @@ function makeGroupListItem(
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,

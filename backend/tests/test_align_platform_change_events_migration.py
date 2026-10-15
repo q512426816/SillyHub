@@ -106,8 +106,10 @@ class TestMigrationStructure:
         # 20261011160000 回单头，2026-10-11-alembic-single-head-guard 漏更本锚）→
         # 20261012123000（agent_sessions.current_change_id，
         # 2026-10-12-run-level-change-attribution）→ 20261014110000
-        # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）。
-        assert heads[0] == "20261014110000"  # 发布记录权限种子迁移成为新 head
+        # （deploy_record:read 权限种子，2026-10-14-deploy-release-notes）→
+        # 20261015120000（agent_group_chats.cross_mention_mode，
+        # 2026-10-15-group-cross-mention-visibility）。
+        assert heads[0] == "20261015120000"  # 互@模式列迁移成为新 head
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

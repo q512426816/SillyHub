@@ -428,6 +428,13 @@ class GroupChatCreate(BaseModel):
         le=3600,
         description="汇总收口超时秒数（60~3600，默认 600——超时强制收口并标注未响应者，D-004）",
     )
+    # 2026-10-15-group-cross-mention-visibility（D-001/D-002）：互@协作可见性
+    # 模式，默认 private（存量语义等价）；consensus_mode=True 时本字段无行为
+    # 效果（consensus 接管，D-005 互斥）。
+    cross_mention_mode: Literal["private", "public"] = Field(
+        default="private",
+        description="互@协作可见性模式（private=回复注入发起方不进群；public=公开委派，最终回复投影进群）",
+    )
     user_members: list[GroupMemberUserCreate] = Field(default_factory=list)
     agent_members: list[GroupMemberAgentConfig] = Field(default_factory=list)
 
@@ -445,6 +452,8 @@ class GroupChatUpdate(BaseModel):
     # 2026-09-10-group-agent-direct-chat（D-002）：None=不改（逐字段局部更新）。
     consensus_mode: bool | None = None
     consensus_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
+    # 2026-10-15-group-cross-mention-visibility（D-001）：互@模式，None=不改。
+    cross_mention_mode: Literal["private", "public"] | None = None
     # quick 群 P1（2026-09-02）互@护栏群级可配：``settings_json.guardrails`` 子键
     # 写入（rate_limit_per_minute / member_trigger_limit / chain_ttl_seconds）。
     # quick 群 P2（2026-09-02）增 ``typing_preview`` 顶层布尔键（typing 草稿预览
@@ -536,6 +545,9 @@ class GroupChatRead(BaseModel):
     # 2026-09-10-group-agent-direct-chat：汇总收口模式设置透出（向导/群设置区消费）。
     consensus_mode: bool
     consensus_timeout_seconds: int
+    # 2026-10-15-group-cross-mention-visibility：互@模式恒透出（群设置控件回显，
+    # server_default private 保证存量行有值）。
+    cross_mention_mode: Literal["private", "public"] = "private"
     created_at: datetime
     ended_at: datetime | None = None
     deleted_at: datetime | None = None

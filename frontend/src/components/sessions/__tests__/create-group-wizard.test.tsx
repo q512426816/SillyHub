@@ -312,6 +312,7 @@ function makeGroupRead(
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -663,6 +664,7 @@ describe("CreateGroupWizard 三步流转（quick 群 PPM 项目化）", () => {
         context_window: 20,
         consensus_mode: false,
         consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
         user_members: [{ user_id: "u-lin" }],
         agent_members: [
           expect.objectContaining({

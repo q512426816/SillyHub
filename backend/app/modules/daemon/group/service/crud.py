@@ -309,6 +309,9 @@ async def create_group(svc, user: User, payload: GroupChatCreate) -> GroupChatCr
         context_window=payload.context_window,
         consensus_mode=payload.consensus_mode,
         consensus_timeout_seconds=payload.consensus_timeout_seconds,
+        # 2026-10-15-group-cross-mention-visibility（D-001/D-002）：互@模式，
+        # 缺省 private（DTO default，存量语义等价）。
+        cross_mention_mode=payload.cross_mention_mode,
         created_at=now,
     )
     svc._session.add(group)
@@ -527,6 +530,10 @@ async def update_group(
         group.consensus_mode = payload.consensus_mode
     if payload.consensus_timeout_seconds is not None:
         group.consensus_timeout_seconds = payload.consensus_timeout_seconds
+    # 2026-10-15-group-cross-mention-visibility（D-001）：互@模式局部更新
+    # （None=不改；consensus_mode=True 时读取侧忽略本字段，D-005 互斥）。
+    if payload.cross_mention_mode is not None:
+        group.cross_mention_mode = payload.cross_mention_mode
     if payload.settings_json is not None:
         # quick 群 P1（2026-09-02）互@护栏群级可配：settings_json.guardrails
         # 子键写入（字段级合并；非法键/范围外值 400 中文）。

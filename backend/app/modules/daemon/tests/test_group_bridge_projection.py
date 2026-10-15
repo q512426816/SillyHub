@@ -91,6 +91,7 @@ async def _seed_group_bridge(
     db_session: AsyncSession,
     *,
     member_name: str = "小码",
+    turn_extra_meta: dict | None = None,
 ) -> SimpleNamespace:
     """落一套完整群桥接底座：群会话 + 群行 + agent 成员（带影子指针）+ 影子
     会话（kind='group_member'）+ 影子 run + 群载体 run + 影子 run 的 user_input
@@ -98,6 +99,9 @@ async def _seed_group_bridge(
 
     submit_messages 判定链：影子会话 kind → 成员表反向指针 → user_input
     metadata_.source_carrier_run_id → 载体 run（投影行 run_id 指向）。
+
+    2026-10-15-group-cross-mention-visibility：``turn_extra_meta`` 并入本轮
+    user_input metadata（agent_public/agent_dm 轮型测试消费）。
     """
     owner_id = await _create_user(db_session)
     rt = await _create_runtime(db_session, owner_id)
@@ -228,6 +232,7 @@ async def _seed_group_bridge(
                 "source_carrier_run_id": str(carrier_run_id),
                 "chain_depth": 0,
                 "sender_user_id": str(owner_id),
+                **(turn_extra_meta or {}),
             },
         )
     )
@@ -242,6 +247,60 @@ async def _seed_group_bridge(
         claim_token=claim_token,
         shadow_run_id=shadow_run_id,
         carrier_run_id=carrier_run_id,
+    )
+
+
+async def _seed_asker_member(
+    db_session: AsyncSession, seed: SimpleNamespace, *, name: str = "小助"
+) -> SimpleNamespace:
+    """补一个发起方 agent 成员（同群）+ 影子会话 + 一个既有 run（轻通知落点）。"""
+    now = datetime.now(UTC)
+    asker_shadow_id = uuid.uuid4()
+    asker_run_id = uuid.uuid4()
+    db_session.add(
+        AgentSession(
+            id=asker_shadow_id,
+            user_id=seed.owner_id,
+            runtime_id=seed.runtime_id,
+            provider="claude",
+            status="active",
+            turn_count=1,
+            created_at=now,
+            session_kind="group_member",
+        )
+    )
+    await db_session.flush()
+    db_session.add(
+        AgentRun(
+            id=asker_run_id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            started_at=now,
+            finished_at=now,
+            spec_strategy="interactive",
+            agent_session_id=asker_shadow_id,
+            user_id=seed.owner_id,
+        )
+    )
+    asker = AgentGroupMember(
+        group_id=seed.group_session_id,
+        member_type="agent",
+        display_name=name,
+        runtime_id=seed.runtime_id,
+        workspace_id=None,
+        provider="claude",
+        shadow_status="active",
+        shadow_session_id=asker_shadow_id,
+        invited_by=seed.owner_id,
+        joined_at=now,
+    )
+    db_session.add(asker)
+    await db_session.commit()
+    return SimpleNamespace(
+        member=asker,
+        shadow_session_id=asker_shadow_id,
+        run_id=asker_run_id,
     )
 
 
@@ -801,3 +860,265 @@ class TestGroupTurnCompleted:
             f"agent_run:{seed.run_id}",
             f"agent_session:{seed.session_id}",
         }
+
+
+class TestPublicDelegation:
+    """公开委派投影与轻通知回流（2026-10-15-group-cross-mention-visibility
+    task-03 / FR-03 / FR-04 / D-003@v1 / D-004@v2 / D-006@v1 / D-007@v1）。"""
+
+    async def _seed_public_round(self, db_session: AsyncSession, *, with_asker: bool = True):
+        """seed 一套 agent_public 轮（asked_by 回填真实发起方成员 id）。"""
+        seed = await _seed_group_bridge(
+            db_session,
+            turn_extra_meta={"dm_kind": "agent_public"},
+        )
+        asker = await _seed_asker_member(db_session, seed, name="小助") if with_asker else None
+        if asker is not None:
+            row = (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == seed.shadow_run_id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            ).scalar_one()
+            row.metadata_ = {
+                **(row.metadata_ or {}),
+                "asked_by_member_id": str(asker.member.id),
+            }
+            await db_session.commit()
+        return seed, asker
+
+    async def test_agent_public_round_projects_group_segments(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """agent_public 轮 [[GROUP]] 段照常投影 + 投影行 metadata.delegation_of
+        =发起方成员名（D-006：无 dm_target 天然放行，谓词零改动）。"""
+        seed, asker = await self._seed_public_round(db_session)
+        assert asker is not None
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]复核结论：白屏根因是 hooks 依赖缺失。[[/GROUP]]",
+                    "channel": "stdout",
+                    "dedup_key": "pub-1",
+                }
+            ],
+        )
+        proj_rows = await _fetch_logs(db_session, seed.carrier_run_id)
+        assert len(proj_rows) == 1, "agent_public 轮 [[GROUP]] 段应投影进群"
+        meta = proj_rows[0].metadata_ or {}
+        assert meta.get("delegation_of") == "小助"
+        assert meta.get("member_name") == "小码"
+
+    async def test_agent_dm_round_still_blocked(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """agent_dm 轮拦截不变：dm_target 非空 → 连 [[GROUP]] 段也不投影。"""
+        seed = await _seed_group_bridge(
+            db_session,
+            turn_extra_meta={
+                "dm_kind": "agent_dm",
+                "dm_target_member_id": "00000000-0000-0000-0000-00000000000e",
+            },
+        )
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]这句不该进群[[/GROUP]]",
+                    "channel": "stdout",
+                    "dedup_key": "dm-1",
+                }
+            ],
+        )
+        proj_rows = await _fetch_logs(db_session, seed.carrier_run_id)
+        assert proj_rows == [], "agent_dm 轮投影拦截行为与现状一致（D-006 零回归）"
+
+    async def test_public_round_without_marker_fallback(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """agent_public 轮无标记 → 兜底行照发（首段摘要，防群里死寂）。"""
+        seed, _asker = await self._seed_public_round(db_session)
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[ASSISTANT] 结论先说：白屏是 hooks 依赖缺失导致。",
+                    "channel": "stdout",
+                    "dedup_key": "pf-1",
+                }
+            ],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        proj_rows = await _fetch_logs(db_session, seed.carrier_run_id)
+        assert len(proj_rows) == 1
+        assert "完整内容见成员会话" in (proj_rows[0].content_redacted or "")
+
+    async def test_close_injects_delegation_notice_to_asker(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """收口轻通知：agent_public 轮 completed → 发起方影子会话最近 run 出现
+        delegation_notice 行；不建 run（发起方影子 run 计数不变，D-004@v2）。"""
+        seed, asker = await self._seed_public_round(db_session)
+        assert asker is not None
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]复核完成，结论已发群。[[/GROUP]]",
+                    "channel": "stdout",
+                    "dedup_key": "cn-1",
+                }
+            ],
+        )
+
+        async def _asker_run_count() -> int:
+            rows = (
+                await db_session.execute(
+                    select(AgentRun.id).where(AgentRun.agent_session_id == asker.shadow_session_id)
+                )
+            ).all()
+            return len(rows)
+
+        before = await _asker_run_count()
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="success",
+            is_error=False,
+        )
+        notices = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == asker.run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        notice_rows = [
+            r
+            for r in notices
+            if isinstance(r.metadata_, dict) and r.metadata_.get("delegation_notice")
+        ]
+        assert len(notice_rows) == 1, "发起方影子会话应收到一条委派回执行"
+        nmeta = notice_rows[0].metadata_
+        assert nmeta["delegated_member_name"] == "小码"
+        assert nmeta["chain_run_id"] == str(seed.carrier_run_id)
+        assert "小码" in (notice_rows[0].content_redacted or "")
+        assert await _asker_run_count() == before, "轻通知不建 run（D-004@v2）"
+
+    async def test_notice_limit_two_per_chain(self, db_session: AsyncSession, mocked_redis) -> None:
+        """同链通知上限 2：第三次注入被拒（零新增行）+ 群内系统行（FR-04
+        「超限丢弃并出群内系统行」——归档复核缺口补全）。"""
+        from app.modules.daemon.group.service.delegation_notice import (
+            inject_delegation_notice,
+        )
+
+        seed = await _seed_group_bridge(db_session)
+        asker = await _seed_asker_member(db_session, seed, name="小助")
+        outcomes = []
+        # 系统行走 group.service 的 get_redis（typing_presence 的 _gsvc 解析路径，
+        # 模块级 mocked_redis fixture 未覆盖）——本用例补 patch 同一 mock。
+        with patch("app.modules.daemon.group.service.get_redis", return_value=mocked_redis):
+            for i in range(3):
+                ok = await inject_delegation_notice(
+                    db_session,
+                    group_id=seed.group_session_id,
+                    carrier_run_id=seed.carrier_run_id,
+                    asked_by_member_id=str(asker.member.id),
+                    delegated_member_name="小码",
+                    summary=f"第{i + 1}次",
+                )
+                outcomes.append(ok)
+        assert outcomes == [True, True, False]
+        notices = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == asker.run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len([r for r in notices if (r.metadata_ or {}).get("delegation_notice")]) == 2
+        # 超限系统行：第三次拒收时群频道出现 channel=system 提示（ephemeral
+        # 不落库，形态照 _publish_rate_limit_notice 先例）。
+        system_events = []
+        for call in mocked_redis.publish.call_args_list:
+            if call.args and call.args[0] == f"agent_session:{seed.group_session_id}":
+                payload = json.loads(call.args[1])
+                if payload.get("channel") == "system":
+                    system_events.append(payload)
+        assert len(system_events) == 1, "超限应发一条群内系统行"
+        assert "已达上限" in system_events[0]["content"]
+        assert "小码" in system_events[0]["content"]
+
+    async def test_interrupted_round_no_notice(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """打断（close status=failed，非 completed）→ 零注入；流式已投影内容
+        不撤回（与普通 @ 轮现状一致——[[GROUP]] 段投影发生在 submit 流式双写，
+        与 run 终态无关；D-007@v2 修正语义）。"""
+        seed, asker = await self._seed_public_round(db_session)
+        assert asker is not None
+        svc = DaemonService(db_session)
+        await svc.submit_messages(
+            seed.lease_id,
+            seed.claim_token,
+            seed.shadow_run_id,
+            [
+                {
+                    "event_type": "text",
+                    "content": "[[GROUP]]被打断的结论[[/GROUP]]",
+                    "channel": "stdout",
+                    "dedup_key": "in-1",
+                }
+            ],
+        )
+        await svc.close_interactive_run(
+            seed.lease_id,
+            seed.shadow_run_id,
+            seed.claim_token,
+            status="failed",
+            is_error=True,
+        )
+        # 流式投影不撤回（submit 时已双写，与普通 @ 轮现状一致）。
+        assert len(await _fetch_logs(db_session, seed.carrier_run_id)) == 1
+        notices = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(AgentRunLog.run_id == asker.run_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert not [r for r in notices if (r.metadata_ or {}).get("delegation_notice")], (
+            "非 completed 零注入"
+        )

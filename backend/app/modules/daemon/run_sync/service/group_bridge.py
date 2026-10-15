@@ -68,6 +68,12 @@ class _GroupBridgeContext:
     consensus_role: str | None = None
     dm_target_member_id: str | None = None
     dm_kind: str | None = None
+    # 公开委派轮（2026-10-15-group-cross-mention-visibility，D-006）：发起方
+    # 成员 id/名——asked_by_member_id 从 turn metadata 解析；asked_by_member_
+    # name 由解析器按成员表快照查询（仅 agent_public 轮一次小查询）。投影行
+    # metadata.delegation_of 与收口轻通知回流消费。
+    asked_by_member_id: str | None = None
+    asked_by_member_name: str | None = None
 
     @property
     def projection_blocked(self) -> bool:
@@ -79,6 +85,8 @@ class _GroupBridgeContext:
         §5.1 初稿将其纳入拦截系对现状误读，执行期修正（G-3 声明对齐）；
         shadow_direct 的既有消费是互@检测早退与 @轮兜底行跳过，不受影响。
         converge 轮（无 dm_target）不命中——收口总结轮放行投影。
+        agent_public 公开委派轮（D-006）同样不命中——无 dm_target 天然放行
+        [[GROUP]] 标记投影（评审 X2 实证，谓词零改动）。
         """
         if self.dm_target_member_id:
             return True
@@ -234,6 +242,24 @@ async def _resolve_group_bridge_context(
         raw = turn_meta.get(key) if isinstance(turn_meta, dict) else None
         return raw if isinstance(raw, str) and raw else None
 
+    # 公开委派轮（D-006）：解析发起方成员 id + 成员名快照（仅 agent_public
+    # 轮一次小查询；查不到名字时保留 id、投影行 delegation_of 置空）。
+    dm_kind_value = _meta_str("dm_kind")
+    asked_by_id = _meta_str("asked_by_member_id")
+    asked_by_name: str | None = None
+    if dm_kind_value == "agent_public" and asked_by_id:
+        try:
+            asked_by_uuid = uuid.UUID(asked_by_id)
+            asked_by_name = (
+                await svc._session.execute(
+                    select(AgentGroupMember.display_name).where(
+                        AgentGroupMember.id == asked_by_uuid
+                    )
+                )
+            ).scalar_one_or_none()
+        except ValueError:
+            asked_by_id = None
+
     return _GroupBridgeContext(
         group_id=group_id,
         member_id=member_id,
@@ -244,7 +270,9 @@ async def _resolve_group_bridge_context(
         consensus_task_id=_meta_str("consensus_task_id"),
         consensus_role=_meta_str("consensus_role"),
         dm_target_member_id=_meta_str("dm_target_member_id"),
-        dm_kind=_meta_str("dm_kind"),
+        dm_kind=dm_kind_value,
+        asked_by_member_id=asked_by_id,
+        asked_by_member_name=asked_by_name,
     )
 
 
@@ -288,6 +316,9 @@ def _build_group_projection_row(
             "member_name": ctx.member_name,
             "source_log_id": str(source_row.id),
             "projection": True,
+            # 公开委派轮（D-006）：发起方成员名快照（前端「受 X 委派」副标签
+            # 数据源；普通轮/私聊轮无此键）。
+            **({"delegation_of": ctx.asked_by_member_name} if ctx.asked_by_member_name else {}),
         },
     )
 
@@ -463,6 +494,37 @@ async def _close_group_hooks(
                 except Exception:
                     _rsvc.log.warning(
                         "group_projection_fallback_failed",
+                        agent_run_id=str(agent_run.id),
+                        group_id=str(group_id),
+                        exc_info=True,
+                    )
+                # 公开委派轻通知回流（2026-10-15-group-cross-mention-visibility
+                # task-03/D-004@v2）：agent_public 轮收口后向发起方影子会话追加
+                # 一条委派回执行（纯日志不触发；同链 2 次上限；失败静默降级
+                # ——helper 自吞异常，此处不再兜）。
+                try:
+                    from app.modules.daemon.group.service.delegation_notice import (
+                        inject_delegation_notice,
+                    )
+
+                    public_ctx = await _resolve_group_bridge_context(svc, agent_run)
+                    if (
+                        public_ctx is not None
+                        and public_ctx.dm_kind == "agent_public"
+                        and public_ctx.asked_by_member_id
+                    ):
+                        summary = await svc._build_group_fallback_summary(agent_run)
+                        await inject_delegation_notice(
+                            svc._session,
+                            group_id=group_id,
+                            carrier_run_id=public_ctx.carrier_run_id,
+                            asked_by_member_id=public_ctx.asked_by_member_id,
+                            delegated_member_name=group_member_name,
+                            summary=summary,
+                        )
+                except Exception:
+                    _rsvc.log.warning(
+                        "delegation_notice_hook_failed",
                         agent_run_id=str(agent_run.id),
                         group_id=str(group_id),
                         exc_info=True,

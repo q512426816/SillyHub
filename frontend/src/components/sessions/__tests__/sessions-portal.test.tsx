@@ -762,6 +762,7 @@ beforeEach(() => {
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -781,6 +782,7 @@ beforeEach(() => {
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -2042,6 +2044,7 @@ function makeGroupListItem(): GroupChatListItemRead {
     context_window: 20,
     consensus_mode: false,
     consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
     created_at: "2026-09-01T00:00:00Z",
     ended_at: null,
     deleted_at: null,
@@ -2207,6 +2210,7 @@ describe("SessionsPortal 群聊分区（task-07）", () => {
         context_window: 20,
         consensus_mode: false,
         consensus_timeout_seconds: 600,
+    cross_mention_mode: "private",
       }),
     );
     // quick：群工作区后端推导——提交不带 workspace_id。

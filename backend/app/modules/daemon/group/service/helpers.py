@@ -91,6 +91,14 @@ ROLE_PROMPT_COORDINATOR = (
 ROLE_PROMPT_AGENT_DM = (
     "【私聊指令】成员「{sender_name}」私聊向你发起协作——本回复不会出现在群里，将直接转交对方。"
 )
+# 公开委派指令（2026-10-15-group-cross-mention-visibility task-02/D-006）：
+# public 群互@轮的 role_prompt——与私聊指令的关键差异是「给群的结论进群」，
+# 要求 agent 用 [[GROUP]] 标记包结论（投影层只抽该段），过程内容不进群。
+ROLE_PROMPT_AGENT_PUBLIC = (
+    "【公开委派指令】成员「{sender_name}」委派给你一项任务——你正在群里协作。"
+    "给群看的结论用 [[GROUP]]...[[/GROUP]] 标记包起（该段将直接进群）；"
+    "任务过程、中间推理与讨论不要放进标记段（不会进群，仅发起方可见）。"
+)
 # 意见转交 preamble（deliver_collaborator_opinion 注入文本头部；末尾拼意见
 # 全文，多任务并行时 source_summary 标注来源消息摘要）。
 OPINION_TRANSFER_HEADER = (

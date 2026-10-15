@@ -460,6 +460,8 @@ def test_agent_group_chat_table_contract() -> None:
         # 2026-09-13-consensus-timeout-activity-aware：群共识模式与超时（存量行默认）。
         "consensus_mode",
         "consensus_timeout_seconds",
+        # 2026-10-15-group-cross-mention-visibility task-01/D-001：互@模式枚举列。
+        "cross_mention_mode",
     }
     actual = set(AgentGroupChat.model_fields.keys())
     assert actual == expected, (
@@ -477,6 +479,9 @@ def test_agent_group_chat_defaults() -> None:
     assert group.agent_cross_mention is True
     assert group.cross_mention_depth == 4
     assert group.context_window == 20
+    # 2026-10-15-group-cross-mention-visibility D-001/D-002：互@模式默认 private
+    # （存量群零变化——新列 server_default 与 ORM default 双轨同值）。
+    assert group.cross_mention_mode == "private"
     assert group.settings_json is None
     assert group.ended_at is None
     assert group.deleted_at is None
@@ -742,6 +747,120 @@ async def test_orm_group_session_unique_rejected(db_session) -> None:
     with pytest.raises(sa.exc.IntegrityError):
         await db_session.commit()
     await db_session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# 5. 互@模式列迁移（2026-10-15-group-cross-mention-visibility task-01/D-001/D-002）
+# ---------------------------------------------------------------------------
+
+MODE_REVISION_ID = "20261015120000"
+
+
+def _create_group_chats_pre_mode_column(conn) -> None:
+    """迁移前形态的最小 agent_group_chats 表（不含 cross_mention_mode）+ 存量行。
+
+    新迁移仅对该表 op.add_column，不触碰其它列/表——最小列集即可 replay。
+    """
+    conn.execute(
+        sa.text(
+            """
+            CREATE TABLE agent_group_chats (
+                id CHAR(36) PRIMARY KEY NOT NULL,
+                title VARCHAR(120) NOT NULL,
+                created_by CHAR(36) NOT NULL,
+                agent_cross_mention BOOLEAN NOT NULL,
+                created_at DATETIME NOT NULL
+            )
+            """
+        )
+    )
+    conn.execute(
+        sa.text(
+            "INSERT INTO agent_group_chats (id, title, created_by, agent_cross_mention, created_at) "
+            "VALUES (:i, :t, :c, 1, :at)"
+        ),
+        {
+            "i": str(uuid.uuid4()),
+            "t": "存量协作群",
+            "c": str(uuid.uuid4()),
+            "at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def _load_mode_migration():
+    return _load_migration(MODE_REVISION_ID)
+
+
+def test_mode_migration_metadata() -> None:
+    mod = _load_mode_migration()
+    assert mod.revision == MODE_REVISION_ID
+    # 接当前唯一 head（20261014110000，alembic heads 实测）。
+    assert mod.down_revision == "20261014110000"
+    assert callable(mod.upgrade)
+    assert callable(mod.downgrade)
+
+
+def test_mode_migration_upgrade_adds_column_with_default() -> None:
+    """AC：加列 VARCHAR(16) NOT NULL server_default 'private'；存量行免回填即得
+    private 语义（D-002 存量零变化）。"""
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            _create_group_chats_pre_mode_column(conn)
+        _run_migration_fn(engine, _load_mode_migration(), "upgrade")
+        with engine.begin() as conn:
+            col = _pragma_column(conn, "agent_group_chats", "cross_mention_mode")
+            assert col is not None
+            col_type, notnull, dflt = col
+            assert col_type == "VARCHAR(16)"
+            assert notnull == 1
+            assert "private" in dflt
+            row = conn.execute(sa.text("SELECT cross_mention_mode FROM agent_group_chats")).scalar()
+            assert row == "private"
+    finally:
+        engine.dispose()
+
+
+def test_mode_migration_check_rejects_invalid_value() -> None:
+    """AC：CHECK 约束拒绝第三种值（只允许 private|public，D-001 枚举）。"""
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            _create_group_chats_pre_mode_column(conn)
+        _run_migration_fn(engine, _load_mode_migration(), "upgrade")
+        with engine.begin() as conn:
+            conn.execute(sa.text("UPDATE agent_group_chats SET cross_mention_mode = 'public'"))
+            row = conn.execute(sa.text("SELECT cross_mention_mode FROM agent_group_chats")).scalar()
+            assert row == "public"
+            with pytest.raises(sa.exc.IntegrityError):
+                conn.execute(sa.text("UPDATE agent_group_chats SET cross_mention_mode = 'bogus'"))
+    finally:
+        engine.dispose()
+
+
+def test_mode_migration_downgrade_drops_column() -> None:
+    """AC：downgrade 删列（数据可清空前提，无回退保留需求）。"""
+    engine = sa.create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as conn:
+            _create_group_chats_pre_mode_column(conn)
+        _run_migration_fn(engine, _load_mode_migration(), "upgrade")
+        _run_migration_fn(engine, _load_mode_migration(), "downgrade")
+        with engine.begin() as conn:
+            assert _pragma_column(conn, "agent_group_chats", "cross_mention_mode") is None
+    finally:
+        engine.dispose()
+
+
+def test_group_chat_dto_cross_mention_mode_contract() -> None:
+    """DTO 契约：Create 缺省 private、Update None=不改、Read 恒透出（FR-01）。"""
+    from app.modules.agent.schema import GroupChatCreate, GroupChatRead, GroupChatUpdate
+
+    assert GroupChatCreate.model_fields["cross_mention_mode"].default == "private"
+    assert GroupChatUpdate.model_fields["cross_mention_mode"].default is None
+    read_field = GroupChatRead.model_fields["cross_mention_mode"]
+    assert read_field.annotation is not None and "private" in str(read_field.annotation)
 
 
 if __name__ == "__main__":

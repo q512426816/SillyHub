@@ -186,6 +186,12 @@ export function CreateGroupWizard({
   /** 汇总收口模式（task-10，D-002 默认关/超时 600——照后端 schema 默认值镜像）。 */
   const [consensusMode, setConsensusMode] = useState(false);
   const [consensusTimeout, setConsensusTimeout] = useState(600);
+  /** 互@协作可见性模式（2026-10-15-group-cross-mention-visibility task-04，
+   *  D-002 默认 private——照后端 GroupChatCreate 默认值镜像；consensus 开启时
+   *  本字段无行为效果（D-005 互斥），提交仍带选中值由后端判定优先级）。 */
+  const [crossMentionMode, setCrossMentionMode] = useState<"private" | "public">(
+    "private",
+  );
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const qc = useQueryClient();
   const notify = useNotify();
@@ -414,6 +420,9 @@ export function CreateGroupWizard({
       agent_cross_mention: true,
       cross_mention_depth: 4,
       context_window: 20,
+      // 互@模式（2026-10-15-group-cross-mention-visibility task-04）：默认
+      // private 与后端 GroupChatCreate 默认值镜像（生成版 TS 类型必填显式传）。
+      cross_mention_mode: crossMentionMode,
       // 汇总收口模式（task-10）：默认关/600 与后端 GroupChatCreate 默认值
       // 镜像（生成版 TS 类型必填须显式传——开方汇总是群级行为开关）。
       consensus_mode: consensusMode,
@@ -709,6 +718,39 @@ export function CreateGroupWizard({
             <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
               开启后，一条消息 @ 多个 Agent 时由汇总人收齐各成员意见后统一发群；
               超时未收齐则按已到意见收口。建群后可在群设置中随时开关。
+            </p>
+          </div>
+          {/* ── 互@模式（2026-10-15-group-cross-mention-visibility task-04，
+              D-002 默认 private）：Radio 二选一；consensus 开启时禁用（互斥，
+              D-005——建群后 consensus 关闭才可改）。 ── */}
+          <div className="rounded-md border border-border bg-card px-2.5 py-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-foreground">互@模式</span>
+              <span role="radiogroup" aria-label="互@模式" data-testid="cgw-cross-mention-mode-radio">
+                <Button
+                  size="small"
+                  type={crossMentionMode === "private" ? "primary" : "default"}
+                  disabled={consensusMode}
+                  onClick={() => setCrossMentionMode("private")}
+                  aria-pressed={crossMentionMode === "private"}
+                >
+                  私聊协作
+                </Button>
+                <Button
+                  size="small"
+                  type={crossMentionMode === "public" ? "primary" : "default"}
+                  disabled={consensusMode}
+                  onClick={() => setCrossMentionMode("public")}
+                  aria-pressed={crossMentionMode === "public"}
+                >
+                  公开委派
+                </Button>
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+              {consensusMode
+                ? "汇总收口模式下由收口人统一发言，互@模式不生效"
+                : "私聊协作：Agent 互@的回复仅发起方可见；公开委派：最终结论投影进群，讨论过程仅发起方可见"}
             </p>
           </div>
         </div>

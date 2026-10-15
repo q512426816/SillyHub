@@ -17723,6 +17723,13 @@ export interface components {
              * @default 600
              */
             consensus_timeout_seconds: number;
+            /**
+             * Cross Mention Mode
+             * @description 互@协作可见性模式（private=回复注入发起方不进群；public=公开委派，最终回复投影进群）
+             * @default private
+             * @enum {string}
+             */
+            cross_mention_mode: "private" | "public";
             /** User Members */
             user_members?: components["schemas"]["GroupMemberUserCreate"][];
             /** Agent Members */
@@ -17767,6 +17774,12 @@ export interface components {
             consensus_mode: boolean;
             /** Consensus Timeout Seconds */
             consensus_timeout_seconds: number;
+            /**
+             * Cross Mention Mode
+             * @default private
+             * @enum {string}
+             */
+            cross_mention_mode: "private" | "public";
             /**
              * Created At
              * Format: date-time
@@ -17829,6 +17842,12 @@ export interface components {
             consensus_mode: boolean;
             /** Consensus Timeout Seconds */
             consensus_timeout_seconds: number;
+            /**
+             * Cross Mention Mode
+             * @default private
+             * @enum {string}
+             */
+            cross_mention_mode: "private" | "public";
             /**
              * Created At
              * Format: date-time
@@ -17916,6 +17935,12 @@ export interface components {
             consensus_mode: boolean;
             /** Consensus Timeout Seconds */
             consensus_timeout_seconds: number;
+            /**
+             * Cross Mention Mode
+             * @default private
+             * @enum {string}
+             */
+            cross_mention_mode: "private" | "public";
             /**
              * Created At
              * Format: date-time
@@ -18023,6 +18048,12 @@ export interface components {
             /** Consensus Timeout Seconds */
             consensus_timeout_seconds: number;
             /**
+             * Cross Mention Mode
+             * @default private
+             * @enum {string}
+             */
+            cross_mention_mode: "private" | "public";
+            /**
              * Created At
              * Format: date-time
              */
@@ -18059,6 +18090,8 @@ export interface components {
             consensus_mode?: boolean | null;
             /** Consensus Timeout Seconds */
             consensus_timeout_seconds?: number | null;
+            /** Cross Mention Mode */
+            cross_mention_mode?: ("private" | "public") | null;
             /**
              * Settings Json
              * @description 群扩展设置；None=不改。支持 guardrails 子键（互@护栏群级覆盖）与 typing_preview 顶层键（typing 草稿预览开关，默认关）

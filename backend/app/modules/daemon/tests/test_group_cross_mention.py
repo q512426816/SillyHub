@@ -416,8 +416,15 @@ async def _seed_detection_env(
     *,
     reply_text: str = "@小助 帮我复核下登录页白屏",
     agent_cross_mention: bool = True,
+    cross_mention_mode: str = "private",
+    source_consensus_task_id: str | None = None,
 ) -> SimpleNamespace:
-    """直落检测所需全套行（群/成员/影子/载体 run/源轮 run/投影行）。"""
+    """直落检测所需全套行（群/成员/影子/载体 run/源轮 run/投影行）。
+
+    2026-10-15-group-cross-mention-visibility：增 ``cross_mention_mode``（群
+    互@模式，三态分流测试消费）与 ``source_consensus_task_id``（源轮 consensus
+    上下文——D-011 三态优先级测试消费）。
+    """
     env = await _make_env(db_session)
     now = datetime.now(UTC)
     group_session = AgentSession(
@@ -439,6 +446,7 @@ async def _seed_detection_env(
         created_by=env.owner.id,
         agent_cross_mention=agent_cross_mention,
         cross_mention_depth=2,
+        cross_mention_mode=cross_mention_mode,
         created_at=now,
     )
     db_session.add(group)
@@ -550,6 +558,11 @@ async def _seed_detection_env(
                 "source_carrier_run_id": str(carrier.id),
                 "chain_depth": 1,
                 "sender_user_id": str(env.owner.id),
+                **(
+                    {"consensus_task_id": source_consensus_task_id}
+                    if source_consensus_task_id
+                    else {}
+                ),
             },
         )
     )
@@ -856,6 +869,109 @@ class TestCrossMentionOrchestration:
             triggered = await _run_detection(db_session, seeded)
         assert triggered == []
         inject_mock.assert_not_called()
+
+
+class TestCrossMentionModeRouting:
+    """三态分流（2026-10-15-group-cross-mention-visibility task-02/D-011/D-006）。
+
+    优先级：源轮 consensus_task_id > 群 cross_mention_mode > agent_dm 现状。
+    """
+
+    async def test_private_group_routes_agent_dm(
+        self,
+        db_session: AsyncSession,
+        fake_group_redis: _FakeRedis,
+    ) -> None:
+        """private 群（现状）：dm_kind=agent_dm + dm_target 存在 + 私聊指令。"""
+        seeded = await _seed_detection_env(db_session)
+        service_cls, inject_mock = _mock_session_service()
+        with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
+            triggered = await _run_detection(db_session, seeded)
+        assert len(triggered) == 1
+        kwargs = inject_mock.await_args.kwargs
+        turn_metadata = kwargs["turn_metadata"]
+        assert turn_metadata["dm_kind"] == "agent_dm"
+        assert turn_metadata["dm_target_member_id"] == str(seeded.source_member.id)
+        assert "asked_by_member_id" not in turn_metadata
+        assert "【私聊指令】" in kwargs["prompt"]
+
+    async def test_public_group_routes_agent_public(
+        self,
+        db_session: AsyncSession,
+        fake_group_redis: _FakeRedis,
+    ) -> None:
+        """public 群：dm_kind=agent_public + asked_by_member_id、无 dm_target。"""
+        seeded = await _seed_detection_env(db_session, cross_mention_mode="public")
+        service_cls, inject_mock = _mock_session_service()
+        with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
+            triggered = await _run_detection(db_session, seeded)
+        assert len(triggered) == 1
+        assert triggered[0].member_id == seeded.target_member.id
+        kwargs = inject_mock.await_args.kwargs
+        turn_metadata = kwargs["turn_metadata"]
+        # D-006：agent_public 轮无 dm_target（投影谓词天然放行）；asked_by
+        # 记发起方成员 id 供 task-03 轻通知回流。
+        assert turn_metadata["dm_kind"] == "agent_public"
+        assert "dm_target_member_id" not in turn_metadata
+        assert turn_metadata["asked_by_member_id"] == str(seeded.source_member.id)
+        # 公开委派指令（[[GROUP]] 标记要求）。
+        assert "【公开委派指令】" in kwargs["prompt"]
+        assert "[[GROUP]]" in kwargs["prompt"]
+
+    async def test_consensus_source_round_overrides_public_mode(
+        self,
+        db_session: AsyncSession,
+        fake_group_redis: _FakeRedis,
+    ) -> None:
+        """D-011 泄漏窗口：consensus 任务进行中切 public——源轮带
+        consensus_task_id 的互@仍走 consensus 协作轮（优先级 > 群模式）。"""
+        seeded = await _seed_detection_env(
+            db_session,
+            cross_mention_mode="public",
+            source_consensus_task_id=str(uuid.uuid4()),
+        )
+        service_cls, inject_mock = _mock_session_service()
+        with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
+            triggered = await _run_detection(db_session, seeded)
+        assert len(triggered) == 1
+        kwargs = inject_mock.await_args.kwargs
+        turn_metadata = kwargs["turn_metadata"]
+        assert turn_metadata["dm_kind"] == "consensus"
+        assert turn_metadata["consensus_role"] == "collaborator"
+        assert turn_metadata["dm_target_member_id"] == str(seeded.source_member.id)
+        assert "dm_kind" in turn_metadata and turn_metadata["dm_kind"] != "agent_public"
+
+    async def test_guardrail_counts_shared_across_modes(
+        self,
+        db_session: AsyncSession,
+        fake_group_redis: _FakeRedis,
+    ) -> None:
+        """护栏同源（FR-05）：public 群同一链同一成员连续触发到 cap 后跳过
+        （同链同成员 2 次口径与 private 群同一计数器语义）。"""
+        seeded = await _seed_detection_env(db_session, cross_mention_mode="public")
+        service_cls, _inject_mock = _mock_session_service()
+
+        async def _run_once() -> list:
+            with mock_patch("app.modules.daemon.group.service.SessionService", service_cls):
+                return await _run_detection(db_session, seeded)
+
+        # 投影行文本由 _seed_detection_env 固定为 @小助……连续检测同链同成员。
+        first = await _run_once()
+        assert len(first) == 1
+        # 第二轮：同链（同 carrier）、同目标成员——占位已有 1，再 +1 达 cap。
+        # 源轮深度也推进（深度 2 到顶后跳过），先把深度回拨到 1 以隔离深度
+        # 护栏、单独验证成员次数护栏。
+        await fake_group_redis.hset(
+            group_chain_key(seeded.carrier.id), GROUP_CHAIN_DEPTH_FIELD, "1"
+        )
+        second = await _run_once()
+        assert len(second) == 1
+        # 第三轮：成员次数已 2（= member_trigger_limit 默认）→ 跳过。
+        await fake_group_redis.hset(
+            group_chain_key(seeded.carrier.id), GROUP_CHAIN_DEPTH_FIELD, "1"
+        )
+        third = await _run_once()
+        assert third == []
 
 
 class TestUserMentionRegistersChain:

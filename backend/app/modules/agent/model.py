@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -1554,6 +1555,24 @@ class AgentGroupChat(BaseModel, table=True):
     consensus_timeout_seconds: int = Field(
         default=600,
         sa_column=Column(Integer, nullable=False, default=600),
+    )
+    # 互@协作可见性模式（2026-10-15-group-cross-mention-visibility D-001，默认
+    # 'private'——存量群零行为变化 D-002）：'private'=互@回复定向注入发起方影子
+    # 会话不进群（2026-09-10 D-005 现状）；'public'=公开委派，被@成员最终回复经
+    # [[GROUP]] 投影进群、过程留影子会话。仅在 agent_cross_mention=True 且
+    # consensus_mode=False 时生效（三态判定见 group/service/mentions.py）。
+    cross_mention_mode: str = Field(
+        default="private",
+        sa_column=Column(
+            String(16),
+            CheckConstraint(
+                "cross_mention_mode IN ('private', 'public')",
+                name="ck_agent_group_chats_cross_mention_mode",
+            ),
+            nullable=False,
+            server_default="private",
+            default="private",
+        ),
     )
     # 预留护栏参数等（§3.2 settings_json；首期空置）。
     settings_json: dict | None = Field(
