@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { ChangeRead } from "@/lib/changes";
-import type { AgentSessionListItem } from "@/lib/daemon";
+import type { AgentSessionListItem } from "@/lib/daemon";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -156,15 +156,11 @@ export function ChangeStageActions({
     );
   }
 
-  // 无待审阶段：无操作区（只读展示区由其它卡片承载）。
+  // 无待审阶段（2026-10-15-change-assets-graph / FR-04 用户裁决）：不渲染任何
+  // 占位卡——「当前无可审批事项，阶段推进由智能体在会话中驱动」对无操作可做的
+  // 浏览者是零信息量噪音；只读展示由其它卡片承载，待审面板出现时本卡才挂载。
   if (!gatePanel) {
-    return (
-      <section className="rounded-md border border-muted bg-card px-4 py-3">
-        <p className="text-xs text-muted-foreground">
-          当前无可审批事项，阶段推进由智能体在会话中驱动。
-        </p>
-      </section>
-    );
+    return null;
   }
 
   const degrade = notifyResult ? degradeMessage(notifyResult, change) : null;

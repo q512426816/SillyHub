@@ -8,7 +8,7 @@
 //   - 意见输入 textarea 调 onGateCommentChange
 //   - 绑定会话只读展示（含空态）
 //   - quick 阶段只读说明（无执行控制）
-//   - 无待审阶段占位说明（无执行控制）
+//   - 无待审阶段不渲染占位卡（返回 null，2026-10-15-change-assets-graph FR-04）
 //   - 三类降级提示（turn_conflict / session_inactive / 其它）+ 文案可复制
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -174,14 +174,16 @@ describe("ChangeStageActions 审批卡（task-10）", () => {
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
 
-  it("无待审阶段：占位说明，无执行控制按钮", () => {
+  it("无待审阶段：不渲染占位卡（返回 null——2026-10-15-change-assets-graph FR-04 用户裁决去噪音）", () => {
     const props = makeProps({
       change: makeChange({ current_stage: "execute", pending_review: null }),
     });
-    render(<ChangeStageActions {...props} />);
+    const { container } = render(<ChangeStageActions {...props} />);
+    // 「当前无可审批事项」占位卡移除：整组件不渲染
     expect(
-      screen.getByText(/当前无可审批事项，阶段推进由智能体在会话中驱动/),
-    ).toBeInTheDocument();
+      screen.queryByText(/当前无可审批事项，阶段推进由智能体在会话中驱动/),
+    ).not.toBeInTheDocument();
+    expect(container.firstChild).toBeNull();
     expect(screen.queryByText(/触发智能体/)).not.toBeInTheDocument();
     expect(screen.queryByText(/推进到/)).not.toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
