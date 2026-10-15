@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-platform-vector-search",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-15-platform-vector-search:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_happy_path_contract」",
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_rejects_non_shpsync_scope」",
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_requires_token」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-platform-vector-search"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-15-platform-vector-search:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_index_fingerprint_cache_and_invalidation」",
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_search_ranking_limit_and_contract」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-platform-vector-search"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-15-platform-vector-search:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_embedder_unavailable_fail_soft」",
+        "backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_degraded_when_model_unavailable」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-platform-vector-search"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-15-platform-vector-search:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_vector_search.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-15-platform-vector-search"
+    }
+  ]
+}

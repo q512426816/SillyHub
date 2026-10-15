@@ -2055,3 +2055,79 @@
   confirmed_at: null
   source_change: 2026-10-15-change-assets-graph
   status: active
+
+## FR-build-137 端点契约逐字段对齐 CLI：Bearer shpsync 鉴权（无 token 401、非 shpsync 凭据 403）、Body {query,limit}、200 {ok,results:[{spec_path:'knowledge/decisions/x.md',anchor:'D-xxx@vN',change,score}]}
+变更：2026-10-15-platform-vector-search
+状态：active
+摘要：主路径；边界
+全文：.sillyspec/changes/archive/2026-10-15-platform-vector-search/requirements.md#FR-01
+最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-platform-vector-search:flow:测试绑定FR-01
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_happy_path_contract」 | backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_rejects_non_shpsync_scope」 | backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_requires_token」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-platform-vector-search
+  status: active
+
+## FR-build-138 索引懒构建+指纹失效（文件增删改后重建），余弦排序 top-k、limit 钳位
+变更：2026-10-15-platform-vector-search
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-platform-vector-search/requirements.md#FR-02
+最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-platform-vector-search:flow:测试绑定FR-02
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_index_fingerprint_cache_and_invalidation」 | backend/app/modules/knowledge/tests/test_vector_search.py「test_search_ranking_limit_and_contract」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-platform-vector-search
+  status: active
+
+## FR-build-139 fastembed 缺席/模型初始化失败 → 200 {ok,results:[],model_ready:false,reason} 不 5xx 不阻塞启动
+变更：2026-10-15-platform-vector-search
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-platform-vector-search/requirements.md#FR-03
+最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-platform-vector-search:flow:测试绑定FR-03
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py「test_embedder_unavailable_fail_soft」 | backend/app/modules/knowledge/tests/test_vector_search.py「test_vector_search_degraded_when_model_unavailable」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-platform-vector-search
+  status: active
+
+## FR-build-140 单测：解析/指纹失效/余弦排序/fake embedder 端点契约/401/403 全绿
+变更：2026-10-15-platform-vector-search
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-15-platform-vector-search/requirements.md#FR-04
+最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-platform-vector-search:flow:测试绑定FR-04
+  tests: backend/app/modules/knowledge/tests/test_vector_search.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-platform-vector-search
+  status: active

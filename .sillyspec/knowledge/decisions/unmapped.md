@@ -3104,3 +3104,11 @@ supersedes：D-002@v1
 锚点：未记录
 最近确认：249bb1fd79725b47073e1b16827848f61df6503c
 理由：- 风险一：在途变更（未注册图节点）neighbors 查询锚点未命中——可能形态为 available=false 或 data.nodes 空；双态都收敛到「整区隐藏」，实测时用归档变更核对。缓解：空 nodes 与 unavailable 同走隐藏分支，不出现半渲染。 - 风险二：资产卡测试既有 fixture 未 mock getKnowledgeGraphQuery——jsdom fetch 报错 → react-query error → 隐藏，既有用例不受扰；显式在新组件测试中 mock 全两态（可用/不可用）。 - 试过放弃：①把图谱分区做成弹窗（点「查看图谱」再开 Dialog）——用户原话是「图放卡片中」，弹窗多一步且复刻了被用户否掉的「点了看不到东西」反模式；②复用图谱页整页三栏（左表单/右结果 tab）——资产卡内只需要画布+节点详情两块，表单/图例属图谱页职责，嵌入会撑爆卡片。
+
+## D-unmapped-012@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-15-platform-vector-search
+原编号：D-001@v1
+锚点：未记录
+最近确认：e5720127412ce70fe982a121ed96dd6bbadebe4f
+理由：最大风险：真模型首查秒级 embed 延迟（700-2400 条）+ 首次模型下载 90MB——已卸线程池不卡事件循环；生产建议镜像预烤模型（文档在 FastembedEmbedder docstring）；workspace 语料超万条时首查可感——当前量级（本体系最大 2400）无虞，超限再引增量索引。次风险：fastembed/ONNX 依赖体积（镜像 +~200MB）——用户已拍板接受；embedding 质量对极短条目（纯标题无理由）弱——语料契约本就含理由文本，模板保证在场。死路（放弃）：①API embedding（litellm/openai）——用户指出 litellm 平台侧已去，且要 key 要钱要外网；②统计向量（TF-IDF/n-gram）——与 CLI 本地层同构重复建设，语义增益零；③pgvector——2400 条暴力余弦毫秒级，数据库往返反而更慢且加迁移负担；④daemon sync 挂点灌索引——免 daemon 改动的懒构建已覆盖，挂点属过早优化。

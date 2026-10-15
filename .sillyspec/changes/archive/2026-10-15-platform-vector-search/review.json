@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-platform-vector-search",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "cafcf1cfd6cfacf504887c4b001de581fd6c392f",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——索引指纹失效自愈，spec 树同步晚到只造成一次多余重建，语义最终一致",
+    "并发": "ok——_indexes/_embedder 全局态持锁；并发首查最坏重复一次 embed 无腐化；spec 树只读坏行 fail-soft 跳过",
+    "切换": "ok——进程重启懒重建零预热义务；模型名换缓存键自动切换；检索主体 run_in_threadpool 卸载不卡事件循环",
+    "作用域": "ok——索引键 (workspace_id, model_name) 双键隔离有测试钉；多实例各自内存索引=正确语义（语料只读重建幂等）"
+  },
+  "notes": {
+    "承诺对照": "FR-01 契约四键/401/403 测试在（happy_path/requires_token/rejects_non_shpsync）；FR-02 指纹计数 4/5/10/15 测试钉（缓存零重建+失效重建+workspace 隔离）；FR-03 降级 200 空结果测试在 + 真模型冒烟留档（512 维、LRU 0.887 vs npm 0.276 语义序）；FR-04 9/9 全绿 + knowledge 模块 166/166 零回归 + main 导入 OK + ruff format/check 全过（pre-commit 拦 B023 闭包绑循环变量已重构清偿）",
+    "声明边界裁决": "①首查秒级+首下载 90MB=可接受（线程池卸载+镜像预烤文档）；②fastembed 依赖体积 +~200MB=用户拍板接受；③极短条目（纯标题）检索弱=语料契约含理由文本兜底。无未裁决边界",
+    "防护声明核实": "fail-soft（fastembed 缺席/初始化失败→200 空结果）有测试双态锁定；lazy import 经 main 导入 OK 实证（fastembed 装前测试已全绿）",
+    "生成物同步": "schema.py VectorSearchIn/Out 与路由/测试对齐；uv.lock 随 pyproject 同步（uv lock 实跑）",
+    "项目探针": {
+      "cli-copy-selfsufficient": "pass——错误文案（403 PermissionDenied 消息）指明所需凭据形态 shpsync_；降级 reason 带因",
+      "config-absent-zero-regression": "pass——KNOWLEDGE_EMBEDDING_MODEL 未配置走默认值（Settings 字段缺省），get_embedder 失败 fail-soft 有测试；缺省路径不改变既有端点行为（新端点无存量）",
+      "crossrepo-path-compat": "pass——spec_root Path 处理全走 pathlib（Windows 盘符/反斜杠经 as_posix 形态输出 spec_path），tmp_path 测试即 Windows 真路径实证"
+    }
+  },
+  "reviewedAt": "2026-10-15T04:05:00.000Z"
+}
