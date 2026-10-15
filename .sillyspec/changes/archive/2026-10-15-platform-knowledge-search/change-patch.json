@@ -1,0 +1,151 @@
+{
+  "change": "2026-10-15-platform-knowledge-search",
+  "baseline": "609f2de5b6dd6d1f31b4f5e05ed220a4bb4e77b0",
+  "head": "2d3c285319fdf676ddfe02309fe7b19e69e1e48b",
+  "files": [
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/schema.py",
+    "backend/app/modules/knowledge/search.py",
+    "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+    "backend/app/modules/knowledge/tests/test_router.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/knowledge.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "totals": {
+    "files": 13,
+    "additions": 2059,
+    "deletions": 15
+  },
+  "savedAt": "2026-10-15T09:31:13.135Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "609f2de5b6dd6d1f31b4f5e05ed220a4bb4e77b0",
+    "totals": {
+      "files": 13,
+      "additions": 2059,
+      "deletions": 15
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/knowledge/router.py",
+        "additions": 73,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/schema.py",
+        "additions": 33,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/search.py",
+        "additions": 395,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+        "additions": 348,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/knowledge/tests/test_router.py",
+        "additions": 221,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 156,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+        "additions": 209,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+        "additions": 88,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+        "additions": 256,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx",
+        "additions": 28,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 113,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/knowledge.ts",
+        "additions": 26,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 113,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "a91358268164a243707d6d9cc85e972b8a48cf2b6456e21d4c1b63cf4358a113",
+  "patchStatus": "ok"
+}

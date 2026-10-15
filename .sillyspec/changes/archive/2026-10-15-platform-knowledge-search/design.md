@@ -168,9 +168,9 @@ export function searchKnowledge(
 
 | 编号 | 风险 | 等级 | 应对策略 |
 |---|---|---|---|
-| R-01 | 首查索引构建耗时未实测（421 文件/4.9MB，~3000+ chunks；embed 可能数十秒） | P1 | execute 阶段实测：若首查 >5s，在响应前加前端明确 loading 文案（「首次搜索正在建立索引…」）；若 >30s 再评估启动预热钩子（D-007 预留） |
-| R-02 | Windows bind mount stat 性能（known-issues 有先例） | P2 | 指纹只 stat 不读内容 + 构建结果缓存；单文件 stat 失败 fail-soft 跳过（D-007 故障面） |
-| R-03 | 融合权重与保底阈值（0.6/0.4、exact=0.9）是初值，可能与真实语料分布不合；且 FR-03/requirements.md:29 已引用同组数值，调参会与需求面脱钩 | P1 | 单测钉住关键行为（精确编号 rank=1 的相对排序断言/纯语义可召回）；execute 用本仓真实语料人工抽验 3-5 组 query，必要时调参并**同步回写 requirements.md FR-03 与单测断言（三方同步）** |
+| R-01 | 首查索引构建耗时未实测（421 文件/4.9MB，~3000+ chunks；embed 可能数十秒） | P1 | **实测（2026-10-15 execute，真实 fastembed + 本仓语料）：6586 chunks / 437 文件，首查含索引构建 304.67s（embedder 加载 1.12s 另计）；缓存命中后二次查询 0.47s**。远超 30s 预案档 → 前端 loading 已带「首次搜索需建立索引，可能较慢」提示（本变更内落地）；**启动预热钩子**（本行为原预案项）建议由后续变更落地——预热需遍历 workspace 解析 spec_root 并在 lifespan 后台建索引（改 backend/app/main.py，超出本变更 allowed_paths，未擅自扩张边界）。 |
+| R-02 | Windows bind mount stat 性能（known-issues 有先例） | P2 | 指纹只 stat 不读内容 + 构建结果缓存；单文件 stat 失败 fail-soft 跳过（D-007 故障面）。实测指纹计算（437 文件）含在首查 304s 内，未见独立瓶颈。 |
+| R-03 | 融合权重与保底阈值（0.6/0.4、exact=0.9）是初值，可能与真实语料分布不合；且 FR-03/requirements.md:29 已引用同组数值，调参会与需求面脱钩 | P1 | **实测抽验（2026-10-15 execute，本仓真实语料 5 组 query）**：① 精确编号「D-011」anchor 保底 0.900 生效且居首（跨文件同号属预期，同号消歧靠 change 展示）；② 中文主题 query（乐观锁 base_version / 搜索框 debounce / 知识库向量检索）top1 均主题相关；③ 语义分带集中 0.36-0.44（弱信号带）——「相关性下限阈值」需真实 query 标注集标定，本期只砍零信号（score=0）保守不动。单测钉住关键行为（精确编号 rank=1 的相对排序断言/纯语义可召回）；后续调参须**同步回写 requirements.md FR-03 与单测断言（三方同步）**。 |
 | R-04 | 前端搜索态与既有深链/编辑态交互冲突 | P2 | 搜索词非空时优先级最高（结果列表替换树）；deepLink ref 机制消费一次语义不变；组件测试覆盖「搜索中打开深链」场景 |
 | R-05 | 大文件切块后 snippet 定位到行号的精度（右栏滚动定位锚点） | P2 | 本期右栏定位复用既有 anchor 滚动机制（锚点=条目/标题文本匹配）；定位失败时至少文件级定位（不报错） |
 | R-06 | UI 原型的形态为项目惯例单 HTML（themes.ts token 复刻），非 React 真码 | P2 | 项目无 React 原型管线（51 个历史原型同为单 HTML + token 复刻形态，最近先例 2026-08-26-file-fullscreen-preview）；原型与本设计 token 单一源核对一致；用户如要求真码原型可补 |

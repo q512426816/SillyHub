@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-platform-knowledge-search",
+  "generatedAt": "2026-10-15T09:51:21.441Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 0,
+        "worktreeHits": 2,
+        "globEntries": 4
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "tasks": 5,
+        "hasTest": 5
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "backendEndpoints": 1092,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "deletions": 0,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-platform-knowledge-search",
+      "metrics": {
+        "checkedFiles": 6,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [
+      {
+        "method": "POST",
+        "path": "/workspaces/{workspace_id}/knowledge/search",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{workspace_id}/knowledge/search",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/knowledge/search",
+        "rowIdx": 2
+      }
+    ],
+    "declared": null,
+    "writeEndpoints": [
+      {
+        "method": "POST",
+        "path": "/workspaces/{workspace_id}/knowledge/search",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{workspace_id}/knowledge/search",
+        "rowIdx": 1
+      },
+      {
+        "method": "POST",
+        "path": "/api/workspaces/{id}/knowledge/search",
+        "rowIdx": 2
+      }
+    ]
+  },
+  "conclusion": "PASS WITH NOTES",
+  "runtimeEvidence": [
+    {
+      "claim": "后端知识搜索端点契约经 FastAPI TestClient 全栈集成（真实路由/鉴权依赖/权限过滤链/线程池卸载），8 用例全绿",
+      "command": "cd backend && uv run pytest app/modules/knowledge/tests/test_router.py app/modules/knowledge/tests/test_knowledge_search.py -q --no-cov",
+      "exitCode": 0,
+      "logPath": "C:/Users/qinyi/IdeaProjects/multi-agent-platform/.sillyspec/.runtime/logs/task05-backend-all.log"
+    }
+  ],
+  "handover": {
+    "count": 2,
+    "items": [
+      {
+        "type": "manual-acceptance",
+        "item": "R-01 首查索引构建 304.67s（437 文件/6586 chunks）——启动预热钩子未落地（需改 backend/app/main.py lifespan，超出本变更 allowed_paths 边界）",
+        "condition": "后续变更落地预热后：重启服务 → 立即搜索 → 应无长等待（目标 <1s）；本变更内已落地首查 loading 文案兜底",
+        "severity": "advisory"
+      },
+      {
+        "type": "manual-acceptance",
+        "item": "visual-evidence 降级（未实机截图，以原型 × 测试断言三方对照替代；autonomous 代裁决）",
+        "condition": "用户部署后目视知识库页搜索交互（四场景：混合召回/精确命中/降级/空结果）；如否决降级则起 pnpm dev 补实机截图",
+        "severity": "advisory"
+      }
+    ]
+  },
+  "dbScriptDeclarations": [],
+  "runtimeEndpointExcluded": false,
+  "integrationRan": "ran",
+  "matrixPartialRows": 2,
+  "consumerHints": {
+    "script": [
+      "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+      "backend/app/modules/knowledge/tests/test_router.py"
+    ]
+  },
+  "smokeRan": "not-configured",
+  "factsConsistency": {
+    "checked": [
+      "probe1",
+      "probe3",
+      "probe5",
+      "probe6",
+      "probe8",
+      "probe9"
+    ],
+    "verdict": "match",
+    "detail": null
+  },
+  "tests": {
+    "command": "module[]+deps(py63+jsx72+jsx26)+fr(160)",
+    "exitCode": 0,
+    "strategy": "dynamic-subset",
+    "failedRemaining": [],
+    "passedAt": "2026-10-15T10:55:07.471Z"
+  }
+}

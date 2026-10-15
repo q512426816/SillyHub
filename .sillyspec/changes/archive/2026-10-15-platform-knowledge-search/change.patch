@@ -1,0 +1,2352 @@
+diff --git a/backend/app/modules/knowledge/router.py b/backend/app/modules/knowledge/router.py
+index 50cd98b9d..956561f72 100644
+--- a/backend/app/modules/knowledge/router.py
++++ b/backend/app/modules/knowledge/router.py
+@@ -36,6 +36,9 @@ from app.modules.knowledge.schema import (
+     KnowledgeMergeIn,
+     KnowledgeMergeResult,
+     KnowledgeProposeIn,
++    KnowledgeSearchIn,
++    KnowledgeSearchOut,
++    KnowledgeSearchResultItem,
+     KnowledgeStatsOut,
+     KnowledgeUpdateIn,
+     MergePreviewOut,
+@@ -451,6 +454,76 @@ async def post_knowledge_governance_action(
+     return GovernanceActionOut(**result)
+ 
+ 
++# ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）──────
++# 声明序铁律：本字面量路由必须在下方 GET /knowledge/{filename:path} 通配之前
++# 注册（本端点方法为 POST、通配为 GET，Starlette 按方法判全量匹配——声明序对
++# POST 非必需，但沿用既有保守口径零成本，防未来加 GET 变体被吞）。
++
++_QUERY_MAX_CHARS = 4000  # 与 CLI 向量端点同款截断（vector_router.py）
++_SEARCH_LIMIT_MIN, _SEARCH_LIMIT_MAX, _SEARCH_LIMIT_DEFAULT = 1, 50, 20
++
++
++@router.post("/knowledge/search", response_model=KnowledgeSearchOut)
++async def search_knowledge(
++    workspace_id: uuid.UUID,
++    payload: KnowledgeSearchIn,
++    session: SessionDep,
++    user: Annotated[User, Depends(require_permission(Permission.KNOWLEDGE_READ))],
++) -> KnowledgeSearchOut:
++    """知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
++
++    - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
++      vector_router.py 同款）；
++    - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
++      权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
++      3×limit 候选再过滤截断，防 top-k 被过滤挤空；
++    - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++    """
++    from fastapi.concurrency import run_in_threadpool
++
++    from app.core.config import get_settings
++    from app.modules.auth.rbac import has_permission
++    from app.modules.knowledge.search import search_sync
++    from app.modules.knowledge.vector_search import get_embedder
++    from app.modules.workspace.service import WorkspaceService
++
++    query = payload.query.strip()[:_QUERY_MAX_CHARS]
++    limit = max(
++        _SEARCH_LIMIT_MIN, min(_SEARCH_LIMIT_MAX, int(payload.limit or _SEARCH_LIMIT_DEFAULT))
++    )
++    workspace = await WorkspaceService(session).get(workspace_id)  # 未知 → 404
++    spec_root = await KnowledgeService(session)._spec_content_root(workspace)
++    settings = get_settings()
++    embedder, embedder_error = get_embedder(settings.knowledge_embedding_model)
++    can_read_docs = await has_permission(
++        session,
++        user=user,
++        permission=Permission.SCAN_DOCS_READ,
++        workspace_id=workspace_id,
++    )
++    out = await run_in_threadpool(
++        search_sync,
++        spec_root,
++        str(workspace_id),
++        query,
++        limit * 3,
++        embedder,
++        settings.knowledge_embedding_model,
++        embedder_error=embedder_error,
++    )
++    filtered = [
++        KnowledgeSearchResultItem(**item)
++        for item in out["results"]
++        if can_read_docs or not str(item["spec_path"]).startswith("docs/")
++    ]
++    return KnowledgeSearchOut(
++        ok=True,
++        results=filtered[:limit],
++        model_ready=out["model_ready"],
++        reason=out["reason"],
++    )
++
++
+ @router.get("/knowledge/{filename:path}", response_model=KnowledgeEntry)
+ async def get_knowledge(
+     workspace_id: uuid.UUID,
+diff --git a/backend/app/modules/knowledge/schema.py b/backend/app/modules/knowledge/schema.py
+index 4b733d16a..69fb9d110 100644
+--- a/backend/app/modules/knowledge/schema.py
++++ b/backend/app/modules/knowledge/schema.py
+@@ -610,3 +610,36 @@ class VectorSearchOut(BaseModel):
+     results: list[VectorSearchResultItem]
+     model_ready: bool = True
+     reason: str | None = None
++
++
++# ── 平台知识搜索（change 2026-10-15-platform-knowledge-search / D-001@v1）────────
++# 契约见 design.md「接口定义」：results 条目为可展示的召回 {spec_path, kind, title,
++# anchor, snippet, score}；docs/ 类结果已按 SCAN_DOCS_READ 服务端过滤（D-005@v1）；
++# model_ready=False 表示语义模型不可用、results 为纯词面降级结果（reason 带因）。
++
++
++class KnowledgeSearchIn(BaseModel):
++    """检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。"""
++
++    query: str
++    limit: int = 20
++
++
++class KnowledgeSearchResultItem(BaseModel):
++    """单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。"""
++
++    spec_path: str
++    kind: str
++    title: str
++    anchor: str | None = None
++    snippet: str
++    score: float
++
++
++class KnowledgeSearchOut(BaseModel):
++    """检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"""
++
++    ok: bool = True
++    results: list[KnowledgeSearchResultItem]
++    model_ready: bool = True
++    reason: str | None = None
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+new file mode 100644
+index 000000000..5c606d5de
+--- /dev/null
++++ b/backend/app/modules/knowledge/search.py
+@@ -0,0 +1,395 @@
++"""平台知识搜索服务（change 2026-10-15-platform-knowledge-search / D-001~D-010）。
++
++消费方：平台用户侧端点 ``POST /api/workspaces/{workspace_id}/knowledge/search``
++（router.py，经 ``run_in_threadpool`` 调用本模块 ``search_sync``）。
++
++设计（design.md Phase 1 / decisions D-002@v1~D-007@v1）：
++
++- **语料** = ``spec_root/knowledge/**/*.md`` ∪ ``spec_root/docs/**/*.md``（排任意层级
++  ``INDEX.md`` 与 symlink）；不含 changes/ 与 .runtime/（D-002@v1 边界）。
++- **切块三档**（D-003@v1）：decisions 按 ``## D-xxx@vN`` 条目 / fr 按 ``## FR-xxx-NNN``
++  条目 / 其余 md 按 ``##`` 标题块；单块超 1500 字符按行滑窗细分（窗 ~1000 / 重叠 ~150）。
++  frontmatter 段不入正文。每块携带 anchor（条目 id / 标题 slug）供前端定位。
++- **索引**：进程内 per-(workspace_key, model_name) 懒构建 + 全语料文件集指纹
++  ``(rel_path, mtime_ns, size)`` 失效；与 vector_search.py 的 CLI decisions 索引
++  **完全独立**（不同 dict，避免污染 CLI 召回）。构建在锁内（single-flight），顺序 =
++  先算指纹 → 构建 → 外回复算指纹不等即重建（防「旧内容 + 新指纹」永久陈旧，D-007@v1）。
++- **embedder 单一源**：调用方一律传 ``get_embedder(settings.knowledge_embedding_model)``
++  的结果（vector_search.py:137-154 单例；单槽位——不得传其他模型名）。
++- **检索**（D-004@v1）：词面（title/path 子串权重高 + 正文次数增益）+ 向量（归一化点积
++  余弦，纯 Python 不引 numpy 耦合）融合 ``0.6*vec + 0.4*word``；title/path 词面命中者
++  保底 0.9（精确编号/文件名排前的下界；可断言形态 = 相对排序 rank=1）。embedder 不可用
++  （fastembed 缺席/模型加载失败）→ ``model_ready=False`` + 纯词面结果 + reason（fail-soft）。
++"""
++
++from __future__ import annotations
++
++import re
++import threading
++from dataclasses import dataclass
++from pathlib import Path
++
++from app.modules.knowledge.parser import slugify_anchor
++
++# ── 切块常量（D-003@v1：阈值 1500 / 窗 1000 / 重叠 150——与 design.md Phase 1 同源）──
++
++_CHUNK_MAX = 1500
++_SLIDE_WINDOW = 1000
++_SLIDE_OVERLAP = 150
++
++#: 条目锚点正则（与本模块独立定义，对齐 vector_search.py:35 的 CLI 契约形态——不复用
++#: 该模块避免与其 DecisionEntry（CLI spec_path 契约）耦合）。
++_DECISION_HEADING_RE = re.compile(r"^##\s+(D-(?:[A-Za-z0-9_\-\u4e00-\u9fff]+-)?\d+@v\d+)\s+(.*)$")
++_FR_HEADING_RE = re.compile(r"^##\s+(FR-[A-Za-z0-9\-]+-\d+)\s+(.*)$")
++_H2_RE = re.compile(r"^##\s+(.*)$")
++_H1_RE = re.compile(r"^#\s+(.*)$")
++
++#: kind 由 spec_path 派生（design.md Phase 1 表）。
++_DOCS_SECTION_KINDS = {"modules": "module", "scan": "scan", "flows": "flow"}
++
++
++@dataclass(frozen=True, slots=True)
++class Chunk:
++    """一个可检索块（条目 / 标题块 / 滑窗片段）。"""
++
++    spec_path: str  # 仓根相对 POSIX（"knowledge/..." 或 "docs/..."）
++    kind: str  # decision|fr|proposed|generated|knowledge|module|scan|flow|glossary
++    title: str  # 条目标题 / 标题块标题 / 文件级回落（H1 或文件名）
++    anchor: str | None  # 条目 id（D-xxx@vN / FR-xxx-NNN）或标题 slug；文件级回落为 None
++    start_line: int  # 1-based 起始行号（块首行）
++    text: str  # embedding 与词面匹配文本（"标题\n正文"）
++
++
++def kind_for(spec_path: str) -> str:
++    """由仓根相对路径派生 kind（design.md Phase 1 表；未知结构按 knowledge/module 兜底）。"""
++    p = spec_path.replace("\\", "/")
++    if p.startswith("knowledge/decisions/"):
++        return "decision"
++    if p.startswith("knowledge/fr/"):
++        return "fr"
++    if p.startswith("knowledge/proposed/"):
++        return "proposed"
++    if p.startswith("knowledge/generated/"):
++        return "generated"
++    if p.startswith("knowledge/"):
++        return "knowledge"
++    if p.startswith("docs/"):
++        segs = p.split("/")
++        if segs[-1] == "glossary.md":
++            return "glossary"
++        if len(segs) >= 3 and segs[2] in _DOCS_SECTION_KINDS:
++            return _DOCS_SECTION_KINDS[segs[2]]
++        return "module"
++    return "knowledge"
++
++
++# ── 切块 ─────────────────────────────────────────────────────────────────────
++
++
++def _skip_frontmatter(lines: list[str]) -> int:
++    """返回正文起始行下标（0-based）；首行 ``---`` 起至闭合 ``---`` 的段跳过。"""
++    if lines and lines[0].strip() == "---":
++        for idx in range(1, len(lines)):
++            if lines[idx].strip() == "---":
++                return idx + 1
++    return 0
++
++
++def _fallback_title(lines: list[str], body_start: int, spec_path: str) -> str:
++    for line in lines[body_start:]:
++        m = _H1_RE.match(line)
++        if m:
++            return m.group(1).strip()
++    return Path(spec_path).stem
++
++
++def _iter_line_windows(lines: list[str], first_line_no: int) -> list[tuple[int, str]]:
++    """按 ~1000 字符切行窗口（相邻窗按行回退 ~150 字符重叠）；单行超窗硬切。
++
++    返回 ``[(1-based 起始行号, 窗口文本)]``。
++    """
++    n = len(lines)
++    out: list[tuple[int, str]] = []
++    i = 0
++    while i < n:
++        start = i
++        size = 0
++        j = i
++        while j < n and (size + len(lines[j]) + 1) <= _SLIDE_WINDOW:
++            size += len(lines[j]) + 1
++            j += 1
++        if j == i:  # 单行超窗：硬切成窗口大小
++            out.append((first_line_no + i, lines[i][:_SLIDE_WINDOW]))
++            i += 1
++            continue
++        out.append((first_line_no + start, "\n".join(lines[start:j]).strip()))
++        if j >= n:
++            break
++        back_size = 0
++        back = 0
++        while back < (j - start) - 1 and back_size < _SLIDE_OVERLAP:
++            back += 1
++            back_size += len(lines[j - back]) + 1
++        i = j - back
++    return out
++
++
++def _emit_segment(
++    chunks: list[Chunk],
++    spec_path: str,
++    kind: str,
++    title: str,
++    anchor: str | None,
++    start_idx: int,
++    seg_lines: list[str],
++) -> None:
++    """把一段（条目/标题块）落为 Chunk；超长按行滑窗细分（``start_line`` 逐窗真实）。"""
++    text_all = "\n".join(seg_lines).strip()
++    if not text_all:
++        return
++    head = f"{title}\n" if title else ""
++    if len(text_all) <= _CHUNK_MAX:
++        chunks.append(Chunk(spec_path, kind, title, anchor, start_idx + 1, head + text_all))
++        return
++    for line_no, window in _iter_line_windows(seg_lines, start_idx + 1):
++        window = window.strip()
++        if not window:
++            continue
++        chunks.append(Chunk(spec_path, kind, title, anchor, line_no, head + window))
++
++
++def chunk_markdown(spec_path: str, content: str) -> list[Chunk]:
++    """把单个 md 文件切为 Chunk 列表（三档规则见模块 docstring）。"""
++    kind = kind_for(spec_path)
++    lines = content.splitlines()
++    body_start = _skip_frontmatter(lines)
++
++    # 主段落定位（title, anchor 或 None, 0-based 行下标）
++    sections: list[tuple[str, str | None, int]] = []
++    if kind == "decision":
++        entry_re: re.Pattern[str] | None = _DECISION_HEADING_RE
++    elif kind == "fr":
++        entry_re = _FR_HEADING_RE
++    else:
++        entry_re = None
++    for idx in range(body_start, len(lines)):
++        m = entry_re.match(lines[idx]) if entry_re is not None else _H2_RE.match(lines[idx])
++        if m:
++            sections.append(
++                (
++                    m.group(2).strip() if entry_re is not None else m.group(1).strip(),
++                    m.group(1) if entry_re is not None else None,
++                    idx,
++                )
++            )
++
++    chunks: list[Chunk] = []
++    if sections:
++        for i, (title, anchor, idx) in enumerate(sections):
++            end = sections[i + 1][2] if i + 1 < len(sections) else len(lines)
++            resolved = anchor if anchor is not None else (slugify_anchor(title) or None)
++            _emit_segment(chunks, spec_path, kind, title, resolved, idx, lines[idx:end])
++    else:
++        title = _fallback_title(lines, body_start, spec_path)
++        _emit_segment(chunks, spec_path, kind, title, None, body_start, lines[body_start:])
++    return chunks
++
++
++def scan_corpus(spec_root: Path) -> list[Chunk]:
++    """扫描 spec 根 knowledge/ 与 docs/ 下全部 md（排 INDEX.md 与 symlink）。
++
++    文件读失败 fail-soft 跳过（单文件不影响整体语料）。目录缺席 → 空列表。
++    """
++    chunks: list[Chunk] = []
++    for base in ("knowledge", "docs"):
++        root_dir = spec_root / base
++        if not root_dir.is_dir():
++            continue
++        for md in sorted(root_dir.rglob("*.md")):
++            if md.name == "INDEX.md" or md.is_symlink():
++                continue
++            try:
++                content = md.read_text(encoding="utf-8", errors="replace")
++            except OSError:
++                continue
++            rel = md.relative_to(spec_root).as_posix()
++            chunks.extend(chunk_markdown(rel, content))
++    return chunks
++
++
++def corpus_fingerprint(spec_root: Path) -> tuple | None:
++    """全语料文件集指纹：``tuple(sorted((rel_path, mtime_ns, size)))``。
++
++    两个语料根都不存在 → ``None``（调用方按空语料处理）。
++    """
++    parts: list[tuple[str, int, int]] = []
++    found = False
++    for base in ("knowledge", "docs"):
++        root_dir = spec_root / base
++        if not root_dir.is_dir():
++            continue
++        found = True
++        for md in root_dir.rglob("*.md"):
++            if md.name == "INDEX.md" or md.is_symlink():
++                continue
++            try:
++                st = md.stat()
++            except OSError:
++                continue
++            parts.append((md.relative_to(spec_root).as_posix(), st.st_mtime_ns, st.st_size))
++    if not found:
++        return None
++    return tuple(sorted(parts))
++
++
++# ── 索引（懒构建 + 指纹失效；与 vector_search.py 的 CLI 索引完全独立）──────────
++
++_index_lock = threading.Lock()
++_indexes: dict[tuple[str, str], dict] = {}  # (workspace_key, model_name) → 缓存条目
++
++
++def _build_index_locked(spec_root: Path, key: tuple[str, str], embedder: object | None) -> dict:
++    """锁内构建索引（调用方持 ``_index_lock``）。
++
++    指纹在 scan **之前**计算并作为存储值——构建期间的文件变更会让外回复算不等，
++    触发重建（防陈旧索引自愈的保守方向）。
++    """
++    fp = corpus_fingerprint(spec_root)
++    chunks = scan_corpus(spec_root)
++    vectors = embedder.embed([c.text for c in chunks]) if (embedder is not None and chunks) else []
++    entry = {"fingerprint": fp, "chunks": chunks, "vectors": vectors}
++    _indexes[key] = entry
++    return entry
++
++
++def reset_index_for_tests() -> None:
++    """测试隔离：清空索引缓存（生产勿调）。"""
++    with _index_lock:
++        _indexes.clear()
++
++
++# ── 打分与片段 ───────────────────────────────────────────────────────────────
++
++
++def _cosine(a: list[float], b: list[float]) -> float:
++    """归一化点积（余弦）；零向量返回 0（口径对齐 vector_search.py:179-197 纯 Python 实现）。"""
++    na = sum(x * x for x in a) ** 0.5
++    nb = sum(x * x for x in b) ** 0.5
++    if na <= 0 or nb <= 0:
++        return 0.0
++    return sum(x * y for x, y in zip(a, b, strict=False)) / (na * nb)
++
++
++def _word_score(query_lower: str, chunk: Chunk) -> tuple[float, bool]:
++    """词面路打分：标题面（anchor/title）0.6 / path 0.25 / 正文按次数 ≤0.15。
++
++    返回 ``(归一化分, 精确命中)``；``精确命中`` = 标题面或 path 词面命中（保底 0.9 的
++    适用面）。**标题面含 anchor**（决策/FR 条目编号在 anchor 字段而非 title 文本——
++    查 D-xxx@vN / FR-xxx-NNN 的精确命中必须由 anchor 承载，执行期裁决 D-011@v1）。
++    """
++    anchor_hit = bool(chunk.anchor) and query_lower in (chunk.anchor or "").lower()
++    title_hit = bool(chunk.title) and query_lower in chunk.title.lower()
++    path_hit = query_lower in chunk.spec_path.lower()
++    score = 0.0
++    if anchor_hit or title_hit:
++        score += 0.6
++    if path_hit:
++        score += 0.25
++    hits = chunk.text.lower().count(query_lower)
++    if hits:
++        score += min(0.15, 0.05 * hits)
++    return min(score, 1.0), (anchor_hit or title_hit or path_hit)
++
++
++def _make_snippet(text: str, query: str) -> str:
++    """匹配上下文片段：词面命中取 ±120 字符窗口；纯语义命中取头部 240 字符。
++
++    换行折为空格（前端两行展示友好）；截断处补省略号。
++    """
++    if query:
++        idx = text.lower().find(query.lower())
++        if idx >= 0:
++            lo = max(0, idx - 120)
++            hi = min(len(text), idx + len(query) + 120)
++            core = text[lo:hi].replace("\n", " ").strip()
++            prefix = "…" if lo > 0 else ""
++            suffix = "…" if hi < len(text) else ""
++            return f"{prefix}{core}{suffix}"
++    core = text[:240].replace("\n", " ").strip()
++    return core + "…" if len(text) > 240 else core
++
++
++# ── 检索主体（路由侧经 run_in_threadpool 调用；embedder 参数供测试注入 fake）────
++
++
++def search_sync(
++    spec_root: Path,
++    workspace_key: str,
++    query: str,
++    limit: int,
++    embedder: object | None,
++    model_name: str,
++    *,
++    embedder_error: str | None = None,
++) -> dict:
++    """同步检索：返回 ``{results, model_ready, reason}``。
++
++    ``results`` 项 = ``{spec_path, kind, title, anchor, snippet, score}``（按融合分降序；
++    同文件同 anchor 去重取最高分）。embedder None（不可用）→ 纯词面结果 + ``model_ready=False``。
++    """
++    q = str(query or "").strip()
++    model_ready = embedder is not None
++    reason = None if model_ready else (embedder_error or "embedder unavailable")
++    if not q:
++        return {"results": [], "model_ready": model_ready, "reason": reason}
++    if corpus_fingerprint(spec_root) is None:
++        return {"results": [], "model_ready": model_ready, "reason": reason}
++
++    key = (workspace_key, model_name)
++    with _index_lock:
++        fp = corpus_fingerprint(spec_root)
++        cached = _indexes.get(key)
++        if cached is None or cached["fingerprint"] != fp:
++            cached = _build_index_locked(spec_root, key, embedder)
++            # 构建后复算：构建期间文件变更 → 立即重建（最多 2 轮，防持续写入死循环）
++            for _ in range(2):
++                if corpus_fingerprint(spec_root) == cached["fingerprint"]:
++                    break
++                cached = _build_index_locked(spec_root, key, embedder)
++        chunks: list[Chunk] = cached["chunks"]
++        vectors: list[list[float]] = cached["vectors"]
++
++    q_vec = embedder.embed([q])[0] if embedder is not None else None
++    q_lower = q.lower()
++    best: dict[tuple[str, str | None, str], tuple[float, Chunk]] = {}
++    for i, chunk in enumerate(chunks):
++        word, exact = _word_score(q_lower, chunk)
++        if q_vec is not None and i < len(vectors):
++            score = 0.6 * _cosine(q_vec, vectors[i]) + 0.4 * word
++            if exact:
++                score = max(score, 0.9)
++        else:
++            score = word
++        dedup_key = (chunk.spec_path, chunk.anchor, chunk.title)
++        cur = best.get(dedup_key)
++        if cur is None or score > cur[0]:
++            best[dedup_key] = (score, chunk)
++
++    # 零信号块过滤：融合分为 0（既无词面命中、向量零相似）不返回——「搜不到」空态
++    # 可达。更严的相关性阈值需真实语料标定（见 design R-03），本期只砍零信号。
++    ranked = sorted(
++        (pair for pair in best.values() if pair[0] > 0),
++        key=lambda pair: (-pair[0], pair[1].spec_path, pair[1].start_line),
++    )
++    results = [
++        {
++            "spec_path": c.spec_path,
++            "kind": c.kind,
++            "title": c.title,
++            "anchor": c.anchor,
++            "snippet": _make_snippet(c.text, q),
++            "score": round(score, 6),
++        }
++        for score, c in ranked[: max(1, int(limit))]
++    ]
++    return {"results": results, "model_ready": model_ready, "reason": reason}
+diff --git a/backend/app/modules/knowledge/tests/test_knowledge_search.py b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+new file mode 100644
+index 000000000..607c1fde0
+--- /dev/null
++++ b/backend/app/modules/knowledge/tests/test_knowledge_search.py
+@@ -0,0 +1,348 @@
++"""平台知识搜索服务单测（change 2026-10-15-platform-knowledge-search / task-01）。
++
++测试面（fastembed 不进测试依赖——embedder 全部 fake 注入，真模型属部署面）：
++
++- 扫描：knowledge/ + docs/ 全量收录、INDEX.md 零收录、symlink 跳过；
++- 切块三档：decision 条目（D-xxx@vN）/ fr 条目（FR-xxx-NNN）/ 标题块（## 切 + 超长滑窗
++  1500/1000/150）、frontmatter 排除；
++- kind 派生全表；
++- 指纹：文件未变二次查询零重建（embed_calls 计数）、增改后重建；
++- 融合检索：精确编号 rank=1（title 词面命中保底）、纯语义可召回（fake 向量近邻）、
++  embedder 不可用 → model_ready=False + 纯词面 + reason；
++- snippet：词面命中取 ±120 字符窗口；无词面命中取头部 240 字符。
++"""
++
++from __future__ import annotations
++
++import itertools
++from collections.abc import Iterator
++from pathlib import Path
++
++import pytest
++
++from app.modules.knowledge.search import (
++    Chunk,
++    chunk_markdown,
++    corpus_fingerprint,
++    reset_index_for_tests,
++    scan_corpus,
++    search_sync,
++)
++
++# ── fake embedder：字符桶计数向量（确定性；对齐 test_vector_search.py 形态）────────
++
++_BUCKET_CHARS = ["缓", "存", "索", "引", "会", "话", "状", "态"]
++
++
++class FakeEmbedder:
++    """字符桶计数向量：text.count(ch) per 桶——「会话状态」重的文本彼此相近。"""
++
++    def __init__(self) -> None:
++        self.embed_calls = 0
++        self.embedded_texts = 0
++
++    def embed(self, texts: list[str]) -> list[list[float]]:
++        self.embed_calls += 1
++        self.embedded_texts += len(texts)
++        return [[float(t.count(ch)) for ch in _BUCKET_CHARS] for t in texts]
++
++
++@pytest.fixture(autouse=True)
++def _reset_search_index() -> Iterator[None]:
++    """测试隔离：每个用例前后清空进程内索引缓存。"""
++    reset_index_for_tests()
++    yield
++    reset_index_for_tests()
++
++
++# ── 语料构造 helpers ─────────────────────────────────────────────────────────
++
++
++def _write(root: Path, rel: str, content: str) -> Path:
++    p = root / rel
++    p.parent.mkdir(parents=True, exist_ok=True)
++    p.write_text(content, encoding="utf-8")
++    return p
++
++
++DECISIONS_DOC = """---
++note: frontmatter 不入 embedding
++---
++
++## D-001@v1 缓存索引策略
++
++状态：implemented
++变更：2026-10-15-demo-change
++理由：索引只缓存不落库。
++
++## D-002@v1 会话状态点语义
++
++状态：implemented
++变更：2026-10-15-demo-change
++理由：行首状态点五态，转圈取活性推导。
++"""
++
++FR_DOC = """## FR-demo-001 搜索入口
++
++状态：active
++摘要：默认场景
++场景正文：
++- 场景：输入关键词失败时显示错误。
++
++## FR-demo-002 结果跳转
++
++状态：active
++摘要：默认场景
++场景正文：
++- 场景：点击结果定位到条目。
++"""
++
++
++def _mini_corpus(root: Path) -> Path:
++    """最小语料：decisions + fr + knowledge 手册 + docs 模块 + INDEX.md（应被排除）。"""
++    _write(root, "knowledge/decisions/demo.md", DECISIONS_DOC)
++    _write(root, "knowledge/fr/demo.md", FR_DOC)
++    _write(
++        root,
++        "knowledge/known-issues.md",
++        "# 已知问题合集\n\n## 会话日志中文乱码\n\nWindows 控制台码页导致落库即坏。\n",
++    )
++    _write(
++        root,
++        "knowledge/INDEX.md",
++        "# Knowledge Index\n\n- 不该被收录 → [x](x.md#y)\n",
++    )
++    _write(
++        root,
++        "docs/demo/modules/frontend.md",
++        "---\nschema_version: 1\n---\n# 前端控制台（frontend）\n\n## 定位\n\nWeb 控制台。\n",
++    )
++    _write(root, "docs/demo/glossary.md", "# 术语表\n\n## 会话状态点\n\n五态定义。\n")
++    _write(root, "changes/some-change/design.md", "# 变更设计（不应收录）\n")
++    return root
++
++
++# ── 扫描 ─────────────────────────────────────────────────────────────────────
++
++
++def test_scan_corpus_covers_knowledge_and_docs_excludes_index_and_changes(
++    tmp_path: Path,
++) -> None:
++    _mini_corpus(tmp_path)
++    chunks = scan_corpus(tmp_path)
++    paths = {c.spec_path for c in chunks}
++    assert any(p.startswith("knowledge/decisions/") for p in paths)
++    assert any(p.startswith("knowledge/fr/") for p in paths)
++    assert any(p.startswith("docs/demo/modules/") for p in paths)
++    # INDEX.md 与 changes/ 零收录
++    assert all(not p.endswith("INDEX.md") for p in paths)
++    assert all(not p.startswith("changes/") for p in paths)
++    # spec_path 恒为 POSIX 形态（Windows 分隔符不得出现）
++    assert all("\\" not in p for p in paths)
++
++
++def test_scan_corpus_missing_dirs_returns_empty(tmp_path: Path) -> None:
++    assert scan_corpus(tmp_path) == []
++
++
++# ── kind 派生全表 ────────────────────────────────────────────────────────────
++
++
++@pytest.mark.parametrize(
++    ("spec_path", "kind"),
++    [
++        ("knowledge/decisions/frontend.md", "decision"),
++        ("knowledge/fr/backend.md", "fr"),
++        ("knowledge/proposed/slug.md", "proposed"),
++        ("knowledge/generated/gen.md", "generated"),
++        ("knowledge/known-issues.md", "knowledge"),
++        ("docs/p/modules/frontend.md", "module"),
++        ("docs/p/scan/PROJECT.md", "scan"),
++        ("docs/p/flows/auth-flow.md", "flow"),
++        ("docs/p/glossary.md", "glossary"),
++    ],
++)
++def test_kind_derivation_full_table(tmp_path: Path, spec_path: str, kind: str) -> None:
++    chunks = chunk_markdown(spec_path, "## 小节\n\n正文。\n")
++    assert chunks, "至少产出一个块"
++    assert all(c.kind == kind for c in chunks)
++
++
++# ── 切块：条目档 ─────────────────────────────────────────────────────────────
++
++
++def test_chunk_decision_entries_anchor_and_title() -> None:
++    chunks = chunk_markdown("knowledge/decisions/demo.md", DECISIONS_DOC)
++    anchors = [c.anchor for c in chunks]
++    assert anchors == ["D-001@v1", "D-002@v1"]
++    assert chunks[0].title == "缓存索引策略"
++    assert "缓存" in chunks[0].text
++    # frontmatter 不入 text
++    assert all("frontmatter" not in c.text for c in chunks)
++    # start_line 指向标题行（1-based；frontmatter 占前 3 行 + 空行）
++    assert chunks[0].start_line == 5
++
++
++def test_chunk_fr_entries_anchor_and_title() -> None:
++    chunks = chunk_markdown("knowledge/fr/demo.md", FR_DOC)
++    assert [c.anchor for c in chunks] == ["FR-demo-001", "FR-demo-002"]
++    assert chunks[1].title == "结果跳转"
++
++
++# ── 切块：标题档 + 滑窗 + frontmatter ────────────────────────────────────────
++
++
++def test_chunk_generic_h2_sections_with_slug_anchor() -> None:
++    doc = "---\na: 1\n---\n# 文档标题\n\n## 会话状态点\n\n正文 A。\n\n## 缓存索引\n\n正文 B。\n"
++    chunks = chunk_markdown("docs/p/modules/demo.md", doc)
++    titles = [c.title for c in chunks]
++    assert titles == ["会话状态点", "缓存索引"]
++    assert chunks[0].anchor == "会话状态点"  # slugify：中文原样保留
++    assert all("a: 1" not in c.text for c in chunks)
++
++
++def test_chunk_long_section_slides_with_overlap() -> None:
++    body = "\n".join(f"第 {i} 行填充内容缓存索引会话状态。" for i in range(300))
++    doc = f"## 长小节\n\n{body}\n"
++    chunks = chunk_markdown("docs/p/modules/big.md", doc)
++    assert len(chunks) > 1, "超长小节应被滑窗切为多块"
++    assert all(c.title == "长小节" for c in chunks)
++    # 相邻块重叠 >0（后块 start_line 回退）
++    for prev, nxt in itertools.pairwise(chunks):
++        assert nxt.start_line <= prev.start_line + _window_line_span(prev)
++    # 每块不超过阈值上限的宽松界（单行硬切场景除外）
++    assert all(len(c.text) <= 1500 + 200 for c in chunks)
++
++
++def _window_line_span(chunk: Chunk) -> int:
++    return chunk.text.count("\n") + 1
++
++
++def test_chunk_file_without_sections_is_single_windowed_chunk() -> None:
++    doc = "无标题纯文本。\n" * 200
++    chunks = chunk_markdown("knowledge/note.md", doc)
++    assert chunks
++    assert all(c.anchor is None for c in chunks)
++
++
++# ── 指纹 ─────────────────────────────────────────────────────────────────────
++
++
++def test_corpus_fingerprint_none_when_dirs_absent(tmp_path: Path) -> None:
++    assert corpus_fingerprint(tmp_path) is None
++
++
++def test_search_reuses_index_until_files_change(tmp_path: Path) -> None:
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out1 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
++    assert out1["model_ready"] is True
++    calls_after_first = fake.embed_calls
++    assert calls_after_first >= 2  # 语料构建 1 次 + query 1 次
++    out2 = search_sync(tmp_path, "ws-1", "会话状态点", 5, fake, "fake-model")
++    assert fake.embed_calls == calls_after_first + 1, "文件未变仅 query embed，不重建索引"
++    assert out2["results"]
++    # 语料变更 → 重建（再多一次全量 embed）
++    _write(tmp_path, "knowledge/known-issues.md", "# 新内容\n\n## 新增小节\n\n状态点补充。\n")
++    search_sync(tmp_path, "ws-1", "状态点", 5, fake, "fake-model")
++    assert fake.embed_calls >= calls_after_first + 3, "文件变更后应重建索引"
++
++
++# ── 融合检索 ─────────────────────────────────────────────────────────────────
++
++
++def test_search_exact_decision_id_ranks_first(tmp_path: Path) -> None:
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = search_sync(tmp_path, "ws-x", "D-002@v1", 5, fake, "fake-model")
++    results = out["results"]
++    assert results, "精确编号应命中"
++    top = results[0]
++    assert top["anchor"] == "D-002@v1"
++    assert top["spec_path"] == "knowledge/decisions/demo.md"
++    assert top["score"] >= 0.9
++    assert {
++        "spec_path",
++        "kind",
++        "title",
++        "anchor",
++        "snippet",
++        "score",
++    } <= set(top.keys())
++
++
++def test_search_pure_semantic_recall_without_word_hit(tmp_path: Path) -> None:
++    _write(
++        tmp_path,
++        "knowledge/manual.md",
++        "# 手册\n\n## 会话过程\n\n列表里的状态点会转圈。\n",
++    )
++    _write(
++        tmp_path,
++        "knowledge/other.md",
++        "# 其他\n\n## 缓存索引分发\n\n缓存索引只在进程内。\n",
++    )
++    fake = FakeEmbedder()
++    # 「会话状态」在语料中无连续子串（「会话过程」/「状态点」分离）→ 纯语义路召回
++    out = search_sync(tmp_path, "ws-sem", "会话状态", 5, fake, "fake-model")
++    results = out["results"]
++    assert results, "纯语义应可召回"
++    assert results[0]["spec_path"] == "knowledge/manual.md"
++    assert results[0]["title"] == "会话过程"
++
++
++def test_search_degraded_word_only_when_embedder_unavailable(tmp_path: Path) -> None:
++    _mini_corpus(tmp_path)
++    out = search_sync(
++        tmp_path,
++        "ws-deg",
++        "会话状态点",
++        5,
++        None,
++        "fake-model",
++        embedder_error="ImportError: fastembed",
++    )
++    assert out["model_ready"] is False
++    assert out["reason"] == "ImportError: fastembed"
++    assert out["results"], "降级仍应返回词面结果"
++    assert all(r["score"] <= 1.0 for r in out["results"])
++    # 词面命中：snippet 含查询词
++    assert any("会话状态点" in r["snippet"] for r in out["results"])
++
++
++def test_search_empty_query_returns_empty(tmp_path: Path) -> None:
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = search_sync(tmp_path, "ws-eq", "   ", 5, fake, "fake-model")
++    assert out["results"] == []
++    assert out["model_ready"] is True
++    assert out["reason"] is None
++
++
++def test_search_snippet_window_around_match(tmp_path: Path) -> None:
++    filler = "填充" * 200
++    doc = f"## 目标小节\n\n{filler}会话状态点{filler}\n"
++    _write(tmp_path, "knowledge/snip.md", doc)
++    fake = FakeEmbedder()
++    out = search_sync(tmp_path, "ws-snip", "会话状态点", 3, fake, "fake-model")
++    results = out["results"]
++    assert results
++    snippet = results[0]["snippet"]
++    assert "会话状态点" in snippet
++    # 窗口截断：snippet 显著短于整段
++    assert len(snippet) < 400
++
++
++def test_search_missing_corpus_returns_empty(tmp_path: Path) -> None:
++    fake = FakeEmbedder()
++    out = search_sync(tmp_path, "ws-none", "任意", 5, fake, "fake-model")
++    assert out["results"] == []
++    assert out["model_ready"] is True
++
++
++def test_search_unrelated_query_returns_empty_state(tmp_path: Path) -> None:
++    """零信号块过滤：无关查询（无词面命中 + 向量零相似）→ 空态可达，不返回 0 分噪声。"""
++    _mini_corpus(tmp_path)
++    fake = FakeEmbedder()
++    out = search_sync(tmp_path, "ws-zero", "量子力学哈密顿算子", 5, fake, "fake-model")
++    assert out["results"] == [], "无信号查询应返回空（前端空态）"
+diff --git a/backend/app/modules/knowledge/tests/test_router.py b/backend/app/modules/knowledge/tests/test_router.py
+index a9aa976a2..d9194db55 100644
+--- a/backend/app/modules/knowledge/tests/test_router.py
++++ b/backend/app/modules/knowledge/tests/test_router.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ 
+ import shutil
+ import uuid
++from collections.abc import Iterator
+ from pathlib import Path
+ 
+ import pytest
+@@ -67,7 +68,8 @@ async def workspace_with_knowledge(
+     spec_ws.spec_root = str(root)
+     await db_session.commit()
+ 
+-    return {"ws_id": ws_id}
++    # root 透出供知识搜索用例写补充语料（向后兼容：既有用例只取 ws_id）。
++    return {"ws_id": ws_id, "root": root}
+ 
+ 
+ async def test_list_knowledge(
+@@ -1209,3 +1211,221 @@ async def test_list_knowledge_includes_fr_zone(
+     assert resp.status_code == 200, resp.text
+     items = resp.json()["items"]
+     assert [(i["filename"], i["zone"]) for i in items] == [("fr/host-fs-handler.md", "fr")]
++
++
++# ── 平台知识搜索端点（change 2026-10-15-platform-knowledge-search / task-02）────
++#
++# embedder 全 fake 注入（get_embedder monkeypatch）——真模型初始化属部署面，测试不触。
++# has_permission 在权限过滤用例中 monkeypatch（构造「无 SCAN_DOCS_READ」/「无任何
++# 权限」两类主体；auth_headers 是 admin 主体，短路全量）。
++
++
++class _FakeSearchEmbedder:
++    """字符桶计数向量（端到端契约不需要真语义，形态对齐 test_knowledge_search.py）。"""
++
++    _BUCKETS = ["缓", "存", "索", "引", "会", "话", "状", "态"]
++
++    def embed(self, texts: list[str]) -> list[list[float]]:
++        return [[float(t.count(ch)) for ch in self._BUCKETS] for t in texts]
++
++
++@pytest.fixture(autouse=True)
++def _clean_search_index() -> Iterator[None]:
++    """知识搜索索引缓存用例前后清空（键含 workspace_id，仍求确定性干净）。"""
++    from app.modules.knowledge.search import reset_index_for_tests
++
++    reset_index_for_tests()
++    yield
++    reset_index_for_tests()
++
++
++def _write_docs_corpus(root: Path) -> None:
++    """补一份 docs/ 语料（fixture 只铺 knowledge/，docs 过滤用例需要两类都在场）。"""
++    d = root / "docs" / "demo" / "modules"
++    d.mkdir(parents=True, exist_ok=True)
++    (d / "frontend.md").write_text(
++        "---\nschema_version: 1\n---\n# 前端控制台（frontend）\n\n"
++        "## 会话状态点\n\n五态定义与转圈推导。\n",
++        encoding="utf-8",
++    )
++
++
++async def test_knowledge_search_happy_path_contract(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """契约：200 + {ok, results[{spec_path,kind,title,anchor,snippet,score}], model_ready, reason}。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "uncategorized"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["ok"] is True
++    assert body["model_ready"] is True
++    assert body["reason"] is None
++    assert body["results"], "词面命中应有结果"
++    item = body["results"][0]
++    assert {"spec_path", "kind", "title", "anchor", "snippet", "score"} <= set(item.keys())
++    assert item["spec_path"] == "knowledge/uncategorized.md"
++    assert item["kind"] == "knowledge"
++    assert item["score"] >= 0.9  # title 词面命中保底
++
++
++async def test_knowledge_search_requires_knowledge_read(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """无 KNOWLEDGE_READ → 403（权限依赖同走 has_permission 权威函数）。"""
++    from app.core import auth_deps
++    from app.modules.auth import rbac
++
++    async def _deny_all(session, *, user, permission, workspace_id):
++        return False
++
++    # 双 patch：auth_deps 是导入时绑定（require_permission 门控依赖），rbac 模块属性
++    # 是端点函数内 ``from app.modules.auth.rbac import has_permission`` 的取值源。
++    monkeypatch.setattr(auth_deps, "has_permission", _deny_all)
++    monkeypatch.setattr(rbac, "has_permission", _deny_all)
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "x"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 403, resp.text
++
++
++async def test_knowledge_search_unknown_workspace_404(
++    client, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """未知 workspace → 404（WorkspaceService.get 口径）。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    resp = await client.post(
++        f"/api/workspaces/{uuid.uuid4()}/knowledge/search",
++        json={"query": "x"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 404, resp.text
++
++
++async def test_knowledge_search_filters_docs_without_scan_docs_permission(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """无 SCAN_DOCS_READ：docs/ 项被服务端过滤，知识类结果照常返回（非 403）。"""
++    from app.core import auth_deps
++    from app.modules.auth import rbac
++    from app.modules.auth.permissions import Permission
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    _write_docs_corpus(workspace_with_knowledge["root"])
++
++    async def _deny_scan_docs(session, *, user, permission, workspace_id):
++        return permission is not Permission.SCAN_DOCS_READ
++
++    # 双 patch（同 403 用例注释）：门控 KNOWLEDGE_READ 放行、docs 判定面拒绝。
++    monkeypatch.setattr(auth_deps, "has_permission", _deny_scan_docs)
++    monkeypatch.setattr(rbac, "has_permission", _deny_scan_docs)
++    ws_id = workspace_with_knowledge["ws_id"]
++    # 同一 query 同时命中知识（uncategorized）与 docs（会话状态点）两类语料
++    resp_kn = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "uncategorized"},
++        headers=auth_headers,
++    )
++    assert resp_kn.status_code == 200, resp_kn.text
++    assert resp_kn.json()["results"], "知识类结果应照常返回"
++    assert all(not r["spec_path"].startswith("docs/") for r in resp_kn.json()["results"])
++    resp_docs = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "会话状态点"},
++        headers=auth_headers,
++    )
++    assert resp_docs.status_code == 200, resp_docs.text
++    assert all(not r["spec_path"].startswith("docs/") for r in resp_docs.json()["results"]), (
++        "docs 命中被过滤后不应残留"
++    )
++
++
++async def test_knowledge_search_admin_sees_docs_results(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """admin（is_platform_admin 短路）→ docs 结果全量可见。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    _write_docs_corpus(workspace_with_knowledge["root"])
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "会话状态点"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    results = resp.json()["results"]
++    assert results
++    assert any(r["spec_path"].startswith("docs/") for r in results)
++    docs_item = next(r for r in results if r["spec_path"].startswith("docs/"))
++    assert docs_item["kind"] == "module"
++
++
++async def test_knowledge_search_degraded_model_not_ready(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """embedder 不可用 → fail-soft：200 + model_ready=False + reason + 纯词面结果非空。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(
++        vector_search, "get_embedder", lambda name: (None, "ImportError: fastembed")
++    )
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "uncategorized"},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    body = resp.json()
++    assert body["model_ready"] is False
++    assert body["reason"] == "ImportError: fastembed"
++    assert body["results"], "降级仍应返回纯词面结果"
++
++
++async def test_knowledge_search_blank_query_returns_empty(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """空白 query → 200 空结果（不报错）。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "   "},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert resp.json()["results"] == []
++
++
++async def test_knowledge_search_limit_clamped(
++    client, workspace_with_knowledge: dict, auth_headers: dict[str, str], monkeypatch
++) -> None:
++    """limit 超界被钳到 1..50（999 → 不报错且结果数 ≤50）。"""
++    from app.modules.knowledge import vector_search
++
++    monkeypatch.setattr(vector_search, "get_embedder", lambda name: (_FakeSearchEmbedder(), None))
++    ws_id = workspace_with_knowledge["ws_id"]
++    resp = await client.post(
++        f"/api/workspaces/{ws_id}/knowledge/search",
++        json={"query": "uncategorized", "limit": 999},
++        headers=auth_headers,
++    )
++    assert resp.status_code == 200, resp.text
++    assert len(resp.json()["results"]) <= 50
+diff --git a/backend/openapi.json b/backend/openapi.json
+index afba0fc7a..a7a06b4fd 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -21780,6 +21780,60 @@
+         }
+       }
+     },
++    "/api/workspaces/{workspace_id}/knowledge/search": {
++      "post": {
++        "tags": [
++          "knowledge"
++        ],
++        "summary": "Search Knowledge",
++        "description": "知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。\n\n- 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，\n  vector_router.py 同款）；\n- docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一\n  权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取\n  3×limit 候选再过滤截断，防 top-k 被过滤挤空；\n- embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。",
++        "operationId": "search_knowledge_api_workspaces__workspace_id__knowledge_search_post",
++        "parameters": [
++          {
++            "name": "workspace_id",
++            "in": "path",
++            "required": true,
++            "schema": {
++              "type": "string",
++              "format": "uuid",
++              "title": "Workspace Id"
++            }
++          }
++        ],
++        "requestBody": {
++          "required": true,
++          "content": {
++            "application/json": {
++              "schema": {
++                "$ref": "#/components/schemas/KnowledgeSearchIn"
++              }
++            }
++          }
++        },
++        "responses": {
++          "200": {
++            "description": "Successful Response",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/KnowledgeSearchOut"
++                }
++              }
++            }
++          },
++          "422": {
++            "description": "Validation Error",
++            "content": {
++              "application/json": {
++                "schema": {
++                  "$ref": "#/components/schemas/HTTPValidationError"
++                }
++              }
++            }
++          }
++        }
++      }
++    },
+     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
+       "get": {
+         "tags": [
+@@ -52064,6 +52118,108 @@
+         "title": "KnowledgeProposeIn",
+         "description": "POST /knowledge/propose 请求体（手工录入候选）。"
+       },
++      "KnowledgeSearchIn": {
++        "properties": {
++          "query": {
++            "type": "string",
++            "title": "Query"
++          },
++          "limit": {
++            "type": "integer",
++            "title": "Limit",
++            "default": 20
++          }
++        },
++        "type": "object",
++        "required": [
++          "query"
++        ],
++        "title": "KnowledgeSearchIn",
++        "description": "检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。"
++      },
++      "KnowledgeSearchOut": {
++        "properties": {
++          "ok": {
++            "type": "boolean",
++            "title": "Ok",
++            "default": true
++          },
++          "results": {
++            "items": {
++              "$ref": "#/components/schemas/KnowledgeSearchResultItem"
++            },
++            "type": "array",
++            "title": "Results"
++          },
++          "model_ready": {
++            "type": "boolean",
++            "title": "Model Ready",
++            "default": true
++          },
++          "reason": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Reason"
++          }
++        },
++        "type": "object",
++        "required": [
++          "results"
++        ],
++        "title": "KnowledgeSearchOut",
++        "description": "检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。"
++      },
++      "KnowledgeSearchResultItem": {
++        "properties": {
++          "spec_path": {
++            "type": "string",
++            "title": "Spec Path"
++          },
++          "kind": {
++            "type": "string",
++            "title": "Kind"
++          },
++          "title": {
++            "type": "string",
++            "title": "Title"
++          },
++          "anchor": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Anchor"
++          },
++          "snippet": {
++            "type": "string",
++            "title": "Snippet"
++          },
++          "score": {
++            "type": "number",
++            "title": "Score"
++          }
++        },
++        "type": "object",
++        "required": [
++          "spec_path",
++          "kind",
++          "title",
++          "snippet",
++          "score"
++        ],
++        "title": "KnowledgeSearchResultItem",
++        "description": "单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。"
++      },
+       "KnowledgeStatsOut": {
+         "properties": {
+           "coverage": {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+index a63f43e45..ad40342d9 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+@@ -79,6 +79,9 @@ vi.mock("@/lib/knowledge", async (importOriginal) => {
+     // task-04（2026-09-20-knowledge-effect-panel）：顶部运营仪表盘消费的
+     // stats 端点（真实请求会打 jsdom 缺失的 fetch；缺省零值指标 = 空态）。
+     getKnowledgeStats: vi.fn(),
++    // task-03（2026-10-15-platform-knowledge-search）：搜索端点（页面输入触发
++    // 真实请求会打 jsdom 缺失的 fetch；用例按需 mockResolvedValue 驱动结果态）。
++    searchKnowledge: vi.fn(),
+   };
+ });
+ 
+@@ -147,13 +150,23 @@ vi.mock("@uiw/react-markdown-preview", () => ({
+ // WorkspaceTabs 的 usePathname 需要 app router 上下文，jsdom 下 mock 掉
+ // （知识库页本身用 params prop，不受影响）。useSearchParams（2026-09-25-change-
+ // detail-assets-usability / FR-01/02 外部深链入口）走 navState 可覆写——用例内
+-// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。
++// 改 navState.searchParams 即可驱动 ?file=&anchor= 落位。useRouter.push（task-03
++// 搜索结果跳转）同为 navState.push 记录断言。
+ const navState = vi.hoisted(() => ({
+   searchParams: new URLSearchParams(),
++  push: vi.fn(),
+ }));
+ vi.mock("next/navigation", () => ({
+   usePathname: () => "/workspaces/ws-1/knowledge",
+   useSearchParams: () => navState.searchParams,
++  useRouter: () => ({
++    push: navState.push,
++    replace: vi.fn(),
++    back: vi.fn(),
++    forward: vi.fn(),
++    refresh: vi.fn(),
++    prefetch: vi.fn(),
++  }),
+ }));
+ 
+ import KnowledgePage from "@/app/(dashboard)/workspaces/[id]/knowledge/page";
+@@ -168,6 +181,7 @@ import {
+   normalizeKnowledgeFileParam,
+   previewMergeKnowledge,
+   rejectKnowledge,
++  searchKnowledge,
+ } from "@/lib/knowledge";
+ import { closestAntdTreeRow, queryAntdTreeIcon, closestAntdTreeNodeWrapper } from "@/test/dom-queries";
+ 
+@@ -970,3 +984,197 @@ describe("WorkspaceTabs「知识库」tab（ql-20260821-015）", () => {  it("
+     expect(links[knowledgeIdx]).toHaveAttribute("href", "/workspaces/ws-1/knowledge");
+   });
+ });
++
++
++// ── task-03（2026-10-15-platform-knowledge-search）：知识搜索交互 ─────────────
++//
++// 覆盖：输入 debounce → 结果列表替换树（徽章/片段高亮/匹配度）；清空还原树；
++// 点击知识类结果 → router.push URL 深链；URL 已等值 → 直调 selectEntry（同 key
++// 重选边界）；点击 docs 类结果 → scan-docs ?path= 跳转；降级提示条；失败错误态 +
++// 重试。
++
++const mockSearch = searchKnowledge as unknown as ReturnType<typeof vi.fn>;
++
++function searchItem(partial: Partial<Record<string, unknown>> = {}) {
++  return {
++    spec_path: "knowledge/decisions/demo.md",
++    kind: "decision",
++    title: "会话状态点语义",
++    anchor: "D-012@v1",
++    snippet: "会话状态点的五态定义：失败红点、完成绿点。",
++    score: 0.91,
++    ...partial,
++  };
++}
++
++async function typeSearch(value: string) {
++  fireEvent.change(screen.getByTestId("knowledge-search-input"), {
++    target: { value },
++  });
++}
++
++describe("知识搜索（task-03）", () => {
++  it("输入关键词后结果列表替换文件树：徽章/匹配度/片段高亮齐全", async () => {
++    mockSearch.mockResolvedValue({
++      ok: true,
++      results: [
++        searchItem(),
++        searchItem({
++          spec_path: "docs/demo/modules/frontend.md",
++          kind: "module",
++          title: "前端控制台",
++          anchor: null,
++          snippet: "会话列表面板说明。",
++          score: 0.7,
++        }),
++      ],
++      model_ready: true,
++      reason: null,
++    });
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话状态点");
++    await waitFor(() => expect(mockSearch).toHaveBeenCalledWith(WS, { query: "会话状态点" }));
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-results")).toBeInTheDocument(),
++    );
++
++    // 树被替换：树里的文件名不再渲染
++    expect(screen.queryByText("conventions.md")).not.toBeInTheDocument();
++    // 徽章（kind 中文化）与匹配度
++    expect(screen.getByText("决策")).toBeInTheDocument();
++    expect(screen.getByText("模块文档")).toBeInTheDocument();
++    expect(screen.getByText("0.91")).toBeInTheDocument();
++    // 片段中查询词被 <mark> 高亮
++    const marks = document.querySelectorAll("mark");
++    expect(marks.length).toBeGreaterThan(0);
++    expect(marks[0]?.textContent).toBe("会话状态点");
++  });
++
++  it("清除搜索词后还原文件树", async () => {
++    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-results")).toBeInTheDocument(),
++    );
++    await typeSearch("");
++    await waitFor(() => expect(screen.getByText("conventions.md")).toBeInTheDocument());
++    expect(screen.queryByTestId("knowledge-search-results")).not.toBeInTheDocument();
++  });
++
++  it("点击知识类结果 → router.push URL 深链（file+anchor，可分享）", async () => {
++    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
++    );
++    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
++    expect(navState.push).toHaveBeenCalledWith(
++      `/workspaces/${WS}/knowledge?file=${encodeURIComponent("decisions/demo.md")}&anchor=${encodeURIComponent("D-012@v1")}`,
++    );
++  });
++
++  it("URL 与目标已等值时点击同结果直调 selectEntry（同 key 重选边界）", async () => {
++    mockSearch.mockResolvedValue({ ok: true, results: [searchItem()], model_ready: true, reason: null });
++    // 当前 URL 已指向该文件与锚点（深链已消费态）
++    navState.searchParams = new URLSearchParams({
++      file: "decisions/demo.md",
++      anchor: "D-012@v1",
++    });
++    mockGet.mockResolvedValue(
++      entry({
++        filename: "decisions/demo.md",
++        path: ".sillyspec/knowledge/decisions/demo.md",
++        zone: "decisions",
++        content: "# 决策\n\n内容",
++      }),
++    );
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
++    );
++    mockGet.mockClear();
++    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
++    // push 不再发生（URL 等值），直调 selectEntry → getKnowledge 被调
++    expect(navState.push).not.toHaveBeenCalled();
++    expect(mockGet).toHaveBeenCalledWith(WS, "decisions/demo.md");
++  });
++
++  it("点击 docs 类结果 → 跳转模块文档页 ?path= 深链", async () => {
++    mockSearch.mockResolvedValue({
++      ok: true,
++      results: [
++        searchItem({
++          spec_path: "docs/demo/modules/frontend.md",
++          kind: "module",
++          title: "前端控制台",
++          anchor: null,
++        }),
++      ],
++      model_ready: true,
++      reason: null,
++    });
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("前端");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
++    );
++    fireEvent.click(screen.getByTestId("knowledge-search-result-0"));
++    expect(navState.push).toHaveBeenCalledWith(
++      `/workspaces/${WS}/scan-docs?path=${encodeURIComponent("docs/demo/modules/frontend.md")}`,
++    );
++  });
++
++  it("语义模型不可用 → 展示降级提示条（结果仍渲染）", async () => {
++    mockSearch.mockResolvedValue({
++      ok: true,
++      results: [searchItem()],
++      model_ready: false,
++      reason: "ImportError: fastembed",
++    });
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-degraded")).toBeInTheDocument(),
++    );
++    expect(screen.getByTestId("knowledge-search-degraded").textContent).toContain(
++      "语义模型暂不可用",
++    );
++    expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument();
++  });
++
++  it("搜索失败 → 错误态 + 重试再发请求", async () => {
++    mockSearch.mockRejectedValueOnce(new Error("boom"));
++    renderPage();
++    await waitForTree(["conventions.md"]);
++
++    await typeSearch("会话");
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-error")).toBeInTheDocument(),
++    );
++    mockSearch.mockResolvedValueOnce({
++      ok: true,
++      results: [searchItem()],
++      model_ready: true,
++      reason: null,
++    });
++    fireEvent.click(screen.getByRole("button", { name: "重试" }));
++    await waitFor(() =>
++      expect(screen.getByTestId("knowledge-search-result-0")).toBeInTheDocument(),
++    );
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+index fb1881b28..ed1c57a0b 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx
+@@ -270,3 +270,91 @@ describe("运营指标面板挂载（task-03 / 2026-09-21-scan-docs-ops-panel）
+     await waitFor(() => expect(mockStats).toHaveBeenCalledWith(WS));
+   });
+ });
++
++
++// ── task-04（2026-10-15-platform-knowledge-search）：?path= 深链 ─────────────
++//
++// 覆盖：?path=（docs/ 前缀形态）归一匹配后自动选中；目标未同步静默待命、
++// 列表刷新出现后自动选中；用户手动点选后刷新不再抢跳（消费标记）；无参数零副作用。
++
++const navState = vi.hoisted(() => ({
++  searchParams: new URLSearchParams(),
++}));
++vi.mock("next/navigation", () => ({
++  useSearchParams: () => navState.searchParams,
++}));
++
++describe("scan-docs ?path= 深链（task-04）", () => {
++  it("?path=（docs/ 前缀形态）命中列表目标：归一匹配后自动选中并展示详情", async () => {
++    navState.searchParams = new URLSearchParams({ path: "docs/backend/ARCHITECTURE.md" });
++    mockGetDoc.mockResolvedValue(
++      summary({
++        id: "id-arch",
++        path: "backend/ARCHITECTURE.md",
++        title: "架构文档",
++        content: "# hello",
++      }),
++    );
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
++    await waitFor(() => expect(screen.getByText("架构文档")).toBeInTheDocument());
++  });
++
++  it("目标未同步：静默待命（不报错不发详情请求），列表刷新出现后自动选中", async () => {
++    navState.searchParams = new URLSearchParams({ path: "backend/NEW.md" });
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    expect(mockGetDoc).not.toHaveBeenCalled();
++
++    // 列表刷新（点「重新扫描」触发 fetchDocs）后目标出现 → 自动选中
++    mockList.mockResolvedValue({
++      items: [
++        summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", doc_type: "scan" }),
++        summary({ id: "id-readme", path: "README.md", source_member_id: "member-12345678" }),
++        summary({ id: "id-new", path: "backend/NEW.md" }),
++      ],
++    });
++    mockGetDoc.mockResolvedValue(
++      summary({ id: "id-new", path: "backend/NEW.md", title: "新文档", content: "" }),
++    );
++    fireEvent.click(screen.getByRole("button", { name: "重新扫描" }));
++    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-new"));
++  });
++
++  it("用户手动点选后列表刷新不再自动跳转（消费标记）", async () => {
++    navState.searchParams = new URLSearchParams({ path: "backend/NEW.md" });
++    mockGetDoc.mockResolvedValue(
++      summary({
++        id: "id-arch",
++        path: "backend/ARCHITECTURE.md",
++        title: "架构文档",
++        content: "# hello",
++      }),
++    );
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    fireEvent.click(
++      screen.getByText("ARCHITECTURE.md").closest(".ant-tree-node-content-wrapper")!,
++    );
++    await waitFor(() => expect(mockGetDoc).toHaveBeenCalledWith(WS, "id-arch"));
++
++    // 列表刷新出现 NEW.md——已消费（手动点选），不再自动抢跳
++    mockList.mockResolvedValue({
++      items: [
++        summary({ id: "id-arch", path: "backend/ARCHITECTURE.md", doc_type: "scan" }),
++        summary({ id: "id-readme", path: "README.md", source_member_id: "member-12345678" }),
++        summary({ id: "id-new", path: "backend/NEW.md" }),
++      ],
++    });
++    fireEvent.click(screen.getByRole("button", { name: "重新扫描" }));
++    await waitForTree(["NEW.md"]);
++    expect(mockGetDoc).not.toHaveBeenCalledWith(WS, "id-new");
++  });
++
++  it("无 ?path= 参数：零副作用（不因深链拉详情）", async () => {
++    renderPage();
++    await waitForTree(["backend", "ARCHITECTURE.md"]);
++    expect(mockGetDoc).not.toHaveBeenCalled();
++  });
++});
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+index 7888f0817..bcfd4c9da 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx
+@@ -44,10 +44,10 @@
+  */
+ 
+ import Link from "next/link";
+-import { useSearchParams } from "next/navigation";
++import { useRouter, useSearchParams } from "next/navigation";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Popconfirm, Tree, type TreeProps } from "antd";
++import { Input, Popconfirm, Tree, type TreeProps } from "antd";
+ import type { DataNode } from "antd/es/tree";
+ import type { ReactNode } from "react";
+ 
+@@ -75,7 +75,9 @@ import {
+   // 沉淀资产卡条目预览弹窗取数前同款归一，避免组件反向 import 页面模块）。
+   normalizeKnowledgeFileParam,
+   rejectKnowledge,
++  searchKnowledge,
+   type KnowledgeEntry,
++  type KnowledgeSearchResultItem,
+ } from "@/lib/knowledge";
+ import { useSession } from "@/stores/session";
+ import "@uiw/react-markdown-preview/markdown.css";
+@@ -91,6 +93,62 @@ const TREE_PANEL_MIN_W = 200;
+ const TREE_PANEL_MAX_W = 480;
+ const TREE_PANEL_WIDTH_KEY = "sillyhub-knowledge-tree-width";
+ 
++// ── 知识搜索（change 2026-10-15-platform-knowledge-search / FR-01~FR-05）────────
++// 状态优先级说明：搜索词非空时结果列表替换树视图（同一列表位两种视图）；点击
++// knowledge/ 类结果经 URL 深链（?file=&anchor=）走既有深链通路就地定位，docs/
++// 类结果跳模块文档页 ?path= 深链。
++
++/** 搜索框输入 debounce（对齐 scan-docs 页同款节流）。 */
++const SEARCH_DEBOUNCE_MS = 300;
++
++/** kind（后端由 spec_path 派生）→ 中文徽章文案。 */
++const SEARCH_KIND_LABELS: Record<string, string> = {
++  decision: "决策",
++  fr: "需求",
++  proposed: "待审核",
++  generated: "自动生成",
++  knowledge: "知识",
++  module: "模块文档",
++  scan: "扫描",
++  flow: "流程",
++  glossary: "术语",
++};
++
++/** kind → 徽章配色（brand 阶随主题换肤；module/scan/flow 等文档类走信息青）。 */
++function searchKindClass(kind: string): string {
++  switch (kind) {
++    case "decision":
++      return "bg-brand-100 text-brand-700";
++    case "fr":
++      return "bg-info/10 text-info";
++    case "proposed":
++      return "bg-destructive/10 text-destructive";
++    default:
++      return "bg-muted text-muted-foreground";
++  }
++}
++
++/**
++ * 片段渲染：query 词面子串以 ``<mark>`` 高亮（brand 阶）。
++ *
++ * 用 React 文本节点拼接（禁止 dangerouslySetInnerHTML——片段源自仓库文件不
++ * 可信，且后端 snippet 已是纯文本）。
++ */
++function renderSearchSnippet(snippet: string, query: string): ReactNode {
++  if (!query) return snippet;
++  const idx = snippet.toLowerCase().indexOf(query.toLowerCase());
++  if (idx < 0) return snippet;
++  return (
++    <>
++      {snippet.slice(0, idx)}
++      <mark className="rounded bg-brand-100 px-0.5 font-semibold text-brand-700">
++        {snippet.slice(idx, idx + query.length)}
++      </mark>
++      {snippet.slice(idx + query.length)}
++    </>
++  );
++}
++
+ // ── 知识条目 → zone 分组目录树 ──────────────────────────────────────────────
+ 
+ /**
+@@ -270,6 +328,7 @@ function toAntdNodes(nodes: KnowledgeNode[]): DataNode[] {
+ export default function KnowledgePage({ params }: Props) {
+   const workspaceId = params.id;
+   const searchParams = useSearchParams();
++  const router = useRouter();
+   /** 外部深链参数（沉淀资产卡 FR/决策索引行等入口）。 */
+   const deepLinkFile = searchParams.get("file");
+   const deepLinkAnchor = searchParams.get("anchor");
+@@ -293,6 +352,16 @@ export default function KnowledgePage({ params }: Props) {
+    * 重试入口；新一次选择即清除。
+    */
+   const [entryError, setEntryError] = useState<string | null>(null);
++  // ── 知识搜索态（task-03 / 2026-10-15-platform-knowledge-search / D-006@v1）──
++  /** 搜索框原始输入与 debounce 后的查询词（非空 = 结果列表替换树视图）。 */
++  const [searchInput, setSearchInput] = useState("");
++  const [debouncedQuery, setDebouncedQuery] = useState("");
++  const [searchResults, setSearchResults] = useState<KnowledgeSearchResultItem[] | null>(null);
++  const [searching, setSearching] = useState(false);
++  const [searchError, setSearchError] = useState<string | null>(null);
++  /** 语义模型可用性（null=未查询；false=降级态——展示提示条，结果为纯词面）。 */
++  const [searchModelReady, setSearchModelReady] = useState<boolean | null>(null);
++  const [searchDegradedReason, setSearchDegradedReason] = useState<string | null>(null);
+   // task-05 写入口态：沉淀弹层开关 + 条目编辑开关。
+   const [precipitateOpen, setPrecipitateOpen] = useState(false);
+   const [distillHistoryOpen, setDistillHistoryOpen] = useState(false);
+@@ -451,6 +520,89 @@ export default function KnowledgePage({ params }: Props) {
+     if (hit) selectEntry(hit.filename, deepLinkAnchor ?? undefined);
+   }, [deepLinkFile, deepLinkAnchor, loading, knowledgeItems, selectEntry]);
+ 
++  // ── 知识搜索：debounce 输入 → 结果列表；点击经 URL 深链/模块文档页跳转 ──────
++  /**
++   * 搜索请求（seq 守卫同 selectEntry 口径：快速改词时只接受最新响应；清空查询
++   * 由下方 effect 直接复位、不发起请求）。
++   */
++  const searchSeqRef = useRef(0);
++  const runSearch = useCallback(
++    (q: string) => {
++      const seq = ++searchSeqRef.current;
++      setSearching(true);
++      setSearchError(null);
++      searchKnowledge(workspaceId, { query: q })
++        .then((resp) => {
++          if (seq !== searchSeqRef.current) return;
++          setSearchResults(resp.results);
++          setSearchModelReady(resp.model_ready);
++          setSearchDegradedReason(resp.reason ?? null);
++        })
++        .catch((err) => {
++          if (seq !== searchSeqRef.current) return;
++          setSearchResults(null);
++          setSearchError(errMessage(err, "搜索失败"));
++        })
++        .finally(() => {
++          if (seq === searchSeqRef.current) setSearching(false);
++        });
++    },
++    [workspaceId],
++  );
++
++  /** 输入 debounce 300ms → debouncedQuery（对齐 scan-docs 页同款节流）。 */
++  useEffect(() => {
++    if (!searchInput.trim()) {
++      setDebouncedQuery("");
++      return;
++    }
++    const timer = setTimeout(() => setDebouncedQuery(searchInput.trim()), SEARCH_DEBOUNCE_MS);
++    return () => clearTimeout(timer);
++  }, [searchInput]);
++
++  useEffect(() => {
++    if (!debouncedQuery) {
++      searchSeqRef.current += 1; // 作废在途响应
++      setSearchResults(null);
++      setSearching(false);
++      setSearchError(null);
++      setSearchModelReady(null);
++      setSearchDegradedReason(null);
++      return;
++    }
++    runSearch(debouncedQuery);
++  }, [debouncedQuery, runSearch]);
++
++  /**
++   * 结果点击跳转（设计口径 = URL 深链驱动，D-006@v1）：
++   * - knowledge/ 类：router.push('?file=&anchor=')——复用既有深链通路就地定位
++   *   （可分享、刷新保持）；**同 key 重选边界**：URL 与目标已等值时 push 不产生
++   *   searchParams 变化（深链 effect 不触发），改为直调 selectEntry 兜底；
++   * - docs/ 类：跳模块文档页 ?path= 深链选定（task-04 落地消费端）。
++   */
++  const onSearchResultClick = useCallback(
++    (item: KnowledgeSearchResultItem) => {
++      if (item.spec_path.startsWith("knowledge/")) {
++        const relative = item.spec_path.slice("knowledge/".length);
++        const anchor = item.anchor ?? "";
++        const curFile = searchParams.get("file") ?? "";
++        const curAnchor = searchParams.get("anchor") ?? "";
++        if (normalizeKnowledgeFileParam(curFile) === relative && curAnchor === anchor) {
++          selectEntry(relative, anchor || undefined);
++          return;
++        }
++        const qs = new URLSearchParams({ file: relative });
++        if (anchor) qs.set("anchor", anchor);
++        router.push(`/workspaces/${workspaceId}/knowledge?${qs.toString()}`);
++      } else {
++        router.push(
++          `/workspaces/${workspaceId}/scan-docs?path=${encodeURIComponent(item.spec_path)}`,
++        );
++      }
++    },
++    [router, workspaceId, searchParams, selectEntry],
++  );
++
+   /**
+    * 条目级计数映射（task-05 / FR-06）：与 OpsDashboard 同 key 复用同一 stats
+    * 查询缓存（零额外请求），从 usage_board（anchor→total）派生——手册=`文件#slug`
+@@ -579,18 +731,109 @@ export default function KnowledgePage({ params }: Props) {
+             style={{ "--tree-w": `${treeWidth}px` } as React.CSSProperties}
+           >
+             <SectionCard bodyPadding="p-2">
+-              <TreeBox className="max-h-[calc(100vh-260px)]">
+-                <Tree
+-                  treeData={treeData}
+-                  expandAction="click"
+-                  expandedKeys={expandedKeys}
+-                  onExpand={(keys) => setExpandedKeys([...keys])}
+-                  selectedKeys={selectedFilename ? [selectedFilename] : []}
+-                  onSelect={onSelectTree}
+-                  showIcon
+-                  blockNode
++              {/* 知识搜索框（task-03 / 2026-10-15-platform-knowledge-search / FR-01）：
++                  debounce 输入；有查询词时下方结果列表替换文件树（同一列表位两视图）。 */}
++              <div className="mb-2 px-1">
++                <Input
++                  value={searchInput}
++                  onChange={(e) => setSearchInput(e.target.value)}
++                  placeholder="搜索知识、需求、决策、模块文档…"
++                  allowClear
++                  aria-label="搜索知识库"
++                  data-testid="knowledge-search-input"
+                 />
+-              </TreeBox>
++              </div>
++              {debouncedQuery && searchModelReady === false ? (
++                <div
++                  data-testid="knowledge-search-degraded"
++                  title={searchDegradedReason ?? undefined}
++                  className="mx-1 mb-2 rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warning"
++                >
++                  语义模型暂不可用，当前为关键词匹配结果
++                </div>
++              ) : null}
++              {debouncedQuery ? (
++                <div
++                  data-testid="knowledge-search-results"
++                  className="overflow-y-auto"
++                  style={{ maxHeight: "calc(100vh - 260px)" }}
++                >
++                  {searching && searchResults === null ? (
++                    <p className="py-6 text-center text-xs leading-relaxed text-muted-foreground">
++                      搜索中…首次搜索需建立索引，可能较慢
++                    </p>
++                  ) : searchError ? (
++                    <div
++                      data-testid="knowledge-search-error"
++                      className="flex flex-col items-center gap-2 py-6 text-center"
++                    >
++                      <div className="text-xs text-destructive">{searchError}</div>
++                      <Button
++                        variant="outline"
++                        size="sm"
++                        onClick={() => runSearch(debouncedQuery)}
++                      >
++                        重试
++                      </Button>
++                    </div>
++                  ) : (searchResults ?? []).length === 0 ? (
++                    <div
++                      data-testid="knowledge-search-empty"
++                      className="py-6 text-center text-xs leading-relaxed text-muted-foreground"
++                    >
++                      没有找到匹配内容。
++                      <br />
++                      换个说法试试，或检查关键词是否属于本工作区。
++                    </div>
++                  ) : (
++                    <ul aria-label="搜索结果">
++                      {(searchResults ?? []).map((r, i) => (
++                        <li key={`${r.spec_path}#${r.anchor ?? ""}#${i}`}>
++                          <button
++                            type="button"
++                            data-testid={`knowledge-search-result-${i}`}
++                            onClick={() => onSearchResultClick(r)}
++                            className="w-full rounded-md px-2 py-2 text-left transition-colors hover:bg-muted/60"
++                          >
++                            <div className="flex items-center gap-1.5">
++                              <span
++                                className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-4 ${searchKindClass(r.kind)}`}
++                              >
++                                {SEARCH_KIND_LABELS[r.kind] ?? r.kind}
++                              </span>
++                              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
++                                {r.title}
++                              </span>
++                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
++                                {r.score.toFixed(2)}
++                              </span>
++                            </div>
++                            <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
++                              {r.spec_path}
++                            </div>
++                            <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
++                              {renderSearchSnippet(r.snippet, debouncedQuery)}
++                            </div>
++                          </button>
++                        </li>
++                      ))}
++                    </ul>
++                  )}
++                </div>
++              ) : (
++                <TreeBox className="max-h-[calc(100vh-260px)]">
++                  <Tree
++                    treeData={treeData}
++                    expandAction="click"
++                    expandedKeys={expandedKeys}
++                    onExpand={(keys) => setExpandedKeys([...keys])}
++                    selectedKeys={selectedFilename ? [selectedFilename] : []}
++                    onSelect={onSelectTree}
++                    showIcon
++                    blockNode
++                  />
++                </TreeBox>
++              )}
+             </SectionCard>
+           </div>
+           {/* 拖拽把手：仅桌面分栏时展示（flex 拉伸使把手沿整列可抓） */}
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+index 6f7bc1391..684fffbdd 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import Link from "next/link";
++import { useSearchParams } from "next/navigation";
+ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import { Tree, type TreeProps } from "antd";
+ import type { DataNode } from "antd/es/tree";
+@@ -233,6 +234,18 @@ export default function ScanDocsPage({ params }: Props) {
+   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
+   const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
+ 
++  // ── 外部深链（task-04 / 2026-10-15-platform-knowledge-search / FR-05）────────
++  /** 知识搜索的 docs/ 类结果经 ?path= 进入本页自动选中该文档。 */
++  const searchParams = useSearchParams();
++  const deepLinkPath = searchParams.get("path");
++  /**
++   * 深链消费标记：只在「命中并选中」后置位（requestDoc 内统一置位——手动点选
++   * 同算消费，防后续列表刷新自动抢跳）；命中前每次列表刷新（含进页 reparse 的
++   * 静默刷新）重试匹配，目标出现即自动选中；查无静默留在列表态（不报错、不
++   * 提示、不发起额外请求）。
++   */
++  const deepLinkDoneRef = useRef(false);
++
+   // 仅拉文档列表（可选关键词过滤 path/title/content）。搜索时不触发 reparse，保证响应快。
+   // silent=true 时不翻 loading（后台同步完成后的静默刷新，避免树区闪一下加载态）。
+   const fetchDocs = useCallback(async (q?: string, opts?: { silent?: boolean }) => {
+@@ -337,6 +350,7 @@ export default function ScanDocsPage({ params }: Props) {
+   /** 树点击拉详情（fetch 上提到主组件统一守卫；子组件只报 docId）。 */
+   const requestDoc = useCallback(
+     (docId: string) => {
++      deepLinkDoneRef.current = true; // 深链消费标记（见上方注释）
+       const seq = ++docSeqRef.current;
+       void getScanDoc(workspaceId, docId)
+         .then((doc) => {
+@@ -348,6 +362,20 @@ export default function ScanDocsPage({ params }: Props) {
+     [workspaceId, selectDoc],
+   );
+ 
++  /**
++   * 深链落位（task-04）：?path= 与列表就绪后匹配（两侧经 stripPathPrefix 归一——
++   * DB path 可能是 docs/<项目>/... 或 .sillyspec/docs/<项目>/... 两种布局），
++   * 命中走既有 requestDoc 链路选中。
++   */
++  useEffect(() => {
++    if (!deepLinkPath || deepLinkDoneRef.current) return;
++    if (loading || docs.length === 0) return;
++    const target = stripPathPrefix(deepLinkPath);
++    const hit = docs.find((d) => stripPathPrefix(d.path) === target);
++    if (!hit) return; // 目标尚未同步：静默待命，下次列表刷新重试
++    requestDoc(hit.id);
++  }, [deepLinkPath, loading, docs, requestDoc]);
++
+   /** 卡片视图跳转（INDEX 路由行）：在当前文档列表里解析目标文件，命中则拉详情
+    *  选中并滚到锚点小节卡（锚点选择器与知识库 EntryCardList 同域）；查无静默
+    *  忽略（目标可能不在 docs 树，如指向 knowledge 域的相对路径）。 */
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 47b419816..4c93d336c 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -8372,6 +8372,33 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/knowledge/search": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Search Knowledge
++         * @description 知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
++         *
++         *     - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
++         *       vector_router.py 同款）；
++         *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
++         *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
++         *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
++         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++         */
++        post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
+         parameters: {
+             query?: never;
+@@ -19009,6 +19036,57 @@ export interface components {
+             /** Tags */
+             tags?: string[];
+         };
++        /**
++         * KnowledgeSearchIn
++         * @description 检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。
++         */
++        KnowledgeSearchIn: {
++            /** Query */
++            query: string;
++            /**
++             * Limit
++             * @default 20
++             */
++            limit: number;
++        };
++        /**
++         * KnowledgeSearchOut
++         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
++         */
++        KnowledgeSearchOut: {
++            /**
++             * Ok
++             * @default true
++             */
++            ok: boolean;
++            /** Results */
++            results: components["schemas"]["KnowledgeSearchResultItem"][];
++            /**
++             * Model Ready
++             * @default true
++             */
++            model_ready: boolean;
++            /** Reason */
++            reason?: string | null;
++        };
++        /**
++         * KnowledgeSearchResultItem
++         * @description 单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。
++         */
++        KnowledgeSearchResultItem: {
++            /** Spec Path */
++            spec_path: string;
++            /** Kind */
++            kind: string;
++            /** Title */
++            title: string;
++            /** Anchor */
++            anchor?: string | null;
++            /** Snippet */
++            snippet: string;
++            /** Score */
++            score: number;
++        };
+         /**
+          * KnowledgeStatsOut
+          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+@@ -43199,6 +43277,41 @@ export interface operations {
+             };
+         };
+     };
++    search_knowledge_api_workspaces__workspace_id__knowledge_search_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["KnowledgeSearchIn"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["KnowledgeSearchOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_knowledge_api_workspaces__workspace_id__knowledge__filename__get: {
+         parameters: {
+             query?: never;
+diff --git a/frontend/src/lib/knowledge.ts b/frontend/src/lib/knowledge.ts
+index 168b636fd..75e89d87e 100644
+--- a/frontend/src/lib/knowledge.ts
++++ b/frontend/src/lib/knowledge.ts
+@@ -26,6 +26,11 @@ export type DistillQuickEntryList = components["schemas"]["DistillQuickEntryList
+ // 运营指标 DTO（task-04 / 2026-09-20-knowledge-effect-panel 消费，task-01 交付
+ // 的生成类型）。
+ export type KnowledgeStatsOut = components["schemas"]["KnowledgeStatsOut"];
++// 平台知识搜索 DTO（change 2026-10-15-platform-knowledge-search / task-03 消费，
++// task-02 后端 schema 为真相源；搜索框 + 结果面板数据链）。
++export type KnowledgeSearchIn = components["schemas"]["KnowledgeSearchIn"];
++export type KnowledgeSearchResultItem = components["schemas"]["KnowledgeSearchResultItem"];
++export type KnowledgeSearchOut = components["schemas"]["KnowledgeSearchOut"];
+ 
+ // ── 知识图谱 DTO（task-05 / 2026-10-08-platform-knowledge-graph；后端三端点
+ // schema.py 为真相源，本组全部取自生成类型零手写）──────────────────────────────
+@@ -112,6 +117,27 @@ export async function getKnowledge(
+   );
+ }
+ 
++/**
++ * 平台知识搜索（change 2026-10-15-platform-knowledge-search / FR-01，task-03）：
++ * POST /knowledge/search——knowledge/ + docs/ 语料词面 + 向量融合召回；docs/ 类
++ * 结果由后端按 scan-docs:read 过滤（前端不做权限隐藏）；model_ready=false 时
++ * results 为纯词面降级结果（页面展示降级提示条）。
++ *
++ * 显式放宽超时：首查含服务端索引构建（对齐 lib/knowledge.ts 的 graph 端点显式
++ * timeoutMs 先例——apiFetch POST 无缺省超时纪律，长时间构建易被误判网络错误）。
++ */
++export async function searchKnowledge(
++  workspaceId: string,
++  input: { query: string; limit?: number },
++): Promise<KnowledgeSearchOut> {
++  // limit 在后端有默认值（20），但生成类型按 default 标注为必填——调用侧补齐
++  // （对齐 KnowledgeProposeIn.category 的既有消费形态）。
++  return apiFetch<KnowledgeSearchOut>(
++    `/api/workspaces/${workspaceId}/knowledge/search`,
++    { method: "POST", json: { limit: 20, ...input }, timeoutMs: 120_000 },
++  );
++}
++
+ /**
+  * 手工录入知识候选（task-05 / FR-02）：POST /knowledge/propose，后端写
+  * knowledge/proposed/<slug>.md，响应复用 KnowledgeEntry。
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 47b419816..4c93d336c 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -8372,6 +8372,33 @@ export interface paths {
+         patch?: never;
+         trace?: never;
+     };
++    "/api/workspaces/{workspace_id}/knowledge/search": {
++        parameters: {
++            query?: never;
++            header?: never;
++            path?: never;
++            cookie?: never;
++        };
++        get?: never;
++        put?: never;
++        /**
++         * Search Knowledge
++         * @description 知识搜索：spec 根 knowledge/ + docs/ 语料内词面 + 向量融合召回。
++         *
++         *     - 检索主体（语料扫描/索引构建/embed/余弦）经线程池卸载（CPU 阻塞面，
++         *       vector_router.py 同款）；
++         *     - docs/ 类结果按 SCAN_DOCS_READ 服务端过滤——判定经 ``has_permission`` 同一
++         *       权威函数（admin 短路在内；禁读 user.permissions 快照，D-005@v1）；先取
++         *       3×limit 候选再过滤截断，防 top-k 被过滤挤空；
++         *     - embedder 不可用 → fail-soft：200 + model_ready=False + 纯词面结果（D-004@v1）。
++         */
++        post: operations["search_knowledge_api_workspaces__workspace_id__knowledge_search_post"];
++        delete?: never;
++        options?: never;
++        head?: never;
++        patch?: never;
++        trace?: never;
++    };
+     "/api/workspaces/{workspace_id}/knowledge/{filename}": {
+         parameters: {
+             query?: never;
+@@ -19009,6 +19036,57 @@ export interface components {
+             /** Tags */
+             tags?: string[];
+         };
++        /**
++         * KnowledgeSearchIn
++         * @description 检索入参：query 截断 4000 字符（沿用 vector_router 同款上限）、limit 钳 1-50。
++         */
++        KnowledgeSearchIn: {
++            /** Query */
++            query: string;
++            /**
++             * Limit
++             * @default 20
++             */
++            limit: number;
++        };
++        /**
++         * KnowledgeSearchOut
++         * @description 检索出参：model_ready=False 时 results 非空（纯词面）+ reason 带因（fail-soft）。
++         */
++        KnowledgeSearchOut: {
++            /**
++             * Ok
++             * @default true
++             */
++            ok: boolean;
++            /** Results */
++            results: components["schemas"]["KnowledgeSearchResultItem"][];
++            /**
++             * Model Ready
++             * @default true
++             */
++            model_ready: boolean;
++            /** Reason */
++            reason?: string | null;
++        };
++        /**
++         * KnowledgeSearchResultItem
++         * @description 单条召回：kind 由 spec_path 派生（decision/fr/knowledge/module/scan/...）。
++         */
++        KnowledgeSearchResultItem: {
++            /** Spec Path */
++            spec_path: string;
++            /** Kind */
++            kind: string;
++            /** Title */
++            title: string;
++            /** Anchor */
++            anchor?: string | null;
++            /** Snippet */
++            snippet: string;
++            /** Score */
++            score: number;
++        };
+         /**
+          * KnowledgeStatsOut
+          * @description GET /knowledge/stats 响应（四指标 + 使用率榜 + 文件级计数）。
+@@ -43199,6 +43277,41 @@ export interface operations {
+             };
+         };
+     };
++    search_knowledge_api_workspaces__workspace_id__knowledge_search_post: {
++        parameters: {
++            query?: never;
++            header?: never;
++            path: {
++                workspace_id: string;
++            };
++            cookie?: never;
++        };
++        requestBody: {
++            content: {
++                "application/json": components["schemas"]["KnowledgeSearchIn"];
++            };
++        };
++        responses: {
++            /** @description Successful Response */
++            200: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["KnowledgeSearchOut"];
++                };
++            };
++            /** @description Validation Error */
++            422: {
++                headers: {
++                    [name: string]: unknown;
++                };
++                content: {
++                    "application/json": components["schemas"]["HTTPValidationError"];
++                };
++            };
++        };
++    };
+     get_knowledge_api_workspaces__workspace_id__knowledge__filename__get: {
+         parameters: {
+             query?: never;

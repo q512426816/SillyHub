@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-platform-knowledge-search",
+  "flag": "--skip-apply",
+  "skippedAt": "2026-10-15T11:54:18.599Z",
+  "deliverableCount": 13,
+  "deliverableFiles": [
+    "backend/app/modules/knowledge/router.py",
+    "backend/app/modules/knowledge/schema.py",
+    "backend/app/modules/knowledge/search.py",
+    "backend/app/modules/knowledge/tests/test_knowledge_search.py",
+    "backend/app/modules/knowledge/tests/test_router.py",
+    "backend/openapi.json",
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/knowledge.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "note": "归档时显式跳过未 apply 交付面检查（--skip-apply）：交付物未确认进主仓，本记录随归档包留存供审计"
+}
