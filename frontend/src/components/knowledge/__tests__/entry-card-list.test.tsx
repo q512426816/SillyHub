@@ -501,6 +501,57 @@ describe("决策形态渲染（zone=decisions）", () => {
     expect(screen.getByText("活决策理由文本。")).toBeInTheDocument();
   });
 
+  // 复合锚（2026-10-14-decision-anchor-change-qualified / FR-01）：聚合决策文件里
+  // 多个变更各有同名决策号（decisions/unmapped.md 实证 D-003@v1 ×3），裸锚
+  // 「文件#id」不唯一、首卡误命中——带「变更：」字段的条目卡必须额外输出
+  // 「文件#变更号#id」复合锚；裸锚原样保留（旧深链兼容）。
+  it("结构化卡：带变更字段输出复合锚属性，裸锚保留；同 id 跨变更复合锚互异", () => {
+    renderList({
+      filename: "decisions/dup.md",
+      zone: "decisions",
+      content: [
+        "# 决策知识 — dup",
+        "",
+        "## D-003@v1 : 甲变更的三波交付决策",
+        "状态：active",
+        "变更：2026-08-29-change-a",
+        "",
+        "## D-003@v1 : 乙变更的磁盘旁路决策",
+        "状态：active",
+        "变更：2026-08-29-change-b",
+        "",
+      ].join("\n"),
+    });
+
+    const cards = screen.getAllByTestId("decision-entry-card");
+    expect(cards).toHaveLength(2);
+    // 裸锚同值（旧契约不变——同值正是首卡误命中的根源，保留仅为兼容旧深链）。
+    for (const c of cards) {
+      expect(c).toHaveAttribute("data-entry-anchor", "decisions/dup.md#D-003@v1");
+    }
+    // 复合锚互异且带变更号——「变更号+决策号」一起才能唯一匹配。
+    expect(cards[0]).toHaveAttribute(
+      "data-entry-anchor-qualified",
+      "decisions/dup.md#2026-08-29-change-a#D-003@v1",
+    );
+    expect(cards[1]).toHaveAttribute(
+      "data-entry-anchor-qualified",
+      "decisions/dup.md#2026-08-29-change-b#D-003@v1",
+    );
+  });
+
+  it("无「变更：」字段或无 id 的条目卡不输出复合锚属性", () => {
+    renderList({
+      filename: "decisions/plain.md",
+      zone: "decisions",
+      // 无 ID 形态的标题：entry.id=null，裸锚本就不输出（既有行为），复合锚同样不输出。
+      content: "## 自由标题条目\n状态：active\n变更：2026-08-29-change-a\n",
+    });
+    const card = screen.getByTestId("decision-entry-card");
+    expect(card).not.toHaveAttribute("data-entry-anchor");
+    expect(card).not.toHaveAttribute("data-entry-anchor-qualified");
+  });
+
   it("superseded 折叠置灰：字段隐藏 + 可展开；取代链条带恒可见", () => {
     renderList({
       filename: "decisions/demo.md",
