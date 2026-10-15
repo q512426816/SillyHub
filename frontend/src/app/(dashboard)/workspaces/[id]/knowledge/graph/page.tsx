@@ -861,7 +861,7 @@ export default function KnowledgeGraphPage({ params }: Props) {
             <p className="mt-2 text-[10.5px] leading-4 text-muted-foreground/80">
               {full
                 ? `全图 ${dumpStats ? `${dumpStats.nodes} 节点 · ${dumpStats.edges} 边` : ""}——CLI 预计算坐标静态星空，点击节点下钻 neighbors`
-                : "切片查询驱动 · 力场上限 200 节点，超限确定性静态布局"}
+                : "切片查询驱动 · 同类型节点聚簇分块 · 力场上限 200 节点，超限确定性静态布局"}
             </p>
           </div>
 
@@ -1299,8 +1299,9 @@ export default function KnowledgeGraphPage({ params }: Props) {
                   <p className="font-semibold text-foreground">数据面两模式</p>
                   <p>
                     「全图」＝dump 静态星空（CLI 预计算坐标不跑力场，点击节点下钻
-                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片，
-                    &gt;200 节点自动确定性静态布局。
+                    neighbors；远视野自动隐藏边线）；「查询切片」＝查询驱动力场切片
+                    （同类型节点自动聚簇分块，跨类型关联呈桥接边），&gt;200 节点自动
+                    确定性静态布局。
                   </p>
                 </div>
                 <div>
