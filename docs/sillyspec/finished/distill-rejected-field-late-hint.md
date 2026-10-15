@@ -34,3 +34,10 @@
    status 条件渲染，accepted 条目不受扰）；
 2. 或 distill 的 needsWait 报错附可复制的补丁样例（现在给了 node 重跑命令但没给字段样例，
    样例藏在源码 case 分支里）。
+
+## 处置记录（2026-10-15）
+
+**已修**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1，两轮评审 PASS）：
+brainstorm 决策条目模板对 `status: rejected` 条目**前置渲染**「否决理由:/复潮条件:」两字段
+（accepted 条目不受扰）——rejected 决策在写入时即带 distill 入库所需字段，归档门口的
+「补字段→重跑」往返消除；needsWait 仍作兜底门（写侧漏配时不静默丢条目）。归档。

@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 2,
+  "change": "2026-10-15-group-cross-mention-visibility",
+  "generatedAt": "2026-10-15T05:19:43.008Z",
+  "probes": {
+    "probe1": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "matches": 0,
+        "skippedFiles": 1,
+        "worktreeHits": 1,
+        "globEntries": 0
+      }
+    },
+    "probe3": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "tasks": 4,
+        "hasTest": 4
+      }
+    },
+    "probe5": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "backendEndpoints": 3049,
+        "frontendCalls": 0
+      }
+    },
+    "probe6": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "deletions": 6,
+        "unavailable": false
+      }
+    },
+    "probe8": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "mispairs": 0,
+        "feOnly": 0,
+        "missingNotNull": 0,
+        "contractCount": 0,
+        "contractOrphans": 0,
+        "missingRequired": 0,
+        "feKeys": 0,
+        "backendFields": 0
+      }
+    },
+    "probe9": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "javaFileCount": 0,
+        "groupCount": 0,
+        "inconsistentGroups": 0
+      }
+    },
+    "probe10": {
+      "command": "sillyspec verify-probes --change 2026-10-15-group-cross-mention-visibility",
+      "metrics": {
+        "checkedFiles": 5,
+        "unclearedFiles": 0
+      }
+    }
+  },
+  "apiFace": {
+    "endpoints": [],
+    "declared": null,
+    "sectionHint": [
+      "接口定义"
+    ]
+  }
+}

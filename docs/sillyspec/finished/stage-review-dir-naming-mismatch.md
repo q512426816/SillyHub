@@ -43,3 +43,15 @@ gate 的"仅 docHash 失配自动机械重算放行"兜底（后者有效，救�
 1. 统一三方口径：marker 值 = 期望目录名（一个真相源），或 gate 报错文案/文档/marker 同步为同一格式；
 2. gate 拦截时直接 echo「期望完整绝对路径」（现在部分场景有，部分没有），主代理照抄即可；
 3. 修 --refresh-hash 的目录解析（按 marker 值或按 stage-reviews/ 下最新 <stage>-review-* 目录找）。
+
+## 处置记录（2026-10-15）
+
+**已修**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1）：
+
+- **读侧归一容错**：stage review 目录读取按「规范 `<stage>-<runId>` → 双前缀错位
+  `<stage>-review-<runId>` → 裸 runId」三态探测 review.json 在场性——历史错位文件对
+  gate / --refresh-hash / autoRefresh 天然可用，不再人工搬运；
+- **写入侧恒规范路径** + SKILL 文档口径同步统一（三方不一致的文档侧收口）；
+- **--refresh-hash 修复**：目录解析走同一读侧归一，「marker 无对应 run」假报错消除。
+
+坑内建议②（gate echo 完整路径）此前已部分在场，读侧归一后期望路径恒规范可照抄。归档。

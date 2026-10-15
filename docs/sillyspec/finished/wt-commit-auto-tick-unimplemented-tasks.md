@@ -35,3 +35,11 @@ checkbox 的自动勾选逻辑（autoCheckPlanFromReviews 类），未以「该 
 
 自动勾选以每 task 的实现事实锚（review.json verdict=pass 或 worktree 内该 task
 allowed_paths 的 commit 存在）为判据；无锚不勾。
+
+## 处置记录（2026-10-15）
+
+**已修（按坑内建议）**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1）：
+自动勾选重构为 `autoTickTasksFromCommitSubjects`——判据 = subject token × allowed_paths
+**实现事实锚**（该 task 声明路径在区间提交确有触及），无锚不勾；后续 Wave 未实现任务不再
+被 wt-commit/platform sync 连带提前勾选。execute 批量收口与中断续跑判据恢复与事实一致。
+坑内人工核对绕过继续有效作兜底。归档。

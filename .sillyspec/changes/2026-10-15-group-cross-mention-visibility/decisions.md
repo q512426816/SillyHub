@@ -160,3 +160,17 @@ change: 2026-10-15-group-cross-mention-visibility
 - evidence: backend/app/modules/daemon/group/service/mentions.py:460-469；stage-reviews/brainstorm-review-2026-10-15-115811/review.json UB-2
 - 故障面: 无（纯优先级显式化，收紧泄漏窗口）。
 - 退役判据: 若 consensus 与互@模式未来统一为单一协作策略引擎，三态判定收敛进该引擎。
+
+## D-007@v2: 打断语义修正——零注入成立，流式已投影不撤回
+- type: boundary
+- priority: P1
+- status: accepted
+- supersedes: D-007@v1
+- source: code
+- question: 被委派轮被打断（run 非 completed）时的投影与注入行为（v1 承诺「零投影零注入」）？
+- answer: v1 的「零投影」承诺过强——[[GROUP]] 段投影发生在 submit_messages 流式双写（与 run 终态无关，普通 @ 轮同款现状语义），打断前已投影的内容不可能也不应撤回。修正为：**零注入**（轻通知挂接点仅在 completed，成立）；**流式已投影内容不撤回**（现状一致）。实测证据：test_interrupted_round_no_notice 初版断言「零投影」失败（submit 时投影行已落载体）。
+- normalized_requirement: close 非 completed → 零 delegation_notice 注入；submit 流式投影行为与普通 @ 轮逐比特一致。
+- impacts: [FR-04, task-03]
+- evidence: backend/app/modules/daemon/run_sync/service/submit_steps.py:691（submit 流式投影点）；execute 期实测（test_group_bridge_projection.py::TestPublicDelegation）
+- 故障面: 无（收紧承诺到现状可兑现语义）。
+- 退役判据: 若未来引入投影撤回机制（override DELETE 扩展到打断轮），可恢复「零投影」承诺。

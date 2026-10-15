@@ -57,11 +57,11 @@ scale: "large"  # Step 8 规模评估：跨 backend(agent 模型/迁移 + daemon
 
 - `_GroupBridgeContext`（group_bridge.py:237；design 前稿误写类名 TurnGroupMeta，实为该上下文结构，:54-76 的 dm_target/dm_kind 字段在其上）识别 `dm_kind='agent_public'`；`projection_blocked` 谓词维持拦 `agent_dm`（dm_target 非空）与 consensus 协作轮（现状），**放行 `agent_public` 轮**（无 dm_target 天然绕过，谓词零改动）：走 [[GROUP]] 标记抽取（:163）+ @ 轮无标记兜底（:304）现有管线，投影行 metadata 带 member 身份与 `delegation_of`（发起方成员名，前端可显示「受 X 委派」标签）。
 - 收口钩子（`_close_group_hooks`，completed 时，group_bridge.py:427）在投影行落库后，向发起方影子会话**追加一条轻通知日志行**（D-004@v2：新增 `_inject_delegation_notice` 纯写日志 helper——评审 UB-1 实证 `send_direct_message`（messages.py:732）为触发语义〔新建群载体 run :806-818 + busy_strategy=inject :848-849〕，无可抽取的「只插行不触发」对应物，故不复用该函数）：直接向发起方**影子会话**（非群载体 run——载体 run 恒挂群会话，术语修正）最近 run 追加 `AgentRunLog(channel='user_input', metadata={'delegation_notice': True, ...})`，不建 run、不入队、不派发、不走 prepare_interactive_dispatch；注入失败**静默降级**（投影已达成可见性主目标），记 structlog warning。计入**同链通知上限**（同链同成员 2 次口径，DB metadata 与 Redis 双轨——沿链深护栏双轨先例 mentions.py:394-453，防 Redis TTL 1800s 过期归零，评审 P2 备注收口）。
-- 打断（run 非 completed）：零投影零注入（挂接点仅在 completed，现状天然成立，D-007）。
+- 打断（run 非 completed）：零注入（挂接点仅在 completed）；流式已投影内容不撤回——[[GROUP]] 段投影发生在 submit 流式双写（与 run 终态无关，普通 @ 轮同款现状），D-007@v2 修正语义（grill 后执行期实证）。
 
 ### Phase 4｜前端
 
-- `member-panel.tsx` 群设置区（consensus 块旁，:362-402 同构模式）：新增「互 @ 模式」Radio.Group（私聊化/公开委派），三态联动——总开关关时禁用 + 「需先开启 agent 互 @」提示；consensus_mode 开时禁用 + 「汇总模式下由收口人统一发言」互斥提示。
+- `member-panel.tsx` 群设置区（consensus 块旁，:362-402 同构模式）：新增「互 @ 模式」控件（私聊化/公开委派 **antd Button 对 + aria-pressed**——antd Radio.Button 的 cssinjs 组合选择器在 jsdom nwsapi 下抛 SyntaxError 级联炸渲染，执行期二分定位后改 Button 对，功能等价），三态联动——总开关关时禁用 + 「需先开启 agent 互 @」提示；consensus_mode 开时禁用 + 「汇总模式下由收口人统一发言」互斥提示。
 - `create-group-wizard.tsx` 第三步护栏区（:414 附近）：同款可选项，默认 private（D-002）。
 - 公开委派结果行复用现有投影行渲染（member_id 分色气泡）零新组件；`delegation_of` metadata 预留气泡副标签（「受 X 委派」），渲染为可选增强不阻塞主链。
 - `pnpm gen:types`（frontend）+ `pnpm -C sillyhub-daemon gen:types` 同变更内跑并提交（CLAUDE.md 规则 21 义务）。
@@ -73,7 +73,7 @@ scale: "large"  # Step 8 规模评估：跨 backend(agent 模型/迁移 + daemon
 | 修改 | backend/app/modules/agent/model.py | AgentGroupChat 新增 cross_mention_mode 列（String(16)，server_default 'private'，CHECK）；producer=模型列 → 迁移 DDL → consumer=群读取侧判定 |
 | 新增 | NEW:backend/migrations/versions/<rev>_add_group_cross_mention_mode.py | 加列迁移（数据可清空，直加列无回填） |
 | 修改 | backend/app/modules/agent/schema.py | GroupChatCreate/Update/Read 加 cross_mention_mode 字段；producer=DTO → router PATCH/POST 透传 → consumer=service 写列；回读链 model → GroupChatRead → 前端 api-types |
-| 修改 | backend/app/modules/daemon/group/router.py | 群读体组装处透传 cross_mention_mode（GroupChatListItemRead/GroupChatDetailRead 若为 router 层扩展读体） |
+| 修改 | backend/app/modules/daemon/group/service/crud.py | 写体透传两处：create_group_chat 的 AgentGroupChat 构造与 update_group_chat 的 if-None 局部更新；读体经 GroupChatRead 基类 model_validate 自动透出（router 子类继承零改动） |
 | 修改 | backend/app/modules/daemon/group/service/helpers.py | 新增 ROLE_PROMPT_AGENT_PUBLIC 常量（公开委派角色指令，含 [[GROUP]] 标记要求） |
 | 修改 | backend/app/modules/daemon/group/service/mentions.py | 互 @ 触发三态分流：源轮 consensus_task_id 优先（现状）→ public 分支写 dm_kind='agent_public' + asked_by_member_id（无 dm_target）→ private 现路径；护栏判定保持在分流前 |
 | 修改 | backend/app/modules/daemon/run_sync/service/group_bridge.py | _GroupBridgeContext 增 agent_public 分支；projection_blocked 放行该轮；收口钩子追加发起方轻注入 |
@@ -89,6 +89,8 @@ scale: "large"  # Step 8 规模评估：跨 backend(agent 模型/迁移 + daemon
 | 修改 | sillyhub-daemon/src/api-types.ts | pnpm -C sillyhub-daemon gen:types 再生成（规则 21 daemon 义务） |
 
 ## 接口定义
+
+本变更接口面：0 端点（无新端点；既有群 CRUD/PATCH 契约加字段 cross_mention_mode，经 gen:types 双端对齐）
 
 - `AgentGroupChat.cross_mention_mode: Mapped[str]`（`'private'|'public'`，default `'private'`）
 - `GroupChatCreate.cross_mention_mode: Literal['private','public'] | None = None`（None → private）
@@ -126,7 +128,7 @@ scale: "large"  # Step 8 规模评估：跨 backend(agent 模型/迁移 + daemon
 | 编号 | 风险 | 等级 | 应对策略 |
 |---|---|---|---|
 | R-01 | 轮型分流漏判：public 群互 @ 仍走私聊（或反之），可见性语义错乱 | P0 | 触发分流单测双断言（public 群 agent_public 无 dm_target / private 群现路径断言不变）；投影矩阵测试钉死两种轮型 |
-| R-02 | 轻注入行在长链多委派下无限累积，膨胀发起方影子会话上下文 | P1 | 注入行计入同链通知上限（同链同成员 2 次口径，超限丢弃并群内系统行提示）；计数 DB metadata + Redis 双轨（沿链深护栏双轨先例，防 Redis TTL 1800s 过期归零——评审 P2 收口） |
+| R-02 | 轻注入行在长链多委派下无限累积，膨胀发起方影子会话上下文 | P1 | 注入行计入同链通知上限（同链同成员 2 次口径，超限丢弃）；计数 DB metadata + Redis 双轨（沿链深护栏双轨先例，防 Redis TTL 1800s 过期归零）；**Redis 不可用 fail-open 放行**（通知上限是防膨胀软约束非防环红线，与互@护栏的 fail-closed 刻意相反——execute 验收评审回记） |
 | R-03 | 轻注入原语无现成实现可复用（send_direct_message 为触发语义，评审 UB-1 实证），新 helper 的落库形态若与影子会话日志装配器（session-log-assembler）口径不符，前端成员会话视图可能出现异常行 | P1 | 已升级为独立任务 NEW:delegation_notice.py + 接口定义钉死字段；execute 期核对注入行与影子会话日志读取口径（timeline_reads / session-log-assembler 的 channel 过滤），单测断言注入行可被成员会话视图正常渲染 |
 | R-04 | [[GROUP]] 无标记兜底把过程性文本带进群，复现「污染时间线」 | P1 | 兜底仅取首段 200 字摘要 + 「完整内容见成员会话」提示（现状口径 ：304 不放宽）；公开轮 role_prompt 强化标记要求 |
 | R-05 | UI 原型跳过导致设置控件与平台双主题（blue/ai-native）样式不符 | P2 | 控件用 antd Radio.Group + 品牌语义类名（brand-*），照 FRONTEND_PAGE_STYLE.md §0.5 主题规范实现；跳过依据=标准组件紧邻同构开关（typing_preview/consensus），用户可否决要求补原型 |
@@ -143,7 +145,7 @@ scale: "large"  # Step 8 规模评估：跨 backend(agent 模型/迁移 + daemon
 | D-004@v1 | Phase 3（轻注入不触发）、§生命周期契约表（轻通知注入行）、R-02 | 已覆盖（AI 裁定待否决；v2 修正注入原语实现路径） |
 | D-005@v1 | Phase 1（优先级链 consensus 接管）、Phase 4（互斥禁用提示） | 已覆盖 |
 | D-006@v1 | Phase 2/Phase 3（轮型分流+投影谓词放行）、R-01 | 已覆盖 |
-| D-007@v1 | Phase 3（打断零副作用）、§生命周期契约表（成员打断行） | 已覆盖 |
+| D-007@v1 | Phase 3（打断零副作用）、§生命周期契约表（成员打断行） | 已覆盖（v2 修正：零注入成立，零投影修正为流式不撤回） |
 | D-008@v1 | §总体方案整体（方案 A 定稿） | 已覆盖（AI 裁定待否决） |
 | D-009@v1 | §非目标（不做双写） | 已覆盖（rejected 留档） |
 | D-010@v1 | §非目标（不做进度播报+自动接话） | 已覆盖（rejected 留档） |

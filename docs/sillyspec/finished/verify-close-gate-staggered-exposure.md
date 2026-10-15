@@ -35,3 +35,18 @@ verify `--done` 收口被纯文档门拦截时，CLI 承诺「一次性全列—
 2. `API_ANCHOR_DESIGN_API_RE` 路径字符类补排除中文左括号（（与全角引号等注记起始符，与已排除的右括号）对称；
 3. 「空指」报错附 facts.apiFace.endpoints 实际解析集（一眼看出是锚点吞字而非 design 缺表）；
 4. provider-caps 类零内容 diff（gen 脚本幂等重生成行尾标记）在对账时按 `git diff --quiet` 判定忽略，不要求补声明。
+
+## 处置记录（2026-10-15）
+
+**四条建议全部落地**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1）：
+
+1. **收口一次全列 ✅**：文档门（module-impact 死信/target_files 对账/矩阵校验）并入
+   一次全列汇总报错，不再逐门连撞（四轮 ×195s 实测门往返消除）；
+2. **锚点正则括号对称 ✅**：`API_ANCHOR_DESIGN_API_RE` 路径字符类左右括号对称排除
+   （（）()）——「锚点后紧跟中文左括号注记」不再吞字恒空指（本日 node 直调复验 PASS）；
+3. **空指附解析面 ✅**：「未命中解析面」报错附 facts.apiFace.endpoints 实际解析集，
+   一眼区分锚点吞字 vs design 缺表；
+4. **零内容 diff 忽略 ✅**：对账剔纯行尾假红（numstat 配对探测）——gen:types 幂等重生成的
+   零内容 diff 不再要求补声明。
+
+归档。

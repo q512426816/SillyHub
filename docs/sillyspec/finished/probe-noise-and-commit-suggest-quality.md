@@ -35,3 +35,18 @@ spec-sync 对 crrcdt.ppdmq.top 的 POST 多次 409 conflict + 「平台响应慢
 让路」——best-effort 不阻断流程，但每条 CLI 命令尾部都带长串 409 JSON 噪音（含整段
 platform_progress 回显，单条数百字符）。409 的自愈文案（「内容一致自愈重推」）说明平台端
 有冲突消化逻辑，本地侧建议把 409 响应体折叠为一行摘要。
+
+## 处置记录（2026-10-15）
+
+**三坑全部已修**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1）：
+
+- **坑 A（探针 3 归属列表噪音）✅**：预填截断为前 5 + 「共 N 个（目录级候选全量在
+  facts/trace）」折叠，路径经 mdEscapeCell 防竖线破表；
+- **坑 B（commit 建议误判）✅**：quick 来源加锚「quicklog 文件属于本次提交变更集」
+  （porcelain staged/unstaged/untracked），不在变更集的条目不参与建议；无 task 无 quick
+  的归档/知识面提交按 chore 语义建议（不再凭空「fix: quick 修复」）；body 与 subject
+  去重保留 qlId 审计锚（25/25 测试绿，含本坑回归钉）；
+- **坑 C（409 响应体刷屏）✅**：非 2xx 回显折叠为一行摘要（conflict 标识 + 关键
+  时间戳/变更字段），不再整段 platform_progress 挂命令尾部。
+
+归档。

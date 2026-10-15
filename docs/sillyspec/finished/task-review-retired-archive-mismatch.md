@@ -41,3 +41,12 @@ archive 前检查 `.sillyspec/.runtime/execute-runs/<runId>/tasks/task-*/review.
    （execute-review-*，双 pass）作复合真相源，per-task review 仅作加分证据；
 2. 或 execute 批量完成时自动为每个已勾 task 落一份 review.json（从 acceptance review 与
    per-task commit diff 机械生成），让 archive 的真相源天然在场。
+
+## 处置记录（2026-10-15）
+
+**已修（方向②）**（sillyspec `2026-10-15-pitfall-batch-clearance`，归档 a493aef1）：
+execute 批量完成前置**自动补 per-task review 草稿**（generateTaskReviewDrafts 机械幂等）
+——archive 完成度真相源（review.json verdict）天然在场，草稿 verdict=cannot_verify 仍由
+verify 兑证/人工复核升级，summarizeTaskCompletion 单列可见；不再出现「execute 说不需要、
+archive 说必须有」的两层矛盾。坑内绕过（review write 手工补登记）继续有效作兜底口径。
+归档。
