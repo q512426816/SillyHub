@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机一行：2026-10-15-change-assets-graph 归档交付的 change-assets-graph.tsx 在 pre-push ci-fast-gate typecheck 报 TS2339——"anchor"
+  in data 收窄对经 env.data ?? null 推断链产生的联合失效（保留非 neighbors 成员交叉 Record<"anchor",unknown>），data.nodes/edges 访问不过编译，推送被闸门拦下。
+
+  成功标准：
+
+  - 前端 pnpm exec tsc --noEmit 0 错（ci-fast-gate typecheck 可过）
+
+  - change-assets-graph 组件既有用例全绿，收窄语义（非 neighbors 分型/空数据隐藏分区）不变
+
+  - 守卫落在 knowledge.ts 紧邻 getKnowledgeGraphQuery，带中文注释说明为何不用裸 in 收窄
+autopilot: false
+prestage_ack: true
+baseline_commit: db44537f2531a5a96a923367a93902297e43808e
+updatedAt: '2026-10-15T05:50:01.672Z'
+cross_baselines:
+  sillyspec: 4c8971ee651ce638cc010d17a2e848d61f94b7b8
+baseline_sha256: 8ce02dad87d1013836771a1e08d51cc431e0c3a8c3bb24846e90d140ea5ee542
+spec_approved: true
+spec_approved_at: '2026-10-15T05:50:01.671Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+
