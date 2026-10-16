@@ -38,6 +38,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
+import { PROVIDER_ID as ZCODE_PROVIDER_ID } from '../zcode-settings.js';
 import {
   normalizeZcodeNotification,
   type ZcodeModelCatalogEntry,
@@ -564,11 +565,12 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     }
   }
 
+  // 实测形状（ZCode zod Pu schema）：model 必须是 { providerId, modelId } 对象——字符串直接传报 Invalid params（腾讯云真机实证）。providerId = zcode-settings 注入的个人 Provider 键。
   /** 初始/热切换模型（providers.ts provider_config_changed 路径复用）。 */
   private async _applyModel(h: ZcodeHandle, model: string): Promise<void> {
     await h.envelope.request(
       'session/setModel',
-      { sessionId: h.zcodeSessionId, model },
+      { sessionId: h.zcodeSessionId, model: { providerId: ZCODE_PROVIDER_ID, modelId: model } },
       (line) => h.child.stdin?.write(line),
       { timeoutMs: this.controlTimeoutMs },
     );

@@ -47,7 +47,7 @@ const CONFIG_REL_DIR = join('.zcode', 'v2');
 const CONFIG_FILENAME = 'provider_config.json';
 
 /** 托管 provider 键名（provider_config.json 内 providerId，展示名 SillyHub）。 */
-const PROVIDER_ID = 'sillyhub';
+export const PROVIDER_ID = 'sillyhub';
 const PROVIDER_DISPLAY_NAME = 'SillyHub';
 
 /** 空串 / null / undefined 一律视为未设置（对齐 types.ts 空串=未配置语义）。 */
