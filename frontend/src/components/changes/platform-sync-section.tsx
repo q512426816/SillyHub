@@ -45,7 +45,7 @@
  * "destructive" 先例；antd 组件色经 App 实例不静态调用。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 
 import { SectionCard } from "@/components/layout";
@@ -61,7 +61,7 @@ import {
   triggerMachineSillySpecGhostCleanup,
   triggerMachineSillySpecTombstoneCleanup,
 } from "@/lib/daemon";
-import { listSpecConflicts } from "@/lib/spec-workspaces";
+import { listSpecConflicts, resolveSpecConflict } from "@/lib/spec-workspaces";
 import { useNotify } from "@/lib/errors";
 import { useMachineSyncActionAccess } from "@/lib/use-machine-sync-action-access";
 import { fetchMyBinding } from "@/lib/workspace-binding";
@@ -232,6 +232,7 @@ export function PlatformSyncSection({
 }: PlatformSyncSectionProps) {
   const { modal } = App.useApp();
   const notify = useNotify();
+  const queryClient = useQueryClient();
   // 下发条目表（key：resolve:<change>:<strategy> / ghost_cleanup）。
   const [pendingMap, setPendingMap] = useState<Record<string, PendingEntry>>({});
   // ghost 清单折叠组展开态（默认折一行计数，对齐总览卡 ghost 折叠组交互）。
@@ -240,6 +241,8 @@ export function PlatformSyncSection({
   const [compareTarget, setCompareTarget] = useState<CompareConflictTarget | null>(
     null,
   );
+  // 「标记已处理」在途行 id（防双击；成功后行随 invalidate 消失）。
+  const [closingId, setClosingId] = useState<string | null>(null);
   // 下发后加速轮询窗口截止时刻（epoch ms；0=未加速，ql-20260911-024）。
   const [pollBoostUntil, setPollBoostUntil] = useState(0);
 
@@ -334,7 +337,7 @@ export function PlatformSyncSection({
    * 拆行；纯墓碑面归 tombstoneIndex 走既有墓碑行形态，不在此处理。损坏行跳过。
    */
   const registryVersionRows = useMemo(() => {
-    const rows: Array<{ change: string; createdAt: string | null }> = [];
+    const rows: Array<{ id: string; change: string; createdAt: string | null }> = [];
     for (const row of specConflictsQ.data ?? []) {
       let details: {
         platform_deleted?: unknown;
@@ -360,7 +363,9 @@ export function PlatformSyncSection({
         const name = m?.[1];
         if (!name) continue;
         if (!rows.some((r) => r.change === name)) {
-          rows.push({ change: name, createdAt: row.created_at ?? null });
+          // id = 注册表行主键（一条记录可归因出多个变更名行——「标记已处理」按 id
+          // 关闭整条记录，并列兄弟行会一起消失：D-012@v1 关闭范围口径）。
+          rows.push({ id: row.id, change: name, createdAt: row.created_at ?? null });
         }
       }
     }
@@ -416,6 +421,7 @@ export function PlatformSyncSection({
     const rows = conflicts.map((c) => {
       const tomb = tombstoneIndex.get(c.change ?? "") ?? null;
       return {
+        id: null as string | null,
         change: c.change || "",
         type: c.type,
         createdAt: c.created_at,
@@ -429,6 +435,7 @@ export function PlatformSyncSection({
       if (!seen.has(name)) {
         seen.add(name);
         rows.push({
+          id: null,
           change: name,
           type: "tombstone",
           createdAt: info.createdAt,
@@ -442,6 +449,7 @@ export function PlatformSyncSection({
       if (seen.has(reg.change)) continue;
       seen.add(reg.change);
       rows.push({
+        id: reg.id,
         change: reg.change,
         type: "spec-tree",
         createdAt: reg.createdAt,
@@ -602,6 +610,48 @@ export function PlatformSyncSection({
       });
   };
 
+  /**
+   * 「标记已处理」（2026-10-16-conflict-full-tree-compare / FR-04 / D-003@v1 /
+   * D-012@v1）：把注册表 open 行置 resolved 并让行从列表消失。关闭的是**整条
+   * 注册表记录**——一条记录可归因出多个变更名行，并列展示的兄弟行会一起消失
+   * （确认文案写明范围）。失败给可读提示；不改本机文件。
+   */
+  const dispatchMarkResolved = (row: { id: string; change: string }) => {
+    modal.confirm({
+      title: "关闭该冲突记录？",
+      content: (
+        <div className="text-[13px] leading-6">
+          <p className="mb-3">
+            变更{" "}
+            <code className="rounded border bg-muted px-1.5 py-px font-mono text-xs">
+              {row.change}
+            </code>
+          </p>
+          <p>
+            该平台冲突记录将被标记为已处理并从列表移除；同一记录含多个变更名时，并列展示的兄弟行会一起消失。
+            该操作不改本机文件；若冲突其实仍存在，下次同步会重新登记。
+          </p>
+        </div>
+      ),
+      okText: "标记已处理",
+      cancelText: "取消",
+      onOk: async () => {
+        setClosingId(row.id);
+        try {
+          await resolveSpecConflict(workspaceId, row.id);
+          await queryClient.invalidateQueries({
+            queryKey: [...QUERY_KEY_ROOT, "spec-conflicts", workspaceId],
+          });
+          notify.success(`已关闭冲突记录 ${row.change}`);
+        } catch (err) {
+          notify.error(err, "关闭冲突记录失败");
+        } finally {
+          setClosingId(null);
+        }
+      },
+    });
+  };
+
   const dispatchGhostCleanup = () => {
     if (ghostCount === 0) return;
     modal.confirm({
@@ -716,6 +766,8 @@ export function PlatformSyncSection({
         <ul className="border-b" data-testid="platform-sync-conflicts">
           {renderRows.map((c, i) => {
             const name = c.change || "—";
+            // 注册表行主键（const 提取：供闭包内 onClick 收窄 string|null → string，D-003@v1）
+            const rowId = c.id;
             const meta = conflictTypeMeta(c.type);
             const activeWarn = name !== "—" && activeNames.has(name);
             // 行回显条目 = 两方向中已存在的那条（同刻仅一行一发；失败/超时后恢复）；
@@ -918,6 +970,22 @@ export function PlatformSyncSection({
                       >
                         查看对比
                       </Button>
+                      {/* 注册表行专属：「标记已处理」关闭整条记录（D-003@v1）。
+                          平台侧动作、不依赖机器在线，故不加 machineOnline 禁用。 */}
+                      {rowId ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={closingId === rowId}
+                          onClick={() =>
+                            dispatchMarkResolved({ id: rowId, change: c.change })
+                          }
+                          data-testid="platform-sync-mark-resolved"
+                          className={cn(compact && "min-h-[44px] flex-1")}
+                        >
+                          标记已处理
+                        </Button>
+                      ) : null}
                     </div>
                   )}
                 </div>

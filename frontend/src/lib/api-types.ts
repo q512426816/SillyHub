@@ -26290,6 +26290,10 @@ export interface components {
          *     kind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。
          *     ``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。
          *     ``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。
+         *     ``record_label``/``covered_changes``/``path_total``：full-tree 兜底来源元数据
+         *     （2026-10-16-conflict-full-tree-compare / D-006@v2）——主取命中时为
+         *     None/[]/None；``path_total`` 是兜底快照返回的路径数（受 daemon 300 路径帽截断，
+         *     非记录真实总数）。
          */
         SillySpecConflictCompareResponse: {
             /** Change */
@@ -26317,6 +26321,12 @@ export interface components {
              * @default 0
              */
             dropped_paths: number;
+            /** Record Label */
+            record_label?: string | null;
+            /** Covered Changes */
+            covered_changes?: string[];
+            /** Path Total */
+            path_total?: number | null;
             /** Files */
             files?: components["schemas"]["SillySpecConflictCompareFile"][];
             /** Progress Rows */

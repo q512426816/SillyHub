@@ -71747,6 +71747,35 @@
             "title": "Dropped Paths",
             "default": 0
           },
+          "record_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Label"
+          },
+          "covered_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Covered Changes"
+          },
+          "path_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path Total"
+          },
           "files": {
             "items": {
               "$ref": "#/components/schemas/SillySpecConflictCompareFile"
@@ -71768,7 +71797,7 @@
           "kind"
         ],
         "title": "SillySpecConflictCompareResponse",
-        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。"
+        "description": "GET /machines/{id}/sillyspec-conflicts/{change}/compare 响应（design §7.2）。\n\nkind=spec-tree → ``files`` 非空 ``progress_rows`` 空；kind=progress 反之。\n``response_truncated``：整响应超 2MB 时按文件倒序丢 diff_rows 后置 True。\n``ql_id``/时间字段为字符串原样透传（daemon 机器本地钟，跨机比较仅辅助）。\n``record_label``/``covered_changes``/``path_total``：full-tree 兜底来源元数据\n（2026-10-16-conflict-full-tree-compare / D-006@v2）——主取命中时为\nNone/[]/None；``path_total`` 是兜底快照返回的路径数（受 daemon 300 路径帽截断，\n非记录真实总数）。"
       },
       "SillySpecConflictDiffRow": {
         "properties": {

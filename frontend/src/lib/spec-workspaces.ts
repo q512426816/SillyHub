@@ -335,3 +335,25 @@ export async function listSpecConflicts(
   // 只认本横幅语义的 spec-sync 行（其它 stage 的冲突行归各自消费方，防误报）。
   return (body.items ?? []).filter((c) => c.stage === "spec-sync");
 }
+
+/**
+ * POST /api/workspaces/{workspaceId}/spec-conflicts/{conflictId}/resolve —
+ * 把注册表冲突行置 resolved（「标记已处理」关闭入口，2026-10-16-conflict-
+ * full-tree-compare / FR-04 / D-003@v1）。
+ *
+ * body 对齐后端 ``SpecConflictResolve``（backend/app/modules/spec_profile/schema.py:69-73）：
+ * status 必填、details_json 可选（本入口只改状态，不动 details）。权限 WORKSPACE_WRITE。
+ * 语义：只关平台记录、不改本机文件；冲突若仍存在则下次同步会重新登记新行。
+ */
+export async function resolveSpecConflict(
+  workspaceId: string,
+  conflictId: string,
+  status = "resolved",
+): Promise<void> {
+  await apiFetch(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/spec-conflicts/${encodeURIComponent(
+      conflictId,
+    )}/resolve`,
+    { method: "POST", json: { status } },
+  );
+}

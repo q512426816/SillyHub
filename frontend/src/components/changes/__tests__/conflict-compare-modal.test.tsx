@@ -40,6 +40,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 组件尚未实现（task-07）——运行时模块不存在即本文件的红态来源。
 import { ConflictCompareModal } from "@/components/changes/conflict-compare-modal";
+import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { queryAntdConfirm, queryAntdConfirmTitle } from "@/test/dom-queries";
 
@@ -368,6 +369,97 @@ describe("ConflictCompareModal（task-06 红态锚定 / design §7.2）", () => 
 
     await screen.findByText(/涉及 4 个文件/);
     expect(mocks.getCompare).toHaveBeenCalledTimes(2);
+  });
+
+  // ── 4b. 失败卡按 daemon_code 四臂分支（2026-10-16-conflict-full-tree-compare
+  //        / FR-03 / D-004@v1 / D-012@v1）────────────────────────────────────
+
+  it("失败卡——conflict_record_missing：重新同步文案、无「重试」、无 504/离线字样", async () => {
+    mocks.getCompare.mockRejectedValue(
+      new ApiError(502, {
+        code: "HTTP_502_DAEMON_RPC_REMOTE",
+        message: "该冲突在本机已无快照（可能已随同步清理或已裁决），请重新同步后再试。",
+        request_id: null,
+        details: {
+          daemon_code: "conflict_record_missing",
+          daemon_message: "冲突记录不存在：spec-sync-conflict-x.json",
+        },
+      }),
+    );
+    renderModal();
+
+    const msg = await screen.findByTestId("compare-failure-message");
+    expect(msg).toHaveTextContent(/已无快照/);
+    expect(msg).toHaveTextContent(/重新同步/);
+    expect(msg).not.toHaveTextContent(/504/);
+    expect(msg).not.toHaveTextContent(/离线/);
+    expect(screen.queryByRole("button", { name: /重试/ })).toBeNull();
+  });
+
+  it("失败卡——workspace_root_unknown：认领文案、无「重试」", async () => {
+    mocks.getCompare.mockRejectedValue(
+      new ApiError(502, {
+        code: "HTTP_502_DAEMON_RPC_REMOTE",
+        message: "该工作区尚未被本机认领，请先在该工作区发起一次会话后重试。",
+        request_id: null,
+        details: { daemon_code: "workspace_root_unknown", daemon_message: "未认领" },
+      }),
+    );
+    renderModal();
+
+    expect(await screen.findByTestId("compare-failure-message")).toHaveTextContent(
+      /尚未被本机认领/,
+    );
+    expect(screen.queryByRole("button", { name: /重试/ })).toBeNull();
+  });
+
+  it("失败卡——504 家族（机器离线）：保留 504 文案 + 「重试」", async () => {
+    mocks.getCompare.mockRejectedValue(
+      new ApiError(504, {
+        code: "HTTP_504_DAEMON_RUNTIME_OFFLINE",
+        message: "机器离线",
+        request_id: null,
+        details: null,
+      }),
+    );
+    renderModal();
+
+    expect(await screen.findByTestId("compare-failure-message")).toHaveTextContent(/504/);
+    expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
+  });
+
+  it("失败卡——未知错误（非 ApiError）：通用失败文案 + 「重试」（回归）", async () => {
+    mocks.getCompare.mockRejectedValueOnce(new Error("boom"));
+    renderModal();
+
+    expect(await screen.findByTestId("compare-failure-message")).toHaveTextContent(
+      /读取机器侧冲突快照失败/,
+    );
+    expect(screen.getByRole("button", { name: /重试/ })).toBeInTheDocument();
+  });
+
+  it("full-tree 兜底命中——顶部来源提示（覆盖 N 变更 / 快照 N 路径 / 本次 M 路径）", async () => {
+    mocks.getCompare.mockResolvedValue({
+      ...SPEC_TREE_RESP,
+      record_label: "full-tree",
+      covered_changes: ["2026-09-02-my-change", "2026-09-03-sibling-change"],
+      path_total: 7,
+    });
+    renderModal();
+
+    await screen.findByText(/涉及 4 个文件/);
+    const notice = screen.getByTestId("compare-record-source");
+    expect(notice).toHaveTextContent(/覆盖 2 个变更/);
+    expect(notice).toHaveTextContent(/快照共 7 个路径/);
+    expect(notice).toHaveTextContent(/相关的 4 个路径/);
+  });
+
+  it("主取命中（无 record_label）——不渲染来源提示", async () => {
+    mocks.getCompare.mockResolvedValue(SPEC_TREE_RESP);
+    renderModal();
+
+    await screen.findByText(/涉及 4 个文件/);
+    expect(screen.queryByTestId("compare-record-source")).toBeNull();
   });
 
   // ── 5. 截断与二进制占位（§7.2 local_truncated / diff_truncated / binary）──

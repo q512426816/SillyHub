@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   triggerResolve: vi.fn(),
   triggerGhostCleanup: vi.fn(),
   listSpecConflicts: vi.fn(),
+  resolveSpecConflict: vi.fn(),
   triggerTombstoneCleanup: vi.fn(),
 }));
 
@@ -71,6 +72,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => ({
 vi.mock("@/lib/spec-workspaces", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/spec-workspaces")>()),
   listSpecConflicts: mocks.listSpecConflicts,
+  resolveSpecConflict: mocks.resolveSpecConflict,
 }));
 
 vi.mock("@/lib/workspace-binding", async (importOriginal) => ({
@@ -329,6 +331,7 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     mocks.triggerGhostCleanup.mockResolvedValue({ sent: true });
     // 注册表默认空（墓碑用例自行覆写——纯墓碑判定谓词见 FR-02）。
     mocks.listSpecConflicts.mockResolvedValue([]);
+    mocks.resolveSpecConflict.mockResolvedValue(undefined);
     mocks.triggerTombstoneCleanup.mockResolvedValue({ sent: true });
   });
 
@@ -968,5 +971,83 @@ describe("PlatformSyncSection（task-09 落地 + task-06 行改造适配）", ()
     });
     expect(screen.queryByTestId("platform-sync-tombstone-row")).not.toBeInTheDocument();
     expect(screen.getByText("mixed-chg")).toBeInTheDocument();
+  });
+
+  // ── 「标记已处理」关闭入口（2026-10-16-conflict-full-tree-compare / FR-04 /
+  //    D-003@v1 / D-012@v1）────────────────────────────────────────────────
+
+  it("标记已处理——注册表版本冲突行：确认后调 resolve、整条记录关闭、行随重取消失", async () => {
+    const rowId = "reg-close-1";
+    mocks.listSpecConflicts
+      .mockResolvedValueOnce([
+        {
+          id: rowId,
+          workspace_id: "ws-1",
+          stage: "spec-sync",
+          conflict_type: "spec_tree",
+          details_json: JSON.stringify({
+            kind: "incremental_push_conflict",
+            server_versions: {
+              "changes/archive/2026-10-13-fire-unitadd-form-import/design.md": 3,
+            },
+            platform_deleted: [],
+            conflicting_paths: [
+              "changes/archive/2026-10-13-fire-unitadd-form-import/design.md",
+            ],
+          }),
+          status: "open",
+          created_at: isoAgo(3 * 24 * 60 * MIN),
+        },
+      ])
+      .mockResolvedValue([]);
+
+    renderSection();
+    const btn = await screen.findByTestId("platform-sync-mark-resolved");
+    fireEvent.click(btn);
+
+    const confirm = await openConfirmRoot();
+    expect(queryAntdConfirmTitle(confirm)).toHaveTextContent("关闭该冲突记录？");
+    // 关闭范围口径：整条记录（含兄弟变更名行）+ 不改本机文件 + 可复现
+    expect(confirm).toHaveTextContent(/兄弟行会一起消失/);
+    expect(confirm).toHaveTextContent(/不改本机文件/);
+    expect(confirm).toHaveTextContent(/重新登记/);
+
+    fireEvent.click(within(confirm).getByText("标记已处理"));
+    await waitFor(() => {
+      expect(mocks.resolveSpecConflict).toHaveBeenCalledWith("ws-1", rowId);
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByText("2026-10-13-fire-unitadd-form-import"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("标记已处理——只读视角不可见；快照行（无注册表 id）不渲染该按钮", async () => {
+    // 只读视角（非机器所有者/非平台管理员）
+    useSession.setState({ user: OTHER_USER } as never);
+    mocks.listSpecConflicts.mockResolvedValue([
+      makeRegistryRow({
+        server_versions: { "changes/reg-readonly/design.md": 1 },
+        conflicting_paths: ["changes/reg-readonly/design.md"],
+        platform_deleted: [],
+      }),
+    ]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("platform-sync-conflict-row").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("platform-sync-mark-resolved")).not.toBeInTheDocument();
+
+    // 快照行（默认机器快照冲突，注册表空）同样不渲染该按钮
+    cleanup();
+    useSession.setState({ user: OWNER_USER, accessToken: "tok", hydrated: true } as never);
+    setupMachine(makeMachine(makeStatus()));
+    mocks.listSpecConflicts.mockResolvedValue([]);
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("platform-sync-conflict-row").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByTestId("platform-sync-mark-resolved")).not.toBeInTheDocument();
   });
 });
