@@ -356,6 +356,15 @@ export function SessionDecisionsHover({
                         → {qa.answerText ?? STATUS_LABEL[detail.status]}
                       </div>
                     )}
+                    {/* 自定义/Other 文本作答（answer 不匹配任何选项 label）：选项
+                        全 ○ 时回答只在列表摘要可见会丢——弹窗内补一行作答回显。 */}
+                    {qa.options.length > 0 &&
+                      qa.answerText &&
+                      !qa.options.some((o) => o.selected) && (
+                        <div className="border-t px-2.5 py-1.5 text-xs text-emerald-700 dark:text-emerald-300">
+                          你的回答（自定义文本）：{qa.answerText}
+                        </div>
+                      )}
                   </div>
                 </div>
               ))}

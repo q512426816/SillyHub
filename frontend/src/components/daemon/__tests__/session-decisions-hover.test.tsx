@@ -257,6 +257,34 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", 
     expect(unselected.textContent).not.toContain("你的选择");
   });
 
+  it("自定义文本作答（不匹配任何选项）详情弹窗内回显作答行——列表摘要有的信息弹窗不丢", async () => {
+    mockedFetch.mockResolvedValue([
+      historyRow({
+        id: "d-c",
+        request_id: "req-custom",
+        answer: { answers: [{ answer: "这三种都做一个原型图，我看完后确认。" }] },
+      }),
+    ]);
+    renderUi();
+    // 无 pending：pill 等历史加载完成才渲染（FR-01 显隐），先等入口出现
+    await waitFor(() =>
+      expect(screen.getByTestId("session-decisions-hover")).toBeTruthy(),
+    );
+    await openPopover();
+    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
+    fireEvent.click(screen.getByTestId("session-decision-item-req-custom"));
+    const dialog = await screen.findByRole("dialog");
+    // 选项全未选（○），自定义回答必须出现在弹窗内
+    expect(within(dialog).getByText(/你的回答（自定义文本）/).textContent).toContain(
+      "这三种都做一个原型图，我看完后确认。",
+    );
+    // 选项命中作答的历史行不显示自定义行（第一条 req-h1 命中"阿里云 ECS"）
+    fireEvent.click(within(dialog).getByText("关闭"));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).toBeNull(),
+    );
+  });
+
   it("无 pending 但有已答历史时仍渲染入口，徽标 0 不呼吸（FR-01）", async () => {
     mockedFetch.mockResolvedValue([historyRow()]);
     renderUi();
