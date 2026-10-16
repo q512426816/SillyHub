@@ -119,11 +119,13 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 ```bash
 ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/deploy && \
   docker compose ps && \
-  curl -s http://127.0.0.1:8001/api/health'
+  curl -s http://127.0.0.1:8001/api/health && \
+  docker exec multi-agent-platform-backend-1 sh -c "touch /data/spec-workspaces/.w && rm /data/spec-workspaces/.w && echo SPEC_MIRROR_WRITE_OK"'
 ```
 - 5 个容器全 healthy（backend / frontend / postgres / redis / minio）
 - health 返回 `{"status":"ok","db":"ok","redis":"ok",...}`
 - **`commit_sha` 必须与打包时打印的短 sha 一致**（2026-10-16 互覆事故后强制）——不一致说明部署后已被其他会话覆盖，见 §0「被覆盖的识别与恢复」
+- `SPEC_MIRROR_WRITE_OK` = spec 镜像目录对容器可写（缺了它变更文件树同步会全线 500，见「常见坑」属主项；迁移/搬数据后必查）
 
 backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：
 ```bash
@@ -389,6 +391,15 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
 - **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。
 - **daemon bundle**：backend 镜像依赖 `sillyhub-daemon/build/bundle/`。daemon 的 `src/` 改过必须 `pnpm bundle` 再打包；只改 `scripts/install.*` 不影响 bundle JS（随 rebuild 自动 COPY 最新源）。
+- **spec 镜像目录属主必须跟容器用户（2026-10-16 迁移实锤，变更文件树同步全线 500 的根因）**：
+  `/data/spec-workspaces`（`SPEC_DATA_HOST_DIR`，宿主 bind mount → 容器同路径）的**工作区树必须属
+  `999:999`**（容器内 `app` 用户 uid/gid=999；宿主上 uid 999 的属名显示为 `dnsmasq`/`systemd-journal`）。
+  迁移/rsync/scp 搬家后若属主变成 `ubuntu`（或任何非 999）且权限 755，后端写落盘即
+  `PermissionError: [Errno 13]` → `POST /api/changes/-/spec-sync` 恒 500 → CLI 端症状为
+  「同步请求失败 HTTP 500（文件树本次未同步，下次自动重试）」无限重试、变更详情页文件树永远空。
+  修复：`sudo chown -R 999:999 /data/spec-workspaces`（顶层目录保持 777 供容器新建 workspace 树）；
+  验证：进容器 `touch` 某个已有工作区树的 `changes/.w` 不报 Permission denied。
+  老阿里云机实证属主就是 999:999——每次迁移/搬数据后都要对齐（已加进「更新部署 §4 验证」探针）。
 - **不要碰 ppdmq-\***：服务器另有 `ppdmq-app/redis/mysql` 是别的项目，部署只动 `multi-agent-platform-*` 容器。
 - **容器端口用 127.0.0.1**：本机 curl 验证服务器映射端口用 `127.0.0.1`（在服务器上 ssh 内执行），不要用 `localhost`（IPv6 解析问题）。
 - **`/daemon/` 别让 nginx 静态 alias**：宿主机 `/var/www/sillyhub/daemon/` 这类静态副本不随镜像更新，会吐旧 bundle/旧 install.ps1（无 BOM、`{{SERVER_URL}}` 未替换）。整段 `location /daemon/` 必须 `proxy_pass` 到后端。排障/部署后对比公网与后端 latest.json 版本是否一致。详见上方「nginx 路由」。

@@ -1,8 +1,11 @@
 import { ApiError, apiFetch, safeUUID } from "./api";
 import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
+import type { ChangeFileSyncResult } from "./change-file-sync";
 
 // ── Types（对齐 backend change/schema.py file tree DTOs）──────────────
+
+export type { ChangeFileSyncResult };
 
 export type ChangeFileEntry = {
   path: string; // 相对变更目录 posix，如 "tasks/task-01.md"
@@ -15,6 +18,9 @@ export type ChangeFileEntry = {
 export type ChangeFileList = {
   change_id: string;
   items: ChangeFileEntry[];
+  // 2026-10-16-change-files-sync-result：仅 sync=true 时后端带回同步执行回执，
+  // 纯读（初始加载/轮询）恒 null；消费方 change-file-tree 翻成中文提示条。
+  sync_result?: ChangeFileSyncResult | null;
 };
 
 export type ChangeFileContent = {
@@ -52,10 +58,11 @@ export type ChangeFileTreeNode = {
 
 // ── API 封装 ──────────────────────────────────────────────────────────
 
-// sync=true（2026-10-14-files-refresh-explicit-sync）：仅「刷新」按钮等用户主动
-// 点击使用——触发绑定 daemon 定向上行同步后再返回（backend 等待预算 3s，超时
-// 降级返回现有镜像数据）；默认不传=纯读，直接返回平台镜像数据（悬浮面板轮询/
-// 初始加载零同步开销）。
+// sync=true（2026-10-14-files-refresh-explicit-sync；2026-10-16-change-files-
+// sync-result 修订）：仅「刷新」按钮等用户主动点击使用——触发绑定 daemon
+// 定向上行同步后再返回（backend 等待预算 15s——实测同步耗时 5.5~13.5s，原 3s
+// 恒超时；超时降级返回现有镜像数据并带 sync_result 回执明示原因）；默认不传=
+// 纯读，直接返回平台镜像数据（悬浮面板轮询/初始加载零同步开销）。
 export function listChangeFiles(
   workspaceId: string,
   changeId: string,

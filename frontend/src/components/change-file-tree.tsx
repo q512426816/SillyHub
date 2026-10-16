@@ -38,6 +38,9 @@ import { ApiError } from "@/lib/api";
 // 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
 // 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
 import { remarkChangeLink, useChangeNameIndex } from "@/lib/change-autolink";
+// 同步回执 → 提示文案（2026-10-16-change-files-sync-result）：独立零依赖模块，
+// 组件只做 state 接线（详见 lib/change-file-sync.ts 顶部注释）
+import { changeFileSyncWarningText } from "@/lib/change-file-sync";
 import { formatFileSize } from "@/lib/file/utils";
 import {
   buildChangeFileTree,
@@ -422,6 +425,9 @@ export function ChangeFileTree({
   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 显式刷新（sync=1）同步未完成时的提示条文案（2026-10-16-change-files-sync-result）：
+  // 仅刷新点击回执驱动；成功/防抖跳过置 null（清除），纯读刷新不动它。
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
 
   // 变更名自动链接（2026-08-31 变更关联审计 P3）：名单为空（查询未就绪/无变更）
   // 时不挂插件，渲染行为与改造前逐字节一致
@@ -438,13 +444,18 @@ export function ChangeFileTree({
 
   const pendingPaths = new Set(pending.map((p) => p.path));
 
-  // sync（2026-10-14-files-refresh-explicit-sync）：仅用户主动点击（「刷新」按钮/
-  // 错误重试）传 true——触发绑定 daemon 定向上行同步（backend 等待预算 3s）；初始
-  // 挂载、autoRefreshMs 轮询、保存后刷新不传（纯读，直接秒回平台镜像数据）。
+  // sync（2026-10-14-files-refresh-explicit-sync；2026-10-16-change-files-sync-result
+  // 修订）：仅用户主动点击（「刷新」按钮/错误重试）传 true——触发绑定 daemon 定向
+  // 上行同步（backend 等待预算 15s）；初始挂载、autoRefreshMs 轮询、保存后刷新不传
+  // （纯读，直接秒回平台镜像数据）。同步回执翻成提示条文案：未完成/未执行时展示
+  // 原因（不再无声），成功/防抖跳过/纯读清空或保持 null。
   const refreshTree = useCallback(async (sync?: boolean) => {
     try {
       const resp = await listChangeFiles(workspaceId, changeId, { sync });
       setTree(buildChangeFileTree(resp.items));
+      if (sync) {
+        setSyncWarning(changeFileSyncWarningText(resp.sync_result ?? null));
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "加载文件树失败");
     }
@@ -614,6 +625,18 @@ export function ChangeFileTree({
       {daemonOnline === false && (
         <div className="mx-3 mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
           ⚠️ daemon 离线，保存将排队待重连回写本机
+        </div>
+      )}
+
+      {/* 显式刷新同步未完成提示（2026-10-16-change-files-sync-result）：
+          刷新点击后带 sync_result 回执时展示/清除，非阻塞（文件树照常显示）。 */}
+      {syncWarning && (
+        <div
+          data-testid="change-files-sync-warning"
+          role="status"
+          className="mx-3 mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700"
+        >
+          ⚠️ {syncWarning}
         </div>
       )}
 

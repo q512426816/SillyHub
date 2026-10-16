@@ -221,9 +221,27 @@ class ChangeFileEntry(BaseModel):
     is_text: bool
 
 
+class ChangeFileSyncResult(BaseModel):
+    """GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
+
+    ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
+    ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
+    rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
+    no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
+    daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
+    默认纯读（不带 sync）本对象为 None。
+    """
+
+    triggered: bool
+    ok: bool | None = None
+    reason: str | None = None
+    stderr_tail: str | None = None
+
+
 class ChangeFileList(BaseModel):
     change_id: uuid.UUID
     items: list[ChangeFileEntry]
+    sync_result: ChangeFileSyncResult | None = None
 
 
 class ChangeFileContent(BaseModel):

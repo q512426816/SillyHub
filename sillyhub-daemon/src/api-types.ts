@@ -1959,9 +1959,12 @@ export interface paths {
          *     2026-10-14-files-refresh-explicit-sync：触发面收窄——默认（sync=false）纯读，
          *     直接返回平台镜像数据、不碰 daemon 通道（悬浮面板轮询/初始加载零同步开销）；
          *     仅显式 sync=true（前端「刷新」按钮点击、错误重试）先经绑定 daemon 触发一次
-         *     此变更的定向上行同步（在线才触发，失败静默降级——``_sync_change_via_daemon``
+         *     此变更的定向上行同步（在线才触发，失败降级不抛——``_sync_change_via_daemon``
          *     任何情况不抛），使主动刷新尽量拿到 daemon 本机最新文档。
-         *     ``service.list_files`` 本体纯读语义零改动。
+         *     2026-10-16-change-files-sync-result：sync=true 时降级不再无声——响应带
+         *     ``sync_result`` 回执（触发状态 / 成败 / 机读原因 / CLI 失败尾段），前端据此
+         *     在同步未完成时提示原因；默认纯读回执恒 None。``service.list_files`` 本体
+         *     纯读语义零改动。
          */
         get: operations["list_change_files_api_workspaces__workspace_id__changes__change_id__files_get"];
         put?: never;
@@ -7361,6 +7364,10 @@ export interface paths {
          *
          *     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
          *     在 service 抛 413/415（AppError 惯例同 file 模块）。
+         *
+         *     2026-10-16-backend-mem-polling task-05 / D-004@v1：读内容**前**先查
+         *     ``UploadFile.size``（Starlette spool 时已知）超限直接 413——超限文件
+         *     不再整读进内存（上限值 import 自 service 单一源，不双写）。
          */
         post: operations["upload_attachment_api_daemon_session_attachments_post"];
         delete?: never;
@@ -14365,6 +14372,28 @@ export interface components {
             change_id: string;
             /** Items */
             items: components["schemas"]["ChangeFileEntry"][];
+            sync_result?: components["schemas"]["ChangeFileSyncResult"] | null;
+        };
+        /**
+         * ChangeFileSyncResult
+         * @description GET files?sync=1 显式同步执行回执（2026-10-16-change-files-sync-result）。
+         *
+         *     ``triggered=False``：RPC 未发出，``reason`` ∈ no_binding / daemon_offline；
+         *     ``ok`` 三态——True=daemon 执行成功；False=执行失败或超时（``reason`` 机读短码：
+         *     rpc_timeout / rpc_remote_error / runtime_offline / exception / cli_failed /
+         *     no_workspace_root 等，``stderr_tail`` 为 CLI 失败输出尾段）；None=已触发但
+         *     daemon 防抖跳过（``skipped_in_flight`` / ``skipped_debounced``）或未触发。
+         *     默认纯读（不带 sync）本对象为 None。
+         */
+        ChangeFileSyncResult: {
+            /** Triggered */
+            triggered: boolean;
+            /** Ok */
+            ok?: boolean | null;
+            /** Reason */
+            reason?: string | null;
+            /** Stderr Tail */
+            stderr_tail?: string | null;
         };
         /** ChangeFileWriteRequest */
         ChangeFileWriteRequest: {

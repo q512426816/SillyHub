@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  动机：change 文件树「刷新」同步链路三层静默失败——后端 RPC 预算 3s 短于实测 6~13.5s 同步耗时（fire-ledger 变更恒超时降级）；后端丢弃 daemon 回执（ok:false 原因与 CLI
+  stderr 无人消费、无日志、无提示）；未触发同步时前端零反馈（auth-random-logout 从未同步过，用户无从知晓）。
+
+  成功标准：
+
+  - 后端 _FILES_REFRESH_SYNC_RPC_TIMEOUT_S 从 3s 放宽到 15s（覆盖实测 6~13.5s 同步耗时）
+
+  - 后端消费 sillyspec_sync_change 回执：ok:false/超时/远程错误/连接丢失记 warning 日志（含 reason 与 stderr_tail），成功与防抖跳过记 info
+
+  - GET files?sync=1 响应新增可选 sync_result 字段（triggered/ok/reason/stderr_tail）；默认纯读不带（null）
+
+  - 前端「刷新」按钮：sync_result 失败或未触发时展示同步未完成提示（含原因中文标注），文件树照常展示；成功与防抖跳过不提示
+
+  - 新增/更新后端与前端测试全绿，既有 test_files_refresh_sync.py 各路用例语义不回归
+
+  - 后端 openapi.json 与前端/daemon api-types.ts 依据 pnpm gen:types 重新生成并提交
+autopilot: true
+prestage_ack: false
+baseline_commit: d581d40b43ea8078957e915ff68709fb9f082b94
+updatedAt: '2026-10-16T08:25:43.225Z'
+cross_baselines:
+  sillyspec: 7f4892ce1d41c5fc03e0f8f590455506584e8fc9
+baseline_sha256: c73dbe8c441f175fe22bf550b422bdccdc93413224a38fbcfffc431cf2c317a5
+
