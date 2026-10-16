@@ -125,10 +125,14 @@ import type { ProviderAdapter } from './providers.js';
 import {
   applyTranscriptConfigDir,
   defaultTranscriptDirs,
+  findClaudeTranscriptPath,
   migrateClaudeTranscriptToHost,
   migrateClaudeTranscriptToIsolated,
   type TranscriptDirs,
 } from './claude-transcript-dir.js';
+// 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗不可跨供应商重放的
+// 供应商私有块（server_tool_use / mcp_tool_use 及其结果块），详见模块头。
+import { sanitizeClaudeTranscriptForReplay } from './transcript-sanitize.js';
 import type { PolicyEngine } from '../policy/filesystem-policy.js';
 import type { SessionInjectAttachment } from '../protocol.js';
 import {
@@ -1870,6 +1874,49 @@ export class SessionManager {
     await run;
   }
 
+  /**
+   * 2026-10-16-provider-switch-transcript-sanitize：切供应商后清洗 transcript 历史。
+   *
+   * 由 `_reloadSessionNow` 在「provider 实际变化 + claude 引擎 + 有 agentSessionId」时调用，
+   * 时序固定为 transcript 迁移之后（`migrateClaudeTranscriptToIsolated/ToHost`）→
+   * `applyTranscriptConfigDir` 定下 configDir → **本方法** → resume，保证新供应商第一
+   * 个请求读到的就是清洗后的历史。
+   *
+   * 失败语义（R-01 同款降级）：探测不到文件 / 清洗内部异常一律只 warn 返回，**绝不抛**——
+   * reload 主路径不阻断（最坏情况退回清洗前的行为，即维持原 400，不会把会话弄坏）。
+   */
+  private async _sanitizeSwitchedTranscript(
+    sessionId: string,
+    agentSessionId: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<void> {
+    try {
+      // configDir 判定与 resume 同源：applyTranscriptConfigDir 命中隔离目录 → 用隔离目录；
+      // 命中宿主机（或探测 unknown 之外的降级）→ 宿主机 ~/.claude。
+      const configDir = env.CLAUDE_CONFIG_DIR ?? this._resumeDirs.home;
+      const filePath = await findClaudeTranscriptPath(configDir, agentSessionId);
+      if (filePath === null) {
+        console.warn('[session-manager] transcript_sanitize_skipped_no_transcript', {
+          session: sessionId,
+        });
+        return;
+      }
+      const result = await sanitizeClaudeTranscriptForReplay(filePath);
+      if (result.changed) {
+        console.warn('[session-manager] transcript_sanitize_applied', {
+          session: sessionId,
+          replaced_blocks: result.replacedBlocks,
+          backup: result.backupPath,
+        });
+      }
+    } catch (e) {
+      console.warn('[session-manager] transcript_sanitize_failed', {
+        session: sessionId,
+        error: (e as Error)?.message ?? String(e),
+      });
+    }
+  }
+
   /** `_reloadSession` 的串行化核心段（由 chain 包装器保证同会话顺序执行）。 */
   private async _reloadSessionNow(
     sessionId: string,
@@ -1972,6 +2019,21 @@ export class SessionManager {
         state.agentSessionId,
         this._resumeDirs,
       );
+
+      // 2026-10-16-provider-switch-transcript-sanitize：切供应商（provider 实际变化）时
+      // 清洗历史里「不可跨供应商重放」的供应商私有块（server_tool_use / mcp_tool_use 及
+      // 引用其 id 的结果块）。历史逐轮全量重放，上一家特有的块会让新供应商直接 400
+      //（实证 MiniMax：400 invalid params, tool result's tool id(...) not found (2013)，
+      // 且每轮复现 → 该会话在新供应商下永久失败）。
+      // 位置：transcript 迁移之后、resume 之前——按 applyTranscriptConfigDir 刚定的
+      // configDir 定位，与 resume 要读的是同一个文件（新供应商首请求即已干净）。
+      if (
+        providerSwitchPayload &&
+        state.provider === 'claude' &&
+        state.agentSessionId
+      ) {
+        await this._sanitizeSwitchedTranscript(state.sessionId, state.agentSessionId, newEnv);
+      }
 
       // ── task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi 文件层配置 ──
       // 写盘 + env 合并。claude 跳过（settings.json 链路仍归 daemon.ts spawn 侧

@@ -540,3 +540,45 @@ describe('classifyModelError — context_overflow 归类（F1a / 2026-10-12-sess
     expect(result?.type).toBe('auth_failed');
   });
 });
+
+describe('classifyModelError — 供应商拒收历史签名（2026-10-16-provider-switch-transcript-sanitize）', () => {
+  // 实证原文（会话 f231ca18 第 36 轮，MiniMax Anthropic 兼容端点）：历史里上一家
+  // 供应商（GLM）的服务端工具块无法被新供应商解析 → 400。
+  const REAL_MINIMAX_REJECT =
+    "API Error: 400 invalid params, tool result's tool id(call_0a26d3a2b8dd4a7e9c5fe566) not found (2013)";
+
+  it('实证 MiniMax 400 文案 → message/hint 覆写为可执行中文提示（type/retryable 不变）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: REAL_MINIMAX_REJECT,
+    });
+    expect(result).not.toBeNull();
+    // type 仍走 classifyBlob（该文案不命中任何既有规则 → unknown 兜底），三端联合类型零变更。
+    expect(result?.type).toBe('unknown');
+    expect(result?.code).toBe('400');
+    expect(result?.retryable).toBe(false);
+    expect(result?.message).toContain('拒收会话历史');
+    expect(result?.hint).toContain('切回原档位');
+  });
+
+  it('tool_use_id 变体（not found）同样命中覆写', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'API Error: 400 invalid_request_error: tool_use_id(toolu_x) not found',
+    });
+    expect(result?.message).toContain('拒收会话历史');
+  });
+
+  it('不含该签名的普通 400 不误命中（保持兜底文案）', () => {
+    const result = classifyModelError({
+      agent: 'claude',
+      isError: true,
+      resultText: 'API Error: 400 invalid params: temperature must be <= 1',
+    });
+    expect(result?.type).toBe('unknown');
+    expect(result?.message).not.toContain('拒收会话历史');
+  });
+});
+

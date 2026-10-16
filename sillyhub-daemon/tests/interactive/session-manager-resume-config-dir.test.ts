@@ -52,6 +52,10 @@ vi.mock('../../src/interactive/claude-transcript-dir.js', () => ({
   migrateClaudeTranscriptToIsolated: vi.fn(() => false),
   // ql-20260824-016 切回本机反向迁移；本测试不触发真实 fs，与正向迁移同款 no-op。
   migrateClaudeTranscriptToHost: vi.fn(() => false),
+  // 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗需先定位 transcript
+  // （findClaudeTranscriptPath）；本测试只覆盖 configDir 判定，定位固定 miss =
+  // 清洗降级跳过（「探测不到 → 行为同清洗前」，R-01）。
+  findClaudeTranscriptPath: vi.fn(async () => null),
 }));
 
 // ── 辅助构造（对齐 config-switch / main-agent-mcp 测试）───────────────────────

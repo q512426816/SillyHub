@@ -300,10 +300,35 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
   // TRANSIENT_ERROR_TYPES 判定零变更）；code 对该签名恒 null。
   const silentTruncation = /\[silent[\s_-]?stream[\s_-]?truncation\]/i.test(blob);
   const code = silentTruncation ? null : extractCode(blob);
+  // 2026-10-16-provider-switch-transcript-sanitize：供应商拒收会话历史签名——
+  // 历史逐轮全量重放，上一家供应商私有的块（server_tool_use / mcp_tool_use 及其
+  // 结果块）新供应商无法解析，第三方 Anthropic 兼容端点直接回 400（实测 MiniMax：
+  // `API Error: 400 invalid params, tool result's tool id(call_…) not found (2013)`，
+  // 会话 f231ca18 第 36 轮）。形态与 silentTruncation 同款：只覆写 message/hint；
+  // type 仍走 classifyBlob（实证落 unknown 兜底），retryable 保持 false——历史未
+  // 清洗时重试必然复现（避免自动重试把同一失败刷 3 次）。
+  const historyRejected =
+    /tool\s+result'?s?\s+tool\s+id|(?:tool[\s_]?result|tool[\s_]?use)[\s_]?id[\s\S]{0,40}(?:not[\s_-]?found|does\s+not\s+exist|不存在|未找到)/i.test(
+      blob,
+    );
 
   // 2. 归类（provider 无关：pi/codex/cursor 与 claude 同一规则体）。
   const type = classifyBlob(blob);
   const info = ERROR_INFO[type];
+  if (historyRejected) {
+    return {
+      type,
+      code,
+      message: '供应商拒收会话历史（含上一家供应商专有内容块）',
+      retryable: false,
+      hint:
+        '会话历史里有上一家供应商专有的工具块（服务端工具调用），当前供应商无法解析——' +
+        '平台内切换供应商会自动清洗历史；若是宿主机档位（本机默认）换供应商，' +
+        '请切回原档位，或在平台新建会话继续。',
+      raw,
+      resetAt: null,
+    };
+  }
   if (silentTruncation) {
     return {
       type,

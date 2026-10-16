@@ -35,9 +35,9 @@
 //     用例不得依赖宿主真状态）+ vi.stubEnv SILLYHUB_DAEMON_DIR 隔离 ForReload 写盘。
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type {
   Query,
   SDKMessage,
@@ -1604,4 +1604,177 @@ describe('provider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A�
     expect(sm.get(BASE_INPUT.sessionId)?.status).toBe('active');
   });
 
+});
+
+// ── 2026-10-16-provider-switch-transcript-sanitize：切供应商时清洗历史私有块 ──
+// 实证（会话 f231ca18 第 36 轮）：历史里上一家供应商（GLM）的服务端工具块
+// （server_tool_use:analyze_image + 同 id tool_result）在切换后重放给新供应商
+// （MiniMax）→ 400 tool result's tool id(...) not found，且每轮复现。修复：
+// reload 切供应商分支在 resume 前清洗 transcript（replace 成 text + 备份），
+// 详见 src/interactive/transcript-sanitize.ts。
+
+describe('2026-10-16-provider-switch-transcript-sanitize / 切供应商清洗历史私有块', () => {
+  const PRIVATE_ID = 'call_0a26d3a2b8dd4a7e9c5fe566';
+
+  const buildDirs = () => {
+    const root = mkdtempSync(join(tmpdir(), 'sm-sanitize-'));
+    return {
+      root,
+      isolated: join(root, 'iso-claude-config'),
+      home: join(root, 'home-claude'),
+    };
+  };
+
+  /** 含实证私有块对的 transcript（同一条 assistant 消息内 server_tool_use + tool_result）。 */
+  const dirtyJsonl = (): string =>
+    [
+      {
+        parentUuid: null,
+        isSidechain: false,
+        type: 'user',
+        uuid: 'u1',
+        timestamp: '2026-10-08T03:00:00.000Z',
+        message: { id: 'm1', role: 'user', content: '你直接看图吧' },
+      },
+      {
+        parentUuid: 'u1',
+        isSidechain: false,
+        type: 'assistant',
+        uuid: 'a1',
+        timestamp: '2026-10-08T03:01:00.000Z',
+        message: {
+          id: 'm2',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '先分析截图。' },
+            { type: 'server_tool_use', id: PRIVATE_ID, name: 'analyze_image', input: {} },
+            { type: 'tool_result', tool_use_id: PRIVATE_ID, content: '# 截图分析正文' },
+          ],
+        },
+      },
+    ]
+      .map((r) => JSON.stringify(r))
+      .join('\n') + '\n';
+
+  const writeJsonl = (
+    dirs: ReturnType<typeof buildDirs>,
+    which: 'home' | 'isolated',
+    sid: string,
+    content: string,
+  ) => {
+    const dir = join(dirs[which], 'projects', 'C--work');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${sid}.jsonl`), content, 'utf8');
+    return join(dir, `${sid}.jsonl`);
+  };
+
+  it('SAN-1: 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动', async () => {
+    const dirs = buildDirs();
+    try {
+      const homeFile = writeJsonl(dirs, 'home', 'sdk-sess-san', dirtyJsonl());
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-san'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      // Act：切供应商（迁移 → 清洗 → resume）。
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+
+      // Assert：resume 读的隔离副本已干净，且备份存在（可回退）。
+      const isolatedFile = join(dirs.isolated, 'projects', 'C--work', 'sdk-sess-san.jsonl');
+      const cleaned = readFileSync(isolatedFile, 'utf-8');
+      expect(cleaned).not.toContain(PRIVATE_ID);
+      // 块本身不再存在（替换文案里提到的类型名属描述文本，故按 JSON 块字面断言）。
+      expect(cleaned).not.toContain('"type":"server_tool_use"');
+      expect(cleaned).toContain('截图分析正文'); // 正文保留
+      const records = cleaned
+        .split('\n')
+        .filter((l) => l.length > 0)
+        .map((l) => JSON.parse(l) as { uuid: string; parentUuid: string | null });
+      expect(records.map((r) => r.uuid)).toEqual(['u1', 'a1']); // 记录数/链不变
+      expect(records.map((r) => r.parentUuid)).toEqual([null, 'u1']);
+      expect(
+        readdirSync(dirname(isolatedFile)).some((f) => f.includes('.bak-sillyhub-')),
+      ).toBe(true);
+      // 宿主原件零改写（~/.claude 是用户数据，daemon 不删不改）。
+      expect(readFileSync(homeFile, 'utf-8')).toContain(PRIVATE_ID);
+      // reload 主路径不受影响。
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+      const env = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://new.example.com');
+      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-san');
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('SAN-2: 无供应商变更（config-only reload）→ 历史零改写、零备份', async () => {
+    const dirs = buildDirs();
+    try {
+      // 本机会话形态（transcript 在 home；config-only reload 不触发正/反向迁移）。
+      const homeFile = writeJsonl(dirs, 'home', 'sdk-sess-san2', dirtyJsonl());
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-san2'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      // Act：只切人格（payload 不带 providerConfig → 非供应商切换轮）。
+      await sm.reloadWithConfig(BASE_INPUT.sessionId, {
+        sessionId: BASE_INPUT.sessionId,
+        runId: 'run-san2',
+        claimToken: 'claim-san2',
+        prompt: '继续',
+        profile: { systemPrompt: '你是助手' },
+        providerConfig: undefined,
+      });
+
+      // Assert：非切换轮不动历史（脏块保留待真正切换时清洗）。
+      expect(readFileSync(homeFile, 'utf-8')).toContain(PRIVATE_ID);
+      expect(
+        readdirSync(dirname(homeFile)).some((f) => f.includes('.bak-sillyhub-')),
+      ).toBe(false);
+      expect(
+        readdirSync(join(dirs.home, 'projects', 'C--work')).some((f) =>
+          f.includes('.bak-sillyhub-'),
+        ),
+      ).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('SAN-3: 探测不到 transcript → 清洗降级跳过，reload 照常成功（R-01）', async () => {
+    const dirs = buildDirs();
+    try {
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-san3'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+      expect(mock.driver.start).toHaveBeenCalledTimes(2);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
 });
