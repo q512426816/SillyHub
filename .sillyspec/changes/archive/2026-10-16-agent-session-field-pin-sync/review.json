@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1, "change": "2026-10-16-agent-session-field-pin-sync", "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "cd5c6760f",
+  "findings": [],
+  "dimensionNotes": { "乱序": "n/a（纯声明式 set 相等断言，无顺序依赖）", "并发": "n/a（无共享状态/IO）", "切换": "n/a（无模式/环境切换路径）", "作用域": "n/a（断言仅作用于 AgentSession.model_fields，未外溢）" },
+  "reviewedAt": "2026-10-16T19:19:37+08:00"
+}

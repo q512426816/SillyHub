@@ -1,0 +1,73 @@
+{
+  "change": "2026-10-16-agent-session-field-pin-sync",
+  "baseline": "4d5f9ac3fee88780186ce89b1d385d201f6c7246",
+  "head": "cd5c6760fd82584b7b25b8e8d89947f6360a55b6",
+  "files": [
+    "backend/app/modules/agent/tests/test_agent_session_model.py"
+  ],
+  "totals": {
+    "files": 1,
+    "additions": 7,
+    "deletions": 2
+  },
+  "savedAt": "2026-10-16T11:18:06.712Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/backend/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "agent",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/agent.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 4,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "4d5f9ac3fee88780186ce89b1d385d201f6c7246",
+    "totals": {
+      "files": 1,
+      "additions": 7,
+      "deletions": 2
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/agent/tests/test_agent_session_model.py",
+        "additions": 7,
+        "deletions": 2,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "7ef454a429229e51ea52605c90d08ab26b8dce8801c0799fb33b20ac016ac713",
+  "patchStatus": "ok"
+}

@@ -384,3 +384,11 @@
 锚点：未记录
 最近确认：d43971698
 理由：内部 commit（对齐 revoke_all_user_sessions 既有语义）。依据：复用分支 UPDATE 后立即 raise AuthRefreshReused，而 get_session 依赖对异常路径 session.rollback()（backend/app/core/db.py:163-167）——不先行提交则族吊销被回滚成空操作（安全响应静默丢失）。design.md 对应措辞已同步修正
+
+## D-unmapped-068@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-agent-session-field-pin-sync
+原编号：D-001@v1
+锚点：未记录
+最近确认：cd5c6760fd82584b7b25b8e8d89947f6360a55b6
+理由：最大风险：钉子与真实模型再次漂移（后续给 agent_sessions 加列的人再次漏更）——护栏恰是本钉子自身（届时实测门会再拦，按本次同款流程补钉即可，local.yaml 豁免仅作过渡不长期留存）。曾考虑的替代方案：把字段集断言放宽为"包含关键列子集"以降低维护成本——放弃：钉子的价值恰在精确集，放宽即失去"未登记列变更"的探测能力。
