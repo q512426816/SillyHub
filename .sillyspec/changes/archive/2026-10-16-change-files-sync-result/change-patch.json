@@ -1,0 +1,284 @@
+{
+  "change": "2026-10-16-change-files-sync-result",
+  "baseline": "d581d40b43ea8078957e915ff68709fb9f082b94",
+  "head": "7ca3e7ba66d5d065715a08ea885d064b2617e3e9",
+  "files": [
+    ".sillyspec/docs/SillyHub/modules/change.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+    ".sillyspec/docs/SillyHub/modules/frontend_lib.md",
+    ".sillyspec/docs/backend/modules/change.md",
+    ".sillyspec/docs/multi-agent-platform/flows/auth-flow.md",
+    ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+    ".zcode/skills/deploy-to-server/SKILL.md",
+    "backend/app/modules/change/router.py",
+    "backend/app/modules/change/schema.py",
+    "backend/app/modules/change/tests/test_files_refresh_sync.py",
+    "backend/openapi.json",
+    "docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md",
+    "frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx",
+    "frontend/src/components/change-file-tree.tsx",
+    "frontend/src/lib/__tests__/change-file-sync.test.ts",
+    "frontend/src/lib/api-types.ts",
+    "frontend/src/lib/change-file-sync.ts",
+    "frontend/src/lib/change-files.ts",
+    "sillyhub-daemon/src/api-types.ts"
+  ],
+  "totals": {
+    "files": 19,
+    "additions": 788,
+    "deletions": 70
+  },
+  "savedAt": "2026-10-16T08:52:27.618Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "change",
+      "files": 3,
+      "doc": "docs/backend/modules/change.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "change",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/change.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": true,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 4,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": true,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [
+    {
+      "dir": ".zcode/skills/deploy-to-server",
+      "files": 1
+    }
+  ],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 4,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "d581d40b43ea8078957e915ff68709fb9f082b94",
+    "totals": {
+      "files": 19,
+      "additions": 788,
+      "deletions": 70
+    },
+    "rows": [
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/change.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_components.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/SillyHub/modules/frontend_lib.md",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/backend/modules/change.md",
+        "additions": 5,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/flows/auth-flow.md",
+        "additions": 20,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/modules/deploy.md",
+        "additions": 1,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": ".zcode/skills/deploy-to-server/SKILL.md",
+        "additions": 12,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/router.py",
+        "additions": 137,
+        "deletions": 23,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/schema.py",
+        "additions": 18,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/change/tests/test_files_refresh_sync.py",
+        "additions": 131,
+        "deletions": 16,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/openapi.json",
+        "additions": 59,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "docs/sillyspec/finished/verify-probe7-matrix-prefill-four-defects.md",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx",
+        "additions": 171,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/change-file-tree.tsx",
+        "additions": 26,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/change-file-sync.test.ts",
+        "additions": 81,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api-types.ts",
+        "additions": 31,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/change-file-sync.ts",
+        "additions": 48,
+        "deletions": 0,
+        "kind": "new",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/change-files.ts",
+        "additions": 11,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/api-types.ts",
+        "additions": 31,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "042632b1be0e900e808ba96eadebcca90be90c86b410502705053e0008b52ace",
+  "patchStatus": "ok"
+}

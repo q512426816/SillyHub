@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-files-sync-result",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-change-files-sync-result:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_sync_budget_covers_measured_cli_runtime」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-files-sync-result"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-change-files-sync-result:flow:测试绑定FR-02",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_daemon_cli_failure_result_propagates / test_daemon_no_workspace_root_result_propagates / test_daemon_debounce_skip_maps_to_info / test_rpc_timeout_degrades / test_rpc_remote_error_degrades_old_daemon / test_runtime_offline_degrades」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-files-sync-result"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-change-files-sync-result:flow:测试绑定FR-03",
+      "tests": [
+        "backend/app/modules/change/tests/test_files_refresh_sync.py「test_online_triggers_sync_before_list / test_default_read_only_skips_sync / test_no_binding_skips_sync / test_daemon_offline_skips_sync / test_binding_without_daemon_id_skips_sync」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-files-sync-result"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-change-files-sync-result:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx「刷新回执提示 6 例」",
+        "frontend/src/lib/__tests__/change-file-sync.test.ts「changeFileSyncWarningText 全分支（10 例）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-files-sync-result"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-change-files-sync-result:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/lib/__tests__/change-file-sync.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-files-sync-result"
+    }
+  ]
+}

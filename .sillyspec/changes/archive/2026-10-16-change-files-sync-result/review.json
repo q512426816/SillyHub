@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-files-sync-result",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "7ca3e7ba66d5d065715a08ea885d064b2617e3e9",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "自声明文件清单与实际冻结面存在差额（后补模块卡与跨变更文档未覆盖）",
+      "evidence": "design「文件变更清单」未列 .sillyspec/docs/SillyHub/modules/change.md|frontend_components.md|frontend_lib.md 与 backend/modules/change.md（本变更 7ca3e7ba6 提交的四张模块卡，清单提交 fd919b659 早于它），也未提及 change.patch 中属其他变更的 auth-flow.md / deploy.md / probe7 归档移动；冻结面大于声明面，属性对账不完整（无代码面影响）。",
+      "location": ".sillyspec/changes/2026-10-16-change-files-sync-result/design.md:29-43（对照 change.patch:1-148,828-842）"
+    },
+    {
+      "severity": "P3",
+      "title": "FR-06 绑定作答的防护挂载点表述不准确：生成物一致性检查在 pre-push 而非 pre-commit",
+      "evidence": "requirements FR-06 称生成物一致性由「pnpm gen:types:check + pre-commit hook」守护；实机 gen:types:check 存在于 frontend/package.json:16 与 sillyhub-daemon/package.json:20，唯一挂载点为 backend/.pre-commit-config.yaml 的 ci-fast-gate（stages: [pre-push]，含 typecheck×2+gen:types:check×2），.git/hooks/pre-commit 实际只执行 ruff/assertion-surfaces——提交阶段不拦 api-types 漂移，推送阶段才拦，防护真实存在但阶段表述差一层。",
+      "location": "backend/.pre-commit-config.yaml:53-55"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok（边界已裁决：可接受）",
+    "并发": "ok（边界已裁决：可接受）",
+    "切换": "ok（边界已裁决：可接受）",
+    "作用域": "ok（边界已裁决：可接受）"
+  },
+  "reviewedAt": "2026-10-16T17:06:00+08:00"
+}
