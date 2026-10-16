@@ -160,6 +160,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       spawnArgs = args;
     }
 
+    // spawn 参数本地留痕（真机诊断：8fad6a97 会话子进程未出现，抓实际参数）
+    // eslint-disable-next-line no-console
+    console.log('[zcode-driver] spawn:', JSON.stringify({ cmd: spawnCmd, args: spawnArgs, cwd: opts.cwd, zcode_data: env['ZCODE_DATA_BASE_DIR'] }));
     const child = spawn(spawnCmd, spawnArgs, {
       cwd: opts.cwd,
       env,
@@ -288,6 +291,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       for (const ev of events) {
         if (ev.type === 'error') {
           pendingTurnError = ev.content || pendingTurnError;
+          // 轮级错误本地留痕（真机诊断：backend 只存 run failed，错误内容仅此一处）
+          // eslint-disable-next-line no-console
+          console.error('[zcode-driver] turn error:', (ev.content || '').slice(0, 300));
         }
         if (ev.type === 'turn_result') {
           const outcome: TurnOutcome = {
@@ -567,10 +573,18 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
 
   // 实测形状（ZCode zod Pu schema）：model 必须是 { providerId, modelId } 对象——字符串直接传报 Invalid params（腾讯云真机实证）。providerId = zcode-settings 注入的个人 Provider 键。
   /** 初始/热切换模型（providers.ts provider_config_changed 路径复用）。 */
-  private async _applyModel(h: ZcodeHandle, model: string): Promise<void> {
+  private async _applyModel(h: ZcodeHandle, model: string | { modelId?: unknown; providerId?: unknown }): Promise<void> {
+    // 平台透传的 model 可能是对象（模型引用 {providerId, modelId}）或字符串——
+    // 归一为字符串 modelId（腾讯云真机实证：对象直传 modelId 变 [object Object]，
+    // ZCode registry 查询失败 turn.failed）。
+    const modelId =
+      typeof model === 'string' ? model
+      : model && typeof model === 'object' && typeof (model as { modelId?: unknown }).modelId === 'string'
+        ? (model as { modelId: string }).modelId
+        : String(model);
     await h.envelope.request(
       'session/setModel',
-      { sessionId: h.zcodeSessionId, model: { providerId: ZCODE_PROVIDER_ID, modelId: model } },
+      { sessionId: h.zcodeSessionId, model: { providerId: ZCODE_PROVIDER_ID, modelId: modelId } },
       (line) => h.child.stdin?.write(line),
       { timeoutMs: this.controlTimeoutMs },
     );
