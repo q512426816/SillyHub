@@ -25,7 +25,7 @@ const mockedFetch = vi.mocked(fetchSessionDialogHistory);
 /* 工厂                                                                */
 /* ------------------------------------------------------------------ */
 
-function pendingReq(partial: Partial<SessionPermissionRequest>): SessionPermissionRequest {
+function pendingReq(partial: Partial<SessionPermissionRequest> = {}): SessionPermissionRequest {
   return {
     session_id: "s-1",
     run_id: "r-1",
@@ -40,7 +40,7 @@ function pendingReq(partial: Partial<SessionPermissionRequest>): SessionPermissi
   } as SessionPermissionRequest;
 }
 
-function historyRow(partial: Partial<SessionDialogRead>): SessionDialogRead {
+function historyRow(partial: Partial<SessionDialogRead> = {}): SessionDialogRead {
   return {
     id: "d-1",
     session_id: "s-1",
@@ -119,7 +119,7 @@ describe("splitDecisions（纯函数）", () => {
     expect(pending.map((p) => p.key)).toEqual(["req-1", "req-2", "plan"]);
     expect(pending.map((p) => p.kind)).toEqual(["ask", "plan", "plan"]);
     expect(pending.every((p) => p.status === "waiting")).toBe(true);
-    expect(pending[2].createdAt).toBe("2026-10-16T03:18:00Z");
+    expect(pending[2]?.createdAt).toBe("2026-10-16T03:18:00Z");
   });
 
   it("历史行：answered 归历史组带回答摘要；cancelled 显示未回答", () => {
@@ -134,10 +134,10 @@ describe("splitDecisions（纯函数）", () => {
       }),
     ]);
     expect(history).toHaveLength(2);
-    expect(history[0].status).toBe("answered");
-    expect(history[0].answerSummary).toBe("阿里云 ECS");
-    expect(history[1].status).toBe("unanswered");
-    expect(history[1].answerSummary).toBeNull();
+    expect(history[0]?.status).toBe("answered");
+    expect(history[0]?.answerSummary).toBe("阿里云 ECS");
+    expect(history[1]?.status).toBe("unanswered");
+    expect(history[1]?.answerSummary).toBeNull();
   });
 
   it("孤儿 pending 行（不在 SSE 待答集）归历史组显示未回答，不算待决策", () => {
@@ -151,8 +151,8 @@ describe("splitDecisions（纯函数）", () => {
     const { pending, history } = splitDecisions([pendingReq({ request_id: "req-1" })], null, [orphan]);
     expect(pending.map((p) => p.key)).toEqual(["req-1"]);
     expect(history).toHaveLength(1);
-    expect(history[0].status).toBe("unanswered");
-    expect(history[0].answerSummary).toBeNull();
+    expect(history[0]?.status).toBe("unanswered");
+    expect(history[0]?.answerSummary).toBeNull();
   });
 
   it("历史 undefined（未加载）时只看 pending 组", () => {

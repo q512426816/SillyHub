@@ -5417,8 +5417,12 @@ export function SessionPanelPage({
           进行中变更徽标呼吸提示（FR-02）。
           2026-10-16-session-decision-pill task-04：锚点内改 flex 悬浮行——待决策
           pill（新增，自渲染 null 零占位同款）与变更文件 pill（embedded 脱壳）
-          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。 */}
-      {sessionId != null && session?.workspace_id != null && (
+          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。
+          2026-10-16-decision-pill-no-workspace：悬浮行门槛放宽为仅真会话
+          （sessionId）——待决策 pill 只消费 sessionId；无 workspace 老会话
+          （workspace_id 为空，如 445e12d9）不应连坐不挂载。变更文件 pill 保留
+          自己的 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）。 */}
+      {sessionId != null && (
         <div className="relative h-0 w-full">
           <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex items-center justify-end gap-2 print:hidden">
             <div className="pointer-events-auto">
@@ -5429,14 +5433,16 @@ export function SessionPanelPage({
                 onFocusPending={handleFocusPending}
               />
             </div>
-            <div className="pointer-events-auto">
-              <SessionChangeFilesHover
-                workspaceId={session.workspace_id}
-                sessionId={sessionId}
-                running={running}
-                embedded
-              />
-            </div>
+            {session?.workspace_id != null && (
+              <div className="pointer-events-auto">
+                <SessionChangeFilesHover
+                  workspaceId={session.workspace_id}
+                  sessionId={sessionId}
+                  running={running}
+                  embedded
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
