@@ -6,6 +6,8 @@ created_at: 2026-10-16T13:19:13.371Z
 
 ## 做法概述
 
+本变更怎么解决问题？改哪里、为什么选这个方案（一两段）。
+
 变更中心两类烂标题（完整变更=变更名兜底、轻量变更=50 字截断长句）的病根在 CLI 侧（另变更处理），但存量已入库的坏 title 只能平台侧修：平台 `changes.description` 列已存有动机段提取文本（2026-09-28-change-list-description），是现成的语义来源。本变更三件事：
 
 1. `title_norm.py` 新增 `condense_title` 纯函数——自然标点截断（强边界 优先，弱边界兜底，区间 `[8,30]`，无边界硬截加 `…`），与将来 CLI 侧同规则实现行为对齐（两边各留一份、用同一组实证样本锚定，防漂移靠测试样本一致）。
@@ -16,6 +18,8 @@ created_at: 2026-10-16T13:19:13.371Z
 
 ## 接口契约
 
+动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
+
 - 新增 `app.modules.change.title_norm.condense_title(text: str | None, *, min_len: int = 10, floor_len: int = 8, max_len: int = 30) -> str`——纯函数，模块级常量 `TITLE_CONDENSE_MIN_LEN=10`（10-30 必须带，用户口径 2026-10-16）/ `TITLE_CONDENSE_FLOOR_LEN=8`（兜底带下限）/ `TITLE_CONDENSE_MAX_LEN=30` 供调用方共享口径；硬截产物总长恰 `max_len`。
 - 修改 `PlatformSyncService._ensure_change_row` 既有行收养分支 + 占位建行分支：title 超过 `TITLE_CONDENSE_MAX_LEN` 时先 `condense_title`，提炼为空则放弃收养/回落 change_key；≤30 字行为不变。
 - 新增 `app.modules.change.title_backfill.TitleBackfillService`：`async backfill_workspace(ws_id, *, apply: bool) -> TitleBackfillStats`（含命中明细列表供脚本打印）；`TitleBackfillStats` dataclass 计数字段（scanned/selected/updated/skipped_no_description/skipped_empty_or_same）。
@@ -24,7 +28,39 @@ created_at: 2026-10-16T13:19:13.371Z
 - 前端（task-07）：详情页 PageHead actions 区新增「改名」动作（`DetailRenameAction`，照 DetailDeleteAction 受控弹层范式），权限可见性复用 `useChangeDeleteAccess`+`canDeleteChange` 三元组启发式；api-types 走 `pnpm gen:types` + `pnpm -C sillyhub-daemon gen:types` 生成（规则 21）。
 - 无新表、无迁移；前端/daemon 类型文件与 openapi.json 随本变更再生成提交。
 
+## 文件变更清单
+
+| 操作 | 路径 | 说明 |
+| --- | --- | --- |
+| 修改 | backend/app/modules/change/title_norm.py | condense_title 纯函数 + 带宽/标签常量（task-01/05） |
+| 修改 | backend/app/modules/change/tests/test_title_normalization.py | TestCondenseTitle 12 用例 + TestAdoptTitleCondenseGuard 4 用例（task-01/02） |
+| 修改 | backend/app/modules/platform_sync/service.py | _ensure_change_row 两入口超长提炼防御（task-02） |
+| 修改 | backend/app/modules/platform_sync/tests/test_change_deleted_guard.py | 超长 HTTP 面用例随提炼契约更新（task-02） |
+| 新增 | backend/app/modules/change/title_backfill.py | 回填服务（task-03） |
+| 新增 | backend/scripts/backfill_change_titles.py | 回填脚本 dry-run/--apply/--yes（task-03） |
+| 新增 | backend/app/modules/change/tests/test_title_backfill.py | 回填服务 9 用例（task-03） |
+| 修改 | backend/app/modules/change/schema.py | ChangeRenameRequest/Response（task-06） |
+| 修改 | backend/app/modules/change/service.py | rename_title 服务方法（task-06） |
+| 修改 | backend/app/modules/change/router.py | PATCH /changes/{cid}/title 端点（task-06） |
+| 新增 | backend/app/modules/change/tests/test_rename_title.py | 改名端点 10 用例（task-06） |
+| 修改 | backend/openapi.json | gen:types 再生成（task-06/07，规则 21） |
+| 修改 | frontend/src/lib/api-types.ts | gen:types 再生成（task-07，规则 21） |
+| 修改 | frontend/src/lib/changes.ts | renameChangeTitle API 封装（task-07） |
+| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx | DetailRenameAction 改名入口（task-07） |
+| 新增 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-rename-title.test.tsx | 改名入口 3 用例（task-07） |
+| 修改 | sillyhub-daemon/src/api-types.ts | gen:types 再生成（task-07，规则 21 daemon 同款义务） |
+| 新增 | docs/sillyspec/change-title-not-readable.md | 工具侧强制命名要求记录（task-05） |
+| 修改 | docs/sillyspec/active-pitfalls.md | 活跃坑索引追加一行（task-05） |
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
+
+4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
+
+3. 切换/生命周期：会话、请求或变更中途切换/中断时状态是否安全？
+
+2. 并发写：两个执行体同时操作同一数据/文件会发生什么？
+
+1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
 
 1. 乱序/迟到到达：回填后若 CLI 侧后续又推来兜底形态 title（老版本 CLI），收养守卫会再次采纳兜底值——但 CLI 侧同规则修复上线后新推送即语义标题；过渡期最坏情形=个别行回退为 key 名，重跑本脚本幂等修复；人工改名后的语义 title 不被兜底回翻（is_fallback 守卫），仅自定义 H1 文档推送可覆盖（CLI --title 改名通道语义保留）。迟到 documents 推送不会回翻语义 title（既有守卫，已测）。
 2. 并发写：回填单事务逐行 UPDATE title，与 reparse/platform_sync 并发时以最后写者为准；title 是展示元信息非权威数据，最后写者胜无一致性风险；改名端点单行 UPDATE + 事件同事务提交，与回填并发同理取最后写者。脚本建议低峰跑（先例同款建议）。
@@ -32,6 +68,8 @@ created_at: 2026-10-16T13:19:13.371Z
 4. 作用域：回填服务按 workspace_id 过滤（脚本缺省遍历全部工作区、`--workspace` 可定向），行级更新只触 `changes.title`，无跨工作区串台面；`location='deleted'` 行明确排除（防复活守卫语义不被搅动）；改名端点 workspace+change 联合定位（get 404 口径）无越权串台。
 
 ## 风险与死路
+
+本方案最大的风险是什么？试过但放弃的方案及放弃理由？
 
 最大风险：提炼结果语义跑偏（标点切断点选错把句子切成病句）。缓解：强边界（句读完整处）优先、必须带 [10,30] 内取首个边界、本仓实证坏样本全部进单测人工核过产出；且 title 只是展示面，错了可由人工改名端点（FR-05/06）随时纠正——这也是补改名能力的动机：提炼是兜底自动化，最终命名权在人。
 
