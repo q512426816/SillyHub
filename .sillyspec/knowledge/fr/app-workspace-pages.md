@@ -528,3 +528,79 @@ created_at: 2026-10-15T18:08:11.679Z
 - 场景：默认场景 — Given 本变更包含四个面板 + 合并算法 + 状态自适应；When 提交验收；Then 四 tab 与两态自适应 MUST 全部可用；MUST NOT 交付「骨架已改、面板仍为旧卡」的中间态
 全文：.sillyspec/changes/archive/2026-10-15-change-detail-redesign/requirements.md#FR-15
 最近确认：fe8a71ed4
+
+## FR-app-workspace-pages-016 visibleTabs 恒返回四 tab（archived 参数保留但不再收窄）
+变更：2026-10-16-archived-files-tab
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-archived-files-tab/requirements.md#FR-01
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-archived-files-tab:flow:测试绑定FR-01
+  tests: frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-archived-files-tab
+  status: active
+
+## FR-app-workspace-pages-017 归档态「文件与对账」面板可挂载，?tab=files 深链直达
+变更：2026-10-16-archived-files-tab
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-archived-files-tab/requirements.md#FR-02
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-archived-files-tab:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-archived-files-tab
+  status: active
+
+## FR-app-workspace-pages-018 概览右信息栏对账入口归档态同在途一样指向「文件与对账」
+变更：2026-10-16-archived-files-tab
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-archived-files-tab/requirements.md#FR-03
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-archived-files-tab:flow:测试绑定FR-03
+  tests: frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-archived-files-tab
+  status: active
+
+## FR-app-workspace-pages-019 测试同步更新且质量门全绿
+变更：2026-10-16-archived-files-tab
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-archived-files-tab/requirements.md#FR-04
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-archived-files-tab:flow:测试绑定FR-04
+  tests: frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-archived-files-tab
+  status: active

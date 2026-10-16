@@ -250,3 +250,11 @@
 锚点：tests/agent-detector.test.ts
 最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
 理由：最大风险：FR-04 让 codex 族 manualApproval=true 会话从恒自动放行变为真人审——行为面变化，若有依赖旧行为（自动放行）的存量 scan 流程会开始弹审批卡。裁决依据：driver-factory 既有注释（"manualApproval=true 时注入"）、基类契约（"driver 读取并据此决定审批行为"）、claude 路为同义行为（canUseTool 人审），三处均指明人审才是设计意图，恒 allow 是接线缺陷而非决策。已用独立测试文件钉住新契约。 试过但放弃：把 manualApproval 映射放在 approvalReady 块外（chat 也显式 false）——放弃，chat 会话 driverOpts 多两键对行为无增益（驱动 `!undefined` 与 `!false` 同真），且扩大 opts 面变更半径；维持「映射只在审批就绪面生效」最小切口。zcode 主循环曾考虑保留 for-await 仅加槽位——放弃，实测（本变更 TDD）证明 for-await 在 close 后仍挂 `next()`，必须改 while 形态才能收敛。 存量损坏顺带修复（收口实测门拦下，非本变更引入）：① `tests/agent-detector.test.ts` 自 329c0e8aa 起语法损坏（13→14 的标题更新被做成「插入新 it( 行」而非替换，3 处悬挂 it 头致缺 3 个 `}`）——tsconfig exclude tests 使 `tsc --noEmit` 全绿假阴性，该文件自损坏起从未被运行；修复=删除 3 个悬挂旧头 + 期望数组补回被误替换的 'dsh'（PROVIDER_SPECS 实序 dsh 在 zcode 前）。② zcode 注册为 fileSettings writer 后触发 provider-adapter-registry 守护③（smokeSuite 须含 API_FORMAT_VOCAB 全部字面量）——补 buildZcodeProviderConfig 真实 api_format→api.type 映射用例（'openai_chat'→'openai-chat-completions' / 'anthropic'·缺省→'anthropic-messages'）满足判据，非塞注释骗静态扫描。
+
+## D-unmapped-053@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-archived-files-tab
+原编号：D-001@v1
+锚点：未记录
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+理由：- 风险：归档态恢复「文件与对账」后，范围对账卡在归档态显示降级信息（指路「产出 · 归档留档」）——与用户诉求（归档留档不展示 spec 文档全貌）不冲突：卡内有降级说明，文件树与预览照常可用。 - 试过放弃：仅对归档隐藏「范围对账」保留文件树——放弃：对账与文件树同属一卡拆开会造成半空卡，且用户诉求未要求拆。 - 死路：无（改动面小：visibleTabs 单函数 + page.tsx 挂载条件 + 信息栏入口文案）。

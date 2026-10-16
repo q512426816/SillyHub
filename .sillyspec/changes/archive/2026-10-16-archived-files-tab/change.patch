@@ -1,0 +1,241 @@
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+index 858e983d6..416e866a9 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx
+@@ -184,20 +184,20 @@ describe("tab 结构与懒挂载（钉子 3/5）", () => {
+     expect(screen.queryByTestId("change-files-panel")).toBeNull();
+   });
+ 
+-  it("归档：tab 收窄为三枚（隐藏「文件与对账」）；深链 ?tab=files 被钳回概览", async () => {
++  it("归档：四 tab 齐全；深链 ?tab=files 直达文件与对账面板（D-019@v1 不再钳制）", async () => {
+     mocks.getChange.mockResolvedValue(
+       makeChange({ location: "archive", status: "archived" }),
+     );
+     navMocks.searchParams = new URLSearchParams("tab=files");
+     await renderPage();
+     const tabs = screen.getAllByRole("tab");
+-    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程"]);
+-    // 不在可见集 → replace 钳回 overview（不留空白面板）
+-    expect(navMocks.replace).toHaveBeenCalledWith(
+-      "/workspaces/ws-1/changes/ch-1?tab=overview",
+-    );
+-    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
+-    expect(screen.queryByTestId("change-files-panel")).toBeNull();
++    expect(tabs.map((t) => t.textContent)).toEqual([
++      "概览",
++      "产出",
++      "过程",
++      "文件与对账",
++    ]);
++    expect(await screen.findByTestId("change-files-panel")).toBeInTheDocument();
+   });
+ 
+   it("两旧时间线卡 MUST NOT 挂载（D-005 取代方向反钉）", async () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
+index 77e43efc4..a594f504f 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx
+@@ -126,7 +126,7 @@ describe("tab URL 驱动（D-013@v1）", () => {
+ });
+ 
+ describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1）", () => {
+-  it("归档态：不出「继续执行」、不渲染在途空态文案、用量区为合计形态", async () => {
++  it("归档态：不出「继续执行」、不渲染在途空态文案、用量区为合计形态；文件与对账 tab 在场（D-019@v1）", async () => {
+     await renderAt("", makeChange({ location: "archive", status: "archived" }));
+     expect(screen.queryByTestId("change-continue-entry")).toBeNull();
+     // 归档首屏为成果语义：摘要卡标题「成果总结」+ 归档留档摘要；无「执行中/进行中」类在途文案
+@@ -134,6 +134,7 @@ describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1
+     expect(screen.getByText("成果总结")).toBeInTheDocument();
+     expect(screen.queryByText("进行中")).toBeNull();
+     expect(screen.queryByText("非终态每 10 秒自动刷新")).toBeNull();
++    navMocks.searchParams = new URLSearchParams("tab=files");
+   });
+ 
+   it("在途态：不出归档空位（无「归档留档」文本、无成果总结卡）", async () => {
+@@ -143,12 +144,6 @@ describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1
+     expect(screen.queryByText(/归档留档/)).toBeNull();
+     expect(screen.queryByText("成果总结")).toBeNull();
+   });
+-
+-  it("归档态范围对账入口改指「产出 · 归档留档」（不留指向已隐藏 tab 的死链）", async () => {
+-    await renderAt("", makeChange({ location: "archive", status: "archived" }));
+-    expect(await screen.findByText(/真实改动面见「产出 · 归档留档」/)).toBeInTheDocument();
+-    expect(screen.queryByText("明细见「文件与对账」")).toBeNull();
+-  });
+ });
+ 
+ describe("thin 出身不特判（D-015@v1）", () => {
+diff --git a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+index cdaac4a29..3a6f2e6d5 100644
+--- a/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
++++ b/frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx
+@@ -522,7 +522,7 @@ export default function ChangeDetailPage({ params }: Props) {
+         </div>
+       ) : null}
+ 
+-      {activeTab === "files" && !archived ? (
++      {activeTab === "files" ? (
+         <ChangeFilesPanel
+           workspaceId={workspaceId}
+           changeId={changeId}
+diff --git a/frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx b/frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx
+index 5496f5276..fe16784fb 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx
+@@ -51,7 +51,6 @@ describe("ChangeFilesPanel", () => {
+     renderPanel();
+     expect(screen.getByTestId("change-files-panel")).toBeInTheDocument();
+     expect(screen.getByTestId("change-files-panel-tree")).toBeInTheDocument();
+-    expect(screen.getByText("变更文件")).toBeInTheDocument();
+     expect(screen.getByTestId("stub-file-tree")).toBeInTheDocument();
+     expect(screen.getByTestId("stub-scope-audit")).toBeInTheDocument();
+     expect(screen.getByTestId("stub-quicklog")).toBeInTheDocument();
+diff --git a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+index 2ac84eaf9..109ff7311 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx
+@@ -158,12 +158,11 @@ describe("ChangeOverviewSide", () => {
+     expect(screen.queryByText(/执行用量（合计）/)).not.toBeInTheDocument();
+   });
+ 
+-  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口改指产出·归档留档（不留死链）", async () => {
++  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口同指「文件与对账」（D-019@v1）", async () => {
+     renderSide(true);
+     expect(screen.getByText("执行用量（合计）")).toBeInTheDocument();
+     expect(await screen.findByText("耗时")).toBeInTheDocument(); // 等用量数据落定再断言入口缺席
+     expect(screen.queryByText("按模型明细 →")).not.toBeInTheDocument();
+-    expect(screen.getByText(/真实改动面见「产出 · 归档留档」/)).toBeInTheDocument();
+-    expect(screen.queryByText("明细见「文件与对账」")).not.toBeInTheDocument();
++    expect(screen.getByText("明细见「文件与对账」")).toBeInTheDocument();
+   });
+ });
+diff --git a/frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx b/frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx
+index df81a42c5..1eb5d30ab 100644
+--- a/frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx
++++ b/frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx
+@@ -19,14 +19,17 @@ describe("visibleTabs", () => {
+     ]);
+   });
+ 
+-  it("归档态：收窄为三 tab（隐藏「文件与对账」），其余顺序不变", () => {
+-    expect(visibleTabs(true)).toEqual<DetailTab[]>(["overview", "assets", "process"]);
++  it("归档态：同样四 tab（D-019@v1 用户裁决推翻 D-007 收窄——归档留档不展示 spec 文档全貌）", () => {
++    expect(visibleTabs(true)).toEqual<DetailTab[]>([
++      "overview",
++      "assets",
++      "process",
++      "files",
++    ]);
+   });
+ 
+-  it("判定输入只有 archived 一个布尔（thin 不特判：同一布尔结果恒等）", () => {
+-    expect(visibleTabs(true)).toEqual(visibleTabs(true));
+-    expect(visibleTabs(false)).toEqual(visibleTabs(false));
+-    expect(visibleTabs(false)).not.toEqual(visibleTabs(true));
++  it("thin 不参与判定：任意入参结果恒等", () => {
++    expect(visibleTabs(true)).toEqual(visibleTabs(false));
+   });
+ 
+   it("返回新数组（调用方改动不影响常量源）", () => {
+@@ -53,12 +56,16 @@ describe("ChangeTabs", () => {
+     expect(selected[0]?.textContent).toBe(TAB_LABELS.assets);
+   });
+ 
+-  it("归档态渲染 3 个 tab（无「文件与对账」）", () => {
++  it("归档态同样渲染 4 个 tab（D-019@v1：不特判收窄）", () => {
+     render(<ChangeTabs archived value="overview" onChange={() => undefined} />);
+     const tabs = screen.getAllByRole("tab");
+-    expect(tabs).toHaveLength(3);
+-    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程"]);
+-    expect(screen.queryByText(TAB_LABELS.files)).not.toBeInTheDocument();
++    expect(tabs).toHaveLength(4);
++    expect(tabs.map((t) => t.textContent)).toEqual([
++      "概览",
++      "产出",
++      "过程",
++      "文件与对账",
++    ]);
+   });
+ 
+   it("点击任一 tab 触发 onChange 且入参为该 tab 的 DetailTab 值", () => {
+diff --git a/frontend/src/components/changes/detail/change-files-panel.tsx b/frontend/src/components/changes/detail/change-files-panel.tsx
+index 8b46cf1e6..40056564d 100644
+--- a/frontend/src/components/changes/detail/change-files-panel.tsx
++++ b/frontend/src/components/changes/detail/change-files-panel.tsx
+@@ -35,17 +35,12 @@ export function ChangeFilesPanel({
+ }: ChangeFilesPanelProps) {
+   return (
+     <div className="flex flex-col gap-3" data-testid="change-files-panel">
+-      <section className="rounded-md border bg-card" data-testid="change-files-panel-tree">
+-        <div className="border-b px-3 py-2">
+-          <h2 className="text-xs font-medium">变更文件</h2>
+-          <p className="mt-0.5 text-[11px] text-muted-foreground">
+-            改动文件树与内容预览（点文件看内容 / diff）
+-          </p>
+-        </div>
+-        <div className="px-3 py-2.5">
+-          <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
+-        </div>
+-      </section>
++      {/* 变更文件：ChangeFileTree 自带「变更文件」卡头（2026-10-16 用户反馈：去掉
++          面板外包的一层重复标题）。外层定高 560px 激活组件内部 min-h-0/flex-1 限高链
++          ——树与预览各自内滚，整列不再无限高（2026-10-16 用户反馈：无限高左右点击不方便）。 */}
++      <div className="flex h-[560px] flex-col" data-testid="change-files-panel-tree">
++        <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
++      </div>
+ 
+       <ScopeAuditCommandCard
+         target={{ kind: "change", workspaceId, changeKey }}
+diff --git a/frontend/src/components/changes/detail/change-overview-side.tsx b/frontend/src/components/changes/detail/change-overview-side.tsx
+index 987858e3f..51a356215 100644
+--- a/frontend/src/components/changes/detail/change-overview-side.tsx
++++ b/frontend/src/components/changes/detail/change-overview-side.tsx
+@@ -214,14 +214,9 @@ export function ChangeOverviewSide({
+           </>
+         )}
+         <div className="pt-1">
+-          {/* 归档态「文件与对账」tab 不渲染（D-007）→ 入口改指「产出 · 归档留档」，不留死链。 */}
+-          {archived ? (
+-            <span className="text-xs text-muted-foreground">
+-              真实改动面见「产出 · 归档留档」
+-            </span>
+-          ) : (
+-            <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
+-          )}
++          {/* 2026-10-16-archived-files-tab / D-019@v1：归档态恢复「文件与对账」tab，
++              两态入口同指该 tab（不再指路「产出 · 归档留档」）。 */}
++          <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
+         </div>
+       </MetaPanelSection>
+ 
+diff --git a/frontend/src/components/changes/detail/change-tabs.tsx b/frontend/src/components/changes/detail/change-tabs.tsx
+index da56f2018..0c03f4877 100644
+--- a/frontend/src/components/changes/detail/change-tabs.tsx
++++ b/frontend/src/components/changes/detail/change-tabs.tsx
+@@ -33,13 +33,12 @@ export const TAB_LABELS: Record<DetailTab, string> = {
+ };
+ 
+ /**
+- * 可见 tab 集：归档态收窄为三枚（隐藏「文件与对账」——归档时其内容与「产出 · 归档留档」
+- * 重复，D-007@v1）；在途与归档的唯一差别就是这个布尔，thin 不参与判定（D-015@v1）。
++ * 可见 tab 集：恒为四枚。（2026-10-16-archived-files-tab / D-019@v1 用户裁决推翻
++ * D-007@v1 的归档收窄——归档留档不展示 spec 文档全貌，归档态同样需要文件树与
++ * 范围对账入口。）`archived` 参数保留以兼容调用方签名，当前不参与判定。
+  */
+-export function visibleTabs(archived: boolean): DetailTab[] {
+-  return archived
+-    ? DETAIL_TAB_ORDER.filter((tab) => tab !== "files")
+-    : [...DETAIL_TAB_ORDER];
++export function visibleTabs(_archived: boolean): DetailTab[] {
++  return [...DETAIL_TAB_ORDER];
+ }
+ 
+ export interface ChangeTabsProps {
+@@ -48,7 +47,7 @@ export interface ChangeTabsProps {
+   /** 当前 tab（由 `?tab=` 派生，见 task-07 的页面层）。 */
+   value: DetailTab;
+   /** 切换回调（页面层据此更新 URL）。 */
+-  onChange: (tab: DetailTab) => void;
++  onChange: (_tab: DetailTab) => void;
+   className?: string;
+ }
