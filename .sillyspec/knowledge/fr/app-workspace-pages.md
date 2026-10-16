@@ -604,3 +604,60 @@ created_at: 2026-10-15T18:08:11.679Z
   confirmed_at: null
   source_change: 2026-10-16-archived-files-tab
   status: active
+
+## FR-app-workspace-pages-020 详情页删除成功后按历史可退性返回列表
+变更：2026-10-16-change-center-delete-back-keeps-state
+状态：active
+摘要：从列表进详情删除后返回；新标签深链详情后删除
+全文：.sillyspec/changes/archive/2026-10-16-change-center-delete-back-keeps-state/requirements.md#FR-01
+最近确认：7da2c5633e9545629ed1e8967bbeba405e4a1055
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-01
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「删除成功:历史可后退时 router.back() 回列表」 | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「删除成功:无历史可退时兜底 push 默认列表」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-delete-back-keeps-state
+  status: active
+
+## FR-app-workspace-pages-021 列表页页码超界钳回最后一页
+变更：2026-10-16-change-center-delete-back-keeps-state
+状态：active
+摘要：删除后当前页超界；真空列表不钳回
+全文：.sillyspec/changes/archive/2026-10-16-change-center-delete-back-keeps-state/requirements.md#FR-02
+最近确认：7da2c5633e9545629ed1e8967bbeba405e4a1055
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-02
+  tests: changes/__tests__/page.test.tsx「页码超界钳回最后一页并重新请求」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-delete-back-keeps-state
+  status: active
+
+## FR-app-workspace-pages-022 测试零回归 + 新增断言
+变更：2026-10-16-change-center-delete-back-keeps-state
+状态：active
+摘要：回归与新增断言
+全文：.sillyspec/changes/archive/2026-10-16-change-center-delete-back-keeps-state/requirements.md#FR-03
+最近确认：7da2c5633e9545629ed1e8967bbeba405e4a1055
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx | frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-delete-back-keeps-state
+  status: active

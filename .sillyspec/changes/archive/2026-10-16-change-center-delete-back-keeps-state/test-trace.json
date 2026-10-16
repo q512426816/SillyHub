@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-center-delete-back-keeps-state",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「删除成功:历史可后退时 router.back() 回列表」",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「删除成功:无历史可退时兜底 push 默认列表」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-delete-back-keeps-state"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-02",
+      "tests": [
+        "changes/__tests__/page.test.tsx「页码超界钳回最后一页并重新请求」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-delete-back-keeps-state"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-change-center-delete-back-keeps-state:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx",
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-delete-back-keeps-state"
+    }
+  ]
+}
