@@ -113,3 +113,4 @@
 | 2026-10-15 | 2026-10-15-assets-graph-depth | 变更详情页沉淀资产卡的内嵌知识图谱分区（2026-10-15-change-assets-graph… |
 - 2026-10-15-change-detail-redesign | 变更详情页重设计：四 tab 容器 + 状态自适应 + 统一时间线 + 图谱独立分区 + 范围对账下沉 + 用量/会话入概览右信息栏（D-001~D-018）
 | 2026-10-16 | 2026-10-16-session-decision-pill | 2026-10-16-session-decision-pill |
+| 2026-10-16 | 2026-10-16-decision-pill-no-workspace | 无 workspace 的会话（如 445e12d9，10-09 创建 workspace_id 为… |

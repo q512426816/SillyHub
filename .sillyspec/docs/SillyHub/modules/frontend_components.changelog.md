@@ -78,3 +78,4 @@ created_at: 2026-08-30 22:23:33
 | 2026-10-15 | 2026-10-15-workspace-session-agent-only | 工作区中新建会话不再选机器：机器已由工作区绑定决定，浮层只让用户选智能体类型 |
 | 2026-10-15 | 2026-10-15-assets-graph-depth | 变更详情页沉淀资产卡的内嵌知识图谱分区（2026-10-15-change-assets-graph… |
 | 2026-10-16 | 2026-10-16-session-decision-pill | 2026-10-16-session-decision-pill |
+| 2026-10-16 | 2026-10-16-decision-pill-no-workspace | 无 workspace 的会话（如 445e12d9，10-09 创建 workspace_id 为… |
