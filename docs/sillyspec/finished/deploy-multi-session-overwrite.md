@@ -31,3 +31,8 @@
 1. build-and-save.sh 开头加校验：当前 HEAD 不在 main 线（`git merge-base --is-ancestor HEAD main` 失败）或落后 origin/main 时告警确认；
 2. 部署互斥/登记：写 `deploy/.last-deploy`（commit_sha+会话+时间），load-and-up 前对比提示；
 3. 长期：生产部署收敛到统一入口（CI 或指定会话），杜绝多会话各自打包。
+
+## 处置记录（2026-10-16）——部署并流校验闸已落，坑关闭
+
+- **修复已实施并归档**：本仓变更 `2026-10-16-deploy-convergence-guard`（task-01/02/03 全勾，提交 d581d40b4）——`build-and-save.sh` 打包前新增「部署并流校验」[0/5] 闸：非 main 分支打包 exit 1（需 `ALLOW_NON_MAIN_DEPLOY=1` 显式放行）、应用目录脏工作区 exit 1（需 `ALLOW_DIRTY_DEPLOY=1`）、打包源分支 + sha 打印留痕；deploy-to-server skill 新增「部署并流校验」节（互覆事故背景 / 部署后 commit_sha 核对 / 被覆盖识别与恢复）。
+- **与坑文建议对账**：建议 1（打包前校验 main 线）已落——分支名硬闸比「告警确认」更强，但未做「落后 origin/main」检测（stale main 仍可打包，靠部署后 commit_sha 核对兜）；建议 2 的部署登记（`.last-deploy`）未自动化，以 skill 纪律面（部署后核对 + 被覆盖识别与恢复）落地；建议 3（生产部署收敛统一入口）属长期项未实施——多会话各自打包在闸门拦截下风险已收窄，收敛决策留后续。

@@ -25,3 +25,11 @@
 - `backend/app/modules/change/title_norm.py` `condense_title`：10-30 必须带 + 8~10 兜底带 + 硬截省略号，实证坏样本全量单测。
 - `_ensure_change_row` 两入口（既有行收养/占位建行）对 >30 字上行标题先提炼再入库。
 - `backend/scripts/backfill_change_titles.py` 存量回填（dry-run 缺省/--apply/--yes 门），从 description 提炼回填兜底或超长 title 行。
+
+## 处置记录（2026-10-16）——工具侧三项已落，坑关闭
+
+- **要求 1（强制命名门）已落**：sillyspec 仓变更 `2026-10-16-title-range-gate`（归档提交 97c397bb）——`flow start` fresh 在任何状态写入前硬门：标题不在 10-30 硬区间或变更名兜底 → exit 2 拒启（`resolveStartTitle` enforce：--title 显式 > --input 首行提炼 > 兜底；hardCut 残句 enforce 下同样拒绝——CLI 提炼救不了就让 agent 命名）；resume/adopt 显式 --title 超界 exit 2，补写/收编不阻断打 ⚠️；平台 writer 预建空目录豁免仅 ⚠️ 留痕。
+- **要求 2（提炼排版对齐）已落**：sillyspec 仓变更 `2026-10-16-short-change-title`（归档提交 8aff1193）——`distillShortTitleEx`：目标 20 / 上限 30 / 截点下限 6，自然标点截断（全角标点无条件 + ASCII 标点后随边界判定），无可用截点才硬切加省略号并标 hardCut（`SHORT_TITLE_HARDCUT_HINT` 软提示）；标题落库面统一入口（flow start/resume/adopt、run initChange）。
+- **要求 3（deriveTitleFromLinkedChange 补回退）已落**：同上变更——纯模板 H1 时回退读 proposal「## 动机」节首行过提炼（`extractMotivationFirstLine`）；run 完整流程在任意持久化点 `refreshChangeTitleFromArtifacts` 刷新标题，治「完整变更恒变更名兜底」。
+- **要求 4（progress repair-titles）未实施，按坑文自标「可选」关闭**：平台侧存量已由 `2026-10-16-change-title-condense-backfill` 四件套回填（提交 ed3fc43bf），坑文明示 CLI 侧修复只影响本地显示——增量病根已被 flow start 硬门从源头堵死，无存量再积压面。
+- **完整流程差异（如实留痕）**：run/brainstorm 收口未设 exit-2 硬门，以「任意持久化点提炼刷新（≤30 封顶）+ run start 教学面 10-30 口径」替代——纯模板无动机的提案仍可能兜底变更名，上行面由平台侧 `_ensure_change_row` 提炼防御兜住。
