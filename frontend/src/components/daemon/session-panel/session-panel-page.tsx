@@ -39,6 +39,7 @@ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 // （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
 import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
 import { SessionDecisionsHover } from "@/components/daemon/session-decisions-hover";
+import { SessionFloatingPillDock } from "@/components/daemon/session-floating-pill-dock";
 // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
 // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
 // 不破，panel 层零 react-query）。
@@ -5409,42 +5410,31 @@ export function SessionPanelPage({
         </p>
       )}
 
-      {/* 2026-10-13-session-change-files-hover task-05：悬浮变更文件入口——
-          h-0 相对锚不占布局位，子组件 absolute 悬浮于聊天区右下（bottom 基线
-          = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
-          sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
-          null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
-          进行中变更徽标呼吸提示（FR-02）。
-          2026-10-16-session-decision-pill task-04：锚点内改 flex 悬浮行——待决策
-          pill（新增，自渲染 null 零占位同款）与变更文件 pill（embedded 脱壳）
-          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。
-          2026-10-16-decision-pill-no-workspace：悬浮行门槛放宽为仅真会话
-          （sessionId）——待决策 pill 只消费 sessionId；无 workspace 老会话
-          （workspace_id 为空，如 445e12d9）不应连坐不挂载。变更文件 pill 保留
-          自己的 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）。 */}
+      {/* 2026-10-16-session-pill-dock-drag：待决策 pill 与变更文件 pill 收进
+          SessionFloatingPillDock——portal body 竖排停靠组，按住整组 viewport
+          内拖动、松手吸附左右边界、位置 localStorage 持久化；两 pill 下拉均
+          改点击展开（原 2026-10-13 悬浮行与 2026-10-16-session-decision-pill
+          task-04 flex 横排行形态退役）。显隐门不变：仅真会话挂载
+          （2026-10-16-decision-pill-no-workspace 放宽口径），变更文件 pill
+          保留自身 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）；
+          两 pill 空数据各自渲染 null，dock empty:hidden 整组零占位。 */}
       {sessionId != null && (
-        <div className="relative h-0 w-full">
-          <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex items-center justify-end gap-2 print:hidden">
-            <div className="pointer-events-auto">
-              <SessionDecisionsHover
-                sessionId={sessionId}
-                pendingRequests={pendingRequests}
-                planPending={planPending}
-                onFocusPending={handleFocusPending}
-              />
-            </div>
-            {session?.workspace_id != null && (
-              <div className="pointer-events-auto">
-                <SessionChangeFilesHover
-                  workspaceId={session.workspace_id}
-                  sessionId={sessionId}
-                  running={running}
-                  embedded
-                />
-              </div>
-            )}
-          </div>
-        </div>
+        <SessionFloatingPillDock>
+          <SessionDecisionsHover
+            sessionId={sessionId}
+            pendingRequests={pendingRequests}
+            planPending={planPending}
+            onFocusPending={handleFocusPending}
+          />
+          {session?.workspace_id != null && (
+            <SessionChangeFilesHover
+              workspaceId={session.workspace_id}
+              sessionId={sessionId}
+              running={running}
+              embedded
+            />
+          )}
+        </SessionFloatingPillDock>
       )}
 
       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：

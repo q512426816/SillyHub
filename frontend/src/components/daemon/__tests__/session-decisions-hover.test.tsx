@@ -84,9 +84,9 @@ function renderUi(props?: Partial<Parameters<typeof SessionDecisionsHover>[0]>) 
   );
 }
 
-/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
+/** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
 async function openPopover() {
-  fireEvent.mouseEnter(screen.getByTestId("session-decisions-hover").querySelector("button")!);
+  fireEvent.click(screen.getByTestId("session-decisions-hover").querySelector("button")!);
   await screen.findByTestId("session-decision-popover");
 }
 
@@ -186,7 +186,7 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", 
     expect(mockedFetch).toHaveBeenCalledWith("s-1");
   });
 
-  it("hover 弹下拉：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）", async () => {
+  it("点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）", async () => {
     mockedFetch.mockResolvedValue([historyRow()]);
     renderUi({
       pendingRequests: [
@@ -198,14 +198,19 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", 
         }),
       ],
     });
+    // 2026-10-16-session-pill-dock-drag：hover 移入不再弹下拉（防误触）
+    fireEvent.mouseEnter(screen.getByTestId("session-decisions-hover").querySelector("button")!);
+    expect(screen.queryByTestId("session-decision-popover")).toBeNull();
+
     await openPopover();
 
     expect(screen.getByText("待决策（2）")).toBeTruthy();
     expect(screen.getByText("提问")).toBeTruthy();
     expect(screen.getByText("Plan")).toBeTruthy();
-    // 历史默认收起
+    // 历史默认收起（click 即开无 hover 延迟，findBy 等历史查询落地）
     expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
-    expect(screen.getByTestId("session-decision-history-toggle").textContent).toContain("已答历史（1）");
+    const toggle = await screen.findByTestId("session-decision-history-toggle");
+    expect(toggle.textContent).toContain("已答历史（1）");
   });
 
   it("历史组展开显示回答摘要；再点收起", async () => {
@@ -213,11 +218,12 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", 
     renderUi({ pendingRequests: [pendingReq()] });
     await openPopover();
 
-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
+    const toggle = await screen.findByTestId("session-decision-history-toggle");
+    fireEvent.click(toggle);
     expect(screen.getByTestId("session-decision-item-req-h1")).toBeTruthy();
     expect(screen.getByText("你的回答：阿里云 ECS")).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
+    fireEvent.click(toggle);
     expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
   });
 
@@ -242,7 +248,7 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", 
     renderUi({ pendingRequests: [pendingReq()] });
     await openPopover();
 
-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
+    fireEvent.click(await screen.findByTestId("session-decision-history-toggle"));
     fireEvent.click(screen.getByTestId("session-decision-item-req-h1"));
     // 弹窗内断言（role=dialog 圈定，避免与下拉列表文本重复命中）
     const dialog = await screen.findByRole("dialog");

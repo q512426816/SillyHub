@@ -72,9 +72,9 @@ function mockData(data: ChangeSummary[] | undefined) {
   mockedHook.mockReturnValue({ data } as ReturnType<typeof useSessionChanges>);
 }
 
-/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
+/** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
 async function openPopover() {
-  fireEvent.mouseEnter(screen.getByTestId("session-change-files-hover").querySelector("button")!);
+  fireEvent.click(screen.getByTestId("session-change-files-hover").querySelector("button")!);
   await screen.findByTestId("session-change-popover");
 }
 
@@ -143,9 +143,13 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
     expect(r2.container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
   });
 
-  it("hover 弹下拉：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
+  it("点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
     mockData([activeThin, activeFull, archivedOne]);
     render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
+    // 2026-10-16-session-pill-dock-drag：hover 移入不再弹下拉（防误触）
+    fireEvent.mouseEnter(screen.getByTestId("session-change-files-hover").querySelector("button")!);
+    expect(screen.queryByTestId("session-change-popover")).toBeNull();
+
     await openPopover();
 
     expect(screen.getByText("进行中（2）")).toBeTruthy();

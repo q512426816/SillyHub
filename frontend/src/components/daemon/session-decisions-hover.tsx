@@ -27,9 +27,11 @@ import { cn } from "@/lib/utils";
  * 会话页面悬浮待决策面板（2026-10-16-session-decision-pill / FR-01~04 /
  * D-004@v1：前端自包含聚合，数据三类零新增）。
  *
- * - 胶囊入口与变更文件 pill 并排（挂载点 flex 悬浮行）；三类信息全空
- *   （pending 提问/Plan 卡/已答历史）不渲染（FR-01 显隐）；
- * - hover（或触屏点击）弹下拉分组：待决策置顶（提问/Plan 徽标 + 状态短语），
+ * - 胶囊入口与变更文件 pill 同组（SessionFloatingPillDock 竖排停靠组，
+ *   2026-10-16-session-pill-dock-drag）；三类信息全空（pending 提问/Plan
+ *   卡/已答历史）不渲染（FR-01 显隐）；
+ * - 点击弹下拉分组（2026-10-16-session-pill-dock-drag 由 hover 改点击，
+ *   不再误触）：待决策置顶（提问/Plan 徽标 + 状态短语），
  *   已答历史默认折叠可展开（FR-02）；历史孤儿 pending 行（不在 SSE 待答集）
  *   归历史组显示「未回答」（对齐 ended 会话死卡门控语义）；
  * - pending 项点击经 onFocusPending 上抛定位还原（FR-03，父级路由 TurnTimeline
@@ -167,8 +169,8 @@ export function SessionDecisionsHover({
   planPending,
   onFocusPending,
 }: SessionDecisionsHoverProps) {
-  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底）——与变更文件
-  // pill 同款交互契约，antd 只发事件，state 是唯一真相。
+  // 受控 popover：点击展开/收起（2026-10-16-session-pill-dock-drag 由
+  // hover 改点击），antd 只发事件，state 是唯一真相。
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [detailKey, setDetailKey] = useState<string | null>(null);
@@ -269,7 +271,7 @@ export function SessionDecisionsHover({
       <Popover
         open={popoverOpen}
         onOpenChange={setPopoverOpen}
-        trigger={["hover", "click"]}
+        trigger="click"
         placement="topRight"
         content={popoverContent}
         styles={{ container: { padding: 4 } }}
@@ -278,7 +280,7 @@ export function SessionDecisionsHover({
           variant="outline"
           size="sm"
           className="gap-1.5 rounded-lg shadow-sm"
-          aria-label="悬浮查看会话待决策信息"
+          aria-label="查看会话待决策信息"
         >
           <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden />
           待决策

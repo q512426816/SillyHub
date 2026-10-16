@@ -20,10 +20,11 @@ import { useSessionChanges, type ChangeSummary } from "@/lib/changes";
  * 会话页面悬浮变更文件面板（2026-10-13-session-change-files-hover task-04 /
  * FR-02~05 / D-001@v2：胶囊入口 + hover 下拉列表 + 点项开大弹窗）。
  *
- * - 胶囊入口非圆圈（用户 step5 修正），右下角悬浮于输入条上方；无关联变更
- *   （含已归档）不渲染（FR-02 显隐）；
- * - hover（或触屏点击）弹下拉分组列表：进行中置顶（轻量/全量徽标 + 阶段 +
- *   时间），已归档默认折叠可展开（FR-03）；
+ * - 胶囊入口非圆圈（用户 step5 修正），与待决策 pill 同组（SessionFloatingPillDock
+ *   竖排停靠组，2026-10-16-session-pill-dock-drag）；无关联变更（含已归档）
+ *   不渲染（FR-02 显隐）；
+ * - 点击弹下拉分组列表（2026-10-16-session-pill-dock-drag 由 hover 改点击）：
+ *   进行中置顶（轻量/全量徽标 + 阶段 + 时间），已归档默认折叠可展开（FR-03）；
  * - 点项开大弹窗（规格对齐 changes/detail/change-files-card.tsx：shadcn
  *   Dialog max-w-6xl × 85vh，Modal 形态不用 Drawer——FRONTEND_PAGE_STYLE §6），
  *   内嵌与变更文件页相同的 ChangeFileTree（key=changeId 切换重挂载），
@@ -37,8 +38,9 @@ export interface SessionChangeFilesHoverProps {
   running?: boolean;
   /**
    * 2026-10-16-session-decision-pill task-03：true 时不渲染自带 absolute 悬浮
-   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——与
-   * 待决策 pill 并排成 flex 悬浮行。缺省 false 行为不变（旧消费方零回归）。
+   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——
+   * 2026-10-16-session-pill-dock-drag 起挂进 SessionFloatingPillDock 竖排
+   * 停靠组。缺省 false 行为不变（旧消费方零回归）。
    */
   embedded?: boolean;
 }
@@ -100,8 +102,8 @@ export function SessionChangeFilesHover({
   running = false,
   embedded = false,
 }: SessionChangeFilesHoverProps) {
-  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底），antd 只发
-  // onOpenChange 事件，state 是唯一真相。
+  // 受控 popover：点击展开/收起（2026-10-16-session-pill-dock-drag 由
+  // hover 改点击），antd 只发 onOpenChange 事件，state 是唯一真相。
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [archiveExpanded, setArchiveExpanded] = useState(false);
   const [dialogChangeId, setDialogChangeId] = useState<string | null>(null);
@@ -191,7 +193,7 @@ export function SessionChangeFilesHover({
       <Popover
         open={popoverOpen}
         onOpenChange={setPopoverOpen}
-        trigger={["hover", "click"]}
+        trigger="click"
         placement="topRight"
         content={popoverContent}
         styles={{ container: { padding: 4 } }}
@@ -200,7 +202,7 @@ export function SessionChangeFilesHover({
           variant="outline"
           size="sm"
           className="gap-1.5 rounded-lg shadow-sm"
-          aria-label="悬浮查看会话关联的变更文件"
+          aria-label="查看会话关联的变更文件"
         >
           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
           变更文件
