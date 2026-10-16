@@ -12,3 +12,5 @@
 <!-- verify-incremental-rerun-infra-batch-growth.md：增量重跑账本把运行器基建失败按测试失败计入失败批 → 失败批随轮膨胀 141→159（2026-10-15，dsh-engine-acp 两轮实证；与 jsx 参数上限同源，账本语义待修） -->
 <!-- verify-test-grouping-cwd-mismatch.md：verify 实测模块分组不稳定——daemon 测试文件偶发分进 frontend vitest 组（cwd 错配 No test files found 假红）；skipped 聚合档（已跑全绿+缺件跳过）在部分路径被判 failed（2026-10-15-server-logs-panel 实证） -->
 <!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
+<!-- conflict-compare-full-tree-label-mismatch.md：跨多变更的全量冲突平台按单变更归因、CLI 落盘 full-tree 名 → 对比恒 conflict_record_missing 且「刷新冲突列表」无效（2026-10-16 生产实证） -->
+<!-- spec-sync-tree-pull-resurrect-and-verify-carry-orphans.md：spec-sync 文件树拉取回灌本地已删旧卡（幽灵卡/探针10误触发）+ verify-result --force 携载孤儿表行被 gate 误归 task 卡（2026-10-16，fix-auth-random-logout 实测清理两次） -->
