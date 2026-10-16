@@ -1,0 +1,195 @@
+{
+  "change": "2026-10-17-audit-risk-followup",
+  "baseline": "09a10bbf7e145ed5a524bf3fddb1952bd23d606d",
+  "head": "7faec5bfa12ed2e7159077f469589243fb36ee5b",
+  "files": [
+    "docs/sillyspec/active-pitfalls.md",
+    "docs/sillyspec/finished/tick-timing-squash-blindspot.md",
+    "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+    "frontend/src/components/sessions/session-list-panel.tsx",
+    "frontend/src/lib/__tests__/logout-storage.test.ts",
+    "frontend/src/lib/logout-storage.ts",
+    "sillyhub-daemon/src/interactive/session-store-persistence.ts",
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+    "sillyhub-daemon/src/spec-sync.ts",
+    "sillyhub-daemon/tests/interactive/session-store-persistence.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+    "sillyhub-daemon/tests/pull-antiresurrect.test.ts"
+  ],
+  "totals": {
+    "files": 12,
+    "additions": 324,
+    "deletions": 58
+  },
+  "savedAt": "2026-10-16T23:21:33.961Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 4,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 6,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_lib",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_lib.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 13,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "09a10bbf7e145ed5a524bf3fddb1952bd23d606d",
+    "totals": {
+      "files": 12,
+      "additions": 324,
+      "deletions": 58
+    },
+    "rows": [
+      {
+        "path": "docs/sillyspec/active-pitfalls.md",
+        "additions": 21,
+        "deletions": 17,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "docs/sillyspec/finished/tick-timing-squash-blindspot.md",
+        "additions": 8,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "unplanned"
+      },
+      {
+        "path": "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx",
+        "additions": 41,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/components/sessions/session-list-panel.tsx",
+        "additions": 4,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/logout-storage.test.ts",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/logout-storage.ts",
+        "additions": 3,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-store-persistence.ts",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 56,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/spec-sync.ts",
+        "additions": 49,
+        "deletions": 31,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/session-store-persistence.test.ts",
+        "additions": 28,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+        "additions": 37,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/pull-antiresurrect.test.ts",
+        "additions": 68,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": null,
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "4fc2b08d1c2d735a7dc2bc2306d5b66d8af4d6bb40d0c4dcc36120010c0eab71",
+  "patchStatus": "ok"
+}

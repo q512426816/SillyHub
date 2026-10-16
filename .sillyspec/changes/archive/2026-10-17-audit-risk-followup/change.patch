@@ -1,0 +1,497 @@
+diff --git a/docs/sillyspec/active-pitfalls.md b/docs/sillyspec/active-pitfalls.md
+index a6c4d1d56..f5fd2e904 100644
+--- a/docs/sillyspec/active-pitfalls.md
++++ b/docs/sillyspec/active-pitfalls.md
+@@ -11,7 +11,7 @@
+ <!-- verify-lint-triage-path-divergence.md：lint 归因降档只挂 --done（gates.js）路径，noAI 质量扫描（verify-quality-scan.js step6）未接线 → 零交集存量债两路径行为分叉（2026-10-15，dsh-engine-acp verify 实证，advisory 逃生收口） -->
+ <!-- verify-incremental-rerun-infra-batch-growth.md：增量重跑账本把运行器基建失败按测试失败计入失败批 → 失败批随轮膨胀 141→159（2026-10-15，dsh-engine-acp 两轮实证；与 jsx 参数上限同源，账本语义待修） -->
+ <!-- verify-test-grouping-cwd-mismatch.md：verify 实测模块分组不稳定——daemon 测试文件偶发分进 frontend vitest 组（cwd 错配 No test files found 假红）；skipped 聚合档（已跑全绿+缺件跳过）在部分路径被判 failed（2026-10-15-server-logs-panel 实证） -->
+-<!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
++<!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16）→ 已关闭（2026-10-16-deploy-convergence-guard 部署并流校验闸归档，d581d40b4；已移入 finished/） -->
+ <!-- conflict-compare-full-tree-label-mismatch.md：跨多变更的全量冲突平台按单变更归因、CLI 落盘 full-tree 名 → 对比恒 conflict_record_missing 且「刷新冲突列表」无效（2026-10-16 生产实证） -->
+-<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字（2026-10-16，平台侧提炼防御+存量回填已落） -->
+-<!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证） -->
++<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字 → 已关闭（sillyspec 仓 short-change-title + title-range-gate 归档，工具侧硬门/提炼/动机回退齐；已移入 finished/） -->
++<!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证）→ 已关闭（sillyspec 仓 2026-10-17-tick-timing-source 归档 d47f7cf0，判定换源侧车墙钟时戳+tick 回显现成命令+文案消歧；已移入 finished/） -->
+diff --git a/docs/sillyspec/tick-timing-squash-blindspot.md b/docs/sillyspec/finished/tick-timing-squash-blindspot.md
+similarity index 65%
+rename from docs/sillyspec/tick-timing-squash-blindspot.md
+rename to docs/sillyspec/finished/tick-timing-squash-blindspot.md
+index 5af68f2ea..0a7fd9a39 100644
+--- a/docs/sillyspec/tick-timing-squash-blindspot.md
++++ b/docs/sillyspec/finished/tick-timing-squash-blindspot.md
+@@ -48,3 +48,11 @@ tasksIn == lastIn → 「一把勾」警告；tasks.md 无任何提交 → 「un
+ ## 处置状态
+ 
+ - 平台侧无需处置（误报不阻断，token 证据链完整）；本条待工具组按上述三点修复后移入 finished/。
++
++## 处置记录（2026-10-17）——工具侧三点已落，坑关闭
++
++- **要求 1（反馈前移）已落**：sillyspec 仓变更 `2026-10-17-tick-timing-source`（归档提交 d47f7cf0）——`task tick` 翻格成功回显两行现成命令（`git add -- <交付文件…> tasks.md 侧车` + `git commit -m "<概括> (task-NN)" -- 同清单`），untracked 场景可一次照抄；已勾 ≥2 格且 tasks.md 零 git 提交时当场一行提醒「此前勾选未随交付入库」——反馈不再等到 flow done 终点（根因 1/3 复现链断）。
++- **要求 2（判定依据换源·治本）已落**：flow.js 勾选时点判定的 git 历史读法（`--reverse` 首提交 == HEAD / untracked 两条 warn）整体退役，换 `detectTickTiming` 纯函数读 task-ticks.jsonl 侧车逐格墙钟时戳——跨度 >120s 即「边干边勾确认」✅ 行（超窗即铁证）；挤 ≤120s 短窗且变更存活 ≥10×跨度才「末尾集中勾选形态」⚠️ advisory；缺锚/单格/无观测各自静默或一行教学。墙钟时戳是侧车文件事实，压扁/rebase 不可改写——与「审计真相锚 change.patch sha256、不依赖 git 形态」口径对齐（根因 4 消除）。e2e 回归钉死本坑场景：侧车时戳分散 + git 压扁形态 → 零「一把勾」警告。
++- **要求 3（横幅文案消歧）已落**：flow start 横幅（勾选证据行+交付纪律行）、brainstorm 收编教学行、任务未全勾拒收行统一口径——「对应提交」=消息带 task-NN **且 pathspec 带上本变更 tasks.md（勾选修改与任务交付同一提交入库）**，并指向 task tick 回显的现成命令（根因 2 消除）。
++- **附带的等价重构**：事件流+侧车观测采集前置为共享 `_tickObs`（时点判定与勾选节奏门一份数据，防双报：节奏门检出单拍跳/突发时判定让位）。
++- **如实留痕的取舍**：watcher 3s 采样事件刻意不作时点判据（部分观测会把分散勾选采样成尾窗聚集，与采样合并跳系列坑同源）；agent 全程直接 Edit 的末尾逐格集中形态两类门都不报（无侧车观测只出一行教学引导走 task tick）——advisory 语义下可接受的盲区，见归档件 design「风险与死路」。
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 87a518f4f..273ee42d4 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -3656,6 +3656,47 @@ describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终
+     ).not.toBeNull();
+   });
+ 
++  it("run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）", async () => {
++    completedFixture("active");
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "active",
++          current_run_status: "running",
++        }),
++      ]),
++    );
++    const { client } = renderPanelWithClient(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await screen.findByLabelText("正在执行");
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++
++    // 下一轮列表刷新：run 仍 running，但行数据有变化（标题字段变）——
++    // 旧实现只看 before 真值即误写完成标记；修复后必须 current 归 null 才标记。
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更（改）",
++          status: "active",
++          current_run_status: "running",
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await screen.findByLabelText("正在执行");
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++  });
++
+   it("run 活跃→null 但正选中该会话 → 不标记（run 来源同 suppress 口径）", async () => {
+     completedFixture("active");
+     mocks.listAgentSessions.mockResolvedValue(
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 26436f67d..6e7dcf670 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -1105,8 +1105,12 @@ function WorkspaceTreeList({
+       const current = s.current_run_status ?? null;
+       next.set(s.id, current);
+       const before = prev.get(s.id);
++      // current 必须已归 null（run 终态收敛）才标记——只看 before 真值会在 run
++      // 跨刷新仍活跃时（如 pending→running 翻转本身触发列表数据变化）反复误标
++      // 「已执行完成」（2026-10-17-audit-risk-followup）。
+       if (
+         before &&
++        current === null &&
+         s.status !== "ended" &&
+         s.status !== "failed" &&
+         s.id !== selectedSessionId
+diff --git a/frontend/src/lib/__tests__/logout-storage.test.ts b/frontend/src/lib/__tests__/logout-storage.test.ts
+index 9803c3352..0b03654db 100644
+--- a/frontend/src/lib/__tests__/logout-storage.test.ts
++++ b/frontend/src/lib/__tests__/logout-storage.test.ts
+@@ -23,7 +23,7 @@ const DEVICE_KEYS = [
+   "sillyhub:session-input-height",
+ ];
+ 
+-/** 用户域键样本（6 前缀全覆盖 + 预会话草稿变体 + 多会话多键）。 */
++/** 用户域键样本（7 前缀全覆盖 + 预会话草稿变体 + 多会话多键）。 */
+ const USER_KEYS = [
+   "sillyhub.sessions.draft.sid-1",
+   "sillyhub.sessions.draft.__pre__",
+@@ -33,6 +33,7 @@ const USER_KEYS = [
+   "sillyhub-group-last-open-gid-1",
+   "sillyhub:liveness-state:sid-1",
+   "sillyhub:liveness-unread:sid-1",
++  "sillyhub:session-completed-unread:sid-1",
+ ];
+ 
+ beforeEach(() => {
+@@ -48,7 +49,7 @@ afterEach(() => {
+ });
+ 
+ describe("clearUserScopedLocalStorage（2026-10-14-logout-localstorage-user-data-cleanup）", () => {
+-  it("6 类用户域前缀全清、设备级键保留、前缀精确匹配", () => {
++  it("7 类用户域前缀全清、设备级键保留、前缀精确匹配", () => {
+     clearUserScopedLocalStorage();
+ 
+     for (const key of USER_KEYS) {
+diff --git a/frontend/src/lib/logout-storage.ts b/frontend/src/lib/logout-storage.ts
+index 41f5ad69e..292e566f9 100644
+--- a/frontend/src/lib/logout-storage.ts
++++ b/frontend/src/lib/logout-storage.ts
+@@ -26,6 +26,9 @@ export const USER_SCOPED_LS_PREFIXES: readonly string[] = [
+   "sillyhub:liveness-state:",
+   // 会话未读标记 — hooks/use-session-liveness.ts UNREAD_KEY_PREFIX
+   "sillyhub:liveness-unread:",
++  // 会话「执行完成」通知标记 — lib/session-completed-unread.ts COMPLETED_UNREAD_KEY_PREFIX
++  //（2026-10-17-audit-risk-followup：键随 fcd4a4048 落地时漏登记，换账号串显前账号角标）
++  "sillyhub:session-completed-unread:",
+ ];
+ 
+ /**
+diff --git a/sillyhub-daemon/src/interactive/session-store-persistence.ts b/sillyhub-daemon/src/interactive/session-store-persistence.ts
+index 5deb87284..43a41bfb7 100644
+--- a/sillyhub-daemon/src/interactive/session-store-persistence.ts
++++ b/sillyhub-daemon/src/interactive/session-store-persistence.ts
+@@ -45,6 +45,7 @@ import {
+ } from 'node:fs/promises';
+ import { join, basename, dirname } from 'node:path';
+ import { daemonStateDir } from '../config.js';
++import { INTERACTIVE_PROVIDERS } from './providers.js';
+ import {
+   SESSION_FILE_VERSION,
+   type PersistedSessionFile,
+@@ -83,7 +84,10 @@ export class SessionPersistenceError extends Error {
+ // 2026-09-04-provider-pi-onboarding 冒烟 F-2：载入白名单缺 provider 会静默丢弃会话记录，
+ // daemon 本地重启恢复缺失（inject parked 60s 超时，靠 backend sweep 兜底）。
+ // 2026-09-08-cursor-interactive-session task-06：加 cursor，同坑。
+-const VALID_PROVIDERS = new Set(['claude', 'codex', 'pi', 'cursor']);
++// 2026-10-17-audit-risk-followup：dsh/zcode 第三次踩同坑后改单源推导——从
++// INTERACTIVE_PROVIDERS 注册表键派生（照 session-manager.ts PROVIDER_RELOAD_ENGINES
++// 手法），新引擎接入注册表即自动覆盖，「装配加键、白名单漏改」类缺陷就此消绝。
++const VALID_PROVIDERS: ReadonlySet<string> = new Set(Object.keys(INTERACTIVE_PROVIDERS));
+ 
+ /**
+  * P0-1：字符串数组字段守卫（mcpRefs/skillRefs/effectiveAllowedRoots 用）。
+@@ -186,7 +190,7 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
+     leaseId,
+     agentSessionId,
+     cwd,
+-    provider: provider as 'claude' | 'codex',
++    provider: provider as PersistedSessionRecord['provider'],
+     turnCount,
+     lastActiveAt,
+   };
+diff --git a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+index 289ec0884..3001d2185 100644
+--- a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+@@ -488,8 +488,15 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+         err instanceof Error ? err.message : `zcode consume 失败：${String(err)}`,
+       );
+     } finally {
++      // 对齐 codex consume finally（codex-app-server-driver.ts 同位）：清 close 槽位
++      //（闭包含 onResult/onMessage 回调与 currentTurnPromise，不清则滞留到 handle GC）
++      // 并兜底 close 子进程——现网 close 链由 terminateSession/reload 发起时 h.closing
++      // 幂等守卫直接返回；未来任何「consume 自然退出」新路径也不泄漏子进程
++      //（2026-10-17-audit-risk-followup，评审 P3 清偿）。
++      delete (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose;
+       finalized = true;
+       h.envelope.dispose();
++      await h.close();
+     }
+   }
+ 
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index 45cd1a167..58c899a84 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -120,12 +120,23 @@ async function pushUnsyncedIfDirty(
+ }
+ 
+ /** 防复活抑制落地：删除 dir 下命中已删面的解包产物，返回真实挡下的路径（供 warn 点名）。
+- *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在。 */
+-async function applyResurrectSuppress(dir: string, suppress: Set<string>): Promise<string[]> {
++ *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在；
++ *  越界键（../ 或绝对形态）跳过并告警——manifest 键受信边界含服务端 new_versions
++ *  回写与本地半写损坏，rm 是删除执行器，包含性校验对齐 extractTar 的 Tar Slip
++ *  双重防线（2026-10-17-audit-risk-followup）。导出仅供单测。 */
++export async function applyResurrectSuppress(
++  dir: string,
++  suppress: Set<string>,
++): Promise<string[]> {
+   if (suppress.size === 0) return [];
+   const skipped: string[] = [];
+   for (const rel of suppress) {
+     const p = join(dir, rel);
++    const relFromDir = relative(dir, p);
++    if (relFromDir.startsWith('..') || isAbsolute(relFromDir)) {
++      console.warn(`⚠️ [spec_sync] 防复活抑制跳过越界 manifest 键（疑似损坏/篡改）: ${rel}`);
++      continue;
++    }
+     if (await pathExists(p)) {
+       await rm(p, { recursive: true, force: true }).catch(() => {});
+       skipped.push(rel);
+@@ -237,35 +248,8 @@ export async function pullSpecBundle(
+   // 判据无状态现算：LocalManifest（pull/push 落地后均回写 = 上次成功同步的文件全集）
+   // 有、当前盘面无、且属同步面（!isUploadExcludedPath，对齐上传排除口径）= 本地已删面；
+   // 解包产物跳过这些路径。删除 op 上行成功后 manifest 不再含该路径 → 抑制面自然衰减。
+-  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
+-  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
+-  // 已知权衡（与 CLI 同构）：抑制集在本时刻现算，pre_swap 二次回灌成功上行删除后本窗口
+-  // 不重算——此时 bundle 通常已不含该文件，误抑制面趋零。
+-  const suppressResurrect = new Set<string>();
+-  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
+-  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
+-  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
+-  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
+-  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
+-  const restoreDeleted =
+-    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
+-  if (!restoreDeleted) {
+-    try {
+-      const cachedManifest = await readLocalManifest(wsId);
+-      if (cachedManifest) {
+-        for (const rel of Object.keys(cachedManifest.files)) {
+-          if (isUploadExcludedPath(rel)) continue;
+-          if (!(await pathExists(join(specDir, rel)))) {
+-            suppressResurrect.add(rel);
+-            suppressEntries.set(rel, cachedManifest.files[rel]!);
+-          }
+-        }
+-      }
+-    } catch {
+-      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
+-    }
+-  }
+-
++  // 防复活抑制面在 pre_swap 之后现算（计算块已下移至 pre_swap 回灌之后——
++  // 时机变更理由见下移处注释，2026-10-17-audit-risk-followup）。
+   let tarBuf: Buffer;
+   try {
+     tarBuf = await client.getSpecBundle(wsId);
+@@ -315,6 +299,40 @@ export async function pullSpecBundle(
+     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+     throw e;
+   }
++  // 防复活抑制面：pre_swap 之后现算（2026-10-17-audit-risk-followup）——原实现
++  // 在 getSpecBundle 之前（T0）一次性计算，此后下载/解包长窗口内若「已删」同名
++  // 文件被重建，重建内容虽经上方 pre_swap 上行留底，本地仍被抑制面从解包产物
++  // 剔除 + 整树交换清掉，且陈旧条目并回基线后下轮 push 会把服务器端一并软删
++  //（窗口内重建 = 双侧真数据丢失）。现算语义：抑制只作用于「此刻盘面仍无」的
++  // 已删面——窗口内重建的行自动退出抑制面（bundle 旧内容落地，重建内容已在
++  // 服务器留底、下跳心跳对齐自愈，与既有「窗口写入」语义一致）。CLI 侧同款
++  // 残余窗口（sillyspec 仓 da8d2449 同构移植）待后续变更同构收口。
++  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
++  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
++  const suppressResurrect = new Set<string>();
++  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
++  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
++  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
++  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
++  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
++  const restoreDeleted =
++    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
++  if (!restoreDeleted) {
++    try {
++      const cachedManifest = await readLocalManifest(wsId);
++      if (cachedManifest) {
++        for (const rel of Object.keys(cachedManifest.files)) {
++          if (isUploadExcludedPath(rel)) continue;
++          if (!(await pathExists(join(specDir, rel)))) {
++            suppressResurrect.add(rel);
++            suppressEntries.set(rel, cachedManifest.files[rel]!);
++          }
++        }
++      }
++    } catch {
++      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
++    }
++  }
+   // 防复活抑制落地（swap 前）：命中已删面的解包条目不进交换（swap 后即不复活）。
+   // 宁可吵不可静默复活：被挡路径点名（截断防刷屏），出路指 SILLYHUB_DAEMON_RESTORE_DELETED=1。
+   const resurrectSkipped = await applyResurrectSuppress(tmpDir, suppressResurrect);
+diff --git a/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts b/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
+index 88e40ab06..829df9770 100644
+--- a/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
+@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync,
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { JsonSessionPersistence } from '../../src/interactive/session-store-persistence.js';
++import { INTERACTIVE_PROVIDERS } from '../../src/interactive/providers.js';
+ import {
+   SESSION_FILE_VERSION,
+   type PersistedSessionRecord,
+@@ -167,7 +168,33 @@ describe('JsonSessionPersistence.load', () => {
+     expect(records.some((r) => r.sessionId === 's-pi')).toBe(true);
+   });
+ 
+-  it('单条记录 provider 非 claude/codex/pi → 该条丢弃', async () => {
++  it('单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）', async () => {
++    const providers = Object.keys(INTERACTIVE_PROVIDERS);
++    expect(providers).toContain('dsh');
++    expect(providers).toContain('zcode');
++    const recs = providers.map((prov) => ({
++      ...mkRecord({ sessionId: `s-${prov}` }),
++      provider: prov as never,
++    }));
++    writeFileSync(
++      file,
++      JSON.stringify({
++        version: SESSION_FILE_VERSION,
++        savedAt: 'x',
++        sessions: recs,
++      }),
++    );
++    const p = new JsonSessionPersistence(file);
++    const records = await p.load();
++    // 注册表键全集逐一保留——未来新引擎接入注册表即自动纳入本守护，
++    // 白名单（已改单源推导）若再与注册表脱钩将在此当场红。
++    expect(records).toHaveLength(recs.length);
++    for (const prov of providers) {
++      expect(records.some((r) => r.sessionId === `s-${prov}`), prov).toBe(true);
++    }
++  });
++
++  it('单条记录 provider 不在注册表（如 foo）→ 该条丢弃', async () => {
+     const bad = { ...mkRecord({ sessionId: 's2' }), provider: 'foo' as never };
+     writeFileSync(
+       file,
+diff --git a/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+index 1e696f5c9..888f2f2d1 100644
+--- a/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+@@ -180,6 +180,9 @@ class FakeZcodeServer {
+       case 'session/subscribe':
+         this.reply(req.id, {});
+         return;
++        // 模型目录就绪信号（驱动 setModel 前等待 state.updated）
++        this.emitNotification('state.updated', { sessionId: ZSID, patch: { model: { current: { providerId: 'sillyhub', modelId: 'glm-5.3' }, available: [{ ref: { providerId: 'sillyhub', modelId: 'glm-5.3' }, label: 'glm-5.3', contextWindow: 200000, maxOutputTokens: 128000, reasoning: { levels: [] } }] } } });
++        return;
+       case 'session/setModel':
+         this.reply(req.id, {});
+         return;
+@@ -383,6 +386,35 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
+     expect(errors).toHaveLength(0);
+   }, 15_000);
+ 
++  it('consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = (await driver.start(iq.queue, makeOpts({ model: 'GLM-5.3' }))) as ZcodeHandle;
++    const { cb, results } = makeCallbacks();
++
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/setModel').length > 0);
++    iq.push('只回复两个字：乒乓');
++    await until(() => results.length > 0);
++
++    // 自然退出路径（非 terminateSession 发起 close）：finally 必须自清槽位并
++    // 兜底 close 子进程——旧实现两步全缺，槽位闭包滞留到 GC、子进程回收完全
++    // 依赖外部 close 链（codex 同位有 delete + await close，zcode 缺席）。
++    const closeSpy = vi.spyOn(handle, 'close');
++    iq.close();
++    await consumePromise;
++
++    expect(closeSpy).toHaveBeenCalledTimes(1);
++    expect(
++      (handle as { _finishTurnOnClose?: () => void })._finishTurnOnClose,
++    ).toBeUndefined();
++  }, 15_000);
++
+   it('ready 门超时 → 结构化 error result（failed）', async () => {
+     const child = createFakeChild();
+     vi.mocked(spawn).mockReturnValue(child as never);
+diff --git a/sillyhub-daemon/tests/pull-antiresurrect.test.ts b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
+index bd95dcfb0..4eee601c4 100644
+--- a/sillyhub-daemon/tests/pull-antiresurrect.test.ts
++++ b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
+@@ -12,6 +12,9 @@
+ //   2. 无基线：manifest 缺失/首拉 → 全量落地（既有行为不变）。
+ //   3. 恢复通道：opts.restoreDeleted / env SILLYHUB_DAEMON_RESTORE_DELETED=1 → 跳过抑制。
+ //   4. 排除口径：isUploadExcludedPath 命中的 manifest 残留行（projects/ 等）不进抑制面。
++//   5. 窗口内重建保护（2026-10-17-audit-risk-followup）：下载窗口内重建的同名文件
++//      不进抑制面（抑制面 pre_swap 后现算）——不删本地、不并回陈旧条目。
++//   6. 越界键防线（2026-10-17-audit-risk-followup）：manifest 越界键（../）跳过 rm 并告警。
+ //
+ // vitest.config.ts: globals=false → 显式 import；HOME/USERPROFILE 覆盖让 specDir 落 tmp。
+ 
+@@ -22,6 +25,7 @@ import { dirname, join } from 'node:path';
+ 
+ import {
+   pullSpecBundle,
++  applyResurrectSuppress,
+   resolveSpecDir,
+   resolveManifestCachePath,
+ } from '../src/spec-sync.js';
+@@ -199,4 +203,68 @@ describe('pullSpecBundle 防复活抑制（2026-10-16-daemon-pull-antiresurrect
+     const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
+     expect(warned).not.toContain('projects/x.yaml');
+   });
++
++  it('用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）', async () => {
++    // T0：manifest 有 docs/b.md、盘面无（已删未上行）。旧实现在 getSpecBundle 之前
++    // 一次性算出抑制面；下载在途时 agent/用户重建 b.md（getSpecBundle mock 内写盘
++    // 模拟窗口写入）——修复后抑制面在 pre_swap 之后现算，b.md 盘面存在 → 自动退出
++    // 抑制面。旧实现该场景：重建文件被 swap 进 trash 删除 + 陈旧条目并回 manifest
++    // → 下轮 push 生成 delete op 把服务器刚留底的重建内容一并软删（双侧丢失）。
++    const specDir = await seedDisk({ 'docs/a.md': 'local-a' });
++    await seedManifest(['docs/a.md', 'docs/b.md']);
++    const bundle = buildTar([
++      { name: 'docs/a.md', content: 'server-a' },
++      { name: 'docs/b.md', content: 'server-b' },
++    ]);
++    const client = {
++      getSpecBundle: vi.fn().mockImplementation(async () => {
++        // 下载在途：窗口内重建（T0 时盘面无，此刻重建）。
++        await mkdir(dirname(join(specDir, 'docs/b.md')), { recursive: true });
++        await writeFile(join(specDir, 'docs/b.md'), 'rebuilt-b', 'utf-8');
++        return bundle;
++      }),
++      postSpecSync: vi.fn().mockResolvedValue({ ok: true }),
++    } as never;
++
++    const out = await pullSpecBundle(client, WS, { unsyncedChecker: async () => false });
++
++    expect(out).toBe(specDir);
++    // 不抑制不删除：b.md 落地（bundle 旧内容；重建内容已在服务器留底，下跳心跳
++    // 拉齐自愈——对齐既有「窗口写入」语义，本地与服务器两侧均无丢失）。
++    expect(await readFile(join(specDir, 'docs/b.md'), 'utf-8')).toBe('server-b');
++    // 不并回陈旧条目：manifest 行来自落地树现算（hash 非 T0 陈旧值 'h-docs/b.md'）。
++    const manifestAfter = JSON.parse(
++      await readFile(resolveManifestCachePath(WS), 'utf-8'),
++    ) as { files: Record<string, { hash: string }> };
++    expect(manifestAfter.files['docs/b.md']).toBeTruthy();
++    expect(manifestAfter.files['docs/b.md'].hash).not.toBe('h-docs/b.md');
++    // 无抑制面 → 不触发抑制 warn。
++    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
++    expect(warned).not.toContain('防复活抑制');
++  });
++
++  it('用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存', async () => {
++    // manifest 键受信边界含服务端 new_versions 回写与本地半写损坏；旧实现直接
++    // join+rm，越界键可把 rm -r 打到 dir 之外（含性校验对齐 extractTar Tar Slip 防线）。
++    const dir = await mkdtemp(join(tmpdir(), 'suppress-containment-'));
++    const victimRel = '../suppress-containment-victim.md';
++    const victimPath = join(dir, victimRel);
++    try {
++      await writeFile(victimPath, 'victim', 'utf-8');
++      await writeFile(join(dir, 'inside.md'), 'x', 'utf-8');
++
++      const skipped = await applyResurrectSuppress(dir, new Set(['inside.md', victimRel]));
++
++      // 正常键照删、越界键跳过且点名。
++      expect(skipped).toEqual(['inside.md']);
++      await expect(readFile(join(dir, 'inside.md'), 'utf-8')).rejects.toThrow();
++      expect(await readFile(victimPath, 'utf-8')).toBe('victim');
++      const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
++      expect(warned).toContain('越界');
++      expect(warned).toContain(victimRel);
++    } finally {
++      await rm(dir, { recursive: true, force: true });
++      await rm(victimPath, { force: true }).catch(() => {});
++    }
++  });
+ });

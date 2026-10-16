@@ -74,3 +74,117 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-16-decision-pill-no-workspace
   status: active
+
+## FR-docs-007 daemon 重启载入时 dsh/zcode 会话记录通过 VALID_PROVIDERS 校验不再静默丢弃，守护测试断言白名单与驱动注册表键一致
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-01
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-01
+  tests: test/sillyhub-daemon/tests/interactive/session-store-persistence.test.ts「单源守护：INTERACTIVE_PROVIDERS 全部键的记录载入保留（2026-10-17-audit-risk-followup——手写白名单漏 dsh/zcode 曾致重启静默丢记录，pi/cursor 同坑各一次）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-008 run 仍活跃（current_run_status 非 null）时不再误标「已执行完成」角标，活跃转 null 仍正确标记，测试覆盖 running 持续不标与 running 转 null 标记两态
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-02
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-02
+  tests: test/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-009 登出清理注册表收录 sillyhub:session-completed-unread: 前缀，测试断言该前缀键被清理
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-03
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-03
+  tests: test/frontend/src/lib/__tests__/logout-storage.test.ts「7 类用户域前缀全清、设备级键保留、前缀精确匹配」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-010 防复活抑制面改为 pre_swap 之后现算：下载窗口内重建的同名文件不再被本地删除、陈旧 manifest 条目不再并回，测试覆盖窗口内重建场景
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-04
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-04
+  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例5（窗口内重建保护）：下载窗口内重建的同名文件不进抑制面——不删本地、不并回陈旧条目（2026-10-17-audit-risk-followup）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-011 zcode consume finally 对齐 codex：清 _finishTurnOnClose 槽位并 await close，幂等不双重关闭
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-05
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-05
+  tests: test/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
+
+## FR-docs-012 applyResurrectSuppress 对越界（路径穿越）manifest 键跳过并告警，测试覆盖越界键不触发删除'
+变更：2026-10-17-audit-risk-followup
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-17-audit-risk-followup/requirements.md#FR-06
+最近确认：7faec5bfa12ed2e7159077f469589243fb36ee5b
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-17-audit-risk-followup:flow:测试绑定FR-06
+  tests: test/sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例6（越界键防线）：applyResurrectSuppress 对越界键（../）跳过 rm 并告警——dir 外文件幸存」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-17-audit-risk-followup
+  status: active
