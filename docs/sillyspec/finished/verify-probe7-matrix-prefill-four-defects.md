@@ -1,7 +1,7 @@
 # verify 探针 7「验收×测试覆盖矩阵」预填噪音四缺陷（假 covered/目录级候选灌水/锚点空心/真 covered 误标 partial）
 
 > 记录时间：2026-10-16 · 来源变更：2026-10-16-backend-mem-polling verify 收口实测
-> 状态：活跃坑（人工三轮复核改写完成验收，预填净成本为负，待工具修复）
+> 状态：已修复并移入 finished/（sillyspec@2026-10-16-probe7-prefill-noise-fix，实现 5ca368a0 / 归档 d118e023，2026-10-16）——四缺陷逐条落地：①部署/文档类条目直判 non-testable + 全条目命中卡不注入 FR 候选池；②covered 仅测试名级命中（锚点=测试函数名行），正文命中封顶 partial；③同波次新增/修改测试零命中 → covered+待人工复核；④候选>5 交人工。回归断言锁在 sillyspec 仓 test/probe7-prefill-noise.test.mjs（6 用例）+ 既有 probe7 测试面改写
 
 ## 背景
 
