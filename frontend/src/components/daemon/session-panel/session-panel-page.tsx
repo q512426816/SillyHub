@@ -35,8 +35,10 @@ import {
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 // 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
+// 2026-10-16-session-decision-pill task-04：会话悬浮待决策入口（与变更文件 pill 并排）
 // （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
 import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
+import { SessionDecisionsHover } from "@/components/daemon/session-decisions-hover";
 // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
 // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
 // 不破，panel 层零 react-query）。
@@ -774,6 +776,15 @@ export function SessionPanelPage({
     summary: PlanSummary;
     requestedAt: string;
   } | null>(null);
+  // 2026-10-16-session-decision-pill task-04：待决策 pill 定位请求（nonce 递增
+  // 触发 TurnTimeline effect——同 requestId 重复点击也生效）；plan 卡高亮闪烁
+  // 落点 ref（该卡在输入区上方恒可见，仅提示注意力）。
+  const [focusDialogRequest, setFocusDialogRequest] = useState<{
+    requestId: string;
+    nonce: number;
+  } | null>(null);
+  const focusDialogNonceRef = useRef(0);
+  const planCardRef = useRef<HTMLDivElement>(null);
   // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
   // 2026-08-25：状态归约统一走底部 applyBashStatusEvent / appendBashChunk（跨命令
   // 重置 + 环形截断，page / dialog 两模式共用）。
@@ -4121,6 +4132,23 @@ export function SessionPanelPage({
     setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
   }, []);
 
+  // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位路由——
+  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + sticky 卡
+  // 闪烁）；"plan" 哨兵 → 输入区上方 Plan 审批卡高亮闪烁（恒可见仅提示）。
+  const handleFocusPending = useCallback((requestId: string) => {
+    if (requestId === "plan") {
+      const el = planCardRef.current;
+      if (!el) return;
+      el.classList.add("ring-2", "ring-brand-500");
+      window.setTimeout(() => el.classList.remove("ring-2", "ring-brand-500"), 1200);
+      return;
+    }
+    setFocusDialogRequest({
+      requestId,
+      nonce: ++focusDialogNonceRef.current,
+    });
+  }, []);
+
   // ── task-09（FR-04）：子代理目录跳转定位（原型 jumpTo 的面板侧实现）────────
   // 三动作：切「进度」视图（子代理块只在 all 视图渲染）→ 展开对应子代理块 →
   // scrollIntoView 居中。SubagentBlockView（task-05）未暴露 data-segment-id DOM
@@ -4625,6 +4653,9 @@ export function SessionPanelPage({
         // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
         // TurnTimeline 内守卫承担，本挂载恒接线）。
         expandPreview={handleExpandPreview}
+        // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位还原
+        // 请求（nonce 触发式；缺省 null 零行为语义由 TurnTimeline 内守卫承担）。
+        focusDialogRequest={focusDialogRequest}
         sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
         pendingRequests={pendingRequests}
         dialogHistory={dialogHistory}
@@ -5355,9 +5386,10 @@ export function SessionPanelPage({
           ActivityCatalog 下拉（原常驻区挤占聊天窗口）；取消/分身子会话交互经
           ActivityCatalog props 透传，活跃期间父层 5s 轮询刷新不变（终态停止）。 */}
 
-      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
+      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。
+          2026-10-16-session-decision-pill task-04：ref 供待决策 pill "plan" 项高亮闪烁。 */}
       {planPending && (
-        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
+        <div ref={planCardRef} className="shrink-0 border-t border-border bg-card px-5 py-3">
           <PlanApprovalCard
             sessionId={sessionId}
             runId={planPending.runId}
@@ -5382,14 +5414,30 @@ export function SessionPanelPage({
           = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
           sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
           null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
-          进行中变更徽标呼吸提示（FR-02）。 */}
+          进行中变更徽标呼吸提示（FR-02）。
+          2026-10-16-session-decision-pill task-04：锚点内改 flex 悬浮行——待决策
+          pill（新增，自渲染 null 零占位同款）与变更文件 pill（embedded 脱壳）
+          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。 */}
       {sessionId != null && session?.workspace_id != null && (
         <div className="relative h-0 w-full">
-          <SessionChangeFilesHover
-            workspaceId={session.workspace_id}
-            sessionId={sessionId}
-            running={running}
-          />
+          <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex items-center justify-end gap-2 print:hidden">
+            <div className="pointer-events-auto">
+              <SessionDecisionsHover
+                sessionId={sessionId}
+                pendingRequests={pendingRequests}
+                planPending={planPending}
+                onFocusPending={handleFocusPending}
+              />
+            </div>
+            <div className="pointer-events-auto">
+              <SessionChangeFilesHover
+                workspaceId={session.workspace_id}
+                sessionId={sessionId}
+                running={running}
+                embedded
+              />
+            </div>
+          </div>
         </div>
       )}
 

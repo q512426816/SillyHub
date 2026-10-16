@@ -1,0 +1,10 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+adopted_from: brainstorm
+review_force: null
+baseline_commit: 25944be2b97cd94680849d070da354eda2131014
+updatedAt: '2026-10-16T03:33:30.004Z'
+baseline_sha256: 74675775979c94044d16bd9a9ca9e377c2c083650a43e6fb8fceb95224d5d882
+

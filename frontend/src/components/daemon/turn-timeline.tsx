@@ -446,6 +446,14 @@ export interface TurnTimelineProps {
    * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
    */
   expandPreview?: (_runKey: string) => void;
+  /**
+   * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
+   * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
+   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡 sticky 常驻
+   * 顶部）；③sticky 容器高亮闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
+   * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
+   */
+  focusDialogRequest?: { requestId: string; nonce: number } | null;
 }
 
 /**
@@ -1134,6 +1142,7 @@ export function TurnTimeline({
   suppressFollowBottom = false,
   forkEntry,
   expandPreview,
+  focusDialogRequest,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -1388,6 +1397,29 @@ export function TurnTimeline({
     sessionStatus !== "ended" &&
     sessionStatus !== "failed";
 
+  // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
+  // sticky 提问卡容器 ref（高亮闪烁落点）；effect 由 nonce 触发（同 requestId
+  // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
+  // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
+  // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
+  // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
+  // 不渲染卡片层）。
+  const stickyCardsRef = useRef<HTMLDivElement>(null);
+  const focusNonceRef = useRef<number>(-1);
+  useEffect(() => {
+    if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
+    focusNonceRef.current = focusDialogRequest.nonce;
+    handleRestore(focusDialogRequest.requestId);
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    const el = stickyCardsRef.current;
+    if (!el) return;
+    el.classList.add("ring-2", "ring-brand-500");
+    const t = window.setTimeout(() => {
+      el.classList.remove("ring-2", "ring-brand-500");
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [focusDialogRequest, handleRestore]);
+
   // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
   // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
   // 真实化只改 scrollHeight——不触发 scroll 事件（scrollTop 未变）、无 turns 提交，
@@ -1517,6 +1549,7 @@ export function TurnTimeline({
           已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
       {showPending && (
         <div
+          ref={stickyCardsRef}
           className={
             visiblePendingCount > 0
               ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
