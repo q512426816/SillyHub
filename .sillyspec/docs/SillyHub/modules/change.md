@@ -20,6 +20,7 @@ created_at: 2026-08-18 01:45:00
   - 文档矩阵与单文档内容；重解析（全量重扫 + rename 检测 + `_sync_docs` 增量同步入库 + 占位行过滤）。
   - 阶段档案配置更新（update_stage_profile）、agent 状态视图（get_agent_status）。
 - **变更文件**：文件树列表 / 读内容 / 写内容（`_enqueue_edit_write` 经 daemon host_fs 通道下发，写后 `_resync_change_docs` 回灌文档矩阵）/ pending 文件列表——会话驱动模式下平台侧读写 agent 写盘结果的口。is_text 判定 = `_TEXT_SUFFIXES` 白名单（md/mdx/html/htm/yaml/yml/json/txt + ql-20260917-004 补 log/patch/diff——verify-logs/*.log 与 scope-audit.patch 此前被误判非文本，文件树给只读占位且全屏预览落 fallback）。
+  - 刷新同步回执（2026-10-16-change-files-sync-result）：`GET files?sync=1` 返回前先经绑定 daemon 触发定向上行同步（`sillyspec_sync_change` RPC，预算 15s——实测同步 5.5~13.5s，原 3s 恒超时），响应新增可选 `sync_result`（triggered/ok/reason/stderr_tail 三态：未绑定/离线 vs 执行失败/超时 vs 防抖跳过；纯读恒 null）；daemon ok:false 回执不再丢弃（reason 与 CLI stderr 尾段透传 + warning 日志 `change.files_refresh_sync_failed`），GET 仍永不因同步失败报错。
 - **阶段流转与审核**：
   - `transition`（FSM `can_transition` 校验）/ `advance_stage`（阶段推进，可带 agent_profile_id 透传派发）/ `complete_stage` + `rerun_stage`（返回结构化结果）。
   - 四类人工审核面板：`proposal_review / plan_review / human_test / archive_confirm`（pending_review 停靠态的放行/打回，打回走 `_record_stage_rework`）。
