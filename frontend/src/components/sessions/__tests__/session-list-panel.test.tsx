@@ -3138,14 +3138,16 @@ describe("SessionListPanel 群行归档与删除操作（task-06）", () => {
   });
 });
 
-// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics） ──
+// ── 14. 行首状态槽语义 + 执行完成通知（2026-10-15-session-status-dot-semantics；
+//        2026-10-15-session-turn-completion-semantics 完成口径改轮次级） ──
 //
 // 语义矩阵（用户确认，参考 deepseek-harness StateDot 五态）：failed→红点 /
 // ended→绿点 / 活性 working→动态转圈 / 活性 blocked→琥珀点 / reconnecting→
-// 动态转圈 / 其余（active 空闲/pending/suspended/活性 idle/unknown/无活性）
-// →留白（槽占位零可见标识）；终态权威优先于活性。行尾活性小灯退役：悬停卡/
-// 未读红角标平移至行首槽。执行完成通知：非终态→ended 且当前不在该会话上 →
-// 绿色角标，点击进入（selected 边沿）后消失。
+// 动态转圈 / 活性 idle+完成标记→绿点（一轮刚跑完待查看）/ 其余（已读空闲/
+// active 空闲/pending/suspended/活性 unknown/无活性）→留白（槽占位零可见
+// 标识）；终态权威优先于活性。行尾活性小灯退役，悬停卡平移至行首槽。执行
+// 完成通知两来源共键：①非终态→ended（面板检测）②working/blocked→idle 轮次
+// 完成（hook 检测）→ 绿色角标，点击进入（selected 边沿）后消失。
 
 describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot-semantics）", () => {
   /**
@@ -3262,6 +3264,49 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
     expect(screen.getByText(/^推导时间：/)).toBeInTheDocument();
   });
 
+  it("active + 活性 idle + 完成标记（一轮刚跑完待查看）→ 绿点 + 完成角标", async () => {
+    window.localStorage.setItem(
+      "sillyhub:session-completed-unread:s-a",
+      String(Date.now()),
+    );
+    slotFixture({ status: "active" }, "idle");
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="执行完成"]')).toBeTruthy();
+    expect(screen.getByLabelText("此会话已执行完成")).toBeTruthy();
+  });
+
+  // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号 ──────────
+
+  it("run=running → 转圈（正在执行）——平台派发会话不依赖日志活性链", async () => {
+    slotFixture({ status: "active", current_run_status: "running" });
+    await renderRow();
+    expect(screen.getByLabelText("正在执行")).toBeTruthy();
+  });
+
+  it("run=pending → 转圈（排队执行中）", async () => {
+    slotFixture({ status: "active", current_run_status: "pending" });
+    await renderRow();
+    expect(screen.getByLabelText("正在执行")).toBeTruthy();
+  });
+
+  it("run=pending_approval → 琥珀点（在等你）——run 权威压过活性 working", async () => {
+    slotFixture(
+      { status: "active", current_run_status: "pending_approval" },
+      "working",
+    );
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="在等你"]')).toBeTruthy();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+  });
+
+  it("run 活跃时留白规则不变：无 run 无活性（active 空闲）→ 留白", async () => {
+    slotFixture({ status: "active", current_run_status: null });
+    const row = await renderRow();
+    expect(
+      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
+    ).toBe("");
+  });
+
   it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
     slotFixture({ status: "active" }, "idle");
     renderPanel(<SessionListPanel />);
@@ -3292,7 +3337,7 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
   });
 });
 
-describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首槽）", () => {
+describe("SessionListPanel 轮次完成绿角标（working/blocked→idle 转移，2026-10-15-session-turn-completion-semantics）", () => {
   /** 带 client 句柄的渲染（转移用例需 refetchQueries 模拟 30s 轮询到点）。 */
   function renderPanelWithClient(ui: React.ReactElement) {
     const client = new QueryClient({
@@ -3321,20 +3366,21 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首�
     });
   }
 
-  it("红点出现：prevState=working → current=idle 转移标记未读", async () => {
+  it("绿点+完成角标出现：prevState=working → current=idle 转移写完成标记", async () => {
     livenessFixture();
     const { client } = renderPanelWithClient(<SessionListPanel />);
     await openGroup("SillyHub");
     await screen.findByTestId("session-status-indicator");
-    // 首轮 working：state 键落盘（首见不触发未读，无红点）
+    // 首轮 working：state 键落盘（首见不触发完成标记，转圈显示）
     await waitFor(() =>
       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
         "working",
       ),
     );
-    expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
 
-    // 下一轮 idle（refetch 模拟 30s 轮询到点）：转移检测写未读 → 红点出现
+    // 下一轮 idle（refetch 模拟 30s 轮询到点）：转移检测写完成标记
+    // → 绿点（执行完成）+ 绿角标出现
     mocks.listWorkspaceAgentLogs.mockResolvedValue({
       items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
     });
@@ -3343,11 +3389,14 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首�
         queryKey: ["agent-liveness-overview", "all"],
       });
     });
-    await screen.findByLabelText("有新的空闲状态未读");
-    expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).not.toBeNull();
+    await screen.findByLabelText("此会话已执行完成");
+    expect(screen.getByLabelText("执行完成")).toBeTruthy();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).not.toBeNull();
   });
 
-  it("红点随 selected 置真消失（点击/Enter/深链三路入口共用的 selected 边沿）", async () => {
+  it("点击进入（selected 置真）→ 角标与绿点一并消失、落盘清除（空闲回归留白）", async () => {
     livenessFixture();
     const { client, rerender } = renderPanelWithClient(<SessionListPanel />);
     await openGroup("SillyHub");
@@ -3360,25 +3409,28 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首�
         queryKey: ["agent-liveness-overview", "all"],
       });
     });
-    await screen.findByLabelText("有新的空闲状态未读");
+    await screen.findByLabelText("此会话已执行完成");
 
-    // selectedSessionId 置真（门户三路入口最终都落到该 prop）→ 边沿清除红点
+    // selectedSessionId 置真（门户三路入口最终都落到该 prop）→ 边沿清除完成通知
     rerender(
       <QueryClientProvider client={client}>
         <SessionListPanel selectedSessionId="s-a" />
       </QueryClientProvider>,
     );
     await waitFor(() =>
-      expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull(),
+      expect(screen.queryByLabelText("此会话已执行完成")).toBeNull(),
     );
     expect(
-      window.localStorage.getItem("sillyhub:liveness-unread:s-a"),
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
     ).toBeNull();
-    // 状态槽本体保留（清除只影响红角标）
-    expect(screen.getByTestId("session-status-indicator")).toBeInTheDocument();
+    // 会话仍 active + 已读空闲 → 绿点一并消失，回归留白
+    const row = screen.getByRole("button", { name: "会话 核对变更" });
+    expect(
+      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
+    ).toBe("");
   });
 
-  it("首见不亮：无 prevState（localStorage 无 state 键）直接 idle 不标未读", async () => {
+  it("首见不标：无 prevState（localStorage 无 state 键）直接 idle 留白", async () => {
     livenessFixture();
     // 首轮直接 idle（首见无 prevState）
     mocks.listWorkspaceAgentLogs.mockResolvedValue({
@@ -3387,14 +3439,42 @@ describe("SessionListPanel 活性未读红角标（原行尾小灯迁入行首�
     renderPanel(<SessionListPanel />);
     await openGroup("SillyHub");
     await screen.findByTestId("session-status-indicator");
-    // state 键首见落盘为 idle，未读键不写
+    // state 键首见落盘为 idle，完成标记不写
     await waitFor(() =>
       expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
         "idle",
       ),
     );
-    expect(window.localStorage.getItem("sillyhub:liveness-unread:s-a")).toBeNull();
-    expect(screen.queryByLabelText("有新的空闲状态未读")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+  });
+
+  it("正选中该会话时完成（suppress 谓词）→ 不标记不亮角标", async () => {
+    livenessFixture();
+    const { client } = renderPanelWithClient(
+      <SessionListPanel selectedSessionId="s-a" />,
+    );
+    // 选中会话所在组豁免默认折叠（ql-20260824-001）——无需点击展开。
+    await screen.findByTestId("session-status-indicator");
+    mocks.listWorkspaceAgentLogs.mockResolvedValue({
+      items: [makeLivenessEntry({ agent_session_id: "s-a", state: "idle" })],
+    });
+    await act(async () => {
+      await client.refetchQueries({
+        queryKey: ["agent-liveness-overview", "all"],
+      });
+    });
+    await waitFor(() =>
+      expect(window.localStorage.getItem("sillyhub:liveness-state:s-a")).toBe(
+        "idle",
+      ),
+    );
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
   });
 });
 
@@ -3528,6 +3608,91 @@ describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终
     await openGroup("SillyHub");
     await screen.findByRole("button", { name: "会话 核对变更" });
     expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+  });
+
+  // ── 2026-10-16-session-run-status-realtime：run 完成触发源 ────────────────
+
+  it("run 活跃→null（run 终态收敛，会话仍 active）→ 完成角标出现（run 来源，不等日志推导）", async () => {
+    completedFixture("active");
+    // 首轮：run=running（转圈）。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    const { client } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByLabelText("正在执行");
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+
+    // 下一轮列表刷新（SSE/轮询）：run 终态收敛 → current_run_status=null
+    // → run 完成检测写完成标记（会话仍 active，无活性数据也触发）。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: null,
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await screen.findByLabelText("此会话已执行完成");
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).not.toBeNull();
+  });
+
+  it("run 活跃→null 但正选中该会话 → 不标记（run 来源同 suppress 口径）", async () => {
+    completedFixture("active");
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    const { client } = renderPanelWithClient(
+      <SessionListPanel selectedSessionId="s-a" />,
+    );
+    // 选中会话所在组豁免默认折叠——无需点击展开。
+    await screen.findByLabelText("正在执行");
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: null,
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("session-status-indicator")?.textContent ?? "",
+      ).toBe(""),
+    );
     expect(
       window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
     ).toBeNull();

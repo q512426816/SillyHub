@@ -62,6 +62,13 @@ class AgentSessionRead(BaseModel):
     pinned_at: datetime | None = None
     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
     current_run_id: uuid.UUID | None = None
+    # 2026-10-16-session-run-status-realtime：当前活跃 run 状态（非 ORM 字段，
+    # 列表/详情端点注入）——后端权威实时信号（发消息瞬间 run=running、等审批=
+    # pending_approval），驱动会话列表行首转圈/琥珀；无活跃 run 为 None。与
+    # daemon 10s 日志活性推导链并存：run 状态优先（平台派发会话），日志活性
+    # 兜底（本地 CLI 会话基线）。值域 = AgentRun.status 词表子集（ACTIVE_RUN_
+    # STATUSES：pending/running/pending_approval）。
+    current_run_status: str | None = None
     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
     # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
     # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联

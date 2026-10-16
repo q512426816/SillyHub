@@ -114,3 +114,6 @@
 - 2026-10-15-change-detail-redesign | 变更详情页重设计：四 tab 容器 + 状态自适应 + 统一时间线 + 图谱独立分区 + 范围对账下沉 + 用量/会话入概览右信息栏（D-001~D-018）
 | 2026-10-16 | 2026-10-16-session-decision-pill | 2026-10-16-session-decision-pill |
 | 2026-10-16 | 2026-10-16-decision-pill-no-workspace | 无 workspace 的会话（如 445e12d9，10-09 创建 workspace_id 为… |
+| 2026-10-16 | 2026-10-16-archived-files-tab | 归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账… |
+| 2026-10-16 | 2026-10-15-session-turn-completion-semantics | 上一变更把绿点/完成通知锚定在会话终态 ended 上，但平台里一轮任务跑完后会话仍为 active… |
+| 2026-10-16 | 2026-10-16-session-run-status-realtime | 会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示… |

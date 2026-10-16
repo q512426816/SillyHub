@@ -214,14 +214,9 @@ export function ChangeOverviewSide({
           </>
         )}
         <div className="pt-1">
-          {/* 归档态「文件与对账」tab 不渲染（D-007）→ 入口改指「产出 · 归档留档」，不留死链。 */}
-          {archived ? (
-            <span className="text-xs text-muted-foreground">
-              真实改动面见「产出 · 归档留档」
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
-          )}
+          {/* 2026-10-16-archived-files-tab / D-019@v1：归档态恢复「文件与对账」tab，
+              两态入口同指该 tab（不再指路「产出 · 归档留档」）。 */}
+          <span className="text-xs text-muted-foreground">明细见「文件与对账」</span>
         </div>
       </MetaPanelSection>
 

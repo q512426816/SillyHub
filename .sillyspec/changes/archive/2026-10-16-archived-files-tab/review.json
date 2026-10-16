@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-archived-files-tab",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "b5c80978eeff39258d70399f559fa678e3c77c6e",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok（visibleTabs 纯函数同入参恒同输出，无时序面）",
+    "并发": "ok（多标签切 tab 后到者胜，无共享可变状态——同 D-013 既有取舍）",
+    "切换": "ok（四 tab 恒定后 URL 残留 ?tab=files 恒在可见集，切换变更无不一致）",
+    "作用域": "ok（零新增取数，全部复用既有 queryKey 含 workspaceId 维度）"
+  },
+  "reviewedAt": "2026-10-16T01:05:00Z"
+}

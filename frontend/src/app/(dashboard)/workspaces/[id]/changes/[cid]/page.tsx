@@ -522,7 +522,7 @@ export default function ChangeDetailPage({ params }: Props) {
         </div>
       ) : null}
 
-      {activeTab === "files" && !archived ? (
+      {activeTab === "files" ? (
         <ChangeFilesPanel
           workspaceId={workspaceId}
           changeId={changeId}

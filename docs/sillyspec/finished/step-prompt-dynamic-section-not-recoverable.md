@@ -46,3 +46,11 @@ grep -n "tier\|材料包\|交叉点" /tmp/step.txt
 
 已二次渲染后才发现的：读 `<sillyspec 安装目录>/src/review-tier.js` + `src/ceremony-tier.js` 反推档位，
 并按 design.md / decisions.md 自建评审材料包（在派发 prompt 中说明「材料包由主代理等价自建」）。
+
+## 处置记录（2026-10-16）
+
+**已修**（sillyspec `2026-10-16-step-guide-dyn-completeness`，fbf0ada4 + 归档 619f3e1d）：
+动态注入段**复入附录化**——9 站点裸 split/join 全部收编 `substituteRaw`（收集进
+dynSegments），复入渲染时「步骤指引未变」提示附**动态段附录**（含评审六值：tier/理由/
+材料包等可回读），首次输出截断/二次重跑丢失双场景闭环。坑内绕过（重定向落盘）仍可用
+但不再必要。归档。

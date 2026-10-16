@@ -333,11 +333,22 @@ export function buildDriverOptions(
     // 2026-10-15-dsh-engine-acp task-04（D-006 边界合并）：dsh 共用本注入块——
     // ACP request_permission 代答桥经 DshAcpStartOptions.sessionPermission 拿同一
     // 对闭包引用（对齐 codex/pi 形态）。
+    // 2026-10-15-zcode-engine-appserver：zcode 同形态审批桥
+    //（interaction/requestPermission 代答），2026-10-16-driver-audit-fixes 补入名单。
     if (
       state.provider === 'codex' ||
       state.provider === 'pi' ||
-      state.provider === 'dsh'
+      state.provider === 'dsh' ||
+      state.provider === 'zcode'
     ) {
+      // 审批三态旗标映射（2026-10-16-driver-audit-fixes）：此前 spec.enableApproval /
+      // effectiveAskUserOnly 只消费成 claude 的 canUseTool 注入，codex 族
+      // manualApproval/askUserOnly 从未赋值——驱动侧 `!opts.manualApproval` 恒真
+      // → 权限请求恒 allow-through（fail-open），下方注入的 sessionPermission 成
+      // 死代码。基类 InteractiveDriverStartOptions 两字段契约（"driver 读取并据此
+      // 决定审批行为"）即本映射依据。
+      driverOpts.manualApproval = spec.enableApproval === true;
+      driverOpts.askUserOnly = spec.effectiveAskUserOnly === true;
       // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
       // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
       driverOpts.sessionPermission = {

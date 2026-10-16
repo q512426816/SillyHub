@@ -1,0 +1,129 @@
+{
+  "change": "2026-10-16-archived-files-tab",
+  "baseline": "1f9fbb8a38d49d701e8038059ef77b2bcbeeb642",
+  "head": "b5c80978eeff39258d70399f559fa678e3c77c6e",
+  "files": [
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx",
+    "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+    "frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx",
+    "frontend/src/components/changes/detail/change-files-panel.tsx",
+    "frontend/src/components/changes/detail/change-overview-side.tsx",
+    "frontend/src/components/changes/detail/change-tabs.tsx"
+  ],
+  "totals": {
+    "files": 9,
+    "additions": 45,
+    "deletions": 56
+  },
+  "savedAt": "2026-10-16T00:56:43.300Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 9,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_app",
+      "files": 3,
+      "doc": "docs/SillyHub/modules/frontend_app.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 6,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 16,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "1f9fbb8a38d49d701e8038059ef77b2bcbeeb642",
+    "totals": {
+      "files": 9,
+      "additions": 45,
+      "deletions": 56
+    },
+    "rows": [
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-restore-assets.test.tsx",
+        "additions": 8,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-tabs.test.tsx",
+        "additions": 2,
+        "deletions": 7,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx",
+        "additions": 1,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-files-panel.test.tsx",
+        "additions": 0,
+        "deletions": 1,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-overview-side.test.tsx",
+        "additions": 2,
+        "deletions": 3,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/__tests__/change-tabs.test.tsx",
+        "additions": 17,
+        "deletions": 10,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-files-panel.tsx",
+        "additions": 6,
+        "deletions": 11,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-overview-side.tsx",
+        "additions": 3,
+        "deletions": 8,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/changes/detail/change-tabs.tsx",
+        "additions": 6,
+        "deletions": 7,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "e427e85db806e53451f2d9f2a7be1d0ef3696035b4552a471f104312f8e47efc",
+  "patchStatus": "ok"
+}

@@ -48,3 +48,16 @@ pnpm lint/daemon typecheck 四段实跑全绿，失败面仅 backend mypy 上述
 2. `printVerifyLintCheck` 目前按「env 档位」而非「终判结果」选措辞（gates 路径先印
    「已阻断」再降档，agent 易误判 CLI 抽风）——抽 helper 后按终判档位分支措辞；
 3. 可选：把「零交集存量债」的摩擦计数（friction event）与降档联动，供存量债清偿排期。
+
+## 处置记录（2026-10-16）
+
+**已修（按坑内建议①共享 helper）**（sillyspec `2026-10-15-lint-triage-path-unify`，
+并行会话落地，本日复核验证）：新增 `src/run/lint-ownership.js` 的
+`lintOwnershipDowngrade`（判定 + 文案收敛单源）——gates.js --done 路径与
+verify-quality-scan.js step6 noAI 路径**双接线**，零交集存量债降档 advisory 不 throw，
+owned/unattributable/鉴定异常维持硬拦（保守）；仅 lint 单独失败时降档（testFailed
+优先）。建议②（按终判档位分支措辞）随 helper 文案收敛一并解决；建议③（摩擦计数联动）
+已在接线中（recordFrictionEvent 与 throw 解耦）。
+
+**测试**：`lint-ownership-failfast` 21/21（3e 源级锚随契约更新钉 helper 双接线）+
+`lint-ownership.test.mjs` 5/5 绿。归档。

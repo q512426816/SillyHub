@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-15-session-turn-completion-semantics",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "fcd4a40489512f45d8e646965833e5e7c13e400b",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——轮次完成只依赖 hook 自身 prevState 链（sillyhub:liveness-state:），与会话状态链互不依赖；两完成来源写同键幂等，谁先到谁点亮",
+    "并发": "ok——存在性键多标签并发 mark/clear 仅展示差异；两来源同写一键最坏重复 setItem（幂等）",
+    "切换": "ok——suppress 按当轮 selectedSessionId 判定（在会话上看完收尾不标，错过不补为显式边界）；prevState 落盘跨刷新保留，完成标记保留至点击",
+    "作用域": "ok——键按 sessionId 全局唯一跨四种 scope 共享；hook 固定 all 槽多挂载共享，标记单处执行幂等不重复"
+  },
+  "checklist": {
+    "frImplTest一致": "FR-01~05 全部兑现且有绑定测试：hook 转移检测 6 用例（working/blocked→idle 标、unknown→idle/首见/→ended 不标、suppress 不标）、面板轮次完成 describe 4 用例 + 矩阵增「idle+完成标记→绿点」、终态来源 describe 5 用例保留；124/124 过、lint 零告警、tsc 过",
+    "盲维四问真实性": "design 四问均非「不适用」且与 diff 相符：单源 prevState 链/幂等键/suppress 当轮判定/global 唯一键均有代码锚点（hooks/use-session-liveness.ts 转移 effect、lib/session-completed-unread.ts、面板 prevStatusRef effect）",
+    "披露边界裁决": "边界已裁决：可接受——①页面关闭期间完成不补报（同上一变更口径）；②旧 sillyhub:liveness-unread:* 存量键不再读写不清理（无碰撞面，自然废弃）；③suppress 错过不补（用户在其上=已看到收尾）",
+    "防护声明": "localStorage 全 try/catch 降级真实存在（hook + lib 两处）；FR-03 的「hook 禁止再导出 isUnread/clearUnread」经 tsc 验证（全仓唯一消费方已迁移，导出已删）",
+    "生成物同步": "无 OpenAPI/schema 改动，无 gen:types 义务"
+  },
+  "reviewedAt": "2026-10-16T01:30:00Z"
+}

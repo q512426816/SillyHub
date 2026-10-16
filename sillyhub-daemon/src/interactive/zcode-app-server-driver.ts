@@ -35,6 +35,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
 import {
@@ -164,6 +165,10 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    // 引擎退出后 stdin 被 Node 自动 destroy，迟到写入（审批桥应答/close 竞态）
+    // 会触发无监听的 'error' → uncaughtException（cli 全局兜底会吞但打 FATAL 栈，
+    // 写入静默失败）；常驻空监听兜底（对齐 dsh start 的 stdin error 监听先例）。
+    child.stdin?.on('error', () => {});
 
     const handle: ZcodeHandle = {
       provider: 'zcode',
@@ -224,6 +229,14 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       currentTurnResolve = null;
       h.turnInFlight = false;
       r(outcome);
+    };
+
+    // 对齐 codex（ql-20260906-004 审计 #9 同型）：把「close 释放轮次」挂到
+    // handle——turn 在途时 _close 杀进程不会再有 turn_result 帧、exit handler
+    // 又因 closing 早退，若无人 finishTurn 则 consume 永挂在
+    // await currentTurnPromise（协程+闭包泄漏，finally 清理全被跳过）。
+    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose = (): void => {
+      finishTurn({ kind: 'cancelled' });
     };
 
     const reportResult = (r: InteractiveDriverResult): void => {
@@ -336,8 +349,17 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     if (!child.stdout) {
       throw new ZcodeProtocolError('zcode 子进程缺 stdout 管道（spawn 配置异常）');
     }
+    // 跨 chunk 多字节 UTF-8 有状态解码（pi-rpc-driver LfLineFramer ql-20260915-005
+    // 同型先例）：逐 chunk toString 会把跨 chunk 边界切开的多字节序列（中文等）
+    // 变成 U+FFFD，且 JSON.parse 不报错——纯静默内容损坏。
+    const decoder = new StringDecoder('utf8');
     child.stdout.on('data', (chunk: Buffer) => {
-      h.envelope.feed(chunk.toString('utf8'), sink);
+      h.envelope.feed(decoder.write(chunk), sink);
+    });
+    child.stdout.on('end', () => {
+      // 进程正常退出时冲刷残尾字节；closing 后信封已/即将 dispose，跳过
+      const tail = decoder.end();
+      if (tail && !h.closing) h.envelope.feed(tail, sink);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       // stderr 诊断噪声不进事件流（引擎日志面）
@@ -400,9 +422,16 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         await this.setThinkingLevel(h, ctx.opts.thinkingLevel);
       }
 
-      // 5. 轮循环：逐输入 → send → 等收敛
-      for await (const item of ctx.input) {
-        if (h.closing || finalized) break;
+      // 5. 轮循环：逐输入 → send → 等收敛。
+      // while + 手动拉取（对齐 codex 主循环形态）：terminateSession 顺序是
+      // driver.close() 先于 queue.close()，for-await 会在 next() 上多挂一段窗口；
+      // 轮内两个 await 点（send / turn 收敛）任一被 close 释放都经 closing 守卫
+      // 静默收敛（终态归 close 链，不报幽灵 result、不回队列拉新输入）。
+      const inputIt = ctx.input[Symbol.asyncIterator]();
+      while (!h.closing && !finalized) {
+        const res = await inputIt.next();
+        if (h.closing || finalized || res.done) break;
+        const item = res.value;
         if (item.type !== 'user' || item.text.trim() === '') continue;
         beginTurn();
         try {
@@ -413,6 +442,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
             { timeoutMs: 0 }, // 轮内不设请求超时——收敛以 turn_result 为准
           );
         } catch (err) {
+          // close 引发的 send 拒绝（dispose reject 全量 pending）：静默收敛，
+          // 终态归 close 链（对齐 codex closing 守卫语义）
+          if (h.closing || finalized) break;
           // send 失败 = 结构化失败（D-004：不重试不降级）
           const message =
             err instanceof ZcodeProtocolError
@@ -428,6 +460,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         }
         // beginTurn 已在 session/send 前赋值（resolver 先于 send 注册），此处非 null
         const outcome = await currentTurnPromise!;
+        // close 期间被 _finishTurnOnClose 释放的 cancelled 不上报（对齐 codex
+        // 主循环 closing 守卫），否则 close 后又报一轮幽灵 result
+        if (h.closing || finalized) break;
         reportResult({
           subtype:
             outcome.kind === 'success'
@@ -602,6 +637,10 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
     const h = handle;
     if (h.closing) return;
     h.closing = true;
+    // 释放 consume 的当前轮等待者（先于杀进程）：进程被杀后不会再有 turn_result
+    // 帧、exit handler 因 closing 早退；不释放则 consume 永挂 await
+    // currentTurnPromise（对齐 codex _close 的 _finishTurnOnClose 调用）。
+    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose?.();
     try {
       if (h.zcodeSessionId && h.child.stdin) {
         await h.envelope
@@ -615,17 +654,30 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
       }
     } finally {
       h.child.stdin?.end();
-      const killTimer = setTimeout(() => {
-        if (h.child.exitCode === null && !h.child.killed) {
-          h.child.kill('SIGTERM');
-          setTimeout(() => {
-            if (h.child.exitCode === null && !h.child.killed) {
-              h.child.kill('SIGKILL');
-            }
-          }, KILL_GRACE_MS).unref?.();
+      // SIGTERM → 到期无条件升级 SIGKILL（仅以 exitCode 判活）：Node 的 killed
+      // 在信号成功发出后即为 true、不代表进程已终止——旧写法 `!h.child.killed`
+      // 使 SIGKILL 分支永不可达，目标捕获/忽略 SIGTERM 时子进程永久泄漏（对齐
+      // codex _close 无条件升级先例）。
+      const termTimer = setTimeout(() => {
+        if (h.child.exitCode === null) {
+          try {
+            h.child.kill('SIGTERM');
+          } catch {
+            // 已退出
+          }
         }
-      }, KILL_GRACE_MS).unref?.();
-      void killTimer;
+      }, KILL_GRACE_MS);
+      termTimer.unref?.();
+      const killTimer = setTimeout(() => {
+        if (h.child.exitCode === null) {
+          try {
+            h.child.kill('SIGKILL');
+          } catch {
+            // 已退出
+          }
+        }
+      }, KILL_GRACE_MS * 2);
+      killTimer.unref?.();
       h.envelope.dispose();
     }
   }

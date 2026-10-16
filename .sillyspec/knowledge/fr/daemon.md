@@ -4989,3 +4989,86 @@
 - 场景：默认场景 — Given zcode 会话开启；When 用户触发上下文压缩或切换思考档位；Then 驱动经 session/compact / session/setThoughtLevel 执行（caps.compact=true / thinking_le
 全文：.sillyspec/changes/archive/2026-10-15-zcode-engine-appserver/requirements.md#FR-08
 最近确认：9e8ba08fe
+
+## FR-daemon-140 列表端点每会话注入 current_run_status（活跃 run 最新一条的状态：pending/running/pending_approval；无活跃 run 为 null），照 owner_name IN 批查先例零 N+1
+变更：2026-10-16-session-run-status-realtime
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-01
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-run-status-realtime:flow:测试绑定FR-01
+  tests: backend/app/modules/daemon/tests/test_sessions_list_run_status.py「active_run_status_injected」 | backend/app/modules/daemon/tests/test_sessions_list_run_status.py「latest_active_run_wins_when_multiple」 | backend/app/modules/daemon/tests/test_sessions_list_run_status.py「no_run_at_all_yields_null」 | backend/app/modules/daemon/tests/test_sessions_list_run_status.py「terminal_run_yields_null」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-run-status-realtime
+  status: active
+
+## FR-daemon-141 前端判定优先级：终态红/绿不变；run=pending_approval 优先显示琥珀在等你；run=pending/running 优先转圈；其后活性 working/blocked 兜底（本地会话）；再 reconnecting 转圈；idle+完成标记绿点；其余留白
+变更：2026-10-16-session-run-status-realtime
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-02
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-run-status-realtime:flow:测试绑定FR-02
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃时留白规则不变」 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=pending → 转圈」 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=pending_approval → 琥珀点——run 权威压过活性 working」 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=running → 转圈」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-run-status-realtime
+  status: active
+
+## FR-daemon-142 完成通知新增 run 完成触发源：current_run_status 从活跃变 null 且会话非终态且不在该会话上 → 标记完成（与活性转移、终态两来源共键）
+变更：2026-10-16-session-run-status-realtime
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-03
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-run-status-realtime:flow:测试绑定FR-03
+  tests: frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃→null 但正选中该会话 → 不标记」 | frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃→null（run 终态收敛…）→ 完成角标出现」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-run-status-realtime
+  status: active
+
+## FR-daemon-143 schema 变更同步再生前端与 daemon 两处 api-types 并提交 openapi.json
+变更：2026-10-16-session-run-status-realtime
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-04
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-run-status-realtime:flow:测试绑定FR-04
+  tests: backend/app/modules/daemon/tests/test_sessions_list_run_status.py「openapi_exposes_current_run_status」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-run-status-realtime
+  status: active
+
+## FR-daemon-144 后端列表注入测试 + 前端判定测试全过，lint/tsc 零告警
+变更：2026-10-16-session-run-status-realtime
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-05
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719

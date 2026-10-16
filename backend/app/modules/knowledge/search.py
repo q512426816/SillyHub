@@ -1,7 +1,8 @@
 """平台知识搜索服务（change 2026-10-15-platform-knowledge-search / D-001~D-010）。
 
 消费方：平台用户侧端点 ``POST /api/workspaces/{workspace_id}/knowledge/search``
-（router.py，经 ``run_in_threadpool`` 调用本模块 ``search_sync``）。
+（router.py async 直调本模块 ``search_sync``——D-005@v2 async 编排，CPU/IO 段由
+本模块内部 ``asyncio.to_thread`` 卸载）。
 
 设计（design.md Phase 1 / decisions D-002@v1~D-007@v1）：
 
@@ -351,7 +352,10 @@ def corpus_fingerprint(spec_root: Path) -> tuple | None:
 # 内存索引已被 PG pgvector 两表取代（重启零重建）：查询时懒同步——指纹一致直查库；
 # 失配差量（新键插入 / hash 变重嵌 / 消失删除 / mtime 漂移被 hash 层吸收）；
 # model_version 变更全量重算。进程内 asyncio.Lock（键 = workspace_key）single-flight
-# 挡同进程并发首查；跨进程由 DB uq + ON CONFLICT/REPLACE 幂等兜底（R-04）。
+# 挡同进程并发首查；DB 层无唯一约束（迁移 20261016010000 已删 (workspace_id,
+# spec_path, anchor, title) uq——生产实证该组合不唯一），跨进程并发无 DB 级幂等
+# 兜底：当前部署单 uvicorn worker（deploy/docker-compose.yml）下成立；扩 workers /
+# 多实例前须补 (workspace_id, spec_path, start_line) 唯一约束或改 ON CONFLICT 写入。
 # DB 异常 → 词面内存直查降级（scan_corpus + _word_score，搜索永不 5xx，design 降级链）。
 
 _sync_locks: dict[str, asyncio.Lock] = {}

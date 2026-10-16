@@ -33,13 +33,12 @@ export const TAB_LABELS: Record<DetailTab, string> = {
 };
 
 /**
- * 可见 tab 集：归档态收窄为三枚（隐藏「文件与对账」——归档时其内容与「产出 · 归档留档」
- * 重复，D-007@v1）；在途与归档的唯一差别就是这个布尔，thin 不参与判定（D-015@v1）。
+ * 可见 tab 集：恒为四枚。（2026-10-16-archived-files-tab / D-019@v1 用户裁决推翻
+ * D-007@v1 的归档收窄——归档留档不展示 spec 文档全貌，归档态同样需要文件树与
+ * 范围对账入口。）`archived` 参数保留以兼容调用方签名，当前不参与判定。
  */
-export function visibleTabs(archived: boolean): DetailTab[] {
-  return archived
-    ? DETAIL_TAB_ORDER.filter((tab) => tab !== "files")
-    : [...DETAIL_TAB_ORDER];
+export function visibleTabs(_archived: boolean): DetailTab[] {
+  return [...DETAIL_TAB_ORDER];
 }
 
 export interface ChangeTabsProps {
@@ -48,7 +47,7 @@ export interface ChangeTabsProps {
   /** 当前 tab（由 `?tab=` 派生，见 task-07 的页面层）。 */
   value: DetailTab;
   /** 切换回调（页面层据此更新 URL）。 */
-  onChange: (tab: DetailTab) => void;
+  onChange: (_tab: DetailTab) => void;
   className?: string;
 }
 

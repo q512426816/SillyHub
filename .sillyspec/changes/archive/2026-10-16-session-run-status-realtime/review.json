@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-session-run-status-realtime",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "65333067fd8ed37d57f8500d2b80c20ea4874964",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——run 状态为后端 DB 单源列表快照；run 完成检测基于连续两轮快照 prevRunStatusRef 对比，react-query 同 key 去重快照单调推进，中间轮不丢转移",
+    "并发": "ok——列表注入纯只读；完成标记与既有两来源共键幂等 setItem，无新增并发写面",
+    "切换": "ok——prevRunStatusRef 内存基线挂载首快照起步（历史空闲不误报）；页面关闭期间完成不补报（与终态来源口径一致）；killed/failed 同走活跃→null 通知（与活性转移口径一致，显式边界）",
+    "作用域": "ok——run 按 agent_session_id 关联注入 owner-scoped 本页会话 IN 子集，分页边界外不参与，无跨工作区串面"
+  },
+  "checklist": {
+    "frImplTest一致": "FR-01~05 全部兑现且有绑定测试：后端 test_sessions_list_run_status.py 6 用例（running/pending_approval 注入、多活跃取最新、终态/无 run 为 null、OpenAPI 字段）；前端 run 判定 4 用例 + run 完成触发源 2 用例；gen:types 双侧再生（api-types.ts 均含 current_run_status）",
+    "盲维四问真实性": "design 四问均非「不适用」且与 diff 相符：DB 单源快照/只读注入/内存基线+共键幂等/owner-scoped IN 子集均有代码锚点",
+    "披露边界裁决": "边界已裁决：可接受——①daemon 半死时 run 滞留 running 转圈不停（既有 lease 超时/清扫兜底，终态与活性信号不受影响）；②killed/failed run 也触发完成通知（三来源统一「有动静回来看看」口径，成败由行首红点/详情呈现）；③页面关闭期间 run 完成不补报（挂载期检测）",
+    "防护声明": "窗口函数 created_at 排序防 NULLS FIRST 挑错行真实存在（session_crud.py 注入 SQL）；前端判定终态权威优先不被 run/活性覆盖",
+    "生成物同步": "gen:types 双侧义务已履行（frontend/src/lib/api-types.ts + sillyhub-daemon/src/api-types.ts + backend/openapi.json 同变更提交，daemon typecheck 过）"
+  },
+  "reviewedAt": "2026-10-16T02:00:00Z"
+}

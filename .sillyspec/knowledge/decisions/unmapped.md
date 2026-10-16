@@ -245,13 +245,45 @@
 
 ## D-unmapped-052@v1 设计期风险与放弃方案（底稿）
 状态：implemented
+变更：2026-10-16-driver-audit-fixes
+原编号：D-001@v1
+锚点：tests/agent-detector.test.ts
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+理由：最大风险：FR-04 让 codex 族 manualApproval=true 会话从恒自动放行变为真人审——行为面变化，若有依赖旧行为（自动放行）的存量 scan 流程会开始弹审批卡。裁决依据：driver-factory 既有注释（"manualApproval=true 时注入"）、基类契约（"driver 读取并据此决定审批行为"）、claude 路为同义行为（canUseTool 人审），三处均指明人审才是设计意图，恒 allow 是接线缺陷而非决策。已用独立测试文件钉住新契约。 试过但放弃：把 manualApproval 映射放在 approvalReady 块外（chat 也显式 false）——放弃，chat 会话 driverOpts 多两键对行为无增益（驱动 `!undefined` 与 `!false` 同真），且扩大 opts 面变更半径；维持「映射只在审批就绪面生效」最小切口。zcode 主循环曾考虑保留 for-await 仅加槽位——放弃，实测（本变更 TDD）证明 for-await 在 close 后仍挂 `next()`，必须改 while 形态才能收敛。 存量损坏顺带修复（收口实测门拦下，非本变更引入）：① `tests/agent-detector.test.ts` 自 329c0e8aa 起语法损坏（13→14 的标题更新被做成「插入新 it( 行」而非替换，3 处悬挂 it 头致缺 3 个 `}`）——tsconfig exclude tests 使 `tsc --noEmit` 全绿假阴性，该文件自损坏起从未被运行；修复=删除 3 个悬挂旧头 + 期望数组补回被误替换的 'dsh'（PROVIDER_SPECS 实序 dsh 在 zcode 前）。② zcode 注册为 fileSettings writer 后触发 provider-adapter-registry 守护③（smokeSuite 须含 API_FORMAT_VOCAB 全部字面量）——补 buildZcodeProviderConfig 真实 api_format→api.type 映射用例（'openai_chat'→'openai-chat-completions' / 'anthropic'·缺省→'anthropic-messages'）满足判据，非塞注释骗静态扫描。
+
+## D-unmapped-053@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-archived-files-tab
+原编号：D-001@v1
+锚点：未记录
+最近确认：b5c80978eeff39258d70399f559fa678e3c77c6e
+理由：- 风险：归档态恢复「文件与对账」后，范围对账卡在归档态显示降级信息（指路「产出 · 归档留档」）——与用户诉求（归档留档不展示 spec 文档全貌）不冲突：卡内有降级说明，文件树与预览照常可用。 - 试过放弃：仅对归档隐藏「范围对账」保留文件树——放弃：对账与文件树同属一卡拆开会造成半空卡，且用户诉求未要求拆。 - 死路：无（改动面小：visibleTabs 单函数 + page.tsx 挂载条件 + 信息栏入口文案）。
+
+## D-unmapped-054@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-15-session-turn-completion-semantics
+原编号：D-001@v1
+锚点：未记录
+最近确认：fcd4a40489512f45d8e646965833e5e7c13e400b
+理由：最大风险：轮次完成依赖活性数据链（daemon 自发现日志 → tailer 推导 → 推送落库 → 前端 30s 轮询），链路断则「跑完无绿点无通知」依旧——用户阿里云实测正是此现象，属部署/数据面问题，本变更不解决链路本身（已在交付说明给服务器排查清单：工作台总览卡有无活性行 → 判别上报链断 vs 关联断）。放弃的方案：a) 给 idle 设时间窗（如 N 小时内算「刚完成」）——引入魔法数且窗口内重复渲染绿点语义含混，改用点击清除的确定性语义；b) 保留红角标只加绿角标——同一行两枚角标且语义重叠（「回来看看」vs「执行完成」是同一事件），用户明确要绿色完成语义；c) 把完成检测全收进面板（连活性转移也面板算）——面板需自维护活性 prevState 副本，与 hook 的 prevState 键双源漂移，不如 hook 单处检测。
+
+## D-unmapped-055@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-session-run-status-realtime
+原编号：D-001@v1
+锚点：未记录
+最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+理由：最大风险：run 状态回写时机依赖 daemon 回传（run 终态经 daemon RPC/清扫收敛落库）——daemon 半死时 run 可能滞留 running（转圈不停）。缓解：既有 lease 超时/清扫机制兜底收敛；且终态权威（ended/failed）与活性兜底信号不受影响。放弃的方案：a) 按用户最初设想做「交互触发按需查询 daemon 推导」——需要新 RPC + daemon 在线，平台派发会话本就有后端权威 run 状态，绕远路；保留为本地会话未来的可选增强。b) 前端单独拉每会话 run 列表端点——N+1 请求放大，列表批量注入一条 SQL 更优。c) run 状态直接写进 AgentSession.status 列——混淆会话生命周期与轮次执行两层语义（一轮跑完会话仍 active），动 ORM 需迁移。
+
+## D-unmapped-056@v1 设计期风险与放弃方案（底稿）
+状态：implemented
 变更：2026-10-16-pg-index-local-followup
 原编号：D-001@v1
 锚点：未记录
 最近确认：08aa9fa699db804e74b848e3aa801de390550c08
 理由：最大风险：补记落 uncategorized 暂存域，未被分类吸收前检索命中率依赖关键词；缓解——小节标题复用事故条目核心词（索引静默损坏/amcheck/归档后仍进行中），与原条目同主题可串联检索。死路：改写既有生产条目把本地数字并入——已放弃，违反 FR-02 且抹掉两次发病的实例差异（需去重 vs 免去重），而该差异恰是「容器被杀风暴后遗症」家族谱系里最有复用价值的分叉知识。
 
-## D-unmapped-053@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-057@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-knowledge-module-card
 原编号：D-001@v1
@@ -259,7 +291,7 @@
 最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
 理由：最大风险：`_module-map.yaml` 头部标注 generator: sillyspec-scan——后续重跑 scan 若全量重生成可能冲掉手改条目；缓解：文件头同时注明「可手动修改」，scan 为 advisory 流程（人工确认后才落盘），且本条目 paths 是 scan 无法推导的规范资产域（scan 只扫代码路径），冲突概率低。死路：手工把 3 条 FR 剪切粘贴到新文件并自行重编号——已放弃，违反迁域不换号铁律（ID 是绑定/supersede 链寻址键），且伪域文件清理状态（清空 vs 移除）手搬无法与 CLI 的 fr-index 幂等提炼状态机对齐。
 
-## D-unmapped-054@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
+## D-unmapped-058@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
 状态：rejected
 变更：2026-10-16-session-decision-pill
 原编号：D-006@v1
@@ -269,7 +301,7 @@
 否决理由：跨模块后端改动（daemon 模块 + OpenAPI + 前端/daemon 双端 gen:types 义务）与功能价值不成比例；普通审批在后端内存态重启照丢，聚合收益有限
 复潮条件：决策数据需要刷新强一致（含内存 pending）或移动端/第三方也要消费会话决策聚合时
 
-## D-unmapped-055@v1 设计期风险与放弃方案（底稿）
+## D-unmapped-059@v1 设计期风险与放弃方案（底稿）
 状态：implemented
 变更：2026-10-16-decision-pill-no-workspace
 原编号：D-001@v1

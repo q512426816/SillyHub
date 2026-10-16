@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import structlog
 
 from app.core.logging import (
@@ -105,6 +106,24 @@ def test_write_failure_does_not_raise(tmp_path: Path) -> None:
     event = _event(1)
     out = writer(None, "info", dict(event))
     assert out == event, "processor 必须原样返回 event_dict 供后续输出"
+
+
+def test_configure_degraded_prints_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """目录不可建（2026-10-15-server-logs-dockerfile-fix：容器权限被拒场景）
+    → configure_logging 不抛 + stderr 打降级警告（含原因）——降级不再无声。"""
+    blocker = tmp_path / "blocker.txt"
+    blocker.write_text("x", encoding="utf-8")
+    # log_dir 指向「文件路径下的子目录」→ mkdir 报 NotADirectoryError（OSError 子类）
+    monkeypatch.setenv("LOG_DIR", str(blocker / "sub" / "logs"))
+    configure_logging("INFO")
+
+    captured = capsys.readouterr()
+    assert "文件日志不可用" in captured.err
+    # Windows 抛 FileExistsError / POSIX 抛 NotADirectoryError——同为 OSError 族，
+    # 断言只锁定「降级警告含原因」不锁具体异常类型
+    assert "Error" in captured.err
 
 
 def test_configure_idempotent_and_path_derivation(tmp_path: Path) -> None:

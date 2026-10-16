@@ -19,14 +19,17 @@ describe("visibleTabs", () => {
     ]);
   });
 
-  it("归档态：收窄为三 tab（隐藏「文件与对账」），其余顺序不变", () => {
-    expect(visibleTabs(true)).toEqual<DetailTab[]>(["overview", "assets", "process"]);
+  it("归档态：同样四 tab（D-019@v1 用户裁决推翻 D-007 收窄——归档留档不展示 spec 文档全貌）", () => {
+    expect(visibleTabs(true)).toEqual<DetailTab[]>([
+      "overview",
+      "assets",
+      "process",
+      "files",
+    ]);
   });
 
-  it("判定输入只有 archived 一个布尔（thin 不特判：同一布尔结果恒等）", () => {
-    expect(visibleTabs(true)).toEqual(visibleTabs(true));
-    expect(visibleTabs(false)).toEqual(visibleTabs(false));
-    expect(visibleTabs(false)).not.toEqual(visibleTabs(true));
+  it("thin 不参与判定：任意入参结果恒等", () => {
+    expect(visibleTabs(true)).toEqual(visibleTabs(false));
   });
 
   it("返回新数组（调用方改动不影响常量源）", () => {
@@ -53,12 +56,16 @@ describe("ChangeTabs", () => {
     expect(selected[0]?.textContent).toBe(TAB_LABELS.assets);
   });
 
-  it("归档态渲染 3 个 tab（无「文件与对账」）", () => {
+  it("归档态同样渲染 4 个 tab（D-019@v1：不特判收窄）", () => {
     render(<ChangeTabs archived value="overview" onChange={() => undefined} />);
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(3);
-    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程"]);
-    expect(screen.queryByText(TAB_LABELS.files)).not.toBeInTheDocument();
+    expect(tabs).toHaveLength(4);
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "概览",
+      "产出",
+      "过程",
+      "文件与对账",
+    ]);
   });
 
   it("点击任一 tab 触发 onChange 且入参为该 tab 的 DetailTab 值", () => {

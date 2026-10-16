@@ -88,7 +88,6 @@ function clearAllSillyhubEnv(): void {
 // ---------------------------------------------------------------------------
 
 describe('PROVIDER_SPECS', () => {
-  it('恰好 13 个 entry（Python AGENT_DEFS 12 + dsh 增补）', () => {
   it('恰好 14 个 entry（对齐 Python AGENT_DEFS + dsh/zcode 增补）', () => {
     expect(Object.keys(PROVIDER_SPECS)).toHaveLength(14);
   });
@@ -116,7 +115,6 @@ describe('PROVIDER_SPECS', () => {
     }
   });
 
-  it('13 个 provider 顺序：Python AGENT_DEFS 12 个在前，dsh 增补在末位', () => {
   it('14 个 provider 顺序（Python AGENT_DEFS + dsh/zcode 追加）', () => {
     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
     expect(Object.keys(PROVIDER_SPECS)).toEqual([
@@ -132,6 +130,7 @@ describe('PROVIDER_SPECS', () => {
       'kimi',
       'kiro',
       'antigravity',
+      'dsh',
       'zcode',
     ]);
   });
@@ -352,7 +351,6 @@ describe('AgentDetector.detectAgents', () => {
   beforeEach(() => clearAllSillyhubEnv());
   afterEach(() => clearAllSillyhubEnv());
 
-  it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
   it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
     const d = new FakeDetector();
     d.fakeFindOnPath = () => null;

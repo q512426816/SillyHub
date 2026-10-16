@@ -216,7 +216,7 @@ async def list_sessions(
             # 与 SessionCreateRequest._require_ppm_item_pair 同口径（用户可见 422 文案中文化）。
             detail="ppm_item_kind 与 ppm_item_id 必须成对提供。",
         )
-    from app.modules.agent.model import AgentRun, AgentRunLog
+    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog
 
     svc = DaemonService(session)
     # 2026-09-01-session-group-chat task-02：session_kind 直传 SessionService——
@@ -260,6 +260,46 @@ async def list_sessions(
         }
         for r in reads:
             r.owner_name = owner_names.get(r.user_id)
+    # 2026-10-16-session-run-status-realtime：批量注入当前活跃 run 状态（照上方
+    # owner_name / terminating_at 的 IN 批查注入先例，零 N+1）。run 状态是后端
+    # 权威实时信号（发消息瞬间 running、等审批 pending_approval、跑完即无活跃
+    # run），前端会话列表行首转圈/琥珀/完成通知以它为第一优先信号，daemon 10s
+    # 日志活性推导链降为本地 CLI 会话兜底基线。窗口函数取每会话 created_at 最新
+    # 一条活跃 run（多活跃 run 并存时挑最新——与 get_session_detail 同款排序
+    # 语义 ql-20260910-011-3d92：pending 未认领 run 的 started_at 为 NULL，按
+    # created_at 排序防 PG DESC NULLS FIRST 挑错行）；无活跃 run 的会话不在结果
+    # 集中 → 保持 None。
+    if items:
+        active_rn = (
+            sa_func.row_number()
+            .over(
+                partition_by=AgentRun.agent_session_id,
+                order_by=AgentRun.created_at.desc(),
+            )
+            .label("rn")
+        )
+        active_subq = (
+            sa_select(
+                AgentRun.agent_session_id.label("session_id"),
+                AgentRun.status.label("run_status"),
+                active_rn,
+            )
+            .where(
+                AgentRun.agent_session_id.in_([item.id for item in items]),
+                AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+            )
+            .subquery()
+        )
+        active_rows = (
+            await session.execute(
+                sa_select(active_subq.c.session_id, active_subq.c.run_status).where(
+                    active_subq.c.rn == 1
+                )
+            )
+        ).all()
+        run_status_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in active_rows}
+        for r in reads:
+            r.current_run_status = run_status_map.get(r.id)
     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。

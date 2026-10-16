@@ -118,8 +118,16 @@ def configure_logging(level: str = "INFO") -> None:
         log_path = get_log_file_path()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_writer = FileWriter(log_path)
-    except OSError:
+    except OSError as exc:
+        # 降级必须留痕（2026-10-15-server-logs-dockerfile-fix）：容器内目录权限
+        # 被拒时静默退回 stderr-only，页面日志卡只剩「尚未生成」无从排查——
+        # 直接往 stderr 打一条含原因的可见警告（容器日志 docker logs 可查）。
         file_writer = None
+        print(
+            f"[logging] 文件日志不可用，已降级为仅 stderr 输出：{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     # FileWriter 插在 JSONRenderer 之前：先写文件（自渲染）、再透传由
     # JSONRenderer 渲染输出 stderr——两份 JSON 同源同构。

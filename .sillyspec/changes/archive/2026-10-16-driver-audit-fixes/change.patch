@@ -1,0 +1,621 @@
+diff --git a/backend/app/modules/knowledge/search.py b/backend/app/modules/knowledge/search.py
+index f4bcab0ed..787cad527 100644
+--- a/backend/app/modules/knowledge/search.py
++++ b/backend/app/modules/knowledge/search.py
+@@ -1,7 +1,8 @@
+ """平台知识搜索服务（change 2026-10-15-platform-knowledge-search / D-001~D-010）。
+ 
+ 消费方：平台用户侧端点 ``POST /api/workspaces/{workspace_id}/knowledge/search``
+-（router.py，经 ``run_in_threadpool`` 调用本模块 ``search_sync``）。
++（router.py async 直调本模块 ``search_sync``——D-005@v2 async 编排，CPU/IO 段由
++本模块内部 ``asyncio.to_thread`` 卸载）。
+ 
+ 设计（design.md Phase 1 / decisions D-002@v1~D-007@v1）：
+ 
+@@ -351,7 +352,10 @@ def corpus_fingerprint(spec_root: Path) -> tuple | None:
+ # 内存索引已被 PG pgvector 两表取代（重启零重建）：查询时懒同步——指纹一致直查库；
+ # 失配差量（新键插入 / hash 变重嵌 / 消失删除 / mtime 漂移被 hash 层吸收）；
+ # model_version 变更全量重算。进程内 asyncio.Lock（键 = workspace_key）single-flight
+-# 挡同进程并发首查；跨进程由 DB uq + ON CONFLICT/REPLACE 幂等兜底（R-04）。
++# 挡同进程并发首查；DB 层无唯一约束（迁移 20261016010000 已删 (workspace_id,
++# spec_path, anchor, title) uq——生产实证该组合不唯一），跨进程并发无 DB 级幂等
++# 兜底：当前部署单 uvicorn worker（deploy/docker-compose.yml）下成立；扩 workers /
++# 多实例前须补 (workspace_id, spec_path, start_line) 唯一约束或改 ON CONFLICT 写入。
+ # DB 异常 → 词面内存直查降级（scan_corpus + _word_score，搜索永不 5xx，design 降级链）。
+ 
+ _sync_locks: dict[str, asyncio.Lock] = {}
+diff --git a/sillyhub-daemon/src/interactive/dsh-acp-driver.ts b/sillyhub-daemon/src/interactive/dsh-acp-driver.ts
+index a6b6caa5f..383363def 100644
+--- a/sillyhub-daemon/src/interactive/dsh-acp-driver.ts
++++ b/sillyhub-daemon/src/interactive/dsh-acp-driver.ts
+@@ -387,7 +387,16 @@ class AcpJsonRpcConnection {
+     const framer = new LfLineFramer((line) => this._onLine(line));
+     child.stdout.on('data', (chunk: Buffer) => framer.push(chunk));
+     child.stdout.on('end', () => framer.end());
+-    child.stderr.setEncoding('utf8');
++    // stderr 消费（2026-10-16-driver-audit-fixes）：旧实现仅 setEncoding 不注册
++    // data 监听——流不进入 flowing 模式，管道缓冲写满会反向阻塞子进程 stderr
++    // 写入，且诊断信息完全丢失（codex/zcode 驱动均消费 stderr）。
++    child.stderr.on('data', (chunk: Buffer) => {
++      const text = chunk.toString('utf8').trim();
++      if (text) {
++        // eslint-disable-next-line no-console
++        console.warn('[dsh-driver] stderr:', text.slice(0, 300));
++      }
++    });
+   }
+ 
+   onNotification(fn: (params: unknown) => void): () => void {
+diff --git a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+index a339c54e0..49ee5fe1a 100644
+--- a/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
++++ b/sillyhub-daemon/src/interactive/session-manager/driver-factory.ts
+@@ -333,11 +333,22 @@ export function buildDriverOptions(
+     // 2026-10-15-dsh-engine-acp task-04（D-006 边界合并）：dsh 共用本注入块——
+     // ACP request_permission 代答桥经 DshAcpStartOptions.sessionPermission 拿同一
+     // 对闭包引用（对齐 codex/pi 形态）。
++    // 2026-10-15-zcode-engine-appserver：zcode 同形态审批桥
++    //（interaction/requestPermission 代答），2026-10-16-driver-audit-fixes 补入名单。
+     if (
+       state.provider === 'codex' ||
+       state.provider === 'pi' ||
+-      state.provider === 'dsh'
++      state.provider === 'dsh' ||
++      state.provider === 'zcode'
+     ) {
++      // 审批三态旗标映射（2026-10-16-driver-audit-fixes）：此前 spec.enableApproval /
++      // effectiveAskUserOnly 只消费成 claude 的 canUseTool 注入，codex 族
++      // manualApproval/askUserOnly 从未赋值——驱动侧 `!opts.manualApproval` 恒真
++      // → 权限请求恒 allow-through（fail-open），下方注入的 sessionPermission 成
++      // 死代码。基类 InteractiveDriverStartOptions 两字段契约（"driver 读取并据此
++      // 决定审批行为"）即本映射依据。
++      driverOpts.manualApproval = spec.enableApproval === true;
++      driverOpts.askUserOnly = spec.effectiveAskUserOnly === true;
+       // 参数类型与 CodexSessionPermissionHooks 契约一致（与 SessionManager public
+       // requestPermission/requestUserDialog 入参同形，去掉 sessionId 由闭包绑定）。
+       driverOpts.sessionPermission = {
+diff --git a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+index a7932504b..fbed6f563 100644
+--- a/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
++++ b/sillyhub-daemon/src/interactive/zcode-app-server-driver.ts
+@@ -35,6 +35,7 @@
+  */
+ 
+ import { spawn, type ChildProcess } from 'node:child_process';
++import { StringDecoder } from 'node:string_decoder';
+ import { resolveWindowsCmdShim } from '../cmd-shim.js';
+ import { ZcodeEnvelope, ZcodeProtocolError } from '../adapters/zcode-envelope.js';
+ import {
+@@ -164,6 +165,10 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+       stdio: ['pipe', 'pipe', 'pipe'],
+       windowsHide: true,
+     });
++    // 引擎退出后 stdin 被 Node 自动 destroy，迟到写入（审批桥应答/close 竞态）
++    // 会触发无监听的 'error' → uncaughtException（cli 全局兜底会吞但打 FATAL 栈，
++    // 写入静默失败）；常驻空监听兜底（对齐 dsh start 的 stdin error 监听先例）。
++    child.stdin?.on('error', () => {});
+ 
+     const handle: ZcodeHandle = {
+       provider: 'zcode',
+@@ -226,6 +231,14 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+       r(outcome);
+     };
+ 
++    // 对齐 codex（ql-20260906-004 审计 #9 同型）：把「close 释放轮次」挂到
++    // handle——turn 在途时 _close 杀进程不会再有 turn_result 帧、exit handler
++    // 又因 closing 早退，若无人 finishTurn 则 consume 永挂在
++    // await currentTurnPromise（协程+闭包泄漏，finally 清理全被跳过）。
++    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose = (): void => {
++      finishTurn({ kind: 'cancelled' });
++    };
++
+     const reportResult = (r: InteractiveDriverResult): void => {
+       // 幂等守卫 = turnReported；finalize 路径（finalizeWithError）也要能上报终态
+       // （首个 result 即收敛），故不把 finalized 计入——它只守 consume 主循环。
+@@ -336,8 +349,17 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+     if (!child.stdout) {
+       throw new ZcodeProtocolError('zcode 子进程缺 stdout 管道（spawn 配置异常）');
+     }
++    // 跨 chunk 多字节 UTF-8 有状态解码（pi-rpc-driver LfLineFramer ql-20260915-005
++    // 同型先例）：逐 chunk toString 会把跨 chunk 边界切开的多字节序列（中文等）
++    // 变成 U+FFFD，且 JSON.parse 不报错——纯静默内容损坏。
++    const decoder = new StringDecoder('utf8');
+     child.stdout.on('data', (chunk: Buffer) => {
+-      h.envelope.feed(chunk.toString('utf8'), sink);
++      h.envelope.feed(decoder.write(chunk), sink);
++    });
++    child.stdout.on('end', () => {
++      // 进程正常退出时冲刷残尾字节；closing 后信封已/即将 dispose，跳过
++      const tail = decoder.end();
++      if (tail && !h.closing) h.envelope.feed(tail, sink);
+     });
+     child.stderr?.on('data', (chunk: Buffer) => {
+       // stderr 诊断噪声不进事件流（引擎日志面）
+@@ -400,9 +422,16 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+         await this.setThinkingLevel(h, ctx.opts.thinkingLevel);
+       }
+ 
+-      // 5. 轮循环：逐输入 → send → 等收敛
+-      for await (const item of ctx.input) {
+-        if (h.closing || finalized) break;
++      // 5. 轮循环：逐输入 → send → 等收敛。
++      // while + 手动拉取（对齐 codex 主循环形态）：terminateSession 顺序是
++      // driver.close() 先于 queue.close()，for-await 会在 next() 上多挂一段窗口；
++      // 轮内两个 await 点（send / turn 收敛）任一被 close 释放都经 closing 守卫
++      // 静默收敛（终态归 close 链，不报幽灵 result、不回队列拉新输入）。
++      const inputIt = ctx.input[Symbol.asyncIterator]();
++      while (!h.closing && !finalized) {
++        const res = await inputIt.next();
++        if (h.closing || finalized || res.done) break;
++        const item = res.value;
+         if (item.type !== 'user' || item.text.trim() === '') continue;
+         beginTurn();
+         try {
+@@ -413,6 +442,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+             { timeoutMs: 0 }, // 轮内不设请求超时——收敛以 turn_result 为准
+           );
+         } catch (err) {
++          // close 引发的 send 拒绝（dispose reject 全量 pending）：静默收敛，
++          // 终态归 close 链（对齐 codex closing 守卫语义）
++          if (h.closing || finalized) break;
+           // send 失败 = 结构化失败（D-004：不重试不降级）
+           const message =
+             err instanceof ZcodeProtocolError
+@@ -428,6 +460,9 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+         }
+         // beginTurn 已在 session/send 前赋值（resolver 先于 send 注册），此处非 null
+         const outcome = await currentTurnPromise!;
++        // close 期间被 _finishTurnOnClose 释放的 cancelled 不上报（对齐 codex
++        // 主循环 closing 守卫），否则 close 后又报一轮幽灵 result
++        if (h.closing || finalized) break;
+         reportResult({
+           subtype:
+             outcome.kind === 'success'
+@@ -602,6 +637,10 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+     const h = handle;
+     if (h.closing) return;
+     h.closing = true;
++    // 释放 consume 的当前轮等待者（先于杀进程）：进程被杀后不会再有 turn_result
++    // 帧、exit handler 因 closing 早退；不释放则 consume 永挂 await
++    // currentTurnPromise（对齐 codex _close 的 _finishTurnOnClose 调用）。
++    (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose?.();
+     try {
+       if (h.zcodeSessionId && h.child.stdin) {
+         await h.envelope
+@@ -615,17 +654,30 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
+       }
+     } finally {
+       h.child.stdin?.end();
++      // SIGTERM → 到期无条件升级 SIGKILL（仅以 exitCode 判活）：Node 的 killed
++      // 在信号成功发出后即为 true、不代表进程已终止——旧写法 `!h.child.killed`
++      // 使 SIGKILL 分支永不可达，目标捕获/忽略 SIGTERM 时子进程永久泄漏（对齐
++      // codex _close 无条件升级先例）。
++      const termTimer = setTimeout(() => {
++        if (h.child.exitCode === null) {
++          try {
++            h.child.kill('SIGTERM');
++          } catch {
++            // 已退出
++          }
++        }
++      }, KILL_GRACE_MS);
++      termTimer.unref?.();
+       const killTimer = setTimeout(() => {
+-        if (h.child.exitCode === null && !h.child.killed) {
+-          h.child.kill('SIGTERM');
+-          setTimeout(() => {
+-            if (h.child.exitCode === null && !h.child.killed) {
+-              h.child.kill('SIGKILL');
+-            }
+-          }, KILL_GRACE_MS).unref?.();
++        if (h.child.exitCode === null) {
++          try {
++            h.child.kill('SIGKILL');
++          } catch {
++            // 已退出
++          }
+         }
+-      }, KILL_GRACE_MS).unref?.();
+-      void killTimer;
++      }, KILL_GRACE_MS * 2);
++      killTimer.unref?.();
+       h.envelope.dispose();
+     }
+   }
+diff --git a/sillyhub-daemon/tests/agent-detector.test.ts b/sillyhub-daemon/tests/agent-detector.test.ts
+index 9513a151c..010c1b686 100644
+--- a/sillyhub-daemon/tests/agent-detector.test.ts
++++ b/sillyhub-daemon/tests/agent-detector.test.ts
+@@ -88,7 +88,6 @@ function clearAllSillyhubEnv(): void {
+ // ---------------------------------------------------------------------------
+ 
+ describe('PROVIDER_SPECS', () => {
+-  it('恰好 13 个 entry（Python AGENT_DEFS 12 + dsh 增补）', () => {
+   it('恰好 14 个 entry（对齐 Python AGENT_DEFS + dsh/zcode 增补）', () => {
+     expect(Object.keys(PROVIDER_SPECS)).toHaveLength(14);
+   });
+@@ -116,7 +115,6 @@ describe('PROVIDER_SPECS', () => {
+     }
+   });
+ 
+-  it('13 个 provider 顺序：Python AGENT_DEFS 12 个在前，dsh 增补在末位', () => {
+   it('14 个 provider 顺序（Python AGENT_DEFS + dsh/zcode 追加）', () => {
+     // Python dict 在 3.7+ 保持插入顺序；Node 对象字面量同样保持插入顺序。
+     expect(Object.keys(PROVIDER_SPECS)).toEqual([
+@@ -132,6 +130,7 @@ describe('PROVIDER_SPECS', () => {
+       'kimi',
+       'kiro',
+       'antigravity',
++      'dsh',
+       'zcode',
+     ]);
+   });
+@@ -352,7 +351,6 @@ describe('AgentDetector.detectAgents', () => {
+   beforeEach(() => clearAllSillyhubEnv());
+   afterEach(() => clearAllSillyhubEnv());
+ 
+-  it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable；dsh 增补后 12→13）', async () => {
+   it('全部不可用 → 14 条 status="unavailable"（对齐 Python test_detect_all_marks_unavailable）', async () => {
+     const d = new FakeDetector();
+     d.fakeFindOnPath = () => null;
+diff --git a/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts b/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+new file mode 100644
+index 000000000..8c6fa00e1
+--- /dev/null
++++ b/sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts
+@@ -0,0 +1,125 @@
++// tests/interactive/driver-factory-approval-wiring.test.ts
++// 2026-10-16-driver-audit-fixes：审批三态旗标接线回归钉——
++//   spec.enableApproval / effectiveAskUserOnly 必须映射为 codex 族的
++//   driverOpts.manualApproval / askUserOnly，且 sessionPermission 注入名单含 zcode。
++//   旧实现缺陷：manualApproval/askUserOnly 从未赋值 → 驱动侧
++//   `!opts.manualApproval || opts.askUserOnly` 恒真 → 权限请求恒 allow-through
++//   （fail-open），已注入的 sessionPermission 成死代码；zcode 亦漏在名单外。
++//   基类 InteractiveDriverStartOptions 对两字段的契约（"driver 读取并据此决定
++//   审批行为"）即本接线的设计依据。
++
++import { describe, it, expect, vi } from 'vitest';
++import { SessionManager } from '../../src/interactive/session-manager.js';
++import type {
++  InteractiveDriver,
++  InteractiveDriverHandle,
++  InteractiveDriverStartOptions,
++} from '../../src/interactive/driver.js';
++import type { InteractiveProvider } from '../../src/interactive/providers.js';
++
++// ── 辅助构造 ─────────────────────────────────────────────────────────────────
++
++function makeCapturingDriver(provider: InteractiveProvider) {
++  let capturedOpts: InteractiveDriverStartOptions | null = null;
++  const driver = {
++    provider,
++    start: vi.fn(async (_input: AsyncIterable<unknown>, opts: InteractiveDriverStartOptions) => {
++      capturedOpts = opts;
++      return {
++        provider,
++        processId: 4242,
++        close: async (): Promise<void> => {},
++      } as unknown as InteractiveDriverHandle;
++    }),
++    consume: vi.fn(async (): Promise<void> => {}),
++    interrupt: vi.fn(async (): Promise<boolean> => true),
++  } as unknown as InteractiveDriver;
++  return { driver, getOpts: (): InteractiveDriverStartOptions | null => capturedOpts };
++}
++
++const noopDeps = {
++  onTurnResult: vi.fn(async () => {}),
++  onTurnMessage: vi.fn(async () => {}),
++  onSessionEnd: vi.fn(async () => {}),
++};
++
++const permissionWsClient = { send: vi.fn(() => true) };
++
++function baseInput(provider: InteractiveProvider) {
++  return {
++    sessionId: `sess-${provider}`,
++    leaseId: 'lease-1',
++    firstPrompt: 'hi',
++    firstRunId: 'run-1',
++    cwd: 'C:\\work',
++    provider,
++    pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
++    pathToAgentExecutable: `C:\\bin\\${provider}.cjs`,
++  };
++}
++
++// ── 用例 ─────────────────────────────────────────────────────────────────────
++
++describe('审批三态接线（driver-factory → codex 族 driverOpts）', () => {
++  it('zcode + manualApproval=true → opts.manualApproval=true / askUserOnly=false / sessionPermission 注入', async () => {
++    const { driver, getOpts } = makeCapturingDriver('zcode');
++    const sm = new SessionManager(
++      { drivers: { zcode: driver }, ...noopDeps },
++      { manualApproval: true, permissionWsClient },
++    );
++    await sm.create({ ...baseInput('zcode'), manualApproval: true });
++
++    const opts = getOpts() as unknown as Record<string, unknown>;
++    expect(opts).not.toBeNull();
++    expect(opts.manualApproval).toBe(true);
++    expect(opts.askUserOnly).toBe(false);
++    const hooks = opts.sessionPermission as
++      | { requestPermission?: unknown; requestUserDialog?: unknown }
++      | undefined;
++    expect(typeof hooks?.requestPermission).toBe('function');
++    expect(typeof hooks?.requestUserDialog).toBe('function');
++  }, 15_000);
++
++  it('codex + manualApproval=true → 同款映射（旧实现恒 allow-through 的回归钉）', async () => {
++    const { driver, getOpts } = makeCapturingDriver('codex');
++    const sm = new SessionManager(
++      { drivers: { codex: driver }, ...noopDeps },
++      { manualApproval: true, permissionWsClient },
++    );
++    await sm.create({ ...baseInput('codex'), manualApproval: true });
++
++    const opts = getOpts() as unknown as Record<string, unknown>;
++    expect(opts.manualApproval).toBe(true);
++    expect(opts.askUserOnly).toBe(false);
++    expect(opts.sessionPermission).toBeDefined();
++  }, 15_000);
++
++  it('askUserOnly=true 透传（驱动侧 allow-through 语义输入面）', async () => {
++    const { driver, getOpts } = makeCapturingDriver('zcode');
++    const sm = new SessionManager(
++      { drivers: { zcode: driver }, ...noopDeps },
++      { manualApproval: true, permissionWsClient },
++    );
++    await sm.create({ ...baseInput('zcode'), manualApproval: true, askUserOnly: true });
++
++    const opts = getOpts() as unknown as Record<string, unknown>;
++    expect(opts.manualApproval).toBe(true);
++    expect(opts.askUserOnly).toBe(true);
++  }, 15_000);
++
++  it('manualApproval=false（chat）→ 映射块整体不进：opts 无 manualApproval 键、不注入 sessionPermission', async () => {
++    const { driver, getOpts } = makeCapturingDriver('zcode');
++    const sm = new SessionManager(
++      { drivers: { zcode: driver }, ...noopDeps },
++      { manualApproval: true, permissionWsClient },
++    );
++    await sm.create({ ...baseInput('zcode'), manualApproval: false });
++
++    const opts = getOpts() as unknown as Record<string, unknown>;
++    // enableApproval=false → approvalReady=false → 注入块整体跳过：键缺省
++    //（undefined）。驱动侧 `!opts.manualApproval` 恒真 → allow-through，与
++    // chat「无人审」既有语义等价；映射只在审批就绪面生效。
++    expect(opts.manualApproval).toBeUndefined();
++    expect(opts.sessionPermission).toBeUndefined();
++  }, 15_000);
++});
+diff --git a/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts b/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+index 3f43b6f09..84637c229 100644
+--- a/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts
+@@ -450,3 +450,30 @@ describe('mapThinkingLevel（ACP 三档本地映射）', () => {
+     expect(mapThinkingLevel('turbo')).toBeUndefined();
+   });
+ });
++
++describe('stderr 消费（2026-10-16-driver-audit-fixes）', () => {
++  it('引擎 stderr 诊断行进 console.warn（流被消费，管道不再可被子进程写满阻塞）', async () => {
++    const driver = new DshAcpDriver();
++    const q = makeInputQueue();
++    const handle = await driver.start(q.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consuming = driver.consume(handle, cb);
++    await waitFor(() => readStdin(fake).includes('"method":"initialize"'));
++    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++    try {
++      fake._emitStderr('dsh bootstrap diagnostic line');
++      await waitFor(() =>
++        warnSpy.mock.calls.some((c) => String(c[0]).includes('[dsh-driver] stderr')),
++      );
++      const line = warnSpy.mock.calls.find((c) =>
++        String(c[0]).includes('[dsh-driver] stderr'),
++      ) as unknown as [string, string];
++      expect(line[1]).toContain('dsh bootstrap diagnostic line');
++    } finally {
++      warnSpy.mockRestore();
++    }
++    await feedHandshake();
++    q.close();
++    await consuming;
++  }, 10_000);
++});
+diff --git a/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+index 5250fed48..1e696f5c9 100644
+--- a/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
++++ b/sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts
+@@ -27,6 +27,8 @@ import type {
+ } from '../../src/interactive/driver.js';
+ import { createFakeChild, readStdin, type FakeChild } from '../helpers/fake-child.js';
+ import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
++import { buildZcodeProviderConfig } from '../../src/zcode-settings.js';
++import type { ProviderConfig } from '../../src/types.js';
+ 
+ // ── 测试工具 ────────────────────────────────────────────────────────────────
+ 
+@@ -584,3 +586,181 @@ describe('interrupt / compact / setThinkingLevel', () => {
+     await consumePromise;
+   }, 15_000);
+ });
++
++// ── 审计修复回归（2026-10-16-driver-audit-fixes）────────────────────────────
++// 对照先例：codex-app-server-driver ql-20260906-004 审计 #9（close 释放轮次）、
++// pi-rpc-driver ql-20260915-005（跨 chunk 多字节 UTF-8）。
++
++describe('审计修复：close 释放轮次 / UTF-8 跨 chunk / kill 升级 / stdin error 兜底', () => {
++  it('轮次进行中 close → consume 收敛返回，不上报幽灵 result（旧实现永挂）', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child, { sendMode: 'manual' });
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb, results } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++    iq.push('long task');
++    await until(() => server.requestsOf('session/send').length > 0);
++    // 轮 in-flight（sendMode=manual 不回 turn_result）时 close：exit handler 因
++    // closing 早退且无人释放 currentTurnPromise → 旧实现 await 永挂（测试超时即红）
++    const closePromise = handle.close();
++    await expect(consumePromise).resolves.toBeUndefined();
++    // cancelled 终态归 close 链收敛，不报幽灵 result（对齐 codex closing 守卫）
++    expect(results).toHaveLength(0);
++    iq.close();
++    await closePromise;
++  }, 15_000);
++
++  it('stdout 跨 chunk 多字节 UTF-8：中文字符不再被切烂成 U+FFFD', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb, envelopes } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++
++    // 手工构造跨 chunk 帧：从首个多字节字符的引导字节后切开（真实管道 chunk
++    // 边界任意，旧实现逐 chunk toString 会把跨边界序列变 U+FFFD）
++    const frame = JSON.stringify({
++      method: 'session/event',
++      params: {
++        sessionId: ZSID,
++        turnId: 'turn_utf8',
++        seq: 1,
++        type: 'model.streaming',
++        payload: {
++          assistantMessageId: 'msg_u1',
++          delta: '知识库审计修复',
++          done: false,
++          kind: 'text_delta',
++        },
++      },
++    });
++    const bytes = Buffer.from(frame, 'utf8');
++    let cut = -1;
++    for (let i = 0; i < bytes.length; i++) {
++      if (bytes[i]! >= 0x80) {
++        cut = i + 1; // 引导字节与其延续字节之间
++        break;
++      }
++    }
++    expect(cut).toBeGreaterThan(0);
++    child.stdout.push(bytes.subarray(0, cut));
++    child.stdout.push(bytes.subarray(cut));
++    child.stdout.push(Buffer.from('\n', 'utf8'));
++
++    await until(() =>
++      envelopes
++        .flatMap((e) => e.events as Array<Record<string, unknown>>)
++        .some((e) => e.type === 'text'),
++    );
++    const textEv = envelopes
++      .flatMap((e) => e.events as Array<Record<string, unknown>>)
++      .find((e) => e.type === 'text');
++    expect(textEv?.content).toBe('知识库审计修复');
++    expect((textEv?.content as string).includes('\uFFFD')).toBe(false);
++    iq.close();
++    await consumePromise;
++  }, 15_000);
++
++  it('close 阶梯：SIGTERM 后到期无条件升级 SIGKILL（killed 置位不再短路）', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const server = new FakeZcodeServer(child);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    const handle = await driver.start(iq.queue, makeOpts());
++    const { cb } = makeCallbacks();
++    const consumePromise = driver.consume(handle, cb);
++    await until(() => vi.mocked(spawn).mock.calls.length > 0);
++    server.startReady();
++    await until(() => server.requestsOf('session/subscribe').length > 0);
++    iq.close();
++    await consumePromise;
++    await handle.close();
++    // ~2s SIGTERM；FakeChild.kill 置 killed=true（真实 Node 语义：信号发出即置位，
++    // 不代表进程已终止）——旧实现此后 !killed 恒 false，SIGKILL 永不可达
++    const lastSignal = () =>
++      (child as unknown as { _lastKillSignal?: string })._lastKillSignal;
++    await until(() => lastSignal() === 'SIGTERM', 4_000);
++    await until(() => lastSignal() === 'SIGKILL', 4_000);
++    expect(child.exitCode).toBeNull();
++    expect(child.killed).toBe(true);
++  }, 20_000);
++
++  it('stdin 常驻 error 监听：destroy 后迟到写入不炸 uncaughtException', async () => {
++    const child = createFakeChild();
++    vi.mocked(spawn).mockReturnValue(child as never);
++    const driver = new ZcodeAppServerDriver();
++    const iq = makeInputQueue();
++    await driver.start(iq.queue, makeOpts());
++    // 引擎退出后 stdin 被 destroy，审批桥应答/close 迟到写入会触发 'error'；
++    // 无监听 → uncaughtException（vitest worker 直接判红），有监听 → 吞掉
++    expect(child.stdin.listenerCount('error')).toBeGreaterThan(0);
++    child.stdin.destroy(new Error('EPIPE simulate'));
++    await new Promise((r) => setImmediate(r));
++    child.stdin.write('{"late":1}\n');
++    await new Promise((r) => setImmediate(r));
++  });
++});
++
++// ── 写盘器 api_format 词表映射（provider-adapter-registry 守护③ smokeSuite 判据）──
++// zcode 写盘器按 provider.api_format 二值映射 api.type（zcode-settings.ts zcodeApiType）：
++// 'openai_chat' → 'openai-chat-completions'（LiteLLM/hub 代理 baseUrl + daemon key）；
++// 'anthropic'/缺省 → 'anthropic-messages'（直连 baseUrl + provider key）。
++// API_FORMAT_VOCAB（'anthropic' | 'openai_chat'）加值时本组用例同步扩展。
++
++describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () => {
++  function ruleOf(provider: ProviderConfig, daemonApiKey?: string | null) {
++    const content = buildZcodeProviderConfig({
++      zcodeDir: 'C:/tmp/zcode-ws',
++      provider,
++      daemonApiKey,
++    });
++    const config = (
++      content as {
++        config: {
++          providerConfigRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
++        };
++      }
++    ).config.providerConfigRules[0]!.config;
++    return config.api;
++  }
++
++  it("api_format 'openai_chat' → api.type 'openai-chat-completions'（hub 代理 baseUrl + daemon key）", () => {
++    const api = ruleOf(
++      {
++        api_format: 'openai_chat',
++        litellm_base_url: 'http://hub/api/daemon/llm-proxy',
++        litellm_proxy: true,
++        model: 'usr-u1-p1',
++      },
++      'dh-live-key',
++    );
++    expect(api.type).toBe('openai-chat-completions');
++    expect(api.baseUrl).toBe('http://hub/api/daemon/llm-proxy');
++  });
++
++  it("api_format 'anthropic' 与缺省 → api.type 'anthropic-messages'（直连 baseUrl + provider key）", () => {
++    for (const api_format of ['anthropic', undefined] as const) {
++      const api = ruleOf({
++        api_format,
++        base_url: 'https://api.upstream.example',
++        api_key: 'sk-upstream',
++        model: 'GLM-5.3',
++      });
++      expect(api.type).toBe('anthropic-messages');
++      expect(api.baseUrl).toBe('https://api.upstream.example');
++    }
++  });
++});

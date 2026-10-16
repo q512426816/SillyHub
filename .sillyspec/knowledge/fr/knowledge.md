@@ -434,3 +434,124 @@ created_at: 2026-10-15T11:52:52.897Z
   confirmed_at: 07355c2a0105569903b451450ab23b12174b02e1
   source_change: 2026-10-15-knowledge-search-pgvector
   status: active
+
+## FR-knowledge-012 zcode 轮次进行中调用 close 时 consume 正常收敛返回（对照 codex _finishTurnOnClose 先例），协程与清理不悬挂
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-01
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「轮次进行中 close → consume 收敛返回，不上报幽灵 result（旧实现永挂）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
+
+## FR-knowledge-013 zcode stdout 跨 chunk 多字节 UTF-8 有状态解码，中文内容不再产生 U+FFFD
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-02
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「stdout 跨 chunk 多字节 UTF-8：中文字符不再被切烂成 U+FFFD」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
+
+## FR-knowledge-014 zcode close 阶梯 SIGTERM 到期后无条件升级 SIGKILL（仅以 exitCode 判活）
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-03
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「close 阶梯：SIGTERM 后到期无条件升级 SIGKILL（killed 置位不再短路）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
+
+## FR-knowledge-015 driver-factory 把 enableApproval/effectiveAskUserOnly 映射为 codex/pi/dsh/zcode 的 manualApproval/askUserOnly，并把 zcode 加入 sessionPermission 注入名单
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-04
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts「审批三态接线（driver-factory → codex 族 driverOpts）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
+
+## FR-knowledge-016 dsh 驱动消费 stderr（诊断可见，管道不再可被子进程写满阻塞）
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-05
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「引擎 stderr 诊断行进 console.warn（流被消费，管道不再可被子进程写满阻塞）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
+
+## FR-knowledge-017 backend search.py 模块 docstring 与同步注释与当前实现（async 直调、无 DB uq 约束）一致
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-06
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+## FR-knowledge-018 聚焦测试全绿：daemon zcode/dsh 驱动与接线相关测试 + tsc 零错误；backend test_knowledge_search.py
+变更：2026-10-16-driver-audit-fixes
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-driver-audit-fixes/requirements.md#FR-07
+最近确认：6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-driver-audit-fixes:flow:测试绑定FR-07
+  tests: backend/app/modules/knowledge/tests/test_knowledge_search.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-driver-audit-fixes
+  status: active
