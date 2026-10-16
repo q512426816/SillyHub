@@ -160,3 +160,79 @@ created_at: 2026-10-02T02:55:12.745Z
 摘要：类型与 schema 同步
 全文：.sillyspec/changes/archive/2026-10-16-change-files-sync-result/requirements.md#FR-06
 最近确认：7ca3e7ba66d5d065715a08ea885d064b2617e3e9
+
+## FR-change-007 列表页 tab/页码/搜索/阶段/分类/聚焦/排序/pageSize 同步写进 URL
+变更：2026-10-16-change-center-back-keeps-list-state
+状态：active
+摘要：切已归档 tab 后 URL 同步；翻页后 URL 同步；从 URL 初始化（深链/返回恢复）
+全文：.sillyspec/changes/archive/2026-10-16-change-center-back-keeps-list-state/requirements.md#FR-01
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-01
+  tests: changes/__tests__/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」 | changes/__tests__/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」 | changes/__tests__/page.test.tsx「翻页后 URL 写回 page=N」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-back-keeps-list-state
+  status: active
+
+## FR-change-008 详情页返回入口可后退时走 router.back()
+变更：2026-10-16-change-center-back-keeps-list-state
+状态：active
+摘要：从列表进详情后点返回
+全文：.sillyspec/changes/archive/2026-10-16-change-center-back-keeps-list-state/requirements.md#FR-02
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-02
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「历史可后退时点返回入口调 router.back()」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-back-keeps-list-state
+  status: active
+
+## FR-change-009 无历史可退时返回入口保持 Link 兜底
+变更：2026-10-16-change-center-back-keeps-list-state
+状态：active
+摘要：新标签深链详情后点返回
+全文：.sillyspec/changes/archive/2026-10-16-change-center-back-keeps-list-state/requirements.md#FR-03
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-03
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「无历史可退时不调 router.back() 走 Link href」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-back-keeps-list-state
+  status: active
+
+## FR-change-010 测试零回归 + 新增行为断言
+变更：2026-10-16-change-center-back-keeps-list-state
+状态：active
+摘要：回归与新增断言
+全文：.sillyspec/changes/archive/2026-10-16-change-center-back-keeps-list-state/requirements.md#FR-04
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-04
+  tests: frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-change-center-back-keeps-list-state
+  status: active

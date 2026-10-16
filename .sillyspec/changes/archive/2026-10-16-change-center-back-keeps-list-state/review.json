@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-center-back-keeps-list-state",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "3963621a86777b6dc2696f5118a8f1fa1125edc2",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "requirements 测试绑定中 FR-02/FR-03 的用例名与实际测试名不一致",
+      "evidence": "绑定串「历史可后退时点返回入口调 router.back()」「无历史可退时不调 router.back() 走 Link href」均非实际用例名的子串（实际名带「（length=2）：点 breadcrumb…」括号补充语）；两个测试真实存在且断言的就是绑定行为（back 调用/href 保留/不调 back），属文档精度瑕疵，行为面无缺口。",
+      "location": ".sillyspec/changes/2026-10-16-change-center-back-keeps-list-state/requirements.md:86-87 vs frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx:132,141"
+    },
+    {
+      "severity": "P3",
+      "title": "verify 存档未持久化 FR 绑定前端测试的实测记录",
+      "evidence": "flow-state gate_summary 记 test: passed ← module[]+deps(py25+jsx6)+fr(27)，但 verify-runs/20261016134410/test-result.json 的 modules 仅含 deps(auto-py)（pytest 430 passed）与 deps(auto-jsx)（6 个无关前端文件 73 passed），fr(27) 的命令与输出未入档；本次评审独立复跑三个绑定文件 61/61 通过补证，行为面无缺口，仅证据链不完整。",
+      "location": ".sillyspec/.runtime/verify-runs/20261016134410/test-result.json (modules 键仅 2 项)"
+    },
+    {
+      "severity": "P3",
+      "title": "顺带提交的 test_title_backfill.py 系首次入库，『仅 ruff format 重排、语义不变』无 git 基线可对比证明",
+      "evidence": "git log --all 显示该文件仅 3963621a8 一个提交（此前为未提交的暂存态，归属 title-condense-backfill 变更）；现状验证：内容为纯 pytest 测试文件（10 用例 + 种子助手，无生产代码、无模块级副作用），uv run ruff format --check 与 ruff check 均通过，verify 实测 pytest 430 passed 覆盖该文件——对本变更零语义影响，但格式化纯度本身无法以版本 diff 复核。",
+      "location": "backend/app/modules/change/tests/test_title_backfill.py:1-190"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-16T21:52:15+08:00"
+}

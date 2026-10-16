@@ -400,3 +400,11 @@
 锚点：未记录
 最近确认：056cff30397de0c5001874901cbbe03d6319df65
 理由：- 最大风险：**误抑制**（用户删除后又在秒级窗口手工恢复同名文件，pull_start 现算的抑制集会把 bundle 版本挡掉）——与 CLI 同构接受（窗口极窄，且有 restoreDeleted/env 显式恢复通道兜底）。 - 次风险：manifest 长期失真（如历史版本缓存含已不在同步面的路径）导致抑制面偏大——已用 `isUploadExcludedPath` 同口径过滤 + 「删除上行成功自然衰减」收敛；且只影响 pull 恢复面，不损伤任何现存文件。 - 首版缺口（独立评审 P2 实证，已修复）：首版只读 manifest、落地重建不并回被抑制行——delete op 生成条件「缓存有/盘面无」随重建断裂，抑制只活一个 pull 周期，第二次自动 pull 复活照旧。修复：落地重建时并回被抑制行（FR-04 持久性语义），新增第二次 pull 持久性测试断言。 - 试过但放弃：①改 `extractTar` 加 skip 参数（侵入面大、in-place 兜底仍需补刀）→ 放弃，改为解包后对命中路径 rm（两路径统一、签名不动）；②在 `hasUnsyncedLocalChanges` 加删除检测（pending/mtime 信号反推）→ 放弃，删除检测本质需要基线快照，重复造 manifest 已有的能力且动既有判定函数风险更高；③照搬 CLI 在 rm 前读基线文件的形态 → 放弃，daemon 的 manifest 缓存已是等价基线且生命周期管理（pull/push 双点回写）更完备。
+
+## D-unmapped-070@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-change-center-back-keeps-list-state
+原编号：D-001@v1
+锚点：未记录
+最近确认：3963621a86777b6dc2696f5118a8f1fa1125edc2
+理由：- **风险①（已知取舍）**：`history.length > 1` 判定在「从站外页点链接进详情」场景会 back 回站外页——内部工具场景罕见，且符合浏览器标准「返回」语义；Next 14.2.5 的 history.state 无可靠栈深标记（idx 为 Next 15+ 字段），无法精确判定「上一条是否本站」， 接受该取舍。 - **风险②**：原生 replaceState 后浏览器「后退」退出列表（不回溯列表内翻页历史）——与 改造前行为一致（useState 翻页本就不产生历史条目），非行为退化；URL 与 UI 的瞬时不一致 仅出现在列表页内按浏览器后退的瞬间（随即整页离开列表），用户实证范围内不可见。 - **死路 A（放弃）**：router.replace 写回——每次翻页触发 RSC 导航请求（页面是 server component 树根），快速翻页产生请求风暴且可能互相竞态。 - **死路 B（放弃）**：sessionStorage 记「最后列表 URL」——多标签页隐式共享面、SSR hydration 需要挂载后二次渲染切 href，复杂度高于收益。 - **死路 C（放弃）**：详情页 URL 反向携带列表 query——污染详情 URL（分享/收藏语义脏）， 且从工作区首页等非列表入口进详情时无 query 可带。

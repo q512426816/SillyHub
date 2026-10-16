@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-change-center-back-keeps-list-state",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-01",
+      "tests": [
+        "changes/__tests__/page.test.tsx「?tab=archive&page=3 深链：主 load 按已归档第3页请求」",
+        "changes/__tests__/page.test.tsx「切已归档 tab 后 URL 写回 tab=archive」",
+        "changes/__tests__/page.test.tsx「翻页后 URL 写回 page=N」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-back-keeps-list-state"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「历史可后退时点返回入口调 router.back()」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-back-keeps-list-state"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-back-to-list.test.tsx「无历史可退时不调 router.back() 走 Link href」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-back-keeps-list-state"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-change-center-back-keeps-list-state:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-change-center-back-keeps-list-state"
+    }
+  ]
+}
