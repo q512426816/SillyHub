@@ -8,7 +8,7 @@ created_at: 2026-10-16T01:42:37.296Z
 
 ### FR-01: .sillyspec/knowledge/uncategorized.md 新增补记小节，覆盖本地 12/360 无重复行直接 REINDEX、amcheck 须 JOIN pg_am 过滤 btree、last_used_at 停滞即同步静默断档信号、墓碑冲突遗留待拍板，四点齐全
 
-- 必须：新增小节一次性覆盖四点——①本地 docker 平台 btree 12/360 坏且全部唯一索引零重复行、免去重直接 REINDEX 即愈（与生产 18 坏+8 幻影行需备份去重的分支对照）；②amcheck 全库扫描必须 JOIN pg_am 过滤 btree 索引（GIN/*_trgm 会被 bt_index_check 报错误计为坏，本地首扫 29 假 17 真）；③platform_sync_tokens.last_used_at 长期停滞 = 同步静默断档信号（工作转移到生产侧后本地平台断粮，区别于 422 失败路径）；④2026-09-08-session-turn-nav 平台删除墓碑与本地 archive 文件冲突遗留待用户拍板（manifest-heal 恢复或 tombstone_cleanup 接受删除）。
+- 必须：新增小节一次性覆盖四点——①本地 docker 平台 btree 12/360 坏且全部唯一索引零重复行、免去重直接 REINDEX 即愈（与生产 18 坏+8 幻影行需备份去重的分支对照）；②amcheck 全库扫描必须 JOIN pg_am 过滤 btree 索引（GIN/*_trgm 会被 bt_index_check 报错误计为坏，本地首扫 29 报中 17 个是 GIN 误报、btree 真坏 12）；③platform_sync_tokens.last_used_at 长期停滞 = 同步静默断档信号（工作转移到生产侧后本地平台断粮，区别于 422 失败路径）；④2026-09-08-session-turn-nav 平台删除墓碑与本地 archive 文件冲突遗留待用户拍板（manifest-heal 恢复或 tombstone_cleanup 接受删除）。
 
 #### 场景：补记四点齐全
 
