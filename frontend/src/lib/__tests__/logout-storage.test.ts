@@ -23,7 +23,7 @@ const DEVICE_KEYS = [
   "sillyhub:session-input-height",
 ];
 
-/** 用户域键样本（6 前缀全覆盖 + 预会话草稿变体 + 多会话多键）。 */
+/** 用户域键样本（7 前缀全覆盖 + 预会话草稿变体 + 多会话多键）。 */
 const USER_KEYS = [
   "sillyhub.sessions.draft.sid-1",
   "sillyhub.sessions.draft.__pre__",
@@ -33,6 +33,7 @@ const USER_KEYS = [
   "sillyhub-group-last-open-gid-1",
   "sillyhub:liveness-state:sid-1",
   "sillyhub:liveness-unread:sid-1",
+  "sillyhub:session-completed-unread:sid-1",
 ];
 
 beforeEach(() => {
@@ -48,7 +49,7 @@ afterEach(() => {
 });
 
 describe("clearUserScopedLocalStorage（2026-10-14-logout-localstorage-user-data-cleanup）", () => {
-  it("6 类用户域前缀全清、设备级键保留、前缀精确匹配", () => {
+  it("7 类用户域前缀全清、设备级键保留、前缀精确匹配", () => {
     clearUserScopedLocalStorage();
 
     for (const key of USER_KEYS) {

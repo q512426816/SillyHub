@@ -3656,6 +3656,47 @@ describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终
     ).not.toBeNull();
   });
 
+  it("run 跨刷新仍活跃（running→running，列表数据有变化）→ 不误标完成角标（活跃期误报回归）", async () => {
+    completedFixture("active");
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    const { client } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByLabelText("正在执行");
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+
+    // 下一轮列表刷新：run 仍 running，但行数据有变化（标题字段变）——
+    // 旧实现只看 before 真值即误写完成标记；修复后必须 current 归 null 才标记。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更（改）",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await screen.findByLabelText("正在执行");
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+  });
+
   it("run 活跃→null 但正选中该会话 → 不标记（run 来源同 suppress 口径）", async () => {
     completedFixture("active");
     mocks.listAgentSessions.mockResolvedValue(

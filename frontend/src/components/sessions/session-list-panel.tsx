@@ -1105,8 +1105,12 @@ function WorkspaceTreeList({
       const current = s.current_run_status ?? null;
       next.set(s.id, current);
       const before = prev.get(s.id);
+      // current 必须已归 null（run 终态收敛）才标记——只看 before 真值会在 run
+      // 跨刷新仍活跃时（如 pending→running 翻转本身触发列表数据变化）反复误标
+      // 「已执行完成」（2026-10-17-audit-risk-followup）。
       if (
         before &&
+        current === null &&
         s.status !== "ended" &&
         s.status !== "failed" &&
         s.id !== selectedSessionId
