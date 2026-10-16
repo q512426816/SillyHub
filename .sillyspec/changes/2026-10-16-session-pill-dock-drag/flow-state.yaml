@@ -1,0 +1,30 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话页右下角两个悬浮 pill（待决策/变更文件）合并为竖排可拖拽停靠组，点击展开替代 hover
+
+  用户实测：两 pill 横排占宽且 hover 易误触。需求：两 pill 合成一组竖向排列；下拉改为点击展开（不再 hover
+  触发）；整组可在窗口（viewport）范围内按住拖动、松手自动吸附到较近的左右边界，纵向保持在窗口内；位置持久化（刷新不丢）。
+
+
+  成功标准：
+
+  - 待决策 pill 与变更文件 pill 渲染在同一悬浮组内竖向排列，各自空数据不渲染的显隐契约不变
+
+  - 两 pill 的下拉均为点击展开（hover 不触发）、再点或点外部收起
+
+  - 悬浮组按住可在 viewport 范围内拖动，松手自动吸附较近的左右边界，纵向钳制在窗口内，位置 localStorage 持久化
+
+  - 位移小于阈值视为点击不触发拖拽，拖拽结束后的残余 click 被吞掉，pill 按钮点击行为不受影响
+
+  - 相关组件测试与 tsc 通过
+autopilot: false
+prestage_ack: false
+baseline_commit: a632e7f74a3e0a766502022689c721ca6cb6616b
+updatedAt: '2026-10-16T06:31:11.409Z'
+baseline_sha256: fad7f2a00227dc73944424edffe307fa6db8119957da3aded5f6aa0e1d488b60
+
