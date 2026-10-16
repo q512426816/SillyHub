@@ -55,3 +55,4 @@ multi-agent-platform 的一体化部署编排组件，用 Docker Compose 把 bac
 - change 2026-08-08-llm-provider-openai-format | deploy 加 litellm + litellm-db 服务（OpenAI↔Anthropic 转换网关，D-012 外包）+ `LITELLM_MASTER_KEY`/`STORE_MODEL_IN_DB` env + `.env.example` 占位 + openai 端到端链路说明
 - 2026-10-14-litellm-retire | litellm 退役拍板（用户 2026-10-14 裁决：彻底退役）：v1.95.0 坏构建坑挂 12 天分叉未拍板，
 - change 2026-10-15-knowledge-search-pgvector | postgres 换 pgvector/pgvector:pg16（知识搜索向量持久化，vector(512) 两表）+ backend fastembed 模型缓存挂载 + mem_limit 800m→1100m（生产 OOM/无外网实证）
+- 2026-10-16-deploy-convergence-guard | 2026-10-16 生产互覆事故——另一会话从分叉分支打包部署，静默回退 main 上已修复的 /…

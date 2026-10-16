@@ -43,3 +43,31 @@ created_at: 2026-10-15T08:08:39.731Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-deploy-script-version-echo-msys/requirements.md#FR-02
 最近确认：45240ef8baaa17b5f1cb4c03bc262ee0a4244a9e
+
+## FR-deploy-001 build-and-save.sh 打包前必须校验当前分支为 main（非 main 时告警并需 ALLOW_NON_MAIN_DEPLOY=1 显式放行），并打印将要打包的 commit hash 与分支供留痕
+变更：2026-10-16-deploy-convergence-guard
+状态：active
+摘要：主路径；非 main 分支
+场景正文：
+- 场景：主路径 — Given 主仓处于 main 分支且应用目录干净；When 执行 build-and-save.sh；Then 必须打印打包源分支与 short-sha 后继续构建
+- 场景：非 main 分支 — Given 当前分支不是 main；When 执行 build-and-save.sh 且未设 ALLOW_NON_MAIN_DEPLOY；Then 必须打印「非 main 覆盖部署会回退主线修复」告警并退出（exit 非 0）
+全文：.sillyspec/changes/archive/2026-10-16-deploy-convergence-guard/requirements.md#FR-01
+最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
+
+## FR-deploy-002 deploy-to-server skill 必须新增「部署并流校验」节：打包前基于 main 校验、部署后 health commit_sha 与打包一致核对（不一致=被覆盖，附识别与恢复路径）
+变更：2026-10-16-deploy-convergence-guard
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 部署 agent 阅读 deploy-to-server skill；When 按 skill 执行更新部署；Then 必须能在 §0 看到并执行「打包前 main 校验 + 部署后 commit_sha 核对」两个动作
+全文：.sillyspec/changes/archive/2026-10-16-deploy-convergence-guard/requirements.md#FR-02
+最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
+
+## FR-deploy-003 skill 中过期的 PROD_API_URL 示例必须更新为当前生产值 https://crrcdt.ppdmq.top
+变更：2026-10-16-deploy-convergence-guard
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given agent 复制 skill 的打包命令；When 执行该命令；Then 前端 build-arg 必须指向 crrcdt.ppdmq.top（而非失效的 192.168.0.143）
+全文：.sillyspec/changes/archive/2026-10-16-deploy-convergence-guard/requirements.md#FR-03
+最近确认：d581d40b43ea8078957e915ff68709fb9f082b94
