@@ -1,0 +1,151 @@
+{
+  "change": "2026-10-16-driver-audit-fixes",
+  "baseline": "0aaada8e95e5899030d2b4924b9a5395021a8127",
+  "head": "6d2fd757fe62c88c9ddc024cfaa6c90b42e0f077",
+  "files": [
+    "backend/app/modules/knowledge/search.py",
+    "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+    "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+    "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+    "sillyhub-daemon/tests/agent-detector.test.ts",
+    "sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts",
+    "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+    "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts"
+  ],
+  "totals": {
+    "files": 8,
+    "additions": 426,
+    "deletions": 20
+  },
+  "savedAt": "2026-10-16T00:16:07.527Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "knowledge",
+      "files": 1,
+      "doc": "docs/backend/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "backend",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/backend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "sillyhub-daemon",
+      "files": 7,
+      "doc": "docs/multi-agent-platform/modules/sillyhub-daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "daemon",
+      "files": 7,
+      "doc": "docs/SillyHub/modules/daemon.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "knowledge",
+      "files": 1,
+      "doc": "docs/SillyHub/modules/knowledge.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0aaada8e95e5899030d2b4924b9a5395021a8127",
+    "totals": {
+      "files": 8,
+      "additions": 426,
+      "deletions": 20
+    },
+    "rows": [
+      {
+        "path": "backend/app/modules/knowledge/search.py",
+        "additions": 6,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/dsh-acp-driver.ts",
+        "additions": 10,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/session-manager/driver-factory.ts",
+        "additions": 12,
+        "deletions": 1,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts",
+        "additions": 65,
+        "deletions": 13,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/agent-detector.test.ts",
+        "additions": 1,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts",
+        "additions": 125,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts",
+        "additions": 27,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts",
+        "additions": 180,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "926f5f0ec25f728e43a918c383fcd83f0c4023b379abe0b4c5b99933eb2e3473",
+  "patchStatus": "ok"
+}

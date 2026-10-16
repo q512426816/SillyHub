@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-driver-audit-fixes",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「轮次进行中 close → consume 收敛返回，不上报幽灵 result（旧实现永挂）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-02",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「stdout 跨 chunk 多字节 UTF-8：中文字符不再被切烂成 U+FFFD」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts「close 阶梯：SIGTERM 后到期无条件升级 SIGKILL（killed 置位不再短路）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts「审批三态接线（driver-factory → codex 族 driverOpts）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-05",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts「引擎 stderr 诊断行进 console.warn（流被消费，管道不再可被子进程写满阻塞）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-driver-audit-fixes:flow:测试绑定FR-07",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_knowledge_search.py"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-driver-audit-fixes"
+    }
+  ]
+}
