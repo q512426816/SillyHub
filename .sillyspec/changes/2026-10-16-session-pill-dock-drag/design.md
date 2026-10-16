@@ -43,3 +43,16 @@ created_at: 2026-10-16T06:31:11.229Z
 最大风险：拖拽与点击手势冲突（按住 pill 移动一点算点击还是拖拽）。口径=位移阈值 6px（小于阈值放行 click）+ 松手后 250ms 吞 click 时间窗（比布尔位稳：拖出元素外松手 click 不触发，布尔位会误吞下一次真点击）——两者均沿用悬浮球实测过的先例。
 
 试过但放弃：a) pointer capture 实现拖拽——jsdom 无实现（测试不可达）且 capture 会劫持 click 目标破坏 pill 点击；b) 拖动过程每次 setPos 都持久化——localStorage 高频写（悬浮球现状），改为松手单点写；c) 保留 hover 双触发——用户明确要求纯点击防误触；d) 沿用挂载点 absolute 容器改竖排——拖不出面板且受祖先裁剪，改 portal body fixed。
+
+## 文件变更清单（本变更全量自声明）
+
+- frontend/src/components/daemon/session-floating-pill-dock.tsx（新增：停靠组组件）
+- frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx（新增：11 用例）
+- frontend/src/components/daemon/session-decisions-hover.tsx（trigger 改 click + aria-label）
+- frontend/src/components/daemon/session-change-files-hover.tsx（trigger 改 click + aria-label）
+- frontend/src/components/daemon/session-panel/session-panel-page.tsx（挂载点换停靠组 + boundsSelector）
+- frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx（点击契约用例）
+- frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx（点击契约用例）
+- .sillyspec/changes/2026-10-16-session-pill-dock-drag/**（四件套 + review.json，即本变更目录）
+- docs/releases/2026-10-16-008-ee1b32dd5.md（本变更首部署发布记录）
+- docs/releases/2026-10-16-009-f01643307.md（本变更贴边边界收窄部署发布记录）
