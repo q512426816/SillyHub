@@ -1,5 +1,5 @@
 diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
-index a39adb7bc..27d60445c 100644
+index a39adb7bc..45cd1a167 100644
 --- a/sillyhub-daemon/src/spec-sync.ts
 +++ b/sillyhub-daemon/src/spec-sync.ts
 @@ -77,6 +77,13 @@ export interface PullSpecBundleOptions {
@@ -38,7 +38,7 @@ index a39adb7bc..27d60445c 100644
  /**
   * 从 backend 拉 spec bundle 解到本地 ~/.sillyhub/daemon/specs/{wsId}（覆盖语义）。
   *
-@@ -207,6 +229,35 @@ export async function pullSpecBundle(
+@@ -207,6 +229,43 @@ export async function pullSpecBundle(
    const checker = opts.unsyncedChecker ?? hasUnsyncedLocalChanges;
    await pushUnsyncedIfDirty(client, wsId, specDir, checker, 'pull_start');
  
@@ -55,6 +55,11 @@ index a39adb7bc..27d60445c 100644
 +  // 已知权衡（与 CLI 同构）：抑制集在本时刻现算，pre_swap 二次回灌成功上行删除后本窗口
 +  // 不重算——此时 bundle 通常已不含该文件，误抑制面趋零。
 +  const suppressResurrect = new Set<string>();
++  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
++  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
++  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
++  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
++  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
 +  const restoreDeleted =
 +    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
 +  if (!restoreDeleted) {
@@ -63,7 +68,10 @@ index a39adb7bc..27d60445c 100644
 +      if (cachedManifest) {
 +        for (const rel of Object.keys(cachedManifest.files)) {
 +          if (isUploadExcludedPath(rel)) continue;
-+          if (!(await pathExists(join(specDir, rel)))) suppressResurrect.add(rel);
++          if (!(await pathExists(join(specDir, rel)))) {
++            suppressResurrect.add(rel);
++            suppressEntries.set(rel, cachedManifest.files[rel]!);
++          }
 +        }
 +      }
 +    } catch {
@@ -74,7 +82,7 @@ index a39adb7bc..27d60445c 100644
    let tarBuf: Buffer;
    try {
      tarBuf = await client.getSpecBundle(wsId);
-@@ -256,12 +307,29 @@ export async function pullSpecBundle(
+@@ -256,12 +315,29 @@ export async function pullSpecBundle(
      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
      throw e;
    }
@@ -104,12 +112,29 @@ index a39adb7bc..27d60445c 100644
    }
  
    // ql-20260904-019：pull 落地后用落地树重建本地 manifest 缓存（best-effort）。
+@@ -277,7 +353,15 @@ export async function pullSpecBundle(
+   // version=0 旧语义，下次 pull 到新服务器后自愈。
+   const manifestVersions = await readBundleManifestVersions(specDir);
+   try {
+-    await writeLocalManifest(wsId, await buildFullManifest(specDir, manifestVersions));
++    const rebuilt = await buildFullManifest(specDir, manifestVersions);
++    // 防复活持久性（评审 P2 修复）：被抑制行并回重建基线——否则 delete op 链断裂
++    // （生成条件「缓存有/盘面无」），服务器 bundle 永远携带该文件，下次自动 pull
++    // 复活照旧。仅并回落地树确实缺失的行（用户已手工恢复的行以落地树为准）；
++    // 删除 op 上行成功后由既有 push 侧回写自然衰减。
++    for (const [rel, entry] of suppressEntries) {
++      if (!(rel in rebuilt.files)) rebuilt.files[rel] = entry;
++    }
++    await writeLocalManifest(wsId, rebuilt);
+   } catch (e) {
+     console.warn('spec_sync: post_pull_manifest_write_failed', wsId, specDir, e);
+   }
 diff --git a/sillyhub-daemon/tests/pull-antiresurrect.test.ts b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
 new file mode 100644
-index 000000000..09e07dc54
+index 000000000..bd95dcfb0
 --- /dev/null
 +++ b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,202 @@
 +// tests/pull-antiresurrect.test.ts
 +// 2026-10-16-daemon-pull-antiresurrect：daemon 侧 pullSpecBundle 防复活抑制单测。
 +//
@@ -238,6 +263,20 @@ index 000000000..09e07dc54
 +    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
 +    expect(warned).toContain('防复活抑制');
 +    expect(warned).toContain('docs/b.md');
++    // 持久性（评审 P2 修复）：落地重建后 manifest 基线仍含被抑制行（delete op 链保活），
++    // 第二次自动 pull（bundle 仍携带）依旧抑制——抑制跨 pull 不失效。
++    const manifestAfter = JSON.parse(
++      await readFile(resolveManifestCachePath(WS), 'utf-8'),
++    ) as { files: Record<string, unknown> };
++    expect(manifestAfter.files['docs/b.md']).toBeTruthy();
++    expect(manifestAfter.files['docs/a.md']).toBeTruthy();
++    const bundle2 = buildTar([
++      { name: 'docs/a.md', content: 'server-a-2' },
++      { name: 'docs/b.md', content: 'server-b-2' },
++    ]);
++    await pullSpecBundle(makeClient(bundle2), WS, { unsyncedChecker: async () => false });
++    expect(await readFile(join(specDir, 'docs/a.md'), 'utf-8')).toBe('server-a-2');
++    await expect(readFile(join(specDir, 'docs/b.md'), 'utf-8')).rejects.toThrow();
 +  });
 +
 +  it('用例2：manifest 缺失（首拉）= 无抑制面，全量落地（既有行为不变）', async () => {

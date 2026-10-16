@@ -3,12 +3,12 @@
   "change": "2026-10-16-daemon-pull-antiresurrect",
   "reviewer": "subagent",
   "verdict": "PASS",
-  "reviewedAgainst": "9a20afe149591ac5678da9d02196b8e55816e2bd",
+  "reviewedAgainst": "056cff30397de0c5001874901cbbe03d6319df65",
   "findings": [
     {
       "severity": "P2",
-      "title": "抑制不跨 pull 持久：pull 后 manifest 全量重建抹掉已删行，delete op 永远无法上行，下一次 pull 仍复活",
-      "evidence": "抑制生效后落地树不含被挡文件，pull 末尾 writeLocalManifest(buildFullManifest(落地树))（spec-sync.ts:346-351，ql-20260904-019 既有语义）把该路径从缓存基线删除；此后 computeIncrementalOps 生成 delete op 的条件是「缓存有/盘面无」（spec-sync.ts:1144-1146、1193-1196），缓存行已消失 → 删除 op 永不生成 → 服务器 bundle 永远携带该文件 → 下一次版本变更触发的自动 pull 抑制集为空 → 复活照旧（复活后该文件还会被 add op 回推服务器，删除彻底翻案）。设计 §风险 只覆盖「上行成功→自然衰减」，漏掉「未上行→pull 重建→衰减」这条恰是本变更主场景的路径。FR-01/FR-04 字面仍满足（FR-04 明令本变更不得改回写点），不构成 FAIL，但防复活意图只在首个 pull 兑现；建议后续变更：post-pull 重建时并回被抑制行（rebuilt ∪ 抑制集），既保 delete op 链路又使抑制跨 pull 持久",
+      "title": "已修复（增量复审确认 056cff30）：抑制不跨 pull 持久——pull 后 manifest 全量重建抹掉已删行，delete op 永远无法上行，下一次 pull 仍复活",
+      "evidence": "【原始发现】抑制生效后落地树不含被挡文件，pull 末尾 writeLocalManifest(buildFullManifest(落地树))（ql-20260904-019 既有语义）把该路径从缓存基线删除；computeIncrementalOps 生成 delete op 的条件是「缓存有/盘面无」，缓存行消失 → 删除 op 永不生成 → 服务器 bundle 永远携带该文件 → 下一次自动 pull 抑制集为空复活照旧。【修复确认】056cff30 增 suppressEntries Map（与抑制 Set 同点捕获基线行，保留原 hash/version/mtime，delete op base_version 正确），落地重建后仅将「落地树确实无该路径」（rel 不在 rebuilt.files）的行并回再落盘（spec-sync.ts:353-366）——in-place 兜底路径同样经过此重建；404 早返回不触重建、manifest 原样不丢行；writeLocalManifest 失败仅 warn 时旧缓存（含抑制行）保留下次 pull 照旧抑制；衰减链闭合（delete op 上行成功 → push 侧回写只装 localFiles → 行自然消失）。测试用例1 增持久性断言：重建后基线仍含 b.md 行 + 第二次 pull bundle 仍携带依旧不落地，正中原 P2 场景；4/4 绿、tsc 零错（实现者报告，静态复核未见阻断）",
       "location": "sillyhub-daemon/src/spec-sync.ts:346-351"
     },
     {
@@ -48,5 +48,5 @@
     "切换": "ok",
     "作用域": "ok"
   },
-  "reviewedAt": "2026-10-16T20:52:01+08:00"
+  "reviewedAt": "2026-10-16T20:54:35+08:00"
 }

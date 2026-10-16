@@ -5072,3 +5072,108 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-05
 最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+## FR-daemon-145 pullSpecBundle 落地前按 LocalManifest 算「本地已删面」（manifest 有/盘面无/属同步面），解包产物命中文件不落地，swap 与 in-place 兜底两路径均不复活
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given LocalManifest 含 docs/b.md 且盘面 specDir 下无 docs/b.md（本地已删除、删除 op 未上行），When pullSpe
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-01
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）：manifest 有/盘面无/同步面 → 解包产物不落地（不复活）+ warn 点名」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-146 manifest 缺失/解析失败/首拉 = 无抑制面，既有全量回放行为不变
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本地无 manifest 缓存（首拉），When pullSpecBundle 消费含任意文件的 bundle，Then bundle 全部文件落地、无防复活抑
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-02
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-02
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例2：manifest 缺失（首拉）= 无抑制面，全量落地（既有行为不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-147 命中面 warn 点名（截断 5）+ 恢复通道（PullSpecBundleOptions.restoreDeleted 或环境变量 SILLYHUB_DAEMON_RESTORE_DELETED=1 跳过抑制）
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 抑制面非空且 bundle 携带命中文件，When 不设恢复通道执行 pull，Then warn 日志点名被挡路径；When 设置 opts.restoreD
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-03
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例3：restoreDeleted（opts / env）= 显式恢复，跳过抑制」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-148 抑制跨 pull 持久——落地重建基线保留被抑制行，直至删除 op 上行成功自然衰减
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 被抑制 pull 完成且删除 op 未上行（manifest 基线仍含该行），When 第二次 pullSpecBundle 消费仍携带该文件的 bundle，
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-04
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts「用例1（核心）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
+
+## FR-daemon-149 vitest 新用例覆盖抑制/无基线全量/恢复通道/排除口径四点，既有测试零回归，tsc 通过
+变更：2026-10-16-daemon-pull-antiresurrect
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — 
+全文：.sillyspec/changes/archive/2026-10-16-daemon-pull-antiresurrect/requirements.md#FR-05
+最近确认：056cff30397de0c5001874901cbbe03d6319df65
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-daemon-pull-antiresurrect:flow:测试绑定FR-05
+  tests: sillyhub-daemon/tests/pull-antiresurrect.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-daemon-pull-antiresurrect
+  status: active
