@@ -19,8 +19,10 @@ description: 本地打包镜像→生产服务器（腾讯云轻量）部署；�
   若控制台把端口重新关掉，`systemctl enable --now tencent-tunnel` + 把 nginx upstream
   改回 `127.0.0.1` 即恢复服务。
 - nginx 5 处 upstream 现指向 `124.222.127.242`（备份在阿里云 `/etc/nginx/backups/`）。
-- 阿里云旧栈：已停止且 `docker update --restart=no`，是迁移 rollback 快照（数据冻结在
-  2026-10-16 11:00），不承担服务。
+- 阿里云旧栈：2026-10-16 下午起容器与镜像已彻底清理（含 litellm 遗物；清理前发现旧栈曾被
+  误启动过一次，删除后此隐患消除），释放约 5G。**仅保留**：数据卷（数据冻结在
+  2026-10-16 11:00 的快照）、compose 目录、nginx 配置备份、隧道应急件与
+  `/root/migrate/` 迁移脚本日志。整机回滚需先从腾讯机取回镜像 tar（见「回滚」）。
 - 阿里云入口机上还有别的项目容器（ppdmq-*），不要碰。
 - 安全建议：轻量防火墙 3001/8001 规则来源最好限定为 `47.113.145.252`（只让阿里云 nginx
   访问），避免全网直打后端裸端口（后端有鉴权，但没必要暴露）。
@@ -196,13 +198,20 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 （`<时间>` 用 `docker images | grep backup` 查。）
 
 **整机级回滚（迁回阿里云旧栈，数据是 2026-10-16 11:00 冻结点，会丢其后新数据）**：
+2026-10-16 下午旧栈容器/镜像已清理，先取回镜像 tar（腾讯机 staging 观察期内保留；
+阿里云机 `tencent_push` 临时密钥已删，本机中转最省事，或临时加回一个可登录密钥走服务器直传）：
 ```bash
-# 阿里云：先起旧栈接管 8001/3001 → upstream 改回本机 → reload（顺序别反，避免 502 窗口）
+# 1) 本机中转取回镜像 tar
+ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cat /home/ubuntu/migrate/staging/images.tar.gz' > /tmp/images.tar.gz
+scp -i ~/.ssh/aliyun_deploy /tmp/images.tar.gz root@47.113.145.252:/root/migrate/
+# 2) 阿里云：load → 起旧栈接管 8001/3001 → upstream 改回本机 → reload（顺序别反，避免 502 窗口）
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
+  gunzip -c /root/migrate/images.tar.gz | docker load && \
   cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d && \
   sed -i "s#proxy_pass http://124.222.127.242:#proxy_pass http://127.0.0.1:#g" /etc/nginx/sites-enabled/crrcdt && \
   nginx -t && systemctl reload nginx'
 ```
+（旧栈数据卷仍在阿里云 = 11:00 冻结点；后端/前端镜像只能从该 tar 恢复。）
 
 ## 首次部署（服务器从零）
 
@@ -302,7 +311,7 @@ MCP gateway」（2026-09-10 spike P0-1 实测）。规范接入端点是 `https:
 # Daemon 分发文件统一走后端 dist_router（镜像 /app/daemon-dist/ 吐最新版）。
 # 禁止 alias 到宿主机静态目录——静态副本不随镜像更新会脱节（见 SKILL「nginx 与 daemon 分发」）。
 location /daemon/ {
-    proxy_pass http://127.0.0.1:8001;
+    proxy_pass http://124.222.127.242:8001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -322,7 +331,7 @@ location /daemon/ {
 # MCP gateway（规范端点 /mcp/ 带尾斜杠）。POST 不跟随重定向，务必带尾斜杠访问。
 # SSE 长连接需要 buffering off + 长 read timeout（对齐 /api/daemon/ws 的 3600s）。
 location /mcp {
-    proxy_pass http://127.0.0.1:8001;
+    proxy_pass http://124.222.127.242:8001;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -379,7 +388,7 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 - **活跃 compose 目录是 `/opt/sillyhub/deploy/deploy/`**（双层 deploy；腾讯云机上只有这一层，路径沿用老服务器保持一致），scp 和 ssh 都进深层目录。
 - **腾讯轻量防火墙默认只开 22**（2026-10-16 实测）：控制台云层拦 80/443/3001/8001（服务器 ufw 是关的、机器上改不了），只能用户在腾讯控制台开。现已放行 3001/8001（nginx 直连）；若被重新关掉，应急恢复 = 阿里云 `systemctl enable --now tencent-tunnel` + upstream 改回 `127.0.0.1`（隧道 unit 与受限密钥保留未删）。
 - **跨公网明文提示**：阿里云 nginx → `124.222.127.242` 这段是公网 HTTP（内网工具可接受）；要加密可退回隧道方案（加密但单流）或给腾讯机挂自签 TLS。轻量防火墙规则来源限定 `47.113.145.252` 可显著收窄暴露面。
-- **域名突然 502/变旧数据时**：先 `systemctl status nginx`，再从阿里云 `curl -m 5 http://124.222.127.242:8001/api/health` 测直连（超时=轻量防火墙被关，走隧道应急）；最后确认阿里云旧栈没被误起。
+- **域名突然 502/变旧数据时**：先 `systemctl status nginx`，再从阿里云 `curl -m 5 http://124.222.127.242:8001/api/health` 测直连（超时=轻量防火墙被关，走隧道应急）。阿里云旧栈容器/镜像已删（2026-10-16 下午），不存在旧栈被误起的风险。
 - **远程 pkill -f 自杀坑**（2026-10-16 实测）：ssh 进去 `pkill -f "xxx"`，模式串会匹配到自己这条 ssh 会话的命令行把自己杀掉（exit 255 无输出）；用括号技巧 `pkill -f "[x]xx"` 或先 pgrep 拿 PID 再 kill。
 - **PROD_API_URL 必须覆盖**：本地 `deploy/.env` 的 `NEXT_PUBLIC_API_BASE_URL=127.0.0.1:8001` 是开发值，直接打包给生产，浏览器会连用户自己机器。用 `PROD_API_URL=生产地址` 覆盖（环境变量 > `.env`）。
 - **.sh 必须 LF**：`.gitattributes` 已强制 `*.sh eol=lf`，scp 前确认 `grep \r = 0`，否则服务器 `bash\r: bad interpreter`。
