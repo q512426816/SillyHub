@@ -21,6 +21,20 @@ created_at: 2026-10-15T23:50:30.652Z
 - `dsh-acp-driver.ts AcpJsonRpcConnection`：stderr 从 setEncoding-only 改为 data 消费（诊断进 `[dsh-driver] stderr:` 日志），无协议面变化。
 - `backend/app/modules/knowledge/search.py`：仅注释，零行为变化。
 
+## 文件变更清单
+
+| 操作 | 路径 | 说明 |
+| --- | --- | --- |
+| 修改 | sillyhub-daemon/src/interactive/zcode-app-server-driver.ts | FR-01/02/03：close 挂 _finishTurnOnClose 槽位 + 主循环 while 化 + StringDecoder + SIGKILL 无条件升级 + stdin error 监听 |
+| 修改 | sillyhub-daemon/src/interactive/session-manager/driver-factory.ts | FR-04：manualApproval/askUserOnly 映射 + sessionPermission 名单 +zcode |
+| 修改 | sillyhub-daemon/src/interactive/dsh-acp-driver.ts | FR-05：stderr data 消费（替 setEncoding-only） |
+| 修改 | backend/app/modules/knowledge/search.py | FR-06：docstring 与同步注释对齐实现（纯注释） |
+| 修改 | sillyhub-daemon/tests/interactive/zcode-app-server-driver.test.ts | FR-01/02/03/07：4 审计回归用例 + 2 api_format 词表用例（守护③） |
+| 新增 | sillyhub-daemon/tests/interactive/driver-factory-approval-wiring.test.ts | FR-04：接线 4 用例 |
+| 修改 | sillyhub-daemon/tests/interactive/dsh-acp-driver.test.ts | FR-05：stderr 消费 1 用例 |
+| 修改 | sillyhub-daemon/tests/agent-detector.test.ts | task-07 收口门拦下的存量损坏修复（329c0e8aa 悬挂 it 头 ×3 + 期望数组补 dsh） |
+| 新增 | .sillyspec/changes/2026-10-16-driver-audit-fixes/（本目录） | 治理工件（flow-state/requirements/design/tasks/proposal/task-ticks） |
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 1. 乱序/迟到到达：输入或事件乱序时，本设计的假设还成立吗？
