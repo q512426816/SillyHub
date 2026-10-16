@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-pg-index-local-followup",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "08aa9fa699db804e74b848e3aa801de390550c08",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "n/a（design 不适用声明成立：纯静态 markdown 尾部追加，无事件流；补记唯一来源为已定案的修复会话实测输出）",
+    "并发": "ok（design 如实披露理论 git 冲突面并声明单会话完成，commit 历史证实单次完整提交，无实际并发风险面）",
+    "切换": "ok（整块 Edit 插入无半写状态，中断最多留未提交本地改动，重入续接安全——与 git 实态相符）",
+    "作用域": "边界已裁决：可接受（uncategorized.md 为本仓库工作区级知识文件，本地 127.0.0.1 与生产 Aliyun 两套 DB 实例在补记文本中显式命名区分不串台；落 uncategorized 暂存域的取舍已披露且有真实缓解——新节标题复用事故条目核心词可串联检索）"
+  },
+  "reviewedAt": "2026-10-16T02:34:14Z"
+}
