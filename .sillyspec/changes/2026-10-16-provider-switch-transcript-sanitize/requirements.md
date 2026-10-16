@@ -70,7 +70,7 @@ Then 全绿零失败。
 
 ## 测试绑定（每条 FR 至少一行——`FR-NN: test/路径「用例名」`；空行/待填在 flow done 拒收）
 
-FR-01: sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「SAN-1 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动」/「SAN-2 无供应商变更（config-only reload）→ 历史零改写、零备份」/「SAN-3 探测不到 transcript → 清洗降级跳过，reload 照常成功（R-01）」；内核词法面：sillyhub-daemon/tests/transcript-sanitize.test.ts「成对私有块（同消息）…」等 11 例
+FR-01: sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「SAN-1 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动」/「SAN-2 无供应商变更（config-only reload）→ 历史零改写、零备份」/「SAN-3 探测不到 transcript → 清洗降级跳过，reload 照常成功（R-01）」；内核词法面：sillyhub-daemon/tests/transcript-sanitize.test.ts 13 例（含并发追加放弃、非文本如实标注）
 FR-02: 不适用：真实供应商端点不入单测（凭据/成本/网络外依赖）——实证留痕：出站请求抓包（清洗后 637 消息、tool_use 309 / tool_result 309 配平、无 server_tool_use）+ 真实端点对照（原形态 400 / 等价 text 形态 200），见本变更收口证据
 FR-03: sillyhub-daemon/tests/model-error/classifier.test.ts「实证 MiniMax 400 文案 → message/hint 覆写为可执行中文提示（type/retryable 不变）」/「tool_use_id 变体（not found）同样命中覆写」/「不含该签名的普通 400 不误命中（保持兜底文案）」
-FR-04: sillyhub-daemon/tests/transcript-sanitize.test.ts（11 例：三类形态 + 幂等 + 备份 + 链路 + 非法行透传 + 私有集合单一源）+ session-manager-config-switch SAN-1/2/3 + model-error/classifier.test.ts 3 例；实测：`vitest run tests/interactive tests/transcript-sanitize.test.ts tests/model-error/classifier.test.ts` 79 文件 1276 例绿 + `tsc --noEmit` 零错
+FR-04: sillyhub-daemon/tests/transcript-sanitize.test.ts（13 例：三类形态 + 幂等 + 备份 + 链路 + 非法行透传 + 私有集合单一源 + 并发追加放弃 + 非文本/无文本如实标注）+ session-manager-config-switch SAN-1/2/3 + model-error/classifier.test.ts 3 例；实测：`vitest run tests/interactive tests/transcript-sanitize.test.ts tests/model-error` 79 文件 1278 例绿（+1 skipped）+ `tsc --noEmit` 零错

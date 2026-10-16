@@ -30,7 +30,7 @@
  * @module interactive/transcript-sanitize
  */
 
-import { copyFile, readFile } from 'node:fs/promises';
+import { copyFile, readFile, unlink } from 'node:fs/promises';
 import { writeFileAtomic } from '../atomic-write.js';
 
 /**
@@ -289,14 +289,19 @@ export async function sanitizeClaudeTranscriptForReplay(
 
   const backupPath = `${filePath}.bak-sillyhub-${backupStamp(new Date())}`;
   try {
-    // 评审 P2-2 守护：写前重读比对，期间被追加/改写则放弃（不吞并发写）。
+    // 备份先行：备份失败则不改写（宁可不清洗，也不让原文件无备份可回退）。
     await opts.beforeWrite?.();
+    await copyFile(filePath, backupPath);
+    // 评审 P2-2 守护：写前重读比对——读盘基线之后的任何时候被并发追加/改写，本次清洗即放弃
+    //（放弃 = 降级回清洗前行为，绝不吞并发写）。残余窗口（比对 → 原子顶替之间的毫秒级）
+    // 如实记在 design §并发写：非零但已显著收窄，落在其中的追加可由备份回退（显式取舍）。
     const fresh = await readFile(filePath, 'utf-8');
     if (fresh !== original) {
+      console.warn('[transcript-sanitize] skipped_concurrent_write', { filePath });
+      // 放弃即无清洗产物：备份一并撤掉（避免留孤件误导「已清洗过」）。
+      await unlink(backupPath).catch(() => {});
       return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
     }
-    // 备份先行：备份失败则不改写（宁可不清洗，也不让原文件无备份可回退）。
-    await copyFile(filePath, backupPath);
     await writeFileAtomic(filePath, planned.text);
   } catch {
     return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
