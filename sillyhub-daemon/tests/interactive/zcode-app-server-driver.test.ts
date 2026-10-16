@@ -27,6 +27,8 @@ import type {
 } from '../../src/interactive/driver.js';
 import { createFakeChild, readStdin, type FakeChild } from '../helpers/fake-child.js';
 import { resolveWindowsCmdShim } from '../../src/cmd-shim.js';
+import { buildZcodeProviderConfig } from '../../src/zcode-settings.js';
+import type { ProviderConfig } from '../../src/types.js';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
@@ -709,5 +711,56 @@ describe('审计修复：close 释放轮次 / UTF-8 跨 chunk / kill 升级 / st
     await new Promise((r) => setImmediate(r));
     child.stdin.write('{"late":1}\n');
     await new Promise((r) => setImmediate(r));
+  });
+});
+
+// ── 写盘器 api_format 词表映射（provider-adapter-registry 守护③ smokeSuite 判据）──
+// zcode 写盘器按 provider.api_format 二值映射 api.type（zcode-settings.ts zcodeApiType）：
+// 'openai_chat' → 'openai-chat-completions'（LiteLLM/hub 代理 baseUrl + daemon key）；
+// 'anthropic'/缺省 → 'anthropic-messages'（直连 baseUrl + provider key）。
+// API_FORMAT_VOCAB（'anthropic' | 'openai_chat'）加值时本组用例同步扩展。
+
+describe('写盘器 api_format 词表映射（buildZcodeProviderConfig）', () => {
+  function ruleOf(provider: ProviderConfig, daemonApiKey?: string | null) {
+    const content = buildZcodeProviderConfig({
+      zcodeDir: 'C:/tmp/zcode-ws',
+      provider,
+      daemonApiKey,
+    });
+    const config = (
+      content as {
+        config: {
+          providerConfigRules: Array<{ config: { api: { type: string; baseUrl: string } } }>;
+        };
+      }
+    ).config.providerConfigRules[0]!.config;
+    return config.api;
+  }
+
+  it("api_format 'openai_chat' → api.type 'openai-chat-completions'（hub 代理 baseUrl + daemon key）", () => {
+    const api = ruleOf(
+      {
+        api_format: 'openai_chat',
+        litellm_base_url: 'http://hub/api/daemon/llm-proxy',
+        litellm_proxy: true,
+        model: 'usr-u1-p1',
+      },
+      'dh-live-key',
+    );
+    expect(api.type).toBe('openai-chat-completions');
+    expect(api.baseUrl).toBe('http://hub/api/daemon/llm-proxy');
+  });
+
+  it("api_format 'anthropic' 与缺省 → api.type 'anthropic-messages'（直连 baseUrl + provider key）", () => {
+    for (const api_format of ['anthropic', undefined] as const) {
+      const api = ruleOf({
+        api_format,
+        base_url: 'https://api.upstream.example',
+        api_key: 'sk-upstream',
+        model: 'GLM-5.3',
+      });
+      expect(api.type).toBe('anthropic-messages');
+      expect(api.baseUrl).toBe('https://api.upstream.example');
+    }
   });
 });
