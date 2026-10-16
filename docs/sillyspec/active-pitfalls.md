@@ -11,7 +11,7 @@
 <!-- verify-lint-triage-path-divergence.md：lint 归因降档只挂 --done（gates.js）路径，noAI 质量扫描（verify-quality-scan.js step6）未接线 → 零交集存量债两路径行为分叉（2026-10-15，dsh-engine-acp verify 实证，advisory 逃生收口） -->
 <!-- verify-incremental-rerun-infra-batch-growth.md：增量重跑账本把运行器基建失败按测试失败计入失败批 → 失败批随轮膨胀 141→159（2026-10-15，dsh-engine-acp 两轮实证；与 jsx 参数上限同源，账本语义待修） -->
 <!-- verify-test-grouping-cwd-mismatch.md：verify 实测模块分组不稳定——daemon 测试文件偶发分进 frontend vitest 组（cwd 错配 No test files found 假红）；skipped 聚合档（已跑全绿+缺件跳过）在部分路径被判 failed（2026-10-15-server-logs-panel 实证） -->
-<!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
+<!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16）→ 已关闭（2026-10-16-deploy-convergence-guard 部署并流校验闸归档，d581d40b4；已移入 finished/） -->
 <!-- conflict-compare-full-tree-label-mismatch.md：跨多变更的全量冲突平台按单变更归因、CLI 落盘 full-tree 名 → 对比恒 conflict_record_missing 且「刷新冲突列表」无效（2026-10-16 生产实证） -->
-<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字（2026-10-16，平台侧提炼防御+存量回填已落） -->
-<!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证） -->
+<!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字 → 已关闭（sillyspec 仓 short-change-title + title-range-gate 归档，工具侧硬门/提炼/动机回退齐；已移入 finished/） -->
+<!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证）→ 已关闭（sillyspec 仓 2026-10-17-tick-timing-source 归档 d47f7cf0，判定换源侧车墙钟时戳+tick 回显现成命令+文案消歧；已移入 finished/） -->
