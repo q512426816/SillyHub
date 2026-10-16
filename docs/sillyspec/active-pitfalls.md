@@ -11,3 +11,4 @@
 <!-- verify-lint-triage-path-divergence.md：lint 归因降档只挂 --done（gates.js）路径，noAI 质量扫描（verify-quality-scan.js step6）未接线 → 零交集存量债两路径行为分叉（2026-10-15，dsh-engine-acp verify 实证，advisory 逃生收口） -->
 <!-- verify-incremental-rerun-infra-batch-growth.md：增量重跑账本把运行器基建失败按测试失败计入失败批 → 失败批随轮膨胀 141→159（2026-10-15，dsh-engine-acp 两轮实证；与 jsx 参数上限同源，账本语义待修） -->
 <!-- verify-test-grouping-cwd-mismatch.md：verify 实测模块分组不稳定——daemon 测试文件偶发分进 frontend vitest 组（cwd 错配 No test files found 假红）；skipped 聚合档（已跑全绿+缺件跳过）在部分路径被判 failed（2026-10-15-server-logs-panel 实证） -->
+<!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
