@@ -1,0 +1,1024 @@
+diff --git a/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
+new file mode 100644
+index 000000000..d3ead5946
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
+@@ -0,0 +1,269 @@
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++// fetchSessionDialogHistory 解耦后端（本文件测 UI 分组/交互/详情解析；数据层
++// fetch 函数有独立职责）。@/lib/daemon 其余导出在本组件渲染树中仅剩类型
++// （编译期擦除），整模块 mock 不影响。
++vi.mock("@/lib/daemon", () => ({
++  fetchSessionDialogHistory: vi.fn(),
++}));
++
++import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
++import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import {
++  SessionDecisionsHover,
++  splitDecisions,
++} from "@/components/daemon/session-decisions-hover";
++import { fetchSessionDialogHistory } from "@/lib/daemon";
++import type {
++  SessionDialogRead,
++  SessionPermissionRequest,
++} from "@/lib/daemon";
++
++const mockedFetch = vi.mocked(fetchSessionDialogHistory);
++
++/* ------------------------------------------------------------------ */
++/* 工厂                                                                */
++/* ------------------------------------------------------------------ */
++
++function pendingReq(partial: Partial<SessionPermissionRequest>): SessionPermissionRequest {
++  return {
++    session_id: "s-1",
++    run_id: "r-1",
++    request_id: "req-1",
++    tool_name: "AskUserQuestion",
++    input: {},
++    dialog_kind: "ask_user",
++    dialog_payload: {
++      questions: [{ question: "使用哪个数据库？", options: [{ label: "SQLite" }] }],
++    },
++    ...partial,
++  } as SessionPermissionRequest;
++}
++
++function historyRow(partial: Partial<SessionDialogRead>): SessionDialogRead {
++  return {
++    id: "d-1",
++    session_id: "s-1",
++    run_id: "r-1",
++    request_id: "req-h1",
++    tool_name: "AskUserQuestion",
++    dialog_kind: "ask_user",
++    dialog_payload: {
++      questions: [
++        {
++          question: "部署目标环境是什么？",
++          options: [
++            { label: "阿里云 ECS", description: "单机 Docker Compose" },
++            { label: "本地开发机" },
++          ],
++        },
++      ],
++    },
++    status: "answered",
++    answer: { answers: [{ answer: "阿里云 ECS" }] },
++    created_at: "2026-10-14T01:30:00Z",
++    answered_at: "2026-10-14T01:31:00Z",
++    ...partial,
++  } as SessionDialogRead;
++}
++
++function renderUi(props?: Partial<Parameters<typeof SessionDecisionsHover>[0]>) {
++  const client = new QueryClient({
++    defaultOptions: { queries: { retry: false } },
++  });
++  return render(
++    <QueryClientProvider client={client}>
++      <SessionDecisionsHover
++        sessionId="s-1"
++        pendingRequests={[]}
++        planPending={null}
++        onFocusPending={vi.fn()}
++        {...props}
++      />
++    </QueryClientProvider>,
++  );
++}
++
++/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
++async function openPopover() {
++  fireEvent.mouseEnter(screen.getByTestId("session-decisions-hover").querySelector("button")!);
++  await screen.findByTestId("session-decision-popover");
++}
++
++beforeEach(() => {
++  mockedFetch.mockResolvedValue([]);
++});
++
++afterEach(() => {
++  vi.clearAllMocks();
++});
++
++/* ------------------------------------------------------------------ */
++/* splitDecisions（纯函数，FR-02 分组口径）                             */
++/* ------------------------------------------------------------------ */
++
++describe("splitDecisions（纯函数）", () => {
++  it("pending dialog + planPending → 待决策组；kind 按 dialog_kind 派生", () => {
++    const { pending } = splitDecisions(
++      [
++        pendingReq({ request_id: "req-1" }),
++        pendingReq({
++          request_id: "req-2",
++          dialog_kind: "plan_approval",
++          dialog_payload: { questions: [{ question: "Agent 提交了执行计划等待审批" }] },
++        }),
++      ],
++      { runId: "r-9", summary: { objective: "", tasks: [] }, requestedAt: "2026-10-16T03:18:00Z" },
++      [],
++    );
++    expect(pending.map((p) => p.key)).toEqual(["req-1", "req-2", "plan"]);
++    expect(pending.map((p) => p.kind)).toEqual(["ask", "plan", "plan"]);
++    expect(pending.every((p) => p.status === "waiting")).toBe(true);
++    expect(pending[2].createdAt).toBe("2026-10-16T03:18:00Z");
++  });
++
++  it("历史行：answered 归历史组带回答摘要；cancelled 显示未回答", () => {
++    const { history } = splitDecisions([], null, [
++      historyRow(),
++      historyRow({
++        id: "d-2",
++        request_id: "req-h2",
++        status: "cancelled",
++        answer: null,
++        answered_at: null,
++      }),
++    ]);
++    expect(history).toHaveLength(2);
++    expect(history[0].status).toBe("answered");
++    expect(history[0].answerSummary).toBe("阿里云 ECS");
++    expect(history[1].status).toBe("unanswered");
++    expect(history[1].answerSummary).toBeNull();
++  });
++
++  it("孤儿 pending 行（不在 SSE 待答集）归历史组显示未回答，不算待决策", () => {
++    const orphan = historyRow({
++      id: "d-o",
++      request_id: "req-orphan",
++      status: "pending",
++      answer: null,
++      answered_at: null,
++    });
++    const { pending, history } = splitDecisions([pendingReq({ request_id: "req-1" })], null, [orphan]);
++    expect(pending.map((p) => p.key)).toEqual(["req-1"]);
++    expect(history).toHaveLength(1);
++    expect(history[0].status).toBe("unanswered");
++    expect(history[0].answerSummary).toBeNull();
++  });
++
++  it("历史 undefined（未加载）时只看 pending 组", () => {
++    const { pending, history } = splitDecisions([pendingReq()], null, undefined);
++    expect(pending).toHaveLength(1);
++    expect(history).toHaveLength(0);
++  });
++});
++
++/* ------------------------------------------------------------------ */
++/* 组件渲染（FR-01 显隐 / FR-02 下拉 / FR-03 点击 / FR-04 详情）         */
++/* ------------------------------------------------------------------ */
++
++describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）", () => {
++  it("三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）", async () => {
++    const { container } = renderUi();
++    // 历史未就绪（Promise 未决/空）期间 pending 为空 → null
++    await waitFor(() => expect(mockedFetch).toHaveBeenCalledWith("s-1"));
++    await waitFor(() =>
++      expect(container.querySelector('[data-testid="session-decisions-hover"]')).toBeNull(),
++    );
++  });
++
++  it("pending 渲染入口：徽标 = 待决策数且呼吸；悬停历史经 fetchSessionDialogHistory 拉取", async () => {
++    renderUi({
++      pendingRequests: [pendingReq()],
++      planPending: { runId: "r-9", summary: { objective: "", tasks: [] }, requestedAt: null },
++    });
++    expect(screen.getByTestId("session-decision-count").textContent).toBe("2");
++    expect(screen.getByTestId("session-decision-count").className).toContain("animate-pulse");
++    expect(mockedFetch).toHaveBeenCalledWith("s-1");
++  });
++
++  it("hover 弹下拉：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）", async () => {
++    mockedFetch.mockResolvedValue([historyRow()]);
++    renderUi({
++      pendingRequests: [
++        pendingReq(),
++        pendingReq({
++          request_id: "req-plan",
++          dialog_kind: "plan_approval",
++          dialog_payload: { questions: [{ question: "Agent 提交了执行计划等待审批" }] },
++        }),
++      ],
++    });
++    await openPopover();
++
++    expect(screen.getByText("待决策（2）")).toBeTruthy();
++    expect(screen.getByText("提问")).toBeTruthy();
++    expect(screen.getByText("Plan")).toBeTruthy();
++    // 历史默认收起
++    expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
++    expect(screen.getByTestId("session-decision-history-toggle").textContent).toContain("已答历史（1）");
++  });
++
++  it("历史组展开显示回答摘要；再点收起", async () => {
++    mockedFetch.mockResolvedValue([historyRow()]);
++    renderUi({ pendingRequests: [pendingReq()] });
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    expect(screen.getByTestId("session-decision-item-req-h1")).toBeTruthy();
++    expect(screen.getByText("你的回答：阿里云 ECS")).toBeTruthy();
++
++    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
++  });
++
++  it("点 pending dialog 项：上抛 onFocusPending(requestId)；点 plan 项上抛 'plan' 哨兵（FR-03）", async () => {
++    const onFocusPending = vi.fn();
++    renderUi({
++      pendingRequests: [pendingReq({ request_id: "req-42" })],
++      planPending: { runId: "r-9", summary: { objective: "", tasks: [] }, requestedAt: null },
++      onFocusPending,
++    });
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-decision-item-req-42"));
++    expect(onFocusPending).toHaveBeenCalledWith("req-42");
++
++    fireEvent.click(screen.getByTestId("session-decision-item-plan"));
++    expect(onFocusPending).toHaveBeenCalledWith("plan");
++  });
++
++  it("点历史项收起下拉并开只读详情弹窗：问题/选项/当时选择 ✓/时间（FR-04）", async () => {
++    mockedFetch.mockResolvedValue([historyRow()]);
++    renderUi({ pendingRequests: [pendingReq()] });
++    await openPopover();
++
++    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    fireEvent.click(screen.getByTestId("session-decision-item-req-h1"));
++    // 弹窗内断言（role=dialog 圈定，避免与下拉列表文本重复命中）
++    const dialog = await screen.findByRole("dialog");
++    expect(within(dialog).getByText("决策详情")).toBeTruthy();
++    expect(within(dialog).getByText("部署目标环境是什么？")).toBeTruthy();
++    expect(within(dialog).getByText("你的选择")).toBeTruthy();
++    expect(within(dialog).getByText("阿里云 ECS", { exact: false })).toBeTruthy();
++    expect(within(dialog).getByText("本地开发机")).toBeTruthy();
++    expect(within(dialog).getByText("已答")).toBeTruthy();
++    // 未选选项无 ✓ 标记
++    const unselected = within(dialog).getByText("本地开发机").closest("div")!;
++    expect(unselected.textContent).not.toContain("你的选择");
++  });
++
++  it("无 pending 但有已答历史时仍渲染入口，徽标 0 不呼吸（FR-01）", async () => {
++    mockedFetch.mockResolvedValue([historyRow()]);
++    renderUi();
++    await waitFor(() =>
++      expect(screen.getByTestId("session-decisions-hover")).toBeTruthy(),
++    );
++    expect(screen.getByTestId("session-decision-count").textContent).toBe("0");
++    expect(screen.getByTestId("session-decision-count").className).not.toContain("animate-pulse");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+index 6cf8e2211..4d0f38ebe 100644
+--- a/frontend/src/components/daemon/session-change-files-hover.tsx
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -35,6 +35,12 @@ export interface SessionChangeFilesHoverProps {
+   sessionId: string;
+   /** 会话在跑（turnState.currentRunId != null）——进行中变更徽标呼吸提示 */
+   running?: boolean;
++  /**
++   * 2026-10-16-session-decision-pill task-03：true 时不渲染自带 absolute 悬浮
++   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——与
++   * 待决策 pill 并排成 flex 悬浮行。缺省 false 行为不变（旧消费方零回归）。
++   */
++  embedded?: boolean;
+ }
+ 
+ /**
+@@ -92,6 +98,7 @@ export function SessionChangeFilesHover({
+   workspaceId,
+   sessionId,
+   running = false,
++  embedded = false,
+ }: SessionChangeFilesHoverProps) {
+   // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底），antd 只发
+   // onOpenChange 事件，state 是唯一真相。
+@@ -177,79 +184,86 @@ export function SessionChangeFilesHover({
+       : `${c.change_key}（${c.is_thin ? "轻量" : "全量"}·${stageLabel(c)}）`,
+   }));
+ 
+-  return (
+-    <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex justify-end print:hidden">
+-      <div className="pointer-events-auto" data-testid="session-change-files-hover">
+-        <Popover
+-          open={popoverOpen}
+-          onOpenChange={setPopoverOpen}
+-          trigger={["hover", "click"]}
+-          placement="topRight"
+-          content={popoverContent}
+-          styles={{ container: { padding: 4 } }}
++  // embedded=true：内容裸输出（挂载方 flex 悬浮行统一定位）；false：自带
++  // absolute 悬浮外壳（原行为，task-03 前唯一形态）。
++  const content = (
++    <div data-testid="session-change-files-hover">
++      <Popover
++        open={popoverOpen}
++        onOpenChange={setPopoverOpen}
++        trigger={["hover", "click"]}
++        placement="topRight"
++        content={popoverContent}
++        styles={{ container: { padding: 4 } }}
++      >
++        <Button
++          variant="outline"
++          size="sm"
++          className="gap-1.5 rounded-lg shadow-sm"
++          aria-label="悬浮查看会话关联的变更文件"
+         >
+-          <Button
+-            variant="outline"
+-            size="sm"
+-            className="gap-1.5 rounded-lg shadow-sm"
+-            aria-label="悬浮查看会话关联的变更文件"
++          <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
++          变更文件
++          <span
++            data-testid="session-change-count"
++            className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
++              running && active.length > 0 ? "animate-pulse" : ""
++            }`}
+           >
+-            <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
+-            变更文件
+-            <span
+-              data-testid="session-change-count"
+-              className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
+-                running && active.length > 0 ? "animate-pulse" : ""
+-              }`}
+-            >
+-              {active.length}
+-            </span>
+-          </Button>
+-        </Popover>
+-
+-        <Dialog
+-          open={dialogChangeId !== null}
+-          onOpenChange={(o) => {
+-            if (!o) setDialogChangeId(null);
+-          }}
+-        >
+-          <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
+-            <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3">
+-              <DialogTitle className="text-sm">变更文件实时预览</DialogTitle>
+-              <Select
+-                size="small"
+-                value={dialogChangeId ?? undefined}
+-                onChange={(v: string) => setDialogChangeId(v)}
+-                options={selectOptions}
+-                className="min-w-0 max-w-[360px] flex-1"
+-                data-testid="session-change-select"
+-                // 2026-10-13 用户实测「下拉项选择不了」修复：radix Dialog modal 对
+-                // body 设 pointer-events:none（仅 DialogContent 内恢复），antd 下拉
+-                // 默认 portal 到 body → 选项点不动且点按触发弹窗 outside-close。
+-                // 挂进 DialogContent（role=dialog）内：pointer-events 恢复、层级随
+-                // 弹窗、radix 不计 outside（下拉交互不再误关弹窗）。
+-                getPopupContainer={(trigger) =>
+-                  (trigger.closest('[role="dialog"]') as HTMLElement | null) ??
+-                  document.body
+-                }
++            {active.length}
++          </span>
++        </Button>
++      </Popover>
++
++      <Dialog
++        open={dialogChangeId !== null}
++        onOpenChange={(o) => {
++          if (!o) setDialogChangeId(null);
++        }}
++      >
++        <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
++          <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3">
++            <DialogTitle className="text-sm">变更文件实时预览</DialogTitle>
++            <Select
++              size="small"
++              value={dialogChangeId ?? undefined}
++              onChange={(v: string) => setDialogChangeId(v)}
++              options={selectOptions}
++              className="min-w-0 max-w-[360px] flex-1"
++              data-testid="session-change-select"
++              // 2026-10-13 用户实测「下拉项选择不了」修复：radix Dialog modal 对
++              // body 设 pointer-events:none（仅 DialogContent 内恢复），antd 下拉
++              // 默认 portal 到 body → 选项点不动且点按触发弹窗 outside-close。
++              // 挂进 DialogContent（role=dialog）内：pointer-events 恢复、层级随
++              // 弹窗、radix 不计 outside（下拉交互不再误关弹窗）。
++              getPopupContainer={(trigger) =>
++                (trigger.closest('[role="dialog"]') as HTMLElement | null) ??
++                document.body
++              }
++            />
++            <DialogDescription className="shrink-0 text-[11px]">
++              与变更文件页同组件 · 15 秒自动刷新
++            </DialogDescription>
++          </DialogHeader>
++          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
++            {dialogChangeId && (
++              <ChangeFileTree
++                key={dialogChangeId}
++                workspaceId={workspaceId}
++                changeId={dialogChangeId}
++                autoRefreshMs={15000}
+               />
+-              <DialogDescription className="shrink-0 text-[11px]">
+-                与变更文件页同组件 · 15 秒自动刷新
+-              </DialogDescription>
+-            </DialogHeader>
+-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+-              {dialogChangeId && (
+-                <ChangeFileTree
+-                  key={dialogChangeId}
+-                  workspaceId={workspaceId}
+-                  changeId={dialogChangeId}
+-                  autoRefreshMs={15000}
+-                />
+-              )}
+-            </div>
+-          </DialogContent>
+-        </Dialog>
+-      </div>
++            )}
++          </div>
++        </DialogContent>
++      </Dialog>
++    </div>
++  );
++
++  if (embedded) return content;
++  return (
++    <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex justify-end print:hidden">
++      <div className="pointer-events-auto">{content}</div>
+     </div>
+   );
+ }
+diff --git a/frontend/src/components/daemon/session-decisions-hover.tsx b/frontend/src/components/daemon/session-decisions-hover.tsx
+new file mode 100644
+index 000000000..2aeb2ad80
+--- /dev/null
++++ b/frontend/src/components/daemon/session-decisions-hover.tsx
+@@ -0,0 +1,381 @@
++"use client";
++
++import { useMemo, useState } from "react";
++import { ClipboardList, HelpCircle, MessageCircleQuestion } from "lucide-react";
++import { Popover } from "antd";
++import { useQuery } from "@tanstack/react-query";
++
++import { Button } from "@/components/ui/button";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
++import { resolvePendingTitle } from "@/components/permissions/minimized-dialog-capsule";
++import {
++  fetchSessionDialogHistory,
++  type PlanSummary,
++  type SessionDialogRead,
++  type SessionPermissionRequest,
++} from "@/lib/daemon";
++import { cn } from "@/lib/utils";
++
++/**
++ * 会话页面悬浮待决策面板（2026-10-16-session-decision-pill / FR-01~04 /
++ * D-004@v1：前端自包含聚合，数据三类零新增）。
++ *
++ * - 胶囊入口与变更文件 pill 并排（挂载点 flex 悬浮行）；三类信息全空
++ *   （pending 提问/Plan 卡/已答历史）不渲染（FR-01 显隐）；
++ * - hover（或触屏点击）弹下拉分组：待决策置顶（提问/Plan 徽标 + 状态短语），
++ *   已答历史默认折叠可展开（FR-02）；历史孤儿 pending 行（不在 SSE 待答集）
++ *   归历史组显示「未回答」（对齐 ended 会话死卡门控语义）；
++ * - pending 项点击经 onFocusPending 上抛定位还原（FR-03，父级路由 TurnTimeline
++ *   focusDialogRequest / Plan 卡高亮）；历史项点开只读详情弹窗（FR-04，
++ *   复用 extractDialogQA 解析问题/选项/当时选择）；
++ * - 历史经 fetchSessionDialogHistory：挂载即取一次（显隐判定需要），下拉/弹窗
++ *   打开时 15s 轮询、关闭即停（active 轮询，对齐 useSessionChanges 模式）。
++ */
++export interface SessionDecisionsHoverProps {
++  sessionId: string;
++  /** pending AskUser/plan_approval dialog（父级 SSE 态，权威源）。 */
++  pendingRequests: SessionPermissionRequest[];
++  /** Plan 审批卡态（机制 1，父级 SSE plan_mode_entered 态；null=无）。 */
++  planPending: {
++    runId: string;
++    summary: PlanSummary;
++    requestedAt: string | null;
++  } | null;
++  /** pending 项点击（dialog request_id；planPending 项固定 "plan" 哨兵）。 */
++  onFocusPending: (requestId: string) => void;
++}
++
++/** 下拉条目（splitDecisions 产出；kind 驱动徽标，status 驱动配色/文案）。 */
++export interface DecisionItem {
++  key: string;
++  title: string;
++  kind: "ask" | "plan";
++  status: "waiting" | "answered" | "unanswered";
++  /** 回答摘要（历史组行内一句话；pending 恒 null）。 */
++  answerSummary: string | null;
++  /** 创建/请求时间（dialog pending 项无时间字段 → null 显示 "—"）。 */
++  createdAt: string | null;
++  /** 历史组详情弹窗原始行（pending 项为 null）。 */
++  dialog: SessionDialogRead | null;
++}
++
++const PLAN_PENDING_KEY = "plan";
++const PLAN_PENDING_TITLE = "Agent 提交了执行计划等待审批";
++
++/** 历史行标题——resolvePendingTitle 同口径（SessionDialogRead 结构兼容子集）。 */
++function dialogRowTitle(row: SessionDialogRead): string {
++  const raw = row.dialog_payload?.questions;
++  if (Array.isArray(raw)) {
++    for (const item of raw) {
++      const question = (item as { question?: unknown } | null)?.question;
++      if (typeof question === "string" && question.trim()) return question.trim();
++    }
++  }
++  if (row.dialog_kind === "plan_approval") return PLAN_PENDING_TITLE;
++  return "智能体提问";
++}
++
++/** 历史行回答摘要——extractDialogQA 首问 answerText，取不到回退 null（行内显示状态短语）。 */
++function answerSummaryOf(row: SessionDialogRead): string | null {
++  const qa = extractDialogQA(row);
++  return qa[0]?.answerText ?? null;
++}
++
++/** 分组纯函数（测试导出）：SSE 待答集 + Plan 卡态 + 历史行 → 待决策/历史两组。 */
++export function splitDecisions(
++  pendingRequests: SessionPermissionRequest[],
++  planPending: SessionDecisionsHoverProps["planPending"],
++  history: SessionDialogRead[] | undefined,
++): { pending: DecisionItem[]; history: DecisionItem[] } {
++  const pendingIds = new Set(pendingRequests.map((r) => r.request_id));
++  const pending: DecisionItem[] = pendingRequests.map((r) => ({
++    key: r.request_id,
++    title: resolvePendingTitle(r),
++    kind: r.dialog_kind === "plan_approval" ? "plan" : "ask",
++    status: "waiting",
++    answerSummary: null,
++    createdAt: null,
++    dialog: null,
++  }));
++  if (planPending) {
++    pending.push({
++      key: PLAN_PENDING_KEY,
++      title: PLAN_PENDING_TITLE,
++      kind: "plan",
++      status: "waiting",
++      answerSummary: null,
++      createdAt: planPending.requestedAt,
++      dialog: null,
++    });
++  }
++  const historyItems: DecisionItem[] = [];
++  for (const row of history ?? []) {
++    // SSE 待答集是 pending 权威源：不在集内的 status=pending 行是孤儿死卡
++    //（会话终止/恢复中断），归历史组显示「未回答」。
++    const orphanPending = row.status === "pending" && !pendingIds.has(row.request_id);
++    historyItems.push({
++      key: row.request_id,
++      title: dialogRowTitle(row),
++      kind: row.dialog_kind === "plan_approval" ? "plan" : "ask",
++      status: row.status === "answered" ? "answered" : "unanswered",
++      answerSummary: orphanPending ? null : answerSummaryOf(row),
++      createdAt: row.created_at ?? null,
++      dialog: row,
++    });
++  }
++  return { pending, history: historyItems };
++}
++
++const KIND_BADGE: Record<DecisionItem["kind"], string> = {
++  ask: "bg-brand-50 text-brand-700",
++  plan: "bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300",
++};
++const KIND_LABEL: Record<DecisionItem["kind"], string> = { ask: "提问", plan: "Plan" };
++const STATUS_BADGE: Record<DecisionItem["status"], string> = {
++  waiting: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
++  answered: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
++  unanswered: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
++};
++const STATUS_LABEL: Record<DecisionItem["status"], string> = {
++  waiting: "等待你的回答",
++  answered: "已答",
++  unanswered: "未回答",
++};
++
++function shortTime(iso: string | null | undefined): string {
++  if (!iso) return "—";
++  const d = new Date(iso);
++  if (Number.isNaN(d.getTime())) return "—";
++  return d.toLocaleString("zh-CN", {
++    month: "2-digit",
++    day: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++  });
++}
++
++export function SessionDecisionsHover({
++  sessionId,
++  pendingRequests,
++  planPending,
++  onFocusPending,
++}: SessionDecisionsHoverProps) {
++  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底）——与变更文件
++  // pill 同款交互契约，antd 只发事件，state 是唯一真相。
++  const [popoverOpen, setPopoverOpen] = useState(false);
++  const [historyExpanded, setHistoryExpanded] = useState(false);
++  const [detailKey, setDetailKey] = useState<string | null>(null);
++
++  const { data: history } = useQuery({
++    queryKey: ["sessionDecisions", sessionId],
++    queryFn: () => fetchSessionDialogHistory(sessionId),
++    staleTime: 10_000,
++    refetchInterval: popoverOpen || detailKey !== null ? 15_000 : false,
++  });
++
++  const { pending, history: historyItems } = useMemo(
++    () => splitDecisions(pendingRequests, planPending, history),
++    [pendingRequests, planPending, history],
++  );
++  const detail = useMemo(
++    () => historyItems.find((d) => d.key === detailKey) ?? null,
++    [historyItems, detailKey],
++  );
++
++  // 三类全空不渲染、不占位（FR-01：历史未加载完成且 pending 为空同样不渲染）。
++  if (pending.length === 0 && historyItems.length === 0) return null;
++
++  const renderItem = (item: DecisionItem, isPending: boolean) => (
++    <button
++      key={item.key}
++      type="button"
++      data-testid={`session-decision-item-${item.key}`}
++      onClick={() => {
++        if (isPending) {
++          setPopoverOpen(false);
++          onFocusPending(item.key);
++        } else {
++          // 开详情弹窗收起下拉（对齐变更文件 pill openDialog 先例）
++          setPopoverOpen(false);
++          setDetailKey(item.key);
++        }
++      }}
++      className="w-full rounded-md border border-transparent px-2.5 py-1.5 text-left transition-colors hover:border-brand-400 hover:bg-accent"
++    >
++      <div className="flex items-center gap-1.5">
++        {item.kind === "ask" ? (
++          <HelpCircle className="h-3 w-3 shrink-0 text-brand-600" aria-hidden />
++        ) : (
++          <ClipboardList className="h-3 w-3 shrink-0 text-cyan-600" aria-hidden />
++        )}
++        <span className="min-w-0 flex-1 truncate text-xs font-medium">{item.title}</span>
++        <span
++          className={`shrink-0 rounded px-1 py-px text-[10px] font-semibold ${KIND_BADGE[item.kind]}`}
++        >
++          {KIND_LABEL[item.kind]}
++        </span>
++      </div>
++      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
++        <span
++          className={`rounded px-1 py-px font-medium ${STATUS_BADGE[item.status]}`}
++        >
++          {isPending && item.kind === "plan" ? "长驻等待，不会自动超时" : STATUS_LABEL[item.status]}
++        </span>
++        <span className="ml-auto">{shortTime(item.createdAt)}</span>
++      </div>
++      {!isPending && item.answerSummary && (
++        <div className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
++          你的回答：{item.answerSummary}
++        </div>
++      )}
++    </button>
++  );
++
++  const popoverContent = (
++    <div
++      data-testid="session-decision-popover"
++      className="max-h-[60vh] w-80 overflow-auto p-1"
++    >
++      <div className="px-1.5 pb-1 text-[11px] font-semibold text-muted-foreground">
++        待决策（{pending.length}）
++      </div>
++      {pending.map((item) => renderItem(item, true))}
++      {historyItems.length > 0 && (
++        <>
++          <button
++            type="button"
++            data-testid="session-decision-history-toggle"
++            onClick={() => setHistoryExpanded((v) => !v)}
++            className="mt-1.5 w-full rounded-md border border-dashed px-2.5 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-brand-400 hover:text-foreground"
++          >
++            {historyExpanded ? "▾" : "▸"} 已答历史（{historyItems.length}）
++            {historyExpanded ? "" : "— 点击展开"}
++          </button>
++          {historyExpanded && historyItems.map((item) => renderItem(item, false))}
++        </>
++      )}
++    </div>
++  );
++
++  return (
++    <div data-testid="session-decisions-hover">
++      <Popover
++        open={popoverOpen}
++        onOpenChange={setPopoverOpen}
++        trigger={["hover", "click"]}
++        placement="topRight"
++        content={popoverContent}
++        styles={{ container: { padding: 4 } }}
++      >
++        <Button
++          variant="outline"
++          size="sm"
++          className="gap-1.5 rounded-lg shadow-sm"
++          aria-label="悬浮查看会话待决策信息"
++        >
++          <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden />
++          待决策
++          <span
++            data-testid="session-decision-count"
++            className={cn(
++              "rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white",
++              pending.length > 0 ? "animate-pulse" : "",
++            )}
++          >
++            {pending.length}
++          </span>
++        </Button>
++      </Popover>
++
++      <Dialog
++        open={detailKey !== null}
++        onOpenChange={(o) => {
++          if (!o) setDetailKey(null);
++        }}
++      >
++        <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0">
++          <DialogHeader className="flex-row items-center gap-2 space-y-0 border-b px-4 py-3">
++            <DialogTitle className="text-sm">决策详情</DialogTitle>
++            {detail && (
++              <span
++                className={`rounded px-1 py-px text-[10px] font-semibold ${KIND_BADGE[detail.kind]}`}
++              >
++                {KIND_LABEL[detail.kind]}
++              </span>
++            )}
++            {detail && (
++              <span
++                className={`rounded px-1 py-px text-[10px] font-semibold ${STATUS_BADGE[detail.status]}`}
++              >
++                {STATUS_LABEL[detail.status]}
++              </span>
++            )}
++            <DialogDescription className="ml-auto shrink-0 text-[11px]">
++              只读回看 · 作答仍在聊天流完成
++            </DialogDescription>
++          </DialogHeader>
++          <div className="min-h-0 flex-1 overflow-auto p-4">
++            {detail?.dialog &&
++              extractDialogQA(detail.dialog).map((qa, i) => (
++                <div key={i} className={i > 0 ? "mt-4" : ""}>
++                  <p className="text-xs font-semibold">{qa.question}</p>
++                  <div className="mt-1.5 overflow-hidden rounded-md border">
++                    {qa.options.map((opt, j) => (
++                      <div
++                        key={j}
++                        className={cn(
++                          "border-b px-2.5 py-1.5 text-xs last:border-b-0",
++                          opt.selected
++                            ? "bg-brand-50 font-semibold text-brand-700"
++                            : "text-muted-foreground",
++                        )}
++                      >
++                        <span className="mr-1" aria-hidden>
++                          {opt.selected ? "✓" : "○"}
++                        </span>
++                        {opt.label}
++                        {opt.selected && (
++                          <span className="ml-1.5 text-[10px] font-normal">你的选择</span>
++                        )}
++                        {opt.description && (
++                          <p className="mt-0.5 text-[11px] font-normal text-muted-foreground/80">
++                            {opt.description}
++                          </p>
++                        )}
++                      </div>
++                    ))}
++                    {qa.options.length === 0 && (
++                      <div className="px-2.5 py-1.5 text-xs text-muted-foreground">
++                        → {qa.answerText ?? STATUS_LABEL[detail.status]}
++                      </div>
++                    )}
++                  </div>
++                </div>
++              ))}
++            {detail?.dialog &&
++              extractDialogQA(detail.dialog).length === 0 && (
++                <p className="text-xs text-muted-foreground">
++                  （该决策记录无结构化问答载荷）
++                </p>
++              )}
++            {detail && (
++              <p className="mt-4 flex gap-4 text-[11px] text-muted-foreground">
++                <span>提问：{shortTime(detail.dialog?.created_at)}</span>
++                <span>
++                  回答：{shortTime(detail.dialog?.answered_at ?? null)}
++                </span>
++              </p>
++            )}
++          </div>
++        </DialogContent>
++      </Dialog>
++    </div>
++  );
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 776d2d097..d92000051 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -35,8 +35,10 @@ import {
+ } from "@/components/daemon/session-input-bar";
+ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+ // 2026-10-13-session-change-files-hover task-05：会话悬浮变更文件入口
++// 2026-10-16-session-decision-pill task-04：会话悬浮待决策入口（与变更文件 pill 并排）
+ // （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
+ import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
++import { SessionDecisionsHover } from "@/components/daemon/session-decisions-hover";
+ // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+ // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+ // 不破，panel 层零 react-query）。
+@@ -774,6 +776,15 @@ export function SessionPanelPage({
+     summary: PlanSummary;
+     requestedAt: string;
+   } | null>(null);
++  // 2026-10-16-session-decision-pill task-04：待决策 pill 定位请求（nonce 递增
++  // 触发 TurnTimeline effect——同 requestId 重复点击也生效）；plan 卡高亮闪烁
++  // 落点 ref（该卡在输入区上方恒可见，仅提示注意力）。
++  const [focusDialogRequest, setFocusDialogRequest] = useState<{
++    requestId: string;
++    nonce: number;
++  } | null>(null);
++  const focusDialogNonceRef = useRef(0);
++  const planCardRef = useRef<HTMLDivElement>(null);
+   // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
+   // 2026-08-25：状态归约统一走底部 applyBashStatusEvent / appendBashChunk（跨命令
+   // 重置 + 环形截断，page / dialog 两模式共用）。
+@@ -4121,6 +4132,23 @@ export function SessionPanelPage({
+     setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
+   }, []);
+ 
++  // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位路由——
++  // dialog 项 → TurnTimeline focusDialogRequest（还原最小化 + 滚顶 + sticky 卡
++  // 闪烁）；"plan" 哨兵 → 输入区上方 Plan 审批卡高亮闪烁（恒可见仅提示）。
++  const handleFocusPending = useCallback((requestId: string) => {
++    if (requestId === "plan") {
++      const el = planCardRef.current;
++      if (!el) return;
++      el.classList.add("ring-2", "ring-brand-500");
++      window.setTimeout(() => el.classList.remove("ring-2", "ring-brand-500"), 1200);
++      return;
++    }
++    setFocusDialogRequest({
++      requestId,
++      nonce: ++focusDialogNonceRef.current,
++    });
++  }, []);
++
+   // ── task-09（FR-04）：子代理目录跳转定位（原型 jumpTo 的面板侧实现）────────
+   // 三动作：切「进度」视图（子代理块只在 all 视图渲染）→ 展开对应子代理块 →
+   // scrollIntoView 居中。SubagentBlockView（task-05）未暴露 data-segment-id DOM
+@@ -4625,6 +4653,9 @@ export function SessionPanelPage({
+         // 回调（runKey 上抛走 fetchAndAttachTurn 单轮直达；缺省零回归语义由
+         // TurnTimeline 内守卫承担，本挂载恒接线）。
+         expandPreview={handleExpandPreview}
++        // 2026-10-16-session-decision-pill task-04 / FR-03：待决策 pill 定位还原
++        // 请求（nonce 触发式；缺省 null 零行为语义由 TurnTimeline 内守卫承担）。
++        focusDialogRequest={focusDialogRequest}
+         sessionStatus={deriveTimelineSessionStatus(ended, session.status === "failed", restoring)}
+         pendingRequests={pendingRequests}
+         dialogHistory={dialogHistory}
+@@ -5355,9 +5386,10 @@ export function SessionPanelPage({
+           ActivityCatalog 下拉（原常驻区挤占聊天窗口）；取消/分身子会话交互经
+           ActivityCatalog props 透传，活跃期间父层 5s 轮询刷新不变（终态停止）。 */}
+ 
+-      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
++      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。
++          2026-10-16-session-decision-pill task-04：ref 供待决策 pill "plan" 项高亮闪烁。 */}
+       {planPending && (
+-        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
++        <div ref={planCardRef} className="shrink-0 border-t border-border bg-card px-5 py-3">
+           <PlanApprovalCard
+             sessionId={sessionId}
+             runId={planPending.runId}
+@@ -5382,14 +5414,30 @@ export function SessionPanelPage({
+           = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
+           sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
+           null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
+-          进行中变更徽标呼吸提示（FR-02）。 */}
++          进行中变更徽标呼吸提示（FR-02）。
++          2026-10-16-session-decision-pill task-04：锚点内改 flex 悬浮行——待决策
++          pill（新增，自渲染 null 零占位同款）与变更文件 pill（embedded 脱壳）
++          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。 */}
+       {sessionId != null && session?.workspace_id != null && (
+         <div className="relative h-0 w-full">
+-          <SessionChangeFilesHover
+-            workspaceId={session.workspace_id}
+-            sessionId={sessionId}
+-            running={running}
+-          />
++          <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex items-center justify-end gap-2 print:hidden">
++            <div className="pointer-events-auto">
++              <SessionDecisionsHover
++                sessionId={sessionId}
++                pendingRequests={pendingRequests}
++                planPending={planPending}
++                onFocusPending={handleFocusPending}
++              />
++            </div>
++            <div className="pointer-events-auto">
++              <SessionChangeFilesHover
++                workspaceId={session.workspace_id}
++                sessionId={sessionId}
++                running={running}
++                embedded
++              />
++            </div>
++          </div>
+         </div>
+       )}
+ 
+diff --git a/frontend/src/components/daemon/turn-timeline.tsx b/frontend/src/components/daemon/turn-timeline.tsx
+index 6823a1015..e27917ea1 100644
+--- a/frontend/src/components/daemon/turn-timeline.tsx
++++ b/frontend/src/components/daemon/turn-timeline.tsx
+@@ -446,6 +446,14 @@ export interface TurnTimelineProps {
+    * 引用稳定（同 onResend 先例，防击穿 TurnRow memo）。
+    */
+   expandPreview?: (_runKey: string) => void;
++  /**
++   * 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原请求（受控
++   * 触发式——nonce 递增驱动 effect，requestId 不变重复点击也生效）。effect：
++   * ①若该卡在 minimizedIds 中先还原；②滚动容器到顶（pending 卡 sticky 常驻
++   * 顶部）；③sticky 容器高亮闪烁 ~1.2s 自清。缺省 / null 零行为（旧消费方
++   * 零回归，同 highlightTurnKey 先例的自清节奏约定——清除归本组件定时器）。
++   */
++  focusDialogRequest?: { requestId: string; nonce: number } | null;
+ }
+ 
+ /**
+@@ -1134,6 +1142,7 @@ export function TurnTimeline({
+   suppressFollowBottom = false,
+   forkEntry,
+   expandPreview,
++  focusDialogRequest,
+ }: TurnTimelineProps) {
+   const scrollRef = useRef<HTMLDivElement>(null);
+ 
+@@ -1388,6 +1397,29 @@ export function TurnTimeline({
+     sessionStatus !== "ended" &&
+     sessionStatus !== "failed";
+ 
++  // ── 2026-10-16-session-decision-pill / FR-03：待决策 pill 定位还原 ──────────
++  // sticky 提问卡容器 ref（高亮闪烁落点）；effect 由 nonce 触发（同 requestId
++  // 重复点击也生效）。还原→滚顶→闪烁三步：还原最小化卡无条件删集合（不在
++  // 集合内为 no-op）；闪烁 class 1.2s 自清（对齐父层 highlightTurnKey ~2.2s
++  // 节奏缩短版——pill 定位是轻提示）。挂载首帧 nonce 变化（初始 null → 值）
++  // 也会触发一次——无害（滚顶+无卡可闪，pending 为空时 showPending 门控本就
++  // 不渲染卡片层）。
++  const stickyCardsRef = useRef<HTMLDivElement>(null);
++  const focusNonceRef = useRef<number>(-1);
++  useEffect(() => {
++    if (!focusDialogRequest || focusDialogRequest.nonce === focusNonceRef.current) return;
++    focusNonceRef.current = focusDialogRequest.nonce;
++    handleRestore(focusDialogRequest.requestId);
++    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
++    const el = stickyCardsRef.current;
++    if (!el) return;
++    el.classList.add("ring-2", "ring-brand-500");
++    const t = window.setTimeout(() => {
++      el.classList.remove("ring-2", "ring-brand-500");
++    }, 1200);
++    return () => window.clearTimeout(t);
++  }, [focusDialogRequest, handleRestore]);
++
+   // ── 2026-10-14-session-bottom-resize-observer：内容高度迟到变化的贴底兜底 ──
+   // 第四层根因（真浏览器注入取证）：懒加载图片 / markdown 迟渲染 / content-visibility
+   // 真实化只改 scrollHeight——不触发 scroll 事件（scrollTop 未变）、无 turns 提交，
+@@ -1517,6 +1549,7 @@ export function TurnTimeline({
+           已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
+       {showPending && (
+         <div
++          ref={stickyCardsRef}
+           className={
+             visiblePendingCount > 0
+               ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-session-decision-pill",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-session-decision-pill:flow:测试绑定FR-01",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-decision-pill"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-session-decision-pill:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「hover 弹下拉：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-decision-pill"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-session-decision-pill:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点 pending dialog 项：上抛 onFocusPending(requestId)；点 plan 项上抛 'plan' 哨兵（FR-03）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-decision-pill"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-session-decision-pill:flow:测试绑定FR-04",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点历史项收起下拉并开只读详情弹窗：问题/选项/当时选择 ✓/时间（FR-04）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-decision-pill"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-session-decision-pill:flow:测试绑定FR-05",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+        "frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-decision-pill"
+    }
+  ]
+}

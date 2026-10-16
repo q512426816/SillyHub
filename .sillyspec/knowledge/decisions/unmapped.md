@@ -258,3 +258,13 @@
 锚点：未记录
 最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
 理由：最大风险：`_module-map.yaml` 头部标注 generator: sillyspec-scan——后续重跑 scan 若全量重生成可能冲掉手改条目；缓解：文件头同时注明「可手动修改」，scan 为 advisory 流程（人工确认后才落盘），且本条目 paths 是 scan 无法推导的规范资产域（scan 只扫代码路径），冲突概率低。死路：手工把 3 条 FR 剪切粘贴到新文件并自行重编号——已放弃，违反迁域不换号铁律（ID 是绑定/supersede 链寻址键），且伪域文件清理状态（清空 vs 移除）手搬无法与 CLI 的 fr-index 幂等提炼状态机对齐。
+
+## D-unmapped-054@v1 rejected 方案 B——后端聚合端点 GET /sessions/{id}/decisions
+状态：rejected
+变更：2026-10-16-session-decision-pill
+原编号：D-006@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：（落选）
+否决理由：跨模块后端改动（daemon 模块 + OpenAPI + 前端/daemon 双端 gen:types 义务）与功能价值不成比例；普通审批在后端内存态重启照丢，聚合收益有限
+复潮条件：决策数据需要刷新强一致（含内存 pending）或移动端/第三方也要消费会话决策聚合时
