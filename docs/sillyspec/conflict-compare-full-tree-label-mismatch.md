@@ -5,7 +5,7 @@ created_at: 2026-10-16T16:46:00
 
 # 冲突对比文件名口径不一致——跨多变更的全量冲突恒 `conflict_record_missing`，且「刷新冲突列表」无效
 
-> **状态**：活跃坑，未修。平台侧对比入口对这种冲突结构性失效；文案误导为「机器离线/504」。
+> **状态**：部分修复（2026-10-16-conflict-full-tree-compare 已上线：daemon 读取侧 full-tree 兜底重取 + 四臂失败文案 + 行级「标记已处理」UI）。**结构性根因未修**：文件名口径由「猜名」改为「按变更路径段裁剪」绕过，记录生命周期断层（行开记录亡）仍在——详见文末「2026-10-17 补充实测」。
 
 ## 现象（2026-10-16 生产实证）
 
@@ -88,3 +88,18 @@ created_at: 2026-10-16T16:46:00
   （`/opt/sillyhub/deploy/deploy`）；阿里云 47.113.145.252 只是 nginx 边车，且残留一份
   **无流量的旧栈副本（独立数据库）**——连错机器会得到与线上不一致的结论（本次排查先
   误查阿里云副本库，其 `spec_conflicts` 行状态与线上不同，已更正）。
+
+## 2026-10-17 补充实测（00:03~00:12，修复上线后生产复验）
+
+已上线修复（main 994656fdd，发布记录 009）：
+
+- daemon 读取侧兜底：主取 `conflict_record_missing` 时以 `full-tree` 重取并按变更路径段裁剪（daemon `sillyspec-manager.ts` 不动，兜底在 backend `sillyspec_compare.py`）；
+- 失败卡四臂文案：`conflict_record_missing` → 「该冲突在本机已无快照（可能已随同步清理或已裁决），请重新同步后再试。」（生产实测生效，替换旧误导文案）；504 族保留重试；
+- 行级「标记已处理」按钮（处置 2 有了 UI 消费方，上文「无 UI」表述已过时）。
+
+**新实测事实（修复的边界）**：
+
+1. **记录生命周期断层**：目标机器（centos8）`.sillyspec/.runtime/` 下 `spec-sync-conflict-<变更名>.json` 与 `spec-sync-conflict-full-tree.json` **双缺**（探针 daemon_message 点名证实）——兜底无米下锅，compare 对该行仍 502（新文案）。行 open 而记录亡的状态可持续存在。
+2. **树冲突记录只在机器侧再生**：落盘点 = 会话结束 / 扫描收尾的树级推送（`syncSpecTreeIfNeeded`）。产品内「刷新」触发的定向同步（`platform sync --change`）**不触发树冲突**（实测 ok:true 且记录仍缺失）——新文案「请重新同步」对这类冲突**不可完全行动**，可行动的是处置 1（机器侧推送）与处置 2（平台裁决）。
+3. **定向同步全绿也会关 open 行**：00:08 一次 per-change 同步 ok:true 后，工作区 open 行即被自动置 resolved（「下一次推送全绿」语义的实测复现，扩大了「全绿」的触发面——原理解只覆盖树推送）。
+4. 复验证据与补验路径：`.sillyspec/changes/2026-10-16-conflict-full-tree-compare/verify-deploy-evidence.md`（200 场景留待机器下次树冲突时补验）。
