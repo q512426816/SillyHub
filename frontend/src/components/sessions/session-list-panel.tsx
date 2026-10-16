@@ -176,11 +176,14 @@ import type { AgentLogListItem } from "@/lib/agent-logs";
 // 2026-10-15-session-status-dot-semantics：LivenessDot 随行尾小灯退役，仅存
 // LIVENESS_META（悬停卡 SessionLivenessPopoverContent 仍消费五态色/文案）。
 import { LIVENESS_META } from "@/components/agent-log/liveness-badge";
+// 2026-10-15-session-turn-completion-semantics：完成通知存储单一源（会话终态
+// 与轮次完成两来源共用一键一角标）；原红色「空闲未读」isUnread/clearUnread 退役。
+import { useSessionLiveness } from "@/hooks/use-session-liveness";
 import {
-  clearUnread,
-  isUnread,
-  useSessionLiveness,
-} from "@/hooks/use-session-liveness";
+  clearCompletedUnread,
+  isCompletedUnread,
+  markCompletedUnread,
+} from "@/lib/session-completed-unread";
 import { MemberFacepile } from "@/components/group-chat/create-group-wizard";
 import { listPersonalPlanTasks } from "@/lib/ppm/task";
 import { listProblems } from "@/lib/ppm/problem";
@@ -582,14 +585,17 @@ function engineValueOf(s: AgentSessionRead): string | null {
 /**
  * 行首状态标识形态（2026-10-15-session-status-dot-semantics 语义重定义，
  * 参考 deepseek-harness StateDot 五态：done 绿 / ongoing 转圈 / error 红 /
- * warning 琥珀 / idle 弱化）：
+ * warning 琥珀 / idle 弱化；2026-10-15-session-turn-completion-semantics 完成
+ * 口径改轮次级）：
  *   - failed        → 红点（异常）
- *   - ended         → 绿点（执行完成）
+ *   - ended         → 绿点（执行完成——会话级终态）
  *   - 活性 working  → 动态转圈（正在执行——本平台 active 只表示「会话开着」
  *                     哪怕空闲，故「进行中」以活性推导 working 为准）
  *   - 活性 blocked  → 琥珀点（在等你：等审批/等回答）
  *   - reconnecting  → 动态转圈（断线恢复中，动态过程）
- *   - 其余（active 空闲 / pending 排队 / suspended 挂起 / 活性 idle/unknown /
+ *   - 活性 idle + 完成标记 → 绿点（一轮任务刚跑完待查看——working/blocked→idle
+ *                     转移写的完成通知，点击进入后随角标一并消失回归留白）
+ *   - 其余（空闲已读 / active 空闲 / pending / suspended / 活性 unknown /
  *     无活性数据）→ null：行首槽零可见内容，视觉留白。
  * 判定序即优先级：终态（failed/ended）权威优先，不被陈旧活性数据覆盖。
  */
@@ -598,10 +604,11 @@ type SessionStatusIndicator =
   | { kind: "spinner"; label: string }
   | null;
 
-/** 行首状态标识单一源（status × 活性 state → 形态；纯函数便于单测）。 */
+/** 行首状态标识单一源（status × 活性 state × 完成标记 → 形态；纯函数便于单测）。 */
 function sessionStatusIndicator(
   status: AgentSessionStatus,
   livenessState?: AgentLogListItem["state"] | null,
+  completedUnread?: boolean,
 ): SessionStatusIndicator {
   if (status === "failed")
     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
@@ -611,6 +618,8 @@ function sessionStatusIndicator(
   if (livenessState === "blocked")
     return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
   if (status === "reconnecting") return { kind: "spinner", label: "恢复中" };
+  if (livenessState === "idle" && completedUnread)
+    return { kind: "dot", cls: "bg-success", label: "执行完成" };
   return null;
 }
 
@@ -693,50 +702,6 @@ interface GroupSection {
    * 当前可见列表的分身子会话收纳，可折叠默认收起，防分页边界丢行）。 */
   isSubOrphan?: boolean;
   sessions: AgentSessionRead[];
-}
-
-/* ────────── 执行完成通知（2026-10-15-session-status-dot-semantics 用户补充） ────────── */
-
-/**
- * 会话执行完成通知：非终态 → ended 且当前不在该会话上 → 行首槽亮绿色通知
- * 角标（「此会话已执行完成」），点击进入（selected 边沿）后消失——与活性
- * 未读（use-session-liveness isUnread/clearUnread）同款通知语义。
- * 键名风格对齐 `sillyhub:liveness-unread:` 前缀惯例；全 try/catch 降级
- * （存储不可用不误亮不崩溃）。
- */
-const COMPLETED_UNREAD_KEY_PREFIX = "sillyhub:session-completed-unread:";
-
-/** 完成通知角标判定（渲染期直读存储；不可用恒 false——fail-open 不误亮）。 */
-function isCompletedUnread(sessionId: string): boolean {
-  try {
-    return (
-      window.localStorage.getItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId) !==
-      null
-    );
-  } catch {
-    return false;
-  }
-}
-
-/** 写完成通知标记（值为发现完成的时刻，仅存在性语义）。 */
-function markCompletedUnread(sessionId: string): void {
-  try {
-    window.localStorage.setItem(
-      COMPLETED_UNREAD_KEY_PREFIX + sessionId,
-      String(Date.now()),
-    );
-  } catch {
-    // 存储不可用：通知不亮，不崩。
-  }
-}
-
-/** 清除完成通知标记（selected 置真时由 SessionRow 调，覆盖点击/Enter/深链）。 */
-function clearCompletedUnread(sessionId: string): void {
-  try {
-    window.localStorage.removeItem(COMPLETED_UNREAD_KEY_PREFIX + sessionId);
-  } catch {
-    // 同上降级。
-  }
 }
 
 /* ────────────────────── 组件 ────────────────────── */
@@ -1065,23 +1030,27 @@ function WorkspaceTreeList({
   const totalFromServer = sessionsQuery.data?.total ?? 0;
 
   // ── 2026-09-08-session-list-liveness-dot task-02 / FR-01 / D-001@v2 ─────
-  // 行尾活性小灯数据源：useSessionLiveness 固定 all 槽 30s 轮询 + 客户端
-  // working/blocked→idle 转移检测（未读标记）。本面板调一次建 map，经
-  // WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未命
-  // 中不传 → 不渲染灯，fail-open 与无日志会话现状一致）。
+  // 活性数据源：useSessionLiveness 固定 all 槽 30s 轮询。本面板调一次建 map，
+  // 经 WorkspaceGroupNode → SessionRow props 链按 session.id 命中下发（map 未
+  // 命中不传 → 非终态行留白，fail-open 与无日志会话现状一致）。
   // quick（ql-20260916-007）：活性灯条件轮询——全空闲列表灯无渲染意义
   // （行不命中 map 不亮），hasActiveSessions=false 时停 30s 轮询省空闲噪音。
+  // 2026-10-15-session-turn-completion-semantics：hook 的转移检测负责「轮次
+  // 完成」标记（working/blocked→idle）；正选中该会话时 suppress——用户就在
+  // 其上看完收尾，无需通知。
   const hasActiveSessionsForLiveness = sessions.some(
     (s) => s.status !== "ended" && s.status !== "failed",
   );
   const { bySessionId: livenessBySessionId } = useSessionLiveness({
     enabled: hasActiveSessionsForLiveness,
+    suppress: (id) => id === selectedSessionId,
   });
 
-  // ── 执行完成通知检测（2026-10-15-session-status-dot-semantics 用户补充）──
-  // 会话由非终态翻 ended 且当前不选中该会话（用户不在其上）→ 落盘完成通知
-  // 标记 + 自增 epoch 强制行重读（isCompletedUnread 渲染期直读存储，与活性
-  // 未读 unreadEpoch 同款机制）。selected 边沿清除归 SessionRow（点击/Enter/
+  // ── 执行完成通知检测·会话终态来源（2026-10-15-session-status-dot-semantics
+  // 用户补充）──会话由非终态翻 ended 且当前不选中该会话（用户不在其上）→ 落盘
+  // 完成通知标记 + 自增 epoch 强制行重读（isCompletedUnread 渲染期直读存储）。
+  // 轮次完成来源（working/blocked→idle）在 use-session-liveness hook 内检测，
+  // 两来源共用同一键与同一角标。selected 边沿清除归 SessionRow（点击/Enter/
   // 深链三路入口）。检测基线 prevStatusRef 在内存：挂载后首个快照为基线——
   // 历史已终态会话不误报；页面关闭期间完成的会话不补报（挂载期轮询检测）。
   const prevStatusRef = useRef<Map<string, AgentSessionStatus>>(new Map());
@@ -2980,7 +2949,6 @@ function WorkspaceGroupNode({
                           hideEngineChip={hideEngineChip}
                           onSelect={onSelect}
                           liveness={liveness}
-                          livenessUnread={liveness ? isUnread(s.id) : undefined}
                           completedUnread={isCompletedUnread(s.id)}
                           batchMode={batchActive}
                           checked={checkedIds.has(s.id)}
@@ -3048,11 +3016,6 @@ function WorkspaceGroupNode({
                                   onSelect={onSelect}
                                   /* task-02：分身行照主行透传（map 命中才有值）。 */
                                   liveness={livenessBySessionId?.get(c.id)}
-                                  livenessUnread={
-                                    livenessBySessionId?.get(c.id)
-                                      ? isUnread(c.id)
-                                      : undefined
-                                  }
                                   completedUnread={isCompletedUnread(c.id)}
                                   batchMode={batchActive}
                                   checked={checkedIds.has(c.id)}
@@ -3124,11 +3087,6 @@ function WorkspaceGroupNode({
                                   hideEngineChip={hideEngineChip}
                                   onSelect={onSelect}
                                   liveness={livenessBySessionId?.get(c.id)}
-                                  livenessUnread={
-                                    livenessBySessionId?.get(c.id)
-                                      ? isUnread(c.id)
-                                      : undefined
-                                  }
                                   completedUnread={isCompletedUnread(c.id)}
                                   batchMode={batchActive}
                                   checked={checkedIds.has(c.id)}
@@ -3223,11 +3181,11 @@ interface SessionRowProps {
    * 行尾小灯——无关联日志会话行为与现状一致）。
    */
   liveness?: AgentLogListItem;
-  /** working/blocked→idle 新转移未读（isUnread 命中才传；selected 置真清除）。 */
-  livenessUnread?: boolean;
   /**
-   * 执行完成通知（2026-10-15 用户补充）：会话翻 ended 时不在本会话上 → 绿色
-   * 通知角标，点击进入（selected 边沿）后消失——isCompletedUnread 渲染期取值。
+   * 执行完成通知（2026-10-15-session-turn-completion-semantics）：两来源共用
+   * ——①会话非终态→ended（面板检测）②活性 working/blocked→idle 轮次完成
+   * （hook 检测）——落同一键，行首亮绿色完成角标+绿点，点击进入（selected
+   * 边沿）后消失（isCompletedUnread 渲染期取值）。
    */
   completedUnread?: boolean;
 }
@@ -3281,25 +3239,25 @@ function SessionLivenessPopoverContent({ entry }: { entry: AgentLogListItem }) {
 }
 
 /**
- * 行首状态槽（2026-10-15-session-status-dot-semantics）：原 6px 状态点与行尾
- * 活性灯合并后的单一标识位——18px flex-none 槽恒渲染（留白行透明占位，保各
- * 行标题对齐），槽内按 indicator 形态渲染：
- *   - dot：8px 语义色圆点（红=异常 / 绿=完成 / 琥珀=在等你）
+ * 行首状态槽（2026-10-15-session-status-dot-semantics；2026-10-15-session-turn-
+ * completion-semantics 角标统一）：原 6px 状态点与行尾活性灯合并后的单一标识
+ * 位——18px flex-none 槽恒渲染（留白行透明占位，保各行标题对齐），槽内按
+ * indicator 形态渲染：
+ *   - dot：8px 语义色圆点（红=异常 / 绿=执行完成（会话终态或轮次刚完成待查看）/
+ *     琥珀=在等你）
  *   - spinner：Loader2 12px 动态转圈（正在执行 / 断线恢复中）
- *   - null：零可见内容（空闲/排队/挂起/未知——「没有动态的留白」）
- * 角标两枚（absolute 右上，互斥场景不叠加）：活性未读红角标（原行尾灯位迁
- * 入）+ 执行完成通知绿角标（点击进入后消失）。活性条目命中时整槽包 Popover
- * （原行尾灯悬停卡平移，portal 渲染防行根 overflow-hidden 裁剪——Grill BL-02）。
+ *   - null：零可见内容（空闲已读/排队/挂起/未知——「没有动态的留白」）
+ * 角标一枚：执行完成通知绿角标（会话终态与轮次完成两来源共一键，点击进入后
+ * 随绿点一并消失）。活性条目命中时整槽包 Popover（悬停卡，portal 渲染防行根
+ * overflow-hidden 裁剪——Grill BL-02）。
  */
 function SessionStatusSlot({
   indicator,
   liveness,
-  unread,
   completedUnread,
 }: {
   indicator: SessionStatusIndicator;
   liveness?: AgentLogListItem;
-  unread?: boolean;
   completedUnread?: boolean;
 }) {
   const slot = (
@@ -3317,12 +3275,6 @@ function SessionStatusSlot({
         <Loader2
           aria-label={indicator.label}
           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground"
-        />
-      )}
-      {unread && (
-        <span
-          aria-label="有新的空闲状态未读"
-          className="absolute right-0 top-0 h-[7px] w-[7px] rounded-full border-[1.5px] border-card bg-destructive"
         />
       )}
       {completedUnread && (
@@ -3369,7 +3321,6 @@ function SessionRow({
   exporting,
   hideEngineChip,
   liveness,
-  livenessUnread,
   completedUnread,
 }: SessionRowProps) {
   // ── task-07（2026-09-07-session-pin-rename-scheduled-send / FR-02）：行内
@@ -3377,21 +3328,16 @@ function SessionRow({
   // renameCancelledRef 标记 Esc 路径，防 setEditing(false) 触发的 blur 再提交。
   const [editing, setEditing] = useState(false);
   const renameCancelledRef = useRef(false);
-  // ── 2026-09-08-session-list-liveness-dot task-02 / FR-03 / D-001@v2：selected
-  // prop false→true 边沿清除该会话 idle 未读标记——覆盖点击选中 / 行级 Enter /
-  // 深链 ?session= 三路入口（深链经 selected 初挂即 true，wasSelectedRef 初值
-  // false 首跑即清）；批量模式勾选走 onToggleCheck 不动 selected，不触发清除。
+  // ── selected prop false→true 边沿清除完成通知（原活性 idle 未读同槽位，
+  // 2026-10-15-session-turn-completion-semantics 起统一为绿色完成角标）——覆盖
+  // 点击选中 / 行级 Enter / 深链 ?session= 三路入口（深链经 selected 初挂即
+  // true，wasSelectedRef 初值 false 首跑即清）；批量模式勾选走 onToggleCheck
+  // 不动 selected，不触发清除。
   const wasSelectedRef = useRef(false);
-  // 未读红点本地显示态：真源是 localStorage（isUnread 经 props 每渲染期取值），
-  // 但 selected 边沿的 clearUnread 在 effect 里执行后需要本行即时重渲染红点才
-  // 消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地态跟随 props 同步、
-  // 边沿清除时立即置 false。
-  const [unreadVisible, setUnreadVisible] = useState(Boolean(livenessUnread));
-  useEffect(() => {
-    setUnreadVisible(Boolean(livenessUnread));
-  }, [livenessUnread]);
-  // 完成通知角标本地显示态（与 unreadVisible 同款模式：真源 localStorage，
-  // selected 边沿清除后本地即时置 false，防等下轮渲染残影）。
+  // 完成通知本地显示态：真源是 localStorage（isCompletedUnread 经 props 每渲染
+  // 期取值），但 selected 边沿的 clearCompletedUnread 在 effect 里执行后需要本
+  // 行即时重渲染角标才消失（否则要等下一轮轮询重渲染，最长 30s 残影）——本地
+  // 态跟随 props 同步、边沿清除时立即置 false。
   const [completedUnreadVisible, setCompletedUnreadVisible] = useState(
     Boolean(completedUnread),
   );
@@ -3400,9 +3346,6 @@ function SessionRow({
   }, [completedUnread]);
   useEffect(() => {
     if (selected && !wasSelectedRef.current) {
-      clearUnread(session.id);
-      setUnreadVisible(false);
-      // 完成通知同边沿清除（点击/Enter/深链三路入口共用）。
       clearCompletedUnread(session.id);
       setCompletedUnreadVisible(false);
     }
@@ -3508,9 +3451,12 @@ function SessionRow({
              + 行尾活性灯合并——两套点并存语义打架，单一源 sessionStatusIndicator
              四分类+琥珀；无标识时槽透明留白，仅占位对齐不渲染任何可见点）。 */
           <SessionStatusSlot
-            indicator={sessionStatusIndicator(session.status, liveness?.state)}
+            indicator={sessionStatusIndicator(
+              session.status,
+              liveness?.state,
+              completedUnreadVisible,
+            )}
             liveness={liveness}
-            unread={unreadVisible}
             completedUnread={completedUnreadVisible}
           />
         )}

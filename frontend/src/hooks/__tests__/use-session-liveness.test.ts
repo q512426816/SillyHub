@@ -1,18 +1,21 @@
 /**
  * useSessionLiveness 单测（2026-09-08-session-list-liveness-dot task-03 /
- * FR-01 / FR-03 / D-001@v2 / D-003@v1）。
+ * FR-01 / FR-03 / D-001@v2 / D-003@v1；2026-10-15-session-turn-completion-
+ * semantics 转移检测重定义）。
  *
  * 依据：
- *   - hooks/use-session-liveness.ts（task-01 实现：固定 all 槽 30s 轮询 +
- *     map DESC 首胜 + 客户端转移检测状态机）；
- *   - tasks/task-03.md acceptance：map 构建首个胜出 / queryKey 固定 all 槽 /
- *     转移各边（working→idle 亮、blocked→idle 亮、unknown→idle 不亮、首见不
- *     亮）/ 存储异常降级不崩；
+ *   - hooks/use-session-liveness.ts（固定 all 槽 30s 轮询 + map DESC 首胜 +
+ *     客户端转移检测状态机；working/blocked→idle = 一轮执行结束 → 写完成通知
+ *     标记 lib/session-completed-unread，取代原红色「空闲未读」）；
+ *   - tasks 验收：map 构建首个胜出 / queryKey 固定 all 槽 / 转移各边
+ *     （working→idle 标、blocked→idle 标、unknown→idle 不标、首见不标）/
+ *     suppress 谓词（正选中会话不标）/ 存储异常降级不崩；
  *   - use-scheduled-messages.test.ts 既有 hook 测试模式（vi.mock 数据源模块 +
  *     renderHook + QueryClientProvider wrapper 经 createElement 包，.ts 免 JSX）。
  *
- * localStorage 用真实 jsdom localStorage 造数（转移 prevState 种子/未读断言），
- * beforeEach 清 sillyhub:liveness-* 键隔离跨用例。
+ * localStorage 用真实 jsdom localStorage 造数（转移 prevState 种子/完成标记
+ * 断言），beforeEach 清 sillyhub:liveness-state:* 与 sillyhub:session-completed-
+ * unread:* 键隔离跨用例。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
@@ -22,10 +25,12 @@ import * as React from "react";
 import {
   SESSION_LIVENESS_QUERY_KEY,
   buildLivenessBySessionId,
-  clearUnread,
-  isUnread,
   useSessionLiveness,
 } from "@/hooks/use-session-liveness";
+import {
+  clearCompletedUnread,
+  isCompletedUnread,
+} from "@/lib/session-completed-unread";
 import type { AgentLogListItem } from "@/lib/agent-logs";
 
 const mocks = vi.hoisted(() => ({
@@ -73,14 +78,14 @@ function makeWrapper() {
 }
 
 const STATE_KEY = (id: string) => `sillyhub:liveness-state:${id}`;
-const UNREAD_KEY = (id: string) => `sillyhub:liveness-unread:${id}`;
+const COMPLETED_KEY = (id: string) => `sillyhub:session-completed-unread:${id}`;
 
-/** 清 liveness 两族 localStorage 键（跨用例隔离）。 */
+/** 清 liveness state 与完成通知两族 localStorage 键（跨用例隔离）。 */
 function clearLivenessStorage() {
   for (const key of Object.keys(window.localStorage)) {
     if (
       key.startsWith("sillyhub:liveness-state:") ||
-      key.startsWith("sillyhub:liveness-unread:")
+      key.startsWith("sillyhub:session-completed-unread:")
     ) {
       window.localStorage.removeItem(key);
     }
@@ -149,13 +154,15 @@ describe("useSessionLiveness queryKey 固定 all 槽", () => {
   });
 });
 
-// ── 转移检测状态机（D-001@v2：仅比较 prevState 与 current 的 state 值） ────
+// ── 转移检测状态机（2026-10-15-session-turn-completion-semantics：仅比较
+//    prevState 与 current 的 state 值；working/blocked→idle = 轮次完成） ────
 
-describe("useSessionLiveness 转移检测状态机", () => {
+describe("useSessionLiveness 轮次完成转移检测", () => {
   /** 种 prevState 后挂载 hook 并等到数据到位。 */
   async function mountWithState(
     prevState: string | null,
     current: AgentLogListItem["state"],
+    opts: { suppress?: (_sessionId: string) => boolean } = {},
   ) {
     if (prevState !== null) {
       window.localStorage.setItem(STATE_KEY("sess-1"), prevState);
@@ -164,7 +171,7 @@ describe("useSessionLiveness 转移检测状态机", () => {
       items: [makeLivenessEntry({ agent_session_id: "sess-1", state: current })],
     });
     const { wrapper } = makeWrapper();
-    const { result } = renderHook(() => useSessionLiveness(), { wrapper });
+    const { result } = renderHook(() => useSessionLiveness(opts), { wrapper });
     await waitFor(() => expect(result.current.bySessionId.size).toBe(1));
     // effect 落盘后再断言（state 键更新到位 = 状态机跑完）。
     await waitFor(() =>
@@ -173,55 +180,63 @@ describe("useSessionLiveness 转移检测状态机", () => {
     return result;
   }
 
-  it("working→idle：写未读标记（红点来源）", async () => {
+  it("working→idle：写轮次完成标记（绿角标来源）", async () => {
     await mountWithState("working", "idle");
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).not.toBeNull();
-    expect(isUnread("sess-1")).toBe(true);
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).not.toBeNull();
+    expect(isCompletedUnread("sess-1")).toBe(true);
   });
 
-  it("blocked→idle：同写未读标记", async () => {
+  it("blocked→idle：同写轮次完成标记", async () => {
     await mountWithState("blocked", "idle");
-    expect(isUnread("sess-1")).toBe(true);
+    expect(isCompletedUnread("sess-1")).toBe(true);
   });
 
-  it("unknown→idle：不写未读（仅 working/blocked 是来源态）", async () => {
+  it("unknown→idle：不写完成标记（仅 working/blocked 是来源态）", async () => {
     await mountWithState("unknown", "idle");
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
-    expect(isUnread("sess-1")).toBe(false);
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
+    expect(isCompletedUnread("sess-1")).toBe(false);
   });
 
-  it("首见（无 prevState）→idle：不写未读，仅落 state 键", async () => {
+  it("首见（无 prevState）→idle：不写完成标记，仅落 state 键", async () => {
     await mountWithState(null, "idle");
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
-    expect(isUnread("sess-1")).toBe(false);
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
+    expect(isCompletedUnread("sess-1")).toBe(false);
   });
 
-  it("working→ended（非 idle 目标态）：不写未读，state 键照常更新", async () => {
+  it("working→ended（非 idle 目标态）：不写完成标记，state 键照常更新", async () => {
     await mountWithState("working", "ended");
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
     expect(window.localStorage.getItem(STATE_KEY("sess-1"))).toBe("ended");
   });
-});
 
-// ── 未读 helper（isUnread / clearUnread） ────────────────────────────────
-
-describe("useSessionLiveness 未读 helper", () => {
-  it("isUnread 按 unread 键存在性判定；clearUnread 删除标记", () => {
-    expect(isUnread("sess-x")).toBe(false);
-    window.localStorage.setItem(UNREAD_KEY("sess-x"), String(Date.now()));
-    expect(isUnread("sess-x")).toBe(true);
-    clearUnread("sess-x");
-    expect(isUnread("sess-x")).toBe(false);
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-x"))).toBeNull();
+  it("suppress 谓词命中（正选中该会话）：转移不标记，state 键照常更新", async () => {
+    await mountWithState("working", "idle", {
+      suppress: (id) => id === "sess-1",
+    });
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
+    expect(isCompletedUnread("sess-1")).toBe(false);
   });
 });
 
-// ── 存储异常降级（localStorage 不可用不崩、不亮红点） ─────────────────────
+// ── 完成标记 helper（lib/session-completed-unread 往返） ─────────────────
+
+describe("完成通知标记 helper（lib/session-completed-unread）", () => {
+  it("isCompletedUnread 按键存在性判定；clearCompletedUnread 删除标记", () => {
+    expect(isCompletedUnread("sess-x")).toBe(false);
+    window.localStorage.setItem(COMPLETED_KEY("sess-x"), String(Date.now()));
+    expect(isCompletedUnread("sess-x")).toBe(true);
+    clearCompletedUnread("sess-x");
+    expect(isCompletedUnread("sess-x")).toBe(false);
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-x"))).toBeNull();
+  });
+});
+
+// ── 存储异常降级（localStorage 不可用不崩、不亮角标） ─────────────────────
 
 describe("useSessionLiveness 存储异常降级", () => {
   // jsdom 的 localStorage 是 Proxy（实例级 spyOn 拦不到转发后的底层方法），
   // 降级注入点打在 Storage.prototype 上。
-  it("setItem 抛错：转移检测停摆（不写未读）但 hook 正常返回数据不崩", async () => {
+  it("setItem 抛错：转移检测停摆（不写完成标记）但 hook 正常返回数据不崩", async () => {
     window.localStorage.setItem(STATE_KEY("sess-1"), "working");
     const setItemSpy = vi
       .spyOn(Storage.prototype, "setItem")
@@ -235,20 +250,20 @@ describe("useSessionLiveness 存储异常降级", () => {
     const { result } = renderHook(() => useSessionLiveness(), { wrapper });
     await waitFor(() => expect(result.current.bySessionId.size).toBe(1));
     expect(result.current.bySessionId.get("sess-1")?.state).toBe("idle");
-    // 写不进 → 未读不亮，且渲染/取数无异常抛出。
-    expect(window.localStorage.getItem(UNREAD_KEY("sess-1"))).toBeNull();
+    // 写不进 → 完成标记不落，且渲染/取数无异常抛出。
+    expect(window.localStorage.getItem(COMPLETED_KEY("sess-1"))).toBeNull();
     setItemSpy.mockRestore();
   });
 
-  it("getItem 抛错：isUnread 恒 false（fail-open 不误亮）", () => {
-    // 先种真实未读键，证伪「读不到键所以 false」——抛错路径也必须收敛 false。
-    window.localStorage.setItem(UNREAD_KEY("sess-y"), String(Date.now()));
+  it("getItem 抛错：isCompletedUnread 恒 false（fail-open 不误亮）", () => {
+    // 先种真实完成键，证伪「读不到键所以 false」——抛错路径也必须收敛 false。
+    window.localStorage.setItem(COMPLETED_KEY("sess-y"), String(Date.now()));
     const getItemSpy = vi
       .spyOn(Storage.prototype, "getItem")
       .mockImplementation(() => {
         throw new Error("SecurityError");
       });
-    expect(isUnread("sess-y")).toBe(false);
+    expect(isCompletedUnread("sess-y")).toBe(false);
     getItemSpy.mockRestore();
   });
 });
