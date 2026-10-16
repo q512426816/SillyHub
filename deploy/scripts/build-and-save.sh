@@ -19,6 +19,27 @@ DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$DEPLOY_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+echo "==> [0/5] 部署并流校验（2026-10-16 互覆事故后新增）"
+# 事故背景：多会话共享同一生产，另一会话从分叉分支打包部署，静默回退 main 上已修复的
+# /data/logs 预建（页面日志再次不可见）。闸门：非 main 分支打包需显式放行 + 打印留痕。
+DEPLOY_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+DEPLOY_COMMIT="$(git rev-parse --short HEAD)"
+echo "    打包源: 分支 $DEPLOY_BRANCH @ $DEPLOY_COMMIT"
+if [ "$DEPLOY_BRANCH" != "main" ]; then
+  echo "    ⚠️  当前分支不是 main——镜像将对生产形成覆盖部署，非 main 版本会回退主线已有修复："
+  echo "        2026-10-16 实证：分叉分支部署覆盖 main 的 /data/logs 修复，页面日志再次不可见。"
+  echo "        建议：切 main 并同步主线后重新打包；确需分支部署设 ALLOW_NON_MAIN_DEPLOY=1 显式放行。"
+  [ "${ALLOW_NON_MAIN_DEPLOY:-}" = "1" ] || exit 1
+  echo "    （已设 ALLOW_NON_MAIN_DEPLOY=1——显式放行非 main 部署，留痕。）"
+fi
+DIRTY_APP="$(git status --porcelain -- backend frontend sillyhub-daemon deploy | head -5)"
+if [ -n "$DIRTY_APP" ]; then
+  echo "    ⚠️  应用目录存在未提交改动——镜像=工作区快照，将带上未合入代码："
+  printf '%s\n' "$DIRTY_APP" | sed 's/^/        /'
+  echo "        建议先提交/合流；确需带改动打包设 ALLOW_DIRTY_DEPLOY=1 显式放行。"
+  [ "${ALLOW_DIRTY_DEPLOY:-}" = "1" ] || exit 1
+fi
+
 echo "==> [1/5] 检查 Docker 运行"
 docker info >/dev/null
 

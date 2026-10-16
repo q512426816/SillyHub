@@ -52,6 +52,21 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'docker compose ls 2>/dev/nu
 
 ## 更新部署（日常用，最常用）
 
+### 0. 部署并流校验（2026-10-16 互覆事故后强制）
+
+**背景**：多会话共享同一台生产服务器，各会话从自己的 worktree/分支打包部署会**互相覆盖**——2026-10-16 实证：分叉分支部署静默回退 main 上当天已修复的 `/data/logs` 预建，页面日志再次不可见（生产跑起了一个不含主线修复的版本）。
+
+**铁律：打包必须基于 main 主线**（主仓 `git rev-parse --abbrev-ref HEAD` 为 main，且应用目录无未提交改动）。`build-and-save.sh` 已内置两道闸门：
+- 非 main 分支打包 → 直接退出（确需分支部署时 `ALLOW_NON_MAIN_DEPLOY=1` 显式放行并留痕）；
+- `backend/frontend/sillyhub-daemon/deploy` 有未提交改动 → 退出（`ALLOW_DIRTY_DEPLOY=1` 放行）——镜像=工作区快照，脏工作区会把未合入代码带上生产。
+
+**部署后必须核对版本**（见 §4）：health 的 `commit_sha` 与打包时打印的 commit 一致才算验收通过；不一致 = 刚被别人覆盖部署，按下方处置。
+
+**被覆盖的识别与恢复**：
+1. 服务器上 `curl -s http://127.0.0.1:8001/api/health` 拿 `commit_sha`；与打包 commit 不符即被覆盖（另可 `docker images | grep backend` 看 created 时间判断）；
+2. 恢复：在 main 主线重新打包 → scp → load-and-up（**勿用分支版本"就地回滚"**——分叉分支缺主线修复，这正是事故本身；要保留对方分支的未合入交付，先合流再部署）；
+3. 记录：按发布记录惯例写明"恢复部署（被 X 覆盖）"。
+
 ### 1. 本地打包（20 核，几分钟）
 
 daemon 的 `src/` 改过才要重打 bundle（只改 install 脚本不影响 bundle JS，可跳过）：
@@ -61,8 +76,9 @@ cd sillyhub-daemon && pnpm bundle && cd ..   # 产出 build/bundle/{sillyhub-dae
 
 打包（生产 API 地址覆盖前端 build-arg；本地 `.env` 的 `127.0.0.1` 是开发值，必须覆盖）：
 ```bash
-PROD_API_URL=http://192.168.0.143:8001 bash deploy/scripts/build-and-save.sh
+PROD_API_URL=https://crrcdt.ppdmq.top bash deploy/scripts/build-and-save.sh
 # 产出 deploy/images.tar.gz（backend + frontend 两镜像 gzip，约 300M）
+# 输出会打印「打包源: 分支 main @ <short-sha>」——记下该 sha，部署后核对用
 ```
 
 > `PROD_API_URL` 是生产环境前端浏览器访问后端的地址（取自服务器 `.env` 的 `NEXT_PUBLIC_API_BASE_URL`）。改了必须重新打包前端（`NEXT_PUBLIC_` 是 build 时固化到客户端的）。
@@ -107,6 +123,7 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 ```
 - 5 个容器全 healthy（backend / frontend / postgres / redis / minio）
 - health 返回 `{"status":"ok","db":"ok","redis":"ok",...}`
+- **`commit_sha` 必须与打包时打印的短 sha 一致**（2026-10-16 互覆事故后强制）——不一致说明部署后已被其他会话覆盖，见 §0「被覆盖的识别与恢复」
 
 backend 镜像变更会自动跑 `alembic upgrade head`，看 logs 确认无报错：
 ```bash
