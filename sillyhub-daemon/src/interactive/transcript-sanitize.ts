@@ -127,16 +127,38 @@ function privateCallToText(block: ContentBlock): ContentBlock {
   };
 }
 
-/** 私有结果块 → 等价 text 块（正文全量保留）。 */
+/**
+ * 私有结果块 → 等价 text 块（文本正文全量保留；非文本部分无法文本化，如实计数标注）。
+ *
+ * 2026-10-16 评审 P3-2：结果内容可能是混合块（图片等非文本无法转成 text）——原先
+ * 静默丢弃却仍写「已转为文本保留」，与事实不符。此处如实标注被丢弃的非文本块数量，
+ * 文本为空时也明说「无文本内容」。
+ */
 function privateResultToText(block: ContentBlock): ContentBlock {
   const type = String(block.type ?? '');
   const text = extractBlockText(block.content);
+  const droppedNonText = countNonTextParts(block.content);
+  const body =
+    text.length > 0
+      ? `\n${text}`
+      : '\n（该结果无文本内容，无法保留）';
+  const dropped = droppedNonText > 0 ? `\n（另含 ${droppedNonText} 个非文本内容块，无法转为文本，未保留）` : '';
   return {
     type: 'text',
-    text:
-      `${SANITIZE_TEXT_PREFIX}原为供应商私有工具块 ${type} 的结果，已转为文本保留：` +
-      (text.length > 0 ? `\n${text}` : ''),
+    text: `${SANITIZE_TEXT_PREFIX}原为供应商私有工具块 ${type} 的结果，已转为文本保留：${body}${dropped}`,
   };
+}
+
+/** 结果内容里的非文本块计数（数组形态才可能混合；字符串/其它视为全部文本）。 */
+function countNonTextParts(content: unknown): number {
+  if (!Array.isArray(content)) return 0;
+  let n = 0;
+  for (const item of content) {
+    if (typeof item === 'string') continue;
+    if (item && typeof item === 'object' && typeof (item as ContentBlock).text === 'string') continue;
+    n += 1;
+  }
+  return n;
 }
 
 /**
@@ -144,10 +166,12 @@ function privateResultToText(block: ContentBlock): ContentBlock {
  *
  * 逐行处理，非 JSON / 形状不符的行原样透传（best-effort：清洗永远不因脏行中断）；
  * 行尾换行风格保持原样（`split('\n')` 后 `join('\n')` 等价还原）。
+ * `droppedRecords` 恒 0——本清洗只替换块、绝不删记录（自证用，供断言与审计对账）。
  */
 export function planTranscriptSanitize(text: string): {
   text: string;
   replacedBlocks: number;
+  droppedRecords: number;
 } {
   const lines = text.split('\n');
 
@@ -174,7 +198,7 @@ export function planTranscriptSanitize(text: string): {
   }
 
   if (privateIds.size === 0) {
-    return { text, replacedBlocks: 0 };
+    return { text, replacedBlocks: 0, droppedRecords: 0 };
   }
 
   // 第二遍：改写命中块（调用侧按类型，结果侧按 tool_use_id 归属）。
@@ -213,7 +237,7 @@ export function planTranscriptSanitize(text: string): {
     return JSON.stringify({ ...record, message: { ...record.message, content: nextContent } });
   });
 
-  return { text: outLines.join('\n'), replacedBlocks };
+  return { text: outLines.join('\n'), replacedBlocks, droppedRecords: 0 };
 }
 
 /** 备份文件名时间戳（Windows 文件名禁冒号，统一替换为 `-`）。 */
@@ -221,12 +245,30 @@ function backupStamp(now: Date): string {
   return now.toISOString().replace(/[:.]/g, '-');
 }
 
+/** 文件级清洗的可注入缝（仅测试用——生产调用不传）。 */
+export interface SanitizeOptions {
+  /**
+   * 读盘与写盘之间的插入点（评审 P2-2 的并发写守护测试用）。
+   * 生产路径不传：正常流程 toggle 为 no-op。
+   */
+  beforeWrite?: () => void | Promise<void>;
+}
+
 /**
  * 文件级清洗：备份 + 原子改写（幂等；IO/解析异常不抛，返回 `changed=false`）。
  *
  * 调用时机见 design §接口契约：reload 切供应商路径在 transcript 迁移之后、resume 之前。
+ *
+ * 并发写守护（2026-10-16 评审 P2-2）：本函数是「读全文 → 计划 → 整文件原子顶替」，
+ * 若在读写之间另一执行体（如仍存活的旧 CLI 句柄在 close 前追加了一轮）写入了新内容，
+ * 直接顶替会**吞掉那次追加**。故写盘前重读一次比对：与计划基线不一致（= 期间被改）
+ * 则放弃本次清洗并返回 `changed=false`（降级语义同其它失败路径：最坏退回清洗前行为，
+ * 绝不丢数据）。代价是一次 6MB 级重读，只在真正的供应商切换路径发生一次。
  */
-export async function sanitizeClaudeTranscriptForReplay(filePath: string): Promise<{
+export async function sanitizeClaudeTranscriptForReplay(
+  filePath: string,
+  opts: SanitizeOptions = {},
+): Promise<{
   filePath: string;
   changed: boolean;
   replacedBlocks: number;
@@ -247,6 +289,12 @@ export async function sanitizeClaudeTranscriptForReplay(filePath: string): Promi
 
   const backupPath = `${filePath}.bak-sillyhub-${backupStamp(new Date())}`;
   try {
+    // 评审 P2-2 守护：写前重读比对，期间被追加/改写则放弃（不吞并发写）。
+    await opts.beforeWrite?.();
+    const fresh = await readFile(filePath, 'utf-8');
+    if (fresh !== original) {
+      return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
+    }
     // 备份先行：备份失败则不改写（宁可不清洗，也不让原文件无备份可回退）。
     await copyFile(filePath, backupPath);
     await writeFileAtomic(filePath, planned.text);

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-provider-switch-transcript-sanitize",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "47249a1350414ad906794f5794550952c712afdb",
+  "findings": [
+    {
+      "severity": "P2",
+      "title": "design 接口契约承诺的 droppedRecords 字段未实现（契约漂移，无功能影响）",
+      "evidence": "design.md:44-48 声明 planTranscriptSanitize 返回 { text, replacedBlocks, droppedRecords }（注释「恒 0，仅为自证留字段」）；实现 transcript-sanitize.ts:245-248 只返回 { text, replacedBlocks }；全仓 grep『droppedRecords』0 命中（src+tests）。无消费方、不影响 FR-01/FR-04 行为，但声明的新增导出签名与代码不一致。",
+      "location": "sillyhub-daemon/src/interactive/transcript-sanitize.ts:245"
+    },
+    {
+      "severity": "P2",
+      "title": "盲维「并发写」防护声明与代码不符：清洗时旧 CLI 仍存活（未 close），同文件并发写窗口存在",
+      "evidence": "清洗调用点 session-manager.ts:2035 位于 driver.start(2149) 与旧句柄 close(2180-2184) 之前，旧 query 在清洗全程未关闭，故设计所称『清洗时刻 CLI 引擎处于已 close 待重建状态、不存在 CLI append 与清洗同写一文件』不成立；对已隔离会话再次切供应商（migrateClaudeTranscriptToIsolated 因 isolated 已命中返回 false、applyTranscriptConfigDir 判 isolated）时，清洗写的就是仍存活旧 CLI 的同一个 jsonl。实际触达需旧 CLI 在毫秒级清洗窗口内产生写入，原子写+备份+reload 空闲触发使风险极低（无事故证据），但宣称的防护机制不存在。",
+      "location": "sillyhub-daemon/src/interactive/session-manager.ts:2035"
+    },
+    {
+      "severity": "P3",
+      "title": "盲维「作用域」作答含事实失真：称『不扫目录』，实现会线性扫 projects/*",
+      "evidence": "findClaudeTranscriptPath 对 <configDir>/projects 逐个一层子目录 readdir 并以 <agentSessionId>.jsonl 精确匹配（claude-transcript-dir.ts:146-163）。按唯一 agentSessionId 文件名匹配且与 resume 同源探测，无跨会话/跨工作区实际串台；但 design.md:93-95『不扫目录、不跨会话』中『不扫目录』与代码不符。",
+      "location": "sillyhub-daemon/src/interactive/claude-transcript-dir.ts:146"
+    },
+    {
+      "severity": "P3",
+      "title": "私有结果块的非文本内容（图片等）被静默丢弃，替换文案仍称「已转为文本保留」",
+      "evidence": "extractBlockText 只提取 string 或 [{type:'text'}] 部件（transcript-sanitize.ts:179-195），图片等非文本部件返回空串被丢弃；privateResultToText 固定文案『…已转为文本保留』（:228-237）无任何丢失告警。实证形态 content 为纯字符串不受影响，但 FR-01『保留原正文』在含图片的私有结果块上不成立。",
+      "location": "sillyhub-daemon/src/interactive/transcript-sanitize.ts:179"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok；边界已裁决：可接受（两遍全文件扫描与块顺序无关；幂等=干净/已清洗文件重跑零写盘零备份；以「替换为 text、不删记录」换取 uuid/parentUuid 链与记录条数不变）",
+    "并发": "finding（P2：旧 CLI 在清洗时未 close，见 findings[1]）；边界已裁决：可接受（备份名带毫秒时间戳避免互覆——同内容二次清洗因幂等 changed=false 不可达；reload 按会话串行化 _reloadChains 与 writeFileAtomic 原子顶替在代码中真实存在）",
+    "切换": "ok；边界已裁决：可接受（清洗失败/探测不到仅 warn 不阻断 reload=R-01 降级；宿主原件主路径不被改写由 SAN-1 锁定；「工具块→text 陈述」的结构语义变化为显式声明取舍，信息保留且优于新供应商下会话永久 400；设计文本称「先清洗再迁移」而代码为迁移→applyTranscriptConfigDir→清洗，清洗目标与 resume 读的是同一文件，行为无风险）；FR-02 证据边界（真实供应商端点不入单测，凭据/成本/网络外依赖）已裁决：可接受（对照实证留痕于 commit 47249a13 与 task-02，单测不引外网属常规取舍，但本评审无法独立复现端点 200/400 对照）",
+    "作用域": "finding（P3：『不扫目录』陈述失真，见 findings[2]；实际无串台）；边界已裁决：可接受（只处理本会话 agentSessionId 对应的那一个 transcript，路径与 resume 同源探测；design 显式遗留「本机默认档位+用户手改宿主 settings.json 换档」不自动清洗，以分类器提示兜底，平台无变更信号可挂钩，范围声明清晰）"
+  },
+  "reviewedAt": "2026-10-16T09:08:32Z"
+}

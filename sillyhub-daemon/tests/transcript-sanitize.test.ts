@@ -267,4 +267,57 @@ describe('sanitizeClaudeTranscriptForReplay — 文件级（FR-01 / FR-04）', (
     expect(backupName).toContain('session.jsonl.bak-sillyhub-');
     expect(backupName).not.toContain(':');
   });
+
+  it('评审 P2-2：读写之间被并发追加 → 放弃清洗（不吞追加、不备份、文件原样）', async () => {
+    const file = join(root, 'session.jsonl');
+    writeJsonl(file, userWithServerToolPair());
+    const baseline = readFileSync(file, 'utf-8');
+
+    // Act：在「读盘 → 计划」与「写盘」之间插入一次外部追加（模拟仍存活的旧 CLI 写盘）。
+    const result = await sanitizeClaudeTranscriptForReplay(file, {
+      beforeWrite: () => {
+        writeFileSync(
+          file,
+          baseline + JSON.stringify(record({ uuid: 'a9', parentUuid: 'u2', role: 'assistant', content: [{ type: 'text', text: '并发追加轮' }] })) + '\n',
+          'utf-8',
+        );
+      },
+    });
+
+    // Assert：放弃清洗（降级），并发追加与脏块都原样保留；零备份。
+    expect(result).toEqual({ filePath: file, changed: false, replacedBlocks: 0, backupPath: null });
+    const after = readFileSync(file, 'utf-8');
+    expect(after).toBe(baseline + JSON.stringify(record({ uuid: 'a9', parentUuid: 'u2', role: 'assistant', content: [{ type: 'text', text: '并发追加轮' }] })) + '\n');
+    expect(after).toContain('call_0a26');
+    expect(readdirSync(root).filter((f) => f.includes('.bak-sillyhub-'))).toHaveLength(0);
+  });
+
+  it('评审 P3-2：结果块含非文本内容/无文本 → 如实标注（不谎称全量文本化）', () => {
+    const records = [
+      record({
+        uuid: 'a1',
+        parentUuid: null,
+        role: 'assistant',
+        content: [
+          { type: 'server_tool_use', id: 'call_img', name: 'analyze_image', input: {} },
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_img',
+            content: [
+              { type: 'text', text: '文本部分' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+            ],
+          },
+          { type: 'server_tool_use', id: 'call_empty', name: 'analyze_image', input: {} },
+          { type: 'tool_result', tool_use_id: 'call_empty', content: [] },
+        ],
+      }),
+    ];
+    const planned = planTranscriptSanitize(records.map((r) => JSON.stringify(r)).join('\n'));
+    expect(planned.replacedBlocks).toBe(4);
+    expect(planned.droppedRecords).toBe(0); // 只替换块、绝不删记录（自证字段）
+    expect(planned.text).toContain('文本部分');
+    expect(planned.text).toContain('另含 1 个非文本内容块');
+    expect(planned.text).toContain('该结果无文本内容');
+  });
 });
