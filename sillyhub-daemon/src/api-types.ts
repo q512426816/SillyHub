@@ -1888,6 +1888,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename Change Title
+         * @description 平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
+         *
+         *     组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
+         *     用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
+         *     经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
+         *     端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
+         *     判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
+         *     给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
+         */
+        patch: operations["rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch"];
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
         parameters: {
             query?: never;
@@ -14619,6 +14646,33 @@ export interface components {
         ChangeRejectProcessReq: {
             /** Comment */
             comment?: string | null;
+        };
+        /**
+         * ChangeRenameRequest
+         * @description PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
+         *
+         *     人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
+         *     strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
+         *     AppError 422 而非 pydantic 422）。
+         */
+        ChangeRenameRequest: {
+            /** Title */
+            title: string;
+        };
+        /**
+         * ChangeRenameResponse
+         * @description PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。
+         */
+        ChangeRenameResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Change Key */
+            change_key: string;
+            /** Title */
+            title: string;
         };
         /** ChangeReparseResponse */
         ChangeReparseResponse: {
@@ -33045,6 +33099,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_change_title_api_workspaces__workspace_id__changes__change_id__title_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeRenameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRenameResponse"];
                 };
             };
             /** @description Validation Error */

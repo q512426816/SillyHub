@@ -105,6 +105,85 @@ def normalize_display_title(h1: str | None, change_key: str) -> str:
 TITLE_MAX_LEN = 500
 
 
+# ── 短标题提炼（2026-10-16-change-title-condense-backfill）──────────────────
+#
+# 病根：完整变更 title 恒为变更名兜底、轻量变更 title 为 CLI「--input 首行 50 字
+# 硬截」长句（sillyspec quicklog.deriveChangeTitle 口径），变更中心不可读。平台侧
+# 两个消费点（收养口防御 + 存量回填脚本）共用本提炼：在自然标点处截断产出约
+# 20 字（区间 [8,30]）短句，语义来源=动机段 description。CLI 侧后续上同规则
+# 实现（sillyspec quicklog），两边用同一组实证样本锚定测试防漂移。
+
+#: 提炼带宽（用户口径 2026-10-16：标题必须简洁达意，10-30 字之内，建议约 20）：
+#: 自然边界**首选**落在 [10,30]（必须带）内；区间内无任何边界时才允许 8~10 的
+#: 兜底下限（短句语义完整优先于凑长度——「清偿跨变更存量债」级别的干净短句
+#: 不为凑 10 字硬切成乱码）。
+TITLE_CONDENSE_MIN_LEN = 10
+TITLE_CONDENSE_FLOOR_LEN = 8
+TITLE_CONDENSE_MAX_LEN = 30
+
+#: 强边界：句读完整处（句号/叹号/问号/分号/省略号/em dash——「——」按单字符两连
+#: 命中，尾随 run 统一剥）。截在此处句子语义完整，不加省略号。
+_CONDENSE_STRONG_BREAKS = "。！？；…—"
+
+#: 弱边界：句内停顿（冒号/逗号/顿号/半角逗号分号冒号）——区间内无强边界时兜底。
+#: 半角句点故意不收（数字小数/文件名误伤面大）。
+_CONDENSE_WEAK_BREAKS = "：，、,;:"
+
+#: 截断后剥除的尾随字符：边界标点 run + 空白（「失败——」截在首个 — 后连剥两个
+#: dash）。引号/括号/书名号不剥——「…被退出登录”」的收引号是语义成分。
+_CONDENSE_TRAILING_RE = re.compile(rf"[{_CONDENSE_STRONG_BREAKS}{_CONDENSE_WEAK_BREAKS}\s]+$")
+
+#: 行首标签前缀（CLI deriveChangeTitle 同款白名单，2026-10-16 生产回填实证：
+#: thin 动机原文常带「动机：」头——不剥则标题以「动机：」开头）。剥完为空则保留原文。
+_CONDENSE_LABEL_RE = re.compile(r"^(?:需求|动机|背景|任务|标题|动机与背景|背景与动机)\s*[:：]\s*")
+
+
+def condense_title(
+    text: str | None,
+    *,
+    min_len: int = TITLE_CONDENSE_MIN_LEN,
+    floor_len: int = TITLE_CONDENSE_FLOOR_LEN,
+    max_len: int = TITLE_CONDENSE_MAX_LEN,
+) -> str:
+    """长文本 → 自然标点截断的短标题（纯函数，10-30 字带、建议约 20）。
+
+    规则（保守：任何一步无产出按序降级）：
+
+    1. 空白折叠单行；长度 ≤ ``max_len`` 原样返回；
+    2. 在 ``[min_len, max_len]``（必须带）找首个**强**边界（句读完整处）截断，
+       无强边界取首个**弱**边界（句内停顿）；自然边界截断不加省略号；
+    3. 必须带内无任何边界 → 降级扫 ``[floor_len, min_len)`` 兜底带（短句语义
+       完整优先于凑长度），仍无才硬截 ``max_len - 1`` 字加 ``…``（总长恰
+       ``max_len``——产物全量落在带内，回填重跑不再因 31 字残留命中）；
+    4. 截断结果剥尾随边界标点 run 与空白（收引号/括号保留）。
+    """
+    if not text:
+        return ""
+    s = re.sub(r"\s+", " ", text).strip()
+    s = _CONDENSE_LABEL_RE.sub("", s) or re.sub(r"\s+", " ", text).strip()
+    if len(s) <= max_len:
+        return s
+
+    def _scan(lo: int, hi: int) -> tuple[int, int]:
+        strong_cut = weak_cut = 0
+        for i in range(max(lo, 1), hi + 1):
+            ch = s[i - 1]
+            if ch in _CONDENSE_STRONG_BREAKS:
+                strong_cut = i
+                break
+            if ch in _CONDENSE_WEAK_BREAKS and not weak_cut:
+                weak_cut = i
+        return strong_cut, weak_cut
+
+    strong_cut, weak_cut = _scan(min_len, max_len)
+    if not (strong_cut or weak_cut):
+        strong_cut, weak_cut = _scan(floor_len, min_len - 1)
+    cut = strong_cut or weak_cut
+    if cut:
+        return _CONDENSE_TRAILING_RE.sub("", s[:cut])
+    return _CONDENSE_TRAILING_RE.sub("", s[: max_len - 1]) + "…"
+
+
 def is_fallback_display_title(title: str | None, change_key: str) -> bool:
     """title 是否为兜底形态：空 / 等于 change_key / 等于去日期前缀语义名 / 裸模板 H1 文本。
 

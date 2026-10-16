@@ -186,6 +186,25 @@ class ChangeDeleteResponse(BaseModel):
     file_count: int
 
 
+class ChangeRenameRequest(BaseModel):
+    """PATCH /changes/{cid}/title 请求（2026-10-16-change-title-condense-backfill FR-05）。
+
+    人工命名带宽（用户口径 2026-10-16：10-30 字之内必须、建议约 20）在服务层
+    strip 后校验（DTO 不设长度约束——错误信息要带当前字数与带宽说明，统一走
+    AppError 422 而非 pydantic 422）。
+    """
+
+    title: str
+
+
+class ChangeRenameResponse(BaseModel):
+    """PATCH /changes/{cid}/title 响应（FR-05）：变更标识 + 改名后的新 title。"""
+
+    id: uuid.UUID
+    change_key: str
+    title: str
+
+
 class ChangeDocMatrixEntry(BaseModel):
     doc_type: str
     exists: bool

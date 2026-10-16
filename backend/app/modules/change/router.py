@@ -44,6 +44,8 @@ from app.modules.change.schema import (
     ChangeList,
     ChangePatchFileRead,
     ChangeRead,
+    ChangeRenameRequest,
+    ChangeRenameResponse,
     ChangeReparseResponse,
     ChangeReparseStats,
     ChangeSummary,
@@ -433,6 +435,53 @@ async def delete_change(
             },
         )
     return await service.delete_change(workspace_id, change_id, actor_id=user.id)
+
+
+@router.patch(
+    "/changes/{change_id}/title",
+    response_model=ChangeRenameResponse,
+)
+async def rename_change_title(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    payload: ChangeRenameRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> ChangeRenameResponse:
+    """平台改名入口（2026-10-16-change-title-condense-backfill FR-05，用户口径 2026-10-16）。
+
+    组合权限与删除端点同款三元组——变更责任人本人（``change.owner_id == 当前
+    用户``）**或** ``CHANGE_ARCHIVE``（workspace_owner 角色内置、platform_admin
+    经 has_permission 短路），即「管理员 || 平台责任人 || 变更责任人」；实现为
+    端点内组合校验（delete_change 同款先例）。带宽校验（10-30 字必须，strip 后
+    判，越带 422）、已删行 409、rename 审计事件由 ``ChangeService.rename_title``
+    给出。改名后的语义 title 不被 CLI 兜底上行回翻（is_fallback 收养守卫）。
+    """
+    service = ChangeService(session)
+    change = await service.get(workspace_id, change_id)
+    allowed = change.owner_id == user.id
+    if not allowed:
+        allowed = await has_permission(
+            session,
+            user=user,
+            permission=Permission.CHANGE_ARCHIVE,
+            workspace_id=workspace_id,
+        )
+    if not allowed:
+        raise PermissionDenied(
+            "无权改名该变更：仅变更责任人本人、平台管理员或工作区负责人可操作。",
+            details={
+                "permission": Permission.CHANGE_ARCHIVE.value,
+                "workspace_id": str(workspace_id),
+                "change_id": str(change_id),
+            },
+        )
+    renamed = await service.rename_title(
+        workspace_id, change_id, title=payload.title, actor_id=user.id
+    )
+    return ChangeRenameResponse(
+        id=renamed.id, change_key=renamed.change_key, title=renamed.title or ""
+    )
 
 
 @router.get(

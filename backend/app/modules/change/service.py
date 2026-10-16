@@ -510,6 +510,94 @@ class ChangeService:
             )
         return ChangeDeleteResponse(ok=True, backup_dir=backup_dir, file_count=file_count)
 
+    async def rename_title(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        *,
+        title: str,
+        actor_id: uuid.UUID,
+    ) -> Change:
+        """平台改名入口服务层（2026-10-16-change-title-condense-backfill FR-05）。
+
+        组合权限（变更责任人本人 OR CHANGE_ARCHIVE——管理员/平台责任人/变更责任人
+        三元组，用户口径 2026-10-16）在 router 层组合完成（delete_change 同款，
+        require_permission 依赖工厂不支持行级 OR）；本方法只做服务顺序：
+
+        1. 取行：不存在 404（``get``）；行已 ``location='deleted'`` 幂等拒绝
+           （409 ``code='change_deleted'``，与 delete 口径一致）；
+        2. strip 后带宽校验：10-30 字之内必须（``TITLE_CONDENSE_MIN_LEN`` /
+           ``TITLE_CONDENSE_MAX_LEN`` 单源共享，用户口径：建议约 20 字），越带
+           422（code=change_title_length_invalid，错误信息带当前字数与带宽）；
+        3. 改 title + touch updated_at + ``change_events`` ``event_type='rename'``
+           （detail 含 renamed_by/old_title/new_title/change_key，savepoint 范式
+           同 delete ④）+ commit。
+
+        改名后的 title 为语义形态：CLI 上行兜底标题不被回翻（is_fallback 收养
+        守卫自然保证）；CLI ``--title`` 自定义 H1 文档推送仍可覆盖（改名通道
+        语义保留——两端都算权威人工命名）。
+        """
+        from app.modules.change.title_norm import (
+            TITLE_CONDENSE_MAX_LEN,
+            TITLE_CONDENSE_MIN_LEN,
+        )
+
+        change = await self.get(workspace_id, change_id)
+        if change.location == "deleted":
+            raise AppError(
+                "该变更已在平台删除，无法改名。",
+                code="change_deleted",
+                http_status=409,
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_id": str(change_id),
+                    "change_key": change.change_key,
+                },
+            )
+        new_title = (title or "").strip()
+        if not (TITLE_CONDENSE_MIN_LEN <= len(new_title) <= TITLE_CONDENSE_MAX_LEN):
+            raise AppError(
+                f"标题需 10-30 字之内（当前 {len(new_title)} 字），建议 20 字左右概括变更内容。",
+                code="change_title_length_invalid",
+                http_status=422,
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_id": str(change_id),
+                    "change_key": change.change_key,
+                    "title_length": len(new_title),
+                    "min_len": TITLE_CONDENSE_MIN_LEN,
+                    "max_len": TITLE_CONDENSE_MAX_LEN,
+                },
+            )
+        old_title = change.title
+        change.title = new_title
+        change.updated_at = datetime.now(UTC)
+        async with self._session.begin_nested():
+            self._session.add(
+                ChangeEventORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_id=change.id,
+                    event_type="rename",
+                    detail={
+                        "renamed_by": str(actor_id),
+                        "change_key": change.change_key,
+                        "old_title": old_title,
+                        "new_title": new_title,
+                    },
+                    created_by=actor_id,
+                )
+            )
+            await self._session.flush()
+        await self._session.commit()
+        log.info(
+            "change.title_renamed",
+            workspace_id=str(workspace_id),
+            change_id=str(change_id),
+            change_key=change.change_key,
+        )
+        return change
+
     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
 
     # is_text 判定的文本扩展名（编辑器对非文本只读，D-007）。

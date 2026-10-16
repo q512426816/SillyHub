@@ -57,6 +57,7 @@ import {
   deleteChange,
   getChange,
   getChangeTimeline,
+  renameChangeTitle,
   submitStageReview,
   type ChangeRead,
 } from "@/lib/changes";
@@ -426,6 +427,15 @@ export default function ChangeDetailPage({ params }: Props) {
         }
         actions={
           <span className="flex items-center gap-2">
+            {/* 2026-10-16-change-title-condense-backfill FR-06：改名入口与删除入口
+                同权限三元组可见（启发式少给无权者看按钮，后端 403 兜底）。 */}
+            {canDeleteChange(change, deleteAccess) ? (
+              <DetailRenameAction
+                workspaceId={workspaceId}
+                changeId={changeId}
+                currentTitle={change.title ?? change.change_key}
+              />
+            ) : null}
             {canDeleteChange(change, deleteAccess) ? (
               <DetailDeleteAction
                 workspaceId={workspaceId}
@@ -569,6 +579,114 @@ export default function ChangeDetailPage({ params }: Props) {
         />
       ) : null}
     </PageContainer>
+  );
+}
+
+/** 人工命名带宽（后端同款口径：strip 后 10-30 字必须，建议约 20，FR-05/06 单源）。 */
+const TITLE_MIN_LEN = 10;
+const TITLE_MAX_LEN = 30;
+
+/**
+ * 详情页改名动作——按钮 + 受控弹层（2026-10-16-change-title-condense-backfill
+ * FR-06，用户口径 2026-10-16：管理员/平台责任人/变更责任人可重命名 title）。
+ * 照 DetailDeleteAction 受控弹层范式；输入 strip 后 10-30 字内才启用保存，
+ * 越带禁用并实时提示字数；保存成功关弹层 + 失效详情/列表缓存（失败走 onError
+ * toast 不重开弹层，与删除动作一致）。
+ */
+function DetailRenameAction({
+  workspaceId,
+  changeId,
+  currentTitle,
+}: {
+  workspaceId: string;
+  changeId: string;
+  currentTitle: string;
+}) {
+  const queryClient = useQueryClient();
+  const notify = useNotify();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(currentTitle);
+  const trimmed = draft.trim();
+  const inBand =
+    trimmed.length >= TITLE_MIN_LEN && trimmed.length <= TITLE_MAX_LEN;
+  const renameMutation = useMutation({
+    mutationFn: () => renameChangeTitle(workspaceId, changeId, trimmed),
+    onSuccess: async (res) => {
+      notify.success(`变更标题已更新：${res.title}`);
+      setOpen(false);
+      await queryClient.invalidateQueries({
+        queryKey: ["change", workspaceId, changeId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+    },
+    onError: (err) => {
+      notify.error(err, "改名失败");
+    },
+  });
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="change-rename-entry"
+        className="text-muted-foreground"
+        onClick={() => {
+          setDraft(currentTitle);
+          setOpen(true);
+        }}
+      >
+        改名
+      </Button>
+      {open && (
+        <div
+          data-testid="change-rename-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+        >
+          <div className="w-96 rounded-md border bg-background p-5 shadow-lg">
+            <h3 className="text-sm font-semibold">修改变更标题</h3>
+            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+              10-30 字之内，建议 20 字左右概括变更内容
+            </p>
+            <input
+              id="change-rename-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={currentTitle}
+              maxLength={80}
+              data-testid="change-rename-input"
+              className="mt-3 h-9 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+            />
+            <div
+              className={`mt-1.5 text-xs ${
+                inBand ? "text-muted-foreground" : "text-destructive"
+              }`}
+              data-testid="change-rename-hint"
+            >
+              {trimmed.length} / 带宽 10-30 字
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                disabled={!inBand || renameMutation.isPending}
+                data-testid="change-rename-save"
+                onClick={() => renameMutation.mutate()}
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
