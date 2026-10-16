@@ -46,3 +46,10 @@
 **测试**：apply-conflict-hardening + binding-extract + dynamic 三族 24/24 本日复跑绿；
 坑内「未提交需收编」注：补丁仍在工具仓工作树（`worktree-apply.js`/`test-bindings.js`/
 `plan-postcheck.js` 为并行会话在途集），随其变更收口。归档。
+
+## 第四坑（同批实证）：cli.ts drivers 装配行漏改——providers.ts 加键 ≠ 引擎可用
+
+- **现象**：dsh 与 zcode 两变更交付后，真机建会话抛 `UNSUPPORTED_PROVIDER: only 'claude' supported in Wave1/2`（腾讯云桌面机 daemon 实证，两引擎各一中招）。
+- **根因**：`sillyhub-daemon/src/cli.ts` 的 SessionManager `deps.drivers` 装配是硬编码白名单 `{claude, codex, pi, cursor}`——`_getDriver` 走 deps.drivers 注入而非 descriptor 的 createDriver 工厂（agent-provider-onboarding.md §4.2「三处硬编码必改点」①）。两变更都只改了 providers.ts 聚合表（②前端单一源与③backend Literal 均已覆盖），①双双漏改；两变更的 e2e 冒烟测试都直构 driver 未走 cli 装配，测试面盲区未被暴露。
+- **修复（已实施，545f7df7c）**：装配行展开为逐行 map 含 `dsh: new DshAcpDriver()` / `zcode: new ZcodeAppServerDriver()`，bundle 重建热替换桌面机 daemon（备份 .bak-manual-20261017-000621）。
+- **建议**：①补守护测试——drivers 装配键集 ⊇ INTERACTIVE_PROVIDERS 键集（源读取式，防第三连败）；②两变更的冒烟测试加「走 cli.ts 装配路径」的集成形态断言。
