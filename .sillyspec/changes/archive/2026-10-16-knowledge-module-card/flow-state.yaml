@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,6 +30,12 @@ input: >-
 autopilot: false
 prestage_ack: true
 baseline_commit: d07aecf2dab34186e89d3a114191e580d8c9e4ad
-updatedAt: '2026-10-16T02:43:26.898Z'
+updatedAt: '2026-10-16T02:51:57.898Z'
 baseline_sha256: 394cf5b1fe4250f67f8cffa5f6f025c225994080b57aa01aa1c71f1d5a9626f2
+spec_approved: true
+spec_approved_at: '2026-10-16T02:45:43.233Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-2BN7FDC
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
 
