@@ -14,3 +14,4 @@
 <!-- deploy-multi-session-overwrite.md：多会话各自打包部署覆盖生产（分叉分支回退 main 修复事故，2026-10-16） -->
 <!-- conflict-compare-full-tree-label-mismatch.md：跨多变更的全量冲突平台按单变更归因、CLI 落盘 full-tree 名 → 对比恒 conflict_record_missing 且「刷新冲突列表」无效（2026-10-16 生产实证） -->
 <!-- change-title-not-readable.md：变更标题不可读——完整变更恒变更名兜底、轻量变更50字截断长句；工具侧需强制agent命名10-30字（2026-10-16，平台侧提炼防御+存量回填已落） -->
+<!-- tick-timing-squash-blindspot.md：勾选时点「一把勾」警告结构性误报——判定读git历史形态与官方压扁口径自相矛盾+「对应提交」指令歧义+反馈只在收口终点（2026-10-16-change-title-condense-backfill 实证） -->
