@@ -7143,3 +7143,54 @@ created_at: 2026-09-28T13:29:09.736Z
   confirmed_at: null
   source_change: 2026-10-13-change-owner-backfill
   status: active
+
+## FR-backend-001 Dockerfile 构建期预建 /data/logs 并 chown 给 app 用户（对齐 /data/spec-workspaces 既有惯例），容器启动后日志文件可正常创建写入
+变更：2026-10-15-server-logs-dockerfile-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 按 backend/Dockerfile 构建的镜像以 app 用户启动容器；When 后端 lifespan 执行 configure_logging 并产生首条日志；Then 默认日志路径（/data/logs/backend.log）的目录创建与文件写入必须成功，页面 GET /api/server-logs 返回非空 entrie
+全文：.sillyspec/changes/archive/2026-10-15-server-logs-dockerfile-fix/requirements.md#FR-01
+最近确认：145bd757934b3ecdf4dc33f855f937b1000cb9f8
+
+## FR-backend-002 configure_logging 建目录/挂 FileWriter 失败时向 stderr 输出一条警告（含失败原因），不再无声降级
+变更：2026-10-15-server-logs-dockerfile-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 日志目录路径不可创建（如父路径为文件/权限被拒）；When configure_logging 执行；Then 必须不抛出，且 stderr 必须出现「文件日志不可用」与异常类型名的降级警告
+全文：.sillyspec/changes/archive/2026-10-15-server-logs-dockerfile-fix/requirements.md#FR-02
+最近确认：145bd757934b3ecdf4dc33f855f937b1000cb9f8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-server-logs-dockerfile-fix:flow:测试绑定FR-02
+  tests: backend/tests/test_server_log_filer.py「test_configure_degraded_prints_warning」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-server-logs-dockerfile-fix
+  status: active
+
+## FR-backend-003 聚焦测试（test_server_log_filer.py）全绿且补降级警告断言用例
+变更：2026-10-15-server-logs-dockerfile-fix
+状态：active
+摘要：主路径
+场景正文：
+- 场景：主路径 — Given 本修复提交的代码与测试；When 在 backend 目录聚焦运行三个测试文件；Then 必须全部通过且无回归
+全文：.sillyspec/changes/archive/2026-10-15-server-logs-dockerfile-fix/requirements.md#FR-03
+最近确认：145bd757934b3ecdf4dc33f855f937b1000cb9f8
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-15-server-logs-dockerfile-fix:flow:测试绑定FR-03
+  tests: backend/tests/test_health.py | backend/tests/test_server_log_filer.py | backend/tests/test_server_logs_api.py
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-15-server-logs-dockerfile-fix
+  status: active
