@@ -609,11 +609,21 @@ function sessionStatusIndicator(
   status: AgentSessionStatus,
   livenessState?: AgentLogListItem["state"] | null,
   completedUnread?: boolean,
+  currentRunStatus?: string | null,
 ): SessionStatusIndicator {
   if (status === "failed")
     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
   if (status === "ended")
     return { kind: "dot", cls: "bg-success", label: "执行完成" };
+  // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号（后端
+  // 权威实时——发消息瞬间 running、等审批 pending_approval，不依赖 daemon
+  // 日志活性上报链）；压过活性推导（run 等审批时日志可能还在写显示 working，
+  // 以 run 为准）。 ──
+  if (currentRunStatus === "pending_approval")
+    return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
+  if (currentRunStatus === "pending" || currentRunStatus === "running")
+    return { kind: "spinner", label: "正在执行" };
+  // ── 活性推导兜底（本地 CLI 会话 / daemon 自发现——10s tailer 基线）。 ──
   if (livenessState === "working") return { kind: "spinner", label: "正在执行" };
   if (livenessState === "blocked")
     return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
@@ -1074,6 +1084,38 @@ function WorkspaceTreeList({
       }
     }
     prevStatusRef.current = next;
+    if (marked) setCompletedUnreadEpoch((n) => n + 1);
+  }, [sessions, selectedSessionId]);
+
+  // ── 执行完成通知检测·run 完成来源（2026-10-16-session-run-status-realtime）──
+  // 会话的 current_run_status 由活跃（pending/running/pending_approval）变为
+  // null（run 终态收敛）且会话非终态且当前不选中 → 一轮平台派发任务执行结束，
+  // 落盘完成通知（与终态/活性转移来源共键共角标）。这是最快触发源：run 终态
+  // 后端即时可知（SSE sessions-changed 触发列表 refetch，不等 10s 日志推导）。
+  // 检测基线 prevRunStatusRef 在内存：挂载首快照为基线——历史已空闲会话不
+  // 误报；run 被杀（killed）/失败（failed）也走「活跃→null」路径——失败会话
+  // 行首由终态红点/下次 run 状态呈现，通知语义统一为「有动静回来看看」，
+  // 与活性转移来源口径一致（working→idle 不区分成败）。
+  const prevRunStatusRef = useRef<Map<string, string | null>>(new Map());
+  useEffect(() => {
+    const prev = prevRunStatusRef.current;
+    const next = new Map<string, string | null>();
+    let marked = false;
+    for (const s of sessions) {
+      const current = s.current_run_status ?? null;
+      next.set(s.id, current);
+      const before = prev.get(s.id);
+      if (
+        before &&
+        s.status !== "ended" &&
+        s.status !== "failed" &&
+        s.id !== selectedSessionId
+      ) {
+        markCompletedUnread(s.id);
+        marked = true;
+      }
+    }
+    prevRunStatusRef.current = next;
     if (marked) setCompletedUnreadEpoch((n) => n + 1);
   }, [sessions, selectedSessionId]);
 
@@ -3455,6 +3497,7 @@ function SessionRow({
               session.status,
               liveness?.state,
               completedUnreadVisible,
+              session.current_run_status,
             )}
             liveness={liveness}
             completedUnread={completedUnreadVisible}

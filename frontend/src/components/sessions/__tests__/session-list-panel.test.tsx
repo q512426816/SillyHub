@@ -3275,6 +3275,38 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
     expect(screen.getByLabelText("此会话已执行完成")).toBeTruthy();
   });
 
+  // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号 ──────────
+
+  it("run=running → 转圈（正在执行）——平台派发会话不依赖日志活性链", async () => {
+    slotFixture({ status: "active", current_run_status: "running" });
+    await renderRow();
+    expect(screen.getByLabelText("正在执行")).toBeTruthy();
+  });
+
+  it("run=pending → 转圈（排队执行中）", async () => {
+    slotFixture({ status: "active", current_run_status: "pending" });
+    await renderRow();
+    expect(screen.getByLabelText("正在执行")).toBeTruthy();
+  });
+
+  it("run=pending_approval → 琥珀点（在等你）——run 权威压过活性 working", async () => {
+    slotFixture(
+      { status: "active", current_run_status: "pending_approval" },
+      "working",
+    );
+    const row = await renderRow();
+    expect(row.querySelector('[aria-label="在等你"]')).toBeTruthy();
+    expect(screen.queryByLabelText("正在执行")).toBeNull();
+  });
+
+  it("run 活跃时留白规则不变：无 run 无活性（active 空闲）→ 留白", async () => {
+    slotFixture({ status: "active", current_run_status: null });
+    const row = await renderRow();
+    expect(
+      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
+    ).toBe("");
+  });
+
   it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
     slotFixture({ status: "active" }, "idle");
     renderPanel(<SessionListPanel />);
@@ -3576,6 +3608,91 @@ describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终
     await openGroup("SillyHub");
     await screen.findByRole("button", { name: "会话 核对变更" });
     expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).toBeNull();
+  });
+
+  // ── 2026-10-16-session-run-status-realtime：run 完成触发源 ────────────────
+
+  it("run 活跃→null（run 终态收敛，会话仍 active）→ 完成角标出现（run 来源，不等日志推导）", async () => {
+    completedFixture("active");
+    // 首轮：run=running（转圈）。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    const { client } = renderPanelWithClient(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByLabelText("正在执行");
+    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
+
+    // 下一轮列表刷新（SSE/轮询）：run 终态收敛 → current_run_status=null
+    // → run 完成检测写完成标记（会话仍 active，无活性数据也触发）。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: null,
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await screen.findByLabelText("此会话已执行完成");
+    expect(
+      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
+    ).not.toBeNull();
+  });
+
+  it("run 活跃→null 但正选中该会话 → 不标记（run 来源同 suppress 口径）", async () => {
+    completedFixture("active");
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: "running",
+        }),
+      ]),
+    );
+    const { client } = renderPanelWithClient(
+      <SessionListPanel selectedSessionId="s-a" />,
+    );
+    // 选中会话所在组豁免默认折叠——无需点击展开。
+    await screen.findByLabelText("正在执行");
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-a",
+          workspace_id: "ws-1",
+          title: "核对变更",
+          status: "active",
+          current_run_status: null,
+        }),
+      ]),
+    );
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["agentSessions"] });
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("session-status-indicator")?.textContent ?? "",
+      ).toBe(""),
+    );
     expect(
       window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
     ).toBeNull();

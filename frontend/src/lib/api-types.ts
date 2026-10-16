@@ -13375,6 +13375,8 @@ export interface components {
             pinned_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
+            /** Current Run Status */
+            current_run_status?: string | null;
             /** Terminating At */
             terminating_at?: string | null;
             /** Agent Profile Id */

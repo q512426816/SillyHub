@@ -1,0 +1,32 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  会话列表行首状态目前只靠 daemon 10 秒日志推导活性链（基线），用户触发会话后转圈/完成提示最长延迟 40 秒且依赖 daemon 上报链路（阿里云实测该链断则列表全空白）。后端 AgentRun
+  状态本是权威实时信号（发消息瞬间 run=running、等审批=pending_approval、跑完=completed），且已有 SSE 会话变更推送管道（前端已订阅），但列表端点未暴露 run 状态。本变更把 run
+  状态接到列表：后端批量注入 current_run_status，前端判定改为 run 状态优先、日志活性兜底，日志推导链保留为本地 CLI 会话基线。
+
+  成功标准：
+
+  - 列表端点每会话注入 current_run_status（活跃 run 最新一条的状态：pending/running/pending_approval；无活跃 run 为 null），照 owner_name IN 批查先例零
+  N+1
+
+  - 前端判定优先级：终态红/绿不变；run=pending_approval 优先显示琥珀在等你；run=pending/running 优先转圈；其后活性 working/blocked 兜底（本地会话）；再 reconnecting
+  转圈；idle+完成标记绿点；其余留白
+
+  - 完成通知新增 run 完成触发源：current_run_status 从活跃变 null 且会话非终态且不在该会话上 → 标记完成（与活性转移、终态两来源共键）
+
+  - schema 变更同步再生前端与 daemon 两处 api-types 并提交 openapi.json
+
+  - 后端列表注入测试 + 前端判定测试全过，lint/tsc 零告警
+autopilot: false
+prestage_ack: false
+baseline_commit: 65333067fd8ed37d57f8500d2b80c20ea4874964
+updatedAt: '2026-10-16T01:42:05.725Z'
+cross_baselines:
+  sillyspec: 4c3168cc35ab7c9b6da7b59cbb33e8f4f36b01b9
+baseline_sha256: 67ec2798ba74570b42febeb0eaed91225ecf406d874821f85fdd834e25c3d2db
+

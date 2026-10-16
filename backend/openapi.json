@@ -38866,6 +38866,17 @@
             ],
             "title": "Current Run Id"
           },
+          "current_run_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Run Status"
+          },
           "terminating_at": {
             "anyOf": [
               {
