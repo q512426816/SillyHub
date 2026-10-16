@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-session-run-status-realtime",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-session-run-status-realtime:flow:测试绑定FR-01",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sessions_list_run_status.py「active_run_status_injected」",
+        "backend/app/modules/daemon/tests/test_sessions_list_run_status.py「latest_active_run_wins_when_multiple」",
+        "backend/app/modules/daemon/tests/test_sessions_list_run_status.py「no_run_at_all_yields_null」",
+        "backend/app/modules/daemon/tests/test_sessions_list_run_status.py「terminal_run_yields_null」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-run-status-realtime"
+    },
+    {
+      "anchor": "FR-02",
+      "row_id": "2026-10-16-session-run-status-realtime:flow:测试绑定FR-02",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃时留白规则不变」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=pending → 转圈」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=pending_approval → 琥珀点——run 权威压过活性 working」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run=running → 转圈」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-run-status-realtime"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-session-run-status-realtime:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃→null 但正选中该会话 → 不标记」",
+        "frontend/src/components/sessions/__tests__/session-list-panel.test.tsx「run 活跃→null（run 终态收敛…）→ 完成角标出现」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-run-status-realtime"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-session-run-status-realtime:flow:测试绑定FR-04",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_sessions_list_run_status.py「openapi_exposes_current_run_status」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-session-run-status-realtime"
+    }
+  ]
+}

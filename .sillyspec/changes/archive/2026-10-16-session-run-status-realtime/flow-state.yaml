@@ -1,6 +1,14 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
 born_face: thin
 with_tasks: false
 review_force: null
@@ -22,11 +30,19 @@ input: >-
   - schema 变更同步再生前端与 daemon 两处 api-types 并提交 openapi.json
 
   - 后端列表注入测试 + 前端判定测试全过，lint/tsc 零告警
-autopilot: false
+autopilot: true
 prestage_ack: false
 baseline_commit: 65333067fd8ed37d57f8500d2b80c20ea4874964
-updatedAt: '2026-10-16T01:42:05.725Z'
+updatedAt: '2026-10-16T02:14:26.814Z'
 cross_baselines:
   sillyspec: 4c3168cc35ab7c9b6da7b59cbb33e8f4f36b01b9
 baseline_sha256: 67ec2798ba74570b42febeb0eaed91225ecf406d874821f85fdd834e25c3d2db
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(py65+jsx67+jsx45)+fr(176)（692.1s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016021230\test-result.json｜lint:
+  passed ← cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy app && cd ../frontend &&
+  pnpm lint && cd ../sillyhub-daemon && pnpm typecheck（45.4s）
+  结果：C:\Users\qinyi\IdeaProjects\multi-agent-platform\.sillyspec\.runtime\verify-runs\20261016021230\test-result.json｜门文件
+  25 个
 

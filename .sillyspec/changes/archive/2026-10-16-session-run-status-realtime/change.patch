@@ -1,0 +1,520 @@
+diff --git a/backend/app/modules/daemon/router/session_crud.py b/backend/app/modules/daemon/router/session_crud.py
+index faf4dae0e..7e736e223 100644
+--- a/backend/app/modules/daemon/router/session_crud.py
++++ b/backend/app/modules/daemon/router/session_crud.py
+@@ -216,7 +216,7 @@ async def list_sessions(
+             # 与 SessionCreateRequest._require_ppm_item_pair 同口径（用户可见 422 文案中文化）。
+             detail="ppm_item_kind 与 ppm_item_id 必须成对提供。",
+         )
+-    from app.modules.agent.model import AgentRun, AgentRunLog
++    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog
+ 
+     svc = DaemonService(session)
+     # 2026-09-01-session-group-chat task-02：session_kind 直传 SessionService——
+@@ -260,6 +260,46 @@ async def list_sessions(
+         }
+         for r in reads:
+             r.owner_name = owner_names.get(r.user_id)
++    # 2026-10-16-session-run-status-realtime：批量注入当前活跃 run 状态（照上方
++    # owner_name / terminating_at 的 IN 批查注入先例，零 N+1）。run 状态是后端
++    # 权威实时信号（发消息瞬间 running、等审批 pending_approval、跑完即无活跃
++    # run），前端会话列表行首转圈/琥珀/完成通知以它为第一优先信号，daemon 10s
++    # 日志活性推导链降为本地 CLI 会话兜底基线。窗口函数取每会话 created_at 最新
++    # 一条活跃 run（多活跃 run 并存时挑最新——与 get_session_detail 同款排序
++    # 语义 ql-20260910-011-3d92：pending 未认领 run 的 started_at 为 NULL，按
++    # created_at 排序防 PG DESC NULLS FIRST 挑错行）；无活跃 run 的会话不在结果
++    # 集中 → 保持 None。
++    if items:
++        active_rn = (
++            sa_func.row_number()
++            .over(
++                partition_by=AgentRun.agent_session_id,
++                order_by=AgentRun.created_at.desc(),
++            )
++            .label("rn")
++        )
++        active_subq = (
++            sa_select(
++                AgentRun.agent_session_id.label("session_id"),
++                AgentRun.status.label("run_status"),
++                active_rn,
++            )
++            .where(
++                AgentRun.agent_session_id.in_([item.id for item in items]),
++                AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
++            )
++            .subquery()
++        )
++        active_rows = (
++            await session.execute(
++                sa_select(active_subq.c.session_id, active_subq.c.run_status).where(
++                    active_subq.c.rn == 1
++                )
++            )
++        ).all()
++        run_status_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in active_rows}
++        for r in reads:
++            r.current_run_status = run_status_map.get(r.id)
+     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
+     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
+     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。
+diff --git a/backend/app/modules/daemon/schema.py b/backend/app/modules/daemon/schema.py
+index cb5868b54..1785c3d71 100644
+--- a/backend/app/modules/daemon/schema.py
++++ b/backend/app/modules/daemon/schema.py
+@@ -62,6 +62,13 @@ class AgentSessionRead(BaseModel):
+     pinned_at: datetime | None = None
+     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
+     current_run_id: uuid.UUID | None = None
++    # 2026-10-16-session-run-status-realtime：当前活跃 run 状态（非 ORM 字段，
++    # 列表/详情端点注入）——后端权威实时信号（发消息瞬间 run=running、等审批=
++    # pending_approval），驱动会话列表行首转圈/琥珀；无活跃 run 为 None。与
++    # daemon 10s 日志活性推导链并存：run 状态优先（平台派发会话），日志活性
++    # 兜底（本地 CLI 会话基线）。值域 = AgentRun.status 词表子集（ACTIVE_RUN_
++    # STATUSES：pending/running/pending_approval）。
++    current_run_status: str | None = None
+     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
+     # lease 处于 terminating 态的时间戳（cancel_lease 写入、daemon 回传统态后清空）。
+     # 非 ORM 字段——AgentSession 本身没有该列，由 router 经 session.lease_id 关联
+diff --git a/backend/app/modules/daemon/tests/test_sessions_list_run_status.py b/backend/app/modules/daemon/tests/test_sessions_list_run_status.py
+new file mode 100644
+index 000000000..b63c8a1fa
+--- /dev/null
++++ b/backend/app/modules/daemon/tests/test_sessions_list_run_status.py
+@@ -0,0 +1,180 @@
++"""2026-10-16-session-run-status-realtime ``GET /sessions`` current_run_status 注入单测.
++
++覆盖（用户确认方案：run 状态第一优先实时信号，日志活性降兜底基线）：
++
++- 活跃 run 注入：会话有 pending/running/pending_approval run → 列表项
++  ``current_run_status`` 返回该状态（窗口函数取每会话 created_at 最新一条
++  活跃 run——多活跃 run 并存挑最新，对齐 get_session_detail 的
++  ql-20260910-011-3d42 排序语义）。
++- 无活跃 run（终态 run / 从未有 run）→ null（brownfield 不崩不丢行）。
++- OpenAPI schema 反映 current_run_status 新字段（gen:types 消费面）。
++
++夹具范式镜像 ``test_sessions_list_owner_name.py``（in-memory SQLite + httpx
++client），AgentRun 建行参数照其模型必填列。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++
++from httpx import AsyncClient
++from sqlalchemy import select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.modules.agent.model import AgentRun, AgentSession
++from app.modules.auth.model import User
++
++# ── Helpers（范式照抄 test_sessions_list_owner_name.py）────────────────────────
++
++
++async def _get_admin(db_session: AsyncSession) -> User:
++    admin = (
++        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
++        .scalars()
++        .first()
++    )
++    assert admin is not None
++    return admin
++
++
++async def _make_session(
++    session: AsyncSession,
++    user_id: uuid.UUID,
++    *,
++    status: str = "active",
++) -> AgentSession:
++    now = datetime.now(UTC)
++    sess = AgentSession(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        runtime_id=None,
++        lease_id=None,
++        provider="claude",
++        status=status,
++        agent_session_id=None,
++        turn_count=1,
++        created_at=now,
++        last_active_at=now,
++    )
++    session.add(sess)
++    await session.commit()
++    return sess
++
++
++async def _make_run(
++    session: AsyncSession,
++    agent_session_id: uuid.UUID,
++    *,
++    status: str,
++    created_at: datetime | None = None,
++) -> AgentRun:
++    run = AgentRun(
++        id=uuid.uuid4(),
++        agent_session_id=agent_session_id,
++        agent_type="claude_code",
++        status=status,
++        created_at=created_at or datetime.now(UTC),
++    )
++    session.add(run)
++    await session.commit()
++    return run
++
++
++# ── current_run_status 注入 ─────────────────────────────────────────────────
++
++
++class TestCurrentRunStatus:
++    async def test_active_run_status_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """会话有 running run → 列表项 current_run_status="running"。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        await _make_run(db_session, s.id, status="running")
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["current_run_status"] == "running"
++
++    async def test_pending_approval_injected(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """等审批 run（pending_approval）同样注入——前端琥珀「在等你」信号源。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        await _make_run(db_session, s.id, status="pending_approval")
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["current_run_status"] == "pending_approval"
++
++    async def test_latest_active_run_wins_when_multiple(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """多活跃 run 并存 → created_at 最新一条胜出（窗口函数排序语义）。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++        base = datetime.now(UTC)
++        await _make_run(db_session, s.id, status="running", created_at=base - timedelta(minutes=5))
++        await _make_run(db_session, s.id, status="pending_approval", created_at=base)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["current_run_status"] == "pending_approval"
++
++    async def test_terminal_run_yields_null(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """只有终态 run（completed/failed/killed 不在 ACTIVE_RUN_STATUSES）→ null。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id, status="active")
++        await _make_run(db_session, s.id, status="completed")
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["current_run_status"] is None
++
++    async def test_no_run_at_all_yields_null(
++        self,
++        client: AsyncClient,
++        auth_headers: dict[str, str],
++        db_session: AsyncSession,
++    ) -> None:
++        """从没有 run 的会话（本地 CLI 上报 / 旧数据）→ null，列表不崩。"""
++        admin = await _get_admin(db_session)
++        s = await _make_session(db_session, admin.id)
++
++        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
++        assert resp.status_code == 200, resp.text
++        item = next(it for it in resp.json()["items"] if it["id"] == str(s.id))
++        assert item["current_run_status"] is None
++
++
++# ── OpenAPI 反映新字段（gen:types 消费面）───────────────────────────────────
++
++
++class TestOpenApiSchema:
++    async def test_openapi_exposes_current_run_status(self) -> None:
++        """非 dev 环境 openapi.json 端点关闭（main.py BS-5），直接经 app.openapi()
++        断言 schema——与 pnpm gen:types 消费的 OpenAPI 产物同源。"""
++        from app.main import app
++
++        props = app.openapi()["components"]["schemas"]["AgentSessionRead"]["properties"]
++        assert "current_run_status" in props
+diff --git a/backend/openapi.json b/backend/openapi.json
+index 9ac63afda..8faeed231 100644
+--- a/backend/openapi.json
++++ b/backend/openapi.json
+@@ -38866,6 +38866,17 @@
+             ],
+             "title": "Current Run Id"
+           },
++          "current_run_status": {
++            "anyOf": [
++              {
++                "type": "string"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "title": "Current Run Status"
++          },
+           "terminating_at": {
+             "anyOf": [
+               {
+diff --git a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+index 369dd90d7..87a518f4f 100644
+--- a/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
++++ b/frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+@@ -3275,6 +3275,38 @@ describe("SessionListPanel 行首状态槽语义（2026-10-15-session-status-dot
+     expect(screen.getByLabelText("此会话已执行完成")).toBeTruthy();
+   });
+ 
++  // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号 ──────────
++
++  it("run=running → 转圈（正在执行）——平台派发会话不依赖日志活性链", async () => {
++    slotFixture({ status: "active", current_run_status: "running" });
++    await renderRow();
++    expect(screen.getByLabelText("正在执行")).toBeTruthy();
++  });
++
++  it("run=pending → 转圈（排队执行中）", async () => {
++    slotFixture({ status: "active", current_run_status: "pending" });
++    await renderRow();
++    expect(screen.getByLabelText("正在执行")).toBeTruthy();
++  });
++
++  it("run=pending_approval → 琥珀点（在等你）——run 权威压过活性 working", async () => {
++    slotFixture(
++      { status: "active", current_run_status: "pending_approval" },
++      "working",
++    );
++    const row = await renderRow();
++    expect(row.querySelector('[aria-label="在等你"]')).toBeTruthy();
++    expect(screen.queryByLabelText("正在执行")).toBeNull();
++  });
++
++  it("run 活跃时留白规则不变：无 run 无活性（active 空闲）→ 留白", async () => {
++    slotFixture({ status: "active", current_run_status: null });
++    const row = await renderRow();
++    expect(
++      row.querySelector('[data-testid="session-status-indicator"]')?.textContent,
++    ).toBe("");
++  });
++
+   it("活性 idle：留白但悬停卡仍可查（详情不丢）", async () => {
+     slotFixture({ status: "active" }, "idle");
+     renderPanel(<SessionListPanel />);
+@@ -3581,6 +3613,91 @@ describe("SessionListPanel 执行完成通知（2026-10-15 用户补充：非终
+     ).toBeNull();
+   });
+ 
++  // ── 2026-10-16-session-run-status-realtime：run 完成触发源 ────────────────
++
++  it("run 活跃→null（run 终态收敛，会话仍 active）→ 完成角标出现（run 来源，不等日志推导）", async () => {
++    completedFixture("active");
++    // 首轮：run=running（转圈）。
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "active",
++          current_run_status: "running",
++        }),
++      ]),
++    );
++    const { client } = renderPanelWithClient(<SessionListPanel />);
++    await openGroup("SillyHub");
++    await screen.findByLabelText("正在执行");
++    expect(screen.queryByLabelText("此会话已执行完成")).toBeNull();
++
++    // 下一轮列表刷新（SSE/轮询）：run 终态收敛 → current_run_status=null
++    // → run 完成检测写完成标记（会话仍 active，无活性数据也触发）。
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "active",
++          current_run_status: null,
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await screen.findByLabelText("此会话已执行完成");
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).not.toBeNull();
++  });
++
++  it("run 活跃→null 但正选中该会话 → 不标记（run 来源同 suppress 口径）", async () => {
++    completedFixture("active");
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "active",
++          current_run_status: "running",
++        }),
++      ]),
++    );
++    const { client } = renderPanelWithClient(
++      <SessionListPanel selectedSessionId="s-a" />,
++    );
++    // 选中会话所在组豁免默认折叠——无需点击展开。
++    await screen.findByLabelText("正在执行");
++    mocks.listAgentSessions.mockResolvedValue(
++      listResponse([
++        makeSession({
++          id: "s-a",
++          workspace_id: "ws-1",
++          title: "核对变更",
++          status: "active",
++          current_run_status: null,
++        }),
++      ]),
++    );
++    await act(async () => {
++      await client.refetchQueries({ queryKey: ["agentSessions"] });
++    });
++    await waitFor(() =>
++      expect(
++        screen.queryByTestId("session-status-indicator")?.textContent ?? "",
++      ).toBe(""),
++    );
++    expect(
++      window.localStorage.getItem("sillyhub:session-completed-unread:s-a"),
++    ).toBeNull();
++  });
++
+   it("active → failed 不出完成角标（异常走红点语义）", async () => {
+     completedFixture("active");
+     const { client } = renderPanelWithClient(<SessionListPanel />);
+diff --git a/frontend/src/components/sessions/session-list-panel.tsx b/frontend/src/components/sessions/session-list-panel.tsx
+index 65fbb3657..26436f67d 100644
+--- a/frontend/src/components/sessions/session-list-panel.tsx
++++ b/frontend/src/components/sessions/session-list-panel.tsx
+@@ -609,11 +609,21 @@ function sessionStatusIndicator(
+   status: AgentSessionStatus,
+   livenessState?: AgentLogListItem["state"] | null,
+   completedUnread?: boolean,
++  currentRunStatus?: string | null,
+ ): SessionStatusIndicator {
+   if (status === "failed")
+     return { kind: "dot", cls: "bg-destructive", label: "异常失败" };
+   if (status === "ended")
+     return { kind: "dot", cls: "bg-success", label: "执行完成" };
++  // ── 2026-10-16-session-run-status-realtime：run 状态第一优先信号（后端
++  // 权威实时——发消息瞬间 running、等审批 pending_approval，不依赖 daemon
++  // 日志活性上报链）；压过活性推导（run 等审批时日志可能还在写显示 working，
++  // 以 run 为准）。 ──
++  if (currentRunStatus === "pending_approval")
++    return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
++  if (currentRunStatus === "pending" || currentRunStatus === "running")
++    return { kind: "spinner", label: "正在执行" };
++  // ── 活性推导兜底（本地 CLI 会话 / daemon 自发现——10s tailer 基线）。 ──
+   if (livenessState === "working") return { kind: "spinner", label: "正在执行" };
+   if (livenessState === "blocked")
+     return { kind: "dot", cls: "bg-warning-500", label: "在等你" };
+@@ -1077,6 +1087,38 @@ function WorkspaceTreeList({
+     if (marked) setCompletedUnreadEpoch((n) => n + 1);
+   }, [sessions, selectedSessionId]);
+ 
++  // ── 执行完成通知检测·run 完成来源（2026-10-16-session-run-status-realtime）──
++  // 会话的 current_run_status 由活跃（pending/running/pending_approval）变为
++  // null（run 终态收敛）且会话非终态且当前不选中 → 一轮平台派发任务执行结束，
++  // 落盘完成通知（与终态/活性转移来源共键共角标）。这是最快触发源：run 终态
++  // 后端即时可知（SSE sessions-changed 触发列表 refetch，不等 10s 日志推导）。
++  // 检测基线 prevRunStatusRef 在内存：挂载首快照为基线——历史已空闲会话不
++  // 误报；run 被杀（killed）/失败（failed）也走「活跃→null」路径——失败会话
++  // 行首由终态红点/下次 run 状态呈现，通知语义统一为「有动静回来看看」，
++  // 与活性转移来源口径一致（working→idle 不区分成败）。
++  const prevRunStatusRef = useRef<Map<string, string | null>>(new Map());
++  useEffect(() => {
++    const prev = prevRunStatusRef.current;
++    const next = new Map<string, string | null>();
++    let marked = false;
++    for (const s of sessions) {
++      const current = s.current_run_status ?? null;
++      next.set(s.id, current);
++      const before = prev.get(s.id);
++      if (
++        before &&
++        s.status !== "ended" &&
++        s.status !== "failed" &&
++        s.id !== selectedSessionId
++      ) {
++        markCompletedUnread(s.id);
++        marked = true;
++      }
++    }
++    prevRunStatusRef.current = next;
++    if (marked) setCompletedUnreadEpoch((n) => n + 1);
++  }, [sessions, selectedSessionId]);
++
+   // ── task-07（2026-09-01-session-group-chat / FR-01）：群聊分区 ──────────
+   // 独立 useQuery 供数（不掺单聊 agentSessions 数据源——design §5.3 群列表
+   // 只走 GET /api/daemon/group-chats）；onSelectGroup 传入才启用（悬浮助手
+@@ -3455,6 +3497,7 @@ function SessionRow({
+               session.status,
+               liveness?.state,
+               completedUnreadVisible,
++              session.current_run_status,
+             )}
+             liveness={liveness}
+             completedUnread={completedUnreadVisible}
+diff --git a/frontend/src/lib/api-types.ts b/frontend/src/lib/api-types.ts
+index 66df3cfd0..dfdb53876 100644
+--- a/frontend/src/lib/api-types.ts
++++ b/frontend/src/lib/api-types.ts
+@@ -13375,6 +13375,8 @@ export interface components {
+             pinned_at?: string | null;
+             /** Current Run Id */
+             current_run_id?: string | null;
++            /** Current Run Status */
++            current_run_status?: string | null;
+             /** Terminating At */
+             terminating_at?: string | null;
+             /** Agent Profile Id */
+diff --git a/sillyhub-daemon/src/api-types.ts b/sillyhub-daemon/src/api-types.ts
+index 66df3cfd0..dfdb53876 100644
+--- a/sillyhub-daemon/src/api-types.ts
++++ b/sillyhub-daemon/src/api-types.ts
+@@ -13375,6 +13375,8 @@ export interface components {
+             pinned_at?: string | null;
+             /** Current Run Id */
+             current_run_id?: string | null;
++            /** Current Run Status */
++            current_run_status?: string | null;
+             /** Terminating At */
+             terminating_at?: string | null;
+             /** Agent Profile Id */
