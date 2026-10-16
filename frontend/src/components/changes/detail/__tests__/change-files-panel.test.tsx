@@ -51,7 +51,6 @@ describe("ChangeFilesPanel", () => {
     renderPanel();
     expect(screen.getByTestId("change-files-panel")).toBeInTheDocument();
     expect(screen.getByTestId("change-files-panel-tree")).toBeInTheDocument();
-    expect(screen.getByText("变更文件")).toBeInTheDocument();
     expect(screen.getByTestId("stub-file-tree")).toBeInTheDocument();
     expect(screen.getByTestId("stub-scope-audit")).toBeInTheDocument();
     expect(screen.getByTestId("stub-quicklog")).toBeInTheDocument();

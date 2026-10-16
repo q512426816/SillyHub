@@ -35,17 +35,12 @@ export function ChangeFilesPanel({
 }: ChangeFilesPanelProps) {
   return (
     <div className="flex flex-col gap-3" data-testid="change-files-panel">
-      <section className="rounded-md border bg-card" data-testid="change-files-panel-tree">
-        <div className="border-b px-3 py-2">
-          <h2 className="text-xs font-medium">变更文件</h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            改动文件树与内容预览（点文件看内容 / diff）
-          </p>
-        </div>
-        <div className="px-3 py-2.5">
-          <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
-        </div>
-      </section>
+      {/* 变更文件：ChangeFileTree 自带「变更文件」卡头（2026-10-16 用户反馈：去掉
+          面板外包的一层重复标题）。外层定高 560px 激活组件内部 min-h-0/flex-1 限高链
+          ——树与预览各自内滚，整列不再无限高（2026-10-16 用户反馈：无限高左右点击不方便）。 */}
+      <div className="flex h-[560px] flex-col" data-testid="change-files-panel-tree">
+        <ChangeFileTree workspaceId={workspaceId} changeId={changeId} />
+      </div>
 
       <ScopeAuditCommandCard
         target={{ kind: "change", workspaceId, changeKey }}

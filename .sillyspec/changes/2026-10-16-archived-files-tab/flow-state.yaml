@@ -1,0 +1,27 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  归档变更也要显示「文件与对账」tab：归档留档区不展示 spec 文档全貌，用户需要文件树与范围对账入口（推翻 D-007 的归档收窄）。
+  成功标准：
+  - visibleTabs 恒返回四 tab（archived 参数保留但不再收窄）
+  - 归档态「文件与对账」面板可挂载（文件树 + 范围对账），?tab=files 深链归档态直达不再钳回概览
+  - 概览右信息栏对账入口归档态同在途一样指向「文件与对账」
+  - 页面级与组件级测试同步更新，变更相关套件全绿 + tsc 0 错
+autopilot: false
+prestage_ack: false
+baseline_commit: 1f9fbb8a38d49d701e8038059ef77b2bcbeeb642
+updatedAt: '2026-10-16T00:52:58.055Z'
+cross_baselines:
+  sillyspec: 6a8f46c3c0cd092f129013b467e8ec1b9477e86a
+baseline_sha256: dc6cc896cf7ca8a9fb263932e3db16b2d1be94c0f3fb7938690b64aa3320a25c
+spec_approved: true
+spec_approved_at: '2026-10-16T00:52:52.260Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

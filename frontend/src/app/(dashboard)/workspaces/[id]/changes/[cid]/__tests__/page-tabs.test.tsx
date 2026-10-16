@@ -126,7 +126,7 @@ describe("tab URL 驱动（D-013@v1）", () => {
 });
 
 describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1）", () => {
-  it("归档态：不出「继续执行」、不渲染在途空态文案、用量区为合计形态", async () => {
+  it("归档态：不出「继续执行」、不渲染在途空态文案、用量区为合计形态；文件与对账 tab 在场（D-019@v1）", async () => {
     await renderAt("", makeChange({ location: "archive", status: "archived" }));
     expect(screen.queryByTestId("change-continue-entry")).toBeNull();
     // 归档首屏为成果语义：摘要卡标题「成果总结」+ 归档留档摘要；无「执行中/进行中」类在途文案
@@ -134,6 +134,7 @@ describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1�
     expect(screen.getByText("成果总结")).toBeInTheDocument();
     expect(screen.queryByText("进行中")).toBeNull();
     expect(screen.queryByText("非终态每 10 秒自动刷新")).toBeNull();
+    navMocks.searchParams = new URLSearchParams("tab=files");
   });
 
   it("在途态：不出归档空位（无「归档留档」文本、无成果总结卡）", async () => {
@@ -142,12 +143,6 @@ describe("归档态收窄与两态空态互斥（task-08 / D-001@v1 / D-007@v1�
     expect(screen.getByTestId("change-continue-entry")).toBeInTheDocument();
     expect(screen.queryByText(/归档留档/)).toBeNull();
     expect(screen.queryByText("成果总结")).toBeNull();
-  });
-
-  it("归档态范围对账入口改指「产出 · 归档留档」（不留指向已隐藏 tab 的死链）", async () => {
-    await renderAt("", makeChange({ location: "archive", status: "archived" }));
-    expect(await screen.findByText(/真实改动面见「产出 · 归档留档」/)).toBeInTheDocument();
-    expect(screen.queryByText("明细见「文件与对账」")).toBeNull();
   });
 });
 

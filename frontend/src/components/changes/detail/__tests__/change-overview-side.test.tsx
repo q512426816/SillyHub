@@ -158,12 +158,11 @@ describe("ChangeOverviewSide", () => {
     expect(screen.queryByText(/执行用量（合计）/)).not.toBeInTheDocument();
   });
 
-  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口改指产出·归档留档（不留死链）", async () => {
+  it("归档态：用量标题改「合计」且 MUST NOT 提供按模型明细；对账入口同指「文件与对账」（D-019@v1）", async () => {
     renderSide(true);
     expect(screen.getByText("执行用量（合计）")).toBeInTheDocument();
     expect(await screen.findByText("耗时")).toBeInTheDocument(); // 等用量数据落定再断言入口缺席
     expect(screen.queryByText("按模型明细 →")).not.toBeInTheDocument();
-    expect(screen.getByText(/真实改动面见「产出 · 归档留档」/)).toBeInTheDocument();
-    expect(screen.queryByText("明细见「文件与对账」")).not.toBeInTheDocument();
+    expect(screen.getByText("明细见「文件与对账」")).toBeInTheDocument();
   });
 });

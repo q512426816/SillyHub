@@ -184,20 +184,20 @@ describe("tab 结构与懒挂载（钉子 3/5）", () => {
     expect(screen.queryByTestId("change-files-panel")).toBeNull();
   });
 
-  it("归档：tab 收窄为三枚（隐藏「文件与对账」）；深链 ?tab=files 被钳回概览", async () => {
+  it("归档：四 tab 齐全；深链 ?tab=files 直达文件与对账面板（D-019@v1 不再钳制）", async () => {
     mocks.getChange.mockResolvedValue(
       makeChange({ location: "archive", status: "archived" }),
     );
     navMocks.searchParams = new URLSearchParams("tab=files");
     await renderPage();
     const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((t) => t.textContent)).toEqual(["概览", "产出", "过程"]);
-    // 不在可见集 → replace 钳回 overview（不留空白面板）
-    expect(navMocks.replace).toHaveBeenCalledWith(
-      "/workspaces/ws-1/changes/ch-1?tab=overview",
-    );
-    expect(await screen.findByTestId("change-overview-panel")).toBeInTheDocument();
-    expect(screen.queryByTestId("change-files-panel")).toBeNull();
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "概览",
+      "产出",
+      "过程",
+      "文件与对账",
+    ]);
+    expect(await screen.findByTestId("change-files-panel")).toBeInTheDocument();
   });
 
   it("两旧时间线卡 MUST NOT 挂载（D-005 取代方向反钉）", async () => {
