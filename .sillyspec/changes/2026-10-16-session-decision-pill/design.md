@@ -67,8 +67,8 @@ brand-* 语义类 + shadow token + bg-card/border 变量类（.sillyspec/docs/Si
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 新增 | NEW:frontend/src/components/daemon/session-decisions-hover.tsx | 决策 pill 组件（胶囊 + 分组下拉 + 只读详情弹窗 + 分组纯函数导出） |
-| 新增 | NEW:frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx | 分组纯函数 + 组件渲染 vitest 用例 |
+| 新增 | frontend/src/components/daemon/session-decisions-hover.tsx | 决策 pill 组件（胶囊 + 分组下拉 + 只读详情弹窗 + 分组纯函数导出）——已落地（brainstorm 时 NEW: 前缀，交付后按存在文件写仓根路径） |
+| 新增 | frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx | 分组纯函数 + 组件渲染 vitest 用例——已落地（同上） |
 | 修改 | frontend/src/components/daemon/session-panel/session-panel-page.tsx | 挂载点改 flex 悬浮行并排两 pill；透传 pendingRequests/planPending/TurnTimeline focus prop |
 | 修改 | frontend/src/components/daemon/session-change-files-hover.tsx | 新增可选 prop embedded（默认 false 行为不变） |
 | 修改 | frontend/src/components/daemon/turn-timeline.tsx | 新增可选 prop focusDialogRequest（还原最小化 + 滚顶 + 高亮闪烁 effect） |

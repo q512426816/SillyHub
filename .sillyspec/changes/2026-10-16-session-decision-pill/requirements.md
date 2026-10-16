@@ -61,8 +61,8 @@ And 决策 pill 仅在 session-panel-page 的 page 渲染分支挂载，dialog �
 
 ## 测试绑定（每条 FR 至少一行：`FR-NN: test/路径「用例名」`；不适用要写理由；flow done 空行拒收）
 
-FR-01: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-02: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-03: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-04: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
-FR-05: （待填——哪个测试文件/用例覆盖这条 FR；无测试面写「不适用：理由」）
+FR-01: frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」；同文件「pending 渲染入口：徽标 = 待决策数且呼吸；悬停历史经 fetchSessionDialogHistory 拉取」；同文件「无 pending 但有已答历史时仍渲染入口，徽标 0 不呼吸（FR-01）」
+FR-02: frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「hover 弹下拉：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」；同文件「历史组展开显示回答摘要；再点收起」；splitDecisions（纯函数）组 4 用例（pending/plan 派生、answered/cancelled、孤儿 pending 归历史、历史未加载）
+FR-03: frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点 pending dialog 项：上抛 onFocusPending(requestId)；点 plan 项上抛 'plan' 哨兵（FR-03）」
+FR-04: frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点历史项收起下拉并开只读详情弹窗：问题/选项/当时选择 ✓/时间（FR-04）」
+FR-05: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx 全组（embedded 缺省行为不变回归，33 用例含 turn-timeline 四套）；frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx 全组（focusDialogRequest 缺省零行为回归）

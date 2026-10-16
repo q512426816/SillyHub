@@ -1,10 +1,17 @@
 tier: thin
 legacy_fallback: false
-substeps: {}
+substeps:
+  artifacts: done
+  ledger: done
 born_face: thin
 adopted_from: brainstorm
 review_force: null
 baseline_commit: 25944be2b97cd94680849d070da354eda2131014
-updatedAt: '2026-10-16T03:33:30.004Z'
+updatedAt: '2026-10-16T03:45:09.154Z'
 baseline_sha256: 74675775979c94044d16bd9a9ca9e377c2c083650a43e6fb8fceb95224d5d882
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx1)（6.6s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261016034508\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 7 个
 
