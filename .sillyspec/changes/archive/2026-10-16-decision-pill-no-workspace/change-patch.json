@@ -1,0 +1,87 @@
+{
+  "change": "2026-10-16-decision-pill-no-workspace",
+  "baseline": "a991df3393e417badcfffc484ec4decb3732e7e6",
+  "head": "256aa6feb2c4349f3d4a1b513e94fb9fa5fddd0e",
+  "files": [
+    "docs/releases/2026-10-16-006-9b5485fb0.md",
+    "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx",
+    "frontend/src/components/daemon/session-panel/session-panel-page.tsx"
+  ],
+  "totals": {
+    "files": 3,
+    "additions": 50,
+    "deletions": 19
+  },
+  "savedAt": "2026-10-16T05:51:34.279Z",
+  "note": "flow done 时点冻结（本变更可归属交付面：baseline..HEAD 提交面过滤 .sillyspec/ 只留 .sillyspec/docs/ 交付文档 + 独占树未提交交付；治理工件目录不入冻结——2026-10-12-close-trace-freeze-integrity FR-01）",
+  "modules": [
+    {
+      "id": "frontend",
+      "files": 2,
+      "doc": "docs/multi-agent-platform/modules/frontend.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "docs",
+      "files": 1,
+      "doc": "docs/multi-agent-platform/modules/docs.md",
+      "docTouched": false,
+      "docMissing": false
+    },
+    {
+      "id": "frontend_components",
+      "files": 2,
+      "doc": "docs/SillyHub/modules/frontend_components.md",
+      "docTouched": false,
+      "docMissing": false
+    }
+  ],
+  "uncoveredDirs": [],
+  "moduleMaps": [
+    "docs/backend/modules/_module-map.yaml",
+    "docs/frontend/modules/_module-map.yaml",
+    "docs/multi-agent-platform/modules/_module-map.yaml",
+    "docs/SillyHub/modules/_module-map.yaml",
+    "docs/sillyhub-daemon/modules/_module-map.yaml"
+  ],
+  "acceptedDirtyGap": 1,
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "a991df3393e417badcfffc484ec4decb3732e7e6",
+    "totals": {
+      "files": 3,
+      "additions": 50,
+      "deletions": 19
+    },
+    "rows": [
+      {
+        "path": "docs/releases/2026-10-16-006-9b5485fb0.md",
+        "additions": 25,
+        "deletions": 0,
+        "kind": "new"
+      },
+      {
+        "path": "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx",
+        "additions": 9,
+        "deletions": 9,
+        "kind": "modified"
+      },
+      {
+        "path": "frontend/src/components/daemon/session-panel/session-panel-page.tsx",
+        "additions": 16,
+        "deletions": 10,
+        "kind": "modified"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "flow done 时点冻结（本文件落盘时采集）",
+    "closedBy": "flow done"
+  },
+  "patchSha256": "79199ea62ef3ea7a6e5b208a0959fae6f2c43f81f7ec50e15665a430c181a514",
+  "patchStatus": "ok"
+}

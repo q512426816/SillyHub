@@ -1,0 +1,36 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机：无 workspace 的会话（如 445e12d9，10-09 创建 workspace_id 为空）待决策 pill 不渲染——挂载条件连坐了变更文件 pill 的 workspace_id 门。
+  成功标准：
+  - session.workspace_id 为空的会话中，待决策 pill 正常渲染（只要有提问历史/pending）
+  - 变更文件 pill 在无 workspace 会话维持不渲染（原有显隐契约不变）
+  - 既有回归测试全绿
+autopilot: false
+prestage_ack: false
+baseline_commit: a991df3393e417badcfffc484ec4decb3732e7e6
+updatedAt: '2026-10-16T05:53:57.386Z'
+baseline_sha256: da6f1f45128d42a9fa55e06e48d14f1af4de151b2a0cae8876836e65635cc726
+spec_approved: true
+spec_approved_at: '2026-10-16T05:49:45.715Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-2BN7FDC
+batch_ticked: true
+gate_summary: >-
+  test: passed ← module[]+deps(jsx27)+fr(26)（69.3s）
+  结果：F:\WorkNew\SillyHub\.sillyspec\.runtime\verify-runs\20261016055124\test-result.json｜lint: skipped — 跳过原因：local.yaml
+  未配置 commands.lint（或标记 unavailable）。｜门文件 5 个
+

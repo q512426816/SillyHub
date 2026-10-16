@@ -1,0 +1,14 @@
+{"ts":1792118610024,"kind":"file","stage":"tasks","detail":"tasks.md 出现","provisional":true}
+{"ts":1792118642354,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792118655659,"kind":"file-update","stage":"requirements","detail":"requirements.md 内容变更","provisional":true}
+{"ts":1792118675402,"kind":"file-update","stage":"design","detail":"design.md 内容变更","provisional":true}
+{"ts":1792118681984,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792118681984,"kind":"task-done","stage":"tasks","detail":"checked 0→1","provisional":true}
+{"ts":1792118681984,"kind":"commit","stage":null,"detail":"37eb0e946","provisional":true}
+{"ts":1792118743854,"kind":"warning","stage":null,"rule":"scope-drift","severity":"warning","detail":"声明面之外的代码文件被改：sillyspec/changes/2026-10-16-knowledge-module-card/flow-state.yaml——范围漂移嫌疑（并行会话改动/越界，人判）","provisional":true}
+{"ts":1792118781575,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792118781575,"kind":"task-done","stage":"tasks","detail":"checked 1→2","provisional":true}
+{"ts":1792118799057,"kind":"commit","stage":null,"detail":"cc61c6350","provisional":true}
+{"ts":1792118829806,"kind":"file-update","stage":"tasks","detail":"tasks.md 内容变更","provisional":true}
+{"ts":1792118829806,"kind":"task-done","stage":"tasks","detail":"checked 2→3","provisional":true}
+{"ts":1792118829806,"kind":"commit","stage":null,"detail":"cc1c9a3f9","provisional":true}

@@ -1115,3 +1115,45 @@ created_at: 2026-09-28T13:29:24.005Z
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-08-sync-sillyspec-skills-3320/requirements.md#FR-04
 最近确认：e3a4222dcee84c1281d5e7414b11b1908724cf69
+
+## FR-auto-sillyspec-083 .sillyspec/knowledge/uncategorized.md 新增补记小节，覆盖本地 12/360 无重复行直接 REINDEX、amcheck 须 JOIN pg_am 过滤 btree、last_used_at 停滞即同步静默断档信号、墓碑冲突遗留待拍板，四点齐全
+变更：2026-10-16-pg-index-local-followup
+状态：active
+摘要：补记四点齐全
+全文：.sillyspec/changes/archive/2026-10-16-pg-index-local-followup/requirements.md#FR-01
+最近确认：08aa9fa699db804e74b848e3aa801de390550c08
+
+## FR-auto-sillyspec-084 补记紧邻既有 2026-10-16 生产事故条目且不改动原条目内容
+变更：2026-10-16-pg-index-local-followup
+状态：active
+摘要：原条目零改动
+全文：.sillyspec/changes/archive/2026-10-16-pg-index-local-followup/requirements.md#FR-02
+最近确认：08aa9fa699db804e74b848e3aa801de390550c08
+
+## FR-auto-sillyspec-085 数字与本次实证一致：360 checked/12 bad/修复后 0 bad、清单 10152 到 10680 行、变更行 614
+变更：2026-10-16-pg-index-local-followup
+状态：active
+摘要：数字一致
+全文：.sillyspec/changes/archive/2026-10-16-pg-index-local-followup/requirements.md#FR-03
+最近确认：08aa9fa699db804e74b848e3aa801de390550c08
+
+## FR-auto-sillyspec-086 _module-map.yaml 新增 sillyspec 模块卡，paths 覆盖 .sillyspec/knowledge/**，配套模块文档 modules/sillyspec.md 创建
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：登记后蒸馏落真域
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-01
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
+
+## FR-auto-sillyspec-087 FR-auto-sillyspec-083~085 三条迁入 knowledge/fr/sillyspec.md，条目 ID 不变（迁域不换号），伪域 fr/auto-sillyspec.md 清空或移除
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：迁域不换号
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-02
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6
+
+## FR-auto-sillyspec-088 redomain 干跑与 --write 输出一致无报错，迁移后 git diff 仅涉及模块图/模块文档/知识 fr 文件
+变更：2026-10-16-knowledge-module-card
+状态：active
+摘要：变更面干净
+全文：.sillyspec/changes/archive/2026-10-16-knowledge-module-card/requirements.md#FR-03
+最近确认：cc1c9a3f91f025c3685e89bf4416c635aef318d6

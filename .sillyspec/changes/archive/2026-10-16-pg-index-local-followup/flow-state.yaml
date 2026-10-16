@@ -1,0 +1,42 @@
+tier: thin
+legacy_fallback: false
+substeps:
+  artifacts: done
+  ledger: done
+  patch: done
+  review: done
+  probes: done
+  distill: done
+  archive: done
+  events: done
+born_face: thin
+with_tasks: false
+review_force: null
+input: >-
+  本地平台 postgres 索引损坏修复补记沉淀知识库
+
+
+  动机：本地 docker 平台复发同款唯一索引静默损坏（btree 12/360 坏、无重复行、直接 REINDEX 即愈），另有三点新经验需补记在生产事故条目旁：amcheck 须过滤 btree（GIN
+  会被误判坏）、同步静默断档排查信号（platform_sync_tokens.last_used_at 长期停滞）、2026-09-08-session-turn-nav 墓碑冲突遗留待拍板。
+
+
+  成功标准：
+
+  - .sillyspec/knowledge/uncategorized.md 新增补记小节，覆盖本地 12/360 无重复行直接 REINDEX、amcheck 须 JOIN pg_am 过滤 btree、last_used_at
+  停滞即同步静默断档信号、墓碑冲突遗留待拍板，四点齐全
+
+  - 补记紧邻既有 2026-10-16 生产事故条目且不改动原条目内容
+
+  - 数字与本次实证一致：360 checked/12 bad/修复后 0 bad、清单 10152 到 10680 行、变更行 614
+autopilot: false
+prestage_ack: false
+baseline_commit: 82f3f70f6df068ee0e45a8d8fd1972b5a6fad26b
+updatedAt: '2026-10-16T02:34:43.329Z'
+baseline_sha256: 74ee53a3aeb777b2c418e18a9dad6276445c2bdabc3f8b582a0ddfd2fd9eeb46
+spec_approved: true
+spec_approved_at: '2026-10-16T02:24:55.515Z'
+spec_approved_by: anon@DESKTOP-2BN7FDC
+spec_approved_channel: user-confirmed
+spec_attested_by: anon@DESKTOP-2BN7FDC
+gate_summary: 'test: —｜lint: —｜门文件 1 个'
+

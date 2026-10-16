@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-decision-pill-no-workspace",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "256aa6feb2c4349f3d4a1b513e94fb9fa5fddd0e",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "无 workspace 挂载分支仍无断言级测试覆盖（已声明的残留缺口，非阻塞）",
+      "evidence": "session-panel-connection.test.tsx 全文无 workspace_id 引用且未断言悬浮行/pill 挂载，本次缺陷类型（挂载门连坐）正是此前变更在无断言覆盖下引入的；requirements FR-01/02 已显式声明由浏览器实测覆盖（会话 445e12d9 实测过），声明合理，但同类回归仍只能靠实测发现",
+      "location": "frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx:1"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "n/a",
+    "并发": "n/a",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-16T05:53:37Z"
+}

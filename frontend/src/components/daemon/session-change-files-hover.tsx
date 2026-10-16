@@ -35,6 +35,12 @@ export interface SessionChangeFilesHoverProps {
   sessionId: string;
   /** 会话在跑（turnState.currentRunId != null）——进行中变更徽标呼吸提示 */
   running?: boolean;
+  /**
+   * 2026-10-16-session-decision-pill task-03：true 时不渲染自带 absolute 悬浮
+   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——与
+   * 待决策 pill 并排成 flex 悬浮行。缺省 false 行为不变（旧消费方零回归）。
+   */
+  embedded?: boolean;
 }
 
 /**
@@ -92,6 +98,7 @@ export function SessionChangeFilesHover({
   workspaceId,
   sessionId,
   running = false,
+  embedded = false,
 }: SessionChangeFilesHoverProps) {
   // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底），antd 只发
   // onOpenChange 事件，state 是唯一真相。
@@ -177,79 +184,86 @@ export function SessionChangeFilesHover({
       : `${c.change_key}（${c.is_thin ? "轻量" : "全量"}·${stageLabel(c)}）`,
   }));
 
+  // embedded=true：内容裸输出（挂载方 flex 悬浮行统一定位）；false：自带
+  // absolute 悬浮外壳（原行为，task-03 前唯一形态）。
+  const content = (
+    <div data-testid="session-change-files-hover">
+      <Popover
+        open={popoverOpen}
+        onOpenChange={setPopoverOpen}
+        trigger={["hover", "click"]}
+        placement="topRight"
+        content={popoverContent}
+        styles={{ container: { padding: 4 } }}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 rounded-lg shadow-sm"
+          aria-label="悬浮查看会话关联的变更文件"
+        >
+          <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
+          变更文件
+          <span
+            data-testid="session-change-count"
+            className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
+              running && active.length > 0 ? "animate-pulse" : ""
+            }`}
+          >
+            {active.length}
+          </span>
+        </Button>
+      </Popover>
+
+      <Dialog
+        open={dialogChangeId !== null}
+        onOpenChange={(o) => {
+          if (!o) setDialogChangeId(null);
+        }}
+      >
+        <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
+          <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3">
+            <DialogTitle className="text-sm">变更文件实时预览</DialogTitle>
+            <Select
+              size="small"
+              value={dialogChangeId ?? undefined}
+              onChange={(v: string) => setDialogChangeId(v)}
+              options={selectOptions}
+              className="min-w-0 max-w-[360px] flex-1"
+              data-testid="session-change-select"
+              // 2026-10-13 用户实测「下拉项选择不了」修复：radix Dialog modal 对
+              // body 设 pointer-events:none（仅 DialogContent 内恢复），antd 下拉
+              // 默认 portal 到 body → 选项点不动且点按触发弹窗 outside-close。
+              // 挂进 DialogContent（role=dialog）内：pointer-events 恢复、层级随
+              // 弹窗、radix 不计 outside（下拉交互不再误关弹窗）。
+              getPopupContainer={(trigger) =>
+                (trigger.closest('[role="dialog"]') as HTMLElement | null) ??
+                document.body
+              }
+            />
+            <DialogDescription className="shrink-0 text-[11px]">
+              与变更文件页同组件 · 15 秒自动刷新
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
+            {dialogChangeId && (
+              <ChangeFileTree
+                key={dialogChangeId}
+                workspaceId={workspaceId}
+                changeId={dialogChangeId}
+                autoRefreshMs={15000}
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+
+  if (embedded) return content;
   return (
     <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex justify-end print:hidden">
-      <div className="pointer-events-auto" data-testid="session-change-files-hover">
-        <Popover
-          open={popoverOpen}
-          onOpenChange={setPopoverOpen}
-          trigger={["hover", "click"]}
-          placement="topRight"
-          content={popoverContent}
-          styles={{ container: { padding: 4 } }}
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 rounded-lg shadow-sm"
-            aria-label="悬浮查看会话关联的变更文件"
-          >
-            <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
-            变更文件
-            <span
-              data-testid="session-change-count"
-              className={`rounded-full bg-emerald-600 px-1.5 text-[10px] font-bold leading-4 text-white ${
-                running && active.length > 0 ? "animate-pulse" : ""
-              }`}
-            >
-              {active.length}
-            </span>
-          </Button>
-        </Popover>
-
-        <Dialog
-          open={dialogChangeId !== null}
-          onOpenChange={(o) => {
-            if (!o) setDialogChangeId(null);
-          }}
-        >
-          <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
-            <DialogHeader className="flex flex-row items-center gap-3 space-y-0 border-b px-4 py-3">
-              <DialogTitle className="text-sm">变更文件实时预览</DialogTitle>
-              <Select
-                size="small"
-                value={dialogChangeId ?? undefined}
-                onChange={(v: string) => setDialogChangeId(v)}
-                options={selectOptions}
-                className="min-w-0 max-w-[360px] flex-1"
-                data-testid="session-change-select"
-                // 2026-10-13 用户实测「下拉项选择不了」修复：radix Dialog modal 对
-                // body 设 pointer-events:none（仅 DialogContent 内恢复），antd 下拉
-                // 默认 portal 到 body → 选项点不动且点按触发弹窗 outside-close。
-                // 挂进 DialogContent（role=dialog）内：pointer-events 恢复、层级随
-                // 弹窗、radix 不计 outside（下拉交互不再误关弹窗）。
-                getPopupContainer={(trigger) =>
-                  (trigger.closest('[role="dialog"]') as HTMLElement | null) ??
-                  document.body
-                }
-              />
-              <DialogDescription className="shrink-0 text-[11px]">
-                与变更文件页同组件 · 15 秒自动刷新
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
-              {dialogChangeId && (
-                <ChangeFileTree
-                  key={dialogChangeId}
-                  workspaceId={workspaceId}
-                  changeId={dialogChangeId}
-                  autoRefreshMs={15000}
-                />
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+      <div className="pointer-events-auto">{content}</div>
     </div>
   );
 }

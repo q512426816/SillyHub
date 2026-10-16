@@ -795,3 +795,22 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+
+  # === SillySpec 规范资产域（2026-10-16-knowledge-module-card 登记） ===
+  sillyspec:
+    status: active
+    doc: modules/sillyspec.md
+    paths:
+      - .sillyspec/knowledge/**
+    tags: [sillyspec, spec-assets, docs]
+    aliases: [spec-knowledge]
+    entrypoints: []
+    main_symbols:
+      - knowledge/fr/（FR 索引，sillyspec-fr-index 机器维护，条目勿手改）
+      - knowledge/decisions/（决策库，rejected 条目防复潮）
+      - knowledge/uncategorized.md（收件箱，新踩坑尾部追加）+ INDEX.md（检索索引）
+    depends_on: []
+    used_by: [全变更收口蒸馏链（fr-index/decision-distill/knowledge-digest）与 brainstorm/flow 知识注入]
+    needs_review: false
+    concerns: []
+    review_reasons: []

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-decision-pill-no-workspace",
+  "rows": [
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-decision-pill-no-workspace:flow:测试绑定FR-03",
+      "tests": [
+        "frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx",
+        "frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-decision-pill-no-workspace"
+    }
+  ]
+}

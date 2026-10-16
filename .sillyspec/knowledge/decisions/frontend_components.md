@@ -1354,3 +1354,41 @@ supersedes：D-007@v1
 锚点：未记录
 最近确认：205ec5afb2097446b431f91cccd00ee00744e0ec
 理由：最大风险：转圈信号取活性 working 依赖 agent 日志上报链路（无日志/未上报的会话活性缺失 → 非终态行留白，用户可能觉得「跑着的会话没转圈」）。缓解：活性链路是既有成熟机制（工作台总览卡同源），且终态红/绿点不依赖活性，最坏退化为留白而非错误标识。放弃的方案：a) status=active 即转圈——会让所有未结束聊天会话永久转圈（用户确认否掉）；b) 保留行尾灯只改行首点——两套点并存，语义打架的根源不除（用户确认移除并入）；c) 把完成通知做进 use-session-liveness hook——完成是会话 status 转移不是日志 state 转移，数据源不同，硬塞进 hook 会让 hook 依赖会话列表数据，耦合更差，故检测放面板层。
+
+## D-frontend_components-001@v1 决策 pill 类型范围——三类全含，后两类仅实时 pending
+状态：implemented
+变更：2026-10-16-session-decision-pill
+原编号：D-001@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：用户选择"三类全要，但后两类只看当前待决策"：AskUser 提问含 pending+已答历史；工具审批（canUseTool）与 Plan 审批仅聚合当前实时 pending，不追历史（历史用聊天时间线回看）。
+故障面：工具审批/Plan 审批 pending 依赖 SSE 实时态——页面刷新后丢失（与聊天流卡片同现状），pill 上不显示刷新前漏掉的实时审批
+退役判据：后续若为工具审批/Plan 新增持久化，本边界升级为全类型含历史
+
+## D-frontend_components-002@v1 pending 项点击动作——定位回聊天流卡片，普通工具审批跳聚合页
+状态：implemented
+变更：2026-10-16-session-decision-pill
+原编号：D-002@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：用户选方案 1（定位回聊天流卡片）：pending 卡 sticky top-0 常驻聊天流顶部不会滚丢，被最小化的可还原。普通工具审批（无 dialog_kind）会话页无卡，跳 approvals 聚合页作答（现有唯一作答面）。
+
+## D-frontend_components-003@v1 实现方案——C 前端自包含聚合（仅 AskUser 提问 + Plan 审批）
+状态：implemented
+变更：2026-10-16-session-decision-pill
+原编号：D-004@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：用户选方案 C：新组件仿 session-change-files-hover 自包含——pending 复用父级现有 SSE 状态链（pendingRequests + planPending），历史组件内 react-query fetchSessionDialogHistory；普通工具审批不收集（门户会话不会发生）。
+故障面：普通审批若未来权限模式变更后发生，pill 不显示（缺口明确记录，非静默失败）
+退役判据：权限模式支持普通审批人审的会话入口上线时，升级聚合范围
+
+## D-frontend_components-004@v1 rejected 方案 A——前端聚合 + 普通审批实时收集
+状态：rejected
+变更：2026-10-16-session-decision-pill
+原编号：D-005@v1
+锚点：未记录
+最近确认：7083eb2b2bd5c6cffe84962df65bbda379485f26
+理由：（落选）
+否决理由：门户会话（manual_approval=true + ask_user_only=true）除 AskUserQuestion 外全部自动放行，普通审批收集是死代码，白增状态面
+复潮条件：出现普通审批人审的会话入口（ask_user_only=false 的门户会话/新权限模式），且用户需要在会话内看到这些等待点
