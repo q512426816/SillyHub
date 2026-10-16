@@ -18,5 +18,6 @@ change: 2026-10-16-conflict-full-tree-compare
   - target_files: frontend/src/lib/spec-workspaces.ts, frontend/src/components/changes/platform-sync-section.tsx, frontend/src/components/changes/__tests__/platform-sync-section.test.tsx
 - [x] task-05: 原型对账与聚焦回归——`pnpm prototype:build` 重编译对账（产物 git diff 为空；变更目录 prototype-conflict-sync-states.html 同步）+ 本改动面聚焦回归（后端 compare 用例族 + 前端两个测试文件 + 前端 lint/typecheck + 后端 ruff/mypy 本文件面） (depends_on: task-03, task-04)
   - target_files: frontend/src/components/prototype/conflict-sync-states-view.tsx, frontend/scripts/prototype-build.mjs, frontend/prototype-dist/conflict-sync-states.html, .sillyspec/changes/2026-10-16-conflict-full-tree-compare/prototype-conflict-sync-states.html
-- [ ] task-06: 部署真机复验（D-008）——按 deploy-to-server skill 打包部署腾讯云生产（124.222.127.242）后，用现网 `2026-10-13-fire-unitadd-form-import` 行验证：对比可打开且仅含该变更 4 个路径 + 来源提示在场 + 失败卡分支文案 + 「标记已处理」可用且行消失；证据（请求与响应摘要）落 verify 记录 (depends_on: task-03, task-04, task-05)
+- [x] task-06: 部署真机复验（D-008）——按 deploy-to-server skill 打包部署腾讯云生产（124.222.127.242）后，用现网 `2026-10-13-fire-unitadd-form-import` 行验证：对比可打开且仅含该变更 4 个路径 + 来源提示在场 + 失败卡分支文案 + 「标记已处理」可用且行消失；证据（请求与响应摘要）落 verify 记录 (depends_on: task-03, task-04, task-05)
   - target_files: -
+  - ✅ 2026-10-17 复验收口（3/4 达成，用户裁决接受偏离）：①commit_sha 核对 ✓（994656fdd 双路一致）②四臂文案生产实测 ✓ + 前端 44 用例绿 ③关行双通道实测 ✓（全绿自动关行 + resolve 幂等确认）；「兜底对比 200」未达——机器侧两记录名双缺（记录生命周期断层：树记录只在机器侧会话结束/扫描收尾落盘，平台定向同步不再生），兜底代码按设计工作；6 条冲突路径 server 版本未动，机器下次树推送必再冲突届时补验。证据全文：`verify-deploy-evidence.md`。

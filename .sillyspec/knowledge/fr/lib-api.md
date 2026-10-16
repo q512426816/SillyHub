@@ -685,12 +685,14 @@
 
 ## FR-lib-api-040 （可选）502 网关文案按 daemon_code 分叉
 变更：2026-09-09-conflict-root-workspace-scoping
-状态：active
+状态：superseded
+superseded_by：FR-daemon-152
+取代链：FR-lib-api-040 ← FR-daemon-152（2026-10-16-conflict-full-tree-compare 承接）
 摘要：默认场景
 场景正文：
 - 场景：默认场景 — Given 对比 RPC 因 daemon 业务错误返回 502；When daemon_code = workspace_root_unknown / conflict_record_missing；Then 用户可见文案分别为「该工作区尚未被本机认领…」/「冲突记录已失效，请刷新
 全文：.sillyspec/changes/archive/2026-09-09-conflict-root-workspace-scoping/requirements.md#FR-06
-最近确认：28b758edc
+最近确认：d3c425bf6
 
 ## FR-lib-api-041 同 ts 批次逐页可达
 变更：2026-09-16-logs-cursor-tiebreaker

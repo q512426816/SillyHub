@@ -445,14 +445,16 @@ created_at: 2026-09-22T17:27:13.449Z
 
 ## FR-spec-sync-023 platform-sync-section 渲染注册表「版本冲突」型开放行（非纯墓碑）并给对比/裁决入口，未决冲突计数与横幅口径一致
 变更：2026-10-11-sync-conflict-tri-fix
-状态：active
+状态：superseded
+superseded_by：FR-daemon-153
+取代链：FR-spec-sync-023 ← FR-daemon-153（2026-10-16-conflict-full-tree-compare 承接）
 摘要：主路径（注册表行可见可裁决）；与机器行去重；混合行（版本冲突 + 墓碑并集）
 场景正文：
 - 场景：主路径（注册表行可见可裁决） — Given 注册表有 1 条开放行（conflicting_paths 含 `changes/archive/X/tasks.md`，platform_deleted 为空；When 渲染平台同步区块；Then 渲染 1 行 spec 徽章 + 变更名 X + 「查看对比」按钮，卡头「未决冲突」= 1（与横幅计数一致）。
 - 场景：与机器行去重 — Given 同一变更名已存在于机器 pending_conflicts 行（CLI 侧冲突）；When 渲染；Then 只渲染机器行一次，不因注册表行重复渲染。
 - 场景：混合行（版本冲突 + 墓碑并集） — Given conflicting_paths 同时含版本冲突路径与 platform_deleted 路径；When 渲染；Then 按版本冲突面归因渲染（墓碑行判定要求纯墓碑，混合行不额外渲染墓碑行）。
 全文：.sillyspec/changes/archive/2026-10-11-sync-conflict-tri-fix/requirements.md#FR-01
-最近确认：0c821b2ec492f134411d4ab2429e8b7f1da438b0
+最近确认：d3c425bf6
 
 测试绑定：
 <!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
@@ -464,7 +466,7 @@ created_at: 2026-09-22T17:27:13.449Z
   confirmed_by: null
   confirmed_at: null
   source_change: 2026-10-11-sync-conflict-tri-fix
-  status: active
+  status: superseded
 
 ## FR-spec-sync-024 daemon 增量推送撞乐观锁冲突后自动重拉 re-base 一次并重试，re-base 后仍冲突才落注册表
 变更：2026-10-11-sync-conflict-tri-fix

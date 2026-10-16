@@ -5177,3 +5177,56 @@
   confirmed_at: null
   source_change: 2026-10-16-daemon-pull-antiresurrect
   status: active
+
+## FR-daemon-150 兜底读取 full-tree 记录，让跨变更冲突的对比可用
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；主路径（兜底命中）
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given 某冲突在机器上落盘为 `spec-sync-conflict-full-tree.json` 且平台行按单变更名 `<change>` 请求对比；When `kind=spec-tree` 且按 `<change>` 读取记录返回 `conflict_record_missing`，而 `full-tree` 记录；Then 平台必须（MUST）以 `full-tree` 记录构建该变更范围内的对比并返回 200；兜底**必须只重试一次**（MUST NOT 递归或多次重取）；实现*
+- 场景：主路径（兜底命中） — Given full-tree 记录含 `changes/archive/<change>/…` 路径；When 对比请求先失败为 `conflict_record_missing`；Then 返回 200 且 `record_label="full-tree"`；daemon RPC 恰好被调用两次（先 `<change>` 后 `full-tree
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-01
+最近确认：d3c425bf6
+
+## FR-daemon-151 对比只呈现所请求变更的范围，并标注来源
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；段边界防误吞
+依据决策：D-006@v2
+场景正文：
+- 场景：默认场景 — Given 兜底命中且 `full-tree` 快照覆盖多个变更的路径；When 生成对比响应；Then 文件清单与 diff **必须（MUST）只包含** `changes/<change>/` 或 `changes/archive/<change>/` 属于该
+- 场景：段边界防误吞 — Given full-tree 记录只含 `changes/foobar/…` 路径；When 请求 `<change>=foo`；Then 兜底不命中（MUST 返回原 `conflict_record_missing` 错误），不得把 `foobar` 的文件混入对比
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-02
+最近确认：d3c425bf6
+
+## FR-daemon-152 失败文案按真实错误码分支
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；记录缺失分支
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 对比请求失败；When 前端渲染失败卡；Then 分支键**必须（MUST）**为 `details.daemon_code`（daemon 业务失败时外层 `ApiError.code` 恒为 `HTTP_5
+- 场景：记录缺失分支 — Given 对比返回 502 且 `details.daemon_code="conflict_record_missing"`；When 失败卡渲染；Then 文案为「该冲突在本机已无快照…请重新同步后再试」且页面上**不存在**「重试」按钮与「504」「离线」字样
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-03
+最近确认：d3c425bf6
+
+## FR-daemon-153 冲突行手动关闭入口（标记已处理）
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景；关闭后消失与可复现
+依据决策：D-003@v1
+场景正文：
+- 场景：默认场景 — Given 可操作者看到一条来自平台注册表的未决冲突行；When 点击行上「标记已处理」并二次确认；Then 前端**必须（MUST）**调 `POST /api/workspaces/{workspace_id}/spec-conflicts/{conflict_id
+- 场景：关闭后消失与可复现 — Given 注册表有 1 条 open 行（含 2 个变更名的并列展示行）；When 可操作者确认「标记已处理」；Then 两行同时从列表消失；若该冲突仍在本机存在，下一次冲突推送**可以（MAY）**重新登记新的 open 行（不视为回归）
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-04
+最近确认：d3c425bf6
+
+## FR-daemon-154 契约与类型同步
+变更：2026-10-16-conflict-full-tree-compare
+状态：active
+摘要：默认场景
+场景正文：
+- 场景：默认场景 — Given 后端 compare 响应新增可选字段；When 本变更交付；Then `backend/openapi.json`、`frontend/src/lib/api-types.ts`、`sillyhub-daemon/src/api-
+全文：.sillyspec/changes/archive/2026-10-16-conflict-full-tree-compare/requirements.md#FR-05
+最近确认：d3c425bf6

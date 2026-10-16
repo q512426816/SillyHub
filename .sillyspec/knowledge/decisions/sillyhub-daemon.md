@@ -313,3 +313,13 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 锚点：backend/app/modules/knowledge/vector_search.py:168
 最近确认：439cdc46c
 理由：纳入。①knowledge/vector_search.py `_indexes` 无界索引缓存（LRU 工作区上限）；②spec_workspace/service.py `_bundle_gzip_cache` 无全局帽（128MB LRU）；③permission_service.py 权限定时器 pin 已关 session 且 route_key None 路径不提交（idle-in-transaction 元凶，新开短 session+全路径提交）。中危配套（ws_hub _pending_rpcs 泄漏两径/disconnect 无身份校验/附件先读后检/WS 大消息日志）一并治理。
+
+## D-sillyhub-daemon-001@v1 落选——新增 daemon「列记录」RPC（方案 C）
+状态：rejected
+变更：2026-10-16-conflict-full-tree-compare
+原编号：D-011@v1
+锚点：未记录
+最近确认：d3c425bf6
+理由：方案 C 落选（用户选 A）。
+否决理由：必须等 daemon 自更新铺开才生效，新增 RPC 带来协议/权限/测试成本，而当前机器侧只有 full-tree 一种已成形形态，收益是假想的未来变化。
+复潮条件：机器侧出现第三种以上记录命名形态（如按工作区/轮次改名）导致「猜名字」清单不可维护时，重议升级为目录发现。
