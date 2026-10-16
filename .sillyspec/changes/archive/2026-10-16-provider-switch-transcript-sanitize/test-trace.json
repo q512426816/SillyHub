@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-provider-switch-transcript-sanitize",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-01",
+      "tests": [
+        "sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「SAN-1 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动」",
+        "sillyhub-daemon/tests/transcript-sanitize.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-provider-switch-transcript-sanitize"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-03",
+      "tests": [
+        "sillyhub-daemon/tests/model-error/classifier.test.ts「实证 MiniMax 400 文案 → message/hint 覆写为可执行中文提示（type/retryable 不变）」"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-provider-switch-transcript-sanitize"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-04",
+      "tests": [
+        "sillyhub-daemon/tests/model-error/classifier.test.ts",
+        "sillyhub-daemon/tests/transcript-sanitize.test.ts"
+      ],
+      "reason": "spec",
+      "state": "candidate",
+      "discovery": "machine",
+      "confirmed_by": null,
+      "confirmed_at": null,
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-provider-switch-transcript-sanitize"
+    }
+  ]
+}

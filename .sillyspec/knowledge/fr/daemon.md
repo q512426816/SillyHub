@@ -5072,3 +5072,76 @@
 摘要：主路径
 全文：.sillyspec/changes/archive/2026-10-16-session-run-status-realtime/requirements.md#FR-05
 最近确认：3472327464a8e8f9d8829a5e9b35fda123a9b719
+
+## FR-daemon-145 平台内切换供应商时，resume 前必须清洗 transcript 里的供应商私有块
+变更：2026-10-16-provider-switch-transcript-sanitize
+状态：active
+摘要：主路径——切供应商后 resume 读到的历史已干净；边界——非切换轮不清洗 / 探测不到则不阻断
+场景正文：
+- 场景：主路径——切供应商后 resume 读到的历史已干净 — Given 会话历史含上一家供应商的私有块对（实证形态：同一条 assistant 消息内 `server_tool_use`；When 平台把该会话切到另一供应商并 reload（迁移 → 清洗 → resume）；；Then 隔离副本中该私有 id 消失、原正文以 `text` 保留、记录条数与链路字段不变、备份文件落盘，
+- 场景：边界——非切换轮不清洗 / 探测不到则不阻断 — Given 同一份含私有块的历史；；When 只切人格（payload 不带 `providerConfig`）或探测不到 transcript；；Then 历史零改写、零备份（非切换轮），且 reload 照常成功（降级路径）。
+全文：.sillyspec/changes/archive/2026-10-16-provider-switch-transcript-sanitize/requirements.md#FR-01
+最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-01
+  tests: sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts「SAN-1 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动」 | sillyhub-daemon/tests/transcript-sanitize.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-provider-switch-transcript-sanitize
+  status: active
+
+## FR-daemon-146 清洗后的历史必须能被真实新供应商接受（实测证据）
+变更：2026-10-16-provider-switch-transcript-sanitize
+状态：active
+摘要：对照实验——同一形态两种编码，端点一拒一收
+场景正文：
+- 场景：对照实验——同一形态两种编码，端点一拒一收 — Given 一段最小化 payload（含 `server_tool_use:analyze_image` + 同 id `tool_result`）；；When 分别以「原形态」与「等价 text 形态」请求真实端点；；Then 前者 400（错误文案与事故现场逐字一致）、后者 200（正常 completion）；且对实证会话的
+全文：.sillyspec/changes/archive/2026-10-16-provider-switch-transcript-sanitize/requirements.md#FR-02
+最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
+
+## FR-daemon-147 模型错误分类器必须识别「供应商拒收历史」签名并给出可执行提示
+变更：2026-10-16-provider-switch-transcript-sanitize
+状态：active
+摘要：签名命中与不误伤
+场景正文：
+- 场景：签名命中与不误伤 — Given 实证错误原文 / 变体文本 / 不含该签名的普通 400；；When 走归类器；；Then 前者得「拒收会话历史」提示且 `type=unknown` / `code=400` / `retryable=false` 不变，
+全文：.sillyspec/changes/archive/2026-10-16-provider-switch-transcript-sanitize/requirements.md#FR-03
+最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-03
+  tests: sillyhub-daemon/tests/model-error/classifier.test.ts「实证 MiniMax 400 文案 → message/hint 覆写为可执行中文提示（type/retryable 不变）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-provider-switch-transcript-sanitize
+  status: active
+
+## FR-daemon-148 守护测试必须覆盖清洗内核三类形态、链路完整性与备份
+变更：2026-10-16-provider-switch-transcript-sanitize
+状态：active
+摘要：测试面全绿
+场景正文：
+- 场景：测试面全绿 — Given 本变更的三份测试文件与既有 interactive 套件；；When 跑 `vitest run tests/interactive tests/transcript-sanitize.test.ts tests/model-er；Then 全绿零失败。
+全文：.sillyspec/changes/archive/2026-10-16-provider-switch-transcript-sanitize/requirements.md#FR-04
+最近确认：030eceeece1388442415e8cd66c3cd3cc443083d
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-provider-switch-transcript-sanitize:flow:测试绑定FR-04
+  tests: sillyhub-daemon/tests/model-error/classifier.test.ts | sillyhub-daemon/tests/transcript-sanitize.test.ts
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-provider-switch-transcript-sanitize
+  status: active
