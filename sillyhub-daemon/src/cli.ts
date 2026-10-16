@@ -76,6 +76,8 @@ import { PiRpcDriver } from './interactive/pi-rpc-driver.js';
 // 档B 步骤 10 补充·三处硬编码必改点之一）。_getDriver 走 deps.drivers 注入，descriptor
 // createDriver 工厂不被消费——providers.ts 加键而不改此处则建会话 UnsupportedProviderError。
 import { CursorDriver } from './interactive/cursor-driver.js';
+import { DshAcpDriver } from './interactive/dsh-acp-driver.js';
+import { ZcodeAppServerDriver } from './interactive/zcode-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
 import { isMainAgentMcpCandidate } from './interactive/providers.js';
 import type { SessionEventForBackend } from './interactive/types.js';
@@ -815,7 +817,17 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 2026-09-08-cursor-interactive-session task-06：registry 加 cursor。
       // _getDriver 走 deps.drivers 注入，descriptor createDriver 工厂不被消费。
       driver,
-      drivers: { claude: driver, codex: codexDriver, pi: piDriver, cursor: cursorDriver },
+      // 2026-10-15 dsh-engine-acp / zcode-engine-appserver：dsh/zcode 装配（docs/
+      // agent-provider-onboarding.md §4.2 三处硬编码必改点①——此前两变更双双漏改，
+      // 建会话抛 UNSUPPORTED_PROVIDER，真机实证后补）。
+      drivers: {
+        claude: driver,
+        codex: codexDriver,
+        pi: piDriver,
+        cursor: cursorDriver,
+        dsh: new DshAcpDriver(),
+        zcode: new ZcodeAppServerDriver(),
+      },
       persistence,
       // task-03（2026-09-11-session-provider-switch-codex-pi / D-003@v1）：daemon 自身
       // apiKey 注入 SessionManager——reload/restore 文件层写盘（ForReload）对 codex
