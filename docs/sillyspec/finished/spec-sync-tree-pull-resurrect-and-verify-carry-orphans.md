@@ -1,7 +1,7 @@
 # spec-sync 文件树拉取回灌本地已删文件 + verify-result --force 携载孤儿表行
 
 > 记录时间：2026-10-16 · 来源变更：2026-10-16-fix-auth-random-logout（plan 卡重构 + verify 收口实测）
-> 状态：活跃坑（已人工清理绕过，待工具修复）
+> 状态：**已修复**（2026-10-16 工具侧 sillyspec 仓 da8d2449/a83f1df4，变更 2026-10-16-fix-downstream-tool-defects——缺陷一 CLI pullSpecBundle 防复活 + 缺陷二携载孤儿残行双修；daemon 侧同款路径移植于 multi-agent-platform 仓 056cff30，变更 2026-10-16-daemon-pull-antiresurrect——pullSpecBundle 防复活抑制 + 落地重建并回被抑制行保 delete op 链，独立评审 PASS 含 P2 增量闭环）
 
 ## 缺陷一：spec-sync 文件树拉取把本地已删除的旧文件回灌「复活」
 
