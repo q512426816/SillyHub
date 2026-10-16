@@ -9,23 +9,25 @@ import { cn } from "@/lib/utils";
  * 会话页悬浮 pill 停靠组（2026-10-16-session-pill-dock-drag）。
  *
  * 待决策 / 变更文件两个 pill 的公共悬浮外壳（用户需求：合成一组竖排、
- * 点击展开、整组可拖动 + 吸附边界）：
+ * 点击展开、整组可拖动 + 吸附边界；贴边不超出聊天时间线容器范围）：
  * - 竖向排列成组（items-end 右对齐）portal 到 body，fixed 定位不受面板
  *   祖先 overflow / transform 裁剪影响；
- * - 按住整组在 viewport 范围内拖动——move/up 挂 window 不依赖 pointer
- *   capture（jsdom 无实现，同款先例 floating-session-host 悬浮球）；
- *   位移 < 阈值视为点击放行，拖拽结束后 250ms 内残余 click 吞掉，pill
- *   自身点击（antd Popover click 触发）不受影响；
- * - 松手自动吸附较近的左右边界（纵向只钳回窗内）；位置 localStorage
- *   持久化（刷新不丢，损坏数据静默回落默认右下位）；
+ * - 按住整组在 boundsSelector 指定的边界容器（聊天时间线
+ *   turn-timeline-scroll；缺省回落整个视口）范围内拖动——move/up 挂
+ *   window 不依赖 pointer capture（jsdom 无实现，同款先例
+ *   floating-session-host 悬浮球）；位移 < 阈值视为点击放行，拖拽结束
+ *   后 250ms 内残余 click 吞掉，pill 自身点击（antd Popover click 触发）
+ *   不受影响；
+ * - 松手自动吸附较近的边界容器左右边缘（纵向钳回容器内）；位置
+ *   localStorage 持久化（刷新不丢，损坏数据静默回落默认右下位）；
  * - children 全为 null（两 pill 空数据各自渲染 null）时 empty:hidden
  *   整组不占位、不拦点击（对齐 pill 自身 FR 显隐契约）。
  */
 /** 判定「拖拽」而非「点击」的位移阈值（px，同悬浮球 DRAG_THRESHOLD）。 */
 const DRAG_THRESHOLD = 6;
-/** 吸附后与视口左右边缘留白（px）。 */
+/** 吸附后与边界左右/下缘留白（px）。 */
 const EDGE_GAP = 16;
-/** 默认（无持久化）停靠位距视口底部留白（px，对齐原 bottom-20 悬浮行）。 */
+/** 视口兜底模式的默认位距视口底部留白（px，对齐原 bottom-20 悬浮行）。 */
 const DEFAULT_BOTTOM_GAP = 96;
 /** 拖拽结束后残余 click 的吞除时间窗（ms，同悬浮球先例：比布尔位稳——
     拖出元素外松手时 click 不触发，布尔位会误吞下一次真点击）。 */
@@ -36,33 +38,54 @@ const DOCK_STORAGE_KEY = "sillyhub:session-pill-dock";
 /** 停靠组左上角视口坐标（px）。 */
 type DockPos = { x: number; y: number };
 
-function viewport() {
+/** 拖拽/吸附边界矩形（视口坐标）。 */
+interface DockBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+function viewportBounds(): DockBounds {
   return {
-    vw: typeof window === "undefined" ? 1024 : window.innerWidth,
-    vh: typeof window === "undefined" ? 768 : window.innerHeight,
+    left: 0,
+    top: 0,
+    right: typeof window === "undefined" ? 1024 : window.innerWidth,
+    bottom: typeof window === "undefined" ? 768 : window.innerHeight,
   };
 }
 
-/** 钳制组左上角使整组留在视口内（w/h 为组实际尺寸）。 */
-function clampPos(p: DockPos, w: number, h: number): DockPos {
-  const { vw, vh } = viewport();
+/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。 */
+function clampPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
   return {
-    x: Math.min(Math.max(p.x, 0), Math.max(vw - w, 0)),
-    y: Math.min(Math.max(p.y, 0), Math.max(vh - h, 0)),
+    x: Math.min(Math.max(p.x, b.left), Math.max(b.left, b.right - w)),
+    y: Math.min(Math.max(p.y, b.top), Math.max(b.top, b.bottom - h)),
   };
 }
 
-/** 松手吸附：贴较近的左右边缘（留 EDGE_GAP），纵向只钳回窗内。幂等——
+/** 松手吸附：贴较近的边界左右边缘（留 EDGE_GAP），纵向只钳回边界内。幂等——
     存档值本就是吸附态，重放不漂移。 */
-function snapPos(p: DockPos, w: number, h: number): DockPos {
-  const { vw } = viewport();
+function snapPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
+  const c = clampPos(p, w, h, b);
+  const midX = (b.left + b.right) / 2;
   const x =
-    clampPos(p, w, h).x + w / 2 <= vw / 2 ? EDGE_GAP : Math.max(vw - w - EDGE_GAP, EDGE_GAP);
-  return { x, y: clampPos(p, w, h).y };
+    c.x + w / 2 <= midX ? b.left + EDGE_GAP : Math.max(b.left, b.right - w - EDGE_GAP);
+  return { x, y: c.y };
 }
 
-/** 悬浮 pill 停靠组：竖排 + 可拖拽 + 边缘吸附 + 位置持久化。 */
-export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
+/** 悬浮 pill 停靠组：竖排 + 可拖拽 + 边界吸附 + 位置持久化。 */
+export function SessionFloatingPillDock({
+  children,
+  boundsSelector,
+}: {
+  children: ReactNode;
+  /**
+   * 拖拽/吸附的边界容器选择器（会话页传聊天时间线
+   * [data-testid="turn-timeline-scroll"]，贴边不越过聊天区）。缺省 = 整个
+   * 视口；元素未挂载/零尺寸时逐次回落视口（不缓存，元素后挂也自愈）。
+   */
+  boundsSelector?: string;
+}) {
   const [pos, setPos] = useState<DockPos | null>(null);
   const [dragging, setDragging] = useState(false);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -79,11 +102,20 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
   /** 有无存档位（无存档首帧按实际尺寸落默认右下位，见 settle）。 */
   const hadStoredPosRef = useRef(false);
 
-  /** 组实际尺寸（jsdom 恒 0×0；未挂载/empty:hidden 时也退化 0 安全）。 */
-  const dockSize = () => {
-    const rect = dockRef.current?.getBoundingClientRect();
-    return { w: rect?.width ?? 0, h: rect?.height ?? 0 };
-  };
+  /** 每次取数现查边界元素（元素尺寸/位置随布局变化，不缓存）。 */
+  const getBounds = useCallback((): DockBounds => {
+    if (boundsSelector && typeof document !== "undefined") {
+      const r = document.querySelector(boundsSelector)?.getBoundingClientRect();
+      if (r && (r.width > 0 || r.height > 0)) {
+        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      }
+    }
+    return viewportBounds();
+  }, [boundsSelector]);
+
+  /** 视口兜底模式默认位距底留白更大（聊天区模式的底部即输入条上缘，
+      视口模式的底部是窗口底缘，需避让输入条）。 */
+  const defaultBottomGap = boundsSelector ? EDGE_GAP : DEFAULT_BOTTOM_GAP;
 
   const persist = useCallback((p: DockPos) => {
     hadStoredPosRef.current = true;
@@ -94,16 +126,25 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  /** 按组实际尺寸收敛：吸附侧 + 钳窗内；无存档首帧默认位距底留白按实际
-      高度算（0 尺寸算的 y 会把组压到视口底缘，旧 UI 悬浮行在输入条上方）。 */
-  const settle = useCallback((p: DockPos, w: number, h: number): DockPos => {
-    const snapped = snapPos(p, w, h);
-    if (!hadStoredPosRef.current) {
-      const { vh } = viewport();
-      snapped.y = Math.max(vh - h - DEFAULT_BOTTOM_GAP, 0);
-    }
-    return snapped;
-  }, []);
+  /** 按组实际尺寸收敛：吸附侧 + 钳边界内；无存档首帧默认位距底留白按实际
+      高度算（0 尺寸算的 y 会把组压到边界底缘，旧 UI 悬浮行在输入条上方）。 */
+  const settle = useCallback(
+    (p: DockPos, w: number, h: number): DockPos => {
+      const b = getBounds();
+      const snapped = snapPos(p, w, h, b);
+      if (!hadStoredPosRef.current) {
+        snapped.y = Math.max(b.top, b.bottom - h - defaultBottomGap);
+      }
+      return snapped;
+    },
+    [getBounds, defaultBottomGap],
+  );
+
+  /** 组实际尺寸（jsdom 恒 0×0；未挂载/empty:hidden 时也退化 0 安全）。 */
+  const dockSize = () => {
+    const rect = dockRef.current?.getBoundingClientRect();
+    return { w: rect?.width ?? 0, h: rect?.height ?? 0 };
+  };
 
   // 挂载后读持久化位置（effect 而非初值：SSR/水合一致，同悬浮球先例）；
   // 无存档回落默认右下角（0 尺寸近似值，首帧挂 ref 后 settle 修正）。
@@ -114,16 +155,16 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
         const v = JSON.parse(raw) as Partial<DockPos>;
         if (typeof v.x === "number" && typeof v.y === "number") {
           hadStoredPosRef.current = true;
-          setPos(clampPos({ x: v.x, y: v.y }, 0, 0));
+          setPos(clampPos({ x: v.x, y: v.y }, 0, 0, getBounds()));
           return;
         }
       }
     } catch {
       // 损坏数据静默丢弃，回落默认右下角
     }
-    const { vw, vh } = viewport();
-    setPos({ x: vw - EDGE_GAP, y: vh - DEFAULT_BOTTOM_GAP });
-  }, []);
+    const b = getBounds();
+    setPos({ x: b.right - EDGE_GAP, y: b.bottom - defaultBottomGap });
+  }, [getBounds, defaultBottomGap]);
 
   // 首帧挂 ref 后按组实际尺寸收敛（初始/存档位按 0 尺寸计算会溢出右缘；
   // snap 幂等，收敛一次即稳定，拖拽中不打架）。
@@ -134,8 +175,8 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
     if (settled.x !== pos.x || settled.y !== pos.y) setPos(settled);
   }, [pos, dragging, settle]);
 
-  // 组尺寸后续变化（pill 空数据显隐 / 数量增减）按新尺寸收敛，防止右缘
-  // 溢出——jsdom 无 ResizeObserver，由上面 [pos,dragging] effect 兜底。
+  // 组尺寸与边界容器尺寸变化（pill 显隐 / 侧栏开合收窄聊天区）都重收敛，
+  // 防溢出——jsdom 无 ResizeObserver，由上面 [pos,dragging] effect 兜底。
   const dockMounted = pos != null;
   useEffect(() => {
     if (!dockMounted || typeof ResizeObserver === "undefined") return;
@@ -146,18 +187,23 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
       setPos((p) => (p && !dragRef.current ? settle(p, rect.width, rect.height) : p));
     });
     ro.observe(el);
+    if (boundsSelector && typeof document !== "undefined") {
+      const boundsEl = document.querySelector(boundsSelector);
+      if (boundsEl) ro.observe(boundsEl);
+    }
     return () => ro.disconnect();
-  }, [dockMounted, settle]);
+  }, [dockMounted, settle, boundsSelector]);
 
-  // 视口缩放：钳回窗内并保持吸附侧（右侧停靠的窗口变宽不悬空）。
+  // 视口缩放：钳回边界内并保持吸附侧（右侧停靠的边界变宽不悬空）。
   useEffect(() => {
     const onResize = () => {
       const { w, h } = dockSize();
-      setPos((p) => (p ? snapPos(p, w, h) : p));
+      const b = getBounds();
+      setPos((p) => (p ? snapPos(p, w, h, b) : p));
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
+  }, [getBounds]);
 
   const onPointerMove = useCallback((e: PointerEvent) => {
     const d = dragRef.current;
@@ -168,8 +214,8 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
     d.moved = true;
     setDragging(true);
     const { w, h } = dockSize();
-    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h));
-  }, []);
+    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h, getBounds()));
+  }, [getBounds]);
 
   const endDrag = useCallback(
     (e: PointerEvent) => {
@@ -184,12 +230,12 @@ export function SessionFloatingPillDock({ children }: { children: ReactNode }) {
       // 松手吸附较近边缘并持久化（只在拖拽结束写，拖动过程不刷 localStorage）。
       const { w, h } = dockSize();
       setPos((p) => {
-        const snapped = snapPos(p ?? { x: d.baseX, y: d.baseY }, w, h);
+        const snapped = snapPos(p ?? { x: d.baseX, y: d.baseY }, w, h, getBounds());
         persist(snapped);
         return snapped;
       });
     },
-    [onPointerMove, persist],
+    [onPointerMove, getBounds, persist],
   );
 
   const onPointerUp = endDrag;

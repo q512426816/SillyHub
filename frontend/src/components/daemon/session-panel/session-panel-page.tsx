@@ -5411,15 +5411,16 @@ export function SessionPanelPage({
       )}
 
       {/* 2026-10-16-session-pill-dock-drag：待决策 pill 与变更文件 pill 收进
-          SessionFloatingPillDock——portal body 竖排停靠组，按住整组 viewport
-          内拖动、松手吸附左右边界、位置 localStorage 持久化；两 pill 下拉均
-          改点击展开（原 2026-10-13 悬浮行与 2026-10-16-session-decision-pill
+          SessionFloatingPillDock——portal body 竖排停靠组，按住整组在聊天
+          时间线容器（turn-timeline-scroll）范围内拖动（贴边不越过聊天区）、
+          松手吸附该容器较近左右边缘、位置 localStorage 持久化；两 pill 下拉
+          均改点击展开（原 2026-10-13 悬浮行与 2026-10-16-session-decision-pill
           task-04 flex 横排行形态退役）。显隐门不变：仅真会话挂载
           （2026-10-16-decision-pill-no-workspace 放宽口径），变更文件 pill
           保留自身 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）；
           两 pill 空数据各自渲染 null，dock empty:hidden 整组零占位。 */}
       {sessionId != null && (
-        <SessionFloatingPillDock>
+        <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
           <SessionDecisionsHover
             sessionId={sessionId}
             pendingRequests={pendingRequests}

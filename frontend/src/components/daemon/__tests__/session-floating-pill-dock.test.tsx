@@ -146,3 +146,85 @@ describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () =>
     expect(dock.style.left).toBe("484px");
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 边界容器模式（用户追加：贴边不超出聊天时间线容器范围）                  */
+/* ------------------------------------------------------------------ */
+
+/** 边界容器桩：jsdom 原生 rect 全 0，mock 出聊天区矩形才能测边界口径。 */
+function mountBoundsEl(rect: { left: number; top: number; width: number; height: number }) {
+  const el = document.createElement("div");
+  el.setAttribute("data-testid", "turn-timeline-scroll");
+  const right = rect.left + rect.width;
+  const bottom = rect.top + rect.height;
+  el.getBoundingClientRect = () =>
+    ({
+      left: rect.left,
+      top: rect.top,
+      right,
+      bottom,
+      width: rect.width,
+      height: rect.height,
+      x: rect.left,
+      y: rect.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  document.body.appendChild(el);
+  return el;
+}
+
+describe("SessionFloatingPillDock 边界容器模式（2026-10-16-session-pill-dock-drag 用户追加）", () => {
+  it("默认位 / 拖拽钳制 / 松手吸附全部以边界容器矩形为准，不贴视口边", () => {
+    // 聊天区矩形 100..500 × 50..350（视口 1024×768，明显错开）
+    const el = mountBoundsEl({ left: 100, top: 50, width: 400, height: 300 });
+    render(
+      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
+        <button type="button">待决策 0</button>
+      </SessionFloatingPillDock>,
+    );
+    const dock = dockEl();
+    // 默认右下 = 容器右下角内缩 EDGE_GAP（484/334），不是视口的 1008/672
+    expect(dock.style.left).toBe("484px");
+    expect(dock.style.top).toBe("334px");
+
+    // 拖到左上：base(484,334)+(-350,-330) → 钳容器内 (134,50)
+    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 5, clientX: 480, clientY: 330 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 5, clientX: 130, clientY: 0 }));
+    expect(dock.style.left).toBe("134px");
+    expect(dock.style.top).toBe("50px");
+    // 松手吸附容器左缘 100+16=116（不是视口左缘 16）
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 5, clientX: 130, clientY: 0 }));
+    expect(dock.style.left).toBe("116px");
+    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 116, y: 50 });
+    el.remove();
+  });
+
+  it("右缘吸附同样是容器右缘（拖出容器右侧被钳回）", () => {
+    const el = mountBoundsEl({ left: 100, top: 50, width: 400, height: 300 });
+    render(
+      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
+        <button type="button">待决策 0</button>
+      </SessionFloatingPillDock>,
+    );
+    const dock = dockEl();
+    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 5, clientX: 480, clientY: 330 }));
+    // 拖出容器右缘（dx=+120 → 604）→ 钳到 500，松手吸附 500-16=484
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 5, clientX: 600, clientY: 330 }));
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 5, clientX: 600, clientY: 330 }));
+    expect(dock.style.left).toBe("484px");
+    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!).x).toBe(484);
+    el.remove();
+  });
+
+  it("边界元素不存在时回落视口口径，不报错（元素后挂载可自愈）", () => {
+    render(
+      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
+        <button type="button">待决策 0</button>
+      </SessionFloatingPillDock>,
+    );
+    const dock = dockEl();
+    // 无边界元素：x 用视口右缘；y 因传了 boundsSelector 按 EDGE_GAP 贴底（元素出现后 settle 自愈）
+    expect(dock.style.left).toBe("1008px");
+    expect(dock.style.top).toBe("752px");
+  });
+});

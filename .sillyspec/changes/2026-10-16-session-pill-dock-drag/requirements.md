@@ -26,12 +26,12 @@ created_at: 2026-10-16T06:31:11.228Z
 
 ### FR-03: 悬浮组按住可在 viewport 范围内拖动，松手自动吸附较近的左右边界，纵向钳制在窗口内，位置 localStorage 持久化
 
-- 悬浮组必须支持按住拖动，拖动位置必须钳制在 viewport 范围内；松手时必须吸附到较近的左右边缘（留白 EDGE_GAP=16px）、纵向仅钳回窗内；吸附位必须持久化到 localStorage 键 `sillyhub:session-pill-dock`，刷新后必须恢复该位置；视口缩放时必须钳回窗内并保持吸附侧。
+- 悬浮组必须支持按住拖动，拖动位置必须钳制在边界范围内；松手时必须吸附到较近的左右边缘（留白 EDGE_GAP=16px）、纵向仅钳回边界内；吸附位必须持久化到 localStorage 键 `sillyhub:session-pill-dock`，刷新后必须恢复该位置；视口缩放时必须钳回并保持吸附侧。**边界范围（2026-10-16 用户追加）**：会话页必须以聊天时间线容器（`[data-testid="turn-timeline-scroll"]` 矩形）为拖拽/钳制/吸附边界，贴边禁止越过聊天区（压到侧栏/输入条/页头）；边界元素未挂载时逐次回落视口口径，元素出现后自动收敛回容器内。
 
 #### 场景：主路径
 
-- Given dock 已渲染 / When 按住拖动超过阈值到左半屏松手 / Then 位置吸附左缘（left=16px）并写入 localStorage；刷新页面后仍在左缘同位。
-- Given dock 停靠右缘 / When 视口变窄（resize） / Then 钳回窗内且仍吸附右缘。
+- Given dock 已渲染（聊天区矩形 100..500×50..350）/ When 按住拖动超过阈值到左半屏松手 / Then 位置吸附容器左缘（left=116px=100+16）并写入 localStorage；刷新页面后仍在容器左缘同位。
+- Given dock 停靠容器右缘 / When 侧栏开合/视口变化使容器变宽（resize） / Then 钳回容器内且仍吸附容器右缘。
 
 ### FR-04: 位移小于阈值视为点击不触发拖拽，拖拽结束后的残余 click 被吞掉，pill 按钮点击行为不受影响
 
@@ -54,6 +54,6 @@ created_at: 2026-10-16T06:31:11.228Z
 
 FR-01: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「竖排停靠组：children 渲染成组（flex-col 右对齐），portal 挂 body」；显隐契约回归 test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」、test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「无关联变更（data 空数组/未就绪）不渲染入口」
 FR-02: test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」；test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠」（点外收起由 antd click trigger 内建，浏览器实测过）
-FR-03: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化」「拖到右半屏松手吸附右缘」「拖拽越界钳回窗内：y 不出上下边」「持久化位置恢复；损坏存档静默回落默认右下」「视口缩放：钳回窗内并保持吸附侧」
+FR-03: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化」「拖到右半屏松手吸附右缘」「拖拽越界钳回窗内：y 不出上下边」「持久化位置恢复；损坏存档静默回落默认右下」「视口缩放：钳回窗内并保持吸附侧」（视口口径）；「默认位 / 拖拽钳制 / 松手吸附全部以边界容器矩形为准，不贴视口边」「右缘吸附同样是容器右缘（拖出容器右侧被钳回）」「边界元素不存在时回落视口口径，不报错（元素后挂载可自愈）」（边界容器口径，2026-10-16 用户追加）
 FR-04: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「位移小于阈值不算拖拽：click 放行给 pill 按钮」「拖拽结束后的残余 click 被吞；时间窗外恢复点击」
 FR-05: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx 全文件（8 用例）+ session-decisions-hover.test.tsx（12 用例）+ session-change-files-hover.test.tsx（10 用例）+ `pnpm -C frontend typecheck`（零错误）+ 浏览器实测（dev 3100 端口：竖排/点击展开/点外收起/拖拽双向吸附/刷新恢复/拖后不误弹全过）

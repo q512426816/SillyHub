@@ -10,13 +10,13 @@ created_at: 2026-10-16T06:31:11.229Z
 
 新增 `SessionFloatingPillDock` 悬浮停靠组组件（`frontend/src/components/daemon/session-floating-pill-dock.tsx`）：portal 到 body 的 `position:fixed` 容器，`flex-col items-end` 把待决策 / 变更文件两个 pill 竖排成组；拖拽复用 floating-session-host 悬浮球的成熟模式（window 监听 pointermove/up 不依赖 pointer capture、6px 位移阈值、松手吸附、localStorage 持久化、250ms 拖后吞 click 时间窗），并补齐停靠组特有需求：松手恒吸附较近左右边缘（EDGE_GAP=16px）、纵向钳制窗内、ResizeObserver 按 pill 显隐引起的组尺寸变化重收敛防右缘溢出。挂载点（session-panel-page.tsx）由旧「absolute 悬浮行」换为该停靠组，两 pill 组件仅改 antd Popover `trigger` 从 `["hover","click"]` 到 `"click"`（用户需求：点击展开不再误触），aria-label 同步去「悬浮」字样。
 
-选 portal body + fixed 而非沿用挂载点内 absolute 容器：拖动目标是「窗口范围内」任意位置，absolute 受面板祖先 overflow/transform 裁剪且出不了面板；fixed+portal 无此问题。
+选 portal body + fixed 而非沿用挂载点内 absolute 容器：拖动目标是「窗口范围内」任意位置，absolute 受面板祖先 overflow/transform 裁剪且出不了面板；fixed+portal 无此问题。2026-10-16 用户追加：拖拽/钳制/吸附边界由整个视口改为聊天时间线容器（`boundsSelector='[data-testid="turn-timeline-scroll"]'`，每次现查 rect 不缓存，元素未挂载回落视口、后挂载自愈）——贴边不再压到侧栏/输入条/页头；默认停靠位随之改为容器右下角内缩 EDGE_GAP。
 
 ## 接口契约
 
 动了哪些函数/端点/命令/文件格式？对外可见的签名或行为变化是什么（含「无」的说明）？
 
-- 新增导出 `SessionFloatingPillDock({ children })`（frontend/src/components/daemon/session-floating-pill-dock.tsx），`data-testid="session-pill-dock"`。
+- 新增导出 `SessionFloatingPillDock({ children, boundsSelector? })`（frontend/src/components/daemon/session-floating-pill-dock.tsx），`data-testid="session-pill-dock"`；2026-10-16 用户追加 `boundsSelector`（边界容器选择器，会话页传聊天时间线）。
 - `SessionDecisionsHover` / `SessionChangeFilesHover`（embedded 形态）对外 props 不变；行为变化：Popover trigger 由 hover+click 改为纯 click；aria-label「悬浮查看会话待决策信息/悬浮查看会话关联的变更文件」改为「查看会话待决策信息/查看会话关联的变更文件」。
 - 新增 localStorage 键 `sillyhub:session-pill-dock`（`{x,y}` 停靠位，仅拖拽结束时写入）。
 - 后端 API / OpenAPI / 文件格式：无改动（gen:types 义务不触发）。
