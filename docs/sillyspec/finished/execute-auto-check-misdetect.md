@@ -6,3 +6,10 @@
 - 影响：自动化便利（省手动勾）与准确性冲突；静默代勾无差异清单输出，依赖 agent 主动发现。
 - 期望：自动勾选的证据判据收紧为「worktree git log 中存在引用 task-XX 的 commit」而非文档文件存在；或代勾时列出证据明细供人工复核。
 - 复现：2026-10-14 会话，execute Step 2 --done（sillyspec 3.32.8，Windows）。
+
+## 处置记录（2026-10-16）
+
+**已修**（sillyspec `2026-10-15-pitfall-batch-clearance`，a493aef1，两轮评审 PASS）：自动勾选
+重构为 `autoTickTasksFromCommitSubjects`——判据 = 区间提交 **subject token × 该 task
+allowed_paths 实现事实锚**（正文提及不勾、文档存在不算证据），无锚不勾。坑现场形态
+（TaskCard 文档被当提交证据勾满）不可达。测试随变更 792/792 全绿。归档。

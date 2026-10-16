@@ -32,3 +32,12 @@ verify `--done` 实测门（模块子集 runner）对同一代码面多次运行
 1. 分桶以测试文件所属项目根（frontend/ sillyhub-daemon/）为分组键且确定性排序（消除随机性）；
 2. runner 调用前校验 filter 路径前缀与 cwd 所属项目一致（错配即报分组错误而非跑出假红）；
 3. 顶层聚合退出码：有 skipped 无 failed 时 exit 0（与 aggregateStatus 语义对齐），skip 信息走 reason 字段。
+
+## 处置记录（2026-10-16）
+
+**已修**（sillyspec `2026-10-15-jsx-batch-cmd-chunk` 批次连带，本日功能复验）：
+jsx 批**逐文件按自身包根** `inferJsxRunner` 分组（frontend 与 sillyhub-daemon 分立
+`deps(auto-jsx)` 各自 cd 前缀），全局推断（首文件）降级为无 hits 兜底——「daemon 文件
+进 frontend vitest 组」的错配源消除。分组确定性：Map 插入序 = 文件排序序（无随机性），
+坑内「同指纹多次运行不同结果」形态不再可达。建议③（skipped 聚合 exit 0）已在前序
+TAP 摘要覆盖轮处理。归档。

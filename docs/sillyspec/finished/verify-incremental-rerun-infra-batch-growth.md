@@ -47,3 +47,17 @@
 
 - `verify-jsx-batch-cmd-too-long.md`：触发面本体（argv 超限 + 分块补丁）；
 - 本记录：账本/签名语义面（补丁修好后，基建失败的**记账方式**仍是独立问题）。
+
+## 处置记录（2026-10-16）
+
+**已修（建议①批失败分类）**（sillyspec 仓工作树，未提交）：`runVerifyTestCheck` 的
+failedFiles 聚合增**基建失败甄别**——批 failed 但输出无任何测试级痕迹（not ok/FAILED/
+AssertionError）且 reason/输出命中基建关键词（命令行太长/E2BIG/spawn/Cannot find
+module/No test files found/ENAMETOOLONG）→ 不进前轮失败批账本 + loud 留痕（「重跑不可能
+转绿，修复基建后整轮重测」）；混合形态（reason 有基建词但有真测试失败行）测试失败行
+优先照归；未知失败保守入账（旧行为）。膨胀自锁链（141→159）断在记账源。
+
+**测试**：`test/verify-infra-failure-ledger.test.mjs` 3/3（源级钉 + 三态行为 + 归因链
+回归）+ dynamic-test-inference/deps-cwd-prefix/cross-repo-verify 27/27。建议②③（上界
+告警/RERUN 签名批构造指纹）不采纳实装——①断根后账本不再含基建批，②③的触发面消失。
+建议④逃生口（test_strategy: full）文档化已在坑内。归档。

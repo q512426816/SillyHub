@@ -30,3 +30,19 @@
 - 三修位置：`C:/Users/qinyi/IdeaProjects/sillyspec/src/`（worktree-apply.js / test-bindings.js / stages/plan-postcheck.js）——**均未提交，需用户提交收编**。
 - 工具侧回归：三批共 **66 用例全绿**（apply×3 + binding×4 + dynamic×3 套件）。
 - 建议上游化：各补一例单测（rollback 残留自证三态 / writeChangeTrace 幽灵过滤 / parseAllowedPaths 双横线+去重）。
+
+## 处置记录（2026-10-16）
+
+**三连环全部已修并在树**（sillyspec 仓，本日逐项源码复核在场）：
+
+1. **rollbackApply 完整性自证 ✅**：尾部 `git status --porcelain -- <patchFiles>` 逐文件
+   复核 + 二次还原 + 仍残留则如实降级报文（`leftovers` 字段）——「已回滚」声明与实态
+   不符的静默流失消除。
+2. **writeChangeTrace 幽灵过滤 ✅**：machine 行 tests 条目按「变更目录上溯项目根 ∪
+   process.cwd()」多根存在性检查，不存在丢弃 + warn 留痕；agent 行不动；全滤光保留
+   原行交悬空闸门。
+3. **parseAllowedPaths 双横线剥除 ✅**：循环剥连续 `- ` 前缀（任意空白形态）+ 去重。
+
+**测试**：apply-conflict-hardening + binding-extract + dynamic 三族 24/24 本日复跑绿；
+坑内「未提交需收编」注：补丁仍在工具仓工作树（`worktree-apply.js`/`test-bindings.js`/
+`plan-postcheck.js` 为并行会话在途集），随其变更收口。归档。

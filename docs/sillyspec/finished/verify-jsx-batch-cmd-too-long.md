@@ -22,3 +22,19 @@
   需单轮强制收口」场景；注意还原，避免拖慢后续会话的全部 verify。
 - 交叉缺陷（独立记账，账本语义面）：`verify-incremental-rerun-infra-batch-growth.md`
   （失败批账本不区分基建失败 → 膨胀 + RERUN 签名无基建维度）。
+
+## 处置记录（2026-10-16）
+
+**主坑 + 三连带全部已修**：
+
+1. **argv 分块 ✅**（sillyspec `ef3d312d`，2026-10-15-jsx-batch-cmd-chunk，归档 e5c97358，
+   三轮评审）：`chunkByCommandLength`（maxLen=6000）js/jsx 双批分块，多块 `:N/M` 独立计账，
+   单块零回归。
+2. **jsx 混包根分组 ✅**（同批连带）：逐文件按自身包根 `inferJsxRunner` 分组（hits 显式
+   命中保持整批旧语义）——本日功能复验：frontend + sillyhub-daemon 双根分立两批，
+   `cd frontend` 批不再含 daemon 文件。
+3. **trace 悬空多根 ✅**（同批连带）：`traceMainRoots`（meta.json worktreePath）悬空
+   判定/残差执行多根解析。
+
+平台侧坑内「补丁已实施未提交」注：工具仓工作树补丁已随上述提交收编落地。归档
+（账本语义面独立坑见 verify-incremental-rerun-infra-batch-growth 处置）。
