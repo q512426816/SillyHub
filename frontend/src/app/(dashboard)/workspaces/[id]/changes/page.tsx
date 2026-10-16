@@ -63,6 +63,52 @@ const TABS = [
 
 type ChangesTab = "active" | "archive" | "quicklog";
 
+// ── 列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-state）────────
+// tab/页码/筛选原本只活在 useState——点行整页导航进详情后，详情页「变更列表」返回
+// 入口客户端导航回无参 /changes，组件重挂载状态全丢（用户实证：已归档 tab/第 N 页
+// 回不去）。本变更把全部查询状态同步进 URL（replaceState 快照，不产生历史条目），
+// 挂载时从 URL 初始化——从详情返回（back 到带 query 的列表 URL）后状态恢复不依赖
+// bfcache。UI 状态单一源仍是 useState，URL 只是恢复快照（挂载后不反向订阅）。
+
+/** 防御解析正整数（URL 恢复用）：非数字/非正整数回退 fallback。 */
+function parsePositiveInt(v: string | null, fallback: number): number {
+  if (v === null) return fallback;
+  const n = Number(v);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/** 深链 tab 合法值（与 useState 初始化口径一致，非法回 active）。 */
+function parseTab(v: string | null): ChangesTab {
+  return v === "quicklog" || v === "archive" ? v : "active";
+}
+
+/**
+ * 构造列表状态 querystring（写回用）：空值/默认值参数省略——默认状态 URL 干净。
+ * 参数名固定：tab / search / stage / lineage / mine / sort / page / pageSize。
+ * 导出供详情页返回测试钉两端参数名契约（back 目标 query ↔ 本页解析端）。
+ */
+export function buildChangesQuery(s: {
+  tab: ChangesTab;
+  search: string;
+  stageFilter: string;
+  lineageFilter: string;
+  focusMine: boolean;
+  sortDir: SortDir;
+  page: number;
+  pageSize: number;
+}): string {
+  const p = new URLSearchParams();
+  if (s.tab !== "active") p.set("tab", s.tab);
+  if (s.search) p.set("search", s.search);
+  if (s.stageFilter) p.set("stage", s.stageFilter);
+  if (s.lineageFilter) p.set("lineage", s.lineageFilter);
+  if (s.focusMine) p.set("mine", "1");
+  if (s.sortDir !== "updated_at_desc") p.set("sort", s.sortDir);
+  if (s.page !== 1) p.set("page", String(s.page));
+  if (s.pageSize !== 20) p.set("pageSize", String(s.pageSize));
+  return p.toString();
+}
+
 // task-06 / design §7：待办徽标映射（替代死代码 GATE_LABELS）。
 // 数据源 = ChangeSummary.pending_review（PG 镜像 _map 投影，task-03）+ status=blocked。
 // 纯前端展示映射，后端 task-03 已统一投影为 4 个新取值（不再 need_* 兼容）。
@@ -265,25 +311,34 @@ export default function ChangesPage({ params }: Props) {
   const workspaceId = params.id;
   const queryClient = useQueryClient();
   // task-10（FR-07）：支持 ?tab=quicklog 初始 tab（变更详情页「关联的快速任务」跳转入口）；
-  // ?search= 初始搜索词（quicklog 关联变更列跳转消费端，QA P2 修复）
+  // ?search= 初始搜索词（quicklog 关联变更列跳转消费端，QA P2 修复）。
+  // 2026-10-16-change-center-back-keeps-list-state：扩到全部查询状态从 URL 初始化
+  // （page/pageSize/stage/lineage/mine/sort，防御解析回默认）——从详情返回/刷新后状态保持。
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get("tab");
-  const initialSearch = searchParams.get("search") ?? "";
-  const [tab, setTab] = useState<ChangesTab>(
-    initialTab === "quicklog" || initialTab === "archive" ? initialTab : "active",
-  );
-  const [searchInput, setSearchInput] = useState(initialSearch);
-  const [search, setSearch] = useState(initialSearch);
+  const [tab, setTab] = useState<ChangesTab>(() => parseTab(searchParams.get("tab")));
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   // ql-20260818-004：「只看待我处理」下放为查询条件（仅进行中视图），默认不勾选
-  const [focusMine, setFocusMine] = useState(false);
+  const [focusMine, setFocusMine] = useState(() => searchParams.get("mine") === "1");
   // 2026-09-28-change-ux-detail-batch：平台同步处理区抽屉开关（常驻卡收进按钮）
   const [syncDrawerOpen, setSyncDrawerOpen] = useState(false);
-  const [stageFilter, setStageFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState(() => {
+    const v = searchParams.get("stage") ?? "";
+    return STAGE_OPTIONS.some((o) => o.value === v) ? v : "";
+  });
   // 2026-10-14-change-center-lineage-tag-and-filter：出身分类筛选（"" = 全部分类）
-  const [lineageFilter, setLineageFilter] = useState("");
-  const [sortDir, setSortDir] = useState<SortDir>("updated_at_desc");
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [lineageFilter, setLineageFilter] = useState(() => {
+    const v = searchParams.get("lineage") ?? "";
+    return LINEAGE_OPTIONS.some((o) => o.value === v) ? v : "";
+  });
+  const [sortDir, setSortDir] = useState<SortDir>(() =>
+    searchParams.get("sort") === "updated_at_asc" ? "updated_at_asc" : "updated_at_desc",
+  );
+  const [page, setPage] = useState(() => parsePositiveInt(searchParams.get("page"), 1));
+  const [pageSize, setPageSize] = useState(() => {
+    const v = parsePositiveInt(searchParams.get("pageSize"), 20);
+    return ([10, 20, 50, 100] as number[]).includes(v) ? v : 20;
+  });
   const [reparsing, setReparsing] = useState(false);
   // task-07（design §6.3 / FR-05d）：受控删除弹层 target（null = 关闭，
   // 照 admin/users DeleteConfirm 受控范式），确认后关弹层 + deleteMutation。
@@ -295,6 +350,28 @@ export default function ChangesPage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [stats, setStats] = useState<ChangeReparseStats | null>(null);
   const [warnings, setWarnings] = useState<ChangeWarning[]>([]);
+
+  // 状态 → URL 写回（2026-10-16-change-center-back-keeps-list-state）：原生
+  // history.replaceState 快照——不新增历史条目、不触发 Next RSC 导航（UI 单一源仍是
+  // useState，此处只写恢复快照）；目标与当前地址相同则跳过（挂载首跑零操作）。
+  // 浏览器后退语义与改造前一致：列表内翻页本就不产生历史条目，后退仍离开列表。
+  useEffect(() => {
+    const qs = buildChangesQuery({
+      tab,
+      search,
+      stageFilter,
+      lineageFilter,
+      focusMine,
+      sortDir,
+      page,
+      pageSize,
+    });
+    const target =
+      `/workspaces/${workspaceId}/changes` + (qs ? `?${qs}` : "");
+    if (window.location.pathname + window.location.search !== target) {
+      window.history.replaceState(window.history.state, "", target);
+    }
+  }, [tab, search, stageFilter, lineageFilter, focusMine, sortDir, page, pageSize, workspaceId]);
 
   // 主 load（task-06 / D-004@v1：裸 useEffect+useState 改 useQuery）。
   // queryKey = workspaceId + 全部请求参数（tab/search/stageFilter/sortDir/

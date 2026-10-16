@@ -1,0 +1,26 @@
+tier: thin
+legacy_fallback: false
+substeps: {}
+born_face: thin
+with_tasks: false
+review_force: null
+input: |-
+  动机:变更中心列表切「已归档」tab或翻页后点行进详情,点详情页「变更列表」返回入口回到列表会重置为进行中tab第1页——列表tab/页码全是组件useState不进URL,返回是客户端导航导致列表组件重挂载。
+  成功标准:
+  - 列表页tab/页码/搜索/阶段/分类/聚焦/排序/pageSize同步写进URL(原生history.replaceState,不新增历史条目),刷新与从详情返回后状态保持
+  - 详情页breadcrumb「变更列表」与错误态「← 变更列表」入口:浏览器历史可后退时router.back()回带query的列表URL,列表从URL恢复tab与页码
+  - 无历史可退(新标签深链详情)时返回入口保持原Link跳默认列表
+  - 列表页既有测试零回归,新增URL初始化与写回断言;详情页新增返回行为断言
+autopilot: false
+prestage_ack: false
+baseline_commit: 39b17126f8da79c0193e42a52ab399f18e9a9088
+updatedAt: '2026-10-16T13:18:22.461Z'
+cross_baselines:
+  sillyspec: f6f22faa3e34eb8c01eabeb2fc6501fc93b3d2d6
+baseline_sha256: a1b2c2932adc9282abef47a427b8e33bcc4d009a862c83aca977948ab7dd44d8
+spec_approved: true
+spec_approved_at: '2026-10-16T13:18:22.461Z'
+spec_approved_by: anon@DESKTOP-HJ0AM09
+spec_approved_channel: agent-self
+spec_attested_by: anon@DESKTOP-HJ0AM09
+

@@ -148,6 +148,44 @@ function stageSpans(rows: UnifiedRow[]): Array<{ label: string; value: string }>
   return items.length > 0 ? items : [{ label: "阶段跨度", value: "暂无带时间戳的记录" }];
 }
 
+/**
+ * 返回列表入口（2026-10-16-change-center-back-keeps-list-state）——breadcrumb「变更列表」
+ * 与错误态「← 变更列表」共用。历史可后退时点击走 router.back()（回离开前带 query 的列表
+ * URL，列表页从 URL 恢复 tab/页码，见列表页同变更的 URL 快照）；新标签深链（length<=1）
+ * 保持 Link 默认导航到默认列表。href 始终保留（新标签打开/收藏语义不变）；SSR 渲染输出
+ * 与客户端一致（判定只影响 onClick，不进 DOM），无 hydration mismatch。
+ */
+function BackToListLink({
+  workspaceId,
+  className,
+  children,
+}: {
+  workspaceId: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const router = useRouter();
+  // Next 14.2.5 history.state 无栈深标记（idx 为 Next 15+ 字段），以 length 判定：
+  // 从列表/其他页进入必有前置条目（>1）；新标签深链 =1。已知取舍：从站外页点进来时
+  // back 回站外页（标准返回语义，内部工具罕见）。
+  const canBack = typeof window !== "undefined" && window.history.length > 1;
+  return (
+    <Link
+      href={`/workspaces/${workspaceId}/changes`}
+      prefetch={false}
+      className={className}
+      onClick={(e) => {
+        if (canBack) {
+          e.preventDefault();
+          router.back();
+        }
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default function ChangeDetailPage({ params }: Props) {
   const workspaceId = params.id;
   const changeId = params.cid;
@@ -319,12 +357,12 @@ export default function ChangeDetailPage({ params }: Props) {
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {loadError ?? "变更未找到"}
         </div>
-        <Link
-          href={`/workspaces/${workspaceId}/changes`}
+        <BackToListLink
+          workspaceId={workspaceId}
           className="mt-3 inline-block text-xs text-primary hover:underline"
         >
           ← 变更列表
-        </Link>
+        </BackToListLink>
       </PageContainer>
     );
   }
@@ -348,9 +386,9 @@ export default function ChangeDetailPage({ params }: Props) {
       <PageHead
         breadcrumb={
           <span className="flex items-center gap-1.5">
-            <Link href={`/workspaces/${workspaceId}/changes`} className="hover:underline">
+            <BackToListLink workspaceId={workspaceId} className="hover:underline">
               变更列表
-            </Link>
+            </BackToListLink>
             <span className="text-muted-foreground/60">/</span>
             <span className="text-foreground">{change.change_key}</span>
           </span>

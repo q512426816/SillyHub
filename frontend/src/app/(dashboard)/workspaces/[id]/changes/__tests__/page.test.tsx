@@ -1032,3 +1032,115 @@ describe("变更列表行内删除入口防劫持（2026-09-28-audit-risk-fixes�
     }
   });
 });
+
+// ── 列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-state）────────
+// tab/页码/筛选原本只活在 useState：详情页「变更列表」返回入口客户端导航回无参
+// /changes，组件重挂载状态全丢（用户实证）。本组用例钉住：①挂载从 URL 初始化
+// （深链/返回恢复）；②状态变化 replaceState 写回 URL（恢复快照，不产生历史条目）。
+describe("列表状态 URL 快照（2026-10-16-change-center-back-keeps-list-state）", () => {
+  beforeEach(() => {
+    setupListChanges();
+    bindingApi.fetchMyBinding.mockResolvedValue(null);
+    // 重置 jsdom 地址（前序用例写回的 query 残留不影响本组初始化断言）
+    window.history.replaceState(null, "", "/workspaces/ws-1/changes");
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    window.history.replaceState(null, "", "/workspaces/ws-1/changes");
+  });
+
+  it("?tab=archive&page=3 深链：主 load 按已归档第3页请求", async () => {
+    mocks.searchParams = new URLSearchParams("tab=archive&page=3");
+    try {
+      await renderAndWait();
+      const params = lastMainLoadParams();
+      expect(params?.location).toBe("archive");
+      expect(params?.page).toBe(3);
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("URL 非法值防御：page=abc/pageSize=99/未知 stage 回默认", async () => {
+    mocks.searchParams = new URLSearchParams("page=abc&pageSize=99&stage=nope&mine=1");
+    try {
+      await renderAndWait();
+      const params = lastMainLoadParams();
+      expect(params?.page).toBe(1);
+      expect(params?.pageSize).toBe(20);
+      expect(params?.currentStage).toBeUndefined();
+      // mine=1 合法：聚焦生效（进行中 tab + pendingReviewOnly）
+      expect(params?.pendingReviewOnly).toBe(true);
+    } finally {
+      mocks.searchParams = new URLSearchParams();
+    }
+  });
+
+  it("切已归档 tab 后 URL 写回 tab=archive（replaceState，历史条目数不变）", async () => {
+    await renderAndWait();
+    const lenBefore = window.history.length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+    });
+    await waitFor(() =>
+      expect(window.location.search).toBe("?tab=archive"),
+    );
+    // replaceState 语义：不新增历史条目
+    expect(window.history.length).toBe(lenBefore);
+  });
+
+  it("翻页后 URL 写回 page=N，主 load 按新页请求", async () => {
+    setupListChanges({
+      items: [makeChange()],
+      total: 60,
+      activeTotal: 60,
+    });
+    await renderAndWait();
+    const nextBtn = document.querySelector(".ant-pagination-next button");
+    expect(nextBtn).not.toBeNull();
+    // 受控 Pagination 分步点击（同 act 连点读到旧 current）
+    await act(async () => {
+      fireEvent.click(nextBtn!);
+    });
+    await waitFor(() => expect(lastMainLoadParams()?.page).toBe(2));
+    await act(async () => {
+      fireEvent.click(document.querySelector(".ant-pagination-next button")!);
+    });
+    await waitFor(() => expect(window.location.search).toBe("?page=3"));
+    expect(lastMainLoadParams()?.page).toBe(3);
+  });
+
+  it("契约对齐：buildChangesQuery 产出 tab/page 参数名与 URL 解析端一致", async () => {
+    // back 恢复链路的两端——详情页返回入口 back 到本函数产出的 URL，本页挂载解析
+    // 同名参数。参数名漂移即两端失配，此用例直接钉死序列化形态。
+    const { buildChangesQuery } = await import(
+      "@/app/(dashboard)/workspaces/[id]/changes/page"
+    );
+    expect(
+      buildChangesQuery({
+        tab: "archive",
+        search: "",
+        stageFilter: "",
+        lineageFilter: "",
+        focusMine: false,
+        sortDir: "updated_at_desc",
+        page: 3,
+        pageSize: 20,
+      }),
+    ).toBe("tab=archive&page=3");
+    // 默认状态 → 空 query（URL 干净）
+    expect(
+      buildChangesQuery({
+        tab: "active",
+        search: "",
+        stageFilter: "",
+        lineageFilter: "",
+        focusMine: false,
+        sortDir: "updated_at_desc",
+        page: 1,
+        pageSize: 20,
+      }),
+    ).toBe("");
+  });
+});
