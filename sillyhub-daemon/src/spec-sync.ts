@@ -77,6 +77,13 @@ export interface PullSpecBundleOptions {
    * 传 `() => false` 显式禁用回灌检查（保持旧行为）。
    */
   unsyncedChecker?: (specDir: string) => Promise<boolean>;
+  /**
+   * 防复活抑制逃生门（2026-10-16-daemon-pull-antiresurrect；对齐 sillyspec CLI
+   * --restore-deleted，da8d2449）：true = 跳过抑制，bundle 携带的已删文件照常落地
+   * （恢复纯快照回放语义）。缺省 undefined = 抑制生效（可用环境变量
+   * SILLYHUB_DAEMON_RESTORE_DELETED=1 全局开启，适配常驻 daemon 进程）。
+   */
+  restoreDeleted?: boolean;
 }
 
 /**
@@ -110,6 +117,21 @@ async function pushUnsyncedIfDirty(
     console.warn('spec_sync: push_before_pull_failed_abort', err.message, phase);
     throw err;
   }
+}
+
+/** 防复活抑制落地：删除 dir 下命中已删面的解包产物，返回真实挡下的路径（供 warn 点名）。
+ *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在。 */
+async function applyResurrectSuppress(dir: string, suppress: Set<string>): Promise<string[]> {
+  if (suppress.size === 0) return [];
+  const skipped: string[] = [];
+  for (const rel of suppress) {
+    const p = join(dir, rel);
+    if (await pathExists(p)) {
+      await rm(p, { recursive: true, force: true }).catch(() => {});
+      skipped.push(rel);
+    }
+  }
+  return skipped;
 }
 
 /**
@@ -207,6 +229,43 @@ export async function pullSpecBundle(
   const checker = opts.unsyncedChecker ?? hasUnsyncedLocalChanges;
   await pushUnsyncedIfDirty(client, wsId, specDir, checker, 'pull_start');
 
+  // ── 防复活抑制（2026-10-16-daemon-pull-antiresurrect；daemon 侧移植自 sillyspec CLI
+  //    da8d2449，坑 docs/sillyspec/spec-sync-tree-pull-resurrect-and-verify-carry-orphans.md）──
+  // hasUnsyncedLocalChanges 的 mtime/pending_push 信号漏判「纯删除」（删除不产生新
+  // mtime）——「按 spec_version 自动取新」（心跳预取 / lease / batch 三入口共用本函数）
+  // 在删除 op 未上行窗口内整树覆盖（swap / in-place 兜底），把已删文件写回=复活。
+  // 判据无状态现算：LocalManifest（pull/push 落地后均回写 = 上次成功同步的文件全集）
+  // 有、当前盘面无、且属同步面（!isUploadExcludedPath，对齐上传排除口径）= 本地已删面；
+  // 解包产物跳过这些路径。删除 op 上行成功后 manifest 不再含该路径 → 抑制面自然衰减。
+  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
+  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
+  // 已知权衡（与 CLI 同构）：抑制集在本时刻现算，pre_swap 二次回灌成功上行删除后本窗口
+  // 不重算——此时 bundle 通常已不含该文件，误抑制面趋零。
+  const suppressResurrect = new Set<string>();
+  // 被抑制行的基线条目（评审 P2 修复）：pull 末尾落地重建会把抑制行从基线抹掉，而
+  // delete op 生成条件恰是「缓存有/盘面无」——缓存行没了 delete op 永不生成，服务器
+  // bundle 永远携带该文件，下次自动 pull 抑制集为空复活照旧。落地重建时并回这些行
+  // （仅当落地树确实无该路径），delete op 链与跨 pull 抑制同时保活。
+  const suppressEntries = new Map<string, { hash: string; version: number; mtime: number }>();
+  const restoreDeleted =
+    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
+  if (!restoreDeleted) {
+    try {
+      const cachedManifest = await readLocalManifest(wsId);
+      if (cachedManifest) {
+        for (const rel of Object.keys(cachedManifest.files)) {
+          if (isUploadExcludedPath(rel)) continue;
+          if (!(await pathExists(join(specDir, rel)))) {
+            suppressResurrect.add(rel);
+            suppressEntries.set(rel, cachedManifest.files[rel]!);
+          }
+        }
+      }
+    } catch {
+      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
+    }
+  }
+
   let tarBuf: Buffer;
   try {
     tarBuf = await client.getSpecBundle(wsId);
@@ -256,12 +315,29 @@ export async function pullSpecBundle(
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     throw e;
   }
+  // 防复活抑制落地（swap 前）：命中已删面的解包条目不进交换（swap 后即不复活）。
+  // 宁可吵不可静默复活：被挡路径点名（截断防刷屏），出路指 SILLYHUB_DAEMON_RESTORE_DELETED=1。
+  const resurrectSkipped = await applyResurrectSuppress(tmpDir, suppressResurrect);
+  if (resurrectSkipped.length > 0) {
+    console.warn(
+      `⚠️ [spec_sync] 防复活抑制：${resurrectSkipped.length} 个本地已删除文件未从快照恢复` +
+        `（删除 op 尚未上行，恢复会被下轮同步重新删除；确要恢复设 SILLYHUB_DAEMON_RESTORE_DELETED=1）: ` +
+        `${resurrectSkipped.slice(0, 5).join(', ')}${resurrectSkipped.length > 5 ? ' 等' : ''}`,
+    );
+  }
   try {
     await swapExtractedDir(tmpDir, specDir);
   } catch (e) {
     console.warn('spec_sync: swap_failed_fallback_inplace_extract', wsId, specDir, e);
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     await extractTar(tarBuf, specDir);
+    // in-place 兜底与 swap 同语义：命中已删面的条目同样不落地（覆盖写会复活）。
+    const fallbackSkipped = await applyResurrectSuppress(specDir, suppressResurrect);
+    if (fallbackSkipped.length > 0) {
+      console.warn(
+        `⚠️ [spec_sync] 防复活抑制（in-place 兜底路径）：${fallbackSkipped.length} 个已删文件未从快照恢复`,
+      );
+    }
   }
 
   // ql-20260904-019：pull 落地后用落地树重建本地 manifest 缓存（best-effort）。
@@ -277,7 +353,15 @@ export async function pullSpecBundle(
   // version=0 旧语义，下次 pull 到新服务器后自愈。
   const manifestVersions = await readBundleManifestVersions(specDir);
   try {
-    await writeLocalManifest(wsId, await buildFullManifest(specDir, manifestVersions));
+    const rebuilt = await buildFullManifest(specDir, manifestVersions);
+    // 防复活持久性（评审 P2 修复）：被抑制行并回重建基线——否则 delete op 链断裂
+    // （生成条件「缓存有/盘面无」），服务器 bundle 永远携带该文件，下次自动 pull
+    // 复活照旧。仅并回落地树确实缺失的行（用户已手工恢复的行以落地树为准）；
+    // 删除 op 上行成功后由既有 push 侧回写自然衰减。
+    for (const [rel, entry] of suppressEntries) {
+      if (!(rel in rebuilt.files)) rebuilt.files[rel] = entry;
+    }
+    await writeLocalManifest(wsId, rebuilt);
   } catch (e) {
     console.warn('spec_sync: post_pull_manifest_write_failed', wsId, specDir, e);
   }

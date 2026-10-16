@@ -1,0 +1,300 @@
+diff --git a/sillyhub-daemon/src/spec-sync.ts b/sillyhub-daemon/src/spec-sync.ts
+index a39adb7bc..27d60445c 100644
+--- a/sillyhub-daemon/src/spec-sync.ts
++++ b/sillyhub-daemon/src/spec-sync.ts
+@@ -77,6 +77,13 @@ export interface PullSpecBundleOptions {
+    * 传 `() => false` 显式禁用回灌检查（保持旧行为）。
+    */
+   unsyncedChecker?: (specDir: string) => Promise<boolean>;
++  /**
++   * 防复活抑制逃生门（2026-10-16-daemon-pull-antiresurrect；对齐 sillyspec CLI
++   * --restore-deleted，da8d2449）：true = 跳过抑制，bundle 携带的已删文件照常落地
++   * （恢复纯快照回放语义）。缺省 undefined = 抑制生效（可用环境变量
++   * SILLYHUB_DAEMON_RESTORE_DELETED=1 全局开启，适配常驻 daemon 进程）。
++   */
++  restoreDeleted?: boolean;
+ }
+ 
+ /**
+@@ -112,6 +119,21 @@ async function pushUnsyncedIfDirty(
+   }
+ }
+ 
++/** 防复活抑制落地：删除 dir 下命中已删面的解包产物，返回真实挡下的路径（供 warn 点名）。
++ *  抑制集为空时零开销直返。路径来自 manifest（'/' 分隔），join 后 rm 容忍不存在。 */
++async function applyResurrectSuppress(dir: string, suppress: Set<string>): Promise<string[]> {
++  if (suppress.size === 0) return [];
++  const skipped: string[] = [];
++  for (const rel of suppress) {
++    const p = join(dir, rel);
++    if (await pathExists(p)) {
++      await rm(p, { recursive: true, force: true }).catch(() => {});
++      skipped.push(rel);
++    }
++  }
++  return skipped;
++}
++
+ /**
+  * 从 backend 拉 spec bundle 解到本地 ~/.sillyhub/daemon/specs/{wsId}（覆盖语义）。
+  *
+@@ -207,6 +229,35 @@ export async function pullSpecBundle(
+   const checker = opts.unsyncedChecker ?? hasUnsyncedLocalChanges;
+   await pushUnsyncedIfDirty(client, wsId, specDir, checker, 'pull_start');
+ 
++  // ── 防复活抑制（2026-10-16-daemon-pull-antiresurrect；daemon 侧移植自 sillyspec CLI
++  //    da8d2449，坑 docs/sillyspec/spec-sync-tree-pull-resurrect-and-verify-carry-orphans.md）──
++  // hasUnsyncedLocalChanges 的 mtime/pending_push 信号漏判「纯删除」（删除不产生新
++  // mtime）——「按 spec_version 自动取新」（心跳预取 / lease / batch 三入口共用本函数）
++  // 在删除 op 未上行窗口内整树覆盖（swap / in-place 兜底），把已删文件写回=复活。
++  // 判据无状态现算：LocalManifest（pull/push 落地后均回写 = 上次成功同步的文件全集）
++  // 有、当前盘面无、且属同步面（!isUploadExcludedPath，对齐上传排除口径）= 本地已删面；
++  // 解包产物跳过这些路径。删除 op 上行成功后 manifest 不再含该路径 → 抑制面自然衰减。
++  // manifest 缺失/解析失败 = 无抑制面（首拉/全新环境全量回放，既有行为不变）。
++  // restoreDeleted（opts 或 env SILLYHUB_DAEMON_RESTORE_DELETED=1）= 显式恢复，跳过抑制。
++  // 已知权衡（与 CLI 同构）：抑制集在本时刻现算，pre_swap 二次回灌成功上行删除后本窗口
++  // 不重算——此时 bundle 通常已不含该文件，误抑制面趋零。
++  const suppressResurrect = new Set<string>();
++  const restoreDeleted =
++    opts.restoreDeleted === true || process.env.SILLYHUB_DAEMON_RESTORE_DELETED === '1';
++  if (!restoreDeleted) {
++    try {
++      const cachedManifest = await readLocalManifest(wsId);
++      if (cachedManifest) {
++        for (const rel of Object.keys(cachedManifest.files)) {
++          if (isUploadExcludedPath(rel)) continue;
++          if (!(await pathExists(join(specDir, rel)))) suppressResurrect.add(rel);
++        }
++      }
++    } catch {
++      /* 基线缺失/损坏 = 无抑制面（首拉/全新环境全量回放，既有行为不变） */
++    }
++  }
++
+   let tarBuf: Buffer;
+   try {
+     tarBuf = await client.getSpecBundle(wsId);
+@@ -256,12 +307,29 @@ export async function pullSpecBundle(
+     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+     throw e;
+   }
++  // 防复活抑制落地（swap 前）：命中已删面的解包条目不进交换（swap 后即不复活）。
++  // 宁可吵不可静默复活：被挡路径点名（截断防刷屏），出路指 SILLYHUB_DAEMON_RESTORE_DELETED=1。
++  const resurrectSkipped = await applyResurrectSuppress(tmpDir, suppressResurrect);
++  if (resurrectSkipped.length > 0) {
++    console.warn(
++      `⚠️ [spec_sync] 防复活抑制：${resurrectSkipped.length} 个本地已删除文件未从快照恢复` +
++        `（删除 op 尚未上行，恢复会被下轮同步重新删除；确要恢复设 SILLYHUB_DAEMON_RESTORE_DELETED=1）: ` +
++        `${resurrectSkipped.slice(0, 5).join(', ')}${resurrectSkipped.length > 5 ? ' 等' : ''}`,
++    );
++  }
+   try {
+     await swapExtractedDir(tmpDir, specDir);
+   } catch (e) {
+     console.warn('spec_sync: swap_failed_fallback_inplace_extract', wsId, specDir, e);
+     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+     await extractTar(tarBuf, specDir);
++    // in-place 兜底与 swap 同语义：命中已删面的条目同样不落地（覆盖写会复活）。
++    const fallbackSkipped = await applyResurrectSuppress(specDir, suppressResurrect);
++    if (fallbackSkipped.length > 0) {
++      console.warn(
++        `⚠️ [spec_sync] 防复活抑制（in-place 兜底路径）：${fallbackSkipped.length} 个已删文件未从快照恢复`,
++      );
++    }
+   }
+ 
+   // ql-20260904-019：pull 落地后用落地树重建本地 manifest 缓存（best-effort）。
+diff --git a/sillyhub-daemon/tests/pull-antiresurrect.test.ts b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
+new file mode 100644
+index 000000000..09e07dc54
+--- /dev/null
++++ b/sillyhub-daemon/tests/pull-antiresurrect.test.ts
+@@ -0,0 +1,188 @@
++// tests/pull-antiresurrect.test.ts
++// 2026-10-16-daemon-pull-antiresurrect：daemon 侧 pullSpecBundle 防复活抑制单测。
++//
++// 背景（坑 docs/sillyspec/spec-sync-tree-pull-resurrect-and-verify-carry-orphans.md 缺陷一
++// daemon 侧移植；CLI 侧同款修复 = sillyspec 仓 da8d2449）：
++//   hasUnsyncedLocalChanges 的 mtime/pending_push 信号漏判「纯删除」（删除不产生新 mtime）——
++//   「按 spec_version 自动取新」（心跳预取/lease/batch 三入口共用 pullSpecBundle）在删除 op
++//   未上行窗口内整树覆盖（swap / in-place 兜底），把已删文件写回=复活。
++//
++// 覆盖（flow start 成功标准逐条）：
++//   1. 抑制核心：LocalManifest 有/盘面无/属同步面 → 解包产物命中文件不落地（不复活）。
++//   2. 无基线：manifest 缺失/首拉 → 全量落地（既有行为不变）。
++//   3. 恢复通道：opts.restoreDeleted / env SILLYHUB_DAEMON_RESTORE_DELETED=1 → 跳过抑制。
++//   4. 排除口径：isUploadExcludedPath 命中的 manifest 残留行（projects/ 等）不进抑制面。
++//
++// vitest.config.ts: globals=false → 显式 import；HOME/USERPROFILE 覆盖让 specDir 落 tmp。
++
++import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
++import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { dirname, join } from 'node:path';
++
++import {
++  pullSpecBundle,
++  resolveSpecDir,
++  resolveManifestCachePath,
++} from '../src/spec-sync.js';
++
++/** 最小合法 ustar（对齐 test_pull_before_push.test.ts 的 buildTar）。 */
++function buildTar(entries: { name: string; content: string }[]): Buffer {
++  const chunks: Buffer[] = [];
++  for (const e of entries) {
++    const header = Buffer.alloc(512, 0);
++    header.write(e.name, 0, 'utf-8');
++    header.write('0000644', 100, 'ascii');
++    const content = Buffer.from(e.content, 'utf-8');
++    const sizeBuf = Buffer.alloc(12, 0x20);
++    sizeBuf.write(content.length.toString(8).padStart(11, '0') + '\0', 0, 'ascii');
++    header.set(sizeBuf, 124);
++    header.write('        ', 148, 'ascii');
++    header[156] = 0x30;
++    header.write('ustar', 257, 'ascii');
++    header.write('00', 263, 'ascii');
++    let sum = 0;
++    for (let i = 0; i < 512; i++) sum += header[i];
++    header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
++    chunks.push(header);
++    chunks.push(content);
++    const padLen = (512 - (content.length % 512)) % 512;
++    if (padLen > 0) chunks.push(Buffer.alloc(padLen, 0));
++  }
++  chunks.push(Buffer.alloc(1024, 0));
++  return Buffer.concat(chunks);
++}
++
++const WS = 'ws-antiresurrect';
++
++/** 种本地清单缓存（模拟「上次成功同步的文件全集」基线）。 */
++async function seedManifest(files: string[]): Promise<void> {
++  const entries: Record<string, { hash: string; version: number; mtime: number }> = {};
++  for (const p of files) entries[p] = { hash: `h-${p}`, version: 1, mtime: 0 };
++  await mkdir(dirname(resolveManifestCachePath(WS)), { recursive: true });
++  await writeFile(
++    resolveManifestCachePath(WS),
++    JSON.stringify({ version: 1, files: entries }),
++    'utf-8',
++  );
++}
++
++describe('pullSpecBundle 防复活抑制（2026-10-16-daemon-pull-antiresurrect）', () => {
++  let tmpHome: string;
++  let warnSpy: ReturnType<typeof vi.spyOn>;
++
++  beforeEach(async () => {
++    tmpHome = await mkdtemp(join(tmpdir(), 'pull-antiresurrect-home-'));
++    process.env.HOME = tmpHome;
++    process.env.USERPROFILE = tmpHome; // Windows
++    delete process.env.SILLYHUB_DAEMON_RESTORE_DELETED;
++    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
++  });
++
++  afterEach(async () => {
++    warnSpy.mockRestore();
++    delete process.env.HOME;
++    delete process.env.USERPROFILE;
++    delete process.env.SILLYHUB_DAEMON_RESTORE_DELETED;
++    await rm(tmpHome, { recursive: true, force: true });
++  });
++
++  /** 盘面预置：specDir 下只留 present 列表里的文件（其余=已删除不在盘面）。 */
++  async function seedDisk(present: Record<string, string>): Promise<string> {
++    const specDir = resolveSpecDir(WS);
++    for (const [rel, content] of Object.entries(present)) {
++      await mkdir(dirname(join(specDir, rel)), { recursive: true });
++      await writeFile(join(specDir, rel), content, 'utf-8');
++    }
++    return specDir;
++  }
++
++  function makeClient(bundle: Buffer) {
++    return {
++      getSpecBundle: vi.fn().mockResolvedValue(bundle),
++      postSpecSync: vi.fn().mockResolvedValue({ ok: true }),
++    } as never;
++  }
++
++  it('用例1（核心）：manifest 有/盘面无/同步面 → 解包产物不落地（不复活）+ warn 点名', async () => {
++    // 上次同步面含 a.md/b.md；本地删除了 b.md（盘面仅剩 a.md，且 mtime 信号漏判删除——
++    // unsyncedChecker 注入 false 即该缺陷场景）；bundle（服务器旧快照）仍携带 b.md。
++    const specDir = await seedDisk({ 'docs/a.md': 'local-a' });
++    await seedManifest(['docs/a.md', 'docs/b.md']);
++    const bundle = buildTar([
++      { name: 'docs/a.md', content: 'server-a' },
++      { name: 'docs/b.md', content: 'server-b' },
++    ]);
++
++    const out = await pullSpecBundle(makeClient(bundle), WS, {
++      unsyncedChecker: async () => false,
++    });
++
++    expect(out).toBe(specDir);
++    // a.md 正常更新；b.md 被抑制不复活。
++    expect(await readFile(join(specDir, 'docs/a.md'), 'utf-8')).toBe('server-a');
++    await expect(readFile(join(specDir, 'docs/b.md'), 'utf-8')).rejects.toThrow();
++    // warn 点名（宁可吵不可静默复活）。
++    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
++    expect(warned).toContain('防复活抑制');
++    expect(warned).toContain('docs/b.md');
++  });
++
++  it('用例2：manifest 缺失（首拉）= 无抑制面，全量落地（既有行为不变）', async () => {
++    // 不种 manifest（首拉）；盘面空。
++    const bundle = buildTar([
++      { name: 'x.md', content: 'x' },
++      { name: 'docs/b.md', content: 'b' },
++    ]);
++
++    const specDir = await pullSpecBundle(makeClient(bundle), WS, {
++      unsyncedChecker: async () => false,
++    });
++
++    expect(specDir).not.toBeNull();
++    expect(await readFile(join(specDir as string, 'x.md'), 'utf-8')).toBe('x');
++    expect(await readFile(join(specDir as string, 'docs/b.md'), 'utf-8')).toBe('b');
++    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
++    expect(warned).not.toContain('防复活抑制');
++  });
++
++  it('用例3：restoreDeleted（opts / env）= 显式恢复，跳过抑制', async () => {
++    // opts.restoreDeleted=true：被删文件按 bundle 落地（用户显式意志优先）。
++    await seedManifest(['docs/b.md']);
++    const bundle = buildTar([{ name: 'docs/b.md', content: 'server-b' }]);
++    const client = makeClient(bundle);
++
++    const specDir1 = await pullSpecBundle(client, WS, {
++      unsyncedChecker: async () => false,
++      restoreDeleted: true,
++    });
++    expect(await readFile(join(specDir1 as string, 'docs/b.md'), 'utf-8')).toBe('server-b');
++
++    // env SILLYHUB_DAEMON_RESTORE_DELETED=1 同效（清盘重摆后下一次 pull）。
++    await rm(resolveSpecDir(WS), { recursive: true, force: true });
++    process.env.SILLYHUB_DAEMON_RESTORE_DELETED = '1';
++    const specDir2 = await pullSpecBundle(client, WS, {
++      unsyncedChecker: async () => false,
++    });
++    expect(await readFile(join(specDir2 as string, 'docs/b.md'), 'utf-8')).toBe('server-b');
++  });
++
++  it('用例4：排除口径——manifest 残留行命中 isUploadExcludedPath（projects/）不进抑制面', async () => {
++    // projects/ 属上传排除面（成员机器本地信息）：manifest 残留行不进抑制面，
++    // bundle 携带即落地（对齐 buildFullManifest/packSpecDir 同一排除口径）。
++    await seedDisk({ 'keep.md': 'keep' });
++    await seedManifest(['keep.md', 'projects/x.yaml']);
++    const bundle = buildTar([
++      { name: 'keep.md', content: 'keep-server' },
++      { name: 'projects/x.yaml', content: 'proj' },
++    ]);
++
++    const specDir = await pullSpecBundle(makeClient(bundle), WS, {
++      unsyncedChecker: async () => false,
++    });
++
++    expect(await readFile(join(specDir as string, 'projects/x.yaml'), 'utf-8')).toBe('proj');
++    const warned = warnSpy.mock.calls.map((c) => String(c[0])).join('\n');
++    expect(warned).not.toContain('projects/x.yaml');
++  });
++});
