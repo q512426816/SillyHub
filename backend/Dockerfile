@@ -127,8 +127,11 @@ COPY --from=node-tools /usr/local/lib/node_modules/sillyspec/package.json /app/s
 # task-04（DG-02）：install.ps1 兜底转 CRLF——PowerShell 偏好 CRLF，与 install.sh 去 CR（LF）相反。
 # 源文件已 CRLF 则幂等无副作用；被 git 在镜像构建前转成 LF 则此处修复回来。注意不并入上面的
 # `sed 's/\r$//' install.sh`（那行明确只列 install.sh + entrypoint，bash 要 LF）。
-RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces \
- && chown -R app:app /app /data/spec-workspaces \
+# 2026-10-15-server-logs-dockerfile-fix：预建 /data/logs（日志轮转文件默认目录）——容器内
+# repo_root 推导到 /，非 root 用户 app 运行期 mkdir /data/logs 会权限被拒 → FileWriter 静默
+# 降级 stderr-only，页面日志卡永远「尚未生成」。对齐 /data/spec-workspaces 既有惯例。
+RUN mkdir -p /app/.cache /app/.config /data/spec-workspaces /data/logs \
+ && chown -R app:app /app /data/spec-workspaces /data/logs \
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
