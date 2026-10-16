@@ -555,3 +555,363 @@ created_at: 2026-10-15T11:52:52.897Z
   confirmed_at: null
   source_change: 2026-10-16-driver-audit-fixes
   status: active
+
+## FR-knowledge-019 嵌入计算子进程封装
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景；三闸自灭；失败 fail-soft；OOM 保护
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given backend 进程运行且知识搜索向量路径被调用；When get_embedder 初始化；Then MUST 返回子进程代理（EmbeddingSubprocessProxy），fastembed 模型 MUST 在独立子进程加载，主进程 MUST NOT 直
+- 场景：三闸自灭 — Given 嵌入子进程运行中；When ①闲置满 idle_exit_sec（默认 900s）或 ②stdin 读到 EOF（父进程死亡）或 ③连续运行满 60min；Then 子进程 MUST 退出（进程退出=内存确定性归还 OS）；下次 embed 请求 MUST 重新拉起
+- 场景：失败 fail-soft — Given 子进程 spawn 失败或连续崩溃 ≥3 次；Then 语义 MUST 与现状模型缺席一致（model_ready=false + 词面兜底 + reason），且 MUST 退避 10 分钟后重试；MUST NOT
+- 场景：OOM 保护 — Given 容器内存告急触发 memcg OOM；Then 主进程 MUST 受 oom_score_adj=-500 保护（compose 服务级设置），嵌入子进程 MUST 在启动时把自身 oom_score_adj
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-01
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-01:acc-0-b27000a4
+  tests: backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-01:acc-1-7d42fcce
+  tests: backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-01:acc-2-9eb1f314
+  tests: backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-01:acc-3-2d0288d0
+  tests: backend/app/modules/knowledge/tests/test_embedding_subprocess.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-020 向量索引缓存上限
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given _indexes 进程内缓存持有多个 workspace 索引；When 工作区数超过 KNOWLEDGE_EMBEDDING_INDEX_MAX_WS（默认 4）；Then MUST 按最久未用淘汰（LRU）；MUST NOT 无界增长
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-02
+最近确认：439cdc46c
+
+## FR-knowledge-021 spec 包缓存全局帽
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given _bundle_gzip_cache 跨工作区累积 gzip 整包；When 总字节数超过 SPEC_BUNDLE_CACHE_MAX_BYTES（默认 128MB）；Then MUST 按最久未用淘汰；per-workspace 最新 2 版本保留策略 MUST 保持
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-03
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-02:acc-0-32092bba
+  tests: backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-02:acc-1-1eda6997
+  tests: backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-02:acc-2-f30b3198
+  tests: backend/app/modules/spec_workspace/tests/test_bundle_sync.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-022 权限定时器会话治理
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景；idle-in-transaction 消除
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 权限请求挂起 5 分钟超时定时器；When _on_timeout 回调执行；Then MUST 经 session_factory() 使用全新短会话，MUST NOT 复用外层已关闭 session；全部路径（含 route_key is No
+- 场景：idle-in-transaction 消除 — Given 权限超时回调各路径执行后；Then postgres MUST NOT 出现因该路径产生的 idle in transaction 连接（生产 FATAL 根因消除）
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-04
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-03:acc-0-06d3d8c8
+  tests: backend/app/modules/daemon/tests/test_permission_http_uplink.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-03:acc-1-5269ffdd
+  tests: backend/app/modules/daemon/tests/test_permission_http_uplink.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-03:acc-2-ed795125
+  tests: backend/app/modules/daemon/tests/test_permission_http_uplink.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-023 ws_hub 泄漏修复与身份校验
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given ws_hub 处理 RPC 与连接生命周期；When ①send_rpc 被外部取消（CancelledError）或 ②resolve_rpc 遇 done future 或 ③disconnect 收到旧连接的；Then ①② MUST 清理 _pending_rpcs 条目；③ MUST 校验连接实例身份（仅当前注册实例可 pop，对齐 _evict_stale 先例）——MU
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-05
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-04:acc-0-320cfcc2
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-04:acc-1-ba0431bc
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-04:acc-2-5b1f8df8
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-024 附件预检与日志截断
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-004@v1
+场景正文：
+- 场景：默认场景 — Given 附件上传 / WS 大消息日志；When 上传请求到达或超大消息被日志记录；Then 上传 MUST 先读 UploadFile.size 超限 413 再读内容；日志 MUST 截断（超 8KB 只记前后 4KB+总长标注）
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-06
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-05:acc-0-8894ad4f
+  tests: backend/app/modules/session_attachment/tests/test_upload_precheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-05:acc-1-c52bae84
+  tests: backend/app/modules/session_attachment/tests/test_upload_precheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-05:acc-2-e360469a
+  tests: backend/app/modules/session_attachment/tests/test_upload_precheck.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-025 change-write WS 事件推送
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given DaemonChangeWrite pending 行落库；When 四个落库点（change/service.py 新建与 match 更新、change_writer/proxy.py、spec_workspace/route；Then backend MUST 经 ws_hub 向该 runtime 所属 daemon 推送 daemon:change_write_available（payl
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-07
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-06:acc-0-4f0baccb
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-06:acc-1-41bf4bc5
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-06:acc-2-851a7926
+  tests: backend/app/modules/daemon/tests/test_ws_hub.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-07:acc-0-2b1b0abf
+  tests: sillyhub-daemon/tests/config.test.ts | sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-07:acc-1-7baf803e
+  tests: sillyhub-daemon/tests/config.test.ts | sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-07:acc-2-9c260248
+  tests: sillyhub-daemon/tests/config.test.ts | sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-07:acc-3-49def444
+  tests: sillyhub-daemon/tests/config.test.ts | sillyhub-daemon/tests/protocol-session-contract.test.ts
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-026 change-write 兜底轮询独立间隔
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given daemon _pollLoop 运行；When change-write 分支等待下一轮
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-08
+最近确认：439cdc46c
+
+## FR-knowledge-027 会话标题预览持久化
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景；列表读列
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given agent_sessions 表；Then MUST 新增 title_fallback（String(64) nullable）列；迁移 MUST 一次性回填存量（与 session_crud.py:3
+- 场景：列表读列 — Given 会话列表请求（limit≤500）；When 组装 title；Then MUST 优先 item.title、次 title_fallback；仅两列皆 NULL 的漏网会话 MUST 收窄查询一次并回写（列或哨兵），之后 MUST
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-09
+最近确认：439cdc46c
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-backend-mem-polling:task-08:acc-0-4ca0bf93
+  tests: backend/app/modules/daemon/tests/test_session_router.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-08:acc-1-060436cc
+  tests: backend/app/modules/daemon/tests/test_session_router.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+- row: 2026-10-16-backend-mem-polling:task-08:acc-2-ddaec966
+  tests: backend/app/modules/daemon/tests/test_session_router.py
+  reason: spec
+  state: active
+  discovery: machine
+  confirmed_by: agent
+  confirmed_at: 9d40341aae3baa9d25dcf9a0cc75c314b48d8708
+  source_change: 2026-10-16-backend-mem-polling
+  status: active
+
+## FR-knowledge-028 部署配额与保护
+变更：2026-10-16-backend-mem-polling
+状态：active
+摘要：默认场景
+依据决策：D-001@v1
+场景正文：
+- 场景：默认场景 — Given deploy/docker-compose.yml；Then mem_limit MUST 重分配（backend 1100m 保持 + oom_score_adj: -500；frontend 300m；minio 12
+全文：.sillyspec/changes/archive/2026-10-16-backend-mem-polling/requirements.md#FR-10
+最近确认：439cdc46c

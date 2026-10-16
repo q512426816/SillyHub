@@ -105,6 +105,27 @@ _LLM_PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10
 # reset fixture 直接对包属性赋 None，本模块经 ``_router`` 延迟读写保持可复位。
 
 
+# 2026-10-16-backend-mem-polling task-05 / D-004@v1：WS 消息日志截断阈值——
+# spec bundle RPC 回包可达数十 MB，整条进日志是内存/CPU 尖峰 + 日志爆量。
+_WS_LOG_TRUNCATE_BYTES = 8 * 1024
+_WS_LOG_KEEP_EACH_SIDE = 4 * 1024
+
+
+def _truncate_ws_log_msg(data: Any) -> Any:
+    """超阈值消息截断为 repr 前后各 4KB + 总长标注（≤8KB 原样返回）。"""
+    try:
+        text = repr(data)
+    except Exception:  # repr 本身异常（极端对象）→ 只回类型名
+        return f"<unrepresentable {type(data).__name__}>"
+    if len(text) <= _WS_LOG_TRUNCATE_BYTES:
+        return data
+    return (
+        f"{text[:_WS_LOG_KEEP_EACH_SIDE]}"
+        f"...<truncated total={len(text)} chars>"
+        f"{text[-_WS_LOG_KEEP_EACH_SIDE:]}"
+    )
+
+
 def _get_llm_proxy_client() -> httpx.AsyncClient:
     """Return (and lazily create) the process-wide upstream forward client."""
     client = _router._LLM_PROXY_CLIENT
@@ -530,7 +551,10 @@ async def daemon_websocket(
                     log.warning(
                         "ws_rpc_result_missing_id",
                         daemon_id=str(daemon_id),
-                        msg=data,
+                        # 2026-10-16-backend-mem-polling task-05 / D-004@v1：WS 消息
+                        # 可达数十 MB（spec bundle RPC 回包），整条进日志是内存/CPU
+                        # 尖峰+日志爆量——截断后只留首尾。
+                        msg=_truncate_ws_log_msg(data),
                     )
                     continue
                 await hub.resolve_rpc(rpc_id, payload)
@@ -587,7 +611,9 @@ async def daemon_websocket(
     except Exception:
         log.exception("ws_unexpected_error", daemon_id=str(daemon_id))
     finally:
-        await hub.disconnect(daemon_id)
+        # 传 ws 做连接身份校验：快速重连时旧 handler 的收尾不得踢掉新连接
+        # （2026-10-16-backend-mem-polling task-04，ws_hub.disconnect 对齐 _evict_stale）。
+        await hub.disconnect(daemon_id, ws=websocket)
 
 
 async def _payload_runtime_id(

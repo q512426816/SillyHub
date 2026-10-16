@@ -112,7 +112,8 @@ class TestMigrationStructure:
         # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）→
         # 20261016010000（drop uq_kssc_workspace_path_anchor_title——生产语料
         # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
-        assert heads[0] == "20261016010000"  # 知识搜索去 uq 迁移成为新 head（注释链续写）
+        # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）
+        assert heads[0] == "20261016100000"  # title_fallback 迁移成为新 head（注释链续写）
 
     def test_revision_chain(self) -> None:
         mod = _load_migration_module()

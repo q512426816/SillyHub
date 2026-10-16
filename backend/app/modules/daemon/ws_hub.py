@@ -12,6 +12,7 @@ from fastapi import WebSocket
 
 from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
+    DAEMON_MSG_CHANGE_WRITE_AVAILABLE,
     DAEMON_MSG_CLEANUP,
     DAEMON_MSG_HEARTBEAT_ACK,
     DAEMON_MSG_PERMISSION_RESPONSE,
@@ -111,9 +112,19 @@ class DaemonWsHub:
             total_connected=len(self._connections),
         )
 
-    async def disconnect(self, daemon_id: uuid.UUID) -> None:
-        """Remove a daemon entity's WebSocket connection."""
+    async def disconnect(self, daemon_id: uuid.UUID, *, ws: WebSocket | None = None) -> None:
+        """Remove a daemon entity's WebSocket connection.
+
+        2026-10-16-backend-mem-polling task-04 / D-004@v1：可选 ``ws`` 连接身份
+        校验（对齐 :meth:`_evict_stale` 先例）——快速重连场景下旧端点 handler 的
+        finally 持陈旧 ws 调本方法，若不校验会误 pop 刚注册的新连接（重连风暴
+        自我放大器）。传 ``ws`` 时仅当注册表当前连接仍是它才清理；不传保持旧
+        语义（无条件 pop，向后兼容存量调用/测试）。
+        """
         async with self._lock:
+            if ws is not None and self._connections.get(daemon_id) is not ws:
+                # 已被新连接替换——本次断连属于陈旧 handler，新连接无辜，不清理。
+                return
             removed = self._connections.pop(daemon_id, None)
 
         if removed is not None:
@@ -605,6 +616,10 @@ class DaemonWsHub:
             ) from None
         except asyncio.CancelledError:
             # future.cancel() — most likely disconnect → cancel_pending_for_daemon.
+            # 2026-10-16-backend-mem-polling task-04：外部取消（HTTP 调用方断开/
+            # 超时取消/重连风暴）同样清理 _pending_rpcs 条目——future 已 done，
+            # 此前不清表会让条目永久驻留（迟到回包也只 warn 不 pop，见 resolve_rpc）。
+            await self._cancel_rpc(rpc_id)
             # Re-raise as DaemonRuntimeOffline so callers map to 504.
             raise DaemonRuntimeOffline(
                 f"daemon '{daemon_id}' disconnected mid-rpc.",
@@ -638,6 +653,10 @@ class DaemonWsHub:
                 return
             future = entry[1]
             if future.done():
+                # 2026-10-16-backend-mem-polling task-04：done future 早退前先 pop
+                # 条目——该 rpc_id 已被超时/取消路径标记完成，条目残留只会在
+                # 后续重复回包时反复 warn 且永不释放。
+                self._pending_rpcs.pop(rpc_id, None)
                 log.warning(
                     "ws_rpc_already_resolved",
                     rpc_id=rpc_id,
@@ -815,3 +834,45 @@ def get_daemon_ws_hub() -> DaemonWsHub:
 
 # Alias — shorter name used by placement and other integration points.
 get_ws_hub = get_daemon_ws_hub
+
+
+async def notify_change_write_available(
+    session: Any,
+    runtime_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+) -> bool:
+    """change-write pending 行落库并 commit 后的定向轻通知（task-06 / D-001@v1）。
+
+    经 ``_resolve_daemon_id_for_runtime``（session.service 单一真相源）解析
+    WS 路由键后推送 ``daemon:change_write_available``（payload 只带
+    runtime_id / workspace_id，daemon 收到即调既有 GET pending-change-writes
+    拉取——幂等，不在 WS 上传任务体）。**best-effort**：解析失败 / 离线 /
+    发送异常仅 debug/warning 日志，不抛不重试——兜底轮询永在（旧 daemon 不
+    识别本消息按 default 分支 warn 丢弃，同样落到兜底轮询）。返回 True 表示
+    已下发。
+    """
+    from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
+
+    try:
+        daemon_id = await _resolve_daemon_id_for_runtime(session, runtime_id)
+        if daemon_id is None:
+            log.debug("change_write_notify_no_daemon", runtime_id=str(runtime_id))
+            return False
+        message = {
+            "type": DAEMON_MSG_CHANGE_WRITE_AVAILABLE,
+            "payload": {
+                "runtime_id": str(runtime_id),
+                "workspace_id": str(workspace_id) if workspace_id is not None else None,
+            },
+        }
+        sent = await get_daemon_ws_hub().send_to_runtime(daemon_id, message)
+        if not sent:
+            log.debug("change_write_notify_offline", runtime_id=str(runtime_id))
+        return sent
+    except Exception:
+        log.warning(
+            "change_write_notify_failed",
+            runtime_id=str(runtime_id),
+            exc_info=True,
+        )
+        return False

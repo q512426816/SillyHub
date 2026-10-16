@@ -872,6 +872,15 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
+    # 2026-10-16-backend-mem-polling task-08 / D-001@v1：chat 会话首条 user_input
+    # 前 30 字预览的服务端持久化缓存（迁移一次性回填；列表读列消窗口函数扫描）。
+    # 三态：NULL=未计算（漏网，列表路径惰性回写自愈）；''=已计算无预览（哨兵，
+    # 防零输入会话每轮重查）；非空=预览文本。title 列语义不动（tool_report 自动
+    # 标题 / chat 恒 NULL 派生路径保持）。
+    title_fallback: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
     agent_session_id: str | None = Field(
         default=None,
         sa_column=Column(String(255), nullable=True),

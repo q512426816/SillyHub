@@ -119,6 +119,24 @@ class Settings(BaseSettings):
         "BAAI/bge-small-zh-v1.5",
         description="fastembed model name for /api/spec/knowledge/vector-search (env KNOWLEDGE_EMBEDDING_MODEL).",
     )
+    # 2026-10-16-backend-mem-polling task-01 / D-001@v1：嵌入模型子进程封装——闲置该秒数
+    # 后子进程自动退出（内存确定性归还 OS），下次查询重新拉起（冷启 1~3s）。
+    knowledge_embedding_idle_exit_sec: int = Field(
+        900,
+        description="embedding worker idle exit in seconds (env KNOWLEDGE_EMBEDDING_IDLE_EXIT_SEC).",
+    )
+    # 2026-10-16-backend-mem-polling task-01 / D-004@v1：CLI 向量端点进程内索引的 LRU
+    # 工作区上限（每 ws 索引 11~40MB，无上限会随工作区数无界增长）。
+    knowledge_embedding_index_max_ws: int = Field(
+        4,
+        description="max workspaces cached in-process for vector index, LRU evict beyond (env KNOWLEDGE_EMBEDDING_INDEX_MAX_WS).",
+    )
+    # 2026-10-16-backend-mem-polling task-02 / D-004@v1：spec 包 gzip 整包缓存的
+    # 全局字节帽（per-ws 2 版本策略之上的总量上界；~18MB/ws 曾无上界慢性爬升）。
+    spec_bundle_cache_max_bytes: int = Field(
+        128 * 1024 * 1024,
+        description="global byte cap for spec bundle gzip cache, LRU evict beyond (env SPEC_BUNDLE_CACHE_MAX_BYTES).",
+    )
 
     # 2026-07-07-daemon-skill-execution task-06：sillyspec skills 打包源目录。
     # 镜像内路径由 Dockerfile COPY → /app/sillyspec-skills/（task-07）。

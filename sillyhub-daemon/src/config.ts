@@ -271,6 +271,8 @@ export interface DaemonConfig {
   workspace_dir: string;
   /** HTTP 轮询间隔（秒），默认 30。 */
   poll_interval: number;
+  /** task-07（2026-10-16-backend-mem-polling）：change-write 兜底轮询独立间隔（秒，默认 120）——推送为主、轮询兜底；与 poll_interval（lease 通道）解耦。 */
+  change_write_poll_interval: number;
   /** WS 心跳间隔（秒），默认 15。 */
   heartbeat_interval: number;
   /** 最大并发任务数，默认 5。 */
@@ -470,6 +472,7 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   profile: 'default',
   workspace_dir: join(homedir(), 'sillyhub_workspaces'),
   poll_interval: 30,
+  change_write_poll_interval: 120,
   heartbeat_interval: 15,
   max_concurrent_tasks: 5,
   log_level: 'info',

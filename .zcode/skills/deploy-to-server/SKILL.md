@@ -5,22 +5,25 @@ description: 本地打包镜像→生产服务器（腾讯云轻量）部署；�
 
 # 远程服务器部署（本地打包 → 腾讯云生产服务器）
 
-## 拓扑（2026-10-16 服务器迁移起）
+## 拓扑（2026-10-16 服务器迁移；同日已去隧道直连）
 
 ```
 用户浏览器 → https://crrcdt.ppdmq.top
-  → 阿里云 47.113.145.252 nginx（443/LE 证书，upstream 仍是 127.0.0.1:8001|3001，零改动）
-  → systemd tencent-tunnel.service（SSH -L 本地转发隧道，流量加密）
+  → 阿里云 47.113.145.252 nginx（443/LE 证书）
+  → 直连 http://124.222.127.242:3001|8001（腾讯轻量控制台防火墙已放行两端口）
   → 腾讯云轻量 124.222.127.242（整套栈：backend/frontend/postgres/redis/minio）
 ```
 
-- 隧道存在的原因：**腾讯轻量控制台防火墙默认只开 22**（3001/8001/80/443 全在云层被拦，
-  服务器自身 ufw 是关的，服务器上改不了，只能腾讯控制台开）。若日后在控制台放行
-  3001/8001，可把 nginx upstream 直接指向 `http://124.222.127.242:8001|3001` 并
-  `systemctl disable --now tencent-tunnel` 撤掉隧道。
+- 迁移当天先经 SSH 隧道过渡（轻量防火墙默认只开 22），用户在控制台放行 3001/8001 后
+  已切直连并 `systemctl disable --now tencent-tunnel`。隧道 unit + 受限密钥保留作应急：
+  若控制台把端口重新关掉，`systemctl enable --now tencent-tunnel` + 把 nginx upstream
+  改回 `127.0.0.1` 即恢复服务。
+- nginx 5 处 upstream 现指向 `124.222.127.242`（备份在阿里云 `/etc/nginx/backups/`）。
 - 阿里云旧栈：已停止且 `docker update --restart=no`，是迁移 rollback 快照（数据冻结在
   2026-10-16 11:00），不承担服务。
 - 阿里云入口机上还有别的项目容器（ppdmq-*），不要碰。
+- 安全建议：轻量防火墙 3001/8001 规则来源最好限定为 `47.113.145.252`（只让阿里云 nginx
+  访问），避免全网直打后端裸端口（后端有鉴权，但没必要暴露）。
 
 ## 目标
 
@@ -175,10 +178,11 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'cd /opt/sillyhub/deploy/dep
 
 **整机级回滚（迁回阿里云旧栈，数据是 2026-10-16 11:00 冻结点，会丢其后新数据）**：
 ```bash
-# 阿里云：停隧道 → 起旧栈（nginx upstream 不用改，8001/3001 会被旧栈接管）
+# 阿里云：先起旧栈接管 8001/3001 → upstream 改回本机 → reload（顺序别反，避免 502 窗口）
 ssh -i ~/.ssh/aliyun_deploy root@47.113.145.252 '
-  systemctl stop tencent-tunnel && \
-  cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d'
+  cd /opt/sillyhub/deploy/deploy && docker compose --env-file .env up -d && \
+  sed -i "s#proxy_pass http://124.222.127.242:#proxy_pass http://127.0.0.1:#g" /etc/nginx/sites-enabled/crrcdt && \
+  nginx -t && systemctl reload nginx'
 ```
 
 ## 首次部署（服务器从零）
@@ -249,9 +253,9 @@ TOKEN=$(ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 'curl -fsS -H "Conte
 
 ## nginx 路由（/daemon/* 与 /mcp 必须走后端）
 
-> 2026-10-16 迁移后：这层 nginx 仍在**阿里云入口机**上，所有 upstream
-> （`127.0.0.1:8001|3001`）**零改动**——这两个本地端口实际由 `tencent-tunnel.service`
-> 的 SSH 转发接到腾讯云生产机。本节 location 调优（SSE/WS/410 特例）全部继续生效；
+> 2026-10-16 迁移后：这层 nginx 仍在**阿里云入口机**上，upstream 已指向
+> `http://124.222.127.242:8001|3001`（当日上午短暂走 SSH 隧道过渡，控制台放行端口后
+> 已切直连）。本节 location 调优（SSE/WS/410 特例）全部继续生效；
 > 动 nginx 的操作也全部仍在阿里云机上做。
 
 对外域名（如 `crrcdt.ppdmq.top`）前面有一层宿主机 nginx 反代，默认只把 `/api/` 与
@@ -354,14 +358,16 @@ ssh -i ~/.ssh/tencent_deploy ubuntu@124.222.127.242 '
 ## 常见坑
 
 - **活跃 compose 目录是 `/opt/sillyhub/deploy/deploy/`**（双层 deploy；腾讯云机上只有这一层，路径沿用老服务器保持一致），scp 和 ssh 都进深层目录。
-- **腾讯轻量防火墙只开 22**（2026-10-16 实测）：控制台云层拦截 80/443/3001/8001（服务器 ufw 是关的、服务器上改不了），任何跨机直连生产端口的尝试都会超时——所以域名流量走阿里云 nginx + SSH 隧道（见顶部拓扑）。要在控制台开端口只能用户在腾讯云控制台操作；开了之后可把 nginx upstream 直指 `124.222.127.242` 并撤隧道。
-- **隧道是阿里云 systemd 服务**：`systemctl status/restart tencent-tunnel`（阿里云机上）；`Restart=always` 断线自动重连；隧道用的密钥 `/root/.ssh/aliyun_tunnel` 在腾讯侧 authorized_keys 里是 `restrict,port-forwarding`（只能转发不能登录 shell）。
-- **域名突然变旧数据/502 时先查隧道**：`systemctl is-active tencent-tunnel`；再确认阿里云旧栈没被误起（旧栈起会抢 8001/3001 端口把隧道挤掉）。
+- **腾讯轻量防火墙默认只开 22**（2026-10-16 实测）：控制台云层拦 80/443/3001/8001（服务器 ufw 是关的、机器上改不了），只能用户在腾讯控制台开。现已放行 3001/8001（nginx 直连）；若被重新关掉，应急恢复 = 阿里云 `systemctl enable --now tencent-tunnel` + upstream 改回 `127.0.0.1`（隧道 unit 与受限密钥保留未删）。
+- **跨公网明文提示**：阿里云 nginx → `124.222.127.242` 这段是公网 HTTP（内网工具可接受）；要加密可退回隧道方案（加密但单流）或给腾讯机挂自签 TLS。轻量防火墙规则来源限定 `47.113.145.252` 可显著收窄暴露面。
+- **域名突然 502/变旧数据时**：先 `systemctl status nginx`，再从阿里云 `curl -m 5 http://124.222.127.242:8001/api/health` 测直连（超时=轻量防火墙被关，走隧道应急）；最后确认阿里云旧栈没被误起。
 - **远程 pkill -f 自杀坑**（2026-10-16 实测）：ssh 进去 `pkill -f "xxx"`，模式串会匹配到自己这条 ssh 会话的命令行把自己杀掉（exit 255 无输出）；用括号技巧 `pkill -f "[x]xx"` 或先 pgrep 拿 PID 再 kill。
 - **PROD_API_URL 必须覆盖**：本地 `deploy/.env` 的 `NEXT_PUBLIC_API_BASE_URL=127.0.0.1:8001` 是开发值，直接打包给生产，浏览器会连用户自己机器。用 `PROD_API_URL=生产地址` 覆盖（环境变量 > `.env`）。
 - **.sh 必须 LF**：`.gitattributes` 已强制 `*.sh eol=lf`，scp 前确认 `grep \r = 0`，否则服务器 `bash\r: bad interpreter`。
 - **backend Dockerfile apt 源用清华 tuna**：`mirrors.aliyun.com` 的 debian trixie Packages 索引缺失会让 backend build 卡死（2026-07-17 已改 tuna）。
 - **磁盘**：60G 盘（腾讯云）。`load-and-up.sh` 自动 `image prune -f` + 删 tar。但 `backup-<时间>` tag 会累积，定期手动清：`docker images | grep backup` → `docker rmi <旧backup>`。
+- **内存与 OOM 排障（2026-10-16-backend-mem-polling）**：容器配额总和须 ≤1.85G（backend 1100m+postgres 256m+frontend 300m+minio 128m+redis 64m，见 compose）。backend 有嵌入子进程（闲置自灭）与 oom_score_adj 保护设计（注意：compose 服务级 oom_score_adj 键被部分 compose 版本忽略——`docker inspect ... OomScoreAdj` 复核）。若再见 OOM 强杀，先 `dmesg -T | grep 'Killed process'` 判被杀的是主进程还是嵌入子进程。建议 sysctl `vm.swappiness=10`（默认 60 在小内存机过早换页放大卡顿；`sysctl -w` + 持久化 /etc/sysctl.d/99-swappiness.conf，不入库；腾讯 8G 机优先级低）。
+
 - **commit_sha=unknown**：health 端点这个字段恒 `unknown` 是既有问题（compose 运行时 `COMMIT_SHA` 覆盖镜像 build 值），不影响功能，见 memory `compose-commit-sha-runtime-override`。
 - **backend 变更触发 alembic**：load + up 后 backend 启动跑 `alembic upgrade head`。migration 链断裂会 crash-loop，看 logs 诊断；项目未上线，可 `docker compose down -v` 重置 DB（先确认数据可丢）。
 - **清库迁移已改 no-op（2026-09-13 部署裁决）**：20260912050000 的破坏性清库 DML **不随** `alembic upgrade head` 自动执行（旧逻辑会在 CLI 升级前自动清库、清空白做；且迁移链重放会把已重建的正确数据再清一遍）。清库改 `backend/scripts/reset_agent_log_attribution.py` 手动执行——见「更新部署 §4」的一次性运维动作段；**只跑一次，CLI 重推开始后禁跑**。

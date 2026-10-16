@@ -419,6 +419,12 @@ async def proxy_create_change(
     await session.commit()
     await session.refresh(change_write)
 
+    # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）——
+    # 也加速下方 60s 回执等待（原纯 30s 轮询派发）。
+    from app.modules.daemon.ws_hub import notify_change_write_available
+
+    await notify_change_write_available(session, runtime_id, workspace_id)
+
     log.info(
         "proxy_change_write_dispatched",
         change_write_id=str(change_write.id),

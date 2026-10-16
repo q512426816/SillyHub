@@ -48,6 +48,10 @@ DAEMON_MSG_SESSION_RESUME = "daemon:session_resume"  # Server → Daemon, FR-2
 # task-02 / FR-02：前端对 plan 模式的确认/修订/取消决策，经 WS Hub 下发 daemon。
 DAEMON_MSG_PLAN_RESPONSE = "daemon:plan_response"  # Server → Daemon, FR-02
 DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server, FR-07 / D-007
+# 2026-10-16-backend-mem-polling task-06 / D-001@v1：change-write pending 行落库后的
+# 轻通知（payload 只带 runtime_id/workspace_id，daemon 收到即拉既有 GET pending-change-writes）。
+# 与 sillyhub-daemon/src/protocol.ts 逐字对齐；旧 daemon default 分支 warn 丢弃落到兜底轮询。
+DAEMON_MSG_CHANGE_WRITE_AVAILABLE = "daemon:change_write_available"  # Server → Daemon, task-06
 DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
 DAEMON_MSG_SELF_UPDATE = "daemon:self_update"  # Server → Daemon, 推送 daemon 自更新指令
 

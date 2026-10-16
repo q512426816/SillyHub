@@ -1553,6 +1553,13 @@ class DaemonPermissionService:
         ``permission_resolved{reason:timeout}`` SSE so the frontend card can
         dismiss. Either failure is logged but not raised — the daemon-side
         fallback timer is the ultimate fail-closed safety net.
+
+        2026-10-16-backend-mem-polling task-03 / D-004@v1：收尾不再复用外层请求域
+        的 ``self._svc._session``（请求早返回后该 session 已关闭，定时器把它 pin 了
+        整整 5 分钟，且 ``route_key None`` 早退路径不提交——生产 postgres
+        idle-in-transaction FATAL 的直接元凶）。改为在全新短会话上构造绑定该会话
+        的 service 实例执行 ``_timeout_denouement``，成功 commit / 异常 rollback，
+        任何路径不再留下挂起事务。
         """
         try:
             await asyncio.sleep(self._timeout_sec)
@@ -1566,11 +1573,41 @@ class DaemonPermissionService:
         if current is not None and current.done() is False and current is asyncio.current_task():
             self._timers.pop(request_id, None)
 
+        from app.core.db import get_session_factory
+
+        session_factory = get_session_factory()
+        try:
+            async with session_factory() as fresh_session:
+                fresh_psv = DaemonPermissionService(DaemonService(fresh_session), self._hub)
+                try:
+                    await fresh_psv._timeout_denouement(session_id, run_id, request_id, runtime_id)
+                    await fresh_session.commit()
+                except Exception:
+                    await fresh_session.rollback()
+                    raise
+        except Exception:
+            # best-effort 语义保持：收尾链任一步失败仅告警不抛（daemon 侧兜底
+            # 定时器是最终 fail-closed 防线），但不再遗留 idle-in-transaction。
+            log.warning(
+                "permission_timeout_denouement_failed",
+                session_id=str(session_id),
+                request_id=request_id,
+                exc_info=True,
+            )
+
+    async def _timeout_denouement(
+        self,
+        session_id: uuid.UUID,
+        run_id: uuid.UUID,
+        request_id: str,
+        runtime_id: uuid.UUID | None,
+    ) -> None:
+        """超时 deny 收尾体（由 _on_timeout 在全新短会话上构造的实例调用，勿直接用）。"""
         # task-06（2026-08-29-approval-notify-push / FR-06 / §7.3③）：超时失效
         # 时向 owner 发 permission_timeout 通知。回调只收请求 id → 重查会话行
-        # 取 owner（D-010@v1：AgentSession.user_id）。本回调后续 ControlCommand
-        # 落库本就使用 self._svc._session，owner 重查同源复用（既有惯例优先于
-        # 新开短 session）。best-effort：失败仅 log.warning（D-001@v1）。
+        # 取 owner（D-010@v1：AgentSession.user_id）。2026-10-16 task-03 起本方法
+        # 运行在 _on_timeout 新开的短会话上（self 绑定 fresh session）。
+        # best-effort：失败仅 log.warning（D-001@v1）。
         # v1 取舍 R-09：不消解历史 permission_request 通知。
         try:
             from app.modules.agent.model import AgentSession as _AgentSession

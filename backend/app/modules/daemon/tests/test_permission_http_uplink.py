@@ -429,3 +429,110 @@ class TestPermissionHttpUplink:
         assert _permission_timers["req-share-1"] is not first_timer
         # 未使用 lease（防 lint 未用告警的显式引用）。
         assert lease.kind == "interactive"
+
+
+# ── task-03（2026-10-16-backend-mem-polling / D-004@v1）：超时回调会话治理 ──────
+
+
+class TestTimeoutFreshSession:
+    """_on_timeout 收尾必须用全新短会话并全路径 commit/rollback。
+
+    回调不得复用外层请求域的已关闭 session（定时器 pin 它 5 分钟 +
+    route_key None 早退不提交——生产 idle-in-transaction FATAL 元凶）。
+    """
+
+    @staticmethod
+    def _fresh_factory(monkeypatch: pytest.MonkeyPatch) -> list:
+        """patch app.core.db.get_session_factory（源头模块属性），返回捕获列表。"""
+        import app.core.db as core_db
+
+        created: list = []
+
+        class _Ctx:
+            def __init__(self, s):
+                self.s = s
+
+            async def __aenter__(self):
+                return self.s
+
+            async def __aexit__(self, *a):
+                return False
+
+        class _Factory:
+            def __call__(self):
+                from unittest.mock import MagicMock
+
+                s = AsyncMock()
+                # execute 返回值须为同步 MagicMock（AsyncMock 自动推导会让
+                # scalar_one_or_none 变协程——与真实 AsyncSession.execute 行为不符）
+                ret = MagicMock()
+                ret.scalar_one_or_none.return_value = None
+                s.execute.return_value = ret
+                created.append(s)
+                return _Ctx(s)
+
+        monkeypatch.setattr(core_db, "get_session_factory", lambda: _Factory())
+        return created
+
+    @pytest.mark.asyncio
+    async def test_timeout_uses_fresh_session_and_commits(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """route_key None 早退路径（历史不提交的元凶路径）也必须 commit 新会话。"""
+        import asyncio
+
+        from app.modules.daemon import permission_service as ps
+        from app.modules.daemon.service import DaemonService
+
+        # 外层 session 模拟"已关闭"：任何复用必然炸——用于证明回调切到了新会话。
+        dead = AsyncMock()
+        dead.execute.side_effect = RuntimeError("outer session closed")
+
+        created = self._fresh_factory(monkeypatch)
+        # publish/notify 走 daemon 服务真实链路依赖 redis，单测打桩隔离（测的是会话治理本身）
+        monkeypatch.setattr(DaemonService, "_publish_session_event", AsyncMock(), raising=False)
+
+        psv = ps.DaemonPermissionService(
+            ps.DaemonService(db_session), AsyncMock(), timeout_sec=0.01
+        )
+        psv._svc._session = dead
+
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        task = asyncio.create_task(psv._on_timeout(sid, rid, "req-fresh-1", None))
+        ps._permission_timers["req-fresh-1"] = task
+        await task
+
+        assert len(created) == 1, "必须经工厂开恰好一个新短会话"
+        fresh = created[0]
+        fresh.commit.await_count == 1 or fresh.commit.assert_awaited_once()
+        fresh.rollback.assert_not_awaited()
+        dead.execute.assert_not_called(), "不得复用外层已关闭 session"
+        assert "req-fresh-1" not in ps._permission_timers, "timer 自清"
+
+    @pytest.mark.asyncio
+    async def test_timeout_denouement_failure_rolls_back_and_never_raises(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """收尾链异常 → rollback + 仅告警不抛（best-effort 语义保持）。"""
+
+        from app.modules.daemon import permission_service as ps
+        from app.modules.daemon.service import DaemonService
+
+        created = self._fresh_factory(monkeypatch)
+        monkeypatch.setattr(
+            DaemonService,
+            "_publish_session_event",
+            AsyncMock(side_effect=RuntimeError("publish down")),
+            raising=False,
+        )
+
+        psv = ps.DaemonPermissionService(
+            ps.DaemonService(db_session), AsyncMock(), timeout_sec=0.01
+        )
+        sid, rid = uuid.uuid4(), uuid.uuid4()
+        # 不抛异常即通过（失败被 best-effort 吞掉）
+        await psv._on_timeout(sid, rid, "req-fresh-2", None)
+
+        assert len(created) == 1
+        created[0].rollback.assert_awaited_once()
+        created[0].commit.assert_not_awaited()

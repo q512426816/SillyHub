@@ -25,8 +25,12 @@ Body ``{query, limit}`` → ``200 {ok, results:[{spec_path, anchor, change, scor
 
 from __future__ import annotations
 
+import json
+import queue
 import re
+import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,45 +115,199 @@ def decisions_fingerprint(spec_root: Path) -> tuple | None:
     return tuple(sorted(parts))
 
 
-# ── embedder（fastembed 懒加载单例；不可用态 fail-soft）────────────────────────
+# ── embedder（子进程封装；不可用态 fail-soft）──────────────────────────────────
+#
+# 2026-10-16-backend-mem-polling task-01 / D-001@v1：fastembed 模型从进程内单例
+# 改为独立子进程（app.modules.knowledge.embedding_worker），主进程只持管道——
+# 模型内存"用时有峰、闲时归零"（子进程三闸自灭=进程退出，内存确定性归还 OS）。
+# 失败语义与旧版模型缺席一致（model_ready=false + 词面兜底），**不回退进程内加载**。
 
 _embedder_lock = threading.Lock()
 _embedder_instance: object | None = None
 _embedder_model: str | None = None
 _embedder_error: str | None = None
 
+# 子进程连续崩溃达到阈值后的退避时长（防崩溃循环烧 CPU）
+_EMBEDDER_CRASH_BACKOFF_SEC = 600.0
 
-class FastembedEmbedder:
-    """fastembed 封装（构造即加载模型——调用方持有单例，不反复初始化）。"""
 
-    def __init__(self, model_name: str) -> None:
-        from fastembed import TextEmbedding  # lazy import：缺席=不可用态，不阻塞启动
+class EmbeddingSubprocessError(RuntimeError):
+    """子进程嵌入失败（崩溃/超时/协议错误），调用方按 fail-soft 降级处理。"""
 
-        self._model = TextEmbedding(model_name=model_name)
+
+class EmbeddingSubprocessProxy:
+    """fastembed 子进程代理——embed() 经 stdin/stdout 行协议往返，签名与旧
+    ``FastembedEmbedder`` 一致（调用方 duck-typing 零改动）。
+
+    - 子进程懒启动（首次 embed 才 spawn）；崩溃自动重启，连续
+      ``MAX_CONSECUTIVE_CRASHES`` 次后进入不可用退避（``available=False``）；
+      退避满 ``retry_at`` 后代理自身恢复可用（get_embedder 审查 available
+      通过即复用原代理，embed 内懒重启子进程——不另建新代理实例）。
+    - 响应读取用常驻读线程 + 队列（Windows 管道无 select）。
+    - ``worker_cmd`` 仅测试注入假 worker 用；生产默认 -m 拉真 worker。
+    """
+
+    REQUEST_TIMEOUT_SEC = 300.0
+    MAX_CONSECUTIVE_CRASHES = 3
+
+    def __init__(
+        self,
+        model_name: str,
+        idle_exit_sec: int = 900,
+        worker_cmd: list[str] | None = None,
+    ) -> None:
+        import subprocess
+
+        self._subprocess = subprocess
+        self._model_name = model_name
+        self._idle_exit_sec = idle_exit_sec
+        self._worker_cmd = worker_cmd
+        self._proc: object | None = None
+        self._responses: queue.Queue = queue.Queue()
+        self._lock = threading.Lock()
+        self._next_id = 0
+        self.consecutive_crashes = 0
+        self.retry_at = 0.0
+
+    # -- 生命周期 -----------------------------------------------------------
+
+    def _poll(self) -> int | None:
+        return self._proc.poll() if self._proc is not None else 0
+
+    def _stop(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+                self._proc.wait(timeout=5)
+            except Exception:
+                pass
+        self._proc = None
+
+    def _ensure_started(self) -> None:
+        """确保子进程与读线程在位（懒启动 + 崩溃重启共用）。"""
+        import threading as _threading
+
+        if self._proc is not None and self._poll() is None:
+            return
+        self._stop()
+        cmd = self._worker_cmd or [
+            sys.executable,
+            "-m",
+            "app.modules.knowledge.embedding_worker",
+            self._model_name,
+            str(self._idle_exit_sec),
+        ]
+        self._responses = queue.Queue()
+        self._proc = self._subprocess.Popen(
+            cmd,
+            stdin=self._subprocess.PIPE,
+            stdout=self._subprocess.PIPE,
+            stderr=self._subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+        )
+        _threading.Thread(target=self._reader, args=(self._proc.stdout,), daemon=True).start()
+
+    def _reader(self, stdout: object) -> None:
+        """读线程：响应行入队；EOF/断裂入哨兵。"""
+        eof_resp = object()
+        try:
+            for line in stdout:
+                self._responses.put(line)
+        except Exception:
+            pass
+        finally:
+            self._responses.put(eof_resp)
+
+    # -- 对外接口（与 FastembedEmbedder 同签名）------------------------------
+
+    @property
+    def available(self) -> bool:
+        """未进入崩溃退避期（True 时可继续 embed）。"""
+        return self.consecutive_crashes < self.MAX_CONSECUTIVE_CRASHES or (
+            time.monotonic() >= self.retry_at
+        )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        out = []
-        for vec in self._model.embed(texts):
-            out.append(vec.tolist() if hasattr(vec, "tolist") else [float(x) for x in vec])
-        return out
+        """阻塞式嵌入一批文本；失败抛 EmbeddingSubprocessError（fail-soft 由调用方降级）。
+
+        子进程自灭（闲置/寿命帽）后的首次请求做**单次透明重启重试**——对调用方
+        等价于"重启即恢复"；重试仍失败或已进崩溃退避则抛。
+        """
+        if not self.available:
+            raise EmbeddingSubprocessError(
+                f"embedding subprocess in crash backoff until {self.retry_at:.0f}"
+            )
+        deadline = time.monotonic() + self.REQUEST_TIMEOUT_SEC
+        with self._lock:
+            attempts = 0
+            while True:
+                attempts += 1
+                try:
+                    self._ensure_started()
+                    self._next_id += 1
+                    rid = self._next_id
+                    req_line = json.dumps({"id": rid, "op": "embed", "texts": texts})
+                    self._proc.stdin.write(req_line + "\n")
+                    self._proc.stdin.flush()
+                    resp_line = self._responses.get(timeout=max(0.1, deadline - time.monotonic()))
+                    if not isinstance(resp_line, str):
+                        raise EmbeddingSubprocessError("embedding worker exited")
+                    resp = json.loads(resp_line)
+                    if not isinstance(resp, dict) or resp.get("id") != rid:
+                        raise EmbeddingSubprocessError(f"protocol mismatch: {resp_line[:200]!r}")
+                    if not resp.get("ok"):
+                        raise EmbeddingSubprocessError(str(resp.get("error") or "embed failed"))
+                    self.consecutive_crashes = 0
+                    return resp["vectors"]
+                except EmbeddingSubprocessError:
+                    self._on_crash()
+                    if attempts >= 2 or not self.available:
+                        raise
+                    continue  # 单次透明重启重试（覆盖闲置/寿命帽自灭场景）
+                except Exception as exc:  # 管道断裂/超时/JSON 损坏一律按崩溃处理
+                    self._on_crash()
+                    raise EmbeddingSubprocessError(f"{type(exc).__name__}: {exc}") from exc
+
+    def _on_crash(self) -> None:
+        self._stop()
+        self.consecutive_crashes += 1
+        if self.consecutive_crashes >= self.MAX_CONSECUTIVE_CRASHES:
+            self.retry_at = time.monotonic() + _EMBEDDER_CRASH_BACKOFF_SEC
+
+    def close(self) -> None:
+        with self._lock:
+            self._stop()
 
 
 def get_embedder(model_name: str) -> tuple[object | None, str | None]:
-    """返回 ``(embedder | None, 不可用原因 | None)``；初始化失败缓存原因（进程级一次）。"""
+    """返回 ``(embedder | None, 不可用原因 | None)``。
+
+    子进程代理懒启动（构造不 spawn，首次 embed 才拉起），构造失败缓存原因
+    （进程级一次，到换模型为止）；连续崩溃进入退避期的代理在 ``retry_at``
+    到点后由本入口重建新代理（旧代理条目替换）。
+    """
     global _embedder_instance, _embedder_model, _embedder_error
     with _embedder_lock:
         if _embedder_instance is not None and _embedder_model == model_name:
-            return _embedder_instance, None
+            proxy = _embedder_instance
+            assert isinstance(proxy, EmbeddingSubprocessProxy)
+            if proxy.available:
+                return proxy, None
+            return None, _embedder_error or "embedding subprocess unavailable (crash backoff)"
         if _embedder_error is not None and _embedder_model == model_name:
             return None, _embedder_error
         try:
-            _embedder_instance = FastembedEmbedder(model_name)
-            _embedder_model = model_name
-            _embedder_error = None
-            return _embedder_instance, None
-        except Exception as exc:  # 依赖缺席/模型下载失败/显存不足一律 fail-soft
-            _embedder_instance = None
-            _embedder_model = model_name
+            from app.core.config import get_settings
+
+            proxy = EmbeddingSubprocessProxy(
+                model_name, idle_exit_sec=get_settings().knowledge_embedding_idle_exit_sec
+            )
+            _embedder_instance, _embedder_model, _embedder_error = proxy, model_name, None
+            return proxy, None
+        except Exception as exc:  # 依赖缺席/配置异常一律 fail-soft
+            _embedder_instance, _embedder_model = None, model_name
             _embedder_error = f"{type(exc).__name__}: {exc}"
             return None, _embedder_error
 
@@ -158,17 +316,48 @@ def reset_embedder_for_tests() -> None:
     """测试隔离：清空单例与错误缓存（生产勿调）。"""
     global _embedder_instance, _embedder_model, _embedder_error
     with _embedder_lock:
+        if isinstance(_embedder_instance, EmbeddingSubprocessProxy):
+            _embedder_instance.close()
         _embedder_instance = None
         _embedder_model = None
         _embedder_error = None
 
 
-# ── 索引（per-workspace 懒构建 + 指纹失效）与检索 ─────────────────────────────
+# ── 索引（per-workspace 懒构建 + 指纹失效 + LRU 工作区上限）与检索 ─────────────
 
 _index_lock = threading.Lock()
 _indexes: dict[
     tuple[str, str], dict
-] = {}  # (workspace_id, model_name) → {fingerprint, entries, vectors}
+] = {}  # (workspace_id, model_name) → {fingerprint, entries, vectors}；插入序=LRU 序
+
+
+def _index_cache_max() -> int:
+    """LRU 工作区上限（settings.knowledge_embedding_index_max_ws，默认 4）。"""
+    from app.core.config import get_settings
+
+    return max(1, get_settings().knowledge_embedding_index_max_ws)
+
+
+def _index_cache_get(key: tuple[str, str]) -> dict | None:
+    """取缓存并刷新 LRU 新鲜度（命中即移到最旧淘汰序末尾）。"""
+    with _index_lock:
+        cached = _indexes.get(key)
+        if cached is not None:
+            del _indexes[key]
+            _indexes[key] = cached
+        return cached
+
+
+def _index_cache_put(key: tuple[str, str], value: dict) -> None:
+    """写入并按 LRU 上限淘汰最久未用（本 key 刚写永不自淘汰）。"""
+    with _index_lock:
+        _indexes.pop(key, None)
+        _indexes[key] = value
+        while len(_indexes) > _index_cache_max():
+            oldest = next(iter(_indexes))
+            if oldest == key:
+                break
+            del _indexes[oldest]
 
 
 def _normalize(vec: list[float]) -> list[float]:
@@ -224,13 +413,12 @@ def search_sync(
     if fp is None:
         return {"results": [], "model_ready": True, "reason": None}
     key = (workspace_key, model_name)
-    with _index_lock:
-        cached = _indexes.get(key)
-        if cached is None or cached["fingerprint"] != fp:
-            entries = parse_decision_entries(spec_root)
-            vectors = embedder.embed([e.text for e in entries]) if entries else []
-            cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
-            _indexes[key] = cached
+    cached = _index_cache_get(key)
+    if cached is None or cached["fingerprint"] != fp:
+        entries = parse_decision_entries(spec_root)
+        vectors = embedder.embed([e.text for e in entries]) if entries else []
+        cached = {"fingerprint": fp, "entries": entries, "vectors": vectors}
+        _index_cache_put(key, cached)
     results = _cosine_top_k(embedder.embed([q])[0], cached["entries"], cached["vectors"], limit)
     return {"results": results, "model_ready": True, "reason": None}
 

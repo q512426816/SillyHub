@@ -297,3 +297,19 @@ supersedes：D-003@v2（仅回传机制部分，其余维持）
 理由：用户选方案 B：daemon 注册 daemon_log_tail 与 daemon_config_get 两个 RPC handler（路径由 daemon 侧 getLogFile()/loadConfig 权威解析，尾部截断与脱敏在源头做），backend 新增转发端点（复制 daemon_rpc.py 先例），前端 /runtimes 机器卡加入口。理由：路径权威（SILLYHUB_DAEMON_DIR 重定向不影响）、大文件不全量传、脱敏贴近数据源
 故障面：老 daemon（未升级）无这两个 RPC → method_not_found；需在 backend 映射 422 + 前端升级提示
 退役判据：若未来 host_fs RPC 支持按约定 key 寻址 + tail 参数，可考虑合并回通用文件读通道
+
+## D-backend-025@v1 治理技术方案选型——子进程封装 + WS 推送 + 预览持久化（方案 A）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/vector_search.py:137
+最近确认：439cdc46c
+理由：**方案 A**。四个机制组合：①嵌入计算子进程封装（闲置自退+OOM 保主进程）；②change-writes 改 WS 事件推送，30s 轮询降 120s 兜底；③会话标题预览持久化为列；④部署内存配额重分配。
+
+## D-backend-026@v1 深扫发现的三处高危内存缺陷纳入本变更任务面
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-004@v1
+锚点：backend/app/modules/knowledge/vector_search.py:168
+最近确认：439cdc46c
+理由：纳入。①knowledge/vector_search.py `_indexes` 无界索引缓存（LRU 工作区上限）；②spec_workspace/service.py `_bundle_gzip_cache` 无全局帽（128MB LRU）；③permission_service.py 权限定时器 pin 已关 session 且 route_key None 路径不提交（idle-in-transaction 元凶，新开短 session+全路径提交）。中危配套（ws_hub _pending_rpcs 泄漏两径/disconnect 无身份校验/附件先读后检/WS 大消息日志）一并治理。

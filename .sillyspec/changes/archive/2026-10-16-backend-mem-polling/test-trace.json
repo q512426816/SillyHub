@@ -1,0 +1,400 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-backend-mem-polling",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-backend-mem-polling:task-01:acc-0-b27000a4",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_embedding_subprocess.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-backend-mem-polling:task-01:acc-1-7d42fcce",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_embedding_subprocess.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-backend-mem-polling:task-01:acc-2-9eb1f314",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_embedding_subprocess.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-backend-mem-polling:task-01:acc-3-2d0288d0",
+      "tests": [
+        "backend/app/modules/knowledge/tests/test_embedding_subprocess.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-backend-mem-polling:task-02:acc-0-32092bba",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_bundle_sync.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-backend-mem-polling:task-02:acc-1-1eda6997",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_bundle_sync.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-03",
+      "row_id": "2026-10-16-backend-mem-polling:task-02:acc-2-f30b3198",
+      "tests": [
+        "backend/app/modules/spec_workspace/tests/test_bundle_sync.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-backend-mem-polling:task-03:acc-0-06d3d8c8",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_permission_http_uplink.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-backend-mem-polling:task-03:acc-1-5269ffdd",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_permission_http_uplink.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-backend-mem-polling:task-03:acc-2-ed795125",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_permission_http_uplink.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-backend-mem-polling:task-04:acc-0-320cfcc2",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-backend-mem-polling:task-04:acc-1-ba0431bc",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-05",
+      "row_id": "2026-10-16-backend-mem-polling:task-04:acc-2-5b1f8df8",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-16-backend-mem-polling:task-05:acc-0-8894ad4f",
+      "tests": [
+        "backend/app/modules/session_attachment/tests/test_upload_precheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-16-backend-mem-polling:task-05:acc-1-c52bae84",
+      "tests": [
+        "backend/app/modules/session_attachment/tests/test_upload_precheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-06",
+      "row_id": "2026-10-16-backend-mem-polling:task-05:acc-2-e360469a",
+      "tests": [
+        "backend/app/modules/session_attachment/tests/test_upload_precheck.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-06:acc-0-4f0baccb",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-06:acc-1-41bf4bc5",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-06:acc-2-851a7926",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_ws_hub.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-07:acc-0-2b1b0abf",
+      "tests": [
+        "sillyhub-daemon/tests/config.test.ts",
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-07:acc-1-7baf803e",
+      "tests": [
+        "sillyhub-daemon/tests/config.test.ts",
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-07:acc-2-9c260248",
+      "tests": [
+        "sillyhub-daemon/tests/config.test.ts",
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-07",
+      "row_id": "2026-10-16-backend-mem-polling:task-07:acc-3-49def444",
+      "tests": [
+        "sillyhub-daemon/tests/config.test.ts",
+        "sillyhub-daemon/tests/protocol-session-contract.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-16-backend-mem-polling:task-08:acc-0-4ca0bf93",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_router.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-16-backend-mem-polling:task-08:acc-1-060436cc",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_router.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    },
+    {
+      "anchor": "FR-09",
+      "row_id": "2026-10-16-backend-mem-polling:task-08:acc-2-ddaec966",
+      "tests": [
+        "backend/app/modules/daemon/tests/test_session_router.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "9d40341aae3baa9d25dcf9a0cc75c314b48d8708",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-backend-mem-polling"
+    }
+  ]
+}

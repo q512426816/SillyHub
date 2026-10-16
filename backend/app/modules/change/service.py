@@ -823,6 +823,10 @@ class ChangeService:
             match.created_at = datetime.now(UTC)
             self._session.add(match)
             await self._session.commit()
+            # task-06：commit 后轻通知 daemon 立即拉取（best-effort，兜底轮询仍在）
+            from app.modules.daemon.ws_hub import notify_change_write_available
+
+            await notify_change_write_available(self._session, runtime_id, workspace.id)
             return match.id
 
         new_row = DaemonChangeWrite(
@@ -836,6 +840,9 @@ class ChangeService:
         )
         self._session.add(new_row)
         await self._session.commit()
+        from app.modules.daemon.ws_hub import notify_change_write_available
+
+        await notify_change_write_available(self._session, runtime_id, workspace.id)
         return new_row.id
 
     async def _resync_change_docs(self, workspace_id: uuid.UUID, change_id: uuid.UUID) -> None:

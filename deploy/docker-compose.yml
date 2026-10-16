@@ -35,7 +35,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    mem_limit: 128m
+    mem_limit: 64m
 
   minio:
     image: minio/minio:latest
@@ -57,7 +57,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    mem_limit: 256m
+    mem_limit: 128m
 
   backend:
     # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
@@ -165,6 +165,10 @@ services:
     # 服务本体合计超限被 cgroup OOM（预建进程 247M 时容器总量触顶）——提至 1100m；
     # 服务器 1.6G：backend 1100 + 其他实际 ~270 + 系统 ~150 仍在总量内。
     mem_limit: 1100m
+    # 2026-10-16-backend-mem-polling task-09 / D-001@v1：主进程 OOM 保护——容器
+    # 内存告急时内核优先牺牲嵌入子进程（worker 启动时自重置 oom_score_adj=0），
+    # 主服务存活。compose 服务级设置免 entrypoint CAP_SYS_RESOURCE 权限问题。
+    oom_score_adj: -500
 
   frontend:
     image: multi-agent-platform-frontend:latest
@@ -190,7 +194,7 @@ services:
       # 时不覆盖。
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
-    mem_limit: 400m
+    mem_limit: 300m
 
 volumes:
   pgdata:

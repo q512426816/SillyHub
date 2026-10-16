@@ -667,3 +667,27 @@ supersedes：D-005@v1
 理由：（落选）不选混合双通道。
 否决理由：两套触发路径 = 最大复杂度；收益与 A 重叠（A 已覆盖查询正确性）；维护两份同步态。
 复潮条件：同 D-012。
+
+## D-backend-025@v1 治理技术方案选型——子进程封装 + WS 推送 + 预览持久化（方案 A）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-001@v1
+锚点：backend/app/modules/knowledge/vector_search.py:137
+最近确认：439cdc46c
+理由：**方案 A**。四个机制组合：①嵌入计算子进程封装（闲置自退+OOM 保主进程）；②change-writes 改 WS 事件推送，30s 轮询降 120s 兜底；③会话标题预览持久化为列；④部署内存配额重分配。
+
+## D-backend-026@v1 深扫发现的三处高危内存缺陷纳入本变更任务面
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-004@v1
+锚点：backend/app/modules/knowledge/vector_search.py:168
+最近确认：439cdc46c
+理由：纳入。①knowledge/vector_search.py `_indexes` 无界索引缓存（LRU 工作区上限）；②spec_workspace/service.py `_bundle_gzip_cache` 无全局帽（128MB LRU）；③permission_service.py 权限定时器 pin 已关 session 且 route_key None 路径不提交（idle-in-transaction 元凶，新开短 session+全路径提交）。中危配套（ws_hub _pending_rpcs 泄漏两径/disconnect 无身份校验/附件先读后检/WS 大消息日志）一并治理。
+
+## D-backend-027@v1 执行期裁决——task-04 disconnect 身份校验需调用方透传 ws（边界微扩）
+状态：implemented
+变更：2026-10-16-backend-mem-polling
+原编号：D-005@v1
+锚点：backend/app/modules/daemon/ws_hub.py:114
+最近确认：439cdc46c
+理由：disconnect 加可选 ws 参数（不传保持旧语义向后兼容）；gateway_misc.py 调用点 +1 行透传。非破坏性（可选参数、1 行接线），随 task-04 一并提交。

@@ -487,3 +487,167 @@ class TestFullLifecycle:
         # B still receives messages
         await hub.send_heartbeat_ack(rid_b)
         assert len(ws_b.sent_messages) == 1
+
+
+# ── task-04（2026-10-16-backend-mem-polling / D-004@v1）：泄漏径与身份校验 ────
+
+
+class TestDisconnectIdentityCheck:
+    """disconnect(ws=...) 连接身份校验：旧 handler 收尾不得踢新连接。"""
+
+    @pytest.mark.asyncio
+    async def test_stale_handler_disconnect_keeps_new_connection(self) -> None:
+        """快速重连：connect 换新 ws 后，旧 handler 的 disconnect(ws=旧) 不清表。"""
+        hub = DaemonWsHub()
+        rid = uuid.uuid4()
+        old_ws = _make_mock_ws()
+        new_ws = _make_mock_ws()
+
+        await hub.connect(rid, old_ws)
+        await hub.connect(rid, new_ws)  # 替换注册（connect 内关旧 ws）
+
+        await hub.disconnect(rid, ws=old_ws)  # 旧 handler 的滞后收尾
+
+        assert hub.is_connected(rid) is True, "新连接必须幸存"
+        assert hub._connections.get(rid) is new_ws
+
+        await hub.disconnect(rid, ws=new_ws)  # 新 handler 正常收尾
+        assert hub.is_connected(rid) is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_without_ws_keeps_legacy_semantics(self) -> None:
+        """不传 ws 保持旧语义（无条件 pop）——存量调用/测试零回归。"""
+        hub = DaemonWsHub()
+        rid = uuid.uuid4()
+        ws = _make_mock_ws()
+        await hub.connect(rid, ws)
+        await hub.disconnect(rid)  # 不带身份校验
+        assert hub.is_connected(rid) is False
+
+
+class TestPendingRpcsCleanup:
+    """_pending_rpcs 两条泄漏径：外部取消清理 / done future 早退前 pop。"""
+
+    @pytest.mark.asyncio
+    async def test_send_rpc_external_cancel_cleans_pending(self) -> None:
+        """HTTP 调用方在等待中被取消 → 条目清理，不残留。"""
+        hub = DaemonWsHub()
+        rid = uuid.uuid4()
+        ws = _make_mock_ws()
+        await hub.connect(rid, ws)
+
+        import asyncio
+
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        outer = asyncio.create_task(hub.send_rpc(rid, "list_dir", {"path": "/x"}, timeout=5.0))
+        await asyncio.sleep(0.05)  # 让 send_rpc 注册 pending 并进入等待
+        outer.cancel()
+        with pytest.raises((asyncio.CancelledError, DaemonRuntimeOffline)):
+            await outer
+        await asyncio.sleep(0.05)  # 让 CancelledError 分支的清理完成
+        # 外层取消会级联取消内层 wait_for → CancelledError 分支 → _cancel_rpc 清表
+        pending = [k for k, v in hub._pending_rpcs.items() if v[0] == rid]
+        assert pending == [], f"外部取消后不得残留 pending 条目: {pending}"
+        await hub.disconnect(rid)
+
+    @pytest.mark.asyncio
+    async def test_resolve_rpc_done_future_pops_entry(self) -> None:
+        """迟到回包命中 done future → 早退前 pop（不永久驻留）。"""
+        import asyncio
+
+        hub = DaemonWsHub()
+
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut.set_result({"result": {"first": True}})  # 已完成（模拟超时后被取消/置结果）
+        hub._pending_rpcs["rpc-done-1"] = (uuid.uuid4(), fut)
+
+        await hub.resolve_rpc("rpc-done-1", {"result": {"late": True}})
+
+        assert "rpc-done-1" not in hub._pending_rpcs, "done future 早退前必须 pop"
+
+
+# ── task-06（2026-10-16-backend-mem-polling / D-001@v1）：change-write 轻通知 ─
+
+
+class TestNotifyChangeWriteAvailable:
+    """notify_change_write_available：解析→定向推送；best-effort 三态不抛。"""
+
+    @pytest.mark.asyncio
+    async def test_notify_sends_payload_with_resolved_daemon(self, monkeypatch) -> None:
+        import app.modules.daemon.ws_hub as hub_mod
+
+        rid, did, wid = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        sent_messages: list = []
+
+        class _FakeHub:
+            async def send_to_runtime(self, daemon_id, message):
+                sent_messages.append((daemon_id, message))
+                return True
+
+        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
+
+        async def _fake_resolve(session, runtime_id):
+            assert runtime_id == rid
+            return did
+
+        monkeypatch.setattr(
+            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _fake_resolve
+        )
+        # 间接引用（helper 内函数级 import 从源模块取属性——testing-gotchas 惯例）
+
+        ok = await hub_mod.notify_change_write_available(None, rid, wid)
+        assert ok is True
+        assert sent_messages == [
+            (
+                did,
+                {
+                    "type": "daemon:change_write_available",
+                    "payload": {"runtime_id": str(rid), "workspace_id": str(wid)},
+                },
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_notify_no_daemon_returns_false_without_send(self, monkeypatch) -> None:
+        import app.modules.daemon.ws_hub as hub_mod
+
+        rid = uuid.uuid4()
+        called = []
+
+        class _FakeHub:
+            async def send_to_runtime(self, *a, **k):  # pragma: no cover - 不应被调
+                called.append(a)
+                return True
+
+        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
+
+        async def _none_resolve(session, runtime_id):
+            return None
+
+        monkeypatch.setattr(
+            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _none_resolve
+        )
+        assert await hub_mod.notify_change_write_available(None, rid) is False
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_notify_send_exception_swallowed(self, monkeypatch) -> None:
+        import app.modules.daemon.ws_hub as hub_mod
+
+        rid, did = uuid.uuid4(), uuid.uuid4()
+
+        class _FakeHub:
+            async def send_to_runtime(self, daemon_id, message):
+                raise RuntimeError("ws broken")
+
+        monkeypatch.setattr(hub_mod, "get_daemon_ws_hub", lambda: _FakeHub())
+
+        async def _ok_resolve(session, runtime_id):
+            return did
+
+        monkeypatch.setattr(
+            "app.modules.daemon.session.service._resolve_daemon_id_for_runtime", _ok_resolve
+        )
+        # 发送异常被吞（best-effort），返回 False 不抛
+        assert await hub_mod.notify_change_write_available(None, rid) is False
