@@ -26,6 +26,22 @@ created_at: 2026-10-16T07:50:41.181Z
 - 前端新导出 `changeFileSyncWarningText(sr: ChangeFileSyncResult | null): string | null`（`lib/change-file-sync.ts`，零依赖纯函数）；组件新增提示条节点 `data-testid="change-files-sync-warning"`（行为可见变化仅此一条 UI 元素）。
 - 零改动面：`service.list_files` 纯读语义、daemon RPC 协议（`sillyspec_sync_change` 入参与回执形态）、GET 路由签名与鉴权。
 
+## 文件变更清单（本变更交付面自声明）
+
+- backend/app/modules/change/router.py（预算 15s + 回执消费 + warning 日志）
+- backend/app/modules/change/schema.py（ChangeFileSyncResult + ChangeFileList.sync_result）
+- backend/app/modules/change/tests/test_files_refresh_sync.py（12 用例）
+- backend/openapi.json（gen:types 重生成）
+- frontend/src/lib/api-types.ts（gen:types 重生成）
+- frontend/src/lib/change-files.ts（类型接线 + 注释更新）
+- frontend/src/lib/change-file-sync.ts（新增：回执→中文提示纯函数）
+- frontend/src/lib/__tests__/change-file-sync.test.ts（新增 10 例）
+- frontend/src/components/change-file-tree.tsx（刷新提示条接线）
+- frontend/src/components/__tests__/change-file-tree-sync-feedback.test.tsx（新增 6 例）
+- sillyhub-daemon/src/api-types.ts（gen:types 重生成）
+- .zcode/skills/deploy-to-server/SKILL.md（迁移属主坑条 + 部署验证探针）
+- .sillyspec/changes/2026-10-16-change-files-sync-result/**（本变更流程产物）
+
 ## 边界与并发（盲维四问——每问必答，答不了即设计缺口）
 
 4. 作用域：跨工作区/跨仓/多实例时数据会不会串台？
