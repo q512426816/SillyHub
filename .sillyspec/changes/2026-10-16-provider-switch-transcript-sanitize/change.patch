@@ -1,0 +1,934 @@
+diff --git a/sillyhub-daemon/src/interactive/session-manager.ts b/sillyhub-daemon/src/interactive/session-manager.ts
+index a126a8419..cc5443c61 100644
+--- a/sillyhub-daemon/src/interactive/session-manager.ts
++++ b/sillyhub-daemon/src/interactive/session-manager.ts
+@@ -125,10 +125,14 @@ import type { ProviderAdapter } from './providers.js';
+ import {
+   applyTranscriptConfigDir,
+   defaultTranscriptDirs,
++  findClaudeTranscriptPath,
+   migrateClaudeTranscriptToHost,
+   migrateClaudeTranscriptToIsolated,
+   type TranscriptDirs,
+ } from './claude-transcript-dir.js';
++// 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗不可跨供应商重放的
++// 供应商私有块（server_tool_use / mcp_tool_use 及其结果块），详见模块头。
++import { sanitizeClaudeTranscriptForReplay } from './transcript-sanitize.js';
+ import type { PolicyEngine } from '../policy/filesystem-policy.js';
+ import type { SessionInjectAttachment } from '../protocol.js';
+ import {
+@@ -1870,6 +1874,49 @@ export class SessionManager {
+     await run;
+   }
+ 
++  /**
++   * 2026-10-16-provider-switch-transcript-sanitize：切供应商后清洗 transcript 历史。
++   *
++   * 由 `_reloadSessionNow` 在「provider 实际变化 + claude 引擎 + 有 agentSessionId」时调用，
++   * 时序固定为 transcript 迁移之后（`migrateClaudeTranscriptToIsolated/ToHost`）→
++   * `applyTranscriptConfigDir` 定下 configDir → **本方法** → resume，保证新供应商第一
++   * 个请求读到的就是清洗后的历史。
++   *
++   * 失败语义（R-01 同款降级）：探测不到文件 / 清洗内部异常一律只 warn 返回，**绝不抛**——
++   * reload 主路径不阻断（最坏情况退回清洗前的行为，即维持原 400，不会把会话弄坏）。
++   */
++  private async _sanitizeSwitchedTranscript(
++    sessionId: string,
++    agentSessionId: string,
++    env: NodeJS.ProcessEnv,
++  ): Promise<void> {
++    try {
++      // configDir 判定与 resume 同源：applyTranscriptConfigDir 命中隔离目录 → 用隔离目录；
++      // 命中宿主机（或探测 unknown 之外的降级）→ 宿主机 ~/.claude。
++      const configDir = env.CLAUDE_CONFIG_DIR ?? this._resumeDirs.home;
++      const filePath = await findClaudeTranscriptPath(configDir, agentSessionId);
++      if (filePath === null) {
++        console.warn('[session-manager] transcript_sanitize_skipped_no_transcript', {
++          session: sessionId,
++        });
++        return;
++      }
++      const result = await sanitizeClaudeTranscriptForReplay(filePath);
++      if (result.changed) {
++        console.warn('[session-manager] transcript_sanitize_applied', {
++          session: sessionId,
++          replaced_blocks: result.replacedBlocks,
++          backup: result.backupPath,
++        });
++      }
++    } catch (e) {
++      console.warn('[session-manager] transcript_sanitize_failed', {
++        session: sessionId,
++        error: (e as Error)?.message ?? String(e),
++      });
++    }
++  }
++
+   /** `_reloadSession` 的串行化核心段（由 chain 包装器保证同会话顺序执行）。 */
+   private async _reloadSessionNow(
+     sessionId: string,
+@@ -1973,6 +2020,21 @@ export class SessionManager {
+         this._resumeDirs,
+       );
+ 
++      // 2026-10-16-provider-switch-transcript-sanitize：切供应商（provider 实际变化）时
++      // 清洗历史里「不可跨供应商重放」的供应商私有块（server_tool_use / mcp_tool_use 及
++      // 引用其 id 的结果块）。历史逐轮全量重放，上一家特有的块会让新供应商直接 400
++      //（实证 MiniMax：400 invalid params, tool result's tool id(...) not found (2013)，
++      // 且每轮复现 → 该会话在新供应商下永久失败）。
++      // 位置：transcript 迁移之后、resume 之前——按 applyTranscriptConfigDir 刚定的
++      // configDir 定位，与 resume 要读的是同一个文件（新供应商首请求即已干净）。
++      if (
++        providerSwitchPayload &&
++        state.provider === 'claude' &&
++        state.agentSessionId
++      ) {
++        await this._sanitizeSwitchedTranscript(state.sessionId, state.agentSessionId, newEnv);
++      }
++
+       // ── task-03（2026-09-11-session-provider-switch-codex-pi）：codex/pi 文件层配置 ──
+       // 写盘 + env 合并。claude 跳过（settings.json 链路仍归 daemon.ts spawn 侧
+       // applyClaudeSettings + 上方既有 env 逻辑，零漂移，design Wave 2 步骤 5）。
+diff --git a/sillyhub-daemon/src/interactive/transcript-sanitize.ts b/sillyhub-daemon/src/interactive/transcript-sanitize.ts
+new file mode 100644
+index 000000000..1a726efae
+--- /dev/null
++++ b/sillyhub-daemon/src/interactive/transcript-sanitize.ts
+@@ -0,0 +1,263 @@
++/**
++ * transcript-sanitize —— 切供应商前清洗历史里「不可跨供应商重放」的供应商私有块。
++ *
++ * 背景（2026-10-16-provider-switch-transcript-sanitize）：
++ * Claude Code 的 transcript（`<configDir>/projects/<encoded-cwd>/<agentSessionId>.jsonl`）
++ * 是**逐轮全量重放**的：换供应商后第一个请求就会把整段历史发给新供应商。而历史里可能含有
++ * 上一家供应商私有的块形态——实证（SillyHub 会话 f231ca18，引擎 0f782746，GLM glm-5.3）：
++ * GLM 侧服务端工具（`analyze_image`）在 transcript 里被记成 `server_tool_use` 块 + 同一条
++ * assistant 消息内的同 id `tool_result`；宿主档位切到 MiniMax 后重放该历史，MiniMax 的
++ * Anthropic 兼容端点只认 `tool_use` ↔ `tool_result` 配对，直接
++ * `400 invalid params, tool result's tool id(call_...) not found (2013)` —— 且每轮重放，
++ * 会话在该供应商下**永久失败、不自愈**。
++ *
++ * 清洗语义（design §做法概述）：
++ *   - 脏块判据（两遍扫描，与块顺序无关）：
++ *     ① 私有调用块：`type ∈ PROVIDER_PRIVATE_TOOL_BLOCK_TYPES`（`server_tool_use` /
++ *        `mcp_tool_use`——Anthropic 服务端工具块，第三方兼容端点不认）；
++ *     ② 私有结果块：任何带 `tool_use_id` 且该 id 属于①的块（`tool_result` 与
++ *        `*_tool_result` 家族同口径）。
++ *   - 改写动作 = **替换为等价 `text` 块**（前缀【历史清理】+ 原文内容），**不删除**：
++ *     记录条数、`uuid`、`parentUuid` 链完全不变（CLI resume 定位与追加逻辑零影响），
++ *     结果正文（如图片分析全文）作为文本保留在上下文里。
++ *   - 写盘前备份 `<文件名>.bak-sillyhub-<时间戳>`；写盘走 `writeFileAtomic`（原子顶替）。
++ *   - 幂等：干净文件 / 已清洗文件重跑 → `replacedBlocks=0`，零写盘零备份。
++ *
++ * 失败语义（R-01 同款降级）：IO / 解析 / 无效行为一律吞掉返回 `changed=false`，
++ * **绝不抛**——调用方（reload 前置路径）只记 warn 后继续 resume；最坏情况是维持
++ * 清洗前的行为（原报错），不会因清洗把会话弄坏。
++ *
++ * @module interactive/transcript-sanitize
++ */
++
++import { copyFile, readFile } from 'node:fs/promises';
++import { writeFileAtomic } from '../atomic-write.js';
++
++/**
++ * 供应商私有工具调用块类型（跨供应商重放不可解析，必须清洗）。
++ *
++ * - `server_tool_use`：Anthropic 服务端工具（含第三方兼容端点在自家端点内提供的
++ *   服务端工具，如 GLM 的 `analyze_image`）；
++ * - `mcp_tool_use`：服务端 MCP 工具块（同属服务端私有，客户端 `tool_use` 之外的形态）。
++ */
++export const PROVIDER_PRIVATE_TOOL_BLOCK_TYPES: ReadonlySet<string> = new Set([
++  'server_tool_use',
++  'mcp_tool_use',
++]);
++
++/** 清洗标记前缀（替换后的 text 块首行，便于用户在历史里识别「这里被清过」）。 */
++export const SANITIZE_TEXT_PREFIX = '【历史清理】';
++
++/** 调用块 input 正文保留上限（字符）——超限截断，避免把超大入参灌进文本块。 */
++const INPUT_TEXT_MAX_CHARS = 2000;
++
++/** jsonl 记录与内容块的最小形状（只声明本模块读写的键，其余原样透传）。 */
++interface TranscriptRecord {
++  message?: { content?: unknown };
++  [key: string]: unknown;
++}
++
++interface ContentBlock {
++  type?: unknown;
++  id?: unknown;
++  name?: unknown;
++  tool_use_id?: unknown;
++  input?: unknown;
++  text?: unknown;
++  content?: unknown;
++  [key: string]: unknown;
++}
++
++/** 私有块 id 合法性（tool_use id 形态宽松：非空字符串即收）。 */
++function asId(v: unknown): string | undefined {
++  return typeof v === 'string' && v.length > 0 ? v : undefined;
++}
++
++/**
++ * 把内容块里的正文抽成纯文本（string / [{type:'text',text}] / 其它标量兜底）。
++ *
++ * 结果块的内容形态由上游供应商决定（本次实证为纯字符串），这里只做「尽量不丢字」
++ * 的宽松提取：拿不到正文返回空串（文本块仍会写一行说明，不会产出空块）。
++ */
++function extractBlockText(content: unknown): string {
++  if (typeof content === 'string') return content;
++  if (Array.isArray(content)) {
++    const parts = content
++      .map((item) => {
++        if (typeof item === 'string') return item;
++        if (item && typeof item === 'object') {
++          const text = (item as ContentBlock).text;
++          if (typeof text === 'string') return text;
++        }
++        return '';
++      })
++      .filter((s) => s.length > 0);
++    return parts.join('\n');
++  }
++  return '';
++}
++
++/** input 摘要（空对象/非对象不产出文本）。 */
++function summarizeInput(input: unknown): string {
++  if (!input || typeof input !== 'object') return '';
++  const keys = Object.keys(input as Record<string, unknown>);
++  if (keys.length === 0) return '';
++  let json: string;
++  try {
++    json = JSON.stringify(input);
++  } catch {
++    return '';
++  }
++  return json.length > INPUT_TEXT_MAX_CHARS
++    ? `${json.slice(0, INPUT_TEXT_MAX_CHARS)}…`
++    : json;
++}
++
++/** 私有调用块 → 等价 text 块。 */
++function privateCallToText(block: ContentBlock): ContentBlock {
++  const type = String(block.type ?? '');
++  const name = typeof block.name === 'string' && block.name.length > 0 ? block.name : '(未命名)';
++  const input = summarizeInput(block.input);
++  return {
++    type: 'text',
++    text:
++      `${SANITIZE_TEXT_PREFIX}原为供应商私有工具块 ${type}（工具 ${name}）的调用，` +
++      `当前供应商不支持该块类型，已转为文本保留。` +
++      (input.length > 0 ? `\n调用入参：${input}` : ''),
++  };
++}
++
++/** 私有结果块 → 等价 text 块（正文全量保留）。 */
++function privateResultToText(block: ContentBlock): ContentBlock {
++  const type = String(block.type ?? '');
++  const text = extractBlockText(block.content);
++  return {
++    type: 'text',
++    text:
++      `${SANITIZE_TEXT_PREFIX}原为供应商私有工具块 ${type} 的结果，已转为文本保留：` +
++      (text.length > 0 ? `\n${text}` : ''),
++  };
++}
++
++/**
++ * 纯函数：jsonl 全文 → 清洗后全文 + 命中计数（不落盘，供单测与预览）。
++ *
++ * 逐行处理，非 JSON / 形状不符的行原样透传（best-effort：清洗永远不因脏行中断）；
++ * 行尾换行风格保持原样（`split('\n')` 后 `join('\n')` 等价还原）。
++ */
++export function planTranscriptSanitize(text: string): {
++  text: string;
++  replacedBlocks: number;
++} {
++  const lines = text.split('\n');
++
++  // 第一遍：收集私有调用块 id 全集（跨行，与块顺序无关）。
++  const privateIds = new Set<string>();
++  for (const line of lines) {
++    if (line.length === 0) continue;
++    let record: TranscriptRecord;
++    try {
++      record = JSON.parse(line) as TranscriptRecord;
++    } catch {
++      continue;
++    }
++    const content = record?.message?.content;
++    if (!Array.isArray(content)) continue;
++    for (const raw of content) {
++      if (!raw || typeof raw !== 'object') continue;
++      const block = raw as ContentBlock;
++      const type = typeof block.type === 'string' ? block.type : '';
++      if (!PROVIDER_PRIVATE_TOOL_BLOCK_TYPES.has(type)) continue;
++      const id = asId(block.id);
++      if (id !== undefined) privateIds.add(id);
++    }
++  }
++
++  if (privateIds.size === 0) {
++    return { text, replacedBlocks: 0 };
++  }
++
++  // 第二遍：改写命中块（调用侧按类型，结果侧按 tool_use_id 归属）。
++  let replacedBlocks = 0;
++  const outLines = lines.map((line) => {
++    if (line.length === 0) return line;
++    let record: TranscriptRecord;
++    try {
++      record = JSON.parse(line) as TranscriptRecord;
++    } catch {
++      return line;
++    }
++    const content = record?.message?.content;
++    if (!Array.isArray(content)) return line;
++
++    let touched = false;
++    const nextContent = content.map((raw) => {
++      if (!raw || typeof raw !== 'object') return raw;
++      const block = raw as ContentBlock;
++      const type = typeof block.type === 'string' ? block.type : '';
++      if (PROVIDER_PRIVATE_TOOL_BLOCK_TYPES.has(type)) {
++        touched = true;
++        replacedBlocks += 1;
++        return privateCallToText(block);
++      }
++      const toolUseId = asId(block.tool_use_id);
++      if (toolUseId !== undefined && privateIds.has(toolUseId)) {
++        touched = true;
++        replacedBlocks += 1;
++        return privateResultToText(block);
++      }
++      return raw;
++    });
++    if (!touched) return line;
++    // 只改 content 数组：记录其余字段（uuid/parentUuid/timestamp/…）原样保留。
++    return JSON.stringify({ ...record, message: { ...record.message, content: nextContent } });
++  });
++
++  return { text: outLines.join('\n'), replacedBlocks };
++}
++
++/** 备份文件名时间戳（Windows 文件名禁冒号，统一替换为 `-`）。 */
++function backupStamp(now: Date): string {
++  return now.toISOString().replace(/[:.]/g, '-');
++}
++
++/**
++ * 文件级清洗：备份 + 原子改写（幂等；IO/解析异常不抛，返回 `changed=false`）。
++ *
++ * 调用时机见 design §接口契约：reload 切供应商路径在 transcript 迁移之后、resume 之前。
++ */
++export async function sanitizeClaudeTranscriptForReplay(filePath: string): Promise<{
++  filePath: string;
++  changed: boolean;
++  replacedBlocks: number;
++  backupPath: string | null;
++}> {
++  let original: string;
++  try {
++    original = await readFile(filePath, 'utf-8');
++  } catch {
++    // 文件不存在 / 读不了：无可清洗（resume 是否可行交 CLI 自行报错）。
++    return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
++  }
++
++  const planned = planTranscriptSanitize(original);
++  if (planned.replacedBlocks === 0) {
++    return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
++  }
++
++  const backupPath = `${filePath}.bak-sillyhub-${backupStamp(new Date())}`;
++  try {
++    // 备份先行：备份失败则不改写（宁可不清洗，也不让原文件无备份可回退）。
++    await copyFile(filePath, backupPath);
++    await writeFileAtomic(filePath, planned.text);
++  } catch {
++    return { filePath, changed: false, replacedBlocks: 0, backupPath: null };
++  }
++
++  return {
++    filePath,
++    changed: true,
++    replacedBlocks: planned.replacedBlocks,
++    backupPath,
++  };
++}
+diff --git a/sillyhub-daemon/src/model-error/classifier.ts b/sillyhub-daemon/src/model-error/classifier.ts
+index 36357e937..531cf6caa 100644
+--- a/sillyhub-daemon/src/model-error/classifier.ts
++++ b/sillyhub-daemon/src/model-error/classifier.ts
+@@ -300,10 +300,35 @@ export function classifyModelError(input: ClassifyModelInput): ModelError | null
+   // TRANSIENT_ERROR_TYPES 判定零变更）；code 对该签名恒 null。
+   const silentTruncation = /\[silent[\s_-]?stream[\s_-]?truncation\]/i.test(blob);
+   const code = silentTruncation ? null : extractCode(blob);
++  // 2026-10-16-provider-switch-transcript-sanitize：供应商拒收会话历史签名——
++  // 历史逐轮全量重放，上一家供应商私有的块（server_tool_use / mcp_tool_use 及其
++  // 结果块）新供应商无法解析，第三方 Anthropic 兼容端点直接回 400（实测 MiniMax：
++  // `API Error: 400 invalid params, tool result's tool id(call_…) not found (2013)`，
++  // 会话 f231ca18 第 36 轮）。形态与 silentTruncation 同款：只覆写 message/hint；
++  // type 仍走 classifyBlob（实证落 unknown 兜底），retryable 保持 false——历史未
++  // 清洗时重试必然复现（避免自动重试把同一失败刷 3 次）。
++  const historyRejected =
++    /tool\s+result'?s?\s+tool\s+id|(?:tool[\s_]?result|tool[\s_]?use)[\s_]?id[\s\S]{0,40}(?:not[\s_-]?found|does\s+not\s+exist|不存在|未找到)/i.test(
++      blob,
++    );
+ 
+   // 2. 归类（provider 无关：pi/codex/cursor 与 claude 同一规则体）。
+   const type = classifyBlob(blob);
+   const info = ERROR_INFO[type];
++  if (historyRejected) {
++    return {
++      type,
++      code,
++      message: '供应商拒收会话历史（含上一家供应商专有内容块）',
++      retryable: false,
++      hint:
++        '会话历史里有上一家供应商专有的工具块（服务端工具调用），当前供应商无法解析——' +
++        '平台内切换供应商会自动清洗历史；若是宿主机档位（本机默认）换供应商，' +
++        '请切回原档位，或在平台新建会话继续。',
++      raw,
++      resetAt: null,
++    };
++  }
+   if (silentTruncation) {
+     return {
+       type,
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+index 138338317..457dfd6e5 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts
+@@ -35,9 +35,9 @@
+ //     用例不得依赖宿主真状态）+ vi.stubEnv SILLYHUB_DAEMON_DIR 隔离 ForReload 写盘。
+ 
+ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
++import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+-import { join } from 'node:path';
++import { dirname, join } from 'node:path';
+ import type {
+   Query,
+   SDKMessage,
+@@ -1605,3 +1605,176 @@ describe('provider-file-tx：D-002@v2 catch 文件层回滚（A→B 失败回 A
+   });
+ 
+ });
++
++// ── 2026-10-16-provider-switch-transcript-sanitize：切供应商时清洗历史私有块 ──
++// 实证（会话 f231ca18 第 36 轮）：历史里上一家供应商（GLM）的服务端工具块
++// （server_tool_use:analyze_image + 同 id tool_result）在切换后重放给新供应商
++// （MiniMax）→ 400 tool result's tool id(...) not found，且每轮复现。修复：
++// reload 切供应商分支在 resume 前清洗 transcript（replace 成 text + 备份），
++// 详见 src/interactive/transcript-sanitize.ts。
++
++describe('2026-10-16-provider-switch-transcript-sanitize / 切供应商清洗历史私有块', () => {
++  const PRIVATE_ID = 'call_0a26d3a2b8dd4a7e9c5fe566';
++
++  const buildDirs = () => {
++    const root = mkdtempSync(join(tmpdir(), 'sm-sanitize-'));
++    return {
++      root,
++      isolated: join(root, 'iso-claude-config'),
++      home: join(root, 'home-claude'),
++    };
++  };
++
++  /** 含实证私有块对的 transcript（同一条 assistant 消息内 server_tool_use + tool_result）。 */
++  const dirtyJsonl = (): string =>
++    [
++      {
++        parentUuid: null,
++        isSidechain: false,
++        type: 'user',
++        uuid: 'u1',
++        timestamp: '2026-10-08T03:00:00.000Z',
++        message: { id: 'm1', role: 'user', content: '你直接看图吧' },
++      },
++      {
++        parentUuid: 'u1',
++        isSidechain: false,
++        type: 'assistant',
++        uuid: 'a1',
++        timestamp: '2026-10-08T03:01:00.000Z',
++        message: {
++          id: 'm2',
++          role: 'assistant',
++          content: [
++            { type: 'text', text: '先分析截图。' },
++            { type: 'server_tool_use', id: PRIVATE_ID, name: 'analyze_image', input: {} },
++            { type: 'tool_result', tool_use_id: PRIVATE_ID, content: '# 截图分析正文' },
++          ],
++        },
++      },
++    ]
++      .map((r) => JSON.stringify(r))
++      .join('\n') + '\n';
++
++  const writeJsonl = (
++    dirs: ReturnType<typeof buildDirs>,
++    which: 'home' | 'isolated',
++    sid: string,
++    content: string,
++  ) => {
++    const dir = join(dirs[which], 'projects', 'C--work');
++    mkdirSync(dir, { recursive: true });
++    writeFileSync(join(dir, `${sid}.jsonl`), content, 'utf8');
++    return join(dir, `${sid}.jsonl`);
++  };
++
++  it('SAN-1: 切供应商 → 隔离副本被清洗（私有 id 消失 + 记录链不变 + 备份落盘），宿主原件不动', async () => {
++    const dirs = buildDirs();
++    try {
++      const homeFile = writeJsonl(dirs, 'home', 'sdk-sess-san', dirtyJsonl());
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-san'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++
++      // Act：切供应商（迁移 → 清洗 → resume）。
++      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
++
++      // Assert：resume 读的隔离副本已干净，且备份存在（可回退）。
++      const isolatedFile = join(dirs.isolated, 'projects', 'C--work', 'sdk-sess-san.jsonl');
++      const cleaned = readFileSync(isolatedFile, 'utf-8');
++      expect(cleaned).not.toContain(PRIVATE_ID);
++      // 块本身不再存在（替换文案里提到的类型名属描述文本，故按 JSON 块字面断言）。
++      expect(cleaned).not.toContain('"type":"server_tool_use"');
++      expect(cleaned).toContain('截图分析正文'); // 正文保留
++      const records = cleaned
++        .split('\n')
++        .filter((l) => l.length > 0)
++        .map((l) => JSON.parse(l) as { uuid: string; parentUuid: string | null });
++      expect(records.map((r) => r.uuid)).toEqual(['u1', 'a1']); // 记录数/链不变
++      expect(records.map((r) => r.parentUuid)).toEqual([null, 'u1']);
++      expect(
++        readdirSync(dirname(isolatedFile)).some((f) => f.includes('.bak-sillyhub-')),
++      ).toBe(true);
++      // 宿主原件零改写（~/.claude 是用户数据，daemon 不删不改）。
++      expect(readFileSync(homeFile, 'utf-8')).toContain(PRIVATE_ID);
++      // reload 主路径不受影响。
++      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
++      const env = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
++      expect(env.ANTHROPIC_BASE_URL).toBe('https://new.example.com');
++      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-san');
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('SAN-2: 无供应商变更（config-only reload）→ 历史零改写、零备份', async () => {
++    const dirs = buildDirs();
++    try {
++      // 本机会话形态（transcript 在 home；config-only reload 不触发正/反向迁移）。
++      const homeFile = writeJsonl(dirs, 'home', 'sdk-sess-san2', dirtyJsonl());
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-san2'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++
++      // Act：只切人格（payload 不带 providerConfig → 非供应商切换轮）。
++      await sm.reloadWithConfig(BASE_INPUT.sessionId, {
++        sessionId: BASE_INPUT.sessionId,
++        runId: 'run-san2',
++        claimToken: 'claim-san2',
++        prompt: '继续',
++        profile: { systemPrompt: '你是助手' },
++        providerConfig: undefined,
++      });
++
++      // Assert：非切换轮不动历史（脏块保留待真正切换时清洗）。
++      expect(readFileSync(homeFile, 'utf-8')).toContain(PRIVATE_ID);
++      expect(
++        readdirSync(dirname(homeFile)).some((f) => f.includes('.bak-sillyhub-')),
++      ).toBe(false);
++      expect(
++        readdirSync(join(dirs.home, 'projects', 'C--work')).some((f) =>
++          f.includes('.bak-sillyhub-'),
++        ),
++      ).toBe(false);
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++
++  it('SAN-3: 探测不到 transcript → 清洗降级跳过，reload 照常成功（R-01）', async () => {
++    const dirs = buildDirs();
++    try {
++      const mock = makeMockClaudeDriver();
++      const sm = new SessionManager(
++        { driver: mock.driver, ...makeDeps() },
++        { resumeDirs: dirs },
++      );
++      await sm.create({ ...BASE_INPUT });
++      mock.emitMessage(systemInitMessage('sdk-sess-san3'));
++      await flushMicrotasks();
++      mock.emitResult(resultSuccess());
++      await flushMicrotasks();
++
++      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
++
++      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
++      expect(mock.driver.start).toHaveBeenCalledTimes(2);
++    } finally {
++      rmSync(dirs.root, { recursive: true, force: true });
++    }
++  });
++});
+diff --git a/sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts b/sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts
+index 544854918..c76851c1a 100644
+--- a/sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts
++++ b/sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts
+@@ -52,6 +52,10 @@ vi.mock('../../src/interactive/claude-transcript-dir.js', () => ({
+   migrateClaudeTranscriptToIsolated: vi.fn(() => false),
+   // ql-20260824-016 切回本机反向迁移；本测试不触发真实 fs，与正向迁移同款 no-op。
+   migrateClaudeTranscriptToHost: vi.fn(() => false),
++  // 2026-10-16-provider-switch-transcript-sanitize：切供应商前清洗需先定位 transcript
++  // （findClaudeTranscriptPath）；本测试只覆盖 configDir 判定，定位固定 miss =
++  // 清洗降级跳过（「探测不到 → 行为同清洗前」，R-01）。
++  findClaudeTranscriptPath: vi.fn(async () => null),
+ }));
+ 
+ // ── 辅助构造（对齐 config-switch / main-agent-mcp 测试）───────────────────────
+diff --git a/sillyhub-daemon/tests/model-error/classifier.test.ts b/sillyhub-daemon/tests/model-error/classifier.test.ts
+index 60192d41a..bf11512a6 100644
+--- a/sillyhub-daemon/tests/model-error/classifier.test.ts
++++ b/sillyhub-daemon/tests/model-error/classifier.test.ts
+@@ -540,3 +540,45 @@ describe('classifyModelError — context_overflow 归类（F1a / 2026-10-12-sess
+     expect(result?.type).toBe('auth_failed');
+   });
+ });
++
++describe('classifyModelError — 供应商拒收历史签名（2026-10-16-provider-switch-transcript-sanitize）', () => {
++  // 实证原文（会话 f231ca18 第 36 轮，MiniMax Anthropic 兼容端点）：历史里上一家
++  // 供应商（GLM）的服务端工具块无法被新供应商解析 → 400。
++  const REAL_MINIMAX_REJECT =
++    "API Error: 400 invalid params, tool result's tool id(call_0a26d3a2b8dd4a7e9c5fe566) not found (2013)";
++
++  it('实证 MiniMax 400 文案 → message/hint 覆写为可执行中文提示（type/retryable 不变）', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: REAL_MINIMAX_REJECT,
++    });
++    expect(result).not.toBeNull();
++    // type 仍走 classifyBlob（该文案不命中任何既有规则 → unknown 兜底），三端联合类型零变更。
++    expect(result?.type).toBe('unknown');
++    expect(result?.code).toBe('400');
++    expect(result?.retryable).toBe(false);
++    expect(result?.message).toContain('拒收会话历史');
++    expect(result?.hint).toContain('切回原档位');
++  });
++
++  it('tool_use_id 变体（not found）同样命中覆写', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'API Error: 400 invalid_request_error: tool_use_id(toolu_x) not found',
++    });
++    expect(result?.message).toContain('拒收会话历史');
++  });
++
++  it('不含该签名的普通 400 不误命中（保持兜底文案）', () => {
++    const result = classifyModelError({
++      agent: 'claude',
++      isError: true,
++      resultText: 'API Error: 400 invalid params: temperature must be <= 1',
++    });
++    expect(result?.type).toBe('unknown');
++    expect(result?.message).not.toContain('拒收会话历史');
++  });
++});
++
+diff --git a/sillyhub-daemon/tests/transcript-sanitize.test.ts b/sillyhub-daemon/tests/transcript-sanitize.test.ts
+new file mode 100644
+index 000000000..b87a6945e
+--- /dev/null
++++ b/sillyhub-daemon/tests/transcript-sanitize.test.ts
+@@ -0,0 +1,270 @@
++/**
++ * interactive/transcript-sanitize 单测（2026-10-16-provider-switch-transcript-sanitize
++ * / FR-01 / FR-04）。
++ *
++ * 覆盖：
++ *   - 同一条 assistant 消息内成对（实证形态：server_tool_use + 同 id tool_result）→ 两块都被
++ *     替换为等价 text 块，正文保留；记录条数与 uuid/parentUuid 链不变；
++ *   - 跨记录成对（调用在 A 记录、结果在 B 记录）→ 同口径命中（顺序无关）；
++ *   - mcp_tool_use / `*_tool_result` 家族（带 tool_use_id 指向私有 id）→ 命中；
++ *   - 正常客户端工具对（tool_use ↔ tool_result）零触碰；
++ *   - 无脏块 → changed=false、零写盘零备份；幂等（清洗后再跑 changed=false）；
++ *   - 备份文件存在且内容=清洗前原文；
++ *   - 文件不存在 / 非 JSON 行 / content 非数组 → 不抛、原样透传。
++ *
++ * @module transcript-sanitize.test
++ */
++
++import { describe, it, expect, beforeEach, afterAll } from 'vitest';
++import * as fs from 'node:fs';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import {
++  PROVIDER_PRIVATE_TOOL_BLOCK_TYPES,
++  SANITIZE_TEXT_PREFIX,
++  planTranscriptSanitize,
++  sanitizeClaudeTranscriptForReplay,
++} from '../src/interactive/transcript-sanitize.js';
++
++const { mkdtempSync, existsSync, rmSync, readFileSync, writeFileSync, readdirSync } = fs;
++
++let root: string;
++const createdRoots: string[] = [];
++
++beforeEach(() => {
++  root = mkdtempSync(join(tmpdir(), 'sillyhub-sanitize-'));
++  createdRoots.push(root);
++});
++
++afterAll(() => {
++  // 临时目录逐个清理（断言失败也照清，避免本机 temp 残留）。
++  for (const dir of createdRoots) {
++    try {
++      rmSync(dir, { recursive: true, force: true });
++    } catch {
++      // best-effort：Windows 上偶发被占用，忽略。
++    }
++  }
++});
++
++/** 记录构造：只带本模块关心的字段 + 链路字段（uuid/parentUuid 用于链路完整性断言）。 */
++function record(opts: {
++  uuid: string;
++  parentUuid: string | null;
++  role: 'assistant' | 'user';
++  content: unknown;
++}): Record<string, unknown> {
++  return {
++    parentUuid: opts.parentUuid,
++    isSidechain: false,
++    type: opts.role,
++    uuid: opts.uuid,
++    timestamp: '2026-10-16T08:00:00.000Z',
++    message: { id: `msg_${opts.uuid}`, role: opts.role, content: opts.content },
++  };
++}
++
++function writeJsonl(filePath: string, records: unknown[]): void {
++  writeFileSync(filePath, records.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
++}
++
++function readJsonl(filePath: string): Array<Record<string, unknown>> {
++  return readFileSync(filePath, 'utf-8')
++    .split('\n')
++    .filter((l) => l.length > 0)
++    .map((l) => JSON.parse(l) as Record<string, unknown>);
++}
++
++/** 实证形态：同一条 assistant 消息里 server_tool_use + 同 id tool_result。 */
++function userWithServerToolPair(): Array<Record<string, unknown>> {
++  return [
++    record({
++      uuid: 'u1',
++      parentUuid: null,
++      role: 'user',
++      content: '你直接看图吧',
++    }),
++    record({
++      uuid: 'a1',
++      parentUuid: 'u1',
++      role: 'assistant',
++      content: [
++        { type: 'text', text: '先分析截图。' },
++        { type: 'server_tool_use', id: 'call_0a26', name: 'analyze_image', input: {} },
++        { type: 'tool_result', tool_use_id: 'call_0a26', content: '# 截图分析正文\n竖条可见' },
++      ],
++    }),
++    record({
++      uuid: 'u2',
++      parentUuid: 'a1',
++      role: 'user',
++      content: [{ type: 'tool_result', tool_use_id: 'call_normal', content: 'ok' }],
++    }),
++  ];
++}
++
++describe('planTranscriptSanitize — 纯函数（FR-01）', () => {
++  it('成对私有块（同消息）：两块替换为 text，正文保留，记录条数与链路字段不变', () => {
++    const records = userWithServerToolPair();
++    const jsonl = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
++    const planned = planTranscriptSanitize(jsonl);
++
++    expect(planned.replacedBlocks).toBe(2);
++    const after = planned.text
++      .split('\n')
++      .filter((l) => l.length > 0)
++      .map((l) => JSON.parse(l) as Record<string, unknown>);
++    // 记录条数不变（不删记录 → uuid/parentUuid 链不断）。
++    expect(after).toHaveLength(records.length);
++    expect(after.map((r) => r.uuid)).toEqual(['u1', 'a1', 'u2']);
++    expect(after.map((r) => r.parentUuid)).toEqual([null, 'u1', 'a1']);
++
++    const blocks = (after[1]!.message as { content: Array<Record<string, unknown>> }).content;
++    expect(blocks).toHaveLength(3);
++    expect(blocks[0]!.type).toBe('text');
++    // 调用块 → 说明性 text（含工具名）
++    expect(blocks[1]!.type).toBe('text');
++    expect(String(blocks[1]!.text)).toContain(SANITIZE_TEXT_PREFIX);
++    expect(String(blocks[1]!.text)).toContain('server_tool_use');
++    expect(String(blocks[1]!.text)).toContain('analyze_image');
++    // 结果块 → 正文全量保留
++    expect(blocks[2]!.type).toBe('text');
++    expect(String(blocks[2]!.text)).toContain('截图分析正文');
++    expect(String(blocks[2]!.text)).toContain('竖条可见');
++    // 私有 id 不再出现在清洗结果里（新供应商不会看到孤儿 tool_use_id）。
++    expect(planned.text).not.toContain('call_0a26');
++  });
++
++  it('跨记录成对（调用在 A 记录、结果在 B 记录）：与顺序无关，同口径命中', () => {
++    const records = [
++      record({
++        uuid: 'a1',
++        parentUuid: null,
++        role: 'assistant',
++        content: [{ type: 'server_tool_use', id: 'call_x', name: 'analyze_image', input: {} }],
++      }),
++      record({
++        uuid: 'a2',
++        parentUuid: 'a1',
++        role: 'assistant',
++        content: [{ type: 'tool_result', tool_use_id: 'call_x', content: '分析正文' }],
++      }),
++    ];
++    const planned = planTranscriptSanitize(records.map((r) => JSON.stringify(r)).join('\n'));
++    expect(planned.replacedBlocks).toBe(2);
++    expect(planned.text).toContain('分析正文');
++    expect(planned.text).not.toContain('call_x');
++  });
++
++  it('mcp_tool_use 与 *_tool_result 家族（带私有 tool_use_id）：命中', () => {
++    const records = [
++      record({
++        uuid: 'a1',
++        parentUuid: null,
++        role: 'assistant',
++        content: [
++          { type: 'mcp_tool_use', id: 'toolu_srv', name: 'server_mcp', input: { q: 'x' } },
++          { type: 'web_search_tool_result', tool_use_id: 'toolu_srv', content: '搜索结果' },
++        ],
++      }),
++    ];
++    const planned = planTranscriptSanitize(records.map((r) => JSON.stringify(r)).join('\n'));
++    expect(planned.replacedBlocks).toBe(2);
++    expect(planned.text).toContain('搜索结果');
++    expect(planned.text).toContain('server_mcp');
++    expect(planned.text).not.toContain('toolu_srv');
++  });
++
++  it('正常客户端工具对（tool_use ↔ tool_result）零触碰', () => {
++    const records = [
++      record({
++        uuid: 'a1',
++        parentUuid: null,
++        role: 'assistant',
++        content: [
++          { type: 'tool_use', id: 'call_ok', name: 'Read', input: { file_path: 'x.md' } },
++          { type: 'thinking', thinking: '看一下' },
++        ],
++      }),
++      record({
++        uuid: 'u1',
++        parentUuid: 'a1',
++        role: 'user',
++        content: [{ type: 'tool_result', tool_use_id: 'call_ok', content: 'file body' }],
++      }),
++    ];
++    const original = records.map((r) => JSON.stringify(r)).join('\n') + '\n';
++    const planned = planTranscriptSanitize(original);
++    expect(planned.replacedBlocks).toBe(0);
++    expect(planned.text).toBe(original);
++  });
++
++  it('非 JSON 行 / content 非数组：原样透传不抛', () => {
++    const raw = '{"uuid":"x"}\nnot-json-line\n{"uuid":"y","message":{"content":"plain string"}}\n';
++    const planned = planTranscriptSanitize(raw);
++    expect(planned.replacedBlocks).toBe(0);
++    expect(planned.text).toBe(raw);
++  });
++
++  it('私有块集合含 server_tool_use 与 mcp_tool_use（判据单一源）', () => {
++    expect([...PROVIDER_PRIVATE_TOOL_BLOCK_TYPES].sort()).toEqual(['mcp_tool_use', 'server_tool_use']);
++  });
++});
++
++describe('sanitizeClaudeTranscriptForReplay — 文件级（FR-01 / FR-04）', () => {
++  it('脏文件：备份存在且等于原文、文件被原子改写、命中计数正确', async () => {
++    const file = join(root, 'session.jsonl');
++    writeJsonl(file, userWithServerToolPair());
++    const before = readFileSync(file, 'utf-8');
++
++    const result = await sanitizeClaudeTranscriptForReplay(file);
++    expect(result.changed).toBe(true);
++    expect(result.replacedBlocks).toBe(2);
++    expect(result.backupPath).not.toBeNull();
++    expect(existsSync(result.backupPath!)).toBe(true);
++    expect(readFileSync(result.backupPath!, 'utf-8')).toBe(before);
++
++    const after = readJsonl(file);
++    expect(after).toHaveLength(3);
++    expect(readFileSync(file, 'utf-8')).not.toContain('call_0a26');
++  });
++
++  it('幂等：清洗后再跑 changed=false 且不产生第二个备份', async () => {
++    const file = join(root, 'session.jsonl');
++    writeJsonl(file, userWithServerToolPair());
++    await sanitizeClaudeTranscriptForReplay(file);
++    const backupsAfterFirst = readdirSync(root).filter((f) => f.includes('.bak-sillyhub-'));
++
++    const second = await sanitizeClaudeTranscriptForReplay(file);
++    expect(second.changed).toBe(false);
++    expect(second.replacedBlocks).toBe(0);
++    expect(readdirSync(root).filter((f) => f.includes('.bak-sillyhub-'))).toHaveLength(
++      backupsAfterFirst.length,
++    );
++  });
++
++  it('干净文件：零写盘零备份（mtime 语义由 changed=false 承载）', async () => {
++    const file = join(root, 'clean.jsonl');
++    writeJsonl(file, [
++      record({ uuid: 'a1', parentUuid: null, role: 'assistant', content: [{ type: 'text', text: 'hi' }] }),
++    ]);
++    const result = await sanitizeClaudeTranscriptForReplay(file);
++    expect(result).toEqual({ filePath: file, changed: false, replacedBlocks: 0, backupPath: null });
++    expect(readdirSync(root).filter((f) => f.includes('.bak-sillyhub-'))).toHaveLength(0);
++  });
++
++  it('文件不存在：changed=false 不抛（resume 是否可行交 CLI 报错）', async () => {
++    const result = await sanitizeClaudeTranscriptForReplay(join(root, 'nope.jsonl'));
++    expect(result.changed).toBe(false);
++    expect(result.backupPath).toBeNull();
++  });
++
++  it('备份文件名不含冒号（Windows 文件名合法性）', async () => {
++    const file = join(root, 'session.jsonl');
++    writeJsonl(file, userWithServerToolPair());
++    const result = await sanitizeClaudeTranscriptForReplay(file);
++    const backupName = result.backupPath!.split(/[\\/]/).pop()!;
++    expect(backupName).toContain('session.jsonl.bak-sillyhub-');
++    expect(backupName).not.toContain(':');
++  });
++});

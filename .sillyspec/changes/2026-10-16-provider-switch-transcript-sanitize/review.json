@@ -1,40 +1,27 @@
 {
   "schemaVersion": 1,
   "change": "2026-10-16-provider-switch-transcript-sanitize",
-  "reviewer": "subagent",
+  "reviewer": "subagent-delta-r4",
   "verdict": "PASS",
-  "reviewedAgainst": "47249a1350414ad906794f5794550952c712afdb",
+  "reviewedAgainst": "4cd21c2cece1ec648a4a84e34ccdfa880e1f8084",
   "findings": [
     {
-      "severity": "P2",
-      "title": "design 接口契约承诺的 droppedRecords 字段未实现（契约漂移，无功能影响）",
-      "evidence": "design.md:44-48 声明 planTranscriptSanitize 返回 { text, replacedBlocks, droppedRecords }（注释「恒 0，仅为自证留字段」）；实现 transcript-sanitize.ts:245-248 只返回 { text, replacedBlocks }；全仓 grep『droppedRecords』0 命中（src+tests）。无消费方、不影响 FR-01/FR-04 行为，但声明的新增导出签名与代码不一致。",
-      "location": "sillyhub-daemon/src/interactive/transcript-sanitize.ts:245"
-    },
-    {
-      "severity": "P2",
-      "title": "盲维「并发写」防护声明与代码不符：清洗时旧 CLI 仍存活（未 close），同文件并发写窗口存在",
-      "evidence": "清洗调用点 session-manager.ts:2035 位于 driver.start(2149) 与旧句柄 close(2180-2184) 之前，旧 query 在清洗全程未关闭，故设计所称『清洗时刻 CLI 引擎处于已 close 待重建状态、不存在 CLI append 与清洗同写一文件』不成立；对已隔离会话再次切供应商（migrateClaudeTranscriptToIsolated 因 isolated 已命中返回 false、applyTranscriptConfigDir 判 isolated）时，清洗写的就是仍存活旧 CLI 的同一个 jsonl。实际触达需旧 CLI 在毫秒级清洗窗口内产生写入，原子写+备份+reload 空闲触发使风险极低（无事故证据），但宣称的防护机制不存在。",
-      "location": "sillyhub-daemon/src/interactive/session-manager.ts:2035"
-    },
-    {
       "severity": "P3",
-      "title": "盲维「作用域」作答含事实失真：称『不扫目录』，实现会线性扫 projects/*",
-      "evidence": "findClaudeTranscriptPath 对 <configDir>/projects 逐个一层子目录 readdir 并以 <agentSessionId>.jsonl 精确匹配（claude-transcript-dir.ts:146-163）。按唯一 agentSessionId 文件名匹配且与 resume 同源探测，无跨会话/跨工作区实际串台；但 design.md:93-95『不扫目录、不跨会话』中『不扫目录』与代码不符。",
-      "location": "sillyhub-daemon/src/interactive/claude-transcript-dir.ts:146"
-    },
-    {
-      "severity": "P3",
-      "title": "私有结果块的非文本内容（图片等）被静默丢弃，替换文案仍称「已转为文本保留」",
-      "evidence": "extractBlockText 只提取 string 或 [{type:'text'}] 部件（transcript-sanitize.ts:179-195），图片等非文本部件返回空串被丢弃；privateResultToText 固定文案『…已转为文本保留』（:228-237）无任何丢失告警。实证形态 content 为纯字符串不受影响，但 FR-01『保留原正文』在含图片的私有结果块上不成立。",
-      "location": "sillyhub-daemon/src/interactive/transcript-sanitize.ts:179"
+      "title": "（纯文字风格，非阻塞，不影响 verdict）残余窗口的时长估算仍写作「毫秒级」——该区间实为 writeFileAtomic 全流程（6MB 级临时写 + fsync + rename + 父目录 fsync），慢盘/带实时扫描的 Windows 上可达数十至数百毫秒",
+      "evidence": "transcript-sanitize.ts:268「比对 → 原子顶替之间仍有毫秒级残余窗口」、design.md:100「毫秒级残余」（内部注释 :301-302 未复述时长）。窗口右端点确实是 rename 生效，区间覆盖 atomic-write.ts:28-55（open tmp → writeFile → handle.sync → rename → 父目录 fsync，父目录 fsync 在 POSIX 上同步等待）。数十至数百毫秒仍属毫秒量级，故与新口径（显著收窄、非零残余、不可由备份回退）不矛盾，不构成事实性错误；若想更保守可改「数十毫秒—亚秒级」。按收口纪律：措辞级，已记 findings，不触发返工。",
+      "location": "sillyhub-daemon/src/interactive/transcript-sanitize.ts:268"
     }
   ],
   "dimensionNotes": {
-    "乱序": "ok；边界已裁决：可接受（两遍全文件扫描与块顺序无关；幂等=干净/已清洗文件重跑零写盘零备份；以「替换为 text、不删记录」换取 uuid/parentUuid 链与记录条数不变）",
-    "并发": "finding（P2：旧 CLI 在清洗时未 close，见 findings[1]）；边界已裁决：可接受（备份名带毫秒时间戳避免互覆——同内容二次清洗因幂等 changed=false 不可达；reload 按会话串行化 _reloadChains 与 writeFileAtomic 原子顶替在代码中真实存在）",
-    "切换": "ok；边界已裁决：可接受（清洗失败/探测不到仅 warn 不阻断 reload=R-01 降级；宿主原件主路径不被改写由 SAN-1 锁定；「工具块→text 陈述」的结构语义变化为显式声明取舍，信息保留且优于新供应商下会话永久 400；设计文本称「先清洗再迁移」而代码为迁移→applyTranscriptConfigDir→清洗，清洗目标与 resume 读的是同一文件，行为无风险）；FR-02 证据边界（真实供应商端点不入单测，凭据/成本/网络外依赖）已裁决：可接受（对照实证留痕于 commit 47249a13 与 task-02，单测不引外网属常规取舍，但本评审无法独立复现端点 200/400 对照）",
-    "作用域": "finding（P3：『不扫目录』陈述失真，见 findings[2]；实际无串台）；边界已裁决：可接受（只处理本会话 agentSessionId 对应的那一个 transcript，路径与 resume 同源探测；design 显式遗留「本机默认档位+用户手改宿主 settings.json 换档」不自动清洗，以分类器提示兜底，平台无变更信号可挂钩，范围声明清晰）"
+    "乱序": "本轮无涉及（diff 未触碰 planTranscriptSanitize 及任何可执行语句）。沿用前裁：配对不依赖块顺序（两遍全文件私有 id 全集 + 结果块比对），幂等早返回在备份/重读之前，已清洗文件仍零写盘零备份。",
+    "并发": "本轮只做口径收口，逐条核实三处是否统一为「显著收窄（非零残余）+ 残窗追加不可由备份回退 + 显式取舍」：① 函数头 transcript-sanitize.ts:268-270 写「毫秒级残余窗口…追加**无法**由备份回退（备份取自比对之前），即『显著收窄』而非『杜绝』…显式取舍，见 design §边界与并发·并发写」；② 函数内注释 :300-303 写「本比对之后到原子顶替之间仍可能被追加且无法由备份回退（备份早于比对），属显式取舍…只宣称『显著收窄』，不宣称『杜绝』」；③ design.md:97-104（§边界与并发·2 并发写）与 :71-72（评审加固段）同样写「显著收窄而非杜绝 / 无法由备份回退 / 显式取舍」，与 header 交叉引用所指向的章节名 design.md:83「## 边界与并发」+ 其第 2 问「并发写」一致。三处口径已统一，无互相打架。残留扫描：对 transcript-sanitize.ts 与 design.md 全量 grep「杜绝|绝不|可由备份回退」，命中 3 条全为否定式或不相关断言——ts:269/design:72/design:103 均为「而非『杜绝』/不宣称『杜绝丢数据』/无法由备份回退」；ts:27「绝不抛」与 design:65「绝不抛、绝不阻断 reload」指异常语义（实现侧所有 IO 均在 try/catch 内返回 changed=false，:305-308，断言成立）；ts:169「绝不删记录」指 droppedRecords 恒 0（纯函数只做块替换，与 :151-161 实现一致）。结论：**已无与实现相反的断言残留**（旧措辞「可由备份回退」「绝不丢数据」在 ts/design 中零命中）。【本轮独立复跑证据】`cd sillyhub-daemon && pnpm exec vitest run tests/transcript-sanitize.test.ts` → 1 文件 13 passed / exit 0（stderr 恰见 1 条 [transcript-sanitize] skipped_concurrent_write，并发放弃路径行为未变）；`pnpm exec tsc --noEmit` → exit 0 零输出。",
+    "切换": "本轮无涉及。沿用前裁：清洗失败/探测不到仅 warn 不阻断 reload（R-01 降级），放弃路径仍返回 changed=false、reload 照常 resume，最坏退回清洗前行为；宿主原件不被删改由 SAN-1 锁定；真实供应商端点对照仍不入单测（边界沿用）。",
+    "作用域": "本轮 diff 范围核实：commit 仅触及 2 个文件、21 insertions/14 deletions，全部落在 transcript-sanitize.ts 的注释与 design.md 的散文；无新增/删除/移动任何代码行（非注释变更行数 = 0），即作用域面零扩张，评审面收敛为「注释与文档是否与既有实现一致」。"
   },
-  "reviewedAt": "2026-10-16T09:08:32Z"
+  "reviewedAt": "2026-10-16T09:27:30Z",
+  "previousReview": {
+    "reviewedAgainst": "8247ebc6a6b2c6e457fe138df76ba008f3359d8b",
+    "verdict": "PASS",
+    "resolved": ["P3-措辞-备份回退不可成立", "P3-注释绝不丢数据"]
+  }
 }
