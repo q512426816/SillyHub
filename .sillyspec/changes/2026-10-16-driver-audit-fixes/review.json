@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-driver-audit-fixes",
+  "reviewer": "subagent",
+  "verdict": "PASS",
+  "reviewedAgainst": "65a36dd1fc14d833be064004d68f4cb7566b6cd6",
+  "findings": [
+    {
+      "severity": "P3",
+      "title": "zcode consume 结束后未删除 _finishTurnOnClose 槽位（codex 先例在 finally 中 delete）",
+      "evidence": "codex-app-server-driver.ts:1502 在 consume finally 里 delete 该槽位；zcode 版本只挂不删（zcode-app-server-driver.ts:238），consume 收敛后槽位继续钉住 consume 闭包直到 handle 被丢弃。无正确性风险，仅为对照先例的闭包滞留卫生差异（该闭包图本就经 envelope 通知句柄被 handle 持有，增量可忽略）。",
+      "location": "sillyhub-daemon/src/interactive/zcode-app-server-driver.ts:238"
+    },
+    {
+      "severity": "P3",
+      "title": "基线→HEAD 区间含一挂未列入 design 文件清单的知识沉淀提交（纯文档，非代码夹带）",
+      "evidence": "0aaada8e95..65a36dd1f 之间的 82f3f70f6（docs(knowledge) postgres 索引事故沉淀，.sillyspec/knowledge/uncategorized.md +3 行）不带本变更标签、不在 design 文件变更清单内；已实测 change.patch 冻结件与 8 个代码文件的 git diff 逐字节一致（PATCH MATCHES HEAD DIFF EXACTLY），代码交付面无夹带，仅区间卫生提示。",
+      "location": ".sillyspec/knowledge/uncategorized.md"
+    }
+  ],
+  "dimensionNotes": {
+    "乱序": "ok",
+    "并发": "ok",
+    "切换": "ok",
+    "作用域": "ok"
+  },
+  "reviewedAt": "2026-10-16T08:15:44+08:00"
+}
