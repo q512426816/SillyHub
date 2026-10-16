@@ -180,6 +180,9 @@ class FakeZcodeServer {
       case 'session/subscribe':
         this.reply(req.id, {});
         return;
+        // 模型目录就绪信号（驱动 setModel 前等待 state.updated）
+        this.emitNotification('state.updated', { sessionId: ZSID, patch: { model: { current: { providerId: 'sillyhub', modelId: 'glm-5.3' }, available: [{ ref: { providerId: 'sillyhub', modelId: 'glm-5.3' }, label: 'glm-5.3', contextWindow: 200000, maxOutputTokens: 128000, reasoning: { levels: [] } }] } } });
+        return;
       case 'session/setModel':
         this.reply(req.id, {});
         return;
@@ -381,6 +384,35 @@ describe('consume 全链路（ready → create/subscribe → send → 流式 →
       api_duration_ms: 800,
     });
     expect(errors).toHaveLength(0);
+  }, 15_000);
+
+  it('consume 自然退出（iq.close）→ finally 对齐 codex：清 _finishTurnOnClose 槽位 + 兜底 close（幂等单次）（2026-10-17-audit-risk-followup）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const server = new FakeZcodeServer(child);
+    const driver = new ZcodeAppServerDriver();
+    const iq = makeInputQueue();
+    const handle = (await driver.start(iq.queue, makeOpts({ model: 'GLM-5.3' }))) as ZcodeHandle;
+    const { cb, results } = makeCallbacks();
+
+    const consumePromise = driver.consume(handle, cb);
+    await until(() => vi.mocked(spawn).mock.calls.length > 0);
+    server.startReady();
+    await until(() => server.requestsOf('session/setModel').length > 0);
+    iq.push('只回复两个字：乒乓');
+    await until(() => results.length > 0);
+
+    // 自然退出路径（非 terminateSession 发起 close）：finally 必须自清槽位并
+    // 兜底 close 子进程——旧实现两步全缺，槽位闭包滞留到 GC、子进程回收完全
+    // 依赖外部 close 链（codex 同位有 delete + await close，zcode 缺席）。
+    const closeSpy = vi.spyOn(handle, 'close');
+    iq.close();
+    await consumePromise;
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (handle as { _finishTurnOnClose?: () => void })._finishTurnOnClose,
+    ).toBeUndefined();
   }, 15_000);
 
   it('ready 门超时 → 结构化 error result（failed）', async () => {

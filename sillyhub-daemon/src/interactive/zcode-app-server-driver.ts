@@ -488,8 +488,15 @@ export class ZcodeAppServerDriver implements InteractiveDriver {
         err instanceof Error ? err.message : `zcode consume 失败：${String(err)}`,
       );
     } finally {
+      // 对齐 codex consume finally（codex-app-server-driver.ts 同位）：清 close 槽位
+      //（闭包含 onResult/onMessage 回调与 currentTurnPromise，不清则滞留到 handle GC）
+      // 并兜底 close 子进程——现网 close 链由 terminateSession/reload 发起时 h.closing
+      // 幂等守卫直接返回；未来任何「consume 自然退出」新路径也不泄漏子进程
+      //（2026-10-17-audit-risk-followup，评审 P3 清偿）。
+      delete (h as { _finishTurnOnClose?: () => void })._finishTurnOnClose;
       finalized = true;
       h.envelope.dispose();
+      await h.close();
     }
   }
 
