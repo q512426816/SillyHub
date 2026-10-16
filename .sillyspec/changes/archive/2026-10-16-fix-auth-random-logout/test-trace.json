@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-fix-auth-random-logout",
+  "rows": [
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-01:acc-0-dac52595",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-01:acc-1-0927a971",
+      "tests": [
+        "backend/tests/test_align_platform_change_events_migration.py"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-02:acc-0-c43862d5",
+      "tests": [
+        "backend/app/core/tests/test_config_auth.py",
+        "backend/tests/modules/auth/"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    },
+    {
+      "anchor": "FR-01",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-02:acc-1-c022f34b",
+      "tests": [
+        "backend/app/core/tests/test_config_auth.py",
+        "backend/tests/modules/auth/"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-03:acc-0-ae30320d",
+      "tests": [
+        "frontend/src/lib/__tests__/token-refresh.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    },
+    {
+      "anchor": "FR-04",
+      "row_id": "2026-10-16-fix-auth-random-logout:task-03:acc-1-aa592dcb",
+      "tests": [
+        "frontend/src/lib/__tests__/token-refresh.test.ts"
+      ],
+      "reason": "spec",
+      "state": "active",
+      "discovery": "machine",
+      "confirmed_by": "agent",
+      "confirmed_at": "d439716981f12e48ada940b75c72cbbbf1f58865",
+      "reconfirm": null,
+      "status": "active",
+      "source_change": "2026-10-16-fix-auth-random-logout"
+    }
+  ]
+}

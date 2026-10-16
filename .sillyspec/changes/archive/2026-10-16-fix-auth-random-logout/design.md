@@ -39,7 +39,7 @@ scale: large  # 用户显式要求完整流程（后端吊销语义属安全语�
 ### Phase 1 后端——会话族建模与族级吊销（对应 D-001/D-002/D-003）
 
 1. `sessions` 表新增 `family_id UUID NULL` 列（alembic 增量迁移）。login 签发时 `family_id = uuid4()` 开新族；refresh 轮换与 grace 续期签发的新 session 继承被消费 session 的族，兜底表达式 `family_id or id`（存量 NULL 行自成一族）。
-2. `_consume_refresh_token` 复用检测分支改调新增的 `_revoke_session_family(user_id=revoked.user_id, family=revoked.family_id or revoked.id)`（**调用处实参表达式必须带 `or revoked.id` 兜底**——design Grill 追问 B-001：存量 NULL 行取 `revoked.family_id or revoked.id`，只写 `revoked.family_id` 会 fail-open 吊销 0 行）：`UPDATE sessions SET revoked_at=now WHERE user_id=:uid AND revoked_at IS NULL AND (family_id=:f OR (family_id IS NULL AND id=:f))`。`revoke_all_user_sessions` 方法保留（无其它调用方，防将来复用语义混淆，注释标明用途已收窄）。
+2. `_consume_refresh_token` 复用检测分支改调新增的 `_revoke_session_family(user_id=revoked.user_id, family=revoked.family_id or revoked.id)`（**调用处实参表达式必须带 `or revoked.id` 兜底**——design Grill 追问 B-001：存量 NULL 行取 `revoked.family_id or revoked.id`，只写 `revoked.family_id` 会 fail-open 吊销 0 行；**内部 commit 必须**——执行期裁决 D-008@v1：复用分支 UPDATE 后立即 raise，`get_session` 对异常路径 rollback，不提交则族吊销被回滚成空操作）：`UPDATE sessions SET revoked_at=now WHERE user_id=:uid AND revoked_at IS NULL AND (family_id=:f OR (family_id IS NULL AND id=:f))`。`revoke_all_user_sessions` 方法保留（复用检测调用已切走；注释标明用途收窄，防将来混用）。
 3. `AuthRefreshReused` 文案改"登录凭证已被使用过（可能存在安全风险），该设备的登录已注销，请重新登录。"
 4. `config.py` `auth_refresh_grace_seconds` 默认 60 → 300（上限 le=600 不变），description 同步。
 5. 复用既有索引 `ix_sessions_user_revoked`（每用户 session 行数少，族谓词在 user_id 过滤后残余行数个位数），不加新索引。
@@ -59,9 +59,11 @@ Wave 1（后端簇，可独立交付）：model + migration + service + config +
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
 | 修改 | backend/app/modules/auth/model.py | Session 模型加 `family_id: uuid.UUID \| None` 列（String→Uuid 同 id 列范式，nullable） |
-| 新增 | NEW:backend/migrations/versions/20261016xxxx_add_sessions_family_id.py | alembic 增量迁移：`add_column sessions family_id UUID NULL`（版本号按迁移链头实际生成） |
+| 修改 | backend/tests/test_align_platform_change_events_migration.py | 链尾 head 锚前移 c3f8a1d6e2b4 + 注释链续写（task-01；符号影响扫描发现漏更即挂） |
+| 新增 | NEW:backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py | alembic 增量迁移：`add_column sessions family_id UUID NULL`（revision=c3f8a1d6e2b4，down_revision 接执行时实测链头） |
 | 修改 | backend/app/modules/auth/service.py | `_issue_token_pair` 加 `family_id` 参数；`refresh` 传族（`session.family_id or session.id`）；复用分支改调新增 `_revoke_session_family`；`AuthRefreshReused` 文案；`revoke_all_user_sessions` 用途注释收窄 |
 | 修改 | backend/app/core/config.py | `auth_refresh_grace_seconds` 默认 60 → 300，description 更新 |
+| 修改 | backend/app/core/tests/test_config_auth.py | 默认值断言 60 → 300 同步（task-02；符号影响扫描发现 test_default_is_60 必挂，补录进范围） |
 | 新增 | NEW:backend/tests/modules/auth/test_refresh_family_revocation.py | 族语义测试（见下） |
 | 修改 | backend/tests/modules/auth/test_refresh_grace_window.py | 复用检测用例的"全用户吊销"断言改为族断言（规格按 D-002 变更，测试随规格走） |
 | 修改 | frontend/src/lib/token-refresh.ts | `doRefresh` 状态码分流（5xx/408/429 抛 ApiError） |
@@ -119,7 +121,7 @@ family_id: uuid.UUID | None = Field(
 ```
 
 - 语义：同一次登录衍生的全部 session 共享一个族值；`NULL` = 存量旧行，读取侧以 `family_id or id` 兜底（自成一族）。
-- 迁移：alembic `add_column("sessions", sa.Column("family_id", Uuid(), nullable=True))`；不回填（旧行 NULL 即设计语义）；PPM 生产库在线加 nullable 列零锁表风险（PG 11+ 默认 fast add）。
+- 迁移：alembic `add_column("sessions", sa.Column("family_id", Uuid(), nullable=True))`（文件 `backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py`）；不回填（旧行 NULL 即设计语义）；PPM 生产库在线加 nullable 列零锁表风险（PG 11+ 默认 fast add）。
 - 索引：不加新索引，复用 `ix_sessions_user_revoked`（user_id, revoked_at）。
 
 ## 兼容策略（brownfield 必填）

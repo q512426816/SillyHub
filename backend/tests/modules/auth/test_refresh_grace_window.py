@@ -7,12 +7,13 @@
 覆盖来源
 --------
 - 需求:
-  - ``FR-01``(后端 grace window):grace 内旧 token 重签、不误杀;超 grace 仍吊销
-    (用例 1 ↔ GWT-1,用例 2 ↔ GWT-2)。
+  - ``FR-01``(后端 grace window):grace 内旧 token 重签、不误杀;超 grace 吊销**命中族**
+    （2026-10-16-fix-auth-random-logout D-002@v1 改族级，用例 2 断言同步）。
   - ``FR-07``(logout 调用点适配三元返回):用例 3 守护。
 - 决策:
   - ``D-001@v1``(grace 窗口内被 rotate 的旧 refresh token 重新签发新对)。
   - ``D-002@v1``(grace=60s 可配置,``auth_refresh_grace_seconds`` 注入)。
+  - 2026-10-16-fix-auth-random-logout ``D-002@v1``:超窗复用改族级吊销(用例 2 改断言)。
 - 设计:
   - ``design.md`` §7(``_consume_refresh_token`` 返回 ``(User, Session, is_grace)``;
     ``refresh()`` 的 ``is_grace`` 分支;``logout_session_by_refresh`` 三元解包)。
@@ -167,77 +168,81 @@ async def test_refresh_within_grace_does_not_revoke_other_sessions(db_session: A
     assert active_count >= 2, f"grace 续期应新增 active session,实际 {active_count}"
 
 
-# ── 用例 2:超 grace 仍吊销该用户全部 session(FR-01 GWT-2) ──────────────────
+# ── 用例 2:超 grace 只吊销命中族,异族存活（FR-01 GWT-2 / 2026-10-16 族语义） ──
+# 2026-10-16-fix-auth-random-logout D-002@v1 改断言：原「超 grace 全用户吊销」换为
+# 「超 grace 只灭本族」——Sx 为存量形态行（family_id=NULL，自成一族），代表"其他设备
+# 登录"，在族级语义下必须存活（原 revoke_all 语义下会被误杀，正是本次修复的缺陷面）。
 
 
-@pytest.mark.xfail(
-    reason=(
-        "RED 阶段 service 无 grace 判定,但 reuse 路径行为碰巧接近(同样抛 "
-        "AuthRefreshReused + revoke_all),本用例可能意外 PASS;task-05 实现 "
-        "rotated_at 判定后转确定 PASS。"
-    ),
-    strict=False,
-)
-async def test_refresh_beyond_grace_revokes_all_user_sessions(db_session: AsyncSession):
+async def test_refresh_beyond_grace_revokes_family_not_others(db_session: AsyncSession):
     """T1 已 rotate(rotated_at=now-61s,超 60s grace),再用 T1 refresh。
 
-    期望:``AuthRefreshReused`` + ``revoke_all_user_sessions``(Sx 被吊销)。
+    期望:``AuthRefreshReused`` + 族级吊销——T1 所属族全灭；Sx（异族）存活。
 
-    RED 处理:task-05 前 service 无 ``rotated_at`` 判定,但走 reuse 路径行为碰巧
-    接近(同样抛 AuthRefreshReused 且 revoke_all 吊销 Sx),故本用例在红阶段可能
-    意外 PASS,用 ``xfail(strict=False)`` 标注(参见 task-04.md 边界 5/AC-04-3)。
+    （原 xfail 标注随旧语义一并移除：task-05 起 rotated_at 判定与族分支均已落地，
+    本用例为确定断言。）
     """
     settings = get_settings()
     settings.auth_refresh_grace_seconds = 60
     service = AuthService(db_session, settings=settings)
 
     user = await _make_user(db_session, email="u2@example.com")
-    t1 = await _login_for_refresh_token(service, account="u2@example.com")
+    # 纯 username 登录（D-001：account 走 username 查库），传 "u2" 非邮箱形式——
+    # 旧版 xfail 掩盖过该处邮箱传参的登录失败。
+    t1 = await _login_for_refresh_token(service, account="u2")
     sx = await _make_other_active_session(db_session, user_id=user.id)
 
     await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
+    # rotate 产生的 child（T1 族后代）——超窗复用须同族同灭（排除异族 Sx）。
+    child = (
+        (
+            await db_session.execute(
+                select(SessionRow).where(
+                    SessionRow.user_id == user.id,
+                    SessionRow.revoked_at.is_(None),
+                    SessionRow.id != sx.id,
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
     # 手动把 rotated_at 摆到 now-61s(明确超 grace 窗口)。
     await _set_rotated_at(
         db_session, user_id=user.id, rotated_at=datetime.now(UTC) - timedelta(seconds=61)
     )
 
-    # 期望:AuthRefreshReused + revoke_all(Sx 被吊销)。
+    # 期望:AuthRefreshReused + 族级吊销（T1 族全灭、异族 Sx 存活）。
     with pytest.raises(AuthRefreshReused):
         await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
 
+    await db_session.refresh(child)
+    assert child.revoked_at is not None, "命中族后代（T1 轮换 child）应被族吊销命中"
     await db_session.refresh(sx)
-    assert sx.revoked_at is not None, "超 grace 重放应吊销该用户全部 session"
+    assert sx.revoked_at is None, "同用户异族 session 不应被牵连（族级吊销语义）"
 
 
 # ── 用例 3:logout 三元解包不抛(FR-07 调用点守护) ──────────────────────────
 
 
-@pytest.mark.xfail(
-    reason=(
-        "RED 阶段 service 仍二元返回,_consume_refresh_token 二元解包在 logout 处"
-        "恰好成立,用例碰巧 PASS;task-05 改三元返回后,若漏改 logout 解包会暴露"
-        "回归,届时本用例稳定 PASS 并移除 xfail。"
-    ),
-    strict=False,
-)
 async def test_logout_unpacks_three_tuple_without_error(db_session: AsyncSession):
     """logout_session_by_refresh 守护 ``_consume_refresh_token`` 三元返回改造。
 
     FR-07:``logout_session_by_refresh`` 内部调 ``_consume_refresh_token`` 返回三元组
-    后应解包 ``_, session, _``;若 task-05 漏改仍二元,此处会抛
+    后应解包 ``_, session, _``;若漏改仍二元,此处会抛
     ``ValueError: too many values to unpack``——本用例守护该回归。
 
     断言:logout 不抛 unpack 错误,且 logout 命中已 rotate 的 session 时**不**签发
     新对(DB 中 active session 数量只减不增)。
 
-    RED 处理:task-05 前 service 仍二元,logout 二元解包二元成立,用例意外 PASS,
-    用 ``xfail(strict=False)`` 标注(参见 task-04.md 边界 5/AC-04-4)。
+    （原 ``xfail(strict=False)`` 已移除：三元返回早已落地，且该 xfail 曾把
+    「邮箱形式账号登录失败」一并吞成假绿——账号改纯 username 形式 "u3"。）
     """
     settings = get_settings()
     service = AuthService(db_session, settings=settings)
 
     user = await _make_user(db_session, email="u3@example.com")
-    t1 = await _login_for_refresh_token(service, account="u3@example.com")
+    t1 = await _login_for_refresh_token(service, account="u3")
 
     active_before = await _count_active_sessions(db_session, user_id=user.id)
 

@@ -30,7 +30,9 @@ core.auth_deps 承接；平台同步 `shpsync_`（platform_sync）与 MCP token�
 - API Key：`POST /api/auth/api-keys` 创建（`shk_live_` 前缀明文仅创建响应返回一次）、
   `GET /api/auth/api-keys` 列表、`DELETE /api/auth/api-keys/{id}` 吊销。
 - `AuthService`（service.py）：login / refresh / logout_session_by_refresh /
-  revoke_all_user_sessions / update_my_avatar（users.avatar 永不存空串——清除即置 NULL；
+  revoke_all_user_sessions（**用途收窄**：复用检测已改 `_revoke_session_family` 族级吊销，
+  2026-10-16-fix-auth-random-logout；本方法保留供管理/测试引用）/ _revoke_session_family /
+  update_my_avatar（users.avatar 永不存空串——清除即置 NULL；
   换绑/清除成功后旧值若为 /api/file/{id} 形态经 file 模块 reclaim_orphaned_file_by_url
   best-effort 回收，ql-20260911-019-1f01）。
 - `ApiKeyService`（api_key_service.py）：key 生命周期与校验；Redis 正/负缓存节流
@@ -53,7 +55,7 @@ core.auth_deps 承接；平台同步 `shpsync_`（platform_sync）与 MCP token�
   tests/modules/auth/test_permissions.py 断言对齐；不调 Redis，对齐 202607251600 范式）。
 - bootstrap：`bootstrap_admin_and_seed_rbac` / `seed_platform_admin_role`
   启动期建管理员与 RBAC 种子（main.py lifespan 调用）。
-- 模型：users / sessions（含 rotate 轮换字段）/ roles / role_permissions /
+- 模型：users / sessions（含 rotate 轮换字段 + `family_id` 会话族）/ roles / role_permissions /
   api_keys / user_workspace_roles。
 
 ## 关键逻辑
@@ -64,7 +66,8 @@ login(account, password):
   login_enabled=False → 拒登; 失败累计 → 需验证码
   _issue_token_pair → 写 Session → commit
 refresh: _consume_refresh_token → (user, session, is_grace)
-  grace 窗口内旧 token 重签新对不吊销; 超窗按重放 revoke_all
+  grace 窗口内旧 token 重签新对不吊销; 超窗按重放**族级吊销**（只灭命中会话族，
+  含该 token 轮换出的后代；同用户其他登录族不牵连，2026-10-16-fix-auth-random-logout）
 API Key 校验: X-API-Key → Redis 正缓存 → 未命中查库(hash 匹配)
   → 回填; 无效 key 写负缓存
 ```
@@ -72,9 +75,12 @@ API Key 校验: X-API-Key → Redis 正缓存 → 未命中查库(hash 匹配)
 ## 注意事项
 - 登录错误信息固定（不区分账号不存在/密码错）防枚举；登录权限闸在口令校验之后才查。
 - refresh token 以 hash 存库、单次使用；被 rotate 的旧 token 在
-  `auth_refresh_grace_seconds`（默认 60s）内再提交会重签新对且**不**触发 revoke_all
-  （并发刷新误杀兜底），`Session.rotated_at` 是 grace 判定锚点、logout 不写；
-  access TTL 默认 30min（`auth_access_ttl_minutes`）。
+  `auth_refresh_grace_seconds`（默认 300s，2026-10-16-fix-auth-random-logout D-003@v1：60→300）
+  内再提交会重签新对且**不**触发吊销（并发刷新/休眠恢复误杀兜底），`Session.rotated_at`
+  是 grace 判定锚点、logout 不写；超窗复用旧 token → `_revoke_session_family` 只吊销
+  命中**会话族**（`sessions.family_id`：login 开新族 uuid4、refresh rotate/grace 继承、
+  存量 NULL 行以自身 id 兜底自成一族；谓词 `user_id=? AND (family_id=? OR (family_id IS NULL
+  AND id=?))`；方法内部 commit——D-008）；access TTL 默认 30min（`auth_access_ttl_minutes`）。
 - rbac 对 admin 模块的 `UserRole` 是延迟 import（平台级角色存 admin 侧），改 admin 表结构
   影响权限收集；平台级 `PLATFORM_ADMIN` 拥有全部权限，新增 Permission 枚举要同步补种子。
 - 平台级 M2M（UserRole/UserOrganization，admin 模块）与 workspace 级

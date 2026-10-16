@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-fix-auth-random-logout",
+  "appliedAt": "2026-10-16T08:45:51.738Z",
+  "baseHash": "f24170b8cbcda8298189f8a7a286e9a46462e703",
+  "files": [
+    {
+      "path": "backend/app/core/config.py",
+      "sha256": "9e4d60666417f2bbe682ea139fbf9a9ae5c898f27140434903b98478df868428"
+    },
+    {
+      "path": "backend/app/core/tests/test_config_auth.py",
+      "sha256": "6988516f39c17d9f7731d420abc0fdcf317183b0236246e7a36bbdaf086294a4"
+    },
+    {
+      "path": "backend/app/modules/auth/model.py",
+      "sha256": "f7eae14a21a5a67a00c8bfaf1a87fac9d81b33c285e29963f9e403b205e67cc6"
+    },
+    {
+      "path": "backend/app/modules/auth/service.py",
+      "sha256": "f28a8f3009cb2868b0a89de0564ee0291c551641fe4685f31d926748bbe18bb9"
+    },
+    {
+      "path": "backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py",
+      "sha256": "c3cdbf1ee1b689948e6213a189f60134126eb5c6c86bd85a2cb41e97e1a88af8"
+    },
+    {
+      "path": "backend/tests/modules/auth/test_refresh_family_revocation.py",
+      "sha256": "93b1037547cb177fa025ff7d0f8325391cd6e891d6f4908e42423dda42480480"
+    },
+    {
+      "path": "backend/tests/modules/auth/test_refresh_grace_window.py",
+      "sha256": "facc95821a79c0850b9452266c62f64b032223c38d0d23c77e6fd6781f7e5543"
+    },
+    {
+      "path": "backend/tests/test_align_platform_change_events_migration.py",
+      "sha256": "b6d22ff8c2659f160b449e5861a5eb76f1cd98a71f6b030ae0fc52eb71fcda30"
+    },
+    {
+      "path": "frontend/src/lib/__tests__/token-refresh.test.ts",
+      "sha256": "231246596c923f1defb9703e17d446453eab9c5e878339bdd5481399b20adcb7"
+    },
+    {
+      "path": "frontend/src/lib/api.ts",
+      "sha256": "06116630aab9af6707c8ce03f7439b43a992b165d5863681fb77e592293af3ac"
+    },
+    {
+      "path": "frontend/src/lib/token-refresh.ts",
+      "sha256": "161c68ea4c6f1b5494be31e2a35ea920564c3d29d6bd75f637cfa3d7ca8a38ca"
+    }
+  ]
+}

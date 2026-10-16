@@ -98,3 +98,14 @@ change: 2026-10-16-fix-auth-random-logout
 - evidence: 方案选择轮（AskUserQuestion 2026-10-16）
 - 否决理由: 安全响应弱于 BCP 族级吊销标准
 - 复潮条件: 平台威胁模型明确接受弱响应（如纯内网无外部暴露）且要求零 schema 变更时
+
+## D-008@v1: 族吊销必须内部 commit（执行期裁决，纠正 design 笔误）
+- type: consistency
+- priority: P0
+- status: accepted
+- source: design-grill
+- question: design 原文写 `_revoke_session_family` 「不提前 commit（refresh 链统一 commit）」——与代码现实矛盾（非破坏性执行期裁决）
+- answer: 内部 commit（对齐 revoke_all_user_sessions 既有语义）。依据：复用分支 UPDATE 后立即 raise AuthRefreshReused，而 get_session 依赖对异常路径 session.rollback()（backend/app/core/db.py:163-167）——不先行提交则族吊销被回滚成空操作（安全响应静默丢失）。design.md 对应措辞已同步修正
+- normalized_requirement: _revoke_session_family 内 await self._db.commit()；测试断言复用后族内 revoked_at 非空（跨请求持久性）
+- impacts: [FR-02, task-02]
+- evidence: backend/app/core/db.py:163-167、backend/app/modules/auth/service.py:238-286（新增方法注释）

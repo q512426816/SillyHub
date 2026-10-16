@@ -233,7 +233,8 @@ export async function apiFetch<T = unknown>(
       !isAuthEndpoint(url.pathname)
     ) {
       // 单飞刷新:并发 401 风暴由 token-refresh 模块级 inflight 保证只发 1 次
-      // POST /api/auth/refresh 并写回 store;未登录/未 hydrate/refresh 失败均返回 null。
+      // POST /api/auth/refresh 并写回 store;未登录/未 hydrate/refresh 收到 4xx 明确失效返回 null;
+      // 瞬态故障(5xx/408/429/超时/网络异常)抛错传播,不落本分支(2026-10-16-fix-auth-random-logout D-004@v1)。
       const newToken = await ensureFreshAccessToken();
       if (newToken) {
         // 拿到新 access token,带 x-auth-retry:1 重试一次(防单请求无限重试)。
@@ -246,7 +247,8 @@ export async function apiFetch<T = unknown>(
           query,
         });
       }
-      // 单飞失败(未登录 / refresh 失败 / 未 hydrate):清 session + 跳 login,行为与原实现一致。
+      // 单飞返 null(未登录 / 未 hydrate / refresh 明确失效 4xx):清 session + 跳 login——
+      // 只有「明确失效」才登出;瞬态故障走抛错通道(修复部署窗口/代理抖动误踢在线用户)。
       useSession.getState().clear();
       // 2026-10-14-logout-localstorage-user-data-cleanup：会话终结，localStorage
       // 用户域键（草稿/未读/活性）同清——与两处主动登出同口径（设备级偏好保留）。

@@ -308,3 +308,79 @@
 锚点：未记录
 最近确认：7ca3e7ba66d5d065715a08ea885d064b2617e3e9
 理由：- 最大风险：15s 预算让「刷新」在同步窗口内最长等 15s（原 3s 秒回旧数据）——用「等待换正确」；极端大仓首同步 >15s 仍会超时，但 daemon 侧继续完成、防抖 TTL 内重点秒回新数据（有明确降级路径，不卡死）。若未来实测普遍 >15s，应改异步推送而非继续加预算（本变更未做，留作后续观察项）。 - 死路（已否决，勿复潮）：fire-and-forget + 前端二次刷新启发式（2026-10-13 D-006@v1）；新增显式 POST 同步端点（D-007@v1）；「继续 3s 只补日志」——治不了「刷不到」主诉，只增排障信息，不采。 - 运维同根因（服务器属主漂移致 spec-sync 500）属部署面，已由 ops 修复 + deploy skill 探针守护，代码面不做属主自动修补（越权面）。
+
+## D-unmapped-060@v1 sessions 表增 family_id 列建模会话族
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-001@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：sessions 表新增 nullable UUID 列 `family_id`。login 签发时生成新 uuid 作为族根；refresh 轮换/grace 续期签发的新 session 继承被消费 session 的族（`family_id ?? id` 兜底存量 NULL 行——旧行自成一族）。族查询条件 `user_id=? AND revoked_at IS NULL AND (family_id=? OR (family_id IS NULL AND id=?))`，复用既有索引 ix_sessions_user_revoked，不加新索引（每用户 session 行数少）。迁移走 alembic 增量加列（PPM 已上线有生产数据，禁重置；加列 nullable 零停机零强制登出）
+故障面：family_id 写错族会把无关设备牵连进吊销面（与旧全吊销等价），靠 FR-02 测试族隔离性兜底
+退役判据：若未来引入服务端全设备会话管理 UI 且要求误杀面趋零，可评估改为「复用检测仅拒绝不吊销」
+
+## D-unmapped-061@v1 refresh 复用检测从全用户吊销改为族级吊销
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-002@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户已定向（「复用检测只吊销会话族」）：复用检测分支改调新增的 `_revoke_session_family(user_id, family)`，只吊销该 token 所属族系（含其后代——攻击者用窃取 token 轮换出的新 session 同族，同样被灭，安全属性保留）；其他设备/其他登录族不受影响。`revoke_all_user_sessions` 方法保留（改密码场景 service.py:243 注释已说明另有内联实现；admin/settings 端点走 UserService.revoke_all_sessions 不受影响）。AuthRefreshReused 报错文案同步改「该设备登录已注销」（原「所有会话已注销」不再准确）
+故障面：攻击者在 grace 窗内重放仍可得新对（既有 grace 权衡，不变）；grace 窗外重放只灭单族，若攻击者已独立另行登录（异族）不受牵连——可接受（异族本就是合法登录）
+退役判据：出现实际窃取事故且需要全设备熔断时，可配置回退全吊销
+
+## D-unmapped-062@v1 grace 宽限窗默认 60s → 300s
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-003@v1
+锚点：未记录
+最近确认：d43971698
+理由：我的判断：`auth_refresh_grace_seconds` 默认 60 → 300（config 上限 le=600 内）。依据：休眠唤醒/后台标签页节流恢复后旧 token 复用常超 60s；300s 覆盖典型恢复窗口，且族级吊销上线后超窗误杀的爆炸半径已缩到单设备，双保险。攻击者在窗内重放可换新对是既有权衡，内部平台威胁模型可接受
+
+## D-unmapped-063@v1 前端 doRefresh 按状态码分流——5xx 抛错不清会话
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-004@v1
+锚点：frontend/src/lib/token-refresh.ts:86
+最近确认：d43971698
+理由：用户已定向（「对 5xx 不清会话」）：doRefresh 分流——2xx → 返回 token 对；401/403/其余 4xx → 返回 null（上层 clear+redirect，明确失效）；5xx/408/429 → 抛 ApiError（对齐 ql-20260917-005 timeout 先例：抛错路径不清会话、不跳登录，调用方 catch 展示可重试错误）。app-shell.tsx:216 主动续票已有 .catch(() => {}) 兜底；api.ts 401 收口处 await 抛错时原 401 ApiError 被 refresh 错误替代传播（与 timeout 行为一致）
+故障面：5xx 时原 401 错误被替换为 refresh 5xx 错误展示（与 timeout 先例一致，可接受）；瞬时 5xx 期间页面报错但登录态保留，恢复后自愈
+退役判据：后端或代理层能保证 refresh 请求不经受 5xx/网络抖动窗口（如本机直连）时，可收敛为单一 null 语义
+
+## D-unmapped-064@v1 根因一实现方案选 A（会话族吊销 + 宽限窗加大）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-005@v1
+锚点：未记录
+最近确认：d43971698
+理由：用户选 A：sessions 加 family_id 建模会话族，复用检测只吊销该族（窃取凭证换出的后代同族同灭，安全属性保留），宽限窗 60→300s 双保险。理由要点：B 治标（全吊销语义未变，超 600s 上限仍团灭）；C 丢失窃取响应（纯拒绝弱于 BCP 族级吊销标准）
+故障面：family 谓词或族继承写错时，误杀面在「全用户」与「单设备」之间漂移（靠 FR-01/FR-02 测试网兜底）
+退役判据：OAuth BCP 实现升级为服务端 per-token introspection 后可重估
+
+## D-unmapped-065@v1 方案 B（只加大宽限窗，不加族系列）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-006@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：一行配置改动最小，但「全用户吊销」语义未变——休眠/离线超过宽限上限（config le=600 即 10 分钟）仍全设备团灭；且单纯加宽窗口给真实窃取者更长重放窗口，治标不治本
+否决理由：全吊销语义未根除，仅推迟触发；安全与可用性双输
+复潮条件：若后端禁止 schema 变更（如生产库冻结期）且急需止血，可作为临时缓解先上线
+
+## D-unmapped-066@v1 方案 C（复用检测只拒绝不吊销）
+状态：rejected
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-007@v1
+锚点：未记录
+最近确认：d43971698
+理由：落选：误杀面归零且零迁移，但丢失对凭证窃取的安全响应——OAuth BCP 对 refresh 轮换复用的标准响应是吊销 token family，纯拒绝使攻击者已换出的新凭证不受影响，安全姿态弱化
+否决理由：安全响应弱于 BCP 族级吊销标准
+复潮条件：平台威胁模型明确接受弱响应（如纯内网无外部暴露）且要求零 schema 变更时
+
+## D-unmapped-067@v1 族吊销必须内部 commit（执行期裁决，纠正 design 笔误）
+状态：implemented
+变更：2026-10-16-fix-auth-random-logout
+原编号：D-008@v1
+锚点：未记录
+最近确认：d43971698
+理由：内部 commit（对齐 revoke_all_user_sessions 既有语义）。依据：复用分支 UPDATE 后立即 raise AuthRefreshReused，而 get_session 依赖对异常路径 session.rollback()（backend/app/core/db.py:163-167）——不先行提交则族吊销被回滚成空操作（安全响应静默丢失）。design.md 对应措辞已同步修正

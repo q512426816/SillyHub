@@ -1,31 +1,33 @@
 ---
 id: task-04
-title: 'task-04 fill-english-title'
-title_zh: 'task-04 fill-english-title'
+title: 'Sync auth-flow doc semantics and TTL numbers'
+title_zh: 'auth-flow 文档同步（族语义 + 宽限窗 + TTL 纠错）'
 author: 'qinyi'
 generated_by: sillyspec-taskcard
-created_at: 2026-10-16 15:41:48
-priority: P0
-depends_on: []
+created_at: 2026-10-16 15:53:07
+priority: P1
+depends_on: ['task-02', 'task-03']
 blocks: []
-requirement_ids: [FR-01, FR-02, FR-03, FR-04, FR-05]  # (预填：核对后删本注)
-decision_ids: []  # (预填源未就绪：plan 阶段后跑 prefill-refresh)
+requirement_ids: [FR-02, FR-03]
+decision_ids: [D-002@v1, D-003@v1]
 allowed_paths:
-  - src/example/file.ts
-target_files: []  # 可选：本 task 计划改动的文件（对账用精确路径清单，格式见下方注释；不填保留 []）
+  - .sillyspec/docs/multi-agent-platform/flows/auth-flow.md
+target_files:
+  - .sillyspec/docs/multi-agent-platform/flows/auth-flow.md
 goal: >
-  一句话说明这个 task 要做什么、为什么。
+  auth-flow.md 同步新语义：族级吊销 + grace 300s + TTL 数字纠错（15min/7d 改实际 30min/14d，R-05）。
 implementation:
-  - 具体步骤 1
-  - 具体步骤 2
+  - 更新流程摘要：access 30min / refresh 14d / grace 300s（对齐 config.py 实际默认）
+  - 失败回滚表「refresh token 重放/失配」行改族级吊销语义（仅吊销该设备族系，其他设备不受影响）
+  - 补前端行为：refresh 请求 5xx/408/429 不清会话（瞬态），401 才清会话跳登录
+  - 关键术语区 TTL 数字纠错
 acceptance:
-  - 可验证的验收条件 1
-  - 可验证的验收条件 2
+  - 文档所述 TTL/宽限值与 backend/app/core/config.py:153-168 实际默认一致
+  - 族语义描述与 backend/app/modules/auth/service.py:408-431 实现一致
 verify:
-  - cd frontend && pnpm exec tsc --noEmit
+  - 人工对照 config.py 与 service.py 逐项核（文档类 diff 自查）
 constraints:
-  - 边界约束 1（如：不加测试）
-  - 边界约束 2（如：不修改传入参数）
+  - 仅文档改动，不动任何代码；中文表述（专业术语除外）
 ---
 
 <!-- 骨架由 sillyspec taskcard 生成（LF 行尾 + frontmatter 已闭合 + 硬校验 9 字段齐全）。

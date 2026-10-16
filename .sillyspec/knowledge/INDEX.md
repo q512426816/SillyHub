@@ -231,3 +231,4 @@
 - docs|FR|需求|承接 → [fr/docs.md](fr/docs.md)
 - app-workspace-pages|FR|需求|承接 → [fr/app-workspace-pages.md](fr/app-workspace-pages.md)
 - test-utils|FR|需求|承接 → [fr/test-utils.md](fr/test-utils.md)
+- auth|FR|需求|承接 → [fr/auth.md](fr/auth.md)

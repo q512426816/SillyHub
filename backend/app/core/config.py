@@ -158,12 +158,14 @@ class Settings(BaseSettings):
     )
     auth_refresh_ttl_days: int = Field(14, ge=1, le=90)
     auth_refresh_grace_seconds: int = Field(
-        60,
+        300,
         ge=0,
         le=600,
         description=(
-            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非 revoke_all"
-            "(并发刷新误杀兜底)。0=退化为旧行为。D-002@v1。"
+            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非族级吊销"
+            "(并发刷新/休眠恢复误杀兜底)。0=退化为旧行为。"
+            "D-002@v1(初值 60s);2026-10-16-fix-auth-random-logout D-003@v1: 默认 60→300"
+            "(覆盖典型休眠/后台标签页节流恢复窗口)。"
         ),
     )
     auth_bcrypt_rounds: int = Field(12, ge=4, le=15)

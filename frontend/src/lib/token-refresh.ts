@@ -26,7 +26,8 @@ const REFRESH_TIMEOUT_MS = 15_000;
  * 确保拿到一个"尽可能新鲜"的 access token:若当前没有进行中的刷新则发起一次,
  * 否则等待已进行中的刷新完成。并发调用只触发 **1 次** `POST /api/auth/refresh`。
  *
- * @returns 新的 access token;无法刷新(未登录 / 未 hydrate / refresh 失败)时返回 null。
+ * @returns 新的 access token;无法刷新(未登录 / 未 hydrate / refresh 收到 4xx 明确失效)时返回 null;
+ *   瞬态故障(5xx/408/429/超时/网络异常)以 ApiError 抛出——不清会话,见 doRefresh 分流。
  */
 export async function ensureFreshAccessToken(): Promise<string | null> {
   const { refreshToken, hydrated } = useSession.getState();
@@ -53,8 +54,10 @@ export async function ensureFreshAccessToken(): Promise<string | null> {
   }
 }
 
-/** 实际发起 refresh 请求。返回新 token 对,失败返回 null(不抛,交由调用方判定);
- * 超时抛 ApiError(timeout)(ql-20260917-005,防僵死挂起)。 */
+/** 实际发起 refresh 请求,按状态码分流(2026-10-16-fix-auth-random-logout task-03 / D-004@v1):
+ * 2xx 返回新 token 对;401/403/其余 4xx 返回 null(明确失效,交上层清会话);
+ * 5xx/408/429 抛 ApiError(状态码透传)——瞬态故障不清会话(修复部署窗口/代理抖动误踢),
+ * 沿用 ql-20260917-005 timeout 抛错通道;超时同样抛 ApiError(timeout)。 */
 async function doRefresh(): Promise<SessionTokens | null> {
   const { refreshToken } = useSession.getState();
   if (!refreshToken) return null;
@@ -83,7 +86,20 @@ async function doRefresh(): Promise<SessionTokens | null> {
   } finally {
     clearTimeout(timer);
   }
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    // 瞬态故障优先判定(先于「其余 4xx → null」,design Grill B-002 归类优先级):
+    // 5xx=后端部署窗口/代理抖动,408=请求超时,429=限流——都不代表凭证失效。
+    if (resp.status >= 500 || resp.status === 408 || resp.status === 429) {
+      throw new ApiError(resp.status, {
+        code: "refresh_transient",
+        message: `登录状态续期失败（HTTP ${resp.status}），请稍后重试`,
+        request_id: resp.headers.get("x-request-id"),
+        details: null,
+      });
+    }
+    // 401/403 及其余 4xx:凭证明确失效 → null,交上层(api.ts 401 收口)清会话跳登录。
+    return null;
+  }
 
   const pair = (await resp.json()) as {
     access_token: string;

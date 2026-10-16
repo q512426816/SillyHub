@@ -336,6 +336,99 @@ describe("ensureFreshAccessToken · single-flight (FR-04)", () => {
       vi.useRealTimers();
     }
   });
+
+  // ── 2026-10-16-fix-auth-random-logout task-03（FR-04/FR-05，D-004@v1）：
+  //    doRefresh 状态码分流——5xx/408/429 抛 ApiError 不清会话（瞬态故障，对齐
+  //    ql-20260917-005 timeout 抛错通道）；401/403/其余 4xx 返 null（明确失效，
+  //    上层 api.ts 401 收口清会话跳登录）。归类优先级：抛错枚举先判，其余 4xx 后落。
+
+  it("用例10:refresh 收到 503/504 抛 ApiError 且不清会话（瞬态故障）", async () => {
+    // 顺序坑：必须先 loadTokenRefresh（doMock 注入 mock store 后再加载 token-refresh），
+    // 再动态 import api 取同一代际的 ApiError 类——反过来会先把 token-refresh 以真实
+    // store 加载（doMock 失效），ensureFreshAccessToken 早退 null 掩盖被测路径。
+    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
+    const { ApiError } = await import("@/lib/api");
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response("bad gateway", { status: 503 }),
+      ) // 第 1 次：部署窗口 5xx
+      .mockResolvedValueOnce(
+        new Response("gateway timeout", { status: 504 }),
+      ); // 第 2 次：代理抖动
+    const clearSpy = vi.spyOn(useSession.getState(), "clear");
+    const setTokensSpy = vi.spyOn(useSession.getState(), "setTokens");
+
+    // 503 → 抛 ApiError，status 透传
+    const r503 = await ensureFreshAccessToken().then(
+      (v) => ({ ok: true as const, v }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    expect(r503.ok).toBe(false);
+    const err503 = (r503 as { ok: false; e: unknown }).e;
+    expect(err503).toBeInstanceOf(ApiError);
+    expect((err503 as { status?: number }).status).toBe(503);
+
+    // 504 → 同样抛（且不写 store）
+    const r504 = await ensureFreshAccessToken().then(
+      (v) => ({ ok: true as const, v }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    expect(r504.ok).toBe(false);
+    expect((r504 as { ok: false; e: unknown }).e).toBeInstanceOf(ApiError);
+    expect(((r504 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(504);
+
+    // 会话未清、token 未动（区别于返 null 的「明确失效」链）
+    expect(clearSpy).not.toHaveBeenCalled();
+    expect(setTokensSpy).not.toHaveBeenCalled();
+    expect(useSession.getState().accessToken).toBe("old-access");
+    expect(useSession.getState().refreshToken).toBe("rt-1");
+  });
+
+  it("用例11:refresh 收到 408/429 归入抛错（瞬态归类优先级，B-002）", async () => {
+    // 顺序同用例10：先 loadTokenRefresh 再 import api（代际一致）。
+    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
+    const { ApiError } = await import("@/lib/api");
+    fetchMock.mockReset();
+    fetchMock
+      .mockResolvedValueOnce(new Response("request timeout", { status: 408 }))
+      .mockResolvedValueOnce(new Response("too many requests", { status: 429 }));
+    const clearSpy = vi.spyOn(useSession.getState(), "clear");
+
+    const r408 = await ensureFreshAccessToken().then(
+      (v) => ({ ok: true as const, v }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    expect(r408.ok).toBe(false);
+    expect((r408 as { ok: false; e: unknown }).e).toBeInstanceOf(ApiError);
+    expect(((r408 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(408);
+
+    const r429 = await ensureFreshAccessToken().then(
+      (v) => ({ ok: true as const, v }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    expect(r429.ok).toBe(false);
+    expect(((r429 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(429);
+
+    expect(clearSpy).not.toHaveBeenCalled();
+    expect(useSession.getState().refreshToken).toBe("rt-1");
+  });
+
+  it("用例12:refresh 收到 401 返 null（明确失效，交上层清会话）", async () => {
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "auth_refresh_reused", message: "reused" }), {
+        status: 401,
+      }),
+    );
+    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
+
+    const r = await ensureFreshAccessToken();
+    expect(r).toBeNull();
+    // doRefresh 只返 null，不清会话（clear+redirect 是 api.ts 401 收口职责）
+    expect(useSession.getState().accessToken).toBe("old-access");
+    expect(useSession.getState().refreshToken).toBe("rt-1");
+  });
 });
 
 describe("decodeJwtExp (FR-04 辅助 / task-09 依赖)", () => {

@@ -1,0 +1,141 @@
+{
+  "change": "2026-10-16-fix-auth-random-logout",
+  "baseline": "0bcdbb5d979be2a82e11ce17a0ffa342721afd4c",
+  "head": "ec47ced2647e5ee08e40577b9079caf5b752323f",
+  "files": [
+    "backend/app/core/config.py",
+    "backend/app/core/tests/test_config_auth.py",
+    "backend/app/modules/auth/model.py",
+    "backend/app/modules/auth/service.py",
+    "backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py",
+    "backend/tests/modules/auth/test_refresh_family_revocation.py",
+    "backend/tests/modules/auth/test_refresh_grace_window.py",
+    "backend/tests/test_align_platform_change_events_migration.py",
+    "frontend/src/lib/__tests__/token-refresh.test.ts",
+    "frontend/src/lib/api.ts",
+    "frontend/src/lib/token-refresh.ts"
+  ],
+  "totals": {
+    "files": 11,
+    "additions": 586,
+    "deletions": 50
+  },
+  "savedAt": "2026-10-16T08:47:50.653Z",
+  "note": "execute --done 时点冻结（沉淀资产面：主仓实改行投影——thin flow done 对等；治理工件目录与其后 verify/archive 演进不在内）",
+  "scopeAudit": {
+    "mode": "full-flow",
+    "ok": true,
+    "degradedReason": null,
+    "baseAnchor": "0bcdbb5d979be2a82e11ce17a0ffa342721afd4c",
+    "totals": {
+      "files": 12,
+      "additions": 586,
+      "deletions": 50
+    },
+    "rows": [
+      {
+        "path": "backend/app/core/config.py",
+        "additions": 5,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/core/tests/test_config_auth.py",
+        "additions": 4,
+        "deletions": 3,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/model.py",
+        "additions": 10,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/app/modules/auth/service.py",
+        "additions": 64,
+        "deletions": 5,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py",
+        "additions": 35,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_refresh_family_revocation.py",
+        "additions": 312,
+        "deletions": 0,
+        "kind": "new",
+        "planned": "新增",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/modules/auth/test_refresh_grace_window.py",
+        "additions": 36,
+        "deletions": 31,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "backend/tests/test_align_platform_change_events_migration.py",
+        "additions": 3,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/__tests__/token-refresh.test.ts",
+        "additions": 93,
+        "deletions": 0,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/api.ts",
+        "additions": 4,
+        "deletions": 2,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": "frontend/src/lib/token-refresh.ts",
+        "additions": 20,
+        "deletions": 4,
+        "kind": "modified",
+        "planned": "修改",
+        "verdict": "planned"
+      },
+      {
+        "path": ".sillyspec/docs/multi-agent-platform/flows/auth-flow.md",
+        "planned": "修改",
+        "additions": 0,
+        "deletions": 0,
+        "kind": "modified",
+        "verdict": "untouched"
+      }
+    ],
+    "excluded": {
+      "foreignDeclared": []
+    },
+    "note": "execute --done 时点冻结（本文件落盘时采集）",
+    "closedBy": "execute --done"
+  },
+  "patchSha256": "6ca737027c536582330b483e08950bb17099d4e07008b478c9fbf73c28768bb5",
+  "patchStatus": "ok"
+}

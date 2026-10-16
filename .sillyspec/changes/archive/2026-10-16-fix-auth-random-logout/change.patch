@@ -1,0 +1,867 @@
+diff --git a/backend/app/core/config.py b/backend/app/core/config.py
+index 7f70ee855..d2b75627e 100644
+--- a/backend/app/core/config.py
++++ b/backend/app/core/config.py
+@@ -158,12 +158,14 @@ class Settings(BaseSettings):
+     )
+     auth_refresh_ttl_days: int = Field(14, ge=1, le=90)
+     auth_refresh_grace_seconds: int = Field(
+-        60,
++        300,
+         ge=0,
+         le=600,
+         description=(
+-            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非 revoke_all"
+-            "(并发刷新误杀兜底)。0=退化为旧行为。D-002@v1。"
++            "Refresh token 轮换宽限窗口(秒)。rotate 后窗口内重复提交换新而非族级吊销"
++            "(并发刷新/休眠恢复误杀兜底)。0=退化为旧行为。"
++            "D-002@v1(初值 60s);2026-10-16-fix-auth-random-logout D-003@v1: 默认 60→300"
++            "(覆盖典型休眠/后台标签页节流恢复窗口)。"
+         ),
+     )
+     auth_bcrypt_rounds: int = Field(12, ge=4, le=15)
+diff --git a/backend/app/core/tests/test_config_auth.py b/backend/app/core/tests/test_config_auth.py
+index 78f69dd7c..7f042d68d 100644
+--- a/backend/app/core/tests/test_config_auth.py
++++ b/backend/app/core/tests/test_config_auth.py
+@@ -1,6 +1,7 @@
+ """Tests for Auth 配置字段(task-01)。
+ 
+-覆盖 FR-03、D-002@v1(refresh grace=60s)、D-003@v1(access TTL 15→30min)。
++覆盖 FR-03、D-002@v1(refresh grace 初值 60s;2026-10-16-fix-auth-random-logout
++D-003@v1 默认 60→300s)、D-003@v1(access TTL 15→30min)。
+ 用例对应蓝图 task-01 §TDD + §边界处理 B-01..B-07。
+ """
+ 
+@@ -22,9 +23,9 @@ def _base_kwargs(**overrides):
+ 
+ 
+ class TestAuthRefreshGraceSeconds:
+-    def test_default_is_60(self):
++    def test_default_is_300(self):
+         s = Settings(**_base_kwargs())
+-        assert s.auth_refresh_grace_seconds == 60
++        assert s.auth_refresh_grace_seconds == 300
+ 
+     def test_env_override(self, monkeypatch):
+         monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "120")
+diff --git a/backend/app/modules/auth/model.py b/backend/app/modules/auth/model.py
+index 72f12d464..739347fac 100644
+--- a/backend/app/modules/auth/model.py
++++ b/backend/app/modules/auth/model.py
+@@ -149,6 +149,16 @@ class Session(BaseModel, table=True):
+         default=None,
+         sa_column=Column(DateTime(timezone=True), nullable=True),
+     )
++    # 会话族标识（2026-10-16-fix-auth-random-logout task-01 / D-001@v1）：同一次登录
++    # 衍生的全部 session 共享一个族值——login 开新族（uuid4），refresh rotate/grace
++    # 续期继承被消费 session 的族（service 侧 `family_id or id` 兜底）。复用检测超窗
++    # 命中时只吊销本族（D-002@v1），不牵连同用户其他登录。nullable=True 兼容存量旧行
++    # （family_id NULL 视为自成一族）。迁移 c3f8a1d6e2b4 仅加列、不回填、不加索引
++    # （族谓词走既有 ix_sessions_user_revoked）。
++    family_id: uuid.UUID | None = Field(
++        default=None,
++        sa_column=Column(Uuid(as_uuid=True), nullable=True),
++    )
+ 
+ 
+ class Role(BaseModel, table=True):
+diff --git a/backend/app/modules/auth/service.py b/backend/app/modules/auth/service.py
+index c01d24104..3292106fa 100644
+--- a/backend/app/modules/auth/service.py
++++ b/backend/app/modules/auth/service.py
+@@ -198,7 +198,15 @@ class AuthService:
+             # is_grace=True 时 session 已 revoked+rotated,跳过避免刷新 rotated_at
+             # 导致 grace 窗口被无限续期(关键防线)。
+             await self._mark_session_rotated(session)
+-        pair = await self._issue_token_pair(user, user_agent=user_agent, ip=ip)
++        # 会话族传递（2026-10-16-fix-auth-random-logout task-02 / D-001@v1）：新行继承
++        # 被消费 session 的族；存量 NULL 行以自身 id 兜底（`family_id or id`，design
++        # Grill B-001——写错则族吊销 fail-open）。rotate 与 grace 两路径共用本签发点。
++        pair = await self._issue_token_pair(
++            user,
++            user_agent=user_agent,
++            ip=ip,
++            family_id=session.family_id or session.id,
++        )
+         await self._db.commit()
+         log.info("auth.refresh.success", user_id=str(user.id), grace=is_grace)
+         return user, pair
+@@ -218,7 +226,13 @@ class AuthService:
+         log.info("auth.logout.success", session_id=str(session.id))
+ 
+     async def revoke_all_user_sessions(self, *, user_id: uuid.UUID) -> int:
+-        """Used by reuse-attack detection. Returns the number of sessions killed."""
++        """吊销该用户全部存活 session。返回吊销行数。
++
++        用途已收窄（2026-10-16-fix-auth-random-logout D-002@v1）：本方法**不再是**
++        复用检测的响应（现走 :meth:`_revoke_session_family` 族级吊销）。admin/settings
++        的「踢全部会话」端点走 UserService.revoke_all_sessions（users 域），不在此。
++        保留供管理语义/测试引用，注释防与族级吊销混用。
++        """
+         now = _utc_now()
+         result = await self._db.execute(
+             update(SessionRow)
+@@ -235,6 +249,41 @@ class AuthService:
+         )
+         return rowcount
+ 
++    async def _revoke_session_family(self, *, user_id: uuid.UUID, family: uuid.UUID) -> int:
++        """复用检测专用（2026-10-16-fix-auth-random-logout task-02 / D-002@v1）：
++        吊销 ``(user_id, family)`` 范围内的存活 session，返回吊销行数。
++
++        谓词两形态：新格式行 ``family_id = :family``；存量 NULL 行
++        ``family_id IS NULL AND id = :family``（自成一族，D-001@v1 兜底语义）。
++        ``user_id`` 前导过滤防跨用户误灭（同 id 概率可忽略但谓词必须自守）。
++
++        **内部 commit 是必须的**（非破坏性执行期裁决）：复用分支在 UPDATE 后立即
++        raise :class:`AuthRefreshReused`，而 ``get_session`` 依赖对异常路径做
++        ``session.rollback()``（backend/app/core/db.py:163-167）——不先行提交则
++        族吊销会被回滚成空操作（历史 ``revoke_all_user_sessions`` 同款内部 commit
++        语义，继承之）。
++        """
++        now = _utc_now()
++        result = await self._db.execute(
++            update(SessionRow)
++            .where(col(SessionRow.user_id) == user_id)
++            .where(col(SessionRow.revoked_at).is_(None))
++            .where(
++                (col(SessionRow.family_id) == family)
++                | ((col(SessionRow.family_id).is_(None)) & (col(SessionRow.id) == family))
++            )
++            .values(revoked_at=now)
++        )
++        await self._db.commit()
++        rowcount = int(getattr(result, "rowcount", 0) or 0)
++        log.warning(
++            "auth.sessions.revoked_family",
++            user_id=str(user_id),
++            family=str(family),
++            count=rowcount,
++        )
++        return rowcount
++
+     async def change_password(
+         self, *, user_id: uuid.UUID, old_password: str, new_password: str
+     ) -> None:
+@@ -332,6 +381,7 @@ class AuthService:
+         *,
+         user_agent: str | None,
+         ip: str | None,
++        family_id: uuid.UUID | None = None,
+     ) -> TokenPair:
+         access_token, payload = create_access_token(
+             user_id=user.id,
+@@ -350,6 +400,9 @@ class AuthService:
+             ip=ip,
+             created_at=_utc_now(),
+             expires_at=expires_at,
++            # 会话族（task-02 / D-001@v1）：None=开新族（login 路径）；refresh 路径
++            # 显式传继承族（service.refresh 传 `session.family_id or session.id`）。
++            family_id=family_id if family_id is not None else uuid.uuid4(),
+         )
+         self._db.add(row)
+         await self._db.flush()
+@@ -421,10 +474,16 @@ class AuthService:
+                     seconds=self._settings.auth_refresh_grace_seconds
+                 ):
+                     return user, revoked, True
+-            # 超 grace 或非 rotate 吊销 → 重放攻击,吊销该用户全部 session。
+-            await self.revoke_all_user_sessions(user_id=revoked.user_id)
++            # 超 grace 或非 rotate 吊销 → 重放攻击。吊销**本族**（task-02 / D-002@v1，
++            # 2026-10-16-fix-auth-random-logout）：只灭命中族系——窃取者用旧 token
++            # 轮换出的后代 session 同族同灭（安全属性保留）；同用户其他登录族不牵连。
++            # 存量 NULL 行以自身 id 兜底（design Grill B-001：只写 family_id 会 fail-open）。
++            await self._revoke_session_family(
++                user_id=revoked.user_id,
++                family=revoked.family_id or revoked.id,
++            )
+             raise AuthRefreshReused(
+-                "登录凭证已被使用过（可能存在安全风险），所有会话已注销，请重新登录。",
++                "登录凭证已被使用过（可能存在安全风险），该设备的登录已注销，请重新登录。",
+                 details={"user_id": str(revoked.user_id)},
+             )
+ 
+diff --git a/backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py b/backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py
+new file mode 100644
+index 000000000..667155cb6
+--- /dev/null
++++ b/backend/migrations/versions/c3f8a1d6e2b4_add_sessions_family_id.py
+@@ -0,0 +1,35 @@
++"""sessions 加 family_id 列（2026-10-16-fix-auth-random-logout task-01 / D-001@v1）。
++
++背景：refresh token 复用检测（旧 token 超 grace 窗再提交）现行处置是吊销该用户
++**全部**会话（service._consume_refresh_token 重放分支），多标签页/休眠恢复的
++正常竞态即全设备团灭。本迁移给 ``sessions`` 加 ``family_id``（UUID，可空）建模
++"会话族"——同一次登录衍生的全部 session 共享一个族值；后续变更把复用检测改
++为只吊销命中族（D-002@v1）。
++
++- 仅加 nullable 列：存量行 family_id=NULL，运行时按"自成一族"处理（读取侧
++  ``family_id or id`` 兜底），零回填、零强制登出。
++- 不加索引：族吊销 UPDATE 谓词 ``user_id=? AND revoked_at IS NULL AND
++  (family_id=? OR (family_id IS NULL AND id=?))`` 走既有 ``ix_sessions_user_revoked``
++  （每用户 session 行数少，user_id 前导过滤后残余行数个位数）。
++"""
++
++from collections.abc import Sequence
++
++import sqlalchemy as sa
++from alembic import op
++
++revision: str = "c3f8a1d6e2b4"
++down_revision: str | Sequence[str] | None = "20261016100000"
++branch_labels: str | Sequence[str] | None = None
++depends_on: str | Sequence[str] | None = None
++
++
++def upgrade() -> None:
++    op.add_column(
++        "sessions",
++        sa.Column("family_id", sa.Uuid(as_uuid=True), nullable=True),
++    )
++
++
++def downgrade() -> None:
++    op.drop_column("sessions", "family_id")
+diff --git a/backend/tests/modules/auth/test_refresh_family_revocation.py b/backend/tests/modules/auth/test_refresh_family_revocation.py
+new file mode 100644
+index 000000000..d7e774762
+--- /dev/null
++++ b/backend/tests/modules/auth/test_refresh_family_revocation.py
+@@ -0,0 +1,312 @@
++"""会话族（family）语义测试（TDD 红阶段）——2026-10-16-fix-auth-random-logout task-02。
++
++覆盖来源
++--------
++- 需求：
++  - ``FR-01``（会话族建模）：login 开新族（uuid4）、refresh rotate/grace 续期继承族、
++    存量 NULL 行自成一族（``family_id or id`` 兜底两形态）。
++  - ``FR-02``（复用检测族级吊销）：旧 token 超 grace 复用只灭本族，同用户异族存活。
++  - ``FR-03``（宽限窗默认 300s）。
++- 决策：``D-001@v1``（family_id 列）/ ``D-002@v1``（族级吊销 + 文案）/ ``D-003@v1``（默认 300）。
++- 设计：``design.md`` §总体方案 Phase 1、§数据模型（谓词 ``user_id=? AND revoked_at IS NULL
++  AND (family_id=? OR (family_id IS NULL AND id=?))``）、§生命周期契约表 reuse 行。
++- Grill：B-001（调用处 ``revoked.family_id or revoked.id`` 兜底不得省——T3 专测）。
++
++TDD 顺序
++--------
++- **本任务 = 红**：service 尚未写族（login/refresh 产出的行 family_id 全为 NULL、复用分支
++  仍 revoke_all）→ 用例 1/2/3 应 FAIL。
++- 实现后转绿。
++
++约束
++----
++- 只测 service 层（直接构造 AuthService），不经 HTTP。
++- 复用根 ``backend/conftest.py`` 的 ``db_session`` fixture（内存 SQLite）。
++- grace 窗显式设 60s（用例内 settings.auth_refresh_grace_seconds），与默认值变更解耦。
++"""
++
++from __future__ import annotations
++
++import uuid
++from datetime import UTC, datetime, timedelta
++
++import pytest
++from sqlalchemy import func, select
++from sqlalchemy.ext.asyncio import AsyncSession
++
++from app.core.config import get_settings
++from app.core.errors import AuthRefreshReused
++from app.core.security import (
++    generate_refresh_token,
++    hash_refresh_token,
++    hmac_token_id,
++    password_hasher,
++)
++from app.modules.auth.model import Session as SessionRow
++from app.modules.auth.model import User
++from app.modules.auth.service import AuthService
++
++_TEST_PASSWORD = "Xx1!abcd"
++_UA = "pytest-ua"
++_IP = "1.1.1.1"
++
++
++async def _make_user(db: AsyncSession, *, username: str) -> User:
++    """建一个 active user（bcrypt rounds 已由 AuthService 构造时 configure）。"""
++    user = User(
++        id=uuid.uuid4(),
++        email=f"{username}@example.com",
++        username=username,
++        password_hash=password_hasher.hash(_TEST_PASSWORD),
++        status="active",
++        login_enabled=True,
++    )
++    db.add(user)
++    await db.commit()
++    await db.refresh(user)
++    return user
++
++
++def _svc(db: AsyncSession) -> AuthService:
++    settings = get_settings()
++    # grace 窗显式 60s：与默认值（300）解耦，超窗判定用 now-61s 稳定复现。
++    settings.auth_refresh_grace_seconds = 60
++    return AuthService(db, settings=settings)
++
++
++async def _login(service: AuthService, *, account: str) -> str:
++    """login 并返回 refresh token。"""
++    _user, pair = await service.login(
++        account=account, password=_TEST_PASSWORD, user_agent=_UA, ip=_IP
++    )
++    return pair.refresh_token
++
++
++async def _make_legacy_session(db: AsyncSession, *, user_id: uuid.UUID) -> tuple[str, SessionRow]:
++    """插入一行**存量形态**（family_id=NULL）的 live session，返回 (refresh_token, row)。
++
++    对齐 D-001 兜底语义：NULL 行自成一族（读取侧 ``family_id or id``）。
++    """
++    token, token_id = generate_refresh_token()
++    row = SessionRow(
++        id=uuid.uuid4(),
++        user_id=user_id,
++        refresh_token_hash=hash_refresh_token(token),
++        token_id_hmac=hmac_token_id(token_id, get_settings()),
++        family_id=None,
++        created_at=datetime.now(UTC),
++        expires_at=datetime.now(UTC) + timedelta(days=7),
++    )
++    db.add(row)
++    await db.commit()
++    await db.refresh(row)
++    return token, row
++
++
++async def _active_count(db: AsyncSession, *, user_id: uuid.UUID) -> int:
++    stmt = (
++        select(func.count())
++        .select_from(SessionRow)
++        .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
++    )
++    return int((await db.execute(stmt)).scalar_one())
++
++
++async def _mature_rotation(db: AsyncSession, *, session_id: uuid.UUID, seconds: int) -> None:
++    """把指定行的 rotated_at 摆到 now-seconds（seconds>grace 即超窗）。"""
++    row = (await db.execute(select(SessionRow).where(SessionRow.id == session_id))).scalar_one()
++    row.rotated_at = datetime.now(UTC) - timedelta(seconds=seconds)
++    await db.commit()
++
++
++async def _latest_session(db: AsyncSession, *, user_id: uuid.UUID) -> SessionRow:
++    stmt = (
++        select(SessionRow)
++        .where(SessionRow.user_id == user_id)
++        .order_by(SessionRow.created_at.desc(), SessionRow.id.desc())
++        .limit(1)
++    )
++    return (await db.execute(stmt)).scalar_one()
++
++
++# ── 用例 1：族隔离——超窗复用只灭本族，异族（另一次登录）存活（FR-02 核心） ──
++
++
++async def test_reuse_beyond_grace_revokes_only_hit_family(db_session: AsyncSession):
++    """设备 A 族旧 token 超窗复用 → A 族全灭；设备 B 族（另一次 login）不受牵连。"""
++    service = _svc(db_session)
++    user = await _make_user(db_session, username="fam1")
++
++    # 设备 A：t1 login（族 F1）→ rotate → 旧 t1 超窗复用。
++    t1 = await _login(service, account="fam1")
++    # 设备 B：第二次 login（族 F2；token 本身不参与后续步骤，仅建立异族会话）。
++    await _login(service, account="fam1")
++
++    # 记录两族 id。
++    rows = (
++        (await db_session.execute(select(SessionRow).where(SessionRow.user_id == user.id)))
++        .scalars()
++        .all()
++    )
++    fam_a = [r for r in rows if r.family_id is not None]
++    assert len(fam_a) >= 2, "login 应产出非空 family_id（红阶段此断言失败）"
++    # t1/t2 两行 family 不同（两次登录两族）。
++    assert len({r.family_id for r in fam_a}) == 2
++
++    # rotate t1 → S1 revoked+rotated，child S3 同族。
++    await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
++    # 找到被 rotate 的行（revoked 非空且 family=F1）。
++    rotated = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id, SessionRow.revoked_at.is_not(None)
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert len(rotated) == 1
++    s1 = rotated[0]
++    await _mature_rotation(db_session, session_id=s1.id, seconds=61)
++
++    # 超窗复用 → AuthRefreshReused。
++    with pytest.raises(AuthRefreshReused):
++        await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
++
++    # 断言：F1 族全灭（S1 + child），F2（t2 登录）存活。
++    f1_rows = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id,
++                    (SessionRow.family_id == s1.family_id) | (SessionRow.id == s1.id),
++                )
++            )
++        )
++        .scalars()
++        .all()
++    )
++    assert all(r.revoked_at is not None for r in f1_rows), "命中族应全部吊销"
++    # t2 的行仍 active。
++    t2_row = next(r for r in rows if r.id != s1.id and r.family_id != s1.family_id)
++    await db_session.refresh(t2_row)
++    assert t2_row.revoked_at is None, "同用户异族 session 不应被牵连"
++    # 活跃数：t2 + child？——child 属 F1 已被灭；只剩 t2 登录族 1 条。
++    assert await _active_count(db_session, user_id=user.id) == 1
++
++
++# ── 用例 2：grace 续期继承族（FR-01） ──
++
++
++async def test_grace_reissue_inherits_family(db_session: AsyncSession):
++    """rotate 后 grace 窗内旧 token 重签新对：新行继承被消费族，且不吊销任何行。"""
++    service = _svc(db_session)
++    user = await _make_user(db_session, username="fam2")
++
++    t1 = await _login(service, account="fam2")
++    login_row = (
++        (await db_session.execute(select(SessionRow).where(SessionRow.user_id == user.id)))
++        .scalars()
++        .one()
++    )
++    assert login_row.family_id is not None, "login 应开新族（红阶段失败）"
++
++    # 正常 rotate。
++    await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
++    rotated = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id, SessionRow.revoked_at.is_not(None)
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )
++    assert rotated.family_id == login_row.family_id, "rotate child 应继承族"
++
++    # rotated_at 摆到 now（窗内）→ grace 续期。
++    await _mature_rotation(db_session, session_id=rotated.id, seconds=0)
++    _user2, pair2 = await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
++    assert pair2.access_token
++
++    # grace 新签发的行也继承族；且无新增吊销波及（窗内不灭族）。
++    newest = await _latest_session(db_session, user_id=user.id)
++    assert newest.family_id == login_row.family_id, "grace 新行应继承族"
++    assert newest.revoked_at is None
++
++
++# ── 用例 3：存量 NULL 行自成一族，子代同族；超窗复用只灭本族（D-001 兜底 + B-001） ──
++
++
++async def test_legacy_null_session_self_family_and_children(db_session: AsyncSession):
++    """family_id=NULL 旧行：自身按 id 兜底命中，子代继承其 id；异族（新登录）不牵连。"""
++    service = _svc(db_session)
++    user = await _make_user(db_session, username="fam3")
++
++    legacy_token, legacy_row = await _make_legacy_session(db_session, user_id=user.id)
++    await _login(service, account="fam3")  # 异族（新格式登录；token 不参与后续步骤）
++
++    # rotate 存量行 → child 应继承 family = legacy_row.id。
++    await service.refresh(refresh_token=legacy_token, user_agent=_UA, ip=_IP)
++    await db_session.refresh(legacy_row)
++    assert legacy_row.revoked_at is not None and legacy_row.rotated_at is not None
++    child = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id, SessionRow.family_id == legacy_row.id
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )  # 红阶段：无任何行 family=legacy.id → NoResultFound（即 FAIL）
++    assert child.family_id == legacy_row.id, "child 应继承存量行 id 作为族（红阶段失败）"
++
++    # 超窗复用存量 token → 只灭 legacy 族（含 child）；异族存活。
++    await _mature_rotation(db_session, session_id=legacy_row.id, seconds=61)
++    with pytest.raises(AuthRefreshReused):
++        await service.refresh(refresh_token=legacy_token, user_agent=_UA, ip=_IP)
++
++    await db_session.refresh(child)
++    assert child.revoked_at is not None, "子代（family=legacy.id）应被族吊销命中"
++
++    other_row = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id,
++                    SessionRow.family_id.is_not(None),
++                    SessionRow.revoked_at.is_(None),
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )
++    assert other_row.revoked_at is None, "异族登录不应被牵连"
++
++
++# ── 用例 4：每次 login 开新族（FR-01） ──
++
++
++async def test_each_login_opens_new_family(db_session: AsyncSession):
++    service = _svc(db_session)
++    user = await _make_user(db_session, username="fam4")
++
++    t1 = await _login(service, account="fam4")
++    t2 = await _login(service, account="fam4")
++    assert t1 != t2
++
++    rows = (
++        (await db_session.execute(select(SessionRow).where(SessionRow.user_id == user.id)))
++        .scalars()
++        .all()
++    )
++    fams = [r.family_id for r in rows]
++    assert all(f is not None for f in fams), "login 行 family_id 应非空（红阶段失败）"
++    assert len(set(fams)) == 2, "两次登录应为两个不同族"
+diff --git a/backend/tests/modules/auth/test_refresh_grace_window.py b/backend/tests/modules/auth/test_refresh_grace_window.py
+index c25297659..056b484d8 100644
+--- a/backend/tests/modules/auth/test_refresh_grace_window.py
++++ b/backend/tests/modules/auth/test_refresh_grace_window.py
+@@ -7,12 +7,13 @@
+ 覆盖来源
+ --------
+ - 需求:
+-  - ``FR-01``(后端 grace window):grace 内旧 token 重签、不误杀;超 grace 仍吊销
+-    (用例 1 ↔ GWT-1,用例 2 ↔ GWT-2)。
++  - ``FR-01``(后端 grace window):grace 内旧 token 重签、不误杀;超 grace 吊销**命中族**
++    （2026-10-16-fix-auth-random-logout D-002@v1 改族级，用例 2 断言同步）。
+   - ``FR-07``(logout 调用点适配三元返回):用例 3 守护。
+ - 决策:
+   - ``D-001@v1``(grace 窗口内被 rotate 的旧 refresh token 重新签发新对)。
+   - ``D-002@v1``(grace=60s 可配置,``auth_refresh_grace_seconds`` 注入)。
++  - 2026-10-16-fix-auth-random-logout ``D-002@v1``:超窗复用改族级吊销(用例 2 改断言)。
+ - 设计:
+   - ``design.md`` §7(``_consume_refresh_token`` 返回 ``(User, Session, is_grace)``;
+     ``refresh()`` 的 ``is_grace`` 分支;``logout_session_by_refresh`` 三元解包)。
+@@ -167,77 +168,81 @@ async def test_refresh_within_grace_does_not_revoke_other_sessions(db_session: A
+     assert active_count >= 2, f"grace 续期应新增 active session,实际 {active_count}"
+ 
+ 
+-# ── 用例 2:超 grace 仍吊销该用户全部 session(FR-01 GWT-2) ──────────────────
++# ── 用例 2:超 grace 只吊销命中族,异族存活（FR-01 GWT-2 / 2026-10-16 族语义） ──
++# 2026-10-16-fix-auth-random-logout D-002@v1 改断言：原「超 grace 全用户吊销」换为
++# 「超 grace 只灭本族」——Sx 为存量形态行（family_id=NULL，自成一族），代表"其他设备
++# 登录"，在族级语义下必须存活（原 revoke_all 语义下会被误杀，正是本次修复的缺陷面）。
+ 
+ 
+-@pytest.mark.xfail(
+-    reason=(
+-        "RED 阶段 service 无 grace 判定,但 reuse 路径行为碰巧接近(同样抛 "
+-        "AuthRefreshReused + revoke_all),本用例可能意外 PASS;task-05 实现 "
+-        "rotated_at 判定后转确定 PASS。"
+-    ),
+-    strict=False,
+-)
+-async def test_refresh_beyond_grace_revokes_all_user_sessions(db_session: AsyncSession):
++async def test_refresh_beyond_grace_revokes_family_not_others(db_session: AsyncSession):
+     """T1 已 rotate(rotated_at=now-61s,超 60s grace),再用 T1 refresh。
+ 
+-    期望:``AuthRefreshReused`` + ``revoke_all_user_sessions``(Sx 被吊销)。
++    期望:``AuthRefreshReused`` + 族级吊销——T1 所属族全灭；Sx（异族）存活。
+ 
+-    RED 处理:task-05 前 service 无 ``rotated_at`` 判定,但走 reuse 路径行为碰巧
+-    接近(同样抛 AuthRefreshReused 且 revoke_all 吊销 Sx),故本用例在红阶段可能
+-    意外 PASS,用 ``xfail(strict=False)`` 标注(参见 task-04.md 边界 5/AC-04-3)。
++    （原 xfail 标注随旧语义一并移除：task-05 起 rotated_at 判定与族分支均已落地，
++    本用例为确定断言。）
+     """
+     settings = get_settings()
+     settings.auth_refresh_grace_seconds = 60
+     service = AuthService(db_session, settings=settings)
+ 
+     user = await _make_user(db_session, email="u2@example.com")
+-    t1 = await _login_for_refresh_token(service, account="u2@example.com")
++    # 纯 username 登录（D-001：account 走 username 查库），传 "u2" 非邮箱形式——
++    # 旧版 xfail 掩盖过该处邮箱传参的登录失败。
++    t1 = await _login_for_refresh_token(service, account="u2")
+     sx = await _make_other_active_session(db_session, user_id=user.id)
+ 
+     await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
++    # rotate 产生的 child（T1 族后代）——超窗复用须同族同灭（排除异族 Sx）。
++    child = (
++        (
++            await db_session.execute(
++                select(SessionRow).where(
++                    SessionRow.user_id == user.id,
++                    SessionRow.revoked_at.is_(None),
++                    SessionRow.id != sx.id,
++                )
++            )
++        )
++        .scalars()
++        .one()
++    )
+     # 手动把 rotated_at 摆到 now-61s(明确超 grace 窗口)。
+     await _set_rotated_at(
+         db_session, user_id=user.id, rotated_at=datetime.now(UTC) - timedelta(seconds=61)
+     )
+ 
+-    # 期望:AuthRefreshReused + revoke_all(Sx 被吊销)。
++    # 期望:AuthRefreshReused + 族级吊销（T1 族全灭、异族 Sx 存活）。
+     with pytest.raises(AuthRefreshReused):
+         await service.refresh(refresh_token=t1, user_agent=_UA, ip=_IP)
+ 
++    await db_session.refresh(child)
++    assert child.revoked_at is not None, "命中族后代（T1 轮换 child）应被族吊销命中"
+     await db_session.refresh(sx)
+-    assert sx.revoked_at is not None, "超 grace 重放应吊销该用户全部 session"
++    assert sx.revoked_at is None, "同用户异族 session 不应被牵连（族级吊销语义）"
+ 
+ 
+ # ── 用例 3:logout 三元解包不抛(FR-07 调用点守护) ──────────────────────────
+ 
+ 
+-@pytest.mark.xfail(
+-    reason=(
+-        "RED 阶段 service 仍二元返回,_consume_refresh_token 二元解包在 logout 处"
+-        "恰好成立,用例碰巧 PASS;task-05 改三元返回后,若漏改 logout 解包会暴露"
+-        "回归,届时本用例稳定 PASS 并移除 xfail。"
+-    ),
+-    strict=False,
+-)
+ async def test_logout_unpacks_three_tuple_without_error(db_session: AsyncSession):
+     """logout_session_by_refresh 守护 ``_consume_refresh_token`` 三元返回改造。
+ 
+     FR-07:``logout_session_by_refresh`` 内部调 ``_consume_refresh_token`` 返回三元组
+-    后应解包 ``_, session, _``;若 task-05 漏改仍二元,此处会抛
++    后应解包 ``_, session, _``;若漏改仍二元,此处会抛
+     ``ValueError: too many values to unpack``——本用例守护该回归。
+ 
+     断言:logout 不抛 unpack 错误,且 logout 命中已 rotate 的 session 时**不**签发
+     新对(DB 中 active session 数量只减不增)。
+ 
+-    RED 处理:task-05 前 service 仍二元,logout 二元解包二元成立,用例意外 PASS,
+-    用 ``xfail(strict=False)`` 标注(参见 task-04.md 边界 5/AC-04-4)。
++    （原 ``xfail(strict=False)`` 已移除：三元返回早已落地，且该 xfail 曾把
++    「邮箱形式账号登录失败」一并吞成假绿——账号改纯 username 形式 "u3"。）
+     """
+     settings = get_settings()
+     service = AuthService(db_session, settings=settings)
+ 
+     user = await _make_user(db_session, email="u3@example.com")
+-    t1 = await _login_for_refresh_token(service, account="u3@example.com")
++    t1 = await _login_for_refresh_token(service, account="u3")
+ 
+     active_before = await _count_active_sessions(db_session, user_id=user.id)
+ 
+diff --git a/backend/tests/test_align_platform_change_events_migration.py b/backend/tests/test_align_platform_change_events_migration.py
+index 9141e2977..31c488251 100644
+--- a/backend/tests/test_align_platform_change_events_migration.py
++++ b/backend/tests/test_align_platform_change_events_migration.py
+@@ -112,8 +112,9 @@ class TestMigrationStructure:
+         # （knowledge_search pgvector 两表，2026-10-15-knowledge-search-pgvector）→
+         # 20261016010000（drop uq_kssc_workspace_path_anchor_title——生产语料
+         # 重号条目撞约束实证，2026-10-15-knowledge-search-pgvector）。
+-        # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）
+-        assert heads[0] == "20261016100000"  # title_fallback 迁移成为新 head（注释链续写）
++        # 20261016100000（agent_sessions 加 title_fallback 列+回填——2026-10-16-backend-mem-polling task-08）→
++        # c3f8a1d6e2b4（sessions 加 family_id 列——2026-10-16-fix-auth-random-logout task-01）。
++        assert heads[0] == "c3f8a1d6e2b4"  # family_id 迁移成为新 head（注释链续写）
+ 
+     def test_revision_chain(self) -> None:
+         mod = _load_migration_module()
+diff --git a/frontend/src/lib/__tests__/token-refresh.test.ts b/frontend/src/lib/__tests__/token-refresh.test.ts
+index 54f9a54fc..91d5eb185 100644
+--- a/frontend/src/lib/__tests__/token-refresh.test.ts
++++ b/frontend/src/lib/__tests__/token-refresh.test.ts
+@@ -336,6 +336,99 @@ describe("ensureFreshAccessToken · single-flight (FR-04)", () => {
+       vi.useRealTimers();
+     }
+   });
++
++  // ── 2026-10-16-fix-auth-random-logout task-03（FR-04/FR-05，D-004@v1）：
++  //    doRefresh 状态码分流——5xx/408/429 抛 ApiError 不清会话（瞬态故障，对齐
++  //    ql-20260917-005 timeout 抛错通道）；401/403/其余 4xx 返 null（明确失效，
++  //    上层 api.ts 401 收口清会话跳登录）。归类优先级：抛错枚举先判，其余 4xx 后落。
++
++  it("用例10:refresh 收到 503/504 抛 ApiError 且不清会话（瞬态故障）", async () => {
++    // 顺序坑：必须先 loadTokenRefresh（doMock 注入 mock store 后再加载 token-refresh），
++    // 再动态 import api 取同一代际的 ApiError 类——反过来会先把 token-refresh 以真实
++    // store 加载（doMock 失效），ensureFreshAccessToken 早退 null 掩盖被测路径。
++    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
++    const { ApiError } = await import("@/lib/api");
++    fetchMock.mockReset();
++    fetchMock
++      .mockResolvedValueOnce(
++        new Response("bad gateway", { status: 503 }),
++      ) // 第 1 次：部署窗口 5xx
++      .mockResolvedValueOnce(
++        new Response("gateway timeout", { status: 504 }),
++      ); // 第 2 次：代理抖动
++    const clearSpy = vi.spyOn(useSession.getState(), "clear");
++    const setTokensSpy = vi.spyOn(useSession.getState(), "setTokens");
++
++    // 503 → 抛 ApiError，status 透传
++    const r503 = await ensureFreshAccessToken().then(
++      (v) => ({ ok: true as const, v }),
++      (e: unknown) => ({ ok: false as const, e }),
++    );
++    expect(r503.ok).toBe(false);
++    const err503 = (r503 as { ok: false; e: unknown }).e;
++    expect(err503).toBeInstanceOf(ApiError);
++    expect((err503 as { status?: number }).status).toBe(503);
++
++    // 504 → 同样抛（且不写 store）
++    const r504 = await ensureFreshAccessToken().then(
++      (v) => ({ ok: true as const, v }),
++      (e: unknown) => ({ ok: false as const, e }),
++    );
++    expect(r504.ok).toBe(false);
++    expect((r504 as { ok: false; e: unknown }).e).toBeInstanceOf(ApiError);
++    expect(((r504 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(504);
++
++    // 会话未清、token 未动（区别于返 null 的「明确失效」链）
++    expect(clearSpy).not.toHaveBeenCalled();
++    expect(setTokensSpy).not.toHaveBeenCalled();
++    expect(useSession.getState().accessToken).toBe("old-access");
++    expect(useSession.getState().refreshToken).toBe("rt-1");
++  });
++
++  it("用例11:refresh 收到 408/429 归入抛错（瞬态归类优先级，B-002）", async () => {
++    // 顺序同用例10：先 loadTokenRefresh 再 import api（代际一致）。
++    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
++    const { ApiError } = await import("@/lib/api");
++    fetchMock.mockReset();
++    fetchMock
++      .mockResolvedValueOnce(new Response("request timeout", { status: 408 }))
++      .mockResolvedValueOnce(new Response("too many requests", { status: 429 }));
++    const clearSpy = vi.spyOn(useSession.getState(), "clear");
++
++    const r408 = await ensureFreshAccessToken().then(
++      (v) => ({ ok: true as const, v }),
++      (e: unknown) => ({ ok: false as const, e }),
++    );
++    expect(r408.ok).toBe(false);
++    expect((r408 as { ok: false; e: unknown }).e).toBeInstanceOf(ApiError);
++    expect(((r408 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(408);
++
++    const r429 = await ensureFreshAccessToken().then(
++      (v) => ({ ok: true as const, v }),
++      (e: unknown) => ({ ok: false as const, e }),
++    );
++    expect(r429.ok).toBe(false);
++    expect(((r429 as { ok: false; e: unknown }).e as { status?: number }).status).toBe(429);
++
++    expect(clearSpy).not.toHaveBeenCalled();
++    expect(useSession.getState().refreshToken).toBe("rt-1");
++  });
++
++  it("用例12:refresh 收到 401 返 null（明确失效，交上层清会话）", async () => {
++    fetchMock.mockReset();
++    fetchMock.mockResolvedValueOnce(
++      new Response(JSON.stringify({ code: "auth_refresh_reused", message: "reused" }), {
++        status: 401,
++      }),
++    );
++    const { ensureFreshAccessToken } = await loadTokenRefresh(useSession);
++
++    const r = await ensureFreshAccessToken();
++    expect(r).toBeNull();
++    // doRefresh 只返 null，不清会话（clear+redirect 是 api.ts 401 收口职责）
++    expect(useSession.getState().accessToken).toBe("old-access");
++    expect(useSession.getState().refreshToken).toBe("rt-1");
++  });
+ });
+ 
+ describe("decodeJwtExp (FR-04 辅助 / task-09 依赖)", () => {
+diff --git a/frontend/src/lib/api.ts b/frontend/src/lib/api.ts
+index 1602b5300..8f7e0dd48 100644
+--- a/frontend/src/lib/api.ts
++++ b/frontend/src/lib/api.ts
+@@ -233,7 +233,8 @@ export async function apiFetch<T = unknown>(
+       !isAuthEndpoint(url.pathname)
+     ) {
+       // 单飞刷新:并发 401 风暴由 token-refresh 模块级 inflight 保证只发 1 次
+-      // POST /api/auth/refresh 并写回 store;未登录/未 hydrate/refresh 失败均返回 null。
++      // POST /api/auth/refresh 并写回 store;未登录/未 hydrate/refresh 收到 4xx 明确失效返回 null;
++      // 瞬态故障(5xx/408/429/超时/网络异常)抛错传播,不落本分支(2026-10-16-fix-auth-random-logout D-004@v1)。
+       const newToken = await ensureFreshAccessToken();
+       if (newToken) {
+         // 拿到新 access token,带 x-auth-retry:1 重试一次(防单请求无限重试)。
+@@ -246,7 +247,8 @@ export async function apiFetch<T = unknown>(
+           query,
+         });
+       }
+-      // 单飞失败(未登录 / refresh 失败 / 未 hydrate):清 session + 跳 login,行为与原实现一致。
++      // 单飞返 null(未登录 / 未 hydrate / refresh 明确失效 4xx):清 session + 跳 login——
++      // 只有「明确失效」才登出;瞬态故障走抛错通道(修复部署窗口/代理抖动误踢在线用户)。
+       useSession.getState().clear();
+       // 2026-10-14-logout-localstorage-user-data-cleanup：会话终结，localStorage
+       // 用户域键（草稿/未读/活性）同清——与两处主动登出同口径（设备级偏好保留）。
+diff --git a/frontend/src/lib/token-refresh.ts b/frontend/src/lib/token-refresh.ts
+index 577272615..4853cb85e 100644
+--- a/frontend/src/lib/token-refresh.ts
++++ b/frontend/src/lib/token-refresh.ts
+@@ -26,7 +26,8 @@ const REFRESH_TIMEOUT_MS = 15_000;
+  * 确保拿到一个"尽可能新鲜"的 access token:若当前没有进行中的刷新则发起一次,
+  * 否则等待已进行中的刷新完成。并发调用只触发 **1 次** `POST /api/auth/refresh`。
+  *
+- * @returns 新的 access token;无法刷新(未登录 / 未 hydrate / refresh 失败)时返回 null。
++ * @returns 新的 access token;无法刷新(未登录 / 未 hydrate / refresh 收到 4xx 明确失效)时返回 null;
++ *   瞬态故障(5xx/408/429/超时/网络异常)以 ApiError 抛出——不清会话,见 doRefresh 分流。
+  */
+ export async function ensureFreshAccessToken(): Promise<string | null> {
+   const { refreshToken, hydrated } = useSession.getState();
+@@ -53,8 +54,10 @@ export async function ensureFreshAccessToken(): Promise<string | null> {
+   }
+ }
+ 
+-/** 实际发起 refresh 请求。返回新 token 对,失败返回 null(不抛,交由调用方判定);
+- * 超时抛 ApiError(timeout)(ql-20260917-005,防僵死挂起)。 */
++/** 实际发起 refresh 请求,按状态码分流(2026-10-16-fix-auth-random-logout task-03 / D-004@v1):
++ * 2xx 返回新 token 对;401/403/其余 4xx 返回 null(明确失效,交上层清会话);
++ * 5xx/408/429 抛 ApiError(状态码透传)——瞬态故障不清会话(修复部署窗口/代理抖动误踢),
++ * 沿用 ql-20260917-005 timeout 抛错通道;超时同样抛 ApiError(timeout)。 */
+ async function doRefresh(): Promise<SessionTokens | null> {
+   const { refreshToken } = useSession.getState();
+   if (!refreshToken) return null;
+@@ -83,7 +86,20 @@ async function doRefresh(): Promise<SessionTokens | null> {
+   } finally {
+     clearTimeout(timer);
+   }
+-  if (!resp.ok) return null;
++  if (!resp.ok) {
++    // 瞬态故障优先判定(先于「其余 4xx → null」,design Grill B-002 归类优先级):
++    // 5xx=后端部署窗口/代理抖动,408=请求超时,429=限流——都不代表凭证失效。
++    if (resp.status >= 500 || resp.status === 408 || resp.status === 429) {
++      throw new ApiError(resp.status, {
++        code: "refresh_transient",
++        message: `登录状态续期失败（HTTP ${resp.status}），请稍后重试`,
++        request_id: resp.headers.get("x-request-id"),
++        details: null,
++      });
++    }
++    // 401/403 及其余 4xx:凭证明确失效 → null,交上层(api.ts 401 收口)清会话跳登录。
++    return null;
++  }
+ 
+   const pair = (await resp.json()) as {
+     access_token: string;

@@ -2947,13 +2947,16 @@ created_at: 2026-09-28T13:29:09.736Z
 
 ## FR-unmapped-260 后端 grace window(grace 内旧 token 重签、不误杀)
 变更：2026-06-24-2026-06-24-concurrent-refresh-revoke
-状态：active
+状态：superseded
+superseded_by：FR-auth-003
+取代链：FR-unmapped-260 ← FR-auth-003（2026-10-16-fix-auth-random-logout 承接）
+退役理由：默认宽限窗 60→300 秒随族级吊销变更调整
 摘要：默认场景
 依据决策：D-001@v1、D-002@v1
 场景正文：
 - 场景：默认场景 — Given 用户已登录,有一 active session S1(refresh_token=T1);T1 被正常 rotate 产生 S2,`S2.rotated_at=；When 在 grace 窗口(`now - rotated_at < auth_refresh_grace_seconds`,默认 60s)内再次用 T1 调 `POS；Then 返回 200 + 全新 TokenPair;**不**触发 `revoke_all_user_sessions`;Sx 仍 active;新增一个 active
 全文：.sillyspec/changes/archive/2026-06-24-2026-06-24-concurrent-refresh-revoke/requirements.md#FR-01
-最近确认：29acb47ea
+最近确认：d43971698
 
 ## FR-unmapped-261 Session.rotated_at 字段 + migration
 变更：2026-06-24-2026-06-24-concurrent-refresh-revoke
