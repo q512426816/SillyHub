@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "change": "2026-10-16-session-pill-dock-drag",
+  "reviewer": "inline-self（环境无已注册子代理，主会话代行）",
+  "verdict": "PASS",
+  "reviewedAgainst": "f01643307ca5551037bf19b31003c63912872e4c",
+  "findings": [],
+  "dimensionNotes": {
+    "乱序": "ok——拖拽手势经 pointerId 过滤（多指/迟到 move 不串）；settle/RO/resize 收敛全走幂等 snapPos（存档值本就是吸附态，重放不漂移）；边界元素 rect 每次现查不缓存，元素未挂载回落视口、后挂载自愈",
+    "并发": "ok——localStorage[sillyhub:session-pill-dock] 仅拖拽结束单点写入（拖动过程不写）；停靠组为会话页单挂载点无页面内并发写；多标签页各拖各的后者覆盖前者，仅 UI 位置偏好无数据破坏",
+    "切换": "ok——拖拽中卸载由 effect cleanup 摘 window 监听；未持久化中间位丢弃回落存档/默认；SSR/水合首帧 pos=null 不渲染（createPortal 仅客户端）；拖拽结束才 persist",
+    "作用域": "ok——停靠位是浏览器全局偏好（有意为之，同悬浮球先例）；两 pill 数据面各自按 sessionId/workspaceId 隔离不串台"
+  },
+  "checklist": {
+    "frImplTest一致": "FR-01~05 + task-06 全部兑现且有绑定测试：dock 11 用例（竖排 portal/显隐 empty:hidden、默认位、左右吸附、越界钳制、持久化恢复、损坏存档回落、resize 保持吸附侧、边界容器默认位/左右吸附/元素缺失回落、阈值内 click 放行、拖后吞 click 时间窗）；两 pill hover 不弹/click 弹用例各 1；浏览器实测 3000 部署页 7 项全过（含 insideTimeline=true 越界钳回）",
+    "盲维四问真实性": "design 四问均非「不适用」且与 diff 相符：pointerId 过滤+幂等 snapPos+现查 bounds 有代码锚点；单点写入/单挂载点/cleanup 摘监听均可在 session-floating-pill-dock.tsx 核对",
+    "披露边界裁决": "边界已裁决：可接受——①拖拽尾音 250ms 时间窗内真点击被吞（同悬浮球先例，窗口极短）；②边界元素缺失瞬间默认位以 EDGE_GAP 贴视口底（元素出现后 settle 自愈）；③多标签页停靠位互相覆盖（仅 UI 偏好）",
+    "防护声明": "位移阈值 6px 防误拖、拖后吞 click 防误弹、empty:hidden 防空组拦截点击、clamp first 防越界——四道防护均有独立测试用例守住",
+    "生成物同步": "不适用：无后端 schema 改动（前后端契约零变更，gen:types 义务不触发）"
+  },
+  "reviewedAt": "2026-10-16T07:50:00Z"
+}
