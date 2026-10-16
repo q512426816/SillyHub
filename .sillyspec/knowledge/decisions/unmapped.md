@@ -308,3 +308,11 @@
 锚点：未记录
 最近确认：256aa6feb2c4349f3d4a1b513e94fb9fa5fddd0e
 理由：最大风险：无（渲染条件放宽面极小——待决策 pill 自带三类全空渲染 null 的显隐门）。放弃的方案：给老会话回填 workspace_id（数据修复面大且改变会话归属语义，否决——显隐不应依赖归属字段完整性）。
+
+## D-unmapped-060@v1 设计期风险与放弃方案（底稿）
+状态：implemented
+变更：2026-10-16-session-pill-dock-drag
+原编号：D-001@v1
+锚点：未记录
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+理由：最大风险：拖拽与点击手势冲突（按住 pill 移动一点算点击还是拖拽）。口径=位移阈值 6px（小于阈值放行 click）+ 松手后 250ms 吞 click 时间窗（比布尔位稳：拖出元素外松手 click 不触发，布尔位会误吞下一次真点击）——两者均沿用悬浮球实测过的先例。 试过但放弃：a) pointer capture 实现拖拽——jsdom 无实现（测试不可达）且 capture 会劫持 click 目标破坏 pill 点击；b) 拖动过程每次 setPos 都持久化——localStorage 高频写（悬浮球现状），改为松手单点写；c) 保留 hover 双触发——用户明确要求纯点击防误触；d) 沿用挂载点 absolute 容器改竖排——拖不出面板且受祖先裁剪，改 portal body fixed。

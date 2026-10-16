@@ -1,0 +1,905 @@
+diff --git a/docs/releases/2026-10-16-008-ee1b32dd5.md b/docs/releases/2026-10-16-008-ee1b32dd5.md
+new file mode 100644
+index 000000000..b03f566e1
+--- /dev/null
++++ b/docs/releases/2026-10-16-008-ee1b32dd5.md
+@@ -0,0 +1,46 @@
++---
++seq: 8
++deployed_at: "2026-10-16 15:23:11"
++status: success
++commit_from: 9b5485fb0
++commit_to: ee1b32dd5
++summary: 会话两悬浮 pill 合组竖排停靠——点击展开替代 hover + 整组可拖拽吸附边界
++agent: zcode-agent
++commits:
++  - sha: ee1b32dd5
++    message: "docs(sillyspec): 2026-10-16-session-pill-dock-drag 薄变更四件套填答 (task-01..05)"
++    author: WhaleFall
++  - sha: 16382d959
++    message: "fix(frontend): 会话两悬浮 pill 合组竖排停靠——点击展开替代 hover + 整组窗口内拖拽吸附边界 (2026-10-16-session-pill-dock-drag)"
++    author: WhaleFall
++  - sha: a632e7f74
++    message: "Merge remote-tracking branch 'origin/main'"
++    author: WhaleFall
++  - sha: ecf06ddfe
++    message: "chore(archive): 2026-10-16-decision-pill-no-workspace 归档留档"
++    author: WhaleFall
++  - sha: 256aa6feb
++    message: "docs(release): 2026-10-16-006 无 workspace 会话待决策 pill 修复发布记录"
++    author: WhaleFall
++  - sha: d74804528
++    message: "docs(sillyspec): 2026-10-16-decision-pill-no-workspace 薄变更四件套填答 (task-01..03)"
++    author: WhaleFall
++---
++
++## ⚡ 交互升级（本次核心）
++
++- 会话面板右下角「待决策 / 变更文件」两个悬浮 pill 合成一个**竖排停靠组**（右对齐，悬浮层挂 body，不受面板裁剪）。
++- 下拉改为**纯点击展开**（再点或点外收起），鼠标划过不再误弹。
++- 停靠组**按住可拖动**到窗口任意位置（拖动中钳制不出窗），**松手自动吸附较近的左右边缘**，位置存 localStorage **刷新不丢**；窗口缩放自动钳回并保持吸附侧。
++- 防误触：按住位移小于 6px 视为点击正常开下拉；拖完松手的残余点击被吞掉不误开。
++
++## 📝 文档收尾（上轮已部署代码的留档）
++
++- 2026-10-16-decision-pill-no-workspace 变更的四件套填答、发布记录 006 与归档留档；合并 origin/main。
++
++## 📝 部署验证
++
++- `docker compose ps`：frontend / backend 均 healthy；`http://127.0.0.1:3000/api/health` 返回 ok。
++- 容器内代码校验：`.next/server` 与 `.next/static` chunk grep 命中 `session-pill-dock` 与新 aria-label（新代码确实进容器）。
++- 浏览器实测（3000 部署页）：默认右下竖排两 pill；点击展开下拉；拖到左半屏松手吸附左缘（left=16px）并写入 localStorage；单测 30 用例全绿 + tsc 零错误（本地 dev 同口径验证过）。
++- 本机 Windows 部署按惯例未注入 COMMIT_SHA（apt 层缓存稳定性权衡），`commit_sha=unknown` 为预期。
+diff --git a/docs/releases/2026-10-16-009-f01643307.md b/docs/releases/2026-10-16-009-f01643307.md
+new file mode 100644
+index 000000000..721d9d364
+--- /dev/null
++++ b/docs/releases/2026-10-16-009-f01643307.md
+@@ -0,0 +1,24 @@
++---
++seq: 9
++deployed_at: "2026-10-16 15:40:30"
++status: success
++commit_from: ee1b32dd5
++commit_to: f01643307
++summary: pill 停靠组贴边边界收窄为聊天时间线容器（用户追加：拖拽/吸附不越过聊天区）
++agent: zcode-agent
++commits:
++  - sha: f01643307
++    message: "fix(frontend): pill 停靠组贴边边界收窄为聊天时间线容器——拖拽/吸附不越过聊天区（用户追加） (2026-10-16-session-pill-dock-drag)"
++    author: WhaleFall
++---
++
++## 🔧 修复（用户对 008 部署的追加反馈）
++
++- pill 停靠组的拖拽 / 钳制 / 吸附边界由**整个视口**收窄为**聊天时间线容器**（`turn-timeline-scroll` 矩形，每次现查不缓存，元素未挂载回落视口、后挂载自愈）——贴边不再压到左侧栏、页头或底部输入条。
++- 默认停靠位随之改为时间线容器右下角内缩 16px；边界容器尺寸变化（侧栏开合/视口缩放）经 ResizeObserver 自动钳回并保持吸附侧。
++
++## 📝 部署验证
++
++- `docker compose ps`：frontend healthy；`/api/health` ok；容器内 chunk grep 命中 `boundsSelector`（新代码确实进容器）。
++- 浏览器实测（3000 部署页，时间线矩形 609..1255×210..509）：默认位精确落容器右下角 (1128,429)；拖向侧栏深处 + 输入区松手 → 停在 (625,445)＝容器左缘 609+16 / 底缘 509-64，`insideTimeline=true` 越界全钳回；拖回右半屏吸附右缘 1128；截图视觉确认胶囊完全在聊天区内、不压会话列表/输入框/右缘。
++- 单测：dock 11 用例（含边界容器模式 3 新用例）+ 面板回归 15 用例全绿；tsc 零错误。
+diff --git a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+index ab914742b..f89a25c17 100644
+--- a/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx
+@@ -72,9 +72,9 @@ function mockData(data: ChangeSummary[] | undefined) {
+   mockedHook.mockReturnValue({ data } as ReturnType<typeof useSessionChanges>);
+ }
+ 
+-/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
++/** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
+ async function openPopover() {
+-  fireEvent.mouseEnter(screen.getByTestId("session-change-files-hover").querySelector("button")!);
++  fireEvent.click(screen.getByTestId("session-change-files-hover").querySelector("button")!);
+   await screen.findByTestId("session-change-popover");
+ }
+ 
+@@ -143,9 +143,13 @@ describe("SessionChangeFilesHover（2026-10-13-session-change-files-hover task-0
+     expect(r2.container.querySelector('[data-testid="session-change-files-hover"]')).toBeNull();
+   });
+ 
+-  it("hover 弹下拉：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
++  it("点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠", async () => {
+     mockData([activeThin, activeFull, archivedOne]);
+     render(<SessionChangeFilesHover workspaceId="ws-1" sessionId="s-1" />);
++    // 2026-10-16-session-pill-dock-drag：hover 移入不再弹下拉（防误触）
++    fireEvent.mouseEnter(screen.getByTestId("session-change-files-hover").querySelector("button")!);
++    expect(screen.queryByTestId("session-change-popover")).toBeNull();
++
+     await openPopover();
+ 
+     expect(screen.getByText("进行中（2）")).toBeTruthy();
+diff --git a/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx b/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
+index 392763c7f..610978097 100644
+--- a/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
++++ b/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
+@@ -84,9 +84,9 @@ function renderUi(props?: Partial<Parameters<typeof SessionDecisionsHover>[0]>)
+   );
+ }
+ 
+-/** 打开 hover 下拉：antd Popover hover trigger 在 jsdom 走 mouseEnter。 */
++/** 打开下拉：2026-10-16-session-pill-dock-drag 起 click 触发（hover 不再弹）。 */
+ async function openPopover() {
+-  fireEvent.mouseEnter(screen.getByTestId("session-decisions-hover").querySelector("button")!);
++  fireEvent.click(screen.getByTestId("session-decisions-hover").querySelector("button")!);
+   await screen.findByTestId("session-decision-popover");
+ }
+ 
+@@ -186,7 +186,7 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）",
+     expect(mockedFetch).toHaveBeenCalledWith("s-1");
+   });
+ 
+-  it("hover 弹下拉：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）", async () => {
++  it("点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）", async () => {
+     mockedFetch.mockResolvedValue([historyRow()]);
+     renderUi({
+       pendingRequests: [
+@@ -198,14 +198,19 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）",
+         }),
+       ],
+     });
++    // 2026-10-16-session-pill-dock-drag：hover 移入不再弹下拉（防误触）
++    fireEvent.mouseEnter(screen.getByTestId("session-decisions-hover").querySelector("button")!);
++    expect(screen.queryByTestId("session-decision-popover")).toBeNull();
++
+     await openPopover();
+ 
+     expect(screen.getByText("待决策（2）")).toBeTruthy();
+     expect(screen.getByText("提问")).toBeTruthy();
+     expect(screen.getByText("Plan")).toBeTruthy();
+-    // 历史默认收起
++    // 历史默认收起（click 即开无 hover 延迟，findBy 等历史查询落地）
+     expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
+-    expect(screen.getByTestId("session-decision-history-toggle").textContent).toContain("已答历史（1）");
++    const toggle = await screen.findByTestId("session-decision-history-toggle");
++    expect(toggle.textContent).toContain("已答历史（1）");
+   });
+ 
+   it("历史组展开显示回答摘要；再点收起", async () => {
+@@ -213,11 +218,12 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）",
+     renderUi({ pendingRequests: [pendingReq()] });
+     await openPopover();
+ 
+-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    const toggle = await screen.findByTestId("session-decision-history-toggle");
++    fireEvent.click(toggle);
+     expect(screen.getByTestId("session-decision-item-req-h1")).toBeTruthy();
+     expect(screen.getByText("你的回答：阿里云 ECS")).toBeTruthy();
+ 
+-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    fireEvent.click(toggle);
+     expect(screen.queryByTestId("session-decision-item-req-h1")).toBeNull();
+   });
+ 
+@@ -242,7 +248,7 @@ describe("SessionDecisionsHover（2026-10-16-session-decision-pill task-05）",
+     renderUi({ pendingRequests: [pendingReq()] });
+     await openPopover();
+ 
+-    fireEvent.click(screen.getByTestId("session-decision-history-toggle"));
++    fireEvent.click(await screen.findByTestId("session-decision-history-toggle"));
+     fireEvent.click(screen.getByTestId("session-decision-item-req-h1"));
+     // 弹窗内断言（role=dialog 圈定，避免与下拉列表文本重复命中）
+     const dialog = await screen.findByRole("dialog");
+diff --git a/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx b/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx
+new file mode 100644
+index 000000000..d2fa85945
+--- /dev/null
++++ b/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx
+@@ -0,0 +1,230 @@
++import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
++
++import { fireEvent, render, screen } from "@testing-library/react";
++
++import { SessionFloatingPillDock } from "@/components/daemon/session-floating-pill-dock";
++
++// jsdom 无 PointerEvent 构造器，fireEvent.pointerDown(type, init) 的
++// clientX/button/pointerId 会被丢弃——构造 Event 后手动挂属性再派发
++// （同 floating-session-host.test.tsx 先例）。
++function pointerEvt(type: string, props: Record<string, unknown>) {
++  const ev = new Event(type, { bubbles: true, cancelable: true });
++  Object.assign(ev, props);
++  return ev;
++}
++
++const DOCK_KEY = "sillyhub:session-pill-dock";
++
++function dockEl() {
++  return document.querySelector('[data-testid="session-pill-dock"]') as HTMLElement;
++}
++
++function renderDock(onPillClick = vi.fn()) {
++  render(
++    <SessionFloatingPillDock>
++      <button type="button" onClick={onPillClick}>
++        待决策 0
++      </button>
++      <button type="button" onClick={onPillClick}>
++        变更文件 0
++      </button>
++    </SessionFloatingPillDock>,
++  );
++  return onPillClick;
++}
++
++beforeEach(() => {
++  window.localStorage.removeItem(DOCK_KEY);
++});
++
++afterEach(() => {
++  // 拖拽钳制用例会改写视口宽，恢复 jsdom 默认 1024×768 防跨用例污染。
++  Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
++});
++
++describe("SessionFloatingPillDock（2026-10-16-session-pill-dock-drag）", () => {
++  it("竖排停靠组：children 渲染成组（flex-col 右对齐），portal 挂 body", () => {
++    renderDock();
++    const dock = dockEl();
++    // portal 到 body：不受面板祖先 overflow/transform 裁剪
++    expect(dock.parentElement).toBe(document.body);
++    expect(dock.className).toContain("flex-col");
++    expect(dock.className).toContain("items-end");
++    // children 全 null 时整组零占位（empty:hidden 契约类）
++    expect(dock.className).toContain("empty:hidden");
++    expect(dock.querySelectorAll("button")).toHaveLength(2);
++    // jsdom 视口 1024×768、组尺寸 0 → 默认右下停靠 (1008, 672)
++    expect(dock.style.left).toBe("1008px");
++    expect(dock.style.top).toBe("672px");
++  });
++
++  it("持久化位置恢复；损坏存档静默回落默认右下", () => {
++    window.localStorage.setItem(DOCK_KEY, JSON.stringify({ x: 16, y: 40 }));
++    renderDock();
++    expect(dockEl().style.left).toBe("16px");
++    expect(dockEl().style.top).toBe("40px");
++
++    window.localStorage.setItem(DOCK_KEY, "not-json");
++    const { unmount } = render(<SessionFloatingPillDock><i /></SessionFloatingPillDock>);
++    expect(dockEl()).toBeTruthy();
++    expect(screen.getAllByTestId("session-pill-dock").at(-1)!.style.left).toBe("1008px");
++    unmount();
++  });
++
++  it("按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化", () => {
++    renderDock();
++    const dock = dockEl();
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 400, clientY: 300 }));
++    // base(1008,672) + (-600,-360) → (408,312)，窗内不钳
++    expect(dock.style.left).toBe("408px");
++    expect(dock.style.top).toBe("312px");
++    expect(dock.className).toContain("cursor-grabbing");
++
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: 300 }));
++    // 408+0/2 ≤ 512 → 吸附左缘 EDGE_GAP=16；纵向保持
++    expect(dock.style.left).toBe("16px");
++    expect(dock.style.top).toBe("312px");
++    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 16, y: 312 });
++  });
++
++  it("拖到右半屏松手吸附右缘", () => {
++    renderDock();
++    const dock = dockEl();
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 1015, clientY: 300 }));
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 1015, clientY: 300 }));
++    // 钳到 1023 ≥ 512 → 右缘 1024-0-16=1008
++    expect(dock.style.left).toBe("1008px");
++    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!).x).toBe(1008);
++  });
++
++  it("拖拽越界钳回窗内：y 不出上下边", () => {
++    renderDock();
++    const dock = dockEl();
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 7, clientX: 1000, clientY: 660 }));
++    // dy=-1000 → y=672-1000<0 钳 0；dx=-600 → 408
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 7, clientX: 400, clientY: -340 }));
++    expect(dock.style.left).toBe("408px");
++    expect(dock.style.top).toBe("0px");
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 7, clientX: 400, clientY: -340 }));
++    expect(dock.style.top).toBe("0px");
++  });
++
++  it("位移小于阈值不算拖拽：click 放行给 pill 按钮", () => {
++    const onPillClick = renderDock();
++    const btn = dockEl().querySelector("button")!;
++    fireEvent(btn, pointerEvt("pointerdown", { button: 0, pointerId: 3, clientX: 500, clientY: 500 }));
++    // hypot(2,2)≈2.8 < 阈值 6
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 3, clientX: 502, clientY: 502 }));
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 3, clientX: 502, clientY: 502 }));
++    fireEvent.click(btn);
++    expect(onPillClick).toHaveBeenCalledTimes(1);
++  });
++
++  it("拖拽结束后的残余 click 被吞；时间窗外恢复点击", async () => {
++    const onPillClick = renderDock();
++    const btn = dockEl().querySelector("button")!;
++    fireEvent(btn, pointerEvt("pointerdown", { button: 0, pointerId: 9, clientX: 500, clientY: 500 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 9, clientX: 200, clientY: 500 }));
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 9, clientX: 200, clientY: 500 }));
++    // 松手 250ms 内的拖拽尾音 click：吞掉（时间窗口径同悬浮球先例）
++    fireEvent.click(btn);
++    expect(onPillClick).not.toHaveBeenCalled();
++    await new Promise((r) => setTimeout(r, 280));
++    fireEvent.click(btn);
++    expect(onPillClick).toHaveBeenCalledTimes(1);
++  });
++
++  it("视口缩放：钳回窗内并保持吸附侧", () => {
++    renderDock();
++    const dock = dockEl();
++    expect(dock.style.left).toBe("1008px"); // 右缘停靠
++    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
++    fireEvent(window, new Event("resize"));
++    // 钳到 500 后仍在右半屏 → 右缘 500-0-16=484
++    expect(dock.style.left).toBe("484px");
++  });
++});
++
++/* ------------------------------------------------------------------ */
++/* 边界容器模式（用户追加：贴边不超出聊天时间线容器范围）                  */
++/* ------------------------------------------------------------------ */
++
++/** 边界容器桩：jsdom 原生 rect 全 0，mock 出聊天区矩形才能测边界口径。 */
++function mountBoundsEl(rect: { left: number; top: number; width: number; height: number }) {
++  const el = document.createElement("div");
++  el.setAttribute("data-testid", "turn-timeline-scroll");
++  const right = rect.left + rect.width;
++  const bottom = rect.top + rect.height;
++  el.getBoundingClientRect = () =>
++    ({
++      left: rect.left,
++      top: rect.top,
++      right,
++      bottom,
++      width: rect.width,
++      height: rect.height,
++      x: rect.left,
++      y: rect.top,
++      toJSON: () => ({}),
++    }) as DOMRect;
++  document.body.appendChild(el);
++  return el;
++}
++
++describe("SessionFloatingPillDock 边界容器模式（2026-10-16-session-pill-dock-drag 用户追加）", () => {
++  it("默认位 / 拖拽钳制 / 松手吸附全部以边界容器矩形为准，不贴视口边", () => {
++    // 聊天区矩形 100..500 × 50..350（视口 1024×768，明显错开）
++    const el = mountBoundsEl({ left: 100, top: 50, width: 400, height: 300 });
++    render(
++      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
++        <button type="button">待决策 0</button>
++      </SessionFloatingPillDock>,
++    );
++    const dock = dockEl();
++    // 默认右下 = 容器右下角内缩 EDGE_GAP（484/334），不是视口的 1008/672
++    expect(dock.style.left).toBe("484px");
++    expect(dock.style.top).toBe("334px");
++
++    // 拖到左上：base(484,334)+(-350,-330) → 钳容器内 (134,50)
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 5, clientX: 480, clientY: 330 }));
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 5, clientX: 130, clientY: 0 }));
++    expect(dock.style.left).toBe("134px");
++    expect(dock.style.top).toBe("50px");
++    // 松手吸附容器左缘 100+16=116（不是视口左缘 16）
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 5, clientX: 130, clientY: 0 }));
++    expect(dock.style.left).toBe("116px");
++    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!)).toEqual({ x: 116, y: 50 });
++    el.remove();
++  });
++
++  it("右缘吸附同样是容器右缘（拖出容器右侧被钳回）", () => {
++    const el = mountBoundsEl({ left: 100, top: 50, width: 400, height: 300 });
++    render(
++      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
++        <button type="button">待决策 0</button>
++      </SessionFloatingPillDock>,
++    );
++    const dock = dockEl();
++    fireEvent(dock, pointerEvt("pointerdown", { button: 0, pointerId: 5, clientX: 480, clientY: 330 }));
++    // 拖出容器右缘（dx=+120 → 604）→ 钳到 500，松手吸附 500-16=484
++    fireEvent(window, pointerEvt("pointermove", { pointerId: 5, clientX: 600, clientY: 330 }));
++    fireEvent(window, pointerEvt("pointerup", { pointerId: 5, clientX: 600, clientY: 330 }));
++    expect(dock.style.left).toBe("484px");
++    expect(JSON.parse(window.localStorage.getItem(DOCK_KEY)!).x).toBe(484);
++    el.remove();
++  });
++
++  it("边界元素不存在时回落视口口径，不报错（元素后挂载可自愈）", () => {
++    render(
++      <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
++        <button type="button">待决策 0</button>
++      </SessionFloatingPillDock>,
++    );
++    const dock = dockEl();
++    // 无边界元素：x 用视口右缘；y 因传了 boundsSelector 按 EDGE_GAP 贴底（元素出现后 settle 自愈）
++    expect(dock.style.left).toBe("1008px");
++    expect(dock.style.top).toBe("752px");
++  });
++});
+diff --git a/frontend/src/components/daemon/session-change-files-hover.tsx b/frontend/src/components/daemon/session-change-files-hover.tsx
+index 4d0f38ebe..659aea7c0 100644
+--- a/frontend/src/components/daemon/session-change-files-hover.tsx
++++ b/frontend/src/components/daemon/session-change-files-hover.tsx
+@@ -20,10 +20,11 @@ import { useSessionChanges, type ChangeSummary } from "@/lib/changes";
+  * 会话页面悬浮变更文件面板（2026-10-13-session-change-files-hover task-04 /
+  * FR-02~05 / D-001@v2：胶囊入口 + hover 下拉列表 + 点项开大弹窗）。
+  *
+- * - 胶囊入口非圆圈（用户 step5 修正），右下角悬浮于输入条上方；无关联变更
+- *   （含已归档）不渲染（FR-02 显隐）；
+- * - hover（或触屏点击）弹下拉分组列表：进行中置顶（轻量/全量徽标 + 阶段 +
+- *   时间），已归档默认折叠可展开（FR-03）；
++ * - 胶囊入口非圆圈（用户 step5 修正），与待决策 pill 同组（SessionFloatingPillDock
++ *   竖排停靠组，2026-10-16-session-pill-dock-drag）；无关联变更（含已归档）
++ *   不渲染（FR-02 显隐）；
++ * - 点击弹下拉分组列表（2026-10-16-session-pill-dock-drag 由 hover 改点击）：
++ *   进行中置顶（轻量/全量徽标 + 阶段 + 时间），已归档默认折叠可展开（FR-03）；
+  * - 点项开大弹窗（规格对齐 changes/detail/change-files-card.tsx：shadcn
+  *   Dialog max-w-6xl × 85vh，Modal 形态不用 Drawer——FRONTEND_PAGE_STYLE §6），
+  *   内嵌与变更文件页相同的 ChangeFileTree（key=changeId 切换重挂载），
+@@ -37,8 +38,9 @@ export interface SessionChangeFilesHoverProps {
+   running?: boolean;
+   /**
+    * 2026-10-16-session-decision-pill task-03：true 时不渲染自带 absolute 悬浮
+-   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——与
+-   * 待决策 pill 并排成 flex 悬浮行。缺省 false 行为不变（旧消费方零回归）。
++   * 外壳（pointer-events-none 定位容器），内容裸输出由挂载方统一定位——
++   * 2026-10-16-session-pill-dock-drag 起挂进 SessionFloatingPillDock 竖排
++   * 停靠组。缺省 false 行为不变（旧消费方零回归）。
+    */
+   embedded?: boolean;
+ }
+@@ -100,8 +102,8 @@ export function SessionChangeFilesHover({
+   running = false,
+   embedded = false,
+ }: SessionChangeFilesHoverProps) {
+-  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底），antd 只发
+-  // onOpenChange 事件，state 是唯一真相。
++  // 受控 popover：点击展开/收起（2026-10-16-session-pill-dock-drag 由
++  // hover 改点击），antd 只发 onOpenChange 事件，state 是唯一真相。
+   const [popoverOpen, setPopoverOpen] = useState(false);
+   const [archiveExpanded, setArchiveExpanded] = useState(false);
+   const [dialogChangeId, setDialogChangeId] = useState<string | null>(null);
+@@ -191,7 +193,7 @@ export function SessionChangeFilesHover({
+       <Popover
+         open={popoverOpen}
+         onOpenChange={setPopoverOpen}
+-        trigger={["hover", "click"]}
++        trigger="click"
+         placement="topRight"
+         content={popoverContent}
+         styles={{ container: { padding: 4 } }}
+@@ -200,7 +202,7 @@ export function SessionChangeFilesHover({
+           variant="outline"
+           size="sm"
+           className="gap-1.5 rounded-lg shadow-sm"
+-          aria-label="悬浮查看会话关联的变更文件"
++          aria-label="查看会话关联的变更文件"
+         >
+           <FolderGit2 className="h-3.5 w-3.5" aria-hidden />
+           变更文件
+diff --git a/frontend/src/components/daemon/session-decisions-hover.tsx b/frontend/src/components/daemon/session-decisions-hover.tsx
+index 7725b2ec2..d2a68b4e0 100644
+--- a/frontend/src/components/daemon/session-decisions-hover.tsx
++++ b/frontend/src/components/daemon/session-decisions-hover.tsx
+@@ -27,9 +27,11 @@ import { cn } from "@/lib/utils";
+  * 会话页面悬浮待决策面板（2026-10-16-session-decision-pill / FR-01~04 /
+  * D-004@v1：前端自包含聚合，数据三类零新增）。
+  *
+- * - 胶囊入口与变更文件 pill 并排（挂载点 flex 悬浮行）；三类信息全空
+- *   （pending 提问/Plan 卡/已答历史）不渲染（FR-01 显隐）；
+- * - hover（或触屏点击）弹下拉分组：待决策置顶（提问/Plan 徽标 + 状态短语），
++ * - 胶囊入口与变更文件 pill 同组（SessionFloatingPillDock 竖排停靠组，
++ *   2026-10-16-session-pill-dock-drag）；三类信息全空（pending 提问/Plan
++ *   卡/已答历史）不渲染（FR-01 显隐）；
++ * - 点击弹下拉分组（2026-10-16-session-pill-dock-drag 由 hover 改点击，
++ *   不再误触）：待决策置顶（提问/Plan 徽标 + 状态短语），
+  *   已答历史默认折叠可展开（FR-02）；历史孤儿 pending 行（不在 SSE 待答集）
+  *   归历史组显示「未回答」（对齐 ended 会话死卡门控语义）；
+  * - pending 项点击经 onFocusPending 上抛定位还原（FR-03，父级路由 TurnTimeline
+@@ -167,8 +169,8 @@ export function SessionDecisionsHover({
+   planPending,
+   onFocusPending,
+ }: SessionDecisionsHoverProps) {
+-  // 受控 popover：hover 弹出移开收起，click 固定（触屏兜底）——与变更文件
+-  // pill 同款交互契约，antd 只发事件，state 是唯一真相。
++  // 受控 popover：点击展开/收起（2026-10-16-session-pill-dock-drag 由
++  // hover 改点击），antd 只发事件，state 是唯一真相。
+   const [popoverOpen, setPopoverOpen] = useState(false);
+   const [historyExpanded, setHistoryExpanded] = useState(false);
+   const [detailKey, setDetailKey] = useState<string | null>(null);
+@@ -269,7 +271,7 @@ export function SessionDecisionsHover({
+       <Popover
+         open={popoverOpen}
+         onOpenChange={setPopoverOpen}
+-        trigger={["hover", "click"]}
++        trigger="click"
+         placement="topRight"
+         content={popoverContent}
+         styles={{ container: { padding: 4 } }}
+@@ -278,7 +280,7 @@ export function SessionDecisionsHover({
+           variant="outline"
+           size="sm"
+           className="gap-1.5 rounded-lg shadow-sm"
+-          aria-label="悬浮查看会话待决策信息"
++          aria-label="查看会话待决策信息"
+         >
+           <MessageCircleQuestion className="h-3.5 w-3.5" aria-hidden />
+           待决策
+diff --git a/frontend/src/components/daemon/session-floating-pill-dock.tsx b/frontend/src/components/daemon/session-floating-pill-dock.tsx
+new file mode 100644
+index 000000000..883dc395a
+--- /dev/null
++++ b/frontend/src/components/daemon/session-floating-pill-dock.tsx
+@@ -0,0 +1,290 @@
++"use client";
++
++import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
++import { createPortal } from "react-dom";
++
++import { cn } from "@/lib/utils";
++
++/**
++ * 会话页悬浮 pill 停靠组（2026-10-16-session-pill-dock-drag）。
++ *
++ * 待决策 / 变更文件两个 pill 的公共悬浮外壳（用户需求：合成一组竖排、
++ * 点击展开、整组可拖动 + 吸附边界；贴边不超出聊天时间线容器范围）：
++ * - 竖向排列成组（items-end 右对齐）portal 到 body，fixed 定位不受面板
++ *   祖先 overflow / transform 裁剪影响；
++ * - 按住整组在 boundsSelector 指定的边界容器（聊天时间线
++ *   turn-timeline-scroll；缺省回落整个视口）范围内拖动——move/up 挂
++ *   window 不依赖 pointer capture（jsdom 无实现，同款先例
++ *   floating-session-host 悬浮球）；位移 < 阈值视为点击放行，拖拽结束
++ *   后 250ms 内残余 click 吞掉，pill 自身点击（antd Popover click 触发）
++ *   不受影响；
++ * - 松手自动吸附较近的边界容器左右边缘（纵向钳回容器内）；位置
++ *   localStorage 持久化（刷新不丢，损坏数据静默回落默认右下位）；
++ * - children 全为 null（两 pill 空数据各自渲染 null）时 empty:hidden
++ *   整组不占位、不拦点击（对齐 pill 自身 FR 显隐契约）。
++ */
++/** 判定「拖拽」而非「点击」的位移阈值（px，同悬浮球 DRAG_THRESHOLD）。 */
++const DRAG_THRESHOLD = 6;
++/** 吸附后与边界左右/下缘留白（px）。 */
++const EDGE_GAP = 16;
++/** 视口兜底模式的默认位距视口底部留白（px，对齐原 bottom-20 悬浮行）。 */
++const DEFAULT_BOTTOM_GAP = 96;
++/** 拖拽结束后残余 click 的吞除时间窗（ms，同悬浮球先例：比布尔位稳——
++    拖出元素外松手时 click 不触发，布尔位会误吞下一次真点击）。 */
++const CLICK_SWALLOW_MS = 250;
++/** 位置持久化键（sillyhub: 前缀同悬浮球）。 */
++const DOCK_STORAGE_KEY = "sillyhub:session-pill-dock";
++
++/** 停靠组左上角视口坐标（px）。 */
++type DockPos = { x: number; y: number };
++
++/** 拖拽/吸附边界矩形（视口坐标）。 */
++interface DockBounds {
++  left: number;
++  top: number;
++  right: number;
++  bottom: number;
++}
++
++function viewportBounds(): DockBounds {
++  return {
++    left: 0,
++    top: 0,
++    right: typeof window === "undefined" ? 1024 : window.innerWidth,
++    bottom: typeof window === "undefined" ? 768 : window.innerHeight,
++  };
++}
++
++/** 钳制组左上角使整组留在边界内（w/h 为组实际尺寸）。 */
++function clampPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
++  return {
++    x: Math.min(Math.max(p.x, b.left), Math.max(b.left, b.right - w)),
++    y: Math.min(Math.max(p.y, b.top), Math.max(b.top, b.bottom - h)),
++  };
++}
++
++/** 松手吸附：贴较近的边界左右边缘（留 EDGE_GAP），纵向只钳回边界内。幂等——
++    存档值本就是吸附态，重放不漂移。 */
++function snapPos(p: DockPos, w: number, h: number, b: DockBounds): DockPos {
++  const c = clampPos(p, w, h, b);
++  const midX = (b.left + b.right) / 2;
++  const x =
++    c.x + w / 2 <= midX ? b.left + EDGE_GAP : Math.max(b.left, b.right - w - EDGE_GAP);
++  return { x, y: c.y };
++}
++
++/** 悬浮 pill 停靠组：竖排 + 可拖拽 + 边界吸附 + 位置持久化。 */
++export function SessionFloatingPillDock({
++  children,
++  boundsSelector,
++}: {
++  children: ReactNode;
++  /**
++   * 拖拽/吸附的边界容器选择器（会话页传聊天时间线
++   * [data-testid="turn-timeline-scroll"]，贴边不越过聊天区）。缺省 = 整个
++   * 视口；元素未挂载/零尺寸时逐次回落视口（不缓存，元素后挂也自愈）。
++   */
++  boundsSelector?: string;
++}) {
++  const [pos, setPos] = useState<DockPos | null>(null);
++  const [dragging, setDragging] = useState(false);
++  const dockRef = useRef<HTMLDivElement | null>(null);
++  const dragRef = useRef<{
++    pointerId: number;
++    startX: number;
++    startY: number;
++    baseX: number;
++    baseY: number;
++    moved: boolean;
++  } | null>(null);
++  /** 拖拽松手时刻（click 吞除时间窗）。 */
++  const lastDragEndRef = useRef(0);
++  /** 有无存档位（无存档首帧按实际尺寸落默认右下位，见 settle）。 */
++  const hadStoredPosRef = useRef(false);
++
++  /** 每次取数现查边界元素（元素尺寸/位置随布局变化，不缓存）。 */
++  const getBounds = useCallback((): DockBounds => {
++    if (boundsSelector && typeof document !== "undefined") {
++      const r = document.querySelector(boundsSelector)?.getBoundingClientRect();
++      if (r && (r.width > 0 || r.height > 0)) {
++        return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
++      }
++    }
++    return viewportBounds();
++  }, [boundsSelector]);
++
++  /** 视口兜底模式默认位距底留白更大（聊天区模式的底部即输入条上缘，
++      视口模式的底部是窗口底缘，需避让输入条）。 */
++  const defaultBottomGap = boundsSelector ? EDGE_GAP : DEFAULT_BOTTOM_GAP;
++
++  const persist = useCallback((p: DockPos) => {
++    hadStoredPosRef.current = true;
++    try {
++      window.localStorage.setItem(DOCK_STORAGE_KEY, JSON.stringify(p));
++    } catch {
++      // 隐私模式写失败不影响功能
++    }
++  }, []);
++
++  /** 按组实际尺寸收敛：吸附侧 + 钳边界内；无存档首帧默认位距底留白按实际
++      高度算（0 尺寸算的 y 会把组压到边界底缘，旧 UI 悬浮行在输入条上方）。 */
++  const settle = useCallback(
++    (p: DockPos, w: number, h: number): DockPos => {
++      const b = getBounds();
++      const snapped = snapPos(p, w, h, b);
++      if (!hadStoredPosRef.current) {
++        snapped.y = Math.max(b.top, b.bottom - h - defaultBottomGap);
++      }
++      return snapped;
++    },
++    [getBounds, defaultBottomGap],
++  );
++
++  /** 组实际尺寸（jsdom 恒 0×0；未挂载/empty:hidden 时也退化 0 安全）。 */
++  const dockSize = () => {
++    const rect = dockRef.current?.getBoundingClientRect();
++    return { w: rect?.width ?? 0, h: rect?.height ?? 0 };
++  };
++
++  // 挂载后读持久化位置（effect 而非初值：SSR/水合一致，同悬浮球先例）；
++  // 无存档回落默认右下角（0 尺寸近似值，首帧挂 ref 后 settle 修正）。
++  useEffect(() => {
++    try {
++      const raw = window.localStorage.getItem(DOCK_STORAGE_KEY);
++      if (raw) {
++        const v = JSON.parse(raw) as Partial<DockPos>;
++        if (typeof v.x === "number" && typeof v.y === "number") {
++          hadStoredPosRef.current = true;
++          setPos(clampPos({ x: v.x, y: v.y }, 0, 0, getBounds()));
++          return;
++        }
++      }
++    } catch {
++      // 损坏数据静默丢弃，回落默认右下角
++    }
++    const b = getBounds();
++    setPos({ x: b.right - EDGE_GAP, y: b.bottom - defaultBottomGap });
++  }, [getBounds, defaultBottomGap]);
++
++  // 首帧挂 ref 后按组实际尺寸收敛（初始/存档位按 0 尺寸计算会溢出右缘；
++  // snap 幂等，收敛一次即稳定，拖拽中不打架）。
++  useEffect(() => {
++    if (!pos || dragging) return;
++    const { w, h } = dockSize();
++    const settled = settle(pos, w, h);
++    if (settled.x !== pos.x || settled.y !== pos.y) setPos(settled);
++  }, [pos, dragging, settle]);
++
++  // 组尺寸与边界容器尺寸变化（pill 显隐 / 侧栏开合收窄聊天区）都重收敛，
++  // 防溢出——jsdom 无 ResizeObserver，由上面 [pos,dragging] effect 兜底。
++  const dockMounted = pos != null;
++  useEffect(() => {
++    if (!dockMounted || typeof ResizeObserver === "undefined") return;
++    const el = dockRef.current;
++    if (!el) return;
++    const ro = new ResizeObserver(() => {
++      const rect = el.getBoundingClientRect();
++      setPos((p) => (p && !dragRef.current ? settle(p, rect.width, rect.height) : p));
++    });
++    ro.observe(el);
++    if (boundsSelector && typeof document !== "undefined") {
++      const boundsEl = document.querySelector(boundsSelector);
++      if (boundsEl) ro.observe(boundsEl);
++    }
++    return () => ro.disconnect();
++  }, [dockMounted, settle, boundsSelector]);
++
++  // 视口缩放：钳回边界内并保持吸附侧（右侧停靠的边界变宽不悬空）。
++  useEffect(() => {
++    const onResize = () => {
++      const { w, h } = dockSize();
++      const b = getBounds();
++      setPos((p) => (p ? snapPos(p, w, h, b) : p));
++    };
++    window.addEventListener("resize", onResize);
++    return () => window.removeEventListener("resize", onResize);
++  }, [getBounds]);
++
++  const onPointerMove = useCallback((e: PointerEvent) => {
++    const d = dragRef.current;
++    if (!d || e.pointerId !== d.pointerId) return;
++    const dx = e.clientX - d.startX;
++    const dy = e.clientY - d.startY;
++    if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
++    d.moved = true;
++    setDragging(true);
++    const { w, h } = dockSize();
++    setPos(clampPos({ x: d.baseX + dx, y: d.baseY + dy }, w, h, getBounds()));
++  }, [getBounds]);
++
++  const endDrag = useCallback(
++    (e: PointerEvent) => {
++      const d = dragRef.current;
++      window.removeEventListener("pointermove", onPointerMove);
++      window.removeEventListener("pointerup", onPointerUp);
++      window.removeEventListener("pointercancel", onPointerCancel);
++      dragRef.current = null;
++      setDragging(false);
++      if (!d || e.pointerId !== d.pointerId || !d.moved) return;
++      lastDragEndRef.current = Date.now();
++      // 松手吸附较近边缘并持久化（只在拖拽结束写，拖动过程不刷 localStorage）。
++      const { w, h } = dockSize();
++      setPos((p) => {
++        const snapped = snapPos(p ?? { x: d.baseX, y: d.baseY }, w, h, getBounds());
++        persist(snapped);
++        return snapped;
++      });
++    },
++    [onPointerMove, getBounds, persist],
++  );
++
++  const onPointerUp = endDrag;
++  const onPointerCancel = endDrag;
++
++  const onDockPointerDown = useCallback(
++    (e: React.PointerEvent<HTMLDivElement>) => {
++      if (e.button !== 0 || !pos) return;
++      dragRef.current = {
++        pointerId: e.pointerId,
++        startX: e.clientX,
++        startY: e.clientY,
++        baseX: pos.x,
++        baseY: pos.y,
++        moved: false,
++      };
++      window.addEventListener("pointermove", onPointerMove);
++      window.addEventListener("pointerup", onPointerUp);
++      window.addEventListener("pointercancel", onPointerCancel);
++    },
++    [pos, onPointerMove, onPointerUp],
++  );
++
++  // 拖拽尾音吞除（捕获阶段拦在 pill 按钮的 click 之前）。
++  const onDockClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
++    if (Date.now() - lastDragEndRef.current < CLICK_SWALLOW_MS) {
++      e.preventDefault();
++      e.stopPropagation();
++    }
++  };
++
++  // pos 未定（SSR/水合首帧）不渲染；createPortal 仅在客户端执行。
++  if (pos == null || typeof document === "undefined") return null;
++
++  return createPortal(
++    <div
++      ref={dockRef}
++      data-testid="session-pill-dock"
++      onPointerDown={onDockPointerDown}
++      onClickCapture={onDockClickCapture}
++      className={cn(
++        "fixed z-40 flex select-none flex-col items-end gap-2 print:hidden empty:hidden",
++        dragging ? "cursor-grabbing" : "cursor-grab",
++        dragging ? "" : "transition-[left,top] duration-200 ease-out",
++      )}
++      style={{ left: pos.x, top: pos.y, touchAction: "none" }}
++    >
++      {children}
++    </div>,
++    document.body,
++  );
++}
+diff --git a/frontend/src/components/daemon/session-panel/session-panel-page.tsx b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+index 919007f7f..e2fd796e3 100644
+--- a/frontend/src/components/daemon/session-panel/session-panel-page.tsx
++++ b/frontend/src/components/daemon/session-panel/session-panel-page.tsx
+@@ -39,6 +39,7 @@ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+ // （胶囊 + hover 下拉 + 大弹窗，组件内自带显隐——无关联变更渲染 null）。
+ import { SessionChangeFilesHover } from "@/components/daemon/session-change-files-hover";
+ import { SessionDecisionsHover } from "@/components/daemon/session-decisions-hover";
++import { SessionFloatingPillDock } from "@/components/daemon/session-floating-pill-dock";
+ // task-08（2026-09-07-session-pin-rename-scheduled-send / FR-04）：定时消息展示条
+ // （自建局部 QueryClientProvider，page / dialog 双挂载点均可安全挂——R4 不变式
+ // 不破，panel 层零 react-query）。
+@@ -5409,42 +5410,32 @@ export function SessionPanelPage({
+         </p>
+       )}
+ 
+-      {/* 2026-10-13-session-change-files-hover task-05：悬浮变更文件入口——
+-          h-0 相对锚不占布局位，子组件 absolute 悬浮于聊天区右下（bottom 基线
+-          = 锚底边 = 输入区顶缘，上浮避让输入条）。仅真会话挂载（预会话无
+-          sessionId，任务卡约束 portal 预会话模式不挂）；无关联变更组件自渲染
+-          null 零占位（FR-02）。running 传会话在跑态（turnState.currentRunId），
+-          进行中变更徽标呼吸提示（FR-02）。
+-          2026-10-16-session-decision-pill task-04：锚点内改 flex 悬浮行——待决策
+-          pill（新增，自渲染 null 零占位同款）与变更文件 pill（embedded 脱壳）
+-          并排；行容器统一 pointer-events 定位，两 pill 各自子槽恢复交互。
+-          2026-10-16-decision-pill-no-workspace：悬浮行门槛放宽为仅真会话
+-          （sessionId）——待决策 pill 只消费 sessionId；无 workspace 老会话
+-          （workspace_id 为空，如 445e12d9）不应连坐不挂载。变更文件 pill 保留
+-          自己的 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）。 */}
++      {/* 2026-10-16-session-pill-dock-drag：待决策 pill 与变更文件 pill 收进
++          SessionFloatingPillDock——portal body 竖排停靠组，按住整组在聊天
++          时间线容器（turn-timeline-scroll）范围内拖动（贴边不越过聊天区）、
++          松手吸附该容器较近左右边缘、位置 localStorage 持久化；两 pill 下拉
++          均改点击展开（原 2026-10-13 悬浮行与 2026-10-16-session-decision-pill
++          task-04 flex 横排行形态退役）。显隐门不变：仅真会话挂载
++          （2026-10-16-decision-pill-no-workspace 放宽口径），变更文件 pill
++          保留自身 workspace_id 门（其 API 需要 workspace，缺省不渲染零占位）；
++          两 pill 空数据各自渲染 null，dock empty:hidden 整组零占位。 */}
+       {sessionId != null && (
+-        <div className="relative h-0 w-full">
+-          <div className="pointer-events-none absolute bottom-20 right-4 z-40 flex items-center justify-end gap-2 print:hidden">
+-            <div className="pointer-events-auto">
+-              <SessionDecisionsHover
+-                sessionId={sessionId}
+-                pendingRequests={pendingRequests}
+-                planPending={planPending}
+-                onFocusPending={handleFocusPending}
+-              />
+-            </div>
+-            {session?.workspace_id != null && (
+-              <div className="pointer-events-auto">
+-                <SessionChangeFilesHover
+-                  workspaceId={session.workspace_id}
+-                  sessionId={sessionId}
+-                  running={running}
+-                  embedded
+-                />
+-              </div>
+-            )}
+-          </div>
+-        </div>
++        <SessionFloatingPillDock boundsSelector='[data-testid="turn-timeline-scroll"]'>
++          <SessionDecisionsHover
++            sessionId={sessionId}
++            pendingRequests={pendingRequests}
++            planPending={planPending}
++            onFocusPending={handleFocusPending}
++          />
++          {session?.workspace_id != null && (
++            <SessionChangeFilesHover
++              workspaceId={session.workspace_id}
++              sessionId={sessionId}
++              running={running}
++              embedded
++            />
++          )}
++        </SessionFloatingPillDock>
+       )}
+ 
+       {/* 输入区：输入框 + 配置控件条（原型 .input-zone）。ql-20260909-006：

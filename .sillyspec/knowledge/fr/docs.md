@@ -74,3 +74,98 @@ created_at: 2026-10-15T16:16:15.707Z
   confirmed_at: null
   source_change: 2026-10-16-decision-pill-no-workspace
   status: active
+
+## FR-docs-007 待决策 pill 与变更文件 pill 渲染在同一悬浮组内竖向排列，各自空数据不渲染的显隐契约不变
+变更：2026-10-16-session-pill-dock-drag
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-pill-dock-drag/requirements.md#FR-01
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-01
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「无关联变更（data 空数组/未就绪）不渲染入口」 | test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「三类全空（pending 空 + 历史空/未加载）不渲染入口（FR-01）」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「竖排停靠组：children 渲染成组（flex-col 右对齐），portal 挂 body」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-pill-dock-drag
+  status: active
+
+## FR-docs-008 两 pill 的下拉均为点击展开（hover 不触发）、再点或点外部收起
+变更：2026-10-16-session-pill-dock-drag
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-pill-dock-drag/requirements.md#FR-02
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-02
+  tests: test/frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx「点击弹下拉（hover 不再触发）：进行中置顶（轻量徽标+阶段），已归档默认折叠」 | test/frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx「点击弹下拉（hover 不再触发）：待决策置顶（提问/Plan 徽标），已答历史默认折叠（FR-02）」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-pill-dock-drag
+  status: active
+
+## FR-docs-009 悬浮组按住可在 viewport 范围内拖动，松手自动吸附较近的左右边界，纵向钳制在窗口内，位置 localStorage 持久化
+变更：2026-10-16-session-pill-dock-drag
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-pill-dock-drag/requirements.md#FR-03
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-03
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖到右半屏松手吸附右缘」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽越界钳回窗内：y 不出上下边」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「持久化位置恢复；损坏存档静默回落默认右下」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「按住拖动超过阈值：跟手且钳制窗内，松手吸附较近左缘并持久化」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「视口缩放：钳回窗内并保持吸附侧」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-pill-dock-drag
+  status: active
+
+## FR-docs-010 位移小于阈值视为点击不触发拖拽，拖拽结束后的残余 click 被吞掉，pill 按钮点击行为不受影响
+变更：2026-10-16-session-pill-dock-drag
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-pill-dock-drag/requirements.md#FR-04
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-04
+  tests: test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「位移小于阈值不算拖拽：click 放行给 pill 按钮」 | test/frontend/src/components/daemon/__tests__/session-floating-pill-dock.test.tsx「拖拽结束后的残余 click 被吞；时间窗外恢复点击」
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-pill-dock-drag
+  status: active
+
+## FR-docs-011 相关组件测试与 tsc 通过
+变更：2026-10-16-session-pill-dock-drag
+状态：active
+摘要：主路径
+全文：.sillyspec/changes/archive/2026-10-16-session-pill-dock-drag/requirements.md#FR-05
+最近确认：f0ba3f3fb30b7b0743ad3265a86578205a46ed43
+
+测试绑定：
+<!-- test-bindings: 机器字段（sillyspec tests 管理），勿手改 -->
+- row: 2026-10-16-session-pill-dock-drag:flow:测试绑定FR-05
+  tests: frontend/src/components/daemon/__tests__/session-change-files-hover.test.tsx | frontend/src/components/daemon/__tests__/session-decisions-hover.test.tsx
+  reason: spec
+  state: candidate
+  discovery: machine
+  confirmed_by: null
+  confirmed_at: null
+  source_change: 2026-10-16-session-pill-dock-drag
+  status: active
